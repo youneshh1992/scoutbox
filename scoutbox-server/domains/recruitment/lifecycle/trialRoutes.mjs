@@ -21,23 +21,63 @@ import { canTransitionRecruitmentCase, RECRUITMENT_LIFECYCLE_POLICY_VERSION } fr
 import { sendDomainError, httpStatusFor } from './errors.mjs';
 import { resolveContactRecipient, CONTACT_LIMITS } from './contact.mjs';
 import {
-  TRIAL_POLICY_VERSION, TRIAL_LIMITS, TRIAL_WORKFLOW_STATES, TRIAL_SESSION_KINDS, TRIAL_ATTENDANCE_STATES,
-  TRIAL_CANCEL_ACTORS, trialRoleAllows, normaliseTrialClientKey, payloadFingerprint,
-  validateTimezone, validateVenue, validateSessionInput, validateScheduleInput, materialChange,
-  deriveWorkflowState, isLegacyTrial, currentAttendance, canComplete, trialStateAllows, blockedAllows,
-  trialIntegrity, trialClubView, trialFamilyView, localDay, byStartsAtThenId, parseInstant,
+  TRIAL_POLICY_VERSION,
+  TRIAL_LIMITS,
+  TRIAL_WORKFLOW_STATES,
+  TRIAL_SESSION_KINDS,
+  TRIAL_ATTENDANCE_STATES,
+  TRIAL_CANCEL_ACTORS,
+  trialRoleAllows,
+  normaliseTrialClientKey,
+  payloadFingerprint,
+  validateTimezone,
+  validateVenue,
+  validateSessionInput,
+  validateScheduleInput,
+  materialChange,
+  deriveWorkflowState,
+  isLegacyTrial,
+  currentAttendance,
+  canComplete,
+  trialStateAllows,
+  blockedAllows,
+  trialIntegrity,
+  trialClubView,
+  trialFamilyView,
+  localDay,
+  byStartsAtThenId,
+  parseInstant,
 } from './trial.mjs';
 
 export function registerTrial(ctx) {
   const {
-    guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked, isAdult,
-    rateLimit, isLead, moderateOrRefuse, issueRecruitmentRequest, auditEntry, orgCanSee, guardianManagedOnly,
-    combineOrgMaySeeResults, testProviderEnabled = false, recruitment, unit,
+    guardians,
+    orgRouter,
+    playerRouter,
+    guardianRouter,
+    nextId,
+    notify,
+    broadcast,
+    findPlayer,
+    isBlocked,
+    isAdult,
+    rateLimit,
+    isLead,
+    moderateOrRefuse,
+    issueRecruitmentRequest,
+    auditEntry,
+    orgCanSee,
+    guardianManagedOnly,
+    combineOrgMaySeeResults,
+    testProviderEnabled = false,
+    recruitment,
+    unit,
     recruitmentReads,
     scoutingReads, // the assessments
     boxCamReads, // Box Cam sessions and their CV results
   } = ctx;
-  if (typeof unit !== 'function' || !recruitment?.trials) throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
+  if (typeof unit !== 'function' || !recruitment?.trials)
+    throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
   const { trials } = recruitment;
   const { cases } = ctx.recruitmentCases; // the case's links and history are explicit writes in the same unit
   const caseAudit = (kase, ...entry) => cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
@@ -53,8 +93,15 @@ export function registerTrial(ctx) {
   /** One history entry, one clock. */
   const entry = (action, by, detail, at) => ({ id: nextId('aud'), at, action, by, detail: detail ?? null });
   /** The history entry and rev bump of an act (revBy null for the family), with its client key. */
-  const acted = (at, revBy, action, by, detail, key = null) => ({ at, bump: true, revBy, history: [entry(action, by, detail, at)], key });
-  const attendedCount = (t) => [...currentAttendance(t).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length;
+  const acted = (at, revBy, action, by, detail, key = null) => ({
+    at,
+    bump: true,
+    revBy,
+    history: [entry(action, by, detail, at)],
+    key,
+  });
+  const attendedCount = (t) =>
+    [...currentAttendance(t).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length;
 
   /** Per action, bounded, with a payload fingerprint. */
   function keyCheck(t, action, key, fp) {
@@ -78,9 +125,15 @@ export function registerTrial(ctx) {
     if (!room) return null;
     const role = roleFor(req, room);
     if (!trialRoleAllows(role, need)) {
-      err(res, 'TRIAL_NOT_PERMITTED', need === 'trial_write'
-        ? 'Only a room lead or recruitment lead can invite, schedule, cancel, record attendance, complete or link evidence for a trial.'
-        : need === 'trial_assess' ? 'Your role cannot assess in this room.' : 'Your role cannot read trials in this room.');
+      err(
+        res,
+        'TRIAL_NOT_PERMITTED',
+        need === 'trial_write'
+          ? 'Only a room lead or recruitment lead can invite, schedule, cancel, record attendance, complete or link evidence for a trial.'
+          : need === 'trial_assess'
+            ? 'Your role cannot assess in this room.'
+            : 'Your role cannot read trials in this room.',
+      );
       return null;
     }
     return { room, role };
@@ -93,17 +146,30 @@ export function registerTrial(ctx) {
     for (const t of trials.forOrgPlayer(room.orgId, room.playerId)) {
       if (t.caseId && t.caseId !== room.id) continue;
       const problems = trialIntegrity(t, { orgId: room.orgId, caseId: t.caseId ? room.id : null });
-      if (problems.length) { omitted += 1; console.error(`TRIAL integrity ${t.id ?? '?'}: ${problems.join(',')}`); continue; }
+      if (problems.length) {
+        omitted += 1;
+        console.error(`TRIAL integrity ${t.id ?? '?'}: ${problems.join(',')}`);
+        continue;
+      }
       good.push(t);
     }
-    good.sort((a, b) => (a.acceptedAt - b.acceptedAt) || String(a.id).localeCompare(String(b.id)));
+    good.sort((a, b) => a.acceptedAt - b.acceptedAt || String(a.id).localeCompare(String(b.id)));
     return { list: good, omitted };
   }
 
   function findTrial(req, res, room) {
     const found = trials.byId(req.params.tid);
-    const t = found && found.orgId === room.orgId && found.playerId === room.playerId && (!found.caseId || found.caseId === room.id) ? found : null;
-    if (!t) { err(res, 'TRIAL_NOT_FOUND', 'No such trial.'); return null; }
+    const t =
+      found &&
+      found.orgId === room.orgId &&
+      found.playerId === room.playerId &&
+      (!found.caseId || found.caseId === room.id)
+        ? found
+        : null;
+    if (!t) {
+      err(res, 'TRIAL_NOT_FOUND', 'No such trial.');
+      return null;
+    }
     const problems = trialIntegrity(t, { orgId: room.orgId, caseId: t.caseId ? room.id : null });
     if (problems.length) {
       console.error(`TRIAL integrity ${t.id}: ${problems.join(',')}`);
@@ -115,19 +181,46 @@ export function registerTrial(ctx) {
 
   function findSession(res, t, sid) {
     const s = (t.schedule?.sessions ?? []).find((x) => x.id === sid) ?? null;
-    if (!s) { err(res, 'TRIAL_SESSION_NOT_FOUND', 'No such session on this trial.'); return null; }
+    if (!s) {
+      err(res, 'TRIAL_SESSION_NOT_FOUND', 'No such session on this trial.');
+      return null;
+    }
     return s;
   }
 
   /** The recipient rule in Trial vocabulary. Computed now, never trusted from a client. */
-  const RECIPIENT_CODES = Object.freeze({ CONTACT_BLOCKED: 'TRIAL_BLOCKED', CONTACT_GUARDIAN_REQUIRED: 'TRIAL_GUARDIAN_REQUIRED', CONTACT_RECIPIENT_UNAVAILABLE: 'TRIAL_RECIPIENT_UNAVAILABLE' });
+  const RECIPIENT_CODES = Object.freeze({
+    CONTACT_BLOCKED: 'TRIAL_BLOCKED',
+    CONTACT_GUARDIAN_REQUIRED: 'TRIAL_GUARDIAN_REQUIRED',
+    CONTACT_RECIPIENT_UNAVAILABLE: 'TRIAL_RECIPIENT_UNAVAILABLE',
+  });
   function recipientFor(org, playerId) {
-    const r = resolveContactRecipient({ player: findPlayer(playerId), org, guardians: guardians.forPlayer(playerId), isAdult, visibleToOrg, isBlocked, now: new Date() });
+    const r = resolveContactRecipient({
+      player: findPlayer(playerId),
+      org,
+      guardians: guardians.forPlayer(playerId),
+      isAdult,
+      visibleToOrg,
+      isBlocked,
+      now: new Date(),
+    });
     if (r.ok) return r;
     const error = RECIPIENT_CODES[r.error] ?? 'TRIAL_RECIPIENT_UNAVAILABLE';
-    return { ok: false, error, message: error === 'TRIAL_GUARDIAN_REQUIRED' ? 'This player is under the age of majority and no valid guardian route exists. The trial cannot proceed.' : error === 'TRIAL_BLOCKED' ? 'This player (or their guardian) has blocked your organisation.' : r.message };
+    return {
+      ok: false,
+      error,
+      message:
+        error === 'TRIAL_GUARDIAN_REQUIRED'
+          ? 'This player is under the age of majority and no valid guardian route exists. The trial cannot proceed.'
+          : error === 'TRIAL_BLOCKED'
+            ? 'This player (or their guardian) has blocked your organisation.'
+            : r.message,
+    };
   }
-  const routingView = (r) => (r.ok ? { available: true, type: r.recipient.type, minor: r.recipient.minor } : { available: false, type: null, minor: null, reason: r.error });
+  const routingView = (r) =>
+    r.ok
+      ? { available: true, type: r.recipient.type, minor: r.recipient.minor }
+      : { available: false, type: null, minor: null, reason: r.error };
 
   /**
    * Re-authorisation on every club mutation, after the role check in roomFor:
@@ -135,20 +228,39 @@ export function registerTrial(ctx) {
    * the recipient, then state.
    */
   function reauth(req, res, room, t, action) {
-    if (t?.subjectRemovedAt) { err(res, 'TRIAL_SUBJECT_REMOVED', 'This player removed their ScoutBox account. The trial stays on record; it can no longer be changed.'); return null; }
+    if (t?.subjectRemovedAt) {
+      err(
+        res,
+        'TRIAL_SUBJECT_REMOVED',
+        'This player removed their ScoutBox account. The trial stays on record; it can no longer be changed.',
+      );
+      return null;
+    }
     if (isBlocked(room.playerId, room.orgId) && !blockedAllows(action)) {
-      err(res, 'TRIAL_BLOCKED', 'This player (or their guardian) has blocked your organisation. You may cancel the trial; nothing else.');
+      err(
+        res,
+        'TRIAL_BLOCKED',
+        'This player (or their guardian) has blocked your organisation. You may cancel the trial; nothing else.',
+      );
       return null;
     }
     const needsRecipient = ['invite', 'schedule', 'reschedule', 'link'].includes(action);
     let recipient = null;
     if (needsRecipient) {
       const r = recipientFor(req.org, room.playerId);
-      if (!r.ok) { err(res, r.error, r.message); return null; }
+      if (!r.ok) {
+        err(res, r.error, r.message);
+        return null;
+      }
       recipient = r.recipient;
     }
     if (t && action !== 'invite' && !trialStateAllows(t, action)) {
-      err(res, 'TRIAL_INVALID_STATE', `A trial that is ${deriveWorkflowState(t).replace('_', ' ')} cannot take this action.`, { current: { workflowState: deriveWorkflowState(t) } });
+      err(
+        res,
+        'TRIAL_INVALID_STATE',
+        `A trial that is ${deriveWorkflowState(t).replace('_', ' ')} cannot take this action.`,
+        { current: { workflowState: deriveWorkflowState(t) } },
+      );
       return null;
     }
     return { recipient };
@@ -157,12 +269,24 @@ export function registerTrial(ctx) {
   /** Required on a mutation of an existing trial; absent is refused, never coerced. */
   function revGate(req, res, t) {
     const exp = expectedRevOf(req.body);
-    if (exp === null) { err(res, 'TRIAL_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.'); return false; }
+    if (exp === null) {
+      err(res, 'TRIAL_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.');
+      return false;
+    }
     // A rev is a JSON integer, never "3", 3.5 or -1: the shared guard folds
     // numeric strings and the Trial does not.
     const rawRev = req.body?.expectedRev ?? req.body?.expectedVersion;
-    if (!Number.isInteger(rawRev) || rawRev < 0) { err(res, 'TRIAL_REV_REQUIRED', 'expectedRev must be a non-negative integer.', { field: 'expectedRev', expected: 'integer' }); return false; }
-    return guardRev(req, res, t, { errorCode: 'TRIAL_VERSION_CONFLICT', current: { workflowState: deriveWorkflowState(t) } });
+    if (!Number.isInteger(rawRev) || rawRev < 0) {
+      err(res, 'TRIAL_REV_REQUIRED', 'expectedRev must be a non-negative integer.', {
+        field: 'expectedRev',
+        expected: 'integer',
+      });
+      return false;
+    }
+    return guardRev(req, res, t, {
+      errorCode: 'TRIAL_VERSION_CONFLICT',
+      current: { workflowState: deriveWorkflowState(t) },
+    });
   }
 
   /**
@@ -172,13 +296,33 @@ export function registerTrial(ctx) {
    */
   function advanceCase({ req = null, room, action, at, trigger, actor = null, keyDetail = {} }) {
     const role = req ? roleFor(req, room) : 'recruitment_admin';
-    const verdict = canTransitionRecruitmentCase(room, action, { role, evidence: ctx.recruitmentEvidenceProvider, now: at });
+    const verdict = canTransitionRecruitmentCase(room, action, {
+      role,
+      evidence: ctx.recruitmentEvidenceProvider,
+      now: at,
+    });
     if (verdict.ok) {
       const org = orgOf(room.orgId);
-      const { from, to } = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null, statusDetail: { lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail } });
+      const { from, to } = ctx.applyLifecycleTransition({
+        req,
+        room,
+        to: verdict.to,
+        reasonCodes: [],
+        trigger,
+        actor: actor ? { ...actor, org } : null,
+        statusDetail: {
+          lifecycleAction: action,
+          clientKey: null,
+          policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION,
+          ...keyDetail,
+        },
+      });
       return { applied: true, from, to, at };
     }
-    if (verdict.error !== 'LIFECYCLE_NO_CHANGE') console.error(`TRIAL lifecycle_not_applied ${room.id} ${action} ${verdict.error} ${verdict.evidenceReason ?? ''}`);
+    if (verdict.error !== 'LIFECYCLE_NO_CHANGE')
+      console.error(
+        `TRIAL lifecycle_not_applied ${room.id} ${action} ${verdict.error} ${verdict.evidenceReason ?? ''}`,
+      );
     return { applied: false, reason: verdict.error, at };
   }
 
@@ -211,19 +355,30 @@ export function registerTrial(ctx) {
     const { room, role } = got;
     const { list, omitted } = trialsOf(room);
     const routing = recipientFor(req.org, room.playerId);
-    const invitation = recruitment.requests.forCase(room.id).filter((r) => r.type === 'trial' && r.orgId === room.orgId)
-      .sort((a, b) => (b.createdAt - a.createdAt) || String(b.id).localeCompare(String(a.id)))[0] ?? null;
+    const invitation =
+      recruitment.requests
+        .forCase(room.id)
+        .filter((r) => r.type === 'trial' && r.orgId === room.orgId)
+        .sort((a, b) => b.createdAt - a.createdAt || String(b.id).localeCompare(String(a.id)))[0] ?? null;
     res.json({
       items: list.map(trialClubView),
       omitted,
       routing: routingView(routing),
       invitation: invitation ? invitationView(invitation) : null,
-      case: { status: room.room.status, acceptsInvitation: TRIAL_CASE_STATUSES.includes(room.room.status), planAction: 'planTrial' },
+      case: {
+        status: room.room.status,
+        acceptsInvitation: TRIAL_CASE_STATUSES.includes(room.room.status),
+        planAction: 'planTrial',
+      },
       canWrite: trialRoleAllows(role, 'trial_write'),
       canAssess: trialRoleAllows(role, 'trial_assess'),
       blocked: isBlocked(room.playerId, room.orgId),
       limits: TRIAL_LIMITS,
-      vocabulary: { workflowStates: TRIAL_WORKFLOW_STATES, sessionKinds: TRIAL_SESSION_KINDS, attendanceStates: TRIAL_ATTENDANCE_STATES },
+      vocabulary: {
+        workflowStates: TRIAL_WORKFLOW_STATES,
+        sessionKinds: TRIAL_SESSION_KINDS,
+        attendanceStates: TRIAL_ATTENDANCE_STATES,
+      },
       policyVersion: TRIAL_POLICY_VERSION,
       note: 'An invitation is not a trial. A trial exists once the player or guardian accepts; it is scheduled once a concrete schedule is confirmed; it is completed only after recorded attendance and the last session has ended.',
     });
@@ -232,10 +387,24 @@ export function registerTrial(ctx) {
   function invitationView(r) {
     const td = r.trialDetails ?? {};
     return {
-      id: r.id, status: r.status, createdAt: r.createdAt, respondedAt: r.respondedAt ?? null, respondedBy: r.respondedBy ?? null,
-      routedTo: r.routedTo ?? null, trialId: r.trialId ?? null,
-      slots: (td.slots ?? []).map((s) => ({ id: s.id, day: s.day, startsAt: s.startsAt, endsAt: s.endsAt, timezone: s.timezone, kind: s.kind ?? null, venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null } : null })),
-      proposedDate: td.proposedDate ?? null, altSlots: td.altSlots ?? [],
+      id: r.id,
+      status: r.status,
+      createdAt: r.createdAt,
+      respondedAt: r.respondedAt ?? null,
+      respondedBy: r.respondedBy ?? null,
+      routedTo: r.routedTo ?? null,
+      trialId: r.trialId ?? null,
+      slots: (td.slots ?? []).map((s) => ({
+        id: s.id,
+        day: s.day,
+        startsAt: s.startsAt,
+        endsAt: s.endsAt,
+        timezone: s.timezone,
+        kind: s.kind ?? null,
+        venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null } : null,
+      })),
+      proposedDate: td.proposedDate ?? null,
+      altSlots: td.altSlots ?? [],
     };
   }
 
@@ -251,28 +420,48 @@ export function registerTrial(ctx) {
     if (!isPlain(body)) return bad('TRIAL_CONTENT_INVALID', 'The invitation must be an object.');
     const tz = validateTimezone(body.timezone);
     if (!tz.ok) return tz;
-    if (!Array.isArray(body.slots) || body.slots.length === 0) return { ok: false, error: 'TRIAL_SLOTS_INVALID', message: 'Offer at least one slot.', field: 'slots' };
-    if (body.slots.length > TRIAL_LIMITS.slots) return bad('TRIAL_SLOTS_INVALID', `Offer at most ${TRIAL_LIMITS.slots} slots.`, { field: 'slots' });
+    if (!Array.isArray(body.slots) || body.slots.length === 0)
+      return { ok: false, error: 'TRIAL_SLOTS_INVALID', message: 'Offer at least one slot.', field: 'slots' };
+    if (body.slots.length > TRIAL_LIMITS.slots)
+      return bad('TRIAL_SLOTS_INVALID', `Offer at most ${TRIAL_LIMITS.slots} slots.`, { field: 'slots' });
     const venue = validateVenue(body.venue);
     if (!venue.ok) return venue;
     const slots = [];
     const days = new Set();
     for (const raw of body.slots) {
-      if (!isPlain(raw)) return bad('TRIAL_SLOTS_INVALID', 'Each slot is an object with startsAt and endsAt.', { field: 'slots' });
+      if (!isPlain(raw))
+        return bad('TRIAL_SLOTS_INVALID', 'Each slot is an object with startsAt and endsAt.', { field: 'slots' });
       const v = validateSessionInput({ ...raw, venue: venue.venue }, { now: at });
       if (!v.ok) return v;
       const day = localDay(v.session.startsAt, tz.timezone);
-      if (days.has(day)) return bad('TRIAL_SLOTS_INVALID', 'Each offered slot must fall on a different day.', { field: 'slots' });
+      if (days.has(day))
+        return bad('TRIAL_SLOTS_INVALID', 'Each offered slot must fall on a different day.', { field: 'slots' });
       days.add(day);
-      slots.push({ id: nextId('tslot'), day, kind: v.session.kind, startsAt: v.session.startsAt, endsAt: v.session.endsAt, timezone: tz.timezone, venue: { name: venue.venue.name, town: venue.venue.town ?? null } });
+      slots.push({
+        id: nextId('tslot'),
+        day,
+        kind: v.session.kind,
+        startsAt: v.session.startsAt,
+        endsAt: v.session.endsAt,
+        timezone: tz.timezone,
+        venue: { name: venue.venue.name, town: venue.venue.town ?? null },
+      });
     }
     slots.sort((a, b) => a.startsAt - b.startsAt);
-    if (typeof body.message !== 'string' || !body.message.trim()) return bad('TRIAL_CONTENT_INVALID', 'Write the message the player or guardian will read.', { field: 'message' });
-    if (body.message.length > TRIAL_LIMITS.message) return bad('TRIAL_CONTENT_INVALID', `Keep the message under ${TRIAL_LIMITS.message} characters.`, { field: 'message' });
+    if (typeof body.message !== 'string' || !body.message.trim())
+      return bad('TRIAL_CONTENT_INVALID', 'Write the message the player or guardian will read.', { field: 'message' });
+    if (body.message.length > TRIAL_LIMITS.message)
+      return bad('TRIAL_CONTENT_INVALID', `Keep the message under ${TRIAL_LIMITS.message} characters.`, {
+        field: 'message',
+      });
     let instructions = null;
     if (body.instructions !== undefined && body.instructions !== null && body.instructions !== '') {
-      if (typeof body.instructions !== 'string') return bad('TRIAL_CONTENT_INVALID', 'Instructions must be text.', { field: 'instructions' });
-      if (body.instructions.length > TRIAL_LIMITS.instructions) return bad('TRIAL_CONTENT_INVALID', `Keep the instructions under ${TRIAL_LIMITS.instructions} characters.`, { field: 'instructions' });
+      if (typeof body.instructions !== 'string')
+        return bad('TRIAL_CONTENT_INVALID', 'Instructions must be text.', { field: 'instructions' });
+      if (body.instructions.length > TRIAL_LIMITS.instructions)
+        return bad('TRIAL_CONTENT_INVALID', `Keep the instructions under ${TRIAL_LIMITS.instructions} characters.`, {
+          field: 'instructions',
+        });
       instructions = body.instructions.trim() || null;
     }
     return { ok: true, timezone: tz.timezone, slots, venue: venue.venue, message: body.message.trim(), instructions };
@@ -287,28 +476,68 @@ export function registerTrial(ctx) {
     const key = normaliseTrialClientKey(req.body?.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const inv = validateInvitation(req.body, { now: at });
-    if (!inv.ok) return err(res, inv.error, inv.message, inv.field ? { field: inv.field } : (inv.allowed ? { allowed: inv.allowed } : {}));
-    const fp = payloadFingerprint({ slots: inv.slots.map((s) => [s.startsAt, s.endsAt]), venue: inv.venue.name, message: inv.message });
+    if (!inv.ok)
+      return err(
+        res,
+        inv.error,
+        inv.message,
+        inv.field ? { field: inv.field } : inv.allowed ? { allowed: inv.allowed } : {},
+      );
+    const fp = payloadFingerprint({
+      slots: inv.slots.map((s) => [s.startsAt, s.endsAt]),
+      venue: inv.venue.name,
+      message: inv.message,
+    });
 
     const mine = recruitment.requests.forCase(room.id).filter((r) => r.type === 'trial' && r.orgId === room.orgId);
     if (key.key) {
       const prior = mine.find((r) => r.keys?.invite?.key === key.key);
-      if (prior && prior.keys.invite.fp === fp) return res.json({ invitation: invitationView(prior), idempotent: true, case: { unchanged: true, status: room.room.status } });
-      if (prior) return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different invitation.');
+      if (prior && prior.keys.invite.fp === fp)
+        return res.json({
+          invitation: invitationView(prior),
+          idempotent: true,
+          case: { unchanged: true, status: room.room.status },
+        });
+      if (prior)
+        return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different invitation.');
     }
 
     if (!TRIAL_CASE_STATUSES.includes(room.room.status)) {
-      return err(res, 'TRIAL_CASE_STATE', `A case at "${ROOM_STATUS_LABELS[room.room.status] ?? room.room.status}" cannot request a trial.`, { allowed: TRIAL_CASE_STATUSES });
+      return err(
+        res,
+        'TRIAL_CASE_STATE',
+        `A case at "${ROOM_STATUS_LABELS[room.room.status] ?? room.room.status}" cannot request a trial.`,
+        { allowed: TRIAL_CASE_STATUSES },
+      );
     }
     const pending = mine.find((r) => r.status === 'pending');
-    if (pending) return err(res, 'TRIAL_ALREADY_INVITED', 'An invitation is already waiting for an answer.', { current: { requestId: pending.id } });
-    const openTrial = trialsOf(room).list.find((t) => t.caseId === room.id && !['completed', 'cancelled'].includes(deriveWorkflowState(t)));
-    if (openTrial) return err(res, 'TRIAL_INVALID_STATE', 'This case already has an open trial. Complete or cancel it before inviting again.', { current: { trialId: openTrial.id, workflowState: deriveWorkflowState(openTrial) } });
+    if (pending)
+      return err(res, 'TRIAL_ALREADY_INVITED', 'An invitation is already waiting for an answer.', {
+        current: { requestId: pending.id },
+      });
+    const openTrial = trialsOf(room).list.find(
+      (t) => t.caseId === room.id && !['completed', 'cancelled'].includes(deriveWorkflowState(t)),
+    );
+    if (openTrial)
+      return err(
+        res,
+        'TRIAL_INVALID_STATE',
+        'This case already has an open trial. Complete or cancel it before inviting again.',
+        { current: { trialId: openTrial.id, workflowState: deriveWorkflowState(openTrial) } },
+      );
     // A declined invitation cannot be followed by another within the Contact cooldown.
-    const declined = mine.filter((r) => r.status === 'declined' && Number.isFinite(r.respondedAt) && at - r.respondedAt < CONTACT_LIMITS.cooldownMs);
+    const declined = mine.filter(
+      (r) =>
+        r.status === 'declined' && Number.isFinite(r.respondedAt) && at - r.respondedAt < CONTACT_LIMITS.cooldownMs,
+    );
     if (declined.length) {
       const latest = Math.max(...declined.map((r) => r.respondedAt));
-      return err(res, 'TRIAL_INVITE_COOLDOWN', 'This player declined a trial invitation recently. Wait before inviting again.', { retryAt: latest + CONTACT_LIMITS.cooldownMs });
+      return err(
+        res,
+        'TRIAL_INVITE_COOLDOWN',
+        'This player declined a trial invitation recently. Wait before inviting again.',
+        { retryAt: latest + CONTACT_LIMITS.cooldownMs },
+      );
     }
     if (limited('trial_invite', req.org.id)) return res.status(429).json(rateLimitedBody('trial_invite'));
 
@@ -317,36 +546,79 @@ export function registerTrial(ctx) {
     if (!auth) return;
     const recipient = auth.recipient;
     const player = findPlayer(room.playerId);
-    if (!moderateOrRefuse(res, inv.message, { kind: 'trial_invitation', orgId: req.org.id, userId: req.orgUser.id })) return;
-    if (inv.instructions && !moderateOrRefuse(res, inv.instructions, { kind: 'trial_instructions', orgId: req.org.id, userId: req.orgUser.id })) return;
+    if (!moderateOrRefuse(res, inv.message, { kind: 'trial_invitation', orgId: req.org.id, userId: req.orgUser.id }))
+      return;
+    if (
+      inv.instructions &&
+      !moderateOrRefuse(res, inv.instructions, {
+        kind: 'trial_instructions',
+        orgId: req.org.id,
+        userId: req.orgUser.id,
+      })
+    )
+      return;
 
     // The transport refuses: nothing is written, no case move, no notification.
-    if (ctx.operations.delivery.consumeInjectedFailure('trial')) { // used up through the delivery bookkeeping (a row)
+    if (ctx.operations.delivery.consumeInjectedFailure('trial')) {
+      // used up through the delivery bookkeeping (a row)
       console.error(`TRIAL transport_failed invitation case=${room.id}`);
       return err(res, 'TRIAL_TRANSPORT_REFUSED', 'The invitation could not be delivered. Nothing was sent; try again.');
     }
 
     let moved = null;
     const request = unit(() => {
-    const request = issueRecruitmentRequest({
-      org: req.org, orgUser: req.orgUser, player, type: 'trial', message: inv.message,
-      trialDetails: {
-        proposedDate: inv.slots[0].day, altSlots: inv.slots.slice(1).map((s) => s.day),
-        venue: inv.venue.town ? `${inv.venue.name}, ${inv.venue.town}` : inv.venue.name, notes: '',
-        slots: inv.slots,
-        // Shared with the recipient after acceptance only; stripped from every recipient-facing view.
-        private: (inv.venue.address ?? null) !== null || (inv.instructions ?? null) !== null ? { venueAddress: inv.venue.address ?? null, instructions: inv.instructions ?? null } : null,
-      },
-      guardianId: recipient.guardianId, at,
-      workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
-    });
-    cases.link(room.id, { requestId: request.id }, { history: [auditEntry('org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', { requestId: request.id, recipientType: recipient.type, slotCount: inv.slots.length })] });
+      const request = issueRecruitmentRequest({
+        org: req.org,
+        orgUser: req.orgUser,
+        player,
+        type: 'trial',
+        message: inv.message,
+        trialDetails: {
+          proposedDate: inv.slots[0].day,
+          altSlots: inv.slots.slice(1).map((s) => s.day),
+          venue: inv.venue.town ? `${inv.venue.name}, ${inv.venue.town}` : inv.venue.name,
+          notes: '',
+          slots: inv.slots,
+          // Shared with the recipient after acceptance only; stripped from every recipient-facing view.
+          private:
+            (inv.venue.address ?? null) !== null || (inv.instructions ?? null) !== null
+              ? { venueAddress: inv.venue.address ?? null, instructions: inv.instructions ?? null }
+              : null,
+        },
+        guardianId: recipient.guardianId,
+        at,
+        workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
+      });
+      cases.link(
+        room.id,
+        { requestId: request.id },
+        {
+          history: [
+            auditEntry('org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', {
+              requestId: request.id,
+              recipientType: recipient.type,
+              slotCount: inv.slots.length,
+            }),
+          ],
+        },
+      );
 
-    moved = advanceCase({ req, room, action: 'planTrial', at, trigger: `trial:invite:${request.id}`, keyDetail: { requestId: request.id } });
-    return request;
+      moved = advanceCase({
+        req,
+        room,
+        action: 'planTrial',
+        at,
+        trigger: `trial:invite:${request.id}`,
+        keyDetail: { requestId: request.id },
+      });
+      return request;
     });
     broadcast('trial_invited', { orgId: room.orgId, roomId: room.id, requestId: request.id });
-    res.status(201).json({ invitation: invitationView(request), routing: routingView({ ok: true, recipient }), case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status } });
+    res.status(201).json({
+      invitation: invitationView(request),
+      routing: routingView({ ok: true, recipient }),
+      case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status },
+    });
   });
 
   // ------------------------------------------------------------- one trial
@@ -356,7 +628,14 @@ export function registerTrial(ctx) {
     if (!got) return;
     const t = findTrial(req, res, got.room);
     if (!t) return;
-    res.json({ trial: trialClubView(t), evidence: evidenceViews(t), assessments: assessmentsFor(req, t), canWrite: trialRoleAllows(got.role, 'trial_write'), canAssess: trialRoleAllows(got.role, 'trial_assess'), blocked: isBlocked(t.playerId, t.orgId) });
+    res.json({
+      trial: trialClubView(t),
+      evidence: evidenceViews(t),
+      assessments: assessmentsFor(req, t),
+      canWrite: trialRoleAllows(got.role, 'trial_write'),
+      canAssess: trialRoleAllows(got.role, 'trial_assess'),
+      blocked: isBlocked(t.playerId, t.orgId),
+    });
   });
 
   /** Assessments in this trial's context that this user may see (the blind rule). Existence and state only. */
@@ -366,7 +645,15 @@ export function registerTrial(ctx) {
     const iSubmitted = mine.some((a) => a.scoutUserId === req.orgUser.id && a.state !== 'draft');
     return mine
       .filter((a) => lead || a.scoutUserId === req.orgUser.id || (iSubmitted && a.state !== 'draft'))
-      .map((a) => ({ id: a.id, state: a.state, scoutName: a.scoutName, scoutUserId: a.scoutUserId, submittedAt: a.submittedAt ?? null, trialSessionId: a.context?.trialSessionId ?? null, published: !!a.publishedFeedback }));
+      .map((a) => ({
+        id: a.id,
+        state: a.state,
+        scoutName: a.scoutName,
+        scoutUserId: a.scoutUserId,
+        submittedAt: a.submittedAt ?? null,
+        trialSessionId: a.context?.trialSessionId ?? null,
+        published: !!a.publishedFeedback,
+      }));
   }
 
   // -------------------------------------------------------------- schedule
@@ -383,10 +670,28 @@ export function registerTrial(ctx) {
 
     const existingIds = (t.schedule?.sessions ?? []).map((s) => s.id);
     const check = validateScheduleInput(req.body, { now: at, mintId: () => nextId('tses'), existingIds });
-    if (!check.ok) return err(res, check.error, check.message, check.field ? { field: check.field } : (check.allowed ? { allowed: check.allowed } : {}));
-    const fp = payloadFingerprint({ timezone: check.schedule.timezone, sessions: check.schedule.sessions.map((s) => [s.id, s.startsAt, s.endsAt, s.venue?.name, s.venue?.town, s.kind, s.instructions ?? null]) });
+    if (!check.ok)
+      return err(
+        res,
+        check.error,
+        check.message,
+        check.field ? { field: check.field } : check.allowed ? { allowed: check.allowed } : {},
+      );
+    const fp = payloadFingerprint({
+      timezone: check.schedule.timezone,
+      sessions: check.schedule.sessions.map((s) => [
+        s.id,
+        s.startsAt,
+        s.endsAt,
+        s.venue?.name,
+        s.venue?.town,
+        s.kind,
+        s.instructions ?? null,
+      ]),
+    });
     const kc = keyCheck(t, 'schedule', key.key, fp);
-    if (kc.conflict) return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different schedule.');
+    if (kc.conflict)
+      return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different schedule.');
     if (kc.replay) return res.json({ trial: trialClubView(t), idempotent: true });
 
     const isRevision = !!t.schedule;
@@ -394,7 +699,12 @@ export function registerTrial(ctx) {
     if (!auth) return;
     if (!revGate(req, res, t)) return;
     if (limited('trial_schedule', req.org.id)) return res.status(429).json(rateLimitedBody('trial_schedule'));
-    if ((t.schedule?.revisions?.length ?? 0) >= TRIAL_LIMITS.revisions) return err(res, 'TRIAL_INVALID_STATE', `A trial schedule may be revised at most ${TRIAL_LIMITS.revisions} times.`);
+    if ((t.schedule?.revisions?.length ?? 0) >= TRIAL_LIMITS.revisions)
+      return err(
+        res,
+        'TRIAL_INVALID_STATE',
+        `A trial schedule may be revised at most ${TRIAL_LIMITS.revisions} times.`,
+      );
 
     // A revision must carry every ended or attendance-recorded session
     // unchanged; attendance has its own append-only route.
@@ -405,11 +715,24 @@ export function registerTrial(ctx) {
       if (!ended && !recorded) continue;
       const kept = check.schedule.sessions.find((s) => s.id === prev.id);
       if (!kept || kept.startsAt !== prev.startsAt || kept.endsAt !== prev.endsAt) {
-        return err(res, 'TRIAL_INVALID_STATE', 'A session that has ended or has attendance recorded cannot be removed or moved. Cancel the trial if it will not go ahead.', { current: { sessionId: prev.id } });
+        return err(
+          res,
+          'TRIAL_INVALID_STATE',
+          'A session that has ended or has attendance recorded cannot be removed or moved. Cancel the trial if it will not go ahead.',
+          { current: { sessionId: prev.id } },
+        );
       }
     }
     for (const s of check.schedule.sessions) {
-      if (s.instructions && !moderateOrRefuse(res, s.instructions, { kind: 'trial_instructions', orgId: req.org.id, userId: req.orgUser.id })) return;
+      if (
+        s.instructions &&
+        !moderateOrRefuse(res, s.instructions, {
+          kind: 'trial_instructions',
+          orgId: req.org.id,
+          userId: req.orgUser.id,
+        })
+      )
+        return;
     }
 
     const by = orgActor(req);
@@ -417,19 +740,49 @@ export function registerTrial(ctx) {
     const material = materialChange(t.schedule, { timezone: check.schedule.timezone, sessions });
     const revision = (t.schedule?.revision ?? 0) + 1;
     const wasConfirmed = !!t.schedule?.confirmedAt;
-    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, TRIAL_LIMITS.reason) || null : null;
+    const reason =
+      typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, TRIAL_LIMITS.reason) || null : null;
 
     // A cosmetic change keeps the confirmation the recipient already gave.
     const keepsConfirmation = wasConfirmed && !material;
-    const workflowState = deriveWorkflowState({ ...t, schedule: { confirmedAt: keepsConfirmation ? t.schedule.confirmedAt : null, sessions } });
-    const fresh = unit(() => trials.proposeSchedule(t.id, {
-      revision, timezone: check.schedule.timezone, sessions, proposedAt: at, proposedBy: by, keepsConfirmation, reason, material, workflowState,
-    }, acted(at, req.orgUser, isRevision ? 'trial_rescheduled' : 'trial_schedule_proposed', by, { revision, sessionCount: sessions.length, material, requiresConfirmation: !keepsConfirmation }, { act: 'schedule', key: key.key, fp })));
+    const workflowState = deriveWorkflowState({
+      ...t,
+      schedule: { confirmedAt: keepsConfirmation ? t.schedule.confirmedAt : null, sessions },
+    });
+    const fresh = unit(() =>
+      trials.proposeSchedule(
+        t.id,
+        {
+          revision,
+          timezone: check.schedule.timezone,
+          sessions,
+          proposedAt: at,
+          proposedBy: by,
+          keepsConfirmation,
+          reason,
+          material,
+          workflowState,
+        },
+        acted(
+          at,
+          req.orgUser,
+          isRevision ? 'trial_rescheduled' : 'trial_schedule_proposed',
+          by,
+          { revision, sessionCount: sessions.length, material, requiresConfirmation: !keepsConfirmation },
+          { act: 'schedule', key: key.key, fp },
+        ),
+      ),
+    );
     if (isRevision) broadcast('trial_rescheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
     else broadcast('trial_scheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-    notifyRecipient(fresh, keepsConfirmation
-      ? `${fresh.orgName} updated the details of your trial (times unchanged).`
-      : isRevision ? `${fresh.orgName} proposed new times for your trial — please confirm the updated schedule.` : `${fresh.orgName} proposed a schedule for your trial — please confirm it.`);
+    notifyRecipient(
+      fresh,
+      keepsConfirmation
+        ? `${fresh.orgName} updated the details of your trial (times unchanged).`
+        : isRevision
+          ? `${fresh.orgName} proposed new times for your trial — please confirm the updated schedule.`
+          : `${fresh.orgName} proposed a schedule for your trial — please confirm it.`,
+    );
     res.json({ trial: trialClubView(fresh), requiresConfirmation: !keepsConfirmation, material });
   }
   orgRouter.post('/rooms/:id/trials/:tid/schedule', scheduleHandler);
@@ -447,23 +800,43 @@ export function registerTrial(ctx) {
     const key = normaliseTrialClientKey(req.body?.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const reasonRaw = req.body?.reason;
-    if (typeof reasonRaw !== 'string' || !reasonRaw.trim()) return err(res, 'TRIAL_CONTENT_INVALID', 'A cancellation needs a reason the family will read.', { field: 'reason' });
-    if (reasonRaw.length > TRIAL_LIMITS.reason) return err(res, 'TRIAL_CONTENT_INVALID', `Keep the reason under ${TRIAL_LIMITS.reason} characters.`, { field: 'reason' });
+    if (typeof reasonRaw !== 'string' || !reasonRaw.trim())
+      return err(res, 'TRIAL_CONTENT_INVALID', 'A cancellation needs a reason the family will read.', {
+        field: 'reason',
+      });
+    if (reasonRaw.length > TRIAL_LIMITS.reason)
+      return err(res, 'TRIAL_CONTENT_INVALID', `Keep the reason under ${TRIAL_LIMITS.reason} characters.`, {
+        field: 'reason',
+      });
     const reason = reasonRaw.trim();
     const fp = payloadFingerprint({ reason });
     const kc = keyCheck(t, 'cancel', key.key, fp);
-    if (kc.conflict) return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different cancellation.');
+    if (kc.conflict)
+      return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different cancellation.');
     if (kc.replay) return res.json({ trial: trialClubView(t), idempotent: true });
     // Allowed while blocked: a safety notice, not solicitation.
     const auth = reauth(req, res, room, t, 'cancel');
     if (!auth) return;
     if (!revGate(req, res, t)) return;
     if (limited('trial_schedule', req.org.id)) return res.status(429).json(rateLimitedBody('trial_schedule'));
-    if (!moderateOrRefuse(res, reason, { kind: 'trial_cancellation', orgId: req.org.id, userId: req.orgUser.id })) return;
+    if (!moderateOrRefuse(res, reason, { kind: 'trial_cancellation', orgId: req.org.id, userId: req.orgUser.id }))
+      return;
     const by = orgActor(req);
     const phase = deriveWorkflowState(t);
-    const fresh = unit(() => trials.cancel(t.id, { at, by, reason, phase, cancelledBy: 'club' },
-      acted(at, req.orgUser, 'trial_cancelled', by, { phase, cancelledBy: 'club', attendedSessions: attendedCount(t) }, { act: 'cancel', key: key.key, fp })));
+    const fresh = unit(() =>
+      trials.cancel(
+        t.id,
+        { at, by, reason, phase, cancelledBy: 'club' },
+        acted(
+          at,
+          req.orgUser,
+          'trial_cancelled',
+          by,
+          { phase, cancelledBy: 'club', attendedSessions: attendedCount(t) },
+          { act: 'cancel', key: key.key, fp },
+        ),
+      ),
+    );
     broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
     notifyRecipient(fresh, `${fresh.orgName} cancelled the trial: ${reason}`);
     res.json({ trial: trialClubView(fresh) });
@@ -481,25 +854,60 @@ export function registerTrial(ctx) {
     const key = normaliseTrialClientKey(req.body?.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const state = req.body?.state;
-    if (!TRIAL_ATTENDANCE_STATES.includes(state)) return err(res, 'TRIAL_ATTENDANCE_INVALID', `Attendance must be one of ${TRIAL_ATTENDANCE_STATES.join(', ')}. It records what happened, never how it went.`, { allowed: TRIAL_ATTENDANCE_STATES });
+    if (!TRIAL_ATTENDANCE_STATES.includes(state))
+      return err(
+        res,
+        'TRIAL_ATTENDANCE_INVALID',
+        `Attendance must be one of ${TRIAL_ATTENDANCE_STATES.join(', ')}. It records what happened, never how it went.`,
+        { allowed: TRIAL_ATTENDANCE_STATES },
+      );
     const noteRaw = req.body?.note;
-    if (noteRaw !== undefined && noteRaw !== null && (typeof noteRaw !== 'string' || noteRaw.length > TRIAL_LIMITS.note)) return err(res, 'TRIAL_ATTENDANCE_INVALID', `A note is text under ${TRIAL_LIMITS.note} characters.`);
+    if (
+      noteRaw !== undefined &&
+      noteRaw !== null &&
+      (typeof noteRaw !== 'string' || noteRaw.length > TRIAL_LIMITS.note)
+    )
+      return err(res, 'TRIAL_ATTENDANCE_INVALID', `A note is text under ${TRIAL_LIMITS.note} characters.`);
     const note = typeof noteRaw === 'string' && noteRaw.trim() ? noteRaw.trim() : null;
     const fp = payloadFingerprint({ sessionId: req.params.sid, state, note });
     const kc = keyCheck(t, 'attendance', key.key, fp);
-    if (kc.conflict) return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different attendance record.');
+    if (kc.conflict)
+      return err(
+        res,
+        'TRIAL_IDEMPOTENCY_CONFLICT',
+        'This clientKey was already used for a different attendance record.',
+      );
     if (kc.replay) return res.json({ trial: trialClubView(t), idempotent: true });
     const auth = reauth(req, res, room, t, 'attendance');
     if (!auth) return;
     const s = findSession(res, t, req.params.sid);
     if (!s) return;
-    if (s.startsAt > at) return err(res, 'TRIAL_INVALID_STATE', 'Attendance is recorded once a session has started.', { current: { sessionId: s.id, startsAt: s.startsAt } });
+    if (s.startsAt > at)
+      return err(res, 'TRIAL_INVALID_STATE', 'Attendance is recorded once a session has started.', {
+        current: { sessionId: s.id, startsAt: s.startsAt },
+      });
     if (!revGate(req, res, t)) return;
     if (limited('trial_attendance', req.org.id)) return res.status(429).json(rateLimitedBody('trial_attendance'));
-    if (note && !moderateOrRefuse(res, note, { kind: 'trial_attendance_note', orgId: req.org.id, userId: req.orgUser.id })) return;
+    if (
+      note &&
+      !moderateOrRefuse(res, note, { kind: 'trial_attendance_note', orgId: req.org.id, userId: req.orgUser.id })
+    )
+      return;
     const by = orgActor(req);
-    const fresh = unit(() => trials.recordAttendance(t.id, { attendance: { sessionId: s.id, state, source: 'manual', recordedBy: by, recordedAt: at, note } },
-      acted(at, req.orgUser, 'trial_attendance_recorded', by, { sessionId: s.id, state, source: 'manual' }, { act: 'attendance', key: key.key, fp })));
+    const fresh = unit(() =>
+      trials.recordAttendance(
+        t.id,
+        { attendance: { sessionId: s.id, state, source: 'manual', recordedBy: by, recordedAt: at, note } },
+        acted(
+          at,
+          req.orgUser,
+          'trial_attendance_recorded',
+          by,
+          { sessionId: s.id, state, source: 'manual' },
+          { act: 'attendance', key: key.key, fp },
+        ),
+      ),
+    );
     broadcast('trial_attendance_recorded', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
     res.json({ trial: trialClubView(fresh) });
   });
@@ -526,19 +934,48 @@ export function registerTrial(ctx) {
     if (!revGate(req, res, t)) return;
     if (limited('trial_attendance', req.org.id)) return res.status(429).json(rateLimitedBody('trial_attendance'));
     if (ctx.operations.delivery.consumeInjectedFailure('trial')) {
-      return err(res, 'TRIAL_TRANSPORT_REFUSED', 'The completion could not be recorded. Nothing was changed; try again.');
+      return err(
+        res,
+        'TRIAL_TRANSPORT_REFUSED',
+        'The completion could not be recorded. Nothing was changed; try again.',
+      );
     }
     const by = orgActor(req);
     let moved = null;
     const fresh = unit(() => {
-      trials.complete(t.id, { at, by }, acted(at, req.orgUser, 'trial_completed', by, { sessionCount: t.schedule.sessions.length, attendedSessions: attendedCount(t) }, { act: 'complete', key: key.key, fp }));
+      trials.complete(
+        t.id,
+        { at, by },
+        acted(
+          at,
+          req.orgUser,
+          'trial_completed',
+          by,
+          { sessionCount: t.schedule.sessions.length, attendedSessions: attendedCount(t) },
+          { act: 'complete', key: key.key, fp },
+        ),
+      );
       // The evidence provider reads the completed trial.
-      moved = t.caseId ? advanceCase({ req, room, action: 'completeTrial', at, trigger: `trial:complete:${t.id}`, keyDetail: { trialId: t.id } }) : { applied: false, reason: 'legacy_no_case', at };
+      moved = t.caseId
+        ? advanceCase({
+            req,
+            room,
+            action: 'completeTrial',
+            at,
+            trigger: `trial:complete:${t.id}`,
+            keyDetail: { trialId: t.id },
+          })
+        : { applied: false, reason: 'legacy_no_case', at };
       return trials.recordLifecycle(t.id, { lifecycle: moved });
     });
     broadcast('trial_completed', { orgId: room.orgId, roomId: room.id, trialId: t.id });
     notifyRecipient(fresh, `${fresh.orgName} recorded the trial as completed. Thank you for taking part.`);
-    res.json({ trial: trialClubView(fresh), case: moved.applied ? { from: moved.from, to: moved.to } : { unchanged: true, status: room.room.status, reason: moved.reason ?? null } });
+    res.json({
+      trial: trialClubView(fresh),
+      case: moved.applied
+        ? { from: moved.from, to: moved.to }
+        : { unchanged: true, status: room.room.status, reason: moved.reason ?? null },
+    });
   });
 
   // ------------------------------------------------------- Box Cam evidence
@@ -550,20 +987,51 @@ export function registerTrial(ctx) {
    * about a session it may see.
    */
   function linkAuthorisation(req, room, boxSessionId) {
-    if (typeof boxSessionId !== 'string' || !boxSessionId) return { ok: false, error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'boxSessionId must be a session id.' };
+    if (typeof boxSessionId !== 'string' || !boxSessionId)
+      return { ok: false, error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'boxSessionId must be a session id.' };
     // Consent is decided before the session lookup, so the refusal never
     // confirms that footage exists.
     const player = findPlayer(room.playerId);
-    if (!player || !orgCanSee(req.org, player)) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
+    if (!player || !orgCanSee(req.org, player))
+      return {
+        ok: false,
+        error: 'TRIAL_BOXCAM_INCOMPATIBLE',
+        message: 'No Box Cam session of this player with that id is available to your organisation.',
+      };
     // The Combine consent rule: the player's recruitment opt-in or an active
     // Combine request from this organisation. A trial is not consent to home footage.
-    if (!combineOrgMaySeeResults?.(req.org, player)) return { ok: false, error: 'EVIDENCE_CONSENT_REQUIRED', message: 'This player has not shared Box Cam activity with your organisation.' };
+    if (!combineOrgMaySeeResults?.(req.org, player))
+      return {
+        ok: false,
+        error: 'EVIDENCE_CONSENT_REQUIRED',
+        message: 'This player has not shared Box Cam activity with your organisation.',
+      };
     const s = typeof boxSessionId === 'string' ? boxCamReads.sessions.byId(boxSessionId) : null;
-    if (!s || s.playerId !== room.playerId) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
+    if (!s || s.playerId !== room.playerId)
+      return {
+        ok: false,
+        error: 'TRIAL_BOXCAM_INCOMPATIBLE',
+        message: 'No Box Cam session of this player with that id is available to your organisation.',
+      };
     const provider = PROVIDERS[s.provider];
-    if (provider?.testOnly && !testProviderEnabled) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
-    if (['cancelled', 'invalidated'].includes(s.verificationState) || s.status === 'cancelled') return { ok: false, error: 'EVIDENCE_WITHDRAWN', message: 'This Box Cam session was withdrawn or invalidated and cannot be cited.' };
-    if (!s.finalizedAt) return { ok: false, error: 'EVIDENCE_NOT_FINAL', message: 'This Box Cam session has not finished; only a finalised session can be cited.' };
+    if (provider?.testOnly && !testProviderEnabled)
+      return {
+        ok: false,
+        error: 'TRIAL_BOXCAM_INCOMPATIBLE',
+        message: 'No Box Cam session of this player with that id is available to your organisation.',
+      };
+    if (['cancelled', 'invalidated'].includes(s.verificationState) || s.status === 'cancelled')
+      return {
+        ok: false,
+        error: 'EVIDENCE_WITHDRAWN',
+        message: 'This Box Cam session was withdrawn or invalidated and cannot be cited.',
+      };
+    if (!s.finalizedAt)
+      return {
+        ok: false,
+        error: 'EVIDENCE_NOT_FINAL',
+        message: 'This Box Cam session has not finished; only a finalised session can be cited.',
+      };
     return { ok: true, session: s };
   }
 
@@ -577,9 +1045,13 @@ export function registerTrial(ctx) {
     const key = normaliseTrialClientKey(req.body?.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const boxSessionId = req.body?.boxSessionId;
-    const fp = payloadFingerprint({ trialSessionId: req.params.sid, boxSessionId: typeof boxSessionId === 'string' ? boxSessionId : null });
+    const fp = payloadFingerprint({
+      trialSessionId: req.params.sid,
+      boxSessionId: typeof boxSessionId === 'string' ? boxSessionId : null,
+    });
     const kc = keyCheck(t, 'link', key.key, fp);
-    if (kc.conflict) return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different evidence link.');
+    if (kc.conflict)
+      return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different evidence link.');
     if (kc.replay) return res.json({ trial: trialClubView(t), evidence: evidenceViews(t), idempotent: true });
     const auth = reauth(req, res, room, t, 'link');
     if (!auth) return;
@@ -589,14 +1061,44 @@ export function registerTrial(ctx) {
     if (!la.ok) return err(res, la.error, la.message);
     if (!revGate(req, res, t)) return;
     // Idempotent on (trialSessionId, boxSessionId).
-    const existing = s.evidence.find((e) => e.kind === 'box_cam_session' && e.sessionId === la.session.id && !e.removedAt);
+    const existing = s.evidence.find(
+      (e) => e.kind === 'box_cam_session' && e.sessionId === la.session.id && !e.removedAt,
+    );
     if (existing) return res.json({ trial: trialClubView(t), evidence: evidenceViews(t), idempotent: true });
-    if (s.evidence.filter((e) => !e.removedAt).length >= TRIAL_LIMITS.evidencePerSession) return err(res, 'TRIAL_INVALID_STATE', `A session cites at most ${TRIAL_LIMITS.evidencePerSession} Box Cam sessions.`);
+    if (s.evidence.filter((e) => !e.removedAt).length >= TRIAL_LIMITS.evidencePerSession)
+      return err(
+        res,
+        'TRIAL_INVALID_STATE',
+        `A session cites at most ${TRIAL_LIMITS.evidencePerSession} Box Cam sessions.`,
+      );
     if (limited('trial_evidence_link', req.org.id)) return res.status(429).json(rateLimitedBody('trial_evidence_link'));
     const by = orgActor(req);
     // Reference only; provenance is read live at projection time.
-    const fresh = unit(() => trials.linkEvidence(t.id, { sessionId: s.id, evidence: { id: nextId('tev'), kind: 'box_cam_session', sessionId: la.session.id, linkedAt: at, linkedBy: by, removedAt: null, removedBy: null } },
-      acted(at, req.orgUser, 'trial_evidence_linked', by, { trialSessionId: s.id, kind: 'box_cam_session', sessionId: la.session.id }, { act: 'link', key: key.key, fp })));
+    const fresh = unit(() =>
+      trials.linkEvidence(
+        t.id,
+        {
+          sessionId: s.id,
+          evidence: {
+            id: nextId('tev'),
+            kind: 'box_cam_session',
+            sessionId: la.session.id,
+            linkedAt: at,
+            linkedBy: by,
+            removedAt: null,
+            removedBy: null,
+          },
+        },
+        acted(
+          at,
+          req.orgUser,
+          'trial_evidence_linked',
+          by,
+          { trialSessionId: s.id, kind: 'box_cam_session', sessionId: la.session.id },
+          { act: 'link', key: key.key, fp },
+        ),
+      ),
+    );
     broadcast('trial_evidence_linked', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
     res.status(201).json({ trial: trialClubView(fresh), evidence: evidenceViews(fresh) });
   });
@@ -610,13 +1112,29 @@ export function registerTrial(ctx) {
     const at = now(req);
     const auth = reauth(req, res, room, t, 'link');
     if (!auth) return;
-    let hit = null; let sess = null;
-    for (const s of t.schedule?.sessions ?? []) { const e = (s.evidence ?? []).find((x) => x.id === req.params.eid); if (e) { hit = e; sess = s; break; } }
+    let hit = null;
+    let sess = null;
+    for (const s of t.schedule?.sessions ?? []) {
+      const e = (s.evidence ?? []).find((x) => x.id === req.params.eid);
+      if (e) {
+        hit = e;
+        sess = s;
+        break;
+      }
+    }
     if (!hit) return err(res, 'TRIAL_SESSION_NOT_FOUND', 'No such evidence link on this trial.');
     if (!revGate(req, res, t)) return;
     if (hit.removedAt) return res.json({ trial: trialClubView(t), evidence: evidenceViews(t), idempotent: true });
-    const fresh = unit(() => trials.unlinkEvidence(t.id, { evidenceId: hit.id, at, by: orgActor(req) },
-      acted(at, req.orgUser, 'trial_evidence_unlinked', orgActor(req), { trialSessionId: sess.id, sessionId: hit.sessionId })));
+    const fresh = unit(() =>
+      trials.unlinkEvidence(
+        t.id,
+        { evidenceId: hit.id, at, by: orgActor(req) },
+        acted(at, req.orgUser, 'trial_evidence_unlinked', orgActor(req), {
+          trialSessionId: sess.id,
+          sessionId: hit.sessionId,
+        }),
+      ),
+    );
     res.json({ trial: trialClubView(fresh), evidence: evidenceViews(fresh) });
   });
 
@@ -632,14 +1150,39 @@ export function registerTrial(ctx) {
     const player = findPlayer(t.playerId);
     if (!player || t.subjectRemovedAt) return res.json({ items: [], consent: false, reason: 'TRIAL_SUBJECT_REMOVED' });
     if (isBlocked(t.playerId, t.orgId)) return res.json({ items: [], consent: false, reason: 'TRIAL_BLOCKED' });
-    if (!orgCanSee(req.org, player)) return res.json({ items: [], consent: false, reason: 'TRIAL_RECIPIENT_UNAVAILABLE' });
-    if (!combineOrgMaySeeResults?.(req.org, player)) return res.json({ items: [], consent: false, reason: 'EVIDENCE_CONSENT_REQUIRED' });
-    const linked = new Set((t.schedule?.sessions ?? []).flatMap((s) => (s.evidence ?? []).filter((e) => !e.removedAt && e.kind === 'box_cam_session').map((e) => e.sessionId)));
-    const items = boxCamReads.sessions.finishedForPlayer(t.playerId)
-      .filter((s) => s.finalizedAt && !['cancelled', 'invalidated'].includes(s.verificationState) && s.status !== 'cancelled' && (!PROVIDERS[s.provider]?.testOnly || testProviderEnabled))
-      .sort((a, b) => ((b.endedAt ?? b.finalizedAt ?? 0) - (a.endedAt ?? a.finalizedAt ?? 0)) || String(b.id).localeCompare(String(a.id)))
+    if (!orgCanSee(req.org, player))
+      return res.json({ items: [], consent: false, reason: 'TRIAL_RECIPIENT_UNAVAILABLE' });
+    if (!combineOrgMaySeeResults?.(req.org, player))
+      return res.json({ items: [], consent: false, reason: 'EVIDENCE_CONSENT_REQUIRED' });
+    const linked = new Set(
+      (t.schedule?.sessions ?? []).flatMap((s) =>
+        (s.evidence ?? []).filter((e) => !e.removedAt && e.kind === 'box_cam_session').map((e) => e.sessionId),
+      ),
+    );
+    const items = boxCamReads.sessions
+      .finishedForPlayer(t.playerId)
+      .filter(
+        (s) =>
+          s.finalizedAt &&
+          !['cancelled', 'invalidated'].includes(s.verificationState) &&
+          s.status !== 'cancelled' &&
+          (!PROVIDERS[s.provider]?.testOnly || testProviderEnabled),
+      )
+      .sort(
+        (a, b) =>
+          (b.endedAt ?? b.finalizedAt ?? 0) - (a.endedAt ?? a.finalizedAt ?? 0) ||
+          String(b.id).localeCompare(String(a.id)),
+      )
       .slice(0, 50)
-      .map((s) => ({ id: s.id, drillId: s.drillId ?? null, protocolId: s.protocolId ?? null, capturedAt: s.endedAt ?? s.finalizedAt ?? null, verificationState: s.verificationState ?? null, simulated: !!PROVIDERS[s.provider]?.testOnly, linked: linked.has(s.id) }));
+      .map((s) => ({
+        id: s.id,
+        drillId: s.drillId ?? null,
+        protocolId: s.protocolId ?? null,
+        capturedAt: s.endedAt ?? s.finalizedAt ?? null,
+        verificationState: s.verificationState ?? null,
+        simulated: !!PROVIDERS[s.provider]?.testOnly,
+        linked: linked.has(s.id),
+      }));
     res.json({ items, consent: true, reason: null });
   });
 
@@ -648,7 +1191,10 @@ export function registerTrial(ctx) {
     if (!got) return;
     const t = findTrial(req, res, got.room);
     if (!t) return;
-    res.json({ items: evidenceViews(t), note: 'Machine observation, referenced live from the player\'s own Box Cam record. A refusal means no reliable observation is available; it is never a statement about the player.' });
+    res.json({
+      items: evidenceViews(t),
+      note: "Machine observation, referenced live from the player's own Box Cam record. A refusal means no reliable observation is available; it is never a statement about the player.",
+    });
   });
 
   /**
@@ -665,24 +1211,91 @@ export function registerTrial(ctx) {
     return out;
   }
   function trialEvidenceView(t, s, e) {
-    const base = { id: e.id, kind: e.kind, trialSessionId: s.id, linkedAt: e.linkedAt, linkedBy: { name: e.linkedBy?.name ?? null }, removedAt: e.removedAt ?? null, provenance: 'box_cam_observed', combineVerified: false, combineVerifiedBlockedBy: COMBINE_DISABLED_REASON.code };
+    const base = {
+      id: e.id,
+      kind: e.kind,
+      trialSessionId: s.id,
+      linkedAt: e.linkedAt,
+      linkedBy: { name: e.linkedBy?.name ?? null },
+      removedAt: e.removedAt ?? null,
+      provenance: 'box_cam_observed',
+      combineVerified: false,
+      combineVerifiedBlockedBy: COMBINE_DISABLED_REASON.code,
+    };
     const found = boxCamReads.sessions.byId(e.sessionId);
     const bs = found && found.playerId === t.playerId ? found : null;
-    if (!bs) return { ...base, session: null, observation: { state: 'unavailable', copy: 'This Box Cam session is no longer available.', qualityState: null, experimental: null }, providerVersion: null, engineVersion: null, cvPolicyVersion: null };
-    const invalidated = bs.verificationState === 'invalidated' || bs.status === 'cancelled' || bs.verificationState === 'cancelled';
-    const session = { id: bs.id, drillId: bs.drillId ?? null, protocolId: bs.protocolId ?? null, capturedAt: bs.endedAt ?? bs.startedAt ?? bs.createdAt ?? null, verificationState: bs.verificationState ?? null, simulated: !!PROVIDERS[bs.provider]?.testOnly, invalidated };
-    if (invalidated) return { ...base, session, observation: { state: 'evidence_withdrawn', copy: 'This Box Cam session was withdrawn after review; no observation is available.', qualityState: null, experimental: null }, providerVersion: bs.providerVersion ?? null, engineVersion: null, cvPolicyVersion: null };
+    if (!bs)
+      return {
+        ...base,
+        session: null,
+        observation: {
+          state: 'unavailable',
+          copy: 'This Box Cam session is no longer available.',
+          qualityState: null,
+          experimental: null,
+        },
+        providerVersion: null,
+        engineVersion: null,
+        cvPolicyVersion: null,
+      };
+    const invalidated =
+      bs.verificationState === 'invalidated' || bs.status === 'cancelled' || bs.verificationState === 'cancelled';
+    const session = {
+      id: bs.id,
+      drillId: bs.drillId ?? null,
+      protocolId: bs.protocolId ?? null,
+      capturedAt: bs.endedAt ?? bs.startedAt ?? bs.createdAt ?? null,
+      verificationState: bs.verificationState ?? null,
+      simulated: !!PROVIDERS[bs.provider]?.testOnly,
+      invalidated,
+    };
+    if (invalidated)
+      return {
+        ...base,
+        session,
+        observation: {
+          state: 'evidence_withdrawn',
+          copy: 'This Box Cam session was withdrawn after review; no observation is available.',
+          qualityState: null,
+          experimental: null,
+        },
+        providerVersion: bs.providerVersion ?? null,
+        engineVersion: null,
+        cvPolicyVersion: null,
+      };
     const cv = boxCamReads.cvResults.latestForSession(bs.id);
     let observation;
     if (!cv) {
-      observation = { state: 'no_cv_result', copy: 'No reliable observation available for this session.', qualityState: null, experimental: null };
+      observation = {
+        state: 'no_cv_result',
+        copy: 'No reliable observation available for this session.',
+        qualityState: null,
+        experimental: null,
+      };
     } else if (cv.outcome === 'accepted') {
-      observation = { state: 'accepted', copy: 'This session was observed by Box Cam.', qualityState: cv.observationQuality?.state ?? null, experimental: cv.experimental ? { status: cv.experimental.status ?? 'experimental_unvalidated' } : null };
+      observation = {
+        state: 'accepted',
+        copy: 'This session was observed by Box Cam.',
+        qualityState: cv.observationQuality?.state ?? null,
+        experimental: cv.experimental ? { status: cv.experimental.status ?? 'experimental_unvalidated' } : null,
+      };
     } else {
       const reason = cv.refusalReason ?? 'unknown';
-      observation = { state: reason, copy: `No reliable observation available. ${CV_STATE_COPY[reason] ?? ''}`.trim(), qualityState: cv.observationQuality?.state ?? null, experimental: null };
+      observation = {
+        state: reason,
+        copy: `No reliable observation available. ${CV_STATE_COPY[reason] ?? ''}`.trim(),
+        qualityState: cv.observationQuality?.state ?? null,
+        experimental: null,
+      };
     }
-    return { ...base, session, observation, providerVersion: cv?.providerVersion ?? bs.providerVersion ?? null, engineVersion: cv?.engineVersion ?? null, cvPolicyVersion: cv?.cvPolicyVersion ?? null };
+    return {
+      ...base,
+      session,
+      observation,
+      providerVersion: cv?.providerVersion ?? bs.providerVersion ?? null,
+      engineVersion: cv?.engineVersion ?? null,
+      cvPolicyVersion: cv?.cvPolicyVersion ?? null,
+    };
   }
   ctx.trialEvidenceViews = evidenceViews;
 
@@ -700,9 +1313,17 @@ export function registerTrial(ctx) {
     if (!room || !org) return fail('TRIAL_RECIPIENT_UNAVAILABLE', 'This invitation can no longer be accepted.');
     const r = recipientFor(org, request.playerId);
     if (!r.ok) return fail(r.error, r.message);
-    if (r.recipient.type !== by) return fail('TRIAL_RECIPIENT_UNAVAILABLE', by === 'guardian' ? 'This player is now the recipient of their own trial invitations; the club needs to re-invite.' : 'This invitation is managed by the player\'s guardian.');
-    if (by === 'guardian' && r.recipient.guardianId !== actorId) return fail('TRIAL_GUARDIAN_REQUIRED', 'You are no longer the verified guardian route for this player.');
-    if (by === 'player' && r.recipient.playerId !== actorId) return fail('TRIAL_RECIPIENT_UNAVAILABLE', 'This invitation is not yours to accept.');
+    if (r.recipient.type !== by)
+      return fail(
+        'TRIAL_RECIPIENT_UNAVAILABLE',
+        by === 'guardian'
+          ? 'This player is now the recipient of their own trial invitations; the club needs to re-invite.'
+          : "This invitation is managed by the player's guardian.",
+      );
+    if (by === 'guardian' && r.recipient.guardianId !== actorId)
+      return fail('TRIAL_GUARDIAN_REQUIRED', 'You are no longer the verified guardian route for this player.');
+    if (by === 'player' && r.recipient.playerId !== actorId)
+      return fail('TRIAL_RECIPIENT_UNAVAILABLE', 'This invitation is not yours to accept.');
     if (ctx.operations.delivery.consumeInjectedFailure('trial')) {
       return fail('TRIAL_TRANSPORT_REFUSED', 'The acceptance could not be recorded. Nothing was changed; try again.');
     }
@@ -714,15 +1335,40 @@ export function registerTrial(ctx) {
     recruitment.requests.linkTrial(request.id, { trialId: trial.id }); // in the respond route's unit
     const room = recruitmentReads.cases.byId(request.caseId);
     if (!room) return null;
-    cases.link(room.id, { trialId: trial.id }, { history: [auditEntry(actor.kind, actor.id, actor.name, 'room_trial_accepted', { trialId: trial.id, requestId: request.id, recipientType: actor.kind, scheduled: trial.workflowState === 'scheduled' })] });
+    cases.link(
+      room.id,
+      { trialId: trial.id },
+      {
+        history: [
+          auditEntry(actor.kind, actor.id, actor.name, 'room_trial_accepted', {
+            trialId: trial.id,
+            requestId: request.id,
+            recipientType: actor.kind,
+            scheduled: trial.workflowState === 'scheduled',
+          }),
+        ],
+      },
+    );
     let moved = { applied: false, reason: 'not_scheduled', at };
     if (trial.workflowState === 'scheduled') {
-      moved = advanceCase({ room, action: 'confirmTrial', at, trigger: `trial:accept:${trial.id}`, actor, keyDetail: { trialId: trial.id } });
+      moved = advanceCase({
+        room,
+        action: 'confirmTrial',
+        at,
+        trigger: `trial:accept:${trial.id}`,
+        actor,
+        keyDetail: { trialId: trial.id },
+      });
     }
     trials.recordLifecycle(trial.id, { lifecycle: moved });
     for (const uid of new Set([room.ownerUserId, room.room?.leadScoutUserId])) {
       if (!uid || uid === request.userId) continue;
-      notify({ kind: 'org_user', id: uid }, 'trial_day', `Recruitment Room — ${room.playerName ?? 'a removed player'}: the ${actor.kind} accepted the trial invitation${trial.workflowState === 'scheduled' ? ' and confirmed the schedule' : ''}.`, trial.id);
+      notify(
+        { kind: 'org_user', id: uid },
+        'trial_day',
+        `Recruitment Room — ${room.playerName ?? 'a removed player'}: the ${actor.kind} accepted the trial invitation${trial.workflowState === 'scheduled' ? ' and confirmed the schedule' : ''}.`,
+        trial.id,
+      );
     }
     broadcast('trial_accepted', { orgId: room.orgId, roomId: room.id, trialId: trial.id, requestId: request.id });
     return moved;
@@ -731,10 +1377,18 @@ export function registerTrial(ctx) {
   ctx.onTrialDeclined = ({ request, at, actor }) => {
     const room = recruitmentReads.cases.byId(request.caseId);
     if (!room) return null;
-    caseAudit(room, actor.kind, actor.id, actor.name, 'room_trial_declined', { requestId: request.id, recipientType: actor.kind });
+    caseAudit(room, actor.kind, actor.id, actor.name, 'room_trial_declined', {
+      requestId: request.id,
+      recipientType: actor.kind,
+    });
     for (const uid of new Set([room.ownerUserId, room.room?.leadScoutUserId])) {
       if (!uid || uid === request.userId) continue;
-      notify({ kind: 'org_user', id: uid }, 'trial_day', `Recruitment Room — ${room.playerName ?? 'a removed player'}: the ${actor.kind} declined the trial invitation.`, request.id);
+      notify(
+        { kind: 'org_user', id: uid },
+        'trial_day',
+        `Recruitment Room — ${room.playerName ?? 'a removed player'}: the ${actor.kind} declined the trial invitation.`,
+        request.id,
+      );
     }
     broadcast('trial_declined', { orgId: room.orgId, roomId: room.id, requestId: request.id });
     void at;
@@ -746,15 +1400,50 @@ export function registerTrial(ctx) {
   function recipientTrial(req, res, { by, actorId, playerIds }) {
     const found = trials.byId(req.params.id);
     const t = found && playerIds.includes(found.playerId) ? found : null;
-    if (!t) { err(res, 'TRIAL_NOT_FOUND', 'No such trial.'); return null; }
-    if (t.subjectRemovedAt) { err(res, 'TRIAL_SUBJECT_REMOVED', 'This trial can no longer be changed.'); return null; }
+    if (!t) {
+      err(res, 'TRIAL_NOT_FOUND', 'No such trial.');
+      return null;
+    }
+    if (t.subjectRemovedAt) {
+      err(res, 'TRIAL_SUBJECT_REMOVED', 'This trial can no longer be changed.');
+      return null;
+    }
     const org = orgOf(t.orgId);
-    const r = resolveContactRecipient({ player: findPlayer(t.playerId), org: org ?? { id: t.orgId }, guardians: guardians.forPlayer(t.playerId), isAdult, visibleToOrg, isBlocked, now: new Date() });
+    const r = resolveContactRecipient({
+      player: findPlayer(t.playerId),
+      org: org ?? { id: t.orgId },
+      guardians: guardians.forPlayer(t.playerId),
+      isAdult,
+      visibleToOrg,
+      isBlocked,
+      now: new Date(),
+    });
     // The recipient may still cancel a blocked organisation's trial; the caller decides.
     const blocked = !r.ok && r.error === 'CONTACT_BLOCKED';
-    if (!r.ok && !blocked) { err(res, RECIPIENT_CODES[r.error] ?? 'TRIAL_RECIPIENT_UNAVAILABLE', by === 'guardian' ? 'You are no longer the verified guardian route for this player.' : 'This trial is not yours to act on.'); return null; }
-    if (!blocked && r.recipient.type !== by) { err(res, 'TRIAL_RECIPIENT_UNAVAILABLE', by === 'guardian' ? 'This player now manages their own trials.' : 'This trial is managed by your parent or guardian.'); return null; }
-    if (!blocked && by === 'guardian' && r.recipient.guardianId !== actorId) { err(res, 'TRIAL_GUARDIAN_REQUIRED', 'You are no longer the verified guardian route for this player.'); return null; }
+    if (!r.ok && !blocked) {
+      err(
+        res,
+        RECIPIENT_CODES[r.error] ?? 'TRIAL_RECIPIENT_UNAVAILABLE',
+        by === 'guardian'
+          ? 'You are no longer the verified guardian route for this player.'
+          : 'This trial is not yours to act on.',
+      );
+      return null;
+    }
+    if (!blocked && r.recipient.type !== by) {
+      err(
+        res,
+        'TRIAL_RECIPIENT_UNAVAILABLE',
+        by === 'guardian'
+          ? 'This player now manages their own trials.'
+          : 'This trial is managed by your parent or guardian.',
+      );
+      return null;
+    }
+    if (!blocked && by === 'guardian' && r.recipient.guardianId !== actorId) {
+      err(res, 'TRIAL_GUARDIAN_REQUIRED', 'You are no longer the verified guardian route for this player.');
+      return null;
+    }
     return { trial: t, blocked };
   }
 
@@ -767,30 +1456,73 @@ export function registerTrial(ctx) {
       const got = recipientTrial(req, res, { by, actorId, playerIds });
       if (!got) return;
       const { trial: t, blocked } = got;
-      if (blocked) return err(res, 'TRIAL_BLOCKED', 'You have blocked this organisation. Lift the block before confirming a trial with it.');
+      if (blocked)
+        return err(
+          res,
+          'TRIAL_BLOCKED',
+          'You have blocked this organisation. Lift the block before confirming a trial with it.',
+        );
       const at = now(req);
       if (!t.schedule) return err(res, 'TRIAL_INVALID_STATE', 'There is no schedule to confirm yet.');
-      if (['completed', 'cancelled'].includes(deriveWorkflowState(t))) return err(res, 'TRIAL_INVALID_STATE', 'This trial has ended.');
+      if (['completed', 'cancelled'].includes(deriveWorkflowState(t)))
+        return err(res, 'TRIAL_INVALID_STATE', 'This trial has ended.');
       if (t.schedule.confirmedAt) return res.json({ trial: trialFamilyView(t), idempotent: true });
       if (limited('trial_response', `${by}:${actorId}`)) return res.status(429).json(rateLimitedBody('trial_response'));
       if (expectedRevOf(req.body) !== null) {
         const rawRev = req.body?.expectedRev ?? req.body?.expectedVersion;
-        if (!Number.isInteger(rawRev) || rawRev < 0) return err(res, 'TRIAL_REV_REQUIRED', 'expectedRev must be a non-negative integer.', { field: 'expectedRev', expected: 'integer' });
-        if (!guardRev(req, res, t, { errorCode: 'TRIAL_VERSION_CONFLICT', current: { workflowState: deriveWorkflowState(t) } })) return;
+        if (!Number.isInteger(rawRev) || rawRev < 0)
+          return err(res, 'TRIAL_REV_REQUIRED', 'expectedRev must be a non-negative integer.', {
+            field: 'expectedRev',
+            expected: 'integer',
+          });
+        if (
+          !guardRev(req, res, t, {
+            errorCode: 'TRIAL_VERSION_CONFLICT',
+            current: { workflowState: deriveWorkflowState(t) },
+          })
+        )
+          return;
       }
       const who = { kind: by, id: actorId, name: actorName };
       const room = t.caseId ? recruitmentReads.cases.byId(t.caseId) : null;
       const fresh = unit(() => {
-        trials.confirmSchedule(t.id, {
-          at, by: who, recipient: { type: by, playerId: t.playerId, guardianId: by === 'guardian' ? actorId : null, minor: by === 'guardian', at },
-          workflowState: deriveWorkflowState({ ...t, schedule: { ...t.schedule, confirmedAt: at } }),
-        }, acted(at, null, 'trial_schedule_confirmed', who, { revision: t.schedule.revision, sessionCount: t.schedule.sessions.length }));
-      // The evidence provider reads the confirmed trial.
-        const moved = room ? advanceCase({ room, action: 'confirmTrial', at, trigger: `trial:confirm:${t.id}`, actor: who, keyDetail: { trialId: t.id } }) : { applied: false, reason: 'legacy_no_case', at };
+        trials.confirmSchedule(
+          t.id,
+          {
+            at,
+            by: who,
+            recipient: {
+              type: by,
+              playerId: t.playerId,
+              guardianId: by === 'guardian' ? actorId : null,
+              minor: by === 'guardian',
+              at,
+            },
+            workflowState: deriveWorkflowState({ ...t, schedule: { ...t.schedule, confirmedAt: at } }),
+          },
+          acted(at, null, 'trial_schedule_confirmed', who, {
+            revision: t.schedule.revision,
+            sessionCount: t.schedule.sessions.length,
+          }),
+        );
+        // The evidence provider reads the confirmed trial.
+        const moved = room
+          ? advanceCase({
+              room,
+              action: 'confirmTrial',
+              at,
+              trigger: `trial:confirm:${t.id}`,
+              actor: who,
+              keyDetail: { trialId: t.id },
+            })
+          : { applied: false, reason: 'legacy_no_case', at };
         return trials.recordLifecycle(t.id, { lifecycle: moved });
       });
       if (room) broadcast('trial_scheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-      notifyClub(fresh, `${actorName} confirmed the trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision}).`);
+      notifyClub(
+        fresh,
+        `${actorName} confirmed the trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision}).`,
+      );
       res.json({ trial: trialFamilyView(fresh) });
     };
   }
@@ -805,17 +1537,35 @@ export function registerTrial(ctx) {
       if (!got) return;
       const { trial: t } = got;
       const at = now(req);
-      if (!t.schedule || t.schedule.confirmedAt) return err(res, 'TRIAL_INVALID_STATE', 'There is no proposed schedule awaiting your answer.');
-      if (['completed', 'cancelled'].includes(deriveWorkflowState(t))) return err(res, 'TRIAL_INVALID_STATE', 'This trial has ended.');
+      if (!t.schedule || t.schedule.confirmedAt)
+        return err(res, 'TRIAL_INVALID_STATE', 'There is no proposed schedule awaiting your answer.');
+      if (['completed', 'cancelled'].includes(deriveWorkflowState(t)))
+        return err(res, 'TRIAL_INVALID_STATE', 'This trial has ended.');
       if (t.schedule.declinedAt) return res.json({ trial: trialFamilyView(t), idempotent: true });
       if (limited('trial_response', `${by}:${actorId}`)) return res.status(429).json(rateLimitedBody('trial_response'));
       const reasonRaw = req.body?.reason;
-      if (reasonRaw !== undefined && reasonRaw !== null && (typeof reasonRaw !== 'string' || reasonRaw.length > TRIAL_LIMITS.reason)) return err(res, 'TRIAL_CONTENT_INVALID', `A reason is text under ${TRIAL_LIMITS.reason} characters.`, { field: 'reason' });
+      if (
+        reasonRaw !== undefined &&
+        reasonRaw !== null &&
+        (typeof reasonRaw !== 'string' || reasonRaw.length > TRIAL_LIMITS.reason)
+      )
+        return err(res, 'TRIAL_CONTENT_INVALID', `A reason is text under ${TRIAL_LIMITS.reason} characters.`, {
+          field: 'reason',
+        });
       const reason = typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
       if (reason && !moderateOrRefuse(res, reason, { kind: 'trial_schedule_decline', trialId: t.id })) return;
       const who = { kind: by, id: actorId, name: actorName };
-      const fresh = unit(() => trials.declineSchedule(t.id, { at, by: who }, acted(at, null, 'trial_schedule_declined', who, { revision: t.schedule.revision, hadReason: !!reason })));
-      notifyClub(fresh, `${actorName} declined the proposed trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision})${reason ? `: ${reason}` : '.'}`);
+      const fresh = unit(() =>
+        trials.declineSchedule(
+          t.id,
+          { at, by: who },
+          acted(at, null, 'trial_schedule_declined', who, { revision: t.schedule.revision, hadReason: !!reason }),
+        ),
+      );
+      notifyClub(
+        fresh,
+        `${actorName} declined the proposed trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision})${reason ? `: ${reason}` : '.'}`,
+      );
       res.json({ trial: trialFamilyView(fresh) });
     };
   }
@@ -831,18 +1581,38 @@ export function registerTrial(ctx) {
       const { trial: t } = got;
       const at = now(req);
       const state = deriveWorkflowState(t);
-      if (['completed', 'cancelled'].includes(state)) return res.json({ trial: trialFamilyView(t), idempotent: state === 'cancelled' });
+      if (['completed', 'cancelled'].includes(state))
+        return res.json({ trial: trialFamilyView(t), idempotent: state === 'cancelled' });
       if (limited('trial_response', `${by}:${actorId}`)) return res.status(429).json(rateLimitedBody('trial_response'));
       const reasonRaw = req.body?.reason;
-      if (reasonRaw !== undefined && reasonRaw !== null && (typeof reasonRaw !== 'string' || reasonRaw.length > TRIAL_LIMITS.reason)) return err(res, 'TRIAL_CONTENT_INVALID', `A reason is text under ${TRIAL_LIMITS.reason} characters.`, { field: 'reason' });
+      if (
+        reasonRaw !== undefined &&
+        reasonRaw !== null &&
+        (typeof reasonRaw !== 'string' || reasonRaw.length > TRIAL_LIMITS.reason)
+      )
+        return err(res, 'TRIAL_CONTENT_INVALID', `A reason is text under ${TRIAL_LIMITS.reason} characters.`, {
+          field: 'reason',
+        });
       const reason = typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
       if (reason && !moderateOrRefuse(res, reason, { kind: 'trial_cancellation', trialId: t.id })) return;
       const who = { kind: by, id: actorId, name: actorName };
-      const fresh = unit(() => trials.cancel(t.id, { at, by: who, reason, phase: state, cancelledBy: by },
-        acted(at, null, 'trial_cancelled', who, { phase: state, cancelledBy: by, attendedSessions: attendedCount(t) })));
+      const fresh = unit(() =>
+        trials.cancel(
+          t.id,
+          { at, by: who, reason, phase: state, cancelledBy: by },
+          acted(at, null, 'trial_cancelled', who, {
+            phase: state,
+            cancelledBy: by,
+            attendedSessions: attendedCount(t),
+          }),
+        ),
+      );
       const room = fresh.caseId ? recruitmentReads.cases.byId(fresh.caseId) : null;
       if (room) broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-      notifyClub(fresh, `${actorName} cancelled the trial for ${fresh.playerName ?? 'the player'}${reason ? `: ${reason}` : '.'}`);
+      notifyClub(
+        fresh,
+        `${actorName} cancelled the trial for ${fresh.playerName ?? 'the player'}${reason ? `: ${reason}` : '.'}`,
+      );
       res.json({ trial: trialFamilyView(fresh) });
     };
   }

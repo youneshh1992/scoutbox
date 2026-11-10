@@ -29,20 +29,40 @@
 
 import { strict as assert } from 'node:assert';
 import {
-  combineCapabilities, combineEligibility, combineVerifiedProtocols,
-  OBSERVATION_CAPABILITIES, boxCamObservedEligible,
+  combineCapabilities,
+  combineEligibility,
+  combineVerifiedProtocols,
+  OBSERVATION_CAPABILITIES,
+  boxCamObservedEligible,
 } from '../../domains/development/boxcam/cv/eligibility.mjs';
 import { ProductionCvProvider } from '../../domains/development/boxcam/cv/provider.mjs';
-import { measureAttempt, measurementSupported, combineProtocol } from '../../domains/development/boxcam/combineShared.mjs';
+import {
+  measureAttempt,
+  measurementSupported,
+  combineProtocol,
+} from '../../domains/development/boxcam/combineShared.mjs';
 import { matchPlayerToCriteria } from '../../domains/discovery/matching/match.mjs';
 import { REAL_WORLD_VALIDATION, REQUIRED_RECORD_FIELDS } from '../../domains/development/boxcam/cv/validation.mjs';
-import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } from '../../domains/development/boxcam/cv/policy.mjs';
+import {
+  CV_ENGINE_VERSION,
+  BOX_CAM_CV_POLICY_VERSION,
+  CANDIDATE_PROTOCOLS,
+} from '../../domains/development/boxcam/cv/policy.mjs';
 import { PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
 import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
 import { sequence, touchPath } from '../../domains/development/boxcam/cv/scenes.mjs';
 
-let pass = 0, fail = 0;
-const ok = (cond, msg) => { if (cond) { pass += 1; console.log(`  ✓ ${msg}`); } else { fail += 1; console.error(`  ✗ ${msg}`); } };
+let pass = 0,
+  fail = 0;
+const ok = (cond, msg) => {
+  if (cond) {
+    pass += 1;
+    console.log(`  ✓ ${msg}`);
+  } else {
+    fail += 1;
+    console.error(`  ✗ ${msg}`);
+  }
+};
 const section = (t) => console.log(`\n--- ${t} ${'-'.repeat(Math.max(0, 62 - t.length))}`);
 
 const PROTO = 'combine-box-touch-60';
@@ -54,11 +74,9 @@ section('§2 — the release state, asserted directly');
 // =====================================================================
 
 for (const id of Object.keys(CANDIDATE_PROTOCOLS)) {
-  ok(REAL_WORLD_VALIDATION[id].status === 'not_completed',
-    `realWorldValidation["${id}"].status === "not_completed"`);
+  ok(REAL_WORLD_VALIDATION[id].status === 'not_completed', `realWorldValidation["${id}"].status === "not_completed"`);
 }
-ok(JSON.stringify(combineVerifiedProtocols()) === '[]',
-  'combineVerifiedProtocols() === []');
+ok(JSON.stringify(combineVerifiedProtocols()) === '[]', 'combineVerifiedProtocols() === []');
 
 // =====================================================================
 section('A perfect synthetic attempt, through the real provider');
@@ -75,19 +93,28 @@ const begun = provider.beginSession({
   nonce: 'server-minted-nonce',
 });
 ok(begun.ok === true, 'a provider session opens against a bound Box Cam session');
-ok(begun.combineVerifiedEligible === false,
-  'the provider says combineVerifiedEligible:false at the START of the attempt, not only at the end');
+ok(
+  begun.combineVerifiedEligible === false,
+  'the provider says combineVerifiedEligible:false at the START of the attempt, not only at the end',
+);
 
 // A clean Box Touch capture: 10 real touches, well lit, steady camera.
 const raw = sequence({
-  w: 240, h: 180, fps: 24, durationMs: 5000,
-  path: touchPath({ touches: 10 }), seed: 23,
+  w: 240,
+  h: 180,
+  fps: 24,
+  durationMs: 5000,
+  path: touchPath({ touches: 10 }),
+  seed: 23,
 });
 let seq = 0;
 let ingestFailures = 0;
 for (const r of raw) {
   const d = decodeFrame(r);
-  if (!d.ok) { ingestFailures += 1; continue; }
+  if (!d.ok) {
+    ingestFailures += 1;
+    continue;
+  }
   seq += 1;
   const res = provider.ingestFrame({
     providerSessionId: begun.providerSessionId,
@@ -111,23 +138,29 @@ const result = fin.result;
 ok(result.outcome === 'accepted', `the engine ACCEPTED this attempt (outcome=${result.outcome})`);
 ok(result.observationQuality.sufficient === true, 'observation quality is sufficient');
 ok(result.integrity.ok === true, 'integrity is clean');
-ok(typeof result.derived.touchCount === 'number' && result.derived.touchCount > 0,
-  `the server derived a real count from pixels (${result.derived.touchCount})`);
-ok(result.derived.personPresent === true && result.derived.ballPresent === true,
-  'person and ball were genuinely detected');
-ok(result.serverDurationMs >= 0 && result.serverStartedAt != null,
-  'the duration comes from the server timeline');
+ok(
+  typeof result.derived.touchCount === 'number' && result.derived.touchCount > 0,
+  `the server derived a real count from pixels (${result.derived.touchCount})`,
+);
+ok(
+  result.derived.personPresent === true && result.derived.ballPresent === true,
+  'person and ball were genuinely detected',
+);
+ok(result.serverDurationMs >= 0 && result.serverStartedAt != null, 'the duration comes from the server timeline');
 
 // This is the attempt §59 describes: everything correct. Now the blocker.
 
 section('§59 — the blocker, on exactly that attempt');
 
-ok(result.combineVerified === false,
-  'the canonical result says combineVerified:false');
-ok(result.combineVerifiedBlockedBy === 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
-  'and names the reason: REAL_WORLD_VALIDATION_NOT_COMPLETED');
-ok(result.experimental.status === 'experimental_unvalidated',
-  'the exact count is carried as experimental_unvalidated, never as a published measurement');
+ok(result.combineVerified === false, 'the canonical result says combineVerified:false');
+ok(
+  result.combineVerifiedBlockedBy === 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
+  'and names the reason: REAL_WORLD_VALIDATION_NOT_COMPLETED',
+);
+ok(
+  result.experimental.status === 'experimental_unvalidated',
+  'the exact count is carried as experimental_unvalidated, never as a published measurement',
+);
 
 // The Combine measurement path, with the capability list the server actually
 // hands it. This is the line that would mint Combine Verified if it were wrong.
@@ -137,12 +170,12 @@ ok(!!proto, 'the Combine protocol definition resolves');
 const observationCaps = PROVIDERS.production_cv.capabilities;
 const combineCaps = combineCapabilities(PROTO, { providerCapabilities: observationCaps });
 
-ok(measurementSupported(proto, observationCaps) === true,
-  'the engine genuinely CAN observe everything this protocol measures (so the block is not incapacity)');
-ok(combineCaps.length === 0,
-  'but the Combine-eligible capability list is empty');
-ok(measurementSupported(proto, combineCaps) === false,
-  'so measurementSupported() over the Combine list is false');
+ok(
+  measurementSupported(proto, observationCaps) === true,
+  'the engine genuinely CAN observe everything this protocol measures (so the block is not incapacity)',
+);
+ok(combineCaps.length === 0, 'but the Combine-eligible capability list is empty');
+ok(measurementSupported(proto, combineCaps) === false, 'so measurementSupported() over the Combine list is false');
 
 // Synthesise the finalized Box Cam session this attempt would produce, in its
 // most favourable possible form, and run the real measurement function.
@@ -153,7 +186,8 @@ const session = {
   verifiedActiveMs: 60_000,
   verifiedReps: result.derived.touchCount,
   sessionDurationMs: 60_000,
-  startedAt: 0, endedAt: 60_000,
+  startedAt: 0,
+  endedAt: 60_000,
   quality: 'good',
   livenessPassedAt: 1,
 };
@@ -164,47 +198,60 @@ const measured = measureAttempt({
   providerCapabilities: combineCaps,
   mode: 'verified',
 });
-ok(measured.combineState !== 'combine_verified',
-  `measureAttempt() does NOT return combine_verified (got "${measured.combineState}")`);
-ok(measured.measuredValue === null,
-  'and mints no measured value at all');
-ok((measured.reasons ?? []).includes('MEASUREMENT_NOT_SUPPORTED'),
-  'the refusal reason is machine-readable');
+ok(
+  measured.combineState !== 'combine_verified',
+  `measureAttempt() does NOT return combine_verified (got "${measured.combineState}")`,
+);
+ok(measured.measuredValue === null, 'and mints no measured value at all');
+ok((measured.reasons ?? []).includes('MEASUREMENT_NOT_SUPPORTED'), 'the refusal reason is machine-readable');
 
 section('The blocker cannot be argued around');
 
 // Every shape of "but surely in this case" that a future change might try.
-ok(combineCapabilities(PROTO, { providerCapabilities: [...OBSERVATION_CAPABILITIES] }).length === 0,
-  'passing the full observation list as provider capabilities does not open it');
-ok(combineCapabilities(PROTO, { engineVersion: 999, policyVersion: 999 }).length === 0,
-  'claiming a different engine/policy version does not open it');
-ok(combineCapabilities('combine-box-juggle').length === 0
-  && combineCapabilities('combine-box-control-60').length === 0,
-  'no sibling protocol is open either');
-ok(combineCapabilities('not-a-protocol').length === 0,
-  'an unknown protocol is closed, not defaulted open');
+ok(
+  combineCapabilities(PROTO, { providerCapabilities: [...OBSERVATION_CAPABILITIES] }).length === 0,
+  'passing the full observation list as provider capabilities does not open it',
+);
+ok(
+  combineCapabilities(PROTO, { engineVersion: 999, policyVersion: 999 }).length === 0,
+  'claiming a different engine/policy version does not open it',
+);
+ok(
+  combineCapabilities('combine-box-juggle').length === 0 && combineCapabilities('combine-box-control-60').length === 0,
+  'no sibling protocol is open either',
+);
+ok(combineCapabilities('not-a-protocol').length === 0, 'an unknown protocol is closed, not defaulted open');
 
 // §60's negative half: a record that LOOKS passing but is not valid must not
 // open the gate. This is the case that catches a partially-filled record.
 const halfBaked = {
   [PROTO]: { status: 'passed', record: { protocolId: PROTO, result: { ok: true } } },
 };
-ok(combineCapabilities(PROTO, { table: halfBaked }).length === 0,
-  'a record marked "passed" but missing required fields does NOT open the gate');
+ok(
+  combineCapabilities(PROTO, { table: halfBaked }).length === 0,
+  'a record marked "passed" but missing required fields does NOT open the gate',
+);
 
 const wrongEngine = {
   [PROTO]: {
     status: 'passed',
     record: {
-      protocolId: PROTO, cvPolicyVersion: BOX_CAM_CV_POLICY_VERSION,
-      providerVersion: 1, engineVersion: CV_ENGINE_VERSION - 1,
-      datasetId: 'ds-1', datasetVersion: 1,
-      result: 'passed', approvalVersion: 1, approvedAt: '2026-01-01',
+      protocolId: PROTO,
+      cvPolicyVersion: BOX_CAM_CV_POLICY_VERSION,
+      providerVersion: 1,
+      engineVersion: CV_ENGINE_VERSION - 1,
+      datasetId: 'ds-1',
+      datasetVersion: 1,
+      result: 'passed',
+      approvalVersion: 1,
+      approvedAt: '2026-01-01',
     },
   },
 };
-ok(combineCapabilities(PROTO, { table: wrongEngine }).length === 0,
-  'a record validated against an OLDER engine does not transfer to this one');
+ok(
+  combineCapabilities(PROTO, { table: wrongEngine }).length === 0,
+  'a record validated against an OLDER engine does not transfer to this one',
+);
 
 section('§30/§31 — Box Cam observed is evaluated independently');
 
@@ -215,19 +262,25 @@ const observed = boxCamObservedEligible({
   result,
   drillRequiresBall: true,
 });
-ok(observed.eligible === true,
-  'the same attempt IS eligible for Box Cam observed — the two gates are genuinely independent');
-ok(observed.combineVerified === false,
-  'and says combineVerified:false on the very same object');
+ok(
+  observed.eligible === true,
+  'the same attempt IS eligible for Box Cam observed — the two gates are genuinely independent',
+);
+ok(observed.combineVerified === false, 'and says combineVerified:false on the very same object');
 ok(observed.failed.length === 0, 'with no failed observation requirement');
 
 // The inverse: liveness missing blocks observation but changes nothing about
 // Combine, which was already closed.
 const noLiveness = boxCamObservedEligible({
-  providerHealth: 'ready', sessionLive: true, livenessPassed: false, result,
+  providerHealth: 'ready',
+  sessionLive: true,
+  livenessPassed: false,
+  result,
 });
-ok(noLiveness.eligible === false && noLiveness.failed.includes('liveness_passed'),
-  '§42 — without liveness there is no Box Cam observed result');
+ok(
+  noLiveness.eligible === false && noLiveness.failed.includes('liveness_passed'),
+  '§42 — without liveness there is no Box Cam observed result',
+);
 
 // =====================================================================
 section('§60 — the future-validated fixture (test-only, torn down)');
@@ -258,14 +311,17 @@ const futureRecord = {
     },
   },
 };
-ok(REQUIRED_RECORD_FIELDS.every((f) => f in futureRecord[PROTO].record),
-  'the fixture record carries every required field');
+ok(
+  REQUIRED_RECORD_FIELDS.every((f) => f in futureRecord[PROTO].record),
+  'the fixture record carries every required field',
+);
 
 const futureCaps = combineCapabilities(PROTO, { table: futureRecord });
-ok(futureCaps.length > 0,
-  `WITH a valid record the Combine capability list is non-empty (${futureCaps.join(', ')})`);
-ok(measurementSupported(proto, futureCaps) === true,
-  'and measurementSupported() over it is true — the wiring is real, not inert');
+ok(futureCaps.length > 0, `WITH a valid record the Combine capability list is non-empty (${futureCaps.join(', ')})`);
+ok(
+  measurementSupported(proto, futureCaps) === true,
+  'and measurementSupported() over it is true — the wiring is real, not inert',
+);
 
 const futureMeasured = measureAttempt({
   protocolDef: proto,
@@ -274,39 +330,45 @@ const futureMeasured = measureAttempt({
   providerCapabilities: futureCaps,
   mode: 'verified',
 });
-ok(futureMeasured.combineState === 'combine_verified',
-  `and the SAME attempt would then mint combine_verified (got "${futureMeasured.combineState}")`);
-ok(futureMeasured.measuredValue === result.derived.touchCount,
-  `with the server-derived count as the measured value (${futureMeasured.measuredValue})`);
+ok(
+  futureMeasured.combineState === 'combine_verified',
+  `and the SAME attempt would then mint combine_verified (got "${futureMeasured.combineState}")`,
+);
+ok(
+  futureMeasured.measuredValue === result.derived.touchCount,
+  `with the server-derived count as the measured value (${futureMeasured.measuredValue})`,
+);
 
 // Teardown, and the proof that teardown is real.
-ok(combineVerifiedProtocols().length === 0,
-  'TEARDOWN: the real table is untouched — combineVerifiedProtocols() is still []');
-ok(REAL_WORLD_VALIDATION[PROTO].status === 'not_completed',
-  'and the real record still reads not_completed');
-ok(combineEligibility(PROTO).eligible === false,
-  'and production eligibility is still false');
+ok(
+  combineVerifiedProtocols().length === 0,
+  'TEARDOWN: the real table is untouched — combineVerifiedProtocols() is still []',
+);
+ok(REAL_WORLD_VALIDATION[PROTO].status === 'not_completed', 'and the real record still reads not_completed');
+ok(combineEligibility(PROTO).eligible === false, 'and production eligibility is still false');
 
 section('The fixture cannot leak into production');
 
-ok(Object.isFrozen(REAL_WORLD_VALIDATION),
-  'REAL_WORLD_VALIDATION is frozen — a test cannot mutate it into a pass');
+ok(Object.isFrozen(REAL_WORLD_VALIDATION), 'REAL_WORLD_VALIDATION is frozen — a test cannot mutate it into a pass');
 let mutated = false;
 try {
   REAL_WORLD_VALIDATION[PROTO] = { status: 'passed', record: futureRecord[PROTO].record };
   mutated = REAL_WORLD_VALIDATION[PROTO].status === 'passed';
-} catch { mutated = false; }
+} catch {
+  mutated = false;
+}
 ok(mutated === false, 'assigning a passing record to the frozen table does not take effect');
-ok(combineVerifiedProtocols().length === 0,
-  'and after that attempt, combineVerifiedProtocols() is STILL []');
+ok(combineVerifiedProtocols().length === 0, 'and after that attempt, combineVerifiedProtocols() is STILL []');
 
 // §60: no environment variable opens it either.
 const before = combineVerifiedProtocols().length;
 process.env.SCOUTBOX_COMBINE_CV_ENABLED = '1';
 process.env.BOX_CAM_TEST_PROVIDER = '1';
 process.env.CV_REAL_WORLD_VALIDATION = 'passed';
-ok(combineVerifiedProtocols().length === before && before === 0,
-  'no environment variable opens the gate — it reads a versioned record, not config');
+ok(
+  combineVerifiedProtocols().length === before && before === 0,
+  'no environment variable opens the gate — it reads a versioned record, not config',
+);
 delete process.env.SCOUTBOX_COMBINE_CV_ENABLED;
 delete process.env.CV_REAL_WORLD_VALIDATION;
 
@@ -324,31 +386,39 @@ section('§66/§67 — matching does not see an unvalidated result');
   const unvalidatedFacts = { combineProtocols: [], combineMeasurements: {} };
   const required = [{ id: 'c1', type: 'combine_result', operator: 'exists', value: PROTO }];
   const m = matchPlayerToCriteria(unvalidatedFacts, { required, preferred: [] });
-  ok(m.matchesRequired === false,
-    '§66. a club criterion requiring a Box Touch 60 Combine result is NOT satisfied');
-  ok(m.required[0].met === false && /No .*Combine Verified result/.test(m.required[0].text),
-    '§66. and the explanation says why, in the club-facing words');
+  ok(m.matchesRequired === false, '§66. a club criterion requiring a Box Touch 60 Combine result is NOT satisfied');
+  ok(
+    m.required[0].met === false && /No .*Combine Verified result/.test(m.required[0].text),
+    '§66. and the explanation says why, in the club-facing words',
+  );
 
   const thresholdReq = [{ id: 'c2', type: 'combine_measurement', operator: 'gte', protocol: PROTO, value: 5 }];
   const m2 = matchPlayerToCriteria(unvalidatedFacts, { required: thresholdReq, preferred: [] });
-  ok(m2.matchesRequired === false,
-    '§66. a measurement threshold is not satisfied either — the count never reaches the facts');
+  ok(
+    m2.matchesRequired === false,
+    '§66. a measurement threshold is not satisfied either — the count never reaches the facts',
+  );
   // Precise, not substring-fishing: a search of the whole JSON for the digit
   // "9" matches a criterion id hash and asserts nothing. The real property is that the facts projection carries no measurement for this
   // protocol and the explanation reports its absence rather than a value.
-  ok(unvalidatedFacts.combineMeasurements[PROTO] === undefined,
-    '§66. the facts projection carries no measurement for this protocol');
-  ok(/^No .* Combine Verified measurement$/.test(m2.required[0].text),
-    `§66. and the explanation reports absence, never a number ("${m2.required[0].text}")`);
+  ok(
+    unvalidatedFacts.combineMeasurements[PROTO] === undefined,
+    '§66. the facts projection carries no measurement for this protocol',
+  );
+  ok(
+    /^No .* Combine Verified measurement$/.test(m2.required[0].text),
+    `§66. and the explanation reports absence, never a number ("${m2.required[0].text}")`,
+  );
 
   // §67 — with a validated result the SAME criterion wiring does match, so
   // this is a gate rather than a dead path.
   const validatedFacts = { combineProtocols: [PROTO], combineMeasurements: { [PROTO]: 9 } };
   const m3 = matchPlayerToCriteria(validatedFacts, { required, preferred: [] });
-  ok(m3.matchesRequired === true,
-    '§67. with a production-valid measurement present, the same criterion DOES match');
-  ok(m3.matchesRequired === true && !('score' in m3) && !('matchScore' in m3),
-    '§67. and no Match Score is produced — membership only');
+  ok(m3.matchesRequired === true, '§67. with a production-valid measurement present, the same criterion DOES match');
+  ok(
+    m3.matchesRequired === true && !('score' in m3) && !('matchScore' in m3),
+    '§67. and no Match Score is produced — membership only',
+  );
 }
 
 // =====================================================================
@@ -363,30 +433,51 @@ section('§68/§69 — invalidation removes it, restoration brings it back');
 {
   const invalidated = { ...session, verificationState: 'invalidated' };
   const r = measureAttempt({
-    protocolDef: proto, session: invalidated, calibrationPassed: true,
-    providerCapabilities: futureCaps, mode: 'verified',
+    protocolDef: proto,
+    session: invalidated,
+    calibrationPassed: true,
+    providerCapabilities: futureCaps,
+    mode: 'verified',
   });
-  ok(r.combineState === 'invalidated' && r.measuredValue === null,
-    '§68. an invalidated Box Cam session yields no measurement, even under a valid validation record');
-  ok((r.reasons ?? []).includes('SESSION_INVALIDATED'),
-    '§68. with a machine-readable reason');
+  ok(
+    r.combineState === 'invalidated' && r.measuredValue === null,
+    '§68. an invalidated Box Cam session yields no measurement, even under a valid validation record',
+  );
+  ok((r.reasons ?? []).includes('SESSION_INVALIDATED'), '§68. with a machine-readable reason');
 
   // Downstream: the facts projection loses the protocol, so the criterion stops matching.
   const factsAfter = { combineProtocols: [], combineMeasurements: {} };
   const mAfter = matchPlayerToCriteria(factsAfter, {
-    required: [{ id: 'c1', type: 'combine_result', operator: 'exists', value: PROTO }], preferred: [],
+    required: [{ id: 'c1', type: 'combine_result', operator: 'exists', value: PROTO }],
+    preferred: [],
   });
   ok(mAfter.matchesRequired === false, '§68. and the criterion stops matching once it is gone');
 
   // §69 — restoration is deterministic: the same session, valid again,
   // reproduces the same measurement exactly.
   const restored = { ...session, verificationState: 'verified' };
-  const r1 = measureAttempt({ protocolDef: proto, session: restored, calibrationPassed: true, providerCapabilities: futureCaps, mode: 'verified' });
-  const r2 = measureAttempt({ protocolDef: proto, session: restored, calibrationPassed: true, providerCapabilities: futureCaps, mode: 'verified' });
-  ok(r1.combineState === 'combine_verified' && r1.measuredValue === futureMeasured.measuredValue,
-    '§69. restoring the session reproduces the SAME measurement');
-  ok(JSON.stringify(r1) === JSON.stringify(r2),
-    '§69. and the projection is deterministic — recomputed, not remembered');
+  const r1 = measureAttempt({
+    protocolDef: proto,
+    session: restored,
+    calibrationPassed: true,
+    providerCapabilities: futureCaps,
+    mode: 'verified',
+  });
+  const r2 = measureAttempt({
+    protocolDef: proto,
+    session: restored,
+    calibrationPassed: true,
+    providerCapabilities: futureCaps,
+    mode: 'verified',
+  });
+  ok(
+    r1.combineState === 'combine_verified' && r1.measuredValue === futureMeasured.measuredValue,
+    '§69. restoring the session reproduces the SAME measurement',
+  );
+  ok(
+    JSON.stringify(r1) === JSON.stringify(r2),
+    '§69. and the projection is deterministic — recomputed, not remembered',
+  );
 }
 
 // =====================================================================
@@ -398,16 +489,22 @@ section('§62/§63 — Trust contribution is unchanged and performance-blind');
   // the result carries no field Trust could weight by performance.
   const big = { ...result, derived: { ...result.derived, touchCount: 200 } };
   const small = { ...result, derived: { ...result.derived, touchCount: 120 } };
-  ok(big.combineVerified === false && small.combineVerified === false,
-    '§62/§63. neither a 200-touch nor a 120-touch unvalidated result is Combine Verified');
-  ok(big.experimental.status === small.experimental.status,
-    '§62. and both carry the identical experimental status regardless of the count');
+  ok(
+    big.combineVerified === false && small.combineVerified === false,
+    '§62/§63. neither a 200-touch nor a 120-touch unvalidated result is Combine Verified',
+  );
+  ok(
+    big.experimental.status === small.experimental.status,
+    '§62. and both carry the identical experimental status regardless of the count',
+  );
 }
 
 provider.disposeAll();
 
 // =====================================================================
 console.log(`\n${'='.repeat(66)}`);
-console.log(`development/combineProductionGate: ${fail === 0 ? `all ${pass} checks passed` : `${fail} FAILED of ${pass + fail}`}`);
+console.log(
+  `development/combineProductionGate: ${fail === 0 ? `all ${pass} checks passed` : `${fail} FAILED of ${pass + fail}`}`,
+);
 console.log('production Combine eligibility: NOT ELIGIBLE — real-world validation not completed');
 if (fail > 0) process.exit(1);

@@ -38,14 +38,29 @@ const API_PORT = 4006;
 const API = `http://localhost:${API_PORT}`;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-navlive-'));
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 const A = { 'x-admin-key': 'scoutbox-admin', 'content-type': 'application/json' };
 
 console.log('building live bundles for :4006…');
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, { cwd: path.join(ROOT, 'scoutbox-grassroots'), stdio: 'pipe' });
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, { cwd: path.join(ROOT, 'scoutbox-admin'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, {
+  cwd: path.join(ROOT, 'scoutbox-grassroots'),
+  stdio: 'pipe',
+});
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, {
+  cwd: path.join(ROOT, 'scoutbox-admin'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -55,11 +70,20 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -74,13 +98,34 @@ serveDir('scoutbox-club/dist-live-verification', 8395);
 serveDir('scoutbox-grassroots/dist-live-verification', 8396);
 serveDir('scoutbox-admin/dist-live-verification', 8397);
 
-process.on('exit', () => { try { serverProc.kill('SIGKILL'); } catch {} for (const s of statics) s.close(); });
-for (let i = 0; i < 60; i++) { try { const r = await fetch(`${API}/healthz`); if (r.ok) break; } catch {} await new Promise((r) => setTimeout(r, 250)); }
+process.on('exit', () => {
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {}
+  for (const s of statics) s.close();
+});
+for (let i = 0; i < 60; i++) {
+  try {
+    const r = await fetch(`${API}/healthz`);
+    if (r.ok) break;
+  } catch {}
+  await new Promise((r) => setTimeout(r, 250));
+}
 
 // Give Maria root verification authority so the live console has data paths.
-await fetch(`${API}/auth/org/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }) })
+await fetch(`${API}/auth/org/login`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }),
+})
   .then((r) => r.json())
-  .then((maria) => fetch(`${API}/admin/verification/orgs/org-eastport/appoint-root`, { method: 'POST', headers: A, body: JSON.stringify({ userId: maria.userId, reason: 'navLive: establish root admin' }) }));
+  .then((maria) =>
+    fetch(`${API}/admin/verification/orgs/org-eastport/appoint-root`, {
+      method: 'POST',
+      headers: A,
+      body: JSON.stringify({ userId: maria.userId, reason: 'navLive: establish root admin' }),
+    }),
+  );
 
 const browser = await chromium.launch({ executablePath: EXE });
 const CLUB = 'http://localhost:8395';
@@ -97,7 +142,12 @@ async function clubLogin(ctx, name, role) {
   await page.waitForTimeout(700); // verLevel fetch settles the nav filter
   return page;
 }
-const goHash = async (page, id) => { await page.evaluate((h) => { location.hash = h; }, `#/${id}`); await page.waitForTimeout(300); };
+const goHash = async (page, id) => {
+  await page.evaluate((h) => {
+    location.hash = h;
+  }, `#/${id}`);
+  await page.waitForTimeout(300);
+};
 // The page title is the top bar's h1 — the ONE title on the page.
 const title = async (page) => (await page.locator('.topbar h1.page-title').innerText()).replace(/\s+/g, ' ').trim();
 const sectionLabels = (page) => page.locator('nav.sidebar button.nav-section').allInnerTexts();
@@ -112,34 +162,48 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   if (sections.some((s) => s.includes('Organisation'))) fail('N1: scout sees Organisation');
   if (sections.some((s) => s.includes('Discover'))) fail('N1: Discover is no longer a section');
   if (sections.length !== 5) fail(`N1: expected 4 sections + Inbox, saw ${sections.length}: ${sections.join('|')}`);
-  say('N1: ordinary scout sees the compact set — Home, Recruitment, Squad & Planning, Network, Inbox; Organisation absent');
-  if ((await scout.locator('h1').count()) !== 1) fail(`N1: exactly one h1 on the page (saw ${await scout.locator('h1').count()})`);
+  say(
+    'N1: ordinary scout sees the compact set — Home, Recruitment, Squad & Planning, Network, Inbox; Organisation absent',
+  );
+  if ((await scout.locator('h1').count()) !== 1)
+    fail(`N1: exactly one h1 on the page (saw ${await scout.locator('h1').count()})`);
   if ((await scout.locator('.content h2').count()) !== 0) fail('N1: the page repeats its own title in an h2');
   say('N1: one page title — the top bar h1 — and no duplicate h2 below it');
   await scout.click('nav.sidebar button.nav-section:has-text("Recruitment")');
   await scout.waitForTimeout(300);
   if (!(await title(scout)).includes('Players')) fail(`N1: Recruitment must open on Players (${await title(scout)})`);
   const groups = await scout.locator('nav.sidebar .nav-sec.open .nav-group-label').allInnerTexts();
-  if (groups.length < 7 || groups[0].toLowerCase() !== 'discover') fail(`N1: Recruitment accordion groups (${groups.join('|')})`);
+  if (groups.length < 7 || groups[0].toLowerCase() !== 'discover')
+    fail(`N1: Recruitment accordion groups (${groups.join('|')})`);
   // One group open at a time: the Discover pages are listed, the other
   // six groups are folded headings, so the sidebar never shows twenty links.
   const pages = await scout.locator('nav.sidebar .nav-sec.open .nav-child').count();
   if (pages < 3 || pages > 5) fail(`N1: Recruitment lists only the open group's pages in the sidebar (${pages})`);
-  const openGroups = await scout.locator('nav.sidebar .nav-sec.open .nav-group-label[aria-expanded="true"]').allInnerTexts();
-  if (openGroups.length !== 1 || openGroups[0].toLowerCase() !== 'discover') fail(`N1: exactly one group open — the one holding the current page (${openGroups.join('|')})`);
+  const openGroups = await scout
+    .locator('nav.sidebar .nav-sec.open .nav-group-label[aria-expanded="true"]')
+    .allInnerTexts();
+  if (openGroups.length !== 1 || openGroups[0].toLowerCase() !== 'discover')
+    fail(`N1: exactly one group open — the one holding the current page (${openGroups.join('|')})`);
   if (!(await activeChild(scout)).includes('Players')) fail('N1: the active page is marked in the accordion');
-  say(`N1: Recruitment opens on Players; the accordion shows ${groups.length} groups (${groups.join(' · ')}) with Discover open and its ${pages} pages listed — the other groups folded`);
-  if (await visible(scout, 'nav.subnav')) fail('N1: the desktop tab strip must be gone — the sidebar carries the pages');
+  say(
+    `N1: Recruitment opens on Players; the accordion shows ${groups.length} groups (${groups.join(' · ')}) with Discover open and its ${pages} pages listed — the other groups folded`,
+  );
+  if (await visible(scout, 'nav.subnav'))
+    fail('N1: the desktop tab strip must be gone — the sidebar carries the pages');
   say('N1: no second navigation bar on the desktop');
   await goHash(scout, 'assessments');
   if ((await title(scout)) !== 'Recruitment / Assessments') fail(`N1: deep link title (${await title(scout)})`);
   const active = await scout.locator('nav.sidebar button.nav-section.active').innerText();
   if (!active.includes('Recruitment')) fail('N1: deep link highlights Recruitment');
-  if ((await activeChild(scout)) !== 'Assessments') fail(`N1: deep link highlights the Assessments page (${await activeChild(scout)})`);
+  if ((await activeChild(scout)) !== 'Assessments')
+    fail(`N1: deep link highlights the Assessments page (${await activeChild(scout)})`);
   say('N1: direct deep link highlights section AND page (no parent-first navigation needed)');
   await goHash(scout, 'verification');
-  if ((await scout.locator('nav.sidebar button.nav-section.active').count()) !== 0) fail('N1: hidden parent must not highlight');
-  say('N1: direct hash to a hidden destination highlights no section (screen renders; the server still gates its data)');
+  if ((await scout.locator('nav.sidebar button.nav-section.active').count()) !== 0)
+    fail('N1: hidden parent must not highlight');
+  say(
+    'N1: direct hash to a hidden destination highlights no section (screen renders; the server still gates its data)',
+  );
 }
 
 // ==================================================== N3 — palette (scout)
@@ -183,7 +247,8 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   say(`N4: collapsed icon rail (${w}px) with accessible names`);
   await scout.click('nav.sidebar button[aria-label="Recruitment"]');
   await scout.waitForTimeout(250);
-  if (!(await visible(scout, 'nav.sidebar .nav-flyout[role="menu"]'))) fail('N4: a multi-page section opens a flyout menu from the rail');
+  if (!(await visible(scout, 'nav.sidebar .nav-flyout[role="menu"]')))
+    fail('N4: a multi-page section opens a flyout menu from the rail');
   const items = await scout.locator('nav.sidebar .nav-flyout button[role="menuitem"]').count();
   if (items < 20) fail(`N4: the flyout lists the section pages (${items})`);
   say(`N4: the rail opens a flyout menu listing all ${items} Recruitment pages, grouped`);
@@ -191,7 +256,8 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   await scout.keyboard.press('Enter');
   await scout.waitForTimeout(300);
   if ((await scout.locator('nav.sidebar .nav-flyout').count()) !== 0) fail('N4: the flyout closes after navigating');
-  if (!(await title(scout)).includes('Shortlist')) fail(`N4: keyboard navigation from the flyout (${await title(scout)})`);
+  if (!(await title(scout)).includes('Shortlist'))
+    fail(`N4: keyboard navigation from the flyout (${await title(scout)})`);
   say('N4: ArrowDown + Enter navigates from the flyout (Players → Shortlist) and closes it');
   await scout.click('nav.sidebar button[aria-label="Recruitment"]');
   await scout.waitForTimeout(150);
@@ -201,7 +267,8 @@ const scout = await clubLogin(scoutCtx, 'Noa Winter', 'First-Team Scout');
   say('N4: Escape closes the flyout and returns focus to the rail');
   await scout.reload();
   await scout.waitForSelector('nav.sidebar', { timeout: 15000 });
-  if ((await scout.locator('nav.sidebar.collapsed').count()) !== 1) fail('N4: collapsed state must persist across reload');
+  if ((await scout.locator('nav.sidebar.collapsed').count()) !== 1)
+    fail('N4: collapsed state must persist across reload');
   say('N4: collapsed preference persists across reload');
   await scout.click('button.nav-collapse');
   await scout.waitForTimeout(200);
@@ -262,8 +329,10 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   if ((await title(lead)) !== 'Recruitment / Trials & Reports') fail('N2: Trials reachable');
   say('N2: Recruitment → Trials reachable; no route lost');
   await goHash(lead, 'recruitment/dashboard');
-  if ((await title(lead)) !== 'Recruitment / Director Dashboard') fail(`N2: dashboard pretty link (${await title(lead)})`);
-  if (!(await lead.locator('nav.sidebar .nav-sec.open .nav-group-label:has-text("Analytics")').count())) fail('N2: Analytics group is visible inside Recruitment');
+  if ((await title(lead)) !== 'Recruitment / Director Dashboard')
+    fail(`N2: dashboard pretty link (${await title(lead)})`);
+  if (!(await lead.locator('nav.sidebar .nav-sec.open .nav-group-label:has-text("Analytics")').count()))
+    fail('N2: Analytics group is visible inside Recruitment');
   say('N2: #/recruitment/dashboard still resolves — Director Dashboard sits in Recruitment › Analytics');
   await lead.keyboard.press('Control+k');
   await lead.fill('.palette input', 'verification');
@@ -280,7 +349,11 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   await goHash(scout, 'feed');
   const m = await scout.evaluate(() => {
     const sb = document.querySelector('nav.sidebar');
-    return { over: sb.scrollHeight > sb.clientHeight, oy: getComputedStyle(sb).overflowY, sections: sb.querySelectorAll('button.nav-section').length };
+    return {
+      over: sb.scrollHeight > sb.clientHeight,
+      oy: getComputedStyle(sb).overflowY,
+      sections: sb.querySelectorAll('button.nav-section').length,
+    };
   });
   if (m.sections !== 5) fail(`N5: sections at 640px (${m.sections})`);
   if (m.over && m.oy !== 'auto') fail('N5: sidebar must scroll when it overflows');
@@ -291,7 +364,11 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   await scout.click('button.nav-hamburger');
   await scout.waitForTimeout(300);
   if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 1) fail('N5: drawer opens');
-  const drawer = await scout.evaluate(() => { const s = document.querySelector('nav.sidebar'); const cs = getComputedStyle(s); return { dir: cs.flexDirection, w: Math.round(s.getBoundingClientRect().width) }; });
+  const drawer = await scout.evaluate(() => {
+    const s = document.querySelector('nav.sidebar');
+    const cs = getComputedStyle(s);
+    return { dir: cs.flexDirection, w: Math.round(s.getBoundingClientRect().width) };
+  });
   if (drawer.dir !== 'column' || drawer.w < 200) fail(`N5: the drawer must be a column (${JSON.stringify(drawer)})`);
   say('N5: the drawer is a vertical list, not a row');
   // In the drawer a section tap EXPANDS the section (its pages
@@ -299,30 +376,46 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   const recBtn = scout.locator('nav.sidebar button.nav-section:has-text("Recruitment")');
   if ((await recBtn.getAttribute('aria-expanded')) !== 'true') await recBtn.click(); // this context opened Recruitment earlier; a tap toggles
   await scout.waitForTimeout(300);
-  if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 1) fail('N5: a section tap in the drawer expands rather than leaves');
-  if ((await scout.locator('nav.sidebar .nav-sec.open .nav-group-label').count()) < 7 || (await scout.locator('nav.sidebar .nav-sec.open .nav-child').count()) < 3) fail('N5: the expanded section lists its groups, with the open group\'s pages, in the drawer');
+  if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 1)
+    fail('N5: a section tap in the drawer expands rather than leaves');
+  if (
+    (await scout.locator('nav.sidebar .nav-sec.open .nav-group-label').count()) < 7 ||
+    (await scout.locator('nav.sidebar .nav-sec.open .nav-child').count()) < 3
+  )
+    fail("N5: the expanded section lists its groups, with the open group's pages, in the drawer");
   await scout.click('nav.sidebar .nav-sec.open .nav-child:text-is("Players")');
   await scout.waitForTimeout(300);
   if ((await scout.locator('nav.sidebar.drawer-open').count()) !== 0) fail('N5: drawer closes after choosing a page');
   if (!(await title(scout)).includes('Players')) fail('N5: drawer navigation');
-  say('N5: narrow-width drawer opens, a section tap expands its pages, a page tap navigates and closes — active state obvious');
+  say(
+    'N5: narrow-width drawer opens, a section tap expands its pages, a page tap navigates and closes — active state obvious',
+  );
   const strip = await scout.locator('nav.subnav button').allInnerTexts();
-  if (!strip.length || strip.length > 7 || !strip.includes('Players') || strip.includes('Recruitment Rooms')) fail(`N5: the phone strip lists the active GROUP only (${strip.join('|')})`);
+  if (!strip.length || strip.length > 7 || !strip.includes('Players') || strip.includes('Recruitment Rooms'))
+    fail(`N5: the phone strip lists the active GROUP only (${strip.join('|')})`);
   say(`N5: the phone strip lists the Discover group only (${strip.join(' · ')}), never the whole section`);
   const chrome = await scout.evaluate(() => ({
     topbar: Math.round(document.querySelector('.topbar').getBoundingClientRect().height),
-    scrollW: document.documentElement.scrollWidth, vw: innerWidth,
-    report: (() => { const b = document.querySelector('.topbar-safety'); return b && b.getBoundingClientRect().width > 0 ? b.getAttribute('aria-label') : null; })(),
+    scrollW: document.documentElement.scrollWidth,
+    vw: innerWidth,
+    report: (() => {
+      const b = document.querySelector('.topbar-safety');
+      return b && b.getBoundingClientRect().width > 0 ? b.getAttribute('aria-label') : null;
+    })(),
   }));
   if (chrome.topbar > 64) fail(`N5: the phone top bar is one row (${chrome.topbar}px)`);
   if (chrome.scrollW > chrome.vw) fail(`N5: horizontal overflow at 420px (${chrome.scrollW} > ${chrome.vw})`);
   if (!chrome.report) fail('N5: Report / Block must stay reachable on a phone');
-  say(`N5: one-row top bar (${chrome.topbar}px), Report / Block reachable ("${chrome.report}"), no horizontal overflow`);
+  say(
+    `N5: one-row top bar (${chrome.topbar}px), Report / Block reachable ("${chrome.report}"), no horizontal overflow`,
+  );
   // N9: a deep link on a phone lands on the right group strip.
   await goHash(scout, 'rooms');
   const pipe = await scout.locator('nav.subnav button').allInnerTexts();
-  if (!pipe.includes('Rooms') || !pipe.includes('Requests') || pipe.includes('Players')) fail(`N9: phone deep link → Pipeline strip (${pipe.join('|')})`);
-  if ((await scout.locator('nav.subnav button.active').innerText()).trim() !== 'Rooms') fail('N9: active page marked in the strip');
+  if (!pipe.includes('Rooms') || !pipe.includes('Requests') || pipe.includes('Players'))
+    fail(`N9: phone deep link → Pipeline strip (${pipe.join('|')})`);
+  if ((await scout.locator('nav.subnav button.active').innerText()).trim() !== 'Rooms')
+    fail('N9: active page marked in the strip');
   say('N9: a phone deep link to Rooms shows the Pipeline strip with Rooms active');
   await scout.setViewportSize({ width: 1280, height: 800 });
 }
@@ -338,9 +431,13 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   await scout.waitForTimeout(150);
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') fail('N10: Enter expands');
   const panel = await toggle.getAttribute('aria-controls');
-  if (!panel || !(await scout.locator(`#${panel} .nav-child`).count())) fail('N10: aria-controls points at the page list');
-  if (!(await activeChild(scout)).includes('Players')) fail('N10: expanding another section does not move the active page');
-  say('N10: a section toggle is a real button — Enter expands it, aria-expanded/aria-controls are correct, the active page is unchanged');
+  if (!panel || !(await scout.locator(`#${panel} .nav-child`).count()))
+    fail('N10: aria-controls points at the page list');
+  if (!(await activeChild(scout)).includes('Players'))
+    fail('N10: expanding another section does not move the active page');
+  say(
+    'N10: a section toggle is a real button — Enter expands it, aria-expanded/aria-controls are correct, the active page is unchanged',
+  );
   await scout.keyboard.press('Enter');
   await scout.waitForTimeout(150);
   if ((await toggle.getAttribute('aria-expanded')) !== 'false') fail('N10: Enter collapses again');
@@ -358,7 +455,8 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   await scout.reload();
   await scout.waitForSelector('nav.sidebar', { timeout: 15000 });
   await scout.waitForTimeout(500);
-  if ((await title(scout)) !== 'Recruitment / Recruitment Rooms') fail(`N11: refresh keeps the page (${await title(scout)})`);
+  if ((await title(scout)) !== 'Recruitment / Recruitment Rooms')
+    fail(`N11: refresh keeps the page (${await title(scout)})`);
   if ((await activeChild(scout)) !== 'Recruitment Rooms') fail('N11: refresh keeps the accordion state');
   say('N11: refresh on a deep link keeps section, page and title');
   await goHash(scout, 'planner');
@@ -369,7 +467,8 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   await scout.goForward();
   await scout.waitForTimeout(400);
   if ((await title(scout)) !== 'Squad & Planning / Squad Planner') fail(`N11: forward (${await title(scout)})`);
-  if (!(await scout.locator('nav.sidebar button.nav-section.active').innerText()).includes('Squad')) fail('N11: forward highlights the section');
+  if (!(await scout.locator('nav.sidebar button.nav-section.active').innerText()).includes('Squad'))
+    fail('N11: forward highlights the section');
   say('N11: browser back / forward move between sections with the title and highlight following');
 }
 
@@ -378,7 +477,8 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   await lead.selectOption('nav.sidebar select', 'fr');
   await lead.waitForSelector('nav.sidebar button:has-text("Recrutement")', { timeout: 8000 });
   await goHash(lead, 'ledger');
-  if (!(await lead.locator('nav.sidebar .nav-sec.open .nav-group-label:has-text("Statistiques")').count())) fail('i18n: group labels translate');
+  if (!(await lead.locator('nav.sidebar .nav-sec.open .nav-group-label:has-text("Statistiques")').count()))
+    fail('i18n: group labels translate');
   if (!(await title(lead)).includes('Recrutement')) fail('i18n: the h1 crumb translates');
   say('i18n: sections, group labels and the page title translate (Recrutement › Statistiques)');
   await lead.selectOption('nav.sidebar select', 'en');
@@ -397,23 +497,29 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await grass.waitForSelector('nav.sidebar', { timeout: 20000 });
   await grass.waitForTimeout(700);
   const sections = await sectionLabels(grass);
-  if (!sections.some((s) => s.includes('Players')) || !sections.some((s) => s.includes('Club'))) fail(`N6: grassroots sections (${sections.join('|')})`);
-  if (sections.some((s) => /Team|Network|Squad & Planning/.test(s))) fail(`N6: old grassroots sections linger (${sections.join('|')})`);
+  if (!sections.some((s) => s.includes('Players')) || !sections.some((s) => s.includes('Club')))
+    fail(`N6: grassroots sections (${sections.join('|')})`);
+  if (sections.some((s) => /Team|Network|Squad & Planning/.test(s)))
+    fail(`N6: old grassroots sections linger (${sections.join('|')})`);
   say('N6: grassroots gets its own reduced structure — Home, Players, Recruitment, Club, Inbox');
   await grass.click('nav.sidebar button.nav-section:has-text("Club")');
   await grass.waitForTimeout(300);
-  if (!(await title(grass)).includes('Clubs & Groups')) fail(`N6: Club opens on Clubs & Groups for every role (${await title(grass)})`);
+  if (!(await title(grass)).includes('Clubs & Groups'))
+    fail(`N6: Club opens on Clubs & Groups for every role (${await title(grass)})`);
   say('N6: Club opens on Clubs & Groups — the page that used to be Network, still visible to everyone');
   await grass.keyboard.press('Control+k');
   await grass.fill('.palette input', 'budgets');
   await grass.waitForTimeout(200);
-  if ((await grass.locator('.palette-results .notice').count()) !== 1) fail('N6: Pro-only Budgets leaked into grassroots');
+  if ((await grass.locator('.palette-results .notice').count()) !== 1)
+    fail('N6: Pro-only Budgets leaked into grassroots');
   await grass.fill('.palette input', 'representation');
   await grass.waitForTimeout(200);
   if ((await grass.locator('.palette-results .notice').count()) !== 1) fail('N6: Pro-only Representation leaked');
   say('N6: no Pro-only destinations exposed in Grassroots');
   await grass.keyboard.press('Escape');
-  await grass.evaluate(() => { location.hash = '#/squad'; });
+  await grass.evaluate(() => {
+    location.hash = '#/squad';
+  });
   await grass.waitForTimeout(300);
   if ((await title(grass)) !== 'Players / Squad & Match Days') fail(`N6: grassroots deep link (${await title(grass)})`);
   say('N6: grassroots deep links work (#/squad → Players / Squad & Match Days)');
@@ -421,7 +527,14 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await grass.waitForTimeout(300);
   await grass.click('button.nav-hamburger');
   await grass.waitForTimeout(300);
-  const d = await grass.evaluate(() => { const s = document.querySelector('nav.sidebar'); return { dir: getComputedStyle(s).flexDirection, w: Math.round(s.getBoundingClientRect().width), scrollW: document.documentElement.scrollWidth }; });
+  const d = await grass.evaluate(() => {
+    const s = document.querySelector('nav.sidebar');
+    return {
+      dir: getComputedStyle(s).flexDirection,
+      w: Math.round(s.getBoundingClientRect().width),
+      scrollW: document.documentElement.scrollWidth,
+    };
+  });
   if (d.dir !== 'column' || d.scrollW > 390) fail(`N6: grassroots phone drawer (${JSON.stringify(d)})`);
   say('N6: the grassroots phone drawer is a column with no horizontal overflow');
 }
@@ -435,9 +548,21 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await admin.click('button:has-text("Enter")');
   await admin.waitForSelector('nav.sidebar', { timeout: 20000 });
   const groups = await admin.locator('nav.sidebar button').allInnerTexts();
-  const expect = ['Home', 'Cases', 'Evidence', 'Verification', 'Safety', 'Operations', 'Delivery & Billing', 'Agents', 'System'];
+  const expect = [
+    'Home',
+    'Cases',
+    'Evidence',
+    'Verification',
+    'Safety',
+    'Operations',
+    'Delivery & Billing',
+    'Agents',
+    'System',
+  ];
   if (!expect.every((g) => groups.some((x) => x.includes(g)))) fail(`N8: admin groups (${groups.join('|')})`);
-  say('N8: T&S console shows nine grouped destinations instead of 22+ flat tabs (Cases and Operations each split so no group lists more than five)');
+  say(
+    'N8: T&S console shows nine grouped destinations instead of 22+ flat tabs (Cases and Operations each split so no group lists more than five)',
+  );
   const tour = [
     ['Cases', ['Report queue', 'Evidence disputes', 'Ver. disputes', 'Support desk']],
     ['Evidence', ['Passport', 'Box Cam', 'Trust']],
@@ -476,72 +601,136 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await scout.setViewportSize({ width: 390, height: 844 });
   await goHash(scout, 'recruitment');
   await scout.waitForTimeout(300);
-  const strip = async () => scout.evaluate(() => {
-    const n = document.querySelector('nav.subnav');
-    const tabs = [...n.querySelectorAll(':scope > button:not(.subnav-more)')].map((b) => ({ t: b.textContent.trim(), active: b.classList.contains('active'), right: Math.round(b.getBoundingClientRect().right), h: Math.round(b.getBoundingClientRect().height) }));
-    const more = n.querySelector('.subnav-more');
-    return { tabs, more: more ? { t: more.textContent.replace(/\s+/g, ' ').trim(), expanded: more.getAttribute('aria-expanded'), active: more.classList.contains('active'), label: more.getAttribute('aria-label') } : null,
-      clip: n.scrollWidth > n.clientWidth, h: Math.round(n.getBoundingClientRect().height), docOverflow: document.documentElement.scrollWidth > innerWidth, font: getComputedStyle(n.querySelector('button')).fontSize };
-  });
+  const strip = async () =>
+    scout.evaluate(() => {
+      const n = document.querySelector('nav.subnav');
+      const tabs = [...n.querySelectorAll(':scope > button:not(.subnav-more)')].map((b) => ({
+        t: b.textContent.trim(),
+        active: b.classList.contains('active'),
+        right: Math.round(b.getBoundingClientRect().right),
+        h: Math.round(b.getBoundingClientRect().height),
+      }));
+      const more = n.querySelector('.subnav-more');
+      return {
+        tabs,
+        more: more
+          ? {
+              t: more.textContent.replace(/\s+/g, ' ').trim(),
+              expanded: more.getAttribute('aria-expanded'),
+              active: more.classList.contains('active'),
+              label: more.getAttribute('aria-label'),
+            }
+          : null,
+        clip: n.scrollWidth > n.clientWidth,
+        h: Math.round(n.getBoundingClientRect().height),
+        docOverflow: document.documentElement.scrollWidth > innerWidth,
+        font: getComputedStyle(n.querySelector('button')).fontSize,
+      };
+    });
   let m = await strip();
-  if (m.tabs.map((x) => x.t).join('|') !== 'Cases|Rooms|Requests|Opportunities' || m.more) fail(`N13: Pipeline shows its four pages whole, no More (${m.tabs.map((x) => x.t).join('|')} ${JSON.stringify(m.more)})`);
-  if (m.clip || m.docOverflow || m.tabs.some((x) => x.right > 390) || m.h > 48) fail(`N13: the Pipeline strip must not clip or overflow (${JSON.stringify(m)})`);
+  if (m.tabs.map((x) => x.t).join('|') !== 'Cases|Rooms|Requests|Opportunities' || m.more)
+    fail(
+      `N13: Pipeline shows its four pages whole, no More (${m.tabs.map((x) => x.t).join('|')} ${JSON.stringify(m.more)})`,
+    );
+  if (m.clip || m.docOverflow || m.tabs.some((x) => x.right > 390) || m.h > 48)
+    fail(`N13: the Pipeline strip must not clip or overflow (${JSON.stringify(m)})`);
   if (!m.tabs[0].active) fail('N13: Cases active on arrival');
-  say(`N13: Pipeline at 390px — Cases · Rooms · Requests · Opportunities all visible, no More needed; ${m.h}px strip, no clipping`);
+  say(
+    `N13: Pipeline at 390px — Cases · Rooms · Requests · Opportunities all visible, no More needed; ${m.h}px strip, no clipping`,
+  );
   await goHash(scout, 'recruitment/matching');
   await scout.waitForTimeout(300);
   m = await strip();
-  if (m.tabs.map((x) => x.t).join('|') !== 'Matching|Watchlists') fail(`N13: Intelligence primaries (${m.tabs.map((x) => x.t).join('|')})`);
-  if (!m.more || !/More/.test(m.more.t) || !/2/.test(m.more.t)) fail(`N13: an explicit More control announces the remaining pages (${JSON.stringify(m.more)})`);
+  if (m.tabs.map((x) => x.t).join('|') !== 'Matching|Watchlists')
+    fail(`N13: Intelligence primaries (${m.tabs.map((x) => x.t).join('|')})`);
+  if (!m.more || !/More/.test(m.more.t) || !/2/.test(m.more.t))
+    fail(`N13: an explicit More control announces the remaining pages (${JSON.stringify(m.more)})`);
   if (m.clip || m.docOverflow) fail(`N13: the strip must not clip or overflow (${JSON.stringify(m)})`);
-  if (m.tabs.some((x) => x.right > 390) || m.h > 48) fail(`N13: every tab fully on screen and the strip compact (${JSON.stringify(m)})`);
-  if (parseFloat(m.font) < 13 || m.tabs.some((x) => x.h < 40)) fail(`N13: readable labels and 40px targets (${m.font}, ${m.tabs.map((x) => x.h)})`);
+  if (m.tabs.some((x) => x.right > 390) || m.h > 48)
+    fail(`N13: every tab fully on screen and the strip compact (${JSON.stringify(m)})`);
+  if (parseFloat(m.font) < 13 || m.tabs.some((x) => x.h < 40))
+    fail(`N13: readable labels and 40px targets (${m.font}, ${m.tabs.map((x) => x.h)})`);
   if (!m.tabs[0].active) fail('N13: Matching active on arrival');
-  say(`N13: Intelligence at 390px — Matching · Watchlists visible, "More 2" for the rest; ${m.h}px strip, no clipping, no document overflow`);
+  say(
+    `N13: Intelligence at 390px — Matching · Watchlists visible, "More 2" for the rest; ${m.h}px strip, no clipping, no document overflow`,
+  );
   await scout.click('nav.subnav button:text-is("Watchlists")');
   await scout.waitForTimeout(300);
   if ((await title(scout)) !== 'Recruitment / Dynamic Watchlists') fail(`N13: Watchlists tab (${await title(scout)})`);
   say('N13: a primary tab is one tap — Watchlists');
   await scout.click('nav.subnav .subnav-more');
   await scout.waitForTimeout(150);
-  const menu = await scout.evaluate(() => { const mn = document.querySelector('nav.subnav [role="menu"]'); return mn ? { items: [...mn.querySelectorAll('[role="menuitem"]')].map((b) => b.textContent.trim()), focused: document.activeElement?.getAttribute('role'), expanded: document.querySelector('.subnav-more').getAttribute('aria-expanded') } : null; });
-  if (!menu || menu.expanded !== 'true' || menu.items.join('|') !== 'Second Look|Nobody Missed') fail(`N13: More menu (${JSON.stringify(menu)})`);
+  const menu = await scout.evaluate(() => {
+    const mn = document.querySelector('nav.subnav [role="menu"]');
+    return mn
+      ? {
+          items: [...mn.querySelectorAll('[role="menuitem"]')].map((b) => b.textContent.trim()),
+          focused: document.activeElement?.getAttribute('role'),
+          expanded: document.querySelector('.subnav-more').getAttribute('aria-expanded'),
+        }
+      : null;
+  });
+  if (!menu || menu.expanded !== 'true' || menu.items.join('|') !== 'Second Look|Nobody Missed')
+    fail(`N13: More menu (${JSON.stringify(menu)})`);
   if (menu.focused !== 'menuitem') fail('N13: focus moves into the menu when it opens');
   say('N13: More opens a real menu (aria-expanded, role=menu) listing Second Look · Nobody Missed, focus inside');
   await scout.keyboard.press('Escape');
   await scout.waitForTimeout(100);
   if ((await scout.locator('nav.subnav [role="menu"]').count()) !== 0) fail('N13: Escape closes the menu');
-  if (!(await scout.evaluate(() => document.activeElement?.classList.contains('subnav-more')))) fail('N13: Escape returns focus to More');
+  if (!(await scout.evaluate(() => document.activeElement?.classList.contains('subnav-more'))))
+    fail('N13: Escape returns focus to More');
   say('N13: Escape closes the menu and returns focus to More');
   await scout.click('nav.subnav .subnav-more');
   await scout.keyboard.press('ArrowDown');
   await scout.keyboard.press('Enter'); // Nobody Missed
   await scout.waitForTimeout(400);
-  if ((await title(scout)) !== 'Recruitment / Nobody Missed') fail(`N13: keyboard selection from More (${await title(scout)})`);
+  if ((await title(scout)) !== 'Recruitment / Nobody Missed')
+    fail(`N13: keyboard selection from More (${await title(scout)})`);
   m = await strip();
-  if (!m.more.active || !/Nobody Missed/.test(m.more.t) || !/More/.test(m.more.label) || m.tabs.some((x) => x.active)) fail(`N13: active state when the page is inside More (${JSON.stringify(m)})`);
+  if (!m.more.active || !/Nobody Missed/.test(m.more.t) || !/More/.test(m.more.label) || m.tabs.some((x) => x.active))
+    fail(`N13: active state when the page is inside More (${JSON.stringify(m)})`);
   if ((await scout.locator('nav.subnav [role="menu"]').count()) !== 0) fail('N13: the menu closes on selection');
-  if (!(await scout.evaluate(() => document.activeElement?.classList.contains('subnav-more')))) fail('N13: focus is not stranded after selection');
-  say('N13: selecting Nobody Missed closes the menu, the More control reads "Nobody Missed ▾" with the active state (its accessible name still says More), focus stays on More');
+  if (!(await scout.evaluate(() => document.activeElement?.classList.contains('subnav-more'))))
+    fail('N13: focus is not stranded after selection');
+  say(
+    'N13: selecting Nobody Missed closes the menu, the More control reads "Nobody Missed ▾" with the active state (its accessible name still says More), focus stays on More',
+  );
   await scout.reload();
   await scout.waitForSelector('nav.subnav', { timeout: 15000 });
   await scout.waitForTimeout(400);
-  if ((await title(scout)) !== 'Recruitment / Nobody Missed' || !(await strip()).more.active) fail('N13: refresh keeps the More-held page active');
+  if ((await title(scout)) !== 'Recruitment / Nobody Missed' || !(await strip()).more.active)
+    fail('N13: refresh keeps the More-held page active');
   say('N13: direct refresh on a More-held page keeps the page and the active state');
   // Browser history: in-app clicks replace the hash (Back leaves the
   // workspace, it does not replay every tab), so the history walk uses the
   // three deep links — Matching, Watchlists, Nobody Missed — and checks the strip follows.
-  await goHash(scout, 'recruitment/matching'); await goHash(scout, 'recruitment/watchlists'); await goHash(scout, 'recruitment/nobody-missed');
+  await goHash(scout, 'recruitment/matching');
+  await goHash(scout, 'recruitment/watchlists');
+  await goHash(scout, 'recruitment/nobody-missed');
   if (!(await strip()).more.active) fail('N13: deep link to a More-held page marks More active');
-  await scout.goBack(); await scout.waitForTimeout(400);
-  if ((await title(scout)) !== 'Recruitment / Dynamic Watchlists' || !(await strip()).tabs[1].active || (await strip()).more.active) fail(`N13: back → Watchlists (${await title(scout)})`);
-  await scout.goBack(); await scout.waitForTimeout(400);
-  if ((await title(scout)) !== 'Recruitment / Player Matching' || !(await strip()).tabs[0].active) fail(`N13: back → Matching (${await title(scout)})`);
-  await scout.goForward(); await scout.waitForTimeout(400);
-  if ((await title(scout)) !== 'Recruitment / Dynamic Watchlists' || !(await strip()).tabs[1].active) fail('N13: forward → Watchlists with the tab active');
-  await scout.goForward(); await scout.waitForTimeout(400);
-  if ((await title(scout)) !== 'Recruitment / Nobody Missed' || !(await strip()).more.active) fail('N13: forward → Nobody Missed with More active');
-  say('N13: back / forward across Matching, Watchlists and Nobody Missed keep the strip, the tab and the More active state right');
+  await scout.goBack();
+  await scout.waitForTimeout(400);
+  if (
+    (await title(scout)) !== 'Recruitment / Dynamic Watchlists' ||
+    !(await strip()).tabs[1].active ||
+    (await strip()).more.active
+  )
+    fail(`N13: back → Watchlists (${await title(scout)})`);
+  await scout.goBack();
+  await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Player Matching' || !(await strip()).tabs[0].active)
+    fail(`N13: back → Matching (${await title(scout)})`);
+  await scout.goForward();
+  await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Dynamic Watchlists' || !(await strip()).tabs[1].active)
+    fail('N13: forward → Watchlists with the tab active');
+  await scout.goForward();
+  await scout.waitForTimeout(400);
+  if ((await title(scout)) !== 'Recruitment / Nobody Missed' || !(await strip()).more.active)
+    fail('N13: forward → Nobody Missed with More active');
+  say(
+    'N13: back / forward across Matching, Watchlists and Nobody Missed keep the strip, the tab and the More active state right',
+  );
   // Outside click closes the menu.
   await scout.click('nav.subnav .subnav-more');
   await scout.click('h1.page-title');
@@ -555,14 +744,19 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await scout.waitForSelector('[aria-label="Recruitment brief criteria"]', { timeout: 15000 });
   await scout.fill('[aria-label="Recruitment brief criteria"] input', 'Unsaved phone brief');
   const outreach = await scout.locator('nav.subnav button').allInnerTexts();
-  if (outreach.join('|') !== 'Campaigns|Briefs') fail(`N13: the Outreach strip is Campaigns · Briefs (${outreach.join('|')})`);
+  if (outreach.join('|') !== 'Campaigns|Briefs')
+    fail(`N13: the Outreach strip is Campaigns · Briefs (${outreach.join('|')})`);
   const dialogs = [];
-  const onDialog = async (d) => { dialogs.push(d.message()); await d.dismiss(); };
+  const onDialog = async (d) => {
+    dialogs.push(d.message());
+    await d.dismiss();
+  };
   scout.on('dialog', onDialog);
   await scout.click('nav.subnav button:text-is("Campaigns")');
   await scout.waitForTimeout(600);
   scout.off('dialog', onDialog);
-  if (dialogs.length !== 1 || !/unsaved/i.test(dialogs[0])) fail(`N13: strip navigation must ask about unsaved changes (${dialogs.length})`);
+  if (dialogs.length !== 1 || !/unsaved/i.test(dialogs[0]))
+    fail(`N13: strip navigation must ask about unsaved changes (${dialogs.length})`);
   if (!(await scout.locator('[aria-label="Recruitment brief criteria"]').count())) fail('N13: declining kept the form');
   say('N13: navigating from the phone strip goes through the unsaved-change guard — declining keeps the form');
   scout.once('dialog', (d) => d.accept());
@@ -573,29 +767,101 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
 {
   await lead.setViewportSize({ width: 360, height: 740 });
   const groupsSeen = [];
-  const ALL_IDS = ['feed', 'search', 'shortlist', 'filmroom', 'insight', 'recruitment', 'rooms', 'requests', 'opportunities', 'campaigns', 'outcomes',
-    'assessments', 'video', 'trials', 'trialdays', 'briefs', 'matching', 'watchlists', 'secondlook', 'nobodymissed', 'dashboard', 'funnel', 'ledger',
-    'planner', 'coverage', 'calibration', 'fixtures', 'network', 'representation', 'organisation', 'verification', 'imports', 'budgets', 'plan', 'reputation', 'messages'];
+  const ALL_IDS = [
+    'feed',
+    'search',
+    'shortlist',
+    'filmroom',
+    'insight',
+    'recruitment',
+    'rooms',
+    'requests',
+    'opportunities',
+    'campaigns',
+    'outcomes',
+    'assessments',
+    'video',
+    'trials',
+    'trialdays',
+    'briefs',
+    'matching',
+    'watchlists',
+    'secondlook',
+    'nobodymissed',
+    'dashboard',
+    'funnel',
+    'ledger',
+    'planner',
+    'coverage',
+    'calibration',
+    'fixtures',
+    'network',
+    'representation',
+    'organisation',
+    'verification',
+    'imports',
+    'budgets',
+    'plan',
+    'reputation',
+    'messages',
+  ];
   for (const id of ALL_IDS) {
     await goHash(lead, id);
     const r = await lead.evaluate(() => {
       const n = document.querySelector('nav.subnav');
       if (!n) return null;
       const btns = [...n.querySelectorAll(':scope > button')];
-      return { n: btns.length, clip: n.scrollWidth > n.clientWidth, off: btns.filter((b) => b.getBoundingClientRect().right > innerWidth + 0.5 || b.getBoundingClientRect().left < -0.5).map((b) => b.textContent.trim()), doc: document.documentElement.scrollWidth > innerWidth, more: !!n.querySelector('.subnav-more'), h: Math.round(n.getBoundingClientRect().height), labels: btns.map((b) => b.textContent.replace(/\s+/g, ' ').trim()) };
+      return {
+        n: btns.length,
+        clip: n.scrollWidth > n.clientWidth,
+        off: btns
+          .filter((b) => b.getBoundingClientRect().right > innerWidth + 0.5 || b.getBoundingClientRect().left < -0.5)
+          .map((b) => b.textContent.trim()),
+        doc: document.documentElement.scrollWidth > innerWidth,
+        more: !!n.querySelector('.subnav-more'),
+        h: Math.round(n.getBoundingClientRect().height),
+        labels: btns.map((b) => b.textContent.replace(/\s+/g, ' ').trim()),
+      };
     });
     if (r && (r.clip || r.off.length || r.doc || r.h > 48)) fail(`N14: ${id} at 360px (${JSON.stringify(r)})`);
     if (r) groupsSeen.push(r.labels.join(' · '));
   }
-  say(`N14: at 360px, every one of ${ALL_IDS.length} pages (lead persona, every section): no strip clips, no tab is off screen, no document overflow — ${[...new Set(groupsSeen)].join(' | ')}`);
+  say(
+    `N14: at 360px, every one of ${ALL_IDS.length} pages (lead persona, every section): no strip clips, no tab is off screen, no document overflow — ${[...new Set(groupsSeen)].join(' | ')}`,
+  );
   // Breakpoint: 900px shows the phone shell, 901px the desktop shell — no in-between state.
   await goHash(lead, 'recruitment');
-  await lead.setViewportSize({ width: 900, height: 800 }); await lead.waitForTimeout(300);
-  const at900 = await lead.evaluate(() => ({ strip: getComputedStyle(document.querySelector('nav.subnav')).display, burger: getComputedStyle(document.querySelector('.nav-hamburger')).display, fixed: getComputedStyle(document.querySelector('nav.sidebar')).position }));
-  await lead.setViewportSize({ width: 901, height: 800 }); await lead.waitForTimeout(300);
-  const at901 = await lead.evaluate(() => ({ strip: document.querySelector('nav.subnav') ? getComputedStyle(document.querySelector('nav.subnav')).display : 'none', burger: getComputedStyle(document.querySelector('.nav-hamburger')).display, fixed: getComputedStyle(document.querySelector('nav.sidebar')).position, accordion: document.querySelectorAll('nav.sidebar .nav-sec.open .nav-child').length, openSections: document.querySelectorAll('nav.sidebar .nav-sec.open').length }));
-  if (at900.strip === 'none' || at900.burger === 'none' || at900.fixed !== 'fixed') fail(`N14: 900px is the phone shell (${JSON.stringify(at900)})`);
-  if (at901.strip !== 'none' || at901.burger !== 'none' || at901.fixed === 'fixed' || at901.openSections !== 1 || at901.accordion < 3 || at901.accordion > 5) fail(`N14: 901px is the desktop shell with one section expanded and only its open group's pages listed (${JSON.stringify(at901)})`);
+  await lead.setViewportSize({ width: 900, height: 800 });
+  await lead.waitForTimeout(300);
+  const at900 = await lead.evaluate(() => ({
+    strip: getComputedStyle(document.querySelector('nav.subnav')).display,
+    burger: getComputedStyle(document.querySelector('.nav-hamburger')).display,
+    fixed: getComputedStyle(document.querySelector('nav.sidebar')).position,
+  }));
+  await lead.setViewportSize({ width: 901, height: 800 });
+  await lead.waitForTimeout(300);
+  const at901 = await lead.evaluate(() => ({
+    strip: document.querySelector('nav.subnav')
+      ? getComputedStyle(document.querySelector('nav.subnav')).display
+      : 'none',
+    burger: getComputedStyle(document.querySelector('.nav-hamburger')).display,
+    fixed: getComputedStyle(document.querySelector('nav.sidebar')).position,
+    accordion: document.querySelectorAll('nav.sidebar .nav-sec.open .nav-child').length,
+    openSections: document.querySelectorAll('nav.sidebar .nav-sec.open').length,
+  }));
+  if (at900.strip === 'none' || at900.burger === 'none' || at900.fixed !== 'fixed')
+    fail(`N14: 900px is the phone shell (${JSON.stringify(at900)})`);
+  if (
+    at901.strip !== 'none' ||
+    at901.burger !== 'none' ||
+    at901.fixed === 'fixed' ||
+    at901.openSections !== 1 ||
+    at901.accordion < 3 ||
+    at901.accordion > 5
+  )
+    fail(
+      `N14: 901px is the desktop shell with one section expanded and only its open group's pages listed (${JSON.stringify(at901)})`,
+    );
   say('N14: one breakpoint — 900px is the phone shell (drawer + strip), 901px the desktop shell (accordion, no strip)');
   await lead.setViewportSize({ width: 1280, height: 800 });
   await scout.setViewportSize({ width: 1280, height: 800 });
@@ -615,60 +881,90 @@ const TASKS = [
   ['Analytics', 'Recruitment', 'Director Dashboard', 'Recruitment / Director Dashboard'],
 ];
 // The group each task's page sits in (one group open at a time).
-const GROUP_OF = { Players: 'Discover', 'Dynamic Watchlists': 'Intelligence', Cases: 'Pipeline', 'Recruitment Rooms': 'Pipeline', 'Second Look': 'Intelligence', 'Trials & Reports': 'Evaluation', 'Director Dashboard': 'Analytics' };
+const GROUP_OF = {
+  Players: 'Discover',
+  'Dynamic Watchlists': 'Intelligence',
+  Cases: 'Pipeline',
+  'Recruitment Rooms': 'Pipeline',
+  'Second Look': 'Intelligence',
+  'Trials & Reports': 'Evaluation',
+  'Director Dashboard': 'Analytics',
+};
 const matrix = {};
 // Fresh state for every task: reload on Home. Accordion state is not persisted,
 // so nothing a previous task expanded survives; the session and the collapse
 // preference do.
-const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.waitForSelector('nav.sidebar', { timeout: 15000 }); await p.waitForTimeout(500); };
+const fresh = async (p) => {
+  await goHash(p, 'feed');
+  await p.reload();
+  await p.waitForSelector('nav.sidebar', { timeout: 15000 });
+  await p.waitForTimeout(500);
+};
 {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const p = await clubLogin(ctx, 'Noa Winter', 'First-Team Scout');
   for (const [task, section, page, expect] of TASKS) {
     await fresh(p); // Home, fresh state: the accordion has nothing but Home open
-    if ((await p.locator('nav.sidebar .nav-sec.open .nav-child').count()) !== 0) fail(`N15: ${task}: Recruitment is pre-expanded on Home`);
+    if ((await p.locator('nav.sidebar .nav-sec.open .nav-child').count()) !== 0)
+      fail(`N15: ${task}: Recruitment is pre-expanded on Home`);
     let n = 0;
-    await p.click(`nav.sidebar button.nav-section:has-text("${section}")`); n++;
+    await p.click(`nav.sidebar button.nav-section:has-text("${section}")`);
+    n++;
     await p.waitForTimeout(250);
     if ((await title(p)) !== expect) {
       // One group open at a time — a page in a folded group is one more
       // tap away, through its visible group heading.
       let child = p.locator(`nav.sidebar .nav-sec.open .nav-child:text-is("${page}")`);
       if (!(await child.isVisible())) {
-        const heading = p.locator(`nav.sidebar .nav-sec.open .nav-group[aria-label="${GROUP_OF[page]}"] > button.nav-group-label`);
-        if (!(await heading.isVisible())) fail(`N15 desktop: ${task}: neither "${page}" nor its group "${GROUP_OF[page]}" is visible under Recruitment`);
-        await heading.click(); n++;
+        const heading = p.locator(
+          `nav.sidebar .nav-sec.open .nav-group[aria-label="${GROUP_OF[page]}"] > button.nav-group-label`,
+        );
+        if (!(await heading.isVisible()))
+          fail(
+            `N15 desktop: ${task}: neither "${page}" nor its group "${GROUP_OF[page]}" is visible under Recruitment`,
+          );
+        await heading.click();
+        n++;
         await p.waitForTimeout(250);
         child = p.locator(`nav.sidebar .nav-sec.open .nav-child:text-is("${page}")`);
         if (!(await child.isVisible())) fail(`N15 desktop: ${task}: "${page}" is not visible after opening its group`);
       }
-      await child.click(); n++;
+      await child.click();
+      n++;
       await p.waitForTimeout(250);
     }
     if ((await title(p)) !== expect) fail(`N15 desktop: ${task}: landed on "${await title(p)}"`);
-    if (!(await p.locator('nav.sidebar button.nav-section.active').innerText()).includes(section)) fail(`N15 desktop: ${task}: parent not active`);
+    if (!(await p.locator('nav.sidebar button.nav-section.active').innerText()).includes(section))
+      fail(`N15 desktop: ${task}: parent not active`);
     matrix[task] = { desktop: n };
   }
-  say(`N15 desktop: all seven destinations found from a fresh login (at most three taps — section, group, page) — ${TASKS.map(([t]) => `${t} ${matrix[t].desktop}`).join(', ')} interactions`);
+  say(
+    `N15 desktop: all seven destinations found from a fresh login (at most three taps — section, group, page) — ${TASKS.map(([t]) => `${t} ${matrix[t].desktop}`).join(', ')} interactions`,
+  );
   await ctx.close();
 }
 {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const p = await clubLogin(ctx, 'Noa Winter', 'First-Team Scout');
-  await p.click('button.nav-collapse'); await p.waitForTimeout(200);
+  await p.click('button.nav-collapse');
+  await p.waitForTimeout(200);
   for (const [task, section, page, expect] of TASKS) {
     await fresh(p);
     let n = 0;
-    await p.click(`nav.sidebar button[aria-label="${section}"]`); n++;
+    await p.click(`nav.sidebar button[aria-label="${section}"]`);
+    n++;
     await p.waitForTimeout(200);
     const item = p.locator(`nav.sidebar .nav-flyout [role="menuitem"]:text-is("${page}")`);
     if (!(await item.isVisible())) fail(`N15 collapsed: ${task}: "${page}" not in the flyout`);
-    await item.click(); n++;
+    await item.click();
+    n++;
     await p.waitForTimeout(250);
     if ((await title(p)) !== expect) fail(`N15 collapsed: ${task}: landed on "${await title(p)}"`);
     matrix[task].collapsed = n;
   }
-  say(`N15 collapsed rail: all seven found through the flyout — ${TASKS.map(([t]) => `${t} ${matrix[t].collapsed}`).join(', ')} interactions`);
+  say(
+    `N15 collapsed rail: all seven found through the flyout — ${TASKS.map(([t]) => `${t} ${matrix[t].collapsed}`).join(', ')} interactions`,
+  );
   await ctx.close();
 }
 {
@@ -677,34 +973,47 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
   for (const [task, section, page, expect] of TASKS) {
     await fresh(p);
     let n = 0;
-    await p.click('button.nav-hamburger'); n++;
+    await p.click('button.nav-hamburger');
+    n++;
     await p.waitForTimeout(250);
     const sec = p.locator(`nav.sidebar button.nav-section:has-text("${section}")`);
-    await sec.click(); n++;
+    await sec.click();
+    n++;
     await p.waitForTimeout(250);
-    if ((await p.locator('nav.sidebar.drawer-open').count()) !== 1) fail(`N15 mobile: ${task}: tapping a section in the drawer must expand it, not leave the drawer`);
-    if ((await sec.getAttribute('aria-expanded')) !== 'true') fail(`N15 mobile: ${task}: section button announces expansion`);
+    if ((await p.locator('nav.sidebar.drawer-open').count()) !== 1)
+      fail(`N15 mobile: ${task}: tapping a section in the drawer must expand it, not leave the drawer`);
+    if ((await sec.getAttribute('aria-expanded')) !== 'true')
+      fail(`N15 mobile: ${task}: section button announces expansion`);
     let child = p.locator(`nav.sidebar .nav-sec.open .nav-child:text-is("${page}")`);
     if (!(await child.isVisible())) {
-      const heading = p.locator(`nav.sidebar .nav-sec.open .nav-group[aria-label="${GROUP_OF[page]}"] > button.nav-group-label`);
-      if (!(await heading.isVisible())) fail(`N15 mobile: ${task}: neither "${page}" nor its group is visible in the expanded drawer`);
+      const heading = p.locator(
+        `nav.sidebar .nav-sec.open .nav-group[aria-label="${GROUP_OF[page]}"] > button.nav-group-label`,
+      );
+      if (!(await heading.isVisible()))
+        fail(`N15 mobile: ${task}: neither "${page}" nor its group is visible in the expanded drawer`);
       const hb = await heading.boundingBox();
       if (!hb || hb.height < 32) fail(`N15 mobile: ${task}: group heading tap target ${hb?.height}px`);
-      await heading.click(); n++;
+      await heading.click();
+      n++;
       await p.waitForTimeout(250);
       child = p.locator(`nav.sidebar .nav-sec.open .nav-child:text-is("${page}")`);
       if (!(await child.isVisible())) fail(`N15 mobile: ${task}: "${page}" not visible after opening its group`);
     }
     const box = await child.boundingBox();
     if (!box || box.height < 32) fail(`N15 mobile: ${task}: tap target ${box?.height}px`);
-    await child.click(); n++;
+    await child.click();
+    n++;
     await p.waitForTimeout(300);
-    if ((await p.locator('nav.sidebar.drawer-open').count()) !== 0) fail(`N15 mobile: ${task}: drawer closes after choosing a page`);
+    if ((await p.locator('nav.sidebar.drawer-open').count()) !== 0)
+      fail(`N15 mobile: ${task}: drawer closes after choosing a page`);
     if ((await title(p)) !== expect) fail(`N15 mobile: ${task}: landed on "${await title(p)}"`);
-    if (await p.evaluate(() => document.documentElement.scrollWidth > innerWidth)) fail(`N15 mobile: ${task}: horizontal overflow`);
+    if (await p.evaluate(() => document.documentElement.scrollWidth > innerWidth))
+      fail(`N15 mobile: ${task}: horizontal overflow`);
     matrix[task].mobile = n;
   }
-  say(`N15 mobile (390px): all seven found through the drawer with no blind swipe — ${TASKS.map(([t]) => `${t} ${matrix[t].mobile}`).join(', ')} interactions`);
+  say(
+    `N15 mobile (390px): all seven found through the drawer with no blind swipe — ${TASKS.map(([t]) => `${t} ${matrix[t].mobile}`).join(', ')} interactions`,
+  );
   console.log('   task-finding matrix: ' + JSON.stringify(matrix));
   await ctx.close();
 }
@@ -716,14 +1025,57 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
   // (no aria-current, no href, no navigation).
   await goHash(scout, 'search');
   const tree = await scout.evaluate(() => {
-    const groups = [...document.querySelectorAll('nav.sidebar .nav-sec.open .nav-group')].map((g) => { const h = g.querySelector('.nav-group-label'); return { role: g.getAttribute('role'), label: g.getAttribute('aria-label'), heading: h?.tagName, expanded: h?.getAttribute('aria-expanded'), controls: h?.getAttribute('aria-controls'), controlled: h?.getAttribute('aria-controls') ? !!document.getElementById(h.getAttribute('aria-controls')) : null, current: h?.getAttribute('aria-current'), isLink: !!h?.closest('a, [role="link"]') }; });
-    const discover = [...document.querySelectorAll('nav.sidebar button')].filter((b) => b.textContent.trim() === 'Discover');
-    return { groups, discoverIsLink: discover.some((b) => b.closest('a') || b.getAttribute('role') === 'link'), discoverExpanded: discover[0]?.getAttribute('aria-expanded') };
+    const groups = [...document.querySelectorAll('nav.sidebar .nav-sec.open .nav-group')].map((g) => {
+      const h = g.querySelector('.nav-group-label');
+      return {
+        role: g.getAttribute('role'),
+        label: g.getAttribute('aria-label'),
+        heading: h?.tagName,
+        expanded: h?.getAttribute('aria-expanded'),
+        controls: h?.getAttribute('aria-controls'),
+        controlled: h?.getAttribute('aria-controls')
+          ? !!document.getElementById(h.getAttribute('aria-controls'))
+          : null,
+        current: h?.getAttribute('aria-current'),
+        isLink: !!h?.closest('a, [role="link"]'),
+      };
+    });
+    const discover = [...document.querySelectorAll('nav.sidebar button')].filter(
+      (b) => b.textContent.trim() === 'Discover',
+    );
+    return {
+      groups,
+      discoverIsLink: discover.some((b) => b.closest('a') || b.getAttribute('role') === 'link'),
+      discoverExpanded: discover[0]?.getAttribute('aria-expanded'),
+    };
   });
-  if (tree.groups.length < 7 || tree.groups.some((g) => g.role !== 'group' || !g.label || g.heading !== 'BUTTON' || !['true', 'false'].includes(g.expanded) || !g.controls || g.current || g.isLink)) fail(`N16: group semantics (${JSON.stringify(tree.groups)})`);
-  if (tree.groups.filter((g) => g.expanded === 'true').length !== 1 || tree.groups.some((g) => g.expanded === 'true' && !g.controlled) || tree.groups.some((g) => g.expanded === 'false' && g.controlled)) fail(`N16: exactly one group expanded and aria-controls names only a rendered panel (${JSON.stringify(tree.groups)})`);
-  if (tree.discoverIsLink || tree.discoverExpanded !== 'true') fail('N16: "Discover" is a disclosure button (aria-expanded), not a link');
-  say('N16: groups are role="group" containers with names; group headings are disclosure buttons with aria-expanded / aria-controls, never links or destinations; one group expanded');
+  if (
+    tree.groups.length < 7 ||
+    tree.groups.some(
+      (g) =>
+        g.role !== 'group' ||
+        !g.label ||
+        g.heading !== 'BUTTON' ||
+        !['true', 'false'].includes(g.expanded) ||
+        !g.controls ||
+        g.current ||
+        g.isLink,
+    )
+  )
+    fail(`N16: group semantics (${JSON.stringify(tree.groups)})`);
+  if (
+    tree.groups.filter((g) => g.expanded === 'true').length !== 1 ||
+    tree.groups.some((g) => g.expanded === 'true' && !g.controlled) ||
+    tree.groups.some((g) => g.expanded === 'false' && g.controlled)
+  )
+    fail(
+      `N16: exactly one group expanded and aria-controls names only a rendered panel (${JSON.stringify(tree.groups)})`,
+    );
+  if (tree.discoverIsLink || tree.discoverExpanded !== 'true')
+    fail('N16: "Discover" is a disclosure button (aria-expanded), not a link');
+  say(
+    'N16: groups are role="group" containers with names; group headings are disclosure buttons with aria-expanded / aria-controls, never links or destinations; one group expanded',
+  );
 }
 
 // ============================== N12 — server authorization unaffected
@@ -733,10 +1085,19 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
   const r2 = await fetch(`${API}/org/verification/requests`);
   if (r2.status !== 401) fail('server auth: org route must still 401 without a session');
   // A scout's OWN session, on a route the sidebar hides from them.
-  const noa = await (await fetch(`${API}/auth/org/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Noa Winter', role: 'First-Team Scout' }) })).json();
+  const noa = await (
+    await fetch(`${API}/auth/org/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Noa Winter', role: 'First-Team Scout' }),
+    })
+  ).json();
   const r3 = await fetch(`${API}/org/verification/requests`, { headers: { authorization: `Bearer ${noa.token}` } });
-  if (r3.status === 200) fail('server auth: a scout must not read the verification console just because the sidebar could be edited');
-  say(`N12: server authorization unaffected — hidden navigation changes nothing about 401/403 rules (scout → ${r3.status})`);
+  if (r3.status === 200)
+    fail('server auth: a scout must not read the verification console just because the sidebar could be edited');
+  say(
+    `N12: server authorization unaffected — hidden navigation changes nothing about 401/403 rules (scout → ${r3.status})`,
+  );
 }
 
 // ======================================= N7 — player app: five destinations
@@ -748,13 +1109,17 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
     if (!fs.existsSync(path.join(tabsDir, `${id}.tsx`))) fail(`N7: player route ${id} has no screen`);
   }
   for (const id of ['profile', 'upload']) {
-    if (!/name: '(profile|upload)'[^\n]*hidden: true/.test(layout) || !layout.includes(`name: '${id}'`)) fail(`N7: ${id} must keep its route off the bar`);
+    if (!/name: '(profile|upload)'[^\n]*hidden: true/.test(layout) || !layout.includes(`name: '${id}'`))
+      fail(`N7: ${id} must keep its route off the bar`);
     if (!fs.existsSync(path.join(tabsDir, `${id}.tsx`))) fail(`N7: player route ${id} removed`);
   }
   if (!layout.includes('href: null')) fail('N7: hidden routes are hidden with href: null, not deleted');
   const football = fs.readFileSync(path.join(tabsDir, 'football.tsx'), 'utf8');
-  if (!/PageTabs/.test(football) || !/href="\/upload"/.test(football)) fail('N7: Football carries page tabs and the + Add evidence action');
-  say('N7: player app — Home / Football / Opportunities / Inbox / You; Profile and Upload stay routes (href: null); Football has page tabs and + Add evidence (browser journeys live in the player suites)');
+  if (!/PageTabs/.test(football) || !/href="\/upload"/.test(football))
+    fail('N7: Football carries page tabs and the + Add evidence action');
+  say(
+    'N7: player app — Home / Football / Opportunities / Inbox / You; Profile and Upload stay routes (href: null); Football has page tabs and + Add evidence (browser journeys live in the player suites)',
+  );
 }
 
 // ================= N17 — the login screen fits a phone
@@ -770,10 +1135,28 @@ for (const width of [390, 360]) {
   page.on('pageerror', (e) => fail(`N17 page error (${width}px): ${e}`));
   await page.goto(CLUB);
   await page.waitForSelector('.org-card', { timeout: 20000 });
-  const fits = () => page.evaluate(() => ({ iw: window.innerWidth, sw: document.documentElement.scrollWidth, bw: document.body.scrollWidth, vv: Math.round(window.visualViewport?.width ?? 0) }));
-  const inside = (sel) => page.evaluate((s) => { const el = [...document.querySelectorAll(s)].pop(); if (!el) return null; const r = el.getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), height: Math.round(r.height), iw: window.innerWidth }; }, sel);
+  const fits = () =>
+    page.evaluate(() => ({
+      iw: window.innerWidth,
+      sw: document.documentElement.scrollWidth,
+      bw: document.body.scrollWidth,
+      vv: Math.round(window.visualViewport?.width ?? 0),
+    }));
+  const inside = (sel) =>
+    page.evaluate((s) => {
+      const el = [...document.querySelectorAll(s)].pop();
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return {
+        left: Math.round(r.left),
+        right: Math.round(r.right),
+        height: Math.round(r.height),
+        iw: window.innerWidth,
+      };
+    }, sel);
   let m = await fits();
-  if (m.sw > m.iw || m.iw !== width) fail(`N17 ${width}px: the org picker widens the document (innerWidth ${m.iw}, scrollWidth ${m.sw})`);
+  if (m.sw > m.iw || m.iw !== width)
+    fail(`N17 ${width}px: the org picker widens the document (innerWidth ${m.iw}, scrollWidth ${m.sw})`);
   // A validation error on screen must not widen it either.
   await page.click('button:has-text("Enter workspace")');
   await page.waitForSelector('.login .notice', { timeout: 5000 });
@@ -786,7 +1169,8 @@ for (const width of [390, 360]) {
   m = await fits();
   if (m.sw > m.iw) fail(`N17 ${width}px: a long name widens the document (${m.sw})`);
   const btn = await inside('.login button.primary');
-  if (!btn || btn.left < 0 || btn.right > btn.iw) fail(`N17 ${width}px: Enter workspace is clipped (${JSON.stringify(btn)})`);
+  if (!btn || btn.left < 0 || btn.right > btn.iw)
+    fail(`N17 ${width}px: Enter workspace is clipped (${JSON.stringify(btn)})`);
   if (btn.height < 34) fail(`N17 ${width}px: Enter workspace is below the 34px phone target (${btn.height})`);
   for (const sel of ['.enter-row input', '.enter-row input.login-pw', '.enter-row select']) {
     const box = await inside(sel);
@@ -799,15 +1183,25 @@ for (const width of [390, 360]) {
   let focus = null;
   for (let i = 0; i < 5; i++) {
     await page.keyboard.press('Tab');
-    focus = await page.evaluate(() => { const el = document.activeElement; const cs = getComputedStyle(el); return { tag: el.tagName, text: el.textContent, outline: cs.outlineStyle, outlineWidth: cs.outlineWidth }; });
+    focus = await page.evaluate(() => {
+      const el = document.activeElement;
+      const cs = getComputedStyle(el);
+      return { tag: el.tagName, text: el.textContent, outline: cs.outlineStyle, outlineWidth: cs.outlineWidth };
+    });
     if (focus.tag === 'BUTTON' && /Enter workspace/.test(focus.text)) break;
   }
-  if (!focus || focus.tag !== 'BUTTON' || !/Enter workspace/.test(focus.text)) fail(`N17 ${width}px: Tab from the name field must reach Enter workspace within five presses (got ${focus?.tag} ${focus?.text})`);
-  if (focus.outline === 'none' || focus.outlineWidth === '0px') fail(`N17 ${width}px: the focused button has no visible focus ring`);
+  if (!focus || focus.tag !== 'BUTTON' || !/Enter workspace/.test(focus.text))
+    fail(
+      `N17 ${width}px: Tab from the name field must reach Enter workspace within five presses (got ${focus?.tag} ${focus?.text})`,
+    );
+  if (focus.outline === 'none' || focus.outlineWidth === '0px')
+    fail(`N17 ${width}px: the focused button has no visible focus ring`);
   // The real login still works from the keyboard.
   await page.keyboard.press('Enter');
   await page.waitForSelector('nav.sidebar, .nav-hamburger', { timeout: 20000 });
-  say(`N17 ${width}px: the login fits (innerWidth ${m.iw} = scrollWidth ${m.sw}), every field and the button are inside the viewport, keyboard login works`);
+  say(
+    `N17 ${width}px: the login fits (innerWidth ${m.iw} = scrollWidth ${m.sw}), every field and the button are inside the viewport, keyboard login works`,
+  );
   await ctx.close();
 }
 // Desktop: the two-panel authentication card — the introduction on
@@ -820,14 +1214,38 @@ for (const width of [390, 360]) {
   await page.waitForSelector('.org-card', { timeout: 20000 });
   const row = await page.evaluate(() => {
     const box = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
-    const promo = box('.auth-promo'), form = box('.auth-form'), card = box('.auth-card');
-    const centres = [...document.querySelectorAll('.enter-row > *')].map((el) => { const r = el.getBoundingClientRect(); return Math.round(r.top + r.height / 2); });
+    const promo = box('.auth-promo'),
+      form = box('.auth-form'),
+      card = box('.auth-card');
+    const centres = [...document.querySelectorAll('.enter-row > *')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return Math.round(r.top + r.height / 2);
+    });
     const stacked = new Set(centres).size === centres.length;
-    const sideBySide = !!promo && !!form && Math.round(promo.right) <= Math.round(form.left) + 1 && Math.abs(promo.top - form.top) <= 1;
-    return { sideBySide, stacked, cardWidth: card && Math.round(card.width), promoShare: promo && card ? Math.round((promo.width / card.width) * 100) : null, sw: document.documentElement.scrollWidth, iw: window.innerWidth };
+    const sideBySide =
+      !!promo && !!form && Math.round(promo.right) <= Math.round(form.left) + 1 && Math.abs(promo.top - form.top) <= 1;
+    return {
+      sideBySide,
+      stacked,
+      cardWidth: card && Math.round(card.width),
+      promoShare: promo && card ? Math.round((promo.width / card.width) * 100) : null,
+      sw: document.documentElement.scrollWidth,
+      iw: window.innerWidth,
+    };
   });
-  if (!row.sideBySide || !row.stacked || !row.cardWidth || row.cardWidth > 1001 || row.promoShare < 40 || row.promoShare > 50 || row.sw > row.iw) fail(`N17 desktop: the authentication layout is wrong (${JSON.stringify(row)})`);
-  say(`N17 desktop: introduction (${row.promoShare}%) beside the form, fields stacked, card ${row.cardWidth}px, no overflow`);
+  if (
+    !row.sideBySide ||
+    !row.stacked ||
+    !row.cardWidth ||
+    row.cardWidth > 1001 ||
+    row.promoShare < 40 ||
+    row.promoShare > 50 ||
+    row.sw > row.iw
+  )
+    fail(`N17 desktop: the authentication layout is wrong (${JSON.stringify(row)})`);
+  say(
+    `N17 desktop: introduction (${row.promoShare}%) beside the form, fields stacked, card ${row.cardWidth}px, no overflow`,
+  );
   await ctx.close();
 }
 

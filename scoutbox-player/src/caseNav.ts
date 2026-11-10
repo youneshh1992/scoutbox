@@ -12,10 +12,23 @@
 // Opportunities screen already read, split by what the player is doing.
 // A category is UI organisation only; it is never a lifecycle state.
 
-export interface PlayerCaseSub { id: string; labelKey: string }
-export interface PlayerCaseCategory { id: string; labelKey: string; subs: readonly PlayerCaseSub[] }
-export interface PlayerCaseNav { id: string; categories: readonly PlayerCaseCategory[] }
-export interface PlayerCaseLocation { category: string; sub: string }
+export interface PlayerCaseSub {
+  id: string;
+  labelKey: string;
+}
+export interface PlayerCaseCategory {
+  id: string;
+  labelKey: string;
+  subs: readonly PlayerCaseSub[];
+}
+export interface PlayerCaseNav {
+  id: string;
+  categories: readonly PlayerCaseCategory[];
+}
+export interface PlayerCaseLocation {
+  category: string;
+  sub: string;
+}
 
 export const PLAYER_NAV: PlayerCaseNav = {
   id: 'player',
@@ -24,7 +37,8 @@ export const PLAYER_NAV: PlayerCaseNav = {
   // the former Current stage / Tasks pages are part of the Overview.
   categories: [
     {
-      id: 'journey', labelKey: 'catJourney',
+      id: 'journey',
+      labelKey: 'catJourney',
       subs: [
         { id: 'overview', labelKey: 'subOverview' },
         { id: 'activity', labelKey: 'subActivity' },
@@ -32,14 +46,16 @@ export const PLAYER_NAV: PlayerCaseNav = {
       ],
     },
     {
-      id: 'contact', labelKey: 'catContact',
+      id: 'contact',
+      labelKey: 'catContact',
       subs: [
         { id: 'messages', labelKey: 'subMessages' },
         { id: 'requests', labelKey: 'subContact' },
       ],
     },
     {
-      id: 'trial', labelKey: 'catTrial',
+      id: 'trial',
+      labelKey: 'catTrial',
       subs: [
         { id: 'invitation', labelKey: 'subInvitation' },
         { id: 'schedule', labelKey: 'subSchedule' },
@@ -47,7 +63,8 @@ export const PLAYER_NAV: PlayerCaseNav = {
       ],
     },
     {
-      id: 'offer', labelKey: 'catOffer',
+      id: 'offer',
+      labelKey: 'catOffer',
       subs: [
         { id: 'offer-terms', labelKey: 'subOffer' },
         { id: 'offer-documents', labelKey: 'subDocuments' },
@@ -55,7 +72,8 @@ export const PLAYER_NAV: PlayerCaseNav = {
       ],
     },
     {
-      id: 'signing', labelKey: 'catSigning',
+      id: 'signing',
+      labelKey: 'catSigning',
       subs: [
         { id: 'signing-status', labelKey: 'subSigning' },
         { id: 'signing-documents', labelKey: 'subDocuments' },
@@ -68,10 +86,16 @@ export const PLAYER_NAV: PlayerCaseNav = {
 /** Older links to the Board and to Current stage / Tasks as separate pages
  *  still land: the Board is a page of the journey; the others are the Overview. */
 export const PLAYER_LEGACY_SUBS: Readonly<Record<string, string>> = {
-  stage: 'overview', tasks: 'overview',
-  'board-open': 'board', 'board-fit': 'board', 'board-invites': 'board', 'board-followups': 'board',
+  stage: 'overview',
+  tasks: 'overview',
+  'board-open': 'board',
+  'board-fit': 'board',
+  'board-invites': 'board',
+  'board-followups': 'board',
 };
-const PLAYER_LEGACY_CATS: Readonly<Record<string, PlayerCaseLocation>> = { board: { category: 'journey', sub: 'board' } };
+const PLAYER_LEGACY_CATS: Readonly<Record<string, PlayerCaseLocation>> = {
+  board: { category: 'journey', sub: 'board' },
+};
 
 export function playerDefaultLocation(model: PlayerCaseNav = PLAYER_NAV): PlayerCaseLocation {
   const c = model.categories[0];
@@ -79,7 +103,11 @@ export function playerDefaultLocation(model: PlayerCaseNav = PLAYER_NAV): Player
 }
 
 /** `?cat=&tab=` → a location, falling back category-first then to the default. Unknown values never throw. */
-export function playerLocation(cat: string | string[] | undefined, tab: string | string[] | undefined, model: PlayerCaseNav = PLAYER_NAV): PlayerCaseLocation {
+export function playerLocation(
+  cat: string | string[] | undefined,
+  tab: string | string[] | undefined,
+  model: PlayerCaseNav = PLAYER_NAV,
+): PlayerCaseLocation {
   const rawC = Array.isArray(cat) ? cat[0] : cat;
   const rawS = Array.isArray(tab) ? tab[0] : tab;
   const legacyCat = rawC ? PLAYER_LEGACY_CATS[rawC] : undefined;

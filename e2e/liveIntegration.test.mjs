@@ -39,11 +39,21 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.ico': 'image/x-icon', '.json': 'application/json' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.ico': 'image/x-icon',
+    '.json': 'application/json',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html'); // SPA fallback
@@ -59,14 +69,22 @@ serveDir('scoutbox-club/dist-live', 8282);
 serveDir('scoutbox-grassroots/dist-live', 8283);
 
 function cleanup() {
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
   for (const s of statics) s.close();
   fs.rmSync(DATA, { recursive: true, force: true });
 }
 process.on('exit', cleanup);
 
 for (let i = 0; i < 60; i++) {
-  try { if ((await fetch(`${API}/health`)).ok) break; } catch { /* booting */ }
+  try {
+    if ((await fetch(`${API}/health`)).ok) break;
+  } catch {
+    /* booting */
+  }
   await new Promise((r) => setTimeout(r, 250));
 }
 say(`backend up on :${API_PORT} (isolated db: ${DATA})`);
@@ -88,7 +106,9 @@ async function loginPortal(page, host, orgName, userName) {
   await page.waitForSelector('.topbar', { timeout: 20000 });
 }
 async function portalRequestContact(page, playerName, message, minor = false) {
-  await page.evaluate(() => { location.hash = '#/search'; }); // deep link (Search)
+  await page.evaluate(() => {
+    location.hash = '#/search';
+  }); // deep link (Search)
   await page.waitForSelector('.player-card:not(.skeleton)', { timeout: 20000 });
   await page.click(`.player-card:has-text("${playerName}")`);
   await page.waitForSelector('.drawer h3', { timeout: 10000 });
@@ -98,7 +118,9 @@ async function portalRequestContact(page, playerName, message, minor = false) {
   await page.click('.drawer button:has-text("Close")');
 }
 async function portalOpenThread(page, playerName) {
-  await page.evaluate(() => { location.hash = '#/messages'; }); // deep link (Messages)
+  await page.evaluate(() => {
+    location.hash = '#/messages';
+  }); // deep link (Messages)
   await page.click(`.list-row:has-text("${playerName}")`);
 }
 async function portalSend(page, text) {
@@ -128,7 +150,11 @@ say('A: player received the request in his own context and accepted');
 // club → player message (arrives over the player's authenticated SSE stream)
 await portalOpenThread(club, 'Kola Adeyemi');
 await portalSend(club, 'Thursday 6pm at the training ground?');
-await player.locator('[data-testid="detail-back"]').first().click().catch(() => {}); // leave the request detail
+await player
+  .locator('[data-testid="detail-back"]')
+  .first()
+  .click()
+  .catch(() => {}); // leave the request detail
 await player.locator('[data-testid^="thread-"]').first().click(); // a conversation row
 await player.waitForSelector('text=Thursday 6pm at the training ground?', { timeout: 15000 });
 say('A: club → player message delivered live');
@@ -140,12 +166,17 @@ await club.waitForSelector('text=Works for me — see you there.', { timeout: 15
 say('A: player → club reply delivered live');
 
 // a second thread's unread badge: send another player message while club is elsewhere
-await club.evaluate(() => { location.hash = '#/search'; }); // deep link (Search) // navigate away
+await club.evaluate(() => {
+  location.hash = '#/search';
+}); // deep link (Search) // navigate away
 await player.fill('input[placeholder="Message…"]', 'One more thing — boots or trainers?');
 await player.keyboard.press('Enter');
 await club.waitForSelector('nav.sidebar .nav-badge', { timeout: 15000 });
 const badge = await club.locator('nav.sidebar .nav-badge').innerText();
-if (!/^\d+$/.test(badge) || Number(badge) < 1) { console.error(`✗ unread badge not numeric: ${badge}`); process.exit(1); }
+if (!/^\d+$/.test(badge) || Number(badge) < 1) {
+  console.error(`✗ unread badge not numeric: ${badge}`);
+  process.exit(1);
+}
 say(`A: numeric unread badge on the Pro sidebar (${badge})`);
 await portalOpenThread(club, 'Kola Adeyemi'); // opening reads the thread
 await club.waitForSelector('text=boots or trainers', { timeout: 10000 });
@@ -163,7 +194,11 @@ say('B: Grassroots portal logged in (Moss Side — separate context)');
 await portalRequestContact(grass, 'Kola Adeyemi', 'First-team spot this season if you fancy it.');
 await player.click('a[href="/inbox"]');
 await player.waitForSelector('text=Moss Side Athletic', { timeout: 15000 });
-await player.locator('[data-testid="thread-back"]').first().click().catch(() => {}); // leave the Eastport thread before the Moss Side request
+await player
+  .locator('[data-testid="thread-back"]')
+  .first()
+  .click()
+  .catch(() => {}); // leave the Eastport thread before the Moss Side request
 await player.locator('[data-testid^="inbox-request-"]').first().click();
 await player.getByRole('button', { name: 'Accept', exact: true }).click();
 await player.waitForSelector('[data-testid^="req-status-"]:has-text("Accepted")', { timeout: 10000 });
@@ -171,12 +206,24 @@ await portalOpenThread(grass, 'Kola Adeyemi');
 await portalSend(grass, 'Training is Tuesdays and Thursdays.');
 // RN-web renders buttons as divs — use text locators, and pick the Moss
 // thread (second in creation order) from the two now open.
-await player.locator('[data-testid="detail-back"]').first().click().catch(() => {}); // leave the Moss Side request detail
-await player.locator('[data-testid="thread-back"]').first().click().catch(() => {});
+await player
+  .locator('[data-testid="detail-back"]')
+  .first()
+  .click()
+  .catch(() => {}); // leave the Moss Side request detail
+await player
+  .locator('[data-testid="thread-back"]')
+  .first()
+  .click()
+  .catch(() => {});
 const mossRow = () => player.locator('[data-testid^="thread-"]').filter({ hasText: /Moss/ });
 for (let i = 0; i < 20 && !(await mossRow().count()); i++) await player.waitForTimeout(500);
-if (!(await mossRow().count())) { // the list is page state; a reload reads the server's channels afresh
-  await player.reload(); await player.waitForSelector('text=Your visibility right now', { timeout: 30000 }).catch(() => {}); await player.click('a[href="/inbox"]'); await player.waitForSelector('[data-testid^="thread-"]', { timeout: 15000 });
+if (!(await mossRow().count())) {
+  // the list is page state; a reload reads the server's channels afresh
+  await player.reload();
+  await player.waitForSelector('text=Your visibility right now', { timeout: 30000 }).catch(() => {});
+  await player.click('a[href="/inbox"]');
+  await player.waitForSelector('[data-testid^="thread-"]', { timeout: 15000 });
 }
 await mossRow().first().click(); // rows sort by latest message, so pick the Moss Side thread by name
 await player.waitForSelector('text=Training is Tuesdays and Thursdays.', { timeout: 15000 });
@@ -197,7 +244,7 @@ await guardian.waitForSelector('text=Eastport FC', { timeout: 15000 });
 await guardian.getByRole('button', { name: 'Accept', exact: true }).first().click();
 say('C: the guardian (own context) received and accepted the request');
 await guardian.locator('[data-testid^="thread-"]').first().click();
-await guardian.fill('input[placeholder="Message…"]', 'Please send the session details — Amara (Guni\'s mum).');
+await guardian.fill('input[placeholder="Message…"]', "Please send the session details — Amara (Guni's mum).");
 await guardian.keyboard.press('Enter');
 await portalOpenThread(club, 'Guni Adebayo');
 await club.waitForSelector("text=Guni's mum", { timeout: 15000 });
@@ -209,10 +256,18 @@ const grass2 = await (await browser.newContext({ viewport: { width: 1440, height
 await loginPortal(grass2, 'http://localhost:8283/', 'Hackney Marsh Rovers', 'Dee Mensah');
 await portalRequestContact(grass2, 'Guni Adebayo', 'Our U15s train five minutes from you.', true);
 say('C2: verified local grassroots club sent a guardian-routed request for the minor');
-await guardian.locator('[data-testid="thread-back"]').first().click().catch(() => {}); // leave the Eastport thread
+await guardian
+  .locator('[data-testid="thread-back"]')
+  .first()
+  .click()
+  .catch(() => {}); // leave the Eastport thread
 await guardian.waitForSelector('text=Hackney Marsh Rovers', { timeout: 15000 });
 await guardian.getByRole('button', { name: 'Accept', exact: true }).first().click();
-await guardian.locator('[data-testid^="thread-"]').filter({ hasText: /Hackney/ }).first().click(); // rows sort by latest message; pick the Hackney thread by name
+await guardian
+  .locator('[data-testid^="thread-"]')
+  .filter({ hasText: /Hackney/ })
+  .first()
+  .click(); // rows sort by latest message; pick the Hackney thread by name
 await guardian.fill('input[placeholder="Message…"]', 'Guni would love that — which pitch?');
 await guardian.keyboard.press('Enter');
 await portalOpenThread(grass2, 'Guni Adebayo');
@@ -224,7 +279,11 @@ say('C2: grassroots ↔ guardian conversation live — the child is never a part
 await player.goto('http://localhost:8281/');
 await player.waitForSelector('text=Your visibility right now', { timeout: 30000 }); // session restored
 await player.click('a[href="/inbox"]');
-await player.locator('[data-testid^="thread-"]').filter({ hasText: /Eastport/ }).first().click(); // rows sort by latest message; pick the Eastport thread by name
+await player
+  .locator('[data-testid^="thread-"]')
+  .filter({ hasText: /Eastport/ })
+  .first()
+  .click(); // rows sort by latest message; pick the Eastport thread by name
 await player.waitForSelector('text=Thursday 6pm at the training ground?', { timeout: 15000 });
 say('D: full reload — session restored, message history intact from the server');
 

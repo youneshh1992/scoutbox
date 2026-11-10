@@ -9,8 +9,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import {
-  BOX_CAM_CV_POLICY_VERSION, CV_ENGINE_VERSION, CV_PROVIDER_ID, FRAME_ENCODING,
-  FRAME_LIMITS, CAPTURE_REQUIREMENTS, DETECTION, EVENT_RULES, CONFIDENCE,
+  BOX_CAM_CV_POLICY_VERSION,
+  CV_ENGINE_VERSION,
+  CV_PROVIDER_ID,
+  FRAME_ENCODING,
+  FRAME_LIMITS,
+  CAPTURE_REQUIREMENTS,
+  DETECTION,
+  EVENT_RULES,
+  CONFIDENCE,
 } from './policy.mjs';
 import { QUALITY_THRESHOLDS } from './quality.mjs';
 import { canonicalJson } from '../../../platform/values.mjs';
@@ -79,7 +86,9 @@ export function frozenGroups() {
 /** Keys sorted, so the checksum doesn't depend on declaration order. */
 export { canonicalJson };
 
-function sha256(s) { return createHash('sha256').update(s, 'utf8').digest('hex'); }
+function sha256(s) {
+  return createHash('sha256').update(s, 'utf8').digest('hex');
+}
 
 export function computeChecksums(groups = frozenGroups()) {
   const out = {};
@@ -98,10 +107,10 @@ export const FREEZE = Object.freeze({
   engineVersion: 2,
   policyVersion: 1,
   reason:
-    'Re-frozen after the scale-step fix that holdout generation 2 forced: the per-sample '
-    + 'normalisation introduced under freeze 2 was replaced by a derived bound on how much '
-    + 'the player region may change size between samples. Generations 1 and 2 are consumed; '
-    + 'generation 3 was generated under this freeze.',
+    'Re-frozen after the scale-step fix that holdout generation 2 forced: the per-sample ' +
+    'normalisation introduced under freeze 2 was replaced by a derived bound on how much ' +
+    'the player region may change size between samples. Generations 1 and 2 are consumed; ' +
+    'generation 3 was generated under this freeze.',
   supersedes: 'm22-v2-freeze-2',
   checksums: Object.freeze({
     policy: '776cb4d0ea6fa31b',
@@ -125,12 +134,12 @@ export const FREEZE_HISTORY = Object.freeze([
     covered: 'constants only',
     supersededBy: 'm22-v2-freeze-2',
     supersededBecause:
-      'Holdout generation 1, run under this freeze, found a P0 false touch (HT05, an 18% '
-      + 'camera zoom pulse over a fixed ball-player relationship). The root cause was in the '
-      + 'tracking layer: player-relative positions were differenced in pixels and then divided '
-      + 'by a single ball diameter, so a global scale change left a residual velocity. The fix '
-      + 'changed code, not constants, which this freeze did not cover — so the freeze was '
-      + 'extended to hash the observation layers themselves.',
+      'Holdout generation 1, run under this freeze, found a P0 false touch (HT05, an 18% ' +
+      'camera zoom pulse over a fixed ball-player relationship). The root cause was in the ' +
+      'tracking layer: player-relative positions were differenced in pixels and then divided ' +
+      'by a single ball diameter, so a global scale change left a residual velocity. The fix ' +
+      'changed code, not constants, which this freeze did not cover — so the freeze was ' +
+      'extended to hash the observation layers themselves.',
   }),
   Object.freeze({
     freezeId: 'm22-v2-freeze-2',
@@ -138,11 +147,11 @@ export const FREEZE_HISTORY = Object.freeze([
     covered: 'constants and layer source',
     supersededBy: 'm22-v2-freeze-3',
     supersededBecause:
-      'Holdout generation 2, run under this freeze, found three more P0 false touches on the '
-      + 'same axis (step zooms and repeated pulses) and, on re-probing, showed that freeze 2\'s '
-      + 'fix had cost counting accuracy by amplifying ball-diameter noise. Both were resolved '
-      + 'by a single derived constant, EVENT_RULES.maxFrameScaleStepPerSample, which changed '
-      + 'the `contact` and `geometry` groups as well as layer source.',
+      'Holdout generation 2, run under this freeze, found three more P0 false touches on the ' +
+      "same axis (step zooms and repeated pulses) and, on re-probing, showed that freeze 2's " +
+      'fix had cost counting accuracy by amplifying ball-diameter noise. Both were resolved ' +
+      'by a single derived constant, EVENT_RULES.maxFrameScaleStepPerSample, which changed ' +
+      'the `contact` and `geometry` groups as well as layer source.',
   }),
 ]);
 

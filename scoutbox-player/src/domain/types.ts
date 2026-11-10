@@ -111,12 +111,7 @@ export interface PlayerProfile {
   medical: Medical;
 }
 
-export type Availability =
-  | 'available_now'
-  | 'end_of_season'
-  | 'loan_open'
-  | 'overseas_open'
-  | 'not_seeking';
+export type Availability = 'available_now' | 'end_of_season' | 'loan_open' | 'overseas_open' | 'not_seeking';
 
 export type ContractStatus =
   | 'under_contract'
@@ -148,7 +143,12 @@ export const CONTRACT_LABELS: Record<ContractStatus, string> = {
 // they get sanitized status notes (ChildInboxItem); the guardian gets the
 // full club-first view (GuardianInboxRequest).
 export interface TrialSlot {
-  id: string; day: string; kind: string | null; startsAt: number; endsAt: number; timezone: string;
+  id: string;
+  day: string;
+  kind: string | null;
+  startsAt: number;
+  endsAt: number;
+  timezone: string;
   venue: { name: string; town: string | null } | null;
 }
 export interface TrialSlotDetails {

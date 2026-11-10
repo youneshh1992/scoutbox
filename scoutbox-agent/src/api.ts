@@ -33,7 +33,9 @@ export interface Session {
 }
 
 /** The current, authorized resource a notification points to, resolved by the server at read time. */
-export type NotificationTarget = { kind: 'client'; clientId: string; tab: string } | { kind: string; [k: string]: unknown };
+export type NotificationTarget =
+  | { kind: 'client'; clientId: string; tab: string }
+  | { kind: string; [k: string]: unknown };
 export interface Notification {
   id: string;
   ts: number;
@@ -58,7 +60,11 @@ export class ApiError extends Error {
   details: Record<string, unknown> | null = null;
   retryAfterS: number | null = null;
   retryable: boolean | null = null;
-  constructor(public status: number, public code: string, message: string) {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+  ) {
     super(message);
   }
   static fromResponse(res: Response, body: Record<string, unknown> | null | undefined): ApiError {
@@ -111,7 +117,8 @@ export const httpCore: CoreApi = {
 
   getNotifications: (s) => request<Notification[]>('/org/notifications', { headers: headers(s) }),
   markNotificationsRead: (s) => request<void>('/org/notifications/read', { method: 'POST', headers: headers(s) }),
-  report: (s, input) => request<void>('/org/report', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
+  report: (s, input) =>
+    request<void>('/org/report', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
 
   onChange(s, cb) {
     if (!s) return () => {};
@@ -125,10 +132,15 @@ export const httpCore: CoreApi = {
       try {
         const { ticket } = await request<{ ticket: string }>('/events/ticket', { method: 'POST', headers: headers(s) });
         if (closed) return;
-        source = new EventSource(`${API_URL}/events?ticket=${encodeURIComponent(ticket)}${lastEventId ? `&lastEventId=${lastEventId}` : ''}`);
+        source = new EventSource(
+          `${API_URL}/events?ticket=${encodeURIComponent(ticket)}${lastEventId ? `&lastEventId=${lastEventId}` : ''}`,
+        );
         source.onopen = () => {
           retry = 0;
-          if (dropped) { dropped = false; cb('reconnected', {}); }
+          if (dropped) {
+            dropped = false;
+            cb('reconnected', {});
+          }
           cb('sse_status', { connected: true });
         };
         source.onmessage = (e) => {
@@ -136,7 +148,9 @@ export const httpCore: CoreApi = {
           try {
             const data = JSON.parse(e.data);
             cb(data.event, data);
-          } catch { /* ignore malformed frames */ }
+          } catch {
+            /* ignore malformed frames */
+          }
         };
         source.onerror = () => {
           source?.close();
@@ -149,14 +163,21 @@ export const httpCore: CoreApi = {
         if (closed) return;
         // A 401 on the ticket means the session is gone; stop
         // asking every 15 s and let the app sign out.
-        if (e instanceof ApiError && e.status === 401) { closed = true; cb('session_expired', {}); return; }
+        if (e instanceof ApiError && e.status === 401) {
+          closed = true;
+          cb('session_expired', {});
+          return;
+        }
         dropped = true;
         cb('sse_status', { connected: false });
         window.setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
       }
     };
     void connect();
-    return () => { closed = true; source?.close(); };
+    return () => {
+      closed = true;
+      source?.close();
+    };
   },
 };
 
@@ -167,6 +188,12 @@ export const api: CoreApi = DEMO_MODE ? demoCore : httpCore;
 export function revokeSession(s: Session | null): void {
   if (DEMO_MODE || !s?.token) return;
   try {
-    void fetch(`${API_URL}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${s.token}` }, keepalive: true }).catch(() => {});
-  } catch { /* offline: the server lifetime still ends it */ }
+    void fetch(`${API_URL}/auth/logout`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${s.token}` },
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* offline: the server lifetime still ends it */
+  }
 }

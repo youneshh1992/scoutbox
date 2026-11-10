@@ -23,7 +23,8 @@ export const DEMO_APPS = {
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) walk(p, out); else out.push(p);
+    if (e.isDirectory()) walk(p, out);
+    else out.push(p);
   }
   return out;
 }
@@ -31,22 +32,34 @@ function walk(dir, out = []) {
 /** sha256 over (relative path + contents) of every file under src/ plus the extras, in a fixed order. */
 export function sourceFingerprint(app, extra = []) {
   const base = path.join(ROOT, app);
-  const files = walk(path.join(base, 'src')).concat(extra.map((f) => path.join(base, f)).filter((f) => fs.existsSync(f)));
+  const files = walk(path.join(base, 'src')).concat(
+    extra.map((f) => path.join(base, f)).filter((f) => fs.existsSync(f)),
+  );
   // The portals render from the shared design system (tokens, shell
   // CSS, icons, fonts), so a change there must invalidate their bundles too.
   // The retained reference HTML is documentation, not source.
-  const shared = app === 'scoutbox-player' ? [] : walk(path.join(ROOT, 'design-system')).filter((f) => !f.includes(`${path.sep}reference${path.sep}`));
+  const shared =
+    app === 'scoutbox-player'
+      ? []
+      : walk(path.join(ROOT, 'design-system')).filter((f) => !f.includes(`${path.sep}reference${path.sep}`));
   const h = createHash('sha256');
   for (const f of files) {
-    h.update(path.relative(base, f)); h.update('\0');
-    h.update(fs.readFileSync(f)); h.update('\0');
+    h.update(path.relative(base, f));
+    h.update('\0');
+    h.update(fs.readFileSync(f));
+    h.update('\0');
   }
   for (const f of shared) {
-    h.update(path.relative(ROOT, f)); h.update('\0');
-    h.update(fs.readFileSync(f)); h.update('\0');
+    h.update(path.relative(ROOT, f));
+    h.update('\0');
+    h.update(fs.readFileSync(f));
+    h.update('\0');
   }
   // The inliner and the demo build script shape the bundle too.
-  for (const f of ['e2e/inline.mjs', 'e2e/buildDemos.mjs']) { h.update(f); h.update(fs.readFileSync(path.join(ROOT, f))); }
+  for (const f of ['e2e/inline.mjs', 'e2e/buildDemos.mjs']) {
+    h.update(f);
+    h.update(fs.readFileSync(path.join(ROOT, f)));
+  }
   return h.digest('hex').slice(0, 24);
 }
 

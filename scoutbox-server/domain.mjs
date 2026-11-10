@@ -84,9 +84,7 @@ export function haversineKm(a, b) {
   const rad = (d) => (d * Math.PI) / 180;
   const dLat = rad(b.lat - a.lat);
   const dLng = rad(b.lng - a.lng);
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
@@ -123,17 +121,41 @@ export function visibleToOrg(player, org) {
 // immediately, not just be blocked.
 const MODERATION_PATTERNS = [
   { flag: 'email', severity: 'contact', re: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i },
-  { flag: 'email_obfuscated', severity: 'contact', re: /\b[a-z0-9._%+-]{2,}\s*(\(|\[)?\s*at\s*(\)|\])?\s*[a-z0-9-]{2,}\s*(\(|\[)?\s*dot\s*(\)|\])?\s*[a-z]{2,}\b/i },
+  {
+    flag: 'email_obfuscated',
+    severity: 'contact',
+    re: /\b[a-z0-9._%+-]{2,}\s*(\(|\[)?\s*at\s*(\)|\])?\s*[a-z0-9-]{2,}\s*(\(|\[)?\s*dot\s*(\)|\])?\s*[a-z]{2,}\b/i,
+  },
   { flag: 'phone_number', severity: 'contact', re: /(\+?\d[\d\s().-]{7,}\d)/ },
-  { flag: 'phone_spelled', severity: 'contact', re: /\b(zero|one|two|three|four|five|six|seven|eight|nine)([\s-]+(zero|one|two|three|four|five|six|seven|eight|nine)){6,}\b/i },
+  {
+    flag: 'phone_spelled',
+    severity: 'contact',
+    re: /\b(zero|one|two|three|four|five|six|seven|eight|nine)([\s-]+(zero|one|two|three|four|five|six|seven|eight|nine)){6,}\b/i,
+  },
   { flag: 'social_handle', severity: 'contact', re: /(^|\s)@[a-z0-9_.]{3,}/i },
-  { flag: 'social_platform', severity: 'contact', re: /\b(whatsapp|snapchat|instagram|telegram|discord|tiktok|signal|wickr|kik|viber|dm me|dms)\b/i },
+  {
+    flag: 'social_platform',
+    severity: 'contact',
+    re: /\b(whatsapp|snapchat|instagram|telegram|discord|tiktok|signal|wickr|kik|viber|dm me|dms)\b/i,
+  },
   { flag: 'url', severity: 'contact', re: /\bhttps?:\/\/|www\.[a-z0-9-]+\.[a-z]{2,}/i },
-  { flag: 'meet_off_platform', severity: 'contact', re: /\b(meet (me|us) (at|outside)|off the app|off[- ]platform)\b/i },
+  {
+    flag: 'meet_off_platform',
+    severity: 'contact',
+    re: /\b(meet (me|us) (at|outside)|off the app|off[- ]platform)\b/i,
+  },
   // Steering / grooming red flags. False positives are acceptable here —
   // a human reviews everything this catches, nothing is auto-punished.
-  { flag: 'secrecy', severity: 'grooming', re: /\b(don'?t tell (your|ur|any)|keep (this|it) (between us|a? ?secret|quiet)|(our|a) little secret|come alone)\b/i },
-  { flag: 'personal_probing', severity: 'grooming', re: /\b(what school (do|does)|home alone|are you alone|where do you live|send (me )?(more )?(photos|pictures|pics) of (you|yourself))\b/i },
+  {
+    flag: 'secrecy',
+    severity: 'grooming',
+    re: /\b(don'?t tell (your|ur|any)|keep (this|it) (between us|a? ?secret|quiet)|(our|a) little secret|come alone)\b/i,
+  },
+  {
+    flag: 'personal_probing',
+    severity: 'grooming',
+    re: /\b(what school (do|does)|home alone|are you alone|where do you live|send (me )?(more )?(photos|pictures|pics) of (you|yourself))\b/i,
+  },
 ];
 /** Every flag a moderation hit can carry, and the two severities (one definition: the moderation log's CHECKs). */
 export const MODERATION_FLAGS = Object.freeze(MODERATION_PATTERNS.map((p) => p.flag));
@@ -169,7 +191,13 @@ export const TRUST = {
  * definition: `computeTrustScore` reads them off a record, and the identity repository off row counts to keep
  * `players.profile_signal`, which the directory sorts by.
  */
-export function trustScoreFromFacts({ identityVerified, attendanceCount, trialReportCount, mediaCount, profileComplete }) {
+export function trustScoreFromFacts({
+  identityVerified,
+  attendanceCount,
+  trialReportCount,
+  mediaCount,
+  profileComplete,
+}) {
   const t = TRUST;
   let score = t.BASE;
   if (identityVerified) score += t.IDENTITY_VERIFIED;
@@ -180,7 +208,8 @@ export function trustScoreFromFacts({ identityVerified, attendanceCount, trialRe
   return Math.min(score, t.MAX);
 }
 /** Is the profile complete for the figure: position, foot, height, weight and some statistics. */
-export const profileIsComplete = (player) => !!(player.position && player.foot && player.heightCm && player.weightKg && player.stats);
+export const profileIsComplete = (player) =>
+  !!(player.position && player.foot && player.heightCm && player.weightKg && player.stats);
 
 export function computeTrustScore(player) {
   return trustScoreFromFacts({
@@ -207,20 +236,24 @@ export function trustBreakdown(player) {
 
 // Trial Performance Report — every field is mandatory. Partial reports are rejected.
 export const TRIAL_REPORT_FIELDS = [
-  'acceleration',      // 0-10
-  'sprintSpeedKmh',    // top speed
-  'distanceKm',        // total distance covered
+  'acceleration', // 0-10
+  'sprintSpeedKmh', // top speed
+  'distanceKm', // total distance covered
   'passCompletionPct', // 0-100
-  'duelSuccessPct',    // 0-100
-  'coachRating',       // 1-10
+  'duelSuccessPct', // 0-100
+  'coachRating', // 1-10
 ];
 
 export function validateTrialReport(report) {
   const missing = TRIAL_REPORT_FIELDS.filter(
-    (f) => report?.[f] === undefined || report[f] === null || report[f] === ''
+    (f) => report?.[f] === undefined || report[f] === null || report[f] === '',
   );
   const invalid = TRIAL_REPORT_FIELDS.filter(
-    (f) => report?.[f] !== undefined && report[f] !== null && report[f] !== '' && (typeof report[f] !== 'number' || Number.isNaN(report[f]))
+    (f) =>
+      report?.[f] !== undefined &&
+      report[f] !== null &&
+      report[f] !== '' &&
+      (typeof report[f] !== 'number' || Number.isNaN(report[f])),
   );
   return { ok: missing.length === 0 && invalid.length === 0, missing, invalid };
 }
@@ -254,7 +287,12 @@ export const TRIAL_DETAIL_LIMITS = Object.freeze({ venue: 200, notes: 500, altSl
  */
 export function parseTrialDate(input) {
   if (input === undefined || input === null || input === '') return { ok: true, value: null, t: null };
-  const invalid = (why) => ({ ok: false, error: 'TRIAL_DATE_INVALID', message: `A trial date must be a calendar day written ${TRIAL_DATE_SYNTAX} (${why}).`, expected: TRIAL_DATE_SYNTAX });
+  const invalid = (why) => ({
+    ok: false,
+    error: 'TRIAL_DATE_INVALID',
+    message: `A trial date must be a calendar day written ${TRIAL_DATE_SYNTAX} (${why}).`,
+    expected: TRIAL_DATE_SYNTAX,
+  });
   // One DATE_ONLY parser for the platform (temporal.mjs); this keeps the Trial
   // vocabulary (its error code and its 2000–2100 bound) at the edge.
   const p = parseStrictDateOnly(input, { yearMin: TRIAL_DATE_YEAR_MIN, yearMax: TRIAL_DATE_YEAR_MAX });
@@ -263,7 +301,10 @@ export function parseTrialDate(input) {
 }
 
 /** True only for a stored value that is a valid trial date (never for "no date"). */
-export const isTrialDate = (v) => { const p = parseTrialDate(v); return p.ok && p.value !== null; };
+export const isTrialDate = (v) => {
+  const p = parseTrialDate(v);
+  return p.ok && p.value !== null;
+};
 
 /**
  * The one report-deadline derivation. `acceptedAt` is the clock the caller
@@ -295,13 +336,16 @@ export function validateTrialDetails(input) {
   const rawSlots = src.altSlots;
   let altSlots = [];
   if (rawSlots !== undefined && rawSlots !== null) {
-    if (!Array.isArray(rawSlots)) return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'Alternative slots must be a list of dates.');
-    if (rawSlots.length > TRIAL_DETAIL_LIMITS.altSlots) return bad('TRIAL_SLOTS_INVALID', 'altSlots', `Offer at most ${TRIAL_DETAIL_LIMITS.altSlots} alternative slots.`);
+    if (!Array.isArray(rawSlots))
+      return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'Alternative slots must be a list of dates.');
+    if (rawSlots.length > TRIAL_DETAIL_LIMITS.altSlots)
+      return bad('TRIAL_SLOTS_INVALID', 'altSlots', `Offer at most ${TRIAL_DETAIL_LIMITS.altSlots} alternative slots.`);
     for (const s of rawSlots) {
       const p = parseTrialDate(s);
       if (!p.ok) return { ...p, field: 'altSlots' };
       if (p.value === null) return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'An alternative slot cannot be empty.');
-      if (p.value === proposed.value || altSlots.includes(p.value)) return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'Each offered slot must be a different day.');
+      if (p.value === proposed.value || altSlots.includes(p.value))
+        return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'Each offered slot must be a different day.');
       altSlots.push(p.value);
     }
   }
@@ -309,16 +353,19 @@ export function validateTrialDetails(input) {
   let venue = null;
   if (src.venue !== undefined && src.venue !== null && src.venue !== '') {
     if (typeof src.venue !== 'string') return bad('TRIAL_VENUE_INVALID', 'venue', 'The venue must be text.');
-    if (src.venue.length > TRIAL_DETAIL_LIMITS.venue) return bad('TRIAL_VENUE_INVALID', 'venue', `Keep the venue under ${TRIAL_DETAIL_LIMITS.venue} characters.`);
+    if (src.venue.length > TRIAL_DETAIL_LIMITS.venue)
+      return bad('TRIAL_VENUE_INVALID', 'venue', `Keep the venue under ${TRIAL_DETAIL_LIMITS.venue} characters.`);
     // eslint-disable-next-line no-control-regex
-    if (/[\u0000-\u001f\u007f]/.test(src.venue)) return bad('TRIAL_VENUE_INVALID', 'venue', 'The venue is one line of text.');
+    if (/[\u0000-\u001f\u007f]/.test(src.venue))
+      return bad('TRIAL_VENUE_INVALID', 'venue', 'The venue is one line of text.');
     venue = src.venue;
   }
 
   let notes = '';
   if (src.notes !== undefined && src.notes !== null) {
     if (typeof src.notes !== 'string') return bad('TRIAL_NOTES_INVALID', 'notes', 'Notes must be text.');
-    if (src.notes.length > TRIAL_DETAIL_LIMITS.notes) return bad('TRIAL_NOTES_INVALID', 'notes', `Keep the notes under ${TRIAL_DETAIL_LIMITS.notes} characters.`);
+    if (src.notes.length > TRIAL_DETAIL_LIMITS.notes)
+      return bad('TRIAL_NOTES_INVALID', 'notes', `Keep the notes under ${TRIAL_DETAIL_LIMITS.notes} characters.`);
     notes = src.notes;
   }
 
@@ -333,8 +380,15 @@ export function validateTrialDetails(input) {
  */
 export function chooseTrialSlot(details, chosenSlot) {
   const d = details && typeof details === 'object' ? details : {};
-  const offered = [d.proposedDate, ...(Array.isArray(d.altSlots) ? d.altSlots : [])].filter((s) => typeof s === 'string' && s !== '');
-  const refuse = { ok: false, error: 'TRIAL_SLOT_INVALID', message: 'Pick one of the dates the club offered.', offered: offered.filter(isTrialDate) };
+  const offered = [d.proposedDate, ...(Array.isArray(d.altSlots) ? d.altSlots : [])].filter(
+    (s) => typeof s === 'string' && s !== '',
+  );
+  const refuse = {
+    ok: false,
+    error: 'TRIAL_SLOT_INVALID',
+    message: 'Pick one of the dates the club offered.',
+    offered: offered.filter(isTrialDate),
+  };
   if (chosenSlot === undefined || chosenSlot === null || chosenSlot === '') {
     return { ok: true, date: isTrialDate(d.proposedDate) ? d.proposedDate : null };
   }
@@ -351,7 +405,8 @@ export function similarityScore(a, b) {
   if (a.foot === b.foot) score += 10;
   const ageDiff = Math.abs(ageOn(a.dob) - ageOn(b.dob));
   score += Math.max(0, 15 - ageDiff * 3);
-  const outA = outputPer90(a), outB = outputPer90(b);
+  const outA = outputPer90(a),
+    outB = outputPer90(b);
   score += Math.max(0, 25 - Math.abs(outA - outB) * 25);
   const hDiff = Math.abs((a.heightCm ?? 180) - (b.heightCm ?? 180));
   const wDiff = Math.abs((a.weightKg ?? 75) - (b.weightKg ?? 75));
@@ -359,12 +414,7 @@ export function similarityScore(a, b) {
   return Math.round(Math.min(score, 100));
 }
 
-const POSITION_GROUPS = [
-  ['GK'],
-  ['CB', 'RB', 'LB', 'RWB', 'LWB'],
-  ['CDM', 'CM', 'CAM'],
-  ['RW', 'LW', 'ST', 'CF'],
-];
+const POSITION_GROUPS = [['GK'], ['CB', 'RB', 'LB', 'RWB', 'LWB'], ['CDM', 'CM', 'CAM'], ['RW', 'LW', 'ST', 'CF']];
 
 function samePositionGroup(p1, p2) {
   return POSITION_GROUPS.some((g) => g.includes(p1) && g.includes(p2));
@@ -417,10 +467,23 @@ export function nextActions(player) {
   const t = TRUST;
   const actions = [];
   const complete = player.position && player.foot && player.heightCm && player.weightKg && player.stats;
-  if (!complete) actions.push({ id: 'complete_profile', label: 'Complete your profile (position, foot, height, weight, stats)', gain: t.PROFILE_COMPLETE });
-  if ((player.media?.length ?? 0) === 0) actions.push({ id: 'first_clip', label: 'Upload your first clip', gain: t.PER_MEDIA });
-  else if ((player.media?.length ?? 0) * t.PER_MEDIA < t.MEDIA_CAP) actions.push({ id: 'more_clips', label: 'Add another clip', gain: t.PER_MEDIA });
-  if ((player.attendance?.length ?? 0) * t.PER_ATTENDANCE < t.ATTENDANCE_CAP) actions.push({ id: 'attendance', label: 'Log a verified match attendance', gain: t.PER_ATTENDANCE });
-  if (!player.media?.some((m) => m.verifiedClip)) actions.push({ id: 'verified_clip', label: 'Link a clip to a verified attendance for the Verified Clip seal', gain: 0 });
+  if (!complete)
+    actions.push({
+      id: 'complete_profile',
+      label: 'Complete your profile (position, foot, height, weight, stats)',
+      gain: t.PROFILE_COMPLETE,
+    });
+  if ((player.media?.length ?? 0) === 0)
+    actions.push({ id: 'first_clip', label: 'Upload your first clip', gain: t.PER_MEDIA });
+  else if ((player.media?.length ?? 0) * t.PER_MEDIA < t.MEDIA_CAP)
+    actions.push({ id: 'more_clips', label: 'Add another clip', gain: t.PER_MEDIA });
+  if ((player.attendance?.length ?? 0) * t.PER_ATTENDANCE < t.ATTENDANCE_CAP)
+    actions.push({ id: 'attendance', label: 'Log a verified match attendance', gain: t.PER_ATTENDANCE });
+  if (!player.media?.some((m) => m.verifiedClip))
+    actions.push({
+      id: 'verified_clip',
+      label: 'Link a clip to a verified attendance for the Verified Clip seal',
+      gain: 0,
+    });
   return actions.slice(0, 3);
 }

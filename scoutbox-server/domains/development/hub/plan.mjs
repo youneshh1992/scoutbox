@@ -4,9 +4,16 @@
  * merged into one figure would be a Development Score by another name.
  */
 import {
-  DEVELOPMENT_POLICY_VERSION, DEVELOPMENT_PRINCIPLE, ACHIEVED_MEANING,
-  FORBIDDEN_DEVELOPMENT_NAMES, GOAL_CATEGORY_LABELS, GOAL_STATUSES,
-  actionCounts, completionPhrase, dueState, reviewDueState,
+  DEVELOPMENT_POLICY_VERSION,
+  DEVELOPMENT_PRINCIPLE,
+  ACHIEVED_MEANING,
+  FORBIDDEN_DEVELOPMENT_NAMES,
+  GOAL_CATEGORY_LABELS,
+  GOAL_STATUSES,
+  actionCounts,
+  completionPhrase,
+  dueState,
+  reviewDueState,
 } from './shared.mjs';
 import { evaluateTarget } from './targets.mjs';
 import { resolveEvidenceLink, summariseEvidence } from './evidence.mjs';
@@ -52,7 +59,14 @@ export function collectPlan(reads, planId) {
 
 /** `access` comes from `planAccess()` and is not recomputed here. */
 export function buildDevelopmentPlan({
-  reads = {}, planId, player, viewer, access, orgCanSee, now = Date.now(), collected = null,
+  reads = {},
+  planId,
+  player,
+  viewer,
+  access,
+  orgCanSee,
+  now = Date.now(),
+  collected = null,
 }) {
   const bundle = collected ?? collectPlan(reads.development, planId);
   if (!bundle) return null;
@@ -74,37 +88,54 @@ export function buildDevelopmentPlan({
     linksByTarget.get(key).push(l);
   }
 
-  const resolveFor = (key) => (linksByTarget.get(key) ?? [])
-    .map((l) => ({ linkId: l.id, ...resolveEvidenceLink(l, { reads, player, viewer, orgCanSee, now }) }))
-    .sort((a, b) => (b.occurredAt ?? 0) - (a.occurredAt ?? 0) || String(a.sourceId).localeCompare(String(b.sourceId)));
+  const resolveFor = (key) =>
+    (linksByTarget.get(key) ?? [])
+      .map((l) => ({ linkId: l.id, ...resolveEvidenceLink(l, { reads, player, viewer, orgCanSee, now }) }))
+      .sort(
+        (a, b) => (b.occurredAt ?? 0) - (a.occurredAt ?? 0) || String(a.sourceId).localeCompare(String(b.sourceId)),
+      );
 
   const goalViews = goals
     .slice()
     .sort((a, b) => a.createdAt - b.createdAt || String(a.id).localeCompare(String(b.id)))
     .map((g) => {
-      const list = (actionsByGoal.get(g.id) ?? []).slice()
-        .sort((x, y) => (x.dueAt ?? Number.MAX_SAFE_INTEGER) - (y.dueAt ?? Number.MAX_SAFE_INTEGER)
-          || x.createdAt - y.createdAt || String(x.id).localeCompare(String(y.id)));
+      const list = (actionsByGoal.get(g.id) ?? [])
+        .slice()
+        .sort(
+          (x, y) =>
+            (x.dueAt ?? Number.MAX_SAFE_INTEGER) - (y.dueAt ?? Number.MAX_SAFE_INTEGER) ||
+            x.createdAt - y.createdAt ||
+            String(x.id).localeCompare(String(y.id)),
+        );
       const counts = actionCounts(list);
       const actionViews = list.map((a) => {
         const due = dueState(a.dueAt, now);
         if (due.state === 'overdue' && !['done', 'cancelled'].includes(a.status)) counts.overdue += 1;
         return {
-          id: a.id, goalId: a.goalId, type: a.type, title: a.title,
-          status: a.status, dueAt: a.dueAt ?? null,
+          id: a.id,
+          goalId: a.goalId,
+          type: a.type,
+          title: a.title,
+          status: a.status,
+          dueAt: a.dueAt ?? null,
           // Overdue describes a date and is never attributed to a person.
           due: ['done', 'cancelled'].includes(a.status) ? { state: 'not_applicable', days: null } : due,
           assignee: a.assignee ? { kind: a.assignee.kind, name: a.assignee.name } : null,
           completedAt: a.completedAt ?? null,
           evidence: resolveFor(a.id),
-          createdAt: a.createdAt, updatedAt: a.updatedAt,
+          createdAt: a.createdAt,
+          updatedAt: a.updatedAt,
         };
       });
       const evidence = resolveFor(g.id);
       const targetState = g.target ? evaluateTarget({ target: g.target, attempts, sessions }) : null;
       return {
-        id: g.id, planId: g.planId, title: g.title, description: g.description ?? null,
-        category: g.category, categoryLabel: GOAL_CATEGORY_LABELS[g.category] ?? g.category,
+        id: g.id,
+        planId: g.planId,
+        title: g.title,
+        description: g.description ?? null,
+        category: g.category,
+        categoryLabel: GOAL_CATEGORY_LABELS[g.category] ?? g.category,
         status: g.status,
         statusMeaning: g.status === 'achieved' ? ACHIEVED_MEANING : null,
         blockReason: g.status === 'blocked' ? (g.blockReason ?? null) : null,
@@ -115,8 +146,12 @@ export function buildDevelopmentPlan({
         targetState,
         origin: g.originObjectiveId ? { kind: 'development_objective', id: g.originObjectiveId } : null,
         createdBy: g.createdBy ? { kind: g.createdBy.kind, name: g.createdBy.name } : null,
-        createdAt: g.createdAt, updatedAt: g.updatedAt, completedAt: g.completedAt ?? null,
-        rev: g.rev ?? 1, revAt: g.revAt ?? null, revBy: g.revBy?.name ?? null,
+        createdAt: g.createdAt,
+        updatedAt: g.updatedAt,
+        completedAt: g.completedAt ?? null,
+        rev: g.rev ?? 1,
+        revAt: g.revAt ?? null,
+        revBy: g.revBy?.name ?? null,
         actions: actionViews,
         actionCounts: counts,
         completion: completionPhrase(counts),
@@ -145,7 +180,8 @@ export function buildDevelopmentPlan({
     neverBuilt: {
       note: 'These do not exist in ScoutBox and are not planned.',
       names: FORBIDDEN_DEVELOPMENT_NAMES,
-      reason: 'A single figure would invite a decision about a person that the figure cannot support. Development here is objective-specific, or it is nothing.',
+      reason:
+        'A single figure would invite a decision about a person that the figure cannot support. Development here is objective-specific, or it is nothing.',
     },
   };
 }
@@ -172,7 +208,9 @@ function planView(plan, { player, access, now }) {
     templateId: plan.templateId ?? null,
     origin: plan.originObjectiveId
       ? { kind: 'development_objective', id: plan.originObjectiveId }
-      : (plan.originTrialId ? { kind: 'trial', id: plan.originTrialId } : null),
+      : plan.originTrialId
+        ? { kind: 'trial', id: plan.originTrialId }
+        : null,
     // Shown only to those who may change it.
     sharedWithOrgIds: access.manage ? (plan.sharedWithOrgIds ?? []) : undefined,
     sharedWithOrgCount: (plan.sharedWithOrgIds ?? []).length,

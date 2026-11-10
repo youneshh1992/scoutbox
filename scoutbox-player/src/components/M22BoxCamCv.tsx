@@ -48,12 +48,21 @@ function reasonLabel(code: string | null): string {
   if (!code) return '';
   return pt(`m22reason_${code}` as Parameters<typeof pt>[0]) || code;
 }
-const stateGlyph = (s: ReadyCheckItem['state']) => (s === 'pass' ? 'Ready ·' : s === 'fail' ? 'Needs attention ·' : 'Unchecked ·');
+const stateGlyph = (s: ReadyCheckItem['state']) =>
+  s === 'pass' ? 'Ready ·' : s === 'fail' ? 'Needs attention ·' : 'Unchecked ·';
 
 export function M22BoxCamCv({
-  playerId, sessionId, nonce, protocolId, onClose,
+  playerId,
+  sessionId,
+  nonce,
+  protocolId,
+  onClose,
 }: {
-  playerId: string; sessionId: string; nonce: string; protocolId: string; onClose: () => void;
+  playerId: string;
+  sessionId: string;
+  nonce: string;
+  protocolId: string;
+  onClose: () => void;
 }) {
   const colors = useColors();
   const [phase, setPhase] = useState<Phase>('ready_check');
@@ -82,8 +91,14 @@ export function M22BoxCamCv({
 
   /** One place that releases everything, called on every exit path. */
   const teardown = useCallback(() => {
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    if (captureRef.current) { clearInterval(captureRef.current); captureRef.current = null; }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    if (captureRef.current) {
+      clearInterval(captureRef.current);
+      captureRef.current = null;
+    }
     if (streamRef.current) {
       for (const t of streamRef.current.getTracks()) t.stop();
       streamRef.current = null;
@@ -103,28 +118,40 @@ export function M22BoxCamCv({
   const runReadyCheck = useCallback(async () => {
     setPhase('ready_check');
     let cameraPermission = 'unknown';
-    let frameWidth = 0, frameHeight = 0, fps = 0;
+    let frameWidth = 0,
+      frameHeight = 0,
+      fps = 0;
     try {
       if (WEB && navigator?.mediaDevices?.getUserMedia) {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 24 } },
-          audio: false,   // audio is never requested, let alone analysed
+          audio: false, // audio is never requested, let alone analysed
         });
         streamRef.current = stream;
         cameraPermission = 'granted';
         const track = stream.getVideoTracks()[0];
         const s = track?.getSettings?.() ?? {};
-        frameWidth = CAP_W; frameHeight = CAP_H;
+        frameWidth = CAP_W;
+        frameHeight = CAP_H;
         fps = Number(s.frameRate ?? 24);
-        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play().catch(() => {}); }
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play().catch(() => {});
+        }
       }
     } catch (e) {
       // The permission states, distinguished rather than collapsed.
       const name = (e as { name?: string })?.name ?? '';
-      cameraPermission = name === 'NotAllowedError' ? 'denied'
-        : name === 'NotReadableError' ? 'in_use'
-          : name === 'NotFoundError' ? 'unavailable'
-            : WEB && !window.isSecureContext ? 'insecure_context' : 'unavailable';
+      cameraPermission =
+        name === 'NotAllowedError'
+          ? 'denied'
+          : name === 'NotReadableError'
+            ? 'in_use'
+            : name === 'NotFoundError'
+              ? 'unavailable'
+              : WEB && !window.isSecureContext
+                ? 'insecure_context'
+                : 'unavailable';
     }
 
     try {
@@ -143,7 +170,9 @@ export function M22BoxCamCv({
     }
   }, [playerId, protocolId]);
 
-  useEffect(() => { void runReadyCheck(); }, [runReadyCheck]);
+  useEffect(() => {
+    void runReadyCheck();
+  }, [runReadyCheck]);
 
   // ---------------------------------------------------------- capturing
 
@@ -156,8 +185,10 @@ export function M22BoxCamCv({
     setCaptureState('sending');
     try {
       const r = await m22.sendFrames(playerId, sessionId, nonce, providerSessionRef.current, batch);
-      if (r.droppedByServer > 0) { setDropped(r.droppedByServer); setCaptureState('degraded'); }
-      else setCaptureState('idle');
+      if (r.droppedByServer > 0) {
+        setDropped(r.droppedByServer);
+        setCaptureState('degraded');
+      } else setCaptureState('idle');
     } catch {
       // A dropped batch is not a player-facing error: the server accounts for
       // what it did not receive, and observation quality reflects it honestly.
@@ -173,15 +204,18 @@ export function M22BoxCamCv({
       startedAtRef.current = Date.now();
       setPhase('capturing');
       timerRef.current = setInterval(() => setElapsed(Date.now() - startedAtRef.current), 250);
-      captureRef.current = setInterval(() => {
-        const v = videoRef.current;
-        if (!v) return;
-        const f = captureGray8(v, seqRef.current, CAP_W, CAP_H);
-        if (!f) return;
-        seqRef.current += 1;
-        pendingRef.current.push(f);
-        void flush();
-      }, Math.round(1000 / CAP_FPS));
+      captureRef.current = setInterval(
+        () => {
+          const v = videoRef.current;
+          if (!v) return;
+          const f = captureGray8(v, seqRef.current, CAP_W, CAP_H);
+          if (!f) return;
+          seqRef.current += 1;
+          pendingRef.current.push(f);
+          void flush();
+        },
+        Math.round(1000 / CAP_FPS),
+      );
     } catch {
       setPhase('error');
     }
@@ -189,8 +223,14 @@ export function M22BoxCamCv({
 
   async function finish() {
     setPhase('finalizing');
-    if (captureRef.current) { clearInterval(captureRef.current); captureRef.current = null; }
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (captureRef.current) {
+      clearInterval(captureRef.current);
+      captureRef.current = null;
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
     try {
       await flush(true);
       const r = await m22.finalize(playerId, sessionId, nonce, providerSessionRef.current ?? '');
@@ -206,7 +246,11 @@ export function M22BoxCamCv({
   async function cancel() {
     teardown();
     if (providerSessionRef.current) {
-      try { await m22.cancel(playerId, sessionId, nonce, providerSessionRef.current); } catch { /* ignore */ }
+      try {
+        await m22.cancel(playerId, sessionId, nonce, providerSessionRef.current);
+      } catch {
+        /* ignore */
+      }
     }
     onClose();
   }
@@ -239,8 +283,12 @@ export function M22BoxCamCv({
       </Row>
       {!available ? (
         <>
-          <GuidanceNote icon="info" size={12}>{reason?.short ?? pt('m22combineUnavailable')}</GuidanceNote>
-          <GuidanceNote icon="info" size={11.5}>{reason?.detail ?? pt('m22validationPending')}</GuidanceNote>
+          <GuidanceNote icon="info" size={12}>
+            {reason?.short ?? pt('m22combineUnavailable')}
+          </GuidanceNote>
+          <GuidanceNote icon="info" size={11.5}>
+            {reason?.detail ?? pt('m22validationPending')}
+          </GuidanceNote>
         </>
       ) : null}
     </View>
@@ -254,20 +302,28 @@ export function M22BoxCamCv({
       </Row>
       <Muted size={12}>{pt('m22whatThisIs')}</Muted>
 
-      {WEB && phase !== 'done' && phase !== 'refused' ? createElement('video', {
-        ref: videoRef, muted: true, playsInline: true,
-        'aria-label': pt('m22videoLabel'),
-        style: { width: '100%', maxHeight: 220, borderRadius: 10, background: '#000', transform: 'scaleX(-1)' },
-      }) : null}
+      {WEB && phase !== 'done' && phase !== 'refused'
+        ? createElement('video', {
+            ref: videoRef,
+            muted: true,
+            playsInline: true,
+            'aria-label': pt('m22videoLabel'),
+            style: { width: '100%', maxHeight: 220, borderRadius: 10, background: '#000', transform: 'scaleX(-1)' },
+          })
+        : null}
 
       {/* ---------------------------------------------------- Ready Check */}
       {phase === 'ready_check' ? (
-        <View accessibilityLiveRegion="polite"><Muted>{pt('m22checking')}</Muted></View>
+        <View accessibilityLiveRegion="polite">
+          <Muted>{pt('m22checking')}</Muted>
+        </View>
       ) : null}
 
       {phase === 'ready' && checks ? (
         <View>
-          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginTop: 8 }}>{pt('m22readyCheck')}</Text>
+          <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, marginTop: 8 }}>
+            {pt('m22readyCheck')}
+          </Text>
           {/* a list, each row labelled for a screen reader in full. */}
           <View accessibilityRole="list">
             {checks.checks.map((c) => (
@@ -322,8 +378,14 @@ export function M22BoxCamCv({
               tone={captureState === 'degraded' ? 'gold' : 'green'}
             />
           </Row>
-          <GuidanceNote icon="info" size={12}>{pt('m22noLiveCount')}</GuidanceNote>
-          {dropped > 0 ? <GuidanceNote icon="info" size={11.5}>{pt('m22someFramesDropped')}</GuidanceNote> : null}
+          <GuidanceNote icon="info" size={12}>
+            {pt('m22noLiveCount')}
+          </GuidanceNote>
+          {dropped > 0 ? (
+            <GuidanceNote icon="info" size={11.5}>
+              {pt('m22someFramesDropped')}
+            </GuidanceNote>
+          ) : null}
           <Row style={{ marginTop: 10 }}>
             <Button primary label={pt('m22finish')} onPress={() => void finish()} />
             <Button small label={pt('m22cancel')} onPress={() => void cancel()} />
@@ -332,7 +394,9 @@ export function M22BoxCamCv({
       ) : null}
 
       {phase === 'finalizing' ? (
-        <View accessibilityLiveRegion="polite"><Muted>{pt('m22finalizing')}</Muted></View>
+        <View accessibilityLiveRegion="polite">
+          <Muted>{pt('m22finalizing')}</Muted>
+        </View>
       ) : null}
 
       {/* -------------------------------------------------------- result */}
@@ -342,7 +406,10 @@ export function M22BoxCamCv({
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>
               {outcome.boxCamObserved.eligible ? pt('m22observed') : pt('m22notObserved')}
             </Text>
-            <Pill label={outcome.boxCamObserved.eligible ? pt('m22observedPill') : pt('m22notYet')} tone={outcome.boxCamObserved.eligible ? 'green' : 'default'} />
+            <Pill
+              label={outcome.boxCamObserved.eligible ? pt('m22observedPill') : pt('m22notYet')}
+              tone={outcome.boxCamObserved.eligible ? 'green' : 'default'}
+            />
           </Row>
           <Muted size={12}>{pt('m22observedDetail')}</Muted>
 
@@ -361,17 +428,27 @@ export function M22BoxCamCv({
               {showExperimental ? (
                 <View style={{ marginTop: 6, backgroundColor: colors.panel2, borderRadius: 8, padding: 10 }}>
                   <Row>
-                    <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>{pt('m22experimentalTitle')}</Text>
+                    <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13 }}>
+                      {pt('m22experimentalTitle')}
+                    </Text>
                     <Pill label={pt('m22experimentalPill')} tone="gold" />
                   </Row>
-                  <Muted size={12}>{pt('m22experimentalCount')}: {outcome.result.experimental.exactCount}</Muted>
-                  <Disclosure label="About this figure"><GuidanceNote title="Demo information" icon="info" size={12}>{pt('m22experimentalNote')}</GuidanceNote></Disclosure>
+                  <Muted size={12}>
+                    {pt('m22experimentalCount')}: {outcome.result.experimental.exactCount}
+                  </Muted>
+                  <Disclosure label="About this figure">
+                    <GuidanceNote title="Demo information" icon="info" size={12}>
+                      {pt('m22experimentalNote')}
+                    </GuidanceNote>
+                  </Disclosure>
                 </View>
               ) : null}
             </View>
           ) : null}
 
-          <Row style={{ marginTop: 10 }}><Button label={pt('m22close')} onPress={onClose} /></Row>
+          <Row style={{ marginTop: 10 }}>
+            <Button label={pt('m22close')} onPress={onClose} />
+          </Row>
         </View>
       ) : null}
 
@@ -383,8 +460,12 @@ export function M22BoxCamCv({
             <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15 }}>{pt('m22couldNotVerify')}</Text>
             <Pill label={pt('m22tryAgain')} tone="gold" />
           </Row>
-          <GuidanceNote icon="activity" size={12}>{reasonLabel(outcome.result.refusalReason)}</GuidanceNote>
-          <GuidanceNote icon="info" size={11.5}>{pt('m22refusalReassure')}</GuidanceNote>
+          <GuidanceNote icon="activity" size={12}>
+            {reasonLabel(outcome.result.refusalReason)}
+          </GuidanceNote>
+          <GuidanceNote icon="info" size={11.5}>
+            {pt('m22refusalReassure')}
+          </GuidanceNote>
 
           {/* The Combine notice belongs here too, and a live journey found
               that it was missing. Without it a refused attempt reads as "try
@@ -404,7 +485,9 @@ export function M22BoxCamCv({
           the player's attempt at all. */}
       {phase === 'error' ? (
         <View accessibilityLiveRegion="assertive">
-          <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15, marginTop: 8 }}>{pt('m22technicalTitle')}</Text>
+          <Text style={{ color: colors.text, fontWeight: '800', fontSize: 15, marginTop: 8 }}>
+            {pt('m22technicalTitle')}
+          </Text>
           <Muted size={12}>{pt('m22technicalDetail')}</Muted>
           <Row style={{ marginTop: 10 }}>
             <Button primary label={pt('m22retry')} onPress={() => void runReadyCheck()} />

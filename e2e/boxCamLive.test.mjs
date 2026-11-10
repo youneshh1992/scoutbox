@@ -17,14 +17,29 @@ const API_PORT = 4008;
 const API = `http://localhost:${API_PORT}`;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-boxcamlive-'));
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 const A = { 'x-admin-key': 'scoutbox-admin', 'content-type': 'application/json' };
 
 console.log('building live bundles for :4008…');
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-boxcam`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-boxcam`, { cwd: path.join(ROOT, 'scoutbox-admin'), stdio: 'pipe' });
-execSync(`EXPO_PUBLIC_API_URL=${API} npx expo export --clear --platform web --output-dir dist-live-boxcam`, { cwd: path.join(ROOT, 'scoutbox-player'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-boxcam`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-boxcam`, {
+  cwd: path.join(ROOT, 'scoutbox-admin'),
+  stdio: 'pipe',
+});
+execSync(`EXPO_PUBLIC_API_URL=${API} npx expo export --clear --platform web --output-dir dist-live-boxcam`, {
+  cwd: path.join(ROOT, 'scoutbox-player'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -34,11 +49,20 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -52,8 +76,19 @@ function serveDir(dir, port) {
 serveDir('scoutbox-player/dist-live-boxcam', 8591);
 serveDir('scoutbox-club/dist-live-boxcam', 8592);
 serveDir('scoutbox-admin/dist-live-boxcam', 8594);
-process.on('exit', () => { try { serverProc.kill('SIGKILL'); } catch {} for (const s of statics) s.close(); fs.rmSync(DATA, { recursive: true, force: true }); });
-for (let i = 0; i < 60; i++) { try { if ((await fetch(`${API}/healthz`)).ok) break; } catch {} await new Promise((r) => setTimeout(r, 250)); }
+process.on('exit', () => {
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {}
+  for (const s of statics) s.close();
+  fs.rmSync(DATA, { recursive: true, force: true });
+});
+for (let i = 0; i < 60; i++) {
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {}
+  await new Promise((r) => setTimeout(r, 250));
+}
 console.log(`backend up on :${API_PORT}`);
 
 const j = async (p, opts = {}, headers = {}) => {
@@ -61,11 +96,23 @@ const j = async (p, opts = {}, headers = {}) => {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 };
 const bearer = (t) => ({ authorization: `Bearer ${t}` });
-const maria = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }) })).body;
-await j('/admin/verification/orgs/org-eastport/appoint-root', { method: 'POST', body: JSON.stringify({ userId: maria.userId, reason: 'box cam live root admin' }) }, A);
+const maria = (
+  await j('/auth/org/login', {
+    method: 'POST',
+    body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }),
+  })
+).body;
+await j(
+  '/admin/verification/orgs/org-eastport/appoint-root',
+  { method: 'POST', body: JSON.stringify({ userId: maria.userId, reason: 'box cam live root admin' }) },
+  A,
+);
 
 // A fake camera device so getUserMedia succeeds headless.
-const browser = await chromium.launch({ executablePath: EXE, args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+const browser = await chromium.launch({
+  executablePath: EXE,
+  args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+});
 const ctxPlayer = await browser.newContext({ viewport: { width: 480, height: 960 }, permissions: ['camera'] });
 const ctxClub = await browser.newContext({ viewport: { width: 1440, height: 900 } });
 const ctxAdmin = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -75,7 +122,7 @@ const player = await ctxPlayer.newPage();
 player.on('pageerror', (e) => fail(`player page error: ${e}`));
 await player.goto('http://localhost:8591/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
-await player.locator('text=Enter').nth(0).click();          // Kola (adult)
+await player.locator('text=Enter').nth(0).click(); // Kola (adult)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href="/football"]');
 await player.getByRole('tab', { name: 'Box Cam' }).click();
@@ -93,9 +140,11 @@ say('B-live: player Football tab shows Box Cam with its Start session action');
   await player.getByText('Finish', { exact: true }).click();
   await player.waitForSelector('text=/Box Session (Complete|Recorded)/', { timeout: 20000 });
   const body = await player.locator('body').innerText();
-  if (!/Partially verified|Box Cam Verified|Recorded, unverified/.test(body)) fail('B1-live: no Box Cam result state shown');
+  if (!/Partially verified|Box Cam Verified|Recorded, unverified/.test(body))
+    fail('B1-live: no Box Cam result state shown');
   say('B1-live: result screen shows a Box Cam state (partial credit — elapsed never substitutes)');
-  if (!body.includes('Box Cam verified') || !body.includes('Session')) fail('B1-live: verified vs session clocks missing from result');
+  if (!body.includes('Box Cam verified') || !body.includes('Session'))
+    fail('B1-live: verified vs session clocks missing from result');
   say('B1-live: verified active time is distinct from session duration');
 }
 
@@ -108,7 +157,9 @@ await club.fill('.enter-row input', 'Maria Keane');
 await club.selectOption('.enter-row select', 'Head of Recruitment');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('nav.sidebar', { timeout: 20000 });
-await club.evaluate(() => { location.hash = '#/search'; });
+await club.evaluate(() => {
+  location.hash = '#/search';
+});
 await club.waitForSelector('.player-card:has-text("Kola Adeyemi")', { timeout: 20000 });
 await club.click('.player-card:has-text("Kola Adeyemi")');
 await club.waitForSelector('[aria-label="Box Training"]', { timeout: 15000 });
@@ -124,23 +175,63 @@ say('B5-live: coach opens the Box Training panel in the player drawer');
   await club.waitForSelector('[aria-label="Box Training"] .list-row:has-text("Box Wall")', { timeout: 15000 });
   say('B5-live: coach assigns Box Wall 150 — appears in the assignment list');
   const panel = await club.locator('[aria-label="Box Training"]').innerText();
-  if (!panel.includes('never') || !/footage/i.test(panel)) fail('B5-live: coach panel must state raw footage is never captured/shared');
+  if (!panel.includes('never') || !/footage/i.test(panel))
+    fail('B5-live: coach panel must state raw footage is never captured/shared');
   say('B5-live: coach panel states results only — never raw home footage');
 }
 
 // verify assignment result flows to the coach after the player completes it
 {
-  const kola = (await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi' }) })).body;
+  const kola = (await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi' }) }))
+    .body;
   const assigns = (await j('/player/box-cam/assignments', {}, bearer(kola.token))).body.items;
   const wall = assigns.find((a) => a.drillId === 'box-wall');
   // run the assigned session via the API test provider (camera-free, deterministic)
-  const created = (await j('/player/box-cam/sessions', { method: 'POST', body: JSON.stringify({ drillId: 'box-wall', target: { type: 'repetitions', value: 150 }, provider: 'local_test', assignmentId: wall.id }) }, bearer(kola.token))).body;
-  await j(`/player/box-cam/sessions/${created.session.id}/start`, { method: 'POST', body: JSON.stringify({ nonce: created.nonce, liveness: created.livenessChallenge }) }, bearer(kola.token));
-  await j(`/player/box-cam/sessions/${created.session.id}/events`, { method: 'POST', body: JSON.stringify({ nonce: created.nonce, batch: [{ seq: 1, type: 'presence_interval', fromMs: 0, toMs: 480000, quality: 'good' }, { seq: 2, type: 'ball_interval', fromMs: 0, toMs: 480000 }, { seq: 3, type: 'active_interval', fromMs: 0, toMs: 480000, quality: 'good' }] }) }, bearer(kola.token));
-  await j(`/player/box-cam/sessions/${created.session.id}/complete`, { method: 'POST', body: JSON.stringify({ nonce: created.nonce }) }, bearer(kola.token));
+  const created = (
+    await j(
+      '/player/box-cam/sessions',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          drillId: 'box-wall',
+          target: { type: 'repetitions', value: 150 },
+          provider: 'local_test',
+          assignmentId: wall.id,
+        }),
+      },
+      bearer(kola.token),
+    )
+  ).body;
+  await j(
+    `/player/box-cam/sessions/${created.session.id}/start`,
+    { method: 'POST', body: JSON.stringify({ nonce: created.nonce, liveness: created.livenessChallenge }) },
+    bearer(kola.token),
+  );
+  await j(
+    `/player/box-cam/sessions/${created.session.id}/events`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        nonce: created.nonce,
+        batch: [
+          { seq: 1, type: 'presence_interval', fromMs: 0, toMs: 480000, quality: 'good' },
+          { seq: 2, type: 'ball_interval', fromMs: 0, toMs: 480000 },
+          { seq: 3, type: 'active_interval', fromMs: 0, toMs: 480000, quality: 'good' },
+        ],
+      }),
+    },
+    bearer(kola.token),
+  );
+  await j(
+    `/player/box-cam/sessions/${created.session.id}/complete`,
+    { method: 'POST', body: JSON.stringify({ nonce: created.nonce }) },
+    bearer(kola.token),
+  );
   await club.reload();
   await club.waitForSelector('nav.sidebar', { timeout: 20000 });
-  await club.evaluate(() => { location.hash = '#/search'; });
+  await club.evaluate(() => {
+    location.hash = '#/search';
+  });
   await club.waitForSelector('.player-card:has-text("Kola Adeyemi")', { timeout: 20000 });
   await club.click('.player-card:has-text("Kola Adeyemi")');
   await club.waitForSelector('[aria-label="Box Training"]', { timeout: 15000 });
@@ -159,7 +250,11 @@ await admin.waitForSelector('nav.sidebar', { timeout: 20000 });
 await admin.click('nav.sidebar button:has-text("Evidence")'); // Passport, Box Cam and Trust left Cases for Evidence
 await admin.click('nav.subnav button:has-text("Box Cam")');
 await admin.waitForSelector('text=Box Cam disputes', { timeout: 15000 });
-await admin.locator('.f-about > summary').first().click().catch(() => {}); // the statement sits behind About
+await admin
+  .locator('.f-about > summary')
+  .first()
+  .click()
+  .catch(() => {}); // the statement sits behind About
 const adminBody = await admin.locator('body').innerText();
 if (!adminBody.includes('never fabricates')) fail('B12-live: T&S Box Cam tab must state results are never fabricated');
 say('B12-live: T&S Box Cam case tab reachable and states results are server-derived, never fabricated');

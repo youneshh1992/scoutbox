@@ -13,7 +13,9 @@ export function checkHistoryFeed(label, { feed, count, records, ownerKey }) {
   let rows = 0;
   for (const orgId of orgs) {
     for (const actions of [actionsSeen, actionsSeen.slice(1), []]) {
-      const all = records.filter((r) => r.orgId === orgId).flatMap((r) => r.history.filter((h) => actions.includes(h.action)).map((entry) => ({ owner: r.id, entry })));
+      const all = records
+        .filter((r) => r.orgId === orgId)
+        .flatMap((r) => r.history.filter((h) => actions.includes(h.action)).map((entry) => ({ owner: r.id, entry })));
       assert.equal(count(orgId, actions), all.length, `${label}: count ${orgId}`);
       for (const atMost of [null, ...new Set(all.map((x) => x.entry.at))]) {
         const pool = all.filter((x) => atMost === null || x.entry.at <= atMost).sort((a, b) => b.entry.at - a.entry.at);
@@ -22,10 +24,20 @@ export function checkHistoryFeed(label, { feed, count, records, ownerKey }) {
           const edge = pool.length > n - 1 + tied ? pool[n - 1 + tied].entry.at : -Infinity;
           const want = pool.filter((x) => x.entry.at >= edge);
           const got = feed(orgId, actions, atMost, n);
-          for (let i = 1; i < got.length; i += 1) assert.ok(got[i - 1].entry.at >= got[i].entry.at, `${label}: newest first`);
+          for (let i = 1; i < got.length; i += 1)
+            assert.ok(got[i - 1].entry.at >= got[i].entry.at, `${label}: newest first`);
           const key = (x) => `${x.owner}|${x.entry.id}`;
-          assert.deepEqual(got.map((x) => `${x[ownerKey]}|${x.entry.id}`).sort(), want.map(key).sort(), `${label}: ${orgId} atMost=${atMost} n=${n}`);
-          for (const x of got) assert.deepEqual(plain(x.entry), plain(want.find((w) => w.owner === x[ownerKey] && w.entry.id === x.entry.id).entry), `${label}: the entry as the record holds it`);
+          assert.deepEqual(
+            got.map((x) => `${x[ownerKey]}|${x.entry.id}`).sort(),
+            want.map(key).sort(),
+            `${label}: ${orgId} atMost=${atMost} n=${n}`,
+          );
+          for (const x of got)
+            assert.deepEqual(
+              plain(x.entry),
+              plain(want.find((w) => w.owner === x[ownerKey] && w.entry.id === x.entry.id).entry),
+              `${label}: the entry as the record holds it`,
+            );
           rows += got.length;
         }
       }

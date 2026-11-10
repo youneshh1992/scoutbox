@@ -4,21 +4,33 @@ import crypto from 'node:crypto';
 
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 export const b32encode = (buf) => {
-  let bits = 0, value = 0, out = '';
+  let bits = 0,
+    value = 0,
+    out = '';
   for (const byte of buf) {
-    value = (value << 8) | byte; bits += 8;
-    while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; }
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += B32[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
   }
   if (bits > 0) out += B32[(value << (5 - bits)) & 31];
   return out;
 };
 export const b32decode = (str) => {
-  let bits = 0, value = 0; const out = [];
+  let bits = 0,
+    value = 0;
+  const out = [];
   for (const ch of String(str).toUpperCase().replace(/=+$/, '')) {
     const idx = B32.indexOf(ch);
     if (idx === -1) continue;
-    value = (value << 5) | idx; bits += 5;
-    if (bits >= 8) { out.push((value >>> (bits - 8)) & 255); bits -= 8; }
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
   }
   return Buffer.from(out);
 };
@@ -34,7 +46,8 @@ export function totp(secretB32, nowMs = Date.now(), stepS = 30) {
   return hotp(b32decode(secretB32), Math.floor(nowMs / 1000 / stepS));
 }
 export const timingSafeEqStr = (a, b) => {
-  const ba = Buffer.from(String(a)), bb = Buffer.from(String(b));
+  const ba = Buffer.from(String(a)),
+    bb = Buffer.from(String(b));
   return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
 };
 export function totpValid(secretB32, code, nowMs = Date.now()) {

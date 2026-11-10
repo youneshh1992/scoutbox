@@ -91,7 +91,9 @@ export function parseStrictDateOnly(input, { yearMin = YEAR_MIN, yearMax = YEAR_
   if (typeof input !== 'string') return bad('not text');
   const m = DATE_ONLY_RE.exec(input);
   if (!m) return bad('wrong shape');
-  const y = Number(m[1]); const mo = Number(m[2]); const d = Number(m[3]);
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
   if (y < yearMin || y > yearMax) return bad(`year outside ${yearMin}–${yearMax}`);
   if (mo < 1 || mo > 12) return bad('no such month');
   if (d < 1 || d > 31) return bad('no such day');
@@ -99,12 +101,16 @@ export function parseStrictDateOnly(input, { yearMin = YEAR_MIN, yearMax = YEAR_
   const back = new Date(t);
   // The round-trip: 30 February "parses" as 2 March. A day that only exists
   // because the engine rolled it over is not a day anyone was born on.
-  if (back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d) return bad('no such day in that month');
+  if (back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d)
+    return bad('no such day in that month');
   return { ok: true, value: input, t };
 }
 
 /** A stored DATE_ONLY, or null when it cannot be read. */
-export const readDateOnly = (v) => { const p = parseStrictDateOnly(v); return p.ok ? p.value : null; };
+export const readDateOnly = (v) => {
+  const p = parseStrictDateOnly(v);
+  return p.ok ? p.value : null;
+};
 
 /** The first instant AFTER a DATE_ONLY day (principle D: a day-precision end covers the whole day). */
 export function endOfDayExclusive(dateOnly) {
@@ -123,7 +129,12 @@ export function endOfDayExclusive(dateOnly) {
  * what it is. Calendar day and time of day are both round-tripped.
  */
 export function parseInstant(v, { yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {}) {
-  const bad = (why) => ({ ok: false, error: TEMPORAL_ERRORS.TIMESTAMP_INVALID, why, expected: 'ISO 8601 with offset or Z, or integer milliseconds' });
+  const bad = (why) => ({
+    ok: false,
+    error: TEMPORAL_ERRORS.TIMESTAMP_INVALID,
+    why,
+    expected: 'ISO 8601 with offset or Z, or integer milliseconds',
+  });
   let ms;
   if (typeof v === 'number') {
     if (!Number.isFinite(v) || !Number.isInteger(v)) return bad('not a whole number');
@@ -133,10 +144,13 @@ export function parseInstant(v, { yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {})
     if (!m) return bad('wrong shape');
     const day = parseStrictDateOnly(`${m[1]}-${m[2]}-${m[3]}`, { yearMin, yearMax });
     if (!day.ok) return bad('no such calendar day');
-    const hh = Number(m[4]); const mm = Number(m[5]); const ss = Number(m[6] ?? 0);
+    const hh = Number(m[4]);
+    const mm = Number(m[5]);
+    const ss = Number(m[6] ?? 0);
     if (hh > 23 || mm > 59 || ss > 59) return bad('no such time of day');
     if (m[8] !== 'Z') {
-      const oh = Number(m[8].slice(1, 3)); const om = Number(m[8].slice(4, 6));
+      const oh = Number(m[8].slice(1, 3));
+      const om = Number(m[8].slice(4, 6));
       if (oh > 14 || om > 59) return bad('no such offset');
     }
     ms = Date.parse(v);
@@ -163,7 +177,13 @@ export function parseDateOrInstant(v, { dayEdge = 'start', yearMin = YEAR_MIN, y
     return { ok: true, ms: dayEdge === 'end' ? d.t + DAY_MS : d.t, precision: 'day', value: d.value };
   }
   const i = parseInstant(v, { yearMin, yearMax });
-  if (!i.ok) return { ok: false, error: TEMPORAL_ERRORS.DATE_INVALID, why: i.why, expected: 'YYYY-MM-DD, ISO 8601 with offset or Z, or integer milliseconds' };
+  if (!i.ok)
+    return {
+      ok: false,
+      error: TEMPORAL_ERRORS.DATE_INVALID,
+      why: i.why,
+      expected: 'YYYY-MM-DD, ISO 8601 with offset or Z, or integer milliseconds',
+    };
   return { ok: true, ms: i.ms, precision: 'instant', value: i.ms };
 }
 
@@ -173,7 +193,11 @@ let supportedZones = null;
 function zoneSet() {
   if (supportedZones) return supportedZones;
   let list = [];
-  try { list = Intl.supportedValuesOf('timeZone'); } catch { list = []; }
+  try {
+    list = Intl.supportedValuesOf('timeZone');
+  } catch {
+    list = [];
+  }
   supportedZones = new Set([...list, 'UTC']);
   return supportedZones;
 }
@@ -185,12 +209,28 @@ function zoneSet() {
  * refuse a real city. Exact case on both sides.
  */
 export const MODERN_ZONE_ALIASES = Object.freeze({
-  'Asia/Kolkata': 'Asia/Calcutta', 'Europe/Kyiv': 'Europe/Kiev', 'Asia/Ho_Chi_Minh': 'Asia/Saigon', 'Asia/Kathmandu': 'Asia/Katmandu',
-  'Asia/Yangon': 'Asia/Rangoon', 'America/Nuuk': 'America/Godthab', 'Atlantic/Faroe': 'Atlantic/Faeroe', 'Pacific/Chuuk': 'Pacific/Truk',
-  'Pacific/Pohnpei': 'Pacific/Ponape', 'Pacific/Kanton': 'Pacific/Enderbury', 'Asia/Dhaka': 'Asia/Dacca', 'Asia/Thimphu': 'Asia/Thimbu',
-  'Asia/Macau': 'Asia/Macao', 'Asia/Ulaanbaatar': 'Asia/Ulan_Bator', 'Africa/Asmara': 'Africa/Asmera', 'America/Argentina/Buenos_Aires': 'America/Buenos_Aires',
-  'America/Argentina/Catamarca': 'America/Catamarca', 'America/Argentina/Cordoba': 'America/Cordoba', 'America/Argentina/Jujuy': 'America/Jujuy',
-  'America/Argentina/Mendoza': 'America/Mendoza', 'America/Indiana/Indianapolis': 'America/Indianapolis', 'America/Kentucky/Louisville': 'America/Louisville',
+  'Asia/Kolkata': 'Asia/Calcutta',
+  'Europe/Kyiv': 'Europe/Kiev',
+  'Asia/Ho_Chi_Minh': 'Asia/Saigon',
+  'Asia/Kathmandu': 'Asia/Katmandu',
+  'Asia/Yangon': 'Asia/Rangoon',
+  'America/Nuuk': 'America/Godthab',
+  'Atlantic/Faroe': 'Atlantic/Faeroe',
+  'Pacific/Chuuk': 'Pacific/Truk',
+  'Pacific/Pohnpei': 'Pacific/Ponape',
+  'Pacific/Kanton': 'Pacific/Enderbury',
+  'Asia/Dhaka': 'Asia/Dacca',
+  'Asia/Thimphu': 'Asia/Thimbu',
+  'Asia/Macau': 'Asia/Macao',
+  'Asia/Ulaanbaatar': 'Asia/Ulan_Bator',
+  'Africa/Asmara': 'Africa/Asmera',
+  'America/Argentina/Buenos_Aires': 'America/Buenos_Aires',
+  'America/Argentina/Catamarca': 'America/Catamarca',
+  'America/Argentina/Cordoba': 'America/Cordoba',
+  'America/Argentina/Jujuy': 'America/Jujuy',
+  'America/Argentina/Mendoza': 'America/Mendoza',
+  'America/Indiana/Indianapolis': 'America/Indianapolis',
+  'America/Kentucky/Louisville': 'America/Louisville',
 });
 
 /**
@@ -200,7 +240,11 @@ export const MODERN_ZONE_ALIASES = Object.freeze({
  * thin rename of this.
  */
 export function validateIanaZone(tz) {
-  const bad = { ok: false, error: TEMPORAL_ERRORS.TIMEZONE_INVALID, message: 'timezone must be an IANA time zone name, for example Europe/London.' };
+  const bad = {
+    ok: false,
+    error: TEMPORAL_ERRORS.TIMEZONE_INVALID,
+    message: 'timezone must be an IANA time zone name, for example Europe/London.',
+  };
   if (typeof tz !== 'string' || tz === '' || tz.length > 64) return bad;
   const known = zoneSet().has(tz);
   const modern = Object.prototype.hasOwnProperty.call(MODERN_ZONE_ALIASES, tz) ? MODERN_ZONE_ALIASES[tz] : null;
@@ -208,7 +252,9 @@ export function validateIanaZone(tz) {
   try {
     const resolved = new Intl.DateTimeFormat('en-GB', { timeZone: tz }).resolvedOptions().timeZone;
     if (resolved !== tz && resolved !== modern) return bad;
-  } catch { return bad; }
+  } catch {
+    return bad;
+  }
   return { ok: true, timezone: tz };
 }
 
@@ -217,8 +263,14 @@ function formatterFor(zone) {
   let f = partsFormatter.get(zone);
   if (!f) {
     f = new Intl.DateTimeFormat('en-GB', {
-      timeZone: zone, hourCycle: 'h23',
-      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+      timeZone: zone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
     });
     partsFormatter.set(zone, f);
   }
@@ -227,14 +279,33 @@ function formatterFor(zone) {
 
 /** Wall-clock parts of an instant in a zone. Deterministic; Intl-backed; throws for an unknown zone. */
 export function localParts(ms, zone) {
-  const p = Object.fromEntries(formatterFor(zone).formatToParts(new Date(ms)).filter((x) => x.type !== 'literal').map((x) => [x.type, x.value]));
-  return { year: p.year, month: p.month, day: p.day, hour: p.hour === '24' ? '00' : p.hour, minute: p.minute, second: p.second };
+  const p = Object.fromEntries(
+    formatterFor(zone)
+      .formatToParts(new Date(ms))
+      .filter((x) => x.type !== 'literal')
+      .map((x) => [x.type, x.value]),
+  );
+  return {
+    year: p.year,
+    month: p.month,
+    day: p.day,
+    hour: p.hour === '24' ? '00' : p.hour,
+    minute: p.minute,
+    second: p.second,
+  };
 }
 
 /** The zone's UTC offset at an instant, in minutes (east positive). */
 export function zoneOffsetMinutes(ms, zone) {
   const p = localParts(ms, zone);
-  const asUtc = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute), Number(p.second));
+  const asUtc = Date.UTC(
+    Number(p.year),
+    Number(p.month) - 1,
+    Number(p.day),
+    Number(p.hour),
+    Number(p.minute),
+    Number(p.second),
+  );
   return Math.round((asUtc - Math.floor(ms / 1000) * 1000) / 60_000);
 }
 
@@ -247,34 +318,62 @@ export function zoneOffsetMinutes(ms, zone) {
  * second as LOCAL_TIME_AMBIGUOUS unless the caller states `resolve:
  * 'earlier' | 'later'` — nothing picks silently.
  */
-export function parseLocalDateTimeWithZone(local, zone, { resolve = null, yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {}) {
+export function parseLocalDateTimeWithZone(
+  local,
+  zone,
+  { resolve = null, yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {},
+) {
   const tz = validateIanaZone(zone);
   if (!tz.ok) return tz;
-  const bad = (why) => ({ ok: false, error: TEMPORAL_ERRORS.TIMESTAMP_INVALID, why, expected: 'YYYY-MM-DDTHH:MM[:SS] with an IANA zone' });
+  const bad = (why) => ({
+    ok: false,
+    error: TEMPORAL_ERRORS.TIMESTAMP_INVALID,
+    why,
+    expected: 'YYYY-MM-DDTHH:MM[:SS] with an IANA zone',
+  });
   if (typeof local !== 'string') return bad('not text');
   const m = LOCAL_WALL_RE.exec(local);
   if (!m) return bad('wrong shape');
   const day = parseStrictDateOnly(`${m[1]}-${m[2]}-${m[3]}`, { yearMin, yearMax });
   if (!day.ok) return bad('no such calendar day');
-  const hh = Number(m[4]); const mm = Number(m[5]); const ss = Number(m[6] ?? 0);
+  const hh = Number(m[4]);
+  const mm = Number(m[5]);
+  const ss = Number(m[6] ?? 0);
   if (hh > 23 || mm > 59 || ss > 59) return bad('no such time of day');
   const wallAsUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), hh, mm, ss);
   // Every offset the zone uses within a day either side of the wall time is a
   // candidate; a candidate is real only if it prints back as the same wall time.
-  const offsets = new Set([zoneOffsetMinutes(wallAsUtc - DAY_MS, zone), zoneOffsetMinutes(wallAsUtc, zone), zoneOffsetMinutes(wallAsUtc + DAY_MS, zone)]);
+  const offsets = new Set([
+    zoneOffsetMinutes(wallAsUtc - DAY_MS, zone),
+    zoneOffsetMinutes(wallAsUtc, zone),
+    zoneOffsetMinutes(wallAsUtc + DAY_MS, zone),
+  ]);
   const wanted = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${String(ss).padStart(2, '0')}`;
   const candidates = [];
   for (const off of offsets) {
     const ms = wallAsUtc - off * 60_000;
     const p = localParts(ms, zone);
-    if (`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}` === wanted) candidates.push({ ms, offsetMinutes: off });
+    if (`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}` === wanted)
+      candidates.push({ ms, offsetMinutes: off });
   }
   candidates.sort((a, b) => a.ms - b.ms);
-  if (candidates.length === 0) return { ok: false, error: TEMPORAL_ERRORS.LOCAL_TIME_NONEXISTENT, why: 'this wall-clock time does not occur in this zone (clocks go forward)', zone };
+  if (candidates.length === 0)
+    return {
+      ok: false,
+      error: TEMPORAL_ERRORS.LOCAL_TIME_NONEXISTENT,
+      why: 'this wall-clock time does not occur in this zone (clocks go forward)',
+      zone,
+    };
   if (candidates.length > 1) {
     if (resolve === 'earlier') return { ok: true, ...candidates[0], ambiguous: true };
     if (resolve === 'later') return { ok: true, ...candidates[candidates.length - 1], ambiguous: true };
-    return { ok: false, error: TEMPORAL_ERRORS.LOCAL_TIME_AMBIGUOUS, why: 'this wall-clock time occurs twice in this zone (clocks go back)', zone, candidates: candidates.map((c) => c.ms) };
+    return {
+      ok: false,
+      error: TEMPORAL_ERRORS.LOCAL_TIME_AMBIGUOUS,
+      why: 'this wall-clock time occurs twice in this zone (clocks go back)',
+      zone,
+      candidates: candidates.map((c) => c.ms),
+    };
   }
   return { ok: true, ...candidates[0], ambiguous: false };
 }
@@ -283,7 +382,8 @@ export function parseLocalDateTimeWithZone(local, zone, { resolve = null, yearMi
 
 /** Both ends readable and start strictly before end (principle E). */
 export function isOrderedInterval(startMs, endMs, { allowEqual = false } = {}) {
-  const s = readInstant(startMs); const e = readInstant(endMs);
+  const s = readInstant(startMs);
+  const e = readInstant(endMs);
   if (s === null || e === null) return false;
   return allowEqual ? s <= e : s < e;
 }
@@ -321,8 +421,14 @@ export const isActiveAt = (rec, now) => !!rec && isEffectiveAt(rec.startsAt, rec
 export function isDayWithin(dayOnly, from, to) {
   const d = readDateOnly(dayOnly);
   if (d === null) return false;
-  if (!isAbsent(from)) { const f = readDateOnly(from); if (f === null || d < f) return false; }
-  if (!isAbsent(to)) { const t = readDateOnly(to); if (t === null || d > t) return false; }
+  if (!isAbsent(from)) {
+    const f = readDateOnly(from);
+    if (f === null || d < f) return false;
+  }
+  if (!isAbsent(to)) {
+    const t = readDateOnly(to);
+    if (t === null || d > t) return false;
+  }
   return true;
 }
 
@@ -337,7 +443,8 @@ export function isDayWithin(dayOnly, from, to) {
 export function ageOnMs(dob, nowMs) {
   const day = parseStrictDateOnly(dob);
   if (!day.ok || !Number.isFinite(nowMs)) return NaN;
-  const on = new Date(nowMs); const b = new Date(day.t);
+  const on = new Date(nowMs);
+  const b = new Date(day.t);
   let age = on.getUTCFullYear() - b.getUTCFullYear();
   const m = on.getUTCMonth() - b.getUTCMonth();
   if (m < 0 || (m === 0 && on.getUTCDate() < b.getUTCDate())) age -= 1;
@@ -345,7 +452,10 @@ export function ageOnMs(dob, nowMs) {
 }
 
 /** A finite age or null — the reader for a JSON projection. */
-export const ageOrNull = (dob, nowMs) => { const a = ageOnMs(dob, nowMs); return Number.isFinite(a) ? a : null; };
+export const ageOrNull = (dob, nowMs) => {
+  const a = ageOnMs(dob, nowMs);
+  return Number.isFinite(a) ? a : null;
+};
 
 /** The oldest a living person plausibly is. */
 export const DOB_MAX_AGE_YEARS = 120;
@@ -358,8 +468,10 @@ export function parseDobStrict(dob, nowMs) {
   const p = parseStrictDateOnly(dob);
   if (!p.ok) return { ok: false, error: TEMPORAL_ERRORS.DOB_INVALID, why: p.why, expected: 'YYYY-MM-DD' };
   if (Number.isFinite(nowMs)) {
-    if (p.t > nowMs) return { ok: false, error: TEMPORAL_ERRORS.DOB_INVALID, why: 'in the future', expected: 'YYYY-MM-DD' };
-    if (ageOnMs(p.value, nowMs) > DOB_MAX_AGE_YEARS) return { ok: false, error: TEMPORAL_ERRORS.DOB_INVALID, why: 'implausibly old', expected: 'YYYY-MM-DD' };
+    if (p.t > nowMs)
+      return { ok: false, error: TEMPORAL_ERRORS.DOB_INVALID, why: 'in the future', expected: 'YYYY-MM-DD' };
+    if (ageOnMs(p.value, nowMs) > DOB_MAX_AGE_YEARS)
+      return { ok: false, error: TEMPORAL_ERRORS.DOB_INVALID, why: 'implausibly old', expected: 'YYYY-MM-DD' };
   }
   return { ok: true, value: p.value, t: p.t };
 }

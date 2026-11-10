@@ -8,16 +8,51 @@
  * legal effect beyond the workflow and evidence it records.
  */
 
-import { parseStrictDateOnly, parseInstant, readInstant, isExpiredAt, isOrderedInterval, DAY_MS } from '../../../temporal.mjs';
-import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
+import {
+  parseStrictDateOnly,
+  parseInstant,
+  readInstant,
+  isExpiredAt,
+  isOrderedInterval,
+  DAY_MS,
+} from '../../../temporal.mjs';
+import {
+  normaliseClientKey as platformClientKey,
+  payloadFingerprint,
+  CLIENT_KEY_MAX,
+} from '../../platform/idempotency.mjs';
 
 export const SIGNING_POLICY_VERSION = 1;
 
-export const SIGNING_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED', 'EXPIRED', 'SUPERSEDED']);
+export const SIGNING_STATUSES = Object.freeze([
+  'DRAFT',
+  'READY',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'CANCELLED',
+  'VOIDED',
+  'EXPIRED',
+  'SUPERSEDED',
+]);
 export const SIGNING_TERMINAL = Object.freeze(['COMPLETED', 'CANCELLED', 'VOIDED', 'EXPIRED']);
 /** EXPIRED is derived at read time and never stored; SUPERSEDED belongs to revisions only. */
-export const SIGNING_STORED_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED']);
-export const SIGNING_REVISION_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED', 'SUPERSEDED']);
+export const SIGNING_STORED_STATUSES = Object.freeze([
+  'DRAFT',
+  'READY',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'CANCELLED',
+  'VOIDED',
+]);
+export const SIGNING_REVISION_STATUSES = Object.freeze([
+  'DRAFT',
+  'READY',
+  'IN_PROGRESS',
+  'COMPLETED',
+  'CANCELLED',
+  'VOIDED',
+  'SUPERSEDED',
+]);
 export const SIGNING_STATUS_LABELS = Object.freeze({
   DRAFT: 'Draft — not presented for signing',
   READY: 'Presented — awaiting signatures',
@@ -37,14 +72,25 @@ export const SIGNING_METHODS = Object.freeze(['PLATFORM_ACKNOWLEDGMENT', 'UPLOAD
 export const PARTY_ACTOR_KINDS = Object.freeze({ PLAYER: ['player'], GUARDIAN: ['guardian'], CLUB_SIGNATORY: ['org'] });
 
 /** Closed in every jurisdiction in this build: a guardian-addressed Offer cannot open a package. */
-export const MINOR_SIGNING_PATHWAY_ENABLED = Object.freeze({ GB: false, ENG: false, INT: false, USA: false, DEFAULT: false });
+export const MINOR_SIGNING_PATHWAY_ENABLED = Object.freeze({
+  GB: false,
+  ENG: false,
+  INT: false,
+  USA: false,
+  DEFAULT: false,
+});
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 export const minorSigningPathwayOpen = (jurisdiction, policy = MINOR_SIGNING_PATHWAY_ENABLED) =>
-  (jurisdiction && has(policy, jurisdiction) ? policy[jurisdiction] === true : policy.DEFAULT === true);
+  jurisdiction && has(policy, jurisdiction) ? policy[jurisdiction] === true : policy.DEFAULT === true;
 
 export const SIGNING_LIMITS = Object.freeze({
-  label: 120, internalNote: 2000, reason: 500, clientKey: CLIENT_KEY_MAX,
-  minExpiryMs: 60 * 60 * 1000, maxExpiryMs: 90 * DAY_MS, defaultExpiryMs: 30 * DAY_MS,
+  label: 120,
+  internalNote: 2000,
+  reason: 500,
+  clientKey: CLIENT_KEY_MAX,
+  minExpiryMs: 60 * 60 * 1000,
+  maxExpiryMs: 90 * DAY_MS,
+  defaultExpiryMs: 30 * DAY_MS,
   maxContractYears: 10,
 });
 
@@ -65,41 +111,107 @@ export const normaliseSigningClientKey = (raw) => platformClientKey(raw, 'SIGNIN
 
 export function validateContractDates({ startDate, endDate } = {}) {
   const s = parseStrictDateOnly(startDate);
-  if (!s.ok) return { ok: false, error: 'SIGNING_CONTRACT_DATES_INVALID', field: 'startDate', message: 'The contract start must be a real calendar day (YYYY-MM-DD).' };
-  let end = null; let endT = null;
+  if (!s.ok)
+    return {
+      ok: false,
+      error: 'SIGNING_CONTRACT_DATES_INVALID',
+      field: 'startDate',
+      message: 'The contract start must be a real calendar day (YYYY-MM-DD).',
+    };
+  let end = null;
+  let endT = null;
   if (endDate !== undefined && endDate !== null && endDate !== '') {
     const e = parseStrictDateOnly(endDate);
-    if (!e.ok) return { ok: false, error: 'SIGNING_CONTRACT_DATES_INVALID', field: 'endDate', message: 'The contract end must be a real calendar day (YYYY-MM-DD).' };
-    if (!isOrderedInterval(s.t, e.t, { allowEqual: true })) return { ok: false, error: 'SIGNING_CONTRACT_DATES_INVALID', field: 'endDate', message: 'The contract cannot end before it starts.' };
-    if (e.t - s.t > SIGNING_LIMITS.maxContractYears * 366 * DAY_MS) return { ok: false, error: 'SIGNING_CONTRACT_DATES_INVALID', field: 'endDate', message: `A contract longer than ${SIGNING_LIMITS.maxContractYears} years cannot be recorded here.` };
-    end = e.value; endT = e.t;
+    if (!e.ok)
+      return {
+        ok: false,
+        error: 'SIGNING_CONTRACT_DATES_INVALID',
+        field: 'endDate',
+        message: 'The contract end must be a real calendar day (YYYY-MM-DD).',
+      };
+    if (!isOrderedInterval(s.t, e.t, { allowEqual: true }))
+      return {
+        ok: false,
+        error: 'SIGNING_CONTRACT_DATES_INVALID',
+        field: 'endDate',
+        message: 'The contract cannot end before it starts.',
+      };
+    if (e.t - s.t > SIGNING_LIMITS.maxContractYears * 366 * DAY_MS)
+      return {
+        ok: false,
+        error: 'SIGNING_CONTRACT_DATES_INVALID',
+        field: 'endDate',
+        message: `A contract longer than ${SIGNING_LIMITS.maxContractYears} years cannot be recorded here.`,
+      };
+    end = e.value;
+    endT = e.t;
   }
   return { ok: true, contract: { startDate: s.value, endDate: end }, startT: s.t, endT };
 }
 
 /** Absent means the default expiry. */
 export function validateExpiry(raw, { now }) {
-  if (raw === undefined || raw === null || raw === '') return { ok: true, ms: now + SIGNING_LIMITS.defaultExpiryMs, defaulted: true };
+  if (raw === undefined || raw === null || raw === '')
+    return { ok: true, ms: now + SIGNING_LIMITS.defaultExpiryMs, defaulted: true };
   const p = parseInstant(raw);
-  if (!p.ok) return { ok: false, error: 'SIGNING_EXPIRY_INVALID', message: 'The expiry must be an ISO 8601 instant with an offset or a millisecond timestamp.', expected: 'instant' };
-  if (p.ms < now + SIGNING_LIMITS.minExpiryMs) return { ok: false, error: 'SIGNING_EXPIRY_INVALID', message: 'A signing must stay open for at least one hour.' };
-  if (p.ms > now + SIGNING_LIMITS.maxExpiryMs) return { ok: false, error: 'SIGNING_EXPIRY_INVALID', message: 'A signing cannot stay open for more than 90 days.' };
+  if (!p.ok)
+    return {
+      ok: false,
+      error: 'SIGNING_EXPIRY_INVALID',
+      message: 'The expiry must be an ISO 8601 instant with an offset or a millisecond timestamp.',
+      expected: 'instant',
+    };
+  if (p.ms < now + SIGNING_LIMITS.minExpiryMs)
+    return { ok: false, error: 'SIGNING_EXPIRY_INVALID', message: 'A signing must stay open for at least one hour.' };
+  if (p.ms > now + SIGNING_LIMITS.maxExpiryMs)
+    return { ok: false, error: 'SIGNING_EXPIRY_INVALID', message: 'A signing cannot stay open for more than 90 days.' };
   return { ok: true, ms: p.ms, defaulted: false };
 }
 
 /** Snapshotted per revision. A guardian recipient is refused upstream while the pathway is closed. */
 export function requiredPartiesFor({ recipientType, playerId, guardianId = null, orgId }) {
   const parties = [];
-  if (recipientType === 'guardian') parties.push({ partyType: 'GUARDIAN', forEntityId: guardianId, forPlayerId: playerId, status: 'PENDING', completedAt: null, completedBy: null, evidenceRef: null, method: null });
-  else parties.push({ partyType: 'PLAYER', forEntityId: playerId, forPlayerId: playerId, status: 'PENDING', completedAt: null, completedBy: null, evidenceRef: null, method: null });
-  parties.push({ partyType: 'CLUB_SIGNATORY', forEntityId: orgId, forPlayerId: playerId, status: 'PENDING', completedAt: null, completedBy: null, evidenceRef: null, method: null });
+  if (recipientType === 'guardian')
+    parties.push({
+      partyType: 'GUARDIAN',
+      forEntityId: guardianId,
+      forPlayerId: playerId,
+      status: 'PENDING',
+      completedAt: null,
+      completedBy: null,
+      evidenceRef: null,
+      method: null,
+    });
+  else
+    parties.push({
+      partyType: 'PLAYER',
+      forEntityId: playerId,
+      forPlayerId: playerId,
+      status: 'PENDING',
+      completedAt: null,
+      completedBy: null,
+      evidenceRef: null,
+      method: null,
+    });
+  parties.push({
+    partyType: 'CLUB_SIGNATORY',
+    forEntityId: orgId,
+    forPlayerId: playerId,
+    status: 'PENDING',
+    completedAt: null,
+    completedBy: null,
+    evidenceRef: null,
+    method: null,
+  });
   return parties;
 }
 
 // ------------------------------------------------------------- reading
 
 export const currentRevision = (pkg) => (pkg?.revisions ?? []).find((r) => r && r.id === pkg.currentRevisionId) ?? null;
-export const nextRevisionNumber = (pkg) => (pkg?.revisions ?? []).reduce((m, r) => Math.max(m, Number.isInteger(r?.revisionNumber) ? r.revisionNumber : 0), 0) + 1;
+export const nextRevisionNumber = (pkg) =>
+  (pkg?.revisions ?? []).reduce((m, r) => Math.max(m, Number.isInteger(r?.revisionNumber) ? r.revisionNumber : 0), 0) +
+  1;
 export const isTerminal = (status) => SIGNING_TERMINAL.includes(status);
 const LIVE = ['DRAFT', 'READY', 'IN_PROGRESS'];
 
@@ -116,21 +228,57 @@ export function effectiveStatus(pkg, now) {
 export const isLive = (pkg, now) => LIVE.includes(effectiveStatus(pkg, now));
 
 const partiesOf = (rev) => (Array.isArray(rev?.requiredParties) ? rev.requiredParties : []);
-export const partiesComplete = (rev) => partiesOf(rev).length > 0 && partiesOf(rev).every((p) => p && p.status === 'COMPLETED');
-export const findParty = (rev, partyType, forEntityId = null) => partiesOf(rev).find((p) => p && p.partyType === partyType && (forEntityId === null || p.forEntityId === forEntityId)) ?? null;
+export const partiesComplete = (rev) =>
+  partiesOf(rev).length > 0 && partiesOf(rev).every((p) => p && p.status === 'COMPLETED');
+export const findParty = (rev, partyType, forEntityId = null) =>
+  partiesOf(rev).find(
+    (p) => p && p.partyType === partyType && (forEntityId === null || p.forEntityId === forEntityId),
+  ) ?? null;
 
 // ------------------------------------------------------------- gates
 
-export function canStart({ offerStatus, offerRevisionStatus, caseStatus, recipientType, jurisdiction, existing = [] }, now) {
+export function canStart(
+  { offerStatus, offerRevisionStatus, caseStatus, recipientType, jurisdiction, existing = [] },
+  now,
+) {
   // A completed or live package over this Offer is named before the lifecycle refusal.
   const completed = existing.find((p) => effectiveStatus(p, now) === 'COMPLETED');
-  if (completed) return { ok: false, error: 'SIGNING_ALREADY_COMPLETED', message: 'A completed signing already exists for this Offer.', current: { signingPackageId: completed.id } };
+  if (completed)
+    return {
+      ok: false,
+      error: 'SIGNING_ALREADY_COMPLETED',
+      message: 'A completed signing already exists for this Offer.',
+      current: { signingPackageId: completed.id },
+    };
   const live = existing.find((p) => isLive(p, now));
-  if (live) return { ok: false, error: 'SIGNING_PACKAGE_EXISTS', message: 'A signing is already open for this Offer.', current: { signingPackageId: live.id, status: effectiveStatus(live, now) } };
-  if (offerStatus !== 'ACCEPTED' || offerRevisionStatus !== 'ACCEPTED') return { ok: false, error: 'SIGNING_OFFER_NOT_ACCEPTED', message: 'A signing can only be opened over an accepted Offer revision.' };
-  if (caseStatus !== 'offer_accepted') return { ok: false, error: 'SIGNING_LIFECYCLE_CONFLICT', message: 'The case is not at Offer accepted.', current: { status: caseStatus ?? null } };
-  if (recipientType === 'guardian' && !minorSigningPathwayOpen(jurisdiction)) return { ok: false, error: 'SIGNING_PATHWAY_CLOSED', message: 'Signing for a player under the age of majority is not open in this jurisdiction.' };
-  if (recipientType !== 'player' && recipientType !== 'guardian') return { ok: false, error: 'SIGNING_RECIPIENT_INVALID', message: 'The Offer names no valid signatory.' };
+  if (live)
+    return {
+      ok: false,
+      error: 'SIGNING_PACKAGE_EXISTS',
+      message: 'A signing is already open for this Offer.',
+      current: { signingPackageId: live.id, status: effectiveStatus(live, now) },
+    };
+  if (offerStatus !== 'ACCEPTED' || offerRevisionStatus !== 'ACCEPTED')
+    return {
+      ok: false,
+      error: 'SIGNING_OFFER_NOT_ACCEPTED',
+      message: 'A signing can only be opened over an accepted Offer revision.',
+    };
+  if (caseStatus !== 'offer_accepted')
+    return {
+      ok: false,
+      error: 'SIGNING_LIFECYCLE_CONFLICT',
+      message: 'The case is not at Offer accepted.',
+      current: { status: caseStatus ?? null },
+    };
+  if (recipientType === 'guardian' && !minorSigningPathwayOpen(jurisdiction))
+    return {
+      ok: false,
+      error: 'SIGNING_PATHWAY_CLOSED',
+      message: 'Signing for a player under the age of majority is not open in this jurisdiction.',
+    };
+  if (recipientType !== 'player' && recipientType !== 'guardian')
+    return { ok: false, error: 'SIGNING_RECIPIENT_INVALID', message: 'The Offer names no valid signatory.' };
   return { ok: true };
 }
 
@@ -138,8 +286,18 @@ export function stateRefusal(pkg, now, allowed) {
   const st = effectiveStatus(pkg, now);
   if (st === null) return { ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'This signing cannot be read.' };
   if (allowed.includes(st)) return { ok: true, status: st };
-  const map = { EXPIRED: 'SIGNING_EXPIRED', CANCELLED: 'SIGNING_CANCELLED', VOIDED: 'SIGNING_VOIDED', COMPLETED: 'SIGNING_ALREADY_COMPLETED' };
-  return { ok: false, error: map[st] ?? 'SIGNING_STATE_INVALID', message: `This signing is ${SIGNING_STATUS_LABELS[st] ?? st}.`, current: { status: st } };
+  const map = {
+    EXPIRED: 'SIGNING_EXPIRED',
+    CANCELLED: 'SIGNING_CANCELLED',
+    VOIDED: 'SIGNING_VOIDED',
+    COMPLETED: 'SIGNING_ALREADY_COMPLETED',
+  };
+  return {
+    ok: false,
+    error: map[st] ?? 'SIGNING_STATE_INVALID',
+    message: `This signing is ${SIGNING_STATUS_LABELS[st] ?? st}.`,
+    current: { status: st },
+  };
 }
 
 export const canAttachDocument = (pkg, now) => stateRefusal(pkg, now, ['DRAFT']);
@@ -152,9 +310,21 @@ export function canMarkReady(pkg, now) {
   if (!s.ok) return s;
   const rev = currentRevision(pkg);
   if (!rev) return { ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'This signing cannot be read.' };
-  if (!rev.document?.evidenceId || !rev.document?.sha256) return { ok: false, error: 'SIGNING_DOCUMENT_REQUIRED', message: 'Attach the exact document the parties will sign before presenting it.' };
-  if (!rev.contract?.startDate) return { ok: false, error: 'SIGNING_CONTRACT_DATES_INVALID', field: 'startDate', message: 'The contract start day is required before presenting.' };
-  if (!partiesOf(rev).length) return { ok: false, error: 'SIGNING_STATE_INVALID', message: 'No required party is recorded.' };
+  if (!rev.document?.evidenceId || !rev.document?.sha256)
+    return {
+      ok: false,
+      error: 'SIGNING_DOCUMENT_REQUIRED',
+      message: 'Attach the exact document the parties will sign before presenting it.',
+    };
+  if (!rev.contract?.startDate)
+    return {
+      ok: false,
+      error: 'SIGNING_CONTRACT_DATES_INVALID',
+      field: 'startDate',
+      message: 'The contract start day is required before presenting.',
+    };
+  if (!partiesOf(rev).length)
+    return { ok: false, error: 'SIGNING_STATE_INVALID', message: 'No required party is recorded.' };
   return { ok: true, status: 'DRAFT' };
 }
 
@@ -164,7 +334,13 @@ export function canCompleteParty(pkg, { partyType, actorKind, actorId, revisionI
   // re-presentation.
   if (isLive(pkg, now) && revisionId !== pkg.currentRevisionId) {
     const older = (pkg.revisions ?? []).find((r) => r && r.id === revisionId && r.status === 'SUPERSEDED');
-    if (older) return { ok: false, error: 'SIGNING_SUPERSEDED', message: 'That signing revision was replaced. Sign the current revision once it is presented.', current: { revisionId: pkg.currentRevisionId } };
+    if (older)
+      return {
+        ok: false,
+        error: 'SIGNING_SUPERSEDED',
+        message: 'That signing revision was replaced. Sign the current revision once it is presented.',
+        current: { revisionId: pkg.currentRevisionId },
+      };
   }
   const s = stateRefusal(pkg, now, ['READY', 'IN_PROGRESS']);
   if (!s.ok) return s;
@@ -172,18 +348,49 @@ export function canCompleteParty(pkg, { partyType, actorKind, actorId, revisionI
   if (!rev) return { ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'This signing cannot be read.' };
   if (revisionId !== rev.id) {
     const old = (pkg.revisions ?? []).find((r) => r && r.id === revisionId);
-    return old ? { ok: false, error: 'SIGNING_SUPERSEDED', message: 'That signing revision was replaced. Sign the current revision.', current: { revisionId: rev.id } } : { ok: false, error: 'SIGNING_INPUT_INVALID', field: 'revisionId', message: 'Name the signing revision you are completing.' };
+    return old
+      ? {
+          ok: false,
+          error: 'SIGNING_SUPERSEDED',
+          message: 'That signing revision was replaced. Sign the current revision.',
+          current: { revisionId: rev.id },
+        }
+      : {
+          ok: false,
+          error: 'SIGNING_INPUT_INVALID',
+          field: 'revisionId',
+          message: 'Name the signing revision you are completing.',
+        };
   }
-  if (!(PARTY_ACTOR_KINDS[partyType] ?? []).includes(actorKind)) return { ok: false, error: 'SIGNING_NOT_PERMITTED', message: 'You cannot sign for that party.' };
+  if (!(PARTY_ACTOR_KINDS[partyType] ?? []).includes(actorKind))
+    return { ok: false, error: 'SIGNING_NOT_PERMITTED', message: 'You cannot sign for that party.' };
   const party = findParty(rev, partyType, partyType === 'CLUB_SIGNATORY' ? pkg.orgId : actorId);
-  if (!party) return { ok: false, error: 'SIGNING_PARTY_NOT_REQUIRED', message: 'This signing does not require your signature.' };
-  if (party.status === 'COMPLETED') return { ok: false, error: 'SIGNING_PARTY_ALREADY_COMPLETED', message: 'Your signature is already recorded on this revision.' };
-  if (!rev.document?.sha256 || typeof documentSha256 !== 'string' || documentSha256.toLowerCase() !== String(rev.document.sha256).toLowerCase()) return { ok: false, error: 'SIGNING_DOCUMENT_MISMATCH', message: 'Confirm the exact document you read: its digest does not match the revision presented.' };
+  if (!party)
+    return { ok: false, error: 'SIGNING_PARTY_NOT_REQUIRED', message: 'This signing does not require your signature.' };
+  if (party.status === 'COMPLETED')
+    return {
+      ok: false,
+      error: 'SIGNING_PARTY_ALREADY_COMPLETED',
+      message: 'Your signature is already recorded on this revision.',
+    };
+  if (
+    !rev.document?.sha256 ||
+    typeof documentSha256 !== 'string' ||
+    documentSha256.toLowerCase() !== String(rev.document.sha256).toLowerCase()
+  )
+    return {
+      ok: false,
+      error: 'SIGNING_DOCUMENT_MISMATCH',
+      message: 'Confirm the exact document you read: its digest does not match the revision presented.',
+    };
   return { ok: true, revision: rev, party };
 }
 
 /** Every unmet condition, named; only an empty list lets completion run. */
-export function completionGate(pkg, { now, offer, offerRevision, kase, otherCompleted = false, blocked = false, documentProblem = null }) {
+export function completionGate(
+  pkg,
+  { now, offer, offerRevision, kase, otherCompleted = false, blocked = false, documentProblem = null },
+) {
   const problems = [];
   if (documentProblem) problems.push(`DOCUMENT_BYTES_${String(documentProblem).toUpperCase()}`);
   const st = effectiveStatus(pkg, now);
@@ -200,16 +407,21 @@ export function completionGate(pkg, { now, offer, offerRevision, kase, otherComp
     for (const p of partiesOf(rev)) {
       if (p?.status !== 'COMPLETED') continue;
       if (!p.evidenceRef || !SIGNING_METHODS.includes(p.method)) problems.push('EVIDENCE_INVALID');
-      if (p.evidenceRef?.documentSha256 && rev.document?.sha256 && p.evidenceRef.documentSha256 !== rev.document.sha256) problems.push('DOCUMENT_MISMATCH');
-      const c = readInstant(p.completedAt); const r0 = readInstant(rev.readyAt ?? rev.createdAt);
+      if (p.evidenceRef?.documentSha256 && rev.document?.sha256 && p.evidenceRef.documentSha256 !== rev.document.sha256)
+        problems.push('DOCUMENT_MISMATCH');
+      const c = readInstant(p.completedAt);
+      const r0 = readInstant(rev.readyAt ?? rev.createdAt);
       if (c === null || (r0 !== null && c < r0)) problems.push('TEMPORAL_ORDER');
     }
     if (!rev.contract?.startDate) problems.push('CONTRACT_DATES_INVALID');
   }
   if (!offer || offer.status !== 'ACCEPTED' || offer.id !== pkg.offerId) problems.push('OFFER_NOT_ACCEPTED');
-  if (!offerRevision || offerRevision.id !== pkg.offerRevisionId || offerRevision.status !== 'ACCEPTED') problems.push('OFFER_REVISION_MISMATCH');
-  if (offer && (offer.orgId !== pkg.orgId || offer.playerId !== pkg.playerId || offer.caseId !== pkg.caseId)) problems.push('REFERENCE_MISMATCH');
-  if (!kase || kase.id !== pkg.caseId || kase.orgId !== pkg.orgId || kase.playerId !== pkg.playerId) problems.push('CASE_MISMATCH');
+  if (!offerRevision || offerRevision.id !== pkg.offerRevisionId || offerRevision.status !== 'ACCEPTED')
+    problems.push('OFFER_REVISION_MISMATCH');
+  if (offer && (offer.orgId !== pkg.orgId || offer.playerId !== pkg.playerId || offer.caseId !== pkg.caseId))
+    problems.push('REFERENCE_MISMATCH');
+  if (!kase || kase.id !== pkg.caseId || kase.orgId !== pkg.orgId || kase.playerId !== pkg.playerId)
+    problems.push('CASE_MISMATCH');
   else if (kase.room?.status !== 'offer_accepted') problems.push('LIFECYCLE_CONFLICT');
   if (otherCompleted) problems.push('CONFLICTING_COMPLETED_SIGNING');
   if (blocked) problems.push('BLOCKED');
@@ -224,7 +436,8 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
   if (!pkg || typeof pkg !== 'object') return ['row'];
   if (typeof pkg.id !== 'string' || !pkg.id) problems.push('id');
   if (orgId !== null && pkg.orgId !== orgId) problems.push('org_mismatch');
-  for (const k of ['orgId', 'playerId', 'caseId', 'offerId', 'offerRevisionId']) if (typeof pkg[k] !== 'string' || !pkg[k]) problems.push(k);
+  for (const k of ['orgId', 'playerId', 'caseId', 'offerId', 'offerRevisionId'])
+    if (typeof pkg[k] !== 'string' || !pkg[k]) problems.push(k);
   if (!SIGNING_STORED_STATUSES.includes(pkg.status)) problems.push('status');
   const c0 = readInstant(pkg.createdAt);
   if (c0 === null) problems.push('created_at');
@@ -233,23 +446,39 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
   if (exp !== null && c0 !== null && exp <= c0) problems.push('expiry_before_created');
   // An expiry beyond the maximum from the last time the package was worked on is tampering.
   if (exp !== null) {
-    const worked = Math.max(c0 ?? 0, ...(Array.isArray(pkg.revisions) ? pkg.revisions.flatMap((r) => [readInstant(r?.createdAt) ?? 0, readInstant(r?.readyAt) ?? 0]) : [0]));
+    const worked = Math.max(
+      c0 ?? 0,
+      ...(Array.isArray(pkg.revisions)
+        ? pkg.revisions.flatMap((r) => [readInstant(r?.createdAt) ?? 0, readInstant(r?.readyAt) ?? 0])
+        : [0]),
+    );
     if (worked > 0 && exp > worked + SIGNING_LIMITS.maxExpiryMs + DAY_MS) problems.push('expiry_beyond_max');
   }
   if (!Array.isArray(pkg.revisions) || pkg.revisions.length === 0) problems.push('revisions');
   else {
-    const ids = new Set(); const nums = new Set();
+    const ids = new Set();
+    const nums = new Set();
     for (const r of pkg.revisions) {
-      if (!r || typeof r.id !== 'string' || ids.has(r.id)) { problems.push('revision_id'); continue; }
+      if (!r || typeof r.id !== 'string' || ids.has(r.id)) {
+        problems.push('revision_id');
+        continue;
+      }
       ids.add(r.id);
-      if (!Number.isInteger(r.revisionNumber) || r.revisionNumber < 1 || nums.has(r.revisionNumber)) problems.push('revision_number');
+      if (!Number.isInteger(r.revisionNumber) || r.revisionNumber < 1 || nums.has(r.revisionNumber))
+        problems.push('revision_number');
       nums.add(r.revisionNumber);
       if (!SIGNING_REVISION_STATUSES.includes(r.status)) problems.push('revision_status');
-      const rc = readInstant(r.createdAt); const rr = readInstant(r.readyAt); const rcomp = readInstant(r.completedAt);
+      const rc = readInstant(r.createdAt);
+      const rr = readInstant(r.readyAt);
+      const rcomp = readInstant(r.completedAt);
       if (rc === null) problems.push('revision_created_at');
       if (rc !== null && c0 !== null && rc < c0) problems.push('revision_before_package');
       if (rr !== null && rc !== null && rr < rc) problems.push('ready_before_created');
-      if (['READY', 'IN_PROGRESS', 'COMPLETED'].includes(r.status) && (rr === null || !r.document?.evidenceId || !r.document?.sha256)) problems.push('presented_without_document');
+      if (
+        ['READY', 'IN_PROGRESS', 'COMPLETED'].includes(r.status) &&
+        (rr === null || !r.document?.evidenceId || !r.document?.sha256)
+      )
+        problems.push('presented_without_document');
       if (!Array.isArray(r.requiredParties) || r.requiredParties.length === 0) problems.push('parties');
       else {
         // One recipient party (PLAYER or GUARDIAN) and one CLUB_SIGNATORY, naming the package's player and club.
@@ -259,20 +488,26 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
         if (types.includes('PLAYER') && types.includes('GUARDIAN')) problems.push('party_recipient_duplicate');
         if (!types.includes('CLUB_SIGNATORY')) problems.push('party_club_missing');
         for (const p of r.requiredParties) {
-          if (!p || !PARTY_TYPES.includes(p.partyType) || !PARTY_STATUSES.includes(p.status)) { problems.push('party_shape'); continue; }
+          if (!p || !PARTY_TYPES.includes(p.partyType) || !PARTY_STATUSES.includes(p.status)) {
+            problems.push('party_shape');
+            continue;
+          }
           if (p.forPlayerId !== undefined && p.forPlayerId !== pkg.playerId) problems.push('party_player_mismatch');
           if (p.partyType === 'PLAYER' && p.forEntityId !== pkg.playerId) problems.push('party_entity_mismatch');
           if (p.partyType === 'CLUB_SIGNATORY' && p.forEntityId !== pkg.orgId) problems.push('party_entity_mismatch');
           if (p.status === 'COMPLETED') {
             const pc = readInstant(p.completedAt);
-            if (pc === null || !p.completedBy || !SIGNING_METHODS.includes(p.method) || !p.evidenceRef) problems.push('party_evidence');
+            if (pc === null || !p.completedBy || !SIGNING_METHODS.includes(p.method) || !p.evidenceRef)
+              problems.push('party_evidence');
             if (pc !== null && rr !== null && pc < rr) problems.push('party_before_ready');
-            if (p.completedBy && !(PARTY_ACTOR_KINDS[p.partyType] ?? []).includes(p.completedBy.kind)) problems.push('party_actor_kind');
+            if (p.completedBy && !(PARTY_ACTOR_KINDS[p.partyType] ?? []).includes(p.completedBy.kind))
+              problems.push('party_actor_kind');
             const ev = p.evidenceRef;
             if (ev && typeof ev === 'object') {
               if (ev.revisionId !== r.id) problems.push('party_evidence_revision');
               if (r.document?.sha256 && ev.documentSha256 !== r.document.sha256) problems.push('party_evidence_digest');
-              if (p.completedBy && (ev.actorId !== p.completedBy.id || ev.actorKind !== p.completedBy.kind)) problems.push('party_evidence_actor');
+              if (p.completedBy && (ev.actorId !== p.completedBy.id || ev.actorKind !== p.completedBy.kind))
+                problems.push('party_evidence_actor');
               if (pc !== null && readInstant(ev.at) !== pc) problems.push('party_evidence_instant');
             }
           } else if (p.completedAt || p.completedBy || p.evidenceRef) problems.push('party_pending_with_evidence');
@@ -283,17 +518,32 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
         const maxParty = Math.max(...partiesOf(r).map((p) => readInstant(p?.completedAt) ?? 0));
         if (rcomp === null || rcomp < maxParty) problems.push('completed_before_parties');
       }
-      if (r.contract && r.contract.startDate && !parseStrictDateOnly(r.contract.startDate).ok) problems.push('contract_dates');
-      if (r.contract && r.contract.endDate && !parseStrictDateOnly(r.contract.endDate).ok) problems.push('contract_dates');
+      if (r.contract && r.contract.startDate && !parseStrictDateOnly(r.contract.startDate).ok)
+        problems.push('contract_dates');
+      if (r.contract && r.contract.endDate && !parseStrictDateOnly(r.contract.endDate).ok)
+        problems.push('contract_dates');
     }
     if (typeof pkg.currentRevisionId !== 'string' || !ids.has(pkg.currentRevisionId)) problems.push('current_revision');
     else {
       const cur = pkg.revisions.find((r) => r && r.id === pkg.currentRevisionId);
-      if (cur && pkg.revisions.some((r) => r && r !== cur && Number.isInteger(r.revisionNumber) && r.revisionNumber > cur.revisionNumber)) problems.push('current_revision_not_latest');
-      if (cur && pkg.status === 'COMPLETED' && cur.status !== 'COMPLETED') problems.push('completed_package_revision_mismatch');
+      if (
+        cur &&
+        pkg.revisions.some(
+          (r) => r && r !== cur && Number.isInteger(r.revisionNumber) && r.revisionNumber > cur.revisionNumber,
+        )
+      )
+        problems.push('current_revision_not_latest');
+      if (cur && pkg.status === 'COMPLETED' && cur.status !== 'COMPLETED')
+        problems.push('completed_package_revision_mismatch');
     }
   }
-  if (pkg.status === 'COMPLETED' && (!pkg.completion || typeof pkg.completion.signingId !== 'string' || readInstant(pkg.completion.completedAt) === null)) problems.push('completion');
+  if (
+    pkg.status === 'COMPLETED' &&
+    (!pkg.completion ||
+      typeof pkg.completion.signingId !== 'string' ||
+      readInstant(pkg.completion.completedAt) === null)
+  )
+    problems.push('completion');
   if (pkg.status !== 'COMPLETED' && pkg.completion) problems.push('completion_without_status');
   return problems;
 }
@@ -309,43 +559,89 @@ export function signingConsistency(pkg, { offer, kase, rows = null, player = nul
     if (st === 'COMPLETED' && mine.length === 0) problems.push('COMPLETED_WITHOUT_ROW');
     if (mine.length > 1) problems.push('DUPLICATE_SIGNING_ROWS');
     if (st !== 'COMPLETED' && mine.length > 0) problems.push('ROW_WITHOUT_COMPLETION');
-    if (st === 'COMPLETED' && pkg.completion?.signingId && !mine.some((s) => s.id === pkg.completion.signingId)) problems.push('COMPLETION_ROW_MISMATCH');
+    if (st === 'COMPLETED' && pkg.completion?.signingId && !mine.some((s) => s.id === pkg.completion.signingId))
+      problems.push('COMPLETION_ROW_MISMATCH');
   }
-  if (player && st === 'COMPLETED' && player.contractStatus !== 'under_contract') problems.push('PLAYER_CONTRACT_STATUS_DIVERGED');
-  if (offer && (offer.orgId !== pkg.orgId || offer.playerId !== pkg.playerId || offer.caseId !== pkg.caseId)) problems.push('OFFER_REFERENCE_MISMATCH');
+  if (player && st === 'COMPLETED' && player.contractStatus !== 'under_contract')
+    problems.push('PLAYER_CONTRACT_STATUS_DIVERGED');
+  if (offer && (offer.orgId !== pkg.orgId || offer.playerId !== pkg.playerId || offer.caseId !== pkg.caseId))
+    problems.push('OFFER_REFERENCE_MISMATCH');
   if (kase && (kase.orgId !== pkg.orgId || kase.playerId !== pkg.playerId)) problems.push('CASE_REFERENCE_MISMATCH');
   // Bound to a revision the Offer lacks, or one superseded, withdrawn or not accepted, is corruption.
   const revs = Array.isArray(offer?.revisions) ? offer.revisions : null;
   if (revs && revs.length) {
     const bound = revs.find((r) => r && r.id === pkg.offerRevisionId) ?? null;
-    const answer = bound ? (Array.isArray(offer.responses) ? offer.responses.find((x) => x && x.revisionId === bound.id) ?? null : null) : null;
-    const stale = !bound || !!bound.supersededByRevisionId || !!bound.withdrawnAt || (answer && answer.responseType !== 'accepted') || (typeof bound.status === 'string' && !['ACCEPTED', 'ISSUED'].includes(bound.status));
+    const answer = bound
+      ? Array.isArray(offer.responses)
+        ? (offer.responses.find((x) => x && x.revisionId === bound.id) ?? null)
+        : null
+      : null;
+    const stale =
+      !bound ||
+      !!bound.supersededByRevisionId ||
+      !!bound.withdrawnAt ||
+      (answer && answer.responseType !== 'accepted') ||
+      (typeof bound.status === 'string' && !['ACCEPTED', 'ISSUED'].includes(bound.status));
     if (stale) problems.push('OFFER_REVISION_MISMATCH');
   }
   if (st === 'COMPLETED' && kase && kase.room?.status !== 'signed') problems.push('COMPLETED_BUT_CASE_NOT_SIGNED');
-  if (st && st !== 'COMPLETED' && LIVE.includes(st) && kase && kase.room?.status !== 'offer_accepted') problems.push('LIVE_SIGNING_CASE_NOT_AT_OFFER_ACCEPTED');
+  if (st && st !== 'COMPLETED' && LIVE.includes(st) && kase && kase.room?.status !== 'offer_accepted')
+    problems.push('LIVE_SIGNING_CASE_NOT_AT_OFFER_ACCEPTED');
   return problems;
 }
-export const SIGNING_CORRUPTION = Object.freeze(['OFFER_REFERENCE_MISMATCH', 'CASE_REFERENCE_MISMATCH', 'OFFER_REVISION_MISMATCH', 'COMPLETED_BUT_CASE_NOT_SIGNED', 'COMPLETED_WITHOUT_ROW', 'DUPLICATE_SIGNING_ROWS', 'ROW_WITHOUT_COMPLETION', 'COMPLETION_ROW_MISMATCH']);
+export const SIGNING_CORRUPTION = Object.freeze([
+  'OFFER_REFERENCE_MISMATCH',
+  'CASE_REFERENCE_MISMATCH',
+  'OFFER_REVISION_MISMATCH',
+  'COMPLETED_BUT_CASE_NOT_SIGNED',
+  'COMPLETED_WITHOUT_ROW',
+  'DUPLICATE_SIGNING_ROWS',
+  'ROW_WITHOUT_COMPLETION',
+  'COMPLETION_ROW_MISMATCH',
+]);
 export const signingCorrupt = (problems) => (problems ?? []).some((p) => SIGNING_CORRUPTION.includes(p));
 
 // ------------------------------------------------------------- views
 
 const actorView = (a) => (a ? { kind: a.kind ?? null, name: a.name ?? null } : null);
 const partyView = (p, { forClub }) => ({
-  partyType: p.partyType, status: p.status, completedAt: p.completedAt ?? null, method: p.method ?? null,
+  partyType: p.partyType,
+  status: p.status,
+  completedAt: p.completedAt ?? null,
+  method: p.method ?? null,
   // The club sees who completed; a recipient sees the kinds only.
-  completedBy: forClub ? actorView(p.completedBy) : (p.completedBy ? { kind: p.completedBy.kind ?? null, name: null } : null),
+  completedBy: forClub
+    ? actorView(p.completedBy)
+    : p.completedBy
+      ? { kind: p.completedBy.kind ?? null, name: null }
+      : null,
 });
-const documentView = (d) => (d ? { id: d.id ?? null, label: d.label ?? null, filename: d.filename ?? null, mime: d.mime ?? null, bytes: d.bytes ?? null, sha256: d.sha256 ?? null } : null);
+const documentView = (d) =>
+  d
+    ? {
+        id: d.id ?? null,
+        label: d.label ?? null,
+        filename: d.filename ?? null,
+        mime: d.mime ?? null,
+        bytes: d.bytes ?? null,
+        sha256: d.sha256 ?? null,
+      }
+    : null;
 function revisionView(r, { forClub }) {
   return {
-    id: r.id, revisionNumber: r.revisionNumber, status: r.status, statusLabel: SIGNING_STATUS_LABELS[r.status] ?? null,
-    createdAt: r.createdAt ?? null, readyAt: r.readyAt ?? null, completedAt: r.completedAt ?? null,
-    document: documentView(r.document), executedDocument: documentView(r.executedDocument),
+    id: r.id,
+    revisionNumber: r.revisionNumber,
+    status: r.status,
+    statusLabel: SIGNING_STATUS_LABELS[r.status] ?? null,
+    createdAt: r.createdAt ?? null,
+    readyAt: r.readyAt ?? null,
+    completedAt: r.completedAt ?? null,
+    document: documentView(r.document),
+    executedDocument: documentView(r.executedDocument),
     contract: r.contract ? { startDate: r.contract.startDate ?? null, endDate: r.contract.endDate ?? null } : null,
     requiredParties: partiesOf(r).map((p) => partyView(p, { forClub })),
-    supersedesRevisionId: r.supersedesRevisionId ?? null, supersededByRevisionId: r.supersededByRevisionId ?? null,
+    supersedesRevisionId: r.supersedesRevisionId ?? null,
+    supersededByRevisionId: r.supersededByRevisionId ?? null,
     ...(forClub ? { createdBy: actorView(r.createdBy), readyBy: actorView(r.readyBy) } : {}),
   };
 }
@@ -363,16 +659,42 @@ export function signingClubView(pkg, now, { orgName = null } = {}) {
   const st = effectiveStatus(pkg, now);
   const rev = currentRevision(pkg);
   return {
-    id: pkg.id, orgId: pkg.orgId, orgName, caseId: pkg.caseId, playerId: pkg.playerId, offerId: pkg.offerId, offerRevisionId: pkg.offerRevisionId, transactionId: pkg.transactionId ?? null,
-    status: st, storedStatus: pkg.status, statusLabel: SIGNING_STATUS_LABELS[st] ?? null, terminal: isTerminal(st),
-    currentRevisionId: pkg.currentRevisionId, currentRevision: rev ? revisionView(rev, { forClub: true }) : null,
+    id: pkg.id,
+    orgId: pkg.orgId,
+    orgName,
+    caseId: pkg.caseId,
+    playerId: pkg.playerId,
+    offerId: pkg.offerId,
+    offerRevisionId: pkg.offerRevisionId,
+    transactionId: pkg.transactionId ?? null,
+    status: st,
+    storedStatus: pkg.status,
+    statusLabel: SIGNING_STATUS_LABELS[st] ?? null,
+    terminal: isTerminal(st),
+    currentRevisionId: pkg.currentRevisionId,
+    currentRevision: rev ? revisionView(rev, { forClub: true }) : null,
     revisions: (pkg.revisions ?? []).map((r) => revisionView(r, { forClub: true })),
-    expiresAt: pkg.expiresAt ?? null, internalNote: pkg.internalNote ?? null,
-    completion: pkg.completion ? { signingId: pkg.completion.signingId, completedAt: pkg.completion.completedAt, contract: pkg.completion.contract ?? null, lifecycle: pkg.completion.lifecycle ?? null } : null,
-    cancelledAt: pkg.cancelledAt ?? null, cancelReason: pkg.cancelReason ?? null, voidedAt: pkg.voidedAt ?? null, voidReason: pkg.voidReason ?? null,
-    createdAt: pkg.createdAt, createdBy: actorView(pkg.createdBy), updatedAt: pkg.updatedAt ?? pkg.createdAt, rev: Number.isInteger(pkg.rev) ? pkg.rev : 1,
+    expiresAt: pkg.expiresAt ?? null,
+    internalNote: pkg.internalNote ?? null,
+    completion: pkg.completion
+      ? {
+          signingId: pkg.completion.signingId,
+          completedAt: pkg.completion.completedAt,
+          contract: pkg.completion.contract ?? null,
+          lifecycle: pkg.completion.lifecycle ?? null,
+        }
+      : null,
+    cancelledAt: pkg.cancelledAt ?? null,
+    cancelReason: pkg.cancelReason ?? null,
+    voidedAt: pkg.voidedAt ?? null,
+    voidReason: pkg.voidReason ?? null,
+    createdAt: pkg.createdAt,
+    createdBy: actorView(pkg.createdBy),
+    updatedAt: pkg.updatedAt ?? pkg.createdAt,
+    rev: Number.isInteger(pkg.rev) ? pkg.rev : 1,
     policyVersion: pkg.policyVersion ?? SIGNING_POLICY_VERSION,
-    honest: 'ScoutBox records the signing workflow and the evidence each party gives against the exact document. It does not execute the agreement and claims no legal effect beyond what it records.',
+    honest:
+      'ScoutBox records the signing workflow and the evidence each party gives against the exact document. It does not execute the agreement and claims no legal effect beyond what it records.',
   };
 }
 
@@ -382,16 +704,25 @@ export function signingRecipientView(pkg, now, { orgName = null, partyType, forE
   const presented = (pkg.revisions ?? []).filter((r) => r && r.readyAt);
   const rev = currentRevision(pkg);
   return {
-    id: pkg.id, playerId: pkg.playerId, club: { id: pkg.orgId, name: orgName }, offerId: pkg.offerId, offerRevisionId: pkg.offerRevisionId,
-    status: st, statusLabel: SIGNING_STATUS_LABELS[st] ?? null, terminal: isTerminal(st),
+    id: pkg.id,
+    playerId: pkg.playerId,
+    club: { id: pkg.orgId, name: orgName },
+    offerId: pkg.offerId,
+    offerRevisionId: pkg.offerRevisionId,
+    status: st,
+    statusLabel: SIGNING_STATUS_LABELS[st] ?? null,
+    terminal: isTerminal(st),
     currentRevisionId: rev?.readyAt ? rev.id : null,
     currentRevision: rev?.readyAt ? revisionView(rev, { forClub: false }) : null,
     revisions: presented.map((r) => revisionView(r, { forClub: false })),
     expiresAt: pkg.expiresAt ?? null,
     nextAction: nextActionFor(pkg, now, { partyType, forEntityId }),
-    completion: pkg.completion ? { completedAt: pkg.completion.completedAt, contract: pkg.completion.contract ?? null } : null,
+    completion: pkg.completion
+      ? { completedAt: pkg.completion.completedAt, contract: pkg.completion.contract ?? null }
+      : null,
     policyVersion: pkg.policyVersion ?? SIGNING_POLICY_VERSION,
-    honest: 'Completing your signature here records that you, as the authenticated account holder, confirm the exact document shown. ScoutBox records the workflow and the evidence; it does not execute the agreement for you.',
+    honest:
+      'Completing your signature here records that you, as the authenticated account holder, confirm the exact document shown. ScoutBox records the workflow and the evidence; it does not execute the agreement for you.',
   };
 }
 
@@ -400,20 +731,40 @@ export function signingAgentView(pkg, now, { orgName = null } = {}) {
   const st = effectiveStatus(pkg, now);
   const rev = currentRevision(pkg);
   return {
-    id: pkg.id, clientId: pkg.playerId, club: { id: pkg.orgId, name: orgName }, offerId: pkg.offerId,
-    status: st, statusLabel: SIGNING_STATUS_LABELS[st] ?? null, terminal: isTerminal(st),
-    currentRevisionNumber: rev?.revisionNumber ?? null, presented: !!rev?.readyAt, expiresAt: pkg.expiresAt ?? null,
-    requiredParties: rev ? partiesOf(rev).map((p) => ({ partyType: p.partyType, status: p.status, completedAt: p.completedAt ?? null })) : [],
+    id: pkg.id,
+    clientId: pkg.playerId,
+    club: { id: pkg.orgId, name: orgName },
+    offerId: pkg.offerId,
+    status: st,
+    statusLabel: SIGNING_STATUS_LABELS[st] ?? null,
+    terminal: isTerminal(st),
+    currentRevisionNumber: rev?.revisionNumber ?? null,
+    presented: !!rev?.readyAt,
+    expiresAt: pkg.expiresAt ?? null,
+    requiredParties: rev
+      ? partiesOf(rev).map((p) => ({ partyType: p.partyType, status: p.status, completedAt: p.completedAt ?? null }))
+      : [],
     clientActionRequired: !!nextActionFor(pkg, now, { partyType: 'PLAYER', forEntityId: pkg.playerId }),
-    contract: rev?.contract ? { startDate: rev.contract.startDate ?? null, endDate: rev.contract.endDate ?? null } : null,
+    contract: rev?.contract
+      ? { startDate: rev.contract.startDate ?? null, endDate: rev.contract.endDate ?? null }
+      : null,
     completedAt: pkg.completion?.completedAt ?? null,
-    honest: 'Read-only. Your client signs as themselves; ScoutBox does not let you sign, acknowledge or complete for a client.',
+    honest:
+      'Read-only. Your client signs as themselves; ScoutBox does not let you sign, acknowledge or complete for a client.',
   };
 }
 
 export function signingHistoryView(pkg, { forRecipient = false } = {}) {
   const items = (pkg?.history ?? []).filter((h) => h && (!forRecipient || !/draft|note|internal/.test(h.action)));
-  return items.map((h) => ({ id: h.id, at: h.at, action: h.action, by: forRecipient ? { kind: h.by?.kind ?? null, name: h.by?.kind === 'org' ? null : h.by?.name ?? null } : actorView(h.by), revisionId: h.detail?.revisionId ?? null }));
+  return items.map((h) => ({
+    id: h.id,
+    at: h.at,
+    action: h.action,
+    by: forRecipient
+      ? { kind: h.by?.kind ?? null, name: h.by?.kind === 'org' ? null : (h.by?.name ?? null) }
+      : actorView(h.by),
+    revisionId: h.detail?.revisionId ?? null,
+  }));
 }
 
 /**
@@ -422,16 +773,38 @@ export function signingHistoryView(pkg, { forRecipient = false } = {}) {
  */
 export function completedSigningRecord({ id, pkg, rev, player, org, actor, at, attribution }) {
   return {
-    id, playerId: player.id, playerName: player.name ?? null, orgId: org.id, orgName: org.name ?? null,
-    userId: actor?.id ?? null, scoutName: actor?.name ?? null,
-    ts: at, signedAt: at,
-    firstQualifyingInteraction: attribution?.first ?? null, attributionWindowMonths: attribution?.windowMonths ?? null, insideAttributionWindow: !!attribution?.inside,
+    id,
+    playerId: player.id,
+    playerName: player.name ?? null,
+    orgId: org.id,
+    orgName: org.name ?? null,
+    userId: actor?.id ?? null,
+    scoutName: actor?.name ?? null,
+    ts: at,
+    signedAt: at,
+    firstQualifyingInteraction: attribution?.first ?? null,
+    attributionWindowMonths: attribution?.windowMonths ?? null,
+    insideAttributionWindow: !!attribution?.inside,
     method: 'CANONICAL_COMPLETION',
-    signingPackageId: pkg.id, signingRevisionId: rev.id, signingRevisionNumber: rev.revisionNumber,
-    caseId: pkg.caseId, offerId: pkg.offerId, offerRevisionId: pkg.offerRevisionId, transactionId: pkg.transactionId ?? null,
-    documentSha256: rev.document?.sha256 ?? null, documentEvidenceId: rev.document?.evidenceId ?? null, executedDocumentEvidenceId: rev.executedDocument?.evidenceId ?? null,
-    contract: rev.contract ? { startDate: rev.contract.startDate ?? null, endDate: rev.contract.endDate ?? null } : null,
-    parties: partiesOf(rev).map((p) => ({ partyType: p.partyType, method: p.method, completedAt: p.completedAt, byKind: p.completedBy?.kind ?? null })),
+    signingPackageId: pkg.id,
+    signingRevisionId: rev.id,
+    signingRevisionNumber: rev.revisionNumber,
+    caseId: pkg.caseId,
+    offerId: pkg.offerId,
+    offerRevisionId: pkg.offerRevisionId,
+    transactionId: pkg.transactionId ?? null,
+    documentSha256: rev.document?.sha256 ?? null,
+    documentEvidenceId: rev.document?.evidenceId ?? null,
+    executedDocumentEvidenceId: rev.executedDocument?.evidenceId ?? null,
+    contract: rev.contract
+      ? { startDate: rev.contract.startDate ?? null, endDate: rev.contract.endDate ?? null }
+      : null,
+    parties: partiesOf(rev).map((p) => ({
+      partyType: p.partyType,
+      method: p.method,
+      completedAt: p.completedAt,
+      byKind: p.completedBy?.kind ?? null,
+    })),
     policyVersion: SIGNING_POLICY_VERSION,
   };
 }

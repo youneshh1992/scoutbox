@@ -16,12 +16,23 @@ import { MobileViewport } from '../components/MobileViewport';
 // fallback for a screen that exists only to recover.)
 class Boundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state = { error: null as Error | null };
-  static getDerivedStateFromError(error: Error) { return { error }; }
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
   render() {
     if (this.state.error) {
       const colors = palettes.dark;
       return (
-        <View style={{ flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: colors.bg,
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+            gap: 12,
+          }}
+        >
           <Text style={{ color: colors.text, fontSize: 20, fontWeight: '700' }}>Something broke in the app</Text>
           <Text style={{ color: colors.muted, fontSize: 13.5, textAlign: 'center' }}>
             The error was contained — your profile and messages live on the server and nothing was lost.

@@ -9,7 +9,11 @@
 
 import { ROOM_TRANSITIONS } from '../rooms/shared.mjs';
 import { parseInstant, readInstant } from '../../../temporal.mjs';
-import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
+import {
+  normaliseClientKey as platformClientKey,
+  payloadFingerprint,
+  CLIENT_KEY_MAX,
+} from '../../platform/idempotency.mjs';
 
 export const CONTACT_POLICY_VERSION = 1;
 
@@ -69,7 +73,9 @@ export const CONTACT_CHANNELS = table({
   agent: { external: true, label: 'Via agent or guardian conversation' },
   other: { external: true, label: 'Other' },
 });
-export const EXTERNAL_CHANNELS = Object.freeze(Object.keys(CONTACT_CHANNELS).filter((c) => CONTACT_CHANNELS[c].external));
+export const EXTERNAL_CHANNELS = Object.freeze(
+  Object.keys(CONTACT_CHANNELS).filter((c) => CONTACT_CHANNELS[c].external),
+);
 
 export const RESPONSE_KINDS = Object.freeze(['accepted', 'declined']);
 
@@ -128,7 +134,11 @@ export function canContactAction(contact, action, { role = null } = {}) {
   }
   const def = CONTACT_ACTIONS[action];
   if (!contact || !CONTACT_STATUSES.includes(contact.status)) {
-    return { ok: false, error: 'CONTACT_STATE_UNKNOWN', message: 'This contact is in a state this build does not recognise.' };
+    return {
+      ok: false,
+      error: 'CONTACT_STATE_UNKNOWN',
+      message: 'This contact is in a state this build does not recognise.',
+    };
   }
   if (def.role && !contactRoleAllows(role, def.role)) {
     return { ok: false, error: 'CONTACT_NOT_PERMITTED', message: 'Your role cannot do this with a contact.' };
@@ -137,7 +147,11 @@ export function canContactAction(contact, action, { role = null } = {}) {
     if (contact.status === 'delivered' && action === 'send') {
       return { ok: false, error: 'CONTACT_ALREADY_SENT', message: 'This contact has already been delivered.' };
     }
-    return { ok: false, error: 'CONTACT_INVALID_STATE', message: `A contact that is ${CONTACT_STATUS_LABELS[contact.status].toLowerCase()} cannot be ${action === 'edit' ? 'edited' : action === 'cancel' ? 'cancelled' : action + 'ed'}.` };
+    return {
+      ok: false,
+      error: 'CONTACT_INVALID_STATE',
+      message: `A contact that is ${CONTACT_STATUS_LABELS[contact.status].toLowerCase()} cannot be ${action === 'edit' ? 'edited' : action === 'cancel' ? 'cancelled' : action + 'ed'}.`,
+    };
   }
   if (def.to && !CONTACT_TRANSITIONS[contact.status].includes(def.to)) {
     return { ok: false, error: 'CONTACT_INVALID_STATE', message: 'That move is not possible from here.' };
@@ -170,10 +184,18 @@ export function validateContactContent({ subject, body } = {}, { requireBody = t
     return { ok: false, error: 'CONTACT_CONTENT_INVALID', message: 'Subject and message must be text.' };
   }
   if (typeof body === 'string' && body.length > CONTACT_LIMITS.body * 4) {
-    return { ok: false, error: 'CONTACT_CONTENT_TOO_LONG', message: `Keep the message under ${CONTACT_LIMITS.body} characters.` };
+    return {
+      ok: false,
+      error: 'CONTACT_CONTENT_TOO_LONG',
+      message: `Keep the message under ${CONTACT_LIMITS.body} characters.`,
+    };
   }
   if (requireBody && !b) {
-    return { ok: false, error: 'CONTACT_CONTENT_INVALID', message: 'Write the message the player or guardian will read.' };
+    return {
+      ok: false,
+      error: 'CONTACT_CONTENT_INVALID',
+      message: 'Write the message the player or guardian will read.',
+    };
   }
   return { ok: true, subject: s || null, body: b };
 }
@@ -182,7 +204,11 @@ export function validateContactContent({ subject, body } = {}, { requireBody = t
 export function validateContactReply(raw, { isContact = true } = {}) {
   if (raw === undefined || raw === null || raw === '') return { ok: true, reply: null };
   if (!isContact || typeof raw !== 'string') {
-    return { ok: false, error: 'CONTACT_RESPONSE_INVALID', message: 'A reply must be text, and only a contact can carry one.' };
+    return {
+      ok: false,
+      error: 'CONTACT_RESPONSE_INVALID',
+      message: 'A reply must be text, and only a contact can carry one.',
+    };
   }
   const reply = plainShared(raw, CONTACT_LIMITS.replyMessage);
   return { ok: true, reply: reply || null };
@@ -196,15 +222,31 @@ export const normaliseClientKey = (raw) => platformClientKey(raw, 'CONTACT_CLIEN
  * The client never names the recipient: it is derived from the live player,
  * organisation, guardian records and clock, and re-derived on every mutation.
  */
-export function resolveContactRecipient({ player, org, guardians = [], isAdult, visibleToOrg, isBlocked, now = new Date() }) {
+export function resolveContactRecipient({
+  player,
+  org,
+  guardians = [],
+  isAdult,
+  visibleToOrg,
+  isBlocked,
+  now = new Date(),
+}) {
   if (!player || player.deletedAt || player.removedAt) {
     return { ok: false, error: 'CONTACT_RECIPIENT_UNAVAILABLE', message: 'This player is not available to contact.' };
   }
   if (isBlocked(player.id, org.id)) {
-    return { ok: false, error: 'CONTACT_BLOCKED', message: 'This player (or their guardian) has blocked your organisation.' };
+    return {
+      ok: false,
+      error: 'CONTACT_BLOCKED',
+      message: 'This player (or their guardian) has blocked your organisation.',
+    };
   }
   if (!visibleToOrg(player, org)) {
-    return { ok: false, error: 'CONTACT_RECIPIENT_UNAVAILABLE', message: 'This player is not available to your organisation under the standing rules.' };
+    return {
+      ok: false,
+      error: 'CONTACT_RECIPIENT_UNAVAILABLE',
+      message: 'This player is not available to your organisation under the standing rules.',
+    };
   }
   if (isAdult(player, now)) {
     return { ok: true, recipient: { type: 'player', playerId: player.id, guardianId: null, minor: false } };
@@ -214,13 +256,25 @@ export function resolveContactRecipient({ player, org, guardians = [], isAdult, 
   // passed the identity and disclaimer gates; an unverified co-guardian is not
   // a route. Anything else, including two verified owners with no primary link
   // between them, fails closed. There is no direct fallback.
-  const owners = guardians.filter((g) => g && typeof g.id === 'string' && Array.isArray(g.childIds)
-    && g.childIds.includes(player.id) && g.idVerified === true && g.disclaimerAccepted === true && !g.removedAt);
+  const owners = guardians.filter(
+    (g) =>
+      g &&
+      typeof g.id === 'string' &&
+      Array.isArray(g.childIds) &&
+      g.childIds.includes(player.id) &&
+      g.idVerified === true &&
+      g.disclaimerAccepted === true &&
+      !g.removedAt,
+  );
   let guardian = null;
   if (owners.length === 1) guardian = owners[0];
   else if (owners.length > 1) guardian = owners.find((g) => g.id === player.guardianId) ?? null;
   if (!guardian) {
-    return { ok: false, error: 'CONTACT_GUARDIAN_REQUIRED', message: 'This player is under the age of majority and no valid guardian route exists. Contact cannot proceed.' };
+    return {
+      ok: false,
+      error: 'CONTACT_GUARDIAN_REQUIRED',
+      message: 'This player is under the age of majority and no valid guardian route exists. Contact cannot proceed.',
+    };
   }
   return { ok: true, recipient: { type: 'guardian', playerId: player.id, guardianId: guardian.id, minor: true } };
 }
@@ -228,24 +282,51 @@ export function resolveContactRecipient({ player, org, guardians = [], isAdult, 
 // ----------------------------------------------------------- external record
 
 /** The recipient type the club states must equal the derived one: "I phoned the player" about a minor is refused, not corrected. */
-export function validateExternalRecord({ channel, occurredAt, summary, recipientType } = {}, { now = Date.now(), derivedRecipientType } = {}) {
+export function validateExternalRecord(
+  { channel, occurredAt, summary, recipientType } = {},
+  { now = Date.now(), derivedRecipientType } = {},
+) {
   if (!has(CONTACT_CHANNELS, channel) || !CONTACT_CHANNELS[channel].external) {
-    return { ok: false, error: 'CONTACT_CHANNEL_INVALID', message: `Channel must be one of ${EXTERNAL_CHANNELS.join(', ')}.`, allowed: EXTERNAL_CHANNELS };
+    return {
+      ok: false,
+      error: 'CONTACT_CHANNEL_INVALID',
+      message: `Channel must be one of ${EXTERNAL_CHANNELS.join(', ')}.`,
+      allowed: EXTERNAL_CHANNELS,
+    };
   }
   // Refuses a bare local time (zone-dependent), `02/03/2026` (ambiguous) and `2026-02-30T10:00Z` (not a day).
   const parsed = parseInstant(occurredAt);
   if (!parsed.ok) {
-    return { ok: false, error: 'CONTACT_OCCURRED_AT_INVALID', message: 'occurredAt must be a date and time: ISO 8601 with an explicit offset or Z, or a millisecond timestamp.' };
+    return {
+      ok: false,
+      error: 'CONTACT_OCCURRED_AT_INVALID',
+      message: 'occurredAt must be a date and time: ISO 8601 with an explicit offset or Z, or a millisecond timestamp.',
+    };
   }
   const ts = parsed.ms;
   if (ts > now + CONTACT_LIMITS.occurredAtSkewMs) {
-    return { ok: false, error: 'CONTACT_OCCURRED_AT_INVALID', message: 'A contact cannot be recorded before it has happened.' };
+    return {
+      ok: false,
+      error: 'CONTACT_OCCURRED_AT_INVALID',
+      message: 'A contact cannot be recorded before it has happened.',
+    };
   }
   if (ts < now - CONTACT_LIMITS.occurredAtMaxAgeMs) {
-    return { ok: false, error: 'CONTACT_OCCURRED_AT_INVALID', message: 'A contact this old cannot be recorded as recruitment evidence.' };
+    return {
+      ok: false,
+      error: 'CONTACT_OCCURRED_AT_INVALID',
+      message: 'A contact this old cannot be recorded as recruitment evidence.',
+    };
   }
   if (recipientType !== undefined && recipientType !== derivedRecipientType) {
-    return { ok: false, error: 'CONTACT_RECIPIENT_MISMATCH', message: derivedRecipientType === 'guardian' ? 'This player is under the age of majority: a recorded contact must be with the guardian.' : 'This player is an adult: the recorded contact is with the player.' };
+    return {
+      ok: false,
+      error: 'CONTACT_RECIPIENT_MISMATCH',
+      message:
+        derivedRecipientType === 'guardian'
+          ? 'This player is under the age of majority: a recorded contact must be with the guardian.'
+          : 'This player is an adult: the recorded contact is with the player.',
+    };
   }
   const s = plainShared(summary, CONTACT_LIMITS.summary);
   if (s === null) return { ok: false, error: 'CONTACT_CONTENT_INVALID', message: 'The summary must be text.' };
@@ -257,12 +338,23 @@ export function validateExternalRecord({ channel, occurredAt, summary, recipient
 /** At most one delivered in-app contact per organisation and player within `cooldownMs`, unless answered. */
 export function cooldownFor(contacts, { orgId, playerId, now = Date.now(), exceptId = null }) {
   // `typeof Infinity === 'number'`, and a corrupt `deliveredAt: Infinity` would cool the pair down for ever.
-  const recent = contacts.filter((c) => c && c.orgId === orgId && c.playerId === playerId && c.id !== exceptId
-    && c.channel === 'in_app' && c.status === 'delivered' && readInstant(c.deliveredAt) !== null
-    && now - c.deliveredAt < CONTACT_LIMITS.cooldownMs);
+  const recent = contacts.filter(
+    (c) =>
+      c &&
+      c.orgId === orgId &&
+      c.playerId === playerId &&
+      c.id !== exceptId &&
+      c.channel === 'in_app' &&
+      c.status === 'delivered' &&
+      readInstant(c.deliveredAt) !== null &&
+      now - c.deliveredAt < CONTACT_LIMITS.cooldownMs,
+  );
   if (recent.length === 0) return null;
   const latest = Math.max(...recent.map((c) => c.deliveredAt));
-  return { retryAt: latest + CONTACT_LIMITS.cooldownMs, blockingContactId: recent.find((c) => c.deliveredAt === latest)?.id ?? null };
+  return {
+    retryAt: latest + CONTACT_LIMITS.cooldownMs,
+    blockingContactId: recent.find((c) => c.deliveredAt === latest)?.id ?? null,
+  };
 }
 
 // ------------------------------------------------------------ idempotency
@@ -271,18 +363,30 @@ export { payloadFingerprint };
 
 // ------------------------------------------------------------ projections
 
-const HISTORY_SEQ = (id) => { const n = Number(String(id ?? '').split('-').pop()); return Number.isFinite(n) ? n : 0; };
+const HISTORY_SEQ = (id) => {
+  const n = Number(
+    String(id ?? '')
+      .split('-')
+      .pop(),
+  );
+  return Number.isFinite(n) ? n : 0;
+};
 
 /** Time, then the monotonic id part, so two entries in one millisecond never swap. */
-export const byAtThenId = (a, b) => (a.at - b.at) || (HISTORY_SEQ(a.id) - HISTORY_SEQ(b.id));
+export const byAtThenId = (a, b) => a.at - b.at || HISTORY_SEQ(a.id) - HISTORY_SEQ(b.id);
 
 /** Implementation-level names are translated by the client; no keys, no fingerprints. */
 export function contactHistoryView(contact) {
-  return (contact.history ?? []).slice().sort(byAtThenId).map((h) => ({
-    id: h.id, at: h.at, action: h.action,
-    by: h.by ? { name: h.by.name ?? null, kind: h.by.kind ?? null } : null,
-    detail: h.detail ?? null,
-  }));
+  return (contact.history ?? [])
+    .slice()
+    .sort(byAtThenId)
+    .map((h) => ({
+      id: h.id,
+      at: h.at,
+      action: h.action,
+      by: h.by ? { name: h.by.name ?? null, kind: h.by.kind ?? null } : null,
+      detail: h.detail ?? null,
+    }));
 }
 
 /**
@@ -321,7 +425,9 @@ export function contactView(c) {
     recordedBy: c.recordedBy ? { name: c.recordedBy.name } : null,
     recordedAt: c.recordedAt ?? null,
     respondedAt: c.respondedAt ?? null,
-    response: c.response ? { kind: c.response.kind, message: c.response.message ?? null, by: c.response.by, at: c.response.at } : null,
+    response: c.response
+      ? { kind: c.response.kind, message: c.response.message ?? null, by: c.response.by, at: c.response.at }
+      : null,
     emailCopy: c.emailCopy ?? null,
     lifecycle: c.lifecycle ?? null,
     cancelledAt: c.cancelledAt ?? null,
@@ -329,9 +435,10 @@ export function contactView(c) {
     revAt: c.revAt ?? null,
     revBy: c.revBy?.name ?? null,
     history: contactHistoryView(c),
-    transportNote: c.channel === 'in_app'
-      ? 'Delivered means the message is in the recipient\'s ScoutBox Inbox. ScoutBox does not track whether it was read.'
-      : 'Recorded by a named member of staff. ScoutBox did not observe this contact.',
+    transportNote:
+      c.channel === 'in_app'
+        ? "Delivered means the message is in the recipient's ScoutBox Inbox. ScoutBox does not track whether it was read."
+        : 'Recorded by a named member of staff. ScoutBox did not observe this contact.',
     policyVersion: CONTACT_POLICY_VERSION,
   };
 }
@@ -364,18 +471,23 @@ export function contactIntegrity(c, { orgId = null, caseId = null } = {}) {
   if (orgId && c.orgId !== orgId) problems.push('org_mismatch');
   if (caseId && c.caseId !== caseId) problems.push('case_mismatch');
   if (typeof c.playerId !== 'string') problems.push('player_missing');
-  if (['delivered', 'responded', 'recorded'].includes(c.status) && !c.recipient?.type) problems.push('recipient_missing');
+  if (['delivered', 'responded', 'recorded'].includes(c.status) && !c.recipient?.type)
+    problems.push('recipient_missing');
   // Either means the record cannot say who it reached, which is what this store is for.
-  if (c.contactMode !== undefined && c.contactMode !== null && !CONTACT_MODES.includes(c.contactMode)) problems.push('contact_mode_unknown');
+  if (c.contactMode !== undefined && c.contactMode !== null && !CONTACT_MODES.includes(c.contactMode))
+    problems.push('contact_mode_unknown');
   if (c.routingSnapshot !== undefined && c.routingSnapshot !== null) {
     const r = c.routingSnapshot;
-    if (typeof r !== 'object' || Array.isArray(r) || !Number.isFinite(r.at) || !CONTACT_MODES.includes(r.mode)) problems.push('routing_snapshot_malformed');
-    else if (r.agent !== null && r.agent !== undefined && typeof r.agent?.agentUserId !== 'string') problems.push('routing_snapshot_malformed');
+    if (typeof r !== 'object' || Array.isArray(r) || !Number.isFinite(r.at) || !CONTACT_MODES.includes(r.mode))
+      problems.push('routing_snapshot_malformed');
+    else if (r.agent !== null && r.agent !== undefined && typeof r.agent?.agentUserId !== 'string')
+      problems.push('routing_snapshot_malformed');
     // Only a send writes a snapshot.
     else if (r.agent && !['delivered', 'responded'].includes(c.status)) problems.push('routing_snapshot_unsent');
   }
   if (c.history !== undefined && !Array.isArray(c.history)) problems.push('history_malformed');
-  if (['delivered', 'responded'].includes(c.status) && !Number.isFinite(c.deliveredAt)) problems.push('timestamp_malformed');
+  if (['delivered', 'responded'].includes(c.status) && !Number.isFinite(c.deliveredAt))
+    problems.push('timestamp_malformed');
   if (c.status === 'recorded' && !Number.isFinite(c.occurredAt)) problems.push('timestamp_malformed');
   return problems;
 }

@@ -14,7 +14,11 @@ const want = process.argv[2] ? new Set(process.argv[2].split(',').map(Number)) :
 const found = new Set();
 for (const f of ['/proc/net/tcp', '/proc/net/tcp6']) {
   let txt;
-  try { txt = fs.readFileSync(f, 'utf8'); } catch { continue; }
+  try {
+    txt = fs.readFileSync(f, 'utf8');
+  } catch {
+    continue;
+  }
   for (const line of txt.split('\n').slice(1)) {
     const c = line.trim().split(/\s+/);
     if (c.length < 4 || c[3] !== '0A') continue;

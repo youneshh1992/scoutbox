@@ -20,22 +20,62 @@ import { migrationApplied, childRowsOf } from './database.mjs';
 
 export const PLAYER_SUBRECORDS_MIGRATION = '0007_player_subrecords';
 /** The top-level lists stored as rows. */
-export const PLAYER_SUBRECORD_KEYS = Object.freeze(['media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory']);
+export const PLAYER_SUBRECORD_KEYS = Object.freeze([
+  'media',
+  'attendance',
+  'timeline',
+  'badges',
+  'drills',
+  'drillResults',
+  'activityLog',
+  'externalIds',
+  'seasonHistory',
+]);
 /** Composites whose list sub-key is stored as rows (`medical.records` → `player_medical_records`, …). */
-export const PLAYER_COMPOSITE_SUBRECORDS = Object.freeze({ medical: Object.freeze(['records']), programme: Object.freeze(['completed']) });
+export const PLAYER_COMPOSITE_SUBRECORDS = Object.freeze({
+  medical: Object.freeze(['records']),
+  programme: Object.freeze(['completed']),
+});
 /** Are the sub-record tables in use on this connection? Decided by the migration record, never by the tables existing. */
 export const subrecordsLive = (sqlite) => migrationApplied(sqlite, PLAYER_SUBRECORDS_MIGRATION);
 
 /** The array keys the repository writes, as the writers name them (`medical.records` and `programme.completed` are sub-keys of split composites). */
-export const SUBRECORD_KEYS = Object.freeze([...PLAYER_SUBRECORD_KEYS, ...Object.entries(PLAYER_COMPOSITE_SUBRECORDS).flatMap(([k, subs]) => subs.map((s) => `${k}.${s}`))]);
+export const SUBRECORD_KEYS = Object.freeze([
+  ...PLAYER_SUBRECORD_KEYS,
+  ...Object.entries(PLAYER_COMPOSITE_SUBRECORDS).flatMap(([k, subs]) => subs.map((s) => `${k}.${s}`)),
+]);
 export const SUBRECORD_TABLES = Object.freeze([
-  'player_season_history', 'player_badges', 'player_drills', 'player_attendance', 'player_timeline', 'player_media', 'player_media_tags',
-  'player_medical_records', 'player_drill_results', 'player_activity_log', 'player_external_ids', 'player_programme_completions',
+  'player_season_history',
+  'player_badges',
+  'player_drills',
+  'player_attendance',
+  'player_timeline',
+  'player_media',
+  'player_media_tags',
+  'player_medical_records',
+  'player_drill_results',
+  'player_activity_log',
+  'player_external_ids',
+  'player_programme_completions',
 ]);
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const setOwn = (o, k, v) => { Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true }); return o; };
-const describe = (v) => (v === null ? 'null' : v === undefined ? 'absent' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v === 'bigint' ? 'a bigint' : `a ${typeof v}`);
+const setOwn = (o, k, v) => {
+  Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true });
+  return o;
+};
+const describe = (v) =>
+  v === null
+    ? 'null'
+    : v === undefined
+      ? 'absent'
+      : Array.isArray(v)
+        ? 'an array'
+        : typeof v === 'object'
+          ? 'an object'
+          : typeof v === 'bigint'
+            ? 'a bigint'
+            : `a ${typeof v}`;
 const absentOrNull = (v) => v === null || v === undefined;
 const isSafeInt = (v) => typeof v === 'number' && Number.isSafeInteger(v);
 const isFinite_ = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -188,80 +228,234 @@ CREATE TABLE player_programme_completions (
 // keys the table requires, which optional keys read back as `null` when their
 // column is NULL (`nullable`; the others are omitted), and the natural key the
 // code enforces (refused when an array violates it).
-const itemSpec = ({ scalars, booleans = [], json = [], composites = {}, defaults = {}, columns }) => Object.freeze({
-  scalars: Object.freeze(scalars), booleans: new Set(booleans), json: new Set(json), composites: Object.freeze(composites),
-  defaults: Object.freeze(defaults), columns: Object.freeze(columns),
-});
+const itemSpec = ({ scalars, booleans = [], json = [], composites = {}, defaults = {}, columns }) =>
+  Object.freeze({
+    scalars: Object.freeze(scalars),
+    booleans: new Set(booleans),
+    json: new Set(json),
+    composites: Object.freeze(composites),
+    defaults: Object.freeze(defaults),
+    columns: Object.freeze(columns),
+  });
 /** A clip's upload instant, as every writer stores it (toISOString), so the feed compares it as text in SQL. */
 const INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 /** `types`: record key → 'text' | 'date' | 'instant' | 'int' | 'real' | 'bool' | 'json'; `required`: keys that must be present and non-null; `enums`: allowed values. */
 export const SUBRECORD_SPECS = Object.freeze({
   media: Object.freeze({
-    table: 'player_media', idKey: 'id', children: 'tags',
+    table: 'player_media',
+    idKey: 'id',
+    children: 'tags',
     spec: itemSpec({
-      scalars: { id: 'id', title: 'title', kind: 'kind', uploadedAt: 'uploaded_at', url: 'url', views: 'views', verifiedClip: 'verified_clip_attendance_id', captions: 'captions', sizeBytes: 'size_bytes', capturedBy: 'captured_by', boxSessionId: 'box_session_id' },
+      scalars: {
+        id: 'id',
+        title: 'title',
+        kind: 'kind',
+        uploadedAt: 'uploaded_at',
+        url: 'url',
+        views: 'views',
+        verifiedClip: 'verified_clip_attendance_id',
+        captions: 'captions',
+        sizeBytes: 'size_bytes',
+        capturedBy: 'captured_by',
+        boxSessionId: 'box_session_id',
+      },
       defaults: { views: 0 },
-      columns: ['id', 'title', 'kind', 'uploaded_at', 'url', 'views', 'verified_clip_attendance_id', 'captions', 'size_bytes', 'captured_by', 'box_session_id'],
+      columns: [
+        'id',
+        'title',
+        'kind',
+        'uploaded_at',
+        'url',
+        'views',
+        'verified_clip_attendance_id',
+        'captions',
+        'size_bytes',
+        'captured_by',
+        'box_session_id',
+      ],
     }),
-    types: { id: 'text', title: 'text', kind: 'text', uploadedAt: 'instant', url: 'text', views: 'int', verifiedClip: 'text', captions: 'text', sizeBytes: 'int', capturedBy: 'text', boxSessionId: 'text' },
-    required: ['id', 'title'], enums: { capturedBy: ['box_cam'] }, unique: [['id']], nullable: ['url', 'verifiedClip', 'captions'],
+    types: {
+      id: 'text',
+      title: 'text',
+      kind: 'text',
+      uploadedAt: 'instant',
+      url: 'text',
+      views: 'int',
+      verifiedClip: 'text',
+      captions: 'text',
+      sizeBytes: 'int',
+      capturedBy: 'text',
+      boxSessionId: 'text',
+    },
+    required: ['id', 'title'],
+    enums: { capturedBy: ['box_cam'] },
+    unique: [['id']],
+    nullable: ['url', 'verifiedClip', 'captions'],
   }),
   attendance: Object.freeze({
-    table: 'player_attendance', idKey: 'id',
+    table: 'player_attendance',
+    idKey: 'id',
     spec: itemSpec({
-      scalars: { id: 'id', fixture: 'fixture', venue: 'venue', date: 'match_date', deviceConfirmed: 'device_confirmed', verified: 'verified', corroboratedBy: 'corroborated_by', trialId: 'trial_id' },
-      booleans: ['deviceConfirmed', 'verified'], composites: { gps: { lat: 'lat', lng: 'lng' } }, defaults: { verified: 0 },
-      columns: ['id', 'fixture', 'venue', 'match_date', 'lat', 'lng', 'device_confirmed', 'verified', 'corroborated_by', 'trial_id'],
+      scalars: {
+        id: 'id',
+        fixture: 'fixture',
+        venue: 'venue',
+        date: 'match_date',
+        deviceConfirmed: 'device_confirmed',
+        verified: 'verified',
+        corroboratedBy: 'corroborated_by',
+        trialId: 'trial_id',
+      },
+      booleans: ['deviceConfirmed', 'verified'],
+      composites: { gps: { lat: 'lat', lng: 'lng' } },
+      defaults: { verified: 0 },
+      columns: [
+        'id',
+        'fixture',
+        'venue',
+        'match_date',
+        'lat',
+        'lng',
+        'device_confirmed',
+        'verified',
+        'corroborated_by',
+        'trial_id',
+      ],
     }),
-    types: { id: 'text', fixture: 'text', venue: 'text', date: 'text', deviceConfirmed: 'bool', verified: 'bool', corroboratedBy: 'text', trialId: 'text' },
-    required: ['id', 'fixture', 'date'], unique: [['id']], nullable: ['gps'],
+    types: {
+      id: 'text',
+      fixture: 'text',
+      venue: 'text',
+      date: 'text',
+      deviceConfirmed: 'bool',
+      verified: 'bool',
+      corroboratedBy: 'text',
+      trialId: 'text',
+    },
+    required: ['id', 'fixture', 'date'],
+    unique: [['id']],
+    nullable: ['gps'],
   }),
   timeline: Object.freeze({
     table: 'player_timeline',
     spec: itemSpec({ scalars: { year: 'year', event: 'event' }, columns: ['year', 'event'] }),
-    types: { year: 'text', event: 'text' }, required: ['year', 'event'],
+    types: { year: 'text', event: 'text' },
+    required: ['year', 'event'],
   }),
   seasonHistory: Object.freeze({
     table: 'player_season_history',
     spec: itemSpec({
-      scalars: { season: 'season', appearances: 'appearances', goals: 'goals', assists: 'assists', paceKmh: 'pace_kmh', passCompletionPct: 'pass_completion_pct', duelSuccessPct: 'duel_success_pct', cleanSheets: 'clean_sheets' },
-      columns: ['season', 'appearances', 'goals', 'assists', 'pace_kmh', 'pass_completion_pct', 'duel_success_pct', 'clean_sheets'],
+      scalars: {
+        season: 'season',
+        appearances: 'appearances',
+        goals: 'goals',
+        assists: 'assists',
+        paceKmh: 'pace_kmh',
+        passCompletionPct: 'pass_completion_pct',
+        duelSuccessPct: 'duel_success_pct',
+        cleanSheets: 'clean_sheets',
+      },
+      columns: [
+        'season',
+        'appearances',
+        'goals',
+        'assists',
+        'pace_kmh',
+        'pass_completion_pct',
+        'duel_success_pct',
+        'clean_sheets',
+      ],
     }),
     // The stats route files any non-negative finite number into a season (the current-season `stats_*` columns are stricter): REAL columns, nothing coerced.
-    types: { season: 'text', appearances: 'real', goals: 'real', assists: 'real', paceKmh: 'real', passCompletionPct: 'real', duelSuccessPct: 'real', cleanSheets: 'real' },
-    required: ['season'], unique: [['season']],
+    types: {
+      season: 'text',
+      appearances: 'real',
+      goals: 'real',
+      assists: 'real',
+      paceKmh: 'real',
+      passCompletionPct: 'real',
+      duelSuccessPct: 'real',
+      cleanSheets: 'real',
+    },
+    required: ['season'],
+    unique: [['season']],
   }),
   'medical.records': Object.freeze({
-    table: 'player_medical_records', idKey: 'id',
+    table: 'player_medical_records',
+    idKey: 'id',
     spec: itemSpec({
-      scalars: { id: 'id', type: 'type', title: 'title', date: 'record_date', layoffWeeks: 'layoff_weeks', cleared: 'cleared' }, booleans: ['cleared'],
+      scalars: {
+        id: 'id',
+        type: 'type',
+        title: 'title',
+        date: 'record_date',
+        layoffWeeks: 'layoff_weeks',
+        cleared: 'cleared',
+      },
+      booleans: ['cleared'],
       columns: ['id', 'type', 'title', 'record_date', 'layoff_weeks', 'cleared'],
     }),
     types: { id: 'text', type: 'text', title: 'text', date: 'date', layoffWeeks: 'real', cleared: 'bool' },
-    required: ['id', 'type', 'title'], unique: [['id']], nullable: ['layoffWeeks', 'cleared'],
+    required: ['id', 'type', 'title'],
+    unique: [['id']],
+    nullable: ['layoffWeeks', 'cleared'],
   }),
   drillResults: Object.freeze({
-    table: 'player_drill_results', idKey: 'id',
+    table: 'player_drill_results',
+    idKey: 'id',
     spec: itemSpec({
-      scalars: { id: 'id', drillId: 'drill_id', drillName: 'drill_name', metric: 'metric', unit: 'unit', value: 'value', verified: 'verified', ts: 'recorded_at' }, booleans: ['verified'], defaults: { verified: 0 },
+      scalars: {
+        id: 'id',
+        drillId: 'drill_id',
+        drillName: 'drill_name',
+        metric: 'metric',
+        unit: 'unit',
+        value: 'value',
+        verified: 'verified',
+        ts: 'recorded_at',
+      },
+      booleans: ['verified'],
+      defaults: { verified: 0 },
       columns: ['id', 'drill_id', 'drill_name', 'metric', 'unit', 'value', 'verified', 'recorded_at'],
     }),
-    types: { id: 'text', drillId: 'text', drillName: 'text', metric: 'text', unit: 'text', value: 'real', verified: 'bool', ts: 'int' },
-    required: ['id', 'drillId', 'metric', 'value', 'ts'], unique: [['id']],
+    types: {
+      id: 'text',
+      drillId: 'text',
+      drillName: 'text',
+      metric: 'text',
+      unit: 'text',
+      value: 'real',
+      verified: 'bool',
+      ts: 'int',
+    },
+    required: ['id', 'drillId', 'metric', 'value', 'ts'],
+    unique: [['id']],
   }),
   externalIds: Object.freeze({
     table: 'player_external_ids',
     spec: itemSpec({
-      scalars: { provider: 'provider', externalId: 'external_id', source: 'source', by: 'linked_by_name', at: 'linked_at', reviewId: 'review_id' },
+      scalars: {
+        provider: 'provider',
+        externalId: 'external_id',
+        source: 'source',
+        by: 'linked_by_name',
+        at: 'linked_at',
+        reviewId: 'review_id',
+      },
       columns: ['provider', 'external_id', 'source', 'linked_by_name', 'linked_at', 'review_id'],
     }),
     types: { provider: 'text', externalId: 'text', source: 'text', by: 'text', at: 'int', reviewId: 'text' },
-    required: ['provider', 'externalId', 'source', 'at'], unique: [['provider', 'externalId']],
+    required: ['provider', 'externalId', 'source', 'at'],
+    unique: [['provider', 'externalId']],
   }),
   'programme.completed': Object.freeze({
     table: 'player_programme_completions',
-    spec: itemSpec({ scalars: { sessionId: 'session_id', ts: 'completed_at' }, columns: ['session_id', 'completed_at'] }),
-    types: { sessionId: 'text', ts: 'int' }, required: ['sessionId', 'ts'],
+    spec: itemSpec({
+      scalars: { sessionId: 'session_id', ts: 'completed_at' },
+      columns: ['session_id', 'completed_at'],
+    }),
+    types: { sessionId: 'text', ts: 'int' },
+    required: ['sessionId', 'ts'],
   }),
   // Primitive arrays: the value IS the item.
   badges: Object.freeze({ table: 'player_badges', primitive: 'text', column: 'badge' }),
@@ -279,17 +473,47 @@ export function getSubrecords(rec, key) {
 
 // ------------------------------------------------------------------ validation (field, index and reason; nothing coerced)
 const checkValue = (problems, label, v, type, { required = false, enums = null } = {}) => {
-  if (v === undefined) { if (required) problems.push(`${label} is absent`); return; }
-  if (v === null) { if (required) problems.push(`${label} is null`); return; }
+  if (v === undefined) {
+    if (required) problems.push(`${label} is absent`);
+    return;
+  }
+  if (v === null) {
+    if (required) problems.push(`${label} is null`);
+    return;
+  }
   switch (type) {
-    case 'text': if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`); break;
-    case 'date': if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`); else if (v.length !== 10) problems.push(`${label} is not a 10-character date (YYYY-MM-DD)`); break;
-    case 'instant': if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`); else if (!INSTANT_RE.test(v) || Number.isNaN(Date.parse(v))) problems.push(`${label} is not a UTC instant as toISOString writes it (YYYY-MM-DDTHH:MM:SS.sssZ)`); break;
-    case 'int': if (!isSafeInt(v)) problems.push(`${label} is ${typeof v === 'number' ? String(v) : describe(v)}, not a safe integer`); break;
-    case 'real': if (!isFinite_(v)) problems.push(`${label} is ${typeof v === 'number' ? String(v) : describe(v)}, not a finite number`); break;
-    case 'bool': if (typeof v !== 'boolean') problems.push(`${label} is ${describe(v)}, not a boolean`); break;
-    case 'json': try { JSON.stringify(v); } catch (err) { problems.push(`${label} cannot be stored as JSON (${String(err?.message ?? err).slice(0, 80)})`); } break;
-    default: throw new Error(`unknown item type ${type}`);
+    case 'text':
+      if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`);
+      break;
+    case 'date':
+      if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`);
+      else if (v.length !== 10) problems.push(`${label} is not a 10-character date (YYYY-MM-DD)`);
+      break;
+    case 'instant':
+      if (typeof v !== 'string') problems.push(`${label} is ${describe(v)}, not text`);
+      else if (!INSTANT_RE.test(v) || Number.isNaN(Date.parse(v)))
+        problems.push(`${label} is not a UTC instant as toISOString writes it (YYYY-MM-DDTHH:MM:SS.sssZ)`);
+      break;
+    case 'int':
+      if (!isSafeInt(v))
+        problems.push(`${label} is ${typeof v === 'number' ? String(v) : describe(v)}, not a safe integer`);
+      break;
+    case 'real':
+      if (!isFinite_(v))
+        problems.push(`${label} is ${typeof v === 'number' ? String(v) : describe(v)}, not a finite number`);
+      break;
+    case 'bool':
+      if (typeof v !== 'boolean') problems.push(`${label} is ${describe(v)}, not a boolean`);
+      break;
+    case 'json':
+      try {
+        JSON.stringify(v);
+      } catch (err) {
+        problems.push(`${label} cannot be stored as JSON (${String(err?.message ?? err).slice(0, 80)})`);
+      }
+      break;
+    default:
+      throw new Error(`unknown item type ${type}`);
   }
   if (enums && typeof v === 'string' && !enums.includes(v)) problems.push(`${label} is not one of ${enums.join('/')}`);
 };
@@ -302,22 +526,42 @@ export function validateSubrecordItem(key, item, index = null) {
   const problems = [];
   if (def.primitive) {
     if (def.primitive === 'text' && typeof item !== 'string') problems.push(`${at} is ${describe(item)}, not text`);
-    if (def.primitive === 'int' && !isSafeInt(item)) problems.push(`${at} is ${typeof item === 'number' ? String(item) : describe(item)}, not a safe integer`);
+    if (def.primitive === 'int' && !isSafeInt(item))
+      problems.push(`${at} is ${typeof item === 'number' ? String(item) : describe(item)}, not a safe integer`);
     return problems;
   }
   if (!isPlainObject(item)) return [`${at} is ${describe(item)}, not an object`];
-  for (const [k, type] of Object.entries(def.types)) checkValue(problems, `${at}.${k}`, item[k], type, { required: def.required.includes(k), enums: def.enums?.[k] ?? null });
+  for (const [k, type] of Object.entries(def.types))
+    checkValue(problems, `${at}.${k}`, item[k], type, {
+      required: def.required.includes(k),
+      enums: def.enums?.[k] ?? null,
+    });
   for (const [ck, subs] of Object.entries(def.spec.composites)) {
     const v = item[ck];
     if (absentOrNull(v)) continue;
-    if (!isPlainObject(v)) { problems.push(`${at}.${ck} is ${describe(v)}, not an object`); continue; }
+    if (!isPlainObject(v)) {
+      problems.push(`${at}.${ck} is ${describe(v)}, not an object`);
+      continue;
+    }
     const present = Object.keys(subs).filter((s) => !absentOrNull(v[s]));
-    if (present.length && present.length !== Object.keys(subs).length) problems.push(`${at}.${ck} has ${present.join('/')} without ${Object.keys(subs).filter((s) => !present.includes(s)).join('/')}`);
-    for (const s of Object.keys(subs)) if (!absentOrNull(v[s]) && !isFinite_(v[s])) problems.push(`${at}.${ck}.${s} is ${describe(v[s])}, not a finite number`);
+    if (present.length && present.length !== Object.keys(subs).length)
+      problems.push(
+        `${at}.${ck} has ${present.join('/')} without ${Object.keys(subs)
+          .filter((s) => !present.includes(s))
+          .join('/')}`,
+      );
+    for (const s of Object.keys(subs))
+      if (!absentOrNull(v[s]) && !isFinite_(v[s]))
+        problems.push(`${at}.${ck}.${s} is ${describe(v[s])}, not a finite number`);
   }
   if (def.children === 'tags' && !absentOrNull(item.tags)) {
     if (!isPlainObject(item.tags)) problems.push(`${at}.tags is ${describe(item.tags)}, not an object of tag → count`);
-    else for (const [tag, n] of Object.entries(item.tags)) if (!isSafeInt(n) || n <= 0) problems.push(`${at}.tags.${tag} is ${typeof n === 'number' ? String(n) : describe(n)}, not a positive integer`);
+    else
+      for (const [tag, n] of Object.entries(item.tags))
+        if (!isSafeInt(n) || n <= 0)
+          problems.push(
+            `${at}.tags.${tag} is ${typeof n === 'number' ? String(n) : describe(n)}, not a positive integer`,
+          );
   }
   return problems;
 }
@@ -331,14 +575,26 @@ export function validateSubrecordArray(key, items) {
   items.forEach((item, i) => problems.push(...validateSubrecordItem(key, item, i)));
   if (problems.length) return problems;
   if (def.primitive) {
-    if (def.unique) { const seen = new Map(); items.forEach((v, i) => { if (seen.has(v)) problems.push(`${key}[${i}] repeats ${JSON.stringify(v)} (first at [${seen.get(v)}]); the table keys ${key} by value and nothing is deduplicated`); else seen.set(v, i); }); }
+    if (def.unique) {
+      const seen = new Map();
+      items.forEach((v, i) => {
+        if (seen.has(v))
+          problems.push(
+            `${key}[${i}] repeats ${JSON.stringify(v)} (first at [${seen.get(v)}]); the table keys ${key} by value and nothing is deduplicated`,
+          );
+        else seen.set(v, i);
+      });
+    }
     return problems;
   }
   for (const cols of def.unique ?? []) {
     const seen = new Map();
     items.forEach((item, i) => {
       const k = JSON.stringify(cols.map((c) => item[c]));
-      if (seen.has(k)) problems.push(`${key}[${i}] repeats ${cols.join('+')} ${cols.map((c) => JSON.stringify(item[c])).join('/')} (first at [${seen.get(k)}]); the table keys ${key} by it and nothing is deduplicated`);
+      if (seen.has(k))
+        problems.push(
+          `${key}[${i}] repeats ${cols.join('+')} ${cols.map((c) => JSON.stringify(item[c])).join('/')} (first at [${seen.get(k)}]); the table keys ${key} by it and nothing is deduplicated`,
+        );
       else seen.set(k, i);
     });
   }
@@ -346,7 +602,8 @@ export function validateSubrecordArray(key, items) {
 }
 
 // ------------------------------------------------------------------ item ⇄ row
-const insertSql = (table, columns) => `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
+const insertSql = (table, columns) =>
+  `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
 
 /** The row of a valid item: its known fields in their columns (unknown fields are not stored), the table defaults where it leaves a required column out. */
 function itemToRow(def, item) {
@@ -372,12 +629,16 @@ function itemFromRow(def, row, tagRows) {
   const item = {};
   for (const [k, col] of Object.entries(s.scalars)) {
     const v = row[col];
-    if (v === null || v === undefined) { if (nullable.includes(k)) item[k] = null; continue; }
+    if (v === null || v === undefined) {
+      if (nullable.includes(k)) item[k] = null;
+      continue;
+    }
     item[k] = s.booleans.has(k) ? v === 1 : s.json.has(k) ? JSON.parse(v) : v;
   }
   for (const [ck, subs] of Object.entries(s.composites)) {
     const cols = Object.entries(subs);
-    if (cols.every(([, col]) => row[col] !== null && row[col] !== undefined)) item[ck] = Object.fromEntries(cols.map(([sub, col]) => [sub, row[col]]));
+    if (cols.every(([, col]) => row[col] !== null && row[col] !== undefined))
+      item[ck] = Object.fromEntries(cols.map(([sub, col]) => [sub, row[col]]));
     else if (nullable.includes(ck)) item[ck] = null;
   }
   if (def.children === 'tags') {
@@ -393,9 +654,11 @@ export function itemRows(key, item, position, playerId) {
   const def = SUBRECORD_SPECS[key];
   if (def.primitive) return { row: { player_id: playerId, position, [def.column]: item }, tags: null };
   const row = itemToRow(def, item);
-  row.player_id = playerId; row.position = position;
+  row.player_id = playerId;
+  row.position = position;
   let tags = null;
-  if (def.children === 'tags' && isPlainObject(item.tags)) tags = Object.entries(item.tags).map(([tag, count], i) => ({ media_id: item.id, position: i, tag, count }));
+  if (def.children === 'tags' && isPlainObject(item.tags))
+    tags = Object.entries(item.tags).map(([tag, count], i) => ({ media_id: item.id, position: i, tag, count }));
   return { row, tags };
 }
 /** A valid item exactly as the tables will read it back. */
@@ -405,7 +668,10 @@ export function storedItem(key, item) {
   const { row, tags } = itemRows(key, item, 0, null);
   return itemFromRow(def, row, tags);
 }
-const columnsOf = (key) => { const def = SUBRECORD_SPECS[key]; return def.primitive ? ['player_id', 'position', def.column] : ['player_id', 'position', ...def.spec.columns]; };
+const columnsOf = (key) => {
+  const def = SUBRECORD_SPECS[key];
+  return def.primitive ? ['player_id', 'position', def.column] : ['player_id', 'position', ...def.spec.columns];
+};
 
 /** Prepared statements for every table (built once per connection by the callers below). */
 export function prepareSubrecordStatements(sqlite) {
@@ -415,16 +681,34 @@ export function prepareSubrecordStatements(sqlite) {
     st[key] = {
       insert: sqlite.prepare(insertSql(def.table, columnsOf(key))),
       deleteAll: sqlite.prepare(`DELETE FROM ${def.table} WHERE player_id = ?`),
-      selectPlayer: sqlite.prepare(`SELECT ${columnsOf(key).join(', ')} FROM ${def.table} WHERE player_id = ? ORDER BY position`),
+      selectPlayer: sqlite.prepare(
+        `SELECT ${columnsOf(key).join(', ')} FROM ${def.table} WHERE player_id = ? ORDER BY position`,
+      ),
       count: sqlite.prepare(`SELECT COUNT(*) AS n FROM ${def.table}`),
     };
-    if (def.idKey) st[key].update = sqlite.prepare(`UPDATE ${def.table} SET ${columnsOf(key).filter((c) => c !== 'id' && c !== 'player_id').map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id AND player_id = @player_id`);
-    else if (!def.primitive) st[key].update = sqlite.prepare(`UPDATE ${def.table} SET ${columnsOf(key).filter((c) => c !== 'player_id' && c !== 'position').map((c) => `${c} = @${c}`).join(', ')} WHERE player_id = @player_id AND position = @position`);
+    if (def.idKey)
+      st[key].update = sqlite.prepare(
+        `UPDATE ${def.table} SET ${columnsOf(key)
+          .filter((c) => c !== 'id' && c !== 'player_id')
+          .map((c) => `${c} = @${c}`)
+          .join(', ')} WHERE id = @id AND player_id = @player_id`,
+      );
+    else if (!def.primitive)
+      st[key].update = sqlite.prepare(
+        `UPDATE ${def.table} SET ${columnsOf(key)
+          .filter((c) => c !== 'player_id' && c !== 'position')
+          .map((c) => `${c} = @${c}`)
+          .join(', ')} WHERE player_id = @player_id AND position = @position`,
+      );
   }
   st.tags = {
-    insert: sqlite.prepare('INSERT INTO player_media_tags (media_id, position, tag, count) VALUES (@media_id, @position, @tag, @count)'),
+    insert: sqlite.prepare(
+      'INSERT INTO player_media_tags (media_id, position, tag, count) VALUES (@media_id, @position, @tag, @count)',
+    ),
     deleteMedia: sqlite.prepare('DELETE FROM player_media_tags WHERE media_id = ?'),
-    selectPlayer: sqlite.prepare('SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id = ? ORDER BY t.media_id, t.position'),
+    selectPlayer: sqlite.prepare(
+      'SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id = ? ORDER BY t.media_id, t.position',
+    ),
     count: sqlite.prepare('SELECT COUNT(*) AS n FROM player_media_tags'),
   };
   return st;
@@ -462,11 +746,17 @@ const itemFromRows = (key, row, tagRows) => {
 const emptyChildren = () => {
   const c = {};
   for (const key of PLAYER_SUBRECORD_KEYS) c[key] = [];
-  for (const [k, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) { c[k] = {}; for (const s of subs) c[k][s] = []; }
+  for (const [k, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) {
+    c[k] = {};
+    for (const s of subs) c[k][s] = [];
+  }
   return c;
 };
 const placeChild = (children, key, item) => {
-  if (!key.includes('.')) { children[key].push(item); return; }
+  if (!key.includes('.')) {
+    children[key].push(item);
+    return;
+  }
   const [k, sub] = key.split('.');
   children[k][sub].push(item);
 };
@@ -475,20 +765,33 @@ const placeChild = (children, key, item) => {
 export function readChildren(st, playerId) {
   const children = emptyChildren();
   const tags = new Map();
-  for (const t of st.tags.selectPlayer.all(playerId)) { if (!tags.has(t.media_id)) tags.set(t.media_id, []); tags.get(t.media_id).push(t); }
-  for (const key of SUBRECORD_KEYS) for (const row of st[key].selectPlayer.all(playerId)) placeChild(children, key, itemFromRows(key, row, tags.get(row.id)));
+  for (const t of st.tags.selectPlayer.all(playerId)) {
+    if (!tags.has(t.media_id)) tags.set(t.media_id, []);
+    tags.get(t.media_id).push(t);
+  }
+  for (const key of SUBRECORD_KEYS)
+    for (const row of st[key].selectPlayer.all(playerId))
+      placeChild(children, key, itemFromRows(key, row, tags.get(row.id)));
   return children;
 }
 /** The lists of many players in one query per table (never a query per player): Map player id → lists. */
 export function readChildrenFor(sqlite, ids) {
   const out = new Map(ids.map((id) => [id, emptyChildren()]));
   if (!ids.length) return out;
-  const tagRows = sqlite.prepare('SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id IN (SELECT value FROM json_each(?)) ORDER BY t.media_id, t.position').all(JSON.stringify(ids));
+  const tagRows = sqlite
+    .prepare(
+      'SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id IN (SELECT value FROM json_each(?)) ORDER BY t.media_id, t.position',
+    )
+    .all(JSON.stringify(ids));
   const tags = new Map();
-  for (const t of tagRows) { if (!tags.has(t.media_id)) tags.set(t.media_id, []); tags.get(t.media_id).push(t); }
+  for (const t of tagRows) {
+    if (!tags.has(t.media_id)) tags.set(t.media_id, []);
+    tags.get(t.media_id).push(t);
+  }
   for (const key of SUBRECORD_KEYS) {
     const rows = childRowsOf(sqlite, SUBRECORD_SPECS[key].table, 'player_id', ids, { order: 'position' });
-    for (const id of ids) for (const row of rows.all(id)) placeChild(out.get(id), key, itemFromRows(key, row, tags.get(row.id)));
+    for (const id of ids)
+      for (const row of rows.all(id)) placeChild(out.get(id), key, itemFromRows(key, row, tags.get(row.id)));
   }
   return out;
 }
@@ -508,7 +811,8 @@ export function countChildRows(st) {
 export function trialReportsFor(trials, playerId) {
   if (!Array.isArray(trials)) return [];
   const out = [];
-  for (const t of trials) if (isPlainObject(t) && t.playerId === playerId && isPlainObject(t.report)) out.push(t.report);
+  for (const t of trials)
+    if (isPlainObject(t) && t.playerId === playerId && isPlainObject(t.report)) out.push(t.report);
   const at = (r) => (typeof r.filedAt === 'number' && Number.isFinite(r.filedAt) ? r.filedAt : 0);
   return out.sort((a, b) => at(a) - at(b));
 }

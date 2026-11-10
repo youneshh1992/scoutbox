@@ -7,14 +7,17 @@
  */
 
 export function createSourceChanges({ nextId, safetyAudit }) {
-  if (typeof safetyAudit?.sourceChanges?.record !== 'function' || typeof nextId !== 'function') throw new TypeError('createSourceChanges needs the safety-audit repository and nextId');
+  if (typeof safetyAudit?.sourceChanges?.record !== 'function' || typeof nextId !== 'function')
+    throw new TypeError('createSourceChanges needs the safety-audit repository and nextId');
 
   /** `occurredAt` is when the fact changed, never a record's creation time standing in for it. */
   const recordSourceChange = ({ playerId, type, sourceSystem, sourceId, occurredAt = Date.now(), detail = null }) => {
     if (!playerId || !type || !sourceSystem) return null;
     return safetyAudit.sourceChanges.record({
       id: nextId('srcc'),
-      playerId, type, sourceSystem,
+      playerId,
+      type,
+      sourceSystem,
       sourceId: sourceId ?? null,
       occurredAt,
       detail: detail ?? null,

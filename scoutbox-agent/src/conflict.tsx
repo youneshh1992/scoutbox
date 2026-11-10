@@ -36,7 +36,11 @@ export function conflictOf(e: unknown): Conflict | null {
   };
 }
 
-export function ConflictNotice({ conflict, onReload, onKeepChanges }: {
+export function ConflictNotice({
+  conflict,
+  onReload,
+  onKeepChanges,
+}: {
   conflict: Conflict;
   onReload: () => void;
   /** Offered only by surfaces that can hold the draft against the new revision. */
@@ -45,12 +49,25 @@ export function ConflictNotice({ conflict, onReload, onKeepChanges }: {
   const who = conflict.updatedBy ? conflict.updatedBy : t('conflict.someone');
   const when = conflict.updatedAt ? ` · ${fmtStamp(conflict.updatedAt)}` : '';
   return (
-    <div className="notice block" role="alert" aria-live="assertive" data-conflict-code={conflict.code} style={{ marginTop: 8 }}>
+    <div
+      className="notice block"
+      role="alert"
+      aria-live="assertive"
+      data-conflict-code={conflict.code}
+      style={{ marginTop: 8 }}
+    >
       <div style={{ fontWeight: 700 }}>{t('conflict.title')}</div>
-      <div style={{ marginTop: 4 }}>{t('conflict.body').replace('{who}', who)}{when}</div>
-      <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>{t('conflict.kept')}</div>
+      <div style={{ marginTop: 4 }}>
+        {t('conflict.body').replace('{who}', who)}
+        {when}
+      </div>
+      <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>
+        {t('conflict.kept')}
+      </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-        <button className="primary" onClick={onReload}>{t('conflict.reload')}</button>
+        <button className="primary" onClick={onReload}>
+          {t('conflict.reload')}
+        </button>
         {onKeepChanges && <button onClick={onKeepChanges}>{t('conflict.keep')}</button>}
       </div>
     </div>

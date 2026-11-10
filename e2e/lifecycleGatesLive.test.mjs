@@ -42,17 +42,29 @@ const STATIC_PORT = 8723;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-lifecyclegateslive-'));
 
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 /** Assert an exact status AND an exact error code. Never "not 200". */
 const expect = (res, status, code, what) => {
-  if (res.status !== status) fail(`${what}: expected ${status}${code ? ` ${code}` : ''}, got ${res.status} ${JSON.stringify(res.body).slice(0, 160)}`);
+  if (res.status !== status)
+    fail(
+      `${what}: expected ${status}${code ? ` ${code}` : ''}, got ${res.status} ${JSON.stringify(res.body).slice(0, 160)}`,
+    );
   if (code && res.body?.error !== code) fail(`${what}: expected error ${code}, got ${JSON.stringify(res.body?.error)}`);
   say(what);
 };
 
 console.log(`building live club bundle for :${API_PORT}…`);
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-lifecycle`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-lifecycle`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -62,11 +74,20 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -81,15 +102,33 @@ serveDir('scoutbox-club/dist-live-lifecycle', STATIC_PORT);
 
 let browser = null;
 process.on('exit', () => {
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
-  try { browser?.close(); } catch { /* gone */ }
-  for (const s of statics) { try { s.close(); } catch { /* gone */ } }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
+  try {
+    browser?.close();
+  } catch {
+    /* gone */
+  }
+  for (const s of statics) {
+    try {
+      s.close();
+    } catch {
+      /* gone */
+    }
+  }
   fs.rmSync(DATA, { recursive: true, force: true });
   fs.rmSync(path.join(ROOT, 'scoutbox-club/dist-live-lifecycle'), { recursive: true, force: true });
 });
 
 for (let i = 0; i < 80; i += 1) {
-  try { if ((await fetch(`${API}/healthz`)).ok) break; } catch { /* booting */ }
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {
+    /* booting */
+  }
   await new Promise((r) => setTimeout(r, 250));
 }
 console.log(`backend up on :${API_PORT}`);
@@ -112,7 +151,11 @@ async function enterClub(ctx, org, name, role) {
   await page.click('button:has-text("Enter workspace")');
   await page.waitForSelector('nav.sidebar', { timeout: 25000 });
   const token = await page.evaluate(() => {
-    try { return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null; } catch { return null; }
+    try {
+      return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null;
+    } catch {
+      return null;
+    }
   });
   if (!token) fail(`${name}: the client stored no session token after login`);
   return { page, token, auth: { authorization: `Bearer ${token}` } };
@@ -126,7 +169,9 @@ say('L1: a recruitment lead signs in through the real client and the app stores 
 
 // Open a Room through the UI, so the case under test was created the way a
 // club actually creates one.
-await lead.page.evaluate(() => { location.hash = '#/search'; });
+await lead.page.evaluate(() => {
+  location.hash = '#/search';
+});
 await lead.page.waitForSelector('.player-card', { timeout: 25000 });
 const PLAYER_NAME = await lead.page.evaluate(() => document.querySelector('.player-card')?.textContent?.trim() ?? '');
 await lead.page.click('.player-card');
@@ -153,30 +198,49 @@ say(`L1: the room is readable through the API the UI is talking to (${ROOM_ID})`
 //
 // Before the fix, `isLead(req)` made every lead resolve as contributor, so a
 // Head of Recruitment got the 403. This asserts the 409 by name.
-const leadRole = await j(`/org/rooms/${ROOM_ID}/lifecycle`, {
-  method: 'POST', body: JSON.stringify({ action: 'confirmSignedOutcome' }),
-}, lead.auth);
-expect(leadRole, 409, 'LIFECYCLE_TRANSITION_INVALID',
-  'L1: the server resolves the Head of Recruitment as recruitment_admin — refused on the transition table, NOT on permission');
+const leadRole = await j(
+  `/org/rooms/${ROOM_ID}/lifecycle`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ action: 'confirmSignedOutcome' }),
+  },
+  lead.auth,
+);
+expect(
+  leadRole,
+  409,
+  'LIFECYCLE_TRANSITION_INVALID',
+  'L1: the server resolves the Head of Recruitment as recruitment_admin — refused on the transition table, NOT on permission',
+);
 
 // And the positive half: a lead can actually perform a lead action end to end.
 const journey0 = await j(`/org/rooms/${ROOM_ID}/journey`, {}, lead.auth);
 if (journey0.status !== 200) fail(`L1: the journey projection answered ${journey0.status}`);
 say('L1: the lead reads the recruitment journey (200)');
-const hold = await j(`/org/rooms/${ROOM_ID}/lifecycle`, {
-  method: 'POST',
-  body: JSON.stringify({ action: 'holdCase', reasonCodes: ['on_hold'], expectedRev: journey0.body.case.rev }),
-}, lead.auth);
+const hold = await j(
+  `/org/rooms/${ROOM_ID}/lifecycle`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ action: 'holdCase', reasonCodes: ['on_hold'], expectedRev: journey0.body.case.rev }),
+  },
+  lead.auth,
+);
 if (hold.status !== 200 || hold.body?.to !== 'on_hold') {
   fail(`L1: the lead could not hold the case — ${hold.status} ${JSON.stringify(hold.body).slice(0, 160)}`);
 }
 say('L1: and performs a lead-authorized lifecycle action successfully (200, watching → on_hold)');
 
-const resumed = await j(`/org/rooms/${ROOM_ID}/lifecycle`, {
-  method: 'POST', body: JSON.stringify({ action: 'resumeCase', expectedRev: hold.body.currentRev }),
-}, lead.auth);
+const resumed = await j(
+  `/org/rooms/${ROOM_ID}/lifecycle`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ action: 'resumeCase', expectedRev: hold.body.currentRev }),
+  },
+  lead.auth,
+);
 // A resume returns the case to the state it was held FROM (here `watching`), never to a fixed state.
-if (resumed.status !== 200 || resumed.body?.to !== 'watching') fail(`L1: resume failed — ${resumed.status} ${resumed.body?.to ?? ''}`);
+if (resumed.status !== 200 || resumed.body?.to !== 'watching')
+  fail(`L1: resume failed — ${resumed.status} ${resumed.body?.to ?? ''}`);
 say('L1: and resumes it (200, on_hold → watching, the held-from state)');
 
 // ====================================== L2 — the negative control
@@ -185,11 +249,20 @@ const ctxScout = await browser.newContext({ viewport: { width: 1440, height: 900
 const scout = await enterClub(ctxScout, 'Eastport FC', 'Tom Field', 'First-Team Scout');
 say('L2: a first-team scout signs in through the same client');
 
-const scoutConfirm = await j(`/org/rooms/${ROOM_ID}/lifecycle`, {
-  method: 'POST', body: JSON.stringify({ action: 'confirmSignedOutcome' }),
-}, scout.auth);
-expect(scoutConfirm, 403, 'LIFECYCLE_NOT_PERMITTED',
-  'L2: the same admin-only action is refused for the scout — so L1 does not pass because everyone is an admin');
+const scoutConfirm = await j(
+  `/org/rooms/${ROOM_ID}/lifecycle`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ action: 'confirmSignedOutcome' }),
+  },
+  scout.auth,
+);
+expect(
+  scoutConfirm,
+  403,
+  'LIFECYCLE_NOT_PERMITTED',
+  'L2: the same admin-only action is refused for the scout — so L1 does not pass because everyone is an admin',
+);
 
 // The scout is still a real member of the room: the control is about
 // PERMISSION, not about access.
@@ -205,11 +278,15 @@ say('L2: and is never offered the action they would be refused');
 
 const beforeStage = await j(`/org/rooms/${ROOM_ID}/journey`, {}, lead.auth);
 const roomBefore = await j(`/org/rooms/${ROOM_ID}`, {}, lead.auth);
-const legacy = await j(`/org/cases/${ROOM_ID}/stage`, {
-  method: 'POST', body: JSON.stringify({ stage: 'trial', reason: 'legacy client' }),
-}, lead.auth);
-expect(legacy, 409, 'STAGE_NOT_SETTABLE_ON_ROOM',
-  'L3: the legacy stage route refuses a case that has a Room');
+const legacy = await j(
+  `/org/cases/${ROOM_ID}/stage`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ stage: 'trial', reason: 'legacy client' }),
+  },
+  lead.auth,
+);
+expect(legacy, 409, 'STAGE_NOT_SETTABLE_ON_ROOM', 'L3: the legacy stage route refuses a case that has a Room');
 if (typeof legacy.body?.use !== 'string' || !legacy.body.use.includes('/lifecycle')) {
   fail('L3: the refusal does not name the lifecycle route');
 }
@@ -218,7 +295,9 @@ say('L3: and names the lifecycle route rather than failing blankly');
 const afterStage = await j(`/org/rooms/${ROOM_ID}/journey`, {}, lead.auth);
 const roomAfter = await j(`/org/rooms/${ROOM_ID}`, {}, lead.auth);
 if (afterStage.body.lifecycle.currentStage !== beforeStage.body.lifecycle.currentStage) {
-  fail(`L3: the room status moved — ${beforeStage.body.lifecycle.currentStage} → ${afterStage.body.lifecycle.currentStage}`);
+  fail(
+    `L3: the room status moved — ${beforeStage.body.lifecycle.currentStage} → ${afterStage.body.lifecycle.currentStage}`,
+  );
 }
 say('L3: the room status is unchanged');
 if (afterStage.body.history.total !== beforeStage.body.history.total) {
@@ -230,7 +309,7 @@ if (roomAfter.body.room?.rev !== roomBefore.body.room?.rev) {
 }
 say('L3: the rev is unchanged — nothing about the case was touched');
 if (afterStage.body.lifecycle.stage !== beforeStage.body.lifecycle.stage) {
-  fail('L3: the derived case stage moved behind the lifecycle\'s back');
+  fail("L3: the derived case stage moved behind the lifecycle's back");
 }
 say('L3: and the derived case stage is unchanged, which is the invariant the refusal exists to protect');
 
@@ -238,17 +317,29 @@ say('L3: and the derived case stage is unchanged, which is the invariant the ref
 // become a licence to break the cases that have no lifecycle to protect.
 const players = await j('/org/players', {}, lead.auth);
 const spare = (players.body?.items ?? []).find((p) => p.name !== PLAYER_NAME && p.id);
-const plain = await j('/org/cases', {
-  method: 'POST', body: JSON.stringify({ playerId: spare.id, priority: 'low' }),
-}, lead.auth);
+const plain = await j(
+  '/org/cases',
+  {
+    method: 'POST',
+    body: JSON.stringify({ playerId: spare.id, priority: 'low' }),
+  },
+  lead.auth,
+);
 if (plain.status !== 201) fail(`L4: could not create a plain case — ${plain.status}`);
 if (plain.body.case.room) fail('L4: the fixture case unexpectedly has a Room facet');
 say('L4: a plain recruitment case with no Room is created');
-const moved = await j(`/org/cases/${plain.body.case.id}/stage`, {
-  method: 'POST', body: JSON.stringify({ stage: 'observation' }),
-}, lead.auth);
+const moved = await j(
+  `/org/cases/${plain.body.case.id}/stage`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ stage: 'observation' }),
+  },
+  lead.auth,
+);
 if (moved.status !== 200 || moved.body?.case?.stage !== 'observation') {
-  fail(`L4: the legacy route no longer works on a plain case — ${moved.status} ${JSON.stringify(moved.body).slice(0, 120)}`);
+  fail(
+    `L4: the legacy route no longer works on a plain case — ${moved.status} ${JSON.stringify(moved.body).slice(0, 120)}`,
+  );
 }
 say('L4: and still moves through the legacy stage route exactly as before (200, stage=observation)');
 
@@ -257,24 +348,41 @@ say('L4: and still moves through the legacy stage route exactly as before (200, 
 // Both routes that can reach `signed` are exercised. Neither may arrive there
 // without a signing record for this org and this player.
 const cur = await j(`/org/rooms/${ROOM_ID}/journey`, {}, lead.auth);
-const legacyStatus = await j(`/org/rooms/${ROOM_ID}/status`, {
-  method: 'POST', body: JSON.stringify({ status: 'signed', expectedRev: cur.body.case.rev }),
-}, lead.auth);
+const legacyStatus = await j(
+  `/org/rooms/${ROOM_ID}/status`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ status: 'signed', expectedRev: cur.body.case.rev }),
+  },
+  lead.auth,
+);
 if (legacyStatus.status === 200) fail('L5: the legacy status route reached `signed` with no signing in the database');
 if (![409, 422].includes(legacyStatus.status)) {
-  fail(`L5: the status route refused with an unexpected ${legacyStatus.status} ${JSON.stringify(legacyStatus.body).slice(0, 160)}`);
+  fail(
+    `L5: the status route refused with an unexpected ${legacyStatus.status} ${JSON.stringify(legacyStatus.body).slice(0, 160)}`,
+  );
 }
 if (!['ROOM_TRANSITION_INVALID', 'ROOM_EVIDENCE_REQUIRED'].includes(legacyStatus.body?.error)) {
   fail(`L5: the status route refused with an unexpected code ${JSON.stringify(legacyStatus.body?.error)}`);
 }
 say(`L5: the legacy status route cannot reach \`signed\` (${legacyStatus.status} ${legacyStatus.body.error})`);
 
-const lifecycleSigned = await j(`/org/rooms/${ROOM_ID}/lifecycle`, {
-  method: 'POST', body: JSON.stringify({ action: 'confirmSignedOutcome', expectedRev: cur.body.case.rev }),
-}, lead.auth);
-if (lifecycleSigned.status === 200) fail('L5: the Room lifecycle route reached `signed` with no signing in the database');
-expect(lifecycleSigned, 409, 'LIFECYCLE_TRANSITION_INVALID',
-  'L5: and neither can the Room lifecycle route from this state');
+const lifecycleSigned = await j(
+  `/org/rooms/${ROOM_ID}/lifecycle`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ action: 'confirmSignedOutcome', expectedRev: cur.body.case.rev }),
+  },
+  lead.auth,
+);
+if (lifecycleSigned.status === 200)
+  fail('L5: the Room lifecycle route reached `signed` with no signing in the database');
+expect(
+  lifecycleSigned,
+  409,
+  'LIFECYCLE_TRANSITION_INVALID',
+  'L5: and neither can the Room lifecycle route from this state',
+);
 
 const stillNotSigned = await j(`/org/rooms/${ROOM_ID}/journey`, {}, lead.auth);
 if (stillNotSigned.body.lifecycle.currentStage === 'signed') fail('L5: the case is at `signed` after two refusals');
@@ -288,7 +396,8 @@ say('L5: the case is not signed, and no signing record was created by trying');
   const probe = await j('/org/recruitment/lifecycle', {}, lead.auth);
   if (probe.status !== 200) fail(`L5: the lifecycle vocabulary route answered ${probe.status}`);
   const signedAction = (probe.body.actions ?? []).find((a) => a.to === 'signed');
-  if (!signedAction || signedAction.action !== 'confirmSignedOutcome') fail('L5: the vocabulary does not name confirmSignedOutcome');
+  if (!signedAction || signedAction.action !== 'confirmSignedOutcome')
+    fail('L5: the vocabulary does not name confirmSignedOutcome');
   if (!signedAction.roles.includes('recruitment_admin') || signedAction.roles.length !== 1) {
     fail(`L5: confirmSignedOutcome is not admin-only — ${JSON.stringify(signedAction.roles)}`);
   }
@@ -300,17 +409,85 @@ say('L5: the case is not signed, and no signing record was created by trying');
 // Each refusal names its own condition. A client branching on these must be
 // able to tell "you may not" from "not from here" from "we cannot prove it".
 const codes = [];
-codes.push(['unknown action', await j(`/org/rooms/${ROOM_ID}/lifecycle`, { method: 'POST', body: JSON.stringify({ action: 'teleport' }) }, lead.auth), 400, 'LIFECYCLE_ACTION_UNKNOWN']);
-codes.push(['a stage key', await j(`/org/rooms/${ROOM_ID}/lifecycle`, { method: 'POST', body: JSON.stringify({ action: 'holdCase', stage: 'signed' }) }, lead.auth), 400, 'LIFECYCLE_STAGE_NOT_SETTABLE']);
+codes.push([
+  'unknown action',
+  await j(
+    `/org/rooms/${ROOM_ID}/lifecycle`,
+    { method: 'POST', body: JSON.stringify({ action: 'teleport' }) },
+    lead.auth,
+  ),
+  400,
+  'LIFECYCLE_ACTION_UNKNOWN',
+]);
+codes.push([
+  'a stage key',
+  await j(
+    `/org/rooms/${ROOM_ID}/lifecycle`,
+    { method: 'POST', body: JSON.stringify({ action: 'holdCase', stage: 'signed' }) },
+    lead.auth,
+  ),
+  400,
+  'LIFECYCLE_STAGE_NOT_SETTABLE',
+]);
 codes.push(['a wrong-role action', scoutConfirm, 403, 'LIFECYCLE_NOT_PERMITTED']);
 codes.push(['an impossible transition', lifecycleSigned, 409, 'LIFECYCLE_TRANSITION_INVALID']);
-codes.push(['a stale rev', await j(`/org/rooms/${ROOM_ID}/lifecycle`, { method: 'POST', body: JSON.stringify({ action: 'holdCase', expectedRev: 1 }) }, lead.auth), 409, 'ROOM_VERSION_CONFLICT']);
+codes.push([
+  'a stale rev',
+  await j(
+    `/org/rooms/${ROOM_ID}/lifecycle`,
+    { method: 'POST', body: JSON.stringify({ action: 'holdCase', expectedRev: 1 }) },
+    lead.auth,
+  ),
+  409,
+  'ROOM_VERSION_CONFLICT',
+]);
 // `rejectCase` (→ archived), not `closeCase`: `under_review → closed` is not
 // an edge, and the transition table is checked before the reason, so
 // `closeCase` would answer TRANSITION_INVALID and never reach the reason rule.
-codes.push(['a missing reason', await j(`/org/rooms/${ROOM_ID}/lifecycle`, { method: 'POST', body: JSON.stringify({ action: 'rejectCase', expectedRev: stillNotSigned.body.case.rev }) }, lead.auth), 400, 'LIFECYCLE_REASON_REQUIRED']);
-codes.push(['a DECISION reason on a transition', await j(`/org/rooms/${ROOM_ID}/lifecycle`, { method: 'POST', body: JSON.stringify({ action: 'rejectCase', reasonCodes: ['squad_space'], expectedRev: stillNotSigned.body.case.rev }) }, lead.auth), 400, 'LIFECYCLE_REASON_UNKNOWN']);
-codes.push(['a protected characteristic', await j(`/org/rooms/${ROOM_ID}/lifecycle`, { method: 'POST', body: JSON.stringify({ action: 'rejectCase', reasonCodes: ['nationality'], expectedRev: stillNotSigned.body.case.rev }) }, lead.auth), 400, 'ROOM_REASON_PROHIBITED']);
+codes.push([
+  'a missing reason',
+  await j(
+    `/org/rooms/${ROOM_ID}/lifecycle`,
+    { method: 'POST', body: JSON.stringify({ action: 'rejectCase', expectedRev: stillNotSigned.body.case.rev }) },
+    lead.auth,
+  ),
+  400,
+  'LIFECYCLE_REASON_REQUIRED',
+]);
+codes.push([
+  'a DECISION reason on a transition',
+  await j(
+    `/org/rooms/${ROOM_ID}/lifecycle`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'rejectCase',
+        reasonCodes: ['squad_space'],
+        expectedRev: stillNotSigned.body.case.rev,
+      }),
+    },
+    lead.auth,
+  ),
+  400,
+  'LIFECYCLE_REASON_UNKNOWN',
+]);
+codes.push([
+  'a protected characteristic',
+  await j(
+    `/org/rooms/${ROOM_ID}/lifecycle`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'rejectCase',
+        reasonCodes: ['nationality'],
+        expectedRev: stillNotSigned.body.case.rev,
+      }),
+    },
+    lead.auth,
+  ),
+  400,
+  'ROOM_REASON_PROHIBITED',
+]);
 for (const [what, res, status, code] of codes) expect(res, status, code, `L6: ${what} answers ${status} ${code}`);
 
 // 404 privacy: another club's case and a case that never existed are the same
@@ -323,7 +500,7 @@ if (foreign.status !== 404) fail(`L6: another club's case answered ${foreign.sta
 if (JSON.stringify(foreign.body) !== JSON.stringify(ghost.body)) {
   fail('L6: a foreign case and a non-existent case give different bodies — the id is confirmable');
 }
-say('L6: another club\'s case and a case that never existed answer 404 byte-identically');
+say("L6: another club's case and a case that never existed answer 404 byte-identically");
 
 // ==================================== L7 — the UI still reads it all
 
@@ -332,7 +509,9 @@ say('L6: another club\'s case and a case that never existed answer 404 byte-iden
 // cannot display the result is a regression even with no new UI.
 await lead.page.reload();
 await lead.page.waitForSelector('nav.sidebar', { timeout: 25000 });
-await lead.page.evaluate(() => { location.hash = '#/rooms'; });
+await lead.page.evaluate(() => {
+  location.hash = '#/rooms';
+});
 await lead.page.waitForSelector('[aria-label="Recruitment Rooms table"]', { timeout: 25000 });
 const listText = await lead.page.evaluate(() => document.body.innerText);
 if (/undefined|NaN|\[object Object\]/.test(listText)) fail('L7: the rooms list renders a placeholder value');
@@ -361,7 +540,8 @@ say('L7: and shows human labels, not raw lifecycle enums');
   const dicts = { EN: i18nSrc.slice(0, frStart), FR: i18nSrc.slice(frStart) };
   for (const [lang, dict] of Object.entries(dicts)) {
     const missing = ROOM_STATUSES.filter((s) => !dict.includes(`'rm.st.${s}'`));
-    if (missing.length) fail(`L7b: ${lang} has no label for ${missing.join(', ')} — the UI would show the de-underscored code`);
+    if (missing.length)
+      fail(`L7b: ${lang} has no label for ${missing.join(', ')} — the UI would show the de-underscored code`);
   }
   say(`L7b: all ${ROOM_STATUSES.length} lifecycle states have a real label in EN and FR, not a de-underscored code`);
 
@@ -370,15 +550,19 @@ say('L7: and shows human labels, not raw lifecycle enums');
   if (!dicts.EN.includes("'rm.st.offer_accepted': 'Accepted in ScoutBox'")) {
     fail('L7b: `offer_accepted` does not use the server\'s wording — "accepted in ScoutBox" is not "signed"');
   }
-  say('L7c: and `offer_accepted` keeps the server\'s wording, which does not claim a signing');
+  say("L7c: and `offer_accepted` keeps the server's wording, which does not claim a signing");
 }
 
 // 390px smoke on the surface that consumes the changed lifecycle contract.
 const ctxPhone = await browser.newContext({ viewport: { width: 390, height: 844 } });
 const phone = await enterClub(ctxPhone, 'Eastport FC', 'Maria Keane', 'Head of Recruitment');
-await phone.page.evaluate(() => { location.hash = '#/rooms'; });
+await phone.page.evaluate(() => {
+  location.hash = '#/rooms';
+});
 await phone.page.waitForSelector('[aria-label="Recruitment Rooms table"]', { timeout: 25000 });
-const overflow = await phone.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+const overflow = await phone.page.evaluate(
+  () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+);
 if (overflow > 0) fail(`L8: the Rooms list overflows a 390px viewport by ${overflow}px`);
 say('L8: the Rooms list fits a 390px phone (overflow=0px)');
 const phoneText = await phone.page.evaluate(() => document.body.innerText);
@@ -394,7 +578,11 @@ say(`L8: and takes keyboard focus (<${focused.toLowerCase()}>)`);
 await browser.close();
 browser = null;
 for (const srv of statics) srv.close();
-try { serverProc.kill('SIGTERM'); } catch { /* gone */ }
+try {
+  serverProc.kill('SIGTERM');
+} catch {
+  /* gone */
+}
 console.log(`\nm23Live: ${passed} checks passed — P2 sweep corrections verified end to end`);
 // EXPLICIT EXIT. The spawned backend and the two static servers are ref'd
 // handles, so without this the process prints its summary and then hangs

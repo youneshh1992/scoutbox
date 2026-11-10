@@ -91,7 +91,11 @@ export interface MatchResult {
   scoreNote: string;
 }
 
-export interface CriterionTypeDef { type: string; label: string; operators: string[] }
+export interface CriterionTypeDef {
+  type: string;
+  label: string;
+  operators: string[];
+}
 export interface MatchVocabulary {
   criterionTypes: CriterionTypeDef[];
   operators: { id: string; arity: string; note: string }[];
@@ -172,16 +176,42 @@ export interface WatchlistHistoryResult {
  *  the offending row named, in the server's own words. */
 export type CriteriaSaveOutcome<T> =
   | { ok: true; value: T }
-  | { ok: false; error: 'CRITERIA_INVALID'; details: { index: number; class: string; type: string | null; error: string }[]; message: string }
+  | {
+      ok: false;
+      error: 'CRITERIA_INVALID';
+      details: { index: number; class: string; type: string | null; error: string }[];
+      message: string;
+    }
   | { ok: false; error: 'CRITERION_PROHIBITED'; prohibited: string[]; message: string };
 
 export interface M19Api {
   vocabulary(s: Session): Promise<MatchVocabulary>;
-  match(s: Session, input: { criteria?: CriteriaInput; briefId?: string; sort?: string; limit?: number; cursor?: string }): Promise<CriteriaSaveOutcome<MatchResult>>;
+  match(
+    s: Session,
+    input: { criteria?: CriteriaInput; briefId?: string; sort?: string; limit?: number; cursor?: string },
+  ): Promise<CriteriaSaveOutcome<MatchResult>>;
   watchlists(s: Session, status?: string): Promise<{ items: Watchlist[]; total: number; note: string }>;
-  createWatchlist(s: Session, input: { name: string; mode: WatchlistMode; criteria?: CriteriaInput; briefId?: string; sourceType?: string; notify?: boolean }): Promise<CriteriaSaveOutcome<Watchlist>>;
-  watchlist(s: Session, id: string, params?: { sort?: string; limit?: number; cursor?: string }): Promise<WatchlistDetail>;
-  patchWatchlist(s: Session, id: string, input: Record<string, unknown> & { expectedRev: number }): Promise<CriteriaSaveOutcome<Watchlist>>;
+  createWatchlist(
+    s: Session,
+    input: {
+      name: string;
+      mode: WatchlistMode;
+      criteria?: CriteriaInput;
+      briefId?: string;
+      sourceType?: string;
+      notify?: boolean;
+    },
+  ): Promise<CriteriaSaveOutcome<Watchlist>>;
+  watchlist(
+    s: Session,
+    id: string,
+    params?: { sort?: string; limit?: number; cursor?: string },
+  ): Promise<WatchlistDetail>;
+  patchWatchlist(
+    s: Session,
+    id: string,
+    input: Record<string, unknown> & { expectedRev: number },
+  ): Promise<CriteriaSaveOutcome<Watchlist>>;
   history(s: Session, id: string, params?: { cursor?: string; limit?: number }): Promise<WatchlistHistoryResult>;
   addToRoom(s: Session, id: string, playerId: string): Promise<{ roomId: string; existed: boolean; note: string }>;
 }
@@ -203,14 +233,33 @@ const qs = (params: Record<string, string | number | undefined | null>) => {
 };
 
 /** Shared refusal handling for every call that carries criteria. */
-async function withCriteria<T>(path: string, init: RequestInit, pick: (b: Record<string, unknown>) => T): Promise<CriteriaSaveOutcome<T>> {
+async function withCriteria<T>(
+  path: string,
+  init: RequestInit,
+  pick: (b: Record<string, unknown>) => T,
+): Promise<CriteriaSaveOutcome<T>> {
   const res = await fetch(`${API_URL}${path}`, init);
   const body = await res.json().catch(() => ({}));
   if (res.status === 400 && body?.error === 'CRITERION_PROHIBITED') {
-    return { ok: false, error: 'CRITERION_PROHIBITED', prohibited: (body.prohibited ?? []) as string[], message: String(body.message ?? '') };
+    return {
+      ok: false,
+      error: 'CRITERION_PROHIBITED',
+      prohibited: (body.prohibited ?? []) as string[],
+      message: String(body.message ?? ''),
+    };
   }
-  if (res.status === 400 && (body?.error === 'CRITERIA_INVALID' || body?.error === 'CRITERIA_TOO_MANY' || body?.error === 'CRITERIA_REQUIRED_EMPTY')) {
-    return { ok: false, error: 'CRITERIA_INVALID', details: (body.details ?? []) as { index: number; class: string; type: string | null; error: string }[], message: String(body.message ?? '') };
+  if (
+    res.status === 400 &&
+    (body?.error === 'CRITERIA_INVALID' ||
+      body?.error === 'CRITERIA_TOO_MANY' ||
+      body?.error === 'CRITERIA_REQUIRED_EMPTY')
+  ) {
+    return {
+      ok: false,
+      error: 'CRITERIA_INVALID',
+      details: (body.details ?? []) as { index: number; class: string; type: string | null; error: string }[],
+      message: String(body.message ?? ''),
+    };
   }
   if (!res.ok) throw ApiError.fromResponse(res, body);
   return { ok: true, value: pick(body as Record<string, unknown>) };
@@ -218,13 +267,29 @@ async function withCriteria<T>(path: string, init: RequestInit, pick: (b: Record
 
 export const httpM19: M19Api = {
   vocabulary: (s) => req('/org/matching/vocabulary', { headers: H(s) }),
-  match: (s, input) => withCriteria('/org/matching', { method: 'POST', headers: H(s), body: JSON.stringify(input) }, (b) => b as unknown as MatchResult),
+  match: (s, input) =>
+    withCriteria(
+      '/org/matching',
+      { method: 'POST', headers: H(s), body: JSON.stringify(input) },
+      (b) => b as unknown as MatchResult,
+    ),
   watchlists: (s, status) => req(`/org/watchlists${qs({ status })}`, { headers: H(s) }),
-  createWatchlist: (s, input) => withCriteria('/org/watchlists', { method: 'POST', headers: H(s), body: JSON.stringify(input) }, (b) => (b as { watchlist: Watchlist }).watchlist),
+  createWatchlist: (s, input) =>
+    withCriteria(
+      '/org/watchlists',
+      { method: 'POST', headers: H(s), body: JSON.stringify(input) },
+      (b) => (b as { watchlist: Watchlist }).watchlist,
+    ),
   watchlist: (s, id, params = {}) => req(`/org/watchlists/${id}${qs({ ...params })}`, { headers: H(s) }),
-  patchWatchlist: (s, id, input) => withCriteria(`/org/watchlists/${id}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }, (b) => (b as { watchlist: Watchlist }).watchlist),
+  patchWatchlist: (s, id, input) =>
+    withCriteria(
+      `/org/watchlists/${id}`,
+      { method: 'PATCH', headers: H(s), body: JSON.stringify(input) },
+      (b) => (b as { watchlist: Watchlist }).watchlist,
+    ),
   history: (s, id, params = {}) => req(`/org/watchlists/${id}/history${qs({ ...params })}`, { headers: H(s) }),
-  addToRoom: (s, id, playerId) => req(`/org/watchlists/${id}/room`, { method: 'POST', headers: H(s), body: JSON.stringify({ playerId }) }),
+  addToRoom: (s, id, playerId) =>
+    req(`/org/watchlists/${id}/room`, { method: 'POST', headers: H(s), body: JSON.stringify({ playerId }) }),
 };
 
 export const m19: M19Api = DEMO_MODE ? demoM19 : httpM19;
@@ -233,12 +298,18 @@ export const m19: M19Api = DEMO_MODE ? demoM19 : httpM19;
  *  forward and a shared internal link. Malformed input is REFUSED by the
  *  server, so this only has to be reversible, not trusted. */
 export function encodeCriteria(c: CriteriaInput): string {
-  try { return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(c))))); } catch { return ''; }
+  try {
+    return encodeURIComponent(btoa(unescape(encodeURIComponent(JSON.stringify(c)))));
+  } catch {
+    return '';
+  }
 }
 export function decodeCriteria(s: string): CriteriaInput | null {
   try {
     const parsed = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(s))))) as CriteriaInput;
     if (!parsed || !Array.isArray(parsed.required) || !Array.isArray(parsed.preferred)) return null;
     return parsed;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }

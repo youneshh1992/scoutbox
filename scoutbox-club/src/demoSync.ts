@@ -47,10 +47,7 @@ export function createDemoBus(role: BusRole, onEvent: (e: BusEvent) => void): De
       return false;
     }
   })();
-  const supported =
-    typeof BroadcastChannel !== 'undefined' &&
-    storageOk &&
-    typeof window !== 'undefined';
+  const supported = typeof BroadcastChannel !== 'undefined' && storageOk && typeof window !== 'undefined';
   if (!supported) {
     return { publish: () => {}, peerActive: () => false, close: () => {} };
   }
@@ -63,14 +60,22 @@ export function createDemoBus(role: BusRole, onEvent: (e: BusEvent) => void): De
   // Catch up on everything that happened before this tab opened. Deferred a
   // tick so module-level state finishes initialising before replay runs.
   let journalRaw: string | null = null;
-  try { journalRaw = localStorage.getItem(JOURNAL_KEY); } catch { /* blocked — no catch-up */ }
+  try {
+    journalRaw = localStorage.getItem(JOURNAL_KEY);
+  } catch {
+    /* blocked — no catch-up */
+  }
   const journal = safeParse<BusEvent[]>(journalRaw, []);
   setTimeout(() => {
     for (const e of journal.sort((a, b) => a.ts - b.ts)) {
       if (seen.has(e.id)) continue;
       seen.add(e.id);
       if (e.from !== role && e.kind !== 'hello') {
-        try { onEvent(e); } catch { /* one bad event must not break replay */ }
+        try {
+          onEvent(e);
+        } catch {
+          /* one bad event must not break replay */
+        }
       }
     }
   }, 0);
@@ -80,7 +85,9 @@ export function createDemoBus(role: BusRole, onEvent: (e: BusEvent) => void): De
       const list = safeParse<BusEvent[]>(localStorage.getItem(JOURNAL_KEY), []);
       list.push(e);
       localStorage.setItem(JOURNAL_KEY, JSON.stringify(list.slice(-JOURNAL_CAP)));
-    } catch { /* storage full/blocked — live channel still works */ }
+    } catch {
+      /* storage full/blocked — live channel still works */
+    }
   };
 
   const markPresence = (r: BusRole) => {
@@ -88,7 +95,9 @@ export function createDemoBus(role: BusRole, onEvent: (e: BusEvent) => void): De
       const p = safeParse<Record<string, number>>(localStorage.getItem(PRESENCE_KEY), {});
       p[r] = Date.now();
       localStorage.setItem(PRESENCE_KEY, JSON.stringify(p));
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   };
 
   const bc = new BroadcastChannel(CHANNEL_NAME);
@@ -101,7 +110,11 @@ export function createDemoBus(role: BusRole, onEvent: (e: BusEvent) => void): De
       return;
     }
     if (e.from !== role) {
-      try { onEvent(e); } catch { /* keep the bus alive */ }
+      try {
+        onEvent(e);
+      } catch {
+        /* keep the bus alive */
+      }
     }
   };
 
@@ -117,7 +130,11 @@ export function createDemoBus(role: BusRole, onEvent: (e: BusEvent) => void): De
       const e: BusEvent = { id: nid(), ts: Date.now(), kind, from: role, payload };
       seen.add(e.id);
       appendJournal(e);
-      try { bc.postMessage(e); } catch { /* channel closed */ }
+      try {
+        bc.postMessage(e);
+      } catch {
+        /* channel closed */
+      }
     },
     peerActive() {
       const p = safeParse<Record<string, number>>(localStorage.getItem(PRESENCE_KEY), {});

@@ -10,7 +10,16 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
 import { parseTrustProxy } from '../httpTrust.mjs';
-import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, liveMailConfigured, livePushConfigured, MEDIA_SECRET_MIN_LENGTH, productionConfigProblems, UNIMPLEMENTED_PROVIDER_VARIABLES } from '../domains/platform/capabilities.mjs';
+import {
+  buildCapabilityReport,
+  demoSeedEnabled,
+  devLoginsEnabled,
+  liveMailConfigured,
+  livePushConfigured,
+  MEDIA_SECRET_MIN_LENGTH,
+  productionConfigProblems,
+  UNIMPLEMENTED_PROVIDER_VARIABLES,
+} from '../domains/platform/capabilities.mjs';
 import { createBilling, createIdvProvider, createStorage } from '../adapters.mjs';
 import { buildSeed } from '../seed.mjs';
 import { freePort } from './testPort.mjs';
@@ -26,12 +35,28 @@ async function test(name, fn) {
 
 // ------------------------------------------------------------- roles.mjs
 await test('lead tier: Head / Director / Lead / Manager / Owner / Chief, case-insensitive', () => {
-  for (const role of ['Head of Recruitment', 'Director', 'Managing Director', 'Recruitment Lead', 'owner', 'CHIEF SCOUT', 'Team Manager']) {
+  for (const role of [
+    'Head of Recruitment',
+    'Director',
+    'Managing Director',
+    'Recruitment Lead',
+    'owner',
+    'CHIEF SCOUT',
+    'Team Manager',
+  ]) {
     assert.equal(isLeadRole(role), true, role);
   }
 });
 await test('lead tier: scouts, coaches, assistants and agents are not leads', () => {
-  for (const role of ['Scout', 'First-Team Scout', 'Head Coach'.replace('Head ', ''), 'Assistant', 'Agent', 'Analyst', '']) {
+  for (const role of [
+    'Scout',
+    'First-Team Scout',
+    'Head Coach'.replace('Head ', ''),
+    'Assistant',
+    'Agent',
+    'Analyst',
+    '',
+  ]) {
     assert.equal(isLeadRole(role), false, role || '(empty)');
   }
 });
@@ -47,7 +72,14 @@ await test('lead tier: the exported pattern is the documented one', () => {
   assert.equal(LEAD_ROLE_PATTERN.flags, 'i');
 });
 await test('finance tier: every lead plus finance and treasurer roles see deal amounts', () => {
-  for (const role of ['Head of Recruitment', 'Director', 'Finance Officer', 'Head of Finance', 'Club Treasurer', 'treasurer']) {
+  for (const role of [
+    'Head of Recruitment',
+    'Director',
+    'Finance Officer',
+    'Head of Finance',
+    'Club Treasurer',
+    'treasurer',
+  ]) {
     assert.equal(isFinanceRole(role), true, role);
   }
   for (const role of ['Scout', 'First-Team Scout', 'Analyst', 'Assistant', 'Agent', '', null, undefined]) {
@@ -56,7 +88,7 @@ await test('finance tier: every lead plus finance and treasurer roles see deal a
   assert.equal(isFinanceUser({ role: 'Treasurer' }), true);
   assert.equal(isFinanceUser(null), false);
 });
-await test('finance tier: the route helpers\' canViewFinance is the roles.mjs rule, not a copy', async () => {
+await test("finance tier: the route helpers' canViewFinance is the roles.mjs rule, not a copy", async () => {
   const { buildRouteHelpers } = await import('../domains/platform/routeHelpers.mjs');
   assert.equal(buildRouteHelpers({ nextId: () => 'x', isBlocked: () => false }).canViewFinance, isFinanceUser);
 });
@@ -70,7 +102,10 @@ await test('trust proxy: unset, empty, 0, false and off trust nothing', () => {
   }
 });
 await test('trust proxy: a hop count becomes a number', () => {
-  assert.deepEqual([parseTrustProxy('1').setting, parseTrustProxy('2').setting, parseTrustProxy(' 3 ').setting], [1, 2, 3]);
+  assert.deepEqual(
+    [parseTrustProxy('1').setting, parseTrustProxy('2').setting, parseTrustProxy(' 3 ').setting],
+    [1, 2, 3],
+  );
   assert.equal(parseTrustProxy('1').state, 'configured');
   assert.match(parseTrustProxy('1').note, /1 proxy hop/);
 });
@@ -99,7 +134,9 @@ async function ipSeenBy(setting, headers) {
   const app = express();
   app.set('trust proxy', setting);
   app.get('/ip', (req, res) => res.json({ ip: req.ip }));
-  const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
   try {
     const { port } = server.address();
     const res = await fetch(`http://127.0.0.1:${port}/ip`, { headers });
@@ -113,7 +150,10 @@ await test('req.ip: with SCOUTBOX_TRUST_PROXY=1 the forwarded client address is 
   assert.equal(await ipSeenBy(parseTrustProxy('1').setting, { 'x-forwarded-for': '203.0.113.9' }), '203.0.113.9');
 });
 await test('req.ip: with one hop trusted, only the last forwarded address counts (a client cannot prepend its own)', async () => {
-  assert.equal(await ipSeenBy(parseTrustProxy('1').setting, { 'x-forwarded-for': '198.51.100.7, 203.0.113.9' }), '203.0.113.9');
+  assert.equal(
+    await ipSeenBy(parseTrustProxy('1').setting, { 'x-forwarded-for': '198.51.100.7, 203.0.113.9' }),
+    '203.0.113.9',
+  );
 });
 await test('req.ip: with nothing trusted the forwarded header is ignored', async () => {
   assert.ok(isLoopback(await ipSeenBy(parseTrustProxy('').setting, { 'x-forwarded-for': '203.0.113.9' })));
@@ -123,20 +163,34 @@ await test('req.ip: an invalid value behaves like nothing trusted', async () => 
 });
 
 // ------------------------------------------------- domains/platform/capabilities.mjs
-const PROD = { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'a-long-production-admin-key-0123' };
+const PROD = {
+  NODE_ENV: 'production',
+  MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef',
+  ADMIN_KEY: 'a-long-production-admin-key-0123',
+};
 await test('boot: a test IdP secret on a production instance is fatal', () => {
-  const problems = productionConfigProblems({ env: { ...PROD, TEST_IDP_SECRET: 'copied-from-dev' }, trustWeightsTotal: 100 });
+  const problems = productionConfigProblems({
+    env: { ...PROD, TEST_IDP_SECRET: 'copied-from-dev' },
+    trustWeightsTotal: 100,
+  });
   assert.ok(problems.some((p) => p.code === 'TEST_IDP_IN_PRODUCTION' && p.fatal));
 });
 await test('boot: the same secret in development is not a problem', () => {
   assert.equal(productionConfigProblems({ env: { TEST_IDP_SECRET: 'x' }, trustWeightsTotal: 100 }).length, 0);
 });
 await test('boot: an invalid SCOUTBOX_TRUST_PROXY is fatal in production, silent in development', () => {
-  assert.ok(productionConfigProblems({ env: { ...PROD, SCOUTBOX_TRUST_PROXY: 'fly' }, trustWeightsTotal: 100 }).some((p) => p.code === 'TRUST_PROXY_INVALID' && p.fatal));
+  assert.ok(
+    productionConfigProblems({ env: { ...PROD, SCOUTBOX_TRUST_PROXY: 'fly' }, trustWeightsTotal: 100 }).some(
+      (p) => p.code === 'TRUST_PROXY_INVALID' && p.fatal,
+    ),
+  );
   assert.equal(productionConfigProblems({ env: { SCOUTBOX_TRUST_PROXY: 'fly' }, trustWeightsTotal: 100 }).length, 0);
 });
 await test('boot: a valid hop count or an unset value raises nothing', () => {
-  assert.equal(productionConfigProblems({ env: { ...PROD, SCOUTBOX_TRUST_PROXY: '1' }, trustWeightsTotal: 100 }).length, 0);
+  assert.equal(
+    productionConfigProblems({ env: { ...PROD, SCOUTBOX_TRUST_PROXY: '1' }, trustWeightsTotal: 100 }).length,
+    0,
+  );
   assert.equal(productionConfigProblems({ env: PROD, trustWeightsTotal: 100 }).length, 0);
 });
 await test('capabilities: proxy trust is reported as a state with a plain-language note, never the raw value', () => {
@@ -149,35 +203,69 @@ await test('capabilities: proxy trust is reported as a state with a plain-langua
 });
 await test('capabilities: staff SSO is test_only in development and not_configured in production', () => {
   assert.equal(buildCapabilityReport({ env: {} }).capabilities.staff_sso.state, 'test_only');
-  assert.equal(buildCapabilityReport({ env: { NODE_ENV: 'production' } }).capabilities.staff_sso.state, 'not_configured');
-  assert.equal(buildCapabilityReport({ env: { NODE_ENV: 'production', ALLOW_DEV_LOGINS: '1' } }).capabilities.staff_sso.state, 'not_configured', 'no production override');
+  assert.equal(
+    buildCapabilityReport({ env: { NODE_ENV: 'production' } }).capabilities.staff_sso.state,
+    'not_configured',
+  );
+  assert.equal(
+    buildCapabilityReport({ env: { NODE_ENV: 'production', ALLOW_DEV_LOGINS: '1' } }).capabilities.staff_sso.state,
+    'not_configured',
+    'no production override',
+  );
 });
 await test('boot: ALLOW_DEV_LOGINS on a production instance is fatal, whatever its value, and harmless in development', () => {
   for (const value of ['1', 'true', '0']) {
-    assert.ok(productionConfigProblems({ env: { ...PROD, ALLOW_DEV_LOGINS: value }, trustWeightsTotal: 100 }).some((p) => p.code === 'DEV_LOGIN_IN_PRODUCTION' && p.fatal), value);
+    assert.ok(
+      productionConfigProblems({ env: { ...PROD, ALLOW_DEV_LOGINS: value }, trustWeightsTotal: 100 }).some(
+        (p) => p.code === 'DEV_LOGIN_IN_PRODUCTION' && p.fatal,
+      ),
+      value,
+    );
   }
-  assert.equal(productionConfigProblems({ env: { ...PROD, ALLOW_DEV_LOGINS: '' }, trustWeightsTotal: 100 }).length, 0, 'an empty value (.env.example) is unset');
+  assert.equal(
+    productionConfigProblems({ env: { ...PROD, ALLOW_DEV_LOGINS: '' }, trustWeightsTotal: 100 }).length,
+    0,
+    'an empty value (.env.example) is unset',
+  );
   assert.equal(productionConfigProblems({ env: { ALLOW_DEV_LOGINS: '1' }, trustWeightsTotal: 100 }).length, 0);
 });
 await test('boot: production needs MEDIA_SECRET of 32+ characters; the old SCOUTBOX_MEDIA_SECRET name does not count', () => {
   const { MEDIA_SECRET: _m, ...noSecret } = PROD;
-  const fatal = (env) => productionConfigProblems({ env, trustWeightsTotal: 100 }).some((p) => p.code === 'MEDIA_SECRET_MISSING' && p.fatal);
+  const fatal = (env) =>
+    productionConfigProblems({ env, trustWeightsTotal: 100 }).some((p) => p.code === 'MEDIA_SECRET_MISSING' && p.fatal);
   assert.ok(fatal(noSecret));
-  assert.ok(fatal({ ...noSecret, SCOUTBOX_MEDIA_SECRET: PROD.MEDIA_SECRET }), 'the name the server never read is not accepted');
+  assert.ok(
+    fatal({ ...noSecret, SCOUTBOX_MEDIA_SECRET: PROD.MEDIA_SECRET }),
+    'the name the server never read is not accepted',
+  );
   assert.ok(fatal({ ...noSecret, MEDIA_SECRET: 'x'.repeat(MEDIA_SECRET_MIN_LENGTH - 1) }));
   assert.ok(!fatal({ ...noSecret, MEDIA_SECRET: 'x'.repeat(MEDIA_SECRET_MIN_LENGTH) }));
   assert.ok(!fatal({}), 'development signs with a per-process key');
-  assert.equal(buildCapabilityReport({ env: { MEDIA_SECRET: PROD.MEDIA_SECRET } }).capabilities.media_signing_secret.state, 'configured');
-  assert.equal(buildCapabilityReport({ env: { SCOUTBOX_MEDIA_SECRET: PROD.MEDIA_SECRET } }).capabilities.media_signing_secret.state, 'not_configured');
+  assert.equal(
+    buildCapabilityReport({ env: { MEDIA_SECRET: PROD.MEDIA_SECRET } }).capabilities.media_signing_secret.state,
+    'configured',
+  );
+  assert.equal(
+    buildCapabilityReport({ env: { SCOUTBOX_MEDIA_SECRET: PROD.MEDIA_SECRET } }).capabilities.media_signing_secret
+      .state,
+    'not_configured',
+  );
 });
 await test('boot: a provider variable with no real integration behind it is fatal in production and ignored in development', () => {
   for (const name of ['ONFIDO_API_TOKEN', 'STRIPE_SECRET_KEY', 'S3_BUCKET']) {
     const problems = productionConfigProblems({ env: { ...PROD, [name]: 'synthetic' }, trustWeightsTotal: 100 });
-    assert.ok(problems.some((p) => p.code === 'PROVIDER_NOT_IMPLEMENTED' && p.fatal && p.message.startsWith(name)), name);
+    assert.ok(
+      problems.some((p) => p.code === 'PROVIDER_NOT_IMPLEMENTED' && p.fatal && p.message.startsWith(name)),
+      name,
+    );
     assert.ok(!JSON.stringify(problems).includes('synthetic'), 'the value is never echoed');
     assert.equal(productionConfigProblems({ env: { [name]: 'synthetic' }, trustWeightsTotal: 100 }).length, 0);
   }
-  assert.deepEqual(Object.keys(UNIMPLEMENTED_PROVIDER_VARIABLES).sort(), ['ONFIDO_API_TOKEN', 'S3_BUCKET', 'STRIPE_SECRET_KEY']);
+  assert.deepEqual(Object.keys(UNIMPLEMENTED_PROVIDER_VARIABLES).sort(), [
+    'ONFIDO_API_TOKEN',
+    'S3_BUCKET',
+    'STRIPE_SECRET_KEY',
+  ]);
 });
 await test('adapters: IDV, billing and storage name the dev provider they are, whatever the environment says', async () => {
   const saved = { ...process.env };
@@ -185,24 +273,58 @@ await test('adapters: IDV, billing and storage name the dev provider they are, w
   try {
     const idv = createIdvProvider();
     assert.equal(idv.provider, 'dev-attestation');
-    assert.equal((await idv.verify({ name: 'Parent', documentType: 'passport', documentRef: '123456789' })).provider, 'dev-attestation');
+    assert.equal(
+      (await idv.verify({ name: 'Parent', documentType: 'passport', documentRef: '123456789' })).provider,
+      'dev-attestation',
+    );
     const issued = []; // the invoices repository's two operations the adapter uses
-    const billing = createBilling({ invoices: { forSigning: () => null, issue: (row) => (issued.push(row), row) }, nextId: (p) => `${p}-1` });
+    const billing = createBilling({
+      invoices: { forSigning: () => null, issue: (row) => (issued.push(row), row) },
+      nextId: (p) => `${p}-1`,
+    });
     assert.equal(billing.provider, 'dev-ledger');
-    assert.equal((await billing.invoiceForSigning({ id: 'sg-1', playerName: 'Player' }, { id: 'org-1', name: 'Club', plan: 'Pro' })).provider, 'dev-ledger');
+    assert.equal(
+      (
+        await billing.invoiceForSigning(
+          { id: 'sg-1', playerName: 'Player' },
+          { id: 'org-1', name: 'Club', plan: 'Pro' },
+        )
+      ).provider,
+      'dev-ledger',
+    );
     assert.equal(issued[0].amountMinor, 150_000, 'the Pro success fee, in minor units');
     assert.equal(createStorage(os.tmpdir()).provider, 'local-disk');
   } finally {
-    for (const k of ['ONFIDO_API_TOKEN', 'STRIPE_SECRET_KEY', 'S3_BUCKET']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    for (const k of ['ONFIDO_API_TOKEN', 'STRIPE_SECRET_KEY', 'S3_BUCKET']) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
   }
 });
 await test('capabilities: adapters are reported from the variables the adapters read', () => {
   const caps = (env) => buildCapabilityReport({ env }).capabilities;
   assert.equal(caps({ SENDGRID_API_KEY: 'SG.synthetic' }).email_transport.state, 'configured');
-  assert.equal(caps({ SENDGRID_API_KEY: '  ' }).email_transport.state, 'local_outbox', 'blank is unset, as in the mailer');
-  assert.equal(caps({ SCOUTBOX_SMTP_URL: 'smtp://x', SMTP_URL: 'smtp://x' }).email_transport.state, 'local_outbox', 'names nothing reads');
-  const everything = { SCOUTBOX_IDV_PROVIDER: 'onfido', ONFIDO_API_TOKEN: 'x', SCOUTBOX_STORAGE_BUCKET: 'b', S3_BUCKET: 'b' };
-  assert.equal(caps(everything).authoritative_identity_provider.state, 'not_configured', 'no IDV provider is integrated');
+  assert.equal(
+    caps({ SENDGRID_API_KEY: '  ' }).email_transport.state,
+    'local_outbox',
+    'blank is unset, as in the mailer',
+  );
+  assert.equal(
+    caps({ SCOUTBOX_SMTP_URL: 'smtp://x', SMTP_URL: 'smtp://x' }).email_transport.state,
+    'local_outbox',
+    'names nothing reads',
+  );
+  const everything = {
+    SCOUTBOX_IDV_PROVIDER: 'onfido',
+    ONFIDO_API_TOKEN: 'x',
+    SCOUTBOX_STORAGE_BUCKET: 'b',
+    S3_BUCKET: 'b',
+  };
+  assert.equal(
+    caps(everything).authoritative_identity_provider.state,
+    'not_configured',
+    'no IDV provider is integrated',
+  );
   assert.equal(caps(everything).object_storage.state, 'not_configured', 'no object storage is integrated');
   assert.equal(liveMailConfigured({ SENDGRID_API_KEY: 'k' }), true);
   assert.equal(livePushConfigured({ EXPO_ACCESS_TOKEN: '' }), false);
@@ -212,8 +334,13 @@ await test('first boot: demo data in development, catalogues only in production;
   assert.equal(demoSeedEnabled({ SCOUTBOX_SEED_DEMO: '0' }), false);
   assert.equal(demoSeedEnabled({ NODE_ENV: 'production' }), false);
   assert.equal(demoSeedEnabled({ NODE_ENV: 'production', SCOUTBOX_SEED_DEMO: '1' }), true);
-  assert.ok(productionConfigProblems({ env: { ...PROD, SCOUTBOX_SEED_DEMO: 'yes' }, trustWeightsTotal: 100 }).some((p) => p.code === 'SEED_DEMO_INVALID' && p.fatal));
-  const empty = buildSeed({ demo: false }), demo = buildSeed();
+  assert.ok(
+    productionConfigProblems({ env: { ...PROD, SCOUTBOX_SEED_DEMO: 'yes' }, trustWeightsTotal: 100 }).some(
+      (p) => p.code === 'SEED_DEMO_INVALID' && p.fatal,
+    ),
+  );
+  const empty = buildSeed({ demo: false }),
+    demo = buildSeed();
   for (const k of ['orgs', 'guardians', 'players', 'reputationSeed']) assert.deepEqual(empty[k], [], k);
   assert.ok(demo.orgs.length && demo.players.length && demo.guardians.length);
   assert.deepEqual(Object.keys(empty).sort(), Object.keys(demo).sort(), 'the same containers either way');
@@ -223,23 +350,49 @@ await test('first boot: demo data in development, catalogues only in production;
 await test('first boot (real server): production starts with no people or clubs, SCOUTBOX_SEED_DEMO=1 opts in, and a saved database is never re-seeded', async () => {
   const PROD_ENV = { NODE_ENV: 'production', MEDIA_SECRET: PROD.MEDIA_SECRET, ADMIN_KEY: PROD.ADMIN_KEY };
   const port = await freePort();
-  const boot = (dir, env) => new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, SCOUTBOX_SEED_DEMO: '', ...env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
-    let log = '';
-    proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(proc); });
-    proc.stderr.on('data', (d) => { log += d; });
-    proc.on('exit', (code) => reject(new Error(`server exited ${code}: ${log}`)));
-    setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000).unref();
-  });
-  const stop = (proc) => new Promise((resolve) => { proc.removeAllListeners('exit'); proc.on('exit', resolve); proc.kill('SIGTERM'); });
+  const boot = (dir, env) =>
+    new Promise((resolve, reject) => {
+      const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], {
+        env: {
+          ...process.env,
+          SCOUTBOX_SEED_DEMO: '',
+          ...env,
+          PORT: String(port),
+          DATA_DIR: dir,
+          SCOUTBOX_QUIET_LOGS: '1',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let log = '';
+      proc.stdout.on('data', (d) => {
+        log += d;
+        if (/listening on/.test(log)) resolve(proc);
+      });
+      proc.stderr.on('data', (d) => {
+        log += d;
+      });
+      proc.on('exit', (code) => reject(new Error(`server exited ${code}: ${log}`)));
+      setTimeout(() => reject(new Error(`boot timeout: ${log}`)), 20_000).unref();
+    });
+  const stop = (proc) =>
+    new Promise((resolve) => {
+      proc.removeAllListeners('exit');
+      proc.on('exit', resolve);
+      proc.kill('SIGTERM');
+    });
   const health = async () => (await fetch(`http://127.0.0.1:${port}/health`)).json();
   const dirs = [];
-  const fresh = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-first-boot-')); dirs.push(d); return d; };
+  const fresh = () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-first-boot-'));
+    dirs.push(d);
+    return d;
+  };
   try {
     const prodDir = fresh();
     let proc = await boot(prodDir, PROD_ENV);
     let h = await health();
-    assert.equal(h.players, 0, 'no demo players'); assert.equal(h.orgs, 0, 'no demo clubs');
+    assert.equal(h.players, 0, 'no demo players');
+    assert.equal(h.orgs, 0, 'no demo clubs');
     const directory = await (await fetch(`http://127.0.0.1:${port}/orgs/directory`)).json();
     assert.deepEqual(directory, { items: [], nextCursor: null }, 'the public club directory is empty');
     await stop(proc);

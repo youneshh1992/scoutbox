@@ -16,11 +16,16 @@ import { grantView as grantExport } from '../groups/groups.mjs';
 // Exported separately so server.mjs can install it before all routes.
 export const metrics = {
   startedAt: Date.now(),
-  requests: 0, status2xx: 0, status4xx: 0, status5xx: 0,
+  requests: 0,
+  status2xx: 0,
+  status4xx: 0,
+  status5xx: 0,
   slowRequests: 0, // > 500ms
-  byRoute: {},     // top-level path segment → count
+  byRoute: {}, // top-level path segment → count
   failedUploads: 0,
-  deliveryFailures: 0, jobRuns: 0, sseConnects: 0,
+  deliveryFailures: 0,
+  jobRuns: 0,
+  sseConnects: 0,
 };
 // insight.mjs plugs exposure capture in here so profile and passport reads become funnel events.
 export const exposureHook = { fn: null };
@@ -40,14 +45,27 @@ export function requestInstrumentation() {
       else if (res.statusCode >= 400) metrics.status4xx++;
       else metrics.status2xx++;
       if (ms > 500) metrics.slowRequests++;
-      const seg = `/${(fullPath.split('/')[1] ?? '')}`;
+      const seg = `/${fullPath.split('/')[1] ?? ''}`;
       metrics.byRoute[seg] = (metrics.byRoute[seg] ?? 0) + 1;
       if (fullPath.startsWith('/player/uploads') && res.statusCode >= 400) metrics.failedUploads++;
       if (fullPath === '/events') metrics.sseConnects++;
-      try { exposureHook.fn?.(req, res); } catch { /* exposure capture must never break a request */ }
+      try {
+        exposureHook.fn?.(req, res);
+      } catch {
+        /* exposure capture must never break a request */
+      }
       // Redacted: no auth headers, tokens, bodies or emails.
       if (process.env.SCOUTBOX_QUIET_LOGS !== '1') {
-        console.log(JSON.stringify({ t: Date.now(), id: req.correlationId, m: req.method, p: fullPath.slice(0, 120), s: res.statusCode, ms: Math.round(ms) }));
+        console.log(
+          JSON.stringify({
+            t: Date.now(),
+            id: req.correlationId,
+            m: req.method,
+            p: fullPath.slice(0, 120),
+            s: res.statusCode,
+            ms: Math.round(ms),
+          }),
+        );
       }
     });
     next();
@@ -68,32 +86,90 @@ export function createMfaGuards() {
     mfaFail(userId) {
       const a = attempts.get(userId) ?? { fails: 0, lockedUntil: 0 };
       a.fails++;
-      if (a.fails >= 5) { a.lockedUntil = Date.now() + 5 * 60_000; a.fails = 0; }
+      if (a.fails >= 5) {
+        a.lockedUntil = Date.now() + 5 * 60_000;
+        a.fails = 0;
+      }
       attempts.set(userId, a);
     },
-    clear: (userId) => { attempts.delete(userId); },
+    clear: (userId) => {
+      attempts.delete(userId);
+    },
   };
 }
 
 export function registerEnterprise(ctx) {
   const {
-    byId, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, notify,
-    mailer, requireLead, isLead, paginate, histAppend,
-    storage, DATA_DIR, backupDatabase, unit, enterprise, enterpriseReads, schemaVersion,
+    byId,
+    users,
+    sessions,
+    orgs,
+    mediaDeletions,
+    codes,
+    notifications,
+    dispatches,
+    outbox,
+    pushLog,
+    pushTokens,
+    channels,
+    safetyAudit,
+    recruitment,
+    recruitmentCases,
+    players,
+    app,
+    orgRouter,
+    adminRouter,
+    nextId,
+    notify,
+    mailer,
+    requireLead,
+    isLead,
+    paginate,
+    histAppend,
+    storage,
+    DATA_DIR,
+    backupDatabase,
+    unit,
+    enterprise,
+    enterpriseReads,
+    schemaVersion,
   } = ctx;
-  if (!enterprise || !enterpriseReads) throw new TypeError('registerEnterprise needs the enterprise repository (ctx.enterprise, ctx.enterpriseReads)');
-  if (typeof ctx.mfaGuards?.mfaFail !== 'function') throw new TypeError('registerEnterprise needs the MFA guards the org log-in shares (createMfaGuards)');
-  if (!ctx.groupReads) throw new TypeError('registerEnterprise needs groupReads (the audit export lists the group grants)');
+  if (!enterprise || !enterpriseReads)
+    throw new TypeError('registerEnterprise needs the enterprise repository (ctx.enterprise, ctx.enterpriseReads)');
+  if (typeof ctx.mfaGuards?.mfaFail !== 'function')
+    throw new TypeError('registerEnterprise needs the MFA guards the org log-in shares (createMfaGuards)');
+  if (!ctx.groupReads)
+    throw new TypeError('registerEnterprise needs groupReads (the audit export lists the group grants)');
   const opsEvent = (row) => safetyAudit.opsEvents.record(row);
-  const ledgerExport = (l) => ({ id: l.id, ts: l.ts, type: l.type, playerId: l.playerId, orgId: l.orgId, orgName: l.orgName, userId: l.userId, scoutName: l.scoutName, detail: l.detail });
+  const ledgerExport = (l) => ({
+    id: l.id,
+    ts: l.ts,
+    type: l.type,
+    playerId: l.playerId,
+    orgId: l.orgId,
+    orgName: l.orgName,
+    userId: l.userId,
+    scoutName: l.scoutName,
+    detail: l.detail,
+  });
 
   const DEV = devLoginsEnabled();
 
   // ================================================== A. org onboarding
   // The emailed invite code is stored only as its sha-256, and no response carries the hash.
   const inviteView = (i) => ({
-    id: i.id, orgId: i.orgId, email: i.email, name: i.name, role: i.role, status: i.status, invitedBy: i.invitedBy,
-    createdAt: i.createdAt, expiresAt: i.expiresAt, acceptedAt: i.acceptedAt, revokedAt: i.revokedAt, userId: i.userId,
+    id: i.id,
+    orgId: i.orgId,
+    email: i.email,
+    name: i.name,
+    role: i.role,
+    status: i.status,
+    invitedBy: i.invitedBy,
+    createdAt: i.createdAt,
+    expiresAt: i.expiresAt,
+    acceptedAt: i.acceptedAt,
+    revokedAt: i.revokedAt,
+    userId: i.userId,
   });
   const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
   const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
@@ -102,29 +178,69 @@ export function registerEnterprise(ctx) {
   orgRouter.post('/invites', (req, res) => {
     if (!requireLead(req, res)) return;
     const { email, name, role } = req.body ?? {};
-    if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'EMAIL_INVALID' }); // a string only: RegExp.test would coerce an array
-    if (email.length > L.email) return res.status(400).json({ error: 'EMAIL_INVALID', message: `An e-mail address has at most ${L.email} characters.` });
+    if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return res.status(400).json({ error: 'EMAIL_INVALID' }); // a string only: RegExp.test would coerce an array
+    if (email.length > L.email)
+      return res
+        .status(400)
+        .json({ error: 'EMAIL_INVALID', message: `An e-mail address has at most ${L.email} characters.` });
     if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
-    if (name.trim().length > L.inviteName) return fieldInvalid(res, 'name', `name is at most ${L.inviteName} characters.`);
-    if (!(role === undefined || role === null || (typeof role === 'string' && role.trim() && role.trim().length <= L.role))) return fieldInvalid(res, 'role', `role is text of 1 to ${L.role} characters.`);
+    if (name.trim().length > L.inviteName)
+      return fieldInvalid(res, 'name', `name is at most ${L.inviteName} characters.`);
+    if (
+      !(
+        role === undefined ||
+        role === null ||
+        (typeof role === 'string' && role.trim() && role.trim().length <= L.role)
+      )
+    )
+      return fieldInvalid(res, 'role', `role is text of 1 to ${L.role} characters.`);
     if (users.activeByEmail(req.org.id, email)) {
-      return res.status(409).json({ error: 'ALREADY_STAFF', message: 'Someone with this email is already on your staff.' });
+      return res
+        .status(409)
+        .json({ error: 'ALREADY_STAFF', message: 'Someone with this email is already on your staff.' });
     }
     const code = crypto.randomBytes(18).toString('hex');
     const at = Date.now();
     const inv = enterprise.invites.create({
-      id: nextId('inv'), orgId: req.org.id, email, name: name.trim(), role: typeof role === 'string' ? role.trim() : 'Scout',
-      tokenHash: sha256(code), status: 'pending', invitedBy: req.orgUser.name ?? null, createdAt: at,
-      expiresAt: at + 7 * 86_400_000, acceptedAt: null, revokedAt: null, userId: null,
+      id: nextId('inv'),
+      orgId: req.org.id,
+      email,
+      name: name.trim(),
+      role: typeof role === 'string' ? role.trim() : 'Scout',
+      tokenHash: sha256(code),
+      status: 'pending',
+      invitedBy: req.orgUser.name ?? null,
+      createdAt: at,
+      expiresAt: at + 7 * 86_400_000,
+      acceptedAt: null,
+      revokedAt: null,
+      userId: null,
     });
     // A rejected send is logged by id rather than left as an unhandled rejection; the invite stands.
-    mailer.send({ to: email, subject: `${req.org.name} invited you to ScoutBox`, text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${code}\n\nThe code expires in 7 days.` }).catch((err) => console.error(`staff invite ${inv.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`));
-    res.status(201).json({ invite: inviteView(inv), note: 'The invite code went to their email (dev outbox in this environment).' });
+    mailer
+      .send({
+        to: email,
+        subject: `${req.org.name} invited you to ScoutBox`,
+        text: `Hi ${inv.name},\n\n${req.orgUser.name} invited you to join ${req.org.name} on ScoutBox as ${inv.role}.\n\nAccept with invite code: ${code}\n\nThe code expires in 7 days.`,
+      })
+      .catch((err) =>
+        console.error(
+          `staff invite ${inv.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`,
+        ),
+      );
+    res
+      .status(201)
+      .json({ invite: inviteView(inv), note: 'The invite code went to their email (dev outbox in this environment).' });
   });
 
   orgRouter.get('/invites', (req, res) => {
     let page;
-    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    try {
+      page = readPage(req.query, ['number']);
+    } catch (e) {
+      return sendPageError(res, e);
+    }
     const p = enterpriseReads.invites.page(req.org.id, page);
     res.json({ items: p.items.map(inviteView), nextCursor: p.nextCursor });
   });
@@ -139,14 +255,19 @@ export function registerEnterprise(ctx) {
   // The emailed code is the proof of invitation; it is looked up by its hash.
   app.post('/auth/org/accept-invite', (req, res) => {
     const { token, scoutName } = req.body ?? {};
-    if (!(scoutName === undefined || scoutName === null || typeof scoutName === 'string')) return fieldInvalid(res, 'scoutName', 'scoutName is text.');
+    if (!(scoutName === undefined || scoutName === null || typeof scoutName === 'string'))
+      return fieldInvalid(res, 'scoutName', 'scoutName is text.');
     const inv = typeof token === 'string' && token ? enterpriseReads.invites.byTokenHash(sha256(token)) : null;
     if (!inv || inv.status !== 'pending') return res.status(404).json({ error: 'INVITE_INVALID' });
-    if (inv.expiresAt < Date.now()) { enterprise.invites.expire(inv.id); return res.status(410).json({ error: 'INVITE_EXPIRED' }); }
+    if (inv.expiresAt < Date.now()) {
+      enterprise.invites.expire(inv.id);
+      return res.status(410).json({ error: 'INVITE_EXPIRED' });
+    }
     const org = byId.org(inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
     const name = scoutName?.trim() || inv.name;
-    if (name.length > STAFF_LIMITS.name) return fieldInvalid(res, 'scoutName', `scoutName is at most ${STAFF_LIMITS.name} characters.`);
+    if (name.length > STAFF_LIMITS.name)
+      return fieldInvalid(res, 'scoutName', `scoutName is at most ${STAFF_LIMITS.name} characters.`);
     // Staff sign in by name, so a name belongs to one account of the organisation (removed ones included): the
     // invited name's account is bound when current and restored when removed (product decision), with the invite's
     // role; any other taken name is refused.
@@ -160,7 +281,11 @@ export function registerEnterprise(ctx) {
           // A restored account starts without its old authenticator (the person may no longer have it); they set MFA up again.
           if (existing.removedAt && existing.mfa) users.disableMfa(existing.id);
           user = users.update(existing.id, (d) => {
-            if (d.removedAt) { d.removedAt = null; d.removedById = null; d.role = inv.role; }
+            if (d.removedAt) {
+              d.removedAt = null;
+              d.removedById = null;
+              d.role = inv.role;
+            }
             d.email = inv.email; // bound by the invite: the basis for SSO linking
           });
         } else {
@@ -170,13 +295,23 @@ export function registerEnterprise(ctx) {
         return { user, restored: !!existing?.removedAt, token: ctx.createSession('org', org.id, { userId: user.id }) };
       });
     } catch (e) {
-      if (e?.code === 'STAFF_NAME_TAKEN') return res.status(409).json({ error: 'STAFF_NAME_TAKEN', message: 'Someone with this name is already on the staff — sign in with a different name (a middle initial, for example).' });
-      if (e?.code === 'STAFF_EMAIL_TAKEN') return res.status(409).json({ error: 'ALREADY_STAFF', message: 'Someone with this email is already on the staff.' });
+      if (e?.code === 'STAFF_NAME_TAKEN')
+        return res.status(409).json({
+          error: 'STAFF_NAME_TAKEN',
+          message:
+            'Someone with this name is already on the staff — sign in with a different name (a middle initial, for example).',
+        });
+      if (e?.code === 'STAFF_EMAIL_TAKEN')
+        return res
+          .status(409)
+          .json({ error: 'ALREADY_STAFF', message: 'Someone with this email is already on the staff.' });
       throw e;
     }
     const { user, restored } = out;
     res.status(201).json({
-      userId: user.id, role: user.role, org: ctx.orgSafe(org),
+      userId: user.id,
+      role: user.role,
+      org: ctx.orgSafe(org),
       token: out.token,
       ...(restored ? { restored: true } : {}),
       onboarding: onboardingFor(org, user),
@@ -187,15 +322,46 @@ export function registerEnterprise(ctx) {
     const staff = users.forOrg(org.id, { active: true });
     const leads = staff.filter((u) => isLead(u));
     const tasks = [
-      { id: 'verify_org', label: 'Verify your organisation (company email domain)', done: !!org.verified, help: 'Trust & Safety reviews verification — required before any under-18 visibility.' },
-      { id: 'safeguarding', label: 'Sign the safeguarding contract', done: !!org.safeguardingContractSigned, help: 'Required for under-18 access. The club safeguarding officer signs.' },
-      { id: 'invite_staff', label: 'Invite your staff', done: staff.length > 1, help: 'Each person works under their own named account — no shared logins.' },
-      { id: 'mfa_leads', label: 'Enable MFA for privileged accounts', done: leads.every((u) => u.mfa?.enabledAt), help: 'Leads approve signings and manage staff — protect those accounts first.' },
-      { id: 'first_import', label: 'Import or add your player records', done: ctx.integrationReads.batches.hasCommitted(org.id) || ctx.integrationReads.prospects.anyForOrg(org.id), help: 'CSV import with dry-run preview, or add prospects by hand.' },
-      { id: 'coverage_plan', label: 'Set up a coverage plan', done: ctx.insightReads.plans.countForOrg(org.id) > 0, help: 'Fixtures, assignments and observation tracking live under Coverage.' },
+      {
+        id: 'verify_org',
+        label: 'Verify your organisation (company email domain)',
+        done: !!org.verified,
+        help: 'Trust & Safety reviews verification — required before any under-18 visibility.',
+      },
+      {
+        id: 'safeguarding',
+        label: 'Sign the safeguarding contract',
+        done: !!org.safeguardingContractSigned,
+        help: 'Required for under-18 access. The club safeguarding officer signs.',
+      },
+      {
+        id: 'invite_staff',
+        label: 'Invite your staff',
+        done: staff.length > 1,
+        help: 'Each person works under their own named account — no shared logins.',
+      },
+      {
+        id: 'mfa_leads',
+        label: 'Enable MFA for privileged accounts',
+        done: leads.every((u) => u.mfa?.enabledAt),
+        help: 'Leads approve signings and manage staff — protect those accounts first.',
+      },
+      {
+        id: 'first_import',
+        label: 'Import or add your player records',
+        done: ctx.integrationReads.batches.hasCommitted(org.id) || ctx.integrationReads.prospects.anyForOrg(org.id),
+        help: 'CSV import with dry-run preview, or add prospects by hand.',
+      },
+      {
+        id: 'coverage_plan',
+        label: 'Set up a coverage plan',
+        done: ctx.insightReads.plans.countForOrg(org.id) > 0,
+        help: 'Fixtures, assignments and observation tracking live under Coverage.',
+      },
     ];
     return {
-      tasks, complete: tasks.every((t) => t.done),
+      tasks,
+      complete: tasks.every((t) => t.done),
       roleHelp: isLead(user)
         ? 'As a lead you approve signings, manage staff and see restricted cases.'
         : 'As a scout you file assessments and observations; a lead reviews decisions.',
@@ -220,33 +386,64 @@ export function registerEnterprise(ctx) {
   orgRouter.post('/mfa/verify', (req, res) => {
     const secret = users.mfaSecretOf(req.orgUser.id);
     if (!secret || req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_PENDING' });
-    if (mfaLocked(req.orgUser.id)) return res.status(429).json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
-    if (!totpValid(secret, req.body?.code)) { mfaFail(req.orgUser.id); return res.status(401).json({ error: 'MFA_CODE_WRONG' }); }
+    if (mfaLocked(req.orgUser.id))
+      return res
+        .status(429)
+        .json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
+    if (!totpValid(secret, req.body?.code)) {
+      mfaFail(req.orgUser.id);
+      return res.status(401).json({ error: 'MFA_CODE_WRONG' });
+    }
     const plain = Array.from({ length: 10 }, () => crypto.randomBytes(5).toString('hex'));
-    users.enableMfa(req.orgUser.id, { at: Date.now(), recoveryHashes: plain.map((c) => crypto.createHash('sha256').update(c).digest('hex')) });
-    res.json({ enabled: true, recoveryCodes: plain, note: 'Store these recovery codes now — each works once and they are never shown again.' });
+    users.enableMfa(req.orgUser.id, {
+      at: Date.now(),
+      recoveryHashes: plain.map((c) => crypto.createHash('sha256').update(c).digest('hex')),
+    });
+    res.json({
+      enabled: true,
+      recoveryCodes: plain,
+      note: 'Store these recovery codes now — each works once and they are never shown again.',
+    });
   });
 
   orgRouter.post('/mfa/disable', (req, res) => {
     // Disabling needs a current valid code (proof of control).
     if (!req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_ENABLED' });
-    if (!totpValid(users.mfaSecretOf(req.orgUser.id), req.body?.code)) return res.status(401).json({ error: 'MFA_CODE_WRONG' });
+    if (!totpValid(users.mfaSecretOf(req.orgUser.id), req.body?.code))
+      return res.status(401).json({ error: 'MFA_CODE_WRONG' });
     users.disableMfa(req.orgUser.id);
     res.json({ enabled: false });
   });
 
   orgRouter.put('/security', (req, res) => {
     if (!requireLead(req, res)) return;
-    if (typeof req.body?.mfaRequiredForLeads !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'mfaRequiredForLeads', message: 'mfaRequiredForLeads must be true or false.' });
-    const updated = orgs.update(req.org.id, (d) => { d.mfaRequiredForLeads = req.body.mfaRequiredForLeads; });
-    res.json({ mfaRequiredForLeads: updated.mfaRequiredForLeads, note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.' });
+    if (typeof req.body?.mfaRequiredForLeads !== 'boolean')
+      return res.status(400).json({
+        error: 'FIELD_INVALID',
+        field: 'mfaRequiredForLeads',
+        message: 'mfaRequiredForLeads must be true or false.',
+      });
+    const updated = orgs.update(req.org.id, (d) => {
+      d.mfaRequiredForLeads = req.body.mfaRequiredForLeads;
+    });
+    res.json({
+      mfaRequiredForLeads: updated.mfaRequiredForLeads,
+      note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.',
+    });
   });
 
   // "Current" is decided by hashing the presented bearer token; sessions hold only hashes.
   orgRouter.get('/sessions', (req, res) => {
     const mine = sessions.listOrgUser(req.orgUser.id);
     const currentToken = (req.headers.authorization ?? '').slice(7);
-    res.json({ items: mine.map((s) => ({ sid: s.sid, createdAt: s.createdAt, current: sessions.isCurrent(s, currentToken), via: s.via ?? 'password' })) });
+    res.json({
+      items: mine.map((s) => ({
+        sid: s.sid,
+        createdAt: s.createdAt,
+        current: sessions.isCurrent(s, currentToken),
+        via: s.via ?? 'password',
+      })),
+    });
   });
 
   orgRouter.post('/sessions/revoke', (req, res) => {
@@ -261,7 +458,9 @@ export function registerEnterprise(ctx) {
     res.json({
       config: cfg ?? null,
       available: DEV ? ['local-test-idp'] : [],
-      note: cfg ? null : 'No identity provider configured. In this environment only the local test IdP is available — a corporate provider requires real OIDC credentials.',
+      note: cfg
+        ? null
+        : 'No identity provider configured. In this environment only the local test IdP is available — a corporate provider requires real OIDC credentials.',
     });
   });
 
@@ -269,10 +468,20 @@ export function registerEnterprise(ctx) {
     if (!requireLead(req, res)) return;
     const issuer = String(req.body?.issuer ?? '');
     if (issuer !== 'local-test-idp') {
-      return res.status(400).json({ error: 'IDP_UNAVAILABLE', message: 'Only the local test IdP exists in this environment. A real provider needs its issuer URL, client id and secret configured on the server.' });
+      return res.status(400).json({
+        error: 'IDP_UNAVAILABLE',
+        message:
+          'Only the local test IdP exists in this environment. A real provider needs its issuer URL, client id and secret configured on the server.',
+      });
     }
     if (!DEV) return res.status(403).json({ error: 'TEST_IDP_DEV_ONLY' });
-    const cfg = enterprise.sso.configure({ id: enterpriseReads.sso.forOrg(req.org.id) ? null : nextId('sso'), orgId: req.org.id, issuer, clientId: `scoutbox-${req.org.id}`, at: Date.now() });
+    const cfg = enterprise.sso.configure({
+      id: enterpriseReads.sso.forOrg(req.org.id) ? null : nextId('sso'),
+      orgId: req.org.id,
+      issuer,
+      clientId: `scoutbox-${req.org.id}`,
+      at: Date.now(),
+    });
     res.json({ config: cfg });
   });
 
@@ -289,12 +498,20 @@ export function registerEnterprise(ctx) {
     if (!body || !sig) return null;
     const expect = crypto.createHmac('sha256', IDP_SECRET).update(body).digest('base64url');
     if (!timingSafeEqStr(sig, expect)) return null;
-    try { return JSON.parse(Buffer.from(body, 'base64url').toString()); } catch { return null; }
+    try {
+      return JSON.parse(Buffer.from(body, 'base64url').toString());
+    } catch {
+      return null;
+    }
   };
 
   const testIdpOnly = (res) => {
     if (DEV) return false;
-    res.status(403).json({ error: 'SSO_PROVIDER_UNAVAILABLE', message: 'Only the local test identity provider exists, and it is disabled outside development. Staff sign in with their organisation credentials.' });
+    res.status(403).json({
+      error: 'SSO_PROVIDER_UNAVAILABLE',
+      message:
+        'Only the local test identity provider exists, and it is disabled outside development. Staff sign in with their organisation credentials.',
+    });
     return true;
   };
 
@@ -302,12 +519,23 @@ export function registerEnterprise(ctx) {
     if (testIdpOnly(res)) return;
     const org = byId.org(req.body?.orgId);
     const cfg = org && enterpriseReads.sso.forOrg(org.id);
-    if (!cfg) return res.status(404).json({ error: 'SSO_NOT_CONFIGURED', message: 'This organisation has no identity provider configured.' });
+    if (!cfg)
+      return res
+        .status(404)
+        .json({ error: 'SSO_NOT_CONFIGURED', message: 'This organisation has no identity provider configured.' });
     // The browser gets the state and nonce; the row keeps only their hashes.
     const state = crypto.randomBytes(16).toString('hex');
     const nonce = crypto.randomBytes(16).toString('hex');
     const at = Date.now();
-    enterprise.ssoStates.create({ id: nextId('sst'), stateHash: sha256(state), nonceHash: sha256(nonce), orgId: org.id, createdAt: at, expiresAt: at + 10 * 60_000, usedAt: null });
+    enterprise.ssoStates.create({
+      id: nextId('sst'),
+      stateHash: sha256(state),
+      nonceHash: sha256(nonce),
+      orgId: org.id,
+      createdAt: at,
+      expiresAt: at + 10 * 60_000,
+      usedAt: null,
+    });
     res.json({ authUrl: `/testidp/authorize?client_id=${cfg.clientId}&state=${state}&nonce=${nonce}`, state });
   });
 
@@ -315,8 +543,19 @@ export function registerEnterprise(ctx) {
     // Authenticates as whatever email the tester picks: it exists to exercise the relying-party logic.
     app.get('/testidp/authorize', (req, res) => {
       const { client_id: clientId, state, nonce, email, groups } = req.query;
-      if (!clientId || !state || !nonce || !email) return res.status(400).json({ error: 'IDP_PARAMS', message: 'client_id, state, nonce, email required' });
-      const code = signToken({ typ: 'code', sub: `idp-${crypto.createHash('sha256').update(String(email)).digest('hex').slice(0, 12)}`, email: String(email), nonce: String(nonce), groups: String(groups ?? '').split(',').filter(Boolean), iat: Date.now(), exp: Date.now() + 5 * 60_000 });
+      if (!clientId || !state || !nonce || !email)
+        return res.status(400).json({ error: 'IDP_PARAMS', message: 'client_id, state, nonce, email required' });
+      const code = signToken({
+        typ: 'code',
+        sub: `idp-${crypto.createHash('sha256').update(String(email)).digest('hex').slice(0, 12)}`,
+        email: String(email),
+        nonce: String(nonce),
+        groups: String(groups ?? '')
+          .split(',')
+          .filter(Boolean),
+        iat: Date.now(),
+        exp: Date.now() + 5 * 60_000,
+      });
       res.json({ code, state });
     });
   }
@@ -327,32 +566,56 @@ export function registerEnterprise(ctx) {
     const st = typeof state === 'string' && state ? enterpriseReads.ssoStates.byStateHash(sha256(state)) : null;
     // Single use even on failure: the database decides, so two callbacks racing on one state cannot both pass.
     if (!st || st.usedAt || st.expiresAt < Date.now() || !enterprise.ssoStates.markUsed(st.id, Date.now())) {
-      return res.status(401).json({ error: 'SSO_STATE_INVALID', message: 'Unknown, expired or already-used state — restart the sign-in.' });
+      return res
+        .status(401)
+        .json({ error: 'SSO_STATE_INVALID', message: 'Unknown, expired or already-used state — restart the sign-in.' });
     }
     const tok = verifyToken(code);
     if (!tok || tok.typ !== 'code' || tok.exp < Date.now()) return res.status(401).json({ error: 'SSO_TOKEN_INVALID' });
-    if (typeof tok.nonce !== 'string' || sha256(tok.nonce) !== st.nonceHash) return res.status(401).json({ error: 'SSO_NONCE_MISMATCH', message: 'The token was not minted for this sign-in attempt.' });
+    if (typeof tok.nonce !== 'string' || sha256(tok.nonce) !== st.nonceHash)
+      return res
+        .status(401)
+        .json({ error: 'SSO_NONCE_MISMATCH', message: 'The token was not minted for this sign-in attempt.' });
     const org = byId.org(st.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
     // Linking needs proof: the email was bound by an accepted invite (or a previous linked login). An assertion for
     // an email never invited links and creates nothing. The subject's linked account wins over the email match.
     const linked = typeof tok.sub === 'string' && tok.sub ? users.bySsoSubject(org.id, tok.sub) : null;
-    const user = linked && !linked.removedAt ? linked : users.activeByEmail(org.id, typeof tok.email === 'string' ? tok.email : null);
+    const user =
+      linked && !linked.removedAt
+        ? linked
+        : users.activeByEmail(org.id, typeof tok.email === 'string' ? tok.email : null);
     if (!user) {
-      return res.status(403).json({ error: 'SSO_NOT_LINKED', message: 'No staff account with this email exists in the organisation. Ask a lead for an invitation — SSO never creates accounts by itself.' });
+      return res.status(403).json({
+        error: 'SSO_NOT_LINKED',
+        message:
+          'No staff account with this email exists in the organisation. Ask a lead for an invitation — SSO never creates accounts by itself.',
+      });
     }
     if (user.ssoSubject !== tok.sub) {
       // A subject still held by a removed account of the organisation is not moved.
-      try { users.update(user.id, (d) => { d.ssoSubject = tok.sub; }); } catch (e) {
-        if (e?.code === 'STAFF_SSO_TAKEN') return res.status(409).json({ error: 'SSO_LINK_CONFLICT', message: 'This identity-provider account is linked to another staff account of the organisation.' });
+      try {
+        users.update(user.id, (d) => {
+          d.ssoSubject = tok.sub;
+        });
+      } catch (e) {
+        if (e?.code === 'STAFF_SSO_TAKEN')
+          return res.status(409).json({
+            error: 'SSO_LINK_CONFLICT',
+            message: 'This identity-provider account is linked to another staff account of the organisation.',
+          });
         throw e;
       }
     }
     // SSO group claims never grant ScoutBox privileges; role, verification and safeguarding approval have their own flows.
     res.json({
-      userId: user.id, role: user.role, org: ctx.orgSafe(org),
+      userId: user.id,
+      role: user.role,
+      org: ctx.orgSafe(org),
       token: ctx.createSession('org', org.id, { userId: user.id, via: 'sso' }),
-      ignoredClaims: tok.groups?.length ? { groups: tok.groups, note: 'Identity-provider groups are ignored for permissions.' } : null,
+      ignoredClaims: tok.groups?.length
+        ? { groups: tok.groups, note: 'Identity-provider groups are ignored for permissions.' }
+        : null,
     });
   });
 
@@ -361,9 +624,14 @@ export function registerEnterprise(ctx) {
     if (!requireLead(req, res)) return;
     const orgId = req.org.id;
     const scoped = {
-      contract: 'audit-export.2026-09.v1', orgId, exportedAt: Date.now(), exportedBy: req.orgUser.name,
+      contract: 'audit-export.2026-09.v1',
+      orgId,
+      exportedAt: Date.now(),
+      exportedBy: req.orgUser.name,
       ledger: safetyAudit.ledger.forOrg(orgId).map(ledgerExport),
-      caseHistories: ctx.recruitmentReads.cases.forOrg(orgId).map((c) => ({ id: c.id, playerId: c.playerId, history: c.history })),
+      caseHistories: ctx.recruitmentReads.cases
+        .forOrg(orgId)
+        .map((c) => ({ id: c.id, playerId: c.playerId, history: c.history })),
       importHistories: ctx.integrationReads.batches.historiesForOrg(orgId),
       grantsGiven: ctx.groupReads.grants.allGivenBy(orgId).map(grantExport),
       grantsReceived: ctx.groupReads.grants.allReceivedBy(orgId).map(grantExport),
@@ -377,20 +645,37 @@ export function registerEnterprise(ctx) {
   orgRouter.post('/support', (req, res) => {
     const { subject, body, refs } = req.body ?? {};
     if (typeof subject !== 'string' || !subject.trim()) return res.status(400).json({ error: 'SUBJECT_REQUIRED' });
-    if (body != null && typeof body !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'body' });
+    if (body != null && typeof body !== 'string')
+      return res.status(400).json({ error: 'FIELD_INVALID', field: 'body' });
     const r = typeRefs(refs ?? [], 'refs');
-    if (!r.ok) return fieldInvalid(res, r.field ?? 'refs', `${r.reason}. A reference is { kind: 'case' | 'import', id }, at most ${L.refs}.`);
+    if (!r.ok)
+      return fieldInvalid(
+        res,
+        r.field ?? 'refs',
+        `${r.reason}. A reference is { kind: 'case' | 'import', id }, at most ${L.refs}.`,
+      );
     const t = enterprise.tickets.create({
-      id: nextId('tkt'), orgId: req.org.id, byUserId: req.orgUser.id, byName: req.orgUser.name ?? null,
-      subject: subject.slice(0, L.subject), body: (body ?? '').slice(0, L.body),
-      refs: r.value, status: 'open', replies: [], createdAt: Date.now(),
+      id: nextId('tkt'),
+      orgId: req.org.id,
+      byUserId: req.orgUser.id,
+      byName: req.orgUser.name ?? null,
+      subject: subject.slice(0, L.subject),
+      body: (body ?? '').slice(0, L.body),
+      refs: r.value,
+      status: 'open',
+      replies: [],
+      createdAt: Date.now(),
     });
     res.status(201).json({ ticket: t, note: 'Records are referenced by id — nothing was copied into the ticket.' });
   });
 
   orgRouter.get('/support', (req, res) => {
     let page;
-    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    try {
+      page = readPage(req.query, ['number']);
+    } catch (e) {
+      return sendPageError(res, e);
+    }
     res.json(enterpriseReads.tickets.page(req.org.id, page));
   });
 
@@ -403,9 +688,17 @@ export function registerEnterprise(ctx) {
 
   adminRouter.get('/support', (req, res) => {
     let page;
-    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    try {
+      page = readPage(req.query, ['number']);
+    } catch (e) {
+      return sendPageError(res, e);
+    }
     const p = enterpriseReads.tickets.pageAll(page);
-    res.json({ items: p.items, nextCursor: p.nextCursor, grants: enterpriseReads.grants.forTickets(p.items.map((t) => t.id)) });
+    res.json({
+      items: p.items,
+      nextCursor: p.nextCursor,
+      grants: enterpriseReads.grants.forTickets(p.items.map((t) => t.id)),
+    });
   });
 
   adminRouter.post('/support/:id/reply', (req, res) => {
@@ -413,9 +706,14 @@ export function registerEnterprise(ctx) {
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
     const { text, close } = req.body ?? {};
     if (typeof text !== 'string' || !text.trim()) return fieldInvalid(res, 'text', 'A reply is text.');
-    if (!(close === undefined || close === null || typeof close === 'boolean')) return fieldInvalid(res, 'close', 'close is true or false.');
+    if (!(close === undefined || close === null || typeof close === 'boolean'))
+      return fieldInvalid(res, 'close', 'close is true or false.');
     const ticket = unit(() => {
-      const out = enterprise.tickets.reply(t.id, { at: Date.now(), by: 'Trust & Safety', text: text.slice(0, L.reply) }, { close: close === true });
+      const out = enterprise.tickets.reply(
+        t.id,
+        { at: Date.now(), by: 'Trust & Safety', text: text.slice(0, L.reply) },
+        { close: close === true },
+      );
       const lead = byId.user(t.byUserId);
       if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Support replied on “${t.subject}”.`, t.id);
       return out;
@@ -427,18 +725,35 @@ export function registerEnterprise(ctx) {
     const t = enterpriseReads.tickets.byId(req.params.id);
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
     const raw = req.body?.hours;
-    if (!(raw === undefined || raw === null || (Number.isInteger(raw) && raw >= L.hours[0] && raw <= L.hours[1]))) return fieldInvalid(res, 'hours', `hours is a whole number from ${L.hours[0]} to ${L.hours[1]}.`);
+    if (!(raw === undefined || raw === null || (Number.isInteger(raw) && raw >= L.hours[0] && raw <= L.hours[1])))
+      return fieldInvalid(res, 'hours', `hours is a whole number from ${L.hours[0]} to ${L.hours[1]}.`);
     const hours = raw ?? 24;
     const g = unit(() => {
       const out = enterprise.grants.request({
-        id: nextId('sag'), ticketId: t.id, orgId: t.orgId, hours,
-        status: 'requested', requestedAt: Date.now(), approvedBy: null, approvedAt: null, expiresAt: null, accessLog: [],
+        id: nextId('sag'),
+        ticketId: t.id,
+        orgId: t.orgId,
+        hours,
+        status: 'requested',
+        requestedAt: Date.now(),
+        approvedBy: null,
+        approvedAt: null,
+        expiresAt: null,
+        accessLog: [],
       });
       const lead = byId.user(t.byUserId);
-      if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Trust & Safety asks for time-limited access (${hours}h) to investigate “${t.subject}”. A lead can approve it from the Support screen.`, t.id);
+      if (lead)
+        notify(
+          { kind: 'org_user', id: lead.id },
+          'support',
+          `Trust & Safety asks for time-limited access (${hours}h) to investigate “${t.subject}”. A lead can approve it from the Support screen.`,
+          t.id,
+        );
       return out;
     });
-    res.status(201).json({ grant: g, note: 'Access starts only after an organisation lead approves, and every read is logged.' });
+    res
+      .status(201)
+      .json({ grant: g, note: 'Access starts only after an organisation lead approves, and every read is logged.' });
   });
 
   // The only admin view into org-private records: needs an approved, unexpired grant, and every use is logged.
@@ -446,15 +761,25 @@ export function registerEnterprise(ctx) {
     const t = enterpriseReads.tickets.byId(req.params.id);
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
     const g = enterpriseReads.grants.liveFor(t.id, Date.now());
-    if (!g) return res.status(403).json({ error: 'SUPPORT_ACCESS_NOT_GRANTED', message: 'A lead of the organisation must approve time-limited access first. There is no silent access path.' });
+    if (!g)
+      return res.status(403).json({
+        error: 'SUPPORT_ACCESS_NOT_GRANTED',
+        message: 'A lead of the organisation must approve time-limited access first. There is no silent access path.',
+      });
     enterprise.grants.logAccess(g.id, { at: Date.now(), what: 'org-records' });
     const orgId = t.orgId;
     res.json({
       grant: { id: g.id, expiresAt: g.expiresAt },
       records: {
         refs: t.refs,
-        cases: t.refs.filter((r) => r.kind === 'case').map((r) => ctx.recruitmentReads.cases.byId(r.id)).filter((c) => c && c.orgId === orgId),
-        imports: ctx.integrationReads.batches.forOrgByIds(orgId, t.refs.filter((r) => r.kind === 'import').map((r) => r.id)),
+        cases: t.refs
+          .filter((r) => r.kind === 'case')
+          .map((r) => ctx.recruitmentReads.cases.byId(r.id))
+          .filter((c) => c && c.orgId === orgId),
+        imports: ctx.integrationReads.batches.forOrgByIds(
+          orgId,
+          t.refs.filter((r) => r.kind === 'import').map((r) => r.id),
+        ),
       },
       note: 'Only records the ticket references, only while the grant lives, only logged.',
     });
@@ -472,7 +797,12 @@ export function registerEnterprise(ctx) {
     // player still carries is a conflict to resolve, refused before any directory exists.
     const conflicts = mediaDeletions.conflicts();
     if (conflicts.length) {
-      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_refused', detail: { dir: stamp, error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflictCount: conflicts.length } });
+      opsEvent({
+        id: nextId('ops'),
+        at: Date.now(),
+        kind: 'backup_refused',
+        detail: { dir: stamp, error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT', conflictCount: conflicts.length },
+      });
       return res.status(409).json({
         error: 'MEDIA_QUEUE_OWNERSHIP_CONFLICT',
         message: `${conflicts.length} queued media removal(s) name a clip a live player still references; the backup was refused because it could neither copy the file as the player's nor leave it out as removed. Resolve the queue entry or the player's reference first.`,
@@ -496,33 +826,68 @@ export function registerEnterprise(ctx) {
       if (fs.existsSync(mediaSrc)) {
         fs.mkdirSync(mediaDst, { recursive: true });
         for (const f of fs.readdirSync(mediaSrc)) {
-          if (queuedIds.has(f.replace(/\.[^.]+$/, ''))) { leftOut += 1; continue; }
+          if (queuedIds.has(f.replace(/\.[^.]+$/, ''))) {
+            leftOut += 1;
+            continue;
+          }
           fs.copyFileSync(path.join(mediaSrc, f), path.join(mediaDst, f));
-          files.push({ path: `media/${f}`, sha256: fileSha256(path.join(mediaDst, f)), bytes: fs.statSync(path.join(mediaDst, f)).size });
+          files.push({
+            path: `media/${f}`,
+            sha256: fileSha256(path.join(mediaDst, f)),
+            bytes: fs.statSync(path.join(mediaDst, f)).size,
+          });
         }
       }
       files.unshift({ path: 'scoutbox.db', sha256: fileSha256(databasePath), bytes: fs.statSync(databasePath).size });
       manifest = {
-        contract: 'backup.2026-11.v2', createdAt: Date.now(), engine: 'sqlite database copy + media files',
-        counts: { players: players.count(), retainedPlayers: players.retainedCount(), orgs: orgs.count(), notifications: notifications.count(), mediaFiles: files.length - 1 },
+        contract: 'backup.2026-11.v2',
+        createdAt: Date.now(),
+        engine: 'sqlite database copy + media files',
+        counts: {
+          players: players.count(),
+          retainedPlayers: players.retainedCount(),
+          orgs: orgs.count(),
+          notifications: notifications.count(),
+          mediaFiles: files.length - 1,
+        },
         media: {
-          copied: files.length - 1, queuedForRemoval: leftOut,
+          copied: files.length - 1,
+          queuedForRemoval: leftOut,
           note: 'Files whose removal was committed but not yet completed are left out on purpose: their queue entries are in scoutbox.db, and the restored server serves nothing for them and finishes the removal at boot.',
         },
         files,
-        secretsNote: 'Backups contain NO server secrets (ADMIN_KEY, signing secrets live in env, never in the DB). Store backups with the same care as the live data directory.',
-        restore: 'Copy this directory to a NEW empty DATA_DIR and start the server with DATA_DIR pointing at it. Never restore over a live data directory.',
+        secretsNote:
+          'Backups contain NO server secrets (ADMIN_KEY, signing secrets live in env, never in the DB). Store backups with the same care as the live data directory.',
+        restore:
+          'Copy this directory to a NEW empty DATA_DIR and start the server with DATA_DIR pointing at it. Never restore over a live data directory.',
       };
       // Written last: a directory without a manifest is not a backup.
       fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2));
     } catch (err) {
       // Nothing half-made is left behind looking usable.
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
       console.error(`backup failed (${stamp}): ${err?.message ?? err}`);
-      opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_failed', detail: { dir: stamp, error: String(err?.message ?? err).slice(0, 200) } });
-      return res.status(500).json({ error: 'BACKUP_FAILED', message: 'The backup could not be completed; the partial directory was removed.' });
+      opsEvent({
+        id: nextId('ops'),
+        at: Date.now(),
+        kind: 'backup_failed',
+        detail: { dir: stamp, error: String(err?.message ?? err).slice(0, 200) },
+      });
+      return res.status(500).json({
+        error: 'BACKUP_FAILED',
+        message: 'The backup could not be completed; the partial directory was removed.',
+      });
     }
-    opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'backup_created', detail: { dir: stamp, files: manifest.files.length, queuedForRemoval: manifest.media.queuedForRemoval } });
+    opsEvent({
+      id: nextId('ops'),
+      at: Date.now(),
+      kind: 'backup_created',
+      detail: { dir: stamp, files: manifest.files.length, queuedForRemoval: manifest.media.queuedForRemoval },
+    });
     res.status(201).json({ dir, manifest });
   });
 
@@ -530,32 +895,48 @@ export function registerEnterprise(ctx) {
     const root = path.join(DATA_DIR, 'backups');
     if (!fs.existsSync(root)) return res.json({ items: [] });
     res.json({
-      items: fs.readdirSync(root).sort().reverse().slice(0, 20).map((d) => {
-        try { return { dir: d, manifest: JSON.parse(fs.readFileSync(path.join(root, d, 'manifest.json'), 'utf8')) }; }
-        catch { return { dir: d, manifest: null }; }
-      }),
+      items: fs
+        .readdirSync(root)
+        .sort()
+        .reverse()
+        .slice(0, 20)
+        .map((d) => {
+          try {
+            return { dir: d, manifest: JSON.parse(fs.readFileSync(path.join(root, d, 'manifest.json'), 'utf8')) };
+          } catch {
+            return { dir: d, manifest: null };
+          }
+        }),
     });
   });
 
   adminRouter.post('/backup/verify', (req, res) => {
     const dir = path.join(DATA_DIR, 'backups', path.basename(String(req.body?.dir ?? '')));
     let manifest;
-    try { manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')); }
-    catch { return res.status(404).json({ error: 'BACKUP_NOT_FOUND' }); }
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+    } catch {
+      return res.status(404).json({ error: 'BACKUP_NOT_FOUND' });
+    }
     const results = manifest.files.map((f) => {
-      try { return { path: f.path, ok: fileSha256(path.join(dir, f.path)) === f.sha256 }; }
-      catch { return { path: f.path, ok: false, missing: true }; }
+      try {
+        return { path: f.path, ok: fileSha256(path.join(dir, f.path)) === f.sha256 };
+      } catch {
+        return { path: f.path, ok: false, missing: true };
+      }
     });
     res.json({ ok: results.every((r) => r.ok), results });
   });
 
   // ================================================== E. reliability
   // The schema version lets an operator see which schema this instance runs without reading the database.
-  app.get('/healthz', (_req, res) => res.json({
-    ok: true,
-    uptimeS: Math.round((Date.now() - metrics.startedAt) / 1000),
-    schemaVersion: schemaVersion(),
-  }));
+  app.get('/healthz', (_req, res) =>
+    res.json({
+      ok: true,
+      uptimeS: Math.round((Date.now() - metrics.startedAt) / 1000),
+      schemaVersion: schemaVersion(),
+    }),
+  );
 
   app.get('/readyz', (_req, res) => {
     try {

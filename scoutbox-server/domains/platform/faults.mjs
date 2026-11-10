@@ -24,15 +24,20 @@ export const FAULT_KINDS = ['delay', 'unavailable', 'timeout', 'retryable', 'fat
 // first N hits (default 1), to exercise its rollback path.
 
 export function parseFaultRules(spec = '') {
-  return String(spec).split(';').map((s) => s.trim()).filter(Boolean).map((rule) => {
-    const [kind, pattern, arg] = rule.split(':');
-    if (!FAULT_KINDS.includes(kind) || !pattern) throw new Error(`bad fault rule "${rule}"`);
-    return { kind, pattern, arg: arg == null ? null : Number(arg), hits: 0 };
-  });
+  return String(spec)
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((rule) => {
+      const [kind, pattern, arg] = rule.split(':');
+      if (!FAULT_KINDS.includes(kind) || !pattern) throw new Error(`bad fault rule "${rule}"`);
+      return { kind, pattern, arg: arg == null ? null : Number(arg), hits: 0 };
+    });
 }
 
 const matches = (pattern, path) => {
-  const p = pattern.split('/'); const q = path.split('/');
+  const p = pattern.split('/');
+  const q = path.split('/');
   if (p.length !== q.length) return false;
   return p.every((seg, i) => seg === '*' || seg === q[i]);
 };
@@ -50,18 +55,43 @@ export function createFaultLayer({ env = process.env } = {}) {
     const rule = rules.find((r) => r.kind !== 'internal' && matches(r.pattern, path));
     if (!rule) return next();
     rule.hits += 1;
-    const fail = (status, error, retryable, message) => res.status(status).json({
-      error, message, retryable, simulated: true, requestId: req.correlationId ?? null,
-    });
+    const fail = (status, error, retryable, message) =>
+      res.status(status).json({
+        error,
+        message,
+        retryable,
+        simulated: true,
+        requestId: req.correlationId ?? null,
+      });
     switch (rule.kind) {
       case 'delay':
         return setTimeout(next, rule.arg ?? 1000);
       case 'unavailable':
-        return fail(503, 'SOURCE_UNAVAILABLE', true, 'A source this request depends on is temporarily unavailable. Try again shortly.');
+        return fail(
+          503,
+          'SOURCE_UNAVAILABLE',
+          true,
+          'A source this request depends on is temporarily unavailable. Try again shortly.',
+        );
       case 'timeout':
-        return setTimeout(() => fail(504, 'SOURCE_TIMEOUT', true, 'A source this request depends on did not answer in time. Try again shortly.'), rule.arg ?? 3000);
+        return setTimeout(
+          () =>
+            fail(
+              504,
+              'SOURCE_TIMEOUT',
+              true,
+              'A source this request depends on did not answer in time. Try again shortly.',
+            ),
+          rule.arg ?? 3000,
+        );
       case 'retryable':
-        if (rule.hits <= (rule.arg ?? 1)) return fail(503, 'SOURCE_UNAVAILABLE', true, 'A source this request depends on is temporarily unavailable. Try again shortly.');
+        if (rule.hits <= (rule.arg ?? 1))
+          return fail(
+            503,
+            'SOURCE_UNAVAILABLE',
+            true,
+            'A source this request depends on is temporarily unavailable. Try again shortly.',
+          );
         return next();
       case 'fatal':
         return fail(500, 'INTERNAL', false, 'Something went wrong handling that request.');

@@ -6,19 +6,27 @@ import { isExpiredAt, readInstant } from '../../../temporal.mjs';
 
 // ------------------------------------------------------------- vocabularies
 import {
-  CLAIM_TYPES, CLAIM_STATES, CLAIM_TRANSITIONS, METHODS, REVIEW_REASONS, EVIDENCE_TYPES, EVIDENCE_VISIBILITY, VER_LEVELS, VERIFICATION_LIMITS,
+  CLAIM_TYPES,
+  CLAIM_STATES,
+  CLAIM_TRANSITIONS,
+  METHODS,
+  REVIEW_REASONS,
+  EVIDENCE_TYPES,
+  EVIDENCE_VISIBILITY,
+  VER_LEVELS,
+  VERIFICATION_LIMITS,
 } from '../../../repositories/verification.mjs';
 export { CLAIM_TYPES, CLAIM_STATES, METHODS, REVIEW_REASONS, EVIDENCE_TYPES, EVIDENCE_VISIBILITY, VER_LEVELS };
 
 // Methods that may accompany a transition into `verified`. document_submitted is evidence collection, not one.
 export const AUTHORITATIVE_METHODS = new Set([
-  'official_domain_email',           // only proves domain control (ORGANISATION_DOMAIN)
+  'official_domain_email', // only proves domain control (ORGANISATION_DOMAIN)
   'organisation_admin_confirmation',
   'authoritative_registry',
   'federation_confirmation',
   'existing_verified_org_admin',
   'scoutbox_manual_review',
-  'migration',                       // carries forward a previously established fact, labelled as such
+  'migration', // carries forward a previously established fact, labelled as such
 ]);
 
 // ---------------------------------------------------------- state machine
@@ -47,11 +55,20 @@ export function transitionChanges(claim, to, { actorKind, actorId, method, reaso
   const changes = { updatedAt: now };
   if (to === 'verified') {
     Object.assign(changes, {
-      verificationMethod: method ?? claim.verificationMethod, verifiedAt: claim.verifiedAt ?? now,
-      verifiedBy: { kind: actorKind ?? 'system', id: actorId ?? null }, suspendedAt: null, disputedAt: null,
+      verificationMethod: method ?? claim.verificationMethod,
+      verifiedAt: claim.verifiedAt ?? now,
+      verifiedBy: { kind: actorKind ?? 'system', id: actorId ?? null },
+      suspendedAt: null,
+      disputedAt: null,
     });
   }
-  if (to === 'revoked') Object.assign(changes, { revokedAt: now, revokedBy: { kind: actorKind, id: actorId ?? null }, revocationReason: why, current: false });
+  if (to === 'revoked')
+    Object.assign(changes, {
+      revokedAt: now,
+      revokedBy: { kind: actorKind, id: actorId ?? null },
+      revocationReason: why,
+      current: false,
+    });
   if (to === 'suspended') Object.assign(changes, { suspendedAt: now, suspendReason: why });
   if (to === 'disputed') changes.disputedAt = now;
   if (to === 'expired') changes.expiredAt = now;
@@ -73,21 +90,24 @@ export function effectiveStatus(claim, { org = null, subjectRemoved = false, now
   let status = claim.status;
   // Expiry applies to current claims; a closed period remains a verified past fact. `validUntil` is exclusive, null
   // means no expiry, and an unreadable value reads expired rather than as "no expiry".
-  if (status === 'verified' && claim.current !== false && isExpiredAt(claim.validUntil, now)) { status = 'expired'; reasons.push('VALID_UNTIL_PASSED'); }
+  if (status === 'verified' && claim.current !== false && isExpiredAt(claim.validUntil, now)) {
+    status = 'expired';
+    reasons.push('VALID_UNTIL_PASSED');
+  }
   if (subjectRemoved && claim.current) reasons.push('SUBJECT_ACCOUNT_INACTIVE');
   const orgScoped = !!claim.organisationId;
   if (orgScoped) {
-    if (!org) { reasons.push('ORGANISATION_MISSING'); }
-    else {
+    if (!org) {
+      reasons.push('ORGANISATION_MISSING');
+    } else {
       if (org.suspended) reasons.push('ORGANISATION_SUSPENDED');
       if (org.verificationRevokedAt) reasons.push('ORGANISATION_REVOKED');
     }
   }
   // A closed verified period stays displayable as history after the person left.
   const verifiedNow = status === 'verified' && reasons.length === 0;
-  const verifiedHistorical = status === 'verified'
-    && claim.current === false && !!claim.validUntil
-    && !reasons.includes('ORGANISATION_REVOKED'); // fraud-revoked orgs stop lending history
+  const verifiedHistorical =
+    status === 'verified' && claim.current === false && !!claim.validUntil && !reasons.includes('ORGANISATION_REVOKED'); // fraud-revoked orgs stop lending history
   return {
     status,
     displayable: verifiedNow || verifiedHistorical,
@@ -98,10 +118,17 @@ export function effectiveStatus(claim, { org = null, subjectRemoved = false, now
 }
 
 // ------------------------------------------------- email / domain helpers
-export const FREE_MAIL_DOMAINS = /^(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|protonmail|gmx|live|msn|mail|yandex|zoho)\./i;
+export const FREE_MAIL_DOMAINS =
+  /^(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|protonmail|gmx|live|msn|mail|yandex|zoho)\./i;
 export const DISPOSABLE_DOMAINS = new Set([
-  'mailinator.com', 'guerrillamail.com', '10minutemail.com', 'tempmail.dev',
-  'yopmail.com', 'sharklasers.com', 'trashmail.com', 'dispostable.com',
+  'mailinator.com',
+  'guerrillamail.com',
+  '10minutemail.com',
+  'tempmail.dev',
+  'yopmail.com',
+  'sharklasers.com',
+  'trashmail.com',
+  'dispostable.com',
 ]);
 export function emailProblem(email) {
   const e = String(email ?? '').trim();
@@ -110,14 +137,22 @@ export function emailProblem(email) {
   return null;
 }
 export function normalizeDomain(domain) {
-  return String(domain ?? '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].split(':')[0];
+  return String(domain ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0]
+    .split(':')[0];
 }
 export const domainOfEmail = (email) => normalizeDomain(String(email ?? '').split('@')[1] ?? '');
-export const isFreeMail = (domain) => FREE_MAIL_DOMAINS.test(`${normalizeDomain(domain)}.`) || FREE_MAIL_DOMAINS.test(normalizeDomain(domain));
+export const isFreeMail = (domain) =>
+  FREE_MAIL_DOMAINS.test(`${normalizeDomain(domain)}.`) || FREE_MAIL_DOMAINS.test(normalizeDomain(domain));
 export const isDisposable = (domain) => DISPOSABLE_DOMAINS.has(normalizeDomain(domain));
 /** True when `candidate` is the org domain or a subdomain of it. */
 export function domainCovered(candidate, orgDomain) {
-  const c = normalizeDomain(candidate), o = normalizeDomain(orgDomain);
+  const c = normalizeDomain(candidate),
+    o = normalizeDomain(orgDomain);
   return !!c && !!o && (c === o || c.endsWith(`.${o}`));
 }
 
@@ -125,10 +160,17 @@ export function domainCovered(candidate, orgDomain) {
 // Signals, not conclusions: nothing downstream may describe a flag as fraud, and no flag alone rejects anything.
 export function riskFlags(input) {
   const {
-    email, orgDomains = [], applicantHadRecentRevocation = false,
-    duplicateEvidenceHash = false, competingOrgClaims = 0, orgSuspended = false,
-    conflictingActiveRoles = 0, requestsLastDay = 0, actorIsSubject = false,
-    emailChallengeFails = 0, credentialReusedByOthers = false,
+    email,
+    orgDomains = [],
+    applicantHadRecentRevocation = false,
+    duplicateEvidenceHash = false,
+    competingOrgClaims = 0,
+    orgSuspended = false,
+    conflictingActiveRoles = 0,
+    requestsLastDay = 0,
+    actorIsSubject = false,
+    emailChallengeFails = 0,
+    credentialReusedByOthers = false,
   } = input;
   const flags = [];
   const dom = domainOfEmail(email ?? '');
@@ -152,10 +194,18 @@ export function riskFlags(input) {
 // is the authoritative source, not a fallback.
 export function decideReview(input) {
   const {
-    claimType, orgHasActiveAuthority = false, isFirstOrgAdmin = false,
-    duplicateOrg = false, conflictingEvidence = false, identityMismatch = false,
-    domainAmbiguous = false, registryResult = null, disputed = false,
-    highRiskAdminChange = false, manualException = false, riskFlagCount = 0,
+    claimType,
+    orgHasActiveAuthority = false,
+    isFirstOrgAdmin = false,
+    duplicateOrg = false,
+    conflictingEvidence = false,
+    identityMismatch = false,
+    domainAmbiguous = false,
+    registryResult = null,
+    disputed = false,
+    highRiskAdminChange = false,
+    manualException = false,
+    riskFlagCount = 0,
     documentOnly = false,
   } = input;
   const reasons = [];
@@ -169,7 +219,14 @@ export function decideReview(input) {
   if (highRiskAdminChange) reasons.push('HIGH_RISK_ADMIN_CHANGE');
   if (manualException) reasons.push('MANUAL_EXCEPTION_REQUESTED');
   if (riskFlagCount >= 3) reasons.push('SUSPECTED_FRAUD_SIGNALS');
-  const affiliationLike = ['CLUB_AFFILIATION', 'CLUB_ROLE', 'AGENCY_AFFILIATION', 'AGENCY_ROLE', 'GRASSROOTS_AFFILIATION', 'FEDERATION_AFFILIATION'].includes(claimType);
+  const affiliationLike = [
+    'CLUB_AFFILIATION',
+    'CLUB_ROLE',
+    'AGENCY_AFFILIATION',
+    'AGENCY_ROLE',
+    'GRASSROOTS_AFFILIATION',
+    'FEDERATION_AFFILIATION',
+  ].includes(claimType);
   if (affiliationLike && !orgHasActiveAuthority) reasons.push('NO_AUTHORITATIVE_SOURCE');
   if (['PERSON_IDENTITY', 'LICENCE'].includes(claimType) && documentOnly && registryResult !== 'match') {
     reasons.push('DOCUMENT_AUTHENTICITY_UNCONFIRMED');
@@ -185,10 +242,20 @@ export const EVIDENCE_MAX_BYTES = 8 * 1024 * 1024;
 export function sniffFileSignature(buf) {
   if (!Buffer.isBuffer(buf) || buf.length < 12) return null;
   if (buf.slice(0, 5).toString('latin1') === '%PDF-') return 'application/pdf';
-  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47
-    && buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a) return 'image/png';
+  if (
+    buf[0] === 0x89 &&
+    buf[1] === 0x50 &&
+    buf[2] === 0x4e &&
+    buf[3] === 0x47 &&
+    buf[4] === 0x0d &&
+    buf[5] === 0x0a &&
+    buf[6] === 0x1a &&
+    buf[7] === 0x0a
+  )
+    return 'image/png';
   if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
-  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP')
+    return 'image/webp';
   return null;
 }
 export function evidenceFileProblem({ mime, bytes, filename, buffer = null }) {
@@ -207,19 +274,20 @@ export function evidenceFileProblem({ mime, bytes, filename, buffer = null }) {
 }
 export function evidenceCompleteness(claimType, evidenceTypes) {
   const have = new Set(evidenceTypes);
-  const need = {
-    PERSON_IDENTITY: ['document'],
-    ORGANISATION_IDENTITY: ['document'],
-    LICENCE: ['document'],
-    CLUB_AFFILIATION: ['official_email'],
-    CLUB_ROLE: ['official_email'],
-    GRASSROOTS_AFFILIATION: [],
-    FEDERATION_AFFILIATION: [],
-    AGENCY_AFFILIATION: ['official_email'],
-    AGENCY_ROLE: ['official_email'],
-    ORGANISATION_DOMAIN: ['official_email'],
-    ORGANISATION_ADMIN: [],
-  }[claimType] ?? [];
+  const need =
+    {
+      PERSON_IDENTITY: ['document'],
+      ORGANISATION_IDENTITY: ['document'],
+      LICENCE: ['document'],
+      CLUB_AFFILIATION: ['official_email'],
+      CLUB_ROLE: ['official_email'],
+      GRASSROOTS_AFFILIATION: [],
+      FEDERATION_AFFILIATION: [],
+      AGENCY_AFFILIATION: ['official_email'],
+      AGENCY_ROLE: ['official_email'],
+      ORGANISATION_DOMAIN: ['official_email'],
+      ORGANISATION_ADMIN: [],
+    }[claimType] ?? [];
   const missing = need.filter((t) => !have.has(t));
   return { complete: missing.length === 0, missing };
 }
@@ -228,12 +296,26 @@ export function evidenceCompleteness(claimType, evidenceTypes) {
 // Hashed at rest, expiring, single-use, bound to a purpose and an address or subject. The plain secret exists only in
 // the e-mail that carries it.
 export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
-export function mintToken(store, nextId, { purpose, email = null, subjectKind = null, subjectId = null, orgId = null, refId = null, ttlMs = 30 * 60_000 }) {
+export function mintToken(
+  store,
+  nextId,
+  { purpose, email = null, subjectKind = null, subjectId = null, orgId = null, refId = null, ttlMs = 30 * 60_000 },
+) {
   const secret = crypto.randomBytes(24).toString('base64url');
   const at = Date.now();
   store.create({
-    id: nextId('vtk'), hash: sha256(secret), purpose, email: email ? String(email).trim().toLowerCase() : null,
-    subjectKind, subjectId, orgId, refId, createdAt: at, expiresAt: at + ttlMs, usedAt: null, attemptsFailed: 0,
+    id: nextId('vtk'),
+    hash: sha256(secret),
+    purpose,
+    email: email ? String(email).trim().toLowerCase() : null,
+    subjectKind,
+    subjectId,
+    orgId,
+    refId,
+    createdAt: at,
+    expiresAt: at + ttlMs,
+    usedAt: null,
+    attemptsFailed: 0,
   });
   return secret;
 }
@@ -260,9 +342,16 @@ export function consumeToken(store, { purpose, secret, email = null, subjectId =
 export function arrayTokenStore(list = []) {
   return {
     rows: list,
-    create: (row) => { list.push({ ...row }); return row; },
+    create: (row) => {
+      list.push({ ...row });
+      return row;
+    },
     byHash: (hash) => list.find((t) => t.hash === hash) ?? null,
-    use: (id, { at }) => { const t = list.find((x) => x.id === id); t.usedAt = at; return t; },
+    use: (id, { at }) => {
+      const t = list.find((x) => x.id === id);
+      t.usedAt = at;
+      return t;
+    },
   };
 }
 
@@ -271,7 +360,9 @@ export const verLevelRank = (level) => VER_LEVELS.indexOf(level);
 /** `source` is a list of administrator rows, or the verification reads. */
 const adminRows = (source, orgId, userId) => (Array.isArray(source) ? source : source.admins.activeFor(orgId, userId));
 export function verLevelFor(source, orgId, userId) {
-  const rows = adminRows(source, orgId, userId).filter((a) => a.orgId === orgId && a.userId === userId && a.status === 'active');
+  const rows = adminRows(source, orgId, userId).filter(
+    (a) => a.orgId === orgId && a.userId === userId && a.status === 'active',
+  );
   if (!rows.length) return null;
   return rows.reduce((best, a) => (verLevelRank(a.level) > verLevelRank(best) ? a.level : best), rows[0].level);
 }
@@ -328,26 +419,45 @@ export function claimProvenanceLabel(claim, orgName) {
       return `Confirmed by an authorised ${orgName ?? 'organisation'} administrator`;
     case 'existing_verified_org_admin':
       return `Confirmed by an existing verified ${orgName ?? 'organisation'} administrator`;
-    case 'authoritative_registry': return 'Confirmed against an authoritative registry';
-    case 'federation_confirmation': return 'Confirmed by the governing federation';
-    case 'official_domain_email': return 'Confirmed control of the official organisation domain';
-    case 'scoutbox_manual_review': return 'Reviewed and confirmed by ScoutBox Trust & Safety';
-    case 'migration': return 'Carried forward from a previously established ScoutBox verification';
-    default: return 'Not independently verified';
+    case 'authoritative_registry':
+      return 'Confirmed against an authoritative registry';
+    case 'federation_confirmation':
+      return 'Confirmed by the governing federation';
+    case 'official_domain_email':
+      return 'Confirmed control of the official organisation domain';
+    case 'scoutbox_manual_review':
+      return 'Reviewed and confirmed by ScoutBox Trust & Safety';
+    case 'migration':
+      return 'Carried forward from a previously established ScoutBox verification';
+    default:
+      return 'Not independently verified';
   }
 }
 const CLAIM_BADGE_KIND = {
-  PERSON_IDENTITY: 'identity', ORGANISATION_IDENTITY: 'organisation',
-  ORGANISATION_DOMAIN: 'domain', ORGANISATION_ADMIN: 'admin',
-  CLUB_AFFILIATION: 'affiliation', CLUB_ROLE: 'role', LICENCE: 'licence',
-  AGENCY_AFFILIATION: 'affiliation', AGENCY_ROLE: 'role',
-  GRASSROOTS_AFFILIATION: 'affiliation', FEDERATION_AFFILIATION: 'affiliation',
+  PERSON_IDENTITY: 'identity',
+  ORGANISATION_IDENTITY: 'organisation',
+  ORGANISATION_DOMAIN: 'domain',
+  ORGANISATION_ADMIN: 'admin',
+  CLUB_AFFILIATION: 'affiliation',
+  CLUB_ROLE: 'role',
+  LICENCE: 'licence',
+  AGENCY_AFFILIATION: 'affiliation',
+  AGENCY_ROLE: 'role',
+  GRASSROOTS_AFFILIATION: 'affiliation',
+  FEDERATION_AFFILIATION: 'affiliation',
 };
-export function toPublicVerificationProfile({ subjectType, subjectId, claims, orgsById = new Map(), subjectRemoved = false, now = Date.now() }) {
+export function toPublicVerificationProfile({
+  subjectType,
+  subjectId,
+  claims,
+  orgsById = new Map(),
+  subjectRemoved = false,
+  now = Date.now(),
+}) {
   const badges = [];
   let identity = null;
   for (const claim of claims) {
-    const org = claim.organisationId ? orgsById.get(claim.organisationId) ?? null : null;
+    const org = claim.organisationId ? (orgsById.get(claim.organisationId) ?? null) : null;
     const eff = effectiveStatus(claim, { org, subjectRemoved, now });
     if (!eff.displayable) continue;
     const y = (ms) => (readInstant(ms) !== null && ms ? new Date(ms).getUTCFullYear() : null); // UTC, not the server's zone
@@ -357,13 +467,15 @@ export function toPublicVerificationProfile({ subjectType, subjectId, claims, or
       identity = {
         confirmed: true,
         assurance,
-        label: assurance === 'authoritative'
-          ? 'Identity confirmed by an authoritative provider'
-          : 'Identity confirmed by ScoutBox review',
+        label:
+          assurance === 'authoritative'
+            ? 'Identity confirmed by an authoritative provider'
+            : 'Identity confirmed by ScoutBox review',
         verifiedAt: claim.verifiedAt ?? null,
-        provenance: assurance === 'authoritative'
-          ? claimProvenanceLabel(claim, org?.name)
-          : 'Reviewed and confirmed by ScoutBox Trust & Safety — a document review, not an authoritative identity check',
+        provenance:
+          assurance === 'authoritative'
+            ? claimProvenanceLabel(claim, org?.name)
+            : 'Reviewed and confirmed by ScoutBox Trust & Safety — a document review, not an authoritative identity check',
       };
       continue;
     }
@@ -387,14 +499,21 @@ export function toPublicVerificationProfile({ subjectType, subjectId, claims, or
 export function badgeLabel(claim, org, eff) {
   const orgName = org?.name ?? 'organisation';
   switch (claim.claimType) {
-    case 'ORGANISATION_IDENTITY': return 'Verified organisation';
-    case 'ORGANISATION_DOMAIN': return `Official domain verified`;
-    case 'ORGANISATION_ADMIN': return `Authorised ${orgName} administrator`;
-    case 'CLUB_AFFILIATION': case 'GRASSROOTS_AFFILIATION': case 'FEDERATION_AFFILIATION': case 'AGENCY_AFFILIATION':
+    case 'ORGANISATION_IDENTITY':
+      return 'Verified organisation';
+    case 'ORGANISATION_DOMAIN':
+      return `Official domain verified`;
+    case 'ORGANISATION_ADMIN':
+      return `Authorised ${orgName} administrator`;
+    case 'CLUB_AFFILIATION':
+    case 'GRASSROOTS_AFFILIATION':
+    case 'FEDERATION_AFFILIATION':
+    case 'AGENCY_AFFILIATION':
       return eff.historical
         ? `Former ${orgName}${claim.role ? ` ${claim.role}` : ''} · Verified history`
         : `Verified at ${orgName}`;
-    case 'CLUB_ROLE': case 'AGENCY_ROLE':
+    case 'CLUB_ROLE':
+    case 'AGENCY_ROLE':
       return eff.historical
         ? `Former ${orgName} ${claim.role ?? 'staff'} · Verified history`
         : `Role verified: ${claim.role ?? 'staff'}`;
@@ -403,7 +522,8 @@ export function badgeLabel(claim, org, eff) {
       return assuranceForClaim(claim) === 'authoritative'
         ? `Licence verified: ${claim.metadata?.licenceType ?? 'credential'}`
         : `Credential reviewed: ${claim.metadata?.licenceType ?? 'credential'}`;
-    default: return 'Verified claim';
+    default:
+      return 'Verified claim';
   }
 }
 
@@ -420,26 +540,77 @@ export function bootstrapVerification({ verification, orgs, now = Date.now() }) 
     const mkClaim = (fields) => {
       const id = `vclm-m-${verification.claims.count() + 1}`;
       const c = verification.claims.create({
-        id, evidenceIds: [], metadata: {}, validFrom: null, validUntil: null, current: true, role: null, organisationId: null,
-        verifiedAt: null, verifiedBy: null, revokedAt: null, revokedBy: null, revocationReason: null, disputedAt: null, suspendedAt: null,
-        reviewReasons: [], riskFlags: [], authorityType: null, authorityId: null, createdAt: now, updatedAt: now, ...fields,
+        id,
+        evidenceIds: [],
+        metadata: {},
+        validFrom: null,
+        validUntil: null,
+        current: true,
+        role: null,
+        organisationId: null,
+        verifiedAt: null,
+        verifiedBy: null,
+        revokedAt: null,
+        revokedBy: null,
+        revocationReason: null,
+        disputedAt: null,
+        suspendedAt: null,
+        reviewReasons: [],
+        riskFlags: [],
+        authorityType: null,
+        authorityId: null,
+        createdAt: now,
+        updatedAt: now,
+        ...fields,
       });
-      verification.events.append({ id: `vevt-m-${created + 1}`, ts: now, type: 'claim.created', claimId: c.id, subjectId: c.subjectId, orgId: c.organisationId, actorKind: 'system', actorId: null, actorName: 'migration', reason: 'M14 migration of pre-existing record', detail: `status: ${c.status}; method: ${c.verificationMethod ?? '—'}` });
+      verification.events.append({
+        id: `vevt-m-${created + 1}`,
+        ts: now,
+        type: 'claim.created',
+        claimId: c.id,
+        subjectId: c.subjectId,
+        orgId: c.organisationId,
+        actorKind: 'system',
+        actorId: null,
+        actorName: 'migration',
+        reason: 'M14 migration of pre-existing record',
+        detail: `status: ${c.status}; method: ${c.verificationMethod ?? '—'}`,
+      });
       created++;
       return c;
     };
     for (const o of orgs) {
       if (!o.verified) continue;
       mkClaim({
-        subjectType: 'org', subjectId: o.id, claimType: 'ORGANISATION_IDENTITY', organisationId: o.id, status: 'verified', verificationMethod: 'migration',
-        verifiedAt: now, verifiedBy: { kind: 'system', id: null }, metadata: { migratedFrom: 'legacy org.verified boolean (set by Trust & Safety review)' },
+        subjectType: 'org',
+        subjectId: o.id,
+        claimType: 'ORGANISATION_IDENTITY',
+        organisationId: o.id,
+        status: 'verified',
+        verificationMethod: 'migration',
+        verifiedAt: now,
+        verifiedBy: { kind: 'system', id: null },
+        metadata: { migratedFrom: 'legacy org.verified boolean (set by Trust & Safety review)' },
       });
       if (o.emailDomainVerified && o.emailDomain) {
         const domain = normalizeDomain(o.emailDomain);
-        if (!verification.domains.has(o.id, domain)) verification.domains.add(o.id, { domain, status: 'verified', method: 'official_domain_email', verifiedAt: now, addedBy: 'migration' });
+        if (!verification.domains.has(o.id, domain))
+          verification.domains.add(o.id, {
+            domain,
+            status: 'verified',
+            method: 'official_domain_email',
+            verifiedAt: now,
+            addedBy: 'migration',
+          });
         mkClaim({
-          subjectType: 'org', subjectId: o.id, claimType: 'ORGANISATION_DOMAIN', organisationId: o.id, status: 'verified', verificationMethod: 'migration',
-          verifiedAt: now, metadata: { domain, migratedFrom: 'legacy emailDomainVerified challenge' },
+          subjectType: 'org',
+          subjectId: o.id,
+          claimType: 'ORGANISATION_DOMAIN',
+          organisationId: o.id,
+          status: 'verified',
+          verificationMethod: 'migration',
+          verifiedAt: now,
+          metadata: { domain, migratedFrom: 'legacy emailDomainVerified challenge' },
         });
       }
     }

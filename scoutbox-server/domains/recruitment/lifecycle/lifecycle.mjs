@@ -8,8 +8,12 @@
  */
 
 import {
-  ROOM_TRANSITIONS, ROOM_STATUSES, TERMINAL_ROOM_STATUSES, STATUS_EVIDENCE_REQUIRED,
-  PROHIBITED_REASON_CODES, INITIAL_ROOM_STATUS,
+  ROOM_TRANSITIONS,
+  ROOM_STATUSES,
+  TERMINAL_ROOM_STATUSES,
+  STATUS_EVIDENCE_REQUIRED,
+  PROHIBITED_REASON_CODES,
+  INITIAL_ROOM_STATUS,
 } from '../rooms/shared.mjs';
 
 export const RECRUITMENT_LIFECYCLE_POLICY_VERSION = 1;
@@ -64,29 +68,66 @@ const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
  * Null prototype so `{ action: "constructor" }` fails the lookup instead of
  * crashing on `.roles`.
  */
-export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null), {
-  startReview:        { to: 'under_review',        reason: 'club_decision',              roles: ['contributor', 'room_lead', 'recruitment_admin'], applicableFrom: (f) => !TERMINAL_ROOM_STATUSES.includes(f) && f !== 'on_hold' },
-  planContact:        { to: 'contact_planned',     reason: 'contact_planned',            roles: ['room_lead', 'recruitment_admin'] },
-  recordContact:      { to: 'contacted',           reason: 'contact_made',               roles: ['room_lead', 'recruitment_admin'] },
-  shortlist:          { to: 'shortlisted',         reason: 'club_decision',              roles: ['contributor', 'room_lead', 'recruitment_admin'] },
-  prioritise:         { to: 'priority',            reason: 'club_decision',              roles: ['room_lead', 'recruitment_admin'] },
-  planTrial:          { to: 'trial_requested',     reason: 'trial_progression',          roles: ['room_lead', 'recruitment_admin'] },
-  confirmTrial:       { to: 'trial_scheduled',     reason: 'trial_progression',          roles: ['room_lead', 'recruitment_admin'] },
-  completeTrial:      { to: 'trial_completed',     reason: 'trial_completed',            roles: ['room_lead', 'recruitment_admin'] },
-  considerOffer:      { to: 'offer_consideration', reason: 'club_decision',              roles: ['room_lead', 'recruitment_admin'] },
-  sendOffer:          { to: 'offer_made',          reason: 'offer_progression',          roles: ['room_lead', 'recruitment_admin'] },
-  recordOfferAccepted:{ to: 'offer_accepted',      reason: 'offer_accepted_in_scoutbox', roles: ['room_lead', 'recruitment_admin'] },
-  recordOfferDeclined:{ to: 'offer_declined',      reason: 'player_declined',            roles: ['room_lead', 'recruitment_admin'] },
-  confirmSignedOutcome:{ to: 'signed',             reason: 'signed_outcome',             roles: ['recruitment_admin'] },
-  holdCase:           { to: 'on_hold',             reason: 'on_hold',                    roles: ['room_lead', 'recruitment_admin'] },
-  // A hold is a pause, not a rewind: resuming returns to the held-from state
-  // when its evidence still stands. `to` is the fallback and the static target.
-  resumeCase:         { to: 'under_review',        reason: 'hold_resumed',               roles: ['room_lead', 'recruitment_admin'], applicableFrom: (f) => f === 'on_hold', resolveTo: resumeTargetFor },
-  rejectCase:         { to: 'archived',            reason: 'rejected',                   roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
-  withdrawCase:       { to: 'withdrawn',           reason: 'withdrawn',                  roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
-  closeCase:          { to: 'closed',              reason: 'case_closed',                roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
-  reopenCase:         { to: 'under_review',        reason: 'case_reopened',              roles: ['room_lead', 'recruitment_admin'], applicableFrom: (f) => REOPENABLE.includes(f) },
-}));
+export const LIFECYCLE_ACTIONS = Object.freeze(
+  Object.assign(Object.create(null), {
+    startReview: {
+      to: 'under_review',
+      reason: 'club_decision',
+      roles: ['contributor', 'room_lead', 'recruitment_admin'],
+      applicableFrom: (f) => !TERMINAL_ROOM_STATUSES.includes(f) && f !== 'on_hold',
+    },
+    planContact: { to: 'contact_planned', reason: 'contact_planned', roles: ['room_lead', 'recruitment_admin'] },
+    recordContact: { to: 'contacted', reason: 'contact_made', roles: ['room_lead', 'recruitment_admin'] },
+    shortlist: { to: 'shortlisted', reason: 'club_decision', roles: ['contributor', 'room_lead', 'recruitment_admin'] },
+    prioritise: { to: 'priority', reason: 'club_decision', roles: ['room_lead', 'recruitment_admin'] },
+    planTrial: { to: 'trial_requested', reason: 'trial_progression', roles: ['room_lead', 'recruitment_admin'] },
+    confirmTrial: { to: 'trial_scheduled', reason: 'trial_progression', roles: ['room_lead', 'recruitment_admin'] },
+    completeTrial: { to: 'trial_completed', reason: 'trial_completed', roles: ['room_lead', 'recruitment_admin'] },
+    considerOffer: { to: 'offer_consideration', reason: 'club_decision', roles: ['room_lead', 'recruitment_admin'] },
+    sendOffer: { to: 'offer_made', reason: 'offer_progression', roles: ['room_lead', 'recruitment_admin'] },
+    recordOfferAccepted: {
+      to: 'offer_accepted',
+      reason: 'offer_accepted_in_scoutbox',
+      roles: ['room_lead', 'recruitment_admin'],
+    },
+    recordOfferDeclined: { to: 'offer_declined', reason: 'player_declined', roles: ['room_lead', 'recruitment_admin'] },
+    confirmSignedOutcome: { to: 'signed', reason: 'signed_outcome', roles: ['recruitment_admin'] },
+    holdCase: { to: 'on_hold', reason: 'on_hold', roles: ['room_lead', 'recruitment_admin'] },
+    // A hold is a pause, not a rewind: resuming returns to the held-from state
+    // when its evidence still stands. `to` is the fallback and the static target.
+    resumeCase: {
+      to: 'under_review',
+      reason: 'hold_resumed',
+      roles: ['room_lead', 'recruitment_admin'],
+      applicableFrom: (f) => f === 'on_hold',
+      resolveTo: resumeTargetFor,
+    },
+    rejectCase: {
+      to: 'archived',
+      reason: 'rejected',
+      roles: ['room_lead', 'recruitment_admin'],
+      reasonCodesRequired: true,
+    },
+    withdrawCase: {
+      to: 'withdrawn',
+      reason: 'withdrawn',
+      roles: ['room_lead', 'recruitment_admin'],
+      reasonCodesRequired: true,
+    },
+    closeCase: {
+      to: 'closed',
+      reason: 'case_closed',
+      roles: ['room_lead', 'recruitment_admin'],
+      reasonCodesRequired: true,
+    },
+    reopenCase: {
+      to: 'under_review',
+      reason: 'case_reopened',
+      roles: ['room_lead', 'recruitment_admin'],
+      applicableFrom: (f) => REOPENABLE.includes(f),
+    },
+  }),
+);
 
 export const LIFECYCLE_ACTION_NAMES = Object.freeze(Object.keys(LIFECYCLE_ACTIONS));
 
@@ -111,7 +152,8 @@ export function heldFromStatus(kase) {
 function resumeTargetFor(kase, { evidence = NULL_EVIDENCE_PROVIDER, now = Date.now() } = {}) {
   const fallback = 'under_review';
   const from = heldFromStatus(kase);
-  if (!from || from === 'on_hold' || !ROOM_STATUSES.includes(from) || TERMINAL_ROOM_STATUSES.includes(from)) return fallback;
+  if (!from || from === 'on_hold' || !ROOM_STATUSES.includes(from) || TERMINAL_ROOM_STATUSES.includes(from))
+    return fallback;
   const pre = LIFECYCLE_PRECONDITIONS[from];
   if (pre) {
     const verdict = evidence.check(pre.kind, { kase, action: 'resumeCase', now }) ?? { satisfied: false };
@@ -177,12 +219,20 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     return { ok: false, error: 'LIFECYCLE_ACTION_UNKNOWN', message: `No such recruitment action: ${action}.` };
   }
   if (!kase || !kase.room) {
-    return { ok: false, error: 'LIFECYCLE_CASE_NOT_A_ROOM', message: 'This recruitment case has no workspace to move.' };
+    return {
+      ok: false,
+      error: 'LIFECYCLE_CASE_NOT_A_ROOM',
+      message: 'This recruitment case has no workspace to move.',
+    };
   }
 
   const from = kase.room.status;
   if (!ROOM_STATUSES.includes(from)) {
-    return { ok: false, error: 'LIFECYCLE_STATE_UNKNOWN', message: 'The recruitment case is in a state this build does not recognise.' };
+    return {
+      ok: false,
+      error: 'LIFECYCLE_STATE_UNKNOWN',
+      message: 'The recruitment case is in a state this build does not recognise.',
+    };
   }
 
   if (!roleAllows(role, def.roles)) {
@@ -194,8 +244,8 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
   if (from === to) {
     return { ok: false, error: 'LIFECYCLE_NO_CHANGE', message: 'The case is already in that state.', allowed };
   }
-    // resumeCase is its own edge: the `on_hold` row omits the evidence-bearing
-    // states it may return to. The target still meets its precondition below.
+  // resumeCase is its own edge: the `on_hold` row omits the evidence-bearing
+  // states it may return to. The target still meets its precondition below.
   const ownEdge = !!def.resolveTo && ROOM_STATUSES.includes(to) && !TERMINAL_ROOM_STATUSES.includes(to);
   if (!allowed.includes(to) && !ownEdge) {
     return {
@@ -218,7 +268,11 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
   }
 
   if (def.reasonCodesRequired && !forAvailability && (!Array.isArray(reasonCodes) || reasonCodes.length === 0)) {
-    return { ok: false, error: 'LIFECYCLE_REASON_REQUIRED', message: 'Ending a recruitment case requires a recorded reason.' };
+    return {
+      ok: false,
+      error: 'LIFECYCLE_REASON_REQUIRED',
+      message: 'Ending a recruitment case requires a recorded reason.',
+    };
   }
 
   const pre = LIFECYCLE_PRECONDITIONS[to];
@@ -257,14 +311,26 @@ const MAX_LIFECYCLE_REASONS = 6;
  */
 export function validateLifecycleReasons(codes) {
   if (!Array.isArray(codes)) {
-    return { ok: false, error: 'LIFECYCLE_REASONS_INVALID', message: 'Reasons must be a list of lifecycle reason codes.' };
+    return {
+      ok: false,
+      error: 'LIFECYCLE_REASONS_INVALID',
+      message: 'Reasons must be a list of lifecycle reason codes.',
+    };
   }
   if (codes.some((c) => c != null && typeof c !== 'string')) {
-    return { ok: false, error: 'LIFECYCLE_REASONS_INVALID', message: 'Each reason must be a reason code, given as text.' };
+    return {
+      ok: false,
+      error: 'LIFECYCLE_REASONS_INVALID',
+      message: 'Each reason must be a reason code, given as text.',
+    };
   }
   const clean = [...new Set(codes.map((c) => (c ?? '').trim().toLowerCase()).filter(Boolean))];
   if (clean.length > MAX_LIFECYCLE_REASONS) {
-    return { ok: false, error: 'LIFECYCLE_REASONS_TOO_MANY', message: `Record up to ${MAX_LIFECYCLE_REASONS} reasons.` };
+    return {
+      ok: false,
+      error: 'LIFECYCLE_REASONS_TOO_MANY',
+      message: `Record up to ${MAX_LIFECYCLE_REASONS} reasons.`,
+    };
   }
   const prohibited = clean.filter((c) => PROHIBITED_REASON_CODES.includes(c));
   if (prohibited.length) {
@@ -280,7 +346,8 @@ export function validateLifecycleReasons(codes) {
     return {
       ok: false,
       error: 'LIFECYCLE_REASON_UNKNOWN',
-      message: 'Reasons must come from the recruitment LIFECYCLE taxonomy, which describes why a case moved — not from the decision taxonomy, which describes what a club concluded about a player.',
+      message:
+        'Reasons must come from the recruitment LIFECYCLE taxonomy, which describes why a case moved — not from the decision taxonomy, which describes what a club concluded about a player.',
       unknown,
       allowed: LIFECYCLE_REASON_CODES,
     };

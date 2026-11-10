@@ -5,7 +5,8 @@ export function sectionIcon(label: string): string {
   if (/visibility|visibilité|discovery|découverte|profile view|vues du profil/i.test(label)) return 'eye';
   if (/medical|médical/i.test(label)) return 'medical';
   if (/privacy|private|confidential|sharing|partage/i.test(label)) return 'lock-keyhole';
-  if (/protect|safety|safeguard|sécurité|trust|confiance|verified|identity|identité/i.test(label)) return 'shield-check';
+  if (/protect|safety|safeguard|sécurité|trust|confiance|verified|identity|identité/i.test(label))
+    return 'shield-check';
   if (/assessment|évaluation|campaign|campagne/i.test(label)) return 'clipboard-list';
   if (/preferences|préférences/i.test(label)) return 'sliders-horizontal';
   if (/availability|disponibilité/i.test(label)) return 'calendar-days';

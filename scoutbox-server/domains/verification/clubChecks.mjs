@@ -11,7 +11,8 @@ import { grassrootsOrgOnly } from '../development/grassrootsClub.mjs';
 const FREE_MAIL = /@(gmail|googlemail|hotmail|outlook|yahoo|icloud|aol|proton|protonmail|gmx|live|msn)\./i;
 
 export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, rateLimit, unit, seam, broadcast }) {
-  if (typeof orgs?.verifyEmailDomain !== 'function' || typeof rateLimit?.peek !== 'function') throw new TypeError('registerClubChecks needs the organisations repository and the rate limiter');
+  if (typeof orgs?.verifyEmailDomain !== 'function' || typeof rateLimit?.peek !== 'function')
+    throw new TypeError('registerClubChecks needs the organisations repository and the rate limiter');
 
   orgRouter.post('/verification/email', async (req, res) => {
     const { email } = req.body || {};
@@ -19,10 +20,12 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
     if (FREE_MAIL.test(email)) {
       return res.status(422).json({
         error: 'COMPANY_EMAIL_REQUIRED',
-        message: 'Free email providers don\'t prove domain control. No club domain? Use federation verification instead — your federation registration is checked by Trust & Safety.',
+        message:
+          "Free email providers don't prove domain control. No club domain? Use federation verification instead — your federation registration is checked by Trust & Safety.",
       });
     }
-    if (rateLimit.limited('email_challenge_request', req.org.id)) return res.status(429).json(rateLimitedBody('email_challenge_request'));
+    if (rateLimit.limited('email_challenge_request', req.org.id))
+      return res.status(429).json(rateLimitedBody('email_challenge_request'));
     // The challenge row is durable before the mail is sent; `secrets` keeps the plain code out of the persisted
     // outbox record. A mail that fails to send leaves the row to expire or be replaced.
     const { code } = codes.issueEmailChallenge(req.org.id, email);
@@ -39,18 +42,23 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
     const { code } = req.body || {};
     // Only a wrong code is charged against the budget. The budget is tested before the code is judged, so a correct
     // guess after it is gone is refused rather than rewarded.
-    if (rateLimit.peek('email_challenge_confirm', req.org.id).remaining === 0) return res.status(429).json(rateLimitedBody('email_challenge_confirm'));
+    if (rateLimit.peek('email_challenge_confirm', req.org.id).remaining === 0)
+      return res.status(429).json(rateLimitedBody('email_challenge_confirm'));
     const check = codes.checkEmailChallenge(req.org.id, code);
     if (check.status === 'none') {
       rateLimit.limited('email_challenge_confirm', req.org.id);
-      return res.status(404).json({ error: 'CHALLENGE_NOT_FOUND', message: 'Request a fresh code — none is active for this club.' });
+      return res
+        .status(404)
+        .json({ error: 'CHALLENGE_NOT_FOUND', message: 'Request a fresh code — none is active for this club.' });
     }
     if (check.status === 'invalid') {
       rateLimit.limited('email_challenge_confirm', req.org.id);
       const { attemptsRemaining, invalidated } = codes.noteFailedEmailAttempt(req.org.id);
       return res.status(400).json({
         error: 'CODE_INVALID',
-        message: invalidated ? 'That code doesn\'t match, and this challenge is now cancelled after too many wrong codes — request a fresh one.' : 'That code doesn\'t match — check the email.',
+        message: invalidated
+          ? "That code doesn't match, and this challenge is now cancelled after too many wrong codes — request a fresh one."
+          : "That code doesn't match — check the email.",
         attemptsRemaining,
       });
     }
@@ -70,11 +78,40 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
     if (grassrootsOrgOnly(req, res)) return;
     const { federation, registrationId, contactEmail } = req.body || {};
     if (!federation || !registrationId) return res.status(400).json({ error: 'FEDERATION_REQUIRED' });
-    if (!reqText(federation, CLUB_SETUP_LIMITS.federation)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'federation', message: `federation is text of at most ${CLUB_SETUP_LIMITS.federation} characters.` });
-    if (!reqText(registrationId, CLUB_SETUP_LIMITS.registrationId)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'registrationId', message: `registrationId is text of at most ${CLUB_SETUP_LIMITS.registrationId} characters.` });
+    if (!reqText(federation, CLUB_SETUP_LIMITS.federation))
+      return res.status(400).json({
+        error: 'FIELD_INVALID',
+        field: 'federation',
+        message: `federation is text of at most ${CLUB_SETUP_LIMITS.federation} characters.`,
+      });
+    if (!reqText(registrationId, CLUB_SETUP_LIMITS.registrationId))
+      return res.status(400).json({
+        error: 'FIELD_INVALID',
+        field: 'registrationId',
+        message: `registrationId is text of at most ${CLUB_SETUP_LIMITS.registrationId} characters.`,
+      });
     const email = typeof contactEmail === 'string' ? contactEmail.trim() : contactEmail;
-    if (!(email === undefined || email === null || email === '' || (typeof email === 'string' && email.length <= CLUB_SETUP_LIMITS.contactEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'contactEmail', message: 'contactEmail is an e-mail address.' });
-    clubSetup.federation.submit({ orgId: req.org.id, federation: federation.trim(), registrationId: registrationId.trim(), contactEmail: email || null, status: 'pending', submittedAt: Date.now() });
+    if (
+      !(
+        email === undefined ||
+        email === null ||
+        email === '' ||
+        (typeof email === 'string' &&
+          email.length <= CLUB_SETUP_LIMITS.contactEmail &&
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      )
+    )
+      return res
+        .status(400)
+        .json({ error: 'FIELD_INVALID', field: 'contactEmail', message: 'contactEmail is an e-mail address.' });
+    clubSetup.federation.submit({
+      orgId: req.org.id,
+      federation: federation.trim(),
+      registrationId: registrationId.trim(),
+      contactEmail: email || null,
+      status: 'pending',
+      submittedAt: Date.now(),
+    });
     broadcast('orgs');
     res.status(201).json({
       submitted: true,

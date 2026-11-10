@@ -13,7 +13,14 @@ import { Icon } from './Icon';
 import { PlayerMeta, PlayerName } from './PlayerIdentity';
 import { useColors, useStyles, type Palette } from '../theme';
 
-export const initialsOf = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+export const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 
 /** `.p-greeting` — a quiet kicker over the page's 25px heading. */
 export function Greeting({ kicker, title, testID }: { kicker: string; title: string; testID?: string }) {
@@ -21,28 +28,68 @@ export function Greeting({ kicker, title, testID }: { kicker: string; title: str
   return (
     <View style={s.greeting} testID={testID}>
       <Text style={s.kicker}>{kicker}</Text>
-      <Text role="heading" aria-level={1} style={s.h1}>{title}</Text>
+      <Text role="heading" aria-level={1} style={s.h1}>
+        {title}
+      </Text>
     </View>
   );
 }
 
 /** `.p-section` — a 17px heading with an optional count bubble or text link on the right. */
-export function SectionHead({ title, count, link, onLink, testID }: { title: string; count?: number; link?: string; onLink?: () => void; testID?: string }) {
+export function SectionHead({
+  title,
+  count,
+  link,
+  onLink,
+  testID,
+}: {
+  title: string;
+  count?: number;
+  link?: string;
+  onLink?: () => void;
+  testID?: string;
+}) {
   const s = useStyles(makeStyles);
   return (
     <View style={s.section} testID={testID}>
-      <Text role="heading" aria-level={2} style={s.h2}>{title}</Text>
-      {typeof count === 'number' ? <View style={s.count}><Text style={s.countText}>{count}</Text></View> : null}
+      <Text role="heading" aria-level={2} style={s.h2}>
+        {title}
+      </Text>
+      {typeof count === 'number' ? (
+        <View style={s.count}>
+          <Text style={s.countText}>{count}</Text>
+        </View>
+      ) : null}
       {link && onLink ? <TextButton label={link} onPress={onLink} /> : null}
     </View>
   );
 }
 
 /** `.f-textbtn` — a green text link with a chevron. */
-export function TextButton({ label, onPress, size = 12, testID }: { label: string; onPress: () => void; size?: number; testID?: string }) {
+export function TextButton({
+  label,
+  onPress,
+  size = 12,
+  testID,
+}: {
+  label: string;
+  onPress: () => void;
+  size?: number;
+  testID?: string;
+}) {
   const c = useColors();
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} testID={testID} hitSlop={6} style={({ pressed }) => [{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 7 }, pressed && { opacity: 0.7 }]}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      testID={testID}
+      hitSlop={6}
+      style={({ pressed }) => [
+        { flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 7 },
+        pressed && { opacity: 0.7 },
+      ]}
+    >
       <Text style={{ color: c.accent2, fontSize: size, fontWeight: '500' }}>{label}</Text>
       <Icon name="chevron-right" size={13} color={c.accent2} />
     </Pressable>
@@ -53,19 +100,46 @@ export function TextButton({ label, onPress, size = 12, testID }: { label: strin
 export function IconTile({ name, size = 18 }: { name: string; size?: number }) {
   const s = useStyles(makeStyles);
   const c = useColors();
-  return <View style={s.iconTile}><Icon name={name} size={size} color="#8ffff0" /></View>;
+  return (
+    <View style={s.iconTile}>
+      <Icon name={name} size={size} color="#8ffff0" />
+    </View>
+  );
 }
 
 /** `.p-mobile-row` — an attention row: icon tile, two lines, chevron. */
-export function MobileRow({ icon, title, sub, onPress, testID }: { icon: string; title: string; sub: string; onPress?: () => void; testID?: string }) {
+export function MobileRow({
+  icon,
+  title,
+  sub,
+  onPress,
+  testID,
+}: {
+  icon: string;
+  title: string;
+  sub: string;
+  onPress?: () => void;
+  testID?: string;
+}) {
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
-    <Pressable onPress={onPress} disabled={!onPress} accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={`${title}. ${sub}`} testID={testID} style={({ pressed }) => [s.row, pressed && { opacity: 0.75 }]}>
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={`${title}. ${sub}`}
+      testID={testID}
+      style={({ pressed }) => [s.row, pressed && { opacity: 0.75 }]}
+    >
       <IconTile name={icon} />
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={s.rowTitle} numberOfLines={1}>{title}</Text>
-        <Text style={s.rowSub} numberOfLines={2}>{sub}</Text>
+        <Text style={s.rowTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text style={s.rowSub} numberOfLines={2}>
+          {sub}
+        </Text>
       </View>
       {onPress ? <Icon name="chevron-right" size={15} color={c.muted} /> : null}
     </Pressable>
@@ -73,17 +147,39 @@ export function MobileRow({ icon, title, sub, onPress, testID }: { icon: string;
 }
 
 /** `.p-passport` — the dark-green Football Passport card on Home. */
-export function PassportCard({ name, line, onOpen, linkLabel, label }: { name: string; line: string; onOpen: () => void; linkLabel: string; label: string }) {
+export function PassportCard({
+  name,
+  line,
+  onOpen,
+  linkLabel,
+  label,
+}: {
+  name: string;
+  line: string;
+  onOpen: () => void;
+  linkLabel: string;
+  label: string;
+}) {
   const s = useStyles(makeStyles);
   return (
     <View style={s.passport} testID="home-passport">
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
-        <View style={s.passportAvatar}><Text style={{ color: '#153c25', fontSize: 15, fontWeight: '600' }}>{initialsOf(name)}</Text></View>
-        <View style={s.passportLabel}><Text style={{ color: '#ffffff', fontSize: 11, fontWeight: '500' }}>{label}</Text></View>
+        <View style={s.passportAvatar}>
+          <Text style={{ color: '#153c25', fontSize: 15, fontWeight: '600' }}>{initialsOf(name)}</Text>
+        </View>
+        <View style={s.passportLabel}>
+          <Text style={{ color: '#ffffff', fontSize: 11, fontWeight: '500' }}>{label}</Text>
+        </View>
       </View>
       <Text style={s.passportName}>{name}</Text>
       <Text style={s.passportLine}>{line}</Text>
-      <Pressable onPress={onOpen} accessibilityRole="button" accessibilityLabel={linkLabel} testID="home-passport-link" style={({ pressed }) => [s.passportLink, pressed && { opacity: 0.75 }]}>
+      <Pressable
+        onPress={onOpen}
+        accessibilityRole="button"
+        accessibilityLabel={linkLabel}
+        testID="home-passport-link"
+        style={({ pressed }) => [s.passportLink, pressed && { opacity: 0.75 }]}
+      >
         <Text style={{ color: '#ffffff', fontSize: 12, fontWeight: '600' }}>{linkLabel}</Text>
         <Icon name="arrow-right" size={16} color="#ffffff" />
       </Pressable>
@@ -92,7 +188,17 @@ export function PassportCard({ name, line, onOpen, linkLabel, label }: { name: s
 }
 
 /** `.p-development` — one development focus with a primary action under it. */
-export function DevelopmentCard({ icon, title, sub, children }: { icon: string; title: string; sub: string; children?: ReactNode }) {
+export function DevelopmentCard({
+  icon,
+  title,
+  sub,
+  children,
+}: {
+  icon: string;
+  title: string;
+  sub: string;
+  children?: ReactNode;
+}) {
   const s = useStyles(makeStyles);
   return (
     <View style={s.card} testID="home-development">
@@ -122,20 +228,42 @@ export function StatusDot({ label, tone = 'ok' }: { label: string; tone?: 'ok' |
 }
 
 /** `.p-profile-intro` — large avatar, name, one line, status. */
-export function ProfileIntro({ name, position, location, status, verified = false }: { name: string; position: string; location?: string; status?: string; verified?: boolean }) {
+export function ProfileIntro({
+  name,
+  position,
+  location,
+  status,
+  verified = false,
+}: {
+  name: string;
+  position: string;
+  location?: string;
+  status?: string;
+  verified?: boolean;
+}) {
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
     <View style={s.intro} testID="passport-intro">
       <ColorAvatar initials={initialsOf(name)} size={88} index={0} />
-      <View style={{ marginTop: 13 }}><PlayerName name={name} verified={verified} centered style={[s.h1, { fontSize: 24 }]} /></View>
-      <View style={{ marginTop: 10 }}><PlayerMeta position={position} location={location} availability={status} centered /></View>
+      <View style={{ marginTop: 13 }}>
+        <PlayerName name={name} verified={verified} centered style={[s.h1, { fontSize: 24 }]} />
+      </View>
+      <View style={{ marginTop: 10 }}>
+        <PlayerMeta position={position} location={location} availability={status} centered />
+      </View>
     </View>
   );
 }
 
 /** Club records follow the shared connected chronology. */
-export function HistoryList({ rows, testID }: { rows: { index: string; title: string; sub: string; right?: ReactNode }[]; testID?: string }) {
+export function HistoryList({
+  rows,
+  testID,
+}: {
+  rows: { index: string; title: string; sub: string; right?: ReactNode }[];
+  testID?: string;
+}) {
   const s = useStyles(makeStyles);
   return (
     <View style={s.history} testID={testID}>
@@ -150,14 +278,27 @@ export function HistoryList({ rows, testID }: { rows: { index: string; title: st
 }
 
 /** `.p-training-visual` — the Box Cam hero: a glyph in a disc, a title and a line on the soft green (no pitch drawing). */
-export function TrainingVisual({ title, sub, bare }: { title: string; sub: string; /** The visual alone; the row under it carries the words */ bare?: boolean }) {
+export function TrainingVisual({
+  title,
+  sub,
+  bare,
+}: {
+  title: string;
+  sub: string /** The visual alone; the row under it carries the words */;
+  bare?: boolean;
+}) {
   const s = useStyles(makeStyles);
   const c = useColors();
   return (
-    <View style={s.training} testID="boxcam-visual"><Gradient />
-      <View style={s.trainingDisc}><Icon name="scan-line" size={bare ? 42 : 28} color={c.accentText} /></View>
+    <View style={s.training} testID="boxcam-visual">
+      <Gradient />
+      <View style={s.trainingDisc}>
+        <Icon name="scan-line" size={bare ? 42 : 28} color={c.accentText} />
+      </View>
       {bare ? null : <Text style={[s.rowTitle, { backgroundColor: c.training, paddingHorizontal: 5 }]}>{title}</Text>}
-      {bare ? null : <Text style={[s.sub, { fontSize: 12, backgroundColor: c.training, paddingHorizontal: 5 }]}>{sub}</Text>}
+      {bare ? null : (
+        <Text style={[s.sub, { fontSize: 12, backgroundColor: c.training, paddingHorizontal: 5 }]}>{sub}</Text>
+      )}
     </View>
   );
 }
@@ -196,39 +337,149 @@ export function Footnote({ children }: { children: ReactNode }) {
 /** A plain reference card (`.p-trust`, `.p-chat-invite` …). */
 export function RefCard({ children, style, testID }: { children: ReactNode; style?: ViewStyle; testID?: string }) {
   const s = useStyles(makeStyles);
-  return <View style={[s.card, style]} testID={testID}>{children}</View>;
+  return (
+    <View style={[s.card, style]} testID={testID}>
+      {children}
+    </View>
+  );
 }
 
-const makeStyles = (c: Palette) => StyleSheet.create({
-  greeting: { marginBottom: 22, gap: 0 },
-  kicker: { color: c.muted, fontSize: 12, lineHeight: 19 },
-  h1: { color: c.text, fontSize: 25, fontWeight: '700', letterSpacing: -0.6, lineHeight: 30, marginVertical: 6 },
-  h2: { color: c.text, fontSize: 19, fontWeight: '600', letterSpacing: -0.4, lineHeight: 24, flexShrink: 1 },
-  sub: { color: c.muted, fontSize: 13, lineHeight: 20 },
-  section: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 30, marginBottom: 8 },
-  count: { width: 22, height: 22, borderRadius: 11, backgroundColor: c.count, alignItems: 'center', justifyContent: 'center' },
-  countText: { color: c.text, fontSize: 11 },
-  iconTile: { backgroundColor: c.iconBg, borderRadius: 16, padding: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  // An attention row is a row, not a card: hairline-separated, full width
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12, width: '100%', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
-  rowTitle: { color: c.text, fontSize: 14.5, fontWeight: '600', lineHeight: 19 },
-  rowSub: { color: c.muted, fontSize: 12.5, lineHeight: 17, marginTop: 3 },
-  passport: { backgroundColor: c.passport, borderRadius: 24, padding: 22, overflow: 'hidden' },
-  passportAvatar: { width: 41, height: 41, borderRadius: 21, backgroundColor: c.accent, alignItems: 'center', justifyContent: 'center' },
-  passportLabel: { backgroundColor: 'rgba(255,255,255,0.09)', borderRadius: 5, paddingVertical: 5, paddingHorizontal: 8 },
-  passportName: { color: '#ffffff', fontSize: 24, fontWeight: '600', letterSpacing: -0.5, lineHeight: 29, marginTop: 19 },
-  passportLine: { color: c.passportText, fontSize: 12, lineHeight: 18, marginTop: 6 },
-  passportLink: { marginTop: 18, paddingTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)', width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  card: { padding: 18, borderRadius: 24, backgroundColor: c.panel, marginVertical: 6 },
-  intro: { alignItems: 'center', paddingTop: 4, paddingBottom: 19 },
-  avatarLarge: { width: 88, height: 88, borderRadius: 44, backgroundColor: c.iconBg, borderWidth: 4, borderColor: c.panel, alignItems: 'center', justifyContent: 'center', shadowColor: c.line, shadowOpacity: 1, shadowRadius: 0, shadowOffset: { width: 0, height: 0 } },
-  history: { paddingTop: 4 },
-  record: { flexDirection: 'row', gap: 9, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
-  index: { width: 24, color: c.accentText, fontSize: 11, fontWeight: '600', paddingTop: 3 },
-  recordTitle: { color: c.text, fontSize: 14, fontWeight: '600', lineHeight: 19 },
-  training: { backgroundColor: c.training, height: 190, borderRadius: 24, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  trainingDisc: { backgroundColor: c.trainingDisc, borderRadius: 999, padding: 10 },
-  pitch: { position: 'absolute', top: 15, bottom: 15, left: 20, right: 20, borderWidth: 1, borderColor: c.trainingLine, opacity: 0.35 },
-  pitchHalf: { position: 'absolute', top: 0, bottom: 0, left: '50%', borderLeftWidth: 1, borderColor: c.trainingLine },
-  pitchCircle: { position: 'absolute', width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: c.trainingLine, left: '50%', top: '50%', marginLeft: -25, marginTop: -25 },
-});
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+    greeting: { marginBottom: 22, gap: 0 },
+    kicker: { color: c.muted, fontSize: 12, lineHeight: 19 },
+    h1: { color: c.text, fontSize: 25, fontWeight: '700', letterSpacing: -0.6, lineHeight: 30, marginVertical: 6 },
+    h2: { color: c.text, fontSize: 19, fontWeight: '600', letterSpacing: -0.4, lineHeight: 24, flexShrink: 1 },
+    sub: { color: c.muted, fontSize: 13, lineHeight: 20 },
+    section: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      marginTop: 30,
+      marginBottom: 8,
+    },
+    count: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: c.count,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    countText: { color: c.text, fontSize: 11 },
+    iconTile: {
+      backgroundColor: c.iconBg,
+      borderRadius: 16,
+      padding: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    // An attention row is a row, not a card: hairline-separated, full width
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      width: '100%',
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: c.line,
+    },
+    rowTitle: { color: c.text, fontSize: 14.5, fontWeight: '600', lineHeight: 19 },
+    rowSub: { color: c.muted, fontSize: 12.5, lineHeight: 17, marginTop: 3 },
+    passport: { backgroundColor: c.passport, borderRadius: 24, padding: 22, overflow: 'hidden' },
+    passportAvatar: {
+      width: 41,
+      height: 41,
+      borderRadius: 21,
+      backgroundColor: c.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    passportLabel: {
+      backgroundColor: 'rgba(255,255,255,0.09)',
+      borderRadius: 5,
+      paddingVertical: 5,
+      paddingHorizontal: 8,
+    },
+    passportName: {
+      color: '#ffffff',
+      fontSize: 24,
+      fontWeight: '600',
+      letterSpacing: -0.5,
+      lineHeight: 29,
+      marginTop: 19,
+    },
+    passportLine: { color: c.passportText, fontSize: 12, lineHeight: 18, marginTop: 6 },
+    passportLink: {
+      marginTop: 18,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: 'rgba(255,255,255,0.15)',
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    card: { padding: 18, borderRadius: 24, backgroundColor: c.panel, marginVertical: 6 },
+    intro: { alignItems: 'center', paddingTop: 4, paddingBottom: 19 },
+    avatarLarge: {
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      backgroundColor: c.iconBg,
+      borderWidth: 4,
+      borderColor: c.panel,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: c.line,
+      shadowOpacity: 1,
+      shadowRadius: 0,
+      shadowOffset: { width: 0, height: 0 },
+    },
+    history: { paddingTop: 4 },
+    record: { flexDirection: 'row', gap: 9, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line },
+    index: { width: 24, color: c.accentText, fontSize: 11, fontWeight: '600', paddingTop: 3 },
+    recordTitle: { color: c.text, fontSize: 14, fontWeight: '600', lineHeight: 19 },
+    training: {
+      backgroundColor: c.training,
+      height: 190,
+      borderRadius: 24,
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 7,
+    },
+    trainingDisc: { backgroundColor: c.trainingDisc, borderRadius: 999, padding: 10 },
+    pitch: {
+      position: 'absolute',
+      top: 15,
+      bottom: 15,
+      left: 20,
+      right: 20,
+      borderWidth: 1,
+      borderColor: c.trainingLine,
+      opacity: 0.35,
+    },
+    pitchHalf: {
+      position: 'absolute',
+      top: 0,
+      bottom: 0,
+      left: '50%',
+      borderLeftWidth: 1,
+      borderColor: c.trainingLine,
+    },
+    pitchCircle: {
+      position: 'absolute',
+      width: 50,
+      height: 50,
+      borderRadius: 25,
+      borderWidth: 1,
+      borderColor: c.trainingLine,
+      left: '50%',
+      top: '50%',
+      marginLeft: -25,
+      marginTop: -25,
+    },
+  });

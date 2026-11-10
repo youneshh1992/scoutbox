@@ -30,11 +30,11 @@ export const REAL_WORLD_VALIDATION = Object.freeze({
 });
 
 /** A record validated against an older engine doesn't describe this one, so it doesn't transfer. */
-export function validateRecord(protocolId, record, {
-  engineVersion = CV_ENGINE_VERSION,
-  policyVersion = BOX_CAM_CV_POLICY_VERSION,
-  providerVersion = null,
-} = {}) {
+export function validateRecord(
+  protocolId,
+  record,
+  { engineVersion = CV_ENGINE_VERSION, policyVersion = BOX_CAM_CV_POLICY_VERSION, providerVersion = null } = {},
+) {
   const problems = [];
   if (!record || typeof record !== 'object') {
     return { valid: false, problems: ['no validation record exists for this protocol'] };
@@ -62,12 +62,15 @@ export function validateRecord(protocolId, record, {
   return { valid: problems.length === 0, problems };
 }
 
-export function realWorldValidationPass(protocolId, {
-  table = REAL_WORLD_VALIDATION,
-  engineVersion = CV_ENGINE_VERSION,
-  policyVersion = BOX_CAM_CV_POLICY_VERSION,
-  providerVersion = null,
-} = {}) {
+export function realWorldValidationPass(
+  protocolId,
+  {
+    table = REAL_WORLD_VALIDATION,
+    engineVersion = CV_ENGINE_VERSION,
+    policyVersion = BOX_CAM_CV_POLICY_VERSION,
+    providerVersion = null,
+  } = {},
+) {
   const entry = table[protocolId] ?? null;
   if (!entry) {
     return { pass: false, status: 'not_completed', problems: [`no validation entry for "${protocolId}"`] };
@@ -91,9 +94,10 @@ export function validationSummary({ table = REAL_WORLD_VALIDATION } = {}) {
       status: e.status,
       datasetId: e.record?.datasetId ?? null,
       approvalVersion: e.record?.approvalVersion ?? null,
-      note: e.status === 'passed'
-        ? 'Validated against real capture material under a versioned release record.'
-        : 'Not validated against real capture material. Exact production measurement is therefore not available for this protocol.',
+      note:
+        e.status === 'passed'
+          ? 'Validated against real capture material under a versioned release record.'
+          : 'Not validated against real capture material. Exact production measurement is therefore not available for this protocol.',
     };
   }
   return out;

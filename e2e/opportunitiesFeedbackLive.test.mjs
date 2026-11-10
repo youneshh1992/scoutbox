@@ -24,12 +24,21 @@ const API_PORT = 4001;
 const API = `http://localhost:${API_PORT}`;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-opportunitiesfeedbacklive-'));
 const say = (m) => console.log(m);
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 
 if (!fs.existsSync(path.join(ROOT, 'scoutbox-club/dist-live/index.html'))) {
   say('building live bundles…');
-  execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
-  execSync(`EXPO_PUBLIC_API_URL=${API} npx expo export --clear --platform web --output-dir dist-live`, { cwd: path.join(ROOT, 'scoutbox-player'), stdio: 'pipe' });
+  execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live`, {
+    cwd: path.join(ROOT, 'scoutbox-club'),
+    stdio: 'pipe',
+  });
+  execSync(`EXPO_PUBLIC_API_URL=${API} npx expo export --clear --platform web --output-dir dist-live`, {
+    cwd: path.join(ROOT, 'scoutbox-player'),
+    stdio: 'pipe',
+  });
 }
 
 const serverProc = spawn('node', ['server.mjs'], {
@@ -40,11 +49,20 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -59,14 +77,22 @@ serveDir('scoutbox-player/dist-live', 8281);
 serveDir('scoutbox-club/dist-live', 8282);
 
 function cleanup() {
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
   for (const s of statics) s.close();
   fs.rmSync(DATA, { recursive: true, force: true });
 }
 process.on('exit', cleanup);
 
 for (let i = 0; i < 60; i++) {
-  try { if ((await fetch(`${API}/health`)).ok) break; } catch { /* booting */ }
+  try {
+    if ((await fetch(`${API}/health`)).ok) break;
+  } catch {
+    /* booting */
+  }
   await new Promise((r) => setTimeout(r, 250));
 }
 say(`backend up on :${API_PORT} (isolated db: ${DATA})`);
@@ -77,7 +103,12 @@ const j = async (p, opts = {}, headers = {}) => {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 };
 const bearer = (t) => ({ authorization: `Bearer ${t}` });
-const MARIA = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }) })).body.token;
+const MARIA = (
+  await j('/auth/org/login', {
+    method: 'POST',
+    body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }),
+  })
+).body.token;
 
 const browser = await chromium.launch({ executablePath: EXE });
 const ctxClub = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -90,7 +121,9 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('.topbar', { timeout: 20000 });
-await club.evaluate(() => { location.hash = '#/opportunities'; }); // deep link (Opportunities)
+await club.evaluate(() => {
+  location.hash = '#/opportunities';
+}); // deep link (Opportunities)
 const deadline = new Date(Date.now() + 21 * 86400e3).toISOString().slice(0, 10);
 await club.fill('input[aria-label="Opportunity title"]', 'U23 look — pressing forwards');
 await club.fill('input[aria-label="Deadline"]', deadline);
@@ -108,13 +141,19 @@ await playerCategory(player, 'journey', 'Board'); // the board is My journey ›
 await player.waitForSelector('text=Opportunity board', { timeout: 20000 });
 await player.waitForSelector('text=U23 look — pressing forwards', { timeout: 15000 });
 say('E1: the opportunity reached the player’s board in his own context');
-await player.locator('[data-testid^="board-view-"]').filter({ hasText: 'U23 look — pressing forwards' }).first().click(); // the row opens its details
+await player
+  .locator('[data-testid^="board-view-"]')
+  .filter({ hasText: 'U23 look — pressing forwards' })
+  .first()
+  .click(); // the row opens its details
 await player.locator('[data-testid^="board-apply-"]').first().click();
 await player.waitForSelector('text=Application submitted', { timeout: 10000 });
 say('E1: player applied from the board');
 
 // ---- Pro sees the application and answers it
-await club.evaluate(() => { location.hash = '#/opportunities'; }); // deep link (Opportunities)
+await club.evaluate(() => {
+  location.hash = '#/opportunities';
+}); // deep link (Opportunities)
 await club.locator('.list-row', { hasText: 'U23 look' }).locator('button:has-text("Applications")').click();
 await club.waitForSelector('text=Kola Adeyemi', { timeout: 15000 });
 await club.locator('.list-row', { hasText: 'Kola Adeyemi' }).locator('button:has-text("Accept")').click();
@@ -123,11 +162,32 @@ say('E1: Pro answered the application — no ghosting');
 
 // ---- E2: published feedback (created via API — assessment editor is covered
 // by demo suites) appears in the player context; raw report does not.
-let r = await j('/org/assessments', { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi', positionGroup: 'ATT' }) }, bearer(MARIA));
+let r = await j(
+  '/org/assessments',
+  { method: 'POST', body: JSON.stringify({ playerId: 'pl-adeyemi', positionGroup: 'ATT' }) },
+  bearer(MARIA),
+);
 const assId = r.body.assessment.id;
-await j(`/org/assessments/${assId}`, { method: 'PUT', body: JSON.stringify({ ratings: [{ attrId: 'finishing', rating: 4, confidence: 'high' }], recommendation: { verdict: 'monitor', reasons: 'live test' } }) }, bearer(MARIA));
+await j(
+  `/org/assessments/${assId}`,
+  {
+    method: 'PUT',
+    body: JSON.stringify({
+      ratings: [{ attrId: 'finishing', rating: 4, confidence: 'high' }],
+      recommendation: { verdict: 'monitor', reasons: 'live test' },
+    }),
+  },
+  bearer(MARIA),
+);
 await j(`/org/assessments/${assId}/submit`, { method: 'POST', body: JSON.stringify({}) }, bearer(MARIA));
-await j(`/org/assessments/${assId}/publish-feedback`, { method: 'POST', body: JSON.stringify({ text: 'Great pressing angles this month — next: recovery runs after losing it.' }) }, bearer(MARIA));
+await j(
+  `/org/assessments/${assId}/publish-feedback`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ text: 'Great pressing angles this month — next: recovery runs after losing it.' }),
+  },
+  bearer(MARIA),
+);
 await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.getByRole('tab', { name: 'Development' }).click(); // feedback is Clubs › Development, the full text behind View details

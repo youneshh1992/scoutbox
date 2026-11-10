@@ -50,10 +50,18 @@ export function transitionFingerprint({ watchlistId, playerId, criteriaVersion, 
  */
 export function explainTransition({ previousMatch, currentMatch, criteriaChanged, briefChanged, transition }) {
   if (briefChanged) {
-    return { reason: 'brief_changed', criterionId: null, text: transition === 'entered' ? ENTRY_REASONS.brief_changed : EXIT_REASONS.brief_changed };
+    return {
+      reason: 'brief_changed',
+      criterionId: null,
+      text: transition === 'entered' ? ENTRY_REASONS.brief_changed : EXIT_REASONS.brief_changed,
+    };
   }
   if (criteriaChanged) {
-    return { reason: 'criteria_changed', criterionId: null, text: transition === 'entered' ? ENTRY_REASONS.criteria_changed : EXIT_REASONS.criteria_changed };
+    return {
+      reason: 'criteria_changed',
+      criterionId: null,
+      text: transition === 'entered' ? ENTRY_REASONS.criteria_changed : EXIT_REASONS.criteria_changed,
+    };
   }
   if (transition === 'entered') {
     if (!previousMatch) {
@@ -100,10 +108,13 @@ export function membershipNotification({ watchlistName, entered = [], left = [],
   if (!entered.length && !left.length) return null;
   const bulk = reason === 'criteria_changed' || reason === 'brief_changed';
   const parts = [];
-  if (entered.length) parts.push(`${entered.length} ${entered.length === 1 ? 'player now matches' : 'players now match'}`);
+  if (entered.length)
+    parts.push(`${entered.length} ${entered.length === 1 ? 'player now matches' : 'players now match'}`);
   if (left.length) parts.push(`${left.length} no longer ${left.length === 1 ? 'matches' : 'match'}`);
   const tail = bulk
-    ? (reason === 'brief_changed' ? ' after the linked Recruitment Brief changed' : ' after the criteria changed')
+    ? reason === 'brief_changed'
+      ? ' after the linked Recruitment Brief changed'
+      : ' after the criteria changed'
     : '';
   return {
     text: `${parts.join(', ')} “${watchlistName}”${tail}.`,
@@ -115,11 +126,33 @@ export function membershipNotification({ watchlistName, entered = [], left = [],
 
 /** A watchlist that cannot produce matches says why, rather than showing zero as "no players match". */
 export function watchlistBlockedState({ status, mode, brief }) {
-  if (status === 'archived') return { blocked: true, code: 'WATCHLIST_ARCHIVED', message: 'This watchlist is archived. Its history is kept; membership is no longer maintained.' };
-  if (status === 'paused') return { blocked: false, paused: true, code: 'WATCHLIST_PAUSED', message: 'This watchlist is paused. Membership is still shown, and no change notifications are sent.' };
+  if (status === 'archived')
+    return {
+      blocked: true,
+      code: 'WATCHLIST_ARCHIVED',
+      message: 'This watchlist is archived. Its history is kept; membership is no longer maintained.',
+    };
+  if (status === 'paused')
+    return {
+      blocked: false,
+      paused: true,
+      code: 'WATCHLIST_PAUSED',
+      message: 'This watchlist is paused. Membership is still shown, and no change notifications are sent.',
+    };
   if (mode === 'live_linked') {
-    if (!brief) return { blocked: true, code: 'WATCHLIST_BRIEF_UNAVAILABLE', message: 'The linked Recruitment Brief is no longer available. Membership cannot be maintained until the link is changed.' };
-    if (brief.status !== 'active') return { blocked: true, code: 'WATCHLIST_BRIEF_INACTIVE', message: `The linked Recruitment Brief is ${brief.status}. Activate it, or switch this watchlist to its own saved criteria.` };
+    if (!brief)
+      return {
+        blocked: true,
+        code: 'WATCHLIST_BRIEF_UNAVAILABLE',
+        message:
+          'The linked Recruitment Brief is no longer available. Membership cannot be maintained until the link is changed.',
+      };
+    if (brief.status !== 'active')
+      return {
+        blocked: true,
+        code: 'WATCHLIST_BRIEF_INACTIVE',
+        message: `The linked Recruitment Brief is ${brief.status}. Activate it, or switch this watchlist to its own saved criteria.`,
+      };
   }
   return { blocked: false };
 }

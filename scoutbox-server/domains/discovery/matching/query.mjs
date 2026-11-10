@@ -20,7 +20,9 @@ export function createMatchReads({ players, matchFacts }) {
   /** A watchlist's leavers the organisation may still see, to say why they left. */
   function visibleFactsOf(org, ids, at) {
     if (!ids.length) return [];
-    const rows = matchQuery(org, [], at, [{ sql: 'p.id IN (SELECT value FROM json_each(?))', args: [JSON.stringify(ids)] }]).page([['p.id', 'ASC']], { limit: ids.length });
+    const rows = matchQuery(org, [], at, [
+      { sql: 'p.id IN (SELECT value FROM json_each(?))', args: [JSON.stringify(ids)] },
+    ]).page([['p.id', 'ASC']], { limit: ids.length });
     return factsOfRows(rows, org, at);
   }
 
@@ -35,7 +37,9 @@ export function createMatchReads({ players, matchFacts }) {
       name: ['f.name_key', 'ASC'],
       age: [`COALESCE(${AGE_SQL(at).sql}, 999)`, 'ASC', AGE_SQL(at).args],
       evidence_confidence: [BAND_RANK_SQL(), 'DESC'],
-      distance: seesDistance ? [`COALESCE(distance_tenths(?, ?, p.lat, p.lng), ${NO_DISTANCE})`, 'ASC', [org.location.lat, org.location.lng]] : [String(NO_DISTANCE), 'ASC'],
+      distance: seesDistance
+        ? [`COALESCE(distance_tenths(?, ?, p.lat, p.lng), ${NO_DISTANCE})`, 'ASC', [org.location.lat, org.location.lng]]
+        : [String(NO_DISTANCE), 'ASC'],
       ...extra,
     }[sort] ?? ['COALESCE(f.last_evidence_at, 0)', 'DESC'];
     // Tie-break on f.player_id (equal to p.id) so the facts index serves the order.
@@ -44,8 +48,19 @@ export function createMatchReads({ players, matchFacts }) {
   const keyOfRow = (r) => [r.k0, r.k1];
   /** An `offset` is refused: a client cannot walk a large result by position. */
   function readMatchPage(input, shape) {
-    if (input?.offset !== undefined) throw Object.assign(new Error('PAGE_OFFSET_UNSUPPORTED: page with cursor, the previous response\'s nextCursor'), { code: 'PAGE_OFFSET_UNSUPPORTED', status: 400, pageError: true });
-    return readPage({ limit: input?.limit === undefined || input?.limit === null ? undefined : String(input.limit), cursor: input?.cursor ?? undefined }, shape);
+    if (input?.offset !== undefined)
+      throw Object.assign(new Error("PAGE_OFFSET_UNSUPPORTED: page with cursor, the previous response's nextCursor"), {
+        code: 'PAGE_OFFSET_UNSUPPORTED',
+        status: 400,
+        pageError: true,
+      });
+    return readPage(
+      {
+        limit: input?.limit === undefined || input?.limit === null ? undefined : String(input.limit),
+        cursor: input?.cursor ?? undefined,
+      },
+      shape,
+    );
   }
 
   return { EMPTY_QUERY, matchQuery, factsOfRows, visibleFactsOf, matchOrder, keyOfRow, readMatchPage };

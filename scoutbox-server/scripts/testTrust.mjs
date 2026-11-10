@@ -3,14 +3,29 @@
 
 import assert from 'node:assert/strict';
 import {
-  computeTrustScore, trustBreakdown, isAdult, visibleToOrg, validateTrialReport,
-  moderateText, computeStreak, weeklyGoal, trustTier, nextActions, TRUST,
-  haversineKm, playerLevelAfterSigning,
+  computeTrustScore,
+  trustBreakdown,
+  isAdult,
+  visibleToOrg,
+  validateTrialReport,
+  moderateText,
+  computeStreak,
+  weeklyGoal,
+  trustTier,
+  nextActions,
+  TRUST,
+  haversineKm,
+  playerLevelAfterSigning,
 } from '../domain.mjs';
 import { buildSeed } from '../seed.mjs';
 import {
-  PROGRAMME_TRACKS, trackForPosition, programmeProgress, pathwayFor,
-  earnedGrassrootsBadges, percentileAmong, weekKey,
+  PROGRAMME_TRACKS,
+  trackForPosition,
+  programmeProgress,
+  pathwayFor,
+  earnedGrassrootsBadges,
+  percentileAmong,
+  weekKey,
 } from '../grassrootsJourney.mjs';
 
 let passed = 0;
@@ -21,8 +36,14 @@ function test(name, fn) {
 }
 
 const bare = {
-  id: 'x', name: 'X', dob: '2000-01-01', country: 'GB',
-  attendance: [], trialReports: [], media: [], medical: { shared: false, records: [] },
+  id: 'x',
+  name: 'X',
+  dob: '2000-01-01',
+  country: 'GB',
+  attendance: [],
+  trialReports: [],
+  media: [],
+  medical: { shared: false, records: [] },
 };
 
 test('bare profile scores BASE', () => {
@@ -35,10 +56,7 @@ test('identity verification adds its bonus', () => {
 
 test('attendance is capped', () => {
   const many = Array.from({ length: 10 }, (_, i) => ({ id: `a${i}` }));
-  assert.equal(
-    computeTrustScore({ ...bare, attendance: many }),
-    TRUST.BASE + TRUST.ATTENDANCE_CAP
-  );
+  assert.equal(computeTrustScore({ ...bare, attendance: many }), TRUST.BASE + TRUST.ATTENDANCE_CAP);
 });
 
 test('trial reports raise trust (institutional corroboration)', () => {
@@ -56,7 +74,11 @@ test('score never exceeds MAX', () => {
   const maxed = {
     ...bare,
     identityVerified: true,
-    position: 'ST', foot: 'right', heightCm: 180, weightKg: 75, stats: {},
+    position: 'ST',
+    foot: 'right',
+    heightCm: 180,
+    weightKg: 75,
+    stats: {},
     attendance: Array.from({ length: 20 }, () => ({})),
     trialReports: Array.from({ length: 20 }, () => ({})),
     media: Array.from({ length: 20 }, () => ({})),
@@ -69,20 +91,29 @@ test('breakdown totals match the score', () => {
   const b = trustBreakdown(seedPlayer);
   assert.equal(
     b.base + b.identityVerified + b.verifiedAttendance + b.trialReports + b.media + b.profileComplete,
-    Math.min(b.total, TRUST.MAX) === TRUST.MAX ? b.base + b.identityVerified + b.verifiedAttendance + b.trialReports + b.media + b.profileComplete : b.total
+    Math.min(b.total, TRUST.MAX) === TRUST.MAX
+      ? b.base + b.identityVerified + b.verifiedAttendance + b.trialReports + b.media + b.profileComplete
+      : b.total,
   );
 });
 
 test('adult age respects country of majority (KR = 19)', () => {
   const nineteenYearsAgo = new Date();
-  nineteenYearsAgo.setFullYear(nineteenYearsAgo.getFullYear() - 18, nineteenYearsAgo.getMonth(), nineteenYearsAgo.getDate() - 1);
+  nineteenYearsAgo.setFullYear(
+    nineteenYearsAgo.getFullYear() - 18,
+    nineteenYearsAgo.getMonth(),
+    nineteenYearsAgo.getDate() - 1,
+  );
   const eighteenInKr = { dob: nineteenYearsAgo.toISOString().slice(0, 10), country: 'KR' };
   assert.equal(isAdult(eighteenInKr), false, '18-year-old is not an adult in KR');
   assert.equal(isAdult({ ...eighteenInKr, country: 'GB' }), true, '18-year-old is an adult in GB');
 });
 
 test('minor visibility: agencies never, unverified clubs never, verified clubs yes', () => {
-  const minor = { dob: new Date(Date.now() - 16 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10), country: 'GB' };
+  const minor = {
+    dob: new Date(Date.now() - 16 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10),
+    country: 'GB',
+  };
   assert.equal(visibleToOrg(minor, { type: 'agency', verified: true }), false, 'agency blocked even if verified');
   assert.equal(visibleToOrg(minor, { type: 'club', verified: false }), false, 'unverified club blocked');
   assert.equal(visibleToOrg(minor, { type: 'club', verified: true }), true, 'verified club allowed');
@@ -147,14 +178,30 @@ test('grassroots walls: 50km radius, level ceiling, fail-closed locations', () =
 
   assert.equal(visibleToOrg(adult({ location: london }), grassroots), true, 'local amateur visible');
   assert.equal(visibleToOrg(adult({ location: manchester }), grassroots), false, 'distant player invisible');
-  assert.equal(visibleToOrg(adult({ location: london, level: 'pro' }), grassroots), false, 'pro players never on Grassroots');
+  assert.equal(
+    visibleToOrg(adult({ location: london, level: 'pro' }), grassroots),
+    false,
+    'pro players never on Grassroots',
+  );
   assert.equal(visibleToOrg(adult({ location: null }), grassroots), false, 'missing player location fails closed');
-  assert.equal(visibleToOrg(adult({ location: london }), { ...grassroots, location: null }), false, 'missing org location fails closed');
-  assert.equal(visibleToOrg(adult({ location: manchester, level: 'pro' }), mainClub), true, 'main platform unaffected by radius/level');
+  assert.equal(
+    visibleToOrg(adult({ location: london }), { ...grassroots, location: null }),
+    false,
+    'missing org location fails closed',
+  );
+  assert.equal(
+    visibleToOrg(adult({ location: manchester, level: 'pro' }), mainClub),
+    true,
+    'main platform unaffected by radius/level',
+  );
 
   const minor = { dob: '2012-02-10', country: 'GB', level: 'amateur', location: london };
   assert.equal(visibleToOrg(minor, grassroots), true, 'verified grassroots club sees local minors');
-  assert.equal(visibleToOrg(minor, { ...grassroots, verified: false }), false, 'unverified grassroots club never sees minors');
+  assert.equal(
+    visibleToOrg(minor, { ...grassroots, verified: false }),
+    false,
+    'unverified grassroots club never sees minors',
+  );
 
   assert.equal(playerLevelAfterSigning('grassroots'), 'semi_pro');
   assert.equal(playerLevelAfterSigning('pro'), 'pro');
@@ -165,8 +212,12 @@ test('partial trial reports are rejected, complete ones pass', () => {
   assert.equal(partial.ok, false);
   assert.ok(partial.missing.includes('coachRating'));
   const full = validateTrialReport({
-    acceleration: 7, sprintSpeedKmh: 33.4, distanceKm: 10.8,
-    passCompletionPct: 82, duelSuccessPct: 58, coachRating: 8,
+    acceleration: 7,
+    sprintSpeedKmh: 33.4,
+    distanceKm: 10.8,
+    passCompletionPct: 82,
+    duelSuccessPct: 58,
+    coachRating: 8,
   });
   assert.equal(full.ok, true);
 });
@@ -197,8 +248,13 @@ test('trust tiers map score bands to names', () => {
 
 test('next actions guide the biggest gaps first', () => {
   const bare = {
-    position: null, foot: null, heightCm: null, weightKg: null, stats: null,
-    media: [], attendance: [],
+    position: null,
+    foot: null,
+    heightCm: null,
+    weightKg: null,
+    stats: null,
+    media: [],
+    attendance: [],
   };
   const actions = nextActions(bare);
   assert.ok(actions.length > 0 && actions.length <= 3);
@@ -231,10 +287,16 @@ test('grassroots journey: programmes track positions and weekly progress', () =>
   assert.equal(trackForPosition('GK'), 'keeper');
   assert.equal(trackForPosition('CB'), 'defence');
   const now = Date.now();
-  const player = { programme: { track: 'attack', startedAt: now, completed: [
-    { sessionId: 'atk-sprint', ts: now },
-    { sessionId: 'atk-finish', ts: now - 10 * 24 * 3600 * 1000 }, // last week — must not count
-  ] } };
+  const player = {
+    programme: {
+      track: 'attack',
+      startedAt: now,
+      completed: [
+        { sessionId: 'atk-sprint', ts: now },
+        { sessionId: 'atk-finish', ts: now - 10 * 24 * 3600 * 1000 }, // last week — must not count
+      ],
+    },
+  };
   const prog = programmeProgress(player, now);
   assert.equal(prog.doneThisWeek, 1);
   assert.equal(prog.totalPerWeek, PROGRAMME_TRACKS.attack.sessions.length);

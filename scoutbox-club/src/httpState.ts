@@ -9,14 +9,14 @@ import { ApiError } from './api';
 import { t } from './i18n';
 
 export type HttpStateKind =
-  | 'session_expired'  // 401 — back to sign-in through the normal auth flow
-  | 'forbidden'        // 403 — a clear, non-technical refusal
-  | 'not_found'        // 404 — identical for "never existed" and "not yours"
-  | 'conflict'         // 409 — the shared conflict UX (conflict.tsx)
-  | 'too_large'        // 413
-  | 'rate_limited'     // 429 — with the wait, from Retry-After
-  | 'unavailable'      // 5xx / network — generic, retryable
-  | 'invalid'          // other 4xx — the server's own wording is the message
+  | 'session_expired' // 401 — back to sign-in through the normal auth flow
+  | 'forbidden' // 403 — a clear, non-technical refusal
+  | 'not_found' // 404 — identical for "never existed" and "not yours"
+  | 'conflict' // 409 — the shared conflict UX (conflict.tsx)
+  | 'too_large' // 413
+  | 'rate_limited' // 429 — with the wait, from Retry-After
+  | 'unavailable' // 5xx / network — generic, retryable
+  | 'invalid' // other 4xx — the server's own wording is the message
   | 'unknown';
 
 export interface HttpState {
@@ -41,7 +41,14 @@ export function httpState(e: unknown): HttpState {
     const retryable = e.retryable ?? (status === 429 || status >= 500);
     switch (true) {
       case status === 401:
-        return { kind: 'session_expired', message: t('http.sessionExpired'), retryable: false, retryAfterS: null, code, status };
+        return {
+          kind: 'session_expired',
+          message: t('http.sessionExpired'),
+          retryable: false,
+          retryAfterS: null,
+          code,
+          status,
+        };
       case status === 403:
         return { kind: 'forbidden', message: t('http.forbidden'), retryable: false, retryAfterS: null, code, status };
       case status === 404:
@@ -59,14 +66,35 @@ export function httpState(e: unknown): HttpState {
         return { kind: 'unavailable', message: t('http.unavailable'), retryable, retryAfterS: null, code, status };
       default:
         // A validation-style 4xx: the server wrote a human sentence for it.
-        return { kind: 'invalid', message: e.message || t('http.unknown'), retryable: false, retryAfterS: null, code, status };
+        return {
+          kind: 'invalid',
+          message: e.message || t('http.unknown'),
+          retryable: false,
+          retryAfterS: null,
+          code,
+          status,
+        };
     }
   }
   // A fetch that never reached the server (offline, DNS, CORS).
   if (e instanceof TypeError) {
-    return { kind: 'unavailable', message: t('http.offline'), retryable: true, retryAfterS: null, code: null, status: null };
+    return {
+      kind: 'unavailable',
+      message: t('http.offline'),
+      retryable: true,
+      retryAfterS: null,
+      code: null,
+      status: null,
+    };
   }
-  return { kind: 'unknown', message: e instanceof Error && e.message ? e.message : t('http.unknown'), retryable: false, retryAfterS: null, code: null, status: null };
+  return {
+    kind: 'unknown',
+    message: e instanceof Error && e.message ? e.message : t('http.unknown'),
+    retryable: false,
+    retryAfterS: null,
+    code: null,
+    status: null,
+  };
 }
 
 /** The message alone, for callers that only toast. */

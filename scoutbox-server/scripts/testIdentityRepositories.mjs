@@ -9,51 +9,110 @@ import { openStore } from '../store.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { runDataMigrations } from '../repositories/database.mjs';
-import { createIdentityRepositories, CORE_IDENTITY_INIT_META, PLAYER_RECORD_KEYS, GUARDIAN_RECORD_KEYS, bornByForAge } from '../repositories/identity.mjs';
+import {
+  createIdentityRepositories,
+  CORE_IDENTITY_INIT_META,
+  PLAYER_RECORD_KEYS,
+  GUARDIAN_RECORD_KEYS,
+  bornByForAge,
+} from '../repositories/identity.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import { adult, child, gSignup, FIXTURE, T0, NOW, TTL, tempDir, clone } from './coreIdentityTestFixtures.mjs';
 import { computeTrustScore, visibleToOrg, haversineKm } from '../domain.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
-function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
+function test(name, fn) {
+  if (only && !name.includes(only)) return;
+  fn();
+  passed++;
+  console.log(`  ✓ ${name}`);
+}
 let counter = 7000;
 const nextId = (p) => `${p}-${++counter}`;
 const ORGS = () => [
   { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB', verified: true },
   { id: 'org-unverified', name: 'Westfield FC', type: 'club', level: 'pro', plan: 'Pro', country: 'GB' },
   { id: 'org-agency', name: 'Elevate', type: 'agency', level: 'agency', plan: 'Agency', country: 'GB' },
-  { id: 'org-grass', name: 'Leeds Grassroots', type: 'club', level: 'grassroots', plan: 'Grassroots', country: 'GB', verified: true, location: { lat: 53.8, lng: -1.55, city: 'Leeds' } },
+  {
+    id: 'org-grass',
+    name: 'Leeds Grassroots',
+    type: 'club',
+    level: 'grassroots',
+    plan: 'Grassroots',
+    country: 'GB',
+    verified: true,
+    location: { lat: 53.8, lng: -1.55, city: 'Leeds' },
+  },
 ];
 
 /** A server-mode store on a new directory with the data layer attached the way the server attaches it (the seed imported once). */
 function boot(dir = tempDir('idrepo'), { players = FIXTURE().players, guardians = FIXTURE().guardians } = {}) {
   const store = openStore(dir);
-  const layer = attachDataLayer({ seed: { orgs: ORGS(), players: clone(players), guardians: clone(guardians) }, store, nextId, sessionTtlMs: TTL, now: () => NOW });
-  const all = (sql, ...p) => store.sqlite.prepare(sql).all(...p).map((r) => ({ ...r }));
+  const layer = attachDataLayer({
+    seed: { orgs: ORGS(), players: clone(players), guardians: clone(guardians) },
+    store,
+    nextId,
+    sessionTtlMs: TTL,
+    now: () => NOW,
+  });
+  const all = (sql, ...p) =>
+    store.sqlite
+      .prepare(sql)
+      .all(...p)
+      .map((r) => ({ ...r }));
   const get = (sql, ...p) => store.sqlite.prepare(sql).get(...p);
-  const invariantBreaks = () => get(`SELECT COUNT(*) AS n FROM players p LEFT JOIN guardian_children l ON l.player_id = p.id AND l.role = 'primary'
-    WHERE (p.guardian_id IS NULL) <> (l.guardian_id IS NULL) OR (p.guardian_id IS NOT NULL AND l.guardian_id <> p.guardian_id)`).n
-    + store.sqlite.prepare('PRAGMA foreign_key_check').all().length;
-  return { dir, store, layer, identity: layer.identity, players: layer.players, guardians: layer.guardians, all, get, invariantBreaks,
-    unit: (fn) => store.unitOfWork(fn), close: () => store.sqlite.close() };
+  const invariantBreaks = () =>
+    get(`SELECT COUNT(*) AS n FROM players p LEFT JOIN guardian_children l ON l.player_id = p.id AND l.role = 'primary'
+    WHERE (p.guardian_id IS NULL) <> (l.guardian_id IS NULL) OR (p.guardian_id IS NOT NULL AND l.guardian_id <> p.guardian_id)`)
+      .n + store.sqlite.prepare('PRAGMA foreign_key_check').all().length;
+  return {
+    dir,
+    store,
+    layer,
+    identity: layer.identity,
+    players: layer.players,
+    guardians: layer.guardians,
+    all,
+    get,
+    invariantBreaks,
+    unit: (fn) => store.unitOfWork(fn),
+    close: () => store.sqlite.close(),
+  };
 }
 const orgOf = (t, id) => t.layer.orgs.byId(id);
-const second = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA busy_timeout = 5000;'); return s; };
+const second = (dir) => {
+  const s = new DatabaseSync(path.join(dir, 'scoutbox.db'));
+  s.exec('PRAGMA busy_timeout = 5000;');
+  return s;
+};
 
 // ------------------------------------------------------------------ authority and initialisation
 test('authority and initialisation: the repositories attach only behind the cutover record; a first installation imports the seed once (links from childIds, roles from guardianId); a later boot attaches and never imports', () => {
-  const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id)));
+  const s = new DatabaseSync(':memory:');
+  s.exec('PRAGMA foreign_keys = ON;');
+  runDataMigrations(
+    s,
+    DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id)),
+  );
   assert.throws(() => createIdentityRepositories({ sqlite: s }), /cutover record 0005_core_identity_live is missing/);
-  assert.equal(s.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('players', 'guardians', 'guardian_children')").get().n, 0, '0002 creates no identity shadow');
+  assert.equal(
+    s
+      .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name IN ('players', 'guardians', 'guardian_children')")
+      .get().n,
+    0,
+    '0002 creates no identity shadow',
+  );
   const t = boot();
   assert.equal(t.layer.firstInstallation, true);
   assert.deepEqual(t.layer.boot.identity, { engine: 'sqlite', players: 5, guardians: 3, links: 5, imported: 8 });
   assert.equal(t.get('SELECT value FROM meta WHERE key = ?', CORE_IDENTITY_INIT_META).value, 'done');
   assert.deepEqual(t.all('SELECT guardian_id, player_id, role FROM guardian_children ORDER BY rowid'), [
-    { guardian_id: 'gd-primary', player_id: 'pl-child1', role: 'primary' }, { guardian_id: 'gd-primary', player_id: 'pl-child2', role: 'primary' },
-    { guardian_id: 'gd-primary', player_id: 'pl-grown', role: 'primary' }, { guardian_id: 'gd-co', player_id: 'pl-child1', role: 'co' }, { guardian_id: 'gd-co', player_id: 'pl-child2', role: 'co' },
+    { guardian_id: 'gd-primary', player_id: 'pl-child1', role: 'primary' },
+    { guardian_id: 'gd-primary', player_id: 'pl-child2', role: 'primary' },
+    { guardian_id: 'gd-primary', player_id: 'pl-grown', role: 'primary' },
+    { guardian_id: 'gd-co', player_id: 'pl-child1', role: 'co' },
+    { guardian_id: 'gd-co', player_id: 'pl-child2', role: 'co' },
   ]);
   assert.equal(t.invariantBreaks(), 0);
   t.close();
@@ -66,16 +125,34 @@ test('authority and initialisation: the repositories attach only behind the cuto
 
 test('the seed is typed before anything is written: a minor without a guardian, an unknown field, a planted facet or a trial-report copy refuses the whole first installation and leaves it pending', () => {
   for (const [label, players, guardians, reason] of [
-    ['a minor without a guardian', [{ ...child('pl-orphan', null, '2015-01-01') }], [], /pl-orphan: a minor without a primary guardian/],
+    [
+      'a minor without a guardian',
+      [{ ...child('pl-orphan', null, '2015-01-01') }],
+      [],
+      /pl-orphan: a minor without a primary guardian/,
+    ],
     ['an unknown field', [{ ...adult(), futureField: 1 }], [], /pl-adult: unknown field futureField/],
     ['a guardian facet', [], [{ ...gSignup(), coGuardians: [] }], /gd-signup: coGuardians is worked out/],
     ['a plain e-mail code', [], [{ ...gSignup(), emailCode: 'K7Q2ZP' }], /gd-signup: unknown field emailCode/],
-    ['a trial-report copy', [{ ...adult(), trialReports: [{ id: 'tr-1' }] }], [], /pl-adult: trialReports are the trials' reports/],
+    [
+      'a trial-report copy',
+      [{ ...adult(), trialReports: [{ id: 'tr-1' }] }],
+      [],
+      /pl-adult: trialReports are the trials' reports/,
+    ],
   ]) {
     const dir = tempDir('idseed');
-    assert.throws(() => boot(dir, { players, guardians }), (e) => e.code === 'CORE_IDENTITY_CUTOVER_BLOCKED' && reason.test(e.message), label);
+    assert.throws(
+      () => boot(dir, { players, guardians }),
+      (e) => e.code === 'CORE_IDENTITY_CUTOVER_BLOCKED' && reason.test(e.message),
+      label,
+    );
     const s = second(dir);
-    assert.equal(s.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META).value, 'pending', `${label}: initialisation stays pending`);
+    assert.equal(
+      s.prepare('SELECT value FROM meta WHERE key = ?').get(CORE_IDENTITY_INIT_META).value,
+      'pending',
+      `${label}: initialisation stays pending`,
+    );
     assert.equal(s.prepare('SELECT COUNT(*) AS n FROM players').get().n, 0, `${label}: nothing written`);
     s.close();
   }
@@ -88,23 +165,60 @@ test('records: every key always present (null, false or [] when unset), the list
   assert.deepEqual(Object.keys(p), PLAYER_RECORD_KEYS);
   assert.equal(p.city, null, 'an empty city is null');
   assert.deepEqual(p.medical, { shared: false, conditionStatus: 'unknown', records: [] });
-  assert.equal(p.stats, null); assert.equal(p.programme, null); assert.equal(p.notificationPrefs, null);
-  assert.deepEqual(p.trialReports, []); assert.equal('password' in p, false);
+  assert.equal(p.stats, null);
+  assert.equal(p.programme, null);
+  assert.equal(p.notificationPrefs, null);
+  assert.deepEqual(p.trialReports, []);
+  assert.equal('password' in p, false);
   assert.ok(Object.isFrozen(p) && Object.isFrozen(p.medical) && Object.isFrozen(p.media));
-  assert.throws(() => { p.name = 'x'; }, TypeError);
+  assert.throws(() => {
+    p.name = 'x';
+  }, TypeError);
   assert.notEqual(t.players.byId('pl-child1'), p, 'a fresh copy on every read');
   const s = t.players.byId('pl-seeded');
-  assert.deepEqual(s.stats, { appearances: 31, goals: 22, assists: 6, paceKmh: 34.1, passCompletionPct: 78, duelSuccessPct: 61, cleanSheets: null }, 'stats carry every key');
+  assert.deepEqual(
+    s.stats,
+    {
+      appearances: 31,
+      goals: 22,
+      assists: 6,
+      paceKmh: 34.1,
+      passCompletionPct: 78,
+      duelSuccessPct: 61,
+      cleanSheets: null,
+    },
+    'stats carry every key',
+  );
   assert.deepEqual(s.programme, { track: 'ST', startedAt: T0, completed: [{ sessionId: 's1', ts: T0 + 86_400_000 }] });
-  assert.deepEqual(s.media, [{ id: 'med-1', title: 'Highlights', kind: 'video', uploadedAt: '2026-05-01T10:00:00.000Z', url: null, views: 3, verifiedClip: null, captions: null, tags: { pace: 2 } }]);
+  assert.deepEqual(s.media, [
+    {
+      id: 'med-1',
+      title: 'Highlights',
+      kind: 'video',
+      uploadedAt: '2026-05-01T10:00:00.000Z',
+      url: null,
+      views: 3,
+      verifiedClip: null,
+      captions: null,
+      tags: { pace: 2 },
+    },
+  ]);
   const g = t.guardians.byId('gd-primary');
   assert.deepEqual(Object.keys(g), GUARDIAN_RECORD_KEYS);
   assert.deepEqual(g.childIds, ['pl-child1', 'pl-child2', 'pl-grown']);
-  assert.deepEqual(g.coGuardians, [{ id: 'gd-co', name: 'Co Parent', email: 'co@example.test' }], 'coGuardians is worked out from co_guardian_of');
+  assert.deepEqual(
+    g.coGuardians,
+    [{ id: 'gd-co', name: 'Co Parent', email: 'co@example.test' }],
+    'coGuardians is worked out from co_guardian_of',
+  );
   assert.equal('password' in g || 'emailCodeHash' in g, false);
   assert.equal(t.guardians.emailCodeHashOf('gd-signup').length, 64);
   assert.equal(t.players.passwordHashOf('pl-adult'), 'scrypt$aa$bb');
-  assert.deepEqual(t.players.byIds(['pl-seeded', 'pl-none', 'pl-adult']).map((x) => x.id), ['pl-seeded', 'pl-adult'], 'byIds keeps the order given and drops the missing');
+  assert.deepEqual(
+    t.players.byIds(['pl-seeded', 'pl-none', 'pl-adult']).map((x) => x.id),
+    ['pl-seeded', 'pl-adult'],
+    'byIds keeps the order given and drops the missing',
+  );
   assert.deepEqual(t.players.byIds(['pl-seeded'])[0], s, 'a batch read decodes exactly what a single read does');
   t.close();
 });
@@ -121,8 +235,17 @@ test('no mirror: a row written by another connection is what the next read retur
 // ------------------------------------------------------------------ writes
 test('create: defaults fill the optional fields; junk is refused by field before anything is written; a minor needs its guardian, gets the primary link in the same unit; a retained or existing id is refused', () => {
   const t = boot();
-  const made = t.players.create({ id: 'pl-new', name: 'New Adult', dob: '1999-02-02', country: 'GB', createdAt: NOW, passwordHash: 'scrypt$x$y' });
-  assert.equal(made.availability, 'not_seeking'); assert.deepEqual(made.badges, []); assert.equal(t.players.passwordHashOf('pl-new'), 'scrypt$x$y');
+  const made = t.players.create({
+    id: 'pl-new',
+    name: 'New Adult',
+    dob: '1999-02-02',
+    country: 'GB',
+    createdAt: NOW,
+    passwordHash: 'scrypt$x$y',
+  });
+  assert.equal(made.availability, 'not_seeking');
+  assert.deepEqual(made.badges, []);
+  assert.equal(t.players.passwordHashOf('pl-new'), 'scrypt$x$y');
   for (const [fields, reason] of [
     [{ name: 'N'.repeat(121) }, /name must be text of 1 to 120/],
     [{ heightCm: '180' }, /heightCm must be a whole number from 50 to 250/],
@@ -135,15 +258,29 @@ test('create: defaults fill the optional fields; junk is refused by field before
     [{ media: [{ id: 'm1' }] }, /media\[0\]\.title is absent/],
     [{ badges: [1] }, /badges\[0\] is a number, not text/],
     [{ facetField: true }, /unknown field facetField/],
-  ]) assert.throws(() => t.players.create({ id: 'pl-junk', name: 'Junk', dob: '1999-02-02', country: 'GB', ...fields }), (e) => e.code === 'PLAYER_RECORD_INVALID' && reason.test(e.message), JSON.stringify(fields));
+  ])
+    assert.throws(
+      () => t.players.create({ id: 'pl-junk', name: 'Junk', dob: '1999-02-02', country: 'GB', ...fields }),
+      (e) => e.code === 'PLAYER_RECORD_INVALID' && reason.test(e.message),
+      JSON.stringify(fields),
+    );
   assert.equal(t.players.byId('pl-junk'), null, 'nothing was written');
-  assert.throws(() => t.players.create({ id: 'pl-kid', name: 'Kid', dob: '2016-01-01', country: 'GB' }), (e) => e.code === 'MINOR_WITHOUT_GUARDIAN');
+  assert.throws(
+    () => t.players.create({ id: 'pl-kid', name: 'Kid', dob: '2016-01-01', country: 'GB' }),
+    (e) => e.code === 'MINOR_WITHOUT_GUARDIAN',
+  );
   t.players.create({ id: 'pl-kid', name: 'Kid', dob: '2016-01-01', country: 'GB', guardianId: 'gd-signup' });
   assert.deepEqual(t.guardians.linksOf('pl-kid'), [{ guardianId: 'gd-signup', role: 'primary' }]);
   assert.deepEqual(t.guardians.byId('gd-signup').childIds, ['pl-kid']);
-  assert.throws(() => t.players.create({ id: 'pl-kid', name: 'Kid', dob: '2000-01-01', country: 'GB' }), (e) => e.code === 'PLAYER_EXISTS');
+  assert.throws(
+    () => t.players.create({ id: 'pl-kid', name: 'Kid', dob: '2000-01-01', country: 'GB' }),
+    (e) => e.code === 'PLAYER_EXISTS',
+  );
   t.players.erase('pl-new', { at: NOW });
-  assert.throws(() => t.players.create({ id: 'pl-new', name: 'Again', dob: '1999-02-02', country: 'GB' }), (e) => e.code === 'PLAYER_ID_RETAINED');
+  assert.throws(
+    () => t.players.create({ id: 'pl-new', name: 'Again', dob: '1999-02-02', country: 'GB' }),
+    (e) => e.code === 'PLAYER_ID_RETAINED',
+  );
   assert.equal(t.invariantBreaks(), 0);
   t.close();
 });
@@ -153,22 +290,56 @@ test('player acts: each named act writes its own columns at once and the table j
   assert.equal(t.players.update, undefined);
   const before = t.players.byId('pl-seeded');
   const after = t.players.setAvailability('pl-seeded', { availability: 'loan_open' });
-  assert.equal(after.availability, 'loan_open'); assert.equal(after.contractStatus, before.contractStatus, 'an absent field is kept');
-  const s = second(t.dir); assert.equal(s.prepare("SELECT availability FROM players WHERE id = 'pl-seeded'").get().availability, 'loan_open', 'written at once'); s.close();
-  assert.deepEqual(Object.fromEntries(['availability', 'contractStatus'].map((k) => [k, t.players.setAvailability('pl-seeded', { availability: 'not_seeking', contractStatus: 'free_agent' })[k]])), { availability: 'not_seeking', contractStatus: 'free_agent' });
-  assert.equal(t.players.setMedicalSharing('pl-seeded', false).medical.records.length, before.medical.records.length, 'the medical records stay');
+  assert.equal(after.availability, 'loan_open');
+  assert.equal(after.contractStatus, before.contractStatus, 'an absent field is kept');
+  const s = second(t.dir);
+  assert.equal(
+    s.prepare("SELECT availability FROM players WHERE id = 'pl-seeded'").get().availability,
+    'loan_open',
+    'written at once',
+  );
+  s.close();
+  assert.deepEqual(
+    Object.fromEntries(
+      ['availability', 'contractStatus'].map((k) => [
+        k,
+        t.players.setAvailability('pl-seeded', { availability: 'not_seeking', contractStatus: 'free_agent' })[k],
+      ]),
+    ),
+    { availability: 'not_seeking', contractStatus: 'free_agent' },
+  );
+  assert.equal(
+    t.players.setMedicalSharing('pl-seeded', false).medical.records.length,
+    before.medical.records.length,
+    'the medical records stay',
+  );
   assert.equal(t.players.setLevel('pl-seeded', 'semi_pro').level, 'semi_pro');
   assert.deepEqual(t.players.setLocation('pl-seeded', { lat: 51.5, lng: -0.1 }).location, { lat: 51.5, lng: -0.1 });
 
   // Stats: the given fields replace theirs, the others stay, and the three counts read 0 once anything is recorded.
   t.players.recordStats('pl-adult', { paceKmh: 30 });
-  assert.equal(t.players.recordStats('pl-adult', { appearances: undefined }).stats.appearances, 0, 'an undefined stat is an absent one');
-  assert.deepEqual(t.players.recordStats('pl-adult', { goals: 3 }).stats, { appearances: 0, goals: 3, assists: 0, paceKmh: 30, passCompletionPct: null, duelSuccessPct: null, cleanSheets: null });
+  assert.equal(
+    t.players.recordStats('pl-adult', { appearances: undefined }).stats.appearances,
+    0,
+    'an undefined stat is an absent one',
+  );
+  assert.deepEqual(t.players.recordStats('pl-adult', { goals: 3 }).stats, {
+    appearances: 0,
+    goals: 3,
+    assists: 0,
+    paceKmh: 30,
+    passCompletionPct: null,
+    duelSuccessPct: null,
+    cleanSheets: null,
+  });
 
   // A new track clears the previous track's completed sessions in the same act.
   assert.equal(before.programme.completed.length, 1);
   const started = t.players.startProgramme('pl-seeded', 'midfield', NOW);
-  assert.deepEqual([started.programme.track, started.programme.startedAt, started.programme.completed.length], ['midfield', NOW, 0]);
+  assert.deepEqual(
+    [started.programme.track, started.programme.startedAt, started.programme.completed.length],
+    ['midfield', NOW, 0],
+  );
 
   const prefs = { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' };
   assert.deepEqual(t.players.setNotificationPrefs('pl-adult', prefs).notificationPrefs, prefs);
@@ -184,16 +355,27 @@ test('player acts: each named act writes its own columns at once and the table j
     [() => t.players.recordStats('pl-seeded', { passCompletionPct: 101 }), /stats_pass_completion_pct/],
     [() => t.players.recordStats('pl-seeded', { rating: 9 }), /stats\.rating is not a stat/],
     [() => t.players.recordStats('pl-seeded', { goals: { sql: '99' } }), /stats_goals must be a single value/],
-    [() => t.players.setConditionStatus('pl-seeded', { sql: "'x'" }), /medical_condition_status must be a single value/],
+    [
+      () => t.players.setConditionStatus('pl-seeded', { sql: "'x'" }),
+      /medical_condition_status must be a single value/,
+    ],
     [() => t.players.setNotificationPrefs('pl-seeded', { quietStart: '21:00' }), /notificationPrefs must be/],
-  ]) assert.throws(act, (e) => e.code === 'PLAYER_RECORD_INVALID' && e.message.includes('player pl-seeded') && reason.test(e.message), String(reason));
-  assert.throws(() => t.players.setLevel('pl-none', 'pro'), (e) => e.code === 'PLAYER_NOT_FOUND');
+  ])
+    assert.throws(
+      act,
+      (e) => e.code === 'PLAYER_RECORD_INVALID' && e.message.includes('player pl-seeded') && reason.test(e.message),
+      String(reason),
+    );
+  assert.throws(
+    () => t.players.setLevel('pl-none', 'pro'),
+    (e) => e.code === 'PLAYER_NOT_FOUND',
+  );
   assert.throws(() => t.players.setAvailability('pl-seeded', {}), TypeError);
   assert.equal(t.players.byId('pl-seeded').level, 'semi_pro', 'a refused act wrote nothing');
   t.close();
 });
 
-test('guardian acts: the safeguarding gates only move forward, except Trust & Safety\'s ID review; there is no generic update', () => {
+test("guardian acts: the safeguarding gates only move forward, except Trust & Safety's ID review; there is no generic update", () => {
   const t = boot();
   assert.equal(t.guardians.update, undefined);
   assert.equal(t.guardians.byId('gd-signup').emailVerified, false);
@@ -203,40 +385,81 @@ test('guardian acts: the safeguarding gates only move forward, except Trust & Sa
 
   const first = t.guardians.acceptDisclaimer('gd-signup', 1000);
   assert.deepEqual([first.disclaimerAccepted, first.disclaimerAcceptedAt], [true, 1000]);
-  assert.equal(t.guardians.acceptDisclaimer('gd-signup', 2000).disclaimerAcceptedAt, 1000, 'the first acceptance time is kept');
+  assert.equal(
+    t.guardians.acceptDisclaimer('gd-signup', 2000).disclaimerAcceptedAt,
+    1000,
+    'the first acceptance time is kept',
+  );
   assert.throws(() => t.guardians.acceptDisclaimer('gd-signup', -1), TypeError);
 
   const checked = t.guardians.recordIdCheck('gd-signup', { reference: 'idv-ref-1' });
   assert.deepEqual([checked.idVerified, checked.idvReference], [true, 'idv-ref-1']);
-  assert.throws(() => t.guardians.recordIdCheck('gd-signup', { reference: '' }), (e) => e.code === 'GUARDIAN_RECORD_INVALID');
+  assert.throws(
+    () => t.guardians.recordIdCheck('gd-signup', { reference: '' }),
+    (e) => e.code === 'GUARDIAN_RECORD_INVALID',
+  );
   assert.equal(t.guardians.reviewIdCheck('gd-signup', false).idVerified, false, 'Trust & Safety can revoke');
   assert.equal(t.guardians.reviewIdCheck('gd-signup', true).idVerified, true);
-  assert.throws(() => t.guardians.reviewIdCheck('gd-signup', 'yes'), (e) => e.code === 'GUARDIAN_RECORD_INVALID');
+  assert.throws(
+    () => t.guardians.reviewIdCheck('gd-signup', 'yes'),
+    (e) => e.code === 'GUARDIAN_RECORD_INVALID',
+  );
 
   const prefs = { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' };
   assert.deepEqual(t.guardians.setNotificationPrefs('gd-signup', prefs).notificationPrefs, prefs);
   assert.equal(t.guardians.setNotificationPrefs('gd-signup', null).notificationPrefs, null);
-  assert.throws(() => t.guardians.setNotificationPrefs('gd-signup', { ...prefs, quietStart: '25:00' }), (e) => e.code === 'GUARDIAN_RECORD_INVALID');
-  assert.throws(() => t.guardians.setNotificationPrefs('gd-signup', { quietStart: '21:00' }), (e) => e.code === 'GUARDIAN_RECORD_INVALID');
+  assert.throws(
+    () => t.guardians.setNotificationPrefs('gd-signup', { ...prefs, quietStart: '25:00' }),
+    (e) => e.code === 'GUARDIAN_RECORD_INVALID',
+  );
+  assert.throws(
+    () => t.guardians.setNotificationPrefs('gd-signup', { quietStart: '21:00' }),
+    (e) => e.code === 'GUARDIAN_RECORD_INVALID',
+  );
 
-  for (const act of [(id) => t.guardians.verifyEmail(id), (id) => t.guardians.acceptDisclaimer(id, 1), (id) => t.guardians.recordIdCheck(id, { reference: 'r' }), (id) => t.guardians.reviewIdCheck(id, true), (id) => t.guardians.setNotificationPrefs(id, null)]) {
-    assert.throws(() => act('gd-nobody'), (e) => e.code === 'GUARDIAN_NOT_FOUND');
+  for (const act of [
+    (id) => t.guardians.verifyEmail(id),
+    (id) => t.guardians.acceptDisclaimer(id, 1),
+    (id) => t.guardians.recordIdCheck(id, { reference: 'r' }),
+    (id) => t.guardians.reviewIdCheck(id, true),
+    (id) => t.guardians.setNotificationPrefs(id, null),
+  ]) {
+    assert.throws(
+      () => act('gd-nobody'),
+      (e) => e.code === 'GUARDIAN_NOT_FOUND',
+    );
   }
   t.close();
 });
 
-test('lists: addItem / setItems / patchItem write rows at once and return the stored list; an item the table cannot hold, or a repeated natural key, is refused naming the field and the index; a clip\'s tags are rows', () => {
+test("lists: addItem / setItems / patchItem write rows at once and return the stored list; an item the table cannot hold, or a repeated natural key, is refused naming the field and the index; a clip's tags are rows", () => {
   const t = boot();
   const media = t.players.addItem('pl-adult', 'media', { id: 'med-a', title: 'Clip', url: null, unknownField: 1 });
-  assert.deepEqual(media, [{ id: 'med-a', title: 'Clip', url: null, views: 0, verifiedClip: null, captions: null, tags: {} }], 'an unknown item field is not stored');
+  assert.deepEqual(
+    media,
+    [{ id: 'med-a', title: 'Clip', url: null, views: 0, verifiedClip: null, captions: null, tags: {} }],
+    'an unknown item field is not stored',
+  );
   const tagged = t.players.patchItem('pl-adult', 'media', { id: 'med-a' }, { tags: { pace: 2, vision: 1 } });
   assert.deepEqual(tagged.tags, { pace: 2, vision: 1 });
-  assert.deepEqual(t.all("SELECT tag, count FROM player_media_tags WHERE media_id = 'med-a' ORDER BY position"), [{ tag: 'pace', count: 2 }, { tag: 'vision', count: 1 }]);
+  assert.deepEqual(t.all("SELECT tag, count FROM player_media_tags WHERE media_id = 'med-a' ORDER BY position"), [
+    { tag: 'pace', count: 2 },
+    { tag: 'vision', count: 1 },
+  ]);
   assert.equal(t.players.byMediaId('med-a').id, 'pl-adult');
-  assert.throws(() => t.players.addItem('pl-adult', 'media', { id: 'med-a', title: 'Again' }), (e) => e.code === 'PLAYER_SUBRECORD_INVALID' && /media\[1\] repeats id/.test(e.message));
-  assert.throws(() => t.players.addItem('pl-adult', 'attendance', { id: 'att-x', fixture: 'F' }), /attendance\[0\]\.date is absent/);
+  assert.throws(
+    () => t.players.addItem('pl-adult', 'media', { id: 'med-a', title: 'Again' }),
+    (e) => e.code === 'PLAYER_SUBRECORD_INVALID' && /media\[1\] repeats id/.test(e.message),
+  );
+  assert.throws(
+    () => t.players.addItem('pl-adult', 'attendance', { id: 'att-x', fixture: 'F' }),
+    /attendance\[0\]\.date is absent/,
+  );
   assert.throws(() => t.players.addItem('pl-adult', 'drills', 3), /drills\[0\] is a number, not text/);
-  assert.throws(() => t.players.addItem('pl-adult', 'programme.completed', { sessionId: 's', ts: 1 }), /programme is null/);
+  assert.throws(
+    () => t.players.addItem('pl-adult', 'programme.completed', { sessionId: 's', ts: 1 }),
+    /programme is null/,
+  );
   t.players.setItems('pl-adult', 'badges', ['A', 'A', 'B']);
   assert.deepEqual(t.players.byId('pl-adult').badges, ['A', 'A', 'B'], 'legal duplicates kept, order kept');
   assert.throws(() => t.players.patchItem('pl-adult', 'media', { id: 'nope' }, { views: 1 }), /0 item\(s\) of media/);
@@ -246,18 +469,32 @@ test('lists: addItem / setItems / patchItem write rows at once and return the st
 
 test('links: link / unlink keep both sides together (guardian_id and the primary row), refuse a second primary; ageUp clears the primary only; co-guardians keep listing the player', () => {
   const t = boot();
-  assert.throws(() => t.identity.link('gd-signup', 'pl-child1', 'primary'), (e) => e.code === 'PRIMARY_EXISTS');
+  assert.throws(
+    () => t.identity.link('gd-signup', 'pl-child1', 'primary'),
+    (e) => e.code === 'PRIMARY_EXISTS',
+  );
   t.identity.link('gd-signup', 'pl-adult', 'co');
   assert.deepEqual(t.guardians.linksOf('pl-adult'), [{ guardianId: 'gd-signup', role: 'co' }]);
-  assert.throws(() => t.identity.link('gd-signup', 'pl-adult', 'co'), (e) => e.code === 'LINK_EXISTS');
+  assert.throws(
+    () => t.identity.link('gd-signup', 'pl-adult', 'co'),
+    (e) => e.code === 'LINK_EXISTS',
+  );
   t.identity.unlink('gd-signup', 'pl-adult');
   assert.deepEqual(t.guardians.linksOf('pl-adult'), []);
   t.players.ageUp('pl-grown');
   assert.equal(t.players.byId('pl-grown').guardianId, null);
   assert.deepEqual(t.guardians.byId('gd-primary').childIds, ['pl-child1', 'pl-child2']);
   t.players.ageUp('pl-child1');
-  assert.deepEqual(t.guardians.byId('gd-co').childIds, ['pl-child1', 'pl-child2'], 'the co-guardian keeps listing the player');
-  assert.deepEqual(t.guardians.forPlayer('pl-child2').map((g) => g.id), ['gd-primary', 'gd-co'], 'primary first');
+  assert.deepEqual(
+    t.guardians.byId('gd-co').childIds,
+    ['pl-child1', 'pl-child2'],
+    'the co-guardian keeps listing the player',
+  );
+  assert.deepEqual(
+    t.guardians.forPlayer('pl-child2').map((g) => g.id),
+    ['gd-primary', 'gd-co'],
+    'primary first',
+  );
   assert.equal(t.invariantBreaks(), 0);
   t.close();
 });
@@ -266,134 +503,386 @@ test('erase: the row stays as the retained record (id, deletion instant, birth d
   const t = boot();
   t.players.addItem('pl-child2', 'timeline', { year: '2025', event: 'First match' });
   t.players.erase('pl-child2', { at: NOW });
-  assert.equal(t.players.byId('pl-child2'), null); assert.equal(t.players.exists('pl-child2'), false);
-  assert.deepEqual(t.players.retained('pl-child2'), { id: 'pl-child2', deletedAt: NOW, birthDate: '2016-08-08', country: 'GB' });
-  for (const table of SUBRECORD_TABLES.filter((x) => x !== 'player_media_tags')) assert.equal(t.get(`SELECT COUNT(*) AS n FROM ${table} WHERE player_id = 'pl-child2'`).n, 0, table);
+  assert.equal(t.players.byId('pl-child2'), null);
+  assert.equal(t.players.exists('pl-child2'), false);
+  assert.deepEqual(t.players.retained('pl-child2'), {
+    id: 'pl-child2',
+    deletedAt: NOW,
+    birthDate: '2016-08-08',
+    country: 'GB',
+  });
+  for (const table of SUBRECORD_TABLES.filter((x) => x !== 'player_media_tags'))
+    assert.equal(t.get(`SELECT COUNT(*) AS n FROM ${table} WHERE player_id = 'pl-child2'`).n, 0, table);
   assert.deepEqual(t.guardians.linksOf('pl-child2'), []);
   assert.equal(t.get("SELECT name FROM players WHERE id = 'pl-child2'").name, 'Deleted player');
-  assert.equal(t.players.count(), 4); assert.equal(t.players.retainedCount(), 1);
-  assert.throws(() => t.players.erase('pl-child2'), (e) => e.code === 'PLAYER_ID_RETAINED');
+  assert.equal(t.players.count(), 4);
+  assert.equal(t.players.retainedCount(), 1);
+  assert.throws(
+    () => t.players.erase('pl-child2'),
+    (e) => e.code === 'PLAYER_ID_RETAINED',
+  );
   t.close();
 });
 
 test('units of work: an operation joins the open unit; a refusal or a throw rolls the whole unit back with nothing to restore in memory; an empty unit touches no identity table', () => {
   const t = boot();
-  assert.throws(() => t.unit(() => { t.players.setAvailability('pl-adult', { availability: 'loan_open' }); t.players.addItem('pl-adult', 'badges', 'X'); throw new Error('boom'); }), /boom/);
+  assert.throws(
+    () =>
+      t.unit(() => {
+        t.players.setAvailability('pl-adult', { availability: 'loan_open' });
+        t.players.addItem('pl-adult', 'badges', 'X');
+        throw new Error('boom');
+      }),
+    /boom/,
+  );
   const p = t.players.byId('pl-adult');
-  assert.equal(p.availability, 'not_seeking'); assert.deepEqual(p.badges, []);
-  assert.throws(() => t.unit(() => { t.guardians.create({ id: 'gd-x', name: 'X', email: 'x@example.test' }); t.players.create({ id: 'pl-y', name: 'Y', dob: '2015-01-01', country: 'GB' }); }), (e) => e.code === 'MINOR_WITHOUT_GUARDIAN');
+  assert.equal(p.availability, 'not_seeking');
+  assert.deepEqual(p.badges, []);
+  assert.throws(
+    () =>
+      t.unit(() => {
+        t.guardians.create({ id: 'gd-x', name: 'X', email: 'x@example.test' });
+        t.players.create({ id: 'pl-y', name: 'Y', dob: '2015-01-01', country: 'GB' });
+      }),
+    (e) => e.code === 'MINOR_WITHOUT_GUARDIAN',
+  );
   assert.equal(t.guardians.byId('gd-x'), null, 'the guardian of the refused unit is not there');
   const statements = [];
   const prepare = t.store.sqlite.prepare.bind(t.store.sqlite);
-  t.store.sqlite.prepare = (sql) => { statements.push(sql); return prepare(sql); };
-  try { t.unit(() => {}); } finally { t.store.sqlite.prepare = prepare; }
-  assert.equal(statements.filter((sql) => /\b(players|guardians|guardian_children|player_\w+)\b/.test(sql)).length, 0, 'an empty unit runs no identity statement');
+  t.store.sqlite.prepare = (sql) => {
+    statements.push(sql);
+    return prepare(sql);
+  };
+  try {
+    t.unit(() => {});
+  } finally {
+    t.store.sqlite.prepare = prepare;
+  }
+  assert.equal(
+    statements.filter((sql) => /\b(players|guardians|guardian_children|player_\w+)\b/.test(sql)).length,
+    0,
+    'an empty unit runs no identity statement',
+  );
   t.close();
 });
 
 // ------------------------------------------------------------------ reads
-test('scans: visibleCandidates applies the under-18 wall (by the country\'s age of majority) for an organisation that cannot see minors, and the grassroots radius; the directory filters are SQL; a batch scan visits every admitted player once', () => {
+test("scans: visibleCandidates applies the under-18 wall (by the country's age of majority) for an organisation that cannot see minors, and the grassroots radius; the directory filters are SQL; a batch scan visits every admitted player once", () => {
   const t = boot();
   const kr17 = bornByForAge(18, NOW); // 18 today: a minor in KR (19), an adult in GB (18)
   t.players.create({ id: 'pl-kr', name: 'Seoul Player', dob: kr17, country: 'KR', guardianId: 'gd-signup' });
-  t.players.create({ id: 'pl-gb18', name: 'Leeds Player', dob: kr17, country: 'GB', location: { lat: 53.81, lng: -1.56 }, level: 'semi_pro', position: 'CB' });
-  t.players.create({ id: 'pl-far', name: 'Far Player', dob: '1995-01-01', country: 'GB', location: { lat: 51.5, lng: -0.12 } });
-  const ids = (org, f) => t.players.visibleCandidates(orgOf(t, org), f).map((p) => p.id).sort();
+  t.players.create({
+    id: 'pl-gb18',
+    name: 'Leeds Player',
+    dob: kr17,
+    country: 'GB',
+    location: { lat: 53.81, lng: -1.56 },
+    level: 'semi_pro',
+    position: 'CB',
+  });
+  t.players.create({
+    id: 'pl-far',
+    name: 'Far Player',
+    dob: '1995-01-01',
+    country: 'GB',
+    location: { lat: 51.5, lng: -0.12 },
+  });
+  const ids = (org, f) =>
+    t.players
+      .visibleCandidates(orgOf(t, org), f)
+      .map((p) => p.id)
+      .sort();
   const adultsAll = ['pl-adult', 'pl-far', 'pl-gb18', 'pl-grown', 'pl-seeded'].sort();
   assert.deepEqual(ids('org-agency'), adultsAll, 'an agency sees adults only (the KR 18-year-old is a minor)');
   assert.deepEqual(ids('org-unverified'), adultsAll, 'an unverified club too');
-  assert.deepEqual(ids('org-pro'), [...adultsAll, 'pl-child1', 'pl-child2', 'pl-kr'].sort(), 'a verified club may see minors');
-  assert.deepEqual(ids('org-grass'), ['pl-adult', 'pl-gb18'], 'a grassroots club: not pro, within 50 km of its ground, exactly (Manchester is inside the index box but beyond the radius)');
+  assert.deepEqual(
+    ids('org-pro'),
+    [...adultsAll, 'pl-child1', 'pl-child2', 'pl-kr'].sort(),
+    'a verified club may see minors',
+  );
+  assert.deepEqual(
+    ids('org-grass'),
+    ['pl-adult', 'pl-gb18'],
+    'a grassroots club: not pro, within 50 km of its ground, exactly (Manchester is inside the index box but beyond the radius)',
+  );
   assert.deepEqual(ids('org-pro', { position: 'CB' }), ['pl-gb18']);
-  assert.deepEqual(ids('org-pro', { ageBelow: 18 }), ['pl-child1', 'pl-child2'].sort(), 'ageBelow is exactly ageOn\'s rule');
+  assert.deepEqual(
+    ids('org-pro', { ageBelow: 18 }),
+    ['pl-child1', 'pl-child2'].sort(),
+    "ageBelow is exactly ageOn's rule",
+  );
   assert.deepEqual(ids('org-pro', { ageAtLeast: 18, ageBelow: 19 }), ['pl-gb18', 'pl-kr'].sort());
-  assert.deepEqual(ids('org-pro', { createdSince: NOW - 1 }), [], 'seed players and new ones without createdAt are not new');
-  const seen = []; t.players.scan({}, (p) => { seen.push(p.id); }); assert.equal(seen.length, t.players.count());
-  const two = []; t.players.scan({}, (p) => { two.push(p.id); return two.length < 2; }); assert.equal(two.length, 2, 'returning false stops the scan');
+  assert.deepEqual(
+    ids('org-pro', { createdSince: NOW - 1 }),
+    [],
+    'seed players and new ones without createdAt are not new',
+  );
+  const seen = [];
+  t.players.scan({}, (p) => {
+    seen.push(p.id);
+  });
+  assert.equal(seen.length, t.players.count());
+  const two = [];
+  t.players.scan({}, (p) => {
+    two.push(p.id);
+    return two.length < 2;
+  });
+  assert.equal(two.length, 2, 'returning false stops the scan');
   t.close();
 });
 
 test('players.profile_signal is computeTrustScore of the record after every kind of write (create, the named acts, addItem, setItems, the seed import), and no act takes it as a field', () => {
   const t = boot();
-  const check = (label) => { for (const p of t.players.list({})) assert.equal(t.get('SELECT profile_signal AS v FROM players WHERE id = ?', p.id).v, computeTrustScore(p), `${label}: ${p.id}`); };
+  const check = (label) => {
+    for (const p of t.players.list({}))
+      assert.equal(
+        t.get('SELECT profile_signal AS v FROM players WHERE id = ?', p.id).v,
+        computeTrustScore(p),
+        `${label}: ${p.id}`,
+      );
+  };
   check('the seed import');
-  t.players.create({ id: 'pl-new', name: 'New Player', dob: '1999-01-01', country: 'GB', position: 'CM', foot: 'left', heightCm: 175, weightKg: 70, stats: { appearances: 3 } });
+  t.players.create({
+    id: 'pl-new',
+    name: 'New Player',
+    dob: '1999-01-01',
+    country: 'GB',
+    position: 'CM',
+    foot: 'left',
+    heightCm: 175,
+    weightKg: 70,
+    stats: { appearances: 3 },
+  });
   check('create (a complete profile)');
   t.players.recordStats('pl-new', { goals: 4 });
   check('an act (stats)');
-  for (let i = 0; i < 7; i += 1) t.players.addItem('pl-new', 'media', { id: `med-n${i}`, title: `Clip ${i}`, kind: 'video', uploadedAt: new Date(NOW).toISOString(), url: null, views: 0, tags: {}, verifiedClip: null });
+  for (let i = 0; i < 7; i += 1)
+    t.players.addItem('pl-new', 'media', {
+      id: `med-n${i}`,
+      title: `Clip ${i}`,
+      kind: 'video',
+      uploadedAt: new Date(NOW).toISOString(),
+      url: null,
+      views: 0,
+      tags: {},
+      verifiedClip: null,
+    });
   check('addItem (clips, past the cap)');
-  t.players.setItems('pl-new', 'attendance', [{ id: 'att-n1', fixture: 'Cup', venue: 'Ground', date: '2026-01-01', verified: true }]);
+  t.players.setItems('pl-new', 'attendance', [
+    { id: 'att-n1', fixture: 'Cup', venue: 'Ground', date: '2026-01-01', verified: true },
+  ]);
   check('setItems (attendance)');
   t.players.setItems('pl-new', 'media', []);
   check('setItems (clips cleared)');
-  assert.throws(() => t.players.addItem('pl-new', 'media', { id: 'med-bad', title: 'Bad', kind: 'video', uploadedAt: '1 May 2026' }), /uploadedAt is not a UTC instant/, 'a clip\'s upload time is an ISO instant');
+  assert.throws(
+    () =>
+      t.players.addItem('pl-new', 'media', { id: 'med-bad', title: 'Bad', kind: 'video', uploadedAt: '1 May 2026' }),
+    /uploadedAt is not a UTC instant/,
+    "a clip's upload time is an ISO instant",
+  );
   t.close();
 });
 
-test('the directory page is exact and in its declared order: the whole visibility rule in SQL (the wall, the 50 km radius on both sides of ±180°, the blocks), the search over name, country and an adult\'s city (as JavaScript lowers text), and cursor pages that lose and repeat nobody at any size', () => {
+test("the directory page is exact and in its declared order: the whole visibility rule in SQL (the wall, the 50 km radius on both sides of ±180°, the blocks), the search over name, country and an adult's city (as JavaScript lowers text), and cursor pages that lose and repeat nobody at any size", () => {
   const t = boot();
-  for (let i = 0; i < 23; i += 1) t.players.create({ id: `pl-d${String(i).padStart(2, '0')}`, name: `Dir ${i}`, dob: '1998-02-02', country: i % 2 ? 'GB' : 'ES', city: i === 4 ? 'Ávila' : null, academyPlus: i % 5 === 0, identityVerified: i % 3 === 0, firstTeamSeeker: i % 4 === 0, location: { lat: 53.8 + i * 0.01, lng: -1.55 } });
-  t.layer.safetyAudit.blocks.add({ id: 'blk-1', playerId: 'pl-d07', orgId: 'org-pro', by: 'player', reason: 'synthetic', ts: NOW });
-  const walk = (org, filter, limit) => { const out = []; let after = null; for (;;) { const pg = t.players.directoryPage(orgOf(t, org), filter, { limit, after }); out.push(...pg.items.map((p) => p.id)); if (!pg.nextCursor) return out; after = JSON.parse(Buffer.from(pg.nextCursor, 'base64url').toString()); } };
+  for (let i = 0; i < 23; i += 1)
+    t.players.create({
+      id: `pl-d${String(i).padStart(2, '0')}`,
+      name: `Dir ${i}`,
+      dob: '1998-02-02',
+      country: i % 2 ? 'GB' : 'ES',
+      city: i === 4 ? 'Ávila' : null,
+      academyPlus: i % 5 === 0,
+      identityVerified: i % 3 === 0,
+      firstTeamSeeker: i % 4 === 0,
+      location: { lat: 53.8 + i * 0.01, lng: -1.55 },
+    });
+  t.layer.safetyAudit.blocks.add({
+    id: 'blk-1',
+    playerId: 'pl-d07',
+    orgId: 'org-pro',
+    by: 'player',
+    reason: 'synthetic',
+    ts: NOW,
+  });
+  const walk = (org, filter, limit) => {
+    const out = [];
+    let after = null;
+    for (;;) {
+      const pg = t.players.directoryPage(orgOf(t, org), filter, { limit, after });
+      out.push(...pg.items.map((p) => p.id));
+      if (!pg.nextCursor) return out;
+      after = JSON.parse(Buffer.from(pg.nextCursor, 'base64url').toString());
+    }
+  };
   const viewOrder = (org) => {
     const o = orgOf(t, org);
     const all = t.players.list({}).filter((p) => visibleToOrg(p, o) && !t.layer.safetyAudit.blocks.has(p.id, o.id));
     const dist = (p) => Math.round(haversineKm(o.location, p.location) * 10);
-    return all.sort((a, b) => (o.level === 'grassroots'
-      ? (b.firstTeamSeeker - a.firstTeamSeeker) || (dist(a) - dist(b)) || (computeTrustScore(b) - computeTrustScore(a))
-      : (b.academyPlus - a.academyPlus) || (computeTrustScore(b) - computeTrustScore(a))) || (a.id < b.id ? -1 : 1)).map((p) => p.id);
+    return all
+      .sort(
+        (a, b) =>
+          (o.level === 'grassroots'
+            ? b.firstTeamSeeker - a.firstTeamSeeker || dist(a) - dist(b) || computeTrustScore(b) - computeTrustScore(a)
+            : b.academyPlus - a.academyPlus || computeTrustScore(b) - computeTrustScore(a)) || (a.id < b.id ? -1 : 1),
+      )
+      .map((p) => p.id);
   };
   for (const org of ['org-pro', 'org-agency', 'org-grass']) {
     const expected = viewOrder(org);
     for (const limit of [1, 4, 50]) assert.deepEqual(walk(org, {}, limit), expected, `${org}, pages of ${limit}`);
   }
-  assert.ok(!walk('org-pro', {}, 50).includes('pl-d07') && walk('org-agency', {}, 50).includes('pl-d07'), 'a block hides the player from the organisation it names only');
-  assert.deepEqual(walk('org-pro', { text: 'ávi' }, 50), ['pl-d04'], 'an accented city matched as JavaScript lowers it');
+  assert.ok(
+    !walk('org-pro', {}, 50).includes('pl-d07') && walk('org-agency', {}, 50).includes('pl-d07'),
+    'a block hides the player from the organisation it names only',
+  );
+  assert.deepEqual(
+    walk('org-pro', { text: 'ávi' }, 50),
+    ['pl-d04'],
+    'an accented city matched as JavaScript lowers it',
+  );
   assert.deepEqual(walk('org-pro', { text: 'child pl-child1' }, 50), ['pl-child1'], 'a name');
   assert.deepEqual(walk('org-pro', { text: 'nowhere' }, 50), [], 'nothing');
   t.store.sqlite.prepare("UPDATE players SET city = 'Hiddenham' WHERE id = 'pl-child1'").run();
-  assert.deepEqual(walk('org-pro', { text: 'hiddenham' }, 50), [], 'a minor\'s city is never shown, so never matched');
+  assert.deepEqual(walk('org-pro', { text: 'hiddenham' }, 50), [], "a minor's city is never shown, so never matched");
   // The antimeridian: a club at 179.9°E sees a player 20 km away at 179.9°W, and not one 60 km away.
-  t.layer.orgs.create({ id: 'org-fiji', name: 'Taveuni FC', type: 'club', level: 'grassroots', plan: 'Grassroots', country: 'FJ', verified: true, location: { lat: -16.8, lng: 179.9, city: 'Waiyevo' } });
-  t.players.create({ id: 'pl-east', name: 'Across The Line', dob: '1990-01-01', country: 'FJ', location: { lat: -16.8, lng: -179.99 } });
-  t.players.create({ id: 'pl-far-east', name: 'Too Far', dob: '1990-01-01', country: 'FJ', location: { lat: -16.8, lng: -179.5 } });
+  t.layer.orgs.create({
+    id: 'org-fiji',
+    name: 'Taveuni FC',
+    type: 'club',
+    level: 'grassroots',
+    plan: 'Grassroots',
+    country: 'FJ',
+    verified: true,
+    location: { lat: -16.8, lng: 179.9, city: 'Waiyevo' },
+  });
+  t.players.create({
+    id: 'pl-east',
+    name: 'Across The Line',
+    dob: '1990-01-01',
+    country: 'FJ',
+    location: { lat: -16.8, lng: -179.99 },
+  });
+  t.players.create({
+    id: 'pl-far-east',
+    name: 'Too Far',
+    dob: '1990-01-01',
+    country: 'FJ',
+    location: { lat: -16.8, lng: -179.5 },
+  });
   assert.deepEqual(walk('org-fiji', {}, 50), ['pl-east'], 'the radius holds across ±180°');
   t.close();
 });
 
-test('the light scan, the Film Room clip page, the fixture graph, the feed\'s recent rows and the drill bests read what the decoded records say', () => {
+test("the light scan, the Film Room clip page, the fixture graph, the feed's recent rows and the drill bests read what the decoded records say", () => {
   const t = boot();
   const pro = orgOf(t, 'org-pro');
-  const light = []; t.players.scanLight({ visibleTo: pro }, (p) => { light.push(p); });
-  assert.deepEqual(light.map((p) => p.id), t.players.visibleCandidates(pro).map((p) => p.id), 'the same players, in creation order');
-  for (const p of light) { const full = t.players.byId(p.id); assert.equal(p.profileSignal, computeTrustScore(full)); for (const k of ['name', 'dob', 'position', 'foot', 'heightCm', 'weightKg', 'level']) assert.deepEqual(p[k], full[k], `${p.id}.${k}`); assert.deepEqual(p.stats, full.stats); assert.equal(p.media, undefined, 'no lists on a light record'); }
-  t.players.addItem('pl-adult', 'media', { id: 'med-a1', title: 'Played', kind: 'video', uploadedAt: new Date(NOW - 86_400_000).toISOString(), url: 'https://media.test/a1', views: 9, tags: {}, verifiedClip: null });
-  t.players.addItem('pl-adult', 'media', { id: 'med-a2', title: 'Verified', kind: 'video', uploadedAt: new Date(NOW - 2 * 86_400_000).toISOString(), url: 'https://media.test/a2', views: 1, tags: {}, verifiedClip: 'att-x' });
-  t.players.addItem('pl-adult', 'media', { id: 'med-a3', title: 'No url', kind: 'video', uploadedAt: new Date(NOW).toISOString(), url: null, views: 50, tags: {}, verifiedClip: null });
-  const deck = []; let after = null; for (;;) { const pg = t.players.clipPage(pro, { limit: 1, after }); deck.push(...pg.items.map((x) => x.media.id)); if (!pg.nextCursor) break; after = JSON.parse(Buffer.from(pg.nextCursor, 'base64url').toString()); }
+  const light = [];
+  t.players.scanLight({ visibleTo: pro }, (p) => {
+    light.push(p);
+  });
+  assert.deepEqual(
+    light.map((p) => p.id),
+    t.players.visibleCandidates(pro).map((p) => p.id),
+    'the same players, in creation order',
+  );
+  for (const p of light) {
+    const full = t.players.byId(p.id);
+    assert.equal(p.profileSignal, computeTrustScore(full));
+    for (const k of ['name', 'dob', 'position', 'foot', 'heightCm', 'weightKg', 'level'])
+      assert.deepEqual(p[k], full[k], `${p.id}.${k}`);
+    assert.deepEqual(p.stats, full.stats);
+    assert.equal(p.media, undefined, 'no lists on a light record');
+  }
+  t.players.addItem('pl-adult', 'media', {
+    id: 'med-a1',
+    title: 'Played',
+    kind: 'video',
+    uploadedAt: new Date(NOW - 86_400_000).toISOString(),
+    url: 'https://media.test/a1',
+    views: 9,
+    tags: {},
+    verifiedClip: null,
+  });
+  t.players.addItem('pl-adult', 'media', {
+    id: 'med-a2',
+    title: 'Verified',
+    kind: 'video',
+    uploadedAt: new Date(NOW - 2 * 86_400_000).toISOString(),
+    url: 'https://media.test/a2',
+    views: 1,
+    tags: {},
+    verifiedClip: 'att-x',
+  });
+  t.players.addItem('pl-adult', 'media', {
+    id: 'med-a3',
+    title: 'No url',
+    kind: 'video',
+    uploadedAt: new Date(NOW).toISOString(),
+    url: null,
+    views: 50,
+    tags: {},
+    verifiedClip: null,
+  });
+  const deck = [];
+  let after = null;
+  for (;;) {
+    const pg = t.players.clipPage(pro, { limit: 1, after });
+    deck.push(...pg.items.map((x) => x.media.id));
+    if (!pg.nextCursor) break;
+    after = JSON.parse(Buffer.from(pg.nextCursor, 'base64url').toString());
+  }
   assert.deepEqual(deck, ['med-a2', 'med-a1'], 'playable clips only, verified first, then views');
   const groups = t.players.fixturePage(pro, { limit: 50, after: null }).items;
-  assert.deepEqual(groups.map((g) => [g.fixture, g.date, g.venue, g.players.map((p) => p.id)]), [['Cup Final', '2026-06-01', 'Hough End', ['pl-seeded']]]);
-  assert.equal(t.players.fixturePage(orgOf(t, 'org-grass'), { limit: 50, after: null }).items.length, 0, 'Manchester is beyond the Leeds club\'s radius');
+  assert.deepEqual(
+    groups.map((g) => [g.fixture, g.date, g.venue, g.players.map((p) => p.id)]),
+    [['Cup Final', '2026-06-01', 'Hough End', ['pl-seeded']]],
+  );
+  assert.equal(
+    t.players.fixturePage(orgOf(t, 'org-grass'), { limit: 50, after: null }).items.length,
+    0,
+    "Manchester is beyond the Leeds club's radius",
+  );
   const recent = t.players.recentFor(pro, NOW - 3 * 86_400_000, 40);
-  assert.deepEqual(recent.clips.map((c) => c.media.id), ['med-a3', 'med-a1', 'med-a2'], 'clips uploaded since, newest first');
+  assert.deepEqual(
+    recent.clips.map((c) => c.media.id),
+    ['med-a3', 'med-a1', 'med-a2'],
+    'clips uploaded since, newest first',
+  );
   assert.deepEqual(recent.players, [], 'no player created in the window');
   const bests = t.players.drillBests({ notLevel: 'pro' });
   assert.deepEqual(bests.get('drill-sprint'), [{ playerId: 'pl-seeded', max: 4.2, min: 4.2 }]);
   t.close();
 });
 
-test('lookups: byExternalId and byNameAndDob (the import\'s identity match), byGuardian, the admin guardians page by cursor', () => {
+test("lookups: byExternalId and byNameAndDob (the import's identity match), byGuardian, the admin guardians page by cursor", () => {
   const t = boot();
-  t.players.addItem('pl-seeded', 'externalIds', { provider: 'fa', externalId: 'X1', source: 'import:b1', at: NOW, reviewId: 'rev-1' });
+  t.players.addItem('pl-seeded', 'externalIds', {
+    provider: 'fa',
+    externalId: 'X1',
+    source: 'import:b1',
+    at: NOW,
+    reviewId: 'rev-1',
+  });
   assert.equal(t.players.byExternalId('fa', 'X1').id, 'pl-seeded');
-  assert.deepEqual(t.players.byId('pl-seeded').externalIds, [{ provider: 'fa', externalId: 'X1', source: 'import:b1', at: NOW, reviewId: 'rev-1' }]);
+  assert.deepEqual(t.players.byId('pl-seeded').externalIds, [
+    { provider: 'fa', externalId: 'X1', source: 'import:b1', at: NOW, reviewId: 'rev-1' },
+  ]);
   assert.equal(t.players.byExternalId('fa', 'X2'), null);
-  assert.equal(t.players.byNameAndDob('SEEDED ADULT', '2004-03-14').id, 'pl-seeded', 'the name compared case-insensitively');
-  assert.deepEqual(t.players.byGuardian('gd-primary').map((p) => p.id), ['pl-child1', 'pl-child2', 'pl-grown']);
+  assert.equal(
+    t.players.byNameAndDob('SEEDED ADULT', '2004-03-14').id,
+    'pl-seeded',
+    'the name compared case-insensitively',
+  );
+  assert.deepEqual(
+    t.players.byGuardian('gd-primary').map((p) => p.id),
+    ['pl-child1', 'pl-child2', 'pl-grown'],
+  );
   const first = t.guardians.page({ limit: 2 });
-  assert.deepEqual(first.items.map((g) => g.id), ['gd-primary', 'gd-co']);
+  assert.deepEqual(
+    first.items.map((g) => g.id),
+    ['gd-primary', 'gd-co'],
+  );
   assert.ok(first.nextCursor);
   t.close();
 });
@@ -403,15 +892,41 @@ test('read back: every live record with its hashes and no derived lists, a retai
   t.players.erase('pl-child2', { at: NOW });
   const back = readRecords(t.dir);
   const p = back.players.find((x) => x.id === 'pl-adult');
-  assert.equal(p.password, 'scrypt$aa$bb'); assert.equal('trialReports' in p, false);
+  assert.equal(p.password, 'scrypt$aa$bb');
+  assert.equal('trialReports' in p, false);
   const g = back.guardians.find((x) => x.id === 'gd-signup');
-  assert.equal(g.emailCodeHash.length, 64); assert.equal('coGuardians' in g, false);
-  assert.equal(back.players.some((x) => x.id === 'pl-child2'), false, 'a retained record is not a player');
-  assert.equal(t.get("SELECT deleted_at FROM players WHERE id = 'pl-child2'").deleted_at, NOW, 'the retained row is kept');
+  assert.equal(g.emailCodeHash.length, 64);
+  assert.equal('coGuardians' in g, false);
+  assert.equal(
+    back.players.some((x) => x.id === 'pl-child2'),
+    false,
+    'a retained record is not a player',
+  );
+  assert.equal(
+    t.get("SELECT deleted_at FROM players WHERE id = 'pl-child2'").deleted_at,
+    NOW,
+    'the retained row is kept',
+  );
   const before = JSON.stringify(t.all('SELECT * FROM players ORDER BY rowid'));
   // (A created record carries no password field: the hash is written by its own operation.)
-  assert.throws(() => writeFixture(t.dir, { players: [{ ...child('pl-child2', 'gd-primary', '2016-08-08'), password: undefined }] }, { now: NOW }), (e) => e.code === 'PLAYER_ID_RETAINED' && /player pl-child2 was deleted and its id is retained/.test(e.message));
-  assert.throws(() => writeFixture(t.dir, { players: [{ ...adult(), id: 'pl-adult2', password: undefined, heightCm: 'tall' }] }, { now: NOW }), (e) => e.code === 'PLAYER_RECORD_INVALID' && /pl-adult2\): heightCm must be a whole number/.test(e.message));
+  assert.throws(
+    () =>
+      writeFixture(
+        t.dir,
+        { players: [{ ...child('pl-child2', 'gd-primary', '2016-08-08'), password: undefined }] },
+        { now: NOW },
+      ),
+    (e) => e.code === 'PLAYER_ID_RETAINED' && /player pl-child2 was deleted and its id is retained/.test(e.message),
+  );
+  assert.throws(
+    () =>
+      writeFixture(
+        t.dir,
+        { players: [{ ...adult(), id: 'pl-adult2', password: undefined, heightCm: 'tall' }] },
+        { now: NOW },
+      ),
+    (e) => e.code === 'PLAYER_RECORD_INVALID' && /pl-adult2\): heightCm must be a whole number/.test(e.message),
+  );
   assert.equal(JSON.stringify(t.all('SELECT * FROM players ORDER BY rowid')), before, 'nothing was written');
   t.close();
 });

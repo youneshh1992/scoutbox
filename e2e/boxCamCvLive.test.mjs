@@ -36,18 +36,32 @@ const PLAYER_PORT = 8921;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-boxcamcvlive-'));
 const CAM = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-boxcamcv-camera-'));
 
-let passed = 0, negatives = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const bad = (m) => { console.error(`✗ ${m}`); process.exitCode = 1; };
+let passed = 0,
+  negatives = 0;
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const bad = (m) => {
+  console.error(`✗ ${m}`);
+  process.exitCode = 1;
+};
 const ok = (cond, m) => (cond ? say(m) : bad(m));
-const neg = (cond, m) => { negatives++; ok(cond, `[neg] ${m}`); };
+const neg = (cond, m) => {
+  negatives++;
+  ok(cond, `[neg] ${m}`);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (o) => JSON.stringify(o);
 
 /** Nothing on any Box Cam surface may claim these. */
 const FORBIDDEN = [
-  /Combine Verified/i, /verifies football ability/i, /AI scout/i,
-  /Player Rating/i, /Match Score/i, /Potential/i,
+  /Combine Verified/i,
+  /verifies football ability/i,
+  /AI scout/i,
+  /Player Rating/i,
+  /Match Score/i,
+  /Potential/i,
 ];
 
 for (const port of [API_PORT, PLAYER_PORT]) {
@@ -57,7 +71,10 @@ for (const port of [API_PORT, PLAYER_PORT]) {
     probe.once('listening', () => probe.close(() => resolve(true)));
     probe.listen(port, '127.0.0.1');
   });
-  if (!free) { console.error(`✗ port ${port} is in use — kill the stale process and re-run.`); process.exit(1); }
+  if (!free) {
+    console.error(`✗ port ${port} is in use — kill the stale process and re-run.`);
+    process.exit(1);
+  }
 }
 
 // ------------------------------------------------------------ fixtures
@@ -69,7 +86,8 @@ console.log(J(await writeY4m({ outPath: darkCam, serverRoot: SERVER_ROOT, scene:
 
 console.log(`building the player app for :${API_PORT}…`);
 execSync(`EXPO_PUBLIC_API_URL=${API} npx expo export --clear --platform web --output-dir dist-live-boxcam-cv`, {
-  cwd: path.join(ROOT, 'scoutbox-player'), stdio: 'pipe',
+  cwd: path.join(ROOT, 'scoutbox-player'),
+  stdio: 'pipe',
 });
 
 const serverProc = spawn('node', ['server.mjs'], {
@@ -81,11 +99,22 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml', '.ttf': 'font/ttf' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+    '.svg': 'image/svg+xml',
+    '.ttf': 'font/ttf',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -100,18 +129,45 @@ serveDir('scoutbox-player/dist-live-boxcam-cv', PLAYER_PORT);
 
 let browser = null;
 const cleanup = () => {
-  try { browser?.close(); } catch { /* gone */ }
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
+  try {
+    browser?.close();
+  } catch {
+    /* gone */
+  }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
   for (const s of statics) s.close();
   fs.rmSync(DATA, { recursive: true, force: true });
   fs.rmSync(CAM, { recursive: true, force: true });
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
-process.on('uncaughtException', (e) => { console.error(e); cleanup(); process.exit(1); });
-process.on('unhandledRejection', (e) => { console.error(e); cleanup(); process.exit(1); });
+for (const sig of ['SIGINT', 'SIGTERM'])
+  process.on(sig, () => {
+    cleanup();
+    process.exit(130);
+  });
+process.on('uncaughtException', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
 
-for (let i = 0; i < 200; i++) { try { if ((await fetch(`${API}/healthz`)).ok) break; } catch { /* booting */ } await sleep(250); }
+for (let i = 0; i < 200; i++) {
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {
+    /* booting */
+  }
+  await sleep(250);
+}
 console.log(`backend up on :${API_PORT}`);
 
 const j = async (method, p, body, token) => {
@@ -166,7 +222,9 @@ const cvText = (page) => page.locator('[data-testid="m22-cv"]').innerText();
 /** Wait for the attempt to reach a decided outcome, either way. */
 async function waitForOutcome(page, timeout = 60000) {
   const card = page.locator('[data-testid="m22-cv"]');
-  await card.getByText(/Box Cam observed|Could not verify|unavailable right now/i).first()
+  await card
+    .getByText(/Box Cam observed|Could not verify|unavailable right now/i)
+    .first()
     .waitFor({ timeout });
 }
 
@@ -181,8 +239,10 @@ async function waitForOutcome(page, timeout = 60000) {
   ok(/Ready check/i.test(body), 'C1 the Ready Check renders in the real app');
   ok(/Camera/i.test(body) && /Ball visible/i.test(body), 'C1 individual check statuses are listed');
   ok(/Box Cam observation/i.test(body), 'C1 observation readiness is stated');
-  neg(/Combine verification/i.test(body) && /Not yet available/i.test(body),
-    'C1 and Combine verification is shown as NOT YET AVAILABLE on the same screen');
+  neg(
+    /Combine verification/i.test(body) && /Not yet available/i.test(body),
+    'C1 and Combine verification is shown as NOT YET AVAILABLE on the same screen',
+  );
   neg(/real.world|validation/i.test(body), 'C1 with the reason given in plain words');
 
   // The marketing claim must not appear anywhere on the surface.
@@ -204,17 +264,22 @@ let liveResult = null;
   const { ctx, page } = await playerPage();
   await openCv(page);
 
-  await page.getByRole('button', { name: /^Start$/ }).first().click();
+  await page
+    .getByRole('button', { name: /^Start$/ })
+    .first()
+    .click();
   await page.waitForSelector('text=Observing', { timeout: 30000 });
   say('C3 the attempt starts and the app reports it is observing');
 
   const duringAttempt = await cvText(page);
-  neg(!/Touches counted/i.test(duringAttempt),
-    'C3/§77 no live exact count is shown during the attempt');
+  neg(!/Touches counted/i.test(duringAttempt), 'C3/§77 no live exact count is shown during the attempt');
 
   // Let real frames flow over the real transport.
   await sleep(4000);
-  await page.getByRole('button', { name: /Finish/i }).first().click();
+  await page
+    .getByRole('button', { name: /Finish/i })
+    .first()
+    .click();
   await waitForOutcome(page);
 
   const after = await cvText(page);
@@ -224,22 +289,29 @@ let liveResult = null;
   // fake camera is a downscaled synthetic scene and the product only promises that
   // Box Cam observed "may succeed if its independent gate permits".
   const refusalLine = (after.match(/Could not verify[\s\S]{0,160}/i) ?? [''])[0].replace(/\s+/g, ' ').trim();
-  ok(observed || refused,
-    `C3 the attempt reaches a decided outcome (${observed ? 'observed' : `refused — ${refusalLine.slice(0, 120)}`})`);
+  ok(
+    observed || refused,
+    `C3 the attempt reaches a decided outcome (${observed ? 'observed' : `refused — ${refusalLine.slice(0, 120)}`})`,
+  );
 
   // MANDATORY. Whatever the outcome, Combine stays closed.
-  neg(/Combine verification/i.test(after) && /not available|Not yet available/i.test(after),
-    'C6 (MANDATORY) after a full live observation, Combine verification is still unavailable');
-  neg((after.match(/Combine Verified/gi) ?? []).length === 0,
-    'C6 and nothing on the result claims Combine Verified');
+  neg(
+    /Combine verification/i.test(after) && /not available|Not yet available/i.test(after),
+    'C6 (MANDATORY) after a full live observation, Combine verification is still unavailable',
+  );
+  neg((after.match(/Combine Verified/gi) ?? []).length === 0, 'C6 and nothing on the result claims Combine Verified');
 
   // The server's own record for this session.
   const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
   const caps = (await j('GET', '/capabilities')).body;
-  neg(caps.capabilities.production_cv.combineVerifiedProtocols.length === 0,
-    'C6 /capabilities reports combineVerifiedProtocols: []');
-  neg(caps.capabilities.production_cv.realWorldValidation === 'not_completed',
-    'C6 and real-world validation as not_completed');
+  neg(
+    caps.capabilities.production_cv.combineVerifiedProtocols.length === 0,
+    'C6 /capabilities reports combineVerifiedProtocols: []',
+  );
+  neg(
+    caps.capabilities.production_cv.realWorldValidation === 'not_completed',
+    'C6 and real-world validation as not_completed',
+  );
   liveResult = { token: kola.token };
 
   // The experimental count is behind a disclosure, not the headline.
@@ -272,17 +344,25 @@ let liveResult = null;
   await page.getByRole('tab', { name: 'Box Cam' }).click();
   await page.waitForSelector('[data-testid="boxcam-start"]', { timeout: 30000 }); // the session-led root
   await openCv(page);
-  await page.getByRole('button', { name: /^Start$/ }).first().click();
+  await page
+    .getByRole('button', { name: /^Start$/ })
+    .first()
+    .click();
   await page.waitForSelector('text=Observing', { timeout: 30000 });
   await sleep(4000);
-  await page.getByRole('button', { name: /Finish/i }).first().click();
+  await page
+    .getByRole('button', { name: /Finish/i })
+    .first()
+    .click();
   await waitForOutcome(page);
 
   const t = await cvText(page);
   neg(/Could not verify/i.test(t), 'C2 a too-dark capture produces a readable refusal');
   neg(!/Touches counted/i.test(t), 'C2 and no exact count is offered for a refused attempt');
-  neg(/not in cause|not at fault|training/i.test(t) || /Try again/i.test(t),
-    'C2 with copy that does not blame the player');
+  neg(
+    /not in cause|not at fault|training/i.test(t) || /Try again/i.test(t),
+    'C2 with copy that does not blame the player',
+  );
   await ctx.close();
   await darkBrowser.close();
 }
@@ -292,34 +372,56 @@ let liveResult = null;
 // =====================================================================
 {
   const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
-  const created = await j('POST', '/player/box-cam/sessions', {
-    drillId: 'box-touches', target: { type: 'repetitions', value: 60 }, provider: 'production_cv',
-  }, kola.token);
+  const created = await j(
+    'POST',
+    '/player/box-cam/sessions',
+    {
+      drillId: 'box-touches',
+      target: { type: 'repetitions', value: 60 },
+      provider: 'production_cv',
+    },
+    kola.token,
+  );
   const { session, nonce, livenessChallenge } = created.body;
   await j('POST', `/player/box-cam/sessions/${session.id}/start`, { nonce, liveness: livenessChallenge }, kola.token);
-  const begun = await j('POST', `/player/box-cam/sessions/${session.id}/cv/begin`, { nonce, protocolId: 'combine-box-touch-60' }, kola.token);
+  const begun = await j(
+    'POST',
+    `/player/box-cam/sessions/${session.id}/cv/begin`,
+    { nonce, protocolId: 'combine-box-touch-60' },
+    kola.token,
+  );
 
   // A tampered finalize, sent from a real browser origin.
   const { ctx, page } = await playerPage();
-  const tampered = await page.evaluate(async ({ api, sid, nonce: n, psid, token }) => {
-    const r = await fetch(`${api}/player/box-cam/sessions/${sid}/cv/finalize`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        nonce: n, providerSessionId: psid,
-        touchCount: 176, verifiedReps: 176, combineVerified: true,
-        experimental: { exactCount: 176 }, outcome: 'accepted',
-      }),
-    });
-    return { status: r.status, body: await r.json().catch(() => ({})) };
-  }, { api: API, sid: session.id, nonce, psid: begun.body.providerSessionId, token: kola.token });
+  const tampered = await page.evaluate(
+    async ({ api, sid, nonce: n, psid, token }) => {
+      const r = await fetch(`${api}/player/box-cam/sessions/${sid}/cv/finalize`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          nonce: n,
+          providerSessionId: psid,
+          touchCount: 176,
+          verifiedReps: 176,
+          combineVerified: true,
+          experimental: { exactCount: 176 },
+          outcome: 'accepted',
+        }),
+      });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    },
+    { api: API, sid: session.id, nonce, psid: begun.body.providerSessionId, token: kola.token },
+  );
 
-  neg(tampered.body?.result?.derived?.touchCount !== 176,
-    `C4 a client-claimed count of 176 is not adopted (server said ${tampered.body?.result?.derived?.touchCount})`);
-  neg(tampered.body?.result?.combineVerified === false,
-    'C4 a client-set combineVerified:true is ignored');
-  neg(tampered.body?.result?.experimental?.exactCount !== 176,
-    'C4 and the experimental field cannot be injected either');
+  neg(
+    tampered.body?.result?.derived?.touchCount !== 176,
+    `C4 a client-claimed count of 176 is not adopted (server said ${tampered.body?.result?.derived?.touchCount})`,
+  );
+  neg(tampered.body?.result?.combineVerified === false, 'C4 a client-set combineVerified:true is ignored');
+  neg(
+    tampered.body?.result?.experimental?.exactCount !== 176,
+    'C4 and the experimental field cannot be injected either',
+  );
   await ctx.close();
 }
 
@@ -328,15 +430,36 @@ let liveResult = null;
 // =====================================================================
 {
   const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
-  const a = await j('POST', '/player/box-cam/sessions', { drillId: 'box-touches', target: { type: 'repetitions', value: 60 }, provider: 'production_cv' }, kola.token);
-  const b = await j('POST', '/player/box-cam/sessions', { drillId: 'box-touches', target: { type: 'repetitions', value: 60 }, provider: 'production_cv' }, kola.token);
-  await j('POST', `/player/box-cam/sessions/${b.body.session.id}/start`, { nonce: b.body.nonce, liveness: b.body.livenessChallenge }, kola.token);
+  const a = await j(
+    'POST',
+    '/player/box-cam/sessions',
+    { drillId: 'box-touches', target: { type: 'repetitions', value: 60 }, provider: 'production_cv' },
+    kola.token,
+  );
+  const b = await j(
+    'POST',
+    '/player/box-cam/sessions',
+    { drillId: 'box-touches', target: { type: 'repetitions', value: 60 }, provider: 'production_cv' },
+    kola.token,
+  );
+  await j(
+    'POST',
+    `/player/box-cam/sessions/${b.body.session.id}/start`,
+    { nonce: b.body.nonce, liveness: b.body.livenessChallenge },
+    kola.token,
+  );
 
   // Session A's nonce, aimed at session B.
-  const replay = await j('POST', `/player/box-cam/sessions/${b.body.session.id}/cv/begin`,
-    { nonce: a.body.nonce, protocolId: 'combine-box-touch-60' }, kola.token);
-  neg(replay.status === 403 && replay.body.error === 'nonce_invalid',
-    'C5 another session\'s nonce is rejected by the live CV endpoint');
+  const replay = await j(
+    'POST',
+    `/player/box-cam/sessions/${b.body.session.id}/cv/begin`,
+    { nonce: a.body.nonce, protocolId: 'combine-box-touch-60' },
+    kola.token,
+  );
+  neg(
+    replay.status === 403 && replay.body.error === 'nonce_invalid',
+    "C5 another session's nonce is rejected by the live CV endpoint",
+  );
 }
 
 // =====================================================================
@@ -344,19 +467,31 @@ let liveResult = null;
 // =====================================================================
 {
   const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
-  const attempt = await j('POST', '/player/combine/attempts',
-    { protocolId: 'combine-box-touch-60', provider: 'production_cv' }, kola.token);
-  neg(attempt.status === 422 && attempt.body.reason === 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
-    'C7/C8 a production_cv Combine attempt is refused as unvalidated, so nothing downstream can be fed');
-  neg(attempt.body.observationSupported === true,
-    'C7/C8 and the refusal distinguishes "cannot observe" from "may not certify"');
+  const attempt = await j(
+    'POST',
+    '/player/combine/attempts',
+    { protocolId: 'combine-box-touch-60', provider: 'production_cv' },
+    kola.token,
+  );
+  neg(
+    attempt.status === 422 && attempt.body.reason === 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
+    'C7/C8 a production_cv Combine attempt is refused as unvalidated, so nothing downstream can be fed',
+  );
+  neg(
+    attempt.body.observationSupported === true,
+    'C7/C8 and the refusal distinguishes "cannot observe" from "may not certify"',
+  );
 
   const protos = (await j('GET', '/player/combine/protocols', undefined, kola.token)).body;
   const touch60 = (protos.protocols ?? []).find((p) => p.id === 'combine-box-touch-60');
-  neg(touch60?.measurementCapability === 'not_configured',
-    'C7/C8 Box Touch 60 measurement capability is not_configured for production');
-  ok(touch60?.observationCapability === 'configured',
-    'C7/C8 while observation capability IS configured — the two are reported separately');
+  neg(
+    touch60?.measurementCapability === 'not_configured',
+    'C7/C8 Box Touch 60 measurement capability is not_configured for production',
+  );
+  ok(
+    touch60?.observationCapability === 'configured',
+    'C7/C8 while observation capability IS configured — the two are reported separately',
+  );
 }
 
 // =====================================================================
@@ -379,14 +514,20 @@ let liveResult = null;
     const r = await j(m, p, bdy, kola.token);
     if (r.status < 400) reachable += 1;
   }
-  neg(reachable === 0,
-    'C9 no HTTP route exists that can write a real-world validation record — the fixture is unreachable from a client');
+  neg(
+    reachable === 0,
+    'C9 no HTTP route exists that can write a real-world validation record — the fixture is unreachable from a client',
+  );
 
   const caps = (await j('GET', '/capabilities')).body;
-  neg(caps.capabilities.production_cv.combineVerifiedProtocols.length === 0,
-    'C9 after probing, combineVerifiedProtocols is still []');
-  neg(caps.capabilities.production_cv.realWorldValidation === 'not_completed',
-    'C10 and the validation record still reads not_completed');
+  neg(
+    caps.capabilities.production_cv.combineVerifiedProtocols.length === 0,
+    'C9 after probing, combineVerifiedProtocols is still []',
+  );
+  neg(
+    caps.capabilities.production_cv.realWorldValidation === 'not_completed',
+    'C10 and the validation record still reads not_completed',
+  );
 }
 
 // =====================================================================
@@ -395,11 +536,20 @@ let liveResult = null;
 {
   const { ctx, page } = await playerPage();
   await openCv(page);
-  await page.getByRole('button', { name: /^Start$/ }).first().click();
+  await page
+    .getByRole('button', { name: /^Start$/ })
+    .first()
+    .click();
   await page.waitForSelector('text=Observing', { timeout: 30000 });
 
   // Make every frame POST fail, mid-attempt.
-  await page.route('**/cv/frames', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'provider_unavailable' }) }));
+  await page.route('**/cv/frames', (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'provider_unavailable' }),
+    }),
+  );
   await sleep(2500);
 
   const during = await cvText(page);
@@ -408,10 +558,16 @@ let liveResult = null;
 
   // And the retry path works once the failure clears.
   await page.unroute('**/cv/frames');
-  await page.getByRole('button', { name: /Finish/i }).first().click();
+  await page
+    .getByRole('button', { name: /Finish/i })
+    .first()
+    .click();
   await waitForOutcome(page);
   const after = await cvText(page);
-  ok(/Box Cam observed|Could not verify|unavailable/i.test(after), 'C11 and it reaches a stated outcome rather than hanging');
+  ok(
+    /Box Cam observed|Could not verify|unavailable/i.test(after),
+    'C11 and it reaches a stated outcome rather than hanging',
+  );
   const retry = page.getByRole('button', { name: /Try again/i }).first();
   if (await retry.count()) {
     await retry.click();
@@ -428,13 +584,17 @@ let liveResult = null;
   const { ctx, page } = await playerPage({ width: 390, height: 844 });
   await openCv(page);
 
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
   neg(overflow <= 2, `C12 no horizontal overflow at 390px (${overflow}px)`);
 
   const t = await cvText(page);
   ok(/Ready check/i.test(t), 'C12 the Ready Check is usable at 390px');
-  neg(/Combine verification/i.test(t) && /Not yet available/i.test(t),
-    'C12 and the Combine notice survives the narrow layout — it is not the thing that gets cut');
+  neg(
+    /Combine verification/i.test(t) && /Not yet available/i.test(t),
+    'C12 and the Combine notice survives the narrow layout — it is not the thing that gets cut',
+  );
 
   // The start control is reachable and operable from the keyboard.
   const start = page.getByRole('button', { name: /^Start$/ }).first();
@@ -447,7 +607,10 @@ let liveResult = null;
 }
 
 // ---------------------------------------------------------------- report
-neg(pageErrors.length === 0, `no uncaught page errors across the journeys (${pageErrors.slice(0, 3).join(' | ') || 'none'})`);
+neg(
+  pageErrors.length === 0,
+  `no uncaught page errors across the journeys (${pageErrors.slice(0, 3).join(' | ') || 'none'})`,
+);
 
 const total = passed;
 const ratio = total ? Math.round((negatives / total) * 100) : 0;

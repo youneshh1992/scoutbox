@@ -8,8 +8,15 @@
 import { buildRecruitmentJourney as journey } from '../domains/recruitment/lifecycle/journey.mjs';
 import { createEvidenceProvider as provider } from '../domains/recruitment/lifecycle/evidence.mjs';
 import { buildReportingContext as reportingContext } from '../domains/recruitment/analytics/dashboard.mjs';
-import { resolveEvidenceLink as resolveLink, recordBelongsToPlayer as belongs, validateEvidenceLink as validateLink } from '../domains/development/hub/evidence.mjs';
-import { resolveEvidenceRefs as resolveRefs, evidenceCandidates as candidates } from '../domains/recruitment/lifecycle/decision.mjs';
+import {
+  resolveEvidenceLink as resolveLink,
+  recordBelongsToPlayer as belongs,
+  validateEvidenceLink as validateLink,
+} from '../domains/development/hub/evidence.mjs';
+import {
+  resolveEvidenceRefs as resolveRefs,
+  evidenceCandidates as candidates,
+} from '../domains/recruitment/lifecycle/decision.mjs';
 import { buildDevelopmentPlan as buildPlan } from '../domains/development/hub/plan.mjs';
 
 const sound = (r) => r !== null && typeof r === 'object';
@@ -130,7 +137,12 @@ function roomRowQueries(rows, { orgPlayer = false } = {}) {
   return {
     byId: (id) => list().find((r) => r.id === id) ?? null,
     forRoom: (roomId) => list().filter((r) => r.roomId === roomId),
-    ...(orgPlayer ? { forOrgPlayer: (orgId, playerId) => list().filter((r) => r.orgId === orgId && r.playerId === playerId), forOrg: (orgId) => list().filter((r) => r.orgId === orgId) } : {}),
+    ...(orgPlayer
+      ? {
+          forOrgPlayer: (orgId, playerId) => list().filter((r) => r.orgId === orgId && r.playerId === playerId),
+          forOrg: (orgId) => list().filter((r) => r.orgId === orgId),
+        }
+      : {}),
   };
 }
 
@@ -177,8 +189,10 @@ export function arrayReads(db) {
   if (Array.isArray(db?.evidence)) out.evidence = evidenceQueries(db.evidence);
   if (Array.isArray(db?.assessments)) out.assessments = assessmentQueries(db.assessments);
   if (Array.isArray(db?.players)) out.player = (id) => db.players.find((x) => x?.id === id) ?? null;
-  if (Array.isArray(db?.blocks)) out.blocks = { has: (playerId, orgId) => db.blocks.some((b) => b && b.playerId === playerId && b.orgId === orgId) };
-  if (Array.isArray(db?.boxSessions) || Array.isArray(db?.combineAttempts)) out.boxCam = boxCamQueries(db.boxSessions ?? [], db.combineAttempts ?? []);
+  if (Array.isArray(db?.blocks))
+    out.blocks = { has: (playerId, orgId) => db.blocks.some((b) => b && b.playerId === playerId && b.orgId === orgId) };
+  if (Array.isArray(db?.boxSessions) || Array.isArray(db?.combineAttempts))
+    out.boxCam = boxCamQueries(db.boxSessions ?? [], db.combineAttempts ?? []);
   return out;
 }
 
@@ -202,7 +216,8 @@ function boxCamQueries(sessions, attempts) {
 }
 
 /** `buildRecruitmentJourney` over a plain database: `opts.reads` defaults to the database's own arrays. */
-export const buildRecruitmentJourney = (db, caseId, viewer, opts = {}) => journey(caseId, viewer, { reads: arrayReads(db), ...opts });
+export const buildRecruitmentJourney = (db, caseId, viewer, opts = {}) =>
+  journey(caseId, viewer, { reads: arrayReads(db), ...opts });
 
 /** `createEvidenceProvider` over a plain database: `reads` defaults to the database's own arrays. */
 export const createEvidenceProvider = (db, reads = arrayReads(db)) => provider(reads);

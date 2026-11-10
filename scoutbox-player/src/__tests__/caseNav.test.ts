@@ -44,11 +44,11 @@ describe('playerLocation', () => {
     expect(playerLocation('offer', 'offer-documents')).toEqual({ category: 'offer', sub: 'offer-documents' });
   });
 
-  test('a known category with an unknown tab falls back to that category\'s first page', () => {
+  test("a known category with an unknown tab falls back to that category's first page", () => {
     expect(playerLocation('trial', 'nonsense')).toEqual({ category: 'trial', sub: 'invitation' });
   });
 
-  test('an unknown category with a known tab finds the tab\'s category', () => {
+  test("an unknown category with a known tab finds the tab's category", () => {
     expect(playerLocation('nonsense', 'signing-contract')).toEqual({ category: 'signing', sub: 'signing-contract' });
   });
 
@@ -61,7 +61,10 @@ describe('playerLocation', () => {
   });
 
   test('repeated query parameters use the first value', () => {
-    expect(playerLocation(['contact', 'offer'], ['requests', 'messages'])).toEqual({ category: 'contact', sub: 'requests' });
+    expect(playerLocation(['contact', 'offer'], ['requests', 'messages'])).toEqual({
+      category: 'contact',
+      sub: 'requests',
+    });
   });
 
   test('unknown values never throw and land on the default', () => {

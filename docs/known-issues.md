@@ -255,3 +255,9 @@ acting on a figure). None touches every player on a write.
 - **`e2e/m24f2DensityAudit` (3 checks) and `e2e/m24fVisualAudit` (2 checks) fail**: Player Account categories, the
   portal ™ label, the Grassroots and Player Home single primary action, and the Player Card/ListRow check. Triage
   them against [`design.md`](design.md).
+- **About 20 of the 56 end-to-end batteries check source text, not behaviour.** They read server and app source
+  files and match regular expressions against them ("every side effect is wrapped in `safe()`", "*Try again* only
+  when retryable", "the request log line has these fields"). Such a check passes while the text matches, even if
+  the behaviour is broken, and fails on harmless rewrites (the Biome reformat broke nine). Replace the ones that
+  guard real behaviour with tests that exercise it, and ask Tom before dropping the ones that only describe code
+  layout.

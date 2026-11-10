@@ -2,8 +2,13 @@
 // Every surface fails closed: an unknown surface, a missing fact or an unrecognised scope denies.
 
 import {
-  SCOPES, effectiveAgreementStatus, agreementGrantsAccess, normaliseScope,
-  DISCLOSURE_KEYS, DISCLOSURE_DEFAULT, normaliseDisclosure,
+  SCOPES,
+  effectiveAgreementStatus,
+  agreementGrantsAccess,
+  normaliseScope,
+  DISCLOSURE_KEYS,
+  DISCLOSURE_DEFAULT,
+  normaliseDisclosure,
 } from '../core/shared.mjs';
 import { readInstant } from '../../../temporal.mjs';
 
@@ -23,7 +28,12 @@ export const SURFACES = nullProto({
   // Evidence the player intentionally shared. Never raw Box Cam.
   evidence_shared: { regulated: false, scopes: null, adultOnly: true, needsShare: true },
   // Being a routable party on a canonical Contact.
-  contact_participation: { regulated: true, scopes: ['employment', 'transfer'], adultOnly: true, needsDisclosure: true },
+  contact_participation: {
+    regulated: true,
+    scopes: ['employment', 'transfer'],
+    adultOnly: true,
+    needsDisclosure: true,
+  },
   // Seeing that a Trial exists and its scheduling, never its assessment.
   trial_projection: { regulated: false, scopes: ['employment', 'transfer'], adultOnly: true, needsDisclosure: true },
   // Coordinating a Trial where scope allows. Never confirming for the player.
@@ -40,23 +50,32 @@ export const SURFACE_NAMES = Object.freeze(Object.keys(SURFACES));
 
 /** A deny carries the first rule that refused; the codes name a category, never a party. */
 export const RULE_ORDER = Object.freeze([
-  'SURFACE_KNOWN', 'BASIS', 'SUBJECT_PRESENT', 'ADULT', 'MINOR_PATHWAY',
-  'BLOCK', 'SCOPE', 'DISCLOSURE', 'SHARE', 'LICENCE', 'COMPLIANCE',
+  'SURFACE_KNOWN',
+  'BASIS',
+  'SUBJECT_PRESENT',
+  'ADULT',
+  'MINOR_PATHWAY',
+  'BLOCK',
+  'SCOPE',
+  'DISCLOSURE',
+  'SHARE',
+  'LICENCE',
+  'COMPLIANCE',
 ]);
 
 export const DENY_CODES = Object.freeze([
-  'SURFACE_UNKNOWN',           // fail closed on an unrecognised surface
-  'NO_REPRESENTATION',         // no canonical basis at all
+  'SURFACE_UNKNOWN', // fail closed on an unrecognised surface
+  'NO_REPRESENTATION', // no canonical basis at all
   'REPRESENTATION_NOT_ACTIVE', // a basis existed once; its status is not active now
-  'REPRESENTATION_AMBIGUOUS',  // two active agents and nothing to choose between them
-  'SUBJECT_UNAVAILABLE',       // removed, tombstoned or not resolvable
-  'MINOR_PATHWAY_DISABLED',    // the client is a regulatory minor and the pathway is closed
-  'BLOCKED',                   // canonical safety state
-  'SCOPE_INSUFFICIENT',        // the agreement does not carry a scope this surface needs
-  'DISCLOSURE_WITHHELD',       // the client has not agreed to this being visible/routed
-  'SHARE_REQUIRED',            // needs an explicit share that does not exist
-  'LICENCE_NOT_CURRENT',       // a regulated action with a stale or unverified facet
-  'COMPLIANCE_NOT_CLEAR',      // the compliance layer has not permitted this
+  'REPRESENTATION_AMBIGUOUS', // two active agents and nothing to choose between them
+  'SUBJECT_UNAVAILABLE', // removed, tombstoned or not resolvable
+  'MINOR_PATHWAY_DISABLED', // the client is a regulatory minor and the pathway is closed
+  'BLOCKED', // canonical safety state
+  'SCOPE_INSUFFICIENT', // the agreement does not carry a scope this surface needs
+  'DISCLOSURE_WITHHELD', // the client has not agreed to this being visible/routed
+  'SHARE_REQUIRED', // needs an explicit share that does not exist
+  'LICENCE_NOT_CURRENT', // a regulated action with a stale or unverified facet
+  'COMPLIANCE_NOT_CLEAR', // the compliance layer has not permitted this
 ]);
 
 const deny = (code, rule) => Object.freeze({ allowed: false, code, rule, basis: null });
@@ -67,7 +86,14 @@ const allow = (basis, surface) => Object.freeze({ allowed: true, code: null, rul
  * the most informative non-active state, for the agent only (never a third party).
  */
 export function agentClientBasis({ agreements = [], agentUserId = null, clientId = null, now = Date.now() } = {}) {
-  const none = (status = null) => ({ ok: false, agentUserId: null, agreementId: null, scope: [], agencyOrgId: null, status });
+  const none = (status = null) => ({
+    ok: false,
+    agentUserId: null,
+    agreementId: null,
+    scope: [],
+    agencyOrgId: null,
+    status,
+  });
   if (typeof agentUserId !== 'string' || !agentUserId || typeof clientId !== 'string' || !clientId) return none();
   let fallback = null;
   for (const a of agreements) {
@@ -202,7 +228,8 @@ export function contactTargetSnapshot(routing, at = Date.now()) {
     player: routing.targets.some((t) => t.type === 'player' || t.type === 'guardian'),
     guardian: routing.targets.some((t) => t.type === 'guardian'),
     agent: routing.agent ? { agentUserId: routing.agent.agentUserId, agreementId: routing.agent.agreementId } : null,
-    honest: 'Who was validly routed when this contact was recorded. A later change to the relationship does not rewrite it, and the next contact is routed from the authority in force then.',
+    honest:
+      'Who was validly routed when this contact was recorded. A later change to the relationship does not rewrite it, and the next contact is routed from the authority in force then.',
   });
 }
 
@@ -222,7 +249,8 @@ export function clubAgentPresence({ decision = null, agent = null, agency = null
       domesticAuthorisation: stateWord(facets?.domestic_authorisation),
     }),
     contactPathway: 'contact_agent',
-    honest: 'Licence status as verified in ScoutBox, with the date of that check. ScoutBox is not a licence register and does not speak for any governing body. No agreement terms and no fee are shown here, to anyone.',
+    honest:
+      'Licence status as verified in ScoutBox, with the date of that check. ScoutBox is not a licence register and does not speak for any governing body. No agreement terms and no fee are shown here, to anyone.',
   });
 }
 
@@ -247,14 +275,14 @@ export function effectiveHandoffStatus(h, now = Date.now()) {
 }
 
 export const HANDOFF_BLOCKERS = Object.freeze([
-  'HANDOFF_NOT_PERMITTED',          // the actor's club role does not include this
-  'HANDOFF_DECISION_REQUIRED',      // no finalised formal decision to progress exists
-  'HANDOFF_CASE_STATE',             // the case is not at a lifecycle point that permits it
-  'HANDOFF_SUBJECT_UNAVAILABLE',    // the player is removed, or not visible to this club
+  'HANDOFF_NOT_PERMITTED', // the actor's club role does not include this
+  'HANDOFF_DECISION_REQUIRED', // no finalised formal decision to progress exists
+  'HANDOFF_CASE_STATE', // the case is not at a lifecycle point that permits it
+  'HANDOFF_SUBJECT_UNAVAILABLE', // the player is removed, or not visible to this club
   'HANDOFF_MINOR_PATHWAY_DISABLED', // the player is under the age of majority
-  'HANDOFF_BLOCKED',                // a canonical block between the player and the club
-  'HANDOFF_EXISTS',                 // one is already standing
-  'HANDOFF_TRANSACTION_EXISTS',     // a live transaction already covers this context
+  'HANDOFF_BLOCKED', // a canonical block between the player and the club
+  'HANDOFF_EXISTS', // one is already standing
+  'HANDOFF_TRANSACTION_EXISTS', // a live transaction already covers this context
   'HANDOFF_COMPLIANCE_UNAVAILABLE', // the compliance layer cannot answer right now
 ]);
 
@@ -292,7 +320,10 @@ export function handoffBlockers({
  * A duplicate only when individual, type and both clubs match and the earlier one is live: a loan beside a transfer,
  * or two clubs competing for one player, are separate transactions.
  */
-export function duplicateTransactionOf(transactions, { clientId, type, engagingOrgId = null, releasingOrgId = null, terminalStatuses = [], partiesOf }) {
+export function duplicateTransactionOf(
+  transactions,
+  { clientId, type, engagingOrgId = null, releasingOrgId = null, terminalStatuses = [], partiesOf },
+) {
   const want = (t) => {
     const parties = partiesOf(t) ?? [];
     const find = (role) => parties.find((p) => p && p.partyRole === role && !p.removed) ?? null;
@@ -314,8 +345,10 @@ export function duplicateTransactionOf(transactions, { clientId, type, engagingO
   return null;
 }
 
-export const surfaceIsRegulated = (surface) => (Object.hasOwn(SURFACES, surface) ? SURFACES[surface].regulated === true : false);
+export const surfaceIsRegulated = (surface) =>
+  Object.hasOwn(SURFACES, surface) ? SURFACES[surface].regulated === true : false;
 
-export const surfaceScopes = (surface) => (Object.hasOwn(SURFACES, surface) ? (SURFACES[surface].scopes ?? null) : null);
+export const surfaceScopes = (surface) =>
+  Object.hasOwn(SURFACES, surface) ? (SURFACES[surface].scopes ?? null) : null;
 
 export { SCOPES };

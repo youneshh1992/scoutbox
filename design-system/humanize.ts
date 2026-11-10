@@ -8,6 +8,10 @@ export function humanText(s: string | null | undefined): string {
   if (!s) return '';
   return s
     .replace(/\bcombine-([a-z0-9]+(?:-[a-z0-9]+)*)\b/g, (_m, slug: string) =>
-      slug.split('-').map((w) => (/^\d+$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1))).join(' '))
+      slug
+        .split('-')
+        .map((w) => (/^\d+$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+        .join(' '),
+    )
     .replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (tok) => SPECIAL[tok] ?? tok.replace(/_/g, ' '));
 }

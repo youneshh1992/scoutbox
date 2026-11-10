@@ -8,7 +8,11 @@
  *   public_safe         any authenticated identity; carries no personal data
  *   trust_safety_only   Trust & Safety only
  */
-import { EVENT_REGISTRY, AUDIENCES as REGISTRY_AUDIENCES, audienceFor as registryAudienceFor } from './eventRegistry.mjs';
+import {
+  EVENT_REGISTRY,
+  AUDIENCES as REGISTRY_AUDIENCES,
+  audienceFor as registryAudienceFor,
+} from './eventRegistry.mjs';
 
 export const AUDIENCES = REGISTRY_AUDIENCES;
 

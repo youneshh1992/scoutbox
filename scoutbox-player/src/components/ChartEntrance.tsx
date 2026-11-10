@@ -14,29 +14,44 @@ export function ChartEntrance({ children }: { children: (progress: Animated.Valu
   const [reduced, setReduced] = useState<boolean | null>(null);
   const [state, setState] = useState<MotionState>('waiting');
   const [run, setRun] = useState(0);
-  useFocusEffect(useCallback(() => {
-    setFocused(true);
-    return () => setFocused(false);
-  }, []));
+  useFocusEffect(
+    useCallback(() => {
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
+  );
 
   useEffect(() => {
     let mounted = true;
     let changed = false;
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', value => {
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', (value) => {
       changed = true;
       if (mounted) setReduced(value);
     });
-    void AccessibilityInfo.isReduceMotionEnabled().then(value => {
-      if (mounted && !changed) setReduced(value);
-    }).catch(() => { if (mounted && !changed) setReduced(true); });
-    return () => { mounted = false; subscription.remove(); };
+    void AccessibilityInfo.isReduceMotionEnabled()
+      .then((value) => {
+        if (mounted && !changed) setReduced(value);
+      })
+      .catch(() => {
+        if (mounted && !changed) setReduced(true);
+      });
+    return () => {
+      mounted = false;
+      subscription.remove();
+    };
   }, []);
 
   useEffect(() => {
     progress.stopAnimation();
     progress.setValue(1);
-    if (!focused || reduced === null) { setState('waiting'); return; }
-    if (reduced) { setState('reduced'); return; }
+    if (!focused || reduced === null) {
+      setState('waiting');
+      return;
+    }
+    if (reduced) {
+      setState('reduced');
+      return;
+    }
     let disposed = false;
     let played = false;
     let intersection = false;
@@ -51,20 +66,28 @@ export function ChartEntrance({ children }: { children: (progress: Animated.Valu
       if (timer) clearInterval(timer);
       progress.setValue(0);
       setState('running');
-      setRun(value => value + 1);
+      setRun((value) => value + 1);
       animation = Animated.timing(progress, {
-        toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: true,
+        toValue: 1,
+        duration: 900,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
       });
-      animation.start(({ finished }) => { if (!disposed && finished) setState('complete'); });
+      animation.start(({ finished }) => {
+        if (!disposed && finished) setState('complete');
+      });
     };
     const checkWeb = () => {
       if (document.visibilityState === 'visible' && intersection) start();
     };
     if (Platform.OS === 'web' && typeof IntersectionObserver !== 'undefined') {
-      observer = new IntersectionObserver(entries => {
-        intersection = entries.some(entry => entry.isIntersecting && entry.intersectionRatio >= 0.35);
-        checkWeb();
-      }, { threshold: [0, 0.35], rootMargin: '0px 0px -80px 0px' });
+      observer = new IntersectionObserver(
+        (entries) => {
+          intersection = entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 0.35);
+          checkWeb();
+        },
+        { threshold: [0, 0.35], rootMargin: '0px 0px -80px 0px' },
+      );
       if (host.current) observer.observe(host.current as unknown as Element);
       document.addEventListener('visibilitychange', checkWeb);
     } else {
@@ -90,7 +113,14 @@ export function ChartEntrance({ children }: { children: (progress: Animated.Valu
     };
   }, [focused, reduced, progress]);
 
-  return <View ref={host} collapsable={false} testID="season-bars-motion" {...(Platform.OS === 'web' ? { dataSet: { motionState: state, motionRun: String(run) } } : {})}>
-    {children(progress)}
-  </View>;
+  return (
+    <View
+      ref={host}
+      collapsable={false}
+      testID="season-bars-motion"
+      {...(Platform.OS === 'web' ? { dataSet: { motionState: state, motionRun: String(run) } } : {})}
+    >
+      {children(progress)}
+    </View>
+  );
 }

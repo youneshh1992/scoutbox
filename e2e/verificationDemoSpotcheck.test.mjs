@@ -12,7 +12,10 @@ const demo = await ensureDemoHost();
 
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const say = (m) => console.log(m);
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 
 const browser = await chromium.launch({ executablePath: EXE });
 const errors = [];
@@ -29,13 +32,16 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('.topbar', { timeout: 20000 });
-await club.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
+await club.evaluate(() => {
+  location.hash = '#/verification';
+}); // deep link (Verification)
 await club.waitForSelector('text=Verify your football role', { timeout: 15000 });
 await club.waitForSelector('text=Role verified: Head of Recruitment', { timeout: 10000 });
 // licence honesty: submitted credential must NOT read as verified
 const meText = await club.locator('body').innerText();
 if (!meText.includes('malware scan: not configured')) fail('evidence checks not honestly labelled');
-if (!meText.includes('review pending') && !meText.includes('requires human review')) say('… (licence pending state shown via status pill)');
+if (!meText.includes('review pending') && !meText.includes('requires human review'))
+  say('… (licence pending state shown via status pill)');
 say('pro demo: My verification — steps, badges with provenance, honest evidence labels');
 
 await club.click('button[role="tab"]:has-text("Requests")');
@@ -65,7 +71,9 @@ await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
 await grass.waitForSelector('.topbar', { timeout: 20000 });
-await grass.evaluate(() => { location.hash = '#/verification'; }); // deep link (Verification)
+await grass.evaluate(() => {
+  location.hash = '#/verification';
+}); // deep link (Verification)
 await grass.waitForSelector('text=Verify your football role', { timeout: 15000 });
 const gText = await grass.locator('body').innerText();
 if (!gText.includes('Hackney Marsh Rovers')) fail('grassroots verification screen missing its own club identity');
@@ -81,7 +89,9 @@ await player.click('a[href^="/you"]');
 await player.getByRole('tab', { name: 'Clubs' }).click();
 await player.getByRole('tab', { name: 'History' }).click(); // references sit in Clubs › History
 await player.waitForSelector('text=Coach references', { timeout: 20000 });
-await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', { timeout: 10000 });
+await player.waitForSelector('text=Coach affiliation was verified when this reference was submitted.', {
+  timeout: 10000,
+});
 const pText = await player.locator('body').innerText();
 if (!pText.includes('is verified')) fail('current-coach provenance line missing');
 say('player demo: references show live vs at-submission provenance honestly');

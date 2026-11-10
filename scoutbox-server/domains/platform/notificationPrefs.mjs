@@ -143,7 +143,8 @@ export function defaultPrefs() {
 
 /** Registers no routes, so the notifier can hold the gate before any module that notifies registers. */
 export function createNotificationPrefs({ notifications }) {
-  if (!notifications || typeof notifications.prefsFor !== 'function') throw new TypeError('createNotificationPrefs needs the notifications repository');
+  if (!notifications || typeof notifications.prefsFor !== 'function')
+    throw new TypeError('createNotificationPrefs needs the notifications repository');
 
   const find = (kind, id) => notifications.prefsFor(kind, id);
 
@@ -164,7 +165,10 @@ export function createNotificationPrefs({ notifications }) {
   const unknownTypes = new Map();
   function allows(audience, type, text) {
     const cat = categoryOf(type, text);
-    if (!cat) { unknownTypes.set(type, (unknownTypes.get(type) ?? 0) + 1); return true; }
+    if (!cat) {
+      unknownTypes.set(type, (unknownTypes.get(type) ?? 0) + 1);
+      return true;
+    }
     if (CATEGORIES[cat].mandatory) return true;
     return effective(audience.kind, audience.id).categories[cat] !== false;
   }
@@ -173,7 +177,10 @@ export function createNotificationPrefs({ notifications }) {
     const eff = effective(kind, id);
     return {
       categories: CATEGORY_NAMES.map((k) => ({
-        id: k, label: CATEGORIES[k].label, enabled: eff.categories[k], mandatory: CATEGORIES[k].mandatory,
+        id: k,
+        label: CATEGORIES[k].label,
+        enabled: eff.categories[k],
+        mandatory: CATEGORIES[k].mandatory,
       })),
       emailIntent: eff.emailIntent,
       channels: {
@@ -187,18 +194,31 @@ export function createNotificationPrefs({ notifications }) {
   function update(kind, id, body, res) {
     const incoming = body?.categories;
     if (incoming !== undefined && (typeof incoming !== 'object' || incoming === null || Array.isArray(incoming))) {
-      return res.status(400).json({ error: 'PREFS_INVALID', message: 'categories must be an object of category → boolean.' });
+      return res
+        .status(400)
+        .json({ error: 'PREFS_INVALID', message: 'categories must be an object of category → boolean.' });
     }
     for (const [k, v] of Object.entries(incoming ?? {})) {
       // Own keys only: `__proto__`, `constructor` and `toString` are not categories.
-      if (!Object.hasOwn(CATEGORIES, k)) return res.status(400).json({ error: 'PREF_CATEGORY_UNKNOWN', category: k, message: 'That is not a notification category.' });
+      if (!Object.hasOwn(CATEGORIES, k))
+        return res
+          .status(400)
+          .json({ error: 'PREF_CATEGORY_UNKNOWN', category: k, message: 'That is not a notification category.' });
       // Never coerced: a numeric 0 would read as "off".
-      if (typeof v !== 'boolean') return res.status(400).json({ error: 'PREFS_INVALID', category: k, message: `${k} must be true or false.` });
+      if (typeof v !== 'boolean')
+        return res.status(400).json({ error: 'PREFS_INVALID', category: k, message: `${k} must be true or false.` });
       if (CATEGORIES[k].mandatory && v === false) {
-        return res.status(400).json({ error: 'PREF_CATEGORY_MANDATORY', category: k, message: 'Security and account notices cannot be turned off.' });
+        return res.status(400).json({
+          error: 'PREF_CATEGORY_MANDATORY',
+          category: k,
+          message: 'Security and account notices cannot be turned off.',
+        });
       }
     }
-    if (body?.emailIntent !== undefined && typeof body.emailIntent !== 'boolean') return res.status(400).json({ error: 'PREFS_INVALID', field: 'emailIntent', message: 'emailIntent must be true or false.' });
+    if (body?.emailIntent !== undefined && typeof body.emailIntent !== 'boolean')
+      return res
+        .status(400)
+        .json({ error: 'PREFS_INVALID', field: 'emailIntent', message: 'emailIntent must be true or false.' });
     const patch = { categories: { ...(incoming ?? {}) } };
     if (body?.emailIntent !== undefined) patch.emailIntent = body.emailIntent;
     notifications.updatePrefs(kind, id, patch, { at: Date.now() });
@@ -210,12 +230,15 @@ export function createNotificationPrefs({ notifications }) {
 
 /** `GET` and `PUT /notification-preferences` for club staff, players and guardians. */
 export function registerNotificationPrefs({ prefs, orgRouter, playerRouter, guardianRouter }) {
-  if (typeof prefs?.view !== 'function') throw new TypeError('registerNotificationPrefs needs the preferences from createNotificationPrefs');
+  if (typeof prefs?.view !== 'function')
+    throw new TypeError('registerNotificationPrefs needs the preferences from createNotificationPrefs');
   const { view, update } = prefs;
   orgRouter.get('/notification-preferences', (req, res) => res.json({ preferences: view('org_user', req.orgUser.id) }));
   orgRouter.put('/notification-preferences', (req, res) => update('org_user', req.orgUser.id, req.body, res));
   playerRouter.get('/notification-preferences', (req, res) => res.json({ preferences: view('player', req.player.id) }));
   playerRouter.put('/notification-preferences', (req, res) => update('player', req.player.id, req.body, res));
-  guardianRouter.get('/notification-preferences', (req, res) => res.json({ preferences: view('guardian', req.guardian.id) }));
+  guardianRouter.get('/notification-preferences', (req, res) =>
+    res.json({ preferences: view('guardian', req.guardian.id) }),
+  );
   guardianRouter.put('/notification-preferences', (req, res) => update('guardian', req.guardian.id, req.body, res));
 }

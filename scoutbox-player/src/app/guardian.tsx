@@ -14,7 +14,15 @@ import { client, type Channel, type FiledReport, type GuardianDigest, type Insig
 import type { NotificationPrefs, GuardianOpenTrial } from '../data/types';
 import { U18_PROMISES } from '../domain/safeguarding';
 import { useSession } from '../state';
-import { BoardSection, CampaignsSection, FeedbackDevSection, FollowUpsSection, PassportSection, SquadInvitesSection, TrialSafetySection } from '../components/M12Sections';
+import {
+  BoardSection,
+  CampaignsSection,
+  FeedbackDevSection,
+  FollowUpsSection,
+  PassportSection,
+  SquadInvitesSection,
+  TrialSafetySection,
+} from '../components/M12Sections';
 import { InvitationCard, InvitationDetail, DateOptions } from '../components/InvitationCard';
 import { TrialSlotChips, TrialWorkflowSection } from '../components/M23Trial';
 import { OfferSection } from '../components/M23Offer';
@@ -66,14 +74,19 @@ export default function GuardianDashboard() {
   useEffect(() => {
     if (!guardianId) return;
     for (const c of children) {
-      client.guardianChildOpenTrials(guardianId, c.id)
+      client
+        .guardianChildOpenTrials(guardianId, c.id)
         .then((list) => setOpenDays((prev) => ({ ...prev, [c.id]: list })))
         .catch(() => {});
     }
   }, [guardianId, children, guardianInbox]);
 
   useEffect(() => {
-    if (guardianId) client.guardianPrefs(guardianId).then((p) => p && setPrefs(p)).catch(() => {});
+    if (guardianId)
+      client
+        .guardianPrefs(guardianId)
+        .then((p) => p && setPrefs(p))
+        .catch(() => {});
   }, [guardianId]);
 
   const savePrefs = async (next: Partial<NotificationPrefs>) => {
@@ -89,16 +102,32 @@ export default function GuardianDashboard() {
   };
 
   useEffect(() => {
-    if (showLog && guardianId) client.guardianLog(guardianId).then(setLog).catch(() => {});
+    if (showLog && guardianId)
+      client
+        .guardianLog(guardianId)
+        .then(setLog)
+        .catch(() => {});
   }, [showLog, guardianId, guardianInbox]);
 
   const load = useCallback(() => {
     if (!guardianId) return;
-    client.guardianChannels(guardianId).then(setChannels).catch(() => {});
-    client.guardianReports(guardianId).then(setMyReports).catch(() => {});
-    client.guardianDigest(guardianId).then(setDigest).catch(() => {});
+    client
+      .guardianChannels(guardianId)
+      .then(setChannels)
+      .catch(() => {});
+    client
+      .guardianReports(guardianId)
+      .then(setMyReports)
+      .catch(() => {});
+    client
+      .guardianDigest(guardianId)
+      .then(setDigest)
+      .catch(() => {});
     for (const c of children) {
-      client.guardianChildInsights(guardianId, c.id).then((i) => setInsights((prev) => ({ ...prev, [c.id]: i }))).catch(() => {});
+      client
+        .guardianChildInsights(guardianId, c.id)
+        .then((i) => setInsights((prev) => ({ ...prev, [c.id]: i })))
+        .catch(() => {});
     }
   }, [guardianId, children]);
 
@@ -124,7 +153,11 @@ export default function GuardianDashboard() {
     try {
       const reply = isContact ? replies[requestId]?.trim() || undefined : undefined;
       await client.guardianRespond(guardianId, requestId, accept, accept ? chosenSlots[requestId] : undefined, reply);
-      setReplies((s) => { const n = { ...s }; delete n[requestId]; return n; });
+      setReplies((s) => {
+        const n = { ...s };
+        delete n[requestId];
+        return n;
+      });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not respond');
@@ -144,8 +177,9 @@ export default function GuardianDashboard() {
   };
 
   const unreadMsgs = channels.reduce(
-    (sum, c) => sum + c.messages.filter((m) => m.sender.kind === 'org_user' && m.ts > (c.readBy?.counterparty ?? 0)).length,
-    0
+    (sum, c) =>
+      sum + c.messages.filter((m) => m.sender.kind === 'org_user' && m.ts > (c.readBy?.counterparty ?? 0)).length,
+    0,
   );
 
   return (
@@ -166,8 +200,15 @@ export default function GuardianDashboard() {
         {/* Who you are, as one quiet line; standing that is not in order is said in words, in the danger colour. */}
         <View style={styles.who}>
           <Text style={styles.whoName}>{guardian?.name}</Text>
-          <Text style={[styles.whoLine, !(guardian?.idVerified && guardian?.disclaimerAccepted) && { color: colors.danger }]}>
-            {guardian?.email}{guardian?.idVerified ? ' · ID verified' : ' · ID not yet verified'}{guardian?.disclaimerAccepted ? '' : ' · Disclaimer pending'}
+          <Text
+            style={[
+              styles.whoLine,
+              !(guardian?.idVerified && guardian?.disclaimerAccepted) && { color: colors.danger },
+            ]}
+          >
+            {guardian?.email}
+            {guardian?.idVerified ? ' · ID verified' : ' · ID not yet verified'}
+            {guardian?.disclaimerAccepted ? '' : ' · Disclaimer pending'}
           </Text>
         </View>
 
@@ -176,20 +217,32 @@ export default function GuardianDashboard() {
             <SectionTitle>This week</SectionTitle>
             {digest.children.map((c) => (
               <Text key={c.id} style={styles.digestLine}>
-                <Text style={{ fontWeight: '600' }}>{c.name}</Text>: {c.views} club view{c.views === 1 ? '' : 's'}, {c.newRequests} new request{c.newRequests === 1 ? '' : 's'}, {c.activityThisWeek} training activit{c.activityThisWeek === 1 ? 'y' : 'ies'}
-                {c.streak > 0 ? ` · ${c.streak}-day streak` : ''}{c.weeklyGoal.met ? ' · weekly goal met' : ''}.
+                <Text style={{ fontWeight: '600' }}>{c.name}</Text>: {c.views} club view{c.views === 1 ? '' : 's'},{' '}
+                {c.newRequests} new request{c.newRequests === 1 ? '' : 's'}, {c.activityThisWeek} training activit
+                {c.activityThisWeek === 1 ? 'y' : 'ies'}
+                {c.streak > 0 ? ` · ${c.streak}-day streak` : ''}
+                {c.weeklyGoal.met ? ' · weekly goal met' : ''}.
               </Text>
             ))}
             <Row style={{ justifyContent: 'space-between' }}>
               <Muted size={11.5}>{digest.note}</Muted>
-              <Button small tertiary label={showLog ? 'Hide activity' : 'View activity'} onPress={() => setShowLog(!showLog)} />
+              <Button
+                small
+                tertiary
+                label={showLog ? 'Hide activity' : 'View activity'}
+                onPress={() => setShowLog(!showLog)}
+              />
             </Row>
-            {showLog && log.map((l) => (
-              <View key={l.id} style={styles.logRow}>
-                <Text style={styles.logWhen}>{fmtDay(l.ts)}</Text>
-                <Text style={styles.logText}>{l.type.replace(/_/g, ' ')} — {l.orgName}{l.scoutName ? ` (${l.scoutName})` : ''}</Text>
-              </View>
-            ))}
+            {showLog &&
+              log.map((l) => (
+                <View key={l.id} style={styles.logRow}>
+                  <Text style={styles.logWhen}>{fmtDay(l.ts)}</Text>
+                  <Text style={styles.logText}>
+                    {l.type.replace(/_/g, ' ')} — {l.orgName}
+                    {l.scoutName ? ` (${l.scoutName})` : ''}
+                  </Text>
+                </View>
+              ))}
             {showLog && log.length === 0 && <Muted size={12.5}>Nothing logged yet.</Muted>}
           </View>
         )}
@@ -203,46 +256,105 @@ export default function GuardianDashboard() {
         <SectionTitle testID="guardian-requests">Club requests</SectionTitle>
         {guardianInbox.length === 0 && <Muted size={13.5}>No requests yet.</Muted>}
         {guardianInbox.map((r) => (
-          <InvitationCard key={r.id} testID={`guardian-request-${r.id}`} title={r.orgName} subtitle={r.type === 'trial' ? pt('inboxTrialInvitation') : pt('inboxContactRequest')} date={r.type === 'trial' ? chosenSlots[r.id] ?? r.trialDetails?.proposedDate ?? null : undefined} venue={r.type === 'trial' ? r.trialDetails?.venue : undefined} badge={r.orgVerified ? pt('inboxVerifiedClub') : undefined} icon="message-circle" actions={<>
-            {r.status === 'accepted' && r.type === 'trial' && r.trialId && <Muted size={12.5}>{pt('trialAcceptedGuardian')}</Muted>}
-            {r.status === 'pending' ? (
+          <InvitationCard
+            key={r.id}
+            testID={`guardian-request-${r.id}`}
+            title={r.orgName}
+            subtitle={r.type === 'trial' ? pt('inboxTrialInvitation') : pt('inboxContactRequest')}
+            date={r.type === 'trial' ? (chosenSlots[r.id] ?? r.trialDetails?.proposedDate ?? null) : undefined}
+            venue={r.type === 'trial' ? r.trialDetails?.venue : undefined}
+            badge={r.orgVerified ? pt('inboxVerifiedClub') : undefined}
+            icon="message-circle"
+            actions={
               <>
-                <Row>
-                  <Button grow primary label={pt('accept')} onPress={() => respond(r.id, true, r.type === 'contact')} testID={`req-accept-${r.id}`} />
-                  <Button grow label={pt('decline')} onPress={() => respond(r.id, false, r.type === 'contact')} testID={`req-decline-${r.id}`} />
-                </Row>
-              </>
-            ) : (
-              <>
-                {r.type === 'contact' && (r.status === 'accepted' || r.status === 'declined') && (
-                  <Muted size={12.5}>{r.status === 'accepted' ? pt('ctRespondedAccepted') : pt('ctRespondedDeclined')}</Muted>
+                {r.status === 'accepted' && r.type === 'trial' && r.trialId && (
+                  <Muted size={12.5}>{pt('trialAcceptedGuardian')}</Muted>
                 )}
-                {r.status === 'accepted' && r.contactChannel && <Muted size={12.5}>Adult-to-adult channel: {r.contactChannel}</Muted>}
+                {r.status === 'pending' ? (
+                  <>
+                    <Row>
+                      <Button
+                        grow
+                        primary
+                        label={pt('accept')}
+                        onPress={() => respond(r.id, true, r.type === 'contact')}
+                        testID={`req-accept-${r.id}`}
+                      />
+                      <Button
+                        grow
+                        label={pt('decline')}
+                        onPress={() => respond(r.id, false, r.type === 'contact')}
+                        testID={`req-decline-${r.id}`}
+                      />
+                    </Row>
+                  </>
+                ) : (
+                  <>
+                    {r.type === 'contact' && (r.status === 'accepted' || r.status === 'declined') && (
+                      <Muted size={12.5}>
+                        {r.status === 'accepted' ? pt('ctRespondedAccepted') : pt('ctRespondedDeclined')}
+                      </Muted>
+                    )}
+                    {r.status === 'accepted' && r.contactChannel && (
+                      <Muted size={12.5}>Adult-to-adult channel: {r.contactChannel}</Muted>
+                    )}
+                  </>
+                )}
               </>
-            )}
-            </>}>
+            }
+          >
             {!r.orgVerified && <Pill label="Unverified club" />}
-            <InvitationDetail icon="users" title={pt('detailInvitePlayer')}>{r.playerName ?? r.playerId}</InvitationDetail>
+            <InvitationDetail icon="users" title={pt('detailInvitePlayer')}>
+              {r.playerName ?? r.playerId}
+            </InvitationDetail>
             {r.status !== 'pending' && <Pill label={r.status.charAt(0).toUpperCase() + r.status.slice(1)} />}
-            {r.subject ? <Text style={styles.subject} testID={`req-subject-${r.id}`}>{r.subject}</Text> : null}
+            {r.subject ? (
+              <Text style={styles.subject} testID={`req-subject-${r.id}`}>
+                {r.subject}
+              </Text>
+            ) : null}
             {/* One-line rule: who, what, for whom, where, the dates and the decision in view; the club's words, the notes and the scout line behind View details */}
             {r.status === 'pending' && r.type === 'trial' && r.trialDetails?.proposedDate && (
               <>
                 {r.trialDetails.slots && r.trialDetails.slots.length > 0 ? (
-                  <TrialSlotChips slots={r.trialDetails.slots} chosenDay={chosenSlots[r.id] ?? r.trialDetails.proposedDate} onPick={(day) => setChosenSlots((s) => ({ ...s, [r.id]: day }))} />
+                  <TrialSlotChips
+                    slots={r.trialDetails.slots}
+                    chosenDay={chosenSlots[r.id] ?? r.trialDetails.proposedDate}
+                    onPick={(day) => setChosenSlots((s) => ({ ...s, [r.id]: day }))}
+                  />
                 ) : (
-                  <DateOptions days={[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])]} selected={chosenSlots[r.id] ?? r.trialDetails.proposedDate} onSelect={(slot) => setChosenSlots((s) => ({ ...s, [r.id]: slot }))} />
+                  <DateOptions
+                    days={[r.trialDetails.proposedDate, ...(r.trialDetails.altSlots ?? [])]}
+                    selected={chosenSlots[r.id] ?? r.trialDetails.proposedDate}
+                    onSelect={(slot) => setChosenSlots((s) => ({ ...s, [r.id]: slot }))}
+                  />
                 )}
               </>
             )}
             <Disclosure label={pt('inboxViewFullMessage')} testID={`req-details-${r.id}`}>
-              {r.message ? <Text style={styles.msg} testID={`req-message-${r.id}`}>“{r.message}”</Text> : null}
-              {r.type === 'trial' && r.trialDetails?.notes ? <InvitationDetail icon="clipboard-list" title={pt('invBeforeArrival')}>{r.trialDetails.notes}</InvitationDetail> : null}
-              <GuidanceNote size={13}>{r.scoutRole ?? 'Scout'} — {r.scoutName} · {fmtDayTime(r.createdAt)}</GuidanceNote>
-              {r.type === 'contact' && <GuidanceNote title="Guardian controls" icon="users" size={12}>{pt('ctGuardianNote')}</GuidanceNote>}
+              {r.message ? (
+                <Text style={styles.msg} testID={`req-message-${r.id}`}>
+                  “{r.message}”
+                </Text>
+              ) : null}
+              {r.type === 'trial' && r.trialDetails?.notes ? (
+                <InvitationDetail icon="clipboard-list" title={pt('invBeforeArrival')}>
+                  {r.trialDetails.notes}
+                </InvitationDetail>
+              ) : null}
+              <GuidanceNote size={13}>
+                {r.scoutRole ?? 'Scout'} — {r.scoutName} · {fmtDayTime(r.createdAt)}
+              </GuidanceNote>
+              {r.type === 'contact' && (
+                <GuidanceNote title="Guardian controls" icon="users" size={12}>
+                  {pt('ctGuardianNote')}
+                </GuidanceNote>
+              )}
               {r.type === 'contact' && r.status === 'pending' && (
                 <View style={{ gap: 6, marginTop: 4 }}>
-                  <Text style={styles.label} nativeID={`reply-label-${r.id}`}>{pt('inboxAddReply')}</Text>
+                  <Text style={styles.label} nativeID={`reply-label-${r.id}`}>
+                    {pt('inboxAddReply')}
+                  </Text>
                   <TextInput
                     style={styles.input}
                     testID={`req-reply-${r.id}`}
@@ -268,7 +380,9 @@ export default function GuardianDashboard() {
         </Row>
         <Threads
           channels={channels}
-          onSend={(channelId, text, attachMediaId, clientMsgId) => client.guardianSendMessage(guardianId!, channelId, text, attachMediaId, clientMsgId)}
+          onSend={(channelId, text, attachMediaId, clientMsgId) =>
+            client.guardianSendMessage(guardianId!, channelId, text, attachMediaId, clientMsgId)
+          }
           auth={{ kind: 'guardian', id: guardianId! }}
           onOpen={(channelId) => void client.guardianMarkChannelRead(guardianId!, channelId).catch(() => {})}
           onTyping={(channelId) => void client.guardianSendTyping(guardianId!, channelId).catch(() => {})}
@@ -286,8 +400,21 @@ export default function GuardianDashboard() {
                 <Pill label={`${c.age} · ${c.position ?? '—'}`} tone="blue" />
               </Row>
               <TrustBar score={c.trustScore} />
-              <MetricTiles items={[{label:'Clips',value:c.media.length,icon:'video'},{label:'Verified attendance',value:c.attendance.length,icon:'calendar-days'},{label:'Trial reports',value:c.trialReports.length,icon:'file-check-2'}]} />
-              {ins && <StatusRow title="Profile views this month" value={String(ins.thisMonth.views)} icon="eye" description={`${ins.byOrg.length > 0 ? `Most recently ${ins.byOrg[0].orgName}. ` : ''}Only verified clubs can look.`} />}
+              <MetricTiles
+                items={[
+                  { label: 'Clips', value: c.media.length, icon: 'video' },
+                  { label: 'Verified attendance', value: c.attendance.length, icon: 'calendar-days' },
+                  { label: 'Trial reports', value: c.trialReports.length, icon: 'file-check-2' },
+                ]}
+              />
+              {ins && (
+                <StatusRow
+                  title="Profile views this month"
+                  value={String(ins.thisMonth.views)}
+                  icon="eye"
+                  description={`${ins.byOrg.length > 0 ? `Most recently ${ins.byOrg[0].orgName}. ` : ''}Only verified clubs can look.`}
+                />
+              )}
               <SectionTitle>Availability — your call, not the club&apos;s</SectionTitle>
               <Row>
                 {CHILD_AVAILABILITY.map((a) => (
@@ -300,7 +427,9 @@ export default function GuardianDashboard() {
                       try {
                         await client.guardianSetChildAvailability(guardianId!, c.id, a.value);
                         await refresh();
-                      } catch { /* refresh shows truth */ }
+                      } catch {
+                        /* refresh shows truth */
+                      }
                     }}
                   />
                 ))}
@@ -308,156 +437,233 @@ export default function GuardianDashboard() {
               {/* The switches, pairing, open days, references and the
                   deletion sit behind one row; the card itself is the child, the
                   completeness, the evidence counts and the availability. */}
-              <Disclosure label={`Manage ${c.name.split(' ')[0]}'s profile`} hint={`Medical sharing ${c.medical.shared ? 'on' : 'off'} · First Team Seeker ${c.firstTeamSeeker ? 'on' : 'off'}${(openDays[c.id]?.length ?? 0) > 0 ? ` · ${openDays[c.id]!.length} open day${openDays[c.id]!.length === 1 ? '' : 's'} nearby` : ''}`} testID={`guardian-manage-${c.id}`}>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <View style={{ flex: 1, paddingRight: 10 }}>
-                  <Muted size={12.5}>
-                    Medical sharing {c.medical.shared ? 'ON' : 'OFF'} — your decision as guardian; invisible
-                    to every organisation unless you switch it on.
-                  </Muted>
-                </View>
-                <Switch value={c.medical.shared} onValueChange={(v) => setMedical(c.id, v)} trackColor={{ true: colors.gold, false: colors.line }} thumbColor="#fff" />
-              </Row>
-              <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 6 }}>
-                <Disclosure label="How pairing works">
-                  <GuidanceNote size={12.5}>
-                    Pair {c.name.split(' ')[0]}&apos;s device: generate a one-time code (15-minute expiry) and
-                    they enter it on their phone. Their login stays limited — uploads, stats and drills only.
-                  </GuidanceNote>
-                </Disclosure>
-                <Row>
-                  <Button
-                    small
-                    label="Generate pairing code"
-                    onPress={async () => {
-                      try {
-                        const pc = await client.guardianPairingCode(guardianId!, c.id);
-                        setPairCodes((prev) => ({ ...prev, [c.id]: pc }));
-                      } catch (e) {
-                        setError(e instanceof Error ? e.message : 'Could not generate a code');
-                      }
-                    }}
-                  />
-                  {pairCodes[c.id] && pairCodes[c.id].expiresAt > Date.now() && (
-                    <Pill label={`Code: ${pairCodes[c.id].code}`} tone="gold" />
-                  )}
-                </Row>
-                {(openDays[c.id]?.length ?? 0) > 0 && (
-                  <View style={{ gap: 6 }}>
-                    <GuidanceNote size={12.5}>Open days near {c.name.split(' ')[0]} — verified local clubs only. You register; they play.</GuidanceNote>
-                    {openDays[c.id]!.map((t) => (
-                      <Row key={t.id} style={{ justifyContent: 'space-between' }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: colors.text, fontSize: 13 }}>{t.orgName}: {t.title} · {t.date}</Text>
-                          <Muted size={11.5}>{t.venue} · {t.distanceKm} km away</Muted>
-                        </View>
-                        {t.registered ? <Pill label="Registered" tone="green" /> : (
-                          <Button small primary label="Register" onPress={async () => {
-                            try {
-                              await client.guardianRegisterOpenTrial(guardianId!, t.id, c.id);
-                              const list = await client.guardianChildOpenTrials(guardianId!, c.id);
-                              setOpenDays((prev) => ({ ...prev, [c.id]: list }));
-                            } catch (e) { setError(e instanceof Error ? e.message : 'Could not register'); }
-                          }} />
-                        )}
-                      </Row>
-                    ))}
-                  </View>
-                )}
+              <Disclosure
+                label={`Manage ${c.name.split(' ')[0]}'s profile`}
+                hint={`Medical sharing ${c.medical.shared ? 'on' : 'off'} · First Team Seeker ${c.firstTeamSeeker ? 'on' : 'off'}${(openDays[c.id]?.length ?? 0) > 0 ? ` · ${openDays[c.id]!.length} open day${openDays[c.id]!.length === 1 ? '' : 's'} nearby` : ''}`}
+                testID={`guardian-manage-${c.id}`}
+              >
                 <Row style={{ justifyContent: 'space-between' }}>
                   <View style={{ flex: 1, paddingRight: 10 }}>
                     <Muted size={12.5}>
-                      First Team Seeker {c.firstTeamSeeker ? 'ON' : 'OFF'} — surfaces {c.name.split(' ')[0]} first to
-                      local verified clubs looking for new players. Your call, free, reversible.
+                      Medical sharing {c.medical.shared ? 'ON' : 'OFF'} — your decision as guardian; invisible to every
+                      organisation unless you switch it on.
                     </Muted>
                   </View>
                   <Switch
-                    value={!!c.firstTeamSeeker}
-                    onValueChange={async (v) => {
-                      try { await client.guardianSetFirstTeamSeeker(guardianId!, c.id, v); await refresh(); }
-                      catch { /* refresh shows truth */ }
-                    }}
-                    trackColor={{ true: colors.accent, false: colors.line }}
+                    value={c.medical.shared}
+                    onValueChange={(v) => setMedical(c.id, v)}
+                    trackColor={{ true: colors.gold, false: colors.line }}
                     thumbColor="#fff"
                   />
                 </Row>
-                <View style={{ gap: 6 }}>
-                  <GuidanceNote size={12.5}>Request a coach reference for {c.name.split(' ')[0]} — the coach confirms by email.</GuidanceNote>
+                <View style={{ borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 6 }}>
+                  <Disclosure label="How pairing works">
+                    <GuidanceNote size={12.5}>
+                      Pair {c.name.split(' ')[0]}&apos;s device: generate a one-time code (15-minute expiry) and they
+                      enter it on their phone. Their login stays limited — uploads, stats and drills only.
+                    </GuidanceNote>
+                  </Disclosure>
                   <Row>
-                    <TextInput
-                      style={[styles.input, { flex: 1 }]}
-                      placeholder="Coach name"
-                      placeholderTextColor={colors.muted}
-                      value={vouchDrafts[c.id]?.name ?? ''}
-                      onChangeText={(v) => setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: v, email: prev[c.id]?.email ?? '' } }))}
-                    />
-                    <TextInput
-                      style={[styles.input, { flex: 1.3 }]}
-                      placeholder="Coach email"
-                      placeholderTextColor={colors.muted}
-                      autoCapitalize="none"
-                      value={vouchDrafts[c.id]?.email ?? ''}
-                      onChangeText={(v) => setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: prev[c.id]?.name ?? '', email: v } }))}
-                    />
-                    <Button small label="Ask" onPress={async () => {
-                      const d = vouchDrafts[c.id];
-                      if (!d?.name.trim() || !d?.email.includes('@')) { setError('Coach name and a valid email are needed.'); return; }
-                      try {
-                        await client.guardianRequestVouch(guardianId!, c.id, d.name.trim(), d.email.trim(), 'Coach');
-                        setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: '', email: '' } }));
-                        setError(null);
-                      } catch (e) { setError(e instanceof Error ? e.message : 'Could not send'); }
-                    }} />
-                  </Row>
-                </View>
-                {confirmDeleteChild === c.id ? (
-                  <Row>
-                    <Muted size={12.5}>Delete {c.name}&apos;s profile and all their content?</Muted>
                     <Button
-                      small danger label="Yes, delete"
+                      small
+                      label="Generate pairing code"
                       onPress={async () => {
                         try {
-                          await client.guardianDeleteChild(guardianId!, c.id);
-                          setConfirmDeleteChild(null);
-                          await refresh();
+                          const pc = await client.guardianPairingCode(guardianId!, c.id);
+                          setPairCodes((prev) => ({ ...prev, [c.id]: pc }));
                         } catch (e) {
-                          setError(e instanceof Error ? e.message : 'Could not delete');
+                          setError(e instanceof Error ? e.message : 'Could not generate a code');
                         }
                       }}
                     />
-                    <Button small label="Keep" onPress={() => setConfirmDeleteChild(null)} />
+                    {pairCodes[c.id] && pairCodes[c.id].expiresAt > Date.now() && (
+                      <Pill label={`Code: ${pairCodes[c.id].code}`} tone="gold" />
+                    )}
                   </Row>
-                ) : (
-                  <Row>
-                    <Button small danger label="Delete this profile" onPress={() => setConfirmDeleteChild(c.id)} />
+                  {(openDays[c.id]?.length ?? 0) > 0 && (
+                    <View style={{ gap: 6 }}>
+                      <GuidanceNote size={12.5}>
+                        Open days near {c.name.split(' ')[0]} — verified local clubs only. You register; they play.
+                      </GuidanceNote>
+                      {openDays[c.id]!.map((t) => (
+                        <Row key={t.id} style={{ justifyContent: 'space-between' }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: colors.text, fontSize: 13 }}>
+                              {t.orgName}: {t.title} · {t.date}
+                            </Text>
+                            <Muted size={11.5}>
+                              {t.venue} · {t.distanceKm} km away
+                            </Muted>
+                          </View>
+                          {t.registered ? (
+                            <Pill label="Registered" tone="green" />
+                          ) : (
+                            <Button
+                              small
+                              primary
+                              label="Register"
+                              onPress={async () => {
+                                try {
+                                  await client.guardianRegisterOpenTrial(guardianId!, t.id, c.id);
+                                  const list = await client.guardianChildOpenTrials(guardianId!, c.id);
+                                  setOpenDays((prev) => ({ ...prev, [c.id]: list }));
+                                } catch (e) {
+                                  setError(e instanceof Error ? e.message : 'Could not register');
+                                }
+                              }}
+                            />
+                          )}
+                        </Row>
+                      ))}
+                    </View>
+                  )}
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <View style={{ flex: 1, paddingRight: 10 }}>
+                      <Muted size={12.5}>
+                        First Team Seeker {c.firstTeamSeeker ? 'ON' : 'OFF'} — surfaces {c.name.split(' ')[0]} first to
+                        local verified clubs looking for new players. Your call, free, reversible.
+                      </Muted>
+                    </View>
+                    <Switch
+                      value={!!c.firstTeamSeeker}
+                      onValueChange={async (v) => {
+                        try {
+                          await client.guardianSetFirstTeamSeeker(guardianId!, c.id, v);
+                          await refresh();
+                        } catch {
+                          /* refresh shows truth */
+                        }
+                      }}
+                      trackColor={{ true: colors.accent, false: colors.line }}
+                      thumbColor="#fff"
+                    />
                   </Row>
-                )}
-              </View>
+                  <View style={{ gap: 6 }}>
+                    <GuidanceNote size={12.5}>
+                      Request a coach reference for {c.name.split(' ')[0]} — the coach confirms by email.
+                    </GuidanceNote>
+                    <Row>
+                      <TextInput
+                        style={[styles.input, { flex: 1 }]}
+                        placeholder="Coach name"
+                        placeholderTextColor={colors.muted}
+                        value={vouchDrafts[c.id]?.name ?? ''}
+                        onChangeText={(v) =>
+                          setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: v, email: prev[c.id]?.email ?? '' } }))
+                        }
+                      />
+                      <TextInput
+                        style={[styles.input, { flex: 1.3 }]}
+                        placeholder="Coach email"
+                        placeholderTextColor={colors.muted}
+                        autoCapitalize="none"
+                        value={vouchDrafts[c.id]?.email ?? ''}
+                        onChangeText={(v) =>
+                          setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: prev[c.id]?.name ?? '', email: v } }))
+                        }
+                      />
+                      <Button
+                        small
+                        label="Ask"
+                        onPress={async () => {
+                          const d = vouchDrafts[c.id];
+                          if (!d?.name.trim() || !d?.email.includes('@')) {
+                            setError('Coach name and a valid email are needed.');
+                            return;
+                          }
+                          try {
+                            await client.guardianRequestVouch(
+                              guardianId!,
+                              c.id,
+                              d.name.trim(),
+                              d.email.trim(),
+                              'Coach',
+                            );
+                            setVouchDrafts((prev) => ({ ...prev, [c.id]: { name: '', email: '' } }));
+                            setError(null);
+                          } catch (e) {
+                            setError(e instanceof Error ? e.message : 'Could not send');
+                          }
+                        }}
+                      />
+                    </Row>
+                  </View>
+                  {confirmDeleteChild === c.id ? (
+                    <Row>
+                      <Muted size={12.5}>Delete {c.name}&apos;s profile and all their content?</Muted>
+                      <Button
+                        small
+                        danger
+                        label="Yes, delete"
+                        onPress={async () => {
+                          try {
+                            await client.guardianDeleteChild(guardianId!, c.id);
+                            setConfirmDeleteChild(null);
+                            await refresh();
+                          } catch (e) {
+                            setError(e instanceof Error ? e.message : 'Could not delete');
+                          }
+                        }}
+                      />
+                      <Button small label="Keep" onPress={() => setConfirmDeleteChild(null)} />
+                    </Row>
+                  ) : (
+                    <Row>
+                      <Button small danger label="Delete this profile" onPress={() => setConfirmDeleteChild(c.id)} />
+                    </Row>
+                  )}
+                </View>
               </Disclosure>
             </Card>
           );
         })}
 
         <Disclosure label="Co-guardian" hint="A second parent or guardian, same children" testID="guardian-coguardian">
-          {(guardian as (typeof guardian & { coGuardians?: { id: string; name: string; email: string }[] }) | null)?.coGuardians?.map((co) => (
+          {(
+            guardian as (typeof guardian & { coGuardians?: { id: string; name: string; email: string }[] }) | null
+          )?.coGuardians?.map((co) => (
             <Row key={co.id}>
               <Pill label="Co-guardian" tone="blue" />
-              <Text style={{ color: colors.text, fontSize: 13.5 }}>{co.name} · {co.email}</Text>
+              <Text style={{ color: colors.text, fontSize: 13.5 }}>
+                {co.name} · {co.email}
+              </Text>
             </Row>
           ))}
           <Row>
-            <TextInput style={[styles.input, { flex: 1 }]} placeholder="Name" placeholderTextColor={colors.muted} value={coName} onChangeText={setCoName} />
-            <TextInput style={[styles.input, { flex: 1.4 }]} placeholder="Email" placeholderTextColor={colors.muted} value={coEmail} onChangeText={setCoEmail} autoCapitalize="none" />
-            <Button small label="Invite" onPress={async () => {
-              if (!coName.trim() || !coEmail.includes('@')) { setError('Co-guardian needs a name and valid email.'); return; }
-              try {
-                await client.guardianAddCoGuardian(guardianId!, coName.trim(), coEmail.trim());
-                setCoName(''); setCoEmail(''); setError(null);
-                await refresh();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : 'Could not add co-guardian');
-              }
-            }} />
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              placeholder="Name"
+              placeholderTextColor={colors.muted}
+              value={coName}
+              onChangeText={setCoName}
+            />
+            <TextInput
+              style={[styles.input, { flex: 1.4 }]}
+              placeholder="Email"
+              placeholderTextColor={colors.muted}
+              value={coEmail}
+              onChangeText={setCoEmail}
+              autoCapitalize="none"
+            />
+            <Button
+              small
+              label="Invite"
+              onPress={async () => {
+                if (!coName.trim() || !coEmail.includes('@')) {
+                  setError('Co-guardian needs a name and valid email.');
+                  return;
+                }
+                try {
+                  await client.guardianAddCoGuardian(guardianId!, coName.trim(), coEmail.trim());
+                  setCoName('');
+                  setCoEmail('');
+                  setError(null);
+                  await refresh();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : 'Could not add co-guardian');
+                }
+              }}
+            />
           </Row>
         </Disclosure>
 
@@ -468,7 +674,10 @@ export default function GuardianDashboard() {
               <Card key={r.id}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.reason}</Text>
-                  <Pill label={r.status === 'resolved' ? 'reviewed' : 'in review'} tone={r.status === 'resolved' ? 'green' : 'gold'} />
+                  <Pill
+                    label={r.status === 'resolved' ? 'reviewed' : 'in review'}
+                    tone={r.status === 'resolved' ? 'green' : 'gold'}
+                  />
                 </Row>
                 {r.outcome && <Muted size={12.5}>{r.outcome}</Muted>}
               </Card>
@@ -476,8 +685,14 @@ export default function GuardianDashboard() {
           </>
         )}
 
-        <Disclosure label="Notifications" hint={prefs.quietStart && prefs.quietEnd ? `Quiet ${prefs.quietStart}–${prefs.quietEnd}` : 'Quiet hours off'} testID="guardian-notifications">
-          <GuidanceNote size={13}>Quiet hours pause push notifications overnight; everything still lands in the app.</GuidanceNote>
+        <Disclosure
+          label="Notifications"
+          hint={prefs.quietStart && prefs.quietEnd ? `Quiet ${prefs.quietStart}–${prefs.quietEnd}` : 'Quiet hours off'}
+          testID="guardian-notifications"
+        >
+          <GuidanceNote size={13}>
+            Quiet hours pause push notifications overnight; everything still lands in the app.
+          </GuidanceNote>
           <Row>
             <Muted size={13}>Quiet from</Muted>
             <TextInput
@@ -504,7 +719,8 @@ export default function GuardianDashboard() {
         <Disclosure label="Your family's data" hint="One bundle, yours to take any time" testID="guardian-data">
           <Row>
             <Button
-              small label="Preview data export"
+              small
+              label="Preview data export"
               onPress={async () => {
                 try {
                   const data = await client.guardianExport(guardianId!);
@@ -516,15 +732,26 @@ export default function GuardianDashboard() {
             />
             {exportPreview && <Button small label="Hide preview" onPress={() => setExportPreview(null)} />}
           </Row>
-          {exportPreview && <Text style={styles.exportPreview} numberOfLines={30}>{exportPreview}…</Text>}
+          {exportPreview && (
+            <Text style={styles.exportPreview} numberOfLines={30}>
+              {exportPreview}…
+            </Text>
+          )}
         </Disclosure>
 
         {!(digest && digest.children.length > 0) && (
-          <Disclosure label="Communications log" hint="Every scouting action around your children, logged and visible to you" testID="guardian-log">
+          <Disclosure
+            label="Communications log"
+            hint="Every scouting action around your children, logged and visible to you"
+            testID="guardian-log"
+          >
             {log.map((l) => (
               <View key={l.id} style={styles.logRow}>
                 <Text style={styles.logWhen}>{fmtDay(l.ts)}</Text>
-                <Text style={styles.logText}>{l.type.replace(/_/g, ' ')} — {l.orgName}{l.scoutName ? ` (${l.scoutName})` : ''}</Text>
+                <Text style={styles.logText}>
+                  {l.type.replace(/_/g, ' ')} — {l.orgName}
+                  {l.scoutName ? ` (${l.scoutName})` : ''}
+                </Text>
               </View>
             ))}
             {log.length === 0 && <GuidanceNote size={12.5}>Nothing logged yet.</GuidanceNote>}
@@ -540,17 +767,38 @@ export default function GuardianDashboard() {
             account does the same and opens the entry screen on Sign in, so the
             next person signs in as themselves — no identity carries over. */}
         <View style={{ marginTop: 18 }}>
-          <ListRow label="Switch account" value="Sign in as someone else on this device" icon="users" testID="switch-account" onPress={() => { logout(); router.replace('/onboarding?mode=signin'); }} />
-          <ListRow label="Sign out" icon="log-out" testID="sign-out" onPress={() => { logout(); router.replace('/onboarding'); }} />
+          <ListRow
+            label="Switch account"
+            value="Sign in as someone else on this device"
+            icon="users"
+            testID="switch-account"
+            onPress={() => {
+              logout();
+              router.replace('/onboarding?mode=signin');
+            }}
+          />
+          <ListRow
+            label="Sign out"
+            icon="log-out"
+            testID="sign-out"
+            onPress={() => {
+              logout();
+              router.replace('/onboarding');
+            }}
+          />
         </View>
-        <Text style={styles.env}>{mode === 'live' ? 'Live — connected to scoutbox-server' : 'Demo — self-contained sample data'}</Text>
+        <Text style={styles.env}>
+          {mode === 'live' ? 'Live — connected to scoutbox-server' : 'Demo — self-contained sample data'}
+        </Text>
 
         {guardianId ? (
           <>
             {children.map((c) => (
               <View key={c.id}>
                 {/* The child's football, one row each: the dashboard stays a list; every section opens one tap deeper. */}
-                <View style={{ marginTop: 22 }}><SectionTitle testID={`guardian-child-head-${c.id}`}>{c.name}</SectionTitle></View>
+                <View style={{ marginTop: 22 }}>
+                  <SectionTitle testID={`guardian-child-head-${c.id}`}>{c.name}</SectionTitle>
+                </View>
                 <Disclosure label={pt('gSec_evidence')} testID={`guardian-child-evidence-${c.id}`}>
                   <PassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
                 </Disclosure>
@@ -558,7 +806,10 @@ export default function GuardianDashboard() {
                   <BoardSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
                 </Disclosure>
                 <Disclosure label={pt('gSec_campaigns')} testID={`guardian-child-campaigns-${c.id}`}>
-                  <CampaignsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
+                  <CampaignsSection
+                    actor={{ kind: 'guardian', id: guardianId, childId: c.id }}
+                    mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))}
+                  />
                 </Disclosure>
                 <Disclosure label={pt('gSec_feedback')} testID={`guardian-child-feedback-${c.id}`}>
                   <FeedbackDevSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
@@ -570,7 +821,11 @@ export default function GuardianDashboard() {
                   <OpportunityFitSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
                 </Disclosure>
                 <Disclosure label={pt('gSec_transition')} testID={`guardian-child-transition-${c.id}`}>
-                  <TransitionsSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor={false} mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))} />
+                  <TransitionsSection
+                    actor={{ kind: 'guardian', id: guardianId, childId: c.id }}
+                    isMinor={false}
+                    mediaOptions={(c.media ?? []).map((m) => ({ id: m.id, title: m.title }))}
+                  />
                 </Disclosure>
                 <Disclosure label={pt('gSec_references')} testID={`guardian-child-references-${c.id}`}>
                   <ChildReferencesSection guardianId={guardianId} childId={c.id} childName={c.name} />
@@ -579,10 +834,17 @@ export default function GuardianDashboard() {
                   <DevelopmentHubSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} />
                 </Disclosure>
                 <Disclosure label={pt('gSec_boxcam')} testID={`guardian-child-boxcam-${c.id}`}>
-                  <BoxTrainingSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} isMinor childName={c.name} />
+                  <BoxTrainingSection
+                    actor={{ kind: 'guardian', id: guardianId, childId: c.id }}
+                    isMinor
+                    childName={c.name}
+                  />
                 </Disclosure>
                 <Disclosure label={pt('gSec_passport')} testID={`guardian-child-passport-${c.id}`}>
-                  <FootballPassportSection actor={{ kind: 'guardian', id: guardianId, childId: c.id }} childName={c.name} />
+                  <FootballPassportSection
+                    actor={{ kind: 'guardian', id: guardianId, childId: c.id }}
+                    childName={c.name}
+                  />
                 </Disclosure>
                 <Disclosure label={pt('gSec_invite')} testID={`guardian-child-invite-${c.id}`}>
                   <InviteCodeSection actor={{ kind: 'guardian', id: guardianId, childId: c.id, childName: c.name }} />
@@ -603,35 +865,43 @@ export default function GuardianDashboard() {
   );
 }
 
-const makeStyles = (colors: Palette) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  h1: { color: colors.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.6, marginTop: 6 },
-  who: { paddingTop: 10, paddingBottom: 6, gap: 2 },
-  whoName: { color: colors.text, fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
-  whoLine: { color: colors.muted, fontSize: 13, lineHeight: 19 },
-  digest: { gap: 6 },
-  digestLine: { color: colors.text, fontSize: 14, lineHeight: 21 },
-  logRow: { flexDirection: 'row', gap: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.line },
-  logWhen: { width: 80, color: colors.muted, fontSize: 12, lineHeight: 18 },
-  logText: { flex: 1, color: colors.muted, fontSize: 13, lineHeight: 18 },
-  env: { color: colors.muted, fontSize: 11.5, marginTop: 24, textAlign: 'center' },
-  org: { color: colors.text, fontSize: 19, fontWeight: '600', letterSpacing: -0.4 },
-  subject: { color: colors.text, fontSize: 15, fontWeight: '700' },
-  msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },
-  label: { color: colors.text, fontSize: 13, fontWeight: '600' },
-  input: {
-    backgroundColor: colors.bg2,
-    borderColor: colors.line,
-    borderWidth: 1,
-    borderRadius: 10,
-    color: colors.text,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-  },
-  exportPreview: {
-    color: colors.muted, fontSize: 11, fontVariant: ['tabular-nums'], lineHeight: 15,
-    borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 8, marginTop: 6,
-  },
-});
+const makeStyles = (colors: Palette) =>
+  StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.bg },
+    scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
+    h1: { color: colors.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.6, marginTop: 6 },
+    who: { paddingTop: 10, paddingBottom: 6, gap: 2 },
+    whoName: { color: colors.text, fontSize: 22, fontWeight: '700', letterSpacing: -0.5 },
+    whoLine: { color: colors.muted, fontSize: 13, lineHeight: 19 },
+    digest: { gap: 6 },
+    digestLine: { color: colors.text, fontSize: 14, lineHeight: 21 },
+    logRow: { flexDirection: 'row', gap: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.line },
+    logWhen: { width: 80, color: colors.muted, fontSize: 12, lineHeight: 18 },
+    logText: { flex: 1, color: colors.muted, fontSize: 13, lineHeight: 18 },
+    env: { color: colors.muted, fontSize: 11.5, marginTop: 24, textAlign: 'center' },
+    org: { color: colors.text, fontSize: 19, fontWeight: '600', letterSpacing: -0.4 },
+    subject: { color: colors.text, fontSize: 15, fontWeight: '700' },
+    msg: { color: colors.text, fontSize: 14, fontStyle: 'italic', lineHeight: 20 },
+    label: { color: colors.text, fontSize: 13, fontWeight: '600' },
+    input: {
+      backgroundColor: colors.bg2,
+      borderColor: colors.line,
+      borderWidth: 1,
+      borderRadius: 10,
+      color: colors.text,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      fontSize: 14,
+    },
+    exportPreview: {
+      color: colors.muted,
+      fontSize: 11,
+      fontVariant: ['tabular-nums'],
+      lineHeight: 15,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 8,
+      padding: 8,
+      marginTop: 6,
+    },
+  });

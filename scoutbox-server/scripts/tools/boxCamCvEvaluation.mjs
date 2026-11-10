@@ -31,7 +31,10 @@ function evaluate(fx) {
   let decodeErrors = 0;
   for (const raw of fx.frames) {
     const d = decodeFrame(raw);
-    if (!d.ok) { decodeErrors += 1; continue; }
+    if (!d.ok) {
+      decodeErrors += 1;
+      continue;
+    }
     run.processFrame(d.frame);
   }
   const result = run.finish({});
@@ -112,12 +115,15 @@ let refused = 0;
 let correct = 0;
 
 console.log(`Box Cam CV evaluation — engine v${CV_ENGINE_VERSION}, policy v${BOX_CAM_CV_POLICY_VERSION}`);
-console.log(`${fixtures.length} golden fixtures (synthetic; see cv/fixtures.mjs for what that does and does not prove)\n`);
+console.log(
+  `${fixtures.length} golden fixtures (synthetic; see cv/fixtures.mjs for what that does and does not prove)\n`,
+);
 
 for (const fx of fixtures) {
   const { result, decodeErrors } = evaluate(fx);
   const j = judge(fx, result);
-  if (result.state === 'accepted') accepted += 1; else refused += 1;
+  if (result.state === 'accepted') accepted += 1;
+  else refused += 1;
   if (j.falseVerification) falseVerifications += 1;
   if (j.verdict === 'correct' || j.verdict === 'correct_refusal') correct += 1;
 
@@ -168,13 +174,21 @@ for (const fam of families) {
     const j = judge(v, result);
     if (j.falseVerification) falseVerifications += 1;
     const ok = j.verdict === 'correct' || j.verdict === 'correct_refusal';
-    if (!ok) { famBad += 1; familyFailures += 1; }
+    if (!ok) {
+      famBad += 1;
+      familyFailures += 1;
+    }
     counts.push(result.count);
     states.push(result.state);
     familyRows.push({
-      family: fam.family, id: v.id, expectedState: v.expected.state,
-      expectedCount: v.expected.count ?? null, gotState: result.state,
-      gotCount: result.count, verdict: j.verdict, falseVerification: j.falseVerification,
+      family: fam.family,
+      id: v.id,
+      expectedState: v.expected.state,
+      expectedCount: v.expected.count ?? null,
+      gotState: result.state,
+      gotCount: result.count,
+      verdict: j.verdict,
+      falseVerification: j.falseVerification,
     });
   }
   // The invariance property itself.
@@ -190,12 +204,12 @@ for (const fam of families) {
   const acceptedCounts = counts.filter((c) => c != null);
   const spread = acceptedCounts.length ? Math.max(...acceptedCounts) - Math.min(...acceptedCounts) : 0;
   const sameState = new Set(states).size === 1;
-  const invariant = checksCount ? (sameState && spread <= 2) : famBad === 0;
+  const invariant = checksCount ? sameState && spread <= 2 : famBad === 0;
   if (!invariant) invarianceBreaks += 1;
   console.log(
     `${pad(fam.family, 28)} ${pad(fam.axis, 16)} variants ${pad(fam.variants.length, 3)} ` +
-    `counts [${counts.map((c) => (c == null ? '—' : c)).join(', ')}] ` +
-    `${invariant ? (checksCount ? 'invariant' : 'on-truth') : '*** NOT INVARIANT ***'}${famBad ? ` ${famBad} off-truth` : ''}`,
+      `counts [${counts.map((c) => (c == null ? '—' : c)).join(', ')}] ` +
+      `${invariant ? (checksCount ? 'invariant' : 'on-truth') : '*** NOT INVARIANT ***'}${famBad ? ` ${famBad} off-truth` : ''}`,
   );
 }
 
@@ -260,14 +274,18 @@ for (const cs of consumed) {
     if (result.state !== 'accepted' || err > (cs.expected.tolerance ?? 0)) consumedOffTruth += 1;
   }
   consumedRows.push({
-    id: cs.id, group: cs.group, consumedFrom: cs.consumedFrom,
-    expectedState: cs.expected.state, expectedCount: cs.expected.count ?? null,
-    gotState: result.state, gotCount: result.count,
+    id: cs.id,
+    group: cs.group,
+    consumedFrom: cs.consumedFrom,
+    expectedState: cs.expected.state,
+    expectedCount: cs.expected.count ?? null,
+    gotState: result.state,
+    gotCount: result.count,
   });
 }
 console.log(
   `${consumed.length} consumed cases: ${consumedFalseTouches} false touch(es), ` +
-  `${consumedOffTruth} counting case(s) off their holdout-era truth`,
+    `${consumedOffTruth} counting case(s) off their holdout-era truth`,
 );
 
 // -------------------------------------------------------- determinism
@@ -345,7 +363,9 @@ console.log(`real-world validation    NO — synthetic fixtures only`);
 console.log(`written to               domains/development/boxcam/cv/evaluation.json`);
 
 if (consumedFalseTouches > 0) {
-  console.error(`\nm22CvEval: FAILED — ${consumedFalseTouches} false touch(es) on consumed holdout material. These are the scenes that already caught a defect once; §4 makes a recurrence a P0.`);
+  console.error(
+    `\nm22CvEval: FAILED — ${consumedFalseTouches} false touch(es) on consumed holdout material. These are the scenes that already caught a defect once; §4 makes a recurrence a P0.`,
+  );
   process.exit(1);
 }
 if (falseTouches > 0) {
@@ -370,5 +390,9 @@ if (nondeterministic > 0) {
 }
 console.log(`\nm22CvEval: no false verifications, fully deterministic.`);
 
-function pad(s, n) { return String(s).padEnd(n); }
-function round3(n) { return Math.round(n * 1000) / 1000; }
+function pad(s, n) {
+  return String(s).padEnd(n);
+}
+function round3(n) {
+  return Math.round(n * 1000) / 1000;
+}

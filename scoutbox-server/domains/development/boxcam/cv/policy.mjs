@@ -16,8 +16,10 @@ export const CV_PROVIDER_ID = 'production_cv';
 export const FRAME_ENCODING = 'gray8';
 
 export const FRAME_LIMITS = Object.freeze({
-  minWidth: 160, minHeight: 120,
-  maxWidth: 320, maxHeight: 240,
+  minWidth: 160,
+  minHeight: 120,
+  maxWidth: 320,
+  maxHeight: 240,
   // A frame is exactly w*h bytes, so an oversized body is refused on size before anything interprets it.
   maxBytes: 320 * 240,
   maxFramesPerBatch: 12,
@@ -164,11 +166,17 @@ export const STATE_COPY = Object.freeze({
   liveness_failed: 'Could not verify this attempt — the live-session check did not pass.',
   provider_unavailable: 'Production observation is not available right now, so this attempt was not verified.',
   unsupported_protocol: 'Production observation is not available for this test on this device.',
-  unsupported_event_cadence: 'Could not verify this attempt — the touches came faster than ScoutBox can reliably count, so no exact result was produced.',
+  unsupported_event_cadence:
+    'Could not verify this attempt — the touches came faster than ScoutBox can reliably count, so no exact result was produced.',
 });
 
 export const PROVIDER_HEALTH = Object.freeze([
-  'not_configured', 'configured', 'warming', 'ready', 'degraded', 'unavailable',
+  'not_configured',
+  'configured',
+  'warming',
+  'ready',
+  'degraded',
+  'unavailable',
 ]);
 
 // ------------------------------------------------- client-supplied fields
@@ -176,10 +184,26 @@ export const PROVIDER_HEALTH = Object.freeze([
 // The client supplies frames, not a measurement. These names are refused with a 422 rather than ignored, so an
 // attempt to self-report is visible in a log.
 export const FORBIDDEN_CLIENT_FIELDS = Object.freeze([
-  'touches', 'touchCount', 'reps', 'repCount', 'juggles', 'juggleCount',
-  'count', 'measurement', 'value', 'result', 'verified', 'verifiedReps',
-  'combineVerified', 'confidence', 'modelVersion', 'providerVersion',
-  'productionEligible', 'accepted', 'observationState', 'score',
+  'touches',
+  'touchCount',
+  'reps',
+  'repCount',
+  'juggles',
+  'juggleCount',
+  'count',
+  'measurement',
+  'value',
+  'result',
+  'verified',
+  'verifiedReps',
+  'combineVerified',
+  'confidence',
+  'modelVersion',
+  'providerVersion',
+  'productionEligible',
+  'accepted',
+  'observationState',
+  'score',
 ]);
 
 export function refusedClientFields(body) {
@@ -229,7 +253,11 @@ export const CANDIDATE_PROTOCOLS = Object.freeze({
 
 // What the engine can offer when healthy. Whether a protocol may use `rep_count` is the gate's decision.
 export const ENGINE_CAPABILITIES = Object.freeze([
-  'player_presence', 'ball_presence', 'active_motion', 'active_duration', 'rep_count',
+  'player_presence',
+  'ball_presence',
+  'active_motion',
+  'active_duration',
+  'rep_count',
 ]);
 
 export const ENGINE_NON_CAPABILITIES = Object.freeze({
@@ -237,7 +265,8 @@ export const ENGINE_NON_CAPABILITIES = Object.freeze({
   technique_signals: 'No technique judgement of any kind is produced.',
   interval_completion: 'Work/rest interval structure is not observed.',
   timing_gate: 'No timing gate exists. Sprint and agility protocols remain unsupported.',
-  spatial_scale: 'No real-world distance is derived from camera geometry (§56). Jump and distance protocols remain unsupported.',
+  spatial_scale:
+    'No real-world distance is derived from camera geometry (§56). Jump and distance protocols remain unsupported.',
   target_zone: 'No target-zone geometry is observed.',
 });
 

@@ -39,10 +39,18 @@ const freshPage = async () => {
   await page.click('a[href="/inbox"]');
   // The invitation is a row; its slot picker opens with the row
   await page.waitForSelector('[data-testid="row-accent-trial"]', { timeout: 15000 });
-  await page.locator('[data-testid^="inbox-request-"]').filter({ has: page.locator('[data-testid="row-accent-trial"]') }).first().click();
+  await page
+    .locator('[data-testid^="inbox-request-"]')
+    .filter({ has: page.locator('[data-testid="row-accent-trial"]') })
+    .first()
+    .click();
   await page.waitForSelector('[data-testid^="trial-slot-"], [data-testid^="alt-slot-"]', { timeout: 15000 });
   say('trial slot picker renders in inbox');
-  await page.locator('[data-testid="detail-back"]').first().click().catch(() => {});
+  await page
+    .locator('[data-testid="detail-back"]')
+    .first()
+    .click()
+    .catch(() => {});
 
   // Training programme on Upload
   // Upload is the "+ Add evidence" action on Football; its route is unchanged.
@@ -57,7 +65,7 @@ const freshPage = async () => {
   // The profile has four sections; the season and the cohort are Performance, the references are Evidence
   await page.getByRole('tab', { name: 'Performance' }).click();
   await page.waitForSelector('text=Season by season', { timeout: 15000 });
-  say('season history renders on the profile\'s Performance section');
+  say("season history renders on the profile's Performance section");
   await page.waitForSelector('text=your cohort, not the pros', { timeout: 10000 });
   await page.getByRole('tab', { name: 'Evidence' }).click();
   await page.waitForSelector('text=Coach references', { timeout: 10000 });

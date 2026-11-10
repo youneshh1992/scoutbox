@@ -24,7 +24,8 @@ export const MEDIA_DELETIONS_MIGRATION = '0006_media_deletions';
 // player_id is metadata, not proof that the file is unowned: the authority is every `media[].id` a live player
 // carries. The invariant is checked again at the execution boundary (every sweep), so a conflicting entry that is
 // already stored is retained with a diagnostic and never acted on.
-const tableExists = (sqlite, name) => !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
+const tableExists = (sqlite, name) =>
+  !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
 
 /**
  * Every media id a live player references, with the ids of the players that carry it: the `player_media` rows, plus
@@ -54,16 +55,24 @@ export function liveMediaReferences(sqlite, { records = [] } = {}) {
 
 /** The queue entries (given, or the stored ones) that name a live-referenced media id: `[{ media_id, owners }]`, ids only. */
 export function mediaQueueConflicts(sqlite, rows = null, { records = [] } = {}) {
-  const entries = rows ?? (tableExists(sqlite, 'media_deletions') ? sqlite.prepare('SELECT media_id FROM media_deletions ORDER BY queued_at, media_id').all() : []);
+  const entries =
+    rows ??
+    (tableExists(sqlite, 'media_deletions')
+      ? sqlite.prepare('SELECT media_id FROM media_deletions ORDER BY queued_at, media_id').all()
+      : []);
   if (!entries.length) return [];
   const refs = liveMediaReferences(sqlite, { records });
-  return entries.filter((r) => refs.has(r.media_id)).map((r) => ({ media_id: r.media_id, owners: refs.get(r.media_id).slice() }));
+  return entries
+    .filter((r) => refs.has(r.media_id))
+    .map((r) => ({ media_id: r.media_id, owners: refs.get(r.media_id).slice() }));
 }
 
 /** The stable, actionable refusal: ids only, never a record. */
 export function ownershipConflictError(conflicts, { label = 'the media-removal queue' } = {}) {
   const list = conflicts.map((c) => `${c.media_id} (player ${c.owners.join(', ')})`);
-  const err = new Error(`MEDIA_QUEUE_OWNERSHIP_CONFLICT: ${conflicts.length} queued removal${conflicts.length === 1 ? '' : 's'} in ${label} name${conflicts.length === 1 ? 's' : ''} media a live player still references — ${list.slice(0, 20).join('; ')}${list.length > 20 ? '; …' : ''}; nothing was removed and the write was rolled back; resolve the queue entry or the player's reference by hand before retrying`);
+  const err = new Error(
+    `MEDIA_QUEUE_OWNERSHIP_CONFLICT: ${conflicts.length} queued removal${conflicts.length === 1 ? '' : 's'} in ${label} name${conflicts.length === 1 ? 's' : ''} media a live player still references — ${list.slice(0, 20).join('; ')}${list.length > 20 ? '; …' : ''}; nothing was removed and the write was rolled back; resolve the queue entry or the player's reference by hand before retrying`,
+  );
   err.code = 'MEDIA_QUEUE_OWNERSHIP_CONFLICT';
   err.conflicts = conflicts;
   return err;
@@ -78,38 +87,63 @@ export function validateMediaDeletionRow(raw) {
   const unknown = Object.keys(raw).filter((k) => !ROW_FIELDS.includes(k));
   if (unknown.length) return { ok: false, reason: `unknown field(s) ${unknown.join(', ')}` };
   const { media_id, player_id = null, queued_at, attempts = 0, last_attempt_at = null, last_error = null } = raw;
-  if (typeof media_id !== 'string' || !MEDIA_ID.test(media_id)) return { ok: false, reason: `${JSON.stringify(media_id)} is not a media id` };
-  if (player_id !== null && typeof player_id !== 'string') return { ok: false, reason: 'player_id must be a string or null' };
+  if (typeof media_id !== 'string' || !MEDIA_ID.test(media_id))
+    return { ok: false, reason: `${JSON.stringify(media_id)} is not a media id` };
+  if (player_id !== null && typeof player_id !== 'string')
+    return { ok: false, reason: 'player_id must be a string or null' };
   if (!Number.isSafeInteger(queued_at)) return { ok: false, reason: 'queued_at must be an integer' };
-  if (!Number.isSafeInteger(attempts) || attempts < 0) return { ok: false, reason: 'attempts must be a non-negative integer' };
-  if (last_attempt_at !== null && !Number.isSafeInteger(last_attempt_at)) return { ok: false, reason: 'last_attempt_at must be an integer or null' };
-  if (last_error !== null && typeof last_error !== 'string') return { ok: false, reason: 'last_error must be a string or null' };
+  if (!Number.isSafeInteger(attempts) || attempts < 0)
+    return { ok: false, reason: 'attempts must be a non-negative integer' };
+  if (last_attempt_at !== null && !Number.isSafeInteger(last_attempt_at))
+    return { ok: false, reason: 'last_attempt_at must be an integer or null' };
+  if (last_error !== null && typeof last_error !== 'string')
+    return { ok: false, reason: 'last_error must be a string or null' };
   return { ok: true, row: { media_id, player_id, queued_at, attempts, last_attempt_at, last_error } };
 }
-
-
 
 /** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const MEDIA_DELETIONS_TABLE = {
   name: 'mediaDeletions',
   read(sqlite) {
     if (!migrationApplied(sqlite, MEDIA_DELETIONS_MIGRATION)) return null;
-    return sqlite.prepare('SELECT media_id, player_id, queued_at, attempts, last_attempt_at, last_error FROM media_deletions ORDER BY queued_at, media_id').all().map((r) => ({ ...r }));
+    return sqlite
+      .prepare(
+        'SELECT media_id, player_id, queued_at, attempts, last_attempt_at, last_error FROM media_deletions ORDER BY queued_at, media_id',
+      )
+      .all()
+      .map((r) => ({ ...r }));
   },
 };
 
 /** `liveRecords()` (optional) returns further player records that count as live references alongside the table. */
-export function createMediaDeletionsQueue({ sqlite, log = () => {}, warn = () => {}, now = Date.now, liveRecords = null }) {
+export function createMediaDeletionsQueue({
+  sqlite,
+  log = () => {},
+  warn = () => {},
+  now = Date.now,
+  liveRecords = null,
+}) {
   if (!sqlite) throw new TypeError('the media-deletion queue needs a SQLite connection (node:sqlite)');
-  if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media_deletions'").get()) throw new Error('media deletions: the media_deletions table does not exist (migration 0006 has not run)');
-  if (liveRecords !== null && typeof liveRecords !== 'function') throw new TypeError('media deletions: liveRecords must be a function returning the live player records, or null');
-  const held = () => { const r = liveRecords ? liveRecords() : []; return Array.isArray(r) ? r : Array.from(r ?? []); };
+  if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'media_deletions'").get())
+    throw new Error('media deletions: the media_deletions table does not exist (migration 0006 has not run)');
+  if (liveRecords !== null && typeof liveRecords !== 'function')
+    throw new TypeError('media deletions: liveRecords must be a function returning the live player records, or null');
+  const held = () => {
+    const r = liveRecords ? liveRecords() : [];
+    return Array.isArray(r) ? r : Array.from(r ?? []);
+  };
   const stmt = {
-    insert: sqlite.prepare('INSERT INTO media_deletions (media_id, player_id, queued_at) VALUES (?, ?, ?) ON CONFLICT(media_id) DO UPDATE SET player_id = excluded.player_id, queued_at = excluded.queued_at'),
-    pending: sqlite.prepare('SELECT media_id, player_id, queued_at, attempts, last_attempt_at, last_error FROM media_deletions ORDER BY queued_at, media_id'),
+    insert: sqlite.prepare(
+      'INSERT INTO media_deletions (media_id, player_id, queued_at) VALUES (?, ?, ?) ON CONFLICT(media_id) DO UPDATE SET player_id = excluded.player_id, queued_at = excluded.queued_at',
+    ),
+    pending: sqlite.prepare(
+      'SELECT media_id, player_id, queued_at, attempts, last_attempt_at, last_error FROM media_deletions ORDER BY queued_at, media_id',
+    ),
     isQueued: sqlite.prepare('SELECT 1 FROM media_deletions WHERE media_id = ?'),
     done: sqlite.prepare('DELETE FROM media_deletions WHERE media_id = ?'),
-    failed: sqlite.prepare('UPDATE media_deletions SET attempts = attempts + 1, last_attempt_at = ?, last_error = ? WHERE media_id = ?'),
+    failed: sqlite.prepare(
+      'UPDATE media_deletions SET attempts = attempts + 1, last_attempt_at = ?, last_error = ? WHERE media_id = ?',
+    ),
     // A conflict is not an attempt: the diagnostic is recorded, the attempt count is not touched.
     conflict: sqlite.prepare('UPDATE media_deletions SET last_attempt_at = ?, last_error = ? WHERE media_id = ?'),
     count: sqlite.prepare('SELECT COUNT(*) AS n FROM media_deletions'),
@@ -118,11 +152,15 @@ export function createMediaDeletionsQueue({ sqlite, log = () => {}, warn = () =>
   return {
     /** Queue the removal of these media files; runs only inside the transaction that removes their owner. */
     enqueue(mediaIds, { playerId = null, at = now() } = {}) {
-      if (!sqlite.isTransaction) throw new Error('media deletions: enqueue() runs inside the deletion\'s transaction (a unit of work), never on its own');
+      if (!sqlite.isTransaction)
+        throw new Error(
+          "media deletions: enqueue() runs inside the deletion's transaction (a unit of work), never on its own",
+        );
       let n = 0;
       for (const id of mediaIds) {
         if (!idOk(id)) throw new TypeError(`media deletions: ${JSON.stringify(id)} is not a media id`);
-        stmt.insert.run(id, playerId, at); n += 1;
+        stmt.insert.run(id, playerId, at);
+        n += 1;
       }
       return n;
     },
@@ -152,22 +190,39 @@ export function createMediaDeletionsQueue({ sqlite, log = () => {}, warn = () =>
       for (const row of rows) {
         const owners = refs.get(row.media_id);
         if (owners) {
-          out.conflicts += 1; retained.push(`${row.media_id} (player ${owners.join(', ')})`);
-          stmt.conflict.run(now(), `OWNERSHIP_CONFLICT: still referenced by live player(s) ${owners.join(', ')}; not removed — resolve the queue entry or the player's reference by hand`.slice(0, 300), row.media_id);
+          out.conflicts += 1;
+          retained.push(`${row.media_id} (player ${owners.join(', ')})`);
+          stmt.conflict.run(
+            now(),
+            `OWNERSHIP_CONFLICT: still referenced by live player(s) ${owners.join(', ')}; not removed — resolve the queue entry or the player's reference by hand`.slice(
+              0,
+              300,
+            ),
+            row.media_id,
+          );
           continue;
         }
         try {
           const removed = storage.delete(row.media_id);
           stmt.done.run(row.media_id);
-          if (removed > 0) out.removed += 1; else out.absent += 1;
+          if (removed > 0) out.removed += 1;
+          else out.absent += 1;
         } catch (err) {
           out.failed += 1;
           stmt.failed.run(now(), String(err?.message ?? err).slice(0, 300), row.media_id);
-          warn(`media deletions: ${row.media_id} could not be removed (attempt ${row.attempts + 1}): ${String(err?.message ?? err).slice(0, 200)}; it stays queued and is never served`);
+          warn(
+            `media deletions: ${row.media_id} could not be removed (attempt ${row.attempts + 1}): ${String(err?.message ?? err).slice(0, 200)}; it stays queued and is never served`,
+          );
         }
       }
-      if (retained.length) warn(`MEDIA_QUEUE_OWNERSHIP_CONFLICT: ${retained.length} queued removal(s) name media a live player still references and were retained, not removed: ${retained.slice(0, 20).join('; ')}${retained.length > 20 ? '; …' : ''}; nothing is served for these ids until the queue entry or the reference is resolved by hand`);
-      if (out.removed || out.absent || out.failed) log(`media deletions: ${out.removed} file(s) removed, ${out.absent} already absent, ${out.failed} still queued`);
+      if (retained.length)
+        warn(
+          `MEDIA_QUEUE_OWNERSHIP_CONFLICT: ${retained.length} queued removal(s) name media a live player still references and were retained, not removed: ${retained.slice(0, 20).join('; ')}${retained.length > 20 ? '; …' : ''}; nothing is served for these ids until the queue entry or the reference is resolved by hand`,
+        );
+      if (out.removed || out.absent || out.failed)
+        log(
+          `media deletions: ${out.removed} file(s) removed, ${out.absent} already absent, ${out.failed} still queued`,
+        );
       return out;
     },
   };

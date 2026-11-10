@@ -38,18 +38,41 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   useEffect(() => {
     let ok = true;
     setErr(null);
-    fn().then((x) => ok && setV(x)).catch((e) => ok && setErr(e instanceof Error ? e.message : 'failed'));
-    return () => { ok = false; };
+    fn()
+      .then((x) => ok && setV(x))
+      .catch((e) => ok && setErr(e instanceof Error ? e.message : 'failed'));
+    return () => {
+      ok = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
   return [v, () => setTick((x) => x + 1), err];
 }
 
-const statusKey = (s: AgentRelationship['status']) => (
-  s === 'proposed' ? 'm24pending' : s === 'active' ? 'm24active' : s === 'declined' ? 'm24declined' : s === 'expired' ? 'm24expired' : s === 'disputed' ? 'm24disputed' : 'm24ended'
-) as Parameters<typeof pt>[0];
-const tone = (s: AgentRelationship['status']): 'green' | 'blue' | 'gold' | 'red' | 'default' => (s === 'active' ? 'green' : s === 'proposed' ? 'blue' : s === 'disputed' ? 'red' : s === 'expired' ? 'gold' : 'default');
-const fmt = (ts: number | null) => (ts ? new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
+const statusKey = (s: AgentRelationship['status']) =>
+  (s === 'proposed'
+    ? 'm24pending'
+    : s === 'active'
+      ? 'm24active'
+      : s === 'declined'
+        ? 'm24declined'
+        : s === 'expired'
+          ? 'm24expired'
+          : s === 'disputed'
+            ? 'm24disputed'
+            : 'm24ended') as Parameters<typeof pt>[0];
+const tone = (s: AgentRelationship['status']): 'green' | 'blue' | 'gold' | 'red' | 'default' =>
+  s === 'active'
+    ? 'green'
+    : s === 'proposed'
+      ? 'blue'
+      : s === 'disputed'
+        ? 'red'
+        : s === 'expired'
+          ? 'gold'
+          : 'default';
+const fmt = (ts: number | null) =>
+  ts ? new Date(ts).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
 export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMinor: boolean }) {
   const colors = useColors();
@@ -61,114 +84,224 @@ export function MyAgentSection({ playerId, isMinor }: { playerId: string; isMino
   // Structurally absent for under-18s — the server answers an empty list with a note; nothing is rendered.
   if (isMinor) return null;
   const act = async (r: AgentRelationship, action: AgentAction, okKey: Parameters<typeof pt>[0]) => {
-    setBusy(true); setMsg(null);
+    setBusy(true);
+    setMsg(null);
     try {
-      await m24.act(playerId, r.id, action, { expectedRev: r.rev, clientKey: m24ClientKey(), ...(action === 'dispute' ? { reason: reason[r.id] ?? '' } : {}) });
-      setMsg(pt(okKey)); setDisputing(null); reload();
+      await m24.act(playerId, r.id, action, {
+        expectedRev: r.rev,
+        clientKey: m24ClientKey(),
+        ...(action === 'dispute' ? { reason: reason[r.id] ?? '' } : {}),
+      });
+      setMsg(pt(okKey));
+      setDisputing(null);
+      reload();
     } catch (e) {
       const code = (e as { code?: string }).code;
-      setMsg(code === 'REPRESENTATION_VERSION_CONFLICT' ? pt('m24conflict') : e instanceof Error && e.message ? e.message : pt('m24failed'));
-    } finally { setBusy(false); }
+      setMsg(
+        code === 'REPRESENTATION_VERSION_CONFLICT'
+          ? pt('m24conflict')
+          : e instanceof Error && e.message
+            ? e.message
+            : pt('m24failed'),
+      );
+    } finally {
+      setBusy(false);
+    }
   };
   const share = async (r: AgentRelationship) => {
-    setBusy(true); setMsg(null);
-    try { await m24.setSharing(playerId, r.id, !r.shareWithAgencyStaff, r.rev); reload(); } catch (e) { setMsg(e instanceof Error && e.message ? e.message : pt('m24failed')); } finally { setBusy(false); }
+    setBusy(true);
+    setMsg(null);
+    try {
+      await m24.setSharing(playerId, r.id, !r.shareWithAgencyStaff, r.rev);
+      reload();
+    } catch (e) {
+      setMsg(e instanceof Error && e.message ? e.message : pt('m24failed'));
+    } finally {
+      setBusy(false);
+    }
   };
   /** One disclosure, one request. The other two are not sent, so they cannot move. */
   const disclose = async (r: AgentRelationship, key: DisclosureKey) => {
-    setBusy(true); setMsg(null);
+    setBusy(true);
+    setMsg(null);
     try {
       await m24.setDisclosure(playerId, r.id, key, !(r.disclosure?.[key] ?? false), r.rev);
       reload();
     } catch (e) {
       const code = (e as { code?: string }).code;
-      setMsg(code === 'REPRESENTATION_VERSION_CONFLICT' ? pt('m24conflict') : e instanceof Error && e.message ? e.message : pt('m24failed'));
-    } finally { setBusy(false); }
+      setMsg(
+        code === 'REPRESENTATION_VERSION_CONFLICT'
+          ? pt('m24conflict')
+          : e instanceof Error && e.message
+            ? e.message
+            : pt('m24failed'),
+      );
+    } finally {
+      setBusy(false);
+    }
   };
   const items = data?.items ?? [];
   return (
     <Card testID="my-agent">
       <SectionTitle>{pt('m24title')}</SectionTitle>
-      <GuidanceNote title="Your choice" icon="shield-check">{pt('m24intro')}</GuidanceNote>
+      <GuidanceNote title="Your choice" icon="shield-check">
+        {pt('m24intro')}
+      </GuidanceNote>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((r) => (
-        <View key={r.id} style={{ marginTop: 8, gap: 12, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 18 }} testID={`my-agent-${r.id}`}>
-          <RecordIdentity name={r.agent.displayName ?? '—'} subtitle={r.agent.agency?.name ?? '—'} status={<Pill label={pt(statusKey(r.status))} tone={tone(r.status)} />} />
+        <View
+          key={r.id}
+          style={{ marginTop: 8, gap: 12, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 18 }}
+          testID={`my-agent-${r.id}`}
+        >
+          <RecordIdentity
+            name={r.agent.displayName ?? '—'}
+            subtitle={r.agent.agency?.name ?? '—'}
+            status={<Pill label={pt(statusKey(r.status))} tone={tone(r.status)} />}
+          />
           <View style={{ gap: 6 }}>
-            <DetailFact label={pt('m24scope')} value={r.scope.map(s => s.replace(/_/g, ' ')).join(', ')} icon="file-text" />
-            {r.termMonths ? <DetailFact label={pt('m24term')} value={`${r.termMonths} ${pt('m24months')}`} icon="calendar-days" /> : null}
+            <DetailFact
+              label={pt('m24scope')}
+              value={r.scope.map((s) => s.replace(/_/g, ' ')).join(', ')}
+              icon="file-text"
+            />
+            {r.termMonths ? (
+              <DetailFact label={pt('m24term')} value={`${r.termMonths} ${pt('m24months')}`} icon="calendar-days" />
+            ) : null}
             {r.endAt ? <DetailFact label={pt('m24ends')} value={fmt(r.endAt)} icon="clock" /> : null}
           </View>
           {/* The licence is one fact; only an UNVERIFIED licence earns its warning sentence. */}
           <GuidanceNote icon="shield" title="Licence status">
-            {pt('m24licence')}: {(r.agent.verification?.fifaLicence ?? 'UNVERIFIED').replace(/_/g, ' ').toLowerCase()}{r.agent.verification?.fifaLicence === 'VERIFIED' ? '' : ` — ${pt('m24honestUnverified')}`}
+            {pt('m24licence')}: {(r.agent.verification?.fifaLicence ?? 'UNVERIFIED').replace(/_/g, ' ').toLowerCase()}
+            {r.agent.verification?.fifaLicence === 'VERIFIED' ? '' : ` — ${pt('m24honestUnverified')}`}
           </GuidanceNote>
-          {r.status === 'disputed' && <GuidanceNote icon="info" size={11.5}>{pt('m24disputedMsg')}</GuidanceNote>}
+          {r.status === 'disputed' && (
+            <GuidanceNote icon="info" size={11.5}>
+              {pt('m24disputedMsg')}
+            </GuidanceNote>
+          )}
           <>
-              <Row style={{ marginTop: 6 }}>
-                {r.status === 'proposed' && <Button small primary disabled={busy} label={pt('m24confirm')} onPress={() => act(r, 'confirm', 'm24confirmed')} />}
-                {r.status === 'proposed' && <Button small disabled={busy} label={pt('m24decline')} onPress={() => act(r, 'decline', 'm24declinedMsg')} />}
-                {r.status === 'active' && <Button small disabled={busy} label={pt('m24end')} onPress={() => act(r, 'terminate', 'm24endedMsg')} />}
-                {(r.status === 'proposed' || r.status === 'active') && <Button small danger disabled={busy} label={pt('m24dispute')} onPress={() => setDisputing(disputing === r.id ? null : r.id)} />}
-              </Row>
-              {disputing === r.id && (
-                <View style={{ marginTop: 6, gap: 6 }}>
-                  <TextInput
-                    accessibilityLabel={pt('m24disputeReason')}
-                    placeholder={pt('m24disputeReason')}
-                    placeholderTextColor={colors.muted}
-                    value={reason[r.id] ?? ''}
-                    onChangeText={(v) => setReason((c) => ({ ...c, [r.id]: v }))}
-                    style={{ backgroundColor: colors.panel2, color: colors.text, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line }}
-                  />
-                  <Button small danger disabled={busy} label={pt('m24dispute')} onPress={() => act(r, 'dispute', 'm24disputedMsg')} />
-                </View>
+            <Row style={{ marginTop: 6 }}>
+              {r.status === 'proposed' && (
+                <Button
+                  small
+                  primary
+                  disabled={busy}
+                  label={pt('m24confirm')}
+                  onPress={() => act(r, 'confirm', 'm24confirmed')}
+                />
+              )}
+              {r.status === 'proposed' && (
+                <Button
+                  small
+                  disabled={busy}
+                  label={pt('m24decline')}
+                  onPress={() => act(r, 'decline', 'm24declinedMsg')}
+                />
               )}
               {r.status === 'active' && (
-                <View style={{ marginTop: 6 }}>
-                  <Button small disabled={busy} label={r.shareWithAgencyStaff ? pt('m24unshare') : pt('m24share')} onPress={() => share(r)} />
-                  <Muted size={11}>{pt('m24shareNote')}</Muted>
-                </View>
+                <Button small disabled={busy} label={pt('m24end')} onPress={() => act(r, 'terminate', 'm24endedMsg')} />
               )}
-              {/*
+              {(r.status === 'proposed' || r.status === 'active') && (
+                <Button
+                  small
+                  danger
+                  disabled={busy}
+                  label={pt('m24dispute')}
+                  onPress={() => setDisputing(disputing === r.id ? null : r.id)}
+                />
+              )}
+            </Row>
+            {disputing === r.id && (
+              <View style={{ marginTop: 6, gap: 6 }}>
+                <TextInput
+                  accessibilityLabel={pt('m24disputeReason')}
+                  placeholder={pt('m24disputeReason')}
+                  placeholderTextColor={colors.muted}
+                  value={reason[r.id] ?? ''}
+                  onChangeText={(v) => setReason((c) => ({ ...c, [r.id]: v }))}
+                  style={{
+                    backgroundColor: colors.panel2,
+                    color: colors.text,
+                    borderRadius: 8,
+                    paddingHorizontal: 10,
+                    paddingVertical: 8,
+                    fontSize: 13,
+                    borderWidth: 1,
+                    borderColor: colors.line,
+                  }}
+                />
+                <Button
+                  small
+                  danger
+                  disabled={busy}
+                  label={pt('m24dispute')}
+                  onPress={() => act(r, 'dispute', 'm24disputedMsg')}
+                />
+              </View>
+            )}
+            {r.status === 'active' && (
+              <View style={{ marginTop: 6 }}>
+                <Button
+                  small
+                  disabled={busy}
+                  label={r.shareWithAgencyStaff ? pt('m24unshare') : pt('m24share')}
+                  onPress={() => share(r)}
+                />
+                <Muted size={11}>{pt('m24shareNote')}</Muted>
+              </View>
+            )}
+            {/*
                 M23 P5.6E — what this agent may see and be sent. Three separate
                 choices, each with its own state in words (on / off) rather than
                 a bare switch, so a screen reader and a glance both get the same
                 answer. Every one starts off.
               */}
-              {r.status === 'active' && (
-                <View style={{ marginTop: 8 }} testID={`my-agent-disclosure-${r.id}`}>
-                  <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12.5 }}>{pt('m27dTitle')}</Text>
-                  {DISCLOSURES.map((d) => {
-                    const on = r.disclosure?.[d.key] === true;
-                    return (
-                      <View key={d.key} style={{ marginTop: 6 }} testID={`my-agent-d-${d.key}`}>
-                        <Row>
-                          <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{pt(d.label)}</Text>
-                          <Pill label={on ? pt('m27dOn') : pt('m27dOff')} tone={on ? 'green' : 'default'} />
-                        </Row>
-                        <Muted size={11}>{pt(d.help)}</Muted>
-                        <View style={{ marginTop: 4, alignSelf: 'flex-start' }}>
-                          <Button
-                            small
-                            disabled={busy}
-                            label={on ? pt('m27dTurnOff') : pt('m27dTurnOn')}
-                            onPress={() => disclose(r, d.key)}
-                            testID={`my-agent-d-${d.key}-toggle`}
-                          />
-                        </View>
+            {r.status === 'active' && (
+              <View style={{ marginTop: 8 }} testID={`my-agent-disclosure-${r.id}`}>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12.5 }}>{pt('m27dTitle')}</Text>
+                {DISCLOSURES.map((d) => {
+                  const on = r.disclosure?.[d.key] === true;
+                  return (
+                    <View key={d.key} style={{ marginTop: 6 }} testID={`my-agent-d-${d.key}`}>
+                      <Row>
+                        <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{pt(d.label)}</Text>
+                        <Pill label={on ? pt('m27dOn') : pt('m27dOff')} tone={on ? 'green' : 'default'} />
+                      </Row>
+                      <Muted size={11}>{pt(d.help)}</Muted>
+                      <View style={{ marginTop: 4, alignSelf: 'flex-start' }}>
+                        <Button
+                          small
+                          disabled={busy}
+                          label={on ? pt('m27dTurnOff') : pt('m27dTurnOn')}
+                          onPress={() => disclose(r, d.key)}
+                          testID={`my-agent-d-${d.key}-toggle`}
+                        />
                       </View>
-                    );
-                  })}
-                </View>
-              )}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </>
         </View>
       ))}
-      {items.length === 0 && !err && <GuidanceNote icon="info" size={12}>{pt('m24none')}</GuidanceNote>}
+      {items.length === 0 && !err && (
+        <GuidanceNote icon="info" size={12}>
+          {pt('m24none')}
+        </GuidanceNote>
+      )}
       {/* One section-level line, not one per relationship. */}
-      {items.length > 0 && <GuidanceNote icon="info" size={11}>{pt('m24whatIs')}</GuidanceNote>}
-      {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
+      {items.length > 0 && (
+        <GuidanceNote icon="info" size={11}>
+          {pt('m24whatIs')}
+        </GuidanceNote>
+      )}
+      {msg && (
+        <View accessibilityLiveRegion="polite">
+          <Muted size={12}>{msg}</Muted>
+        </View>
+      )}
     </Card>
   );
 }
@@ -194,16 +327,26 @@ export function AgentSharedOpportunities({ playerId, isMinor }: { playerId: stri
       <SectionTitle>{pt('m27sTitle')}</SectionTitle>
       {err && <Muted size={12}>{err}</Muted>}
       {items.map((s) => (
-        <View key={s.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }} testID={`agent-shared-${s.id}`}>
+        <View
+          key={s.id}
+          style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 6 }}
+          testID={`agent-shared-${s.id}`}
+        >
           <Row>
-            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>{s.title ?? pt('m27sUntitled')}</Text>
+            <Text style={{ color: colors.text, fontWeight: '700', fontSize: 13, flex: 1 }}>
+              {s.title ?? pt('m27sUntitled')}
+            </Text>
             {s.deadline && <Pill label={`${pt('m27sBy')} ${s.deadline}`} tone="blue" />}
           </Row>
-          <Muted size={12}>{s.orgName ?? '—'} · {pt('m27sSharedBy')} {s.sharedByName ?? '—'} · {fmt(s.sharedAt)}</Muted>
+          <Muted size={12}>
+            {s.orgName ?? '—'} · {pt('m27sSharedBy')} {s.sharedByName ?? '—'} · {fmt(s.sharedAt)}
+          </Muted>
           {s.note && <Text style={{ color: colors.text, fontSize: 12.5, marginTop: 4 }}>{s.note}</Text>}
         </View>
       ))}
-      <GuidanceNote icon="info" size={11}>{pt('m27sHonest')}</GuidanceNote>
+      <GuidanceNote icon="info" size={11}>
+        {pt('m27sHonest')}
+      </GuidanceNote>
     </Card>
   );
 }

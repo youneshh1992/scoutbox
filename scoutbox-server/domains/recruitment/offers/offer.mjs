@@ -10,7 +10,11 @@
  */
 
 import { parseInstant, parseStrictDateOnly, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../../../temporal.mjs';
-import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
+import {
+  normaliseClientKey as platformClientKey,
+  payloadFingerprint,
+  CLIENT_KEY_MAX,
+} from '../../platform/idempotency.mjs';
 
 export const OFFER_POLICY_VERSION = 1;
 
@@ -21,7 +25,15 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 // ------------------------------------------------------------------ vocabulary
 
 /** `viewed` is a read receipt, not a status. */
-export const OFFER_STATUSES = Object.freeze(['DRAFT', 'ISSUED', 'ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']);
+export const OFFER_STATUSES = Object.freeze([
+  'DRAFT',
+  'ISSUED',
+  'ACCEPTED',
+  'DECLINED',
+  'WITHDRAWN',
+  'EXPIRED',
+  'SUPERSEDED',
+]);
 export const OFFER_TERMINAL_STATUSES = Object.freeze(['ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']);
 
 export const OFFER_STATUS_LABELS = table({
@@ -75,9 +87,15 @@ export const OFFER_LIMITS = Object.freeze({
  * No jurisdiction's legal policy for an Offer to a minor is encoded yet, so the pathway is closed everywhere:
  * an Offer whose recipient resolves to a guardian is refused at issue. Opening one is a change to this table.
  */
-export const MINOR_OFFER_PATHWAY_ENABLED = Object.freeze({ GB: false, ENG: false, INT: false, USA: false, DEFAULT: false });
+export const MINOR_OFFER_PATHWAY_ENABLED = Object.freeze({
+  GB: false,
+  ENG: false,
+  INT: false,
+  USA: false,
+  DEFAULT: false,
+});
 export const minorOfferPathwayOpen = (jurisdiction, policy = MINOR_OFFER_PATHWAY_ENABLED) =>
-  (jurisdiction && has(policy, jurisdiction) ? policy[jurisdiction] === true : policy.DEFAULT === true);
+  jurisdiction && has(policy, jurisdiction) ? policy[jurisdiction] === true : policy.DEFAULT === true;
 
 // ------------------------------------------------------------------ keys
 
@@ -110,47 +128,93 @@ export function validateTerms(raw, { requireComplete = false } = {}) {
   if (raw !== undefined && raw !== null && !isPlain(raw)) return bad('terms', 'terms must be an object.');
   const t = raw ?? {};
   const offerType = t.offerType === undefined || t.offerType === null ? 'direct_recruitment' : t.offerType;
-  if (!OFFER_TYPES.includes(offerType)) return bad('offerType', `offerType must be one of ${OFFER_TYPES.join(', ')}.`, { allowed: OFFER_TYPES });
+  if (!OFFER_TYPES.includes(offerType))
+    return bad('offerType', `offerType must be one of ${OFFER_TYPES.join(', ')}.`, { allowed: OFFER_TYPES });
   const role = cleanText(t.role, OFFER_LIMITS.role, { oneLine: true });
-  if (!role.ok) return bad('role', role.tooLong ? `Keep the role under ${OFFER_LIMITS.role} characters.` : 'The role must be text.');
+  if (!role.ok)
+    return bad(
+      'role',
+      role.tooLong ? `Keep the role under ${OFFER_LIMITS.role} characters.` : 'The role must be text.',
+    );
   const squad = cleanText(t.squad, OFFER_LIMITS.squad, { oneLine: true });
-  if (!squad.ok) return bad('squad', squad.tooLong ? `Keep the squad under ${OFFER_LIMITS.squad} characters.` : 'The squad must be text.');
+  if (!squad.ok)
+    return bad(
+      'squad',
+      squad.tooLong ? `Keep the squad under ${OFFER_LIMITS.squad} characters.` : 'The squad must be text.',
+    );
   const conditions = cleanText(t.conditions, OFFER_LIMITS.conditions);
-  if (!conditions.ok) return bad('conditions', conditions.tooLong ? `Keep the conditions under ${OFFER_LIMITS.conditions} characters.` : 'Conditions must be text.');
+  if (!conditions.ok)
+    return bad(
+      'conditions',
+      conditions.tooLong
+        ? `Keep the conditions under ${OFFER_LIMITS.conditions} characters.`
+        : 'Conditions must be text.',
+    );
   let startDate = null;
   if (!isAbsent(t.startDate)) {
     const p = parseStrictDateOnly(t.startDate);
-    if (!p.ok) return bad('startDate', `The start date must be a calendar day written YYYY-MM-DD (${p.why}).`, { expected: 'YYYY-MM-DD' });
+    if (!p.ok)
+      return bad('startDate', `The start date must be a calendar day written YYYY-MM-DD (${p.why}).`, {
+        expected: 'YYYY-MM-DD',
+      });
     startDate = p.value;
   }
   let endDate = null;
   if (!isAbsent(t.endDate)) {
     const p = parseStrictDateOnly(t.endDate);
-    if (!p.ok) return bad('endDate', `The end date must be a calendar day written YYYY-MM-DD (${p.why}).`, { expected: 'YYYY-MM-DD' });
+    if (!p.ok)
+      return bad('endDate', `The end date must be a calendar day written YYYY-MM-DD (${p.why}).`, {
+        expected: 'YYYY-MM-DD',
+      });
     endDate = p.value;
   }
-  if (startDate && endDate && !(startDate < endDate)) return bad('endDate', 'The end date must be after the start date.');
+  if (startDate && endDate && !(startDate < endDate))
+    return bad('endDate', 'The end date must be after the start date.');
   if (requireComplete && !startDate) return bad('startDate', 'An issued Offer names the day it would start.');
-  return { ok: true, terms: { offerType, role: role.value, squad: squad.value, startDate, endDate, conditions: conditions.value } };
+  return {
+    ok: true,
+    terms: { offerType, role: role.value, squad: squad.value, startDate, endDate, conditions: conditions.value },
+  };
 }
 
 export function validateMessages({ recipientMessage, internalNote } = {}) {
   const bad = (field, message) => ({ ok: false, error: 'OFFER_INPUT_INVALID', field, message });
   const m = cleanText(recipientMessage, OFFER_LIMITS.recipientMessage);
-  if (!m.ok) return bad('recipientMessage', m.tooLong ? `Keep the message under ${OFFER_LIMITS.recipientMessage} characters.` : 'The message must be text.');
+  if (!m.ok)
+    return bad(
+      'recipientMessage',
+      m.tooLong ? `Keep the message under ${OFFER_LIMITS.recipientMessage} characters.` : 'The message must be text.',
+    );
   const n = cleanText(internalNote, OFFER_LIMITS.internalNote);
-  if (!n.ok) return bad('internalNote', n.tooLong ? `Keep the internal note under ${OFFER_LIMITS.internalNote} characters.` : 'The internal note must be text.');
+  if (!n.ok)
+    return bad(
+      'internalNote',
+      n.tooLong
+        ? `Keep the internal note under ${OFFER_LIMITS.internalNote} characters.`
+        : 'The internal note must be text.',
+    );
   return { ok: true, recipientMessage: m.value, internalNote: n.value };
 }
 
 /** An instant with an explicit offset, or milliseconds; never the client's clock. */
 export function validateExpiry(raw, { now, required = false } = {}) {
-  const bad = (message, extra = {}) => ({ ok: false, error: 'OFFER_EXPIRY_INVALID', field: 'expiresAt', message, ...extra });
+  const bad = (message, extra = {}) => ({
+    ok: false,
+    error: 'OFFER_EXPIRY_INVALID',
+    field: 'expiresAt',
+    message,
+    ...extra,
+  });
   if (isAbsent(raw)) return required ? bad('An issued Offer needs an expiry.') : { ok: true, ms: null };
   const p = parseInstant(raw);
-  if (!p.ok) return bad(`expiresAt must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp (${p.why}).`, { expected: p.expected });
+  if (!p.ok)
+    return bad(
+      `expiresAt must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp (${p.why}).`,
+      { expected: p.expected },
+    );
   if (Number.isFinite(now)) {
-    if (p.ms < now + OFFER_LIMITS.minExpiryMs) return bad('An Offer must stay open for at least an hour after it is issued.');
+    if (p.ms < now + OFFER_LIMITS.minExpiryMs)
+      return bad('An Offer must stay open for at least an hour after it is issued.');
     if (p.ms > now + OFFER_LIMITS.maxExpiryMs) return bad('An Offer cannot stay open for more than 180 days.');
   }
   return { ok: true, ms: p.ms };
@@ -158,19 +222,31 @@ export function validateExpiry(raw, { now, required = false } = {}) {
 
 /** References to the evidence vault by id, with a label; no bytes, no paths. */
 export function validateDocumentRefs(raw) {
-  const bad = (message, extra = {}) => ({ ok: false, error: 'OFFER_DOCUMENT_INVALID', field: 'documents', message, ...extra });
+  const bad = (message, extra = {}) => ({
+    ok: false,
+    error: 'OFFER_DOCUMENT_INVALID',
+    field: 'documents',
+    message,
+    ...extra,
+  });
   if (raw === undefined) return { ok: true, documents: undefined };
   if (!Array.isArray(raw)) return bad('documents must be a list.');
   if (raw.length > OFFER_LIMITS.documents) return bad(`An Offer carries at most ${OFFER_LIMITS.documents} documents.`);
   const out = [];
   const seen = new Set();
   for (const d of raw) {
-    if (!isPlain(d) || typeof d.evidenceId !== 'string' || !d.evidenceId.trim()) return bad('Each document names an evidence record by id.');
+    if (!isPlain(d) || typeof d.evidenceId !== 'string' || !d.evidenceId.trim())
+      return bad('Each document names an evidence record by id.');
     const id = d.evidenceId.trim();
     if (seen.has(id)) return bad('A document appears twice.');
     seen.add(id);
     const label = cleanText(d.label, OFFER_LIMITS.documentLabel, { oneLine: true });
-    if (!label.ok) return bad(label.tooLong ? `Keep a document label under ${OFFER_LIMITS.documentLabel} characters.` : 'A document label must be text.');
+    if (!label.ok)
+      return bad(
+        label.tooLong
+          ? `Keep a document label under ${OFFER_LIMITS.documentLabel} characters.`
+          : 'A document label must be text.',
+      );
     out.push({ evidenceId: id, label: label.value });
   }
   return { ok: true, documents: out };
@@ -185,7 +261,8 @@ export function effectiveRevisionStatus(rev, now) {
   return rev.status;
 }
 
-export const currentRevision = (offer) => (offer?.revisions ?? []).find((r) => r && r.id === offer.currentRevisionId) ?? null;
+export const currentRevision = (offer) =>
+  (offer?.revisions ?? []).find((r) => r && r.id === offer.currentRevisionId) ?? null;
 
 /** A withdrawn draft was never issued. */
 export const wasIssued = (r) => !!r && r.status !== 'DRAFT' && readInstant(r.issuedAt) !== null;
@@ -213,9 +290,25 @@ export function offerStatus(offer, now) {
 export function canRevise(offer, now) {
   const st = offerStatus(offer, now);
   if (st === null) return { ok: false, error: 'OFFER_STATE_UNKNOWN' };
-  if (st === 'DRAFT') return { ok: false, error: 'OFFER_STATE_INVALID', message: 'This Offer already has a draft revision. Edit it or withdraw it.' };
-  if (st === 'ACCEPTED') return { ok: false, error: 'OFFER_STATE_INVALID', message: 'An accepted Offer is not revised. A contract workflow, or an explicit withdrawal and restart, owns what happens next.' };
-  if ((offer.revisions ?? []).length >= OFFER_LIMITS.revisions) return { ok: false, error: 'OFFER_STATE_INVALID', message: `An Offer carries at most ${OFFER_LIMITS.revisions} revisions.` };
+  if (st === 'DRAFT')
+    return {
+      ok: false,
+      error: 'OFFER_STATE_INVALID',
+      message: 'This Offer already has a draft revision. Edit it or withdraw it.',
+    };
+  if (st === 'ACCEPTED')
+    return {
+      ok: false,
+      error: 'OFFER_STATE_INVALID',
+      message:
+        'An accepted Offer is not revised. A contract workflow, or an explicit withdrawal and restart, owns what happens next.',
+    };
+  if ((offer.revisions ?? []).length >= OFFER_LIMITS.revisions)
+    return {
+      ok: false,
+      error: 'OFFER_STATE_INVALID',
+      message: `An Offer carries at most ${OFFER_LIMITS.revisions} revisions.`,
+    };
   return { ok: true, from: st };
 }
 
@@ -225,12 +318,19 @@ export function canRespondToRevision(offer, revisionId, now) {
   if (!wasIssued(rev)) return { ok: false, error: 'OFFER_STATE_INVALID', message: 'This Offer has not been issued.' };
   const st = effectiveRevisionStatus(rev, now);
   if (st === null) return { ok: false, error: 'OFFER_STATE_UNKNOWN' };
-  if (st === 'SUPERSEDED' || rev.supersededByRevisionId) return { ok: false, error: 'OFFER_SUPERSEDED', message: 'This revision was replaced by a later one. Answer the current revision.' };
+  if (st === 'SUPERSEDED' || rev.supersededByRevisionId)
+    return {
+      ok: false,
+      error: 'OFFER_SUPERSEDED',
+      message: 'This revision was replaced by a later one. Answer the current revision.',
+    };
   if (st === 'WITHDRAWN') return { ok: false, error: 'OFFER_WITHDRAWN', message: 'The club withdrew this Offer.' };
   if (st === 'EXPIRED') return { ok: false, error: 'OFFER_EXPIRED', message: 'This Offer has expired.' };
-  if (st === 'ACCEPTED' || st === 'DECLINED' || rev.response) return { ok: false, error: 'OFFER_ALREADY_RESPONDED', message: 'This revision already has an answer.' };
+  if (st === 'ACCEPTED' || st === 'DECLINED' || rev.response)
+    return { ok: false, error: 'OFFER_ALREADY_RESPONDED', message: 'This revision already has an answer.' };
   const live = liveRevision(offer);
-  if (!live || live.id !== rev.id) return { ok: false, error: 'OFFER_SUPERSEDED', message: 'This revision is not the current one.' };
+  if (!live || live.id !== rev.id)
+    return { ok: false, error: 'OFFER_SUPERSEDED', message: 'This revision is not the current one.' };
   return { ok: true, revision: rev };
 }
 
@@ -239,9 +339,20 @@ export function canWithdrawRevision(offer, now) {
   if (!rev) return { ok: false, error: 'OFFER_STATE_UNKNOWN' };
   const st = effectiveRevisionStatus(rev, now);
   if (st === 'DRAFT' || st === 'ISSUED') return { ok: true, revision: rev, from: st };
-  if (st === 'ACCEPTED') return { ok: false, error: 'OFFER_ALREADY_RESPONDED', message: 'The recipient has already accepted this Offer; it cannot be withdrawn as if unanswered.' };
-  if (st === 'DECLINED') return { ok: false, error: 'OFFER_ALREADY_RESPONDED', message: 'The recipient has already declined this Offer.' };
-  return { ok: false, error: 'OFFER_STATE_INVALID', message: `A revision that is ${OFFER_STATUS_LABELS[st] ?? st} is not withdrawn.`, current: { status: st } };
+  if (st === 'ACCEPTED')
+    return {
+      ok: false,
+      error: 'OFFER_ALREADY_RESPONDED',
+      message: 'The recipient has already accepted this Offer; it cannot be withdrawn as if unanswered.',
+    };
+  if (st === 'DECLINED')
+    return { ok: false, error: 'OFFER_ALREADY_RESPONDED', message: 'The recipient has already declined this Offer.' };
+  return {
+    ok: false,
+    error: 'OFFER_STATE_INVALID',
+    message: `A revision that is ${OFFER_STATUS_LABELS[st] ?? st} is not withdrawn.`,
+    current: { status: st },
+  };
 }
 
 /** Matches the recipient snapshotted at issue; the route re-checks the live recipient rule. */
@@ -253,7 +364,11 @@ export function responderMatches(rev, { kind, actorId, playerId }) {
   return kind === 'player' && actorId === playerId;
 }
 
-export const nextRevisionNumber = (offer) => (offer?.revisions ?? []).reduce((m, r) => Math.max(m, Number.isInteger(r?.revisionNumber) ? r.revisionNumber : 0), 0) + 1;
+export const nextRevisionNumber = (offer) =>
+  (offer?.revisions ?? []).reduce(
+    (m, r) => Math.max(m, Number.isInteger(r?.revisionNumber) ? r.revisionNumber : 0),
+    0,
+  ) + 1;
 
 // ------------------------------------------------------------------ integrity
 
@@ -268,11 +383,16 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
   if (!OFFER_TYPES.includes(offer.type)) problems.push('type');
   if (!Array.isArray(offer.revisions) || offer.revisions.length === 0) problems.push('revisions');
   else {
-    const ids = new Set(); const nums = new Set();
+    const ids = new Set();
+    const nums = new Set();
     for (const r of offer.revisions) {
-      if (!r || typeof r.id !== 'string' || ids.has(r.id)) { problems.push('revision_id'); continue; }
+      if (!r || typeof r.id !== 'string' || ids.has(r.id)) {
+        problems.push('revision_id');
+        continue;
+      }
       ids.add(r.id);
-      if (!Number.isInteger(r.revisionNumber) || r.revisionNumber < 1 || nums.has(r.revisionNumber)) problems.push('revision_number');
+      if (!Number.isInteger(r.revisionNumber) || r.revisionNumber < 1 || nums.has(r.revisionNumber))
+        problems.push('revision_number');
       nums.add(r.revisionNumber);
       if (!OFFER_STATUSES.includes(r.status)) problems.push('revision_status');
       // A draft withdrawn before issue has no issue instant or expiry.
@@ -280,32 +400,63 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
       if (issuedLike && readInstant(r.issuedAt) === null) problems.push('issued_at');
       if (issuedLike && readInstant(r.expiresAt) === null) problems.push('expires_at');
       if (r.status === 'WITHDRAWN' && readInstant(r.withdrawnAt) === null) problems.push('withdrawn_at');
-      if (r.status === 'WITHDRAWN' && r.issuedAt !== null && r.issuedAt !== undefined && readInstant(r.issuedAt) === null) problems.push('issued_at');
+      if (
+        r.status === 'WITHDRAWN' &&
+        r.issuedAt !== null &&
+        r.issuedAt !== undefined &&
+        readInstant(r.issuedAt) === null
+      )
+        problems.push('issued_at');
       // Out-of-order or out-of-bounds instants are corruption, and the row is refused rather than read as live.
-      const c0 = readInstant(r.createdAt); const i0 = readInstant(r.issuedAt); const x0 = readInstant(r.expiresAt);
+      const c0 = readInstant(r.createdAt);
+      const i0 = readInstant(r.issuedAt);
+      const x0 = readInstant(r.expiresAt);
       if (c0 !== null && i0 !== null && i0 < c0) problems.push('issued_before_created');
-      if (i0 !== null && readInstant(r.respondedAt) !== null && readInstant(r.respondedAt) < i0) problems.push('responded_before_issued');
-      if (c0 !== null && readInstant(r.withdrawnAt) !== null && readInstant(r.withdrawnAt) < c0) problems.push('withdrawn_before_created');
-      if (issuedLike && i0 !== null && x0 !== null && x0 > i0 + OFFER_LIMITS.maxExpiryMs + DAY_MS) problems.push('expiry_out_of_bounds');
+      if (i0 !== null && readInstant(r.respondedAt) !== null && readInstant(r.respondedAt) < i0)
+        problems.push('responded_before_issued');
+      if (c0 !== null && readInstant(r.withdrawnAt) !== null && readInstant(r.withdrawnAt) < c0)
+        problems.push('withdrawn_before_created');
+      if (issuedLike && i0 !== null && x0 !== null && x0 > i0 + OFFER_LIMITS.maxExpiryMs + DAY_MS)
+        problems.push('expiry_out_of_bounds');
       if (issuedLike && i0 !== null && x0 !== null && x0 < i0) problems.push('expired_before_issued');
       if (r.status === 'ACCEPTED' || r.status === 'DECLINED') {
         const resp = (offer.responses ?? []).find((x) => x && x.revisionId === r.id);
-        if (!resp || !OFFER_RESPONSE_TYPES.includes(resp.responseType) || !OFFER_RESPONSE_ACTORS.includes(resp.actorType)) problems.push('response');
+        if (
+          !resp ||
+          !OFFER_RESPONSE_TYPES.includes(resp.responseType) ||
+          !OFFER_RESPONSE_ACTORS.includes(resp.actorType)
+        )
+          problems.push('response');
       }
     }
-    if (typeof offer.currentRevisionId !== 'string' || !ids.has(offer.currentRevisionId)) problems.push('current_revision');
+    if (typeof offer.currentRevisionId !== 'string' || !ids.has(offer.currentRevisionId))
+      problems.push('current_revision');
     else {
       // The only revision allowed after the current one is a draft discarded when the previous revision was
       // accepted (recorded WITHDRAWN).
       const cur = offer.revisions.find((r) => r && r.id === offer.currentRevisionId);
-      if (cur && offer.revisions.some((r) => r && r !== cur && Number.isInteger(r.revisionNumber) && r.revisionNumber > cur.revisionNumber && r.status !== 'WITHDRAWN')) problems.push('current_revision_not_latest');
+      if (
+        cur &&
+        offer.revisions.some(
+          (r) =>
+            r &&
+            r !== cur &&
+            Number.isInteger(r.revisionNumber) &&
+            r.revisionNumber > cur.revisionNumber &&
+            r.status !== 'WITHDRAWN',
+        )
+      )
+        problems.push('current_revision_not_latest');
     }
   }
   if (!Array.isArray(offer.responses)) problems.push('responses');
   else {
     const seen = new Set();
     for (const x of offer.responses) {
-      if (!x || typeof x.revisionId !== 'string') { problems.push('response_shape'); continue; }
+      if (!x || typeof x.revisionId !== 'string') {
+        problems.push('response_shape');
+        continue;
+      }
       if (seen.has(x.revisionId)) problems.push('duplicate_response');
       seen.add(x.revisionId);
     }
@@ -340,17 +491,41 @@ export const offerCaseCorrupt = (problems) => (problems ?? []).some((p) => OFFER
  */
 export function offerEvidence(offers, kase, kind, now) {
   if (!Array.isArray(offers)) return { satisfied: false, reason: 'offers_store_unavailable' };
-  const own = offers.filter((o) => o && o.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0);
+  const own = offers.filter(
+    (o) =>
+      o &&
+      o.caseId === kase.id &&
+      o.orgId === kase.orgId &&
+      o.playerId === kase.playerId &&
+      offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0,
+  );
   // A draft beside the live revision is not evidence of anything.
-  const withStatus = own.map((o) => ({ o, rev: liveRevision(o) })).filter((x) => x.rev).map((x) => ({ ...x, st: effectiveRevisionStatus(x.rev, now) }));
+  const withStatus = own
+    .map((o) => ({ o, rev: liveRevision(o) }))
+    .filter((x) => x.rev)
+    .map((x) => ({ ...x, st: effectiveRevisionStatus(x.rev, now) }));
   if (kind === 'offer_sent') {
     const hit = withStatus.find((x) => x.st === 'ISSUED' || x.st === 'ACCEPTED' || x.st === 'DECLINED');
-    return hit ? { satisfied: true, sourceType: 'recruitment_offer', sourceId: hit.o.id, revisionId: hit.rev.id } : { satisfied: false, reason: 'no_issued_offer' };
+    return hit
+      ? { satisfied: true, sourceType: 'recruitment_offer', sourceId: hit.o.id, revisionId: hit.rev.id }
+      : { satisfied: false, reason: 'no_issued_offer' };
   }
   if (kind === 'offer_accepted_by_recipient' || kind === 'offer_declined_by_recipient') {
     const want = kind === 'offer_accepted_by_recipient' ? 'ACCEPTED' : 'DECLINED';
-    const hit = withStatus.find((x) => x.st === want && (x.o.responses ?? []).some((r) => r && r.revisionId === x.rev.id && r.responseType === want.toLowerCase() && responderMatches(x.rev, { kind: r.actorType, actorId: r.actorId, playerId: x.o.playerId })));
-    return hit ? { satisfied: true, sourceType: 'recruitment_offer', sourceId: hit.o.id, revisionId: hit.rev.id } : { satisfied: false, reason: want === 'ACCEPTED' ? 'no_recipient_acceptance' : 'no_recipient_decline' };
+    const hit = withStatus.find(
+      (x) =>
+        x.st === want &&
+        (x.o.responses ?? []).some(
+          (r) =>
+            r &&
+            r.revisionId === x.rev.id &&
+            r.responseType === want.toLowerCase() &&
+            responderMatches(x.rev, { kind: r.actorType, actorId: r.actorId, playerId: x.o.playerId }),
+        ),
+    );
+    return hit
+      ? { satisfied: true, sourceType: 'recruitment_offer', sourceId: hit.o.id, revisionId: hit.rev.id }
+      : { satisfied: false, reason: want === 'ACCEPTED' ? 'no_recipient_acceptance' : 'no_recipient_decline' };
   }
   return { satisfied: false, reason: 'unknown_evidence_kind' };
 }
@@ -384,24 +559,65 @@ function revisionBase(r, now) {
 export function offerClubView(offer, now) {
   const cur = currentRevision(offer);
   return {
-    id: offer.id, caseId: offer.caseId, playerId: offer.playerId, orgId: offer.orgId, type: offer.type,
-    status: offerStatus(offer, now), statusLabel: OFFER_STATUS_LABELS[offerStatus(offer, now)] ?? null,
+    id: offer.id,
+    caseId: offer.caseId,
+    playerId: offer.playerId,
+    orgId: offer.orgId,
+    type: offer.type,
+    status: offerStatus(offer, now),
+    statusLabel: OFFER_STATUS_LABELS[offerStatus(offer, now)] ?? null,
     currentRevisionId: offer.currentRevisionId,
     liveRevisionId: liveRevision(offer)?.id ?? null,
     liveStatus: liveStatus(offer, now),
     awaitingResponse: liveStatus(offer, now) === 'ISSUED',
-    currentRevision: cur ? { ...revisionBase(cur, now), internalNote: cur.internalNote ?? null, issuedBy: actorView(cur.issuedBy), createdBy: actorView(cur.createdBy), withdrawnBy: actorView(cur.withdrawnBy), withdrawReason: cur.withdrawReason ?? null, recipient: cur.recipientSnapshot ? { type: cur.recipientSnapshot.type, minor: cur.recipientSnapshot.minor === true } : null, readiness: cur.readinessSnapshot ?? null } : null,
-    revisions: (offer.revisions ?? []).slice().sort((a, b) => a.revisionNumber - b.revisionNumber).map((r) => ({ ...revisionBase(r, now), internalNote: r.internalNote ?? null, issuedBy: actorView(r.issuedBy), createdBy: actorView(r.createdBy), withdrawnBy: actorView(r.withdrawnBy), withdrawReason: r.withdrawReason ?? null })),
-    responses: (offer.responses ?? []).map((x) => ({ id: x.id, revisionId: x.revisionId, responseType: x.responseType, actorType: x.actorType, forPlayerId: x.forPlayerId, occurredAt: x.occurredAt, reason: x.reason ?? null })),
-    firstViewedAt: (offer.readReceipts ?? []).reduce((m, r) => (r && Number.isFinite(r.firstViewedAt) && (m === null || r.firstViewedAt < m) ? r.firstViewedAt : m), null),
+    currentRevision: cur
+      ? {
+          ...revisionBase(cur, now),
+          internalNote: cur.internalNote ?? null,
+          issuedBy: actorView(cur.issuedBy),
+          createdBy: actorView(cur.createdBy),
+          withdrawnBy: actorView(cur.withdrawnBy),
+          withdrawReason: cur.withdrawReason ?? null,
+          recipient: cur.recipientSnapshot
+            ? { type: cur.recipientSnapshot.type, minor: cur.recipientSnapshot.minor === true }
+            : null,
+          readiness: cur.readinessSnapshot ?? null,
+        }
+      : null,
+    revisions: (offer.revisions ?? [])
+      .slice()
+      .sort((a, b) => a.revisionNumber - b.revisionNumber)
+      .map((r) => ({
+        ...revisionBase(r, now),
+        internalNote: r.internalNote ?? null,
+        issuedBy: actorView(r.issuedBy),
+        createdBy: actorView(r.createdBy),
+        withdrawnBy: actorView(r.withdrawnBy),
+        withdrawReason: r.withdrawReason ?? null,
+      })),
+    responses: (offer.responses ?? []).map((x) => ({
+      id: x.id,
+      revisionId: x.revisionId,
+      responseType: x.responseType,
+      actorType: x.actorType,
+      forPlayerId: x.forPlayerId,
+      occurredAt: x.occurredAt,
+      reason: x.reason ?? null,
+    })),
+    firstViewedAt: (offer.readReceipts ?? []).reduce(
+      (m, r) => (r && Number.isFinite(r.firstViewedAt) && (m === null || r.firstViewedAt < m) ? r.firstViewedAt : m),
+      null,
+    ),
     agentShared: !!offer.agentShare,
     decisionId: offer.decisionId ?? null,
     transactionId: offer.transactionId ?? null,
     lifecycle: offer.lifecycle ?? null,
-    createdAt: offer.createdAt, updatedAt: offer.updatedAt ?? null,
+    createdAt: offer.createdAt,
+    updatedAt: offer.updatedAt ?? null,
     rev: Number.isInteger(offer.rev) ? offer.rev : 1,
     policyVersion: OFFER_POLICY_VERSION,
-    honest: 'An Offer is the club\'s proposal, issued as an exact revision. An acceptance in ScoutBox is the recipient saying yes to that revision; it is not a signing, not a registration and not an executed contract.',
+    honest:
+      "An Offer is the club's proposal, issued as an exact revision. An acceptance in ScoutBox is the recipient saying yes to that revision; it is not a signing, not a registration and not an executed contract.",
   };
 }
 
@@ -411,9 +627,12 @@ export function offerRecipientView(offer, now, { orgName = null, caseOpen = true
   const curIssued = liveRevision(offer);
   const st = curIssued ? effectiveRevisionStatus(curIssued, now) : null;
   return {
-    id: offer.id, playerId: offer.playerId, club: { id: offer.orgId, name: orgName },
+    id: offer.id,
+    playerId: offer.playerId,
+    club: { id: offer.orgId, name: orgName },
     type: offer.type,
-    status: st, statusLabel: OFFER_STATUS_LABELS[st] ?? null,
+    status: st,
+    statusLabel: OFFER_STATUS_LABELS[st] ?? null,
     currentRevisionId: curIssued ? curIssued.id : null,
     currentRevision: curIssued ? revisionBase(curIssued, now) : null,
     revisions: issued.map((r) => revisionBase(r, now)),
@@ -421,10 +640,17 @@ export function offerRecipientView(offer, now, { orgName = null, caseOpen = true
     // A paused or moved case cannot be answered; the recipient is told so instead of hitting a 409.
     answerable: st === 'ISSUED' && caseOpen,
     notAnswerableReason: st === 'ISSUED' && !caseOpen ? 'CASE_PAUSED' : null,
-    responses: (offer.responses ?? []).map((x) => ({ id: x.id, revisionId: x.revisionId, responseType: x.responseType, actorType: x.actorType, occurredAt: x.occurredAt })),
+    responses: (offer.responses ?? []).map((x) => ({
+      id: x.id,
+      revisionId: x.revisionId,
+      responseType: x.responseType,
+      actorType: x.actorType,
+      occurredAt: x.occurredAt,
+    })),
     agentShared: !!offer.agentShare,
     policyVersion: OFFER_POLICY_VERSION,
-    honest: 'Accepting an Offer in ScoutBox tells the club you say yes to exactly these terms. It is not a signature, not a registration and not a contract; nothing is signed here.',
+    honest:
+      'Accepting an Offer in ScoutBox tells the club you say yes to exactly these terms. It is not a signature, not a registration and not a contract; nothing is signed here.',
   };
 }
 
@@ -432,25 +658,46 @@ export function offerRecipientView(offer, now, { orgName = null, caseOpen = true
 export function offerAgentView(offer, now, { orgName = null } = {}) {
   const v = offerRecipientView(offer, now, { orgName });
   return {
-    id: v.id, clientId: v.playerId, club: v.club, type: v.type, status: v.status, statusLabel: v.statusLabel,
+    id: v.id,
+    clientId: v.playerId,
+    club: v.club,
+    type: v.type,
+    status: v.status,
+    statusLabel: v.statusLabel,
     currentRevision: v.currentRevision ? { ...v.currentRevision, documents: [] } : null,
     revisions: v.revisions.map((r) => ({ ...r, documents: [] })),
     awaitingClientResponse: v.awaitingYourResponse,
     responses: v.responses,
     sharedAt: offer.agentShare?.at ?? null,
-    honest: 'Your client shared this Offer with you. Accepting or declining is your client\'s own act; ScoutBox does not let you answer on their behalf, and nothing here is a negotiation, a fee or a signing.',
+    honest:
+      "Your client shared this Offer with you. Accepting or declining is your client's own act; ScoutBox does not let you answer on their behalf, and nothing here is a negotiation, a fee or a signing.",
   };
 }
 
 // ------------------------------------------------------------------ history
 
 /** The numeric id suffix breaks ties within a millisecond. */
-const SEQ = (id) => { const n = Number(String(id ?? '').split('-').pop()); return Number.isFinite(n) ? n : 0; };
-export const byAtThenId = (a, b) => (a.at - b.at) || (SEQ(a.id) - SEQ(b.id));
+const SEQ = (id) => {
+  const n = Number(
+    String(id ?? '')
+      .split('-')
+      .pop(),
+  );
+  return Number.isFinite(n) ? n : 0;
+};
+export const byAtThenId = (a, b) => a.at - b.at || SEQ(a.id) - SEQ(b.id);
 
 /** Ids, states, times, actor kind and name only. */
 export function offerHistoryView(offer, { forRecipient = false } = {}) {
-  return (offer.history ?? []).slice().sort(byAtThenId)
+  return (offer.history ?? [])
+    .slice()
+    .sort(byAtThenId)
     .filter((h) => !forRecipient || !/draft|internal/.test(h.action))
-    .map((h) => ({ id: h.id, at: h.at, action: h.action, by: actorView(h.by), revisionId: h.detail?.revisionId ?? null }));
+    .map((h) => ({
+      id: h.id,
+      at: h.at,
+      action: h.action,
+      by: actorView(h.by),
+      revisionId: h.detail?.revisionId ?? null,
+    }));
 }

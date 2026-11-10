@@ -21,13 +21,39 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 
-const DIST = process.env.DEMO_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist'); const PORT = 8894;
-const FILES = { club: 'scoutbox-club-demo.html', grassroots: 'scoutbox-grassroots-demo.html', agent: 'scoutbox-agent-demo.html', admin: 'scoutbox-admin-demo.html' };
-let passed = 0; const failures = []; const errors = [];
-const ok = (c, m) => { if (c) { passed++; console.log(`✓ ${m}`); } else { failures.push(m); console.log(`✗ ${m}`); } };
+const DIST = process.env.DEMO_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist');
+const PORT = 8894;
+const FILES = {
+  club: 'scoutbox-club-demo.html',
+  grassroots: 'scoutbox-grassroots-demo.html',
+  agent: 'scoutbox-agent-demo.html',
+  admin: 'scoutbox-admin-demo.html',
+};
+let passed = 0;
+const failures = [];
+const errors = [];
+const ok = (c, m) => {
+  if (c) {
+    passed++;
+    console.log(`✓ ${m}`);
+  } else {
+    failures.push(m);
+    console.log(`✗ ${m}`);
+  }
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-try { execSync(`fuser -k ${PORT}/tcp`, { stdio: 'ignore' }); } catch { /* free */ }
-const server = http.createServer((q, r) => { const app = new URL(q.url, 'http://x').searchParams.get('app') || 'club'; r.writeHead(200, { 'content-type': 'text/html' }); fs.createReadStream(path.join(DIST, FILES[app])).pipe(r); }).listen(PORT);
+try {
+  execSync(`fuser -k ${PORT}/tcp`, { stdio: 'ignore' });
+} catch {
+  /* free */
+}
+const server = http
+  .createServer((q, r) => {
+    const app = new URL(q.url, 'http://x').searchParams.get('app') || 'club';
+    r.writeHead(200, { 'content-type': 'text/html' });
+    fs.createReadStream(path.join(DIST, FILES[app])).pipe(r);
+  })
+  .listen(PORT);
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
 
 const MEASURE = `(() => {
@@ -43,13 +69,24 @@ const MEASURE = `(() => {
   const overflow = document.documentElement.scrollWidth > innerWidth + 1;
   return { words, paragraphs: paragraphs.map((t) => t.slice(0, 80)), fonts, emoji, seconds, overflow };
 })()`;
-const interOnly = (m) => Object.keys(m.fonts).every((f) => /^Inter|Albert Sans|Fraunces|Instrument Serif|serif/i.test(f)) && /^Inter/.test(Object.entries(m.fonts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '');
+const interOnly = (m) =>
+  Object.keys(m.fonts).every((f) => /^Inter|Albert Sans|Fraunces|Instrument Serif|serif/i.test(f)) &&
+  /^Inter/.test(Object.entries(m.fonts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '');
 const txt = async (loc) => (await loc.innerText()).replace(/\s+/g, ' ');
-const allSides = (loc) => loc.evaluate((el) => { const cs = getComputedStyle(el); return ['Top', 'Right', 'Bottom', 'Left'].every((s) => parseFloat(cs[`border${s}Width`]) > 0 && cs[`border${s}Style`] !== 'none'); });
+const allSides = (loc) =>
+  loc.evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return ['Top', 'Right', 'Bottom', 'Left'].every(
+      (s) => parseFloat(cs[`border${s}Width`]) > 0 && cs[`border${s}Style`] !== 'none',
+    );
+  });
 const base = async (tag, screen, p, budget, allowPara = 0) => {
   const m = await p.evaluate(MEASURE);
   ok(m.words <= budget, `${tag} ${screen}: ${m.words} words (budget ${budget})`);
-  ok(m.paragraphs.length <= allowPara, `${tag} ${screen}: ${m.paragraphs.length} paragraph(s) over 140 characters (allowed ${allowPara})${m.paragraphs[0] ? ` ("${m.paragraphs[0]}…")` : ''}`);
+  ok(
+    m.paragraphs.length <= allowPara,
+    `${tag} ${screen}: ${m.paragraphs.length} paragraph(s) over 140 characters (allowed ${allowPara})${m.paragraphs[0] ? ` ("${m.paragraphs[0]}…")` : ''}`,
+  );
   ok(!m.overflow, `${tag} ${screen}: no horizontal overflow`);
   ok(interOnly(m), `${tag} ${screen}: Inter computed (${Object.keys(m.fonts).join(', ')})`);
   ok(m.emoji === 0, `${tag} ${screen}: zero emoji`);
@@ -57,21 +94,47 @@ const base = async (tag, screen, p, budget, allowPara = 0) => {
   return m;
 };
 async function open(app, w, h) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h } }); const p = await ctx.newPage(); p.on('pageerror', (e) => errors.push(`${app} ${w}: ${e.message}`));
-  await p.goto(`http://localhost:${PORT}/?app=${app}`); await Promise.race([p.waitForSelector('.auth-card', { timeout: 30000 }), p.waitForSelector('nav.sidebar', { timeout: 30000 })]);
+  const ctx = await browser.newContext({ viewport: { width: w, height: h } });
+  const p = await ctx.newPage();
+  p.on('pageerror', (e) => errors.push(`${app} ${w}: ${e.message}`));
+  await p.goto(`http://localhost:${PORT}/?app=${app}`);
+  await Promise.race([
+    p.waitForSelector('.auth-card', { timeout: 30000 }),
+    p.waitForSelector('nav.sidebar', { timeout: 30000 }),
+  ]);
   if (!(await p.locator('nav.sidebar').count())) {
-    if (app === 'admin') { await p.fill('input[type="password"]', 'scoutbox-admin'); await p.click('button.primary'); }
-    else if (app === 'agent') { await p.click('.org-card:has-text("North Star")'); await p.fill('.enter-row input[aria-label]', 'Ana Costa'); await p.click('button:has-text("Enter workspace")'); }
-    else { await p.waitForSelector('.org-card'); await p.click('.org-card >> nth=0'); await p.fill('.enter-row input', app === 'club' ? 'Maria Keane' : 'Sam Tully'); await p.click('button.primary'); }
+    if (app === 'admin') {
+      await p.fill('input[type="password"]', 'scoutbox-admin');
+      await p.click('button.primary');
+    } else if (app === 'agent') {
+      await p.click('.org-card:has-text("North Star")');
+      await p.fill('.enter-row input[aria-label]', 'Ana Costa');
+      await p.click('button:has-text("Enter workspace")');
+    } else {
+      await p.waitForSelector('.org-card');
+      await p.click('.org-card >> nth=0');
+      await p.fill('.enter-row input', app === 'club' ? 'Maria Keane' : 'Sam Tully');
+      await p.click('button.primary');
+    }
   }
-  await p.waitForSelector('nav.sidebar', { timeout: 30000 }); await sleep(800);
+  await p.waitForSelector('nav.sidebar', { timeout: 30000 });
+  await sleep(800);
   return { ctx, p };
 }
-const go = async (p, hash) => { await p.evaluate((h) => { location.hash = h; }, hash); await sleep(1100); };
+const go = async (p, hash) => {
+  await p.evaluate((h) => {
+    location.hash = h;
+  }, hash);
+  await sleep(1100);
+};
 const rgb = (s) => (s.match(/\d+(\.\d+)?/g) || []).slice(0, 3).map(Number);
 const lum = ([r, g, b]) => (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 
-for (const [w, h] of [[1024, 768], [1280, 800], [1440, 900]]) {
+for (const [w, h] of [
+  [1024, 768],
+  [1280, 800],
+  [1440, 900],
+]) {
   const tag = `${w}px`;
   // ---------------------------------------------------------------- Grassroots
   {
@@ -79,20 +142,41 @@ for (const [w, h] of [[1024, 768], [1280, 800], [1440, 900]]) {
     await go(p, '#/feed');
     await base(`${tag} Grassroots`, 'Home', p, 260);
     const side = rgb(await p.locator('nav.sidebar').evaluate((el) => getComputedStyle(el).backgroundColor));
-    const canvas = rgb(await p.locator('.content').evaluate((el) => { for (let e = el; e; e = e.parentElement) { const c = getComputedStyle(e).backgroundColor; if (!/rgba\(0, 0, 0, 0\)|transparent/.test(c)) return c; } return getComputedStyle(document.body).backgroundColor; }));
+    const canvas = rgb(
+      await p.locator('.content').evaluate((el) => {
+        for (let e = el; e; e = e.parentElement) {
+          const c = getComputedStyle(e).backgroundColor;
+          if (!/rgba\(0, 0, 0, 0\)|transparent/.test(c)) return c;
+        }
+        return getComputedStyle(document.body).backgroundColor;
+      }),
+    );
     ok(lum(side) < 0.3 && side[2] > side[0], `${tag} Grassroots: navy sidebar (rgb ${side.join(',')})`);
     ok(lum(canvas) > 0.85, `${tag} Grassroots: light canvas (rgb ${canvas.join(',')})`);
-    const grass = await p.evaluate(() => [...document.querySelectorAll('.content, .content *, main, body')].filter((el) => /url\(/.test(getComputedStyle(el).backgroundImage)).length);
+    const grass = await p.evaluate(
+      () =>
+        [...document.querySelectorAll('.content, .content *, main, body')].filter((el) =>
+          /url\(/.test(getComputedStyle(el).backgroundImage),
+        ).length,
+    );
     ok(grass === 0, `${tag} Grassroots: no grass photograph inside the workspace`);
     await go(p, '#/opendays');
     await base(`${tag} Grassroots`, 'Open Days', p, 220, 0);
     const read = p.locator('[data-testid="radar-read"]');
-    ok((await read.count()) === 1 && !(await allSides(read)) && (await p.locator('[data-testid="radar"] input').count()) === 0, `${tag} radar: read line, no border, no input`);
+    ok(
+      (await read.count()) === 1 &&
+        !(await allSides(read)) &&
+        (await p.locator('[data-testid="radar"] input').count()) === 0,
+      `${tag} radar: read line, no border, no input`,
+    );
     const editColor = await p.locator('[data-testid="radar-edit-link"]').evaluate((el) => getComputedStyle(el).color);
     const inkColor = await read.evaluate((el) => getComputedStyle(el).color);
     ok(editColor !== inkColor, `${tag} radar: Edit reads as a link (${editColor})`);
     const meta = p.locator('[data-testid^="openday-meta-"]');
-    ok((await meta.count()) >= 1 && (await p.locator('.content .section h4 ~ .pill').count()) === 0, `${tag} Open Days: one quiet meta line per open day, no pill row`);
+    ok(
+      (await meta.count()) >= 1 && (await p.locator('.content .section h4 ~ .pill').count()) === 0,
+      `${tag} Open Days: one quiet meta line per open day, no pill row`,
+    );
     ok(!/\b(u16|u18|open)\b ·/.test(await txt(meta.first())), `${tag} Open Days: age group in words, not a raw code`);
     ok(!/\d{4}-\d{2}-\d{2}/.test(await txt(p.locator('.content'))), `${tag} Open Days: no ISO dates`);
     await go(p, '#/squad');
@@ -107,18 +191,41 @@ for (const [w, h] of [[1024, 768], [1280, 800], [1440, 900]]) {
     await go(p, '#/recruitment/nobody-missed');
     await base(`${tag} Pro`, 'Nobody Missed', p, 190, 1); // the one honesty sentence (Nobody Missed ≠ ranking) is the allowed paragraph
     const body = await txt(p.locator('.content'));
-    ok(!/Not yet evaluated \(\d+\)/.test(body) && /Needs review · \d+/i.test(body), `${tag} Nobody Missed: one heading per group`);
-    ok(/not a measure of scouting quality/.test(body) && (await p.locator('.nm-ring').count()) === 1, `${tag} Nobody Missed: coverage ring and its honesty line (not a ranking)`);
+    ok(
+      !/Not yet evaluated \(\d+\)/.test(body) && /Needs review · \d+/i.test(body),
+      `${tag} Nobody Missed: one heading per group`,
+    );
+    ok(
+      /not a measure of scouting quality/.test(body) && (await p.locator('.nm-ring').count()) === 1,
+      `${tag} Nobody Missed: coverage ring and its honesty line (not a ranking)`,
+    );
     await go(p, '#/recruitment/dashboard');
     const dm = await base(`${tag} Pro`, 'Director Dashboard', p, 160, 0);
     ok((await p.locator('[data-kpis] [data-kpi]').count()) <= 4, `${tag} Dashboard: at most four counts`);
-    ok((await p.locator('[data-visual="funnel"] .dash-bar').count()) >= 1 && (await p.locator('[data-visual="time"]').count()) === 1 && (await p.locator('[data-visual="coverage"]').count()) === 1, `${tag} Dashboard: funnel, time by stage, coverage`);
+    ok(
+      (await p.locator('[data-visual="funnel"] .dash-bar').count()) >= 1 &&
+        (await p.locator('[data-visual="time"]').count()) === 1 &&
+        (await p.locator('[data-visual="coverage"]').count()) === 1,
+      `${tag} Dashboard: funnel, time by stage, coverage`,
+    );
     ok((await p.locator('[data-attention] li').count()) <= 5, `${tag} Dashboard: needs attention ≤ 5`);
-    ok((await p.locator('[data-testid="dash-filters"]').count()) === 0 && (await p.locator('.dash-detail').count()) === 0 && (await p.locator('[data-principle]').count()) === 0, `${tag} Dashboard: filters, principle and detail are one tap away, not on the root`);
-    ok((await p.locator('.content code, .content pre').count()) === 0, `${tag} Dashboard: no internal record names in code type`);
+    ok(
+      (await p.locator('[data-testid="dash-filters"]').count()) === 0 &&
+        (await p.locator('.dash-detail').count()) === 0 &&
+        (await p.locator('[data-principle]').count()) === 0,
+      `${tag} Dashboard: filters, principle and detail are one tap away, not on the root`,
+    );
+    ok(
+      (await p.locator('.content code, .content pre').count()) === 0,
+      `${tag} Dashboard: no internal record names in code type`,
+    );
     ok(dm.words <= 160, `${tag} Dashboard: executive root (${dm.words} words)`);
-    await p.locator('[data-testid="dash-detail-toggle"]').click(); await sleep(400);
-    ok((await p.locator('[data-family]').count()) === 7, `${tag} Dashboard: "Show all figures" opens the seven families`);
+    await p.locator('[data-testid="dash-detail-toggle"]').click();
+    await sleep(400);
+    ok(
+      (await p.locator('[data-family]').count()) === 7,
+      `${tag} Dashboard: "Show all figures" opens the seven families`,
+    );
     await go(p, '#/filmroom');
     const cap = p.locator('[data-testid="filmroom-caption"]');
     if (await cap.count()) {
@@ -129,7 +236,11 @@ for (const [w, h] of [[1024, 768], [1280, 800], [1440, 900]]) {
     } else ok(false, `${tag} Film Room: caption present`);
     await go(p, '#/verification');
     await base(`${tag} Pro`, 'Verification', p, 200, 0);
-    ok((await p.locator('[data-testid="verify-start-more"]').count()) === 1 && (await p.locator('input[aria-label^="Professional role"]').isVisible()) === false, `${tag} Verification: a verified administrator sees the start forms folded`);
+    ok(
+      (await p.locator('[data-testid="verify-start-more"]').count()) === 1 &&
+        (await p.locator('input[aria-label^="Professional role"]').isVisible()) === false,
+      `${tag} Verification: a verified administrator sees the start forms folded`,
+    );
     await ctx.close();
   }
   // ---------------------------------------------------------------- Agent
@@ -144,26 +255,42 @@ for (const [w, h] of [[1024, 768], [1280, 800], [1440, 900]]) {
     await go(p, '#/transactions');
     await base(`${tag} Agent`, 'Transactions', p, 260, 0);
     const stats = p.locator('.content .stats .stat');
-    if (await stats.count() >= 2) { const [a, b] = [await stats.nth(0).boundingBox(), await stats.nth(1).boundingBox()]; ok(Math.abs(a.y - b.y) < 4, `${tag} Agent Transactions: counts in one row`); }
+    if ((await stats.count()) >= 2) {
+      const [a, b] = [await stats.nth(0).boundingBox(), await stats.nth(1).boundingBox()];
+      ok(Math.abs(a.y - b.y) < 4, `${tag} Agent Transactions: counts in one row`);
+    }
     await ctx.close();
   }
   // ---------------------------------------------------------------- Trust & Safety
   {
     const { ctx, p } = await open('admin', w, h);
-    await p.locator('nav.sidebar button:has-text("Verification")').first().click(); await sleep(900);
+    await p.locator('nav.sidebar button:has-text("Verification")').first().click();
+    await sleep(900);
     await base(`${tag} T&S`, 'Verification', p, 260, 0);
     const t = await txt(p.locator('.content'));
-    ok(!/\b[A-Z]{3,}(_[A-Z]+)+\b/.test(t) && !/\w+=\w+/.test(t), `${tag} T&S Verification: reasons and checks in words, no machine codes`);
+    ok(
+      !/\b[A-Z]{3,}(_[A-Z]+)+\b/.test(t) && !/\w+=\w+/.test(t),
+      `${tag} T&S Verification: reasons and checks in words, no machine codes`,
+    );
     ok(!/\bDns\b/.test(t), `${tag} T&S Verification: acronyms keep their capitals`);
-    await p.locator('nav.sidebar button:has-text("Agents")').first().click(); await sleep(700);
-    const sub = p.locator('nav.subnav button').filter({ hasText: 'Agent transactions' }); if (await sub.count()) { await sub.first().click(); await sleep(900); }
+    await p.locator('nav.sidebar button:has-text("Agents")').first().click();
+    await sleep(700);
+    const sub = p.locator('nav.subnav button').filter({ hasText: 'Agent transactions' });
+    if (await sub.count()) {
+      await sub.first().click();
+      await sleep(900);
+    }
     await base(`${tag} T&S`, 'Agent transactions', p, 460, 0);
-    ok(!/pending_review|\bPENDING\b|\b[A-Z]{3,}_[A-Z_]+\b/.test(await txt(p.locator('.content'))), `${tag} T&S Agent transactions: statuses in words`);
+    ok(
+      !/pending_review|\bPENDING\b|\b[A-Z]{3,}_[A-Z_]+\b/.test(await txt(p.locator('.content'))),
+      `${tag} T&S Agent transactions: statuses in words`,
+    );
     await ctx.close();
   }
 }
 
 ok(errors.length === 0, `0 page errors (${errors.length ? errors.slice(0, 3).join(' | ') : 'clean'})`);
 console.log(`\nm24f5PortalVisualLive: ${passed} passed, ${failures.length} failed`);
-server.close(); await browser.close();
+server.close();
+await browser.close();
 process.exit(failures.length ? 1 : 0);

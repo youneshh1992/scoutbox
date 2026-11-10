@@ -40,8 +40,14 @@ const CLUB_PORT = 8814;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-matchingwatchlistslive-'));
 
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 for (const port of [API_PORT, CLUB_PORT]) {
@@ -55,7 +61,10 @@ for (const port of [API_PORT, CLUB_PORT]) {
 }
 
 console.log(`building live bundle for :${API_PORT}…`);
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-matching`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-matching`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -65,11 +74,21 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+    '.svg': 'image/svg+xml',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -83,16 +102,39 @@ function serveDir(dir, port) {
 serveDir('scoutbox-club/dist-live-matching', CLUB_PORT);
 
 const cleanup = () => {
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
   for (const s of statics) s.close();
   fs.rmSync(DATA, { recursive: true, force: true });
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
-process.on('uncaughtException', (e) => { console.error(e); cleanup(); process.exit(1); });
-process.on('unhandledRejection', (e) => { console.error(e); cleanup(); process.exit(1); });
+for (const sig of ['SIGINT', 'SIGTERM'])
+  process.on(sig, () => {
+    cleanup();
+    process.exit(130);
+  });
+process.on('uncaughtException', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
 
-for (let i = 0; i < 160; i++) { try { if ((await fetch(`${API}/healthz`)).ok) break; } catch { /* booting */ } await sleep(250); }
+for (let i = 0; i < 160; i++) {
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {
+    /* booting */
+  }
+  await sleep(250);
+}
 console.log(`backend up on :${API_PORT}`);
 
 const j = async (method, p, body, token) => {
@@ -119,15 +161,29 @@ async function enterClub(ctx, org, name, role) {
   await page.waitForSelector('nav.sidebar', { timeout: 30000 });
   return page;
 }
-const tokenOf = (page) => page.evaluate(() => {
-  try { return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null; } catch { return null; }
-});
+const tokenOf = (page) =>
+  page.evaluate(() => {
+    try {
+      return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null;
+    } catch {
+      return null;
+    }
+  });
 async function goto(page, hash, selector) {
-  await page.evaluate((h) => { window.location.hash = h; }, hash);
+  await page.evaluate((h) => {
+    window.location.hash = h;
+  }, hash);
   if (selector) {
     await page.waitForSelector(selector, { timeout: 25000 }).catch(async () => {
       const where = await page.evaluate(() => location.hash);
-      const text = (await page.locator('body').innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 400);
+      const text = (
+        await page
+          .locator('body')
+          .innerText()
+          .catch(() => '')
+      )
+        .replace(/\n/g, ' ')
+        .slice(0, 400);
       fail(`navigation to ${hash} never showed ${selector} (now at ${where}): ${text}`);
     });
   }
@@ -139,7 +195,9 @@ const WATCHLISTS = '#/recruitment/watchlists';
 const maria = await enterClub(ctxA, 'Eastport FC', 'Maria Keane', 'Head of Recruitment');
 const MARIA = await tokenOf(maria);
 if (!MARIA) fail('fixture: the recruiter has no session token');
-const TOM = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Head of Recruitment' })).body.token;
+const TOM = (
+  await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Head of Recruitment' })
+).body.token;
 
 // ------------------------------------------------------------------ helpers
 /** Add a criterion row of a given type to a class, and return its row locator. */
@@ -173,39 +231,54 @@ const bodyText = (page) => page.locator('body').innerText();
   for (let i = 0; i < n; i++) {
     const text = await cards.nth(i).innerText();
     if (!/Why this player matches/.test(text)) fail(`W2: card ${i} has no explanation`);
-    if (!/Matches position criteria \(CDM\)/.test(text)) fail(`W2: card ${i} does not name the criterion it matched: ${text.slice(0, 200)}`);
+    if (!/Matches position criteria \(CDM\)/.test(text))
+      fail(`W2: card ${i} does not name the criterion it matched: ${text.slice(0, 200)}`);
   }
   say(`W2 all ${n} cards name the criterion they matched — nothing matches for an unstated reason`);
   // The ✓ / ○ glyph is decorative; the outcome also exists in words for a
   // screen reader, and that copy must not print on the page.
   const srCount = await maria.locator('[data-match-card] .sr-only').count();
   if (srCount === 0) fail('W2: the criterion outcome is carried by a glyph alone');
-  const srVisible = await maria.locator('[data-match-card] .sr-only').first().evaluate((el) => {
-    const r = el.getBoundingClientRect();
-    return r.width > 2 || r.height > 2;
-  });
+  const srVisible = await maria
+    .locator('[data-match-card] .sr-only')
+    .first()
+    .evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 2 || r.height > 2;
+    });
   if (srVisible) fail('W2: the screen-reader-only outcome text is printing on the page');
-  const glyphHidden = await maria.locator('[data-match-card] span[aria-hidden="true"]').first().getAttribute('aria-hidden');
+  const glyphHidden = await maria
+    .locator('[data-match-card] span[aria-hidden="true"]')
+    .first()
+    .getAttribute('aria-hidden');
   if (glyphHidden !== 'true') fail('W2: the decorative glyph is not hidden from assistive technology');
   say(`W2b the ✓ glyph is decorative and the outcome is also in words (${srCount} hidden labels, 0 visible)`);
 }
 
 // ==================================================================== W3
 {
-  const order = await maria.locator('[data-match-card]').evaluateAll((els) => els.map((e) => e.getAttribute('data-match-card')));
+  const order = await maria
+    .locator('[data-match-card]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-match-card')));
   const pref = await addCriterion(maria, 'preferred', 'trust_band');
   await pref.locator('select[aria-label="Value"]').selectOption('very_strong_evidence');
   await maria.click('button:has-text("Show matching players")');
   await maria.waitForSelector('[data-match-total]', { timeout: 20000 });
-  const after = await maria.locator('[data-match-card]').evaluateAll((els) => els.map((e) => e.getAttribute('data-match-card')));
-  if (JSON.stringify(order) !== JSON.stringify(after)) fail('W3: adding a preferred criterion changed who is on the list, or the order');
+  const after = await maria
+    .locator('[data-match-card]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-match-card')));
+  if (JSON.stringify(order) !== JSON.stringify(after))
+    fail('W3: adding a preferred criterion changed who is on the list, or the order');
   const text = await bodyText(maria);
-  if (!/0 of 1 preferred criteria met/.test(text)) fail(`W3: the preferred count is not shown as a count: ${text.slice(0, 400)}`);
-  if (!/It is not a score, and players are never ordered by it/.test(text)) fail('W3: the count is shown without saying what it is not');
+  if (!/0 of 1 preferred criteria met/.test(text))
+    fail(`W3: the preferred count is not shown as a count: ${text.slice(0, 400)}`);
+  if (!/It is not a score, and players are never ordered by it/.test(text))
+    fail('W3: the count is shown without saying what it is not');
   await maria.locator('[data-match-card]').first().locator('button:has-text("Show preferred criteria")').click();
   await maria.waitForTimeout(200);
   const expanded = await maria.locator('[data-match-card]').first().innerText();
-  if (!/Evidence confidence is below the criteria/.test(expanded)) fail(`W3: an UNMET preferred criterion is not shown as plainly as a met one: ${expanded}`);
+  if (!/Evidence confidence is below the criteria/.test(expanded))
+    fail(`W3: an UNMET preferred criterion is not shown as plainly as a met one: ${expanded}`);
   say('W3 preferred criteria are counted, shown met and unmet, and change neither membership nor order');
 }
 
@@ -219,29 +292,44 @@ const bodyText = (page) => page.locator('body').innerText();
   if (!/An ordering, not a ranking/.test(note)) fail('W4: the ordering is not declared as an ordering');
   await maria.locator('select[aria-label="Order by"]').selectOption('name');
   await maria.waitForTimeout(900);
-  const names = await maria.locator('[data-match-card] b').evaluateAll((els) => els.filter((e) => e.style.fontSize === '15px').map((e) => e.textContent));
+  const names = await maria
+    .locator('[data-match-card] b')
+    .evaluateAll((els) => els.filter((e) => e.style.fontSize === '15px').map((e) => e.textContent));
   const sorted = [...names].sort((a, b) => a.localeCompare(b));
-  if (JSON.stringify(names) !== JSON.stringify(sorted)) fail(`W4: name ordering did not order by name: ${names.join(',')}`);
-  say(`W4 the ordering control declares itself, offers no "best match", and does what it says (${options.length} options)`);
+  if (JSON.stringify(names) !== JSON.stringify(sorted))
+    fail(`W4: name ordering did not order by name: ${names.join(',')}`);
+  say(
+    `W4 the ordering control declares itself, offers no "best match", and does what it says (${options.length} options)`,
+  );
 }
 
 // ==================================================================== W5
 {
-  const types = await maria.locator('select[aria-label="Fact"]').first().locator('option').evaluateAll((els) => els.map((e) => e.value));
+  const types = await maria
+    .locator('select[aria-label="Fact"]')
+    .first()
+    .locator('option')
+    .evaluateAll((els) => els.map((e) => e.value));
   const protectedish = types.find((t) => /ethnic|race|religion|disab|income|school|orientation/i.test(t));
   if (protectedish) fail(`W5: the criterion editor offers "${protectedish}"`);
   // And it is refused on the wire, by name, if it is sent anyway.
-  const refusal = await maria.evaluate(async ([api, token]) => {
-    const r = await fetch(`${api}/org/matching`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ criteria: { required: [{ type: 'ethnicity', operator: 'in', values: ['x'] }] } }),
-    });
-    return { status: r.status, body: await r.json() };
-  }, [API, MARIA]);
-  if (refusal.status !== 400 || refusal.body.error !== 'CRITERION_PROHIBITED') fail(`W5: a protected characteristic was not refused: ${JSON.stringify(refusal)}`);
+  const refusal = await maria.evaluate(
+    async ([api, token]) => {
+      const r = await fetch(`${api}/org/matching`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ criteria: { required: [{ type: 'ethnicity', operator: 'in', values: ['x'] }] } }),
+      });
+      return { status: r.status, body: await r.json() };
+    },
+    [API, MARIA],
+  );
+  if (refusal.status !== 400 || refusal.body.error !== 'CRITERION_PROHIBITED')
+    fail(`W5: a protected characteristic was not refused: ${JSON.stringify(refusal)}`);
   if (!refusal.body.prohibited.includes('ethnicity')) fail('W5: the refusal does not name the offending criterion');
-  say(`W5 no protected characteristic is offered in the editor (${types.length} types), and one sent anyway is refused by name`);
+  say(
+    `W5 no protected characteristic is offered in the editor (${types.length} types), and one sent anyway is refused by name`,
+  );
 }
 
 // ==================================================================== W6
@@ -249,7 +337,9 @@ const bodyText = (page) => page.locator('body').innerText();
   // A fresh editor. Navigating to a bare matching link deliberately does NOT
   // discard criteria already typed — a colleague's link is not a reason to
   // throw away your work — so this journey starts from a reload.
-  await maria.evaluate((h) => { window.location.hash = h; }, MATCHING);
+  await maria.evaluate((h) => {
+    window.location.hash = h;
+  }, MATCHING);
   await maria.reload();
   await maria.waitForSelector('.topbar h1:has-text("Player Matching")', { timeout: 25000 });
   await maria.waitForTimeout(500);
@@ -262,7 +352,8 @@ const bodyText = (page) => page.locator('body').innerText();
   await maria.waitForTimeout(1200);
   const text = await bodyText(maria);
   if (!/cannot be saved as written/i.test(text)) fail(`W6: no refusal message: ${text.slice(0, 400)}`);
-  if (!/the range starts after it ends/i.test(text)) fail(`W6: the refusal does not say what is wrong with the row: ${text.slice(0, 500)}`);
+  if (!/the range starts after it ends/i.test(text))
+    fail(`W6: the refusal does not say what is wrong with the row: ${text.slice(0, 500)}`);
   const stillThere = await maria.locator('[data-criteria-class="required"] .list-row').count();
   if (stillThere !== 2) fail(`W6: the draft did not survive the refusal (${stillThere} rows left)`);
   const cdmStillChecked = await good.locator('input[type=checkbox]').nth(6).isChecked();
@@ -318,7 +409,8 @@ let WL_HASH = null;
   const text = await bodyText(maria);
   if (!/Membership last derived/.test(text)) fail('W9: the watchlist does not say when membership was derived');
   if (!/derived when this page is read/i.test(text)) fail('W9: the page does not say membership is derived on read');
-  if (!/does not recompute watchlists in the background/i.test(text)) fail('W9: the page implies a scheduler this build does not have');
+  if (!/does not recompute watchlists in the background/i.test(text))
+    fail('W9: the page implies a scheduler this build does not have');
   if (!/newly matched/.test(text) || !/no longer match/.test(text)) fail('W9: no change summary');
   if (!/not an improvement in a player/i.test(text)) fail('W9: the counts are shown without saying what they are not');
   if (!/MEMBERSHIP HISTORY|Membership history/i.test(text)) fail('W9: no membership history');
@@ -332,10 +424,20 @@ let WL_HASH = null;
   const before = (await j('GET', `/org/watchlists/${id}`, undefined, MARIA)).body.total;
   // Narrow the saved criteria through the API the UI uses, then re-read in the UI.
   const cur = (await j('GET', `/org/watchlists/${id}`, undefined, MARIA)).body.watchlist;
-  const patch = await j('PATCH', `/org/watchlists/${id}`, {
-    criteria: { required: [{ type: 'position', operator: 'in', values: ['CDM'] }, { type: 'age', operator: 'lte', value: 18 }] },
-    expectedRev: cur.rev,
-  }, MARIA);
+  const patch = await j(
+    'PATCH',
+    `/org/watchlists/${id}`,
+    {
+      criteria: {
+        required: [
+          { type: 'position', operator: 'in', values: ['CDM'] },
+          { type: 'age', operator: 'lte', value: 18 },
+        ],
+      },
+      expectedRev: cur.rev,
+    },
+    MARIA,
+  );
   if (patch.status !== 200) fail(`W10: could not narrow the criteria: ${JSON.stringify(patch.body)}`);
   await maria.reload();
   await maria.waitForSelector('h3:has-text("2027 Defensive Midfielders")', { timeout: 25000 });
@@ -345,7 +447,8 @@ let WL_HASH = null;
   const current = Number(await maria.locator('[data-wl-count="current"] b').innerText());
   if (!(left > 0)) fail(`W10: tightening the criteria removed nobody (before ${before}, now ${current})`);
   if (!/No longer matches/.test(text)) fail('W10: the history does not show the departures');
-  if (!/The saved criteria changed/.test(text)) fail(`W10: the history does not say the CRITERIA changed — it must not blame the player: ${text.slice(0, 800)}`);
+  if (!/The saved criteria changed/.test(text))
+    fail(`W10: the history does not say the CRITERIA changed — it must not blame the player: ${text.slice(0, 800)}`);
   say(`W10 narrowing the criteria moved ${left} players out, and the history says the criteria changed`);
 }
 
@@ -363,12 +466,13 @@ let WL_HASH = null;
   await maria.waitForSelector('.notice, [role="alert"]', { timeout: 15000 }).catch(() => {});
   await maria.waitForTimeout(600);
   const notice = maria.locator('[data-conflict-code]');
-  if (await notice.count() === 0) fail(`W11: no shared conflict notice: ${(await bodyText(maria)).slice(0, 500)}`);
+  if ((await notice.count()) === 0) fail(`W11: no shared conflict notice: ${(await bodyText(maria)).slice(0, 500)}`);
   const code = await notice.first().getAttribute('data-conflict-code');
   if (code !== 'WATCHLIST_VERSION_CONFLICT') fail(`W11: the notice carries the wrong code (${code})`);
   const noticeText = await notice.first().innerText();
   if (!/This changed while you were editing/.test(noticeText)) fail(`W11: not the shared notice: ${noticeText}`);
-  if (!/Tom Field saved a newer version/.test(noticeText)) fail(`W11: the conflict does not name the colleague: ${noticeText}`);
+  if (!/Tom Field saved a newer version/.test(noticeText))
+    fail(`W11: the conflict does not name the colleague: ${noticeText}`);
   if (!/nothing of yours has been lost/.test(noticeText)) fail('W11: the notice does not say the draft survived');
   const draft = await maria.locator('input[aria-label="Name"]').inputValue();
   if (draft !== 'Renamed by Maria') fail(`W11: the conflict destroyed the typed name ("${draft}")`);
@@ -378,30 +482,46 @@ let WL_HASH = null;
   await maria.reload();
   await maria.waitForSelector('button:has-text("Archive")', { timeout: 25000 });
   let dialogText = null;
-  maria.once('dialog', async (d) => { dialogText = d.message(); await d.dismiss(); });
+  maria.once('dialog', async (d) => {
+    dialogText = d.message();
+    await d.dismiss();
+  });
   await maria.click('button:has-text("Archive")');
   await maria.waitForTimeout(600);
   if (!dialogText) fail('W11: archiving did not confirm first');
   if (!/history is kept/i.test(dialogText) || !/not reopened/i.test(dialogText)) {
     fail(`W11: the confirmation does not state the consequence: ${dialogText}`);
   }
-  if (/Are you sure/i.test(dialogText)) fail(`W11: the confirmation asks "are you sure" instead of saying what happens: ${dialogText}`);
+  if (/Are you sure/i.test(dialogText))
+    fail(`W11: the confirmation asks "are you sure" instead of saying what happens: ${dialogText}`);
   await maria.waitForTimeout(400);
   const stillActive = await bodyText(maria);
-  if (/Archived/.test(stillActive.split('Membership')[0] ?? '')) fail('W11: dismissing the confirmation archived it anyway');
+  if (/Archived/.test(stillActive.split('Membership')[0] ?? ''))
+    fail('W11: dismissing the confirmation archived it anyway');
   say('W11b archiving states its consequence before acting, and dismissing it does nothing');
 }
 
 // =================================================================== W12
 {
-  const FORBIDDEN = [/AI Match Score/i, /Talent Score/i, /Potential Score/i, /Recruitability/i, /ScoutBox Rating/i, /\bBest Match\b/i, /Recommended Player/i];
+  const FORBIDDEN = [
+    /AI Match Score/i,
+    /Talent Score/i,
+    /Potential Score/i,
+    /Recruitability/i,
+    /ScoutBox Rating/i,
+    /\bBest Match\b/i,
+    /Recommended Player/i,
+  ];
   for (const hash of [MATCHING, WATCHLISTS, WL_HASH]) {
     await goto(maria, hash, '.content');
     await maria.waitForTimeout(500);
     const raw = await bodyText(maria);
     // Strip the sentences that exist precisely to deny these things.
-    const text = raw.replace(/no match score[^.]*\./gi, '').replace(/does not rank or score[^.]*\./gi, '')
-      .replace(/never scored[^.]*\.?/gi, '').replace(/not a score[^.]*\.?/gi, '');
+    const text = raw
+      .replace(/no match score[^.]*\./gi, '')
+      .replace(/does not rank or score[^.]*\./gi, '')
+      .replace(/never scored[^.]*\.?/gi, '')
+      .replace(/not a score[^.]*\.?/gi, '');
     for (const re of FORBIDDEN) {
       if (re.test(text)) fail(`W12: ${hash} shows forbidden vocabulary matching ${re}`);
     }
@@ -412,7 +532,9 @@ let WL_HASH = null;
   for (const hash of [MATCHING, WATCHLISTS, WL_HASH]) {
     await goto(maria, hash, '.content');
     await maria.waitForTimeout(400);
-    const overflow = await maria.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+    const overflow = await maria.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
+    );
     if (overflow) fail(`W12: ${hash} scrolls sideways at 390px`);
   }
   say('W12b every matching and watchlist screen fits a 390px phone without sideways scrolling');
@@ -424,7 +546,10 @@ let WL_HASH = null;
   await maria.waitForTimeout(300);
   const added = await maria.locator('[data-criteria-class="required"] .list-row').count();
   if (added < 1) fail('W12: the criteria editor cannot be operated from the keyboard');
-  const labelled = await maria.locator('[data-criteria-class="required"] select, [data-criteria-class="required"] input[type=number], [data-criteria-class="required"] input[type=text]')
+  const labelled = await maria
+    .locator(
+      '[data-criteria-class="required"] select, [data-criteria-class="required"] input[type=number], [data-criteria-class="required"] input[type=text]',
+    )
     .evaluateAll((els) => els.every((e) => e.getAttribute('aria-label') || e.closest('label')));
   if (!labelled) fail('W12: a control in the criteria editor has no accessible name');
   say('W12c the criteria editor is keyboard-operable and every control has an accessible name');

@@ -48,8 +48,20 @@ export const OFFER_ERROR_HTTP = table({
 export const httpStatusFor = (code) => OFFER_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
-  'error', 'message', 'field', 'allowed', 'expected', 'current', 'expectedRev', 'currentRev',
-  'updatedBy', 'updatedAt', 'reasons', 'blockers', 'lifecycle', 'status',
+  'error',
+  'message',
+  'field',
+  'allowed',
+  'expected',
+  'current',
+  'expectedRev',
+  'currentRev',
+  'updatedBy',
+  'updatedAt',
+  'reasons',
+  'blockers',
+  'lifecycle',
+  'status',
 ];
 
 export function publicErrorBody(out) {
@@ -66,11 +78,25 @@ export function sendOfferError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
     console.error(`offers ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
-    return res.status(500).json({ ok: false, error: 'OFFER_STATE_UNKNOWN', message: 'The Offer service cannot serve this request. This has been recorded.' });
+    return res.status(500).json({
+      ok: false,
+      error: 'OFFER_STATE_UNKNOWN',
+      message: 'The Offer service cannot serve this request. This has been recorded.',
+    });
   }
   if (status === 500) console.error(`offers ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }
 
-export const notFound = (res, where) => sendOfferError(res, { error: 'OFFER_NOT_FOUND', message: 'No Offer with that reference is available to you.' }, where);
-export const documentNotFound = (res, where) => sendOfferError(res, { error: 'OFFER_DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' }, where);
+export const notFound = (res, where) =>
+  sendOfferError(
+    res,
+    { error: 'OFFER_NOT_FOUND', message: 'No Offer with that reference is available to you.' },
+    where,
+  );
+export const documentNotFound = (res, where) =>
+  sendOfferError(
+    res,
+    { error: 'OFFER_DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' },
+    where,
+  );

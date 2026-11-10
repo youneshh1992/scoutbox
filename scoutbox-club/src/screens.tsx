@@ -7,12 +7,29 @@ import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } fr
 import { ProGlyph as Icon } from './proExperience';
 import { pressable, useDialog } from './dialog';
 import {
-  api, ApiError, DEMO_MODE,
-  type Session, type Player, type PlayerDetail, type OrgRequest, type Trial,
-  type LedgerEntry, type ProofPack, type PlanInfo, type Reputation, type SearchFilters,
-  type Channel, type FiledReport, type TrialDetails,
-  type FeedItem, type FilmRoomItem, type FixtureGroup, type SavedSearch, type OrgNote,
-  type Funnel, type Invoice,
+  api,
+  ApiError,
+  DEMO_MODE,
+  type Session,
+  type Player,
+  type PlayerDetail,
+  type OrgRequest,
+  type Trial,
+  type LedgerEntry,
+  type ProofPack,
+  type PlanInfo,
+  type Reputation,
+  type SearchFilters,
+  type Channel,
+  type FiledReport,
+  type TrialDetails,
+  type FeedItem,
+  type FilmRoomItem,
+  type FixtureGroup,
+  type SavedSearch,
+  type OrgNote,
+  type Funnel,
+  type Invoice,
 } from './api';
 import { FootballPassportPanel, SharedPassportOpener, usePassportSummaries } from './m15screens';
 import { BoxTrainingPanel } from './m16screens';
@@ -27,9 +44,18 @@ const tt = t;
 import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 
 const TAG_LABELS: Record<string, string> = {
-  first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
-  left_foot: 'Left foot', right_foot: 'Right foot', aerial: 'Aerial', composure: 'Composure',
-  vision: 'Vision', pressing: 'Pressing', finishing: 'Finishing', distribution: 'Distribution',
+  first_touch: 'First touch',
+  pace: 'Pace',
+  positioning: 'Positioning',
+  work_rate: 'Work rate',
+  left_foot: 'Left foot',
+  right_foot: 'Right foot',
+  aerial: 'Aerial',
+  composure: 'Composure',
+  vision: 'Vision',
+  pressing: 'Pressing',
+  finishing: 'Finishing',
+  distribution: 'Distribution',
 };
 
 interface ScreenProps {
@@ -80,7 +106,10 @@ export function Toast({ text, error }: { text: string; error?: boolean }) {
 function errMsg(e: unknown): string {
   // A temporal refusal (DATE_INVALID, INTERVAL_INVALID, …) has a
   // translated sentence; anything else keeps the server's own message.
-  if (e instanceof ApiError) { const translated = t(`err.${e.code}`, ''); if (translated) return translated; }
+  if (e instanceof ApiError) {
+    const translated = t(`err.${e.code}`, '');
+    if (translated) return translated;
+  }
   return e instanceof Error ? e.message : 'Something went wrong';
 }
 
@@ -96,8 +125,12 @@ function errMsg(e: unknown): string {
 function TrustBar({ score }: { score: number }) {
   return (
     <div className="trust" title={t('term.profileSignalNote')}>
-      <span>{t('term.profileSignal')} {score}%</span>
-      <span className="bar"><i style={{ width: `${score}%` }} /></span>
+      <span>
+        {t('term.profileSignal')} {score}%
+      </span>
+      <span className="bar">
+        <i style={{ width: `${score}%` }} />
+      </span>
     </div>
   );
 }
@@ -106,24 +139,28 @@ function AgencyWall({ session }: { session: Session }) {
   if (session.org.type === 'agency') {
     return (
       <div className="wall">
-        <Icon name="shield-alert" size={25}/><div><b>Under-18 access is restricted</b>
-        <p>
-          Agency accounts can only access adult players. Under-18 profiles, contact and representation are unavailable to this account.
-        </p>
-      </div>
+        <Icon name="shield-alert" size={25} />
+        <div>
+          <b>Under-18 access is restricted</b>
+          <p>
+            Agency accounts can only access adult players. Under-18 profiles, contact and representation are unavailable
+            to this account.
+          </p>
+        </div>
       </div>
     );
   }
   if (session.org.type === 'club' && !session.org.verified) {
     return (
       <div className="wall">
-        <Icon name="shield-alert" size={25}/><div><b>Club verification required</b>
-        <p>
-          Only verified clubs can search or view under-18 players. Verification requires a company
-          email domain and a signed safeguarding contract; until it clears, this workspace sees the
-          adult pool only.
-        </p>
-      </div>
+        <Icon name="shield-alert" size={25} />
+        <div>
+          <b>Club verification required</b>
+          <p>
+            Only verified clubs can search or view under-18 players. Verification requires a company email domain and a
+            signed safeguarding contract; until it clears, this workspace sees the adult pool only.
+          </p>
+        </div>
       </div>
     );
   }
@@ -134,7 +171,12 @@ function AgencyWall({ session }: { session: Session }) {
 
 // One-click reporting, reachable from every screen (topbar) and from
 // profiles. Urgent reports immediately suspend communication pending review.
-export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
+export function SafetyModal({
+  session,
+  notify,
+  onClose,
+  presetPlayerId,
+}: {
   session: Session;
   notify: (text: string, error?: boolean) => void;
   onClose: () => void;
@@ -147,7 +189,12 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   const [urgent, setUrgent] = useState(false);
   const [myReports, setMyReports] = useState<FiledReport[]>([]);
 
-  useEffect(() => { api.getMyReports(session).then(setMyReports).catch(() => {}); }, [session]);
+  useEffect(() => {
+    api
+      .getMyReports(session)
+      .then(setMyReports)
+      .catch(() => {});
+  }, [session]);
 
   const submit = async () => {
     if (!reason.trim()) return notify('Describe what happened — reports need a reason.', true);
@@ -170,19 +217,37 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer pro-safety-panel" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Report & block" tabIndex={-1} style={{ width: 'min(520px, 92vw)' }}>
+      <div
+        className="drawer pro-safety-panel"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Report & block"
+        tabIndex={-1}
+        style={{ width: 'min(520px, 92vw)' }}
+      >
         <div className="head">
           <div>
-            <span className="pro-safety-kicker"><Icon name="shield-alert" size={18} /> Trust &amp; safety</span><h3>Report &amp; block</h3>
+            <span className="pro-safety-kicker">
+              <Icon name="shield-alert" size={18} /> Trust &amp; safety
+            </span>
+            <h3>Report &amp; block</h3>
             <div className="sub">All reports are reviewed. Urgent reports suspend communication immediately.</div>
           </div>
-          <button className="close" onClick={onClose}>Close</button>
+          <button className="close" onClick={onClose}>
+            Close
+          </button>
         </div>
         <div className="section">
           <h4>What are you reporting?</h4>
           <div style={{ display: 'flex', gap: 8 }}>
             {(['player', 'scout', 'club'] as const).map((k) => (
-              <button key={k} className={targetKind === k ? 'selected' : ''} aria-pressed={targetKind === k} onClick={() => setTargetKind(k)}>
+              <button
+                key={k}
+                className={targetKind === k ? 'selected' : ''}
+                aria-pressed={targetKind === k}
+                onClick={() => setTargetKind(k)}
+              >
                 {k === 'player' ? 'Player' : k === 'scout' ? 'Scout' : 'Club'}
               </button>
             ))}
@@ -190,20 +255,43 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
         </div>
         <div className="section">
           <h4>{targetKind === 'player' ? 'Player id' : targetKind === 'scout' ? 'Scout name' : 'Club / org id'}</h4>
-          <input aria-label="Report subject" style={{ width: '100%' }} value={target} onChange={(e) => setTarget(e.target.value)}
-            placeholder={targetKind === 'player' ? 'e.g. pl-adeyemi' : targetKind === 'scout' ? 'e.g. the name shown on the request' : 'e.g. org-northstar'} />
+          <input
+            aria-label="Report subject"
+            style={{ width: '100%' }}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder={
+              targetKind === 'player'
+                ? 'e.g. pl-adeyemi'
+                : targetKind === 'scout'
+                  ? 'e.g. the name shown on the request'
+                  : 'e.g. org-northstar'
+            }
+          />
         </div>
         <div className="section">
           <h4>What happened?</h4>
-          <textarea aria-label="What happened?" rows={4} style={{ width: '100%' }} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe the behaviour and include any relevant details." />
+          <textarea
+            aria-label="What happened?"
+            rows={4}
+            style={{ width: '100%' }}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Describe the behaviour and include any relevant details."
+          />
         </div>
         <div className="section">
           <label className="chk pro-safety-urgent">
             <input type="checkbox" checked={urgent} onChange={(e) => setUrgent(e.target.checked)} />
-            <span><strong>Urgent report</strong><small>Suspend communication immediately while this report is reviewed.</small></span>
+            <span>
+              <strong>Urgent report</strong>
+              <small>Suspend communication immediately while this report is reviewed.</small>
+            </span>
           </label>
         </div>
-        <button className="primary" onClick={submit}>Submit report</button>
+        <button className="primary" onClick={submit}>
+          Submit report
+        </button>
         {myReports.length > 0 && (
           <div className="section" style={{ marginTop: 22 }}>
             <h4>Your reports — you always hear back</h4>
@@ -212,10 +300,18 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
                 <div key={r.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     <span className="pill">{r.targetKind}</span>
-                    <span className="grow" style={{ fontSize: 13 }}>{r.reason}</span>
-                    <span className={`pill ${r.status === 'resolved' ? 'green' : 'gold'}`}>{r.status === 'resolved' ? 'reviewed' : 'in review'}</span>
+                    <span className="grow" style={{ fontSize: 13 }}>
+                      {r.reason}
+                    </span>
+                    <span className={`pill ${r.status === 'resolved' ? 'green' : 'gold'}`}>
+                      {r.status === 'resolved' ? 'reviewed' : 'in review'}
+                    </span>
                   </div>
-                  {r.outcome && <span className="dim" style={{ fontSize: 12.5 }}>{r.outcome}</span>}
+                  {r.outcome && (
+                    <span className="dim" style={{ fontSize: 12.5 }}>
+                      {r.outcome}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -238,32 +334,104 @@ const FEED_LABELS: Record<FeedItem['type'], string> = {
 export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
   const [filter, setFilter] = useState('all');
   const [items, setItems] = useState<FeedItem[] | null>(null);
-  useEffect(() => { api.getFeed(session).then(setItems).catch(() => setItems([])); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getFeed(session)
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [session, tick]);
 
   if (items === null) {
-    return <div className="player-grid">{[1, 2, 3, 4, 5, 6].map((i) => <div key={i} className="player-card skeleton" style={{ height: 90 }} />)}</div>;
+    return (
+      <div className="player-grid">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="player-card skeleton" style={{ height: 90 }} />
+        ))}
+      </div>
+    );
   }
 
   return (
     <>
       <AgencyWall session={session} />
       {items.length === 0 && <div className="notice">Quiet fortnight — nothing new yet.</div>}
-      <section className="pro-feed"><header><div><span className="pro-eyebrow">The latest from your network</span><h3>Scouting wire</h3></div><div className="pro-feed-tabs" role="group" aria-label="Filter activity">{[['all','All activity'],['footage','Footage'],['players','Players'],['reports','Reports']].map(([id,label])=><button key={id} aria-pressed={filter === id} onClick={()=>setFilter(id)}>{label}</button>)}</div></header><div className="list-rows">
-        {items.filter(it => filter === 'all' || (filter === 'footage' && (it.type === 'new_clip' || it.type === 'shortlist_new_clip')) || (filter === 'players' && it.type === 'new_player') || (filter === 'reports' && it.type === 'report_due')).map((it, i) => (
-          <div key={i} className="list-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(it.playerId))}>
-            <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}><Icon name={it.type==='new_player'?'user':it.type==='report_due'?'clipboard':'video'} size={22}/><small>{FEED_LABELS[it.type]}</small></span>
-            <span className="grow">
-              <b>{it.playerName}</b>
-              {it.type === 'new_player' && <span className="dim"> {it.position} · {it.age} years{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}</span>}
-              {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
-                <span className="dim"> {it.title}{it.verifiedClip ? ' · Verified footage' : ''}</span>
-              )}
-              {it.type === 'report_due' && <span className="dim"> Trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>}
-            </span>
-            <span className="dim">{fmtDate(it.ts)}</span>
+      <section className="pro-feed">
+        <header>
+          <div>
+            <span className="pro-eyebrow">The latest from your network</span>
+            <h3>Scouting wire</h3>
           </div>
-        ))}
-      </div>{!items.some(it => filter === 'all' || (filter === 'footage' && (it.type === 'new_clip' || it.type === 'shortlist_new_clip')) || (filter === 'players' && it.type === 'new_player') || (filter === 'reports' && it.type === 'report_due')) && <p className="pro-data-note" style={{padding:'0 23px 20px'}}>No activity in this view.</p>}</section>
+          <div className="pro-feed-tabs" role="group" aria-label="Filter activity">
+            {[
+              ['all', 'All activity'],
+              ['footage', 'Footage'],
+              ['players', 'Players'],
+              ['reports', 'Reports'],
+            ].map(([id, label]) => (
+              <button key={id} aria-pressed={filter === id} onClick={() => setFilter(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </header>
+        <div className="list-rows">
+          {items
+            .filter(
+              (it) =>
+                filter === 'all' ||
+                (filter === 'footage' && (it.type === 'new_clip' || it.type === 'shortlist_new_clip')) ||
+                (filter === 'players' && it.type === 'new_player') ||
+                (filter === 'reports' && it.type === 'report_due'),
+            )
+            .map((it, i) => (
+              <div
+                key={i}
+                className="list-row"
+                style={{ cursor: 'pointer' }}
+                {...pressable(() => openPlayer(it.playerId))}
+              >
+                <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}>
+                  <Icon
+                    name={it.type === 'new_player' ? 'user' : it.type === 'report_due' ? 'clipboard' : 'video'}
+                    size={22}
+                  />
+                  <small>{FEED_LABELS[it.type]}</small>
+                </span>
+                <span className="grow">
+                  <b>{it.playerName}</b>
+                  {it.type === 'new_player' && (
+                    <span className="dim">
+                      {' '}
+                      {it.position} · {it.age} years{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}
+                    </span>
+                  )}
+                  {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
+                    <span className="dim">
+                      {' '}
+                      {it.title}
+                      {it.verifiedClip ? ' · Verified footage' : ''}
+                    </span>
+                  )}
+                  {it.type === 'report_due' && (
+                    <span className="dim"> Trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>
+                  )}
+                </span>
+                <span className="dim">{fmtDate(it.ts)}</span>
+              </div>
+            ))}
+        </div>
+        {!items.some(
+          (it) =>
+            filter === 'all' ||
+            (filter === 'footage' && (it.type === 'new_clip' || it.type === 'shortlist_new_clip')) ||
+            (filter === 'players' && it.type === 'new_player') ||
+            (filter === 'reports' && it.type === 'report_due'),
+        ) && (
+          <p className="pro-data-note" style={{ padding: '0 23px 20px' }}>
+            No activity in this view.
+          </p>
+        )}
+      </section>
     </>
   );
 }
@@ -284,8 +452,15 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
   const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
-    api.getFilmRoom(session).then(setDeck).catch(() => setLoadFailed(true)).finally(() => setLoading(false));
-    api.getScoutTags(session).then(setTagOptions).catch(() => {});
+    api
+      .getFilmRoom(session)
+      .then(setDeck)
+      .catch(() => setLoadFailed(true))
+      .finally(() => setLoading(false));
+    api
+      .getScoutTags(session)
+      .then(setTagOptions)
+      .catch(() => {});
   }, [session]);
 
   const current = deck[index] ?? null;
@@ -296,12 +471,17 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
       viewed.current.add(current.media.id);
       api.recordClipView(session, current.player.id, current.media.id).catch(() => {});
     }
-    setPendingTags([]); setPlayhead(0); setDuration(0);
+    setPendingTags([]);
+    setPlayhead(0);
+    setDuration(0);
   }, [current, session]);
 
-  const step = useCallback((dir: number) => {
-    setIndex((i) => Math.min(Math.max(i + dir, 0), Math.max(deck.length - 1, 0)));
-  }, [deck.length]);
+  const step = useCallback(
+    (dir: number) => {
+      setIndex((i) => Math.min(Math.max(i + dir, 0), Math.max(deck.length - 1, 0)));
+    },
+    [deck.length],
+  );
 
   const submitTags = async () => {
     if (!current || pendingTags.length === 0) return;
@@ -309,24 +489,169 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
       await api.tagClip(session, current.player.id, current.media.id, pendingTags);
       notify('Tagged — aggregated anonymously into the player\'s "what scouts noticed".');
       setPendingTags([]);
-    } catch (e) { notify(errMsg(e), true); }
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
   };
 
-  if (loading) return <div className="notice" aria-busy="true">Loading the screening room…</div>;
-  if (loadFailed) return <div className="notice block">The footage library could not be loaded. Please refresh to try again.</div>;
-  if (!current) return <div className="notice">No playable footage yet. Clips appear here when players upload them — Verified Clips first.</div>;
-  const timecode = (seconds: number) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
-  return <div className="pro-studio">
-    <aside className="pro-film-library"><header><span className="pro-eyebrow">Review library</span><h3>{deck.length} clips</h3></header>{deck.map((clip,i)=><button key={clip.media.id} aria-pressed={i===index} onClick={()=>setIndex(i)}><span className="pro-film-number">{String(i+1).padStart(2,'0')}</span><span><strong>{clip.player.name}</strong><small>{clip.media.title}</small><em>{clip.player.position}{clip.media.verifiedClip ? ' / Verified clip' : ''}</em></span><Icon name={i===index?'eye':'video'} size={14}/></button>)}</aside>
-    <section className="pro-film-viewer"><header><span><Icon name="video" size={16}/> Screening room</span><span className="pro-film-counter">{String(index+1).padStart(2,'0')} / {String(deck.length).padStart(2,'0')}</span></header>
-      <div className="filmroom-stage"><video ref={videoRef} key={current.media.id} className="filmroom-video" src={api.mediaUrl(current.media.url)!} controls playsInline onTimeUpdate={e=>setPlayhead(e.currentTarget.currentTime)} onLoadedMetadata={e=>{setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0);e.currentTarget.playbackRate=speed;}} /></div>
-      <div className="pro-film-transport"><span>{timecode(playhead)}</span><input type="range" aria-label="Seek footage" min={0} max={duration || 0} step={.1} value={Math.min(playhead,duration)} disabled={!duration} onChange={e=>{if(videoRef.current){videoRef.current.currentTime=Number(e.target.value);setPlayhead(Number(e.target.value));}}}/><span>{timecode(duration)}</span><select aria-label="Playback speed" value={speed} onChange={e=>{const value=Number(e.target.value);setSpeed(value);if(videoRef.current)videoRef.current.playbackRate=value;}}>{[.5,.75,1,1.5,2].map(x=><option key={x} value={x}>{x}×</option>)}</select></div>
-      <ProClipTools session={session} mediaId={current.media.id} playerId={current.player.id} videoRef={videoRef} duration={duration} playhead={playhead} notify={notify} onStep={step}/>
-      <div className="pro-film-caption" data-testid="filmroom-caption"><h3>{current.media.title}</h3><p>{current.media.views} views · {t('term.profileSignal')} {current.player.trustScore}%</p>{current.media.verifiedClip && <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>}</div>
-      <div className="filmroom-controls"><button onClick={()=>step(-1)} disabled={index===0}><Icon name="chevron-left" size={15}/> Previous</button><span className="dim">↑ / ↓ to change clips · Space to play</span><button onClick={()=>step(1)} disabled={index>=deck.length-1}>Next clip <Icon name="arrow-right" size={15}/></button></div>
-    </section>
-    <aside className="pro-film-inspector"><span className="pro-eyebrow">Player dossier</span><button className="pro-film-player" onClick={()=>openPlayer(current.player.id)}><strong>{current.player.name}</strong><Icon name="arrow-up-right" size={17}/></button><div className="pro-film-player-meta"><span>{current.player.position}</span><span>{current.player.age} years</span>{current.player.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}</div><h4>What did you notice?</h4><p>Select the qualities you observed in this clip.</p><div className="filmroom-tags" aria-label="Tag what you saw">{tagOptions.map(tag=><button key={tag} aria-pressed={pendingTags.includes(tag)} onClick={()=>setPendingTags(p=>p.includes(tag)?p.filter(x=>x!==tag):[...p,tag])}>{TAG_LABELS[tag]??tag}</button>)}</div><button className="primary" disabled={!pendingTags.length} onClick={submitTags}>Save {pendingTags.length || ''} {pendingTags.length === 1 ? 'observation' : 'observations'}</button><p className="pro-data-note">Observations are aggregated anonymously into the player’s “what scouts noticed”.</p></aside>
-  </div>;
+  if (loading)
+    return (
+      <div className="notice" aria-busy="true">
+        Loading the screening room…
+      </div>
+    );
+  if (loadFailed)
+    return <div className="notice block">The footage library could not be loaded. Please refresh to try again.</div>;
+  if (!current)
+    return (
+      <div className="notice">
+        No playable footage yet. Clips appear here when players upload them — Verified Clips first.
+      </div>
+    );
+  const timecode = (seconds: number) =>
+    `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+  return (
+    <div className="pro-studio">
+      <aside className="pro-film-library">
+        <header>
+          <span className="pro-eyebrow">Review library</span>
+          <h3>{deck.length} clips</h3>
+        </header>
+        {deck.map((clip, i) => (
+          <button key={clip.media.id} aria-pressed={i === index} onClick={() => setIndex(i)}>
+            <span className="pro-film-number">{String(i + 1).padStart(2, '0')}</span>
+            <span>
+              <strong>{clip.player.name}</strong>
+              <small>{clip.media.title}</small>
+              <em>
+                {clip.player.position}
+                {clip.media.verifiedClip ? ' / Verified clip' : ''}
+              </em>
+            </span>
+            <Icon name={i === index ? 'eye' : 'video'} size={14} />
+          </button>
+        ))}
+      </aside>
+      <section className="pro-film-viewer">
+        <header>
+          <span>
+            <Icon name="video" size={16} /> Screening room
+          </span>
+          <span className="pro-film-counter">
+            {String(index + 1).padStart(2, '0')} / {String(deck.length).padStart(2, '0')}
+          </span>
+        </header>
+        <div className="filmroom-stage">
+          <video
+            ref={videoRef}
+            key={current.media.id}
+            className="filmroom-video"
+            src={api.mediaUrl(current.media.url)!}
+            controls
+            playsInline
+            onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)}
+            onLoadedMetadata={(e) => {
+              setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0);
+              e.currentTarget.playbackRate = speed;
+            }}
+          />
+        </div>
+        <div className="pro-film-transport">
+          <span>{timecode(playhead)}</span>
+          <input
+            type="range"
+            aria-label="Seek footage"
+            min={0}
+            max={duration || 0}
+            step={0.1}
+            value={Math.min(playhead, duration)}
+            disabled={!duration}
+            onChange={(e) => {
+              if (videoRef.current) {
+                videoRef.current.currentTime = Number(e.target.value);
+                setPlayhead(Number(e.target.value));
+              }
+            }}
+          />
+          <span>{timecode(duration)}</span>
+          <select
+            aria-label="Playback speed"
+            value={speed}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              setSpeed(value);
+              if (videoRef.current) videoRef.current.playbackRate = value;
+            }}
+          >
+            {[0.5, 0.75, 1, 1.5, 2].map((x) => (
+              <option key={x} value={x}>
+                {x}×
+              </option>
+            ))}
+          </select>
+        </div>
+        <ProClipTools
+          session={session}
+          mediaId={current.media.id}
+          playerId={current.player.id}
+          videoRef={videoRef}
+          duration={duration}
+          playhead={playhead}
+          notify={notify}
+          onStep={step}
+        />
+        <div className="pro-film-caption" data-testid="filmroom-caption">
+          <h3>{current.media.title}</h3>
+          <p>
+            {current.media.views} views · {t('term.profileSignal')} {current.player.trustScore}%
+          </p>
+          {current.media.verifiedClip && (
+            <span className="pill green">Verified Clip — filmed at a confirmed fixture</span>
+          )}
+        </div>
+        <div className="filmroom-controls">
+          <button onClick={() => step(-1)} disabled={index === 0}>
+            <Icon name="chevron-left" size={15} /> Previous
+          </button>
+          <span className="dim">↑ / ↓ to change clips · Space to play</span>
+          <button onClick={() => step(1)} disabled={index >= deck.length - 1}>
+            Next clip <Icon name="arrow-right" size={15} />
+          </button>
+        </div>
+      </section>
+      <aside className="pro-film-inspector">
+        <span className="pro-eyebrow">Player dossier</span>
+        <button className="pro-film-player" onClick={() => openPlayer(current.player.id)}>
+          <strong>{current.player.name}</strong>
+          <Icon name="arrow-up-right" size={17} />
+        </button>
+        <div className="pro-film-player-meta">
+          <span>{current.player.position}</span>
+          <span>{current.player.age} years</span>
+          {current.player.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
+        </div>
+        <h4>What did you notice?</h4>
+        <p>Select the qualities you observed in this clip.</p>
+        <div className="filmroom-tags" aria-label="Tag what you saw">
+          {tagOptions.map((tag) => (
+            <button
+              key={tag}
+              aria-pressed={pendingTags.includes(tag)}
+              onClick={() => setPendingTags((p) => (p.includes(tag) ? p.filter((x) => x !== tag) : [...p, tag]))}
+            >
+              {TAG_LABELS[tag] ?? tag}
+            </button>
+          ))}
+        </div>
+        <button className="primary" disabled={!pendingTags.length} onClick={submitTags}>
+          Save {pendingTags.length || ''} {pendingTags.length === 1 ? 'observation' : 'observations'}
+        </button>
+        <p className="pro-data-note">
+          Observations are aggregated anonymously into the player’s “what scouts noticed”.
+        </p>
+      </aside>
+    </div>
+  );
 }
 
 /* ------------------------------------------------------------- Fixtures */
@@ -334,7 +659,12 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
 export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
   const [fixtures, setFixtures] = useState<FixtureGroup[]>([]);
   const [openKey, setOpenKey] = useState<string | null>(null);
-  useEffect(() => { api.getFixtures(session).then(setFixtures).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getFixtures(session)
+      .then(setFixtures)
+      .catch(() => {});
+  }, [session, tick]);
   return (
     <>
       <div className="list-rows">
@@ -342,17 +672,31 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
           const key = `${f.fixture}|${f.date}`;
           return (
             <div key={key} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }} {...pressable(() => setOpenKey(openKey === key ? null : key))}>
-                <span className="grow"><b>{f.fixture}</b> <span className="dim">— {f.venue}</span></span>
-                <span className="dim">GPS ✓ · {f.players.length} player{f.players.length === 1 ? '' : 's'} · {f.date}</span>
+              <div
+                style={{ display: 'flex', gap: 12, alignItems: 'center', cursor: 'pointer' }}
+                {...pressable(() => setOpenKey(openKey === key ? null : key))}
+              >
+                <span className="grow">
+                  <b>{f.fixture}</b> <span className="dim">— {f.venue}</span>
+                </span>
+                <span className="dim">
+                  GPS ✓ · {f.players.length} player{f.players.length === 1 ? '' : 's'} · {f.date}
+                </span>
               </div>
               {openKey === key && (
                 <div className="list-rows" style={{ marginTop: 8 }}>
                   {f.players.map((p) => (
-                    <div key={p.id} className="list-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(p.id))}>
+                    <div
+                      key={p.id}
+                      className="list-row"
+                      style={{ cursor: 'pointer' }}
+                      {...pressable(() => openPlayer(p.id))}
+                    >
                       <span className="pill blue">{p.position}</span>
                       <span className="grow">{p.name}</span>
-                      <span className="dim">{p.age} · {t('term.profileSignal')} {p.trustScore}%</span>
+                      <span className="dim">
+                        {p.age} · {t('term.profileSignal')} {p.trustScore}%
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -368,7 +712,11 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
 /* ------------------------------------------------------------ Compare */
 
 // Side-by-side comparison — the spreadsheet scouts keep, built in.
-export function CompareModal({ session, playerIds, onClose }: {
+export function CompareModal({
+  session,
+  playerIds,
+  onClose,
+}: {
   session: Session;
   playerIds: string[];
   onClose: () => void;
@@ -376,8 +724,9 @@ export function CompareModal({ session, playerIds, onClose }: {
   const dialogRef = useDialog<HTMLDivElement>(onClose);
   const [players, setPlayers] = useState<PlayerDetail[]>([]);
   useEffect(() => {
-    Promise.all(playerIds.map((id) => api.getPlayer(session, id).catch(() => null)))
-      .then((list) => setPlayers(list.filter((p): p is PlayerDetail => !!p)));
+    Promise.all(playerIds.map((id) => api.getPlayer(session, id).catch(() => null))).then((list) =>
+      setPlayers(list.filter((p): p is PlayerDetail => !!p)),
+    );
   }, [session, playerIds]);
 
   const rows: { label: string; get: (p: PlayerDetail) => ReactNode }[] = [
@@ -386,35 +735,66 @@ export function CompareModal({ session, playerIds, onClose }: {
     { label: 'Apps', get: (p) => p.stats?.appearances ?? '—' },
     { label: 'Goals', get: (p) => p.stats?.goals ?? '—' },
     { label: 'Assists', get: (p) => p.stats?.assists ?? '—' },
-    { label: 'Top speed', get: (p) => p.stats?.paceKmh ? `${p.stats.paceKmh} km/h` : '—' },
-    { label: 'Pass %', get: (p) => p.stats?.passCompletionPct ? `${p.stats.passCompletionPct}%` : '—' },
-    { label: 'Duels %', get: (p) => p.stats?.duelSuccessPct ? `${p.stats.duelSuccessPct}%` : '—' },
+    { label: 'Top speed', get: (p) => (p.stats?.paceKmh ? `${p.stats.paceKmh} km/h` : '—') },
+    { label: 'Pass %', get: (p) => (p.stats?.passCompletionPct ? `${p.stats.passCompletionPct}%` : '—') },
+    { label: 'Duels %', get: (p) => (p.stats?.duelSuccessPct ? `${p.stats.duelSuccessPct}%` : '—') },
     { label: 'Verified attendance', get: (p) => p.attendance.length },
     { label: 'Verified clips', get: (p) => p.media.filter((m) => m.verifiedClip).length },
     { label: 'Trial reports', get: (p) => p.trialReports.length },
-    { label: 'Combine (verified)', get: (p) => (p.drillResults ?? []).filter((r) => r.verified).map((r) => `${r.metric} ${r.value}${r.unit}`).join(', ') || '—' },
+    {
+      label: 'Combine (verified)',
+      get: (p) =>
+        (p.drillResults ?? [])
+          .filter((r) => r.verified)
+          .map((r) => `${r.metric} ${r.value}${r.unit}`)
+          .join(', ') || '—',
+    },
     { label: 'Availability', get: (p) => AVAILABILITY_LABELS[p.availability] ?? p.availability },
-    { label: 'Status', get: (p) => p.guardianManaged ? 'U18 · guardian-managed' : CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus },
+    {
+      label: 'Status',
+      get: (p) =>
+        p.guardianManaged ? 'U18 · guardian-managed' : (CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus),
+    },
   ];
 
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Compare" tabIndex={-1} style={{ width: 'min(980px, 94vw)' }}>
+      <div
+        className="drawer"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Compare"
+        tabIndex={-1}
+        style={{ width: 'min(980px, 94vw)' }}
+      >
         <div className="head">
-          <div><h3>Compare</h3><div className="sub">Side by side — verified data only.</div></div>
-          <button className="close" onClick={onClose}>Close</button>
+          <div>
+            <h3>Compare</h3>
+            <div className="sub">Side by side — verified data only.</div>
+          </div>
+          <button className="close" onClick={onClose}>
+            Close
+          </button>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table className="data">
             <thead>
-              <tr><th></th>{players.map((p) => <th key={p.id}>{p.name}</th>)}</tr>
+              <tr>
+                <th></th>
+                {players.map((p) => (
+                  <th key={p.id}>{p.name}</th>
+                ))}
+              </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.label}>
                   <td style={{ color: 'var(--muted)' }}>{r.label}</td>
-                  {players.map((p) => <td key={p.id}>{r.get(p)}</td>)}
+                  {players.map((p) => (
+                    <td key={p.id}>{r.get(p)}</td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -428,7 +808,7 @@ export function CompareModal({ session, playerIds, onClose }: {
 /* ------------------------------------------------------------- Search */
 
 export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps) {
-  const [view, setView] = useState<'dossiers'|'list'>('dossiers');
+  const [view, setView] = useState<'dossiers' | 'list'>('dossiers');
   const [filters, setFilters] = useState<SearchFilters>({});
   const [players, setPlayers] = useState<Player[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -438,11 +818,20 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
   const [comparing, setComparing] = useState(false);
 
   useEffect(() => {
-    api.searchPlayers(session, filters).then((p) => { setPlayers(p); setError(null); }).catch((e) => setError(errMsg(e)));
+    api
+      .searchPlayers(session, filters)
+      .then((p) => {
+        setPlayers(p);
+        setError(null);
+      })
+      .catch((e) => setError(errMsg(e)));
   }, [session, filters, tick]);
 
   useEffect(() => {
-    api.getSavedSearches(session).then(setSaved).catch(() => {});
+    api
+      .getSavedSearches(session)
+      .then(setSaved)
+      .catch(() => {});
   }, [session, tick]);
 
   const saveCurrent = async () => {
@@ -451,93 +840,244 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
       await api.saveSearch(session, saveName.trim(), filters);
       setSaveName('');
       setSaved(await api.getSavedSearches(session));
-      notify('Saved — you\'ll be notified the moment a new player matches.');
-    } catch (e) { notify(errMsg(e), true); }
+      notify("Saved — you'll be notified the moment a new player matches.");
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
   };
 
   const toggleCompare = (id: string) => {
-    setCompareIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 3 ? prev : [...prev, id]);
+    setCompareIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 3 ? prev : [...prev, id],
+    );
   };
 
   // One batch call decorates every visible card — never N+1 passports.
-  const fpSummaries = usePassportSummaries(session, players.map((p) => p.id));
+  const fpSummaries = usePassportSummaries(
+    session,
+    players.map((p) => p.id),
+  );
 
   return (
     <>
       <AgencyWall session={session} />
-      <div className="filters pro-discovery-filters pro-market-filters"><div className="pro-market-search"><Icon name="search" size={21}/>
-        <input
-          type="search"
-          aria-label="Search players"
-          placeholder="Search players, city or country"
-          value={filters.q ?? ''}
-          onChange={(e) => setFilters({ ...filters, q: e.target.value || undefined })}
-        />
-        </div><div className="pro-market-controls"><span className="pro-filter-label">Refine search</span><select aria-label="Position" value={filters.position ?? ''} onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}>
-          <option value="">Any position</option>
-          {POSITIONS.map((p) => <option key={p}>{p}</option>)}
-        </select>
-        <select aria-label="Availability" value={filters.availability ?? ''} onChange={(e) => setFilters({ ...filters, availability: e.target.value || undefined })}>
-          <option value="">Any availability</option>
-          {Object.entries(AVAILABILITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <select aria-label="Age group" value={filters.ageGroup ?? ''} onChange={(e) => setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })}>
-          <option value="">Any age group</option>
-          <option value="u16">U16</option>
-          <option value="u18">U18</option>
-          <option value="18-21">18–21</option>
-          <option value="senior">22+</option>
-        </select>
-        <select aria-label="Country" value={filters.country ?? ''} onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}>
-          <option value="">Any country</option>
-          {['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR'].map((c) => <option key={c}>{c}</option>)}
-        </select>
-        <label className="chk">
-          <input type="checkbox" checked={!!filters.academyPlus} onChange={(e) => setFilters({ ...filters, academyPlus: e.target.checked || undefined })} />
-          Academy+ only
-        </label>
-        <label className="chk">
-          <input type="checkbox" checked={!!filters.newDays} onChange={(e) => setFilters({ ...filters, newDays: e.target.checked ? 7 : undefined })} />
-          New this week
-        </label>
-
+      <div className="filters pro-discovery-filters pro-market-filters">
+        <div className="pro-market-search">
+          <Icon name="search" size={21} />
+          <input
+            type="search"
+            aria-label="Search players"
+            placeholder="Search players, city or country"
+            value={filters.q ?? ''}
+            onChange={(e) => setFilters({ ...filters, q: e.target.value || undefined })}
+          />
+        </div>
+        <div className="pro-market-controls">
+          <span className="pro-filter-label">Refine search</span>
+          <select
+            aria-label="Position"
+            value={filters.position ?? ''}
+            onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}
+          >
+            <option value="">Any position</option>
+            {POSITIONS.map((p) => (
+              <option key={p}>{p}</option>
+            ))}
+          </select>
+          <select
+            aria-label="Availability"
+            value={filters.availability ?? ''}
+            onChange={(e) => setFilters({ ...filters, availability: e.target.value || undefined })}
+          >
+            <option value="">Any availability</option>
+            {Object.entries(AVAILABILITY_LABELS).map(([k, v]) => (
+              <option key={k} value={k}>
+                {v}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Age group"
+            value={filters.ageGroup ?? ''}
+            onChange={(e) =>
+              setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })
+            }
+          >
+            <option value="">Any age group</option>
+            <option value="u16">U16</option>
+            <option value="u18">U18</option>
+            <option value="18-21">18–21</option>
+            <option value="senior">22+</option>
+          </select>
+          <select
+            aria-label="Country"
+            value={filters.country ?? ''}
+            onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}
+          >
+            <option value="">Any country</option>
+            {['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR'].map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+          <label className="chk">
+            <input
+              type="checkbox"
+              checked={!!filters.academyPlus}
+              onChange={(e) => setFilters({ ...filters, academyPlus: e.target.checked || undefined })}
+            />
+            Academy+ only
+          </label>
+          <label className="chk">
+            <input
+              type="checkbox"
+              checked={!!filters.newDays}
+              onChange={(e) => setFilters({ ...filters, newDays: e.target.checked ? 7 : undefined })}
+            />
+            New this week
+          </label>
+        </div>
       </div>
-      </div><details className="pro-saved-search"><summary><Icon name="clipboard" size={16}/> Saved searches <span>{saved.length}</span></summary><div className="filters">
-        <input type="text" placeholder="Name this search to receive new-match alerts" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
-        <button onClick={saveCurrent}>Save search</button>
-        {saved.map((s) => (
-          <span key={s.id} className="pill blue" style={{ cursor: 'pointer' }} title={`by ${s.scoutName}`}>
-            <button className="linklike" onClick={() => setFilters(s.filters)}>{s.name}</button>{' '}
-            <button
-              className="linklike"
-              aria-label={`${t('confirm.deleteSavedSearch').replace('{name}', s.name)}`}
-              title="Delete"
-              onClick={() => confirmDestructive({ ...DESTRUCTIVE_ACTIONS.deleteSavedSearch, name: s.name }) && api.deleteSavedSearch(session, s.id).then(() => api.getSavedSearches(session).then(setSaved))}
-            >✕</button>
-          </span>
-        ))}
-      </div>
+      <details className="pro-saved-search">
+        <summary>
+          <Icon name="clipboard" size={16} /> Saved searches <span>{saved.length}</span>
+        </summary>
+        <div className="filters">
+          <input
+            type="text"
+            placeholder="Name this search to receive new-match alerts"
+            value={saveName}
+            onChange={(e) => setSaveName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && saveCurrent()}
+          />
+          <button onClick={saveCurrent}>Save search</button>
+          {saved.map((s) => (
+            <span key={s.id} className="pill blue" style={{ cursor: 'pointer' }} title={`by ${s.scoutName}`}>
+              <button className="linklike" onClick={() => setFilters(s.filters)}>
+                {s.name}
+              </button>{' '}
+              <button
+                className="linklike"
+                aria-label={`${t('confirm.deleteSavedSearch').replace('{name}', s.name)}`}
+                title="Delete"
+                onClick={() =>
+                  confirmDestructive({ ...DESTRUCTIVE_ACTIONS.deleteSavedSearch, name: s.name }) &&
+                  api.deleteSavedSearch(session, s.id).then(() => api.getSavedSearches(session).then(setSaved))
+                }
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
       </details>
       {error && <div className="notice block">{error}</div>}
       {comparing && <CompareModal session={session} playerIds={compareIds} onClose={() => setComparing(false)} />}
       {/* The ordering is stated, not inferred. It is deliberately not
           a ranking, and the sentence says what the figure is not. */}
-      <details className="pro-ordering" data-ordering><summary>How results are ordered</summary><p>{t('discover.ordering')}</p></details>
-      <div className="pro-results-toolbar"><div><strong>{players.length}</strong><span>{players.length===1?'player':'players'} in this view</span></div><div role="group" aria-label="Player presentation">{compareIds.length >= 2 && <button className="primary" onClick={() => setComparing(true)}>Compare {compareIds.length}</button>}<button aria-pressed={view==='dossiers'} onClick={()=>setView('dossiers')}>Dossiers</button><button aria-pressed={view==='list'} onClick={()=>setView('list')}>List</button><button disabled={!players.length} onClick={()=>exportCsv('scoutbox-pro-visible-players.csv',['Player','Position','Age','Country','Preferred foot','Height (cm)','Availability'],players.map(p=>[p.name,p.position,p.age,p.country,p.foot,p.heightCm,AVAILABILITY_LABELS[p.availability]??p.availability]))}><Icon name="download" size={15}/> Export view</button></div></div>
+      <details className="pro-ordering" data-ordering>
+        <summary>How results are ordered</summary>
+        <p>{t('discover.ordering')}</p>
+      </details>
+      <div className="pro-results-toolbar">
+        <div>
+          <strong>{players.length}</strong>
+          <span>{players.length === 1 ? 'player' : 'players'} in this view</span>
+        </div>
+        <div role="group" aria-label="Player presentation">
+          {compareIds.length >= 2 && (
+            <button className="primary" onClick={() => setComparing(true)}>
+              Compare {compareIds.length}
+            </button>
+          )}
+          <button aria-pressed={view === 'dossiers'} onClick={() => setView('dossiers')}>
+            Dossiers
+          </button>
+          <button aria-pressed={view === 'list'} onClick={() => setView('list')}>
+            List
+          </button>
+          <button
+            disabled={!players.length}
+            onClick={() =>
+              exportCsv(
+                'scoutbox-pro-visible-players.csv',
+                ['Player', 'Position', 'Age', 'Country', 'Preferred foot', 'Height (cm)', 'Availability'],
+                players.map((p) => [
+                  p.name,
+                  p.position,
+                  p.age,
+                  p.country,
+                  p.foot,
+                  p.heightCm,
+                  AVAILABILITY_LABELS[p.availability] ?? p.availability,
+                ]),
+              )
+            }
+          >
+            <Icon name="download" size={15} /> Export view
+          </button>
+        </div>
+      </div>
       <div className={`player-grid pro-player-results ${view}`}>
         {players.map((p) => (
           <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
-            <div className="pro-player-identity"><span className="pro-player-kit" aria-hidden="true">{p.position}</span><div><span className="pro-card-location">{p.city ? `${p.city}, ` : ''}{p.country}</span><span className="name">{p.name}{p.identityVerified&&<Icon name="badge-check" size={21} label="Identity verified"/>}</span><span className="pro-card-position">{p.position} <i/> {AVAILABILITY_LABELS[p.availability] ?? p.availability}</span></div><label className="pro-compare-pick" onClick={e=>e.stopPropagation()}><input type="checkbox" aria-label={`Compare ${p.name}`} checked={compareIds.includes(p.id)} onChange={()=>toggleCompare(p.id)}/><span>Compare</span></label></div>
-            <dl className="pro-player-facts"><div><dt>Age</dt><dd>{p.age} years</dd></div><div><dt>Preferred foot</dt><dd>{p.foot.charAt(0).toUpperCase()+p.foot.slice(1)}</dd></div><div><dt>Height</dt><dd>{p.heightCm} cm</dd></div></dl>
+            <div className="pro-player-identity">
+              <span className="pro-player-kit" aria-hidden="true">
+                {p.position}
+              </span>
+              <div>
+                <span className="pro-card-location">
+                  {p.city ? `${p.city}, ` : ''}
+                  {p.country}
+                </span>
+                <span className="name">
+                  {p.name}
+                  {p.identityVerified && <Icon name="badge-check" size={21} label="Identity verified" />}
+                </span>
+                <span className="pro-card-position">
+                  {p.position} <i /> {AVAILABILITY_LABELS[p.availability] ?? p.availability}
+                </span>
+              </div>
+              <label className="pro-compare-pick" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  aria-label={`Compare ${p.name}`}
+                  checked={compareIds.includes(p.id)}
+                  onChange={() => toggleCompare(p.id)}
+                />
+                <span>Compare</span>
+              </label>
+            </div>
+            <dl className="pro-player-facts">
+              <div>
+                <dt>Age</dt>
+                <dd>{p.age} years</dd>
+              </div>
+              <div>
+                <dt>Preferred foot</dt>
+                <dd>{p.foot.charAt(0).toUpperCase() + p.foot.slice(1)}</dd>
+              </div>
+              <div>
+                <dt>Height</dt>
+                <dd>{p.heightCm} cm</dd>
+              </div>
+            </dl>
             {/* At most three pills (the safeguarding state, Academy+, the availability); everything else is one quiet line. */}
             <div className="badges">
               {p.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
               {p.academyPlus && <span className="pill green">Academy+</span>}
-
             </div>
             {/* One quiet line: identity check, contract, current club. Badges and evidence detail are one tap deeper, on the profile. */}
             <div className="meta player-quiet">
-              <DetailItems items={[p.identityVerified ? 'ID verified' : null, CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus, fpSummaries.get(p.id)?.currentClub?.name ?? null, fpSummaries.get(p.id) ? `${t('fp.coverage')}: ${t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}` : null].filter(Boolean)}/>
+              <DetailItems
+                items={[
+                  p.identityVerified ? 'ID verified' : null,
+                  CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus,
+                  fpSummaries.get(p.id)?.currentClub?.name ?? null,
+                  fpSummaries.get(p.id)
+                    ? `${t('fp.coverage')}: ${t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}`
+                    : null,
+                ].filter(Boolean)}
+              />
             </div>
             <TrustBar score={p.trustScore} />
           </div>
@@ -552,13 +1092,26 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
 
 export function ShortlistScreen({ session, tick, openPlayer }: ScreenProps) {
   const [players, setPlayers] = useState<Player[]>([]);
-  useEffect(() => { api.getShortlist(session).then(setPlayers).catch(() => {}); }, [session, tick]);
-  if (!players.length) return <div className="notice">Nothing shortlisted yet — shortlist players from their profile. Every shortlist action lands on the Discovery Ledger under your name.</div>;
+  useEffect(() => {
+    api
+      .getShortlist(session)
+      .then(setPlayers)
+      .catch(() => {});
+  }, [session, tick]);
+  if (!players.length)
+    return (
+      <div className="notice">
+        Nothing shortlisted yet — shortlist players from their profile. Every shortlist action lands on the Discovery
+        Ledger under your name.
+      </div>
+    );
   return (
     <div className="player-grid">
       {players.map((p) => (
         <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
-          <div className="row1"><span className="name">{p.name}</span></div>
+          <div className="row1">
+            <span className="name">{p.name}</span>
+          </div>
           <TrustBar score={p.trustScore} />
         </div>
       ))}
@@ -570,25 +1123,46 @@ export function ShortlistScreen({ session, tick, openPlayer }: ScreenProps) {
 
 export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
   const [requests, setRequests] = useState<OrgRequest[]>([]);
-  useEffect(() => { api.getRequests(session).then(setRequests).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getRequests(session)
+      .then(setRequests)
+      .catch(() => {});
+  }, [session, tick]);
   return (
     <>
-      <Hint>No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request goes to the parent or guardian, never the child.</Hint>
+      <Hint>
+        No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request
+        goes to the parent or guardian, never the child.
+      </Hint>
       <div className="list-rows">
         {requests.length === 0 && <div className="notice">No requests sent yet.</div>}
         {requests.map((r) => (
           <div key={r.id} className="list-row">
             <span className={`pill ${r.type === 'trial' ? 'gold' : 'blue'}`}>{r.type}</span>
             <span className="grow">
-              <a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} {...pressable(() => openPlayer(r.playerId))}>{r.playerName ?? r.playerId}</a>
-              {r.routedTo === 'guardian' && <span className="pill red" style={{ marginLeft: 8 }}>→ guardian</span>}
+              <a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} {...pressable(() => openPlayer(r.playerId))}>
+                {r.playerName ?? r.playerId}
+              </a>
+              {r.routedTo === 'guardian' && (
+                <span className="pill red" style={{ marginLeft: 8 }}>
+                  → guardian
+                </span>
+              )}
               {r.message && <span className="dim"> — “{r.message}”</span>}
             </span>
-            <span className="dim">by {r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''}</span>
-            <span className={`pill ${r.status === 'accepted' ? 'green' : r.status === 'declined' || r.status === 'suspended' ? 'red' : ''}`}>
+            <span className="dim">
+              by {r.scoutName}
+              {r.scoutRole ? ` (${r.scoutRole})` : ''}
+            </span>
+            <span
+              className={`pill ${r.status === 'accepted' ? 'green' : r.status === 'declined' || r.status === 'suspended' ? 'red' : ''}`}
+            >
               {r.status === 'pending' && r.routedTo === 'guardian' ? 'awaiting guardian' : r.status}
             </span>
-            {r.status === 'accepted' && r.contactChannel && <span className="pill outline-green">Channel open: {r.contactChannel}</span>}
+            {r.status === 'accepted' && r.contactChannel && (
+              <span className="pill outline-green">Channel open: {r.contactChannel}</span>
+            )}
           </div>
         ))}
       </div>
@@ -604,15 +1178,51 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [openId, setOpenId] = useState<string | null>(DEMO_MODE ? 'pro-sample-conversation' : null);
   const [threadSearch, setThreadSearch] = useState('');
-  const [showDetails, setShowDetails] = useState(()=>window.matchMedia('(min-width:1251px)').matches);
-  const [inboxFilter, setInboxFilter] = useState<'all'|'open'>('all');
-  const [sample, setSample] = useState<Channel>(()=>({id:'pro-sample-conversation',requestId:'sample',playerId:'sample-adult',playerName:'Jordan Ellis',orgName:session.org.name,scoutName:session.scoutName,scoutRole:session.role,counterparty:'player',createdAt:Date.UTC(2026,9,6,13),messages:[
-    {id:'sample-1',ts:Date.UTC(2026,9,6,13,10),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text:'Hi Jordan, thanks for accepting our request. We enjoyed watching your recent match footage, especially your movement between the lines.'},
-    {id:'sample-2',ts:Date.UTC(2026,9,6,13,14),sender:{kind:'player',id:'sample-adult',name:'Jordan Ellis'},text:'Thanks for getting in touch. I’m pleased to hear that. Happy to talk about the role and what you’re looking for.'},
-    {id:'sample-3',ts:Date.UTC(2026,9,6,13,18),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text:'We’re looking for a forward who can lead the press and link play. Would you be available for a training visit next Tuesday?'},
-    {id:'sample-4',ts:Date.UTC(2026,9,6,13,22),sender:{kind:'player',id:'sample-adult',name:'Jordan Ellis'},text:'Tuesday works for me. Could you send the session details through ScoutBox so I can check everything beforehand?'},
-    {id:'sample-5',ts:Date.UTC(2026,9,6,13,25),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text:'Absolutely. We’ll send a trial invitation with the time, venue and what to bring. Looking forward to meeting you.'}
-  ]}));
+  const [showDetails, setShowDetails] = useState(() => window.matchMedia('(min-width:1251px)').matches);
+  const [inboxFilter, setInboxFilter] = useState<'all' | 'open'>('all');
+  const [sample, setSample] = useState<Channel>(() => ({
+    id: 'pro-sample-conversation',
+    requestId: 'sample',
+    playerId: 'sample-adult',
+    playerName: 'Jordan Ellis',
+    orgName: session.org.name,
+    scoutName: session.scoutName,
+    scoutRole: session.role,
+    counterparty: 'player',
+    createdAt: Date.UTC(2026, 9, 6, 13),
+    messages: [
+      {
+        id: 'sample-1',
+        ts: Date.UTC(2026, 9, 6, 13, 10),
+        sender: { kind: 'org_user', id: 'sample-scout', name: session.scoutName },
+        text: 'Hi Jordan, thanks for accepting our request. We enjoyed watching your recent match footage, especially your movement between the lines.',
+      },
+      {
+        id: 'sample-2',
+        ts: Date.UTC(2026, 9, 6, 13, 14),
+        sender: { kind: 'player', id: 'sample-adult', name: 'Jordan Ellis' },
+        text: 'Thanks for getting in touch. I’m pleased to hear that. Happy to talk about the role and what you’re looking for.',
+      },
+      {
+        id: 'sample-3',
+        ts: Date.UTC(2026, 9, 6, 13, 18),
+        sender: { kind: 'org_user', id: 'sample-scout', name: session.scoutName },
+        text: 'We’re looking for a forward who can lead the press and link play. Would you be available for a training visit next Tuesday?',
+      },
+      {
+        id: 'sample-4',
+        ts: Date.UTC(2026, 9, 6, 13, 22),
+        sender: { kind: 'player', id: 'sample-adult', name: 'Jordan Ellis' },
+        text: 'Tuesday works for me. Could you send the session details through ScoutBox so I can check everything beforehand?',
+      },
+      {
+        id: 'sample-5',
+        ts: Date.UTC(2026, 9, 6, 13, 25),
+        sender: { kind: 'org_user', id: 'sample-scout', name: session.scoutName },
+        text: 'Absolutely. We’ll send a trial invitation with the time, venue and what to bring. Looking forward to meeting you.',
+      },
+    ],
+  }));
   const [draft, setDraft] = useState('');
   const [attachReportId, setAttachReportId] = useState('');
   const [trials, setTrials] = useState<Trial[]>([]);
@@ -621,15 +1231,33 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   const lastTyped = useRef(0);
   const typingTimer = useRef<number | null>(null);
 
-  useEffect(() => { api.getChannels(session).then(setChannels).catch(() => {}); }, [session, tick]);
-  useEffect(() => { api.getTrials(session).then(setTrials).catch(() => {}); }, [session, tick]);
-  useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [channels, openId, sample]);
+  useEffect(() => {
+    api
+      .getChannels(session)
+      .then(setChannels)
+      .catch(() => {});
+  }, [session, tick]);
+  useEffect(() => {
+    api
+      .getTrials(session)
+      .then(setTrials)
+      .catch(() => {});
+  }, [session, tick]);
+  useEffect(() => {
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
+  }, [channels, openId, sample]);
 
-  const visibleChannels = DEMO_MODE ? [sample,...channels] : channels;
+  const visibleChannels = DEMO_MODE ? [sample, ...channels] : channels;
   const open = visibleChannels.find((c) => c.id === openId) ?? null;
   const isSample = DEMO_MODE && openId === sample.id;
-  const filteredChannels = visibleChannels.filter(c=>(inboxFilter==='all'||!c.closed)&&c.playerName.toLowerCase().includes(threadSearch.toLowerCase()));
-  useEffect(()=>{setDraft('');setAttachReportId('');setTyping(false);},[openId]);
+  const filteredChannels = visibleChannels.filter(
+    (c) => (inboxFilter === 'all' || !c.closed) && c.playerName.toLowerCase().includes(threadSearch.toLowerCase()),
+  );
+  useEffect(() => {
+    setDraft('');
+    setAttachReportId('');
+    setTyping(false);
+  }, [openId]);
 
   // Read receipts: opening a thread marks it read for our side.
   useEffect(() => {
@@ -663,15 +1291,33 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   // Outbox: a send is 'pending' until the server confirms it durable, and
   // 'failed' (with retry) if the request errors. Retries reuse the same
   // client message id, so the server never stores a duplicate.
-  const [outbox, setOutbox] = useState<{ id: string; channelId: string; text: string; attach?: string; status: 'pending' | 'failed' }[]>([]);
+  const [outbox, setOutbox] = useState<
+    { id: string; channelId: string; text: string; attach?: string; status: 'pending' | 'failed' }[]
+  >([]);
   const send = async (retryId?: string) => {
     const entry = retryId ? outbox.find((o) => o.id === retryId) : null;
     const text = entry ? entry.text : draft.trim();
     const channelId = entry ? entry.channelId : open?.id;
     if (!channelId || !text || open?.closed) return;
-    if (DEMO_MODE && channelId===sample.id) {setSample(c=>({...c,messages:[...c.messages,{id:`sample-${Date.now()}`,ts:Date.now(),sender:{kind:'org_user',id:'sample-scout',name:session.scoutName},text}]}));setDraft('');notify('Added to the sample conversation. No message was sent.');return;}
+    if (DEMO_MODE && channelId === sample.id) {
+      setSample((c) => ({
+        ...c,
+        messages: [
+          ...c.messages,
+          {
+            id: `sample-${Date.now()}`,
+            ts: Date.now(),
+            sender: { kind: 'org_user', id: 'sample-scout', name: session.scoutName },
+            text,
+          },
+        ],
+      }));
+      setDraft('');
+      notify('Added to the sample conversation. No message was sent.');
+      return;
+    }
     const cid = entry ? entry.id : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const attach = entry ? entry.attach : (attachReportId || undefined);
+    const attach = entry ? entry.attach : attachReportId || undefined;
     if (entry) {
       setOutbox((o) => o.map((x) => (x.id === cid ? { ...x, status: 'pending' } : x)));
     } else {
@@ -691,100 +1337,366 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
-      <header className="pro-correspondence-heading"><div><span>SCOUTBOX / CORRESPONDENCE</span><h2>Messages<span className="pro-communications-mark" aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></h2></div><p><Icon name="lock-keyhole" size={14}/> Your conversations. One private workspace.</p></header>
-      <div className={`pro-messenger pro-correspondence ${open?'has-thread':''} ${showDetails&&open?'with-details':''}`}>
-        <aside className="pro-inbox"><header><div><strong>Conversations</strong><span>{visibleChannels.length.toString().padStart(2,'0')}</span></div><label><Icon name="search" size={16}/><input type="search" aria-label="Find a conversation" placeholder="Search conversations" value={threadSearch} onChange={e=>setThreadSearch(e.target.value)}/></label><nav aria-label="Conversation filters"><button aria-pressed={inboxFilter==='all'} onClick={()=>setInboxFilter('all')}>All</button><button aria-pressed={inboxFilter==='open'} onClick={()=>setInboxFilter('open')}>Open</button></nav></header>
+      <header className="pro-correspondence-heading">
+        <div>
+          <span>SCOUTBOX / CORRESPONDENCE</span>
+          <h2>
+            Messages
+            <span className="pro-communications-mark" aria-hidden="true">
+              <Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }} />
+            </span>
+          </h2>
+        </div>
+        <p>
+          <Icon name="lock-keyhole" size={14} /> Your conversations. One private workspace.
+        </p>
+      </header>
+      <div
+        className={`pro-messenger pro-correspondence ${open ? 'has-thread' : ''} ${showDetails && open ? 'with-details' : ''}`}
+      >
+        <aside className="pro-inbox">
+          <header>
+            <div>
+              <strong>Conversations</strong>
+              <span>{visibleChannels.length.toString().padStart(2, '0')}</span>
+            </div>
+            <label>
+              <Icon name="search" size={16} />
+              <input
+                type="search"
+                aria-label="Find a conversation"
+                placeholder="Search conversations"
+                value={threadSearch}
+                onChange={(e) => setThreadSearch(e.target.value)}
+              />
+            </label>
+            <nav aria-label="Conversation filters">
+              <button aria-pressed={inboxFilter === 'all'} onClick={() => setInboxFilter('all')}>
+                All
+              </button>
+              <button aria-pressed={inboxFilter === 'open'} onClick={() => setInboxFilter('open')}>
+                Open
+              </button>
+            </nav>
+          </header>
           {filteredChannels.map((c) => (
             <div
               key={c.id}
-              className={`pro-inbox-thread ${openId===c.id?'selected':''}`}
+              className={`pro-inbox-thread ${openId === c.id ? 'selected' : ''}`}
               style={{ cursor: 'pointer' }}
               {...pressable(() => setOpenId(c.id))}
             >
-              <span className="pro-message-avatar" aria-hidden="true">{c.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span><span className="grow">
-                <b>{c.playerName}<span aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
-                <span className="pro-thread-preview">{c.messages.at(-1)?.text ?? 'Your conversation is ready'}</span><small>{DEMO_MODE&&c.id===sample.id?'Sample conversation':c.counterparty==='guardian'?'With parent or guardian':'Player conversation'}</small>
+              <span className="pro-message-avatar" aria-hidden="true">
+                {c.playerName
+                  .split(' ')
+                  .map((n) => n[0])
+                  .slice(0, 2)
+                  .join('')}
+              </span>
+              <span className="grow">
+                <b>
+                  {c.playerName}
+                  <span aria-hidden="true">
+                    <Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }} />
+                  </span>
+                </b>
+                {c.closed && (
+                  <span className="pill red" style={{ marginLeft: 6 }}>
+                    Closed
+                  </span>
+                )}
+                <span className="pro-thread-preview">{c.messages.at(-1)?.text ?? 'Your conversation is ready'}</span>
+                <small>
+                  {DEMO_MODE && c.id === sample.id
+                    ? 'Sample conversation'
+                    : c.counterparty === 'guardian'
+                      ? 'With parent or guardian'
+                      : 'Player conversation'}
+                </small>
               </span>
             </div>
           ))}
-          {filteredChannels.length===0&&<p className="pro-inbox-empty">{visibleChannels.length?'No conversations match your search.':'Accepted requests appear here.'}</p>}<footer className="pro-inbox-footer"><span className="pro-correspondence-lines" aria-hidden="true"/><span>SCOUTBOX PRO<small>Every conversation moves football forward.</small></span></footer>
+          {filteredChannels.length === 0 && (
+            <p className="pro-inbox-empty">
+              {visibleChannels.length ? 'No conversations match your search.' : 'Accepted requests appear here.'}
+            </p>
+          )}
+          <footer className="pro-inbox-footer">
+            <span className="pro-correspondence-lines" aria-hidden="true" />
+            <span>
+              SCOUTBOX PRO<small>Every conversation moves football forward.</small>
+            </span>
+          </footer>
         </aside>
         {open ? (
           <section className="pro-conversation">
-            <header className="pro-conversation-header"><button className="pro-message-back" onClick={()=>setOpenId(null)} aria-label="Back to inbox"><Icon name="chevron-left" size={18}/></button><span className="pro-message-avatar" aria-hidden="true">{open.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</span>
+            <header className="pro-conversation-header">
+              <button className="pro-message-back" onClick={() => setOpenId(null)} aria-label="Back to inbox">
+                <Icon name="chevron-left" size={18} />
+              </button>
+              <span className="pro-message-avatar" aria-hidden="true">
+                {open.playerName
+                  .split(' ')
+                  .map((n) => n[0])
+                  .slice(0, 2)
+                  .join('')}
+              </span>
               <span className="grow">
-                <small className="pro-thread-kicker">{isSample?'RECRUITMENT CONVERSATION':open.counterparty==='guardian'?'GUARDIAN CONVERSATION':'PLAYER CONVERSATION'}</small><b>{open.playerName}</b>{' '}
+                <small className="pro-thread-kicker">
+                  {isSample
+                    ? 'RECRUITMENT CONVERSATION'
+                    : open.counterparty === 'guardian'
+                      ? 'GUARDIAN CONVERSATION'
+                      : 'PLAYER CONVERSATION'}
+                </small>
+                <b>{open.playerName}</b>{' '}
                 {open.counterparty === 'guardian' && <span className="pill red">Thread is with the guardian</span>}
               </span>
-              <button className="pro-thread-details-toggle" aria-label="Conversation details" aria-expanded={showDetails} onClick={()=>setShowDetails(v=>!v)}><Icon name="panel-left-close" size={17}/><span>Details</span></button>
-            </header>{isSample&&<div className="pro-sample-notice"><span>DEMO</span> Fictional adult player. Replies stay in this preview.</div>}
+              <button
+                className="pro-thread-details-toggle"
+                aria-label="Conversation details"
+                aria-expanded={showDetails}
+                onClick={() => setShowDetails((v) => !v)}
+              >
+                <Icon name="panel-left-close" size={17} />
+                <span>Details</span>
+              </button>
+            </header>
+            {isSample && (
+              <div className="pro-sample-notice">
+                <span>DEMO</span> Fictional adult player. Replies stay in this preview.
+              </div>
+            )}
             <div className="thread" ref={threadRef}>
               {open.messages.length === 0 && <div className="notice">Say hello — they accepted your request.</div>}
               {open.messages.map((m, index) => {
                 const mine = m.sender.kind === 'org_user';
                 const read = mine && open.readBy?.counterparty != null && open.readBy.counterparty >= m.ts;
                 return (
-                  <Fragment key={m.id}>{(index===0||new Date(open.messages[index-1].ts).toDateString()!==new Date(m.ts).toDateString())&&<div className="pro-message-day">{fmtDate(m.ts)}</div>}<div className={`bubble ${mine ? 'mine' : 'theirs'}`}><span className="pro-dispatch-avatar" aria-hidden="true">{m.sender.name.split(' ').map(n=>n[0]).slice(0,2).join('')}</span>
-                    <div className="who"><strong>{m.sender.name}<small>{mine?'Your organisation':open.counterparty==='guardian'?'Parent / guardian':'Player'}</small></strong><time>{new Date(m.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</time></div>
-                    {m.text}
-                    {m.attachment?.kind === 'clip' && (
-                      <div style={{ marginTop: 6 }}>
-                        <span className="pill blue">{m.attachment.title}</span>{' '}
-                        {m.attachment.verifiedClip && <span className="pill green">Verified Clip</span>}
-                        {api.mediaUrl(m.attachment.url) && <video className="clip" style={{ marginTop: 6 }} controls preload="metadata" src={api.mediaUrl(m.attachment.url)!} />}
-                      </div>
+                  <Fragment key={m.id}>
+                    {(index === 0 ||
+                      new Date(open.messages[index - 1].ts).toDateString() !== new Date(m.ts).toDateString()) && (
+                      <div className="pro-message-day">{fmtDate(m.ts)}</div>
                     )}
-                    {m.attachment?.kind === 'trial_report' && (
-                      <div style={{ marginTop: 6 }}>
-                        <span className="pill gold">Trial report — {m.attachment.orgName}</span>
-                        <div className="dim" style={{ fontSize: 12 }}>{m.attachment.summary}</div>
+                    <div className={`bubble ${mine ? 'mine' : 'theirs'}`}>
+                      <span className="pro-dispatch-avatar" aria-hidden="true">
+                        {m.sender.name
+                          .split(' ')
+                          .map((n) => n[0])
+                          .slice(0, 2)
+                          .join('')}
+                      </span>
+                      <div className="who">
+                        <strong>
+                          {m.sender.name}
+                          <small>
+                            {mine
+                              ? 'Your organisation'
+                              : open.counterparty === 'guardian'
+                                ? 'Parent / guardian'
+                                : 'Player'}
+                          </small>
+                        </strong>
+                        <time>
+                          {new Date(m.ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+                        </time>
                       </div>
-                    )}
-                    {mine && <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>{isSample?'Preview':read ? 'Read' : 'Sent'}</div>}
-                  </div></Fragment>
+                      {m.text}
+                      {m.attachment?.kind === 'clip' && (
+                        <div style={{ marginTop: 6 }}>
+                          <span className="pill blue">{m.attachment.title}</span>{' '}
+                          {m.attachment.verifiedClip && <span className="pill green">Verified Clip</span>}
+                          {api.mediaUrl(m.attachment.url) && (
+                            <video
+                              className="clip"
+                              style={{ marginTop: 6 }}
+                              controls
+                              preload="metadata"
+                              src={api.mediaUrl(m.attachment.url)!}
+                            />
+                          )}
+                        </div>
+                      )}
+                      {m.attachment?.kind === 'trial_report' && (
+                        <div style={{ marginTop: 6 }}>
+                          <span className="pill gold">Trial report — {m.attachment.orgName}</span>
+                          <div className="dim" style={{ fontSize: 12 }}>
+                            {m.attachment.summary}
+                          </div>
+                        </div>
+                      )}
+                      {mine && (
+                        <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>
+                          {isSample ? 'Preview' : read ? 'Read' : 'Sent'}
+                        </div>
+                      )}
+                    </div>
+                  </Fragment>
                 );
               })}
-              {outbox.filter((o) => o.channelId === open.id).map((o) => (
-                <div key={o.id} className={`bubble mine ${o.status === 'failed' ? 'failed' : 'pending'}`}>
-                  {o.text}
-                  <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>
-                    {o.status === 'failed'
-                      ? <>not delivered — <button style={{ padding: 0, color: 'var(--danger)' }} onClick={() => send(o.id)}>retry</button></>
-                      : '… sending'}
+              {outbox
+                .filter((o) => o.channelId === open.id)
+                .map((o) => (
+                  <div key={o.id} className={`bubble mine ${o.status === 'failed' ? 'failed' : 'pending'}`}>
+                    {o.text}
+                    <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>
+                      {o.status === 'failed' ? (
+                        <>
+                          not delivered —{' '}
+                          <button style={{ padding: 0, color: 'var(--danger)' }} onClick={() => send(o.id)}>
+                            retry
+                          </button>
+                        </>
+                      ) : (
+                        '… sending'
+                      )}
+                    </div>
                   </div>
+                ))}
+              {typing && (
+                <div className="dim" style={{ fontSize: 12.5 }}>
+                  … {open.counterparty === 'guardian' ? 'the guardian is' : `${open.playerName} is`} typing
                 </div>
-              ))}
-              {typing && <div className="dim" style={{ fontSize: 12.5 }}>… {open.counterparty === 'guardian' ? 'the guardian is' : `${open.playerName} is`} typing</div>}
+              )}
             </div>
             {open.closed && (
               <div className="notice block">
-                This thread is closed — the player is no longer available to your organisation (block,
-                suspension, or a platform change). The history stays for audit; nothing new can be sent.
+                This thread is closed — the player is no longer available to your organisation (block, suspension, or a
+                platform change). The history stays for audit; nothing new can be sent.
               </div>
             )}
-            <div className="pro-compose-area">{!open.closed&&<div className="pro-reply-starters"><span>START A REPLY</span><button onClick={()=>onDraftChange('Could you share your availability for a conversation this week?')}>Availability <span><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button><button onClick={()=>onDraftChange('We would like to discuss a training visit. Which dates would work for you?')}>Training visit <span><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button></div>}<div className="pro-message-composer">
-              {openPlayerReports.length > 0 && (
-                <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report" disabled={open.closed}>
-                  <option value="">no attachment</option>
-                  {openPlayerReports.map((r) => (
-                    <option key={r.id} value={r.id}>trial report ({fmtDate(r.filedAt)})</option>
-                  ))}
-                </select>
+            <div className="pro-compose-area">
+              {!open.closed && (
+                <div className="pro-reply-starters">
+                  <span>START A REPLY</span>
+                  <button
+                    onClick={() => onDraftChange('Could you share your availability for a conversation this week?')}
+                  >
+                    Availability{' '}
+                    <span>
+                      <Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }} />
+                    </span>
+                  </button>
+                  <button
+                    onClick={() =>
+                      onDraftChange('We would like to discuss a training visit. Which dates would work for you?')
+                    }
+                  >
+                    Training visit{' '}
+                    <span>
+                      <Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }} />
+                    </span>
+                  </button>
+                </div>
               )}
-              <textarea rows={2}
-                aria-label="Message" disabled={open.closed}
-                placeholder={isSample?'Try a reply in this preview…':'Write your message…'}
-                value={draft}
-                onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={(e) => {if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();send();}}}
-              />
-              <button className="primary" disabled={open.closed||!draft.trim()} onClick={() => send()}><Icon name="send" size={17}/>{isSample?'Preview reply':'Send'}</button>
-            </div><div className="pro-compose-caption"><span>{isSample?'Preview mode · nothing is sent':'Messages stay on ScoutBox'}</span><span>⌘ / Ctrl + Enter</span></div></div>
+              <div className="pro-message-composer">
+                {openPlayerReports.length > 0 && (
+                  <select
+                    value={attachReportId}
+                    onChange={(e) => setAttachReportId(e.target.value)}
+                    title="Attach a filed trial report"
+                    disabled={open.closed}
+                  >
+                    <option value="">no attachment</option>
+                    {openPlayerReports.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        trial report ({fmtDate(r.filedAt)})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <textarea
+                  rows={2}
+                  aria-label="Message"
+                  disabled={open.closed}
+                  placeholder={isSample ? 'Try a reply in this preview…' : 'Write your message…'}
+                  value={draft}
+                  onChange={(e) => onDraftChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                />
+                <button className="primary" disabled={open.closed || !draft.trim()} onClick={() => send()}>
+                  <Icon name="send" size={17} />
+                  {isSample ? 'Preview reply' : 'Send'}
+                </button>
+              </div>
+              <div className="pro-compose-caption">
+                <span>{isSample ? 'Preview mode · nothing is sent' : 'Messages stay on ScoutBox'}</span>
+                <span>⌘ / Ctrl + Enter</span>
+              </div>
+            </div>
           </section>
         ) : (
-          <div className="pro-inbox-welcome"><Icon name="messages-square" size={42}/><h3>Your next conversation starts here.</h3><p>{channels.length?'Select a conversation from your inbox.':'A conversation opens when a player or guardian accepts your request.'}</p></div>
+          <div className="pro-inbox-welcome">
+            <Icon name="messages-square" size={42} />
+            <h3>Your next conversation starts here.</h3>
+            <p>
+              {channels.length
+                ? 'Select a conversation from your inbox.'
+                : 'A conversation opens when a player or guardian accepts your request.'}
+            </p>
+          </div>
         )}
-        {open&&showDetails&&<aside className="pro-correspondence-context"><header><span>CONVERSATION FILE</span><button aria-label="Close conversation details" onClick={()=>setShowDetails(false)}><Icon name="x" size={16}/></button></header><div className="pro-contact-number" aria-hidden="true">{isSample?'09':open.playerName.split(' ').map(n=>n[0]).slice(0,2).join('')}</div><h3>{open.playerName}</h3><p>{isSample?'Fictional adult forward':open.counterparty==='guardian'?'Conversation with parent or guardian':'Player conversation'}</p>{isSample&&<div className="pro-contact-pitch" aria-label="Sample player role: centre forward"><svg viewBox="0 0 200 120" fill="none" aria-hidden="true"><path d="M1 1h198v118H1zM100 1v118M1 30h30v60H1m198-60h-30v60h30M1 45h10v30H1m198-30h-10v30h10"/><circle cx="100" cy="60" r="22"/><circle className="pro-position-point" cx="155" cy="60" r="6"/></svg><span>CF / FORWARD</span></div>}<dl><dt>Opened</dt><dd>{fmtDate(open.createdAt)}</dd><dt>Organisation</dt><dd>{open.orgName}</dd><dt>Conversation</dt><dd>{open.closed?'Closed':isSample?'Demo preview':'Open'}</dd></dl>{isSample&&<div className="pro-next-conversation"><Icon name="calendar-days" size={18}/><strong>Discussing a training visit</strong><p>Date, venue and invitation still to be agreed in this example.</p></div>}<Hint>Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</Hint></aside>}
+        {open && showDetails && (
+          <aside className="pro-correspondence-context">
+            <header>
+              <span>CONVERSATION FILE</span>
+              <button aria-label="Close conversation details" onClick={() => setShowDetails(false)}>
+                <Icon name="x" size={16} />
+              </button>
+            </header>
+            <div className="pro-contact-number" aria-hidden="true">
+              {isSample
+                ? '09'
+                : open.playerName
+                    .split(' ')
+                    .map((n) => n[0])
+                    .slice(0, 2)
+                    .join('')}
+            </div>
+            <h3>{open.playerName}</h3>
+            <p>
+              {isSample
+                ? 'Fictional adult forward'
+                : open.counterparty === 'guardian'
+                  ? 'Conversation with parent or guardian'
+                  : 'Player conversation'}
+            </p>
+            {isSample && (
+              <div className="pro-contact-pitch" aria-label="Sample player role: centre forward">
+                <svg viewBox="0 0 200 120" fill="none" aria-hidden="true">
+                  <path d="M1 1h198v118H1zM100 1v118M1 30h30v60H1m198-60h-30v60h30M1 45h10v30H1m198-30h-10v30h10" />
+                  <circle cx="100" cy="60" r="22" />
+                  <circle className="pro-position-point" cx="155" cy="60" r="6" />
+                </svg>
+                <span>CF / FORWARD</span>
+              </div>
+            )}
+            <dl>
+              <dt>Opened</dt>
+              <dd>{fmtDate(open.createdAt)}</dd>
+              <dt>Organisation</dt>
+              <dd>{open.orgName}</dd>
+              <dt>Conversation</dt>
+              <dd>{open.closed ? 'Closed' : isSample ? 'Demo preview' : 'Open'}</dd>
+            </dl>
+            {isSample && (
+              <div className="pro-next-conversation">
+                <Icon name="calendar-days" size={18} />
+                <strong>Discussing a training visit</strong>
+                <p>Date, venue and invitation still to be agreed in this example.</p>
+              </div>
+            )}
+            <Hint>
+              Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking
+              to the parent or guardian, never the child.
+            </Hint>
+          </aside>
+        )}
       </div>
     </>
   );
@@ -807,11 +1719,17 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [localTick, setLocalTick] = useState(0);
 
-  useEffect(() => { api.getTrials(session).then(setTrials).catch(() => {}); }, [session, tick, localTick]);
+  useEffect(() => {
+    api
+      .getTrials(session)
+      .then(setTrials)
+      .catch(() => {});
+  }, [session, tick, localTick]);
 
   const file = async (trialId: string) => {
     const report: Record<string, number | string> = {};
-    for (const f of REPORT_FIELDS) if (form[f.key] !== undefined && form[f.key] !== '') report[f.key] = Number(form[f.key]);
+    for (const f of REPORT_FIELDS)
+      if (form[f.key] !== undefined && form[f.key] !== '') report[f.key] = Number(form[f.key]);
     if (form.strengthNote) report.strengthNote = form.strengthNote;
     if (form.focusNote) report.focusNote = form.focusNote;
     try {
@@ -831,41 +1749,72 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
     <>
       {awaiting.length > 0 && (
         <div className="notice warn" style={{ marginBottom: 16 }}>
-          {awaiting.length} trial{awaiting.length > 1 ? 's' : ''} awaiting a mandatory performance report.
-          New trial requests are blocked until every report is filed — partial reports are rejected by the server.
+          {awaiting.length} trial{awaiting.length > 1 ? 's' : ''} awaiting a mandatory performance report. New trial
+          requests are blocked until every report is filed — partial reports are rejected by the server.
         </div>
       )}
       <div className="list-rows">
-        {trials.length === 0 && <div className="notice">No trials yet. Trials begin when a player accepts a trial request.</div>}
+        {trials.length === 0 && (
+          <div className="notice">No trials yet. Trials begin when a player accepts a trial request.</div>
+        )}
         {trials.map((t) => (
           <div key={t.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <span className="grow">
                 <b>{t.playerName}</b> <span className="dim">requested by {t.scoutName}</span>
-                {t.guardianApproved && <span className="pill red" style={{ marginLeft: 8 }}>Guardian approved</span>}
+                {t.guardianApproved && (
+                  <span className="pill red" style={{ marginLeft: 8 }}>
+                    Guardian approved
+                  </span>
+                )}
                 <div className="dim">
-                  {t.proposedDate ? `${t.proposedDate}` : 'date TBC'}{t.venue ? ` · ${t.venue}` : ''}{t.notes ? ` · ${t.notes}` : ''}
+                  {t.proposedDate ? `${t.proposedDate}` : 'date TBC'}
+                  {t.venue ? ` · ${t.venue}` : ''}
+                  {t.notes ? ` · ${t.notes}` : ''}
                   {t.status === 'awaiting_report' && t.reportDueAt ? ` · report due ${fmtDate(t.reportDueAt)}` : ''}
                 </div>
               </span>
               {api.trialIcsUrl(session, t.id) && (
-                <a className="pill blue" style={{ textDecoration: 'none' }} href={api.trialIcsUrl(session, t.id)!} download={`scoutbox-trial-${t.id}.ics`}>.ics</a>
+                <a
+                  className="pill blue"
+                  style={{ textDecoration: 'none' }}
+                  href={api.trialIcsUrl(session, t.id)!}
+                  download={`scoutbox-trial-${t.id}.ics`}
+                >
+                  .ics
+                </a>
               )}
               {t.workflowState && t.workflowState !== 'legacy_accepted' && (
-                <span className={`pill ${t.workflowState === 'scheduled' ? 'blue' : t.workflowState === 'completed' ? 'green' : t.workflowState === 'cancelled' ? 'red' : 'gold'}`} data-workflow-state={t.workflowState}>{tt(`tr.state.${t.workflowState}`, t.workflowState)}</span>
+                <span
+                  className={`pill ${t.workflowState === 'scheduled' ? 'blue' : t.workflowState === 'completed' ? 'green' : t.workflowState === 'cancelled' ? 'red' : 'gold'}`}
+                  data-workflow-state={t.workflowState}
+                >
+                  {tt(`tr.state.${t.workflowState}`, t.workflowState)}
+                </span>
               )}
-              {t.caseId && <a className="pill" style={{ textDecoration: 'none' }} href={hashForRoom(t.caseId)}>{tt('rm.tab.trial')} →</a>}
-              <span className={`pill ${t.status === 'reported' ? 'green' : 'gold'}`}>{t.status === 'reported' ? 'report filed' : 'awaiting report'}</span>
+              {t.caseId && (
+                <a className="pill" style={{ textDecoration: 'none' }} href={hashForRoom(t.caseId)}>
+                  {tt('rm.tab.trial')} →
+                </a>
+              )}
+              <span className={`pill ${t.status === 'reported' ? 'green' : 'gold'}`}>
+                {t.status === 'reported' ? 'report filed' : 'awaiting report'}
+              </span>
               {t.status === 'awaiting_report' && (
-                <button onClick={() => { setFiling(filing === t.id ? null : t.id); setForm({}); }}>
+                <button
+                  onClick={() => {
+                    setFiling(filing === t.id ? null : t.id);
+                    setForm({});
+                  }}
+                >
                   {filing === t.id ? 'Cancel' : 'File report'}
                 </button>
               )}
             </div>
             {t.status === 'reported' && t.report && (
               <div className="dim" style={{ marginTop: 6 }}>
-                accel {t.report.acceleration}/10 · {t.report.sprintSpeedKmh} km/h · {t.report.distanceKm} km ·
-                pass {t.report.passCompletionPct}% · duels {t.report.duelSuccessPct}% · coach {t.report.coachRating}/10
+                accel {t.report.acceleration}/10 · {t.report.sprintSpeedKmh} km/h · {t.report.distanceKm} km · pass{' '}
+                {t.report.passCompletionPct}% · duels {t.report.duelSuccessPct}% · coach {t.report.coachRating}/10
               </div>
             )}
             {filing === t.id && (
@@ -884,11 +1833,25 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: 10, margin: '8px 0' }}>
-                  <input style={{ flex: 1 }} placeholder="One strength (goes to the player — optional)" value={form.strengthNote ?? ''} onChange={(e) => setForm({ ...form, strengthNote: e.target.value })} />
-                  <input style={{ flex: 1 }} placeholder="One focus area (goes to the player — optional)" value={form.focusNote ?? ''} onChange={(e) => setForm({ ...form, focusNote: e.target.value })} />
+                  <input
+                    style={{ flex: 1 }}
+                    placeholder="One strength (goes to the player — optional)"
+                    value={form.strengthNote ?? ''}
+                    onChange={(e) => setForm({ ...form, strengthNote: e.target.value })}
+                  />
+                  <input
+                    style={{ flex: 1 }}
+                    placeholder="One focus area (goes to the player — optional)"
+                    value={form.focusNote ?? ''}
+                    onChange={(e) => setForm({ ...form, focusNote: e.target.value })}
+                  />
                 </div>
-                <button className="primary" onClick={() => file(t.id)}>Submit full report</button>
-                <span className="dim" style={{ marginLeft: 10 }}>All six metrics are mandatory; the feedback notes reach the player even if it goes no further.</span>
+                <button className="primary" onClick={() => file(t.id)}>
+                  Submit full report
+                </button>
+                <span className="dim" style={{ marginLeft: 10 }}>
+                  All six metrics are mandatory; the feedback notes reach the player even if it goes no further.
+                </span>
               </div>
             )}
           </div>
@@ -916,23 +1879,48 @@ const LEDGER_LABELS: Record<string, string> = {
 
 export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
   const [rows, setRows] = useState<LedgerEntry[]>([]);
-  useEffect(() => { api.getLedger(session).then(setRows).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getLedger(session)
+      .then(setRows)
+      .catch(() => {});
+  }, [session, tick]);
   return (
     <>
       <Hint>Append-only: every action is timestamped to a named scout and cannot be edited or purged.</Hint>
       <div style={{ overflowX: 'auto' }}>
         <table className="data">
-          <thead><tr><th>When</th><th>Action</th><th>Player</th><th>By</th></tr></thead>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Action</th>
+              <th>Player</th>
+              <th>By</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
                 <td>{fmtDateTime(r.ts)}</td>
                 <td>{LEDGER_LABELS[r.type] ?? r.type}</td>
-                <td><a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} {...pressable(() => openPlayer(r.playerId))}>{r.playerId}</a></td>
+                <td>
+                  <a
+                    style={{ color: 'var(--accent-2)', cursor: 'pointer' }}
+                    {...pressable(() => openPlayer(r.playerId))}
+                  >
+                    {r.playerId}
+                  </a>
+                </td>
                 <td>{r.scoutName}</td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={4} style={{ color: 'var(--muted)' }}>No entries yet — view a profile to create the first one.</td></tr>}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={4} style={{ color: 'var(--muted)' }}>
+                  No entries yet — view a profile to create the first one.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -944,7 +1932,12 @@ export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
 
 export function ReputationScreen({ session, tick }: ScreenProps) {
   const [rep, setRep] = useState<Reputation | null>(null);
-  useEffect(() => { api.getReputation(session).then(setRep).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getReputation(session)
+      .then(setRep)
+      .catch(() => {});
+  }, [session, tick]);
   if (!rep) return null;
   return (
     <>
@@ -952,11 +1945,23 @@ export function ReputationScreen({ session, tick }: ScreenProps) {
         <h4>Track records</h4>
         <div style={{ overflowX: 'auto' }}>
           <table className="data">
-            <thead><tr><th>Scout / coach</th><th>Organisation</th><th>Discoveries</th><th>Success rate</th><th>Avg resale multiple</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Scout / coach</th>
+                <th>Organisation</th>
+                <th>Discoveries</th>
+                <th>Success rate</th>
+                <th>Avg resale multiple</th>
+              </tr>
+            </thead>
             <tbody>
               {rep.seeded.map((r) => (
                 <tr key={r.scoutName}>
-                  <td>{r.scoutName}</td><td>{r.orgName}</td><td>{r.discoveries}</td><td>{r.successRatePct}%</td><td>{r.avgResaleMultiple}×</td>
+                  <td>{r.scoutName}</td>
+                  <td>{r.orgName}</td>
+                  <td>{r.discoveries}</td>
+                  <td>{r.successRatePct}%</td>
+                  <td>{r.avgResaleMultiple}×</td>
                 </tr>
               ))}
             </tbody>
@@ -967,12 +1972,32 @@ export function ReputationScreen({ session, tick }: ScreenProps) {
         <h4>Live activity (computed from the Discovery Ledger)</h4>
         <div style={{ overflowX: 'auto' }}>
           <table className="data">
-            <thead><tr><th>Scout / coach</th><th>Organisation</th><th>Views</th><th>Contacts</th><th>Trials</th><th>Signings</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Scout / coach</th>
+                <th>Organisation</th>
+                <th>Views</th>
+                <th>Contacts</th>
+                <th>Trials</th>
+                <th>Signings</th>
+              </tr>
+            </thead>
             <tbody>
-              {rep.live.length === 0 && <tr><td colSpan={6} style={{ color: 'var(--muted)' }}>No live activity yet this session.</td></tr>}
+              {rep.live.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ color: 'var(--muted)' }}>
+                    No live activity yet this session.
+                  </td>
+                </tr>
+              )}
               {rep.live.map((r) => (
                 <tr key={`${r.scoutName}-${r.orgName}`}>
-                  <td>{r.scoutName}</td><td>{r.orgName}</td><td>{r.views}</td><td>{r.contacts}</td><td>{r.trials}</td><td>{r.signings}</td>
+                  <td>{r.scoutName}</td>
+                  <td>{r.orgName}</td>
+                  <td>{r.views}</td>
+                  <td>{r.contacts}</td>
+                  <td>{r.trials}</td>
+                  <td>{r.signings}</td>
                 </tr>
               ))}
             </tbody>
@@ -987,7 +2012,12 @@ export function ReputationScreen({ session, tick }: ScreenProps) {
 
 export function FunnelScreen({ session, tick }: ScreenProps) {
   const [funnel, setFunnel] = useState<Funnel | null>(null);
-  useEffect(() => { api.getFunnel(session).then(setFunnel).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getFunnel(session)
+      .then(setFunnel)
+      .catch(() => {});
+  }, [session, tick]);
   if (!funnel) return <div className="notice">Loading your recruitment funnel…</div>;
   const max = Math.max(...funnel.stages.map((s) => s.count), 1);
   const pct = (i: number) => {
@@ -997,8 +2027,22 @@ export function FunnelScreen({ session, tick }: ScreenProps) {
   };
   return (
     <>
-      <ProChart additive={false} title="Recruitment activity by stage" items={funnel.stages.map(s=>({label:s.label,value:s.count}))} note="Recorded activity counts. A player may appear at more than one stage; these are not player ratings."/>
-      <div className="pro-stage-ratios">{funnel.stages.map((s,i)=>pct(i)!==null && <span key={s.key}>{s.label}: <b>{pct(i)}%</b> of preceding stage</span>)}</div>
+      <ProChart
+        additive={false}
+        title="Recruitment activity by stage"
+        items={funnel.stages.map((s) => ({ label: s.label, value: s.count }))}
+        note="Recorded activity counts. A player may appear at more than one stage; these are not player ratings."
+      />
+      <div className="pro-stage-ratios">
+        {funnel.stages.map(
+          (s, i) =>
+            pct(i) !== null && (
+              <span key={s.key}>
+                {s.label}: <b>{pct(i)}%</b> of preceding stage
+              </span>
+            ),
+        )}
+      </div>
       {funnel.byScout.length > 0 && (
         <div className="section">
           <h4>Activity by scout</h4>
@@ -1021,50 +2065,90 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
   const [verifyCode, setVerifyCode] = useState('');
   const [codeSent, setCodeSent] = useState(false);
   useEffect(() => {
-    api.getPlan(session).then(setInfo).catch(() => {});
-    api.getInvoices(session).then(setInvoices).catch(() => {});
+    api
+      .getPlan(session)
+      .then(setInfo)
+      .catch(() => {});
+    api
+      .getInvoices(session)
+      .then(setInvoices)
+      .catch(() => {});
   }, [session, tick]);
   if (!info) return null;
   return (
     <>
-      <section className="pro-plan-membership"><div><span className="pro-eyebrow">ScoutBox / Your membership</span><h2>{info.plan.name}</h2><p>{session.org.name}</p></div><div className="pro-plan-price">£{info.plan.pricePerMonthGBP}<span>per month · {info.plan.seats} named seats</span><span>{info.plan.attributionWindowMonths}-month attribution window</span></div></section>
+      <section className="pro-plan-membership">
+        <div>
+          <span className="pro-eyebrow">ScoutBox / Your membership</span>
+          <h2>{info.plan.name}</h2>
+          <p>{session.org.name}</p>
+        </div>
+        <div className="pro-plan-price">
+          £{info.plan.pricePerMonthGBP}
+          <span>per month · {info.plan.seats} named seats</span>
+          <span>{info.plan.attributionWindowMonths}-month attribution window</span>
+        </div>
+      </section>
       <div className="section">
         <h4>Company email verification {session.org.emailDomainVerified ? '— ✓ verified' : ''}</h4>
         {session.org.emailDomainVerified ? (
           <div className="notice">
-            Domain control confirmed{session.org.emailDomain ? ` for @${session.org.emailDomain}` : ''}. This is one of the
-            safeguarding requirements for access to under-18 players.
+            Domain control confirmed{session.org.emailDomain ? ` for @${session.org.emailDomain}` : ''}. This is one of
+            the safeguarding requirements for access to under-18 players.
           </div>
         ) : (
           <>
-            <details className="f-about" style={{ marginBottom: 10 }}><summary>About</summary><div className="notice">
-              Prove control of a company mailbox — free email providers are refused. A code lands in the
-              mailbox; entering it here confirms the domain.
-            </div></details>
+            <details className="f-about" style={{ marginBottom: 10 }}>
+              <summary>About</summary>
+              <div className="notice">
+                Prove control of a company mailbox — free email providers are refused. A code lands in the mailbox;
+                entering it here confirms the domain.
+              </div>
+            </details>
             <div className="filters">
-              <input type="text" placeholder="recruitment@yourclub.com" value={verifyEmail} onChange={(e) => setVerifyEmail(e.target.value)} />
-              <button onClick={async () => {
-                try {
-                  await api.requestEmailVerification(session, verifyEmail.trim());
-                  setCodeSent(true);
-                  notify('Verification code sent — check the mailbox.');
-                } catch (e) {
-                  notify(e instanceof Error ? e.message : 'Could not send the code', true);
-                }
-              }}>Send code</button>
+              <input
+                type="text"
+                placeholder="recruitment@yourclub.com"
+                value={verifyEmail}
+                onChange={(e) => setVerifyEmail(e.target.value)}
+              />
+              <button
+                onClick={async () => {
+                  try {
+                    await api.requestEmailVerification(session, verifyEmail.trim());
+                    setCodeSent(true);
+                    notify('Verification code sent — check the mailbox.');
+                  } catch (e) {
+                    notify(e instanceof Error ? e.message : 'Could not send the code', true);
+                  }
+                }}
+              >
+                Send code
+              </button>
               {codeSent && (
                 <>
-                  <input type="text" placeholder="6-char code" value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} style={{ maxWidth: 140 }} />
-                  <button className="primary" onClick={async () => {
-                    try {
-                      const r = await api.confirmEmailVerification(session, verifyCode.trim());
-                      session.org.emailDomainVerified = true;
-                      session.org.emailDomain = r.emailDomain;
-                      notify(`Domain @${r.emailDomain} verified.`);
-                    } catch (e) {
-                      notify(e instanceof Error ? e.message : 'Code rejected', true);
-                    }
-                  }}>Confirm</button>
+                  <input
+                    type="text"
+                    placeholder="6-char code"
+                    value={verifyCode}
+                    onChange={(e) => setVerifyCode(e.target.value)}
+                    style={{ maxWidth: 140 }}
+                  />
+                  <button
+                    className="primary"
+                    onClick={async () => {
+                      try {
+                        const r = await api.confirmEmailVerification(session, verifyCode.trim());
+                        session.org.emailDomainVerified = true;
+                        session.org.emailDomain = r.emailDomain;
+                        notify(`Domain @${r.emailDomain} verified.`);
+                      } catch (e) {
+                        notify(e instanceof Error ? e.message : 'Code rejected', true);
+                      }
+                    }}
+                  >
+                    Confirm
+                  </button>
                 </>
               )}
             </div>
@@ -1073,7 +2157,11 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h4>Invoices — success fees</h4>
-        {invoices.length === 0 && <div className="notice">No invoices yet. A signing recorded inside the attribution window issues one automatically.</div>}
+        {invoices.length === 0 && (
+          <div className="notice">
+            No invoices yet. A signing recorded inside the attribution window issues one automatically.
+          </div>
+        )}
         {invoices.map((inv) => (
           <div key={inv.id} className="list-row">
             <span>{inv.description}</span>
@@ -1093,10 +2181,13 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h4>Accountability</h4>
-        <details className="f-about"><summary>About</summary><div className="notice">
-          Every seat is a named individual. The API refuses any request that is not attributed to a person —
-          shared logins do not exist on ScoutBox.
-        </div></details>
+        <details className="f-about">
+          <summary>About</summary>
+          <div className="notice">
+            Every seat is a named individual. The API refuses any request that is not attributed to a person — shared
+            logins do not exist on ScoutBox.
+          </div>
+        </details>
       </div>
     </>
   );
@@ -1104,7 +2195,13 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
 
 /* ------------------------------------------------------ Player drawer */
 
-export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }: {
+export function PlayerDrawer({
+  session,
+  playerId,
+  notify,
+  onClose,
+  onOpenRoom,
+}: {
   session: Session;
   playerId: string;
   notify: (text: string, error?: boolean) => void;
@@ -1113,14 +2210,16 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
    *  decision layer). Absent in surfaces that cannot navigate. */
   onOpenRoom?: (roomId: string) => void;
 }) {
-  const [profileTab, setProfileTab] = useState<'overview'|'footage'|'evidence'|'club'>('overview');
+  const [profileTab, setProfileTab] = useState<'overview' | 'footage' | 'evidence' | 'club'>('overview');
   const dialogRef = useDialog<HTMLDivElement>(onClose);
   const [player, setPlayer] = useState<PlayerDetail | null>(null);
   const requestRef = useRef<HTMLDivElement>(null);
   const [proof, setProof] = useState<ProofPack | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [requestType, setRequestType] = useState<'contact' | 'trial' | null>(null);
-  useEffect(()=>{if(requestType) requestRef.current?.scrollIntoView({block:'center'});},[requestType]);
+  useEffect(() => {
+    if (requestType) requestRef.current?.scrollIntoView({ block: 'center' });
+  }, [requestType]);
   const [message, setMessage] = useState('');
   const [trialDetails, setTrialDetails] = useState<TrialDetails>({});
   const [reporting, setReporting] = useState(false);
@@ -1128,37 +2227,65 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
   const [moreLike, setMoreLike] = useState<(Player & { similarity: number })[] | null>(null);
 
   useEffect(() => {
-    setPlayer(null); setProof(null); setError(null); setProfileTab('overview'); setRequestType(null);
-    api.getPlayer(session, playerId).then(setPlayer).catch((e) => {
-      setError(
-        e instanceof ApiError && e.code === 'UNDER_18_WALL'
-          ? 'The under-18 wall: agency accounts cannot view minors. This profile does not exist for your organisation.'
-          : e instanceof ApiError && e.code === 'VERIFIED_CLUBS_ONLY'
-            ? 'Under-18 profiles are visible to verified clubs only. Complete club verification to view this player.'
-            : errMsg(e));
-    });
+    setPlayer(null);
+    setProof(null);
+    setError(null);
+    setProfileTab('overview');
+    setRequestType(null);
+    api
+      .getPlayer(session, playerId)
+      .then(setPlayer)
+      .catch((e) => {
+        setError(
+          e instanceof ApiError && e.code === 'UNDER_18_WALL'
+            ? 'The under-18 wall: agency accounts cannot view minors. This profile does not exist for your organisation.'
+            : e instanceof ApiError && e.code === 'VERIFIED_CLUBS_ONLY'
+              ? 'Under-18 profiles are visible to verified clubs only. Complete club verification to view this player.'
+              : errMsg(e),
+        );
+      });
   }, [session, playerId]);
 
   const act = async (action: 'save' | 'shortlist') => {
     try {
       await api.act(session, playerId, action);
-      notify(`${action === 'save' ? 'Saved' : 'Shortlisted'} — logged to the Discovery Ledger under ${session.scoutName}.`);
-    } catch (e) { notify(errMsg(e), true); }
+      notify(
+        `${action === 'save' ? 'Saved' : 'Shortlisted'} — logged to the Discovery Ledger under ${session.scoutName}.`,
+      );
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
   };
 
   const send = async () => {
     if (!requestType) return;
     const minor = player?.guardianManaged;
     try {
-      await api.sendRequest(session, playerId, requestType, message, requestType === 'trial' ? trialDetails : undefined);
-      notify(minor
-        ? `Sent to the parent/guardian. ${session.org.name} (${session.role}) has requested to discuss a ${requestType === 'trial' ? 'trial' : 'conversation'} — the guardian decides.`
-        : `${requestType === 'trial' ? 'Trial' : 'Contact'} request sent to the player's Scout Inbox. Contact unlocks only if they accept.`);
-      setRequestType(null); setMessage(''); setTrialDetails({});
-    } catch (e) { notify(errMsg(e), true); }
+      await api.sendRequest(
+        session,
+        playerId,
+        requestType,
+        message,
+        requestType === 'trial' ? trialDetails : undefined,
+      );
+      notify(
+        minor
+          ? `Sent to the parent/guardian. ${session.org.name} (${session.role}) has requested to discuss a ${requestType === 'trial' ? 'trial' : 'conversation'} — the guardian decides.`
+          : `${requestType === 'trial' ? 'Trial' : 'Contact'} request sent to the player's Scout Inbox. Contact unlocks only if they accept.`,
+      );
+      setRequestType(null);
+      setMessage('');
+      setTrialDetails({});
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
   };
 
-  const loadProof = () => api.getProofPack(session, playerId).then(setProof).catch((e) => notify(errMsg(e), true));
+  const loadProof = () =>
+    api
+      .getProofPack(session, playerId)
+      .then(setProof)
+      .catch((e) => notify(errMsg(e), true));
 
   // Open (or re-open) this player's Recruitment Room. A room is private
   // to this organisation: the player, their guardian and every other club can
@@ -1189,11 +2316,81 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer pro-player-dossier" ref={dialogRef} role="dialog" aria-modal="true" aria-label={player?.name ?? 'Player'} tabIndex={-1}>
-        {error && <><div className="notice block">{error}</div><div style={{ marginTop: 14 }}><button onClick={onClose}>Close</button></div></>}
+      <div
+        className="drawer pro-player-dossier"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={player?.name ?? 'Player'}
+        tabIndex={-1}
+      >
+        {error && (
+          <>
+            <div className="notice block">{error}</div>
+            <div style={{ marginTop: 14 }}>
+              <button onClick={onClose}>Close</button>
+            </div>
+          </>
+        )}
         {player && (
           <>
-            <header className="pro-profile-header"><div className="pro-profile-topline"><span>SCOUTBOX PRO / PLAYER DOSSIER</span><button className="close" onClick={onClose}><Icon name="x" size={16}/> Close profile</button></div><div className="pro-profile-identity"><span className="pro-profile-kit" aria-hidden="true">{player.position}</span><div><span className="pro-eyebrow">{player.city ? `${player.city}, ` : ''}{player.country}</span><h3>{player.name}{player.identityVerified&&<Icon name="badge-check" size={27} label="Identity verified"/>}</h3><div className="badges">{player.guardianManaged&&<span className="pill red">Under 18 · guardian-managed</span>}{player.academyPlus&&<span className="pill green">Academy+</span>}<span className="pill">{AVAILABILITY_LABELS[player.availability]??player.availability}</span><span className="pill">{CONTRACT_LABELS[player.contractStatus]??player.contractStatus}</span></div></div></div><dl className="pro-profile-facts"><div><dt>Position</dt><dd>{player.position}</dd></div><div><dt>Age</dt><dd>{player.age} <small>years</small></dd></div><div><dt>Preferred foot</dt><dd>{player.foot}</dd></div><div><dt>Height</dt><dd>{player.heightCm} <small>cm</small></dd></div><div><dt>Weight</dt><dd>{player.weightKg} <small>kg</small></dd></div></dl></header>
+            <header className="pro-profile-header">
+              <div className="pro-profile-topline">
+                <span>SCOUTBOX PRO / PLAYER DOSSIER</span>
+                <button className="close" onClick={onClose}>
+                  <Icon name="x" size={16} /> Close profile
+                </button>
+              </div>
+              <div className="pro-profile-identity">
+                <span className="pro-profile-kit" aria-hidden="true">
+                  {player.position}
+                </span>
+                <div>
+                  <span className="pro-eyebrow">
+                    {player.city ? `${player.city}, ` : ''}
+                    {player.country}
+                  </span>
+                  <h3>
+                    {player.name}
+                    {player.identityVerified && <Icon name="badge-check" size={27} label="Identity verified" />}
+                  </h3>
+                  <div className="badges">
+                    {player.guardianManaged && <span className="pill red">Under 18 · guardian-managed</span>}
+                    {player.academyPlus && <span className="pill green">Academy+</span>}
+                    <span className="pill">{AVAILABILITY_LABELS[player.availability] ?? player.availability}</span>
+                    <span className="pill">{CONTRACT_LABELS[player.contractStatus] ?? player.contractStatus}</span>
+                  </div>
+                </div>
+              </div>
+              <dl className="pro-profile-facts">
+                <div>
+                  <dt>Position</dt>
+                  <dd>{player.position}</dd>
+                </div>
+                <div>
+                  <dt>Age</dt>
+                  <dd>
+                    {player.age} <small>years</small>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Preferred foot</dt>
+                  <dd>{player.foot}</dd>
+                </div>
+                <div>
+                  <dt>Height</dt>
+                  <dd>
+                    {player.heightCm} <small>cm</small>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Weight</dt>
+                  <dd>
+                    {player.weightKg} <small>kg</small>
+                  </dd>
+                </div>
+              </dl>
+            </header>
             <TrustBar score={player.trustScore} />
 
             <div className="actions pro-profile-actions">
@@ -1206,58 +2403,97 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               )}
               {player.guardianManaged ? (
                 <>
-                  <button className="primary" onClick={() => setRequestType('contact')}>Contact Guardian</button>
+                  <button className="primary" onClick={() => setRequestType('contact')}>
+                    Contact Guardian
+                  </button>
                   <button onClick={() => setRequestType('trial')}>Invite to trial (via guardian)</button>
                 </>
               ) : (
                 <>
-                  <button className="primary" onClick={() => setRequestType('contact')}>Request contact</button>
+                  <button className="primary" onClick={() => setRequestType('contact')}>
+                    Request contact
+                  </button>
                   <button onClick={() => setRequestType('trial')}>Request trial</button>
                 </>
               )}
-              <details className="pro-profile-more"><summary>More actions</summary><div><button onClick={loadProof}>Proof Pack</button>
-              <button onClick={() => api.moreLikeThis(session, playerId).then((r) => setMoreLike(r.players)).catch((e) => notify(errMsg(e), true))}>Similar players</button>
-              {!player.guardianManaged && (
-                <button onClick={async () => {
-                  if (!confirmDestructive({ ...DESTRUCTIVE_ACTIONS.recordSigning, name: player.name })) return;
-                  try {
-                    const s = await api.recordSigning(session, playerId);
-                    notify(`Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`);
-                  } catch (e) { notify(errMsg(e), true); }
-                }}>Record signing</button>
-              )}
-              <button onClick={() => setReporting(true)}>Report</button></div></details>
+              <details className="pro-profile-more">
+                <summary>More actions</summary>
+                <div>
+                  <button onClick={loadProof}>Proof Pack</button>
+                  <button
+                    onClick={() =>
+                      api
+                        .moreLikeThis(session, playerId)
+                        .then((r) => setMoreLike(r.players))
+                        .catch((e) => notify(errMsg(e), true))
+                    }
+                  >
+                    Similar players
+                  </button>
+                  {!player.guardianManaged && (
+                    <button
+                      onClick={async () => {
+                        if (!confirmDestructive({ ...DESTRUCTIVE_ACTIONS.recordSigning, name: player.name })) return;
+                        try {
+                          const s = await api.recordSigning(session, playerId);
+                          notify(
+                            `Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`,
+                          );
+                        } catch (e) {
+                          notify(errMsg(e), true);
+                        }
+                      }}
+                    >
+                      Record signing
+                    </button>
+                  )}
+                  <button onClick={() => setReporting(true)}>Report</button>
+                </div>
+              </details>
             </div>
 
-            <nav className="pro-profile-tabs" aria-label="Player dossier sections">{(['overview','footage','evidence','club'] as const).map(tab=><button key={tab} aria-pressed={profileTab===tab} onClick={()=>setProfileTab(tab)}>{({overview:'Overview',footage:'Footage',evidence:'Evidence',club:'Club notes'})[tab]}</button>)}</nav>
-            {profileTab==='evidence' && <>
-            <FootballPassportPanel session={session} playerId={playerId} notify={notify} />
-            <BoxTrainingPanel session={session} playerId={playerId} notify={notify} />
-            <CombinePanel session={session} playerId={playerId} notify={notify} />
-            <TrustPanel session={session} playerId={playerId} />
-            {(player.vouches?.length ?? 0) > 0 && (
-              <div className="section">
-                <h4>Coach references — named, email-verified</h4>
-                <div className="list-rows">
-                  {player.vouches!.map((v) => (
-                    <div key={v.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                      <div style={{ display: 'flex', gap: 10 }}>
-                        <span className="grow"><b>{v.coachName}</b> <span className="dim">{v.role}{v.seasons ? ` · ${v.seasons}` : ''}</span></span>
-                        <span className="pill green">Verified</span>
-                      </div>
-                      {v.text && <div className="dim">“{v.text}”</div>}
+            <nav className="pro-profile-tabs" aria-label="Player dossier sections">
+              {(['overview', 'footage', 'evidence', 'club'] as const).map((tab) => (
+                <button key={tab} aria-pressed={profileTab === tab} onClick={() => setProfileTab(tab)}>
+                  {{ overview: 'Overview', footage: 'Footage', evidence: 'Evidence', club: 'Club notes' }[tab]}
+                </button>
+              ))}
+            </nav>
+            {profileTab === 'evidence' && (
+              <>
+                <FootballPassportPanel session={session} playerId={playerId} notify={notify} />
+                <BoxTrainingPanel session={session} playerId={playerId} notify={notify} />
+                <CombinePanel session={session} playerId={playerId} notify={notify} />
+                <TrustPanel session={session} playerId={playerId} />
+                {(player.vouches?.length ?? 0) > 0 && (
+                  <div className="section">
+                    <h4>Coach references — named, email-verified</h4>
+                    <div className="list-rows">
+                      {player.vouches!.map((v) => (
+                        <div key={v.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <span className="grow">
+                              <b>{v.coachName}</b>{' '}
+                              <span className="dim">
+                                {v.role}
+                                {v.seasons ? ` · ${v.seasons}` : ''}
+                              </span>
+                            </span>
+                            <span className="pill green">Verified</span>
+                          </div>
+                          {v.text && <div className="dim">“{v.text}”</div>}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
+                )}
+              </>
             )}
-
-            </>}
             {player.guardianManaged && (
               <div className="notice warn" style={{ marginTop: 12 }}>
-                This player is under 18. Their account is owned by a parent/guardian: you cannot message
-                the child, ever. Requests below go to the guardian, who sees your club, your name and
-                your verified role ({session.role}).
+                This player is under 18. Their account is owned by a parent/guardian: you cannot message the child,
+                ever. Requests below go to the guardian, who sees your club, your name and your verified role (
+                {session.role}).
               </div>
             )}
 
@@ -1269,43 +2505,63 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                     <div key={m.id} className="list-row" style={{ cursor: 'pointer' }}>
                       <span className="pill blue">{m.position}</span>
                       <span className="grow">{m.name}</span>
-                      <span className="dim">{m.similarity}% similar · profile completeness {m.trustScore}%</span>
+                      <span className="dim">
+                        {m.similarity}% similar · profile completeness {m.trustScore}%
+                      </span>
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {profileTab==='club' && <>
-            <div className="section">
-              <h4>Private club notes</h4><p className="pro-private-note"><Icon name="lock-keyhole" size={14}/> Visible only to your organisation.</p>
-              <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
-                <input style={{ flex: 1 }} placeholder='e.g. "Watched live 12/8 — second viewing needed"' value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} />
-                <button onClick={async () => {
-                  if (!noteDraft.trim()) return;
-                  try {
-                    await api.addNote(session, playerId, noteDraft.trim());
-                    setNoteDraft('');
-                    setPlayer(await api.getPlayer(session, playerId));
-                  } catch (e) { notify(errMsg(e), true); }
-                }}>Add note</button>
-              </div>
-              <div className="list-rows">
-                {(player.orgNotes ?? []).map((n: OrgNote) => (
-                  <div key={n.id} className="list-row">
-                    <span className="grow" style={{ fontSize: 13 }}>{n.text}</span>
-                    <span className="dim">{n.scoutName} · {fmtDate(n.ts)}</span>
+            {profileTab === 'club' && (
+              <>
+                <div className="section">
+                  <h4>Private club notes</h4>
+                  <p className="pro-private-note">
+                    <Icon name="lock-keyhole" size={14} /> Visible only to your organisation.
+                  </p>
+                  <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
+                    <input
+                      style={{ flex: 1 }}
+                      placeholder='e.g. "Watched live 12/8 — second viewing needed"'
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
+                    />
+                    <button
+                      onClick={async () => {
+                        if (!noteDraft.trim()) return;
+                        try {
+                          await api.addNote(session, playerId, noteDraft.trim());
+                          setNoteDraft('');
+                          setPlayer(await api.getPlayer(session, playerId));
+                        } catch (e) {
+                          notify(errMsg(e), true);
+                        }
+                      }}
+                    >
+                      Add note
+                    </button>
                   </div>
-                ))}
-              </div>
-            </div>
+                  <div className="list-rows">
+                    {(player.orgNotes ?? []).map((n: OrgNote) => (
+                      <div key={n.id} className="list-row">
+                        <span className="grow" style={{ fontSize: 13 }}>
+                          {n.text}
+                        </span>
+                        <span className="dim">
+                          {n.scoutName} · {fmtDate(n.ts)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-            {/* Development sits inside the player, which is where a
+                {/* Development sits inside the player, which is where a
                 development plan belongs. It adds no top-level destination. */}
-            <DevelopmentPanel session={session} playerId={playerId} notify={notify} />
-
-
-            </>}
+                <DevelopmentPanel session={session} playerId={playerId} notify={notify} />
+              </>
+            )}
             {requestType && (
               <div className="section pro-request-panel" ref={requestRef}>
                 <h4>
@@ -1315,23 +2571,62 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 </h4>
                 {requestType === 'trial' && (
                   <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-                    <input type="date" title="Proposed date" value={trialDetails.proposedDate ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, proposedDate: e.target.value || undefined })} />
-                    <input type="date" title="Alternative slot 1" value={trialDetails.altSlots?.[0] ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, altSlots: [e.target.value, trialDetails.altSlots?.[1] ?? ''].filter(Boolean) })} />
-                    <input type="date" title="Alternative slot 2" value={trialDetails.altSlots?.[1] ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, altSlots: [trialDetails.altSlots?.[0] ?? '', e.target.value].filter(Boolean) })} />
-                    <input style={{ flex: 1 }} placeholder="Venue (e.g. Eastport Training Centre)" value={trialDetails.venue ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, venue: e.target.value || undefined })} />
-                    <input style={{ flex: 1 }} placeholder="What to bring / notes" value={trialDetails.notes ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, notes: e.target.value || undefined })} />
+                    <input
+                      type="date"
+                      title="Proposed date"
+                      value={trialDetails.proposedDate ?? ''}
+                      onChange={(e) => setTrialDetails({ ...trialDetails, proposedDate: e.target.value || undefined })}
+                    />
+                    <input
+                      type="date"
+                      title="Alternative slot 1"
+                      value={trialDetails.altSlots?.[0] ?? ''}
+                      onChange={(e) =>
+                        setTrialDetails({
+                          ...trialDetails,
+                          altSlots: [e.target.value, trialDetails.altSlots?.[1] ?? ''].filter(Boolean),
+                        })
+                      }
+                    />
+                    <input
+                      type="date"
+                      title="Alternative slot 2"
+                      value={trialDetails.altSlots?.[1] ?? ''}
+                      onChange={(e) =>
+                        setTrialDetails({
+                          ...trialDetails,
+                          altSlots: [trialDetails.altSlots?.[0] ?? '', e.target.value].filter(Boolean),
+                        })
+                      }
+                    />
+                    <input
+                      style={{ flex: 1 }}
+                      placeholder="Venue (e.g. Eastport Training Centre)"
+                      value={trialDetails.venue ?? ''}
+                      onChange={(e) => setTrialDetails({ ...trialDetails, venue: e.target.value || undefined })}
+                    />
+                    <input
+                      style={{ flex: 1 }}
+                      placeholder="What to bring / notes"
+                      value={trialDetails.notes ?? ''}
+                      onChange={(e) => setTrialDetails({ ...trialDetails, notes: e.target.value || undefined })}
+                    />
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 10 }}>
                   <input
                     style={{ flex: 1 }}
-                    placeholder={player.guardianManaged
-                      ? `Message to the guardian (they see ${session.org.name}, ${session.role}, ${session.scoutName})`
-                      : 'Message to the player (they see your club and your name)'}
+                    placeholder={
+                      player.guardianManaged
+                        ? `Message to the guardian (they see ${session.org.name}, ${session.role}, ${session.scoutName})`
+                        : 'Message to the player (they see your club and your name)'
+                    }
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                   />
-                  <button className="primary" onClick={() => send()}>Send</button>
+                  <button className="primary" onClick={() => send()}>
+                    Send
+                  </button>
                   <button onClick={() => setRequestType(null)}>Cancel</button>
                 </div>
                 <div className="dim" style={{ marginTop: 6, fontSize: 12.5 }}>
@@ -1354,7 +2649,10 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                   </div>
                   <div className="list-row">
                     <span className="grow">Attribution window</span>
-                    <span className="dim">{proof.attributionWindowMonths} months{proof.attributionWindowEnds ? ` — ends ${fmtDate(proof.attributionWindowEnds)}` : ''}</span>
+                    <span className="dim">
+                      {proof.attributionWindowMonths} months
+                      {proof.attributionWindowEnds ? ` — ends ${fmtDate(proof.attributionWindowEnds)}` : ''}
+                    </span>
                   </div>
                   <div className="list-row">
                     <span className="grow">Logged events for {proof.org.name}</span>
@@ -1364,164 +2662,221 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               </div>
             )}
 
-            {profileTab==='overview' && <>
-            {player.badges.length>0&&<div className="pro-profile-styles"><span>Playing styles</span><DetailItems items={player.badges}/></div>}
-            {player.stats && (
-              <div className="section">
-                <h4>Season output</h4>
-                <div className="stat-grid">
-                  <Stat v={player.stats.appearances} k="Appearances" />
-                  {player.position === 'GK'
-                    ? <Stat v={player.stats.cleanSheets ?? 0} k="Clean sheets" />
-                    : <><Stat v={player.stats.goals} k="Goals" /><Stat v={player.stats.assists} k="Assists" /></>}
-                  {player.stats.paceKmh != null && <Stat v={`${player.stats.paceKmh}`} k="Top speed km/h" />}
-                  {player.stats.passCompletionPct != null && <Stat v={`${player.stats.passCompletionPct}%`} k="Pass completion" />}
-                  {player.stats.duelSuccessPct != null && player.position !== 'GK' && <Stat v={`${player.stats.duelSuccessPct}%`} k="Duel success" />}
-                </div>
-              </div>
-            )}
-
-            {(player.contractUntil || player.marketValueRange || player.agentName) && (
-              <div className="section">
-                <h4>Contract</h4>
-                <div className="stat-grid">
-                  {player.contractUntil && <Stat v={fmtDate(player.contractUntil)} k="Contracted until" />}
-                  {player.marketValueRange && <Stat v={player.marketValueRange} k="Market value" />}
-                  {player.agentName && <Stat v={player.agentName} k="Agent" />}
-                </div>
-              </div>
-            )}
-
-            </>}
-            {profileTab==='evidence' && <>
-            <div className="section">
-              <h4>Verified match attendance</h4>
-              {player.attendance.length === 0 && <div className="notice">No verified attendances yet.</div>}
-              <div className="list-rows">
-                {player.attendance.map((a) => (
-                  <div key={a.id} className="list-row">
-                    <span className="pill green">GPS + device ✓</span>
-                    <span className="grow">{a.fixture}</span>
-                    <span className="dim">{a.venue} · {a.date}</span>
+            {profileTab === 'overview' && (
+              <>
+                {player.badges.length > 0 && (
+                  <div className="pro-profile-styles">
+                    <span>Playing styles</span>
+                    <DetailItems items={player.badges} />
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {player.trialReports.length > 0 && (
-              <div className="section">
-                <h4>Trial performance reports (institutional corroboration)</h4>
-                <div className="list-rows">
-                  {player.trialReports.map((r) => (
-                    <div key={r.id} className="list-row">
-                      <span className="grow">{r.orgName} <span className="dim">· {r.scoutName}</span></span>
-                      <span className="dim">
-                        accel {r.acceleration}/10 · {r.sprintSpeedKmh} km/h · {r.distanceKm} km · pass {r.passCompletionPct}% · duels {r.duelSuccessPct}% · coach {r.coachRating}/10
-                      </span>
+                )}
+                {player.stats && (
+                  <div className="section">
+                    <h4>Season output</h4>
+                    <div className="stat-grid">
+                      <Stat v={player.stats.appearances} k="Appearances" />
+                      {player.position === 'GK' ? (
+                        <Stat v={player.stats.cleanSheets ?? 0} k="Clean sheets" />
+                      ) : (
+                        <>
+                          <Stat v={player.stats.goals} k="Goals" />
+                          <Stat v={player.stats.assists} k="Assists" />
+                        </>
+                      )}
+                      {player.stats.paceKmh != null && <Stat v={`${player.stats.paceKmh}`} k="Top speed km/h" />}
+                      {player.stats.passCompletionPct != null && (
+                        <Stat v={`${player.stats.passCompletionPct}%`} k="Pass completion" />
+                      )}
+                      {player.stats.duelSuccessPct != null && player.position !== 'GK' && (
+                        <Stat v={`${player.stats.duelSuccessPct}%`} k="Duel success" />
+                      )}
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
+                )}
+
+                {(player.contractUntil || player.marketValueRange || player.agentName) && (
+                  <div className="section">
+                    <h4>Contract</h4>
+                    <div className="stat-grid">
+                      {player.contractUntil && <Stat v={fmtDate(player.contractUntil)} k="Contracted until" />}
+                      {player.marketValueRange && <Stat v={player.marketValueRange} k="Market value" />}
+                      {player.agentName && <Stat v={player.agentName} k="Agent" />}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
-
-            </>}
-            {profileTab==='overview' && <>
-            <div className="section">
-              <h4>Medical</h4>
-              {player.medical.shared ? (
-                <div className="list-rows">
-                  <div className="list-row"><span className="pill green">Shared by player</span><span className="grow">Condition: {player.medical.conditionStatus.replace(/_/g, ' ')}</span></div>
-                  {player.medical.records.map((m) => (
-                    <div key={m.id} className="list-row">
-                      <span className="pill">{m.type}</span>
-                      <span className="grow">{m.title}</span>
-                      <span className="dim">{m.date}{m.layoffWeeks ? ` · ${m.layoffWeeks} wks out` : ''}{m.cleared ? ' · cleared' : ''}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="notice">
-                  <Icon name="lock-keyhole" size={13} /> Medical data is player-controlled under data-protection law. This player has not switched
-                  sharing on, so nothing is visible to any organisation — including yours.
-                </div>
-              )}
-            </div>
-
-            </>}
-            {profileTab==='evidence' && <>
-            {(player.drillResults?.length ?? 0) > 0 && (
-              <div className="section">
-                <h4>At-home combine (video-verified drills)</h4>
-                <div className="list-rows">
-                  {player.drillResults!.map((r) => (
-                    <div key={r.id} className="list-row">
-                      {r.verified ? <span className="pill green">Verified</span> : <span className="pill">Self-reported</span>}
-                      <span className="grow">{r.drillName}</span>
-                      <span className="dim">{r.metric}: <b style={{ color: 'var(--text)' }}>{r.value}{r.unit}</b> · {fmtDate(r.ts)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            </>}
-            {profileTab==='overview' && <>
-            <div className="section">
-              <h4>Transfer timeline</h4>
-              <div className="list-rows">
-                {player.timeline.map((t, i) => (
-                  <div key={i} className="list-row"><span className="pill">{t.year}</span><span className="grow">{t.event}</span></div>
-                ))}
-              </div>
-            </div>
-
-            </>}
-            {profileTab==='footage' && <>
-            <div className="section">
-              <h4>Media</h4>
-              {player.media.length === 0 && <div className="notice">No uploads yet.</div>}
-              <div className="list-rows">
-                {player.media.map((m) => (
-                  <div key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <span className="pill blue">{m.kind}</span>
-                      {m.verifiedClip && <span className="pill green">Verified Clip — confirmed fixture</span>}
-                      <span className="grow">{m.title}</span>
-                      <span className="dim">{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'} · {fmtDate(m.uploadedAt)}</span>
-                    </div>
-                    {Object.keys(m.tags ?? {}).length > 0 && (
-                      <div className="badges">
-                        {Object.entries(m.tags!).map(([t, n]) => <span key={t} className="pill gold">{TAG_LABELS[t] ?? t} ×{n}</span>)}
+            {profileTab === 'evidence' && (
+              <>
+                <div className="section">
+                  <h4>Verified match attendance</h4>
+                  {player.attendance.length === 0 && <div className="notice">No verified attendances yet.</div>}
+                  <div className="list-rows">
+                    {player.attendance.map((a) => (
+                      <div key={a.id} className="list-row">
+                        <span className="pill green">GPS + device ✓</span>
+                        <span className="grow">{a.fixture}</span>
+                        <span className="dim">
+                          {a.venue} · {a.date}
+                        </span>
                       </div>
-                    )}
-                    {api.mediaUrl(m.url) && <video className="clip" controls preload="metadata" src={api.mediaUrl(m.url)!} />}
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
 
-            </>}
-            {profileTab==='overview' && <>
-            <div className="section">
-              <h4>Similar players — {player.similarPlayers.note}</h4>
-              <div className="list-rows">
-                {player.similarPlayers.archetypes.map((a) => (
-                  <div key={a.archetypeId} className="list-row">
-                    <span className="pill gold">Archetype</span>
-                    <span className="grow">{a.label}</span>
-                    <span className="dim">{a.score}% match</span>
+                {player.trialReports.length > 0 && (
+                  <div className="section">
+                    <h4>Trial performance reports (institutional corroboration)</h4>
+                    <div className="list-rows">
+                      {player.trialReports.map((r) => (
+                        <div key={r.id} className="list-row">
+                          <span className="grow">
+                            {r.orgName} <span className="dim">· {r.scoutName}</span>
+                          </span>
+                          <span className="dim">
+                            accel {r.acceleration}/10 · {r.sprintSpeedKmh} km/h · {r.distanceKm} km · pass{' '}
+                            {r.passCompletionPct}% · duels {r.duelSuccessPct}% · coach {r.coachRating}/10
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-                {player.similarPlayers.players.map((sp) => (
-                  <div key={sp.playerId} className="list-row">
-                    <span className="pill blue">{sp.position}</span>
-                    <span className="grow">{sp.name}</span>
-                    <span className="dim">{sp.score}% similar</span>
+                )}
+              </>
+            )}
+            {profileTab === 'overview' && (
+              <>
+                <div className="section">
+                  <h4>Medical</h4>
+                  {player.medical.shared ? (
+                    <div className="list-rows">
+                      <div className="list-row">
+                        <span className="pill green">Shared by player</span>
+                        <span className="grow">Condition: {player.medical.conditionStatus.replace(/_/g, ' ')}</span>
+                      </div>
+                      {player.medical.records.map((m) => (
+                        <div key={m.id} className="list-row">
+                          <span className="pill">{m.type}</span>
+                          <span className="grow">{m.title}</span>
+                          <span className="dim">
+                            {m.date}
+                            {m.layoffWeeks ? ` · ${m.layoffWeeks} wks out` : ''}
+                            {m.cleared ? ' · cleared' : ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="notice">
+                      <Icon name="lock-keyhole" size={13} /> Medical data is player-controlled under data-protection
+                      law. This player has not switched sharing on, so nothing is visible to any organisation —
+                      including yours.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            {profileTab === 'evidence' && (
+              <>
+                {(player.drillResults?.length ?? 0) > 0 && (
+                  <div className="section">
+                    <h4>At-home combine (video-verified drills)</h4>
+                    <div className="list-rows">
+                      {player.drillResults!.map((r) => (
+                        <div key={r.id} className="list-row">
+                          {r.verified ? (
+                            <span className="pill green">Verified</span>
+                          ) : (
+                            <span className="pill">Self-reported</span>
+                          )}
+                          <span className="grow">{r.drillName}</span>
+                          <span className="dim">
+                            {r.metric}:{' '}
+                            <b style={{ color: 'var(--text)' }}>
+                              {r.value}
+                              {r.unit}
+                            </b>{' '}
+                            · {fmtDate(r.ts)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
-            </>}
+                )}
+              </>
+            )}
+            {profileTab === 'overview' && (
+              <>
+                <div className="section">
+                  <h4>Transfer timeline</h4>
+                  <div className="list-rows">
+                    {player.timeline.map((t, i) => (
+                      <div key={i} className="list-row">
+                        <span className="pill">{t.year}</span>
+                        <span className="grow">{t.event}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+            {profileTab === 'footage' && (
+              <>
+                <div className="section">
+                  <h4>Media</h4>
+                  {player.media.length === 0 && <div className="notice">No uploads yet.</div>}
+                  <div className="list-rows">
+                    {player.media.map((m) => (
+                      <div key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span className="pill blue">{m.kind}</span>
+                          {m.verifiedClip && <span className="pill green">Verified Clip — confirmed fixture</span>}
+                          <span className="grow">{m.title}</span>
+                          <span className="dim">
+                            {m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'} · {fmtDate(m.uploadedAt)}
+                          </span>
+                        </div>
+                        {Object.keys(m.tags ?? {}).length > 0 && (
+                          <div className="badges">
+                            {Object.entries(m.tags!).map(([t, n]) => (
+                              <span key={t} className="pill gold">
+                                {TAG_LABELS[t] ?? t} ×{n}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {api.mediaUrl(m.url) && (
+                          <video className="clip" controls preload="metadata" src={api.mediaUrl(m.url)!} />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+            {profileTab === 'overview' && (
+              <>
+                <div className="section">
+                  <h4>Similar players — {player.similarPlayers.note}</h4>
+                  <div className="list-rows">
+                    {player.similarPlayers.archetypes.map((a) => (
+                      <div key={a.archetypeId} className="list-row">
+                        <span className="pill gold">Archetype</span>
+                        <span className="grow">{a.label}</span>
+                        <span className="dim">{a.score}% match</span>
+                      </div>
+                    ))}
+                    {player.similarPlayers.players.map((sp) => (
+                      <div key={sp.playerId} className="list-row">
+                        <span className="pill blue">{sp.position}</span>
+                        <span className="grow">{sp.name}</span>
+                        <span className="dim">{sp.score}% similar</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -1533,5 +2888,10 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
 }
 
 function Stat({ v, k }: { v: ReactNode; k: string }) {
-  return <div className="stat"><div className="v">{v}</div><div className="k">{k}</div></div>;
+  return (
+    <div className="stat">
+      <div className="v">{v}</div>
+      <div className="k">{k}</div>
+    </div>
+  );
 }

@@ -14,9 +14,8 @@ export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
 export const devLoginsEnabled = (env = process.env) => env.NODE_ENV !== 'production';
 
 /** Whether a first boot loads the demo world. Later boots never seed. */
-export const demoSeedEnabled = (env = process.env) => (
-  env.SCOUTBOX_SEED_DEMO === '1' ? true : env.SCOUTBOX_SEED_DEMO === '0' ? false : env.NODE_ENV !== 'production'
-);
+export const demoSeedEnabled = (env = process.env) =>
+  env.SCOUTBOX_SEED_DEMO === '1' ? true : env.SCOUTBOX_SEED_DEMO === '0' ? false : env.NODE_ENV !== 'production';
 
 /** Whether requests may pin their own time with the test-clock header (clock.mjs). Refused in production at boot. */
 export const testClockEnabled = (env = process.env) => env.SCOUTBOX_TEST_CLOCK === '1' && env.NODE_ENV !== 'production';
@@ -28,7 +27,13 @@ export const liveMailConfigured = (env = process.env) => isSet(env.SENDGRID_API_
 /** The push adapter sends through Expo when this holds; otherwise it writes the local push log. */
 export const livePushConfigured = (env = process.env) => isSet(env.EXPO_ACCESS_TOKEN);
 
-export function buildCapabilityReport({ env = process.env, rateLimit = null, providers = [], trustProxy = null, extra = {} } = {}) {
+export function buildCapabilityReport({
+  env = process.env,
+  rateLimit = null,
+  providers = [],
+  trustProxy = null,
+  extra = {},
+} = {}) {
   const flag = (v) => !!v && String(v).trim() !== '';
   const proxy = trustProxy ?? parseTrustProxy(env.SCOUTBOX_TRUST_PROXY);
   const devLogins = devLoginsEnabled(env);
@@ -46,7 +51,7 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
     mode: env.NODE_ENV === 'production' ? 'production' : 'development',
     capabilities: {
       production_cv: {
-        state: productionCv.length ? 'configured' : (testOnlyAvailable ? 'test_only' : 'not_configured'),
+        state: productionCv.length ? 'configured' : testOnlyAvailable ? 'test_only' : 'not_configured',
         note: productionCv.length
           ? 'Box Cam uses server-side computer vision to observe supported activity. Combine verification for these CV protocols remains disabled pending real-world validation.'
           : `No production computer-vision provider is configured.${limitedOnly ? ' Web capture observes player presence and active duration only — it cannot count repetitions or classify technique.' : ''} Combine metrics that need a real detector are reported as unsupported, never estimated.`,
@@ -96,7 +101,7 @@ export function buildCapabilityReport({ env = process.env, rateLimit = null, pro
       proxy_trust: { state: proxy.state, note: proxy.note },
       core_identity_storage: {
         state: 'live',
-        note: 'Players, guardians and guardian–child links are table-backed (migration 0005); writes go through the identity repositories and multi-domain operations run inside the store\'s unit of work.',
+        note: "Players, guardians and guardian–child links are table-backed (migration 0005); writes go through the identity repositories and multi-domain operations run inside the store's unit of work.",
       },
     },
     ...extra,
@@ -110,7 +115,7 @@ export const MEDIA_SECRET_MIN_LENGTH = 32;
 export const UNIMPLEMENTED_PROVIDER_VARIABLES = Object.freeze({
   ONFIDO_API_TOKEN: 'identity verification (guardian ID checks still auto-approve)',
   STRIPE_SECRET_KEY: 'billing (success fees are recorded in the local ledger only)',
-  S3_BUCKET: 'object storage (media is stored on this instance\'s disk)',
+  S3_BUCKET: "object storage (media is stored on this instance's disk)",
 });
 
 /** Unsafe production configuration. The caller throws on the result in production. */
@@ -129,7 +134,8 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
   if (production && env.BOX_CAM_TEST_PROVIDER === '1') {
     problems.push({
       code: 'TEST_PROVIDER_IN_PRODUCTION',
-      message: 'BOX_CAM_TEST_PROVIDER=1 enables the simulated observer. Simulated captures must never be reachable in production.',
+      message:
+        'BOX_CAM_TEST_PROVIDER=1 enables the simulated observer. Simulated captures must never be reachable in production.',
       fatal: true,
     });
   }
@@ -161,7 +167,8 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
   if (production && flagged(env.ALLOW_DEV_LOGINS)) {
     problems.push({
       code: 'DEV_LOGIN_IN_PRODUCTION',
-      message: 'ALLOW_DEV_LOGINS is set. Passwordless demo logins are never available in production; give demo accounts real passwords instead.',
+      message:
+        'ALLOW_DEV_LOGINS is set. Passwordless demo logins are never available in production; give demo accounts real passwords instead.',
       fatal: true,
     });
   }
@@ -185,7 +192,8 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
   if (production && (!env.ADMIN_KEY || env.ADMIN_KEY === 'scoutbox-admin' || String(env.ADMIN_KEY).length < 16)) {
     problems.push({
       code: 'ADMIN_KEY_UNSAFE',
-      message: 'ADMIN_KEY is unset, is the development default or is shorter than 16 characters; the Trust & Safety API would accept a publicly known key.',
+      message:
+        'ADMIN_KEY is unset, is the development default or is shorter than 16 characters; the Trust & Safety API would accept a publicly known key.',
       fatal: true,
     });
   }
@@ -193,7 +201,8 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
   if (production && env.AGENT_VERIFICATION_TEST_PROVIDER === '1') {
     problems.push({
       code: 'AGENT_TEST_PROVIDER_IN_PRODUCTION',
-      message: 'AGENT_VERIFICATION_TEST_PROVIDER=1 enables the synthetic licence register, which verifies any TEST-VERIFIED reference.',
+      message:
+        'AGENT_VERIFICATION_TEST_PROVIDER=1 enables the synthetic licence register, which verifies any TEST-VERIFIED reference.',
       fatal: true,
     });
   }
@@ -201,7 +210,8 @@ export function productionConfigProblems({ env = process.env, trustWeightsTotal 
   if (production && flagged(env.TEST_IDP_SECRET)) {
     problems.push({
       code: 'TEST_IDP_IN_PRODUCTION',
-      message: 'TEST_IDP_SECRET is set. The local test identity provider must never be configured on a production instance.',
+      message:
+        'TEST_IDP_SECRET is set. The local test identity provider must never be configured on a production instance.',
       fatal: true,
     });
   }

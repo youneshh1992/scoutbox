@@ -15,14 +15,22 @@ import { Icon } from './icons';
 export type AppKey = 'pro' | 'grass' | 'agent' | 'safety' | 'player';
 export type Theme = 'light' | 'dark';
 
-export const THEME_DEFAULTS: Record<AppKey, Theme> = { pro: 'light', grass: 'light', agent: 'dark', safety: 'light', player: 'light' };
+export const THEME_DEFAULTS: Record<AppKey, Theme> = {
+  pro: 'light',
+  grass: 'light',
+  agent: 'dark',
+  safety: 'light',
+  player: 'light',
+};
 export const themeStorageKey = (app: AppKey) => `sb-theme:${app}`;
 
 export function readTheme(app: AppKey): Theme {
   try {
     const v = localStorage.getItem(themeStorageKey(app));
     return v === 'dark' || v === 'light' ? v : THEME_DEFAULTS[app];
-  } catch { return THEME_DEFAULTS[app]; }
+  } catch {
+    return THEME_DEFAULTS[app];
+  }
 }
 
 /** Stamp the document. `data-app` scopes the application palette (Agent
@@ -36,17 +44,28 @@ export function applyTheme(app: AppKey, theme: Theme) {
 
 export function useTheme(app: AppKey): { theme: Theme; toggle: () => void; set: (t: Theme) => void } {
   const [theme, setTheme] = useState<Theme>(() => readTheme(app));
-  useEffect(() => { applyTheme(app, theme); }, [app, theme]);
+  useEffect(() => {
+    applyTheme(app, theme);
+  }, [app, theme]);
   // Another tab of the same application changed its appearance: follow it.
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => { if (e.key === themeStorageKey(app)) setTheme(readTheme(app)); };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === themeStorageKey(app)) setTheme(readTheme(app));
+    };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, [app]);
-  const set = useCallback((t: Theme) => {
-    setTheme(t);
-    try { localStorage.setItem(themeStorageKey(app), t); } catch { /* private mode: the choice lasts the session */ }
-  }, [app]);
+  const set = useCallback(
+    (t: Theme) => {
+      setTheme(t);
+      try {
+        localStorage.setItem(themeStorageKey(app), t);
+      } catch {
+        /* private mode: the choice lasts the session */
+      }
+    },
+    [app],
+  );
   const toggle = useCallback(() => set(theme === 'dark' ? 'light' : 'dark'), [set, theme]);
   return { theme, toggle, set };
 }
@@ -54,8 +73,13 @@ export function useTheme(app: AppKey): { theme: Theme; toggle: () => void; set: 
 /** The appearance control from the reference header: a switch whose checked
  *  state is "dark". Keyboard: Space/Enter (a native button). The visible word
  *  is hidden in the phone header, where the track alone carries the state. */
-export function ThemeToggle({ theme, onToggle, labels }: {
-  theme: Theme; onToggle: () => void;
+export function ThemeToggle({
+  theme,
+  onToggle,
+  labels,
+}: {
+  theme: Theme;
+  onToggle: () => void;
   labels: { aria: string; light: string; dark: string };
 }) {
   const dark = theme === 'dark';
@@ -71,7 +95,9 @@ export function ThemeToggle({ theme, onToggle, labels }: {
     >
       <Icon name={dark ? 'moon' : 'sun'} size={15} />
       <span className="p-theme-text">{dark ? labels.dark : labels.light}</span>
-      <span className="p-theme-track" aria-hidden="true"><span /></span>
+      <span className="p-theme-track" aria-hidden="true">
+        <span />
+      </span>
     </button>
   );
 }

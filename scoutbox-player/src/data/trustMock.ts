@@ -11,11 +11,18 @@
 // weight), the copy is the server's neutral wording, and the profile is always
 // flagged simulatedEvidenceIncluded so the UI can label it as a demo.
 import type {
-  TrustClient, TrustSelf, TrustComponent, TrustComponentId, TrustExplained,
-  TrustLevel, TrustPolicy, TrustSignal,
+  TrustClient,
+  TrustSelf,
+  TrustComponent,
+  TrustComponentId,
+  TrustExplained,
+  TrustLevel,
+  TrustPolicy,
+  TrustSignal,
 } from './trustClient';
 
-const DISCLAIMER = 'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.';
+const DISCLAIMER =
+  'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.';
 
 // The five bands. No other band exists anywhere in the product.
 const BANDS = [
@@ -27,7 +34,12 @@ const BANDS = [
 ];
 
 const WEIGHTS: Record<TrustComponentId, number> = {
-  identity: 15, footballHistory: 20, relationships: 20, evidence: 20, combine: 15, references: 10,
+  identity: 15,
+  footballHistory: 20,
+  relationships: 20,
+  evidence: 20,
+  combine: 15,
+  references: 10,
 };
 
 const LEVELS: { id: string; label: string; min: number }[] = [
@@ -44,9 +56,16 @@ function levelFor(coverageBp: number): TrustLevel {
   return { id: out.id, label: out.label };
 }
 
-function component(id: TrustComponentId, coverageBp: number, parts: {
-  reasons?: string[]; strengths?: TrustSignal[]; gaps?: TrustSignal[]; detail?: Record<string, unknown>;
-}): TrustComponent {
+function component(
+  id: TrustComponentId,
+  coverageBp: number,
+  parts: {
+    reasons?: string[];
+    strengths?: TrustSignal[];
+    gaps?: TrustSignal[];
+    detail?: Record<string, unknown>;
+  },
+): TrustComponent {
   const weight = WEIGHTS[id];
   return {
     weight,
@@ -67,7 +86,12 @@ const components: Record<TrustComponentId, TrustComponent> = {
   identity: component('identity', 7000, {
     reasons: ['IDENTITY_SCOUTBOX_DOCUMENT_REVIEW'],
     strengths: [{ code: 'IDENTITY_CONFIRMED', text: 'Identity confirmed by ScoutBox review.' }],
-    gaps: [{ code: 'IDENTITY_REVIEW_ONLY', text: 'Identity was confirmed by document review rather than an authoritative source.' }],
+    gaps: [
+      {
+        code: 'IDENTITY_REVIEW_ONLY',
+        text: 'Identity was confirmed by document review rather than an authoritative source.',
+      },
+    ],
     detail: { assurance: 'scoutbox_document_review' },
   }),
   footballHistory: component('footballHistory', 8750, {
@@ -76,7 +100,12 @@ const components: Record<TrustComponentId, TrustComponent> = {
       { code: 'CURRENT_CLUB_CONFIRMED', text: 'Your current club is confirmed.' },
       { code: 'CAREER_RECORD_CONFIRMED', text: '2 club records are independently confirmed.' },
     ],
-    gaps: [{ code: 'HISTORY_PLAYER_SUBMITTED', text: '1 club entry is provided by the player and not independently confirmed.' }],
+    gaps: [
+      {
+        code: 'HISTORY_PLAYER_SUBMITTED',
+        text: '1 club entry is provided by the player and not independently confirmed.',
+      },
+    ],
     detail: { rows: 3, confirmedRows: 2, attributableMass: 1.75 },
   }),
   relationships: component('relationships', 7500, {

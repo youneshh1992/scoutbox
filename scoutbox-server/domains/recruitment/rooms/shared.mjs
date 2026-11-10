@@ -11,8 +11,8 @@ const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 export const ROOM_STATUSES = [
   'watching',
   'under_review',
-  'contact_planned',   // agreed to approach; nobody has yet
-  'contacted',         // approach delivered; awaiting a response
+  'contact_planned', // agreed to approach; nobody has yet
+  'contacted', // approach delivered; awaiting a response
   'shortlisted',
   'priority',
   'trial_requested',
@@ -20,10 +20,10 @@ export const ROOM_STATUSES = [
   'trial_completed',
   'offer_consideration',
   'offer_made',
-  'offer_accepted',    // accepted in ScoutBox; not a signing
-  'offer_declined',    // the player declined; distinct from the club withdrawing
+  'offer_accepted', // accepted in ScoutBox; not a signing
+  'offer_declined', // the player declined; distinct from the club withdrawing
   'signed',
-  'on_hold',           // paused deliberately, still live
+  'on_hold', // paused deliberately, still live
   'withdrawn',
   'archived',
   'closed',
@@ -142,11 +142,46 @@ export function roomStatusForStage(stage, orgLevel) {
 // Anything not listed is refused.
 export const ROOM_TRANSITIONS = table({
   watching: ['under_review', 'shortlisted', 'contact_planned', 'on_hold', 'withdrawn', 'archived'],
-  under_review: ['watching', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'on_hold', 'withdrawn', 'archived'],
+  under_review: [
+    'watching',
+    'shortlisted',
+    'priority',
+    'contact_planned',
+    'trial_requested',
+    'on_hold',
+    'withdrawn',
+    'archived',
+  ],
   contact_planned: ['contacted', 'under_review', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
-  contacted: ['shortlisted', 'priority', 'trial_requested', 'offer_consideration', 'under_review', 'on_hold', 'withdrawn', 'archived'],
-  shortlisted: ['under_review', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'on_hold', 'withdrawn', 'archived'],
-  priority: ['shortlisted', 'contact_planned', 'trial_requested', 'offer_consideration', 'on_hold', 'withdrawn', 'archived'],
+  contacted: [
+    'shortlisted',
+    'priority',
+    'trial_requested',
+    'offer_consideration',
+    'under_review',
+    'on_hold',
+    'withdrawn',
+    'archived',
+  ],
+  shortlisted: [
+    'under_review',
+    'priority',
+    'contact_planned',
+    'trial_requested',
+    'offer_consideration',
+    'on_hold',
+    'withdrawn',
+    'archived',
+  ],
+  priority: [
+    'shortlisted',
+    'contact_planned',
+    'trial_requested',
+    'offer_consideration',
+    'on_hold',
+    'withdrawn',
+    'archived',
+  ],
   trial_requested: ['trial_scheduled', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
   trial_scheduled: ['trial_completed', 'trial_requested', 'on_hold', 'withdrawn', 'archived'],
   trial_completed: ['offer_consideration', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
@@ -161,7 +196,17 @@ export const ROOM_TRANSITIONS = table({
   signed: ['closed'],
   // `resumeCase` is the only way back to the held-from state. This row names none of the states a
   // recipient's answer reaches, so nothing else takes a paused case out of the hold.
-  on_hold: ['under_review', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived', 'closed'],
+  on_hold: [
+    'under_review',
+    'shortlisted',
+    'priority',
+    'contact_planned',
+    'trial_requested',
+    'offer_consideration',
+    'withdrawn',
+    'archived',
+    'closed',
+  ],
   withdrawn: ['under_review', 'archived', 'closed'],
   archived: ['under_review', 'closed'],
   closed: ['under_review'],
@@ -172,11 +217,20 @@ export const ROOM_TRANSITIONS = table({
 // A caller with no evidence provider must fail closed.
 export const STATUS_EVIDENCE_REQUIRED = table({
   contacted: { kind: 'contact_delivered', note: 'a contact must have been delivered or recorded' },
-  trial_requested: { kind: 'trial_invited', note: 'a trial invitation must have been sent to the player or their guardian' },
-  trial_scheduled: { kind: 'trial_confirmed', note: 'a trial schedule must have been confirmed with at least one concrete session' },
+  trial_requested: {
+    kind: 'trial_invited',
+    note: 'a trial invitation must have been sent to the player or their guardian',
+  },
+  trial_scheduled: {
+    kind: 'trial_confirmed',
+    note: 'a trial schedule must have been confirmed with at least one concrete session',
+  },
   trial_completed: { kind: 'trial_completed', note: 'a trial must have been completed' },
   // A draft, advisory or superseded decision proves nothing.
-  offer_consideration: { kind: 'decision_progress', note: 'a finalized recruitment decision to progress must exist for this case' },
+  offer_consideration: {
+    kind: 'decision_progress',
+    note: 'a finalized recruitment decision to progress must exist for this case',
+  },
   offer_made: { kind: 'offer_sent', note: 'an offer must have been sent' },
   offer_accepted: { kind: 'offer_accepted_by_recipient', note: 'the recipient must have accepted their own offer' },
   offer_declined: { kind: 'offer_declined_by_recipient', note: 'the recipient must have declined their own offer' },
@@ -199,9 +253,15 @@ export const REOPENED_FROM = ['withdrawn', 'archived', 'closed'];
 // Statuses at which the evidence confidence the club could see is snapshotted, to answer "what did they
 // see at the time?".
 export const SNAPSHOT_STATUSES = [
-  'shortlisted', 'priority', 'trial_requested',
-  'offer_consideration', 'offer_made', 'signed',
-  'withdrawn', 'archived', 'closed',
+  'shortlisted',
+  'priority',
+  'trial_requested',
+  'offer_consideration',
+  'offer_made',
+  'signed',
+  'withdrawn',
+  'archived',
+  'closed',
 ];
 
 export const canTransition = (from, to) => (ROOM_TRANSITIONS[from] ?? []).includes(to);
@@ -242,18 +302,10 @@ export function validateTransition(from, to, { reasonCodes = [] } = {}) {
 
 // Only the code is machine-readable, so later analysis never has to read anybody's free text.
 export const REASON_CODES = {
-  football: [
-    'technical_fit', 'tactical_fit', 'physical_profile', 'position_need', 'development_upside',
-  ],
-  evidence: [
-    'insufficient_full_match', 'insufficient_recent_evidence', 'reference_missing', 'combine_missing',
-  ],
-  process: [
-    'budget', 'squad_space', 'timing', 'registration', 'travel_logistics', 'eligibility',
-  ],
-  outcome: [
-    'trial_needed', 'continue_monitoring', 'not_current_priority', 'trial_outcome', 'player_unavailable',
-  ],
+  football: ['technical_fit', 'tactical_fit', 'physical_profile', 'position_need', 'development_upside'],
+  evidence: ['insufficient_full_match', 'insufficient_recent_evidence', 'reference_missing', 'combine_missing'],
+  process: ['budget', 'squad_space', 'timing', 'registration', 'travel_logistics', 'eligibility'],
+  outcome: ['trial_needed', 'continue_monitoring', 'not_current_priority', 'trial_outcome', 'player_unavailable'],
 };
 
 export const ALL_REASON_CODES = Object.values(REASON_CODES).flat();
@@ -264,13 +316,34 @@ export const reasonCategory = (code) =>
 // Refused with their own error code so an audit cannot mistake the refusal for a typo. A club may still
 // decline a player; it may not record a protected trait as the reason.
 export const PROHIBITED_REASON_CODES = [
-  'race', 'ethnicity', 'skin_colour', 'skin_color',
-  'nationality', 'nationality_preference', 'national_origin', 'immigration_status',
-  'religion', 'faith', 'caste',
-  'disability', 'medical_condition', 'mental_health',
-  'gender', 'sex', 'sexuality', 'sexual_orientation', 'gender_identity',
-  'socioeconomic', 'social_background', 'family_income', 'postcode', 'accent',
-  'pregnancy', 'marital_status', 'political_opinion', 'union_membership',
+  'race',
+  'ethnicity',
+  'skin_colour',
+  'skin_color',
+  'nationality',
+  'nationality_preference',
+  'national_origin',
+  'immigration_status',
+  'religion',
+  'faith',
+  'caste',
+  'disability',
+  'medical_condition',
+  'mental_health',
+  'gender',
+  'sex',
+  'sexuality',
+  'sexual_orientation',
+  'gender_identity',
+  'socioeconomic',
+  'social_background',
+  'family_income',
+  'postcode',
+  'accent',
+  'pregnancy',
+  'marital_status',
+  'political_opinion',
+  'union_membership',
 ];
 
 // Evidence-shaped reasons: an archived room may be worth a second look when the missing evidence arrives.
@@ -312,17 +385,31 @@ export function validateReasonCodes(codes) {
 // ---------------------------------------------------------- recommendations
 
 export const RECOMMENDATIONS = [
-  'no_decision', 'continue_watching', 'shortlist', 'priority', 'trial', 'offer', 'archive',
+  'no_decision',
+  'continue_watching',
+  'shortlist',
+  'priority',
+  'trial',
+  'offer',
+  'archive',
 ];
 
 export function validateDecision({ recommendation, reasonCodes = [], note = null } = {}) {
   if (!RECOMMENDATIONS.includes(recommendation)) {
-    return { ok: false, error: 'ROOM_RECOMMENDATION_UNKNOWN', message: 'That is not a ScoutBox recruitment recommendation.' };
+    return {
+      ok: false,
+      error: 'ROOM_RECOMMENDATION_UNKNOWN',
+      message: 'That is not a ScoutBox recruitment recommendation.',
+    };
   }
   const reasons = validateReasonCodes(reasonCodes);
   if (!reasons.ok) return reasons;
   if (recommendation === 'archive' && reasons.codes.length === 0) {
-    return { ok: false, error: 'ROOM_REASON_REQUIRED', message: 'Archiving needs at least one reason so the decision stays useful later.' };
+    return {
+      ok: false,
+      error: 'ROOM_REASON_REQUIRED',
+      message: 'Archiving needs at least one reason so the decision stays useful later.',
+    };
   }
   if (note != null && String(note).length > 2000) {
     return { ok: false, error: 'ROOM_NOTE_TOO_LONG', message: 'Keep the internal note under 2000 characters.' };
@@ -334,10 +421,15 @@ export function validateDecision({ recommendation, reasonCodes = [], note = null
 
 // Workflow completeness, not a score or a recommendation: each item is a fact a human could check.
 export function decisionReadiness({
-  assessmentsAssigned = 0, assessmentsSubmitted = 0,
-  recentFullMatch = false, coachReference = false,
-  combineVerified = 0, combineRequested = 0,
-  trialState = 'none', openTasks = 0, openEvidenceRequests = 0,
+  assessmentsAssigned = 0,
+  assessmentsSubmitted = 0,
+  recentFullMatch = false,
+  coachReference = false,
+  combineVerified = 0,
+  combineRequested = 0,
+  trialState = 'none',
+  openTasks = 0,
+  openEvidenceRequests = 0,
 } = {}) {
   const items = [
     {
@@ -345,7 +437,12 @@ export function decisionReadiness({
       label: 'Assessments',
       value: `${assessmentsSubmitted}/${assessmentsAssigned} submitted`,
       complete: assessmentsAssigned > 0 && assessmentsSubmitted >= assessmentsAssigned,
-      outstanding: assessmentsAssigned === 0 ? 'None assigned yet' : assessmentsSubmitted < assessmentsAssigned ? 'Awaiting submissions' : null,
+      outstanding:
+        assessmentsAssigned === 0
+          ? 'None assigned yet'
+          : assessmentsSubmitted < assessmentsAssigned
+            ? 'Awaiting submissions'
+            : null,
     },
     {
       key: 'recent_full_match',
@@ -364,14 +461,27 @@ export function decisionReadiness({
     {
       key: 'combine',
       label: 'Combine',
-      value: combineVerified > 0 ? `${combineVerified} verified` : combineRequested > 0 ? 'Requested' : 'No verified result',
+      value:
+        combineVerified > 0 ? `${combineVerified} verified` : combineRequested > 0 ? 'Requested' : 'No verified result',
       complete: combineVerified > 0,
-      outstanding: combineVerified > 0 ? null : combineRequested > 0 ? 'Requested, not yet completed' : 'No production-supported Combine Verified result is currently available',
+      outstanding:
+        combineVerified > 0
+          ? null
+          : combineRequested > 0
+            ? 'Requested, not yet completed'
+            : 'No production-supported Combine Verified result is currently available',
     },
     {
       key: 'trial',
       label: 'Trial',
-      value: { none: 'Not required yet', requested: 'Requested', scheduled: 'Scheduled', awaiting_report: 'Awaiting report', reported: 'Reported' }[trialState] ?? 'Not required yet',
+      value:
+        {
+          none: 'Not required yet',
+          requested: 'Requested',
+          scheduled: 'Scheduled',
+          awaiting_report: 'Awaiting report',
+          reported: 'Reported',
+        }[trialState] ?? 'Not required yet',
       complete: trialState === 'reported',
       outstanding: ['requested', 'scheduled', 'awaiting_report'].includes(trialState) ? 'Trial in progress' : null,
     },
@@ -395,7 +505,13 @@ export function decisionReadiness({
 }
 
 // A word, never a number: a second numeric score next to the Trust Score would read as a player rating.
-export const ROOM_HEALTH = ['decision_recorded', 'trial_pending', 'assessment_outstanding', 'waiting_on_evidence', 'ready_for_review'];
+export const ROOM_HEALTH = [
+  'decision_recorded',
+  'trial_pending',
+  'assessment_outstanding',
+  'waiting_on_evidence',
+  'ready_for_review',
+];
 
 export const ROOM_HEALTH_LABELS = {
   decision_recorded: 'Decision recorded',
@@ -410,7 +526,8 @@ export function roomHealth({ readiness, hasCurrentDecision = false, status = 'wa
   const blocked = new Set((readiness?.blockers ?? []).map((b) => b.key));
   if (blocked.has('trial')) return 'trial_pending';
   if (blocked.has('assessments')) return 'assessment_outstanding';
-  if (blocked.has('recent_full_match') || blocked.has('coach_reference') || blocked.has('combine')) return 'waiting_on_evidence';
+  if (blocked.has('recent_full_match') || blocked.has('coach_reference') || blocked.has('combine'))
+    return 'waiting_on_evidence';
   return 'ready_for_review';
 }
 
@@ -473,11 +590,19 @@ export const roomCan = (role, action) => {
 
 /** Where a room came from: workflow provenance only. */
 export const SOURCE_CONTEXTS = [
-  'search', 'watchlist', 'shortlist', 'opportunity', 'recommendation', 'campaign', 'passport',
+  'search',
+  'watchlist',
+  'shortlist',
+  'opportunity',
+  'recommendation',
+  'campaign',
+  'passport',
   // Kept distinct so the funnel can tell a reactivation from an organic discovery. Never shown to the player.
-  'nobody_missed', 'second_look',
+  'nobody_missed',
+  'second_look',
   // Kept distinct so the funnel can tell a saved-criteria origin from a one-off query.
-  'matching', 'dynamic_watchlist',
+  'matching',
+  'dynamic_watchlist',
   'direct',
 ];
 
@@ -494,7 +619,15 @@ export const TASK_TRANSITIONS = {
 };
 export const canTaskTransition = (from, to) => (TASK_TRANSITIONS[from] ?? []).includes(to);
 
-export const LINKED_RESOURCE_TYPES = ['evidence', 'assessment', 'combine_request', 'trial', 'box_cam_assignment', 'evidence_request', 'comment'];
+export const LINKED_RESOURCE_TYPES = [
+  'evidence',
+  'assessment',
+  'combine_request',
+  'trial',
+  'box_cam_assignment',
+  'evidence_request',
+  'comment',
+];
 
 // ------------------------------------------------------------ evidence state
 
@@ -504,24 +637,42 @@ export const EVIDENCE_REVIEW_STATES = ['not_reviewed', 'reviewing', 'reviewed', 
 
 export const ROOM_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 
-export const ROOM_PRIORITY_NOTE = 'Internal workflow urgency for your organisation. It is not a judgement of the player and is never shown to them.';
+export const ROOM_PRIORITY_NOTE =
+  'Internal workflow urgency for your organisation. It is not a judgement of the player and is never shown to them.';
 
 // -------------------------------------------------------------- activity
 
 export const ROOM_EVENT_TYPES = [
-  'room_created', 'room_status_changed', 'room_reopened', 'room_owner_changed',
-  'room_member_assigned', 'room_task_created', 'room_task_updated',
-  'room_comment_added', 'room_comment_edited', 'room_comment_deleted',
-  'room_assessment_assigned', 'room_evidence_reviewed', 'room_evidence_requested',
-  'room_combine_requested', 'room_trial_linked', 'room_signing_linked',
-  'room_decision_recorded', 'room_tag_changed', 'room_priority_changed',
+  'room_created',
+  'room_status_changed',
+  'room_reopened',
+  'room_owner_changed',
+  'room_member_assigned',
+  'room_task_created',
+  'room_task_updated',
+  'room_comment_added',
+  'room_comment_edited',
+  'room_comment_deleted',
+  'room_assessment_assigned',
+  'room_evidence_reviewed',
+  'room_evidence_requested',
+  'room_combine_requested',
+  'room_trial_linked',
+  'room_signing_linked',
+  'room_decision_recorded',
+  'room_tag_changed',
+  'room_priority_changed',
 ];
 
 // The numeric suffix of the event id breaks timestamp ties, so events written in the same millisecond keep
 // their order between reads.
 export function roomActivity(history = [], { limit = 50, cursor = null } = {}) {
   const seq = (id) => {
-    const n = Number(String(id ?? '').split('-').pop());
+    const n = Number(
+      String(id ?? '')
+        .split('-')
+        .pop(),
+    );
     return Number.isFinite(n) ? n : 0;
   };
   const rows = history
@@ -532,12 +683,12 @@ export function roomActivity(history = [], { limit = 50, cursor = null } = {}) {
       actor: h.byId ? { kind: h.byKind, id: h.byId, name: h.byName } : null,
       detail: h.detail ?? null,
     }))
-    .sort((a, b) => (b.at - a.at) || (seq(b.id) - seq(a.id)));
+    .sort((a, b) => b.at - a.at || seq(b.id) - seq(a.id));
   const start = cursor ? rows.findIndex((r) => r.id === cursor) + 1 : 0;
   const page = rows.slice(start, start + limit);
   return {
     items: page,
-    nextCursor: start + limit < rows.length ? page[page.length - 1]?.id ?? null : null,
+    nextCursor: start + limit < rows.length ? (page[page.length - 1]?.id ?? null) : null,
     total: rows.length,
   };
 }
@@ -578,20 +729,26 @@ export function buildRoomSnapshot({ trustSnapshot = null, sourceRefs = {}, trigg
 // ------------------------------------------------------- safe projections
 
 export const ROOM_TRUST_NOTE = 'Evidence confidence — not football ability.';
-export const ROOM_DEV_NOTE = 'Box Cam activity shows verified training evidence. It does not independently establish football ability.';
-export const ROOM_PRIVACY_NOTE = 'This room is private to your organisation. The player, their guardian and every other club can never see it.';
-export const ROOM_UNAVAILABLE_NOTE = 'Player data is currently unavailable to your organisation under the standing rules. Your internal record remains.';
+export const ROOM_DEV_NOTE =
+  'Box Cam activity shows verified training evidence. It does not independently establish football ability.';
+export const ROOM_PRIVACY_NOTE =
+  'This room is private to your organisation. The player, their guardian and every other club can never see it.';
+export const ROOM_UNAVAILABLE_NOTE =
+  'Player data is currently unavailable to your organisation under the standing rules. Your internal record remains.';
 
 /** A room row for a list. Carries no player-private field and no source detail. */
-export function roomSummary(room, { player = null, trust = null, openTasks = 0, health = null, lastActivityAt = null, visible = true } = {}) {
+export function roomSummary(
+  room,
+  { player = null, trust = null, openTasks = 0, health = null, lastActivityAt = null, visible = true } = {},
+) {
   return {
     roomId: room.id,
     playerId: room.playerId,
     playerName: visible ? room.playerName : null,
     playerAvailable: visible,
-    position: visible ? player?.position ?? null : null,
-    age: visible ? player?.age ?? null : null,
-    currentClub: visible ? player?.currentClub ?? null : null,
+    position: visible ? (player?.position ?? null) : null,
+    age: visible ? (player?.age ?? null) : null,
+    currentClub: visible ? (player?.currentClub ?? null) : null,
     status: room.room.status,
     statusLabel: ROOM_STATUS_LABELS[room.room.status],
     stage: room.stage,
@@ -600,7 +757,10 @@ export function roomSummary(room, { player = null, trust = null, openTasks = 0, 
     ownerUserId: room.ownerUserId,
     ownerName: room.ownerName,
     leadScoutUserId: room.room.leadScoutUserId ?? null,
-    trust: visible && trust ? { score: trust.score, band: trust.band, bandLabel: trust.bandLabel, note: ROOM_TRUST_NOTE } : null,
+    trust:
+      visible && trust
+        ? { score: trust.score, band: trust.band, bandLabel: trust.bandLabel, note: ROOM_TRUST_NOTE }
+        : null,
     openTasks,
     health,
     healthLabel: health ? ROOM_HEALTH_LABELS[health] : null,
@@ -672,11 +832,17 @@ export const clampPage = (n, fallback = LIMITS.pageSize) => {
 
 /** Tags are internal labels. A tag that reads as a protected trait is refused. */
 export function validateTag(raw) {
-  const tag = String(raw ?? '').trim().slice(0, LIMITS.tagLength);
+  const tag = String(raw ?? '')
+    .trim()
+    .slice(0, LIMITS.tagLength);
   if (!tag) return { ok: false, error: 'ROOM_TAG_EMPTY', message: 'A tag needs some text.' };
   const flat = tag.toLowerCase().replace(/[^a-z]+/g, '_');
   if (PROHIBITED_REASON_CODES.some((c) => flat === c || flat.startsWith(`${c}_`) || flat.endsWith(`_${c}`))) {
-    return { ok: false, error: 'ROOM_TAG_PROHIBITED', message: 'A tag cannot classify a player by a protected characteristic.' };
+    return {
+      ok: false,
+      error: 'ROOM_TAG_PROHIBITED',
+      message: 'A tag cannot classify a player by a protected characteristic.',
+    };
   }
   return { ok: true, tag };
 }

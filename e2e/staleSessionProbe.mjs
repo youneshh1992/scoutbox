@@ -25,7 +25,9 @@ async function loadWith(session) {
   page.on('pageerror', (e) => errors.push(String(e)));
   if (session !== undefined) {
     await ctx.addInitScript((s) => {
-      try { localStorage.setItem('scoutbox-player-session', s); } catch {}
+      try {
+        localStorage.setItem('scoutbox-player-session', s);
+      } catch {}
     }, session);
   }
   await page.goto(`http://127.0.0.1:${PORT}/`);
@@ -84,7 +86,10 @@ async function loadWith(session) {
   await page.reload();
   await page.waitForTimeout(1500);
   const after = await page.innerText('body');
-  check('valid session survives reload', /weekly scout report/i.test(after) && !/or continue as a demo account/i.test(after));
+  check(
+    'valid session survives reload',
+    /weekly scout report/i.test(after) && !/or continue as a demo account/i.test(after),
+  );
   check('reload no page errors', errors.length === 0);
   await ctx.close();
 }

@@ -21,7 +21,10 @@ export type GoalStatus = 'not_started' | 'in_progress' | 'blocked' | 'achieved' 
 export type ActionStatus = 'todo' | 'in_progress' | 'done' | 'blocked' | 'cancelled';
 export type TargetState = 'target_met' | 'target_not_met' | 'no_current_valid_measurement';
 
-export interface DueState { state: string; days: number | null }
+export interface DueState {
+  state: string;
+  days: number | null;
+}
 
 export interface EvidenceView {
   linkId: string;
@@ -105,9 +108,14 @@ export interface ReviewView {
 }
 
 export interface TimelineEntry {
-  id: string; at: number; action: string; label: string; internal: boolean;
+  id: string;
+  at: number;
+  action: string;
+  label: string;
+  internal: boolean;
   subject: { kind: string; id: string; title: string | null };
-  byKind: string; byName: string | null;
+  byKind: string;
+  byName: string | null;
 }
 
 export interface DevelopmentPlanView {
@@ -115,20 +123,31 @@ export interface DevelopmentPlanView {
   principle: string;
   limitation: string;
   plan: {
-    id: string; playerId: string; playerName: string; title: string;
-    status: PlanStatus; visibility: PlanVisibility;
+    id: string;
+    playerId: string;
+    playerName: string;
+    title: string;
+    status: PlanStatus;
+    visibility: PlanVisibility;
     owner: { kind: PlanOwnerKind; orgId: string | null; orgName: string | null };
     createdBy: { kind: string; name: string | null } | null;
-    startDate: number | null; nextReviewAt: number | null; endDate: number | null;
+    startDate: number | null;
+    nextReviewAt: number | null;
+    endDate: number | null;
     reviewDue: DueState;
-    sharedWithOrgIds?: string[]; sharedWithOrgCount: number;
-    rev: number; updatedAt: number;
+    sharedWithOrgIds?: string[];
+    sharedWithOrgCount: number;
+    rev: number;
+    updatedAt: number;
   };
   summary: {
     goalsByStatus: Record<GoalStatus, number>;
-    activeGoals: number; actionsDue: number; actionsOverdue: number;
+    activeGoals: number;
+    actionsDue: number;
+    actionsOverdue: number;
     linkedEvidenceAvailable: number;
-    lastReviewAt: number | null; nextReviewAt: number | null;
+    lastReviewAt: number | null;
+    nextReviewAt: number | null;
     reviewDue: DueState;
     note: string;
   };
@@ -141,11 +160,17 @@ export interface DevelopmentPlanView {
 }
 
 export interface PlanListItem {
-  id: string; title: string; status: PlanStatus; visibility: PlanVisibility;
+  id: string;
+  title: string;
+  status: PlanStatus;
+  visibility: PlanVisibility;
   owner: { kind: PlanOwnerKind; orgId: string | null };
   goalsByStatus: Record<GoalStatus, number>;
-  activeGoals: number; actionsOverdue: number;
-  nextReviewAt: number | null; reviewDue: DueState; updatedAt: number;
+  activeGoals: number;
+  actionsOverdue: number;
+  nextReviewAt: number | null;
+  reviewDue: DueState;
+  updatedAt: number;
 }
 
 export interface DevelopmentCatalogue {
@@ -167,14 +192,19 @@ export interface DevelopmentCatalogue {
 }
 
 export interface LinkableEvidence {
-  sourceType: string; sourceId: string; sourceLabel: string; title: string;
-  provenance: string | null; occurredAt: number | null; simulated: boolean;
+  sourceType: string;
+  sourceId: string;
+  sourceLabel: string;
+  title: string;
+  provenance: string | null;
+  occurredAt: number | null;
+  simulated: boolean;
 }
 
 export type DevActor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 const base = (a: DevActor) => (a.kind === 'player' ? '/player/development' : '/guardian/development');
 const withChild = (a: DevActor, body: Record<string, unknown>) =>
-  (a.kind === 'guardian' ? { ...body, playerId: a.childId } : body);
+  a.kind === 'guardian' ? { ...body, playerId: a.childId } : body;
 
 export interface PlayerM21 {
   catalogue(a: DevActor): Promise<DevelopmentCatalogue>;
@@ -187,7 +217,11 @@ export interface PlayerM21 {
   updateGoal(a: DevActor, goalId: string, body: Record<string, unknown>): Promise<DevelopmentPlanView>;
   addAction(a: DevActor, goalId: string, body: Record<string, unknown>): Promise<DevelopmentPlanView>;
   updateAction(a: DevActor, actionId: string, body: Record<string, unknown>): Promise<DevelopmentPlanView>;
-  linkEvidence(a: DevActor, goalId: string, body: { sourceType: string; sourceId: string }): Promise<DevelopmentPlanView>;
+  linkEvidence(
+    a: DevActor,
+    goalId: string,
+    body: { sourceType: string; sourceId: string },
+  ): Promise<DevelopmentPlanView>;
   unlinkEvidence(a: DevActor, linkId: string): Promise<DevelopmentPlanView>;
   addReflection(a: DevActor, planId: string, body: Record<string, unknown>): Promise<DevelopmentPlanView>;
   history(a: DevActor, planId: string): Promise<{ items: TimelineEntry[]; total: number; note: string }>;

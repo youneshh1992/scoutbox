@@ -25,66 +25,326 @@ const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://
 const DEMO = import.meta.env.VITE_DEMO === '1';
 
 interface Report {
-  id: string; ts: number; by: string; byId: string; targetKind: string;
-  targetOrgId: string | null; targetScoutName: string | null; targetPlayerId: string | null;
-  reason: string; urgent: boolean; status: string; outcome: string | null; resolvedAt: number | null;
+  id: string;
+  ts: number;
+  by: string;
+  byId: string;
+  targetKind: string;
+  targetOrgId: string | null;
+  targetScoutName: string | null;
+  targetPlayerId: string | null;
+  reason: string;
+  urgent: boolean;
+  status: string;
+  outcome: string | null;
+  resolvedAt: number | null;
 }
 interface Club {
-  id: string; name: string; type: string; plan: string; verified: boolean;
-  verifiedDomain: string | null; safeguardingContractSigned: boolean;
-  safeguardingCertified: boolean; suspended?: boolean;
+  id: string;
+  name: string;
+  type: string;
+  plan: string;
+  verified: boolean;
+  verifiedDomain: string | null;
+  safeguardingContractSigned: boolean;
+  safeguardingCertified: boolean;
+  suspended?: boolean;
 }
-interface GuardianRow { id: string; name: string; email: string; idVerified: boolean; disclaimerAccepted: boolean; childIds: string[] }
-interface IdvRow { id: string; guardianId: string; guardianName: string; documentType: string; documentRef: string; ts: number; status: string }
-interface BlockRow { id: string; playerId: string; orgId: string; by: string; reason: string; ts: number }
-interface ModRow { id: string; ts: number; context: { kind?: string }; flags: string[]; severity?: string | null }
-interface ThreadRow { id: string; playerName: string; orgName: string; scoutName: string; scoutRole: string; counterparty: string; messages: { id: string; ts: number; sender: { name: string }; text: string }[] }
-interface Overview { players: number; guardians: number; orgs: number; openReports: number; blocks: number; moderationHits: number; channels: number; signings: number; persisted: boolean; invoices?: number; emailsSent?: number; pushesSent?: number; sessions?: number; storageEngine?: string; groomingEscalations?: number }
-interface MailRow { id: string; ts: number; to: string; subject: string; text: string; transport: string; delivered: boolean }
-interface InvoiceRow { id: string; ts: number; orgName: string; description: string; amount: number; currency: string; status: string; provider: string }
+interface GuardianRow {
+  id: string;
+  name: string;
+  email: string;
+  idVerified: boolean;
+  disclaimerAccepted: boolean;
+  childIds: string[];
+}
+interface IdvRow {
+  id: string;
+  guardianId: string;
+  guardianName: string;
+  documentType: string;
+  documentRef: string;
+  ts: number;
+  status: string;
+}
+interface BlockRow {
+  id: string;
+  playerId: string;
+  orgId: string;
+  by: string;
+  reason: string;
+  ts: number;
+}
+interface ModRow {
+  id: string;
+  ts: number;
+  context: { kind?: string };
+  flags: string[];
+  severity?: string | null;
+}
+interface ThreadRow {
+  id: string;
+  playerName: string;
+  orgName: string;
+  scoutName: string;
+  scoutRole: string;
+  counterparty: string;
+  messages: { id: string; ts: number; sender: { name: string }; text: string }[];
+}
+interface Overview {
+  players: number;
+  guardians: number;
+  orgs: number;
+  openReports: number;
+  blocks: number;
+  moderationHits: number;
+  channels: number;
+  signings: number;
+  persisted: boolean;
+  invoices?: number;
+  emailsSent?: number;
+  pushesSent?: number;
+  sessions?: number;
+  storageEngine?: string;
+  groomingEscalations?: number;
+}
+interface MailRow {
+  id: string;
+  ts: number;
+  to: string;
+  subject: string;
+  text: string;
+  transport: string;
+  delivered: boolean;
+}
+interface InvoiceRow {
+  id: string;
+  ts: number;
+  orgName: string;
+  description: string;
+  amount: number;
+  currency: string;
+  status: string;
+  provider: string;
+}
 
 // ------------------------------------------------------------- demo state
 const demo = {
-  overview: { players: 13, guardians: 2, orgs: 3, openReports: 2, blocks: 1, moderationHits: 4, channels: 3, signings: 1, persisted: true, invoices: 1, emailsSent: 2, pushesSent: 9, sessions: 6, storageEngine: 'sqlite', groomingEscalations: 1 } as Overview,
+  overview: {
+    players: 13,
+    guardians: 2,
+    orgs: 3,
+    openReports: 2,
+    blocks: 1,
+    moderationHits: 4,
+    channels: 3,
+    signings: 1,
+    persisted: true,
+    invoices: 1,
+    emailsSent: 2,
+    pushesSent: 9,
+    sessions: 6,
+    storageEngine: 'sqlite',
+    groomingEscalations: 1,
+  } as Overview,
   reports: [
-    { id: 'rep-9001', ts: Date.now() - 3600e3, by: 'guardian', byId: 'gd-amara', targetKind: 'scout', targetOrgId: 'org-northstar', targetScoutName: 'T. Rivera', targetPlayerId: null, reason: 'Asked to move the conversation to WhatsApp.', urgent: true, status: 'pending_review', outcome: null, resolvedAt: null },
-    { id: 'rep-9002', ts: Date.now() - 7200e3, by: 'player', byId: 'pl-adeyemi', targetKind: 'club', targetOrgId: 'org-harbour', targetScoutName: null, targetPlayerId: null, reason: 'Trial report still not filed after three weeks.', urgent: false, status: 'pending_review', outcome: null, resolvedAt: null },
-    { id: 'rep-9000', ts: Date.now() - 86400e3, by: 'org_user', byId: 'usr-1', targetKind: 'player', targetOrgId: null, targetScoutName: null, targetPlayerId: 'pl-x', reason: 'Suspected duplicate profile.', urgent: false, status: 'resolved', outcome: 'Duplicate merged.', resolvedAt: Date.now() - 80000e3 },
+    {
+      id: 'rep-9001',
+      ts: Date.now() - 3600e3,
+      by: 'guardian',
+      byId: 'gd-amara',
+      targetKind: 'scout',
+      targetOrgId: 'org-northstar',
+      targetScoutName: 'T. Rivera',
+      targetPlayerId: null,
+      reason: 'Asked to move the conversation to WhatsApp.',
+      urgent: true,
+      status: 'pending_review',
+      outcome: null,
+      resolvedAt: null,
+    },
+    {
+      id: 'rep-9002',
+      ts: Date.now() - 7200e3,
+      by: 'player',
+      byId: 'pl-adeyemi',
+      targetKind: 'club',
+      targetOrgId: 'org-harbour',
+      targetScoutName: null,
+      targetPlayerId: null,
+      reason: 'Trial report still not filed after three weeks.',
+      urgent: false,
+      status: 'pending_review',
+      outcome: null,
+      resolvedAt: null,
+    },
+    {
+      id: 'rep-9000',
+      ts: Date.now() - 86400e3,
+      by: 'org_user',
+      byId: 'usr-1',
+      targetKind: 'player',
+      targetOrgId: null,
+      targetScoutName: null,
+      targetPlayerId: 'pl-x',
+      reason: 'Suspected duplicate profile.',
+      urgent: false,
+      status: 'resolved',
+      outcome: 'Duplicate merged.',
+      resolvedAt: Date.now() - 80000e3,
+    },
   ] as Report[],
   outbox: [
-    { id: 'mail-1', ts: Date.now() - 1800e3, to: 'nadia@testfamily.co.uk', subject: 'Verify your ScoutBox guardian account', text: 'Your ScoutBox verification code is QK7M2X.', transport: 'dev-outbox', delivered: false },
-    { id: 'mail-2', ts: Date.now() - 3600e3, to: 'recruitment@eastportfc.co.uk', subject: 'Verify Eastport FC on ScoutBox', text: 'Your ScoutBox club verification code is B4TR9N.', transport: 'dev-outbox', delivered: false },
+    {
+      id: 'mail-1',
+      ts: Date.now() - 1800e3,
+      to: 'nadia@testfamily.co.uk',
+      subject: 'Verify your ScoutBox guardian account',
+      text: 'Your ScoutBox verification code is QK7M2X.',
+      transport: 'dev-outbox',
+      delivered: false,
+    },
+    {
+      id: 'mail-2',
+      ts: Date.now() - 3600e3,
+      to: 'recruitment@eastportfc.co.uk',
+      subject: 'Verify Eastport FC on ScoutBox',
+      text: 'Your ScoutBox club verification code is B4TR9N.',
+      transport: 'dev-outbox',
+      delivered: false,
+    },
   ] as MailRow[],
   invoices: [
-    { id: 'inv-1', ts: Date.now() - 86400e3, orgName: 'Eastport FC', description: 'Success fee — Elias Svensson signed inside the attribution window', amount: 1500, currency: 'EUR', status: 'issued', provider: 'dev-ledger' },
+    {
+      id: 'inv-1',
+      ts: Date.now() - 86400e3,
+      orgName: 'Eastport FC',
+      description: 'Success fee — Elias Svensson signed inside the attribution window',
+      amount: 1500,
+      currency: 'EUR',
+      status: 'issued',
+      provider: 'dev-ledger',
+    },
   ] as InvoiceRow[],
   clubs: [
-    { id: 'org-eastport', name: 'Eastport FC', type: 'club', plan: 'Pro', verified: true, verifiedDomain: 'eastportfc.com', safeguardingContractSigned: true, safeguardingCertified: true },
-    { id: 'org-harbour', name: 'Harbour City FC', type: 'club', plan: 'Academy', verified: false, verifiedDomain: null, safeguardingContractSigned: false, safeguardingCertified: false },
-    { id: 'org-northstar', name: 'North Star Sports Agency', type: 'agency', plan: 'Agency', verified: false, verifiedDomain: null, safeguardingContractSigned: false, safeguardingCertified: false },
+    {
+      id: 'org-eastport',
+      name: 'Eastport FC',
+      type: 'club',
+      plan: 'Pro',
+      verified: true,
+      verifiedDomain: 'eastportfc.com',
+      safeguardingContractSigned: true,
+      safeguardingCertified: true,
+    },
+    {
+      id: 'org-harbour',
+      name: 'Harbour City FC',
+      type: 'club',
+      plan: 'Academy',
+      verified: false,
+      verifiedDomain: null,
+      safeguardingContractSigned: false,
+      safeguardingCertified: false,
+    },
+    {
+      id: 'org-northstar',
+      name: 'North Star Sports Agency',
+      type: 'agency',
+      plan: 'Agency',
+      verified: false,
+      verifiedDomain: null,
+      safeguardingContractSigned: false,
+      safeguardingCertified: false,
+    },
   ] as Club[],
   guardians: [
-    { id: 'gd-amara', name: 'Amara Adebayo', email: 'amara.adebayo@example.com', idVerified: true, disclaimerAccepted: true, childIds: ['pl-guni'] },
-    { id: 'gd-marek', name: 'Marek Kowalski', email: 'marek.kowalski@example.com', idVerified: true, disclaimerAccepted: true, childIds: ['pl-tomasz', 'pl-imani'] },
+    {
+      id: 'gd-amara',
+      name: 'Amara Adebayo',
+      email: 'amara.adebayo@example.com',
+      idVerified: true,
+      disclaimerAccepted: true,
+      childIds: ['pl-guni'],
+    },
+    {
+      id: 'gd-marek',
+      name: 'Marek Kowalski',
+      email: 'marek.kowalski@example.com',
+      idVerified: true,
+      disclaimerAccepted: true,
+      childIds: ['pl-tomasz', 'pl-imani'],
+    },
   ] as GuardianRow[],
   idvQueue: [
-    { id: 'idv-1', guardianId: 'gd-amara', guardianName: 'Amara Adebayo', documentType: 'passport', documentRef: 'P•••••41', ts: Date.now() - 90 * 86400e3, status: 'auto_approved' },
-    { id: 'idv-2', guardianId: 'gd-marek', guardianName: 'Marek Kowalski', documentType: 'driving_licence', documentRef: 'D•••••88', ts: Date.now() - 60 * 86400e3, status: 'auto_approved' },
+    {
+      id: 'idv-1',
+      guardianId: 'gd-amara',
+      guardianName: 'Amara Adebayo',
+      documentType: 'passport',
+      documentRef: 'P•••••41',
+      ts: Date.now() - 90 * 86400e3,
+      status: 'auto_approved',
+    },
+    {
+      id: 'idv-2',
+      guardianId: 'gd-marek',
+      guardianName: 'Marek Kowalski',
+      documentType: 'driving_licence',
+      documentRef: 'D•••••88',
+      ts: Date.now() - 60 * 86400e3,
+      status: 'auto_approved',
+    },
   ] as IdvRow[],
-  blocks: [{ id: 'blk-1', playerId: 'pl-guni', orgId: 'org-northstar', by: 'guardian', reason: 'suspended_pending_review', ts: Date.now() - 3000e3 }] as BlockRow[],
+  blocks: [
+    {
+      id: 'blk-1',
+      playerId: 'pl-guni',
+      orgId: 'org-northstar',
+      by: 'guardian',
+      reason: 'suspended_pending_review',
+      ts: Date.now() - 3000e3,
+    },
+  ] as BlockRow[],
   moderation: [
-    { id: 'mod-1', ts: Date.now() - 4000e3, context: { kind: 'org_request_message' }, flags: ['phone_number', 'social_platform'] },
+    {
+      id: 'mod-1',
+      ts: Date.now() - 4000e3,
+      context: { kind: 'org_request_message' },
+      flags: ['phone_number', 'social_platform'],
+    },
     { id: 'mod-2', ts: Date.now() - 9000e3, context: { kind: 'player_message' }, flags: ['phone_number'] },
     { id: 'mod-3', ts: Date.now() - 86400e3, context: { kind: 'media_title' }, flags: ['social_handle'] },
     { id: 'mod-4', ts: Date.now() - 2 * 86400e3, context: { kind: 'guardian_message' }, flags: ['email'] },
-    { id: 'mod-5', ts: Date.now() - 1000e3, context: { kind: 'org_message' }, flags: ['secrecy'], severity: 'grooming' },
+    {
+      id: 'mod-5',
+      ts: Date.now() - 1000e3,
+      context: { kind: 'org_message' },
+      flags: ['secrecy'],
+      severity: 'grooming',
+    },
   ] as ModRow[],
   threads: [
     {
-      id: 'chan-1', playerName: 'Guni Adebayo', orgName: 'Eastport FC', scoutName: 'Maria Keane', scoutRole: 'Head of Recruitment', counterparty: 'guardian',
+      id: 'chan-1',
+      playerName: 'Guni Adebayo',
+      orgName: 'Eastport FC',
+      scoutName: 'Maria Keane',
+      scoutRole: 'Head of Recruitment',
+      counterparty: 'guardian',
       messages: [
-        { id: 'm1', ts: Date.now() - 3500e3, sender: { name: 'Maria Keane · Head of Recruitment · Eastport FC' }, text: 'Thanks for accepting — the U15 assessment day runs 10am–1pm.' },
-        { id: 'm2', ts: Date.now() - 3400e3, sender: { name: 'Amara Adebayo' }, text: 'Who will be present at the session?' },
+        {
+          id: 'm1',
+          ts: Date.now() - 3500e3,
+          sender: { name: 'Maria Keane · Head of Recruitment · Eastport FC' },
+          text: 'Thanks for accepting — the U15 assessment day runs 10am–1pm.',
+        },
+        {
+          id: 'm2',
+          ts: Date.now() - 3400e3,
+          sender: { name: 'Amara Adebayo' },
+          text: 'Who will be present at the session?',
+        },
       ],
     },
   ] as ThreadRow[],
@@ -101,20 +361,50 @@ async function call<T>(key: string, path: string, init?: RequestInit): Promise<T
   return body as T;
 }
 
-type Tab = 'overview' | 'reports' | 'clubs' | 'guardians' | 'blocks' | 'moderation' | 'threads' | 'outbox' | 'billing' | M12Tab | M13Tab | M14Tab | M15Tab | M16Tab | M162Tab | M25Tab;
+type Tab =
+  | 'overview'
+  | 'reports'
+  | 'clubs'
+  | 'guardians'
+  | 'blocks'
+  | 'moderation'
+  | 'threads'
+  | 'outbox'
+  | 'billing'
+  | M12Tab
+  | M13Tab
+  | M14Tab
+  | M15Tab
+  | M16Tab
+  | M162Tab
+  | M25Tab;
 // Grouped destinations with a page-level tab row; no group lists more than
 // five pages. The
 // configuration lives in navGroups.ts (plain data the navigation suite reads);
 // the groups are presentation only — the admin key + server rules still gate
 // all data.
-const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = ADMIN_NAV_GROUPS.map((g) => ({ id: g.id, label: g.label, tabs: [...g.tabs] }));
+const NAV_GROUPS: { id: string; label: string; tabs: Tab[] }[] = ADMIN_NAV_GROUPS.map((g) => ({
+  id: g.id,
+  label: g.label,
+  tabs: [...g.tabs],
+}));
 // Every configured tab id must be a real Tab (checked at compile time).
 type AdminTabsAreTabs = AdminNavTab extends Tab ? true : never;
 const ADMIN_TABS_ARE_TABS: AdminTabsAreTabs = true;
 void ADMIN_TABS_ARE_TABS;
 const groupOfTab = (tab: Tab) => NAV_GROUPS.find((g) => g.tabs.includes(tab)) ?? NAV_GROUPS[0];
 // The platform icon for each destination group (lucide names).
-const GROUP_ICON: Record<string, string> = { home: 'layout-dashboard', cases: 'inbox', evidence: 'file-check-2', verification: 'badge-check', safety: 'shield-check', operations: 'folders', delivery: 'mail', agents: 'users', system: 'settings-2' };
+const GROUP_ICON: Record<string, string> = {
+  home: 'layout-dashboard',
+  cases: 'inbox',
+  evidence: 'file-check-2',
+  verification: 'badge-check',
+  safety: 'shield-check',
+  operations: 'folders',
+  delivery: 'mail',
+  agents: 'users',
+  system: 'settings-2',
+};
 const THEME_LABELS = { aria: 'Dark theme', light: 'Light', dark: 'Dark' };
 
 const TABS: { id: Tab; label: string }[] = [
@@ -156,7 +446,10 @@ export default function App() {
   const [openThread, setOpenThread] = useState<string | null>(null);
   const [outcomeDrafts, setOutcomeDrafts] = useState<Record<string, string>>({});
 
-  const say = (text: string) => { setToast(text); setTimeout(() => setToast(null), 3500); };
+  const say = (text: string) => {
+    setToast(text);
+    setTimeout(() => setToast(null), 3500);
+  };
   // One appearance for Trust & Safety, persisted under its own key.
   const { theme, toggle: toggleTheme } = useTheme('safety');
   // At ≤ 900px the sidebar is a drawer (platform.css); the top bar
@@ -173,15 +466,24 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [drawerOpen]);
-  const pick = (next: Tab) => { setTab(next); setDrawerOpen(false); };
+  const pick = (next: Tab) => {
+    setTab(next);
+    setDrawerOpen(false);
+  };
 
   const load = useCallback(async () => {
     setError(null);
     if (DEMO) {
-      setOverview(demo.overview); setReports(demo.reports); setClubs(demo.clubs);
-      setGuardians(demo.guardians); setIdvQueue(demo.idvQueue); setBlocks(demo.blocks);
-      setModeration(demo.moderation); setThreads(demo.threads);
-      setOutbox(demo.outbox); setInvoices(demo.invoices);
+      setOverview(demo.overview);
+      setReports(demo.reports);
+      setClubs(demo.clubs);
+      setGuardians(demo.guardians);
+      setIdvQueue(demo.idvQueue);
+      setBlocks(demo.blocks);
+      setModeration(demo.moderation);
+      setThreads(demo.threads);
+      setOutbox(demo.outbox);
+      setInvoices(demo.invoices);
       return;
     }
     try {
@@ -192,8 +494,12 @@ export default function App() {
       // The clubs page by cursor too: the first page is read; "load more" (nextCursor) is still needed.
       setClubs((await call<{ items: Club[]; nextCursor: string | null }>(key, '/admin/clubs')).items);
       // The guardians page by cursor too: the first page is read; "load more" (nextCursor) is still needed.
-      const g = await call<{ guardians: GuardianRow[]; nextCursor: string | null; idvQueue: IdvRow[] }>(key, '/admin/guardians');
-      setGuardians(g.guardians); setIdvQueue(g.idvQueue);
+      const g = await call<{ guardians: GuardianRow[]; nextCursor: string | null; idvQueue: IdvRow[] }>(
+        key,
+        '/admin/guardians',
+      );
+      setGuardians(g.guardians);
+      setIdvQueue(g.idvQueue);
       setBlocks((await call<{ items: BlockRow[]; nextCursor: string | null }>(key, '/admin/blocks')).items);
       setModeration((await call<{ items: ModRow[]; nextCursor: string | null }>(key, '/admin/moderation')).items);
       // Pages by cursor, most recently active first: the first page is read; "load more" (nextCursor) is still needed.
@@ -208,20 +514,37 @@ export default function App() {
     }
   }, [key]);
 
-  useEffect(() => { if (entered) void load(); }, [entered, load]);
+  useEffect(() => {
+    if (entered) void load();
+  }, [entered, load]);
   // The way out: forget the key and everything it loaded, back to the
   // key screen. There is no server session to revoke — the key is sent with
   // every request and nothing is stored on the server for it.
   const signOut = () => {
-    setEntered(false); setKey(''); setError(null); setToast(null); setTab('overview');
-    setOverview(null); setReports([]); setClubs([]); setGuardians([]); setIdvQueue([]); setBlocks([]); setModeration([]); setThreads([]); setOutbox([]); setInvoices([]);
+    setEntered(false);
+    setKey('');
+    setError(null);
+    setToast(null);
+    setTab('overview');
+    setOverview(null);
+    setReports([]);
+    setClubs([]);
+    setGuardians([]);
+    setIdvQueue([]);
+    setBlocks([]);
+    setModeration([]);
+    setThreads([]);
+    setOutbox([]);
+    setInvoices([]);
   };
 
   const resolveReport = async (r: Report, action: 'none' | 'warning' | 'suspend_org' | 'dismiss') => {
     const outcome = outcomeDrafts[r.id]?.trim();
     if (!outcome) return say('Write the outcome the reporter will read.');
     if (DEMO) {
-      r.status = 'resolved'; r.outcome = outcome; r.resolvedAt = Date.now();
+      r.status = 'resolved';
+      r.outcome = outcome;
+      r.resolvedAt = Date.now();
       setReports([...reports]);
       say('Resolved — the reporter has been notified.');
       return;
@@ -230,7 +553,9 @@ export default function App() {
       await call(key, `/admin/reports/${r.id}/resolve`, { method: 'POST', body: JSON.stringify({ outcome, action }) });
       say('Resolved — the reporter has been notified.');
       await load();
-    } catch (e) { say(e instanceof Error ? e.message : 'Failed'); }
+    } catch (e) {
+      say(e instanceof Error ? e.message : 'Failed');
+    }
   };
 
   const setClubVerification = async (c: Club, patch: Partial<Club>) => {
@@ -245,25 +570,40 @@ export default function App() {
       await call(key, `/admin/clubs/${c.id}/verification`, { method: 'POST', body: JSON.stringify(patch) });
       say(`${c.name} updated.`);
       await load();
-    } catch (e) { say(e instanceof Error ? e.message : 'Failed'); }
+    } catch (e) {
+      say(e instanceof Error ? e.message : 'Failed');
+    }
   };
 
   const setIdv = async (g: GuardianRow, approved: boolean) => {
-    if (DEMO) { g.idVerified = approved; setGuardians([...guardians]); say('Updated.'); return; }
+    if (DEMO) {
+      g.idVerified = approved;
+      setGuardians([...guardians]);
+      say('Updated.');
+      return;
+    }
     try {
       await call(key, `/admin/guardians/${g.id}/idv`, { method: 'POST', body: JSON.stringify({ approved }) });
       say('Updated.');
       await load();
-    } catch (e) { say(e instanceof Error ? e.message : 'Failed'); }
+    } catch (e) {
+      say(e instanceof Error ? e.message : 'Failed');
+    }
   };
 
   const liftBlock = async (b: BlockRow) => {
-    if (DEMO) { setBlocks(blocks.filter((x) => x.id !== b.id)); say('Suspension lifted.'); return; }
+    if (DEMO) {
+      setBlocks(blocks.filter((x) => x.id !== b.id));
+      say('Suspension lifted.');
+      return;
+    }
     try {
       await call(key, `/admin/blocks/${b.id}/lift`, { method: 'POST' });
       say('Suspension lifted.');
       await load();
-    } catch (e) { say(e instanceof Error ? e.message : 'Failed'); }
+    } catch (e) {
+      say(e instanceof Error ? e.message : 'Failed');
+    }
   };
 
   if (!entered) {
@@ -281,15 +621,35 @@ export default function App() {
           'Moderation and the append-only audit of every action.',
         ]}
       >
-        <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); if (key) setEntered(true); }} aria-label="Sign in" noValidate>
+        <form
+          className="auth-signin"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (key) setEntered(true);
+          }}
+          aria-label="Sign in"
+          noValidate
+        >
           <div className="enter-row">
             <AuthField label="Admin key">
-              <PasswordInput placeholder="Admin key" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="current-password" aria-label="Admin key" />
+              <PasswordInput
+                placeholder="Admin key"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                autoComplete="current-password"
+                aria-label="Admin key"
+              />
             </AuthField>
-            <button type="submit" className="primary" disabled={!key}>Enter</button>
+            <button type="submit" className="primary" disabled={!key}>
+              Enter
+            </button>
           </div>
         </form>
-        {error && <div className="notice block" role="alert">{error}</div>}
+        {error && (
+          <div className="notice block" role="alert">
+            {error}
+          </div>
+        )}
         <AuthAccessNote>Staff access is issued by ScoutBox. There is no registration.</AuthAccessNote>
       </AuthPage>
     );
@@ -299,19 +659,38 @@ export default function App() {
     <div className="shell">
       {drawerOpen && <div className="drawer-veil nav-drawer-veil" onClick={() => setDrawerOpen(false)} />}
       <nav id="app-sidebar" className={`sidebar ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
-        <div className="brand" title="ScoutBox Trust &amp; Safety"><span className="wordmark">ScoutBox</span><sup className="tm" aria-label="trademark">TM</sup><span className="brand-sub">Trust &amp; Safety</span></div>
+        <div className="brand" title="ScoutBox Trust &amp; Safety">
+          <span className="wordmark">ScoutBox</span>
+          <sup className="tm" aria-label="trademark">
+            TM
+          </sup>
+          <span className="brand-sub">Trust &amp; Safety</span>
+        </div>
         <div className="p-org" aria-label="Safety workspace">
-          <span className="p-avatar club" aria-hidden="true">TS</span>
-          <span><strong>Safety workspace</strong><small>{DEMO ? 'Demo data' : 'Live console'}</small></span>
+          <span className="p-avatar club" aria-hidden="true">
+            TS
+          </span>
+          <span>
+            <strong>Safety workspace</strong>
+            <small>{DEMO ? 'Demo data' : 'Live console'}</small>
+          </span>
         </div>
         {/* The sections scroll on their own; the account block with Sign out stays on screen. */}
         <div className="nav-scroll" data-testid="nav-scroll">
-          <span className="nav-group-label" aria-hidden="true">Review workspace</span>
+          <span className="nav-group-label" aria-hidden="true">
+            Review workspace
+          </span>
           {NAV_GROUPS.map((g) => {
             const active = groupOfTab(tab).id === g.id;
             const pending = g.id === 'cases' ? reports.filter((r) => r.status === 'pending_review').length : 0;
             return (
-              <button key={g.id} className={`nav-section ${active ? 'active' : ''}`} onClick={() => pick(g.tabs[0])} style={{ position: 'relative' }} aria-current={active ? 'page' : undefined}>
+              <button
+                key={g.id}
+                className={`nav-section ${active ? 'active' : ''}`}
+                onClick={() => pick(g.tabs[0])}
+                style={{ position: 'relative' }}
+                aria-current={active ? 'page' : undefined}
+              >
                 <Icon name={GROUP_ICON[g.id] ?? 'folders'} />
                 <span className="grow">{g.label}</span>
                 {pending > 0 && <span className="nav-badge">{pending}</span>}
@@ -320,30 +699,72 @@ export default function App() {
           })}
         </div>
         <div className="p-account">
-          <div className="p-who"><span className="p-avatar" aria-hidden="true">TS</span><div><strong>Safety staff</strong><small>{DEMO ? 'Demo mode' : 'Live'}</small></div></div>
+          <div className="p-who">
+            <span className="p-avatar" aria-hidden="true">
+              TS
+            </span>
+            <div>
+              <strong>Safety staff</strong>
+              <small>{DEMO ? 'Demo mode' : 'Live'}</small>
+            </div>
+          </div>
           <div className="p-links">
-            <button data-exit="sign-out" data-testid="sign-out" onClick={signOut} aria-label="Sign out"><Icon name="log-out" size={14} />Sign out</button>
+            <button data-exit="sign-out" data-testid="sign-out" onClick={signOut} aria-label="Sign out">
+              <Icon name="log-out" size={14} />
+              Sign out
+            </button>
           </div>
         </div>
       </nav>
       <div className="main">
         <div className="topbar">
-          <button className="nav-hamburger" aria-label="Open navigation" aria-expanded={drawerOpen} aria-controls="app-sidebar" onClick={() => setDrawerOpen(true)}><Icon name="menu" /></button>
+          <button
+            className="nav-hamburger"
+            aria-label="Open navigation"
+            aria-expanded={drawerOpen}
+            aria-controls="app-sidebar"
+            onClick={() => setDrawerOpen(true)}
+          >
+            <Icon name="menu" />
+          </button>
           <h2>
-            <span className="crumb">Trust &amp; Safety</span><span className="crumb-sep" aria-hidden="true"> / </span>
-            {groupOfTab(tab).tabs.length > 1 && <><span className="crumb">{groupOfTab(tab).label}</span><span className="crumb-sep" aria-hidden="true"> / </span></>}
+            <span className="crumb">Trust &amp; Safety</span>
+            <span className="crumb-sep" aria-hidden="true">
+              {' '}
+              /{' '}
+            </span>
+            {groupOfTab(tab).tabs.length > 1 && (
+              <>
+                <span className="crumb">{groupOfTab(tab).label}</span>
+                <span className="crumb-sep" aria-hidden="true">
+                  {' '}
+                  /{' '}
+                </span>
+              </>
+            )}
             {TABS.find((t) => t.id === tab)?.label}
           </h2>
           <div className="p-toolbar">
             <ThemeToggle theme={theme} onToggle={toggleTheme} labels={THEME_LABELS} />
-            {DEMO && <span className="p-note" data-testid="demo-note">Demo data</span>}
-            <button onClick={() => void load()} title="Refresh"><Icon name="refresh-cw" size={18} /> Refresh</button>
+            {DEMO && (
+              <span className="p-note" data-testid="demo-note">
+                Demo data
+              </span>
+            )}
+            <button onClick={() => void load()} title="Refresh">
+              <Icon name="refresh-cw" size={18} /> Refresh
+            </button>
           </div>
         </div>
         {groupOfTab(tab).tabs.length > 1 && (
           <nav className="subnav" aria-label={groupOfTab(tab).label}>
             {groupOfTab(tab).tabs.map((id) => (
-              <button key={id} className={tab === id ? 'active' : ''} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}>
+              <button
+                key={id}
+                className={tab === id ? 'active' : ''}
+                aria-current={tab === id ? 'page' : undefined}
+                onClick={() => setTab(id)}
+              >
                 {TABS.find((t) => t.id === id)?.label}
               </button>
             ))}
@@ -351,7 +772,11 @@ export default function App() {
         )}
         <div className="content">
           {/* The reference page heading; the top bar keeps the crumb path. */}
-          <div className="f-heading"><p className="f-display" aria-hidden="true">{TABS.find((t) => t.id === tab)?.label}</p></div>
+          <div className="f-heading">
+            <p className="f-display" aria-hidden="true">
+              {TABS.find((t) => t.id === tab)?.label}
+            </p>
+          </div>
           {tab === 'overview' && overview && (
             <div className="stat-grid">
               <Stat v={overview.players} k="Players" />
@@ -376,21 +801,11 @@ export default function App() {
           {(['groups', 'supportdesk', 'deliverycentre', 'servicehealth', 'backups'] as Tab[]).includes(tab) && (
             <M13Panel tab={tab as M13Tab} adminKey={key} say={say} />
           )}
-          {M14_TABS.some((x) => x.id === tab) && (
-            <M14Panel tab={tab as M14Tab} adminKey={key} say={say} />
-          )}
-          {tab === 'passport' && (
-            <M15Panel tab={tab as M15Tab} adminKey={key} say={say} />
-          )}
-          {tab === 'boxcam' && (
-            <M16Panel tab={tab as M16Tab} adminKey={key} say={say} />
-          )}
-          {tab === 'trust' && (
-            <M162Panel tab={tab as M162Tab} adminKey={key} say={say} />
-          )}
-          {M25_TABS.some((x) => x.id === tab) && (
-            <M25Panel tab={tab as M25Tab} adminKey={key} say={say} />
-          )}
+          {M14_TABS.some((x) => x.id === tab) && <M14Panel tab={tab as M14Tab} adminKey={key} say={say} />}
+          {tab === 'passport' && <M15Panel tab={tab as M15Tab} adminKey={key} say={say} />}
+          {tab === 'boxcam' && <M16Panel tab={tab as M16Tab} adminKey={key} say={say} />}
+          {tab === 'trust' && <M162Panel tab={tab as M162Tab} adminKey={key} say={say} />}
+          {M25_TABS.some((x) => x.id === tab) && <M25Panel tab={tab as M25Tab} adminKey={key} say={say} />}
           {tab === 'reports' && (
             <div className="list-rows">
               {reports.length === 0 && <div className="notice">No reports.</div>}
@@ -399,12 +814,19 @@ export default function App() {
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     {r.urgent && <span className="pill red">URGENT — comms suspended</span>}
                     <span className="pill">{cap(r.targetKind)}</span>
-                    <span className="grow"><b>{r.reason}</b></span>
-                    <span className="dim">by {r.by} · {fmtStamp(r.ts)}</span>
-                    <span className={`pill ${r.status === 'pending_review' ? 'gold' : 'green'}`}>{r.status === 'pending_review' ? 'Awaiting review' : 'Resolved'}</span>
+                    <span className="grow">
+                      <b>{r.reason}</b>
+                    </span>
+                    <span className="dim">
+                      by {r.by} · {fmtStamp(r.ts)}
+                    </span>
+                    <span className={`pill ${r.status === 'pending_review' ? 'gold' : 'green'}`}>
+                      {r.status === 'pending_review' ? 'Awaiting review' : 'Resolved'}
+                    </span>
                   </div>
                   <div className="dim">
-                    target: {r.targetOrgId ?? r.targetPlayerId ?? '—'}{r.targetScoutName ? ` · scout: ${r.targetScoutName}` : ''}
+                    target: {r.targetOrgId ?? r.targetPlayerId ?? '—'}
+                    {r.targetScoutName ? ` · scout: ${r.targetScoutName}` : ''}
                   </div>
                   {r.status === 'pending_review' ? (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -416,7 +838,9 @@ export default function App() {
                       />
                       <button onClick={() => resolveReport(r, 'none')}>Resolve</button>
                       <button onClick={() => resolveReport(r, 'warning')}>Warn</button>
-                      <button className="primary" onClick={() => resolveReport(r, 'suspend_org')}>Suspend org</button>
+                      <button className="primary" onClick={() => resolveReport(r, 'suspend_org')}>
+                        Suspend org
+                      </button>
                       <button onClick={() => resolveReport(r, 'dismiss')}>Dismiss</button>
                     </div>
                   ) : (
@@ -432,16 +856,44 @@ export default function App() {
               {clubs.map((c) => (
                 <div key={c.id} className="list-row">
                   <span className="grow">
-                    <b>{c.name}</b> <span className="dim">({c.type} · {c.plan}{c.verifiedDomain ? ` · @${c.verifiedDomain}` : ''})</span>
+                    <b>{c.name}</b>{' '}
+                    <span className="dim">
+                      ({c.type} · {c.plan}
+                      {c.verifiedDomain ? ` · @${c.verifiedDomain}` : ''})
+                    </span>
                   </span>
                   {c.suspended && <span className="pill red">Suspended</span>}
                   {c.safeguardingCertified && <span className="pill green">Certified</span>}
-                  <label className="chk"><input type="checkbox" checked={c.verified} onChange={(e) => setClubVerification(c, { verified: e.target.checked })} /> verified</label>
-                  <label className="chk"><input type="checkbox" checked={c.safeguardingContractSigned} onChange={(e) => setClubVerification(c, { safeguardingContractSigned: e.target.checked })} /> contract</label>
-                  <label className="chk"><input type="checkbox" checked={!!c.suspended} onChange={(e) => setClubVerification(c, { suspended: e.target.checked })} /> suspend</label>
+                  <label className="chk">
+                    <input
+                      type="checkbox"
+                      checked={c.verified}
+                      onChange={(e) => setClubVerification(c, { verified: e.target.checked })}
+                    />{' '}
+                    verified
+                  </label>
+                  <label className="chk">
+                    <input
+                      type="checkbox"
+                      checked={c.safeguardingContractSigned}
+                      onChange={(e) => setClubVerification(c, { safeguardingContractSigned: e.target.checked })}
+                    />{' '}
+                    contract
+                  </label>
+                  <label className="chk">
+                    <input
+                      type="checkbox"
+                      checked={!!c.suspended}
+                      onChange={(e) => setClubVerification(c, { suspended: e.target.checked })}
+                    />{' '}
+                    suspend
+                  </label>
                 </div>
               ))}
-              <div className="notice">Verified + contract = eligible for U18 visibility. Certification drops automatically while an urgent report stands.</div>
+              <div className="notice">
+                Verified + contract = eligible for U18 visibility. Certification drops automatically while an urgent
+                report stands.
+              </div>
             </div>
           )}
 
@@ -450,18 +902,39 @@ export default function App() {
               <div className="list-rows" style={{ marginBottom: 18 }}>
                 {guardians.map((g) => (
                   <div key={g.id} className="list-row">
-                    <span className="grow"><b>{g.name}</b> <span className="dim">{g.email} · {g.childIds.length} child{g.childIds.length === 1 ? '' : 'ren'}</span></span>
-                    <span className={`pill ${g.idVerified ? 'green' : 'red'}`}>{g.idVerified ? 'ID verified' : 'Unverified'}</span>
+                    <span className="grow">
+                      <b>{g.name}</b>{' '}
+                      <span className="dim">
+                        {g.email} · {g.childIds.length} child{g.childIds.length === 1 ? '' : 'ren'}
+                      </span>
+                    </span>
+                    <span className={`pill ${g.idVerified ? 'green' : 'red'}`}>
+                      {g.idVerified ? 'ID verified' : 'Unverified'}
+                    </span>
                     <button onClick={() => setIdv(g, !g.idVerified)}>{g.idVerified ? 'Revoke' : 'Approve'}</button>
                   </div>
                 ))}
               </div>
               <h4 style={{ color: 'var(--muted)', marginBottom: 8 }}>IDV submissions (audit)</h4>
               <table className="data">
-                <thead><tr><th>Guardian</th><th>Document</th><th>Ref</th><th>When</th><th>Status</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Guardian</th>
+                    <th>Document</th>
+                    <th>Ref</th>
+                    <th>When</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {idvQueue.map((q) => (
-                    <tr key={q.id}><td>{q.guardianName}</td><td>{q.documentType}</td><td>{q.documentRef}</td><td>{new Date(q.ts).toLocaleDateString()}</td><td>{q.status}</td></tr>
+                    <tr key={q.id}>
+                      <td>{q.guardianName}</td>
+                      <td>{q.documentType}</td>
+                      <td>{q.documentRef}</td>
+                      <td>{new Date(q.ts).toLocaleDateString()}</td>
+                      <td>{q.status}</td>
+                    </tr>
                   ))}
                 </tbody>
               </table>
@@ -474,8 +947,12 @@ export default function App() {
               {blocks.map((b) => (
                 <div key={b.id} className="list-row">
                   <span className="pill red">{b.reason === 'suspended_pending_review' ? 'Suspension' : 'Block'}</span>
-                  <span className="grow">{b.orgId} → {b.playerId}</span>
-                  <span className="dim">by {b.by} · {fmtStamp(b.ts)}</span>
+                  <span className="grow">
+                    {b.orgId} → {b.playerId}
+                  </span>
+                  <span className="dim">
+                    by {b.by} · {fmtStamp(b.ts)}
+                  </span>
                   <button onClick={() => liftBlock(b)}>Lift</button>
                 </div>
               ))}
@@ -484,14 +961,33 @@ export default function App() {
 
           {tab === 'moderation' && (
             <table className="data">
-              <thead><tr><th>When</th><th>Where</th><th>Severity</th><th>Flags</th></tr></thead>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Where</th>
+                  <th>Severity</th>
+                  <th>Flags</th>
+                </tr>
+              </thead>
               <tbody>
                 {moderation.map((m) => (
                   <tr key={m.id}>
                     <td>{fmtStamp(m.ts)}</td>
                     <td>{m.context?.kind ?? '—'}</td>
-                    <td>{m.severity === 'grooming' ? <span className="pill red">GROOMING — escalated</span> : <span className="pill">{cap(m.severity ?? 'contact')}</span>}</td>
-                    <td>{m.flags.map((f) => <span key={f} className="pill red" style={{ marginRight: 4 }}>{cap(f)}</span>)}</td>
+                    <td>
+                      {m.severity === 'grooming' ? (
+                        <span className="pill red">GROOMING — escalated</span>
+                      ) : (
+                        <span className="pill">{cap(m.severity ?? 'contact')}</span>
+                      )}
+                    </td>
+                    <td>
+                      {m.flags.map((f) => (
+                        <span key={f} className="pill red" style={{ marginRight: 4 }}>
+                          {cap(f)}
+                        </span>
+                      ))}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -500,17 +996,29 @@ export default function App() {
 
           {tab === 'outbox' && (
             <div className="list-rows">
-              <details className="f-about"><summary>About</summary><div className="notice">Dev mail transport: everything the platform "sends" lands here. Set SENDGRID_API_KEY on the server to deliver for real — this view then becomes the delivery audit.</div></details>
+              <details className="f-about">
+                <summary>About</summary>
+                <div className="notice">
+                  Dev mail transport: everything the platform "sends" lands here. Set SENDGRID_API_KEY on the server to
+                  deliver for real — this view then becomes the delivery audit.
+                </div>
+              </details>
               {outbox.length === 0 && <div className="notice">No mail yet.</div>}
               {outbox.map((m) => (
                 <div key={m.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <span className="grow"><b>{m.subject}</b></span>
+                    <span className="grow">
+                      <b>{m.subject}</b>
+                    </span>
                     <span className="dim">to {m.to}</span>
-                    <span className={`pill ${m.delivered ? 'green' : 'gold'}`}>{m.delivered ? 'Delivered' : cap(m.transport)}</span>
+                    <span className={`pill ${m.delivered ? 'green' : 'gold'}`}>
+                      {m.delivered ? 'Delivered' : cap(m.transport)}
+                    </span>
                     <span className="dim">{fmtStamp(m.ts)}</span>
                   </div>
-                  <div className="dim" style={{ whiteSpace: 'pre-wrap' }}>{m.text}</div>
+                  <div className="dim" style={{ whiteSpace: 'pre-wrap' }}>
+                    {m.text}
+                  </div>
                 </div>
               ))}
             </div>
@@ -518,11 +1026,19 @@ export default function App() {
 
           {tab === 'billing' && (
             <div className="list-rows">
-              <details className="f-about"><summary>About</summary><div className="notice">Success fees issued by the billing adapter (dev ledger; no payment provider is connected). A signing inside the attribution window invoices automatically.</div></details>
+              <details className="f-about">
+                <summary>About</summary>
+                <div className="notice">
+                  Success fees issued by the billing adapter (dev ledger; no payment provider is connected). A signing
+                  inside the attribution window invoices automatically.
+                </div>
+              </details>
               {invoices.length === 0 && <div className="notice">No invoices yet.</div>}
               {invoices.map((i) => (
                 <div key={i.id} className="list-row">
-                  <span className="grow"><b>{i.orgName ?? ''}</b> <span className="dim">{i.description}</span></span>
+                  <span className="grow">
+                    <b>{i.orgName ?? ''}</b> <span className="dim">{i.description}</span>
+                  </span>
                   <span className="pill gold">€{i.amount}</span>
                   <span className="pill">{cap(i.status)}</span>
                   <span className="pill blue">{i.provider}</span>
@@ -534,19 +1050,41 @@ export default function App() {
 
           {tab === 'threads' && (
             <div className="list-rows">
-              <div className="notice">Every conversation on the platform is auditable — this is the "all communications logged" promise, inspectable.</div>
+              <div className="notice">
+                Every conversation on the platform is auditable — this is the "all communications logged" promise,
+                inspectable.
+              </div>
               {threads.map((t) => (
                 <div key={t.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }} role="button" tabIndex={0} aria-expanded={openThread === t.id} onClick={() => setOpenThread(openThread === t.id ? null : t.id)} onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpenThread(openThread === t.id ? null : t.id); } }} /* keyboard-operable */>
-                    <span className="grow"><b>{t.orgName}</b> — {t.counterparty === 'guardian' ? `guardian of ${t.playerName}` : t.playerName}</span>
-                    <span className="dim">{t.scoutRole} — {t.scoutName}</span>
+                  <div
+                    style={{ display: 'flex', gap: 10, alignItems: 'center', cursor: 'pointer' }}
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={openThread === t.id}
+                    onClick={() => setOpenThread(openThread === t.id ? null : t.id)}
+                    onKeyDown={(e) => {
+                      if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                        e.preventDefault();
+                        setOpenThread(openThread === t.id ? null : t.id);
+                      }
+                    }} /* keyboard-operable */
+                  >
+                    <span className="grow">
+                      <b>{t.orgName}</b> —{' '}
+                      {t.counterparty === 'guardian' ? `guardian of ${t.playerName}` : t.playerName}
+                    </span>
+                    <span className="dim">
+                      {t.scoutRole} — {t.scoutName}
+                    </span>
                     <span className="pill">{t.messages.length} msg</span>
                   </div>
                   {openThread === t.id && (
                     <div className="thread" style={{ maxHeight: 260 }}>
                       {t.messages.map((m) => (
                         <div key={m.id} className="bubble theirs">
-                          <div className="who">{m.sender.name} · {fmtStamp(m.ts)}</div>
+                          <div className="who">
+                            {m.sender.name} · {fmtStamp(m.ts)}
+                          </div>
                           {m.text}
                         </div>
                       ))}
@@ -564,5 +1102,10 @@ export default function App() {
 }
 
 function Stat({ v, k }: { v: number | string; k: string }) {
-  return <div className="stat"><div className="v">{v}</div><div className="k">{k}</div></div>;
+  return (
+    <div className="stat">
+      <div className="v">{v}</div>
+      <div className="k">{k}</div>
+    </div>
+  );
 }

@@ -9,7 +9,7 @@ import { sequence, touchPath } from './scenes.mjs';
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
-    a = (a + 0x6D2B79F5) >>> 0;
+    a = (a + 0x6d2b79f5) >>> 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -20,8 +20,7 @@ const W = 240;
 const H = 180;
 
 /** Drawn from explicit geometry: there is no image asset in ScoutBox. */
-function render({ w = W, h = H, bg = 130, noise = 6, ball = null, balls = null,
-  people = [], gain = 1, rng }) {
+function render({ w = W, h = H, bg = 130, noise = 6, ball = null, balls = null, people = [], gain = 1, rng }) {
   const px = new Uint8Array(w * h);
   for (let i = 0; i < px.length; i += 1) {
     px[i] = clamp8((bg + (rng() - 0.5) * 2 * noise) * gain);
@@ -65,17 +64,17 @@ function envelope(scene, seq, atMs) {
 const PERSON = { x0: 96, y0: 58, x1: 130, y1: 168, luma: 55 };
 
 /** Parabolic flights between contacts; `bounces` contacts by construction. */
-function juggleFrames({ bounces = 8, fps = 12, seed = 11, apexFrac = 0.30 }) {
+function juggleFrames({ bounces = 8, fps = 12, seed = 11, apexFrac = 0.3 }) {
   const rng = mulberry32(seed);
   const frames = [];
-  const periodMs = 600;                         // one contact every 600 ms
+  const periodMs = 600; // one contact every 600 ms
   const dtMs = Math.round(1000 / fps);
-  const contactY = 150;                         // ball's lowest point
+  const contactY = 150; // ball's lowest point
   const apex = contactY - H * apexFrac;
   const totalMs = bounces * periodMs;
   let seq = 0;
   for (let t = 0; t <= totalMs; t += dtMs) {
-    const phase = (t % periodMs) / periodMs;    // 0 at contact, 1 at next
+    const phase = (t % periodMs) / periodMs; // 0 at contact, 1 at next
     // Symmetric parabola: y = contactY - 4*A*phase*(1-phase)
     const y = contactY - 4 * (contactY - apex) * phase * (1 - phase);
     const x = 113 + Math.sin(t / 900) * 5;
@@ -87,8 +86,12 @@ function juggleFrames({ bounces = 8, fps = 12, seed = 11, apexFrac = 0.30 }) {
 
 function touchFrames({ touches = 10, fps = 12, seed = 23 }) {
   return sequence({
-    w: W, h: H, fps, durationMs: 500 * touches,
-    path: touchPath({ touches, periodMs: 500 }), seed,
+    w: W,
+    h: H,
+    fps,
+    durationMs: 500 * touches,
+    path: touchPath({ touches, periodMs: 500 }),
+    seed,
   });
 }
 
@@ -135,7 +138,8 @@ export function goldenFixtures() {
       frames: (() => {
         const rng = mulberry32(31);
         return Array.from({ length: 40 }, (_, i) =>
-          envelope(render({ ball: { x: 60 + i * 2, y: 150, r: 6 }, people: [], rng }), i, i * 83));
+          envelope(render({ ball: { x: 60 + i * 2, y: 150, r: 6 }, people: [], rng }), i, i * 83),
+        );
       })(),
       expected: { state: 'person_not_detected', count: null },
     },
@@ -148,12 +152,15 @@ export function goldenFixtures() {
         const base = juggleFrames({ bounces: 8, seed: 11 });
         // Low gain rather than post-darkening, so it's a genuinely dark capture.
         const out = [];
-        const periodMs = 600, dtMs = 83, contactY = 150, apex = contactY - H * 0.30;
+        const periodMs = 600,
+          dtMs = 83,
+          contactY = 150,
+          apex = contactY - H * 0.3;
         let seq = 0;
         for (let t = 0; t <= 8 * periodMs; t += dtMs) {
           const phase = (t % periodMs) / periodMs;
           const y = contactY - 4 * (contactY - apex) * phase * (1 - phase);
-          out.push(envelope(render({ ball: { x: 113, y, r: 6 }, people: [PERSON], gain: 0.10, noise: 2, rng }), seq, t));
+          out.push(envelope(render({ ball: { x: 113, y, r: 6 }, people: [PERSON], gain: 0.1, noise: 2, rng }), seq, t));
           seq += 1;
         }
         void base;
@@ -170,12 +177,15 @@ export function goldenFixtures() {
       frames: (() => {
         const rng = mulberry32(11);
         const out = [];
-        const periodMs = 600, dtMs = 83, contactY = 150, apex = contactY - H * 0.30;
+        const periodMs = 600,
+          dtMs = 83,
+          contactY = 150,
+          apex = contactY - H * 0.3;
         let seq = 0;
         for (let t = 0; t <= 8 * periodMs; t += dtMs) {
           const phase = (t % periodMs) / periodMs;
           const y = contactY - 4 * (contactY - apex) * phase * (1 - phase);
-          const hidden = seq >= 18 && seq <= 26;    // 9 consecutive frames
+          const hidden = seq >= 18 && seq <= 26; // 9 consecutive frames
           out.push(envelope(render({ ball: hidden ? null : { x: 113, y, r: 6 }, people: [PERSON], rng }), seq, t));
           seq += 1;
         }
@@ -189,10 +199,20 @@ export function goldenFixtures() {
       description: 'Two balls of comparable size in the capture area.',
       frames: (() => {
         const rng = mulberry32(41);
-        return Array.from({ length: 40 }, (_, i) => envelope(render({
-          balls: [{ x: 120 + Math.sin(i / 3) * 14, y: 150, r: 6 }, { x: 60, y: 120, r: 6 }],
-          people: [PERSON], rng,
-        }), i, i * 83));
+        return Array.from({ length: 40 }, (_, i) =>
+          envelope(
+            render({
+              balls: [
+                { x: 120 + Math.sin(i / 3) * 14, y: 150, r: 6 },
+                { x: 60, y: 120, r: 6 },
+              ],
+              people: [PERSON],
+              rng,
+            }),
+            i,
+            i * 83,
+          ),
+        );
       })(),
       expected: { state: 'protocol_violation', count: null },
     },
@@ -202,10 +222,17 @@ export function goldenFixtures() {
       description: 'A second person in the capture area, materially interfering.',
       frames: (() => {
         const rng = mulberry32(43);
-        return Array.from({ length: 40 }, (_, i) => envelope(render({
-          ball: { x: 136 + Math.sin(i / 2) * 14, y: 150, r: 6 },
-          people: [PERSON, { x0: 20, y0: 60, x1: 56, y1: 168, luma: 58 }], rng,
-        }), i, i * 83));
+        return Array.from({ length: 40 }, (_, i) =>
+          envelope(
+            render({
+              ball: { x: 136 + Math.sin(i / 2) * 14, y: 150, r: 6 },
+              people: [PERSON, { x0: 20, y0: 60, x1: 56, y1: 168, luma: 58 }],
+              rng,
+            }),
+            i,
+            i * 83,
+          ),
+        );
       })(),
       // Two dark masses merge into one person region. The engine must not report a confident count attributed to either.
       expected: { state: 'any_refusal_or_uncounted', count: null },
@@ -230,7 +257,9 @@ export function goldenFixtures() {
         const live = juggleFrames({ bounces: 3, seed: 11 });
         const last = live[live.length - 1];
         const frozen = Array.from({ length: 12 }, (_, i) => ({
-          ...last, seq: live.length + i, atMs: last.atMs + (i + 1) * 83,
+          ...last,
+          seq: live.length + i,
+          atMs: last.atMs + (i + 1) * 83,
           // One pixel differs, so only the static-run rule catches this, not the duplicate hash.
           data: nudge(last.data),
         }));
@@ -254,11 +283,15 @@ export function goldenFixtures() {
         return Array.from({ length: 40 }, (_, i) => {
           const jx = (rng() - 0.5) * 7;
           const jy = (rng() - 0.5) * 7;
-          return envelope(render({
-            ball: { x: 136 + jx, y: 150 + jy, r: 6 },
-            people: [{ x0: PERSON.x0 + jx, y0: PERSON.y0 + jy, x1: PERSON.x1 + jx, y1: PERSON.y1 + jy, luma: 55 }],
-            rng,
-          }), i, i * 83);
+          return envelope(
+            render({
+              ball: { x: 136 + jx, y: 150 + jy, r: 6 },
+              people: [{ x0: PERSON.x0 + jx, y0: PERSON.y0 + jy, x1: PERSON.x1 + jx, y1: PERSON.y1 + jy, luma: 55 }],
+              rng,
+            }),
+            i,
+            i * 83,
+          );
         });
       })(),
       // The ball is not being played: anything counted is a false positive.
@@ -274,8 +307,8 @@ export function goldenFixtures() {
         const out = [];
         let seq = 0;
         base.forEach((f, i) => {
-          out.push({ ...f, seq: seq += 1 });
-          if (i % 4 === 0) out.push({ ...f, seq: seq += 1 });   // same pixels, new seq
+          out.push({ ...f, seq: (seq += 1) });
+          if (i % 4 === 0) out.push({ ...f, seq: (seq += 1) }); // same pixels, new seq
         });
         return out;
       })(),
@@ -291,8 +324,8 @@ export function goldenFixtures() {
         const out = [];
         let seq = 0;
         for (const f of base) {
-          out.push({ ...f, seq: seq += 1 });
-          out.push({ ...f, seq: seq += 1 });
+          out.push({ ...f, seq: (seq += 1) });
+          out.push({ ...f, seq: (seq += 1) });
         }
         return out;
       })(),

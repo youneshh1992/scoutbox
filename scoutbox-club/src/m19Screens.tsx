@@ -24,13 +24,26 @@ import { humanText } from '../../design-system/humanize';
 import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
 import {
-  m19, encodeCriteria, decodeCriteria,
-  type CriteriaInput, type CriterionInput, type MatchCard, type MatchResult,
-  type MatchVocabulary, type Watchlist, type WatchlistDetail, type WatchlistHistoryEntry,
+  m19,
+  encodeCriteria,
+  decodeCriteria,
+  type CriteriaInput,
+  type CriterionInput,
+  type MatchCard,
+  type MatchResult,
+  type MatchVocabulary,
+  type Watchlist,
+  type WatchlistDetail,
+  type WatchlistHistoryEntry,
   type WatchlistMode,
 } from './m19Api';
 import {
-  m18, BRIEF_EVIDENCE_REQUIREMENTS, BRIEF_FEET, BRIEF_LEVELS, BRIEF_POSITIONS, BRIEF_TRUST_BANDS,
+  m18,
+  BRIEF_EVIDENCE_REQUIREMENTS,
+  BRIEF_FEET,
+  BRIEF_LEVELS,
+  BRIEF_POSITIONS,
+  BRIEF_TRUST_BANDS,
   type BriefListResult,
 } from './m18Api';
 import { t, fmtDate, fmtDateTime } from './i18n';
@@ -95,14 +108,25 @@ function errMessage(e: unknown): string {
 
 /** A criterion's outcome is never colour alone — always a word too. */
 function Mark({ met }: { met: boolean }) {
-  return <span aria-hidden="true" style={{ fontWeight: 700, marginRight: 6 }}>{met ? '✓' : '○'}</span>;
+  return (
+    <span aria-hidden="true" style={{ fontWeight: 700, marginRight: 6 }}>
+      {met ? '✓' : '○'}
+    </span>
+  );
 }
 
 function LoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="notice block" role="alert">
       {message}
-      {onRetry && <> <button onClick={onRetry} style={{ marginInlineStart: 8 }}>{t('common.retry')}</button></>}
+      {onRetry && (
+        <>
+          {' '}
+          <button onClick={onRetry} style={{ marginInlineStart: 8 }}>
+            {t('common.retry')}
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -133,7 +157,11 @@ const num = (v: string): number | null => (v.trim() === '' ? null : Number(v));
  * nobody can read back six weeks later.
  */
 function CriterionRow({
-  criterion, vocab, error, onChange, onRemove,
+  criterion,
+  vocab,
+  error,
+  onChange,
+  onRemove,
 }: {
   criterion: CriterionInput;
   vocab: MatchVocabulary | null;
@@ -151,87 +179,163 @@ function CriterionRow({
   const protocols = vocab?.combineProtocols ?? [];
 
   return (
-    <div className="list-row" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', paddingBlock: 8 }}>
+    <div
+      className="list-row"
+      style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', paddingBlock: 8 }}
+    >
       <label style={{ fontSize: 13 }}>
-        <span className="dim" style={{ display: 'block', fontSize: 11 }}>{t('m19.cr.type')}</span>
+        <span className="dim" style={{ display: 'block', fontSize: 11 }}>
+          {t('m19.cr.type')}
+        </span>
         <select
           aria-label={t('m19.cr.type')}
           value={criterion.type}
-          onChange={(e) => onChange({ ...BLANK[e.target.value] ?? { type: e.target.value, operator: 'equals' } })}
+          onChange={(e) => onChange({ ...(BLANK[e.target.value] ?? { type: e.target.value, operator: 'equals' }) })}
         >
           {(vocab?.criterionTypes ?? [])
             .filter((x) => ALLOW_COMBINE_CRITERIA || !x.type.startsWith('combine_'))
-            .map((x) => <option key={x.type} value={x.type}>{typeLabel(x.type)}</option>)}
+            .map((x) => (
+              <option key={x.type} value={x.type}>
+                {typeLabel(x.type)}
+              </option>
+            ))}
         </select>
       </label>
 
       <label style={{ fontSize: 13 }}>
-        <span className="dim" style={{ display: 'block', fontSize: 11 }}>{t('m19.cr.test')}</span>
-        <select aria-label={t('m19.cr.test')} value={criterion.operator} onChange={(e) => set({ operator: e.target.value })}>
-          {operators.map((o) => <option key={o} value={o}>{opLabel(o)}</option>)}
+        <span className="dim" style={{ display: 'block', fontSize: 11 }}>
+          {t('m19.cr.test')}
+        </span>
+        <select
+          aria-label={t('m19.cr.test')}
+          value={criterion.operator}
+          onChange={(e) => set({ operator: e.target.value })}
+        >
+          {operators.map((o) => (
+            <option key={o} value={o}>
+              {opLabel(o)}
+            </option>
+          ))}
         </select>
       </label>
 
       <div style={{ flex: '1 1 240px', minWidth: 200 }}>
-        <span className="dim" style={{ display: 'block', fontSize: 11 }}>{t('m19.cr.value')}</span>
+        <span className="dim" style={{ display: 'block', fontSize: 11 }}>
+          {t('m19.cr.value')}
+        </span>
 
         {criterion.type === 'position' && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {BRIEF_POSITIONS.map((p) => (
               <label key={p} style={{ fontSize: 13 }}>
-                <input type="checkbox" checked={(criterion.values ?? []).map(String).includes(p)} onChange={() => toggleValue(p)} /> {p}
+                <input
+                  type="checkbox"
+                  checked={(criterion.values ?? []).map(String).includes(p)}
+                  onChange={() => toggleValue(p)}
+                />{' '}
+                {p}
               </label>
             ))}
             <label style={{ fontSize: 13 }}>
-              <input type="checkbox" checked={criterion.primaryOnly === true} onChange={(e) => set({ primaryOnly: e.target.checked })} /> {t('m19.cr.primaryOnly')}
+              <input
+                type="checkbox"
+                checked={criterion.primaryOnly === true}
+                onChange={(e) => set({ primaryOnly: e.target.checked })}
+              />{' '}
+              {t('m19.cr.primaryOnly')}
             </label>
           </div>
         )}
 
-        {criterion.type === 'age' && (criterion.operator === 'between' ? (
-          <span>
+        {criterion.type === 'age' &&
+          (criterion.operator === 'between' ? (
+            <span>
+              <input
+                type="number"
+                style={{ width: 80 }}
+                aria-label={t('m19.cr.ageFrom')}
+                value={criterion.values?.[0] ?? ''}
+                onChange={(e) =>
+                  set({
+                    values: [num(e.target.value) ?? '', criterion.values?.[1] ?? ''].map((x) => x as string | number),
+                  })
+                }
+              />
+              {' – '}
+              <input
+                type="number"
+                style={{ width: 80 }}
+                aria-label={t('m19.cr.ageTo')}
+                value={criterion.values?.[1] ?? ''}
+                onChange={(e) =>
+                  set({
+                    values: [criterion.values?.[0] ?? '', num(e.target.value) ?? ''].map((x) => x as string | number),
+                  })
+                }
+              />
+            </span>
+          ) : (
             <input
-              type="number" style={{ width: 80 }} aria-label={t('m19.cr.ageFrom')}
-              value={criterion.values?.[0] ?? ''}
-              onChange={(e) => set({ values: [num(e.target.value) ?? '', criterion.values?.[1] ?? ''].map((x) => x as string | number) })}
+              type="number"
+              style={{ width: 100 }}
+              aria-label={t('m19.cr.value')}
+              value={criterion.value ?? ''}
+              onChange={(e) => set({ value: num(e.target.value) })}
             />
-            {' – '}
-            <input
-              type="number" style={{ width: 80 }} aria-label={t('m19.cr.ageTo')}
-              value={criterion.values?.[1] ?? ''}
-              onChange={(e) => set({ values: [criterion.values?.[0] ?? '', num(e.target.value) ?? ''].map((x) => x as string | number) })}
-            />
-          </span>
-        ) : (
-          <input type="number" style={{ width: 100 }} aria-label={t('m19.cr.value')} value={criterion.value ?? ''} onChange={(e) => set({ value: num(e.target.value) })} />
-        ))}
+          ))}
 
         {criterion.type === 'geography' && (
           <span>
-            <input type="number" style={{ width: 110 }} aria-label={t('m19.cr.radiusKm')} value={criterion.value ?? ''} onChange={(e) => set({ value: num(e.target.value) })} /> km
+            <input
+              type="number"
+              style={{ width: 110 }}
+              aria-label={t('m19.cr.radiusKm')}
+              value={criterion.value ?? ''}
+              onChange={(e) => set({ value: num(e.target.value) })}
+            />{' '}
+            km
           </span>
         )}
 
-        {criterion.type === 'level' && (criterion.operator === 'in' ? (
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {BRIEF_LEVELS.map((l) => (
-              <label key={l} style={{ fontSize: 13 }}>
-                <input type="checkbox" checked={(criterion.values ?? []).map(String).includes(l)} onChange={() => toggleValue(l)} /> {levelLabel(l)}
-              </label>
-            ))}
-          </div>
-        ) : (
-          <select aria-label={t('m19.cr.value')} value={String(criterion.value ?? '')} onChange={(e) => set({ value: e.target.value })}>
-            <option value="">{t('m19.cr.choose')}</option>
-            {BRIEF_LEVELS.map((l) => <option key={l} value={l}>{levelLabel(l)}</option>)}
-          </select>
-        ))}
+        {criterion.type === 'level' &&
+          (criterion.operator === 'in' ? (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {BRIEF_LEVELS.map((l) => (
+                <label key={l} style={{ fontSize: 13 }}>
+                  <input
+                    type="checkbox"
+                    checked={(criterion.values ?? []).map(String).includes(l)}
+                    onChange={() => toggleValue(l)}
+                  />{' '}
+                  {levelLabel(l)}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <select
+              aria-label={t('m19.cr.value')}
+              value={String(criterion.value ?? '')}
+              onChange={(e) => set({ value: e.target.value })}
+            >
+              <option value="">{t('m19.cr.choose')}</option>
+              {BRIEF_LEVELS.map((l) => (
+                <option key={l} value={l}>
+                  {levelLabel(l)}
+                </option>
+              ))}
+            </select>
+          ))}
 
         {criterion.type === 'foot' && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {BRIEF_FEET.map((f) => (
               <label key={f} style={{ fontSize: 13 }}>
-                <input type="checkbox" checked={(criterion.values ?? []).map(String).includes(f)} onChange={() => toggleValue(f)} /> {t(`m18.br.foot.${f}`, f)}
+                <input
+                  type="checkbox"
+                  checked={(criterion.values ?? []).map(String).includes(f)}
+                  onChange={() => toggleValue(f)}
+                />{' '}
+                {t(`m18.br.foot.${f}`, f)}
               </label>
             ))}
           </div>
@@ -249,23 +353,45 @@ function CriterionRow({
               onChange={(e) => set({ value: e.target.value })}
             />
             <datalist id="m19-availability">
-              {(vocab?.availabilityValues ?? []).map((v) => <option key={v} value={v}>{t(`m19.av.${v}`, v.replace(/_/g, ' '))}</option>)}
+              {(vocab?.availabilityValues ?? []).map((v) => (
+                <option key={v} value={v}>
+                  {t(`m19.av.${v}`, v.replace(/_/g, ' '))}
+                </option>
+              ))}
             </datalist>
           </span>
         )}
 
         {criterion.type === 'evidence' && (
-          <select aria-label={t('m19.cr.value')} value={String(criterion.value ?? '')} onChange={(e) => set({ value: e.target.value })}>
+          <select
+            aria-label={t('m19.cr.value')}
+            value={String(criterion.value ?? '')}
+            onChange={(e) => set({ value: e.target.value })}
+          >
             <option value="">{t('m19.cr.choose')}</option>
-            {BRIEF_EVIDENCE_REQUIREMENTS.map((r) => <option key={r.key} value={r.key}>{t(`m18.br.ev.${r.key}`, r.label)}</option>)}
+            {BRIEF_EVIDENCE_REQUIREMENTS.map((r) => (
+              <option key={r.key} value={r.key}>
+                {t(`m18.br.ev.${r.key}`, r.label)}
+              </option>
+            ))}
           </select>
         )}
 
         {criterion.type === 'evidence_recency' && (
           <span>
-            <input type="number" style={{ width: 90 }} aria-label={t('m19.cr.days')} value={criterion.value ?? ''} onChange={(e) => set({ value: num(e.target.value) })} /> {t('m19.cr.days')}
-            {' '}
-            <select aria-label={t('m19.cr.evidenceKind')} value={criterion.evidenceKind ?? 'footage'} onChange={(e) => set({ evidenceKind: e.target.value })}>
+            <input
+              type="number"
+              style={{ width: 90 }}
+              aria-label={t('m19.cr.days')}
+              value={criterion.value ?? ''}
+              onChange={(e) => set({ value: num(e.target.value) })}
+            />{' '}
+            {t('m19.cr.days')}{' '}
+            <select
+              aria-label={t('m19.cr.evidenceKind')}
+              value={criterion.evidenceKind ?? 'footage'}
+              onChange={(e) => set({ evidenceKind: e.target.value })}
+            >
               <option value="footage">{t('m19.cr.kindFootage')}</option>
               <option value="any">{t('m19.cr.kindAny')}</option>
             </select>
@@ -274,44 +400,88 @@ function CriterionRow({
 
         {criterion.type === 'trust_band' && (
           <span>
-            <select aria-label={t('m19.cr.value')} value={String(criterion.value ?? '')} onChange={(e) => set({ value: e.target.value })}>
+            <select
+              aria-label={t('m19.cr.value')}
+              value={String(criterion.value ?? '')}
+              onChange={(e) => set({ value: e.target.value })}
+            >
               <option value="">{t('m19.cr.choose')}</option>
-              {BRIEF_TRUST_BANDS.map((b) => <option key={b} value={b}>{bandLabel(b)}</option>)}
+              {BRIEF_TRUST_BANDS.map((b) => (
+                <option key={b} value={b}>
+                  {bandLabel(b)}
+                </option>
+              ))}
             </select>
-            <span className="dim" style={{ display: 'block', fontSize: 11 }}>{t('m18.trustNote')}</span>
+            <span className="dim" style={{ display: 'block', fontSize: 11 }}>
+              {t('m18.trustNote')}
+            </span>
           </span>
         )}
 
         {criterion.type === 'combine_result' && (
-          <select aria-label={t('m19.cr.value')} value={String(criterion.value ?? '')} onChange={(e) => set({ value: e.target.value })}>
+          <select
+            aria-label={t('m19.cr.value')}
+            value={String(criterion.value ?? '')}
+            onChange={(e) => set({ value: e.target.value })}
+          >
             <option value="">{t('m19.cr.choose')}</option>
-            {protocols.map((p) => <option key={p} value={p}>{p}</option>)}
+            {protocols.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
           </select>
         )}
 
         {criterion.type === 'combine_measurement' && (
           <span>
-            <select aria-label={t('m19.cr.protocol')} value={criterion.protocol ?? ''} onChange={(e) => set({ protocol: e.target.value })}>
+            <select
+              aria-label={t('m19.cr.protocol')}
+              value={criterion.protocol ?? ''}
+              onChange={(e) => set({ protocol: e.target.value })}
+            >
               <option value="">{t('m19.cr.choose')}</option>
-              {protocols.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-            {' '}
-            <input type="number" style={{ width: 100 }} aria-label={t('m19.cr.value')} value={criterion.value ?? ''} onChange={(e) => set({ value: num(e.target.value) })} />
-            <span className="dim" style={{ display: 'block', fontSize: 11 }}>{t('m19.cr.combineNote')}</span>
+              {protocols.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>{' '}
+            <input
+              type="number"
+              style={{ width: 100 }}
+              aria-label={t('m19.cr.value')}
+              value={criterion.value ?? ''}
+              onChange={(e) => set({ value: num(e.target.value) })}
+            />
+            <span className="dim" style={{ display: 'block', fontSize: 11 }}>
+              {t('m19.cr.combineNote')}
+            </span>
           </span>
         )}
 
-        {error && <div className="notice" style={{ marginTop: 4, fontSize: 12.5 }} role="alert">{t(`m19.crErr.${error}`, error.replace(/_/g, ' ').toLowerCase())}</div>}
+        {error && (
+          <div className="notice" style={{ marginTop: 4, fontSize: 12.5 }} role="alert">
+            {t(`m19.crErr.${error}`, error.replace(/_/g, ' ').toLowerCase())}
+          </div>
+        )}
       </div>
 
-      <button onClick={onRemove} aria-label={`${t('m19.cr.remove')} — ${typeLabel(criterion.type)}`}>{t('m19.cr.remove')}</button>
+      <button onClick={onRemove} aria-label={`${t('m19.cr.remove')} — ${typeLabel(criterion.type)}`}>
+        {t('m19.cr.remove')}
+      </button>
     </div>
   );
 }
 
 /** One class of criteria — Required decides the set, Preferred adds context. */
 function CriteriaClassEditor({
-  cls, rows, vocab, errors, disabled, onChange,
+  cls,
+  rows,
+  vocab,
+  errors,
+  disabled,
+  onChange,
 }: {
   cls: 'required' | 'preferred';
   rows: CriterionInput[];
@@ -323,17 +493,29 @@ function CriteriaClassEditor({
   const errFor = (i: number) => errors.find((e) => e.class === cls && e.index === i)?.error;
   return (
     // A titled group on the page, not a browser fieldset box.
-    <fieldset
-      disabled={disabled}
-      className="m19-criteria"
-      data-criteria-class={cls}
-    >
+    <fieldset disabled={disabled} className="m19-criteria" data-criteria-class={cls}>
       <legend className="sr-only">{cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}</legend>
-      <div className="criteria-panel-heading"><div><span className="suite-eyebrow">{cls === 'required' ? 'Must be present' : 'Useful context'}</span><h3>{cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}</h3></div><span className="criteria-count">{rows.length}</span></div>
+      <div className="criteria-panel-heading">
+        <div>
+          <span className="suite-eyebrow">{cls === 'required' ? 'Must be present' : 'Useful context'}</span>
+          <h3>{cls === 'required' ? t('m19.cr.required') : t('m19.cr.preferred')}</h3>
+        </div>
+        <span className="criteria-count">{rows.length}</span>
+      </div>
       <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>
         {cls === 'required' ? t('m19.cr.requiredNote') : t('m19.cr.preferredNote')}
       </div>
-      {rows.length === 0 && <div className="criteria-empty"><span aria-hidden="true">{cls === 'required' ? '+' : '◇'}</span><b>{cls === 'required' ? 'Define your essentials' : 'Add a little more context'}</b><p>{cls === 'required' ? 'Start with a position, age range or another recorded fact.' : 'Optional details help you read each result. They never exclude a player.'}</p></div>}
+      {rows.length === 0 && (
+        <div className="criteria-empty">
+          <span aria-hidden="true">{cls === 'required' ? '+' : '◇'}</span>
+          <b>{cls === 'required' ? 'Define your essentials' : 'Add a little more context'}</b>
+          <p>
+            {cls === 'required'
+              ? 'Start with a position, age range or another recorded fact.'
+              : 'Optional details help you read each result. They never exclude a player.'}
+          </p>
+        </div>
+      )}
       {rows.map((c, i) => (
         <CriterionRow
           key={`${cls}-${i}`}
@@ -378,7 +560,9 @@ function WhyPanel({ card, compact }: { card: MatchCard; compact?: boolean }) {
               .replace('{met}', String(card.preferredMet))
               .replace('{total}', String(card.preferredTotal))}
           </b>
-          <div className="dim" style={{ fontSize: 12 }}>{t('m19.preferredCountNote')}</div>
+          <div className="dim" style={{ fontSize: 12 }}>
+            {t('m19.preferredCountNote')}
+          </div>
           {!compact && (
             <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
               {card.preferred.map((r) => (
@@ -392,13 +576,18 @@ function WhyPanel({ card, compact }: { card: MatchCard; compact?: boolean }) {
           )}
         </div>
       )}
-      <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{card.note}</div>
+      <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+        {card.note}
+      </div>
     </div>
   );
 }
 
 function MatchCardView({
-  card, openPlayer, onAddToRoom, busyRoom,
+  card,
+  openPlayer,
+  onAddToRoom,
+  busyRoom,
 }: {
   card: MatchCard;
   openPlayer: (id: string) => void;
@@ -411,17 +600,31 @@ function MatchCardView({
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
         <b style={{ fontSize: 15 }}>{card.name}</b>
         {card.position && <span className="pill blue">{card.position}</span>}
-        {card.secondaryPositions.map((p) => <span key={p} className="pill">{p}</span>)}
-        {card.age !== null && <span className="pill">{t('m19.age')} {card.age}</span>}
+        {card.secondaryPositions.map((p) => (
+          <span key={p} className="pill">
+            {p}
+          </span>
+        ))}
+        {card.age !== null && (
+          <span className="pill">
+            {t('m19.age')} {card.age}
+          </span>
+        )}
         {card.trustBand && <span className="pill">{bandLabel(card.trustBand)}</span>}
         {card.distanceKm !== null && <span className="pill">{Math.round(card.distanceKm)} km</span>}
         <span className="grow" />
         <button onClick={() => openPlayer(card.playerId)}>{t('m19.openPlayer')}</button>
         {onAddToRoom && (
-          <button disabled={busyRoom} onClick={() => onAddToRoom(card.playerId)}>{t('m19.addToRoom')}</button>
+          <button disabled={busyRoom} onClick={() => onAddToRoom(card.playerId)}>
+            {t('m19.addToRoom')}
+          </button>
         )}
       </div>
-      {card.trustBand && <div className="dim" style={{ fontSize: 12 }}>{card.trustNote}</div>}
+      {card.trustBand && (
+        <div className="dim" style={{ fontSize: 12 }}>
+          {card.trustNote}
+        </div>
+      )}
 
       <div style={{ marginTop: 8 }}>
         <WhyPanel card={card} compact={!open} />
@@ -440,8 +643,7 @@ function MatchCardView({
 }
 
 /** The orderings this app may actually ask for. */
-const permittedSorts = (sorts: string[]) =>
-  sorts.filter((s) => ALLOW_DISTANCE_SORT || s !== 'distance');
+const permittedSorts = (sorts: string[]) => sorts.filter((s) => ALLOW_DISTANCE_SORT || s !== 'distance');
 
 /** The ordering control. Every option names what it orders by, and none of
  *  them is "best match" — there is nothing to be best at. */
@@ -450,9 +652,15 @@ function SortPicker({ sorts, value, onChange }: { sorts: string[]; value: string
     <label style={{ fontSize: 13 }}>
       {t('m19.orderBy')}{' '}
       <select aria-label={t('m19.orderBy')} value={value} onChange={(e) => onChange(e.target.value)}>
-        {permittedSorts(sorts).map((s) => <option key={s} value={s}>{sortLabel(s)}</option>)}
+        {permittedSorts(sorts).map((s) => (
+          <option key={s} value={s}>
+            {sortLabel(s)}
+          </option>
+        ))}
       </select>
-      <span className="dim" style={{ display: 'block', fontSize: 11 }}>{t('m19.orderNote')}</span>
+      <span className="dim" style={{ display: 'block', fontSize: 11 }}>
+        {t('m19.orderNote')}
+      </span>
     </label>
   );
 }
@@ -469,13 +677,21 @@ export interface MatchingScreenProps extends M19ScreenProps {
 const EMPTY_CRITERIA: CriteriaInput = { required: [], preferred: [] };
 
 export function MatchingScreen({
-  session, tick, notify, openPlayer, encodedCriteria, onCriteriaState, onOpenWatchlist,
+  session,
+  tick,
+  notify,
+  openPlayer,
+  encodedCriteria,
+  onCriteriaState,
+  onOpenWatchlist,
 }: MatchingScreenProps) {
   const [vocab, setVocab] = useState<MatchVocabulary | null>(null);
   const [briefs, setBriefs] = useState<BriefListResult['items']>([]);
   const [source, setSource] = useState<'criteria' | 'brief'>('criteria');
   const [briefId, setBriefId] = useState<string>('');
-  const [criteria, setCriteria] = useState<CriteriaInput>(() => decodeCriteria(encodedCriteria ?? '') ?? EMPTY_CRITERIA);
+  const [criteria, setCriteria] = useState<CriteriaInput>(
+    () => decodeCriteria(encodedCriteria ?? '') ?? EMPTY_CRITERIA,
+  );
   const [sort, setSort] = useState<string>('recent_evidence');
   const [result, setResult] = useState<MatchResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -493,11 +709,28 @@ export function MatchingScreen({
   useEffect(() => {
     let live = true;
     setLoadErr(null);
-    m19.vocabulary(session)
-      .then((v) => { if (live) { setVocab(v); setSort((s) => (v.sorts.includes(s) ? s : v.defaultSort)); } })
-      .catch((e) => { if (live) setLoadErr(errMessage(e)); });
-    m18.briefs(session).then((d) => { if (live) setBriefs(d.items); }).catch(() => { /* brief source degrades to criteria */ });
-    return () => { live = false; };
+    m19
+      .vocabulary(session)
+      .then((v) => {
+        if (live) {
+          setVocab(v);
+          setSort((s) => (v.sorts.includes(s) ? s : v.defaultSort));
+        }
+      })
+      .catch((e) => {
+        if (live) setLoadErr(errMessage(e));
+      });
+    m18
+      .briefs(session)
+      .then((d) => {
+        if (live) setBriefs(d.items);
+      })
+      .catch(() => {
+        /* brief source degrades to criteria */
+      });
+    return () => {
+      live = false;
+    };
   }, [session, tick, bump]);
 
   // A shared link reproduces the search it was copied from.
@@ -515,15 +748,18 @@ export function MatchingScreen({
     setDetails([]);
     try {
       // Matches page by cursor: this reads the first page; a "load more" (nextCursor) is needed.
-      const out = await m19.match(session, source === 'brief'
-        ? { briefId, sort: nextSort }
-        : { criteria, sort: nextSort });
+      const out = await m19.match(
+        session,
+        source === 'brief' ? { briefId, sort: nextSort } : { criteria, sort: nextSort },
+      );
       if (out.ok) {
         setResult(out.value);
         ranRef.current = JSON.stringify(criteria);
-        onCriteriaState(source === 'criteria' && (criteria.required.length || criteria.preferred.length)
-          ? encodeCriteria(criteria)
-          : null);
+        onCriteriaState(
+          source === 'criteria' && (criteria.required.length || criteria.preferred.length)
+            ? encodeCriteria(criteria)
+            : null,
+        );
       } else {
         setResult(null);
         setMessage(out.message);
@@ -545,14 +781,42 @@ export function MatchingScreen({
   return (
     <div className="matching-workspace">
       <p className="matching-principle">{t('m19.noScore')}</p>
-      <details className="f-about" style={{ marginBottom: 10 }} data-testid="matching-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}>{t('m19.intro')}</div></details>
+      <details className="f-about" style={{ marginBottom: 10 }} data-testid="matching-about">
+        <summary>About</summary>
+        <div className="dim" style={{ fontSize: 12.5 }}>
+          {t('m19.intro')}
+        </div>
+      </details>
 
       {loadErr && <LoadError message={loadErr} onRetry={() => setBump((b) => b + 1)} />}
 
       <div className="match-builder" aria-label={t('m19.criteriaLabel')}>
         <div className="matching-source" role="radiogroup" aria-label="Choose your search source">
-          <label className={source==='criteria'?'selected':''}><input type="radio" name="m19-source" checked={source==='criteria'} onChange={()=>setSource('criteria')}/><span className="source-symbol" aria-hidden="true">01</span><span><strong>{t('m19.srcCriteria')}</strong><small>Build a search for today’s requirements</small></span></label>
-          <label className={source==='brief'?'selected':''}><input type="radio" name="m19-source" checked={source==='brief'} onChange={()=>setSource('brief')}/><span className="source-symbol" aria-hidden="true">02</span><span><strong>{t('m19.srcBrief')}</strong><small>Start from an existing recruitment brief</small></span></label>
+          <label className={source === 'criteria' ? 'selected' : ''}>
+            <input
+              type="radio"
+              name="m19-source"
+              checked={source === 'criteria'}
+              onChange={() => setSource('criteria')}
+            />
+            <span className="source-symbol" aria-hidden="true">
+              01
+            </span>
+            <span>
+              <strong>{t('m19.srcCriteria')}</strong>
+              <small>Build a search for today’s requirements</small>
+            </span>
+          </label>
+          <label className={source === 'brief' ? 'selected' : ''}>
+            <input type="radio" name="m19-source" checked={source === 'brief'} onChange={() => setSource('brief')} />
+            <span className="source-symbol" aria-hidden="true">
+              02
+            </span>
+            <span>
+              <strong>{t('m19.srcBrief')}</strong>
+              <small>Start from an existing recruitment brief</small>
+            </span>
+          </label>
         </div>
 
         {source === 'brief' ? (
@@ -561,10 +825,16 @@ export function MatchingScreen({
               {t('m19.pickBrief')}{' '}
               <select aria-label={t('m19.pickBrief')} value={briefId} onChange={(e) => setBriefId(e.target.value)}>
                 <option value="">{t('m19.cr.choose')}</option>
-                {briefs.map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}
+                {briefs.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.title}
+                  </option>
+                ))}
               </select>
             </label>
-            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m19.briefAllRequired')}</div>
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              {t('m19.briefAllRequired')}
+            </div>
           </div>
         ) : (
           <div className="matching-criteria-grid">
@@ -585,14 +855,31 @@ export function MatchingScreen({
           </div>
         )}
 
-        {message && <div className="notice block" role="alert">{message}</div>}
+        {message && (
+          <div className="notice block" role="alert">
+            {message}
+          </div>
+        )}
 
         <div className="matching-runbar">
-          <button className="primary" disabled={busy || !canRun} onClick={() => run()}>{t('m19.run')}</button>
-          {vocab && <SortPicker sorts={vocab.sorts} value={sort} onChange={(s) => { setSort(s); if (result) void run(s); }} />}
+          <button className="primary" disabled={busy || !canRun} onClick={() => run()}>
+            {t('m19.run')}
+          </button>
+          {vocab && (
+            <SortPicker
+              sorts={vocab.sorts}
+              value={sort}
+              onChange={(s) => {
+                setSort(s);
+                if (result) void run(s);
+              }}
+            />
+          )}
         </div>
         {!canRun && source === 'criteria' && (
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m19.needRequired')}</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+            {t('m19.needRequired')}
+          </div>
         )}
       </div>
 
@@ -613,7 +900,14 @@ export function MatchingScreen({
 }
 
 function MatchResults({
-  session, result, criteria, source, briefId, openPlayer, notify, onOpenWatchlist,
+  session,
+  result,
+  criteria,
+  source,
+  briefId,
+  openPlayer,
+  notify,
+  onOpenWatchlist,
 }: {
   session: Session;
   result: MatchResult;
@@ -637,9 +931,10 @@ function MatchResults({
     setBusy(true);
     setSaveErr(null);
     try {
-      const out = await m19.createWatchlist(session, source === 'brief'
-        ? { name, mode, briefId, sourceType: 'brief' }
-        : { name, mode: 'snapshot', criteria });
+      const out = await m19.createWatchlist(
+        session,
+        source === 'brief' ? { name, mode, briefId, sourceType: 'brief' } : { name, mode: 'snapshot', criteria },
+      );
       if (out.ok) {
         notify(t('m19.wl.created'));
         setSaving(false);
@@ -660,54 +955,92 @@ function MatchResults({
       <div className="section" aria-label={t('m19.resultsLabel')}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
           <b data-match-total={result.total}>
-            {result.total === 1
-              ? t('m19.countOne')
-              : t('m19.countMany').replace('{n}', String(result.total))}
+            {result.total === 1 ? t('m19.countOne') : t('m19.countMany').replace('{n}', String(result.total))}
           </b>
           <span className="pill">{sortLabel(result.sort)}</span>
         </div>
-        <div aria-label={t('m19.criteriaRun')}><CriteriaSummary criteria={result.criteria} /></div>
-        <div className="dim" style={{ fontSize: 12 }}>{result.note}</div>
-        <div className="dim" style={{ fontSize: 12 }}>{result.scoreNote}</div>
-        <div className="dim" style={{ fontSize: 12 }}>{t('m19.evaluatedAt')}: {fmtDateTime(result.evaluatedAt)}</div>
+        <div aria-label={t('m19.criteriaRun')}>
+          <CriteriaSummary criteria={result.criteria} />
+        </div>
+        <div className="dim" style={{ fontSize: 12 }}>
+          {result.note}
+        </div>
+        <div className="dim" style={{ fontSize: 12 }}>
+          {result.scoreNote}
+        </div>
+        <div className="dim" style={{ fontSize: 12 }}>
+          {t('m19.evaluatedAt')}: {fmtDateTime(result.evaluatedAt)}
+        </div>
         {result.truncated && <div className="notice block">{result.note}</div>}
 
         <div style={{ marginTop: 10 }}>
           {!saving ? (
-            <button className="primary" onClick={() => setSaving(true)}>{t('m19.saveAsWatchlist')}</button>
+            <button className="primary" onClick={() => setSaving(true)}>
+              {t('m19.saveAsWatchlist')}
+            </button>
           ) : (
             <div>
               <label style={{ fontSize: 13, display: 'block', marginBottom: 6 }}>
                 {t('m19.wl.name')}{' '}
-                <input aria-label={t('m19.wl.name')} value={name} onChange={(e) => setName(e.target.value)} style={{ width: 260 }} />
+                <input
+                  aria-label={t('m19.wl.name')}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  style={{ width: 260 }}
+                />
               </label>
               <fieldset className="m19-criteria">
                 <legend className="m19-criteria-title">{t('m19.wl.modeLegend')}</legend>
                 {source === 'brief' && (
                   <label style={{ fontSize: 13, display: 'block' }}>
-                    <input type="radio" name="m19-mode" checked={mode === 'live_linked'} onChange={() => setMode('live_linked')} />{' '}
+                    <input
+                      type="radio"
+                      name="m19-mode"
+                      checked={mode === 'live_linked'}
+                      onChange={() => setMode('live_linked')}
+                    />{' '}
                     <b>{modeLabel('live_linked')}</b> — {t('m19.wl.modeLiveNote')}
                   </label>
                 )}
                 <label style={{ fontSize: 13, display: 'block' }}>
-                  <input type="radio" name="m19-mode" checked={mode === 'snapshot'} onChange={() => setMode('snapshot')} />{' '}
+                  <input
+                    type="radio"
+                    name="m19-mode"
+                    checked={mode === 'snapshot'}
+                    onChange={() => setMode('snapshot')}
+                  />{' '}
                   <b>{modeLabel('snapshot')}</b> — {t('m19.wl.modeSnapshotNote')}
                 </label>
               </fieldset>
-              {saveErr && <div className="notice block" role="alert">{saveErr}</div>}
+              {saveErr && (
+                <div className="notice block" role="alert">
+                  {saveErr}
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8 }}>
-                <button className="primary" disabled={busy || !name.trim()} onClick={save}>{t('common.save')}</button>
-                <button onClick={() => { setSaving(false); setSaveErr(null); }}>{t('common.cancel')}</button>
+                <button className="primary" disabled={busy || !name.trim()} onClick={save}>
+                  {t('common.save')}
+                </button>
+                <button
+                  onClick={() => {
+                    setSaving(false);
+                    setSaveErr(null);
+                  }}
+                >
+                  {t('common.cancel')}
+                </button>
               </div>
             </div>
           )}
         </div>
       </div>
 
-      {result.items.length === 0 && (
-        <div className="notice block">{t('m19.emptyMatches')}</div>
-      )}
-      <div className="matching-results-list">{result.items.map((c) => <MatchCardView key={c.playerId} card={c} openPlayer={openPlayer} />)}</div>
+      {result.items.length === 0 && <div className="notice block">{t('m19.emptyMatches')}</div>}
+      <div className="matching-results-list">
+        {result.items.map((c) => (
+          <MatchCardView key={c.playerId} card={c} openPlayer={openPlayer} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -723,9 +1056,11 @@ export interface WatchlistsScreenProps extends M19ScreenProps {
 }
 
 export function WatchlistsScreen(props: WatchlistsScreenProps) {
-  return props.watchlistId
-    ? <WatchlistDetailView {...props} watchlistId={props.watchlistId} />
-    : <WatchlistList {...props} />;
+  return props.watchlistId ? (
+    <WatchlistDetailView {...props} watchlistId={props.watchlistId} />
+  ) : (
+    <WatchlistList {...props} />
+  );
 }
 
 function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: WatchlistsScreenProps) {
@@ -740,20 +1075,38 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
     setErr(null);
     // The server pages this list (first 50, newest activity first; `nextCursor` names the next page): a "load more" is
     // needed here once a club keeps more than 50 watchlists, archived ones included.
-    m19.watchlists(session, status || undefined)
-      .then((d) => { if (live) { setItems(d.items); setNote(d.note); } })
-      .catch((e) => { if (live) setErr(errMessage(e)); });
-    return () => { live = false; };
+    m19
+      .watchlists(session, status || undefined)
+      .then((d) => {
+        if (live) {
+          setItems(d.items);
+          setNote(d.note);
+        }
+      })
+      .catch((e) => {
+        if (live) setErr(errMessage(e));
+      });
+    return () => {
+      live = false;
+    };
   }, [session, tick, bump, status]);
 
   return (
     <div>
-      <details className="f-about" style={{ marginBottom: 10 }} data-testid="watchlists-about"><summary>About</summary><div className="dim" style={{ fontSize: 12.5 }}><p>{t('m19.wl.intro')}</p><p>{t('m19.wl.derivedNote')}</p></div></details>
+      <details className="f-about" style={{ marginBottom: 10 }} data-testid="watchlists-about">
+        <summary>About</summary>
+        <div className="dim" style={{ fontSize: 12.5 }}>
+          <p>{t('m19.wl.intro')}</p>
+          <p>{t('m19.wl.derivedNote')}</p>
+        </div>
+      </details>
 
       {err && <LoadError message={err} onRetry={() => setBump((b) => b + 1)} />}
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center' }}>
-        <button className="primary" onClick={onNewWatchlist}>{t('m19.wl.new')}</button>
+        <button className="primary" onClick={onNewWatchlist}>
+          {t('m19.wl.new')}
+        </button>
         <label style={{ fontSize: 13 }}>
           {t('common.status')}{' '}
           <select aria-label={t('common.status')} value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -770,24 +1123,53 @@ function WatchlistList({ session, tick, onOpenWatchlist, onNewWatchlist }: Watch
         {items && items.length === 0 && <div className="dim">{t('m19.wl.empty')}</div>}
         {items && items.length > 0 && (
           <div className="watchlist-register">
-            {items.map(w => <article key={w.id} className="watchlist-record">
-              <header className="watchlist-record-heading"><div><span className="suite-eyebrow">{t('m19.wl.criteria')}</span><h3>{w.name}</h3></div><span className="pill">{wlStatusLabel(w.status)}</span><button onClick={() => onOpenWatchlist(w.id)} aria-label={`${t('m19.wl.open')} ${w.name}`}>{t('m19.wl.open')} <span aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button></header>
-              <CriteriaSummary criteria={w.criteria} />
-              <RecordFacts items={[
-                {label: t('m19.wl.mode'), value: modeLabel(w.mode)},
-                {label: t('m19.wl.lastDerived'), value: w.lastReconciledAt ? fmtDate(w.lastReconciledAt) : t('m19.wl.neverDerived')},
-              ]} />
-            </article>)}
+            {items.map((w) => (
+              <article key={w.id} className="watchlist-record">
+                <header className="watchlist-record-heading">
+                  <div>
+                    <span className="suite-eyebrow">{t('m19.wl.criteria')}</span>
+                    <h3>{w.name}</h3>
+                  </div>
+                  <span className="pill">{wlStatusLabel(w.status)}</span>
+                  <button onClick={() => onOpenWatchlist(w.id)} aria-label={`${t('m19.wl.open')} ${w.name}`}>
+                    {t('m19.wl.open')}{' '}
+                    <span aria-hidden="true">
+                      <Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }} />
+                    </span>
+                  </button>
+                </header>
+                <CriteriaSummary criteria={w.criteria} />
+                <RecordFacts
+                  items={[
+                    { label: t('m19.wl.mode'), value: modeLabel(w.mode) },
+                    {
+                      label: t('m19.wl.lastDerived'),
+                      value: w.lastReconciledAt ? fmtDate(w.lastReconciledAt) : t('m19.wl.neverDerived'),
+                    },
+                  ]}
+                />
+              </article>
+            ))}
           </div>
         )}
-        {note && <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{note}</div>}
+        {note && (
+          <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>
+            {note}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 function WatchlistDetailView({
-  session, tick, notify, openPlayer, watchlistId, onCloseWatchlist, onOpenRoom,
+  session,
+  tick,
+  notify,
+  openPlayer,
+  watchlistId,
+  onCloseWatchlist,
+  onOpenRoom,
 }: WatchlistsScreenProps & { watchlistId: string }) {
   const [data, setData] = useState<WatchlistDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -807,11 +1189,21 @@ function WatchlistDetailView({
     let live = true;
     setErr(null);
     // The members page by cursor: this reads the first page; a "load more" (nextCursor) is needed.
-    m19.watchlist(session, watchlistId, { sort })
+    m19
+      .watchlist(session, watchlistId, { sort })
       // A refetch never overwrites a name the person is in the middle of typing.
-      .then((d) => { if (live) { setData(d); if (!renaming) setName(d.watchlist.name); } })
-      .catch((e) => { if (live) setErr(errMessage(e)); });
-    return () => { live = false; };
+      .then((d) => {
+        if (live) {
+          setData(d);
+          if (!renaming) setName(d.watchlist.name);
+        }
+      })
+      .catch((e) => {
+        if (live) setErr(errMessage(e));
+      });
+    return () => {
+      live = false;
+    };
     // `renaming` is deliberately not a dependency: it only guards the name.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, watchlistId, tick, bump, sort]);
@@ -825,20 +1217,28 @@ function WatchlistDetailView({
     setConflict(null);
     try {
       const out = await m19.patchWatchlist(session, w.id, { ...input, expectedRev: atRev ?? w.rev });
-      if (out.ok) { notify(okText); setBump((b) => b + 1); return true; }
+      if (out.ok) {
+        notify(okText);
+        setBump((b) => b + 1);
+        return true;
+      }
       notify(out.message, true);
       return false;
     } catch (e) {
       const c = conflictOf(e);
-      if (c) setConflict(c); else notify(errMessage(e), true);
+      if (c) setConflict(c);
+      else notify(errMessage(e), true);
       return false;
     }
   };
 
   const setStatus = async (status: string) => {
-    const action = status === 'archived'
-      ? DESTRUCTIVE_ACTIONS.archiveWatchlist
-      : status === 'paused' ? DESTRUCTIVE_ACTIONS.pauseWatchlist : null;
+    const action =
+      status === 'archived'
+        ? DESTRUCTIVE_ACTIONS.archiveWatchlist
+        : status === 'paused'
+          ? DESTRUCTIVE_ACTIONS.pauseWatchlist
+          : null;
     if (action && !confirmDestructive({ ...action, name: w?.name ?? null })) return;
     await patch({ status }, t('m19.wl.statusChanged'));
   };
@@ -861,7 +1261,9 @@ function WatchlistDetailView({
     return (
       <div>
         <button onClick={onCloseWatchlist}>← {t('m19.wl.back')}</button>
-        <div className="notice block" style={{ marginTop: 10 }} role="alert">{err}</div>
+        <div className="notice block" style={{ marginTop: 10 }} role="alert">
+          {err}
+        </div>
       </div>
     );
   }
@@ -876,7 +1278,12 @@ function WatchlistDetailView({
       {conflict && (
         <ConflictNotice
           conflict={conflict}
-          onReload={() => { setConflict(null); setRenaming(false); editRevRef.current = null; setBump((b) => b + 1); }}
+          onReload={() => {
+            setConflict(null);
+            setRenaming(false);
+            editRevRef.current = null;
+            setBump((b) => b + 1);
+          }}
           onKeepChanges={() => setConflict(null)}
         />
       )}
@@ -886,21 +1293,44 @@ function WatchlistDetailView({
           <h3 style={{ margin: 0 }}>{w.name}</h3>
           <span className="pill blue">{wlStatusLabel(w.status)}</span>
           <span className="pill">{modeLabel(w.mode)}</span>
-          {w.notify ? <span className="pill outline-green">{t('m19.wl.notifyOn')}</span> : <span className="pill">{t('m19.wl.notifyOff')}</span>}
+          {w.notify ? (
+            <span className="pill outline-green">{t('m19.wl.notifyOn')}</span>
+          ) : (
+            <span className="pill">{t('m19.wl.notifyOff')}</span>
+          )}
         </div>
         <CriteriaSummary criteria={w.criteria} />
-        <RecordFacts items={[
-          ...(w.createdBy ? [{label: t('m19.wl.createdBy'), value: w.createdBy}] : []),
-          {label: t('m19.wl.lastDerived'), value: data.evaluatedAt ? fmtDateTime(data.evaluatedAt) : t('m19.wl.neverDerived')},
-        ]} />
-        <div className="dim" style={{ fontSize: 12 }}>{data.refreshNote}</div>
+        <RecordFacts
+          items={[
+            ...(w.createdBy ? [{ label: t('m19.wl.createdBy'), value: w.createdBy }] : []),
+            {
+              label: t('m19.wl.lastDerived'),
+              value: data.evaluatedAt ? fmtDateTime(data.evaluatedAt) : t('m19.wl.neverDerived'),
+            },
+          ]}
+        />
+        <div className="dim" style={{ fontSize: 12 }}>
+          {data.refreshNote}
+        </div>
 
         {(blocked.blocked || blocked.paused) && (
-          <div className="notice block" role="status" style={{ marginTop: 8 }}>{blocked.message}</div>
+          <div className="notice block" role="status" style={{ marginTop: 8 }}>
+            {blocked.message}
+          </div>
         )}
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-          {!renaming && <button onClick={() => { editRevRef.current = w.rev; setName(w.name); setRenaming(true); }}>{t('m19.wl.rename')}</button>}
+          {!renaming && (
+            <button
+              onClick={() => {
+                editRevRef.current = w.rev;
+                setName(w.name);
+                setRenaming(true);
+              }}
+            >
+              {t('m19.wl.rename')}
+            </button>
+          )}
           {w.status === 'active' && <button onClick={() => setStatus('paused')}>{t('m19.wl.pause')}</button>}
           {w.status === 'paused' && <button onClick={() => setStatus('active')}>{t('m19.wl.resume')}</button>}
           {w.status !== 'archived' && <button onClick={() => setStatus('archived')}>{t('m19.wl.archive')}</button>}
@@ -909,38 +1339,76 @@ function WatchlistDetailView({
           </button>
           <button onClick={() => setBump((b) => b + 1)}>{t('m19.wl.refresh')}</button>
         </div>
-        <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m19.wl.notifyNote')}</div>
+        <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+          {t('m19.wl.notifyNote')}
+        </div>
 
         {renaming && (
           <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input aria-label={t('m19.wl.name')} value={name} onChange={(e) => setName(e.target.value)} style={{ width: 260 }} />
+            <input
+              aria-label={t('m19.wl.name')}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={{ width: 260 }}
+            />
             <button
               className="primary"
               disabled={!name.trim()}
               onClick={async () => {
                 const ok = await patch({ name: name.trim() }, t('m19.wl.renamed'), editRevRef.current ?? w.rev);
-                if (ok) { setRenaming(false); editRevRef.current = null; }
+                if (ok) {
+                  setRenaming(false);
+                  editRevRef.current = null;
+                }
               }}
-            >{t('common.save')}</button>
-            <button onClick={() => { setRenaming(false); editRevRef.current = null; setName(w.name); }}>{t('common.cancel')}</button>
+            >
+              {t('common.save')}
+            </button>
+            <button
+              onClick={() => {
+                setRenaming(false);
+                editRevRef.current = null;
+                setName(w.name);
+              }}
+            >
+              {t('common.cancel')}
+            </button>
           </div>
         )}
       </div>
 
       <div className="section" aria-label={t('m19.wl.summaryLabel')}>
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-          <span data-wl-count="current"><b>{data.summary.current}</b> {t('m19.wl.currentlyMatching')}</span>
-          <span data-wl-count="newly-matched"><b>{data.summary.newlyMatched}</b> {t('m19.wl.newlyMatched')}</span>
-          <span data-wl-count="no-longer-matches"><b>{data.summary.noLongerMatches}</b> {t('m19.wl.noLongerMatches')}</span>
+          <span data-wl-count="current">
+            <b>{data.summary.current}</b> {t('m19.wl.currentlyMatching')}
+          </span>
+          <span data-wl-count="newly-matched">
+            <b>{data.summary.newlyMatched}</b> {t('m19.wl.newlyMatched')}
+          </span>
+          <span data-wl-count="no-longer-matches">
+            <b>{data.summary.noLongerMatches}</b> {t('m19.wl.noLongerMatches')}
+          </span>
         </div>
-        {data.summary.changedAt
-          ? <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('m19.wl.changedAt')}: {fmtDateTime(data.summary.changedAt)}</div>
-          : <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('m19.wl.noChangeYet')}</div>}
-        <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{data.summary.note}</div>
+        {data.summary.changedAt ? (
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            {t('m19.wl.changedAt')}: {fmtDateTime(data.summary.changedAt)}
+          </div>
+        ) : (
+          <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+            {t('m19.wl.noChangeYet')}
+          </div>
+        )}
+        <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+          {data.summary.note}
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '10px 0' }}>
-        <SortPicker sorts={['recent_evidence', 'name', 'age', 'evidence_confidence', 'distance']} value={sort} onChange={setSort} />
+        <SortPicker
+          sorts={['recent_evidence', 'name', 'age', 'evidence_confidence', 'distance']}
+          value={sort}
+          onChange={setSort}
+        />
       </div>
 
       {data.items.length === 0 && !blocked.blocked && <div className="notice block">{t('m19.emptyMatches')}</div>}
@@ -972,7 +1440,8 @@ function WatchlistHistory({ session, watchlistId, tick }: { session: Session; wa
   useEffect(() => {
     let live = true;
     setErr(null);
-    m19.history(session, watchlistId, cursor ? { cursor } : {})
+    m19
+      .history(session, watchlistId, cursor ? { cursor } : {})
       .then((d) => {
         if (!live) return;
         setItems((prev) => (cursor ? [...prev, ...d.items] : d.items));
@@ -980,38 +1449,68 @@ function WatchlistHistory({ session, watchlistId, tick }: { session: Session; wa
         setNote(d.note);
         setTotal(d.total);
       })
-      .catch((e) => { if (live) setErr(errMessage(e)); });
-    return () => { live = false; };
+      .catch((e) => {
+        if (live) setErr(errMessage(e));
+      });
+    return () => {
+      live = false;
+    };
   }, [session, watchlistId, tick, cursor]);
 
   return (
     <div className="section" aria-label={t('m19.hist.label')}>
-      <h4 style={{ marginTop: 0 }}>{t('m19.hist.title')} {total > 0 && <span className="pill">{total}</span>}</h4>
+      <h4 style={{ marginTop: 0 }}>
+        {t('m19.hist.title')} {total > 0 && <span className="pill">{total}</span>}
+      </h4>
       {err && <LoadError message={err} />}
-      {items.length === 0 && !err && <div className="dim" style={{ fontSize: 13 }}>{t('m19.hist.empty')}</div>}
+      {items.length === 0 && !err && (
+        <div className="dim" style={{ fontSize: 13 }}>
+          {t('m19.hist.empty')}
+        </div>
+      )}
       <ul style={{ margin: 0, paddingInlineStart: 20 }}>
         {items.map((h) => (
           <li key={h.id} style={{ fontSize: 13, marginBottom: 4 }}>
             <span className={`pill ${h.transition === 'entered' ? 'outline-green' : ''}`}>
               {h.transition === 'entered' ? t('m19.hist.entered') : t('m19.hist.left')}
             </span>{' '}
-            <b>{h.playerName ?? t('m19.hist.playerUnavailable')}</b>{' '}
-            <span className="dim">{fmtDateTime(h.at)}</span>
-            <div className="dim" style={{ fontSize: 12.5 }}>{h.text || reasonLabel(h.reason)}</div>
+            <b>{h.playerName ?? t('m19.hist.playerUnavailable')}</b> <span className="dim">{fmtDateTime(h.at)}</span>
+            <div className="dim" style={{ fontSize: 12.5 }}>
+              {h.text || reasonLabel(h.reason)}
+            </div>
           </li>
         ))}
       </ul>
-      {next && <button style={{ marginTop: 8 }} onClick={() => setCursor(next)}>{t('m19.hist.more')}</button>}
-      {note && <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{note}</div>}
+      {next && (
+        <button style={{ marginTop: 8 }} onClick={() => setCursor(next)}>
+          {t('m19.hist.more')}
+        </button>
+      )}
+      {note && (
+        <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>
+          {note}
+        </div>
+      )}
     </div>
   );
 }
 
 function CriteriaSummary({ criteria }: { criteria: { required: string[]; preferred: string[] } }) {
-  return <div className="saved-criteria-grid">{(['required', 'preferred'] as const).map(kind =>
-    <section key={kind} className="saved-criteria-group" aria-label={t(`m19.cr.${kind}`)}>
-      <header><span>{t(`m19.cr.${kind}`)}</span><b>{criteria[kind].length}</b></header>
-      {criteria[kind].length ? <DetailItems items={criteria[kind].map(value => sentenceCase(humanText(value)))} /> : <p className="criteria-empty">{t('m19.cr.none')}</p>}
-    </section>
-  )}</div>;
+  return (
+    <div className="saved-criteria-grid">
+      {(['required', 'preferred'] as const).map((kind) => (
+        <section key={kind} className="saved-criteria-group" aria-label={t(`m19.cr.${kind}`)}>
+          <header>
+            <span>{t(`m19.cr.${kind}`)}</span>
+            <b>{criteria[kind].length}</b>
+          </header>
+          {criteria[kind].length ? (
+            <DetailItems items={criteria[kind].map((value) => sentenceCase(humanText(value)))} />
+          ) : (
+            <p className="criteria-empty">{t('m19.cr.none')}</p>
+          )}
+        </section>
+      ))}
+    </div>
+  );
 }

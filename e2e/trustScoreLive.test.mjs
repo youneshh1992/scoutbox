@@ -19,12 +19,24 @@ const API_PORT = 4009;
 const API = `http://localhost:${API_PORT}`;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-trustscorelive-'));
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 
 console.log('building live bundles for :4009…');
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-trust`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
-execSync(`EXPO_PUBLIC_API_URL=${API} npx expo export --clear --platform web --output-dir dist-live-trust`, { cwd: path.join(ROOT, 'scoutbox-player'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-trust`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
+execSync(`EXPO_PUBLIC_API_URL=${API} npx expo export --clear --platform web --output-dir dist-live-trust`, {
+  cwd: path.join(ROOT, 'scoutbox-player'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -34,11 +46,20 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -51,8 +72,19 @@ function serveDir(dir, port) {
 }
 serveDir('scoutbox-player/dist-live-trust', 8601);
 serveDir('scoutbox-club/dist-live-trust', 8602);
-process.on('exit', () => { try { serverProc.kill('SIGKILL'); } catch {} for (const s of statics) s.close(); fs.rmSync(DATA, { recursive: true, force: true }); });
-for (let i = 0; i < 60; i++) { try { if ((await fetch(`${API}/healthz`)).ok) break; } catch {} await new Promise((r) => setTimeout(r, 250)); }
+process.on('exit', () => {
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {}
+  for (const s of statics) s.close();
+  fs.rmSync(DATA, { recursive: true, force: true });
+});
+for (let i = 0; i < 60; i++) {
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {}
+  await new Promise((r) => setTimeout(r, 250));
+}
 console.log(`backend up on :${API_PORT}`);
 
 const j = async (p, opts = {}, headers = {}) => {
@@ -60,8 +92,17 @@ const j = async (p, opts = {}, headers = {}) => {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 };
 const A = { 'x-admin-key': 'scoutbox-admin', 'content-type': 'application/json' };
-const maria = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }) })).body;
-await j('/admin/verification/orgs/org-eastport/appoint-root', { method: 'POST', body: JSON.stringify({ userId: maria.userId, reason: 'trust score live root admin' }) }, A);
+const maria = (
+  await j('/auth/org/login', {
+    method: 'POST',
+    body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }),
+  })
+).body;
+await j(
+  '/admin/verification/orgs/org-eastport/appoint-root',
+  { method: 'POST', body: JSON.stringify({ userId: maria.userId, reason: 'trust score live root admin' }) },
+  A,
+);
 
 const browser = await chromium.launch({ executablePath: EXE });
 const ctxPlayer = await browser.newContext({ viewport: { width: 480, height: 1200 } });
@@ -72,7 +113,7 @@ const player = await ctxPlayer.newPage();
 player.on('pageerror', (e) => fail(`player page error: ${e}`));
 await player.goto('http://localhost:8601/');
 await player.waitForSelector('text=Our promises to every player', { timeout: 30000 });
-await player.locator('text=Enter').nth(0).click();          // Kola (adult)
+await player.locator('text=Enter').nth(0).click(); // Kola (adult)
 await player.waitForSelector('text=Your visibility right now', { timeout: 20000 });
 await player.click('a[href="/football"]');
 await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
@@ -82,15 +123,19 @@ say('T1: the player Football tab shows the ScoutBox Trust Score');
   // band and the disclaimer arrive with it. Wait for the projection to land so
   // the assertions below judge the loaded surface, never a half-painted one.
   // A timeout here is not the verdict — the assertions still are.
-  await player.locator('text=reflects verification and evidence confidence')
-    .first().waitFor({ timeout: 20000 }).catch(() => {});
+  await player
+    .locator('text=reflects verification and evidence confidence')
+    .first()
+    .waitFor({ timeout: 20000 })
+    .catch(() => {});
   const body = await player.locator('body').innerText();
   if (!/reflects verification and evidence confidence/.test(body)) fail('T1: the mandatory disclaimer is missing');
   say('T1: the disclaimer states this is evidence confidence, not football ability');
   if (!/(Limited|Developing|Established|Strong|Very strong) evidence/.test(body)) fail('T1: no evidence band shown');
   say('T1: an evidence band is shown alongside the score');
   // No ability/character language anywhere on the surface.
-  if (/untrustworthy|suspicious|fraud|risky|poor player|talent score|ability score/i.test(body)) fail('T1: prohibited ability/character language on the Trust surface');
+  if (/untrustworthy|suspicious|fraud|risky|poor player|talent score|ability score/i.test(body))
+    fail('T1: prohibited ability/character language on the Trust surface');
   say('T1: no ability or character language appears');
 
   await player.getByText('Why this score?', { exact: true }).first().click();
@@ -113,7 +158,9 @@ await club.fill('.enter-row input', 'Maria Keane');
 await club.selectOption('.enter-row select', 'Head of Recruitment');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('nav.sidebar', { timeout: 20000 });
-await club.evaluate(() => { location.hash = '#/search'; });
+await club.evaluate(() => {
+  location.hash = '#/search';
+});
 await club.waitForSelector('.player-card:has-text("Kola Adeyemi")', { timeout: 20000 });
 await club.click('.player-card:has-text("Kola Adeyemi")');
 await club.waitForSelector('[aria-label="Trust Profile"]', { timeout: 15000 });
@@ -122,13 +169,16 @@ say('T8: the club player drawer contains a Trust Profile panel');
   await club.click('[aria-label="Trust Profile"] button:has-text("Show")');
   await club.waitForSelector('[aria-label="Trust Profile"]:has-text("Evidence Confidence")', { timeout: 15000 });
   const panel = await club.locator('[aria-label="Trust Profile"]').innerText();
-  if (!/not football ability/i.test(panel)) fail('T8: the club panel must state evidence confidence, not football ability');
+  if (!/not football ability/i.test(panel))
+    fail('T8: the club panel must state evidence confidence, not football ability');
   say('T8: the club panel carries the "not football ability" disclaimer');
-  if (!/never ranks players by Trust Score/i.test(panel)) fail('T8: the club panel must state ScoutBox never ranks by Trust Score');
+  if (!/never ranks players by Trust Score/i.test(panel))
+    fail('T8: the club panel must state ScoutBox never ranks by Trust Score');
   say('T8: the club panel states ScoutBox never ranks players by Trust Score');
   // The club projection must not carry the player's private derivation.
-  if (/What could strengthen it further|gaps/i.test(panel)) fail('T8: the club must not see the player\'s evidence gaps');
-  say('T8: the player\'s evidence gaps are not exposed to the club');
+  if (/What could strengthen it further|gaps/i.test(panel))
+    fail("T8: the club must not see the player's evidence gaps");
+  say("T8: the player's evidence gaps are not exposed to the club");
   if (/gd-amara|vclm-|identityVerified/i.test(panel)) fail('T8: restricted source identifiers leaked to the club');
   say('T8: no guardian identity or verification source id reaches the club');
 }

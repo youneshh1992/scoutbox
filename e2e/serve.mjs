@@ -28,13 +28,20 @@ const FILES = {
   '/connected/': 'scoutbox-connected-demo.html',
 };
 
-http.createServer((req, res) => {
-  if (req.url === '/__buildmarker') {
-    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
-    return res.end(BUILD_MARKER);
-  }
-  const key = Object.keys(FILES).find((k) => req.url === k || req.url === k.slice(0, -1));
-  if (!key) { res.writeHead(404); return res.end('not found'); }
-  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-  res.end(fs.readFileSync(path.join(DIST, FILES[key])));
-}).listen(PORT, () => console.log(`demo host on :${PORT} build ${BUILD_MARKER} — /club /player /admin /grassroots /agent /deep/nested`));
+http
+  .createServer((req, res) => {
+    if (req.url === '/__buildmarker') {
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(BUILD_MARKER);
+    }
+    const key = Object.keys(FILES).find((k) => req.url === k || req.url === k.slice(0, -1));
+    if (!key) {
+      res.writeHead(404);
+      return res.end('not found');
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(fs.readFileSync(path.join(DIST, FILES[key])));
+  })
+  .listen(PORT, () =>
+    console.log(`demo host on :${PORT} build ${BUILD_MARKER} — /club /player /admin /grassroots /agent /deep/nested`),
+  );

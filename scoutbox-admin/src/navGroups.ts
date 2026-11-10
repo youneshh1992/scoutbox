@@ -29,7 +29,9 @@ export type AdminNavGroup = (typeof ADMIN_NAV_GROUPS)[number];
 export type AdminNavTab = AdminNavGroup['tabs'][number];
 
 /** Structural problems with the console's navigation; empty means sound. */
-export function validateAdminNav(groups: readonly { id: string; label: string; tabs: readonly string[] }[] = ADMIN_NAV_GROUPS): string[] {
+export function validateAdminNav(
+  groups: readonly { id: string; label: string; tabs: readonly string[] }[] = ADMIN_NAV_GROUPS,
+): string[] {
   const problems: string[] = [];
   const seen = new Map<string, number>();
   for (const g of groups) {

@@ -30,12 +30,28 @@
 // real thing: a dismissal stays dismissed, a review stays reviewed, and a
 // reopened room stays reopened for the rest of the session.
 import type {
-  AddToRoomResult, BriefCriteria, BriefInput, BriefListResult, BriefSaveResult,
-  ComparisonRow, EvaluationCoverage, EvaluationCoverageResult, EvaluationPolicy,
-  M18Api, NobodyMissedItem, NobodyMissedReason, NobodyMissedResult,
-  NobodyMissedReview, RecruitmentBrief, ReopenRoomResult, SecondLookChange,
-  SecondLookChangesResult, SecondLookDetailResult, SecondLookItem,
-  SecondLookListResult, TrustMovement,
+  AddToRoomResult,
+  BriefCriteria,
+  BriefInput,
+  BriefListResult,
+  BriefSaveResult,
+  ComparisonRow,
+  EvaluationCoverage,
+  EvaluationCoverageResult,
+  EvaluationPolicy,
+  M18Api,
+  NobodyMissedItem,
+  NobodyMissedReason,
+  NobodyMissedResult,
+  NobodyMissedReview,
+  RecruitmentBrief,
+  ReopenRoomResult,
+  SecondLookChange,
+  SecondLookChangesResult,
+  SecondLookDetailResult,
+  SecondLookItem,
+  SecondLookListResult,
+  TrustMovement,
 } from './m18Api';
 
 // ------------------------------------------------------------- local notes
@@ -101,7 +117,12 @@ const CHANGE_COPY: Record<string, string> = {
 
 /** A reason absent from this map can NEVER be resolved by player evidence. */
 const REASON_CHANGE_MAP: Record<string, string[]> = {
-  insufficient_recent_evidence: ['full_match_added', 'evidence_added', 'evidence_quality_improved', 'evidence_gap_closed'],
+  insufficient_recent_evidence: [
+    'full_match_added',
+    'evidence_added',
+    'evidence_quality_improved',
+    'evidence_gap_closed',
+  ],
   insufficient_full_match: ['full_match_added', 'evidence_gap_closed'],
   reference_missing: ['verified_reference_added'],
   combine_missing: ['combine_verified_added'],
@@ -111,20 +132,33 @@ const REASON_CHANGE_MAP: Record<string, string[]> = {
   not_current_priority: ['full_match_added', 'verified_reference_added', 'combine_verified_added', 'trial_completed'],
   // Club-side facts. No amount of new footage makes a squad place or a budget
   // appear, and pretending otherwise would be a lie dressed up as a feature.
-  squad_space: [], budget: [], timing: [], registration: [],
-  travel_logistics: [], eligibility: [], player_unavailable: [],
+  squad_space: [],
+  budget: [],
+  timing: [],
+  registration: [],
+  travel_logistics: [],
+  eligibility: [],
+  player_unavailable: [],
 };
 const CLUB_SIDE_REASONS = Object.keys(REASON_CHANGE_MAP).filter((c) => REASON_CHANGE_MAP[c].length === 0);
 /** Derived, never typed in: the reasons a club gave that still stand. */
 const unresolved = (reasonCodes: string[]) => reasonCodes.filter((c) => CLUB_SIDE_REASONS.includes(c));
 
 const DISMISSAL_REASONS = [
-  'already_reviewed_elsewhere', 'change_not_material', 'timing_not_right',
-  'squad_need_changed', 'no_action_required', 'other',
+  'already_reviewed_elsewhere',
+  'change_not_material',
+  'timing_not_right',
+  'squad_need_changed',
+  'no_action_required',
+  'other',
 ];
 const NM_DISMISSAL_REASONS = [
-  'already_known', 'not_current_need', 'evidence_insufficient',
-  'role_mismatch_after_review', 'timing', 'other',
+  'already_known',
+  'not_current_need',
+  'evidence_insufficient',
+  'role_mismatch_after_review',
+  'timing',
+  'other',
 ];
 const NM_SORTS = ['newest_evidence', 'last_reviewed', 'name', 'distance', 'evidence_confidence'];
 
@@ -138,8 +172,19 @@ const BRIEF_TRANSITIONS: Record<string, string[]> = {
 };
 const POSITIONS = ['GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF'];
 const POSITION_GROUP_OF: Record<string, string> = {
-  GK: 'GK', CB: 'DEF', RB: 'DEF', LB: 'DEF', RWB: 'DEF', LWB: 'DEF',
-  CDM: 'MID', CM: 'MID', CAM: 'MID', RW: 'ATT', LW: 'ATT', ST: 'ATT', CF: 'ATT',
+  GK: 'GK',
+  CB: 'DEF',
+  RB: 'DEF',
+  LB: 'DEF',
+  RWB: 'DEF',
+  LWB: 'DEF',
+  CDM: 'MID',
+  CM: 'MID',
+  CAM: 'MID',
+  RW: 'ATT',
+  LW: 'ATT',
+  ST: 'ATT',
+  CF: 'ATT',
 };
 const EVIDENCE_REQUIREMENTS = [
   { key: 'recent_full_match', label: 'Recent full match available' },
@@ -147,7 +192,13 @@ const EVIDENCE_REQUIREMENTS = [
   { key: 'confirmed_current_club', label: 'Current club confirmed' },
   { key: 'combine_verified', label: 'Combine Verified result available' },
 ];
-const TRUST_BANDS = ['limited_evidence', 'developing_evidence', 'established_evidence', 'strong_evidence', 'very_strong_evidence'];
+const TRUST_BANDS = [
+  'limited_evidence',
+  'developing_evidence',
+  'established_evidence',
+  'strong_evidence',
+  'very_strong_evidence',
+];
 const BAND_LABELS: Record<string, string> = {
   limited_evidence: 'Limited evidence',
   developing_evidence: 'Developing evidence',
@@ -176,12 +227,30 @@ const NON_EVALUATION_SIGNALS = [
 ];
 
 const PROHIBITED_BRIEF_FIELDS = [
-  'race', 'ethnicity', 'skin_colour', 'skin_color', 'religion', 'faith', 'caste',
-  'disability', 'medical_condition', 'mental_health',
-  'gender_identity', 'sexuality', 'sexual_orientation',
-  'socioeconomic', 'social_background', 'family_income', 'school_type',
-  'postcode_deprivation', 'deprivation', 'maturity', 'biological_age',
-  'physical_maturity', 'immigration_status', 'national_origin',
+  'race',
+  'ethnicity',
+  'skin_colour',
+  'skin_color',
+  'religion',
+  'faith',
+  'caste',
+  'disability',
+  'medical_condition',
+  'mental_health',
+  'gender_identity',
+  'sexuality',
+  'sexual_orientation',
+  'socioeconomic',
+  'social_background',
+  'family_income',
+  'school_type',
+  'postcode_deprivation',
+  'deprivation',
+  'maturity',
+  'biological_age',
+  'physical_maturity',
+  'immigration_status',
+  'national_origin',
 ];
 
 // --------------------------------------------------------------- fixtures
@@ -189,12 +258,30 @@ const NOW = Date.now();
 const DAY = 86_400_000;
 let seq = 0;
 const nid = (prefix: string) => `${prefix}-${++seq}`;
-const delay = <T,>(v: T): Promise<T> => new Promise((res) => setTimeout(() => res(v), 60));
+const delay = <T>(v: T): Promise<T> => new Promise((res) => setTimeout(() => res(v), 60));
 
-const change = (type: string, occurredAt: number, relatesTo: string[], fingerprint: string, negative = false): SecondLookChange =>
-  ({ type, text: CHANGE_COPY[type] ?? type.replace(/_/g, ' '), relatesTo, negative, occurredAt, fingerprint });
+const change = (
+  type: string,
+  occurredAt: number,
+  relatesTo: string[],
+  fingerprint: string,
+  negative = false,
+): SecondLookChange => ({
+  type,
+  text: CHANGE_COPY[type] ?? type.replace(/_/g, ' '),
+  relatesTo,
+  negative,
+  occurredAt,
+  fingerprint,
+});
 
-const trust = (score: number, band: string) => ({ score, band, bandLabel: BAND_LABELS[band], note: TRUST_NOTE, policyVersion: 2 });
+const trust = (score: number, band: string) => ({
+  score,
+  band,
+  bandLabel: BAND_LABELS[band],
+  note: TRUST_NOTE,
+  policyVersion: 2,
+});
 
 // ------------------------------------------------------------ Second Look
 // The headline story: a room archived for "not enough recent evidence" where a
@@ -233,7 +320,10 @@ const secondLookStore: SecondLookItem[] = [
     currentTrust: trust(82, 'strong_evidence'),
     summary: 'A new full match has been added. This relates to the reason recorded when the room was closed.',
     latestChangeAt: NOW - 5 * DAY,
-    reviewedAt: null, dismissedAt: null, dismissReason: null, reopenedAt: null,
+    reviewedAt: null,
+    dismissedAt: null,
+    dismissReason: null,
+    reopenedAt: null,
     disclaimer: SECOND_LOOK_DISCLAIMER,
   },
   {
@@ -259,7 +349,10 @@ const secondLookStore: SecondLookItem[] = [
     currentTrust: trust(54, 'developing_evidence'),
     summary: 'One source used in the previous review is no longer current.',
     latestChangeAt: NOW - 8 * DAY,
-    reviewedAt: null, dismissedAt: null, dismissReason: null, reopenedAt: null,
+    reviewedAt: null,
+    dismissedAt: null,
+    dismissReason: null,
+    reopenedAt: null,
     disclaimer: SECOND_LOOK_DISCLAIMER,
   },
   {
@@ -290,7 +383,9 @@ const secondLookStore: SecondLookItem[] = [
     latestChangeAt: NOW - 20 * DAY,
     reviewedAt: NOW - 3 * DAY,
     reviewedBy: { userId: 'u-demo', name: 'A. Coach' },
-    dismissedAt: null, dismissReason: null, reopenedAt: null,
+    dismissedAt: null,
+    dismissReason: null,
+    reopenedAt: null,
     disclaimer: SECOND_LOOK_DISCLAIMER,
   },
   {
@@ -328,7 +423,10 @@ const secondLookStore: SecondLookItem[] = [
 ];
 
 const row = (key: string, label: string, was: unknown, now: unknown, wasKnown: boolean): ComparisonRow => ({
-  key, label, was: wasKnown ? was : null, now,
+  key,
+  label,
+  was: wasKnown ? was : null,
+  now,
   available: wasKnown,
   changed: wasKnown ? JSON.stringify(was) !== JSON.stringify(now) : null,
 });
@@ -353,7 +451,13 @@ const CHANGE_DETAIL: Record<string, SecondLookChangesResult> = {
       at: NOW - 141 * DAY,
       note: null,
       rows: [
-        row('trust', 'Evidence confidence', { score: 68, band: 'developing_evidence' }, { score: 82, band: 'strong_evidence' }, true),
+        row(
+          'trust',
+          'Evidence confidence',
+          { score: 68, band: 'developing_evidence' },
+          { score: 82, band: 'strong_evidence' },
+          true,
+        ),
         row('evidence', 'Evidence items', 4, 6, true),
         row('references', 'Verified coach references', null, 1, false),
         row('combine', 'Combine Verified protocols', 1, 1, true),
@@ -418,7 +522,13 @@ const CHANGE_DETAIL: Record<string, SecondLookChangesResult> = {
       at: NOW - 210 * DAY,
       note: null,
       rows: [
-        row('trust', 'Evidence confidence', { score: 63, band: 'developing_evidence' }, { score: 71, band: 'strong_evidence' }, true),
+        row(
+          'trust',
+          'Evidence confidence',
+          { score: 63, band: 'developing_evidence' },
+          { score: 71, band: 'strong_evidence' },
+          true,
+        ),
         row('evidence', 'Evidence items', 5, 5, true),
         row('references', 'Verified coach references', null, 2, false),
         row('combine', 'Combine Verified protocols', 0, 0, true),
@@ -453,7 +563,13 @@ const CHANGE_DETAIL: Record<string, SecondLookChangesResult> = {
       at: NOW - 320 * DAY,
       note: null,
       rows: [
-        row('trust', 'Evidence confidence', { score: 44, band: 'limited_evidence' }, { score: 49, band: 'developing_evidence' }, true),
+        row(
+          'trust',
+          'Evidence confidence',
+          { score: 44, band: 'limited_evidence' },
+          { score: 49, band: 'developing_evidence' },
+          true,
+        ),
         row('evidence', 'Evidence items', 2, 3, true),
         row('references', 'Verified coach references', null, 0, false),
         row('combine', 'Combine Verified protocols', 0, 0, true),
@@ -476,7 +592,8 @@ const CHANGE_DETAIL: Record<string, SecondLookChangesResult> = {
 // ------------------------------------------------------ Recruitment Briefs
 function explainBriefCriteria(criteria: BriefCriteria): { key: string; label: string; value: string }[] {
   const out: { key: string; label: string; value: string }[] = [];
-  if (criteria.positions?.length) out.push({ key: 'positions', label: 'Position', value: criteria.positions.join(', ') });
+  if (criteria.positions?.length)
+    out.push({ key: 'positions', label: 'Position', value: criteria.positions.join(', ') });
   if (criteria.minAge != null || criteria.maxAge != null) {
     out.push({ key: 'age', label: 'Age', value: `${criteria.minAge ?? 'any'}–${criteria.maxAge ?? 'any'}` });
   }
@@ -485,24 +602,36 @@ function explainBriefCriteria(criteria: BriefCriteria): { key: string; label: st
   if (criteria.foot) out.push({ key: 'foot', label: 'Foot', value: criteria.foot });
   if (criteria.availability) out.push({ key: 'availability', label: 'Availability', value: criteria.availability });
   for (const e of criteria.evidenceRequirements ?? []) {
-    out.push({ key: `evidence:${e}`, label: 'Evidence', value: EVIDENCE_REQUIREMENTS.find((r) => r.key === e)?.label ?? e });
+    out.push({
+      key: `evidence:${e}`,
+      label: 'Evidence',
+      value: EVIDENCE_REQUIREMENTS.find((r) => r.key === e)?.label ?? e,
+    });
   }
-  if (criteria.minTrustBand) out.push({ key: 'minTrustBand', label: 'Minimum evidence confidence', value: criteria.minTrustBand });
-  for (const p of criteria.combineProtocols ?? []) out.push({ key: `combine:${p}`, label: 'Combine', value: `${p} result available` });
+  if (criteria.minTrustBand)
+    out.push({ key: 'minTrustBand', label: 'Minimum evidence confidence', value: criteria.minTrustBand });
+  for (const p of criteria.combineProtocols ?? [])
+    out.push({ key: `combine:${p}`, label: 'Combine', value: `${p} result available` });
   return out;
 }
 
 interface DemoBrief {
-  id: string; title: string; status: string; version: number;
+  id: string;
+  title: string;
+  status: string;
+  version: number;
   criteria: BriefCriteria;
-  activeFrom: string | null; activeUntil: string | null;
-  createdAt: number; updatedAt: number;
+  activeFrom: string | null;
+  activeUntil: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 const DM_CRITERIA: BriefCriteria = {
   positions: ['CDM', 'CM'],
   positionGroups: ['MID'],
-  minAge: 17, maxAge: 21,
+  minAge: 17,
+  maxAge: 21,
   radiusKm: 120,
   maxLevel: 'semi_pro',
   foot: null,
@@ -514,43 +643,76 @@ const DM_CRITERIA: BriefCriteria = {
 
 const briefStore: DemoBrief[] = [
   {
-    id: 'brf-dm-2027', title: '2027 Defensive Midfielder', status: 'active', version: 2,
+    id: 'brf-dm-2027',
+    title: '2027 Defensive Midfielder',
+    status: 'active',
+    version: 2,
     criteria: DM_CRITERIA,
-    activeFrom: null, activeUntil: null,
-    createdAt: NOW - 62 * DAY, updatedAt: NOW - 9 * DAY,
+    activeFrom: null,
+    activeUntil: null,
+    createdAt: NOW - 62 * DAY,
+    updatedAt: NOW - 9 * DAY,
   },
   {
-    id: 'brf-lb-cover', title: 'Left-sided defensive cover', status: 'draft', version: 1,
+    id: 'brf-lb-cover',
+    title: 'Left-sided defensive cover',
+    status: 'draft',
+    version: 1,
     criteria: {
-      positions: ['LB', 'LWB'], positionGroups: ['DEF'],
-      minAge: 18, maxAge: 23, radiusKm: 90, maxLevel: 'semi_pro',
-      foot: 'Left', availability: null,
-      evidenceRequirements: ['coach_reference'], minTrustBand: null, combineProtocols: [],
+      positions: ['LB', 'LWB'],
+      positionGroups: ['DEF'],
+      minAge: 18,
+      maxAge: 23,
+      radiusKm: 90,
+      maxLevel: 'semi_pro',
+      foot: 'Left',
+      availability: null,
+      evidenceRequirements: ['coach_reference'],
+      minTrustBand: null,
+      combineProtocols: [],
     },
-    activeFrom: null, activeUntil: null,
-    createdAt: NOW - 18 * DAY, updatedAt: NOW - 18 * DAY,
+    activeFrom: null,
+    activeUntil: null,
+    createdAt: NOW - 18 * DAY,
+    updatedAt: NOW - 18 * DAY,
   },
   {
-    id: 'brf-gk-2026', title: 'Goalkeeper — summer window', status: 'paused', version: 3,
+    id: 'brf-gk-2026',
+    title: 'Goalkeeper — summer window',
+    status: 'paused',
+    version: 3,
     criteria: {
-      positions: ['GK'], positionGroups: ['GK'],
-      minAge: 19, maxAge: 25, radiusKm: 200, maxLevel: 'pro',
-      foot: null, availability: 'Immediate',
+      positions: ['GK'],
+      positionGroups: ['GK'],
+      minAge: 19,
+      maxAge: 25,
+      radiusKm: 200,
+      maxLevel: 'pro',
+      foot: null,
+      availability: 'Immediate',
       evidenceRequirements: ['recent_full_match', 'coach_reference'],
-      minTrustBand: 'established_evidence', combineProtocols: [],
+      minTrustBand: 'established_evidence',
+      combineProtocols: [],
     },
-    activeFrom: null, activeUntil: null,
-    createdAt: NOW - 120 * DAY, updatedAt: NOW - 31 * DAY,
+    activeFrom: null,
+    activeUntil: null,
+    createdAt: NOW - 120 * DAY,
+    updatedAt: NOW - 31 * DAY,
   },
 ];
 
 const briefView = (b: DemoBrief): RecruitmentBrief => ({
-  id: b.id, title: b.title, status: b.status, version: b.version,
+  id: b.id,
+  title: b.title,
+  status: b.status,
+  version: b.version,
   criteria: b.criteria,
   criteriaExplained: explainBriefCriteria(b.criteria),
-  activeFrom: b.activeFrom, activeUntil: b.activeUntil,
+  activeFrom: b.activeFrom,
+  activeUntil: b.activeUntil,
   createdBy: { userId: 'u-demo', name: 'A. Coach' },
-  createdAt: b.createdAt, updatedAt: b.updatedAt,
+  createdAt: b.createdAt,
+  updatedAt: b.updatedAt,
   note: BRIEF_NOTE,
 });
 
@@ -560,22 +722,99 @@ const briefView = (b: DemoBrief): RecruitmentBrief => ({
 // of the nine coverage signals already fired — null means this club has never
 // entered them into its evaluation workflow.
 interface RosterEntry {
-  playerId: string; name: string; position: string; age: number;
-  trustBand: string; distanceKm: number; lastEvidenceAt: number;
+  playerId: string;
+  name: string;
+  position: string;
+  age: number;
+  trustBand: string;
+  distanceKm: number;
+  lastEvidenceAt: number;
   /** null = not yet evaluated by this organisation. */
   evaluatedSignal: string | null;
 }
 
 const DM_ROSTER: RosterEntry[] = [
-  { playerId: 'pl-vrba', name: 'Tomas Vrba', position: 'CDM', age: 19, trustBand: 'established_evidence', distanceKm: 22, lastEvidenceAt: NOW - 11 * DAY, evaluatedSignal: 'room_open' },
-  { playerId: 'pl-whitfield', name: 'Jonah Whitfield', position: 'CM', age: 18, trustBand: 'developing_evidence', distanceKm: 47, lastEvidenceAt: NOW - 26 * DAY, evaluatedSignal: 'assessment_submitted' },
-  { playerId: 'pl-almeida', name: 'Rui Almeida', position: 'CDM', age: 20, trustBand: 'strong_evidence', distanceKm: 96, lastEvidenceAt: NOW - 5 * DAY, evaluatedSignal: 'shortlisted' },
-  { playerId: 'pl-fischer', name: 'Leon Fischer', position: 'CM', age: 19, trustBand: 'developing_evidence', distanceKm: 61, lastEvidenceAt: NOW - 33 * DAY, evaluatedSignal: 'trial' },
-  { playerId: 'pl-haddad', name: 'Amir Haddad', position: 'CDM', age: 21, trustBand: 'established_evidence', distanceKm: 112, lastEvidenceAt: NOW - 58 * DAY, evaluatedSignal: 'room_decided' },
+  {
+    playerId: 'pl-vrba',
+    name: 'Tomas Vrba',
+    position: 'CDM',
+    age: 19,
+    trustBand: 'established_evidence',
+    distanceKm: 22,
+    lastEvidenceAt: NOW - 11 * DAY,
+    evaluatedSignal: 'room_open',
+  },
+  {
+    playerId: 'pl-whitfield',
+    name: 'Jonah Whitfield',
+    position: 'CM',
+    age: 18,
+    trustBand: 'developing_evidence',
+    distanceKm: 47,
+    lastEvidenceAt: NOW - 26 * DAY,
+    evaluatedSignal: 'assessment_submitted',
+  },
+  {
+    playerId: 'pl-almeida',
+    name: 'Rui Almeida',
+    position: 'CDM',
+    age: 20,
+    trustBand: 'strong_evidence',
+    distanceKm: 96,
+    lastEvidenceAt: NOW - 5 * DAY,
+    evaluatedSignal: 'shortlisted',
+  },
+  {
+    playerId: 'pl-fischer',
+    name: 'Leon Fischer',
+    position: 'CM',
+    age: 19,
+    trustBand: 'developing_evidence',
+    distanceKm: 61,
+    lastEvidenceAt: NOW - 33 * DAY,
+    evaluatedSignal: 'trial',
+  },
+  {
+    playerId: 'pl-haddad',
+    name: 'Amir Haddad',
+    position: 'CDM',
+    age: 21,
+    trustBand: 'established_evidence',
+    distanceKm: 112,
+    lastEvidenceAt: NOW - 58 * DAY,
+    evaluatedSignal: 'room_decided',
+  },
   // The three this organisation has never entered into its workflow.
-  { playerId: 'pl-bello', name: 'Idris Bello', position: 'CDM', age: 18, trustBand: 'developing_evidence', distanceKm: 34, lastEvidenceAt: NOW - 6 * DAY, evaluatedSignal: null },
-  { playerId: 'pl-sobota', name: 'Marek Sobota', position: 'CM', age: 20, trustBand: 'established_evidence', distanceKm: 88, lastEvidenceAt: NOW - 19 * DAY, evaluatedSignal: null },
-  { playerId: 'pl-pritchard', name: 'Owen Pritchard', position: 'CDM', age: 19, trustBand: 'developing_evidence', distanceKm: 12, lastEvidenceAt: NOW - 41 * DAY, evaluatedSignal: null },
+  {
+    playerId: 'pl-bello',
+    name: 'Idris Bello',
+    position: 'CDM',
+    age: 18,
+    trustBand: 'developing_evidence',
+    distanceKm: 34,
+    lastEvidenceAt: NOW - 6 * DAY,
+    evaluatedSignal: null,
+  },
+  {
+    playerId: 'pl-sobota',
+    name: 'Marek Sobota',
+    position: 'CM',
+    age: 20,
+    trustBand: 'established_evidence',
+    distanceKm: 88,
+    lastEvidenceAt: NOW - 19 * DAY,
+    evaluatedSignal: null,
+  },
+  {
+    playerId: 'pl-pritchard',
+    name: 'Owen Pritchard',
+    position: 'CDM',
+    age: 19,
+    trustBand: 'developing_evidence',
+    distanceKm: 12,
+    lastEvidenceAt: NOW - 41 * DAY,
+    evaluatedSignal: null,
+  },
 ];
 
 const ROSTERS: Record<string, RosterEntry[]> = { 'brf-dm-2027': DM_ROSTER };
@@ -592,16 +831,30 @@ function reasonsFor(entry: RosterEntry, criteria: BriefCriteria): NobodyMissedRe
   const out: NobodyMissedReason[] = [];
   if (criteria.positions.length) {
     const met = criteria.positions.includes(entry.position);
-    out.push({ key: 'position', met, text: met ? `Matches position criteria (${entry.position})` : 'Does not match the position criteria' });
+    out.push({
+      key: 'position',
+      met,
+      text: met ? `Matches position criteria (${entry.position})` : 'Does not match the position criteria',
+    });
   }
   if (criteria.minAge != null || criteria.maxAge != null) {
-    const met = (criteria.minAge == null || entry.age >= criteria.minAge) && (criteria.maxAge == null || entry.age <= criteria.maxAge);
-    out.push({ key: 'age', met, text: met ? `Matches age criteria (${entry.age})` : `Age ${entry.age} is outside the criteria` });
+    const met =
+      (criteria.minAge == null || entry.age >= criteria.minAge) &&
+      (criteria.maxAge == null || entry.age <= criteria.maxAge);
+    out.push({
+      key: 'age',
+      met,
+      text: met ? `Matches age criteria (${entry.age})` : `Age ${entry.age} is outside the criteria`,
+    });
   }
   if (criteria.maxLevel) out.push({ key: 'level', met: true, text: 'Within the level criteria' });
   if (criteria.radiusKm != null) {
     const met = entry.distanceKm <= criteria.radiusKm;
-    out.push({ key: 'location', met, text: met ? 'Within the club’s permitted search area' : 'Outside the permitted search area' });
+    out.push({
+      key: 'location',
+      met,
+      text: met ? 'Within the club’s permitted search area' : 'Outside the permitted search area',
+    });
   }
   for (const key of criteria.evidenceRequirements) {
     const label = EVIDENCE_REQUIREMENTS.find((r) => r.key === key)?.label ?? key;
@@ -610,7 +863,8 @@ function reasonsFor(entry: RosterEntry, criteria: BriefCriteria): NobodyMissedRe
   if (criteria.minTrustBand) {
     const met = (BAND_RANK[entry.trustBand] ?? -1) >= (BAND_RANK[criteria.minTrustBand] ?? 0);
     out.push({
-      key: 'minTrustBand', met,
+      key: 'minTrustBand',
+      met,
       text: met
         ? `Evidence confidence meets the criteria (${BAND_LABELS[entry.trustBand] ?? entry.trustBand})`
         : `Evidence confidence is below the criteria (${BAND_LABELS[entry.trustBand] ?? entry.trustBand})`,
@@ -632,7 +886,10 @@ function coverageFor(briefId: string): EvaluationCoverage {
   const notYet = Math.max(0, eligible - evaluated);
   if (eligible > 0 && eligible < SUPPRESS_MIN) {
     return {
-      eligible, evaluated: null, notYetEvaluated: null, coveragePercent: null,
+      eligible,
+      evaluated: null,
+      notYetEvaluated: null,
+      coveragePercent: null,
       suppressed: true,
       note: `Fewer than ${SUPPRESS_MIN} eligible players match this brief — the breakdown is suppressed.`,
       policyVersion: COVERAGE_POLICY_VERSION,
@@ -662,22 +919,24 @@ function candidatesFor(brief: DemoBrief): NobodyMissedItem[] {
       return { entry, review };
     })
     .filter(({ review }) => !review || !['dismissed', 'added_to_room'].includes(review.state))
-    .map(({ entry, review }): NobodyMissedItem => ({
-      playerId: entry.playerId,
-      briefId: brief.id,
-      briefVersion: brief.version,
-      name: entry.name,
-      position: entry.position,
-      age: entry.age,
-      trustBand: entry.trustBand,
-      trustNote: TRUST_NOTE,
-      reasons: reasonsFor(entry, brief.criteria),
-      note: CANDIDATE_NOTE,
-      distanceKm: entry.distanceKm,
-      lastEvidenceAt: entry.lastEvidenceAt,
-      state: review?.state ?? 'open',
-      reviewedAt: review?.reviewedAt ?? null,
-    }));
+    .map(
+      ({ entry, review }): NobodyMissedItem => ({
+        playerId: entry.playerId,
+        briefId: brief.id,
+        briefVersion: brief.version,
+        name: entry.name,
+        position: entry.position,
+        age: entry.age,
+        trustBand: entry.trustBand,
+        trustNote: TRUST_NOTE,
+        reasons: reasonsFor(entry, brief.criteria),
+        note: CANDIDATE_NOTE,
+        distanceKm: entry.distanceKm,
+        lastEvidenceAt: entry.lastEvidenceAt,
+        state: review?.state ?? 'open',
+        reviewedAt: review?.reviewedAt ?? null,
+      }),
+    );
 }
 
 function orderCandidates(items: NobodyMissedItem[], sort: string): NobodyMissedItem[] {
@@ -692,7 +951,12 @@ function orderCandidates(items: NobodyMissedItem[], sort: string): NobodyMissedI
   return items.slice().sort((a, b) => cmp(a, b) || String(a.playerId).localeCompare(String(b.playerId)));
 }
 
-function setReview(briefId: string, briefVersion: number, playerId: string, patch: Partial<NobodyMissedReview>): NobodyMissedReview {
+function setReview(
+  briefId: string,
+  briefVersion: number,
+  playerId: string,
+  patch: Partial<NobodyMissedReview>,
+): NobodyMissedReview {
   let r = reviewFor(briefId, playerId);
   if (!r) {
     r = { id: nid('nmr'), briefId, briefVersion, playerId, state: 'open', updatedAt: Date.now() };
@@ -712,66 +976,103 @@ const EVALUATION_POLICY: EvaluationPolicy = {
 };
 
 // ----------------------------------------------------------- brief writing
-function validateBrief(input: BriefInput, prev?: DemoBrief): BriefSaveResult | { ok: true; title: string; criteria: BriefCriteria; activeFrom: string | null; activeUntil: string | null } {
+function validateBrief(
+  input: BriefInput,
+  prev?: DemoBrief,
+):
+  | BriefSaveResult
+  | { ok: true; title: string; criteria: BriefCriteria; activeFrom: string | null; activeUntil: string | null } {
   const offered = Object.keys(input).map((k) => k.toLowerCase().replace(/[^a-z]+/g, '_'));
   const prohibited = offered.filter((k) => PROHIBITED_BRIEF_FIELDS.some((p) => k === p || k.includes(p)));
   if (prohibited.length) {
     return {
-      ok: false, error: 'BRIEF_CRITERION_PROHIBITED', prohibited,
+      ok: false,
+      error: 'BRIEF_CRITERION_PROHIBITED',
+      prohibited,
       message: 'A recruitment brief can never filter players by a protected characteristic.',
     };
   }
   const details: { field: string; error: string; unknown?: string[] }[] = [];
-  const title = String(input.title ?? prev?.title ?? '').trim().slice(0, 120);
+  const title = String(input.title ?? prev?.title ?? '')
+    .trim()
+    .slice(0, 120);
   if (!title) details.push({ field: 'title', error: 'BRIEF_TITLE_REQUIRED' });
 
   const positions = [...new Set((input.positions ?? prev?.criteria.positions ?? []).map(String))];
   const unknownPos = positions.filter((p) => !POSITIONS.includes(p));
   if (unknownPos.length) details.push({ field: 'positions', error: 'BRIEF_POSITION_UNKNOWN', unknown: unknownPos });
 
-  const minAge = input.minAge === undefined ? prev?.criteria.minAge ?? null : (input.minAge == null ? null : Number(input.minAge));
-  const maxAge = input.maxAge === undefined ? prev?.criteria.maxAge ?? null : (input.maxAge == null ? null : Number(input.maxAge));
-  for (const [k, v] of [['minAge', minAge], ['maxAge', maxAge]] as [string, number | null][]) {
+  const minAge =
+    input.minAge === undefined ? (prev?.criteria.minAge ?? null) : input.minAge == null ? null : Number(input.minAge);
+  const maxAge =
+    input.maxAge === undefined ? (prev?.criteria.maxAge ?? null) : input.maxAge == null ? null : Number(input.maxAge);
+  for (const [k, v] of [
+    ['minAge', minAge],
+    ['maxAge', maxAge],
+  ] as [string, number | null][]) {
     if (v != null && (!Number.isInteger(v) || v < 5 || v > 60)) details.push({ field: k, error: 'BRIEF_AGE_INVALID' });
   }
-  if (minAge != null && maxAge != null && minAge > maxAge) details.push({ field: 'ageRange', error: 'BRIEF_AGE_RANGE_INVALID' });
+  if (minAge != null && maxAge != null && minAge > maxAge)
+    details.push({ field: 'ageRange', error: 'BRIEF_AGE_RANGE_INVALID' });
 
-  const radiusKm = input.radiusKm === undefined ? prev?.criteria.radiusKm ?? null : (input.radiusKm == null ? null : Number(input.radiusKm));
-  if (radiusKm != null && (!Number.isFinite(radiusKm) || radiusKm <= 0 || radiusKm > 20000)) details.push({ field: 'radiusKm', error: 'BRIEF_RADIUS_INVALID' });
+  const radiusKm =
+    input.radiusKm === undefined
+      ? (prev?.criteria.radiusKm ?? null)
+      : input.radiusKm == null
+        ? null
+        : Number(input.radiusKm);
+  if (radiusKm != null && (!Number.isFinite(radiusKm) || radiusKm <= 0 || radiusKm > 20000))
+    details.push({ field: 'radiusKm', error: 'BRIEF_RADIUS_INVALID' });
 
-  const maxLevel = input.maxLevel === undefined ? prev?.criteria.maxLevel ?? null : (input.maxLevel ?? null);
-  if (maxLevel != null && !['amateur', 'semi_pro', 'pro'].includes(maxLevel)) details.push({ field: 'maxLevel', error: 'BRIEF_LEVEL_UNKNOWN' });
+  const maxLevel = input.maxLevel === undefined ? (prev?.criteria.maxLevel ?? null) : (input.maxLevel ?? null);
+  if (maxLevel != null && !['amateur', 'semi_pro', 'pro'].includes(maxLevel))
+    details.push({ field: 'maxLevel', error: 'BRIEF_LEVEL_UNKNOWN' });
 
   const evidence = [...new Set((input.evidenceRequirements ?? prev?.criteria.evidenceRequirements ?? []).map(String))];
   const unknownEv = evidence.filter((e) => !EVIDENCE_REQUIREMENTS.some((r) => r.key === e));
-  if (unknownEv.length) details.push({ field: 'evidenceRequirements', error: 'BRIEF_EVIDENCE_REQUIREMENT_UNKNOWN', unknown: unknownEv });
+  if (unknownEv.length)
+    details.push({ field: 'evidenceRequirements', error: 'BRIEF_EVIDENCE_REQUIREMENT_UNKNOWN', unknown: unknownEv });
 
-  const minTrustBand = input.minTrustBand === undefined ? prev?.criteria.minTrustBand ?? null : (input.minTrustBand ?? null);
-  if (minTrustBand != null && !TRUST_BANDS.includes(minTrustBand)) details.push({ field: 'minTrustBand', error: 'BRIEF_TRUST_BAND_UNKNOWN' });
+  const minTrustBand =
+    input.minTrustBand === undefined ? (prev?.criteria.minTrustBand ?? null) : (input.minTrustBand ?? null);
+  if (minTrustBand != null && !TRUST_BANDS.includes(minTrustBand))
+    details.push({ field: 'minTrustBand', error: 'BRIEF_TRUST_BAND_UNKNOWN' });
 
-  const activeFrom = input.activeFrom === undefined ? prev?.activeFrom ?? null : (input.activeFrom || null);
-  const activeUntil = input.activeUntil === undefined ? prev?.activeUntil ?? null : (input.activeUntil || null);
-  if (activeFrom && activeUntil && String(activeFrom) > String(activeUntil)) details.push({ field: 'activeWindow', error: 'BRIEF_WINDOW_INVALID' });
+  const activeFrom = input.activeFrom === undefined ? (prev?.activeFrom ?? null) : input.activeFrom || null;
+  const activeUntil = input.activeUntil === undefined ? (prev?.activeUntil ?? null) : input.activeUntil || null;
+  if (activeFrom && activeUntil && String(activeFrom) > String(activeUntil))
+    details.push({ field: 'activeWindow', error: 'BRIEF_WINDOW_INVALID' });
 
   if (details.length) {
-    return { ok: false, error: 'BRIEF_INVALID', details, message: 'This recruitment brief cannot be saved as written.' };
+    return {
+      ok: false,
+      error: 'BRIEF_INVALID',
+      details,
+      message: 'This recruitment brief cannot be saved as written.',
+    };
   }
-  const foot = input.foot === undefined ? prev?.criteria.foot ?? null : (input.foot ?? null);
-  const availability = input.availability === undefined ? prev?.criteria.availability ?? null : (input.availability || null);
+  const foot = input.foot === undefined ? (prev?.criteria.foot ?? null) : (input.foot ?? null);
+  const availability =
+    input.availability === undefined ? (prev?.criteria.availability ?? null) : input.availability || null;
   const combineProtocols = [...new Set((input.combineProtocols ?? prev?.criteria.combineProtocols ?? []).map(String))];
   return {
-    ok: true, title,
+    ok: true,
+    title,
     criteria: {
       positions,
       positionGroups: [...new Set(positions.map((p) => POSITION_GROUP_OF[p]).filter(Boolean))],
-      minAge, maxAge, radiusKm, maxLevel,
+      minAge,
+      maxAge,
+      radiusKm,
+      maxLevel,
       foot: ['Left', 'Right', 'Both'].includes(String(foot)) ? foot : null,
       availability: availability ? String(availability).slice(0, 40) : null,
       evidenceRequirements: evidence,
       minTrustBand,
       combineProtocols,
     },
-    activeFrom, activeUntil,
+    activeFrom,
+    activeUntil,
   };
 }
 
@@ -813,7 +1114,8 @@ export const demoM18: M18Api = {
   reviewSecondLook: async (_s, id) => {
     const item = secondLookStore.find((i) => i.id === id);
     if (!item) throw new Error('SECOND_LOOK_NOT_FOUND');
-    if (!(SECOND_LOOK_TRANSITIONS[item.status] ?? []).includes('reviewed')) throw new Error('SECOND_LOOK_TRANSITION_INVALID');
+    if (!(SECOND_LOOK_TRANSITIONS[item.status] ?? []).includes('reviewed'))
+      throw new Error('SECOND_LOOK_TRANSITION_INVALID');
     item.status = 'reviewed';
     item.reviewedAt = Date.now();
     item.reviewedBy = { userId: 'u-demo', name: 'A. Coach' };
@@ -824,7 +1126,8 @@ export const demoM18: M18Api = {
     const item = secondLookStore.find((i) => i.id === id);
     if (!item) throw new Error('SECOND_LOOK_NOT_FOUND');
     if (!DISMISSAL_REASONS.includes(reason)) throw new Error('SECOND_LOOK_REASON_UNKNOWN');
-    if (!(SECOND_LOOK_TRANSITIONS[item.status] ?? []).includes('dismissed')) throw new Error('SECOND_LOOK_TRANSITION_INVALID');
+    if (!(SECOND_LOOK_TRANSITIONS[item.status] ?? []).includes('dismissed'))
+      throw new Error('SECOND_LOOK_TRANSITION_INVALID');
     item.status = 'dismissed';
     item.dismissedAt = Date.now();
     item.dismissReason = reason;
@@ -837,7 +1140,8 @@ export const demoM18: M18Api = {
     void reasonCodes; // recorded on the room in live mode
     const item = secondLookStore.find((i) => i.id === id);
     if (!item) throw new Error('SECOND_LOOK_NOT_FOUND');
-    if (!(SECOND_LOOK_TRANSITIONS[item.status] ?? []).includes('reopened_room')) throw new Error('SECOND_LOOK_TRANSITION_INVALID');
+    if (!(SECOND_LOOK_TRANSITIONS[item.status] ?? []).includes('reopened_room'))
+      throw new Error('SECOND_LOOK_TRANSITION_INVALID');
     item.status = 'reopened_room';
     item.reopenedAt = Date.now();
     const result: ReopenRoomResult = {
@@ -850,7 +1154,10 @@ export const demoM18: M18Api = {
 
   briefs: async () => {
     const result: BriefListResult = {
-      items: briefStore.slice().sort((a, b) => b.updatedAt - a.updatedAt).map(briefView),
+      items: briefStore
+        .slice()
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map(briefView),
       total: briefStore.length,
       statuses: BRIEF_STATUSES,
       vocabulary: { positions: POSITIONS, evidenceRequirements: EVIDENCE_REQUIREMENTS, trustBands: TRUST_BANDS },
@@ -869,9 +1176,15 @@ export const demoM18: M18Api = {
     const v = validateBrief(input);
     if (!('criteria' in v)) return delay(v as BriefSaveResult);
     const b: DemoBrief = {
-      id: nid('brf'), title: v.title, status: 'draft', version: 1,
-      criteria: v.criteria, activeFrom: v.activeFrom, activeUntil: v.activeUntil,
-      createdAt: Date.now(), updatedAt: Date.now(),
+      id: nid('brf'),
+      title: v.title,
+      status: 'draft',
+      version: 1,
+      criteria: v.criteria,
+      activeFrom: v.activeFrom,
+      activeUntil: v.activeUntil,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     };
     briefStore.push(b);
     return delay({ ok: true, brief: briefView(b) } as BriefSaveResult);
@@ -886,8 +1199,21 @@ export const demoM18: M18Api = {
       if (!(BRIEF_TRANSITIONS[b.status] ?? []).includes(input.status)) throw new Error('BRIEF_TRANSITION_INVALID');
       b.status = input.status;
     }
-    const wantsCriteria = ['title', 'positions', 'minAge', 'maxAge', 'radiusKm', 'maxLevel', 'foot', 'availability', 'evidenceRequirements', 'minTrustBand', 'combineProtocols', 'activeFrom', 'activeUntil']
-      .some((k) => (input as Record<string, unknown>)[k] !== undefined);
+    const wantsCriteria = [
+      'title',
+      'positions',
+      'minAge',
+      'maxAge',
+      'radiusKm',
+      'maxLevel',
+      'foot',
+      'availability',
+      'evidenceRequirements',
+      'minTrustBand',
+      'combineProtocols',
+      'activeFrom',
+      'activeUntil',
+    ].some((k) => (input as Record<string, unknown>)[k] !== undefined);
     if (wantsCriteria) {
       const v = validateBrief(input, b);
       if (!('criteria' in v)) return delay(v as BriefSaveResult);
@@ -896,7 +1222,10 @@ export const demoM18: M18Api = {
       b.title = v.title;
       b.activeFrom = v.activeFrom;
       b.activeUntil = v.activeUntil;
-      if (changed) { b.criteria = v.criteria; b.version += 1; }
+      if (changed) {
+        b.criteria = v.criteria;
+        b.version += 1;
+      }
     }
     b.updatedAt = Date.now();
     return delay({ ok: true, brief: briefView(b) } as BriefSaveResult);
@@ -907,17 +1236,26 @@ export const demoM18: M18Api = {
     if (!b) throw new Error('BRIEF_NOT_FOUND');
     if (!briefIsLive(b)) {
       const notLive: NobodyMissedResult = {
-        brief: briefView(b), live: false, items: [], total: 0, coverage: null, note: NOT_LIVE_NOTE,
+        brief: briefView(b),
+        live: false,
+        items: [],
+        total: 0,
+        coverage: null,
+        note: NOT_LIVE_NOTE,
       };
       return delay(notLive);
     }
     const sort = NM_SORTS.includes(String(params.sort)) ? String(params.sort) : 'newest_evidence';
     const items = orderCandidates(candidatesFor(b), sort);
     const result: NobodyMissedResult = {
-      brief: briefView(b), live: true, briefVersion: b.version,
-      items, total: items.length,
+      brief: briefView(b),
+      live: true,
+      briefVersion: b.version,
+      items,
+      total: items.length,
       coverage: coverageFor(b.id),
-      sorts: NM_SORTS, sort,
+      sorts: NM_SORTS,
+      sort,
       evaluationPolicy: EVALUATION_POLICY,
       note: NM_NOTE,
     };
@@ -935,7 +1273,11 @@ export const demoM18: M18Api = {
     const b = briefStore.find((x) => x.id === input.briefId);
     if (!b) throw new Error('BRIEF_NOT_FOUND');
     if (!NM_DISMISSAL_REASONS.includes(input.reason)) throw new Error('NM_REASON_UNKNOWN');
-    const r = setReview(b.id, b.version, input.playerId, { state: 'dismissed', dismissReason: input.reason, dismissedAt: Date.now() });
+    const r = setReview(b.id, b.version, input.playerId, {
+      state: 'dismissed',
+      dismissReason: input.reason,
+      dismissedAt: Date.now(),
+    });
     return delay({ review: { ...r }, note: NM_DISMISS_NOTE });
   },
 
@@ -956,7 +1298,10 @@ export const demoM18: M18Api = {
   evaluationCoverage: async () => {
     const result: EvaluationCoverageResult = {
       items: briefStore.filter(briefIsLive).map((b) => ({
-        briefId: b.id, title: b.title, briefVersion: b.version, coverage: coverageFor(b.id),
+        briefId: b.id,
+        title: b.title,
+        briefVersion: b.version,
+        coverage: coverageFor(b.id),
       })),
       policyVersion: COVERAGE_POLICY_VERSION,
       note: COVERAGE_NOTE,
@@ -968,4 +1313,5 @@ export const demoM18: M18Api = {
 // Kept deliberately: the demo's own Combine vocabulary is SIMULATED and must
 // never be presented as production recruitment evidence — which is why no
 // fixture above carries a Combine requirement or a Combine change.
-export const DEMO_COMBINE_LABEL = 'Simulated Combine result — demo only. Never counted as production recruitment evidence.';
+export const DEMO_COMBINE_LABEL =
+  'Simulated Combine result — demo only. Never counted as production recruitment evidence.';

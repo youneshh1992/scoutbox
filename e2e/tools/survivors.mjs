@@ -20,10 +20,13 @@ const SETTLE_MS = Number(process.env.SETTLE_MS ?? 4000);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function scan() {
-  const live = []; const zombies = [];
+  const live = [];
+  const zombies = [];
   for (const pid of fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
     if (Number(pid) === process.pid) continue;
-    let comm; let argv; let state;
+    let comm;
+    let argv;
+    let state;
     try {
       comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
       argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
@@ -31,7 +34,9 @@ function scan() {
       // spaces, so split after the LAST ')' rather than on whitespace.
       const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
       state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
-    } catch { continue; }
+    } catch {
+      continue;
+    }
     const isServer = comm === 'node' && argv.some((a) => /(^|\/)server\.mjs$/.test(a));
     const isSuite = comm === 'node' && argv.some((a) => /\.test\.mjs$/.test(a));
     const isChromium = /^chrome|^chromium|^headless/.test(comm);
@@ -44,9 +49,13 @@ function scan() {
 }
 
 let { live, zombies } = scan();
-if (live.length) { await sleep(SETTLE_MS); ({ live, zombies } = scan()); }
+if (live.length) {
+  await sleep(SETTLE_MS);
+  ({ live, zombies } = scan());
+}
 
-if (zombies.length) console.log(`${zombies.length} zombie(s) awaiting reap — exited already, holding no port or memory; not a leak`);
+if (zombies.length)
+  console.log(`${zombies.length} zombie(s) awaiting reap — exited already, holding no port or memory; not a leak`);
 if (live.length) {
   console.log(`!!! ${live.length} LIVE survivor(s) after a ${SETTLE_MS}ms settle:\n${live.join('\n')}`);
   process.exit(1);

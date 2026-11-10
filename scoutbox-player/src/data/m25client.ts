@@ -36,7 +36,12 @@ export interface AgentConsentRequest {
   agent: ConsentAgent;
   context: ConsentContext | null;
   otherPartyRoles: string[];
-  particulars: { fullParticularsProvided: boolean; legalAdviceOffered: boolean; proposedFeeDisclosed: boolean; acknowledged: unknown } | null;
+  particulars: {
+    fullParticularsProvided: boolean;
+    legalAdviceOffered: boolean;
+    proposedFeeDisclosed: boolean;
+    acknowledged: unknown;
+  } | null;
   policyVersions: string[];
   ruleIds: string[];
   requestedAt: number;
@@ -49,13 +54,28 @@ export interface AgentConsentRequest {
 
 export interface PlayerM25 {
   list(playerId: string): Promise<{ items: AgentConsentRequest[]; minor?: boolean; note?: string }>;
-  answer(playerId: string, id: string, action: ConsentAction, input: { acknowledgedParticulars?: boolean; acknowledgedLegalAdvice?: boolean; expectedRev: number; clientKey: string }): Promise<AgentConsentRequest>;
+  answer(
+    playerId: string,
+    id: string,
+    action: ConsentAction,
+    input: {
+      acknowledgedParticulars?: boolean;
+      acknowledgedLegalAdvice?: boolean;
+      expectedRev: number;
+      clientKey: string;
+    },
+  ): Promise<AgentConsentRequest>;
 }
 
 const live: PlayerM25 = {
   list: (pid) => req('/player/agent/consents', pid),
   answer: async (pid, id, action, input) =>
-    (await req<{ consent: AgentConsentRequest }>(`/player/agent/consents/${encodeURIComponent(id)}/${action}`, pid, { method: 'POST', body: JSON.stringify(input) })).consent,
+    (
+      await req<{ consent: AgentConsentRequest }>(`/player/agent/consents/${encodeURIComponent(id)}/${action}`, pid, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+    ).consent,
 };
 
 export const m25: PlayerM25 = DEMO ? m25mock : live;

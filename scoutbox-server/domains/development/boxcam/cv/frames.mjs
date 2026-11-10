@@ -28,9 +28,14 @@ export function decodeFrame(raw) {
   }
   const w = Number(raw.w);
   const h = Number(raw.h);
-  if (!Number.isInteger(w) || !Number.isInteger(h)
-    || w < FRAME_LIMITS.minWidth || h < FRAME_LIMITS.minHeight
-    || w > FRAME_LIMITS.maxWidth || h > FRAME_LIMITS.maxHeight) {
+  if (
+    !Number.isInteger(w) ||
+    !Number.isInteger(h) ||
+    w < FRAME_LIMITS.minWidth ||
+    h < FRAME_LIMITS.minHeight ||
+    w > FRAME_LIMITS.maxWidth ||
+    h > FRAME_LIMITS.maxHeight
+  ) {
     return {
       ok: false,
       error: FRAME_ERRORS.FRAME_DIMENSIONS_INVALID,
@@ -114,7 +119,9 @@ export class FrameQueue {
     this.items = [];
   }
 
-  get size() { return this.items.length; }
+  get size() {
+    return this.items.length;
+  }
 }
 
 export function frameStats(frame) {

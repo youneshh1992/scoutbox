@@ -12,7 +12,8 @@ export function normaliseClientKey(raw, error = 'CLIENT_KEY_INVALID') {
   if (raw === undefined || raw === null || raw === '') return { ok: true, key: null };
   if (typeof raw !== 'string') return { ok: false, error, message: 'clientKey must be text.' };
   const k = raw.trim();
-  if (!k || k.length > CLIENT_KEY_MAX) return { ok: false, error, message: `clientKey must be 1–${CLIENT_KEY_MAX} characters.` };
+  if (!k || k.length > CLIENT_KEY_MAX)
+    return { ok: false, error, message: `clientKey must be 1–${CLIENT_KEY_MAX} characters.` };
   return { ok: true, key: k };
 }
 

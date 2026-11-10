@@ -1,4 +1,4 @@
-// One-click reporting + blocking, reachable from EVERY screen via the 
+// One-click reporting + blocking, reachable from EVERY screen via the
 // button in each tab header. Works for both player and guardian sessions.
 // An urgent report immediately suspends communication pending review.
 
@@ -23,7 +23,13 @@ export function ReportButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Pressable onPress={() => setOpen(true)} style={styles.flagBtn} accessibilityRole="button" accessibilityLabel="Report or block" testID="report-button">
+      <Pressable
+        onPress={() => setOpen(true)}
+        style={styles.flagBtn}
+        accessibilityRole="button"
+        accessibilityLabel="Report or block"
+        testID="report-button"
+      >
         <Icon name="flag" size={22} color={colors.danger} />
       </Pressable>
       {open && <ReportSheet onClose={() => setOpen(false)} />}
@@ -68,7 +74,7 @@ export function ReportSheet({ onClose }: { onClose: () => void }) {
           ? 'Report filed. Communication with this organisation is suspended pending review.'
           : alsoBlock
             ? 'Report filed and organisation blocked.'
-            : 'Report filed for review. Thank you for flagging it.'
+            : 'Report filed for review. Thank you for flagging it.',
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not file the report.');
@@ -91,13 +97,23 @@ export function ReportSheet({ onClose }: { onClose: () => void }) {
             ) : (
               <>
                 <Muted size={13}>
-                  Every report is reviewed. Mark it urgent to suspend all communication with the
-                  organisation immediately, pending review.
+                  Every report is reviewed. Mark it urgent to suspend all communication with the organisation
+                  immediately, pending review.
                 </Muted>
                 <SectionTitle>What are you reporting?</SectionTitle>
                 <Row>
-                  <Button small primary={targetKind === 'club'} label="Report Club" onPress={() => setTargetKind('club')} />
-                  <Button small primary={targetKind === 'scout'} label="Report Scout" onPress={() => setTargetKind('scout')} />
+                  <Button
+                    small
+                    primary={targetKind === 'club'}
+                    label="Report Club"
+                    onPress={() => setTargetKind('club')}
+                  />
+                  <Button
+                    small
+                    primary={targetKind === 'scout'}
+                    label="Report Scout"
+                    onPress={() => setTargetKind('scout')}
+                  />
                 </Row>
                 <SectionTitle>Organisation</SectionTitle>
                 <Row>
@@ -125,11 +141,21 @@ export function ReportSheet({ onClose }: { onClose: () => void }) {
                 />
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Muted size={13}>Urgent — suspend communication now</Muted>
-                  <Switch value={urgent} onValueChange={setUrgent} trackColor={{ true: colors.danger, false: colors.line }} thumbColor="#fff" />
+                  <Switch
+                    value={urgent}
+                    onValueChange={setUrgent}
+                    trackColor={{ true: colors.danger, false: colors.line }}
+                    thumbColor="#fff"
+                  />
                 </Row>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Muted size={13}>Also block this organisation</Muted>
-                  <Switch value={alsoBlock} onValueChange={setAlsoBlock} trackColor={{ true: colors.danger, false: colors.line }} thumbColor="#fff" />
+                  <Switch
+                    value={alsoBlock}
+                    onValueChange={setAlsoBlock}
+                    trackColor={{ true: colors.danger, false: colors.line }}
+                    thumbColor="#fff"
+                  />
                 </Row>
                 {error && (
                   <Card style={{ borderColor: colors.danger }}>
@@ -146,27 +172,37 @@ export function ReportSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-const makeStyles = (colors: Palette) => StyleSheet.create({
-  flagBtn: { width: 44, height: 44, borderRadius: 22, borderWidth: 0, borderColor: colors.line, backgroundColor: colors.bg2, alignItems: 'center', justifyContent: 'center' },
-  veil: { flex: 1, backgroundColor: 'rgba(3,8,18,0.7)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: colors.bg2,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.line,
-    padding: 18,
-    maxHeight: '85%',
-  },
-  title: { color: colors.text, fontSize: 20, fontWeight: '800' },
-  input: {
-    backgroundColor: colors.bg,
-    borderColor: colors.line,
-    borderWidth: 1,
-    borderRadius: 10,
-    color: colors.text,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
-});
+const makeStyles = (colors: Palette) =>
+  StyleSheet.create({
+    flagBtn: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      borderWidth: 0,
+      borderColor: colors.line,
+      backgroundColor: colors.bg2,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    veil: { flex: 1, backgroundColor: 'rgba(3,8,18,0.7)', justifyContent: 'flex-end' },
+    sheet: {
+      backgroundColor: colors.bg2,
+      borderTopLeftRadius: 18,
+      borderTopRightRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.line,
+      padding: 18,
+      maxHeight: '85%',
+    },
+    title: { color: colors.text, fontSize: 20, fontWeight: '800' },
+    input: {
+      backgroundColor: colors.bg,
+      borderColor: colors.line,
+      borderWidth: 1,
+      borderRadius: 10,
+      color: colors.text,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      fontSize: 15,
+    },
+  });

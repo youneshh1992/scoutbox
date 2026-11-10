@@ -1,11 +1,37 @@
 /* ScoutBox Trust & Safety — presentation comes from the shared design system.
    The console has no sidebar accordion: its page-level tab row is the
    platform's underline tabs, shown at every width. */
-@import '../../design-system/platform.css';
+@import "../../design-system/platform.css";
 
-.subnav { display: flex; gap: 18px; padding: 0 26px; background: var(--sb-topbar); border-bottom: 1px solid var(--sb-rule); overflow-x: auto; }
-.subnav button { padding: 11px 0; border-bottom: 2px solid transparent; font-size: 12px; min-height: 0; }
-.subnav button.active { color: var(--sb-tab-active); border-bottom-color: var(--sb-tab-line); font-weight: 600; }
-@media (max-width: 640px) { .subnav { padding: 0 17px; gap: 14px; } }
+.subnav {
+  display: flex;
+  gap: 18px;
+  padding: 0 26px;
+  background: var(--sb-topbar);
+  border-bottom: 1px solid var(--sb-rule);
+  overflow-x: auto;
+}
+.subnav button {
+  padding: 11px 0;
+  border-bottom: 2px solid transparent;
+  font-size: 12px;
+  min-height: 0;
+}
+.subnav button.active {
+  color: var(--sb-tab-active);
+  border-bottom-color: var(--sb-tab-line);
+  font-weight: 600;
+}
+@media (max-width: 640px) {
+  .subnav {
+    padding: 0 17px;
+    gap: 14px;
+  }
+}
 /* phone width: the console's report rows are flex lines of pills and text; let them wrap. */
-@media (max-width: 640px) { .list-row, .list-row > div { flex-wrap: wrap; } }
+@media (max-width: 640px) {
+  .list-row,
+  .list-row > div {
+    flex-wrap: wrap;
+  }
+}

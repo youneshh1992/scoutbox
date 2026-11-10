@@ -8,11 +8,27 @@ import { minimizePayload } from './eventRegistry.mjs';
 const SSE_TICKET_TTL_MS = 10 * 60 * 1000;
 const EVENT_LOG_CAP = 500;
 
-export function createLiveSync({ app, store, sessions, byId, users, channels, findPlayer, isBlocked, sessionFor, newToken }) {
+export function createLiveSync({
+  app,
+  store,
+  sessions,
+  byId,
+  users,
+  channels,
+  findPlayer,
+  isBlocked,
+  sessionFor,
+  newToken,
+}) {
   for (const [name, fn] of Object.entries({ findPlayer, isBlocked, sessionFor, newToken })) {
     if (typeof fn !== 'function') throw new TypeError(`createLiveSync needs ${name}`);
   }
-  if (typeof sessions?.bySid !== 'function' || typeof channels?.parties !== 'function' || typeof users?.byId !== 'function') throw new TypeError('createLiveSync needs the sessions, channels and staff repositories');
+  if (
+    typeof sessions?.bySid !== 'function' ||
+    typeof channels?.parties !== 'function' ||
+    typeof users?.byId !== 'function'
+  )
+    throw new TypeError('createLiveSync needs the sessions, channels and staff repositories');
 
   const sseClients = new Set(); // { res, identity }
   const sseTickets = new Map(); // ticket -> { sid, expiresAt }
@@ -56,14 +72,18 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
       const channel = channels.parties(payload.channelId);
       if (!channel) return false;
       if (identity.kind === 'org') return channel.orgId === org.id;
-      if (identity.kind === 'player') return channel.playerId === identity.playerId && channel.counterparty === 'player';
+      if (identity.kind === 'player')
+        return channel.playerId === identity.playerId && channel.counterparty === 'player';
       if (identity.kind === 'guardian') return channel.guardianId === identity.guardianId;
       return false;
     }
     if (event === 'notify') {
-      if (identity.kind === 'org') return payload.audienceKind === 'org_user' && users.byId(payload.audienceId)?.orgId === org.id;
-      if (identity.kind === 'player') return payload.audienceKind === 'player' && payload.audienceId === identity.playerId;
-      if (identity.kind === 'guardian') return payload.audienceKind === 'guardian' && payload.audienceId === identity.guardianId;
+      if (identity.kind === 'org')
+        return payload.audienceKind === 'org_user' && users.byId(payload.audienceId)?.orgId === org.id;
+      if (identity.kind === 'player')
+        return payload.audienceKind === 'player' && payload.audienceId === identity.playerId;
+      if (identity.kind === 'guardian')
+        return payload.audienceKind === 'guardian' && payload.audienceId === identity.guardianId;
       return false;
     }
     // An orgId makes an event private to that club. Checked before the playerId rule, which would deliver it to the
@@ -80,11 +100,16 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
     }
     // No default of true, so a new payload shape cannot inherit broadcast-to-all; unclassified names fail closed.
     switch (audienceFor(event)) {
-      case 'public_safe': return true;
-      case 'trust_safety_only': return identity.kind === 'admin';
-      case 'player_private': return identity.kind === 'player' || identity.kind === 'guardian';
-      case 'guardian_private': return identity.kind === 'guardian';
-      case 'org_member': return identity.kind === 'org';
+      case 'public_safe':
+        return true;
+      case 'trust_safety_only':
+        return identity.kind === 'admin';
+      case 'player_private':
+        return identity.kind === 'player' || identity.kind === 'guardian';
+      case 'guardian_private':
+        return identity.kind === 'guardian';
+      case 'org_member':
+        return identity.kind === 'org';
       case 'org_private':
       default:
         // An org-private event without an orgId is a classification bug; nobody gets it.
@@ -127,7 +152,10 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
     }
     // Inside a unit, send after commit (never for a rollback). The check above still runs now, so a bad call site
     // fails the unit.
-    if (store.inUnitOfWork?.()) { store.afterCommit(() => broadcast(event, rawPayload)); return; }
+    if (store.inUnitOfWork?.()) {
+      store.afterCommit(() => broadcast(event, rawPayload));
+      return;
+    }
     publishEvent(event, payload);
   }
 
@@ -135,7 +163,11 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
   function closeStreamsOf(userId) {
     for (const client of [...sseClients]) {
       if (client.identity?.kind === 'org' && client.identity.userId === userId) {
-        try { client.res.end(); } catch { /* already gone */ }
+        try {
+          client.res.end();
+        } catch {
+          /* already gone */
+        }
         sseClients.delete(client);
       }
     }
@@ -143,7 +175,10 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
 
   app.post('/events/ticket', (req, res) => {
     const session = sessionFor(req);
-    if (!sseIdentityFor(session)) return res.status(401).json({ error: 'AUTH_REQUIRED', message: 'Log in first — live sync is scoped to your account.' });
+    if (!sseIdentityFor(session))
+      return res
+        .status(401)
+        .json({ error: 'AUTH_REQUIRED', message: 'Log in first — live sync is scoped to your account.' });
     for (const [t, v] of sseTickets) if (v.expiresAt < Date.now()) sseTickets.delete(t);
     const ticket = newToken();
     // Holds the session's sid, never a bearer token.
@@ -154,11 +189,16 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
   app.get('/events', (req, res) => {
     const t = sseTickets.get(String(req.query.ticket ?? ''));
     if (!t || t.expiresAt < Date.now()) {
-      return res.status(401).json({ error: 'TICKET_INVALID', message: 'Mint a fresh connect ticket (POST /events/ticket) and reconnect.' });
+      return res
+        .status(401)
+        .json({ error: 'TICKET_INVALID', message: 'Mint a fresh connect ticket (POST /events/ticket) and reconnect.' });
     }
     // Resolved from the live session, so logout invalidates a ticket within its lifetime.
     const identity = sseIdentityFor(sessions.bySid(t.sid));
-    if (!identity) return res.status(401).json({ error: 'SESSION_INVALID', message: 'Log in again — this session is no longer valid.' });
+    if (!identity)
+      return res
+        .status(401)
+        .json({ error: 'SESSION_INVALID', message: 'Log in again — this session is no longer valid.' });
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.flushHeaders();
     res.write(`data: ${JSON.stringify({ event: 'connected', ts: Date.now() })}\n\n`);
@@ -177,8 +217,17 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
     }
     const client = { res, identity };
     sseClients.add(client);
-    const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* closing */ } }, 25_000);
-    req.on('close', () => { clearInterval(ping); sseClients.delete(client); });
+    const ping = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        /* closing */
+      }
+    }, 25_000);
+    req.on('close', () => {
+      clearInterval(ping);
+      sseClients.delete(client);
+    });
   });
 
   return { broadcast, publishEvent, eventPayloadDrops, closeStreamsOf };

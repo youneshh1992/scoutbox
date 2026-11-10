@@ -12,10 +12,17 @@ const demo = await ensureDemoHost();
 
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 // Language that would turn a workspace into a talent judgement.
-const FORBIDDEN = /player score|overall rating|talent score|signing probability|readiness score|decision score|untrustworthy|suspicious|risky|poor player/i;
+const FORBIDDEN =
+  /player score|overall rating|talent score|signing probability|readiness score|decision score|untrustworthy|suspicious|risky|poor player/i;
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 
 const browser = await chromium.launch({ executablePath: EXE });
 const errors = [];
@@ -34,14 +41,17 @@ async function driveClub(url, label, { enterprise }) {
   await app.waitForSelector('nav.sidebar', { timeout: 25000 });
 
   // The Room lives inside the EXISTING Recruitment destination.
-  await app.evaluate(() => { location.hash = '#/rooms'; });
+  await app.evaluate(() => {
+    location.hash = '#/rooms';
+  });
   await app.waitForSelector('[aria-label="Recruitment Rooms table"]', { timeout: 20000 });
   say(`${label}: the Rooms list opens inside Recruitment`);
   {
     const body = await app.locator('body').innerText();
     if (!/never sorts or ranks rooms by Trust Score/i.test(body)) fail(`${label}: the no-ranking statement is missing`);
     say(`${label}: the list states rooms are never ranked by Trust Score`);
-    if (!/Evidence confidence — not football ability/i.test(body)) fail(`${label}: the Trust disclaimer is missing from the list`);
+    if (!/Evidence confidence — not football ability/i.test(body))
+      fail(`${label}: the Trust disclaimer is missing from the list`);
     say(`${label}: the Trust Score carries its disclaimer in the list`);
     if (FORBIDDEN.test(body)) fail(`${label}: prohibited scoring language in the Rooms list`);
     say(`${label}: no player score, rating or probability appears in the list`);
@@ -51,7 +61,8 @@ async function driveClub(url, label, { enterprise }) {
   const sidebarItems = await app.locator('nav.sidebar button').count();
   await app.click('[aria-label="Saved views"] button[role="tab"]:nth-child(2)');
   await app.waitForTimeout(400);
-  if (await app.locator('nav.sidebar button').count() !== sidebarItems) fail(`${label}: a saved view changed the global navigation`);
+  if ((await app.locator('nav.sidebar button').count()) !== sidebarItems)
+    fail(`${label}: a saved view changed the global navigation`);
   say(`${label}: saved views are page-level filters, not new sidebar items`);
   await app.click('[aria-label="Saved views"] button[role="tab"]:nth-child(1)');
   await app.waitForTimeout(400);
@@ -64,14 +75,26 @@ async function driveClub(url, label, { enterprise }) {
     if (!/^#\/recruitment\/rooms\//.test(hash)) fail(`${label}: the room has no deep link (${hash})`);
     say(`${label}: the room has its own deep link`);
     const header = await app.locator('[aria-label="Room header"]').innerText();
-    if (!/Evidence confidence — not football ability/i.test(header)) fail(`${label}: the room header shows a score without its disclaimer`);
+    if (!/Evidence confidence — not football ability/i.test(header))
+      fail(`${label}: the room header shows a score without its disclaimer`);
     say(`${label}: the room header shows the Trust Score with its disclaimer`);
     const body = await app.locator('body').innerText();
-    if (!/private to your organisation/i.test(body)) fail(`${label}: the room does not state it is organisation-private`);
+    if (!/private to your organisation/i.test(body))
+      fail(`${label}: the room does not state it is organisation-private`);
     say(`${label}: the room states it is private to the organisation`);
   }
 
-  for (const tab of ['Overview', 'Passport', 'Evidence', 'Assessments', 'Combine', 'Development', 'Discussion', 'Activity', 'Decision']) {
+  for (const tab of [
+    'Overview',
+    'Passport',
+    'Evidence',
+    'Assessments',
+    'Combine',
+    'Development',
+    'Discussion',
+    'Activity',
+    'Decision',
+  ]) {
     await roomTab(app, tab);
     await app.waitForSelector(`[role="tabpanel"][aria-label="${roomPanelLabel(tab)}"]`, { timeout: 10000 });
   }
@@ -83,7 +106,8 @@ async function driveClub(url, label, { enterprise }) {
     const panel = await app.locator('[role="tabpanel"][aria-label="Summary"]').innerText();
     if (FORBIDDEN.test(panel)) fail(`${label}: prohibited scoring language on the overview`);
     say(`${label}: the overview carries no second score`);
-    if (!/Ready for review|Waiting on evidence|Assessment outstanding|Trial pending|Decision recorded/i.test(panel)) fail(`${label}: room health is not shown as a word`);
+    if (!/Ready for review|Waiting on evidence|Assessment outstanding|Trial pending|Decision recorded/i.test(panel))
+      fail(`${label}: room health is not shown as a word`);
     say(`${label}: room health is a word, never a number`);
   }
 
@@ -91,7 +115,8 @@ async function driveClub(url, label, { enterprise }) {
   {
     await roomTab(app, 'Tasks');
     const panel = await app.locator('[role="tabpanel"][aria-label="Tasks"]').innerText();
-    if (!/never sent to the player/i.test(panel)) fail(`${label}: the tasks note does not say tasks are never sent to the player`);
+    if (!/never sent to the player/i.test(panel))
+      fail(`${label}: the tasks note does not say tasks are never sent to the player`);
     say(`${label}: room tasks state they are never sent to the player`);
   }
 
@@ -118,7 +143,9 @@ async function driveClub(url, label, { enterprise }) {
   // The archived room is where decision memory actually has something to show:
   // a superseded decision, a structured archive reason, and the evidence
   // confidence the club could see when it decided.
-  await app.evaluate(() => { location.hash = '#/rooms'; });
+  await app.evaluate(() => {
+    location.hash = '#/rooms';
+  });
   await app.waitForSelector('[aria-label="Recruitment Rooms table"]', { timeout: 20000 });
   await app.click('[aria-label="Saved views"] button[role="tab"]:has-text("Archived")');
   await app.waitForTimeout(500);
@@ -138,15 +165,21 @@ async function driveClub(url, label, { enterprise }) {
   if (enterprise) {
     // Structured reasons only — and never a protected characteristic.
     await roomTab(app, 'Overview');
-    const reasons = await app.locator('[aria-label="Reasons"]').innerText().catch(() => '');
-    if (/nationality|ethnic|religion|disab|postcode|income/i.test(reasons)) fail(`${label}: a protected characteristic is offered as a reason`);
+    const reasons = await app
+      .locator('[aria-label="Reasons"]')
+      .innerText()
+      .catch(() => '');
+    if (/nationality|ethnic|religion|disab|postcode|income/i.test(reasons))
+      fail(`${label}: a protected characteristic is offered as a reason`);
     say(`${label}: the reason picker offers no protected characteristic`);
   }
 
   // Narrow layout: the tab strip scrolls, the page does not.
   await app.setViewportSize({ width: 400, height: 900 });
   await app.waitForTimeout(500);
-  const overflow = await app.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2);
+  const overflow = await app.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth + 2,
+  );
   if (overflow) fail(`${label}: the room overflows horizontally at 400px`);
   say(`${label}: the room fits a 400px viewport with no horizontal page scroll`);
   await app.setViewportSize({ width: 1440, height: 900 });
@@ -174,11 +207,14 @@ await driveClub(`${demo.host}/grassroots/`, 'grassroots demo', { enterprise: fal
   // vocabulary.
   // ("append-only" is likewise pre-existing: the player is told their safety
   // ledger is append-only, which is about THEIR record, not a room's.)
-  if (/room lead|decision readiness|room health|reason code|trust at decision|private to your organisation/i.test(body)) {
+  if (
+    /room lead|decision readiness|room health|reason code|trust at decision|private to your organisation/i.test(body)
+  ) {
     fail('player demo: club-internal recruitment vocabulary leaked to the player');
   }
   say('player demo: no room lead, readiness, health, decision reason or snapshot reaches the player');
-  if (/Under review|Offer consideration|Trial requested|Offer made/i.test(body)) fail('player demo: a room status label leaked to the player');
+  if (/Under review|Offer consideration|Trial requested|Offer made/i.test(body))
+    fail('player demo: a room status label leaked to the player');
   say('player demo: no room status label reaches the player');
   await player.close();
 }
@@ -188,7 +224,8 @@ await driveClub(`${demo.host}/grassroots/`, 'grassroots demo', { enterprise: fal
   const admin = await page(`${demo.host}/admin/`);
   await admin.waitForSelector('text=Report queue', { timeout: 20000 });
   const body = await admin.locator('body').innerText();
-  if (/Recruitment Room — |room discussion|decision reason/i.test(body)) fail('T&S demo: room contents are exposed in the back office');
+  if (/Recruitment Room — |room discussion|decision reason/i.test(body))
+    fail('T&S demo: room contents are exposed in the back office');
   say('T&S demo: the back office exposes no Recruitment Room contents');
   await admin.close();
 }

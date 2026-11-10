@@ -3,8 +3,15 @@
 // geometric and photometric, with no demographic labels.
 
 import {
-  sequence, jugglePath, touchPath, stationaryPath, rollPath,
-  independentBouncePath, nearMissPath, DEFAULT_PERSON, DEFAULT_BALL_RN,
+  sequence,
+  jugglePath,
+  touchPath,
+  stationaryPath,
+  rollPath,
+  independentBouncePath,
+  nearMissPath,
+  DEFAULT_PERSON,
+  DEFAULT_BALL_RN,
 } from './scenes.mjs';
 
 // Real 480p–1080p would exceed the gray8 320x240 cap, so these are proportional synthetic sizes; 2x between smallest
@@ -86,8 +93,8 @@ export function variationFamilies() {
   fams.push({
     family: 'ball_scale',
     axis: 'ballScale',
-    parameterSpace: { rN: [0.022, 0.033, 0.050] },
-    variants: [0.022, 0.033, 0.050].map((rN, i) => ({
+    parameterSpace: { rN: [0.022, 0.033, 0.05] },
+    variants: [0.022, 0.033, 0.05].map((rN, i) => ({
       id: `ball_scale_${i}`,
       kind: 'juggle',
       frames: sequence({ path: jugglePath({ contacts: 8 }), rN, seed: 11 }),
@@ -127,9 +134,9 @@ export function variationFamilies() {
   // --- Family 8: player silhouette geometry ------------------------------
   const SILHOUETTES = [
     { id: 'narrow', box: { x0: 0.43, y0: 0.32, x1: 0.51, y1: 0.93, luma: 55 } },
-    { id: 'wide', box: { x0: 0.36, y0: 0.30, x1: 0.58, y1: 0.93, luma: 55 } },
-    { id: 'mid_contrast', box: { x0: 0.40, y0: 0.32, x1: 0.54, y1: 0.93, luma: 92 } },
-    { id: 'shifted_left', box: { x0: 0.30, y0: 0.32, x1: 0.44, y1: 0.93, luma: 55 } },
+    { id: 'wide', box: { x0: 0.36, y0: 0.3, x1: 0.58, y1: 0.93, luma: 55 } },
+    { id: 'mid_contrast', box: { x0: 0.4, y0: 0.32, x1: 0.54, y1: 0.93, luma: 92 } },
+    { id: 'shifted_left', box: { x0: 0.3, y0: 0.32, x1: 0.44, y1: 0.93, luma: 55 } },
   ];
   fams.push({
     family: 'player_silhouette',
@@ -141,7 +148,8 @@ export function variationFamilies() {
       // The ball tracks the silhouette, so every variant is the same physical scene.
       frames: sequence({
         path: jugglePath({ contacts: 8, x: (s.box.x0 + s.box.x1) / 2 + 0.02 }),
-        person: s.box, seed: 11,
+        person: s.box,
+        seed: 11,
       }),
       expected: { state: 'accepted', count: 8, tolerance: 1 },
     })),
@@ -155,7 +163,10 @@ export function variationFamilies() {
     parameterSpace: { mode: ['still', 'small_translation', 'shake', 'mild_scale'] },
     variants: [
       { id: 'cam_still', opts: {} },
-      { id: 'cam_translation', opts: { cameraDrift: (t) => ({ dx: 0.04 * Math.sin(t / 1500), dy: 0.02 * Math.cos(t / 1700) }) } },
+      {
+        id: 'cam_translation',
+        opts: { cameraDrift: (t) => ({ dx: 0.04 * Math.sin(t / 1500), dy: 0.02 * Math.cos(t / 1700) }) },
+      },
       { id: 'cam_shake', opts: { cameraShakeN: 0.012 } },
       { id: 'cam_scale', opts: { cameraScale: (t) => 1 + 0.06 * Math.sin(t / 2000) } },
     ].map((v) => ({
@@ -187,8 +198,10 @@ export function variationFamilies() {
       id: `pace_${p.id}`,
       kind: 'touch',
       frames: sequence({
-        fps: 30, durationMs: p.periodMs * p.touches,
-        path: touchPath({ touches: p.touches, periodMs: p.periodMs }), seed: 23,
+        fps: 30,
+        durationMs: p.periodMs * p.touches,
+        path: touchPath({ touches: p.touches, periodMs: p.periodMs }),
+        seed: 23,
       }),
       // Even the fastest supported pace is well outside the 180 ms refractory, so every touch must survive.
       expected: { state: 'accepted', count: p.touches, tolerance: 2 },
@@ -203,17 +216,22 @@ export function variationFamilies() {
     family: 'touch_pace_above_supported',
     axis: 'motionSpeed',
     parameterSpace: { periodMs: [260] },
-    declaredLimitation: 'Above four touches per second the engine under-counts; the pace is outside the supported envelope.',
-    variants: [{
-      id: 'pace_above_supported_260ms',
-      kind: 'touch',
-      frames: sequence({
-        fps: 30, durationMs: 260 * 14,
-        path: touchPath({ touches: 14, periodMs: 260 }), seed: 23,
-      }),
-      // The count is not asserted against the true 14: this is outside the envelope.
-      expected: { state: 'accepted_count_not_asserted', count: null },
-    }],
+    declaredLimitation:
+      'Above four touches per second the engine under-counts; the pace is outside the supported envelope.',
+    variants: [
+      {
+        id: 'pace_above_supported_260ms',
+        kind: 'touch',
+        frames: sequence({
+          fps: 30,
+          durationMs: 260 * 14,
+          path: touchPath({ touches: 14, periodMs: 260 }),
+          seed: 23,
+        }),
+        // The count is not asserted against the true 14: this is outside the envelope.
+        expected: { state: 'accepted_count_not_asserted', count: null },
+      },
+    ],
     invariant: 'declared_limitation_only',
   });
 
@@ -260,138 +278,117 @@ export function falseTouchStress() {
   const near = { x: 0.567, y: 0.83 };
 
   const c = (id, description, opts, kind = 'touch') => ({
-    id, kind, description,
+    id,
+    kind,
+    description,
     frames: sequence({ seed: 61, ...opts }),
     expected: { state: 'zero_touches', count: 0 },
   });
 
   return [
-    c('FT01_body_moves_near_still_ball',
-      'Player shifts body beside a stationary ball without touching it.',
-      {
-        path: stationaryPath(near),
-        personAt: (t) => ({ ...P, x0: P.x0 + 0.02 * Math.sin(t / 400), x1: P.x1 + 0.02 * Math.sin(t / 400) }),
-      }),
+    c('FT01_body_moves_near_still_ball', 'Player shifts body beside a stationary ball without touching it.', {
+      path: stationaryPath(near),
+      personAt: (t) => ({ ...P, x0: P.x0 + 0.02 * Math.sin(t / 400), x1: P.x1 + 0.02 * Math.sin(t / 400) }),
+    }),
 
-    c('FT02_still_ball_body_shift',
-      'Stationary ball, player sways slowly.',
-      {
-        path: stationaryPath(near),
-        personAt: (t) => ({ ...P, y0: P.y0 + 0.01 * Math.sin(t / 900), y1: P.y1 + 0.01 * Math.sin(t / 900) }),
-      }),
+    c('FT02_still_ball_body_shift', 'Stationary ball, player sways slowly.', {
+      path: stationaryPath(near),
+      personAt: (t) => ({ ...P, y0: P.y0 + 0.01 * Math.sin(t / 900), y1: P.y1 + 0.01 * Math.sin(t / 900) }),
+    }),
 
-    c('FT03_ball_rolls_near_no_contact',
-      'Ball rolls steadily past the player without contact.',
-      { path: rollPath({ x0: 0.05, x1: 0.95, y: 0.90, durationMs: 4000 }) }),
+    c('FT03_ball_rolls_near_no_contact', 'Ball rolls steadily past the player without contact.', {
+      path: rollPath({ x0: 0.05, x1: 0.95, y: 0.9, durationMs: 4000 }),
+    }),
 
-    c('FT04_ball_rolls_behind',
-      'Ball rolls behind the player, higher in frame.',
-      { path: rollPath({ x0: 0.05, x1: 0.95, y: 0.40, durationMs: 4000 }) }),
+    c('FT04_ball_rolls_behind', 'Ball rolls behind the player, higher in frame.', {
+      path: rollPath({ x0: 0.05, x1: 0.95, y: 0.4, durationMs: 4000 }),
+    }),
 
-    c('FT05_ball_passes_in_front',
-      'Ball passes in front of the player, low in frame.',
-      { path: rollPath({ x0: 0.95, x1: 0.05, y: 0.95, durationMs: 4000 }) }),
+    c('FT05_ball_passes_in_front', 'Ball passes in front of the player, low in frame.', {
+      path: rollPath({ x0: 0.95, x1: 0.05, y: 0.95, durationMs: 4000 }),
+    }),
 
-    c('FT06_independent_bounce',
-      'Ball bounces on its own, away from the player.',
-      { path: independentBouncePath({ x: 0.15 }) }),
+    c('FT06_independent_bounce', 'Ball bounces on its own, away from the player.', {
+      path: independentBouncePath({ x: 0.15 }),
+    }),
 
-    c('FT07_whole_camera_moves',
-      'Ball and player both stationary; the entire camera translates.',
-      {
-        path: stationaryPath(near),
-        cameraDrift: (t) => ({ dx: 0.06 * Math.sin(t / 700), dy: 0.04 * Math.cos(t / 800) }),
-      }),
+    c('FT07_whole_camera_moves', 'Ball and player both stationary; the entire camera translates.', {
+      path: stationaryPath(near),
+      cameraDrift: (t) => ({ dx: 0.06 * Math.sin(t / 700), dy: 0.04 * Math.cos(t / 800) }),
+    }),
 
-    c('FT08_camera_pan_fixed_relation',
-      'Camera pans steadily; player and ball keep a fixed relationship.',
-      { path: stationaryPath(near), cameraDrift: (t) => ({ dx: -0.10 + 0.00005 * t, dy: 0 }) }),
+    c('FT08_camera_pan_fixed_relation', 'Camera pans steadily; player and ball keep a fixed relationship.', {
+      path: stationaryPath(near),
+      cameraDrift: (t) => ({ dx: -0.1 + 0.00005 * t, dy: 0 }),
+    }),
 
-    c('FT09_person_walks_past_still_ball',
-      'A person walks across frame past a stationary ball.',
-      {
-        path: stationaryPath({ x: 0.80, y: 0.88 }),
-        personAt: (t) => {
-          const x = 0.05 + 0.00012 * t;
-          return { x0: x, y0: 0.32, x1: x + 0.14, y1: 0.93, luma: 55 };
-        },
-      }),
+    c('FT09_person_walks_past_still_ball', 'A person walks across frame past a stationary ball.', {
+      path: stationaryPath({ x: 0.8, y: 0.88 }),
+      personAt: (t) => {
+        const x = 0.05 + 0.00012 * t;
+        return { x0: x, y0: 0.32, x1: x + 0.14, y1: 0.93, luma: 55 };
+      },
+    }),
 
-    c('FT10_ball_starts_in_contact_range',
-      'Ball is already resting against the player when the protocol begins.',
-      { path: stationaryPath({ x: 0.55, y: 0.90 }) }),
+    c('FT10_ball_starts_in_contact_range', 'Ball is already resting against the player when the protocol begins.', {
+      path: stationaryPath({ x: 0.55, y: 0.9 }),
+    }),
 
-    c('FT11_prolonged_proximity',
-      'Ball rests against the foot for the entire attempt.',
-      { path: stationaryPath({ x: 0.545, y: 0.91 }), durationMs: 8000 }),
+    c('FT11_prolonged_proximity', 'Ball rests against the foot for the entire attempt.', {
+      path: stationaryPath({ x: 0.545, y: 0.91 }),
+      durationMs: 8000,
+    }),
 
-    c('FT12_oscillates_near_threshold',
-      'Ball oscillates just outside contact range, never arriving.',
-      { path: nearMissPath({ x0: 0.72, amplitude: 0.02 }) }),
+    c('FT12_oscillates_near_threshold', 'Ball oscillates just outside contact range, never arriving.', {
+      path: nearMissPath({ x0: 0.72, amplitude: 0.02 }),
+    }),
 
-    c('FT13_relative_motion_noise',
-      'Small random player-relative jitter with no real contact.',
-      {
-        path: (() => {
-          let s = 5;
-          const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return (s / 0x7fffffff) - 0.5; };
-          return () => ({ x: 0.567 + rnd() * 0.006, y: 0.83 + rnd() * 0.006 });
-        })(),
-      }),
+    c('FT13_relative_motion_noise', 'Small random player-relative jitter with no real contact.', {
+      path: (() => {
+        let s = 5;
+        const rnd = () => {
+          s = (s * 1103515245 + 12345) & 0x7fffffff;
+          return s / 0x7fffffff - 0.5;
+        };
+        return () => ({ x: 0.567 + rnd() * 0.006, y: 0.83 + rnd() * 0.006 });
+      })(),
+    }),
 
-    c('FT14_tracking_jitter',
-      'Detector-scale jitter on both ball and player.',
-      {
-        path: (t) => ({ x: 0.567 + 0.004 * Math.sin(t / 60), y: 0.83 + 0.004 * Math.cos(t / 55) }),
-        personAt: (t) => ({ ...P, x0: P.x0 + 0.004 * Math.sin(t / 61), x1: P.x1 + 0.004 * Math.sin(t / 61) }),
-      }),
+    c('FT14_tracking_jitter', 'Detector-scale jitter on both ball and player.', {
+      path: (t) => ({ x: 0.567 + 0.004 * Math.sin(t / 60), y: 0.83 + 0.004 * Math.cos(t / 55) }),
+      personAt: (t) => ({ ...P, x0: P.x0 + 0.004 * Math.sin(t / 61), x1: P.x1 + 0.004 * Math.sin(t / 61) }),
+    }),
 
-    c('FT15_centroid_noise_high_freq',
-      'High-frequency centroid noise at the detector floor.',
-      { path: (t) => ({ x: 0.567 + (t % 2 === 0 ? 0.003 : -0.003), y: 0.83 }) }),
+    c('FT15_centroid_noise_high_freq', 'High-frequency centroid noise at the detector floor.', {
+      path: (t) => ({ x: 0.567 + (t % 2 === 0 ? 0.003 : -0.003), y: 0.83 }),
+    }),
 
-    c('FT16_one_frame_false_proximity',
-      'Ball is distant except for a single frame adjacent to the player.',
-      {
-        path: (t) => (Math.abs(t - 2000) < 30
-          ? { x: 0.55, y: 0.86 }
-          : { x: 0.90, y: 0.86 }),
-      }),
+    c('FT16_one_frame_false_proximity', 'Ball is distant except for a single frame adjacent to the player.', {
+      path: (t) => (Math.abs(t - 2000) < 30 ? { x: 0.55, y: 0.86 } : { x: 0.9, y: 0.86 }),
+    }),
 
-    c('FT17_two_frame_false_proximity',
-      'Ball is distant except for two adjacent frames near the player.',
-      {
-        path: (t) => (t >= 2000 && t <= 2180
-          ? { x: 0.55, y: 0.86 }
-          : { x: 0.90, y: 0.86 }),
-      }),
+    c('FT17_two_frame_false_proximity', 'Ball is distant except for two adjacent frames near the player.', {
+      path: (t) => (t >= 2000 && t <= 2180 ? { x: 0.55, y: 0.86 } : { x: 0.9, y: 0.86 }),
+    }),
 
-    c('FT18_sudden_bbox_size_change',
-      'Player region changes size abruptly mid-attempt.',
-      {
-        path: stationaryPath(near),
-        personAt: (t) => (t < 2400
-          ? P
-          : { x0: 0.30, y0: 0.20, x1: 0.62, y1: 0.97, luma: 55 }),
-      }),
+    c('FT18_sudden_bbox_size_change', 'Player region changes size abruptly mid-attempt.', {
+      path: stationaryPath(near),
+      personAt: (t) => (t < 2400 ? P : { x0: 0.3, y0: 0.2, x1: 0.62, y1: 0.97, luma: 55 }),
+    }),
 
-    c('FT19_ball_crosses_behind_silhouette',
-      'Ball passes behind the player and is briefly occluded.',
-      {
-        path: (t) => {
-          const x = 0.05 + 0.00020 * t;
-          if (x > 0.40 && x < 0.54) return null;      // hidden by the player
-          return { x: Math.min(0.97, x), y: 0.62 };
-        },
-      }),
+    c('FT19_ball_crosses_behind_silhouette', 'Ball passes behind the player and is briefly occluded.', {
+      path: (t) => {
+        const x = 0.05 + 0.0002 * t;
+        if (x > 0.4 && x < 0.54) return null; // hidden by the player
+        return { x: Math.min(0.97, x), y: 0.62 };
+      },
+    }),
 
-    c('FT20_lost_then_reacquired_near_player',
-      'Ball is lost for a few frames and reappears beside the player.',
-      {
-        path: (t) => {
-          if (t > 1500 && t < 1900) return null;
-          return t <= 1500 ? { x: 0.85, y: 0.86 } : { x: 0.56, y: 0.86 };
-        },
-      }),
+    c('FT20_lost_then_reacquired_near_player', 'Ball is lost for a few frames and reappears beside the player.', {
+      path: (t) => {
+        if (t > 1500 && t < 1900) return null;
+        return t <= 1500 ? { x: 0.85, y: 0.86 } : { x: 0.56, y: 0.86 };
+      },
+    }),
   ];
 }

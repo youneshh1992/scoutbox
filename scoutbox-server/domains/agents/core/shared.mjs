@@ -12,19 +12,24 @@ export const AGENT_POLICY_VERSION = 1;
 // -------------------------------------------------------------- verification
 
 export const VERIFICATION_STATES = Object.freeze([
-  'UNVERIFIED',              // nothing declared, or declared and nothing submitted
-  'PENDING',                 // submitted; a provider or attributed review has not answered
-  'VERIFIED',                // a provider with recorded provenance answered "current"
-  'STALE',                   // was VERIFIED; recheckAt has passed without a re-check
-  'INACTIVE',                // provider or holder says suspended / withdrawn / expired
-  'MANUAL_REVIEW_REQUIRED',  // no authoritative source; attributed human review needed (G-C0)
+  'UNVERIFIED', // nothing declared, or declared and nothing submitted
+  'PENDING', // submitted; a provider or attributed review has not answered
+  'VERIFIED', // a provider with recorded provenance answered "current"
+  'STALE', // was VERIFIED; recheckAt has passed without a re-check
+  'INACTIVE', // provider or holder says suspended / withdrawn / expired
+  'MANUAL_REVIEW_REQUIRED', // no authoritative source; attributed human review needed (G-C0)
 ]);
 
 /**
  * Separate facts with separate clocks: a FIFA licence, a national registration and a domestic activity
  * authorisation (e.g. the U.S. Soccer background check and SafeSport).
  */
-export const FACETS = Object.freeze(['fifa_licence', 'national_registration', 'domestic_authorisation', 'minors_authorisation']);
+export const FACETS = Object.freeze([
+  'fifa_licence',
+  'national_registration',
+  'domestic_authorisation',
+  'minors_authorisation',
+]);
 
 /** How long a VERIFIED facet stays current before it must be re-checked. */
 export const RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
@@ -33,15 +38,21 @@ export const RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
 export const JURISDICTIONS = Object.freeze(['INT', 'ENG', 'USA']);
 
 const emptyFacet = () => ({
-  state: 'UNVERIFIED', reference: null, memberAssociation: null,
-  provenance: null, submittedAt: null, verifiedAt: null, recheckAt: null, note: null,
+  state: 'UNVERIFIED',
+  reference: null,
+  memberAssociation: null,
+  provenance: null,
+  submittedAt: null,
+  verifiedAt: null,
+  recheckAt: null,
+  note: null,
 });
 
 export const newFacets = () => ({
   fifa_licence: emptyFacet(),
-  national_registration: {},   // keyed by member association, e.g. ENG
-  domestic_authorisation: {},  // keyed by member association, e.g. USA background check + SafeSport
-  minors_authorisation: {},    // keyed by member association
+  national_registration: {}, // keyed by member association, e.g. ENG
+  domestic_authorisation: {}, // keyed by member association, e.g. USA background check + SafeSport
+  minors_authorisation: {}, // keyed by member association
 });
 
 /**
@@ -50,7 +61,8 @@ export const newFacets = () => ({
  */
 export function effectiveFacetState(facet, now = Date.now()) {
   if (!facet || !facet.state) return 'UNVERIFIED';
-  if (facet.state === 'VERIFIED' && !boundaryAbsent(facet.recheckAt) && isExpiredAt(facet.recheckAt, now)) return 'STALE';
+  if (facet.state === 'VERIFIED' && !boundaryAbsent(facet.recheckAt) && isExpiredAt(facet.recheckAt, now))
+    return 'STALE';
   return VERIFICATION_STATES.includes(facet.state) ? facet.state : 'MANUAL_REVIEW_REQUIRED';
 }
 
@@ -63,21 +75,27 @@ export function evaluateSubmission({ facet, reference, testProviderEnabled = fal
   if (testProviderEnabled) {
     if (/^TEST-VERIFIED-/i.test(ref)) {
       return {
-        state: 'VERIFIED', verifiedAt: now, recheckAt: now + RECHECK_MS,
+        state: 'VERIFIED',
+        verifiedAt: now,
+        recheckAt: now + RECHECK_MS,
         provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at: now },
         note: 'Verified by the LOCAL SYNTHETIC test provider. This is not a FIFA, FA or U.S. Soccer register check and never exists in production.',
       };
     }
     if (/^TEST-INACTIVE-/i.test(ref)) {
       return {
-        state: 'INACTIVE', verifiedAt: null, recheckAt: null,
+        state: 'INACTIVE',
+        verifiedAt: null,
+        recheckAt: null,
         provenance: { provider: 'local-synthetic-test-provider', kind: 'synthetic', at: now },
         note: 'Reported inactive by the LOCAL SYNTHETIC test provider.',
       };
     }
   }
   return {
-    state: 'MANUAL_REVIEW_REQUIRED', verifiedAt: null, recheckAt: null,
+    state: 'MANUAL_REVIEW_REQUIRED',
+    verifiedAt: null,
+    recheckAt: null,
     provenance: { provider: 'none', kind: 'none', at: now },
     note: `No ${facet === 'fifa_licence' ? 'FIFA' : 'national'} register integration exists in this build. A submitted reference is a declaration, not a verification; it is queued for attributed Trust & Safety review (G-C0), and nothing is verified until a named reviewer decides.`,
   };
@@ -115,8 +133,10 @@ export const normaliseTiers = (raw) => {
 
 /** As with an agreement term, a start or end that is not a finite instant fails closed. */
 export const affiliationActive = (a, now = Date.now()) =>
-  !!a && readInstant(a.startedAt) !== null && a.startedAt <= now
-  && (boundaryAbsent(a.endedAt) || (readInstant(a.endedAt) !== null && a.endedAt > now));
+  !!a &&
+  readInstant(a.startedAt) !== null &&
+  a.startedAt <= now &&
+  (boundaryAbsent(a.endedAt) || (readInstant(a.endedAt) !== null && a.endedAt > now));
 
 export const tiersOf = (a) => (a ? normaliseTiers(a.tiers) : []);
 
@@ -124,31 +144,33 @@ export const tiersOf = (a) => (a ? normaliseTiers(a.tiers) : []);
  * Capability → the roles that hold it; a capability absent here is held by nobody. Agency staff see only a summary
  * row of a client who chose to share with them, never the client's data.
  */
-export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
-  'me.read':                    TIERS,
-  'profile.write.own':          ['licensed_agent'],
-  'verification.submit':        ['licensed_agent'],
-  'clients.read.own':           ['licensed_agent'],
-  'clients.read.shared_summary': ['agency_admin', 'analyst', 'assistant', 'finance'],
-  'clients.request':            ['licensed_agent'],
-  'clients.terminate':          ['licensed_agent'],
-  'clients.opportunities.read': ['licensed_agent'],
-  // A regulated act of the licensed individual, not agency admin work.
-  'clients.opportunities.share': ['licensed_agent'],
-  'players.lookup':             ['licensed_agent'],
-  'inbox.read':                 TIERS,
-  'agency.read':                TIERS,
-  'agency.team.read':           TIERS,
-  'agency.team.write':          ['agency_admin'],
-  'agency.settings.write':      ['agency_admin'],
-  'agency.audit.read':          ['agency_admin'],
-  'agency.compliance.read':     ['agency_admin', 'licensed_agent'],
-  // Writing compliance contexts and transactions is a regulated act of the licensed individual only.
-  'compliance.read':            TIERS,
-  'compliance.contexts.write':  ['licensed_agent'],
-  'transactions.read':          TIERS,
-  'transactions.write':         ['licensed_agent'],
-}));
+export const PERMISSIONS = Object.freeze(
+  Object.assign(Object.create(null), {
+    'me.read': TIERS,
+    'profile.write.own': ['licensed_agent'],
+    'verification.submit': ['licensed_agent'],
+    'clients.read.own': ['licensed_agent'],
+    'clients.read.shared_summary': ['agency_admin', 'analyst', 'assistant', 'finance'],
+    'clients.request': ['licensed_agent'],
+    'clients.terminate': ['licensed_agent'],
+    'clients.opportunities.read': ['licensed_agent'],
+    // A regulated act of the licensed individual, not agency admin work.
+    'clients.opportunities.share': ['licensed_agent'],
+    'players.lookup': ['licensed_agent'],
+    'inbox.read': TIERS,
+    'agency.read': TIERS,
+    'agency.team.read': TIERS,
+    'agency.team.write': ['agency_admin'],
+    'agency.settings.write': ['agency_admin'],
+    'agency.audit.read': ['agency_admin'],
+    'agency.compliance.read': ['agency_admin', 'licensed_agent'],
+    // Writing compliance contexts and transactions is a regulated act of the licensed individual only.
+    'compliance.read': TIERS,
+    'compliance.contexts.write': ['licensed_agent'],
+    'transactions.read': TIERS,
+    'transactions.write': ['licensed_agent'],
+  }),
+);
 
 export function can(tiers, capability) {
   // Own keys of a null-prototype table: "constructor" is not a capability.
@@ -161,7 +183,14 @@ export function can(tiers, capability) {
 export const capabilitiesOf = (tiers) => Object.keys(PERMISSIONS).filter((c) => can(tiers, c));
 
 /** Nobody grants themselves agency_admin, and the last admin cannot be demoted or removed. */
-export function affiliationChangeProblem({ affiliations, target, actorUserId, nextTiers, now = Date.now(), ending = false }) {
+export function affiliationChangeProblem({
+  affiliations,
+  target,
+  actorUserId,
+  nextTiers,
+  now = Date.now(),
+  ending = false,
+}) {
   const admins = affiliations.filter((a) => affiliationActive(a, now) && tiersOf(a).includes('agency_admin'));
   const targetIsAdmin = tiersOf(target).includes('agency_admin');
   const willBeAdmin = !ending && nextTiers.includes('agency_admin');
@@ -174,7 +203,13 @@ export function affiliationChangeProblem({ affiliations, target, actorUserId, ne
 
 /** `expired` is derived, never written by a user. */
 export const AGREEMENT_STATUSES = Object.freeze([
-  'proposed', 'active', 'declined', 'expired', 'terminated_by_client', 'terminated_by_agent', 'disputed',
+  'proposed',
+  'active',
+  'declined',
+  'expired',
+  'terminated_by_client',
+  'terminated_by_agent',
+  'disputed',
 ]);
 export const SCOPES = Object.freeze(['employment', 'transfer', 'commercial', 'other_services']);
 /** FFAR 12(3) / FA 4.3: a player agreement may not exceed two years. */
@@ -187,7 +222,7 @@ export const REQUEST_COOLDOWN_MS = 30 * 24 * 60 * 60 * 1000;
 export const EXPIRY_ALERT_MS = 30 * 24 * 60 * 60 * 1000;
 
 export const normaliseScope = (raw) => {
-  const arr = Array.isArray(raw) ? raw : (typeof raw === 'string' ? [raw] : []);
+  const arr = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
   const out = [];
   for (const s of arr) if (SCOPES.includes(s) && !out.includes(s)) out.push(s);
   return out.length ? out : ['employment'];
@@ -211,17 +246,17 @@ const boundaryAbsent = (v) => v === null || v === undefined;
 const readBoundary = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 function endBoundaryPassed(endAt, now) {
-  if (boundaryAbsent(endAt)) return false;          // open-ended never expires
+  if (boundaryAbsent(endAt)) return false; // open-ended never expires
   const n = readBoundary(endAt);
-  if (n === null) return true;                      // present but unreadable → fail closed
-  return n <= now;                                  // `endAt === now` is over
+  if (n === null) return true; // present but unreadable → fail closed
+  return n <= now; // `endAt === now` is over
 }
 
 function startBoundaryReached(startAt, now) {
-  if (boundaryAbsent(startAt)) return true;         // open start
+  if (boundaryAbsent(startAt)) return true; // open start
   const n = readBoundary(startAt);
-  if (n === null) return false;                     // present but unreadable → fail closed
-  return n <= now;                                  // `startAt === now` counts as started
+  if (n === null) return false; // present but unreadable → fail closed
+  return n <= now; // `startAt === now` counts as started
 }
 
 /**
@@ -297,16 +332,23 @@ export function requestConflict(agreements, { agentUserId, playerId, now = Date.
   for (const a of agreements) {
     if (!a || a.agentUserId !== agentUserId || a.clientId !== playerId) continue;
     const st = effectiveAgreementStatus(a, now);
-    if (st === 'proposed' || st === 'active' || st === 'disputed') return { error: 'REPRESENTATION_ALREADY_EXISTS', agreementId: a.id, status: st };
+    if (st === 'proposed' || st === 'active' || st === 'disputed')
+      return { error: 'REPRESENTATION_ALREADY_EXISTS', agreementId: a.id, status: st };
   }
   let latestEnd = null;
   for (const a of agreements) {
     if (!a || a.agentUserId !== agentUserId || a.clientId !== playerId) continue;
     const st = effectiveAgreementStatus(a, now);
-    const endedAt = st === 'declined' ? a.declinedAt
-      : st === 'terminated_by_client' || st === 'terminated_by_agent' ? a.terminatedAt
-        : st === 'expired' ? a.endAt : null;
-    if (typeof endedAt === 'number' && now - endedAt < REQUEST_COOLDOWN_MS) latestEnd = Math.max(latestEnd ?? 0, endedAt);
+    const endedAt =
+      st === 'declined'
+        ? a.declinedAt
+        : st === 'terminated_by_client' || st === 'terminated_by_agent'
+          ? a.terminatedAt
+          : st === 'expired'
+            ? a.endAt
+            : null;
+    if (typeof endedAt === 'number' && now - endedAt < REQUEST_COOLDOWN_MS)
+      latestEnd = Math.max(latestEnd ?? 0, endedAt);
   }
   if (latestEnd !== null) return { error: 'REPRESENTATION_COOLDOWN', retryAt: latestEnd + REQUEST_COOLDOWN_MS };
   return null;
@@ -315,7 +357,7 @@ export function requestConflict(agreements, { agentUserId, playerId, now = Date.
 /** Which transitions each side may make. */
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
 export const AGENT_TRANSITIONS = nullProto({
-  proposed: ['terminated_by_agent'],       // cancel a pending request
+  proposed: ['terminated_by_agent'], // cancel a pending request
   active: ['terminated_by_agent'],
 });
 export const CLIENT_TRANSITIONS = nullProto({
@@ -339,22 +381,43 @@ export const historyEntry = (id, at, action, by, detail = null) => ({ id, at, ac
 export function agreementForAgent(a, now = Date.now()) {
   if (!a) return null;
   return {
-    id: a.id, agentUserId: a.agentUserId, agencyOrgId: a.agencyOrgId,
-    clientKind: a.clientKind, clientId: a.clientId,
-    status: effectiveAgreementStatus(a, now), storedStatus: a.status,
-    scope: a.scope, exclusive: !!a.exclusive, jurisdiction: a.jurisdiction ?? null,
-    termMonths: a.termMonths ?? null, startAt: a.startAt ?? null, endAt: a.endAt ?? null,
-    proposedAt: a.proposedAt ?? null, confirmedAt: a.confirmedAt ?? null,
-    declinedAt: a.declinedAt ?? null, terminatedAt: a.terminatedAt ?? null, terminatedBy: a.terminatedBy ?? null,
-    terminationReasonCode: a.terminationReasonCode ?? null, disputedAt: a.disputedAt ?? null,
+    id: a.id,
+    agentUserId: a.agentUserId,
+    agencyOrgId: a.agencyOrgId,
+    clientKind: a.clientKind,
+    clientId: a.clientId,
+    status: effectiveAgreementStatus(a, now),
+    storedStatus: a.status,
+    scope: a.scope,
+    exclusive: !!a.exclusive,
+    jurisdiction: a.jurisdiction ?? null,
+    termMonths: a.termMonths ?? null,
+    startAt: a.startAt ?? null,
+    endAt: a.endAt ?? null,
+    proposedAt: a.proposedAt ?? null,
+    confirmedAt: a.confirmedAt ?? null,
+    declinedAt: a.declinedAt ?? null,
+    terminatedAt: a.terminatedAt ?? null,
+    terminatedBy: a.terminatedBy ?? null,
+    terminationReasonCode: a.terminationReasonCode ?? null,
+    disputedAt: a.disputedAt ?? null,
     shareWithAgencyStaff: !!a.shareWithAgencyStaff,
     // The agent's own permissions: an agent not routed a club's message should know why nothing arrives.
     disclosure: normaliseDisclosure(a.disclosure),
     subjectRemovedAt: a.subjectRemovedAt ?? null,
     policyVersion: AGENT_POLICY_VERSION,
-    rev: a.rev ?? 1, revAt: a.revAt ?? null,
-    history: (a.history ?? []).map((h) => ({ id: h.id, at: h.at, action: h.action, byKind: h.by?.kind ?? null, byName: h.by?.name ?? null, detail: h.detail ?? null })),
-    honest: 'A ScoutBox relationship record. It is not a representation contract and ScoutBox has not assessed its legal validity; the client confirmed it in ScoutBox.',
+    rev: a.rev ?? 1,
+    revAt: a.revAt ?? null,
+    history: (a.history ?? []).map((h) => ({
+      id: h.id,
+      at: h.at,
+      action: h.action,
+      byKind: h.by?.kind ?? null,
+      byName: h.by?.name ?? null,
+      detail: h.detail ?? null,
+    })),
+    honest:
+      'A ScoutBox relationship record. It is not a representation contract and ScoutBox has not assessed its legal validity; the client confirmed it in ScoutBox.',
   };
 }
 
@@ -370,6 +433,11 @@ export function agreementForClient(a, now = Date.now()) {
 
 /** The summary a same-agency colleague may see when the client allows it. */
 export const agreementSummaryForStaff = (a, now = Date.now()) => ({
-  id: a.id, agentUserId: a.agentUserId, clientId: a.clientId, status: effectiveAgreementStatus(a, now),
-  startAt: a.startAt ?? null, endAt: a.endAt ?? null, summaryOnly: true,
+  id: a.id,
+  agentUserId: a.agentUserId,
+  clientId: a.clientId,
+  status: effectiveAgreementStatus(a, now),
+  startAt: a.startAt ?? null,
+  endAt: a.endAt ?? null,
+  summaryOnly: true,
 });

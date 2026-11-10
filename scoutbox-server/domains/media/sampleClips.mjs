@@ -18,7 +18,12 @@ export function installSampleClips({ assetsDir, findPlayer, players, storage }) 
       if (!media) continue;
       storage.saveDataUrl(media.id, `data:video/webm;base64,${data.toString('base64')}`);
       // Each sample is a verified clip of the player's first attended fixture.
-      players.patchItem(player.id, 'media', { id: media.id }, { url: `/media/${media.id}`, ...(player.attendance[0] ? { verifiedClip: player.attendance[0].id } : {}) });
+      players.patchItem(
+        player.id,
+        'media',
+        { id: media.id },
+        { url: `/media/${media.id}`, ...(player.attendance[0] ? { verifiedClip: player.attendance[0].id } : {}) },
+      );
     } catch {
       // the asset is optional
     }

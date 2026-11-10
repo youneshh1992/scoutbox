@@ -1,6 +1,12 @@
 import type {
-  Availability, ContractStatus, InboxRequest, ChildInboxItem, GuardianInboxRequest,
-  Guardian, Drill, PlayerProfile,
+  Availability,
+  ContractStatus,
+  InboxRequest,
+  ChildInboxItem,
+  GuardianInboxRequest,
+  Guardian,
+  Drill,
+  PlayerProfile,
 } from '../domain/types';
 
 export interface NotificationPrefs {
@@ -10,7 +16,12 @@ export interface NotificationPrefs {
 }
 
 // ---- The Grassroots journey (exclusive to amateur/semi-pro players) ----
-export interface PathwayStep { key: string; label: string; reached: boolean; note: string }
+export interface PathwayStep {
+  key: string;
+  label: string;
+  reached: boolean;
+  note: string;
+}
 export interface Pathway {
   level: string;
   steps: PathwayStep[];
@@ -18,10 +29,20 @@ export interface Pathway {
   nextStep: string;
 }
 
-export interface ProgrammeSession { id: string; day: string; title: string; drillId: string | null; done: boolean }
+export interface ProgrammeSession {
+  id: string;
+  day: string;
+  title: string;
+  drillId: string | null;
+  done: boolean;
+}
 export interface ProgrammeProgress {
-  track: string; label: string; startedAt: number;
-  sessions: ProgrammeSession[]; doneThisWeek: number; totalPerWeek: number;
+  track: string;
+  label: string;
+  startedAt: number;
+  sessions: ProgrammeSession[];
+  doneThisWeek: number;
+  totalPerWeek: number;
 }
 export interface ProgrammeInfo {
   current: ProgrammeProgress | null;
@@ -37,25 +58,57 @@ export interface Benchmarks {
 }
 
 export interface OpportunityOpenTrial {
-  id: string; title: string; date: string; venue: string; ageGroup: string;
-  positions: string[]; registered: boolean; orgName?: string;
+  id: string;
+  title: string;
+  date: string;
+  venue: string;
+  ageGroup: string;
+  positions: string[];
+  registered: boolean;
+  orgName?: string;
 }
 export interface OpportunityClub {
-  id: string; name: string; city: string; distanceKm: number; verified: boolean;
-  safeguardingCertified: boolean; lookingFor: string[]; openTrials: OpportunityOpenTrial[];
+  id: string;
+  name: string;
+  city: string;
+  distanceKm: number;
+  verified: boolean;
+  safeguardingCertified: boolean;
+  lookingFor: string[];
+  openTrials: OpportunityOpenTrial[];
   /** Development record: players this club signed or hosted who moved up. */
-  progressed?: number; pathwayClub?: boolean;
+  progressed?: number;
+  pathwayClub?: boolean;
 }
-export interface Opportunities { radiusKm?: number; clubs: OpportunityClub[]; lookingForYou?: number; note?: string }
+export interface Opportunities {
+  radiusKm?: number;
+  clubs: OpportunityClub[];
+  lookingForYou?: number;
+  note?: string;
+}
 
 export interface GuardianOpenTrial {
-  id: string; title: string; date: string; venue: string; ageGroup: string; positions: string[];
-  orgName: string; verified: boolean; safeguardingCertified: boolean; distanceKm: number; registered: boolean;
+  id: string;
+  title: string;
+  date: string;
+  venue: string;
+  ageGroup: string;
+  positions: string[];
+  orgName: string;
+  verified: boolean;
+  safeguardingCertified: boolean;
+  distanceKm: number;
+  registered: boolean;
 }
 
 export interface Vouch {
-  id: string; coachName: string; role: string; seasons: string | null;
-  text: string | null; status: 'pending' | 'published' | 'revoked'; ts: number;
+  id: string;
+  coachName: string;
+  role: string;
+  seasons: string | null;
+  text: string | null;
+  status: 'pending' | 'published' | 'revoked';
+  ts: number;
 }
 
 export interface SeasonWrap {
@@ -118,7 +171,10 @@ export interface Me extends PlayerProfile {
 }
 
 export class ClientError extends Error {
-  constructor(public code: string, message: string) {
+  constructor(
+    public code: string,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -214,12 +270,30 @@ export type PlayerFeedItem =
 
 export interface PlayerCV {
   generatedAt: string;
-  player: { name: string; age: number; country: string; position: string | null; foot: string | null; heightCm: number | null; weightKg: number | null; identityVerified: boolean };
+  player: {
+    name: string;
+    age: number;
+    country: string;
+    position: string | null;
+    foot: string | null;
+    heightCm: number | null;
+    weightKg: number | null;
+    identityVerified: boolean;
+  };
   trust: { score: number; tier: string; breakdown: TrustBreakdown };
   seasonStats: PlayerProfile['stats'];
   verifiedAttendance: { fixture: string; venue: string; date: string }[];
   verifiedClips: { title: string; uploadedAt: string }[];
-  trialReports: { orgName: string; filedAt: number; acceleration: number; sprintSpeedKmh: number; distanceKm: number; passCompletionPct: number; duelSuccessPct: number; coachRating: number }[];
+  trialReports: {
+    orgName: string;
+    filedAt: number;
+    acceleration: number;
+    sprintSpeedKmh: number;
+    distanceKm: number;
+    passCompletionPct: number;
+    duelSuccessPct: number;
+    coachRating: number;
+  }[];
   combine: import('../domain/types').CombineResult[];
   timeline: { year: string; event: string }[];
   note: string;
@@ -300,7 +374,13 @@ export interface PlayerClient {
   /** Resolve a media path to a playable URL (absolute in live mode). */
   mediaUrl(path: string | null | undefined): string | null;
   getChannels(playerId: string): Promise<Channel[]>;
-  sendMessage(playerId: string, channelId: string, text: string, attachMediaId?: string, clientMsgId?: string): Promise<void>;
+  sendMessage(
+    playerId: string,
+    channelId: string,
+    text: string,
+    attachMediaId?: string,
+    clientMsgId?: string,
+  ): Promise<void>;
   markChannelRead(playerId: string, channelId: string): Promise<void>;
   sendTyping(playerId: string, channelId: string): Promise<void>;
   getFeed(playerId: string): Promise<PlayerFeedItem[]>;
@@ -346,20 +426,38 @@ export interface PlayerClient {
   guardianChildren(guardianId: string): Promise<Me[]>;
   guardianAddChild(guardianId: string, input: ChildInput): Promise<{ playerId: string }>;
   guardianInbox(guardianId: string): Promise<GuardianInboxRequest[]>;
-  guardianRespond(guardianId: string, requestId: string, accept: boolean, chosenSlot?: string, message?: string): Promise<void>;
-  guardianLog(guardianId: string): Promise<{ id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]>;
+  guardianRespond(
+    guardianId: string,
+    requestId: string,
+    accept: boolean,
+    chosenSlot?: string,
+    message?: string,
+  ): Promise<void>;
+  guardianLog(
+    guardianId: string,
+  ): Promise<{ id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]>;
   guardianSetMedicalShared(guardianId: string, childId: string, shared: boolean): Promise<void>;
   guardianReport(guardianId: string, input: ReportInput): Promise<void>;
   guardianBlock(guardianId: string, orgId: string, childId?: string, reason?: string): Promise<void>;
   guardianChannels(guardianId: string): Promise<Channel[]>;
-  guardianSendMessage(guardianId: string, channelId: string, text: string, attachMediaId?: string, clientMsgId?: string): Promise<void>;
+  guardianSendMessage(
+    guardianId: string,
+    channelId: string,
+    text: string,
+    attachMediaId?: string,
+    clientMsgId?: string,
+  ): Promise<void>;
   guardianMarkChannelRead(guardianId: string, channelId: string): Promise<void>;
   guardianSendTyping(guardianId: string, channelId: string): Promise<void>;
   guardianDigest(guardianId: string): Promise<GuardianDigest>;
   guardianNotifications(guardianId: string): Promise<AppNotification[]>;
   guardianMarkNotificationsRead(guardianId: string): Promise<void>;
   guardianChildInsights(guardianId: string, childId: string): Promise<Insights>;
-  guardianSetChildAvailability(guardianId: string, childId: string, availability: 'available_now' | 'end_of_season' | 'not_seeking'): Promise<void>;
+  guardianSetChildAvailability(
+    guardianId: string,
+    childId: string,
+    availability: 'available_now' | 'end_of_season' | 'not_seeking',
+  ): Promise<void>;
   guardianAddCoGuardian(guardianId: string, name: string, email: string): Promise<void>;
   guardianReports(guardianId: string): Promise<FiledReport[]>;
   guardianPairingCode(guardianId: string, childId: string): Promise<{ code: string; expiresAt: number }>;
@@ -370,9 +468,18 @@ export interface PlayerClient {
   guardianChildOpenTrials(guardianId: string, childId: string): Promise<GuardianOpenTrial[]>;
   guardianRegisterOpenTrial(guardianId: string, openTrialId: string, childId: string): Promise<void>;
   guardianSetFirstTeamSeeker(guardianId: string, childId: string, enabled: boolean): Promise<void>;
-  guardianRequestVouch(guardianId: string, childId: string, coachName: string, coachEmail: string, role: string): Promise<void>;
+  guardianRequestVouch(
+    guardianId: string,
+    childId: string,
+    coachName: string,
+    coachEmail: string,
+    role: string,
+  ): Promise<void>;
 
-  onChange(cb: (event?: string, payload?: Record<string, unknown>) => void, auth?: { kind: 'player' | 'guardian'; id: string }): () => void;
+  onChange(
+    cb: (event?: string, payload?: Record<string, unknown>) => void,
+    auth?: { kind: 'player' | 'guardian'; id: string },
+  ): () => void;
   /** Reachability probe — rejects when the backend is down (live mode). */
   ping(): Promise<void>;
 }

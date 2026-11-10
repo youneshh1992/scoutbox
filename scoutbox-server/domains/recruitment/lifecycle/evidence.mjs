@@ -12,7 +12,11 @@ import { CONTACT_EVIDENCE_STATUSES, contactIntegrity } from './contact.mjs';
 import { trialIntegrity, deriveWorkflowState } from './trial.mjs';
 import { offerEvidence } from '../offers/offer.mjs';
 
-const OFFER_EVIDENCE_KINDS = Object.freeze(['offer_sent', 'offer_accepted_by_recipient', 'offer_declined_by_recipient']);
+const OFFER_EVIDENCE_KINDS = Object.freeze([
+  'offer_sent',
+  'offer_accepted_by_recipient',
+  'offer_declined_by_recipient',
+]);
 
 export const EVIDENCE_KINDS = Object.freeze([
   'contact_delivered',
@@ -35,17 +39,25 @@ function signingSupports(signing, kase, packages = null) {
   if (signing.orgId !== kase.orgId) return false;
   if (signing.playerId !== kase.playerId) return false;
   if (signing.cancelledAt || signing.revokedAt || signing.voidedAt) return false;
-    // A row naming a package is evidence only if that package is COMPLETED and
-    // names this row back; a row planted beside a live package proves nothing.
+  // A row naming a package is evidence only if that package is COMPLETED and
+  // names this row back; a row planted beside a live package proves nothing.
   if (signing.signingPackageId) {
-    const pkg = Array.isArray(packages) ? packages.find((x) => x && x.id === signing.signingPackageId) ?? null : null;
-    if (!pkg || pkg.status !== 'COMPLETED' || pkg.completion?.signingId !== signing.id || pkg.orgId !== kase.orgId || pkg.playerId !== kase.playerId) return false;
+    const pkg = Array.isArray(packages) ? (packages.find((x) => x && x.id === signing.signingPackageId) ?? null) : null;
+    if (
+      !pkg ||
+      pkg.status !== 'COMPLETED' ||
+      pkg.completion?.signingId !== signing.id ||
+      pkg.orgId !== kase.orgId ||
+      pkg.playerId !== kase.playerId
+    )
+      return false;
     // A package proves the case it was opened on, not another case of the same club and player.
     if (pkg.caseId !== kase.id) return false;
     return true;
   }
   // A row with no package proves a joining only for a case that existed when it was recorded.
-  const ts = Number(signing.ts); const opened = Number(kase.createdAt);
+  const ts = Number(signing.ts);
+  const opened = Number(kase.createdAt);
   if (Number.isFinite(ts) && Number.isFinite(opened) && ts < opened) return false;
   return true;
 }
@@ -70,10 +82,14 @@ export function createEvidenceProvider(reads = {}) {
 
       if (kind === 'confirmed_join') {
         // A missing store is a broken composition; "unsatisfied" would look like a truthful answer.
-        if (typeof reads.signings?.forOrgPlayer !== 'function') return { satisfied: false, reason: 'signings_store_unavailable' };
+        if (typeof reads.signings?.forOrgPlayer !== 'function')
+          return { satisfied: false, reason: 'signings_store_unavailable' };
         // A package proves only the case it was opened on.
-        const packages = typeof reads.signingPackages?.forCase === 'function' ? reads.signingPackages.forCase(kase.id) : null;
-        const hit = reads.signings.forOrgPlayer(kase.orgId, kase.playerId).find((s) => signingSupports(s, kase, packages));
+        const packages =
+          typeof reads.signingPackages?.forCase === 'function' ? reads.signingPackages.forCase(kase.id) : null;
+        const hit = reads.signings
+          .forOrgPlayer(kase.orgId, kase.playerId)
+          .find((s) => signingSupports(s, kase, packages));
         return hit
           ? { satisfied: true, sourceType: 'signing', sourceId: hit.id }
           : { satisfied: false, reason: 'no_confirmed_join' };
@@ -82,9 +98,19 @@ export function createEvidenceProvider(reads = {}) {
       if (kind === 'contact_delivered') {
         // Delivered in-app, answered, or recorded as happening outside ScoutBox.
         // Drafts, failed attempts and corrupt records are not evidence.
-        if (typeof reads.contacts?.forOrgPlayer !== 'function') return { satisfied: false, reason: 'contacts_store_unavailable' };
-        const hit = reads.contacts.forOrgPlayer(kase.orgId, kase.playerId).find((c) => c && c.orgId === kase.orgId && c.playerId === kase.playerId
-          && CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt && contactIntegrity(c).length === 0);
+        if (typeof reads.contacts?.forOrgPlayer !== 'function')
+          return { satisfied: false, reason: 'contacts_store_unavailable' };
+        const hit = reads.contacts
+          .forOrgPlayer(kase.orgId, kase.playerId)
+          .find(
+            (c) =>
+              c &&
+              c.orgId === kase.orgId &&
+              c.playerId === kase.playerId &&
+              CONTACT_EVIDENCE_STATUSES.includes(c.status) &&
+              !c.cancelledAt &&
+              contactIntegrity(c).length === 0,
+          );
         return hit
           ? { satisfied: true, sourceType: 'recruitment_contact', sourceId: hit.id }
           : { satisfied: false, reason: 'no_contact_delivered' };
@@ -94,9 +120,20 @@ export function createEvidenceProvider(reads = {}) {
       if (kind === 'trial_invited') {
         // A delivered `trial` request tied to this case by caseId, still pending
         // or accepted. The `planTrial` action alone, or a request with no caseId, proves nothing.
-        if (typeof reads.requests?.forCase !== 'function') return { satisfied: false, reason: 'requests_store_unavailable' };
-        const hit = reads.requests.forCase(kase.id).find((r) => r && r.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId
-          && r.playerId === kase.playerId && ['pending', 'accepted'].includes(r.status) && !r.subjectRemovedAt);
+        if (typeof reads.requests?.forCase !== 'function')
+          return { satisfied: false, reason: 'requests_store_unavailable' };
+        const hit = reads.requests
+          .forCase(kase.id)
+          .find(
+            (r) =>
+              r &&
+              r.type === 'trial' &&
+              r.caseId === kase.id &&
+              r.orgId === kase.orgId &&
+              r.playerId === kase.playerId &&
+              ['pending', 'accepted'].includes(r.status) &&
+              !r.subjectRemovedAt,
+          );
         return hit
           ? { satisfied: true, sourceType: 'trial_request', sourceId: hit.id }
           : { satisfied: false, reason: 'no_invitation' };
@@ -106,11 +143,25 @@ export function createEvidenceProvider(reads = {}) {
         // `legacy_accepted` never satisfies `trial_confirmed` (no confirmed
         // schedule) and `reported` never satisfies `trial_completed` (a report is
         // not completion). A tombstoned trial still answers, so history stays honest.
-        if (typeof reads.trials?.forCase !== 'function') return { satisfied: false, reason: 'trials_store_unavailable' };
-        const own = reads.trials.forCase(kase.id).filter((t) => t && t.caseId === kase.id && t.orgId === kase.orgId && t.playerId === kase.playerId
-          && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length === 0);
+        if (typeof reads.trials?.forCase !== 'function')
+          return { satisfied: false, reason: 'trials_store_unavailable' };
+        const own = reads.trials
+          .forCase(kase.id)
+          .filter(
+            (t) =>
+              t &&
+              t.caseId === kase.id &&
+              t.orgId === kase.orgId &&
+              t.playerId === kase.playerId &&
+              trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length === 0,
+          );
         if (kind === 'trial_confirmed') {
-          const hit = own.find((t) => deriveWorkflowState(t) === 'scheduled' && Number.isFinite(t.schedule?.confirmedAt) && (t.schedule?.sessions?.length ?? 0) > 0);
+          const hit = own.find(
+            (t) =>
+              deriveWorkflowState(t) === 'scheduled' &&
+              Number.isFinite(t.schedule?.confirmedAt) &&
+              (t.schedule?.sessions?.length ?? 0) > 0,
+          );
           return hit
             ? { satisfied: true, sourceType: 'trial', sourceId: hit.id }
             : { satisfied: false, reason: 'no_confirmed_schedule' };
@@ -124,9 +175,22 @@ export function createEvidenceProvider(reads = {}) {
       // ---- Decision evidence: a finalised, current, formal decision to
       // progress. Drafts and advisory recommendations do not count.
       if (kind === 'decision_progress') {
-        if (typeof reads.decisions?.forRoom !== 'function') return { satisfied: false, reason: 'decisions_store_unavailable' };
-        const hit = reads.decisions.forRoom(kase.id).find((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && d.outcome === 'progress'
-          && d.roomId === kase.id && d.orgId === kase.orgId && d.playerId === kase.playerId && !d.supersededById);
+        if (typeof reads.decisions?.forRoom !== 'function')
+          return { satisfied: false, reason: 'decisions_store_unavailable' };
+        const hit = reads.decisions
+          .forRoom(kase.id)
+          .find(
+            (d) =>
+              d &&
+              typeof d === 'object' &&
+              d.kind === 'formal' &&
+              d.state !== 'draft' &&
+              d.outcome === 'progress' &&
+              d.roomId === kase.id &&
+              d.orgId === kase.orgId &&
+              d.playerId === kase.playerId &&
+              !d.supersededById,
+          );
         return hit
           ? { satisfied: true, sourceType: 'decision', sourceId: hit.id }
           : { satisfied: false, reason: 'no_finalized_progress_decision' };
@@ -137,7 +201,8 @@ export function createEvidenceProvider(reads = {}) {
       // satisfies accepted or declined. `recordOfferAccepted` with no recipient
       // response is refused here.
       if (OFFER_EVIDENCE_KINDS.includes(kind)) {
-        if (typeof reads.offers?.forCase !== 'function') return { satisfied: false, reason: 'offers_store_unavailable' };
+        if (typeof reads.offers?.forCase !== 'function')
+          return { satisfied: false, reason: 'offers_store_unavailable' };
         return offerEvidence(reads.offers.forCase(kase.id), kase, kind, now);
       }
 

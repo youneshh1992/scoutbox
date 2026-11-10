@@ -23,13 +23,22 @@ describe('ageOn', () => {
     expect(ageOn('2008-10-15', ON)).toBe(17);
     expect(ageOn('2008-10-13', ON)).toBe(18);
   });
-  test('a birthday later in the year is not reached yet', () => { expect(ageOn('2008-12-01', ON)).toBe(17); });
-  test('a birthday earlier in the year has passed', () => { expect(ageOn('2008-01-31', ON)).toBe(18); });
+  test('a birthday later in the year is not reached yet', () => {
+    expect(ageOn('2008-12-01', ON)).toBe(17);
+  });
+  test('a birthday earlier in the year has passed', () => {
+    expect(ageOn('2008-01-31', ON)).toBe(18);
+  });
 });
 
 describe('isAdult', () => {
-  beforeEach(() => { jest.useFakeTimers(); jest.setSystemTime(ON); });
-  afterEach(() => { jest.useRealTimers(); });
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(ON);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
   test('eighteen today is an adult in a default country but not where the age is nineteen', () => {
     expect(isAdult('2008-10-14', 'GB')).toBe(true);
     expect(isAdult('2008-10-14', 'KR')).toBe(false);

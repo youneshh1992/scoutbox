@@ -37,8 +37,13 @@ import { fileURLToPath } from 'node:url';
 import { ObservationRun } from '../../domains/development/boxcam/cv/engine.mjs';
 import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
 import {
-  holdoutFamilies, holdoutFalseTouchStress, holdoutSeeds, DEV_SEEDS,
-  GENERATION_PARAMETERS, HOLDOUT_GENERATIONS, ACTIVE_GENERATION,
+  holdoutFamilies,
+  holdoutFalseTouchStress,
+  holdoutSeeds,
+  DEV_SEEDS,
+  GENERATION_PARAMETERS,
+  HOLDOUT_GENERATIONS,
+  ACTIVE_GENERATION,
 } from '../../domains/development/boxcam/cv/holdout.mjs';
 import { freezeStatus, geometryMirrorCheck, FREEZE } from '../../domains/development/boxcam/cv/freeze.mjs';
 import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../domains/development/boxcam/cv/policy.mjs';
@@ -80,9 +85,9 @@ if (!fz.intact) {
   }
   console.error(
     '\nThe engine has changed since the freeze was recorded, so any holdout result\n' +
-    'measured now would be measured against different constants than the ones the\n' +
-    'holdout was generated under. Record a new freeze, regenerate the holdout with\n' +
-    'fresh seeds, and run it once. Do not re-run the existing holdout.',
+      'measured now would be measured against different constants than the ones the\n' +
+      'holdout was generated under. Record a new freeze, regenerate the holdout with\n' +
+      'fresh seeds, and run it once. Do not re-run the existing holdout.',
   );
   process.exit(2);
 }
@@ -101,7 +106,9 @@ console.log('geometry mirror         verified against detect/track/protocol sour
 const seeds = holdoutSeeds();
 const collisions = seeds.filter((s) => DEV_SEEDS.includes(s));
 if (collisions.length) {
-  console.error(`boxCamCvHoldout: REFUSING TO RUN — holdout seeds collide with development seeds: ${collisions.join(', ')}`);
+  console.error(
+    `boxCamCvHoldout: REFUSING TO RUN — holdout seeds collide with development seeds: ${collisions.join(', ')}`,
+  );
   process.exit(2);
 }
 console.log(`seeds disjoint          yes — holdout ${seeds.length} seeds, none in [${DEV_SEEDS.join(', ')}]\n`);
@@ -148,12 +155,16 @@ function judge(fx, result) {
 
 const families = holdoutFamilies();
 const familyRows = [];
-let variants = 0, offTruth = 0, invarianceBreaks = 0, falseVerifications = 0;
+let variants = 0,
+  offTruth = 0,
+  invarianceBreaks = 0,
+  falseVerifications = 0;
 const countErrors = [];
 
 console.log('--- holdout counting families -----------------------------------');
 for (const fam of families) {
-  const counts = [], states = [];
+  const counts = [],
+    states = [];
   let famBad = 0;
   for (const v of fam.variants) {
     variants += 1;
@@ -162,25 +173,32 @@ for (const fam of families) {
     if (j.falseVerification) falseVerifications += 1;
     if (j.countError != null) countErrors.push(j.countError);
     const ok = j.verdict === 'correct';
-    if (!ok) { famBad += 1; offTruth += 1; }
+    if (!ok) {
+      famBad += 1;
+      offTruth += 1;
+    }
     counts.push(result.count);
     states.push(result.state);
     familyRows.push({
-      family: fam.family, id: v.id,
-      expectedState: v.expected.state, expectedCount: v.expected.count ?? null,
-      gotState: result.state, gotCount: result.count,
-      countError: j.countError, verdict: j.verdict,
+      family: fam.family,
+      id: v.id,
+      expectedState: v.expected.state,
+      expectedCount: v.expected.count ?? null,
+      gotState: result.state,
+      gotCount: result.count,
+      countError: j.countError,
+      verdict: j.verdict,
     });
   }
   const checksCount = fam.invariant === 'count_must_match_across_variants';
   const got = counts.filter((c) => c != null);
   const spread = got.length ? Math.max(...got) - Math.min(...got) : 0;
   const sameState = new Set(states).size === 1;
-  const invariant = checksCount ? (sameState && spread <= 2) : famBad === 0;
+  const invariant = checksCount ? sameState && spread <= 2 : famBad === 0;
   if (!invariant) invarianceBreaks += 1;
   console.log(
     `${pad(fam.family, 30)} ${pad(fam.axis, 20)} counts [${counts.map((c) => (c == null ? '—' : c)).join(', ')}] ` +
-    `${invariant ? (checksCount ? 'invariant' : 'on-truth') : '*** NOT INVARIANT ***'}${famBad ? ` ${famBad} off-truth` : ''}`,
+      `${invariant ? (checksCount ? 'invariant' : 'on-truth') : '*** NOT INVARIANT ***'}${famBad ? ` ${famBad} off-truth` : ''}`,
   );
 }
 
@@ -258,12 +276,16 @@ const holdout = {
 
 // The gap is the deliverable. It is computed and named, not left for a reader
 // to work out by subtracting two tables.
-const gap = dev ? {
-  meanAbsCountError: dev.meanAbsCountError == null || holdout.meanAbsCountError == null
-    ? null : round3(holdout.meanAbsCountError - dev.meanAbsCountError),
-  offTruthRateDevelopment: dev.familyVariants ? round3(dev.offTruth / dev.familyVariants) : null,
-  offTruthRateHoldout: variants ? round3(offTruth / variants) : null,
-} : null;
+const gap = dev
+  ? {
+      meanAbsCountError:
+        dev.meanAbsCountError == null || holdout.meanAbsCountError == null
+          ? null
+          : round3(holdout.meanAbsCountError - dev.meanAbsCountError),
+      offTruthRateDevelopment: dev.familyVariants ? round3(dev.offTruth / dev.familyVariants) : null,
+      offTruthRateHoldout: variants ? round3(offTruth / variants) : null,
+    }
+  : null;
 
 const report = {
   kind: 'm22_holdout',
@@ -309,8 +331,12 @@ row('max abs count error', dev?.maxAbsCountError, holdout.maxAbsCountError);
 
 if (gap) {
   console.log('\n--- generalisation gap ------------------------------------------');
-  console.log(`mean abs count error     ${gap.meanAbsCountError == null ? 'n/a' : (gap.meanAbsCountError >= 0 ? '+' : '') + gap.meanAbsCountError} (holdout minus development)`);
-  console.log(`off-truth rate           development ${gap.offTruthRateDevelopment}  holdout ${gap.offTruthRateHoldout}`);
+  console.log(
+    `mean abs count error     ${gap.meanAbsCountError == null ? 'n/a' : (gap.meanAbsCountError >= 0 ? '+' : '') + gap.meanAbsCountError} (holdout minus development)`,
+  );
+  console.log(
+    `off-truth rate           development ${gap.offTruthRateDevelopment}  holdout ${gap.offTruthRateHoldout}`,
+  );
 }
 
 console.log('\nprovenance               synthetic — held out from development, not from reality');
@@ -332,10 +358,10 @@ if (nondeterministic > 0) {
 if (offTruth > 0 || invarianceBreaks > 0) {
   console.log(
     `\nm22Holdout: no P0 failures. ${offTruth} off-truth variant(s) and ${invarianceBreaks} invariance break(s)\n` +
-    'are RECORDED, not failed — a generalisation gap is a measurement. The permitted\n' +
-    'responses are to narrow the declared envelope, document the limitation, or fix the\n' +
-    'engine and regenerate the holdout under a new freeze. Tuning against these numbers\n' +
-    'is not one of them.',
+      'are RECORDED, not failed — a generalisation gap is a measurement. The permitted\n' +
+      'responses are to narrow the declared envelope, document the limitation, or fix the\n' +
+      'engine and regenerate the holdout under a new freeze. Tuning against these numbers\n' +
+      'is not one of them.',
   );
 } else {
   console.log('\nm22Holdout: no false touches, no false verifications, deterministic, no generalisation gap measured.');

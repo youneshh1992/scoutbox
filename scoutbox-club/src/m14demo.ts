@@ -5,9 +5,20 @@
 // submitted-but-NOT-verified licence. State lives in-page and resets on
 // reload; nothing reaches a real person.
 import type {
-  M14Api, MyVerification, SubjectClaim, VerRequestRow, StaffRow, VerAdminRow,
-  DomainRow, DomainRequest, RootTransfer, ReferenceRow, PlayerInviteRow, ConflictRow,
-  PublicVerProfile, ClubTransaction,
+  M14Api,
+  MyVerification,
+  SubjectClaim,
+  VerRequestRow,
+  StaffRow,
+  VerAdminRow,
+  DomainRow,
+  DomainRequest,
+  RootTransfer,
+  ReferenceRow,
+  PlayerInviteRow,
+  ConflictRow,
+  PublicVerProfile,
+  ClubTransaction,
 } from './m14api';
 
 const now = Date.now();
@@ -15,83 +26,281 @@ const day = 86_400_000;
 const y = (yr: number) => new Date(`${yr}-07-01`).getTime();
 
 const mk = (o: Partial<SubjectClaim>): SubjectClaim => ({
-  id: `dclm-${Math.random().toString(36).slice(2, 8)}`, claimType: 'CLUB_ROLE', status: 'verified',
+  id: `dclm-${Math.random().toString(36).slice(2, 8)}`,
+  claimType: 'CLUB_ROLE',
+  status: 'verified',
   effective: { status: 'verified', current: true, historical: false },
-  organisation: { id: 'org-eastport', name: 'Eastport United' }, role: null,
-  validFrom: now - 300 * day, validUntil: null, current: true,
-  verificationMethod: 'organisation_admin_confirmation', verifiedAt: now - 290 * day,
+  organisation: { id: 'org-eastport', name: 'Eastport United' },
+  role: null,
+  validFrom: now - 300 * day,
+  validUntil: null,
+  current: true,
+  verificationMethod: 'organisation_admin_confirmation',
+  verifiedAt: now - 290 * day,
   provenance: 'Confirmed by an authorised Eastport United administrator',
-  reviewReasons: [], createdAt: now - 300 * day, updatedAt: now - 290 * day,
-  revocationReason: null, disputedAt: null, evidence: [], humanReviewNote: null, ...o,
+  reviewReasons: [],
+  createdAt: now - 300 * day,
+  updatedAt: now - 290 * day,
+  revocationReason: null,
+  disputedAt: null,
+  evidence: [],
+  humanReviewNote: null,
+  ...o,
 });
 
 // You (the demo login) — identity verified, role verified, licence SUBMITTED.
 const myClaims: SubjectClaim[] = [
-  mk({ id: 'dclm-me-id', claimType: 'PERSON_IDENTITY', organisation: null, provenance: 'Reviewed and confirmed by ScoutBox Trust & Safety', verificationMethod: 'scoutbox_manual_review' }),
+  mk({
+    id: 'dclm-me-id',
+    claimType: 'PERSON_IDENTITY',
+    organisation: null,
+    provenance: 'Reviewed and confirmed by ScoutBox Trust & Safety',
+    verificationMethod: 'scoutbox_manual_review',
+  }),
   mk({ id: 'dclm-me-aff', claimType: 'CLUB_AFFILIATION' }),
   mk({ id: 'dclm-me-role', role: 'Head of Recruitment' }),
   mk({
-    id: 'dclm-me-lic', claimType: 'LICENCE', organisation: null, status: 'requires_human_review',
+    id: 'dclm-me-lic',
+    claimType: 'LICENCE',
+    organisation: null,
+    status: 'requires_human_review',
     effective: { status: 'requires_human_review', current: false, historical: false },
-    verificationMethod: 'document_submitted', verifiedAt: null, provenance: null,
+    verificationMethod: 'document_submitted',
+    verifiedAt: null,
+    provenance: null,
     reviewReasons: ['NO_AUTHORITATIVE_SOURCE', 'DOCUMENT_AUTHENTICITY_UNCONFIRMED'],
-    evidence: [{ id: 'devd-1', type: 'document', receivedAt: now - 6 * day, filename: 'uefa-a-licence.pdf', checks: { malwareScan: 'not_configured' }, note: null }],
-    humanReviewNote: 'ScoutBox needs to review this request because an uploaded document is evidence, not proof — a reviewer checks it against authoritative sources.',
+    evidence: [
+      {
+        id: 'devd-1',
+        type: 'document',
+        receivedAt: now - 6 * day,
+        filename: 'uefa-a-licence.pdf',
+        checks: { malwareScan: 'not_configured' },
+        note: null,
+      },
+    ],
+    humanReviewNote:
+      'ScoutBox needs to review this request because an uploaded document is evidence, not proof — a reviewer checks it against authoritative sources.',
   }),
 ];
 
-const requests: VerRequestRow[] = [{
-  claimId: 'dclm-jo-role', claimType: 'CLUB_ROLE', pairId: 'dpair-jo',
-  person: { id: 'usr-jo', name: 'Jo Denton', email: 'jo.denton@eastportfc.com', accountCreatedAt: now - 20 * day, removed: false },
-  claimedRole: 'Academy Coach', requestedStart: null, identityStatus: 'verified',
-  emailStatus: 'work_email_on_verified_domain', riskFlags: [], status: 'automated_checks_passed', requestedAt: now - 2 * day,
-  priorClaims: [{ claimType: 'GRASSROOTS_AFFILIATION', organisationId: 'org-other', role: 'Coach', current: false }],
-}, {
-  claimId: 'dclm-jo-aff', claimType: 'CLUB_AFFILIATION', pairId: 'dpair-jo',
-  person: { id: 'usr-jo', name: 'Jo Denton', email: 'jo.denton@eastportfc.com', accountCreatedAt: now - 20 * day, removed: false },
-  claimedRole: null, requestedStart: null, identityStatus: 'verified',
-  emailStatus: 'work_email_on_verified_domain', riskFlags: [], status: 'automated_checks_passed', requestedAt: now - 2 * day,
-  priorClaims: [],
-}];
+const requests: VerRequestRow[] = [
+  {
+    claimId: 'dclm-jo-role',
+    claimType: 'CLUB_ROLE',
+    pairId: 'dpair-jo',
+    person: {
+      id: 'usr-jo',
+      name: 'Jo Denton',
+      email: 'jo.denton@eastportfc.com',
+      accountCreatedAt: now - 20 * day,
+      removed: false,
+    },
+    claimedRole: 'Academy Coach',
+    requestedStart: null,
+    identityStatus: 'verified',
+    emailStatus: 'work_email_on_verified_domain',
+    riskFlags: [],
+    status: 'automated_checks_passed',
+    requestedAt: now - 2 * day,
+    priorClaims: [{ claimType: 'GRASSROOTS_AFFILIATION', organisationId: 'org-other', role: 'Coach', current: false }],
+  },
+  {
+    claimId: 'dclm-jo-aff',
+    claimType: 'CLUB_AFFILIATION',
+    pairId: 'dpair-jo',
+    person: {
+      id: 'usr-jo',
+      name: 'Jo Denton',
+      email: 'jo.denton@eastportfc.com',
+      accountCreatedAt: now - 20 * day,
+      removed: false,
+    },
+    claimedRole: null,
+    requestedStart: null,
+    identityStatus: 'verified',
+    emailStatus: 'work_email_on_verified_domain',
+    riskFlags: [],
+    status: 'automated_checks_passed',
+    requestedAt: now - 2 * day,
+    priorClaims: [],
+  },
+];
 
 const staff: StaffRow[] = [
-  { claimId: 'dclm-tom', person: { id: 'usr-tom', name: 'Tom Field' }, claimType: 'CLUB_ROLE', role: 'Academy Scout', status: 'verified', effective: { status: 'verified', displayable: true, current: true, historical: false }, current: true, validFrom: now - 400 * day, validUntil: null, verificationMethod: 'organisation_admin_confirmation', verifiedAt: now - 390 * day },
-  { claimId: 'dclm-priya', person: { id: 'usr-priya', name: 'Priya Nair' }, claimType: 'CLUB_ROLE', role: 'Academy Coach', status: 'verified', effective: { status: 'verified', displayable: true, current: false, historical: true }, current: false, validFrom: y(2019), validUntil: y(2023), verificationMethod: 'organisation_admin_confirmation', verifiedAt: y(2019) },
-  { claimId: 'dclm-sam-lic', person: { id: 'usr-sam', name: 'Sam Cole' }, claimType: 'LICENCE', role: null, status: 'requires_human_review', effective: { status: 'requires_human_review', displayable: false, current: false, historical: false }, current: true, validFrom: null, validUntil: null, verificationMethod: 'document_submitted', verifiedAt: null },
+  {
+    claimId: 'dclm-tom',
+    person: { id: 'usr-tom', name: 'Tom Field' },
+    claimType: 'CLUB_ROLE',
+    role: 'Academy Scout',
+    status: 'verified',
+    effective: { status: 'verified', displayable: true, current: true, historical: false },
+    current: true,
+    validFrom: now - 400 * day,
+    validUntil: null,
+    verificationMethod: 'organisation_admin_confirmation',
+    verifiedAt: now - 390 * day,
+  },
+  {
+    claimId: 'dclm-priya',
+    person: { id: 'usr-priya', name: 'Priya Nair' },
+    claimType: 'CLUB_ROLE',
+    role: 'Academy Coach',
+    status: 'verified',
+    effective: { status: 'verified', displayable: true, current: false, historical: true },
+    current: false,
+    validFrom: y(2019),
+    validUntil: y(2023),
+    verificationMethod: 'organisation_admin_confirmation',
+    verifiedAt: y(2019),
+  },
+  {
+    claimId: 'dclm-sam-lic',
+    person: { id: 'usr-sam', name: 'Sam Cole' },
+    claimType: 'LICENCE',
+    role: null,
+    status: 'requires_human_review',
+    effective: { status: 'requires_human_review', displayable: false, current: false, historical: false },
+    current: true,
+    validFrom: null,
+    validUntil: null,
+    verificationMethod: 'document_submitted',
+    verifiedAt: null,
+  },
 ];
 
-const domains: DomainRow[] = [{ domain: 'eastportfc.com', status: 'verified', method: 'official_domain_email', verifiedAt: now - 200 * day, addedBy: 'usr-maria' }];
+const domains: DomainRow[] = [
+  {
+    domain: 'eastportfc.com',
+    status: 'verified',
+    method: 'official_domain_email',
+    verifiedAt: now - 200 * day,
+    addedBy: 'usr-maria',
+  },
+];
 const domainRequests: DomainRequest[] = [];
 const admins: VerAdminRow[] = [
-  { id: 'dadm-1', userId: 'usr-maria', level: 'verification_root_admin', status: 'active', person: { id: 'usr-maria', name: 'Maria Keane' }, createdAt: now - 200 * day },
-  { id: 'dadm-2', userId: 'usr-tom', level: 'verification_reviewer', status: 'active', person: { id: 'usr-tom', name: 'Tom Field' }, createdAt: now - 100 * day },
+  {
+    id: 'dadm-1',
+    userId: 'usr-maria',
+    level: 'verification_root_admin',
+    status: 'active',
+    person: { id: 'usr-maria', name: 'Maria Keane' },
+    createdAt: now - 200 * day,
+  },
+  {
+    id: 'dadm-2',
+    userId: 'usr-tom',
+    level: 'verification_reviewer',
+    status: 'active',
+    person: { id: 'usr-tom', name: 'Tom Field' },
+    createdAt: now - 100 * day,
+  },
 ];
 const transfers: RootTransfer[] = [];
-const references: ReferenceRow[] = [{
-  id: 'dref-1', version: 1, playerId: 'pl-adeyemi', playerName: 'Kola Adeyemi', coachName: 'Tom Field', orgName: 'Eastport United',
-  roleAtTime: 'Academy Scout', relationship: 'Scouted and coached at development camp', capacity: '2 seasons',
-  fromYear: 2024, toYear: 2026, structured: { strengths: 'Pressing triggers, first touch under pressure', development: 'Weak-foot delivery', summary: 'Reliable, coachable wide forward.' },
-  status: 'active', createdAt: now - 30 * day,
-}];
-const invites: PlayerInviteRow[] = [{ id: 'dinv-1', name: 'Noor Haddad', squad: 'U18', status: 'accepted', byName: 'Tom Field', createdAt: now - 9 * day, expiresAt: now + 5 * day, guardianApproved: { guardianId: 'gd-1', at: now - 8 * day } }];
-const conflicts: ConflictRow[] = [{ id: 'dcoi-1', userId: 'usr-tom', kind: 'family_relationship', subject: 'Nephew trials at U15', note: 'Declared before any assessment', createdAt: now - 40 * day, withdrawnAt: null }];
+const references: ReferenceRow[] = [
+  {
+    id: 'dref-1',
+    version: 1,
+    playerId: 'pl-adeyemi',
+    playerName: 'Kola Adeyemi',
+    coachName: 'Tom Field',
+    orgName: 'Eastport United',
+    roleAtTime: 'Academy Scout',
+    relationship: 'Scouted and coached at development camp',
+    capacity: '2 seasons',
+    fromYear: 2024,
+    toYear: 2026,
+    structured: {
+      strengths: 'Pressing triggers, first touch under pressure',
+      development: 'Weak-foot delivery',
+      summary: 'Reliable, coachable wide forward.',
+    },
+    status: 'active',
+    createdAt: now - 30 * day,
+  },
+];
+const invites: PlayerInviteRow[] = [
+  {
+    id: 'dinv-1',
+    name: 'Noor Haddad',
+    squad: 'U18',
+    status: 'accepted',
+    byName: 'Tom Field',
+    createdAt: now - 9 * day,
+    expiresAt: now + 5 * day,
+    guardianApproved: { guardianId: 'gd-1', at: now - 8 * day },
+  },
+];
+const conflicts: ConflictRow[] = [
+  {
+    id: 'dcoi-1',
+    userId: 'usr-tom',
+    kind: 'family_relationship',
+    subject: 'Nephew trials at U15',
+    note: 'Declared before any assessment',
+    createdAt: now - 40 * day,
+    withdrawnAt: null,
+  },
+];
 
 const publicProfiles: Record<string, PublicVerProfile> = {
   'usr-tom': {
-    subjectType: 'user', subjectId: 'usr-tom', identityVerified: true,
+    subjectType: 'user',
+    subjectId: 'usr-tom',
+    identityVerified: true,
     badges: [
-      { kind: 'affiliation', claimType: 'CLUB_AFFILIATION', label: 'Verified at Eastport United', organisation: { id: 'org-eastport', name: 'Eastport United' }, role: null, current: true, historical: false, period: { from: 2025, to: null }, verifiedAt: now - 390 * day, provenance: 'Confirmed by an authorised Eastport United administrator' },
-      { kind: 'role', claimType: 'CLUB_ROLE', label: 'Role verified: Academy Scout', organisation: { id: 'org-eastport', name: 'Eastport United' }, role: 'Academy Scout', current: true, historical: false, period: { from: 2025, to: null }, verifiedAt: now - 390 * day, provenance: 'Confirmed by an authorised Eastport United administrator' },
+      {
+        kind: 'affiliation',
+        claimType: 'CLUB_AFFILIATION',
+        label: 'Verified at Eastport United',
+        organisation: { id: 'org-eastport', name: 'Eastport United' },
+        role: null,
+        current: true,
+        historical: false,
+        period: { from: 2025, to: null },
+        verifiedAt: now - 390 * day,
+        provenance: 'Confirmed by an authorised Eastport United administrator',
+      },
+      {
+        kind: 'role',
+        claimType: 'CLUB_ROLE',
+        label: 'Role verified: Academy Scout',
+        organisation: { id: 'org-eastport', name: 'Eastport United' },
+        role: 'Academy Scout',
+        current: true,
+        historical: false,
+        period: { from: 2025, to: null },
+        verifiedAt: now - 390 * day,
+        provenance: 'Confirmed by an authorised Eastport United administrator',
+      },
     ],
   },
   'usr-priya': {
-    subjectType: 'user', subjectId: 'usr-priya', identityVerified: true,
-    badges: [{ kind: 'role', claimType: 'CLUB_ROLE', label: 'Former Eastport United Academy Coach · Verified history', organisation: { id: 'org-eastport', name: 'Eastport United' }, role: 'Academy Coach', current: false, historical: true, period: { from: 2019, to: 2023 }, verifiedAt: y(2019), provenance: 'Confirmed by an authorised Eastport United administrator' }],
+    subjectType: 'user',
+    subjectId: 'usr-priya',
+    identityVerified: true,
+    badges: [
+      {
+        kind: 'role',
+        claimType: 'CLUB_ROLE',
+        label: 'Former Eastport United Academy Coach · Verified history',
+        organisation: { id: 'org-eastport', name: 'Eastport United' },
+        role: 'Academy Coach',
+        current: false,
+        historical: true,
+        period: { from: 2019, to: 2023 },
+        verifiedAt: y(2019),
+        provenance: 'Confirmed by an authorised Eastport United administrator',
+      },
+    ],
   },
 };
 
 const me: MyVerification = {
-  claims: myClaims, verificationLevel: 'verification_root_admin', organisationStatus: 'verified',
+  claims: myClaims,
+  verificationLevel: 'verification_root_admin',
+  organisationStatus: 'verified',
   steps: [
     { id: 'identity', label: 'Verify identity', done: true, state: 'verified' },
     { id: 'organisation', label: 'Select organisation', done: true, state: 'done' },
@@ -100,25 +309,62 @@ const me: MyVerification = {
     { id: 'confirmation', label: 'Organisation confirmation', done: true, state: 'verified' },
   ],
   publicPreview: {
-    subjectType: 'user', subjectId: 'usr-maria', identityVerified: true,
-    badges: [{ kind: 'role', claimType: 'CLUB_ROLE', label: 'Role verified: Head of Recruitment', organisation: { id: 'org-eastport', name: 'Eastport United' }, role: 'Head of Recruitment', current: true, historical: false, period: { from: 2025, to: null }, verifiedAt: now - 290 * day, provenance: 'Confirmed by an authorised Eastport United administrator' }],
+    subjectType: 'user',
+    subjectId: 'usr-maria',
+    identityVerified: true,
+    badges: [
+      {
+        kind: 'role',
+        claimType: 'CLUB_ROLE',
+        label: 'Role verified: Head of Recruitment',
+        organisation: { id: 'org-eastport', name: 'Eastport United' },
+        role: 'Head of Recruitment',
+        current: true,
+        historical: false,
+        period: { from: 2025, to: null },
+        verifiedAt: now - 290 * day,
+        provenance: 'Confirmed by an authorised Eastport United administrator',
+      },
+    ],
   },
 };
 
-const dl = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 120));
-
+const dl = <T>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 120));
 
 // ---- one open consent ask and one granted-then-revocable ask.
-const DEMO_CONSENT_HONEST = 'You may decline. Consent is specific to this agent, this transaction context and these parties; it can be revoked at any time, and a revocation stops any future regulated action that needs it. ScoutBox records your answer; it does not advise you.';
+const DEMO_CONSENT_HONEST =
+  'You may decline. Consent is specific to this agent, this transaction context and these parties; it can be revoked at any time, and a revocation stops any future regulated action that needs it. ScoutBox records your answer; it does not advise you.';
 const DEMO_CLUB_CONSENTS: import('./m14api').ClubConsentRequest[] = [
   {
-    id: 'rcs-c1', kind: 'dual_representation', status: 'requested', partyRole: 'engaging_entity',
+    id: 'rcs-c1',
+    kind: 'dual_representation',
+    status: 'requested',
+    partyRole: 'engaging_entity',
     agent: { userId: 'usr-ana', displayName: 'Ana Costa', agency: 'North Star Sports Agency', licence: 'VERIFIED' },
-    context: { id: 'ctx-c1', type: 'employment_contract', jurisdictions: ['ENG'], parties: [{ partyRole: 'individual', subjectKind: 'player', name: null }, { partyRole: 'engaging_entity', subjectKind: 'club', name: 'Eastport FC' }] },
+    context: {
+      id: 'ctx-c1',
+      type: 'employment_contract',
+      jurisdictions: ['ENG'],
+      parties: [
+        { partyRole: 'individual', subjectKind: 'player', name: null },
+        { partyRole: 'engaging_entity', subjectKind: 'club', name: 'Eastport FC' },
+      ],
+    },
     otherPartyRoles: ['individual'],
-    particulars: { fullParticularsProvided: true, legalAdviceOffered: true, proposedFeeDisclosed: true, acknowledged: null },
-    policyVersions: ['jp-fifa-2025-1', 'jp-eng-2026-27-1'], ruleIds: ['ENG-6.3'],
-    requestedAt: Date.now() - 3 * 3600e3, grantedAt: null, declinedAt: null, revokedAt: null, rev: 1, honest: DEMO_CONSENT_HONEST,
+    particulars: {
+      fullParticularsProvided: true,
+      legalAdviceOffered: true,
+      proposedFeeDisclosed: true,
+      acknowledged: null,
+    },
+    policyVersions: ['jp-fifa-2025-1', 'jp-eng-2026-27-1'],
+    ruleIds: ['ENG-6.3'],
+    requestedAt: Date.now() - 3 * 3600e3,
+    grantedAt: null,
+    declinedAt: null,
+    revokedAt: null,
+    rev: 1,
+    honest: DEMO_CONSENT_HONEST,
   },
 ];
 
@@ -128,61 +374,197 @@ const DEMO_CLUB_CONSENTS: import('./m14api').ClubConsentRequest[] = [
 // documents shared with it; the other club's private note and the agent's
 // private file are not in this fixture because they would not be in the
 // projection either. Nothing here is an offer or a signing.
-const TX_HONEST = 'A ScoutBox transaction is a permissioned workspace. "Ready" means ScoutBox currently permits this workflow to proceed under the encoded rules \u2014 it is not a statement of legal validity, no governing body has approved anything, no offer exists and nothing has been signed.';
-const TX_OFFER = 'Readiness means ScoutBox currently permits this workflow to proceed under the encoded rules. No offer exists, no offer can be created here, and nothing has been agreed, approved or signed.';
-const TX_COMPLIANCE_HONEST = 'ScoutBox has evaluated its own encoded rules. It has not determined anyone\u2019s legal rights and no governing body has approved anything.';
+const TX_HONEST =
+  'A ScoutBox transaction is a permissioned workspace. "Ready" means ScoutBox currently permits this workflow to proceed under the encoded rules \u2014 it is not a statement of legal validity, no governing body has approved anything, no offer exists and nothing has been signed.';
+const TX_OFFER =
+  'Readiness means ScoutBox currently permits this workflow to proceed under the encoded rules. No offer exists, no offer can be created here, and nothing has been agreed, approved or signed.';
+const TX_COMPLIANCE_HONEST =
+  'ScoutBox has evaluated its own encoded rules. It has not determined anyone\u2019s legal rights and no governing body has approved anything.';
 const DEMO_CLUB_TXS: ClubTransaction[] = [
   {
-    id: 'atx-c1', type: 'employment_contract', status: 'PARTIES_CONFIRMED', jurisdictions: ['ENG'],
-    viewerRoles: ['party_club_signatory'], viewerPartyRole: 'engaging_entity',
+    id: 'atx-c1',
+    type: 'employment_contract',
+    status: 'PARTIES_CONFIRMED',
+    jurisdictions: ['ENG'],
+    viewerRoles: ['party_club_signatory'],
+    viewerPartyRole: 'engaging_entity',
     agency: { id: 'org-northstar', name: 'North Star Sports Agency' },
     parties: [
-      { id: 'p1', partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi', name: 'Kola Adeyemi', removed: false, confirmedAt: now - day, confirmedByKind: 'player' },
-      { id: 'p2', partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-eastport', name: 'Eastport United', removed: false, confirmedAt: null, confirmedByKind: null },
+      {
+        id: 'p1',
+        partyRole: 'individual',
+        subjectKind: 'player',
+        subjectId: 'pl-adeyemi',
+        name: 'Kola Adeyemi',
+        removed: false,
+        confirmedAt: now - day,
+        confirmedByKind: 'player',
+      },
+      {
+        id: 'p2',
+        partyRole: 'engaging_entity',
+        subjectKind: 'club',
+        subjectId: 'org-eastport',
+        name: 'Eastport United',
+        removed: false,
+        confirmedAt: null,
+        confirmedByKind: null,
+      },
     ],
-    awaitingConfirmation: ['engaging_entity'], partiesConfirmed: false,
-    representations: [{ id: 'r1', partyRole: 'individual', status: 'verified', basis: 'client_confirmed_agreement', scope: ['employment'] }],
-    compliance: { outcome: null, pendingReason: 'PARTIES_NOT_CONFIRMED', blocked: false, clear: false, reasonCodes: [], evaluatedAt: now - day, staleness: null, honest: TX_COMPLIANCE_HONEST },
+    awaitingConfirmation: ['engaging_entity'],
+    partiesConfirmed: false,
+    representations: [
+      {
+        id: 'r1',
+        partyRole: 'individual',
+        status: 'verified',
+        basis: 'client_confirmed_agreement',
+        scope: ['employment'],
+      },
+    ],
+    compliance: {
+      outcome: null,
+      pendingReason: 'PARTIES_NOT_CONFIRMED',
+      blocked: false,
+      clear: false,
+      reasonCodes: [],
+      evaluatedAt: now - day,
+      staleness: null,
+      honest: TX_COMPLIANCE_HONEST,
+    },
     consents: [],
-    documents: [{ id: 'd1', documentType: 'term_sheet_draft', visibility: 'ALL_TRANSACTION_PARTIES', version: 1, label: 'Draft term sheet', uploadedAt: now - day, actor: { kind: 'agent', label: 'Representing agent' }, downloadable: false }],
+    documents: [
+      {
+        id: 'd1',
+        documentType: 'term_sheet_draft',
+        visibility: 'ALL_TRANSACTION_PARTIES',
+        version: 1,
+        label: 'Draft term sheet',
+        uploadedAt: now - day,
+        actor: { kind: 'agent', label: 'Representing agent' },
+        downloadable: false,
+      },
+    ],
     notes: [],
-    offerBoundary: { canStartOfferWorkflow: false, blockers: ['TRANSACTION_NOT_READY', 'COMPLIANCE_NOT_CLEAR', 'ENGAGING_ENTITY_NOT_CONFIRMED'], honest: TX_OFFER },
-    updatedAt: now - day, rev: 3, honest: TX_HONEST,
+    offerBoundary: {
+      canStartOfferWorkflow: false,
+      blockers: ['TRANSACTION_NOT_READY', 'COMPLIANCE_NOT_CLEAR', 'ENGAGING_ENTITY_NOT_CONFIRMED'],
+      honest: TX_OFFER,
+    },
+    updatedAt: now - day,
+    rev: 3,
+    honest: TX_HONEST,
   },
   {
-    id: 'atx-c2', type: 'transfer', status: 'COMPLIANCE_PENDING', jurisdictions: ['ENG'],
-    viewerRoles: ['party_club_signatory'], viewerPartyRole: 'releasing_entity',
+    id: 'atx-c2',
+    type: 'transfer',
+    status: 'COMPLIANCE_PENDING',
+    jurisdictions: ['ENG'],
+    viewerRoles: ['party_club_signatory'],
+    viewerPartyRole: 'releasing_entity',
     agency: { id: 'org-northstar', name: 'North Star Sports Agency' },
     parties: [
-      { id: 'p3', partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-carvalho', name: 'Mateus Carvalho', removed: false, confirmedAt: now - 5 * day, confirmedByKind: 'player' },
-      { id: 'p4', partyRole: 'engaging_entity', subjectKind: 'club', subjectId: 'org-harbour', name: 'Harbour City FC', removed: false, confirmedAt: now - 5 * day, confirmedByKind: 'club_user' },
-      { id: 'p5', partyRole: 'releasing_entity', subjectKind: 'club', subjectId: 'org-eastport', name: 'Eastport United', removed: false, confirmedAt: now - 4 * day, confirmedByKind: 'club_user' },
+      {
+        id: 'p3',
+        partyRole: 'individual',
+        subjectKind: 'player',
+        subjectId: 'pl-carvalho',
+        name: 'Mateus Carvalho',
+        removed: false,
+        confirmedAt: now - 5 * day,
+        confirmedByKind: 'player',
+      },
+      {
+        id: 'p4',
+        partyRole: 'engaging_entity',
+        subjectKind: 'club',
+        subjectId: 'org-harbour',
+        name: 'Harbour City FC',
+        removed: false,
+        confirmedAt: now - 5 * day,
+        confirmedByKind: 'club_user',
+      },
+      {
+        id: 'p5',
+        partyRole: 'releasing_entity',
+        subjectKind: 'club',
+        subjectId: 'org-eastport',
+        name: 'Eastport United',
+        removed: false,
+        confirmedAt: now - 4 * day,
+        confirmedByKind: 'club_user',
+      },
     ],
-    awaitingConfirmation: [], partiesConfirmed: true,
+    awaitingConfirmation: [],
+    partiesConfirmed: true,
     representations: [
-      { id: 'r2', partyRole: 'individual', status: 'verified', basis: 'client_confirmed_agreement', scope: ['transfer'] },
+      {
+        id: 'r2',
+        partyRole: 'individual',
+        status: 'verified',
+        basis: 'client_confirmed_agreement',
+        scope: ['transfer'],
+      },
       { id: 'r3', partyRole: 'engaging_entity', status: 'verified', basis: 'declared', scope: [] },
     ],
-    compliance: { outcome: 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED', pendingReason: 'CONSENT_REQUIRED', blocked: false, clear: false, reasonCodes: ['CONSENT_REQUIRED'], evaluatedAt: now - 3 * day, staleness: null, honest: TX_COMPLIANCE_HONEST },
+    compliance: {
+      outcome: 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQUIRED',
+      pendingReason: 'CONSENT_REQUIRED',
+      blocked: false,
+      clear: false,
+      reasonCodes: ['CONSENT_REQUIRED'],
+      evaluatedAt: now - 3 * day,
+      staleness: null,
+      honest: TX_COMPLIANCE_HONEST,
+    },
     consents: [
       { id: null, kind: 'dual_representation', partyRole: 'individual', status: 'granted', mine: false },
       { id: 'rcs-c1', kind: 'dual_representation', partyRole: 'engaging_entity', status: 'requested', mine: false },
     ],
     documents: [],
-    notes: [{ id: 'n1', visibility: 'RELEASING_CLUB_PRIVATE', text: 'Board will not go below the buy-out figure.', at: now - 2 * day, actor: { kind: 'club', label: 'Club signatory' } }],
-    offerBoundary: { canStartOfferWorkflow: false, blockers: ['TRANSACTION_NOT_READY', 'COMPLIANCE_NOT_CLEAR'], honest: TX_OFFER },
-    updatedAt: now - 2 * day, rev: 7, honest: TX_HONEST,
+    notes: [
+      {
+        id: 'n1',
+        visibility: 'RELEASING_CLUB_PRIVATE',
+        text: 'Board will not go below the buy-out figure.',
+        at: now - 2 * day,
+        actor: { kind: 'club', label: 'Club signatory' },
+      },
+    ],
+    offerBoundary: {
+      canStartOfferWorkflow: false,
+      blockers: ['TRANSACTION_NOT_READY', 'COMPLIANCE_NOT_CLEAR'],
+      honest: TX_OFFER,
+    },
+    updatedAt: now - 2 * day,
+    rev: 7,
+    honest: TX_HONEST,
   },
 ];
 
 export const demoM14: M14Api = {
-  async agentConsents() { return { items: structuredClone(DEMO_CLUB_CONSENTS), signatory: true }; },
+  async agentConsents() {
+    return { items: structuredClone(DEMO_CLUB_CONSENTS), signatory: true };
+  },
   async transactions() {
     return {
-      items: structuredClone(DEMO_CLUB_TXS), signatory: true,
-      statuses: ['DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'READY', 'ACTIVE', 'ON_HOLD', 'CANCELLED', 'CLOSED', 'ARCHIVED'],
+      items: structuredClone(DEMO_CLUB_TXS),
+      signatory: true,
+      statuses: [
+        'DRAFT',
+        'PARTIES_CONFIRMED',
+        'COMPLIANCE_PENDING',
+        'COMPLIANCE_BLOCKED',
+        'READY',
+        'ACTIVE',
+        'ON_HOLD',
+        'CANCELLED',
+        'CLOSED',
+        'ARCHIVED',
+      ],
       documentTypes: ['club_document', 'regulatory_evidence', 'correspondence_attachment'],
-      note: null, honest: TX_HONEST,
+      note: null,
+      honest: TX_HONEST,
     };
   },
   async confirmTransaction(_s, id) {
@@ -190,28 +572,53 @@ export const demoM14: M14Api = {
     if (!tx) throw new Error('No transaction with that reference is available to you.');
     const mine = tx.parties.find((p) => p.partyRole === tx.viewerPartyRole);
     if (mine && !mine.confirmedAt) {
-      mine.confirmedAt = Date.now(); mine.confirmedByKind = 'club_user';
+      mine.confirmedAt = Date.now();
+      mine.confirmedByKind = 'club_user';
       tx.awaitingConfirmation = tx.awaitingConfirmation.filter((r) => r !== tx.viewerPartyRole);
       tx.partiesConfirmed = tx.awaitingConfirmation.length === 0;
       tx.compliance.pendingReason = tx.partiesConfirmed ? 'REPRESENTATION_MISSING' : 'PARTIES_NOT_CONFIRMED';
-      tx.rev += 1; tx.updatedAt = Date.now();
+      tx.rev += 1;
+      tx.updatedAt = Date.now();
     }
     return { transaction: structuredClone(tx) };
   },
   async transactionNote(_s, id, input) {
     const tx = DEMO_CLUB_TXS.find((t) => t.id === id);
     if (!tx) throw new Error('No transaction with that reference is available to you.');
-    tx.notes.unshift({ id: `n-${Date.now().toString(36)}`, visibility: input.visibility, text: input.text, at: Date.now(), actor: { kind: 'club', label: 'Club signatory' } });
-    tx.rev += 1; tx.updatedAt = Date.now();
+    tx.notes.unshift({
+      id: `n-${Date.now().toString(36)}`,
+      visibility: input.visibility,
+      text: input.text,
+      at: Date.now(),
+      actor: { kind: 'club', label: 'Club signatory' },
+    });
+    tx.rev += 1;
+    tx.updatedAt = Date.now();
     return { note: { id: tx.notes[0].id } };
   },
   async transactionTimeline(_s, id) {
     const tx = DEMO_CLUB_TXS.find((t) => t.id === id);
     return {
-      items: tx ? [
-        { id: `t-${id}-2`, at: tx.updatedAt, action: 'transaction_compliance_evaluated', audience: 'all_parties', actor: { kind: 'system', label: 'ScoutBox' }, detail: { outcome: tx.compliance.outcome } },
-        { id: `t-${id}-1`, at: tx.updatedAt - day, action: 'transaction_created', audience: 'all_parties', actor: { kind: 'agent', label: 'Representing agent' }, detail: { count: tx.parties.length } },
-      ] : [],
+      items: tx
+        ? [
+            {
+              id: `t-${id}-2`,
+              at: tx.updatedAt,
+              action: 'transaction_compliance_evaluated',
+              audience: 'all_parties',
+              actor: { kind: 'system', label: 'ScoutBox' },
+              detail: { outcome: tx.compliance.outcome },
+            },
+            {
+              id: `t-${id}-1`,
+              at: tx.updatedAt - day,
+              action: 'transaction_created',
+              audience: 'all_parties',
+              actor: { kind: 'agent', label: 'Representing agent' },
+              detail: { count: tx.parties.length },
+            },
+          ]
+        : [],
       note: 'The timeline is what this club may see of what happened.',
     };
   },
@@ -221,56 +628,143 @@ export const demoM14: M14Api = {
     if (input.expectedRev !== k.rev) throw new Error('This changed since you loaded it. Reload and try again.');
     if (action === 'revoke') {
       if (k.status !== 'granted') throw new Error('Only a granted consent can be revoked.');
-      k.status = 'revoked'; k.revokedAt = Date.now(); k.rev += 1;
+      k.status = 'revoked';
+      k.revokedAt = Date.now();
+      k.rev += 1;
       return { consent: structuredClone(k) };
     }
     if (k.status !== 'requested') throw new Error('That request has already been answered.');
     if (action === 'grant' && (!input.acknowledgedParticulars || !input.acknowledgedLegalAdvice)) {
-      throw new Error('To grant, confirm the club received the full particulars and was told it may take independent legal advice.');
+      throw new Error(
+        'To grant, confirm the club received the full particulars and was told it may take independent legal advice.',
+      );
     }
-    if (action === 'grant') { k.status = 'granted'; k.grantedAt = Date.now(); } else { k.status = 'declined'; k.declinedAt = Date.now(); }
+    if (action === 'grant') {
+      k.status = 'granted';
+      k.grantedAt = Date.now();
+    } else {
+      k.status = 'declined';
+      k.declinedAt = Date.now();
+    }
     k.rev += 1;
     return { consent: structuredClone(k) };
   },
   me: () => dl(me),
   startIdentity: () => dl({ claim: myClaims[0] }),
-  requestAffiliation: (_s, role) => dl({ affiliation: mk({ claimType: 'CLUB_AFFILIATION', status: 'collecting_evidence' }), role: mk({ role, status: 'collecting_evidence' }), next: 'Prove control of your work email; the organisation confirms the relationship.' }),
+  requestAffiliation: (_s, role) =>
+    dl({
+      affiliation: mk({ claimType: 'CLUB_AFFILIATION', status: 'collecting_evidence' }),
+      role: mk({ role, status: 'collecting_evidence' }),
+      next: 'Prove control of your work email; the organisation confirms the relationship.',
+    }),
   addEvidence: () => dl({ claim: myClaims[3] }),
   submitClaim: () => dl({ claim: myClaims[3] }),
-  sendWorkEmail: () => dl({ sent: true, note: 'Demo: a single-use code would arrive at that mailbox (local outbox in dev).' }),
-  confirmWorkEmail: () => dl({ domainControl: 'passed', domainCoveredByOrg: true, note: 'Email control recorded as evidence. It does NOT by itself verify employment.', claims: myClaims.slice(1, 3) }),
-  disputeClaim: () => dl({ note: 'The claim is flagged, its history is preserved, and Trust & Safety reviews the dispute.' }),
+  sendWorkEmail: () =>
+    dl({ sent: true, note: 'Demo: a single-use code would arrive at that mailbox (local outbox in dev).' }),
+  confirmWorkEmail: () =>
+    dl({
+      domainControl: 'passed',
+      domainCoveredByOrg: true,
+      note: 'Email control recorded as evidence. It does NOT by itself verify employment.',
+      claims: myClaims.slice(1, 3),
+    }),
+  disputeClaim: () =>
+    dl({ note: 'The claim is flagged, its history is preserved, and Trust & Safety reviews the dispute.' }),
 
-  dashboard: () => dl({ organisationStatus: 'verified', counts: { verifiedStaff: 2, pending: requests.length / 2, humanReview: 1, expiringSoon: 0, disputed: 0, revoked: 0, domains: domains.length, administrators: admins.filter((a) => a.status === 'active').length } }),
+  dashboard: () =>
+    dl({
+      organisationStatus: 'verified',
+      counts: {
+        verifiedStaff: 2,
+        pending: requests.length / 2,
+        humanReview: 1,
+        expiringSoon: 0,
+        disputed: 0,
+        revoked: 0,
+        domains: domains.length,
+        administrators: admins.filter((a) => a.status === 'active').length,
+      },
+    }),
   listRequests: () => dl({ items: requests, note: 'Decisions are audited. You cannot decide your own request.' }),
   decideRequest: (_s, claimId, action, opts) => {
     const rows = requests.filter((r) => r.pairId === (requests.find((x) => x.claimId === claimId)?.pairId ?? ''));
     for (const r of rows) requests.splice(requests.indexOf(r), 1);
     if (action !== 'reject') {
-      staff.unshift({ claimId, person: rows[0]?.person ?? { id: 'x', name: '?' }, claimType: 'CLUB_ROLE', role: opts?.role ?? rows.find((r) => r.claimedRole)?.claimedRole ?? 'Staff', status: 'verified', effective: { status: 'verified', displayable: true, current: action !== 'mark_former', historical: action === 'mark_former' }, current: action !== 'mark_former', validFrom: now, validUntil: action === 'mark_former' ? now : null, verificationMethod: 'organisation_admin_confirmation', verifiedAt: now });
+      staff.unshift({
+        claimId,
+        person: rows[0]?.person ?? { id: 'x', name: '?' },
+        claimType: 'CLUB_ROLE',
+        role: opts?.role ?? rows.find((r) => r.claimedRole)?.claimedRole ?? 'Staff',
+        status: 'verified',
+        effective: {
+          status: 'verified',
+          displayable: true,
+          current: action !== 'mark_former',
+          historical: action === 'mark_former',
+        },
+        current: action !== 'mark_former',
+        validFrom: now,
+        validUntil: action === 'mark_former' ? now : null,
+        verificationMethod: 'organisation_admin_confirmation',
+        verifiedAt: now,
+      });
     }
     return dl({ decided: action, claims: [] });
   },
   listStaff: () => dl({ items: staff }),
   markDeparted: (_s, userId) => {
-    for (const row of staff) if (row.person.id === userId && row.current) { row.current = false; row.validUntil = now; row.effective = { status: 'verified', displayable: true, current: false, historical: true }; }
-    return dl({ closed: 1, note: 'Current badges end now; the historical verified period remains. The person can dispute this.' });
+    for (const row of staff)
+      if (row.person.id === userId && row.current) {
+        row.current = false;
+        row.validUntil = now;
+        row.effective = { status: 'verified', displayable: true, current: false, historical: true };
+      }
+    return dl({
+      closed: 1,
+      note: 'Current badges end now; the historical verified period remains. The person can dispute this.',
+    });
   },
   listDomains: () => dl({ domains, requests: domainRequests }),
   addDomain: (_s, domain) => {
-    const request: DomainRequest = { id: `ddom-${domainRequests.length + 1}`, domain, status: 'requires_human_review', reviewReasons: ['HIGH_RISK_ADMIN_CHANGE'], createdAt: now };
+    const request: DomainRequest = {
+      id: `ddom-${domainRequests.length + 1}`,
+      domain,
+      status: 'requires_human_review',
+      reviewReasons: ['HIGH_RISK_ADMIN_CHANGE'],
+      createdAt: now,
+    };
     domainRequests.push(request);
-    return dl({ request, note: 'Root or contested domain changes are reviewed by Trust & Safety before they take effect.' });
+    return dl({
+      request,
+      note: 'Root or contested domain changes are reviewed by Trust & Safety before they take effect.',
+    });
   },
-  confirmDomain: (_s, requestId) => dl({ domain: domainRequests.find((r) => r.id === requestId)?.domain ?? '', status: 'verified' }),
+  confirmDomain: (_s, requestId) =>
+    dl({ domain: domainRequests.find((r) => r.id === requestId)?.domain ?? '', status: 'verified' }),
   listAdmins: () => dl({ items: admins, transfers }),
   grantAdmin: (_s, userId, level) => {
     if (level === 'verification_root_admin') {
-      const transfer: RootTransfer = { id: `dtx-${transfers.length + 1}`, toUserId: userId, proposedBy: 'usr-maria', status: 'pending', createdAt: now };
+      const transfer: RootTransfer = {
+        id: `dtx-${transfers.length + 1}`,
+        toUserId: userId,
+        proposedBy: 'usr-maria',
+        status: 'pending',
+        createdAt: now,
+      };
       transfers.push(transfer);
-      return dl({ transfer, note: 'Root authority changes need a second approval: another root administrator, or Trust & Safety.' });
+      return dl({
+        transfer,
+        note: 'Root authority changes need a second approval: another root administrator, or Trust & Safety.',
+      });
     }
-    const admin: VerAdminRow = { id: `dadm-${admins.length + 1}`, userId, level, status: 'active', person: { id: userId, name: userId }, createdAt: now };
+    const admin: VerAdminRow = {
+      id: `dadm-${admins.length + 1}`,
+      userId,
+      level,
+      status: 'active',
+      person: { id: userId, name: userId },
+      createdAt: now,
+    };
     admins.push(admin);
     return dl({ admin });
   },
@@ -282,24 +776,88 @@ export const demoM14: M14Api = {
   approveTransfer: (_s, transferId) => {
     const tr = transfers.find((x) => x.id === transferId)!;
     tr.status = 'approved';
-    const admin: VerAdminRow = { id: `dadm-${admins.length + 1}`, userId: tr.toUserId, level: 'verification_root_admin', status: 'active', person: { id: tr.toUserId, name: tr.toUserId }, createdAt: now };
+    const admin: VerAdminRow = {
+      id: `dadm-${admins.length + 1}`,
+      userId: tr.toUserId,
+      level: 'verification_root_admin',
+      status: 'active',
+      person: { id: tr.toUserId, name: tr.toUserId },
+      createdAt: now,
+    };
     admins.push(admin);
     return dl({ transfer: tr, admin });
   },
-  licenceProviders: () => dl({
-    providers: [
-      { id: 'fa-england', name: 'The FA coaching qualifications register', state: 'not_configured' },
-      { id: 'uefa', name: 'UEFA coaching licence register', state: 'not_configured' },
-    ],
-    note: 'No production governing-body register is connected. Providers listed not_configured are real integration points, not working integrations.',
-  }),
-  submitLicence: () => dl({ claim: { id: 'dclm-new-lic', status: 'collecting_evidence', display: 'Credential submitted — verification pending' }, note: 'An uploaded credential is a document, not a verified licence.' }),
-  runLicenceCheck: () => dl({ claim: { id: 'dclm-new-lic', status: 'requires_human_review', display: 'Credential submitted — verification pending' }, provider: { id: 'fa-england', state: 'not_configured' }, note: 'No authoritative register is configured for this issuer — a reviewer can perform a document review, which is labelled as a document review.' }),
-  publicUser: (_s, userId) => dl(publicProfiles[userId] ?? { subjectType: 'user', subjectId: userId, identityVerified: false, badges: [] }),
-  publicOrg: (_s, orgId) => dl({ subjectType: 'org', subjectId: orgId, identityVerified: false, organisationStatus: orgId === 'org-eastport' ? 'verified' : 'unverified', badges: orgId === 'org-eastport' ? [{ kind: 'organisation', claimType: 'ORGANISATION_IDENTITY', label: 'Verified organisation', organisation: { id: orgId, name: 'Eastport United' }, role: null, current: true, historical: false, period: null, verifiedAt: now - 200 * day, provenance: 'Reviewed and confirmed by ScoutBox Trust & Safety' }] : [] }),
+  licenceProviders: () =>
+    dl({
+      providers: [
+        { id: 'fa-england', name: 'The FA coaching qualifications register', state: 'not_configured' },
+        { id: 'uefa', name: 'UEFA coaching licence register', state: 'not_configured' },
+      ],
+      note: 'No production governing-body register is connected. Providers listed not_configured are real integration points, not working integrations.',
+    }),
+  submitLicence: () =>
+    dl({
+      claim: {
+        id: 'dclm-new-lic',
+        status: 'collecting_evidence',
+        display: 'Credential submitted — verification pending',
+      },
+      note: 'An uploaded credential is a document, not a verified licence.',
+    }),
+  runLicenceCheck: () =>
+    dl({
+      claim: {
+        id: 'dclm-new-lic',
+        status: 'requires_human_review',
+        display: 'Credential submitted — verification pending',
+      },
+      provider: { id: 'fa-england', state: 'not_configured' },
+      note: 'No authoritative register is configured for this issuer — a reviewer can perform a document review, which is labelled as a document review.',
+    }),
+  publicUser: (_s, userId) =>
+    dl(publicProfiles[userId] ?? { subjectType: 'user', subjectId: userId, identityVerified: false, badges: [] }),
+  publicOrg: (_s, orgId) =>
+    dl({
+      subjectType: 'org',
+      subjectId: orgId,
+      identityVerified: false,
+      organisationStatus: orgId === 'org-eastport' ? 'verified' : 'unverified',
+      badges:
+        orgId === 'org-eastport'
+          ? [
+              {
+                kind: 'organisation',
+                claimType: 'ORGANISATION_IDENTITY',
+                label: 'Verified organisation',
+                organisation: { id: orgId, name: 'Eastport United' },
+                role: null,
+                current: true,
+                historical: false,
+                period: null,
+                verifiedAt: now - 200 * day,
+                provenance: 'Reviewed and confirmed by ScoutBox Trust & Safety',
+              },
+            ]
+          : [],
+    }),
   listReferences: () => dl({ items: references }),
   createReference: (_s, input) => {
-    const reference: ReferenceRow = { id: `dref-${references.length + 1}`, version: 1, playerId: input.playerId, playerName: input.playerId, coachName: 'You', orgName: 'Eastport United', roleAtTime: 'Head of Recruitment', relationship: input.relationship, capacity: input.capacity ?? '', fromYear: input.fromYear ?? null, toYear: input.toYear ?? null, structured: { strengths: input.strengths ?? '', development: input.development ?? '', summary: input.summary }, status: 'active', createdAt: now };
+    const reference: ReferenceRow = {
+      id: `dref-${references.length + 1}`,
+      version: 1,
+      playerId: input.playerId,
+      playerName: input.playerId,
+      coachName: 'You',
+      orgName: 'Eastport United',
+      roleAtTime: 'Head of Recruitment',
+      relationship: input.relationship,
+      capacity: input.capacity ?? '',
+      fromYear: input.fromYear ?? null,
+      toYear: input.toYear ?? null,
+      structured: { strengths: input.strengths ?? '', development: input.development ?? '', summary: input.summary },
+      status: 'active',
+      createdAt: now,
+    };
     references.unshift(reference);
     return dl({ reference });
   },
@@ -310,13 +868,34 @@ export const demoM14: M14Api = {
   },
   listPlayerInvites: () => dl({ items: invites }),
   createPlayerInvite: (_s, name, squad) => {
-    const invite: PlayerInviteRow = { id: `dinv-${invites.length + 1}`, name, squad, status: 'pending', byName: 'You', createdAt: now, expiresAt: now + 14 * day, guardianApproved: null };
+    const invite: PlayerInviteRow = {
+      id: `dinv-${invites.length + 1}`,
+      name,
+      squad,
+      status: 'pending',
+      byName: 'You',
+      createdAt: now,
+      expiresAt: now + 14 * day,
+      guardianApproved: null,
+    };
     invites.unshift(invite);
-    return dl({ invite, code: 'demo-invite-code', note: 'Demo: hand the single-use code to the player (or their guardian).' });
+    return dl({
+      invite,
+      code: 'demo-invite-code',
+      note: 'Demo: hand the single-use code to the player (or their guardian).',
+    });
   },
   listConflicts: () => dl({ items: conflicts }),
   declareConflict: (_s, kind, subject, note) => {
-    const conflict: ConflictRow = { id: `dcoi-${conflicts.length + 1}`, userId: 'usr-maria', kind, subject, note, createdAt: now, withdrawnAt: null };
+    const conflict: ConflictRow = {
+      id: `dcoi-${conflicts.length + 1}`,
+      userId: 'usr-maria',
+      kind,
+      subject,
+      note,
+      createdAt: now,
+      withdrawnAt: null,
+    };
     conflicts.unshift(conflict);
     return dl({ conflict, note: 'Declarations are explicit — never inferred, never public.' });
   },

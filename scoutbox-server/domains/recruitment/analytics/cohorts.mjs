@@ -58,7 +58,11 @@ export function evidenceLimitedExits(ctx) {
     ended += 1;
     const codes = new Set(ds.flatMap((d) => (Array.isArray(d.reasonCodes) ? d.reasonCodes : [])));
     let hit = false;
-    for (const c of EVIDENCE_REASON_CODES) if (codes.has(c)) { byCode[c] += 1; hit = true; }
+    for (const c of EVIDENCE_REASON_CODES)
+      if (codes.has(c)) {
+        byCode[c] += 1;
+        hit = true;
+      }
     if (hit) evidenceLimited += 1;
   }
   return {
@@ -99,8 +103,10 @@ export function briefsLive(ctx) {
     ...wire(METRICS.briefs_live),
     ...count(live.length),
     total: count(ctx.briefs.length),
-    byStatus: ['draft', 'active', 'paused', 'closed', 'archived']
-      .map((status) => ({ status, ...count(ctx.briefs.filter((b) => b.status === status).length) })),
+    byStatus: ['draft', 'active', 'paused', 'closed', 'archived'].map((status) => ({
+      status,
+      ...count(ctx.briefs.filter((b) => b.status === status).length),
+    })),
     rows: live
       .slice()
       .sort((a, b) => String(a.title ?? '').localeCompare(String(b.title ?? '')))
@@ -118,16 +124,18 @@ export function nobodyMissedCoverage(ctx) {
   const liveIds = new Set(ctx.briefs.filter((b) => briefIsLiveOn(b, ctx.today)).map((b) => b.id));
   const rel = ctx.nmReviews.filter((r) => liveIds.has(r.briefId));
   const open = rel.filter((r) => r.state === 'open');
-  const perBrief = [...liveIds].map((briefId) => {
-    const forBrief = rel.filter((r) => r.briefId === briefId);
-    const brief = ctx.briefs.find((b) => b.id === briefId);
-    return {
-      briefId,
-      title: brief?.title ?? null,
-      ...count(forBrief.filter((r) => r.state === 'open').length),
-      reviewed: ratio(forBrief.filter((r) => r.state !== 'open').length, forBrief.length),
-    };
-  }).sort((a, b) => String(a.title ?? '').localeCompare(String(b.title ?? '')));
+  const perBrief = [...liveIds]
+    .map((briefId) => {
+      const forBrief = rel.filter((r) => r.briefId === briefId);
+      const brief = ctx.briefs.find((b) => b.id === briefId);
+      return {
+        briefId,
+        title: brief?.title ?? null,
+        ...count(forBrief.filter((r) => r.state === 'open').length),
+        reviewed: ratio(forBrief.filter((r) => r.state !== 'open').length, forBrief.length),
+      };
+    })
+    .sort((a, b) => String(a.title ?? '').localeCompare(String(b.title ?? '')));
   return {
     backlog: {
       ...wire(METRICS.nobody_missed_backlog),
@@ -148,9 +156,7 @@ export function secondLookCoverage(ctx) {
   const items = ctx.secondLook;
   const open = items.filter((i) => i.status === 'open');
   const responded = items.filter((i) => i.status !== 'open' && Number(i.updatedAt) > Number(i.createdAt));
-  const values = responded
-    .filter((i) => inWindow(i.updatedAt, ctx.window))
-    .map((i) => days(i.createdAt, i.updatedAt));
+  const values = responded.filter((i) => inWindow(i.updatedAt, ctx.window)).map((i) => days(i.createdAt, i.updatedAt));
   return {
     backlog: {
       ...wire(METRICS.second_look_backlog),
@@ -163,7 +169,8 @@ export function secondLookCoverage(ctx) {
     responseTime: {
       ...wire(METRICS.second_look_response_time),
       ...distribution(values, { excluded: open.length }),
-      excludedMeans: 'Second Look items nobody has touched yet. They have no response time to measure, which is exactly why the backlog is shown next to this.',
+      excludedMeans:
+        'Second Look items nobody has touched yet. They have no response time to measure, which is exactly why the backlog is shown next to this.',
     },
   };
 }
@@ -180,8 +187,10 @@ export function watchlistActivity(ctx) {
       ...wire(METRICS.active_watchlists),
       ...count(active.length),
       total: count(ctx.watchlists.length),
-      byStatus: ['active', 'paused', 'archived']
-        .map((status) => ({ status, ...count(ctx.watchlists.filter((w) => w.status === status).length) })),
+      byStatus: ['active', 'paused', 'archived'].map((status) => ({
+        status,
+        ...count(ctx.watchlists.filter((w) => w.status === status).length),
+      })),
     },
     churn: {
       ...wire(METRICS.watchlist_membership_churn),
@@ -191,11 +200,17 @@ export function watchlistActivity(ctx) {
       // Watchlists have no scheduler: membership is recalculated when someone opens a list, so this counts
       // recalculations, not players whose situation changed.
       derivedOnRead: true,
-      refreshNote: 'ScoutBox does not recompute watchlists in the background. These are the changes found when someone opened a list — a list nobody opened records nothing.',
+      refreshNote:
+        'ScoutBox does not recompute watchlists in the background. These are the changes found when someone opened a list — a list nobody opened records nothing.',
     },
   };
 }
 
-export const DECISION_METRICS = { terminalWithRecordedDecision, supersededDecisionRate, evidenceLimitedExits, reopenRate };
+export const DECISION_METRICS = {
+  terminalWithRecordedDecision,
+  supersededDecisionRate,
+  evidenceLimitedExits,
+  reopenRate,
+};
 export const COVERAGE_METRICS = { briefsLive, nobodyMissedCoverage, secondLookCoverage };
 export const WATCHLIST_METRICS = { watchlistActivity };

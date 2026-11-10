@@ -34,7 +34,8 @@ export function adulthoodAt(player) {
 
 export function createMatchFactsKeeper(ctx) {
   const { matchFacts, players, unit } = ctx;
-  if (typeof matchFacts?.write !== 'function' || typeof players?.byIds !== 'function') throw new TypeError('the match facts keeper needs the matchFacts and players repositories');
+  if (typeof matchFacts?.write !== 'function' || typeof players?.byIds !== 'function')
+    throw new TypeError('the match facts keeper needs the matchFacts and players repositories');
   const vreads = ctx.verificationReads;
   const sreads = ctx.scoutingReads;
   const breads = ctx.boxCamReads;
@@ -49,14 +50,20 @@ export function createMatchFactsKeeper(ctx) {
     const evidence = sreads.evidence.currentForPlayer(id);
     const newest = (list) => list.reduce((m, e) => Math.max(m, e.recordedAt ?? 0), 0) || null;
     // A simulated result is not recruitment eligibility, and an attempt whose session was invalidated stops counting.
-    const verified = [...breads.attempts.forPlayer(id)].reverse()
+    const verified = [...breads.attempts.forPlayer(id)]
+      .reverse()
       .filter((a) => a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
     const sessions = new Map(breads.sessions.byIds(verified.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
     const combine = {};
     for (const a of verified) {
       if (sessions.get(a.boxSessionId)?.verificationState === 'invalidated') continue;
       // A missing measurement is no measurement (Number(null) would read it as 0 and meet a ≤ threshold).
-      const v = typeof a.measuredValue === 'number' ? a.measuredValue : (typeof a.measuredValue === 'string' && a.measuredValue.trim() ? Number(a.measuredValue) : NaN);
+      const v =
+        typeof a.measuredValue === 'number'
+          ? a.measuredValue
+          : typeof a.measuredValue === 'string' && a.measuredValue.trim()
+            ? Number(a.measuredValue)
+            : NaN;
       const best = combine[a.protocolId] ?? null;
       combine[a.protocolId] = Number.isFinite(v) ? (best === null ? v : Math.max(best, v)) : best;
     }
@@ -65,10 +72,15 @@ export function createMatchFactsKeeper(ctx) {
     // until its expiry has passed, a claim until its valid_until, an agreement inside its term, and adulthood decides
     // which components are eligible).
     const due = [];
-    const future = (v) => { if (typeof v === 'number' && Number.isFinite(v) && v > now) due.push(Math.ceil(v)); };
+    const future = (v) => {
+      if (typeof v === 'number' && Number.isFinite(v) && v > now) due.push(Math.ceil(v));
+    };
     for (const e of evidence) if (typeof e.expiresAt === 'number') future(e.expiresAt + 1);
     for (const c of vreads.claims.forSubjectId(id)) future(c.validUntil);
-    for (const a of agreements.forClient(id)) { future(a.startAt); future(a.endAt); }
+    for (const a of agreements.forClient(id)) {
+      future(a.startAt);
+      future(a.endAt);
+    }
     future(adulthoodAt(player));
 
     return {
@@ -79,7 +91,8 @@ export function createMatchFactsKeeper(ctx) {
       trustBand: ctx.trustSummaryFor(player)?.band ?? null,
       lastEvidenceAt: newest(evidence),
       lastFootageAt: newest(evidence.filter((e) => e.claimType === 'footage')),
-      coachReference: vreads.references.hasActive(id) || evidence.some((e) => e.verification?.status === 'coach_confirmed'),
+      coachReference:
+        vreads.references.hasActive(id) || evidence.some((e) => e.verification?.status === 'coach_confirmed'),
       clubConfirmed: signings.forPlayer(id).length > 0,
       combine,
       refreshDueAt: due.length ? Math.min(...due) : null,
@@ -101,23 +114,41 @@ export function createMatchFactsKeeper(ctx) {
         matchFacts.clearDirty(ids);
         n += ids.length;
       }
-    } finally { draining = false; }
+    } finally {
+      draining = false;
+    }
     return n;
   }
 
   /** The unit's COMMIT re-derives the marked rows. */
   const sweep = (at = Date.now()) => unit(() => matchFacts.markDue(at));
 
-  const policyKey = matchFactsPolicyKey({ trustPolicyVersion: TRUST_SCORE_POLICY_VERSION, simulatedEvidence: !!ctx.testProviderEnabled });
+  const policyKey = matchFactsPolicyKey({
+    trustPolicyVersion: TRUST_SCORE_POLICY_VERSION,
+    simulatedEvidence: !!ctx.testProviderEnabled,
+  });
   let stop = null;
   function start() {
     if (stop) return;
     stop = onBeforeCommit(ctx.sqlite, drain);
     unit(() => {
-      if (matchFacts.policyKey() !== policyKey) { matchFacts.markAll(); matchFacts.setPolicyKey(policyKey); }
+      if (matchFacts.policyKey() !== policyKey) {
+        matchFacts.markAll();
+        matchFacts.setPolicyKey(policyKey);
+      }
       matchFacts.markDue(Date.now());
     });
   }
 
-  return { build, drain, sweep, start, stopForTests: () => { stop?.(); stop = null; }, policyKey };
+  return {
+    build,
+    drain,
+    sweep,
+    start,
+    stopForTests: () => {
+      stop?.();
+      stop = null;
+    },
+    policyKey,
+  };
 }

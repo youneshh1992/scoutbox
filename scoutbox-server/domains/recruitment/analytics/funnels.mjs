@@ -5,11 +5,13 @@
  * This is not a conversion funnel. Rooms can be reopened (Second Look exists to cause that), so a room counts
  * once for each stage it ever reached, not as a monotonic drop-off.
  */
+import { METRICS, wire, ratio, count, inWindow, cohortIncomplete, ASSOCIATION_NOTE, SMALL_N_MIN } from './metrics.mjs';
 import {
-  METRICS, wire, ratio, count, inWindow, cohortIncomplete, ASSOCIATION_NOTE, SMALL_N_MIN,
-} from './metrics.mjs';
-import {
-  ROOM_STATUSES, TERMINAL_ROOM_STATUSES, SOURCE_CONTEXTS, reasonCategory, REASON_CODES,
+  ROOM_STATUSES,
+  TERMINAL_ROOM_STATUSES,
+  SOURCE_CONTEXTS,
+  reasonCategory,
+  REASON_CODES,
 } from '../rooms/shared.mjs';
 
 /**
@@ -82,7 +84,11 @@ export function pipelineStageCounts(ctx) {
     ...wire(METRICS.pipeline_stage_counts),
     total: count(ctx.rooms.length),
     // Vocabulary order: ordering by size would turn a status list into a ranking.
-    rows: ROOM_STATUSES.map((status) => ({ status, terminal: TERMINAL_ROOM_STATUSES.includes(status), ...count(by[status]) })),
+    rows: ROOM_STATUSES.map((status) => ({
+      status,
+      terminal: TERMINAL_ROOM_STATUSES.includes(status),
+      ...count(by[status]),
+    })),
   };
 }
 
@@ -157,10 +163,15 @@ export function exitReasonMix(ctx) {
     total: count(n),
     overlapping: true,
     uncoded: count(uncoded),
-    rows: REASON_CATEGORIES.map((category) => ({ category, ...count(byCategory[category]), share: ratio(byCategory[category], n) })),
+    rows: REASON_CATEGORIES.map((category) => ({
+      category,
+      ...count(byCategory[category]),
+      share: ratio(byCategory[category], n),
+    })),
     // Taxonomy order, never by frequency.
-    codes: REASON_CATEGORIES.flatMap((cat) => REASON_CODES[cat].map((code) => ({ code, category: cat, ...count(byCode.get(code) ?? 0) })))
-      .filter((row) => row.value > 0),
+    codes: REASON_CATEGORIES.flatMap((cat) =>
+      REASON_CODES[cat].map((code) => ({ code, category: cat, ...count(byCode.get(code) ?? 0) })),
+    ).filter((row) => row.value > 0),
   };
 }
 
@@ -231,7 +242,9 @@ export const SOURCE_METRICS = { roomSourceMix, sourceStageReach };
  */
 export function decisionOutcomes(ctx) {
   const w = ctx.window;
-  const rows = (ctx.decisions ?? []).filter((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && inWindow(d.createdAt, w));
+  const rows = (ctx.decisions ?? []).filter(
+    (d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && inWindow(d.createdAt, w),
+  );
   const by = { progress: 0, hold: 0, reject: 0 };
   for (const d of rows) if (Object.prototype.hasOwnProperty.call(by, d.outcome)) by[d.outcome] += 1;
   return {
@@ -267,66 +280,174 @@ export function trialProcess(ctx) {
   };
 }
 
-
 // ------------------------------------------------------------ journey funnel
 
 /** The instant that proves each journey stage, or null. */
 const JOURNEY_EVIDENCE = Object.freeze({
-  contacted: (k, x) => firstAt(x.contactsByCase.get(k.id), (c) => ['delivered', 'responded', 'recorded'].includes(c.status) && !c.cancelledAt, (c) => c.deliveredAt ?? c.occurredAt ?? c.recordedAt),
-  trial_requested: (k, x) => firstAt(x.requestsByCase.get(k.id), (r) => r.type === 'trial', (r) => r.createdAt),
-  trial_scheduled: (k, x) => firstAt(x.trialsByCase.get(k.id), (t) => Number.isFinite(t.schedule?.confirmedAt) || t.completion?.state === 'completed', (t) => t.schedule?.confirmedAt ?? t.completion?.at),
-  trial_completed: (k, x) => firstAt(x.trialsByCase.get(k.id), (t) => t.completion?.state === 'completed', (t) => t.completion?.at),
+  contacted: (k, x) =>
+    firstAt(
+      x.contactsByCase.get(k.id),
+      (c) => ['delivered', 'responded', 'recorded'].includes(c.status) && !c.cancelledAt,
+      (c) => c.deliveredAt ?? c.occurredAt ?? c.recordedAt,
+    ),
+  trial_requested: (k, x) =>
+    firstAt(
+      x.requestsByCase.get(k.id),
+      (r) => r.type === 'trial',
+      (r) => r.createdAt,
+    ),
+  trial_scheduled: (k, x) =>
+    firstAt(
+      x.trialsByCase.get(k.id),
+      (t) => Number.isFinite(t.schedule?.confirmedAt) || t.completion?.state === 'completed',
+      (t) => t.schedule?.confirmedAt ?? t.completion?.at,
+    ),
+  trial_completed: (k, x) =>
+    firstAt(
+      x.trialsByCase.get(k.id),
+      (t) => t.completion?.state === 'completed',
+      (t) => t.completion?.at,
+    ),
   // An assessment counts for one case: the one whose Trial it was written in, else the case open when it was
   // written. A second case never claims an ended case's assessment.
-  assessed: (k, x) => firstAt(x.assessmentsByPlayer.get(k.playerId), (a) => a.state !== 'draft' && assessmentOfCase(a, k, x), (a) => a.submittedAt ?? a.createdAt),
+  assessed: (k, x) =>
+    firstAt(
+      x.assessmentsByPlayer.get(k.playerId),
+      (a) => a.state !== 'draft' && assessmentOfCase(a, k, x),
+      (a) => a.submittedAt ?? a.createdAt,
+    ),
   decision_progress: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'progress'),
   decision_hold: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'hold'),
   decision_reject: (k, x) => decisionAt(x.decisionsByCase.get(k.id), 'reject'),
-  offer_issued: (k, x) => firstAt(x.offersByCase.get(k.id), (o) => (o.revisions ?? []).some((r) => r && r.issuedAt && r.status !== 'DRAFT'), (o) => Math.min(...(o.revisions ?? []).filter((r) => r && r.issuedAt).map((r) => Number(r.issuedAt)))),
-  offer_accepted: (k, x) => firstAt(x.offersByCase.get(k.id), (o) => (o.revisions ?? []).some((r) => r && r.status === 'ACCEPTED'), (o) => (o.revisions ?? []).find((r) => r && r.status === 'ACCEPTED')?.respondedAt),
-  offer_declined: (k, x) => firstAt(x.offersByCase.get(k.id), (o) => (o.revisions ?? []).some((r) => r && r.status === 'DECLINED'), (o) => (o.revisions ?? []).find((r) => r && r.status === 'DECLINED')?.respondedAt),
-  signing_started: (k, x) => firstAt(x.packagesByCase.get(k.id), () => true, (p) => p.createdAt),
+  offer_issued: (k, x) =>
+    firstAt(
+      x.offersByCase.get(k.id),
+      (o) => (o.revisions ?? []).some((r) => r && r.issuedAt && r.status !== 'DRAFT'),
+      (o) => Math.min(...(o.revisions ?? []).filter((r) => r && r.issuedAt).map((r) => Number(r.issuedAt))),
+    ),
+  offer_accepted: (k, x) =>
+    firstAt(
+      x.offersByCase.get(k.id),
+      (o) => (o.revisions ?? []).some((r) => r && r.status === 'ACCEPTED'),
+      (o) => (o.revisions ?? []).find((r) => r && r.status === 'ACCEPTED')?.respondedAt,
+    ),
+  offer_declined: (k, x) =>
+    firstAt(
+      x.offersByCase.get(k.id),
+      (o) => (o.revisions ?? []).some((r) => r && r.status === 'DECLINED'),
+      (o) => (o.revisions ?? []).find((r) => r && r.status === 'DECLINED')?.respondedAt,
+    ),
+  signing_started: (k, x) =>
+    firstAt(
+      x.packagesByCase.get(k.id),
+      () => true,
+      (p) => p.createdAt,
+    ),
   signed: (k, x) => {
     // A canonical row: a COMPLETED package on this case that names the row back. A legacy row: no package,
     // recorded after the case opened.
     const pkgs = x.packagesByCase.get(k.id) ?? [];
-    for (const p of pkgs) { if (p.status === 'COMPLETED' && p.completion?.signingId) { const row = x.signingsById.get(p.completion.signingId); if (row && row.signingPackageId === p.id && !row.cancelledAt) return Number(p.completion.completedAt) || Number(row.ts) || null; } }
-    const legacy = (x.signingsByPlayer.get(k.playerId) ?? []).filter((s) => !s.signingPackageId && !s.cancelledAt && !s.voidedAt && (!Number.isFinite(Number(k.createdAt)) || Number(s.ts) >= Number(k.createdAt)));
+    for (const p of pkgs) {
+      if (p.status === 'COMPLETED' && p.completion?.signingId) {
+        const row = x.signingsById.get(p.completion.signingId);
+        if (row && row.signingPackageId === p.id && !row.cancelledAt)
+          return Number(p.completion.completedAt) || Number(row.ts) || null;
+      }
+    }
+    const legacy = (x.signingsByPlayer.get(k.playerId) ?? []).filter(
+      (s) =>
+        !s.signingPackageId &&
+        !s.cancelledAt &&
+        !s.voidedAt &&
+        (!Number.isFinite(Number(k.createdAt)) || Number(s.ts) >= Number(k.createdAt)),
+    );
     return legacy.length ? Math.min(...legacy.map((s) => Number(s.ts))) : null;
   },
 });
 /** The status whose history entry is each stage's "history only" counterpart. */
-const JOURNEY_STAGE_STATUS = Object.freeze({ contacted: 'contacted', trial_requested: 'trial_requested', trial_scheduled: 'trial_scheduled', trial_completed: 'trial_completed', decision_progress: 'offer_consideration', offer_issued: 'offer_made', offer_accepted: 'offer_accepted', offer_declined: 'offer_declined', signed: 'signed' });
+const JOURNEY_STAGE_STATUS = Object.freeze({
+  contacted: 'contacted',
+  trial_requested: 'trial_requested',
+  trial_scheduled: 'trial_scheduled',
+  trial_completed: 'trial_completed',
+  decision_progress: 'offer_consideration',
+  offer_issued: 'offer_made',
+  offer_accepted: 'offer_accepted',
+  offer_declined: 'offer_declined',
+  signed: 'signed',
+});
 export const JOURNEY_FUNNEL_STAGES = Object.freeze(Object.keys(JOURNEY_EVIDENCE));
-const SOURCE_OF = Object.freeze({ contacted: 'recruitmentContacts', trial_requested: 'requests', trial_scheduled: 'trials', trial_completed: 'trials', assessed: 'assessments', decision_progress: 'roomDecisions', decision_hold: 'roomDecisions', decision_reject: 'roomDecisions', offer_issued: 'recruitmentOffers', offer_accepted: 'recruitmentOffers', offer_declined: 'recruitmentOffers', signing_started: 'signingPackages', signed: 'signings' });
+const SOURCE_OF = Object.freeze({
+  contacted: 'recruitmentContacts',
+  trial_requested: 'requests',
+  trial_scheduled: 'trials',
+  trial_completed: 'trials',
+  assessed: 'assessments',
+  decision_progress: 'roomDecisions',
+  decision_hold: 'roomDecisions',
+  decision_reject: 'roomDecisions',
+  offer_issued: 'recruitmentOffers',
+  offer_accepted: 'recruitmentOffers',
+  offer_declined: 'recruitmentOffers',
+  signing_started: 'signingPackages',
+  signed: 'signings',
+});
 
 /** The latest terminal transition if the case is terminal now; a reopened case is open again (Infinity). */
 function caseEndedAt(k) {
   const status = k.room?.status ?? k.status ?? null;
   if (!TERMINAL_ROOM_STATUSES.includes(status)) return Infinity;
-  const ends = transitions(k).filter((t) => TERMINAL_ROOM_STATUSES.includes(t.to)).map((t) => Number(t.at) || 0);
+  const ends = transitions(k)
+    .filter((t) => TERMINAL_ROOM_STATUSES.includes(t.to))
+    .map((t) => Number(t.at) || 0);
   return ends.length ? Math.max(...ends) : 0;
 }
 /** Mirrors ownedByAnotherCase in domains/recruitment/lifecycle/journey.mjs. */
 function assessmentOfCase(a, k, x) {
   const tid = a?.context?.trialId;
-  if (typeof tid === 'string' && tid) { const t = x.trialsById.get(tid); return !!t && t.caseId === k.id; }
+  if (typeof tid === 'string' && tid) {
+    const t = x.trialsById.get(tid);
+    return !!t && t.caseId === k.id;
+  }
   const at = Number(a?.submittedAt ?? a?.createdAt);
   if (!Number.isFinite(at)) return false;
-  return !(x.casesByPlayer.get(k.playerId) ?? []).some((o) => o && o.id !== k.id && Number(o.createdAt) <= at && at <= caseEndedAt(o));
+  return !(x.casesByPlayer.get(k.playerId) ?? []).some(
+    (o) => o && o.id !== k.id && Number(o.createdAt) <= at && at <= caseEndedAt(o),
+  );
 }
 function firstAt(rows, pred, atOf) {
   let best = null;
-  for (const r of rows ?? []) { if (!r || !pred(r)) continue; const t = Number(atOf(r)); if (!Number.isFinite(t) || t <= 0) continue; if (best === null || t < best) best = t; }
+  for (const r of rows ?? []) {
+    if (!r || !pred(r)) continue;
+    const t = Number(atOf(r));
+    if (!Number.isFinite(t) || t <= 0) continue;
+    if (best === null || t < best) best = t;
+  }
   return best;
 }
 function decisionAt(rows, outcome) {
   // The standing formal decision (nothing supersedes it) with this outcome.
-  const heads = (rows ?? []).filter((d) => d && d.kind === 'formal' && d.state !== 'draft' && !d.supersededById && d.outcome === outcome);
+  const heads = (rows ?? []).filter(
+    (d) => d && d.kind === 'formal' && d.state !== 'draft' && !d.supersededById && d.outcome === outcome,
+  );
   return heads.length ? Math.min(...heads.map((d) => Number(d.createdAt) || Infinity)) : null;
 }
-const groupBy = (rows, keyOf) => { const m = new Map(); for (const r of rows ?? []) { if (!r) continue; const k = keyOf(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return m; };
-const median = (xs) => { const a = xs.filter((x) => Number.isFinite(x)).sort((p, q) => p - q); if (!a.length) return null; const mid = Math.floor(a.length / 2); return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2; };
+const groupBy = (rows, keyOf) => {
+  const m = new Map();
+  for (const r of rows ?? []) {
+    if (!r) continue;
+    const k = keyOf(r);
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(r);
+  }
+  return m;
+};
+const median = (xs) => {
+  const a = xs.filter((x) => Number.isFinite(x)).sort((p, q) => p - q);
+  if (!a.length) return null;
+  const mid = Math.floor(a.length / 2);
+  return a.length % 2 ? a[mid] : (a[mid - 1] + a[mid]) / 2;
+};
 const days = (ms) => Math.round((ms / 86_400_000) * 10) / 10;
 
 /**
@@ -350,20 +471,35 @@ export function journeyEvidenceFunnel(ctx) {
     signingsById: new Map((ctx.signings ?? []).filter(Boolean).map((s) => [s.id, s])),
     signingsByPlayer: groupBy(ctx.signings, (s) => s.playerId),
   };
-  const reached = (k, status) => (k.history ?? []).some((h) => h && h.action === 'room_status_changed' && h.detail?.to === status) || k.room?.status === status;
+  const reached = (k, status) =>
+    (k.history ?? []).some((h) => h && h.action === 'room_status_changed' && h.detail?.to === status) ||
+    k.room?.status === status;
   const rows = [];
   const instants = new Map(); // stage → Map(caseId → at)
   for (const stage of JOURNEY_FUNNEL_STAGES) {
-    let value = 0; let historyOnly = 0; const m = new Map();
+    let value = 0;
+    let historyOnly = 0;
+    const m = new Map();
     for (const k of cohort) {
       const at = JOURNEY_EVIDENCE[stage](k, x);
-      if (at !== null) { value += 1; m.set(k.id, at); }
-      else if (JOURNEY_STAGE_STATUS[stage] && reached(k, JOURNEY_STAGE_STATUS[stage])) historyOnly += 1;
+      if (at !== null) {
+        value += 1;
+        m.set(k.id, at);
+      } else if (JOURNEY_STAGE_STATUS[stage] && reached(k, JOURNEY_STAGE_STATUS[stage])) historyOnly += 1;
     }
     instants.set(stage, m);
     rows.push({ stage, value, historyOnly, basis: 'case', source: SOURCE_OF[stage] });
   }
-  const between = (a, b) => { const ma = instants.get(a); const mb = instants.get(b); const xs = []; for (const [id, t1] of ma) { const t2 = mb.get(id); if (Number.isFinite(t2) && t2 >= t1) xs.push(t2 - t1); } return { n: xs.length, medianDays: xs.length ? days(median(xs)) : null }; };
+  const between = (a, b) => {
+    const ma = instants.get(a);
+    const mb = instants.get(b);
+    const xs = [];
+    for (const [id, t1] of ma) {
+      const t2 = mb.get(id);
+      if (Number.isFinite(t2) && t2 >= t1) xs.push(t2 - t1);
+    }
+    return { n: xs.length, medianDays: xs.length ? days(median(xs)) : null };
+  };
   const intervals = {
     contact_to_trial: between('contacted', 'trial_scheduled'),
     trial_completed_to_decision: between('trial_completed', 'decision_progress'),

@@ -11,13 +11,25 @@
 // nothing here is ranked.
 import type { TrustApi, TrustClub, TrustSummaryRow } from './trustApi';
 
-const DISCLAIMER = 'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.';
+const DISCLAIMER =
+  'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.';
 const NOTE = 'Evidence confidence — not football ability.';
 
-interface Fixture { score: number; band: string; bandLabel: string; levels: Record<string, [string, string]>; signals: { code: string; text: string }[] }
+interface Fixture {
+  score: number;
+  band: string;
+  bandLabel: string;
+  levels: Record<string, [string, string]>;
+  signals: { code: string; text: string }[];
+}
 
 const WEIGHTS: Record<string, number> = {
-  identity: 15, footballHistory: 20, relationships: 20, evidence: 20, combine: 15, references: 10,
+  identity: 15,
+  footballHistory: 20,
+  relationships: 20,
+  evidence: 20,
+  combine: 15,
+  references: 10,
 };
 const ORDER = ['identity', 'footballHistory', 'relationships', 'evidence', 'combine', 'references'];
 
@@ -25,7 +37,9 @@ const ORDER = ['identity', 'footballHistory', 'relationships', 'evidence', 'comb
 // present as LIMITED EVIDENCE, never as a lesser or riskier player.
 const FIXTURES: Record<string, Fixture> = {
   'pl-adeyemi': {
-    score: 79, band: 'strong_evidence', bandLabel: 'Strong evidence',
+    score: 79,
+    band: 'strong_evidence',
+    bandLabel: 'Strong evidence',
     levels: {
       identity: ['established', 'Established'],
       footballHistory: ['strong', 'Strong'],
@@ -46,7 +60,9 @@ const FIXTURES: Record<string, Fixture> = {
     ],
   },
   'pl-svensson': {
-    score: 46, band: 'developing_evidence', bandLabel: 'Developing evidence',
+    score: 46,
+    band: 'developing_evidence',
+    bandLabel: 'Developing evidence',
     levels: {
       identity: ['established', 'Established'],
       footballHistory: ['limited', 'Limited'],
@@ -64,7 +80,9 @@ const FIXTURES: Record<string, Fixture> = {
 };
 
 const FALLBACK: Fixture = {
-  score: 31, band: 'limited_evidence', bandLabel: 'Limited evidence',
+  score: 31,
+  band: 'limited_evidence',
+  bandLabel: 'Limited evidence',
   levels: {
     identity: ['limited', 'Limited'],
     footballHistory: ['limited', 'Limited'],
@@ -81,7 +99,10 @@ const fixture = (playerId: string): Fixture => FIXTURES[playerId] ?? FALLBACK;
 const project = (playerId: string): TrustClub => {
   const f = fixture(playerId);
   return {
-    score: f.score, band: f.band, bandLabel: f.bandLabel, policyVersion: 1,
+    score: f.score,
+    band: f.band,
+    bandLabel: f.bandLabel,
+    policyVersion: 1,
     disclaimer: DISCLAIMER,
     simulatedEvidenceIncluded: true,
     viewer: 'pro_club',
@@ -103,7 +124,11 @@ export const demoTrust: TrustApi = {
     items: playerIds.map((playerId): TrustSummaryRow => {
       const f = fixture(playerId);
       return {
-        playerId, score: f.score, band: f.band, bandLabel: f.bandLabel, policyVersion: 1,
+        playerId,
+        score: f.score,
+        band: f.band,
+        bandLabel: f.bandLabel,
+        policyVersion: 1,
         topEvidenceSignals: f.signals.slice(0, 3).map((s) => s.code),
       };
     }),

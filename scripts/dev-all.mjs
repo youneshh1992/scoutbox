@@ -21,17 +21,76 @@ const WITH_ADMIN = process.argv.includes('--with-admin');
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
 const APPS = [
-  { name: 'backend', dir: 'scoutbox-server', port: 4000, cmd: 'node', args: ['server.mjs'], url: 'http://localhost:4000', label: 'API — /health to check', ready: async () => {
-    const res = await fetch('http://localhost:4000/health');
-    const h = await res.json();
-    if (!h.ok || !h.engine) throw new Error('health incomplete');
-    return `engine: ${h.engine} · dev logins: ${h.devLogins ? 'ON (local development only)' : 'off'}`;
-  } },
-  { name: 'player', dir: 'scoutbox-player', port: 8081, cmd: 'npx', args: ['expo', 'start', '--web', '--port', '8081'], env: { EXPO_PUBLIC_API_URL: API_URL, BROWSER: 'none' }, url: 'http://localhost:8081', label: 'ScoutBox Player (web)', marker: 'root' },
-  { name: 'pro', dir: 'scoutbox-club', port: 5173, cmd: 'npx', args: ['vite', '--port', '5173', '--strictPort'], url: 'http://localhost:5173', label: 'ScoutBox Pro', marker: 'ScoutBox Pro' },
-  { name: 'grassroots', dir: 'scoutbox-grassroots', port: 5175, cmd: 'npx', args: ['vite', '--port', '5175', '--strictPort'], url: 'http://localhost:5175', label: 'ScoutBox Grassroots', marker: 'ScoutBox Grassroots' },
-  { name: 'agent', dir: 'scoutbox-agent', port: 5176, cmd: 'npx', args: ['vite', '--port', '5176', '--strictPort'], url: 'http://localhost:5176', label: 'ScoutBox Agent', marker: 'ScoutBox Agent' },
-  ...(WITH_ADMIN ? [{ name: 'admin', dir: 'scoutbox-admin', port: 5174, cmd: 'npx', args: ['vite', '--port', '5174', '--strictPort'], url: 'http://localhost:5174', label: 'Trust & Safety console', marker: 'ScoutBox' }] : []),
+  {
+    name: 'backend',
+    dir: 'scoutbox-server',
+    port: 4000,
+    cmd: 'node',
+    args: ['server.mjs'],
+    url: 'http://localhost:4000',
+    label: 'API — /health to check',
+    ready: async () => {
+      const res = await fetch('http://localhost:4000/health');
+      const h = await res.json();
+      if (!h.ok || !h.engine) throw new Error('health incomplete');
+      return `engine: ${h.engine} · dev logins: ${h.devLogins ? 'ON (local development only)' : 'off'}`;
+    },
+  },
+  {
+    name: 'player',
+    dir: 'scoutbox-player',
+    port: 8081,
+    cmd: 'npx',
+    args: ['expo', 'start', '--web', '--port', '8081'],
+    env: { EXPO_PUBLIC_API_URL: API_URL, BROWSER: 'none' },
+    url: 'http://localhost:8081',
+    label: 'ScoutBox Player (web)',
+    marker: 'root',
+  },
+  {
+    name: 'pro',
+    dir: 'scoutbox-club',
+    port: 5173,
+    cmd: 'npx',
+    args: ['vite', '--port', '5173', '--strictPort'],
+    url: 'http://localhost:5173',
+    label: 'ScoutBox Pro',
+    marker: 'ScoutBox Pro',
+  },
+  {
+    name: 'grassroots',
+    dir: 'scoutbox-grassroots',
+    port: 5175,
+    cmd: 'npx',
+    args: ['vite', '--port', '5175', '--strictPort'],
+    url: 'http://localhost:5175',
+    label: 'ScoutBox Grassroots',
+    marker: 'ScoutBox Grassroots',
+  },
+  {
+    name: 'agent',
+    dir: 'scoutbox-agent',
+    port: 5176,
+    cmd: 'npx',
+    args: ['vite', '--port', '5176', '--strictPort'],
+    url: 'http://localhost:5176',
+    label: 'ScoutBox Agent',
+    marker: 'ScoutBox Agent',
+  },
+  ...(WITH_ADMIN
+    ? [
+        {
+          name: 'admin',
+          dir: 'scoutbox-admin',
+          port: 5174,
+          cmd: 'npx',
+          args: ['vite', '--port', '5174', '--strictPort'],
+          url: 'http://localhost:5174',
+          label: 'Trust & Safety console',
+          marker: 'ScoutBox',
+        },
+      ]
+    : []),
 ];
 
 // ---------- prerequisites: deps installed, ports free
@@ -67,7 +126,13 @@ let shuttingDown = false;
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  for (const c of children) { try { c.kill('SIGTERM'); } catch { /* gone */ } }
+  for (const c of children) {
+    try {
+      c.kill('SIGTERM');
+    } catch {
+      /* gone */
+    }
+  }
   setTimeout(() => process.exit(code), 800);
 }
 process.on('SIGINT', () => shutdown(0));
@@ -80,7 +145,16 @@ function start(app) {
     env: { ...process.env, ...(app.env ?? {}) },
   });
   const tag = `[${app.name}]`.padEnd(13);
-  const fwd = (stream, out) => stream.on('data', (d) => out.write(String(d).split('\n').filter(Boolean).map((l) => `${tag}${l}`).join('\n') + '\n'));
+  const fwd = (stream, out) =>
+    stream.on('data', (d) =>
+      out.write(
+        String(d)
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => `${tag}${l}`)
+          .join('\n') + '\n',
+      ),
+    );
   fwd(child.stdout, process.stdout);
   fwd(child.stderr, process.stderr);
   child.on('exit', (code) => {
@@ -105,7 +179,9 @@ async function waitReady(app, timeoutMs) {
       throw new Error(`unexpected response (${res.status})`);
     } catch (e) {
       if (Date.now() - started > timeoutMs) {
-        throw new Error(`${app.name} not ready after ${Math.round(timeoutMs / 1000)}s — see the ${`[${app.name}]`} log lines above (${e.message})`);
+        throw new Error(
+          `${app.name} not ready after ${Math.round(timeoutMs / 1000)}s — see the ${`[${app.name}]`} log lines above (${e.message})`,
+        );
       }
       await new Promise((r) => setTimeout(r, 700));
     }
@@ -122,7 +198,7 @@ try {
   console.log('\n──────────────────────────────────────────────────────────');
   console.log('ScoutBox is up — one backend, one database, connected mode.');
   console.log('These URLs are LOCAL TO THIS MACHINE (open them in a browser');
-  console.log('on the same machine, or substitute this machine\'s LAN IP):');
+  console.log("on the same machine, or substitute this machine's LAN IP):");
   for (const app of APPS) console.log(`  • ${app.url}  (${app.label})`);
   if (notes[0]) console.log(`  ${notes[0]}`);
   console.log('  Phone on the same Wi-Fi: EXPO_PUBLIC_API_URL=http://<this-machine-LAN-IP>:4000 (see README)');

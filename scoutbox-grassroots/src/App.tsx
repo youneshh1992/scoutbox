@@ -6,17 +6,40 @@ import { initials } from '../../design-system/text';
 import { Icon } from './icons';
 import { api, ApiError, DEMO_MODE, revokeSession, type Notification, type Org, type Session } from './api';
 import {
-  FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
-  TrialsScreen, OpenDaysScreen, SquadScreen, FriendliesScreen, FixturesScreen, LedgerScreen, FunnelScreen, PlanScreen,
-  PlayerDrawer, Toast, SafetyModal,
+  FilmRoomScreen,
+  SearchScreen,
+  ShortlistScreen,
+  RequestsScreen,
+  MessagesScreen,
+  TrialsScreen,
+  OpenDaysScreen,
+  SquadScreen,
+  FriendliesScreen,
+  FixturesScreen,
+  LedgerScreen,
+  FunnelScreen,
+  PlanScreen,
+  PlayerDrawer,
+  Toast,
+  SafetyModal,
 } from './screens';
 import {
-  AssessmentsScreen, RecruitmentScreen, OpportunitiesScreen,
-  CampaignsScreen, VideoScreen, OutcomesScreen, TrialDaysScreen, CoachesScreen,
+  AssessmentsScreen,
+  RecruitmentScreen,
+  OpportunitiesScreen,
+  CampaignsScreen,
+  VideoScreen,
+  OutcomesScreen,
+  TrialDaysScreen,
+  CoachesScreen,
 } from './m12screens';
 import {
-  ImportsScreen, CoverageScreen, CalibrationScreen, InsightScreen,
-  NetworkScreen, OrganisationScreen,
+  ImportsScreen,
+  CoverageScreen,
+  CalibrationScreen,
+  InsightScreen,
+  NetworkScreen,
+  OrganisationScreen,
 } from './m13screens';
 import { VerificationScreen } from './m14screens';
 import { RoomsScreen } from './roomsScreens';
@@ -26,11 +49,27 @@ import { DirectorDashboardScreen } from './m20Screens';
 import type { DashboardFilters } from './m20Api';
 import { m14 } from './m14api';
 import {
-  briefFromHash, criteriaFromHash, hashForBrief, hashForMatching, hashForRoom, hashForScreen, roomTabFromHash, type RoomTab,
-  dashboardFromHash, hashForDashboard,
-  hashForWatchlist, loadCollapsed, loadShortcuts, resolveNavigationLocation, roomFromHash,
-  saveCollapsed, saveShortcuts, screenFromHash, watchlistFromHash,
-  NAV_SECTIONS, type NavContext,
+  briefFromHash,
+  criteriaFromHash,
+  hashForBrief,
+  hashForMatching,
+  hashForRoom,
+  hashForScreen,
+  roomTabFromHash,
+  type RoomTab,
+  dashboardFromHash,
+  hashForDashboard,
+  hashForWatchlist,
+  loadCollapsed,
+  loadShortcuts,
+  resolveNavigationLocation,
+  roomFromHash,
+  saveCollapsed,
+  saveShortcuts,
+  screenFromHash,
+  watchlistFromHash,
+  NAV_SECTIONS,
+  type NavContext,
 } from './nav';
 import { CommandPalette, OrgChips, Sidebar, SecondaryNav, TopBar, useNavSections, usePaletteHotkey } from './navui';
 import { HomeScreen } from './homeScreen';
@@ -51,19 +90,46 @@ function loadSession(): Session | null {
 }
 
 export type ScreenId =
-  | 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'opendays'
-  | 'squad' | 'friendlies' | 'fixtures' | 'ledger' | 'funnel' | 'plan'
-  | 'assessments' | 'recruitment' | 'coaches' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays'
-  | 'insight' | 'coverage' | 'calibration' | 'imports' | 'network' | 'organisation' | 'verification'
+  | 'feed'
+  | 'filmroom'
+  | 'search'
+  | 'shortlist'
+  | 'requests'
+  | 'messages'
+  | 'trials'
+  | 'opendays'
+  | 'squad'
+  | 'friendlies'
+  | 'fixtures'
+  | 'ledger'
+  | 'funnel'
+  | 'plan'
+  | 'assessments'
+  | 'recruitment'
+  | 'coaches'
+  | 'opportunities'
+  | 'campaigns'
+  | 'video'
+  | 'outcomes'
+  | 'trialdays'
+  | 'insight'
+  | 'coverage'
+  | 'calibration'
+  | 'imports'
+  | 'network'
+  | 'organisation'
+  | 'verification'
   | 'rooms'
-  | 'secondlook' | 'nobodymissed' | 'briefs'
-  | 'matching' | 'watchlists'
+  | 'secondlook'
+  | 'nobodymissed'
+  | 'briefs'
+  | 'matching'
+  | 'watchlists'
   | 'dashboard';
 
 // The information architecture lives in src/nav.ts (sections → child tabs),
 // which also drives the sidebar, the command palette, resolver and shortcuts.
 // Every ScreenId is deep-linkable as "#/<screenId>".
-
 
 // ---------------------------------------------------------------- bell
 /**
@@ -94,7 +160,11 @@ const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
   saved_search: 'search',
 };
 
-interface BellRow { n: Notification; count: number; unread: boolean }
+interface BellRow {
+  n: Notification;
+  count: number;
+  unread: boolean;
+}
 
 /**
  * Collapse repeats. The server already coalesces an identical notification the
@@ -106,22 +176,30 @@ interface BellRow { n: Notification; count: number; unread: boolean }
  */
 function bellRows(items: Notification[]): BellRow[] {
   const rows = new Map<string, BellRow>();
-  for (const n of items) { // newest first
+  for (const n of items) {
+    // newest first
     const key = `${n.type}|${n.refId ?? ''}|${n.text}`;
     const hit = rows.get(key);
-    if (hit) { hit.count += n.repeatCount ?? 1; hit.unread = hit.unread || !n.read; continue; }
+    if (hit) {
+      hit.count += n.repeatCount ?? 1;
+      hit.unread = hit.unread || !n.read;
+      continue;
+    }
     rows.set(key, { n, count: n.repeatCount ?? 1, unread: !n.read });
   }
   return [...rows.values()];
 }
-
 
 export default function App() {
   // Sessions persist across refreshes (cleared by "Switch org").
   const [session, setSession] = useState<Session | null>(loadSession);
 
   const login = (s: Session) => {
-    try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* private mode */ }
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    } catch {
+      /* private mode */
+    }
     setSession(s);
   };
   const logout = () => {
@@ -129,9 +207,13 @@ export default function App() {
     try {
       localStorage.removeItem(SESSION_KEY);
       // Offline drafts are identity-scoped and cleared on logout.
-      const stale = session ? Object.keys(localStorage).filter((k) => k.startsWith(`sbdraft:${session.org.id}:${session.userId}:`)) : [];
+      const stale = session
+        ? Object.keys(localStorage).filter((k) => k.startsWith(`sbdraft:${session.org.id}:${session.userId}:`))
+        : [];
       for (const k of stale) localStorage.removeItem(k);
-    } catch { /* private mode */ }
+    } catch {
+      /* private mode */
+    }
     setSession(null);
   };
 
@@ -155,20 +237,27 @@ export default function App() {
   // browser ends this tab's workspace too, instead of leaving it acting on a
   // token the server no longer honours.
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => { if (e.key === SESSION_KEY || e.key === null) setSession(loadSession()); };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === SESSION_KEY || e.key === null) setSession(loadSession());
+    };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // One appearance per application, persisted under its own key.
   useTheme('grass'); // Preserve the entry-page preference; the workspace owns its clubhouse palette.
-  return session
-    ? <Workspace session={session} onLogout={logout} />
-    : <Login onLogin={login} />;
+  return session ? <Workspace session={session} onLogout={logout} /> : <Login onLogin={login} />;
 }
 
 // Presentation casing for the organisation metadata line ("Club · Grassroots · Verified"); the data value stays as it is.
-const orgTypeLabel = (type: string) => type === 'club' ? 'Club' : type === 'academy' ? 'Academy' : type === 'agency' ? 'Agency' : type.charAt(0).toUpperCase() + type.slice(1);
+const orgTypeLabel = (type: string) =>
+  type === 'club'
+    ? 'Club'
+    : type === 'academy'
+      ? 'Academy'
+      : type === 'agency'
+        ? 'Agency'
+        : type.charAt(0).toUpperCase() + type.slice(1);
 
 function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -179,10 +268,21 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
-  const [reg, setReg] = useState({ name: '', federation: '', registrationId: '', city: '', lat: '', lng: '', scoutName: '' });
+  const [reg, setReg] = useState({
+    name: '',
+    federation: '',
+    registrationId: '',
+    city: '',
+    lat: '',
+    lng: '',
+    scoutName: '',
+  });
 
   useEffect(() => {
-    api.listOrgs().then(setOrgs).catch(() => setError('Cannot reach scoutbox-server on localhost:4000 — start it first.'));
+    api
+      .listOrgs()
+      .then(setOrgs)
+      .catch(() => setError('Cannot reach scoutbox-server on localhost:4000 — start it first.'));
   }, []);
 
   const enter = async () => {
@@ -194,7 +294,9 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
       onLogin(await api.login(selected, scoutName, role, password || undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const register = async () => {
@@ -202,13 +304,23 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     setError(null);
     setBusy(true);
     try {
-      onLogin(await api.registerGrassroots({
-        name: reg.name.trim(), federation: reg.federation.trim(), registrationId: reg.registrationId.trim(),
-        city: reg.city.trim(), lat: Number(reg.lat), lng: Number(reg.lng), scoutName: reg.scoutName.trim(), role: 'Manager',
-      }));
+      onLogin(
+        await api.registerGrassroots({
+          name: reg.name.trim(),
+          federation: reg.federation.trim(),
+          registrationId: reg.registrationId.trim(),
+          city: reg.city.trim(),
+          lat: Number(reg.lat),
+          lng: Number(reg.lng),
+          scoutName: reg.scoutName.trim(),
+          role: 'Manager',
+        }),
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Registration failed');
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   // Grassroots is the one portal with a real public registration
@@ -220,17 +332,58 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
       heading="Your club. Your community. Your next player."
       summary="Federation-registered grassroots clubs, scouting within 50 km of their ground."
       points={[]}
-      aside={DEMO_MODE ? <span className="auth-env" data-testid="auth-env">Demo environment</span> : undefined}
+      aside={
+        DEMO_MODE ? (
+          <span className="auth-env" data-testid="auth-env">
+            Demo environment
+          </span>
+        ) : undefined
+      }
     >
-      <AuthTabs tabs={[{ id: 'signin', label: 'Sign in' }, { id: 'register', label: 'Register club' }] as const} value={mode} onChange={(m) => { setError(null); setMode(m); }} label="Sign in or register your club" />
+      <AuthTabs
+        tabs={
+          [
+            { id: 'signin', label: 'Sign in' },
+            { id: 'register', label: 'Register club' },
+          ] as const
+        }
+        value={mode}
+        onChange={(m) => {
+          setError(null);
+          setMode(m);
+        }}
+        label="Sign in or register your club"
+      />
       {mode === 'signin' && (
-        <form className="auth-signin" onSubmit={(e) => { e.preventDefault(); void enter(); }} aria-label="Sign in" noValidate>
+        <form
+          className="auth-signin"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void enter();
+          }}
+          aria-label="Sign in"
+          noValidate
+        >
           <div className="auth-field" role="group" aria-labelledby="grass-org-label">
-            <span className="auth-label" id="grass-org-label">Club</span>
+            <span className="auth-label" id="grass-org-label">
+              Club
+            </span>
             <div className="org-grid">
               {orgs.map((o) => (
-                <AuthRow key={o.id} label={o.name} selected={selected === o.id} onClick={() => setSelected(o.id)}
-                  meta={[orgTypeLabel(o.type), o.plan, o.trustedPartner ? 'Trusted Partner' : null, o.type === 'club' ? (o.verified ? 'Verified' : 'Verification Pending') : null].filter(Boolean).join(' · ')} />
+                <AuthRow
+                  key={o.id}
+                  label={o.name}
+                  selected={selected === o.id}
+                  onClick={() => setSelected(o.id)}
+                  meta={[
+                    orgTypeLabel(o.type),
+                    o.plan,
+                    o.trustedPartner ? 'Trusted Partner' : null,
+                    o.type === 'club' ? (o.verified ? 'Verified' : 'Verification Pending') : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                />
               ))}
             </div>
           </div>
@@ -256,29 +409,97 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
             </AuthField>
             <AuthField label="Role">
               <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">
-                {ROLES.map((r) => <option key={r}>{r}</option>)}
+                {ROLES.map((r) => (
+                  <option key={r}>{r}</option>
+                ))}
               </select>
             </AuthField>
-            <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy ? 'Entering…' : 'Enter workspace'}</button>
+            <button type="submit" className="primary" disabled={busy} aria-busy={busy}>
+              {busy ? 'Entering…' : 'Enter workspace'}
+            </button>
           </div>
         </form>
       )}
       {mode === 'register' && (
-        <form className="register-box" onSubmit={(e) => { e.preventDefault(); void register(); }} aria-label="Register your club" noValidate>
-          <p className="auth-lead">For federation-registered semi-pro and amateur clubs. Scouting stays within 50 km of your ground; under-18s appear only after verification and the safeguarding contract.</p>
+        <form
+          className="register-box"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void register();
+          }}
+          aria-label="Register your club"
+          noValidate
+        >
+          <p className="auth-lead">
+            For federation-registered semi-pro and amateur clubs. Scouting stays within 50 km of your ground; under-18s
+            appear only after verification and the safeguarding contract.
+          </p>
           <div className="reg-grid">
-            <AuthField label="Club name"><input placeholder="Club name" value={reg.name} onChange={(e) => setReg({ ...reg, name: e.target.value })} autoComplete="organization" /></AuthField>
-            <AuthField label="Federation"><input placeholder="Federation (e.g. The FA — England)" value={reg.federation} onChange={(e) => setReg({ ...reg, federation: e.target.value })} /></AuthField>
-            <AuthField label="Federation registration id"><input placeholder="Federation registration id" value={reg.registrationId} onChange={(e) => setReg({ ...reg, registrationId: e.target.value })} /></AuthField>
-            <AuthField label="Town / city"><input placeholder="Town / city" value={reg.city} onChange={(e) => setReg({ ...reg, city: e.target.value })} autoComplete="address-level2" /></AuthField>
-            <AuthField label="Ground latitude"><input placeholder="Ground latitude (e.g. 51.55)" value={reg.lat} onChange={(e) => setReg({ ...reg, lat: e.target.value })} inputMode="decimal" /></AuthField>
-            <AuthField label="Ground longitude"><input placeholder="Ground longitude (e.g. -0.02)" value={reg.lng} onChange={(e) => setReg({ ...reg, lng: e.target.value })} inputMode="decimal" /></AuthField>
-            <AuthField label="Your name"><input placeholder="Your name" value={reg.scoutName} onChange={(e) => setReg({ ...reg, scoutName: e.target.value })} autoComplete="name" /></AuthField>
-            <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy ? 'Registering…' : 'Register club'}</button>
+            <AuthField label="Club name">
+              <input
+                placeholder="Club name"
+                value={reg.name}
+                onChange={(e) => setReg({ ...reg, name: e.target.value })}
+                autoComplete="organization"
+              />
+            </AuthField>
+            <AuthField label="Federation">
+              <input
+                placeholder="Federation (e.g. The FA — England)"
+                value={reg.federation}
+                onChange={(e) => setReg({ ...reg, federation: e.target.value })}
+              />
+            </AuthField>
+            <AuthField label="Federation registration id">
+              <input
+                placeholder="Federation registration id"
+                value={reg.registrationId}
+                onChange={(e) => setReg({ ...reg, registrationId: e.target.value })}
+              />
+            </AuthField>
+            <AuthField label="Town / city">
+              <input
+                placeholder="Town / city"
+                value={reg.city}
+                onChange={(e) => setReg({ ...reg, city: e.target.value })}
+                autoComplete="address-level2"
+              />
+            </AuthField>
+            <AuthField label="Ground latitude">
+              <input
+                placeholder="Ground latitude (e.g. 51.55)"
+                value={reg.lat}
+                onChange={(e) => setReg({ ...reg, lat: e.target.value })}
+                inputMode="decimal"
+              />
+            </AuthField>
+            <AuthField label="Ground longitude">
+              <input
+                placeholder="Ground longitude (e.g. -0.02)"
+                value={reg.lng}
+                onChange={(e) => setReg({ ...reg, lng: e.target.value })}
+                inputMode="decimal"
+              />
+            </AuthField>
+            <AuthField label="Your name">
+              <input
+                placeholder="Your name"
+                value={reg.scoutName}
+                onChange={(e) => setReg({ ...reg, scoutName: e.target.value })}
+                autoComplete="name"
+              />
+            </AuthField>
+            <button type="submit" className="primary" disabled={busy} aria-busy={busy}>
+              {busy ? 'Registering…' : 'Register club'}
+            </button>
           </div>
         </form>
       )}
-      {error && <div className="notice block" role="alert">{error}</div>}
+      {error && (
+        <div className="notice block" role="alert">
+          {error}
+        </div>
+      )}
     </AuthPage>
   );
 }
@@ -301,7 +522,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   // Reuses it a fourth time: the Director Dashboard's window and filters
   // live in the hash so a director can send a colleague the exact view they
   // are reading. None of these filters names a person.
-  const [dashFilters, setDashFilters] = useState<DashboardFilters>(() => (dashboardFromHash(window.location.hash) ?? {}) as DashboardFilters);
+  const [dashFilters, setDashFilters] = useState<DashboardFilters>(
+    () => (dashboardFromHash(window.location.hash) ?? {}) as DashboardFilters,
+  );
   // Every programmatic navigation asks the dirty-guard first. A form
   // with nothing unsaved never triggers it.
   const setScreen = useCallback((id: ScreenId) => {
@@ -312,7 +535,11 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setWatchlistId(null);
     if (id !== 'matching') setMatchState(null);
     if (id !== 'dashboard') setDashFilters({});
-    try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /** Opening a room PUSHES, so the browser Back button closes it again. */
@@ -322,19 +549,31 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setBriefId(null);
     setRoomId(id);
     setRoomTab(tab);
-    try { if (window.location.hash !== hashForRoom(id, tab)) window.history.pushState(null, '', hashForRoom(id, tab)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForRoom(id, tab)) window.history.pushState(null, '', hashForRoom(id, tab));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /** A tab change inside a room REPLACES the hash (no history entry per tab). */
   const onRoomTab = useCallback((id: string, tab: string) => {
     setRoomTab(tab as RoomTab);
-    try { if (window.location.hash !== hashForRoom(id, tab)) window.history.replaceState(null, '', hashForRoom(id, tab)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForRoom(id, tab)) window.history.replaceState(null, '', hashForRoom(id, tab));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   const closeRoom = useCallback(() => {
     setScreenState('rooms');
     setRoomId(null);
-    try { if (window.location.hash !== hashForScreen('rooms')) window.history.pushState(null, '', hashForScreen('rooms')); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForScreen('rooms')) window.history.pushState(null, '', hashForScreen('rooms'));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /** Opening a brief PUSHES, so the browser Back button closes it again. */
@@ -343,14 +582,22 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setScreenState('briefs');
     setRoomId(null);
     setBriefId(id);
-    try { if (window.location.hash !== hashForBrief(id)) window.history.pushState(null, '', hashForBrief(id)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForBrief(id)) window.history.pushState(null, '', hashForBrief(id));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   const closeBrief = useCallback(() => {
     if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('briefs');
     setBriefId(null);
-    try { if (window.location.hash !== hashForScreen('briefs')) window.history.pushState(null, '', hashForScreen('briefs')); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForScreen('briefs')) window.history.pushState(null, '', hashForScreen('briefs'));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /** Opening a Dynamic Watchlist PUSHES, so Back closes it again. */
@@ -360,14 +607,23 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     setRoomId(null);
     setBriefId(null);
     setWatchlistId(id);
-    try { if (window.location.hash !== hashForWatchlist(id)) window.history.pushState(null, '', hashForWatchlist(id)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForWatchlist(id)) window.history.pushState(null, '', hashForWatchlist(id));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   const closeWatchlist = useCallback(() => {
     if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('watchlists');
     setWatchlistId(null);
-    try { if (window.location.hash !== hashForScreen('watchlists')) window.history.pushState(null, '', hashForScreen('watchlists')); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForScreen('watchlists'))
+        window.history.pushState(null, '', hashForScreen('watchlists'));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /**
@@ -381,7 +637,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     try {
       const next = hashForMatching(encoded);
       if (window.location.hash !== next) window.history.replaceState(null, '', next);
-    } catch { /* sandboxed */ }
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /**
@@ -394,7 +652,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     try {
       const next = hashForDashboard(f as Record<string, string | number | undefined | null>);
       if (window.location.hash !== next) window.history.replaceState(null, '', next);
-    } catch { /* sandboxed */ }
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   // Close/reload prompt while a form is dirty.
@@ -414,7 +674,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     };
     window.addEventListener('hashchange', onHash);
     window.addEventListener('popstate', onHash);
-    return () => { window.removeEventListener('hashchange', onHash); window.removeEventListener('popstate', onHash); };
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('popstate', onHash);
+    };
   }, []);
 
   // Verification authority — fetched ONCE per session for the nav filter.
@@ -422,8 +685,17 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const [verLevel, setVerLevel] = useState<string | null>(null);
   useEffect(() => {
     let gone = false;
-    m14.me(session).then((me) => { if (!gone) setVerLevel(me.verificationLevel ?? null); }).catch(() => { if (!gone) setVerLevel(null); });
-    return () => { gone = true; };
+    m14
+      .me(session)
+      .then((me) => {
+        if (!gone) setVerLevel(me.verificationLevel ?? null);
+      })
+      .catch(() => {
+        if (!gone) setVerLevel(null);
+      });
+    return () => {
+      gone = true;
+    };
   }, [session]);
   const navCtx: NavContext = { role: session.role, verLevel };
   const sections = useNavSections(navCtx);
@@ -431,17 +703,29 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const activeSection = sections.find((s) => s.id === loc.sectionId) ?? null;
 
   const [shortcuts, setShortcuts] = useState<ScreenId[]>([]);
-  useEffect(() => { setShortcuts(loadShortcuts(session.org.id, session.userId, navCtx)); }, [session, verLevel]); // eslint-disable-line react-hooks/exhaustive-deps
-  const togglePin = useCallback((id: ScreenId) => {
-    setShortcuts((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      saveShortcuts(session.org.id, session.userId, next);
-      return next;
-    });
-  }, [session]);
+  useEffect(() => {
+    setShortcuts(loadShortcuts(session.org.id, session.userId, navCtx));
+  }, [session, verLevel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const togglePin = useCallback(
+    (id: ScreenId) => {
+      setShortcuts((prev) => {
+        const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+        saveShortcuts(session.org.id, session.userId, next);
+        return next;
+      });
+    },
+    [session],
+  );
 
   const [collapsed, setCollapsed] = useState(loadCollapsed);
-  const toggleCollapsed = useCallback(() => setCollapsed((c) => { saveCollapsed(!c); return !c; }), []);
+  const toggleCollapsed = useCallback(
+    () =>
+      setCollapsed((c) => {
+        saveCollapsed(!c);
+        return !c;
+      }),
+    [],
+  );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   usePaletteHotkey(useCallback(() => setPaletteOpen(true), []));
@@ -459,8 +743,14 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     if (!bellOpen && !drawerOpen) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (bellOpen) { setBellOpen(false); (document.querySelector('.topbar-bell') as HTMLElement | null)?.focus(); }
-      if (drawerOpen) { setDrawerOpen(false); (document.querySelector('.nav-hamburger') as HTMLElement | null)?.focus(); }
+      if (bellOpen) {
+        setBellOpen(false);
+        (document.querySelector('.topbar-bell') as HTMLElement | null)?.focus();
+      }
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        (document.querySelector('.nav-hamburger') as HTMLElement | null)?.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -476,23 +766,39 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     window.addEventListener('sb-lang', onLang);
     return () => window.removeEventListener('sb-lang', onLang);
   }, []);
-  useEffect(() => api.onChange(session, (event, payload) => {
-    if (event === 'session_expired') { onLogout(); return; }
-    if (event === 'sse_status') { setLive((payload as { connected?: boolean } | undefined)?.connected !== false); return; }
-    if (event === 'typing') return; // transient — handled inside Messages
-    setTick((t) => t + 1);
-  }), [session]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(
+    () =>
+      api.onChange(session, (event, payload) => {
+        if (event === 'session_expired') {
+          onLogout();
+          return;
+        }
+        if (event === 'sse_status') {
+          setLive((payload as { connected?: boolean } | undefined)?.connected !== false);
+          return;
+        }
+        if (event === 'typing') return; // transient — handled inside Messages
+        setTick((t) => t + 1);
+      }),
+    [session],
+  ); // eslint-disable-line react-hooks/exhaustive-deps
   // A missed event, a dropped stream or a tab left in the
   // background: every screen re-reads canonical state when the window regains
   // focus or becomes visible again. Nothing local is trusted over the server.
   useEffect(() => {
     if (!session) return undefined;
     const refetch = () => setTick((t) => t + 1);
-    const onVisible = () => { if (document.visibilityState === 'visible') refetch(); };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refetch();
+    };
     window.addEventListener('focus', refetch);
     window.addEventListener('pageshow', refetch);
     document.addEventListener('visibilitychange', onVisible);
-    return () => { window.removeEventListener('focus', refetch); window.removeEventListener('pageshow', refetch); document.removeEventListener('visibilitychange', onVisible); };
+    return () => {
+      window.removeEventListener('focus', refetch);
+      window.removeEventListener('pageshow', refetch);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [session]);
 
   useEffect(() => {
@@ -500,8 +806,16 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
     // session that died mid-use (expired, revoked, the user removed) is
     // noticed. Only a 401 ends the session; anything else is a transient
     // failure the workspace survives.
-    api.getNotifications(session).then(setNotifications).catch((e) => { if (e instanceof ApiError && e.status === 401) onLogout(); });
-    api.getChannelCounts(session).then((c) => setUnreadMessages(c.unreadMessages)).catch(() => {});
+    api
+      .getNotifications(session)
+      .then(setNotifications)
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 401) onLogout();
+      });
+    api
+      .getChannelCounts(session)
+      .then((c) => setUnreadMessages(c.unreadMessages))
+      .catch(() => {});
   }, [session, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unread = notifications.filter((n) => !n.read).length;
@@ -527,7 +841,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       try {
         await api.markNotificationsRead(session);
         setNotifications(await api.getNotifications(session));
-      } catch { /* stays unread */ }
+      } catch {
+        /* stays unread */
+      }
     }
   };
 
@@ -539,7 +855,11 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
   const props = { session, tick, notify, openPlayer: setOpenPlayerId };
 
   const breadcrumbSection = NAV_SECTIONS.find((s) => s.id === loc.sectionId) ?? null;
-  const screenLabel = t((loc.itemId ? (NAV_SECTIONS.flatMap((s) => s.children).find((c) => c.id === screen)?.labelKey ?? `nav.${screen}`) : `nav.${screen}`) as Parameters<typeof t>[0]);
+  const screenLabel = t(
+    (loc.itemId
+      ? (NAV_SECTIONS.flatMap((s) => s.children).find((c) => c.id === screen)?.labelKey ?? `nav.${screen}`)
+      : `nav.${screen}`) as Parameters<typeof t>[0],
+  );
 
   return (
     <div className={`shell grass-workspace ${collapsed ? 'nav-collapsed' : ''}`}>
@@ -559,21 +879,55 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         org={{ initials: initials(session.org.name), name: session.org.name, line: session.org.plan }}
         footer={
           <div className="p-account">
-            <div className="p-who"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><div><strong>{session.scoutName}</strong><small>{session.role}</small></div></div>
+            <div className="p-who">
+              <span className="p-avatar" aria-hidden="true">
+                {initials(session.scoutName)}
+              </span>
+              <div>
+                <strong>{session.scoutName}</strong>
+                <small>{session.role}</small>
+              </div>
+            </div>
             <OrgChips org={session.org} />
             <div className="p-links scout-account-links">
-              <button onClick={() => setScreen('verification')}><Icon name="badge-check" size={14} />{t('navsec.myVerification')}</button>
-              <details className="scout-account-menu"><summary><Icon name="settings-2" size={14} /><span>Account settings</span><Icon name="chevron-down" size={12} /></summary>
-              <label title={t('common.machineTranslated')}>
-                {t('common.language')}:{' '}
-                <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
-                  <option value="en">English</option>
-                  <option value="fr">Français (trad. automatique)</option>
-                </select>
-              </label>
-              {/* The way out of the session, in the account block where the person is named. */}
-              <button data-exit="switch-org" data-testid="switch-org" onClick={onLogout} aria-label={t('common.switchOrg')}><Icon name="arrow-right" size={14} />{t('common.switchOrg')}</button>
-              <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}><Icon name="log-out" size={14} />{t('common.signOut')}</button>
+              <button onClick={() => setScreen('verification')}>
+                <Icon name="badge-check" size={14} />
+                {t('navsec.myVerification')}
+              </button>
+              <details className="scout-account-menu">
+                <summary>
+                  <Icon name="settings-2" size={14} />
+                  <span>Account settings</span>
+                  <Icon name="chevron-down" size={12} />
+                </summary>
+                <label title={t('common.machineTranslated')}>
+                  {t('common.language')}:{' '}
+                  <select
+                    aria-label={t('common.language')}
+                    value={lang}
+                    onChange={(e) => {
+                      setLang(e.target.value as 'en' | 'fr');
+                      setLangTick((x) => x + 1);
+                    }}
+                  >
+                    <option value="en">English</option>
+                    <option value="fr">Français (trad. automatique)</option>
+                  </select>
+                </label>
+                {/* The way out of the session, in the account block where the person is named. */}
+                <button
+                  data-exit="switch-org"
+                  data-testid="switch-org"
+                  onClick={onLogout}
+                  aria-label={t('common.switchOrg')}
+                >
+                  <Icon name="arrow-right" size={14} />
+                  {t('common.switchOrg')}
+                </button>
+                <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}>
+                  <Icon name="log-out" size={14} />
+                  {t('common.signOut')}
+                </button>
               </details>
             </div>
           </div>
@@ -582,7 +936,11 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
       <div className="main">
         <TopBar
           title={screenLabel}
-          crumb={breadcrumbSection && breadcrumbSection.children.length > 1 ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}
+          crumb={
+            breadcrumbSection && breadcrumbSection.children.length > 1
+              ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0])
+              : null
+          }
           live={live}
           unread={unread}
           bellOpen={bellOpen}
@@ -595,24 +953,45 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
         />
         {bellOpen && (
           <div className="bell-panel">
-            {notifications.length === 0 && <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>}
-            {bellRows(notifications).slice(0, 20).map(({ n, count, unread }) => {
-              // The server resolved the CURRENT resource this row points to (a room and its tab).
-              const target = n.target ?? null;
-              const dest = target?.kind === 'room' ? 'rooms' : NOTIFICATION_SCREEN[n.type];
-              return (
-                <div key={n.id} className="list-row" style={{ opacity: unread ? 1 : 0.7 }} data-target-kind={target?.kind ?? ''}>
-                  <span className="grow" style={{ fontSize: 13 }}>
-                    {n.text}
-                    {count > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{count}</span>}
-                  </span>
-                  {dest && (
-                    <button onClick={() => { if (target?.kind === 'room') openRoom(target.roomId, target.tab as RoomTab); else setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>
-                  )}
-                  <span className="dim">{fmtStamp(n.ts)}</span>
-                </div>
-              );
-            })}
+            {notifications.length === 0 && (
+              <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>
+            )}
+            {bellRows(notifications)
+              .slice(0, 20)
+              .map(({ n, count, unread }) => {
+                // The server resolved the CURRENT resource this row points to (a room and its tab).
+                const target = n.target ?? null;
+                const dest = target?.kind === 'room' ? 'rooms' : NOTIFICATION_SCREEN[n.type];
+                return (
+                  <div
+                    key={n.id}
+                    className="list-row"
+                    style={{ opacity: unread ? 1 : 0.7 }}
+                    data-target-kind={target?.kind ?? ''}
+                  >
+                    <span className="grow" style={{ fontSize: 13 }}>
+                      {n.text}
+                      {count > 1 && (
+                        <span className="pill" style={{ marginLeft: 6 }}>
+                          ×{count}
+                        </span>
+                      )}
+                    </span>
+                    {dest && (
+                      <button
+                        onClick={() => {
+                          if (target?.kind === 'room') openRoom(target.roomId, target.tab as RoomTab);
+                          else setScreen(dest);
+                          setBellOpen(false);
+                        }}
+                      >
+                        {t('common.open')}
+                      </button>
+                    )}
+                    <span className="dim">{fmtStamp(n.ts)}</span>
+                  </div>
+                );
+              })}
           </div>
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
@@ -620,7 +999,9 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           {/* The reference page heading; the top bar keeps the document <h1>. */}
           <ScoutPageHeading screen={screen} title={screenLabel} />
           {/* The Home: welcome, one primary action, counts, attention, club progress, activity, quick actions. */}
-          {screen === 'feed' && <HomeScreen {...props} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />}
+          {screen === 'feed' && (
+            <HomeScreen {...props} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />
+          )}
           {screen === 'filmroom' && <FilmRoomScreen {...props} />}
           {screen === 'opendays' && <OpenDaysScreen {...props} />}
           {screen === 'squad' && <SquadScreen {...props} />}
@@ -639,10 +1020,21 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           )}
           {screen === 'assessments' && <AssessmentsScreen {...props} />}
           {screen === 'recruitment' && <RecruitmentScreen {...props} />}
-          {screen === 'rooms' && <RoomsScreen {...props} roomId={roomId} roomTab={roomTab} onRoomTab={onRoomTab} onOpenRoom={openRoom} onCloseRoom={closeRoom} />}
+          {screen === 'rooms' && (
+            <RoomsScreen
+              {...props}
+              roomId={roomId}
+              roomTab={roomTab}
+              onRoomTab={onRoomTab}
+              onOpenRoom={openRoom}
+              onCloseRoom={closeRoom}
+            />
+          )}
           {screen === 'secondlook' && <SecondLookScreen {...props} />}
           {screen === 'nobodymissed' && <NobodyMissedScreen {...props} onOpenRoom={openRoom} />}
-          {screen === 'briefs' && <BriefsScreen {...props} briefId={briefId} onOpenBrief={openBrief} onCloseBrief={closeBrief} />}
+          {screen === 'briefs' && (
+            <BriefsScreen {...props} briefId={briefId} onOpenBrief={openBrief} onCloseBrief={closeBrief} />
+          )}
           {screen === 'matching' && (
             <MatchingScreen
               {...props}
@@ -682,7 +1074,10 @@ function Workspace({ session, onLogout }: { session: Session; onLogout: () => vo
           playerId={openPlayerId}
           notify={notify}
           onClose={() => setOpenPlayerId(null)}
-          onOpenRoom={(id) => { setOpenPlayerId(null); openRoom(id); }}
+          onOpenRoom={(id) => {
+            setOpenPlayerId(null);
+            openRoom(id);
+          }}
         />
       )}
       {safetyOpen && <SafetyModal session={session} notify={notify} onClose={() => setSafetyOpen(false)} />}

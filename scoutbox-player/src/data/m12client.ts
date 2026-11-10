@@ -9,9 +9,17 @@ import { m12mock } from './m12mock';
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 
 export interface EvidenceRec {
-  id: string; claimType: string; label: string; value: number | string | null; units: string | null; season: string | null;
+  id: string;
+  claimType: string;
+  label: string;
+  value: number | string | null;
+  units: string | null;
+  season: string | null;
   verification: { status: string; method: string | null; reviewerName: string | null };
-  recordedAt: number; superseded?: boolean; correctionOf?: string | null; openDisputes?: number;
+  recordedAt: number;
+  superseded?: boolean;
+  correctionOf?: string | null;
+  openDisputes?: number;
   freshness?: { ageDays: number; fresh: boolean };
 }
 export interface PassportView {
@@ -19,9 +27,17 @@ export interface PassportView {
   legacy: { kind: string; label: string; tier: string; method: string; caveat?: string }[];
   summary: { activeRecords: number; corroborated: number; insufficient: boolean; note: string };
 }
-export interface FeedbackItem { id: string; orgName: string; byName: string; text: string; at: number }
+export interface FeedbackItem {
+  id: string;
+  orgName: string;
+  byName: string;
+  text: string;
+  at: number;
+}
 export interface ObjectiveRec {
-  id: string; playerId: string; orgId: string;
+  id: string;
+  playerId: string;
+  orgId: string;
   reviewer: { name: string; orgName?: string };
   objectives: { id: string; text: string }[];
   progress: { at: number; note: string | null }[];
@@ -30,15 +46,41 @@ export interface ObjectiveRec {
   status: string;
 }
 export interface BoardItem {
-  id: string; via?: string; type: string; title: string; orgName: string; deadline: string;
-  schedule?: string | null; category?: string; requirements?: string[]; distance?: string | null;
-  applied: { id?: string; status: string } | null; description?: string | null;
+  id: string;
+  via?: string;
+  type: string;
+  title: string;
+  orgName: string;
+  deadline: string;
+  schedule?: string | null;
+  category?: string;
+  requirements?: string[];
+  distance?: string | null;
+  applied: { id?: string; status: string } | null;
+  description?: string | null;
 }
-export interface ApplicationRec { id: string; status: string; outcome: { decision: string; note: string | null } | null; opportunity: { title?: string; orgName?: string } }
+export interface ApplicationRec {
+  id: string;
+  status: string;
+  outcome: { decision: string; note: string | null } | null;
+  opportunity: { title?: string; orgName?: string };
+}
 export interface CampaignView {
-  id: string; title: string; orgName: string; deadline: string; attemptsAllowed: number;
+  id: string;
+  title: string;
+  orgName: string;
+  deadline: string;
+  attemptsAllowed: number;
   drills: { name: string; instructions: string; recording: Record<string, string> }[];
-  mySubmission: { attempts: { id: string; drillName: string; status: string; fileChecks: { passed: boolean; issues: string[] }; review: { reasons: string | null; kind?: string } | null }[] } | null;
+  mySubmission: {
+    attempts: {
+      id: string;
+      drillName: string;
+      status: string;
+      fileChecks: { passed: boolean; issues: string[] };
+      review: { reasons: string | null; kind?: string } | null;
+    }[];
+  } | null;
 }
 // The family's view of the Trial workflow (the shared operational
 // edge): state, the confirmed sessions with the address and instructions,
@@ -47,37 +89,103 @@ export interface CampaignView {
 // receives the outcome line only.
 export type TrialWorkflowState = 'legacy_accepted' | 'accepted' | 'scheduled' | 'completed' | 'cancelled';
 export interface FamilyTrialSession {
-  id: string; kind: string; startsAt: number; endsAt: number;
+  id: string;
+  kind: string;
+  startsAt: number;
+  endsAt: number;
   venue: { name: string; town: string | null; address?: string | null } | null;
   instructions?: string | null;
   attendance: { state: string; source: string | null; recordedAt: number | null };
 }
 export interface FamilyTrialWorkflow {
-  id: string; orgId: string; orgName: string | null; playerId: string;
-  workflowState: TrialWorkflowState; workflowLabel: string; legacy: boolean;
-  acceptedAt: number | null; proposedDate: string | null; venue: string | null;
-  schedule: { legacy: boolean; timezone: string | null; revision: number; confirmedAt: number | null; awaitingConfirmation: boolean; declinedAt?: number | null; sessions: FamilyTrialSession[]; proposedDate?: string | null; venue?: string | null } | null;
+  id: string;
+  orgId: string;
+  orgName: string | null;
+  playerId: string;
+  workflowState: TrialWorkflowState;
+  workflowLabel: string;
+  legacy: boolean;
+  acceptedAt: number | null;
+  proposedDate: string | null;
+  venue: string | null;
+  schedule: {
+    legacy: boolean;
+    timezone: string | null;
+    revision: number;
+    confirmedAt: number | null;
+    awaitingConfirmation: boolean;
+    declinedAt?: number | null;
+    sessions: FamilyTrialSession[];
+    proposedDate?: string | null;
+    venue?: string | null;
+  } | null;
   awaitingYourConfirmation: boolean;
   completion: { state: 'completed' | 'cancelled'; at: number; byKind: string | null; reason: string | null } | null;
-  reportStatus: string; hasReport: boolean; rev: number;
+  reportStatus: string;
+  hasReport: boolean;
+  rev: number;
 }
-export interface TrialOutcomeLine { id: string; orgName: string | null; workflowState: TrialWorkflowState; workflowLabel: string; guardianManaged: true }
-export const isOutcomeLine = (w: FamilyTrialWorkflow | TrialOutcomeLine | null | undefined): w is TrialOutcomeLine => !!w && 'guardianManaged' in w && w.guardianManaged === true;
+export interface TrialOutcomeLine {
+  id: string;
+  orgName: string | null;
+  workflowState: TrialWorkflowState;
+  workflowLabel: string;
+  guardianManaged: true;
+}
+export const isOutcomeLine = (w: FamilyTrialWorkflow | TrialOutcomeLine | null | undefined): w is TrialOutcomeLine =>
+  !!w && 'guardianManaged' in w && w.guardianManaged === true;
 export interface FamilyTrial {
-  id: string; playerId: string; playerName: string; orgName: string; proposedDate: string | null; venue: string | null;
+  id: string;
+  playerId: string;
+  playerName: string;
+  orgName: string;
+  proposedDate: string | null;
+  venue: string | null;
   staff: { name: string; role: string; check: { kind: string | null; status: string } }[];
   arrival: { time: string | null; address: string | null; notes: string | null } | null;
-  consents: { byKind: string; scope: string }[]; checkins: { at: number }[];
-  cancelled: boolean; statusEvents: { kind: string; reason: string; newDate: string | null }[];
+  consents: { byKind: string; scope: string }[];
+  checkins: { at: number }[];
+  cancelled: boolean;
+  statusEvents: { kind: string; reason: string; newDate: string | null }[];
   workflow?: FamilyTrialWorkflow | TrialOutcomeLine | null;
 }
 export interface SafetyPack {
   trial: FamilyTrial;
-  pack: { headline: string; checksExplained: string; arrival: FamilyTrial['arrival']; collection: { policy: string } | null; emergencySet: boolean; reportRoute: string; feedbackDue: string | null; staff: FamilyTrial['staff'] };
+  pack: {
+    headline: string;
+    checksExplained: string;
+    arrival: FamilyTrial['arrival'];
+    collection: { policy: string } | null;
+    emergencySet: boolean;
+    reportRoute: string;
+    feedbackDue: string | null;
+    staff: FamilyTrial['staff'];
+  };
 }
-export interface SquadInvite { id: string; orgName: string; playerName: string; note: string | null; status: string }
-export interface FollowUpView { id: string; playerId: string; orgName: string; milestone: string; dueAt: number; outcomeState: string; report: { registrationStatus: string; matchesPlayed: number | null; progression: string | null } | null }
-export interface UploadSession { id: string; chunkSize: number; totalChunks: number; received: number[]; status: string; finalisedMediaId: string | null }
+export interface SquadInvite {
+  id: string;
+  orgName: string;
+  playerName: string;
+  note: string | null;
+  status: string;
+}
+export interface FollowUpView {
+  id: string;
+  playerId: string;
+  orgName: string;
+  milestone: string;
+  dueAt: number;
+  outcomeState: string;
+  report: { registrationStatus: string; matchesPlayed: number | null; progression: string | null } | null;
+}
+export interface UploadSession {
+  id: string;
+  chunkSize: number;
+  totalChunks: number;
+  received: number[];
+  status: string;
+  finalisedMediaId: string | null;
+}
 
 // The recipient's view of the canonical Offer: the ISSUED revisions
 // exactly as the club issued them, the recipient message, the expiry, the
@@ -85,56 +193,190 @@ export interface UploadSession { id: string; chunkSize: number; totalChunks: num
 // decision or transaction reference. Accepting is the recipient's own act and
 // is NOT a signing.
 export type OfferStatus = 'DRAFT' | 'ISSUED' | 'ACCEPTED' | 'DECLINED' | 'WITHDRAWN' | 'EXPIRED' | 'SUPERSEDED';
-export interface FamilyOfferTerms { offerType: string; role: string | null; squad: string | null; startDate: string | null; endDate: string | null; conditions: string | null }
+export interface FamilyOfferTerms {
+  offerType: string;
+  role: string | null;
+  squad: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  conditions: string | null;
+}
 export interface FamilyOfferRevision {
-  id: string; revisionNumber: number; status: OfferStatus; storedStatus: OfferStatus; statusLabel: string | null; terms: FamilyOfferTerms;
-  recipientMessage: string | null; documents: { id: string; label: string | null }[]; expiresAt: number | null; issuedAt: number | null; createdAt: number | null;
-  supersedesRevisionId: string | null; supersededByRevisionId: string | null; withdrawnAt: number | null; respondedAt: number | null; rev: number;
+  id: string;
+  revisionNumber: number;
+  status: OfferStatus;
+  storedStatus: OfferStatus;
+  statusLabel: string | null;
+  terms: FamilyOfferTerms;
+  recipientMessage: string | null;
+  documents: { id: string; label: string | null }[];
+  expiresAt: number | null;
+  issuedAt: number | null;
+  createdAt: number | null;
+  supersedesRevisionId: string | null;
+  supersededByRevisionId: string | null;
+  withdrawnAt: number | null;
+  respondedAt: number | null;
+  rev: number;
 }
-export interface FamilyOfferResponse { id: string; revisionId: string; responseType: 'accepted' | 'declined'; actorType: 'player' | 'guardian'; occurredAt: number }
+export interface FamilyOfferResponse {
+  id: string;
+  revisionId: string;
+  responseType: 'accepted' | 'declined';
+  actorType: 'player' | 'guardian';
+  occurredAt: number;
+}
 export interface FamilyOffer {
-  id: string; playerId: string; playerName?: string | null; club: { id: string; name: string | null }; type: string; status: OfferStatus | null; statusLabel: string | null;
-  currentRevisionId: string | null; currentRevision: FamilyOfferRevision | null; revisions: FamilyOfferRevision[]; awaitingYourResponse: boolean; answerable?: boolean; notAnswerableReason?: string | null;
-  responses: FamilyOfferResponse[]; agentShared: boolean; policyVersion: number; honest: string;
+  id: string;
+  playerId: string;
+  playerName?: string | null;
+  club: { id: string; name: string | null };
+  type: string;
+  status: OfferStatus | null;
+  statusLabel: string | null;
+  currentRevisionId: string | null;
+  currentRevision: FamilyOfferRevision | null;
+  revisions: FamilyOfferRevision[];
+  awaitingYourResponse: boolean;
+  answerable?: boolean;
+  notAnswerableReason?: string | null;
+  responses: FamilyOfferResponse[];
+  agentShared: boolean;
+  policyVersion: number;
+  honest: string;
 }
-export interface FamilyOfferHistory { id: string; at: number; action: string; by: { kind: string | null; name: string | null } | null; revisionId: string | null }
-export interface OfferAnswerResult { offer: FamilyOffer; lifecycle: unknown; signing?: { created: false; note: string }; idempotent?: boolean }
-export interface OfferDocumentFile { document: { id: string; label: string | null; mime: string | null; bytes: number | null; filename: string | null }; file: { mime: string; base64: string } | null }
+export interface FamilyOfferHistory {
+  id: string;
+  at: number;
+  action: string;
+  by: { kind: string | null; name: string | null } | null;
+  revisionId: string | null;
+}
+export interface OfferAnswerResult {
+  offer: FamilyOffer;
+  lifecycle: unknown;
+  signing?: { created: false; note: string };
+  idempotent?: boolean;
+}
+export interface OfferDocumentFile {
+  document: { id: string; label: string | null; mime: string | null; bytes: number | null; filename: string | null };
+  file: { mime: string; base64: string } | null;
+}
 
 // The recipient's view of a signing package: the presented revisions
 // only, the document by its digest, the parties by kind, and what (if
 // anything) is the player's next act. Never the club's note, never a draft.
-export type SigningStatus = 'DRAFT' | 'READY' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'VOIDED' | 'EXPIRED' | 'SUPERSEDED';
+export type SigningStatus =
+  | 'DRAFT'
+  | 'READY'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'VOIDED'
+  | 'EXPIRED'
+  | 'SUPERSEDED';
 export type SigningPartyType = 'PLAYER' | 'GUARDIAN' | 'CLUB_SIGNATORY';
-export interface FamilySigningDocument { id: string | null; label: string | null; filename: string | null; mime: string | null; bytes: number | null; sha256: string | null }
-export interface FamilySigningParty { partyType: SigningPartyType; status: 'PENDING' | 'COMPLETED'; completedAt: number | null; method: string | null; completedBy: { kind: string | null; name: string | null } | null }
+export interface FamilySigningDocument {
+  id: string | null;
+  label: string | null;
+  filename: string | null;
+  mime: string | null;
+  bytes: number | null;
+  sha256: string | null;
+}
+export interface FamilySigningParty {
+  partyType: SigningPartyType;
+  status: 'PENDING' | 'COMPLETED';
+  completedAt: number | null;
+  method: string | null;
+  completedBy: { kind: string | null; name: string | null } | null;
+}
 export interface FamilySigningRevision {
-  id: string; revisionNumber: number; status: SigningStatus; statusLabel: string | null; createdAt: number | null; readyAt: number | null; completedAt: number | null;
-  document: FamilySigningDocument | null; executedDocument: FamilySigningDocument | null; contract: { startDate: string | null; endDate: string | null } | null;
-  requiredParties: FamilySigningParty[]; supersedesRevisionId: string | null; supersededByRevisionId: string | null;
+  id: string;
+  revisionNumber: number;
+  status: SigningStatus;
+  statusLabel: string | null;
+  createdAt: number | null;
+  readyAt: number | null;
+  completedAt: number | null;
+  document: FamilySigningDocument | null;
+  executedDocument: FamilySigningDocument | null;
+  contract: { startDate: string | null; endDate: string | null } | null;
+  requiredParties: FamilySigningParty[];
+  supersedesRevisionId: string | null;
+  supersededByRevisionId: string | null;
 }
 export interface FamilySigning {
-  id: string; playerId: string; club: { id: string; name: string | null }; offerId: string; offerRevisionId: string | null;
-  status: SigningStatus; statusLabel: string | null; terminal: boolean; currentRevisionId: string | null; currentRevision: FamilySigningRevision | null; revisions: FamilySigningRevision[];
-  expiresAt: number | null; nextAction: { action: 'COMPLETE_SIGNATURE'; revisionId: string; documentSha256: string | null } | null;
-  completion: { completedAt: number; contract: { startDate: string | null; endDate: string | null } | null } | null; policyVersion: number; honest: string;
+  id: string;
+  playerId: string;
+  club: { id: string; name: string | null };
+  offerId: string;
+  offerRevisionId: string | null;
+  status: SigningStatus;
+  statusLabel: string | null;
+  terminal: boolean;
+  currentRevisionId: string | null;
+  currentRevision: FamilySigningRevision | null;
+  revisions: FamilySigningRevision[];
+  expiresAt: number | null;
+  nextAction: { action: 'COMPLETE_SIGNATURE'; revisionId: string; documentSha256: string | null } | null;
+  completion: { completedAt: number; contract: { startDate: string | null; endDate: string | null } | null } | null;
+  policyVersion: number;
+  honest: string;
 }
-export interface FamilySigningHistory { id: string; at: number; action: string; by: { kind: string | null; name: string | null } | null; revisionId: string | null }
-export interface SigningDocumentFile { document: FamilySigningDocument; file: { mime: string; base64: string } | null }
-export interface SigningCompleteResult { signing: FamilySigning; idempotent?: boolean }
+export interface FamilySigningHistory {
+  id: string;
+  at: number;
+  action: string;
+  by: { kind: string | null; name: string | null } | null;
+  revisionId: string | null;
+}
+export interface SigningDocumentFile {
+  document: FamilySigningDocument;
+  file: { mime: string; base64: string } | null;
+}
+export interface SigningCompleteResult {
+  signing: FamilySigning;
+  idempotent?: boolean;
+}
 
 // The player-facing journey. Only stages that involve the recipient; never a club's internal state.
-export type PlayerJourneyStage = 'contacted' | 'trial_invited' | 'trial_scheduled' | 'trial_completed' | 'offer_received' | 'offer_accepted' | 'offer_declined' | 'signing' | 'signed' | 'none';
-export type PlayerNextActionCode = 'RESPOND_TO_CONTACT' | 'RESPOND_TO_TRIAL_INVITATION' | 'CONFIRM_TRIAL_SCHEDULE' | 'RESPOND_TO_OFFER' | 'SIGN' | 'NONE';
+export type PlayerJourneyStage =
+  | 'contacted'
+  | 'trial_invited'
+  | 'trial_scheduled'
+  | 'trial_completed'
+  | 'offer_received'
+  | 'offer_accepted'
+  | 'offer_declined'
+  | 'signing'
+  | 'signed'
+  | 'none';
+export type PlayerNextActionCode =
+  | 'RESPOND_TO_CONTACT'
+  | 'RESPOND_TO_TRIAL_INVITATION'
+  | 'CONFIRM_TRIAL_SCHEDULE'
+  | 'RESPOND_TO_OFFER'
+  | 'SIGN'
+  | 'NONE';
 export interface PlayerJourney {
   club: { id: string; name: string | null; level: string | null; verified: boolean };
   shared: { kind: string; id: string; status?: string | null; at?: number | null }[];
-  journey: { policyVersion: number; stage: PlayerJourneyStage; nextAction: { code: PlayerNextActionCode; resources: Record<string, string | null> }; resources: Record<string, string | null>; timeline: { kind: string; at: number; [k: string]: unknown }[] };
+  journey: {
+    policyVersion: number;
+    stage: PlayerJourneyStage;
+    nextAction: { code: PlayerNextActionCode; resources: Record<string, string | null> };
+    resources: Record<string, string | null>;
+    timeline: { kind: string; at: number; [k: string]: unknown }[];
+  };
 }
 
 export interface PlayerM12 {
   getPassport(playerId: string): Promise<PassportView>;
-  addEvidence(playerId: string, input: { claimType: string; label: string; value?: number | string; units?: string; season?: string }): Promise<void>;
+  addEvidence(
+    playerId: string,
+    input: { claimType: string; label: string; value?: number | string; units?: string; season?: string },
+  ): Promise<void>;
   correctEvidence(playerId: string, evidenceId: string, value: number | string, reason: string): Promise<void>;
   getFeedback(playerId: string): Promise<{ guardianManaged?: boolean; count?: number; items: FeedbackItem[] }>;
   getObjectives(playerId: string): Promise<ObjectiveRec[]>;
@@ -147,7 +389,13 @@ export interface PlayerM12 {
   withdrawApplication(playerId: string, applicationId: string): Promise<void>;
   myApplications(playerId: string): Promise<ApplicationRec[]>;
   getCampaigns(playerId: string): Promise<CampaignView[]>;
-  submitCampaignAttempt(playerId: string, campaignId: string, mediaId: string | undefined, drillName: string, note?: string): Promise<{ status: string; issues: string[]; note: string }>;
+  submitCampaignAttempt(
+    playerId: string,
+    campaignId: string,
+    mediaId: string | undefined,
+    drillName: string,
+    note?: string,
+  ): Promise<{ status: string; issues: string[]; note: string }>;
   getTrials(playerId: string): Promise<FamilyTrial[]>;
   confirmTrialSchedule(playerId: string, trialId: string): Promise<FamilyTrialWorkflow>;
   declineTrialSchedule(playerId: string, trialId: string, reason?: string): Promise<FamilyTrialWorkflow>;
@@ -158,18 +406,36 @@ export interface PlayerM12 {
   getSquadInvites(playerId: string): Promise<SquadInvite[]>;
   respondSquadInvite(playerId: string, inviteId: string, accept: boolean): Promise<void>;
   getFollowUps(playerId: string): Promise<FollowUpView[]>;
-  respondFollowUp(playerId: string, followUpId: string, agree: boolean, note?: string, experienceRating?: number): Promise<void>;
+  respondFollowUp(
+    playerId: string,
+    followUpId: string,
+    agree: boolean,
+    note?: string,
+    experienceRating?: number,
+  ): Promise<void>;
   setFootballCategory(playerId: string, category: string | null): Promise<void>;
   setCaptions(playerId: string, mediaId: string, vtt: string): Promise<void>;
   // Resumable uploads. No success is reported before finalisation.
-  startUpload(playerId: string, input: { size: number; mime: string; title: string; sha256?: string }): Promise<UploadSession>;
-  putChunk(playerId: string, uploadId: string, index: number, base64: string): Promise<{ received: number; totalChunks: number; complete: boolean }>;
+  startUpload(
+    playerId: string,
+    input: { size: number; mime: string; title: string; sha256?: string },
+  ): Promise<UploadSession>;
+  putChunk(
+    playerId: string,
+    uploadId: string,
+    index: number,
+    base64: string,
+  ): Promise<{ received: number; totalChunks: number; complete: boolean }>;
   finaliseUpload(playerId: string, uploadId: string): Promise<{ mediaId: string }>;
   abortUpload(playerId: string, uploadId: string): Promise<void>;
 
   // Guardian surface — child ids are always explicit, ownership checked server-side.
   gPassport(guardianId: string, childId: string): Promise<PassportView>;
-  gAddEvidence(guardianId: string, childId: string, input: { claimType: string; label: string; value?: number | string; units?: string }): Promise<void>;
+  gAddEvidence(
+    guardianId: string,
+    childId: string,
+    input: { claimType: string; label: string; value?: number | string; units?: string },
+  ): Promise<void>;
   gFeedback(guardianId: string, childId: string): Promise<{ items: FeedbackItem[] }>;
   gObjectives(guardianId: string, childId: string): Promise<ObjectiveRec[]>;
   gCreateObjective(guardianId: string, childId: string, feedbackId: string, texts: string[]): Promise<void>;
@@ -179,7 +445,13 @@ export interface PlayerM12 {
   gApply(guardianId: string, childId: string, opportunityId: string, note?: string): Promise<void>;
   gApplications(guardianId: string): Promise<ApplicationRec[]>;
   gCampaigns(guardianId: string, childId: string): Promise<CampaignView[]>;
-  gSubmitCampaignAttempt(guardianId: string, childId: string, campaignId: string, mediaId: string | undefined, drillName: string): Promise<{ status: string; issues: string[] }>;
+  gSubmitCampaignAttempt(
+    guardianId: string,
+    childId: string,
+    campaignId: string,
+    mediaId: string | undefined,
+    drillName: string,
+  ): Promise<{ status: string; issues: string[] }>;
   gTrials(guardianId: string): Promise<FamilyTrial[]>;
   gConfirmTrialSchedule(guardianId: string, trialId: string): Promise<FamilyTrialWorkflow>;
   gDeclineTrialSchedule(guardianId: string, trialId: string, reason?: string): Promise<FamilyTrialWorkflow>;
@@ -195,8 +467,19 @@ export interface PlayerM12 {
   getOffers(playerId: string): Promise<FamilyOffer[]>;
   getOffer(playerId: string, offerId: string): Promise<{ offer: FamilyOffer; history: FamilyOfferHistory[] }>;
   acceptOffer(playerId: string, offerId: string, revisionId: string, clientKey: string): Promise<OfferAnswerResult>;
-  declineOffer(playerId: string, offerId: string, revisionId: string, clientKey: string, reason?: string): Promise<OfferAnswerResult>;
-  shareOfferWithAgent(playerId: string, offerId: string, share: boolean, agreementId?: string): Promise<{ offer: FamilyOffer }>;
+  declineOffer(
+    playerId: string,
+    offerId: string,
+    revisionId: string,
+    clientKey: string,
+    reason?: string,
+  ): Promise<OfferAnswerResult>;
+  shareOfferWithAgent(
+    playerId: string,
+    offerId: string,
+    share: boolean,
+    agreementId?: string,
+  ): Promise<{ offer: FamilyOffer }>;
   getOfferDocument(playerId: string, offerId: string, docId: string): Promise<OfferDocumentFile>;
   // The recipient's journeys, one per club that reached them (server-derived stage and next action).
   getJourneys(playerId: string): Promise<PlayerJourney[]>;
@@ -205,12 +488,24 @@ export interface PlayerM12 {
   getSignings(playerId: string): Promise<FamilySigning[]>;
   getSigning(playerId: string, signingId: string): Promise<{ signing: FamilySigning; history: FamilySigningHistory[] }>;
   getSigningDocument(playerId: string, signingId: string, revisionId?: string): Promise<SigningDocumentFile>;
-  completeSigning(playerId: string, signingId: string, revisionId: string, documentSha256: string, clientKey: string): Promise<SigningCompleteResult>;
+  completeSigning(
+    playerId: string,
+    signingId: string,
+    revisionId: string,
+    documentSha256: string,
+    clientKey: string,
+  ): Promise<SigningCompleteResult>;
   gSignings(guardianId: string): Promise<FamilySigning[]>;
   gOffers(guardianId: string): Promise<FamilyOffer[]>;
   gOffer(guardianId: string, offerId: string): Promise<{ offer: FamilyOffer; history: FamilyOfferHistory[] }>;
   gAcceptOffer(guardianId: string, offerId: string, revisionId: string, clientKey: string): Promise<OfferAnswerResult>;
-  gDeclineOffer(guardianId: string, offerId: string, revisionId: string, clientKey: string, reason?: string): Promise<OfferAnswerResult>;
+  gDeclineOffer(
+    guardianId: string,
+    offerId: string,
+    revisionId: string,
+    clientKey: string,
+    reason?: string,
+  ): Promise<OfferAnswerResult>;
   gOfferDocument(guardianId: string, offerId: string, docId: string): Promise<OfferDocumentFile>;
 }
 
@@ -223,7 +518,8 @@ const live: PlayerM12 = {
   correctEvidence: (pid, eid, value, reason) => post(`/player/evidence/${eid}/correct`, pid, { value, reason }),
   getFeedback: (pid) => req('/player/feedback', pid),
   getObjectives: (pid) => req('/player/objectives', pid),
-  createObjective: (pid, feedbackId, texts) => post('/player/objectives', pid, { feedbackId, objectives: texts.map((t) => ({ text: t })) }),
+  createObjective: (pid, feedbackId, texts) =>
+    post('/player/objectives', pid, { feedbackId, objectives: texts.map((t) => ({ text: t })) }),
   addObjectiveProgress: (pid, oid, note) => post(`/player/objectives/${oid}/progress`, pid, { note }),
   shareObjective: (pid, oid, orgId, enabled) => post(`/player/objectives/${oid}/share`, pid, { orgId, enabled }),
   requestReassessment: (pid, oid) => post(`/player/objectives/${oid}/reassessment`, pid),
@@ -239,15 +535,18 @@ const live: PlayerM12 = {
   },
   getTrials: (pid) => req('/player/trials', pid),
   confirmTrialSchedule: async (pid, tid) => (await post(`/player/trials/${tid}/confirm-schedule`, pid)).trial,
-  declineTrialSchedule: async (pid, tid, reason) => (await post(`/player/trials/${tid}/decline-schedule`, pid, reason ? { reason } : {})).trial,
-  cancelTrial: async (pid, tid, reason) => (await post(`/player/trials/${tid}/cancel`, pid, reason ? { reason } : {})).trial,
+  declineTrialSchedule: async (pid, tid, reason) =>
+    (await post(`/player/trials/${tid}/decline-schedule`, pid, reason ? { reason } : {})).trial,
+  cancelTrial: async (pid, tid, reason) =>
+    (await post(`/player/trials/${tid}/cancel`, pid, reason ? { reason } : {})).trial,
   giveTrialConsent: (pid, tid) => post(`/player/trials/${tid}/consent`, pid),
   setEmergencyContact: (pid, tid, name, phone) => post(`/player/trials/${tid}/emergency-contact`, pid, { name, phone }),
   getSafetyPack: (pid, tid) => req(`/player/trials/${tid}/safety-pack`, pid),
   getSquadInvites: (pid) => req('/player/squad-invites', pid),
   respondSquadInvite: (pid, iid, accept) => post(`/player/squad-invites/${iid}/respond`, pid, { accept }),
   getFollowUps: (pid) => req('/player/followups', pid),
-  respondFollowUp: (pid, fid, agree, note, experienceRating) => post(`/player/followups/${fid}/respond`, pid, { agree, note, experienceRating }),
+  respondFollowUp: (pid, fid, agree, note, experienceRating) =>
+    post(`/player/followups/${fid}/respond`, pid, { agree, note, experienceRating }),
   setFootballCategory: (pid, category) => post('/player/football-category', pid, { category }),
   setCaptions: (pid, mid, vtt) => post(`/player/media/${mid}/captions`, pid, { vtt }),
   startUpload: async (pid, input) => (await post('/player/uploads', pid, input)).upload,
@@ -262,24 +561,29 @@ const live: PlayerM12 = {
   gAddEvidence: (gid, cid, input) => post(`/guardian/children/${cid}/evidence`, gid, input),
   gFeedback: (gid, cid) => req(`/guardian/children/${cid}/feedback`, gid),
   gObjectives: (gid, cid) => req(`/guardian/children/${cid}/objectives`, gid),
-  gCreateObjective: (gid, cid, feedbackId, texts) => post(`/guardian/children/${cid}/objectives`, gid, { feedbackId, objectives: texts.map((t) => ({ text: t })) }),
+  gCreateObjective: (gid, cid, feedbackId, texts) =>
+    post(`/guardian/children/${cid}/objectives`, gid, { feedbackId, objectives: texts.map((t) => ({ text: t })) }),
   gShareObjective: (gid, oid, orgId, enabled) => post(`/guardian/objectives/${oid}/share`, gid, { orgId, enabled }),
   gRequestReassessment: (gid, oid) => post(`/guardian/objectives/${oid}/reassessment`, gid),
   // First page only: "load more" (nextCursor) is still needed.
   gBoard: (gid, cid) => req(`/guardian/children/${cid}/opportunity-board`, gid),
   gApply: (gid, cid, oid, note) => post(`/guardian/children/${cid}/opportunities/${oid}/apply`, gid, { note }),
   gApplications: (gid) => req('/guardian/applications', gid),
-  gCampaigns: async (gid, cid) => (await req<{ items: CampaignView[] }>(`/guardian/children/${cid}/campaigns`, gid)).items,
+  gCampaigns: async (gid, cid) =>
+    (await req<{ items: CampaignView[] }>(`/guardian/children/${cid}/campaigns`, gid)).items,
   gSubmitCampaignAttempt: async (gid, cid, campId, mediaId, drillName) => {
     const r = await post(`/guardian/children/${cid}/campaigns/${campId}/submit`, gid, { mediaId, drillName });
     return { status: r.attempt.status, issues: r.attempt.fileChecks.issues };
   },
   gTrials: (gid) => req('/guardian/trials', gid),
   gConfirmTrialSchedule: async (gid, tid) => (await post(`/guardian/trials/${tid}/confirm-schedule`, gid)).trial,
-  gDeclineTrialSchedule: async (gid, tid, reason) => (await post(`/guardian/trials/${tid}/decline-schedule`, gid, reason ? { reason } : {})).trial,
-  gCancelTrial: async (gid, tid, reason) => (await post(`/guardian/trials/${tid}/cancel`, gid, reason ? { reason } : {})).trial,
+  gDeclineTrialSchedule: async (gid, tid, reason) =>
+    (await post(`/guardian/trials/${tid}/decline-schedule`, gid, reason ? { reason } : {})).trial,
+  gCancelTrial: async (gid, tid, reason) =>
+    (await post(`/guardian/trials/${tid}/cancel`, gid, reason ? { reason } : {})).trial,
   gGiveTrialConsent: (gid, tid) => post(`/guardian/trials/${tid}/consent`, gid),
-  gSetEmergencyContact: (gid, tid, name, phone) => post(`/guardian/trials/${tid}/emergency-contact`, gid, { name, phone }),
+  gSetEmergencyContact: (gid, tid, name, phone) =>
+    post(`/guardian/trials/${tid}/emergency-contact`, gid, { name, phone }),
   gSafetyPack: (gid, tid) => req(`/guardian/trials/${tid}/safety-pack`, gid),
   gSquadInvites: (gid) => req('/guardian/squad-invites', gid),
   gRespondSquadInvite: (gid, iid, accept) => post(`/guardian/squad-invites/${iid}/respond`, gid, { accept }),
@@ -288,21 +592,34 @@ const live: PlayerM12 = {
   // ---- Offers, signing and the journey
   getOffers: async (pid) => (await req<{ items: FamilyOffer[] }>('/player/offers', pid)).items,
   getOffer: (pid, oid) => req(`/player/offers/${oid}`, pid),
-  acceptOffer: (pid, oid, revisionId, clientKey) => post(`/player/offers/${oid}/accept`, pid, { revisionId, clientKey }),
-  declineOffer: (pid, oid, revisionId, clientKey, reason) => post(`/player/offers/${oid}/decline`, pid, { revisionId, clientKey, ...(reason ? { reason } : {}) }),
-  shareOfferWithAgent: (pid, oid, share, agreementId) => post(`/player/offers/${oid}/share-agent`, pid, { share, ...(agreementId ? { agreementId } : {}) }),
+  acceptOffer: (pid, oid, revisionId, clientKey) =>
+    post(`/player/offers/${oid}/accept`, pid, { revisionId, clientKey }),
+  declineOffer: (pid, oid, revisionId, clientKey, reason) =>
+    post(`/player/offers/${oid}/decline`, pid, { revisionId, clientKey, ...(reason ? { reason } : {}) }),
+  shareOfferWithAgent: (pid, oid, share, agreementId) =>
+    post(`/player/offers/${oid}/share-agent`, pid, { share, ...(agreementId ? { agreementId } : {}) }),
   getOfferDocument: (pid, oid, docId) => req(`/player/offers/${oid}/documents/${docId}`, pid),
   getJourneys: async (pid) => (await req<{ items: PlayerJourney[] }>('/player/journeys', pid)).items,
-  gJourneys: async (gid, childId) => (await req<{ items: PlayerJourney[] }>(`/guardian/children/${encodeURIComponent(childId)}/journeys`, gid)).items,
+  gJourneys: async (gid, childId) =>
+    (await req<{ items: PlayerJourney[] }>(`/guardian/children/${encodeURIComponent(childId)}/journeys`, gid)).items,
   getSignings: async (pid) => (await req<{ items: FamilySigning[] }>('/player/signings', pid)).items,
   getSigning: (pid, sid) => req(`/player/signings/${sid}`, pid),
-  getSigningDocument: (pid, sid, revisionId) => req(`/player/signings/${sid}/document${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`, pid),
-  completeSigning: (pid, sid, revisionId, documentSha256, clientKey) => post(`/player/signings/${sid}/complete`, pid, { revisionId, documentSha256, clientKey, method: 'PLATFORM_ACKNOWLEDGMENT' }),
+  getSigningDocument: (pid, sid, revisionId) =>
+    req(`/player/signings/${sid}/document${revisionId ? `?revisionId=${encodeURIComponent(revisionId)}` : ''}`, pid),
+  completeSigning: (pid, sid, revisionId, documentSha256, clientKey) =>
+    post(`/player/signings/${sid}/complete`, pid, {
+      revisionId,
+      documentSha256,
+      clientKey,
+      method: 'PLATFORM_ACKNOWLEDGMENT',
+    }),
   gSignings: async (gid) => (await req<{ items: FamilySigning[] }>('/guardian/signings', gid)).items,
   gOffers: async (gid) => (await req<{ items: FamilyOffer[] }>('/guardian/offers', gid)).items,
   gOffer: (gid, oid) => req(`/guardian/offers/${oid}`, gid),
-  gAcceptOffer: (gid, oid, revisionId, clientKey) => post(`/guardian/offers/${oid}/accept`, gid, { revisionId, clientKey }),
-  gDeclineOffer: (gid, oid, revisionId, clientKey, reason) => post(`/guardian/offers/${oid}/decline`, gid, { revisionId, clientKey, ...(reason ? { reason } : {}) }),
+  gAcceptOffer: (gid, oid, revisionId, clientKey) =>
+    post(`/guardian/offers/${oid}/accept`, gid, { revisionId, clientKey }),
+  gDeclineOffer: (gid, oid, revisionId, clientKey, reason) =>
+    post(`/guardian/offers/${oid}/decline`, gid, { revisionId, clientKey, ...(reason ? { reason } : {}) }),
   gOfferDocument: (gid, oid, docId) => req(`/guardian/offers/${oid}/documents/${docId}`, gid),
 };
 

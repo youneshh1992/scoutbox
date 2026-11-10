@@ -22,7 +22,6 @@ export const SESSIONS_TABLE_MIGRATION = '0003_sessions_live';
 
 export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
-
 const SELECT = 'SELECT sid, kind, ref_id, org_user_id, via, created_at, expires_at FROM sessions';
 const toRow = (r) => {
   const row = { sid: r.sid, kind: r.kind, refId: r.ref_id, createdAt: r.created_at, expiresAt: r.expires_at };
@@ -38,18 +37,35 @@ export const SESSIONS_TABLE = {
   name: 'sessions',
   read(sqlite) {
     if (!cutOver(sqlite)) return null;
-    return sqlite.prepare('SELECT token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at FROM sessions ORDER BY created_at, sid').all()
+    return sqlite
+      .prepare(
+        'SELECT token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at FROM sessions ORDER BY created_at, sid',
+      )
+      .all()
       .map((r) => ({ ...toRow(r), tokenHash: r.token_hash }));
   },
 };
 
-export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSION_TTL_MS, now = Date.now, newToken = () => crypto.randomBytes(24).toString('hex'), newSid = () => crypto.randomBytes(6).toString('hex'), log = () => {} }) {
-  if (!sqlite) throw new TypeError('the sessions repository needs a SQLite connection (node:sqlite); sessions have no in-memory or JSON fallback');
-  if (!Number.isFinite(sessionTtlMs) || sessionTtlMs <= 0) throw new TypeError('sessionTtlMs must be a positive number of milliseconds');
+export function createSessionsRepository({
+  sqlite,
+  sessionTtlMs = DEFAULT_SESSION_TTL_MS,
+  now = Date.now,
+  newToken = () => crypto.randomBytes(24).toString('hex'),
+  newSid = () => crypto.randomBytes(6).toString('hex'),
+  log = () => {},
+}) {
+  if (!sqlite)
+    throw new TypeError(
+      'the sessions repository needs a SQLite connection (node:sqlite); sessions have no in-memory or JSON fallback',
+    );
+  if (!Number.isFinite(sessionTtlMs) || sessionTtlMs <= 0)
+    throw new TypeError('sessionTtlMs must be a positive number of milliseconds');
   const stmt = {
     byHash: sqlite.prepare(`${SELECT} WHERE token_hash = ?`),
     bySid: sqlite.prepare(`${SELECT} WHERE sid = ?`),
-    insert: sqlite.prepare('INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'),
+    insert: sqlite.prepare(
+      'INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ),
     listFor: sqlite.prepare(`${SELECT} WHERE kind = ? AND ref_id = ? ORDER BY created_at, sid`),
     listOrgUser: sqlite.prepare(`${SELECT} WHERE kind = 'org' AND org_user_id = ? ORDER BY created_at, sid`),
     count: sqlite.prepare('SELECT COUNT(*) AS n FROM sessions'),
@@ -61,11 +77,14 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
     delExpired: sqlite.prepare('DELETE FROM sessions WHERE created_at <= 0 OR created_at <= ?'),
     retime: sqlite.prepare('UPDATE sessions SET expires_at = created_at + ?'),
     metaGet: sqlite.prepare('SELECT value FROM meta WHERE key = ?'),
-    metaPut: sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
+    metaPut: sqlite.prepare(
+      'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ),
     cutover: sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?'),
   };
 
-  const live = (row, at = now()) => !!row && Number.isInteger(row.createdAt) && row.createdAt > 0 && at - row.createdAt < sessionTtlMs;
+  const live = (row, at = now()) =>
+    !!row && Number.isInteger(row.createdAt) && row.createdAt > 0 && at - row.createdAt < sessionTtlMs;
 
   // Every read is a query and every write a statement on the store's connection, so a write inside a unit of work
   // joins it and is undone by its rollback.
@@ -76,12 +95,18 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
 
     /** Boot: refuse to run without the migration record; align expires_at with the configured lifetime. */
     attach() {
-      if (!stmt.cutover.get(SESSIONS_TABLE_MIGRATION)) throw new Error(`sessions: the cutover record ${SESSIONS_TABLE_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
+      if (!stmt.cutover.get(SESSIONS_TABLE_MIGRATION))
+        throw new Error(
+          `sessions: the cutover record ${SESSIONS_TABLE_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`,
+        );
       const stored = Number(stmt.metaGet.get('sessionTtlMs')?.value) || null;
       if (stored !== sessionTtlMs) {
         stmt.retime.run(sessionTtlMs);
         stmt.metaPut.run('sessionTtlMs', String(sessionTtlMs));
-        if (stored) log(`sessions: the configured lifetime changed from ${stored} ms to ${sessionTtlMs} ms; expiry of every stored session was recomputed`);
+        if (stored)
+          log(
+            `sessions: the configured lifetime changed from ${stored} ms to ${sessionTtlMs} ms; expiry of every stored session was recomputed`,
+          );
       }
       return { engine: 'sqlite', rows: stmt.count.get().n };
     },
@@ -90,7 +115,8 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
     create(kind, refId, { userId = null, via = null } = {}) {
       if (!SESSION_KINDS.includes(kind)) throw new TypeError(`"${kind}" is not a session kind`);
       if (typeof refId !== 'string' || !refId) throw new TypeError('a session needs a refId');
-      if (kind === 'org' && (typeof userId !== 'string' || !userId)) throw new TypeError('an org session needs a staff member');
+      if (kind === 'org' && (typeof userId !== 'string' || !userId))
+        throw new TypeError('an org session needs a staff member');
       if (via !== null && !SESSION_VIAS.includes(via)) throw new TypeError(`via "${via}" is not supported`);
       repo.prune();
       const token = newToken();
@@ -98,7 +124,16 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
       const row = { sid: newSid(), kind, refId, createdAt, expiresAt: createdAt + sessionTtlMs };
       if (kind === 'org') row.userId = userId;
       if (via) row.via = via;
-      stmt.insert.run(sha256(token), row.sid, kind, refId, kind === 'org' ? userId : null, via, createdAt, createdAt + sessionTtlMs);
+      stmt.insert.run(
+        sha256(token),
+        row.sid,
+        kind,
+        refId,
+        kind === 'org' ? userId : null,
+        via,
+        createdAt,
+        createdAt + sessionTtlMs,
+      );
       return { token, session: row };
     },
 
@@ -109,7 +144,10 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
       const r = stmt.byHash.get(hash);
       if (!r) return null;
       const row = toRow(r);
-      if (!live(row)) { stmt.delHash.run(hash); return null; }
+      if (!live(row)) {
+        stmt.delHash.run(hash);
+        return null;
+      }
       return row;
     },
     /** The live session with this id (media links are bound to it), or null. */
@@ -120,7 +158,9 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
       return live(row) ? row : null;
     },
     /** Does this bearer token name this session? (own-session listing marks the current one) */
-    isCurrent(row, token) { return !!row && typeof token === 'string' && !!token && stmt.byHash.get(sha256(token))?.sid === row.sid; },
+    isCurrent(row, token) {
+      return !!row && typeof token === 'string' && !!token && stmt.byHash.get(sha256(token))?.sid === row.sid;
+    },
 
     listFor: (kind, refId) => stmt.listFor.all(kind, refId).map(toRow),
     listOrgUser: (userId) => stmt.listOrgUser.all(userId).map(toRow),

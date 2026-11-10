@@ -30,8 +30,7 @@ export function verifyPassword(password, stored) {
   if (!stored) return false;
   if (!stored.startsWith('scrypt$')) {
     // A plain-text record (no scrypt prefix). Verify, and let the caller upgrade it.
-    return crypto.timingSafeEqual(Buffer.from(String(password)), Buffer.from(String(stored)))
-      ? 'upgrade' : false;
+    return crypto.timingSafeEqual(Buffer.from(String(password)), Buffer.from(String(stored))) ? 'upgrade' : false;
   }
   const [, salt, hash] = stored.split('$');
   const candidate = crypto.scryptSync(String(password), salt, 32).toString('hex');
@@ -78,7 +77,8 @@ const DEV_DELIVERY_LIMIT = 500;
 
 /** The mail outbox (repositories/outboxPush.mjs `outbox`): every mail is recorded there. */
 const needOutbox = (outbox) => {
-  if (typeof outbox?.append !== 'function' || typeof outbox?.markDelivered !== 'function') throw new TypeError('createMailer needs the outbox repository ({ append, markDelivered })');
+  if (typeof outbox?.append !== 'function' || typeof outbox?.markDelivered !== 'function')
+    throw new TypeError('createMailer needs the outbox repository ({ append, markDelivered })');
   return outbox;
 };
 
@@ -99,7 +99,15 @@ export function createMailer(nextId, { outbox: outboxRepo } = {}) {
       const stored = withheld.reduce((t, s) => t.split(s).join(OUTBOX_SECRET_PLACEHOLDER), String(text));
       // The stored record keeps at most what its columns hold (OUTBOX_LIMITS: subject 300, text 10,000); a name the
       // routes do not bound can make a subject longer, so it is shortened here, never refused (the mail still goes).
-      const record = { id: nextId('mail'), ts: Date.now(), to, subject: String(subject ?? '').slice(0, 300), text: stored.slice(0, 10_000), transport: live ? 'sendgrid' : 'dev-outbox', delivered: !live };
+      const record = {
+        id: nextId('mail'),
+        ts: Date.now(),
+        to,
+        subject: String(subject ?? '').slice(0, 300),
+        text: stored.slice(0, 10_000),
+        transport: live ? 'sendgrid' : 'dev-outbox',
+        delivered: !live,
+      };
       if (!live && withheld.length) {
         devDeliveries.set(record.id, String(text));
         if (devDeliveries.size > DEV_DELIVERY_LIMIT) devDeliveries.delete(devDeliveries.keys().next().value);
@@ -130,7 +138,7 @@ export function createMailer(nextId, { outbox: outboxRepo } = {}) {
       return record;
     },
     /** Dev transport only: the full text of a mail whose secrets the persisted record withholds (this process's memory; null otherwise). */
-    devDeliveredText: (id) => (live ? null : devDeliveries.get(id) ?? null),
+    devDeliveredText: (id) => (live ? null : (devDeliveries.get(id) ?? null)),
   };
 }
 
@@ -141,13 +149,21 @@ export function createMailer(nextId, { outbox: outboxRepo } = {}) {
  * written in its own transaction once the notification is durable.
  */
 export function createPushSender(nextId, { pushLog, pushTokens } = {}) {
-  if (typeof pushLog?.append !== 'function' || typeof pushTokens?.forAudience !== 'function') throw new TypeError('createPushSender needs the push log and device token repositories');
+  if (typeof pushLog?.append !== 'function' || typeof pushTokens?.forAudience !== 'function')
+    throw new TypeError('createPushSender needs the push log and device token repositories');
   const live = livePushConfigured();
   return {
     transport: live ? 'expo' : 'dev-log',
     async send(audience, title, body) {
       // The body is the notice's text, shortened to what the log keeps (OUTBOX_LIMITS.body).
-      const record = { id: nextId('push'), ts: Date.now(), audience: { kind: audience.kind, id: audience.id }, title, body: String(body).slice(0, 4000), transport: live ? 'expo' : 'dev-log' };
+      const record = {
+        id: nextId('push'),
+        ts: Date.now(),
+        audience: { kind: audience.kind, id: audience.id },
+        title,
+        body: String(body).slice(0, 4000),
+        transport: live ? 'expo' : 'dev-log',
+      };
       pushLog.append(record);
       if (live) {
         // Expo push needs a device token registered by the person (POST /push/register).
@@ -159,7 +175,9 @@ export function createPushSender(nextId, { pushLog, pushTokens } = {}) {
               headers: { authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}`, 'content-type': 'application/json' },
               body: JSON.stringify({ to: t.token, title, body }),
             });
-          } catch { /* recorded in the push log regardless */ }
+          } catch {
+            /* recorded in the push log regardless */
+          }
         }
       }
       return record;
@@ -222,8 +240,17 @@ export function createBilling({ invoices, nextId }) {
 
 /** An invoice as the API answers it: `amount` in major units (the stored minor units divided by 100). */
 export const invoiceView = (i) => ({
-  id: i.id, ts: i.ts, orgId: i.orgId, orgName: i.orgName, signingId: i.signingId, playerName: i.playerName,
-  description: i.description, amount: i.amountMinor / 100, currency: i.currency, status: i.status, provider: i.provider,
+  id: i.id,
+  ts: i.ts,
+  orgId: i.orgId,
+  orgName: i.orgName,
+  signingId: i.signingId,
+  playerName: i.playerName,
+  description: i.description,
+  amount: i.amountMinor / 100,
+  currency: i.currency,
+  status: i.status,
+  provider: i.provider,
 });
 
 // ------------------------------------------------------------- object storage
@@ -263,7 +290,12 @@ export function createStorage(dataDir) {
     delete(id) {
       let removed = 0;
       for (const ext of ['webm', 'mp4', 'bin']) {
-        try { fs.unlinkSync(path.join(mediaDir, `${id}.${ext}`)); removed += 1; } catch (err) { if (err?.code !== 'ENOENT') throw err; }
+        try {
+          fs.unlinkSync(path.join(mediaDir, `${id}.${ext}`));
+          removed += 1;
+        } catch (err) {
+          if (err?.code !== 'ENOENT') throw err;
+        }
       }
       return removed;
     },

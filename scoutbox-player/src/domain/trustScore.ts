@@ -41,7 +41,7 @@ export function trustBreakdown(p: PlayerProfile): TrustBreakdown {
   };
   const total = Math.min(
     b.base + b.identityVerified + b.verifiedAttendance + b.trialReports + b.media + b.profileComplete,
-    TRUST.MAX
+    TRUST.MAX,
   );
   return { ...b, total };
 }

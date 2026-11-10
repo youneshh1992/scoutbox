@@ -41,32 +41,45 @@ export function parseTrustProxy(raw) {
   const value = String(raw ?? '').trim();
   if (!value || /^(0|false|off|no)$/i.test(value)) {
     return {
-      setting: false, state: 'not_configured', value,
-      note: 'No reverse proxy is trusted; the connecting socket address is the client address. Behind a platform proxy every client would share the proxy\'s address and per-IP limits would apply to everyone at once.',
+      setting: false,
+      state: 'not_configured',
+      value,
+      note: "No reverse proxy is trusted; the connecting socket address is the client address. Behind a platform proxy every client would share the proxy's address and per-IP limits would apply to everyone at once.",
     };
   }
   if (/^(true|all)$/i.test(value)) {
     return {
-      setting: true, state: 'configured', value,
+      setting: true,
+      state: 'configured',
+      value,
       note: 'Every X-Forwarded-For hop is trusted. The client address is spoofable unless the proxy in front of this server strips the inbound header.',
     };
   }
   if (/^\d+$/.test(value)) {
     const hops = Number(value);
     return {
-      setting: hops, state: 'configured', value,
+      setting: hops,
+      state: 'configured',
+      value,
       note: `${hops} proxy hop${hops === 1 ? '' : 's'} in front of the server ${hops === 1 ? 'is' : 'are'} trusted; the client address is read from X-Forwarded-For.`,
     };
   }
-  const entries = value.split(',').map((s) => s.trim()).filter(Boolean);
+  const entries = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (entries.length && entries.every(validEntry)) {
     return {
-      setting: entries.join(', '), state: 'configured', value,
+      setting: entries.join(', '),
+      state: 'configured',
+      value,
       note: `Proxies at ${entries.join(', ')} are trusted; the client address is read from X-Forwarded-For.`,
     };
   }
   return {
-    setting: false, state: 'invalid', value,
+    setting: false,
+    state: 'invalid',
+    value,
     note: `SCOUTBOX_TRUST_PROXY=${JSON.stringify(value)} is not a hop count, true/false, or a list of addresses and subnets. Nothing is trusted.`,
   };
 }

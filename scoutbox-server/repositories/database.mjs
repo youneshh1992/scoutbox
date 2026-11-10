@@ -19,7 +19,12 @@ try {
 export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = () => {}, context = {} } = {}) {
   sqlite.exec('CREATE TABLE IF NOT EXISTS data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);');
   sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
-  const applied = new Set(sqlite.prepare('SELECT id FROM data_migrations').all().map((r) => r.id));
+  const applied = new Set(
+    sqlite
+      .prepare('SELECT id FROM data_migrations')
+      .all()
+      .map((r) => r.id),
+  );
   const ran = [];
   const sorted = [...migrations].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const step of sorted) {
@@ -39,13 +44,18 @@ export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = 
         step.up(sqlite, { now, ...context });
         if (fkOff) {
           const broken = sqlite.prepare('PRAGMA foreign_key_check').all();
-          if (broken.length) throw new Error(`foreign_key_check found ${broken.length} broken reference(s) after the rebuild (first: ${broken[0].table} rowid ${broken[0].rowid} → ${broken[0].parent})`);
+          if (broken.length)
+            throw new Error(
+              `foreign_key_check found ${broken.length} broken reference(s) after the rebuild (first: ${broken[0].table} rowid ${broken[0].rowid} → ${broken[0].parent})`,
+            );
         }
         sqlite.prepare('INSERT INTO data_migrations (id, applied_at) VALUES (?, ?)').run(step.id, now);
         sqlite.exec('COMMIT');
       } catch (err) {
         sqlite.exec('ROLLBACK');
-        throw new Error(`data migration ${step.id} failed: ${err?.message ?? err}. Boot aborted; the database was not modified.`);
+        throw new Error(
+          `data migration ${step.id} failed: ${err?.message ?? err}. Boot aborted; the database was not modified.`,
+        );
       }
     } finally {
       if (fkOff) sqlite.exec('PRAGMA foreign_keys = ON;');
@@ -68,7 +78,10 @@ export function onBeforeCommit(sqlite, fn) {
   const list = BEFORE_COMMIT.get(sqlite) ?? [];
   list.push(fn);
   BEFORE_COMMIT.set(sqlite, list);
-  return () => { const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); };
+  return () => {
+    const i = list.indexOf(fn);
+    if (i >= 0) list.splice(i, 1);
+  };
 }
 export function runBeforeCommit(sqlite) {
   for (const fn of BEFORE_COMMIT.get(sqlite) ?? []) fn();
@@ -98,9 +111,16 @@ export function transaction(sqlite, fn) {
 export function newestHistory(sqlite, { select, from, where, params = [] }, atMost, n) {
   const upTo = atMost === null ? '' : ' AND h.at <= ?';
   const p = atMost === null ? params : [...params, atMost];
-  const tied = atMost === null ? 0 : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${from} WHERE ${where} AND h.at = ?`).get(...params, atMost).n;
-  const edge = sqlite.prepare(`SELECT h.at FROM ${from} WHERE ${where}${upTo} ORDER BY h.at DESC LIMIT 1 OFFSET ?`).get(...p, n - 1 + tied);
-  return sqlite.prepare(`SELECT ${select} FROM ${from} WHERE ${where}${upTo}${edge ? ' AND h.at >= ?' : ''} ORDER BY h.at DESC`).all(...p, ...(edge ? [edge.at] : []));
+  const tied =
+    atMost === null
+      ? 0
+      : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${from} WHERE ${where} AND h.at = ?`).get(...params, atMost).n;
+  const edge = sqlite
+    .prepare(`SELECT h.at FROM ${from} WHERE ${where}${upTo} ORDER BY h.at DESC LIMIT 1 OFFSET ?`)
+    .get(...p, n - 1 + tied);
+  return sqlite
+    .prepare(`SELECT ${select} FROM ${from} WHERE ${where}${upTo}${edge ? ' AND h.at >= ?' : ''} ORDER BY h.at DESC`)
+    .all(...p, ...(edge ? [edge.at] : []));
 }
 
 /**
@@ -115,12 +135,20 @@ export function childRowsOf(sqlite, table, parentCol, parentIds, { order = 'rowi
   const groups = new Map();
   const ids = [...new Set(parentIds)];
   if (ids.length) {
-    let cache = childStatements.get(sqlite); if (!cache || cache.preparedBy !== sqlite.prepare) { cache = new Map(); cache.preparedBy = sqlite.prepare; childStatements.set(sqlite, cache); }
+    let cache = childStatements.get(sqlite);
+    if (!cache || cache.preparedBy !== sqlite.prepare) {
+      cache = new Map();
+      cache.preparedBy = sqlite.prepare;
+      childStatements.set(sqlite, cache);
+    }
     const sql = `SELECT * FROM ${table} WHERE ${where ? `${where} AND ` : ''}${parentCol} IN (SELECT value FROM json_each(?)) ORDER BY ${parentCol}, ${order}`;
-    let stmt = cache.get(sql); if (!stmt) cache.set(sql, (stmt = sqlite.prepare(sql)));
+    let stmt = cache.get(sql);
+    if (!stmt) cache.set(sql, (stmt = sqlite.prepare(sql)));
     for (const r of stmt.all(JSON.stringify(ids))) {
       const k = [r[parentCol], ...subKey.map((c) => r[c])].join('\u0000');
-      let list = groups.get(k); if (!list) groups.set(k, (list = [])); list.push(r);
+      let list = groups.get(k);
+      if (!list) groups.set(k, (list = []));
+      list.push(r);
     }
   }
   return { all: (...k) => groups.get(k.join('\u0000')) ?? [] };
@@ -131,15 +159,31 @@ export function childRowsOf(sqlite, table, parentCol, parentIds, { order = 'rowi
  * existence or occupancy says nothing about which migrations have run.
  */
 export function migrationApplied(sqlite, id) {
-  if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'data_migrations'").get()) return false;
+  if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'data_migrations'").get())
+    return false;
   return !!sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(id);
 }
 
 /** Operator-facing view of the table schema: ids and counts only. */
 export function dataSchemaReport(sqlite, migrations) {
-  if (!sqlite) throw new TypeError('dataSchemaReport needs a SQLite connection; the data layer has no in-memory engine');
+  if (!sqlite)
+    throw new TypeError('dataSchemaReport needs a SQLite connection; the data layer has no in-memory engine');
   const applied = sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations').get()?.n ?? 0;
-  const tables = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('meta', 'data_migrations', 'counters') AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map((r) => r.name);
-  const appliedIds = sqlite.prepare('SELECT id FROM data_migrations ORDER BY id').all().map((r) => r.id);
-  return { engine: 'sqlite', migrationsApplied: applied, migrationsKnown: migrations.length, migrations: appliedIds, tables };
+  const tables = sqlite
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('meta', 'data_migrations', 'counters') AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )
+    .all()
+    .map((r) => r.name);
+  const appliedIds = sqlite
+    .prepare('SELECT id FROM data_migrations ORDER BY id')
+    .all()
+    .map((r) => r.id);
+  return {
+    engine: 'sqlite',
+    migrationsApplied: applied,
+    migrationsKnown: migrations.length,
+    migrations: appliedIds,
+    tables,
+  };
 }

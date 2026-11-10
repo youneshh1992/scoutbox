@@ -29,12 +29,26 @@ import { humanText } from '../../design-system/humanize';
 import { Icon } from '../../design-system/icons';
 import { ApiError, type Session } from './api';
 import {
-  m18, BRIEF_EVIDENCE_REQUIREMENTS, BRIEF_FEET, BRIEF_LEVELS, BRIEF_POSITIONS,
-  BRIEF_TRANSITIONS, BRIEF_TRUST_BANDS, NOBODY_MISSED_DISMISS_REASONS,
-  NOBODY_MISSED_SORTS, SECOND_LOOK_DISMISS_REASONS,
-  type BriefInput, type BriefListResult, type ComparisonRow, type EvaluationCoverage,
-  type NobodyMissedItem, type NobodyMissedResult, type RecruitmentBrief,
-  type SecondLookChangesResult, type SecondLookItem, type SecondLookListResult,
+  m18,
+  BRIEF_EVIDENCE_REQUIREMENTS,
+  BRIEF_FEET,
+  BRIEF_LEVELS,
+  BRIEF_POSITIONS,
+  BRIEF_TRANSITIONS,
+  BRIEF_TRUST_BANDS,
+  NOBODY_MISSED_DISMISS_REASONS,
+  NOBODY_MISSED_SORTS,
+  SECOND_LOOK_DISMISS_REASONS,
+  type BriefInput,
+  type BriefListResult,
+  type ComparisonRow,
+  type EvaluationCoverage,
+  type NobodyMissedItem,
+  type NobodyMissedResult,
+  type RecruitmentBrief,
+  type SecondLookChangesResult,
+  type SecondLookItem,
+  type SecondLookListResult,
   type TrustMovement,
 } from './m18Api';
 import { STANDARD_PROTOCOLS } from './combineApi';
@@ -58,7 +72,8 @@ export interface M18ScreenProps {
 // ------------------------------------------------------------ small helpers
 const reasonLabel = (code: string) => t(`rm.reason.${code}`, code.replace(/_/g, ' '));
 const bandLabel = (code?: string | null) => (code ? t(`m18.band.${code}`, code.replace(/_/g, ' ')) : t('m18.none'));
-const statusLabel = (code?: string | null) => (code ? t(`m18.sl.status.${code}`, code.replace(/_/g, ' ')) : t('m18.none'));
+const statusLabel = (code?: string | null) =>
+  code ? t(`m18.sl.status.${code}`, code.replace(/_/g, ' ')) : t('m18.none');
 const archivedLabel = (code?: string | null) => (code ? t(`rm.st.${code}`, code.replace(/_/g, ' ')) : t('m18.none'));
 const briefStatusLabel = (code: string) => t(`m18.br.status.${code}`, code.replace(/_/g, ' '));
 const slDismissLabel = (code: string) => t(`m18.sl.dr.${code}`, code.replace(/_/g, ' '));
@@ -101,13 +116,19 @@ function errMessage(e: unknown): string {
 
 /** The Trust Score never appears without saying what it is. */
 function TrustNote({ note }: { note?: string | null }) {
-  return <span className="dim" style={{ fontSize: 12, display: 'block' }}>{note ?? t('m18.trustNote')}</span>;
+  return (
+    <span className="dim" style={{ fontSize: 12, display: 'block' }}>
+      {note ?? t('m18.trustNote')}
+    </span>
+  );
 }
 
 /** A status is never communicated by colour alone — always a word too. */
 function Mark({ met }: { met: boolean }) {
   return (
-    <span aria-hidden="true" style={{ fontWeight: 700, marginRight: 6 }}>{met ? '✓' : '○'}</span>
+    <span aria-hidden="true" style={{ fontWeight: 700, marginRight: 6 }}>
+      {met ? '✓' : '○'}
+    </span>
   );
 }
 
@@ -131,13 +152,15 @@ function TrustMovementList({ movement }: { movement: TrustMovement[] }) {
       <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
         {movement.map((m, i) => (
           <li key={`${m.component}-${m.code}-${i}`} style={{ fontSize: 13 }}>
-            <span aria-hidden="true">{m.direction === 'up' ? '▲' : '▼'}</span>{' '}
-            {componentLabel(m.component)} — {t(`m18.trustcode.${m.code}`, m.code.replace(/_/g, ' ').toLowerCase())}{' '}
+            <span aria-hidden="true">{m.direction === 'up' ? '▲' : '▼'}</span> {componentLabel(m.component)} —{' '}
+            {t(`m18.trustcode.${m.code}`, m.code.replace(/_/g, ' ').toLowerCase())}{' '}
             <span className="dim">({m.direction === 'up' ? t('m18.sl.dirUp') : t('m18.sl.dirDown')})</span>
           </li>
         ))}
       </ul>
-      <div className="dim" style={{ fontSize: 12 }}>{t('m18.sl.trustContext')}</div>
+      <div className="dim" style={{ fontSize: 12 }}>
+        {t('m18.sl.trustContext')}
+      </div>
     </div>
   );
 }
@@ -165,7 +188,11 @@ function LoadError({ message, onRetry }: { message: string; onRetry?: () => void
   return (
     <div className="notice block" role="alert">
       <div>{message}</div>
-      {onRetry && <button style={{ marginTop: 6 }} onClick={onRetry}>{t('common.retry')}</button>}
+      {onRetry && (
+        <button style={{ marginTop: 6 }} onClick={onRetry}>
+          {t('common.retry')}
+        </button>
+      )}
     </div>
   );
 }
@@ -185,28 +212,32 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
     // One read of the whole queue: the four tabs are the SAME items in
     // different workflow states, so splitting them client-side keeps every tab
     // count honest instead of showing a number from a different fetch.
-    m18.secondLook(session, { status: 'all', limit: 100 })
-      .then((d) => { if (live) setData(d); })
-      .catch((e) => { if (live) setErr(errMessage(e)); });
-    return () => { live = false; };
+    m18
+      .secondLook(session, { status: 'all', limit: 100 })
+      .then((d) => {
+        if (live) setData(d);
+      })
+      .catch((e) => {
+        if (live) setErr(errMessage(e));
+      });
+    return () => {
+      live = false;
+    };
   }, [session, tick, bump]);
 
   const items = data?.items ?? [];
-  const buckets = useMemo(() => ({
-    worth: items.filter((i) => i.status === 'open' && !isEvidenceChanged(i)),
-    changed: items.filter((i) => i.status === 'open' && isEvidenceChanged(i)),
-    reviewed: items.filter((i) => i.status === 'reviewed'),
-    dismissed: items.filter((i) => i.status === 'dismissed'),
-  }), [items]);
+  const buckets = useMemo(
+    () => ({
+      worth: items.filter((i) => i.status === 'open' && !isEvidenceChanged(i)),
+      changed: items.filter((i) => i.status === 'open' && isEvidenceChanged(i)),
+      reviewed: items.filter((i) => i.status === 'reviewed'),
+      dismissed: items.filter((i) => i.status === 'dismissed'),
+    }),
+    [items],
+  );
 
   if (changesFor) {
-    return (
-      <ReviewChangesView
-        session={session}
-        item={changesFor}
-        onBack={() => setChangesFor(null)}
-      />
-    );
+    return <ReviewChangesView session={session} item={changesFor} onBack={() => setChangesFor(null)} />;
   }
 
   return (
@@ -239,12 +270,7 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
 
       {err && <LoadError message={err} onRetry={reload} />}
 
-      <div
-        role="tabpanel"
-        id="m18-sl-panel"
-        aria-labelledby={`m18-sl-tab-${tab}`}
-        aria-label={t('m18.sl.panelLabel')}
-      >
+      <div role="tabpanel" id="m18-sl-panel" aria-labelledby={`m18-sl-tab-${tab}`} aria-label={t('m18.sl.panelLabel')}>
         {!data && !err && <div className="dim">{t('m18.loading')}</div>}
         {data && buckets[tab].length === 0 && <div className="dim">{t(`m18.sl.empty.${tab}`, t('m18.sl.empty'))}</div>}
         {buckets[tab].map((item) => (
@@ -259,14 +285,18 @@ export function SecondLookScreen({ session, tick, notify, openPlayer }: M18Scree
           />
         ))}
       </div>
-
     </div>
   );
 }
 
 /** ONE card per player, carrying every change — never three alerts for one result. */
 function SecondLookCard({
-  session, item, notify, openPlayer, reload, onReviewChanges,
+  session,
+  item,
+  notify,
+  openPlayer,
+  reload,
+  onReviewChanges,
 }: {
   session: Session;
   item: SecondLookItem;
@@ -283,9 +313,15 @@ function SecondLookCard({
 
   const act = async (fn: () => Promise<unknown>, done: string) => {
     setBusy(true);
-    try { await fn(); notify(done); reload(); }
-    catch (e) { notify(errMessage(e), true); }
-    finally { setBusy(false); }
+    try {
+      await fn();
+      notify(done);
+      reload();
+    } catch (e) {
+      notify(errMessage(e), true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const changes = item.changes ?? [];
@@ -293,33 +329,127 @@ function SecondLookCard({
   const open = item.status === 'open';
 
   return (
-    <article className="section desk-secondlook" aria-label={`${t('m18.sl.cardLabel')}: ${item.playerName ?? t('m18.sl.playerWithheld')}`}>
+    <article
+      className="section desk-secondlook"
+      aria-label={`${t('m18.sl.cardLabel')}: ${item.playerName ?? t('m18.sl.playerWithheld')}`}
+    >
       <header className="review-dossier-head">
-        <span className="review-monogram" aria-hidden="true">{item.playerName ? item.playerName.split(' ').map(n=>n[0]).slice(0,2).join('') : '—'}</span>
-        <div><span className="suite-eyebrow">Second Look · decision review</span><h3>{item.playerName ?? t('m18.sl.playerWithheld')}</h3><div className="review-statuses">{item.kindLabel && <span>{item.kindLabel}</span>}<span className="pill">{statusLabel(item.status)}</span></div></div>
-        {item.playerName && <button onClick={() => openPlayer(item.playerId)}>{t('m18.sl.openProfile')} <span aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button>}
+        <span className="review-monogram" aria-hidden="true">
+          {item.playerName
+            ? item.playerName
+                .split(' ')
+                .map((n) => n[0])
+                .slice(0, 2)
+                .join('')
+            : '—'}
+        </span>
+        <div>
+          <span className="suite-eyebrow">Second Look · decision review</span>
+          <h3>{item.playerName ?? t('m18.sl.playerWithheld')}</h3>
+          <div className="review-statuses">
+            {item.kindLabel && <span>{item.kindLabel}</span>}
+            <span className="pill">{statusLabel(item.status)}</span>
+          </div>
+        </div>
+        {item.playerName && (
+          <button onClick={() => openPlayer(item.playerId)}>
+            {t('m18.sl.openProfile')}{' '}
+            <span aria-hidden="true">
+              <Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }} />
+            </span>
+          </button>
+        )}
       </header>
       {item.playerAvailable === false && <div className="notice block">{t('m18.sl.playerUnavailable')}</div>}
       {item.summary && <p className="review-summary">{item.summary}</p>}
       <div className="review-dossier-grid">
-        <aside className="review-original"><span className="suite-eyebrow">01 · Original decision</span><dl>
-          <div><dt>{t('m18.sl.archivedOn')}</dt><dd>{item.decisionAt ? fmtDate(item.decisionAt) : '—'}</dd></div>
-          {item.archivedStatus && <div><dt>Recorded status</dt><dd>{archivedLabel(item.archivedStatus)}</dd></div>}
-          <div><dt>{t('m18.sl.originalReason')}</dt><dd>{(item.archiveReasonCodes ?? []).length ? <ul>{item.archiveReasonCodes!.map(code=><li key={code}>{reasonLabel(code)}</li>)}</ul> : t('m18.sl.noReasonRecorded')}</dd></div>
-        </dl></aside>
-        <section className="review-new"><div className="review-new-title"><div><span className="suite-eyebrow">02 · Evidence update</span><h4>{t('m18.sl.newSince')}</h4></div><b>{changes.length}</b></div>
+        <aside className="review-original">
+          <span className="suite-eyebrow">01 · Original decision</span>
+          <dl>
+            <div>
+              <dt>{t('m18.sl.archivedOn')}</dt>
+              <dd>{item.decisionAt ? fmtDate(item.decisionAt) : '—'}</dd>
+            </div>
+            {item.archivedStatus && (
+              <div>
+                <dt>Recorded status</dt>
+                <dd>{archivedLabel(item.archivedStatus)}</dd>
+              </div>
+            )}
+            <div>
+              <dt>{t('m18.sl.originalReason')}</dt>
+              <dd>
+                {(item.archiveReasonCodes ?? []).length ? (
+                  <ul>
+                    {item.archiveReasonCodes!.map((code) => (
+                      <li key={code}>{reasonLabel(code)}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  t('m18.sl.noReasonRecorded')
+                )}
+              </dd>
+            </div>
+          </dl>
+        </aside>
+        <section className="review-new">
+          <div className="review-new-title">
+            <div>
+              <span className="suite-eyebrow">02 · Evidence update</span>
+              <h4>{t('m18.sl.newSince')}</h4>
+            </div>
+            <b>{changes.length}</b>
+          </div>
           {changes.length === 0 && <p className="dim">{t('m18.sl.noChanges')}</p>}
-          <ol className="review-evidence-list">{changes.map((c,i)=><li key={c.fingerprint ?? `${c.type}-${i}`}>
-            <span className={`review-event-mark ${c.negative?'reduced':''}`} aria-hidden="true">{c.negative?'−':'+'}</span>
-            <div><time>{fmtDate(c.occurredAt)}</time><p>{c.text}</p>{c.negative && <span className="pill">{t('m18.sl.reducesEvidence')}</span>}{(c.relatesTo??[]).length>0&&<small>{t('m18.sl.relatesTo')}: {c.relatesTo!.map(reasonLabel).join(', ')}</small>}</div>
-          </li>)}</ol>
+          <ol className="review-evidence-list">
+            {changes.map((c, i) => (
+              <li key={c.fingerprint ?? `${c.type}-${i}`}>
+                <span className={`review-event-mark ${c.negative ? 'reduced' : ''}`} aria-hidden="true">
+                  {c.negative ? '−' : '+'}
+                </span>
+                <div>
+                  <time>{fmtDate(c.occurredAt)}</time>
+                  <p>{c.text}</p>
+                  {c.negative && <span className="pill">{t('m18.sl.reducesEvidence')}</span>}
+                  {(c.relatesTo ?? []).length > 0 && (
+                    <small>
+                      {t('m18.sl.relatesTo')}: {c.relatesTo!.map(reasonLabel).join(', ')}
+                    </small>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
         </section>
-        {unresolvedCodes.length > 0 && <aside className="review-standing"><span className="suite-eyebrow">Club circumstances</span><h4>{t('m18.sl.stillStands')}</h4><ul>{unresolvedCodes.map(c=><li key={c}>{reasonLabel(c)}</li>)}</ul><p>{t('m18.sl.stillStandsNote')}</p></aside>}
-        <section className="review-context"><TrustMovementList movement={item.trustMovement ?? []}/>{item.currentTrust && <div className="review-confidence" title={item.currentTrust.note ?? t('m18.trustNote')}><span>{t('m18.sl.currentTrust')}</span><strong>{item.currentTrust.score}</strong><span className="pill">{item.currentTrust.bandLabel ?? bandLabel(item.currentTrust.band)}</span><TrustNote note={item.currentTrust.note}/></div>}</section>
+        {unresolvedCodes.length > 0 && (
+          <aside className="review-standing">
+            <span className="suite-eyebrow">Club circumstances</span>
+            <h4>{t('m18.sl.stillStands')}</h4>
+            <ul>
+              {unresolvedCodes.map((c) => (
+                <li key={c}>{reasonLabel(c)}</li>
+              ))}
+            </ul>
+            <p>{t('m18.sl.stillStandsNote')}</p>
+          </aside>
+        )}
+        <section className="review-context">
+          <TrustMovementList movement={item.trustMovement ?? []} />
+          {item.currentTrust && (
+            <div className="review-confidence" title={item.currentTrust.note ?? t('m18.trustNote')}>
+              <span>{t('m18.sl.currentTrust')}</span>
+              <strong>{item.currentTrust.score}</strong>
+              <span className="pill">{item.currentTrust.bandLabel ?? bandLabel(item.currentTrust.band)}</span>
+              <TrustNote note={item.currentTrust.note} />
+            </div>
+          )}
+        </section>
       </div>
 
       {item.status === 'reviewed' && item.reviewedAt && (
-        <div className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>{t('m18.sl.reviewedOn')}: {fmtDateTime(item.reviewedAt)}</div>
+        <div className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>
+          {t('m18.sl.reviewedOn')}: {fmtDateTime(item.reviewedAt)}
+        </div>
       )}
       {item.status === 'dismissed' && (
         <div className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>
@@ -328,23 +458,43 @@ function SecondLookCard({
         </div>
       )}
       {item.status === 'reopened_room' && item.reopenedAt && (
-        <div className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>{t('m18.sl.reopenedOn')}: {fmtDateTime(item.reopenedAt)}</div>
+        <div className="dim" style={{ fontSize: 12.5, marginTop: 8 }}>
+          {t('m18.sl.reopenedOn')}: {fmtDateTime(item.reopenedAt)}
+        </div>
       )}
 
       {/* CTAs. Reopening a room happens ONLY because a recruiter clicked. */}
       <div className="review-dossier-actions">
         <button onClick={onReviewChanges}>{t('m18.sl.reviewChanges')}</button>
         {open && (
-          <button disabled={busy} onClick={() => act(() => m18.reviewSecondLook(session, item.id), t('m18.sl.markedReviewed'))}>
+          <button
+            disabled={busy}
+            onClick={() => act(() => m18.reviewSecondLook(session, item.id), t('m18.sl.markedReviewed'))}
+          >
             {t('m18.sl.markReviewed')}
           </button>
         )}
         {(open || item.status === 'reviewed') && (
           <>
-            <button className="primary" disabled={busy} onClick={() => { setReopenOpen((v) => !v); setDismissOpen(false); }} aria-expanded={reopenOpen}>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => {
+                setReopenOpen((v) => !v);
+                setDismissOpen(false);
+              }}
+              aria-expanded={reopenOpen}
+            >
               {t('m18.sl.reopenRoom')}
             </button>
-            <button disabled={busy} onClick={() => { setDismissOpen((v) => !v); setReopenOpen(false); }} aria-expanded={dismissOpen}>
+            <button
+              disabled={busy}
+              onClick={() => {
+                setDismissOpen((v) => !v);
+                setReopenOpen(false);
+              }}
+              aria-expanded={dismissOpen}
+            >
               {t('m18.sl.dismiss')}
             </button>
           </>
@@ -360,7 +510,9 @@ function SecondLookCard({
                 <input
                   type="checkbox"
                   checked={reopenCodes.includes(code)}
-                  onChange={(e) => setReopenCodes((prev) => (e.target.checked ? [...prev, code] : prev.filter((x) => x !== code)))}
+                  onChange={(e) =>
+                    setReopenCodes((prev) => (e.target.checked ? [...prev, code] : prev.filter((x) => x !== code)))
+                  }
                 />{' '}
                 {reasonLabel(code)}
               </label>
@@ -376,7 +528,9 @@ function SecondLookCard({
             </button>
             <button onClick={() => setReopenOpen(false)}>{t('common.cancel')}</button>
           </div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m18.sl.reopenNote')}</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+            {t('m18.sl.reopenNote')}
+          </div>
         </div>
       )}
 
@@ -384,8 +538,16 @@ function SecondLookCard({
         <div className="section" style={{ marginTop: 8 }} aria-label={t('m18.sl.dismissPanel')}>
           <label style={{ fontSize: 13 }}>
             {t('m18.sl.dismissReason')}{' '}
-            <select aria-label={t('m18.sl.dismissReason')} value={dismissReason} onChange={(e) => setDismissReason(e.target.value)}>
-              {SECOND_LOOK_DISMISS_REASONS.map((r) => <option key={r} value={r}>{slDismissLabel(r)}</option>)}
+            <select
+              aria-label={t('m18.sl.dismissReason')}
+              value={dismissReason}
+              onChange={(e) => setDismissReason(e.target.value)}
+            >
+              {SECOND_LOOK_DISMISS_REASONS.map((r) => (
+                <option key={r} value={r}>
+                  {slDismissLabel(r)}
+                </option>
+              ))}
             </select>
           </label>
           <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -397,7 +559,9 @@ function SecondLookCard({
             </button>
             <button onClick={() => setDismissOpen(false)}>{t('common.cancel')}</button>
           </div>
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m18.sl.dismissNote')}</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+            {t('m18.sl.dismissNote')}
+          </div>
         </div>
       )}
     </article>
@@ -420,13 +584,22 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
   useEffect(() => {
     let live = true;
     setErr(null);
-    m18.secondLookChanges(session, item.id)
-      .then((d) => { if (live) setData(d); })
-      .catch((e) => { if (live) setErr(errMessage(e)); });
-    return () => { live = false; };
+    m18
+      .secondLookChanges(session, item.id)
+      .then((d) => {
+        if (live) setData(d);
+      })
+      .catch((e) => {
+        if (live) setErr(errMessage(e));
+      });
+    return () => {
+      live = false;
+    };
   }, [session, item.id, bump]);
 
-  const rows: ComparisonRow[] = (data?.comparison?.rows ?? []).filter((r) => r.changed === true || r.available === false);
+  const rows: ComparisonRow[] = (data?.comparison?.rows ?? []).filter(
+    (r) => r.changed === true || r.available === false,
+  );
 
   return (
     <div className="review-comparison">
@@ -446,9 +619,14 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
           <div style={{ fontSize: 13, marginBottom: 8 }}>
             <b>{t('m18.sl.previousReview')}:</b>{' '}
             {data.previous?.at ? fmtDate(data.previous.at) : <span className="dim">—</span>}
-            {data.previous?.recommendation && <> · {t(`rm.rec.${data.previous.recommendation}`, data.previous.recommendation.replace(/_/g, ' '))}</>}
+            {data.previous?.recommendation && (
+              <> · {t(`rm.rec.${data.previous.recommendation}`, data.previous.recommendation.replace(/_/g, ' '))}</>
+            )}
             {(data.previous?.reasonCodes ?? []).length > 0 && (
-              <div className="dim">{t('m18.sl.originalReason')}: <DetailItems items={(data.previous?.reasonCodes ?? []).map(reasonLabel)} /></div>
+              <div className="dim">
+                {t('m18.sl.originalReason')}:{' '}
+                <DetailItems items={(data.previous?.reasonCodes ?? []).map(reasonLabel)} />
+              </div>
             )}
             {data.previous?.note && <div className="dim">{data.previous.note}</div>}
           </div>
@@ -467,9 +645,7 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
                   <tr key={r.key}>
                     <td>{t(`m18.sl.row.${r.key}`, r.label)}</td>
                     <td>
-                      {r.available
-                        ? fmtValue(r.was)
-                        : <span className="dim">{t('m18.sl.previousUnavailable')}</span>}
+                      {r.available ? fmtValue(r.was) : <span className="dim">{t('m18.sl.previousUnavailable')}</span>}
                     </td>
                     <td>{fmtValue(r.now)}</td>
                   </tr>
@@ -477,8 +653,16 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
               </tbody>
             </table>
           </div>
-          {rows.length === 0 && <div className="dim" style={{ marginTop: 8 }}>{t('m18.sl.noChangedRows')}</div>}
-          {data.comparison?.note && <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{data.comparison.note}</div>}
+          {rows.length === 0 && (
+            <div className="dim" style={{ marginTop: 8 }}>
+              {t('m18.sl.noChangedRows')}
+            </div>
+          )}
+          {data.comparison?.note && (
+            <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+              {data.comparison.note}
+            </div>
+          )}
 
           {(data.changes ?? []).length > 0 && (
             <div style={{ marginTop: 12 }}>
@@ -486,8 +670,8 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
               <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
                 {(data.changes ?? []).map((c, i) => (
                   <li key={`${c.type}-${i}`} style={{ fontSize: 13 }}>
-                    <Mark met={!c.negative} />{c.text}{' '}
-                    <span className="dim">{fmtDate(c.occurredAt)}</span>
+                    <Mark met={!c.negative} />
+                    {c.text} <span className="dim">{fmtDate(c.occurredAt)}</span>
                   </li>
                 ))}
               </ul>
@@ -500,14 +684,22 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
             <div className="sl-still" style={{ marginTop: 12, fontSize: 13 }}>
               <b>{t('m18.sl.stillStands')}</b>
               <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
-                {(data.unresolvedReasonCodes ?? []).map((c) => <li key={c}>{reasonLabel(c)}</li>)}
+                {(data.unresolvedReasonCodes ?? []).map((c) => (
+                  <li key={c}>{reasonLabel(c)}</li>
+                ))}
               </ul>
-              <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>{t('m18.sl.stillStandsNote')}</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 4 }}>
+                {t('m18.sl.stillStandsNote')}
+              </div>
             </div>
           )}
 
-          <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>{data.note ?? t('m18.sl.note')}</div>
-          <div className="dim" style={{ fontSize: 12 }}>{data.disclaimer ?? t('m18.sl.disclaimer')}</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 10 }}>
+            {data.note ?? t('m18.sl.note')}
+          </div>
+          <div className="dim" style={{ fontSize: 12 }}>
+            {data.disclaimer ?? t('m18.sl.disclaimer')}
+          </div>
         </div>
       )}
     </div>
@@ -521,10 +713,21 @@ function ReviewChangesView({ session, item, onBack }: { session: Session; item: 
 // grouped by their state. Every reason, the evidence confidence, the last
 // evidence and the actions open behind the row. The one sentence that must
 // stay on screen — coverage is workflow coverage, never a score — stays.
-const initialsOf = (name: string | null | undefined) => (name ?? '').split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '·';
+const initialsOf = (name: string | null | undefined) =>
+  (name ?? '')
+    .split(/\s+/)
+    .map((w) => w[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase() || '·';
 
 export function NobodyMissedScreen({
-  session, tick, notify, openPlayer, onOpenRoom,
+  session,
+  tick,
+  notify,
+  openPlayer,
+  onOpenRoom,
 }: M18ScreenProps & { onOpenRoom?: (roomId: string) => void }) {
   const [briefs, setBriefs] = useState<BriefListResult | null>(null);
   const [briefId, setBriefId] = useState<string>('');
@@ -536,14 +739,19 @@ export function NobodyMissedScreen({
 
   useEffect(() => {
     let live = true;
-    m18.briefs(session)
+    m18
+      .briefs(session)
       .then((d) => {
         if (!live) return;
         setBriefs(d);
         setBriefId((prev) => prev || (d.items.find((b) => b.status === 'active')?.id ?? d.items[0]?.id ?? ''));
       })
-      .catch((e) => { if (live) setErr(errMessage(e)); });
-    return () => { live = false; };
+      .catch((e) => {
+        if (live) setErr(errMessage(e));
+      });
+    return () => {
+      live = false;
+    };
   }, [session, tick]);
 
   useEffect(() => {
@@ -551,43 +759,85 @@ export function NobodyMissedScreen({
     let live = true;
     setErr(null);
     // The candidates page by cursor: this reads the first page; a "load more" (nextCursor) is needed.
-    m18.nobodyMissed(session, { briefId, sort })
-      .then((d) => { if (live) setData(d); })
-      .catch((e) => { if (live) { setErr(errMessage(e)); setData(null); } });
-    return () => { live = false; };
+    m18
+      .nobodyMissed(session, { briefId, sort })
+      .then((d) => {
+        if (live) setData(d);
+      })
+      .catch((e) => {
+        if (live) {
+          setErr(errMessage(e));
+          setData(null);
+        }
+      });
+    return () => {
+      live = false;
+    };
   }, [session, briefId, sort, tick, bump]);
 
   const act = async (fn: () => Promise<unknown>, done: string) => {
-    try { await fn(); notify(done); reload(); }
-    catch (e) { notify(errMessage(e), true); }
+    try {
+      await fn();
+      notify(done);
+      reload();
+    } catch (e) {
+      notify(errMessage(e), true);
+    }
   };
 
-  const groups = data ? [
-    { key: 'open', label: t('m18.nm.groupNeedsReview', 'Needs review'), items: data.items.filter((c) => c.state === 'open') },
-    { key: 'reviewed', label: t('m18.nm.groupReviewed', 'Reviewed, no action yet'), items: data.items.filter((c) => c.state === 'reviewed') },
-    { key: 'other', label: t('m18.nm.groupOther', 'Other'), items: data.items.filter((c) => c.state !== 'open' && c.state !== 'reviewed') },
-  ].filter((g) => g.items.length > 0) : [];
+  const groups = data
+    ? [
+        {
+          key: 'open',
+          label: t('m18.nm.groupNeedsReview', 'Needs review'),
+          items: data.items.filter((c) => c.state === 'open'),
+        },
+        {
+          key: 'reviewed',
+          label: t('m18.nm.groupReviewed', 'Reviewed, no action yet'),
+          items: data.items.filter((c) => c.state === 'reviewed'),
+        },
+        {
+          key: 'other',
+          label: t('m18.nm.groupOther', 'Other'),
+          items: data.items.filter((c) => c.state !== 'open' && c.state !== 'reviewed'),
+        },
+      ].filter((g) => g.items.length > 0)
+    : [];
 
   return (
     <div data-screen="nobody-missed" className="coverage-workspace">
       <section className="nm-briefbar" aria-label={t('m18.nm.briefPickerLabel')}>
-        <div className="nm-briefbar-title"><span className="discovery-step">01</span><div><h3>Set your discovery scope</h3><p>Choose a recruitment brief, then arrange the review queue.</p></div></div>
+        <div className="nm-briefbar-title">
+          <span className="discovery-step">01</span>
+          <div>
+            <h3>Set your discovery scope</h3>
+            <p>Choose a recruitment brief, then arrange the review queue.</p>
+          </div>
+        </div>
         <div className="nm-controls">
-        <label>
-          {t('m18.nm.brief')}{' '}
-          <select aria-label={t('m18.nm.brief')} value={briefId} onChange={(e) => setBriefId(e.target.value)}>
-            {(briefs?.items ?? []).map((b) => (
-              <option key={b.id} value={b.id}>{b.title} — {briefStatusLabel(b.status)} (v{b.version})</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {t('m18.nm.sort')}{' '}
-          <select aria-label={t('m18.nm.sort')} value={sort} onChange={(e) => setSort(e.target.value)}>
-            {(data?.sorts ?? NOBODY_MISSED_SORTS).map((s) => <option key={s} value={s}>{sortLabel(s)}</option>)}
-          </select>
-        </label>
-        </div><p className="discovery-method">{t('m18.nm.noRank')}</p>
+          <label>
+            {t('m18.nm.brief')}{' '}
+            <select aria-label={t('m18.nm.brief')} value={briefId} onChange={(e) => setBriefId(e.target.value)}>
+              {(briefs?.items ?? []).map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.title} — {briefStatusLabel(b.status)} (v{b.version})
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            {t('m18.nm.sort')}{' '}
+            <select aria-label={t('m18.nm.sort')} value={sort} onChange={(e) => setSort(e.target.value)}>
+              {(data?.sorts ?? NOBODY_MISSED_SORTS).map((s) => (
+                <option key={s} value={s}>
+                  {sortLabel(s)}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <p className="discovery-method">{t('m18.nm.noRank')}</p>
       </section>
 
       {err && <LoadError message={err} onRetry={reload} />}
@@ -596,25 +846,50 @@ export function NobodyMissedScreen({
 
       {data && (
         <>
-          <CoveragePanel coverage={data.coverage} live={data.live} note={data.note} brief={data.brief} needsReview={data.items.filter((c) => c.state === 'open').length} />
+          <CoveragePanel
+            coverage={data.coverage}
+            live={data.live}
+            note={data.note}
+            brief={data.brief}
+            needsReview={data.items.filter((c) => c.state === 'open').length}
+          />
 
           {data.evaluationPolicy && (
             <details className="f-about" style={{ marginBottom: 18 }}>
-              <summary>{t('m18.nm.policyTitle')} (v{data.evaluationPolicy.version})</summary>
+              <summary>
+                {t('m18.nm.policyTitle')} (v{data.evaluationPolicy.version})
+              </summary>
               <div style={{ fontSize: 13, marginTop: 6 }}>
                 <b>{t('m18.nm.counts')}</b>
                 <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
-                  {data.evaluationPolicy.counts.map((c) => <li key={c.key}><Mark met />{c.label}</li>)}
+                  {data.evaluationPolicy.counts.map((c) => (
+                    <li key={c.key}>
+                      <Mark met />
+                      {c.label}
+                    </li>
+                  ))}
                 </ul>
                 <b style={{ display: 'block', marginTop: 8 }}>{t('m18.nm.doesNotCount')}</b>
                 <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
-                  {data.evaluationPolicy.doesNotCount.map((c) => <li key={c.key}><Mark met={false} />{c.why}</li>)}
+                  {data.evaluationPolicy.doesNotCount.map((c) => (
+                    <li key={c.key}>
+                      <Mark met={false} />
+                      {c.why}
+                    </li>
+                  ))}
                 </ul>
                 <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
-                  {t('m18.nm.recentDays', 'A player decided on recently is not surfaced here.')} ({data.evaluationPolicy.recentDecisionDays})
+                  {t('m18.nm.recentDays', 'A player decided on recently is not surfaced here.')} (
+                  {data.evaluationPolicy.recentDecisionDays})
                 </div>
-                {data.coverage && <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{data.coverage.note}</div>}
-                <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{data.note}</div>
+                {data.coverage && (
+                  <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+                    {data.coverage.note}
+                  </div>
+                )}
+                <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+                  {data.note}
+                </div>
               </div>
             </details>
           )}
@@ -625,22 +900,39 @@ export function NobodyMissedScreen({
             {data.live && data.items.length === 0 && <div className="dim">{t('m18.nm.empty')}</div>}
             {groups.map((g) => (
               <div key={g.key} className="nm-group" data-group={g.key}>
-                <div className="nm-group-label">{g.label} · {g.items.length}</div>
+                <div className="nm-group-label">
+                  {g.label} · {g.items.length}
+                </div>
                 <div className="list-rows">
                   {g.items.map((c) => (
                     <CandidateRow
                       key={c.playerId}
                       item={c}
                       openPlayer={openPlayer}
-                      onReview={() => act(() => m18.reviewCandidate(session, { briefId: c.briefId, playerId: c.playerId }), t('m18.nm.reviewed'))}
-                      onDismiss={(reason) => act(() => m18.dismissCandidate(session, { briefId: c.briefId, playerId: c.playerId, reason }), t('m18.nm.dismissed'))}
+                      onReview={() =>
+                        act(
+                          () => m18.reviewCandidate(session, { briefId: c.briefId, playerId: c.playerId }),
+                          t('m18.nm.reviewed'),
+                        )
+                      }
+                      onDismiss={(reason) =>
+                        act(
+                          () => m18.dismissCandidate(session, { briefId: c.briefId, playerId: c.playerId, reason }),
+                          t('m18.nm.dismissed'),
+                        )
+                      }
                       onAdd={async () => {
                         try {
-                          const out = await m18.addCandidateToRoom(session, { briefId: c.briefId, playerId: c.playerId });
+                          const out = await m18.addCandidateToRoom(session, {
+                            briefId: c.briefId,
+                            playerId: c.playerId,
+                          });
                           notify(t('m18.nm.addedToRoom'));
                           reload();
                           if (out.roomId) onOpenRoom?.(out.roomId);
-                        } catch (e) { notify(errMessage(e), true); }
+                        } catch (e) {
+                          notify(errMessage(e), true);
+                        }
                       }}
                     />
                   ))}
@@ -661,16 +953,38 @@ function CoverageRing({ percent, label }: { percent: number | null; label: strin
   return (
     <svg className="nm-ring" viewBox="0 0 36 36" width="96" height="96" role="img" aria-label={label}>
       <circle cx="18" cy="18" r={r} fill="none" stroke="var(--sb-wash)" strokeWidth="3.2" />
-      <circle cx="18" cy="18" r={r} fill="none" stroke="var(--sb-green-text)" strokeWidth="3.2" strokeLinecap="round" strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset="25" />
-      <text x="18" y="19.6" textAnchor="middle" fontSize="7.5" fontWeight="650" fill="currentColor">{percent == null ? '—' : `${percent}%`}</text>
+      <circle
+        cx="18"
+        cy="18"
+        r={r}
+        fill="none"
+        stroke="var(--sb-green-text)"
+        strokeWidth="3.2"
+        strokeLinecap="round"
+        strokeDasharray={`${pct} ${100 - pct}`}
+        strokeDashoffset="25"
+      />
+      <text x="18" y="19.6" textAnchor="middle" fontSize="7.5" fontWeight="650" fill="currentColor">
+        {percent == null ? '—' : `${percent}%`}
+      </text>
     </svg>
   );
 }
 
 /** Evaluation Coverage — a count over a declared denominator. Never a score. */
 function CoveragePanel({
-  coverage, live, note, brief, needsReview,
-}: { coverage: EvaluationCoverage | null; live: boolean; note: string; brief: RecruitmentBrief; needsReview: number }) {
+  coverage,
+  live,
+  note,
+  brief,
+  needsReview,
+}: {
+  coverage: EvaluationCoverage | null;
+  live: boolean;
+  note: string;
+  brief: RecruitmentBrief;
+  needsReview: number;
+}) {
   return (
     <div className="section nm-coverage" aria-label={t('m18.nm.coverageLabel')}>
       <h4>{t('m18.nm.coverage')}</h4>
@@ -685,7 +999,10 @@ function CoveragePanel({
 
       {live && coverage && !coverage.suppressed && (
         <div className="nm-coverage-body">
-          <CoverageRing percent={coverage.coveragePercent} label={`${t('m18.nm.percent')} ${coverage.coveragePercent == null ? '—' : `${coverage.coveragePercent}%`}`} />
+          <CoverageRing
+            percent={coverage.coveragePercent}
+            label={`${t('m18.nm.percent')} ${coverage.coveragePercent == null ? '—' : `${coverage.coveragePercent}%`}`}
+          />
           <div className="stat-grid nm-stats">
             <div className="stat">
               <div className="v">{coverage.eligible}</div>
@@ -708,16 +1025,24 @@ function CoveragePanel({
       )}
 
       {live && coverage && !coverage.suppressed && coverage.complete && (
-        <div className="dim" style={{ fontSize: 13, marginTop: 6 }}>{t('m18.nm.complete')}</div>
+        <div className="dim" style={{ fontSize: 13, marginTop: 6 }}>
+          {t('m18.nm.complete')}
+        </div>
       )}
-      <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{t('m18.nm.notQuality')}</div>
+      <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>
+        {t('m18.nm.notQuality')}
+      </div>
     </div>
   );
 }
 
 /** One candidate as a row: initials, the name, one line; everything else opens under it. */
 function CandidateRow({
-  item, openPlayer, onReview, onDismiss, onAdd,
+  item,
+  openPlayer,
+  onReview,
+  onDismiss,
+  onAdd,
 }: {
   item: NobodyMissedItem;
   openPlayer: (id: string) => void;
@@ -733,14 +1058,33 @@ function CandidateRow({
 
   return (
     <article className="nm-row" aria-label={`${t('m18.nm.cardLabel')}: ${name}`} data-state={item.state}>
-      <button type="button" className="nm-row-head" aria-expanded={open} data-testid="nm-row-toggle" onClick={() => setOpen((v) => !v)}>
-        <span className="p-avatar" aria-hidden="true">{initialsOf(item.name)}</span>
+      <button
+        type="button"
+        className="nm-row-head"
+        aria-expanded={open}
+        data-testid="nm-row-toggle"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="p-avatar" aria-hidden="true">
+          {initialsOf(item.name)}
+        </span>
         <span className="nm-row-main">
           <b>{name}</b>
-          <RecordFacts items={[{label: 'Position', value: item.position}, {label: 'Age', value: item.age}, ...(item.distanceKm != null ? [{label: 'Distance', value: `${item.distanceKm} km`}] : []), ...(item.reasons.length ? [{label: t('m18.nm.criteriaMet', 'Criteria met'), value: `${met}/${item.reasons.length}`}] : [])]} />
+          <RecordFacts
+            items={[
+              { label: 'Position', value: item.position },
+              { label: 'Age', value: item.age },
+              ...(item.distanceKm != null ? [{ label: 'Distance', value: `${item.distanceKm} km` }] : []),
+              ...(item.reasons.length
+                ? [{ label: t('m18.nm.criteriaMet', 'Criteria met'), value: `${met}/${item.reasons.length}` }]
+                : []),
+            ]}
+          />
         </span>
         {item.lastEvidenceAt && <span className="dim nm-row-when">{fmtDate(item.lastEvidenceAt)}</span>}
-        <span className="dim" aria-hidden="true">{open ? '⌄' : '›'}</span>
+        <span className="dim" aria-hidden="true">
+          {open ? '⌄' : '›'}
+        </span>
       </button>
 
       {open && (
@@ -763,31 +1107,61 @@ function CandidateRow({
           </div>
           {item.lastEvidenceAt && (
             <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>
-              {t('m18.nm.lastEvidence')}: {fmtDate(item.lastEvidenceAt)} · {t('m18.nm.state')}: {t(`m18.nm.st.${item.state}`, item.state.replace(/_/g, ' '))}
+              {t('m18.nm.lastEvidence')}: {fmtDate(item.lastEvidenceAt)} · {t('m18.nm.state')}:{' '}
+              {t(`m18.nm.st.${item.state}`, item.state.replace(/_/g, ' '))}
             </div>
           )}
           <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="primary" onClick={onAdd}>{t('m18.nm.addToRoom')}</button>
+            <button className="primary" onClick={onAdd}>
+              {t('m18.nm.addToRoom')}
+            </button>
             <button onClick={onReview}>{t('m18.nm.reviewPlayer')}</button>
-            <button className="linklike" onClick={() => openPlayer(item.playerId)}>{t('m18.sl.openProfile')}</button>
-            <button className="linklike" onClick={() => setDismissOpen((v) => !v)} aria-expanded={dismissOpen}>{t('m18.nm.dismissForBrief')}</button>
+            <button className="linklike" onClick={() => openPlayer(item.playerId)}>
+              {t('m18.sl.openProfile')}
+            </button>
+            <button className="linklike" onClick={() => setDismissOpen((v) => !v)} aria-expanded={dismissOpen}>
+              {t('m18.nm.dismissForBrief')}
+            </button>
           </div>
           {dismissOpen && (
             <div style={{ marginTop: 10 }} aria-label={t('m18.nm.dismissPanel')}>
               <label style={{ fontSize: 13 }}>
                 {t('m18.nm.dismissReason')}{' '}
-                <select aria-label={t('m18.nm.dismissReason')} value={reason} onChange={(e) => setReason(e.target.value)}>
-                  {NOBODY_MISSED_DISMISS_REASONS.map((r) => <option key={r} value={r}>{nmDismissLabel(r)}</option>)}
+                <select
+                  aria-label={t('m18.nm.dismissReason')}
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                >
+                  {NOBODY_MISSED_DISMISS_REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {nmDismissLabel(r)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={() => { setDismissOpen(false); onDismiss(reason); }}>{t('m18.nm.confirmDismiss')}</button>
-                <button className="linklike" onClick={() => setDismissOpen(false)}>{t('common.cancel')}</button>
+                <button
+                  onClick={() => {
+                    setDismissOpen(false);
+                    onDismiss(reason);
+                  }}
+                >
+                  {t('m18.nm.confirmDismiss')}
+                </button>
+                <button className="linklike" onClick={() => setDismissOpen(false)}>
+                  {t('common.cancel')}
+                </button>
               </div>
-              <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m18.nm.dismissNote')}</div>
+              <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+                {t('m18.nm.dismissNote')}
+              </div>
             </div>
           )}
-          {item.note && <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>{item.note}</div>}
+          {item.note && (
+            <div className="dim" style={{ fontSize: 12, marginTop: 8 }}>
+              {item.note}
+            </div>
+          )}
         </div>
       )}
     </article>
@@ -803,16 +1177,23 @@ export interface BriefsScreenProps extends M18ScreenProps {
 }
 
 export function BriefsScreen(props: BriefsScreenProps) {
-  return props.briefId
-    ? <BriefDetail {...props} briefId={props.briefId} />
-    : <BriefList {...props} />;
+  return props.briefId ? <BriefDetail {...props} briefId={props.briefId} /> : <BriefList {...props} />;
 }
 
 const EMPTY_FORM: BriefInput = {
-  title: '', positions: [], minAge: null, maxAge: null, radiusKm: null,
-  maxLevel: null, foot: null, availability: null,
-  evidenceRequirements: [], minTrustBand: null, combineProtocols: [],
-  activeFrom: null, activeUntil: null,
+  title: '',
+  positions: [],
+  minAge: null,
+  maxAge: null,
+  radiusKm: null,
+  maxLevel: null,
+  foot: null,
+  availability: null,
+  evidenceRequirements: [],
+  minTrustBand: null,
+  combineProtocols: [],
+  activeFrom: null,
+  activeUntil: null,
 };
 
 function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
@@ -825,16 +1206,27 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
   useEffect(() => {
     let live = true;
     setErr(null);
-    m18.briefs(session)
-      .then((d) => { if (live) setData(d); })
-      .catch((e) => { if (live) setErr(errMessage(e)); });
-    return () => { live = false; };
+    m18
+      .briefs(session)
+      .then((d) => {
+        if (live) setData(d);
+      })
+      .catch((e) => {
+        if (live) setErr(errMessage(e));
+      });
+    return () => {
+      live = false;
+    };
   }, [session, tick, bump]);
 
   return (
     <div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>{t('m18.br.intro')}</div>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>{t('m18.br.noHidden')}</div>
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 4 }}>
+        {t('m18.br.intro')}
+      </div>
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 10 }}>
+        {t('m18.br.noHidden')}
+      </div>
 
       {err && <LoadError message={err} onRetry={reload} />}
 
@@ -865,7 +1257,35 @@ function BriefList({ session, tick, notify, onOpenBrief }: BriefsScreenProps) {
       <div className="section" aria-label={t('m18.br.listLabel')}>
         {!data && !err && <div className="dim">{t('m18.loading')}</div>}
         {data && data.items.length === 0 && <div className="dim">{t('m18.br.empty')}</div>}
-        <div className="brief-dossiers">{(data?.items??[]).map(b=><article key={b.id} className="brief-dossier"><header><span className="pill">{briefStatusLabel(b.status)}</span><small>Version {b.version}</small><h3>{b.title}</h3></header><dl>{b.criteriaExplained.map((c,i)=><div key={`${c.key}-${i}`}><dt>{c.label}</dt><dd>{sentenceCase(humanText(c.value))}</dd></div>)}</dl>{!b.criteriaExplained.length&&<p>{t('m18.br.noCriteria')}</p>}<footer><span>Updated {fmtDate(b.updatedAt)}</span><button onClick={()=>onOpenBrief?.(b.id)} aria-label={`${t('m18.br.open')} ${b.title}`}>Open brief <span aria-hidden="true"><Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }}/></span></button></footer></article>)}</div>
+        <div className="brief-dossiers">
+          {(data?.items ?? []).map((b) => (
+            <article key={b.id} className="brief-dossier">
+              <header>
+                <span className="pill">{briefStatusLabel(b.status)}</span>
+                <small>Version {b.version}</small>
+                <h3>{b.title}</h3>
+              </header>
+              <dl>
+                {b.criteriaExplained.map((c, i) => (
+                  <div key={`${c.key}-${i}`}>
+                    <dt>{c.label}</dt>
+                    <dd>{sentenceCase(humanText(c.value))}</dd>
+                  </div>
+                ))}
+              </dl>
+              {!b.criteriaExplained.length && <p>{t('m18.br.noCriteria')}</p>}
+              <footer>
+                <span>Updated {fmtDate(b.updatedAt)}</span>
+                <button onClick={() => onOpenBrief?.(b.id)} aria-label={`${t('m18.br.open')} ${b.title}`}>
+                  Open brief{' '}
+                  <span aria-hidden="true">
+                    <Icon name="arrow-up-right" style={{ width: '1em', height: '1em', verticalAlign: '-0.125em' }} />
+                  </span>
+                </button>
+              </footer>
+            </article>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -882,28 +1302,55 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
   useEffect(() => {
     let live = true;
     setErr(null);
-    m18.brief(session, briefId)
-      .then((b) => { if (live) setBrief(b); })
-      .catch((e) => { if (live) setErr(errMessage(e)); });
-    m18.briefs(session).then((d) => { if (live) setVocab(d.vocabulary); }).catch(() => { /* form falls back */ });
-    m18.evaluationCoverage(session)
-      .then((d) => { if (live) setCoverage(d.items.find((x) => x.briefId === briefId)?.coverage ?? null); })
-      .catch(() => { /* coverage strip is progressive enhancement */ });
-    return () => { live = false; };
+    m18
+      .brief(session, briefId)
+      .then((b) => {
+        if (live) setBrief(b);
+      })
+      .catch((e) => {
+        if (live) setErr(errMessage(e));
+      });
+    m18
+      .briefs(session)
+      .then((d) => {
+        if (live) setVocab(d.vocabulary);
+      })
+      .catch(() => {
+        /* form falls back */
+      });
+    m18
+      .evaluationCoverage(session)
+      .then((d) => {
+        if (live) setCoverage(d.items.find((x) => x.briefId === briefId)?.coverage ?? null);
+      })
+      .catch(() => {
+        /* coverage strip is progressive enhancement */
+      });
+    return () => {
+      live = false;
+    };
   }, [session, briefId, tick, bump]);
 
   const [statusConflict, setStatusConflict] = useState<Conflict | null>(null);
   const setStatus = async (status: string) => {
-    const action = status === 'archived' ? DESTRUCTIVE_ACTIONS.archiveBrief : status === 'paused' ? DESTRUCTIVE_ACTIONS.pauseBrief : null;
+    const action =
+      status === 'archived'
+        ? DESTRUCTIVE_ACTIONS.archiveBrief
+        : status === 'paused'
+          ? DESTRUCTIVE_ACTIONS.pauseBrief
+          : null;
     if (action && !confirmDestructive({ ...action, name: brief?.title ?? null })) return;
     setStatusConflict(null);
     try {
       const out = await m18.patchBrief(session, briefId, { status, expectedRev: brief?.rev });
-      if (out.ok) { notify(t('m18.br.statusChanged')); setBump((b) => b + 1); }
-      else notify(out.message, true);
+      if (out.ok) {
+        notify(t('m18.br.statusChanged'));
+        setBump((b) => b + 1);
+      } else notify(out.message, true);
     } catch (e) {
       const c = conflictOf(e);
-      if (c) setStatusConflict(c); else notify(errMessage(e), true);
+      if (c) setStatusConflict(c);
+      else notify(errMessage(e), true);
     }
   };
 
@@ -911,7 +1358,9 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
     return (
       <div>
         <button onClick={() => onCloseBrief?.()}>← {t('m18.br.back')}</button>
-        <div className="notice block" style={{ marginTop: 10 }}>{err}</div>
+        <div className="notice block" style={{ marginTop: 10 }}>
+          {err}
+        </div>
       </div>
     );
   }
@@ -927,25 +1376,38 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'baseline' }}>
           <h3 style={{ margin: 0 }}>{brief.title}</h3>
           <span className="pill blue">{briefStatusLabel(brief.status)}</span>
-          <span className="pill">{t('m18.br.version')} {brief.version}</span>
+          <span className="pill">
+            {t('m18.br.version')} {brief.version}
+          </span>
         </div>
         <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>
           {t('m18.br.updated')}: {fmtDateTime(brief.updatedAt)}
-          {brief.createdBy?.name && <> · {t('m18.br.createdBy')}: {brief.createdBy.name}</>}
+          {brief.createdBy?.name && (
+            <>
+              {' '}
+              · {t('m18.br.createdBy')}: {brief.createdBy.name}
+            </>
+          )}
         </div>
 
         <div style={{ marginTop: 10 }}>
           <b style={{ fontSize: 13 }}>{t('m18.br.criteria')}</b>
-          {brief.criteriaExplained.length === 0
-            ? <div className="dim" style={{ fontSize: 13 }}>{t('m18.br.noCriteria')}</div>
-            : (
-              <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
-                {brief.criteriaExplained.map((c) => (
-                  <li key={c.key} style={{ fontSize: 13 }}><b>{c.label}:</b> {c.value}</li>
-                ))}
-              </ul>
-            )}
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{brief.note ?? t('m18.br.noHidden')}</div>
+          {brief.criteriaExplained.length === 0 ? (
+            <div className="dim" style={{ fontSize: 13 }}>
+              {t('m18.br.noCriteria')}
+            </div>
+          ) : (
+            <ul style={{ margin: '4px 0 0', paddingInlineStart: 20 }}>
+              {brief.criteriaExplained.map((c) => (
+                <li key={c.key} style={{ fontSize: 13 }}>
+                  <b>{c.label}:</b> {c.value}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+            {brief.note ?? t('m18.br.noHidden')}
+          </div>
         </div>
 
         {(brief.activeFrom || brief.activeUntil) && (
@@ -954,7 +1416,15 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
           </div>
         )}
 
-        {statusConflict && <ConflictNotice conflict={statusConflict} onReload={() => { setStatusConflict(null); setBump((b) => b + 1); }} />}
+        {statusConflict && (
+          <ConflictNotice
+            conflict={statusConflict}
+            onReload={() => {
+              setStatusConflict(null);
+              setBump((b) => b + 1);
+            }}
+          />
+        )}
         <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button onClick={() => setEditing((v) => !v)} aria-expanded={editing}>
             {editing ? t('common.cancel') : t('m18.br.edit')}
@@ -964,24 +1434,42 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
               {t(`m18.br.action.${to}`, to)}
             </button>
           ))}
-          {transitions.length === 0 && <span className="dim" style={{ fontSize: 12.5 }}>{t('m18.br.terminal')}</span>}
+          {transitions.length === 0 && (
+            <span className="dim" style={{ fontSize: 12.5 }}>
+              {t('m18.br.terminal')}
+            </span>
+          )}
         </div>
       </div>
 
       {coverage && (
         <div className="section" aria-label={t('m18.nm.coverageLabel')}>
           <h4>{t('m18.nm.coverage')}</h4>
-          {coverage.suppressed
-            ? <div className="notice block">{coverage.note}</div>
-            : (
-              <div className="stat-grid">
-                <div className="stat"><div className="v">{coverage.eligible}</div><div className="k">{t('m18.nm.eligible')}</div></div>
-                <div className="stat"><div className="v">{coverage.evaluated ?? '—'}</div><div className="k">{t('m18.nm.evaluated')}</div></div>
-                <div className="stat"><div className="v">{coverage.notYetEvaluated ?? '—'}</div><div className="k">{t('m18.nm.notYet')}</div></div>
-                <div className="stat"><div className="v">{coverage.coveragePercent == null ? '—' : `${coverage.coveragePercent}%`}</div><div className="k">{t('m18.nm.percent')}</div></div>
+          {coverage.suppressed ? (
+            <div className="notice block">{coverage.note}</div>
+          ) : (
+            <div className="stat-grid">
+              <div className="stat">
+                <div className="v">{coverage.eligible}</div>
+                <div className="k">{t('m18.nm.eligible')}</div>
               </div>
-            )}
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{coverage.note}</div>
+              <div className="stat">
+                <div className="v">{coverage.evaluated ?? '—'}</div>
+                <div className="k">{t('m18.nm.evaluated')}</div>
+              </div>
+              <div className="stat">
+                <div className="v">{coverage.notYetEvaluated ?? '—'}</div>
+                <div className="k">{t('m18.nm.notYet')}</div>
+              </div>
+              <div className="stat">
+                <div className="v">{coverage.coveragePercent == null ? '—' : `${coverage.coveragePercent}%`}</div>
+                <div className="k">{t('m18.nm.percent')}</div>
+              </div>
+            </div>
+          )}
+          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+            {coverage.note}
+          </div>
         </div>
       )}
 
@@ -1006,13 +1494,20 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
           submitLabel={t('common.save')}
           onSubmit={async (input) => {
             const out = await m18.patchBrief(session, briefId, { ...input, expectedRev: brief.rev });
-            if (out.ok) { notify(t('m18.br.saved')); setEditing(false); setBump((b) => b + 1); }
+            if (out.ok) {
+              notify(t('m18.br.saved'));
+              setEditing(false);
+              setBump((b) => b + 1);
+            }
             return out;
           }}
           // Closing the editor re-reads the brief. "Reload latest" on a
           // conflict goes through here, so the detail view never keeps showing
           // the pre-conflict title after "Reload latest".
-          onCancel={() => { setEditing(false); setBump((b) => b + 1); }}
+          onCancel={() => {
+            setEditing(false);
+            setBump((b) => b + 1);
+          }}
         />
       )}
     </div>
@@ -1021,7 +1516,12 @@ function BriefDetail({ session, tick, notify, briefId, onCloseBrief }: BriefsScr
 
 type SaveOutcome =
   | { ok: true; brief: RecruitmentBrief }
-  | { ok: false; error: 'BRIEF_INVALID'; details: { field: string; error: string; unknown?: string[] }[]; message: string }
+  | {
+      ok: false;
+      error: 'BRIEF_INVALID';
+      details: { field: string; error: string; unknown?: string[] }[];
+      message: string;
+    }
   | { ok: false; error: 'BRIEF_CRITERION_PROHIBITED'; prohibited: string[]; message: string };
 
 /**
@@ -1031,7 +1531,11 @@ type SaveOutcome =
  * that refusal in the server's own words rather than swallowing it.
  */
 function BriefForm({
-  vocabulary, initial, submitLabel, onSubmit, onCancel,
+  vocabulary,
+  initial,
+  submitLabel,
+  onSubmit,
+  onCancel,
 }: {
   vocabulary?: BriefListResult['vocabulary'];
   initial: BriefInput;
@@ -1082,7 +1586,8 @@ function BriefForm({
       }
     } catch (e) {
       const c = conflictOf(e);
-      if (c) setConflict(c); else setMessage(errMessage(e));
+      if (c) setConflict(c);
+      else setMessage(errMessage(e));
     } finally {
       setBusy(false);
     }
@@ -1095,7 +1600,10 @@ function BriefForm({
       {conflict && (
         <ConflictNotice
           conflict={conflict}
-          onReload={() => { setConflict(null); onCancel(); }}
+          onReload={() => {
+            setConflict(null);
+            onCancel();
+          }}
           onKeepChanges={() => setConflict(null)}
         />
       )}
@@ -1104,7 +1612,8 @@ function BriefForm({
         <ul style={{ margin: '0 0 8px', paddingInlineStart: 20 }}>
           {fieldErrors.map((f, i) => (
             <li key={`${f.field}-${i}`} style={{ fontSize: 13 }}>
-              <b>{t(`m18.br.field.${f.field}`, f.field)}</b> — {t(`m18.br.err.${f.error}`, f.error.replace(/_/g, ' ').toLowerCase())}
+              <b>{t(`m18.br.field.${f.field}`, f.field)}</b> —{' '}
+              {t(`m18.br.err.${f.error}`, f.error.replace(/_/g, ' ').toLowerCase())}
             </li>
           ))}
         </ul>
@@ -1125,7 +1634,12 @@ function BriefForm({
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {positions.map((p) => (
             <label key={p} style={{ fontSize: 13 }}>
-              <input type="checkbox" checked={(form.positions ?? []).includes(p)} onChange={() => toggle('positions', p)} /> {p}
+              <input
+                type="checkbox"
+                checked={(form.positions ?? []).includes(p)}
+                onChange={() => toggle('positions', p)}
+              />{' '}
+              {p}
             </label>
           ))}
         </div>
@@ -1134,33 +1648,72 @@ function BriefForm({
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
         <label style={{ fontSize: 13 }}>
           {t('m18.br.fMinAge')}{' '}
-          <input type="number" style={{ width: 80 }} aria-label={t('m18.br.fMinAge')} value={form.minAge ?? ''} onChange={(e) => set('minAge', num(e.target.value))} />
+          <input
+            type="number"
+            style={{ width: 80 }}
+            aria-label={t('m18.br.fMinAge')}
+            value={form.minAge ?? ''}
+            onChange={(e) => set('minAge', num(e.target.value))}
+          />
         </label>
         <label style={{ fontSize: 13 }}>
           {t('m18.br.fMaxAge')}{' '}
-          <input type="number" style={{ width: 80 }} aria-label={t('m18.br.fMaxAge')} value={form.maxAge ?? ''} onChange={(e) => set('maxAge', num(e.target.value))} />
+          <input
+            type="number"
+            style={{ width: 80 }}
+            aria-label={t('m18.br.fMaxAge')}
+            value={form.maxAge ?? ''}
+            onChange={(e) => set('maxAge', num(e.target.value))}
+          />
         </label>
         <label style={{ fontSize: 13 }}>
           {t('m18.br.fRadius')}{' '}
-          <input type="number" style={{ width: 100 }} aria-label={t('m18.br.fRadius')} value={form.radiusKm ?? ''} onChange={(e) => set('radiusKm', num(e.target.value))} />
+          <input
+            type="number"
+            style={{ width: 100 }}
+            aria-label={t('m18.br.fRadius')}
+            value={form.radiusKm ?? ''}
+            onChange={(e) => set('radiusKm', num(e.target.value))}
+          />
         </label>
         <label style={{ fontSize: 13 }}>
           {t('m18.br.fLevel')}{' '}
-          <select aria-label={t('m18.br.fLevel')} value={form.maxLevel ?? ''} onChange={(e) => set('maxLevel', e.target.value || null)}>
+          <select
+            aria-label={t('m18.br.fLevel')}
+            value={form.maxLevel ?? ''}
+            onChange={(e) => set('maxLevel', e.target.value || null)}
+          >
             <option value="">{t('m18.br.any')}</option>
-            {BRIEF_LEVELS.map((l) => <option key={l} value={l}>{levelLabel(l)}</option>)}
+            {BRIEF_LEVELS.map((l) => (
+              <option key={l} value={l}>
+                {levelLabel(l)}
+              </option>
+            ))}
           </select>
         </label>
         <label style={{ fontSize: 13 }}>
           {t('m18.br.fFoot')}{' '}
-          <select aria-label={t('m18.br.fFoot')} value={form.foot ?? ''} onChange={(e) => set('foot', e.target.value || null)}>
+          <select
+            aria-label={t('m18.br.fFoot')}
+            value={form.foot ?? ''}
+            onChange={(e) => set('foot', e.target.value || null)}
+          >
             <option value="">{t('m18.br.any')}</option>
-            {BRIEF_FEET.map((f) => <option key={f} value={f}>{t(`m18.br.foot.${f}`, f)}</option>)}
+            {BRIEF_FEET.map((f) => (
+              <option key={f} value={f}>
+                {t(`m18.br.foot.${f}`, f)}
+              </option>
+            ))}
           </select>
         </label>
         <label style={{ fontSize: 13 }}>
           {t('m18.br.fAvailability')}{' '}
-          <input style={{ width: 160 }} aria-label={t('m18.br.fAvailability')} value={form.availability ?? ''} onChange={(e) => set('availability', e.target.value || null)} />
+          <input
+            style={{ width: 160 }}
+            aria-label={t('m18.br.fAvailability')}
+            value={form.availability ?? ''}
+            onChange={(e) => set('availability', e.target.value || null)}
+          />
         </label>
       </div>
 
@@ -1173,7 +1726,8 @@ function BriefForm({
                 type="checkbox"
                 checked={(form.evidenceRequirements ?? []).includes(r.key)}
                 onChange={() => toggle('evidenceRequirements', r.key)}
-              /> {t(`m18.br.ev.${r.key}`, r.label)}
+              />{' '}
+              {t(`m18.br.ev.${r.key}`, r.label)}
             </label>
           ))}
         </div>
@@ -1188,43 +1742,75 @@ function BriefForm({
                 <input
                   type="checkbox"
                   checked={(form.combineProtocols ?? []).includes(p.id)}
-                  onChange={() => setForm((f) => {
-                    const cur = f.combineProtocols ?? [];
-                    return { ...f, combineProtocols: cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id] };
-                  })}
-                /> {p.title}
+                  onChange={() =>
+                    setForm((f) => {
+                      const cur = f.combineProtocols ?? [];
+                      return {
+                        ...f,
+                        combineProtocols: cur.includes(p.id) ? cur.filter((x) => x !== p.id) : [...cur, p.id],
+                      };
+                    })
+                  }
+                />{' '}
+                {p.title}
               </label>
             ))}
           </div>
-          <div className="dim" style={{ fontSize: 12 }}>{t('m18.br.combineNote')}</div>
+          <div className="dim" style={{ fontSize: 12 }}>
+            {t('m18.br.combineNote')}
+          </div>
         </fieldset>
       )}
 
       <label style={{ display: 'block', marginBottom: 8, fontSize: 13 }}>
         {t('m18.br.fMinBand')}{' '}
-        <select aria-label={t('m18.br.fMinBand')} value={form.minTrustBand ?? ''} onChange={(e) => set('minTrustBand', e.target.value || null)}>
+        <select
+          aria-label={t('m18.br.fMinBand')}
+          value={form.minTrustBand ?? ''}
+          onChange={(e) => set('minTrustBand', e.target.value || null)}
+        >
           <option value="">{t('m18.br.any')}</option>
-          {bands.map((b) => <option key={b} value={b}>{bandLabel(b)}</option>)}
+          {bands.map((b) => (
+            <option key={b} value={b}>
+              {bandLabel(b)}
+            </option>
+          ))}
         </select>
-        <span className="dim" style={{ display: 'block', fontSize: 12 }}>{t('m18.trustNote')}</span>
+        <span className="dim" style={{ display: 'block', fontSize: 12 }}>
+          {t('m18.trustNote')}
+        </span>
       </label>
 
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
         <label style={{ fontSize: 13 }}>
           {t('m18.br.fFrom')}{' '}
-          <input type="date" aria-label={t('m18.br.fFrom')} value={form.activeFrom ?? ''} onChange={(e) => set('activeFrom', e.target.value || null)} />
+          <input
+            type="date"
+            aria-label={t('m18.br.fFrom')}
+            value={form.activeFrom ?? ''}
+            onChange={(e) => set('activeFrom', e.target.value || null)}
+          />
         </label>
         <label style={{ fontSize: 13 }}>
           {t('m18.br.fUntil')}{' '}
-          <input type="date" aria-label={t('m18.br.fUntil')} value={form.activeUntil ?? ''} onChange={(e) => set('activeUntil', e.target.value || null)} />
+          <input
+            type="date"
+            aria-label={t('m18.br.fUntil')}
+            value={form.activeUntil ?? ''}
+            onChange={(e) => set('activeUntil', e.target.value || null)}
+          />
         </label>
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="primary" disabled={busy} onClick={submit}>{submitLabel}</button>
+        <button className="primary" disabled={busy} onClick={submit}>
+          {submitLabel}
+        </button>
         <button onClick={onCancel}>{t('common.cancel')}</button>
       </div>
-      <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('m18.br.prohibitedNote')}</div>
+      <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+        {t('m18.br.prohibitedNote')}
+      </div>
     </div>
   );
 }

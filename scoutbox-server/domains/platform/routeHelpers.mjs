@@ -12,7 +12,10 @@ export function buildRouteHelpers(ctx) {
   const isLead = isLeadUser;
   const requireLead = (req, res) => {
     if (isLead(req.orgUser)) return true;
-    res.status(403).json({ error: 'LEAD_REQUIRED', message: 'This action needs a recruitment lead (role containing Head/Director/Lead/Manager).' });
+    res.status(403).json({
+      error: 'LEAD_REQUIRED',
+      message: 'This action needs a recruitment lead (role containing Head/Director/Lead/Manager).',
+    });
     return false;
   };
 
@@ -25,7 +28,15 @@ export function buildRouteHelpers(ctx) {
     return { total: list.length, limit, offset, items: list.slice(offset, offset + limit) };
   };
 
-  const auditEntry = (byKind, byId, byName, action, detail = null) => ({ id: nextId('aud'), at: Date.now(), byKind, byId, byName, action, detail });
+  const auditEntry = (byKind, byId, byName, action, detail = null) => ({
+    id: nextId('aud'),
+    at: Date.now(),
+    byKind,
+    byId,
+    byName,
+    action,
+    detail,
+  });
   const audit = (record, ...entry) => {
     record.history ??= [];
     record.history.push(auditEntry(...entry));
@@ -55,14 +66,26 @@ export function buildRouteHelpers(ctx) {
     if (elig.maxAge != null && (age === null || age > elig.maxAge)) reasons.push(`maximum age ${elig.maxAge}`);
     if (elig.maxLevel === 'semi_pro' && player.level === 'pro') reasons.push('amateur/semi-pro only');
     if (elig.positionGroup && elig.positionGroup !== 'any') {
-      const groups = { GK: ['GK'], DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'], MID: ['CDM', 'CM', 'CAM'], ATT: ['ST', 'CF', 'RW', 'LW'] };
-      if (!(groups[elig.positionGroup] ?? []).includes(player.position)) reasons.push(`position group ${elig.positionGroup}`);
+      const groups = {
+        GK: ['GK'],
+        DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'],
+        MID: ['CDM', 'CM', 'CAM'],
+        ATT: ['ST', 'CF', 'RW', 'LW'],
+      };
+      if (!(groups[elig.positionGroup] ?? []).includes(player.position))
+        reasons.push(`position group ${elig.positionGroup}`);
     }
-    if (elig.category && elig.category !== 'mixed' && player.footballCategory && player.footballCategory !== elig.category) {
+    if (
+      elig.category &&
+      elig.category !== 'mixed' &&
+      player.footballCategory &&
+      player.footballCategory !== elig.category
+    ) {
       reasons.push(`this is a ${elig.category} team/competition`);
     }
     if (elig.radiusKm != null) {
-      if (!org?.location || !player.location) reasons.push('location required (fail-closed: set your ground/home area)');
+      if (!org?.location || !player.location)
+        reasons.push('location required (fail-closed: set your ground/home area)');
       else if (haversineKm(org.location, player.location) > elig.radiusKm) reasons.push(`within ${elig.radiusKm} km`);
     }
     return { eligible: reasons.length === 0, reasons };
@@ -79,7 +102,15 @@ export function buildRouteHelpers(ctx) {
   const dueAtOrRefuse = (res, raw, field = 'dueAt') => {
     if (isAbsent(raw)) return null;
     const p = parseDateOrInstant(raw, { dayEdge: 'end' });
-    if (!p.ok) { res.status(400).json({ error: 'DATE_INVALID', field, message: `A due date is a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${p.why}).`, expected: p.expected }); return undefined; }
+    if (!p.ok) {
+      res.status(400).json({
+        error: 'DATE_INVALID',
+        field,
+        message: `A due date is a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${p.why}).`,
+        expected: p.expected,
+      });
+      return undefined;
+    }
     return p.precision === 'day' ? p.value : p.ms;
   };
 
@@ -92,9 +123,25 @@ export function buildRouteHelpers(ctx) {
   const coarseArea = (loc) => loc?.city || 'area withheld';
 
   return {
-    isLead, requireLead, orgCanSee, paginate, audit, auditEntry, guardianOwnsChild, dueAtOrRefuse,
-    EVIDENCE_TIERS, freshness, activeAffiliation, checkEligibility,
-    distanceBand, isAdult, haversineKm,
-    histAppend, suppress, SUPPRESS_MIN, coarseArea, canViewFinance: isFinanceUser,
+    isLead,
+    requireLead,
+    orgCanSee,
+    paginate,
+    audit,
+    auditEntry,
+    guardianOwnsChild,
+    dueAtOrRefuse,
+    EVIDENCE_TIERS,
+    freshness,
+    activeAffiliation,
+    checkEligibility,
+    distanceBand,
+    isAdult,
+    haversineKm,
+    histAppend,
+    suppress,
+    SUPPRESS_MIN,
+    coarseArea,
+    canViewFinance: isFinanceUser,
   };
 }

@@ -6,12 +6,17 @@ import crypto from 'node:crypto';
 import { ObservationRun } from './engine.mjs';
 import { FrameQueue } from './frames.mjs';
 import {
-  CV_PROVIDER_ID, CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION,
-  FRAME_LIMITS, CANDIDATE_PROTOCOLS,
+  CV_PROVIDER_ID,
+  CV_ENGINE_VERSION,
+  BOX_CAM_CV_POLICY_VERSION,
+  FRAME_LIMITS,
+  CANDIDATE_PROTOCOLS,
 } from './policy.mjs';
 import {
-  OBSERVATION_CAPABILITIES, NON_CAPABILITIES,
-  combineEligibilityMatrix, combineVerifiedProtocols,
+  OBSERVATION_CAPABILITIES,
+  NON_CAPABILITIES,
+  combineEligibilityMatrix,
+  combineVerifiedProtocols,
 } from './eligibility.mjs';
 
 /** The provider's own version, separate from the engine's. */
@@ -23,8 +28,15 @@ export const PROVIDER_VERSION = 1;
 // An explicit table so a test can read which transitions are illegal.
 
 export const PROVIDER_STATES = Object.freeze([
-  'created', 'ready', 'running', 'finalizing',
-  'accepted', 'refused', 'cancelled', 'expired', 'failed',
+  'created',
+  'ready',
+  'running',
+  'finalizing',
+  'accepted',
+  'refused',
+  'cancelled',
+  'expired',
+  'failed',
 ]);
 
 export const TERMINAL_PROVIDER_STATES = Object.freeze(['accepted', 'refused', 'cancelled', 'expired', 'failed']);
@@ -34,7 +46,11 @@ const TRANSITIONS = Object.freeze({
   ready: ['running', 'finalizing', 'cancelled', 'expired', 'failed'],
   running: ['finalizing', 'cancelled', 'expired', 'failed'],
   finalizing: ['accepted', 'refused', 'failed'],
-  accepted: [], refused: [], cancelled: [], expired: [], failed: [],
+  accepted: [],
+  refused: [],
+  cancelled: [],
+  expired: [],
+  failed: [],
 });
 
 export function canTransition(from, to) {
@@ -107,7 +123,9 @@ class ProviderSession {
     this.disposed = false;
   }
 
-  get finalized() { return TERMINAL_PROVIDER_STATES.includes(this.state); }
+  get finalized() {
+    return TERMINAL_PROVIDER_STATES.includes(this.state);
+  }
 
   transition(to) {
     if (!canTransition(this.state, to)) {
@@ -122,7 +140,11 @@ class ProviderSession {
     if (this.disposed) return false;
     this.queue.clear();
     if (this.run && typeof this.run.dispose === 'function') {
-      try { this.run.dispose(); } catch { /* disposal must never throw */ }
+      try {
+        this.run.dispose();
+      } catch {
+        /* disposal must never throw */
+      }
     }
     this.run = null;
     this.seenSeqs.clear();
@@ -163,13 +185,21 @@ export class ProductionCvProvider {
     this.maxConcurrent = maxConcurrent;
     this.customProcessFrame = processFrame;
 
-    this.sessions = new Map();      // providerSessionId -> ProviderSession
+    this.sessions = new Map(); // providerSessionId -> ProviderSession
     this.byBoxCamSession = new Map(); // boxCamSessionId -> providerSessionId
 
     this.healthState = 'ready';
     this.stats = {
-      created: 0, accepted: 0, refused: 0, cancelled: 0, expired: 0, failed: 0,
-      framesAccepted: 0, framesRejected: 0, framesDropped: 0, shed: 0,
+      created: 0,
+      accepted: 0,
+      refused: 0,
+      cancelled: 0,
+      expired: 0,
+      failed: 0,
+      framesAccepted: 0,
+      framesRejected: 0,
+      framesDropped: 0,
+      shed: 0,
     };
   }
 
@@ -181,7 +211,7 @@ export class ProductionCvProvider {
     let state = this.healthState;
     if (state === 'ready' && load >= 1) state = 'degraded';
     return {
-      state,                                  // not_configured | warming | ready | degraded | unavailable
+      state, // not_configured | warming | ready | degraded | unavailable
       providerId: this.id,
       providerVersion: this.providerVersion,
       engineVersion: this.engineVersion,
@@ -244,12 +274,18 @@ export class ProductionCvProvider {
       return { ok: false, error: PROVIDER_ERRORS.PROVIDER_BUSY, activeSessions: this.sessions.size };
     }
     if (this.byBoxCamSession.has(boxCamSessionId)) {
-      return { ok: false, error: PROVIDER_ERRORS.INVALID_STATE, detail: 'a provider session already exists for this Box Cam session' };
+      return {
+        ok: false,
+        error: PROVIDER_ERRORS.INVALID_STATE,
+        detail: 'a provider session already exists for this Box Cam session',
+      };
     }
 
     const s = new ProviderSession({
       providerSessionId: `pcv_${crypto.randomBytes(12).toString('base64url')}`,
-      boxCamSessionId, playerId, protocolId,
+      boxCamSessionId,
+      playerId,
+      protocolId,
       eventKind: candidate.eventKind,
       nonce,
       createdAt: this.now(),
@@ -535,21 +571,30 @@ export class ProductionCvProvider {
   sweep(nowMs = this.now()) {
     let swept = 0;
     for (const [, s] of this.sessions) {
-      if (!s.finalized && nowMs > s.expiresAt) { this.#end(s, 'expired'); swept += 1; }
+      if (!s.finalized && nowMs > s.expiresAt) {
+        this.#end(s, 'expired');
+        swept += 1;
+      }
     }
     return swept;
   }
 
   footprint() {
-    let queued = 0, detections = 0, seqs = 0;
+    let queued = 0,
+      detections = 0,
+      seqs = 0;
     for (const s of this.sessions.values()) {
       const f = s.footprint();
-      queued += f.queuedFrames; detections += f.detections; seqs += f.seenSeqs;
+      queued += f.queuedFrames;
+      detections += f.detections;
+      seqs += f.seenSeqs;
     }
     return {
       activeSessions: this.sessions.size,
       boxCamIndexSize: this.byBoxCamSession.size,
-      queuedFrames: queued, detections, seenSeqs: seqs,
+      queuedFrames: queued,
+      detections,
+      seenSeqs: seqs,
       stats: { ...this.stats },
     };
   }

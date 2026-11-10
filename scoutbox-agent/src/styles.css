@@ -3,4 +3,4 @@
    defined once in design-system/platform.css; the document attributes
    data-app="agent" and data-theme select this application's palette. Keep
    app-specific rules (if any) below the import. */
-@import '../../design-system/platform.css';
+@import "../../design-system/platform.css";

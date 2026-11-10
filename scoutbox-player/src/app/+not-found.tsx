@@ -15,7 +15,12 @@ export default function NotFound() {
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }}>
       <View style={{ flex: 1, justifyContent: 'center', padding: 16 }}>
         <Card testID="not-found">
-          <Text accessibilityRole="header" style={{ color: colors.text, fontSize: 18, fontWeight: '700', marginBottom: 6 }}>{pt('notFoundTitle')}</Text>
+          <Text
+            accessibilityRole="header"
+            style={{ color: colors.text, fontSize: 18, fontWeight: '700', marginBottom: 6 }}
+          >
+            {pt('notFoundTitle')}
+          </Text>
           <Muted>{pt('notFoundBody')}</Muted>
           <View style={{ marginTop: 12 }}>
             <Button primary label={pt('notFoundHome')} onPress={() => router.replace('/')} testID="not-found-home" />

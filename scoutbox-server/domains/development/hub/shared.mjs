@@ -20,10 +20,17 @@ export const DEVELOPMENT_PRINCIPLE =
  * person that the figure cannot support. Scanned against exported labels at boot.
  */
 export const FORBIDDEN_DEVELOPMENT_NAMES = Object.freeze([
-  'Development Score', 'Potential Score', 'Improvement Score',
-  'Readiness Score', 'Growth Score', 'Academy Score',
-  'Player Progress Rating', 'Player Rating', 'Development Rating',
-  'Development Ranking', 'Coach Ranking',
+  'Development Score',
+  'Potential Score',
+  'Improvement Score',
+  'Readiness Score',
+  'Growth Score',
+  'Academy Score',
+  'Player Progress Rating',
+  'Player Rating',
+  'Development Rating',
+  'Development Ranking',
+  'Coach Ranking',
 ]);
 
 /**
@@ -31,24 +38,50 @@ export const FORBIDDEN_DEVELOPMENT_NAMES = Object.freeze([
  * say a word while denying it ("does not measure a player's ceiling").
  */
 export const FORBIDDEN_FIELD_NAMES = Object.freeze([
-  'developmentScore', 'development_score',
-  'potentialScore', 'potential_score',
-  'improvementScore', 'improvement_score',
-  'readinessScore', 'readiness_score',
-  'growthScore', 'growth_score',
-  'academyScore', 'academy_score',
-  'playerProgressRating', 'player_progress_rating',
-  'playerRating', 'player_rating',
-  'developmentRating', 'developmentRanking', 'coachRanking',
-  'progressPercent', 'progress_percent', 'developmentPercent', 'percentDeveloped',
-  'ceiling', 'projectedCeiling', 'talentScore',
+  'developmentScore',
+  'development_score',
+  'potentialScore',
+  'potential_score',
+  'improvementScore',
+  'improvement_score',
+  'readinessScore',
+  'readiness_score',
+  'growthScore',
+  'growth_score',
+  'academyScore',
+  'academy_score',
+  'playerProgressRating',
+  'player_progress_rating',
+  'playerRating',
+  'player_rating',
+  'developmentRating',
+  'developmentRanking',
+  'coachRanking',
+  'progressPercent',
+  'progress_percent',
+  'developmentPercent',
+  'percentDeveloped',
+  'ceiling',
+  'projectedCeiling',
+  'talentScore',
 ]);
 
 /** Patterns a client-supplied body may never carry, whatever it is called. */
 export const REFUSED_CLIENT_FIELDS = Object.freeze([
-  'targetState', 'target_met', 'targetMet', 'progress', 'progressPercent',
-  'evidenceConfidence', 'trustScore', 'verified', 'verifiedEvidence',
-  'developmentScore', 'potentialScore', 'score', 'rating', 'rank',
+  'targetState',
+  'target_met',
+  'targetMet',
+  'progress',
+  'progressPercent',
+  'evidenceConfidence',
+  'trustScore',
+  'verified',
+  'verifiedEvidence',
+  'developmentScore',
+  'potentialScore',
+  'score',
+  'rating',
+  'rank',
 ]);
 
 // -------------------------------------------------------------- plan vocabulary
@@ -92,8 +125,13 @@ export const PLAN_TRANSITIONS = Object.freeze({
  * model for health data, so there must be no place to type a diagnosis.
  */
 export const GOAL_CATEGORIES = Object.freeze([
-  'technical', 'tactical', 'physical', 'psychological',
-  'match_understanding', 'position_specific', 'other',
+  'technical',
+  'tactical',
+  'physical',
+  'psychological',
+  'match_understanding',
+  'position_specific',
+  'other',
 ]);
 
 export const GOAL_CATEGORY_LABELS = Object.freeze({
@@ -122,9 +160,7 @@ export const GOAL_TRANSITIONS = Object.freeze({
 });
 
 /** No injury reason, for the same health-data reason as the categories. */
-export const BLOCK_REASONS = Object.freeze([
-  'waiting_for_assessment', 'schedule', 'facility', 'coach_review', 'other',
-]);
+export const BLOCK_REASONS = Object.freeze(['waiting_for_assessment', 'schedule', 'facility', 'coach_review', 'other']);
 
 /** Sent with every achieved goal so no surface renders the word without it. */
 export const ACHIEVED_MEANING =
@@ -133,8 +169,15 @@ export const ACHIEVED_MEANING =
 // ------------------------------------------------------------ action vocabulary
 
 export const ACTION_TYPES = Object.freeze([
-  'training', 'assessment', 'video_review', 'match_objective',
-  'coach_review', 'combine', 'box_cam', 'evidence_request', 'custom',
+  'training',
+  'assessment',
+  'video_review',
+  'match_objective',
+  'coach_review',
+  'combine',
+  'box_cam',
+  'evidence_request',
+  'custom',
 ]);
 
 export const ACTION_STATUSES = Object.freeze(['todo', 'in_progress', 'done', 'blocked', 'cancelled']);
@@ -154,7 +197,11 @@ export const ASSIGNEE_KINDS = Object.freeze(['player', 'guardian', 'org_user']);
 
 /** A link stores only `{sourceType, sourceId}`, never content from the source. */
 export const EVIDENCE_SOURCES = Object.freeze([
-  'passport_evidence', 'assessment', 'box_cam_session', 'combine_attempt', 'trial_report',
+  'passport_evidence',
+  'assessment',
+  'box_cam_session',
+  'combine_attempt',
+  'trial_report',
 ]);
 
 export const EVIDENCE_SOURCE_LABELS = Object.freeze({
@@ -167,8 +214,11 @@ export const EVIDENCE_SOURCE_LABELS = Object.freeze({
 
 /** Why a link cannot be resolved right now. Never carries the hidden detail. */
 export const UNAVAILABLE_REASONS = Object.freeze([
-  'evidence_not_found', 'evidence_superseded', 'evidence_expired',
-  'evidence_withdrawn', 'evidence_not_visible',
+  'evidence_not_found',
+  'evidence_superseded',
+  'evidence_expired',
+  'evidence_withdrawn',
+  'evidence_not_visible',
 ]);
 
 // -------------------------------------------------------------- review vocabulary
@@ -221,15 +271,18 @@ export const GOAL_LIBRARY_NOTE =
 /** Structure only: headings, not advice. */
 export const PLAN_TEMPLATES = Object.freeze([
   {
-    id: 'technical_development', title: 'Technical Development',
+    id: 'technical_development',
+    title: 'Technical Development',
     goals: Object.freeze([{ category: 'technical' }, { category: 'technical' }]),
   },
   {
-    id: 'positional_development', title: 'Positional Development',
+    id: 'positional_development',
+    title: 'Positional Development',
     goals: Object.freeze([{ category: 'position_specific' }, { category: 'tactical' }]),
   },
   {
-    id: 'trial_follow_up', title: 'Trial Follow-up',
+    id: 'trial_follow_up',
+    title: 'Trial Follow-up',
     goals: Object.freeze([{ category: 'match_understanding' }, { category: 'technical' }]),
   },
 ]);
@@ -275,7 +328,13 @@ export function boundedText(raw, max, { field }) {
   const s = raw.trim();
   if (!s) return { value: null };
   if (s.length > max) {
-    return { error: 'TEXT_TOO_LONG', field, max, length: s.length, detail: `${field} may be at most ${max} characters.` };
+    return {
+      error: 'TEXT_TOO_LONG',
+      field,
+      max,
+      length: s.length,
+      detail: `${field} may be at most ${max} characters.`,
+    };
   }
   return { value: s };
 }
@@ -288,9 +347,11 @@ export function boundedText(raw, max, { field }) {
 export function parseDate(raw, { field }) {
   if (raw == null || raw === '') return { value: null };
   const p = parseDateOrInstant(raw, { dayEdge: 'start' });
-  if (!p.ok) return { error: 'DATE_INVALID', field, detail: `${field} is not a date (${p.why}).`, expected: p.expected };
+  if (!p.ok)
+    return { error: 'DATE_INVALID', field, detail: `${field} is not a date (${p.why}).`, expected: p.expected };
   // An instant is stored as an integer column; one beyond the safe range is refused, not stored.
-  if (!Number.isSafeInteger(p.ms)) return { error: 'DATE_INVALID', field, detail: `${field} is not a date (out of range).` };
+  if (!Number.isSafeInteger(p.ms))
+    return { error: 'DATE_INVALID', field, detail: `${field} is not a date (out of range).` };
   return { value: p.ms };
 }
 
@@ -346,10 +407,15 @@ export function assertDevelopmentVocabulary({ mode = process.env.NODE_ENV ?? 'de
 
   const checkTable = (name, statuses, table) => {
     for (const s of statuses) {
-      if (!Object.prototype.hasOwnProperty.call(table, s)) { problems.push(`${name}: status "${s}" has no transition entry`); continue; }
-      for (const to of table[s]) if (!statuses.includes(to)) problems.push(`${name}: "${s}" → "${to}" is not a known status`);
+      if (!Object.prototype.hasOwnProperty.call(table, s)) {
+        problems.push(`${name}: status "${s}" has no transition entry`);
+        continue;
+      }
+      for (const to of table[s])
+        if (!statuses.includes(to)) problems.push(`${name}: "${s}" → "${to}" is not a known status`);
     }
-    for (const s of Object.keys(table)) if (!statuses.includes(s)) problems.push(`${name}: transition entry "${s}" is not a status`);
+    for (const s of Object.keys(table))
+      if (!statuses.includes(s)) problems.push(`${name}: transition entry "${s}" is not a status`);
   };
   checkTable('PLAN', PLAN_STATUSES, PLAN_TRANSITIONS);
   checkTable('GOAL', GOAL_STATUSES, GOAL_TRANSITIONS);
@@ -357,10 +423,13 @@ export function assertDevelopmentVocabulary({ mode = process.env.NODE_ENV ?? 'de
 
   for (const [owner, vis] of Object.entries(VISIBILITY_BY_OWNER)) {
     if (!PLAN_OWNER_KINDS.includes(owner)) problems.push(`VISIBILITY_BY_OWNER: unknown owner kind "${owner}"`);
-    for (const v of vis) if (!PLAN_VISIBILITY.includes(v)) problems.push(`VISIBILITY_BY_OWNER.${owner}: unknown visibility "${v}"`);
+    for (const v of vis)
+      if (!PLAN_VISIBILITY.includes(v)) problems.push(`VISIBILITY_BY_OWNER.${owner}: unknown visibility "${v}"`);
   }
   for (const t of PLAN_TEMPLATES) {
-    for (const g of t.goals) if (!GOAL_CATEGORIES.includes(g.category)) problems.push(`PLAN_TEMPLATES.${t.id}: unknown category "${g.category}"`);
+    for (const g of t.goals)
+      if (!GOAL_CATEGORIES.includes(g.category))
+        problems.push(`PLAN_TEMPLATES.${t.id}: unknown category "${g.category}"`);
   }
   for (const g of GOAL_LIBRARY) {
     if (!GOAL_CATEGORIES.includes(g.category)) problems.push(`GOAL_LIBRARY.${g.id}: unknown category "${g.category}"`);

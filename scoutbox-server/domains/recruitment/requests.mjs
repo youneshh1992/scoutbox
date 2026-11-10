@@ -22,7 +22,15 @@ export const requestForRecipient = ({ orgId, userId, contactId, caseId, recipien
   return out;
 };
 
-export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify, broadcast, safeguardingCertified, moderateOrRefuse }) {
+export function createRequestWriters({
+  recruitment,
+  nextId,
+  ledgerAppend,
+  notify,
+  broadcast,
+  safeguardingCertified,
+  moderateOrRefuse,
+}) {
   /**
    * The only writer of an org → player/guardian request row. The Contact send, the Trial invitation, an open-day
    * invitation and the direct request route all use it, so routing (scout → parent, never scout → child), the
@@ -33,8 +41,18 @@ export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify
    * case link, recipient snapshot and client key (`{ caseId, recipient, keys }`).
    */
   function issueRecruitmentRequest({
-    org, orgUser, player, type, message = '', trialDetails = null,
-    subject = null, contactId = null, guardianId = undefined, at = Date.now(), notice = null, workflow = null,
+    org,
+    orgUser,
+    player,
+    type,
+    message = '',
+    trialDetails = null,
+    subject = null,
+    contactId = null,
+    guardianId = undefined,
+    at = Date.now(),
+    notice = null,
+    workflow = null,
   }) {
     const minor = !isAdult(player);
     const request = {
@@ -61,16 +79,42 @@ export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify
       routedTo: minor ? 'guardian' : 'player',
       guardianId: minor ? (guardianId ?? player.guardianId) : null,
       contactChannel: null, // stays null until the player/guardian accepts
-      ...(workflow ? { caseId: workflow.caseId, trialId: null, recipient: workflow.recipient, keys: workflow.keys } : {}),
+      ...(workflow
+        ? { caseId: workflow.caseId, trialId: null, recipient: workflow.recipient, keys: workflow.keys }
+        : {}),
     };
     const stored = recruitment.requests.create(request);
-    ledgerAppend({ type: `${type}_request${minor ? '_to_guardian' : ''}`, playerId: player.id, orgId: org.id, orgName: org.name, userId: orgUser.id, scoutName: orgUser.name });
+    ledgerAppend({
+      type: `${type}_request${minor ? '_to_guardian' : ''}`,
+      playerId: player.id,
+      orgId: org.id,
+      orgName: org.name,
+      userId: orgUser.id,
+      scoutName: orgUser.name,
+    });
     const kind = notice?.kind ?? 'request';
     if (minor) {
-      notify({ kind: 'guardian', id: stored.guardianId }, kind, notice?.toGuardian ?? `${org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${player.name}.`, stored.id);
-      notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`, stored.id);
+      notify(
+        { kind: 'guardian', id: stored.guardianId },
+        kind,
+        notice?.toGuardian ??
+          `${org.name} has requested to discuss a ${type === 'trial' ? 'trial' : 'conversation'} for ${player.name}.`,
+        stored.id,
+      );
+      notify(
+        { kind: 'player', id: player.id },
+        kind,
+        notice?.toPlayer ??
+          `${org.name} contacted your parent/guardian about a ${type === 'trial' ? 'trial' : 'conversation'}.`,
+        stored.id,
+      );
     } else {
-      notify({ kind: 'player', id: player.id }, kind, notice?.toPlayer ?? `${org.name} sent you a ${type} request.`, stored.id);
+      notify(
+        { kind: 'player', id: player.id },
+        kind,
+        notice?.toPlayer ?? `${org.name} sent you a ${type} request.`,
+        stored.id,
+      );
     }
     broadcast('inbox', { playerId: player.id });
     return stored;
@@ -85,24 +129,60 @@ export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify
     // Accepting a concrete slot is the schedule confirmation: the trial is born `scheduled`, revision 1 confirmed
     // by the recipient. A date-only or undated invitation is born `accepted` with no schedule: a date the club typed
     // is not a confirmed schedule.
-    const slot = Array.isArray(details.slots) ? details.slots.find((s) => s && s.day === trialDate) ?? null : null;
-    const recipient = { type: by, playerId: player.id, guardianId: by === 'guardian' ? (actor?.id ?? null) : null, minor: by === 'guardian', at };
+    const slot = Array.isArray(details.slots) ? (details.slots.find((s) => s && s.day === trialDate) ?? null) : null;
+    const recipient = {
+      type: by,
+      playerId: player.id,
+      guardianId: by === 'guardian' ? (actor?.id ?? null) : null,
+      minor: by === 'guardian',
+      at,
+    };
     const who = { kind: by, id: actor?.id ?? null, name: actor?.name ?? null };
     // The address line and the instructions were held back from the invitation; they join the session now.
     const priv = details.private && typeof details.private === 'object' ? details.private : {};
-    const session = slot ? {
-      id: nextId('tses'), kind: slot.kind ?? 'training', startsAt: slot.startsAt, endsAt: slot.endsAt,
-      venue: slot.venue ? { name: slot.venue.name, town: slot.venue.town ?? null, address: typeof priv.venueAddress === 'string' ? priv.venueAddress : null } : null,
-      instructions: typeof priv.instructions === 'string' ? priv.instructions : null,
-      evidence: [],
-    } : null;
+    const session = slot
+      ? {
+          id: nextId('tses'),
+          kind: slot.kind ?? 'training',
+          startsAt: slot.startsAt,
+          endsAt: slot.endsAt,
+          venue: slot.venue
+            ? {
+                name: slot.venue.name,
+                town: slot.venue.town ?? null,
+                address: typeof priv.venueAddress === 'string' ? priv.venueAddress : null,
+              }
+            : null,
+          instructions: typeof priv.instructions === 'string' ? priv.instructions : null,
+          evidence: [],
+        }
+      : null;
     const proposedBy = { kind: 'org', userId: request.userId ?? null, name: request.scoutName ?? null };
-    const schedule = session ? {
-      timezone: slot.timezone, revision: 1, proposedAt: request.createdAt ?? at, proposedBy,
-      confirmedAt: at, confirmedBy: who,
-      sessions: [session],
-      revisions: [{ revision: 1, timezone: slot.timezone, sessions: [{ ...session, evidence: undefined }], proposedAt: request.createdAt ?? at, proposedBy, confirmedAt: at, confirmedBy: who, supersededAt: null, reason: 'invitation', material: null }],
-    } : null;
+    const schedule = session
+      ? {
+          timezone: slot.timezone,
+          revision: 1,
+          proposedAt: request.createdAt ?? at,
+          proposedBy,
+          confirmedAt: at,
+          confirmedBy: who,
+          sessions: [session],
+          revisions: [
+            {
+              revision: 1,
+              timezone: slot.timezone,
+              sessions: [{ ...session, evidence: undefined }],
+              proposedAt: request.createdAt ?? at,
+              proposedBy,
+              confirmedAt: at,
+              confirmedBy: who,
+              supersededAt: null,
+              reason: 'invitation',
+              material: null,
+            },
+          ],
+        }
+      : null;
     const trial = {
       id: nextId('trial'),
       requestId: request.id,
@@ -127,11 +207,29 @@ export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify
       completion: null,
       recipient,
       history: [
-        { id: nextId('aud'), at, action: 'trial_accepted', by: who, detail: { recipientType: by, slotId: slot?.id ?? null, day: trialDate ?? null } },
-        ...(schedule ? [{ id: nextId('aud'), at, action: 'trial_schedule_confirmed', by: who, detail: { revision: 1, sessionCount: 1 } }] : []),
+        {
+          id: nextId('aud'),
+          at,
+          action: 'trial_accepted',
+          by: who,
+          detail: { recipientType: by, slotId: slot?.id ?? null, day: trialDate ?? null },
+        },
+        ...(schedule
+          ? [
+              {
+                id: nextId('aud'),
+                at,
+                action: 'trial_schedule_confirmed',
+                by: who,
+                detail: { revision: 1, sessionCount: 1 },
+              },
+            ]
+          : []),
       ],
       reminders: {},
-      rev: 1, revAt: at, revBy: null,
+      rev: 1,
+      revAt: at,
+      revBy: null,
     };
     return recruitment.trials.create(trial); // inside the respond route's unit
   }
@@ -142,8 +240,12 @@ export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify
    */
   function contactReplyFrom(req, res, request) {
     const check = validateContactReply(req.body?.message, { isContact: request.type === 'contact' });
-    if (!check.ok) { res.status(400).json({ error: check.error, message: check.message }); return { ok: false }; }
-    if (check.reply && !moderateOrRefuse(res, check.reply, { kind: 'contact_reply', requestId: request.id })) return { ok: false };
+    if (!check.ok) {
+      res.status(400).json({ error: check.error, message: check.message });
+      return { ok: false };
+    }
+    if (check.reply && !moderateOrRefuse(res, check.reply, { kind: 'contact_reply', requestId: request.id }))
+      return { ok: false };
     return { ok: true, reply: check.reply };
   }
 
@@ -151,8 +253,17 @@ export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify
 }
 
 /** The direct request route, and the club's Requests and Trials lists and home figures. */
-export function registerClubRequests({ orgRouter, recruitment, findPlayer, isBlocked, moderateOrRefuse, rateLimit, issueRecruitmentRequest }) {
-  if (typeof issueRecruitmentRequest !== 'function' || typeof rateLimit?.limited !== 'function') throw new TypeError('registerClubRequests needs the request writer and the rate limiter');
+export function registerClubRequests({
+  orgRouter,
+  recruitment,
+  findPlayer,
+  isBlocked,
+  moderateOrRefuse,
+  rateLimit,
+  issueRecruitmentRequest,
+}) {
+  if (typeof issueRecruitmentRequest !== 'function' || typeof rateLimit?.limited !== 'function')
+    throw new TypeError('registerClubRequests needs the request writer and the rate limiter');
 
   orgRouter.post('/players/:id/request', (req, res) => {
     const p = findPlayer(req.params.id);
@@ -160,15 +271,21 @@ export function registerClubRequests({ orgRouter, recruitment, findPlayer, isBlo
     if (!visibleToOrg(p, req.org)) {
       return res.status(403).json({
         error: req.org.type === 'agency' ? 'UNDER_18_WALL' : 'VERIFIED_CLUBS_ONLY',
-        message: req.org.type === 'agency' ? 'Agency accounts cannot contact minors.' : 'Only verified clubs can contact under-18 players (via their guardian).',
+        message:
+          req.org.type === 'agency'
+            ? 'Agency accounts cannot contact minors.'
+            : 'Only verified clubs can contact under-18 players (via their guardian).',
       });
     }
     if (isBlocked(p.id, req.org.id)) {
-      return res.status(403).json({ error: 'BLOCKED', message: 'This player (or their guardian) has blocked your organisation.' });
+      return res
+        .status(403)
+        .json({ error: 'BLOCKED', message: 'This player (or their guardian) has blocked your organisation.' });
     }
     const { type, message } = req.body || {};
     if (!['contact', 'trial'].includes(type)) return res.status(400).json({ error: 'TYPE_MUST_BE_CONTACT_OR_TRIAL' });
-    if (!moderateOrRefuse(res, message, { kind: 'org_request_message', orgId: req.org.id, userId: req.orgUser.id })) return;
+    if (!moderateOrRefuse(res, message, { kind: 'org_request_message', orgId: req.org.id, userId: req.orgUser.id }))
+      return;
 
     if (type === 'trial') {
       // An unfiled report for a past trial blocks new trial requests. A tombstoned trial can never be reported, so it
@@ -190,13 +307,29 @@ export function registerClubRequests({ orgRouter, recruitment, findPlayer, isBlo
       const check = validateTrialDetails(req.body);
       if (!check.ok) return res.status(400).json(check);
       trialDetails = check.details;
-      if (trialDetails.notes && !moderateOrRefuse(res, trialDetails.notes, { kind: 'trial_notes', orgId: req.org.id })) return;
+      if (trialDetails.notes && !moderateOrRefuse(res, trialDetails.notes, { kind: 'trial_notes', orgId: req.org.id }))
+        return;
     }
     // The same inbox row as a Contact send or Trial invitation, so the same budgets and one-pending rule apply.
-    const pendingSame = recruitment.requests.forOrgPlayer(req.org.id, p.id).find((r) => r.type === type && r.status === 'pending' && !r.subjectRemovedAt);
-    if (pendingSame) return res.status(409).json({ error: 'REQUEST_PENDING', message: `A ${type} request to this player is already awaiting an answer.`, requestId: pendingSame.id });
-    if (rateLimit.limited(type === 'trial' ? 'trial_invite' : 'contact_send', req.org.id)) return res.status(429).json(rateLimitedBody(type === 'trial' ? 'trial_invite' : 'contact_send'));
-    const request = issueRecruitmentRequest({ org: req.org, orgUser: req.orgUser, player: p, type, message, trialDetails });
+    const pendingSame = recruitment.requests
+      .forOrgPlayer(req.org.id, p.id)
+      .find((r) => r.type === type && r.status === 'pending' && !r.subjectRemovedAt);
+    if (pendingSame)
+      return res.status(409).json({
+        error: 'REQUEST_PENDING',
+        message: `A ${type} request to this player is already awaiting an answer.`,
+        requestId: pendingSame.id,
+      });
+    if (rateLimit.limited(type === 'trial' ? 'trial_invite' : 'contact_send', req.org.id))
+      return res.status(429).json(rateLimitedBody(type === 'trial' ? 'trial_invite' : 'contact_send'));
+    const request = issueRecruitmentRequest({
+      org: req.org,
+      orgUser: req.orgUser,
+      player: p,
+      type,
+      message,
+      trialDetails,
+    });
     res.status(201).json({ ok: true, requestId: request.id, status: 'pending', routedTo: request.routedTo });
   });
 
@@ -204,13 +337,21 @@ export function registerClubRequests({ orgRouter, recruitment, findPlayer, isBlo
   // counting a page.
   orgRouter.get('/requests', (req, res) => {
     let page;
-    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    try {
+      page = readPage(req.query, ['number']);
+    } catch (e) {
+      return sendPageError(res, e);
+    }
     res.json(recruitment.requests.pageForOrg(req.org.id, page));
   });
 
   orgRouter.get('/trials', (req, res) => {
     let page;
-    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    try {
+      page = readPage(req.query, ['number']);
+    } catch (e) {
+      return sendPageError(res, e);
+    }
     res.json(recruitment.trials.pageForOrg(req.org.id, page));
   });
 

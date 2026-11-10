@@ -62,11 +62,16 @@ function get(url, timeoutMs = 1500) {
   return new Promise((resolve) => {
     const req = http.get(url, (res) => {
       let body = '';
-      res.on('data', (c) => { body += c; });
+      res.on('data', (c) => {
+        body += c;
+      });
       res.on('end', () => resolve({ ok: true, status: res.statusCode, body }));
     });
     req.on('error', () => resolve({ ok: false }));
-    req.setTimeout(timeoutMs, () => { req.destroy(); resolve({ ok: false }); });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      resolve({ ok: false });
+    });
   });
 }
 
@@ -90,7 +95,7 @@ export async function ensureDemoHost({ port = DEFAULT_PORT, dist = DIST, timeout
   if (missing.length) {
     throw new Error(
       `demo bundles are missing from ${dist}:\n  ${missing.join('\n  ')}\n` +
-      'Run `node e2e/buildDemos.mjs` (and buildConnectedDemo.mjs) before the E2E battery.',
+        'Run `node e2e/buildDemos.mjs` (and buildConnectedDemo.mjs) before the E2E battery.',
     );
   }
 
@@ -103,10 +108,10 @@ export async function ensureDemoHost({ port = DEFAULT_PORT, dist = DIST, timeout
     const served = probe.status === 200 ? probe.body.trim() : `no marker (HTTP ${probe.status})`;
     throw new Error(
       `A process is listening on :${port} but it is not serving the current demo bundles.\n` +
-      `  on disk: ${marker}\n  served : ${served}\n` +
-      'This is the stale-demo-server failure: the tests would have passed against a build\n' +
-      'nobody in this run produced. Stop that process and let the battery start its own\n' +
-      `(e.g. \`pkill -f e2e/serve.mjs\` or free port ${port}), then re-run.`,
+        `  on disk: ${marker}\n  served : ${served}\n` +
+        'This is the stale-demo-server failure: the tests would have passed against a build\n' +
+        'nobody in this run produced. Stop that process and let the battery start its own\n' +
+        `(e.g. \`pkill -f e2e/serve.mjs\` or free port ${port}), then re-run.`,
     );
   }
 
@@ -116,7 +121,9 @@ export async function ensureDemoHost({ port = DEFAULT_PORT, dist = DIST, timeout
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let childErr = '';
-  child.stderr.on('data', (c) => { childErr += c; });
+  child.stderr.on('data', (c) => {
+    childErr += c;
+  });
 
   // Ownership must not depend on the caller remembering to call stop().
   //
@@ -125,9 +132,19 @@ export async function ensureDemoHost({ port = DEFAULT_PORT, dist = DIST, timeout
   // rejection. Patching every one of those is how a host gets left behind
   // again, which is the exact bug this module exists to kill. So the child is
   // killed from an exit hook here, synchronously, for every caller.
-  const killOnExit = () => { try { if (child.exitCode == null) child.kill('SIGKILL'); } catch { /* gone */ } };
+  const killOnExit = () => {
+    try {
+      if (child.exitCode == null) child.kill('SIGKILL');
+    } catch {
+      /* gone */
+    }
+  };
   process.once('exit', killOnExit);
-  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => { killOnExit(); process.exit(130); });
+  for (const sig of ['SIGINT', 'SIGTERM'])
+    process.once(sig, () => {
+      killOnExit();
+      process.exit(130);
+    });
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -148,7 +165,9 @@ export async function ensureDemoHost({ port = DEFAULT_PORT, dist = DIST, timeout
       child.stderr?.unref?.();
 
       return {
-        host, started: true, marker,
+        host,
+        started: true,
+        marker,
         stop: async () => {
           process.removeListener('exit', killOnExit);
           if (child.exitCode == null) {

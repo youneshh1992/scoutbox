@@ -32,8 +32,14 @@ const CLUB_PORT = 8812;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-roomshardeninglive-'));
 
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A backend left behind by a crashed earlier run would hand this suite another
@@ -50,7 +56,10 @@ for (const port of [API_PORT, CLUB_PORT]) {
 }
 
 console.log(`building live bundle for :${API_PORT}…`);
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-rooms-hardening`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-rooms-hardening`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -60,11 +69,21 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+    '.svg': 'image/svg+xml',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -78,16 +97,39 @@ function serveDir(dir, port) {
 serveDir('scoutbox-club/dist-live-rooms-hardening', CLUB_PORT);
 
 const cleanup = () => {
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
   for (const s of statics) s.close();
   fs.rmSync(DATA, { recursive: true, force: true });
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
-process.on('uncaughtException', (e) => { console.error(e); cleanup(); process.exit(1); });
-process.on('unhandledRejection', (e) => { console.error(e); cleanup(); process.exit(1); });
+for (const sig of ['SIGINT', 'SIGTERM'])
+  process.on(sig, () => {
+    cleanup();
+    process.exit(130);
+  });
+process.on('uncaughtException', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
 
-for (let i = 0; i < 80; i++) { try { if ((await fetch(`${API}/healthz`)).ok) break; } catch { /* booting */ } await sleep(250); }
+for (let i = 0; i < 80; i++) {
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {
+    /* booting */
+  }
+  await sleep(250);
+}
 console.log(`backend up on :${API_PORT}`);
 
 // The API stands in for "the colleague in the next room" and for checking the
@@ -116,11 +158,18 @@ async function enterClub(ctx, org, name, role) {
   await page.waitForSelector('nav.sidebar', { timeout: 30000 });
   return page;
 }
-const tokenOf = (page) => page.evaluate(() => {
-  try { return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null; } catch { return null; }
-});
+const tokenOf = (page) =>
+  page.evaluate(() => {
+    try {
+      return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null;
+    } catch {
+      return null;
+    }
+  });
 async function goto(page, hash, selector) {
-  await page.evaluate((h) => { window.location.hash = h; }, hash);
+  await page.evaluate((h) => {
+    window.location.hash = h;
+  }, hash);
   if (selector) await page.waitForSelector(selector, { timeout: 25000 });
   await page.waitForTimeout(500);
 }
@@ -133,7 +182,9 @@ const scout = await enterClub(ctxA, 'Eastport FC', 'Maria Keane', 'Head of Recru
 const MARIA = await tokenOf(scout);
 if (!MARIA) fail('fixture: the scout has no session token');
 // A second identity in the SAME organisation — the colleague in H1 and H2.
-const TOM = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Head of Recruitment' })).body.token;
+const TOM = (
+  await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Head of Recruitment' })
+).body.token;
 const players = (await j('GET', '/org/players', undefined, MARIA)).body.items;
 const SUBJECT = players.find((p) => /Kola Adeyemi/.test(p.name)) ?? players[0];
 if (!SUBJECT) fail('fixture: no visible player');
@@ -144,8 +195,13 @@ if (!SUBJECT) fail('fixture: no visible player');
 await goto(scout, BR, '[aria-label="Recruitment briefs"]');
 await scout.click('button:has-text("New brief")');
 await scout.waitForSelector('[aria-label="Recruitment brief criteria"]', { timeout: 15000 });
-await scout.fill('[aria-label="Recruitment brief criteria"] input[aria-label="Title"]', 'Left-sided central midfielder');
-await scout.check('[aria-label="Recruitment brief criteria"] input[type="checkbox"]:below(:text("Positions"))').catch(() => {});
+await scout.fill(
+  '[aria-label="Recruitment brief criteria"] input[aria-label="Title"]',
+  'Left-sided central midfielder',
+);
+await scout
+  .check('[aria-label="Recruitment brief criteria"] input[type="checkbox"]:below(:text("Positions"))')
+  .catch(() => {});
 await scout.click('[aria-label="Recruitment brief criteria"] button:has-text("Create")');
 await scout.waitForTimeout(1500);
 
@@ -157,7 +213,12 @@ if (typeof BRIEF.rev !== 'number') fail('H1: the brief projection carries no rev
 say(`H1: the brief is published with its concurrency token (rev ${BRIEF.rev})`);
 
 // The colleague moves it while this page is still showing the old revision.
-const colleague = await j('PATCH', `/org/recruitment-briefs/${BRIEF.id}`, { title: 'Colleague’s title', expectedRev: BRIEF.rev }, TOM);
+const colleague = await j(
+  'PATCH',
+  `/org/recruitment-briefs/${BRIEF.id}`,
+  { title: 'Colleague’s title', expectedRev: BRIEF.rev },
+  TOM,
+);
 if (colleague.status !== 200) fail(`H1: the colleague's edit should have succeeded (${colleague.status})`);
 say('H1: a colleague edits the same brief from their own session');
 
@@ -167,14 +228,17 @@ await scout.waitForTimeout(300);
 {
   // Deliberately do NOT reload the detail view: drive the stale state directly
   // the way a page left open on a desk would.
-  const stale = await scout.evaluate(async ([api, token, id, rev]) => {
-    const r = await fetch(`${api}/org/recruitment-briefs/${id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ title: 'Stale overwrite from an open tab', expectedRev: rev }),
-    });
-    return { status: r.status, body: await r.json().catch(() => ({})) };
-  }, [API, MARIA, BRIEF.id, BRIEF.rev]);
+  const stale = await scout.evaluate(
+    async ([api, token, id, rev]) => {
+      const r = await fetch(`${api}/org/recruitment-briefs/${id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
+        body: JSON.stringify({ title: 'Stale overwrite from an open tab', expectedRev: rev }),
+      });
+      return { status: r.status, body: await r.json().catch(() => ({})) };
+    },
+    [API, MARIA, BRIEF.id, BRIEF.rev],
+  );
   if (stale.status !== 409 || stale.body.error !== 'BRIEF_VERSION_CONFLICT') {
     fail(`H1: the stale write was not refused (${stale.status} ${stale.body.error})`);
   }
@@ -220,7 +284,11 @@ await scout.route(/\/org\/rooms\/[^/]+\/status$/, async (route) => {
   let sentBody = null;
   const onRequest = (req) => {
     if (req.method() === 'POST' && /\/org\/rooms\/[^/]+\/status$/.test(new URL(req.url()).pathname)) {
-      try { sentBody = JSON.parse(req.postData() ?? '{}'); } catch { sentBody = {}; }
+      try {
+        sentBody = JSON.parse(req.postData() ?? '{}');
+      } catch {
+        sentBody = {};
+      }
     }
   };
   scout.on('request', onRequest);
@@ -240,11 +308,15 @@ await scout.route(/\/org\/rooms\/[^/]+\/status$/, async (route) => {
   const body = await scout.locator('body').innerText();
   if (!colleagueMoved) fail('H2: the colleague’s interleaved transition never ran, so nothing was raced');
   say('H2: a colleague moved the room while this page’s own request was in flight');
-  if (server.status !== 'under_review') fail('H2: the stale transition was applied — the colleague’s move was overwritten');
+  if (server.status !== 'under_review')
+    fail('H2: the stale transition was applied — the colleague’s move was overwritten');
   say('H2: the stale transition is refused — the colleague’s move stands');
   // The shared ConflictNotice leads with its own sentence and names the colleague.
   if (!/Someone else changed this while you were working on it|This changed while you were editing/i.test(body)) {
-    const toast = await scout.locator('.toast').innerText().catch(() => '(no toast on screen)');
+    const toast = await scout
+      .locator('.toast')
+      .innerText()
+      .catch(() => '(no toast on screen)');
     console.error(`  toast said: ${toast}`);
     fail('H2: the refusal was not explained to the person who made it');
   }
@@ -255,7 +327,8 @@ await scout.unroute(/\/org\/rooms\/[^/]+\/status$/);
 // ===================================================================== H3
 // A double click must add a candidate once.
 {
-  const brief2 = (await j('POST', '/org/recruitment-briefs', { title: 'Idempotency brief', positions: ['CM'] }, MARIA)).body.brief;
+  const brief2 = (await j('POST', '/org/recruitment-briefs', { title: 'Idempotency brief', positions: ['CM'] }, MARIA))
+    .body.brief;
   await j('PATCH', `/org/recruitment-briefs/${brief2.id}`, { status: 'active', expectedRev: brief2.rev }, MARIA);
   const target = players.find((p) => p.id !== SUBJECT.id);
   const [one, two] = await Promise.all([
@@ -274,12 +347,18 @@ await scout.unroute(/\/org\/rooms\/[^/]+\/status$/);
 await goto(scout, RM, 'table.data');
 {
   const html = await scout.content();
-  const table = await scout.locator('table.data').first().innerText().catch(() => '');
+  const table = await scout
+    .locator('table.data')
+    .first()
+    .innerText()
+    .catch(() => '');
   const dashCells = (table.match(/^—$/gm) ?? []).length;
   const hasWords = /Not available|Player withheld|Evidence confidence temporarily unavailable/i.test(table + html);
   const hasTrustNumbers = /\b\d{1,3}\b/.test(table);
   if (!hasWords && !hasTrustNumbers) fail('H4: the rooms table showed neither a Trust value nor a stated reason');
-  say(`H4: the rooms table renders evidence confidence as a value or as words (${hasWords ? 'words present' : 'all rows have a value'})`);
+  say(
+    `H4: the rooms table renders evidence confidence as a value or as words (${hasWords ? 'words present' : 'all rows have a value'})`,
+  );
   // Whatever it shows, it must never show a bare zero in the Trust column.
   if (/\bTrust[^\n]*\b0\b/.test(table)) fail('H4: a missing Trust profile rendered as 0');
   say('H4: no row reports a missing evidence confidence as zero');
@@ -354,8 +433,15 @@ await goto(scout, SL, '[role="tablist"]');
   await p.waitForSelector('.topbar', { timeout: 30000 });
   say('H7: the club app signs in at 390px');
 
-  for (const [label, hash] of [['Rooms', RM], ['Second Look', SL], ['Briefs', BR], ['Nobody Missed', NM]]) {
-    await p.evaluate((h) => { window.location.hash = h; }, hash);
+  for (const [label, hash] of [
+    ['Rooms', RM],
+    ['Second Look', SL],
+    ['Briefs', BR],
+    ['Nobody Missed', NM],
+  ]) {
+    await p.evaluate((h) => {
+      window.location.hash = h;
+    }, hash);
     await p.waitForTimeout(1400);
     const overflow = await p.evaluate(() => ({
       doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -377,7 +463,8 @@ await goto(scout, SL, '[role="tablist"]');
     return { left: r.left, right: r.right, width: window.innerWidth };
   });
   if (bell) {
-    if (bell.left < -1 || bell.right > bell.width + 1) fail(`H7: the notification panel sits off-screen (${bell.left} → ${bell.right} of ${bell.width})`);
+    if (bell.left < -1 || bell.right > bell.width + 1)
+      fail(`H7: the notification panel sits off-screen (${bell.left} → ${bell.right} of ${bell.width})`);
     say('H7: the notification panel fits inside the phone viewport');
   } else say('H7: the notification panel did not open on this build (no assertion made)');
   await phone.close();
@@ -393,11 +480,15 @@ await goto(scout, SL, '[role="tablist"]');
   if (focused !== 'tab') fail('H8: a Second Look tab cannot take keyboard focus');
   say('H8: the Second Look tabs take keyboard focus');
 
-  const before = await scout.evaluate(() => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? '');
+  const before = await scout.evaluate(
+    () => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? '',
+  );
   await scout.keyboard.press('Tab');
   await scout.keyboard.press('Enter');
   await scout.waitForTimeout(500);
-  const after = await scout.evaluate(() => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? '');
+  const after = await scout.evaluate(
+    () => document.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? '',
+  );
   if (before === after) fail('H8: pressing Enter on a focused tab did not switch tabs');
   say('H8: a tab can be selected with the keyboard alone');
 
@@ -419,15 +510,24 @@ await goto(scout, SL, '[role="tablist"]');
   const room2 = (await j('POST', '/org/rooms', { playerId: players[2]?.id ?? SUBJECT.id }, TOM)).body.room;
   const me = (await j('GET', '/org/me', undefined, MARIA)).body;
   for (let i = 0; i < 2; i++) {
-    await j('POST', `/org/rooms/${room2.roomId}/tasks`, {
-      title: 'Watch the Riverton match', assigneeUserId: me?.userId ?? me?.id ?? null,
-    }, TOM);
+    await j(
+      'POST',
+      `/org/rooms/${room2.roomId}/tasks`,
+      {
+        title: 'Watch the Riverton match',
+        assigneeUserId: me?.userId ?? me?.id ?? null,
+      },
+      TOM,
+    );
   }
   await scout.reload();
   await scout.waitForSelector('.topbar', { timeout: 25000 });
   await scout.click('button[aria-label^="Notifications"]');
   await scout.waitForTimeout(800);
-  const panel = await scout.locator('.bell-panel').innerText().catch(() => '');
+  const panel = await scout
+    .locator('.bell-panel')
+    .innerText()
+    .catch(() => '');
   if (!panel) {
     say('H9: no notification reached this scout in this run (nothing asserted)');
   } else {
@@ -460,14 +560,21 @@ await goto(scout, SL, '[role="tablist"]');
   // "Trusted Partner" is an organisation badge and has nothing to do with the
   // Trust Score; the rule is about the SCORE's name, not the English word.
   if (/\bTrust Score\b/i.test(roomsText) && !/Evidence confidence/i.test(roomsText)) {
-    const lines = roomsText.split('\n').filter((l) => /Trust Score/i.test(l)).slice(0, 6);
+    const lines = roomsText
+      .split('\n')
+      .filter((l) => /Trust Score/i.test(l))
+      .slice(0, 6);
     console.error(`  lines naming the Trust Score: ${JSON.stringify(lines)}`);
     fail('H10: Rooms names the Trust Score without saying it means evidence confidence');
   }
   say('H10: wherever Rooms names the Trust Score, it says evidence confidence too');
 
   const forbidden = /talent score|player score|ability score|signing probability|likelihood of success/i;
-  for (const [label, hash] of [['Second Look', SL], ['Briefs', BR], ['Rooms', RM]]) {
+  for (const [label, hash] of [
+    ['Second Look', SL],
+    ['Briefs', BR],
+    ['Rooms', RM],
+  ]) {
     await goto(scout, hash);
     await scout.waitForTimeout(900);
     const text = await scout.locator('body').innerText();

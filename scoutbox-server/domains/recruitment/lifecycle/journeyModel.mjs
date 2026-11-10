@@ -14,8 +14,18 @@ import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../rooms/shared.mjs';
 import { LIFECYCLE_ACTIONS, LIFECYCLE_REOPENABLE } from './lifecycle.mjs';
 import { CONTACT_EVIDENCE_STATUSES } from './contact.mjs';
 import { deriveWorkflowState } from './trial.mjs';
-import { liveRevision, effectiveRevisionStatus, currentRevision as offerCurrentRevision, offerStatus, liveStatus as offerLiveStatus } from '../offers/offer.mjs';
-import { effectiveStatus as signingEffectiveStatus, currentRevision as signingCurrentRevision, isLive as signingIsLive } from '../signings/signing.mjs';
+import {
+  liveRevision,
+  effectiveRevisionStatus,
+  currentRevision as offerCurrentRevision,
+  offerStatus,
+  liveStatus as offerLiveStatus,
+} from '../offers/offer.mjs';
+import {
+  effectiveStatus as signingEffectiveStatus,
+  currentRevision as signingCurrentRevision,
+  isLive as signingIsLive,
+} from '../signings/signing.mjs';
 
 export const JOURNEY_POLICY_VERSION = 1;
 
@@ -27,23 +37,56 @@ export const JOURNEY_POLICY_VERSION = 1;
  * description mapped from the lifecycle states, adding no state to them.
  */
 export const JOURNEY_STAGES = Object.freeze([
-  'discovery', 'watching', 'review', 'contact', 'trial', 'assessment', 'decision', 'offer', 'acceptance', 'signing', 'signed', 'paused', 'ended',
+  'discovery',
+  'watching',
+  'review',
+  'contact',
+  'trial',
+  'assessment',
+  'decision',
+  'offer',
+  'acceptance',
+  'signing',
+  'signed',
+  'paused',
+  'ended',
 ]);
 /** The stages a case completes, in order. */
-export const PIPELINE_STAGES = Object.freeze(['watching', 'review', 'contact', 'trial', 'assessment', 'decision', 'offer', 'acceptance', 'signing', 'signed']);
+export const PIPELINE_STAGES = Object.freeze([
+  'watching',
+  'review',
+  'contact',
+  'trial',
+  'assessment',
+  'decision',
+  'offer',
+  'acceptance',
+  'signing',
+  'signed',
+]);
 
-const STAGE_OF_STATUS = Object.freeze(Object.assign(Object.create(null), {
-  watching: 'watching',
-  under_review: 'review', shortlisted: 'review', priority: 'review',
-  contact_planned: 'contact', contacted: 'contact',
-  trial_requested: 'trial', trial_scheduled: 'trial',
-  trial_completed: 'assessment', // refined by the facts: assessed → decision
-  offer_consideration: 'offer', offer_made: 'offer', offer_declined: 'offer',
-  offer_accepted: 'acceptance',
-  signed: 'signed',
-  on_hold: 'paused',
-  withdrawn: 'ended', archived: 'ended', closed: 'ended',
-}));
+const STAGE_OF_STATUS = Object.freeze(
+  Object.assign(Object.create(null), {
+    watching: 'watching',
+    under_review: 'review',
+    shortlisted: 'review',
+    priority: 'review',
+    contact_planned: 'contact',
+    contacted: 'contact',
+    trial_requested: 'trial',
+    trial_scheduled: 'trial',
+    trial_completed: 'assessment', // refined by the facts: assessed → decision
+    offer_consideration: 'offer',
+    offer_made: 'offer',
+    offer_declined: 'offer',
+    offer_accepted: 'acceptance',
+    signed: 'signed',
+    on_hold: 'paused',
+    withdrawn: 'ended',
+    archived: 'ended',
+    closed: 'ended',
+  }),
+);
 
 /**
  * The stage for a lifecycle status, refined by facts the lifecycle does not
@@ -61,7 +104,8 @@ export function canonicalStageFor(status, facts = {}) {
 // ------------------------------------------------------- deterministic order
 
 /** Newest first; equal instants fall back to the id, descending, so two reads agree. */
-const newestFirst = (atOf) => (a, b) => ((Number(atOf(b)) || 0) - (Number(atOf(a)) || 0)) || String(b?.id ?? '').localeCompare(String(a?.id ?? ''));
+const newestFirst = (atOf) => (a, b) =>
+  (Number(atOf(b)) || 0) - (Number(atOf(a)) || 0) || String(b?.id ?? '').localeCompare(String(a?.id ?? ''));
 const latest = (rows, atOf) => (rows.length ? rows.slice().sort(newestFirst(atOf))[0] : null);
 
 // ------------------------------------------------- current-resource selection
@@ -73,10 +117,24 @@ const latest = (rows, atOf) => (rows.length ? rows.slice().sort(newestFirst(atOf
 export function currentContactForCase(contacts) {
   const rows = (contacts ?? []).filter((c) => c && c.status !== 'cancelled');
   const tier = (pred, atOf) => latest(rows.filter(pred), atOf);
-  return tier((c) => c.status === 'delivered', (c) => c.deliveredAt ?? c.createdAt)
-    ?? tier((c) => c.status === 'responded' || c.status === 'recorded', (c) => c.respondedAt ?? c.occurredAt ?? c.recordedAt ?? c.deliveredAt ?? c.createdAt)
-    ?? tier((c) => c.status === 'draft', (c) => c.updatedAt ?? c.createdAt)
-    ?? tier((c) => c.status === 'failed', (c) => c.failedAt ?? c.createdAt);
+  return (
+    tier(
+      (c) => c.status === 'delivered',
+      (c) => c.deliveredAt ?? c.createdAt,
+    ) ??
+    tier(
+      (c) => c.status === 'responded' || c.status === 'recorded',
+      (c) => c.respondedAt ?? c.occurredAt ?? c.recordedAt ?? c.deliveredAt ?? c.createdAt,
+    ) ??
+    tier(
+      (c) => c.status === 'draft',
+      (c) => c.updatedAt ?? c.createdAt,
+    ) ??
+    tier(
+      (c) => c.status === 'failed',
+      (c) => c.failedAt ?? c.createdAt,
+    )
+  );
 }
 
 /**
@@ -87,23 +145,46 @@ export function currentTrialForCase(trials) {
   const rows = (trials ?? []).filter(Boolean);
   const st = (t) => deriveWorkflowState(t);
   const tier = (pred, atOf) => latest(rows.filter(pred), atOf);
-  return tier((t) => ['accepted', 'scheduled'].includes(st(t)), (t) => t.schedule?.confirmedAt ?? t.acceptedAt)
-    ?? tier((t) => st(t) === 'completed', (t) => t.completion?.at ?? t.acceptedAt)
-    ?? tier((t) => st(t) === 'cancelled', (t) => t.completion?.at ?? t.acceptedAt)
-    ?? tier((t) => st(t) === 'legacy_accepted', (t) => t.acceptedAt);
+  return (
+    tier(
+      (t) => ['accepted', 'scheduled'].includes(st(t)),
+      (t) => t.schedule?.confirmedAt ?? t.acceptedAt,
+    ) ??
+    tier(
+      (t) => st(t) === 'completed',
+      (t) => t.completion?.at ?? t.acceptedAt,
+    ) ??
+    tier(
+      (t) => st(t) === 'cancelled',
+      (t) => t.completion?.at ?? t.acceptedAt,
+    ) ??
+    tier(
+      (t) => st(t) === 'legacy_accepted',
+      (t) => t.acceptedAt,
+    )
+  );
 }
 
 /** The latest submitted assessment, else the latest draft. */
 export function currentAssessmentForCase(assessments) {
   const rows = (assessments ?? []).filter(Boolean);
-  return latest(rows.filter((a) => a.state !== 'draft'), (a) => a.submittedAt ?? a.createdAt)
-    ?? latest(rows.filter((a) => a.state === 'draft'), (a) => a.updatedAt ?? a.createdAt);
+  return (
+    latest(
+      rows.filter((a) => a.state !== 'draft'),
+      (a) => a.submittedAt ?? a.createdAt,
+    ) ??
+    latest(
+      rows.filter((a) => a.state === 'draft'),
+      (a) => a.updatedAt ?? a.createdAt,
+    )
+  );
 }
 
 /** The formal chain head, else the advisory head. Never a draft. */
 export function currentDecisionForCase(decisions) {
   const rows = (decisions ?? []).filter((d) => d && !d.supersededById && d.state !== 'draft');
-  const oldestLast = (atOf) => (a, b) => ((Number(atOf(a)) || 0) - (Number(atOf(b)) || 0)) || String(a.id).localeCompare(String(b.id));
+  const oldestLast = (atOf) => (a, b) =>
+    (Number(atOf(a)) || 0) - (Number(atOf(b)) || 0) || String(a.id).localeCompare(String(b.id));
   const formal = rows.filter((d) => d.kind === 'formal').sort(oldestLast((d) => d.createdAt));
   if (formal.length) return formal[formal.length - 1];
   const advisory = rows.filter((d) => d.kind !== 'formal').sort(oldestLast((d) => d.createdAt));
@@ -119,7 +200,8 @@ export function currentOfferForCase(offers, now) {
   const rows = (offers ?? []).filter(Boolean);
   const st = (o) => offerStatus(o, now);
   const tier = (pred) => latest(rows.filter(pred), (o) => o.updatedAt ?? o.createdAt);
-  const offer = tier((o) => ['DRAFT', 'ISSUED'].includes(st(o))) ?? tier((o) => st(o) === 'ACCEPTED') ?? tier(() => true);
+  const offer =
+    tier((o) => ['DRAFT', 'ISSUED'].includes(st(o))) ?? tier((o) => st(o) === 'ACCEPTED') ?? tier(() => true);
   if (!offer) return null;
   const live = liveRevision(offer);
   const revision = live ?? offerCurrentRevision(offer);
@@ -130,7 +212,11 @@ export function currentOfferForCase(offers, now) {
 export function currentSigningForOffer(packages, now) {
   const rows = (packages ?? []).filter(Boolean);
   const tier = (pred) => latest(rows.filter(pred), (p) => p.createdAt);
-  return tier((p) => signingIsLive(p, now)) ?? tier((p) => signingEffectiveStatus(p, now) === 'COMPLETED') ?? tier(() => true);
+  return (
+    tier((p) => signingIsLive(p, now)) ??
+    tier((p) => signingEffectiveStatus(p, now) === 'COMPLETED') ??
+    tier(() => true)
+  );
 }
 export const currentSigningForCase = currentSigningForOffer;
 
@@ -159,40 +245,105 @@ export function completedStagesFor(facts) {
   const h = facts.history ?? [];
   const opened = firstReach(h, ROOM_STATUSES) ?? facts.createdAt ?? null;
   push('watching', 'lifecycle', opened, {});
-  const reviewAt = firstReach(h, ROOM_STATUSES.filter((s) => s !== 'watching' && s !== 'on_hold' && !TERMINAL_ROOM_STATUSES.includes(s)));
+  const reviewAt = firstReach(
+    h,
+    ROOM_STATUSES.filter((s) => s !== 'watching' && s !== 'on_hold' && !TERMINAL_ROOM_STATUSES.includes(s)),
+  );
   if (reviewAt !== null) push('review', 'lifecycle', reviewAt, {});
-  const evidenceContact = latestBy(facts.contacts, (c) => CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt, (c) => c.deliveredAt ?? c.occurredAt ?? c.recordedAt);
-  if (evidenceContact) push('contact', 'canonical', evidenceContact.deliveredAt ?? evidenceContact.occurredAt ?? evidenceContact.recordedAt, { contactId: evidenceContact.id });
-  else { const at = firstReach(h, ['contacted']); if (at !== null) push('contact', 'lifecycle', at, {}); }
-  const doneTrial = latestBy(facts.trials, (t) => deriveWorkflowState(t) === 'completed', (t) => t.completion?.at);
+  const evidenceContact = latestBy(
+    facts.contacts,
+    (c) => CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt,
+    (c) => c.deliveredAt ?? c.occurredAt ?? c.recordedAt,
+  );
+  if (evidenceContact)
+    push(
+      'contact',
+      'canonical',
+      evidenceContact.deliveredAt ?? evidenceContact.occurredAt ?? evidenceContact.recordedAt,
+      { contactId: evidenceContact.id },
+    );
+  else {
+    const at = firstReach(h, ['contacted']);
+    if (at !== null) push('contact', 'lifecycle', at, {});
+  }
+  const doneTrial = latestBy(
+    facts.trials,
+    (t) => deriveWorkflowState(t) === 'completed',
+    (t) => t.completion?.at,
+  );
   if (doneTrial) push('trial', 'canonical', doneTrial.completion?.at, { trialId: doneTrial.id });
-  else { const at = firstReach(h, ['trial_completed']); if (at !== null) push('trial', 'lifecycle', at, {}); }
-  const assessed = latestBy(facts.assessments, (a) => a.state !== 'draft', (a) => a.submittedAt ?? a.createdAt);
-  if (assessed) push('assessment', 'canonical', assessed.submittedAt ?? assessed.createdAt, { assessmentId: assessed.id });
-  const decided = (facts.decisions ?? []).filter((d) => d && d.kind === 'formal' && d.state !== 'draft' && !d.supersededById);
+  else {
+    const at = firstReach(h, ['trial_completed']);
+    if (at !== null) push('trial', 'lifecycle', at, {});
+  }
+  const assessed = latestBy(
+    facts.assessments,
+    (a) => a.state !== 'draft',
+    (a) => a.submittedAt ?? a.createdAt,
+  );
+  if (assessed)
+    push('assessment', 'canonical', assessed.submittedAt ?? assessed.createdAt, { assessmentId: assessed.id });
+  const decided = (facts.decisions ?? []).filter(
+    (d) => d && d.kind === 'formal' && d.state !== 'draft' && !d.supersededById,
+  );
   const decision = decided.length ? decided.slice().sort(newestFirst((d) => d.createdAt))[0] : null;
   if (decision) push('decision', 'canonical', decision.createdAt, { decisionId: decision.id });
-  else { const at = firstReach(h, ['offer_consideration']); if (at !== null) push('decision', 'lifecycle', at, {}); }
+  else {
+    const at = firstReach(h, ['offer_consideration']);
+    if (at !== null) push('decision', 'lifecycle', at, {});
+  }
   // Issued, answered, expired or withdrawn after issue all count as "an Offer was made".
   const issued = (facts.offers ?? []).map((o) => ({ o, r: liveRevision(o) })).filter((x) => x.r);
-  const firstIssued = issued.length ? issued.slice().sort((a, b) => (Number(a.r.issuedAt) || 0) - (Number(b.r.issuedAt) || 0))[0] : null;
-  if (firstIssued) push('offer', 'canonical', firstIssued.r.issuedAt, { offerId: firstIssued.o.id, offerRevisionId: firstIssued.r.id });
-  else { const at = firstReach(h, ['offer_made']); if (at !== null) push('offer', 'lifecycle', at, {}); }
-  const accepted = issued.filter((x) => effectiveRevisionStatus(x.r, facts.now) === 'ACCEPTED').sort((a, b) => (Number(a.r.respondedAt) || 0) - (Number(b.r.respondedAt) || 0))[0] ?? null;
-  if (accepted) push('acceptance', 'canonical', accepted.r.respondedAt, { offerId: accepted.o.id, offerRevisionId: accepted.r.id });
-  else { const at = firstReach(h, ['offer_accepted']); if (at !== null) push('acceptance', 'lifecycle', at, {}); }
-  const completedPkg = latestBy(facts.packages, (p) => signingEffectiveStatus(p, facts.now) === 'COMPLETED', (p) => p.completion?.completedAt);
-  if (completedPkg) push('signing', 'canonical', completedPkg.completion?.completedAt, { signingPackageId: completedPkg.id, completedSigningId: completedPkg.completion?.signingId ?? null });
+  const firstIssued = issued.length
+    ? issued.slice().sort((a, b) => (Number(a.r.issuedAt) || 0) - (Number(b.r.issuedAt) || 0))[0]
+    : null;
+  if (firstIssued)
+    push('offer', 'canonical', firstIssued.r.issuedAt, {
+      offerId: firstIssued.o.id,
+      offerRevisionId: firstIssued.r.id,
+    });
+  else {
+    const at = firstReach(h, ['offer_made']);
+    if (at !== null) push('offer', 'lifecycle', at, {});
+  }
+  const accepted =
+    issued
+      .filter((x) => effectiveRevisionStatus(x.r, facts.now) === 'ACCEPTED')
+      .sort((a, b) => (Number(a.r.respondedAt) || 0) - (Number(b.r.respondedAt) || 0))[0] ?? null;
+  if (accepted)
+    push('acceptance', 'canonical', accepted.r.respondedAt, { offerId: accepted.o.id, offerRevisionId: accepted.r.id });
+  else {
+    const at = firstReach(h, ['offer_accepted']);
+    if (at !== null) push('acceptance', 'lifecycle', at, {});
+  }
+  const completedPkg = latestBy(
+    facts.packages,
+    (p) => signingEffectiveStatus(p, facts.now) === 'COMPLETED',
+    (p) => p.completion?.completedAt,
+  );
+  if (completedPkg)
+    push('signing', 'canonical', completedPkg.completion?.completedAt, {
+      signingPackageId: completedPkg.id,
+      completedSigningId: completedPkg.completion?.signingId ?? null,
+    });
   const signedAt = firstReach(h, ['signed']);
   if (signedAt !== null || facts.status === 'signed') {
     const row = facts.signingRow ?? null;
-    push('signed', row ? 'canonical' : 'lifecycle', signedAt ?? row?.ts ?? null, row ? { completedSigningId: row.id } : {});
+    push(
+      'signed',
+      row ? 'canonical' : 'lifecycle',
+      signedAt ?? row?.ts ?? null,
+      row ? { completedSigningId: row.id } : {},
+    );
   }
   return out;
 }
 
 function latestBy(rows, pred, atOf) {
-  return latest((rows ?? []).filter((r) => r && pred(r)), atOf);
+  return latest(
+    (rows ?? []).filter((r) => r && pred(r)),
+    atOf,
+  );
 }
 
 // ------------------------------------------------------------ next action
@@ -201,37 +352,47 @@ function latestBy(rows, pred, atOf) {
  * `kind` is a club act, something the club awaits, or none. Where the act is a
  * lifecycle action it is named, so the permission rule is the lifecycle's own.
  */
-export const NEXT_ACTIONS = Object.freeze(Object.assign(Object.create(null), {
-  REVIEW_PLAYER:            { stage: 'watching',   kind: 'club',  tab: 'overview',    lifecycleAction: 'startReview' },
-  DECIDE_APPROACH:          { stage: 'review',     kind: 'club',  tab: 'overview',    lifecycleAction: 'planContact' },
-  SEND_CONTACT:             { stage: 'contact',    kind: 'club',  tab: 'contact',     permission: 'contact_write' },
-  AWAIT_CONTACT_RESPONSE:   { stage: 'contact',    kind: 'await', tab: 'contact' },
-  CONTINUE_EVALUATION:      { stage: 'contact',    kind: 'club',  tab: 'overview',    lifecycleAction: 'shortlist' },
-  AWAIT_TRIAL_RESPONSE:     { stage: 'trial',      kind: 'await', tab: 'trial' },
-  CONDUCT_TRIAL:            { stage: 'trial',      kind: 'club',  tab: 'trial',       permission: 'trial_write' },
-  COMPLETE_TRIAL:           { stage: 'trial',      kind: 'club',  tab: 'trial',       permission: 'trial_write' },
-  COMPLETE_ASSESSMENT:      { stage: 'assessment', kind: 'club',  tab: 'assessments', permission: 'assess' },
-  RECORD_DECISION:          { stage: 'decision',   kind: 'club',  tab: 'decision',    permission: 'decide' },
-  PREPARE_OFFER:            { stage: 'offer',      kind: 'club',  tab: 'offer',       permission: 'offer_write' },
-  ISSUE_OFFER:              { stage: 'offer',      kind: 'club',  tab: 'offer',       permission: 'offer_write' },
-  AWAIT_OFFER_RESPONSE:     { stage: 'offer',      kind: 'await', tab: 'offer' },
-  REVISE_OR_WITHDRAW_OFFER: { stage: 'offer',      kind: 'club',  tab: 'offer',       permission: 'offer_write' },
-  REVIEW_DECLINED_OFFER:    { stage: 'offer',      kind: 'club',  tab: 'offer',       lifecycleAction: 'considerOffer' },
-  START_SIGNING:            { stage: 'acceptance', kind: 'club',  tab: 'signing',     permission: 'signing_manage' },
-  PRESENT_SIGNING:          { stage: 'signing',    kind: 'club',  tab: 'signing',     permission: 'signing_manage' },
-  SIGN_FOR_CLUB:            { stage: 'signing',    kind: 'club',  tab: 'signing',     permission: 'signing_lead' },
-  AWAIT_RECIPIENT_SIGNATURE:{ stage: 'signing',    kind: 'await', tab: 'signing' },
-  COMPLETE_SIGNING:         { stage: 'signing',    kind: 'club',  tab: 'signing',     permission: 'signing_lead' },
-  RECRUITMENT_COMPLETE:     { stage: 'signed',     kind: 'none',  tab: 'signing' },
-  RESUME_CASE:              { stage: 'paused',     kind: 'club',  tab: 'overview',    lifecycleAction: 'resumeCase' },
-  CASE_ENDED:               { stage: 'ended',      kind: 'none',  tab: 'overview' },
-  STATE_UNKNOWN:            { stage: null,         kind: 'none',  tab: 'overview' },
-}));
+export const NEXT_ACTIONS = Object.freeze(
+  Object.assign(Object.create(null), {
+    REVIEW_PLAYER: { stage: 'watching', kind: 'club', tab: 'overview', lifecycleAction: 'startReview' },
+    DECIDE_APPROACH: { stage: 'review', kind: 'club', tab: 'overview', lifecycleAction: 'planContact' },
+    SEND_CONTACT: { stage: 'contact', kind: 'club', tab: 'contact', permission: 'contact_write' },
+    AWAIT_CONTACT_RESPONSE: { stage: 'contact', kind: 'await', tab: 'contact' },
+    CONTINUE_EVALUATION: { stage: 'contact', kind: 'club', tab: 'overview', lifecycleAction: 'shortlist' },
+    AWAIT_TRIAL_RESPONSE: { stage: 'trial', kind: 'await', tab: 'trial' },
+    CONDUCT_TRIAL: { stage: 'trial', kind: 'club', tab: 'trial', permission: 'trial_write' },
+    COMPLETE_TRIAL: { stage: 'trial', kind: 'club', tab: 'trial', permission: 'trial_write' },
+    COMPLETE_ASSESSMENT: { stage: 'assessment', kind: 'club', tab: 'assessments', permission: 'assess' },
+    RECORD_DECISION: { stage: 'decision', kind: 'club', tab: 'decision', permission: 'decide' },
+    PREPARE_OFFER: { stage: 'offer', kind: 'club', tab: 'offer', permission: 'offer_write' },
+    ISSUE_OFFER: { stage: 'offer', kind: 'club', tab: 'offer', permission: 'offer_write' },
+    AWAIT_OFFER_RESPONSE: { stage: 'offer', kind: 'await', tab: 'offer' },
+    REVISE_OR_WITHDRAW_OFFER: { stage: 'offer', kind: 'club', tab: 'offer', permission: 'offer_write' },
+    REVIEW_DECLINED_OFFER: { stage: 'offer', kind: 'club', tab: 'offer', lifecycleAction: 'considerOffer' },
+    START_SIGNING: { stage: 'acceptance', kind: 'club', tab: 'signing', permission: 'signing_manage' },
+    PRESENT_SIGNING: { stage: 'signing', kind: 'club', tab: 'signing', permission: 'signing_manage' },
+    SIGN_FOR_CLUB: { stage: 'signing', kind: 'club', tab: 'signing', permission: 'signing_lead' },
+    AWAIT_RECIPIENT_SIGNATURE: { stage: 'signing', kind: 'await', tab: 'signing' },
+    COMPLETE_SIGNING: { stage: 'signing', kind: 'club', tab: 'signing', permission: 'signing_lead' },
+    RECRUITMENT_COMPLETE: { stage: 'signed', kind: 'none', tab: 'signing' },
+    RESUME_CASE: { stage: 'paused', kind: 'club', tab: 'overview', lifecycleAction: 'resumeCase' },
+    CASE_ENDED: { stage: 'ended', kind: 'none', tab: 'overview' },
+    STATE_UNKNOWN: { stage: null, kind: 'none', tab: 'overview' },
+  }),
+);
 export const NEXT_ACTION_CODES = Object.freeze(Object.keys(NEXT_ACTIONS));
 
 const ROLE_RANK = { viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 };
 /** Only says whether to offer the act; the domain routes remain the authority. */
-const PERMISSION_MIN_ROLE = Object.freeze({ contact_write: 'room_lead', trial_write: 'room_lead', assess: 'contributor', decide: 'room_lead', offer_write: 'room_lead', signing_manage: 'room_lead', signing_lead: 'recruitment_admin' });
+const PERMISSION_MIN_ROLE = Object.freeze({
+  contact_write: 'room_lead',
+  trial_write: 'room_lead',
+  assess: 'contributor',
+  decide: 'room_lead',
+  offer_write: 'room_lead',
+  signing_manage: 'room_lead',
+  signing_lead: 'recruitment_admin',
+});
 const rankOf = (role) => ROLE_RANK[role] ?? -1;
 
 /**
@@ -244,19 +405,30 @@ export function nextActionFor(p) {
   if (!ROOM_STATUSES.includes(status)) return pick('STATE_UNKNOWN');
   if (TERMINAL_ROOM_STATUSES.includes(status) && status !== 'signed') return pick('CASE_ENDED');
   switch (status) {
-    case 'signed': return pick('RECRUITMENT_COMPLETE', { completedSigningId: p.signingRow?.id ?? p.signing?.completion?.signingId ?? null, signingPackageId: p.signing?.id ?? null });
-    case 'on_hold': return pick('RESUME_CASE');
-    case 'watching': return pick('REVIEW_PLAYER');
-    case 'under_review': case 'shortlisted': case 'priority':
+    case 'signed':
+      return pick('RECRUITMENT_COMPLETE', {
+        completedSigningId: p.signingRow?.id ?? p.signing?.completion?.signingId ?? null,
+        signingPackageId: p.signing?.id ?? null,
+      });
+    case 'on_hold':
+      return pick('RESUME_CASE');
+    case 'watching':
+      return pick('REVIEW_PLAYER');
+    case 'under_review':
+    case 'shortlisted':
+    case 'priority':
       if (p.assessed && !p.decision) return pick('RECORD_DECISION');
       return pick('DECIDE_APPROACH');
-    case 'contact_planned': return pick('SEND_CONTACT', { contactId: p.contact?.status === 'draft' ? p.contact.id : null });
+    case 'contact_planned':
+      return pick('SEND_CONTACT', { contactId: p.contact?.status === 'draft' ? p.contact.id : null });
     case 'contacted':
       if (p.contact?.status === 'delivered') return pick('AWAIT_CONTACT_RESPONSE', { contactId: p.contact.id });
       return pick('CONTINUE_EVALUATION', { contactId: p.contact?.id ?? null });
-    case 'trial_requested': return pick('AWAIT_TRIAL_RESPONSE', { trialRequestId: p.trialRequest?.id ?? null });
+    case 'trial_requested':
+      return pick('AWAIT_TRIAL_RESPONSE', { trialRequestId: p.trialRequest?.id ?? null });
     case 'trial_scheduled': {
-      const t = p.trial; const sessions = t?.schedule?.sessions ?? [];
+      const t = p.trial;
+      const sessions = t?.schedule?.sessions ?? [];
       const lastEnd = sessions.reduce((m, s) => Math.max(m, Number(s?.endsAt) || 0), 0);
       return pick(lastEnd && lastEnd <= now ? 'COMPLETE_TRIAL' : 'CONDUCT_TRIAL', { trialId: t?.id ?? null });
     }
@@ -265,27 +437,40 @@ export function nextActionFor(p) {
       if (!p.decision) return pick('RECORD_DECISION', { trialId: p.trial?.id ?? null });
       return pick('RECORD_DECISION', { trialId: p.trial?.id ?? null, decisionId: p.decision.id });
     case 'offer_consideration':
-      if (p.offer && p.offer.status === 'DRAFT') return pick('ISSUE_OFFER', { offerId: p.offer.offer.id, offerRevisionId: p.offer.revision?.id ?? null });
+      if (p.offer && p.offer.status === 'DRAFT')
+        return pick('ISSUE_OFFER', { offerId: p.offer.offer.id, offerRevisionId: p.offer.revision?.id ?? null });
       return pick('PREPARE_OFFER', { decisionId: p.decision?.id ?? null });
     case 'offer_made': {
       const o = p.offer;
-      if (o && o.liveStatus === 'ISSUED') return pick('AWAIT_OFFER_RESPONSE', { offerId: o.offer.id, offerRevisionId: o.revision?.id ?? null });
-      return pick('REVISE_OR_WITHDRAW_OFFER', { offerId: o?.offer.id ?? null, offerRevisionId: o?.revision?.id ?? null });
+      if (o && o.liveStatus === 'ISSUED')
+        return pick('AWAIT_OFFER_RESPONSE', { offerId: o.offer.id, offerRevisionId: o.revision?.id ?? null });
+      return pick('REVISE_OR_WITHDRAW_OFFER', {
+        offerId: o?.offer.id ?? null,
+        offerRevisionId: o?.revision?.id ?? null,
+      });
     }
-    case 'offer_declined': return pick('REVIEW_DECLINED_OFFER', { offerId: p.offer?.offer.id ?? null });
+    case 'offer_declined':
+      return pick('REVIEW_DECLINED_OFFER', { offerId: p.offer?.offer.id ?? null });
     case 'offer_accepted': {
-      const s = p.signing; const st = s ? signingEffectiveStatus(s, now) : null;
-      const refs = { offerId: p.offer?.offer.id ?? null, offerRevisionId: p.offer?.revision?.id ?? null, signingPackageId: s?.id ?? null };
+      const s = p.signing;
+      const st = s ? signingEffectiveStatus(s, now) : null;
+      const refs = {
+        offerId: p.offer?.offer.id ?? null,
+        offerRevisionId: p.offer?.revision?.id ?? null,
+        signingPackageId: s?.id ?? null,
+      };
       if (!s || !signingIsLive(s, now)) return pick('START_SIGNING', { ...refs, signingPackageId: null });
       if (st === 'DRAFT') return pick('PRESENT_SIGNING', refs);
-      const rev = signingCurrentRevision(s); const parties = Array.isArray(rev?.requiredParties) ? rev.requiredParties : [];
+      const rev = signingCurrentRevision(s);
+      const parties = Array.isArray(rev?.requiredParties) ? rev.requiredParties : [];
       const clubPending = parties.some((x) => x?.partyType === 'CLUB_SIGNATORY' && x.status === 'PENDING');
       const othersPending = parties.some((x) => x?.partyType !== 'CLUB_SIGNATORY' && x.status === 'PENDING');
       if (clubPending) return pick('SIGN_FOR_CLUB', refs);
       if (othersPending) return pick('AWAIT_RECIPIENT_SIGNATURE', refs);
       return pick('COMPLETE_SIGNING', refs);
     }
-    default: return pick('STATE_UNKNOWN');
+    default:
+      return pick('STATE_UNKNOWN');
   }
 }
 
@@ -298,33 +483,77 @@ function finish(code, refs, p) {
   }
   let permitted = def.kind !== 'club' ? null : true;
   if (def.kind === 'club') {
-    if (def.lifecycleAction) permitted = (LIFECYCLE_ACTIONS[def.lifecycleAction]?.roles ?? []).some((r) => rankOf(p.role) >= rankOf(r));
+    if (def.lifecycleAction)
+      permitted = (LIFECYCLE_ACTIONS[def.lifecycleAction]?.roles ?? []).some((r) => rankOf(p.role) >= rankOf(r));
     else if (def.permission) permitted = rankOf(p.role) >= rankOf(PERMISSION_MIN_ROLE[def.permission]);
   }
   return {
-    code, stage: def.stage, kind: def.kind, tab: def.tab,
+    code,
+    stage: def.stage,
+    kind: def.kind,
+    tab: def.tab,
     lifecycleAction: def.lifecycleAction ?? null,
-    permitted, blockedBy,
+    permitted,
+    blockedBy,
     resources: Object.fromEntries(Object.entries(refs).filter(([, v]) => v !== undefined)),
   };
 }
 
 /** Only things the player or guardian can answer themselves; nothing about the club's process. */
-export const PLAYER_NEXT_ACTIONS = Object.freeze(['RESPOND_TO_CONTACT', 'RESPOND_TO_TRIAL_INVITATION', 'CONFIRM_TRIAL_SCHEDULE', 'RESPOND_TO_OFFER', 'SIGN', 'NONE']);
-export function playerNextActionFor({ pendingContactRequest = null, pendingTrialRequest = null, trialAwaitingConfirmation = null, issuedOffer = null, signingPending = null }) {
+export const PLAYER_NEXT_ACTIONS = Object.freeze([
+  'RESPOND_TO_CONTACT',
+  'RESPOND_TO_TRIAL_INVITATION',
+  'CONFIRM_TRIAL_SCHEDULE',
+  'RESPOND_TO_OFFER',
+  'SIGN',
+  'NONE',
+]);
+export function playerNextActionFor({
+  pendingContactRequest = null,
+  pendingTrialRequest = null,
+  trialAwaitingConfirmation = null,
+  issuedOffer = null,
+  signingPending = null,
+}) {
   if (signingPending) return { code: 'SIGN', resources: { signingPackageId: signingPending.id } };
-  if (issuedOffer) return { code: 'RESPOND_TO_OFFER', resources: { offerId: issuedOffer.offer.id, offerRevisionId: issuedOffer.revision?.id ?? null } };
-  if (trialAwaitingConfirmation) return { code: 'CONFIRM_TRIAL_SCHEDULE', resources: { trialId: trialAwaitingConfirmation.id } };
-  if (pendingTrialRequest) return { code: 'RESPOND_TO_TRIAL_INVITATION', resources: { requestId: pendingTrialRequest.id } };
+  if (issuedOffer)
+    return {
+      code: 'RESPOND_TO_OFFER',
+      resources: { offerId: issuedOffer.offer.id, offerRevisionId: issuedOffer.revision?.id ?? null },
+    };
+  if (trialAwaitingConfirmation)
+    return { code: 'CONFIRM_TRIAL_SCHEDULE', resources: { trialId: trialAwaitingConfirmation.id } };
+  if (pendingTrialRequest)
+    return { code: 'RESPOND_TO_TRIAL_INVITATION', resources: { requestId: pendingTrialRequest.id } };
   if (pendingContactRequest) return { code: 'RESPOND_TO_CONTACT', resources: { requestId: pendingContactRequest.id } };
   return { code: 'NONE', resources: {} };
 }
 
 /** Only stages that involve the player; never anything about the club's internal pipeline. */
-export const PLAYER_STAGES = Object.freeze(['contacted', 'trial_invited', 'trial_scheduled', 'trial_completed', 'offer_received', 'offer_accepted', 'offer_declined', 'signing', 'signed', 'none']);
-export function playerStageFor({ contacts = [], trialRequests = [], trials = [], offer = null, signing = null, signingRow = null, now = Date.now() }) {
+export const PLAYER_STAGES = Object.freeze([
+  'contacted',
+  'trial_invited',
+  'trial_scheduled',
+  'trial_completed',
+  'offer_received',
+  'offer_accepted',
+  'offer_declined',
+  'signing',
+  'signed',
+  'none',
+]);
+export function playerStageFor({
+  contacts = [],
+  trialRequests = [],
+  trials = [],
+  offer = null,
+  signing = null,
+  signingRow = null,
+  now = Date.now(),
+}) {
   if (signingRow || (signing && signingEffectiveStatus(signing, now) === 'COMPLETED')) return 'signed';
-  if (signing && signingIsLive(signing, now) && ['READY', 'IN_PROGRESS'].includes(signingEffectiveStatus(signing, now))) return 'signing';
+  if (signing && signingIsLive(signing, now) && ['READY', 'IN_PROGRESS'].includes(signingEffectiveStatus(signing, now)))
+    return 'signing';
   if (offer) {
     const st = offer.liveStatus ?? null;
     if (st === 'ACCEPTED') return 'offer_accepted';
@@ -348,8 +577,16 @@ export const JOURNEY_CLASSIFICATIONS = Object.freeze(['canonical', 'legacy', 'pa
 
 /** Domain codes (offer/signing consistency) are folded in as they are. */
 export const JOURNEY_INTEGRITY_CODES = Object.freeze([
-  'LIFECYCLE_STATE_UNKNOWN', 'PLAYER_MISMATCH', 'CLUB_MISMATCH', 'CASE_MISMATCH',
-  'STALE_POINTER', 'LIFECYCLE_AHEAD_OF_EVIDENCE', 'LIFECYCLE_BEHIND_TERMINAL_EVIDENCE', 'EVIDENCE_AHEAD_OF_LIFECYCLE', 'HISTORY_MALFORMED', 'TEMPORAL_ORDER',
+  'LIFECYCLE_STATE_UNKNOWN',
+  'PLAYER_MISMATCH',
+  'CLUB_MISMATCH',
+  'CASE_MISMATCH',
+  'STALE_POINTER',
+  'LIFECYCLE_AHEAD_OF_EVIDENCE',
+  'LIFECYCLE_BEHIND_TERMINAL_EVIDENCE',
+  'EVIDENCE_AHEAD_OF_LIFECYCLE',
+  'HISTORY_MALFORMED',
+  'TEMPORAL_ORDER',
   // A corrupt record naming this case is omitted from the projection, and the
   // omission is a problem, not a quiet downgrade to "legacy".
   'RECORD_CORRUPT',
@@ -383,7 +620,17 @@ export function validateRecruitmentJourney(facts) {
     package: new Set((facts.packages ?? []).map((p) => p.id)),
   };
   for (const r of facts.foreign ?? []) problems.add(r);
-  const reached = { contacted: null, trial_requested: null, trial_scheduled: null, trial_completed: null, offer_consideration: null, offer_made: null, offer_accepted: null, offer_declined: null, signed: null };
+  const reached = {
+    contacted: null,
+    trial_requested: null,
+    trial_scheduled: null,
+    trial_completed: null,
+    offer_consideration: null,
+    offer_made: null,
+    offer_accepted: null,
+    offer_declined: null,
+    signed: null,
+  };
   for (const h of facts.history ?? []) {
     if (!h || typeof h !== 'object') continue;
     // A malformed instant is corruption; out-of-order instants (a test clock, a
@@ -404,28 +651,55 @@ export function validateRecruitmentJourney(facts) {
   // no row is a stale pointer, not a legacy `signed`.
   if ((Number(facts.corruptRecords) || 0) > 0) problems.add('RECORD_CORRUPT');
   const linkedSigning = kase?.links?.signingId;
-  if (typeof linkedSigning === 'string' && linkedSigning && facts.signingRowIds instanceof Set && !facts.signingRowIds.has(linkedSigning)) problems.add('STALE_POINTER');
+  if (
+    typeof linkedSigning === 'string' &&
+    linkedSigning &&
+    facts.signingRowIds instanceof Set &&
+    !facts.signingRowIds.has(linkedSigning)
+  )
+    problems.add('STALE_POINTER');
   const evidence = {
     contacted: (facts.contacts ?? []).some((c) => CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt),
     trial_requested: (facts.trialRequests ?? []).length > 0 || (facts.trials ?? []).length > 0,
-    trial_scheduled: (facts.trials ?? []).some((t) => ['scheduled', 'completed', 'cancelled'].includes(deriveWorkflowState(t)) && t.schedule),
+    trial_scheduled: (facts.trials ?? []).some(
+      (t) => ['scheduled', 'completed', 'cancelled'].includes(deriveWorkflowState(t)) && t.schedule,
+    ),
     trial_completed: (facts.trials ?? []).some((t) => deriveWorkflowState(t) === 'completed'),
-    offer_consideration: (facts.decisions ?? []).some((d) => d.kind === 'formal' && d.state !== 'draft' && d.outcome === 'progress'),
+    offer_consideration: (facts.decisions ?? []).some(
+      (d) => d.kind === 'formal' && d.state !== 'draft' && d.outcome === 'progress',
+    ),
     offer_made: (facts.offers ?? []).some((o) => liveRevision(o)),
-    offer_accepted: (facts.offers ?? []).some((o) => { const r = liveRevision(o); return r && effectiveRevisionStatus(r, now) === 'ACCEPTED'; }),
-    offer_declined: (facts.offers ?? []).some((o) => { const r = liveRevision(o); return r && effectiveRevisionStatus(r, now) === 'DECLINED'; }),
+    offer_accepted: (facts.offers ?? []).some((o) => {
+      const r = liveRevision(o);
+      return r && effectiveRevisionStatus(r, now) === 'ACCEPTED';
+    }),
+    offer_declined: (facts.offers ?? []).some((o) => {
+      const r = liveRevision(o);
+      return r && effectiveRevisionStatus(r, now) === 'DECLINED';
+    }),
     signed: !!facts.signingRow,
   };
-  let backed = 0; let unbacked = 0;
+  let backed = 0;
+  let unbacked = 0;
   for (const [state, r] of Object.entries(reached)) {
     if (!r) continue;
-    if (evidence[state]) { backed += 1; continue; }
-    if (r.claimed) problems.add('LIFECYCLE_AHEAD_OF_EVIDENCE'); else unbacked += 1;
+    if (evidence[state]) {
+      backed += 1;
+      continue;
+    }
+    if (r.claimed) problems.add('LIFECYCLE_AHEAD_OF_EVIDENCE');
+    else unbacked += 1;
   }
   // The current state with no history entry must be backed too.
   if (Object.hasOwn(evidence, status) && !evidence[status] && !reached[status]) unbacked += 1;
   const completedPkg = (facts.packages ?? []).some((p) => signingEffectiveStatus(p, now) === 'COMPLETED');
-  if ((completedPkg || facts.signingRow) && status !== 'signed' && !TERMINAL_ROOM_STATUSES.includes(status) && status !== 'on_hold') problems.add('LIFECYCLE_BEHIND_TERMINAL_EVIDENCE');
+  if (
+    (completedPkg || facts.signingRow) &&
+    status !== 'signed' &&
+    !TERMINAL_ROOM_STATUSES.includes(status) &&
+    status !== 'on_hold'
+  )
+    problems.add('LIFECYCLE_BEHIND_TERMINAL_EVIDENCE');
   // Every domain writer moves the case in the same unit of work, so a record
   // proving a state the case never reached is drift: named, never repaired.
   // A held or ended case is exempt: its evidence may outlive its last live state.
@@ -450,8 +724,16 @@ export function validateRecruitmentJourney(facts) {
   return { ok: list.length === 0, classification, problems: list, backed, unbacked };
 }
 
-const claimOf = (d) => !!(d.contactId || d.trialId || d.requestId || d.decisionId || d.offerId || d.signingPackageId
-  || (typeof d.trigger === 'string' && /^(contact|trial|offer|signing|decision):/.test(d.trigger)));
+const claimOf = (d) =>
+  !!(
+    d.contactId ||
+    d.trialId ||
+    d.requestId ||
+    d.decisionId ||
+    d.offerId ||
+    d.signingPackageId ||
+    (typeof d.trigger === 'string' && /^(contact|trial|offer|signing|decision):/.test(d.trigger))
+  );
 
 // ---------------------------------------------------------------- timeline
 
@@ -464,9 +746,14 @@ export const TIMELINE_VISIBILITY = Object.freeze({
   room_created: ['club', 'trust_safety'],
   room_status_changed: ['club', 'trust_safety'],
   room_reopened: ['club', 'trust_safety'],
-  case_created: ['club'], case_stage_changed: ['club'],
-  room_decision_recorded: ['club'], decision: ['club'], decision_recorded: ['club'], decision_superseded: ['club'],
-  transaction_handoff_invited: ['club'], transaction_handoff_withdrawn: ['club'],
+  case_created: ['club'],
+  case_stage_changed: ['club'],
+  room_decision_recorded: ['club'],
+  decision: ['club'],
+  decision_recorded: ['club'],
+  decision_superseded: ['club'],
+  transaction_handoff_invited: ['club'],
+  transaction_handoff_withdrawn: ['club'],
   contact_initiated: ['club', 'player', 'guardian', 'agent', 'trust_safety'],
   contact_response_received: ['club', 'player', 'guardian', 'agent', 'trust_safety'],
   trial_invited: ['club', 'player', 'guardian', 'agent', 'trust_safety'],
@@ -500,20 +787,54 @@ export const TIMELINE_AUDIENCES = Object.freeze(['club', 'player', 'guardian', '
 export const timelineVisibleTo = (kind, audience) => (TIMELINE_VISIBILITY[kind] ?? []).includes(audience);
 
 /** Offer history actions that are journey milestones (drafts and views are not). */
-export const OFFER_TIMELINE_ACTIONS = Object.freeze(['offer_draft_created', 'offer_issued', 'offer_superseded', 'offer_withdrawn', 'offer_accepted', 'offer_declined']);
+export const OFFER_TIMELINE_ACTIONS = Object.freeze([
+  'offer_draft_created',
+  'offer_issued',
+  'offer_superseded',
+  'offer_withdrawn',
+  'offer_accepted',
+  'offer_declined',
+]);
 /** Signing history actions that are journey milestones (document attachments carry a digest and are not). */
-export const SIGNING_TIMELINE_ACTIONS = Object.freeze(['signing_created', 'signing_ready', 'signing_party_completed', 'signing_completed', 'signing_cancelled', 'signing_voided', 'signing_superseded']);
+export const SIGNING_TIMELINE_ACTIONS = Object.freeze([
+  'signing_created',
+  'signing_ready',
+  'signing_party_completed',
+  'signing_completed',
+  'signing_cancelled',
+  'signing_voided',
+  'signing_superseded',
+]);
 
 /** A history entry stripped to ids, words and an instant — never a digest, a term, a note or a name of the other side. */
 export function offerTimelineEntry(offer, h) {
   if (!OFFER_TIMELINE_ACTIONS.includes(h?.action)) return null;
   const d = h.detail ?? {};
-  return { _k: `${h.action}:${offer.id}:${h.id ?? ''}`, kind: h.action, at: h.at, by: h.by?.kind === 'org' ? (h.by.name ?? null) : null, byKind: h.by?.kind ?? null, offerId: offer.id, ...(d.revisionId ? { offerRevisionId: d.revisionId } : {}), ...(Number.isInteger(d.revisionNumber) ? { revisionNumber: d.revisionNumber } : {}) };
+  return {
+    _k: `${h.action}:${offer.id}:${h.id ?? ''}`,
+    kind: h.action,
+    at: h.at,
+    by: h.by?.kind === 'org' ? (h.by.name ?? null) : null,
+    byKind: h.by?.kind ?? null,
+    offerId: offer.id,
+    ...(d.revisionId ? { offerRevisionId: d.revisionId } : {}),
+    ...(Number.isInteger(d.revisionNumber) ? { revisionNumber: d.revisionNumber } : {}),
+  };
 }
 export function signingTimelineEntry(pkg, h) {
   if (!SIGNING_TIMELINE_ACTIONS.includes(h?.action)) return null;
   const d = h.detail ?? {};
-  return { _k: `${h.action}:${pkg.id}:${h.id ?? ''}`, kind: h.action, at: h.at, by: h.by?.kind === 'org' ? (h.by.name ?? null) : null, byKind: h.by?.kind ?? null, signingPackageId: pkg.id, ...(d.revisionId ? { signingRevisionId: d.revisionId } : {}), ...(d.partyType ? { partyType: d.partyType } : {}), ...(d.signingId ? { completedSigningId: d.signingId } : {}) };
+  return {
+    _k: `${h.action}:${pkg.id}:${h.id ?? ''}`,
+    kind: h.action,
+    at: h.at,
+    by: h.by?.kind === 'org' ? (h.by.name ?? null) : null,
+    byKind: h.by?.kind ?? null,
+    signingPackageId: pkg.id,
+    ...(d.revisionId ? { signingRevisionId: d.revisionId } : {}),
+    ...(d.partyType ? { partyType: d.partyType } : {}),
+    ...(d.signingId ? { completedSigningId: d.signingId } : {}),
+  };
 }
 
 /** `signed` is the only lifecycle state whose label the player may read as their own; everything else is club vocabulary. */

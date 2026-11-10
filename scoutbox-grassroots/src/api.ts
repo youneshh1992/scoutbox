@@ -26,7 +26,13 @@ export interface Org {
   /** Positions this club is recruiting — powers players' opportunity radar. */
   lookingFor?: string[];
   /** Federation-route verification filed with Trust & Safety. */
-  federationCheck?: { federation: string; registrationId: string; contactEmail: string | null; status: string; submittedAt: number } | null;
+  federationCheck?: {
+    federation: string;
+    registrationId: string;
+    contactEmail: string | null;
+    status: string;
+    submittedAt: number;
+  } | null;
 }
 
 // ---- the grassroots club toolkit
@@ -257,8 +263,23 @@ export interface CombineResult {
 }
 
 export interface FilmRoomItem {
-  media: { id: string; title: string; url: string; views: number; verifiedClip: string | null; tags: Record<string, number> };
-  player: { id: string; name: string; position: string; age: number; trustScore: number; academyPlus: boolean; guardianManaged: boolean };
+  media: {
+    id: string;
+    title: string;
+    url: string;
+    views: number;
+    verifiedClip: string | null;
+    tags: Record<string, number>;
+  };
+  player: {
+    id: string;
+    name: string;
+    position: string;
+    age: number;
+    trustScore: number;
+    academyPlus: boolean;
+    guardianManaged: boolean;
+  };
 }
 
 export interface FeedItem {
@@ -492,12 +513,25 @@ export interface ProofPack {
 
 export interface PlanInfo {
   org: Org;
-  plan: { name: string; pricePerMonthGBP: number; seats: number; attributionWindowMonths: number; antiCircumvention: string };
+  plan: {
+    name: string;
+    pricePerMonthGBP: number;
+    seats: number;
+    attributionWindowMonths: number;
+    antiCircumvention: string;
+  };
   compliance: { attributionWindowMonths: number; antiCircumvention: string; feeProtection: string };
 }
 
 export interface Reputation {
-  seeded: { scoutName: string; orgName: string; discoveries: number; successRatePct: number; avgResaleMultiple: number; seeded: true }[];
+  seeded: {
+    scoutName: string;
+    orgName: string;
+    discoveries: number;
+    successRatePct: number;
+    avgResaleMultiple: number;
+    seeded: true;
+  }[];
   live: { scoutName: string; orgName: string; views: number; contacts: number; trials: number; signings: number }[];
 }
 
@@ -512,7 +546,11 @@ export class ApiError extends Error {
   details: Record<string, unknown> | null = null;
   retryAfterS: number | null = null;
   retryable: boolean | null = null;
-  constructor(public status: number, public code: string, message: string) {
+  constructor(
+    public status: number,
+    public code: string,
+    message: string,
+  ) {
     super(message);
   }
   static fromResponse(res: Response, body: Record<string, unknown> | null | undefined): ApiError {
@@ -542,8 +580,14 @@ export interface ScoutboxApi {
   listOrgs(): Promise<Org[]>;
   login(orgId: string, scoutName: string, role: string, password?: string): Promise<Session>;
   registerGrassroots(input: {
-    name: string; federation: string; registrationId: string; city: string;
-    lat: number; lng: number; scoutName: string; role: string;
+    name: string;
+    federation: string;
+    registrationId: string;
+    city: string;
+    lat: number;
+    lng: number;
+    scoutName: string;
+    role: string;
   }): Promise<Session>;
   report(s: Session, input: ReportInput): Promise<void>;
   searchPlayers(s: Session, f: SearchFilters): Promise<Player[]>;
@@ -552,12 +596,24 @@ export interface ScoutboxApi {
   getPlayer(s: Session, id: string): Promise<PlayerDetail>;
   act(s: Session, playerId: string, action: 'save' | 'shortlist' | 'signing'): Promise<void>;
   getShortlist(s: Session): Promise<Player[]>;
-  sendRequest(s: Session, playerId: string, type: 'contact' | 'trial', message: string, details?: TrialDetails): Promise<void>;
+  sendRequest(
+    s: Session,
+    playerId: string,
+    type: 'contact' | 'trial',
+    message: string,
+    details?: TrialDetails,
+  ): Promise<void>;
   /** The first page of the organisation's threads, most recently active first; `playerId` limits it to one player's. */
   getChannels(s: Session, opts?: { playerId?: string }): Promise<Channel[]>;
   /** The inbox figures: the organisation's threads and the unread messages from players and guardians. */
   getChannelCounts(s: Session): Promise<{ threads: number; unreadMessages: number }>;
-  sendMessage(s: Session, channelId: string, text: string, attachTrialReportId?: string, clientMsgId?: string): Promise<void>;
+  sendMessage(
+    s: Session,
+    channelId: string,
+    text: string,
+    attachTrialReportId?: string,
+    clientMsgId?: string,
+  ): Promise<void>;
   markChannelRead(s: Session, channelId: string): Promise<void>;
   sendTyping(s: Session, channelId: string): Promise<void>;
   getFeed(s: Session): Promise<FeedItem[]>;
@@ -570,22 +626,40 @@ export interface ScoutboxApi {
   saveSearch(s: Session, name: string, filters: SearchFilters): Promise<void>;
   deleteSavedSearch(s: Session, id: string): Promise<void>;
   addNote(s: Session, playerId: string, text: string): Promise<void>;
-  moreLikeThis(s: Session, playerId: string): Promise<{ base: { name: string }; players: (Player & { similarity: number })[] }>;
+  moreLikeThis(
+    s: Session,
+    playerId: string,
+  ): Promise<{ base: { name: string }; players: (Player & { similarity: number })[] }>;
   recordSigning(s: Session, playerId: string): Promise<SigningRecord>;
   trialIcsUrl(s: Session, trialId: string): string | null;
   getFunnel(s: Session): Promise<Funnel>;
   getOpenTrials(s: Session): Promise<OpenTrial[]>;
-  postOpenTrial(s: Session, input: { title: string; date: string; venue: string; ageGroup: string; positions: string[]; notes?: string }): Promise<void>;
+  postOpenTrial(
+    s: Session,
+    input: { title: string; date: string; venue: string; ageGroup: string; positions: string[]; notes?: string },
+  ): Promise<void>;
   deleteOpenTrial(s: Session, id: string): Promise<void>;
   setLookingFor(s: Session, positions: string[]): Promise<void>;
-  resolveOpenTrialOutcome(s: Session, trialId: string, regId: string, outcome: 'invite_trial' | 'declined', note?: string): Promise<void>;
+  resolveOpenTrialOutcome(
+    s: Session,
+    trialId: string,
+    regId: string,
+    outcome: 'invite_trial' | 'declined',
+    note?: string,
+  ): Promise<void>;
   getSquad(s: Session): Promise<Squad>;
   addSquadEntry(s: Session, input: { name: string; position?: string; playerId?: string }): Promise<Squad>;
   releaseSquadEntry(s: Session, entryId: string, referenceText?: string): Promise<Squad>;
-  logMatchday(s: Session, input: { fixture: string; venue?: string; date: string; result?: string; playerIds: string[] }): Promise<{ credited: number }>;
+  logMatchday(
+    s: Session,
+    input: { fixture: string; venue?: string; date: string; result?: string; playerIds: string[] },
+  ): Promise<{ credited: number }>;
   getMatchdays(s: Session): Promise<Matchday[]>;
   getPathwayRecord(s: Session): Promise<PathwayRecord>;
-  submitFederationVerification(s: Session, input: { federation: string; registrationId: string; contactEmail?: string }): Promise<{ note: string }>;
+  submitFederationVerification(
+    s: Session,
+    input: { federation: string; registrationId: string; contactEmail?: string },
+  ): Promise<{ note: string }>;
   getFriendlies(s: Session): Promise<Friendly[]>;
   postFriendly(s: Session, input: { ageGroup?: string; date: string; venue?: string; notes?: string }): Promise<void>;
   respondFriendly(s: Session, id: string, message: string): Promise<void>;
@@ -638,11 +712,14 @@ export const httpApi: ScoutboxApi = {
   },
 
   async registerGrassroots(input) {
-    const r = await request<{ userId: string; role: string; org: Org; token: string }>('/auth/org/register-grassroots', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    });
+    const r = await request<{ userId: string; role: string; org: Org; token: string }>(
+      '/auth/org/register-grassroots',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+    );
     return { org: r.org, userId: r.userId, scoutName: input.scoutName, role: r.role, token: r.token };
   },
 
@@ -659,7 +736,9 @@ export const httpApi: ScoutboxApi = {
     if (f.ageGroup) params.set('ageGroup', f.ageGroup);
     if (f.newDays) params.set('newDays', String(f.newDays));
     // The directory is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
-    return request<{ items: Player[]; nextCursor: string | null }>(`/org/players?${params}`, { headers: headers(s) }).then((page) => page.items);
+    return request<{ items: Player[]; nextCursor: string | null }>(`/org/players?${params}`, {
+      headers: headers(s),
+    }).then((page) => page.items);
   },
 
   async allPlayers(s) {
@@ -668,7 +747,10 @@ export const httpApi: ScoutboxApi = {
     const out: Player[] = [];
     let cursor: string | null = null;
     do {
-      const page: { items: Player[]; nextCursor: string | null } = await request(`/org/players?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: headers(s) });
+      const page: { items: Player[]; nextCursor: string | null } = await request(
+        `/org/players?limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        { headers: headers(s) },
+      );
       out.push(...page.items);
       cursor = page.nextCursor;
     } while (cursor);
@@ -690,12 +772,21 @@ export const httpApi: ScoutboxApi = {
     }),
 
   // Pages by cursor, most recently active first: the first page (50) is read; "load more" (nextCursor) is still needed.
-  getChannels: (s, opts) => request<{ items: Channel[]; nextCursor: string | null }>(`/org/channels${opts?.playerId ? `?playerId=${encodeURIComponent(opts.playerId)}` : ''}`, { headers: headers(s) }).then((r) => r.items),
+  getChannels: (s, opts) =>
+    request<{ items: Channel[]; nextCursor: string | null }>(
+      `/org/channels${opts?.playerId ? `?playerId=${encodeURIComponent(opts.playerId)}` : ''}`,
+      { headers: headers(s) },
+    ).then((r) => r.items),
 
-  getChannelCounts: (s) => request<{ threads: number; unreadMessages: number }>('/org/channels/counts', { headers: headers(s) }),
+  getChannelCounts: (s) =>
+    request<{ threads: number; unreadMessages: number }>('/org/channels/counts', { headers: headers(s) }),
 
   sendMessage: (s, channelId, text, attachTrialReportId, clientMsgId) =>
-    request<void>(`/org/channels/${channelId}/messages`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text, attachTrialReportId, clientMsgId }) }),
+    request<void>(`/org/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify({ text, attachTrialReportId, clientMsgId }),
+    }),
 
   markChannelRead: (s, channelId) =>
     request<void>(`/org/channels/${channelId}/read`, { method: 'POST', headers: headers(s) }),
@@ -706,35 +797,54 @@ export const httpApi: ScoutboxApi = {
   getFeed: (s) => request<FeedItem[]>('/org/feed', { headers: headers(s) }),
 
   // The Film Room deck is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
-  getFilmRoom: (s) => request<{ items: FilmRoomItem[]; nextCursor: string | null }>('/org/filmroom', { headers: headers(s) }).then((page) => page.items),
+  getFilmRoom: (s) =>
+    request<{ items: FilmRoomItem[]; nextCursor: string | null }>('/org/filmroom', { headers: headers(s) }).then(
+      (page) => page.items,
+    ),
 
   recordClipView: (s, playerId, mediaId) =>
     request<void>(`/org/players/${playerId}/media/${mediaId}/view`, { method: 'POST', headers: headers(s) }),
 
   tagClip: (s, playerId, mediaId, tags) =>
-    request<void>(`/org/players/${playerId}/media/${mediaId}/tags`, { method: 'POST', headers: headers(s), body: JSON.stringify({ tags }) }),
+    request<void>(`/org/players/${playerId}/media/${mediaId}/tags`, {
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify({ tags }),
+    }),
 
   getScoutTags: (s) => request<string[]>('/org/tags', { headers: headers(s) }),
 
   // The fixture graph is paged ({ items, nextCursor }); this reads the first page only. "Load more" is needed.
-  getFixtures: (s) => request<{ items: FixtureGroup[]; nextCursor: string | null }>('/org/fixtures', { headers: headers(s) }).then((page) => page.items),
+  getFixtures: (s) =>
+    request<{ items: FixtureGroup[]; nextCursor: string | null }>('/org/fixtures', { headers: headers(s) }).then(
+      (page) => page.items,
+    ),
 
   getSavedSearches: (s) => request<SavedSearch[]>('/org/searches', { headers: headers(s) }),
 
   saveSearch: (s, name, filters) =>
     request<void>('/org/searches', { method: 'POST', headers: headers(s), body: JSON.stringify({ name, filters }) }),
 
-  deleteSavedSearch: (s, id) =>
-    request<void>(`/org/searches/${id}`, { method: 'DELETE', headers: headers(s) }),
+  deleteSavedSearch: (s, id) => request<void>(`/org/searches/${id}`, { method: 'DELETE', headers: headers(s) }),
 
   addNote: (s, playerId, text) =>
-    request<void>(`/org/players/${playerId}/notes`, { method: 'POST', headers: headers(s), body: JSON.stringify({ text }) }),
+    request<void>(`/org/players/${playerId}/notes`, {
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify({ text }),
+    }),
 
   moreLikeThis: (s, playerId) =>
-    request<{ base: { name: string }; players: (Player & { similarity: number })[] }>(`/org/players/${playerId}/morelike`, { headers: headers(s) }),
+    request<{ base: { name: string }; players: (Player & { similarity: number })[] }>(
+      `/org/players/${playerId}/morelike`,
+      { headers: headers(s) },
+    ),
 
   recordSigning: async (s, playerId) => {
-    const r = await request<{ signing: SigningRecord }>(`/org/players/${playerId}/signing`, { method: 'POST', headers: headers(s) });
+    const r = await request<{ signing: SigningRecord }>(`/org/players/${playerId}/signing`, {
+      method: 'POST',
+      headers: headers(s),
+    });
     return r.signing;
   },
 
@@ -743,20 +853,23 @@ export const httpApi: ScoutboxApi = {
   getFunnel: (s) => request<Funnel>('/org/funnel', { headers: headers(s) }),
 
   // These three lists page by cursor: the first page is read; "load more" (nextCursor) is still needed.
-  getOpenTrials: async (s) => (await request<{ items: OpenTrial[]; nextCursor: string | null }>('/org/open-trials', { headers: headers(s) })).items,
+  getOpenTrials: async (s) =>
+    (await request<{ items: OpenTrial[]; nextCursor: string | null }>('/org/open-trials', { headers: headers(s) }))
+      .items,
 
   postOpenTrial: (s, input) =>
     request<void>('/org/open-trials', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
 
-  deleteOpenTrial: (s, id) =>
-    request<void>(`/org/open-trials/${id}`, { method: 'DELETE', headers: headers(s) }),
+  deleteOpenTrial: (s, id) => request<void>(`/org/open-trials/${id}`, { method: 'DELETE', headers: headers(s) }),
 
   setLookingFor: (s, positions) =>
     request<void>('/org/looking-for', { method: 'POST', headers: headers(s), body: JSON.stringify({ positions }) }),
 
   resolveOpenTrialOutcome: (s, trialId, regId, outcome, note) =>
     request<void>(`/org/open-trials/${trialId}/registrations/${regId}/outcome`, {
-      method: 'POST', headers: headers(s), body: JSON.stringify({ outcome, note }),
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify({ outcome, note }),
     }),
 
   getSquad: (s) => request<Squad>('/org/squad', { headers: headers(s) }),
@@ -765,39 +878,61 @@ export const httpApi: ScoutboxApi = {
     request<Squad>('/org/squad', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
 
   releaseSquadEntry: (s, entryId, referenceText) =>
-    request<Squad>(`/org/squad/${entryId}/release`, { method: 'POST', headers: headers(s), body: JSON.stringify({ referenceText }) }),
+    request<Squad>(`/org/squad/${entryId}/release`, {
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify({ referenceText }),
+    }),
 
   logMatchday: (s, input) =>
-    request<{ credited: number }>('/org/matchday', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
+    request<{ credited: number }>('/org/matchday', {
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify(input),
+    }),
 
-  getMatchdays: async (s) => (await request<{ items: Matchday[]; nextCursor: string | null }>('/org/matchdays', { headers: headers(s) })).items,
+  getMatchdays: async (s) =>
+    (await request<{ items: Matchday[]; nextCursor: string | null }>('/org/matchdays', { headers: headers(s) })).items,
 
   getPathwayRecord: (s) => request<PathwayRecord>('/org/pathway-record', { headers: headers(s) }),
 
   submitFederationVerification: (s, input) =>
-    request<{ note: string }>('/org/verification/federation', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
+    request<{ note: string }>('/org/verification/federation', {
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify(input),
+    }),
 
-  getFriendlies: async (s) => (await request<{ items: Friendly[]; nextCursor: string | null }>('/org/friendlies', { headers: headers(s) })).items,
+  getFriendlies: async (s) =>
+    (await request<{ items: Friendly[]; nextCursor: string | null }>('/org/friendlies', { headers: headers(s) })).items,
 
   postFriendly: (s, input) =>
     request<void>('/org/friendlies', { method: 'POST', headers: headers(s), body: JSON.stringify(input) }),
 
   respondFriendly: (s, id, message) =>
-    request<void>(`/org/friendlies/${id}/respond`, { method: 'POST', headers: headers(s), body: JSON.stringify({ message }) }),
+    request<void>(`/org/friendlies/${id}/respond`, {
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify({ message }),
+    }),
 
   // Pages by cursor, newest first: the first page is read; "load more" (nextCursor) is still needed.
-  getInvoices: async (s) => (await request<{ items: Invoice[]; nextCursor: string | null }>('/org/invoices', { headers: headers(s) })).items,
+  getInvoices: async (s) =>
+    (await request<{ items: Invoice[]; nextCursor: string | null }>('/org/invoices', { headers: headers(s) })).items,
 
   requestEmailVerification: (s, email) =>
     request<void>('/org/verification/email', { method: 'POST', headers: headers(s), body: JSON.stringify({ email }) }),
 
   confirmEmailVerification: (s, code) =>
-    request<{ emailDomain: string }>('/org/verification/email/confirm', { method: 'POST', headers: headers(s), body: JSON.stringify({ code }) }),
+    request<{ emailDomain: string }>('/org/verification/email/confirm', {
+      method: 'POST',
+      headers: headers(s),
+      body: JSON.stringify({ code }),
+    }),
 
   getNotifications: (s) => request<Notification[]>('/org/notifications', { headers: headers(s) }),
 
-  markNotificationsRead: (s) =>
-    request<void>('/org/notifications/read', { method: 'POST', headers: headers(s) }),
+  markNotificationsRead: (s) => request<void>('/org/notifications/read', { method: 'POST', headers: headers(s) }),
 
   getMyReports: (s) => request<FiledReport[]>('/org/reports', { headers: headers(s) }),
 
@@ -807,8 +942,10 @@ export const httpApi: ScoutboxApi = {
   // here: the Requests, Trials and Trial days screens and the Messages report picker will need a "load more" that passes
   // `?cursor=<nextCursor>` (not built yet, by decision). The home figures come from getRecruitmentCounts, never from
   // counting a page.
-  getRequests: async (s) => (await request<{ items: OrgRequest[]; nextCursor: string | null }>('/org/requests', { headers: headers(s) })).items,
-  getTrials: async (s) => (await request<{ items: Trial[]; nextCursor: string | null }>('/org/trials', { headers: headers(s) })).items,
+  getRequests: async (s) =>
+    (await request<{ items: OrgRequest[]; nextCursor: string | null }>('/org/requests', { headers: headers(s) })).items,
+  getTrials: async (s) =>
+    (await request<{ items: Trial[]; nextCursor: string | null }>('/org/trials', { headers: headers(s) })).items,
   getRecruitmentCounts: (s) => request<RecruitmentCounts>('/org/recruitment-counts', { headers: headers(s) }),
 
   fileTrialReport: (s, trialId, report) =>
@@ -819,7 +956,8 @@ export const httpApi: ScoutboxApi = {
     }),
 
   // Pages by cursor, newest first: the first page is read; the ledger screen still needs a "load more" (nextCursor).
-  getLedger: async (s) => (await request<{ items: LedgerEntry[]; nextCursor: string | null }>('/org/ledger', { headers: headers(s) })).items,
+  getLedger: async (s) =>
+    (await request<{ items: LedgerEntry[]; nextCursor: string | null }>('/org/ledger', { headers: headers(s) })).items,
   getProofPack: (s, playerId) => request<ProofPack>(`/org/players/${playerId}/proofpack`, { headers: headers(s) }),
   getPlan: (s) => request<PlanInfo>('/org/plan', { headers: headers(s) }),
   getReputation: (s) => request<Reputation>('/org/reputation', { headers: headers(s) }),
@@ -840,10 +978,15 @@ export const httpApi: ScoutboxApi = {
       try {
         const { ticket } = await request<{ ticket: string }>('/events/ticket', { method: 'POST', headers: headers(s) });
         if (closed) return;
-        source = new EventSource(`${API_URL}/events?ticket=${encodeURIComponent(ticket)}${lastEventId ? `&lastEventId=${lastEventId}` : ''}`);
+        source = new EventSource(
+          `${API_URL}/events?ticket=${encodeURIComponent(ticket)}${lastEventId ? `&lastEventId=${lastEventId}` : ''}`,
+        );
         source.onopen = () => {
           retry = 0;
-          if (dropped) { dropped = false; cb('reconnected', {}); }
+          if (dropped) {
+            dropped = false;
+            cb('reconnected', {});
+          }
           cb('sse_status', { connected: true });
         };
         source.onmessage = (e) => {
@@ -867,14 +1010,21 @@ export const httpApi: ScoutboxApi = {
         // A 401 on the ticket means the session is gone
         // (expired, revoked, the user removed). Retrying would ask every 15 s
         // for ever; instead the stream stops and the app signs out.
-        if (e instanceof ApiError && e.status === 401) { closed = true; cb('session_expired', {}); return; }
+        if (e instanceof ApiError && e.status === 401) {
+          closed = true;
+          cb('session_expired', {});
+          return;
+        }
         dropped = true;
         cb('sse_status', { connected: false });
         window.setTimeout(connect, Math.min(15_000, 1000 * 2 ** Math.min(retry++, 4)));
       }
     };
     void connect();
-    return () => { closed = true; source?.close(); };
+    return () => {
+      closed = true;
+      source?.close();
+    };
   },
 };
 
@@ -890,6 +1040,12 @@ export const api: ScoutboxApi = DEMO_MODE ? demoApi : httpApi;
 export function revokeSession(s: Session | null): void {
   if (DEMO_MODE || !s?.token) return;
   try {
-    void fetch(`${API_URL}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${s.token}` }, keepalive: true }).catch(() => {});
-  } catch { /* offline: the server lifetime still ends it */ }
+    void fetch(`${API_URL}/auth/logout`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${s.token}` },
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    /* offline: the server lifetime still ends it */
+  }
 }

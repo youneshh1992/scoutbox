@@ -3,7 +3,8 @@
  * contract end has not passed. This record owns `under_contract`; a self-declaration never overrides it.
  */
 export function createContractLookup({ signingsFollowUps }) {
-  if (typeof signingsFollowUps?.signings?.forPlayer !== 'function') throw new TypeError('createContractLookup needs the signings repository');
+  if (typeof signingsFollowUps?.signings?.forPlayer !== 'function')
+    throw new TypeError('createContractLookup needs the signings repository');
   return function canonicalContractFor(playerId, now = Date.now(), { exceptOrgId = null } = {}) {
     const today = new Date(now).toISOString().slice(0, 10);
     for (const s of signingsFollowUps.signings.forPlayer(playerId)) {

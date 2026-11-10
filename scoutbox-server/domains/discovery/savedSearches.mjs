@@ -35,7 +35,12 @@ export function readSearchFilters(raw) {
 function matchesSearch(view, f) {
   if (f.q) {
     const n = String(f.q).toLowerCase();
-    if (!view.name.toLowerCase().includes(n) && !(view.city || '').toLowerCase().includes(n) && !(view.country || '').toLowerCase().includes(n)) return false;
+    if (
+      !view.name.toLowerCase().includes(n) &&
+      !(view.city || '').toLowerCase().includes(n) &&
+      !(view.country || '').toLowerCase().includes(n)
+    )
+      return false;
   }
   if (f.position && view.position !== f.position) return false;
   if (f.availability && view.availability !== f.availability) return false;
@@ -49,18 +54,37 @@ function matchesSearch(view, f) {
   return true;
 }
 
-const searchView = (s) => ({ id: s.id, orgId: s.orgId, userId: s.userId, scoutName: s.scoutName, name: s.name, filters: { ...s.filters }, createdAt: s.createdAt });
+const searchView = (s) => ({
+  id: s.id,
+  orgId: s.orgId,
+  userId: s.userId,
+  scoutName: s.scoutName,
+  name: s.name,
+  filters: { ...s.filters },
+  createdAt: s.createdAt,
+});
 
 export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerViewForOrg, reqText, savedSearches }) {
-  if (typeof savedSearches?.create !== 'function') throw new TypeError('registerSavedSearches needs the saved-searches repository');
+  if (typeof savedSearches?.create !== 'function')
+    throw new TypeError('registerSavedSearches needs the saved-searches repository');
 
   function checkSavedSearches(player) {
-    for (const ss of savedSearches.candidatesFor({ position: player.position ?? null, foot: player.foot ?? null, country: player.country ?? null, availability: player.availability ?? null })) {
+    for (const ss of savedSearches.candidatesFor({
+      position: player.position ?? null,
+      foot: player.foot ?? null,
+      country: player.country ?? null,
+      availability: player.availability ?? null,
+    })) {
       const org = byId.org(ss.orgId);
       if (!org) continue;
       const view = playerViewForOrg(player, org);
       if (view && matchesSearch(view, ss.filters)) {
-        notify({ kind: 'org_user', id: ss.userId }, 'saved_search', `New match for your saved search “${ss.name}”: ${player.name} (${player.position ?? '—'}) just joined.`, player.id);
+        notify(
+          { kind: 'org_user', id: ss.userId },
+          'saved_search',
+          `New match for your saved search “${ss.name}”: ${player.name} (${player.position ?? '—'}) just joined.`,
+          player.id,
+        );
       }
     }
   }
@@ -74,8 +98,20 @@ export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerV
     const { name, filters } = req.body || {};
     if (!reqText(name, L.searchName)) return res.status(400).json({ error: 'NAME_REQUIRED' });
     const read = readSearchFilters(filters);
-    if (read.field) return res.status(400).json({ error: 'FIELD_INVALID', field: read.field, message: `${read.field} is not a search filter this build accepts.` });
-    const ss = savedSearches.create({ id: nextId('ss'), orgId: req.org.id, userId: req.orgUser.id, name: name.trim(), filters: read.filters, createdAt: Date.now() });
+    if (read.field)
+      return res.status(400).json({
+        error: 'FIELD_INVALID',
+        field: read.field,
+        message: `${read.field} is not a search filter this build accepts.`,
+      });
+    const ss = savedSearches.create({
+      id: nextId('ss'),
+      orgId: req.org.id,
+      userId: req.orgUser.id,
+      name: name.trim(),
+      filters: read.filters,
+      createdAt: Date.now(),
+    });
     res.status(201).json(searchView(ss));
   });
 

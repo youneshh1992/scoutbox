@@ -34,7 +34,10 @@ export interface CaseNavProps {
   subTestId?: (subId: string) => string;
 }
 
-export function visibleCategories(model: CaseNavModel, visible?: CaseNavProps['visible']): { category: CaseCategory; subs: CaseSub[] }[] {
+export function visibleCategories(
+  model: CaseNavModel,
+  visible?: CaseNavProps['visible'],
+): { category: CaseCategory; subs: CaseSub[] }[] {
   return model.categories
     .map((category) => ({ category, subs: category.subs.filter((s) => !visible || visible(s, category)) }))
     .filter((c) => c.subs.length > 0);
@@ -54,10 +57,27 @@ function rove(e: KeyboardEvent<HTMLElement>, ids: string[], current: string, go:
 }
 
 function intoView(el: Element | null) {
-  try { (el as HTMLElement | null)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); } catch { /* not in a layout context */ }
+  try {
+    (el as HTMLElement | null)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  } catch {
+    /* not in a layout context */
+  }
 }
 
-export function CaseNav({ model, value, onChange, translate, idPrefix, label, categoriesLabel, subsLabel, visible, testId, catTestId, subTestId }: CaseNavProps) {
+export function CaseNav({
+  model,
+  value,
+  onChange,
+  translate,
+  idPrefix,
+  label,
+  categoriesLabel,
+  subsLabel,
+  visible,
+  testId,
+  catTestId,
+  subTestId,
+}: CaseNavProps) {
   const cats = visibleCategories(model, visible);
   const active = cats.find((c) => c.category.id === value.category) ?? cats[0];
   const catsRef = useRef<HTMLUListElement>(null);
@@ -74,9 +94,17 @@ export function CaseNav({ model, value, onChange, translate, idPrefix, label, ca
     reveal();
     const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(reveal) : null;
     const timer = setTimeout(reveal, 300);
-    try { document.fonts?.ready?.then(reveal); } catch { /* no font API */ }
+    try {
+      document.fonts?.ready?.then(reveal);
+    } catch {
+      /* no font API */
+    }
     window.addEventListener('resize', reveal);
-    return () => { if (raf !== null) cancelAnimationFrame(raf); clearTimeout(timer); window.removeEventListener('resize', reveal); };
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      window.removeEventListener('resize', reveal);
+    };
   }, [value.category, value.sub]);
 
   if (!active) return null;
@@ -87,16 +115,24 @@ export function CaseNav({ model, value, onChange, translate, idPrefix, label, ca
     if (!c) return;
     onChange({ category: c.category.id, sub: c.subs[0].id });
     // Focus follows the arrow keys so a keyboard user hears the new category.
-    queueMicrotask(() => (catsRef.current?.querySelector<HTMLButtonElement>(`[data-cat="${id}"]`))?.focus());
+    queueMicrotask(() => catsRef.current?.querySelector<HTMLButtonElement>(`[data-cat="${id}"]`)?.focus());
   };
   const pickSub = (id: string) => {
     onChange({ category: active.category.id, sub: id });
-    queueMicrotask(() => (subsRef.current?.querySelector<HTMLButtonElement>(`[data-sub="${id}"]`))?.focus());
+    queueMicrotask(() => subsRef.current?.querySelector<HTMLButtonElement>(`[data-sub="${id}"]`)?.focus());
   };
   const catLabel = translate(active.category.labelKey);
 
   return (
-    <div className="casenav" data-casenav={model.id} data-category={active.category.id} data-sub={value.sub} data-testid={testId} aria-label={label} role="group">
+    <div
+      className="casenav"
+      data-casenav={model.id}
+      data-category={active.category.id}
+      data-sub={value.sub}
+      data-testid={testId}
+      aria-label={label}
+      role="group"
+    >
       <nav className="casenav-catnav" aria-label={categoriesLabel}>
         <ul className="casenav-cats" ref={catsRef}>
           {cats.map(({ category, subs }) => {
@@ -110,18 +146,28 @@ export function CaseNav({ model, value, onChange, translate, idPrefix, label, ca
                   data-cat={category.id}
                   data-subs={subs.map((s) => s.id).join(' ')}
                   data-testid={catTestId?.(category.id)}
-                  onClick={() => { if (!current) pickCategory(category.id); }}
+                  onClick={() => {
+                    if (!current) pickCategory(category.id);
+                  }}
                   onKeyDown={(e) => rove(e, catIds, category.id, pickCategory)}
                 >
                   <span className="casenav-cat-text">{translate(category.labelKey)}</span>
-                  <span className="casenav-cat-count" aria-hidden="true">{subs.length}</span>
+                  <span className="casenav-cat-count" aria-hidden="true">
+                    {subs.length}
+                  </span>
                 </button>
               </li>
             );
           })}
         </ul>
       </nav>
-      <div className="casenav-subs" role="tablist" aria-label={subsLabel(catLabel)} ref={subsRef} data-cat={active.category.id}>
+      <div
+        className="casenav-subs"
+        role="tablist"
+        aria-label={subsLabel(catLabel)}
+        ref={subsRef}
+        data-cat={active.category.id}
+      >
         {active.subs.map((s) => {
           const selected = s.id === value.sub;
           return (
@@ -135,7 +181,9 @@ export function CaseNav({ model, value, onChange, translate, idPrefix, label, ca
               className={`casenav-sub${selected ? ' active' : ''}`}
               data-sub={s.id}
               data-testid={subTestId?.(s.id)}
-              onClick={() => { if (!selected) pickSub(s.id); }}
+              onClick={() => {
+                if (!selected) pickSub(s.id);
+              }}
               onKeyDown={(e) => rove(e, subIds, s.id, pickSub)}
             >
               {translate(s.labelKey)}
@@ -149,11 +197,26 @@ export function CaseNav({ model, value, onChange, translate, idPrefix, label, ca
 
 /** The attributes a subcategory's panel carries so the tab → panel relation holds. */
 export function casePanelProps(idPrefix: string, sub: string, label: string) {
-  return { role: 'tabpanel' as const, id: `${idPrefix}-panel-${sub}`, 'aria-labelledby': `${idPrefix}-tab-${sub}`, 'aria-label': label };
+  return {
+    role: 'tabpanel' as const,
+    id: `${idPrefix}-panel-${sub}`,
+    'aria-labelledby': `${idPrefix}-tab-${sub}`,
+    'aria-label': label,
+  };
 }
 
 /** A compact "Category / Sub" line for a breadcrumb or a header. */
-export function CaseCrumb({ model, value, translate, prefix }: { model: CaseNavModel; value: CaseLocation; translate: (k: string) => string; prefix?: string[] }) {
+export function CaseCrumb({
+  model,
+  value,
+  translate,
+  prefix,
+}: {
+  model: CaseNavModel;
+  value: CaseLocation;
+  translate: (k: string) => string;
+  prefix?: string[];
+}) {
   const cat = categoryOf(model, value.category);
   const sub = cat?.subs.find((s) => s.id === value.sub);
   if (!cat || !sub) return null;
@@ -162,7 +225,13 @@ export function CaseCrumb({ model, value, translate, prefix }: { model: CaseNavM
     <p className="casenav-crumb" data-testid="case-crumb" aria-label={parts.join(' / ')}>
       {parts.map((p, i) => (
         <span key={`${i}-${p}`} className={i === parts.length - 1 ? 'casenav-crumb-current' : undefined}>
-          {i > 0 && <span className="crumb-sep" aria-hidden="true"> / </span>}{p}
+          {i > 0 && (
+            <span className="crumb-sep" aria-hidden="true">
+              {' '}
+              /{' '}
+            </span>
+          )}
+          {p}
         </span>
       ))}
     </p>

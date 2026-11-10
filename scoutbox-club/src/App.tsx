@@ -8,17 +8,40 @@ import { ClubCrest, ProBrand } from './proExperience';
 import { ProMasthead, ProOverview } from './proDesign';
 import { api, ApiError, DEMO_MODE, revokeSession, type Notification, type Org, type Session } from './api';
 import {
-  FeedScreen, FilmRoomScreen, SearchScreen, ShortlistScreen, RequestsScreen, MessagesScreen,
-  TrialsScreen, FixturesScreen, LedgerScreen, FunnelScreen, ReputationScreen, PlanScreen,
-  PlayerDrawer, Toast, SafetyModal,
+  FeedScreen,
+  FilmRoomScreen,
+  SearchScreen,
+  ShortlistScreen,
+  RequestsScreen,
+  MessagesScreen,
+  TrialsScreen,
+  FixturesScreen,
+  LedgerScreen,
+  FunnelScreen,
+  ReputationScreen,
+  PlanScreen,
+  PlayerDrawer,
+  Toast,
+  SafetyModal,
 } from './screens';
 import {
-  AssessmentsScreen, RecruitmentScreen, SquadPlannerScreen, OpportunitiesScreen,
-  CampaignsScreen, VideoScreen, OutcomesScreen, TrialDaysScreen,
+  AssessmentsScreen,
+  RecruitmentScreen,
+  SquadPlannerScreen,
+  OpportunitiesScreen,
+  CampaignsScreen,
+  VideoScreen,
+  OutcomesScreen,
+  TrialDaysScreen,
 } from './m12screens';
 import {
-  ImportsScreen, CoverageScreen, CalibrationScreen, InsightScreen,
-  NetworkScreen, BudgetsScreen, OrganisationScreen,
+  ImportsScreen,
+  CoverageScreen,
+  CalibrationScreen,
+  InsightScreen,
+  NetworkScreen,
+  BudgetsScreen,
+  OrganisationScreen,
 } from './m13screens';
 import { VerificationScreen } from './m14screens';
 import { RoomsScreen } from './roomsScreens';
@@ -28,13 +51,38 @@ import { DirectorDashboardScreen } from './m20Screens';
 import type { DashboardFilters } from './m20Api';
 import { m14 } from './m14api';
 import {
-  briefFromHash, criteriaFromHash, hashForBrief, hashForMatching, hashForRoom, hashForScreen, roomTabFromHash, type RoomTab,
-  dashboardFromHash, hashForDashboard,
-  hashForWatchlist, loadCollapsed, loadShortcuts, resolveNavigationLocation, roomFromHash,
-  saveCollapsed, saveShortcuts, screenFromHash, watchlistFromHash,
-  NAV_SECTIONS, type NavContext,
+  briefFromHash,
+  criteriaFromHash,
+  hashForBrief,
+  hashForMatching,
+  hashForRoom,
+  hashForScreen,
+  roomTabFromHash,
+  type RoomTab,
+  dashboardFromHash,
+  hashForDashboard,
+  hashForWatchlist,
+  loadCollapsed,
+  loadShortcuts,
+  resolveNavigationLocation,
+  roomFromHash,
+  saveCollapsed,
+  saveShortcuts,
+  screenFromHash,
+  watchlistFromHash,
+  NAV_SECTIONS,
+  type NavContext,
 } from './nav';
-import { CommandPalette, NeedsAttention, OrgChips, Sidebar, SecondaryNav, TopBar, useNavSections, usePaletteHotkey } from './navui';
+import {
+  CommandPalette,
+  NeedsAttention,
+  OrgChips,
+  Sidebar,
+  SecondaryNav,
+  TopBar,
+  useNavSections,
+  usePaletteHotkey,
+} from './navui';
 import { fmtStamp, getLang, setLang, t } from './i18n';
 import { confirmLeave, guardHashChange, installDirtyGuard, noteNavigated } from './dirtyGuard';
 
@@ -52,20 +100,46 @@ function loadSession(): Session | null {
 }
 
 export type ScreenId =
-  | 'feed' | 'filmroom' | 'search' | 'shortlist' | 'requests' | 'messages' | 'trials' | 'fixtures'
-  | 'ledger' | 'funnel' | 'reputation' | 'plan'
-  | 'assessments' | 'recruitment' | 'planner' | 'opportunities' | 'campaigns' | 'video' | 'outcomes' | 'trialdays'
-  | 'imports' | 'coverage' | 'calibration' | 'insight' | 'network' | 'budgets' | 'organisation'
-  | 'verification' | 'rooms'
-  | 'secondlook' | 'nobodymissed' | 'briefs'
-  | 'matching' | 'watchlists'
+  | 'feed'
+  | 'filmroom'
+  | 'search'
+  | 'shortlist'
+  | 'requests'
+  | 'messages'
+  | 'trials'
+  | 'fixtures'
+  | 'ledger'
+  | 'funnel'
+  | 'reputation'
+  | 'plan'
+  | 'assessments'
+  | 'recruitment'
+  | 'planner'
+  | 'opportunities'
+  | 'campaigns'
+  | 'video'
+  | 'outcomes'
+  | 'trialdays'
+  | 'imports'
+  | 'coverage'
+  | 'calibration'
+  | 'insight'
+  | 'network'
+  | 'budgets'
+  | 'organisation'
+  | 'verification'
+  | 'rooms'
+  | 'secondlook'
+  | 'nobodymissed'
+  | 'briefs'
+  | 'matching'
+  | 'watchlists'
   | 'dashboard';
 
 // The information architecture lives in src/nav.ts (sections → child tabs),
 // which also drives the sidebar, the command palette, active-route resolution
 // and pinned shortcuts. Every ScreenId above is a live, deep-linkable
 // destination ("#/<screenId>").
-
 
 // ---------------------------------------------------------------- bell
 /**
@@ -96,7 +170,11 @@ const NOTIFICATION_SCREEN: Record<string, ScreenId> = {
   saved_search: 'search',
 };
 
-interface BellRow { n: Notification; count: number; unread: boolean }
+interface BellRow {
+  n: Notification;
+  count: number;
+  unread: boolean;
+}
 
 /**
  * Collapse repeats. The server already coalesces an identical notification the
@@ -108,22 +186,30 @@ interface BellRow { n: Notification; count: number; unread: boolean }
  */
 function bellRows(items: Notification[]): BellRow[] {
   const rows = new Map<string, BellRow>();
-  for (const n of items) { // newest first
+  for (const n of items) {
+    // newest first
     const key = `${n.type}|${n.refId ?? ''}|${n.text}`;
     const hit = rows.get(key);
-    if (hit) { hit.count += n.repeatCount ?? 1; hit.unread = hit.unread || !n.read; continue; }
+    if (hit) {
+      hit.count += n.repeatCount ?? 1;
+      hit.unread = hit.unread || !n.read;
+      continue;
+    }
     rows.set(key, { n, count: n.repeatCount ?? 1, unread: !n.read });
   }
   return [...rows.values()];
 }
-
 
 export default function App() {
   // Sessions persist across refreshes (cleared by "Switch org").
   const [session, setSession] = useState<Session | null>(loadSession);
 
   const login = (s: Session) => {
-    try { localStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* private mode */ }
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(s));
+    } catch {
+      /* private mode */
+    }
     setSession(s);
   };
   const logout = () => {
@@ -132,9 +218,13 @@ export default function App() {
       localStorage.removeItem(SESSION_KEY);
       // Offline drafts are identity-scoped and cleared on logout — nothing
       // sensitive lingers on a shared device.
-      const stale = session ? Object.keys(localStorage).filter((k) => k.startsWith(`sbdraft:${session.org.id}:${session.userId}:`)) : [];
+      const stale = session
+        ? Object.keys(localStorage).filter((k) => k.startsWith(`sbdraft:${session.org.id}:${session.userId}:`))
+        : [];
       for (const k of stale) localStorage.removeItem(k);
-    } catch { /* private mode */ }
+    } catch {
+      /* private mode */
+    }
     setSession(null);
   };
 
@@ -158,20 +248,31 @@ export default function App() {
   // browser ends this tab's workspace too, instead of leaving it acting on a
   // token the server no longer honours.
   useEffect(() => {
-    const onStorage = (e: StorageEvent) => { if (e.key === SESSION_KEY || e.key === null) setSession(loadSession()); };
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === SESSION_KEY || e.key === null) setSession(loadSession());
+    };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   // One appearance per application, persisted under its own key.
   const { theme, toggle: toggleTheme } = useTheme('pro');
-  return session
-    ? <Workspace session={session} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />
-    : <Login onLogin={login} />;
+  return session ? (
+    <Workspace session={session} onLogout={logout} theme={theme} onToggleTheme={toggleTheme} />
+  ) : (
+    <Login onLogin={login} />
+  );
 }
 
 // Presentation casing for the organisation metadata line ("Club · Grassroots · Verified"); the data value stays as it is.
-const orgTypeLabel = (type: string) => type === 'club' ? 'Club' : type === 'academy' ? 'Academy' : type === 'agency' ? 'Agency' : type.charAt(0).toUpperCase() + type.slice(1);
+const orgTypeLabel = (type: string) =>
+  type === 'club'
+    ? 'Club'
+    : type === 'academy'
+      ? 'Academy'
+      : type === 'agency'
+        ? 'Agency'
+        : type.charAt(0).toUpperCase() + type.slice(1);
 
 function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [orgs, setOrgs] = useState<Org[]>([]);
@@ -185,7 +286,10 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [orgPickerOpen, setOrgPickerOpen] = useState(true);
 
   useEffect(() => {
-    api.listOrgs().then(setOrgs).catch(() => setError('We couldn’t load the available organisations. Please try again shortly.'));
+    api
+      .listOrgs()
+      .then(setOrgs)
+      .catch(() => setError('We couldn’t load the available organisations. Please try again shortly.'));
   }, []);
 
   // One submission at a time; a refusal keeps the name, organisation
@@ -199,39 +303,214 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
       onLogin(await api.login(selected, scoutName, role, password || undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Login failed');
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const activeOrg = orgs.find(o => o.id === selected);
-  return <main className="login pro-entry">
-    <section className="pro-entry-story" aria-label="ScoutBox Pro football workspace">
-      <img src={stadiumImage} alt="An empty floodlit football stadium seen from the players’ tunnel"/>
-      <div className="pro-entry-brand"><ProBrand/></div>
-      <div className="pro-entry-copy"><span className="pro-entry-kicker">For the people who build the team</span><h1>See the game.<br/>Shape the<br/><em>next chapter.</em></h1><p>The football workspace for discovery,<br/>analysis and recruitment.</p></div>
-      <footer><span>SCOUTBOX / PROFESSIONAL</span><span>Discover <i/> Assess <i/> Decide</span></footer>
-    </section>
-    <section className="pro-entry-panel" aria-label="ScoutBox Pro — sign in">
-      <div className="pro-entry-form-wrap"><div className="pro-entry-top"><span>CLUB ACCESS</span><span className="pro-entry-pro">PRO</span></div>
-        <h2>{accessHelp ? 'Join the workspace.' : 'Welcome to the club.'}</h2><p className="pro-entry-description">{accessHelp ? 'Your club administrator manages invitations and access.' : 'Sign in to your club’s professional workspace.'}</p>
-        <div className="pro-entry-tabs" role="group" aria-label="Account access"><button type="button" aria-pressed={!accessHelp} onClick={()=>setAccessHelp(false)}>Sign in</button><button type="button" aria-pressed={accessHelp} onClick={()=>setAccessHelp(true)}>Get access</button></div>
-        {accessHelp ? <div className="pro-access-guide"><h3>One club. Your own account.</h3><ol><li><b>Speak to your club administrator</b><span>Ask for an invitation to your organisation’s ScoutBox workspace.</span></li><li><b>Receive your access details</b><span>Your administrator will confirm your role and the sign-in details you need.</span></li><li><b>Start working with your team</b><span>Use your own name so observations and decisions are attributed correctly.</span></li></ol><p>New organisations are set up directly by ScoutBox. Public registration is not available yet.</p><button className="primary" onClick={()=>setAccessHelp(false)}>Back to sign in <Icon name="arrow-right" size={17}/></button></div> : <>
-        <form className="auth-signin" onSubmit={e=>{e.preventDefault();void enter()}} aria-label="Sign in" noValidate>
-          <div className="pro-entry-club"><span className="auth-label">Your organisation</span><details open={orgPickerOpen} onToggle={e=>setOrgPickerOpen(e.currentTarget.open)}><summary><ClubCrest initials={activeOrg ? initials(activeOrg.name) : 'SB'}/><span><strong>{activeOrg?.name ?? 'Choose your organisation'}</strong><small>{activeOrg ? `${orgTypeLabel(activeOrg.type)} workspace` : 'Select a club, academy or agency'}</small></span><Icon name="chevron-down" size={16}/></summary><div className="org-grid">{orgs.map(o=><button key={o.id} type="button" className={`org-card ${selected===o.id?'selected':''}`} aria-pressed={selected===o.id} onClick={()=>{setSelected(o.id);setOrgPickerOpen(false);setError(null)}}><span className="org-name">{o.name}</span><small>{o.type==='club' ? (o.verified?'Verified club':'Verification pending') : orgTypeLabel(o.type)}</small><Icon name="arrow-right" size={14}/></button>)}</div></details></div>
-          <div className="enter-row">
-            <AuthField label="Your name"><input placeholder="Full name" value={scoutName} onChange={e=>{setScoutName(e.target.value);setError(null)}} autoComplete="name" aria-label="Your name"/></AuthField>
-            <AuthField label="Role"><select value={role} onChange={e=>setRole(e.target.value)} aria-label="Role">{ROLES.map(r=><option key={r}>{r}</option>)}</select></AuthField>
-            <AuthField label="Club password" hint={DEMO_MODE ? 'No password is needed for the interactive demo.' : 'Use the password supplied by your organisation, if required.'}><PasswordInput placeholder="Enter your password" value={password} onChange={e=>{setPassword(e.target.value);setError(null)}} className="login-pw" autoComplete="current-password" aria-label="Club password"/></AuthField>
-            {error&&<div className="notice block" role="alert">{error}</div>}
-            <button type="submit" className="primary" disabled={busy} aria-busy={busy}>{busy?'Signing in…':'Enter workspace'}<Icon name="arrow-right" size={18}/></button>
+  const activeOrg = orgs.find((o) => o.id === selected);
+  return (
+    <main className="login pro-entry">
+      <section className="pro-entry-story" aria-label="ScoutBox Pro football workspace">
+        <img src={stadiumImage} alt="An empty floodlit football stadium seen from the players’ tunnel" />
+        <div className="pro-entry-brand">
+          <ProBrand />
+        </div>
+        <div className="pro-entry-copy">
+          <span className="pro-entry-kicker">For the people who build the team</span>
+          <h1>
+            See the game.
+            <br />
+            Shape the
+            <br />
+            <em>next chapter.</em>
+          </h1>
+          <p>
+            The football workspace for discovery,
+            <br />
+            analysis and recruitment.
+          </p>
+        </div>
+        <footer>
+          <span>SCOUTBOX / PROFESSIONAL</span>
+          <span>
+            Discover <i /> Assess <i /> Decide
+          </span>
+        </footer>
+      </section>
+      <section className="pro-entry-panel" aria-label="ScoutBox Pro — sign in">
+        <div className="pro-entry-form-wrap">
+          <div className="pro-entry-top">
+            <span>CLUB ACCESS</span>
+            <span className="pro-entry-pro">PRO</span>
           </div>
-        </form><p className="pro-entry-access" data-testid="auth-access">Access is managed by your organisation. Need an invitation? <button onClick={()=>setAccessHelp(true)}>Get access</button></p></>}
-      </div><footer className="pro-entry-bottom"><span>{DEMO_MODE ? 'Interactive demo · sample club records' : 'ScoutBox Pro · Club workspace'}</span><span className="login-signature" data-testid="login-signature">Built by <b>Guni &amp; Younes</b></span></footer>
-    </section>
-  </main>;
-
+          <h2>{accessHelp ? 'Join the workspace.' : 'Welcome to the club.'}</h2>
+          <p className="pro-entry-description">
+            {accessHelp
+              ? 'Your club administrator manages invitations and access.'
+              : 'Sign in to your club’s professional workspace.'}
+          </p>
+          <div className="pro-entry-tabs" role="group" aria-label="Account access">
+            <button type="button" aria-pressed={!accessHelp} onClick={() => setAccessHelp(false)}>
+              Sign in
+            </button>
+            <button type="button" aria-pressed={accessHelp} onClick={() => setAccessHelp(true)}>
+              Get access
+            </button>
+          </div>
+          {accessHelp ? (
+            <div className="pro-access-guide">
+              <h3>One club. Your own account.</h3>
+              <ol>
+                <li>
+                  <b>Speak to your club administrator</b>
+                  <span>Ask for an invitation to your organisation’s ScoutBox workspace.</span>
+                </li>
+                <li>
+                  <b>Receive your access details</b>
+                  <span>Your administrator will confirm your role and the sign-in details you need.</span>
+                </li>
+                <li>
+                  <b>Start working with your team</b>
+                  <span>Use your own name so observations and decisions are attributed correctly.</span>
+                </li>
+              </ol>
+              <p>New organisations are set up directly by ScoutBox. Public registration is not available yet.</p>
+              <button className="primary" onClick={() => setAccessHelp(false)}>
+                Back to sign in <Icon name="arrow-right" size={17} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <form
+                className="auth-signin"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void enter();
+                }}
+                aria-label="Sign in"
+                noValidate
+              >
+                <div className="pro-entry-club">
+                  <span className="auth-label">Your organisation</span>
+                  <details open={orgPickerOpen} onToggle={(e) => setOrgPickerOpen(e.currentTarget.open)}>
+                    <summary>
+                      <ClubCrest initials={activeOrg ? initials(activeOrg.name) : 'SB'} />
+                      <span>
+                        <strong>{activeOrg?.name ?? 'Choose your organisation'}</strong>
+                        <small>
+                          {activeOrg ? `${orgTypeLabel(activeOrg.type)} workspace` : 'Select a club, academy or agency'}
+                        </small>
+                      </span>
+                      <Icon name="chevron-down" size={16} />
+                    </summary>
+                    <div className="org-grid">
+                      {orgs.map((o) => (
+                        <button
+                          key={o.id}
+                          type="button"
+                          className={`org-card ${selected === o.id ? 'selected' : ''}`}
+                          aria-pressed={selected === o.id}
+                          onClick={() => {
+                            setSelected(o.id);
+                            setOrgPickerOpen(false);
+                            setError(null);
+                          }}
+                        >
+                          <span className="org-name">{o.name}</span>
+                          <small>
+                            {o.type === 'club'
+                              ? o.verified
+                                ? 'Verified club'
+                                : 'Verification pending'
+                              : orgTypeLabel(o.type)}
+                          </small>
+                          <Icon name="arrow-right" size={14} />
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+                <div className="enter-row">
+                  <AuthField label="Your name">
+                    <input
+                      placeholder="Full name"
+                      value={scoutName}
+                      onChange={(e) => {
+                        setScoutName(e.target.value);
+                        setError(null);
+                      }}
+                      autoComplete="name"
+                      aria-label="Your name"
+                    />
+                  </AuthField>
+                  <AuthField label="Role">
+                    <select value={role} onChange={(e) => setRole(e.target.value)} aria-label="Role">
+                      {ROLES.map((r) => (
+                        <option key={r}>{r}</option>
+                      ))}
+                    </select>
+                  </AuthField>
+                  <AuthField
+                    label="Club password"
+                    hint={
+                      DEMO_MODE
+                        ? 'No password is needed for the interactive demo.'
+                        : 'Use the password supplied by your organisation, if required.'
+                    }
+                  >
+                    <PasswordInput
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        setError(null);
+                      }}
+                      className="login-pw"
+                      autoComplete="current-password"
+                      aria-label="Club password"
+                    />
+                  </AuthField>
+                  {error && (
+                    <div className="notice block" role="alert">
+                      {error}
+                    </div>
+                  )}
+                  <button type="submit" className="primary" disabled={busy} aria-busy={busy}>
+                    {busy ? 'Signing in…' : 'Enter workspace'}
+                    <Icon name="arrow-right" size={18} />
+                  </button>
+                </div>
+              </form>
+              <p className="pro-entry-access" data-testid="auth-access">
+                Access is managed by your organisation. Need an invitation?{' '}
+                <button onClick={() => setAccessHelp(true)}>Get access</button>
+              </p>
+            </>
+          )}
+        </div>
+        <footer className="pro-entry-bottom">
+          <span>{DEMO_MODE ? 'Interactive demo · sample club records' : 'ScoutBox Pro · Club workspace'}</span>
+          <span className="login-signature" data-testid="login-signature">
+            Built by <b>Guni &amp; Younes</b>
+          </span>
+        </footer>
+      </section>
+    </main>
+  );
 }
 
-function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Session; onLogout: () => void; theme: Theme; onToggleTheme: () => void }) {
+function Workspace({
+  session,
+  onLogout,
+  theme,
+  onToggleTheme,
+}: {
+  session: Session;
+  onLogout: () => void;
+  theme: Theme;
+  onToggleTheme: () => void;
+}) {
   // Deep links: the hash IS the screen id ("#/verification"). Unknown or
   // absent hashes land on Home without highlighting a wrong section.
   const [screen, setScreenState] = useState<ScreenId>(() => screenFromHash(window.location.hash) ?? 'feed');
@@ -250,7 +529,9 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   // Reuses it a fourth time: the Director Dashboard's window and filters
   // live in the hash so a director can send a colleague the exact view they
   // are reading. None of these filters names a person.
-  const [dashFilters, setDashFilters] = useState<DashboardFilters>(() => (dashboardFromHash(window.location.hash) ?? {}) as DashboardFilters);
+  const [dashFilters, setDashFilters] = useState<DashboardFilters>(
+    () => (dashboardFromHash(window.location.hash) ?? {}) as DashboardFilters,
+  );
   // Every programmatic navigation asks the dirty-guard first. A form
   // with nothing unsaved never triggers it.
   const setScreen = useCallback((id: ScreenId) => {
@@ -261,7 +542,11 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     setWatchlistId(null);
     if (id !== 'matching') setMatchState(null);
     if (id !== 'dashboard') setDashFilters({});
-    try { if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForScreen(id)) window.history.replaceState(null, '', hashForScreen(id));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /** Opening a room PUSHES, so the browser Back button closes it again. */
@@ -271,19 +556,31 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     setBriefId(null);
     setRoomId(id);
     setRoomTab(tab);
-    try { if (window.location.hash !== hashForRoom(id, tab)) window.history.pushState(null, '', hashForRoom(id, tab)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForRoom(id, tab)) window.history.pushState(null, '', hashForRoom(id, tab));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /** A tab change inside a room REPLACES the hash (no history entry per tab). */
   const onRoomTab = useCallback((id: string, tab: string) => {
     setRoomTab(tab as RoomTab);
-    try { if (window.location.hash !== hashForRoom(id, tab)) window.history.replaceState(null, '', hashForRoom(id, tab)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForRoom(id, tab)) window.history.replaceState(null, '', hashForRoom(id, tab));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   const closeRoom = useCallback(() => {
     setScreenState('rooms');
     setRoomId(null);
-    try { if (window.location.hash !== hashForScreen('rooms')) window.history.pushState(null, '', hashForScreen('rooms')); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForScreen('rooms')) window.history.pushState(null, '', hashForScreen('rooms'));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /** Opening a brief PUSHES, so the browser Back button closes it again. */
@@ -292,14 +589,22 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     setScreenState('briefs');
     setRoomId(null);
     setBriefId(id);
-    try { if (window.location.hash !== hashForBrief(id)) window.history.pushState(null, '', hashForBrief(id)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForBrief(id)) window.history.pushState(null, '', hashForBrief(id));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   const closeBrief = useCallback(() => {
     if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('briefs');
     setBriefId(null);
-    try { if (window.location.hash !== hashForScreen('briefs')) window.history.pushState(null, '', hashForScreen('briefs')); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForScreen('briefs')) window.history.pushState(null, '', hashForScreen('briefs'));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /** Opening a Dynamic Watchlist PUSHES, so Back closes it again. */
@@ -309,14 +614,23 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     setRoomId(null);
     setBriefId(null);
     setWatchlistId(id);
-    try { if (window.location.hash !== hashForWatchlist(id)) window.history.pushState(null, '', hashForWatchlist(id)); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForWatchlist(id)) window.history.pushState(null, '', hashForWatchlist(id));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   const closeWatchlist = useCallback(() => {
     if (!confirmLeave(t('brief.unsaved'))) return;
     setScreenState('watchlists');
     setWatchlistId(null);
-    try { if (window.location.hash !== hashForScreen('watchlists')) window.history.pushState(null, '', hashForScreen('watchlists')); } catch { /* sandboxed */ }
+    try {
+      if (window.location.hash !== hashForScreen('watchlists'))
+        window.history.pushState(null, '', hashForScreen('watchlists'));
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /**
@@ -330,7 +644,9 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     try {
       const next = hashForMatching(encoded);
       if (window.location.hash !== next) window.history.replaceState(null, '', next);
-    } catch { /* sandboxed */ }
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   /**
@@ -343,7 +659,9 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     try {
       const next = hashForDashboard(f as Record<string, string | number | undefined | null>);
       if (window.location.hash !== next) window.history.replaceState(null, '', next);
-    } catch { /* sandboxed */ }
+    } catch {
+      /* sandboxed */
+    }
     noteNavigated();
   }, []);
   // Close/reload prompt while a form is dirty.
@@ -363,7 +681,10 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     };
     window.addEventListener('hashchange', onHash);
     window.addEventListener('popstate', onHash);
-    return () => { window.removeEventListener('hashchange', onHash); window.removeEventListener('popstate', onHash); };
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      window.removeEventListener('popstate', onHash);
+    };
   }, []);
 
   // Verification authority — fetched ONCE per session and reused by the nav
@@ -372,8 +693,17 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   const [verLevel, setVerLevel] = useState<string | null>(null);
   useEffect(() => {
     let gone = false;
-    m14.me(session).then((me) => { if (!gone) setVerLevel(me.verificationLevel ?? null); }).catch(() => { if (!gone) setVerLevel(null); });
-    return () => { gone = true; };
+    m14
+      .me(session)
+      .then((me) => {
+        if (!gone) setVerLevel(me.verificationLevel ?? null);
+      })
+      .catch(() => {
+        if (!gone) setVerLevel(null);
+      });
+    return () => {
+      gone = true;
+    };
   }, [session]);
   const navCtx: NavContext = { role: session.role, verLevel };
   const sections = useNavSections(navCtx);
@@ -382,17 +712,29 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
 
   // Pinned shortcuts (by item id, identity-scoped, permission-rechecked).
   const [shortcuts, setShortcuts] = useState<ScreenId[]>([]);
-  useEffect(() => { setShortcuts(loadShortcuts(session.org.id, session.userId, navCtx)); }, [session, verLevel]); // eslint-disable-line react-hooks/exhaustive-deps
-  const togglePin = useCallback((id: ScreenId) => {
-    setShortcuts((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      saveShortcuts(session.org.id, session.userId, next);
-      return next;
-    });
-  }, [session]);
+  useEffect(() => {
+    setShortcuts(loadShortcuts(session.org.id, session.userId, navCtx));
+  }, [session, verLevel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const togglePin = useCallback(
+    (id: ScreenId) => {
+      setShortcuts((prev) => {
+        const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+        saveShortcuts(session.org.id, session.userId, next);
+        return next;
+      });
+    },
+    [session],
+  );
 
   const [collapsed, setCollapsed] = useState(loadCollapsed);
-  const toggleCollapsed = useCallback(() => setCollapsed((c) => { saveCollapsed(!c); return !c; }), []);
+  const toggleCollapsed = useCallback(
+    () =>
+      setCollapsed((c) => {
+        saveCollapsed(!c);
+        return !c;
+      }),
+    [],
+  );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
@@ -411,8 +753,14 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     if (!bellOpen && !drawerOpen) return undefined;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (bellOpen) { setBellOpen(false); (document.querySelector('.topbar-bell') as HTMLElement | null)?.focus(); }
-      if (drawerOpen) { setDrawerOpen(false); (document.querySelector('.nav-hamburger') as HTMLElement | null)?.focus(); }
+      if (bellOpen) {
+        setBellOpen(false);
+        (document.querySelector('.topbar-bell') as HTMLElement | null)?.focus();
+      }
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        (document.querySelector('.nav-hamburger') as HTMLElement | null)?.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -428,23 +776,39 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     window.addEventListener('sb-lang', onLang);
     return () => window.removeEventListener('sb-lang', onLang);
   }, []);
-  useEffect(() => api.onChange(session, (event, payload) => {
-    if (event === 'session_expired') { onLogout(); return; }
-    if (event === 'sse_status') { setLive((payload as { connected?: boolean } | undefined)?.connected !== false); return; }
-    if (event === 'typing') return; // transient — handled inside Messages
-    setTick((t) => t + 1);
-  }), [session]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(
+    () =>
+      api.onChange(session, (event, payload) => {
+        if (event === 'session_expired') {
+          onLogout();
+          return;
+        }
+        if (event === 'sse_status') {
+          setLive((payload as { connected?: boolean } | undefined)?.connected !== false);
+          return;
+        }
+        if (event === 'typing') return; // transient — handled inside Messages
+        setTick((t) => t + 1);
+      }),
+    [session],
+  ); // eslint-disable-line react-hooks/exhaustive-deps
   // A missed event, a dropped stream or a tab left in the
   // background: every screen re-reads canonical state when the window regains
   // focus or becomes visible again. Nothing local is trusted over the server.
   useEffect(() => {
     if (!session) return undefined;
     const refetch = () => setTick((t) => t + 1);
-    const onVisible = () => { if (document.visibilityState === 'visible') refetch(); };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refetch();
+    };
     window.addEventListener('focus', refetch);
     window.addEventListener('pageshow', refetch);
     document.addEventListener('visibilitychange', onVisible);
-    return () => { window.removeEventListener('focus', refetch); window.removeEventListener('pageshow', refetch); document.removeEventListener('visibilitychange', onVisible); };
+    return () => {
+      window.removeEventListener('focus', refetch);
+      window.removeEventListener('pageshow', refetch);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [session]);
 
   useEffect(() => {
@@ -452,8 +816,16 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
     // session that died mid-use (expired, revoked, the user removed) is
     // noticed. Only a 401 ends the session; anything else is a transient
     // failure the workspace survives.
-    api.getNotifications(session).then(setNotifications).catch((e) => { if (e instanceof ApiError && e.status === 401) onLogout(); });
-    api.getChannelCounts(session).then((c) => setUnreadMessages(c.unreadMessages)).catch(() => {});
+    api
+      .getNotifications(session)
+      .then(setNotifications)
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 401) onLogout();
+      });
+    api
+      .getChannelCounts(session)
+      .then((c) => setUnreadMessages(c.unreadMessages))
+      .catch(() => {});
   }, [session, tick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unread = notifications.filter((n) => !n.read).length;
@@ -479,7 +851,9 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
       try {
         await api.markNotificationsRead(session);
         setNotifications(await api.getNotifications(session));
-      } catch { /* stays unread */ }
+      } catch {
+        /* stays unread */
+      }
     }
   };
 
@@ -491,7 +865,11 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
   const props = { session, tick, notify, openPlayer: setOpenPlayerId };
 
   const breadcrumbSection = NAV_SECTIONS.find((s) => s.id === loc.sectionId) ?? null;
-  const screenLabel = t((loc.itemId ? (NAV_SECTIONS.flatMap((s) => s.children).find((c) => c.id === screen)?.labelKey ?? `nav.${screen}`) : `nav.${screen}`) as Parameters<typeof t>[0]);
+  const screenLabel = t(
+    (loc.itemId
+      ? (NAV_SECTIONS.flatMap((s) => s.children).find((c) => c.id === screen)?.labelKey ?? `nav.${screen}`)
+      : `nav.${screen}`) as Parameters<typeof t>[0],
+  );
 
   return (
     <div className={`shell pro-workspace ${collapsed ? 'nav-collapsed' : ''}`}>
@@ -504,33 +882,74 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         shortcuts={shortcuts}
         onTogglePin={togglePin}
         unreadMessages={unreadMessages}
-        onOpenPalette={(query?: string) => {setPaletteQuery(query??'');setPaletteOpen(true)}}
+        onOpenPalette={(query?: string) => {
+          setPaletteQuery(query ?? '');
+          setPaletteOpen(true);
+        }}
         drawerOpen={drawerOpen}
         onCloseDrawer={() => setDrawerOpen(false)}
         brand={{ short: 'P', long: 'Pro' }}
         org={{ initials: initials(session.org.name), name: session.org.name, line: session.org.plan }}
         footer={
           <div className="p-account">
-            <details className="pro-account-settings"><summary aria-label="Manage account"><span className="p-avatar" aria-hidden="true">{initials(session.scoutName)}</span><span className="pro-account-identity"><strong>{session.scoutName}</strong><small>{session.role}</small></span><Icon name="chevron-down" size={14}/></summary><OrgChips org={session.org} /><div className="p-links">
-              <button onClick={() => setScreen('verification')}><Icon name="badge-check" size={14} />{t('navsec.myVerification')}</button>
-              <label title={t('common.machineTranslated')}>
-                {t('common.language')}:{' '}
-                <select aria-label={t('common.language')} value={lang} onChange={(e) => { setLang(e.target.value as 'en' | 'fr'); setLangTick((x) => x + 1); }}>
-                  <option value="en">English</option>
-                  <option value="fr">Français (trad. automatique)</option>
-                </select>
-              </label>
-              {/* The way out of the session, in the account block where the person is named. */}
-              <button data-exit="switch-org" data-testid="switch-org" onClick={onLogout} aria-label={t('common.switchOrg')}><Icon name="arrow-right" size={14} />{t('common.switchOrg')}</button>
-              <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}><Icon name="log-out" size={14} />{t('common.signOut')}</button>
-            </div></details>
+            <details className="pro-account-settings">
+              <summary aria-label="Manage account">
+                <span className="p-avatar" aria-hidden="true">
+                  {initials(session.scoutName)}
+                </span>
+                <span className="pro-account-identity">
+                  <strong>{session.scoutName}</strong>
+                  <small>{session.role}</small>
+                </span>
+                <Icon name="chevron-down" size={14} />
+              </summary>
+              <OrgChips org={session.org} />
+              <div className="p-links">
+                <button onClick={() => setScreen('verification')}>
+                  <Icon name="badge-check" size={14} />
+                  {t('navsec.myVerification')}
+                </button>
+                <label title={t('common.machineTranslated')}>
+                  {t('common.language')}:{' '}
+                  <select
+                    aria-label={t('common.language')}
+                    value={lang}
+                    onChange={(e) => {
+                      setLang(e.target.value as 'en' | 'fr');
+                      setLangTick((x) => x + 1);
+                    }}
+                  >
+                    <option value="en">English</option>
+                    <option value="fr">Français (trad. automatique)</option>
+                  </select>
+                </label>
+                {/* The way out of the session, in the account block where the person is named. */}
+                <button
+                  data-exit="switch-org"
+                  data-testid="switch-org"
+                  onClick={onLogout}
+                  aria-label={t('common.switchOrg')}
+                >
+                  <Icon name="arrow-right" size={14} />
+                  {t('common.switchOrg')}
+                </button>
+                <button data-exit="sign-out" data-testid="sign-out" onClick={onLogout} aria-label={t('common.signOut')}>
+                  <Icon name="log-out" size={14} />
+                  {t('common.signOut')}
+                </button>
+              </div>
+            </details>
           </div>
         }
       />
       <div className="main">
         <TopBar
           title={screenLabel}
-          crumb={breadcrumbSection && breadcrumbSection.children.length > 1 ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}
+          crumb={
+            breadcrumbSection && breadcrumbSection.children.length > 1
+              ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0])
+              : null
+          }
           live={live}
           unread={unread}
           bellOpen={bellOpen}
@@ -538,43 +957,87 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           edition="Pro"
           theme={theme}
           onToggleTheme={onToggleTheme}
-          onOpenPalette={(query?: string) => {setPaletteQuery(query??'');setPaletteOpen(true)}}
+          onOpenPalette={(query?: string) => {
+            setPaletteQuery(query ?? '');
+            setPaletteOpen(true);
+          }}
           onToggleBell={openBell}
           onReport={() => setSafetyOpen(true)}
           onOpenDrawer={() => setDrawerOpen(true)}
         />
         {bellOpen && (
-          <div className="bell-panel" aria-label="Notifications"><div className="pro-alert-heading"><h3>Notifications</h3><button aria-label="Close notifications" onClick={() => setBellOpen(false)}><Icon name="x" size={17}/></button></div>
-            {notifications.length === 0 && <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>}
-            {bellRows(notifications).slice(0, 20).map(({ n, count, unread }) => {
-              // The server resolved the CURRENT resource this row
-              // points to (a room and its tab), re-authorized at read time. A
-              // row with no target keeps the type-level destination, or stays
-              // plain text.
-              const target = n.target ?? null;
-              const dest = target?.kind === 'room' ? 'rooms' : NOTIFICATION_SCREEN[n.type];
-              return (
-                <div key={n.id} className="list-row" style={{ opacity: unread ? 1 : 0.7 }} data-target-kind={target?.kind ?? ''}>
-                  <span className="grow" style={{ fontSize: 13 }}>
-                    {n.text}
-                    {count > 1 && <span className="pill" style={{ marginLeft: 6 }}>×{count}</span>}
-                  </span>
-                  {dest && (
-                    <button onClick={() => { if (target?.kind === 'room') openRoom(target.roomId, target.tab as RoomTab); else setScreen(dest); setBellOpen(false); }}>{t('common.open')}</button>
-                  )}
-                  <span className="dim">{fmtStamp(n.ts)}</span>
-                </div>
-              );
-            })}
+          <div className="bell-panel" aria-label="Notifications">
+            <div className="pro-alert-heading">
+              <h3>Notifications</h3>
+              <button aria-label="Close notifications" onClick={() => setBellOpen(false)}>
+                <Icon name="x" size={17} />
+              </button>
+            </div>
+            {notifications.length === 0 && (
+              <div className="notice">Nothing yet — you'll hear the moment a player or guardian responds.</div>
+            )}
+            {bellRows(notifications)
+              .slice(0, 20)
+              .map(({ n, count, unread }) => {
+                // The server resolved the CURRENT resource this row
+                // points to (a room and its tab), re-authorized at read time. A
+                // row with no target keeps the type-level destination, or stays
+                // plain text.
+                const target = n.target ?? null;
+                const dest = target?.kind === 'room' ? 'rooms' : NOTIFICATION_SCREEN[n.type];
+                return (
+                  <div
+                    key={n.id}
+                    className="list-row"
+                    style={{ opacity: unread ? 1 : 0.7 }}
+                    data-target-kind={target?.kind ?? ''}
+                  >
+                    <span className="grow" style={{ fontSize: 13 }}>
+                      {n.text}
+                      {count > 1 && (
+                        <span className="pill" style={{ marginLeft: 6 }}>
+                          ×{count}
+                        </span>
+                      )}
+                    </span>
+                    {dest && (
+                      <button
+                        onClick={() => {
+                          if (target?.kind === 'room') openRoom(target.roomId, target.tab as RoomTab);
+                          else setScreen(dest);
+                          setBellOpen(false);
+                        }}
+                      >
+                        {t('common.open')}
+                      </button>
+                    )}
+                    <span className="dim">{fmtStamp(n.ts)}</span>
+                  </div>
+                );
+              })}
           </div>
         )}
         {activeSection && <SecondaryNav section={activeSection} activeItemId={loc.itemId} onNavigate={setScreen} />}
         <div className="content pro-content" data-screen={screen}>
           {/* The reference page heading; the top bar keeps the document <h1>. */}
-          <div key={screen} className="pro-page-entry">{screen !== 'feed' && screen !== 'messages' && <ProMasthead screen={screen} title={screenLabel} section={breadcrumbSection ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}/>}</div>
+          <div key={screen} className="pro-page-entry">
+            {screen !== 'feed' && screen !== 'messages' && (
+              <ProMasthead
+                screen={screen}
+                title={screenLabel}
+                section={breadcrumbSection ? t(breadcrumbSection.labelKey as Parameters<typeof t>[0]) : null}
+              />
+            )}
+          </div>
           {screen === 'feed' && <ProOverview session={session} tick={tick} navigate={setScreen} />}
           {screen === 'feed' && (
-            <NeedsAttention session={session} tick={tick} unreadMessages={unreadMessages} verLevel={verLevel} onNavigate={setScreen} />
+            <NeedsAttention
+              session={session}
+              tick={tick}
+              unreadMessages={unreadMessages}
+              verLevel={verLevel}
+              onNavigate={setScreen}
+            />
           )}
           {screen === 'feed' && <FeedScreen {...props} />}
           {screen === 'filmroom' && <FilmRoomScreen {...props} />}
@@ -590,10 +1053,21 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           {screen === 'plan' && <PlanScreen {...props} />}
           {screen === 'assessments' && <AssessmentsScreen {...props} />}
           {screen === 'recruitment' && <RecruitmentScreen {...props} />}
-          {screen === 'rooms' && <RoomsScreen {...props} roomId={roomId} roomTab={roomTab} onRoomTab={onRoomTab} onOpenRoom={openRoom} onCloseRoom={closeRoom} />}
+          {screen === 'rooms' && (
+            <RoomsScreen
+              {...props}
+              roomId={roomId}
+              roomTab={roomTab}
+              onRoomTab={onRoomTab}
+              onOpenRoom={openRoom}
+              onCloseRoom={closeRoom}
+            />
+          )}
           {screen === 'secondlook' && <SecondLookScreen {...props} />}
           {screen === 'nobodymissed' && <NobodyMissedScreen {...props} onOpenRoom={openRoom} />}
-          {screen === 'briefs' && <BriefsScreen {...props} briefId={briefId} onOpenBrief={openBrief} onCloseBrief={closeBrief} />}
+          {screen === 'briefs' && (
+            <BriefsScreen {...props} briefId={briefId} onOpenBrief={openBrief} onCloseBrief={closeBrief} />
+          )}
           {screen === 'matching' && (
             <MatchingScreen
               {...props}
@@ -637,7 +1111,10 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
           playerId={openPlayerId}
           notify={notify}
           onClose={() => setOpenPlayerId(null)}
-          onOpenRoom={(id) => { setOpenPlayerId(null); openRoom(id); }}
+          onOpenRoom={(id) => {
+            setOpenPlayerId(null);
+            openRoom(id);
+          }}
         />
       )}
       {safetyOpen && <SafetyModal session={session} notify={notify} onClose={() => setSafetyOpen(false)} />}
@@ -645,7 +1122,10 @@ function Workspace({ session, onLogout, theme, onToggleTheme }: { session: Sessi
         ctx={navCtx}
         open={paletteOpen}
         initialQuery={paletteQuery}
-        onClose={() => {setPaletteOpen(false);setPaletteQuery('')}}
+        onClose={() => {
+          setPaletteOpen(false);
+          setPaletteQuery('');
+        }}
         onNavigate={setScreen}
         shortcuts={shortcuts}
         onTogglePin={togglePin}

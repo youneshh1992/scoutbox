@@ -9,7 +9,11 @@ import { realWorldValidationPass, REAL_WORLD_VALIDATION } from './validation.mjs
 
 /** Each entry is backed by the recorded synthetic evaluation (cv/evaluation.json, cv/holdout.json). */
 export const OBSERVATION_CAPABILITIES = Object.freeze([
-  'player_presence', 'ball_presence', 'active_motion', 'active_duration', 'rep_count',
+  'player_presence',
+  'ball_presence',
+  'active_motion',
+  'active_duration',
+  'rep_count',
 ]);
 
 export const NON_CAPABILITIES = Object.freeze({
@@ -25,12 +29,15 @@ export const NON_CAPABILITIES = Object.freeze({
  * `[]` unless a passing real-world validation record exists for the protocol at this engine and policy version.
  * Intersected with the provider's observation list, so validation only permits a subset of what it observes.
  */
-export function combineCapabilities(protocolId, {
-  providerCapabilities = OBSERVATION_CAPABILITIES,
-  table = REAL_WORLD_VALIDATION,
-  engineVersion = CV_ENGINE_VERSION,
-  policyVersion = BOX_CAM_CV_POLICY_VERSION,
-} = {}) {
+export function combineCapabilities(
+  protocolId,
+  {
+    providerCapabilities = OBSERVATION_CAPABILITIES,
+    table = REAL_WORLD_VALIDATION,
+    engineVersion = CV_ENGINE_VERSION,
+    policyVersion = BOX_CAM_CV_POLICY_VERSION,
+  } = {},
+) {
   const verdict = realWorldValidationPass(protocolId, { table, engineVersion, policyVersion });
   // The verdict is an always-truthy object; `=== true` makes any other shape deny.
   if (verdict?.pass !== true) return [];
@@ -43,7 +50,12 @@ export function combineCapabilities(protocolId, {
 export function combineEligibility(protocolId, opts = {}) {
   const candidate = CANDIDATE_PROTOCOLS[protocolId] ?? null;
   if (!candidate) {
-    return { eligible: false, capabilities: [], reason: 'UNSUPPORTED_PROTOCOL', reasonDetail: 'This protocol is not a Box Cam CV candidate.' };
+    return {
+      eligible: false,
+      capabilities: [],
+      reason: 'UNSUPPORTED_PROTOCOL',
+      reasonDetail: 'This protocol is not a Box Cam CV candidate.',
+    };
   }
   const caps = combineCapabilities(protocolId, opts);
   if (caps.length === 0) {
@@ -109,7 +121,9 @@ export function boxCamObservedEligible({
   supportedDrill = true,
 } = {}) {
   const failed = [];
-  const add = (id, ok) => { if (!ok) failed.push(id); };
+  const add = (id, ok) => {
+    if (!ok) failed.push(id);
+  };
 
   add('provider_ready', providerHealth === 'ready' || providerHealth === 'degraded');
   add('live_session', !!sessionLive);
@@ -129,7 +143,8 @@ export function boxCamObservedEligible({
     failed,
     // On every result, so a successful observation isn't read as a verified measurement.
     combineVerified: false,
-    combineVerifiedNote: 'Box Cam observed is not Combine Verified. Combine verification for CV protocols remains disabled pending real-world validation.',
+    combineVerifiedNote:
+      'Box Cam observed is not Combine Verified. Combine verification for CV protocols remains disabled pending real-world validation.',
   };
 }
 
@@ -137,5 +152,6 @@ export function boxCamObservedEligible({
 export const COMBINE_DISABLED_REASON = Object.freeze({
   code: 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
   short: 'Combine verification is not available yet for this protocol.',
-  detail: 'Real-world validation has not been completed, so ScoutBox will not publish a standardised Combine measurement from computer vision.',
+  detail:
+    'Real-world validation has not been completed, so ScoutBox will not publish a standardised Combine measurement from computer vision.',
 });

@@ -5,46 +5,86 @@
 import crypto from 'node:crypto';
 import { isAdult } from '../../../domain.mjs';
 import {
-  verifiedActiveMs, dedupeReps, targetCompleted, detectionQuality,
-  deriveVerification, resultHash, boxStreakWeeks, boxBests, boxCamDetail,
-  mergeIntervals, normIntervals, sumIntervals, fmtMs, STATE_COPY, TERMINAL_STATES, typeObservation,
+  verifiedActiveMs,
+  dedupeReps,
+  targetCompleted,
+  detectionQuality,
+  deriveVerification,
+  resultHash,
+  boxStreakWeeks,
+  boxBests,
+  boxCamDetail,
+  mergeIntervals,
+  normIntervals,
+  sumIntervals,
+  fmtMs,
+  STATE_COPY,
+  TERMINAL_STATES,
+  typeObservation,
 } from './shared.mjs';
 import { drillByIdVersion, latestDrill, providerFor, LIVENESS_CHALLENGES, PROVIDERS } from './drills.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { hashNonce, nonceMatches, BOX_CAM_LIMITS } from '../../../repositories/boxCam.mjs';
 
-const DRIFT_MS = 7_000;            // allowed client/server clock drift
+const DRIFT_MS = 7_000; // allowed client/server clock drift
 const SESSION_TTL_MS = 2 * 3_600_000;
 const MAX_EVENTS_PER_BATCH = 200;
 const MAX_BATCHES_PER_SESSION = 500;
 const MAX_STORED_INTERVALS = 2_000;
 const EVENT_TYPES = new Set([
-  'active_interval', 'presence_interval', 'ball_interval', 'rep',
-  'set_completed', 'pause', 'resume', 'camera_interrupted', 'multi_person',
+  'active_interval',
+  'presence_interval',
+  'ball_interval',
+  'rep',
+  'set_completed',
+  'pause',
+  'resume',
+  'camera_interrupted',
+  'multi_person',
   'observation_gap',
 ]);
 
 /** An accepted event as the observation row it becomes (`resume` closes the open pause). */
 function observationOf(e) {
   switch (e.type) {
-    case 'active_interval': return { kind: 'active', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null, quality: e.quality ?? null };
-    case 'presence_interval': return { kind: 'presence', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null, quality: e.quality ?? null };
-    case 'ball_interval': return { kind: 'ball', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null };
-    case 'rep': return { kind: 'rep', atMs: e.atMs ?? null, confidence: e.confidence ?? null };
-    case 'set_completed': return { kind: 'set', atMs: e.atMs ?? null };
-    case 'pause': return { kind: 'pause', fromMs: e.atMs ?? null, toMs: null };
-    case 'resume': return { kind: 'resume', atMs: e.atMs ?? null };
-    case 'camera_interrupted': case 'observation_gap': return { kind: 'interruption', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null };
-    case 'multi_person': return { kind: 'multi_person', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null };
-    default: return null;
+    case 'active_interval':
+      return { kind: 'active', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null, quality: e.quality ?? null };
+    case 'presence_interval':
+      return { kind: 'presence', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null, quality: e.quality ?? null };
+    case 'ball_interval':
+      return { kind: 'ball', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null };
+    case 'rep':
+      return { kind: 'rep', atMs: e.atMs ?? null, confidence: e.confidence ?? null };
+    case 'set_completed':
+      return { kind: 'set', atMs: e.atMs ?? null };
+    case 'pause':
+      return { kind: 'pause', fromMs: e.atMs ?? null, toMs: null };
+    case 'resume':
+      return { kind: 'resume', atMs: e.atMs ?? null };
+    case 'camera_interrupted':
+    case 'observation_gap':
+      return { kind: 'interruption', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null };
+    case 'multi_person':
+      return { kind: 'multi_person', fromMs: e.fromMs ?? null, toMs: e.toMs ?? null };
+    default:
+      return null;
   }
 }
 
 export function registerBoxCamSessions(ctx) {
   const {
-    playerRouter, guardianRouter, adminRouter, nextId,
-    notify, broadcast, moderateOrRefuse, vmetric, testProviderEnabled,
-    boxCam, boxCamReads: reads, unit,
+    playerRouter,
+    guardianRouter,
+    adminRouter,
+    nextId,
+    notify,
+    broadcast,
+    moderateOrRefuse,
+    vmetric,
+    testProviderEnabled,
+    boxCam,
+    boxCamReads: reads,
+    unit,
   } = ctx;
 
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
@@ -59,11 +99,17 @@ export function registerBoxCamSessions(ctx) {
   };
 
   const sessionView = (s, { includeIntegrity = false } = {}) => ({
-    id: s.id, playerId: s.playerId, drillId: s.drillId, drillVersion: s.drillVersion,
+    id: s.id,
+    playerId: s.playerId,
+    drillId: s.drillId,
+    drillVersion: s.drillVersion,
     drillTitle: latestDrill(s.drillId)?.title ?? s.drillId,
-    assignmentId: s.assignmentId ?? null, challengeEntryIds: s.challengeEntryId ? [s.challengeEntryId] : [],
-    target: s.target, status: s.status,
-    startedAt: s.startedAt ?? null, endedAt: s.endedAt ?? null,
+    assignmentId: s.assignmentId ?? null,
+    challengeEntryIds: s.challengeEntryId ? [s.challengeEntryId] : [],
+    target: s.target,
+    status: s.status,
+    startedAt: s.startedAt ?? null,
+    endedAt: s.endedAt ?? null,
     sessionDurationMs: s.sessionDurationMs ?? null,
     verifiedActiveMs: s.verifiedActiveMs ?? null,
     verifiedReps: s.verifiedReps ?? null,
@@ -71,17 +117,34 @@ export function registerBoxCamSessions(ctx) {
     targetCompleted: s.targetCompleted ?? null,
     verificationState: s.verificationState ?? null,
     verificationReasons: s.verificationReasons ?? [],
-    stateCopy: s.verificationState ? STATE_COPY[s.verificationState] ?? null : null,
+    stateCopy: s.verificationState ? (STATE_COPY[s.verificationState] ?? null) : null,
     quality: s.quality ?? null,
     interruptions: s.interruptionsCount ?? 0,
-    provider: s.provider, providerVersion: s.providerVersion,
+    provider: s.provider,
+    providerVersion: s.providerVersion,
     simulated: !!PROVIDERS[s.provider]?.testOnly, // never hide that a fixture drove this
     note: s.note ?? null,
-    provenance: s.verificationState && ['verified', 'partially_verified'].includes(s.verificationState) ? 'box_cam_observed' : null,
-    provenanceLabel: s.verificationState === 'verified' ? 'Box Cam Verified' : s.verificationState === 'partially_verified' ? 'Captured by Box Cam' : null,
-    provenanceDetail: s.verificationState && ['verified', 'partially_verified'].includes(s.verificationState) ? boxCamDetail(s) : null,
+    provenance:
+      s.verificationState && ['verified', 'partially_verified'].includes(s.verificationState)
+        ? 'box_cam_observed'
+        : null,
+    provenanceLabel:
+      s.verificationState === 'verified'
+        ? 'Box Cam Verified'
+        : s.verificationState === 'partially_verified'
+          ? 'Captured by Box Cam'
+          : null,
+    provenanceDetail:
+      s.verificationState && ['verified', 'partially_verified'].includes(s.verificationState) ? boxCamDetail(s) : null,
     createdAt: s.createdAt,
-    ...(includeIntegrity ? { resultHash: s.resultHash ?? null, integrity: s.id ? { minted: 'server', drift: DRIFT_MS } : null, lastSeq: s.lastSeq, batches: s.batches } : {}),
+    ...(includeIntegrity
+      ? {
+          resultHash: s.resultHash ?? null,
+          integrity: s.id ? { minted: 'server', drift: DRIFT_MS } : null,
+          lastSeq: s.lastSeq,
+          batches: s.batches,
+        }
+      : {}),
   });
   ctx.boxSessionView = sessionView;
 
@@ -91,27 +154,57 @@ export function registerBoxCamSessions(ctx) {
   }
 
   /** A new server-minted session record and its plain nonce (returned once, never stored). */
-  function newSession({ player, drill, target, provider, assignmentId = null, challengeEntryId = null, captureContext = null }) {
+  function newSession({
+    player,
+    drill,
+    target,
+    provider,
+    assignmentId = null,
+    challengeEntryId = null,
+    captureContext = null,
+  }) {
     const nonce = crypto.randomBytes(18).toString('base64url');
     const at = Date.now();
     return {
       nonce,
       record: {
-        id: nextId('boxs'), playerId: player.id,
-        drillId: drill.id, drillVersion: drill.version,
-        assignmentId, challengeEntryId,
+        id: nextId('boxs'),
+        playerId: player.id,
+        drillId: drill.id,
+        drillVersion: drill.version,
+        assignmentId,
+        challengeEntryId,
         target,
         nonceHash: hashNonce(nonce),
         livenessChallenge: LIVENESS_CHALLENGES[crypto.randomInt(LIVENESS_CHALLENGES.length)],
-        provider: provider.id, providerVersion: provider.version,
+        provider: provider.id,
+        providerVersion: provider.version,
         status: 'setup_required',
-        createdAt: at, expiresAt: at + SESSION_TTL_MS,
-        startedAt: null, endedAt: null, livenessPassedAt: null,
-        lastSeq: 0, batches: 0, captureContext,
-        sessionDurationMs: null, verifiedActiveMs: null, verifiedReps: null, setsCompleted: null, targetCompleted: null,
-        quality: null, interruptionsCount: null, verificationState: null, verificationReasons: [], resultHash: null,
-        finalizedAt: null, note: null, clipMediaId: null, previousVerificationState: null, invalidatedAt: null,
-        integrityEvents: [], cvProviderSessionId: null,
+        createdAt: at,
+        expiresAt: at + SESSION_TTL_MS,
+        startedAt: null,
+        endedAt: null,
+        livenessPassedAt: null,
+        lastSeq: 0,
+        batches: 0,
+        captureContext,
+        sessionDurationMs: null,
+        verifiedActiveMs: null,
+        verifiedReps: null,
+        setsCompleted: null,
+        targetCompleted: null,
+        quality: null,
+        interruptionsCount: null,
+        verificationState: null,
+        verificationReasons: [],
+        resultHash: null,
+        finalizedAt: null,
+        note: null,
+        clipMediaId: null,
+        previousVerificationState: null,
+        invalidatedAt: null,
+        integrityEvents: [],
+        cvProviderSessionId: null,
       },
     };
   }
@@ -131,43 +224,70 @@ export function registerBoxCamSessions(ctx) {
       drills: ctx.drillList(),
       providers: Object.values(PROVIDERS)
         .filter((p) => !p.testOnly || testProviderEnabled)
-        .map((p) => ({ id: p.id, status: p.status, label: p.label ?? p.status, capabilities: p.capabilities, testOnly: !!p.testOnly, note: p.note })),
+        .map((p) => ({
+          id: p.id,
+          status: p.status,
+          label: p.label ?? p.status,
+          capabilities: p.capabilities,
+          testOnly: !!p.testOnly,
+          note: p.note,
+        })),
       note: 'A drill only verifies what its detector and the active observation provider can genuinely observe.',
     });
   });
 
   // --------------------------------------------------------------- create
   playerRouter.post('/box-cam/sessions', (req, res) => {
-    if (limited('box_session_create', req.player.id)) return res.status(429).json(rateLimitedBody('box_session_create'));
+    if (limited('box_session_create', req.player.id))
+      return res.status(429).json(rateLimitedBody('box_session_create'));
     const { drillId, target, provider: providerId, assignmentId, challengeEntryId } = req.body ?? {};
     const drill = latestDrill(String(drillId ?? ''));
     if (!drill) return res.status(404).json({ error: 'DRILL_UNKNOWN' });
     const provider = providerFor(String(providerId ?? 'web_client'), { testProviderEnabled });
-    if (!provider) return res.status(403).json({ error: 'PROVIDER_UNAVAILABLE', message: 'The requested observation provider is not available in this environment.' });
+    if (!provider)
+      return res.status(403).json({
+        error: 'PROVIDER_UNAVAILABLE',
+        message: 'The requested observation provider is not available in this environment.',
+      });
     if (provider.status === 'not_configured') {
-      return res.status(503).json({ error: 'PROVIDER_NOT_CONFIGURED', message: 'No production computer-vision provider is configured. This is stated honestly rather than simulated.' });
+      return res.status(503).json({
+        error: 'PROVIDER_NOT_CONFIGURED',
+        message: 'No production computer-vision provider is configured. This is stated honestly rather than simulated.',
+      });
     }
     const t = target ?? {};
-    if (!drill.targetTypes.includes(t.type)) return res.status(400).json({ error: 'TARGET_TYPE_UNSUPPORTED', allowed: drill.targetTypes });
+    if (!drill.targetTypes.includes(t.type))
+      return res.status(400).json({ error: 'TARGET_TYPE_UNSUPPORTED', allowed: drill.targetTypes });
     const bounds = { duration: [60_000, 2 * 3_600_000], repetitions: [1, 2_000], sets: [1, 20] };
     const [min, max] = bounds[t.type];
     // The value is a number as sent: a numeric string is refused.
-    if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < min || t.value > max) return res.status(400).json({ error: 'TARGET_VALUE_INVALID', min, max });
+    if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < min || t.value > max)
+      return res.status(400).json({ error: 'TARGET_VALUE_INVALID', min, max });
 
     let assignment = null;
     if (assignmentId) {
       assignment = reads.assignments.byId(assignmentId);
-      if (!assignment || assignment.playerId !== req.player.id) return res.status(404).json({ error: 'ASSIGNMENT_NOT_FOUND' });
-      if (assignment.state === 'cancelled') return res.status(409).json({ error: 'ASSIGNMENT_CANCELLED', message: 'This assignment is no longer active.' });
+      if (!assignment || assignment.playerId !== req.player.id)
+        return res.status(404).json({ error: 'ASSIGNMENT_NOT_FOUND' });
+      if (assignment.state === 'cancelled')
+        return res.status(409).json({ error: 'ASSIGNMENT_CANCELLED', message: 'This assignment is no longer active.' });
       if (assignment.drillId !== drill.id) return res.status(400).json({ error: 'ASSIGNMENT_DRILL_MISMATCH' });
     }
     let entry = null;
     if (challengeEntryId) {
       entry = reads.entries.byId(challengeEntryId);
-      if (!entry || entry.playerId !== req.player.id || entry.status !== 'active') return res.status(404).json({ error: 'CHALLENGE_ENTRY_NOT_FOUND' });
+      if (!entry || entry.playerId !== req.player.id || entry.status !== 'active')
+        return res.status(404).json({ error: 'CHALLENGE_ENTRY_NOT_FOUND' });
     }
 
-    const { nonce, record } = newSession({ player: req.player, drill, target: { type: t.type, value: t.value }, provider, assignmentId: assignment?.id ?? null, challengeEntryId: entry?.id ?? null });
+    const { nonce, record } = newSession({
+      player: req.player,
+      drill,
+      target: { type: t.type, value: t.value },
+      provider,
+      assignmentId: assignment?.id ?? null,
+      challengeEntryId: entry?.id ?? null,
+    });
     const session = boxCam.sessions.create(record);
     vmetric('box_sessions_started');
     // The nonce and liveness challenge exist only in this response.
@@ -189,12 +309,19 @@ export function registerBoxCamSessions(ctx) {
   playerRouter.post('/box-cam/sessions/:id/start', (req, res) => {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    if (s.status !== 'setup_required') return res.status(409).json({ error: 'SESSION_NOT_STARTABLE', status: s.status });
-    if (Date.now() > s.expiresAt) { boxCam.sessions.expire(s.id); return res.status(410).json({ error: 'SESSION_EXPIRED' }); }
+    if (s.status !== 'setup_required')
+      return res.status(409).json({ error: 'SESSION_NOT_STARTABLE', status: s.status });
+    if (Date.now() > s.expiresAt) {
+      boxCam.sessions.expire(s.id);
+      return res.status(410).json({ error: 'SESSION_EXPIRED' });
+    }
     const { nonce, liveness } = req.body ?? {};
     if (!nonceMatches(s, nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
     if (!liveness) return res.status(403).json({ error: 'LIVENESS_REQUIRED', challenge: s.livenessChallenge });
-    if (liveness !== s.livenessChallenge) return res.status(403).json({ error: 'LIVENESS_MISMATCH', message: 'Complete the liveness action the server asked for.' });
+    if (liveness !== s.livenessChallenge)
+      return res
+        .status(403)
+        .json({ error: 'LIVENESS_MISMATCH', message: 'Complete the liveness action the server asked for.' });
     const at = Date.now();
     const next = boxCam.sessions.start(s.id, { at });
     res.json({ session: sessionView(next) });
@@ -211,8 +338,12 @@ export function registerBoxCamSessions(ctx) {
     if (!Array.isArray(batch) || batch.length === 0 || batch.length > MAX_EVENTS_PER_BATCH) {
       return res.status(400).json({ error: 'BATCH_INVALID', maxEvents: MAX_EVENTS_PER_BATCH });
     }
-    if (s.batches >= MAX_BATCHES_PER_SESSION) return res.status(429).json({ error: 'RATE_LIMITED', message: 'Observation batch limit reached for this session.' });
-    if (reads.sessions.storedIntervals(s.id) > MAX_STORED_INTERVALS) return res.status(429).json({ error: 'RATE_LIMITED', message: 'Observation storage limit reached.' });
+    if (s.batches >= MAX_BATCHES_PER_SESSION)
+      return res
+        .status(429)
+        .json({ error: 'RATE_LIMITED', message: 'Observation batch limit reached for this session.' });
+    if (reads.sessions.storedIntervals(s.id) > MAX_STORED_INTERVALS)
+      return res.status(429).json({ error: 'RATE_LIMITED', message: 'Observation storage limit reached.' });
 
     const elapsed = Date.now() - s.startedAt;
     // Real providers are bound to the server's clock plus bounded drift. The test-only fixture provider simulates
@@ -224,9 +355,11 @@ export function registerBoxCamSessions(ctx) {
     const observations = [];
     for (const e of batch) {
       const n = Number(e?.seq);
-      if (!Number.isSafeInteger(n) || n <= seq) return res.status(409).json({ error: 'SEQUENCE_INVALID', lastSeq: s.lastSeq });
+      if (!Number.isSafeInteger(n) || n <= seq)
+        return res.status(409).json({ error: 'SEQUENCE_INVALID', lastSeq: s.lastSeq });
       seq = n;
-      if (!EVENT_TYPES.has(e.type)) return res.status(400).json({ error: 'EVENT_TYPE_UNKNOWN', type: String(e.type ?? '') });
+      if (!EVENT_TYPES.has(e.type))
+        return res.status(400).json({ error: 'EVENT_TYPE_UNKNOWN', type: String(e.type ?? '') });
       for (const k of ['atMs', 'fromMs', 'toMs']) {
         if (e[k] != null && (!Number.isFinite(Number(e[k])) || Number(e[k]) < 0 || Number(e[k]) > maxMs)) {
           return res.status(422).json({ error: 'TIMESTAMP_OUT_OF_RANGE', field: k, maxMs });
@@ -235,7 +368,10 @@ export function registerBoxCamSessions(ctx) {
       // An event the engine cannot read is refused naming the field, never dropped or read as good quality.
       const o = observationOf(e);
       if (o.kind === 'resume') {
-        if (typeof o.atMs !== 'number') return res.status(400).json({ error: 'EVENT_INVALID', seq: n, field: 'atMs', message: 'A resume needs atMs.' });
+        if (typeof o.atMs !== 'number')
+          return res
+            .status(400)
+            .json({ error: 'EVENT_INVALID', seq: n, field: 'atMs', message: 'A resume needs atMs.' });
       } else {
         const typed = typeObservation(o, `event ${n}`);
         if (!typed.ok) return res.status(400).json({ error: 'EVENT_INVALID', seq: n, message: typed.reason });
@@ -289,10 +425,18 @@ export function registerBoxCamSessions(ctx) {
     });
     const presenceMs = sumIntervals(mergeIntervals(normIntervals(obs.presence, dur)));
     d.verifiedReps = capabilities.includes('rep_count')
-      ? dedupeReps(obs.reps, { sessionDurationMs: dur, minGapMs: drill?.thresholds?.repMinGapMs ?? 250, minConfidence: drill?.thresholds?.repMinConfidence ?? 0.5 }).length
+      ? dedupeReps(obs.reps, {
+          sessionDurationMs: dur,
+          minGapMs: drill?.thresholds?.repMinGapMs ?? 250,
+          minConfidence: drill?.thresholds?.repMinConfidence ?? 0.5,
+        }).length
       : null;
     d.setsCompleted = capabilities.includes('interval_completion') ? obs.sets.length : null;
-    d.targetCompleted = targetCompleted(d.target, { activeMs: d.verifiedActiveMs, reps: d.verifiedReps, setsCompleted: d.setsCompleted ?? 0 }, capabilities);
+    d.targetCompleted = targetCompleted(
+      d.target,
+      { activeMs: d.verifiedActiveMs, reps: d.verifiedReps, setsCompleted: d.setsCompleted ?? 0 },
+      capabilities,
+    );
     d.quality = detectionQuality({ observedMs: Math.max(presenceMs, d.verifiedActiveMs), sessionDurationMs: dur });
     d.interruptionsCount = obs.interruptions.length + obs.multiPerson.length;
 
@@ -316,20 +460,65 @@ export function registerBoxCamSessions(ctx) {
     d.status = state;
     d.resultHash = resultHash(d);
     d.finalizedAt = now;
-    const { endedAt, sessionDurationMs, verifiedReps, setsCompleted, quality, interruptionsCount, verificationState, verificationReasons, status, resultHash: hash, finalizedAt } = d;
-    return { status, endedAt, sessionDurationMs, verifiedActiveMs: d.verifiedActiveMs, verifiedReps, setsCompleted, targetCompleted: d.targetCompleted, quality, interruptionsCount, verificationState, verificationReasons, resultHash: hash, finalizedAt };
+    const {
+      endedAt,
+      sessionDurationMs,
+      verifiedReps,
+      setsCompleted,
+      quality,
+      interruptionsCount,
+      verificationState,
+      verificationReasons,
+      status,
+      resultHash: hash,
+      finalizedAt,
+    } = d;
+    return {
+      status,
+      endedAt,
+      sessionDurationMs,
+      verifiedActiveMs: d.verifiedActiveMs,
+      verifiedReps,
+      setsCompleted,
+      targetCompleted: d.targetCompleted,
+      quality,
+      interruptionsCount,
+      verificationState,
+      verificationReasons,
+      resultHash: hash,
+      finalizedAt,
+    };
   }
 
   // Shared by the Box Cam and Combine complete routes. The onSessionFinalized hook drives assignments, challenges
   // and Combine measurement, all in one unit of work.
   function completeSession(sessionId, p) {
     const s = unit(() => {
-      const done = boxCam.sessions.finish(sessionId, finalize(reads.sessions.byId(sessionId), reads.sessions.observationsOf(sessionId)));
+      const done = boxCam.sessions.finish(
+        sessionId,
+        finalize(reads.sessions.byId(sessionId), reads.sessions.observationsOf(sessionId)),
+      );
       if (['verified', 'partially_verified'].includes(done.verificationState)) {
-        notify({ kind: 'player', id: p.id }, 'box_cam', `Your work counts. ${fmtMs(done.verifiedActiveMs)} of ${latestDrill(done.drillId)?.title ?? done.drillId} was recorded in your training history.`, done.id);
-        if (!isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'box_cam', `${p.name} completed a Box Session (${fmtMs(done.verifiedActiveMs)} Box Cam verified).`, done.id);
+        notify(
+          { kind: 'player', id: p.id },
+          'box_cam',
+          `Your work counts. ${fmtMs(done.verifiedActiveMs)} of ${latestDrill(done.drillId)?.title ?? done.drillId} was recorded in your training history.`,
+          done.id,
+        );
+        if (!isAdult(p) && p.guardianId)
+          notify(
+            { kind: 'guardian', id: p.guardianId },
+            'box_cam',
+            `${p.name} completed a Box Session (${fmtMs(done.verifiedActiveMs)} Box Cam verified).`,
+            done.id,
+          );
       } else {
-        notify({ kind: 'player', id: p.id }, 'box_cam', STATE_COPY[done.verificationState] ?? 'Box Session recorded.', done.id);
+        notify(
+          { kind: 'player', id: p.id },
+          'box_cam',
+          STATE_COPY[done.verificationState] ?? 'Box Session recorded.',
+          done.id,
+        );
       }
       ctx.onSessionFinalized?.(done, p);
       broadcast('player_development_evidence_changed', { playerId: p.id });
@@ -348,7 +537,10 @@ export function registerBoxCamSessions(ctx) {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (!nonceMatches(s, (req.body ?? {}).nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
-    if (TERMINAL_STATES.has(s.status)) return res.status(409).json({ error: 'ALREADY_FINALIZED', message: 'A completed Box Session cannot be submitted again.' });
+    if (TERMINAL_STATES.has(s.status))
+      return res
+        .status(409)
+        .json({ error: 'ALREADY_FINALIZED', message: 'A completed Box Session cannot be submitted again.' });
     if (s.status !== 'recording') return res.status(409).json({ error: 'SESSION_NOT_RECORDING', status: s.status });
     res.json({ session: sessionView(completeSession(s.id, req.player)) });
   });
@@ -357,9 +549,10 @@ export function registerBoxCamSessions(ctx) {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (TERMINAL_STATES.has(s.status)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
-    const next = s.status === 'recording'
-      ? boxCam.sessions.finish(s.id, finalize(s, reads.sessions.observationsOf(s.id), { cancelled: true }))
-      : boxCam.sessions.cancel(s.id);
+    const next =
+      s.status === 'recording'
+        ? boxCam.sessions.finish(s.id, finalize(s, reads.sessions.observationsOf(s.id), { cancelled: true }))
+        : boxCam.sessions.cancel(s.id);
     res.json({ session: sessionView(next) });
   });
 
@@ -392,7 +585,9 @@ export function registerBoxCamSessions(ctx) {
 
   // --------------------------------------------------------- dashboards
   function dashboard(player) {
-    const sessions = reads.sessions.finishedForPlayer(player.id).filter((s) => !['cancelled', 'invalidated'].includes(s.verificationState));
+    const sessions = reads.sessions
+      .finishedForPlayer(player.id)
+      .filter((s) => !['cancelled', 'invalidated'].includes(s.verificationState));
     const assignments = reads.assignments.forPlayer(player.id).filter((a) => a.state !== 'cancelled');
     return {
       streakWeeks: boxStreakWeeks(sessions),
@@ -418,17 +613,28 @@ export function registerBoxCamSessions(ctx) {
     if (!s || !TERMINAL_STATES.has(s.status)) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     const prefs = ctx.boxPrefsFor(req.player.id);
     if (!isAdult(req.player) && !prefs.retainClips) {
-      return res.status(403).json({ error: 'GUARDIAN_CONTROLLED', message: 'Your parent/guardian controls whether Box Clips from home training are kept.' });
+      return res.status(403).json({
+        error: 'GUARDIAN_CONTROLLED',
+        message: 'Your parent/guardian controls whether Box Clips from home training are kept.',
+      });
     }
     const media = (req.player.media ?? []).find((m) => m.id === req.body?.mediaId);
     if (!media) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
     const next = unit(() => {
       ctx.players.patchItem(req.player.id, 'media', { id: media.id }, { capturedBy: 'box_cam', boxSessionId: s.id });
       const row = boxCam.sessions.attachClip(s.id, { mediaId: media.id });
-      ctx.ledgerAppend?.({ type: 'box_clip_saved', playerId: req.player.id, orgId: null, detail: { sessionId: s.id, mediaId: media.id } });
+      ctx.ledgerAppend?.({
+        type: 'box_clip_saved',
+        playerId: req.player.id,
+        orgId: null,
+        detail: { sessionId: s.id, mediaId: media.id },
+      });
       return row;
     });
-    res.json({ session: sessionView(next), note: 'Clip kept with your media. Saving a clip never makes it public — its visibility follows your existing media privacy.' });
+    res.json({
+      session: sessionView(next),
+      note: 'Clip kept with your media. Saving a clip never makes it public — its visibility follows your existing media privacy.',
+    });
   });
 
   // -------------------------------------------------------------- T&S read

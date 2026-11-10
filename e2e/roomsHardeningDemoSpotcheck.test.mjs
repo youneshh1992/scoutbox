@@ -25,12 +25,18 @@ const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const browser = await chromium.launch({ executablePath: EXE });
 const allErrors = [];
 let bad = 0;
-const ok = (c, m) => { console.log(`${c ? '✓' : '✗'} ${m}`); if (!c) bad++; };
+const ok = (c, m) => {
+  console.log(`${c ? '✓' : '✗'} ${m}`);
+  if (!c) bad++;
+};
 
 async function open(url, viewport = { width: 1440, height: 900 }) {
   const p = await browser.newPage({ viewport });
   const errors = [];
-  p.on('pageerror', (e) => { errors.push(`${url}: ${e.message}`); allErrors.push(`${url}: ${e.message}`); });
+  p.on('pageerror', (e) => {
+    errors.push(`${url}: ${e.message}`);
+    allErrors.push(`${url}: ${e.message}`);
+  });
   p.on('console', (m) => {
     // The demo host serves no favicon; that 404 is the host, not the bundle.
     if (m.type() === 'error' && !m.location()?.url?.endsWith('/favicon.ico')) {
@@ -51,31 +57,48 @@ async function login(p) {
 }
 
 // ---- 1. every bundle boots clean
-for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/'], ['admin', 'admin/'], ['player', 'player/']]) {
+for (const [name, path] of [
+  ['club', 'club/'],
+  ['grassroots', 'grassroots/'],
+  ['admin', 'admin/'],
+  ['player', 'player/'],
+]) {
   const { p, errors } = await open(`${BASE}/${path}`);
   const body = ((await p.textContent('body')) ?? '').trim();
-  ok(errors.length === 0 && body.length > 40, `${name} demo boots — pageErrors=${errors.length} bodyChars=${body.length}`);
+  ok(
+    errors.length === 0 && body.length > 40,
+    `${name} demo boots — pageErrors=${errors.length} bodyChars=${body.length}`,
+  );
   for (const e of errors.slice(0, 4)) console.log(`    ${e}`);
   await p.close();
 }
 
 // ---- 2. terminology, states and accessibility in both org bundles
-for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
+for (const [name, path] of [
+  ['club', 'club/'],
+  ['grassroots', 'grassroots/'],
+]) {
   const { p, errors } = await open(`${BASE}/${path}`);
   await login(p);
 
   // -- two numbers, two names
-  await p.evaluate(() => { window.location.hash = '#/search'; });
+  await p.evaluate(() => {
+    window.location.hash = '#/search';
+  });
   await p.waitForTimeout(1200);
   let body = (await p.textContent('body')) ?? '';
   ok(/Profile completeness/i.test(body), `${name} Discover names the completeness figure for what it measures`);
   ok(!/\bTrust\s+\d{1,3}%/.test(body), `${name} Discover no longer labels that figure "Trust NN%"`);
-  ok(!/\bTrust Score\b/i.test(body) || /Evidence confidence/i.test(body),
-    `${name} Discover never says "Trust Score" without saying evidence confidence`);
+  ok(
+    !/\bTrust Score\b/i.test(body) || /Evidence confidence/i.test(body),
+    `${name} Discover never says "Trust Score" without saying evidence confidence`,
+  );
 
   // -- untranslated keys would render as literal dotted identifiers
-  ok(!/term\.profileSignal|common\.retry|common\.conflict|rm\.trustUnavailableShort|m18\.sl\.empty\./.test(body),
-    `${name} no raw i18n key leaks onto the page`);
+  ok(
+    !/term\.profileSignal|common\.retry|common\.conflict|rm\.trustUnavailableShort|m18\.sl\.empty\./.test(body),
+    `${name} no raw i18n key leaks onto the page`,
+  );
 
   // -- the emoji-only header controls have accessible names
   const bellName = await p.getAttribute('button[aria-label^="Notifications"]', 'aria-label').catch(() => null);
@@ -84,7 +107,9 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
   ok(!!reportName, `${name} the report/block control has an accessible name`);
 
   // -- Second Look: four tabs, four distinct empty states, no generic fallback
-  await p.evaluate(() => { window.location.hash = '#/recruitment/second-look'; });
+  await p.evaluate(() => {
+    window.location.hash = '#/recruitment/second-look';
+  });
   await p.waitForTimeout(1200);
   body = (await p.textContent('body')) ?? '';
   ok(/Worth Another Look/.test(body), `${name} Second Look renders`);
@@ -99,23 +124,42 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
       const first = panel.trim().split('\n').filter(Boolean)[0] ?? '';
       if (/^No |^Nothing/i.test(first)) empties.add(first);
     }
-    ok(empties.size !== 1 || tabs <= 1, `${name} empty Second Look tabs each say something different (${empties.size} distinct)`);
+    ok(
+      empties.size !== 1 || tabs <= 1,
+      `${name} empty Second Look tabs each say something different (${empties.size} distinct)`,
+    );
   }
 
   // -- Rooms: a missing evidence confidence is words, never a bare dash or 0
-  await p.evaluate(() => { window.location.hash = '#/recruitment/rooms'; });
+  await p.evaluate(() => {
+    window.location.hash = '#/recruitment/rooms';
+  });
   await p.waitForTimeout(1400);
-  const table = await p.locator('table.data').first().innerText().catch(() => '');
-  ok(!/^—$/m.test(table) || /Not available|Player withheld/i.test(table),
-    `${name} the Rooms table never leaves a bare em dash where evidence confidence belongs`);
+  const table = await p
+    .locator('table.data')
+    .first()
+    .innerText()
+    .catch(() => '');
+  ok(
+    !/^—$/m.test(table) || /Not available|Player withheld/i.test(table),
+    `${name} the Rooms table never leaves a bare em dash where evidence confidence belongs`,
+  );
   ok(!/Trust[^\n]*\s0\b/.test(table), `${name} a missing Trust profile is not rendered as 0`);
 
   // -- the toast is announced. A toast only exists while one is on screen, so
   //    provoke one and look, rather than asserting on an empty page. Nobody
   //    Missed always has a candidate in the demo, and reviewing one toasts.
-  await p.evaluate(() => { window.location.hash = '#/recruitment/nobody-missed'; });
+  await p.evaluate(() => {
+    window.location.hash = '#/recruitment/nobody-missed';
+  });
   await p.waitForTimeout(1400);
-  { const toggle = p.locator('[data-testid="nm-row-toggle"]').first(); if (await toggle.count()) { await toggle.click(); await p.waitForTimeout(300); } } // actions sit behind the row
+  {
+    const toggle = p.locator('[data-testid="nm-row-toggle"]').first();
+    if (await toggle.count()) {
+      await toggle.click();
+      await p.waitForTimeout(300);
+    }
+  } // actions sit behind the row
   {
     const review = p.locator('button:has-text("Review player")').first();
     if (await review.count()) {
@@ -127,7 +171,10 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
         return { role: el.getAttribute('role'), live: el.getAttribute('aria-live'), text: el.textContent };
       });
       if (announced) {
-        ok(announced.role === 'status' || announced.role === 'alert', `${name} the toast is announced (role=${announced.role}, aria-live=${announced.live})`);
+        ok(
+          announced.role === 'status' || announced.role === 'alert',
+          `${name} the toast is announced (role=${announced.role}, aria-live=${announced.live})`,
+        );
       } else {
         ok(true, `${name} the action produced no toast in the demo bundle (nothing asserted)`);
       }
@@ -144,12 +191,16 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
     ['Briefs', '#/briefs'],
     ['Rooms', '#/recruitment/rooms'],
   ]) {
-    await p.evaluate((h) => { window.location.hash = h; }, hash);
+    await p.evaluate((h) => {
+      window.location.hash = h;
+    }, hash);
     await p.waitForTimeout(900);
-    const overflow = await p.evaluate(() => Math.max(
-      document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      document.body.scrollWidth - document.body.clientWidth,
-    ));
+    const overflow = await p.evaluate(() =>
+      Math.max(
+        document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        document.body.scrollWidth - document.body.clientWidth,
+      ),
+    );
     ok(overflow <= 4, `${name} ${label} fits 390px (overflow=${overflow}px)`);
   }
   await p.setViewportSize({ width: 1440, height: 900 });
@@ -170,19 +221,25 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
 
   // The demo must never let a simulated observation read as production evidence.
   ok(/demo/i.test(body), 'the player demo says it is a demo');
-  ok(!/production evidence|verified by an official/i.test(body),
-    'no simulated result claims to be production evidence');
+  ok(
+    !/production evidence|verified by an official/i.test(body),
+    'no simulated result claims to be production evidence',
+  );
 
   // Terminology: the player's own completeness figure is not called Trust.
   ok(!/\bTrust\s+\d{1,3}%/.test(body), 'the player app does not label completeness "Trust NN%"');
 
   // Second Look and Nobody Missed remain club-internal.
-  ok(!/second look|nobody missed|worth another look|evaluation coverage/i.test(body),
-    'the player app carries no Second Look / Nobody Missed surface');
+  ok(
+    !/second look|nobody missed|worth another look|evaluation coverage/i.test(body),
+    'the player app carries no Second Look / Nobody Missed surface',
+  );
 
   // A raw combine state id must never reach a player.
-  ok(!/combine_verified|measurement_unavailable|protocol_invalid|integrity_review|partially_measured/.test(body),
-    'no raw Combine state identifier is rendered at the player');
+  ok(
+    !/combine_verified|measurement_unavailable|protocol_invalid|integrity_review|partially_measured/.test(body),
+    'no raw Combine state identifier is rendered at the player',
+  );
   ok(!/cmbState_|m15prov_/.test(body), 'no raw player i18n key leaks onto the page');
 
   ok(errors.length === 0, `player journey produced zero page errors`);
@@ -190,6 +247,11 @@ for (const [name, path] of [['club', 'club/'], ['grassroots', 'grassroots/']]) {
 }
 
 await browser.close();
-console.log(`\n${bad === 0 ? 'Rooms hardening headless spotcheck: ALL CHECKS PASSED — zero page errors' : `Rooms hardening headless spotcheck: ${bad} FAILURE(S)`}`);
-if (allErrors.length) { console.log('page errors:'); for (const e of allErrors) console.log(`  ${e}`); }
+console.log(
+  `\n${bad === 0 ? 'Rooms hardening headless spotcheck: ALL CHECKS PASSED — zero page errors' : `Rooms hardening headless spotcheck: ${bad} FAILURE(S)`}`,
+);
+if (allErrors.length) {
+  console.log('page errors:');
+  for (const e of allErrors) console.log(`  ${e}`);
+}
 process.exit(bad ? 1 : 0);

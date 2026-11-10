@@ -5,7 +5,8 @@ import { makeRateLimiter } from '../../adapters.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 
 export function createSessionAccess({ sessions }) {
-  if (typeof sessions?.create !== 'function' || typeof sessions?.byToken !== 'function') throw new TypeError('createSessionAccess needs the sessions repository');
+  if (typeof sessions?.create !== 'function' || typeof sessions?.byToken !== 'function')
+    throw new TypeError('createSessionAccess needs the sessions repository');
   // The session's sid is a non-secret identifier that media URLs are bound to: the URL dies with the session.
   const createSession = (kind, refId, extra = {}) => sessions.create(kind, refId, extra).token;
   const sessionFor = (req) => {
@@ -34,14 +35,19 @@ export function registerSessionRoutes({ app, sessions, sessionFor }) {
  */
 export function createLoginBudget({ rateLimit }) {
   if (typeof rateLimit?.peek !== 'function') throw new TypeError('createLoginBudget needs the rate limiter');
-  const loginKey = (identifier) => String(identifier ?? '').trim().toLowerCase() || 'unknown';
+  const loginKey = (identifier) =>
+    String(identifier ?? '')
+      .trim()
+      .toLowerCase() || 'unknown';
   /** True (and the response already sent) when locked out. */
   const loginLockedOut = (res, identifier) => {
     if (!rateLimit.peek('login_failure', loginKey(identifier)).limited) return false;
     res.status(429).json(rateLimitedBody('login_failure'));
     return true;
   };
-  const noteLoginFailure = (identifier) => { rateLimit.limited('login_failure', loginKey(identifier)); };
+  const noteLoginFailure = (identifier) => {
+    rateLimit.limited('login_failure', loginKey(identifier));
+  };
   return { loginKey, loginLockedOut, noteLoginFailure };
 }
 

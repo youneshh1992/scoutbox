@@ -6,7 +6,7 @@
 import { ORGS_TABLE_MIGRATION, ORGS_INIT_META, ORGS_DDL } from '../orgs.mjs';
 
 export const id = ORGS_TABLE_MIGRATION;
-export const note = 'organisations become a typed table (explicit writes, SQL reads); the staff table is 0001\'s';
+export const note = "organisations become a typed table (explicit writes, SQL reads); the staff table is 0001's";
 export const foreignKeysOff = true;
 export { ORGS_DDL };
 
@@ -15,5 +15,7 @@ export function up(sqlite) {
   sqlite.exec('DROP TABLE IF EXISTS orgs;');
   sqlite.exec(ORGS_DDL);
   // A first installation waits for its seed.
-  sqlite.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(ORGS_INIT_META, 'pending');
+  sqlite
+    .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(ORGS_INIT_META, 'pending');
 }

@@ -14,11 +14,18 @@ import { t } from './i18n';
 
 /** The server's PROVENANCE vocabulary (domains/verification/passport/shared.mjs), in rank order. */
 export const PROVENANCE_TYPES = [
-  'player_submitted', 'guardian_submitted', 'system_recorded', 'historical_migration',
-  'box_cam_observed', 'scoutbox_reviewed', 'verified_coach_confirmed',
-  'verified_club_confirmed', 'authoritative_registry',
+  'player_submitted',
+  'guardian_submitted',
+  'system_recorded',
+  'historical_migration',
+  'box_cam_observed',
+  'scoutbox_reviewed',
+  'verified_coach_confirmed',
+  'verified_club_confirmed',
+  'authoritative_registry',
   // Not a Passport provenance but a source badge surfaces use next to them.
-  'combine_verified', 'simulated_demo',
+  'combine_verified',
+  'simulated_demo',
 ] as const;
 export type ProvenanceType = (typeof PROVENANCE_TYPES)[number];
 
@@ -49,7 +56,11 @@ const TABLE: Record<ProvenanceType, ProvenanceEntry> = {
 };
 
 const TONE_CLASS: Record<ProvenanceTone, string> = {
-  neutral: '', reviewed: 'gold', coach: 'blue', confirmed: 'green', demo: 'gold',
+  neutral: '',
+  reviewed: 'gold',
+  coach: 'blue',
+  confirmed: 'green',
+  demo: 'gold',
 };
 
 export interface ProvenancePresentation {
@@ -67,7 +78,11 @@ export function provenanceOf(type: string | null | undefined, serverCopy?: strin
   const entry = type ? TABLE[type as ProvenanceType] : undefined;
   if (!entry) {
     return {
-      known: false, label: t('prov.unknown'), glyph: '?', tone: 'neutral', pillClass: 'pill',
+      known: false,
+      label: t('prov.unknown'),
+      glyph: '?',
+      tone: 'neutral',
+      pillClass: 'pill',
       note: t('prov.unknownNote'),
     };
   }
@@ -83,4 +98,10 @@ export function provenanceOf(type: string | null | undefined, serverCopy?: strin
 
 /** True when a provenance means someone other than the subject confirmed it. */
 export const isConfirmedProvenance = (type: string | null | undefined) =>
-  ['scoutbox_reviewed', 'verified_coach_confirmed', 'verified_club_confirmed', 'authoritative_registry', 'combine_verified'].includes(String(type));
+  [
+    'scoutbox_reviewed',
+    'verified_coach_confirmed',
+    'verified_club_confirmed',
+    'authoritative_registry',
+    'combine_verified',
+  ].includes(String(type));

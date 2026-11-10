@@ -13,13 +13,16 @@ assert.equal(validClipRange(0, Infinity, Infinity), false);
 assert.equal(clipTime(59.996), '01:00.00');
 assert.equal(clipTime(0), '00:00.00');
 assert.equal(clipTime(NaN), '00:00.00');
-assert.equal(clipTime(.04), '00:00.04');
-const rows = [['=SUM(A1)', 'a,b', 'two"quotes', 'line\nbreak'], ['+1', '@x', '-2', null]];
+assert.equal(clipTime(0.04), '00:00.04');
+const rows = [
+  ['=SUM(A1)', 'a,b', 'two"quotes', 'line\nbreak'],
+  ['+1', '@x', '-2', null],
+];
 const original = structuredClone(rows);
-const csv = csvContent(['A','B','C','D'], rows);
+const csv = csvContent(['A', 'B', 'C', 'D'], rows);
 assert.ok(csv.startsWith('\uFEFF"A","B","C","D"\r\n'));
-assert.ok(csv.includes("\"'=SUM(A1)\""));
+assert.ok(csv.includes('"\'=SUM(A1)"'));
 assert.ok(csv.includes('"a,b","two""quotes","line\nbreak"'));
-assert.ok(csv.includes("\"'+1\",\"'@x\",\"'-2\",\"\""));
+assert.ok(csv.includes('"\'+1","\'@x","\'-2",""'));
 assert.deepEqual(rows, original);
 console.log('Pro tools: 18 checks passed (clip boundaries, rounding, timecodes and CSV escaping).');

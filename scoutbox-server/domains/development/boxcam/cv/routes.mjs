@@ -3,9 +3,7 @@
 // batch of 12 every few hundred ms fits request/response, and the engine needs 12 fps sustained, not 60. It is not a
 // file upload: one representation (gray8, see policy.mjs), anything else refused by name.
 
-import {
-  FRAME_LIMITS, FRAME_ENCODING, CANDIDATE_PROTOCOLS, refusedClientFields,
-} from './policy.mjs';
+import { FRAME_LIMITS, FRAME_ENCODING, CANDIDATE_PROTOCOLS, refusedClientFields } from './policy.mjs';
 import { decodeFrame, FRAME_ERRORS } from './frames.mjs';
 import { productionCvProvider, PROVIDER_ERRORS } from './provider.mjs';
 import { combineEligibility, boxCamObservedEligible, COMBINE_DISABLED_REASON } from './eligibility.mjs';
@@ -58,15 +56,16 @@ function refuseClientFields(res, ...objects) {
 export function registerProductionCvRoutes(ctx) {
   // The nonce is checked against the session's stored hash, then the plain value sent binds the in-memory provider
   // session.
-  const {
-    playerRouter, adminRouter, vmetric, broadcast, boxCam, boxCamReads: reads,
-  } = ctx;
+  const { playerRouter, adminRouter, vmetric, broadcast, boxCam, boxCamReads: reads } = ctx;
   const provider = ctx.productionCv ?? productionCvProvider();
   ctx.productionCv = provider;
 
   const limited = limitCheck(ctx.rateLimit);
 
-  const ownSession = (playerId, id) => { const s = reads.sessions.byId(id); return s && s.playerId === playerId ? s : null; };
+  const ownSession = (playerId, id) => {
+    const s = reads.sessions.byId(id);
+    return s && s.playerId === playerId ? s : null;
+  };
 
   // ====================================================================
   // Provider session lifecycle
@@ -90,7 +89,9 @@ export function registerProductionCvRoutes(ctx) {
       return fail(res, PROVIDER_ERRORS.INVALID_STATE, { detail: 'liveness has not been established for this session' });
     }
     if (s.provider !== 'production_cv') {
-      return fail(res, PROVIDER_ERRORS.INVALID_STATE, { detail: 'this Box Cam session is not bound to the production CV provider' });
+      return fail(res, PROVIDER_ERRORS.INVALID_STATE, {
+        detail: 'this Box Cam session is not bound to the production CV provider',
+      });
     }
 
     const protocolId = String((req.body ?? {}).protocolId ?? '');
@@ -100,7 +101,8 @@ export function registerProductionCvRoutes(ctx) {
       protocolId,
       nonce: req.body.nonce,
     });
-    if (!begun.ok) return fail(res, begun.error, { protocolId: begun.protocolId, activeSessions: begun.activeSessions });
+    if (!begun.ok)
+      return fail(res, begun.error, { protocolId: begun.protocolId, activeSessions: begun.activeSessions });
 
     boxCam.sessions.bindCvSession(s.id, { providerSessionId: begun.providerSessionId });
     vmetric('box_cam_cv_sessions_started');
@@ -270,37 +272,67 @@ export function registerProductionCvRoutes(ctx) {
 
     // Client-reported facts only advise during setup; lying about them gains nothing but bad advice.
     const cam = String(b.cameraPermission ?? 'unknown');
-    add('camera_permission',
+    add(
+      'camera_permission',
       cam === 'granted' ? 'pass' : 'fail',
-      cam === 'granted' ? null : ({
-        denied: 'CAMERA_DENIED', unavailable: 'CAMERA_UNAVAILABLE',
-        in_use: 'CAMERA_IN_USE', insecure_context: 'INSECURE_CONTEXT',
-      }[cam] ?? 'CAMERA_UNKNOWN'));
+      cam === 'granted'
+        ? null
+        : ({
+            denied: 'CAMERA_DENIED',
+            unavailable: 'CAMERA_UNAVAILABLE',
+            in_use: 'CAMERA_IN_USE',
+            insecure_context: 'INSECURE_CONTEXT',
+          }[cam] ?? 'CAMERA_UNKNOWN'),
+    );
 
-    add('secure_context', b.secureContext === true ? 'pass' : 'fail', b.secureContext === true ? null : 'INSECURE_CONTEXT');
+    add(
+      'secure_context',
+      b.secureContext === true ? 'pass' : 'fail',
+      b.secureContext === true ? null : 'INSECURE_CONTEXT',
+    );
 
-    const w = Number(b.frameWidth), h = Number(b.frameHeight);
-    const dimsOk = Number.isInteger(w) && Number.isInteger(h)
-      && w >= FRAME_LIMITS.minWidth && h >= FRAME_LIMITS.minHeight
-      && w <= FRAME_LIMITS.maxWidth && h <= FRAME_LIMITS.maxHeight;
-    add('frame_dimensions', dimsOk ? 'pass' : 'fail', dimsOk ? null : 'FRAME_DIMENSIONS_UNSUPPORTED',
-      { min: [FRAME_LIMITS.minWidth, FRAME_LIMITS.minHeight], max: [FRAME_LIMITS.maxWidth, FRAME_LIMITS.maxHeight] });
+    const w = Number(b.frameWidth),
+      h = Number(b.frameHeight);
+    const dimsOk =
+      Number.isInteger(w) &&
+      Number.isInteger(h) &&
+      w >= FRAME_LIMITS.minWidth &&
+      h >= FRAME_LIMITS.minHeight &&
+      w <= FRAME_LIMITS.maxWidth &&
+      h <= FRAME_LIMITS.maxHeight;
+    add('frame_dimensions', dimsOk ? 'pass' : 'fail', dimsOk ? null : 'FRAME_DIMENSIONS_UNSUPPORTED', {
+      min: [FRAME_LIMITS.minWidth, FRAME_LIMITS.minHeight],
+      max: [FRAME_LIMITS.maxWidth, FRAME_LIMITS.maxHeight],
+    });
 
     const fps = Number(b.fps);
     const fpsOk = Number.isFinite(fps) && fps >= 12;
     add('capture_cadence', fpsOk ? 'pass' : 'fail', fpsOk ? null : 'FRAME_RATE_TOO_LOW', { minSustainedFps: 12 });
 
     const health = provider.health();
-    add('provider_health', ['ready', 'degraded'].includes(health.state) ? 'pass' : 'fail',
-      ['ready', 'degraded'].includes(health.state) ? null : 'PROVIDER_UNAVAILABLE', { state: health.state });
+    add(
+      'provider_health',
+      ['ready', 'degraded'].includes(health.state) ? 'pass' : 'fail',
+      ['ready', 'degraded'].includes(health.state) ? null : 'PROVIDER_UNAVAILABLE',
+      { state: health.state },
+    );
 
     // Checks the client cannot self-assess are "unknown", not assumed to pass.
-    add('person_region', b.personDetected === true ? 'pass' : (b.personDetected === false ? 'fail' : 'unknown'),
-      b.personDetected === false ? 'PERSON_NOT_DETECTED' : null);
-    add('ball_detection', b.ballDetected === true ? 'pass' : (b.ballDetected === false ? 'fail' : 'unknown'),
-      b.ballDetected === false ? 'BALL_NOT_DETECTED' : null);
-    add('lighting', b.lightingOk === true ? 'pass' : (b.lightingOk === false ? 'fail' : 'unknown'),
-      b.lightingOk === false ? 'INSUFFICIENT_LIGHT' : null);
+    add(
+      'person_region',
+      b.personDetected === true ? 'pass' : b.personDetected === false ? 'fail' : 'unknown',
+      b.personDetected === false ? 'PERSON_NOT_DETECTED' : null,
+    );
+    add(
+      'ball_detection',
+      b.ballDetected === true ? 'pass' : b.ballDetected === false ? 'fail' : 'unknown',
+      b.ballDetected === false ? 'BALL_NOT_DETECTED' : null,
+    );
+    add(
+      'lighting',
+      b.lightingOk === true ? 'pass' : b.lightingOk === false ? 'fail' : 'unknown',
+      b.lightingOk === false ? 'INSUFFICIENT_LIGHT' : null,
+    );
 
     const protocolId = String(b.protocolId ?? '');
     const supported = !!CANDIDATE_PROTOCOLS[protocolId];
@@ -345,5 +377,4 @@ export function registerProductionCvRoutes(ctx) {
       note: 'Structured diagnostics only. ScoutBox never retains frames, so there is nothing to view. Observed counts cannot be edited.',
     });
   });
-
 }

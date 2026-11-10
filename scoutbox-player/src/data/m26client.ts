@@ -24,7 +24,13 @@ export interface TxParty {
   confirmedAt: number | null;
   confirmedByKind: string | null;
 }
-export interface TxRepresentation { id: string; partyRole: string; status: string; basis: string; scope: string[] }
+export interface TxRepresentation {
+  id: string;
+  partyRole: string;
+  status: string;
+  basis: string;
+  scope: string[];
+}
 export interface TxCompliance {
   outcome: string | null;
   pendingReason: string | null;
@@ -35,9 +41,34 @@ export interface TxCompliance {
   staleness: string | null;
   honest: string;
 }
-export interface TxConsent { id: string | null; kind: string; partyRole: string | null; status: string; mine: boolean; requestedAt: number | null; grantedAt: number | null; revokedAt: number | null }
-export interface TxDocument { id: string; documentType: string; visibility: string; version: number; label: string; uploadedAt: number; actor: { kind: string; label: string } | null; downloadable: boolean }
-export interface TxTimelineEntry { id: string; at: number; action: string; audience: string; actor: { kind: string; label: string } | null; detail: Record<string, unknown> | null }
+export interface TxConsent {
+  id: string | null;
+  kind: string;
+  partyRole: string | null;
+  status: string;
+  mine: boolean;
+  requestedAt: number | null;
+  grantedAt: number | null;
+  revokedAt: number | null;
+}
+export interface TxDocument {
+  id: string;
+  documentType: string;
+  visibility: string;
+  version: number;
+  label: string;
+  uploadedAt: number;
+  actor: { kind: string; label: string } | null;
+  downloadable: boolean;
+}
+export interface TxTimelineEntry {
+  id: string;
+  at: number;
+  action: string;
+  audience: string;
+  actor: { kind: string; label: string } | null;
+  detail: Record<string, unknown> | null;
+}
 
 export interface PlayerTransaction {
   id: string;
@@ -69,7 +100,12 @@ export interface PlayerM26 {
 const live: PlayerM26 = {
   list: (pid) => req('/player/transactions', pid),
   confirm: async (pid, id, input) =>
-    (await req<{ transaction: PlayerTransaction }>(`/player/transactions/${encodeURIComponent(id)}/confirm`, pid, { method: 'POST', body: JSON.stringify(input) })).transaction,
+    (
+      await req<{ transaction: PlayerTransaction }>(`/player/transactions/${encodeURIComponent(id)}/confirm`, pid, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      })
+    ).transaction,
   timeline: (pid, id) => req(`/player/transactions/${encodeURIComponent(id)}/timeline`, pid),
 };
 

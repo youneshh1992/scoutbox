@@ -12,11 +12,11 @@ const EVAL_PATH = path.join(HERE, 'evaluation.json');
 
 /** Fixed before the evaluation was run, not softened after. The last one decides enablement and is not a number. */
 export const ACCEPTANCE_CRITERIA = Object.freeze({
-  maxFalseVerifications: 0,          // any is a P0.
-  maxNondeterministic: 0,            // the same fixture must answer the same way.
-  maxMeanAbsCountError: 1.0,         // on fixtures that should be accepted.
-  maxAbsCountError: 2,               // no single fixture may be wilder than this.
-  minCorrectVerdictRate: 1.0,        // every fixture must land on its declared truth.
+  maxFalseVerifications: 0, // any is a P0.
+  maxNondeterministic: 0, // the same fixture must answer the same way.
+  maxMeanAbsCountError: 1.0, // on fixtures that should be accepted.
+  maxAbsCountError: 2, // no single fixture may be wilder than this.
+  minCorrectVerdictRate: 1.0, // every fixture must land on its declared truth.
   // A counting claim about real football needs evidence from real football.
   requiresRealWorldValidation: true,
 });
@@ -41,7 +41,9 @@ export function evaluateGate(report) {
     failures.push(`evaluation was produced by engine v${report.engineVersion}, this build is v${CV_ENGINE_VERSION}`);
   }
   if (report.policyVersion !== BOX_CAM_CV_POLICY_VERSION) {
-    failures.push(`evaluation was produced under policy v${report.policyVersion}, this build is v${BOX_CAM_CV_POLICY_VERSION}`);
+    failures.push(
+      `evaluation was produced under policy v${report.policyVersion}, this build is v${BOX_CAM_CV_POLICY_VERSION}`,
+    );
   }
   if ((report.falseVerifications ?? Infinity) > ACCEPTANCE_CRITERIA.maxFalseVerifications) {
     failures.push(`${report.falseVerifications} false verification(s) in the adversarial fixture set`);
@@ -50,14 +52,20 @@ export function evaluateGate(report) {
     failures.push(`${report.nondeterministic} fixture(s) produced nondeterministic output`);
   }
   if (report.meanAbsCountError == null || report.meanAbsCountError > ACCEPTANCE_CRITERIA.maxMeanAbsCountError) {
-    failures.push(`mean absolute count error ${report.meanAbsCountError ?? 'n/a'} exceeds ${ACCEPTANCE_CRITERIA.maxMeanAbsCountError}`);
+    failures.push(
+      `mean absolute count error ${report.meanAbsCountError ?? 'n/a'} exceeds ${ACCEPTANCE_CRITERIA.maxMeanAbsCountError}`,
+    );
   }
   if (report.maxAbsCountError == null || report.maxAbsCountError > ACCEPTANCE_CRITERIA.maxAbsCountError) {
-    failures.push(`worst-case count error ${report.maxAbsCountError ?? 'n/a'} exceeds ${ACCEPTANCE_CRITERIA.maxAbsCountError}`);
+    failures.push(
+      `worst-case count error ${report.maxAbsCountError ?? 'n/a'} exceeds ${ACCEPTANCE_CRITERIA.maxAbsCountError}`,
+    );
   }
   const rate = report.fixtureCount ? (report.correct ?? 0) / report.fixtureCount : 0;
   if (rate < ACCEPTANCE_CRITERIA.minCorrectVerdictRate) {
-    failures.push(`correct-verdict rate ${(rate * 100).toFixed(1)}% is below ${(ACCEPTANCE_CRITERIA.minCorrectVerdictRate * 100).toFixed(0)}%`);
+    failures.push(
+      `correct-verdict rate ${(rate * 100).toFixed(1)}% is below ${(ACCEPTANCE_CRITERIA.minCorrectVerdictRate * 100).toFixed(0)}%`,
+    );
   }
   // Real-world validation isn't checked here, so a synthetic artefact can't assert its own real-world validity. It is
   // checked in `protocolProductionEnabled()` against validation.mjs.
@@ -65,14 +73,17 @@ export function evaluateGate(report) {
 }
 
 /** Every clause must hold, and each failing one is named. */
-export function protocolProductionEnabled(protocolId, {
-  providerConfigured = false,
-  providerHealth = 'not_configured',
-  providerCapabilities = [],
-  environmentAllows = true,
-  evaluation = null,
-  providerVersion = null,
-} = {}) {
+export function protocolProductionEnabled(
+  protocolId,
+  {
+    providerConfigured = false,
+    providerHealth = 'not_configured',
+    providerCapabilities = [],
+    environmentAllows = true,
+    evaluation = null,
+    providerVersion = null,
+  } = {},
+) {
   const reasons = [];
   const candidate = CANDIDATE_PROTOCOLS[protocolId] ?? null;
 

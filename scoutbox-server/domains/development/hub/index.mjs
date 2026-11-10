@@ -10,19 +10,52 @@
  * the existing record rather than using an idempotency key store.
  */
 import {
-  DEVELOPMENT_POLICY_VERSION, DEVELOPMENT_PRINCIPLE, ACHIEVED_MEANING,
-  PLAN_OWNER_KINDS, PLAN_VISIBILITY, VISIBILITY_BY_OWNER, PLAN_STATUSES, PLAN_TRANSITIONS,
-  GOAL_CATEGORIES, GOAL_CATEGORY_LABELS, GOAL_STATUSES, GOAL_TRANSITIONS, BLOCK_REASONS,
-  ACTION_TYPES, ACTION_STATUSES, ACTION_TRANSITIONS,
-  EVIDENCE_SOURCES, EVIDENCE_SOURCE_LABELS, REVIEWER_KINDS, REVIEWER_KIND_LABELS, SHARE_SCOPES,
-  DEVELOPMENT_HUB_LIMITS, GOAL_LIBRARY, GOAL_LIBRARY_NOTE, PLAN_TEMPLATES, TEMPLATE_NOTE,
-  FORBIDDEN_DEVELOPMENT_NAMES, assertDevelopmentVocabulary, refusedClientFields,
-  boundedText, parseDate, transitionAllowed, dueState, reviewDueState,
+  DEVELOPMENT_POLICY_VERSION,
+  DEVELOPMENT_PRINCIPLE,
+  ACHIEVED_MEANING,
+  PLAN_OWNER_KINDS,
+  PLAN_VISIBILITY,
+  VISIBILITY_BY_OWNER,
+  PLAN_STATUSES,
+  PLAN_TRANSITIONS,
+  GOAL_CATEGORIES,
+  GOAL_CATEGORY_LABELS,
+  GOAL_STATUSES,
+  GOAL_TRANSITIONS,
+  BLOCK_REASONS,
+  ACTION_TYPES,
+  ACTION_STATUSES,
+  ACTION_TRANSITIONS,
+  EVIDENCE_SOURCES,
+  EVIDENCE_SOURCE_LABELS,
+  REVIEWER_KINDS,
+  REVIEWER_KIND_LABELS,
+  SHARE_SCOPES,
+  DEVELOPMENT_HUB_LIMITS,
+  GOAL_LIBRARY,
+  GOAL_LIBRARY_NOTE,
+  PLAN_TEMPLATES,
+  TEMPLATE_NOTE,
+  FORBIDDEN_DEVELOPMENT_NAMES,
+  assertDevelopmentVocabulary,
+  refusedClientFields,
+  boundedText,
+  parseDate,
+  transitionAllowed,
+  dueState,
+  reviewDueState,
 } from './shared.mjs';
 import { TARGET_SOURCES, TARGET_OPERATORS, TARGET_STATES, TARGET_LIMITATION, validateTarget } from './targets.mjs';
 import { validateEvidenceLink, resolveEvidenceLink, EVIDENCE_LINK_FIELDS } from './evidence.mjs';
 import { viewerFor, planAccess, canAssign, VIEWER_KINDS, CAPABILITIES } from './permissions.mjs';
-import { collectPlan, buildDevelopmentPlan, planListItem, buildTimeline, TIMELINE_ACTIONS, PLAN_LIMITATION } from './plan.mjs';
+import {
+  collectPlan,
+  buildDevelopmentPlan,
+  planListItem,
+  buildTimeline,
+  TIMELINE_ACTIONS,
+  PLAN_LIMITATION,
+} from './plan.mjs';
 import { buildGoalSnapshots, validateReview, validateSupersession, pageReviews } from './reviews.mjs';
 import { guardRev, bumpRev } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
@@ -34,21 +67,40 @@ import { now } from '../../platform/clock.mjs';
 const IDEMPOTENCY_WINDOW_MS = 60_000;
 
 export const DEVELOPMENT_HUB_STORES = Object.freeze([
-  'developmentPlans', 'developmentGoals', 'developmentActions',
-  'developmentEvidenceLinks', 'developmentReviews',
+  'developmentPlans',
+  'developmentGoals',
+  'developmentActions',
+  'developmentEvidenceLinks',
+  'developmentReviews',
 ]);
 
 export function registerDevelopment(ctx) {
   const {
-    byId, users, nextId, notify, broadcast, findPlayer, orgCanSee, isLead,
-    orgRouter, playerRouter, guardianRouter, audit, isAdult, unit,
-    recruitmentReads, scoutingReads,
-    development, developmentReads,
+    byId,
+    users,
+    nextId,
+    notify,
+    broadcast,
+    findPlayer,
+    orgCanSee,
+    isLead,
+    orgRouter,
+    playerRouter,
+    guardianRouter,
+    audit,
+    isAdult,
+    unit,
+    recruitmentReads,
+    scoutingReads,
+    development,
+    developmentReads,
     boxCamReads, // Box Cam sessions and Combine attempts: linkable evidence and target states
   } = ctx;
   const reads = { ...recruitmentReads, ...scoutingReads, development: developmentReads, boxCam: boxCamReads };
-  if (typeof reads?.trials?.byId !== 'function') throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
-  if (typeof development?.plans?.create !== 'function' || !developmentReads) throw new TypeError('registerDevelopment needs the development repository from the data layer');
+  if (typeof reads?.trials?.byId !== 'function')
+    throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
+  if (typeof development?.plans?.create !== 'function' || !developmentReads)
+    throw new TypeError('registerDevelopment needs the development repository from the data layer');
   /** Stored records are read-only; a route edits a copy and writes it whole. */
   const copy = (r) => structuredClone(r);
 
@@ -63,7 +115,9 @@ export function registerDevelopment(ctx) {
     development_idempotent_retries: 0,
     policyVersion: DEVELOPMENT_POLICY_VERSION,
   };
-  const vmetric = (k, n = 1) => { metrics.development[k] = (metrics.development[k] ?? 0) + n; };
+  const vmetric = (k, n = 1) => {
+    metrics.development[k] = (metrics.development[k] ?? 0) + n;
+  };
 
   const limited = limitCheck(ctx.rateLimit);
 
@@ -91,9 +145,12 @@ export function registerDevelopment(ctx) {
     send({ orgId, ...payload });
   };
 
-  const audienceOrgs = (plan) => (plan.owner.kind === 'org'
-    ? [plan.owner.orgId]
-    : (plan.visibility === 'shared_with_org' ? (plan.sharedWithOrgIds ?? []) : []));
+  const audienceOrgs = (plan) =>
+    plan.owner.kind === 'org'
+      ? [plan.owner.orgId]
+      : plan.visibility === 'shared_with_org'
+        ? (plan.sharedWithOrgIds ?? [])
+        : [];
 
   const emitAll = (event, plan, payload) => {
     for (const orgId of audienceOrgs(plan)) emit(event, orgId, { planId: plan.id, ...payload });
@@ -114,9 +171,12 @@ export function registerDevelopment(ctx) {
 
   const actorOf = (viewer, req) => {
     switch (viewer.kind) {
-      case 'player_self': return { kind: 'player', id: req.player.id, name: req.player.name };
-      case 'guardian': return { kind: 'guardian', id: req.guardian.id, name: req.guardian.name ?? null };
-      default: return { kind: 'org', id: req.orgUser.id, name: req.orgUser.name };
+      case 'player_self':
+        return { kind: 'player', id: req.player.id, name: req.player.name };
+      case 'guardian':
+        return { kind: 'guardian', id: req.guardian.id, name: req.guardian.name ?? null };
+      default:
+        return { kind: 'org', id: req.orgUser.id, name: req.orgUser.name };
     }
   };
 
@@ -161,17 +221,27 @@ export function registerDevelopment(ctx) {
     return false;
   };
 
-  const project = (bundle, viewer) => buildDevelopmentPlan({
-    reads, planId: bundle.plan.id, player: bundle.player, viewer, access: bundle.access,
-    orgCanSee, now: now(), collected: bundle,
-  });
+  const project = (bundle, viewer) =>
+    buildDevelopmentPlan({
+      reads,
+      planId: bundle.plan.id,
+      player: bundle.player,
+      viewer,
+      access: bundle.access,
+      orgCanSee,
+      now: now(),
+      collected: bundle,
+    });
 
   const touch = (plan, actor) => {
     plan.updatedAt = now();
     bumpRev(plan, { by: { id: actor.id, name: actor.name } });
   };
   /** Called inside the route's unit. */
-  const touchPlan = (planId, actor) => development.plans.update(planId, (d) => { touch(d, actor); });
+  const touchPlan = (planId, actor) =>
+    development.plans.update(planId, (d) => {
+      touch(d, actor);
+    });
 
   // ------------------------------------------------------------- catalogue
 
@@ -180,21 +250,41 @@ export function registerDevelopment(ctx) {
     policyVersion: DEVELOPMENT_POLICY_VERSION,
     principle: DEVELOPMENT_PRINCIPLE,
     limitation: PLAN_LIMITATION,
-    plan: { ownerKinds: PLAN_OWNER_KINDS, visibility: PLAN_VISIBILITY, visibilityByOwner: VISIBILITY_BY_OWNER, statuses: PLAN_STATUSES, transitions: PLAN_TRANSITIONS },
+    plan: {
+      ownerKinds: PLAN_OWNER_KINDS,
+      visibility: PLAN_VISIBILITY,
+      visibilityByOwner: VISIBILITY_BY_OWNER,
+      statuses: PLAN_STATUSES,
+      transitions: PLAN_TRANSITIONS,
+    },
     goal: {
-      categories: GOAL_CATEGORIES, categoryLabels: GOAL_CATEGORY_LABELS,
-      statuses: GOAL_STATUSES, transitions: GOAL_TRANSITIONS,
-      blockReasons: BLOCK_REASONS, achievedMeaning: ACHIEVED_MEANING,
+      categories: GOAL_CATEGORIES,
+      categoryLabels: GOAL_CATEGORY_LABELS,
+      statuses: GOAL_STATUSES,
+      transitions: GOAL_TRANSITIONS,
+      blockReasons: BLOCK_REASONS,
+      achievedMeaning: ACHIEVED_MEANING,
       omitted: {
         categories: ['availability_rehabilitation'],
         blockReasons: ['injury_or_unavailable'],
-        reason: 'ScoutBox has no safe vocabulary, consent model or retention rule for health information, so it does not offer a structured field that invites one. A blocked goal can say “other” in the author’s own words.',
+        reason:
+          'ScoutBox has no safe vocabulary, consent model or retention rule for health information, so it does not offer a structured field that invites one. A blocked goal can say “other” in the author’s own words.',
       },
     },
     action: { types: ACTION_TYPES, statuses: ACTION_STATUSES, transitions: ACTION_TRANSITIONS },
     evidence: { sources: EVIDENCE_SOURCES, sourceLabels: EVIDENCE_SOURCE_LABELS },
-    target: { sources: TARGET_SOURCES, operators: TARGET_OPERATORS, states: TARGET_STATES, limitation: TARGET_LIMITATION },
-    review: { reviewerKinds: REVIEWER_KINDS, reviewerKindLabels: REVIEWER_KIND_LABELS, shareScopes: SHARE_SCOPES, appendOnly: true },
+    target: {
+      sources: TARGET_SOURCES,
+      operators: TARGET_OPERATORS,
+      states: TARGET_STATES,
+      limitation: TARGET_LIMITATION,
+    },
+    review: {
+      reviewerKinds: REVIEWER_KINDS,
+      reviewerKindLabels: REVIEWER_KIND_LABELS,
+      shareScopes: SHARE_SCOPES,
+      appendOnly: true,
+    },
     timeline: { actions: Object.keys(TIMELINE_ACTIONS) },
     goalLibrary: { items: GOAL_LIBRARY, note: GOAL_LIBRARY_NOTE },
     templates: { items: PLAN_TEMPLATES, note: TEMPLATE_NOTE },
@@ -223,10 +313,13 @@ export function registerDevelopment(ctx) {
     const visibility = body?.visibility ?? existing?.visibility ?? allowed[0];
     if (!allowed.includes(visibility)) {
       return {
-        error: 'PLAN_VISIBILITY_INVALID', allowed, received: visibility,
-        detail: ownerKind === 'org'
-          ? 'A club plan is either kept inside the club or made visible to the player. It cannot be shared with another club.'
-          : 'A player’s plan is private, visible to the guardian, or shared with named clubs. It cannot be marked club-private.',
+        error: 'PLAN_VISIBILITY_INVALID',
+        allowed,
+        received: visibility,
+        detail:
+          ownerKind === 'org'
+            ? 'A club plan is either kept inside the club or made visible to the player. It cannot be shared with another club.'
+            : 'A player’s plan is private, visible to the guardian, or shared with named clubs. It cannot be marked club-private.',
       };
     }
 
@@ -246,11 +339,24 @@ export function registerDevelopment(ctx) {
 
     let templateId = body?.templateId ?? existing?.templateId ?? null;
     if (templateId != null && !PLAN_TEMPLATES.some((t) => t.id === templateId)) {
-      return { error: 'TEMPLATE_UNKNOWN', allowed: PLAN_TEMPLATES.map((t) => t.id), detail: `Unknown template "${templateId}".` };
+      return {
+        error: 'TEMPLATE_UNKNOWN',
+        allowed: PLAN_TEMPLATES.map((t) => t.id),
+        detail: `Unknown template "${templateId}".`,
+      };
     }
 
     // An emptied start keeps the stored one; a new plan starts at creation.
-    return { value: { title: title.value, visibility, startDate: start.value ?? existing?.startDate ?? null, nextReviewAt: nextReview.value, endDate: end.value, templateId } };
+    return {
+      value: {
+        title: title.value,
+        visibility,
+        startDate: start.value ?? existing?.startDate ?? null,
+        nextReviewAt: nextReview.value,
+        endDate: end.value,
+        templateId,
+      },
+    };
   }
 
   function validateGoalBody(body, { existing = null }) {
@@ -258,12 +364,19 @@ export function registerDevelopment(ctx) {
     if (title.error) return title;
     if (!title.value) return { error: 'TITLE_REQUIRED', detail: 'A development goal needs a title.' };
 
-    const description = boundedText(body?.description ?? existing?.description, DEVELOPMENT_HUB_LIMITS.descriptionMax, { field: 'description' });
+    const description = boundedText(body?.description ?? existing?.description, DEVELOPMENT_HUB_LIMITS.descriptionMax, {
+      field: 'description',
+    });
     if (description.error) return description;
 
     const category = body?.category ?? existing?.category;
     if (!GOAL_CATEGORIES.includes(category)) {
-      return { error: 'GOAL_CATEGORY_UNKNOWN', allowed: GOAL_CATEGORIES, received: category ?? null, detail: `Unknown goal category "${category ?? ''}".` };
+      return {
+        error: 'GOAL_CATEGORY_UNKNOWN',
+        allowed: GOAL_CATEGORIES,
+        received: category ?? null,
+        detail: `Unknown goal category "${category ?? ''}".`,
+      };
     }
 
     const targetDate = parseDate(body?.targetDate ?? existing?.targetDate, { field: 'targetDate' });
@@ -276,7 +389,9 @@ export function registerDevelopment(ctx) {
       target = t.value;
     }
 
-    return { value: { title: title.value, description: description.value, category, targetDate: targetDate.value, target } };
+    return {
+      value: { title: title.value, description: description.value, category, targetDate: targetDate.value, target },
+    };
   }
 
   function validateActionBody(body, { plan, player, existing = null }) {
@@ -286,7 +401,12 @@ export function registerDevelopment(ctx) {
 
     const type = body?.type ?? existing?.type;
     if (!ACTION_TYPES.includes(type)) {
-      return { error: 'ACTION_TYPE_UNKNOWN', allowed: ACTION_TYPES, received: type ?? null, detail: `Unknown action type "${type ?? ''}".` };
+      return {
+        error: 'ACTION_TYPE_UNKNOWN',
+        allowed: ACTION_TYPES,
+        received: type ?? null,
+        detail: `Unknown action type "${type ?? ''}".`,
+      };
     }
 
     const dueAt = parseDate(body?.dueAt ?? existing?.dueAt, { field: 'dueAt' });
@@ -297,7 +417,13 @@ export function registerDevelopment(ctx) {
 
     let assignee = existing?.assignee ?? null;
     if (Object.prototype.hasOwnProperty.call(body ?? {}, 'assignee')) {
-      const a = canAssign({ assignee: body.assignee, plan, player, guardianById: (id) => byId.guardian(id), staffById: (id) => byId.user(id) });
+      const a = canAssign({
+        assignee: body.assignee,
+        plan,
+        player,
+        guardianById: (id) => byId.guardian(id),
+        staffById: (id) => byId.user(id),
+      });
       if (a.error) return a;
       assignee = a.value;
     }
@@ -320,30 +446,47 @@ export function registerDevelopment(ctx) {
       if (!player) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
       const subject = { ...player, isMinor: !isAdult(player) };
 
-      const canSee = viewer.kind === 'player_self' ? viewer.playerId === player.id
-        : viewer.kind === 'guardian' ? (viewer.childIds ?? []).includes(player.id)
-          : !!viewer.org && orgCanSee(viewer.org, player);
+      const canSee =
+        viewer.kind === 'player_self'
+          ? viewer.playerId === player.id
+          : viewer.kind === 'guardian'
+            ? (viewer.childIds ?? []).includes(player.id)
+            : !!viewer.org && orgCanSee(viewer.org, player);
       if (!canSee) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
 
       const candidates = [
-        ...(reads.evidence?.forPlayer(player.id) ?? []).map((e) => ({ sourceType: 'passport_evidence', sourceId: e.id })),
+        ...(reads.evidence?.forPlayer(player.id) ?? []).map((e) => ({
+          sourceType: 'passport_evidence',
+          sourceId: e.id,
+        })),
         ...(reads.assessments?.forPlayer(player.id) ?? []).map((a) => ({ sourceType: 'assessment', sourceId: a.id })),
         ...boxCamReads.sessions.forPlayer(player.id).map((s) => ({ sourceType: 'box_cam_session', sourceId: s.id })),
-        ...[...boxCamReads.attempts.forPlayer(player.id)].reverse().map((a) => ({ sourceType: 'combine_attempt', sourceId: a.id })),
+        ...[...boxCamReads.attempts.forPlayer(player.id)]
+          .reverse()
+          .map((a) => ({ sourceType: 'combine_attempt', sourceId: a.id })),
         ...reads.trials.forPlayer(player.id).map((t) => ({ sourceType: 'trial_report', sourceId: t.id })),
       ];
       const items = candidates
-        .map((c) => ({ ...c, ...validateEvidenceLink({ ...c, reads, player: subject, viewer, orgCanSee, now: now() }) }))
+        .map((c) => ({
+          ...c,
+          ...validateEvidenceLink({ ...c, reads, player: subject, viewer, orgCanSee, now: now() }),
+        }))
         .filter((c) => !c.error)
         .map((c) => {
           const r = resolveEvidenceLink(c, { reads, player: subject, viewer, orgCanSee, now: now() });
           return {
-            sourceType: c.sourceType, sourceId: c.sourceId,
-            sourceLabel: r.sourceLabel, title: r.title ?? r.sourceLabel,
-            provenance: r.provenance, occurredAt: r.occurredAt, simulated: r.simulated,
+            sourceType: c.sourceType,
+            sourceId: c.sourceId,
+            sourceLabel: r.sourceLabel,
+            title: r.title ?? r.sourceLabel,
+            provenance: r.provenance,
+            occurredAt: r.occurredAt,
+            simulated: r.simulated,
           };
         })
-        .sort((a, b) => (b.occurredAt ?? 0) - (a.occurredAt ?? 0) || String(a.sourceId).localeCompare(String(b.sourceId)))
+        .sort(
+          (a, b) => (b.occurredAt ?? 0) - (a.occurredAt ?? 0) || String(a.sourceId).localeCompare(String(b.sourceId)),
+        )
         .slice(0, DEVELOPMENT_HUB_LIMITS.listPageMax);
 
       res.set('X-ScoutBox-Ordering', 'newest_first_then_id');
@@ -359,7 +502,11 @@ export function registerDevelopment(ctx) {
     router.get('/development/plans', (req, res) => {
       const viewer = V(req);
       let page;
-      try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
+      try {
+        page = readPage(req.query, ['number', 'string']);
+      } catch (e) {
+        return sendPageError(res, e);
+      }
       const status = req.query.status ? String(req.query.status) : null;
       if (status && !PLAN_STATUSES.includes(status)) {
         return res.status(400).json({ error: 'PLAN_STATUS_UNKNOWN', allowed: PLAN_STATUSES });
@@ -367,8 +514,14 @@ export function registerDevelopment(ctx) {
       const playerFilter = req.query.playerId ? String(req.query.playerId) : null;
       const dev = developmentReads.plans;
       let candidates;
-      if (viewer.kind === 'player_self') candidates = playerFilter && playerFilter !== viewer.playerId ? [] : dev.forPlayers([viewer.playerId], { status });
-      else if (viewer.kind === 'guardian') candidates = dev.forPlayers((viewer.childIds ?? []).filter((id) => !playerFilter || id === playerFilter), { status });
+      if (viewer.kind === 'player_self')
+        candidates =
+          playerFilter && playerFilter !== viewer.playerId ? [] : dev.forPlayers([viewer.playerId], { status });
+      else if (viewer.kind === 'guardian')
+        candidates = dev.forPlayers(
+          (viewer.childIds ?? []).filter((id) => !playerFilter || id === playerFilter),
+          { status },
+        );
       else candidates = dev.forOrg(viewer.org.id, { playerId: playerFilter, status });
 
       const readable = [];
@@ -380,13 +533,21 @@ export function registerDevelopment(ctx) {
       }
       const keyOf = (r) => [r.plan.updatedAt, r.plan.id];
       // Must match the repository's order, which the cursor relies on.
-      const cmpKey = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
+      const cmpKey = (a, b) => b[0] - a[0] || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
       const { items, nextCursor } = pageSorted(readable, page, keyOf, cmpKey);
       const counts = dev.listCounts(items.map((r) => r.plan.id));
       res.set('X-ScoutBox-Ordering', 'recently_updated_then_id');
       res.json({
         total: readable.length,
-        items: items.map(({ plan, subject }) => planListItem({ plan, player: subject, goals: counts.goals.get(plan.id), actions: counts.actions.get(plan.id), now: now() })),
+        items: items.map(({ plan, subject }) =>
+          planListItem({
+            plan,
+            player: subject,
+            goals: counts.goals.get(plan.id),
+            actions: counts.actions.get(plan.id),
+            now: now(),
+          }),
+        ),
         nextCursor,
         note: 'Plans you can see. ScoutBox does not report how many other plans exist.',
       });
@@ -396,7 +557,8 @@ export function registerDevelopment(ctx) {
     router.post('/development/plans', (req, res) => {
       if (refuseDerived(req, res)) return;
       const viewer = V(req);
-      if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
+      if (limited('development_plan_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_plan_write'));
 
       const subject = subjectFor(req, res);
       if (!subject) return undefined;
@@ -413,7 +575,10 @@ export function registerDevelopment(ctx) {
         return res.status(400).json({ error: 'PLAN_STATUS_UNKNOWN', allowed: ['draft', 'active'] });
       }
       if (wantsActive && !goalBodies.length) {
-        return res.status(400).json({ error: 'ACTIVE_PLAN_NEEDS_A_GOAL', detail: 'An active plan needs at least one goal. Save it as a draft if you are not ready.' });
+        return res.status(400).json({
+          error: 'ACTIVE_PLAN_NEEDS_A_GOAL',
+          detail: 'An active plan needs at least one goal. Save it as a draft if you are not ready.',
+        });
       }
       if (goalBodies.length > DEVELOPMENT_HUB_LIMITS.goalsPerPlan) {
         return res.status(400).json({ error: 'TOO_MANY_GOALS', max: DEVELOPMENT_HUB_LIMITS.goalsPerPlan });
@@ -422,13 +587,22 @@ export function registerDevelopment(ctx) {
       const ownerOrgId = ownerKind === 'org' ? req.org.id : null;
       const activeCount = developmentReads.plans.openCount(player.id, ownerKind, ownerOrgId);
       if (activeCount >= DEVELOPMENT_HUB_LIMITS.activePlansPerOwner) {
-        return res.status(400).json({ error: 'TOO_MANY_ACTIVE_PLANS', max: DEVELOPMENT_HUB_LIMITS.activePlansPerOwner, detail: 'Complete or archive an existing plan first.' });
+        return res.status(400).json({
+          error: 'TOO_MANY_ACTIVE_PLANS',
+          max: DEVELOPMENT_HUB_LIMITS.activePlansPerOwner,
+          detail: 'Complete or archive an existing plan first.',
+        });
       }
 
       const actor = actorOf(viewer, req);
       const at = now();
       const dup = developmentReads.plans.recentCreate({
-        playerId: player.id, title: parsed.value.title, createdById: actor.id, ownerKind, ownerOrgId, since: at - IDEMPOTENCY_WINDOW_MS,
+        playerId: player.id,
+        title: parsed.value.title,
+        createdById: actor.id,
+        ownerKind,
+        ownerOrgId,
+        since: at - IDEMPOTENCY_WINDOW_MS,
       });
       if (dup) {
         vmetric('development_idempotent_retries');
@@ -459,9 +633,13 @@ export function registerDevelopment(ctx) {
         templateId: parsed.value.templateId,
         // Records where the idea came from; the objective itself is untouched.
         originObjectiveId: originObjectiveFor(req.body?.originObjectiveId, player, res),
-        createdAt: at, updatedAt: at,
-        rev: 1, revAt: at, revBy: { userId: actor.id, name: actor.name },
-        completedAt: null, archivedAt: null,
+        createdAt: at,
+        updatedAt: at,
+        rev: 1,
+        revAt: at,
+        revBy: { userId: actor.id, name: actor.name },
+        completedAt: null,
+        archivedAt: null,
         history: [],
       };
       if (plan.originObjectiveId === false) return undefined; // already answered
@@ -500,9 +678,20 @@ export function registerDevelopment(ctx) {
       const { access } = bundle;
       const plan = copy(bundle.plan);
       if (!requireCap(res, access, 'manage', 'You cannot change this plan.')) return undefined;
-      if (plan.status === 'archived') return res.status(409).json({ error: 'PLAN_ARCHIVED', detail: 'An archived plan is a historical record and cannot be changed. Its history is preserved.' });
-      if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
-      if (!guardRev(req, res, plan, { errorCode: 'DEVELOPMENT_PLAN_VERSION_CONFLICT', current: { planId: plan.id, status: plan.status } })) return undefined;
+      if (plan.status === 'archived')
+        return res.status(409).json({
+          error: 'PLAN_ARCHIVED',
+          detail: 'An archived plan is a historical record and cannot be changed. Its history is preserved.',
+        });
+      if (limited('development_plan_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_plan_write'));
+      if (
+        !guardRev(req, res, plan, {
+          errorCode: 'DEVELOPMENT_PLAN_VERSION_CONFLICT',
+          current: { planId: plan.id, status: plan.status },
+        })
+      )
+        return undefined;
 
       const parsed = validatePlanBody(req.body, { ownerKind: plan.owner.kind, existing: plan });
       if (parsed.error) return res.status(400).json(parsed);
@@ -514,7 +703,11 @@ export function registerDevelopment(ctx) {
       if (visibilityChanged) {
         writeHistory(plan, actor, 'plan_visibility_changed', { to: plan.visibility });
         // Narrowing a player-owned plan's visibility withdraws every share.
-        if (plan.owner.kind === 'player' && plan.visibility !== 'shared_with_org' && (plan.sharedWithOrgIds ?? []).length) {
+        if (
+          plan.owner.kind === 'player' &&
+          plan.visibility !== 'shared_with_org' &&
+          (plan.sharedWithOrgIds ?? []).length
+        ) {
           withdrawn.push(...plan.sharedWithOrgIds);
           plan.sharedWithOrgIds = [];
           writeHistory(plan, actor, 'plan_unshared');
@@ -538,28 +731,45 @@ export function registerDevelopment(ctx) {
       const { goals, access } = bundle;
       const plan = copy(bundle.plan);
       if (!requireCap(res, access, 'manage', 'You cannot change this plan’s status.')) return undefined;
-      if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
+      if (limited('development_plan_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_plan_write'));
 
       const to = String(req.body?.status ?? '');
-      if (!PLAN_STATUSES.includes(to)) return res.status(400).json({ error: 'PLAN_STATUS_UNKNOWN', allowed: PLAN_STATUSES });
+      if (!PLAN_STATUSES.includes(to))
+        return res.status(400).json({ error: 'PLAN_STATUS_UNKNOWN', allowed: PLAN_STATUSES });
       if (!transitionAllowed(PLAN_TRANSITIONS, plan.status, to)) {
         return res.status(409).json({
-          error: 'PLAN_TRANSITION_INVALID', from: plan.status, to,
+          error: 'PLAN_TRANSITION_INVALID',
+          from: plan.status,
+          to,
           allowed: PLAN_TRANSITIONS[plan.status],
           detail: `A ${plan.status} plan cannot become ${to}.`,
         });
       }
       if (to === 'active' && !goals.length) {
-        return res.status(400).json({ error: 'ACTIVE_PLAN_NEEDS_A_GOAL', detail: 'An active plan needs at least one goal.' });
+        return res
+          .status(400)
+          .json({ error: 'ACTIVE_PLAN_NEEDS_A_GOAL', detail: 'An active plan needs at least one goal.' });
       }
-      if (!guardRev(req, res, plan, { errorCode: 'DEVELOPMENT_PLAN_VERSION_CONFLICT', current: { planId: plan.id, status: plan.status } })) return undefined;
+      if (
+        !guardRev(req, res, plan, {
+          errorCode: 'DEVELOPMENT_PLAN_VERSION_CONFLICT',
+          current: { planId: plan.id, status: plan.status },
+        })
+      )
+        return undefined;
 
       const actor = actorOf(viewer, req);
       const from = plan.status;
       plan.status = to;
       if (to === 'completed') plan.completedAt = now();
       if (to === 'archived') plan.archivedAt = now();
-      const ACTION_BY_STATUS = { active: 'plan_activated', paused: 'plan_paused', completed: 'plan_completed', archived: 'plan_archived' };
+      const ACTION_BY_STATUS = {
+        active: 'plan_activated',
+        paused: 'plan_paused',
+        completed: 'plan_completed',
+        archived: 'plan_archived',
+      };
       writeHistory(plan, actor, ACTION_BY_STATUS[to] ?? 'plan_updated', { from, to });
       touch(plan, actor);
       unit(() => {
@@ -579,17 +789,28 @@ export function registerDevelopment(ctx) {
       const plan = copy(bundle.plan);
       if (!requireCap(res, access, 'manage', 'You cannot change who this plan is shared with.')) return undefined;
       if (plan.owner.kind !== 'player') {
-        return res.status(400).json({ error: 'SHARE_NOT_APPLICABLE', detail: 'A club plan is shared with the player by changing its visibility, not by sharing it with another club.' });
+        return res.status(400).json({
+          error: 'SHARE_NOT_APPLICABLE',
+          detail:
+            'A club plan is shared with the player by changing its visibility, not by sharing it with another club.',
+        });
       }
-      if (limited('development_plan_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_plan_write'));
+      if (limited('development_plan_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_plan_write'));
 
       const orgId = req.body?.orgId;
-      if (typeof orgId !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'orgId', message: 'orgId names the organisation, as text.' });
-      if (req.body?.revoke !== undefined && typeof req.body.revoke !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'revoke', message: 'revoke is true or false.' });
+      if (typeof orgId !== 'string')
+        return res
+          .status(400)
+          .json({ error: 'FIELD_INVALID', field: 'orgId', message: 'orgId names the organisation, as text.' });
+      if (req.body?.revoke !== undefined && typeof req.body.revoke !== 'boolean')
+        return res.status(400).json({ error: 'FIELD_INVALID', field: 'revoke', message: 'revoke is true or false.' });
       const org = byId.org(orgId);
       // Sharing with a club that cannot see the player would grant access the visibility rules deny.
       if (!org || !orgCanSee(org, player)) {
-        return res.status(404).json({ error: 'ORG_NOT_FOUND', detail: 'No such organisation is available to share with.' });
+        return res
+          .status(404)
+          .json({ error: 'ORG_NOT_FOUND', detail: 'No such organisation is available to share with.' });
       }
       const revoke = req.body?.revoke === true;
       const actor = actorOf(viewer, req);
@@ -597,13 +818,17 @@ export function registerDevelopment(ctx) {
       const effects = [];
 
       if (revoke) {
-        if (!plan.sharedWithOrgIds.includes(orgId)) return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
+        if (!plan.sharedWithOrgIds.includes(orgId))
+          return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
         plan.sharedWithOrgIds = plan.sharedWithOrgIds.filter((x) => x !== orgId);
         writeHistory(plan, actor, 'plan_unshared', { kind: 'org' });
         effects.push(() => emit('development_plan_updated', orgId, { planId: plan.id }));
       } else {
         if (plan.visibility !== 'shared_with_org') {
-          return res.status(400).json({ error: 'PLAN_NOT_SHAREABLE', detail: 'Set this plan’s visibility to “shared with clubs” before choosing which clubs can read it.' });
+          return res.status(400).json({
+            error: 'PLAN_NOT_SHAREABLE',
+            detail: 'Set this plan’s visibility to “shared with clubs” before choosing which clubs can read it.',
+          });
         }
         if (plan.sharedWithOrgIds.includes(orgId)) {
           vmetric('development_idempotent_retries');
@@ -631,11 +856,20 @@ export function registerDevelopment(ctx) {
       const { plan, goals, access } = bundle;
       if (!requireCap(res, access, 'writeGoals', 'You cannot add goals to this plan.')) return undefined;
       if (['archived', 'completed'].includes(plan.status)) {
-        return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status, detail: `A ${plan.status} plan cannot take new goals.` });
+        return res.status(409).json({
+          error: 'PLAN_NOT_EDITABLE',
+          status: plan.status,
+          detail: `A ${plan.status} plan cannot take new goals.`,
+        });
       }
-      if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
+      if (limited('development_item_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_item_write'));
       if (goals.length >= DEVELOPMENT_HUB_LIMITS.goalsPerPlan) {
-        return res.status(400).json({ error: 'TOO_MANY_GOALS', max: DEVELOPMENT_HUB_LIMITS.goalsPerPlan, detail: 'A plan with twenty goals is a plan nobody will work through.' });
+        return res.status(400).json({
+          error: 'TOO_MANY_GOALS',
+          max: DEVELOPMENT_HUB_LIMITS.goalsPerPlan,
+          detail: 'A plan with twenty goals is a plan nobody will work through.',
+        });
       }
 
       const parsed = validateGoalBody(req.body, {});
@@ -646,7 +880,9 @@ export function registerDevelopment(ctx) {
       const dup = recentDuplicate(goals, (g) => g.title === parsed.value.title && g.createdBy?.id === actor.id, at);
       if (dup) {
         vmetric('development_idempotent_retries');
-        return res.status(200).json({ ...project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer), idempotent: true });
+        return res
+          .status(200)
+          .json({ ...project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer), idempotent: true });
       }
 
       const origin = originObjectiveFor(req.body?.originObjectiveId, bundle.player, res);
@@ -676,10 +912,17 @@ export function registerDevelopment(ctx) {
       if (['archived', 'completed'].includes(plan.status)) {
         return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
       }
-      if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
+      if (limited('development_item_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_item_write'));
       // The conflict body omits the title: the other person's edit is content,
       // which the caller reloads through its own authorised read.
-      if (!guardRev(req, res, goal, { errorCode: 'DEVELOPMENT_GOAL_VERSION_CONFLICT', current: { goalId: goal.id, status: goal.status } })) return undefined;
+      if (
+        !guardRev(req, res, goal, {
+          errorCode: 'DEVELOPMENT_GOAL_VERSION_CONFLICT',
+          current: { goalId: goal.id, status: goal.status },
+        })
+      )
+        return undefined;
 
       const actor = actorOf(viewer, req);
       const at = now();
@@ -687,19 +930,29 @@ export function registerDevelopment(ctx) {
       let statusChanged = null;
       if (req.body?.status != null && req.body.status !== goal.status) {
         const to = String(req.body.status);
-        if (!GOAL_STATUSES.includes(to)) return res.status(400).json({ error: 'GOAL_STATUS_UNKNOWN', allowed: GOAL_STATUSES });
+        if (!GOAL_STATUSES.includes(to))
+          return res.status(400).json({ error: 'GOAL_STATUS_UNKNOWN', allowed: GOAL_STATUSES });
         if (!transitionAllowed(GOAL_TRANSITIONS, goal.status, to)) {
           return res.status(409).json({
-            error: 'GOAL_TRANSITION_INVALID', from: goal.status, to, allowed: GOAL_TRANSITIONS[goal.status],
-            detail: goal.status === 'not_started' && to === 'achieved'
-              ? 'A goal nobody started cannot have been achieved through this plan. Move it to in progress first.'
-              : `A ${goal.status} goal cannot become ${to}.`,
+            error: 'GOAL_TRANSITION_INVALID',
+            from: goal.status,
+            to,
+            allowed: GOAL_TRANSITIONS[goal.status],
+            detail:
+              goal.status === 'not_started' && to === 'achieved'
+                ? 'A goal nobody started cannot have been achieved through this plan. Move it to in progress first.'
+                : `A ${goal.status} goal cannot become ${to}.`,
           });
         }
         if (to === 'blocked') {
           const reason = String(req.body?.blockReason ?? '');
           if (!BLOCK_REASONS.includes(reason)) {
-            return res.status(400).json({ error: 'BLOCK_REASON_UNKNOWN', allowed: BLOCK_REASONS, detail: 'A blocked goal needs a reason from the list. ScoutBox does not offer a health reason and does not record one.' });
+            return res.status(400).json({
+              error: 'BLOCK_REASON_UNKNOWN',
+              allowed: BLOCK_REASONS,
+              detail:
+                'A blocked goal needs a reason from the list. ScoutBox does not offer a health reason and does not record one.',
+            });
           }
           const note = boundedText(req.body?.blockNote, DEVELOPMENT_HUB_LIMITS.blockNoteMax, { field: 'blockNote' });
           if (note.error) return res.status(400).json(note);
@@ -722,7 +975,8 @@ export function registerDevelopment(ctx) {
       bumpRev(goal, { by: { id: actor.id, name: actor.name }, at });
 
       if (statusChanged) writeHistory(goal, actor, 'goal_status_changed', statusChanged);
-      if (targetChanged && goal.target) writeHistory(goal, actor, 'goal_target_set', { protocolId: goal.target.protocolId });
+      if (targetChanged && goal.target)
+        writeHistory(goal, actor, 'goal_target_set', { protocolId: goal.target.protocolId });
       if (!statusChanged && !targetChanged) writeHistory(goal, actor, 'goal_updated');
 
       unit(() => {
@@ -746,8 +1000,10 @@ export function registerDevelopment(ctx) {
       if (!bundle) return undefined;
       const { plan, actions, access, player } = bundle;
       if (!requireCap(res, access, 'writeGoals', 'You cannot add actions to this plan.')) return undefined;
-      if (['archived', 'completed'].includes(plan.status)) return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
-      if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
+      if (['archived', 'completed'].includes(plan.status))
+        return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
+      if (limited('development_item_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_item_write'));
       const mine = actions.filter((a) => a.goalId === goal.id);
       if (mine.length >= DEVELOPMENT_HUB_LIMITS.actionsPerGoal) {
         return res.status(400).json({ error: 'TOO_MANY_ACTIONS', max: DEVELOPMENT_HUB_LIMITS.actionsPerGoal });
@@ -761,16 +1017,25 @@ export function registerDevelopment(ctx) {
       const dup = recentDuplicate(mine, (a) => a.title === parsed.value.title && a.createdBy?.id === actor.id, at);
       if (dup) {
         vmetric('development_idempotent_retries');
-        return res.status(200).json({ ...project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer), idempotent: true });
+        return res
+          .status(200)
+          .json({ ...project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer), idempotent: true });
       }
 
       const action = {
         id: nextId('devact'),
-        planId: plan.id, goalId: goal.id, playerId: plan.playerId,
-        type: parsed.value.type, title: parsed.value.title,
-        dueAt: parsed.value.dueAt, assignee: parsed.value.assignee,
+        planId: plan.id,
+        goalId: goal.id,
+        playerId: plan.playerId,
+        type: parsed.value.type,
+        title: parsed.value.title,
+        dueAt: parsed.value.dueAt,
+        assignee: parsed.value.assignee,
         status: 'todo',
-        createdBy: actor, createdAt: at, updatedAt: at, completedAt: null,
+        createdBy: actor,
+        createdAt: at,
+        updatedAt: at,
+        completedAt: null,
         history: [],
       };
       writeHistory(action, actor, 'action_created', { kind: action.type });
@@ -790,23 +1055,38 @@ export function registerDevelopment(ctx) {
       const bundle = resolvePlan(req, res, action.planId, viewer);
       if (!bundle) return undefined;
       const { plan, access, player } = bundle;
-      if (['archived', 'completed'].includes(plan.status)) return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
-      if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
+      if (['archived', 'completed'].includes(plan.status))
+        return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
+      if (limited('development_item_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_item_write'));
 
       // An assignee may tick their own action on a plan they cannot otherwise edit.
-      const assignedToViewer = action.assignee?.kind === 'player' && viewer.kind === 'player_self' && action.assignee.id === viewer.playerId;
-      const assignedToGuardian = action.assignee?.kind === 'guardian' && viewer.kind === 'guardian' && action.assignee.id === viewer.guardianId;
+      const assignedToViewer =
+        action.assignee?.kind === 'player' && viewer.kind === 'player_self' && action.assignee.id === viewer.playerId;
+      const assignedToGuardian =
+        action.assignee?.kind === 'guardian' && viewer.kind === 'guardian' && action.assignee.id === viewer.guardianId;
       const mayTick = access.writeGoals || assignedToViewer || assignedToGuardian;
-      if (!mayTick) return res.status(403).json({ error: 'DEVELOPMENT_NOT_PERMITTED', capability: 'writeGoals', message: 'You cannot change this action.' });
+      if (!mayTick)
+        return res.status(403).json({
+          error: 'DEVELOPMENT_NOT_PERMITTED',
+          capability: 'writeGoals',
+          message: 'You cannot change this action.',
+        });
 
       const actor = actorOf(viewer, req);
       const at = now();
       let statusChanged = null;
       if (req.body?.status != null && req.body.status !== action.status) {
         const to = String(req.body.status);
-        if (!ACTION_STATUSES.includes(to)) return res.status(400).json({ error: 'ACTION_STATUS_UNKNOWN', allowed: ACTION_STATUSES });
+        if (!ACTION_STATUSES.includes(to))
+          return res.status(400).json({ error: 'ACTION_STATUS_UNKNOWN', allowed: ACTION_STATUSES });
         if (!transitionAllowed(ACTION_TRANSITIONS, action.status, to)) {
-          return res.status(409).json({ error: 'ACTION_TRANSITION_INVALID', from: action.status, to, allowed: ACTION_TRANSITIONS[action.status] });
+          return res.status(409).json({
+            error: 'ACTION_TRANSITION_INVALID',
+            from: action.status,
+            to,
+            allowed: ACTION_TRANSITIONS[action.status],
+          });
         }
         statusChanged = { from: action.status, to };
         action.status = to;
@@ -814,8 +1094,15 @@ export function registerDevelopment(ctx) {
       }
 
       if (!access.writeGoals) {
-        const editing = ['title', 'type', 'dueAt', 'assignee'].some((k) => Object.prototype.hasOwnProperty.call(req.body ?? {}, k));
-        if (editing) return res.status(403).json({ error: 'DEVELOPMENT_NOT_PERMITTED', capability: 'writeGoals', message: 'You can mark this action done, but not change it.' });
+        const editing = ['title', 'type', 'dueAt', 'assignee'].some((k) =>
+          Object.prototype.hasOwnProperty.call(req.body ?? {}, k),
+        );
+        if (editing)
+          return res.status(403).json({
+            error: 'DEVELOPMENT_NOT_PERMITTED',
+            capability: 'writeGoals',
+            message: 'You can mark this action done, but not change it.',
+          });
       } else {
         const parsed = validateActionBody(req.body, { plan, player, existing: action });
         if (parsed.error) return res.status(400).json(parsed);
@@ -823,13 +1110,20 @@ export function registerDevelopment(ctx) {
       }
       action.updatedAt = at;
 
-      if (statusChanged) writeHistory(action, actor, statusChanged.to === 'done' ? 'action_completed' : 'action_status_changed', statusChanged);
+      if (statusChanged)
+        writeHistory(
+          action,
+          actor,
+          statusChanged.to === 'done' ? 'action_completed' : 'action_status_changed',
+          statusChanged,
+        );
       unit(() => {
         development.actions.update(action.id, () => action);
         if (statusChanged?.to === 'done') {
           // Completing an action never moves its goal's status.
           emitAll('development_action_completed', plan, { actionId: action.id });
-          if (plan.owner.kind === 'org' && actor.kind !== 'org') tellOrg(plan.owner.orgId, `${player.name} completed a development action: ${action.title}`);
+          if (plan.owner.kind === 'org' && actor.kind !== 'org')
+            tellOrg(plan.owner.orgId, `${player.name} completed a development action: ${action.title}`);
         }
         touchPlan(plan.id, actor);
       });
@@ -841,34 +1135,51 @@ export function registerDevelopment(ctx) {
     const linkEvidence = (targetKind) => (req, res) => {
       if (refuseDerived(req, res)) return;
       const viewer = V(req);
-      const stored = targetKind === 'goal'
-        ? developmentReads.goals.byId(req.params.goalId)
-        : developmentReads.actions.byId(req.params.actionId);
+      const stored =
+        targetKind === 'goal'
+          ? developmentReads.goals.byId(req.params.goalId)
+          : developmentReads.actions.byId(req.params.actionId);
       const holder = stored ? copy(stored) : null;
-      if (!holder) return res.status(404).json({ error: targetKind === 'goal' ? 'DEVELOPMENT_GOAL_NOT_FOUND' : 'DEVELOPMENT_ACTION_NOT_FOUND' });
+      if (!holder)
+        return res
+          .status(404)
+          .json({ error: targetKind === 'goal' ? 'DEVELOPMENT_GOAL_NOT_FOUND' : 'DEVELOPMENT_ACTION_NOT_FOUND' });
       const bundle = resolvePlan(req, res, holder.planId, viewer);
       if (!bundle) return undefined;
       const { plan, links, access, player } = bundle;
       if (!requireCap(res, access, 'linkEvidence', 'You cannot link evidence to this plan.')) return undefined;
-      if (['archived', 'completed'].includes(plan.status)) return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
-      if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
+      if (['archived', 'completed'].includes(plan.status))
+        return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
+      if (limited('development_item_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_item_write'));
 
       const key = targetKind === 'goal' ? 'goalId' : 'actionId';
       const mine = links.filter((l) => l[key] === holder.id);
       if (mine.length >= DEVELOPMENT_HUB_LIMITS.evidenceLinksPerTarget) {
-        return res.status(400).json({ error: 'TOO_MANY_EVIDENCE_LINKS', max: DEVELOPMENT_HUB_LIMITS.evidenceLinksPerTarget });
+        return res
+          .status(400)
+          .json({ error: 'TOO_MANY_EVIDENCE_LINKS', max: DEVELOPMENT_HUB_LIMITS.evidenceLinksPerTarget });
       }
 
       const parsed = validateEvidenceLink({
-        sourceType: req.body?.sourceType, sourceId: req.body?.sourceId,
-        reads, player, viewer, orgCanSee, now: now(),
+        sourceType: req.body?.sourceType,
+        sourceId: req.body?.sourceId,
+        reads,
+        player,
+        viewer,
+        orgCanSee,
+        now: now(),
       });
       if (parsed.error) return res.status(parsed.error === 'EVIDENCE_NOT_FOUND' ? 404 : 400).json(parsed);
 
-      const existing = mine.find((l) => l.sourceType === parsed.value.sourceType && l.sourceId === parsed.value.sourceId);
+      const existing = mine.find(
+        (l) => l.sourceType === parsed.value.sourceType && l.sourceId === parsed.value.sourceId,
+      );
       if (existing) {
         vmetric('development_idempotent_retries');
-        return res.status(200).json({ ...project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer), idempotent: true });
+        return res
+          .status(200)
+          .json({ ...project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer), idempotent: true });
       }
 
       const actor = actorOf(viewer, req);
@@ -881,7 +1192,9 @@ export function registerDevelopment(ctx) {
         playerId: plan.playerId,
         sourceType: parsed.value.sourceType,
         sourceId: parsed.value.sourceId,
-        linkedByKind: actor.kind, linkedById: actor.id, linkedByName: actor.name,
+        linkedByKind: actor.kind,
+        linkedById: actor.id,
+        linkedByName: actor.name,
         linkedAt: at,
       };
       writeHistory(holder, actor, 'evidence_linked', { kind: link.sourceType });
@@ -906,7 +1219,8 @@ export function registerDevelopment(ctx) {
       if (!bundle) return undefined;
       const { plan, goals, actions, access } = bundle;
       if (!requireCap(res, access, 'linkEvidence', 'You cannot change this plan’s evidence.')) return undefined;
-      if (['archived', 'completed'].includes(plan.status)) return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
+      if (['archived', 'completed'].includes(plan.status))
+        return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
 
       const actor = actorOf(viewer, req);
       const found = link.goalId ? goals.find((g) => g.id === link.goalId) : actions.find((a) => a.id === link.actionId);
@@ -928,7 +1242,10 @@ export function registerDevelopment(ctx) {
       const full = project(bundle, viewer);
       const page = pageReviews(full.reviews, { limit: req.query.limit, cursor: req.query.cursor });
       if (page.error) return res.status(400).json(page);
-      return res.json({ ...page.value, note: 'Reviews are append-only. A correction appears as a new review that names the one it replaces.' });
+      return res.json({
+        ...page.value,
+        note: 'Reviews are append-only. A correction appears as a new review that names the one it replaces.',
+      });
     });
 
     router.post('/development/plans/:id/reviews', (req, res) => {
@@ -937,8 +1254,10 @@ export function registerDevelopment(ctx) {
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
       const { plan, goals, actions, links, reviews, access, player } = bundle;
-      if (plan.status === 'archived') return res.status(409).json({ error: 'PLAN_ARCHIVED', detail: 'An archived plan cannot take a new review.' });
-      if (limited('development_review_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_review_write'));
+      if (plan.status === 'archived')
+        return res.status(409).json({ error: 'PLAN_ARCHIVED', detail: 'An archived plan cannot take a new review.' });
+      if (limited('development_review_write', rateKeyFor(req)))
+        return res.status(429).json(rateLimitedBody('development_review_write'));
 
       const parsed = validateReview({ body: req.body, access, viewer, now: now() });
       if (parsed.error) return res.status(parsed.error === 'REVIEW_NOT_PERMITTED' ? 403 : 400).json(parsed);
@@ -953,7 +1272,14 @@ export function registerDevelopment(ctx) {
 
       const actor = actorOf(viewer, req);
       const at = now();
-      const dup = recentDuplicate(reviews, (r) => r.reviewedBy?.id === actor.id && r.sharedSummary === parsed.value.sharedSummary && r.internalNote === parsed.value.internalNote, at);
+      const dup = recentDuplicate(
+        reviews,
+        (r) =>
+          r.reviewedBy?.id === actor.id &&
+          r.sharedSummary === parsed.value.sharedSummary &&
+          r.internalNote === parsed.value.internalNote,
+        at,
+      );
       if (dup) {
         vmetric('development_idempotent_retries');
         return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
@@ -963,7 +1289,8 @@ export function registerDevelopment(ctx) {
       const sessions = new Map(boxCamReads.sessions.forPlayer(plan.playerId).map((s) => [s.id, s]));
       const review = {
         id: nextId('devrev'),
-        planId: plan.id, playerId: plan.playerId,
+        planId: plan.id,
+        playerId: plan.playerId,
         reviewerKind: parsed.value.reviewerKind,
         reviewedBy: actor,
         orgId: actor.kind === 'org' ? req.org.id : null,
@@ -982,10 +1309,14 @@ export function registerDevelopment(ctx) {
       if (review.reviewerKind !== 'coach_review') review.sharedWithPlayerAt = at;
 
       writeHistory(review, actor, 'review_submitted', { kind: review.reviewerKind, note: !!review.internalNote });
-      if (review.sharedWithPlayerAt && review.reviewerKind === 'coach_review') writeHistory(review, actor, 'review_shared');
+      if (review.sharedWithPlayerAt && review.reviewerKind === 'coach_review')
+        writeHistory(review, actor, 'review_shared');
       unit(() => {
         development.reviews.create(review);
-        if (superseded) development.reviews.update(superseded.id, (d) => { writeHistory(d, actor, 'review_superseded'); });
+        if (superseded)
+          development.reviews.update(superseded.id, (d) => {
+            writeHistory(d, actor, 'review_superseded');
+          });
         development.plans.update(plan.id, (d) => {
           if (parsed.value.nextReviewAt != null) d.nextReviewAt = parsed.value.nextReviewAt;
           touch(d, actor);
@@ -1011,13 +1342,22 @@ export function registerDevelopment(ctx) {
       const bundle = resolvePlan(req, res, review.planId, viewer);
       if (!bundle) return undefined;
       const { plan, access } = bundle;
-      if (!access.readInternal) return res.status(403).json({ error: 'DEVELOPMENT_NOT_PERMITTED', message: 'Only the organisation that wrote this review can share it.' });
-      if (!review.sharedSummary) return res.status(400).json({ error: 'SHARE_NEEDS_SUMMARY', detail: 'This review has no summary to share. The internal note is never shared.' });
+      if (!access.readInternal)
+        return res.status(403).json({
+          error: 'DEVELOPMENT_NOT_PERMITTED',
+          message: 'Only the organisation that wrote this review can share it.',
+        });
+      if (!review.sharedSummary)
+        return res.status(400).json({
+          error: 'SHARE_NEEDS_SUMMARY',
+          detail: 'This review has no summary to share. The internal note is never shared.',
+        });
       if (review.sharedWithPlayerAt) {
         vmetric('development_idempotent_retries');
         return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
       }
-      const asked = Array.isArray(req.body?.scopes) && req.body.scopes.length ? req.body.scopes.map(String) : ['summary'];
+      const asked =
+        Array.isArray(req.body?.scopes) && req.body.scopes.length ? req.body.scopes.map(String) : ['summary'];
       const unknown = asked.filter((s) => !SHARE_SCOPES.includes(s));
       if (unknown.length) return res.status(400).json({ error: 'SHARE_SCOPE_UNKNOWN', allowed: SHARE_SCOPES });
 
@@ -1044,7 +1384,11 @@ export function registerDevelopment(ctx) {
       let start = 0;
       if (req.query.cursor) {
         const idx = all.findIndex((r) => r.id === String(req.query.cursor));
-        if (idx < 0) return res.status(400).json({ error: 'HISTORY_CURSOR_INVALID', detail: 'That page no longer exists — start again from the first page.' });
+        if (idx < 0)
+          return res.status(400).json({
+            error: 'HISTORY_CURSOR_INVALID',
+            detail: 'That page no longer exists — start again from the first page.',
+          });
         start = idx + 1;
       }
       const page = all.slice(start, start + limit);
@@ -1052,7 +1396,7 @@ export function registerDevelopment(ctx) {
       return res.json({
         items: page,
         total: all.length,
-        nextCursor: start + limit < all.length ? page[page.length - 1]?.id ?? null : null,
+        nextCursor: start + limit < all.length ? (page[page.length - 1]?.id ?? null) : null,
         note: 'Meaningful development events only. Reads and saves that changed nothing are not recorded.',
       });
     });
@@ -1063,14 +1407,24 @@ export function registerDevelopment(ctx) {
   function newGoal(plan, v, actor, at) {
     const goal = {
       id: nextId('devgoal'),
-      planId: plan.id, playerId: plan.playerId,
-      title: v.title, description: v.description ?? null, category: v.category,
-      status: 'not_started', blockReason: null, blockNote: null,
+      planId: plan.id,
+      playerId: plan.playerId,
+      title: v.title,
+      description: v.description ?? null,
+      category: v.category,
+      status: 'not_started',
+      blockReason: null,
+      blockNote: null,
       targetDate: v.targetDate ?? null,
       target: v.target ?? null,
       originObjectiveId: v.originObjectiveId ?? null,
-      createdBy: actor, createdAt: at, updatedAt: at, completedAt: null,
-      rev: 1, revAt: at, revBy: { userId: actor.id, name: actor.name },
+      createdBy: actor,
+      createdAt: at,
+      updatedAt: at,
+      completedAt: null,
+      rev: 1,
+      revAt: at,
+      revBy: { userId: actor.id, name: actor.name },
       history: [],
     };
     writeHistory(goal, actor, 'goal_created', { kind: goal.category });
@@ -1084,7 +1438,10 @@ export function registerDevelopment(ctx) {
     const found = typeof raw === 'string' ? developmentReads.objectives.byId(raw) : null;
     const rec = found && found.playerId === player.id ? found : null;
     if (!rec) {
-      res.status(404).json({ error: 'DEVELOPMENT_OBJECTIVE_NOT_FOUND', detail: 'No such development objective exists for this player.' });
+      res.status(404).json({
+        error: 'DEVELOPMENT_OBJECTIVE_NOT_FOUND',
+        detail: 'No such development objective exists for this player.',
+      });
       return false;
     }
     return rec.id;
@@ -1104,7 +1461,8 @@ export function registerDevelopment(ctx) {
           // Safeguarding: a minor's records are created by their guardian.
           minorRefusal: {
             error: 'GUARDIAN_MANAGED',
-            message: 'A guardian creates and manages development plans for a player under 18. You can read the plan here.',
+            message:
+              'A guardian creates and manages development plans for a player under 18. You can read the plan here.',
           },
         };
       }
@@ -1134,7 +1492,9 @@ export function registerDevelopment(ctx) {
   mount(orgRouter, {
     viewerOf: (req) => ({
       kind: req.org.level === 'grassroots' ? 'grassroots_staff' : 'org_staff',
-      org: req.org, orgUser: req.orgUser, isLead: isLead(req.orgUser),
+      org: req.org,
+      orgUser: req.orgUser,
+      isLead: isLead(req.orgUser),
     }),
     ownerKindFor: () => 'org',
     rateKeyFor: (req) => `org:${req.org.id}`,
@@ -1142,7 +1502,9 @@ export function registerDevelopment(ctx) {
       const p = findPlayer(String(req.body?.playerId ?? ''));
       // Not visible is not found, so plan creation cannot probe for players.
       if (!p || !orgCanSee(req.org, p)) {
-        res.status(404).json({ error: 'PLAYER_NOT_FOUND', message: 'No such player is available to your organisation.' });
+        res
+          .status(404)
+          .json({ error: 'PLAYER_NOT_FOUND', message: 'No such player is available to your organisation.' });
         return null;
       }
       return { player: { ...p, isMinor: !isAdult(p) } };

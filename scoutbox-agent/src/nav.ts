@@ -23,7 +23,11 @@ export interface NavItem {
   shortKey?: string;
 }
 
-export interface NavGroup { id: string; labelKey: string; items: ScreenId[] }
+export interface NavGroup {
+  id: string;
+  labelKey: string;
+  items: ScreenId[];
+}
 
 export interface NavSection {
   id: 'home' | 'clients' | 'transactions' | 'opportunities' | 'agency';
@@ -45,49 +49,121 @@ const licensed = (ctx: NavContext) => has(ctx, 'licensed_agent');
 
 export const NAV_SECTIONS: NavSection[] = [
   {
-    id: 'home', labelKey: 'navsec.home', icon: 'home',
+    id: 'home',
+    labelKey: 'navsec.home',
+    icon: 'home',
     children: [
       { id: 'home', labelKey: 'nav.home', aliases: ['dashboard', 'accueil', 'overview'] },
-      { id: 'profile', labelKey: 'nav.profile', shortKey: 'navshort.profile', aliases: ['verification', 'licence', 'license', 'fifa', 'registration', 'my profile', 'vérification', 'licence fifa'] },
+      {
+        id: 'profile',
+        labelKey: 'nav.profile',
+        shortKey: 'navshort.profile',
+        aliases: [
+          'verification',
+          'licence',
+          'license',
+          'fifa',
+          'registration',
+          'my profile',
+          'vérification',
+          'licence fifa',
+        ],
+      },
       // The agent's own regulatory standing, conflict contexts, consents
       // and attributed review items. Not a transaction room (no offer, no terms).
-      { id: 'compliance', labelKey: 'nav.compliance', shortKey: 'navshort.compliance', aliases: ['conflict', 'conflicts', 'consent', 'consents', 'policy', 'policies', 'review', 'regulatory', 'conformité', 'conflit', 'consentement'] },
+      {
+        id: 'compliance',
+        labelKey: 'nav.compliance',
+        shortKey: 'navshort.compliance',
+        aliases: [
+          'conflict',
+          'conflicts',
+          'consent',
+          'consents',
+          'policy',
+          'policies',
+          'review',
+          'regulatory',
+          'conformité',
+          'conflit',
+          'consentement',
+        ],
+      },
     ],
   },
   {
-    id: 'clients', labelKey: 'navsec.clients', icon: 'user',
+    id: 'clients',
+    labelKey: 'navsec.clients',
+    icon: 'user',
     children: [
-      { id: 'clients', labelKey: 'nav.clients', aliases: ['players', 'relationships', 'representation', 'requests', 'joueurs', 'représentation'] },
+      {
+        id: 'clients',
+        labelKey: 'nav.clients',
+        aliases: ['players', 'relationships', 'representation', 'requests', 'joueurs', 'représentation'],
+      },
     ],
   },
   {
     // The multi-party transaction workspace. Reading is every member's;
     // opening one, changing its parties and moving its status are the licensed
     // individual's, and the server refuses the rest whatever this list shows.
-    id: 'transactions', labelKey: 'navsec.transactions', icon: 'target',
+    id: 'transactions',
+    labelKey: 'navsec.transactions',
+    icon: 'target',
     children: [
-      { id: 'transactions', labelKey: 'nav.transactions', shortKey: 'navshort.transactions', aliases: ['transaction', 'transfer', 'loan', 'deal', 'workspace', 'parties', 'transfert', 'pr\u00eat', 'op\u00e9ration'] },
+      {
+        id: 'transactions',
+        labelKey: 'nav.transactions',
+        shortKey: 'navshort.transactions',
+        aliases: [
+          'transaction',
+          'transfer',
+          'loan',
+          'deal',
+          'workspace',
+          'parties',
+          'transfert',
+          'pr\u00eat',
+          'op\u00e9ration',
+        ],
+      },
     ],
   },
   {
-    id: 'opportunities', labelKey: 'navsec.opportunities', icon: 'globe',
+    id: 'opportunities',
+    labelKey: 'navsec.opportunities',
+    icon: 'globe',
     // The board reads only through an active relationship, which only a
     // licensed agent can hold. Convenience filter; the server refuses the rest.
     visible: licensed,
     children: [
-      { id: 'opportunities', labelKey: 'nav.opportunities', aliases: ['board', 'trials', 'open trials', 'opportunités'] },
+      {
+        id: 'opportunities',
+        labelKey: 'nav.opportunities',
+        aliases: ['board', 'trials', 'open trials', 'opportunités'],
+      },
     ],
   },
   {
-    id: 'agency', labelKey: 'navsec.agency', icon: 'building',
+    id: 'agency',
+    labelKey: 'navsec.agency',
+    icon: 'building',
     children: [
-      { id: 'agency', labelKey: 'nav.agency', aliases: ['team', 'members', 'compliance', 'settings', 'audit', 'équipe', 'conformité', 'paramètres'] },
+      {
+        id: 'agency',
+        labelKey: 'nav.agency',
+        aliases: ['team', 'members', 'compliance', 'settings', 'audit', 'équipe', 'conformité', 'paramètres'],
+      },
     ],
   },
 ];
 
 // Inbox is a utility destination, not a section (it keeps its unread badge).
-export const INBOX_ITEM: NavItem = { id: 'inbox', labelKey: 'nav.inbox', aliases: ['inbox', 'notifications', 'messages', 'boîte de réception'] };
+export const INBOX_ITEM: NavItem = {
+  id: 'inbox',
+  labelKey: 'nav.inbox',
+  aliases: ['inbox', 'notifications', 'messages', 'boîte de réception'],
+};
 
 // ------------------------------------------------------------ pure helpers
 export function filterSections(ctx: NavContext): NavSection[] {
@@ -101,7 +177,10 @@ export function filterSections(ctx: NavContext): NavSection[] {
   return out;
 }
 
-export interface NavLocation { sectionId: NavSection['id'] | null; itemId: ScreenId | null }
+export interface NavLocation {
+  sectionId: NavSection['id'] | null;
+  itemId: ScreenId | null;
+}
 
 export function resolveNavigationLocation(screenId: string): NavLocation {
   if (screenId === INBOX_ITEM.id) return { sectionId: null, itemId: 'inbox' };
@@ -116,21 +195,37 @@ export function allItems(): { section: NavSection; item: NavItem }[] {
   return NAV_SECTIONS.flatMap((section) => section.children.map((item) => ({ section, item })));
 }
 
-export interface NavGroupView { id: string | null; labelKey: string | null; children: NavItem[] }
+export interface NavGroupView {
+  id: string | null;
+  labelKey: string | null;
+  children: NavItem[];
+}
 export function groupedChildren(section: NavSection): NavGroupView[] {
   if (!section.groups || section.groups.length === 0) return [{ id: null, labelKey: null, children: section.children }];
   const byId = new Map(section.children.map((c) => [c.id, c] as const));
   return section.groups
-    .map((g) => ({ id: g.id, labelKey: g.labelKey, children: g.items.map((id) => byId.get(id)).filter((c): c is NavItem => !!c) }))
+    .map((g) => ({
+      id: g.id,
+      labelKey: g.labelKey,
+      children: g.items.map((id) => byId.get(id)).filter((c): c is NavItem => !!c),
+    }))
     .filter((g) => g.children.length > 0);
 }
 export function groupSiblings(section: NavSection, itemId: ScreenId | null): NavItem[] {
   const hit = groupedChildren(section).find((g) => g.children.some((c) => c.id === itemId));
-  return hit ? hit.children : groupedChildren(section)[0]?.children ?? [];
+  return hit ? hit.children : (groupedChildren(section)[0]?.children ?? []);
 }
 export const STRIP_MAX_VISIBLE = 4;
-export interface StripLayout { visible: NavItem[]; overflow: NavItem[]; activeInOverflow: NavItem | null }
-export function stripLayout(section: NavSection, itemId: ScreenId | null, max: number = STRIP_MAX_VISIBLE): StripLayout {
+export interface StripLayout {
+  visible: NavItem[];
+  overflow: NavItem[];
+  activeInOverflow: NavItem | null;
+}
+export function stripLayout(
+  section: NavSection,
+  itemId: ScreenId | null,
+  max: number = STRIP_MAX_VISIBLE,
+): StripLayout {
   const items = groupSiblings(section, itemId);
   if (items.length <= max) return { visible: items, overflow: [], activeInOverflow: null };
   const flagged = items.filter((c) => c.primary);
@@ -167,25 +262,43 @@ export function validateNavConfig(sections: NavSection[] = NAV_SECTIONS): string
 export function searchNav(query: string, ctx: NavContext, translate: (key: string) => string) {
   const q = query.trim().toLowerCase();
   const sections = filterSections(ctx);
-  const rows = sections.flatMap((section) =>
-    section.children.map((item) => ({
-      sectionId: section.id, itemId: item.id,
-      sectionLabel: translate(section.labelKey), label: translate(item.labelKey),
-      groupLabel: (() => { const g = groupOf(section, item.id); return g?.labelKey ? translate(g.labelKey) : ''; })(),
-      aliases: item.aliases ?? [],
-    }))
-  ).concat([{ sectionId: 'home' as NavSection['id'], itemId: INBOX_ITEM.id, sectionLabel: '', groupLabel: '', label: translate(INBOX_ITEM.labelKey), aliases: INBOX_ITEM.aliases ?? [] }]);
+  const rows = sections
+    .flatMap((section) =>
+      section.children.map((item) => ({
+        sectionId: section.id,
+        itemId: item.id,
+        sectionLabel: translate(section.labelKey),
+        label: translate(item.labelKey),
+        groupLabel: (() => {
+          const g = groupOf(section, item.id);
+          return g?.labelKey ? translate(g.labelKey) : '';
+        })(),
+        aliases: item.aliases ?? [],
+      })),
+    )
+    .concat([
+      {
+        sectionId: 'home' as NavSection['id'],
+        itemId: INBOX_ITEM.id,
+        sectionLabel: '',
+        groupLabel: '',
+        label: translate(INBOX_ITEM.labelKey),
+        aliases: INBOX_ITEM.aliases ?? [],
+      },
+    ]);
   if (!q) return rows.slice(0, 8);
-  const scored = rows.map((r) => {
-    const label = r.label.toLowerCase();
-    let score = -1;
-    if (label.startsWith(q)) score = 0;
-    else if (label.includes(q)) score = 1;
-    else if (r.aliases.some((a) => a.startsWith(q))) score = 2;
-    else if (r.aliases.some((a) => a.includes(q))) score = 3;
-    else if (r.sectionLabel.toLowerCase().includes(q)) score = 4;
-    return { ...r, score };
-  }).filter((r) => r.score >= 0);
+  const scored = rows
+    .map((r) => {
+      const label = r.label.toLowerCase();
+      let score = -1;
+      if (label.startsWith(q)) score = 0;
+      else if (label.includes(q)) score = 1;
+      else if (r.aliases.some((a) => a.startsWith(q))) score = 2;
+      else if (r.aliases.some((a) => a.includes(q))) score = 3;
+      else if (r.sectionLabel.toLowerCase().includes(q)) score = 4;
+      return { ...r, score };
+    })
+    .filter((r) => r.score >= 0);
   scored.sort((a, b) => a.score - b.score || a.label.localeCompare(b.label));
   return scored.slice(0, 8);
 }
@@ -227,7 +340,10 @@ export function clientLocationFromHash(hash: string): CaseLocation | null {
   const m = CLIENT_HASH.exec(hash ?? '');
   return m ? parseCaseSegments(CLIENT_NAV, segsOf(m[2])) : null;
 }
-export const hashForClient = (id: string, tab: ClientTab = 'summary') => `#/clients/${id}${caseSegments(CLIENT_NAV, resolveTab(CLIENT_NAV, tab)).map((s) => `/${s}`).join('')}`;
+export const hashForClient = (id: string, tab: ClientTab = 'summary') =>
+  `#/clients/${id}${caseSegments(CLIENT_NAV, resolveTab(CLIENT_NAV, tab))
+    .map((s) => `/${s}`)
+    .join('')}`;
 
 export function agencyTabFromHash(hash: string): AgencyTab | null {
   const m = AGENCY_HASH.exec(hash ?? '');
@@ -251,7 +367,10 @@ export function transactionLocationFromHash(hash: string): CaseLocation | null {
   const m = TRANSACTION_HASH.exec(hash ?? '');
   return m ? parseCaseSegments(TRANSACTION_NAV, segsOf(m[2])) : null;
 }
-export const hashForTransaction = (id: string, tab: TransactionTab = 'overview') => `#/transactions/${id}${caseSegments(TRANSACTION_NAV, resolveTab(TRANSACTION_NAV, tab)).map((s) => `/${s}`).join('')}`;
+export const hashForTransaction = (id: string, tab: TransactionTab = 'overview') =>
+  `#/transactions/${id}${caseSegments(TRANSACTION_NAV, resolveTab(TRANSACTION_NAV, tab))
+    .map((s) => `/${s}`)
+    .join('')}`;
 
 export function screenFromHash(hash: string): ScreenId | null {
   if (clientFromHash(hash)) return 'clients';
@@ -276,18 +395,34 @@ export function loadShortcuts(orgId: string, userId: string, ctx: NavContext): S
     if (!Array.isArray(list)) return [];
     const permitted = new Set(filterSections(ctx).flatMap((s) => s.children.map((c) => c.id)));
     permitted.add(INBOX_ITEM.id);
-    return list.filter((x): x is ScreenId => typeof x === 'string' && permitted.has(x as ScreenId)).slice(0, MAX_SHORTCUTS);
-  } catch { return []; }
+    return list
+      .filter((x): x is ScreenId => typeof x === 'string' && permitted.has(x as ScreenId))
+      .slice(0, MAX_SHORTCUTS);
+  } catch {
+    return [];
+  }
 }
 export function saveShortcuts(orgId: string, userId: string, ids: ScreenId[]) {
-  try { localStorage.setItem(shortcutsKey(orgId, userId), JSON.stringify(ids.slice(0, MAX_SHORTCUTS))); } catch { /* private mode */ }
+  try {
+    localStorage.setItem(shortcutsKey(orgId, userId), JSON.stringify(ids.slice(0, MAX_SHORTCUTS)));
+  } catch {
+    /* private mode */
+  }
 }
 
 // -------------------------------------------------------- collapsed state
 const COLLAPSE_KEY = 'sb-agent-nav-collapsed';
 export function loadCollapsed(): boolean {
-  try { return localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { return false; }
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 export function saveCollapsed(collapsed: boolean) {
-  try { localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0'); } catch { /* private mode */ }
+  try {
+    localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+  } catch {
+    /* private mode */
+  }
 }

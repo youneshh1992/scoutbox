@@ -7,30 +7,74 @@ import { API_URL, DEMO_MODE, ApiError, type Session } from './api';
 import { demoM15 } from './m15demo';
 
 export interface FpEvent {
-  id: string; type: string; when: { display: string; precision: string };
-  title: Record<string, unknown>; org: { id: string | null; name: string | null } | null;
-  provenance: string; provenanceCopy: string | null; current?: boolean | null;
+  id: string;
+  type: string;
+  when: { display: string; precision: string };
+  title: Record<string, unknown>;
+  org: { id: string | null; name: string | null } | null;
+  provenance: string;
+  provenanceCopy: string | null;
+  current?: boolean | null;
 }
 export interface FpHistoryRow {
-  orgName: string | null; role: string | null; from: string | null; to: string | null;
-  current: boolean; provenance: string; provenanceCopy: string | null;
+  orgName: string | null;
+  role: string | null;
+  from: string | null;
+  to: string | null;
+  current: boolean;
+  provenance: string;
+  provenanceCopy: string | null;
 }
 export interface FpReference {
-  id: string; coachName: string; roleAtTime: string | null; orgName: string;
-  relationship: string; fromYear: number | null; toYear: number | null; at: string | null;
-  provenance: string; provenanceCopy: string;
+  id: string;
+  coachName: string;
+  roleAtTime: string | null;
+  orgName: string;
+  relationship: string;
+  fromYear: number | null;
+  toYear: number | null;
+  at: string | null;
+  provenance: string;
+  provenanceCopy: string;
   structured?: { strengths: string; development: string; summary: string };
 }
-export interface FpAchievement { id: string; title: string; orgName: string | null; when: string | null; provenance: string; confirmedBy: string | null; provenanceCopy: string | null }
+export interface FpAchievement {
+  id: string;
+  title: string;
+  orgName: string | null;
+  when: string | null;
+  provenance: string;
+  confirmedBy: string | null;
+  provenanceCopy: string | null;
+}
 export interface RecruitmentPassport {
-  viewer: string; shareMode?: string | null;
-  player: { id: string; name: string; age: number; position: string | null; location: string | null; level: string | null };
+  viewer: string;
+  shareMode?: string | null;
+  player: {
+    id: string;
+    name: string;
+    age: number;
+    position: string | null;
+    location: string | null;
+    level: string | null;
+  };
   identity: { confirmed: boolean; assurance: string; label: string } | null;
-  status: { currentClub: { orgName: string | null; role: string | null; since: string | null; provenance: string } | null; availability: string | null; representation: { agencyName: string; scope: string } | null };
+  status: {
+    currentClub: { orgName: string | null; role: string | null; since: string | null; provenance: string } | null;
+    availability: string | null;
+    representation: { agencyName: string; scope: string } | null;
+  };
   note: string;
   timeline: FpEvent[];
   clubHistory: FpHistoryRow[];
-  evidence: { fullMatches: number; clips: number; assessments: number; references: number; lastEvidenceDays: number | null; note: string };
+  evidence: {
+    fullMatches: number;
+    clips: number;
+    assessments: number;
+    references: number;
+    lastEvidenceDays: number | null;
+    note: string;
+  };
   references: FpReference[];
   achievements: FpAchievement[];
   assessments: { id: string; org: string | null; at: string | null; state: string }[];
@@ -39,11 +83,15 @@ export interface RecruitmentPassport {
   representation: { agencyName: string; scope: string } | null;
 }
 export interface FpSummary {
-  playerId: string; position: string | null; age: number;
+  playerId: string;
+  position: string | null;
+  age: number;
   currentClub: { name: string | null; provenance: string } | null;
   evidenceCoverage: 'strong' | 'moderate' | 'limited';
-  lastEvidenceDays: number | null; references: number;
-  availability: string | null; identityConfirmed: boolean;
+  lastEvidenceDays: number | null;
+  references: number;
+  availability: string | null;
+  identityConfirmed: boolean;
 }
 
 export interface M15Api {
@@ -65,11 +113,16 @@ export const httpM15: M15Api = {
   passport: (s, playerId) => req(`/org/players/${playerId}/football-passport`, { headers: H(s) }),
   summaries: async (s, ids) => {
     if (!ids.length) return [];
-    const r = await req<{ items: FpSummary[] }>(`/org/football-passports?ids=${ids.slice(0, 100).join(',')}`, { headers: H(s) });
+    const r = await req<{ items: FpSummary[] }>(`/org/football-passports?ids=${ids.slice(0, 100).join(',')}`, {
+      headers: H(s),
+    });
     return r.items;
   },
   confirmAchievement: (s, playerId, achievementId) =>
-    req(`/org/players/${playerId}/football-passport/achievements/${achievementId}/confirm`, { method: 'POST', headers: H(s) }),
+    req(`/org/players/${playerId}/football-passport/achievements/${achievementId}/confirm`, {
+      method: 'POST',
+      headers: H(s),
+    }),
   openShared: (s, token) => req(`/org/passport/shared/${encodeURIComponent(token)}`, { headers: H(s) }),
 };
 

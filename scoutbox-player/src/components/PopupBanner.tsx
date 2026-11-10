@@ -17,25 +17,26 @@ export function PopupBanner() {
   );
 }
 
-const makeStyles = (colors: Palette) => StyleSheet.create({
-  banner: {
-    position: 'absolute',
-    top: 8,
-    left: 12,
-    right: 12,
-    zIndex: 100,
-    backgroundColor: colors.panel,
-    borderColor: colors.line,
-    borderLeftColor: colors.accent,
-    borderWidth: 1,
-    borderLeftWidth: 3,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  text: { color: colors.text, fontSize: 13.5, lineHeight: 19 },
-});
+const makeStyles = (colors: Palette) =>
+  StyleSheet.create({
+    banner: {
+      position: 'absolute',
+      top: 8,
+      left: 12,
+      right: 12,
+      zIndex: 100,
+      backgroundColor: colors.panel,
+      borderColor: colors.line,
+      borderLeftColor: colors.accent,
+      borderWidth: 1,
+      borderLeftWidth: 3,
+      borderRadius: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      shadowColor: '#000',
+      shadowOpacity: 0.18,
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    text: { color: colors.text, fontSize: 13.5, lineHeight: 19 },
+  });

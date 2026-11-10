@@ -13,7 +13,9 @@ const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist');
 // deep-path history shim is a SecurityError under file://.
 const demo = await ensureDemoHost();
 const HOST = process.env.DEMO_HOST || demo.host;
-console.log(`demo host: ${demo.host} build ${demo.marker} (${demo.started ? 'started by this test' : 'already running, marker matches'})`);
+console.log(
+  `demo host: ${demo.host} build ${demo.marker} (${demo.started ? 'started by this test' : 'already running, marker matches'})`,
+);
 const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const browser = await chromium.launch({ executablePath: EXE });
 
@@ -26,7 +28,9 @@ const browser = await chromium.launch({ executablePath: EXE });
   await page.click('.org-card:has-text("Eastport FC")');
   await page.fill('.enter-row input', 'Maria Keane');
   await page.click('button:has-text("Enter workspace")');
-  await page.evaluate(() => { location.hash = '#/search'; }); // deep link (Search)
+  await page.evaluate(() => {
+    location.hash = '#/search';
+  }); // deep link (Search)
   await page.waitForSelector('.player-card:not(.skeleton) .name');
   console.log('club demo: search shows', await page.locator('.player-card:not(.skeleton)').count(), 'players');
   await page.click('.player-card:not(.skeleton) >> nth=0');
@@ -56,7 +60,9 @@ const browser = await chromium.launch({ executablePath: EXE });
   await page.click('.org-card:has-text("Hackney Marsh Rovers")');
   await page.fill('.enter-row input', 'Dee Mensah');
   await page.click('button:has-text("Enter workspace")');
-  await page.evaluate(() => { location.hash = '#/search'; }); // deep link (Search)
+  await page.evaluate(() => {
+    location.hash = '#/search';
+  }); // deep link (Search)
   await page.waitForSelector('text=within 50 km');
   await page.waitForSelector('.player-card:not(.skeleton) .name');
   const names = await page.locator('.player-card:not(.skeleton) .name').allInnerTexts();
@@ -71,7 +77,9 @@ const browser = await chromium.launch({ executablePath: EXE });
 // ---- player demo, deep path, only that origin allowed
 {
   const page = await browser.newPage({ viewport: { width: 420, height: 880 } });
-  await page.route(/^https?:\/\//, (r) => (r.request().url().startsWith(`${HOST}/deep/nested`) ? r.continue() : r.abort()));
+  await page.route(/^https?:\/\//, (r) =>
+    r.request().url().startsWith(`${HOST}/deep/nested`) ? r.continue() : r.abort(),
+  );
   page.on('pageerror', (e) => console.log('PLAYER PAGE ERROR:', e.message));
   await page.goto(`${HOST}/deep/nested/`);
   await page.evaluate(() => localStorage.clear());

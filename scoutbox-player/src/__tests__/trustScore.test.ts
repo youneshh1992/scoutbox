@@ -6,17 +6,38 @@ import { TRUST, computeTrustScore, trustBreakdown } from '../domain/trustScore';
 import type { PlayerProfile } from '../domain/types';
 
 /** A profile with nothing that earns trust; fields the arithmetic reads are explicit, the rest is the minimum the type needs. */
-const bare = (over: Partial<PlayerProfile> = {}): PlayerProfile => ({
-  id: 'pl-test', name: 'Test Player', dob: '2000-01-01', country: 'GB', city: 'Testville',
-  position: null, foot: null, heightCm: null, weightKg: null, stats: null,
-  academyPlus: false, badges: [], identityVerified: false, attendance: [], timeline: [],
-  ...over,
-} as PlayerProfile);
+const bare = (over: Partial<PlayerProfile> = {}): PlayerProfile =>
+  ({
+    id: 'pl-test',
+    name: 'Test Player',
+    dob: '2000-01-01',
+    country: 'GB',
+    city: 'Testville',
+    position: null,
+    foot: null,
+    heightCm: null,
+    weightKg: null,
+    stats: null,
+    academyPlus: false,
+    badges: [],
+    identityVerified: false,
+    attendance: [],
+    timeline: [],
+    ...over,
+  }) as PlayerProfile;
 const n = (count: number) => Array.from({ length: count }, (_, i) => ({ id: `x-${i}` })) as never;
 
 describe('trustBreakdown', () => {
   test('an empty profile scores the base alone', () => {
-    expect(trustBreakdown(bare())).toEqual({ base: TRUST.BASE, identityVerified: 0, verifiedAttendance: 0, trialReports: 0, media: 0, profileComplete: 0, total: TRUST.BASE });
+    expect(trustBreakdown(bare())).toEqual({
+      base: TRUST.BASE,
+      identityVerified: 0,
+      verifiedAttendance: 0,
+      trialReports: 0,
+      media: 0,
+      profileComplete: 0,
+      total: TRUST.BASE,
+    });
     expect(computeTrustScore(bare())).toBe(30);
   });
 
@@ -40,16 +61,34 @@ describe('trustBreakdown', () => {
   });
 
   test('the profile bonus needs every one of position, foot, height, weight and stats', () => {
-    const full = { position: 'ST', foot: 'R', heightCm: 180, weightKg: 75, stats: { appearances: 1, goals: 0, assists: 0 } } as const;
+    const full = {
+      position: 'ST',
+      foot: 'R',
+      heightCm: 180,
+      weightKg: 75,
+      stats: { appearances: 1, goals: 0, assists: 0 },
+    } as const;
     expect(trustBreakdown(bare(full)).profileComplete).toBe(TRUST.PROFILE_COMPLETE);
     expect(trustBreakdown(bare({ ...full, foot: null })).profileComplete).toBe(0);
     expect(trustBreakdown(bare({ ...full, stats: null })).profileComplete).toBe(0);
   });
 
   test('every component at its cap sums to exactly MAX, and nothing can exceed it', () => {
-    const maxed = bare({ identityVerified: true, attendance: n(99), trialReports: n(99), media: n(99), position: 'GK', foot: 'L', heightCm: 190, weightKg: 85, stats: { appearances: 9, goals: 0, assists: 0 } });
+    const maxed = bare({
+      identityVerified: true,
+      attendance: n(99),
+      trialReports: n(99),
+      media: n(99),
+      position: 'GK',
+      foot: 'L',
+      heightCm: 190,
+      weightKg: 85,
+      stats: { appearances: 9, goals: 0, assists: 0 },
+    });
     const b = trustBreakdown(maxed);
-    expect(b.base + b.identityVerified + b.verifiedAttendance + b.trialReports + b.media + b.profileComplete).toBe(TRUST.MAX);
+    expect(b.base + b.identityVerified + b.verifiedAttendance + b.trialReports + b.media + b.profileComplete).toBe(
+      TRUST.MAX,
+    );
     expect(b.total).toBe(TRUST.MAX);
     expect(computeTrustScore(maxed)).toBeLessThanOrEqual(99);
   });

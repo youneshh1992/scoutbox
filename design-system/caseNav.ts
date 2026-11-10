@@ -38,7 +38,10 @@ export interface CaseNavModel {
   categories: readonly CaseCategory[];
 }
 
-export interface CaseLocation { category: string; sub: string }
+export interface CaseLocation {
+  category: string;
+  sub: string;
+}
 
 /** The hard rule: no category may hold more than this many subcategories. */
 export const CASE_NAV_MAX_SUBS = 5;
@@ -60,7 +63,8 @@ export function validateCaseNav(model: CaseNavModel): string[] {
     if (catIds.has(c.id)) problems.push(`${model.id}/${c.id}: duplicate category id`);
     catIds.add(c.id);
     if (c.subs.length === 0) problems.push(`${model.id}/${c.id}: empty category`);
-    if (c.subs.length > CASE_NAV_MAX_SUBS) problems.push(`${model.id}/${c.id}: ${c.subs.length} subcategories (max ${CASE_NAV_MAX_SUBS})`);
+    if (c.subs.length > CASE_NAV_MAX_SUBS)
+      problems.push(`${model.id}/${c.id}: ${c.subs.length} subcategories (max ${CASE_NAV_MAX_SUBS})`);
     for (const s of c.subs) {
       if (!SLUG.test(s.id)) problems.push(`${model.id}/${c.id}/${s.id}: sub id is not a slug`);
       if (subIds.has(s.id)) problems.push(`${model.id}: "${s.id}" appears in more than one category`);
@@ -97,7 +101,8 @@ export function resolveTab(model: CaseNavModel, tab: string | null | undefined):
   if (!tab) return null;
   const direct = locate(model, tab);
   if (direct) return direct;
-  for (const c of model.categories) for (const s of c.subs) if (s.legacy?.includes(tab)) return { category: c.id, sub: s.id };
+  for (const c of model.categories)
+    for (const s of c.subs) if (s.legacy?.includes(tab)) return { category: c.id, sub: s.id };
   return null;
 }
 

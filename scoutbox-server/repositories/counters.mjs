@@ -23,11 +23,18 @@ export function createIdCounter({ sqlite }) {
   const write = sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'");
   const stored = read.get();
   // Migration 0039 always inserts the row; without it every mint would be lost and ids reused after a restart.
-  if (!stored) throw new Error("COUNTER_MISSING: the counters table has no 'id' row (migration 0039 inserts it); refusing to mint ids that would not be stored");
+  if (!stored)
+    throw new Error(
+      "COUNTER_MISSING: the counters table has no 'id' row (migration 0039 inserts it); refusing to mint ids that would not be stored",
+    );
   let value = Math.max(ID_COUNTER_FLOOR, Number(stored.value) || 0);
   return {
     /** The next number, written through before it is returned. */
-    next() { value += 1; write.run(value); return value; },
+    next() {
+      value += 1;
+      write.run(value);
+      return value;
+    },
     /** The last number handed out (or the floor). */
     current: () => value,
   };

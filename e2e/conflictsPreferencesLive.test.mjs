@@ -33,8 +33,14 @@ const CLUB_PORT = 8813;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-conflictspreferenceslive-'));
 
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 for (const port of [API_PORT, CLUB_PORT]) {
@@ -48,7 +54,10 @@ for (const port of [API_PORT, CLUB_PORT]) {
 }
 
 console.log(`building live bundle for :${API_PORT}…`);
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-conflicts`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-conflicts`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -58,11 +67,21 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+    '.svg': 'image/svg+xml',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -76,16 +95,39 @@ function serveDir(dir, port) {
 serveDir('scoutbox-club/dist-live-conflicts', CLUB_PORT);
 
 const cleanup = () => {
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
   for (const s of statics) s.close();
   fs.rmSync(DATA, { recursive: true, force: true });
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
-process.on('uncaughtException', (e) => { console.error(e); cleanup(); process.exit(1); });
-process.on('unhandledRejection', (e) => { console.error(e); cleanup(); process.exit(1); });
+for (const sig of ['SIGINT', 'SIGTERM'])
+  process.on(sig, () => {
+    cleanup();
+    process.exit(130);
+  });
+process.on('uncaughtException', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
 
-for (let i = 0; i < 160; i++) { try { if ((await fetch(`${API}/healthz`)).ok) break; } catch { /* booting */ } await sleep(250); }
+for (let i = 0; i < 160; i++) {
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {
+    /* booting */
+  }
+  await sleep(250);
+}
 console.log(`backend up on :${API_PORT}`);
 
 const j = async (method, p, body, token) => {
@@ -112,16 +154,38 @@ async function enterClub(ctx, org, name, role) {
   await page.waitForSelector('nav.sidebar', { timeout: 30000 });
   return page;
 }
-const tokenOf = (page) => page.evaluate(() => {
-  try { return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null; } catch { return null; }
-});
+const tokenOf = (page) =>
+  page.evaluate(() => {
+    try {
+      return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null;
+    } catch {
+      return null;
+    }
+  });
 async function goto(page, hash, selector) {
-  await page.evaluate((h) => { window.location.hash = h; }, hash);
-  if (hash === '#/organisation') { for (let i = 0; i < 20 && !(await page.locator('details.settings-row').count()); i++) await page.waitForTimeout(250); await page.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); } // Staff & Security sections are rows; open them, then assert the same
+  await page.evaluate((h) => {
+    window.location.hash = h;
+  }, hash);
+  if (hash === '#/organisation') {
+    for (let i = 0; i < 20 && !(await page.locator('details.settings-row').count()); i++)
+      await page.waitForTimeout(250);
+    await page.evaluate(() =>
+      document.querySelectorAll('details.settings-row').forEach((d) => {
+        d.open = true;
+      }),
+    );
+  } // Staff & Security sections are rows; open them, then assert the same
   if (selector) {
     await page.waitForSelector(selector, { timeout: 25000 }).catch(async (e) => {
       const where = await page.evaluate(() => location.hash);
-      const text = (await page.locator('body').innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 400);
+      const text = (
+        await page
+          .locator('body')
+          .innerText()
+          .catch(() => '')
+      )
+        .replace(/\n/g, ' ')
+        .slice(0, 400);
       fail(`navigation to ${hash} never showed ${selector} (now at ${where}): ${text}`);
       throw e;
     });
@@ -136,14 +200,17 @@ const SL = '#/recruitment/second-look';
 const scout = await enterClub(ctxA, 'Eastport FC', 'Maria Keane', 'Head of Recruitment');
 const MARIA = await tokenOf(scout);
 if (!MARIA) fail('fixture: the scout has no session token');
-const TOM = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Head of Recruitment' })).body.token;
+const TOM = (
+  await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Head of Recruitment' })
+).body.token;
 const players = (await j('GET', '/org/players', undefined, MARIA)).body.items;
 const SUBJECT = players.find((p) => /Kola Adeyemi/.test(p.name)) ?? players[0];
 if (!SUBJECT) fail('fixture: no visible player');
 
 // ===================================================================== J1
 // A Brief conflict: the shared notice, the colleague's name, the kept draft.
-const brief = (await j('POST', '/org/recruitment-briefs', { title: 'Left-sided CM', positions: ['CM'] }, MARIA)).body.brief;
+const brief = (await j('POST', '/org/recruitment-briefs', { title: 'Left-sided CM', positions: ['CM'] }, MARIA)).body
+  .brief;
 if (!brief?.id) fail('J1 fixture: could not create a brief');
 await goto(scout, `#/recruitment/briefs/${brief.id}`);
 await scout.waitForSelector('button:has-text("Edit criteria")', { timeout: 20000 });
@@ -155,17 +222,25 @@ await scout.waitForSelector('button:has-text("Edit criteria")', { timeout: 20000
   say('J1: the scout opens the Brief editor and types a change');
 
   // The colleague moves it while this editor is still open.
-  const move = await j('PATCH', `/org/recruitment-briefs/${brief.id}`, { title: 'Tom’s title', expectedRev: brief.rev }, TOM);
+  const move = await j(
+    'PATCH',
+    `/org/recruitment-briefs/${brief.id}`,
+    { title: 'Tom’s title', expectedRev: brief.rev },
+    TOM,
+  );
   if (move.status !== 200) fail(`J1: the colleague's edit should have succeeded (${move.status})`);
   say('J1: a colleague edits the same Brief from their own session');
 
-  await scout.click('[aria-label="Recruitment brief criteria"] button.primary, [aria-label="Recruitment brief criteria"] button:has-text("Save")');
+  await scout.click(
+    '[aria-label="Recruitment brief criteria"] button.primary, [aria-label="Recruitment brief criteria"] button:has-text("Save")',
+  );
   await scout.waitForSelector('[data-conflict-code]', { timeout: 15000 });
   const code = await scout.getAttribute('[data-conflict-code]', 'data-conflict-code');
   if (code !== 'BRIEF_VERSION_CONFLICT') fail(`J1: the notice carries the wrong code (${code})`);
   say('J1: the save is refused and the SHARED conflict notice appears (BRIEF_VERSION_CONFLICT)');
   const notice = await scout.locator('[data-conflict-code]').innerText();
-  if (!/This changed while you were editing/.test(notice)) fail('J1: the notice does not lead with the human explanation');
+  if (!/This changed while you were editing/.test(notice))
+    fail('J1: the notice does not lead with the human explanation');
   if (!/Tom Field/.test(notice)) fail(`J1: the notice does not name the colleague — it said: ${notice.slice(0, 160)}`);
   say('J1: it names who changed it, in words, with the machine code kept as data');
   const role = await scout.getAttribute('[data-conflict-code]', 'role');
@@ -201,7 +276,12 @@ say('J2: the scout opens a Recruitment Room from Discover');
     if (!colleagueMoved && route.request().method() === 'POST') {
       colleagueMoved = true;
       const cur = (await j('GET', `/org/rooms/${ROOM_ID}`, undefined, MARIA)).body.room;
-      const move = await j('POST', `/org/rooms/${ROOM_ID}/status`, { status: 'under_review', expectedRev: cur.rev }, TOM);
+      const move = await j(
+        'POST',
+        `/org/rooms/${ROOM_ID}/status`,
+        { status: 'under_review', expectedRev: cur.rev },
+        TOM,
+      );
       if (move.status !== 200) fail(`J2: the colleague's transition should have succeeded (${move.status})`);
     }
     await route.continue();
@@ -213,13 +293,17 @@ say('J2: the scout opens a Recruitment Room from Discover');
   const code = await scout.getAttribute('[data-conflict-code]', 'data-conflict-code');
   if (code !== 'ROOM_VERSION_CONFLICT') fail(`J2: wrong code (${code})`);
   const notice = await scout.locator('[data-conflict-code]').innerText();
-  if (!/This changed while you were editing/.test(notice)) fail('J2: the Room conflict uses different wording from the Brief conflict');
+  if (!/This changed while you were editing/.test(notice))
+    fail('J2: the Room conflict uses different wording from the Brief conflict');
   if (!/Tom Field/.test(notice)) fail('J2: the Room conflict does not name the colleague');
-  say('J2: the Room conflict is the SAME notice with the same wording and the colleague’s name (ROOM_VERSION_CONFLICT)');
+  say(
+    'J2: the Room conflict is the SAME notice with the same wording and the colleague’s name (ROOM_VERSION_CONFLICT)',
+  );
   await scout.click('[data-conflict-code] button:has-text("Reload latest")');
   await scout.waitForTimeout(1200);
   const header = await scout.locator('[aria-label="Room header"]').innerText();
-  if (!/Under review/i.test(header)) fail(`J2: after reload the header does not show the colleague's status: ${header.slice(0, 120)}`);
+  if (!/Under review/i.test(header))
+    fail(`J2: after reload the header does not show the colleague's status: ${header.slice(0, 120)}`);
   say('J2: "Reload latest" shows the colleague’s status');
   await scout.unroute(/\/org\/rooms\/[^/]+\/status$/);
 }
@@ -228,26 +312,34 @@ say('J2: the scout opens a Recruitment Room from Discover');
 // Leaving a dirty form asks first; a clean one never does.
 {
   const dialogs = [];
-  const onDialog = async (d) => { dialogs.push(d.message()); await d.dismiss(); };
+  const onDialog = async (d) => {
+    dialogs.push(d.message());
+    await d.dismiss();
+  };
   scout.on('dialog', onDialog);
   await goto(scout, BR, '[aria-label="Recruitment briefs"]');
   await scout.click('button:has-text("New brief")');
   await scout.waitForSelector('[aria-label="Recruitment brief criteria"]', { timeout: 15000 });
   // Clean form: navigating away must NOT prompt.
-  await scout.evaluate(() => { window.location.hash = '#/recruitment/rooms'; }); // the parent of a deep link resolves
+  await scout.evaluate(() => {
+    window.location.hash = '#/recruitment/rooms';
+  }); // the parent of a deep link resolves
   await scout.waitForTimeout(1200);
   if (dialogs.length) fail('J3: a CLEAN form prompted on navigation — that trains people to click through');
   {
     const hash = await scout.evaluate(() => location.hash);
     const form = await scout.locator('[aria-label="Recruitment brief criteria"]').count();
-    if (form || !/rooms/.test(hash)) fail(`J3: a clean form BLOCKED navigation without asking (hash ${hash}, form still mounted: ${form})`);
+    if (form || !/rooms/.test(hash))
+      fail(`J3: a clean form BLOCKED navigation without asking (hash ${hash}, form still mounted: ${form})`);
   }
   say('J3: leaving a clean form never prompts, and the navigation happens');
   await goto(scout, BR, '[aria-label="Recruitment briefs"]');
   await scout.click('button:has-text("New brief")');
   await scout.waitForSelector('[aria-label="Recruitment brief criteria"]', { timeout: 15000 });
   await scout.fill('[aria-label="Recruitment brief criteria"] input', 'Unsaved wing-back brief');
-  await scout.evaluate(() => { window.location.hash = '#/recruitment/rooms'; });
+  await scout.evaluate(() => {
+    window.location.hash = '#/recruitment/rooms';
+  });
   await scout.waitForTimeout(900);
   if (dialogs.length !== 1) fail(`J3: a dirty form did not prompt exactly once on hash navigation (${dialogs.length})`);
   if (!/unsaved changes/i.test(dialogs[0])) fail(`J3: the prompt does not say what is at stake: ${dialogs[0]}`);
@@ -261,14 +353,18 @@ say('J2: the scout opens a Recruitment Room from Discover');
   await scout.click('nav.sidebar button.nav-section:has-text("Squad & Planning")', { timeout: 5000 }).catch(() => {});
   await scout.waitForTimeout(600);
   if (dialogs.length < 2) fail('J3: sidebar navigation bypassed the guard');
-  if (!(await scout.locator('[aria-label="Recruitment brief criteria"]').count())) fail('J3: declining the sidebar prompt still navigated');
+  if (!(await scout.locator('[aria-label="Recruitment brief criteria"]').count()))
+    fail('J3: declining the sidebar prompt still navigated');
   say('J3: the sidebar asks too — one guard, every exit');
   scout.off('dialog', onDialog);
   // Accept and leave, so later journeys start clean.
   scout.once('dialog', (d) => d.accept());
-  await scout.evaluate(() => { window.location.hash = '#/recruitment/rooms'; });
+  await scout.evaluate(() => {
+    window.location.hash = '#/recruitment/rooms';
+  });
   await scout.waitForTimeout(900);
-  if (await scout.locator('[aria-label="Recruitment brief criteria"]').count()) fail('J3: accepting the prompt did not leave');
+  if (await scout.locator('[aria-label="Recruitment brief criteria"]').count())
+    fail('J3: accepting the prompt did not leave');
   say('J3: accepting leaves');
 }
 
@@ -289,17 +385,24 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   const mLabels = await mandatory.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
   const unexplained = mLabels.filter((l) => !/Always on/i.test(l));
   if (unexplained.length) fail(`J4: a locked control does not say it is always on (${unexplained.join('; ')})`);
-  if (!mLabels.some((l) => /Security and account/.test(l))) fail(`J4: the security category is not among the locked ones (${mLabels.join('; ')})`);
-  say(`J4: every mandatory category is locked and labelled Always on (${mLabels.length}: ${mLabels.map((l) => l.split(':')[0]).join(', ')})`);
+  if (!mLabels.some((l) => /Security and account/.test(l)))
+    fail(`J4: the security category is not among the locked ones (${mLabels.join('; ')})`);
+  say(
+    `J4: every mandatory category is locked and labelled Always on (${mLabels.length}: ${mLabels.map((l) => l.split(':')[0]).join(', ')})`,
+  );
   let sent = null;
-  const onReq = (r) => { if (r.method() === 'PUT' && /notification-preferences$/.test(new URL(r.url()).pathname)) sent = JSON.parse(r.postData() ?? '{}'); };
+  const onReq = (r) => {
+    if (r.method() === 'PUT' && /notification-preferences$/.test(new URL(r.url()).pathname))
+      sent = JSON.parse(r.postData() ?? '{}');
+  };
   scout.on('request', onReq);
   const mentions = panel.locator('input[type="checkbox"][aria-label^="Mentions"]');
   if (!(await mentions.count())) fail('J4: no Mentions toggle');
   await mentions.click();
   await scout.waitForTimeout(900);
   scout.off('request', onReq);
-  if (!sent || sent.categories?.mentions !== false) fail(`J4: the toggle did not PUT {mentions:false} (${JSON.stringify(sent)})`);
+  if (!sent || sent.categories?.mentions !== false)
+    fail(`J4: the toggle did not PUT {mentions:false} (${JSON.stringify(sent)})`);
   say('J4: turning Mentions off sends exactly that category to the server');
   const server = (await j('GET', '/org/notification-preferences', undefined, MARIA)).body.preferences;
   if (server.categories.find((c) => c.id === 'mentions').enabled !== false) fail('J4: the server did not record it');
@@ -320,7 +423,8 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   await goto(scout, ORG, '[data-panel="audit-log"]');
   await scout.waitForTimeout(800);
   const audit = await scout.locator('[data-panel="audit-log"]').innerText();
-  if (!/Tom Field/.test(audit) || !/shortlist/i.test(audit)) fail(`J5: the audit log does not show the colleague's status change: ${audit.slice(0, 200)}`);
+  if (!/Tom Field/.test(audit) || !/shortlist/i.test(audit))
+    fail(`J5: the audit log does not show the colleague's status change: ${audit.slice(0, 200)}`);
   say('J5: a lead sees who moved the Room and to what');
   if (audit.includes(SECRET)) fail('J5: the audit log shows the note body');
   if (!/note was written|note/i.test(audit)) fail('J5: the audit log does not say a note existed');
@@ -375,13 +479,15 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   await goto(tom, ORG, '[data-panel="audit-log"]');
   await tom.waitForTimeout(1000);
   const audit = await tom.locator('[data-panel="audit-log"]').innerText();
-  if (!/do not have permission/i.test(audit)) fail(`J8: a scout's 403 on the audit log is not explained: ${audit.slice(0, 160)}`);
+  if (!/do not have permission/i.test(audit))
+    fail(`J8: a scout's 403 on the audit log is not explained: ${audit.slice(0, 160)}`);
   say('J8: a scout sees a permission message on the audit log');
   if (!(await tom.locator('nav.sidebar').count())) fail('J8: the 403 signed the scout out');
   const token = await tokenOf(tom);
   if (!token) fail('J8: the session was cleared on a 403');
   say('J8: and stays signed in — a 403 is about one request, not the session');
-  if (await tom.locator('[data-panel="audit-log"] button:has-text("Try again")').count()) fail('J8: a 403 offered "Try again", which would repeat the same answer');
+  if (await tom.locator('[data-panel="audit-log"] button:has-text("Try again")').count())
+    fail('J8: a 403 offered "Try again", which would repeat the same answer');
   say('J8: no retry is offered for an answer that will not change');
   // Reload the page: session restore must survive a 403 too.
   await tom.reload();
@@ -395,7 +501,8 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
 {
   await goto(scout, '#/search', '[data-ordering]');
   const line = await scout.locator('[data-ordering]').innerText();
-  if (!/not ability/i.test(line) || !/Trust Score/.test(line)) fail(`J9: the ordering statement is incomplete: ${line}`);
+  if (!/not ability/i.test(line) || !/Trust Score/.test(line))
+    fail(`J9: the ordering statement is incomplete: ${line}`);
   say(`J9: Discover states its ordering — "${line.slice(0, 80)}…"`);
   const ids = await scout.locator('.player-card').allInnerTexts();
   await scout.reload();
@@ -417,14 +524,23 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   await p.selectOption('.enter-row select', 'Head of Recruitment').catch(() => {});
   await p.click('button:has-text("Enter workspace")');
   await p.waitForSelector('.topbar', { timeout: 30000 });
-  await p.evaluate((h) => { window.location.hash = h; }, ORG);
-  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250); await p.evaluate(() => document.querySelectorAll('details.settings-row').forEach((d) => { d.open = true; })); // Staff & Security sections are rows; open them, then assert the same
+  await p.evaluate((h) => {
+    window.location.hash = h;
+  }, ORG);
+  for (let i = 0; i < 20 && !(await p.locator('details.settings-row').count()); i++) await p.waitForTimeout(250);
+  await p.evaluate(() =>
+    document.querySelectorAll('details.settings-row').forEach((d) => {
+      d.open = true;
+    }),
+  ); // Staff & Security sections are rows; open them, then assert the same
   await p.waitForSelector('[data-panel="notification-preferences"]', { timeout: 20000 });
   await p.waitForTimeout(1200);
-  const overflow = await p.evaluate(() => Math.max(
-    document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    document.body.scrollWidth - document.body.clientWidth,
-  ));
+  const overflow = await p.evaluate(() =>
+    Math.max(
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      document.body.scrollWidth - document.body.clientWidth,
+    ),
+  );
   if (overflow > 4) fail(`J10: Organisation with the new panels overflows 390px by ${overflow}px`);
   say('J10: the preferences and audit panels fit a 390px phone');
   const first = p.locator('[data-panel="notification-preferences"] input[type="checkbox"]:not([disabled])').first();
@@ -442,13 +558,17 @@ await goto(scout, ORG, '[data-panel="notification-preferences"]');
   // The destructive confirm names the consequence, and declining does nothing.
   await goto(scout, `#/recruitment/rooms/${ROOM_ID}`, '[aria-label="Room header"]');
   let message = null;
-  scout.once('dialog', async (d) => { message = d.message(); await d.dismiss(); });
+  scout.once('dialog', async (d) => {
+    message = d.message();
+    await d.dismiss();
+  });
   await scout.selectOption('[aria-label="Move to"]', 'archived').catch(() => {});
   await scout.waitForTimeout(300);
   await scout.click('button:has-text("Apply")').catch(() => {});
   await scout.waitForTimeout(900);
   if (!message) fail('J10: archiving a Room raised no confirmation');
-  if (!/Decision history, comments and tasks are preserved/.test(message)) fail(`J10: the confirmation does not state the consequence: ${message}`);
+  if (!/Decision history, comments and tasks are preserved/.test(message))
+    fail(`J10: the confirmation does not state the consequence: ${message}`);
   if (/are you sure/i.test(message)) fail('J10: the confirmation asks "are you sure"');
   say('J10: archiving asks with the consequence stated, not "are you sure"');
   const status = (await j('GET', `/org/rooms/${ROOM_ID}`, undefined, MARIA)).body.room.status;

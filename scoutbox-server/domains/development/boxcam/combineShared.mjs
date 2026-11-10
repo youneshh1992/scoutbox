@@ -4,20 +4,37 @@ import crypto from 'node:crypto';
 
 // ------------------------------------------------------------------ states
 export const COMBINE_STATES = [
-  'not_started', 'setup_required', 'ready', 'attempt_in_progress', 'processing',
-  'combine_verified', 'partially_measured', 'measurement_unavailable',
-  'protocol_invalid', 'integrity_review', 'invalidated', 'cancelled',
+  'not_started',
+  'setup_required',
+  'ready',
+  'attempt_in_progress',
+  'processing',
+  'combine_verified',
+  'partially_measured',
+  'measurement_unavailable',
+  'protocol_invalid',
+  'integrity_review',
+  'invalidated',
+  'cancelled',
 ];
 export const COMBINE_TERMINAL = new Set([
-  'combine_verified', 'partially_measured', 'measurement_unavailable',
-  'protocol_invalid', 'integrity_review', 'invalidated', 'cancelled',
+  'combine_verified',
+  'partially_measured',
+  'measurement_unavailable',
+  'protocol_invalid',
+  'integrity_review',
+  'invalidated',
+  'cancelled',
 ]);
 export const METRIC_TYPES = ['count', 'time', 'distance', 'duration', 'set', 'percentage'];
 
 export const COMBINE_STATE_COPY = {
-  combine_verified: 'Measured from a standardized ScoutBox Combine Protocol during a live Box Cam session, with a supported detector, and passed the required integrity checks.',
-  partially_measured: 'The standardized measurement window was not fully observed, so this attempt is recorded as a measurement but is not Combine Verified. No value is projected or estimated.',
-  measurement_unavailable: 'This Combine measurement is not yet supported on this device. ScoutBox does not estimate or fabricate a result.',
+  combine_verified:
+    'Measured from a standardized ScoutBox Combine Protocol during a live Box Cam session, with a supported detector, and passed the required integrity checks.',
+  partially_measured:
+    'The standardized measurement window was not fully observed, so this attempt is recorded as a measurement but is not Combine Verified. No value is projected or estimated.',
+  measurement_unavailable:
+    'This Combine measurement is not yet supported on this device. ScoutBox does not estimate or fabricate a result.',
   protocol_invalid: 'The attempt did not follow the standardized protocol, so no verified measurement was produced.',
   integrity_review: 'This result is under integrity review and does not currently count as Combine Verified.',
   invalidated: 'This Combine result was invalidated after review and no longer counts as Combine Verified.',
@@ -43,10 +60,17 @@ const protocol = (p) => ({
 
 export const COMBINE_PROTOCOLS = [
   protocol({
-    id: 'combine-box-touch-60', version: 1, title: 'Box Touch 60', category: 'ball_mastery',
+    id: 'combine-box-touch-60',
+    version: 1,
+    title: 'Box Touch 60',
+    category: 'ball_mastery',
     description: 'As many controlled alternating touches on top of the ball as possible in 60 seconds.',
-    drillId: 'box-touches', drillTarget: { type: 'repetitions', value: 2000 },
-    metricType: 'count', metricUnit: 'touches', direction: 'higher', precision: 'integer',
+    drillId: 'box-touches',
+    drillTarget: { type: 'repetitions', value: 2000 },
+    metricType: 'count',
+    metricUnit: 'touches',
+    direction: 'higher',
+    precision: 'integer',
     protocolWindowMs: 60_000,
     requiredCapabilities: ['player_presence', 'ball_presence', 'rep_count'],
     setupRequirements: 'Full body and ball in frame, stable phone, 2m × 2m clear area.',
@@ -55,15 +79,23 @@ export const COMBINE_PROTOCOLS = [
     equipmentRequirements: ['ball'],
     startRule: 'The 60-second measurement window begins when the attempt starts.',
     finishRule: 'The window closes at 60 seconds. Only touches observed inside the window count.',
-    validAttemptRules: 'Player and ball must remain observable. If observation is lost, the attempt is partially measured, never estimated.',
+    validAttemptRules:
+      'Player and ball must remain observable. If observation is lost, the attempt is partially measured, never estimated.',
     scoringMethod: 'Verified, de-duplicated touch count inside the 60-second window.',
     safetyNotes: 'Warm up first. Stop on any pain — recorded work still counts.',
   }),
   protocol({
-    id: 'combine-box-juggle', version: 1, title: 'Box Juggle', category: 'ball_mastery',
+    id: 'combine-box-juggle',
+    version: 1,
+    title: 'Box Juggle',
+    category: 'ball_mastery',
     description: 'Total verified juggles (keepy-uppies) within a 60-second window.',
-    drillId: 'box-juggles', drillTarget: { type: 'repetitions', value: 2000 },
-    metricType: 'count', metricUnit: 'juggles', direction: 'higher', precision: 'integer',
+    drillId: 'box-juggles',
+    drillTarget: { type: 'repetitions', value: 2000 },
+    metricType: 'count',
+    metricUnit: 'juggles',
+    direction: 'higher',
+    precision: 'integer',
     protocolWindowMs: 60_000,
     requiredCapabilities: ['player_presence', 'ball_presence', 'rep_count'],
     setupRequirements: 'Full body in frame, ball never leaves the frame vertically.',
@@ -77,10 +109,17 @@ export const COMBINE_PROTOCOLS = [
     safetyNotes: 'Warm up first. Stop on any pain — recorded work still counts.',
   }),
   protocol({
-    id: 'combine-box-control-60', version: 1, title: 'Box Control 60', category: 'close_control',
+    id: 'combine-box-control-60',
+    version: 1,
+    title: 'Box Control 60',
+    category: 'close_control',
     description: 'Verified active close-control time inside a fixed 60-second protocol.',
-    drillId: 'box-control', drillTarget: { type: 'duration', value: 60_000 },
-    metricType: 'duration', metricUnit: 'seconds', direction: 'higher', precision: 'tenths',
+    drillId: 'box-control',
+    drillTarget: { type: 'duration', value: 60_000 },
+    metricType: 'duration',
+    metricUnit: 'seconds',
+    direction: 'higher',
+    precision: 'tenths',
     protocolWindowMs: 60_000,
     // Duration only: the metric the web provider supports, so this can be Combine Verified today.
     requiredCapabilities: ['player_presence', 'ball_presence', 'active_duration'],
@@ -90,15 +129,23 @@ export const COMBINE_PROTOCOLS = [
     equipmentRequirements: ['ball'],
     startRule: 'The 60-second window begins when the attempt starts.',
     finishRule: 'Verified active control time observed inside the window (max 60.0s).',
-    validAttemptRules: 'If the ball or player leaves frame, that time does not count; a short-observed window is partially measured.',
+    validAttemptRules:
+      'If the ball or player leaves frame, that time does not count; a short-observed window is partially measured.',
     scoringMethod: 'Verified active-control seconds ∩ ball-visible, inside the window.',
     safetyNotes: 'Warm up first. Stop on any pain — recorded work still counts.',
   }),
   protocol({
-    id: 'combine-box-footwork', version: 1, title: 'Box Footwork', category: 'footwork',
+    id: 'combine-box-footwork',
+    version: 1,
+    title: 'Box Footwork',
+    category: 'footwork',
     description: 'Completed standardized lateral footwork intervals.',
-    drillId: 'box-footwork', drillTarget: { type: 'sets', value: 5 },
-    metricType: 'set', metricUnit: 'intervals', direction: 'higher', precision: 'integer',
+    drillId: 'box-footwork',
+    drillTarget: { type: 'sets', value: 5 },
+    metricType: 'set',
+    metricUnit: 'intervals',
+    direction: 'higher',
+    precision: 'integer',
     protocolWindowMs: 5 * 60_000,
     requiredCapabilities: ['player_presence', 'active_duration', 'interval_completion'],
     setupRequirements: 'Feet clearly visible between two markers.',
@@ -107,15 +154,24 @@ export const COMBINE_PROTOCOLS = [
     equipmentRequirements: [],
     startRule: 'Intervals begin when the attempt starts.',
     finishRule: 'Number of completed intervals out of the target.',
-    validAttemptRules: 'Player must remain observable during work intervals; rest intervals never count against the result.',
+    validAttemptRules:
+      'Player must remain observable during work intervals; rest intervals never count against the result.',
     scoringMethod: 'Count of completed intervals.',
     safetyNotes: 'Rest 30–60s between sets. Stop on any pain.',
   }),
   protocol({
-    id: 'combine-box-strength-60', version: 1, title: 'Box Strength 60', category: 'strength',
-    description: 'Valid observed bodyweight squat repetitions in 60 seconds. General physical-development evidence — not a measure of football ability.',
-    drillId: 'box-strength', drillTarget: { type: 'repetitions', value: 2000 },
-    metricType: 'count', metricUnit: 'reps', direction: 'higher', precision: 'integer',
+    id: 'combine-box-strength-60',
+    version: 1,
+    title: 'Box Strength 60',
+    category: 'strength',
+    description:
+      'Valid observed bodyweight squat repetitions in 60 seconds. General physical-development evidence — not a measure of football ability.',
+    drillId: 'box-strength',
+    drillTarget: { type: 'repetitions', value: 2000 },
+    metricType: 'count',
+    metricUnit: 'reps',
+    direction: 'higher',
+    precision: 'integer',
     protocolWindowMs: 60_000,
     requiredCapabilities: ['player_presence', 'active_motion', 'rep_count'],
     setupRequirements: 'Full body side-on in frame.',
@@ -132,41 +188,77 @@ export const COMBINE_PROTOCOLS = [
   // --------- future athletic protocols -----
   // Each needs a capability no provider has, so it stays `not_configured` until a real detector ships.
   protocol({
-    id: 'combine-agility-5-10-5', version: 1, title: '5-10-5 Agility', category: 'athletic',
+    id: 'combine-agility-5-10-5',
+    version: 1,
+    title: '5-10-5 Agility',
+    category: 'athletic',
     description: 'Standardized 5-10-5 pro-agility shuttle. Requires spatial calibration and automated timing gates.',
-    drillId: null, metricType: 'time', metricUnit: 'seconds', direction: 'lower', precision: 'hundredths',
-    protocolWindowMs: 60_000, requiredCapabilities: ['timing_gate', 'spatial_scale'],
-    calibrationRequirements: ['box_marker_5m'], practiceAllowed: false,
+    drillId: null,
+    metricType: 'time',
+    metricUnit: 'seconds',
+    direction: 'lower',
+    precision: 'hundredths',
+    protocolWindowMs: 60_000,
+    requiredCapabilities: ['timing_gate', 'spatial_scale'],
+    calibrationRequirements: ['box_marker_5m'],
+    practiceAllowed: false,
     setupRequirements: 'Three markers exactly 5 metres apart (Box Marker).',
     scoringMethod: 'Automated start/finish timing — not available in this environment.',
     safetyNotes: 'Requires a large, flat, clear surface.',
   }),
   protocol({
-    id: 'combine-accel-10m', version: 1, title: '10 m Acceleration', category: 'athletic',
+    id: 'combine-accel-10m',
+    version: 1,
+    title: '10 m Acceleration',
+    category: 'athletic',
     description: 'Standardized 10-metre acceleration. Requires spatial calibration and automated timing gates.',
-    drillId: null, metricType: 'time', metricUnit: 'seconds', direction: 'lower', precision: 'hundredths',
-    protocolWindowMs: 60_000, requiredCapabilities: ['timing_gate', 'spatial_scale'],
-    calibrationRequirements: ['box_marker_10m'], practiceAllowed: false,
+    drillId: null,
+    metricType: 'time',
+    metricUnit: 'seconds',
+    direction: 'lower',
+    precision: 'hundredths',
+    protocolWindowMs: 60_000,
+    requiredCapabilities: ['timing_gate', 'spatial_scale'],
+    calibrationRequirements: ['box_marker_10m'],
+    practiceAllowed: false,
     setupRequirements: 'Two markers exactly 10 metres apart (Box Marker).',
     scoringMethod: 'Automated start/finish timing — not available in this environment.',
     safetyNotes: 'Requires a straight, flat, clear 15m+ run.',
   }),
   protocol({
-    id: 'combine-broad-jump', version: 1, title: 'Standing Broad Jump', category: 'athletic',
+    id: 'combine-broad-jump',
+    version: 1,
+    title: 'Standing Broad Jump',
+    category: 'athletic',
     description: 'Standardized standing broad jump. Requires physical-scale calibration.',
-    drillId: null, metricType: 'distance', metricUnit: 'centimetres', direction: 'higher', precision: 'centimetres',
-    protocolWindowMs: 60_000, requiredCapabilities: ['spatial_scale'],
-    calibrationRequirements: ['box_marker_scale'], practiceAllowed: false,
+    drillId: null,
+    metricType: 'distance',
+    metricUnit: 'centimetres',
+    direction: 'higher',
+    precision: 'centimetres',
+    protocolWindowMs: 60_000,
+    requiredCapabilities: ['spatial_scale'],
+    calibrationRequirements: ['box_marker_scale'],
+    practiceAllowed: false,
     setupRequirements: 'Calibration marker of known size in frame (Box Marker).',
     scoringMethod: 'Calibrated distance measurement — not available in this environment.',
     safetyNotes: 'Land safely on a soft, clear surface.',
   }),
   protocol({
-    id: 'combine-passing-target', version: 1, title: 'Passing Target', category: 'technical',
+    id: 'combine-passing-target',
+    version: 1,
+    title: 'Passing Target',
+    category: 'technical',
     description: 'Successful passes into a defined target zone out of attempts. Requires target-zone detection.',
-    drillId: null, metricType: 'percentage', metricUnit: '%', direction: 'higher', precision: 'integer',
-    protocolWindowMs: 120_000, requiredCapabilities: ['target_zone', 'spatial_scale'],
-    calibrationRequirements: ['box_marker_target'], practiceAllowed: false,
+    drillId: null,
+    metricType: 'percentage',
+    metricUnit: '%',
+    direction: 'higher',
+    precision: 'integer',
+    protocolWindowMs: 120_000,
+    requiredCapabilities: ['target_zone', 'spatial_scale'],
+    calibrationRequirements: ['box_marker_target'],
+    practiceAllowed: false,
     setupRequirements: 'Defined target zone visible in frame.',
     scoringMethod: 'Objective successful/attempted ratio — not available in this environment.',
     safetyNotes: 'Clear the area around the target.',
@@ -179,8 +271,12 @@ export const COMBINE_PROTOCOLS = [
  */
 export function liveCombineState(attempt, boundSession) {
   if (!attempt) return null;
-  if (boundSession && boundSession.verificationState === 'invalidated'
-    && ['combine_verified', 'partially_measured'].includes(attempt.combineState)) return 'invalidated';
+  if (
+    boundSession &&
+    boundSession.verificationState === 'invalidated' &&
+    ['combine_verified', 'partially_measured'].includes(attempt.combineState)
+  )
+    return 'invalidated';
   return attempt.combineState;
 }
 
@@ -194,8 +290,10 @@ export function isProductionValidCombine(attempt, boundSession, provider) {
   return liveCombineState(attempt, boundSession) === 'combine_verified';
 }
 
-export const combineProtocol = (id, version) => COMBINE_PROTOCOLS.find((p) => p.id === id && p.version === Number(version)) ?? null;
-export const latestCombineProtocol = (id) => COMBINE_PROTOCOLS.filter((p) => p.id === id).sort((a, b) => b.version - a.version)[0] ?? null;
+export const combineProtocol = (id, version) =>
+  COMBINE_PROTOCOLS.find((p) => p.id === id && p.version === Number(version)) ?? null;
+export const latestCombineProtocol = (id) =>
+  COMBINE_PROTOCOLS.filter((p) => p.id === id).sort((a, b) => b.version - a.version)[0] ?? null;
 
 export function measurementSupported(protocolDef, providerCapabilities = []) {
   const caps = new Set(providerCapabilities);
@@ -208,9 +306,21 @@ export function measurementCapability(protocolDef, providerCapabilities = []) {
 
 // ---------------------------------------------------------- measurement
 /** From the finalized session's server-derived values only. A short-observed window is partial, not scaled up. */
-export function measureAttempt({ protocolDef, session, calibrationPassed, providerCapabilities = [], mode = 'verified' }) {
+export function measureAttempt({
+  protocolDef,
+  session,
+  calibrationPassed,
+  providerCapabilities = [],
+  mode = 'verified',
+}) {
   const reasons = [];
-  const fail = (combineState, r, extra = {}) => ({ combineState, measurementState: combineState === 'combine_verified' ? 'measured' : combineState, measuredValue: null, reasons: [...reasons, r].filter(Boolean), ...extra });
+  const fail = (combineState, r, extra = {}) => ({
+    combineState,
+    measurementState: combineState === 'combine_verified' ? 'measured' : combineState,
+    measuredValue: null,
+    reasons: [...reasons, r].filter(Boolean),
+    ...extra,
+  });
 
   if (!protocolDef) return fail('protocol_invalid', 'PROTOCOL_UNKNOWN');
   if (!session) return fail('protocol_invalid', 'SESSION_MISSING');
@@ -225,9 +335,12 @@ export function measureAttempt({ protocolDef, session, calibrationPassed, provid
   // `partially_verified` are treated alike.
   if (session.verificationState === 'invalidated') return fail('invalidated', 'SESSION_INVALIDATED');
   if (session.verificationState === 'cancelled') return fail('cancelled', 'SESSION_CANCELLED');
-  if (session.verificationState === 'completed_unverified') return fail('protocol_invalid', 'LIVENESS_OR_PROVIDER_MISSING');
-  if (session.verificationState === 'unable_to_verify') return fail('measurement_unavailable', 'NO_RELIABLE_OBSERVATION');
-  if (!['verified', 'partially_verified'].includes(session.verificationState)) return fail('protocol_invalid', 'SESSION_NOT_FINALIZED');
+  if (session.verificationState === 'completed_unverified')
+    return fail('protocol_invalid', 'LIVENESS_OR_PROVIDER_MISSING');
+  if (session.verificationState === 'unable_to_verify')
+    return fail('measurement_unavailable', 'NO_RELIABLE_OBSERVATION');
+  if (!['verified', 'partially_verified'].includes(session.verificationState))
+    return fail('protocol_invalid', 'SESSION_NOT_FINALIZED');
 
   const windowMs = protocolDef.protocolWindowMs;
   // The window is fully observed when the server-known session duration reaches it (±1 ms).
@@ -260,30 +373,64 @@ export function measureAttempt({ protocolDef, session, calibrationPassed, provid
 
   // Practice attempts never become Combine Verified.
   if (mode === 'practice') {
-    return { combineState: 'partially_measured', measurementState: 'practice', measuredValue, reasons: [...reasons, 'PRACTICE_ATTEMPT'], practice: true, observedMs, windowMs };
+    return {
+      combineState: 'partially_measured',
+      measurementState: 'practice',
+      measuredValue,
+      reasons: [...reasons, 'PRACTICE_ATTEMPT'],
+      practice: true,
+      observedMs,
+      windowMs,
+    };
   }
 
   // Combine Verified needs the full window observed at good quality; otherwise it's a recorded measurement.
   if (!windowFullyObserved) {
     reasons.push('MEASUREMENT_WINDOW_INCOMPLETE');
-    return { combineState: 'partially_measured', measurementState: 'partially_measured', measuredValue, observedMs, windowMs, reasons };
+    return {
+      combineState: 'partially_measured',
+      measurementState: 'partially_measured',
+      measuredValue,
+      observedMs,
+      windowMs,
+      reasons,
+    };
   }
   if (session.quality !== 'good') {
     reasons.push('OBSERVATION_QUALITY_DEGRADED');
-    return { combineState: 'partially_measured', measurementState: 'partially_measured', measuredValue, observedMs, windowMs, reasons };
+    return {
+      combineState: 'partially_measured',
+      measurementState: 'partially_measured',
+      measuredValue,
+      observedMs,
+      windowMs,
+      reasons,
+    };
   }
-  return { combineState: 'combine_verified', measurementState: 'measured', measuredValue, observedMs, windowMs, reasons };
+  return {
+    combineState: 'combine_verified',
+    measurementState: 'measured',
+    measuredValue,
+    observedMs,
+    windowMs,
+    reasons,
+  };
 }
 
 /** At the protocol's declared precision, never more. */
 export function formatCombineValue(protocolDef, value) {
   if (value == null) return '—';
   switch (protocolDef.precision) {
-    case 'integer': return `${Math.round(value)}`;
-    case 'tenths': return value.toFixed(1);
-    case 'hundredths': return value.toFixed(2);
-    case 'centimetres': return `${Math.round(value)}`;
-    default: return `${value}`;
+    case 'integer':
+      return `${Math.round(value)}`;
+    case 'tenths':
+      return value.toFixed(1);
+    case 'hundredths':
+      return value.toFixed(2);
+    case 'centimetres':
+      return `${Math.round(value)}`;
+    default:
+      return `${value}`;
   }
 }
 
@@ -301,13 +448,18 @@ export function personalBest(attempts) {
 
 export function combineResultHash(attempt) {
   const canonical = JSON.stringify({
-    playerId: attempt.playerId, attemptId: attempt.id,
-    protocolId: attempt.protocolId, protocolVersion: attempt.protocolVersion,
+    playerId: attempt.playerId,
+    attemptId: attempt.id,
+    protocolId: attempt.protocolId,
+    protocolVersion: attempt.protocolVersion,
     boxSessionId: attempt.boxSessionId,
-    metricType: attempt.metricType, measuredValue: attempt.measuredValue,
-    provider: attempt.provider, providerVersion: attempt.providerVersion,
+    metricType: attempt.metricType,
+    measuredValue: attempt.measuredValue,
+    provider: attempt.provider,
+    providerVersion: attempt.providerVersion,
     measurementAlgorithmVersion: attempt.measurementAlgorithmVersion,
-    completedAt: attempt.completedAt, combineState: attempt.combineState,
+    completedAt: attempt.completedAt,
+    combineState: attempt.combineState,
   });
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }
@@ -315,12 +467,26 @@ export function combineResultHash(attempt) {
 /** Missing results are null, not zero; there is no overall ranking, clubs sort columns themselves. */
 export function comparisonMatrix({ players, protocols, bestByPlayerProtocol }) {
   return {
-    protocols: protocols.map((p) => ({ id: p.id, version: p.version, title: p.title, metricUnit: p.metricUnit, direction: p.direction })),
+    protocols: protocols.map((p) => ({
+      id: p.id,
+      version: p.version,
+      title: p.title,
+      metricUnit: p.metricUnit,
+      direction: p.direction,
+    })),
     rows: players.map((pl) => ({
-      playerId: pl.id, playerName: pl.name,
+      playerId: pl.id,
+      playerName: pl.name,
       cells: protocols.map((p) => {
         const b = bestByPlayerProtocol.get(`${pl.id}::${p.id}@${p.version}`) ?? null;
-        return b ? { value: b.measuredValue, display: formatCombineValue(p, b.measuredValue), verified: true, at: b.completedAt } : null;
+        return b
+          ? {
+              value: b.measuredValue,
+              display: formatCombineValue(p, b.measuredValue),
+              verified: true,
+              at: b.completedAt,
+            }
+          : null;
       }),
     })),
     note: 'Verified numbers only (✓). A blank cell means no verified result — not zero. ScoutBox does not rank players overall.',

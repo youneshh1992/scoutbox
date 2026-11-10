@@ -19,8 +19,18 @@ import { AgentBrand } from './AgentVisuals';
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ScreenId } from './App';
 import {
-  INBOX_ITEM, MAX_SHORTCUTS, type NavContext, type NavGroupView, type NavItem, type NavLocation, type NavSection,
-  allItems, filterSections, groupedChildren, searchNav, stripLayout,
+  INBOX_ITEM,
+  MAX_SHORTCUTS,
+  type NavContext,
+  type NavGroupView,
+  type NavItem,
+  type NavLocation,
+  type NavSection,
+  allItems,
+  filterSections,
+  groupedChildren,
+  searchNav,
+  stripLayout,
 } from './nav';
 import { Icon } from './icons';
 import { t } from './i18n';
@@ -28,15 +38,24 @@ import { t } from './i18n';
 type TKey = Parameters<typeof t>[0];
 const tr = (key: string) => t(key as TKey);
 
-export interface Brand { short: string; long: string }
+export interface Brand {
+  short: string;
+  long: string;
+}
 /** The organisation block under the wordmark (reference `.p-org`): initials tile, name, one quiet line. */
-export interface OrgBlock { initials: string; name: string; line?: string }
+export interface OrgBlock {
+  initials: string;
+  name: string;
+  line?: string;
+}
 
 /** ≤ 900px: the sidebar is a drawer. Tapping a multi-page section there
  *  expands it (the pages are the point of opening a drawer) rather than
  *  navigating away and closing it. Desktop behaviour is unchanged. */
 function useIsPhoneShell(): boolean {
-  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches);
+  const [phone, setPhone] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches,
+  );
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 900px)');
     const on = () => setPhone(mq.matches);
@@ -48,8 +67,21 @@ function useIsPhoneShell(): boolean {
 
 // ------------------------------------------------------------------ Sidebar
 export function Sidebar({
-  sections, location, onNavigate, collapsed, onToggleCollapsed, shortcuts,
-  onTogglePin, unreadMessages, badges = {}, onOpenPalette, drawerOpen, onCloseDrawer, footer, brand, org,
+  sections,
+  location,
+  onNavigate,
+  collapsed,
+  onToggleCollapsed,
+  shortcuts,
+  onTogglePin,
+  unreadMessages,
+  badges = {},
+  onOpenPalette,
+  drawerOpen,
+  onCloseDrawer,
+  footer,
+  brand,
+  org,
 }: {
   sections: NavSection[];
   location: NavLocation;
@@ -60,7 +92,7 @@ export function Sidebar({
   onTogglePin: (id: ScreenId) => void;
   unreadMessages: number;
   badges?: Partial<Record<NavSection['id'], number>>;
-  onOpenPalette: (query?:string) => void;
+  onOpenPalette: (query?: string) => void;
   drawerOpen: boolean;
   onCloseDrawer: () => void;
   footer: ReactNode;
@@ -82,9 +114,16 @@ export function Sidebar({
   // person had opened on the way, so the sidebar shows one expanded section
   // (its one open group) rather than everything they passed through.
   useEffect(() => {
-    if (location.sectionId) setOpen((prev) => (prev.size === 1 && prev.has(location.sectionId!) ? prev : new Set([location.sectionId!])));
+    if (location.sectionId)
+      setOpen((prev) => (prev.size === 1 && prev.has(location.sectionId!) ? prev : new Set([location.sectionId!])));
   }, [location.sectionId, location.itemId]);
-  const toggle = (id: string) => setOpen((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggle = (id: string) =>
+    setOpen((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
 
   // Collapsed-rail flyout: at most one open. Closed by Escape, by clicking
   // elsewhere, by leaving it with the pointer, and by navigating.
@@ -92,83 +131,133 @@ export function Sidebar({
   const navRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!flyout) return;
-    const onDown = (e: MouseEvent) => { if (navRef.current && !navRef.current.contains(e.target as Node)) setFlyout(null); };
+    const onDown = (e: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) setFlyout(null);
+    };
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, [flyout]);
-  useEffect(() => { if (!collapsed) setFlyout(null); }, [collapsed]);
+  useEffect(() => {
+    if (!collapsed) setFlyout(null);
+  }, [collapsed]);
 
-  const go = useCallback((id: ScreenId) => { onNavigate(id); onCloseDrawer(); setFlyout(null); }, [onNavigate, onCloseDrawer]);
+  const go = useCallback(
+    (id: ScreenId) => {
+      onNavigate(id);
+      onCloseDrawer();
+      setFlyout(null);
+    },
+    [onNavigate, onCloseDrawer],
+  );
   const phone = useIsPhoneShell();
 
   return (
     <>
       {drawerOpen && <div className="drawer-veil nav-drawer-veil" onClick={onCloseDrawer} />}
-      <nav ref={navRef} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`} aria-label="Main navigation">
+      <nav
+        ref={navRef}
+        id="app-sidebar"
+        className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'drawer-open' : ''}`}
+        aria-label="Main navigation"
+      >
         {/* The reference wordmark: one ink, a green square, the edition beside it. */}
         <div className="brand" title={`ScoutBox ${brand.long}`}>
-          {collapsed ? <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>S</span> : <AgentBrand/>}
+          {collapsed ? (
+            <span className="wordmark" aria-label={`ScoutBox ${brand.long}`}>
+              S
+            </span>
+          ) : (
+            <AgentBrand />
+          )}
         </div>
         {org && (
           <div className="p-org" aria-label={org.name}>
-            <span className="p-avatar club" aria-hidden="true">{org.initials}</span>
-            <span><strong>{org.name}</strong>{org.line && <small>{org.line}</small>}</span>
+            <span className="p-avatar club" aria-hidden="true">
+              {org.initials}
+            </span>
+            <span>
+              <strong>{org.name}</strong>
+              {org.line && <small>{org.line}</small>}
+            </span>
           </div>
         )}
 
         <div className="nav-scroll" data-testid="nav-scroll">
-        {sections.map((s) => (
-          <SectionRow
-            key={s.id}
-            section={s}
-            active={location.sectionId === s.id}
-            activeItemId={location.itemId}
-            expanded={open.has(s.id)}
-            onToggle={() => toggle(s.id)}
-            collapsed={collapsed}
-            flyoutOpen={flyout === s.id}
-            onFlyout={(want) => setFlyout(want ? s.id : null)}
-            count={badges[s.id]}
-            onNavigate={go}
-            expandOnSelect={phone && drawerOpen}
-          />
-        ))}
+          {sections.map((s) => (
+            <SectionRow
+              key={s.id}
+              section={s}
+              active={location.sectionId === s.id}
+              activeItemId={location.itemId}
+              expanded={open.has(s.id)}
+              onToggle={() => toggle(s.id)}
+              collapsed={collapsed}
+              flyoutOpen={flyout === s.id}
+              onFlyout={(want) => setFlyout(want ? s.id : null)}
+              count={badges[s.id]}
+              onNavigate={go}
+              expandOnSelect={phone && drawerOpen}
+            />
+          ))}
 
-        {shortcuts.length > 0 && !collapsed && (
-          <div className="nav-shortcuts">
-            <div className="nav-group-label">{t('navsec.shortcuts')}</div>
-            {shortcuts.map((id) => (
-              <button key={id} className={`nav-shortcut ${location.itemId === id ? 'active' : ''}`} onClick={() => go(id)}>
-                <Icon name="pin" size={12} />
-                <span className="grow">{labelFor(id)}</span>
-                <span
-                  role="button" tabIndex={0} className="nav-unpin" aria-label={t('navsec.unpin')} title={t('navsec.unpin')}
-                  onClick={(e) => { e.stopPropagation(); onTogglePin(id); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onTogglePin(id); } }}
-                >×</span>
-              </button>
-            ))}
-          </div>
-        )}
+          {shortcuts.length > 0 && !collapsed && (
+            <div className="nav-shortcuts">
+              <div className="nav-group-label">{t('navsec.shortcuts')}</div>
+              {shortcuts.map((id) => (
+                <button
+                  key={id}
+                  className={`nav-shortcut ${location.itemId === id ? 'active' : ''}`}
+                  onClick={() => go(id)}
+                >
+                  <Icon name="pin" size={12} />
+                  <span className="grow">{labelFor(id)}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="nav-unpin"
+                    aria-label={t('navsec.unpin')}
+                    title={t('navsec.unpin')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePin(id);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onTogglePin(id);
+                      }
+                    }}
+                  >
+                    ×
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
 
-        <div className="nav-divider" role="separator" />
-        <button
-          className={`nav-section ${location.itemId === 'inbox' ? 'active' : ''}`}
-          aria-current={location.itemId === 'inbox' ? 'page' : undefined}
-          aria-label={t('nav.inbox')}
-          title={collapsed ? t('nav.inbox') : undefined}
-          onClick={() => go('inbox')}
-        >
-          <Icon name="inbox" />
-          {!collapsed && <span className="grow">{t('nav.inbox')}</span>}
-          {unreadMessages > 0 && <span className="nav-badge">{unreadMessages}</span>}
-          {location.itemId === 'inbox' && <span className="nav-active-bar" aria-hidden="true" />}
-        </button>
-
+          <div className="nav-divider" role="separator" />
+          <button
+            className={`nav-section ${location.itemId === 'inbox' ? 'active' : ''}`}
+            aria-current={location.itemId === 'inbox' ? 'page' : undefined}
+            aria-label={t('nav.inbox')}
+            title={collapsed ? t('nav.inbox') : undefined}
+            onClick={() => go('inbox')}
+          >
+            <Icon name="inbox" />
+            {!collapsed && <span className="grow">{t('nav.inbox')}</span>}
+            {unreadMessages > 0 && <span className="nav-badge">{unreadMessages}</span>}
+            {location.itemId === 'inbox' && <span className="nav-active-bar" aria-hidden="true" />}
+          </button>
         </div>
         <div className="spacer" />
         {!collapsed && footer}
-        <button className="nav-collapse" onClick={onToggleCollapsed} aria-label={collapsed ? t('navsec.expand') : t('navsec.collapse')} title={collapsed ? t('navsec.expand') : t('navsec.collapse')}>
+        <button
+          className="nav-collapse"
+          onClick={onToggleCollapsed}
+          aria-label={collapsed ? t('navsec.expand') : t('navsec.collapse')}
+          title={collapsed ? t('navsec.expand') : t('navsec.collapse')}
+        >
           <Icon name={collapsed ? 'expand' : 'collapse'} />
           {!collapsed && <span className="grow">{t('navsec.collapse')}</span>}
         </button>
@@ -179,9 +268,29 @@ export function Sidebar({
 
 /** One section: its button, its chevron, and — when expanded or flown out —
  *  its grouped children. */
-function SectionRow({ section: s, active, activeItemId, expanded, onToggle, collapsed, flyoutOpen, onFlyout, count, onNavigate, expandOnSelect }: {
-  section: NavSection; active: boolean; activeItemId: ScreenId | null; expanded: boolean; onToggle: () => void;
-  collapsed: boolean; flyoutOpen: boolean; onFlyout: (open: boolean) => void; count?: number; onNavigate: (id: ScreenId) => void;
+function SectionRow({
+  section: s,
+  active,
+  activeItemId,
+  expanded,
+  onToggle,
+  collapsed,
+  flyoutOpen,
+  onFlyout,
+  count,
+  onNavigate,
+  expandOnSelect,
+}: {
+  section: NavSection;
+  active: boolean;
+  activeItemId: ScreenId | null;
+  expanded: boolean;
+  onToggle: () => void;
+  collapsed: boolean;
+  flyoutOpen: boolean;
+  onFlyout: (open: boolean) => void;
+  count?: number;
+  onNavigate: (id: ScreenId) => void;
   expandOnSelect?: boolean;
 }) {
   const label = tr(s.labelKey);
@@ -195,9 +304,20 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
   const onFlyKey = (e: KeyboardEvent) => {
     const items = Array.from(flyRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]') ?? []);
     const i = items.findIndex((b) => b === document.activeElement);
-    if (e.key === 'Escape') { e.preventDefault(); onFlyout(false); iconRef.current?.focus(); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onFlyout(false);
+      iconRef.current?.focus();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      items[(i + 1) % items.length]?.focus();
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(i - 1 + items.length) % items.length]?.focus();
+    }
   };
   useEffect(() => {
     if (flyoutOpen) flyRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
@@ -212,52 +332,72 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
   // flyout and a section with no groups keep every page visible.
   const activeGroupId = groups.find((g) => g.children.some((c) => c.id === activeItemId))?.id ?? null;
   const [chosenGroup, setChosenGroup] = useState<string | null | undefined>(undefined);
-  useEffect(() => { setChosenGroup(undefined); }, [activeItemId]);
+  useEffect(() => {
+    setChosenGroup(undefined);
+  }, [activeItemId]);
   const openGroup = chosenGroup === undefined ? (activeGroupId ?? groups[0]?.id ?? null) : chosenGroup;
 
   // A group is a labelled container, not a destination: role="group" with its
   // name. In the accordion its heading is a disclosure button (aria-expanded,
   // aria-controls) that never navigates; in the flyout menu it is plain text.
-  const pages = (g: NavGroupView, role: 'menuitem' | undefined) => g.children.map((c) => (
-    <button
-      key={c.id}
-      role={role}
-      className={`nav-child ${activeItemId === c.id ? 'active' : ''}`}
-      aria-current={activeItemId === c.id ? 'page' : undefined}
-      onClick={() => onNavigate(c.id)}
-    >
-      {tr(c.labelKey)}
-    </button>
-  ));
-  const children = (role: 'menuitem' | undefined, accordion: boolean) => groups.map((g) => {
-    if (!g.labelKey) return <div key="all" className="nav-group">{pages(g, role)}</div>;
-    const name = tr(g.labelKey);
-    if (!accordion) {
+  const pages = (g: NavGroupView, role: 'menuitem' | undefined) =>
+    g.children.map((c) => (
+      <button
+        key={c.id}
+        role={role}
+        className={`nav-child ${activeItemId === c.id ? 'active' : ''}`}
+        aria-current={activeItemId === c.id ? 'page' : undefined}
+        onClick={() => onNavigate(c.id)}
+      >
+        {tr(c.labelKey)}
+      </button>
+    ));
+  const children = (role: 'menuitem' | undefined, accordion: boolean) =>
+    groups.map((g) => {
+      if (!g.labelKey)
+        return (
+          <div key="all" className="nav-group">
+            {pages(g, role)}
+          </div>
+        );
+      const name = tr(g.labelKey);
+      if (!accordion) {
+        return (
+          <div key={g.id} className="nav-group" role="group" aria-label={name}>
+            <div className="nav-group-label" aria-hidden="true">
+              {name}
+            </div>
+            {pages(g, role)}
+          </div>
+        );
+      }
+      const isOpen = openGroup === g.id;
+      const gid = `${panelId}-${g.id}`;
       return (
-        <div key={g.id} className="nav-group" role="group" aria-label={name}>
-          <div className="nav-group-label" aria-hidden="true">{name}</div>
-          {pages(g, role)}
+        <div
+          key={g.id}
+          className={`nav-group ${isOpen ? 'open' : ''} ${activeGroupId === g.id ? 'has-active' : ''}`}
+          role="group"
+          aria-label={name}
+        >
+          <button
+            type="button"
+            className="nav-group-label"
+            aria-expanded={isOpen}
+            aria-controls={gid}
+            onClick={() => setChosenGroup(isOpen ? null : g.id)}
+          >
+            <span className="grow">{name}</span>
+            <Icon name="chevron" size={11} />
+          </button>
+          {isOpen && (
+            <div id={gid} className="nav-group-pages">
+              {pages(g, role)}
+            </div>
+          )}
         </div>
       );
-    }
-    const isOpen = openGroup === g.id;
-    const gid = `${panelId}-${g.id}`;
-    return (
-      <div key={g.id} className={`nav-group ${isOpen ? 'open' : ''} ${activeGroupId === g.id ? 'has-active' : ''}`} role="group" aria-label={name}>
-        <button
-          type="button"
-          className="nav-group-label"
-          aria-expanded={isOpen}
-          aria-controls={gid}
-          onClick={() => setChosenGroup(isOpen ? null : g.id)}
-        >
-          <span className="grow">{name}</span>
-          <Icon name="chevron" size={11} />
-        </button>
-        {isOpen && <div id={gid} className="nav-group-pages">{pages(g, role)}</div>}
-      </div>
-    );
-  });
+    });
 
   if (collapsed) {
     // Rail: a single-child section navigates; a multi-child one opens a menu.
@@ -272,15 +412,26 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
           aria-haspopup={multi ? 'menu' : undefined}
           aria-expanded={multi ? flyoutOpen : undefined}
           onClick={() => (multi ? onFlyout(!flyoutOpen) : onNavigate(s.children[0].id))}
-          onKeyDown={(e) => { if (multi && e.key === 'ArrowRight') { e.preventDefault(); onFlyout(true); } }}
+          onKeyDown={(e) => {
+            if (multi && e.key === 'ArrowRight') {
+              e.preventDefault();
+              onFlyout(true);
+            }
+          }}
         >
           <Icon name={s.icon} />
-          {!!count && count > 0 && <span className="nav-badge" aria-label={`${count}`}>{count}</span>}
+          {!!count && count > 0 && (
+            <span className="nav-badge" aria-label={`${count}`}>
+              {count}
+            </span>
+          )}
           {active && <span className="nav-active-bar" aria-hidden="true" />}
         </button>
         {multi && flyoutOpen && (
           <div ref={flyRef} className="nav-flyout" role="menu" aria-label={label} onKeyDown={onFlyKey}>
-            <div className="nav-flyout-title" aria-hidden="true">{label}</div>
+            <div className="nav-flyout-title" aria-hidden="true">
+              {label}
+            </div>
             {children('menuitem', false)}
           </div>
         )}
@@ -300,7 +451,11 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
         >
           <Icon name={s.icon} />
           <span className="grow">{label}</span>
-          {!!count && count > 0 && <span className="nav-badge" aria-label={`${count}`}>{count}</span>}
+          {!!count && count > 0 && (
+            <span className="nav-badge" aria-label={`${count}`}>
+              {count}
+            </span>
+          )}
           {active && <span className="nav-active-bar" aria-hidden="true" />}
         </button>
         {multi && (
@@ -333,7 +488,11 @@ function SectionRow({ section: s, active, activeItemId, expanded, onToggle, coll
 // page is discoverable only by scrolling a clipped strip. When the current
 // page sits in the menu, the More control carries its name and the active
 // state. Keyboard: roving arrows across the tabs; the menu is a real menu.
-export function SecondaryNav({ section, activeItemId, onNavigate }: {
+export function SecondaryNav({
+  section,
+  activeItemId,
+  onNavigate,
+}: {
   section: NavSection;
   activeItemId: ScreenId | null;
   onNavigate: (id: ScreenId) => void;
@@ -345,10 +504,14 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
   const { visible, overflow, activeInOverflow } = stripLayout(section, activeItemId);
   const label = (c: NavItem) => tr(c.shortKey ?? c.labelKey);
 
-  useEffect(() => { setOpen(false); }, [activeItemId, section.id]);
+  useEffect(() => {
+    setOpen(false);
+  }, [activeItemId, section.id]);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
     document.addEventListener('mousedown', onDown);
     menuRef.current?.querySelector<HTMLButtonElement>('button[role="menuitem"]')?.focus();
     return () => document.removeEventListener('mousedown', onDown);
@@ -367,9 +530,20 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
   const onMenuKey = (e: KeyboardEvent) => {
     const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]') ?? []);
     const i = items.findIndex((b) => b === document.activeElement);
-    if (e.key === 'Escape') { e.preventDefault(); setOpen(false); moreRef.current?.focus(); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+      moreRef.current?.focus();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      items[(i + 1) % items.length]?.focus();
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      items[(i - 1 + items.length) % items.length]?.focus();
+    }
   };
   const pick = (id: ScreenId) => {
     setOpen(false);
@@ -398,19 +572,43 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
           aria-haspopup="menu"
           aria-expanded={open}
           aria-controls={`subnav-more-${section.id}`}
-          aria-label={activeInOverflow ? `${t('navsec.moreAria')} — ${tr(activeInOverflow.labelKey)}` : `${t('navsec.moreAria')} (${overflow.length})`}
+          aria-label={
+            activeInOverflow
+              ? `${t('navsec.moreAria')} — ${tr(activeInOverflow.labelKey)}`
+              : `${t('navsec.moreAria')} (${overflow.length})`
+          }
           onClick={() => setOpen((o) => !o)}
-          onKeyDown={(e) => { if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); } }}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setOpen(true);
+            }
+          }}
         >
           {/* Current page inside the menu: the control shows THAT page's name
               with the active state and the menu caret; its accessible name
               still says it is the More menu. Otherwise "More" + a count. */}
-          {activeInOverflow ? <b>{label(activeInOverflow)}</b> : <>{t('navsec.more')} <span className="subnav-more-count">{overflow.length}</span></>}
-          <span className="subnav-caret" aria-hidden="true">▾</span>
+          {activeInOverflow ? (
+            <b>{label(activeInOverflow)}</b>
+          ) : (
+            <>
+              {t('navsec.more')} <span className="subnav-more-count">{overflow.length}</span>
+            </>
+          )}
+          <span className="subnav-caret" aria-hidden="true">
+            ▾
+          </span>
         </button>
       )}
       {open && (
-        <div id={`subnav-more-${section.id}`} ref={menuRef} className="subnav-menu" role="menu" aria-label={t('navsec.moreMenu')} onKeyDown={onMenuKey}>
+        <div
+          id={`subnav-more-${section.id}`}
+          ref={menuRef}
+          className="subnav-menu"
+          role="menu"
+          aria-label={t('navsec.moreMenu')}
+          onKeyDown={onMenuKey}
+        >
           {overflow.map((c) => (
             <button
               key={c.id}
@@ -436,31 +634,106 @@ export function SecondaryNav({ section, activeItemId, onNavigate }: {
  * is never hidden: under 640px it shrinks to its glyph with the same
  * accessible name.
  */
-export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOpen = false, onOpenPalette, onToggleBell, onReport, onOpenDrawer }: {
-  title: string; crumb?: string | null; edition?: string; live: boolean; unread: number; bellOpen: boolean; drawerOpen?: boolean;
-  onOpenPalette: (query?:string) => void;
-  onToggleBell: () => void; onReport: () => void; onOpenDrawer: () => void;
+export function TopBar({
+  title,
+  crumb,
+  edition,
+  live,
+  unread,
+  bellOpen,
+  drawerOpen = false,
+  onOpenPalette,
+  onToggleBell,
+  onReport,
+  onOpenDrawer,
+}: {
+  title: string;
+  crumb?: string | null;
+  edition?: string;
+  live: boolean;
+  unread: number;
+  bellOpen: boolean;
+  drawerOpen?: boolean;
+  onOpenPalette: (query?: string) => void;
+  onToggleBell: () => void;
+  onReport: () => void;
+  onOpenDrawer: () => void;
 }) {
-  const [searchText,setSearchText]=useState('');
+  const [searchText, setSearchText] = useState('');
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform ?? '');
   return (
     <header className="topbar">
       {/* The menu button says whether the drawer is open */}
-      <button className="nav-hamburger" aria-label={t('navsec.openMenu')} aria-expanded={drawerOpen} aria-controls="app-sidebar" onClick={onOpenDrawer}><Icon name="menu" /></button>
+      <button
+        className="nav-hamburger"
+        aria-label={t('navsec.openMenu')}
+        aria-expanded={drawerOpen}
+        aria-controls="app-sidebar"
+        onClick={onOpenDrawer}
+      >
+        <Icon name="menu" />
+      </button>
       {/* The reference breadcrumb: edition / section / page. The page
           name stays the document's <h1>; the parts before it are its path. */}
       <div className="p-breadcrumb">
-        {edition && <span className="crumb crumb-edition" aria-hidden="true">{edition}<span className="crumb-sep"> / </span></span>}
+        {edition && (
+          <span className="crumb crumb-edition" aria-hidden="true">
+            {edition}
+            <span className="crumb-sep"> / </span>
+          </span>
+        )}
         <h1 className="page-title" tabIndex={-1}>
-          {crumb && <><span className="crumb">{crumb}</span><span className="crumb-sep"> / </span></>}
+          {crumb && (
+            <>
+              <span className="crumb">{crumb}</span>
+              <span className="crumb-sep"> / </span>
+            </>
+          )}
           {title}
         </h1>
       </div>
       <div className="p-toolbar a-workspace-tools">
-        <form className="a-global-search" role="search" onSubmit={e=>{e.preventDefault();onOpenPalette(searchText);setSearchText('')}}><svg className="a-tool-search" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 6 6"/></svg><input type="search" aria-label="Search Agent workspace" placeholder="Find a page…" value={searchText} onChange={e=>setSearchText(e.target.value)}/><button aria-label="Open workspace search" type="submit"><kbd>{isMac?'⌘ K':'Ctrl K'}</kbd><Icon name="search" size={17}/></button></form>
-        {live
-          ? <span className="a-sync-status" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
-          : <span className="pill red" role="status">○ {t('navsec.liveOff')}</span>}
+        <form
+          className="a-global-search"
+          role="search"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onOpenPalette(searchText);
+            setSearchText('');
+          }}
+        >
+          <svg
+            className="a-tool-search"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            aria-hidden="true"
+          >
+            <circle cx="10" cy="10" r="6.5" />
+            <path d="m15 15 6 6" />
+          </svg>
+          <input
+            type="search"
+            aria-label="Search Agent workspace"
+            placeholder="Find a page…"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+          <button aria-label="Open workspace search" type="submit">
+            <kbd>{isMac ? '⌘ K' : 'Ctrl K'}</kbd>
+            <Icon name="search" size={17} />
+          </button>
+        </form>
+        {live ? (
+          <span className="a-sync-status" role="status" aria-label={t('navsec.liveOk')} title={t('navsec.liveOk')} />
+        ) : (
+          <span className="pill red" role="status">
+            ○ {t('navsec.liveOff')}
+          </span>
+        )}
         <button
           className="topbar-bell a-tool-button a-updates-tool"
           onClick={onToggleBell}
@@ -468,10 +741,48 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
           aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ''}`}
           aria-expanded={bellOpen}
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 11v9H4V4h9M8 9h4m-4 5h8"/><circle cx="19" cy="5" r="3"/></svg><span className="a-tool-label">Updates</span>{unread > 0 && <span className="a-update-count" aria-hidden="true">{unread}</span>}
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M20 11v9H4V4h9M8 9h4m-4 5h8" />
+            <circle cx="19" cy="5" r="3" />
+          </svg>
+          <span className="a-tool-label">Updates</span>
+          {unread > 0 && (
+            <span className="a-update-count" aria-hidden="true">
+              {unread}
+            </span>
+          )}
         </button>
-        <button className="topbar-safety a-tool-button a-report-tool" onClick={onReport} title={t('navsec.reportAria')} aria-label={t('navsec.reportAria')}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z"/><path d="M12 8v5m0 3h.01"/></svg><span className="a-tool-label">Report</span>
+        <button
+          className="topbar-safety a-tool-button a-report-tool"
+          onClick={onReport}
+          title={t('navsec.reportAria')}
+          aria-label={t('navsec.reportAria')}
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6l8-3Z" />
+            <path d="M12 8v5m0 3h.01" />
+          </svg>
+          <span className="a-tool-label">Report</span>
         </button>
       </div>
     </header>
@@ -480,7 +791,11 @@ export function TopBar({ title, crumb, edition, live, unread, bellOpen, drawerOp
 
 /** The organisation's standing badges, in the account block where the
  *  organisation is named (in the top bar they would repeat on every page). */
-export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolean; safeguardingCertified?: boolean; verified?: boolean } }) {
+export function OrgChips({
+  org,
+}: {
+  org: { type: string; trustedPartner?: boolean; safeguardingCertified?: boolean; verified?: boolean };
+}) {
   // One quiet line of standing, not a row of badges: the same facts, as text.
   const facts = [
     org.type ? org.type.charAt(0).toUpperCase() + org.type.slice(1) : null,
@@ -488,13 +803,25 @@ export function OrgChips({ org }: { org: { type: string; trustedPartner?: boolea
     org.trustedPartner ? 'Trusted Partner' : null,
     org.safeguardingCertified ? 'Safeguarding Certified' : null,
   ].filter(Boolean);
-  return <div className="org-chips org-standing" aria-label={t('navsec.orgStatus')}>{facts.join(' · ')}</div>;
+  return (
+    <div className="org-chips org-standing" aria-label={t('navsec.orgStatus')}>
+      {facts.join(' · ')}
+    </div>
+  );
 }
 
 // ---------------------------------------------------------- CommandPalette
-export function CommandPalette({ ctx, initialQuery='', open, onClose, onNavigate, shortcuts, onTogglePin }: {
+export function CommandPalette({
+  ctx,
+  initialQuery = '',
+  open,
+  onClose,
+  onNavigate,
+  shortcuts,
+  onTogglePin,
+}: {
   ctx: NavContext;
-  initialQuery?:string;
+  initialQuery?: string;
   open: boolean;
   onClose: () => void;
   onNavigate: (id: ScreenId) => void;
@@ -504,19 +831,44 @@ export function CommandPalette({ ctx, initialQuery='', open, onClose, onNavigate
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { if (open) { setQ(initialQuery); setSel(0); setTimeout(() => inputRef.current?.focus(), 0); } }, [open,initialQuery]);
+  useEffect(() => {
+    if (open) {
+      setQ(initialQuery);
+      setSel(0);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open, initialQuery]);
   if (!open) return null;
   const results = searchNav(q, ctx, tr);
-  const go = (itemId: ScreenId) => { onNavigate(itemId); onClose(); };
+  const go = (itemId: ScreenId) => {
+    onNavigate(itemId);
+    onClose();
+  };
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); setSel((s) => Math.min(s + 1, results.length - 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setSel((s) => Math.max(s - 1, 0)); }
-    else if (e.key === 'Enter' && results[sel]) { e.preventDefault(); go(results[sel].itemId as ScreenId); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      onClose();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSel((s) => Math.min(s + 1, results.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSel((s) => Math.max(s - 1, 0));
+    } else if (e.key === 'Enter' && results[sel]) {
+      e.preventDefault();
+      go(results[sel].itemId as ScreenId);
+    }
   };
   return (
     <div className="palette-veil" onClick={onClose} role="presentation">
-      <div className="palette" role="dialog" aria-modal="true" aria-label={t('navsec.searchAria')} onClick={(e) => e.stopPropagation()} onKeyDown={onKey}>
+      <div
+        className="palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t('navsec.searchAria')}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={onKey}
+      >
         <div className="palette-input-row">
           <Icon name="search" />
           <input
@@ -524,12 +876,19 @@ export function CommandPalette({ ctx, initialQuery='', open, onClose, onNavigate
             value={q}
             placeholder={t('navsec.searchPlaceholder')}
             aria-label={t('navsec.searchAria')}
-            onChange={(e) => { setQ(e.target.value); setSel(0); }}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setSel(0);
+            }}
           />
           <kbd>Esc</kbd>
         </div>
         <div className="palette-results" role="listbox" aria-label={t('navsec.searchResults')}>
-          {results.length === 0 && <div className="notice" style={{ margin: 8 }}>{t('navsec.searchEmpty')}</div>}
+          {results.length === 0 && (
+            <div className="notice" style={{ margin: 8 }}>
+              {t('navsec.searchEmpty')}
+            </div>
+          )}
           {results.map((r, i) => {
             const pinned = shortcuts.includes(r.itemId as ScreenId);
             const canPin = !pinned && shortcuts.length < MAX_SHORTCUTS && r.itemId !== 'inbox';
@@ -543,8 +902,18 @@ export function CommandPalette({ ctx, initialQuery='', open, onClose, onNavigate
                 onClick={() => go(r.itemId as ScreenId)}
               >
                 <span className="palette-path">
-                  {r.sectionLabel && <><span className="dim">{r.sectionLabel}</span><span className="dim"> › </span></>}
-                  {r.groupLabel && <><span className="dim">{r.groupLabel}</span><span className="dim"> › </span></>}
+                  {r.sectionLabel && (
+                    <>
+                      <span className="dim">{r.sectionLabel}</span>
+                      <span className="dim"> › </span>
+                    </>
+                  )}
+                  {r.groupLabel && (
+                    <>
+                      <span className="dim">{r.groupLabel}</span>
+                      <span className="dim"> › </span>
+                    </>
+                  )}
                   <b>{r.label}</b>
                 </span>
                 {(pinned || canPin) && (
@@ -552,7 +921,10 @@ export function CommandPalette({ ctx, initialQuery='', open, onClose, onNavigate
                     className={`palette-pin ${pinned ? 'pinned' : ''}`}
                     aria-label={pinned ? t('navsec.unpin') : t('navsec.pin')}
                     title={pinned ? t('navsec.unpin') : t('navsec.pin')}
-                    onClick={(e) => { e.stopPropagation(); onTogglePin(r.itemId as ScreenId); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePin(r.itemId as ScreenId);
+                    }}
                   >
                     <Icon name="pin" size={12} />
                   </button>
@@ -584,7 +956,9 @@ export function usePaletteHotkey(openPalette: () => void) {
 // Convenience hook: filtered sections recomputed only when ctx changes.
 export function useNavSections(ctx: NavContext): NavSection[] {
   const [sections, setSections] = useState(() => filterSections(ctx));
-  useEffect(() => { setSections(filterSections(ctx)); }, [ctx.role, (ctx.tiers ?? []).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setSections(filterSections(ctx));
+  }, [ctx.role, (ctx.tiers ?? []).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
   return sections;
 }
 export { INBOX_ITEM };
@@ -594,15 +968,27 @@ export { INBOX_ITEM };
 // workspace already loads: unread notices, pending requests, disputes, and
 // the agent's own verification gap. Nothing here invents a number; when
 // there is nothing to act on, the card disappears entirely.
-export function NeedsAttention({ unread, pending, disputed, expiringSoon, verificationGap, onNavigate }: {
-  unread: number; pending: number; disputed: number; expiringSoon: number; verificationGap: boolean;
+export function NeedsAttention({
+  unread,
+  pending,
+  disputed,
+  expiringSoon,
+  verificationGap,
+  onNavigate,
+}: {
+  unread: number;
+  pending: number;
+  disputed: number;
+  expiringSoon: number;
+  verificationGap: boolean;
   onNavigate: (id: ScreenId) => void;
 }) {
   const rows: { key: string; label: string; count: number | null; target: ScreenId }[] = [];
   if (verificationGap) rows.push({ key: 'ver', label: t('navsec.attnVerification'), count: null, target: 'profile' });
   if (disputed > 0) rows.push({ key: 'disp', label: t('navsec.attnDisputed'), count: disputed, target: 'clients' });
   if (pending > 0) rows.push({ key: 'pend', label: t('navsec.attnPending'), count: pending, target: 'clients' });
-  if (expiringSoon > 0) rows.push({ key: 'exp', label: t('navsec.attnExpiring'), count: expiringSoon, target: 'clients' });
+  if (expiringSoon > 0)
+    rows.push({ key: 'exp', label: t('navsec.attnExpiring'), count: expiringSoon, target: 'clients' });
   if (unread > 0) rows.push({ key: 'inbox', label: t('navsec.attnMessages'), count: unread, target: 'inbox' });
   if (rows.length === 0) return null;
   return (

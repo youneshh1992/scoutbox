@@ -31,15 +31,16 @@ export function timeToFirstDecision(ctx) {
   for (const r of ctx.rooms) {
     const ds = ctx.decisionsByRoom.get(r.id);
     if (!ds?.length) continue;
-    const first = ds[0];                       // decisionsByRoom is sorted by createdAt
+    const first = ds[0]; // decisionsByRoom is sorted by createdAt
     if (!inWindow(first.createdAt, ctx.window)) continue;
     values.push(days(r.createdAt, first.createdAt));
   }
-  const excluded = ctx.rooms.filter((r) => !(ctx.decisionsByRoom.get(r.id)?.length)).length;
+  const excluded = ctx.rooms.filter((r) => !ctx.decisionsByRoom.get(r.id)?.length).length;
   return {
     ...wire(METRICS.time_to_first_decision),
     ...distribution(values, { excluded }),
-    excludedMeans: 'Rooms with no recorded decision at all. They cannot contribute a duration, so this figure describes the rooms that reached a decision — not all of your rooms.',
+    excludedMeans:
+      'Rooms with no recorded decision at all. They cannot contribute a duration, so this figure describes the rooms that reached a decision — not all of your rooms.',
   };
 }
 
@@ -50,7 +51,7 @@ export function timeInStage(ctx) {
   let stillIn = 0;
   for (const r of ctx.rooms) {
     for (const v of stageVisits(r)) {
-      if (!inWindow(v.to, ctx.window)) continue;     // the exit falls in the window
+      if (!inWindow(v.to, ctx.window)) continue; // the exit falls in the window
       byStatus.get(v.status)?.push(v.ms / DAY_MS);
     }
     if (OPEN_ROOM_STATUSES.includes(r.status)) stillIn += 1;
@@ -58,10 +59,12 @@ export function timeInStage(ctx) {
   return {
     ...wire(METRICS.time_in_stage),
     // Vocabulary order: sorting by duration would give a "slowest stage" ranking the exclusion makes untrue.
-    rows: ROOM_STATUSES.map((status) => ({ status, ...distribution(byStatus.get(status) ?? []) }))
-      .filter((row) => row.n > 0),
+    rows: ROOM_STATUSES.map((status) => ({ status, ...distribution(byStatus.get(status) ?? []) })).filter(
+      (row) => row.n > 0,
+    ),
     stillInAStage: count(stillIn),
-    excludedMeans: 'Only visits that ENDED are measured. A stage where everything is stuck looks fast here, because the rooms still sitting in it are not counted. Read this next to Rooms with no recent activity.',
+    excludedMeans:
+      'Only visits that ENDED are measured. A stage where everything is stuck looks fast here, because the rooms still sitting in it are not counted. Read this next to Rooms with no recent activity.',
   };
 }
 
@@ -78,7 +81,8 @@ export function timeToTrialRequested(ctx) {
   return {
     ...wire(METRICS.time_to_trial_requested),
     ...distribution(values, { excluded }),
-    excludedMeans: 'Rooms that never reached a trial request. Most rooms never will, and that is not a fault in the club or in any player.',
+    excludedMeans:
+      'Rooms that never reached a trial request. Most rooms never will, and that is not a fault in the club or in any player.',
   };
 }
 
@@ -89,9 +93,12 @@ export function timeTrialRequestedToCompleted(ctx) {
     const req = firstReachedAt(r, 'trial_requested');
     if (req == null) continue;
     const done = firstReachedAt(r, 'trial_completed');
-    if (done == null) { unfinished += 1; continue; }
+    if (done == null) {
+      unfinished += 1;
+      continue;
+    }
     if (!inWindow(done, ctx.window)) continue;
-    if (done < req) continue;      // a reopened room can reach these out of order
+    if (done < req) continue; // a reopened room can reach these out of order
     values.push(days(req, done));
   }
   return {
@@ -140,7 +147,7 @@ export function stalledRooms(ctx, { thresholdDays = DEFAULT_STALL_DAYS } = {}) {
   const rows = aged
     .filter((a) => a.idleDays >= threshold)
     // Most idle first, then id: stable across reads.
-    .sort((a, b) => (b.idleDays - a.idleDays) || String(a.room.id).localeCompare(String(b.room.id)))
+    .sort((a, b) => b.idleDays - a.idleDays || String(a.room.id).localeCompare(String(b.room.id)))
     .map((a) => ({
       roomId: a.room.id,
       status: a.room.status,
@@ -170,7 +177,7 @@ export function overdueTrialReports(ctx) {
     awaitingReport: count(awaiting.length),
     rows: late
       .slice()
-      .sort((a, b) => (a.reportDueAt - b.reportDueAt) || String(a.id).localeCompare(String(b.id)))
+      .sort((a, b) => a.reportDueAt - b.reportDueAt || String(a.id).localeCompare(String(b.id)))
       .map((t) => ({ trialId: t.id, overdueDays: Math.floor(days(t.reportDueAt, ctx.now)) })),
     note: 'Unfiled trial reports already block new trial requests. This is the same rule, seen from the top.',
   };
@@ -183,19 +190,23 @@ export const DECISION_OWED_STATUSES = ['offer_consideration', 'offer_made'];
 
 export function decisionOutstanding(ctx) {
   const owed = ctx.rooms.filter((r) => DECISION_OWED_STATUSES.includes(r.status));
-  const missing = owed.filter((r) => !(ctx.decisionsByRoom.get(r.id)?.length));
+  const missing = owed.filter((r) => !ctx.decisionsByRoom.get(r.id)?.length);
   return {
     ...wire(METRICS.decision_outstanding),
     ...count(missing.length),
     atOfferStage: count(owed.length),
     rows: missing
       .slice()
-      .sort((a, b) => (a.createdAt - b.createdAt) || String(a.id).localeCompare(String(b.id)))
+      .sort((a, b) => a.createdAt - b.createdAt || String(a.id).localeCompare(String(b.id)))
       .map((r) => ({ roomId: r.id, status: r.status, ...ctx.subjectOf(r) })),
   };
 }
 
 export const DURATION_METRICS = {
-  timeToFirstDecision, timeInStage, timeToTrialRequested, timeTrialRequestedToCompleted, openRoomAge,
+  timeToFirstDecision,
+  timeInStage,
+  timeToTrialRequested,
+  timeTrialRequestedToCompleted,
+  openRoomAge,
 };
 export const AGING_METRICS = { stalledRooms, overdueTrialReports, decisionOutstanding };

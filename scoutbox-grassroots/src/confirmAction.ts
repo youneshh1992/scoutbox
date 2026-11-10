@@ -46,8 +46,16 @@ export const DESTRUCTIVE_ACTIONS: Record<string, DestructiveAction> = {
   deleteComment: { titleKey: 'confirm.deleteComment', bodyKey: 'confirm.deleteCommentBody', cls: 'tombstone' },
   cancelTrial: { titleKey: 'confirm.cancelTrial', bodyKey: 'confirm.cancelTrialBody', cls: 'archive' },
   // A formal decision is not destructive, but it is the club's recruitment act and is confirmed like one: the copy says what it records and what it does not (no offer, nothing sent).
-  finalizeDecision: { titleKey: 'confirm.finalizeDecision', bodyKey: 'confirm.finalizeDecisionBody', cls: 'irreversible' },
-  discardDecisionDraft: { titleKey: 'confirm.discardDecisionDraft', bodyKey: 'confirm.discardDecisionDraftBody', cls: 'tombstone' },
+  finalizeDecision: {
+    titleKey: 'confirm.finalizeDecision',
+    bodyKey: 'confirm.finalizeDecisionBody',
+    cls: 'irreversible',
+  },
+  discardDecisionDraft: {
+    titleKey: 'confirm.discardDecisionDraft',
+    bodyKey: 'confirm.discardDecisionDraftBody',
+    cls: 'tombstone',
+  },
   // Issuing an Offer is the club's outward act: an exact revision reaches a person and cannot be edited afterwards; withdrawing closes it.
   issueOffer: { titleKey: 'confirm.issueOffer', bodyKey: 'confirm.issueOfferBody', cls: 'irreversible' },
   withdrawOffer: { titleKey: 'confirm.withdrawOffer', bodyKey: 'confirm.withdrawOfferBody', cls: 'archive' },
@@ -60,11 +68,23 @@ export const DESTRUCTIVE_ACTIONS: Record<string, DestructiveAction> = {
   supersedeSigning: { titleKey: 'confirm.supersedeSigning', bodyKey: 'confirm.supersedeSigningBody', cls: 'archive' },
   archiveBrief: { titleKey: 'confirm.archiveBrief', bodyKey: 'confirm.archiveBriefBody', cls: 'archive' },
   pauseBrief: { titleKey: 'confirm.pauseBrief', bodyKey: 'confirm.pauseBriefBody', cls: 'reversible' },
-  deleteSavedSearch: { titleKey: 'confirm.deleteSavedSearch', bodyKey: 'confirm.deleteSavedSearchBody', cls: 'irreversible' },
-  cancelCombineRequest: { titleKey: 'confirm.cancelCombine', bodyKey: 'confirm.cancelCombineBody', cls: 'irreversible' },
+  deleteSavedSearch: {
+    titleKey: 'confirm.deleteSavedSearch',
+    bodyKey: 'confirm.deleteSavedSearchBody',
+    cls: 'irreversible',
+  },
+  cancelCombineRequest: {
+    titleKey: 'confirm.cancelCombine',
+    bodyKey: 'confirm.cancelCombineBody',
+    cls: 'irreversible',
+  },
   removeStaff: { titleKey: 'confirm.removeStaff', bodyKey: 'confirm.removeStaffBody', cls: 'irreversible' },
   recordSigning: { titleKey: 'confirm.recordSigning', bodyKey: 'confirm.recordSigningBody', cls: 'irreversible' },
-  dismissSecondLook: { titleKey: 'confirm.dismissSecondLook', bodyKey: 'confirm.dismissSecondLookBody', cls: 'reversible' },
+  dismissSecondLook: {
+    titleKey: 'confirm.dismissSecondLook',
+    bodyKey: 'confirm.dismissSecondLookBody',
+    cls: 'reversible',
+  },
   // Archiving a Dynamic Watchlist stops membership being maintained and
   // is not reopened; pausing only stops the change notifications.
   archiveWatchlist: { titleKey: 'confirm.archiveWatchlist', bodyKey: 'confirm.archiveWatchlistBody', cls: 'archive' },

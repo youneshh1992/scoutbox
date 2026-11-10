@@ -12,7 +12,8 @@ export function convertMinor(amountMinor, rateStr) {
   if (!m) return null;
   const scaled = BigInt(m[1]) * 1_000_000n + BigInt((m[2] ?? '').padEnd(6, '0') || '0');
   const num = BigInt(amountMinor) * scaled;
-  const q = num / 1_000_000n, r = num % 1_000_000n;
+  const q = num / 1_000_000n,
+    r = num % 1_000_000n;
   const rounded = r * 2n >= 1_000_000n ? q + 1n : q;
   return Number(rounded);
 }

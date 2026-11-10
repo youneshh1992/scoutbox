@@ -12,11 +12,20 @@ const MEDIA_URL_TTL_MS = 15 * 60 * 1000;
  * links minted before a restart stop verifying and clients re-mint them.
  */
 export function installSignedMedia({ app, byId, sessions, mediaDeletions, storage, sessionFor, isBlocked }) {
-  if (typeof sessionFor !== 'function' || typeof isBlocked !== 'function' || typeof byId?.mediaOwner !== 'function') throw new TypeError('installSignedMedia needs sessionFor, isBlocked and the media-owner lookup');
-  if (typeof sessions?.bySid !== 'function' || typeof mediaDeletions?.isQueued !== 'function' || typeof storage?.read !== 'function') throw new TypeError('installSignedMedia needs the sessions and media-deletions repositories and the storage adapter');
+  if (typeof sessionFor !== 'function' || typeof isBlocked !== 'function' || typeof byId?.mediaOwner !== 'function')
+    throw new TypeError('installSignedMedia needs sessionFor, isBlocked and the media-owner lookup');
+  if (
+    typeof sessions?.bySid !== 'function' ||
+    typeof mediaDeletions?.isQueued !== 'function' ||
+    typeof storage?.read !== 'function'
+  )
+    throw new TypeError(
+      'installSignedMedia needs the sessions and media-deletions repositories and the storage adapter',
+    );
   const secret = process.env.MEDIA_SECRET || crypto.randomBytes(32).toString('base64url');
 
-  const mediaSig = (id, exp, sid) => crypto.createHmac('sha256', secret).update(`${id}.${exp}.${sid}`).digest('base64url').slice(0, 24);
+  const mediaSig = (id, exp, sid) =>
+    crypto.createHmac('sha256', secret).update(`${id}.${exp}.${sid}`).digest('base64url').slice(0, 24);
 
   function signMediaPath(pathStr, sid) {
     const m = /^\/media\/([A-Za-z0-9-]+)$/.exec(pathStr);
@@ -32,7 +41,10 @@ export function installSignedMedia({ app, byId, sessions, mediaDeletions, storag
       let out = null;
       for (let i = 0; i < value.length; i++) {
         const signed = signMediaDeep(value[i], sid);
-        if (signed !== value[i]) { out ??= value.slice(); out[i] = signed; }
+        if (signed !== value[i]) {
+          out ??= value.slice();
+          out[i] = signed;
+        }
       }
       return out ?? value;
     }
@@ -40,7 +52,10 @@ export function installSignedMedia({ app, byId, sessions, mediaDeletions, storag
       let out = null;
       for (const key of Object.keys(value)) {
         const signed = signMediaDeep(value[key], sid);
-        if (signed !== value[key]) { out ??= { ...value }; out[key] = signed; }
+        if (signed !== value[key]) {
+          out ??= { ...value };
+          out[key] = signed;
+        }
       }
       return out ?? value;
     }
@@ -78,7 +93,10 @@ export function installSignedMedia({ app, byId, sessions, mediaDeletions, storag
     if (sid && exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp, sid)) session = sessions.bySid(sid);
     session ??= sessionFor(req);
     if (!sessionMayAccessMedia(session, id)) {
-      return res.status(401).json({ error: 'MEDIA_AUTH_REQUIRED', message: 'Media links are short-lived and tied to your login — refetch the profile for a fresh link.' });
+      return res.status(401).json({
+        error: 'MEDIA_AUTH_REQUIRED',
+        message: 'Media links are short-lived and tied to your login — refetch the profile for a fresh link.',
+      });
     }
     const blob = storage.read(id);
     if (!blob) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });

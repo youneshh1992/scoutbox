@@ -12,18 +12,38 @@ import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, USERS } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {
-  ENTERPRISE_MIGRATION as MIGRATION, ENTERPRISE_TABLES as TABLES, ENTERPRISE_COLLECTIONS as COLLECTIONS,
-  typeInvite, typeSsoState, typeTicket, typeGrant, typeRefs,
+  ENTERPRISE_MIGRATION as MIGRATION,
+  ENTERPRISE_TABLES as TABLES,
+  ENTERPRISE_COLLECTIONS as COLLECTIONS,
+  typeInvite,
+  typeSsoState,
+  typeTicket,
+  typeGrant,
+  typeRefs,
 } from '../repositories/enterprise.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
-function test(name, fn) { if (only && !name.includes(only)) return; fn(); passed++; console.log(`  ✓ ${name}`); }
-const rm = (...dirs) => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); };
-let counter = 9000; const nextId = (p) => `${p}-${++counter}`;
+function test(name, fn) {
+  if (only && !name.includes(only)) return;
+  fn();
+  passed++;
+  console.log(`  ✓ ${name}`);
+}
+const rm = (...dirs) => {
+  for (const d of dirs) fs.rmSync(d, { recursive: true, force: true });
+};
+let counter = 9000;
+const nextId = (p) => `${p}-${++counter}`;
 const refused = (fn, pattern, label = '') => {
-  let err = null; try { fn(); } catch (e) { err = e; }
-  assert.ok(err, `${label}: expected a refusal`); assert.match(String(err.message), pattern, `${label}: ${err.message}`);
+  let err = null;
+  try {
+    fn();
+  } catch (e) {
+    err = e;
+  }
+  assert.ok(err, `${label}: expected a refusal`);
+  assert.match(String(err.message), pattern, `${label}: ${err.message}`);
   return err;
 };
 const plain = (v) => JSON.parse(JSON.stringify(v));
@@ -31,12 +51,57 @@ const sha = (v) => crypto.createHash('sha256').update(v).digest('hex');
 
 // ------------------------------------------------------------- fixtures: the literals the routes write
 const invite = (over = {}) => ({
-  id: 'inv-1', orgId: ORG.id, email: 'synthetic.invitee@example.test', name: 'Synthetic Invitee', role: 'Scout', tokenHash: sha('code-1'),
-  status: 'pending', invitedBy: 'Maria', createdAt: NOW, expiresAt: NOW + 7 * 86_400_000, acceptedAt: null, revokedAt: null, userId: null, ...over,
+  id: 'inv-1',
+  orgId: ORG.id,
+  email: 'synthetic.invitee@example.test',
+  name: 'Synthetic Invitee',
+  role: 'Scout',
+  tokenHash: sha('code-1'),
+  status: 'pending',
+  invitedBy: 'Maria',
+  createdAt: NOW,
+  expiresAt: NOW + 7 * 86_400_000,
+  acceptedAt: null,
+  revokedAt: null,
+  userId: null,
+  ...over,
 });
-const ssoState = (over = {}) => ({ id: 'sst-1', stateHash: sha('state-1'), nonceHash: sha('nonce-1'), orgId: ORG.id, createdAt: NOW, expiresAt: NOW + 600_000, usedAt: null, ...over });
-const ticket = (over = {}) => ({ id: 'tkt-1', orgId: ORG.id, byUserId: SCOUT.userId, byName: 'Maria', subject: 'Case question', body: 'Please look', refs: [{ kind: 'case', id: 'case-1' }], status: 'open', replies: [], createdAt: NOW, ...over });
-const grant = (over = {}) => ({ id: 'sag-1', ticketId: 'tkt-1', orgId: ORG.id, hours: 4, status: 'requested', requestedAt: NOW, approvedBy: null, approvedAt: null, expiresAt: null, accessLog: [], ...over });
+const ssoState = (over = {}) => ({
+  id: 'sst-1',
+  stateHash: sha('state-1'),
+  nonceHash: sha('nonce-1'),
+  orgId: ORG.id,
+  createdAt: NOW,
+  expiresAt: NOW + 600_000,
+  usedAt: null,
+  ...over,
+});
+const ticket = (over = {}) => ({
+  id: 'tkt-1',
+  orgId: ORG.id,
+  byUserId: SCOUT.userId,
+  byName: 'Maria',
+  subject: 'Case question',
+  body: 'Please look',
+  refs: [{ kind: 'case', id: 'case-1' }],
+  status: 'open',
+  replies: [],
+  createdAt: NOW,
+  ...over,
+});
+const grant = (over = {}) => ({
+  id: 'sag-1',
+  ticketId: 'tkt-1',
+  orgId: ORG.id,
+  hours: 4,
+  status: 'requested',
+  requestedAt: NOW,
+  approvedBy: null,
+  approvedAt: null,
+  expiresAt: null,
+  accessLog: [],
+  ...over,
+});
 
 const FIX = () => ({ users: [...USERS()], notifications: [], dispatches: [] });
 function serverOpen(dir) {
@@ -44,40 +109,75 @@ function serverOpen(dir) {
   const layer = attachDataLayer({ store, nextId, sessionTtlMs: TTL, now: () => NOW, warn: () => {} });
   return { store, repo: layer.enterprise, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
-const seeded = (label) => { const dir = tempDir(label); saveFixture(dir, FIX()); return { dir, s: serverOpen(dir) }; };
+const seeded = (label) => {
+  const dir = tempDir(label);
+  saveFixture(dir, FIX());
+  return { dir, s: serverOpen(dir) };
+};
 
 // ------------------------------------------------------------- schema
 test('[schema] 0035 is registered after 0034 and creates the STRICT tables (no JSON column), empty', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0034_integrations') + 1);
   for (const n of COLLECTIONS) assert.ok(TABLE_BACKED.includes(n), `${n} is table-backed`);
-  const dir = tempDir('s13b-empty'); const s = openLayer(dir).sqlite;
+  const dir = tempDir('s13b-empty');
+  const s = openLayer(dir).sqlite;
   for (const t of TABLES) {
     const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t).sql;
     assert.match(sql, /STRICT\s*$/, `${t} is STRICT`);
     assert.doesNotMatch(sql, /json_valid|_json\s/i, `${t} has no JSON column`);
     assert.equal(s.prepare(`SELECT count(*) AS n FROM ${t}`).get().n, 0, `${t} starts empty`);
   }
-  for (const [t, c] of [['org_invites', 'token'], ['sso_states', 'state'], ['sso_states', 'nonce']]) {
-    assert.equal(s.prepare(`SELECT 1 FROM pragma_table_info('${t}') WHERE name = ?`).get(c), undefined, `${t} has no plain ${c} column`);
+  for (const [t, c] of [
+    ['org_invites', 'token'],
+    ['sso_states', 'state'],
+    ['sso_states', 'nonce'],
+  ]) {
+    assert.equal(
+      s.prepare(`SELECT 1 FROM pragma_table_info('${t}') WHERE name = ?`).get(c),
+      undefined,
+      `${t} has no plain ${c} column`,
+    );
   }
-  s.close(); rm(dir);
+  s.close();
+  rm(dir);
 });
 
 // ------------------------------------------------------------- typing
 test('[typing] junk is refused naming the record and field', () => {
   assert.ok(typeInvite(invite()).ok);
-  assert.match(typeInvite(invite({ tokenHash: 'code-1' })).reason, /orgInvites inv-1\.tokenHash must be a sha-256 hex digest/);
-  assert.match(typeInvite({ ...invite(), token: 'code-1' }).reason, /carries field\(s\) this build does not store: token/);
-  assert.match(typeInvite(invite({ status: 'accepted', acceptedAt: NOW })).reason, /acceptedAt and userId are set exactly when the invite is accepted/);
+  assert.match(
+    typeInvite(invite({ tokenHash: 'code-1' })).reason,
+    /orgInvites inv-1\.tokenHash must be a sha-256 hex digest/,
+  );
+  assert.match(
+    typeInvite({ ...invite(), token: 'code-1' }).reason,
+    /carries field\(s\) this build does not store: token/,
+  );
+  assert.match(
+    typeInvite(invite({ status: 'accepted', acceptedAt: NOW })).reason,
+    /acceptedAt and userId are set exactly when the invite is accepted/,
+  );
   assert.match(typeInvite(invite({ role: 42 })).reason, /role must be text/);
   assert.match(typeSsoState(ssoState({ stateHash: 'state-1' })).reason, /stateHash must be a sha-256 hex digest/);
   assert.match(typeSsoState({ ...ssoState(), nonce: 'n' }).reason, /does not store: nonce/);
-  assert.match(typeTicket(ticket({ refs: [{ kind: 'player', id: 'pl-1' }] })).reason, /refs\[0\]\.kind must be one of case\|import/);
-  assert.match(typeTicket(ticket({ replies: [{ at: NOW, by: 'Trust & Safety', text: '' }] })).reason, /replies\[0\]\.text must be text of 1 to 2000/);
+  assert.match(
+    typeTicket(ticket({ refs: [{ kind: 'player', id: 'pl-1' }] })).reason,
+    /refs\[0\]\.kind must be one of case\|import/,
+  );
+  assert.match(
+    typeTicket(ticket({ replies: [{ at: NOW, by: 'Trust & Safety', text: '' }] })).reason,
+    /replies\[0\]\.text must be text of 1 to 2000/,
+  );
   assert.match(typeGrant(grant({ hours: 100 })).reason, /hours must be from 1 to 72/);
-  assert.match(typeGrant(grant({ status: 'active' })).reason, /approvedAt and expiresAt are set exactly when the grant is active/);
-  assert.match(typeGrant(grant({ accessLog: [{ at: NOW, what: 'org-records' }] })).reason, /accessLog is empty until the grant is approved/);
+  assert.match(
+    typeGrant(grant({ status: 'active' })).reason,
+    /approvedAt and expiresAt are set exactly when the grant is active/,
+  );
+  assert.match(
+    typeGrant(grant({ accessLog: [{ at: NOW, what: 'org-records' }] })).reason,
+    /accessLog is empty until the grant is approved/,
+  );
   assert.equal(typeRefs('case-1').field, 'refs');
   assert.equal(typeRefs(Array.from({ length: 11 }, (_, i) => ({ kind: 'case', id: `c-${i}` }))).field, 'refs');
   assert.equal(typeRefs([{ kind: 'case', id: 42 }]).field, 'refs[0].id');
@@ -85,7 +185,7 @@ test('[typing] junk is refused naming the record and field', () => {
 });
 
 // ------------------------------------------------------------- invites
-test('[invites] found by the code\'s hash only; pending → accepted (staff of its organisation) | revoked | expired, once', () => {
+test("[invites] found by the code's hash only; pending → accepted (staff of its organisation) | revoked | expired, once", () => {
   const { dir, s } = seeded('s13b-invites');
   const created = s.repo.invites.create(invite());
   assert.deepEqual(plain(created), plain(invite()));
@@ -101,27 +201,56 @@ test('[invites] found by the code\'s hash only; pending → accepted (staff of i
   assert.equal(s.repo.invites.expire('inv-3').status, 'expired');
   assert.equal(s.repo.invites.revoke('inv-3', NOW).status, 'expired', 'an expired invite stays expired');
   s.repo.invites.create(invite({ id: 'inv-4', tokenHash: sha('code-4') }));
-  assert.deepEqual([s.repo.invites.revoke('inv-4', NOW + 4).revokedAt, s.repo.invites.revoke('inv-4', NOW + 5).revokedAt], [NOW + 4, NOW + 4], 'the first revocation stands');
+  assert.deepEqual(
+    [s.repo.invites.revoke('inv-4', NOW + 4).revokedAt, s.repo.invites.revoke('inv-4', NOW + 5).revokedAt],
+    [NOW + 4, NOW + 4],
+    'the first revocation stands',
+  );
   const page = s.repo.reads.invites.page(ORG.id, { limit: 2 });
-  assert.deepEqual(page.items.map((i) => i.id), ['inv-4', 'inv-3']); assert.equal(typeof page.nextCursor, 'string');
-  s.close(); rm(dir);
+  assert.deepEqual(
+    page.items.map((i) => i.id),
+    ['inv-4', 'inv-3'],
+  );
+  assert.equal(typeof page.nextCursor, 'string');
+  s.close();
+  rm(dir);
 });
 
 // ------------------------------------------------------------- SSO
 test('[sso] one configuration per organisation; a sign-in state is found by its hash and used once', () => {
   const { dir, s } = seeded('s13b-sso');
-  const first = s.repo.sso.configure({ id: 'sso-1', orgId: ORG.id, issuer: 'local-test-idp', clientId: `scoutbox-${ORG.id}`, at: NOW });
-  const again = s.repo.sso.configure({ id: 'sso-2', orgId: ORG.id, issuer: 'local-test-idp', clientId: `scoutbox-${ORG.id}`, at: NOW + 9 });
-  assert.deepEqual([again.id, again.createdAt, again.updatedAt], ['sso-1', NOW, NOW + 9], 'the second configuration replaces the first, keeping its id');
+  const first = s.repo.sso.configure({
+    id: 'sso-1',
+    orgId: ORG.id,
+    issuer: 'local-test-idp',
+    clientId: `scoutbox-${ORG.id}`,
+    at: NOW,
+  });
+  const again = s.repo.sso.configure({
+    id: 'sso-2',
+    orgId: ORG.id,
+    issuer: 'local-test-idp',
+    clientId: `scoutbox-${ORG.id}`,
+    at: NOW + 9,
+  });
+  assert.deepEqual(
+    [again.id, again.createdAt, again.updatedAt],
+    ['sso-1', NOW, NOW + 9],
+    'the second configuration replaces the first, keeping its id',
+  );
   assert.equal(first.issuer, 'local-test-idp');
-  refused(() => s.repo.sso.configure({ id: 'sso-3', orgId: ORG.id, issuer: 'corporate-okta', clientId: 'x', at: NOW }), /issuer must be one of local-test-idp/);
+  refused(
+    () => s.repo.sso.configure({ id: 'sso-3', orgId: ORG.id, issuer: 'corporate-okta', clientId: 'x', at: NOW }),
+    /issuer must be one of local-test-idp/,
+  );
   s.repo.ssoStates.create(ssoState());
   const st = s.repo.reads.ssoStates.byStateHash(sha('state-1'));
   assert.equal(st.nonceHash, sha('nonce-1'));
   assert.equal(s.repo.ssoStates.markUsed('sst-1', NOW + 1), true);
   assert.equal(s.repo.ssoStates.markUsed('sst-1', NOW + 2), false, 'the second use is refused by the database');
   assert.equal(s.repo.reads.ssoStates.byStateHash(sha('state-1')).usedAt, NOW + 1);
-  s.close(); rm(dir);
+  s.close();
+  rm(dir);
 });
 
 // ------------------------------------------------------------- support
@@ -131,7 +260,10 @@ test('[support] a ticket keeps references and replies as rows; a grant is approv
   refused(() => s.repo.tickets.create(ticket({ id: 'tkt-2', byUserId: 'usr-none' })), /byUserId names no staff member/);
   s.repo.tickets.reply('tkt-1', { at: NOW + 1, by: 'Trust & Safety', text: 'Looking now.' });
   const closed = s.repo.tickets.reply('tkt-1', { at: NOW + 2, by: 'Trust & Safety', text: 'Done.' }, { close: true });
-  assert.deepEqual(plain(closed.replies), [{ at: NOW + 1, by: 'Trust & Safety', text: 'Looking now.' }, { at: NOW + 2, by: 'Trust & Safety', text: 'Done.' }]);
+  assert.deepEqual(plain(closed.replies), [
+    { at: NOW + 1, by: 'Trust & Safety', text: 'Looking now.' },
+    { at: NOW + 2, by: 'Trust & Safety', text: 'Done.' },
+  ]);
   assert.equal(closed.status, 'closed');
   refused(() => s.repo.grants.request(grant({ ticketId: 'tkt-none' })), /no ticket tkt-none/);
   s.repo.grants.request(grant());
@@ -146,16 +278,27 @@ test('[support] a ticket keeps references and replies as rows; a grant is approv
   assert.deepEqual(plain(s.repo.reads.grants.forOrg(ORG.id)[0].accessLog), [{ at: NOW + 12, what: 'org-records' }]);
   refused(() => s.repo.grants.approve('sag-1', { by: 'Maria', at: NOW }), /is active, not requested/);
   assert.equal(s.repo.reads.tickets.pageAll({ limit: 10 }).items[0].id, 'tkt-1');
-  s.close(); rm(dir);
+  s.close();
+  rm(dir);
 });
 
 // ------------------------------------------------------------- units, retirement, fixtures
 test('[unit] a rolled-back unit leaves nothing', () => {
   const { dir, s } = seeded('s13b-unit');
-  assert.throws(() => s.unit(() => { s.repo.tickets.create(ticket()); s.repo.grants.request(grant()); throw new Error('boom'); }), /boom/);
-  assert.equal(s.repo.reads.tickets.byId('tkt-1'), null); assert.equal(s.repo.reads.grants.byId('sag-1'), null);
+  assert.throws(
+    () =>
+      s.unit(() => {
+        s.repo.tickets.create(ticket());
+        s.repo.grants.request(grant());
+        throw new Error('boom');
+      }),
+    /boom/,
+  );
+  assert.equal(s.repo.reads.tickets.byId('tkt-1'), null);
+  assert.equal(s.repo.reads.grants.byId('sag-1'), null);
   assert.equal(typeof s.repo.reads.invites.create, 'undefined', 'the reads cannot write');
-  s.close(); rm(dir);
+  s.close();
+  rm(dir);
 });
 
 /**
@@ -167,18 +310,34 @@ const WRITERS = {
   ssoConfigs: (L, records) => {
     for (const c of records) {
       L.enterprise.sso.configure({ id: c.id, orgId: c.orgId, issuer: c.issuer, clientId: c.clientId, at: c.createdAt });
-      if (c.updatedAt !== c.createdAt) L.enterprise.sso.configure({ id: c.id, orgId: c.orgId, issuer: c.issuer, clientId: c.clientId, at: c.updatedAt });
+      if (c.updatedAt !== c.createdAt)
+        L.enterprise.sso.configure({
+          id: c.id,
+          orgId: c.orgId,
+          issuer: c.issuer,
+          clientId: c.clientId,
+          at: c.updatedAt,
+        });
     }
   },
   supportTickets: (L, records) => {
     for (const { replies = [], status, ...t } of records) {
       L.enterprise.tickets.create({ ...t, status: 'open', replies: [] });
-      replies.forEach((r, i) => L.enterprise.tickets.reply(t.id, r, { close: status === 'closed' && i === replies.length - 1 }));
+      replies.forEach((r, i) =>
+        L.enterprise.tickets.reply(t.id, r, { close: status === 'closed' && i === replies.length - 1 }),
+      );
     }
   },
   supportAccessGrants: (L, records) => {
     for (const { status, approvedBy, approvedAt, expiresAt, accessLog = [], ...g } of records) {
-      L.enterprise.grants.request({ ...g, status: 'requested', approvedBy: null, approvedAt: null, expiresAt: null, accessLog: [] });
+      L.enterprise.grants.request({
+        ...g,
+        status: 'requested',
+        approvedBy: null,
+        approvedAt: null,
+        expiresAt: null,
+        accessLog: [],
+      });
       if (status === 'active') L.enterprise.grants.approve(g.id, { by: approvedBy, at: approvedAt });
       for (const a of accessLog) L.enterprise.grants.logAccess(g.id, a);
     }
@@ -187,21 +346,57 @@ const WRITERS = {
 const write = (dir, records) => writeFixture(dir, records, { now: NOW, writers: WRITERS });
 test('[fixtures] a record written through the repository is typed, a missing reference is named, a refused write leaves nothing, and the records read back as written', () => {
   const dir = tempDir('s13b-fix');
-  const live = grant({ status: 'active', approvedBy: 'Maria', approvedAt: NOW + 1, expiresAt: NOW + 1 + 4 * 3600_000, accessLog: [{ at: NOW + 2, what: 'org-records' }] });
+  const live = grant({
+    status: 'active',
+    approvedBy: 'Maria',
+    approvedAt: NOW + 1,
+    expiresAt: NOW + 1 + 4 * 3600_000,
+    accessLog: [{ at: NOW + 2, what: 'org-records' }],
+  });
   const replied = ticket({ replies: [{ at: NOW + 1, by: 'Trust & Safety', text: 'Hello' }] });
-  const cfg = { id: 'sso-1', orgId: ORG.id, issuer: 'local-test-idp', clientId: 'scoutbox-org-pro', createdAt: NOW, updatedAt: NOW };
-  write(dir, fixtureDb({ ...FIX(), orgInvites: [invite()], ssoConfigs: [cfg], ssoStates: [ssoState()], supportTickets: [replied], supportAccessGrants: [live] }));
+  const cfg = {
+    id: 'sso-1',
+    orgId: ORG.id,
+    issuer: 'local-test-idp',
+    clientId: 'scoutbox-org-pro',
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+  write(
+    dir,
+    fixtureDb({
+      ...FIX(),
+      orgInvites: [invite()],
+      ssoConfigs: [cfg],
+      ssoStates: [ssoState()],
+      supportTickets: [replied],
+      supportAccessGrants: [live],
+    }),
+  );
   const back = readRecords(dir);
   assert.deepEqual(plain(back.orgInvites), [plain(invite())]);
   assert.deepEqual(plain(back.ssoConfigs), [cfg]);
   assert.deepEqual(plain(back.supportTickets), [plain(replied)]);
   assert.deepEqual(plain(back.supportAccessGrants), [plain(live)]);
   assert.deepEqual(plain(back.ssoStates), [plain(ssoState())]);
-  refused(() => write(dir, { supportAccessGrants: [grant({ id: 'sag-2', ticketId: 'tkt-none' })] }), /ENTERPRISE_REFERENCE_MISSING.*tkt-none/);
-  refused(() => write(dir, { orgInvites: [{ ...invite({ id: 'inv-2' }), token: 'plain' }] }), /ENTERPRISE_INPUT_INVALID.*does not store: token/);
-  refused(() => write(dir, { supportTickets: [ticket({ id: 'tkt-2', refs: [{ kind: 'note', id: 'x' }] })] }), /ENTERPRISE_INPUT_INVALID.*refs\[0\]\.kind/);
+  refused(
+    () => write(dir, { supportAccessGrants: [grant({ id: 'sag-2', ticketId: 'tkt-none' })] }),
+    /ENTERPRISE_REFERENCE_MISSING.*tkt-none/,
+  );
+  refused(
+    () => write(dir, { orgInvites: [{ ...invite({ id: 'inv-2' }), token: 'plain' }] }),
+    /ENTERPRISE_INPUT_INVALID.*does not store: token/,
+  );
+  refused(
+    () => write(dir, { supportTickets: [ticket({ id: 'tkt-2', refs: [{ kind: 'note', id: 'x' }] })] }),
+    /ENTERPRISE_INPUT_INVALID.*refs\[0\]\.kind/,
+  );
   const after = readRecords(dir);
-  assert.deepEqual([after.orgInvites.length, after.supportTickets.map((t) => t.replies.length), after.supportAccessGrants.length], [1, [1], 1], 'a refused write changed nothing');
+  assert.deepEqual(
+    [after.orgInvites.length, after.supportTickets.map((t) => t.replies.length), after.supportAccessGrants.length],
+    [1, [1], 1],
+    'a refused write changed nothing',
+  );
   rm(dir);
 });
 

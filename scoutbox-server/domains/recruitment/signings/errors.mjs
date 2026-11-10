@@ -62,14 +62,31 @@ export const SIGNING_ERROR_HTTP = table({
 export const httpStatusFor = (code) => SIGNING_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
-  'error', 'message', 'field', 'allowed', 'expected', 'current', 'expectedRev', 'currentRev',
-  'updatedBy', 'updatedAt', 'reasons', 'blockers', 'lifecycle', 'status', 'parties',
+  'error',
+  'message',
+  'field',
+  'allowed',
+  'expected',
+  'current',
+  'expectedRev',
+  'currentRev',
+  'updatedBy',
+  'updatedAt',
+  'reasons',
+  'blockers',
+  'lifecycle',
+  'status',
+  'parties',
 ];
 
 export function publicErrorBody(out) {
   const code = out?.error;
   if (SIGNING_ERROR_HTTP[code] === 500) {
-    return { ok: false, error: code, message: 'The Signing service cannot serve this request. This has been recorded.' };
+    return {
+      ok: false,
+      error: code,
+      message: 'The Signing service cannot serve this request. This has been recorded.',
+    };
   }
   const body = { ok: false };
   for (const k of PUBLIC_ERROR_FIELDS) if (out?.[k] !== undefined) body[k] = out[k];
@@ -80,11 +97,25 @@ export function sendSigningError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
     console.error(`signings ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
-    return res.status(500).json({ ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'The Signing service cannot serve this request. This has been recorded.' });
+    return res.status(500).json({
+      ok: false,
+      error: 'SIGNING_STATE_UNKNOWN',
+      message: 'The Signing service cannot serve this request. This has been recorded.',
+    });
   }
   if (status === 500) console.error(`signings ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }
 
-export const notFound = (res, where) => sendSigningError(res, { error: 'SIGNING_NOT_FOUND', message: 'No signing with that reference is available to you.' }, where);
-export const documentNotFound = (res, where) => sendSigningError(res, { error: 'SIGNING_DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' }, where);
+export const notFound = (res, where) =>
+  sendSigningError(
+    res,
+    { error: 'SIGNING_NOT_FOUND', message: 'No signing with that reference is available to you.' },
+    where,
+  );
+export const documentNotFound = (res, where) =>
+  sendSigningError(
+    res,
+    { error: 'SIGNING_DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' },
+    where,
+  );

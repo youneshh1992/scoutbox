@@ -214,7 +214,10 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       ? ({ kind: 'guardian', id: guardianId } as const)
       : ({ kind: 'player', id: playerId! } as const);
     return client.onChange((event, payload) => {
-      if (event === 'session_expired') { endSession(); return; }
+      if (event === 'session_expired') {
+        endSession();
+        return;
+      }
       if (event === 'typing') return; // ephemeral — screens listen for it directly
       if (event === 'sse_status') {
         setLiveConnected((payload as { connected?: boolean } | undefined)?.connected !== false);
@@ -238,8 +241,9 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       notifications,
       unread: notifications.filter((n) => !n.read).length,
       unreadMessages: channels.reduce(
-        (sum, c) => sum + c.messages.filter((m) => m.sender.kind === 'org_user' && m.ts > (c.readBy?.counterparty ?? 0)).length,
-        0
+        (sum, c) =>
+          sum + c.messages.filter((m) => m.sender.kind === 'org_user' && m.ts > (c.readBy?.counterparty ?? 0)).length,
+        0,
       ),
       channels,
       popup,
@@ -269,7 +273,22 @@ export function SessionProvider({ children: kids }: { children: ReactNode }) {
       },
       refresh,
     }),
-    [playerId, guardianId, me, inbox, guardian, guardianInbox, childProfiles, notifications, channels, popup, liveConnected, markNotificationsRead, refresh, clearIdentityState]
+    [
+      playerId,
+      guardianId,
+      me,
+      inbox,
+      guardian,
+      guardianInbox,
+      childProfiles,
+      notifications,
+      channels,
+      popup,
+      liveConnected,
+      markNotificationsRead,
+      refresh,
+      clearIdentityState,
+    ],
   );
 
   if (booting) return null; // resolves in one tick in demo mode; screens mount with a valid (or no) identity

@@ -10,7 +10,13 @@ const children = new Set();
 let installed = false;
 
 function killAll() {
-  for (const proc of children) { try { proc.kill('SIGKILL'); } catch { /* already gone */ } }
+  for (const proc of children) {
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      /* already gone */
+    }
+  }
   children.clear();
 }
 
@@ -20,7 +26,11 @@ function install() {
   process.on('exit', killAll);
   // A signal handler replaces Node's default "terminate": exit explicitly, so
   // the 'exit' handler above runs and the suite still ends with the signal's code.
-  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) {
+  for (const [signal, code] of [
+    ['SIGINT', 130],
+    ['SIGTERM', 143],
+    ['SIGHUP', 129],
+  ]) {
     process.on(signal, () => process.exit(code));
   }
 }

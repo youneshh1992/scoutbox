@@ -22,24 +22,48 @@ const { API, DATA_DIR } = await serverUnderTest();
 async function serverUnderTest() {
   if (process.env.API_URL) {
     if (!process.env.DATA_DIR) {
-      console.error('apiE2E: API_URL is set but DATA_DIR is not. Pass the DATA_DIR the server at API_URL was started with (its persistence is checked on disk), or unset API_URL to let this script start its own server.');
+      console.error(
+        'apiE2E: API_URL is set but DATA_DIR is not. Pass the DATA_DIR the server at API_URL was started with (its persistence is checked on disk), or unset API_URL to let this script start its own server.',
+      );
       process.exit(2);
     }
     return { API: process.env.API_URL, DATA_DIR: path.resolve(process.env.DATA_DIR) };
   }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-api-e2e-'));
-  const port = await new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); }); });
+  const port = await new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.once('error', reject);
+    s.listen(0, '127.0.0.1', () => {
+      const { port: p } = s.address();
+      s.close(() => resolve(p));
+    });
+  });
   const { API_URL: _u, ...env } = process.env;
-  const child = spawn(process.execPath, [path.join(SERVER_DIR, 'server.mjs')], { env: { ...env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(SERVER_DIR, 'server.mjs')], {
+    env: { ...env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   let log = '';
-  child.stdout.on('data', (d) => { log += d; }); child.stderr.on('data', (d) => { log += d; });
+  child.stdout.on('data', (d) => {
+    log += d;
+  });
+  child.stderr.on('data', (d) => {
+    log += d;
+  });
   // `ok` exits the process on the first failure: the server and its directory go with it.
-  process.on('exit', () => { child.kill('SIGKILL'); fs.rmSync(dir, { recursive: true, force: true }); });
+  process.on('exit', () => {
+    child.kill('SIGKILL');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(130));
   const api = `http://127.0.0.1:${port}`;
   for (let i = 0; i < 60; i++) {
     if (child.exitCode !== null) break;
-    try { if ((await fetch(`${api}/orgs/directory`)).ok) return { API: api, DATA_DIR: dir }; } catch { /* not listening yet */ }
+    try {
+      if ((await fetch(`${api}/orgs/directory`)).ok) return { API: api, DATA_DIR: dir };
+    } catch {
+      /* not listening yet */
+    }
     await new Promise((res) => setTimeout(res, 500));
   }
   console.error(`apiE2E: the server did not start:\n${log.slice(-1500)}`);
@@ -47,11 +71,18 @@ async function serverUnderTest() {
 }
 let passed = 0;
 const ok = (cond, name) => {
-  if (!cond) { console.error(`✗ ${name}`); process.exit(1); }
-  passed++; console.log(`✓ ${name}`);
+  if (!cond) {
+    console.error(`✗ ${name}`);
+    process.exit(1);
+  }
+  passed++;
+  console.log(`✓ ${name}`);
 };
 const j = async (pathname, opts = {}, headers = {}) => {
-  const res = await fetch(`${API}${pathname}`, { ...opts, headers: { 'content-type': 'application/json', ...headers } });
+  const res = await fetch(`${API}${pathname}`, {
+    ...opts,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
   const body = await res.json().catch(() => ({}));
   return { status: res.status, body };
 };
@@ -61,14 +92,35 @@ const admin = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 // ---- 0. auth fundamentals
 let r = await j('/player/me', {}, { 'x-player-id': 'pl-adeyemi' });
 ok(r.status === 401, 'legacy trusted-id headers are refused');
-r = await j('/auth/player/signup', { method: 'POST', body: JSON.stringify({ name: 'No Pw', dob: '2000-01-01', country: 'GB' }) });
+r = await j('/auth/player/signup', {
+  method: 'POST',
+  body: JSON.stringify({ name: 'No Pw', dob: '2000-01-01', country: 'GB' }),
+});
 ok(r.status === 400 && r.body.error === 'PASSWORD_REQUIRED', 'signup without a password is refused');
-r = await j('/auth/player/signup', { method: 'POST', body: JSON.stringify({ name: 'Locked Player', dob: '2000-01-01', country: 'GB', password: 'longenough1', position: 'CM' }) });
-ok(r.status === 201 && r.body.token && !('password' in (r.body.player ?? {})), 'signup mints a session token and never echoes the hash');
+r = await j('/auth/player/signup', {
+  method: 'POST',
+  body: JSON.stringify({
+    name: 'Locked Player',
+    dob: '2000-01-01',
+    country: 'GB',
+    password: 'longenough1',
+    position: 'CM',
+  }),
+});
+ok(
+  r.status === 201 && r.body.token && !('password' in (r.body.player ?? {})),
+  'signup mints a session token and never echoes the hash',
+);
 const lockedId = r.body.playerId;
-r = await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: lockedId, password: 'wrong-password' }) });
+r = await j('/auth/player/login', {
+  method: 'POST',
+  body: JSON.stringify({ playerId: lockedId, password: 'wrong-password' }),
+});
 ok(r.status === 401, 'wrong password is refused');
-r = await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId: lockedId, password: 'longenough1' }) });
+r = await j('/auth/player/login', {
+  method: 'POST',
+  body: JSON.stringify({ playerId: lockedId, password: 'longenough1' }),
+});
 ok(r.status === 200 && r.body.token, 'correct password logs in');
 const lockedToken = r.body.token;
 r = await j('/player/me', {}, bearer(lockedToken));
@@ -84,8 +136,12 @@ const KOLA = await login('pl-adeyemi');
 const GUNI = await login('pl-guni');
 const SVEN = await login('pl-svensson');
 const IMANI = await login('pl-imani');
-const AMARA = (await j('/auth/guardian/login', { method: 'POST', body: JSON.stringify({ guardianId: 'gd-amara' }) })).body.token;
-const orgLogin = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }) });
+const AMARA = (await j('/auth/guardian/login', { method: 'POST', body: JSON.stringify({ guardianId: 'gd-amara' }) }))
+  .body.token;
+const orgLogin = await j('/auth/org/login', {
+  method: 'POST',
+  body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' }),
+});
 const EASTPORT = orgLogin.body.token;
 ok(!!(KOLA && GUNI && AMARA && EASTPORT), 'seed identities log in (passwordless demo seeds)');
 
@@ -94,33 +150,70 @@ ok(!!(KOLA && GUNI && AMARA && EASTPORT), 'seed identities log in (passwordless 
 // neither hits EMAIL_IN_USE here nor reads an earlier run's verification code
 // out of the outbox.
 const nadiaEmail = `nadia+${Date.now().toString(36)}@testfamily.co.uk`;
-r = await j('/auth/guardian/signup', { method: 'POST', body: JSON.stringify({ name: 'Nadia Test', email: nadiaEmail, password: 'longenough1' }) });
+r = await j('/auth/guardian/signup', {
+  method: 'POST',
+  body: JSON.stringify({ name: 'Nadia Test', email: nadiaEmail, password: 'longenough1' }),
+});
 ok(r.status === 201 && r.body.emailVerificationSent, 'guardian signup sends the verification email');
 const nadiaId = r.body.guardianId;
 const nadiaToken = r.body.token;
-r = await j('/auth/guardian/signup', { method: 'POST', body: JSON.stringify({ name: 'Nadia Twice', email: nadiaEmail, password: 'longenough1' }) });
+r = await j('/auth/guardian/signup', {
+  method: 'POST',
+  body: JSON.stringify({ name: 'Nadia Twice', email: nadiaEmail, password: 'longenough1' }),
+});
 ok(r.status === 409 && r.body.error === 'EMAIL_IN_USE', 'a second signup on the same email is refused');
-await j('/guardian/verify-id', { method: 'POST', body: JSON.stringify({ documentType: 'passport', documentRef: 'X1234567' }) }, bearer(nadiaToken));
+await j(
+  '/guardian/verify-id',
+  { method: 'POST', body: JSON.stringify({ documentType: 'passport', documentRef: 'X1234567' }) },
+  bearer(nadiaToken),
+);
 await j('/guardian/disclaimer', { method: 'POST', body: JSON.stringify({ accepted: true }) }, bearer(nadiaToken));
-r = await j('/guardian/children', { method: 'POST', body: JSON.stringify({ name: 'Test Kid', dob: '2013-01-01', country: 'GB' }) }, bearer(nadiaToken));
-ok(r.status === 403 && r.body.error === 'EMAIL_UNVERIFIED', 'unverified email blocks child onboarding even after IDV + disclaimer');
+r = await j(
+  '/guardian/children',
+  { method: 'POST', body: JSON.stringify({ name: 'Test Kid', dob: '2013-01-01', country: 'GB' }) },
+  bearer(nadiaToken),
+);
+ok(
+  r.status === 403 && r.body.error === 'EMAIL_UNVERIFIED',
+  'unverified email blocks child onboarding even after IDV + disclaimer',
+);
 const outbox = await j('/admin/outbox', {}, admin);
 const mail = outbox.body.items.find((m) => m.to === nadiaEmail);
 const emailCode = /code is ([A-Z0-9]{6})/.exec(mail?.text ?? '')?.[1];
 ok(!!emailCode, 'verification code is in the dev outbox');
-r = await j('/auth/guardian/verify-email', { method: 'POST', body: JSON.stringify({ guardianId: nadiaId, code: emailCode }) });
+r = await j('/auth/guardian/verify-email', {
+  method: 'POST',
+  body: JSON.stringify({ guardianId: nadiaId, code: emailCode }),
+});
 ok(r.status === 200 && r.body.emailVerified, 'email code verifies the guardian');
-r = await j('/guardian/children', { method: 'POST', body: JSON.stringify({ name: 'Test Kid', dob: '2013-01-01', country: 'GB' }) }, bearer(nadiaToken));
+r = await j(
+  '/guardian/children',
+  { method: 'POST', body: JSON.stringify({ name: 'Test Kid', dob: '2013-01-01', country: 'GB' }) },
+  bearer(nadiaToken),
+);
 ok(r.status === 201, 'child onboarding opens after all three gates');
 const acceptedAt = (await j('/guardian/me', {}, bearer(nadiaToken))).body.disclaimerAcceptedAt;
 await j('/guardian/disclaimer', { method: 'POST', body: JSON.stringify({ accepted: true }) }, bearer(nadiaToken));
 r = await j('/guardian/me', {}, bearer(nadiaToken));
-ok(Number.isInteger(acceptedAt) && r.body.disclaimerAcceptedAt === acceptedAt && !('passwordHash' in r.body) && !('emailCodeHash' in r.body), 'accepting the disclaimer again keeps the first acceptance time; the self view carries no secrets');
-r = await j('/auth/guardian/verify-email', { method: 'POST', body: JSON.stringify({ guardianId: nadiaId, code: 'WRONG1' }) });
+ok(
+  Number.isInteger(acceptedAt) &&
+    r.body.disclaimerAcceptedAt === acceptedAt &&
+    !('passwordHash' in r.body) &&
+    !('emailCodeHash' in r.body),
+  'accepting the disclaimer again keeps the first acceptance time; the self view carries no secrets',
+);
+r = await j('/auth/guardian/verify-email', {
+  method: 'POST',
+  body: JSON.stringify({ guardianId: nadiaId, code: 'WRONG1' }),
+});
 ok(r.status === 200 && r.body.emailVerified, 'a verified e-mail stays verified');
 r = await j(`/admin/guardians/${nadiaId}/idv`, { method: 'POST', body: JSON.stringify({ approved: false }) }, admin);
 ok(r.status === 200 && r.body.idVerified === false, 'Trust & Safety revokes the ID check');
-r = await j('/guardian/children', { method: 'POST', body: JSON.stringify({ name: 'Test Kid Two', dob: '2014-01-01', country: 'GB' }) }, bearer(nadiaToken));
+r = await j(
+  '/guardian/children',
+  { method: 'POST', body: JSON.stringify({ name: 'Test Kid Two', dob: '2014-01-01', country: 'GB' }) },
+  bearer(nadiaToken),
+);
 ok(r.status === 403 && r.body.error === 'GUARDIAN_ID_UNVERIFIED', 'a revoked ID check closes child onboarding again');
 r = await j(`/admin/guardians/${nadiaId}/idv`, { method: 'POST', body: JSON.stringify({ approved: true }) }, admin);
 ok(r.status === 200 && r.body.idVerified === true, 'Trust & Safety can approve it again');
@@ -132,109 +225,266 @@ const code = r.body.code;
 r = await j('/auth/player/pair', { method: 'POST', body: JSON.stringify({ code: 'WRONG1' }) });
 ok(r.status === 404, 'wrong pairing code is refused');
 r = await j('/auth/player/pair', { method: 'POST', body: JSON.stringify({ code }) });
-ok(r.status === 200 && r.body.playerId === 'pl-guni' && r.body.token, 'pairing exchanges the code for a child session token');
+ok(
+  r.status === 200 && r.body.playerId === 'pl-guni' && r.body.token,
+  'pairing exchanges the code for a child session token',
+);
 r = await j('/auth/player/pair', { method: 'POST', body: JSON.stringify({ code }) });
 ok(r.status === 404, 'pairing code is single-use');
 
 // ---- 3. trial with alt slots → chosen slot → ICS
-r = await j('/org/players/pl-adeyemi/request', {
-  method: 'POST',
-  body: JSON.stringify({ type: 'trial', message: 'Assessment day — pick a slot.', proposedDate: '2026-09-05', altSlots: ['2026-09-12', '2026-09-19'], venue: 'Eastport Dome', notes: 'Bring boots.' }),
-}, bearer(EASTPORT));
+r = await j(
+  '/org/players/pl-adeyemi/request',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'trial',
+      message: 'Assessment day — pick a slot.',
+      proposedDate: '2026-09-05',
+      altSlots: ['2026-09-12', '2026-09-19'],
+      venue: 'Eastport Dome',
+      notes: 'Bring boots.',
+    }),
+  },
+  bearer(EASTPORT),
+);
 ok(r.status === 201, 'org sends trial request with alt slots');
 const reqId = r.body.requestId;
 let inbox = await j('/player/inbox', {}, bearer(KOLA));
-ok(inbox.body.items.find((x) => x.id === reqId)?.trialDetails?.altSlots?.length === 2, 'player sees proposed + alt slots');
-r = await j(`/player/requests/${reqId}/respond`, { method: 'POST', body: JSON.stringify({ accept: true, chosenSlot: '2026-09-12' }) }, bearer(KOLA));
+ok(
+  inbox.body.items.find((x) => x.id === reqId)?.trialDetails?.altSlots?.length === 2,
+  'player sees proposed + alt slots',
+);
+r = await j(
+  `/player/requests/${reqId}/respond`,
+  { method: 'POST', body: JSON.stringify({ accept: true, chosenSlot: '2026-09-12' }) },
+  bearer(KOLA),
+);
 ok(r.status === 200, 'player accepts choosing an alt slot');
 let trials = await j('/org/trials', {}, bearer(EASTPORT));
 const trial = trials.body.items.find((t) => t.requestId === reqId);
 ok(trial?.proposedDate === '2026-09-12', 'trial is booked on the chosen alt slot');
 const ics = await fetch(`${API}/org/trials/${trial.id}/ics`, { headers: bearer(EASTPORT) });
 const icsText = await ics.text();
-ok(ics.status === 200 && icsText.includes('BEGIN:VCALENDAR') && icsText.includes('20260912'), 'trial exports as ICS with the chosen date');
+ok(
+  ics.status === 200 && icsText.includes('BEGIN:VCALENDAR') && icsText.includes('20260912'),
+  'trial exports as ICS with the chosen date',
+);
 
 // ---- 4. season history, prefs
-r = await j('/player/stats', { method: 'POST', body: JSON.stringify({ appearances: 20, goals: 9, assists: 3, season: '2022/23' }) }, bearer(KOLA));
-ok(r.status === 200 && r.body.seasonHistory.some((s) => s.season === '2022/23' && s.goals === 9), 'past-season stats file into season history');
-r = await j('/player/prefs', { method: 'POST', body: JSON.stringify({ quietStart: '22:00', quietEnd: '07:00' }) }, bearer(KOLA));
+r = await j(
+  '/player/stats',
+  { method: 'POST', body: JSON.stringify({ appearances: 20, goals: 9, assists: 3, season: '2022/23' }) },
+  bearer(KOLA),
+);
+ok(
+  r.status === 200 && r.body.seasonHistory.some((s) => s.season === '2022/23' && s.goals === 9),
+  'past-season stats file into season history',
+);
+r = await j(
+  '/player/prefs',
+  { method: 'POST', body: JSON.stringify({ quietStart: '22:00', quietEnd: '07:00' }) },
+  bearer(KOLA),
+);
 ok(r.status === 200 && r.body.prefs.quietStart === '22:00', 'player sets quiet hours');
 
 // ---- 5. saved search + alert
-await j('/org/searches', { method: 'POST', body: JSON.stringify({ name: 'Young strikers GB', filters: { position: 'ST', country: 'GB' } }) }, bearer(EASTPORT));
-r = await j('/auth/player/signup', { method: 'POST', body: JSON.stringify({ name: 'Alerted Striker', dob: '2005-01-01', country: 'GB', position: 'ST', password: 'longenough1' }) });
+await j(
+  '/org/searches',
+  { method: 'POST', body: JSON.stringify({ name: 'Young strikers GB', filters: { position: 'ST', country: 'GB' } }) },
+  bearer(EASTPORT),
+);
+r = await j('/auth/player/signup', {
+  method: 'POST',
+  body: JSON.stringify({
+    name: 'Alerted Striker',
+    dob: '2005-01-01',
+    country: 'GB',
+    position: 'ST',
+    password: 'longenough1',
+  }),
+});
 const newPlayerId = r.body.playerId;
 const newPlayerToken = r.body.token;
 let notifs = await j('/org/notifications', {}, bearer(EASTPORT));
-ok(notifs.body.some((n) => n.type === 'saved_search' && /Young strikers GB/.test(n.text)), 'saved-search alert fires for the new signup');
+ok(
+  notifs.body.some((n) => n.type === 'saved_search' && /Young strikers GB/.test(n.text)),
+  'saved-search alert fires for the new signup',
+);
 // A saved search is a row with typed filters; junk filters are refused naming the field, an empty value means no filter.
 r = await j('/org/searches', {}, bearer(EASTPORT));
 const savedYoung = r.body.find((x) => x.name === 'Young strikers GB');
-ok(savedYoung && savedYoung.scoutName && JSON.stringify(savedYoung.filters) === JSON.stringify({ position: 'ST', country: 'GB' }), 'the saved search reads back with its filters and the scout\'s name');
-for (const [filters, field] of [[{ position: 'Striker' }, 'filters.position'], [{ ageGroup: 'u12' }, 'filters.ageGroup'], [{ sort: 'age' }, 'filters.sort'], [{ academyPlus: 'yes' }, 'filters.academyPlus'], [{ newDays: '7' }, 'filters.newDays']]) {
+ok(
+  savedYoung &&
+    savedYoung.scoutName &&
+    JSON.stringify(savedYoung.filters) === JSON.stringify({ position: 'ST', country: 'GB' }),
+  "the saved search reads back with its filters and the scout's name",
+);
+for (const [filters, field] of [
+  [{ position: 'Striker' }, 'filters.position'],
+  [{ ageGroup: 'u12' }, 'filters.ageGroup'],
+  [{ sort: 'age' }, 'filters.sort'],
+  [{ academyPlus: 'yes' }, 'filters.academyPlus'],
+  [{ newDays: '7' }, 'filters.newDays'],
+]) {
   r = await j('/org/searches', { method: 'POST', body: JSON.stringify({ name: 'Junk', filters }) }, bearer(EASTPORT));
-  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `a junk search filter is refused naming ${field}`);
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field,
+    `a junk search filter is refused naming ${field}`,
+  );
 }
-r = await j('/org/searches', { method: 'POST', body: JSON.stringify({ name: 'Any winger', filters: { q: '', position: 'RW', academyPlus: false, country: null } }) }, bearer(EASTPORT));
-ok(r.status === 201 && JSON.stringify(r.body.filters) === JSON.stringify({ position: 'RW' }), 'empty, false and null filters mean no filter, as the apps send them');
+r = await j(
+  '/org/searches',
+  {
+    method: 'POST',
+    body: JSON.stringify({ name: 'Any winger', filters: { q: '', position: 'RW', academyPlus: false, country: null } }),
+  },
+  bearer(EASTPORT),
+);
+ok(
+  r.status === 201 && JSON.stringify(r.body.filters) === JSON.stringify({ position: 'RW' }),
+  'empty, false and null filters mean no filter, as the apps send them',
+);
 r = await j(`/org/searches/${r.body.id}`, { method: 'DELETE' }, bearer(EASTPORT));
 ok(r.status === 200, 'the club deletes its saved search');
-const HARBOUR = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-harbour', scoutName: 'Coach D. Ansah', role: 'Head of Recruitment' }) })).body.token;
+const HARBOUR = (
+  await j('/auth/org/login', {
+    method: 'POST',
+    body: JSON.stringify({ orgId: 'org-harbour', scoutName: 'Coach D. Ansah', role: 'Head of Recruitment' }),
+  })
+).body.token;
 r = await j(`/org/searches/${savedYoung.id}`, { method: 'DELETE' }, bearer(HARBOUR));
 ok(r.status === 404, 'another club cannot delete it');
 
 // ---- 6. mandatory report with feedback, then minor trial via guardian slot choice
-r = await j(`/org/trials/${trial.id}/report`, {
-  method: 'POST',
-  body: JSON.stringify({ acceleration: 8, sprintSpeedKmh: 33.4, distanceKm: 9.1, passCompletionPct: 81, duelSuccessPct: 63, coachRating: 8, strengthNote: 'Ruthless in the box.', focusNote: 'Weak-side pressing.' }),
-}, bearer(EASTPORT));
+r = await j(
+  `/org/trials/${trial.id}/report`,
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      acceleration: 8,
+      sprintSpeedKmh: 33.4,
+      distanceKm: 9.1,
+      passCompletionPct: 81,
+      duelSuccessPct: 63,
+      coachRating: 8,
+      strengthNote: 'Ruthless in the box.',
+      focusNote: 'Weak-side pressing.',
+    }),
+  },
+  bearer(EASTPORT),
+);
 ok(r.status === 201 || r.status === 200, 'org files the mandatory trial report with feedback notes');
 let me = await j('/player/me', {}, bearer(KOLA));
-ok(/Ruthless/.test(me.body.trialReports.find((x) => x.orgName === 'Eastport FC')?.strengthNote ?? ''), 'feedback lands on the player profile');
+ok(
+  /Ruthless/.test(me.body.trialReports.find((x) => x.orgName === 'Eastport FC')?.strengthNote ?? ''),
+  'feedback lands on the player profile',
+);
 
-r = await j('/org/players/pl-guni/request', {
-  method: 'POST',
-  body: JSON.stringify({ type: 'trial', message: 'U15 assessment for Guni.', proposedDate: '2026-09-06', altSlots: ['2026-09-13'], venue: 'Eastport Dome', notes: 'U15 day.' }),
-}, bearer(EASTPORT));
+r = await j(
+  '/org/players/pl-guni/request',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'trial',
+      message: 'U15 assessment for Guni.',
+      proposedDate: '2026-09-06',
+      altSlots: ['2026-09-13'],
+      venue: 'Eastport Dome',
+      notes: 'U15 day.',
+    }),
+  },
+  bearer(EASTPORT),
+);
 ok(r.status === 201 && r.body.routedTo === 'guardian', 'minor trial request routes to guardian');
 const gReqId = r.body.requestId;
-r = await j(`/guardian/requests/${gReqId}/respond`, { method: 'POST', body: JSON.stringify({ accept: true, chosenSlot: '2026-09-13' }) }, bearer(AMARA));
+r = await j(
+  `/guardian/requests/${gReqId}/respond`,
+  { method: 'POST', body: JSON.stringify({ accept: true, chosenSlot: '2026-09-13' }) },
+  bearer(AMARA),
+);
 ok(r.status === 200, 'guardian accepts choosing the alt slot');
 trials = await j('/org/trials', {}, bearer(EASTPORT));
-ok(trials.body.items.some((t) => t.requestId === gReqId && t.proposedDate === '2026-09-13'), 'guardian-chosen slot books the trial');
+ok(
+  trials.body.items.some((t) => t.requestId === gReqId && t.proposedDate === '2026-09-13'),
+  'guardian-chosen slot books the trial',
+);
 
 // ---- 7. moderation v2: grooming language blocks AND escalates
 const guniChannel = (await j('/guardian/channels', {}, bearer(AMARA))).body.find((c) => c.requestId === gReqId);
-r = await j(`/org/channels/${guniChannel.id}/messages`, { method: 'POST', body: JSON.stringify({ text: "Great session. Don't tell your parents but we should keep this between us." }) }, bearer(EASTPORT));
+r = await j(
+  `/org/channels/${guniChannel.id}/messages`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ text: "Great session. Don't tell your parents but we should keep this between us." }),
+  },
+  bearer(EASTPORT),
+);
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'grooming-pattern message is blocked');
 let adminReports = await j('/admin/reports?limit=100', {}, admin);
-ok(adminReports.body.items.some((x) => x.by === 'system' && x.urgent && /grooming/.test(x.reason)), 'grooming hit auto-escalates as an urgent report');
+ok(
+  adminReports.body.items.some((x) => x.by === 'system' && x.urgent && /grooming/.test(x.reason)),
+  'grooming hit auto-escalates as an urgent report',
+);
 ok(adminReports.body.items[0].urgent === true, 'admin triage puts urgent reports first');
 
 // ---- 8. funnel + signing → invoice
-r = await j('/org/players/pl-svensson/request', { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'First-team conversation.' }) }, bearer(EASTPORT));
-await j(`/player/requests/${r.body.requestId}/respond`, { method: 'POST', body: JSON.stringify({ accept: true }) }, bearer(SVEN));
-r = await j('/org/players/pl-svensson/signing', { method: 'POST', body: JSON.stringify({ note: 'Signed after trial run.' }) }, bearer(EASTPORT));
+r = await j(
+  '/org/players/pl-svensson/request',
+  { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'First-team conversation.' }) },
+  bearer(EASTPORT),
+);
+await j(
+  `/player/requests/${r.body.requestId}/respond`,
+  { method: 'POST', body: JSON.stringify({ accept: true }) },
+  bearer(SVEN),
+);
+r = await j(
+  '/org/players/pl-svensson/signing',
+  { method: 'POST', body: JSON.stringify({ note: 'Signed after trial run.' }) },
+  bearer(EASTPORT),
+);
 ok(r.status === 201 && r.body.signing.insideAttributionWindow, 'signing recorded inside attribution window');
 let invoices = await j('/org/invoices', {}, bearer(EASTPORT));
-ok(invoices.body.items.some((i) => i.signingId === r.body.signing.id && i.amount > 0), 'success-fee invoice issued through the billing adapter');
+ok(
+  invoices.body.items.some((i) => i.signingId === r.body.signing.id && i.amount > 0),
+  'success-fee invoice issued through the billing adapter',
+);
 let funnel = await j('/org/funnel', {}, bearer(EASTPORT));
 const stage = (k) => funnel.body.stages.find((s) => s.key === k)?.count ?? -1;
-ok(stage('requests') >= 3 && stage('trials') >= 2 && stage('signings') >= 1, 'funnel computes real stage counts from the ledger');
+ok(
+  stage('requests') >= 3 && stage('trials') >= 2 && stage('signings') >= 1,
+  'funnel computes real stage counts from the ledger',
+);
 
 // ---- 9. club email-domain verification
-r = await j('/org/verification/email', { method: 'POST', body: JSON.stringify({ email: 'scout@gmail.com' }) }, bearer(EASTPORT));
+r = await j(
+  '/org/verification/email',
+  { method: 'POST', body: JSON.stringify({ email: 'scout@gmail.com' }) },
+  bearer(EASTPORT),
+);
 ok(r.status === 422, 'free-mail domains are refused for club verification');
-r = await j('/org/verification/email', { method: 'POST', body: JSON.stringify({ email: 'recruitment@eastportfc.co.uk' }) }, bearer(EASTPORT));
+r = await j(
+  '/org/verification/email',
+  { method: 'POST', body: JSON.stringify({ email: 'recruitment@eastportfc.co.uk' }) },
+  bearer(EASTPORT),
+);
 ok(r.status === 201, 'company-domain challenge sent');
 const vMail = (await j('/admin/outbox', {}, admin)).body.items.find((m) => m.to === 'recruitment@eastportfc.co.uk');
 const vCode = /code is ([A-Z0-9]{6})/.exec(vMail?.text ?? '')?.[1];
-r = await j('/org/verification/email/confirm', { method: 'POST', body: JSON.stringify({ code: vCode }) }, bearer(EASTPORT));
+r = await j(
+  '/org/verification/email/confirm',
+  { method: 'POST', body: JSON.stringify({ code: vCode }) },
+  bearer(EASTPORT),
+);
 ok(r.status === 200 && r.body.emailDomain === 'eastportfc.co.uk', 'code from the mailbox confirms domain control');
 
 // ---- 10. exports, deletion rules, aging-up
 r = await j('/player/export', {}, bearer(KOLA));
-ok(r.body.profile?.id === 'pl-adeyemi' && r.body.profile.password === undefined, 'player export bundles data, never the hash');
+ok(
+  r.body.profile?.id === 'pl-adeyemi' && r.body.profile.password === undefined,
+  'player export bundles data, never the hash',
+);
 r = await j('/guardian/export', {}, bearer(AMARA));
 ok(r.body.guardian?.id === 'gd-amara' && r.body.guardian.password === undefined, 'guardian export is sanitized');
 r = await j('/player/account', { method: 'DELETE' }, bearer(GUNI));
@@ -247,29 +497,73 @@ r = await j('/player/aging-up/complete', { method: 'POST' }, bearer(IMANI));
 ok(r.status === 200, 'aging-up handover completes');
 
 // ---- 11. admin resolve reaches the reporter; push log records delivery
-await j('/player/report', { method: 'POST', body: JSON.stringify({ targetKind: 'club', targetOrgId: 'org-harbour', reason: 'Asked to move to WhatsApp', urgent: true }) }, bearer(KOLA));
-const rep = (await j('/admin/reports?limit=100', {}, admin)).body.items.find((x) => x.status === 'pending_review' && x.by === 'player');
-r = await j(`/admin/reports/${rep.id}/resolve`, { method: 'POST', body: JSON.stringify({ outcome: 'Warning issued to the club.', action: 'warning' }) }, admin);
+await j(
+  '/player/report',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      targetKind: 'club',
+      targetOrgId: 'org-harbour',
+      reason: 'Asked to move to WhatsApp',
+      urgent: true,
+    }),
+  },
+  bearer(KOLA),
+);
+const rep = (await j('/admin/reports?limit=100', {}, admin)).body.items.find(
+  (x) => x.status === 'pending_review' && x.by === 'player',
+);
+r = await j(
+  `/admin/reports/${rep.id}/resolve`,
+  { method: 'POST', body: JSON.stringify({ outcome: 'Warning issued to the club.', action: 'warning' }) },
+  admin,
+);
 ok(r.status === 200, 'admin resolves the report');
 const myReports = await j('/player/reports', {}, bearer(KOLA));
-ok(myReports.body.some((x) => x.id === rep.id && /Warning issued/.test(x.outcome ?? '')), 'resolution reaches the reporter');
+ok(
+  myReports.body.some((x) => x.id === rep.id && /Warning issued/.test(x.outcome ?? '')),
+  'resolution reaches the reporter',
+);
 const pushLog = await j('/admin/push-log', {}, admin);
 ok(pushLog.body.items.length > 0, 'push adapter records deliveries (dev transport)');
 
 // ---- 12. platform separation: ScoutBox Grassroots
-r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', platform: 'grassroots' }) });
+r = await j('/auth/org/login', {
+  method: 'POST',
+  body: JSON.stringify({ orgId: 'org-eastport', scoutName: 'Maria Keane', platform: 'grassroots' }),
+});
 ok(r.status === 403 && r.body.error === 'PLATFORM_MISMATCH', 'pro club cannot log into ScoutBox Grassroots');
-r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Mensah', role: 'Manager' }) });
-ok(r.status === 403 && r.body.error === 'GRASSROOTS_PLATFORM_ONLY', 'grassroots club cannot log into the main platform');
-r = await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Mensah', role: 'Manager', platform: 'grassroots' }) });
+r = await j('/auth/org/login', {
+  method: 'POST',
+  body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Mensah', role: 'Manager' }),
+});
+ok(
+  r.status === 403 && r.body.error === 'GRASSROOTS_PLATFORM_ONLY',
+  'grassroots club cannot log into the main platform',
+);
+r = await j('/auth/org/login', {
+  method: 'POST',
+  body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Mensah', role: 'Manager', platform: 'grassroots' }),
+});
 ok(r.status === 200 && r.body.token, 'grassroots club logs in on its own platform');
 const HACKNEY = r.body.token;
-const MOSS = (await j('/auth/org/login', { method: 'POST', body: JSON.stringify({ orgId: 'org-mossside', scoutName: 'Pat Doyle', role: 'Head Coach', platform: 'grassroots' }) })).body.token;
+const MOSS = (
+  await j('/auth/org/login', {
+    method: 'POST',
+    body: JSON.stringify({ orgId: 'org-mossside', scoutName: 'Pat Doyle', role: 'Head Coach', platform: 'grassroots' }),
+  })
+).body.token;
 
 let orgList = await j('/orgs?platform=grassroots');
-ok(orgList.body.length >= 2 && orgList.body.every((o) => o.level === 'grassroots'), 'grassroots login screen lists only grassroots clubs');
+ok(
+  orgList.body.length >= 2 && orgList.body.every((o) => o.level === 'grassroots'),
+  'grassroots login screen lists only grassroots clubs',
+);
 orgList = await j('/orgs?platform=main');
-ok(orgList.body.every((o) => o.level !== 'grassroots'), 'main login screen never lists grassroots clubs');
+ok(
+  orgList.body.every((o) => o.level !== 'grassroots'),
+  'main login screen never lists grassroots clubs',
+);
 
 // Hackney (London, verified): sees local minor Guni, not Manchester's Kola,
 // and never a pro-level player.
@@ -278,22 +572,41 @@ const names = gsearch.body.items.map((p) => p.name);
 ok(names.includes('Guni Adebayo'), 'verified grassroots club sees a LOCAL minor (safeguarding bar identical)');
 ok(!names.includes('Kola Adeyemi'), 'players beyond 50km are invisible to grassroots clubs');
 ok(!names.includes('Elias Svensson'), 'pro-level players never appear on Grassroots');
-ok(gsearch.body.items.every((p) => typeof p.distanceKm === 'number' && p.distanceKm <= 50), 'grassroots views carry distance, all within radius');
-ok(gsearch.body.items.every((p) => !('academyPlus' in p) && !('marketValueRange' in p) && !('agentName' in p)), 'pro-market surface (Academy+, value, agent) stripped on Grassroots');
+ok(
+  gsearch.body.items.every((p) => typeof p.distanceKm === 'number' && p.distanceKm <= 50),
+  'grassroots views carry distance, all within radius',
+);
+ok(
+  gsearch.body.items.every((p) => !('academyPlus' in p) && !('marketValueRange' in p) && !('agentName' in p)),
+  'pro-market surface (Academy+, value, agent) stripped on Grassroots',
+);
 r = await j('/org/players/pl-adeyemi', {}, bearer(HACKNEY));
 ok(r.status === 403 || r.status === 404, 'direct profile fetch beyond the radius refused');
 
 // Moss Side (Manchester, unverified): adults-only, local-only.
 gsearch = await j('/org/players', {}, bearer(MOSS));
-ok(gsearch.body.items.some((p) => p.name === 'Kola Adeyemi'), 'Manchester grassroots club sees Manchester amateur');
-ok(!gsearch.body.items.some((p) => p.guardianManaged), 'unverified grassroots club sees no minors — same rule as everywhere');
+ok(
+  gsearch.body.items.some((p) => p.name === 'Kola Adeyemi'),
+  'Manchester grassroots club sees Manchester amateur',
+);
+ok(
+  !gsearch.body.items.some((p) => p.guardianManaged),
+  'unverified grassroots club sees no minors — same rule as everywhere',
+);
 
 // Grassroots signing sets the player semi-pro (still on the platform).
-await j('/org/players/pl-adeyemi/request', { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'First-team spot this season.' }) }, bearer(MOSS));
+await j(
+  '/org/players/pl-adeyemi/request',
+  { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'First-team spot this season.' }) },
+  bearer(MOSS),
+);
 r = await j('/org/players/pl-adeyemi/signing', { method: 'POST' }, bearer(MOSS));
 ok(r.status === 201, 'grassroots club records a signing');
 gsearch = await j('/org/players', {}, bearer(MOSS));
-ok(gsearch.body.items.find((p) => p.id === 'pl-adeyemi')?.level === 'semi_pro', 'grassroots signing makes the player semi-pro, still visible locally');
+ok(
+  gsearch.body.items.find((p) => p.id === 'pl-adeyemi')?.level === 'semi_pro',
+  'grassroots signing makes the player semi-pro, still visible locally',
+);
 
 // A pro signing removes the player from Grassroots entirely (Svensson,
 // signed by Eastport in section 8, is now level pro).
@@ -301,24 +614,49 @@ const svView = await j('/org/players/pl-svensson', {}, bearer(EASTPORT));
 ok(svView.body.level === 'pro', 'academy/pro signing marks the player pro');
 
 // Registration requires federation details + a ground location.
-r = await j('/auth/org/register-grassroots', { method: 'POST', body: JSON.stringify({ name: 'No Fed FC', scoutName: 'A' }) });
+r = await j('/auth/org/register-grassroots', {
+  method: 'POST',
+  body: JSON.stringify({ name: 'No Fed FC', scoutName: 'A' }),
+});
 ok(r.status === 400 && r.body.error === 'FEDERATION_REQUIRED', 'registration without federation record refused');
 r = await j('/auth/org/register-grassroots', {
   method: 'POST',
-  body: JSON.stringify({ name: 'Leyton Sunday Stars', country: 'GB', city: 'London', lat: 51.56, lng: -0.005, federation: 'The FA (England)', registrationId: 'FA-GR-3344', scoutName: 'Sam Cole', role: 'Manager' }),
+  body: JSON.stringify({
+    name: 'Leyton Sunday Stars',
+    country: 'GB',
+    city: 'London',
+    lat: 51.56,
+    lng: -0.005,
+    federation: 'The FA (England)',
+    registrationId: 'FA-GR-3344',
+    scoutName: 'Sam Cole',
+    role: 'Manager',
+  }),
 });
-ok(r.status === 201 && r.body.token && r.body.org.level === 'grassroots' && r.body.org.verified === false, 'grassroots registration opens unverified (adults-only) with a token');
+ok(
+  r.status === 201 && r.body.token && r.body.org.level === 'grassroots' && r.body.org.verified === false,
+  'grassroots registration opens unverified (adults-only) with a token',
+);
 const LEYTON = r.body.token; // London grassroots club, ~2km from Hackney Marsh
 gsearch = await j('/org/players', {}, bearer(LEYTON));
-ok(gsearch.body.items.every((p) => !p.guardianManaged && p.distanceKm <= 50), 'freshly registered club: local adults only until verification');
+ok(
+  gsearch.body.items.every((p) => !p.guardianManaged && p.distanceKm <= 50),
+  'freshly registered club: local adults only until verification',
+);
 
 // ---- 13. the Grassroots player journey
 // Kola became semi-pro via the Moss Side signing above — the level-up moment
 // should have fired: badge, pathway, timeline.
 me = await j('/player/me', {}, bearer(KOLA));
-ok(me.body.pathway?.level === 'semi_pro' && me.body.pathway.steps.find((s) => s.key === 'semi_pro').reached, 'pathway shows the level-up');
+ok(
+  me.body.pathway?.level === 'semi_pro' && me.body.pathway.steps.find((s) => s.key === 'semi_pro').reached,
+  'pathway shows the level-up',
+);
 ok(me.body.badges.includes('First Club'), 'level-up awarded the First Club badge');
-ok(me.body.timeline.some((t) => /Levelled up: amateur → semi-pro/.test(t.event)), 'level-up recorded on the timeline');
+ok(
+  me.body.timeline.some((t) => /Levelled up: amateur → semi-pro/.test(t.event)),
+  'level-up recorded on the timeline',
+);
 
 // Training programme: suggested by position, weekly progress, feeds streaks.
 r = await j('/player/programme', {}, bearer(KOLA));
@@ -326,29 +664,55 @@ ok(r.status === 200 && r.body.suggested === 'attack', 'programme suggests the at
 r = await j('/player/programme', { method: 'POST', body: JSON.stringify({ track: 'attack' }) }, bearer(KOLA));
 ok(r.status === 201 && r.body.current.doneThisWeek === 0, 'programme selected');
 r = await j('/player/programme/sessions/atk-sprint/complete', { method: 'POST' }, bearer(KOLA));
-ok(r.body.current.doneThisWeek === 1 && r.body.current.sessions.find((x) => x.id === 'atk-sprint').done, 'session completion tracked weekly');
+ok(
+  r.body.current.doneThisWeek === 1 && r.body.current.sessions.find((x) => x.id === 'atk-sprint').done,
+  'session completion tracked weekly',
+);
 r = await j('/player/programme', {}, bearer(SVEN));
 ok(r.status === 403 && r.body.error === 'GRASSROOTS_ONLY', 'pro players have no grassroots programme');
 
 // Benchmarks: cohort percentiles, explicitly not a leaderboard.
 r = await j('/player/benchmarks', {}, bearer(KOLA));
-ok(r.status === 200 && /not competition/.test(r.body.note) && Array.isArray(r.body.stats), 'benchmarks return cohort percentiles, framed as context');
+ok(
+  r.status === 200 && /not competition/.test(r.body.note) && Array.isArray(r.body.stats),
+  'benchmarks return cohort percentiles, framed as context',
+);
 
 // Opportunity radar: Moss Side (Manchester) is in Kola's radius.
 r = await j('/org/looking-for', { method: 'POST', body: JSON.stringify({ positions: ['striker'] }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.field === 'positions[0]', 'looking-for takes position codes only (the radar could never match "striker")');
+ok(
+  r.status === 400 && r.body.field === 'positions[0]',
+  'looking-for takes position codes only (the radar could never match "striker")',
+);
 r = await j('/org/looking-for', { method: 'POST', body: JSON.stringify({ positions: ['ST', 'CDM'] }) }, bearer(MOSS));
 ok(r.status === 200 && r.body.lookingFor.join() === 'ST,CDM', 'the club says what it is looking for');
-r = await j('/org/open-trials', {
-  method: 'POST',
-  body: JSON.stringify({ title: 'Open training session', date: '2099-05-01', venue: 'Moss Side Rec', ageGroup: 'open', positions: ['ST'] }),
-}, bearer(MOSS));
+r = await j(
+  '/org/open-trials',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      title: 'Open training session',
+      date: '2099-05-01',
+      venue: 'Moss Side Rec',
+      ageGroup: 'open',
+      positions: ['ST'],
+    }),
+  },
+  bearer(MOSS),
+);
 ok(r.status === 201, 'grassroots club posts an open trial day');
 const mossTrialId = r.body.openTrial.id;
-r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'x', date: '2099-05-01', venue: 'y' }) }, bearer(EASTPORT));
+r = await j(
+  '/org/open-trials',
+  { method: 'POST', body: JSON.stringify({ title: 'x', date: '2099-05-01', venue: 'y' }) },
+  bearer(EASTPORT),
+);
 ok(r.status === 403 && r.body.error === 'GRASSROOTS_ORGS_ONLY', 'open days are grassroots-only');
 r = await j('/player/opportunities', {}, bearer(KOLA));
-ok(r.body.clubs.some((c) => c.name === 'Moss Side Athletic' && c.lookingFor.includes('ST')), 'radar shows the local club looking for his position');
+ok(
+  r.body.clubs.some((c) => c.name === 'Moss Side Athletic' && c.lookingFor.includes('ST')),
+  'radar shows the local club looking for his position',
+);
 ok(r.body.lookingForYou >= 1, 'radar counts clubs looking for the player');
 r = await j(`/player/open-trials/${mossTrialId}/register`, { method: 'POST' }, bearer(KOLA));
 ok(r.status === 201, 'adult registers for a local open day');
@@ -358,64 +722,159 @@ ok(r.status === 409, 'double registration refused');
 // First Team Seekers: surfaced first to grassroots clubs, never purchasable.
 await j('/player/first-team-seeker', { method: 'POST', body: JSON.stringify({ enabled: true }) }, bearer(KOLA));
 gsearch = await j('/org/players', {}, bearer(MOSS));
-ok(gsearch.body.items.find((p) => p.id === 'pl-adeyemi')?.firstTeamSeeker === true, 'seeker flag visible to grassroots clubs');
+ok(
+  gsearch.body.items.find((p) => p.id === 'pl-adeyemi')?.firstTeamSeeker === true,
+  'seeker flag visible to grassroots clubs',
+);
 
 // Coach vouches: email-code verified, moderated, coach email never exposed.
-r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: 'Ade Falana', coachEmail: 'ade@sundayleague.org.uk', role: 'Manager' }) }, bearer(KOLA));
+r = await j(
+  '/player/vouches/request',
+  {
+    method: 'POST',
+    body: JSON.stringify({ coachName: 'Ade Falana', coachEmail: 'ade@sundayleague.org.uk', role: 'Manager' }),
+  },
+  bearer(KOLA),
+);
 ok(r.status === 201, 'vouch request sent to the coach');
 const vMailBox = await j('/admin/outbox', {}, admin);
 const vouchMail = vMailBox.body.items.find((m) => m.to === 'ade@sundayleague.org.uk');
 const vouchCode = /reference code is ([A-Z0-9]{8})/.exec(vouchMail?.text ?? '')?.[1];
 ok(!!vouchCode, 'vouch code delivered via the mailer');
-r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: "Don't tell your parents but call me on 07911 123456" }) });
+r = await j('/vouch/submit', {
+  method: 'POST',
+  body: JSON.stringify({ code: vouchCode, text: "Don't tell your parents but call me on 07911 123456" }),
+});
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'vouch text passes through the same moderation screen');
-r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: 'Two seasons with me — never missed a session, leads the line brilliantly.', seasons: '2024–2026' }) });
+r = await j('/vouch/submit', {
+  method: 'POST',
+  body: JSON.stringify({
+    code: vouchCode,
+    text: 'Two seasons with me — never missed a session, leads the line brilliantly.',
+    seasons: '2024–2026',
+  }),
+});
 ok(r.status === 201, 'clean vouch publishes');
 // The code is single use (stored only as its hash, cleared on publish); junk is refused, not coerced.
-r = await j('/vouch/submit', { method: 'POST', body: JSON.stringify({ code: vouchCode, text: 'A second go with the same code.' }) });
+r = await j('/vouch/submit', {
+  method: 'POST',
+  body: JSON.stringify({ code: vouchCode, text: 'A second go with the same code.' }),
+});
 ok(r.status === 404 && r.body.error === 'CODE_INVALID', 'a used reference code is refused');
-r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: { first: 'Ade' }, coachEmail: 'ade@sundayleague.org.uk' }) }, bearer(KOLA));
-ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'coachName', 'a coach name that is not text is refused, naming the field');
-r = await j('/player/vouches/request', { method: 'POST', body: JSON.stringify({ coachName: 'Ade', coachEmail: 'not-an-email' }) }, bearer(KOLA));
+r = await j(
+  '/player/vouches/request',
+  { method: 'POST', body: JSON.stringify({ coachName: { first: 'Ade' }, coachEmail: 'ade@sundayleague.org.uk' }) },
+  bearer(KOLA),
+);
+ok(
+  r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'coachName',
+  'a coach name that is not text is refused, naming the field',
+);
+r = await j(
+  '/player/vouches/request',
+  { method: 'POST', body: JSON.stringify({ coachName: 'Ade', coachEmail: 'not-an-email' }) },
+  bearer(KOLA),
+);
 ok(r.status === 400 && r.body.error === 'COACH_DETAILS_REQUIRED', 'a coach email without an address shape is refused');
 const tsVouches = await j('/admin/vouches?limit=1', {}, admin);
-ok(tsVouches.status === 200 && tsVouches.body.items.length === 1 && 'nextCursor' in tsVouches.body, 'the T&S reference list pages by cursor (items, nextCursor)');
-ok(tsVouches.body.items.every((v) => !('code' in v) && !('codeHash' in v) && 'coachEmail' in v), 'T&S sees the coach email, never the code or its hash');
+ok(
+  tsVouches.status === 200 && tsVouches.body.items.length === 1 && 'nextCursor' in tsVouches.body,
+  'the T&S reference list pages by cursor (items, nextCursor)',
+);
+ok(
+  tsVouches.body.items.every((v) => !('code' in v) && !('codeHash' in v) && 'coachEmail' in v),
+  'T&S sees the coach email, never the code or its hash',
+);
 ok((await j('/admin/vouches?cursor=junk', {}, admin)).status === 400, 'a junk cursor is refused');
 gsearch = await j(`/org/players/pl-adeyemi`, {}, bearer(MOSS));
-ok(gsearch.body.vouches?.some((v) => /leads the line/.test(v.text)) && !('coachEmail' in (gsearch.body.vouches?.[0] ?? {})), 'published vouch visible to clubs, coach email never exposed');
+ok(
+  gsearch.body.vouches?.some((v) => /leads the line/.test(v.text)) &&
+    !('coachEmail' in (gsearch.body.vouches?.[0] ?? {})),
+  'published vouch visible to clubs, coach email never exposed',
+);
 
 // Guardian route: open days for a child list only clubs allowed to see them.
-r = await j('/org/open-trials', {
-  method: 'POST',
-  body: JSON.stringify({ title: 'U15 open morning', date: '2099-06-01', venue: 'Hackney Marshes pitch 4', ageGroup: 'u16' }),
-}, bearer(HACKNEY));
+r = await j(
+  '/org/open-trials',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      title: 'U15 open morning',
+      date: '2099-06-01',
+      venue: 'Hackney Marshes pitch 4',
+      ageGroup: 'u16',
+    }),
+  },
+  bearer(HACKNEY),
+);
 const hackneyTrialId = r.body.openTrial.id;
 r = await j('/guardian/children/pl-guni/open-trials', {}, bearer(AMARA));
-ok(r.body.openTrials.some((t) => t.id === hackneyTrialId) && !r.body.openTrials.some((t) => t.id === mossTrialId), 'guardian sees local verified open days only');
-r = await j(`/guardian/open-trials/${mossTrialId}/register`, { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) }, bearer(AMARA));
+ok(
+  r.body.openTrials.some((t) => t.id === hackneyTrialId) && !r.body.openTrials.some((t) => t.id === mossTrialId),
+  'guardian sees local verified open days only',
+);
+r = await j(
+  `/guardian/open-trials/${mossTrialId}/register`,
+  { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) },
+  bearer(AMARA),
+);
 ok(r.status === 403, 'minor registration to a club that may not see them is refused');
-r = await j(`/guardian/open-trials/${hackneyTrialId}/register`, { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) }, bearer(AMARA));
+r = await j(
+  `/guardian/open-trials/${hackneyTrialId}/register`,
+  { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) },
+  bearer(AMARA),
+);
 ok(r.status === 201, 'guardian registers the child for a verified local open day');
 r = await j('/org/open-trials', {}, bearer(HACKNEY));
-ok(r.body.items.find((t) => t.id === hackneyTrialId)?.registrations.some((x) => x.playerName === 'Guni Adebayo' && x.byGuardian), 'club sees the guardian-made registration');
+ok(
+  r.body.items
+    .find((t) => t.id === hackneyTrialId)
+    ?.registrations.some((x) => x.playerName === 'Guni Adebayo' && x.byGuardian),
+  'club sees the guardian-made registration',
+);
 
 // Season wrap.
 r = await j('/player/season-wrap', {}, bearer(KOLA));
-ok(r.status === 200 && r.body.badges.includes('First Club') && /ledger/.test(r.body.note), 'season wrap assembles the verified year');
+ok(
+  r.status === 200 && r.body.badges.includes('First Club') && /ledger/.test(r.body.note),
+  'season wrap assembles the verified year',
+);
 
 // ---- 13b. the grassroots club toolkit
 
 // Squad: the Moss Side signing (section 12) auto-rostered Kola; gap analysis
 // flags uncovered position groups and suggests what to look for.
 r = await j('/org/squad', {}, bearer(MOSS));
-ok(r.body.entries.some((e) => e.playerId === 'pl-adeyemi' && e.source === 'signing' && e.onPlatform), 'a grassroots signing lands the player on the squad list automatically');
-ok(r.body.gaps.includes('GK') && r.body.suggestedLookingFor.includes('GK'), 'gap analysis flags uncovered groups and suggests positions');
-r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Big Trev (Sunday keeper)', position: 'GK' }) }, bearer(MOSS));
-ok(r.status === 201 && r.body.entries.some((e) => e.name === 'Big Trev (Sunday keeper)' && !e.onPlatform) && r.body.coverage.GK === 1, 'off-platform players roster by name and count toward coverage');
-r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Kola', playerId: 'pl-adeyemi' }) }, bearer(MOSS));
+ok(
+  r.body.entries.some((e) => e.playerId === 'pl-adeyemi' && e.source === 'signing' && e.onPlatform),
+  'a grassroots signing lands the player on the squad list automatically',
+);
+ok(
+  r.body.gaps.includes('GK') && r.body.suggestedLookingFor.includes('GK'),
+  'gap analysis flags uncovered groups and suggests positions',
+);
+r = await j(
+  '/org/squad',
+  { method: 'POST', body: JSON.stringify({ name: 'Big Trev (Sunday keeper)', position: 'GK' }) },
+  bearer(MOSS),
+);
+ok(
+  r.status === 201 &&
+    r.body.entries.some((e) => e.name === 'Big Trev (Sunday keeper)' && !e.onPlatform) &&
+    r.body.coverage.GK === 1,
+  'off-platform players roster by name and count toward coverage',
+);
+r = await j(
+  '/org/squad',
+  { method: 'POST', body: JSON.stringify({ name: 'Kola', playerId: 'pl-adeyemi' }) },
+  bearer(MOSS),
+);
 ok(r.status === 409 && r.body.error === 'ALREADY_ON_SQUAD', 'double rostering refused');
-r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Elias', playerId: 'pl-svensson' }) }, bearer(MOSS));
+r = await j(
+  '/org/squad',
+  { method: 'POST', body: JSON.stringify({ name: 'Elias', playerId: 'pl-svensson' }) },
+  bearer(MOSS),
+);
 ok(r.status === 403, 'cannot roster a player the platform walls hide');
 r = await j('/org/squad', {}, bearer(EASTPORT));
 ok(r.status === 403 && r.body.error === 'GRASSROOTS_ORGS_ONLY', 'squad tools are grassroots-only');
@@ -424,155 +883,441 @@ ok(r.status === 403 && r.body.error === 'GRASSROOTS_ORGS_ONLY', 'squad tools are
 // for every rostered platform player. Non-rostered ids are never credited.
 me = await j('/player/me', {}, bearer(KOLA));
 const attBefore = me.body.attendance.length;
-r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Moss Side vs Ancoats Rovers', date: '2026-08-30', result: '3-1', playerIds: ['pl-adeyemi', 'pl-svensson', 'pl-nobody'] }) }, bearer(MOSS));
+r = await j(
+  '/org/matchday',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      fixture: 'Moss Side vs Ancoats Rovers',
+      date: '2026-08-30',
+      result: '3-1',
+      playerIds: ['pl-adeyemi', 'pl-svensson', 'pl-nobody'],
+    }),
+  },
+  bearer(MOSS),
+);
 ok(r.status === 201 && r.body.credited === 1, 'match day credits only rostered, visible platform players');
 me = await j('/player/me', {}, bearer(KOLA));
 const lastAtt = me.body.attendance[me.body.attendance.length - 1];
-ok(me.body.attendance.length === attBefore + 1 && lastAtt.verified === true && lastAtt.corroboratedBy === 'Moss Side Athletic', 'player receives verified, coach-corroborated attendance');
+ok(
+  me.body.attendance.length === attBefore + 1 &&
+    lastAtt.verified === true &&
+    lastAtt.corroboratedBy === 'Moss Side Athletic',
+  'player receives verified, coach-corroborated attendance',
+);
 r = await j('/org/matchdays', {}, bearer(MOSS));
-ok(r.body.items.some((m) => m.fixture === 'Moss Side vs Ancoats Rovers' && m.result === '3-1'), 'match-day log kept for the club');
+ok(
+  r.body.items.some((m) => m.fixture === 'Moss Side vs Ancoats Rovers' && m.result === '3-1'),
+  'match-day log kept for the club',
+);
 
 // The no-ghosting rule: unresolved past open-day registrants block the next
 // posting — every kid who turns up gets an answer.
-r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Last month\'s open session', date: '2020-01-01', venue: 'Moss Side Rec' }) }, bearer(MOSS));
+r = await j(
+  '/org/open-trials',
+  {
+    method: 'POST',
+    body: JSON.stringify({ title: "Last month's open session", date: '2020-01-01', venue: 'Moss Side Rec' }),
+  },
+  bearer(MOSS),
+);
 const pastTrialId = r.body.openTrial.id;
 await j(`/player/open-trials/${pastTrialId}/register`, { method: 'POST' }, bearer(KOLA));
-r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Next open session', date: '2099-07-01', venue: 'Moss Side Rec' }) }, bearer(MOSS));
-ok(r.status === 409 && r.body.error === 'OUTCOMES_OUTSTANDING', 'posting a new open day is blocked while past registrants wait for an answer');
+r = await j(
+  '/org/open-trials',
+  { method: 'POST', body: JSON.stringify({ title: 'Next open session', date: '2099-07-01', venue: 'Moss Side Rec' }) },
+  bearer(MOSS),
+);
+ok(
+  r.status === 409 && r.body.error === 'OUTCOMES_OUTSTANDING',
+  'posting a new open day is blocked while past registrants wait for an answer',
+);
 trials = await j('/org/open-trials', {}, bearer(MOSS));
 const pastReg = trials.body.items.find((t) => t.id === pastTrialId).registrations[0];
-r = await j(`/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'invite_trial', note: 'Great movement up front — come train with the first team.' }) }, bearer(MOSS));
+r = await j(
+  `/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`,
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      outcome: 'invite_trial',
+      note: 'Great movement up front — come train with the first team.',
+    }),
+  },
+  bearer(MOSS),
+);
 ok(r.status === 200 && r.body.registration.outcome === 'invite_trial', 'open-day outcome recorded: trial invitation');
 r = await j('/player/inbox', {}, bearer(KOLA));
-ok(r.body.items.some((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? '') && x.status === 'pending'), 'the invitation is a real, properly-routed trial request in the player inbox');
+ok(
+  r.body.items.some(
+    (x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? '') && x.status === 'pending',
+  ),
+  'the invitation is a real, properly-routed trial request in the player inbox',
+);
 {
   const invite = r.body.items.find((x) => x.type === 'trial' && /open day/.test(x.trialDetails?.notes ?? ''));
-  ok(invite?.routedTo === 'player' && invite.orgName === 'Moss Side Athletic' && typeof invite.orgSafeguardingCertified === 'boolean' && invite.message.startsWith('Great movement'),
-    'it is written by the one request writer: routing, club facts and the club\'s note, like any other trial invitation');
+  ok(
+    invite?.routedTo === 'player' &&
+      invite.orgName === 'Moss Side Athletic' &&
+      typeof invite.orgSafeguardingCertified === 'boolean' &&
+      invite.message.startsWith('Great movement'),
+    "it is written by the one request writer: routing, club facts and the club's note, like any other trial invitation",
+  );
   const feed = await j('/player/notifications', {}, bearer(KOLA));
   const items = Array.isArray(feed.body) ? feed.body : (feed.body?.items ?? []);
-  ok(items.some((n) => n.type === 'open_trial' && n.refId === invite?.id && /trial invitation in your inbox/.test(n.text)), 'the player is told in the open-day wording, linked to the request');
+  ok(
+    items.some(
+      (n) => n.type === 'open_trial' && n.refId === invite?.id && /trial invitation in your inbox/.test(n.text),
+    ),
+    'the player is told in the open-day wording, linked to the request',
+  );
 }
-r = await j(`/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined' }) }, bearer(MOSS));
+r = await j(
+  `/org/open-trials/${pastTrialId}/registrations/${pastReg.id}/outcome`,
+  { method: 'POST', body: JSON.stringify({ outcome: 'declined' }) },
+  bearer(MOSS),
+);
 ok(r.status === 409 && r.body.error === 'ALREADY_RESOLVED', 'an outcome is final — no flip-flopping on a player');
-r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Next open session', date: '2099-07-01', venue: 'Moss Side Rec' }) }, bearer(MOSS));
+r = await j(
+  '/org/open-trials',
+  { method: 'POST', body: JSON.stringify({ title: 'Next open session', date: '2099-07-01', venue: 'Moss Side Rec' }) },
+  bearer(MOSS),
+);
 ok(r.status === 201, 'with every registrant answered, the next open day posts');
 
 // The kind no: guardian-managed registrants get the answer via the guardian.
 trials = await j('/org/open-trials', {}, bearer(HACKNEY));
-const guniReg = trials.body.items.find((t) => t.id === hackneyTrialId).registrations.find((x) => x.playerName === 'Guni Adebayo');
-r = await j(`/org/open-trials/${hackneyTrialId}/registrations/${guniReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined', note: 'Call me on 07911 123456 to discuss' }) }, bearer(HACKNEY));
+const guniReg = trials.body.items
+  .find((t) => t.id === hackneyTrialId)
+  .registrations.find((x) => x.playerName === 'Guni Adebayo');
+r = await j(
+  `/org/open-trials/${hackneyTrialId}/registrations/${guniReg.id}/outcome`,
+  { method: 'POST', body: JSON.stringify({ outcome: 'declined', note: 'Call me on 07911 123456 to discuss' }) },
+  bearer(HACKNEY),
+);
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'outcome notes pass the same moderation screen');
-r = await j(`/org/open-trials/${hackneyTrialId}/registrations/${guniReg.id}/outcome`, { method: 'POST', body: JSON.stringify({ outcome: 'declined', note: 'Not this time — keep playing, and come back next season.' }) }, bearer(HACKNEY));
-ok(r.status === 200 && r.body.registration.outcome === 'declined', 'kind no recorded for a guardian-managed registrant');
+r = await j(
+  `/org/open-trials/${hackneyTrialId}/registrations/${guniReg.id}/outcome`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ outcome: 'declined', note: 'Not this time — keep playing, and come back next season.' }),
+  },
+  bearer(HACKNEY),
+);
+ok(
+  r.status === 200 && r.body.registration.outcome === 'declined',
+  'kind no recorded for a guardian-managed registrant',
+);
 r = await j('/guardian/notifications', {}, bearer(AMARA));
-ok(r.body.some((n) => n.type === 'open_trial' && /keep playing/.test(n.text)), 'the kind no reaches the guardian, never a bare child');
+ok(
+  r.body.some((n) => n.type === 'open_trial' && /keep playing/.test(n.text)),
+  'the kind no reaches the guardian, never a bare child',
+);
 
 // Release with a reference: availability restored + a club-authored reference
 // published on the way out.
 r = await j('/org/squad', {}, bearer(MOSS));
 const kolaEntry = r.body.entries.find((e) => e.playerId === 'pl-adeyemi');
-r = await j(`/org/squad/${kolaEntry.id}/release`, { method: 'POST', body: JSON.stringify({ referenceText: 'A season of graft — never late, pressed every minute. Any club within 50km should move.' }) }, bearer(MOSS));
-ok(r.status === 200 && !r.body.entries.some((e) => e.playerId === 'pl-adeyemi'), 'release removes the player from the squad');
+r = await j(
+  `/org/squad/${kolaEntry.id}/release`,
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      referenceText: 'A season of graft — never late, pressed every minute. Any club within 50km should move.',
+    }),
+  },
+  bearer(MOSS),
+);
+ok(
+  r.status === 200 && !r.body.entries.some((e) => e.playerId === 'pl-adeyemi'),
+  'release removes the player from the squad',
+);
 me = await j('/player/me', {}, bearer(KOLA));
-ok(me.body.availability === 'available_now' && me.body.contractStatus === 'free_agent', 'released player is marked available and free-agent');
-ok(me.body.vouches.some((v) => /A season of graft/.test(v.text) && v.status === 'published'), 'the club-authored reference publishes straight to the profile');
+ok(
+  me.body.availability === 'available_now' && me.body.contractStatus === 'free_agent',
+  'released player is marked available and free-agent',
+);
+ok(
+  me.body.vouches.some((v) => /A season of graft/.test(v.text) && v.status === 'published'),
+  'the club-authored reference publishes straight to the profile',
+);
 
 // Pathway Club record: development is the grassroots reputation currency.
 r = await j('/org/pathway-record', {}, bearer(MOSS));
-ok(r.status === 200 && r.body.progressed === 0 && r.body.pathwayClub === false && r.body.matchdaysLogged >= 1, 'pathway record starts honest: nobody has progressed yet');
+ok(
+  r.status === 200 && r.body.progressed === 0 && r.body.pathwayClub === false && r.body.matchdaysLogged >= 1,
+  'pathway record starts honest: nobody has progressed yet',
+);
 r = await j('/player/opportunities', {}, bearer(KOLA));
-ok(r.body.clubs.every((c) => typeof c.progressed === 'number' && typeof c.pathwayClub === 'boolean'), 'the opportunity radar carries each club\'s development record');
-await j('/org/players/pl-adeyemi/request', { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'We have watched your season.' }) }, bearer(EASTPORT));
+ok(
+  r.body.clubs.every((c) => typeof c.progressed === 'number' && typeof c.pathwayClub === 'boolean'),
+  "the opportunity radar carries each club's development record",
+);
+await j(
+  '/org/players/pl-adeyemi/request',
+  { method: 'POST', body: JSON.stringify({ type: 'contact', message: 'We have watched your season.' }) },
+  bearer(EASTPORT),
+);
 r = await j('/org/players/pl-adeyemi/signing', { method: 'POST' }, bearer(EASTPORT));
 ok(r.status === 201, 'a pro club signs the grassroots product');
 r = await j('/org/pathway-record', {}, bearer(MOSS));
 ok(r.body.progressed >= 1 && r.body.pathwayClub === true, 'the pro signing makes Moss Side a Pathway Club');
 r = await j('/orgs/directory');
-ok(r.body.items.find((o) => o.id === 'org-mossside')?.pathwayClub === true, 'the Pathway Club badge shows in the player-facing directory');
+ok(
+  r.body.items.find((o) => o.id === 'org-mossside')?.pathwayClub === true,
+  'the Pathway Club badge shows in the player-facing directory',
+);
 
 // Federation-route verification: Sunday-league clubs run on free email —
 // they verify through their federation registration instead.
-r = await j('/org/verification/federation', { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'mosssideathletic@gmail.com' }) }, bearer(MOSS));
+r = await j(
+  '/org/verification/federation',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      federation: 'Manchester FA',
+      registrationId: 'MFA-2210',
+      contactEmail: 'mosssideathletic@gmail.com',
+    }),
+  },
+  bearer(MOSS),
+);
 ok(r.status === 201 && r.body.submitted, 'grassroots club files federation verification (free-mail contact allowed)');
-r = await j('/org/verification/federation', { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'not an address' }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.field === 'contactEmail', 'a federation contact that is not an e-mail address is refused');
+r = await j(
+  '/org/verification/federation',
+  {
+    method: 'POST',
+    body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', contactEmail: 'not an address' }),
+  },
+  bearer(MOSS),
+);
+ok(
+  r.status === 400 && r.body.field === 'contactEmail',
+  'a federation contact that is not an e-mail address is refused',
+);
 r = await j('/admin/clubs', {}, admin);
-ok(r.body.items.find((o) => o.id === 'org-mossside')?.federationCheck?.status === 'pending', 'the federation check lands in the Trust & Safety queue');
+ok(
+  r.body.items.find((o) => o.id === 'org-mossside')?.federationCheck?.status === 'pending',
+  'the federation check lands in the Trust & Safety queue',
+);
 
 // Friendlies board: club-to-club, same 50km radius.
-r = await j('/org/friendlies', { method: 'POST', body: JSON.stringify({ ageGroup: 'u15', date: '2099-08-15', venue: 'Hackney Marshes pitch 2', notes: 'Development XI, decent standard.' }) }, bearer(HACKNEY));
+r = await j(
+  '/org/friendlies',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      ageGroup: 'u15',
+      date: '2099-08-15',
+      venue: 'Hackney Marshes pitch 2',
+      notes: 'Development XI, decent standard.',
+    }),
+  },
+  bearer(HACKNEY),
+);
 ok(r.status === 201, 'grassroots club posts a friendly');
 const friendlyId = r.body.friendly.id;
 r = await j('/org/friendlies', {}, bearer(MOSS));
-ok(!r.body.items.some((f) => f.id === friendlyId), 'Manchester never sees a London friendly — the 50km rule holds club-to-club');
+ok(
+  !r.body.items.some((f) => f.id === friendlyId),
+  'Manchester never sees a London friendly — the 50km rule holds club-to-club',
+);
 r = await j('/org/friendlies', {}, bearer(LEYTON));
-ok(r.body.items.some((f) => f.id === friendlyId && typeof f.distanceKm === 'number' && f.distanceKm <= 50), 'a neighbouring club sees the friendly with its distance');
-r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'WhatsApp me on 07911 123456' }) }, bearer(LEYTON));
+ok(
+  r.body.items.some((f) => f.id === friendlyId && typeof f.distanceKm === 'number' && f.distanceKm <= 50),
+  'a neighbouring club sees the friendly with its distance',
+);
+r = await j(
+  `/org/friendlies/${friendlyId}/respond`,
+  { method: 'POST', body: JSON.stringify({ message: 'WhatsApp me on 07911 123456' }) },
+  bearer(LEYTON),
+);
 ok(r.status === 400 && r.body.error === 'MODERATION_BLOCKED', 'friendly responses are moderated like everything else');
-r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'Our u15s are free that Saturday — happy to travel.' }) }, bearer(LEYTON));
+r = await j(
+  `/org/friendlies/${friendlyId}/respond`,
+  { method: 'POST', body: JSON.stringify({ message: 'Our u15s are free that Saturday — happy to travel.' }) },
+  bearer(LEYTON),
+);
 ok(r.status === 201, 'a local club responds to the friendly');
-r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: 'again' }) }, bearer(LEYTON));
+r = await j(
+  `/org/friendlies/${friendlyId}/respond`,
+  { method: 'POST', body: JSON.stringify({ message: 'again' }) },
+  bearer(LEYTON),
+);
 ok(r.status === 409 && r.body.error === 'ALREADY_RESPONDED', 'double responses refused');
 r = await j('/org/friendlies', {}, bearer(HACKNEY));
-ok(r.body.items.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to travel/.test(x.message)), 'the poster sees who is up for it');
+ok(
+  r.body.items.find((f) => f.id === friendlyId)?.responses.some((x) => /happy to travel/.test(x.message)),
+  'the poster sees who is up for it',
+);
 
 // ---- 13c. open days, match days and friendlies are typed tables. Junk is refused naming the field; the clubs'
 // lists page by cursor; deleting an open day takes it off every list.
-r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: 'GK' }) }, bearer(HACKNEY));
-ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'positions', 'positions that are not a list are refused (were read as none)');
-r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: ['GK', 7] }) }, bearer(HACKNEY));
+r = await j(
+  '/org/open-trials',
+  {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: 'GK' }),
+  },
+  bearer(HACKNEY),
+);
+ok(
+  r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'positions',
+  'positions that are not a list are refused (were read as none)',
+);
+r = await j(
+  '/org/open-trials',
+  {
+    method: 'POST',
+    body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: ['GK', 7] }),
+  },
+  bearer(HACKNEY),
+);
 ok(r.status === 400 && r.body.field === 'positions', 'a position that is not text is refused (was dropped)');
-r = await j('/org/open-trials', { method: 'POST', body: JSON.stringify({ title: 'Keepers only', date: '2099-06-08', venue: 'Hackney Marshes', positions: ['GK', ' GK '] }) }, bearer(HACKNEY));
-ok(r.status === 201 && r.body.openTrial.positions.join() === 'GK' && typeof r.body.openTrial.orgName === 'string', 'a repeated position is kept once; the club\'s name is read live');
+r = await j(
+  '/org/open-trials',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      title: 'Keepers only',
+      date: '2099-06-08',
+      venue: 'Hackney Marshes',
+      positions: ['GK', ' GK '],
+    }),
+  },
+  bearer(HACKNEY),
+);
+ok(
+  r.status === 201 && r.body.openTrial.positions.join() === 'GK' && typeof r.body.openTrial.orgName === 'string',
+  "a repeated position is kept once; the club's name is read live",
+);
 const keepersId = r.body.openTrial?.id;
 r = await j('/org/open-trials?limit=1', {}, bearer(HACKNEY));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].id === keepersId && typeof r.body.nextCursor === 'string', 'a club\'s open days page newest first');
+ok(
+  r.status === 200 &&
+    r.body.items.length === 1 &&
+    r.body.items[0].id === keepersId &&
+    typeof r.body.nextCursor === 'string',
+  "a club's open days page newest first",
+);
 r = await j(`/org/open-trials?limit=1&cursor=${r.body.nextCursor}`, {}, bearer(HACKNEY));
 ok(r.status === 200 && r.body.items[0]?.id === hackneyTrialId, 'the cursor continues where the page stopped');
 r = await j('/org/open-trials?cursor=junk', {}, bearer(HACKNEY));
 ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', 'a junk cursor is refused');
 r = await j('/org/coverage/fixtures?limit=100', {}, bearer(LEYTON));
-ok(r.status === 200 && r.body.items.some((f) => f.id === `tr-${keepersId}` && f.source === 'open_trial' && f.home) && r.body.items.some((f) => f.id === `fr-${friendlyId}` && f.source === 'friendly_board'), 'the observable fixtures union lists open days and friendlies');
+ok(
+  r.status === 200 &&
+    r.body.items.some((f) => f.id === `tr-${keepersId}` && f.source === 'open_trial' && f.home) &&
+    r.body.items.some((f) => f.id === `fr-${friendlyId}` && f.source === 'friendly_board'),
+  'the observable fixtures union lists open days and friendlies',
+);
 r = await j('/org/coverage/fixtures?limit=1', {}, bearer(LEYTON));
-ok(r.status === 200 && r.body.items.length === 1 && typeof r.body.nextCursor === 'string', 'the fixture list pages by cursor');
+ok(
+  r.status === 200 && r.body.items.length === 1 && typeof r.body.nextCursor === 'string',
+  'the fixture list pages by cursor',
+);
 r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(LEYTON));
 ok(r.status === 404, 'only the host deletes its open day');
 r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(HACKNEY));
 ok(r.status === 200 && r.body.deleted === true, 'the host deletes its open day');
 r = await j('/org/open-trials', {}, bearer(HACKNEY));
-ok(!r.body.items.some((t) => t.id === keepersId), 'a deleted open day leaves the club\'s list');
+ok(!r.body.items.some((t) => t.id === keepersId), "a deleted open day leaves the club's list");
 r = await j('/org/coverage/fixtures?limit=100', {}, bearer(LEYTON));
 ok(!r.body.items.some((f) => f.id === `tr-${keepersId}`), '… and the observable fixtures');
-r = await j(`/guardian/open-trials/${keepersId}/register`, { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) }, bearer(AMARA));
+r = await j(
+  `/guardian/open-trials/${keepersId}/register`,
+  { method: 'POST', body: JSON.stringify({ childId: 'pl-guni' }) },
+  bearer(AMARA),
+);
 ok(r.status === 404 && r.body.error === 'OPEN_TRIAL_NOT_FOUND', '… and cannot be registered for');
 r = await j(`/org/open-trials/${keepersId}`, { method: 'DELETE' }, bearer(HACKNEY));
 ok(r.status === 404, 'deleting twice answers 404');
 
-r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 7, date: '2026-09-06' }) }, bearer(MOSS));
+r = await j(
+  '/org/matchday',
+  { method: 'POST', body: JSON.stringify({ fixture: 7, date: '2026-09-06' }) },
+  bearer(MOSS),
+);
 ok(r.status === 400 && r.body.field === 'fixture', 'a fixture that is not text is refused (was stringified)');
-r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Moss Side vs Hulme', date: '2026-09-06', result: '3-1 after extra time and penalties' }) }, bearer(MOSS));
+r = await j(
+  '/org/matchday',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      fixture: 'Moss Side vs Hulme',
+      date: '2026-09-06',
+      result: '3-1 after extra time and penalties',
+    }),
+  },
+  bearer(MOSS),
+);
 ok(r.status === 400 && r.body.field === 'result', 'a result over 20 characters is refused (was cut off)');
-r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Moss Side vs Hulme', date: '2026-09-06', playerIds: 'pl-adeyemi' }) }, bearer(MOSS));
+r = await j(
+  '/org/matchday',
+  {
+    method: 'POST',
+    body: JSON.stringify({ fixture: 'Moss Side vs Hulme', date: '2026-09-06', playerIds: 'pl-adeyemi' }),
+  },
+  bearer(MOSS),
+);
 ok(r.status === 400 && r.body.field === 'playerIds', 'playerIds that is not a list is refused (was read as none)');
-r = await j('/org/squad', { method: 'POST', body: JSON.stringify({ name: 'Guni', playerId: 'pl-guni' }) }, bearer(HACKNEY));
+r = await j(
+  '/org/squad',
+  { method: 'POST', body: JSON.stringify({ name: 'Guni', playerId: 'pl-guni' }) },
+  bearer(HACKNEY),
+);
 ok(r.status === 201, 'Hackney rosters a local player it can see');
-r = await j('/org/matchday', { method: 'POST', body: JSON.stringify({ fixture: 'Hackney Marsh vs Clapton', date: '2026-09-06', playerIds: ['pl-guni', 'pl-guni'] }) }, bearer(HACKNEY));
+r = await j(
+  '/org/matchday',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      fixture: 'Hackney Marsh vs Clapton',
+      date: '2026-09-06',
+      playerIds: ['pl-guni', 'pl-guni'],
+    }),
+  },
+  bearer(HACKNEY),
+);
 ok(r.status === 201 && r.body.credited === 1, 'a player listed twice is credited once');
 r = await j('/org/matchdays?limit=1', {}, bearer(HACKNEY));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].playerIds.join() === 'pl-guni', '… and the match day names them once');
+ok(
+  r.status === 200 && r.body.items.length === 1 && r.body.items[0].playerIds.join() === 'pl-guni',
+  '… and the match day names them once',
+);
 r = await j('/org/matchdays?limit=1', {}, bearer(MOSS));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].fixture === 'Moss Side vs Ancoats Rovers' && r.body.nextCursor === null, 'match days page; the last page has no cursor');
+ok(
+  r.status === 200 &&
+    r.body.items.length === 1 &&
+    r.body.items[0].fixture === 'Moss Side vs Ancoats Rovers' &&
+    r.body.nextCursor === null,
+  'match days page; the last page has no cursor',
+);
 
-r = await j(`/org/friendlies/${friendlyId}/respond`, { method: 'POST', body: JSON.stringify({ message: { text: 'hi' } }) }, bearer(MOSS));
-ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'message', 'a response message that is not text is refused (was stringified)');
+r = await j(
+  `/org/friendlies/${friendlyId}/respond`,
+  { method: 'POST', body: JSON.stringify({ message: { text: 'hi' } }) },
+  bearer(MOSS),
+);
+ok(
+  r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'message',
+  'a response message that is not text is refused (was stringified)',
+);
 r = await j('/org/friendlies?limit=0', {}, bearer(HACKNEY));
 ok(r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID', 'the board refuses a junk limit');
 r = await j('/org/friendlies?limit=1', {}, bearer(LEYTON));
-ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].status === 'open' && r.body.items[0].responses.every((x) => x.message === ''), 'the board pages; another club never sees responders\' messages');
+ok(
+  r.status === 200 &&
+    r.body.items.length === 1 &&
+    r.body.items[0].status === 'open' &&
+    r.body.items[0].responses.every((x) => x.message === ''),
+  "the board pages; another club never sees responders' messages",
+);
 
 r = await j('/player/opportunity-board?limit=1', {}, bearer(KOLA));
-ok(r.status === 200 && Array.isArray(r.body.items) && r.body.items.length <= 1 && 'nextCursor' in r.body, 'the opportunity board pages by cursor');
+ok(
+  r.status === 200 && Array.isArray(r.body.items) && r.body.items.length <= 1 && 'nextCursor' in r.body,
+  'the opportunity board pages by cursor',
+);
 r = await j('/player/opportunity-board?cursor=junk', {}, bearer(KOLA));
 ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', '… and refuses a junk cursor');
 

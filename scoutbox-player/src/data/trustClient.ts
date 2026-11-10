@@ -15,15 +15,20 @@ import { trustMock } from './trustMock';
 
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 
-export type TrustComponentId =
-  | 'identity' | 'footballHistory' | 'relationships' | 'evidence' | 'combine' | 'references';
+export type TrustComponentId = 'identity' | 'footballHistory' | 'relationships' | 'evidence' | 'combine' | 'references';
 
 /** A single evidence signal. `text` is server-authored, neutral copy: a gap is
  *  always an EVIDENCE GAP, never a player weakness or a suggestion of
  *  dishonesty. Clients render it verbatim. */
-export interface TrustSignal { code: string; text: string }
+export interface TrustSignal {
+  code: string;
+  text: string;
+}
 
-export interface TrustLevel { id: string; label: string }
+export interface TrustLevel {
+  id: string;
+  label: string;
+}
 
 export interface TrustComponent {
   weight: number;
@@ -47,7 +52,12 @@ export interface TrustExplanation {
   reasons: string[];
 }
 
-export interface TrustBand { id: string; label: string; min: number; max: number }
+export interface TrustBand {
+  id: string;
+  label: string;
+  min: number;
+  max: number;
+}
 
 /** The self/guardian projection returned by the server. */
 export interface TrustSelf {
@@ -87,11 +97,10 @@ export interface TrustClient {
 }
 
 const live: TrustClient = {
-  profile: async (a) => (
+  profile: async (a) =>
     a.kind === 'player'
       ? (await req<{ trust: TrustSelf }>('/player/trust-profile', a.id)).trust
-      : (await req<{ trust: TrustSelf }>(`/guardian/children/${a.childId}/trust-profile`, a.id)).trust
-  ),
+      : (await req<{ trust: TrustSelf }>(`/guardian/children/${a.childId}/trust-profile`, a.id)).trust,
   explain: (playerId) => req<TrustExplained>('/player/trust-profile/explain', playerId),
 };
 

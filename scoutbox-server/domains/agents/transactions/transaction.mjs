@@ -28,17 +28,32 @@ export const RELEASING_PARTY_TYPES = Object.freeze(['transfer', 'loan']);
  *   ARCHIVED            a retention state, never a deletion.
  */
 export const TRANSACTION_STATUSES = Object.freeze([
-  'DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED',
-  'READY', 'ACTIVE', 'ON_HOLD', 'CANCELLED', 'CLOSED', 'ARCHIVED',
+  'DRAFT',
+  'PARTIES_CONFIRMED',
+  'COMPLIANCE_PENDING',
+  'COMPLIANCE_BLOCKED',
+  'READY',
+  'ACTIVE',
+  'ON_HOLD',
+  'CANCELLED',
+  'CLOSED',
+  'ARCHIVED',
 ]);
 
-export const LIVE_STATUSES = Object.freeze(['DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'READY', 'ACTIVE', 'ON_HOLD']);
+export const LIVE_STATUSES = Object.freeze([
+  'DRAFT',
+  'PARTIES_CONFIRMED',
+  'COMPLIANCE_PENDING',
+  'COMPLIANCE_BLOCKED',
+  'READY',
+  'ACTIVE',
+  'ON_HOLD',
+]);
 export const TERMINAL_STATUSES = Object.freeze(['CANCELLED', 'CLOSED', 'ARCHIVED']);
 
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
 /** A row with no parties array belongs to nobody, rather than failing every party's list route. */
 const partiesOf = (tx) => (Array.isArray(tx?.parties) ? tx.parties : []);
-
 
 /** READY and the COMPLIANCE_* states are absent: they are the compliance layer's answer, not anyone's request. */
 export const ACTOR_TRANSITIONS = nullProto({
@@ -98,8 +113,13 @@ export const ALL_TRANSITIONS = Object.freeze(
  * transaction pathway is enabled.
  */
 export const ROOM_ROLES = Object.freeze([
-  'representing_agent', 'party_individual', 'party_guardian',
-  'party_club_signatory', 'party_club_member', 'agency_admin_observer', 'trust_safety',
+  'representing_agent',
+  'party_individual',
+  'party_guardian',
+  'party_club_signatory',
+  'party_club_member',
+  'agency_admin_observer',
+  'trust_safety',
 ]);
 
 /** `viewer` is what the server derived (e.g. whether the user is a recorded signatory), never a request's claim. */
@@ -110,7 +130,8 @@ export function roomRolesFor(tx, viewer) {
   const parties = partiesOf(tx);
   if (viewer.kind === 'ts_reviewer') return ['trust_safety'];
   if (viewer.kind === 'player') {
-    if (parties.some((p) => live(p) && p.subjectKind === 'player' && p.subjectId === viewer.playerId)) roles.push('party_individual');
+    if (parties.some((p) => live(p) && p.subjectKind === 'player' && p.subjectId === viewer.playerId))
+      roles.push('party_individual');
     return roles;
   }
   if (viewer.kind === 'agency') {
@@ -177,7 +198,13 @@ const VISIBILITY_ROLES = nullProto({
   PLAYER_AGENT_SHARED: ['representing_agent', 'party_individual', 'party_guardian'],
   ENGAGING_AGENT_SHARED: ['representing_agent', 'party_club_signatory', 'party_club_member'],
   RELEASING_AGENT_SHARED: ['representing_agent', 'party_club_signatory', 'party_club_member'],
-  ALL_TRANSACTION_PARTIES: ['representing_agent', 'party_individual', 'party_guardian', 'party_club_signatory', 'party_club_member'],
+  ALL_TRANSACTION_PARTIES: [
+    'representing_agent',
+    'party_individual',
+    'party_guardian',
+    'party_club_signatory',
+    'party_club_member',
+  ],
   T_AND_S_ONLY: ['trust_safety'],
 });
 
@@ -210,7 +237,13 @@ export function uploadableVisibilities(roles, partyRole = null) {
     if (v === 'T_AND_S_ONLY') continue;
     if (!canSeeVisibility(v, roles, partyRole)) continue;
     // The club-side classes belong to the club and agent lanes, not the player's.
-    if (roles.includes('party_individual') && !roles.includes('representing_agent') && /CLUB|ENGAGING|RELEASING/.test(v) && v !== 'ALL_TRANSACTION_PARTIES') continue;
+    if (
+      roles.includes('party_individual') &&
+      !roles.includes('representing_agent') &&
+      /CLUB|ENGAGING|RELEASING/.test(v) &&
+      v !== 'ALL_TRANSACTION_PARTIES'
+    )
+      continue;
     out.push(v);
   }
   return out;
@@ -221,13 +254,24 @@ export const NOTE_VISIBILITY = Object.freeze(DOCUMENT_VISIBILITY.filter((v) => v
 // ------------------------------------------------------------------ compliance state
 
 export const PENDING_REASONS = Object.freeze([
-  'CONSENT_REQUIRED', 'MANUAL_REVIEW', 'INSUFFICIENT_DATA', 'PROVIDER_UNAVAILABLE',
-  'JURISDICTION_UNSUPPORTED', 'FACET_NOT_VERIFIED', 'PARTIES_NOT_CONFIRMED', 'REPRESENTATION_MISSING',
+  'CONSENT_REQUIRED',
+  'MANUAL_REVIEW',
+  'INSUFFICIENT_DATA',
+  'PROVIDER_UNAVAILABLE',
+  'JURISDICTION_UNSUPPORTED',
+  'FACET_NOT_VERIFIED',
+  'PARTIES_NOT_CONFIRMED',
+  'REPRESENTATION_MISSING',
 ]);
 /** Refusals by the facet gate before the engine ran, so the snapshot names no evaluation row. */
 export const COMPLIANCE_GATES = Object.freeze(['FACET_NOT_VERIFIED', 'JURISDICTION_UNSUPPORTED']);
 export const STALENESS_REASONS = Object.freeze(['NO_SNAPSHOT', 'INPUTS_CHANGED', 'POLICY_CHANGED', 'EXPIRED']);
-export const WITHDRAWN_REASONS = Object.freeze(['party_removed', 'agent_withdrew', 'subject_removed', 'review_rejected']);
+export const WITHDRAWN_REASONS = Object.freeze([
+  'party_removed',
+  'agent_withdrew',
+  'subject_removed',
+  'review_rejected',
+]);
 
 /**
  * A snapshot stores only the evaluation it names (or its gate), its pending reason, the party revision and licence
@@ -236,21 +280,51 @@ export const WITHDRAWN_REASONS = Object.freeze(['party_removed', 'agent_withdrew
 export function snapshotView(tx, stored, evaluation) {
   if (!stored) return null;
   const gate = stored.gate ?? null;
-  const outcome = gate ? null : evaluation?.outcome ?? null;
-  const reasonCodes = gate ? (gate === 'JURISDICTION_UNSUPPORTED' ? ['POLICY_NOT_ENCODED'] : []) : [...new Set((evaluation?.reasons ?? []).map((r) => r.code))];
+  const outcome = gate ? null : (evaluation?.outcome ?? null);
+  const reasonCodes = gate
+    ? gate === 'JURISDICTION_UNSUPPORTED'
+      ? ['POLICY_NOT_ENCODED']
+      : []
+    : [...new Set((evaluation?.reasons ?? []).map((r) => r.code))];
   const pendingReason = stored.pendingReason ?? null;
   const consents = gate ? [] : (evaluation?.consentsOutstanding ?? []);
-  const state = { outcome, reasonCodes, pendingReason, blocked: pendingReason === null && outcome === 'PROHIBITED_CONFLICT', clear: pendingReason === null && outcome === 'CLEAR' };
+  const state = {
+    outcome,
+    reasonCodes,
+    pendingReason,
+    blocked: pendingReason === null && outcome === 'PROHIBITED_CONFLICT',
+    clear: pendingReason === null && outcome === 'CLEAR',
+  };
   if (pendingReason === 'CONSENT_REQUIRED' && outcome === PERMITTED_WITH_CONSENT) state.consentsOutstanding = consents;
   return {
-    evaluationId: gate ? `${tx.id}#gate` : stored.evaluationId, contextId: tx.contextId ?? null, evaluatedAt: stored.evaluatedAt,
-    policyVersions: gate ? [] : (evaluation?.policyVersions ?? []), outcome, reasonCodes, pendingReason, blocked: state.blocked, clear: state.clear,
-    consentRequirements: consents.map((c) => ({ partyRole: c.partyRole, consentKind: c.consentKind, reasonCode: c.reasonCode })),
-    verificationFreshness: stored.verificationFreshness ?? null, partyRevision: stored.partyRevision, state,
+    evaluationId: gate ? `${tx.id}#gate` : stored.evaluationId,
+    contextId: tx.contextId ?? null,
+    evaluatedAt: stored.evaluatedAt,
+    policyVersions: gate ? [] : (evaluation?.policyVersions ?? []),
+    outcome,
+    reasonCodes,
+    pendingReason,
+    blocked: state.blocked,
+    clear: state.clear,
+    consentRequirements: consents.map((c) => ({
+      partyRole: c.partyRole,
+      consentKind: c.consentKind,
+      reasonCode: c.reasonCode,
+    })),
+    verificationFreshness: stored.verificationFreshness ?? null,
+    partyRevision: stored.partyRevision,
+    state,
   };
 }
 
-export function complianceStateFrom({ outcome = null, gate = null, reasons = [], consentsOutstanding = [], representationCount = 0, partiesConfirmed = false }) {
+export function complianceStateFrom({
+  outcome = null,
+  gate = null,
+  reasons = [],
+  consentsOutstanding = [],
+  representationCount = 0,
+  partiesConfirmed = false,
+}) {
   const codes = [...new Set((reasons ?? []).map((r) => (typeof r === 'string' ? r : r?.code)).filter(Boolean))];
   const base = { outcome: outcome ?? null, reasonCodes: codes, pendingReason: null, blocked: false, clear: false };
   if (gate) return { ...base, pendingReason: gate, blocked: false };
@@ -271,18 +345,34 @@ export function statusForComplianceState(state) {
   if (state.clear) return 'READY';
   // Not yet a compliance question: calling these COMPLIANCE_PENDING would tell a party compliance is outstanding
   // when nothing has been asked of it.
-  if (state.pendingReason === 'PARTIES_NOT_CONFIRMED' || state.pendingReason === 'REPRESENTATION_MISSING') return 'PARTIES_CONFIRMED';
+  if (state.pendingReason === 'PARTIES_NOT_CONFIRMED' || state.pendingReason === 'REPRESENTATION_MISSING')
+    return 'PARTIES_CONFIRMED';
   return 'COMPLIANCE_PENDING';
 }
 
 // ------------------------------------------------------------------ snapshots
 
 /** A hash of everything a compliance evaluation depended on: when it changes, the evaluation is stale by definition. */
-export function partyRevisionOf({ parties = [], agentUserId = null, representations = [], consents = [], facetStates = {}, policyVersions = [], blockedSubjectIds = [], minorSubjectIds = [] }) {
+export function partyRevisionOf({
+  parties = [],
+  agentUserId = null,
+  representations = [],
+  consents = [],
+  facetStates = {},
+  policyVersions = [],
+  blockedSubjectIds = [],
+  minorSubjectIds = [],
+}) {
   return inputHashOf({
-    parties: parties.filter((p) => p && !p.removed).map((p) => `${p.partyRole}:${p.subjectKind}:${p.subjectId}:${p.confirmedAt ? 'c' : 'u'}`).sort(),
+    parties: parties
+      .filter((p) => p && !p.removed)
+      .map((p) => `${p.partyRole}:${p.subjectKind}:${p.subjectId}:${p.confirmedAt ? 'c' : 'u'}`)
+      .sort(),
     agentUserId,
-    representations: representations.filter((r) => r && r.status !== 'withdrawn').map((r) => `${r.agentUserId}:${r.partyRole}:${r.status}:${r.agreementId ?? ''}`).sort(),
+    representations: representations
+      .filter((r) => r && r.status !== 'withdrawn')
+      .map((r) => `${r.agentUserId}:${r.partyRole}:${r.status}:${r.agreementId ?? ''}`)
+      .sort(),
     consents: consents.map((k) => `${k.id}:${k.status}`).sort(),
     facetStates,
     policyVersions: [...policyVersions].sort(),
@@ -310,12 +400,15 @@ export function offerReadiness(tx, { complianceState = null, staleness = null } 
   if (!['READY', 'ACTIVE'].includes(tx.status)) blockers.push('TRANSACTION_NOT_READY');
   if (staleness) blockers.push('COMPLIANCE_SNAPSHOT_STALE');
   if (!complianceState?.clear) blockers.push('COMPLIANCE_NOT_CLEAR');
-  if (!partiesOf(tx).some((p) => !p.removed && p.partyRole === 'individual' && p.confirmedAt)) blockers.push('INDIVIDUAL_NOT_CONFIRMED');
-  if (!partiesOf(tx).some((p) => !p.removed && p.partyRole === 'engaging_entity' && p.confirmedAt)) blockers.push('ENGAGING_ENTITY_NOT_CONFIRMED');
+  if (!partiesOf(tx).some((p) => !p.removed && p.partyRole === 'individual' && p.confirmedAt))
+    blockers.push('INDIVIDUAL_NOT_CONFIRMED');
+  if (!partiesOf(tx).some((p) => !p.removed && p.partyRole === 'engaging_entity' && p.confirmedAt))
+    blockers.push('ENGAGING_ENTITY_NOT_CONFIRMED');
   return { canStartOfferWorkflow: blockers.length === 0, blockers, honest: OFFER_HONEST };
 }
 
-const OFFER_HONEST = 'Readiness means ScoutBox currently permits this workflow to proceed under the encoded rules. No offer exists, no offer can be created here, and nothing has been agreed, approved or signed.';
+const OFFER_HONEST =
+  'Readiness means ScoutBox currently permits this workflow to proceed under the encoded rules. No offer exists, no offer can be created here, and nothing has been agreed, approved or signed.';
 
 // ------------------------------------------------------------------ party model
 
@@ -346,7 +439,14 @@ export const partiesAwaitingConfirmation = (tx) =>
  * `per_document` entries reach exactly the parties the document's own class admits: announcing a private document
  * to everyone would disclose what the class exists to hide.
  */
-export const TIMELINE_AUDIENCES = Object.freeze(['all_parties', 'agent_only', 'player_and_agent', 'club_side', 'per_document', 'audit_only']);
+export const TIMELINE_AUDIENCES = Object.freeze([
+  'all_parties',
+  'agent_only',
+  'player_and_agent',
+  'club_side',
+  'per_document',
+  'audit_only',
+]);
 
 const ACTION_AUDIENCE = nullProto({
   transaction_created: 'all_parties',
@@ -387,8 +487,16 @@ export function timelineVisible(audience, roles, partyRole = null, detail = null
   }
   if (audience === 'all_parties') return true;
   if (audience === 'agent_only') return roles.includes('representing_agent');
-  if (audience === 'player_and_agent') return roles.includes('representing_agent') || roles.includes('party_individual') || roles.includes('party_guardian');
-  if (audience === 'club_side') return roles.includes('party_club_signatory') || roles.includes('party_club_member') || (roles.includes('representing_agent') && partyRole !== null);
+  if (audience === 'player_and_agent')
+    return (
+      roles.includes('representing_agent') || roles.includes('party_individual') || roles.includes('party_guardian')
+    );
+  if (audience === 'club_side')
+    return (
+      roles.includes('party_club_signatory') ||
+      roles.includes('party_club_member') ||
+      (roles.includes('representing_agent') && partyRole !== null)
+    );
   return false;
 }
 
@@ -397,7 +505,14 @@ export function timelineFor(tx, roles, partyRole = null, { limit = 200 } = {}) {
   for (const h of Array.isArray(tx?.history) ? tx.history : []) {
     const audience = timelineAudienceOf(h?.action);
     if (!timelineVisible(audience, roles, partyRole, h?.detail)) continue;
-    out.push({ id: h.id, at: h.at, action: h.action, audience, actor: actorLabel(h.by), detail: safeTimelineDetail(h.detail) });
+    out.push({
+      id: h.id,
+      at: h.at,
+      action: h.action,
+      audience,
+      actor: actorLabel(h.by),
+      detail: safeTimelineDetail(h.detail),
+    });
   }
   return out.slice(-limit).reverse();
 }
@@ -417,7 +532,23 @@ export function actorLabel(by) {
 function safeTimelineDetail(detail) {
   if (!detail || typeof detail !== 'object') return null;
   const out = {};
-  for (const k of ['from', 'to', 'partyRole', 'subjectKind', 'status', 'outcome', 'pendingReason', 'reasonCodes', 'policyVersions', 'documentType', 'visibility', 'staleness', 'holdReasonCode', 'version', 'count']) {
+  for (const k of [
+    'from',
+    'to',
+    'partyRole',
+    'subjectKind',
+    'status',
+    'outcome',
+    'pendingReason',
+    'reasonCodes',
+    'policyVersions',
+    'documentType',
+    'visibility',
+    'staleness',
+    'holdReasonCode',
+    'version',
+    'count',
+  ]) {
     if (detail[k] !== undefined) out[k] = detail[k];
   }
   return Object.keys(out).length ? out : null;
@@ -427,13 +558,26 @@ function safeTimelineDetail(detail) {
 
 /** Codes, so analytics can count them without reading prose. */
 export const HOLD_REASON_CODES = Object.freeze([
-  'awaiting_party_decision', 'awaiting_document', 'awaiting_regulatory_answer', 'window_closed', 'party_request', 'other',
+  'awaiting_party_decision',
+  'awaiting_document',
+  'awaiting_regulatory_answer',
+  'window_closed',
+  'party_request',
+  'other',
 ]);
 export const CANCEL_REASON_CODES = Object.freeze([
-  'party_withdrew', 'terms_not_agreed', 'window_closed', 'compliance_not_cleared', 'duplicate', 'other',
+  'party_withdrew',
+  'terms_not_agreed',
+  'window_closed',
+  'compliance_not_cleared',
+  'duplicate',
+  'other',
 ]);
 export const CLOSE_REASON_CODES = Object.freeze([
-  'process_concluded', 'proceeded_outside_scoutbox', 'superseded', 'other',
+  'process_concluded',
+  'proceeded_outside_scoutbox',
+  'superseded',
+  'other',
 ]);
 
 // ------------------------------------------------------------------ limits

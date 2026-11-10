@@ -17,7 +17,8 @@ import { pt } from '../i18n';
 import { Button, Card, Muted, Pill, Row, SectionTitle } from './ui';
 import { relTime, uiLocale } from '../time';
 
-const isChild = (r: InboxRequest | ChildInboxItem): r is ChildInboxItem => 'guardianManaged' in r && r.guardianManaged === true;
+const isChild = (r: InboxRequest | ChildInboxItem): r is ChildInboxItem =>
+  'guardianManaged' in r && r.guardianManaged === true;
 
 export function ContactRequestsSection({ kind }: { kind: 'contact' | 'trial' }) {
   const colors = useColors();
@@ -29,20 +30,64 @@ export function ContactRequestsSection({ kind }: { kind: 'contact' | 'trial' }) 
     <Card testID={`requests-${kind}`}>
       <SectionTitle>{title}</SectionTitle>
       <Muted size={12.5}>{pt('ctxAnswerInInbox')}</Muted>
-      {rows.length === 0 && <View style={{ marginTop: 6 }}><Muted size={12.5}>{kind === 'trial' ? pt('ctxTrialReqNone') : pt('ctxRequestsNone')}</Muted></View>}
+      {rows.length === 0 && (
+        <View style={{ marginTop: 6 }}>
+          <Muted size={12.5}>{kind === 'trial' ? pt('ctxTrialReqNone') : pt('ctxRequestsNone')}</Muted>
+        </View>
+      )}
       {rows.map((r) => (
-        <View key={r.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 4 }} testID={`request-${r.id}`}>
+        <View
+          key={r.id}
+          style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 4 }}
+          testID={`request-${r.id}`}
+        >
           <Row style={{ justifyContent: 'space-between' }}>
             <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>{r.orgName}</Text>
-            <Pill label={isChild(r) && r.status === 'pending' ? pt('ctxWithGuardian') : ({ pending: pt('ctxAwaitingYou'), accepted: pt('inboxAccepted'), declined: pt('inboxDeclined'), suspended: pt('inboxSuspended') } as Record<string, string>)[r.status] ?? r.status} tone={r.status === 'accepted' ? 'green' : r.status === 'declined' ? 'red' : 'gold'} />
+            <Pill
+              label={
+                isChild(r) && r.status === 'pending'
+                  ? pt('ctxWithGuardian')
+                  : ((
+                      {
+                        pending: pt('ctxAwaitingYou'),
+                        accepted: pt('inboxAccepted'),
+                        declined: pt('inboxDeclined'),
+                        suspended: pt('inboxSuspended'),
+                      } as Record<string, string>
+                    )[r.status] ?? r.status)
+              }
+              tone={r.status === 'accepted' ? 'green' : r.status === 'declined' ? 'red' : 'gold'}
+            />
           </Row>
-          {!isChild(r) && <GuidanceNote icon="info" size={12.5}>{r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''} · {new Date(r.createdAt).toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric' })}</GuidanceNote>}
-          {!isChild(r) && r.subject ? <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }}>{r.subject}</Text> : null}
-          {isChild(r) ? <GuidanceNote icon="info" size={12.5}>{r.note}</GuidanceNote> : null}
+          {!isChild(r) && (
+            <GuidanceNote icon="info" size={12.5}>
+              {r.scoutName}
+              {r.scoutRole ? ` (${r.scoutRole})` : ''} ·{' '}
+              {new Date(r.createdAt).toLocaleDateString(uiLocale(), {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric',
+              })}
+            </GuidanceNote>
+          )}
+          {!isChild(r) && r.subject ? (
+            <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600' }}>{r.subject}</Text>
+          ) : null}
+          {isChild(r) ? (
+            <GuidanceNote icon="info" size={12.5}>
+              {r.note}
+            </GuidanceNote>
+          ) : null}
         </View>
       ))}
       <Row style={{ marginTop: 10 }}>
-        <Button small primary label={pt('ctxOpenInbox')} onPress={() => router.push('/(tabs)/inbox' as never)} testID={`open-inbox-${kind}`} />
+        <Button
+          small
+          primary
+          label={pt('ctxOpenInbox')}
+          onPress={() => router.push('/(tabs)/inbox' as never)}
+          testID={`open-inbox-${kind}`}
+        />
       </Row>
     </Card>
   );
@@ -55,32 +100,61 @@ export function MessagesSummarySection() {
   const [channels, setChannels] = useState<Channel[] | null>(null);
   useEffect(() => {
     let on = true;
-    if (playerId && !isMinor) client.getChannels(playerId).then((c) => on && setChannels(c)).catch(() => on && setChannels([]));
+    if (playerId && !isMinor)
+      client
+        .getChannels(playerId)
+        .then((c) => on && setChannels(c))
+        .catch(() => on && setChannels([]));
     else setChannels([]);
-    return () => { on = false; };
+    return () => {
+      on = false;
+    };
   }, [playerId, isMinor, inbox, notifications]);
   return (
     <Card testID="messages-summary">
       <SectionTitle>{pt('ctxMessagesTitle')}</SectionTitle>
-      {isMinor ? <GuidanceNote icon="info" size={12.5}>{pt('ctxMinorMessages')}</GuidanceNote> : (
+      {isMinor ? (
+        <GuidanceNote icon="info" size={12.5}>
+          {pt('ctxMinorMessages')}
+        </GuidanceNote>
+      ) : (
         <>
-          {channels && channels.length === 0 && <GuidanceNote icon="info" size={12.5}>{pt('ctxMessagesNone')}</GuidanceNote>}
+          {channels && channels.length === 0 && (
+            <GuidanceNote icon="info" size={12.5}>
+              {pt('ctxMessagesNone')}
+            </GuidanceNote>
+          )}
           {(channels ?? []).map((c) => {
             const last = c.messages[c.messages.length - 1];
             return (
-              <View key={c.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 2 }} testID={`thread-${c.id}`}>
+              <View
+                key={c.id}
+                style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8, gap: 2 }}
+                testID={`thread-${c.id}`}
+              >
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>{c.orgName}</Text>
-                  <Muted size={12}>{c.messages.length} {pt('ctxMessagesCount')}</Muted>
+                  <Muted size={12}>
+                    {c.messages.length} {pt('ctxMessagesCount')}
+                  </Muted>
                 </Row>
-                <Muted size={12.5}>{c.scoutName}{last ? ` · ${relTime(last.ts)}` : ''}</Muted>
+                <Muted size={12.5}>
+                  {c.scoutName}
+                  {last ? ` · ${relTime(last.ts)}` : ''}
+                </Muted>
               </View>
             );
           })}
         </>
       )}
       <Row style={{ marginTop: 10 }}>
-        <Button small primary label={pt('ctxOpenInbox')} onPress={() => router.push('/(tabs)/inbox' as never)} testID="open-inbox-messages" />
+        <Button
+          small
+          primary
+          label={pt('ctxOpenInbox')}
+          onPress={() => router.push('/(tabs)/inbox' as never)}
+          testID="open-inbox-messages"
+        />
       </Row>
     </Card>
   );

@@ -8,7 +8,17 @@ import { StyleSheet, View } from 'react-native';
 import { Text } from './Text';
 import { useColors } from '../theme';
 
-export function Wordmark({ size = 24, color, tmColor, label }: { size?: number; color?: string; tmColor?: string; label?: string }) {
+export function Wordmark({
+  size = 24,
+  color,
+  tmColor,
+  label,
+}: {
+  size?: number;
+  color?: string;
+  tmColor?: string;
+  label?: string;
+}) {
   const c = useColors();
   const ink = color ?? c.text;
   const square = Math.max(5, Math.round(size * 0.25));
@@ -19,9 +29,32 @@ export function Wordmark({ size = 24, color, tmColor, label }: { size?: number; 
   // the top. The mark reads as one word.
   return (
     <View style={styles.row} accessibilityRole="header" aria-level={1} accessibilityLabel={label ?? 'ScoutBox'}>
-      <Text brand style={{ color: ink, fontSize: size, fontWeight: '800', letterSpacing: -size * 0.046, lineHeight }}>ScoutBox</Text>
-      <View style={{ marginLeft: 2, height: lineHeight, justifyContent: 'space-between', alignItems: 'flex-start', paddingTop: Math.round(size * 0.06), paddingBottom: Math.round(size * 0.17) }} testID="wordmark-mark">
-        <Text style={{ color: tmColor ?? c.muted, fontSize: tmSize, fontWeight: '700', letterSpacing: 0.3, lineHeight: tmSize + 1 }} accessibilityLabel="trademark">TM</Text>
+      <Text brand style={{ color: ink, fontSize: size, fontWeight: '800', letterSpacing: -size * 0.046, lineHeight }}>
+        ScoutBox
+      </Text>
+      <View
+        style={{
+          marginLeft: 2,
+          height: lineHeight,
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          paddingTop: Math.round(size * 0.06),
+          paddingBottom: Math.round(size * 0.17),
+        }}
+        testID="wordmark-mark"
+      >
+        <Text
+          style={{
+            color: tmColor ?? c.muted,
+            fontSize: tmSize,
+            fontWeight: '700',
+            letterSpacing: 0.3,
+            lineHeight: tmSize + 1,
+          }}
+          accessibilityLabel="trademark"
+        >
+          TM
+        </Text>
         <View style={{ width: square, height: square, borderRadius: 1, backgroundColor: c.accent }} />
       </View>
     </View>

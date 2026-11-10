@@ -29,25 +29,50 @@ const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m13-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
-const fail = (msg) => { console.error(`✗ ${msg}`); process.exitCode = 1; };
-const ok = (cond, msg) => { if (cond) { passed++; console.log(`✓ ${msg}`); } else fail(msg); };
+const fail = (msg) => {
+  console.error(`✗ ${msg}`);
+  process.exitCode = 1;
+};
+const ok = (cond, msg) => {
+  if (cond) {
+    passed++;
+    console.log(`✓ ${msg}`);
+  } else fail(msg);
+};
 const section = (name) => console.log(`\n— ${name} —`);
 
 const ENV = {
-  ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_FAST_SWEEPS: '1',
-  ALLOW_LOCAL_WEBHOOKS: '1', SCOUTBOX_QUIET_LOGS: '1',
+  ...process.env,
+  PORT: String(PORT),
+  DATA_DIR,
+  SCOUTBOX_FAST_SWEEPS: '1',
+  ALLOW_LOCAL_WEBHOOKS: '1',
+  SCOUTBOX_QUIET_LOGS: '1',
 };
 let server = null;
 const children = [];
-process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
+process.on('exit', () => {
+  for (const c of children) {
+    try {
+      c.kill('SIGKILL');
+    } catch {
+      /* gone */
+    }
+  }
+});
 async function startServer(port = PORT, dataDir = DATA_DIR) {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...ENV, PORT: String(port), DATA_DIR: dataDir }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], {
+    env: { ...ENV, PORT: String(port), DATA_DIR: dataDir },
+    stdio: 'ignore',
+  });
   children.push(proc);
   for (let i = 0; i < 60; i++) {
     try {
       const r = await fetch(`http://localhost:${port}/healthz`);
       if (r.ok) return proc;
-    } catch { /* booting */ }
+    } catch {
+      /* booting */
+    }
     await sleep(250);
   }
   throw new Error('server did not come up');
@@ -57,11 +82,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function j(method, url, body, token, extraHeaders = {}) {
   const r = await fetch(`${BASE}${url}`, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extraHeaders },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...extraHeaders,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let data = null;
-  try { data = await r.json(); } catch { /* non-json */ }
+  try {
+    data = await r.json();
+  } catch {
+    /* non-json */
+  }
   return { status: r.status, body: data };
 }
 const A = (key) => ({ 'x-admin-key': key ?? 'scoutbox-admin' });
@@ -74,7 +107,10 @@ section('unit fixtures (pure helpers, controlled clocks)');
   ok(totp(rfcSecret, 59 * 1000) === '287082', 'TOTP matches RFC 6238 vector at t=59s');
   ok(totp(rfcSecret, 1111111109 * 1000) === '081804', 'TOTP matches RFC 6238 vector at t=1111111109s');
   ok(totp(rfcSecret, 1234567890 * 1000) === '005924', 'TOTP matches RFC 6238 vector at t=1234567890s');
-  ok(totpValid(rfcSecret, totp(rfcSecret, 1_000_000_000_000), 1_000_000_000_000 + 29_000), 'TOTP ±1 step drift window accepts an adjacent code');
+  ok(
+    totpValid(rfcSecret, totp(rfcSecret, 1_000_000_000_000), 1_000_000_000_000 + 29_000),
+    'TOTP ±1 step drift window accepts an adjacent code',
+  );
   ok(!totpValid(rfcSecret, '000000', 1_000_000_000_000), 'TOTP rejects a wrong code');
 
   ok(convertMinor(100000, '1.1732') === 117320, 'convertMinor: 1000.00 @ 1.1732 = 1173.20 (integer math)');
@@ -83,37 +119,135 @@ section('unit fixtures (pure helpers, controlled clocks)');
   ok(convertMinor(1000, 'not-a-rate') === null, 'convertMinor refuses a malformed rate');
 
   const scn = {
-    currency: 'GBP', termMonths: 12,
+    currency: 'GBP',
+    termMonths: 12,
     lines: [
-      { id: 'w', kind: 'wage', label: 'wage', amountMinor: 50000, currency: 'GBP', schedule: 'weekly', confirmed: true, conditional: null },
-      { id: 'f', kind: 'fee', label: 'fee', amountMinor: 1_000_000, currency: 'GBP', schedule: 'one_off', confirmed: false, conditional: null },
-      { id: 'b', kind: 'bonus', label: 'promotion bonus', amountMinor: 2_000_000, currency: 'GBP', schedule: 'one_off', confirmed: false, conditional: { assumption: 'only if promoted' } },
+      {
+        id: 'w',
+        kind: 'wage',
+        label: 'wage',
+        amountMinor: 50000,
+        currency: 'GBP',
+        schedule: 'weekly',
+        confirmed: true,
+        conditional: null,
+      },
+      {
+        id: 'f',
+        kind: 'fee',
+        label: 'fee',
+        amountMinor: 1_000_000,
+        currency: 'GBP',
+        schedule: 'one_off',
+        confirmed: false,
+        conditional: null,
+      },
+      {
+        id: 'b',
+        kind: 'bonus',
+        label: 'promotion bonus',
+        amountMinor: 2_000_000,
+        currency: 'GBP',
+        schedule: 'one_off',
+        confirmed: false,
+        conditional: { assumption: 'only if promoted' },
+      },
     ],
     fxAssumptions: [],
   };
   const t1 = computeScenarioTotals(scn);
   ok(t1.perCurrency.GBP.confirmedMinor === 50000 * 52, 'weekly wage over 12 months = 52 occurrences (integer)');
   ok(t1.perCurrency.GBP.estimatedMinor === 1_000_000, 'estimated one-off counted once, separately from confirmed');
-  ok(t1.combined.confirmedMinor === 2_600_000 && t1.combined.viaFx === false, 'single-currency combined total needs no FX');
-  ok(t1.conditionalLines.length === 1 && t1.perCurrency.GBP.confirmedMinor + t1.perCurrency.GBP.estimatedMinor === 3_600_000, 'conditional bonus EXCLUDED from every total');
-  const scn18 = { ...scn, termMonths: 18, lines: [{ id: 'a', kind: 'wage', label: 'x', amountMinor: 100, currency: 'GBP', schedule: 'annual', confirmed: true, conditional: null }] };
-  ok(computeScenarioTotals(scn18).perCurrency.GBP.confirmedMinor === 200, 'annual line over 18 months = 2 occurrences (ceil)');
-  const mixed = { ...scn, lines: [...scn.lines.slice(0, 1), { id: 'e', kind: 'fee', label: 'eur fee', amountMinor: 500_000, currency: 'EUR', schedule: 'one_off', confirmed: true, conditional: null }] };
-  ok(computeScenarioTotals(mixed).combined.unavailable === true, 'mixed currencies WITHOUT a stated rate: combined total honestly unavailable');
-  const mixedFx = { ...mixed, fxAssumptions: [{ from: 'EUR', to: 'GBP', rate: '0.85', source: 'manual', date: '2026-09-01', manual: true }] };
+  ok(
+    t1.combined.confirmedMinor === 2_600_000 && t1.combined.viaFx === false,
+    'single-currency combined total needs no FX',
+  );
+  ok(
+    t1.conditionalLines.length === 1 &&
+      t1.perCurrency.GBP.confirmedMinor + t1.perCurrency.GBP.estimatedMinor === 3_600_000,
+    'conditional bonus EXCLUDED from every total',
+  );
+  const scn18 = {
+    ...scn,
+    termMonths: 18,
+    lines: [
+      {
+        id: 'a',
+        kind: 'wage',
+        label: 'x',
+        amountMinor: 100,
+        currency: 'GBP',
+        schedule: 'annual',
+        confirmed: true,
+        conditional: null,
+      },
+    ],
+  };
+  ok(
+    computeScenarioTotals(scn18).perCurrency.GBP.confirmedMinor === 200,
+    'annual line over 18 months = 2 occurrences (ceil)',
+  );
+  const mixed = {
+    ...scn,
+    lines: [
+      ...scn.lines.slice(0, 1),
+      {
+        id: 'e',
+        kind: 'fee',
+        label: 'eur fee',
+        amountMinor: 500_000,
+        currency: 'EUR',
+        schedule: 'one_off',
+        confirmed: true,
+        conditional: null,
+      },
+    ],
+  };
+  ok(
+    computeScenarioTotals(mixed).combined.unavailable === true,
+    'mixed currencies WITHOUT a stated rate: combined total honestly unavailable',
+  );
+  const mixedFx = {
+    ...mixed,
+    fxAssumptions: [{ from: 'EUR', to: 'GBP', rate: '0.85', source: 'manual', date: '2026-09-01', manual: true }],
+  };
   const tFx = computeScenarioTotals(mixedFx);
-  ok(tFx.combined.viaFx === true && tFx.combined.confirmedMinor === 50000 * 52 + 425_000, 'mixed currencies WITH a labelled manual rate combine correctly');
+  ok(
+    tFx.combined.viaFx === true && tFx.combined.confirmedMinor === 50000 * 52 + 425_000,
+    'mixed currencies WITH a labelled manual rate combine correctly',
+  );
 
   // Time zones: Tue 10:00–11:00 New York = Tue 15:00–16:00 UTC (ref date).
   const ny = { day: 'tue', start: '10:00', end: '11:00', tz: 'America/New_York' };
-  ok(slotsOverlap(ny, { day: 'tue', start: '15:30', end: '16:30', tz: 'UTC' }) === true, 'tz-aware overlap: NY morning hits UTC afternoon');
-  ok(slotsOverlap(ny, { day: 'tue', start: '10:00', end: '11:00', tz: 'UTC' }) === false, 'same wall-clock in different zones does NOT overlap');
-  ok(slotsOverlap({ day: 'mon', start: '01:00', end: '02:00', tz: 'Pacific/Auckland' }, { day: 'sun', start: '12:30', end: '13:30', tz: 'UTC' }) === true, 'week-boundary wrap via tz shift still compares');
-  ok(slotsOverlap({ day: 'xxx', start: '01:00', end: '02:00', tz: 'UTC' }, ny) === null, 'malformed slot yields UNKNOWN, not false');
+  ok(
+    slotsOverlap(ny, { day: 'tue', start: '15:30', end: '16:30', tz: 'UTC' }) === true,
+    'tz-aware overlap: NY morning hits UTC afternoon',
+  );
+  ok(
+    slotsOverlap(ny, { day: 'tue', start: '10:00', end: '11:00', tz: 'UTC' }) === false,
+    'same wall-clock in different zones does NOT overlap',
+  );
+  ok(
+    slotsOverlap(
+      { day: 'mon', start: '01:00', end: '02:00', tz: 'Pacific/Auckland' },
+      { day: 'sun', start: '12:30', end: '13:30', tz: 'UTC' },
+    ) === true,
+    'week-boundary wrap via tz shift still compares',
+  );
+  ok(
+    slotsOverlap({ day: 'xxx', start: '01:00', end: '02:00', tz: 'UTC' }, ny) === null,
+    'malformed slot yields UNKNOWN, not false',
+  );
 
-  ok(webhookUrlProblem('http://127.0.0.1:9999/hook') === null, 'loopback allowed under ALLOW_LOCAL_WEBHOOKS=1 (tests only)');
+  ok(
+    webhookUrlProblem('http://127.0.0.1:9999/hook') === null,
+    'loopback allowed under ALLOW_LOCAL_WEBHOOKS=1 (tests only)',
+  );
   ok(webhookUrlProblem('https://10.0.0.5/hook') !== null, 'SSRF guard: private 10.x blocked');
-  ok(webhookUrlProblem('https://169.254.169.254/latest/meta-data') !== null, 'SSRF guard: link-local metadata endpoint blocked');
+  ok(
+    webhookUrlProblem('https://169.254.169.254/latest/meta-data') !== null,
+    'SSRF guard: link-local metadata endpoint blocked',
+  );
   ok(webhookUrlProblem('https://internal-api.company.internal/x') !== null, 'SSRF guard: .internal hostnames blocked');
   ok(webhookUrlProblem('https://user:pw@example.com/x') !== null, 'SSRF guard: credentials in URL blocked');
   ok(webhookUrlProblem('ftp://example.com/x') !== null, 'SSRF guard: non-http(s) schemes blocked');
@@ -127,8 +261,14 @@ section('unit fixtures (pure helpers, controlled clocks)');
     d.setDate(d.getDate() + extraDays);
     return d.toISOString().slice(0, 10);
   };
-  ok(ageOn(dobYearsAgo(16), at) === 16 && !isAdult({ dob: dobYearsAgo(16), country: 'GB' }, at), 'boundary: a 16-year-old is NOT an adult (GB)');
-  ok(ageOn(dobYearsAgo(17), at) === 17 && !isAdult({ dob: dobYearsAgo(17), country: 'GB' }, at), 'boundary: a 17-year-old is NOT an adult (GB)');
+  ok(
+    ageOn(dobYearsAgo(16), at) === 16 && !isAdult({ dob: dobYearsAgo(16), country: 'GB' }, at),
+    'boundary: a 16-year-old is NOT an adult (GB)',
+  );
+  ok(
+    ageOn(dobYearsAgo(17), at) === 17 && !isAdult({ dob: dobYearsAgo(17), country: 'GB' }, at),
+    'boundary: a 17-year-old is NOT an adult (GB)',
+  );
   ok(isAdult({ dob: dobYearsAgo(18), country: 'GB' }, at), 'boundary: 18th birthday today IS adult (GB)');
   ok(!isAdult({ dob: dobYearsAgo(18, 1), country: 'GB' }, at), 'boundary: 18 years minus one day is NOT adult');
   ok(!isAdult({ dob: dobYearsAgo(18), country: 'KR' }, at), 'boundary: 18 in KR (majority 19) is NOT adult');
@@ -140,18 +280,51 @@ server = await startServer();
 ok(true, `server up on :${PORT} with throwaway DATA_DIR`);
 
 // Actors.
-const maria = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;
-const scout2 = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Scout' })).body;
-const agency = (await j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Alex Agent', role: 'Agent' })).body;
-const hackney = (await j('POST', '/auth/org/login', { orgId: 'org-hackneymarsh', scoutName: 'Dee Coach', role: 'Manager', platform: 'grassroots' })).body;
+const maria = (
+  await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })
+).body;
+const scout2 = (await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Tom Field', role: 'Scout' }))
+  .body;
+const agency = (await j('POST', '/auth/org/login', { orgId: 'org-northstar', scoutName: 'Alex Agent', role: 'Agent' }))
+  .body;
+const hackney = (
+  await j('POST', '/auth/org/login', {
+    orgId: 'org-hackneymarsh',
+    scoutName: 'Dee Coach',
+    role: 'Manager',
+    platform: 'grassroots',
+  })
+).body;
 const adeyemi = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' })).body;
 const amara = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body;
-ok(maria?.token && scout2?.token && agency?.token && hackney?.token && adeyemi?.token && amara?.token, 'all six actors logged in');
+ok(
+  maria?.token && scout2?.token && agency?.token && hackney?.token && adeyemi?.token && amara?.token,
+  'all six actors logged in',
+);
 
 // 16- and 17-year-old boundary players, created through the guardian gate.
-const dobY = (y) => { const d = new Date(); d.setFullYear(d.getFullYear() - y); d.setDate(d.getDate() + 10); return d.toISOString().slice(0, 10); };
-const kid17 = (await j('POST', '/guardian/children', { name: 'Sev Test17', dob: dobY(18), position: 'CM', foot: 'right', lat: 51.5, lng: -0.06 }, amara.token)).body; // 18y - 10d → 17 today
-const kid16 = (await j('POST', '/guardian/children', { name: 'Rio Test16', dob: dobY(17), position: 'RB', foot: 'right', lat: 51.5, lng: -0.06 }, amara.token)).body;
+const dobY = (y) => {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - y);
+  d.setDate(d.getDate() + 10);
+  return d.toISOString().slice(0, 10);
+};
+const kid17 = (
+  await j(
+    'POST',
+    '/guardian/children',
+    { name: 'Sev Test17', dob: dobY(18), position: 'CM', foot: 'right', lat: 51.5, lng: -0.06 },
+    amara.token,
+  )
+).body; // 18y - 10d → 17 today
+const kid16 = (
+  await j(
+    'POST',
+    '/guardian/children',
+    { name: 'Rio Test16', dob: dobY(17), position: 'RB', foot: 'right', lat: 51.5, lng: -0.06 },
+    amara.token,
+  )
+).body;
 const kid17Id = kid17?.player?.id ?? kid17?.id;
 const kid16Id = kid16?.player?.id ?? kid16?.id;
 ok(!!kid17Id && !!kid16Id, 'guardian created 17- and 16-year-old boundary players (DOB-derived)');
@@ -177,19 +350,28 @@ section('CSV import, identity, API keys, webhooks');
   r = await j('POST', '/org/imports', { csv }, maria.token);
   ok(r.status === 201 && r.body.dryRun === true, 'validated batch is a DRY RUN — nothing written yet');
   const s = r.body.batch.summary;
-  ok(s.creatable === 2 && s.errors === 1 && s.duplicatesInFile === 1 && s.ambiguous === 1, `dry run classifies every row (create 2 · error 1 · dup 1 · ambiguous 1)`);
+  ok(
+    s.creatable === 2 && s.errors === 1 && s.duplicatesInFile === 1 && s.ambiguous === 1,
+    `dry run classifies every row (create 2 · error 1 · dup 1 · ambiguous 1)`,
+  );
   const batchId = r.body.batch.id;
   ok(r.body.batch.rows.find((x) => x.row === 4).errors[0].includes('dob'), 'row-level error names the field');
 
   r = await j('POST', `/org/imports/${batchId}/commit`, {}, maria.token);
   ok(r.status === 400 && r.body.error === 'CONFIRM_REQUIRED', 'commit demands explicit confirmation');
   r = await j('POST', `/org/imports/${batchId}/commit`, { confirm: true }, maria.token);
-  ok(r.status === 200 && r.body.created === 2 && r.body.reviewsQueued === 1, 'commit creates prospects + queues the ambiguous identity');
+  ok(
+    r.status === 200 && r.body.created === 2 && r.body.reviewsQueued === 1,
+    'commit creates prospects + queues the ambiguous identity',
+  );
   r = await j('POST', `/org/imports/${batchId}/commit`, { confirm: true }, maria.token);
   ok(r.status === 200 && r.body.note?.includes('idempotent'), 'recommitting is idempotent');
 
   r = await j('POST', '/org/imports', { csv }, maria.token);
-  ok(r.body.batch.summary.creatable === 0 && r.body.batch.summary.alreadyImported >= 2, 'REIMPORT duplicates nothing (provider+externalId dedupe)');
+  ok(
+    r.body.batch.summary.creatable === 0 && r.body.batch.summary.alreadyImported >= 2,
+    'REIMPORT duplicates nothing (provider+externalId dedupe)',
+  );
 
   r = await j('GET', '/org/identity-reviews', undefined, maria.token);
   const review = r.body.items[0];
@@ -202,7 +384,10 @@ section('CSV import, identity, API keys, webhooks');
   // API keys + versioned export.
   r = await j('POST', '/org/api-keys', { scopes: ['export:shortlist'], label: 'test' }, maria.token);
   const apiKey = r.body.plaintext;
-  ok(r.status === 201 && apiKey?.startsWith('sbk_') && !JSON.stringify(r.body.key).includes(apiKey), 'API key issued once, only the hash stored');
+  ok(
+    r.status === 201 && apiKey?.startsWith('sbk_') && !JSON.stringify(r.body.key).includes(apiKey),
+    'API key issued once, only the hash stored',
+  );
   let er = await fetch(`${BASE}/api/v1/export/shortlist`, { headers: { Authorization: `ApiKey ${apiKey}` } });
   const exp = await er.json();
   ok(er.status === 200 && exp.contract && exp.orgId === 'org-eastport', 'versioned export contract, tenant-scoped');
@@ -228,21 +413,41 @@ section('CSV import, identity, API keys, webhooks');
   });
   await new Promise((r2) => receiver.listen(RCV_PORT, '127.0.0.1', r2));
 
-  r = await j('POST', '/org/webhooks', { url: 'https://169.254.169.254/hook', events: ['import.committed'] }, maria.token);
-  ok(r.status === 400 && r.body.error === 'WEBHOOK_URL_REJECTED', 'SSRF guard blocks internal destinations at registration');
-  r = await j('POST', '/org/webhooks', { url: `http://127.0.0.1:${RCV_PORT}/hook`, events: ['import.committed', 'identity.resolved'] }, maria.token);
-  ok(r.status === 201 && r.body.endpoint.secret.startsWith('whsec_'), 'webhook endpoint registered with a signing secret');
+  r = await j(
+    'POST',
+    '/org/webhooks',
+    { url: 'https://169.254.169.254/hook', events: ['import.committed'] },
+    maria.token,
+  );
+  ok(
+    r.status === 400 && r.body.error === 'WEBHOOK_URL_REJECTED',
+    'SSRF guard blocks internal destinations at registration',
+  );
+  r = await j(
+    'POST',
+    '/org/webhooks',
+    { url: `http://127.0.0.1:${RCV_PORT}/hook`, events: ['import.committed', 'identity.resolved'] },
+    maria.token,
+  );
+  ok(
+    r.status === 201 && r.body.endpoint.secret.startsWith('whsec_'),
+    'webhook endpoint registered with a signing secret',
+  );
   const whId = r.body.endpoint.id;
   const whSecret = r.body.endpoint.secret;
 
   // Trigger an event and wait for the fast sweep.
-  const csv2 = 'name,dob,position,foot,heightCm,provider,externalId,notes\nNew Guy,2002-01-01,GK,right,190,statsprovider,SP-77,keeper';
+  const csv2 =
+    'name,dob,position,foot,heightCm,provider,externalId,notes\nNew Guy,2002-01-01,GK,right,190,statsprovider,SP-77,keeper';
   const b2 = (await j('POST', '/org/imports', { csv: csv2 }, maria.token)).body.batch.id;
   await j('POST', `/org/imports/${b2}/commit`, { confirm: true }, maria.token);
   for (let i = 0; i < 40 && received.length === 0; i++) await sleep(200);
   ok(received.length >= 1, 'local receiver got the webhook delivery');
   const d0 = received[0];
-  const expectSig = crypto.createHmac('sha256', whSecret).update(`${d0.headers['x-scoutbox-event-id']}.${d0.headers['x-scoutbox-timestamp']}.${d0.raw}`).digest('hex');
+  const expectSig = crypto
+    .createHmac('sha256', whSecret)
+    .update(`${d0.headers['x-scoutbox-event-id']}.${d0.headers['x-scoutbox-timestamp']}.${d0.raw}`)
+    .digest('hex');
   ok(d0.headers['x-scoutbox-signature'] === expectSig, 'delivery signature verifies against the shared secret');
   ok(JSON.parse(d0.raw).type === 'import.committed', 'payload carries event id + type + data');
 
@@ -259,24 +464,41 @@ section('CSV import, identity, API keys, webhooks');
     await sleep(250);
   }
   const dl = (await j('GET', `/org/webhooks/${whId}/deliveries`, undefined, maria.token)).body.items;
-  ok(dl.some((x) => x.attempts.length >= 2 && x.status === 'delivered'), 'failed delivery retried with backoff until the receiver recovered');
+  ok(
+    dl.some((x) => x.attempts.length >= 2 && x.status === 'delivered'),
+    'failed delivery retried with backoff until the receiver recovered',
+  );
 
   r = await j('POST', `/org/webhooks/${whId}/rotate`, {}, maria.token);
-  ok(r.status === 200 && r.body.endpoint.secret !== whSecret && r.body.note.includes('24 hours'), 'secret rotation keeps the old secret briefly valid');
+  ok(
+    r.status === 200 && r.body.endpoint.secret !== whSecret && r.body.note.includes('24 hours'),
+    'secret rotation keeps the old secret briefly valid',
+  );
 
   r = await j('GET', '/org/connectors', undefined, maria.token);
-  ok(r.body.items.every((c) => c.status === 'not_configured'), 'every provider connector honestly reports not_configured');
+  ok(
+    r.body.items.every((c) => c.status === 'not_configured'),
+    'every provider connector honestly reports not_configured',
+  );
   receiver.close();
 
   // Integrations: junk is refused naming the field, lists page by cursor, one live prospect
   // per provider and external id holds on every path.
   r = await j('POST', '/org/api-keys', { scopes: ['export:everything'] }, maria.token);
-  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'scopes[0]', 'an unknown API scope is refused, naming it (not silently dropped)');
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'scopes[0]',
+    'an unknown API scope is refused, naming it (not silently dropped)',
+  );
   r = await j('POST', '/org/api-keys', { scopes: 'export:shortlist' }, maria.token);
   ok(r.status === 400 && r.body.field === 'scopes', 'scopes must be a list');
   r = await j('POST', '/org/api-keys', { scopes: ['export:prospects'], label: 42 }, maria.token);
   ok(r.status === 400 && r.body.field === 'label', 'a label that is not text is refused');
-  r = await j('POST', '/org/webhooks', { url: 'https://hooks.example.test/x', events: ['import.committed', 'nope'] }, maria.token);
+  r = await j(
+    'POST',
+    '/org/webhooks',
+    { url: 'https://hooks.example.test/x', events: ['import.committed', 'nope'] },
+    maria.token,
+  );
   ok(r.status === 400 && r.body.field === 'events[1]', 'an unknown webhook event is refused, naming it');
   r = await j('POST', '/org/imports', { csv: 42 }, maria.token);
   ok(r.status === 400 && r.body.field === 'csv', 'a csv that is not text is refused');
@@ -285,49 +507,107 @@ section('CSV import, identity, API keys, webhooks');
   ok(r.status === 400 && r.body.field === 'mapping', 'a mapping naming a column the CSV does not have is refused');
   r = await j('POST', '/org/imports', { csv: `${head}\nA B,,,,,p,1,`, mapping: { name: 'shoeSize' } }, maria.token);
   ok(r.status === 400 && r.body.field === 'mapping.name', 'a mapping to a field prospects do not have is refused');
-  r = await j('POST', '/org/imports', { csv: `${head}\nLong Notes,,,,,statsprovider,SP-LONG,${'x'.repeat(2001)}` }, maria.token);
-  ok(r.status === 201 && r.body.batch.rows[0].disposition === 'error' && r.body.batch.rows[0].errors.some((e) => e.includes('notes exceeds 2000')), 'an over-long cell is a row error, not a stored blob');
+  r = await j(
+    'POST',
+    '/org/imports',
+    { csv: `${head}\nLong Notes,,,,,statsprovider,SP-LONG,${'x'.repeat(2001)}` },
+    maria.token,
+  );
+  ok(
+    r.status === 201 &&
+      r.body.batch.rows[0].disposition === 'error' &&
+      r.body.batch.rows[0].errors.some((e) => e.includes('notes exceeds 2000')),
+    'an over-long cell is a row error, not a stored blob',
+  );
 
   r = await j('GET', '/org/imports?limit=1', undefined, maria.token);
-  ok(r.status === 200 && r.body.items.length === 1 && typeof r.body.nextCursor === 'string' && r.body.items[0].rows === undefined && Number.isInteger(r.body.items[0].rowCount), 'import batches page by cursor, newest first, without their rows');
+  ok(
+    r.status === 200 &&
+      r.body.items.length === 1 &&
+      typeof r.body.nextCursor === 'string' &&
+      r.body.items[0].rows === undefined &&
+      Number.isInteger(r.body.items[0].rowCount),
+    'import batches page by cursor, newest first, without their rows',
+  );
   const nextImports = await j('GET', `/org/imports?limit=1&cursor=${r.body.nextCursor}`, undefined, maria.token);
-  ok(nextImports.status === 200 && nextImports.body.items[0]?.id !== r.body.items[0].id, 'the cursor continues where the first page ended');
-  ok((await j('GET', '/org/imports?limit=0', undefined, maria.token)).body.error === 'PAGE_LIMIT_INVALID', 'a junk page limit is refused');
+  ok(
+    nextImports.status === 200 && nextImports.body.items[0]?.id !== r.body.items[0].id,
+    'the cursor continues where the first page ended',
+  );
+  ok(
+    (await j('GET', '/org/imports?limit=0', undefined, maria.token)).body.error === 'PAGE_LIMIT_INVALID',
+    'a junk page limit is refused',
+  );
   r = await j('GET', '/org/prospects', undefined, maria.token);
-  ok(r.status === 200 && Array.isArray(r.body.items) && 'nextCursor' in r.body && r.body.items.some((p) => p.externalId === 'SP-77' && p.dob === '2002-01-01' && p.heightCm === 190), 'prospects page by cursor, typed (height a number, dob a day)');
+  ok(
+    r.status === 200 &&
+      Array.isArray(r.body.items) &&
+      'nextCursor' in r.body &&
+      r.body.items.some((p) => p.externalId === 'SP-77' && p.dob === '2002-01-01' && p.heightCm === 190),
+    'prospects page by cursor, typed (height a number, dob a day)',
+  );
 
   // "Keep separate" honours the same identity rule the import applies.
-  r = await j('POST', '/org/imports', { csv: `${head}\nKola Adeyemi,2004-03-14,ST,right,181,statsprovider,SP-500,again` }, maria.token);
+  r = await j(
+    'POST',
+    '/org/imports',
+    { csv: `${head}\nKola Adeyemi,2004-03-14,ST,right,181,statsprovider,SP-500,again` },
+    maria.token,
+  );
   const ambiguousBatch = r.body.batch.id;
   ok(r.body.batch.summary.ambiguous === 1, 'a name + dob match is queued as ambiguous');
   await j('POST', `/org/imports/${ambiguousBatch}/commit`, { confirm: true }, maria.token);
-  const sepReview = (await j('GET', '/org/identity-reviews', undefined, maria.token)).body.items.find((x) => x.batchId === ambiguousBatch);
-  ok(sepReview?.record?.externalId === 'SP-500', 'the review shows its batch row\'s record');
-  const takenBatch = (await j('POST', '/org/imports', { csv: `${head}\nSomeone Else,,,,,statsprovider,SP-500,` }, maria.token)).body.batch.id;
+  const sepReview = (await j('GET', '/org/identity-reviews', undefined, maria.token)).body.items.find(
+    (x) => x.batchId === ambiguousBatch,
+  );
+  ok(sepReview?.record?.externalId === 'SP-500', "the review shows its batch row's record");
+  const takenBatch = (
+    await j('POST', '/org/imports', { csv: `${head}\nSomeone Else,,,,,statsprovider,SP-500,` }, maria.token)
+  ).body.batch.id;
   r = await j('POST', `/org/imports/${takenBatch}/commit`, { confirm: true }, maria.token);
   ok(r.status === 200 && r.body.created === 1, 'another import takes SP-500 meanwhile');
   r = await j('POST', `/org/identity-reviews/${sepReview.id}/resolve`, { action: 'separate' }, maria.token);
-  ok(r.status === 409 && r.body.error === 'ALREADY_IMPORTED', 'keeping the record separate is refused while SP-500 is a live prospect');
+  ok(
+    r.status === 409 && r.body.error === 'ALREADY_IMPORTED',
+    'keeping the record separate is refused while SP-500 is a live prospect',
+  );
   r = await j('POST', `/org/imports/${takenBatch}/reverse`, {}, maria.token);
   ok(r.status === 200 && r.body.removed === 1, 'the other import is reversed');
   r = await j('POST', `/org/identity-reviews/${sepReview.id}/resolve`, { action: 'separate' }, maria.token);
   ok(r.status === 200 && r.body.review.resolution === 'kept_separate', 'then the record is kept separate');
   r = await j('GET', '/org/prospects', undefined, maria.token);
-  ok(r.body.items.filter((p) => p.externalId === 'SP-500').length === 1 && r.body.items.find((p) => p.externalId === 'SP-500').minor === false, 'one live SP-500 prospect, with its minor flag computed');
+  ok(
+    r.body.items.filter((p) => p.externalId === 'SP-500').length === 1 &&
+      r.body.items.find((p) => p.externalId === 'SP-500').minor === false,
+    'one live SP-500 prospect, with its minor flag computed',
+  );
   const prospectsKey = (await j('POST', '/org/api-keys', { scopes: ['export:prospects'] }, maria.token)).body.plaintext;
-  const exp2 = await (await fetch(`${BASE}/api/v1/export/prospects`, { headers: { Authorization: `ApiKey ${prospectsKey}` } })).json();
-  ok(exp2.items.length >= 1 && exp2.items.every((p) => p.linkedPlayerId === null), 'the prospects export keeps linkedPlayerId in its contract (null)');
+  const exp2 = await (
+    await fetch(`${BASE}/api/v1/export/prospects`, { headers: { Authorization: `ApiKey ${prospectsKey}` } })
+  ).json();
+  ok(
+    exp2.items.length >= 1 && exp2.items.every((p) => p.linkedPlayerId === null),
+    'the prospects export keeps linkedPlayerId in its contract (null)',
+  );
   const usedKey = (await j('GET', '/org/api-keys', undefined, maria.token)).body.items.at(-1);
-  ok(Number.isInteger(usedKey.lastUsedAt) && usedKey.keyHash === undefined, 'a use of the key is recorded; its hash is never served');
+  ok(
+    Number.isInteger(usedKey.lastUsedAt) && usedKey.keyHash === undefined,
+    'a use of the key is recorded; its hash is never served',
+  );
 }
 
 // ================================================================ onboarding and security
 section('onboarding, MFA, SSO, audit, support, backup, reliability');
 let inviteUserToken = null;
 {
-  let r = await j('POST', '/org/invites', { email: 'newscout@eastport.example', name: 'Nina Invitee', role: 'Scout' }, maria.token);
+  let r = await j(
+    'POST',
+    '/org/invites',
+    { email: 'newscout@eastport.example', name: 'Nina Invitee', role: 'Scout' },
+    maria.token,
+  );
   ok(r.status === 201 && r.body.invite.token === undefined, 'invite created; token only in the email');
-  const outbox = (await fetch(`${BASE}/admin/outbox`, { headers: A() }).then((x) => x.json()));
+  const outbox = await fetch(`${BASE}/admin/outbox`, { headers: A() }).then((x) => x.json());
   const inviteMail = outbox.items.find((m) => m.to === 'newscout@eastport.example');
   const inviteCode = inviteMail?.text.match(/invite code: ([a-f0-9]+)/)?.[1];
   ok(!!inviteCode, 'invite code delivered via the (dev) mailer');
@@ -337,7 +617,10 @@ let inviteUserToken = null;
   r = await j('POST', '/auth/org/accept-invite', { token: inviteCode });
   ok(r.status === 404, 'an invite code is single-use');
   r = await j('GET', '/org/onboarding', undefined, maria.token);
-  ok(r.body.tasks.find((t) => t.id === 'invite_staff')?.done === true && typeof r.body.roleHelp === 'string', 'onboarding shows role-specific help + live task state');
+  ok(
+    r.body.tasks.find((t) => t.id === 'invite_staff')?.done === true && typeof r.body.roleHelp === 'string',
+    'onboarding shows role-specific help + live task state',
+  );
 
   // MFA.
   r = await j('POST', '/org/mfa/setup', {}, maria.token);
@@ -360,113 +643,225 @@ let inviteUserToken = null;
   ok(r.status === 200, 'a recovery code signs in');
   r = await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', recoveryCode: rec });
   ok(r.status === 401, 'each recovery code works exactly once');
-  for (let i = 0; i < 5; i++) await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', mfaCode: '000001' });
+  for (let i = 0; i < 5; i++)
+    await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', mfaCode: '000001' });
   r = await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', mfaCode: totp(mfaSecret) });
   ok(r.status === 429 && r.body.error === 'MFA_LOCKED', 'repeated wrong codes rate-limit even a correct one');
 
   // Sessions/devices.
   r = await j('GET', '/org/sessions', undefined, scout2.token);
-  ok(r.body.items.some((s) => s.current) && r.body.items.every((s) => !s.token), 'session list shows devices, current flag, no raw tokens');
+  ok(
+    r.body.items.some((s) => s.current) && r.body.items.every((s) => !s.token),
+    'session list shows devices, current flag, no raw tokens',
+  );
 
   // SSO with the local test IdP.
   r = await j('PUT', '/org/sso', { issuer: 'corporate-okta' }, scout2.token);
   ok(r.status === 403 || r.status === 400, 'a non-lead / unavailable IdP cannot be configured');
   r = await j('PUT', '/org/sso', { issuer: 'local-test-idp' }, maria.token);
-  ok(r.status === 200 && r.body.config.clientId, 'org configured against the LOCAL TEST IdP (only one available — honestly labelled)');
+  ok(
+    r.status === 200 && r.body.config.clientId,
+    'org configured against the LOCAL TEST IdP (only one available — honestly labelled)',
+  );
   const start = (await j('POST', '/auth/sso/start', { orgId: 'org-eastport' })).body;
   ok(!!start.authUrl && !!start.state, 'SSO start mints state + nonce');
-  const authz = await (await fetch(`${BASE}${start.authUrl}&email=newscout@eastport.example&groups=admins,superusers`)).json();
+  const authz = await (
+    await fetch(`${BASE}${start.authUrl}&email=newscout@eastport.example&groups=admins,superusers`)
+  ).json();
   r = await j('POST', '/auth/sso/callback', { code: authz.code, state: start.state });
-  ok(r.status === 200 && r.body.token && r.body.ignoredClaims?.groups?.length === 2, 'SSO login links the invited email; IdP group claims explicitly IGNORED for permissions');
+  ok(
+    r.status === 200 && r.body.token && r.body.ignoredClaims?.groups?.length === 2,
+    'SSO login links the invited email; IdP group claims explicitly IGNORED for permissions',
+  );
   const ssoRole = r.body.role;
   ok(!/head|director|lead|admin/i.test(ssoRole), 'group claim "admins" did not grant a privileged ScoutBox role');
   r = await j('POST', '/auth/sso/callback', { code: authz.code, state: start.state });
   ok(r.status === 401 && r.body.error === 'SSO_STATE_INVALID', 'state replay refused (single use)');
   const start2 = (await j('POST', '/auth/sso/start', { orgId: 'org-eastport' })).body;
-  const authzBadNonce = await (await fetch(`${BASE}/testidp/authorize?client_id=x&state=${start2.state}&nonce=WRONG&email=newscout@eastport.example`)).json();
+  const authzBadNonce = await (
+    await fetch(
+      `${BASE}/testidp/authorize?client_id=x&state=${start2.state}&nonce=WRONG&email=newscout@eastport.example`,
+    )
+  ).json();
   r = await j('POST', '/auth/sso/callback', { code: authzBadNonce.code, state: start2.state });
   ok(r.status === 401 && r.body.error === 'SSO_NONCE_MISMATCH', 'nonce mismatch refused');
   const start3 = (await j('POST', '/auth/sso/start', { orgId: 'org-eastport' })).body;
-  const authzStranger = await (await fetch(`${BASE}/testidp/authorize?client_id=x&state=${start3.state}&nonce=${start3.authUrl.match(/nonce=([a-f0-9]+)/)[1]}&email=stranger@nowhere.example`)).json();
+  const authzStranger = await (
+    await fetch(
+      `${BASE}/testidp/authorize?client_id=x&state=${start3.state}&nonce=${start3.authUrl.match(/nonce=([a-f0-9]+)/)[1]}&email=stranger@nowhere.example`,
+    )
+  ).json();
   r = await j('POST', '/auth/sso/callback', { code: authzStranger.code, state: start3.state });
-  ok(r.status === 403 && r.body.error === 'SSO_NOT_LINKED', 'an un-invited email cannot link or create an account through SSO');
+  ok(
+    r.status === 403 && r.body.error === 'SSO_NOT_LINKED',
+    'an un-invited email cannot link or create an account through SSO',
+  );
 
   // Audit export tenant boundary.
   r = await j('GET', '/org/audit/export', undefined, maria.token);
   const auditStr = JSON.stringify(r.body);
-  ok(r.status === 200 && r.body.orgId === 'org-eastport' && !auditStr.includes('org-hackneymarsh'), 'audit export is tenant-scoped (no other org ids)');
+  ok(
+    r.status === 200 && r.body.orgId === 'org-eastport' && !auditStr.includes('org-hackneymarsh'),
+    'audit export is tenant-scoped (no other org ids)',
+  );
   r = await j('GET', '/org/audit/export', undefined, scout2.token);
   ok(r.status === 403, 'audit export needs a lead');
 
   // Support with explicit, time-limited, logged access.
   const caseForTicket = (await j('POST', '/org/cases', { playerId: 'pl-svensson' }, maria.token)).body.case;
-  r = await j('POST', '/org/support', { subject: 'Case question', body: 'Please look at this case', refs: [{ kind: 'case', id: caseForTicket.id }] }, maria.token);
+  r = await j(
+    'POST',
+    '/org/support',
+    { subject: 'Case question', body: 'Please look at this case', refs: [{ kind: 'case', id: caseForTicket.id }] },
+    maria.token,
+  );
   const ticket = r.body.ticket;
   ok(r.status === 201 && ticket.refs[0].id === caseForTicket.id, 'support ticket references records by id, no copies');
   let ar = await fetch(`${BASE}/admin/support/${ticket.id}/org-records`, { headers: A() });
   ok(ar.status === 403, 'support CANNOT read org records before a grant — no silent access path');
-  await fetch(`${BASE}/admin/support/${ticket.id}/request-access`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ hours: 4 }) });
+  await fetch(`${BASE}/admin/support/${ticket.id}/request-access`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ hours: 4 }),
+  });
   r = await j('POST', `/org/support/${ticket.id}/approve-access`, {}, maria.token);
   ok(r.status === 200 && r.body.grant.status === 'active', 'an org lead approves time-limited support access');
   ar = await fetch(`${BASE}/admin/support/${ticket.id}/org-records`, { headers: A() });
   const arBody = await ar.json();
-  ok(ar.status === 200 && arBody.records.cases[0]?.id === caseForTicket.id, 'granted support access reads ONLY the referenced records');
+  ok(
+    ar.status === 200 && arBody.records.cases[0]?.id === caseForTicket.id,
+    'granted support access reads ONLY the referenced records',
+  );
   const grants = (await fetch(`${BASE}/admin/support`, { headers: A() }).then((x) => x.json())).grants;
   ok(grants[0].accessLog.length === 1, 'every support read lands in the access log');
 
   // Invites, SSO states, tickets and grants: junk is refused naming the field (not clamped, coerced or stored as
   // 'undefined'), the lists page by cursor, an invite code is single-use whatever its state.
-  r = await j('POST', '/org/invites', { email: 'role.junk@eastport.example', name: 'Role Junk', role: 42 }, maria.token);
+  r = await j(
+    'POST',
+    '/org/invites',
+    { email: 'role.junk@eastport.example', name: 'Role Junk', role: 42 },
+    maria.token,
+  );
   ok(r.status === 400 && r.body.field === 'role', 'an invite role that is not text is refused, naming it');
-  r = await j('POST', '/org/invites', { email: 'revoked.invitee@eastport.example', name: 'Revoked Invitee', role: 'Analyst' }, maria.token);
-  ok(r.status === 201 && r.body.invite.tokenHash === undefined && r.body.invite.token === undefined, 'an invite is served without its code or the code\'s hash');
-  const revokedCode = (await fetch(`${BASE}/admin/outbox`, { headers: A() }).then((x) => x.json())).items.find((m) => m.to === 'revoked.invitee@eastport.example')?.text.match(/invite code: ([a-f0-9]+)/)?.[1];
+  r = await j(
+    'POST',
+    '/org/invites',
+    { email: 'revoked.invitee@eastport.example', name: 'Revoked Invitee', role: 'Analyst' },
+    maria.token,
+  );
+  ok(
+    r.status === 201 && r.body.invite.tokenHash === undefined && r.body.invite.token === undefined,
+    "an invite is served without its code or the code's hash",
+  );
+  const revokedCode = (await fetch(`${BASE}/admin/outbox`, { headers: A() }).then((x) => x.json())).items
+    .find((m) => m.to === 'revoked.invitee@eastport.example')
+    ?.text.match(/invite code: ([a-f0-9]+)/)?.[1];
   await j('POST', `/org/invites/${r.body.invite.id}/revoke`, {}, maria.token);
   r = await j('POST', '/auth/org/accept-invite', { token: revokedCode });
-  ok(!!revokedCode && r.status === 404 && r.body.error === 'INVITE_INVALID', 'a revoked invite\'s code accepts nothing');
+  ok(!!revokedCode && r.status === 404 && r.body.error === 'INVITE_INVALID', "a revoked invite's code accepts nothing");
   r = await j('POST', '/auth/org/accept-invite', { token: ['not', 'a', 'code'] });
   ok(r.status === 404, 'a code that is not text finds nothing');
   r = await j('GET', '/org/invites?limit=1', undefined, maria.token);
-  ok(r.status === 200 && r.body.items.length === 1 && r.body.items[0].status === 'revoked' && typeof r.body.nextCursor === 'string', 'invites page by cursor, newest first');
+  ok(
+    r.status === 200 &&
+      r.body.items.length === 1 &&
+      r.body.items[0].status === 'revoked' &&
+      typeof r.body.nextCursor === 'string',
+    'invites page by cursor, newest first',
+  );
   r = await j('GET', `/org/invites?limit=1&cursor=${r.body.nextCursor}`, undefined, maria.token);
   ok(r.status === 200 && r.body.items[0]?.status === 'accepted', 'the cursor continues to the accepted invite');
-  for (const [refs, field] of [['case-1', 'refs'], [[{ kind: 'player', id: 'pl-1' }], 'refs[0].kind'], [[{ kind: 'case', id: 42 }], 'refs[0].id'], [Array.from({ length: 11 }, (_, i) => ({ kind: 'case', id: `c${i}` })), 'refs']]) {
+  for (const [refs, field] of [
+    ['case-1', 'refs'],
+    [[{ kind: 'player', id: 'pl-1' }], 'refs[0].kind'],
+    [[{ kind: 'case', id: 42 }], 'refs[0].id'],
+    [Array.from({ length: 11 }, (_, i) => ({ kind: 'case', id: `c${i}` })), 'refs'],
+  ]) {
     r = await j('POST', '/org/support', { subject: 'Junk refs', refs }, maria.token);
-    ok(r.status === 400 && r.body.field === field, `a support reference ${JSON.stringify(refs).slice(0, 40)} is refused, naming ${field}`);
+    ok(
+      r.status === 400 && r.body.field === field,
+      `a support reference ${JSON.stringify(refs).slice(0, 40)} is refused, naming ${field}`,
+    );
   }
   const junkTicket = (await j('POST', '/org/support', { subject: 'Reply junk' }, maria.token)).body.ticket;
-  const adminPost = (p, body) => fetch(`${BASE}${p}`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (x) => ({ status: x.status, body: await x.json() }));
+  const adminPost = (p, body) =>
+    fetch(`${BASE}${p}`, {
+      method: 'POST',
+      headers: { ...A(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(async (x) => ({ status: x.status, body: await x.json() }));
   r = await adminPost(`/admin/support/${junkTicket.id}/reply`, {});
-  ok(r.status === 400 && r.body.field === 'text', 'a reply with no text is refused (it used to store the word "undefined")');
+  ok(
+    r.status === 400 && r.body.field === 'text',
+    'a reply with no text is refused (it used to store the word "undefined")',
+  );
   r = await adminPost(`/admin/support/${junkTicket.id}/reply`, { text: 'ok', close: 'yes' });
   ok(r.status === 400 && r.body.field === 'close', 'close must be true or false');
   for (const hours of [0, 73, 1.5, '4']) {
     r = await adminPost(`/admin/support/${junkTicket.id}/request-access`, { hours });
-    ok(r.status === 400 && r.body.field === 'hours', `access hours ${JSON.stringify(hours)} are refused (no longer clamped)`);
+    ok(
+      r.status === 400 && r.body.field === 'hours',
+      `access hours ${JSON.stringify(hours)} are refused (no longer clamped)`,
+    );
   }
   r = await adminPost(`/admin/support/${junkTicket.id}/request-access`, {});
   ok(r.status === 201 && r.body.grant.hours === 24, 'access hours default to 24');
   r = await j('GET', '/org/support?limit=1', undefined, maria.token);
-  ok(r.status === 200 && r.body.items[0]?.id === junkTicket.id && typeof r.body.nextCursor === 'string', 'tickets page by cursor, newest first');
+  ok(
+    r.status === 200 && r.body.items[0]?.id === junkTicket.id && typeof r.body.nextCursor === 'string',
+    'tickets page by cursor, newest first',
+  );
   const adminPage = await fetch(`${BASE}/admin/support?limit=1`, { headers: A() }).then((x) => x.json());
-  ok(adminPage.items.length === 1 && adminPage.items[0].id === junkTicket.id && adminPage.grants.every((g) => g.ticketId === junkTicket.id) && adminPage.grants.length === 1, 'the admin list pages by cursor, with the grants of the tickets on the page');
+  ok(
+    adminPage.items.length === 1 &&
+      adminPage.items[0].id === junkTicket.id &&
+      adminPage.grants.every((g) => g.ticketId === junkTicket.id) &&
+      adminPage.grants.length === 1,
+    'the admin list pages by cursor, with the grants of the tickets on the page',
+  );
 
   // Metrics + injected failure detection. Inject exactly MAX_ATTEMPTS (4 in
   // fast mode) so the dispatch to Nina (who HAS an email) exhausts its
   // retries and surfaces as a monitored failure — with nothing left over to
   // pollute later delivery tests.
   // Junk is refused naming the field: an unknown channel is not read as email, a count is not clamped.
-  for (const [body, field] of [[{ channel: 'fax', count: 1 }, 'channel'], [{ channel: 'email', count: 0 }, 'count'], [{ channel: 'email', count: 21 }, 'count'], [{ channel: 'email', count: '2' }, 'count']]) {
-    const bad = await fetch(`${BASE}/admin/delivery/inject-failure`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    ok(bad.status === 400 && (await bad.json()).field === field, `an injection with a junk ${field} is refused, naming it`);
+  for (const [body, field] of [
+    [{ channel: 'fax', count: 1 }, 'channel'],
+    [{ channel: 'email', count: 0 }, 'count'],
+    [{ channel: 'email', count: 21 }, 'count'],
+    [{ channel: 'email', count: '2' }, 'count'],
+  ]) {
+    const bad = await fetch(`${BASE}/admin/delivery/inject-failure`, {
+      method: 'POST',
+      headers: { ...A(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    ok(
+      bad.status === 400 && (await bad.json()).field === field,
+      `an injection with a junk ${field} is refused, naming it`,
+    );
   }
-  await fetch(`${BASE}/admin/delivery/inject-failure`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'email', count: 4 }) });
-  const failTicket = (await j('POST', '/org/support', { subject: 'Failure-injection ticket', body: 'x', refs: [] }, inviteUserToken)).body.ticket;
-  await fetch(`${BASE}/admin/support/${failTicket.id}/reply`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'This reply will fail to email.' }) });
+  await fetch(`${BASE}/admin/delivery/inject-failure`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel: 'email', count: 4 }),
+  });
+  const failTicket = (
+    await j('POST', '/org/support', { subject: 'Failure-injection ticket', body: 'x', refs: [] }, inviteUserToken)
+  ).body.ticket;
+  await fetch(`${BASE}/admin/support/${failTicket.id}/reply`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'This reply will fail to email.' }),
+  });
   let failed = false;
   for (let i = 0; i < 60; i++) {
     const m = await (await fetch(`${BASE}/admin/metrics`, { headers: A() })).json();
-    if (m.deliveryFailures > 0) { failed = true; break; }
+    if (m.deliveryFailures > 0) {
+      failed = true;
+      break;
+    }
     await sleep(300);
   }
   ok(failed, 'monitoring surfaces the injected provider failure (bounded retries exhausted)');
@@ -482,25 +877,43 @@ section('delivery centre');
   ok(r.status === 200, 'org user sets delivery preferences');
 
   // A support reply notifies maria (org_user with no email → skipped email; in_app delivered).
-  const t2 = (await j('POST', '/org/support', { subject: 'Second ticket', body: 'x', refs: [] }, maria.token)).body.ticket;
-  await fetch(`${BASE}/admin/support/${t2.id}/reply`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Reply for delivery test' }) });
+  const t2 = (await j('POST', '/org/support', { subject: 'Second ticket', body: 'x', refs: [] }, maria.token)).body
+    .ticket;
+  await fetch(`${BASE}/admin/support/${t2.id}/reply`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'Reply for delivery test' }),
+  });
   await sleep(1200);
   const adminDel = await (await fetch(`${BASE}/admin/delivery`, { headers: A() })).json();
   ok(adminDel.providerNote.includes('not configured'), 'delivery centre states real transport is NOT configured');
   const inApp = adminDel.recent.find((d) => d.channel === 'in_app' && d.status === 'delivered');
   ok(!!inApp, 'canonical in-app dispatch is delivered');
-  ok(!adminDel.recent.some((d) => d.channel === 'email' && d.status === 'delivered' && !d.deliveredAt), 'no email is marked delivered without confirmation');
+  ok(
+    !adminDel.recent.some((d) => d.channel === 'email' && d.status === 'delivered' && !d.deliveredAt),
+    'no email is marked delivered without confirmation',
+  );
 
   // Nina (invited, has email) gets a notification → email accepted, not delivered.
-  const t3 = (await j('POST', '/org/support', { subject: 'Nina ticket', body: 'x', refs: [] }, inviteUserToken)).body.ticket;
-  await fetch(`${BASE}/admin/support/${t3.id}/reply`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Nina, see this.' }) });
+  const t3 = (await j('POST', '/org/support', { subject: 'Nina ticket', body: 'x', refs: [] }, inviteUserToken)).body
+    .ticket;
+  await fetch(`${BASE}/admin/support/${t3.id}/reply`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'Nina, see this.' }),
+  });
   let ninaEmail = null;
   for (let i = 0; i < 40 && !ninaEmail; i++) {
     await sleep(250);
     const del = await (await fetch(`${BASE}/admin/delivery`, { headers: A() })).json();
-    ninaEmail = del.recent.find((d) => d.channel === 'email' && d.to === 'newscout@eastport.example' && d.status === 'accepted');
+    ninaEmail = del.recent.find(
+      (d) => d.channel === 'email' && d.to === 'newscout@eastport.example' && d.status === 'accepted',
+    );
   }
-  ok(!!ninaEmail?.providerMessageId, 'email dispatch: provider ACCEPTED with message id (never auto-“delivered”, never “read”)');
+  ok(
+    !!ninaEmail?.providerMessageId,
+    'email dispatch: provider ACCEPTED with message id (never auto-“delivered”, never “read”)',
+  );
 
   // Signed idempotent callbacks; out-of-order safe.
   const CBS = 'local-fake-callback-secret';
@@ -508,18 +921,33 @@ section('delivery centre');
     const body = JSON.stringify({ provider: 'local-fake', events });
     const ts = String(Date.now());
     const sig = crypto.createHmac('sha256', CBS).update(`callback.${ts}.${body}`).digest('hex');
-    return j('POST', '/callbacks/delivery', JSON.parse(body), null, { 'x-provider-timestamp': ts, 'x-provider-signature': sig });
+    return j('POST', '/callbacks/delivery', JSON.parse(body), null, {
+      'x-provider-timestamp': ts,
+      'x-provider-signature': sig,
+    });
   };
-  let cr = await j('POST', '/callbacks/delivery', { events: [] }, null, { 'x-provider-timestamp': String(Date.now()), 'x-provider-signature': 'bad' });
+  let cr = await j('POST', '/callbacks/delivery', { events: [] }, null, {
+    'x-provider-timestamp': String(Date.now()),
+    'x-provider-signature': 'bad',
+  });
   ok(cr.status === 401, 'unsigned/badly-signed callback refused');
-  cr = await post([{ callbackId: 'cb-1', providerMessageId: ninaEmail.providerMessageId, status: 'opened', at: Date.now() }]);
+  cr = await post([
+    { callbackId: 'cb-1', providerMessageId: ninaEmail.providerMessageId, status: 'opened', at: Date.now() },
+  ]);
   ok(cr.status === 200 && cr.body.applied === 1, 'out-of-order OPENED applies (implies delivered)');
-  cr = await post([{ callbackId: 'cb-1', providerMessageId: ninaEmail.providerMessageId, status: 'opened', at: Date.now() }]);
+  cr = await post([
+    { callbackId: 'cb-1', providerMessageId: ninaEmail.providerMessageId, status: 'opened', at: Date.now() },
+  ]);
   ok(cr.body.duplicates === 1 && cr.body.applied === 0, 'duplicate callback id is idempotent');
-  cr = await post([{ callbackId: 'cb-2', providerMessageId: ninaEmail.providerMessageId, status: 'bounced', at: Date.now() }]);
+  cr = await post([
+    { callbackId: 'cb-2', providerMessageId: ninaEmail.providerMessageId, status: 'bounced', at: Date.now() },
+  ]);
   const after = await (await fetch(`${BASE}/admin/delivery`, { headers: A() })).json();
   const ninaAfter = after.recent.find((d) => d.providerMessageId === ninaEmail.providerMessageId);
-  ok(ninaAfter.status === 'opened' && ninaAfter.deliveredAt && ninaAfter.openedAt, 'late bounce does NOT regress a confirmed open (forward-only ladder)');
+  ok(
+    ninaAfter.status === 'opened' && ninaAfter.deliveredAt && ninaAfter.openedAt,
+    'late bounce does NOT regress a confirmed open (forward-only ladder)',
+  );
 }
 
 // ================================================================ suitability
@@ -527,46 +955,112 @@ section('player-controlled suitability');
 let oppId = null;
 {
   // Eastport publishes an opportunity with structured requirements.
-  let r = await j('POST', '/org/opportunities', { type: 'trial', title: 'U21s trial day', category: 'mens', deadline: '2027-01-01', description: 'Trial for the U21 squad' }, maria.token);
+  let r = await j(
+    'POST',
+    '/org/opportunities',
+    {
+      type: 'trial',
+      title: 'U21s trial day',
+      category: 'mens',
+      deadline: '2027-01-01',
+      description: 'Trial for the U21 squad',
+    },
+    maria.token,
+  );
   oppId = r.body.opportunity.id;
-  r = await j('PUT', `/org/opportunities/${oppId}/structured-requirements`, {
-    trainingSlots: [{ day: 'tue', start: '17:00', end: '18:30', tz: 'Europe/London' }],
-    relocationRequired: false, feeMinor: 0, expensesCovered: false,
-    environment: ['competitive'], accommodations: [],
-  }, maria.token);
+  r = await j(
+    'PUT',
+    `/org/opportunities/${oppId}/structured-requirements`,
+    {
+      trainingSlots: [{ day: 'tue', start: '17:00', end: '18:30', tz: 'Europe/London' }],
+      relocationRequired: false,
+      feeMinor: 0,
+      expensesCovered: false,
+      environment: ['competitive'],
+      accommodations: [],
+    },
+    maria.token,
+  );
   ok(r.status === 200, 'club attaches structured requirements to an opportunity');
 
   // Reading preferences writes nothing; junk is refused with the field named.
   r = await j('GET', '/player/preferences', undefined, adeyemi.token);
-  ok(r.status === 200 && r.body.preferences.updatedAt === null && r.body.private === true, 'preferences read before any save are the blank defaults');
-  for (const [body, field] of [[{ transport: 'horse' }, 'transport'], [{ travelLimitKm: 'far' }, 'travelLimitKm'], [{ commitments: [{ day: 'tuesday', start: '16:00', end: '18:00', tz: 'Europe/London' }] }, 'commitments[0].day'], [{ commitments: [{ day: 'tue', start: '18:00', end: '16:00', tz: 'Europe/London' }] }, 'commitments[0].end']]) {
+  ok(
+    r.status === 200 && r.body.preferences.updatedAt === null && r.body.private === true,
+    'preferences read before any save are the blank defaults',
+  );
+  for (const [body, field] of [
+    [{ transport: 'horse' }, 'transport'],
+    [{ travelLimitKm: 'far' }, 'travelLimitKm'],
+    [{ commitments: [{ day: 'tuesday', start: '16:00', end: '18:00', tz: 'Europe/London' }] }, 'commitments[0].day'],
+    [{ commitments: [{ day: 'tue', start: '18:00', end: '16:00', tz: 'Europe/London' }] }, 'commitments[0].end'],
+  ]) {
     r = await j('PUT', '/player/preferences', body, adeyemi.token);
-    ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field, `preferences with a bad ${field} are refused, naming the field`);
+    ok(
+      r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field,
+      `preferences with a bad ${field} are refused, naming the field`,
+    );
   }
-  r = await j('PUT', `/org/opportunities/${oppId}/structured-requirements`, { trainingSlots: [{ day: 'tue', start: '17:00', end: '18:30', tz: 'Mars/Olympus' }] }, maria.token);
-  ok(r.status === 400 && r.body.field === 'trainingSlots[0].tz', 'structured requirements with an unknown time zone are refused');
-  r = await j('PUT', '/player/preferences', {
-    commitments: [{ day: 'tue', start: '16:00', end: '18:00', tz: 'Europe/London', label: 'college class' }],
-    travelLimitKm: 20, environment: ['competitive'],
-    compensation: { maxFeeMinor: 0, currency: 'GBP', expensesNeeded: true },
-  }, adeyemi.token);
+  r = await j(
+    'PUT',
+    `/org/opportunities/${oppId}/structured-requirements`,
+    { trainingSlots: [{ day: 'tue', start: '17:00', end: '18:30', tz: 'Mars/Olympus' }] },
+    maria.token,
+  );
+  ok(
+    r.status === 400 && r.body.field === 'trainingSlots[0].tz',
+    'structured requirements with an unknown time zone are refused',
+  );
+  r = await j(
+    'PUT',
+    '/player/preferences',
+    {
+      commitments: [{ day: 'tue', start: '16:00', end: '18:00', tz: 'Europe/London', label: 'college class' }],
+      travelLimitKm: 20,
+      environment: ['competitive'],
+      compensation: { maxFeeMinor: 0, currency: 'GBP', expensesNeeded: true },
+    },
+    adeyemi.token,
+  );
   ok(r.status === 200 && r.body.preferences.updatedAt, 'adult player sets private preferences');
 
   r = await j('GET', `/player/suitability/${oppId}`, undefined, adeyemi.token);
   const v = Object.fromEntries(r.body.verdicts.map((x) => [x.dimension, x]));
-  ok(v.schedule.verdict === 'conflict' && v.schedule.reason.includes('college class'), 'conflicting training schedule detected (tz-aware)');
+  ok(
+    v.schedule.verdict === 'conflict' && v.schedule.reason.includes('college class'),
+    'conflicting training schedule detected (tz-aware)',
+  );
   ok(v.compensation.verdict === 'conflict', 'expense needs vs no-expenses opportunity → conflict');
-  ok(v.travel.reason.includes('travel time unavailable'), 'no invented travel estimates: distance + “travel time unavailable”');
+  ok(
+    v.travel.reason.includes('travel time unavailable'),
+    'no invented travel estimates: distance + “travel time unavailable”',
+  );
   ok(r.body.note.includes('Eligibility'), 'suitability explicitly separate from mandatory eligibility');
 
   // Changing preferences updates matching.
-  await j('PUT', '/player/preferences', { commitments: [], availableSlots: [{ day: 'tue', start: '16:00', end: '20:00', tz: 'Europe/London' }] }, adeyemi.token);
+  await j(
+    'PUT',
+    '/player/preferences',
+    { commitments: [], availableSlots: [{ day: 'tue', start: '16:00', end: '20:00', tz: 'Europe/London' }] },
+    adeyemi.token,
+  );
   r = await j('GET', `/player/suitability/${oppId}`, undefined, adeyemi.token);
-  ok(r.body.verdicts.find((x) => x.dimension === 'schedule').verdict === 'compatible', 'preference change recomputes the verdict');
+  ok(
+    r.body.verdicts.find((x) => x.dimension === 'schedule').verdict === 'compatible',
+    'preference change recomputes the verdict',
+  );
 
   // Guardian manages a minor's preferences; the child cannot.
-  r = await j('PUT', `/guardian/children/${kid16Id}/preferences`, { travelLimitKm: 10, relocation: 'yes' }, amara.token);
-  ok(r.status === 200 && r.body.preferences.relocation === null, 'guardian sets a minor\'s prefs; relocation NEVER collected for minors');
+  r = await j(
+    'PUT',
+    `/guardian/children/${kid16Id}/preferences`,
+    { travelLimitKm: 10, relocation: 'yes' },
+    amara.token,
+  );
+  ok(
+    r.status === 200 && r.body.preferences.relocation === null,
+    "guardian sets a minor's prefs; relocation NEVER collected for minors",
+  );
 
   // Privacy: the club sees nothing until an approved summary exists.
   const apply = await j('POST', `/player/opportunities/${oppId}/apply`, {}, adeyemi.token);
@@ -577,7 +1071,10 @@ let oppId = null;
   r = await j('POST', '/player/suitability/share', { applicationId, share: true }, adeyemi.token);
   ok(r.status === 200, 'player approves a summary');
   r = await j('GET', `/org/applications/${applicationId}/suitability`, undefined, maria.token);
-  ok(r.body.summary.verdicts.every((x) => x.verdict && x.dimension && !x.reason), 'club summary carries verdicts ONLY — reasons (commitments, needs, limits) stay private');
+  ok(
+    r.body.summary.verdicts.every((x) => x.verdict && x.dimension && !x.reason),
+    'club summary carries verdicts ONLY — reasons (commitments, needs, limits) stay private',
+  );
   const leak = JSON.stringify(r.body);
   ok(!leak.includes('college') && !leak.includes('travelLimit'), 'no private preference text leaks to the club');
 }
@@ -586,63 +1083,125 @@ let oppId = null;
 section('consent-based transitions');
 {
   const me = (await j('GET', '/player/me', undefined, adeyemi.token)).body;
-  const mediaId = me.media?.[0]?.id ?? (me.player?.media?.[0]?.id);
+  const mediaId = me.media?.[0]?.id ?? me.player?.media?.[0]?.id;
   let r = await j('POST', '/player/transitions', { pack: {} }, adeyemi.token);
-  ok(r.status === 400 && r.body.error === 'PACK_EMPTY', 'an empty pack (or club-private material) cannot start a transition');
+  ok(
+    r.status === 400 && r.body.error === 'PACK_EMPTY',
+    'an empty pack (or club-private material) cannot start a transition',
+  );
   // Junk is refused with the field named, never clamped or coerced.
   r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, periodDays: 7 }, adeyemi.token);
-  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'periodDays', 'a period outside 14-180 days is refused, not clamped');
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'periodDays',
+    'a period outside 14-180 days is refused, not clamped',
+  );
   r = await j('POST', '/player/transitions', { pack: { mediaIds: mediaId } }, adeyemi.token);
-  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'pack.mediaIds', 'a pack list that is not a list is refused');
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'pack.mediaIds',
+    'a pack list that is not a list is refused',
+  );
   r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId], notes: ['x'] } }, adeyemi.token);
-  ok(r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'pack.notes', 'a pack field the build does not store is refused');
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'pack.notes',
+    'a pack field the build does not store is refused',
+  );
   r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, note: { text: 'x' } }, adeyemi.token);
   ok(r.status === 400 && r.body.field === 'note', 'a note that is not text is refused');
-  ok((await j('GET', '/player/transitions', undefined, adeyemi.token)).body.items.length === 0, 'and none of the refused requests opened a case');
-  r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, note: 'Looking for a new club after the academy', periodDays: 60 }, adeyemi.token);
+  ok(
+    (await j('GET', '/player/transitions', undefined, adeyemi.token)).body.items.length === 0,
+    'and none of the refused requests opened a case',
+  );
+  r = await j(
+    'POST',
+    '/player/transitions',
+    { pack: { mediaIds: [mediaId] }, note: 'Looking for a new club after the academy', periodDays: 60 },
+    adeyemi.token,
+  );
   const trn = r.body.transition;
-  ok(r.status === 201 && trn.status === 'open' && r.body.note.includes('never re-labels'), 'player opens a transition case; no “released” label anywhere');
+  ok(
+    r.status === 201 && trn.status === 'open' && r.body.note.includes('never re-labels'),
+    'player opens a transition case; no “released” label anywhere',
+  );
   const levelBefore = me.level ?? me.player?.level;
 
   r = await j('POST', `/player/transitions/${trn.id}/recipients`, { orgId: 'org-northstar' }, adeyemi.token);
   ok(r.status === 403 && r.body.error === 'AGENCIES_EXCLUDED', 'agencies can never be transition recipients');
   r = await j('POST', `/player/transitions/${trn.id}/recipients`, { orgId: 'org-eastport', days: 365 }, adeyemi.token);
   ok(r.status === 400 && r.body.field === 'days', 'a grant longer than 90 days is refused, not clamped');
-  ok(trn.caseOwner?.id === trn.startedBy?.id && trn.history.length === 1 && trn.history[0].action === 'opened', 'the case names its owner and records its opening');
+  ok(
+    trn.caseOwner?.id === trn.startedBy?.id && trn.history.length === 1 && trn.history[0].action === 'opened',
+    'the case names its owner and records its opening',
+  );
   r = await j('POST', `/player/transitions/${trn.id}/recipients`, { orgId: 'org-eastport', days: 30 }, adeyemi.token);
   ok(r.status === 201, 'player grants a specific eligible club access');
 
   r = await j('GET', '/org/transitions', undefined, maria.token);
-  ok(r.body.items.some((t) => t.id === trn.id), 'the granted club sees the shared case (no browsable pool)');
+  ok(
+    r.body.items.some((t) => t.id === trn.id),
+    'the granted club sees the shared case (no browsable pool)',
+  );
   r = await j('GET', `/org/transitions/${trn.id}/pack`, undefined, maria.token);
   ok(r.status === 200 && r.body.pack.media.length === 1, 'recipient reads exactly the selected evidence pack');
   r = await j('GET', `/org/transitions/${trn.id}/pack`, undefined, hackney.token);
   ok(r.status === 403, 'a club WITHOUT a grant gets nothing');
 
   r = await j('POST', `/player/transitions/${trn.id}/revoke-recipient`, { orgId: 'org-eastport' }, adeyemi.token);
-  ok(r.status === 200 && r.body.honest.includes('cannot be remotely erased'), 'revocation is honest about already-downloaded copies');
+  ok(
+    r.status === 200 && r.body.honest.includes('cannot be remotely erased'),
+    'revocation is honest about already-downloaded copies',
+  );
   r = await j('GET', `/org/transitions/${trn.id}/pack`, undefined, maria.token);
-  ok(r.status === 403 && r.body.error === 'TRANSITION_ACCESS_REVOKED', 'revocation stops future platform access immediately');
+  ok(
+    r.status === 403 && r.body.error === 'TRANSITION_ACCESS_REVOKED',
+    'revocation stops future platform access immediately',
+  );
   const orgNotifs = (await j('GET', '/org/notifications', undefined, maria.token)).body;
-  ok(orgNotifs.some((n) => n.type === 'transition' && n.actionRequired), 'withdrawal notice with acknowledgement lands at the club');
+  ok(
+    orgNotifs.some((n) => n.type === 'transition' && n.actionRequired),
+    'withdrawal notice with acknowledgement lands at the club',
+  );
   const ackN = orgNotifs.find((n) => n.type === 'transition' && n.actionRequired);
   r = await j('POST', `/org/notifications/${ackN.id}/ack`, {}, maria.token);
   ok(r.status === 200 && r.body.ackedAt, 'the club acknowledges the withdrawal');
 
-  r = await j('POST', `/player/transitions/${trn.id}/place`, { orgId: 'org-eastport', note: 'Signed for the U21s' }, adeyemi.token);
-  ok(r.status === 200 && r.body.transition.status === 'placed' && r.body.transition.history.length >= 3, 'placement closes the case, history intact');
+  r = await j(
+    'POST',
+    `/player/transitions/${trn.id}/place`,
+    { orgId: 'org-eastport', note: 'Signed for the U21s' },
+    adeyemi.token,
+  );
+  ok(
+    r.status === 200 && r.body.transition.status === 'placed' && r.body.transition.history.length >= 3,
+    'placement closes the case, history intact',
+  );
   const meAfter = (await j('GET', '/player/me', undefined, adeyemi.token)).body;
-  ok((meAfter.level ?? meAfter.player?.level) === levelBefore, 'transition/placement did NOT change the player level automatically');
+  ok(
+    (meAfter.level ?? meAfter.player?.level) === levelBefore,
+    'transition/placement did NOT change the player level automatically',
+  );
 
   // Audited level review is the only path.
-  let lr = await fetch(`${BASE}/admin/players/pl-adeyemi/level-review`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ level: 'semi_pro' }) });
+  let lr = await fetch(`${BASE}/admin/players/pl-adeyemi/level-review`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ level: 'semi_pro' }),
+  });
   ok(lr.status === 400, 'level review without a reason is refused (audited)');
-  lr = await fetch(`${BASE}/admin/players/pl-adeyemi/level-review`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ level: levelBefore, reason: 'no-op review for the audit trail test' }) });
+  lr = await fetch(`${BASE}/admin/players/pl-adeyemi/level-review`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ level: levelBefore, reason: 'no-op review for the audit trail test' }),
+  });
   ok(lr.status === 200, 'authorised level review is explicit, reasoned and ledger-audited');
 
   // Guardian-controlled for minors + recipient eligibility fail-closed.
   const guniMedia = null;
-  const gt = await j('POST', `/guardian/children/pl-guni/transitions`, { pack: { mediaIds: ['media-x-not-owned'] } }, amara.token);
+  const gt = await j(
+    'POST',
+    `/guardian/children/pl-guni/transitions`,
+    { pack: { mediaIds: ['media-x-not-owned'] } },
+    amara.token,
+  );
   ok(gt.status === 400, 'a pack can only reference records the player actually owns');
 }
 
@@ -653,8 +1212,18 @@ section('the legacy representation lane is gone');
   // The legacy lane had no licence check, jurisdiction policy, conflict evaluation, consent ledger, rev or
   // idempotency, so none of its routes may exist.
   const bodies = [];
-  for (const [label, playerId] of [['a 14-year-old', 'pl-guni'], ['a 17-year-old', kid17Id], ['a 16-year-old', kid16Id], ['an adult', 'pl-adeyemi']]) {
-    const r = await j('POST', '/org/representation/propose', { playerId, representativeName: 'Alex Agent', scope: 'full' }, agency.token);
+  for (const [label, playerId] of [
+    ['a 14-year-old', 'pl-guni'],
+    ['a 17-year-old', kid17Id],
+    ['a 16-year-old', kid16Id],
+    ['an adult', 'pl-adeyemi'],
+  ]) {
+    const r = await j(
+      'POST',
+      '/org/representation/propose',
+      { playerId, representativeName: 'Alex Agent', scope: 'full' },
+      agency.token,
+    );
     ok(r.status === 404, `the removed lane creates nothing for ${label}`);
     bodies.push(JSON.stringify(r.body));
   }
@@ -664,7 +1233,13 @@ section('the legacy representation lane is gone');
   ok(new Set(bodies).size === 1, 'and the refusal is identical for a minor and an adult — it is not an age oracle');
   const r2 = await j('POST', '/org/representation/propose', { playerId: 'pl-adeyemi' }, maria.token);
   ok(r2.status === 404, 'a club gets the same: there is no such route');
-  for (const [m, u, tok] of [['GET', '/org/representation', agency.token], ['GET', '/player/representation', adeyemi.token], ['POST', '/player/representation/rep-x/confirm', adeyemi.token], ['POST', '/player/representation/rep-x/withdraw', adeyemi.token], ['POST', '/player/representation/rep-x/dispute', adeyemi.token]]) {
+  for (const [m, u, tok] of [
+    ['GET', '/org/representation', agency.token],
+    ['GET', '/player/representation', adeyemi.token],
+    ['POST', '/player/representation/rep-x/confirm', adeyemi.token],
+    ['POST', '/player/representation/rep-x/withdraw', adeyemi.token],
+    ['POST', '/player/representation/rep-x/dispute', adeyemi.token],
+  ]) {
     const r = await j(m, u, m === 'POST' ? {} : undefined, tok);
     ok(r.status === 404, `${m} ${u} is gone (404)`);
   }
@@ -672,13 +1247,20 @@ section('the legacy representation lane is gone');
   ok(adminList.status === 404, 'and so is the Trust & Safety list of legacy records');
   // The canonical lane is where a relationship comes from: a licensed agent requests it.
   const canonical = await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi' }, agency.token);
-  ok(canonical.status !== 404, `the canonical route exists (POST /org/agent/clients/request answers ${canonical.status})`);
+  ok(
+    canonical.status !== 404,
+    `the canonical route exists (POST /org/agent/clients/request answers ${canonical.status})`,
+  );
 }
 
 // ================================================================ group workspaces
 section('group workspaces');
 {
-  let gr = await fetch(`${BASE}/admin/groups`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'North West Development Group', adminOrgId: 'org-eastport' }) });
+  let gr = await fetch(`${BASE}/admin/groups`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'North West Development Group', adminOrgId: 'org-eastport' }),
+  });
   const group = (await gr.json()).group;
   ok(gr.status === 201, 'T&S onboards a federation/group with a delegated admin org');
 
@@ -694,17 +1276,36 @@ section('group workspaces');
   ok(r.status === 200, 'invited club lead accepts membership');
 
   // Preview then grant a shortlist.
-  r = await j('POST', `/org/groups/${group.id}/grants/preview`, { resourceKind: 'shortlist', resourceId: '*', toOrgIds: ['org-hackneymarsh'] }, maria.token);
-  ok(r.status === 200 && r.body.recipients[0].wouldSee.kind === 'shortlist', 'sharing preview shows exactly what each recipient would see');
-  r = await j('POST', `/org/groups/${group.id}/grants`, { resourceKind: 'shortlist', resourceId: '*', toOrgIds: ['org-hackneymarsh'], expiresDays: 30 }, maria.token);
+  r = await j(
+    'POST',
+    `/org/groups/${group.id}/grants/preview`,
+    { resourceKind: 'shortlist', resourceId: '*', toOrgIds: ['org-hackneymarsh'] },
+    maria.token,
+  );
+  ok(
+    r.status === 200 && r.body.recipients[0].wouldSee.kind === 'shortlist',
+    'sharing preview shows exactly what each recipient would see',
+  );
+  r = await j(
+    'POST',
+    `/org/groups/${group.id}/grants`,
+    { resourceKind: 'shortlist', resourceId: '*', toOrgIds: ['org-hackneymarsh'], expiresDays: 30 },
+    maria.token,
+  );
   const grant = r.body.grant;
   ok(r.status === 201, 'explicit, expiring grant created');
 
   r = await j('GET', `/org/shared/${grant.id}`, undefined, hackney.token);
   ok(r.status === 200, 'recipient reads the shared resource');
   const shared = r.body.resource;
-  ok(shared.players.every((p) => p.level !== 'pro'), 'grassroots recipient NEVER receives pro players through a grant (intersection rule)');
-  ok(shared.withheld >= 0 && (shared.withheld === 0 || shared.withheldNote.includes('never overrides')), 'withheld players are counted and explained, not silently leaked');
+  ok(
+    shared.players.every((p) => p.level !== 'pro'),
+    'grassroots recipient NEVER receives pro players through a grant (intersection rule)',
+  );
+  ok(
+    shared.withheld >= 0 && (shared.withheld === 0 || shared.withheldNote.includes('never overrides')),
+    'withheld players are counted and explained, not silently leaked',
+  );
 
   r = await j('GET', `/org/shared/${grant.id}`, undefined, agency.token);
   ok(r.status === 404, 'a non-recipient org cannot fetch the grant');
@@ -716,8 +1317,18 @@ section('group workspaces');
 
   // Aggregates + departure.
   r = await j('GET', `/org/groups/${group.id}/report`, undefined, maria.token);
-  ok(r.status === 200 && r.body.note.includes('suppressed') && JSON.stringify(r.body.activity).includes('<3'), 'group report suppresses small counts and holds no player data');
-  const g2 = (await j('POST', `/org/groups/${group.id}/grants`, { resourceKind: 'shortlist', resourceId: '*', toOrgIds: ['org-hackneymarsh'], expiresDays: 30 }, maria.token)).body.grant;
+  ok(
+    r.status === 200 && r.body.note.includes('suppressed') && JSON.stringify(r.body.activity).includes('<3'),
+    'group report suppresses small counts and holds no player data',
+  );
+  const g2 = (
+    await j(
+      'POST',
+      `/org/groups/${group.id}/grants`,
+      { resourceKind: 'shortlist', resourceId: '*', toOrgIds: ['org-hackneymarsh'], expiresDays: 30 },
+      maria.token,
+    )
+  ).body.grant;
   r = await j('POST', `/org/groups/${group.id}/leave`, {}, hackney.token);
   ok(r.status === 200 && r.body.grantsEnded >= 1, 'leaving the group ends dependent grants both ways, keeps ownership');
   r = await j('GET', `/org/shared/${g2.id}`, undefined, hackney.token);
@@ -728,19 +1339,46 @@ section('group workspaces');
 // by cursor, and a departure ends only the grants whose owner shares no group with any recipient.
 section('group workspaces as tables');
 {
-  const post = (url, body) => fetch(`${BASE}${url}`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(async (x) => ({ status: x.status, body: await x.json() }));
+  const post = (url, body) =>
+    fetch(`${BASE}${url}`, {
+      method: 'POST',
+      headers: { ...A(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(async (x) => ({ status: x.status, body: await x.json() }));
   let r = await post('/admin/groups', { name: 42, adminOrgId: 'org-eastport' });
-  ok(r.status === 400 && r.body.field === 'name', 'a group name that is not text is refused, naming the field (it crashed the route)');
+  ok(
+    r.status === 400 && r.body.field === 'name',
+    'a group name that is not text is refused, naming the field (it crashed the route)',
+  );
   r = await post('/admin/groups', { name: 'x'.repeat(101), adminOrgId: 'org-eastport' });
   ok(r.status === 400 && r.body.field === 'name', 'an over-long group name is refused (it was cut off)');
   r = await post('/admin/groups', { name: 'Agency-led group', adminOrgId: 'org-northstar' });
   ok(r.status === 403 && r.body.error === 'AGENCIES_EXCLUDED', 'an agency cannot administer a group either');
   r = await post('/admin/groups', { name: 'Coast Partnership', adminOrgId: 'org-eastport' });
-  ok(r.status === 201 && JSON.stringify(Object.keys(r.body.group).sort()) === JSON.stringify(['adminOrgIds', 'createdAt', 'id', 'memberOrgIds', 'name', 'pendingInvites', 'programmes', 'sharedTemplateIds']), 'the group is answered from an allowlist');
+  ok(
+    r.status === 201 &&
+      JSON.stringify(Object.keys(r.body.group).sort()) ===
+        JSON.stringify([
+          'adminOrgIds',
+          'createdAt',
+          'id',
+          'memberOrgIds',
+          'name',
+          'pendingInvites',
+          'programmes',
+          'sharedTemplateIds',
+        ]),
+    'the group is answered from an allowlist',
+  );
   const coast = r.body.group;
 
-  const harbour = (await j('POST', '/auth/org/login', { orgId: 'org-harbour', scoutName: 'Hal Harbour', role: 'Head of Recruitment' })).body;
-  for (const [org, tok] of [['org-hackneymarsh', hackney.token], ['org-harbour', harbour.token]]) {
+  const harbour = (
+    await j('POST', '/auth/org/login', { orgId: 'org-harbour', scoutName: 'Hal Harbour', role: 'Head of Recruitment' })
+  ).body;
+  for (const [org, tok] of [
+    ['org-hackneymarsh', hackney.token],
+    ['org-harbour', harbour.token],
+  ]) {
     r = await j('POST', `/org/groups/${coast.id}/invite`, { orgId: org }, maria.token);
     ok(r.status === 201, `${org} invited`);
     r = await j('POST', `/org/groups/${coast.id}/accept`, {}, tok);
@@ -754,29 +1392,55 @@ section('group workspaces as tables');
   r = await j('POST', `/org/groups/${coast.id}/programmes`, { name: '   ' }, maria.token);
   ok(r.status === 400 && r.body.field === 'name', 'a blank programme name is refused');
   r = await j('POST', `/org/groups/${coast.id}/programmes`, { name: 'U14 pathway', region: 'Coast' }, maria.token);
-  ok(r.status === 201 && r.body.group.programmes.at(-1).name === 'U14 pathway' && r.body.group.programmes.at(-1).region === 'Coast', 'a programme is added');
+  ok(
+    r.status === 201 &&
+      r.body.group.programmes.at(-1).name === 'U14 pathway' &&
+      r.body.group.programmes.at(-1).region === 'Coast',
+    'a programme is added',
+  );
 
-  const shareTo = (body) => j('POST', `/org/groups/${coast.id}/grants`, { resourceKind: 'shortlist', resourceId: '*', ...body }, maria.token);
+  const shareTo = (body) =>
+    j('POST', `/org/groups/${coast.id}/grants`, { resourceKind: 'shortlist', resourceId: '*', ...body }, maria.token);
   r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays: 0 });
   ok(r.status === 400 && r.body.field === 'expiresDays', 'expiresDays out of range is refused (it was clamped)');
   r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays: '30' });
   ok(r.status === 400 && r.body.field === 'expiresDays', 'expiresDays that is not a number is refused');
   r = await shareTo({ toOrgIds: 'org-hackneymarsh' });
-  ok(r.status === 400 && r.body.field === 'toOrgIds', 'toOrgIds that is not a list is refused (it read as no recipients)');
+  ok(
+    r.status === 400 && r.body.field === 'toOrgIds',
+    'toOrgIds that is not a list is refused (it read as no recipients)',
+  );
   r = await shareTo({ toOrgIds: ['org-harbour', 'org-hackneymarsh', 'org-harbour'] });
   const both = r.body.grant;
-  ok(r.status === 201 && JSON.stringify(both.toOrgIds) === JSON.stringify(['org-harbour', 'org-hackneymarsh']) && both.expiresAt - both.createdAt === 30 * 86_400_000, 'a grant to two members (each once), 30 days by default');
+  ok(
+    r.status === 201 &&
+      JSON.stringify(both.toOrgIds) === JSON.stringify(['org-harbour', 'org-hackneymarsh']) &&
+      both.expiresAt - both.createdAt === 30 * 86_400_000,
+    'a grant to two members (each once), 30 days by default',
+  );
   r = await shareTo({ toOrgIds: ['org-harbour'] });
   const harbourOnly = r.body.grant;
 
   r = await j('GET', '/org/grants?limit=1', undefined, maria.token);
-  ok(r.status === 200 && r.body.given.length === 1 && r.body.given[0].id === harbourOnly.id && typeof r.body.nextCursor === 'string', 'the given grants page newest first by cursor');
+  ok(
+    r.status === 200 &&
+      r.body.given.length === 1 &&
+      r.body.given[0].id === harbourOnly.id &&
+      typeof r.body.nextCursor === 'string',
+    'the given grants page newest first by cursor',
+  );
   const rest = await j('GET', `/org/grants?limit=100&cursor=${r.body.nextCursor}`, undefined, maria.token);
-  ok(rest.body.given.some((g) => g.id === both.id) && !rest.body.given.some((g) => g.id === harbourOnly.id), 'the next page continues where the first stopped');
+  ok(
+    rest.body.given.some((g) => g.id === both.id) && !rest.body.given.some((g) => g.id === harbourOnly.id),
+    'the next page continues where the first stopped',
+  );
   r = await j('GET', '/org/grants?limit=abc', undefined, maria.token);
   ok(r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID', 'a junk page limit is refused');
   r = await j('GET', '/org/grants/counts', undefined, harbour.token);
-  ok(r.status === 200 && r.body.received === 2 && r.body.given === 0, 'the counts route counts what the organisation can read now');
+  ok(
+    r.status === 200 && r.body.received === 2 && r.body.given === 0,
+    'the counts route counts what the organisation can read now',
+  );
 
   // The first recipient of the two-recipient grant leaves: the grant stays live for the other one.
   r = await j('POST', `/org/groups/${coast.id}/leave`, {}, harbour.token);
@@ -789,49 +1453,151 @@ section('group workspaces as tables');
   ok(r.status === 403 && r.body.error === 'GRANT_ENDED', 'the grant it alone received has ended');
 
   r = await fetch(`${BASE}/admin/groups?limit=1`, { headers: A() }).then((x) => x.json());
-  ok(r.items.length === 1 && r.items[0].id === coast.id && typeof r.nextCursor === 'string', 'Trust & Safety pages the groups newest first by cursor');
+  ok(
+    r.items.length === 1 && r.items[0].id === coast.id && typeof r.nextCursor === 'string',
+    'Trust & Safety pages the groups newest first by cursor',
+  );
   r = await j('GET', '/org/audit/export', undefined, maria.token);
-  ok(r.body.grantsGiven.some((g) => g.id === both.id && g.revokedAt === null) && r.body.grantsGiven.every((g) => g.fromOrgId === 'org-eastport'), 'the audit export lists the grants the organisation gave');
+  ok(
+    r.body.grantsGiven.some((g) => g.id === both.id && g.revokedAt === null) &&
+      r.body.grantsGiven.every((g) => g.fromOrgId === 'org-eastport'),
+    'the audit export lists the grants the organisation gave',
+  );
 }
 
 // ================================================================ budgets
 section('budget scenarios over the API');
 {
   const kase = (await j('POST', '/org/cases', { playerId: 'pl-svensson' }, maria.token)).body.case;
-  let r = await j('POST', `/org/cases/${kase.id}/budget/scenarios`, {
-    label: 'Base offer', currency: 'GBP', termMonths: 12,
-    lines: [
-      { kind: 'wage', label: 'Weekly wage', amountMinor: 120000, currency: 'GBP', schedule: 'weekly', confirmed: true },
-      { kind: 'bonus', label: 'Appearance bonus', amountMinor: 500000, currency: 'GBP', schedule: 'one_off', confirmed: false, conditional: { assumption: '20+ league appearances' } },
-      { kind: 'fee', label: 'Agent fee (EUR)', amountMinor: 300000, currency: 'EUR', schedule: 'one_off', confirmed: true },
-    ],
-  }, scout2.token);
+  let r = await j(
+    'POST',
+    `/org/cases/${kase.id}/budget/scenarios`,
+    {
+      label: 'Base offer',
+      currency: 'GBP',
+      termMonths: 12,
+      lines: [
+        {
+          kind: 'wage',
+          label: 'Weekly wage',
+          amountMinor: 120000,
+          currency: 'GBP',
+          schedule: 'weekly',
+          confirmed: true,
+        },
+        {
+          kind: 'bonus',
+          label: 'Appearance bonus',
+          amountMinor: 500000,
+          currency: 'GBP',
+          schedule: 'one_off',
+          confirmed: false,
+          conditional: { assumption: '20+ league appearances' },
+        },
+        {
+          kind: 'fee',
+          label: 'Agent fee (EUR)',
+          amountMinor: 300000,
+          currency: 'EUR',
+          schedule: 'one_off',
+          confirmed: true,
+        },
+      ],
+    },
+    scout2.token,
+  );
   ok(r.status === 403 && r.body.error === 'FINANCE_ROLE_REQUIRED', 'a plain scout cannot see or create deal amounts');
-  r = await j('POST', `/org/cases/${kase.id}/budget/scenarios`, {
-    label: 'Base offer', currency: 'GBP', termMonths: 12,
-    lines: [
-      { kind: 'wage', label: 'Weekly wage', amountMinor: 120000, currency: 'GBP', schedule: 'weekly', confirmed: true },
-      { kind: 'bonus', label: 'Appearance bonus', amountMinor: 500000, currency: 'GBP', schedule: 'one_off', confirmed: false, conditional: { assumption: '20+ league appearances' } },
-      { kind: 'fee', label: 'Agent fee (EUR)', amountMinor: 300000, currency: 'EUR', schedule: 'one_off', confirmed: true },
-    ],
-  }, maria.token);
+  r = await j(
+    'POST',
+    `/org/cases/${kase.id}/budget/scenarios`,
+    {
+      label: 'Base offer',
+      currency: 'GBP',
+      termMonths: 12,
+      lines: [
+        {
+          kind: 'wage',
+          label: 'Weekly wage',
+          amountMinor: 120000,
+          currency: 'GBP',
+          schedule: 'weekly',
+          confirmed: true,
+        },
+        {
+          kind: 'bonus',
+          label: 'Appearance bonus',
+          amountMinor: 500000,
+          currency: 'GBP',
+          schedule: 'one_off',
+          confirmed: false,
+          conditional: { assumption: '20+ league appearances' },
+        },
+        {
+          kind: 'fee',
+          label: 'Agent fee (EUR)',
+          amountMinor: 300000,
+          currency: 'EUR',
+          schedule: 'one_off',
+          confirmed: true,
+        },
+      ],
+    },
+    maria.token,
+  );
   const scn = r.body.scenario;
-  ok(r.status === 201 && r.body.honest.includes('never invents market values'), 'scenario created; no invented values, no sell-on model');
+  ok(
+    r.status === 201 && r.body.honest.includes('never invents market values'),
+    'scenario created; no invented values, no sell-on model',
+  );
   ok(r.body.totals.combined.unavailable === true, 'GBP+EUR without a rate: combined honestly unavailable');
-  r = await j('PUT', `/org/cases/${kase.id}/budget/scenarios/${scn.id}`, { fxAssumptions: [{ from: 'EUR', to: 'GBP', rate: '0.85', source: 'club treasury 2026-09-01', date: '2026-09-01' }] }, maria.token);
-  ok(r.body.totals.combined.viaFx === true && r.body.totals.combined.confirmedMinor === 120000 * 52 + 255000, 'manual labelled rate combines: 52×1200 + 2550 = £8,790.00 confirmed');
+  r = await j(
+    'PUT',
+    `/org/cases/${kase.id}/budget/scenarios/${scn.id}`,
+    {
+      fxAssumptions: [{ from: 'EUR', to: 'GBP', rate: '0.85', source: 'club treasury 2026-09-01', date: '2026-09-01' }],
+    },
+    maria.token,
+  );
+  ok(
+    r.body.totals.combined.viaFx === true && r.body.totals.combined.confirmedMinor === 120000 * 52 + 255000,
+    'manual labelled rate combines: 52×1200 + 2550 = £8,790.00 confirmed',
+  );
   ok(r.body.totals.conditionalLines.length === 1, 'conditional bonus listed separately, excluded from totals');
 
-  const scn2 = (await j('POST', `/org/cases/${kase.id}/budget/scenarios`, { label: 'Stretch offer', currency: 'GBP', termMonths: 24, lines: [{ kind: 'wage', label: 'w', amountMinor: 150000, currency: 'GBP', schedule: 'weekly', confirmed: false }] }, maria.token)).body.scenario;
+  const scn2 = (
+    await j(
+      'POST',
+      `/org/cases/${kase.id}/budget/scenarios`,
+      {
+        label: 'Stretch offer',
+        currency: 'GBP',
+        termMonths: 24,
+        lines: [
+          { kind: 'wage', label: 'w', amountMinor: 150000, currency: 'GBP', schedule: 'weekly', confirmed: false },
+        ],
+      },
+      maria.token,
+    )
+  ).body.scenario;
   r = await j('PUT', `/org/cases/${kase.id}/budget/scenarios/${scn2.id}`, { termMonths: 36 }, maria.token);
   const both = (await j('GET', `/org/cases/${kase.id}/budget`, undefined, maria.token)).body.scenarios;
   ok(both.find((x) => x.id === scn.id).termMonths === 12, 'editing one scenario leaves the other untouched');
 
   r = await j('POST', `/org/cases/${kase.id}/budget/scenarios/${scn.id}/approve`, {}, maria.token);
-  ok(r.status === 200 && r.body.scenario.approval.by === 'Maria Keane' && r.body.scenario.approval.version === r.body.scenario.version, 'approval is attributable and version-specific');
+  ok(
+    r.status === 200 &&
+      r.body.scenario.approval.by === 'Maria Keane' &&
+      r.body.scenario.approval.version === r.body.scenario.version,
+    'approval is attributable and version-specific',
+  );
   r = await j('PUT', `/org/cases/${kase.id}/budget/scenarios/${scn.id}`, { label: 'Base offer v2' }, maria.token);
   ok(r.body.scenario.approval.superseded === true, 'editing after approval marks the approval superseded');
-  r = await j('POST', `/org/cases/${kase.id}/budget/scenarios/${scn.id}/actuals`, { lineId: 'ln-1', amountMinor: 118000 }, maria.token);
+  r = await j(
+    'POST',
+    `/org/cases/${kase.id}/budget/scenarios/${scn.id}/actuals`,
+    { lineId: 'ln-1', amountMinor: 118000 },
+    maria.token,
+  );
   ok(r.status === 200 && r.body.actuals.length === 1, 'actual-versus-planned recorded per line');
 }
 
@@ -840,8 +1606,15 @@ section('F12D — backup and isolated restore');
 {
   let r = await fetch(`${BASE}/admin/backup`, { method: 'POST', headers: A() });
   const backup = await r.json();
-  ok(r.status === 201 && backup.manifest.files[0].path === 'scoutbox.db' && backup.manifest.files.every((f) => f.sha256), 'backup written with checksummed manifest');
-  r = await fetch(`${BASE}/admin/backup/verify`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ dir: path.basename(backup.dir) }) });
+  ok(
+    r.status === 201 && backup.manifest.files[0].path === 'scoutbox.db' && backup.manifest.files.every((f) => f.sha256),
+    'backup written with checksummed manifest',
+  );
+  r = await fetch(`${BASE}/admin/backup/verify`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dir: path.basename(backup.dir) }),
+  });
   ok((await r.json()).ok === true, 'backup verifies against its manifest');
 
   const restoreDir = mkdtempSync(path.join(tmpdir(), 'sbx-restore-'));
@@ -849,10 +1622,19 @@ section('F12D — backup and isolated restore');
   const restored = await startServer(RESTORE_PORT, restoreDir);
   const rz = await (await fetch(`http://localhost:${RESTORE_PORT}/readyz`)).json();
   ok(rz.ready === true && rz.players >= 14, 'restored server boots from the backup in a SEPARATE empty directory');
-  const rl = await fetch(`http://localhost:${RESTORE_PORT}/auth/org/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Coach', platform: 'grassroots' }) });
+  const rl = await fetch(`http://localhost:${RESTORE_PORT}/auth/org/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orgId: 'org-hackneymarsh', scoutName: 'Dee Coach', platform: 'grassroots' }),
+  });
   const rlb = await rl.json();
-  const rq = await fetch(`http://localhost:${RESTORE_PORT}/org/players`, { headers: { Authorization: `Bearer ${rlb.token}` } });
-  ok(rl.status === 200 && rq.status === 200, 'representative workflow (login + player list) works on the RESTORED copy');
+  const rq = await fetch(`http://localhost:${RESTORE_PORT}/org/players`, {
+    headers: { Authorization: `Bearer ${rlb.token}` },
+  });
+  ok(
+    rl.status === 200 && rq.status === 200,
+    'representative workflow (login + player list) works on the RESTORED copy',
+  );
   restored.kill('SIGTERM');
 }
 
@@ -860,9 +1642,18 @@ section('F12D — backup and isolated restore');
 section('restart durability (SIGKILL)');
 {
   // Queue an email dispatch, then kill -9 before it can finish retrying.
-  await fetch(`${BASE}/admin/delivery/inject-failure`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ channel: 'email', count: 2 }) });
-  const t4 = (await j('POST', '/org/support', { subject: 'Durability ticket', body: 'x', refs: [] }, inviteUserToken)).body.ticket;
-  await fetch(`${BASE}/admin/support/${t4.id}/reply`, { method: 'POST', headers: { ...A(), 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Survive this.' }) });
+  await fetch(`${BASE}/admin/delivery/inject-failure`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ channel: 'email', count: 2 }),
+  });
+  const t4 = (await j('POST', '/org/support', { subject: 'Durability ticket', body: 'x', refs: [] }, inviteUserToken))
+    .body.ticket;
+  await fetch(`${BASE}/admin/support/${t4.id}/reply`, {
+    method: 'POST',
+    headers: { ...A(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'Survive this.' }),
+  });
   await sleep(900); // let the dispatch row be created + first failed attempt persist
   server.kill('SIGKILL');
   await sleep(400);
@@ -870,14 +1661,26 @@ section('restart durability (SIGKILL)');
   let recovered = false;
   for (let i = 0; i < 50; i++) {
     const del = await (await fetch(`${BASE}/admin/delivery`, { headers: A() })).json();
-    const row = del.recent.find((d) => d.channel === 'email' && d.to === 'newscout@eastport.example' && d.status === 'accepted' && d.attempts.length >= 1);
-    if (row) { recovered = true; break; }
+    const row = del.recent.find(
+      (d) =>
+        d.channel === 'email' &&
+        d.to === 'newscout@eastport.example' &&
+        d.status === 'accepted' &&
+        d.attempts.length >= 1,
+    );
+    if (row) {
+      recovered = true;
+      break;
+    }
     await sleep(300);
   }
   ok(recovered, 'queued delivery work survives SIGKILL and completes after restart');
   const trns = await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' });
   const list = await j('GET', '/player/transitions', undefined, trns.body.token);
-  ok(list.body.items.some((t) => t.status === 'placed'), 'transition history intact across the crash');
+  ok(
+    list.body.items.some((t) => t.status === 'placed'),
+    'transition history intact across the crash',
+  );
 }
 
 console.log(`\noperations/clubOperations: ${process.exitCode ? 'FAILURES above —' : 'all'} ${passed} checks passed`);

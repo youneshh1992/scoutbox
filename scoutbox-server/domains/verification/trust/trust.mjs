@@ -6,15 +6,17 @@ import { effectiveStatus, assuranceForClaim } from '../claims/shared.mjs';
 import { agreementInForce } from '../../agents/core/shared.mjs';
 import { PROVIDERS } from '../../development/boxcam/drills.mjs';
 import {
-  POLICY, TRUST_SCORE_POLICY_VERSION, calculateTrustScore, safeTrustProjection,
-  trustSummary, trustSnapshot, TRUST_DISCLAIMER,
+  POLICY,
+  TRUST_SCORE_POLICY_VERSION,
+  calculateTrustScore,
+  safeTrustProjection,
+  trustSummary,
+  trustSnapshot,
+  TRUST_DISCLAIMER,
 } from './shared.mjs';
 
 export function registerTrust(ctx) {
-  const {
-    byId, playerRouter, guardianRouter, orgRouter, adminRouter,
-    findPlayer, isBlocked, vmetric,
-  } = ctx;
+  const { byId, playerRouter, guardianRouter, orgRouter, adminRouter, findPlayer, isBlocked, vmetric } = ctx;
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
@@ -24,7 +26,9 @@ export function registerTrust(ctx) {
   // ------------------------------------------------- source maps
   /** Falls back to `identityVerified` only when no claim exists, and then reports it as a ScoutBox review. */
   function identitySource(player) {
-    const claims = ctx.verificationReads.claims.forSubjectId(player.id).filter((c) => c.claimType === 'PERSON_IDENTITY');
+    const claims = ctx.verificationReads.claims
+      .forSubjectId(player.id)
+      .filter((c) => c.claimType === 'PERSON_IDENTITY');
     let best = null;
     for (const c of claims) {
       const eff = effectiveStatus(c, { org: c.organisationId ? byId.org(c.organisationId) : null, now: Date.now() });
@@ -40,7 +44,8 @@ export function registerTrust(ctx) {
 
   function historySource(full) {
     return (full?.history?.rows ?? []).map((r, i) => ({
-      key: r.source?.id ? `hist:${r.source.type ?? 'row'}:${r.source.id}`
+      key: r.source?.id
+        ? `hist:${r.source.type ?? 'row'}:${r.source.id}`
         : `hist:${r.org?.id ?? r.title?.org ?? 'club'}:${r.from ?? ''}:${r.to ?? ''}:${i > 0 && !r.org?.id ? i : ''}`,
       provenance: r.provenance,
       current: !!r.current,
@@ -74,19 +79,26 @@ export function registerTrust(ctx) {
   }
 
   function evidenceSource(player) {
-    return ctx.scoutingReads.evidence.currentForPlayer(player.id)
+    return ctx.scoutingReads.evidence
+      .currentForPlayer(player.id)
       .filter((e) => !(e.expiresAt && e.expiresAt < Date.now()))
       .map((e) => ({
         key: `ev:${e.id}`,
-        provenance: e.verification?.status === 'club_assessed' ? 'verified_club_confirmed'
-          : e.verification?.status === 'coach_confirmed' ? 'verified_coach_confirmed'
-            : e.source?.kind === 'guardian' ? 'guardian_submitted' : 'player_submitted',
+        provenance:
+          e.verification?.status === 'club_assessed'
+            ? 'verified_club_confirmed'
+            : e.verification?.status === 'coach_confirmed'
+              ? 'verified_coach_confirmed'
+              : e.source?.kind === 'guardian'
+                ? 'guardian_submitted'
+                : 'player_submitted',
         recordedAt: e.recordedAt ?? 0,
       }));
   }
 
   function boxCamSource(player) {
-    return ctx.boxCamReads.sessions.forPlayer(player.id)
+    return ctx.boxCamReads.sessions
+      .forPlayer(player.id)
       .filter((s) => s.finalizedAt)
       .map((s) => ({
         key: `box:${s.id}`,
@@ -101,30 +113,30 @@ export function registerTrust(ctx) {
   function combineSource(player) {
     const attempts = [...ctx.boxCamReads.attempts.forPlayer(player.id)].reverse();
     const sessions = new Map(ctx.boxCamReads.sessions.byIds(attempts.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
-    return attempts
-      .map((a) => {
-        const s = sessions.get(a.boxSessionId);
-        const invalidated = !!s && s.verificationState === 'invalidated';
-        return {
-          key: `catt:${a.id}`,
-          protocolId: a.protocolId, protocolVersion: a.protocolVersion,
-          combineState: invalidated ? 'invalidated' : a.combineState,
-          simulated: !!PROVIDERS[a.provider]?.testOnly,
-        };
-      });
+    return attempts.map((a) => {
+      const s = sessions.get(a.boxSessionId);
+      const invalidated = !!s && s.verificationState === 'invalidated';
+      return {
+        key: `catt:${a.id}`,
+        protocolId: a.protocolId,
+        protocolVersion: a.protocolVersion,
+        combineState: invalidated ? 'invalidated' : a.combineState,
+        simulated: !!PROVIDERS[a.provider]?.testOnly,
+      };
+    });
   }
 
   function referenceSource(player) {
-    return ctx.verificationReads.references.activeForPlayer(player.id)
-      .map((r) => {
-        const claim = ctx.verificationReads.claims.byId(r.provenanceSnapshot?.claimId);
-        return { key: `ref:${r.id}`, verified: !!claim && claim.status === 'verified' };
-      });
+    return ctx.verificationReads.references.activeForPlayer(player.id).map((r) => {
+      const claim = ctx.verificationReads.claims.byId(r.provenanceSnapshot?.claimId);
+      return { key: `ref:${r.id}`, verified: !!claim && claim.status === 'verified' };
+    });
   }
 
   /** Attribution only: the rating content is never read. */
   function assessmentSource(player) {
-    return ctx.scoutingReads.assessments.forPlayer(player.id)
+    return ctx.scoutingReads.assessments
+      .forPlayer(player.id)
       .filter((a) => a.state !== 'draft')
       .map((a) => ({ key: `asmt:${a.id}`, verifiedSource: !!byId.org(a.orgId)?.verified }));
   }
@@ -132,7 +144,11 @@ export function registerTrust(ctx) {
   /** `full` is an already-built light Passport assembly when the caller has one. */
   function buildFor(player, { full = null } = {}) {
     // Only the Passport's club history is a trust source, so without an assembly the history is read alone.
-    const assembled = full ?? (ctx.passportHistoryFor ? { history: ctx.passportHistoryFor(player) } : null) ?? ctx.assemblePassport?.(player, { light: true }) ?? null;
+    const assembled =
+      full ??
+      (ctx.passportHistoryFor ? { history: ctx.passportHistoryFor(player) } : null) ??
+      ctx.assemblePassport?.(player, { light: true }) ??
+      null;
     return calculateTrustScore({
       playerContext: { isAdult: isAdult(player) },
       identity: identitySource(player),
@@ -154,7 +170,9 @@ export function registerTrust(ctx) {
   ctx.safeTrustProjection = safeTrustProjection;
 
   const band = (p) => p.band;
-  const countBand = (p) => { vmetric?.(`trust_band_${band(p)}`); };
+  const countBand = (p) => {
+    vmetric?.(`trust_band_${band(p)}`);
+  };
 
   // ================================================================ PLAYER
   playerRouter.get('/trust-profile', (req, res) => {
@@ -187,7 +205,8 @@ export function registerTrust(ctx) {
   // A Trust Score of 100 opens no door that a score of 0 would not.
   orgRouter.get('/players/:id/trust-profile', (req, res) => {
     const p = findPlayer(req.params.id);
-    if (!p || !orgCanSee(req.org, p)) return res.status(p ? 403 : 404).json({ error: p ? 'NOT_VISIBLE' : 'PLAYER_NOT_FOUND' });
+    if (!p || !orgCanSee(req.org, p))
+      return res.status(p ? 403 : 404).json({ error: p ? 'NOT_VISIBLE' : 'PLAYER_NOT_FOUND' });
     const viewer = req.org.type === 'grassroots' ? 'grassroots_club' : 'pro_club';
     vmetric?.('trust_profile_viewed');
     res.json({ playerId: p.id, trust: safeTrustProjection(buildFor(p), viewer) });
@@ -195,7 +214,11 @@ export function registerTrust(ctx) {
 
   /** Returned in the order requested, never ranked. */
   orgRouter.get('/trust-summaries', (req, res) => {
-    const ids = String(req.query.playerIds ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 100);
+    const ids = String(req.query.playerIds ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 100);
     const items = [];
     for (const id of ids) {
       const p = findPlayer(id);
@@ -223,12 +246,22 @@ export function registerTrust(ctx) {
     });
   });
 
-  adminRouter.get('/trust-policy', (_req, res) => res.json({
-    policyVersion: TRUST_SCORE_POLICY_VERSION, weights: POLICY.weights, bands: POLICY.bands,
-    curves: { relationships: POLICY.relationships.curve, combineProtocols: POLICY.combine.protocolCurve, boxCam: POLICY.evidence.boxCamCurve, evidenceRecords: POLICY.evidence.recordsCurve, references: POLICY.references.curve },
-    subCaps: { evidenceRecords: POLICY.evidence.recordsSubCap, boxCam: POLICY.evidence.boxCamSubCap },
-    disclaimer: TRUST_DISCLAIMER,
-  }));
+  adminRouter.get('/trust-policy', (_req, res) =>
+    res.json({
+      policyVersion: TRUST_SCORE_POLICY_VERSION,
+      weights: POLICY.weights,
+      bands: POLICY.bands,
+      curves: {
+        relationships: POLICY.relationships.curve,
+        combineProtocols: POLICY.combine.protocolCurve,
+        boxCam: POLICY.evidence.boxCamCurve,
+        evidenceRecords: POLICY.evidence.recordsCurve,
+        references: POLICY.references.curve,
+      },
+      subCaps: { evidenceRecords: POLICY.evidence.recordsSubCap, boxCam: POLICY.evidence.boxCamSubCap },
+      disclaimer: TRUST_DISCLAIMER,
+    }),
+  );
 
   return { buildFor };
 }

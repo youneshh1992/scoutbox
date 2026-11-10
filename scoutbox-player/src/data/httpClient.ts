@@ -1,12 +1,38 @@
 // Live data client — talks to scoutbox-server (EXPO_PUBLIC_API_URL).
 
 import type {
-  PlayerClient, SignupInput, Me, AttendanceInput, DemoIdentity, ReportInput, ChildInput,
-  Channel, AppNotification, Insights, FiledReport, PlayerFeedItem, PlayerCV, GuardianDigest,
-  NotificationPrefs, DirectoryClub, ProgrammeInfo, Benchmarks, Opportunities, GuardianOpenTrial, SeasonWrap,
+  PlayerClient,
+  SignupInput,
+  Me,
+  AttendanceInput,
+  DemoIdentity,
+  ReportInput,
+  ChildInput,
+  Channel,
+  AppNotification,
+  Insights,
+  FiledReport,
+  PlayerFeedItem,
+  PlayerCV,
+  GuardianDigest,
+  NotificationPrefs,
+  DirectoryClub,
+  ProgrammeInfo,
+  Benchmarks,
+  Opportunities,
+  GuardianOpenTrial,
+  SeasonWrap,
 } from './types';
 import { ClientError } from './types';
-import type { Availability, ContractStatus, InboxRequest, ChildInboxItem, Guardian, GuardianInboxRequest, Drill } from '../domain/types';
+import type {
+  Availability,
+  ContractStatus,
+  InboxRequest,
+  ChildInboxItem,
+  Guardian,
+  GuardianInboxRequest,
+  Drill,
+} from '../domain/types';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -19,19 +45,27 @@ try {
   if (typeof localStorage !== 'undefined') {
     for (const [k, v] of Object.entries(JSON.parse(localStorage.getItem(TOKENS_KEY) ?? '{}'))) tokens.set(k, String(v));
   }
-} catch { /* fresh start */ }
+} catch {
+  /* fresh start */
+}
 function rememberToken(id: string, token: string | undefined) {
   if (!token) return;
   tokens.set(id, token);
   try {
-    if (typeof localStorage !== 'undefined') localStorage.setItem(TOKENS_KEY, JSON.stringify(Object.fromEntries(tokens)));
-  } catch { /* memory copy still works */ }
+    if (typeof localStorage !== 'undefined')
+      localStorage.setItem(TOKENS_KEY, JSON.stringify(Object.fromEntries(tokens)));
+  } catch {
+    /* memory copy still works */
+  }
 }
 function forgetToken(id: string) {
   tokens.delete(id);
   try {
-    if (typeof localStorage !== 'undefined') localStorage.setItem(TOKENS_KEY, JSON.stringify(Object.fromEntries(tokens)));
-  } catch { /* memory copy already gone */ }
+    if (typeof localStorage !== 'undefined')
+      localStorage.setItem(TOKENS_KEY, JSON.stringify(Object.fromEntries(tokens)));
+  } catch {
+    /* memory copy already gone */
+  }
 }
 const authHeader = (id?: string): Record<string, string> =>
   id && tokens.has(id) ? { authorization: `Bearer ${tokens.get(id)}` } : {};
@@ -106,14 +140,24 @@ export const httpClient: PlayerClient = {
     const token = tokens.get(accountId);
     forgetToken(accountId);
     if (!token) return;
-    try { await fetch(`${API_URL}/auth/logout`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, keepalive: true }); } catch { /* offline: the server lifetime ends it */ }
+    try {
+      await fetch(`${API_URL}/auth/logout`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+        keepalive: true,
+      });
+    } catch {
+      /* offline: the server lifetime ends it */
+    }
   },
 
   getMe: (playerId) => request<Me>('/player/me', playerId),
 
   // The server pages the Inbox by cursor ({ items, nextCursor }, newest 50 first). Only the first page is read here: the
   // Inbox will need a "load more" that passes `?cursor=<nextCursor>` (not built yet, by decision).
-  getInbox: async (playerId) => (await request<{ items: (InboxRequest | ChildInboxItem)[]; nextCursor: string | null }>('/player/inbox', playerId)).items,
+  getInbox: async (playerId) =>
+    (await request<{ items: (InboxRequest | ChildInboxItem)[]; nextCursor: string | null }>('/player/inbox', playerId))
+      .items,
 
   pair: async (code) => {
     const r = await request<{ playerId: string; name: string; token?: string }>('/auth/player/pair', undefined, {
@@ -134,14 +178,20 @@ export const httpClient: PlayerClient = {
     request<void>('/player/academyplus', playerId, { method: 'POST', body: JSON.stringify({ enabled }) }),
 
   addMedia: (playerId, title, dataUrl, attendanceId) =>
-    request<void>('/player/media', playerId, { method: 'POST', body: JSON.stringify({ title, kind: 'video', dataUrl, attendanceId }) }),
+    request<void>('/player/media', playerId, {
+      method: 'POST',
+      body: JSON.stringify({ title, kind: 'video', dataUrl, attendanceId }),
+    }),
 
   mediaUrl: (path) => (path ? (path.startsWith('data:') ? path : `${API_URL}${path}`) : null),
 
   getChannels: (playerId) => request<Channel[]>('/player/channels', playerId),
 
   sendMessage: (playerId, channelId, text, attachMediaId, clientMsgId) =>
-    request<void>(`/player/channels/${channelId}/messages`, playerId, { method: 'POST', body: JSON.stringify({ text, attachMediaId, clientMsgId }) }),
+    request<void>(`/player/channels/${channelId}/messages`, playerId, {
+      method: 'POST',
+      body: JSON.stringify({ text, attachMediaId, clientMsgId }),
+    }),
 
   markChannelRead: (playerId, channelId) =>
     request<void>(`/player/channels/${channelId}/read`, playerId, { method: 'POST' }),
@@ -155,8 +205,7 @@ export const httpClient: PlayerClient = {
 
   getNotifications: (playerId) => request<AppNotification[]>('/player/notifications', playerId),
 
-  markNotificationsRead: (playerId) =>
-    request<void>('/player/notifications/read', playerId, { method: 'POST' }),
+  markNotificationsRead: (playerId) => request<void>('/player/notifications/read', playerId, { method: 'POST' }),
 
   getInsights: (playerId) => request<Insights>('/player/insights', playerId),
 
@@ -183,24 +232,25 @@ export const httpClient: PlayerClient = {
   getDrills: (playerId) => request<Drill[]>('/player/drills', playerId),
 
   completeDrill: (playerId, drillId, value, videoDataUrl) =>
-    request<void>(`/player/drills/${drillId}/complete`, playerId, { method: 'POST', body: JSON.stringify({ value, videoDataUrl }) }),
+    request<void>(`/player/drills/${drillId}/complete`, playerId, {
+      method: 'POST',
+      body: JSON.stringify({ value, videoDataUrl }),
+    }),
 
-  agingUpComplete: (playerId) =>
-    request<void>('/player/aging-up/complete', playerId, { method: 'POST' }),
+  agingUpComplete: (playerId) => request<void>('/player/aging-up/complete', playerId, { method: 'POST' }),
 
-  getPrefs: (playerId) =>
-    request<{ prefs: NotificationPrefs | null }>('/player/prefs', playerId).then((r) => r.prefs),
+  getPrefs: (playerId) => request<{ prefs: NotificationPrefs | null }>('/player/prefs', playerId).then((r) => r.prefs),
 
   setPrefs: (playerId, prefs) =>
     request<void>('/player/prefs', playerId, { method: 'POST', body: JSON.stringify(prefs) }),
 
   getExport: (playerId) => request<Record<string, unknown>>('/player/export', playerId),
 
-  deleteAccount: (playerId) =>
-    request<void>('/player/account', playerId, { method: 'DELETE' }),
+  deleteAccount: (playerId) => request<void>('/player/account', playerId, { method: 'DELETE' }),
 
   // The directory pages by cursor: the first page is read; "load more" (nextCursor) is still needed.
-  getDirectory: async () => (await request<{ items: DirectoryClub[]; nextCursor: string | null }>('/orgs/directory')).items,
+  getDirectory: async () =>
+    (await request<{ items: DirectoryClub[]; nextCursor: string | null }>('/orgs/directory')).items,
 
   // ---- the Grassroots journey ----
   getProgramme: (playerId) => request<ProgrammeInfo>('/player/programme', playerId),
@@ -222,7 +272,10 @@ export const httpClient: PlayerClient = {
     request<void>('/player/first-team-seeker', playerId, { method: 'POST', body: JSON.stringify({ enabled }) }),
 
   requestVouch: (playerId, coachName, coachEmail, role) =>
-    request<void>('/player/vouches/request', playerId, { method: 'POST', body: JSON.stringify({ coachName, coachEmail, role }) }),
+    request<void>('/player/vouches/request', playerId, {
+      method: 'POST',
+      body: JSON.stringify({ coachName, coachEmail, role }),
+    }),
 
   getSeasonWrap: (playerId) => request<SeasonWrap>('/player/season-wrap', playerId),
 
@@ -234,19 +287,31 @@ export const httpClient: PlayerClient = {
 
   // ---- guardian surface ----
   guardianSignup: async (name, email, password) => {
-    const r = await request<{ guardianId: string; token?: string; devEmailCode?: string }>('/auth/guardian/signup', undefined, {
-      method: 'POST', body: JSON.stringify({ name, email, password }),
-    });
+    const r = await request<{ guardianId: string; token?: string; devEmailCode?: string }>(
+      '/auth/guardian/signup',
+      undefined,
+      {
+        method: 'POST',
+        body: JSON.stringify({ name, email, password }),
+      },
+    );
     rememberToken(r.guardianId, r.token);
     return r;
   },
 
   guardianVerifyEmail: (guardianId, code) =>
-    request<void>('/auth/guardian/verify-email', undefined, { method: 'POST', body: JSON.stringify({ guardianId, code }) }),
+    request<void>('/auth/guardian/verify-email', undefined, {
+      method: 'POST',
+      body: JSON.stringify({ guardianId, code }),
+    }),
 
   guardianLogin: async (idOrEmail, password) => {
     const body = idOrEmail.includes('@') ? { email: idOrEmail, password } : { guardianId: idOrEmail, password };
-    const r = await request<{ guardianId: string; guardian: Guardian; token?: string }>('/auth/guardian/login', undefined, { method: 'POST', body: JSON.stringify(body) });
+    const r = await request<{ guardianId: string; guardian: Guardian; token?: string }>(
+      '/auth/guardian/login',
+      undefined,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
     rememberToken(r.guardianId, r.token);
     return r;
   },
@@ -254,38 +319,67 @@ export const httpClient: PlayerClient = {
   guardianMe: (guardianId) => guardianRequest<Guardian>('/guardian/me', guardianId),
 
   guardianVerifyId: (guardianId, documentType, documentRef) =>
-    guardianRequest<void>('/guardian/verify-id', guardianId, { method: 'POST', body: JSON.stringify({ documentType, documentRef }) }),
+    guardianRequest<void>('/guardian/verify-id', guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ documentType, documentRef }),
+    }),
 
   guardianAcceptDisclaimer: (guardianId) =>
-    guardianRequest<void>('/guardian/disclaimer', guardianId, { method: 'POST', body: JSON.stringify({ accepted: true }) }),
+    guardianRequest<void>('/guardian/disclaimer', guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ accepted: true }),
+    }),
 
   guardianChildren: (guardianId) => guardianRequest<Me[]>('/guardian/children', guardianId),
 
   guardianAddChild: (guardianId, input: ChildInput) =>
-    guardianRequest<{ playerId: string }>('/guardian/children', guardianId, { method: 'POST', body: JSON.stringify(input) }),
+    guardianRequest<{ playerId: string }>('/guardian/children', guardianId, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
 
   // Paged like the player Inbox (newest 50 first); only the first page is read, a "load more" is not built yet (by decision).
-  guardianInbox: async (guardianId) => (await guardianRequest<{ items: GuardianInboxRequest[]; nextCursor: string | null }>('/guardian/inbox', guardianId)).items,
+  guardianInbox: async (guardianId) =>
+    (await guardianRequest<{ items: GuardianInboxRequest[]; nextCursor: string | null }>('/guardian/inbox', guardianId))
+      .items,
 
   guardianRespond: (guardianId, requestId, accept, chosenSlot, message) =>
-    guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, { method: 'POST', body: JSON.stringify({ accept, chosenSlot, ...(message ? { message } : {}) }) }),
+    guardianRequest<void>(`/guardian/requests/${requestId}/respond`, guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ accept, chosenSlot, ...(message ? { message } : {}) }),
+    }),
 
   // Paged by cursor, newest 50 first; only the first page is read, a "load more" is not built yet (by decision).
-  guardianLog: async (guardianId) => (await guardianRequest<{ items: { id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[]; nextCursor: string | null }>('/guardian/log', guardianId)).items,
+  guardianLog: async (guardianId) =>
+    (
+      await guardianRequest<{
+        items: { id: string; ts: number; type: string; orgName: string; scoutName: string; playerId: string }[];
+        nextCursor: string | null;
+      }>('/guardian/log', guardianId)
+    ).items,
 
   guardianSetMedicalShared: (guardianId, childId, shared) =>
-    guardianRequest<void>(`/guardian/children/${childId}/medical/share`, guardianId, { method: 'POST', body: JSON.stringify({ shared }) }),
+    guardianRequest<void>(`/guardian/children/${childId}/medical/share`, guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ shared }),
+    }),
 
   guardianReport: (guardianId, input: ReportInput) =>
     guardianRequest<void>('/guardian/report', guardianId, { method: 'POST', body: JSON.stringify(input) }),
 
   guardianBlock: (guardianId, orgId, childId, reason) =>
-    guardianRequest<void>('/guardian/block', guardianId, { method: 'POST', body: JSON.stringify({ orgId, playerId: childId, reason }) }),
+    guardianRequest<void>('/guardian/block', guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ orgId, playerId: childId, reason }),
+    }),
 
   guardianChannels: (guardianId) => guardianRequest<Channel[]>('/guardian/channels', guardianId),
 
   guardianSendMessage: (guardianId, channelId, text, attachMediaId, clientMsgId) =>
-    guardianRequest<void>(`/guardian/channels/${channelId}/messages`, guardianId, { method: 'POST', body: JSON.stringify({ text, attachMediaId, clientMsgId }) }),
+    guardianRequest<void>(`/guardian/channels/${channelId}/messages`, guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ text, attachMediaId, clientMsgId }),
+    }),
 
   guardianMarkChannelRead: (guardianId, channelId) =>
     guardianRequest<void>(`/guardian/channels/${channelId}/read`, guardianId, { method: 'POST' }),
@@ -304,15 +398,23 @@ export const httpClient: PlayerClient = {
     guardianRequest<Insights>(`/guardian/children/${childId}/insights`, guardianId),
 
   guardianSetChildAvailability: (guardianId, childId, availability) =>
-    guardianRequest<void>(`/guardian/children/${childId}/availability`, guardianId, { method: 'POST', body: JSON.stringify({ availability }) }),
+    guardianRequest<void>(`/guardian/children/${childId}/availability`, guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ availability }),
+    }),
 
   guardianAddCoGuardian: (guardianId, name, email) =>
-    guardianRequest<void>('/guardian/coguardian', guardianId, { method: 'POST', body: JSON.stringify({ name, email }) }),
+    guardianRequest<void>('/guardian/coguardian', guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ name, email }),
+    }),
 
   guardianReports: (guardianId) => guardianRequest<FiledReport[]>('/guardian/reports', guardianId),
 
   guardianPairingCode: (guardianId, childId) =>
-    guardianRequest<{ code: string; expiresAt: number }>(`/guardian/children/${childId}/pairing-code`, guardianId, { method: 'POST' }),
+    guardianRequest<{ code: string; expiresAt: number }>(`/guardian/children/${childId}/pairing-code`, guardianId, {
+      method: 'POST',
+    }),
 
   guardianPrefs: (guardianId) =>
     guardianRequest<{ prefs: NotificationPrefs | null }>('/guardian/prefs', guardianId).then((r) => r.prefs),
@@ -326,16 +428,27 @@ export const httpClient: PlayerClient = {
     guardianRequest<void>(`/guardian/children/${childId}`, guardianId, { method: 'DELETE' }),
 
   guardianChildOpenTrials: (guardianId, childId) =>
-    guardianRequest<{ openTrials: GuardianOpenTrial[] }>(`/guardian/children/${childId}/open-trials`, guardianId).then((r) => r.openTrials),
+    guardianRequest<{ openTrials: GuardianOpenTrial[] }>(`/guardian/children/${childId}/open-trials`, guardianId).then(
+      (r) => r.openTrials,
+    ),
 
   guardianRegisterOpenTrial: (guardianId, openTrialId, childId) =>
-    guardianRequest<void>(`/guardian/open-trials/${openTrialId}/register`, guardianId, { method: 'POST', body: JSON.stringify({ childId }) }),
+    guardianRequest<void>(`/guardian/open-trials/${openTrialId}/register`, guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ childId }),
+    }),
 
   guardianSetFirstTeamSeeker: (guardianId, childId, enabled) =>
-    guardianRequest<void>(`/guardian/children/${childId}/first-team-seeker`, guardianId, { method: 'POST', body: JSON.stringify({ enabled }) }),
+    guardianRequest<void>(`/guardian/children/${childId}/first-team-seeker`, guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
 
   guardianRequestVouch: (guardianId, childId, coachName, coachEmail, role) =>
-    guardianRequest<void>(`/guardian/children/${childId}/vouches/request`, guardianId, { method: 'POST', body: JSON.stringify({ coachName, coachEmail, role }) }),
+    guardianRequest<void>(`/guardian/children/${childId}/vouches/request`, guardianId, {
+      method: 'POST',
+      body: JSON.stringify({ coachName, coachEmail, role }),
+    }),
 
   // Live sync is authenticated and scoped: a short-lived connect ticket is
   // minted over the bearer session, then streamed. On drops we reconnect with
@@ -356,14 +469,23 @@ export const httpClient: PlayerClient = {
       try {
         const res = await fetch(`${API_URL}/events/ticket`, { method: 'POST', headers: { ...authHeader(auth.id) } });
         // A 401 means the session is gone — stop asking every 15 s and let the app end it.
-        if (res.status === 401) { stopped = true; cb('session_expired', {}); return; }
+        if (res.status === 401) {
+          stopped = true;
+          cb('session_expired', {});
+          return;
+        }
         if (!res.ok) throw new Error('ticket refused');
         const { ticket } = (await res.json()) as { ticket: string };
         if (stopped) return;
-        source = new EventSource(`${API_URL}/events?ticket=${encodeURIComponent(ticket)}${lastEventId ? `&lastEventId=${lastEventId}` : ''}`);
+        source = new EventSource(
+          `${API_URL}/events?ticket=${encodeURIComponent(ticket)}${lastEventId ? `&lastEventId=${lastEventId}` : ''}`,
+        );
         source.onopen = () => {
           retry = 0;
-          if (dropped) { dropped = false; cb('reconnected', {}); }
+          if (dropped) {
+            dropped = false;
+            cb('reconnected', {});
+          }
           cb('sse_status', { connected: true });
         };
         source.onmessage = (e) => {
@@ -390,7 +512,10 @@ export const httpClient: PlayerClient = {
       }
     };
     void connect();
-    return () => { stopped = true; source?.close(); };
+    return () => {
+      stopped = true;
+      source?.close();
+    };
   },
 
   ping: async () => {

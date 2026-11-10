@@ -28,7 +28,9 @@ try {
 
 export function openStore(dataDir) {
   if (!DatabaseSync) {
-    const err = new Error(`SQLITE_REQUIRED: ScoutBox needs the node:sqlite module (${CONTRACT}, enabled by default; this is ${process.version}${process.execArgv.some((a) => /no-experimental-sqlite/.test(a)) ? ', started with --no-experimental-sqlite' : ''}). There is no JSON fallback. The data directory was not touched.`);
+    const err = new Error(
+      `SQLITE_REQUIRED: ScoutBox needs the node:sqlite module (${CONTRACT}, enabled by default; this is ${process.version}${process.execArgv.some((a) => /no-experimental-sqlite/.test(a)) ? ', started with --no-experimental-sqlite' : ''}). There is no JSON fallback. The data directory was not touched.`,
+    );
     err.code = 'SQLITE_REQUIRED';
     throw err;
   }
@@ -45,7 +47,9 @@ export function openStore(dataDir) {
   // file is a first installation; an empty one is refused. (Switching to WAL
   // writes the header at once, so a real database is never 0 bytes.)
   if (fs.existsSync(databaseFile) && fs.statSync(databaseFile).size === 0) {
-    const err = new Error(`DATABASE_EMPTY: ${databaseFile} exists but is empty (0 bytes). It is not opened as a new installation. Restore a verified backup, or delete the file to start from the seed. Nothing was changed.`);
+    const err = new Error(
+      `DATABASE_EMPTY: ${databaseFile} exists but is empty (0 bytes). It is not opened as a new installation. Restore a verified backup, or delete the file to start from the seed. Nothing was changed.`,
+    );
     err.code = 'DATABASE_EMPTY';
     throw err;
   }
@@ -70,11 +74,15 @@ export function openStore(dataDir) {
   // continuations run later, OUTSIDE any unit, and nothing here can cancel them.
   const strayAsyncWork = { escaped: 0, rejected: 0, lastError: null };
   const brief = (err) => ({ at: Date.now(), message: String(err?.message ?? err).slice(0, 200) });
-  const isThenable = (v) => v !== null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function';
+  const isThenable = (v) =>
+    v !== null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function';
   // An `async function` (or async generator) is identifiable BEFORE it runs:
   // refusing it then means none of its body executes. A plain function that
   // returns a promise can only be recognised afterwards (see `unitOfWork`).
-  const asyncKind = (fn) => { const k = Object.prototype.toString.call(fn); return k === '[object AsyncFunction]' || k === '[object AsyncGeneratorFunction]' ? k.slice(8, -1) : null; };
+  const asyncKind = (fn) => {
+    const k = Object.prototype.toString.call(fn);
+    return k === '[object AsyncFunction]' || k === '[object AsyncGeneratorFunction]' ? k.slice(8, -1) : null;
+  };
 
   /**
    * Run one side effect (an after-commit callback). It never throws into the
@@ -86,11 +94,21 @@ export function openStore(dataDir) {
     const failed = (err) => {
       afterCommitFailures += 1;
       lastAfterCommitError = brief(err);
-      console.error(`unit of work: an after-commit side effect failed (the data is committed): ${lastAfterCommitError.message}`);
+      console.error(
+        `unit of work: an after-commit side effect failed (the data is committed): ${lastAfterCommitError.message}`,
+      );
     };
     let result;
-    try { result = fn(); } catch (err) { failed(err); return; }
-    if (isThenable(result)) Promise.resolve(result).then(() => { afterCommitDelivered += 1; }, failed);
+    try {
+      result = fn();
+    } catch (err) {
+      failed(err);
+      return;
+    }
+    if (isThenable(result))
+      Promise.resolve(result).then(() => {
+        afterCommitDelivered += 1;
+      }, failed);
     else afterCommitDelivered += 1;
   }
 
@@ -100,7 +118,9 @@ export function openStore(dataDir) {
     Promise.resolve(thenable).then(undefined, (err) => {
       strayAsyncWork.rejected += 1;
       strayAsyncWork.lastError = brief(err);
-      console.error(`unit of work: asynchronous work that escaped a rolled-back unit rejected later (whatever it did ran outside any unit): ${strayAsyncWork.lastError.message}`);
+      console.error(
+        `unit of work: asynchronous work that escaped a rolled-back unit rejected later (whatever it did ran outside any unit): ${strayAsyncWork.lastError.message}`,
+      );
     });
   }
 
@@ -139,8 +159,14 @@ export function openStore(dataDir) {
    *    runs no work; a failing ROLLBACK is recorded (`cleanupFailures`,
    *    attached to the error as `unitOfWorkCleanup`) and still closes the unit.
    */
-  const asyncRefusal = (kind, nested) => new TypeError(`a unit of work must be synchronous: the ${nested ? 'nested ' : ''}work is an ${kind} and was not invoked (a SQLite transaction never spans an await; nothing of it ran)`);
-  const thenableRefusal = () => new Error('a unit of work must be synchronous: the work returned a promise/thenable, so the unit was rolled back; its continuation is not cancelled and whatever it does later happens outside any unit (counted in unitOfWorkState().strayAsyncWork)');
+  const asyncRefusal = (kind, nested) =>
+    new TypeError(
+      `a unit of work must be synchronous: the ${nested ? 'nested ' : ''}work is an ${kind} and was not invoked (a SQLite transaction never spans an await; nothing of it ran)`,
+    );
+  const thenableRefusal = () =>
+    new Error(
+      'a unit of work must be synchronous: the work returned a promise/thenable, so the unit was rolled back; its continuation is not cancelled and whatever it does later happens outside any unit (counted in unitOfWorkState().strayAsyncWork)',
+    );
 
   /** Run `work` inside the already-open unit. Any failure — thrown, or a refused asynchronous shape — poisons the unit. */
   function runJoined(work) {
@@ -148,7 +174,10 @@ export function openStore(dataDir) {
       const kind = asyncKind(work);
       if (kind) throw asyncRefusal(kind, true);
       const result = work();
-      if (isThenable(result)) { observeStrayAsync(result); throw thenableRefusal(); }
+      if (isThenable(result)) {
+        observeStrayAsync(result);
+        throw thenableRefusal();
+      }
       return result;
     } catch (err) {
       if (!unit.failure) unit.failure = err;
@@ -191,8 +220,15 @@ export function openStore(dataDir) {
     let result;
     try {
       result = work();
-      if (isThenable(result)) { observeStrayAsync(result); throw thenableRefusal(); }
-      if (unit.failure) throw new Error(`the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String(unit.failure?.message ?? unit.failure).slice(0, 200)}`, { cause: unit.failure });
+      if (isThenable(result)) {
+        observeStrayAsync(result);
+        throw thenableRefusal();
+      }
+      if (unit.failure)
+        throw new Error(
+          `the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String(unit.failure?.message ?? unit.failure).slice(0, 200)}`,
+          { cause: unit.failure },
+        );
       runBeforeCommit(sqlite);
       sqlite.exec('COMMIT');
     } catch (err) {
@@ -231,7 +267,9 @@ export function openStore(dataDir) {
     failCommitOfOpenTransaction() {
       if (!sqlite.isTransaction) throw new Error('failCommitOfOpenTransaction: no transaction is open');
       sqlite.exec('PRAGMA defer_foreign_keys = ON');
-      sqlite.exec('CREATE TABLE fault_commit_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_commit_child (parent_id TEXT NOT NULL REFERENCES fault_commit_parent(id))');
+      sqlite.exec(
+        'CREATE TABLE fault_commit_parent (id TEXT PRIMARY KEY); CREATE TABLE fault_commit_child (parent_id TEXT NOT NULL REFERENCES fault_commit_parent(id))',
+      );
       sqlite.prepare('INSERT INTO fault_commit_child (parent_id) VALUES (?)').run('missing-on-purpose');
     },
     unitOfWork,
@@ -250,7 +288,10 @@ export function openStore(dataDir) {
       active: () => unit !== null,
       join(work) {
         if (typeof work !== 'function') throw new TypeError('unit.join needs a synchronous work function');
-        if (!unit) throw new Error('unit.join needs an open unit of work (outside a unit a repository operation runs a transaction of its own)');
+        if (!unit)
+          throw new Error(
+            'unit.join needs an open unit of work (outside a unit a repository operation runs a transaction of its own)',
+          );
         return runJoined(work);
       },
     },
@@ -262,12 +303,16 @@ export function openStore(dataDir) {
      */
     afterCommit(fn) {
       if (typeof fn !== 'function') throw new TypeError('afterCommit needs a function');
-      if (unit) unit.afterCommit.push(fn); else runSideEffect(fn);
+      if (unit) unit.afterCommit.push(fn);
+      else runSideEffect(fn);
     },
     unitOfWorkState: () => ({
       active: unit !== null,
-      afterCommitFailures, afterCommitDelivered, lastAfterCommitError,
-      cleanupFailures, lastCleanupError,
+      afterCommitFailures,
+      afterCommitDelivered,
+      lastAfterCommitError,
+      cleanupFailures,
+      lastCleanupError,
       strayAsyncWork: { ...strayAsyncWork },
     }),
   };

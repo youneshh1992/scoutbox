@@ -67,10 +67,15 @@ export const POLICY = {
     boxCamSubCap: 6000,
     recencyDays: 365, // applies to current evidence coverage only
     provenance: {
-      authoritative_registry: 10000, verified_club_confirmed: 10000,
-      verified_coach_confirmed: 8000, scoutbox_reviewed: 7000,
-      box_cam_observed: 7000, system_recorded: 5000,
-      historical_migration: 5000, guardian_submitted: 3000, player_submitted: 3000,
+      authoritative_registry: 10000,
+      verified_club_confirmed: 10000,
+      verified_coach_confirmed: 8000,
+      scoutbox_reviewed: 7000,
+      box_cam_observed: 7000,
+      system_recorded: 5000,
+      historical_migration: 5000,
+      guardian_submitted: 3000,
+      player_submitted: 3000,
     },
   },
 
@@ -89,13 +94,21 @@ export const POLICY = {
   ],
 };
 
-export const TRUST_DISCLAIMER = 'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.';
+export const TRUST_DISCLAIMER =
+  'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.';
 
 export const TRUST_CHANGE_REASONS = [
-  'IDENTITY_CONFIRMED', 'CURRENT_CLUB_CONFIRMED', 'CAREER_RECORD_CONFIRMED',
-  'COACH_RELATIONSHIP_CONFIRMED', 'REFERENCE_CONFIRMED', 'BOX_CAM_EVIDENCE_ADDED',
-  'COMBINE_VERIFIED_ADDED', 'EVIDENCE_EXPIRED', 'CLAIM_REVOKED',
-  'COMBINE_INVALIDATED', 'COMBINE_RESTORED',
+  'IDENTITY_CONFIRMED',
+  'CURRENT_CLUB_CONFIRMED',
+  'CAREER_RECORD_CONFIRMED',
+  'COACH_RELATIONSHIP_CONFIRMED',
+  'REFERENCE_CONFIRMED',
+  'BOX_CAM_EVIDENCE_ADDED',
+  'COMBINE_VERIFIED_ADDED',
+  'EVIDENCE_EXPIRED',
+  'CLAIM_REVOKED',
+  'COMBINE_INVALIDATED',
+  'COMBINE_RESTORED',
 ];
 
 // ------------------------------------------------------------- primitives
@@ -145,7 +158,10 @@ const component = (weight, coverageBp, { reasons = [], strengths = [], gaps = []
   coverageBp: clampBp(coverageBp),
   earnedWeightBp: Math.round(weight * clampBp(coverageBp)), // weight × bp  (max weight*10000)
   level: levelFor(clampBp(coverageBp)),
-  reasons, strengths, gaps, detail,
+  reasons,
+  strengths,
+  gaps,
+  detail,
 });
 
 // ------------------------------------------------------- component scorers
@@ -158,16 +174,24 @@ export function scoreIdentityConfidence({ assurance = null }, policy = POLICY) {
       gaps: [{ code: 'IDENTITY_NOT_ESTABLISHED', text: 'Your identity has not yet been confirmed on ScoutBox.' }],
     });
   }
-  const label = assurance === 'authoritative'
-    ? 'Identity confirmed by an authoritative source.'
-    : assurance === 'organisation_attested'
-      ? 'Identity confirmed by an authorised organisation administrator.'
-      : 'Identity confirmed by ScoutBox review.';
+  const label =
+    assurance === 'authoritative'
+      ? 'Identity confirmed by an authoritative source.'
+      : assurance === 'organisation_attested'
+        ? 'Identity confirmed by an authorised organisation administrator.'
+        : 'Identity confirmed by ScoutBox review.';
   return component(w, bp, {
     reasons: [`IDENTITY_${String(assurance).toUpperCase()}`],
     strengths: [{ code: 'IDENTITY_CONFIRMED', text: label }],
-    gaps: assurance === 'scoutbox_document_review'
-      ? [{ code: 'IDENTITY_REVIEW_ONLY', text: 'Identity was confirmed by document review rather than an authoritative source.' }] : [],
+    gaps:
+      assurance === 'scoutbox_document_review'
+        ? [
+            {
+              code: 'IDENTITY_REVIEW_ONLY',
+              text: 'Identity was confirmed by document review rather than an authoritative source.',
+            },
+          ]
+        : [],
     detail: { assurance },
   });
 }
@@ -175,9 +199,13 @@ export function scoreIdentityConfidence({ assurance = null }, policy = POLICY) {
 /** Historical facts never decay. */
 export function scoreFootballHistoryConfidence({ rows = [] }, policy = POLICY) {
   const w = policy.weights.footballHistory;
-  const canonical = canonicalTrustSources(rows.map((r) => ({
-    key: r.key, strengthBp: policy.historyProvenance[r.provenance] ?? 0, row: r,
-  })));
+  const canonical = canonicalTrustSources(
+    rows.map((r) => ({
+      key: r.key,
+      strengthBp: policy.historyProvenance[r.provenance] ?? 0,
+      row: r,
+    })),
+  );
   if (canonical.length === 0) {
     return component(w, 0, {
       reasons: ['NO_FOOTBALL_HISTORY'],
@@ -186,19 +214,32 @@ export function scoreFootballHistoryConfidence({ rows = [] }, policy = POLICY) {
   }
   const mass = canonical.reduce((t, c) => t + c.strengthBp / 10000, 0);
   const coverage = clampBp((mass / policy.history.targetConfirmedMass) * 10000);
-  const confirmedCurrent = canonical.some((c) => c.row.current && c.strengthBp >= policy.historyProvenance.scoutbox_reviewed);
+  const confirmedCurrent = canonical.some(
+    (c) => c.row.current && c.strengthBp >= policy.historyProvenance.scoutbox_reviewed,
+  );
   const selfOnly = canonical.filter((c) => c.strengthBp <= policy.historyProvenance.player_submitted);
   const strengths = [];
   const gaps = [];
   if (confirmedCurrent) strengths.push({ code: 'CURRENT_CLUB_CONFIRMED', text: 'Your current club is confirmed.' });
   else gaps.push({ code: 'CURRENT_CLUB_UNCONFIRMED', text: 'Your current club is not independently confirmed yet.' });
-  const confirmedCount = canonical.filter((c) => c.strengthBp >= policy.historyProvenance.verified_coach_confirmed).length;
-  if (confirmedCount > 0) strengths.push({ code: 'CAREER_RECORD_CONFIRMED', text: `${confirmedCount} club record${confirmedCount > 1 ? 's are' : ' is'} independently confirmed.` });
+  const confirmedCount = canonical.filter(
+    (c) => c.strengthBp >= policy.historyProvenance.verified_coach_confirmed,
+  ).length;
+  if (confirmedCount > 0)
+    strengths.push({
+      code: 'CAREER_RECORD_CONFIRMED',
+      text: `${confirmedCount} club record${confirmedCount > 1 ? 's are' : ' is'} independently confirmed.`,
+    });
   if (selfOnly.length > 0) {
-    gaps.push({ code: 'HISTORY_PLAYER_SUBMITTED', text: `${selfOnly.length} club entr${selfOnly.length > 1 ? 'ies are' : 'y is'} provided by the player and not independently confirmed.` });
+    gaps.push({
+      code: 'HISTORY_PLAYER_SUBMITTED',
+      text: `${selfOnly.length} club entr${selfOnly.length > 1 ? 'ies are' : 'y is'} provided by the player and not independently confirmed.`,
+    });
   }
   return component(w, coverage, {
-    reasons: ['HISTORY_COVERAGE'], strengths, gaps,
+    reasons: ['HISTORY_COVERAGE'],
+    strengths,
+    gaps,
     detail: { rows: canonical.length, confirmedRows: confirmedCount, attributableMass: Math.round(mass * 100) / 100 },
   });
 }
@@ -216,26 +257,47 @@ export function scoreRelationshipConfidence({ relationships = [], isAdult = true
   const coaches = canonical.filter((c) => c.rel.kind === 'coach').length;
   const clubs = canonical.filter((c) => c.rel.kind === 'club').length;
   const strengths = [];
-  if (clubs > 0) strengths.push({ code: 'CLUB_RELATIONSHIP_CONFIRMED', text: `${clubs} verified club relationship${clubs > 1 ? 's' : ''}.` });
-  if (coaches > 0) strengths.push({ code: 'COACH_RELATIONSHIP_CONFIRMED', text: `${coaches} verified coach relationship${coaches > 1 ? 's' : ''}.` });
+  if (clubs > 0)
+    strengths.push({
+      code: 'CLUB_RELATIONSHIP_CONFIRMED',
+      text: `${clubs} verified club relationship${clubs > 1 ? 's' : ''}.`,
+    });
+  if (coaches > 0)
+    strengths.push({
+      code: 'COACH_RELATIONSHIP_CONFIRMED',
+      text: `${coaches} verified coach relationship${coaches > 1 ? 's' : ''}.`,
+    });
   return component(w, coverage, {
-    reasons: ['RELATIONSHIP_COVERAGE'], strengths,
-    gaps: canonical.length === 0 ? [{ code: 'NO_VERIFIED_RELATIONSHIPS', text: 'No verified club or coach relationship is recorded yet.' }] : [],
+    reasons: ['RELATIONSHIP_COVERAGE'],
+    strengths,
+    gaps:
+      canonical.length === 0
+        ? [{ code: 'NO_VERIFIED_RELATIONSHIPS', text: 'No verified club or coach relationship is recorded yet.' }]
+        : [],
     detail: { distinct: canonical.length, clubs, coaches },
   });
 }
 
-export function scoreEvidenceConfidence({ evidenceItems = [], boxCamSessions = [], now = Date.now(), allowSimulatedEvidence = false }, policy = POLICY) {
+export function scoreEvidenceConfidence(
+  { evidenceItems = [], boxCamSessions = [], now = Date.now(), allowSimulatedEvidence = false },
+  policy = POLICY,
+) {
   const w = policy.weights.evidence;
   const p = policy.evidence;
-  const recs = canonicalTrustSources((evidenceItems ?? []).map((e) => ({
-    key: e.key, strengthBp: p.provenance[e.provenance] ?? 0, item: e,
-  }))).filter((c) => c.strengthBp > 0);
+  const recs = canonicalTrustSources(
+    (evidenceItems ?? []).map((e) => ({
+      key: e.key,
+      strengthBp: p.provenance[e.provenance] ?? 0,
+      item: e,
+    })),
+  ).filter((c) => c.strengthBp > 0);
   // Simulated (test-provider) sessions count only in an explicitly simulated context.
-  const box = canonicalTrustSources((boxCamSessions ?? [])
-    .filter((s) => (allowSimulatedEvidence || !s.simulated))
-    .filter((s) => ['verified', 'partially_verified'].includes(s.verificationState))
-    .map((s) => ({ key: s.key, strengthBp: 10000, s })));
+  const box = canonicalTrustSources(
+    (boxCamSessions ?? [])
+      .filter((s) => allowSimulatedEvidence || !s.simulated)
+      .filter((s) => ['verified', 'partially_verified'].includes(s.verificationState))
+      .map((s) => ({ key: s.key, strengthBp: 10000, s })),
+  );
 
   const recBp = Math.min(applyDiminishingReturns(recs.length, p.recordsCurve), p.recordsSubCap);
   const boxBp = Math.min(applyDiminishingReturns(box.length, p.boxCamCurve), p.boxCamSubCap);
@@ -243,12 +305,28 @@ export function scoreEvidenceConfidence({ evidenceItems = [], boxCamSessions = [
 
   const strengths = [];
   const gaps = [];
-  if (recs.length > 0) strengths.push({ code: 'EVIDENCE_RECORDED', text: `${recs.length} provenance-bearing evidence item${recs.length > 1 ? 's' : ''} on record.` });
+  if (recs.length > 0)
+    strengths.push({
+      code: 'EVIDENCE_RECORDED',
+      text: `${recs.length} provenance-bearing evidence item${recs.length > 1 ? 's' : ''} on record.`,
+    });
   else gaps.push({ code: 'NO_EVIDENCE', text: 'No provenance-bearing football evidence is recorded yet.' });
-  if (box.length > 0) strengths.push({ code: 'BOX_CAM_EVIDENCE', text: `${box.length} Box Cam observed training session${box.length > 1 ? 's' : ''}.` });
+  if (box.length > 0)
+    strengths.push({
+      code: 'BOX_CAM_EVIDENCE',
+      text: `${box.length} Box Cam observed training session${box.length > 1 ? 's' : ''}.`,
+    });
   return component(w, coverage, {
-    reasons: ['EVIDENCE_COVERAGE'], strengths, gaps,
-    detail: { evidenceItems: recs.length, boxCamSessions: box.length, recordsBp: recBp, boxCamBp: boxBp, subCaps: { records: p.recordsSubCap, boxCam: p.boxCamSubCap } },
+    reasons: ['EVIDENCE_COVERAGE'],
+    strengths,
+    gaps,
+    detail: {
+      evidenceItems: recs.length,
+      boxCamSessions: box.length,
+      recordsBp: recBp,
+      boxCamBp: boxBp,
+      subCaps: { records: p.recordsSubCap, boxCam: p.boxCamSubCap },
+    },
   });
 }
 
@@ -256,18 +334,27 @@ export function scoreEvidenceConfidence({ evidenceItems = [], boxCamSessions = [
  *  still count as Box Cam evidence). */
 export function scoreCombineConfidence({ attempts = [], allowSimulatedEvidence = false }, policy = POLICY) {
   const w = policy.weights.combine;
-  const valid = (attempts ?? []).filter((a) => a
-    && a.combineState === 'combine_verified'
-    && (allowSimulatedEvidence || !a.simulated));
-  const protocols = canonicalTrustSources(valid.map((a) => ({
-    key: `protocol:${a.protocolId}@${a.protocolVersion}`, strengthBp: 10000, a,
-  })));
+  const valid = (attempts ?? []).filter(
+    (a) => a && a.combineState === 'combine_verified' && (allowSimulatedEvidence || !a.simulated),
+  );
+  const protocols = canonicalTrustSources(
+    valid.map((a) => ({
+      key: `protocol:${a.protocolId}@${a.protocolVersion}`,
+      strengthBp: 10000,
+      a,
+    })),
+  );
   const coverage = applyDiminishingReturns(protocols.length, policy.combine.protocolCurve);
-  const excludedSimulated = (attempts ?? []).filter((a) => a && a.simulated && a.combineState === 'combine_verified').length;
+  const excludedSimulated = (attempts ?? []).filter(
+    (a) => a && a.simulated && a.combineState === 'combine_verified',
+  ).length;
   const strengths = [];
   const gaps = [];
   if (protocols.length > 0) {
-    strengths.push({ code: 'COMBINE_VERIFIED', text: `${protocols.length} standardized Combine Verified measurement${protocols.length > 1 ? 's' : ''}.` });
+    strengths.push({
+      code: 'COMBINE_VERIFIED',
+      text: `${protocols.length} standardized Combine Verified measurement${protocols.length > 1 ? 's' : ''}.`,
+    });
   } else {
     gaps.push({
       code: 'NO_COMBINE_VERIFIED',
@@ -275,7 +362,9 @@ export function scoreCombineConfidence({ attempts = [], allowSimulatedEvidence =
     });
   }
   return component(w, coverage, {
-    reasons: ['COMBINE_COVERAGE'], strengths, gaps,
+    reasons: ['COMBINE_COVERAGE'],
+    strengths,
+    gaps,
     detail: { distinctProtocols: protocols.length, validAttempts: valid.length, excludedSimulated },
   });
 }
@@ -285,17 +374,29 @@ export function scoreReferencesConfidence({ references = [], assessments = [] },
   const w = policy.weights.references;
   const items = canonicalTrustSources([
     ...(references ?? []).filter((r) => r.verified).map((r) => ({ key: r.key, strengthBp: 10000, kind: 'reference' })),
-    ...(assessments ?? []).filter((a) => a.verifiedSource).map((a) => ({ key: a.key, strengthBp: 8000, kind: 'assessment' })),
+    ...(assessments ?? [])
+      .filter((a) => a.verifiedSource)
+      .map((a) => ({ key: a.key, strengthBp: 8000, kind: 'assessment' })),
   ]);
   const coverage = applyDiminishingReturns(items.length, policy.references.curve);
   const refs = items.filter((i) => i.kind === 'reference').length;
   const asmts = items.filter((i) => i.kind === 'assessment').length;
   const strengths = [];
-  if (refs > 0) strengths.push({ code: 'REFERENCE_CONFIRMED', text: `${refs} reference${refs > 1 ? 's' : ''} with verified provenance.` });
-  if (asmts > 0) strengths.push({ code: 'ASSESSMENT_ATTRIBUTED', text: `${asmts} assessment${asmts > 1 ? 's' : ''} from a verified evaluator.` });
+  if (refs > 0)
+    strengths.push({
+      code: 'REFERENCE_CONFIRMED',
+      text: `${refs} reference${refs > 1 ? 's' : ''} with verified provenance.`,
+    });
+  if (asmts > 0)
+    strengths.push({
+      code: 'ASSESSMENT_ATTRIBUTED',
+      text: `${asmts} assessment${asmts > 1 ? 's' : ''} from a verified evaluator.`,
+    });
   return component(w, coverage, {
-    reasons: ['REFERENCE_COVERAGE'], strengths,
-    gaps: items.length === 0 ? [{ code: 'NO_REFERENCES', text: 'No verified coach reference is currently present.' }] : [],
+    reasons: ['REFERENCE_COVERAGE'],
+    strengths,
+    gaps:
+      items.length === 0 ? [{ code: 'NO_REFERENCES', text: 'No verified coach reference is currently present.' }] : [],
     detail: { references: refs, assessments: asmts },
   });
 }
@@ -331,8 +432,8 @@ export function calculateTrustScore(input, policy = POLICY) {
 
   const availableWeight = Object.values(components).reduce((t, c) => t + c.availableWeight, 0);
   const earnedBp = Object.values(components).reduce((t, c) => t + c.earnedWeightBp, 0);
-  const score = availableWeight === 0 ? 0
-    : Math.max(0, Math.min(100, Math.round((earnedBp / (availableWeight * 10000)) * 100)));
+  const score =
+    availableWeight === 0 ? 0 : Math.max(0, Math.min(100, Math.round((earnedBp / (availableWeight * 10000)) * 100)));
 
   const band = trustBandForScore(score, policy);
   const strengths = Object.values(components).flatMap((c) => c.strengths);
@@ -355,7 +456,11 @@ export function calculateTrustScore(input, policy = POLICY) {
       coverage: Math.round(c.coverageBp / 100),
       reasons: [...c.strengths, ...c.gaps].map((r) => r.text),
     })),
-    context: { isAdult, excludedComponents: Object.keys(excluded ?? {}).length ? [] : [], adultOnlyFacetsExcluded: adultOnlyFacets },
+    context: {
+      isAdult,
+      excludedComponents: Object.keys(excluded ?? {}).length ? [] : [],
+      adultOnlyFacetsExcluded: adultOnlyFacets,
+    },
     simulatedEvidenceIncluded: !!allowSimulatedEvidence,
   };
 }
@@ -364,21 +469,38 @@ export const buildTrustProfile = calculateTrustScore;
 
 export function safeTrustProjection(profile, viewer, { publicAllowed = false } = {}) {
   const base = {
-    score: profile.score, band: profile.band, bandLabel: profile.bandLabel,
-    policyVersion: profile.policyVersion, disclaimer: profile.disclaimer,
+    score: profile.score,
+    band: profile.band,
+    bandLabel: profile.bandLabel,
+    policyVersion: profile.policyVersion,
+    disclaimer: profile.disclaimer,
     simulatedEvidenceIncluded: profile.simulatedEvidenceIncluded,
   };
   switch (viewer) {
     case 'self':
     case 'guardian':
     case 'trust_safety':
-      return { ...base, viewer, components: profile.components, strengths: profile.strengths, gaps: profile.gaps, explanations: profile.explanations, context: profile.context };
+      return {
+        ...base,
+        viewer,
+        components: profile.components,
+        strengths: profile.strengths,
+        gaps: profile.gaps,
+        explanations: profile.explanations,
+        context: profile.context,
+      };
     case 'pro_club':
     case 'grassroots_club':
       // Component levels and the public wording of each signal, never the underlying records.
       return {
-        ...base, viewer,
-        explanations: profile.explanations.map((e) => ({ component: e.component, level: e.level, levelLabel: e.levelLabel, weight: e.weight })),
+        ...base,
+        viewer,
+        explanations: profile.explanations.map((e) => ({
+          component: e.component,
+          level: e.level,
+          levelLabel: e.levelLabel,
+          weight: e.weight,
+        })),
         signals: profile.strengths.map((s) => ({ code: s.code, text: s.text })),
         note: 'Evidence confidence — not football ability.',
       };
@@ -391,7 +513,9 @@ export function safeTrustProjection(profile, viewer, { publicAllowed = false } =
 
 export function trustSummary(profile) {
   return {
-    score: profile.score, band: profile.band, bandLabel: profile.bandLabel,
+    score: profile.score,
+    band: profile.band,
+    bandLabel: profile.bandLabel,
     policyVersion: profile.policyVersion,
     topEvidenceSignals: profile.strengths.slice(0, 3).map((s) => s.code),
   };
@@ -420,12 +544,27 @@ export function trustChangeReasons(before, after) {
 /** The score at a Recruitment Room decision, with the policy version that produced it. */
 export function trustSnapshot(profile, { at = Date.now() } = {}) {
   return {
-    at, score: profile.score, band: profile.band, policyVersion: profile.policyVersion,
-    components: Object.fromEntries(Object.entries(profile.components).map(([k, c]) => [k, { weight: c.weight, coverage: Math.round(c.coverageBp / 100), level: c.level.id }])),
-    hash: crypto.createHash('sha256').update(JSON.stringify({
-      score: profile.score, policyVersion: profile.policyVersion,
-      cov: Object.fromEntries(Object.entries(profile.components).map(([k, c]) => [k, c.coverageBp])),
-    })).digest('hex').slice(0, 32),
+    at,
+    score: profile.score,
+    band: profile.band,
+    policyVersion: profile.policyVersion,
+    components: Object.fromEntries(
+      Object.entries(profile.components).map(([k, c]) => [
+        k,
+        { weight: c.weight, coverage: Math.round(c.coverageBp / 100), level: c.level.id },
+      ]),
+    ),
+    hash: crypto
+      .createHash('sha256')
+      .update(
+        JSON.stringify({
+          score: profile.score,
+          policyVersion: profile.policyVersion,
+          cov: Object.fromEntries(Object.entries(profile.components).map(([k, c]) => [k, c.coverageBp])),
+        }),
+      )
+      .digest('hex')
+      .slice(0, 32),
   };
 }
 

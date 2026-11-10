@@ -32,8 +32,14 @@ import { pathToFileURL } from 'node:url';
  * which is what the engine wants anyway — the client would discard colour.
  */
 export async function writeY4m({
-  outPath, serverRoot, w = 320, h = 240, fps = 12, durationMs = 6000,
-  scene = 'touch', seed = 23,
+  outPath,
+  serverRoot,
+  w = 320,
+  h = 240,
+  fps = 12,
+  durationMs = 6000,
+  scene = 'touch',
+  seed = 23,
 }) {
   const scenes = await import(pathToFileURL(path.join(serverRoot, 'm22', 'scenes.mjs')).href);
   const { sequence, touchPath, jugglePath, stationaryPath } = scenes;
@@ -48,7 +54,10 @@ export async function writeY4m({
   // capture is simply too dark to observe reliably.
   const dark = scene === 'lowlight';
   const frames = sequence({
-    w, h, fps, durationMs,
+    w,
+    h,
+    fps,
+    durationMs,
     path: (paths[dark ? 'touch' : scene] ?? paths.touch)(),
     seed,
     ...(dark ? { bgLuma: 10, ballLuma: 26, noise: 2 } : {}),
@@ -56,7 +65,8 @@ export async function writeY4m({
 
   // Y4M header. Frame rate as a ratio, 4:2:0, progressive.
   const header = Buffer.from(`YUV4MPEG2 W${w} H${h} F${fps}:1 Ip A1:1 C420\n`, 'latin1');
-  const chromaW = w >> 1, chromaH = h >> 1;
+  const chromaW = w >> 1,
+    chromaH = h >> 1;
   const neutralChroma = Buffer.alloc(chromaW * chromaH, 128);
   const frameTag = Buffer.from('FRAME\n', 'latin1');
 
@@ -78,8 +88,8 @@ export async function writeY4m({
 /** Chromium flags that turn the Y4M into the camera `getUserMedia` returns. */
 export function fakeCameraArgs(y4mPath) {
   return [
-    '--use-fake-ui-for-media-stream',      // no permission prompt
-    '--use-fake-device-for-media-stream',  // synthetic capture device
+    '--use-fake-ui-for-media-stream', // no permission prompt
+    '--use-fake-device-for-media-stream', // synthetic capture device
     `--use-file-for-fake-video-capture=${y4mPath}`,
     '--autoplay-policy=no-user-gesture-required',
   ];

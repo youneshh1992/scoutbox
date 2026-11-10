@@ -23,10 +23,19 @@ let lastHash = typeof window !== 'undefined' ? window.location.hash : '';
 
 export function registerDirtyGuard(isDirty: IsDirty): () => void {
   guards.add(isDirty);
-  return () => { guards.delete(isDirty); };
+  return () => {
+    guards.delete(isDirty);
+  };
 }
 
-export const anyDirty = () => [...guards].some((f) => { try { return f(); } catch { return false; } });
+export const anyDirty = () =>
+  [...guards].some((f) => {
+    try {
+      return f();
+    } catch {
+      return false;
+    }
+  });
 
 /**
  * Ask before leaving. Returns true when navigation may proceed. The browser's
@@ -50,7 +59,11 @@ export function guardHashChange(message: () => string): boolean {
   const next = window.location.hash;
   if (next === lastHash) return true;
   if (anyDirty() && !window.confirm(message())) {
-    try { window.history.replaceState(null, '', lastHash || '#/'); } catch { /* sandboxed */ }
+    try {
+      window.history.replaceState(null, '', lastHash || '#/');
+    } catch {
+      /* sandboxed */
+    }
     return false;
   }
   lastHash = next;
@@ -67,8 +80,12 @@ export function installDirtyGuard() {
     e.returnValue = '';
   };
   window.addEventListener('beforeunload', onBeforeUnload);
-  return () => { window.removeEventListener('beforeunload', onBeforeUnload); };
+  return () => {
+    window.removeEventListener('beforeunload', onBeforeUnload);
+  };
 }
 
 /** Keep the remembered hash in step with programmatic (pushState/replaceState) navigation. */
-export function noteNavigated() { lastHash = window.location.hash; }
+export function noteNavigated() {
+  lastHash = window.location.hash;
+}

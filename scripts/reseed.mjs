@@ -15,4 +15,6 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const backup = `${dataDir}.bak-${stamp}`;
 fs.renameSync(dataDir, backup);
 console.log(`Current data archived to ${backup}`);
-console.log('The next server start creates a fresh seed. To restore, stop the server and rename the backup back to "data".');
+console.log(
+  'The next server start creates a fresh seed. To restore, stop the server and rename the backup back to "data".',
+);

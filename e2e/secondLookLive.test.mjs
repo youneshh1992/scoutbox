@@ -34,11 +34,18 @@ const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-secondlooklive-'));
 
 // Copy that would turn either system into a judgement of the club's decision
 // or of the player.
-const FORBIDDEN = /decision was wrong|should have signed|you were wrong|missed talent|talent score|player score|signing probability|probability of success|best available|should recruit/i;
+const FORBIDDEN =
+  /decision was wrong|should have signed|you were wrong|missed talent|talent score|player score|signing probability|probability of success|best available|should recruit/i;
 
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A backend left behind by a crashed earlier run would answer on this port and
@@ -56,8 +63,14 @@ if (!portFree) {
 }
 
 console.log('building live bundles for :4018…');
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-secondlook`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-secondlook`, { cwd: path.join(ROOT, 'scoutbox-grassroots'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-secondlook`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-secondlook`, {
+  cwd: path.join(ROOT, 'scoutbox-grassroots'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -67,11 +80,20 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -85,15 +107,38 @@ function serveDir(dir, port) {
 serveDir('scoutbox-club/dist-live-secondlook', 8802);
 serveDir('scoutbox-grassroots/dist-live-secondlook', 8803);
 const cleanup = () => {
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
   for (const s of statics) s.close();
   fs.rmSync(DATA, { recursive: true, force: true });
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
-process.on('uncaughtException', (e) => { console.error(e); cleanup(); process.exit(1); });
-process.on('unhandledRejection', (e) => { console.error(e); cleanup(); process.exit(1); });
-for (let i = 0; i < 60; i++) { try { if ((await fetch(`${API}/healthz`)).ok) break; } catch { /* booting */ } await sleep(250); }
+for (const sig of ['SIGINT', 'SIGTERM'])
+  process.on(sig, () => {
+    cleanup();
+    process.exit(130);
+  });
+process.on('uncaughtException', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
+for (let i = 0; i < 60; i++) {
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {
+    /* booting */
+  }
+  await sleep(250);
+}
 console.log(`backend up on :${API_PORT}`);
 
 // The API is used for two things only: arranging the world outside this
@@ -125,11 +170,18 @@ async function enterClub(ctx, base, org, name, role) {
   return page;
 }
 // Pro and Grassroots keep their sessions under their own storage keys.
-const tokenOf = (page, key = 'scoutbox-club-session') => page.evaluate((k) => {
-  try { return JSON.parse(localStorage.getItem(k) ?? 'null')?.token ?? null; } catch { return null; }
-}, key);
+const tokenOf = (page, key = 'scoutbox-club-session') =>
+  page.evaluate((k) => {
+    try {
+      return JSON.parse(localStorage.getItem(k) ?? 'null')?.token ?? null;
+    } catch {
+      return null;
+    }
+  }, key);
 async function goto(page, hash, selector) {
-  await page.evaluate((h) => { window.location.hash = h; }, hash);
+  await page.evaluate((h) => {
+    window.location.hash = h;
+  }, hash);
   if (selector) await page.waitForSelector(selector, { timeout: 20000 });
   await page.waitForTimeout(500);
 }
@@ -190,10 +242,12 @@ await goto(scout, SL, `[aria-label="Second Look item: ${ALONSO.name}"]`);
   if (cards !== 1) fail(`M1: one change produced ${cards} cards for one player`);
   say('M1: one change, one item — not one alert per historical room');
   const text = await card.innerText();
-  if (!/Worth Another Look/.test(await scout.locator('body').innerText())) fail('M1: the Worth Another Look tab is missing');
+  if (!/Worth Another Look/.test(await scout.locator('body').innerText()))
+    fail('M1: the Worth Another Look tab is missing');
   if (!/Not enough recent evidence/.test(text)) fail('M1: the card does not state the reason recorded at the time');
   say('M1: the item names the reason this club recorded, not a verdict on it');
-  if (!/relates to the reason recorded/i.test(text)) fail('M1: the card does not explain the relationship to the reason');
+  if (!/relates to the reason recorded/i.test(text))
+    fail('M1: the card does not explain the relationship to the reason');
   say('M1: the card explains how the change relates to that reason');
   if (FORBIDDEN.test(text)) fail(`M1: prohibited language on the Second Look card`);
   say('M1: nothing on the card says the decision was wrong or scores the player');
@@ -206,7 +260,8 @@ await scout.click(`[aria-label="Second Look item: ${ALONSO.name}"] button:has-te
 await scout.waitForSelector('[aria-label="Comparison with your previous review"]', { timeout: 15000 });
 {
   const cmp = await scout.locator('[aria-label="Comparison with your previous review"]').innerText();
-  if (!/At your previous review vs now/i.test(await scout.locator('body').innerText())) fail('M1: the comparison has no heading');
+  if (!/At your previous review vs now/i.test(await scout.locator('body').innerText()))
+    fail('M1: the comparison has no heading');
   if (!/Evidence items/.test(cmp)) fail('M1: the comparison shows no evidence row');
   say('M1: Review Changes shows the recorded before and after');
   if (FORBIDDEN.test(cmp)) fail('M1: prohibited language in the comparison');
@@ -220,7 +275,8 @@ await scout.click(`[aria-label="Second Look item: ${ALONSO.name}"] button:has-te
 await scout.waitForSelector('[aria-label="Reopen this room"]', { timeout: 10000 });
 {
   const panel = await scout.locator('[aria-label="Reopen this room"]').innerText();
-  if (!/only ever reopens because you clicked/i.test(panel)) fail('M1: the reopen panel does not state that nothing reopens by itself');
+  if (!/only ever reopens because you clicked/i.test(panel))
+    fail('M1: the reopen panel does not state that nothing reopens by itself');
   say('M1: the reopen panel states ScoutBox never reopens a room for you');
 }
 await scout.click('[aria-label="Reopen this room"] button:has-text("Reopen room")');
@@ -231,7 +287,8 @@ await scout.waitForTimeout(1400);
   if (room.sourceContext !== 'second_look') fail(`M1: the reopen recorded source ${room.sourceContext}`);
   say('M1: the room reopens through the Room rules and records second_look as the source');
   const history = (await j('GET', `/org/rooms/${ROOM_ID}/decisions`, undefined, MARIA)).body.history ?? [];
-  if (!history.some((d) => (d.reasonCodes ?? []).includes('insufficient_recent_evidence'))) fail('M1: the original archive decision was lost');
+  if (!history.some((d) => (d.reasonCodes ?? []).includes('insufficient_recent_evidence')))
+    fail('M1: the original archive decision was lost');
   say('M1: the archived decision still stands in the room’s history');
   const acts = (await j('GET', `/org/rooms/${ROOM_ID}/activity`, undefined, MARIA)).body.items ?? [];
   if (!acts.some((a) => a.type === 'room_reopened')) fail('M1: the reopen is not on the room timeline');
@@ -243,7 +300,12 @@ await scout.waitForTimeout(1400);
 const OTHER = players.find((p) => p.id !== ALONSO.id && p.name);
 const roomB = (await j('POST', '/org/rooms', { playerId: OTHER.id }, MARIA)).body.room;
 await j('POST', `/org/rooms/${roomB.roomId}/status`, { status: 'under_review' }, MARIA);
-await j('POST', `/org/rooms/${roomB.roomId}/status`, { status: 'archived', reasonCodes: ['insufficient_recent_evidence', 'squad_space'] }, MARIA);
+await j(
+  'POST',
+  `/org/rooms/${roomB.roomId}/status`,
+  { status: 'archived', reasonCodes: ['insufficient_recent_evidence', 'squad_space'] },
+  MARIA,
+);
 await j('POST', `/org/players/${OTHER.id}/evidence`, { claimType: 'footage', label: 'Full match vs Eastfield' }, MARIA);
 await goto(scout, '#/home');
 await goto(scout, SL, `[aria-label="Second Look item: ${OTHER.name}"]`);
@@ -254,7 +316,9 @@ await goto(scout, SL, `[aria-label="Second Look item: ${OTHER.name}"]`);
   say('M2: the club-side reason is printed as still standing, not as resolved');
   if (!/facts about your club/i.test(card)) fail('M2: the card does not explain why those reasons cannot be resolved');
   say('M2: the card explains that no player evidence can resolve them');
-  if (/resolved|no longer applies|answered/i.test(card.replace(/Reasons that still stand[\s\S]*?(?=New since|$)/i, ''))) {
+  if (
+    /resolved|no longer applies|answered/i.test(card.replace(/Reasons that still stand[\s\S]*?(?=New since|$)/i, ''))
+  ) {
     fail('M2: the card claims a reason was resolved');
   }
   say('M2: nothing on the card claims a recorded reason was resolved');
@@ -305,18 +369,26 @@ await scout.waitForTimeout(1200);
 
 // ===================================================================== M4
 await sleep(10);
-await j('POST', `/org/players/${OTHER.id}/evidence`, { claimType: 'footage', label: 'Later full match vs Harbour' }, MARIA);
+await j(
+  'POST',
+  `/org/players/${OTHER.id}/evidence`,
+  { claimType: 'footage', label: 'Later full match vs Harbour' },
+  MARIA,
+);
 await goto(scout, '#/home');
 await goto(scout, SL, '[aria-label="Second Look items"]');
 {
   const body = await scout.locator('body').innerText();
-  if (!/Worth Another Look \(1\)/.test(body)) fail('M4: a genuinely different later full match did not resurface the item');
+  if (!/Worth Another Look \(1\)/.test(body))
+    fail('M4: a genuinely different later full match did not resurface the item');
   say('M4: genuinely different later evidence surfaces the item again');
   const card = await scout.locator(`[aria-label="Second Look item: ${OTHER.name}"]`).innerText();
-  if (!/Full match vs Eastfield|Later full match vs Harbour|full match/i.test(card)) fail('M4: the card does not list what changed');
+  if (!/Full match vs Eastfield|Later full match vs Harbour|full match/i.test(card))
+    fail('M4: the card does not list what changed');
   const items = (await j('GET', '/org/second-look', undefined, MARIA)).body.items ?? [];
   const it = items.find((x) => x.playerId === OTHER.id);
-  if (!it || it.changeCount !== 2) fail(`M4: both full matches did not group into one item (changeCount=${it?.changeCount})`);
+  if (!it || it.changeCount !== 2)
+    fail(`M4: both full matches did not group into one item (changeCount=${it?.changeCount})`);
   say('M4: both full matches group into ONE item, not two alerts');
 }
 
@@ -371,7 +443,9 @@ let cov = await readCoverage();
 {
   const panel = await scout.locator('[aria-label="Evaluation Coverage"]').innerText();
   if (!/Evaluation Coverage/.test(panel)) fail('M5: the coverage panel is not called Evaluation Coverage');
-  if (/Scout Quality|Recruitment Quality|Scouting Score|Fairness Score/i.test(await scout.locator('body').innerText())) {
+  if (
+    /Scout Quality|Recruitment Quality|Scouting Score|Fairness Score/i.test(await scout.locator('body').innerText())
+  ) {
     fail('M5: coverage is renamed as a quality score somewhere on the page');
   }
   say('M5: it is Evaluation Coverage — never a scouting or quality score');
@@ -380,7 +454,9 @@ let cov = await readCoverage();
   if (!Number.isFinite(cov.eligible) || cov.eligible !== cov.evaluated + cov.notYet) {
     fail(`M5: coverage arithmetic does not hold (${cov.eligible} ≠ ${cov.evaluated} + ${cov.notYet})`);
   }
-  say(`M5: coverage is arithmetic over a declared denominator (${cov.eligible} = ${cov.evaluated} + ${cov.notYet}, ${cov.percent})`);
+  say(
+    `M5: coverage is arithmetic over a declared denominator (${cov.eligible} = ${cov.evaluated} + ${cov.notYet}, ${cov.percent})`,
+  );
 }
 const queue = (await j('GET', `/org/nobody-missed?briefId=${BRIEF_ID}`, undefined, MARIA)).body;
 const CAND = queue.items?.[0];
@@ -396,7 +472,8 @@ if (!CAND) fail('M5: the fixture produced no Nobody Missed candidate');
   const html = await scout.locator('[aria-label="Candidates under this brief"]').innerHTML();
   if (/matchScore|rankScore|"rank"|ranked #/i.test(html)) fail('M5: a hidden ranking score reached the candidate list');
   say('M5: no score, rank or weight appears anywhere in the candidate list');
-  if (!/Ordering is a convenience/i.test(await scout.locator('body').innerText())) fail('M5: the ordering note is missing');
+  if (!/Ordering is a convenience/i.test(await scout.locator('body').innerText()))
+    fail('M5: the ordering note is missing');
   say('M5: the ordering is stated to be a convenience, not a quality rank');
 }
 
@@ -411,7 +488,8 @@ const CAND_ROOM = (await scout.evaluate(() => location.hash)).split('/').pop();
 await goto(scout, NM, '[aria-label="Evaluation Coverage"]');
 {
   const after = await readCoverage();
-  if (after.evaluated !== cov.evaluated + 1) fail(`M5: coverage did not update (${cov.evaluated} → ${after.evaluated})`);
+  if (after.evaluated !== cov.evaluated + 1)
+    fail(`M5: coverage did not update (${cov.evaluated} → ${after.evaluated})`);
   if (after.eligible !== cov.eligible) fail('M5: the denominator moved when a player entered the workflow');
   say(`M5: coverage updates — evaluated ${cov.evaluated} → ${after.evaluated} over the same denominator`);
   const html = await scout.locator('body').innerHTML();
@@ -443,15 +521,22 @@ await goto(scout, NM, '[aria-label="Evaluation Coverage"]');
   if (html.includes(`Candidate: ${CAND.name}`)) fail('M7: an archived player fell straight back into Nobody Missed');
   say('M7: archiving does not push an evaluated player back into Nobody Missed');
   const after = await readCoverage();
-  if (after.evaluated !== cov.evaluated) fail(`M7: the archive changed the evaluated count (${cov.evaluated} → ${after.evaluated})`);
+  if (after.evaluated !== cov.evaluated)
+    fail(`M7: the archive changed the evaluated count (${cov.evaluated} → ${after.evaluated})`);
   say('M7: they remain counted as evaluated — they were evaluated');
 }
-await j('POST', `/org/players/${CAND.playerId}/evidence`, { claimType: 'footage', label: 'Full match after the decision' }, MARIA);
+await j(
+  'POST',
+  `/org/players/${CAND.playerId}/evidence`,
+  { claimType: 'footage', label: 'Full match after the decision' },
+  MARIA,
+);
 await goto(scout, '#/home');
 await goto(scout, SL, '[aria-label="Second Look items"]');
 {
   const html = await scout.locator('body').innerHTML();
-  if (!html.includes(`Second Look item: ${CAND.name}`)) fail('M7: later evidence for an evaluated player did not reach Second Look');
+  if (!html.includes(`Second Look item: ${CAND.name}`))
+    fail('M7: later evidence for an evaluated player did not reach Second Look');
   say('M7: later relevant evidence reaches the club through Second Look instead');
   await goto(scout, NM, '[aria-label="Evaluation Coverage"]');
   if ((await scout.locator('body').innerHTML()).includes(`Candidate: ${CAND.name}`)) {
@@ -461,23 +546,32 @@ await goto(scout, SL, '[aria-label="Second Look items"]');
 }
 
 // ===================================================================== M8
-const rival = await enterClub(ctxRival, 'http://localhost:8802/', 'Harbour City FC', 'Rita Vale', 'Head of Recruitment');
+const rival = await enterClub(
+  ctxRival,
+  'http://localhost:8802/',
+  'Harbour City FC',
+  'Rita Vale',
+  'Head of Recruitment',
+);
 const RITA = await tokenOf(rival);
 {
   await goto(rival, SL, '[aria-label="Second Look items"]');
   const body = await rival.locator('body').innerText();
-  if (new RegExp(`${ALONSO.name}|${OTHER.name}`).test(body)) fail('M8: the rival club sees another club’s Second Look items');
+  if (new RegExp(`${ALONSO.name}|${OTHER.name}`).test(body))
+    fail('M8: the rival club sees another club’s Second Look items');
   if (!/Worth Another Look \(0\)/.test(body)) fail('M8: the rival club’s queue is not its own');
   say('M8: the rival club’s Second Look queue contains none of the first club’s items');
 
   await goto(rival, `#/recruitment/briefs/${BRIEF_ID}`);
   await rival.waitForTimeout(1500);
-  if (/2027 Defensive Midfielder/.test(await rival.locator('body').innerText())) fail('M8: a deep link exposed another club’s brief');
+  if (/2027 Defensive Midfielder/.test(await rival.locator('body').innerText()))
+    fail('M8: a deep link exposed another club’s brief');
   say('M8: a deep link to another club’s brief reveals nothing — not even that it exists');
 
   await goto(rival, NM);
   await rival.waitForTimeout(1200);
-  if (/2027 Defensive Midfielder/.test(await rival.locator('body').innerText())) fail('M8: another club’s brief appears in the rival’s picker');
+  if (/2027 Defensive Midfielder/.test(await rival.locator('body').innerText()))
+    fail('M8: another club’s brief appears in the rival’s picker');
   say('M8: the rival club’s brief picker contains none of the first club’s briefs');
 
   const item = (await j('GET', '/org/second-look', undefined, MARIA)).body.items[0];
@@ -540,7 +634,8 @@ await dee.waitForSelector('[aria-label="Recruitment brief criteria"]', { timeout
   const max = await dee.locator('[aria-label="Radius (km)"]').getAttribute('max');
   if (max !== '50') fail(`M10: the grassroots radius input is not capped (max=${max})`);
   say('M10: the grassroots radius input is capped at 50 km');
-  if (/Standardized Combine requirement/i.test(form)) fail('M10: the grassroots brief offers the Pro-only Combine criterion');
+  if (/Standardized Combine requirement/i.test(form))
+    fail('M10: the grassroots brief offers the Pro-only Combine criterion');
   say('M10: the grassroots brief stays simpler — no standardized-Combine criterion');
 }
 await dee.fill('[aria-label="Title"]', 'Local defensive midfielder');
@@ -556,7 +651,8 @@ await dee.waitForTimeout(1300);
   const gb = briefs.find((b) => /Local defensive midfielder/.test(b.title));
   if (!gb) fail('M10: the grassroots brief was not created');
   if (gb.criteria.radiusKm !== 50) fail(`M10: the grassroots brief kept a ${gb.criteria.radiusKm} km radius`);
-  if (gb.criteria.maxLevel && gb.criteria.maxLevel !== 'semi_pro') fail(`M10: the grassroots brief reached ${gb.criteria.maxLevel}`);
+  if (gb.criteria.maxLevel && gb.criteria.maxLevel !== 'semi_pro')
+    fail(`M10: the grassroots brief reached ${gb.criteria.maxLevel}`);
   say('M10: a 500 km entry is held at the standing 50 km ceiling by the server, not by the form alone');
 
   await j('PATCH', `/org/recruitment-briefs/${gb.id}`, { status: 'active' }, DEE);

@@ -22,26 +22,38 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   useEffect(() => {
     let ok = true;
     setErr(null);
-    fn().then((x) => ok && setV(x)).catch((e) => ok && setErr(e instanceof Error ? e.message : 'failed'));
-    return () => { ok = false; };
+    fn()
+      .then((x) => ok && setV(x))
+      .catch((e) => ok && setErr(e instanceof Error ? e.message : 'failed'));
+    return () => {
+      ok = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
   return [v, () => setTick((x) => x + 1), err];
 }
 
-const inputStyle = (colors: Palette) => ({
-  backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
-  paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
-} as const);
+const inputStyle = (colors: Palette) =>
+  ({
+    backgroundColor: colors.panel2,
+    color: colors.text,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    borderWidth: 1,
+    borderColor: colors.line,
+  }) as const;
 
-const fitTone = (v: string): 'green' | 'red' | 'default' => (v === 'compatible' ? 'green' : v === 'conflict' ? 'red' : 'default');
+const fitTone = (v: string): 'green' | 'red' | 'default' =>
+  v === 'compatible' ? 'green' : v === 'conflict' ? 'red' : 'default';
 
 // -------------------------------------------------- private preferences
 export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: boolean }) {
   const colors = useColors();
   const [data, reload] = useLoad(
     () => (actor.kind === 'player' ? m13.getPreferences(actor.id) : m13.gGetPreferences(actor.id, actor.childId)),
-    [actor.id]
+    [actor.id],
   );
   const [travel, setTravel] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
@@ -54,28 +66,81 @@ export function PreferencesSection({ actor, isMinor }: { actor: Actor; isMinor: 
       else await m13.gSavePreferences(actor.id, actor.childId, patch);
       setMsg('Saved — private to you, never shown to clubs.');
       reload();
-    } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'failed');
+    }
   };
   return (
     <Card>
       <SectionTitle>{pt('m13prefs')}</SectionTitle>
-      <GuidanceNote icon="info" size={12}>{pt('m13prefsPrivate')}</GuidanceNote>
-      {readOnly && <GuidanceNote icon="users" size={12}>{pt('m13prefsGuardian')}</GuidanceNote>}
-      <RecordPanel title={pt('m13commitments')} icon="calendar-days">{p.commitments.length ? p.commitments.map((c, i) => <DetailFact key={i} label={c.label ?? c.day} value={`${c.day} ${c.start}–${c.end}`} icon="clock" />) : <Muted>—</Muted>}</RecordPanel>
-      <RecordPanel title={pt('m13available')} icon="calendar-days">{p.availableSlots.length ? p.availableSlots.map((c, i) => <DetailFact key={i} label={c.day} value={`${c.start}–${c.end}`} icon="clock" />) : <Muted>—</Muted>}</RecordPanel>
-      <RecordPanel title={pt('m13travel')} icon="map-pin"><DetailFact label={pt('m13travel')} value={p.travelLimitKm != null ? `${p.travelLimitKm} km` : '—'} icon="map-pin" /><DetailFact label={pt('m13transport')} value={p.transport ?? '—'} icon="route" />{actor.kind === 'player' && !isMinor && <DetailFact label={pt('m13relocation')} value={p.relocation ?? '—'} icon="globe" />}<DetailFact label={pt('m13expenses')} value={p.compensation.expensesNeeded ? pt('m13expensesNeeded') : pt('m13expensesOk')} icon="file-text" /></RecordPanel>
+      <GuidanceNote icon="info" size={12}>
+        {pt('m13prefsPrivate')}
+      </GuidanceNote>
+      {readOnly && (
+        <GuidanceNote icon="users" size={12}>
+          {pt('m13prefsGuardian')}
+        </GuidanceNote>
+      )}
+      <RecordPanel title={pt('m13commitments')} icon="calendar-days">
+        {p.commitments.length ? (
+          p.commitments.map((c, i) => (
+            <DetailFact key={i} label={c.label ?? c.day} value={`${c.day} ${c.start}–${c.end}`} icon="clock" />
+          ))
+        ) : (
+          <Muted>—</Muted>
+        )}
+      </RecordPanel>
+      <RecordPanel title={pt('m13available')} icon="calendar-days">
+        {p.availableSlots.length ? (
+          p.availableSlots.map((c, i) => (
+            <DetailFact key={i} label={c.day} value={`${c.start}–${c.end}`} icon="clock" />
+          ))
+        ) : (
+          <Muted>—</Muted>
+        )}
+      </RecordPanel>
+      <RecordPanel title={pt('m13travel')} icon="map-pin">
+        <DetailFact
+          label={pt('m13travel')}
+          value={p.travelLimitKm != null ? `${p.travelLimitKm} km` : '—'}
+          icon="map-pin"
+        />
+        <DetailFact label={pt('m13transport')} value={p.transport ?? '—'} icon="route" />
+        {actor.kind === 'player' && !isMinor && (
+          <DetailFact label={pt('m13relocation')} value={p.relocation ?? '—'} icon="globe" />
+        )}
+        <DetailFact
+          label={pt('m13expenses')}
+          value={p.compensation.expensesNeeded ? pt('m13expensesNeeded') : pt('m13expensesOk')}
+          icon="file-text"
+        />
+      </RecordPanel>
       {!readOnly && (
         <Row style={{ marginTop: 8 }}>
           <TextInput
-            accessibilityLabel={pt('m13travel')} style={[inputStyle(colors), { width: 90 }]} keyboardType="numeric"
-            placeholder="km" placeholderTextColor={colors.muted} value={travel} onChangeText={setTravel}
+            accessibilityLabel={pt('m13travel')}
+            style={[inputStyle(colors), { width: 90 }]}
+            keyboardType="numeric"
+            placeholder="km"
+            placeholderTextColor={colors.muted}
+            value={travel}
+            onChangeText={setTravel}
           />
           <Button small label={pt('m13saveTravel')} onPress={() => travel && save({ travelLimitKm: Number(travel) })} />
-          <Button small label={p.compensation.expensesNeeded ? pt('m13expensesOkBtn') : pt('m13expensesNeedBtn')}
-            onPress={() => save({ compensation: { ...p.compensation, expensesNeeded: !p.compensation.expensesNeeded } })} />
+          <Button
+            small
+            label={p.compensation.expensesNeeded ? pt('m13expensesOkBtn') : pt('m13expensesNeedBtn')}
+            onPress={() =>
+              save({ compensation: { ...p.compensation, expensesNeeded: !p.compensation.expensesNeeded } })
+            }
+          />
         </Row>
       )}
-      {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
+      {msg && (
+        <View accessibilityLiveRegion="polite">
+          <Muted size={12}>{msg}</Muted>
+        </View>
+      )}
     </Card>
   );
 }
@@ -85,7 +150,7 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
   const colors = useColors();
   const [board, reloadBoard] = useLoad<{ items: BoardItem[] }>(
     () => (actor.kind === 'player' ? m12.getBoard(actor.id) : m12.gBoard(actor.id, actor.childId)),
-    [actor.id]
+    [actor.id],
   );
   const [openId, setOpenId] = useState<string | null>(null);
   const [fit, setFit] = useState<{ oppId: string; verdicts: Verdict[]; note?: string } | null>(null);
@@ -93,61 +158,111 @@ export function OpportunityFitSection({ actor }: { actor: Actor }) {
   if (!board?.items.length) return null;
   // The root is one line and a "Check fit" per opportunity; the
   // verdicts are words per dimension, and the reasons are behind "Why".
-  const toneColor = (v: string) => (fitTone(v) === 'green' ? colors.accentText : fitTone(v) === 'red' ? colors.danger : colors.text);
+  const toneColor = (v: string) =>
+    fitTone(v) === 'green' ? colors.accentText : fitTone(v) === 'red' ? colors.danger : colors.text;
   return (
     <Card testID="fit">
       <SectionTitle>{pt('m13fit')}</SectionTitle>
       <Muted size={13}>{pt('m13fitLine')}</Muted>
-      {board.items.filter((o) => o.via !== 'open_trial').slice(0, 4).map((o) => (
-        <View key={o.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`fit-${o.id}`}>
-          <Row>
-            <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14, flex: 1 }}>{o.title}</Text>
-            <Button small tertiary label={openId === o.id ? pt('m13hideFit') : pt('m13checkFit')} testID={`fit-check-${o.id}`} onPress={async () => {
-              if (openId === o.id) { setOpenId(null); setFit(null); return; }
-              reloadBoard(); // pick up a just-submitted application so the share control appears
-              try {
-                const r = actor.kind === 'player' ? await m13.suitability(actor.id, o.id) : await m13.gSuitability(actor.id, actor.childId, o.id);
-                setFit({ oppId: o.id, ...r });
-                setOpenId(o.id);
-              } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); }
-            }} />
-          </Row>
-          {openId === o.id && fit?.oppId === o.id && (
-            <View testID={`fit-result-${o.id}`}>
-              {fit.verdicts.map((v) => (
-                <Row key={v.dimension} style={{ marginTop: 4, justifyContent: 'space-between' }}>
-                  <Text style={{ color: colors.text, fontSize: 13.5 }}>{cap(v.dimension)}</Text>
-                  <Text style={{ color: toneColor(v.verdict), fontSize: 13.5, fontWeight: '600' }}>{cap(v.verdict)}</Text>
-                </Row>
-              ))}
-              <Disclosure label={pt('m13fitWhy')} testID={`fit-why-${o.id}`}>
-                {fit.verdicts.map((v) => <RecordPanel key={v.dimension} title={cap(v.dimension)} subtitle={v.source} icon="clipboard-list"><GuidanceNote size={13}>{v.reason}</GuidanceNote></RecordPanel>)}
-                {fit.note && <GuidanceNote size={12.5}>{fit.note}</GuidanceNote>}
-              </Disclosure>
-              {o.applied?.id && (
-                <Row><Button small tertiary label={pt('m13shareFit')} onPress={async () => {
+      {board.items
+        .filter((o) => o.via !== 'open_trial')
+        .slice(0, 4)
+        .map((o) => (
+          <View
+            key={o.id}
+            style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}
+            testID={`fit-${o.id}`}
+          >
+            <Row>
+              <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14, flex: 1 }}>{o.title}</Text>
+              <Button
+                small
+                tertiary
+                label={openId === o.id ? pt('m13hideFit') : pt('m13checkFit')}
+                testID={`fit-check-${o.id}`}
+                onPress={async () => {
+                  if (openId === o.id) {
+                    setOpenId(null);
+                    setFit(null);
+                    return;
+                  }
+                  reloadBoard(); // pick up a just-submitted application so the share control appears
                   try {
-                    if (actor.kind === 'player') await m13.shareSuitability(actor.id, o.applied!.id!, true);
-                    else await m13.gShareSuitability(actor.id, actor.childId, o.applied!.id!, true);
-                    setMsg(pt('m13sharedFit'));
-                  } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); }
-                }} /></Row>
-              )}
-            </View>
-          )}
+                    const r =
+                      actor.kind === 'player'
+                        ? await m13.suitability(actor.id, o.id)
+                        : await m13.gSuitability(actor.id, actor.childId, o.id);
+                    setFit({ oppId: o.id, ...r });
+                    setOpenId(o.id);
+                  } catch (e) {
+                    setMsg(e instanceof Error ? e.message : 'failed');
+                  }
+                }}
+              />
+            </Row>
+            {openId === o.id && fit?.oppId === o.id && (
+              <View testID={`fit-result-${o.id}`}>
+                {fit.verdicts.map((v) => (
+                  <Row key={v.dimension} style={{ marginTop: 4, justifyContent: 'space-between' }}>
+                    <Text style={{ color: colors.text, fontSize: 13.5 }}>{cap(v.dimension)}</Text>
+                    <Text style={{ color: toneColor(v.verdict), fontSize: 13.5, fontWeight: '600' }}>
+                      {cap(v.verdict)}
+                    </Text>
+                  </Row>
+                ))}
+                <Disclosure label={pt('m13fitWhy')} testID={`fit-why-${o.id}`}>
+                  {fit.verdicts.map((v) => (
+                    <RecordPanel key={v.dimension} title={cap(v.dimension)} subtitle={v.source} icon="clipboard-list">
+                      <GuidanceNote size={13}>{v.reason}</GuidanceNote>
+                    </RecordPanel>
+                  ))}
+                  {fit.note && <GuidanceNote size={12.5}>{fit.note}</GuidanceNote>}
+                </Disclosure>
+                {o.applied?.id && (
+                  <Row>
+                    <Button
+                      small
+                      tertiary
+                      label={pt('m13shareFit')}
+                      onPress={async () => {
+                        try {
+                          if (actor.kind === 'player') await m13.shareSuitability(actor.id, o.applied!.id!, true);
+                          else await m13.gShareSuitability(actor.id, actor.childId, o.applied!.id!, true);
+                          setMsg(pt('m13sharedFit'));
+                        } catch (e) {
+                          setMsg(e instanceof Error ? e.message : 'failed');
+                        }
+                      }}
+                    />
+                  </Row>
+                )}
+              </View>
+            )}
+          </View>
+        ))}
+      {msg && (
+        <View accessibilityLiveRegion="polite">
+          <Muted size={12.5}>{msg}</Muted>
         </View>
-      ))}
-      {msg && <View accessibilityLiveRegion="polite"><Muted size={12.5}>{msg}</Muted></View>}
+      )}
     </Card>
   );
 }
 
 // --------------------------------------------------------- transitions
-export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Actor; isMinor: boolean; mediaOptions: { id: string; title: string }[] }) {
+export function TransitionsSection({
+  actor,
+  isMinor,
+  mediaOptions,
+}: {
+  actor: Actor;
+  isMinor: boolean;
+  mediaOptions: { id: string; title: string }[];
+}) {
   const colors = useColors();
   const [cases, reload, err] = useLoad<TransitionCase[]>(
     () => (actor.kind === 'player' ? m13.listTransitions(actor.id) : m13.gListTransitions(actor.id)),
-    [actor.id]
+    [actor.id],
   );
   const [orgInput, setOrgInput] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
@@ -160,53 +275,128 @@ export function TransitionsSection({ actor, isMinor, mediaOptions }: { actor: Ac
     );
   }
   const act = (fn: () => Promise<unknown>, done: string) =>
-    fn().then(() => { setMsg(done); reload(); }).catch((e) => setMsg(e instanceof Error ? e.message : 'failed'));
+    fn()
+      .then(() => {
+        setMsg(done);
+        reload();
+      })
+      .catch((e) => setMsg(e instanceof Error ? e.message : 'failed'));
   return (
     <Card>
       <SectionTitle>{pt('m13trn')}</SectionTitle>
-      <GuidanceNote title="Your transition pack" icon="folder-open">{pt('m13trnNote')}</GuidanceNote>
+      <GuidanceNote title="Your transition pack" icon="folder-open">
+        {pt('m13trnNote')}
+      </GuidanceNote>
       {(cases ?? []).map((c) => (
-        <View key={c.id} style={{ marginTop: 8, gap: 14, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 16 }}>
-          <RecordIdentity name={c.note ?? c.id} icon="route" status={<Pill label={pt(c.status === 'open' ? 'm13trnStOpen' : c.status === 'placed' ? 'm13trnStPlaced' : 'm13trnStClosed')} tone={c.status === 'open' ? 'blue' : c.status === 'placed' ? 'green' : 'default'} />} />
+        <View
+          key={c.id}
+          style={{ marginTop: 8, gap: 14, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 16 }}
+        >
+          <RecordIdentity
+            name={c.note ?? c.id}
+            icon="route"
+            status={
+              <Pill
+                label={pt(
+                  c.status === 'open' ? 'm13trnStOpen' : c.status === 'placed' ? 'm13trnStPlaced' : 'm13trnStClosed',
+                )}
+                tone={c.status === 'open' ? 'blue' : c.status === 'placed' ? 'green' : 'default'}
+              />
+            }
+          />
           {c.recipients.map((r) => (
             <Row key={r.orgId} style={{ marginTop: 4 }}>
-              <View style={{ flex: 1, gap: 5 }}><Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>{r.orgName}</Text><Muted size={11.5}>{r.revokedAt ? pt('m13trnRevoked') : r.viewedAt ? pt('m13trnViewed') : pt('m13trnNotViewed')}</Muted></View>
+              <View style={{ flex: 1, gap: 5 }}>
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>{r.orgName}</Text>
+                <Muted size={11.5}>
+                  {r.revokedAt ? pt('m13trnRevoked') : r.viewedAt ? pt('m13trnViewed') : pt('m13trnNotViewed')}
+                </Muted>
+              </View>
               {!r.revokedAt && c.status === 'open' && (
-                <Button small label={pt('m13trnRevoke')} onPress={() => act(
-                  () => (actor.kind === 'player' ? m13.revokeRecipient(actor.id, c.id, r.orgId) : m13.gRevokeRecipient(actor.id, c.id, r.orgId)),
-                  pt('m13trnRevokedMsg')
-                )} />
+                <Button
+                  small
+                  label={pt('m13trnRevoke')}
+                  onPress={() =>
+                    act(
+                      () =>
+                        actor.kind === 'player'
+                          ? m13.revokeRecipient(actor.id, c.id, r.orgId)
+                          : m13.gRevokeRecipient(actor.id, c.id, r.orgId),
+                      pt('m13trnRevokedMsg'),
+                    )
+                  }
+                />
               )}
             </Row>
           ))}
           {c.status === 'open' && (
             <Row style={{ marginTop: 6 }}>
-              <TextInput accessibilityLabel="Org id" style={[inputStyle(colors), { flex: 1 }]} placeholder={pt('m13trnClubHint')} placeholderTextColor={colors.muted} value={orgInput} onChangeText={setOrgInput} />
-              <Button small label={pt('m13trnGrant')} onPress={() => orgInput && act(
-                () => (actor.kind === 'player' ? m13.addRecipient(actor.id, c.id, orgInput) : m13.gAddRecipient(actor.id, c.id, orgInput)),
-                pt('m13trnGranted')
-              )} />
+              <TextInput
+                accessibilityLabel="Org id"
+                style={[inputStyle(colors), { flex: 1 }]}
+                placeholder={pt('m13trnClubHint')}
+                placeholderTextColor={colors.muted}
+                value={orgInput}
+                onChangeText={setOrgInput}
+              />
+              <Button
+                small
+                label={pt('m13trnGrant')}
+                onPress={() =>
+                  orgInput &&
+                  act(
+                    () =>
+                      actor.kind === 'player'
+                        ? m13.addRecipient(actor.id, c.id, orgInput)
+                        : m13.gAddRecipient(actor.id, c.id, orgInput),
+                    pt('m13trnGranted'),
+                  )
+                }
+              />
               {actor.kind === 'player' && (
-                <Button small label={pt('m13trnPlace')} onPress={() => orgInput && act(
-                  () => m13.placeTransition(actor.id, c.id, orgInput), pt('m13trnPlaced')
-                )} />
+                <Button
+                  small
+                  label={pt('m13trnPlace')}
+                  onPress={() =>
+                    orgInput && act(() => m13.placeTransition(actor.id, c.id, orgInput), pt('m13trnPlaced'))
+                  }
+                />
               )}
             </Row>
           )}
-          {c.placement && <Muted size={12}>{pt('m13trnPlacedAt')} {c.placement.orgName}</Muted>}
+          {c.placement && (
+            <Muted size={12}>
+              {pt('m13trnPlacedAt')} {c.placement.orgName}
+            </Muted>
+          )}
         </View>
       ))}
       {(cases ?? []).length === 0 && !err && (
-        <Button small primary label={pt('m13trnOpen')} onPress={() => {
-          const mediaIds = mediaOptions.slice(0, 1).map((mm) => mm.id);
-          if (!mediaIds.length) { setMsg(pt('m13trnNeedMedia')); return; }
-          act(
-            () => (actor.kind === 'player' ? m13.openTransition(actor.id, { mediaIds, note: 'Open to a new club' }) : m13.gOpenTransition(actor.id, actor.childId, { mediaIds, note: 'Open to a new club' })),
-            pt('m13trnOpened')
-          );
-        }} />
+        <Button
+          small
+          primary
+          label={pt('m13trnOpen')}
+          onPress={() => {
+            const mediaIds = mediaOptions.slice(0, 1).map((mm) => mm.id);
+            if (!mediaIds.length) {
+              setMsg(pt('m13trnNeedMedia'));
+              return;
+            }
+            act(
+              () =>
+                actor.kind === 'player'
+                  ? m13.openTransition(actor.id, { mediaIds, note: 'Open to a new club' })
+                  : m13.gOpenTransition(actor.id, actor.childId, { mediaIds, note: 'Open to a new club' }),
+              pt('m13trnOpened'),
+            );
+          }}
+        />
       )}
-      {msg && <View accessibilityLiveRegion="polite"><Muted size={12}>{msg}</Muted></View>}
+      {msg && (
+        <View accessibilityLiveRegion="polite">
+          <Muted size={12}>{msg}</Muted>
+        </View>
+      )}
     </Card>
   );
 }
@@ -219,8 +409,16 @@ export function ExposureSection({ playerId }: { playerId: string }) {
   return (
     <Card>
       <SectionTitle>{pt('m13exposure')}</SectionTitle>
-      <MetricTiles items={[{ label: pt('m13expSearches'), value: exp.appearedInSearches, icon: 'search' }, { label: pt('m13expProfiles'), value: exp.profileViews, icon: 'eye' }, { label: pt('m13expClubs'), value: exp.clubs, icon: 'building-2' }]} />
-      <Disclosure label="About these figures"><GuidanceNote size={12}>{exp.note}</GuidanceNote></Disclosure>
+      <MetricTiles
+        items={[
+          { label: pt('m13expSearches'), value: exp.appearedInSearches, icon: 'search' },
+          { label: pt('m13expProfiles'), value: exp.profileViews, icon: 'eye' },
+          { label: pt('m13expClubs'), value: exp.clubs, icon: 'building-2' },
+        ]}
+      />
+      <Disclosure label="About these figures">
+        <GuidanceNote size={12}>{exp.note}</GuidanceNote>
+      </Disclosure>
     </Card>
   );
 }
@@ -229,7 +427,7 @@ export function ExposureSection({ playerId }: { playerId: string }) {
 export function AckSection({ actor }: { actor: Actor }) {
   const [items, reload] = useLoad<AckNotification[]>(
     () => (actor.kind === 'player' ? m13.ackList(actor.id) : m13.gAckList(actor.id)),
-    [actor.id]
+    [actor.id],
   );
   const pending = (items ?? []).filter((nn) => !nn.actionRequired?.ackedAt);
   if (!pending.length) return null;
@@ -240,10 +438,17 @@ export function AckSection({ actor }: { actor: Actor }) {
         // One line per notice; the full text and the action sit behind it.
         <Disclosure key={nn.id} label={nn.text.split(/[.;—]\s/)[0].slice(0, 64)} testID={`ack-${nn.id}`}>
           <GuidanceNote size={12.5}>{nn.text}</GuidanceNote>
-          <Button small primary label={pt('m13ackBtn')} testID={`ack-confirm-${nn.id}`} onPress={async () => {
-            if (actor.kind === 'player') await m13.ack(actor.id, nn.id); else await m13.gAck(actor.id, nn.id);
-            reload();
-          }} />
+          <Button
+            small
+            primary
+            label={pt('m13ackBtn')}
+            testID={`ack-confirm-${nn.id}`}
+            onPress={async () => {
+              if (actor.kind === 'player') await m13.ack(actor.id, nn.id);
+              else await m13.gAck(actor.id, nn.id);
+              reload();
+            }}
+          />
         </Disclosure>
       ))}
     </Card>

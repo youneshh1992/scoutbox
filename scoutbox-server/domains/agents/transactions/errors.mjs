@@ -79,25 +79,59 @@ export const TRANSACTION_ERROR_HTTP = table({
 export const httpStatusFor = (code) => TRANSACTION_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
-  'error', 'message', 'field', 'allowed', 'status', 'from', 'to', 'expectedRev', 'currentRev',
-  'updatedBy', 'updatedAt', 'retryAfter', 'partyRole', 'awaiting', 'pendingReason', 'reasons',
-  'policyVersions', 'consentsOutstanding', 'staleness', 'visibility', 'documentType', 'contextId', 'outcome',
+  'error',
+  'message',
+  'field',
+  'allowed',
+  'status',
+  'from',
+  'to',
+  'expectedRev',
+  'currentRev',
+  'updatedBy',
+  'updatedAt',
+  'retryAfter',
+  'partyRole',
+  'awaiting',
+  'pendingReason',
+  'reasons',
+  'policyVersions',
+  'consentsOutstanding',
+  'staleness',
+  'visibility',
+  'documentType',
+  'contextId',
+  'outcome',
 ];
 
 /** Reasons reach the wire as codes and rule references only. */
-const publicReason = (r) => ({ code: r.code, ruleId: r.ruleId ?? null, ruleStatus: r.ruleStatus ?? null, policyVersion: r.policyVersion ?? null, ...(r.partyRole ? { partyRole: r.partyRole } : {}), ...(r.partyRoles ? { partyRoles: r.partyRoles } : {}) });
+const publicReason = (r) => ({
+  code: r.code,
+  ruleId: r.ruleId ?? null,
+  ruleStatus: r.ruleStatus ?? null,
+  policyVersion: r.policyVersion ?? null,
+  ...(r.partyRole ? { partyRole: r.partyRole } : {}),
+  ...(r.partyRoles ? { partyRoles: r.partyRoles } : {}),
+});
 
 export function publicErrorBody(out) {
   const code = out?.error;
   if (TRANSACTION_ERROR_HTTP[code] === 500) {
-    return { ok: false, error: code, message: 'The transaction service cannot serve this request. This has been recorded.' };
+    return {
+      ok: false,
+      error: code,
+      message: 'The transaction service cannot serve this request. This has been recorded.',
+    };
   }
   const body = { ok: false };
   for (const k of PUBLIC_ERROR_FIELDS) {
     if (out?.[k] === undefined) continue;
-    body[k] = k === 'reasons' && Array.isArray(out[k]) ? out[k].map(publicReason)
-      : k === 'consentsOutstanding' && Array.isArray(out[k]) ? out[k].map((c) => ({ partyRole: c.partyRole, consentKind: c.consentKind, reasonCode: c.reasonCode }))
-        : out[k];
+    body[k] =
+      k === 'reasons' && Array.isArray(out[k])
+        ? out[k].map(publicReason)
+        : k === 'consentsOutstanding' && Array.isArray(out[k])
+          ? out[k].map((c) => ({ partyRole: c.partyRole, consentKind: c.consentKind, reasonCode: c.reasonCode }))
+          : out[k];
   }
   return body;
 }
@@ -106,11 +140,20 @@ export function sendTransactionError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
     console.error(`transactions ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
-    return res.status(500).json({ ok: false, error: 'TRANSACTION_STATE_UNKNOWN', message: 'The transaction service cannot serve this request. This has been recorded.' });
+    return res.status(500).json({
+      ok: false,
+      error: 'TRANSACTION_STATE_UNKNOWN',
+      message: 'The transaction service cannot serve this request. This has been recorded.',
+    });
   }
   if (status === 500) console.error(`transactions ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }
 
 /** Every "you may not know whether this exists" answer. */
-export const notFound = (res, where) => sendTransactionError(res, { error: 'TRANSACTION_NOT_FOUND', message: 'No transaction with that reference is available to you.' }, where);
+export const notFound = (res, where) =>
+  sendTransactionError(
+    res,
+    { error: 'TRANSACTION_NOT_FOUND', message: 'No transaction with that reference is available to you.' },
+    where,
+  );

@@ -43,10 +43,17 @@ export function TrustPanel({ session, playerId }: { session: Session; playerId: 
     if (!open) return;
     let live = true;
     setErr(null);
-    trust.player(session, playerId)
-      .then((p) => { if (live) setProfile(p); })
-      .catch((e) => { if (live) setErr(wallMessage(e)); });
-    return () => { live = false; };
+    trust
+      .player(session, playerId)
+      .then((p) => {
+        if (live) setProfile(p);
+      })
+      .catch((e) => {
+        if (live) setErr(wallMessage(e));
+      });
+    return () => {
+      live = false;
+    };
   }, [session, playerId, open]);
 
   const note = profile?.note || t('trs.note');
@@ -55,7 +62,9 @@ export function TrustPanel({ session, playerId }: { session: Session; playerId: 
     <div className="section" aria-label="Trust Profile">
       <h4>
         {t('trs.title')}
-        <button style={{ marginLeft: 8 }} onClick={() => setOpen((x) => !x)}>{open ? t('trs.hide') : t('trs.show')}</button>
+        <button style={{ marginLeft: 8 }} onClick={() => setOpen((x) => !x)}>
+          {open ? t('trs.hide') : t('trs.show')}
+        </button>
       </h4>
       {open && err && <div className="notice block">{err}</div>}
       {open && !profile && !err && <div className="dim">{t('trs.loading')}</div>}
@@ -68,8 +77,12 @@ export function TrustPanel({ session, playerId }: { session: Session; playerId: 
             <span className="pill blue">{profile.bandLabel}</span>
             {profile.simulatedEvidenceIncluded && <span className="pill gold">{t('trs.demo')}</span>}
           </div>
-          <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>{profile.disclaimer || t('trs.disclaimer')}</div>
-          <div className="dim" style={{ fontSize: 12.5 }} title={note}>{note}</div>
+          <div className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>
+            {profile.disclaimer || t('trs.disclaimer')}
+          </div>
+          <div className="dim" style={{ fontSize: 12.5 }} title={note}>
+            {note}
+          </div>
 
           {/* Safe component levels — the level only, never the records behind it. */}
           <div style={{ marginTop: 10 }}>
@@ -77,9 +90,13 @@ export function TrustPanel({ session, playerId }: { session: Session; playerId: 
             <div className="list-rows">
               {profile.explanations.map((e) => (
                 <div key={e.component} className="list-row">
-                  <span className="grow"><b>{componentLabel(e.component)}</b></span>
+                  <span className="grow">
+                    <b>{componentLabel(e.component)}</b>
+                  </span>
                   <span className="pill">{e.levelLabel}</span>
-                  <span className="dim" style={{ fontSize: 12 }}>{t('trs.weight')} {e.weight}</span>
+                  <span className="dim" style={{ fontSize: 12 }}>
+                    {t('trs.weight')} {e.weight}
+                  </span>
                 </div>
               ))}
             </div>
@@ -92,13 +109,19 @@ export function TrustPanel({ session, playerId }: { session: Session; playerId: 
             {profile.signals.length > 0 ? (
               <div className="list-rows">
                 {profile.signals.map((s, i) => (
-                  <div key={`${s.code}-${i}`} className="list-row"><span className="grow">✓ {s.text}</span></div>
+                  <div key={`${s.code}-${i}`} className="list-row">
+                    <span className="grow">✓ {s.text}</span>
+                  </div>
                 ))}
               </div>
-            ) : <div className="dim">{t('trs.noSignals')}</div>}
+            ) : (
+              <div className="dim">{t('trs.noSignals')}</div>
+            )}
           </div>
 
-          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>{t('trs.policy')} {profile.policyVersion} · {t('trs.noRanking')}</div>
+          <div className="dim" style={{ fontSize: 12, marginTop: 6 }}>
+            {t('trs.policy')} {profile.policyVersion} · {t('trs.noRanking')}
+          </div>
         </>
       )}
     </div>

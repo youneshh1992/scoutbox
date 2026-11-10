@@ -20,22 +20,30 @@ export const group = (k, fields, o = {}) => ({ k, group: fields, ...o });
 // ------------------------------------------------------------------ DDL
 export const flat = (spec) => spec.flatMap((f) => (f.group ? flat(f.group) : [f]));
 export const quote = (v) => `'${String(v).replace(/'/g, "''")}'`;
-const DATE_SQL = (c) => `(${c} GLOB '[0-9][0-9][0-9][0-9]' OR ${c} GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' OR ${c} GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')`;
+const DATE_SQL = (c) =>
+  `(${c} GLOB '[0-9][0-9][0-9][0-9]' OR ${c} GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]' OR ${c} GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]')`;
 export function columnDdl(f, { nullable = false } = {}) {
   const notNull = f.req && !nullable;
   const nn = notNull ? ' NOT NULL' : '';
   const guard = (cond) => (notNull ? `CHECK (${cond})` : `CHECK (${f.c} IS NULL OR ${cond})`);
-  if (f.t === 'text') return `TEXT${nn} ${guard(`length(${f.c}) <= ${f.max}${f.nonEmpty ? ` AND length(${f.c}) > 0` : ''}`)}`;
+  if (f.t === 'text')
+    return `TEXT${nn} ${guard(`length(${f.c}) <= ${f.max}${f.nonEmpty ? ` AND length(${f.c}) > 0` : ''}`)}`;
   if (f.t === 'int') return `INTEGER${nn}${f.def !== undefined ? ` DEFAULT ${f.def}` : ''}`;
   if (f.t === 'num') return `REAL${nn}`;
   if (f.t === 'bool') return `INTEGER${nn} ${guard(`${f.c} IN (0,1)`)}`;
   if (f.t === 'date') return `TEXT${nn} ${guard(DATE_SQL(f.c))}`;
   return `TEXT${nn} ${guard(`${f.c} IN (${f.vals.map(quote).join(',')})`)}`;
 }
-const columnsOf = (spec, inNullableGroup = false) => spec.flatMap((f) => (f.group ? columnsOf(f.group, inNullableGroup || !!f.nullable) : [{ f, nullable: inNullableGroup }]));
+const columnsOf = (spec, inNullableGroup = false) =>
+  spec.flatMap((f) =>
+    f.group ? columnsOf(f.group, inNullableGroup || !!f.nullable) : [{ f, nullable: inNullableGroup }],
+  );
 /** `CREATE TABLE` for a spec: its columns, then the given keys and table constraints. A column named `id` is the text primary key. */
 export function tableDdl(name, spec, extra = []) {
-  const cols = columnsOf(spec).map(({ f, nullable }) => `  ${f.c.padEnd(40)} ${f.c === 'id' ? 'TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80)' : columnDdl(f, { nullable })}`);
+  const cols = columnsOf(spec).map(
+    ({ f, nullable }) =>
+      `  ${f.c.padEnd(40)} ${f.c === 'id' ? 'TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= 80)' : columnDdl(f, { nullable })}`,
+  );
   return `CREATE TABLE ${name} (\n${[...cols, ...extra.map((e) => `  ${e}`)].join(',\n')}\n) STRICT;`;
 }
 
@@ -54,7 +62,8 @@ export function isFootballDate(v) {
 }
 export function typeScalar(f, v, at) {
   if (v === undefined && f.def !== undefined) v = f.def;
-  if (v === undefined || v === null) return f.req ? bad(at, f.k, `is required (got ${describe(v)})`) : { ok: true, value: null };
+  if (v === undefined || v === null)
+    return f.req ? bad(at, f.k, `is required (got ${describe(v)})`) : { ok: true, value: null };
   if (f.t === 'text') {
     if (typeof v !== 'string') return bad(at, f.k, `must be text (got ${describe(v)})`);
     if (v.length > f.max) return bad(at, f.k, `exceeds ${f.max} characters`);
@@ -62,11 +71,13 @@ export function typeScalar(f, v, at) {
   } else if (f.t === 'int') {
     if (!Number.isSafeInteger(v)) return bad(at, f.k, `must be an integer (got ${describe(v)})`);
   } else if (f.t === 'num') {
-    if (typeof v !== 'number' || !Number.isFinite(v)) return bad(at, f.k, `must be a finite number (got ${describe(v)})`);
+    if (typeof v !== 'number' || !Number.isFinite(v))
+      return bad(at, f.k, `must be a finite number (got ${describe(v)})`);
   } else if (f.t === 'bool') {
     if (typeof v !== 'boolean') return bad(at, f.k, `must be true or false (got ${describe(v)})`);
   } else if (f.t === 'date') {
-    if (!isFootballDate(v)) return bad(at, f.k, `must be a date written YYYY, YYYY-MM or YYYY-MM-DD (got ${describe(v)})`);
+    if (!isFootballDate(v))
+      return bad(at, f.k, `must be a date written YYYY, YYYY-MM or YYYY-MM-DD (got ${describe(v)})`);
   } else if (!f.vals.includes(v)) return bad(at, f.k, `must be one of ${f.vals.join('|')} (got ${describe(v)})`);
   return { ok: true, value: v };
 }
@@ -75,21 +86,32 @@ export function typeSpec(spec, raw, at, extra = []) {
   if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
   const known = new Set([...spec.map((f) => f.k), ...extra]);
   const unknown = Object.keys(raw).filter((k) => !known.has(k));
-  if (unknown.length) return { ok: false, reason: `${at} carries field(s) this build does not store: ${unknown.join(', ')}` };
+  if (unknown.length)
+    return { ok: false, reason: `${at} carries field(s) this build does not store: ${unknown.join(', ')}` };
   const out = {};
   for (const f of spec) {
     const v = raw[f.k];
     if (f.group) {
       if (v === undefined || v === null) {
-        if (f.nullable) { if (!f.sparse || v === null) out[f.k] = null; continue; }
-        if (f.sparse) { const t = typeSpec(f.group, {}, `${at}.${f.k}`); if (!t.ok) return t; out[f.k] = t.record; continue; }
+        if (f.nullable) {
+          if (!f.sparse || v === null) out[f.k] = null;
+          continue;
+        }
+        if (f.sparse) {
+          const t = typeSpec(f.group, {}, `${at}.${f.k}`);
+          if (!t.ok) return t;
+          out[f.k] = t.record;
+          continue;
+        }
         return bad(at, f.k, `is required (got ${describe(v)})`);
       }
-      const t = typeSpec(f.group, v, `${at}.${f.k}`); if (!t.ok) return t;
+      const t = typeSpec(f.group, v, `${at}.${f.k}`);
+      if (!t.ok) return t;
       out[f.k] = f.sparse ? Object.fromEntries(Object.entries(t.record).filter(([, x]) => x !== null)) : t.record;
       continue;
     }
-    const t = typeScalar(f, v, at); if (!t.ok) return t;
+    const t = typeScalar(f, v, at);
+    if (!t.ok) return t;
     out[f.k] = t.value;
   }
   return { ok: true, record: out };
@@ -98,7 +120,10 @@ export function typeSpec(spec, raw, at, extra = []) {
 // ------------------------------------------------------------------ rows
 export const encode = (spec, rec, row = {}) => {
   for (const f of spec) {
-    if (f.group) { encode(f.group, rec[f.k] ?? {}, row); continue; }
+    if (f.group) {
+      encode(f.group, rec[f.k] ?? {}, row);
+      continue;
+    }
     const v = rec[f.k];
     row[f.c] = v === undefined || v === null ? null : f.t === 'bool' ? (v ? 1 : 0) : v;
   }
@@ -109,7 +134,10 @@ export const decode = (spec, row) => {
   for (const f of spec) {
     if (f.group) {
       const inner = decode(f.group, row);
-      if (f.nullable && row[f.group[0].c] === null) { if (!f.sparse) out[f.k] = null; continue; }
+      if (f.nullable && row[f.group[0].c] === null) {
+        if (!f.sparse) out[f.k] = null;
+        continue;
+      }
       out[f.k] = f.sparse ? Object.fromEntries(Object.entries(inner).filter(([, x]) => x !== null)) : inner;
       continue;
     }
@@ -118,5 +146,14 @@ export const decode = (spec, row) => {
   }
   return out;
 };
-export const insertSql = (table, spec) => { const cols = flat(spec).map((f) => f.c); return `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`; };
-export const upsertSql = (table, spec, key = ['id']) => { const cols = flat(spec).map((f) => f.c); return `${insertSql(table, spec)} ON CONFLICT(${key.join(', ')}) DO UPDATE SET ${cols.filter((c) => !key.includes(c)).map((c) => `${c} = excluded.${c}`).join(', ')}`; };
+export const insertSql = (table, spec) => {
+  const cols = flat(spec).map((f) => f.c);
+  return `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`;
+};
+export const upsertSql = (table, spec, key = ['id']) => {
+  const cols = flat(spec).map((f) => f.c);
+  return `${insertSql(table, spec)} ON CONFLICT(${key.join(', ')}) DO UPDATE SET ${cols
+    .filter((c) => !key.includes(c))
+    .map((c) => `${c} = excluded.${c}`)
+    .join(', ')}`;
+};

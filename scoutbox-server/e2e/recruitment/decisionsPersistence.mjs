@@ -20,40 +20,93 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
-import { decisionIntegrity, duplicateFinalHeads, chainHead, isFormal } from '../../domains/recruitment/lifecycle/decision.mjs';
+import {
+  decisionIntegrity,
+  duplicateFinalHeads,
+  chainHead,
+  isFormal,
+} from '../../domains/recruitment/lifecycle/decision.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
-const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
+const LATEST_SCHEMA = Number(
+  DATA_MIGRATIONS.map((m) => m.id)
+    .sort()
+    .at(-1)
+    .slice(0, 4),
+); // the latest table migration's number
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 
-let passed = 0; let negatives = 0;
-const fail = (m) => { console.error(`✗ ${m}`); process.exitCode = 1; };
-const ok = (c, m) => { if (c) { passed++; console.log(`✓ ${m}`); } else fail(m); };
-const neg = (c, m) => { negatives++; ok(c, `[neg] ${m}`); };
+let passed = 0;
+let negatives = 0;
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exitCode = 1;
+};
+const ok = (c, m) => {
+  if (c) {
+    passed++;
+    console.log(`✓ ${m}`);
+  } else fail(m);
+};
+const neg = (c, m) => {
+  negatives++;
+  ok(c, `[neg] ${m}`);
+};
 const section = (n) => console.log(`\n— ${n} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const children = [];
-process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
+process.on('exit', () => {
+  for (const c of children) {
+    try {
+      c.kill('SIGKILL');
+    } catch {
+      /* gone */
+    }
+  }
+});
 
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn(process.execPath, [SERVER], {
+    env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
   children.push(proc);
   let log = '';
-  proc.stdout.on('data', (b) => { log += b; }); proc.stderr.on('data', (b) => { log += b; });
-  proc.unref(); proc.stdout.unref(); proc.stderr.unref();
+  proc.stdout.on('data', (b) => {
+    log += b;
+  });
+  proc.stderr.on('data', (b) => {
+    log += b;
+  });
+  proc.unref();
+  proc.stdout.unref();
+  proc.stderr.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i += 1) {
     if (proc.exitCode != null) return { up: false, log: () => log };
-    try { up = (await fetch(`${base}/healthz`)).ok; } catch { /* booting */ }
+    try {
+      up = (await fetch(`${base}/healthz`)).ok;
+    } catch {
+      /* booting */
+    }
     if (!up) await sleep(250);
   }
   const j = async (method, url, body, token, extra = {}) => {
-    const r = await fetch(`${base}${url}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra }, body: body === undefined ? undefined : JSON.stringify(body) });
-    let data = null; try { data = await r.json(); } catch { /* non-json */ }
+    const r = await fetch(`${base}${url}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    let data = null;
+    try {
+      data = await r.json();
+    } catch {
+      /* non-json */
+    }
     return { status: r.status, body: data };
   };
   const stop = async () => {
@@ -75,48 +128,192 @@ const BY = { userId: 'usr-owner', name: 'Owner', role: 'Head of Recruitment' };
  *  naming an unknown staff member is refused with the id, never repaired. */
 function baseDb() {
   const db = {
-    players: [{ id: 'pl-x', name: 'Xavier Adult', dob: '2000-05-05', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } }],
-    orgs: [{ id: 'org-x', name: 'X FC', type: 'club', level: 'pro', plan: 'Pro', verified: true, safeguardingContractSigned: true, location: { lat: 51.5, lng: -0.1 } }],
-    guardians: [], users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }], sessions: [], ledger: [], notifications: [],
-    recruitmentCases: [{
-      id: 'case-x', orgId: 'org-x', playerId: 'pl-x', playerName: 'Xavier Adult', ownerUserId: 'usr-owner', ownerName: 'Owner', stage: 'review',
-      priority: 'medium', restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null },
-      room: { status: 'shortlisted', priority: 'normal', tags: [], leadScoutUserId: 'usr-owner', sourceContext: 'search', updatedAt: 1000, archivedAt: null, closedAt: null, rev: 2, revAt: 1000, revBy: null },
-      createdAt: 1000, history: [{ id: 'aud-1', at: 1000, byKind: 'org', byId: 'usr-owner', byName: 'Owner', action: 'room_created', detail: { status: 'watching' } }, { id: 'aud-2', at: 1001, byKind: 'org', byId: 'usr-owner', byName: 'Owner', action: 'room_status_changed', detail: { from: 'watching', to: 'shortlisted', reasonCodes: [] } }],
-    }],
+    players: [
+      {
+        id: 'pl-x',
+        name: 'Xavier Adult',
+        dob: '2000-05-05',
+        country: 'GB',
+        city: 'London',
+        media: [],
+        attendance: [],
+        trialReports: [],
+        badges: [],
+        timeline: [],
+        medical: { shared: false, records: [], conditionStatus: 'unknown' },
+        level: 'amateur',
+        location: { lat: 51.5, lng: -0.1 },
+      },
+    ],
+    orgs: [
+      {
+        id: 'org-x',
+        name: 'X FC',
+        type: 'club',
+        level: 'pro',
+        plan: 'Pro',
+        verified: true,
+        safeguardingContractSigned: true,
+        location: { lat: 51.5, lng: -0.1 },
+      },
+    ],
+    guardians: [],
+    users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }],
+    sessions: [],
+    ledger: [],
+    notifications: [],
+    recruitmentCases: [
+      {
+        id: 'case-x',
+        orgId: 'org-x',
+        playerId: 'pl-x',
+        playerName: 'Xavier Adult',
+        ownerUserId: 'usr-owner',
+        ownerName: 'Owner',
+        stage: 'review',
+        priority: 'medium',
+        restricted: false,
+        assignments: [],
+        tasks: [],
+        approvals: [],
+        decision: null,
+        links: { requestIds: [], trialIds: [], signingId: null },
+        room: {
+          status: 'shortlisted',
+          priority: 'normal',
+          tags: [],
+          leadScoutUserId: 'usr-owner',
+          sourceContext: 'search',
+          updatedAt: 1000,
+          archivedAt: null,
+          closedAt: null,
+          rev: 2,
+          revAt: 1000,
+          revBy: null,
+        },
+        createdAt: 1000,
+        history: [
+          {
+            id: 'aud-1',
+            at: 1000,
+            byKind: 'org',
+            byId: 'usr-owner',
+            byName: 'Owner',
+            action: 'room_created',
+            detail: { status: 'watching' },
+          },
+          {
+            id: 'aud-2',
+            at: 1001,
+            byKind: 'org',
+            byId: 'usr-owner',
+            byName: 'Owner',
+            action: 'room_status_changed',
+            detail: { from: 'watching', to: 'shortlisted', reasonCodes: [] },
+          },
+        ],
+      },
+    ],
   };
-  db.roomDecisions ??= []; db.recruitmentCases ??= [];
+  db.roomDecisions ??= [];
+  db.recruitmentCases ??= [];
   return db;
 }
 
 const legacyRow = (over = {}) => ({
-  id: 'rdec-legacy', roomId: 'case-x', orgId: 'org-x', playerId: 'pl-x',
-  recommendation: 'shortlist', reasonCodes: ['tactical_fit'], note: 'Legacy opinion.', by: BY, createdAt: T0, trigger: 'decision',
-  supersedes: null, supersededById: 'rdec-formal-1', clientKey: 'legacy-key', snapshot: null,
+  id: 'rdec-legacy',
+  roomId: 'case-x',
+  orgId: 'org-x',
+  playerId: 'pl-x',
+  recommendation: 'shortlist',
+  reasonCodes: ['tactical_fit'],
+  note: 'Legacy opinion.',
+  by: BY,
+  createdAt: T0,
+  trigger: 'decision',
+  supersedes: null,
+  supersededById: 'rdec-formal-1',
+  clientKey: 'legacy-key',
+  snapshot: null,
   ...over,
 });
 const formalRow = (over = {}) => ({
-  id: 'rdec-formal-1', roomId: 'case-x', orgId: 'org-x', playerId: 'pl-x',
-  kind: 'formal', state: 'final', outcome: 'progress', recommendation: 'offer',
-  reasonCodes: ['position_need'], note: 'First formal.', by: BY, createdAt: T0 + 10, finalizedAt: T0 + 10, trigger: 'decision:finalize', clientKey: 'fin-1',
-  supersedes: 'rdec-legacy', supersededById: 'rdec-formal-2', supersession: null,
-  rev: 2, revAt: T0 + 20, evidenceRefs: [{ kind: 'assessment', id: 'ass-1', meta: { scoutName: 'S', submittedAt: T0, verdict: 'sign', trialId: null } }],
-  assessmentSummary: { submitted: 1, withheld: 0, verdicts: { sign: 1, monitor: 0, pass: 0, none: 0 }, assessmentIds: ['ass-1'] },
-  snapshot: null, keys: { finalize: { key: 'fin-1', fp: '{"fixture":1}' }, draft: { key: 'draft-1', fp: '{"fixture":1}' } }, draftId: 'rdraft-1',
-  lifecycle: { action: 'considerOffer', from: 'shortlisted', to: 'offer_consideration', applied: true, at: T0 + 10 }, policyVersion: 1,
+  id: 'rdec-formal-1',
+  roomId: 'case-x',
+  orgId: 'org-x',
+  playerId: 'pl-x',
+  kind: 'formal',
+  state: 'final',
+  outcome: 'progress',
+  recommendation: 'offer',
+  reasonCodes: ['position_need'],
+  note: 'First formal.',
+  by: BY,
+  createdAt: T0 + 10,
+  finalizedAt: T0 + 10,
+  trigger: 'decision:finalize',
+  clientKey: 'fin-1',
+  supersedes: 'rdec-legacy',
+  supersededById: 'rdec-formal-2',
+  supersession: null,
+  rev: 2,
+  revAt: T0 + 20,
+  evidenceRefs: [
+    { kind: 'assessment', id: 'ass-1', meta: { scoutName: 'S', submittedAt: T0, verdict: 'sign', trialId: null } },
+  ],
+  assessmentSummary: {
+    submitted: 1,
+    withheld: 0,
+    verdicts: { sign: 1, monitor: 0, pass: 0, none: 0 },
+    assessmentIds: ['ass-1'],
+  },
+  snapshot: null,
+  keys: { finalize: { key: 'fin-1', fp: '{"fixture":1}' }, draft: { key: 'draft-1', fp: '{"fixture":1}' } },
+  draftId: 'rdraft-1',
+  lifecycle: { action: 'considerOffer', from: 'shortlisted', to: 'offer_consideration', applied: true, at: T0 + 10 },
+  policyVersion: 1,
   ...over,
 });
-const headRow = (over = {}) => formalRow({
-  id: 'rdec-formal-2', outcome: 'hold', recommendation: 'continue_watching', reasonCodes: ['timing'], note: 'Second formal.',
-  createdAt: T0 + 20, finalizedAt: T0 + 20, clientKey: 'fin-2', supersedes: 'rdec-formal-1', supersededById: null,
-  supersession: { of: 'rdec-formal-1', reason: 'Budget review.' }, rev: 1, revAt: T0 + 20, evidenceRefs: [], assessmentSummary: { submitted: 1, withheld: 0, verdicts: { sign: 1, monitor: 0, pass: 0, none: 0 }, assessmentIds: ['ass-1'] },
-  keys: { finalize: { key: 'fin-2', fp: '{"fixture":2}' }, draft: null }, draftId: 'rdraft-2',
-  lifecycle: { action: 'holdCase', from: 'offer_consideration', to: 'on_hold', applied: true, at: T0 + 20 },
-  ...over,
-});
+const headRow = (over = {}) =>
+  formalRow({
+    id: 'rdec-formal-2',
+    outcome: 'hold',
+    recommendation: 'continue_watching',
+    reasonCodes: ['timing'],
+    note: 'Second formal.',
+    createdAt: T0 + 20,
+    finalizedAt: T0 + 20,
+    clientKey: 'fin-2',
+    supersedes: 'rdec-formal-1',
+    supersededById: null,
+    supersession: { of: 'rdec-formal-1', reason: 'Budget review.' },
+    rev: 1,
+    revAt: T0 + 20,
+    evidenceRefs: [],
+    assessmentSummary: {
+      submitted: 1,
+      withheld: 0,
+      verdicts: { sign: 1, monitor: 0, pass: 0, none: 0 },
+      assessmentIds: ['ass-1'],
+    },
+    keys: { finalize: { key: 'fin-2', fp: '{"fixture":2}' }, draft: null },
+    draftId: 'rdraft-2',
+    lifecycle: { action: 'holdCase', from: 'offer_consideration', to: 'on_hold', applied: true, at: T0 + 20 },
+    ...over,
+  });
 const draftRow = (over = {}) => ({
-  id: 'rdraft-3', outcome: 'reject', reasonCodes: ['insufficient_recent_evidence'], note: 'Thinking.', evidenceRefs: [],
-  by: BY, createdAt: T0 + 30, updatedAt: T0 + 31, updatedBy: BY, rev: 2, revAt: T0 + 31, keys: { create: { key: 'draft-3', fp: '{"fixture":3}' } },
+  id: 'rdraft-3',
+  outcome: 'reject',
+  reasonCodes: ['insufficient_recent_evidence'],
+  note: 'Thinking.',
+  evidenceRefs: [],
+  by: BY,
+  createdAt: T0 + 30,
+  updatedAt: T0 + 31,
+  updatedBy: BY,
+  rev: 2,
+  revAt: T0 + 31,
+  keys: { create: { key: 'draft-3', fp: '{"fixture":3}' } },
   ...over,
 });
 
@@ -124,17 +321,38 @@ const write = (dir, db) => writeFixture(dir, db);
 
 // Key-order-insensitive: the rows are read back from tables in column order, not the writer's insertion order; every
 // key and value is compared.
-const canon = (v) => (Array.isArray(v) ? v.map(canon) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v);
+const canon = (v) =>
+  Array.isArray(v)
+    ? v.map(canon)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(
+          Object.keys(v)
+            .sort()
+            .map((k) => [k, canon(v[k])]),
+        )
+      : v;
 const stableJson = (v) => JSON.stringify(canon(v));
-const lead = (s) => s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' }).then((r) => r.body);
+const lead = (s) =>
+  s
+    .j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })
+    .then((r) => r.body);
 
 // ======================================================= 1 — no migration
 section('1 — no decision migration: one decision store, the draft on the case, nothing renamed');
 {
   // The rows surviving a boot unchanged, with no case field invented, is proved over a real boot in section 2.
-  ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /decision/i.test(m.id)), 'the current schema, and the decision adds no migration of its own (its table comes with the cases, 0016)');
-  ok(TABLE_BACKED.includes('roomDecisions') && !JOURNEY_REQUIRED_STORES.includes('roomDecisions'), 'roomDecisions is a typed table read through SQL');
-  neg(!TABLE_BACKED.includes('recruitmentDecisions') && !TABLE_BACKED.includes('decisionDrafts'), 'no second decision table and no draft table');
+  ok(
+    DATA_MIGRATIONS.length === LATEST_SCHEMA && !DATA_MIGRATIONS.some((m) => /decision/i.test(m.id)),
+    'the current schema, and the decision adds no migration of its own (its table comes with the cases, 0016)',
+  );
+  ok(
+    TABLE_BACKED.includes('roomDecisions') && !JOURNEY_REQUIRED_STORES.includes('roomDecisions'),
+    'roomDecisions is a typed table read through SQL',
+  );
+  neg(
+    !TABLE_BACKED.includes('recruitmentDecisions') && !TABLE_BACKED.includes('decisionDrafts'),
+    'no second decision table and no draft table',
+  );
 }
 
 // ======================================================= 2 — byte-faithful restore
@@ -148,34 +366,100 @@ section('2 — a fixture with legacy + formal rows and a draft restores byte-fai
   write(DIR, db);
   // The typed tables read every record back whole (an absent field reads null): the reference is the store as written.
   const saved = readRecords(DIR);
-  const beforeRows = saved.roomDecisions.map(stableJson); const beforeDraft = stableJson(saved.recruitmentCases[0].decisionDraft);
+  const beforeRows = saved.roomDecisions.map(stableJson);
+  const beforeDraft = stableJson(saved.recruitmentCases[0].decisionDraft);
   const s = await bootOn(DIR, PORT);
   ok(s.up, 'the server boots on the fixture');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
-  ok(sf.status === 200 && sf.body.current?.id === 'rdec-formal-2' && sf.body.current.outcome === 'hold' && sf.body.current.rev === 1 && sf.body.current.supersession?.reason === 'Budget review.' && sf.body.omitted === 0 && sf.body.duplicateHeads.length === 0, 'the surface: the hold is current, with its supersession reason; nothing omitted');
-  ok(sf.body.history.map((d) => d.id).join() === 'rdec-formal-2,rdec-formal-1,rdec-legacy' && sf.body.history[1].rev === 2 && sf.body.history[1].supersededById === 'rdec-formal-2' && sf.body.history[2].kind === 'recommendation' && sf.body.history[2].supersededById === 'rdec-formal-1', 'the chain reads newest first: hold ← progress (rev 2, superseded) ← legacy advisory (superseded by the progress)');
-  ok(sf.body.draft?.id === 'rdraft-3' && sf.body.draft.rev === 2 && sf.body.draft.outcome === 'reject' && sf.body.draft.note === 'Thinking.', 'the draft restored with its rev and content');
-  ok(sf.body.history[1].evidenceRefs[0].meta.verdict === 'sign' && sf.body.history[1].assessmentSummary.assessmentIds[0] === 'ass-1', 'the references and the assessment snapshot restored on the superseded row');
+  ok(
+    sf.status === 200 &&
+      sf.body.current?.id === 'rdec-formal-2' &&
+      sf.body.current.outcome === 'hold' &&
+      sf.body.current.rev === 1 &&
+      sf.body.current.supersession?.reason === 'Budget review.' &&
+      sf.body.omitted === 0 &&
+      sf.body.duplicateHeads.length === 0,
+    'the surface: the hold is current, with its supersession reason; nothing omitted',
+  );
+  ok(
+    sf.body.history.map((d) => d.id).join() === 'rdec-formal-2,rdec-formal-1,rdec-legacy' &&
+      sf.body.history[1].rev === 2 &&
+      sf.body.history[1].supersededById === 'rdec-formal-2' &&
+      sf.body.history[2].kind === 'recommendation' &&
+      sf.body.history[2].supersededById === 'rdec-formal-1',
+    'the chain reads newest first: hold ← progress (rev 2, superseded) ← legacy advisory (superseded by the progress)',
+  );
+  ok(
+    sf.body.draft?.id === 'rdraft-3' &&
+      sf.body.draft.rev === 2 &&
+      sf.body.draft.outcome === 'reject' &&
+      sf.body.draft.note === 'Thinking.',
+    'the draft restored with its rev and content',
+  );
+  ok(
+    sf.body.history[1].evidenceRefs[0].meta.verdict === 'sign' &&
+      sf.body.history[1].assessmentSummary.assessmentIds[0] === 'ass-1',
+    'the references and the assessment snapshot restored on the superseded row',
+  );
   // Keys restored: the stored fingerprints are fixture values, so a different payload under the same key is a CONFLICT — the key was restored.
   const dk = await s.j('POST', '/org/rooms/case-x/decision/draft', { outcome: 'hold', clientKey: 'draft-3' }, L.token);
-  neg(dk.status === 409 && dk.body.error === 'DECISION_IDEMPOTENCY_CONFLICT', 'the draft key on the case was restored (mismatched fingerprint is a conflict, not a fresh draft)');
+  neg(
+    dk.status === 409 && dk.body.error === 'DECISION_IDEMPOTENCY_CONFLICT',
+    'the draft key on the case was restored (mismatched fingerprint is a conflict, not a fresh draft)',
+  );
   const fk = await s.j('POST', '/org/rooms/case-x/decision/finalize', { expectedRev: 2, clientKey: 'fin-2' }, L.token);
-  neg(fk.status === 409 && fk.body.error === 'DECISION_IDEMPOTENCY_CONFLICT', 'the finalize key on the formal row was restored too');
+  neg(
+    fk.status === 409 && fk.body.error === 'DECISION_IDEMPOTENCY_CONFLICT',
+    'the finalize key on the formal row was restored too',
+  );
   const stale = await s.j('PATCH', '/org/rooms/case-x/decision/draft', { note: 'x', expectedRev: 1 }, L.token);
-  neg(stale.status === 409 && stale.body.error === 'DECISION_VERSION_CONFLICT' && stale.body.currentRev === 2, 'the draft rev is enforced from the fixture');
+  neg(
+    stale.status === 409 && stale.body.error === 'DECISION_VERSION_CONFLICT' && stale.body.currentRev === 2,
+    'the draft rev is enforced from the fixture',
+  );
   const legacyRoute = await s.j('GET', '/org/rooms/case-x/decisions', undefined, L.token);
-  ok(legacyRoute.status === 200 && legacyRoute.body.current?.id === 'rdec-formal-2' && legacyRoute.body.history.length === 3, 'the Rooms route reads the same three rows and the same head');
+  ok(
+    legacyRoute.status === 200 &&
+      legacyRoute.body.current?.id === 'rdec-formal-2' &&
+      legacyRoute.body.history.length === 3,
+    'the Rooms route reads the same three rows and the same head',
+  );
   const jr = await s.j('GET', '/org/rooms/case-x/journey', undefined, L.token);
-  ok(jr.status === 200 && jr.body.decisions.formal?.id === 'rdec-formal-2' && jr.body.decisions.draft?.id === 'rdraft-3' && jr.body.lifecycle.currentStage === 'on_hold', 'the journey projects the formal head, the draft and the case stage');
+  ok(
+    jr.status === 200 &&
+      jr.body.decisions.formal?.id === 'rdec-formal-2' &&
+      jr.body.decisions.draft?.id === 'rdraft-3' &&
+      jr.body.lifecycle.currentStage === 'on_hold',
+    'the journey projects the formal head, the draft and the case stage',
+  );
   const after = await s.stop();
-  if (!after || after.roomDecisions.map(stableJson).join('\n') !== beforeRows.join('\n') || stableJson(after.recruitmentCases[0].decisionDraft) !== beforeDraft) {
-    for (let i = 0; i < beforeRows.length; i += 1) if (stableJson(after?.roomDecisions?.[i]) !== beforeRows[i]) console.error(`   row ${i} before ${beforeRows[i]}\n   row ${i} after  ${stableJson(after?.roomDecisions?.[i])}`);
-    if (stableJson(after?.recruitmentCases?.[0]?.decisionDraft) !== beforeDraft) console.error(`   draft before ${beforeDraft}\n   draft after  ${stableJson(after?.recruitmentCases?.[0]?.decisionDraft)}`);
+  if (
+    !after ||
+    after.roomDecisions.map(stableJson).join('\n') !== beforeRows.join('\n') ||
+    stableJson(after.recruitmentCases[0].decisionDraft) !== beforeDraft
+  ) {
+    for (let i = 0; i < beforeRows.length; i += 1)
+      if (stableJson(after?.roomDecisions?.[i]) !== beforeRows[i])
+        console.error(
+          `   row ${i} before ${beforeRows[i]}\n   row ${i} after  ${stableJson(after?.roomDecisions?.[i])}`,
+        );
+    if (stableJson(after?.recruitmentCases?.[0]?.decisionDraft) !== beforeDraft)
+      console.error(
+        `   draft before ${beforeDraft}\n   draft after  ${stableJson(after?.recruitmentCases?.[0]?.decisionDraft)}`,
+      );
   }
-  ok(after && after.roomDecisions.map(stableJson).join('\n') === beforeRows.join('\n') && stableJson(after.recruitmentCases[0].decisionDraft) === beforeDraft, 'after a boot, reads, refused writes and a graceful stop, every row and the draft are identical in every key and value — nothing rewritten, re-ordered or "repaired"');
+  ok(
+    after &&
+      after.roomDecisions.map(stableJson).join('\n') === beforeRows.join('\n') &&
+      stableJson(after.recruitmentCases[0].decisionDraft) === beforeDraft,
+    'after a boot, reads, refused writes and a graceful stop, every row and the draft are identical in every key and value — nothing rewritten, re-ordered or "repaired"',
+  );
   neg(!s.log().includes('DECISION integrity'), 'no integrity warning was logged for sound rows');
-  neg(after && !('decisionStatus' in after.recruitmentCases[0].room), 'no case field was invented for the decision — the case carries only its draft');
+  neg(
+    after && !('decisionStatus' in after.recruitmentCases[0].room),
+    'no case field was invented for the decision — the case carries only its draft',
+  );
 }
 
 // ======================================================= 3 — corrupt rows
@@ -188,15 +472,33 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   // and judged on read.
   const unstorable = [
     formalRow({ id: 'rdec-bad-outcome', outcome: 'accept', supersedes: null, supersededById: 'x1', createdAt: T0 + 1 }),
-    formalRow({ id: 'rdec-bad-proto', outcome: '__proto__', supersedes: null, supersededById: 'x1', createdAt: T0 + 2 }),
+    formalRow({
+      id: 'rdec-bad-proto',
+      outcome: '__proto__',
+      supersedes: null,
+      supersededById: 'x1',
+      createdAt: T0 + 2,
+    }),
     formalRow({ id: 'rdec-bad-time', createdAt: 'yesterday', supersedes: null, supersededById: 'x1' }),
-    formalRow({ id: 'rdec-bad-reasons', reasonCodes: 'position_need', supersedes: null, supersededById: 'x1', createdAt: T0 + 4 }),
+    formalRow({
+      id: 'rdec-bad-reasons',
+      reasonCodes: 'position_need',
+      supersedes: null,
+      supersededById: 'x1',
+      createdAt: T0 + 4,
+    }),
     formalRow({ id: 'rdec-bad-refs', evidenceRefs: {}, supersedes: null, supersededById: 'x1', createdAt: T0 + 6 }),
     formalRow({ id: 'rdec-bad-rev', rev: 0, supersedes: null, supersededById: 'x1', createdAt: T0 + 7 }),
   ];
   const bad = [
     formalRow({ id: 'rdec-bad-actor', by: null, supersedes: null, supersededById: 'x1', createdAt: T0 + 3 }),
-    formalRow({ id: 'rdec-bad-code', reasonCodes: ['race'], supersedes: null, supersededById: 'x1', createdAt: T0 + 5 }),
+    formalRow({
+      id: 'rdec-bad-code',
+      reasonCodes: ['race'],
+      supersedes: null,
+      supersededById: 'x1',
+      createdAt: T0 + 5,
+    }),
   ];
   // A fixture goes through the repository, which REFUSES an entry that is not a record or a chain pointer naming a
   // decision that does not exist (ids named), with nothing written. The corrupt rows the
@@ -205,23 +507,67 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
     // A fixture is written through the decisions repository's create, one unit of work: a record the columns cannot hold
     // is refused by its id and the part, and nothing of the fixture is written (only the first installation's organisation
     // and player, which a new directory imports on its own, are there: the yardstick for "nothing was written").
-    const rowIds = (d) => JSON.stringify(Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])));
+    const rowIds = (d) =>
+      JSON.stringify(
+        Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])),
+      );
     const { orgs, players, guardians } = baseDb();
-    const FRESH = rowIds(readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-m23d-fresh-')), { orgs, players, guardians })));
+    const FRESH = rowIds(
+      readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-m23d-fresh-')), { orgs, players, guardians })),
+    );
     const refused = async (label, rows, pattern) => {
       const D = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-refused-'));
-      const fixture = baseDb(); fixture.roomDecisions.push(legacyRow({ supersededById: 'rdec-formal-2' }), headRow({ supersedes: 'rdec-legacy' }), ...rows);
+      const fixture = baseDb();
+      fixture.roomDecisions.push(
+        legacyRow({ supersededById: 'rdec-formal-2' }),
+        headRow({ supersedes: 'rdec-legacy' }),
+        ...rows,
+      );
       let err = null;
-      try { write(D, fixture); } catch (e) { err = e; }
+      try {
+        write(D, fixture);
+      } catch (e) {
+        err = e;
+      }
       const refusal = String(err?.message ?? '');
-      ok(!!err && pattern.test(refusal), `${label}: the write is REFUSED and the refusal names the entry (${refusal.slice(0, 160)}…)`);
+      ok(
+        !!err && pattern.test(refusal),
+        `${label}: the write is REFUSED and the refusal names the entry (${refusal.slice(0, 160)}…)`,
+      );
       ok(rowIds(readRecords(D)) === FRESH, `${label}: nothing was written — nothing deleted, nothing repaired`);
     };
-    for (const [alien, what] of [[null, 'null'], ['string', 'string'], [42, 'number']]) await refused(`an alien entry (${what})`, [alien], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: room_decisions: a record must be an object \\(got ${what}\\)`));
+    for (const [alien, what] of [
+      [null, 'null'],
+      ['string', 'string'],
+      [42, 'number'],
+    ])
+      await refused(
+        `an alien entry (${what})`,
+        [alien],
+        new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: room_decisions: a record must be an object \\(got ${what}\\)`),
+      );
     // What each column says of the value it cannot hold.
-    const why = { outcome: 'row: CHECK constraint failed: outcome', createdAt: 'row: cannot store TEXT value in INTEGER column room_decisions\\.created_at', reasonCodes: 'reasonCodes: must be a list', evidenceRefs: 'evidenceRefs: must be a list', rev: 'row: CHECK constraint failed: rev' };
-    for (const [r, field] of unstorable.map((r, i) => [r, ['outcome', 'outcome', 'createdAt', 'reasonCodes', 'evidenceRefs', 'rev'][i]])) await refused(`a corrupt row the typed columns cannot hold (${r.id}.${field})`, [r], new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: room_decisions ${r.id} ${why[field]}`));
-    await refused('two corrupt rows whose chain pointer names a decision that does not exist', bad, /RECRUITMENT_CASES_INPUT_INVALID: room_decisions rdec-bad-actor markSuperseded: FOREIGN KEY constraint failed/);
+    const why = {
+      outcome: 'row: CHECK constraint failed: outcome',
+      createdAt: 'row: cannot store TEXT value in INTEGER column room_decisions\\.created_at',
+      reasonCodes: 'reasonCodes: must be a list',
+      evidenceRefs: 'evidenceRefs: must be a list',
+      rev: 'row: CHECK constraint failed: rev',
+    };
+    for (const [r, field] of unstorable.map((r, i) => [
+      r,
+      ['outcome', 'outcome', 'createdAt', 'reasonCodes', 'evidenceRefs', 'rev'][i],
+    ]))
+      await refused(
+        `a corrupt row the typed columns cannot hold (${r.id}.${field})`,
+        [r],
+        new RegExp(`RECRUITMENT_CASES_INPUT_INVALID: room_decisions ${r.id} ${why[field]}`),
+      );
+    await refused(
+      'two corrupt rows whose chain pointer names a decision that does not exist',
+      bad,
+      /RECRUITMENT_CASES_INPUT_INVALID: room_decisions rdec-bad-actor markSuperseded: FOREIGN KEY constraint failed/,
+    );
   }
   // The two storable defects, each row superseded by the real head, are stored and judged on read.
   for (const r of bad) r.supersededById = 'rdec-formal-2';
@@ -233,37 +579,82 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
   ok(s.up, 'the server boots with two corrupt formal rows in the store');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
-  if (sf.status !== 200) console.error('   surface', sf.status, JSON.stringify(sf.body).slice(0, 300), s.log().split('\n').filter((l) => /Error|TypeError/.test(l)).slice(0, 4).join(' | '));
-  ok(sf.status === 200 && sf.body.current?.id === 'rdec-formal-2' && sf.body.history.length === 2, 'the surface serves the sound head and the legacy row');
+  if (sf.status !== 200)
+    console.error(
+      '   surface',
+      sf.status,
+      JSON.stringify(sf.body).slice(0, 300),
+      s
+        .log()
+        .split('\n')
+        .filter((l) => /Error|TypeError/.test(l))
+        .slice(0, 4)
+        .join(' | '),
+    );
+  ok(
+    sf.status === 200 && sf.body.current?.id === 'rdec-formal-2' && sf.body.history.length === 2,
+    'the surface serves the sound head and the legacy row',
+  );
   neg(sf.body.omitted === 2, `two corrupt formal rows are counted as omitted (${sf.body.omitted})`);
   const log = s.log();
-  neg(bad.every((r) => log.includes(`DECISION integrity ${r.id}`)), 'every corrupt row is NAMED in the server log with its problems');
-  neg([...unstorable, ...bad].every((r) => decisionIntegrity(r, { orgId: 'org-x', caseId: 'case-x' }).length > 0) && decisionIntegrity(headRow(), { orgId: 'org-x', caseId: 'case-x' }).length === 0, 'the pure integrity check agrees row by row (all eight defects)');
+  neg(
+    bad.every((r) => log.includes(`DECISION integrity ${r.id}`)),
+    'every corrupt row is NAMED in the server log with its problems',
+  );
+  neg(
+    [...unstorable, ...bad].every((r) => decisionIntegrity(r, { orgId: 'org-x', caseId: 'case-x' }).length > 0) &&
+      decisionIntegrity(headRow(), { orgId: 'org-x', caseId: 'case-x' }).length === 0,
+    'the pure integrity check agrees row by row (all eight defects)',
+  );
   const jr = await s.j('GET', '/org/rooms/case-x/journey', undefined, L.token);
-  ok(jr.status === 200 && jr.body.decisions.formal?.id === 'rdec-formal-2', 'the journey still projects the sound head');
+  ok(
+    jr.status === 200 && jr.body.decisions.formal?.id === 'rdec-formal-2',
+    'the journey still projects the sound head',
+  );
   const after = await s.stop();
-  neg(after.roomDecisions.filter((x) => x && typeof x === 'object').length === 4 && after.roomDecisions.some((x) => x?.id === 'rdec-bad-code' && x.reasonCodes[0] === 'race'), 'the corrupt rows are still in the snapshot exactly as they were — omitted on read, never deleted or "repaired" on write');
-  if (stableJson(after.roomDecisions) !== stableJson(savedRows)) console.error('   store changed', stableJson(after.roomDecisions).slice(0, 300));
+  neg(
+    after.roomDecisions.filter((x) => x && typeof x === 'object').length === 4 &&
+      after.roomDecisions.some((x) => x?.id === 'rdec-bad-code' && x.reasonCodes[0] === 'race'),
+    'the corrupt rows are still in the snapshot exactly as they were — omitted on read, never deleted or "repaired" on write',
+  );
+  if (stableJson(after.roomDecisions) !== stableJson(savedRows))
+    console.error('   store changed', stableJson(after.roomDecisions).slice(0, 300));
   ok(stableJson(after.roomDecisions) === stableJson(savedRows), 'the whole store is identical in every key and value');
 
   // Duplicate final heads.
   const DIR2 = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-dup-'));
   const db2 = baseDb();
-  db2.roomDecisions.push(headRow({ id: 'rdec-head-a', supersedes: null }), headRow({ id: 'rdec-head-b', supersedes: null, createdAt: T0 + 21 }));
+  db2.roomDecisions.push(
+    headRow({ id: 'rdec-head-a', supersedes: null }),
+    headRow({ id: 'rdec-head-b', supersedes: null, createdAt: T0 + 21 }),
+  );
   db2.recruitmentCases[0].decisionDraft = draftRow();
   write(DIR2, db2);
   const saved2 = readRecords(DIR2);
-  neg(duplicateFinalHeads(db2.roomDecisions).length === 2 && chainHead(db2.roomDecisions).id === 'rdec-head-b', 'the pure check names both heads (the chain reader alone would silently pick the later one)');
+  neg(
+    duplicateFinalHeads(db2.roomDecisions).length === 2 && chainHead(db2.roomDecisions).id === 'rdec-head-b',
+    'the pure check names both heads (the chain reader alone would silently pick the later one)',
+  );
   const s2 = await bootOn(DIR2, PORT + 2);
   ok(s2.up, 'the server boots with two formal rows both claiming to be current');
   const L2 = await lead(s2);
   const dup = await s2.j('GET', '/org/rooms/case-x/decision', undefined, L2.token);
-  neg(dup.status === 500 && dup.body.error === 'DECISION_STATE_UNKNOWN', 'reading the surface is DECISION_STATE_UNKNOWN (500) — no honest "current decision" exists');
+  neg(
+    dup.status === 500 && dup.body.error === 'DECISION_STATE_UNKNOWN',
+    'reading the surface is DECISION_STATE_UNKNOWN (500) — no honest "current decision" exists',
+  );
   const fin = await s2.j('POST', '/org/rooms/case-x/decision/finalize', { expectedRev: 2 }, L2.token);
-  neg(fin.status === 500 && fin.body.error === 'DECISION_STATE_UNKNOWN', 'nothing new is finalized on top of corruption');
+  neg(
+    fin.status === 500 && fin.body.error === 'DECISION_STATE_UNKNOWN',
+    'nothing new is finalized on top of corruption',
+  );
   neg(s2.log().includes('duplicate_final_heads rdec-head-a,rdec-head-b'), 'the duplicate heads are named in the log');
   const after2 = await s2.stop();
-  ok(stableJson(after2.roomDecisions) === stableJson(saved2.roomDecisions) && stableJson(after2.recruitmentCases[0].decisionDraft) === stableJson(saved2.recruitmentCases[0].decisionDraft), 'the two heads and the draft are still there, untouched — a person decides which is true, not the boot');
+  ok(
+    stableJson(after2.roomDecisions) === stableJson(saved2.roomDecisions) &&
+      stableJson(after2.recruitmentCases[0].decisionDraft) === stableJson(saved2.recruitmentCases[0].decisionDraft),
+    'the two heads and the draft are still there, untouched — a person decides which is true, not the boot',
+  );
 }
 
 // ======================================================= 4 — legacy rows
@@ -273,7 +664,15 @@ section('4 — legacy advisory row read as advisory and keep their chain; P5 jud
   const db = baseDb();
   db.roomDecisions.push(
     legacyRow({ id: 'rdec-l1', createdAt: T0, supersededById: 'rdec-l2' }),
-    legacyRow({ id: 'rdec-l2', recommendation: 'offer', reasonCodes: [], note: null, createdAt: T0 + 1, supersedes: 'rdec-l1', supersededById: null }),
+    legacyRow({
+      id: 'rdec-l2',
+      recommendation: 'offer',
+      reasonCodes: [],
+      note: null,
+      createdAt: T0 + 1,
+      supersedes: 'rdec-l1',
+      supersededById: null,
+    }),
     // An odd legacy row: no actor and no reason (a time and a reason list are typed columns, so a save refuses junk there).
     legacyRow({ id: 'rdec-l-odd', by: null, reasonCodes: [], supersededById: 'rdec-l1' }),
   );
@@ -283,13 +682,35 @@ section('4 — legacy advisory row read as advisory and keep their chain; P5 jud
   ok(s.up, 'the server boots on a legacy-only decision memory');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
-  ok(sf.status === 200 && sf.body.current === null && sf.body.advisory?.id === 'rdec-l2' && sf.body.advisory.kind === 'recommendation' && sf.body.advisory.recommendation === 'offer' && sf.body.omitted === 0, 'an advisory "offer" recommendation at the head is ADVISORY — not a formal decision, not current');
-  neg(!db.roomDecisions.some(isFormal) && sf.body.requirements.hasFinal === false, 'no legacy row is read as formal, whatever it recommends');
-  ok(sf.body.history.length === 3 && sf.body.omitted === 0 && !s.log().includes('DECISION integrity'), 'an odd legacy row (no actor, no reason) is served as the Rooms always served it — P5 does not judge it');
+  ok(
+    sf.status === 200 &&
+      sf.body.current === null &&
+      sf.body.advisory?.id === 'rdec-l2' &&
+      sf.body.advisory.kind === 'recommendation' &&
+      sf.body.advisory.recommendation === 'offer' &&
+      sf.body.omitted === 0,
+    'an advisory "offer" recommendation at the head is ADVISORY — not a formal decision, not current',
+  );
+  neg(
+    !db.roomDecisions.some(isFormal) && sf.body.requirements.hasFinal === false,
+    'no legacy row is read as formal, whatever it recommends',
+  );
+  ok(
+    sf.body.history.length === 3 && sf.body.omitted === 0 && !s.log().includes('DECISION integrity'),
+    'an odd legacy row (no actor, no reason) is served as the Rooms always served it — P5 does not judge it',
+  );
   const byHand = await s.j('POST', '/org/rooms/case-x/lifecycle', { action: 'considerOffer', expectedRev: 2 }, L.token);
-  neg(byHand.status === 422 && byHand.body.error === 'LIFECYCLE_EVIDENCE_REQUIRED' && byHand.body.evidenceReason === 'no_finalized_progress_decision', 'and the advisory "offer" does not evidence offer_consideration');
+  neg(
+    byHand.status === 422 &&
+      byHand.body.error === 'LIFECYCLE_EVIDENCE_REQUIRED' &&
+      byHand.body.evidenceReason === 'no_finalized_progress_decision',
+    'and the advisory "offer" does not evidence offer_consideration',
+  );
   const after = await s.stop();
-  ok(stableJson(after.roomDecisions) === stableJson(savedLegacy), 'the legacy rows are identical in every key and value after the boot');
+  ok(
+    stableJson(after.roomDecisions) === stableJson(savedLegacy),
+    'the legacy rows are identical in every key and value after the boot',
+  );
 }
 
 // ======================================================= 5 — clean boot, live flow, restart
@@ -299,34 +720,102 @@ section('5 — clean boot: draft → finalize → stop → reboot: one store, ke
   write(DIR, baseDb());
   const s = await bootOn(DIR, PORT + 4);
   const L = await lead(s);
-  const d = await s.j('POST', '/org/rooms/case-x/decision/draft', { outcome: 'progress', reasonCodes: ['position_need'], note: 'Clean.', clientKey: 'clean-draft' }, L.token);
+  const d = await s.j(
+    'POST',
+    '/org/rooms/case-x/decision/draft',
+    { outcome: 'progress', reasonCodes: ['position_need'], note: 'Clean.', clientKey: 'clean-draft' },
+    L.token,
+  );
   ok(d.status === 201 && d.body.draft.rev === 1, 'a draft opens on a clean database');
   const snap0 = await s.stop();
-  ok(snap0.recruitmentCases[0].decisionDraft?.id === d.body.draft.id && snap0.recruitmentCases[0].decisionDraft.keys.create.key === 'clean-draft' && snap0.roomDecisions.length === 0, 'the snapshot holds the draft ON THE CASE with its key, and no decision row');
+  ok(
+    snap0.recruitmentCases[0].decisionDraft?.id === d.body.draft.id &&
+      snap0.recruitmentCases[0].decisionDraft.keys.create.key === 'clean-draft' &&
+      snap0.roomDecisions.length === 0,
+    'the snapshot holds the draft ON THE CASE with its key, and no decision row',
+  );
   const s2 = await bootOn(DIR, PORT + 5);
   const L2 = await lead(s2);
-  const replayDraft = await s2.j('POST', '/org/rooms/case-x/decision/draft', { outcome: 'progress', reasonCodes: ['position_need'], note: 'Clean.', clientKey: 'clean-draft' }, L2.token);
+  const replayDraft = await s2.j(
+    'POST',
+    '/org/rooms/case-x/decision/draft',
+    { outcome: 'progress', reasonCodes: ['position_need'], note: 'Clean.', clientKey: 'clean-draft' },
+    L2.token,
+  );
   ok(replayDraft.status === 200 && replayDraft.body.idempotent === true, 'after the reboot the draft key replays');
-  const fin = await s2.j('POST', '/org/rooms/case-x/decision/finalize', { expectedRev: 1, clientKey: 'clean-final' }, L2.token);
-  ok(fin.status === 201 && fin.body.lifecycle.to === 'offer_consideration', 'the draft finalizes to a progress decision and the case moves');
+  const fin = await s2.j(
+    'POST',
+    '/org/rooms/case-x/decision/finalize',
+    { expectedRev: 1, clientKey: 'clean-final' },
+    L2.token,
+  );
+  ok(
+    fin.status === 201 && fin.body.lifecycle.to === 'offer_consideration',
+    'the draft finalizes to a progress decision and the case moves',
+  );
   const snap1 = await s2.stop();
   const row = snap1.roomDecisions.find((x) => x.id === fin.body.decision.id);
-  ok(row && row.kind === 'formal' && row.state === 'final' && row.outcome === 'progress' && row.keys.finalize.key === 'clean-final' && row.keys.draft.key === 'clean-draft' && row.draftId === d.body.draft.id && snap1.recruitmentCases[0].decisionDraft === null && snap1.recruitmentCases[0].room.status === 'offer_consideration', 'the snapshot holds the formal row on roomDecisions with both keys, the draft cleared, the case at offer_consideration');
-  neg(!Object.keys(snap1).some((k) => /decisionDraft|recruitmentDecision/i.test(k)) && Object.keys(snap1).filter((k) => /offer/i.test(k)).join() === 'recruitmentOffers', 'no P5 top-level store appeared in the snapshot (the P6 Offer store is the one Offer store)');
+  ok(
+    row &&
+      row.kind === 'formal' &&
+      row.state === 'final' &&
+      row.outcome === 'progress' &&
+      row.keys.finalize.key === 'clean-final' &&
+      row.keys.draft.key === 'clean-draft' &&
+      row.draftId === d.body.draft.id &&
+      snap1.recruitmentCases[0].decisionDraft === null &&
+      snap1.recruitmentCases[0].room.status === 'offer_consideration',
+    'the snapshot holds the formal row on roomDecisions with both keys, the draft cleared, the case at offer_consideration',
+  );
+  neg(
+    !Object.keys(snap1).some((k) => /decisionDraft|recruitmentDecision/i.test(k)) &&
+      Object.keys(snap1)
+        .filter((k) => /offer/i.test(k))
+        .join() === 'recruitmentOffers',
+    'no P5 top-level store appeared in the snapshot (the P6 Offer store is the one Offer store)',
+  );
   const s3 = await bootOn(DIR, PORT + 6);
   const L3 = await lead(s3);
-  const replayFin = await s3.j('POST', '/org/rooms/case-x/decision/finalize', { expectedRev: 1, clientKey: 'clean-final' }, L3.token);
-  ok(replayFin.status === 200 && replayFin.body.idempotent === true && replayFin.body.decision.id === fin.body.decision.id, 'after another reboot the finalize key replays the same decision');
-  const replayDraft2 = await s3.j('POST', '/org/rooms/case-x/decision/draft', { outcome: 'progress', reasonCodes: ['position_need'], note: 'Clean.', clientKey: 'clean-draft' }, L3.token);
-  ok(replayDraft2.status === 200 && replayDraft2.body.idempotent === true && replayDraft2.body.decision?.id === fin.body.decision.id, 'and the draft key replays the decision it became');
+  const replayFin = await s3.j(
+    'POST',
+    '/org/rooms/case-x/decision/finalize',
+    { expectedRev: 1, clientKey: 'clean-final' },
+    L3.token,
+  );
+  ok(
+    replayFin.status === 200 &&
+      replayFin.body.idempotent === true &&
+      replayFin.body.decision.id === fin.body.decision.id,
+    'after another reboot the finalize key replays the same decision',
+  );
+  const replayDraft2 = await s3.j(
+    'POST',
+    '/org/rooms/case-x/decision/draft',
+    { outcome: 'progress', reasonCodes: ['position_need'], note: 'Clean.', clientKey: 'clean-draft' },
+    L3.token,
+  );
+  ok(
+    replayDraft2.status === 200 &&
+      replayDraft2.body.idempotent === true &&
+      replayDraft2.body.decision?.id === fin.body.decision.id,
+    'and the draft key replays the decision it became',
+  );
   const sf = await s3.j('GET', '/org/rooms/case-x/decision', undefined, L3.token);
-  ok(sf.body.current?.id === fin.body.decision.id && sf.body.draft === null && sf.body.history.length === 1, 'the surface after two reboots: one formal decision, no draft');
+  ok(
+    sf.body.current?.id === fin.body.decision.id && sf.body.draft === null && sf.body.history.length === 1,
+    'the surface after two reboots: one formal decision, no draft',
+  );
   const snap2 = await s3.stop();
-  ok(stableJson(snap2.roomDecisions) === stableJson(snap1.roomDecisions), 'a reboot with only reads and replays rewrote nothing');
+  ok(
+    stableJson(snap2.roomDecisions) === stableJson(snap1.roomDecisions),
+    'a reboot with only reads and replays rewrote nothing',
+  );
 }
 
 // ------------------------------------------------------------ report
-console.log(`\nrecruitment/decisionsPersistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / passed) * 100)}%)`);
+console.log(
+  `\nrecruitment/decisionsPersistence: ${passed} checks passed, ${negatives} negative (${Math.round((negatives / passed) * 100)}%)`,
+);
 if (process.exitCode === 1) console.error('\n✗ recruitment/decisionsPersistence has failures.');
 else console.log('all recruitment/decisionsPersistence checks passed');
 process.exit(process.exitCode ?? 0);

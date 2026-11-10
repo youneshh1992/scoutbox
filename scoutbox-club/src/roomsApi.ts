@@ -26,15 +26,30 @@ import { demoRooms } from './roomsDemo';
 // Mirrors of the server's fixed vocabularies. They are declarative labels for
 // the UI only — the server remains the sole authority on what is allowed.
 export const ROOM_STATUSES = [
-  'watching', 'under_review', 'shortlisted', 'priority',
-  'trial_requested', 'trial_scheduled', 'trial_completed',
-  'offer_consideration', 'offer_made', 'signed',
-  'withdrawn', 'archived', 'closed',
+  'watching',
+  'under_review',
+  'shortlisted',
+  'priority',
+  'trial_requested',
+  'trial_scheduled',
+  'trial_completed',
+  'offer_consideration',
+  'offer_made',
+  'signed',
+  'withdrawn',
+  'archived',
+  'closed',
 ] as const;
 export type RoomStatus = (typeof ROOM_STATUSES)[number];
 
 export const ROOM_RECOMMENDATIONS = [
-  'no_decision', 'continue_watching', 'shortlist', 'priority', 'trial', 'offer', 'archive',
+  'no_decision',
+  'continue_watching',
+  'shortlist',
+  'priority',
+  'trial',
+  'offer',
+  'archive',
 ] as const;
 export type RoomRecommendation = (typeof ROOM_RECOMMENDATIONS)[number];
 
@@ -87,15 +102,25 @@ export interface RoomListItem {
 }
 
 export interface RoomFunnel {
-  total: number; active: number; shortlisted: number; trials: number;
-  offers: number; signed: number; archived: number;
+  total: number;
+  active: number;
+  shortlisted: number;
+  trials: number;
+  offers: number;
+  signed: number;
+  archived: number;
   byStatus: Record<string, number>;
   note: string;
 }
 
 export interface RoomListParams {
-  view?: string; status?: string; tag?: string; assignee?: string;
-  q?: string; limit?: number; cursor?: string;
+  view?: string;
+  status?: string;
+  tag?: string;
+  assignee?: string;
+  q?: string;
+  limit?: number;
+  cursor?: string;
 }
 
 // The server pages this list by cursor ("continue from here"): `nextCursor` is passed back as `cursor` for the next page,
@@ -109,32 +134,47 @@ export interface RoomListResult {
 }
 
 export interface RoomAttentionItem {
-  roomId: string; playerId: string; playerName: string | null;
-  status: string; reasons: { code: string; text: string }[];
+  roomId: string;
+  playerId: string;
+  playerName: string | null;
+  status: string;
+  reasons: { code: string; text: string }[];
 }
 
 export interface RoomSummaryRow {
-  playerId: string; roomId: string | null;
-  status: string | null; statusLabel?: string | null;
+  playerId: string;
+  roomId: string | null;
+  status: string | null;
+  statusLabel?: string | null;
 }
 
 export interface RoomTask {
-  id: string; title: string; description: string | null;
-  assigneeUserId: string | null; assigneeName: string | null;
-  status: string; dueAt: string | number | null;
-  linkedResourceType: string | null; linkedResourceId: string | null;
+  id: string;
+  title: string;
+  description: string | null;
+  assigneeUserId: string | null;
+  assigneeName: string | null;
+  status: string;
+  dueAt: string | number | null;
+  linkedResourceType: string | null;
+  linkedResourceId: string | null;
   createdBy: { userId: string; name: string } | null;
-  createdAt: number; completedAt: number | null;
+  createdAt: number;
+  completedAt: number | null;
 }
 
 /** A deleted comment is tombstoned, never erased — the thread and the audit
  *  trail keep their shape and the author stays attributable. */
 export interface RoomComment {
-  id: string; roomId: string;
+  id: string;
+  roomId: string;
   author: { userId: string; name: string };
   body: string | null;
-  deleted: boolean; deletedAt: number | null;
-  edited: boolean; editedAt: number | null; editCount: number;
+  deleted: boolean;
+  deletedAt: number | null;
+  edited: boolean;
+  editedAt: number | null;
+  editCount: number;
   replyToId: string | null;
   mentions: { userId: string; name: string }[];
   createdAt: number;
@@ -145,11 +185,19 @@ export interface RoomSnapshot {
   id?: string;
   at: number;
   trigger?: string;
-  trust: { score: number; band: string; policyVersion: number; componentLevels: Record<string, string>; hash?: string } | null;
+  trust: {
+    score: number;
+    band: string;
+    policyVersion: number;
+    componentLevels: Record<string, string>;
+    hash?: string;
+  } | null;
   sourceRefs: {
     passportVersion: number | string | null;
-    evidenceIds: string[]; assessmentIds: string[];
-    combineResults: string[]; trialIds: string[];
+    evidenceIds: string[];
+    assessmentIds: string[];
+    combineResults: string[];
+    trialIds: string[];
   };
   note: string;
 }
@@ -178,17 +226,24 @@ export interface RoomDecisionsResult {
 }
 
 export interface RoomActivityItem {
-  id: string; at: number; type: string;
+  id: string;
+  at: number;
+  type: string;
   actor: { kind: string; id: string; name: string } | null;
   detail: Record<string, unknown> | null;
 }
 
 export interface RoomActivityResult {
-  items: RoomActivityItem[]; nextCursor: string | null; total: number;
+  items: RoomActivityItem[];
+  nextCursor: string | null;
+  total: number;
 }
 
 export interface RoomCommentsResult {
-  items: RoomComment[]; nextCursor: string | null; total: number; note: string;
+  items: RoomComment[];
+  nextCursor: string | null;
+  total: number;
+  note: string;
 }
 
 /** Counts and words. Deliberately never a percentage and never a score. */
@@ -215,23 +270,40 @@ export interface RoomEvidenceItem {
 }
 
 export interface RoomAssessment {
-  id: string; scoutUserId: string; scoutName: string;
-  templateId: string | null; templateVersion: number | null;
-  state: string; recommendation: string | null; context: string | null;
-  createdAt: number; submittedAt: number | null;
+  id: string;
+  scoutUserId: string;
+  scoutName: string;
+  templateId: string | null;
+  templateVersion: number | null;
+  state: string;
+  recommendation: string | null;
+  context: string | null;
+  createdAt: number;
+  submittedAt: number | null;
 }
 
 export interface RoomCombineResult {
-  protocolId: string; protocolVersion: number; protocolTitle: string;
-  metricUnit: string; measuredValue: number; display: string;
-  combineVerified: boolean; capturedBy: string; completedAt: number;
+  protocolId: string;
+  protocolVersion: number;
+  protocolTitle: string;
+  metricUnit: string;
+  measuredValue: number;
+  display: string;
+  combineVerified: boolean;
+  capturedBy: string;
+  completedAt: number;
 }
 
 export interface RoomCombineRequest {
-  id: string; title: string | null; state: string;
+  id: string;
+  title: string | null;
+  state: string;
   protocols: { protocolId: string; protocolTitle: string; completed: boolean }[];
-  deadline: string | null; instructions: string | null;
-  completedCount: number; requiredCount: number; createdAt: number;
+  deadline: string | null;
+  instructions: string | null;
+  completedCount: number;
+  requiredCount: number;
+  createdAt: number;
   note?: string | null;
 }
 
@@ -256,15 +328,23 @@ export interface RoomDevelopment {
 }
 
 export interface RoomMissingEvidence {
-  id: string; ruleId: string; ruleVersion: number;
-  explanation: string; action: string; status: string;
+  id: string;
+  ruleId: string;
+  ruleVersion: number;
+  explanation: string;
+  action: string;
+  status: string;
   requestedAt: number | null;
 }
 
 export interface RoomTrial {
-  id: string; status: string; proposedDate: string | null;
-  venue: string | null; reportDueAt: string | null;
-  hasReport: boolean; linked: boolean;
+  id: string;
+  status: string;
+  proposedDate: string | null;
+  venue: string | null;
+  reportDueAt: string | null;
+  hasReport: boolean;
+  linked: boolean;
 }
 
 /** The composed Room. Every player-side field is null/empty and
@@ -345,7 +425,6 @@ export interface PatchRoomInput {
   deadline?: string | null;
 }
 
-
 // ------------------------------------------------------- Contact
 // A Contact is the club's INTERNAL record of one communication process. A
 // draft never leaves the organisation; only a sent message or a recorded
@@ -357,7 +436,9 @@ export const CONTACT_EXTERNAL_CHANNELS = ['phone', 'in_person', 'email_external'
 export type ContactExternalChannel = (typeof CONTACT_EXTERNAL_CHANNELS)[number];
 
 export interface ContactHistoryEntry {
-  id: string; at: number; action: string;
+  id: string;
+  at: number;
+  action: string;
   by: { name: string | null; kind: string | null } | null;
   detail: Record<string, unknown> | null;
 }
@@ -392,7 +473,12 @@ export interface ContactRecord {
   recordedBy: { name: string } | null;
   recordedAt: number | null;
   respondedAt: number | null;
-  response: { kind: 'accepted' | 'declined' | string; message: string | null; by: 'player' | 'guardian' | string; at: number } | null;
+  response: {
+    kind: 'accepted' | 'declined' | string;
+    message: string | null;
+    by: 'player' | 'guardian' | string;
+    at: number;
+  } | null;
   /** Courtesy email copy to a guardian — never the transport of record, never "delivered". */
   emailCopy: { state: string; to: string; outboxId: string | null; at: number } | null;
   lifecycle: { applied: boolean; from?: string; to?: string; reason?: string; at: number } | null;
@@ -472,71 +558,220 @@ export type ContactCaseMove = { from: string; to: string } | { unchanged: true; 
 export type TrialWorkflowState = 'legacy_accepted' | 'accepted' | 'scheduled' | 'completed' | 'cancelled';
 export type TrialAttendanceState = 'attended' | 'partial' | 'no_show' | 'club_cancelled' | 'player_withdrew';
 export interface TrialSessionView {
-  id: string; kind: string; startsAt: number; endsAt: number;
+  id: string;
+  kind: string;
+  startsAt: number;
+  endsAt: number;
   venue: { name: string; town: string | null; address?: string | null } | null;
   instructions?: string | null;
   attendance: { state: TrialAttendanceState | 'not_recorded'; source: string | null; recordedAt: number | null };
   evidence?: { id: string; kind: string; sessionId: string; linkedAt: number }[];
 }
 export interface TrialScheduleView {
-  legacy: boolean; timezone: string | null; revision: number; confirmedAt: number | null; confirmedBy: { kind: string } | null;
-  proposedAt: number | null; awaitingConfirmation: boolean; declinedAt?: number | null; sessions: TrialSessionView[];
-  proposedDate?: string | null; venue?: string | null;
+  legacy: boolean;
+  timezone: string | null;
+  revision: number;
+  confirmedAt: number | null;
+  confirmedBy: { kind: string } | null;
+  proposedAt: number | null;
+  awaitingConfirmation: boolean;
+  declinedAt?: number | null;
+  sessions: TrialSessionView[];
+  proposedDate?: string | null;
+  venue?: string | null;
 }
-export interface TrialRevisionView { revision: number; proposedAt: number; proposedBy: { kind: string; name: string | null } | null; confirmedAt: number | null; supersededAt: number | null; reason: string | null; material: boolean | null; sessionCount: number }
-export interface TrialAttendanceRecord { sessionId: string; state: TrialAttendanceState; source: string; recordedAt: number; recordedBy: { name: string | null } | null; note: string | null }
-export interface TrialHistoryEntry { id: string; at: number; action: string; by: { kind: string | null; name: string | null } | null; detail: Record<string, unknown> | null }
+export interface TrialRevisionView {
+  revision: number;
+  proposedAt: number;
+  proposedBy: { kind: string; name: string | null } | null;
+  confirmedAt: number | null;
+  supersededAt: number | null;
+  reason: string | null;
+  material: boolean | null;
+  sessionCount: number;
+}
+export interface TrialAttendanceRecord {
+  sessionId: string;
+  state: TrialAttendanceState;
+  source: string;
+  recordedAt: number;
+  recordedBy: { name: string | null } | null;
+  note: string | null;
+}
+export interface TrialHistoryEntry {
+  id: string;
+  at: number;
+  action: string;
+  by: { kind: string | null; name: string | null } | null;
+  detail: Record<string, unknown> | null;
+}
 export interface TrialClubView {
-  id: string; caseId: string | null; requestId: string | null; playerId: string; playerName: string | null; orgId: string;
-  workflowState: TrialWorkflowState; workflowLabel: string; legacy: boolean;
-  reportStatus: 'awaiting_report' | 'reported'; reportDueAt: number | null; hasReport: boolean;
-  acceptedAt: number | null; acceptedBy: string | null; guardianApproved: boolean | null;
-  proposedDate: string | null; venue: string | null;
+  id: string;
+  caseId: string | null;
+  requestId: string | null;
+  playerId: string;
+  playerName: string | null;
+  orgId: string;
+  workflowState: TrialWorkflowState;
+  workflowLabel: string;
+  legacy: boolean;
+  reportStatus: 'awaiting_report' | 'reported';
+  reportDueAt: number | null;
+  hasReport: boolean;
+  acceptedAt: number | null;
+  acceptedBy: string | null;
+  guardianApproved: boolean | null;
+  proposedDate: string | null;
+  venue: string | null;
   schedule: TrialScheduleView | null;
   revisions: TrialRevisionView[];
   attendanceHistory: TrialAttendanceRecord[];
-  completion: { state: 'completed' | 'cancelled'; at: number; by: { kind: string; name: string | null } | null; reason: string | null; phase: string | null; cancelledBy: string | null } | null;
+  completion: {
+    state: 'completed' | 'cancelled';
+    at: number;
+    by: { kind: string; name: string | null } | null;
+    reason: string | null;
+    phase: string | null;
+    cancelledBy: string | null;
+  } | null;
   recipient: { type: 'player' | 'guardian'; minor: boolean } | null;
   subjectRemovedAt: number | null;
   evidenceCount: number;
   history: TrialHistoryEntry[];
-  rev: number; revAt: number | null; policyVersion: number;
+  rev: number;
+  revAt: number | null;
+  policyVersion: number;
 }
 export interface TrialInvitationView {
-  id: string; status: 'pending' | 'accepted' | 'declined' | string; createdAt: number; respondedAt: number | null; respondedBy: string | null;
-  routedTo: string | null; trialId: string | null;
-  slots: { id: string; day: string; startsAt: number; endsAt: number; timezone: string; kind: string | null; venue: { name: string; town: string | null } | null }[];
-  proposedDate: string | null; altSlots: string[];
+  id: string;
+  status: 'pending' | 'accepted' | 'declined' | string;
+  createdAt: number;
+  respondedAt: number | null;
+  respondedBy: string | null;
+  routedTo: string | null;
+  trialId: string | null;
+  slots: {
+    id: string;
+    day: string;
+    startsAt: number;
+    endsAt: number;
+    timezone: string;
+    kind: string | null;
+    venue: { name: string; town: string | null } | null;
+  }[];
+  proposedDate: string | null;
+  altSlots: string[];
 }
 export interface TrialList {
-  items: TrialClubView[]; omitted: number;
+  items: TrialClubView[];
+  omitted: number;
   routing: ContactRouting;
   invitation: TrialInvitationView | null;
   case: { status: string; acceptsInvitation: boolean; planAction: string };
-  canWrite: boolean; canAssess: boolean; blocked: boolean;
-  limits: { sessions: number; slots: number; instructions: number; venueName: number; venueTown: number; venueAddress: number; reason: number; note: number; message: number; clientKey: number; evidencePerSession: number; minSessionMs: number; maxSessionMs: number; revisions: number };
-  vocabulary: { workflowStates: TrialWorkflowState[]; sessionKinds: string[]; attendanceStates: TrialAttendanceState[] };
-  policyVersion: number; note: string;
+  canWrite: boolean;
+  canAssess: boolean;
+  blocked: boolean;
+  limits: {
+    sessions: number;
+    slots: number;
+    instructions: number;
+    venueName: number;
+    venueTown: number;
+    venueAddress: number;
+    reason: number;
+    note: number;
+    message: number;
+    clientKey: number;
+    evidencePerSession: number;
+    minSessionMs: number;
+    maxSessionMs: number;
+    revisions: number;
+  };
+  vocabulary: {
+    workflowStates: TrialWorkflowState[];
+    sessionKinds: string[];
+    attendanceStates: TrialAttendanceState[];
+  };
+  policyVersion: number;
+  note: string;
 }
 export interface TrialEvidenceView {
-  id: string; kind: string; trialSessionId: string; linkedAt: number; linkedBy: { name: string | null }; removedAt: number | null;
-  provenance: string; combineVerified: boolean; combineVerifiedBlockedBy: string;
-  session: { id: string; drillId: string | null; protocolId: string | null; capturedAt: number | null; verificationState: string | null; simulated: boolean; invalidated: boolean } | null;
+  id: string;
+  kind: string;
+  trialSessionId: string;
+  linkedAt: number;
+  linkedBy: { name: string | null };
+  removedAt: number | null;
+  provenance: string;
+  combineVerified: boolean;
+  combineVerifiedBlockedBy: string;
+  session: {
+    id: string;
+    drillId: string | null;
+    protocolId: string | null;
+    capturedAt: number | null;
+    verificationState: string | null;
+    simulated: boolean;
+    invalidated: boolean;
+  } | null;
   observation: { state: string; copy: string; qualityState: string | null; experimental: { status: string } | null };
-  providerVersion: string | null; engineVersion: string | null; cvPolicyVersion: string | null;
+  providerVersion: string | null;
+  engineVersion: string | null;
+  cvPolicyVersion: string | null;
 }
-export interface TrialEvidenceCandidate { id: string; drillId: string | null; protocolId: string | null; capturedAt: number | null; verificationState: string | null; simulated: boolean; linked: boolean }
-export interface TrialAssessmentLine { id: string; state: string; scoutName: string; scoutUserId: string; submittedAt: number | null; trialSessionId: string | null; published: boolean }
-export interface TrialDetail { trial: TrialClubView; evidence: TrialEvidenceView[]; assessments: TrialAssessmentLine[]; canWrite: boolean; canAssess: boolean; blocked: boolean }
-export interface TrialSessionInput { id?: string; kind?: string; startsAt: number; endsAt: number; venue: { name: string; town?: string | null; address?: string | null }; instructions?: string | null }
+export interface TrialEvidenceCandidate {
+  id: string;
+  drillId: string | null;
+  protocolId: string | null;
+  capturedAt: number | null;
+  verificationState: string | null;
+  simulated: boolean;
+  linked: boolean;
+}
+export interface TrialAssessmentLine {
+  id: string;
+  state: string;
+  scoutName: string;
+  scoutUserId: string;
+  submittedAt: number | null;
+  trialSessionId: string | null;
+  published: boolean;
+}
+export interface TrialDetail {
+  trial: TrialClubView;
+  evidence: TrialEvidenceView[];
+  assessments: TrialAssessmentLine[];
+  canWrite: boolean;
+  canAssess: boolean;
+  blocked: boolean;
+}
+export interface TrialSessionInput {
+  id?: string;
+  kind?: string;
+  startsAt: number;
+  endsAt: number;
+  venue: { name: string; town?: string | null; address?: string | null };
+  instructions?: string | null;
+}
 export type TrialCaseMove = { from: string; to: string } | { unchanged: true; status: string; reason?: string | null };
 
 // ---- the formal recruitment decision. The same append-only decision
 // memory the Room owns, with an outcome; a draft that is visibly not a decision.
 export type DecisionOutcome = 'progress' | 'hold' | 'reject';
 export type DecisionEvidenceRefKind = 'assessment' | 'trial' | 'box_cam_session' | 'passport_evidence';
-export interface DecisionEvidenceRef { kind: DecisionEvidenceRefKind; id: string; meta?: Record<string, unknown> | null }
-export interface DecisionLifecycleEffect { action: string; from: string; to: string; applied: boolean; reason?: string | null; at: number }
+export interface DecisionEvidenceRef {
+  kind: DecisionEvidenceRefKind;
+  id: string;
+  meta?: Record<string, unknown> | null;
+}
+export interface DecisionLifecycleEffect {
+  action: string;
+  from: string;
+  to: string;
+  applied: boolean;
+  reason?: string | null;
+  at: number;
+}
 export interface FormalDecision {
   id: string;
   kind: 'formal' | 'recommendation';
@@ -556,37 +791,105 @@ export interface FormalDecision {
   supersession: { reason: string | null; of: string | null } | null;
   evidenceRefs: DecisionEvidenceRef[];
   evidenceCount: number;
-  assessmentSummary: { submitted: number; withheld: number; verdicts: Record<string, number>; assessmentIds: string[] } | null;
+  assessmentSummary: {
+    submitted: number;
+    withheld: number;
+    verdicts: Record<string, number>;
+    assessmentIds: string[];
+  } | null;
   lifecycle: DecisionLifecycleEffect | null;
   trigger: string | null;
   snapshot: { at: number | null; trust: RoomSnapshot['trust']; snapshotId: string | null; note: string } | null;
   policyVersion: number | null;
 }
 export interface DecisionDraft {
-  id: string; state: 'draft'; outcome: DecisionOutcome | null; outcomeLabel: string | null; reasonCodes: string[]; note: string | null;
-  evidenceRefs: DecisionEvidenceRef[]; by: { userId: string | null; name: string | null } | null; createdAt: number | null; updatedAt: number | null;
-  updatedBy: { userId: string | null; name: string | null } | null; rev: number; label: string;
+  id: string;
+  state: 'draft';
+  outcome: DecisionOutcome | null;
+  outcomeLabel: string | null;
+  reasonCodes: string[];
+  note: string | null;
+  evidenceRefs: DecisionEvidenceRef[];
+  by: { userId: string | null; name: string | null } | null;
+  createdAt: number | null;
+  updatedAt: number | null;
+  updatedBy: { userId: string | null; name: string | null } | null;
+  rev: number;
+  label: string;
 }
 export interface DecisionAssessmentLine {
-  id: string; scoutName: string | null; scoutUserId: string | null; state: string; submittedAt: number | null; verdict: string | null;
-  trialId: string | null; trialSessionId: string | null; rated: number; notObserved: number; confidence: { low: number; medium: number; high: number };
-  evidenceRefs: number; published: boolean;
+  id: string;
+  scoutName: string | null;
+  scoutUserId: string | null;
+  state: string;
+  submittedAt: number | null;
+  verdict: string | null;
+  trialId: string | null;
+  trialSessionId: string | null;
+  rated: number;
+  notObserved: number;
+  confidence: { low: number; medium: number; high: number };
+  evidenceRefs: number;
+  published: boolean;
 }
 export interface DecisionAssessmentSummary {
-  submitted: number; drafts: number; withheld: number; verdicts: { sign: number; monitor: number; pass: number; none: number };
-  disagreement: { kind: 'verdicts_differ' | 'unanimous'; verdicts: string[] } | null; assessments: DecisionAssessmentLine[]; note: string;
-}
-export interface DecisionEvidence {
-  assessments: { id: string; scoutName: string | null; submittedAt: number | null; verdict: string | null; trialId: string | null }[];
-  trials: { id: string; workflowState: string; completedAt: number | null; sessionCount: number; legacy: boolean }[];
-  boxCam: { id: string; trialId: string; trialSessionId: string; verificationState: string | null; observation: string; observationCopy: string | null; simulated: boolean; provenance: string }[];
-  passport: { id: string; claimType: string | null; label: string | null; provenance: string; recordedAt: number | null }[];
+  submitted: number;
+  drafts: number;
+  withheld: number;
+  verdicts: { sign: number; monitor: number; pass: number; none: number };
+  disagreement: { kind: 'verdicts_differ' | 'unanimous'; verdicts: string[] } | null;
+  assessments: DecisionAssessmentLine[];
   note: string;
 }
-export interface DecisionOutcomeAvailability { outcome: DecisionOutcome; action: string; to: string; toLabel: string; possible: boolean; alreadyThere: boolean; reason: string | null }
+export interface DecisionEvidence {
+  assessments: {
+    id: string;
+    scoutName: string | null;
+    submittedAt: number | null;
+    verdict: string | null;
+    trialId: string | null;
+  }[];
+  trials: { id: string; workflowState: string; completedAt: number | null; sessionCount: number; legacy: boolean }[];
+  boxCam: {
+    id: string;
+    trialId: string;
+    trialSessionId: string;
+    verificationState: string | null;
+    observation: string;
+    observationCopy: string | null;
+    simulated: boolean;
+    provenance: string;
+  }[];
+  passport: {
+    id: string;
+    claimType: string | null;
+    label: string | null;
+    provenance: string;
+    recordedAt: number | null;
+  }[];
+  note: string;
+}
+export interface DecisionOutcomeAvailability {
+  outcome: DecisionOutcome;
+  action: string;
+  to: string;
+  toLabel: string;
+  possible: boolean;
+  alreadyThere: boolean;
+  reason: string | null;
+}
 export interface DecisionRequirements {
-  canDraft: boolean; canFinalize: boolean; role: string | null; blocked: boolean; subjectRemoved: boolean; hasDraft: boolean; hasFinal: boolean;
-  inputs: { submittedAssessments: number; completedTrials: number; note: string }; outcomes: DecisionOutcomeAvailability[]; status: string | null; note: string;
+  canDraft: boolean;
+  canFinalize: boolean;
+  role: string | null;
+  blocked: boolean;
+  subjectRemoved: boolean;
+  hasDraft: boolean;
+  hasFinal: boolean;
+  inputs: { submittedAssessments: number; completedTrials: number; note: string };
+  outcomes: DecisionOutcomeAvailability[];
+  status: string | null;
+  note: string;
 }
 export interface DecisionSurface {
   current: FormalDecision | null;
@@ -600,169 +903,696 @@ export interface DecisionSurface {
   requirements: DecisionRequirements;
   blocked: boolean;
   subjectRemoved: boolean;
-  vocabulary: { outcomes: DecisionOutcome[]; outcomeLabels: Record<string, string>; reasonCategories: Record<string, string[]>; evidenceRefKinds: DecisionEvidenceRefKind[] };
+  vocabulary: {
+    outcomes: DecisionOutcome[];
+    outcomeLabels: Record<string, string>;
+    reasonCategories: Record<string, string[]>;
+    evidenceRefKinds: DecisionEvidenceRefKind[];
+  };
   limits: Record<string, number>;
   policyVersion: number;
   note: string;
 }
-export interface DecisionDraftInput { outcome?: DecisionOutcome | null; reasonCodes?: string[]; note?: string | null; evidenceRefs?: { kind: DecisionEvidenceRefKind; id: string }[]; clientKey?: string }
-export interface DecisionFinalizeInput { expectedRev: number; clientKey?: string; supersedes?: string; supersedesRev?: number; supersessionReason?: string }
-export interface DecisionFinalizeResult { decision: FormalDecision; lifecycle: DecisionLifecycleEffect | null; case?: { from: string; to: string } | { unchanged: true; status: string }; rev?: number; idempotent?: boolean }
-
+export interface DecisionDraftInput {
+  outcome?: DecisionOutcome | null;
+  reasonCodes?: string[];
+  note?: string | null;
+  evidenceRefs?: { kind: DecisionEvidenceRefKind; id: string }[];
+  clientKey?: string;
+}
+export interface DecisionFinalizeInput {
+  expectedRev: number;
+  clientKey?: string;
+  supersedes?: string;
+  supersedesRev?: number;
+  supersessionReason?: string;
+}
+export interface DecisionFinalizeResult {
+  decision: FormalDecision;
+  lifecycle: DecisionLifecycleEffect | null;
+  case?: { from: string; to: string } | { unchanged: true; status: string };
+  rev?: number;
+  idempotent?: boolean;
+}
 
 // ---- the canonical Offer. A club's proposal, issued as an exact,
 // immutable revision; the recipient's own acceptance or decline; never a
 // signing. The club view carries the internal note; nothing here carries the
 // decision's rationale or an assessment.
 export type OfferStatus = 'DRAFT' | 'ISSUED' | 'ACCEPTED' | 'DECLINED' | 'WITHDRAWN' | 'EXPIRED' | 'SUPERSEDED';
-export interface OfferTerms { offerType: 'direct_recruitment'; role: string | null; squad: string | null; startDate: string | null; endDate: string | null; conditions: string | null }
-export interface OfferDocumentRef { id: string; label: string | null }
-export interface OfferActor { kind: string | null; name: string | null }
+export interface OfferTerms {
+  offerType: 'direct_recruitment';
+  role: string | null;
+  squad: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  conditions: string | null;
+}
+export interface OfferDocumentRef {
+  id: string;
+  label: string | null;
+}
+export interface OfferActor {
+  kind: string | null;
+  name: string | null;
+}
 export interface OfferRevisionView {
-  id: string; revisionNumber: number; status: OfferStatus; storedStatus: OfferStatus; statusLabel: string | null; terms: OfferTerms;
-  recipientMessage: string | null; documents: OfferDocumentRef[]; expiresAt: number | null; issuedAt: number | null; createdAt: number | null;
-  supersedesRevisionId: string | null; supersededByRevisionId: string | null; withdrawnAt: number | null; respondedAt: number | null; rev: number;
-  internalNote?: string | null; issuedBy?: OfferActor | null; createdBy?: OfferActor | null; withdrawnBy?: OfferActor | null; withdrawReason?: string | null;
-  recipient?: { type: 'player' | 'guardian'; minor: boolean } | null; readiness?: { transactionId: string; evaluatedAt: number; status: string; blockers: string[] } | null;
+  id: string;
+  revisionNumber: number;
+  status: OfferStatus;
+  storedStatus: OfferStatus;
+  statusLabel: string | null;
+  terms: OfferTerms;
+  recipientMessage: string | null;
+  documents: OfferDocumentRef[];
+  expiresAt: number | null;
+  issuedAt: number | null;
+  createdAt: number | null;
+  supersedesRevisionId: string | null;
+  supersededByRevisionId: string | null;
+  withdrawnAt: number | null;
+  respondedAt: number | null;
+  rev: number;
+  internalNote?: string | null;
+  issuedBy?: OfferActor | null;
+  createdBy?: OfferActor | null;
+  withdrawnBy?: OfferActor | null;
+  withdrawReason?: string | null;
+  recipient?: { type: 'player' | 'guardian'; minor: boolean } | null;
+  readiness?: { transactionId: string; evaluatedAt: number; status: string; blockers: string[] } | null;
 }
-export interface OfferResponseView { id: string; revisionId: string; responseType: 'accepted' | 'declined'; actorType: 'player' | 'guardian'; forPlayerId: string; occurredAt: number; reason: string | null }
-export interface OfferLifecycleEffect { applied: boolean; action: string | null; from?: string; to?: string | null; reason?: string; at: number }
+export interface OfferResponseView {
+  id: string;
+  revisionId: string;
+  responseType: 'accepted' | 'declined';
+  actorType: 'player' | 'guardian';
+  forPlayerId: string;
+  occurredAt: number;
+  reason: string | null;
+}
+export interface OfferLifecycleEffect {
+  applied: boolean;
+  action: string | null;
+  from?: string;
+  to?: string | null;
+  reason?: string;
+  at: number;
+}
 export interface OfferClubView {
-  id: string; caseId: string; playerId: string; orgId: string; type: string; status: OfferStatus; statusLabel: string | null;
-  currentRevisionId: string; liveRevisionId: string | null; liveStatus: OfferStatus | null; awaitingResponse: boolean;
-  currentRevision: OfferRevisionView | null; revisions: OfferRevisionView[]; responses: OfferResponseView[];
-  firstViewedAt: number | null; agentShared: boolean; decisionId: string | null; transactionId: string | null; lifecycle: OfferLifecycleEffect | null;
-  createdAt: number; updatedAt: number | null; rev: number; policyVersion: number; honest: string;
+  id: string;
+  caseId: string;
+  playerId: string;
+  orgId: string;
+  type: string;
+  status: OfferStatus;
+  statusLabel: string | null;
+  currentRevisionId: string;
+  liveRevisionId: string | null;
+  liveStatus: OfferStatus | null;
+  awaitingResponse: boolean;
+  currentRevision: OfferRevisionView | null;
+  revisions: OfferRevisionView[];
+  responses: OfferResponseView[];
+  firstViewedAt: number | null;
+  agentShared: boolean;
+  decisionId: string | null;
+  transactionId: string | null;
+  lifecycle: OfferLifecycleEffect | null;
+  createdAt: number;
+  updatedAt: number | null;
+  rev: number;
+  policyVersion: number;
+  honest: string;
 }
-export interface OfferRequirements { role: string | null; canDraft: boolean; canIssue: boolean; status: string | null; statusLabel: string | null; draftBlockers: string[]; issueBlockers: string[]; blocked: boolean; subjectRemoved: boolean }
+export interface OfferRequirements {
+  role: string | null;
+  canDraft: boolean;
+  canIssue: boolean;
+  status: string | null;
+  statusLabel: string | null;
+  draftBlockers: string[];
+  issueBlockers: string[];
+  blocked: boolean;
+  subjectRemoved: boolean;
+}
 export interface OfferSurface {
-  offers: OfferClubView[]; liveOfferId: string | null; requirements: OfferRequirements;
-  vocabulary: { statuses: OfferStatus[]; statusLabels: Record<string, string>; types: string[]; responseTypes: string[] };
-  limits: Record<string, number>; policyVersion: number; note: string;
+  offers: OfferClubView[];
+  liveOfferId: string | null;
+  requirements: OfferRequirements;
+  vocabulary: {
+    statuses: OfferStatus[];
+    statusLabels: Record<string, string>;
+    types: string[];
+    responseTypes: string[];
+  };
+  limits: Record<string, number>;
+  policyVersion: number;
+  note: string;
 }
-export interface OfferDraftInput { terms?: Partial<OfferTerms>; recipientMessage?: string | null; internalNote?: string | null; expiresAt?: string | number | null; documents?: { evidenceId: string; label?: string | null }[]; transactionId?: string | null; clientKey?: string }
-export interface OfferHistoryItem { id: string; at: number; action: string; by: OfferActor | null; revisionId: string | null }
+export interface OfferDraftInput {
+  terms?: Partial<OfferTerms>;
+  recipientMessage?: string | null;
+  internalNote?: string | null;
+  expiresAt?: string | number | null;
+  documents?: { evidenceId: string; label?: string | null }[];
+  transactionId?: string | null;
+  clientKey?: string;
+}
+export interface OfferHistoryItem {
+  id: string;
+  at: number;
+  action: string;
+  by: OfferActor | null;
+  revisionId: string | null;
+}
 export type OfferCaseMove = { from: string; to: string } | { unchanged: true; status: string };
 
 // ---- Signing & Contract Completion. The workflow record over an
 // ACCEPTED Offer revision: immutable signing revisions (document digest,
 // required parties, contract days), party completion evidence, one completion.
-export type SigningStatus = 'DRAFT' | 'READY' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'VOIDED' | 'EXPIRED' | 'SUPERSEDED';
+export type SigningStatus =
+  | 'DRAFT'
+  | 'READY'
+  | 'IN_PROGRESS'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'VOIDED'
+  | 'EXPIRED'
+  | 'SUPERSEDED';
 export type SigningPartyType = 'PLAYER' | 'GUARDIAN' | 'CLUB_SIGNATORY';
-export interface SigningDocumentView { id: string | null; label: string | null; filename: string | null; mime: string | null; bytes: number | null; sha256: string | null }
-export interface SigningPartyView { partyType: SigningPartyType; status: 'PENDING' | 'COMPLETED'; completedAt: number | null; method: string | null; completedBy: OfferActor | null }
+export interface SigningDocumentView {
+  id: string | null;
+  label: string | null;
+  filename: string | null;
+  mime: string | null;
+  bytes: number | null;
+  sha256: string | null;
+}
+export interface SigningPartyView {
+  partyType: SigningPartyType;
+  status: 'PENDING' | 'COMPLETED';
+  completedAt: number | null;
+  method: string | null;
+  completedBy: OfferActor | null;
+}
 export interface SigningRevisionView {
-  id: string; revisionNumber: number; status: SigningStatus; statusLabel: string | null; createdAt: number | null; readyAt: number | null; completedAt: number | null;
-  document: SigningDocumentView | null; executedDocument: SigningDocumentView | null; contract: { startDate: string | null; endDate: string | null } | null;
-  requiredParties: SigningPartyView[]; supersedesRevisionId: string | null; supersededByRevisionId: string | null; createdBy?: OfferActor | null; readyBy?: OfferActor | null;
+  id: string;
+  revisionNumber: number;
+  status: SigningStatus;
+  statusLabel: string | null;
+  createdAt: number | null;
+  readyAt: number | null;
+  completedAt: number | null;
+  document: SigningDocumentView | null;
+  executedDocument: SigningDocumentView | null;
+  contract: { startDate: string | null; endDate: string | null } | null;
+  requiredParties: SigningPartyView[];
+  supersedesRevisionId: string | null;
+  supersededByRevisionId: string | null;
+  createdBy?: OfferActor | null;
+  readyBy?: OfferActor | null;
 }
 export interface SigningClubView {
-  id: string; orgId: string; orgName: string | null; caseId: string; playerId: string; offerId: string; offerRevisionId: string; transactionId: string | null;
-  status: SigningStatus | null; storedStatus: string; statusLabel: string | null; terminal: boolean; currentRevisionId: string; currentRevision: SigningRevisionView | null; revisions: SigningRevisionView[];
-  expiresAt: number | null; internalNote: string | null;
-  completion: { signingId: string; completedAt: number; contract: { startDate: string | null; endDate: string | null } | null; lifecycle: { from: string; to: string; at: number } | null } | null;
-  cancelledAt: number | null; cancelReason: string | null; voidedAt: number | null; voidReason: string | null; createdAt: number; createdBy: OfferActor | null; updatedAt: number; rev: number; policyVersion: number; honest: string;
+  id: string;
+  orgId: string;
+  orgName: string | null;
+  caseId: string;
+  playerId: string;
+  offerId: string;
+  offerRevisionId: string;
+  transactionId: string | null;
+  status: SigningStatus | null;
+  storedStatus: string;
+  statusLabel: string | null;
+  terminal: boolean;
+  currentRevisionId: string;
+  currentRevision: SigningRevisionView | null;
+  revisions: SigningRevisionView[];
+  expiresAt: number | null;
+  internalNote: string | null;
+  completion: {
+    signingId: string;
+    completedAt: number;
+    contract: { startDate: string | null; endDate: string | null } | null;
+    lifecycle: { from: string; to: string; at: number } | null;
+  } | null;
+  cancelledAt: number | null;
+  cancelReason: string | null;
+  voidedAt: number | null;
+  voidReason: string | null;
+  createdAt: number;
+  createdBy: OfferActor | null;
+  updatedAt: number;
+  rev: number;
+  policyVersion: number;
+  honest: string;
 }
-export interface SigningRequirements { role: string | null; canManage: boolean; canComplete: boolean; status: string | null; startBlockers: string[]; acceptedOfferId: string | null }
+export interface SigningRequirements {
+  role: string | null;
+  canManage: boolean;
+  canComplete: boolean;
+  status: string | null;
+  startBlockers: string[];
+  acceptedOfferId: string | null;
+}
 export interface SigningSurface {
-  packages: (SigningClubView & { integrity: string[] })[]; livePackageId: string | null;
-  legacySigning: { id: string; at: number | null; method: string } | null; requirements: SigningRequirements;
-  vocabulary: { statuses: SigningStatus[]; statusLabels: Record<string, string>; partyTypes: SigningPartyType[]; methods: string[] }; policyVersion: number; honest: string;
+  packages: (SigningClubView & { integrity: string[] })[];
+  livePackageId: string | null;
+  legacySigning: { id: string; at: number | null; method: string } | null;
+  requirements: SigningRequirements;
+  vocabulary: {
+    statuses: SigningStatus[];
+    statusLabels: Record<string, string>;
+    partyTypes: SigningPartyType[];
+    methods: string[];
+  };
+  policyVersion: number;
+  honest: string;
 }
-export interface SigningHistoryItem { id: string; at: number; action: string; by: OfferActor | null; revisionId: string | null }
-export interface SigningDocumentFile { document: SigningDocumentView; file: { mime: string; base64: string } | null }
-export interface SigningActInput { expectedRev: number; clientKey?: string; reason?: string }
+export interface SigningHistoryItem {
+  id: string;
+  at: number;
+  action: string;
+  by: OfferActor | null;
+  revisionId: string | null;
+}
+export interface SigningDocumentFile {
+  document: SigningDocumentView;
+  file: { mime: string; base64: string } | null;
+}
+export interface SigningActInput {
+  expectedRev: number;
+  clientKey?: string;
+  reason?: string;
+}
 
 // ---------------------------------------------------------------- journey
 // The server-derived journey block (domains/recruitment/lifecycle/journeyModel.mjs). The client renders
 // it and never computes a stage or a next action.
-export type JourneyStage = 'watching' | 'review' | 'contact' | 'trial' | 'assessment' | 'decision' | 'offer' | 'acceptance' | 'signing' | 'signed' | 'paused' | 'ended';
+export type JourneyStage =
+  | 'watching'
+  | 'review'
+  | 'contact'
+  | 'trial'
+  | 'assessment'
+  | 'decision'
+  | 'offer'
+  | 'acceptance'
+  | 'signing'
+  | 'signed'
+  | 'paused'
+  | 'ended';
 export type JourneyTab = 'overview' | 'contact' | 'trial' | 'assessments' | 'decision' | 'offer' | 'signing';
-export interface JourneyNextAction { code: string; stage: JourneyStage | null; kind: 'club' | 'await' | 'none'; tab: JourneyTab; lifecycleAction: string | null; permitted: boolean | null; blockedBy: string[]; resources: Record<string, string | null> }
-export interface JourneyCompletedStage { stage: JourneyStage; basis: 'canonical' | 'lifecycle'; at: number | null; [k: string]: unknown }
-export interface JourneyBlock { policyVersion: number; stage: JourneyStage; completedStages: JourneyCompletedStage[]; resources: Record<string, string | null>; nextAction: JourneyNextAction; classification: 'canonical' | 'legacy' | 'partially_canonical' | 'integrity_error'; integrity: string[]; blocked: boolean; subjectRemoved: boolean }
-export interface JourneyHistoryEntry { kind: string; at: number; by: string | null; to?: string | null; from?: string | null; revisionNumber?: number; partyType?: string; [k: string]: unknown }
-export interface RoomJourney { ok: true; journey: JourneyBlock | null; lifecycle?: { currentStage: string; allowedNext: string[]; terminal: boolean; reopenable: boolean }; nextActions?: string[]; history: { entries: JourneyHistoryEntry[]; total: number }; generatedAt: number }
+export interface JourneyNextAction {
+  code: string;
+  stage: JourneyStage | null;
+  kind: 'club' | 'await' | 'none';
+  tab: JourneyTab;
+  lifecycleAction: string | null;
+  permitted: boolean | null;
+  blockedBy: string[];
+  resources: Record<string, string | null>;
+}
+export interface JourneyCompletedStage {
+  stage: JourneyStage;
+  basis: 'canonical' | 'lifecycle';
+  at: number | null;
+  [k: string]: unknown;
+}
+export interface JourneyBlock {
+  policyVersion: number;
+  stage: JourneyStage;
+  completedStages: JourneyCompletedStage[];
+  resources: Record<string, string | null>;
+  nextAction: JourneyNextAction;
+  classification: 'canonical' | 'legacy' | 'partially_canonical' | 'integrity_error';
+  integrity: string[];
+  blocked: boolean;
+  subjectRemoved: boolean;
+}
+export interface JourneyHistoryEntry {
+  kind: string;
+  at: number;
+  by: string | null;
+  to?: string | null;
+  from?: string | null;
+  revisionNumber?: number;
+  partyType?: string;
+  [k: string]: unknown;
+}
+export interface RoomJourney {
+  ok: true;
+  journey: JourneyBlock | null;
+  lifecycle?: { currentStage: string; allowedNext: string[]; terminal: boolean; reopenable: boolean };
+  nextActions?: string[];
+  history: { entries: JourneyHistoryEntry[]; total: number };
+  generatedAt: number;
+}
 
 export interface RoomsApi {
   // The journey projection and the semantic lifecycle action.
   journey(s: Session, roomId: string): Promise<RoomJourney>;
-  lifecycle(s: Session, roomId: string, input: { action: string; reasonCodes?: string[]; expectedRev?: number; clientKey?: string }): Promise<{ ok?: boolean; from?: string; to?: string; rev?: number; idempotent?: boolean }>;
+  lifecycle(
+    s: Session,
+    roomId: string,
+    input: { action: string; reasonCodes?: string[]; expectedRev?: number; clientKey?: string },
+  ): Promise<{ ok?: boolean; from?: string; to?: string; rev?: number; idempotent?: boolean }>;
   list(s: Session, params?: RoomListParams): Promise<RoomListResult>;
   needsAttention(s: Session): Promise<{ items: RoomAttentionItem[]; note: string }>;
   summaries(s: Session, playerIds: string[]): Promise<{ items: RoomSummaryRow[] }>;
   create(s: Session, input: CreateRoomInput): Promise<CreateRoomResult>;
   get(s: Session, roomId: string): Promise<Room>;
   patch(s: Session, roomId: string, input: PatchRoomInput): Promise<Room>;
-  setStatus(s: Session, roomId: string, input: { status: string; reasonCodes?: string[]; note?: string | null; expectedRev?: number }): Promise<{ room: Room; snapshot: RoomSnapshot | null }>;
-  activity(s: Session, roomId: string, params?: { limit?: number; cursor?: string | null }): Promise<RoomActivityResult>;
-  comments(s: Session, roomId: string, params?: { limit?: number; cursor?: string | null }): Promise<RoomCommentsResult>;
-  addComment(s: Session, roomId: string, input: { body: string; replyToId?: string | null; mentions?: string[] }): Promise<RoomComment>;
+  setStatus(
+    s: Session,
+    roomId: string,
+    input: { status: string; reasonCodes?: string[]; note?: string | null; expectedRev?: number },
+  ): Promise<{ room: Room; snapshot: RoomSnapshot | null }>;
+  activity(
+    s: Session,
+    roomId: string,
+    params?: { limit?: number; cursor?: string | null },
+  ): Promise<RoomActivityResult>;
+  comments(
+    s: Session,
+    roomId: string,
+    params?: { limit?: number; cursor?: string | null },
+  ): Promise<RoomCommentsResult>;
+  addComment(
+    s: Session,
+    roomId: string,
+    input: { body: string; replyToId?: string | null; mentions?: string[] },
+  ): Promise<RoomComment>;
   editComment(s: Session, roomId: string, commentId: string, body: string): Promise<RoomComment>;
   deleteComment(s: Session, roomId: string, commentId: string): Promise<RoomComment>;
-  createTask(s: Session, roomId: string, input: { title: string; description?: string | null; assigneeUserId?: string | null; dueAt?: string | null; linkedResourceType?: string | null; linkedResourceId?: string | null }): Promise<RoomTask>;
-  updateTask(s: Session, roomId: string, taskId: string, input: { status?: string; assigneeUserId?: string | null }): Promise<RoomTask>;
+  createTask(
+    s: Session,
+    roomId: string,
+    input: {
+      title: string;
+      description?: string | null;
+      assigneeUserId?: string | null;
+      dueAt?: string | null;
+      linkedResourceType?: string | null;
+      linkedResourceId?: string | null;
+    },
+  ): Promise<RoomTask>;
+  updateTask(
+    s: Session,
+    roomId: string,
+    taskId: string,
+    input: { status?: string; assigneeUserId?: string | null },
+  ): Promise<RoomTask>;
   decisions(s: Session, roomId: string): Promise<RoomDecisionsResult>;
-  recordDecision(s: Session, roomId: string, input: { recommendation: string; reasonCodes?: string[]; note?: string | null; clientKey?: string; expectedRev?: number }): Promise<{ decision: RoomDecision; snapshot: RoomSnapshot | null }>;
+  recordDecision(
+    s: Session,
+    roomId: string,
+    input: {
+      recommendation: string;
+      reasonCodes?: string[];
+      note?: string | null;
+      clientKey?: string;
+      expectedRev?: number;
+    },
+  ): Promise<{ decision: RoomDecision; snapshot: RoomSnapshot | null }>;
   snapshots(s: Session, roomId: string): Promise<{ items: RoomSnapshot[] }>;
-  reviewEvidence(s: Session, roomId: string, evidenceId: string, input: { state: string; note?: string | null }): Promise<{ review: { evidenceId: string; state: string; note: string | null; by: string | null; at: number }; note: string }>;
-  assignAssessment(s: Session, roomId: string, input: { userId: string; kind?: string; dueAt?: string | null }): Promise<{ assignment: { id: string; userId: string; name: string; task: string; dueAt: string | null; status: string; createdAt: number } }>;
+  reviewEvidence(
+    s: Session,
+    roomId: string,
+    evidenceId: string,
+    input: { state: string; note?: string | null },
+  ): Promise<{
+    review: { evidenceId: string; state: string; note: string | null; by: string | null; at: number };
+    note: string;
+  }>;
+  assignAssessment(
+    s: Session,
+    roomId: string,
+    input: { userId: string; kind?: string; dueAt?: string | null },
+  ): Promise<{
+    assignment: {
+      id: string;
+      userId: string;
+      name: string;
+      task: string;
+      dueAt: string | null;
+      status: string;
+      createdAt: number;
+    };
+  }>;
   /** Bridges to the evidence-gap engine. There is deliberately NO free-text field. */
-  requestEvidence(s: Session, roomId: string, suggestionId: string): Promise<{ suggestion: RoomMissingEvidence; routedTo: string; note: string }>;
-  requestCombine(s: Session, roomId: string, input: { protocolIds: string[]; title?: string | null; deadline?: string | null; instructions?: string | null }): Promise<{ request: RoomCombineRequest }>;
-  link(s: Session, roomId: string, input: { trialId?: string; signingId?: string; requestId?: string }): Promise<{ links: Room['links'] }>;
+  requestEvidence(
+    s: Session,
+    roomId: string,
+    suggestionId: string,
+  ): Promise<{ suggestion: RoomMissingEvidence; routedTo: string; note: string }>;
+  requestCombine(
+    s: Session,
+    roomId: string,
+    input: { protocolIds: string[]; title?: string | null; deadline?: string | null; instructions?: string | null },
+  ): Promise<{ request: RoomCombineRequest }>;
+  link(
+    s: Session,
+    roomId: string,
+    input: { trialId?: string; signingId?: string; requestId?: string },
+  ): Promise<{ links: Room['links'] }>;
   // Contact. Page-local to the Room; there is no top-level surface.
   contacts(s: Session, roomId: string): Promise<ContactList>;
-  createContact(s: Session, roomId: string, input: { subject?: string | null; body: string; contactMode?: 'player_only' | 'both'; clientKey?: string }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
-  patchContact(s: Session, roomId: string, contactId: string, input: { subject?: string | null; body?: string; contactMode?: 'player_only' | 'both'; expectedRev: number }): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
-  sendContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ contact: ContactRecord; delivered: boolean; routing?: ContactRouting; case?: ContactCaseMove; idempotent?: boolean }>;
-  cancelContact(s: Session, roomId: string, contactId: string, input: { expectedRev: number }): Promise<{ contact: ContactRecord }>;
-  recordExternalContact(s: Session, roomId: string, input: { channel: string; occurredAt: number | string; summary?: string | null; recipientType: 'player' | 'guardian'; clientKey?: string }): Promise<{ contact: ContactRecord; case?: ContactCaseMove; idempotent?: boolean }>;
+  createContact(
+    s: Session,
+    roomId: string,
+    input: { subject?: string | null; body: string; contactMode?: 'player_only' | 'both'; clientKey?: string },
+  ): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
+  patchContact(
+    s: Session,
+    roomId: string,
+    contactId: string,
+    input: { subject?: string | null; body?: string; contactMode?: 'player_only' | 'both'; expectedRev: number },
+  ): Promise<{ contact: ContactRecord; routing: ContactRouting }>;
+  sendContact(
+    s: Session,
+    roomId: string,
+    contactId: string,
+    input: { expectedRev: number; clientKey?: string },
+  ): Promise<{
+    contact: ContactRecord;
+    delivered: boolean;
+    routing?: ContactRouting;
+    case?: ContactCaseMove;
+    idempotent?: boolean;
+  }>;
+  cancelContact(
+    s: Session,
+    roomId: string,
+    contactId: string,
+    input: { expectedRev: number },
+  ): Promise<{ contact: ContactRecord }>;
+  recordExternalContact(
+    s: Session,
+    roomId: string,
+    input: {
+      channel: string;
+      occurredAt: number | string;
+      summary?: string | null;
+      recipientType: 'player' | 'guardian';
+      clientKey?: string;
+    },
+  ): Promise<{ contact: ContactRecord; case?: ContactCaseMove; idempotent?: boolean }>;
   // Trial. Page-local to the Room, plus the existing Trials & Reports list.
   trials(s: Session, roomId: string): Promise<TrialList>;
   trial(s: Session, roomId: string, trialId: string): Promise<TrialDetail>;
-  inviteTrial(s: Session, roomId: string, input: { timezone: string; venue: { name: string; town?: string | null; address?: string | null }; message: string; instructions?: string | null; slots: { startsAt: number; endsAt: number; kind?: string }[]; clientKey?: string }): Promise<{ invitation: TrialInvitationView; routing: ContactRouting; case: TrialCaseMove; idempotent?: boolean }>;
-  scheduleTrial(s: Session, roomId: string, trialId: string, input: { timezone: string; sessions: TrialSessionInput[]; reason?: string | null; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; requiresConfirmation?: boolean; material?: boolean; idempotent?: boolean }>;
-  cancelTrial(s: Session, roomId: string, trialId: string, input: { reason: string; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; idempotent?: boolean }>;
-  recordTrialAttendance(s: Session, roomId: string, trialId: string, sessionId: string, input: { state: TrialAttendanceState; note?: string | null; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; idempotent?: boolean }>;
-  completeTrial(s: Session, roomId: string, trialId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; case: TrialCaseMove; idempotent?: boolean }>;
-  trialEvidenceCandidates(s: Session, roomId: string, trialId: string): Promise<{ items: TrialEvidenceCandidate[]; consent: boolean; reason: string | null }>;
-  linkTrialEvidence(s: Session, roomId: string, trialId: string, sessionId: string, input: { boxSessionId: string; expectedRev: number; clientKey?: string }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
-  unlinkTrialEvidence(s: Session, roomId: string, trialId: string, evidenceId: string, input: { expectedRev: number }): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
+  inviteTrial(
+    s: Session,
+    roomId: string,
+    input: {
+      timezone: string;
+      venue: { name: string; town?: string | null; address?: string | null };
+      message: string;
+      instructions?: string | null;
+      slots: { startsAt: number; endsAt: number; kind?: string }[];
+      clientKey?: string;
+    },
+  ): Promise<{ invitation: TrialInvitationView; routing: ContactRouting; case: TrialCaseMove; idempotent?: boolean }>;
+  scheduleTrial(
+    s: Session,
+    roomId: string,
+    trialId: string,
+    input: {
+      timezone: string;
+      sessions: TrialSessionInput[];
+      reason?: string | null;
+      expectedRev: number;
+      clientKey?: string;
+    },
+  ): Promise<{ trial: TrialClubView; requiresConfirmation?: boolean; material?: boolean; idempotent?: boolean }>;
+  cancelTrial(
+    s: Session,
+    roomId: string,
+    trialId: string,
+    input: { reason: string; expectedRev: number; clientKey?: string },
+  ): Promise<{ trial: TrialClubView; idempotent?: boolean }>;
+  recordTrialAttendance(
+    s: Session,
+    roomId: string,
+    trialId: string,
+    sessionId: string,
+    input: { state: TrialAttendanceState; note?: string | null; expectedRev: number; clientKey?: string },
+  ): Promise<{ trial: TrialClubView; idempotent?: boolean }>;
+  completeTrial(
+    s: Session,
+    roomId: string,
+    trialId: string,
+    input: { expectedRev: number; clientKey?: string },
+  ): Promise<{ trial: TrialClubView; case: TrialCaseMove; idempotent?: boolean }>;
+  trialEvidenceCandidates(
+    s: Session,
+    roomId: string,
+    trialId: string,
+  ): Promise<{ items: TrialEvidenceCandidate[]; consent: boolean; reason: string | null }>;
+  linkTrialEvidence(
+    s: Session,
+    roomId: string,
+    trialId: string,
+    sessionId: string,
+    input: { boxSessionId: string; expectedRev: number; clientKey?: string },
+  ): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
+  unlinkTrialEvidence(
+    s: Session,
+    roomId: string,
+    trialId: string,
+    evidenceId: string,
+    input: { expectedRev: number },
+  ): Promise<{ trial: TrialClubView; evidence: TrialEvidenceView[]; idempotent?: boolean }>;
   // Formal decision.
   decision(s: Session, roomId: string): Promise<DecisionSurface>;
   // ---- the formal decision → transaction handoff.
   handoff(s: Session, roomId: string): Promise<HandoffSurface>;
-  inviteHandoff(s: Session, roomId: string, input: { clientKey?: string }): Promise<{ handoff: HandoffView; idempotent?: boolean; note?: string }>;
+  inviteHandoff(
+    s: Session,
+    roomId: string,
+    input: { clientKey?: string },
+  ): Promise<{ handoff: HandoffView; idempotent?: boolean; note?: string }>;
   withdrawHandoff(s: Session, roomId: string): Promise<{ handoff: HandoffView; idempotent?: boolean }>;
-  createDecisionDraft(s: Session, roomId: string, input: DecisionDraftInput): Promise<{ draft: DecisionDraft | null; decision?: FormalDecision; idempotent?: boolean }>;
-  updateDecisionDraft(s: Session, roomId: string, input: DecisionDraftInput & { expectedRev: number }): Promise<{ draft: DecisionDraft }>;
-  discardDecisionDraft(s: Session, roomId: string, expectedRev: number): Promise<{ draft: null; discarded: { id: string } }>;
+  createDecisionDraft(
+    s: Session,
+    roomId: string,
+    input: DecisionDraftInput,
+  ): Promise<{ draft: DecisionDraft | null; decision?: FormalDecision; idempotent?: boolean }>;
+  updateDecisionDraft(
+    s: Session,
+    roomId: string,
+    input: DecisionDraftInput & { expectedRev: number },
+  ): Promise<{ draft: DecisionDraft }>;
+  discardDecisionDraft(
+    s: Session,
+    roomId: string,
+    expectedRev: number,
+  ): Promise<{ draft: null; discarded: { id: string } }>;
   finalizeDecision(s: Session, roomId: string, input: DecisionFinalizeInput): Promise<DecisionFinalizeResult>;
   // The canonical Offer. Page-local to the Room's Offer tab.
   offers(s: Session, roomId: string): Promise<OfferSurface>;
-  createOffer(s: Session, roomId: string, input: OfferDraftInput): Promise<{ offer: OfferClubView; idempotent?: boolean }>;
+  createOffer(
+    s: Session,
+    roomId: string,
+    input: OfferDraftInput,
+  ): Promise<{ offer: OfferClubView; idempotent?: boolean }>;
   offer(s: Session, offerId: string): Promise<{ offer: OfferClubView }>;
   offerHistory(s: Session, offerId: string): Promise<{ items: OfferHistoryItem[]; offerId: string }>;
-  updateOfferDraft(s: Session, offerId: string, input: OfferDraftInput & { expectedRev: number }): Promise<{ offer: OfferClubView }>;
-  issueOffer(s: Session, offerId: string, input: { expectedRev: number; clientKey?: string }): Promise<{ offer: OfferClubView; lifecycle: OfferLifecycleEffect | null; case?: OfferCaseMove; rev?: number; idempotent?: boolean }>;
-  withdrawOffer(s: Session, offerId: string, input: { expectedRev: number; reason?: string; clientKey?: string }): Promise<{ offer: OfferClubView; lifecycle: OfferLifecycleEffect | null; idempotent?: boolean }>;
-  reviseOffer(s: Session, offerId: string, input: OfferDraftInput & { expectedRev: number }): Promise<{ offer: OfferClubView; idempotent?: boolean }>;
+  updateOfferDraft(
+    s: Session,
+    offerId: string,
+    input: OfferDraftInput & { expectedRev: number },
+  ): Promise<{ offer: OfferClubView }>;
+  issueOffer(
+    s: Session,
+    offerId: string,
+    input: { expectedRev: number; clientKey?: string },
+  ): Promise<{
+    offer: OfferClubView;
+    lifecycle: OfferLifecycleEffect | null;
+    case?: OfferCaseMove;
+    rev?: number;
+    idempotent?: boolean;
+  }>;
+  withdrawOffer(
+    s: Session,
+    offerId: string,
+    input: { expectedRev: number; reason?: string; clientKey?: string },
+  ): Promise<{ offer: OfferClubView; lifecycle: OfferLifecycleEffect | null; idempotent?: boolean }>;
+  reviseOffer(
+    s: Session,
+    offerId: string,
+    input: OfferDraftInput & { expectedRev: number },
+  ): Promise<{ offer: OfferClubView; idempotent?: boolean }>;
   // The signing workflow. Page-local to the Room's Signing tab.
   signing(s: Session, roomId: string): Promise<SigningSurface>;
-  startSigning(s: Session, offerId: string, input: { clientKey?: string; contract?: { startDate?: string | null; endDate?: string | null }; internalNote?: string | null; expiresAt?: string | number | null }): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  startSigning(
+    s: Session,
+    offerId: string,
+    input: {
+      clientKey?: string;
+      contract?: { startDate?: string | null; endDate?: string | null };
+      internalNote?: string | null;
+      expiresAt?: string | number | null;
+    },
+  ): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
   signingPackage(s: Session, signingId: string): Promise<{ signing: SigningClubView; integrity: string[] }>;
   signingHistory(s: Session, signingId: string): Promise<{ items: SigningHistoryItem[]; signingPackageId: string }>;
   signingDocument(s: Session, signingId: string, kind?: 'document' | 'executed'): Promise<SigningDocumentFile>;
-  updateSigningDraft(s: Session, signingId: string, input: { contract?: { startDate?: string | null; endDate?: string | null }; internalNote?: string | null; expectedRev: number }): Promise<{ signing: SigningClubView }>;
-  attachSigningDocument(s: Session, signingId: string, input: { dataUrl: string; filename: string; label?: string | null; expectedRev: number }): Promise<{ signing: SigningClubView }>;
-  attachExecutedDocument(s: Session, signingId: string, input: { dataUrl: string; filename: string; expectedRev: number }): Promise<{ signing: SigningClubView }>;
-  presentSigning(s: Session, signingId: string, input: SigningActInput & { expiresAt?: string | number | null }): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
-  completeClubParty(s: Session, signingId: string, input: SigningActInput & { revisionId: string; documentSha256: string }): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
-  completeSigning(s: Session, signingId: string, input: SigningActInput): Promise<{ signing: SigningClubView; lifecycle: OfferLifecycleEffect | null; signingId?: string; idempotent?: boolean }>;
-  cancelSigning(s: Session, signingId: string, input: SigningActInput): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
-  voidSigning(s: Session, signingId: string, input: SigningActInput): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
-  supersedeSigning(s: Session, signingId: string, input: SigningActInput): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  updateSigningDraft(
+    s: Session,
+    signingId: string,
+    input: {
+      contract?: { startDate?: string | null; endDate?: string | null };
+      internalNote?: string | null;
+      expectedRev: number;
+    },
+  ): Promise<{ signing: SigningClubView }>;
+  attachSigningDocument(
+    s: Session,
+    signingId: string,
+    input: { dataUrl: string; filename: string; label?: string | null; expectedRev: number },
+  ): Promise<{ signing: SigningClubView }>;
+  attachExecutedDocument(
+    s: Session,
+    signingId: string,
+    input: { dataUrl: string; filename: string; expectedRev: number },
+  ): Promise<{ signing: SigningClubView }>;
+  presentSigning(
+    s: Session,
+    signingId: string,
+    input: SigningActInput & { expiresAt?: string | number | null },
+  ): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  completeClubParty(
+    s: Session,
+    signingId: string,
+    input: SigningActInput & { revisionId: string; documentSha256: string },
+  ): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  completeSigning(
+    s: Session,
+    signingId: string,
+    input: SigningActInput,
+  ): Promise<{
+    signing: SigningClubView;
+    lifecycle: OfferLifecycleEffect | null;
+    signingId?: string;
+    idempotent?: boolean;
+  }>;
+  cancelSigning(
+    s: Session,
+    signingId: string,
+    input: SigningActInput,
+  ): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  voidSigning(
+    s: Session,
+    signingId: string,
+    input: SigningActInput,
+  ): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
+  supersedeSigning(
+    s: Session,
+    signingId: string,
+    input: SigningActInput,
+  ): Promise<{ signing: SigningClubView; idempotent?: boolean }>;
   funnel(s: Session): Promise<RoomFunnel>;
 }
 
@@ -784,14 +1614,20 @@ const qs = (params: Record<string, string | number | undefined | null>) => {
 export const httpRooms: RoomsApi = {
   list: (s, params = {}) => req(`/org/rooms${qs({ ...params })}`, { headers: H(s) }),
   needsAttention: (s) => req('/org/rooms/needs-attention', { headers: H(s) }),
-  summaries: (s, playerIds) => req(`/org/rooms/summaries?playerIds=${encodeURIComponent(playerIds.slice(0, 100).join(','))}`, { headers: H(s) }),
+  summaries: (s, playerIds) =>
+    req(`/org/rooms/summaries?playerIds=${encodeURIComponent(playerIds.slice(0, 100).join(','))}`, { headers: H(s) }),
   create: async (s, input) => {
     // 409 ROOM_EXISTS is a routing answer, not a failure: it carries the id of
     // the room the organisation already has, so the caller opens that one.
     const res = await fetch(`${API_URL}/org/rooms`, { method: 'POST', headers: H(s), body: JSON.stringify(input) });
     const body = await res.json().catch(() => ({}));
     if (res.status === 409 && body?.error === 'ROOM_EXISTS') {
-      return { ok: false, error: 'ROOM_EXISTS', existingRoomId: String(body.existingRoomId), status: String(body.status ?? '') };
+      return {
+        ok: false,
+        error: 'ROOM_EXISTS',
+        existingRoomId: String(body.existingRoomId),
+        status: String(body.status ?? ''),
+      };
     }
     if (!res.ok) throw ApiError.fromResponse(res, body);
     return { ok: true, room: body.room as Room, adoptedExistingCase: !!body.adoptedExistingCase };
@@ -799,73 +1635,198 @@ export const httpRooms: RoomsApi = {
   get: async (s, roomId) => (await req<{ room: Room }>(`/org/rooms/${roomId}`, { headers: H(s) })).room,
   // journey
   journey: (s, roomId) => req(`/org/rooms/${roomId}/journey?limit=200`, { headers: H(s) }),
-  lifecycle: (s, roomId, input) => req(`/org/rooms/${roomId}/lifecycle`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  patch: async (s, roomId, input) => (await req<{ room: Room }>(`/org/rooms/${roomId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) })).room,
-  setStatus: (s, roomId, input) => req(`/org/rooms/${roomId}/status`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  activity: (s, roomId, params = {}) => req(`/org/rooms/${roomId}/activity${qs({ limit: params.limit, cursor: params.cursor })}`, { headers: H(s) }),
-  comments: (s, roomId, params = {}) => req(`/org/rooms/${roomId}/comments${qs({ limit: params.limit, cursor: params.cursor })}`, { headers: H(s) }),
-  addComment: async (s, roomId, input) => (await req<{ comment: RoomComment }>(`/org/rooms/${roomId}/comments`, { method: 'POST', headers: H(s), body: JSON.stringify(input) })).comment,
-  editComment: async (s, roomId, commentId, body) => (await req<{ comment: RoomComment }>(`/org/rooms/${roomId}/comments/${commentId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify({ body }) })).comment,
-  deleteComment: async (s, roomId, commentId) => (await req<{ comment: RoomComment }>(`/org/rooms/${roomId}/comments/${commentId}`, { method: 'DELETE', headers: H(s) })).comment,
-  createTask: async (s, roomId, input) => (await req<{ task: RoomTask }>(`/org/rooms/${roomId}/tasks`, { method: 'POST', headers: H(s), body: JSON.stringify(input) })).task,
-  updateTask: async (s, roomId, taskId, input) => (await req<{ task: RoomTask }>(`/org/rooms/${roomId}/tasks/${taskId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) })).task,
+  lifecycle: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/lifecycle`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  patch: async (s, roomId, input) =>
+    (await req<{ room: Room }>(`/org/rooms/${roomId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }))
+      .room,
+  setStatus: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/status`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  activity: (s, roomId, params = {}) =>
+    req(`/org/rooms/${roomId}/activity${qs({ limit: params.limit, cursor: params.cursor })}`, { headers: H(s) }),
+  comments: (s, roomId, params = {}) =>
+    req(`/org/rooms/${roomId}/comments${qs({ limit: params.limit, cursor: params.cursor })}`, { headers: H(s) }),
+  addComment: async (s, roomId, input) =>
+    (
+      await req<{ comment: RoomComment }>(`/org/rooms/${roomId}/comments`, {
+        method: 'POST',
+        headers: H(s),
+        body: JSON.stringify(input),
+      })
+    ).comment,
+  editComment: async (s, roomId, commentId, body) =>
+    (
+      await req<{ comment: RoomComment }>(`/org/rooms/${roomId}/comments/${commentId}`, {
+        method: 'PATCH',
+        headers: H(s),
+        body: JSON.stringify({ body }),
+      })
+    ).comment,
+  deleteComment: async (s, roomId, commentId) =>
+    (
+      await req<{ comment: RoomComment }>(`/org/rooms/${roomId}/comments/${commentId}`, {
+        method: 'DELETE',
+        headers: H(s),
+      })
+    ).comment,
+  createTask: async (s, roomId, input) =>
+    (
+      await req<{ task: RoomTask }>(`/org/rooms/${roomId}/tasks`, {
+        method: 'POST',
+        headers: H(s),
+        body: JSON.stringify(input),
+      })
+    ).task,
+  updateTask: async (s, roomId, taskId, input) =>
+    (
+      await req<{ task: RoomTask }>(`/org/rooms/${roomId}/tasks/${taskId}`, {
+        method: 'PATCH',
+        headers: H(s),
+        body: JSON.stringify(input),
+      })
+    ).task,
   decisions: (s, roomId) => req(`/org/rooms/${roomId}/decisions`, { headers: H(s) }),
-  recordDecision: (s, roomId, input) => req(`/org/rooms/${roomId}/decisions`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  recordDecision: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/decisions`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   snapshots: (s, roomId) => req(`/org/rooms/${roomId}/snapshots`, { headers: H(s) }),
-  reviewEvidence: (s, roomId, evidenceId, input) => req(`/org/rooms/${roomId}/evidence/${evidenceId}/review`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  assignAssessment: (s, roomId, input) => req(`/org/rooms/${roomId}/assessment-assignments`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  requestEvidence: (s, roomId, suggestionId) => req(`/org/rooms/${roomId}/evidence-requests`, { method: 'POST', headers: H(s), body: JSON.stringify({ suggestionId }) }),
-  requestCombine: (s, roomId, input) => req(`/org/rooms/${roomId}/combine-requests`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  link: (s, roomId, input) => req(`/org/rooms/${roomId}/link`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  reviewEvidence: (s, roomId, evidenceId, input) =>
+    req(`/org/rooms/${roomId}/evidence/${evidenceId}/review`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
+  assignAssessment: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/assessment-assignments`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  requestEvidence: (s, roomId, suggestionId) =>
+    req(`/org/rooms/${roomId}/evidence-requests`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify({ suggestionId }),
+    }),
+  requestCombine: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/combine-requests`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  link: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/link`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   contacts: (s, roomId) => req(`/org/rooms/${roomId}/contacts`, { headers: H(s) }),
-  createContact: (s, roomId, input) => req(`/org/rooms/${roomId}/contacts`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  patchContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
-  sendContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/send`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  createContact: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/contacts`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  patchContact: (s, roomId, contactId, input) =>
+    req(`/org/rooms/${roomId}/contacts/${contactId}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  sendContact: (s, roomId, contactId, input) =>
+    req(`/org/rooms/${roomId}/contacts/${contactId}/send`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
   // ---- transaction handoff
   handoff: (s, roomId) => req(`/org/rooms/${roomId}/transaction-handoff`, { headers: H(s) }),
-  inviteHandoff: (s, roomId, input) => req(`/org/rooms/${roomId}/transaction-handoff`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  withdrawHandoff: (s, roomId) => req(`/org/rooms/${roomId}/transaction-handoff/withdraw`, { method: 'POST', headers: H(s), body: '{}' }),
-  cancelContact: (s, roomId, contactId, input) => req(`/org/rooms/${roomId}/contacts/${contactId}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  recordExternalContact: (s, roomId, input) => req(`/org/rooms/${roomId}/contacts/external`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  inviteHandoff: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/transaction-handoff`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  withdrawHandoff: (s, roomId) =>
+    req(`/org/rooms/${roomId}/transaction-handoff/withdraw`, { method: 'POST', headers: H(s), body: '{}' }),
+  cancelContact: (s, roomId, contactId, input) =>
+    req(`/org/rooms/${roomId}/contacts/${contactId}/cancel`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
+  recordExternalContact: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/contacts/external`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   trials: (s, roomId) => req(`/org/rooms/${roomId}/trials`, { headers: H(s) }),
   trial: (s, roomId, trialId) => req(`/org/rooms/${roomId}/trials/${trialId}`, { headers: H(s) }),
-  inviteTrial: (s, roomId, input) => req(`/org/rooms/${roomId}/trials`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  scheduleTrial: (s, roomId, trialId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/reschedule`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  cancelTrial: (s, roomId, trialId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  recordTrialAttendance: (s, roomId, trialId, sessionId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/sessions/${sessionId}/attendance`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  completeTrial: (s, roomId, trialId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/complete`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  trialEvidenceCandidates: (s, roomId, trialId) => req(`/org/rooms/${roomId}/trials/${trialId}/evidence/candidates`, { headers: H(s) }),
-  linkTrialEvidence: (s, roomId, trialId, sessionId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/sessions/${sessionId}/evidence`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  unlinkTrialEvidence: (s, roomId, trialId, evidenceId, input) => req(`/org/rooms/${roomId}/trials/${trialId}/evidence/${evidenceId}/unlink`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  inviteTrial: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/trials`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  scheduleTrial: (s, roomId, trialId, input) =>
+    req(`/org/rooms/${roomId}/trials/${trialId}/reschedule`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
+  cancelTrial: (s, roomId, trialId, input) =>
+    req(`/org/rooms/${roomId}/trials/${trialId}/cancel`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
+  recordTrialAttendance: (s, roomId, trialId, sessionId, input) =>
+    req(`/org/rooms/${roomId}/trials/${trialId}/sessions/${sessionId}/attendance`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
+  completeTrial: (s, roomId, trialId, input) =>
+    req(`/org/rooms/${roomId}/trials/${trialId}/complete`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
+  trialEvidenceCandidates: (s, roomId, trialId) =>
+    req(`/org/rooms/${roomId}/trials/${trialId}/evidence/candidates`, { headers: H(s) }),
+  linkTrialEvidence: (s, roomId, trialId, sessionId, input) =>
+    req(`/org/rooms/${roomId}/trials/${trialId}/sessions/${sessionId}/evidence`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
+  unlinkTrialEvidence: (s, roomId, trialId, evidenceId, input) =>
+    req(`/org/rooms/${roomId}/trials/${trialId}/evidence/${evidenceId}/unlink`, {
+      method: 'POST',
+      headers: H(s),
+      body: JSON.stringify(input),
+    }),
   decision: (s, roomId) => req(`/org/rooms/${roomId}/decision`, { headers: H(s) }),
-  createDecisionDraft: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  updateDecisionDraft: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
-  discardDecisionDraft: (s, roomId, expectedRev) => req(`/org/rooms/${roomId}/decision/draft`, { method: 'DELETE', headers: H(s), body: JSON.stringify({ expectedRev }) }),
-  finalizeDecision: (s, roomId, input) => req(`/org/rooms/${roomId}/decision/finalize`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  createDecisionDraft: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/decision/draft`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  updateDecisionDraft: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/decision/draft`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  discardDecisionDraft: (s, roomId, expectedRev) =>
+    req(`/org/rooms/${roomId}/decision/draft`, {
+      method: 'DELETE',
+      headers: H(s),
+      body: JSON.stringify({ expectedRev }),
+    }),
+  finalizeDecision: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/decision/finalize`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   // ---- Offers
   offers: (s, roomId) => req(`/org/rooms/${roomId}/offers`, { headers: H(s) }),
-  createOffer: (s, roomId, input) => req(`/org/rooms/${roomId}/offers`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  createOffer: (s, roomId, input) =>
+    req(`/org/rooms/${roomId}/offers`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   offer: (s, offerId) => req(`/org/offers/${offerId}`, { headers: H(s) }),
   offerHistory: (s, offerId) => req(`/org/offers/${offerId}/history`, { headers: H(s) }),
-  updateOfferDraft: (s, offerId, input) => req(`/org/offers/${offerId}/draft`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
-  issueOffer: (s, offerId, input) => req(`/org/offers/${offerId}/issue`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  withdrawOffer: (s, offerId, input) => req(`/org/offers/${offerId}/withdraw`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  reviseOffer: (s, offerId, input) => req(`/org/offers/${offerId}/revise`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  updateOfferDraft: (s, offerId, input) =>
+    req(`/org/offers/${offerId}/draft`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  issueOffer: (s, offerId, input) =>
+    req(`/org/offers/${offerId}/issue`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  withdrawOffer: (s, offerId, input) =>
+    req(`/org/offers/${offerId}/withdraw`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  reviseOffer: (s, offerId, input) =>
+    req(`/org/offers/${offerId}/revise`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   // The signing workflow.
   signing: (s, roomId) => req(`/org/rooms/${roomId}/signing`, { headers: H(s) }),
-  startSigning: (s, offerId, input) => req(`/org/offers/${offerId}/signing`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  startSigning: (s, offerId, input) =>
+    req(`/org/offers/${offerId}/signing`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   signingPackage: (s, id) => req(`/org/signings/${id}`, { headers: H(s) }),
   signingHistory: (s, id) => req(`/org/signings/${id}/history`, { headers: H(s) }),
-  signingDocument: (s, id, kind = 'document') => req(`/org/signings/${id}/document${kind === 'executed' ? '?kind=executed' : ''}`, { headers: H(s) }),
-  updateSigningDraft: (s, id, input) => req(`/org/signings/${id}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
-  attachSigningDocument: (s, id, input) => req(`/org/signings/${id}/document`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  attachExecutedDocument: (s, id, input) => req(`/org/signings/${id}/executed-document`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  presentSigning: (s, id, input) => req(`/org/signings/${id}/ready`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  completeClubParty: (s, id, input) => req(`/org/signings/${id}/parties/club/complete`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  completeSigning: (s, id, input) => req(`/org/signings/${id}/complete`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  cancelSigning: (s, id, input) => req(`/org/signings/${id}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  voidSigning: (s, id, input) => req(`/org/signings/${id}/void`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  supersedeSigning: (s, id, input) => req(`/org/signings/${id}/supersede`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  signingDocument: (s, id, kind = 'document') =>
+    req(`/org/signings/${id}/document${kind === 'executed' ? '?kind=executed' : ''}`, { headers: H(s) }),
+  updateSigningDraft: (s, id, input) =>
+    req(`/org/signings/${id}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  attachSigningDocument: (s, id, input) =>
+    req(`/org/signings/${id}/document`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  attachExecutedDocument: (s, id, input) =>
+    req(`/org/signings/${id}/executed-document`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  presentSigning: (s, id, input) =>
+    req(`/org/signings/${id}/ready`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  completeClubParty: (s, id, input) =>
+    req(`/org/signings/${id}/parties/club/complete`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  completeSigning: (s, id, input) =>
+    req(`/org/signings/${id}/complete`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  cancelSigning: (s, id, input) =>
+    req(`/org/signings/${id}/cancel`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  voidSigning: (s, id, input) =>
+    req(`/org/signings/${id}/void`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  supersedeSigning: (s, id, input) =>
+    req(`/org/signings/${id}/supersede`, { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
   funnel: (s) => req('/org/rooms-funnel', { headers: H(s) }),
 };
 

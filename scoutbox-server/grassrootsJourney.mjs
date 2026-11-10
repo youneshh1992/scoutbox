@@ -95,8 +95,18 @@ export function pathwayFor(player, { vouchCount = 0 } = {}) {
     level,
     steps: [
       { key: 'amateur', label: 'Amateur', reached: true, note: 'Where every journey starts.' },
-      { key: 'semi_pro', label: 'Semi-pro', reached: level === 'semi_pro', note: 'A grassroots club signing takes you here.' },
-      { key: 'pro', label: 'Academy / Pro', reached: false, note: 'An academy or pro club signing takes you here — and onto ScoutBox.' },
+      {
+        key: 'semi_pro',
+        label: 'Semi-pro',
+        reached: level === 'semi_pro',
+        note: 'A grassroots club signing takes you here.',
+      },
+      {
+        key: 'pro',
+        label: 'Academy / Pro',
+        reached: false,
+        note: 'An academy or pro club signing takes you here — and onto ScoutBox.',
+      },
     ],
     // What clubs actually look at — the player's controllable signals.
     signals: {
@@ -105,9 +115,10 @@ export function pathwayFor(player, { vouchCount = 0 } = {}) {
       combineVerified,
       coachVouches: vouchCount,
     },
-    nextStep: level === 'amateur'
-      ? 'Get seen locally: verified attendance, a verified clip, and a coach vouch are what nearby clubs check first.'
-      : 'Keep the record growing — academy scouts on ScoutBox see your trust, combine numbers and trial reports.',
+    nextStep:
+      level === 'amateur'
+        ? 'Get seen locally: verified attendance, a verified clip, and a coach vouch are what nearby clubs check first.'
+        : 'Keep the record growing — academy scouts on ScoutBox see your trust, combine numbers and trial reports.',
   };
 }
 
@@ -117,12 +128,12 @@ export function pathwayFor(player, { vouchCount = 0 } = {}) {
 export function earnedGrassrootsBadges(player, { streak = 0 } = {}) {
   const earned = [];
   const apps = player.stats?.appearances ?? 0;
-  if ((player.attendance ?? []).length >= 1) earned.push('Turnstile');            // first verified attendance
-  if ((player.attendance ?? []).length >= 10) earned.push('Ever-Present');        // ten verified attendances
-  if (apps >= 20) earned.push('Season Regular');                                  // a real season of football
-  if (streak >= 14) earned.push('Iron Streak');                                   // two weeks of daily activity
+  if ((player.attendance ?? []).length >= 1) earned.push('Turnstile'); // first verified attendance
+  if ((player.attendance ?? []).length >= 10) earned.push('Ever-Present'); // ten verified attendances
+  if (apps >= 20) earned.push('Season Regular'); // a real season of football
+  if (streak >= 14) earned.push('Iron Streak'); // two weeks of daily activity
   if ((player.drillResults ?? []).filter((r) => r.verified).length >= 3) earned.push('Combine Proven');
-  if (player.level === 'semi_pro') earned.push('First Club');                     // the level-up itself
+  if (player.level === 'semi_pro') earned.push('First Club'); // the level-up itself
   return earned;
 }
 

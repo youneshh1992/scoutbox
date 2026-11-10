@@ -11,9 +11,12 @@ export function registerTrustScore(ctx) {
 
   // Aggregate counters only, never a player id or name.
   metrics.trust = {
-    trust_profile_viewed: 0, trust_explanation_viewed: 0,
-    trust_band_limited_evidence: 0, trust_band_developing_evidence: 0,
-    trust_band_established_evidence: 0, trust_band_strong_evidence: 0,
+    trust_profile_viewed: 0,
+    trust_explanation_viewed: 0,
+    trust_band_limited_evidence: 0,
+    trust_band_developing_evidence: 0,
+    trust_band_established_evidence: 0,
+    trust_band_strong_evidence: 0,
     trust_band_very_strong_evidence: 0,
     trust_recalculation_reason: 0,
     policyVersion: TRUST_SCORE_POLICY_VERSION,

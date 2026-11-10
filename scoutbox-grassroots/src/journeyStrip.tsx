@@ -17,13 +17,25 @@ import { rooms, type Room, type RoomJourney, type JourneyTab, type JourneyStage 
 import { t, fmtDateTime } from './i18n';
 
 /** The pipeline stages, in order. The same list as the server's PIPELINE_STAGES. */
-export const PIPELINE_STAGES: JourneyStage[] = ['watching', 'review', 'contact', 'trial', 'assessment', 'decision', 'offer', 'acceptance', 'signing', 'signed'];
+export const PIPELINE_STAGES: JourneyStage[] = [
+  'watching',
+  'review',
+  'contact',
+  'trial',
+  'assessment',
+  'decision',
+  'offer',
+  'acceptance',
+  'signing',
+  'signed',
+];
 /** Next actions the strip performs itself (a lifecycle action with no record to make first). */
 const PERFORMABLE = new Set(['REVIEW_PLAYER', 'RESUME_CASE']);
 
 export const stageLabel = (s: string) => t(`jn.stage.${s}`, s);
 export const nextActionLabel = (code: string) => t(`jn.next.${code}`, code.toLowerCase().replace(/_/g, ' '));
-export const journeyEventLabel = (kind: string) => t(`jn.ev.${kind}`, t(`rm.ev.${kind}`, kind.replace(/^(room|case)_/, '').replace(/_/g, ' ')));
+export const journeyEventLabel = (kind: string) =>
+  t(`jn.ev.${kind}`, t(`rm.ev.${kind}`, kind.replace(/^(room|case)_/, '').replace(/_/g, ' ')));
 
 /**
  * The journey for a room, re-read whenever the room's revision or the app's
@@ -36,21 +48,44 @@ export function useRoomJourney(session: Session, room: Room, tick: number) {
   const bump = useCallback(() => setBumpN((b) => b + 1), []);
   useEffect(() => {
     let live = true;
-    rooms.journey(session, room.roomId).then((j) => { if (live) setJourney(j); }).catch(() => { if (live) setJourney(null); });
-    return () => { live = false; };
+    rooms
+      .journey(session, room.roomId)
+      .then((j) => {
+        if (live) setJourney(j);
+      })
+      .catch(() => {
+        if (live) setJourney(null);
+      });
+    return () => {
+      live = false;
+    };
   }, [session, room.roomId, room.rev, tick, bumpN]);
   useEffect(() => {
     const onFocus = () => bump();
-    const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') bump();
+    };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('pageshow', onFocus);
-    return () => { window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('pageshow', onFocus); };
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onFocus);
+    };
   }, [bump]);
   return { journey, bump };
 }
 
-export function JourneyStrip({ session, room, journey, notify, reload, onTab, bump }: {
+export function JourneyStrip({
+  session,
+  room,
+  journey,
+  notify,
+  reload,
+  onTab,
+  bump,
+}: {
   session: Session;
   room: Room;
   journey: RoomJourney | null;
@@ -66,42 +101,74 @@ export function JourneyStrip({ session, room, journey, notify, reload, onTab, bu
   const na = jb.nextAction;
   const currentIdx = PIPELINE_STAGES.indexOf(jb.stage as JourneyStage);
   const done = new Set(jb.completedStages.map((c) => c.stage));
-  const performable = na.kind === 'club' && !!na.lifecycleAction && PERFORMABLE.has(na.code) && na.permitted === true && na.blockedBy.length === 0;
+  const performable =
+    na.kind === 'club' &&
+    !!na.lifecycleAction &&
+    PERFORMABLE.has(na.code) &&
+    na.permitted === true &&
+    na.blockedBy.length === 0;
 
   const act = async () => {
     if (busy) return;
     setChanged(false);
-    if (!performable) { onTab(na.tab); return; }
+    if (!performable) {
+      onTab(na.tab);
+      return;
+    }
     setBusy(true);
     try {
       await rooms.lifecycle(session, room.roomId, { action: na.lifecycleAction!, expectedRev: room.rev });
       notify(t('jn.moved'));
-      reload(); bump();
+      reload();
+      bump();
     } catch (e) {
       // The case is not where the strip thought: refresh, say so once, never overwrite.
-      if (e instanceof ApiError && [403, 409, 422].includes(e.status)) { setChanged(true); reload(); bump(); }
-      else notify(e instanceof Error ? e.message : 'failed', true);
-    } finally { setBusy(false); }
+      if (e instanceof ApiError && [403, 409, 422].includes(e.status)) {
+        setChanged(true);
+        reload();
+        bump();
+      } else notify(e instanceof Error ? e.message : 'failed', true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
-    <section className="section" aria-label={t('jn.title')} data-testid="journey-strip" data-stage={jb.stage} data-next={na.code} data-classification={jb.classification}>
+    <section
+      className="section"
+      aria-label={t('jn.title')}
+      data-testid="journey-strip"
+      data-stage={jb.stage}
+      data-next={na.code}
+      data-classification={jb.classification}
+    >
       <ol className="journey-rail" aria-label={t('jn.railLabel')}>
         {PIPELINE_STAGES.map((s, i) => {
           // The current stage is marked current even when it is also done (signed): a reader must always find ONE aria-current step.
           const state = s === jb.stage ? 'current' : done.has(s) ? 'done' : i < currentIdx ? 'passed' : 'pending';
           const glyph = done.has(s) ? '✓' : state === 'current' ? '●' : '○';
           return (
-            <li key={s} className={`journey-step ${state}`} aria-current={state === 'current' ? 'step' : undefined} data-stage={s} data-state={state}>
+            <li
+              key={s}
+              className={`journey-step ${state}`}
+              aria-current={state === 'current' ? 'step' : undefined}
+              data-stage={s}
+              data-state={state}
+            >
               <span aria-hidden="true">{glyph}</span> <span>{stageLabel(s)}</span>
             </li>
           );
         })}
         {(jb.stage === 'paused' || jb.stage === 'ended') && (
-          <li className="journey-step current" aria-current="step" data-stage={jb.stage} data-state="current"><span aria-hidden="true">■</span> <span>{stageLabel(jb.stage)}</span></li>
+          <li className="journey-step current" aria-current="step" data-stage={jb.stage} data-state="current">
+            <span aria-hidden="true">■</span> <span>{stageLabel(jb.stage)}</span>
+          </li>
         )}
       </ol>
-      <div className="journey-next" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+      <div
+        className="journey-next"
+        style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}
+      >
         <span className="pill blue">{t('jn.nextLabel')}</span>
         <span className="grow" data-testid="journey-next-action">
           {na.kind === 'await' && <Icon name="clock" size={13} label="waiting" />}
@@ -109,11 +176,21 @@ export function JourneyStrip({ session, room, journey, notify, reload, onTab, bu
           {nextActionLabel(na.code)}
         </span>
         {na.kind === 'club' && (
-          <button className="primary" data-testid="journey-next-go" disabled={busy || na.permitted === false || na.blockedBy.length > 0} onClick={act} aria-describedby={na.permitted === false || na.blockedBy.length > 0 ? 'journey-next-why' : undefined}>
+          <button
+            className="primary"
+            data-testid="journey-next-go"
+            disabled={busy || na.permitted === false || na.blockedBy.length > 0}
+            onClick={act}
+            aria-describedby={na.permitted === false || na.blockedBy.length > 0 ? 'journey-next-why' : undefined}
+          >
             {performable ? nextActionLabel(na.code) : `${t('jn.open')} ${t(`rm.tab.${na.tab}`)}`}
           </button>
         )}
-        {na.kind === 'await' && <button onClick={() => onTab(na.tab)}>{t('jn.open')} {t(`rm.tab.${na.tab}`)}</button>}
+        {na.kind === 'await' && (
+          <button onClick={() => onTab(na.tab)}>
+            {t('jn.open')} {t(`rm.tab.${na.tab}`)}
+          </button>
+        )}
       </div>
       {(na.permitted === false || na.blockedBy.length > 0) && (
         <div id="journey-next-why" className="dim" style={{ fontSize: 12.5, marginTop: 4 }}>
@@ -121,12 +198,32 @@ export function JourneyStrip({ session, room, journey, notify, reload, onTab, bu
         </div>
       )}
       {jb.classification !== 'canonical' && (
-        <div className="notice" role="note" style={{ marginTop: 6, fontSize: 12.5 }} data-testid="journey-classification">{t(`jn.class.${jb.classification}`)}{jb.integrity.length > 0 ? ` (${jb.integrity.join(', ')})` : ''}</div>
+        <div
+          className="notice"
+          role="note"
+          style={{ marginTop: 6, fontSize: 12.5 }}
+          data-testid="journey-classification"
+        >
+          {t(`jn.class.${jb.classification}`)}
+          {jb.integrity.length > 0 ? ` (${jb.integrity.join(', ')})` : ''}
+        </div>
       )}
       {changed && (
-        <div className="notice block" role="status" aria-live="polite" data-testid="journey-changed" style={{ marginTop: 6 }}>{t('jn.changed')}</div>
+        <div
+          className="notice block"
+          role="status"
+          aria-live="polite"
+          data-testid="journey-changed"
+          style={{ marginTop: 6 }}
+        >
+          {t('jn.changed')}
+        </div>
       )}
-      {journey?.generatedAt ? <div className="dim" style={{ fontSize: 11.5, marginTop: 4 }}>{t('jn.asOf')} {fmtDateTime(journey.generatedAt)}</div> : null}
+      {journey?.generatedAt ? (
+        <div className="dim" style={{ fontSize: 11.5, marginTop: 4 }}>
+          {t('jn.asOf')} {fmtDateTime(journey.generatedAt)}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -136,17 +233,33 @@ export function JourneyTimeline({ journey }: { journey: RoomJourney | null }) {
   const entries = journey?.history?.entries ?? [];
   return (
     <div className="section" aria-label={t('jn.timeline')} data-testid="journey-timeline">
-      <h4>{t('jn.timeline')} <span className="dim" style={{ fontSize: 12.5 }}>({journey?.history?.total ?? 0})</span></h4>
-      <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('jn.timelineNote')}</div>
-      {entries.length === 0 ? <div className="dim">{t('jn.noTimeline')}</div> : (
+      <h4>
+        {t('jn.timeline')}{' '}
+        <span className="dim" style={{ fontSize: 12.5 }}>
+          ({journey?.history?.total ?? 0})
+        </span>
+      </h4>
+      <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>
+        {t('jn.timelineNote')}
+      </div>
+      {entries.length === 0 ? (
+        <div className="dim">{t('jn.noTimeline')}</div>
+      ) : (
         <ol className="list-rows" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
           {entries.map((e, i) => (
             <li key={`${e.kind}:${e.at}:${i}`} className="list-row" style={{ flexWrap: 'wrap' }} data-kind={e.kind}>
-              <span className="dim" style={{ minWidth: 120 }}>{fmtDateTime(e.at)}</span>
+              <span className="dim" style={{ minWidth: 120 }}>
+                {fmtDateTime(e.at)}
+              </span>
               <span className="grow">
                 {journeyEventLabel(e.kind)}
                 {e.to ? <span className="dim"> → {t(`rm.st.${e.to}`, e.to)}</span> : null}
-                {typeof e.revisionNumber === 'number' ? <span className="dim"> · {t('jn.revision')} {e.revisionNumber}</span> : null}
+                {typeof e.revisionNumber === 'number' ? (
+                  <span className="dim">
+                    {' '}
+                    · {t('jn.revision')} {e.revisionNumber}
+                  </span>
+                ) : null}
                 {e.partyType ? <span className="dim"> · {t(`sg.party.${e.partyType}`, e.partyType)}</span> : null}
               </span>
               <span className="dim">{e.by ?? t('rm.system')}</span>

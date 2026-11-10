@@ -15,7 +15,10 @@
 import { API_URL, DEMO_MODE, ApiError, type Session } from './api';
 import { demoTrust } from './trustDemo';
 
-export interface TrustSignal { code: string; text: string }
+export interface TrustSignal {
+  code: string;
+  text: string;
+}
 
 /** Safe per-component projection: the level, never the underlying records. */
 export interface TrustComponentLevel {
@@ -63,8 +66,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const httpTrust: TrustApi = {
-  player: async (s, playerId) => (await req<{ playerId: string; trust: TrustClub }>(`/org/players/${playerId}/trust-profile`, { headers: H(s) })).trust,
-  summaries: (s, playerIds) => req(`/org/trust-summaries?playerIds=${encodeURIComponent(playerIds.join(','))}`, { headers: H(s) }),
+  player: async (s, playerId) =>
+    (await req<{ playerId: string; trust: TrustClub }>(`/org/players/${playerId}/trust-profile`, { headers: H(s) }))
+      .trust,
+  summaries: (s, playerIds) =>
+    req(`/org/trust-summaries?playerIds=${encodeURIComponent(playerIds.join(','))}`, { headers: H(s) }),
 };
 
 export const trust: TrustApi = DEMO_MODE ? demoTrust : httpTrust;

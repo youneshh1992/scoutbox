@@ -53,7 +53,11 @@ export function TrustScoreHeader({ t, compact }: { t: TrustSelf; compact?: boole
   return (
     <View accessibilityLabel={`${pt('trsTitle')} ${t.score}. ${t.bandLabel}. ${trustDisclaimer(t)}`}>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-        <Text style={{ color: colors.text, fontWeight: '800', fontSize: compact ? 28 : 38, lineHeight: compact ? 34 : 44 }}>{t.score}</Text>
+        <Text
+          style={{ color: colors.text, fontWeight: '800', fontSize: compact ? 28 : 38, lineHeight: compact ? 34 : 44 }}
+        >
+          {t.score}
+        </Text>
         <Text style={{ color: colors.text, fontWeight: '600', fontSize: 15 }}>{t.bandLabel}</Text>
       </View>
       <Muted size={12.5}>{pt('trsEvidenceOnly')}</Muted>
@@ -71,23 +75,44 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
   useEffect(() => {
     let live = true;
     setErr(null);
-    trust.profile(actor)
-      .then((v) => { if (live) setT(v); })
-      .catch((e) => { if (live) setErr(e instanceof Error ? e.message : 'failed'); });
-    return () => { live = false; };
+    trust
+      .profile(actor)
+      .then((v) => {
+        if (live) setT(v);
+      })
+      .catch((e) => {
+        if (live) setErr(e instanceof Error ? e.message : 'failed');
+      });
+    return () => {
+      live = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, actor.kind]);
 
   return (
     <RefCard testID="trust-card">
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 }} accessibilityLabel={t ? `${pt('trsTitle')} ${t.score}. ${t.bandLabel}. ${trustDisclaimer(t)}` : undefined}>
+      <View
+        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}
+        accessibilityLabel={t ? `${pt('trsTitle')} ${t.score}. ${t.bandLabel}. ${trustDisclaimer(t)}` : undefined}
+      >
         <View style={{ flex: 1 }}>
-          <Text style={{ color: colors.muted, fontSize: 11, marginBottom: 5 }}>{pt('trsTitle')}{childName ? ` — ${childName}` : ''}</Text>
-          <Text role="heading" aria-level={3} style={{ color: colors.text, fontSize: 16, fontWeight: '600', letterSpacing: -0.25 }}>{t ? t.bandLabel : err ? err : pt('trsLoading')}</Text>
+          <Text style={{ color: colors.muted, fontSize: 11, marginBottom: 5 }}>
+            {pt('trsTitle')}
+            {childName ? ` — ${childName}` : ''}
+          </Text>
+          <Text
+            role="heading"
+            aria-level={3}
+            style={{ color: colors.text, fontSize: 16, fontWeight: '600', letterSpacing: -0.25 }}
+          >
+            {t ? t.bandLabel : err ? err : pt('trsLoading')}
+          </Text>
           {t ? <Muted size={12.5}>{pt('trsEvidenceOnly')}</Muted> : null}
         </View>
         {t ? (
-          <View testID="trust-score"><ScoreRing value={t.score} label={pt('trsTitle')} /></View>
+          <View testID="trust-score">
+            <ScoreRing value={t.score} label={pt('trsTitle')} />
+          </View>
         ) : null}
       </View>
 
@@ -99,8 +124,22 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
             {t.explanations.map((e) => {
               const strong = /strong|verified|complete|high/i.test(e.levelLabel);
               return (
-                <View key={e.component} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.line }}>
-                  <Icon name={strong ? 'check' : 'circle'} size={14} color={strong ? colors.accentText : colors.muted} />
+                <View
+                  key={e.component}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 10,
+                    paddingVertical: 8,
+                    borderBottomWidth: 1,
+                    borderBottomColor: colors.line,
+                  }}
+                >
+                  <Icon
+                    name={strong ? 'check' : 'circle'}
+                    size={14}
+                    color={strong ? colors.accentText : colors.muted}
+                  />
                   <Text style={{ color: colors.text, fontSize: 14, flex: 1 }}>{componentLabel(e.component)}</Text>
                   <Text style={{ color: colors.muted, fontSize: 12.5 }}>{e.levelLabel}</Text>
                 </View>
@@ -110,12 +149,20 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
           {t.gaps.length > 0 ? (
             <View style={{ marginTop: 10, gap: 4 }} testID="trust-gaps">
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13.5 }}>{pt('trsImprove')}</Text>
-              {t.gaps.slice(0, 3).map((g, i) => <InfoNote key={`${g.code}-${i}`} icon="circle-help">{g.text}</InfoNote>)}
+              {t.gaps.slice(0, 3).map((g, i) => (
+                <InfoNote key={`${g.code}-${i}`} icon="circle-help">
+                  {g.text}
+                </InfoNote>
+              ))}
             </View>
           ) : null}
           {t.strengths.length > 0 ? (
             <Disclosure label={pt('trsStrengths')} testID="trust-strengths">
-              {t.strengths.map((s, i) => <InfoNote key={`${s.code}-${i}`} icon="shield-check">{s.text}</InfoNote>)}
+              {t.strengths.map((s, i) => (
+                <InfoNote key={`${s.code}-${i}`} icon="shield-check">
+                  {s.text}
+                </InfoNote>
+              ))}
             </Disclosure>
           ) : null}
           <Disclosure label={pt('trsAbout')} testID="trust-about">
@@ -123,12 +170,22 @@ export function TrustProfileSection({ actor, childName }: { actor: TrustActor; c
               <RecordPanel key={e.component} title={componentLabel(e.component)} icon="shield-check">
                 <DetailFact label={pt('trsWeight')} value={e.weight} />
                 <Text style={{ color: colors.muted, fontSize: 12 }}>{e.coverage}%</Text>
-                {e.reasons.map((r, i) => <InfoNote key={i}>{r}</InfoNote>)}
+                {e.reasons.map((r, i) => (
+                  <InfoNote key={i}>{r}</InfoNote>
+                ))}
               </RecordPanel>
             ))}
-            {t.context.adultOnlyFacetsExcluded.length > 0 ? <GuidanceNote size={12}>{pt('trsAdultOnly')}</GuidanceNote> : null}
-            <GuidanceNote title="Policy version" icon="file-text" size={11.5}>{pt('trsPolicy')} {t.policyVersion}</GuidanceNote>
-            {t.simulatedEvidenceIncluded ? <GuidanceNote title="Demo information" icon="info" size={11.5}>{pt('trsDemoSim')}</GuidanceNote> : null}
+            {t.context.adultOnlyFacetsExcluded.length > 0 ? (
+              <GuidanceNote size={12}>{pt('trsAdultOnly')}</GuidanceNote>
+            ) : null}
+            <GuidanceNote title="Policy version" icon="file-text" size={11.5}>
+              {pt('trsPolicy')} {t.policyVersion}
+            </GuidanceNote>
+            {t.simulatedEvidenceIncluded ? (
+              <GuidanceNote title="Demo information" icon="info" size={11.5}>
+                {pt('trsDemoSim')}
+              </GuidanceNote>
+            ) : null}
           </Disclosure>
         </Disclosure>
       ) : null}

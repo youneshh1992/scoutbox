@@ -9,8 +9,10 @@ export function buildTracks(detections) {
   const samples = [];
   let lastDiameter = null;
   let lastPerson = null;
-  let gapFrames = 0, maxGapFrames = 0;
-  let gapStartMs = null, maxGapMs = 0;
+  let gapFrames = 0,
+    maxGapFrames = 0;
+  let gapStartMs = null,
+    maxGapMs = 0;
   let resets = 0;
 
   for (const d of detections) {
@@ -37,15 +39,17 @@ export function buildTracks(detections) {
     // Flag it so the protocol layer drops those samples.
     let personJump = false;
     if (person && lastPerson) {
-      const wPrev = lastPerson.x1 - lastPerson.x0, hPrev = lastPerson.y1 - lastPerson.y0;
-      const wNow = person.x1 - person.x0, hNow = person.y1 - person.y0;
+      const wPrev = lastPerson.x1 - lastPerson.x0,
+        hPrev = lastPerson.y1 - lastPerson.y0;
+      const wNow = person.x1 - person.x0,
+        hNow = person.y1 - person.y0;
       const cPrev = { x: (lastPerson.x0 + lastPerson.x1) / 2, y: (lastPerson.y0 + lastPerson.y1) / 2 };
       const cNow = { x: (person.x0 + person.x1) / 2, y: (person.y0 + person.y1) / 2 };
       // Scale: the player region, being large, is the least noisy measure of image scaling. Beyond the per-sample budget
       // the frame of reference is zooming (camera zoom, player approaching the lens, or the region clipping an edge).
       const tol = EVENT_RULES.maxFrameScaleStepPerSample;
-      const scaleJump = wPrev > 0 && hPrev > 0
-        && (Math.abs(wNow / wPrev - 1) > tol || Math.abs(hNow / hPrev - 1) > tol);
+      const scaleJump =
+        wPrev > 0 && hPrev > 0 && (Math.abs(wNow / wPrev - 1) > tol || Math.abs(hNow / hPrev - 1) > tol);
       // Position: the player moves, which isn't a discontinuity; half a body width in one sample is.
       const shiftJump = Math.hypot(cNow.x - cPrev.x, cNow.y - cPrev.y) > Math.max(wPrev, 1) * 0.5;
       personJump = scaleJump || shiftJump;
@@ -53,13 +57,17 @@ export function buildTracks(detections) {
     }
     if (person) lastPerson = person;
     // Player-relative position cancels rigid camera motion.
-    const rel = (ball && person)
-      ? { x: ball.x - (person.x0 + person.x1) / 2, y: ball.y - (person.y0 + person.y1) / 2 }
-      : null;
+    const rel =
+      ball && person ? { x: ball.x - (person.x0 + person.x1) / 2, y: ball.y - (person.y0 + person.y1) / 2 } : null;
 
     samples.push({
-      seq: d.seq, atMs: d.atMs, w: d.w, h: d.h,
-      ball, person, rel,
+      seq: d.seq,
+      atMs: d.atMs,
+      w: d.w,
+      h: d.h,
+      ball,
+      person,
+      rel,
       rivals: d.rivals ?? 0,
       personJump,
       usable: d.visibility.usable,
@@ -83,14 +91,14 @@ export function buildTracks(detections) {
   const medianIntervalMs = median(intervals);
   const effectiveFps = medianIntervalMs > 0 ? 1000 / medianIntervalMs : 0;
   // See lowFpsIntervalTolerance in policy.
-  const lowIntervalMs = (1000 / CAPTURE_REQUIREMENTS.minSustainedFps)
-    * CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;
+  const lowIntervalMs = (1000 / CAPTURE_REQUIREMENTS.minSustainedFps) * CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;
   const lowFpsIntervals = intervals.filter((iv) => iv > lowIntervalMs).length;
 
   // Active duration counts only spans where both were visible at both ends.
   let activeMs = 0;
   for (let i = 1; i < samples.length; i += 1) {
-    const a = samples[i - 1], b = samples[i];
+    const a = samples[i - 1],
+      b = samples[i];
     if (a.ball && a.person && b.ball && b.person) activeMs += Math.max(0, b.atMs - a.atMs);
   }
 
@@ -131,14 +139,18 @@ export function relativeMotion(tracks) {
   const pts = tracks.samples.filter((s) => s.ball && s.person && s.rel);
   const out = [];
   for (let i = 1; i < pts.length - 1; i += 1) {
-    const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+    const a = pts[i - 1],
+      b = pts[i],
+      c = pts[i + 1];
     const dt1 = (b.atMs - a.atMs) / 1000;
     const dt2 = (c.atMs - b.atMs) / 1000;
     if (dt1 <= 0 || dt2 <= 0) continue;
-    const d = b.ball.diameter || 1;                 // the ruler
+    const d = b.ball.diameter || 1; // the ruler
     // Velocities in diameters per second, in the player's frame.
-    const v1x = ((b.rel.x - a.rel.x) / d) / dt1, v1y = ((b.rel.y - a.rel.y) / d) / dt1;
-    const v2x = ((c.rel.x - b.rel.x) / d) / dt2, v2y = ((c.rel.y - b.rel.y) / d) / dt2;
+    const v1x = (b.rel.x - a.rel.x) / d / dt1,
+      v1y = (b.rel.y - a.rel.y) / d / dt1;
+    const v2x = (c.rel.x - b.rel.x) / d / dt2,
+      v2y = (c.rel.y - b.rel.y) / d / dt2;
     out.push({
       seq: b.seq,
       atMs: b.atMs,
@@ -153,9 +165,7 @@ export function relativeMotion(tracks) {
       speedDiametersPerSec: Math.hypot(v2x, v2y),
       confidence: (a.ball.confidence + b.ball.confidence + c.ball.confidence) / 3,
       // In diameters: a clipped blob has an unreliable centroid and must not manufacture an impulse.
-      edgeDiameters: Math.min(
-        b.ball.x, b.ball.y, b.w - b.ball.x, b.h - b.ball.y,
-      ) / d,
+      edgeDiameters: Math.min(b.ball.x, b.ball.y, b.w - b.ball.x, b.h - b.ball.y) / d,
       // So the protocol layer can tell genuine adjacency from one spanning a dropped-frame gap.
       gapBeforeMs: b.atMs - a.atMs,
       gapAfterMs: c.atMs - b.atMs,

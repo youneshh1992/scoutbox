@@ -29,10 +29,12 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
     }
     case 'age': {
       if (facts.age == null) return { key: 'age', met: false, text: 'Age is not on record' };
-      const lo = c.operator === 'between' ? c.values[0] : (c.operator === 'gte' ? c.value : null);
-      const hi = c.operator === 'between' ? c.values[1] : (c.operator === 'lte' ? c.value : null);
-      if (lo != null && facts.age < lo) return { key: 'age', met: false, text: `Age ${facts.age} is below the criteria` };
-      if (hi != null && facts.age > hi) return { key: 'age', met: false, text: `Age ${facts.age} is above the criteria` };
+      const lo = c.operator === 'between' ? c.values[0] : c.operator === 'gte' ? c.value : null;
+      const hi = c.operator === 'between' ? c.values[1] : c.operator === 'lte' ? c.value : null;
+      if (lo != null && facts.age < lo)
+        return { key: 'age', met: false, text: `Age ${facts.age} is below the criteria` };
+      if (hi != null && facts.age > hi)
+        return { key: 'age', met: false, text: `Age ${facts.age} is above the criteria` };
       return { key: 'age', met: true, text: `Matches age criteria (${facts.age})` };
     }
     case 'geography': {
@@ -49,8 +51,10 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
           : { key: 'level', met: false, text: 'Plays at a level outside the criteria' };
       }
       // An unknown level does not block.
-      if (c.value === 'semi_pro' && facts.level === 'pro') return { key: 'level', met: false, text: 'Plays at a level above the criteria' };
-      if (facts.level && LEVEL_RANK[facts.level] > LEVEL_RANK[c.value]) return { key: 'level', met: false, text: 'Plays at a level above the criteria' };
+      if (c.value === 'semi_pro' && facts.level === 'pro')
+        return { key: 'level', met: false, text: 'Plays at a level above the criteria' };
+      if (facts.level && LEVEL_RANK[facts.level] > LEVEL_RANK[c.value])
+        return { key: 'level', met: false, text: 'Plays at a level above the criteria' };
       return { key: 'level', met: true, text: 'Within the level criteria' };
     }
     case 'foot': {
@@ -103,8 +107,16 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
       if (v == null) return { key, met: false, text: `No ${c.protocol} Combine Verified measurement` };
       const met = c.operator === 'gte' ? v >= c.value : v <= c.value;
       return met
-        ? { key, met: true, text: `${c.protocol} ${v} meets the club’s threshold (${c.operator === 'gte' ? '≥' : '≤'} ${c.value})` }
-        : { key, met: false, text: `${c.protocol} ${v} does not meet the club’s threshold (${c.operator === 'gte' ? '≥' : '≤'} ${c.value})` };
+        ? {
+            key,
+            met: true,
+            text: `${c.protocol} ${v} meets the club’s threshold (${c.operator === 'gte' ? '≥' : '≤'} ${c.value})`,
+          }
+        : {
+            key,
+            met: false,
+            text: `${c.protocol} ${v} does not meet the club’s threshold (${c.operator === 'gte' ? '≥' : '≤'} ${c.value})`,
+          };
     }
     default:
       // Unreachable through validateCriteria.
@@ -115,10 +127,18 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
 /** ageOn's rule in SQL: whole UTC years, one fewer before the birthday. */
 export const AGE_SQL = (now) => {
   const d = new Date(now);
-  return { sql: "(? - CAST(substr(p.birth_date, 1, 4) AS INTEGER) - (? < substr(p.birth_date, 6, 5)))", args: [d.getUTCFullYear(), `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`] };
+  return {
+    sql: '(? - CAST(substr(p.birth_date, 1, 4) AS INTEGER) - (? < substr(p.birth_date, 6, 5)))',
+    args: [
+      d.getUTCFullYear(),
+      `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`,
+    ],
+  };
 };
 export const BAND_RANK_SQL = (col = 'f.trust_band') => bandRankExpr(col); // the facts' band index is on this expression
-const LEVEL_RANK_SQL = `COALESCE(CASE p.level ${Object.entries(LEVEL_RANK).map(([l, i]) => `WHEN '${l}' THEN ${i}`).join(' ')} END, -1)`;
+const LEVEL_RANK_SQL = `COALESCE(CASE p.level ${Object.entries(LEVEL_RANK)
+  .map(([l, i]) => `WHEN '${l}' THEN ${i}`)
+  .join(' ')} END, -1)`;
 const json = (vs) => JSON.stringify(vs);
 /**
  * The same test as `evaluate`, as an SQL condition over `players p` joined to `player_match_facts f`.
@@ -126,43 +146,77 @@ const json = (vs) => JSON.stringify(vs);
  */
 export function criterionSql(c, { now, org }) {
   switch (c.type) {
-    case 'position': return c.primaryOnly
-      ? { sql: 'f.position IN (SELECT value FROM json_each(?))', args: [json(c.values)] }
-      : { sql: 'p.id IN (SELECT player_id FROM player_match_facts WHERE position IN (SELECT value FROM json_each(?)) UNION SELECT player_id FROM player_match_fact_positions WHERE code IN (SELECT value FROM json_each(?)))', args: [json(c.values), json(c.values)] };
+    case 'position':
+      return c.primaryOnly
+        ? { sql: 'f.position IN (SELECT value FROM json_each(?))', args: [json(c.values)] }
+        : {
+            sql: 'p.id IN (SELECT player_id FROM player_match_facts WHERE position IN (SELECT value FROM json_each(?)) UNION SELECT player_id FROM player_match_fact_positions WHERE code IN (SELECT value FROM json_each(?)))',
+            args: [json(c.values), json(c.values)],
+          };
     case 'age': {
       // Age ≥ n exactly when the birth day is on or before n years before today (age N starts at 00:00 UTC on the
       // birthday), so no per-row function is called and the index can serve it.
-      const lo = c.operator === 'between' ? c.values[0] : (c.operator === 'gte' ? c.value : null);
-      const hi = c.operator === 'between' ? c.values[1] : (c.operator === 'lte' ? c.value : null);
-      return { sql: `p.birth_date IS NOT NULL${lo != null ? ' AND p.birth_date <= ?' : ''}${hi != null ? ' AND p.birth_date > ?' : ''}`, args: [...(lo != null ? [bornByForAge(lo, now)] : []), ...(hi != null ? [bornByForAge(hi + 1, now)] : [])] };
+      const lo = c.operator === 'between' ? c.values[0] : c.operator === 'gte' ? c.value : null;
+      const hi = c.operator === 'between' ? c.values[1] : c.operator === 'lte' ? c.value : null;
+      return {
+        sql: `p.birth_date IS NOT NULL${lo != null ? ' AND p.birth_date <= ?' : ''}${hi != null ? ' AND p.birth_date > ?' : ''}`,
+        args: [...(lo != null ? [bornByForAge(lo, now)] : []), ...(hi != null ? [bornByForAge(hi + 1, now)] : [])],
+      };
     }
     case 'geography':
       // Only a Grassroots club may see distance (views/playerViews.mjs).
       if ((org?.level ?? null) !== 'grassroots' || !org.location) return { sql: '0', args: [] };
-      return { sql: 'distance_tenths(?, ?, p.lat, p.lng) IS NOT NULL AND distance_tenths(?, ?, p.lat, p.lng) / 10.0 <= ?', args: [org.location.lat, org.location.lng, org.location.lat, org.location.lng, c.value] };
+      return {
+        sql: 'distance_tenths(?, ?, p.lat, p.lng) IS NOT NULL AND distance_tenths(?, ?, p.lat, p.lng) / 10.0 <= ?',
+        args: [org.location.lat, org.location.lng, org.location.lat, org.location.lng, c.value],
+      };
     case 'level':
       if (c.operator === 'in') return { sql: 'p.level IN (SELECT value FROM json_each(?))', args: [json(c.values)] };
       // An unknown level does not block.
       return { sql: `${LEVEL_RANK_SQL} <= ?`, args: [LEVEL_RANK[c.value] ?? -1] };
     case 'foot':
-      return { sql: "p.foot IS NOT NULL AND (lower_js(p.foot) IN (SELECT value FROM json_each(?)) OR lower_js(p.foot) = 'both')", args: [json(c.values.map((v) => String(v).toLowerCase()))] };
-    case 'availability': return { sql: 'f.availability = ?', args: [c.value] };
+      return {
+        sql: "p.foot IS NOT NULL AND (lower_js(p.foot) IN (SELECT value FROM json_each(?)) OR lower_js(p.foot) = 'both')",
+        args: [json(c.values.map((v) => String(v).toLowerCase()))],
+      };
+    case 'availability':
+      return { sql: 'f.availability = ?', args: [c.value] };
     case 'evidence':
       switch (c.value) {
-        case 'recent_full_match': return { sql: 'f.last_footage_at > ?', args: [now - 180 * 86_400_000] };
-        case 'coach_reference': return { sql: 'f.coach_reference = 1', args: [] };
-        case 'confirmed_current_club': return { sql: 'f.club_confirmed = 1', args: [] };
-        case 'combine_verified': return { sql: 'EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id)', args: [] };
-        default: return { sql: '0', args: [] };
+        case 'recent_full_match':
+          return { sql: 'f.last_footage_at > ?', args: [now - 180 * 86_400_000] };
+        case 'coach_reference':
+          return { sql: 'f.coach_reference = 1', args: [] };
+        case 'confirmed_current_club':
+          return { sql: 'f.club_confirmed = 1', args: [] };
+        case 'combine_verified':
+          return { sql: 'EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id)', args: [] };
+        default:
+          return { sql: '0', args: [] };
       }
     case 'evidence_recency':
       // floor((now - at) / day) <= days  ⇔  at > now - (days + 1) · day
-      return { sql: `${c.evidenceKind === 'any' ? 'f.last_evidence_at' : 'f.last_footage_at'} > ?`, args: [now - (c.value + 1) * 86_400_000] };
-    case 'trust_band': return { sql: `f.trust_band IS NOT NULL AND ${BAND_RANK_SQL()} >= ?`, args: [bandRank()[c.value] ?? TRUST_BANDS.length] };
-    case 'combine_result': return { sql: 'EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id AND mc.protocol_id = ?)', args: [c.value] };
+      return {
+        sql: `${c.evidenceKind === 'any' ? 'f.last_evidence_at' : 'f.last_footage_at'} > ?`,
+        args: [now - (c.value + 1) * 86_400_000],
+      };
+    case 'trust_band':
+      return {
+        sql: `f.trust_band IS NOT NULL AND ${BAND_RANK_SQL()} >= ?`,
+        args: [bandRank()[c.value] ?? TRUST_BANDS.length],
+      };
+    case 'combine_result':
+      return {
+        sql: 'EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id AND mc.protocol_id = ?)',
+        args: [c.value],
+      };
     case 'combine_measurement':
-      return { sql: `EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id AND mc.protocol_id = ? AND mc.best_value IS NOT NULL AND mc.best_value ${c.operator === 'gte' ? '>=' : '<='} ?)`, args: [c.protocol, c.value] };
-    default: return { sql: '0', args: [] };
+      return {
+        sql: `EXISTS (SELECT 1 FROM player_match_fact_combine mc WHERE mc.player_id = p.id AND mc.protocol_id = ? AND mc.best_value IS NOT NULL AND mc.best_value ${c.operator === 'gte' ? '>=' : '<='} ?)`,
+        args: [c.protocol, c.value],
+      };
+    default:
+      return { sql: '0', args: [] };
   }
 }
 
@@ -173,8 +227,10 @@ export function factsOfRow(row, children, { org, now }) {
   const combineMeasurements = {};
   for (const [protocol, best] of Object.entries(combine)) if (best !== null) combineMeasurements[protocol] = best;
   const located = typeof row.lat === 'number' && typeof row.lng === 'number';
-  const distanceKm = (org?.level ?? null) === 'grassroots' && org.location && located
-    ? Math.round(haversineKm(org.location, { lat: row.lat, lng: row.lng }) * 10) / 10 : null;
+  const distanceKm =
+    (org?.level ?? null) === 'grassroots' && org.location && located
+      ? Math.round(haversineKm(org.location, { lat: row.lat, lng: row.lng }) * 10) / 10
+      : null;
   return {
     playerId: row.id,
     name: row.name,
@@ -200,8 +256,16 @@ export function factsOfRow(row, children, { org, now }) {
 }
 
 export function matchPlayerToCriteria(facts, criteria = {}, { now = Date.now() } = {}) {
-  const required = (criteria.required ?? []).map((c) => ({ criterionId: c.id, type: c.type, ...evaluate(c, facts, { now }) }));
-  const preferred = (criteria.preferred ?? []).map((c) => ({ criterionId: c.id, type: c.type, ...evaluate(c, facts, { now }) }));
+  const required = (criteria.required ?? []).map((c) => ({
+    criterionId: c.id,
+    type: c.type,
+    ...evaluate(c, facts, { now }),
+  }));
+  const preferred = (criteria.preferred ?? []).map((c) => ({
+    criterionId: c.id,
+    type: c.type,
+    ...evaluate(c, facts, { now }),
+  }));
   return {
     matchesRequired: required.every((r) => r.met),
     required,
@@ -218,12 +282,21 @@ export function matchPlayerToCriteria(facts, criteria = {}, { now = Date.now() }
 export function briefCriteriaToCanonical(criteria = {}) {
   const required = [];
   const add = (type, operator, body) => {
-    const parts = Object.keys(body).sort().map((k) => `${k}=${Array.isArray(body[k]) ? [...body[k]].sort().join('|') : body[k]}`);
-    required.push({ id: `${type}:${operator}${parts.length ? `:${parts.join(',')}` : ''}`, type, operator, class: 'required', ...body });
+    const parts = Object.keys(body)
+      .sort()
+      .map((k) => `${k}=${Array.isArray(body[k]) ? [...body[k]].sort().join('|') : body[k]}`);
+    required.push({
+      id: `${type}:${operator}${parts.length ? `:${parts.join(',')}` : ''}`,
+      type,
+      operator,
+      class: 'required',
+      ...body,
+    });
   };
   if (criteria.positions?.length) add('position', 'in', { values: [...criteria.positions], primaryOnly: false });
   if (criteria.minAge != null || criteria.maxAge != null) {
-    if (criteria.minAge != null && criteria.maxAge != null) add('age', 'between', { values: [criteria.minAge, criteria.maxAge] });
+    if (criteria.minAge != null && criteria.maxAge != null)
+      add('age', 'between', { values: [criteria.minAge, criteria.maxAge] });
     else if (criteria.minAge != null) add('age', 'gte', { value: criteria.minAge });
     else add('age', 'lte', { value: criteria.maxAge });
   }

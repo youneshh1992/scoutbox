@@ -30,7 +30,10 @@ inline(path.join(ROOT, 'scoutbox-agent', 'dist'), path.join(OUT, 'scoutbox-agent
 
 // Demo is explicit now: without EXPO_PUBLIC_DEMO=1 the player app builds in
 // LIVE mode against the real backend.
-run('EXPO_PUBLIC_DEMO=1 npx expo export --clear --platform web --output-dir dist-demo', path.join(ROOT, 'scoutbox-player'));
+run(
+  'EXPO_PUBLIC_DEMO=1 npx expo export --clear --platform web --output-dir dist-demo',
+  path.join(ROOT, 'scoutbox-player'),
+);
 inline(path.join(ROOT, 'scoutbox-player', 'dist-demo'), path.join(OUT, 'scoutbox-player-demo.html'));
 
 // expo-router matches on pathname; hosted at any deep path the demo must
@@ -48,8 +51,15 @@ if (!html.includes(shim)) {
 // localStorage/sessionStorage GETTERS throw — `typeof localStorage` included —
 // which crashes app bundles at boot into a white screen. Replace throwing
 // storage with an in-memory shim before any bundle code runs, in every demo.
-const storageShim = '<script data-storage-shim>(function(){function mem(){var m=new Map;return{getItem:function(k){k=String(k);return m.has(k)?m.get(k):null},setItem:function(k,v){m.set(String(k),String(v))},removeItem:function(k){m.delete(String(k))},clear:function(){m.clear()},key:function(i){return Array.from(m.keys())[i]!==undefined?Array.from(m.keys())[i]:null},get length(){return m.size}}}function guard(n){try{window[n].getItem("__probe__")}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(e2){}}}guard("localStorage");guard("sessionStorage")})();</script>';
-for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-agent-demo.html', 'scoutbox-player-demo.html']) {
+const storageShim =
+  '<script data-storage-shim>(function(){function mem(){var m=new Map;return{getItem:function(k){k=String(k);return m.has(k)?m.get(k):null},setItem:function(k,v){m.set(String(k),String(v))},removeItem:function(k){m.delete(String(k))},clear:function(){m.clear()},key:function(i){return Array.from(m.keys())[i]!==undefined?Array.from(m.keys())[i]:null},get length(){return m.size}}}function guard(n){try{window[n].getItem("__probe__")}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(e2){}}}guard("localStorage");guard("sessionStorage")})();</script>';
+for (const f of [
+  'scoutbox-club-demo.html',
+  'scoutbox-admin-demo.html',
+  'scoutbox-grassroots-demo.html',
+  'scoutbox-agent-demo.html',
+  'scoutbox-player-demo.html',
+]) {
   const p = path.join(OUT, f);
   let doc = fs.readFileSync(p, 'utf8');
   if (!doc.includes('data-storage-shim')) {
@@ -64,8 +74,15 @@ for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbo
 const sha = execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim();
 const built = new Date().toISOString().slice(0, 10);
 // Inter like the product; bottom-right, and above the Player tab bar so it never covers a label.
-const badgeFor = (bottom) => `<div data-demo-badge style="position:fixed;right:8px;bottom:${bottom}px;z-index:2147483000;background:rgba(11,18,32,.78);border:1px solid #263a5e;color:#8fa3c8;font:10px/1.4 Inter,system-ui,sans-serif;border-radius:8px;padding:2px 7px;pointer-events:none">Interactive demo — sample data · build ${sha} · ${built}</div>`;
-for (const f of ['scoutbox-club-demo.html', 'scoutbox-admin-demo.html', 'scoutbox-grassroots-demo.html', 'scoutbox-agent-demo.html', 'scoutbox-player-demo.html']) {
+const badgeFor = (bottom) =>
+  `<div data-demo-badge style="position:fixed;right:8px;bottom:${bottom}px;z-index:2147483000;background:rgba(11,18,32,.78);border:1px solid #263a5e;color:#8fa3c8;font:10px/1.4 Inter,system-ui,sans-serif;border-radius:8px;padding:2px 7px;pointer-events:none">Interactive demo — sample data · build ${sha} · ${built}</div>`;
+for (const f of [
+  'scoutbox-club-demo.html',
+  'scoutbox-admin-demo.html',
+  'scoutbox-grassroots-demo.html',
+  'scoutbox-agent-demo.html',
+  'scoutbox-player-demo.html',
+]) {
   const p = path.join(OUT, f);
   let doc = fs.readFileSync(p, 'utf8');
   doc = doc.replace(/<div data-demo-badge[^>]*>[^<]*<\/div>/, ''); // idempotent
@@ -83,7 +100,10 @@ const ICON = `<link rel="icon" data-sb-icon type="image/svg+xml" href="data:imag
 for (const [f, { app, extra }] of Object.entries(DEMO_APPS)) {
   const p = path.join(OUT, f);
   let doc = fs.readFileSync(p, 'utf8');
-  doc = doc.replace(/<meta name="sb-source-fingerprint" content="[^"]*">/g, '').replace(/<meta name="sb-build-sha" content="[^"]*">/g, '').replace(/<link rel="icon" data-sb-icon[^>]*>/g, '');
+  doc = doc
+    .replace(/<meta name="sb-source-fingerprint" content="[^"]*">/g, '')
+    .replace(/<meta name="sb-build-sha" content="[^"]*">/g, '')
+    .replace(/<link rel="icon" data-sb-icon[^>]*>/g, '');
   // An inline icon, so a browser serving the single-file bundle never asks the host for /favicon.ico (no 404).
   const stamp = `<meta name="sb-source-fingerprint" content="${sourceFingerprint(app, extra)}"><meta name="sb-build-sha" content="${sha}">${ICON}`;
   doc = doc.includes('<head>') ? doc.replace('<head>', `<head>${stamp}`) : stamp + doc;

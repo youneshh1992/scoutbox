@@ -7,10 +7,15 @@ import { demoM14 } from './m14demo';
 
 export interface VerBadge {
   kind: 'identity' | 'organisation' | 'domain' | 'admin' | 'affiliation' | 'role' | 'licence' | 'claim';
-  claimType: string; label: string; organisation: { id: string; name: string } | null;
-  role: string | null; current: boolean; historical: boolean;
+  claimType: string;
+  label: string;
+  organisation: { id: string; name: string } | null;
+  role: string | null;
+  current: boolean;
+  historical: boolean;
   period: { from: number | null; to: number | null } | null;
-  verifiedAt: number | null; provenance: string;
+  verifiedAt: number | null;
+  provenance: string;
 }
 
 // ------------------------------------------------------------ multiple-representation consent
@@ -19,65 +24,208 @@ export interface VerBadge {
 // verification authority (its signatory) can bind it — the server decides that,
 // and `signatory` below is its answer, never a client claim.
 export interface ClubConsentRequest {
-  id: string; kind: string; status: 'requested' | 'granted' | 'declined' | 'revoked';
+  id: string;
+  kind: string;
+  status: 'requested' | 'granted' | 'declined' | 'revoked';
   partyRole: string;
   agent: { userId: string | null; displayName: string | null; agency: string | null; licence: string };
-  context: { id: string; type: string; jurisdictions: string[]; parties: { partyRole: string; subjectKind: string; name: string | null }[] } | null;
+  context: {
+    id: string;
+    type: string;
+    jurisdictions: string[];
+    parties: { partyRole: string; subjectKind: string; name: string | null }[];
+  } | null;
   otherPartyRoles: string[];
-  particulars: { fullParticularsProvided: boolean; legalAdviceOffered: boolean; proposedFeeDisclosed: boolean; acknowledged: unknown } | null;
-  policyVersions: string[]; ruleIds: string[];
-  requestedAt: number; grantedAt: number | null; declinedAt: number | null; revokedAt: number | null;
-  rev: number; honest: string;
+  particulars: {
+    fullParticularsProvided: boolean;
+    legalAdviceOffered: boolean;
+    proposedFeeDisclosed: boolean;
+    acknowledged: unknown;
+  } | null;
+  policyVersions: string[];
+  ruleIds: string[];
+  requestedAt: number;
+  grantedAt: number | null;
+  declinedAt: number | null;
+  revokedAt: number | null;
+  rev: number;
+  honest: string;
 }
 
-export interface PublicVerProfile { subjectType: string; subjectId: string; identityVerified: boolean; badges: VerBadge[]; organisationStatus?: string }
+export interface PublicVerProfile {
+  subjectType: string;
+  subjectId: string;
+  identityVerified: boolean;
+  badges: VerBadge[];
+  organisationStatus?: string;
+}
 export interface SubjectClaim {
-  id: string; claimType: string; status: string;
+  id: string;
+  claimType: string;
+  status: string;
   effective: { status: string; current: boolean; historical: boolean };
-  organisation: { id: string; name: string } | null; role: string | null;
-  validFrom: number | null; validUntil: number | null; current: boolean;
-  verificationMethod: string | null; verifiedAt: number | null; provenance: string | null;
-  reviewReasons: string[]; createdAt: number; updatedAt: number;
-  revocationReason: string | null; disputedAt: number | null;
-  evidence: { id: string; type: string; receivedAt: number; filename: string | null; checks: Record<string, string>; note: string | null }[];
+  organisation: { id: string; name: string } | null;
+  role: string | null;
+  validFrom: number | null;
+  validUntil: number | null;
+  current: boolean;
+  verificationMethod: string | null;
+  verifiedAt: number | null;
+  provenance: string | null;
+  reviewReasons: string[];
+  createdAt: number;
+  updatedAt: number;
+  revocationReason: string | null;
+  disputedAt: number | null;
+  evidence: {
+    id: string;
+    type: string;
+    receivedAt: number;
+    filename: string | null;
+    checks: Record<string, string>;
+    note: string | null;
+  }[];
   humanReviewNote: string | null;
 }
-export interface VerStep { id: string; label: string; done: boolean; state: string }
-export interface MyVerification { claims: SubjectClaim[]; verificationLevel: string | null; organisationStatus: string; steps: VerStep[]; publicPreview: PublicVerProfile }
+export interface VerStep {
+  id: string;
+  label: string;
+  done: boolean;
+  state: string;
+}
+export interface MyVerification {
+  claims: SubjectClaim[];
+  verificationLevel: string | null;
+  organisationStatus: string;
+  steps: VerStep[];
+  publicPreview: PublicVerProfile;
+}
 export interface VerRequestRow {
-  claimId: string; claimType: string; pairId: string | null;
+  claimId: string;
+  claimType: string;
+  pairId: string | null;
   person: { id: string; name: string; email: string | null; accountCreatedAt: number | null; removed: boolean };
-  claimedRole: string | null; requestedStart: number | null; identityStatus: string;
-  emailStatus: string; riskFlags: string[]; status: string; requestedAt: number;
+  claimedRole: string | null;
+  requestedStart: number | null;
+  identityStatus: string;
+  emailStatus: string;
+  riskFlags: string[];
+  status: string;
+  requestedAt: number;
   priorClaims: { claimType: string; organisationId: string | null; role: string | null; current: boolean }[];
 }
 export interface StaffRow {
-  claimId: string; person: { id: string; name: string }; claimType: string; role: string | null;
-  status: string; effective: { status: string; displayable: boolean; current: boolean; historical: boolean };
-  current: boolean; validFrom: number | null; validUntil: number | null;
-  verificationMethod: string | null; verifiedAt: number | null;
+  claimId: string;
+  person: { id: string; name: string };
+  claimType: string;
+  role: string | null;
+  status: string;
+  effective: { status: string; displayable: boolean; current: boolean; historical: boolean };
+  current: boolean;
+  validFrom: number | null;
+  validUntil: number | null;
+  verificationMethod: string | null;
+  verifiedAt: number | null;
 }
-export interface VerDashboard { organisationStatus: string; counts: Record<string, number> }
-export interface DomainRow { domain: string; status: string; method: string; verifiedAt: number; addedBy?: string }
-export interface DomainRequest { id: string; domain: string; status: string; reviewReasons?: string[]; createdAt: number }
-export interface VerAdminRow { id: string; userId: string; level: string; status: string; person: { id: string; name: string }; createdAt: number }
-export interface RootTransfer { id: string; toUserId: string; proposedBy: string; status: string; createdAt: number }
-export interface LicenceProvider { id: string; name: string; state: 'configured' | 'not_configured' | 'temporarily_unavailable' | 'unsupported' }
+export interface VerDashboard {
+  organisationStatus: string;
+  counts: Record<string, number>;
+}
+export interface DomainRow {
+  domain: string;
+  status: string;
+  method: string;
+  verifiedAt: number;
+  addedBy?: string;
+}
+export interface DomainRequest {
+  id: string;
+  domain: string;
+  status: string;
+  reviewReasons?: string[];
+  createdAt: number;
+}
+export interface VerAdminRow {
+  id: string;
+  userId: string;
+  level: string;
+  status: string;
+  person: { id: string; name: string };
+  createdAt: number;
+}
+export interface RootTransfer {
+  id: string;
+  toUserId: string;
+  proposedBy: string;
+  status: string;
+  createdAt: number;
+}
+export interface LicenceProvider {
+  id: string;
+  name: string;
+  state: 'configured' | 'not_configured' | 'temporarily_unavailable' | 'unsupported';
+}
 export interface ReferenceRow {
-  id: string; version: number; playerId?: string; playerName?: string; coachName: string; orgName: string;
-  roleAtTime: string | null; relationship: string; capacity: string; fromYear: number | null; toYear: number | null;
-  structured: { strengths: string; development: string; summary: string }; status: string; createdAt: number;
+  id: string;
+  version: number;
+  playerId?: string;
+  playerName?: string;
+  coachName: string;
+  orgName: string;
+  roleAtTime: string | null;
+  relationship: string;
+  capacity: string;
+  fromYear: number | null;
+  toYear: number | null;
+  structured: { strengths: string; development: string; summary: string };
+  status: string;
+  createdAt: number;
 }
-export interface PlayerInviteRow { id: string; name: string; squad: string; status: string; byName: string; createdAt: number; expiresAt: number; guardianApproved: { guardianId: string; at: number } | null }
-export interface ConflictRow { id: string; userId: string; kind: string; subject: string; note: string; createdAt: number; withdrawnAt: number | null }
+export interface PlayerInviteRow {
+  id: string;
+  name: string;
+  squad: string;
+  status: string;
+  byName: string;
+  createdAt: number;
+  expiresAt: number;
+  guardianApproved: { guardianId: string; at: number } | null;
+}
+export interface ConflictRow {
+  id: string;
+  userId: string;
+  kind: string;
+  subject: string;
+  note: string;
+  createdAt: number;
+  withdrawnAt: number | null;
+}
 
 // ------------------------------------------- transaction workspace
 // The club's side of a multi-party transaction: the transactions this club is
 // actually a party to, projected for THIS club. What the server withholds — the
 // other club's private documents, the agent's private notes, the agent's own
 // agreement reference, the policy versions, any fee — has no field here.
-export interface ClubTxParty { id: string; partyRole: string; subjectKind: string; subjectId: string; name: string | null; removed: boolean; confirmedAt: number | null; confirmedByKind: string | null }
-export interface ClubTxDocument { id: string; documentType: string; visibility: string; version: number; label: string; uploadedAt: number; actor: { kind: string; label: string } | null; downloadable: boolean }
+export interface ClubTxParty {
+  id: string;
+  partyRole: string;
+  subjectKind: string;
+  subjectId: string;
+  name: string | null;
+  removed: boolean;
+  confirmedAt: number | null;
+  confirmedByKind: string | null;
+}
+export interface ClubTxDocument {
+  id: string;
+  documentType: string;
+  visibility: string;
+  version: number;
+  label: string;
+  uploadedAt: number;
+  actor: { kind: string; label: string } | null;
+  downloadable: boolean;
+}
 export interface ClubTransaction {
   id: string;
   type: string;
@@ -90,7 +238,16 @@ export interface ClubTransaction {
   awaitingConfirmation: string[];
   partiesConfirmed: boolean;
   representations: { id: string; partyRole: string; status: string; basis: string; scope: string[] }[];
-  compliance: { outcome: string | null; pendingReason: string | null; blocked: boolean; clear: boolean; reasonCodes: string[]; evaluatedAt: number | null; staleness: string | null; honest: string };
+  compliance: {
+    outcome: string | null;
+    pendingReason: string | null;
+    blocked: boolean;
+    clear: boolean;
+    reasonCodes: string[];
+    evaluatedAt: number | null;
+    staleness: string | null;
+    honest: string;
+  };
   consents: { id: string | null; kind: string; partyRole: string | null; status: string; mine: boolean }[];
   documents: ClubTxDocument[];
   notes: { id: string; visibility: string; text: string; at: number; actor: { kind: string; label: string } | null }[];
@@ -99,24 +256,56 @@ export interface ClubTransaction {
   rev: number;
   honest: string;
 }
-export interface ClubTxTimelineEntry { id: string; at: number; action: string; audience: string; actor: { kind: string; label: string } | null; detail: Record<string, unknown> | null }
+export interface ClubTxTimelineEntry {
+  id: string;
+  at: number;
+  action: string;
+  audience: string;
+  actor: { kind: string; label: string } | null;
+  detail: Record<string, unknown> | null;
+}
 
 export interface M14Api {
   me(s: Session): Promise<MyVerification>;
   /** The club's own consent lane. `signatory` says whether THIS user may bind the club. */
   agentConsents(s: Session): Promise<{ items: ClubConsentRequest[]; signatory: boolean }>;
-  answerAgentConsent(s: Session, id: string, action: 'grant' | 'decline' | 'revoke', input: { acknowledgedParticulars?: boolean; acknowledgedLegalAdvice?: boolean; expectedRev: number; clientKey: string }): Promise<{ consent: ClubConsentRequest }>;
+  answerAgentConsent(
+    s: Session,
+    id: string,
+    action: 'grant' | 'decline' | 'revoke',
+    input: {
+      acknowledgedParticulars?: boolean;
+      acknowledgedLegalAdvice?: boolean;
+      expectedRev: number;
+      clientKey: string;
+    },
+  ): Promise<{ consent: ClubConsentRequest }>;
   startIdentity(s: Session): Promise<{ claim: SubjectClaim }>;
-  requestAffiliation(s: Session, role: string): Promise<{ affiliation: SubjectClaim; role: SubjectClaim; next: string }>;
-  addEvidence(s: Session, claimId: string, input: { dataUrl?: string; filename?: string; note?: string }): Promise<{ claim: SubjectClaim }>;
+  requestAffiliation(
+    s: Session,
+    role: string,
+  ): Promise<{ affiliation: SubjectClaim; role: SubjectClaim; next: string }>;
+  addEvidence(
+    s: Session,
+    claimId: string,
+    input: { dataUrl?: string; filename?: string; note?: string },
+  ): Promise<{ claim: SubjectClaim }>;
   submitClaim(s: Session, claimId: string): Promise<{ claim: SubjectClaim }>;
   sendWorkEmail(s: Session, email: string): Promise<{ sent: boolean; note: string }>;
-  confirmWorkEmail(s: Session, code: string): Promise<{ domainControl: string; domainCoveredByOrg: boolean; note: string; claims: SubjectClaim[] }>;
+  confirmWorkEmail(
+    s: Session,
+    code: string,
+  ): Promise<{ domainControl: string; domainCoveredByOrg: boolean; note: string; claims: SubjectClaim[] }>;
   disputeClaim(s: Session, claimId: string, reason: string): Promise<{ note: string }>;
 
   dashboard(s: Session): Promise<VerDashboard>;
   listRequests(s: Session): Promise<{ items: VerRequestRow[]; note: string }>;
-  decideRequest(s: Session, claimId: string, action: string, opts?: { role?: string; validFrom?: number; validUntil?: number; reason?: string }): Promise<{ decided: string; claims: SubjectClaim[] }>;
+  decideRequest(
+    s: Session,
+    claimId: string,
+    action: string,
+    opts?: { role?: string; validFrom?: number; validUntil?: number; reason?: string },
+  ): Promise<{ decided: string; claims: SubjectClaim[] }>;
   listStaff(s: Session, filters?: Record<string, string>): Promise<{ items: StaffRow[] }>;
   markDeparted(s: Session, userId: string): Promise<{ closed: number; note: string }>;
 
@@ -125,30 +314,86 @@ export interface M14Api {
   confirmDomain(s: Session, requestId: string, code: string): Promise<{ domain: string; status: string }>;
 
   listAdmins(s: Session): Promise<{ items: VerAdminRow[]; transfers: RootTransfer[] }>;
-  grantAdmin(s: Session, userId: string, level: string): Promise<{ admin?: VerAdminRow; transfer?: RootTransfer; note?: string }>;
+  grantAdmin(
+    s: Session,
+    userId: string,
+    level: string,
+  ): Promise<{ admin?: VerAdminRow; transfer?: RootTransfer; note?: string }>;
   revokeAdmin(s: Session, adminId: string, reason: string): Promise<{ admin: VerAdminRow; note: string }>;
   approveTransfer(s: Session, transferId: string): Promise<{ transfer: RootTransfer; admin: VerAdminRow }>;
 
   licenceProviders(s: Session): Promise<{ providers: LicenceProvider[]; note: string }>;
-  submitLicence(s: Session, input: { licenceType: string; issuer: string; identifier?: string; holderName?: string; expiry?: string; dataUrl?: string; filename?: string }): Promise<{ claim: { id: string; status: string; display: string }; note: string }>;
-  runLicenceCheck(s: Session, claimId: string, providerId: string): Promise<{ claim: { id: string; status: string; display: string }; provider: { id: string; state?: string; result?: string }; note?: string }>;
+  submitLicence(
+    s: Session,
+    input: {
+      licenceType: string;
+      issuer: string;
+      identifier?: string;
+      holderName?: string;
+      expiry?: string;
+      dataUrl?: string;
+      filename?: string;
+    },
+  ): Promise<{ claim: { id: string; status: string; display: string }; note: string }>;
+  runLicenceCheck(
+    s: Session,
+    claimId: string,
+    providerId: string,
+  ): Promise<{
+    claim: { id: string; status: string; display: string };
+    provider: { id: string; state?: string; result?: string };
+    note?: string;
+  }>;
 
   publicUser(s: Session, userId: string): Promise<PublicVerProfile>;
   publicOrg(s: Session, orgId: string): Promise<PublicVerProfile>;
 
   listReferences(s: Session): Promise<{ items: ReferenceRow[] }>;
-  createReference(s: Session, input: { playerId: string; relationship: string; capacity?: string; fromYear?: number; toYear?: number; strengths?: string; development?: string; summary: string }): Promise<{ reference: ReferenceRow }>;
+  createReference(
+    s: Session,
+    input: {
+      playerId: string;
+      relationship: string;
+      capacity?: string;
+      fromYear?: number;
+      toYear?: number;
+      strengths?: string;
+      development?: string;
+      summary: string;
+    },
+  ): Promise<{ reference: ReferenceRow }>;
   withdrawReference(s: Session, id: string, reason: string): Promise<{ reference: ReferenceRow }>;
 
   listPlayerInvites(s: Session): Promise<{ items: PlayerInviteRow[] }>;
-  createPlayerInvite(s: Session, name: string, squad: string, email?: string): Promise<{ invite: PlayerInviteRow; code?: string; note?: string }>;
+  createPlayerInvite(
+    s: Session,
+    name: string,
+    squad: string,
+    email?: string,
+  ): Promise<{ invite: PlayerInviteRow; code?: string; note?: string }>;
 
   listConflicts(s: Session): Promise<{ items: ConflictRow[] }>;
-  declareConflict(s: Session, kind: string, subject: string, note: string): Promise<{ conflict: ConflictRow; note: string }>;
+  declareConflict(
+    s: Session,
+    kind: string,
+    subject: string,
+    note: string,
+  ): Promise<{ conflict: ConflictRow; note: string }>;
   // ---- the club's transaction party lane
-  transactions(s: Session): Promise<{ items: ClubTransaction[]; signatory: boolean; statuses: string[]; documentTypes: string[]; note: string | null; honest: string }>;
+  transactions(s: Session): Promise<{
+    items: ClubTransaction[];
+    signatory: boolean;
+    statuses: string[];
+    documentTypes: string[];
+    note: string | null;
+    honest: string;
+  }>;
   confirmTransaction(s: Session, id: string, input: { expectedRev: number }): Promise<{ transaction: ClubTransaction }>;
-  transactionNote(s: Session, id: string, input: { text: string; visibility: string; expectedRev: number }): Promise<{ note: { id: string } }>;
+  transactionNote(
+    s: Session,
+    id: string,
+    input: { text: string; visibility: string; expectedRev: number },
+  ): Promise<{ note: { id: string } }>;
   transactionTimeline(s: Session, id: string): Promise<{ items: ClubTxTimelineEntry[]; note: string }>;
 }
 
@@ -174,7 +419,8 @@ export const httpM14: M14Api = {
   confirmTransaction: (s, id, input) => P(s, `/org/transactions/${encodeURIComponent(id)}/confirm`, input),
   transactionNote: (s, id, input) => P(s, `/org/transactions/${encodeURIComponent(id)}/notes`, input),
   transactionTimeline: (s, id) => G(s, `/org/transactions/${encodeURIComponent(id)}/timeline`),
-  answerAgentConsent: (s, id, action, input) => P(s, `/org/compliance/consents/${encodeURIComponent(id)}/${action}`, input),
+  answerAgentConsent: (s, id, action, input) =>
+    P(s, `/org/compliance/consents/${encodeURIComponent(id)}/${action}`, input),
   startIdentity: (s) => P(s, '/org/verification/identity'),
   requestAffiliation: (s, role) => P(s, '/org/verification/affiliation', { role }),
   addEvidence: (s, claimId, input) => P(s, `/org/verification/claims/${claimId}/evidence`, input),
@@ -185,7 +431,8 @@ export const httpM14: M14Api = {
 
   dashboard: (s) => G(s, '/org/verification/dashboard'),
   listRequests: (s) => G(s, '/org/verification/requests'),
-  decideRequest: (s, claimId, action, opts) => P(s, `/org/verification/requests/${claimId}/decide`, { action, ...opts }),
+  decideRequest: (s, claimId, action, opts) =>
+    P(s, `/org/verification/requests/${claimId}/decide`, { action, ...opts }),
   listStaff: (s, filters) => G(s, `/org/verification/staff${filters ? `?${new URLSearchParams(filters)}` : ''}`),
   markDeparted: (s, userId) => P(s, `/org/verification/staff/${userId}/departed`, {}),
 

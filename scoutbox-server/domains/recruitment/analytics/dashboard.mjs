@@ -7,20 +7,51 @@
  * payload, and it asks `orgCanSee` every time.
  */
 import {
-  RECRUITMENT_ANALYTICS_POLICY_VERSION, METRIC_FAMILIES, FAMILY_IDS, SMALL_N_MIN,
-  TIME_SEMANTICS, GROUP_DIMENSIONS, utcDay, resolveWindow, previousWindow, compare, inWindow, DAY_MS,
+  RECRUITMENT_ANALYTICS_POLICY_VERSION,
+  METRIC_FAMILIES,
+  FAMILY_IDS,
+  SMALL_N_MIN,
+  TIME_SEMANTICS,
+  GROUP_DIMENSIONS,
+  utcDay,
+  resolveWindow,
+  previousWindow,
+  compare,
+  inWindow,
+  DAY_MS,
 } from './metrics.mjs';
 import {
-  pipelineStageCounts, funnelProgression, exitReasonMix, roomSourceMix, sourceStageReach,
-  transitions, firstTerminalAt, trialProcess, decisionOutcomes, journeyEvidenceFunnel,
+  pipelineStageCounts,
+  funnelProgression,
+  exitReasonMix,
+  roomSourceMix,
+  sourceStageReach,
+  transitions,
+  firstTerminalAt,
+  trialProcess,
+  decisionOutcomes,
+  journeyEvidenceFunnel,
 } from './funnels.mjs';
 import {
-  timeToFirstDecision, timeInStage, timeToTrialRequested, timeTrialRequestedToCompleted,
-  openRoomAge, stalledRooms, overdueTrialReports, decisionOutstanding, DEFAULT_STALL_DAYS,
+  timeToFirstDecision,
+  timeInStage,
+  timeToTrialRequested,
+  timeTrialRequestedToCompleted,
+  openRoomAge,
+  stalledRooms,
+  overdueTrialReports,
+  decisionOutstanding,
+  DEFAULT_STALL_DAYS,
 } from './timeSeries.mjs';
 import {
-  terminalWithRecordedDecision, supersededDecisionRate, evidenceLimitedExits, reopenRate,
-  briefsLive, nobodyMissedCoverage, secondLookCoverage, watchlistActivity,
+  terminalWithRecordedDecision,
+  supersededDecisionRate,
+  evidenceLimitedExits,
+  reopenRate,
+  briefsLive,
+  nobodyMissedCoverage,
+  secondLookCoverage,
+  watchlistActivity,
 } from './cohorts.mjs';
 import { SOURCE_CONTEXTS, ROOM_PRIORITIES } from '../rooms/shared.mjs';
 
@@ -43,7 +74,9 @@ function projectRoom(c) {
     history: (c.history ?? []).map((h) => ({
       at: h.at,
       action: h.action,
-      detail: h.detail ? { from: h.detail.from, to: h.detail.to, status: h.detail.status, sourceContext: h.detail.sourceContext } : null,
+      detail: h.detail
+        ? { from: h.detail.from, to: h.detail.to, status: h.detail.status, sourceContext: h.detail.sourceContext }
+        : null,
     })),
   };
   room.transitions = transitions(room);
@@ -54,10 +87,12 @@ function projectRoom(c) {
 const formalFields = (d) => ({
   kind: d.kind === 'formal' ? 'formal' : 'recommendation',
   state: d.state === 'draft' ? 'draft' : 'final',
-  outcome: d.kind === 'formal' ? d.outcome ?? null : null,
+  outcome: d.kind === 'formal' ? (d.outcome ?? null) : null,
 });
 const projectDecision = (d) => ({
-  id: d.id, roomId: d.roomId, createdAt: d.createdAt,
+  id: d.id,
+  roomId: d.roomId,
+  createdAt: d.createdAt,
   recommendation: d.recommendation,
   reasonCodes: Array.isArray(d.reasonCodes) ? d.reasonCodes : [],
   supersededById: d.supersededById ?? null,
@@ -66,7 +101,13 @@ const projectDecision = (d) => ({
 });
 
 export function buildReportingContext({
-  reads = {}, org, window: w, now = Date.now(), orgCanSee, findPlayer, filters = {},
+  reads = {},
+  org,
+  window: w,
+  now = Date.now(),
+  orgCanSee,
+  findPlayer,
+  filters = {},
 }) {
   const orgId = org.id;
 
@@ -83,7 +124,7 @@ export function buildReportingContext({
     if (d.orgId !== orgId) continue;
     decisions.push(projectDecision(d));
   }
-  decisions.sort((a, b) => (a.createdAt - b.createdAt) || String(a.id).localeCompare(String(b.id)));
+  decisions.sort((a, b) => a.createdAt - b.createdAt || String(a.id).localeCompare(String(b.id)));
 
   // ---- filters, applied before any metric sees a room ---------------------
   const applied = [];
@@ -119,21 +160,24 @@ export function buildReportingContext({
   const subjectOf = (room) => {
     if (!seen.has(room.playerId)) {
       const p = findPlayer?.(room.playerId);
-      seen.set(room.playerId, p && orgCanSee?.(org, p)
-        ? { playerId: p.id, playerName: p.name }
-        : { playerId: null, playerName: null });
+      seen.set(
+        room.playerId,
+        p && orgCanSee?.(org, p) ? { playerId: p.id, playerName: p.name } : { playerId: null, playerName: null },
+      );
     }
     return seen.get(room.playerId);
   };
 
   // ---- the typical journey, used only as a caution on young cohorts -------
   const terminalDurations = rooms
-    .map((r) => { const at = firstTerminalAt(r); return at == null ? null : (at - r.createdAt) / DAY_MS; })
+    .map((r) => {
+      const at = firstTerminalAt(r);
+      return at == null ? null : (at - r.createdAt) / DAY_MS;
+    })
     .filter((v) => Number.isFinite(v) && v >= 0)
     .sort((a, b) => a - b);
-  const typicalDaysToTerminal = terminalDurations.length >= SMALL_N_MIN
-    ? terminalDurations[Math.floor(terminalDurations.length / 2)]
-    : null;
+  const typicalDaysToTerminal =
+    terminalDurations.length >= SMALL_N_MIN ? terminalDurations[Math.floor(terminalDurations.length / 2)] : null;
 
   return {
     org,

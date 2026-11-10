@@ -8,10 +8,19 @@
 
 const groupBy = (records, key) => {
   const out = new Map();
-  for (const r of records) { const k = key(r); let list = out.get(k); if (!list) out.set(k, (list = [])); list.push(r); }
+  for (const r of records) {
+    const k = key(r);
+    let list = out.get(k);
+    if (!list) out.set(k, (list = []));
+    list.push(r);
+  }
   return out;
 };
-const indexById = (...lists) => { const out = new Map(); for (const list of lists) for (const r of list) out.set(r.id, r); return out; };
+const indexById = (...lists) => {
+  const out = new Map();
+  for (const list of lists) for (const r of list) out.set(r.id, r);
+  return out;
+};
 
 export function playerJourneyReads(reads, playerId, cases) {
   const caseIds = cases.map((k) => k.id);
@@ -33,8 +42,12 @@ export function playerJourneyReads(reads, playerId, cases) {
     signingPackages: reads.signingPackages.forCases(caseIds),
     decisions: reads.decisions.forRooms(caseIds),
   };
-  const orgPlayer = Object.fromEntries(Object.entries(byPlayer).map(([n, list]) => [n, groupBy(list, (r) => pairKey(r.orgId, r.playerId))]));
-  const ofCase = Object.fromEntries(Object.entries(byCase).map(([n, list]) => [n, groupBy(list, (r) => (n === 'decisions' ? r.roomId : r.caseId))]));
+  const orgPlayer = Object.fromEntries(
+    Object.entries(byPlayer).map(([n, list]) => [n, groupBy(list, (r) => pairKey(r.orgId, r.playerId))]),
+  );
+  const ofCase = Object.fromEntries(
+    Object.entries(byCase).map(([n, list]) => [n, groupBy(list, (r) => (n === 'decisions' ? r.roomId : r.caseId))]),
+  );
   const known = {
     cases: indexById(cases),
     trials: indexById(byPlayer.trials, byCase.trials),
@@ -43,17 +56,35 @@ export function playerJourneyReads(reads, playerId, cases) {
   };
   const caseSet = new Set(caseIds);
 
-  const forOrgPlayer = (name) => (orgId, pid) => (pid === playerId ? orgPlayer[name].get(pairKey(orgId, pid)) ?? [] : reads[name].forOrgPlayer(orgId, pid));
-  const forCase = (name, method = 'forCase') => (caseId) => (caseSet.has(caseId) ? ofCase[name].get(caseId) ?? [] : reads[name][method](caseId));
+  const forOrgPlayer = (name) => (orgId, pid) =>
+    pid === playerId ? (orgPlayer[name].get(pairKey(orgId, pid)) ?? []) : reads[name].forOrgPlayer(orgId, pid);
+  const forCase =
+    (name, method = 'forCase') =>
+    (caseId) =>
+      caseSet.has(caseId) ? (ofCase[name].get(caseId) ?? []) : reads[name][method](caseId);
   const byId = (name) => (id) => known[name].get(id) ?? reads[name].byId(id);
 
   return Object.freeze({
     ...reads,
     cases: Object.freeze({ ...reads.cases, byId: byId('cases'), forOrgPlayer: forOrgPlayer('cases') }),
-    requests: Object.freeze({ ...reads.requests, forOrgPlayer: forOrgPlayer('requests'), forCase: forCase('requests') }),
-    trials: Object.freeze({ ...reads.trials, byId: byId('trials'), forOrgPlayer: forOrgPlayer('trials'), forCase: forCase('trials') }),
+    requests: Object.freeze({
+      ...reads.requests,
+      forOrgPlayer: forOrgPlayer('requests'),
+      forCase: forCase('requests'),
+    }),
+    trials: Object.freeze({
+      ...reads.trials,
+      byId: byId('trials'),
+      forOrgPlayer: forOrgPlayer('trials'),
+      forCase: forCase('trials'),
+    }),
     signings: Object.freeze({ ...reads.signings, byId: byId('signings'), forOrgPlayer: forOrgPlayer('signings') }),
-    contacts: Object.freeze({ ...reads.contacts, byId: byId('contacts'), forOrgPlayer: forOrgPlayer('contacts'), forCase: forCase('contacts') }),
+    contacts: Object.freeze({
+      ...reads.contacts,
+      byId: byId('contacts'),
+      forOrgPlayer: forOrgPlayer('contacts'),
+      forCase: forCase('contacts'),
+    }),
     offers: Object.freeze({ ...reads.offers, forCase: forCase('offers') }),
     signingPackages: Object.freeze({ ...reads.signingPackages, forCase: forCase('signingPackages') }),
     decisions: Object.freeze({ ...reads.decisions, forRoom: forCase('decisions', 'forRoom') }),

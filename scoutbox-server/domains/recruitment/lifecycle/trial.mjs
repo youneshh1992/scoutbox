@@ -20,8 +20,16 @@
  */
 
 import { parseTrialDate, isTrialDate } from '../../../domain.mjs';
-import { validateIanaZone, parseInstant as parseCanonicalInstant, localParts as canonicalLocalParts } from '../../../temporal.mjs';
-import { normaliseClientKey as platformClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../../platform/idempotency.mjs';
+import {
+  validateIanaZone,
+  parseInstant as parseCanonicalInstant,
+  localParts as canonicalLocalParts,
+} from '../../../temporal.mjs';
+import {
+  normaliseClientKey as platformClientKey,
+  payloadFingerprint,
+  CLIENT_KEY_MAX,
+} from '../../platform/idempotency.mjs';
 
 export const TRIAL_POLICY_VERSION = 1;
 
@@ -32,7 +40,13 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 // ------------------------------------------------------------------ vocabulary
 
 /** `legacy_accepted` is a read-only interpretation of a row with no operational fields. */
-export const TRIAL_WORKFLOW_STATES = Object.freeze(['legacy_accepted', 'accepted', 'scheduled', 'completed', 'cancelled']);
+export const TRIAL_WORKFLOW_STATES = Object.freeze([
+  'legacy_accepted',
+  'accepted',
+  'scheduled',
+  'completed',
+  'cancelled',
+]);
 export const TRIAL_FINAL_STATES = Object.freeze(['completed', 'cancelled']);
 
 export const TRIAL_WORKFLOW_LABELS = table({
@@ -47,7 +61,13 @@ export const TRIAL_WORKFLOW_LABELS = table({
 export const TRIAL_SESSION_KINDS = Object.freeze(['onboarding', 'training', 'drill', 'small_sided', 'match', 'other']);
 
 /** `not_recorded` is derived, never stored. */
-export const TRIAL_ATTENDANCE_STATES = Object.freeze(['attended', 'partial', 'no_show', 'club_cancelled', 'player_withdrew']);
+export const TRIAL_ATTENDANCE_STATES = Object.freeze([
+  'attended',
+  'partial',
+  'no_show',
+  'club_cancelled',
+  'player_withdrew',
+]);
 export const TRIAL_ATTENDANCE_SOURCES = Object.freeze(['checkin', 'manual']);
 /** The player took part. */
 export const TRIAL_ATTENDED_STATES = Object.freeze(['attended', 'partial']);
@@ -126,7 +146,12 @@ export function validateTimezone(tz) {
  */
 export function parseInstant(v) {
   const p = parseCanonicalInstant(v, { yearMin: TRIAL_INSTANT_YEAR_MIN, yearMax: TRIAL_INSTANT_YEAR_MAX });
-  if (!p.ok) return { ok: false, error: 'TRIAL_SCHEDULE_INVALID', message: `A session time must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp (${p.why}).` };
+  if (!p.ok)
+    return {
+      ok: false,
+      error: 'TRIAL_SCHEDULE_INVALID',
+      message: `A session time must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp (${p.why}).`,
+    };
   return { ok: true, ms: p.ms };
 }
 
@@ -145,7 +170,12 @@ export function icsLocal(ms, timezone) {
 }
 
 /** RFC 5545 text escaping: backslash, semicolon, comma, line breaks. */
-export const icsText = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+export const icsText = (s) =>
+  String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
 
 // ------------------------------------------------------------------ text
 
@@ -166,19 +196,34 @@ export function validateVenue(raw, { addressAllowed = true } = {}) {
   const bad = (message) => ({ ok: false, error: 'TRIAL_VENUE_INVALID', message });
   if (!isPlain(raw)) return bad('venue must be an object with at least a name.');
   const name = cleanText(raw.name, TRIAL_LIMITS.venueName, { oneLine: true });
-  if (!name.ok || !name.value) return bad(name.tooLong ? `Keep the venue name under ${TRIAL_LIMITS.venueName} characters.` : 'A venue needs a name.');
+  if (!name.ok || !name.value)
+    return bad(
+      name.tooLong ? `Keep the venue name under ${TRIAL_LIMITS.venueName} characters.` : 'A venue needs a name.',
+    );
   const town = cleanText(raw.town, TRIAL_LIMITS.venueTown, { oneLine: true });
-  if (!town.ok) return bad(town.tooLong ? `Keep the town under ${TRIAL_LIMITS.venueTown} characters.` : 'The town must be text.');
+  if (!town.ok)
+    return bad(town.tooLong ? `Keep the town under ${TRIAL_LIMITS.venueTown} characters.` : 'The town must be text.');
   const address = cleanText(raw.address, TRIAL_LIMITS.venueAddress, { oneLine: true });
-  if (!address.ok) return bad(address.tooLong ? `Keep the address under ${TRIAL_LIMITS.venueAddress} characters.` : 'The address must be text.');
+  if (!address.ok)
+    return bad(
+      address.tooLong ? `Keep the address under ${TRIAL_LIMITS.venueAddress} characters.` : 'The address must be text.',
+    );
   return { ok: true, venue: { name: name.value, town: town.value, address: addressAllowed ? address.value : null } };
 }
 
 // ------------------------------------------------------------------ sessions
 
-const SESSION_SEQ = (id) => { const n = Number(String(id ?? '').split('-').pop()); return Number.isFinite(n) ? n : 0; };
+const SESSION_SEQ = (id) => {
+  const n = Number(
+    String(id ?? '')
+      .split('-')
+      .pop(),
+  );
+  return Number.isFinite(n) ? n : 0;
+};
 /** Start time, then the monotonic id part. */
-export const byStartsAtThenId = (a, b) => (a.startsAt - b.startsAt) || (SESSION_SEQ(a.id) - SESSION_SEQ(b.id)) || String(a.id).localeCompare(String(b.id));
+export const byStartsAtThenId = (a, b) =>
+  a.startsAt - b.startsAt || SESSION_SEQ(a.id) - SESSION_SEQ(b.id) || String(a.id).localeCompare(String(b.id));
 
 /**
  * `id` is assigned by the caller (stable, never array position). A session
@@ -188,7 +233,13 @@ export function validateSessionInput(raw, { now = Date.now(), allowPast = false 
   const bad = (message) => ({ ok: false, error: 'TRIAL_SCHEDULE_INVALID', message });
   if (!isPlain(raw)) return bad('Each session must be an object.');
   const kind = raw.kind === undefined || raw.kind === null ? 'training' : raw.kind;
-  if (!TRIAL_SESSION_KINDS.includes(kind)) return { ok: false, error: 'TRIAL_SCHEDULE_INVALID', message: `Session kind must be one of ${TRIAL_SESSION_KINDS.join(', ')}.`, allowed: TRIAL_SESSION_KINDS };
+  if (!TRIAL_SESSION_KINDS.includes(kind))
+    return {
+      ok: false,
+      error: 'TRIAL_SCHEDULE_INVALID',
+      message: `Session kind must be one of ${TRIAL_SESSION_KINDS.join(', ')}.`,
+      allowed: TRIAL_SESSION_KINDS,
+    };
   const start = parseInstant(raw.startsAt);
   if (!start.ok) return { ...start, field: 'startsAt' };
   const end = parseInstant(raw.endsAt);
@@ -203,8 +254,16 @@ export function validateSessionInput(raw, { now = Date.now(), allowPast = false 
   const venue = validateVenue(raw.venue);
   if (!venue.ok) return venue;
   const instructions = cleanText(raw.instructions, TRIAL_LIMITS.instructions);
-  if (!instructions.ok) return bad(instructions.tooLong ? `Keep the instructions under ${TRIAL_LIMITS.instructions} characters.` : 'Instructions must be text.');
-  return { ok: true, session: { kind, startsAt: start.ms, endsAt: end.ms, venue: venue.venue, instructions: instructions.value } };
+  if (!instructions.ok)
+    return bad(
+      instructions.tooLong
+        ? `Keep the instructions under ${TRIAL_LIMITS.instructions} characters.`
+        : 'Instructions must be text.',
+    );
+  return {
+    ok: true,
+    session: { kind, startsAt: start.ms, endsAt: end.ms, venue: venue.venue, instructions: instructions.value },
+  };
 }
 
 /**
@@ -213,12 +272,14 @@ export function validateSessionInput(raw, { now = Date.now(), allowPast = false 
  */
 export function validateScheduleInput(raw, { now = Date.now(), mintId, existingIds = [] } = {}) {
   const bad = (error, message, extra = {}) => ({ ok: false, error, message, ...extra });
-  if (!isPlain(raw)) return bad('TRIAL_SCHEDULE_INVALID', 'A schedule is an object with a timezone and a list of sessions.');
+  if (!isPlain(raw))
+    return bad('TRIAL_SCHEDULE_INVALID', 'A schedule is an object with a timezone and a list of sessions.');
   const tz = validateTimezone(raw.timezone);
   if (!tz.ok) return tz;
   if (!Array.isArray(raw.sessions)) return bad('TRIAL_SCHEDULE_INVALID', 'sessions must be a list.');
   if (raw.sessions.length === 0) return bad('TRIAL_SCHEDULE_INVALID', 'A schedule needs at least one session.');
-  if (raw.sessions.length > TRIAL_LIMITS.sessions) return bad('TRIAL_SCHEDULE_INVALID', `A trial has at most ${TRIAL_LIMITS.sessions} sessions.`);
+  if (raw.sessions.length > TRIAL_LIMITS.sessions)
+    return bad('TRIAL_SCHEDULE_INVALID', `A trial has at most ${TRIAL_LIMITS.sessions} sessions.`);
   const sessions = [];
   const seenIds = new Set();
   for (const s of raw.sessions) {
@@ -227,7 +288,8 @@ export function validateScheduleInput(raw, { now = Date.now(), mintId, existingI
     if (!v.ok) return v;
     let id = null;
     if (s.id !== undefined && s.id !== null && s.id !== '') {
-      if (typeof s.id !== 'string' || !existingIds.includes(s.id)) return bad('TRIAL_SESSION_NOT_FOUND', 'A session id on a revision must name a session of this trial.');
+      if (typeof s.id !== 'string' || !existingIds.includes(s.id))
+        return bad('TRIAL_SESSION_NOT_FOUND', 'A session id on a revision must name a session of this trial.');
       id = s.id;
     } else {
       id = mintId();
@@ -253,7 +315,8 @@ export function materialChange(prev, next) {
   if (prev.timezone !== next.timezone) return true;
   if (prev.sessions.length !== next.sessions.length) return true;
   const key = (s) => `${s.id}|${s.startsAt}|${s.endsAt}|${s.venue?.name ?? ''}|${s.venue?.town ?? ''}`;
-  const a = prev.sessions.map(key).sort(); const b = next.sessions.map(key).sort();
+  const a = prev.sessions.map(key).sort();
+  const b = next.sessions.map(key).sort();
   return a.some((k, i) => k !== b[i]);
 }
 
@@ -271,7 +334,8 @@ export function deriveWorkflowState(t) {
   if (t.completion?.state === 'cancelled') return 'cancelled';
   if (t.completion?.state === 'completed') return 'completed';
   if (isLegacyTrial(t) && !t.schedule) return 'legacy_accepted';
-  if (t.schedule?.confirmedAt && Array.isArray(t.schedule.sessions) && t.schedule.sessions.length > 0) return 'scheduled';
+  if (t.schedule?.confirmedAt && Array.isArray(t.schedule.sessions) && t.schedule.sessions.length > 0)
+    return 'scheduled';
   return 'accepted';
 }
 
@@ -306,7 +370,13 @@ export function canComplete(t, { now = Date.now() } = {}) {
     return { ok: false, error: 'TRIAL_INVALID_STATE', message: 'This trial is already completed.', reasons };
   }
   if (reasons.length) {
-    return { ok: false, error: 'TRIAL_COMPLETION_REQUIREMENTS_NOT_MET', message: 'A trial completes only after a confirmed schedule, recorded attendance at a session, and the last session has ended.', reasons };
+    return {
+      ok: false,
+      error: 'TRIAL_COMPLETION_REQUIREMENTS_NOT_MET',
+      message:
+        'A trial completes only after a confirmed schedule, recorded attendance at a session, and the last session has ended.',
+      reasons,
+    };
   }
   return { ok: true };
 }
@@ -316,14 +386,22 @@ export function trialStateAllows(t, action) {
   const state = deriveWorkflowState(t);
   const open = state === 'accepted' || state === 'scheduled' || state === 'legacy_accepted';
   switch (action) {
-    case 'schedule': return open;
-    case 'reschedule': return open && !!t.schedule;
-    case 'cancel': return open;
-    case 'attendance': return state === 'scheduled';
-    case 'complete': return state === 'scheduled';
-    case 'link': return state === 'scheduled' || state === 'completed';
-    case 'confirm': return (state === 'accepted' || state === 'legacy_accepted') && !!t.schedule && !t.schedule.confirmedAt;
-    default: return false;
+    case 'schedule':
+      return open;
+    case 'reschedule':
+      return open && !!t.schedule;
+    case 'cancel':
+      return open;
+    case 'attendance':
+      return state === 'scheduled';
+    case 'complete':
+      return state === 'scheduled';
+    case 'link':
+      return state === 'scheduled' || state === 'completed';
+    case 'confirm':
+      return (state === 'accepted' || state === 'legacy_accepted') && !!t.schedule && !t.schedule.confirmedAt;
+    default:
+      return false;
   }
 }
 
@@ -368,13 +446,20 @@ function trialIntegrityUnsafe(t, { orgId = null, caseId = null } = {}) {
       else {
         const ids = new Set();
         for (const x of s.sessions) {
-          if (!isPlain(x) || typeof x.id !== 'string' || ids.has(x.id)) { p.push('schedule.session'); break; }
+          if (!isPlain(x) || typeof x.id !== 'string' || ids.has(x.id)) {
+            p.push('schedule.session');
+            break;
+          }
           ids.add(x.id);
-          if (!Number.isFinite(x.startsAt) || !Number.isFinite(x.endsAt) || x.endsAt <= x.startsAt) { p.push('schedule.session_time'); break; }
+          if (!Number.isFinite(x.startsAt) || !Number.isFinite(x.endsAt) || x.endsAt <= x.startsAt) {
+            p.push('schedule.session_time');
+            break;
+          }
         }
         if (s.sessions.length > TRIAL_LIMITS.sessions) p.push('schedule.session_count');
       }
-      if (s.confirmedAt !== null && s.confirmedAt !== undefined && !Number.isFinite(s.confirmedAt)) p.push('schedule.confirmedAt');
+      if (s.confirmedAt !== null && s.confirmedAt !== undefined && !Number.isFinite(s.confirmedAt))
+        p.push('schedule.confirmedAt');
     }
   }
   if (t.attendance !== undefined) {
@@ -383,12 +468,20 @@ function trialIntegrityUnsafe(t, { orgId = null, caseId = null } = {}) {
       // A non-list `sessions` was flagged above; this check must not throw over it.
       const ids = new Set((Array.isArray(t.schedule?.sessions) ? t.schedule.sessions : []).map((s) => s?.id));
       for (const a of t.attendance) {
-        if (!isPlain(a) || !TRIAL_ATTENDANCE_STATES.includes(a.state) || !ids.has(a.sessionId)) { p.push('attendance.record'); break; }
+        if (!isPlain(a) || !TRIAL_ATTENDANCE_STATES.includes(a.state) || !ids.has(a.sessionId)) {
+          p.push('attendance.record');
+          break;
+        }
       }
     }
   }
   if (t.completion !== undefined && t.completion !== null) {
-    if (!isPlain(t.completion) || !TRIAL_COMPLETION_STATES.includes(t.completion.state) || !Number.isFinite(t.completion.at)) p.push('completion');
+    if (
+      !isPlain(t.completion) ||
+      !TRIAL_COMPLETION_STATES.includes(t.completion.state) ||
+      !Number.isFinite(t.completion.at)
+    )
+      p.push('completion');
   }
   if (t.rev !== undefined && !(Number.isInteger(t.rev) && t.rev >= 1)) p.push('rev');
   return p;
@@ -396,18 +489,34 @@ function trialIntegrityUnsafe(t, { orgId = null, caseId = null } = {}) {
 
 // ------------------------------------------------------------------ projections
 
-const HISTORY_SEQ = (id) => { const n = Number(String(id ?? '').split('-').pop()); return Number.isFinite(n) ? n : 0; };
-export const byAtThenId = (a, b) => (a.at - b.at) || (HISTORY_SEQ(a.id) - HISTORY_SEQ(b.id));
+const HISTORY_SEQ = (id) => {
+  const n = Number(
+    String(id ?? '')
+      .split('-')
+      .pop(),
+  );
+  return Number.isFinite(n) ? n : 0;
+};
+export const byAtThenId = (a, b) => a.at - b.at || HISTORY_SEQ(a.id) - HISTORY_SEQ(b.id);
 
 /** Evidence is ids only. */
 function sessionView(s, att, { withAddress, withInstructions, withEvidence }) {
   const a = att.get(s.id) ?? null;
   return {
-    id: s.id, kind: s.kind, startsAt: s.startsAt, endsAt: s.endsAt,
-    venue: s.venue ? { name: s.venue.name, town: s.venue.town ?? null, address: withAddress ? (s.venue.address ?? null) : undefined } : null,
+    id: s.id,
+    kind: s.kind,
+    startsAt: s.startsAt,
+    endsAt: s.endsAt,
+    venue: s.venue
+      ? { name: s.venue.name, town: s.venue.town ?? null, address: withAddress ? (s.venue.address ?? null) : undefined }
+      : null,
     instructions: withInstructions ? (s.instructions ?? null) : undefined,
-    attendance: a ? { state: a.state, source: a.source, recordedAt: a.recordedAt } : { state: 'not_recorded', source: null, recordedAt: null },
-    evidence: withEvidence ? (s.evidence ?? []).map((e) => ({ id: e.id, kind: e.kind, sessionId: e.sessionId, linkedAt: e.linkedAt })) : undefined,
+    attendance: a
+      ? { state: a.state, source: a.source, recordedAt: a.recordedAt }
+      : { state: 'not_recorded', source: null, recordedAt: null },
+    evidence: withEvidence
+      ? (s.evidence ?? []).map((e) => ({ id: e.id, kind: e.kind, sessionId: e.sessionId, linkedAt: e.linkedAt }))
+      : undefined,
   };
 }
 
@@ -429,7 +538,8 @@ export const TRIAL_SCHEDULE_VIEWERS = Object.freeze(['club', 'family_accepted', 
 export function scheduleView(t, viewer) {
   const att = currentAttendance(t);
   if (!t.schedule) {
-    if (isTrialDate(t.proposedDate)) return { legacy: true, timezone: null, revision: 0, confirmedAt: null, date: t.proposedDate, sessions: [] };
+    if (isTrialDate(t.proposedDate))
+      return { legacy: true, timezone: null, revision: 0, confirmedAt: null, date: t.proposedDate, sessions: [] };
     return null;
   }
   const club = viewer === 'club';
@@ -441,11 +551,16 @@ export function scheduleView(t, viewer) {
     confirmedBy: t.schedule.confirmedBy ? { kind: t.schedule.confirmedBy.kind } : null,
     proposedAt: t.schedule.proposedAt ?? null,
     awaitingConfirmation: !t.schedule.confirmedAt,
-    sessions: t.schedule.sessions.slice().sort(byStartsAtThenId).map((s) => sessionView(s, att, {
-      withAddress: club || viewer === 'family_accepted',
-      withInstructions: club || viewer === 'family_accepted',
-      withEvidence: club,
-    })),
+    sessions: t.schedule.sessions
+      .slice()
+      .sort(byStartsAtThenId)
+      .map((s) =>
+        sessionView(s, att, {
+          withAddress: club || viewer === 'family_accepted',
+          withInstructions: club || viewer === 'family_accepted',
+          withEvidence: club,
+        }),
+      ),
   };
 }
 
@@ -453,23 +568,71 @@ export function scheduleView(t, viewer) {
 export function trialClubView(t) {
   const state = deriveWorkflowState(t);
   return {
-    id: t.id, caseId: t.caseId ?? null, requestId: t.requestId ?? null,
-    playerId: t.playerId, playerName: t.playerName ?? null, orgId: t.orgId,
-    workflowState: state, workflowLabel: TRIAL_WORKFLOW_LABELS[state] ?? state,
+    id: t.id,
+    caseId: t.caseId ?? null,
+    requestId: t.requestId ?? null,
+    playerId: t.playerId,
+    playerName: t.playerName ?? null,
+    orgId: t.orgId,
+    workflowState: state,
+    workflowLabel: TRIAL_WORKFLOW_LABELS[state] ?? state,
     legacy: isLegacyTrial(t),
-    reportStatus: t.status, reportDueAt: Number.isFinite(t.reportDueAt) ? t.reportDueAt : null, hasReport: !!t.report,
-    acceptedAt: t.acceptedAt ?? null, acceptedBy: t.acceptedBy ?? null, guardianApproved: t.guardianApproved ?? null,
-    proposedDate: t.proposedDate ?? null, venue: t.venue ?? null,
+    reportStatus: t.status,
+    reportDueAt: Number.isFinite(t.reportDueAt) ? t.reportDueAt : null,
+    hasReport: !!t.report,
+    acceptedAt: t.acceptedAt ?? null,
+    acceptedBy: t.acceptedBy ?? null,
+    guardianApproved: t.guardianApproved ?? null,
+    proposedDate: t.proposedDate ?? null,
+    venue: t.venue ?? null,
     schedule: scheduleView(t, 'club'),
-    revisions: (t.schedule?.revisions ?? []).map((r) => ({ revision: r.revision, proposedAt: r.proposedAt, proposedBy: r.proposedBy ? { kind: r.proposedBy.kind, name: r.proposedBy.name ?? null } : null, confirmedAt: r.confirmedAt ?? null, supersededAt: r.supersededAt ?? null, reason: r.reason ?? null, material: r.material ?? null, sessionCount: r.sessions?.length ?? 0 })),
-    attendanceHistory: (t.attendance ?? []).map((a) => ({ sessionId: a.sessionId, state: a.state, source: a.source, recordedAt: a.recordedAt, recordedBy: a.recordedBy ? { name: a.recordedBy.name ?? null } : null, note: a.note ?? null })),
-    completion: t.completion ? { state: t.completion.state, at: t.completion.at, by: t.completion.by ? { kind: t.completion.by.kind, name: t.completion.by.name ?? null } : null, reason: t.completion.reason ?? null, phase: t.completion.phase ?? null, cancelledBy: t.completion.cancelledBy ?? null } : null,
+    revisions: (t.schedule?.revisions ?? []).map((r) => ({
+      revision: r.revision,
+      proposedAt: r.proposedAt,
+      proposedBy: r.proposedBy ? { kind: r.proposedBy.kind, name: r.proposedBy.name ?? null } : null,
+      confirmedAt: r.confirmedAt ?? null,
+      supersededAt: r.supersededAt ?? null,
+      reason: r.reason ?? null,
+      material: r.material ?? null,
+      sessionCount: r.sessions?.length ?? 0,
+    })),
+    attendanceHistory: (t.attendance ?? []).map((a) => ({
+      sessionId: a.sessionId,
+      state: a.state,
+      source: a.source,
+      recordedAt: a.recordedAt,
+      recordedBy: a.recordedBy ? { name: a.recordedBy.name ?? null } : null,
+      note: a.note ?? null,
+    })),
+    completion: t.completion
+      ? {
+          state: t.completion.state,
+          at: t.completion.at,
+          by: t.completion.by ? { kind: t.completion.by.kind, name: t.completion.by.name ?? null } : null,
+          reason: t.completion.reason ?? null,
+          phase: t.completion.phase ?? null,
+          cancelledBy: t.completion.cancelledBy ?? null,
+        }
+      : null,
     recipient: t.recipient ? { type: t.recipient.type, minor: !!t.recipient.minor } : null,
     blockedBy: t.blockedBy ?? null,
     subjectRemovedAt: t.subjectRemovedAt ?? null,
-    evidenceCount: (t.schedule?.sessions ?? []).reduce((n, s) => n + (s.evidence ?? []).filter((e) => !e.removedAt).length, 0),
-    history: (t.history ?? []).slice().sort(byAtThenId).map((h) => ({ id: h.id, at: h.at, action: h.action, by: h.by ? { kind: h.by.kind ?? null, name: h.by.name ?? null } : null, detail: h.detail ?? null })),
-    rev: t.rev ?? 1, revAt: t.revAt ?? null,
+    evidenceCount: (t.schedule?.sessions ?? []).reduce(
+      (n, s) => n + (s.evidence ?? []).filter((e) => !e.removedAt).length,
+      0,
+    ),
+    history: (t.history ?? [])
+      .slice()
+      .sort(byAtThenId)
+      .map((h) => ({
+        id: h.id,
+        at: h.at,
+        action: h.action,
+        by: h.by ? { kind: h.by.kind ?? null, name: h.by.name ?? null } : null,
+        detail: h.detail ?? null,
+      })),
+    rev: t.rev ?? 1,
+    revAt: t.revAt ?? null,
     policyVersion: TRIAL_POLICY_VERSION,
   };
 }
@@ -481,15 +644,28 @@ export function trialClubView(t) {
 export function trialFamilyView(t) {
   const state = deriveWorkflowState(t);
   return {
-    id: t.id, orgId: t.orgId, orgName: t.orgName ?? null, playerId: t.playerId,
-    workflowState: state, workflowLabel: TRIAL_WORKFLOW_LABELS[state] ?? state,
+    id: t.id,
+    orgId: t.orgId,
+    orgName: t.orgName ?? null,
+    playerId: t.playerId,
+    workflowState: state,
+    workflowLabel: TRIAL_WORKFLOW_LABELS[state] ?? state,
     legacy: isLegacyTrial(t),
     acceptedAt: t.acceptedAt ?? null,
-    proposedDate: t.proposedDate ?? null, venue: t.venue ?? null,
+    proposedDate: t.proposedDate ?? null,
+    venue: t.venue ?? null,
     schedule: scheduleView(t, 'family_accepted'),
     awaitingYourConfirmation: !!t.schedule && !t.schedule.confirmedAt,
-    completion: t.completion ? { state: t.completion.state, at: t.completion.at, byKind: t.completion.by?.kind ?? null, reason: t.completion.state === 'cancelled' ? (t.completion.reason ?? null) : null } : null,
-    reportStatus: t.status, hasReport: !!t.report,
+    completion: t.completion
+      ? {
+          state: t.completion.state,
+          at: t.completion.at,
+          byKind: t.completion.by?.kind ?? null,
+          reason: t.completion.state === 'cancelled' ? (t.completion.reason ?? null) : null,
+        }
+      : null,
+    reportStatus: t.status,
+    hasReport: !!t.report,
     rev: t.rev ?? 1,
   };
 }
@@ -499,14 +675,30 @@ export function trialMilestone(t) {
   const att = currentAttendance(t);
   const sessions = t.schedule?.sessions ?? [];
   return {
-    id: t.id, caseId: t.caseId ?? null, requestId: t.requestId ?? null,
-    workflowState: deriveWorkflowState(t), legacy: isLegacyTrial(t),
-    reportStatus: t.status, hasReport: !!t.report,
+    id: t.id,
+    caseId: t.caseId ?? null,
+    requestId: t.requestId ?? null,
+    workflowState: deriveWorkflowState(t),
+    legacy: isLegacyTrial(t),
+    reportStatus: t.status,
+    hasReport: !!t.report,
     acceptedAt: t.acceptedAt ?? null,
     scheduledAt: t.schedule?.confirmedAt ?? null,
     revision: t.schedule?.revision ?? 0,
-    sessions: sessions.slice().sort(byStartsAtThenId).map((s) => ({ id: s.id, kind: s.kind, startsAt: s.startsAt, endsAt: s.endsAt, attendance: att.get(s.id)?.state ?? 'not_recorded', evidenceCount: (s.evidence ?? []).filter((e) => !e.removedAt).length })),
-    completion: t.completion ? { state: t.completion.state, at: t.completion.at, byKind: t.completion.by?.kind ?? null } : null,
+    sessions: sessions
+      .slice()
+      .sort(byStartsAtThenId)
+      .map((s) => ({
+        id: s.id,
+        kind: s.kind,
+        startsAt: s.startsAt,
+        endsAt: s.endsAt,
+        attendance: att.get(s.id)?.state ?? 'not_recorded',
+        evidenceCount: (s.evidence ?? []).filter((e) => !e.removedAt).length,
+      })),
+    completion: t.completion
+      ? { state: t.completion.state, at: t.completion.at, byKind: t.completion.by?.kind ?? null }
+      : null,
     evidenceCount: sessions.reduce((n, s) => n + (s.evidence ?? []).filter((e) => !e.removedAt).length, 0),
   };
 }
@@ -514,5 +706,11 @@ export function trialMilestone(t) {
 /** What a minor's own device may show: state only (privacy matrix). */
 export function trialOutcomeLine(t) {
   const state = deriveWorkflowState(t);
-  return { id: t.id, orgName: t.orgName ?? null, workflowState: state, workflowLabel: TRIAL_WORKFLOW_LABELS[state] ?? state, guardianManaged: true };
+  return {
+    id: t.id,
+    orgName: t.orgName ?? null,
+    workflowState: state,
+    workflowLabel: TRIAL_WORKFLOW_LABELS[state] ?? state,
+    guardianManaged: true,
+  };
 }

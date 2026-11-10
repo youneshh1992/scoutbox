@@ -22,10 +22,20 @@ import { parseStrictDateOnly, readInstant } from '../../../temporal.mjs';
 
 export { RULE_STATUSES };
 
-export const POLICY_ACTIONS = Object.freeze(['approach_adult', 'declare_representation', 'request_consent', 'approach_minor']);
+export const POLICY_ACTIONS = Object.freeze([
+  'approach_adult',
+  'declare_representation',
+  'request_consent',
+  'approach_minor',
+]);
 
 /** Facet names the policy layer can require. Registration and domestic authorisation are separate facets (DR-53). */
-export const POLICY_FACETS = Object.freeze(['fifa_licence', 'national_registration', 'domestic_authorisation', 'minors_authorisation']);
+export const POLICY_FACETS = Object.freeze([
+  'fifa_licence',
+  'national_registration',
+  'domestic_authorisation',
+  'minors_authorisation',
+]);
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -34,7 +44,10 @@ const DAY = 24 * 60 * 60 * 1000;
  * boundary means the version is never selected.
  */
 const dateMs = (iso) => {
-  if (typeof iso === 'string') { const p = parseStrictDateOnly(iso); return p.ok ? p.t : NaN; }
+  if (typeof iso === 'string') {
+    const p = parseStrictDateOnly(iso);
+    return p.ok ? p.t : NaN;
+  }
   return readInstant(iso) ?? NaN;
 };
 
@@ -55,11 +68,15 @@ export function selectPolicyVersion(rows, jurisdiction, now = Date.now()) {
 
 /** FIFA (`INT`) always applies. A missing national entry is reported, never skipped. */
 export function applicablePolicySet(rows, memberAssociations, now = Date.now()) {
-  const mas = [...new Set(['INT', ...(memberAssociations ?? []).filter((m) => typeof m === 'string' && m && m !== 'INT')])];
-  const policies = []; const missing = [];
+  const mas = [
+    ...new Set(['INT', ...(memberAssociations ?? []).filter((m) => typeof m === 'string' && m && m !== 'INT')]),
+  ];
+  const policies = [];
+  const missing = [];
   for (const ma of mas) {
     const v = selectPolicyVersion(rows, ma, now);
-    if (v) policies.push(v); else missing.push(ma);
+    if (v) policies.push(v);
+    else missing.push(ma);
   }
   return { policies, missing, memberAssociations: mas };
 }
@@ -104,7 +121,13 @@ export function ruleAt(policySet, ruleId, now = Date.now()) {
 
 /** `national` for a single non-INT association; `international` when INT or several are involved. */
 export function resolveScope(jurisdictions) {
-  const mas = [...new Set((jurisdictions ?? []).map((j) => (typeof j === 'string' ? j : j?.memberAssociation)).filter((m) => typeof m === 'string' && m))];
+  const mas = [
+    ...new Set(
+      (jurisdictions ?? [])
+        .map((j) => (typeof j === 'string' ? j : j?.memberAssociation))
+        .filter((m) => typeof m === 'string' && m),
+    ),
+  ];
   if (!mas.length) return { scope: 'unknown', memberAssociations: [] };
   if (mas.length === 1 && mas[0] !== 'INT') return { scope: 'national', memberAssociations: mas, nationalMa: mas[0] };
   return { scope: 'international', memberAssociations: mas };
@@ -133,10 +156,18 @@ export function facetRefusalCode(facet, state) {
 // ------------------------------------------------------------ decision
 
 const emptyDecision = () => ({
-  allowed: false, blocked: false,
-  requiresConsent: false, requiresGuardian: false, requiresMinorAccreditation: false,
-  requiresNationalRegistration: false, requiresDomesticAuthorisation: false, requiresManualReview: false,
-  reasons: [], policyVersions: [], ruleIds: [], ruleStatuses: {},
+  allowed: false,
+  blocked: false,
+  requiresConsent: false,
+  requiresGuardian: false,
+  requiresMinorAccreditation: false,
+  requiresNationalRegistration: false,
+  requiresDomesticAuthorisation: false,
+  requiresManualReview: false,
+  reasons: [],
+  policyVersions: [],
+  ruleIds: [],
+  ruleStatuses: {},
   facetGaps: [], // [{ facet, memberAssociation, state, code }] — objective, fail closed
 });
 
@@ -144,8 +175,14 @@ const finish = (d, policySet) => {
   d.policyVersions = [...new Set((policySet ?? []).map((p) => p.id))];
   d.ruleIds = [...new Set(d.reasons.map((r) => r.ruleId).filter(Boolean))];
   for (const r of d.reasons) if (r.ruleId) d.ruleStatuses[r.ruleId] = r.ruleStatus;
-  d.allowed = !d.blocked && !d.requiresConsent && !d.requiresGuardian && !d.requiresMinorAccreditation
-    && !d.requiresNationalRegistration && !d.requiresDomesticAuthorisation && !d.requiresManualReview;
+  d.allowed =
+    !d.blocked &&
+    !d.requiresConsent &&
+    !d.requiresGuardian &&
+    !d.requiresMinorAccreditation &&
+    !d.requiresNationalRegistration &&
+    !d.requiresDomesticAuthorisation &&
+    !d.requiresManualReview;
   return d;
 };
 
@@ -158,7 +195,8 @@ function requireFacet(d, entry, facet, ma, facets, flag) {
       const code = facetRefusalCode(facet, state);
       d.facetGaps.push({ facet, memberAssociation: ma, state, code });
       d.reasons.push(reasonOf(code, entry, { facet, memberAssociation: ma, state }));
-      if (flag) d[flag] = true; else d.blocked = true;
+      if (flag) d[flag] = true;
+      else d.blocked = true;
     } else {
       d.reasons.push(reasonOf('FACET_VERIFIED', entry, { facet, memberAssociation: ma }));
     }
@@ -167,9 +205,11 @@ function requireFacet(d, entry, facet, ma, facets, flag) {
   } else if (st === 'PENDING_IMPLEMENTATION') {
     d.reasons.push(reasonOf('RULE_NOT_YET_IN_FORCE', entry));
   } else if (st === 'UNDER_LEGAL_REVIEW') {
-    d.requiresManualReview = true; d.reasons.push(reasonOf('RULE_STATUS_UNCERTAIN', entry));
+    d.requiresManualReview = true;
+    d.reasons.push(reasonOf('RULE_STATUS_UNCERTAIN', entry));
   } else {
-    d.requiresManualReview = true; d.reasons.push(reasonOf('POLICY_NOT_ENCODED', entry));
+    d.requiresManualReview = true;
+    d.reasons.push(reasonOf('POLICY_NOT_ENCODED', entry));
   }
 }
 
@@ -177,22 +217,48 @@ function requireFacet(d, entry, facet, ma, facets, flag) {
  * `facets` are effective states, e.g. `{ fifa_licence: 'VERIFIED', national_registration: { ENG: 'VERIFIED' } }`.
  * `otherExclusiveAgreements` are other agents' active exclusive agreements, anonymised to `[{ endAt }]`.
  */
-export function evaluatePolicy({ action, memberAssociations = [], facets = {}, policySet = [], missingPolicies = [], otherExclusiveAgreements = [], now = Date.now() }) {
+export function evaluatePolicy({
+  action,
+  memberAssociations = [],
+  facets = {},
+  policySet = [],
+  missingPolicies = [],
+  otherExclusiveAgreements = [],
+  now = Date.now(),
+}) {
   const d = emptyDecision();
   if (!POLICY_ACTIONS.includes(action)) {
-    d.blocked = true; d.reasons.push({ code: 'ACTION_UNKNOWN', ruleId: null, ruleStatus: 'UNKNOWN', regulator: null, jurisdiction: null, policyVersion: null });
+    d.blocked = true;
+    d.reasons.push({
+      code: 'ACTION_UNKNOWN',
+      ruleId: null,
+      ruleStatus: 'UNKNOWN',
+      regulator: null,
+      jurisdiction: null,
+      policyVersion: null,
+    });
     return finish(d, policySet);
   }
   for (const ma of missingPolicies ?? []) {
     d.requiresManualReview = true;
-    d.reasons.push({ code: 'POLICY_NOT_ENCODED', ruleId: null, ruleStatus: 'UNKNOWN', regulator: null, jurisdiction: ma, policyVersion: null });
+    d.reasons.push({
+      code: 'POLICY_NOT_ENCODED',
+      ruleId: null,
+      ruleStatus: 'UNKNOWN',
+      regulator: null,
+      jurisdiction: ma,
+      policyVersion: null,
+    });
   }
   const mas = [...new Set(['INT', ...memberAssociations.filter((m) => m && m !== 'INT')])];
 
   // The FIFA licence is personal and required for every regulated act (FIFA-8.1 / 11.1 / 12.2).
   requireFacet(d, ruleAt(policySet, 'FIFA-8.1', now), 'fifa_licence', null, facets, null);
   const approachRule = ruleAt(policySet, action === 'approach_minor' ? 'FIFA-13.1' : 'FIFA-12.2', now);
-  if (approachRule.status !== 'ACTIVE') d.reasons.push(reasonOf(approachRule.status === 'UNKNOWN' ? 'POLICY_NOT_ENCODED' : 'RULE_STATUS_UNCERTAIN', approachRule));
+  if (approachRule.status !== 'ACTIVE')
+    d.reasons.push(
+      reasonOf(approachRule.status === 'UNKNOWN' ? 'POLICY_NOT_ENCODED' : 'RULE_STATUS_UNCERTAIN', approachRule),
+    );
 
   // National overlays: registration and domestic authorisation are separate facets (DR-53).
   for (const ma of mas) {
@@ -201,9 +267,12 @@ export function evaluatePolicy({ action, memberAssociations = [], facets = {}, p
     if (!policy) continue; // already reported as missing
     for (const [ruleId, r] of Object.entries(policy.rules ?? {})) {
       const entry = { ruleId, rule: r, policy, status: ruleStatusAt({ rule: r }, now) };
-      if (r.params?.nationalRegistrationRequired) requireFacet(d, entry, 'national_registration', ma, facets, 'requiresNationalRegistration');
-      if (r.params?.domesticAuthorisationRequired) requireFacet(d, entry, 'domestic_authorisation', ma, facets, 'requiresDomesticAuthorisation');
-      if (action === 'approach_minor' && r.params?.minorsAuthorisationRequired) requireFacet(d, entry, 'minors_authorisation', ma, facets, 'requiresMinorAccreditation');
+      if (r.params?.nationalRegistrationRequired)
+        requireFacet(d, entry, 'national_registration', ma, facets, 'requiresNationalRegistration');
+      if (r.params?.domesticAuthorisationRequired)
+        requireFacet(d, entry, 'domestic_authorisation', ma, facets, 'requiresDomesticAuthorisation');
+      if (action === 'approach_minor' && r.params?.minorsAuthorisationRequired)
+        requireFacet(d, entry, 'minors_authorisation', ma, facets, 'requiresMinorAccreditation');
     }
   }
   if (action === 'approach_minor') {
@@ -214,20 +283,25 @@ export function evaluatePolicy({ action, memberAssociations = [], facets = {}, p
 
   // Exclusive-agreement approach window (FIFA-16.1b / ENG-8.1b): while under legal review, manual review whenever
   // the rule would decide, never a block and never the other agent's identity.
-  if ((action === 'approach_adult') && (otherExclusiveAgreements ?? []).length) {
+  if (action === 'approach_adult' && (otherExclusiveAgreements ?? []).length) {
     for (const ruleId of ['FIFA-16.1b', ...mas.filter((m) => m !== 'INT').map((m) => `${m}-8.1b`)]) {
       const e = ruleAt(policySet, ruleId, now);
       if (!e.rule) continue;
       if (e.status === 'ACTIVE') {
         // The text's own window: an approach only in the final two months of the other agreement.
         const windowMs = (e.rule.params?.exclusivityWindowMonths ?? 2) * 30 * DAY;
-        const insideWindow = otherExclusiveAgreements.every((a) => typeof a?.endAt === 'number' && a.endAt - now <= windowMs);
-        if (!insideWindow) { d.blocked = true; d.reasons.push(reasonOf('EXCLUSIVITY_WINDOW_CLOSED', e)); }
-        else d.reasons.push(reasonOf('EXCLUSIVITY_WINDOW_OPEN', e));
+        const insideWindow = otherExclusiveAgreements.every(
+          (a) => typeof a?.endAt === 'number' && a.endAt - now <= windowMs,
+        );
+        if (!insideWindow) {
+          d.blocked = true;
+          d.reasons.push(reasonOf('EXCLUSIVITY_WINDOW_CLOSED', e));
+        } else d.reasons.push(reasonOf('EXCLUSIVITY_WINDOW_OPEN', e));
       } else if (e.status === 'SUSPENDED' || e.status === 'PENDING_IMPLEMENTATION') {
         d.reasons.push(reasonOf(e.status === 'SUSPENDED' ? 'RULE_SUSPENDED' : 'RULE_NOT_YET_IN_FORCE', e));
       } else {
-        d.requiresManualReview = true; d.reasons.push(reasonOf('EXCLUSIVITY_WINDOW_DOUBTFUL', e));
+        d.requiresManualReview = true;
+        d.reasons.push(reasonOf('EXCLUSIVITY_WINDOW_DOUBTFUL', e));
       }
     }
   }
@@ -261,9 +335,14 @@ export function earliestPermittedApproachAt(dob, entry, { employingCountry = nul
   if (p.formula === 'academic_year_16') {
     const sixteenth = Date.UTC(b.getUTCFullYear() + 16, b.getUTCMonth(), b.getUTCDate());
     const d16 = new Date(sixteenth);
-    const [mm, dd] = String(p.academicYearStart ?? '09-01').split('-').map(Number);
+    const [mm, dd] = String(p.academicYearStart ?? '09-01')
+      .split('-')
+      .map(Number);
     // The academic year containing the sixteenth birthday starts on the most recent 1 Sep at or before it.
-    const startYear = (d16.getUTCMonth() + 1 > mm || (d16.getUTCMonth() + 1 === mm && d16.getUTCDate() >= dd)) ? d16.getUTCFullYear() : d16.getUTCFullYear() - 1;
+    const startYear =
+      d16.getUTCMonth() + 1 > mm || (d16.getUTCMonth() + 1 === mm && d16.getUTCDate() >= dd)
+        ? d16.getUTCFullYear()
+        : d16.getUTCFullYear() - 1;
     return { at: Date.UTC(startYear, mm - 1, dd), reason: null, formula: 'academic_year_16' };
   }
   if (p.formula === 'six_months_before_first_contract_age') {
@@ -282,47 +361,129 @@ export const MINOR_PATHWAY_PRODUCTION_ENABLED = Object.freeze({ ENG: false, INT:
  * Readiness only; no route lets an agency see a minor. `dob` is the server's record, never client-supplied;
  * `guardianConsents` are for this minor and this agent.
  */
-export function evaluateMinorGate({ dob, memberAssociation, employingCountry = null, facets = {}, policySet = [], missingPolicies = [], guardianConsents = [], blocked = false, now = Date.now() }) {
+export function evaluateMinorGate({
+  dob,
+  memberAssociation,
+  employingCountry = null,
+  facets = {},
+  policySet = [],
+  missingPolicies = [],
+  guardianConsents = [],
+  blocked = false,
+  now = Date.now(),
+}) {
   const d = emptyDecision();
   d.pathwayEnabledInProduction = false;
   const minor = isRegulatoryMinor(dob, now);
-  if (minor === null) { d.blocked = true; d.reasons.push({ code: 'SUBJECT_DOB_UNKNOWN', ruleId: null, ruleStatus: 'UNKNOWN', regulator: null, jurisdiction: memberAssociation ?? null, policyVersion: null }); return finish(d, policySet); }
+  if (minor === null) {
+    d.blocked = true;
+    d.reasons.push({
+      code: 'SUBJECT_DOB_UNKNOWN',
+      ruleId: null,
+      ruleStatus: 'UNKNOWN',
+      regulator: null,
+      jurisdiction: memberAssociation ?? null,
+      policyVersion: null,
+    });
+    return finish(d, policySet);
+  }
   d.isRegulatoryMinor = minor;
-  if (!minor) { d.reasons.push({ code: 'NOT_A_MINOR', ruleId: null, ruleStatus: 'ACTIVE', regulator: null, jurisdiction: memberAssociation ?? null, policyVersion: null }); return finish(d, policySet); }
-  if (blocked) { d.blocked = true; d.reasons.push({ code: 'SAFEGUARDING_BLOCK', ruleId: null, ruleStatus: 'ACTIVE', regulator: null, jurisdiction: memberAssociation ?? null, policyVersion: null }); }
+  if (!minor) {
+    d.reasons.push({
+      code: 'NOT_A_MINOR',
+      ruleId: null,
+      ruleStatus: 'ACTIVE',
+      regulator: null,
+      jurisdiction: memberAssociation ?? null,
+      policyVersion: null,
+    });
+    return finish(d, policySet);
+  }
+  if (blocked) {
+    d.blocked = true;
+    d.reasons.push({
+      code: 'SAFEGUARDING_BLOCK',
+      ruleId: null,
+      ruleStatus: 'ACTIVE',
+      regulator: null,
+      jurisdiction: memberAssociation ?? null,
+      policyVersion: null,
+    });
+  }
 
   // The minor's national timing rule, else FIFA's formula (whose parameter is unknown, so INSUFFICIENT_DATA).
-  const national = memberAssociation && memberAssociation !== 'INT' ? policySet.find((p) => p.jurisdiction === memberAssociation) : null;
-  const timingRuleId = national ? Object.keys(national.rules ?? {}).find((id) => national.rules[id]?.params?.formula) ?? null : null;
+  const national =
+    memberAssociation && memberAssociation !== 'INT'
+      ? policySet.find((p) => p.jurisdiction === memberAssociation)
+      : null;
+  const timingRuleId = national
+    ? (Object.keys(national.rules ?? {}).find((id) => national.rules[id]?.params?.formula) ?? null)
+    : null;
   const timing = timingRuleId ? ruleAt(policySet, timingRuleId, now) : ruleAt(policySet, 'FIFA-13.1', now);
-  if ((missingPolicies ?? []).includes(memberAssociation) || (memberAssociation && memberAssociation !== 'INT' && !national)) {
-    d.requiresManualReview = true; d.blocked = true;
-    d.reasons.push({ code: 'POLICY_NOT_ENCODED', ruleId: null, ruleStatus: 'UNKNOWN', regulator: null, jurisdiction: memberAssociation, policyVersion: null });
+  if (
+    (missingPolicies ?? []).includes(memberAssociation) ||
+    (memberAssociation && memberAssociation !== 'INT' && !national)
+  ) {
+    d.requiresManualReview = true;
+    d.blocked = true;
+    d.reasons.push({
+      code: 'POLICY_NOT_ENCODED',
+      ruleId: null,
+      ruleStatus: 'UNKNOWN',
+      regulator: null,
+      jurisdiction: memberAssociation,
+      policyVersion: null,
+    });
   }
   if (timing.status !== 'ACTIVE') {
-    d.requiresManualReview = true; d.blocked = true;
+    d.requiresManualReview = true;
+    d.blocked = true;
     d.reasons.push(reasonOf(timing.status === 'UNKNOWN' ? 'POLICY_NOT_ENCODED' : 'RULE_STATUS_UNCERTAIN', timing));
   } else {
     const e = earliestPermittedApproachAt(dob, timing, { employingCountry });
     if (e.at === null) {
-      d.requiresManualReview = true; d.blocked = true;
+      d.requiresManualReview = true;
+      d.blocked = true;
       d.reasons.push(reasonOf('INSUFFICIENT_DATA', timing, { detail: e.reason }));
     } else if (now < e.at) {
-      d.blocked = true; d.reasons.push(reasonOf('MINOR_APPROACH_NOT_PERMITTED', timing, { reason: 'timing' })); // no date in the reason (DR-16)
+      d.blocked = true;
+      d.reasons.push(reasonOf('MINOR_APPROACH_NOT_PERMITTED', timing, { reason: 'timing' })); // no date in the reason (DR-16)
     } else {
       d.reasons.push(reasonOf('MINOR_TIMING_SATISFIED', timing));
     }
   }
   // The individual's own facets, never the agency's.
-  const licence = evaluatePolicy({ action: 'approach_minor', memberAssociations: [memberAssociation].filter(Boolean), facets, policySet, missingPolicies: [], now });
-  for (const k of ['requiresNationalRegistration', 'requiresDomesticAuthorisation', 'requiresMinorAccreditation', 'requiresManualReview']) if (licence[k]) d[k] = true;
+  const licence = evaluatePolicy({
+    action: 'approach_minor',
+    memberAssociations: [memberAssociation].filter(Boolean),
+    facets,
+    policySet,
+    missingPolicies: [],
+    now,
+  });
+  for (const k of [
+    'requiresNationalRegistration',
+    'requiresDomesticAuthorisation',
+    'requiresMinorAccreditation',
+    'requiresManualReview',
+  ])
+    if (licence[k]) d[k] = true;
   if (licence.blocked) d.blocked = true;
   d.facetGaps.push(...licence.facetGaps);
   d.reasons.push(...licence.reasons.filter((r) => r.code !== 'FACET_VERIFIED' || true));
   // The guardian's unrevoked approach consent must pre-exist; it cannot be retroactive.
-  const approachConsent = (guardianConsents ?? []).find((c) => c && c.kind === 'guardian_approach' && readInstant(c.grantedAt) !== null && c.grantedAt <= now && c.revokedAt == null);
-  if (!approachConsent) { d.requiresGuardian = true; d.reasons.push(reasonOf('GUARDIAN_CONSENT_REQUIRED', timing, { consentKind: 'guardian_approach' })); }
-  else d.reasons.push(reasonOf('GUARDIAN_CONSENT_PRESENT', timing, { consentKind: 'guardian_approach' }));
+  const approachConsent = (guardianConsents ?? []).find(
+    (c) =>
+      c &&
+      c.kind === 'guardian_approach' &&
+      readInstant(c.grantedAt) !== null &&
+      c.grantedAt <= now &&
+      c.revokedAt == null,
+  );
+  if (!approachConsent) {
+    d.requiresGuardian = true;
+    d.reasons.push(reasonOf('GUARDIAN_CONSENT_REQUIRED', timing, { consentKind: 'guardian_approach' }));
+  } else d.reasons.push(reasonOf('GUARDIAN_CONSENT_PRESENT', timing, { consentKind: 'guardian_approach' }));
   return finish(d, policySet);
 }
 
@@ -336,17 +497,26 @@ export const CONTEXT_TYPE_SCOPES = Object.freeze({
   other_services: ['other_services', 'commercial'],
 });
 
-export function representationScopeProblem({ agreement, effectiveStatus, confirmed, contextType, memberAssociations = [] }) {
+export function representationScopeProblem({
+  agreement,
+  effectiveStatus,
+  confirmed,
+  contextType,
+  memberAssociations = [],
+}) {
   if (!agreement) return { error: 'REPRESENTATION_REQUIRED' };
   if (effectiveStatus === 'expired') return { error: 'REPRESENTATION_EXPIRED', agreementId: agreement.id };
-  if (effectiveStatus !== 'active' || !confirmed) return { error: 'REPRESENTATION_REQUIRED', agreementId: agreement.id, status: effectiveStatus };
+  if (effectiveStatus !== 'active' || !confirmed)
+    return { error: 'REPRESENTATION_REQUIRED', agreementId: agreement.id, status: effectiveStatus };
   const needed = CONTEXT_TYPE_SCOPES[contextType];
   if (!needed) return { error: 'REPRESENTATION_SCOPE_INSUFFICIENT', agreementId: agreement.id, required: null };
   const scope = Array.isArray(agreement.scope) ? agreement.scope : [];
-  if (!needed.some((s) => scope.includes(s))) return { error: 'REPRESENTATION_SCOPE_INSUFFICIENT', agreementId: agreement.id, required: needed };
+  if (!needed.some((s) => scope.includes(s)))
+    return { error: 'REPRESENTATION_SCOPE_INSUFFICIENT', agreementId: agreement.id, required: needed };
   const j = agreement.jurisdiction ?? null;
   // An agreement for one national association does not authorise an act in another; INT covers only the international dimension.
   const foreign = memberAssociations.filter((m) => m && m !== 'INT' && j && j !== 'INT' && m !== j);
-  if (foreign.length) return { error: 'REPRESENTATION_SCOPE_INSUFFICIENT', agreementId: agreement.id, required: memberAssociations };
+  if (foreign.length)
+    return { error: 'REPRESENTATION_SCOPE_INSUFFICIENT', agreementId: agreement.id, required: memberAssociations };
   return null;
 }

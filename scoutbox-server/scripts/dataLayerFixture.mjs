@@ -27,9 +27,22 @@ const sha256 = (s) => createHash('sha256').update(String(s)).digest('hex');
 export function openLayer(dir, { seed = {}, now = Date.now, nextId = null, warn = () => {}, sessionTtlMs = TTL } = {}) {
   const store = openStore(dir);
   let counter = null;
-  const mint = nextId ?? ((prefix) => { counter ??= Number(store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get()?.value) || 0; counter += 1; store.sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(counter); return `${prefix}-${counter}`; });
+  const mint =
+    nextId ??
+    ((prefix) => {
+      counter ??= Number(store.sqlite.prepare("SELECT value FROM counters WHERE name = 'id'").get()?.value) || 0;
+      counter += 1;
+      store.sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(counter);
+      return `${prefix}-${counter}`;
+    });
   const layer = attachDataLayer({ seed, store, nextId: mint, sessionTtlMs, now, warn, log: () => {} });
-  return { store, layer, sqlite: store.sqlite, unit: (work) => store.unitOfWork(work), close: () => store.sqlite.close() };
+  return {
+    store,
+    layer,
+    sqlite: store.sqlite,
+    unit: (work) => store.unitOfWork(work),
+    close: () => store.sqlite.close(),
+  };
 }
 
 /**
@@ -38,11 +51,32 @@ export function openLayer(dir, { seed = {}, now = Date.now, nextId = null, warn 
  * and the entries whose id `dropHistory(id)` holds removed. Returns the case as stored. Test databases only.
  */
 export function plantCase(L, id, { status, stage, rev, signingId, history = [], dropHistory = null } = {}) {
-  const cols = Object.entries({ room_status: status, stage, room_rev: rev, links_signing_id: signingId }).filter(([, v]) => v !== undefined);
-  if (cols.length) L.sqlite.prepare(`UPDATE recruitment_cases SET ${cols.map(([c]) => `${c} = ?`).join(', ')} WHERE id = ?`).run(...cols.map(([, v]) => v), id);
-  if (dropHistory) for (const { id: hid } of L.sqlite.prepare('SELECT id FROM case_history WHERE case_id = ?').all(id)) if (dropHistory(hid)) L.sqlite.prepare('DELETE FROM case_history WHERE case_id = ? AND id = ?').run(id, hid);
-  const insert = L.sqlite.prepare('INSERT INTO case_history (case_id, position, id, at, action, by_kind, by_id, by_name, detail_text, detail_json) VALUES (?, (SELECT COALESCE(MAX(position) + 1, 0) FROM case_history WHERE case_id = ?), ?, ?, ?, ?, ?, ?, ?, ?)');
-  for (const h of history) insert.run(id, id, h.id, h.at, h.action, h.byKind ?? null, h.byId ?? null, h.byName ?? null, typeof h.detail === 'string' ? h.detail : null, h.detail && typeof h.detail === 'object' ? JSON.stringify(h.detail) : null);
+  const cols = Object.entries({ room_status: status, stage, room_rev: rev, links_signing_id: signingId }).filter(
+    ([, v]) => v !== undefined,
+  );
+  if (cols.length)
+    L.sqlite
+      .prepare(`UPDATE recruitment_cases SET ${cols.map(([c]) => `${c} = ?`).join(', ')} WHERE id = ?`)
+      .run(...cols.map(([, v]) => v), id);
+  if (dropHistory)
+    for (const { id: hid } of L.sqlite.prepare('SELECT id FROM case_history WHERE case_id = ?').all(id))
+      if (dropHistory(hid)) L.sqlite.prepare('DELETE FROM case_history WHERE case_id = ? AND id = ?').run(id, hid);
+  const insert = L.sqlite.prepare(
+    'INSERT INTO case_history (case_id, position, id, at, action, by_kind, by_id, by_name, detail_text, detail_json) VALUES (?, (SELECT COALESCE(MAX(position) + 1, 0) FROM case_history WHERE case_id = ?), ?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  for (const h of history)
+    insert.run(
+      id,
+      id,
+      h.id,
+      h.at,
+      h.action,
+      h.byKind ?? null,
+      h.byId ?? null,
+      h.byName ?? null,
+      typeof h.detail === 'string' ? h.detail : null,
+      h.detail && typeof h.detail === 'object' ? JSON.stringify(h.detail) : null,
+    );
   return L.layer.recruitmentCases.cases.byId(id);
 }
 
@@ -52,11 +86,26 @@ export function plantCase(L, id, { status, stage, rev, signingId, history = [], 
  * into `plantCase`.
  */
 export function legacyMoves(k, chain, { prefix, byName = 'Legacy', extraLast = {}, withReasons = true } = {}) {
-  let prev = k.room.status; let at = Math.max(Date.now(), ...k.history.map((h) => Number(h.at) || 0));
+  let prev = k.room.status;
+  let at = Math.max(Date.now(), ...k.history.map((h) => Number(h.at) || 0));
   const history = chain.map((to, i) => {
     at += 3_600_000;
-    const h = { id: `${prefix}-${Math.random().toString(36).slice(2, 8)}`, at, action: 'room_status_changed', byKind: 'org', byId: 'legacy', byName, detail: { from: prev, to, ...(withReasons ? { reasonCodes: [] } : {}), ...(i === chain.length - 1 ? extraLast : {}) } };
-    prev = to; return h;
+    const h = {
+      id: `${prefix}-${Math.random().toString(36).slice(2, 8)}`,
+      at,
+      action: 'room_status_changed',
+      byKind: 'org',
+      byId: 'legacy',
+      byName,
+      detail: {
+        from: prev,
+        to,
+        ...(withReasons ? { reasonCodes: [] } : {}),
+        ...(i === chain.length - 1 ? extraLast : {}),
+      },
+    };
+    prev = to;
+    return h;
   });
   return { status: chain[chain.length - 1], rev: (k.room.rev ?? 1) + chain.length, history };
 }
@@ -67,11 +116,25 @@ export function legacyMoves(k, chain, { prefix, byName = 'Legacy', extraLast = {
  */
 function writeSession(sqlite, s, { now, ttl }) {
   const createdAt = Number.isFinite(s.createdAt) ? s.createdAt : now;
-  sqlite.prepare('INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(sha256(s.token), s.sid, s.kind, s.refId, s.kind === 'org' ? (s.userId ?? null) : null, s.via ?? null, createdAt, Number.isFinite(s.expiresAt) ? s.expiresAt : createdAt + ttl);
+  sqlite
+    .prepare(
+      'INSERT INTO sessions (token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    )
+    .run(
+      sha256(s.token),
+      s.sid,
+      s.kind,
+      s.refId,
+      s.kind === 'org' ? (s.userId ?? null) : null,
+      s.via ?? null,
+      createdAt,
+      Number.isFinite(s.expiresAt) ? s.expiresAt : createdAt + ttl,
+    );
 }
 
-const each = (fn) => (L, records) => { for (const r of records) fn(L, r); };
+const each = (fn) => (L, records) => {
+  for (const r of records) fn(L, r);
+};
 
 /**
  * The writers, in dependency order: every collection a fixture may carry, and the repository operation that writes one
@@ -85,10 +148,16 @@ const WRITERS = {
   users: (L, records) => {
     for (const { removedAt = null, removedById = null, ...u } of records) {
       L.users.create(u);
-      if (removedAt !== null) L.users.update(u.id, (d) => { d.removedAt = removedAt; d.removedById = removedById; });
+      if (removedAt !== null)
+        L.users.update(u.id, (d) => {
+          d.removedAt = removedAt;
+          d.removedById = removedById;
+        });
     }
   },
-  sessions: (L, records, ctx) => { for (const s of records) writeSession(L.sqlite, s, ctx); },
+  sessions: (L, records, ctx) => {
+    for (const s of records) writeSession(L.sqlite, s, ctx);
+  },
   // safety and audit
   blocks: each((L, r) => L.safetyAudit.blocks.add(r)),
   reports: each((L, r) => L.safetyAudit.reports.file(r)),
@@ -100,7 +169,9 @@ const WRITERS = {
   idvQueue: each((L, r) => L.safetyAudit.idvQueue.add(r)),
   // recruitment: a request's and a trial's case is an immediate key, and so are a case's links to its requests and
   // trials, so the cases are written without their links, then the requests and trials, then the links.
-  recruitmentCases: each((L, r) => L.recruitmentCases.cases.create({ ...r, links: { ...(r.links ?? {}), requestIds: [], trialIds: [] } })),
+  recruitmentCases: each((L, r) =>
+    L.recruitmentCases.cases.create({ ...r, links: { ...(r.links ?? {}), requestIds: [], trialIds: [] } }),
+  ),
   requests: each((L, r) => L.recruitment.requests.create(r)),
   trials: each((L, r) => L.recruitment.trials.create(r)),
   caseLinks: null, // see writeFixture: the cases' links, once their requests and trials exist
@@ -110,13 +181,19 @@ const WRITERS = {
   // already written, and is marked superseded once its successor exists (a key naming a decision not yet there is
   // refused). A chain no route writes, a decision superseding a later one, is set with SQL.
   roomDecisions: (L, records) => {
-    const D = L.recruitmentCases.decisions; const made = new Set();
+    const D = L.recruitmentCases.decisions;
+    const made = new Set();
     for (const r of records) {
-      if (!r || typeof r !== 'object') { D.create(r); continue; } // junk: refused by the repository, naming it
-      D.create({ ...r, supersedes: made.has(r.supersedes) ? r.supersedes : null, supersededById: null }); made.add(r.id);
+      if (!r || typeof r !== 'object') {
+        D.create(r);
+        continue;
+      } // junk: refused by the repository, naming it
+      D.create({ ...r, supersedes: made.has(r.supersedes) ? r.supersedes : null, supersededById: null });
+      made.add(r.id);
     }
     for (const r of records) {
-      if ((r.supersedes ?? null) !== null && !D.byId(r.id).supersedes) L.sqlite.prepare('UPDATE room_decisions SET supersedes_id = ? WHERE id = ?').run(r.supersedes, r.id);
+      if ((r.supersedes ?? null) !== null && !D.byId(r.id).supersedes)
+        L.sqlite.prepare('UPDATE room_decisions SET supersedes_id = ? WHERE id = ?').run(r.supersedes, r.id);
       if ((r.supersededById ?? null) !== null) D.markSuperseded(r.id, { by: r.supersededById });
     }
   },
@@ -131,7 +208,11 @@ const WRITERS = {
   // A correction names the record it corrects and back: both are created, then the original is marked superseded.
   evidence: (L, records) => {
     for (const r of records) L.scoutingEvidence.evidence.create({ ...r, supersededBy: null });
-    for (const r of records) if (r.supersededBy) L.scoutingEvidence.evidence.update(r.id, (x) => { x.supersededBy = r.supersededBy; });
+    for (const r of records)
+      if (r.supersededBy)
+        L.scoutingEvidence.evidence.update(r.id, (x) => {
+          x.supersededBy = r.supersededBy;
+        });
   },
   coachAffiliations: each((L, r) => L.scoutingEvidence.coachAffiliations.create(r)),
   squadInvites: each((L, r) => L.scoutingEvidence.squadInvites.create(r)),
@@ -240,7 +321,8 @@ const ORDER = Object.keys(WRITERS);
  * fixture's `password` is the stored hash, which the repositories take apart from the record (`passwordHash`).
  */
 function writeIdentity(L, { players = [], guardians = [] }) {
-  for (const { password = null, ...g } of guardians) L.guardians.create({ ...g, passwordHash: g.passwordHash ?? password });
+  for (const { password = null, ...g } of guardians)
+    L.guardians.create({ ...g, passwordHash: g.passwordHash ?? password });
   for (const { password = null, ...p } of players) L.players.create({ ...p, passwordHash: p.passwordHash ?? password });
 }
 
@@ -250,10 +332,24 @@ function writeIdentity(L, { players = [], guardians = [] }) {
  */
 export function writeFixture(dir, collections = {}, { now = Date.now(), idCounter = null, writers = {} } = {}) {
   const W = { ...WRITERS, ...writers }; // `writers`: a test's own writer for a collection, `(repos, records, { now, ttl, collections }) => …`
-  const unknown = Object.keys(collections).filter((n) => collections[n] !== undefined && (!Object.hasOwn(W, n) || n === 'caseLinks') && n !== 'reputationSeed');
-  if (unknown.length) throw Object.assign(new Error(`FIXTURE_COLLECTION_UNSUPPORTED: ${unknown.join(', ')} ${unknown.length === 1 ? 'has' : 'have'} no fixture writer (scripts/dataLayerFixture.mjs): add one, or write ${unknown.length === 1 ? 'it' : 'them'} through the repository in the test`), { code: 'FIXTURE_COLLECTION_UNSUPPORTED' });
-  for (const [n, v] of Object.entries(collections)) if (v !== undefined && !Array.isArray(v)) throw new TypeError(`${n}: a fixture collection is an array of records`);
-  const seed = { orgs: collections.orgs ?? [], players: collections.players ?? [], guardians: collections.guardians ?? [], reputationSeed: collections.reputationSeed ?? [] };
+  const unknown = Object.keys(collections).filter(
+    (n) => collections[n] !== undefined && (!Object.hasOwn(W, n) || n === 'caseLinks') && n !== 'reputationSeed',
+  );
+  if (unknown.length)
+    throw Object.assign(
+      new Error(
+        `FIXTURE_COLLECTION_UNSUPPORTED: ${unknown.join(', ')} ${unknown.length === 1 ? 'has' : 'have'} no fixture writer (scripts/dataLayerFixture.mjs): add one, or write ${unknown.length === 1 ? 'it' : 'them'} through the repository in the test`,
+      ),
+      { code: 'FIXTURE_COLLECTION_UNSUPPORTED' },
+    );
+  for (const [n, v] of Object.entries(collections))
+    if (v !== undefined && !Array.isArray(v)) throw new TypeError(`${n}: a fixture collection is an array of records`);
+  const seed = {
+    orgs: collections.orgs ?? [],
+    players: collections.players ?? [],
+    guardians: collections.guardians ?? [],
+    reputationSeed: collections.reputationSeed ?? [],
+  };
   const L = openLayer(dir, { seed, now: () => now });
   try {
     const ctx = { now, ttl: TTL, collections };
@@ -268,7 +364,8 @@ export function writeFixture(dir, collections = {}, { now = Date.now(), idCounte
         if (name === 'caseLinks') {
           if (W.recruitmentCases === WRITERS.recruitmentCases) {
             for (const c of collections.recruitmentCases ?? []) {
-              for (const requestId of c.links?.requestIds ?? []) L.layer.recruitmentCases.cases.link(c.id, { requestId });
+              for (const requestId of c.links?.requestIds ?? [])
+                L.layer.recruitmentCases.cases.link(c.id, { requestId });
               for (const trialId of c.links?.trialIds ?? []) L.layer.recruitmentCases.cases.link(c.id, { trialId });
             }
           }
@@ -278,8 +375,11 @@ export function writeFixture(dir, collections = {}, { now = Date.now(), idCounte
         if (records?.length) W[name](repos, records, ctx);
       }
     });
-    if (idCounter !== null) L.sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(Number(idCounter) || 0);
-  } finally { L.close(); }
+    if (idCounter !== null)
+      L.sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'").run(Number(idCounter) || 0);
+  } finally {
+    L.close();
+  }
   return dir;
 }
 /** Every collection read back as plain records (the shapes the repositories hand out). */
@@ -288,5 +388,9 @@ export function readRecords(dir) {
   // directory with no database yet is initialised first (the migrations), so it reads as a clean database.
   if (!fs.existsSync(path.join(dir, 'scoutbox.db'))) openLayer(dir).close();
   const sqlite = new DatabaseSync(path.join(dir, 'scoutbox.db'), { readOnly: true });
-  try { return JSON.parse(JSON.stringify(readAllRecords(sqlite))); } finally { sqlite.close(); }
+  try {
+    return JSON.parse(JSON.stringify(readAllRecords(sqlite)));
+  } finally {
+    sqlite.close();
+  }
 }

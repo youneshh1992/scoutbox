@@ -21,7 +21,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 let passed = 0;
-function test(name, fn) { fn(); passed++; console.log(`  ✓ ${name}`); }
+function test(name, fn) {
+  fn();
+  passed++;
+  console.log(`  ✓ ${name}`);
+}
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..');
 const PROBE = path.join(HERE, 'runtimeProbe.mjs');
@@ -30,17 +34,38 @@ const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const digestDir = (dir) => {
   if (!fs.existsSync(dir)) return 'absent';
   const h = crypto.createHash('sha256');
-  for (const f of fs.readdirSync(dir).sort()) { h.update(f); h.update(fs.readFileSync(path.join(dir, f))); }
+  for (const f of fs.readdirSync(dir).sort()) {
+    h.update(f);
+    h.update(fs.readFileSync(path.join(dir, f)));
+  }
   return h.digest('hex');
 };
 const runProbe = (bin, dir, { mask = false } = {}) => {
-  const r = spawnSync(bin, [...(mask ? ['--require', MASK] : []), PROBE, dir], { encoding: 'utf8', env: { ...process.env, SCOUTBOX_QUIET_LOGS: '1' } });
-  const line = r.stdout.trim().split('\n').filter((l) => l.startsWith('{')).pop();
+  const r = spawnSync(bin, [...(mask ? ['--require', MASK] : []), PROBE, dir], {
+    encoding: 'utf8',
+    env: { ...process.env, SCOUTBOX_QUIET_LOGS: '1' },
+  });
+  const line = r.stdout
+    .trim()
+    .split('\n')
+    .filter((l) => l.startsWith('{'))
+    .pop();
   return { status: r.status, out: line ? JSON.parse(line) : null, stderr: r.stderr };
 };
 const parseVersion = (v) => String(v).replace(/^v/, '').split('.').map(Number);
-const atLeast = (v, min) => { const a = parseVersion(v), b = parseVersion(min); for (let i = 0; i < 3; i++) { if (a[i] > b[i]) return true; if (a[i] < b[i]) return false; } return true; };
-const supportedByContract = (v) => { const [major] = parseVersion(v); return major >= 24 || (major === 22 && atLeast(v, '22.16.0')); };
+const atLeast = (v, min) => {
+  const a = parseVersion(v),
+    b = parseVersion(min);
+  for (let i = 0; i < 3; i++) {
+    if (a[i] > b[i]) return true;
+    if (a[i] < b[i]) return false;
+  }
+  return true;
+};
+const supportedByContract = (v) => {
+  const [major] = parseVersion(v);
+  return major >= 24 || (major === 22 && atLeast(v, '22.16.0'));
+};
 
 const runtime = await import('../runtime.mjs').catch((err) => ({ missing: err.message }));
 
@@ -51,7 +76,8 @@ test('[current runtime] the support check describes this Node.js and finds the t
   assert.equal(s.ok, true, s.reason);
   assert.equal(s.hasTransactionState, true);
   assert.equal(typeof runtime.MIN_NODE, 'object');
-  assert.equal(runtime.MIN_NODE[22], '22.16.0'); assert.equal(runtime.MIN_NODE[24], '24.0.0');
+  assert.equal(runtime.MIN_NODE[22], '22.16.0');
+  assert.equal(runtime.MIN_NODE[24], '24.0.0');
   assert.doesNotThrow(() => runtime.requireRuntime());
   // The contract is what package.json advertises.
   const pkg = JSON.parse(fs.readFileSync(path.join(SERVER, 'package.json'), 'utf8'));
@@ -64,7 +90,9 @@ test(`[current runtime] ${process.version} (real): a normal save, a failed save 
   const dir = tempDir('rt-current');
   const r = runProbe(process.execPath, dir);
   assert.equal(r.status, 0, `probe exit ${r.status}: ${JSON.stringify(r.out)} ${r.stderr.slice(-300)}`);
-  assert.equal(r.out.ok, true); assert.equal(r.out.rolledBack, true); assert.equal(r.out.squadRows, 1);
+  assert.equal(r.out.ok, true);
+  assert.equal(r.out.rolledBack, true);
+  assert.equal(r.out.squadRows, 1);
   assert.ok(r.out.steps.some((s) => s.startsWith('failed-save-threw')));
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -73,7 +101,11 @@ test('[simulation] with isTransaction masked, the store refuses the runtime as u
   // A directory that does not exist yet.
   const absent = path.join(tempDir('rt-mask'), 'data');
   const r = runProbe(process.execPath, absent, { mask: true });
-  assert.equal(r.status, 3, `expected the unsupported-runtime exit (3), got ${r.status}: ${JSON.stringify(r.out)} ${r.stderr.slice(-400)}`);
+  assert.equal(
+    r.status,
+    3,
+    `expected the unsupported-runtime exit (3), got ${r.status}: ${JSON.stringify(r.out)} ${r.stderr.slice(-400)}`,
+  );
   assert.equal(r.out.error?.code, 'NODE_UNSUPPORTED');
   assert.match(r.out.error.message, /22\.16/, 'the message names the minimum release');
   assert.match(r.out.error.message, /not touched/i);
@@ -84,15 +116,21 @@ test('[simulation] with isTransaction masked, the store refuses the runtime as u
   fs.writeFileSync(path.join(existing, 'marker.txt'), 'keep me');
   const before = digestDir(existing);
   const r2 = runProbe(process.execPath, existing, { mask: true });
-  assert.equal(r2.status, 3); assert.equal(r2.out.error?.code, 'NODE_UNSUPPORTED');
+  assert.equal(r2.status, 3);
+  assert.equal(r2.out.error?.code, 'NODE_UNSUPPORTED');
   assert.equal(digestDir(existing), before, 'the existing directory is unchanged');
   assert.ok(!fs.existsSync(path.join(existing, 'scoutbox.db')), 'no database file was created');
-  fs.rmSync(path.dirname(absent), { recursive: true, force: true }); fs.rmSync(existing, { recursive: true, force: true });
+  fs.rmSync(path.dirname(absent), { recursive: true, force: true });
+  fs.rmSync(existing, { recursive: true, force: true });
 });
 
 test('[simulation] the server refuses to boot on the masked runtime: non-zero exit, NODE_UNSUPPORTED before "listening on", data directory never created', () => {
   const dir = path.join(tempDir('rt-mask-server'), 'data');
-  const r = spawnSync(process.execPath, ['--require', MASK, path.join(SERVER, 'server.mjs')], { encoding: 'utf8', env: { ...process.env, DATA_DIR: dir, PORT: '0', SCOUTBOX_QUIET_LOGS: '1' }, timeout: 30_000 });
+  const r = spawnSync(process.execPath, ['--require', MASK, path.join(SERVER, 'server.mjs')], {
+    encoding: 'utf8',
+    env: { ...process.env, DATA_DIR: dir, PORT: '0', SCOUTBOX_QUIET_LOGS: '1' },
+    timeout: 30_000,
+  });
   const log = `${r.stdout}\n${r.stderr}`;
   assert.notEqual(r.status, 0, `the server must not start: exit ${r.status}`);
   assert.match(log, /NODE_UNSUPPORTED/);
@@ -102,7 +140,10 @@ test('[simulation] the server refuses to boot on the masked runtime: non-zero ex
 });
 
 const bins = (process.env.SCOUTBOX_TEST_NODE_BINS || '').split(':').filter(Boolean);
-if (!bins.length) console.log('  (no SCOUTBOX_TEST_NODE_BINS supplied: real older-runtime checks skipped; the simulation above covers the API shape only)');
+if (!bins.length)
+  console.log(
+    '  (no SCOUTBOX_TEST_NODE_BINS supplied: real older-runtime checks skipped; the simulation above covers the API shape only)',
+  );
 for (const bin of bins) {
   const version = spawnSync(bin, ['--version'], { encoding: 'utf8' }).stdout.trim();
   const expectSupported = supportedByContract(version);
@@ -111,10 +152,16 @@ for (const bin of bins) {
     const r = runProbe(bin, dir);
     if (expectSupported) {
       assert.equal(r.status, 0, `probe exit ${r.status}: ${JSON.stringify(r.out)} ${r.stderr.slice(-400)}`);
-      assert.equal(r.out.ok, true); assert.equal(r.out.rolledBack, true); assert.equal(r.out.squadRows, 1);
+      assert.equal(r.out.ok, true);
+      assert.equal(r.out.rolledBack, true);
+      assert.equal(r.out.squadRows, 1);
       assert.equal(r.out.node, version);
     } else {
-      assert.equal(r.status, 3, `expected the unsupported-runtime exit (3), got ${r.status}: ${JSON.stringify(r.out)} ${r.stderr.slice(-400)}`);
+      assert.equal(
+        r.status,
+        3,
+        `expected the unsupported-runtime exit (3), got ${r.status}: ${JSON.stringify(r.out)} ${r.stderr.slice(-400)}`,
+      );
       assert.equal(r.out.error?.code, 'NODE_UNSUPPORTED');
       assert.equal(r.out.node, version);
       assert.equal(fs.existsSync(dir), false, 'the data directory was not created');

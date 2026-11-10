@@ -17,8 +17,14 @@ import { provenanceOf } from './provenance';
 export function ProvPill({ provenance, copy }: { provenance: string; copy?: string | null }) {
   const p = provenanceOf(provenance, copy);
   return (
-    <span className={p.pillClass} title={p.note || undefined} data-provenance={provenance} data-known={p.known ? '1' : '0'}>
-      <span aria-hidden="true">{p.glyph} </span>{p.label}
+    <span
+      className={p.pillClass}
+      title={p.note || undefined}
+      data-provenance={provenance}
+      data-known={p.known ? '1' : '0'}
+    >
+      <span aria-hidden="true">{p.glyph} </span>
+      {p.label}
     </span>
   );
 }
@@ -38,47 +44,101 @@ function wallMessage(e: unknown): string {
 function eventLine(e: FpEvent): string {
   const org = (e.title as { org?: string }).org ?? e.org?.name ?? '';
   switch (e.type) {
-    case 'club_joined': return `${t('fp.evJoined')} ${org}`;
-    case 'club_left': return `${t('fp.evLeft')} ${org}`;
-    case 'club_affiliation_verified': return `${t('fp.evAffVerified')} — ${org}`;
-    case 'trial_attended': return `${t('fp.evTrial')} — ${org}`;
-    case 'trial_outcome': return `${t('fp.evTrialOutcome')} — ${org}`;
-    case 'assessment_completed': return `${t('fp.evAssessment')} — ${org}`;
-    case 'reference_received': return `${t('fp.evReference')}${(e.title as { coach?: string }).coach ? ` — ${(e.title as { coach?: string }).coach}` : ''}`;
-    case 'evidence_added': return `${t('fp.evEvidence')}: ${(e.title as { label?: string }).label ?? ''}`;
-    case 'signed': return `${t('fp.evSigned')} ${org}`;
-    case 'role_or_squad_changed': return `${t('fp.evRole')}${org ? ` — ${org}` : ''}`;
-    case 'representation_started': return `${t('fp.evRepStart')} — ${org}`;
-    case 'representation_ended': return `${t('fp.evRepEnd')} — ${org}`;
-    case 'achievement': return `${(e.title as { label?: string }).label ?? ''}`;
-    case 'position_change': return `${t('fp.evPosition')}: ${(e.title as { primary?: string }).primary ?? ''}`;
-    default: return e.type.replace(/_/g, ' ');
+    case 'club_joined':
+      return `${t('fp.evJoined')} ${org}`;
+    case 'club_left':
+      return `${t('fp.evLeft')} ${org}`;
+    case 'club_affiliation_verified':
+      return `${t('fp.evAffVerified')} — ${org}`;
+    case 'trial_attended':
+      return `${t('fp.evTrial')} — ${org}`;
+    case 'trial_outcome':
+      return `${t('fp.evTrialOutcome')} — ${org}`;
+    case 'assessment_completed':
+      return `${t('fp.evAssessment')} — ${org}`;
+    case 'reference_received':
+      return `${t('fp.evReference')}${(e.title as { coach?: string }).coach ? ` — ${(e.title as { coach?: string }).coach}` : ''}`;
+    case 'evidence_added':
+      return `${t('fp.evEvidence')}: ${(e.title as { label?: string }).label ?? ''}`;
+    case 'signed':
+      return `${t('fp.evSigned')} ${org}`;
+    case 'role_or_squad_changed':
+      return `${t('fp.evRole')}${org ? ` — ${org}` : ''}`;
+    case 'representation_started':
+      return `${t('fp.evRepStart')} — ${org}`;
+    case 'representation_ended':
+      return `${t('fp.evRepEnd')} — ${org}`;
+    case 'achievement':
+      return `${(e.title as { label?: string }).label ?? ''}`;
+    case 'position_change':
+      return `${t('fp.evPosition')}: ${(e.title as { primary?: string }).primary ?? ''}`;
+    default:
+      return e.type.replace(/_/g, ' ');
   }
 }
 
 /** Renders one recruitment passport body (drawer panel and share opener). */
-export function PassportBody({ session, p, notify, reload }: { session: Session; p: RecruitmentPassport; notify: (text: string, error?: boolean) => void; reload?: () => void }) {
+export function PassportBody({
+  session,
+  p,
+  notify,
+  reload,
+}: {
+  session: Session;
+  p: RecruitmentPassport;
+  notify: (text: string, error?: boolean) => void;
+  reload?: () => void;
+}) {
   const [showAll, setShowAll] = useState(false);
   const events = showAll ? p.timeline : p.timeline.slice(0, 8);
   return (
     <>
       <div className="badges" style={{ marginBottom: 8 }}>
-        {p.identity && <span className="pill outline-green" title={t('fp.identityCopy')}>{p.identity.label}</span>}
-        {p.status.currentClub
-          ? <span className={provPillClass(p.status.currentClub.provenance)}>{p.status.currentClub.orgName}{p.status.currentClub.since ? ` · ${t('fp.since')} ${p.status.currentClub.since}` : ''}</span>
-          : <span className="pill">{t('fp.noClub')}</span>}
+        {p.identity && (
+          <span className="pill outline-green" title={t('fp.identityCopy')}>
+            {p.identity.label}
+          </span>
+        )}
+        {p.status.currentClub ? (
+          <span className={provPillClass(p.status.currentClub.provenance)}>
+            {p.status.currentClub.orgName}
+            {p.status.currentClub.since ? ` · ${t('fp.since')} ${p.status.currentClub.since}` : ''}
+          </span>
+        ) : (
+          <span className="pill">{t('fp.noClub')}</span>
+        )}
         {p.availability && <span className="pill blue">{p.availability.replace(/_/g, ' ')}</span>}
-        {p.representation && <span className="pill gold">{t('fp.represented')}: {p.representation.agencyName}</span>}
+        {p.representation && (
+          <span className="pill gold">
+            {t('fp.represented')}: {p.representation.agencyName}
+          </span>
+        )}
       </div>
-      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>{p.note}</Hint>
+      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 8 }}>
+        {p.note}
+      </Hint>
 
       <div className="stat-grid" aria-label={t('fp.evidence')}>
-        <div className="stat"><div className="v">{p.evidence.fullMatches}</div><div className="k">{t('fp.fullMatches')}</div></div>
-        <div className="stat"><div className="v">{p.evidence.clips}</div><div className="k">{t('fp.clips')}</div></div>
-        <div className="stat"><div className="v">{p.evidence.references}</div><div className="k">{t('fp.references')}</div></div>
-        <div className="stat"><div className="v">{p.evidence.lastEvidenceDays ?? '—'}</div><div className="k">{t('fp.lastEvidence')}</div></div>
+        <div className="stat">
+          <div className="v">{p.evidence.fullMatches}</div>
+          <div className="k">{t('fp.fullMatches')}</div>
+        </div>
+        <div className="stat">
+          <div className="v">{p.evidence.clips}</div>
+          <div className="k">{t('fp.clips')}</div>
+        </div>
+        <div className="stat">
+          <div className="v">{p.evidence.references}</div>
+          <div className="k">{t('fp.references')}</div>
+        </div>
+        <div className="stat">
+          <div className="v">{p.evidence.lastEvidenceDays ?? '—'}</div>
+          <div className="k">{t('fp.lastEvidence')}</div>
+        </div>
       </div>
-      <div className="dim" style={{ fontSize: 12 }}>{p.evidence.note}</div>
+      <div className="dim" style={{ fontSize: 12 }}>
+        {p.evidence.note}
+      </div>
 
       {p.clubHistory.length > 0 && (
         <div className="section">
@@ -86,8 +146,13 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
           <div className="list-rows">
             {p.clubHistory.map((r) => (
               <div key={`${r.orgName}-${r.from}`} className="list-row">
-                <span className="grow">{r.orgName}{r.role ? ` · ${r.role}` : ''}</span>
-                <span className="dim">{r.from ?? '—'} → {r.current ? t('fp.now') : r.to ?? '—'}</span>
+                <span className="grow">
+                  {r.orgName}
+                  {r.role ? ` · ${r.role}` : ''}
+                </span>
+                <span className="dim">
+                  {r.from ?? '—'} → {r.current ? t('fp.now') : (r.to ?? '—')}
+                </span>
                 <ProvPill provenance={r.provenance} copy={r.provenanceCopy} />
               </div>
             ))}
@@ -98,13 +163,25 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
       {(p.assessments.length > 0 || p.trials.length > 0) && (
         <div className="section">
           <h4>{t('fp.ownOrg')}</h4>
-          <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('fp.ownOrgNote')}</div>
+          <div className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>
+            {t('fp.ownOrgNote')}
+          </div>
           <div className="list-rows">
             {p.assessments.map((a) => (
-              <div key={a.id} className="list-row"><span className="grow">{t('fp.assessment')} · {a.at ?? '—'}</span><span className="pill">{a.state}</span></div>
+              <div key={a.id} className="list-row">
+                <span className="grow">
+                  {t('fp.assessment')} · {a.at ?? '—'}
+                </span>
+                <span className="pill">{a.state}</span>
+              </div>
             ))}
             {p.trials.map((tr) => (
-              <div key={tr.id} className="list-row"><span className="grow">{t('fp.trial')} · {tr.date ?? '—'}</span><span className="pill">{tr.hasReport ? t('fp.reportFiled') : t('fp.reportPending')}</span></div>
+              <div key={tr.id} className="list-row">
+                <span className="grow">
+                  {t('fp.trial')} · {tr.date ?? '—'}
+                </span>
+                <span className="pill">{tr.hasReport ? t('fp.reportFiled') : t('fp.reportPending')}</span>
+              </div>
             ))}
           </div>
         </div>
@@ -117,11 +194,25 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
             {p.references.map((r) => (
               <div key={r.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <span className="grow"><b>{r.coachName}</b> <span className="dim">{r.roleAtTime ?? ''} · {r.orgName}{r.fromYear ? ` · ${r.fromYear}–${r.toYear ?? ''}` : ''}</span></span>
-                  <span className="pill blue" title={r.provenanceCopy}>{t('fp.provCoach')}</span>
+                  <span className="grow">
+                    <b>{r.coachName}</b>{' '}
+                    <span className="dim">
+                      {r.roleAtTime ?? ''} · {r.orgName}
+                      {r.fromYear ? ` · ${r.fromYear}–${r.toYear ?? ''}` : ''}
+                    </span>
+                  </span>
+                  <span className="pill blue" title={r.provenanceCopy}>
+                    {t('fp.provCoach')}
+                  </span>
                 </div>
-                {r.structured && <div className="dim" style={{ fontSize: 12.5 }}>“{r.structured.summary}”</div>}
-                <div className="dim" style={{ fontSize: 11.5 }}>{r.provenanceCopy}</div>
+                {r.structured && (
+                  <div className="dim" style={{ fontSize: 12.5 }}>
+                    “{r.structured.summary}”
+                  </div>
+                )}
+                <div className="dim" style={{ fontSize: 11.5 }}>
+                  {r.provenanceCopy}
+                </div>
               </div>
             ))}
           </div>
@@ -134,21 +225,33 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
           <div className="list-rows">
             {p.achievements.map((a) => (
               <div key={a.id} className="list-row">
-                <span className="grow"><Icon name="trophy" size={13} /> {a.title}{a.when ? ` (${a.when})` : ''}</span>
+                <span className="grow">
+                  <Icon name="trophy" size={13} /> {a.title}
+                  {a.when ? ` (${a.when})` : ''}
+                </span>
                 <ProvPill provenance={a.provenance} copy={a.provenanceCopy} />
                 {!a.confirmedBy && reload && (
-                  <button aria-label={`${t('fp.confirm')} ${a.title}`} onClick={async () => {
-                    try {
-                      await m15.confirmAchievement(session, p.player.id, a.id);
-                      notify(t('fp.confirmed'));
-                      reload();
-                    } catch (e) { notify(wallMessage(e), true); }
-                  }}>{t('fp.confirm')}</button>
+                  <button
+                    aria-label={`${t('fp.confirm')} ${a.title}`}
+                    onClick={async () => {
+                      try {
+                        await m15.confirmAchievement(session, p.player.id, a.id);
+                        notify(t('fp.confirmed'));
+                        reload();
+                      } catch (e) {
+                        notify(wallMessage(e), true);
+                      }
+                    }}
+                  >
+                    {t('fp.confirm')}
+                  </button>
                 )}
               </div>
             ))}
           </div>
-          <div className="dim" style={{ fontSize: 12 }}>{t('fp.confirmNote')}</div>
+          <div className="dim" style={{ fontSize: 12 }}>
+            {t('fp.confirmNote')}
+          </div>
         </div>
       )}
 
@@ -157,7 +260,9 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
         <div className="list-rows">
           {events.map((e) => (
             <div key={e.id} className="list-row">
-              <span className="dim" style={{ minWidth: 84 }}>{e.when.display}</span>
+              <span className="dim" style={{ minWidth: 84 }}>
+                {e.when.display}
+              </span>
               <span className="grow">{eventLine(e)}</span>
               <ProvPill provenance={e.provenance} copy={e.provenanceCopy} />
             </div>
@@ -174,7 +279,15 @@ export function PassportBody({ session, p, notify, reload }: { session: Session;
 }
 
 /** Drawer panel: loads this org's projection for one player. */
-export function FootballPassportPanel({ session, playerId, notify }: { session: Session; playerId: string; notify: (text: string, error?: boolean) => void }) {
+export function FootballPassportPanel({
+  session,
+  playerId,
+  notify,
+}: {
+  session: Session;
+  playerId: string;
+  notify: (text: string, error?: boolean) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [p, setP] = useState<RecruitmentPassport | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -183,14 +296,21 @@ export function FootballPassportPanel({ session, playerId, notify }: { session: 
     if (!open) return;
     let live = true;
     setErr(null);
-    m15.passport(session, playerId).then((x) => live && setP(x)).catch((e) => live && setErr(wallMessage(e)));
-    return () => { live = false; };
+    m15
+      .passport(session, playerId)
+      .then((x) => live && setP(x))
+      .catch((e) => live && setErr(wallMessage(e)));
+    return () => {
+      live = false;
+    };
   }, [session, playerId, open, bump]);
   return (
     <div className="section" aria-label={t('fp.title')}>
       <h4>
         {t('fp.title')}{' '}
-        <button style={{ marginLeft: 8 }} onClick={() => setOpen((x) => !x)}>{open ? t('fp.hide') : t('fp.show')}</button>
+        <button style={{ marginLeft: 8 }} onClick={() => setOpen((x) => !x)}>
+          {open ? t('fp.hide') : t('fp.show')}
+        </button>
       </h4>
       {open && err && <div className="notice block">{err}</div>}
       {open && !err && !p && <div className="dim">…</div>}
@@ -209,10 +329,16 @@ export function SummaryChips({ s }: { s: FpSummary | undefined }) {
           {s.currentClub.name}
         </span>
       )}
-      <span className={`pill ${s.evidenceCoverage === 'strong' ? 'green' : s.evidenceCoverage === 'moderate' ? 'blue' : ''}`}>
+      <span
+        className={`pill ${s.evidenceCoverage === 'strong' ? 'green' : s.evidenceCoverage === 'moderate' ? 'blue' : ''}`}
+      >
         {t('fp.coverage')}: {t(`fp.cov.${s.evidenceCoverage}`)}
       </span>
-      {s.references > 0 && <span className="pill">{s.references} {t('fp.refsShort')}</span>}
+      {s.references > 0 && (
+        <span className="pill">
+          {s.references} {t('fp.refsShort')}
+        </span>
+      )}
     </>
   );
 }
@@ -223,37 +349,90 @@ export function usePassportSummaries(session: Session, ids: string[]): Map<strin
   const key = ids.slice(0, 100).join(',');
   useEffect(() => {
     let live = true;
-    if (!key) { setMap(new Map()); return; }
-    m15.summaries(session, key.split(','))
-      .then((items) => { if (live) setMap(new Map(items.map((i) => [i.playerId, i]))); })
-      .catch(() => { /* summaries are progressive enhancement */ });
-    return () => { live = false; };
+    if (!key) {
+      setMap(new Map());
+      return;
+    }
+    m15
+      .summaries(session, key.split(','))
+      .then((items) => {
+        if (live) setMap(new Map(items.map((i) => [i.playerId, i])));
+      })
+      .catch(() => {
+        /* summaries are progressive enhancement */
+      });
+    return () => {
+      live = false;
+    };
   }, [session, key]);
   return map;
 }
 
 /** Opens a recruitment share link pasted by a scout. The server re-runs
  *  every visibility gate — the link locates, it never authorises. */
-export function SharedPassportOpener({ session, notify }: { session: Session; notify: (text: string, error?: boolean) => void }) {
+export function SharedPassportOpener({
+  session,
+  notify,
+}: {
+  session: Session;
+  notify: (text: string, error?: boolean) => void;
+}) {
   const [input, setInput] = useState('');
   const [p, setP] = useState<RecruitmentPassport | null>(null);
   const [err, setErr] = useState<string | null>(null);
   return (
     <div className="section" aria-label={t('fp.shareOpen')}>
       <h4>{t('fp.shareOpen')}</h4>
-      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>{t('fp.shareOpenNote')}</Hint>
+      <Hint className="dim" style={{ fontSize: 12.5, marginBottom: 6 }}>
+        {t('fp.shareOpenNote')}
+      </Hint>
       <div style={{ display: 'flex', gap: 8 }}>
-        <input style={{ flex: 1 }} placeholder={t('fp.sharePlaceholder')} value={input} onChange={(e) => setInput(e.target.value)} aria-label={t('fp.sharePlaceholder')} />
-        <button className="primary" onClick={async () => {
-          setErr(null); setP(null);
-          try { setP(await m15.openShared(session, shareTokenFrom(input))); } catch (e) { setErr(wallMessage(e)); }
-        }}>{t('fp.open')}</button>
-        {p && <button onClick={() => { setP(null); setInput(''); }}>{t('fp.close')}</button>}
+        <input
+          style={{ flex: 1 }}
+          placeholder={t('fp.sharePlaceholder')}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          aria-label={t('fp.sharePlaceholder')}
+        />
+        <button
+          className="primary"
+          onClick={async () => {
+            setErr(null);
+            setP(null);
+            try {
+              setP(await m15.openShared(session, shareTokenFrom(input)));
+            } catch (e) {
+              setErr(wallMessage(e));
+            }
+          }}
+        >
+          {t('fp.open')}
+        </button>
+        {p && (
+          <button
+            onClick={() => {
+              setP(null);
+              setInput('');
+            }}
+          >
+            {t('fp.close')}
+          </button>
+        )}
       </div>
-      {err && <div className="notice block" style={{ marginTop: 8 }}>{err}</div>}
+      {err && (
+        <div className="notice block" style={{ marginTop: 8 }}>
+          {err}
+        </div>
+      )}
       {p && (
         <div style={{ marginTop: 10 }}>
-          <h4>{p.player.name} <span className="dim">· {p.player.age}{p.player.position ? ` · ${p.player.position}` : ''}</span></h4>
+          <h4>
+            {p.player.name}{' '}
+            <span className="dim">
+              · {p.player.age}
+              {p.player.position ? ` · ${p.player.position}` : ''}
+            </span>
+          </h4>
           <PassportBody session={session} p={p} notify={notify} />
         </div>
       )}

@@ -3,9 +3,7 @@
  * and are counted ("2 of 3 met"), never turned into a percentage, rank or score: a count of the club's own criteria
  * is a fact, a score would be a judgement.
  */
-import {
-  POSITIONS, TRUST_BANDS, EVIDENCE_REQUIREMENTS, PROHIBITED_BRIEF_FIELDS,
-} from '../shared.mjs';
+import { POSITIONS, TRUST_BANDS, EVIDENCE_REQUIREMENTS, PROHIBITED_BRIEF_FIELDS } from '../shared.mjs';
 
 /** Bump when the meaning of a criterion changes, even if its shape does not: a stored explanation is only
  *  comparable to a new one at the same policy version. */
@@ -54,16 +52,16 @@ export const CRITERION_TYPES = {
     label: 'Age',
     validate: (c) => {
       const nums = c.operator === 'between' ? c.values : [c.value];
-      if (nums.some((n) => !Number.isInteger(Number(n)) || Number(n) < 5 || Number(n) > 60)) return 'CRITERION_VALUE_OUT_OF_RANGE';
+      if (nums.some((n) => !Number.isInteger(Number(n)) || Number(n) < 5 || Number(n) > 60))
+        return 'CRITERION_VALUE_OUT_OF_RANGE';
       if (c.operator === 'between') {
         if (!Array.isArray(c.values) || c.values.length !== 2) return 'CRITERION_RANGE_INVALID';
         if (Number(c.values[0]) > Number(c.values[1])) return 'CRITERION_RANGE_INVALID';
       }
       return null;
     },
-    normalise: (c) => (c.operator === 'between'
-      ? { values: [Number(c.values[0]), Number(c.values[1])] }
-      : { value: Number(c.value) }),
+    normalise: (c) =>
+      c.operator === 'between' ? { values: [Number(c.values[0]), Number(c.values[1])] } : { value: Number(c.value) },
   },
   geography: {
     operators: ['within_radius'],
@@ -88,7 +86,8 @@ export const CRITERION_TYPES = {
       return null;
     },
     normalise: (c, { orgLevel }) => {
-      if (c.operator === 'in') return { values: uniqStrings(c.values).filter((v) => orgLevel !== 'grassroots' || v !== 'pro') };
+      if (c.operator === 'in')
+        return { values: uniqStrings(c.values).filter((v) => orgLevel !== 'grassroots' || v !== 'pro') };
       return { value: orgLevel === 'grassroots' && c.value === 'pro' ? 'semi_pro' : String(c.value) };
     },
   },
@@ -172,7 +171,9 @@ export const LIMITS = {
 const uniqStrings = (v) => (Array.isArray(v) ? [...new Set(v.map((x) => String(x)))] : []);
 
 export const isProhibitedCriterion = (type) => {
-  const k = String(type ?? '').toLowerCase().replace(/[^a-z]+/g, '_');
+  const k = String(type ?? '')
+    .toLowerCase()
+    .replace(/[^a-z]+/g, '_');
   return PROHIBITED_BRIEF_FIELDS.some((p) => k === p || k.includes(p));
 };
 
@@ -186,14 +187,21 @@ export function validateCriteria(input = {}, { orgLevel = 'pro', protocols = nul
   ];
 
   if (raw.length > LIMITS.maxCriteria) {
-    return { ok: false, error: 'CRITERIA_TOO_MANY', limit: LIMITS.maxCriteria, message: `A criteria set may hold at most ${LIMITS.maxCriteria} criteria.` };
+    return {
+      ok: false,
+      error: 'CRITERIA_TOO_MANY',
+      limit: LIMITS.maxCriteria,
+      message: `A criteria set may hold at most ${LIMITS.maxCriteria} criteria.`,
+    };
   }
 
   // Refused first, with its own code, so the refusal is unambiguous in an audit.
   const prohibited = raw.map((c) => c.type).filter(isProhibitedCriterion);
   if (prohibited.length) {
     return {
-      ok: false, error: 'CRITERION_PROHIBITED', prohibited: [...new Set(prohibited.map(String))],
+      ok: false,
+      error: 'CRITERION_PROHIBITED',
+      prohibited: [...new Set(prohibited.map(String))],
       message: 'Players can never be matched on a protected characteristic.',
     };
   }
@@ -202,11 +210,23 @@ export function validateCriteria(input = {}, { orgLevel = 'pro', protocols = nul
   for (const [i, c] of raw.entries()) {
     const where = { index: i, class: c.class, type: c.type ?? null };
     const def = CRITERION_TYPES[c.type];
-    if (!def) { details.push({ ...where, error: 'CRITERION_TYPE_UNKNOWN' }); continue; }
-    if (!OPERATOR_NAMES.includes(c.operator)) { details.push({ ...where, error: 'CRITERION_OPERATOR_UNKNOWN' }); continue; }
-    if (!def.operators.includes(c.operator)) { details.push({ ...where, error: 'CRITERION_OPERATOR_NOT_SUPPORTED', supported: def.operators }); continue; }
+    if (!def) {
+      details.push({ ...where, error: 'CRITERION_TYPE_UNKNOWN' });
+      continue;
+    }
+    if (!OPERATOR_NAMES.includes(c.operator)) {
+      details.push({ ...where, error: 'CRITERION_OPERATOR_UNKNOWN' });
+      continue;
+    }
+    if (!def.operators.includes(c.operator)) {
+      details.push({ ...where, error: 'CRITERION_OPERATOR_NOT_SUPPORTED', supported: def.operators });
+      continue;
+    }
     const problem = def.validate(c, { orgLevel, protocols });
-    if (problem) { details.push({ ...where, error: problem }); continue; }
+    if (problem) {
+      details.push({ ...where, error: problem });
+      continue;
+    }
 
     const body = def.normalise(c, { orgLevel, protocols });
     const id = criterionId(c.type, c.operator, body);
@@ -227,7 +247,9 @@ export function validateCriteria(input = {}, { orgLevel = 'pro', protocols = nul
 
 /** Same test, same id, whatever the key order. */
 export function criterionId(type, operator, body = {}) {
-  const parts = Object.keys(body).sort().map((k) => `${k}=${Array.isArray(body[k]) ? [...body[k]].sort().join('|') : body[k]}`);
+  const parts = Object.keys(body)
+    .sort()
+    .map((k) => `${k}=${Array.isArray(body[k]) ? [...body[k]].sort().join('|') : body[k]}`);
   return `${type}:${operator}${parts.length ? `:${parts.join(',')}` : ''}`;
 }
 
@@ -235,7 +257,11 @@ export function criterionId(type, operator, body = {}) {
 export function criteriaVersion(criteria = {}) {
   const hit = VERSION_MEMO.get(criteria);
   if (hit) return hit;
-  const line = (list = []) => list.map((c) => c.id).sort().join(';');
+  const line = (list = []) =>
+    list
+      .map((c) => c.id)
+      .sort()
+      .join(';');
   const v = `cv1:${hash32(`${line(criteria.required)}#${line(criteria.preferred)}`)}`;
   VERSION_MEMO.set(criteria, v);
   return v;
@@ -249,25 +275,42 @@ const VERSION_MEMO = new WeakMap();
 
 function hash32(s) {
   let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
   return h.toString(16).padStart(8, '0');
 }
 
 export function describeCriteria(criteria = {}) {
   const one = (c) => {
     switch (c.type) {
-      case 'position': return `${c.values.join(' / ')}${c.primaryOnly ? ' (primary)' : ''}`;
-      case 'age': return c.operator === 'between' ? `${c.values[0]}–${c.values[1]}` : `age ${c.operator === 'gte' ? '≥' : '≤'} ${c.value}`;
-      case 'geography': return `within ${c.value} km`;
-      case 'level': return c.operator === 'in' ? c.values.join(' / ') : `up to ${c.value}`;
-      case 'foot': return c.values.join(' / ');
-      case 'availability': return c.value;
-      case 'evidence': return EVIDENCE_REQUIREMENTS.find((r) => r.key === c.value)?.label ?? c.value;
-      case 'evidence_recency': return `evidence within ${c.value} days`;
-      case 'trust_band': return `${c.value.replace(/_/g, ' ')} or higher`;
-      case 'combine_result': return `${c.value} result available`;
-      case 'combine_measurement': return `${c.protocol} ${c.operator === 'gte' ? '≥' : '≤'} ${c.value}`;
-      default: return c.type;
+      case 'position':
+        return `${c.values.join(' / ')}${c.primaryOnly ? ' (primary)' : ''}`;
+      case 'age':
+        return c.operator === 'between'
+          ? `${c.values[0]}–${c.values[1]}`
+          : `age ${c.operator === 'gte' ? '≥' : '≤'} ${c.value}`;
+      case 'geography':
+        return `within ${c.value} km`;
+      case 'level':
+        return c.operator === 'in' ? c.values.join(' / ') : `up to ${c.value}`;
+      case 'foot':
+        return c.values.join(' / ');
+      case 'availability':
+        return c.value;
+      case 'evidence':
+        return EVIDENCE_REQUIREMENTS.find((r) => r.key === c.value)?.label ?? c.value;
+      case 'evidence_recency':
+        return `evidence within ${c.value} days`;
+      case 'trust_band':
+        return `${c.value.replace(/_/g, ' ')} or higher`;
+      case 'combine_result':
+        return `${c.value} result available`;
+      case 'combine_measurement':
+        return `${c.protocol} ${c.operator === 'gte' ? '≥' : '≤'} ${c.value}`;
+      default:
+        return c.type;
     }
   };
   return {

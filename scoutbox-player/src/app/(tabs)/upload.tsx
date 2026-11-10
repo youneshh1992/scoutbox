@@ -60,8 +60,16 @@ export default function Upload() {
   const [programme, setProgramme] = useState<ProgrammeInfo | null>(null);
 
   useEffect(() => {
-    if (playerId) client.getDrills(playerId).then(setDrills).catch(() => {});
-    if (playerId && me?.pathway) client.getProgramme(playerId).then(setProgramme).catch(() => setProgramme(null));
+    if (playerId)
+      client
+        .getDrills(playerId)
+        .then(setDrills)
+        .catch(() => {});
+    if (playerId && me?.pathway)
+      client
+        .getProgramme(playerId)
+        .then(setProgramme)
+        .catch(() => setProgramme(null));
   }, [playerId, me]);
   const [fixture, setFixture] = useState('');
   const [venue, setVenue] = useState('');
@@ -78,8 +86,15 @@ export default function Upload() {
 
   const chooseFile = async () => {
     const picked = await pickVideoFile();
-    if (!picked) return say(Platform.OS === 'web' ? 'No file chosen.' : 'File picking is web-only in this prototype — native uses the camera roll in production.', true);
-    if (picked.name.startsWith('TOO_LARGE:')) return say('That file is over the 12MB prototype cap — trim the clip and retry.', true);
+    if (!picked)
+      return say(
+        Platform.OS === 'web'
+          ? 'No file chosen.'
+          : 'File picking is web-only in this prototype — native uses the camera roll in production.',
+        true,
+      );
+    if (picked.name.startsWith('TOO_LARGE:'))
+      return say('That file is over the 12MB prototype cap — trim the clip and retry.', true);
     setPickedFile(picked);
     if (!mediaTitle.trim()) setMediaTitle(picked.name.replace(/\.[^.]+$/, ''));
     say(`Selected ${picked.name} — add a title and upload.`);
@@ -88,15 +103,24 @@ export default function Upload() {
   const uploadMedia = async () => {
     if (!mediaTitle.trim()) return say('Give the clip a title.', true);
     try {
-      await client.addMedia(playerId, mediaTitle.trim(), pickedFile?.dataUrl || undefined, linkAttendanceId ?? undefined);
+      await client.addMedia(
+        playerId,
+        mediaTitle.trim(),
+        pickedFile?.dataUrl || undefined,
+        linkAttendanceId ?? undefined,
+      );
       const verified = !!linkAttendanceId && !!pickedFile;
       setMediaTitle('');
       setPickedFile(null);
       setLinkAttendanceId(null);
       await refresh();
-      say(verified
-        ? 'Verified Clip uploaded — provably filmed at a confirmed fixture. Clubs see the seal.'
-        : pickedFile ? 'Video uploaded — clubs can watch it now, and it nudges your Trust Score.' : 'Added — attach a video file next time so clubs can watch it.');
+      say(
+        verified
+          ? 'Verified Clip uploaded — provably filmed at a confirmed fixture. Clubs see the seal.'
+          : pickedFile
+            ? 'Video uploaded — clubs can watch it now, and it nudges your Trust Score.'
+            : 'Added — attach a video file next time so clubs can watch it.',
+      );
     } catch (e) {
       say(e instanceof Error ? e.message : 'Upload failed', true);
     }
@@ -112,8 +136,16 @@ export default function Upload() {
     if (!fixture.trim() || !venue.trim() || !date.trim()) return say('Fixture, venue and date are all required.', true);
     if (!gps) return say('Capture GPS + device first — attendance must be verifiable.', true);
     try {
-      await client.addAttendance(playerId, { fixture: fixture.trim(), venue: venue.trim(), date, gps, deviceId: 'device-prototype' });
-      setFixture(''); setVenue(''); setGps(null);
+      await client.addAttendance(playerId, {
+        fixture: fixture.trim(),
+        venue: venue.trim(),
+        date,
+        gps,
+        deviceId: 'device-prototype',
+      });
+      setFixture('');
+      setVenue('');
+      setGps(null);
       await refresh();
       say('Verified attendance logged — Trust Score raised.');
     } catch (e) {
@@ -139,7 +171,11 @@ export default function Upload() {
         <Card>
           <SectionTitle>Add match footage</SectionTitle>
           <Row>
-            <Button small label={pickedFile ? `${pickedFile.name.slice(0, 28)}` : 'Choose video file'} onPress={chooseFile} />
+            <Button
+              small
+              label={pickedFile ? `${pickedFile.name.slice(0, 28)}` : 'Choose video file'}
+              onPress={chooseFile}
+            />
             {pickedFile && <Pill label="Ready" tone="green" />}
           </Row>
           <TextInput
@@ -168,14 +204,19 @@ export default function Upload() {
             </>
           )}
           <Button primary label={linkAttendanceId ? 'Upload as Verified Clip' : 'Upload clip'} onPress={uploadMedia} />
-          {me && <GuidanceNote icon="info" size={12.5}>{me.media.length} clip{me.media.length === 1 ? '' : 's'} on your profile. Titles are screened — no contact details.</GuidanceNote>}
+          {me && (
+            <GuidanceNote icon="info" size={12.5}>
+              {me.media.length} clip{me.media.length === 1 ? '' : 's'} on your profile. Titles are screened — no contact
+              details.
+            </GuidanceNote>
+          )}
         </Card>
 
         <Card>
           <SectionTitle>Edit season stats</SectionTitle>
           <Muted size={12.5}>
-            Leave the season blank to update this season, or name a past one (e.g. 2024/25) to build
-            your season-by-season record.
+            Leave the season blank to update this season, or name a past one (e.g. 2024/25) to build your
+            season-by-season record.
           </Muted>
           <View style={{ gap: 4, maxWidth: 160 }}>
             <Muted size={11.5}>Season (optional)</Muted>
@@ -208,7 +249,8 @@ export default function Upload() {
             onPress={async () => {
               const updates: Record<string, number> = {};
               for (const f of STAT_FIELDS) {
-                if (statDraft[f.key] !== undefined && statDraft[f.key] !== '') updates[f.key] = Number(statDraft[f.key]);
+                if (statDraft[f.key] !== undefined && statDraft[f.key] !== '')
+                  updates[f.key] = Number(statDraft[f.key]);
               }
               if (!Object.keys(updates).length) return say('Change at least one stat first.', true);
               try {
@@ -216,7 +258,11 @@ export default function Upload() {
                 setStatDraft({});
                 setSeasonDraft('');
                 await refresh();
-                say(seasonDraft.trim() ? `Filed under ${seasonDraft.trim()} in your season history.` : 'Stats saved to your profile.');
+                say(
+                  seasonDraft.trim()
+                    ? `Filed under ${seasonDraft.trim()} in your season history.`
+                    : 'Stats saved to your profile.',
+                );
               } catch (e) {
                 say(e instanceof Error ? e.message : 'Could not save stats', true);
               }
@@ -230,8 +276,8 @@ export default function Upload() {
             {!programme.current ? (
               <>
                 <GuidanceNote icon="info" size={12.5}>
-                  Academy players get coaches — you get this. Free, position-specific, and every session
-                  feeds your streak and weekly goal. Pick your track:
+                  Academy players get coaches — you get this. Free, position-specific, and every session feeds your
+                  streak and weekly goal. Pick your track:
                 </GuidanceNote>
                 <Row>
                   {programme.tracks.map((t) => (
@@ -245,7 +291,9 @@ export default function Upload() {
                           await client.selectProgramme(playerId, t.key);
                           setProgramme(await client.getProgramme(playerId));
                           say('Track selected — first session is waiting below.');
-                        } catch (e) { say(e instanceof Error ? e.message : 'Could not start', true); }
+                        } catch (e) {
+                          say(e instanceof Error ? e.message : 'Could not start', true);
+                        }
                       }}
                     />
                   ))}
@@ -264,22 +312,31 @@ export default function Upload() {
                   <Row key={sesh.id} style={{ justifyContent: 'space-between' }}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: sesh.done ? colors.muted : colors.text, fontSize: 13.5 }}>
-                        {sesh.done ? 'Done · ' : ''}{sesh.day} — {sesh.title}
+                        {sesh.done ? 'Done · ' : ''}
+                        {sesh.day} — {sesh.title}
                       </Text>
                     </View>
                     {!sesh.done && (
-                      <Button small label="Done" onPress={async () => {
-                        try {
-                          await client.completeProgrammeSession(playerId, sesh.id);
-                          setProgramme(await client.getProgramme(playerId));
-                          await refresh();
-                          say('Session logged — it counts toward your streak and weekly goal.');
-                        } catch (e) { say(e instanceof Error ? e.message : 'Could not log', true); }
-                      }} />
+                      <Button
+                        small
+                        label="Done"
+                        onPress={async () => {
+                          try {
+                            await client.completeProgrammeSession(playerId, sesh.id);
+                            setProgramme(await client.getProgramme(playerId));
+                            await refresh();
+                            say('Session logged — it counts toward your streak and weekly goal.');
+                          } catch (e) {
+                            say(e instanceof Error ? e.message : 'Could not log', true);
+                          }
+                        }}
+                      />
                     )}
                   </Row>
                 ))}
-                <GuidanceNote icon="info" size={11.5}>Sessions with a matching drill count double when you record the drill below with video.</GuidanceNote>
+                <GuidanceNote icon="info" size={11.5}>
+                  Sessions with a matching drill count double when you record the drill below with video.
+                </GuidanceNote>
               </>
             )}
           </Card>
@@ -289,18 +346,23 @@ export default function Upload() {
           <SectionTitle>At-home combine</SectionTitle>
           <Muted size={12.5}>
             Standardised drills with a measurable number. Record it on video and the result is
-            <Text style={{ color: colors.accentText }}> combine-verified</Text> — real numbers clubs can trust,
-            from anywhere.
+            <Text style={{ color: colors.accentText }}> combine-verified</Text> — real numbers clubs can trust, from
+            anywhere.
           </Muted>
           {drills.map((d) => (
             <View key={d.id} style={{ gap: 6, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <Text style={{ color: colors.text, fontSize: 13.5, fontWeight: '600', flex: 1 }}>{d.name}</Text>
-                {d.best
-                  ? <Pill label={`best ${d.best.value}${d.unit}${d.best.verified ? ' ' : ''}`} tone="green" />
-                  : d.completed ? <Pill label="Done" tone="blue" /> : null}
+                {d.best ? (
+                  <Pill label={`best ${d.best.value}${d.unit}${d.best.verified ? ' ' : ''}`} tone="green" />
+                ) : d.completed ? (
+                  <Pill label="Done" tone="blue" />
+                ) : null}
               </Row>
-              <Muted size={11.5}>{d.metric} · benchmark {d.benchmark}{d.unit}</Muted>
+              <Muted size={11.5}>
+                {d.metric} · benchmark {d.benchmark}
+                {d.unit}
+              </Muted>
               <Row>
                 <TextInput
                   style={[styles.input, { flex: 1, paddingVertical: 6 }]}
@@ -310,29 +372,42 @@ export default function Upload() {
                   value={drillValues[d.id] ?? ''}
                   onChangeText={(v) => setDrillValues({ ...drillValues, [d.id]: v })}
                 />
-                <Button small label={drillVideos[d.id] ? 'Attached' : 'Attach'} onPress={async () => {
-                  const picked = await pickVideoFile();
-                  if (picked && !picked.name.startsWith('TOO_LARGE:')) {
-                    setDrillVideos({ ...drillVideos, [d.id]: picked.dataUrl });
-                    say('Drill video attached — result will be combine-verified.');
-                  } else if (picked) {
-                    say('That file is over the 12MB cap.', true);
-                  }
-                }} />
-                <Button small primary label="Log" onPress={async () => {
-                  const raw = drillValues[d.id];
-                  if (!raw) return say('Enter your number first.', true);
-                  try {
-                    await client.completeDrill(playerId, d.id, Number(raw), drillVideos[d.id]);
-                    setDrillValues({ ...drillValues, [d.id]: '' });
-                    setDrillVideos({ ...drillVideos, [d.id]: '' });
-                    setDrills(await client.getDrills(playerId));
-                    await refresh();
-                    say(drillVideos[d.id] ? 'Combine-verified result logged.' : 'Result logged (attach video next time to verify it).');
-                  } catch (e) {
-                    say(e instanceof Error ? e.message : 'Could not log drill', true);
-                  }
-                }} />
+                <Button
+                  small
+                  label={drillVideos[d.id] ? 'Attached' : 'Attach'}
+                  onPress={async () => {
+                    const picked = await pickVideoFile();
+                    if (picked && !picked.name.startsWith('TOO_LARGE:')) {
+                      setDrillVideos({ ...drillVideos, [d.id]: picked.dataUrl });
+                      say('Drill video attached — result will be combine-verified.');
+                    } else if (picked) {
+                      say('That file is over the 12MB cap.', true);
+                    }
+                  }}
+                />
+                <Button
+                  small
+                  primary
+                  label="Log"
+                  onPress={async () => {
+                    const raw = drillValues[d.id];
+                    if (!raw) return say('Enter your number first.', true);
+                    try {
+                      await client.completeDrill(playerId, d.id, Number(raw), drillVideos[d.id]);
+                      setDrillValues({ ...drillValues, [d.id]: '' });
+                      setDrillVideos({ ...drillVideos, [d.id]: '' });
+                      setDrills(await client.getDrills(playerId));
+                      await refresh();
+                      say(
+                        drillVideos[d.id]
+                          ? 'Combine-verified result logged.'
+                          : 'Result logged (attach video next time to verify it).',
+                      );
+                    } catch (e) {
+                      say(e instanceof Error ? e.message : 'Could not log drill', true);
+                    }
+                  }}
+                />
               </Row>
             </View>
           ))}
@@ -344,34 +419,57 @@ export default function Upload() {
             ScoutBox confirms you were physically at the fixture — venue, date, GPS and device data together.
             That&apos;s why verified attendance carries real weight with clubs.
           </Muted>
-          <TextInput style={styles.input} placeholder="Fixture (e.g. County Cup semi-final)" placeholderTextColor={colors.muted} value={fixture} onChangeText={setFixture} />
-          <TextInput style={styles.input} placeholder="Venue" placeholderTextColor={colors.muted} value={venue} onChangeText={setVenue} />
-          <TextInput style={styles.input} placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.muted} value={date} onChangeText={setDate} />
+          <TextInput
+            style={styles.input}
+            placeholder="Fixture (e.g. County Cup semi-final)"
+            placeholderTextColor={colors.muted}
+            value={fixture}
+            onChangeText={setFixture}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Venue"
+            placeholderTextColor={colors.muted}
+            value={venue}
+            onChangeText={setVenue}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Date (YYYY-MM-DD)"
+            placeholderTextColor={colors.muted}
+            value={date}
+            onChangeText={setDate}
+          />
           <Row>
             <Button small label={gps ? 'GPS + device captured' : 'Capture GPS + device'} onPress={captureGps} />
             {gps && <Pill label={`${gps.lat.toFixed(3)}, ${gps.lng.toFixed(3)}`} tone="green" />}
           </Row>
           <Button primary label="Log attendance" onPress={logAttendance} />
         </Card>
-        {playerId ? <CampaignsSection actor={{ kind: 'player', id: playerId }} mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))} /> : null}
+        {playerId ? (
+          <CampaignsSection
+            actor={{ kind: 'player', id: playerId }}
+            mediaOptions={(me?.media ?? []).map((m) => ({ id: m.id, title: m.title }))}
+          />
+        ) : null}
         {playerId ? <ResumableUploadCard playerId={playerId} onDone={refresh} /> : null}
-
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const makeStyles = (colors: Palette) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  input: {
-    backgroundColor: colors.bg2,
-    borderColor: colors.line,
-    borderWidth: 1,
-    borderRadius: 10,
-    color: colors.text,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-  },
-});
+const makeStyles = (colors: Palette) =>
+  StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.bg },
+    scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
+    input: {
+      backgroundColor: colors.bg2,
+      borderColor: colors.line,
+      borderWidth: 1,
+      borderRadius: 10,
+      color: colors.text,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      fontSize: 15,
+    },
+  });

@@ -92,51 +92,185 @@ const leadOrVer = (ctx: NavContext) => isLeadRole(ctx.role) || ctx.verLevel !== 
 // too; Network (one page) folds into Club. Grouping moves no route.
 export const NAV_SECTIONS: NavSection[] = [
   {
-    id: 'home', labelKey: 'navsec.home', icon: 'home',
+    id: 'home',
+    labelKey: 'navsec.home',
+    icon: 'home',
     children: [{ id: 'feed', labelKey: 'nav.feed', aliases: ['dashboard', 'accueil', 'home'] }],
   },
   {
-    id: 'players', labelKey: 'navsec.players', icon: 'user',
+    id: 'players',
+    labelKey: 'navsec.players',
+    icon: 'user',
     children: [
-      { id: 'squad', labelKey: 'nav.squad', shortKey: 'navshort.squad', aliases: ['squad', 'match days', 'team', 'effectif', 'équipe'] },
+      {
+        id: 'squad',
+        labelKey: 'nav.squad',
+        shortKey: 'navshort.squad',
+        aliases: ['squad', 'match days', 'team', 'effectif', 'équipe'],
+      },
       { id: 'coaches', labelKey: 'nav.coaches', aliases: ['coach', 'staff coaches', 'entraîneurs'] },
       { id: 'friendlies', labelKey: 'nav.friendlies', aliases: ['friendly matches', 'amicaux'] },
       { id: 'fixtures', labelKey: 'nav.fixtures', aliases: ['matches', 'schedule', 'rencontres'] },
     ],
   },
   {
-    id: 'recruitment', labelKey: 'navsec.recruitment', icon: 'target',
+    id: 'recruitment',
+    labelKey: 'navsec.recruitment',
+    icon: 'target',
     // Order = display order. The groups below name the same ids and nothing
     // else; `validateNavConfig` refuses a child in zero or two groups.
     children: [
       // — Discover
-      { id: 'search', labelKey: 'nav2.search', aliases: ['players', 'player search', 'find players', 'discover', 'joueurs', 'recherche'] },
+      {
+        id: 'search',
+        labelKey: 'nav2.search',
+        aliases: ['players', 'player search', 'find players', 'discover', 'joueurs', 'recherche'],
+      },
       { id: 'shortlist', labelKey: 'nav.shortlist', aliases: ['watchlist', 'saved players', 'présélection'] },
       { id: 'filmroom', labelKey: 'nav.filmroom', aliases: ['film', 'clips', 'footage', 'vidéo'] },
-      { id: 'insight', labelKey: 'nav.insight', shortKey: 'navshort.insight', aliases: ['scouting insight', 'analyse'] },
+      {
+        id: 'insight',
+        labelKey: 'nav.insight',
+        shortKey: 'navshort.insight',
+        aliases: ['scouting insight', 'analyse'],
+      },
       // — Pipeline (Open Days are how grassroots recruits, so they sit here)
-      { id: 'recruitment', labelKey: 'nav2.recruitment', primary: true, aliases: ['pipeline', 'applications', 'recrutement'] },
-      { id: 'rooms', labelKey: 'nav2.rooms', primary: true, shortKey: 'navshort.rooms', aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'] },
-      { id: 'requests', labelKey: 'nav2.requests', primary: true, shortKey: 'navshort.requests', aliases: ['player requests', 'contact requests', 'demandes'] },
+      {
+        id: 'recruitment',
+        labelKey: 'nav2.recruitment',
+        primary: true,
+        aliases: ['pipeline', 'applications', 'recrutement'],
+      },
+      {
+        id: 'rooms',
+        labelKey: 'nav2.rooms',
+        primary: true,
+        shortKey: 'navshort.rooms',
+        aliases: ['recruitment rooms', 'room', 'rooms', 'workspace', 'salles'],
+      },
+      {
+        id: 'requests',
+        labelKey: 'nav2.requests',
+        primary: true,
+        shortKey: 'navshort.requests',
+        aliases: ['player requests', 'contact requests', 'demandes'],
+      },
       { id: 'opportunities', labelKey: 'nav.opportunities', aliases: ['open roles', 'positions', 'opportunités'] },
       { id: 'campaigns', labelKey: 'nav.campaigns', aliases: ['campagnes'] },
-      { id: 'opendays', labelKey: 'nav.opendays', shortKey: 'navshort.opendays', aliases: ['open days', 'portes ouvertes'] },
-      { id: 'outcomes', labelKey: 'nav2.outcomes', shortKey: 'navshort.outcomes', aliases: ['signings', 'post-signing', 'signatures'] },
+      {
+        id: 'opendays',
+        labelKey: 'nav.opendays',
+        shortKey: 'navshort.opendays',
+        aliases: ['open days', 'portes ouvertes'],
+      },
+      {
+        id: 'outcomes',
+        labelKey: 'nav2.outcomes',
+        shortKey: 'navshort.outcomes',
+        aliases: ['signings', 'post-signing', 'signatures'],
+      },
       // — Evidence
-      { id: 'assessments', labelKey: 'nav.assessments', aliases: ['reports', 'scouting reports', 'évaluations', 'rapports'] },
-      { id: 'video', labelKey: 'nav2.video', shortKey: 'navshort.video', aliases: ['evidence', 'video workspace', 'preuves'] },
-      { id: 'trials', labelKey: 'nav.trials', shortKey: 'navshort.trials', aliases: ['trial', 'trial reports', 'essais'] },
+      {
+        id: 'assessments',
+        labelKey: 'nav.assessments',
+        aliases: ['reports', 'scouting reports', 'évaluations', 'rapports'],
+      },
+      {
+        id: 'video',
+        labelKey: 'nav2.video',
+        shortKey: 'navshort.video',
+        aliases: ['evidence', 'video workspace', 'preuves'],
+      },
+      {
+        id: 'trials',
+        labelKey: 'nav.trials',
+        shortKey: 'navshort.trials',
+        aliases: ['trial', 'trial reports', 'essais'],
+      },
       { id: 'trialdays', labelKey: 'nav.trialdays', aliases: ['trial days', 'journées d’essai'] },
       // — Intelligence (none is a ranking)
-      { id: 'briefs', labelKey: 'nav2.briefs', primary: true, shortKey: 'navshort.briefs', aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'] },
-      { id: 'matching', labelKey: 'nav2.matching', primary: true, shortKey: 'navshort.matching', aliases: ['player matching', 'explainable matching', 'match criteria', 'who matches', 'why this player matches', 'correspondance', 'critères de correspondance'] },
-      { id: 'watchlists', labelKey: 'nav2.watchlists', primary: true, shortKey: 'navshort.watchlists', aliases: ['dynamic watchlists', 'dynamic watchlist', 'saved criteria', 'listes dynamiques', 'critères enregistrés'] },
-      { id: 'secondlook', labelKey: 'nav2.secondlook', aliases: ['second look', 'worth another look', 'evidence changed', 'reconsider', 'second regard', 'nouveau regard'] },
-      { id: 'nobodymissed', labelKey: 'nav2.nobodymissed', shortKey: 'navshort.nobodymissed', aliases: ['nobody missed', 'evaluation coverage', 'coverage gaps', 'not yet evaluated', 'couverture d’évaluation'] },
+      {
+        id: 'briefs',
+        labelKey: 'nav2.briefs',
+        primary: true,
+        shortKey: 'navshort.briefs',
+        aliases: ['recruitment briefs', 'brief', 'briefs', 'criteria', 'cahier des charges', 'briefs de recrutement'],
+      },
+      {
+        id: 'matching',
+        labelKey: 'nav2.matching',
+        primary: true,
+        shortKey: 'navshort.matching',
+        aliases: [
+          'player matching',
+          'explainable matching',
+          'match criteria',
+          'who matches',
+          'why this player matches',
+          'correspondance',
+          'critères de correspondance',
+        ],
+      },
+      {
+        id: 'watchlists',
+        labelKey: 'nav2.watchlists',
+        primary: true,
+        shortKey: 'navshort.watchlists',
+        aliases: [
+          'dynamic watchlists',
+          'dynamic watchlist',
+          'saved criteria',
+          'listes dynamiques',
+          'critères enregistrés',
+        ],
+      },
+      {
+        id: 'secondlook',
+        labelKey: 'nav2.secondlook',
+        aliases: [
+          'second look',
+          'worth another look',
+          'evidence changed',
+          'reconsider',
+          'second regard',
+          'nouveau regard',
+        ],
+      },
+      {
+        id: 'nobodymissed',
+        labelKey: 'nav2.nobodymissed',
+        shortKey: 'navshort.nobodymissed',
+        aliases: [
+          'nobody missed',
+          'evaluation coverage',
+          'coverage gaps',
+          'not yet evaluated',
+          'couverture d’évaluation',
+        ],
+      },
       // — Analytics (measures the process, never a player or a colleague)
-      { id: 'dashboard', labelKey: 'nav2.dashboard', shortKey: 'navshort.dashboard', aliases: ['director dashboard', 'recruitment analytics', 'analytics', 'pipeline health', 'how long does it take', 'stalled rooms', 'tableau de bord', 'analyse du recrutement'] },
+      {
+        id: 'dashboard',
+        labelKey: 'nav2.dashboard',
+        shortKey: 'navshort.dashboard',
+        aliases: [
+          'director dashboard',
+          'recruitment analytics',
+          'analytics',
+          'pipeline health',
+          'how long does it take',
+          'stalled rooms',
+          'tableau de bord',
+          'analyse du recrutement',
+        ],
+      },
       { id: 'funnel', labelKey: 'nav.funnel', aliases: ['recruitment funnel', 'entonnoir'] },
-      { id: 'ledger', labelKey: 'nav.ledger', shortKey: 'navshort.ledger', aliases: ['discovery ledger', 'audit trail', 'registre'] },
+      {
+        id: 'ledger',
+        labelKey: 'nav.ledger',
+        shortKey: 'navshort.ledger',
+        aliases: ['discovery ledger', 'audit trail', 'registre'],
+      },
       // — Planning: scout planning, not squad management
       { id: 'coverage', labelKey: 'nav.coverage', aliases: ['scout coverage', 'planning', 'couverture'] },
       { id: 'calibration', labelKey: 'nav.calibration', aliases: ['scout calibration', 'calibrage'] },
@@ -150,7 +284,12 @@ export const NAV_SECTIONS: NavSection[] = [
       { id: 'pipeline', labelKey: 'navgrp.pipeline', items: ['recruitment', 'rooms', 'requests', 'opportunities'] },
       { id: 'outreach', labelKey: 'navgrp.outreach', items: ['campaigns', 'opendays', 'briefs'] },
       { id: 'evaluation', labelKey: 'navgrp.evaluation', items: ['assessments', 'video', 'trials', 'trialdays'] },
-      { id: 'intelligence', labelKey: 'navgrp.intelligence', items: ['matching', 'watchlists', 'secondlook', 'nobodymissed'], stripMax: 3 },
+      {
+        id: 'intelligence',
+        labelKey: 'navgrp.intelligence',
+        items: ['matching', 'watchlists', 'secondlook', 'nobodymissed'],
+        stripMax: 3,
+      },
       { id: 'outcomes', labelKey: 'navgrp.outcomes', items: ['outcomes'] },
       { id: 'analytics', labelKey: 'navgrp.analytics', items: ['dashboard', 'funnel', 'ledger'] },
       { id: 'planning', labelKey: 'navgrp.planning', items: ['coverage', 'calibration'] },
@@ -162,19 +301,54 @@ export const NAV_SECTIONS: NavSection[] = [
     // administrative pages keep their lead / verification gates. Because the
     // section is not itself gated, a non-lead sees Club with that one child —
     // never an empty husk, because `filterSections` drops empty sections.
-    id: 'organisation', labelKey: 'navsec.club', icon: 'building',
+    id: 'organisation',
+    labelKey: 'navsec.club',
+    icon: 'building',
     children: [
-      { id: 'network', labelKey: 'nav2.network', primary: true, shortKey: 'navshort.network', aliases: ['clubs', 'groups', 'federation', 'network', 'réseau'] },
-      { id: 'organisation', labelKey: 'nav2.organisation', primary: true, shortKey: 'navshort.organisation', aliases: ['staff', 'security', 'settings', 'organisation'], visible: leadOrVer },
-      { id: 'verification', labelKey: 'nav.verification', aliases: ['verify', 'staff verification', 'club verification', 'vérification'], visible: leadOrVer },
-      { id: 'imports', labelKey: 'nav2.imports', aliases: ['integrations', 'imports', 'webhooks', 'intégrations'], visible: (c) => isLeadRole(c.role) },
-      { id: 'plan', labelKey: 'nav.plan', shortKey: 'navshort.plan', aliases: ['billing', 'compliance', 'subscription', 'abonnement'], visible: (c) => isLeadRole(c.role) },
+      {
+        id: 'network',
+        labelKey: 'nav2.network',
+        primary: true,
+        shortKey: 'navshort.network',
+        aliases: ['clubs', 'groups', 'federation', 'network', 'réseau'],
+      },
+      {
+        id: 'organisation',
+        labelKey: 'nav2.organisation',
+        primary: true,
+        shortKey: 'navshort.organisation',
+        aliases: ['staff', 'security', 'settings', 'organisation'],
+        visible: leadOrVer,
+      },
+      {
+        id: 'verification',
+        labelKey: 'nav.verification',
+        aliases: ['verify', 'staff verification', 'club verification', 'vérification'],
+        visible: leadOrVer,
+      },
+      {
+        id: 'imports',
+        labelKey: 'nav2.imports',
+        aliases: ['integrations', 'imports', 'webhooks', 'intégrations'],
+        visible: (c) => isLeadRole(c.role),
+      },
+      {
+        id: 'plan',
+        labelKey: 'nav.plan',
+        shortKey: 'navshort.plan',
+        aliases: ['billing', 'compliance', 'subscription', 'abonnement'],
+        visible: (c) => isLeadRole(c.role),
+      },
     ],
   },
 ];
 
 // Inbox is a utility destination, not a section (it keeps its unread badge).
-export const INBOX_ITEM: NavItem = { id: 'messages', labelKey: 'nav.messages', aliases: ['inbox', 'messages', 'threads', 'boîte de réception'] };
+export const INBOX_ITEM: NavItem = {
+  id: 'messages',
+  labelKey: 'nav.messages',
+  aliases: ['inbox', 'messages', 'threads', 'boîte de réception'],
+};
 
 // ------------------------------------------------------------ pure helpers
 export function filterSections(ctx: NavContext): NavSection[] {
@@ -188,7 +362,10 @@ export function filterSections(ctx: NavContext): NavSection[] {
   return out;
 }
 
-export interface NavLocation { sectionId: NavSection['id'] | null; itemId: ScreenId | null }
+export interface NavLocation {
+  sectionId: NavSection['id'] | null;
+  itemId: ScreenId | null;
+}
 
 /** Deterministic active-location resolution: one screen id → one section. */
 export function resolveNavigationLocation(screenId: string): NavLocation {
@@ -205,7 +382,12 @@ export function allItems(): { section: NavSection; item: NavItem }[] {
 }
 
 // ------------------------------------------------------------------ groups
-export interface NavGroupView { id: string | null; labelKey: string | null; children: NavItem[]; stripMax?: number }
+export interface NavGroupView {
+  id: string | null;
+  labelKey: string | null;
+  children: NavItem[];
+  stripMax?: number;
+}
 
 /**
  * A section's children arranged by group, in group order. Works on a section
@@ -217,7 +399,12 @@ export function groupedChildren(section: NavSection): NavGroupView[] {
   if (!section.groups || section.groups.length === 0) return [{ id: null, labelKey: null, children: section.children }];
   const byId = new Map(section.children.map((c) => [c.id, c] as const));
   return section.groups
-    .map((g) => ({ id: g.id, labelKey: g.labelKey, stripMax: g.stripMax, children: g.items.map((id) => byId.get(id)).filter((c): c is NavItem => !!c) }))
+    .map((g) => ({
+      id: g.id,
+      labelKey: g.labelKey,
+      stripMax: g.stripMax,
+      children: g.items.map((id) => byId.get(id)).filter((c): c is NavItem => !!c),
+    }))
     .filter((g) => g.children.length > 0);
 }
 
@@ -225,7 +412,7 @@ export function groupedChildren(section: NavSection): NavGroupView[] {
  *  section when the section has no groups. Never more than one group. */
 export function groupSiblings(section: NavSection, itemId: ScreenId | null): NavItem[] {
   const hit = groupedChildren(section).find((g) => g.children.some((c) => c.id === itemId));
-  return hit ? hit.children : groupedChildren(section)[0]?.children ?? [];
+  return hit ? hit.children : (groupedChildren(section)[0]?.children ?? []);
 }
 
 /**
@@ -237,8 +424,16 @@ export function groupSiblings(section: NavSection, itemId: ScreenId | null): Nav
  * accordion — this is presentation, computed from the same configuration.
  */
 export const STRIP_MAX_VISIBLE = 4;
-export interface StripLayout { visible: NavItem[]; overflow: NavItem[]; activeInOverflow: NavItem | null }
-export function stripLayout(section: NavSection, itemId: ScreenId | null, max: number = STRIP_MAX_VISIBLE): StripLayout {
+export interface StripLayout {
+  visible: NavItem[];
+  overflow: NavItem[];
+  activeInOverflow: NavItem | null;
+}
+export function stripLayout(
+  section: NavSection,
+  itemId: ScreenId | null,
+  max: number = STRIP_MAX_VISIBLE,
+): StripLayout {
   const items = groupSiblings(section, itemId);
   const hit = groupedChildren(section).find((g) => g.children.some((c) => c.id === itemId));
   const stripMax = hit?.stripMax ?? max;
@@ -266,13 +461,15 @@ export function validateNavConfig(sections: NavSection[] = NAV_SECTIONS): string
   const problems: string[] = [];
   for (const s of sections) {
     // The five rule, at every level that is a list of choices.
-    if (!s.groups && s.children.length > NAV_MAX_PER_CATEGORY) problems.push(`${s.id}: ${s.children.length} pages in an ungrouped section (max ${NAV_MAX_PER_CATEGORY})`);
+    if (!s.groups && s.children.length > NAV_MAX_PER_CATEGORY)
+      problems.push(`${s.id}: ${s.children.length} pages in an ungrouped section (max ${NAV_MAX_PER_CATEGORY})`);
     if (!s.groups) continue;
     const ids = s.children.map((c) => c.id);
     const seen = new Map<string, number>();
     for (const g of s.groups) {
       if (g.items.length === 0) problems.push(`${s.id}/${g.id}: empty group`);
-      if (g.items.length > NAV_MAX_PER_CATEGORY) problems.push(`${s.id}/${g.id}: ${g.items.length} pages (max ${NAV_MAX_PER_CATEGORY})`);
+      if (g.items.length > NAV_MAX_PER_CATEGORY)
+        problems.push(`${s.id}/${g.id}: ${g.items.length} pages (max ${NAV_MAX_PER_CATEGORY})`);
       for (const id of g.items) {
         seen.set(id, (seen.get(id) ?? 0) + 1);
         if (!ids.includes(id)) problems.push(`${s.id}/${g.id}: "${id}" is not a child of ${s.id}`);
@@ -291,27 +488,45 @@ export function validateNavConfig(sections: NavSection[] = NAV_SECTIONS): string
 export function searchNav(query: string, ctx: NavContext, translate: (key: string) => string) {
   const q = query.trim().toLowerCase();
   const sections = filterSections(ctx);
-  const rows = sections.flatMap((section) =>
-    section.children.map((item) => ({
-      sectionId: section.id, itemId: item.id,
-      sectionLabel: translate(section.labelKey), label: translate(item.labelKey),
-      // The palette path names the group too ("Recruitment › Pipeline ›
-      // Rooms"), so a result says where it lives in the sidebar.
-      groupLabel: (() => { const g = groupOf(section, item.id); return g?.labelKey ? translate(g.labelKey) : ''; })(),
-      aliases: item.aliases ?? [],
-    }))
-  ).concat([{ sectionId: 'home' as NavSection['id'], itemId: INBOX_ITEM.id, sectionLabel: '', groupLabel: '', label: translate(INBOX_ITEM.labelKey), aliases: INBOX_ITEM.aliases ?? [] }]);
+  const rows = sections
+    .flatMap((section) =>
+      section.children.map((item) => ({
+        sectionId: section.id,
+        itemId: item.id,
+        sectionLabel: translate(section.labelKey),
+        label: translate(item.labelKey),
+        // The palette path names the group too ("Recruitment › Pipeline ›
+        // Rooms"), so a result says where it lives in the sidebar.
+        groupLabel: (() => {
+          const g = groupOf(section, item.id);
+          return g?.labelKey ? translate(g.labelKey) : '';
+        })(),
+        aliases: item.aliases ?? [],
+      })),
+    )
+    .concat([
+      {
+        sectionId: 'home' as NavSection['id'],
+        itemId: INBOX_ITEM.id,
+        sectionLabel: '',
+        groupLabel: '',
+        label: translate(INBOX_ITEM.labelKey),
+        aliases: INBOX_ITEM.aliases ?? [],
+      },
+    ]);
   if (!q) return rows.slice(0, 8);
-  const scored = rows.map((r) => {
-    const label = r.label.toLowerCase();
-    let score = -1;
-    if (label.startsWith(q)) score = 0;
-    else if (label.includes(q)) score = 1;
-    else if (r.aliases.some((a) => a.startsWith(q))) score = 2;
-    else if (r.aliases.some((a) => a.includes(q))) score = 3;
-    else if (r.sectionLabel.toLowerCase().includes(q)) score = 4;
-    return { ...r, score };
-  }).filter((r) => r.score >= 0);
+  const scored = rows
+    .map((r) => {
+      const label = r.label.toLowerCase();
+      let score = -1;
+      if (label.startsWith(q)) score = 0;
+      else if (label.includes(q)) score = 1;
+      else if (r.aliases.some((a) => a.startsWith(q))) score = 2;
+      else if (r.aliases.some((a) => a.includes(q))) score = 3;
+      else if (r.sectionLabel.toLowerCase().includes(q)) score = 4;
+      return { ...r, score };
+    })
+    .filter((r) => r.score >= 0);
   scored.sort((a, b) => a.score - b.score || a.label.localeCompare(b.label));
   return scored.slice(0, 8);
 }
@@ -332,7 +547,12 @@ export function searchNav(query: string, ctx: NavContext, translate: (key: strin
 // server's tab names ("offer", "signing", "trial", …) resolve to their
 // subcategory, so notifications, next actions and bookmarks that name a flat
 // tab keep working. An unknown segment makes the whole hash malformed.
-export const ROOM_TABS = [...new Set([...allSubs(ROOM_NAV), ...ROOM_NAV.categories.flatMap((c) => c.subs.flatMap((s) => [...(s.legacy ?? [])]))])] as readonly string[];
+export const ROOM_TABS = [
+  ...new Set([
+    ...allSubs(ROOM_NAV),
+    ...ROOM_NAV.categories.flatMap((c) => c.subs.flatMap((s) => [...(s.legacy ?? [])])),
+  ]),
+] as readonly string[];
 export type RoomTab = string;
 const ROOM_HASH = /^#\/recruitment\/rooms\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})((?:\/[a-z][a-z0-9-]*){0,2})$/;
 const roomSegs = (m: RegExpExecArray) => (m[2] ? m[2].slice(1).split('/') : []);
@@ -397,8 +617,7 @@ export function criteriaFromHash(hash: string): string | null {
   const m = MATCHING_RE.exec(hash ?? '');
   return m?.[1] ?? null;
 }
-export const hashForMatching = (encoded?: string | null) =>
-  (encoded ? `${MATCHING_HASH}?c=${encoded}` : MATCHING_HASH);
+export const hashForMatching = (encoded?: string | null) => (encoded ? `${MATCHING_HASH}?c=${encoded}` : MATCHING_HASH);
 
 /** The watchlist id inside a deep link, or null for any other (or malformed) hash. */
 export function watchlistFromHash(hash: string): string | null {
@@ -491,18 +710,34 @@ export function loadShortcuts(orgId: string, userId: string, ctx: NavContext): S
     if (!Array.isArray(list)) return [];
     const permitted = new Set(filterSections(ctx).flatMap((s) => s.children.map((c) => c.id)));
     permitted.add(INBOX_ITEM.id);
-    return list.filter((x): x is ScreenId => typeof x === 'string' && permitted.has(x as ScreenId)).slice(0, MAX_SHORTCUTS);
-  } catch { return []; }
+    return list
+      .filter((x): x is ScreenId => typeof x === 'string' && permitted.has(x as ScreenId))
+      .slice(0, MAX_SHORTCUTS);
+  } catch {
+    return [];
+  }
 }
 export function saveShortcuts(orgId: string, userId: string, ids: ScreenId[]) {
-  try { localStorage.setItem(shortcutsKey(orgId, userId), JSON.stringify(ids.slice(0, MAX_SHORTCUTS))); } catch { /* private mode */ }
+  try {
+    localStorage.setItem(shortcutsKey(orgId, userId), JSON.stringify(ids.slice(0, MAX_SHORTCUTS)));
+  } catch {
+    /* private mode */
+  }
 }
 
 // -------------------------------------------------------- collapsed state
 const COLLAPSE_KEY = 'sb-nav-collapsed';
 export function loadCollapsed(): boolean {
-  try { return localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { return false; }
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 export function saveCollapsed(collapsed: boolean) {
-  try { localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0'); } catch { /* private mode */ }
+  try {
+    localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
+  } catch {
+    /* private mode */
+  }
 }

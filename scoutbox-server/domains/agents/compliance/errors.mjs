@@ -84,25 +84,63 @@ export const COMPLIANCE_ERROR_HTTP = table({
 export const httpStatusFor = (code) => COMPLIANCE_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
-  'error', 'message', 'allowed', 'facet', 'memberAssociation', 'state', 'code',
-  'expectedRev', 'currentRev', 'updatedBy', 'updatedAt', 'retryAfter', 'status', 'agreementId', 'field',
-  'required', 'reasons', 'policyVersions', 'consentsOutstanding', 'consentKind', 'reviewId', 'contextId', 'outcome', 'reason', 'role',
+  'error',
+  'message',
+  'allowed',
+  'facet',
+  'memberAssociation',
+  'state',
+  'code',
+  'expectedRev',
+  'currentRev',
+  'updatedBy',
+  'updatedAt',
+  'retryAfter',
+  'status',
+  'agreementId',
+  'field',
+  'required',
+  'reasons',
+  'policyVersions',
+  'consentsOutstanding',
+  'consentKind',
+  'reviewId',
+  'contextId',
+  'outcome',
+  'reason',
+  'role',
 ];
 
 /** Codes and rule references only, never prose or a name. */
-const publicReason = (r) => ({ code: r.code, ruleId: r.ruleId ?? null, ruleStatus: r.ruleStatus ?? null, regulator: r.regulator ?? null, jurisdiction: r.jurisdiction ?? null, policyVersion: r.policyVersion ?? null, ...(r.partyRoles ? { partyRoles: r.partyRoles } : {}), ...(r.partyRole ? { partyRole: r.partyRole } : {}) });
+const publicReason = (r) => ({
+  code: r.code,
+  ruleId: r.ruleId ?? null,
+  ruleStatus: r.ruleStatus ?? null,
+  regulator: r.regulator ?? null,
+  jurisdiction: r.jurisdiction ?? null,
+  policyVersion: r.policyVersion ?? null,
+  ...(r.partyRoles ? { partyRoles: r.partyRoles } : {}),
+  ...(r.partyRole ? { partyRole: r.partyRole } : {}),
+});
 
 export function publicErrorBody(out) {
   const code = out?.error;
   if (COMPLIANCE_ERROR_HTTP[code] === 500) {
-    return { ok: false, error: code, message: 'The compliance service cannot serve this request. This has been recorded.' };
+    return {
+      ok: false,
+      error: code,
+      message: 'The compliance service cannot serve this request. This has been recorded.',
+    };
   }
   const body = { ok: false };
   for (const k of PUBLIC_ERROR_FIELDS) {
     if (out?.[k] === undefined) continue;
-    body[k] = k === 'reasons' && Array.isArray(out[k]) ? out[k].map(publicReason)
-      : k === 'consentsOutstanding' && Array.isArray(out[k]) ? out[k].map((c) => ({ partyRole: c.partyRole, consentKind: c.consentKind, reasonCode: c.reasonCode }))
-        : out[k];
+    body[k] =
+      k === 'reasons' && Array.isArray(out[k])
+        ? out[k].map(publicReason)
+        : k === 'consentsOutstanding' && Array.isArray(out[k])
+          ? out[k].map((c) => ({ partyRole: c.partyRole, consentKind: c.consentKind, reasonCode: c.reasonCode }))
+          : out[k];
   }
   return body;
 }
@@ -111,7 +149,11 @@ export function sendComplianceError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
     console.error(`compliance ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
-    return res.status(500).json({ ok: false, error: 'COMPLIANCE_STATE_UNKNOWN', message: 'The compliance service cannot serve this request. This has been recorded.' });
+    return res.status(500).json({
+      ok: false,
+      error: 'COMPLIANCE_STATE_UNKNOWN',
+      message: 'The compliance service cannot serve this request. This has been recorded.',
+    });
   }
   if (status === 500) console.error(`compliance ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));

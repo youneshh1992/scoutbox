@@ -28,10 +28,22 @@ export function MobileViewport({ children }: { children: ReactNode }) {
   if (Platform.OS !== 'web') return <>{children}</>;
   const framed = width > MOBILE_VIEWPORT_MAX;
   return (
-    <View style={[styles.surround, { backgroundColor: onAuth ? AUTH_PAGE.page : colors.frame }]} testID="mobile-viewport-surround" data-auth-fixed={onAuth ? '1' : undefined}>
+    <View
+      style={[styles.surround, { backgroundColor: onAuth ? AUTH_PAGE.page : colors.frame }]}
+      testID="mobile-viewport-surround"
+      data-auth-fixed={onAuth ? '1' : undefined}
+    >
       <View
         testID="mobile-viewport"
-        style={[styles.frame, { backgroundColor: onAuth ? AUTH_PAGE.page : colors.bg }, framed && { borderLeftWidth: 1, borderRightWidth: 1, borderColor: onAuth ? AUTH_PAGE.panelLine : colors.frameLine }]}
+        style={[
+          styles.frame,
+          { backgroundColor: onAuth ? AUTH_PAGE.page : colors.bg },
+          framed && {
+            borderLeftWidth: 1,
+            borderRightWidth: 1,
+            borderColor: onAuth ? AUTH_PAGE.panelLine : colors.frameLine,
+          },
+        ]}
       >
         {children}
       </View>

@@ -4,9 +4,20 @@
  * cursor-paged in a stable order. Nothing is stored: every figure is projected from other modules' records.
  */
 import {
-  RECRUITMENT_ANALYTICS_POLICY_VERSION, METRICS, METRIC_IDS, METRIC_FAMILIES, FAMILY_IDS,
-  SMALL_N_MIN, TIME_SEMANTICS, GROUP_DIMENSIONS, PERSON_DIMENSIONS, WINDOW_PRESETS,
-  DEFAULT_WINDOW, FORBIDDEN_METRIC_NAMES, assertMetricRegistry, resolveWindow,
+  RECRUITMENT_ANALYTICS_POLICY_VERSION,
+  METRICS,
+  METRIC_IDS,
+  METRIC_FAMILIES,
+  FAMILY_IDS,
+  SMALL_N_MIN,
+  TIME_SEMANTICS,
+  GROUP_DIMENSIONS,
+  PERSON_DIMENSIONS,
+  WINDOW_PRESETS,
+  DEFAULT_WINDOW,
+  FORBIDDEN_METRIC_NAMES,
+  assertMetricRegistry,
+  resolveWindow,
 } from './metrics.mjs';
 import { buildReportingContext, buildDashboard, ROOM_PRIORITIES } from './dashboard.mjs';
 import { STALL_THRESHOLDS, DEFAULT_STALL_DAYS } from './timeSeries.mjs';
@@ -16,14 +27,27 @@ import { metrics } from '../../enterprise/enterprise.mjs';
 import { now } from '../../platform/clock.mjs';
 
 /** The metrics whose rows a director can page through. */
-export const DRILLDOWN_METRICS = ['stalled_rooms', 'decision_outstanding', 'terminal_with_recorded_decision', 'overdue_trial_reports'];
+export const DRILLDOWN_METRICS = [
+  'stalled_rooms',
+  'decision_outstanding',
+  'terminal_with_recorded_decision',
+  'overdue_trial_reports',
+];
 const PAGE_MAX = 50;
 const PAGE_DEFAULT = 25;
 
 export function registerAnalytics(ctx) {
   const { recruitmentReads, scoutingReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
   const reportingReads = { ...recruitmentReads, ...scoutingReads, discovery: ctx.discoveryReads };
-  if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function' || typeof recruitmentReads?.signings?.forOrg !== 'function' || typeof recruitmentReads?.signingPackages?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
+  if (
+    typeof recruitmentReads?.contacts?.forOrg !== 'function' ||
+    typeof recruitmentReads?.offers?.forOrg !== 'function' ||
+    typeof recruitmentReads?.signings?.forOrg !== 'function' ||
+    typeof recruitmentReads?.signingPackages?.forOrg !== 'function'
+  )
+    throw new TypeError(
+      'registerAnalytics needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer',
+    );
 
   // Two counters only, neither of which could be read as a measure of anybody.
   metrics.analytics = {
@@ -31,7 +55,9 @@ export function registerAnalytics(ctx) {
     recruitment_analytics_rows_read: 0,
     policyVersion: RECRUITMENT_ANALYTICS_POLICY_VERSION,
   };
-  const vmetric = (k, n = 1) => { metrics.analytics[k] = (metrics.analytics[k] ?? 0) + n; };
+  const vmetric = (k, n = 1) => {
+    metrics.analytics[k] = (metrics.analytics[k] ?? 0) + n;
+  };
 
   // A metric with no limitation, a forbidden name or a private field stops the process before serving.
   const registryShape = assertMetricRegistry();
@@ -49,12 +75,18 @@ export function registerAnalytics(ctx) {
         return {
           error: 'GROUPING_BY_PERSON_REFUSED',
           status: 400,
-          detail: 'ScoutBox does not break recruitment analytics down by person. These figures measure the process, not any colleague’s performance, and a per-person breakdown of them would be a scout leaderboard.',
+          detail:
+            'ScoutBox does not break recruitment analytics down by person. These figures measure the process, not any colleague’s performance, and a per-person breakdown of them would be a scout leaderboard.',
           allowed: GROUP_DIMENSIONS,
         };
       }
       if (!GROUP_DIMENSIONS.includes(String(groupBy))) {
-        return { error: 'GROUPING_UNKNOWN', status: 400, detail: `Unknown grouping "${groupBy}".`, allowed: GROUP_DIMENSIONS };
+        return {
+          error: 'GROUPING_UNKNOWN',
+          status: 400,
+          detail: `Unknown grouping "${groupBy}".`,
+          allowed: GROUP_DIMENSIONS,
+        };
       }
     }
 
@@ -64,13 +96,23 @@ export function registerAnalytics(ctx) {
     const filters = {};
     if (q.source != null && q.source !== '') {
       if (!SOURCE_CONTEXTS.includes(String(q.source))) {
-        return { error: 'SOURCE_CONTEXT_UNKNOWN', status: 400, detail: `Unknown source context "${q.source}".`, allowed: SOURCE_CONTEXTS };
+        return {
+          error: 'SOURCE_CONTEXT_UNKNOWN',
+          status: 400,
+          detail: `Unknown source context "${q.source}".`,
+          allowed: SOURCE_CONTEXTS,
+        };
       }
       filters.sourceContext = String(q.source);
     }
     if (q.priority != null && q.priority !== '') {
       if (!ROOM_PRIORITIES.includes(String(q.priority))) {
-        return { error: 'ROOM_PRIORITY_UNKNOWN', status: 400, detail: `Unknown priority "${q.priority}".`, allowed: ROOM_PRIORITIES };
+        return {
+          error: 'ROOM_PRIORITY_UNKNOWN',
+          status: 400,
+          detail: `Unknown priority "${q.priority}".`,
+          allowed: ROOM_PRIORITIES,
+        };
       }
       filters.priority = String(q.priority);
     }
@@ -78,9 +120,18 @@ export function registerAnalytics(ctx) {
 
     let families = FAMILY_IDS;
     if (q.families) {
-      const asked = String(q.families).split(',').map((s) => s.trim()).filter(Boolean);
+      const asked = String(q.families)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
       const unknown = asked.filter((f) => !FAMILY_IDS.includes(f));
-      if (unknown.length) return { error: 'FAMILY_UNKNOWN', status: 400, detail: `Unknown family: ${unknown.join(', ')}.`, allowed: FAMILY_IDS };
+      if (unknown.length)
+        return {
+          error: 'FAMILY_UNKNOWN',
+          status: 400,
+          detail: `Unknown family: ${unknown.join(', ')}.`,
+          allowed: FAMILY_IDS,
+        };
       families = asked;
     }
 
@@ -88,7 +139,12 @@ export function registerAnalytics(ctx) {
     if (q.stallDays != null && q.stallDays !== '') {
       const n = Number(q.stallDays);
       if (!STALL_THRESHOLDS.includes(n)) {
-        return { error: 'STALL_THRESHOLD_UNKNOWN', status: 400, detail: `Stall threshold must be one of ${STALL_THRESHOLDS.join(', ')} days.`, allowed: STALL_THRESHOLDS };
+        return {
+          error: 'STALL_THRESHOLD_UNKNOWN',
+          status: 400,
+          detail: `Stall threshold must be one of ${STALL_THRESHOLDS.join(', ')} days.`,
+          allowed: STALL_THRESHOLDS,
+        };
       }
       stallDays = n;
     }
@@ -96,9 +152,16 @@ export function registerAnalytics(ctx) {
     return { window: w, filters, families, stallDays, groupBy: groupBy ?? null };
   }
 
-  const contextFor = (req, parsed) => buildReportingContext({
-    reads: reportingReads, org: req.org, window: parsed.window, now: now(), orgCanSee, findPlayer, filters: parsed.filters,
-  });
+  const contextFor = (req, parsed) =>
+    buildReportingContext({
+      reads: reportingReads,
+      org: req.org,
+      window: parsed.window,
+      now: now(),
+      orgCanSee,
+      findPlayer,
+      filters: parsed.filters,
+    });
 
   // ------------------------------------------------------------- the catalogue
 
@@ -122,9 +185,13 @@ export function registerAnalytics(ctx) {
       metrics: METRIC_IDS.map((id) => {
         const m = METRICS[id];
         return {
-          id: m.id, family: m.family, name: m.name, unit: m.unit,
-          semantics: m.semantics, sources: m.sources,
-          kind: m.distribution ? 'distribution' : (m.ratio ? 'ratio' : 'count'),
+          id: m.id,
+          family: m.family,
+          name: m.name,
+          unit: m.unit,
+          semantics: m.semantics,
+          sources: m.sources,
+          kind: m.distribution ? 'distribution' : m.ratio ? 'ratio' : 'count',
           associationOnly: !!m.association,
           limitation: m.limitation,
         };
@@ -132,7 +199,8 @@ export function registerAnalytics(ctx) {
       neverBuilt: {
         note: 'These do not exist in ScoutBox and are not planned.',
         names: FORBIDDEN_METRIC_NAMES,
-        reason: 'A single blended figure invites a decision it cannot support, and a per-person breakdown of process counts is a ranking of colleagues however it is labelled.',
+        reason:
+          'A single blended figure invites a decision it cannot support, and a per-person breakdown of process counts is a ranking of colleagues however it is labelled.',
       },
     });
   });
@@ -167,7 +235,11 @@ export function registerAnalytics(ctx) {
     if (limited('analytics_read', req.org.id)) return res.status(429).json(rateLimitedBody('analytics_read'));
     const metric = String(req.query?.metric ?? '');
     if (!DRILLDOWN_METRICS.includes(metric)) {
-      return res.status(400).json({ error: 'METRIC_HAS_NO_ROWS', detail: `"${metric}" has no row-level view.`, allowed: DRILLDOWN_METRICS });
+      return res.status(400).json({
+        error: 'METRIC_HAS_NO_ROWS',
+        detail: `"${metric}" has no row-level view.`,
+        allowed: DRILLDOWN_METRICS,
+      });
     }
     const parsed = readQuery(req.query ?? {});
     if (parsed.error) return res.status(parsed.status).json(parsed);
@@ -198,6 +270,7 @@ export function registerAnalytics(ctx) {
 
   return {
     analyticsCatalogue: () => ({ policyVersion: RECRUITMENT_ANALYTICS_POLICY_VERSION, metrics: METRIC_IDS.length }),
-    buildReportingContext: (org, opts) => buildReportingContext({ reads: reportingReads, org, orgCanSee, findPlayer, ...opts }),
+    buildReportingContext: (org, opts) =>
+      buildReportingContext({ reads: reportingReads, org, orgCanSee, findPlayer, ...opts }),
   };
 }

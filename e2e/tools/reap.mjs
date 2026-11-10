@@ -11,12 +11,20 @@ import fs from 'node:fs';
 const killed = [];
 for (const pid of fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d))) {
   if (Number(pid) === process.pid) continue;
-  let comm; let argv;
+  let comm;
+  let argv;
   try {
     comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
     argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
-  } catch { continue; }
+  } catch {
+    continue;
+  }
   if (comm !== 'node' || argv.length !== 2 || !/(^|\/)server\.mjs$/.test(argv[1])) continue;
-  try { process.kill(Number(pid), 'SIGTERM'); killed.push(pid); } catch { /* already gone */ }
+  try {
+    process.kill(Number(pid), 'SIGTERM');
+    killed.push(pid);
+  } catch {
+    /* already gone */
+  }
 }
 console.log(killed.length ? `terminated server.mjs pids: ${killed.join(' ')}` : 'no server.mjs process running');

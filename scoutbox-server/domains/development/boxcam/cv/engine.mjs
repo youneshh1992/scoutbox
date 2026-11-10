@@ -19,9 +19,9 @@ const MAX_DUPLICATE_FRAC = 0.5;
 
 export class ObservationRun {
   constructor({ eventKind } = {}) {
-    this.eventKind = eventKind;          // 'touch' | 'juggle' | 'duration'
-    this.detections = [];                // Layer 1 output only — no pixels
-    this.prev = null;                    // exactly one frame, for diffing
+    this.eventKind = eventKind; // 'touch' | 'juggle' | 'duration'
+    this.detections = []; // Layer 1 output only — no pixels
+    this.prev = null; // exactly one frame, for diffing
     this.seenHashes = new Set();
     this.duplicates = 0;
     this.framesSeen = 0;
@@ -54,8 +54,11 @@ export class ObservationRun {
     this.detections.push(det);
     this.prev = frame;
     return {
-      seq: frame.seq, duplicate: false,
-      ball: !!det.ball, person: !!det.person, usable: det.visibility.usable,
+      seq: frame.seq,
+      duplicate: false,
+      ball: !!det.ball,
+      person: !!det.person,
+      usable: det.visibility.usable,
     };
   }
 
@@ -113,24 +116,29 @@ export class ObservationRun {
     if (tracks.occlusion.broken) conditions.push('observation_discontinuity');
     // Too few distinct frames have no meaningful frame rate; "insufficient frame rate" would hide that someone held a
     // still image to the lens.
-    if (tracks.cadence.intervalCount >= 3
-      && tracks.cadence.effectiveFps > 0
-      && tracks.cadence.effectiveFps < CAPTURE_REQUIREMENTS.minSustainedFps) {
+    if (
+      tracks.cadence.intervalCount >= 3 &&
+      tracks.cadence.effectiveFps > 0 &&
+      tracks.cadence.effectiveFps < CAPTURE_REQUIREMENTS.minSustainedFps
+    ) {
       conditions.push('insufficient_frame_rate');
     }
 
     // Runs even when conditions exist, because quality needs the ambiguous-interval count; output is discarded unless
     // everything passes.
     const motion = relativeMotion(tracks);
-    const interpreted = this.eventKind === 'duration'
-      ? { events: [], ambiguousIntervals: 0, transitions: [], finalState: 'READY' }
-      : interpret(this.eventKind, motion);
+    const interpreted =
+      this.eventKind === 'duration'
+        ? { events: [], ambiguousIntervals: 0, transitions: [], finalState: 'READY' }
+        : interpret(this.eventKind, motion);
 
     const usable = interpreted.events.filter((e) => e.confidence >= CONFIDENCE.minPerEvent);
     const withBoth = tracks.samples.filter((s) => s.ball && s.person);
     const aggregate = usable.length
       ? usable.reduce((a, e) => a + e.confidence, 0) / usable.length
-      : (withBoth.length ? withBoth.reduce((a, x) => a + x.ball.confidence, 0) / withBoth.length : 0);
+      : withBoth.length
+        ? withBoth.reduce((a, x) => a + x.ball.confidence, 0) / withBoth.length
+        : 0;
 
     const quality = observationQuality({
       continuity: c,
@@ -146,8 +154,11 @@ export class ObservationRun {
     // envelope: refuse rather than present an under-count.
     const suppressed = interpreted.suppressedByRefractory ?? 0;
     const strikesSeen = usable.length + suppressed;
-    if (this.eventKind !== 'duration' && strikesSeen > 0
-      && suppressed / strikesSeen > EVENT_RULES.maxRefractorySuppressedFrac) {
+    if (
+      this.eventKind !== 'duration' &&
+      strikesSeen > 0 &&
+      suppressed / strikesSeen > EVENT_RULES.maxRefractorySuppressedFrac
+    ) {
       conditions.push('unsupported_event_cadence');
     }
 

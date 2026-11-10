@@ -7,7 +7,9 @@ export type Scheme = 'dark';
 
 export const palettes = {
   dark: {
-    gradientEnd: '#12161a', gradientInk: '#ffffff', gradientShade: 'rgba(0,0,0,0.55)',
+    gradientEnd: '#12161a',
+    gradientInk: '#ffffff',
+    gradientShade: 'rgba(0,0,0,0.55)',
     bg: '#0e131f',
     bg2: '#12161a',
     panel: '#161c24',
@@ -66,7 +68,10 @@ export const palettes = {
 } as const;
 
 export type Palette = { [K in keyof typeof palettes.dark]: string };
-interface ThemeValue { scheme: Scheme; colors: Palette }
+interface ThemeValue {
+  scheme: Scheme;
+  colors: Palette;
+}
 const DARK_THEME: ThemeValue = { scheme: 'dark', colors: palettes.dark };
 const ThemeContext = createContext<ThemeValue>(DARK_THEME);
 
@@ -90,20 +95,60 @@ export const AUTH_PANEL: Palette = {
   // The entry palette: the dark football green of the Football
   // Passport card for the surfaces, white and #CFDFD0 for the text, the
   // bright brand green for the primary action, links and focus.
-  bg: '#173b27', bg2: '#113822', panel: '#113822', panel2: '#1d4a33', line: 'rgba(207,223,208,0.35)',
-  text: '#ffffff', muted: '#cfdfd0',
-  accent: '#00e676', accentInk: '#113822', accentText: '#00e676', accent2: '#00e676',
-  tabActive: '#ffffff', tabActiveBg: '#113822', tabInactive: '#cfdfd0',
-  iconBg: '#113822', iconFg: '#5aeeb2', greenBg: '#113822', greenInk: '#e5f5e9', infoBg: '#113822', infoInk: '#e5f5e9',
-  goldBg: '#113822', goldInk: '#f3dca3',
-  trial: '#e9c46a', trialBg: '#113822', trialInk: '#f3dca3', offer: '#6fd3cc', offerBg: '#113822', offerInk: '#bfe9e5', signing: '#00e676', signingBg: '#113822', signingInk: '#d6f5df',
+  bg: '#173b27',
+  bg2: '#113822',
+  panel: '#113822',
+  panel2: '#1d4a33',
+  line: 'rgba(207,223,208,0.35)',
+  text: '#ffffff',
+  muted: '#cfdfd0',
+  accent: '#00e676',
+  accentInk: '#113822',
+  accentText: '#00e676',
+  accent2: '#00e676',
+  tabActive: '#ffffff',
+  tabActiveBg: '#113822',
+  tabInactive: '#cfdfd0',
+  iconBg: '#113822',
+  iconFg: '#5aeeb2',
+  greenBg: '#113822',
+  greenInk: '#e5f5e9',
+  infoBg: '#113822',
+  infoInk: '#e5f5e9',
+  goldBg: '#113822',
+  goldInk: '#f3dca3',
+  trial: '#e9c46a',
+  trialBg: '#113822',
+  trialInk: '#f3dca3',
+  offer: '#6fd3cc',
+  offerBg: '#113822',
+  offerInk: '#bfe9e5',
+  signing: '#00e676',
+  signingBg: '#113822',
+  signingInk: '#d6f5df',
   // errors keep their own hue so a refusal never reads as success
-  danger: '#ffb3a8', dangerBg: '#4a2b27', dangerInk: '#ffd4cc', knob: '#ffffff', track: 'rgba(207,223,208,0.35)',
-  frame: '#173b27', frameLine: '#173b27',
+  danger: '#ffb3a8',
+  dangerBg: '#4a2b27',
+  dangerInk: '#ffd4cc',
+  knob: '#ffffff',
+  track: 'rgba(207,223,208,0.35)',
+  frame: '#173b27',
+  frameLine: '#173b27',
   // the pitch behind the entry screen: white lines at 8%, grain under 2%
-  pitch: 'rgba(255,255,255,0.08)', grain: 'rgba(255,255,255,0.016)', band: 'rgba(255,255,255,0.012)',
+  pitch: 'rgba(255,255,255,0.08)',
+  grain: 'rgba(255,255,255,0.016)',
+  band: 'rgba(255,255,255,0.012)',
 };
-export const AUTH_PAGE = { page: '#173b27', panel: '#173b27', green: '#00e676', ink: '#113822', white: '#ffffff', soft: '#cfdfd0', pale: '#e5f5e9', panelLine: 'rgba(255,255,255,0.14)' } as const;
+export const AUTH_PAGE = {
+  page: '#173b27',
+  panel: '#173b27',
+  green: '#00e676',
+  ink: '#113822',
+  white: '#ffffff',
+  soft: '#cfdfd0',
+  pale: '#e5f5e9',
+  panelLine: 'rgba(255,255,255,0.14)',
+} as const;
 
 export function ThemeOverride({ colors, children }: { colors: Palette; children: ReactNode }) {
   const base = useContext(ThemeContext);

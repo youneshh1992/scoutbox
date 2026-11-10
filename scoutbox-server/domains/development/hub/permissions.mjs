@@ -9,18 +9,23 @@
 export const VIEWER_KINDS = Object.freeze(['player_self', 'guardian', 'org_staff', 'grassroots_staff']);
 
 export const CAPABILITIES = Object.freeze([
-  'read',          // may see the plan at all
-  'readInternal',  // may see organisation-internal review notes
-  'writeGoals',    // may create and edit goals and actions
-  'manage',        // may pause, complete, archive, change visibility and sharing
-  'review',        // may submit a coach review
-  'reflect',       // may submit a player or guardian reflection
-  'linkEvidence',  // may attach an evidence reference
+  'read', // may see the plan at all
+  'readInternal', // may see organisation-internal review notes
+  'writeGoals', // may create and edit goals and actions
+  'manage', // may pause, complete, archive, change visibility and sharing
+  'review', // may submit a coach review
+  'reflect', // may submit a player or guardian reflection
+  'linkEvidence', // may attach an evidence reference
 ]);
 
 const NONE = Object.freeze({
-  read: false, readInternal: false, writeGoals: false,
-  manage: false, review: false, reflect: false, linkEvidence: false,
+  read: false,
+  readInternal: false,
+  writeGoals: false,
+  manage: false,
+  review: false,
+  reflect: false,
+  linkEvidence: false,
 });
 
 const caps = (o) => Object.freeze({ ...NONE, ...o });
@@ -38,11 +43,15 @@ export function planAccess(viewer, plan, { player, orgCanSee, isLead = () => fal
   if (plan.playerId !== player.id) return NONE;
 
   switch (viewer.kind) {
-    case 'player_self': return playerAccess(viewer, plan, player);
-    case 'guardian': return guardianAccess(viewer, plan, player);
+    case 'player_self':
+      return playerAccess(viewer, plan, player);
+    case 'guardian':
+      return guardianAccess(viewer, plan, player);
     case 'org_staff':
-    case 'grassroots_staff': return orgAccess(viewer, plan, player, { orgCanSee, isLead });
-    default: return NONE;
+    case 'grassroots_staff':
+      return orgAccess(viewer, plan, player, { orgCanSee, isLead });
+    default:
+      return NONE;
   }
 }
 
@@ -57,7 +66,11 @@ function playerAccess(viewer, plan, player) {
   if (plan.owner.kind === 'player') {
     if (minor) return caps({ read: true });
     return caps({
-      read: true, writeGoals: true, manage: true, reflect: true, linkEvidence: true,
+      read: true,
+      writeGoals: true,
+      manage: true,
+      reflect: true,
+      linkEvidence: true,
     });
   }
 
@@ -91,8 +104,12 @@ function orgAccess(viewer, plan, player, { orgCanSee, isLead }) {
   if (plan.owner.kind === 'org') {
     if (plan.owner.orgId !== org.id) return NONE;
     return caps({
-      read: true, readInternal: true, writeGoals: true,
-      manage: lead, review: true, linkEvidence: true,
+      read: true,
+      readInternal: true,
+      writeGoals: true,
+      manage: lead,
+      review: true,
+      linkEvidence: true,
     });
   }
 
@@ -108,7 +125,8 @@ export function canAssign({ assignee, plan, player, guardianById = () => null, s
   const kind = String(assignee.kind ?? '');
 
   if (kind === 'player') {
-    if (assignee.id !== plan.playerId) return { error: 'ASSIGNEE_INVALID', detail: 'Only this plan’s player can be assigned as the player.' };
+    if (assignee.id !== plan.playerId)
+      return { error: 'ASSIGNEE_INVALID', detail: 'Only this plan’s player can be assigned as the player.' };
     return { value: { kind: 'player', id: player.id, name: player.name } };
   }
 
@@ -116,14 +134,23 @@ export function canAssign({ assignee, plan, player, guardianById = () => null, s
     const found = typeof assignee.id === 'string' ? guardianById(assignee.id) : null;
     const g = found && found.childIds.includes(plan.playerId) ? found : null;
     if (!g) return { error: 'ASSIGNEE_INVALID', detail: 'That guardian does not manage this player.' };
-    if (!player.isMinor) return { error: 'ASSIGNEE_INVALID', detail: 'This player is an adult; a guardian cannot be assigned their actions.' };
+    if (!player.isMinor)
+      return {
+        error: 'ASSIGNEE_INVALID',
+        detail: 'This player is an adult; a guardian cannot be assigned their actions.',
+      };
     return { value: { kind: 'guardian', id: g.id, name: g.name ?? null } };
   }
 
   if (kind === 'org_user') {
-    if (plan.owner.kind !== 'org') return { error: 'ASSIGNEE_INVALID', detail: 'Club staff can only be assigned actions on a club-owned plan.' };
+    if (plan.owner.kind !== 'org')
+      return { error: 'ASSIGNEE_INVALID', detail: 'Club staff can only be assigned actions on a club-owned plan.' };
     const u = staffById(assignee.id);
-    if (!u || u.orgId !== plan.owner.orgId || u.removedAt) return { error: 'ASSIGNEE_INVALID', detail: 'That person is not current staff of the organisation that owns this plan.' };
+    if (!u || u.orgId !== plan.owner.orgId || u.removedAt)
+      return {
+        error: 'ASSIGNEE_INVALID',
+        detail: 'That person is not current staff of the organisation that owns this plan.',
+      };
     return { value: { kind: 'org_user', id: u.id, name: u.name } };
   }
 

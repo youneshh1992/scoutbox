@@ -13,7 +13,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import { Linking, View } from 'react-native';
 import { Text } from './Text';
-import { m12, type FamilySigning, type FamilySigningParty, type SigningPartyType, type SigningStatus } from '../data/m12client';
+import {
+  m12,
+  type FamilySigning,
+  type FamilySigningParty,
+  type SigningPartyType,
+  type SigningStatus,
+} from '../data/m12client';
 import { useColors } from '../theme';
 import { pt } from '../i18n';
 import { TimelineItem, Button, Card, Muted, Row, SectionTitle, Disclosure } from './ui';
@@ -21,22 +27,52 @@ import { uiLocale } from '../time';
 
 type Actor = { kind: 'player'; id: string } | { kind: 'guardian'; id: string; childId: string };
 
-const tone = (s: SigningStatus | null) => (s === 'READY' || s === 'IN_PROGRESS' ? 'gold' : s === 'COMPLETED' ? 'green' : s === 'CANCELLED' || s === 'VOIDED' || s === 'EXPIRED' ? 'red' : 'default');
+const tone = (s: SigningStatus | null) =>
+  s === 'READY' || s === 'IN_PROGRESS'
+    ? 'gold'
+    : s === 'COMPLETED'
+      ? 'green'
+      : s === 'CANCELLED' || s === 'VOIDED' || s === 'EXPIRED'
+        ? 'red'
+        : 'default';
 const stLabel = (s: SigningStatus | null) => {
   if (!s) return '';
   const key = `signingSt_${s}` as Parameters<typeof pt>[0];
-  try { return pt(key) ?? s; } catch { return s; }
+  try {
+    return pt(key) ?? s;
+  } catch {
+    return s;
+  }
 };
 const partyLabel = (p: SigningPartyType) => {
   const key = `signingParty_${p}` as Parameters<typeof pt>[0];
-  try { return pt(key) ?? p; } catch { return p; }
+  try {
+    return pt(key) ?? p;
+  } catch {
+    return p;
+  }
 };
-const fmt = (ms: number | null) => (ms ? new Date(ms).toLocaleString(uiLocale(), { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—');
+const fmt = (ms: number | null) =>
+  ms
+    ? new Date(ms).toLocaleString(uiLocale(), {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : '—';
 const shortSha = (sha: string | null) => (sha ? `${sha.slice(0, 12)}…${sha.slice(-8)}` : '—');
 const errMsg = (e: unknown) => {
   const code = (e as { code?: string } | null)?.code ?? (e instanceof Error ? e.message : '');
   const key = `signingErr_${code}` as Parameters<typeof pt>[0];
-  try { const s = pt(key); if (s) return s; } catch { /* unknown code */ }
+  try {
+    const s = pt(key);
+    if (s) return s;
+  } catch {
+    /* unknown code */
+  }
   return pt('signingErr_generic');
 };
 const keyFor = (sid: string, rid: string) => `sg-complete-${sid}-${rid}`;
@@ -54,40 +90,75 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
   // The tab keeps this screen mounted; a package the club presented, superseded
   // or cancelled while the player was elsewhere must not stay on screen stale.
   const [focusTick, setFocusTick] = useState(0);
-  useFocusEffect(useCallback(() => { setFocusTick((x) => x + 1); }, []));
+  useFocusEffect(
+    useCallback(() => {
+      setFocusTick((x) => x + 1);
+    }, []),
+  );
   useEffect(() => {
     let on = true;
-    (actor.kind === 'player' ? m12.getSignings(actor.id) : m12.gSignings(actor.id)).then((x) => on && setItems(x)).catch(() => on && setItems([]));
-    return () => { on = false; };
+    (actor.kind === 'player' ? m12.getSignings(actor.id) : m12.gSignings(actor.id))
+      .then((x) => on && setItems(x))
+      .catch(() => on && setItems([]));
+    return () => {
+      on = false;
+    };
   }, [actor.id, actor.kind, tick, focusTick]);
   if (!items) return null;
   if (actor.kind !== 'player') return null;
   const show = (...views: SigningView[]) => view === 'all' || views.includes(view);
   if (items.length === 0) {
     if (view === 'all') return null;
-    return <Card testID="signing-section"><SectionTitle>{pt('signingTitle')}</SectionTitle><Muted size={12.5}>{pt('signingNoneYet')}</Muted></Card>;
+    return (
+      <Card testID="signing-section">
+        <SectionTitle>{pt('signingTitle')}</SectionTitle>
+        <Muted size={12.5}>{pt('signingNoneYet')}</Muted>
+      </Card>
+    );
   }
 
   const confirm = async (s: FamilySigning) => {
     if (busy || !s.nextAction) return;
-    setBusy(s.id); setMsg(null);
+    setBusy(s.id);
+    setMsg(null);
     try {
-      await m12.completeSigning(actor.id, s.id, s.nextAction.revisionId, s.nextAction.documentSha256 ?? '', keyFor(s.id, s.nextAction.revisionId));
+      await m12.completeSigning(
+        actor.id,
+        s.id,
+        s.nextAction.revisionId,
+        s.nextAction.documentSha256 ?? '',
+        keyFor(s.id, s.nextAction.revisionId),
+      );
       setMsg(pt('signingConfirmed'));
       setArm(null);
       setTick((x) => x + 1);
-    } catch (e) { setMsg(errMsg(e)); setArm(null); setTick((x) => x + 1); }
-    finally { setBusy(null); }
+    } catch (e) {
+      setMsg(errMsg(e));
+      setArm(null);
+      setTick((x) => x + 1);
+    } finally {
+      setBusy(null);
+    }
   };
   const openDoc = async (s: FamilySigning, revisionId: string) => {
     if (busy) return;
-    setBusy(s.id); setMsg(null);
+    setBusy(s.id);
+    setMsg(null);
     try {
       const f = await m12.getSigningDocument(actor.id, s.id, revisionId);
-      if (f.file) { try { await Linking.openURL(`data:${f.file.mime};base64,${f.file.base64}`); } catch { /* not openable here */ } }
+      if (f.file) {
+        try {
+          await Linking.openURL(`data:${f.file.mime};base64,${f.file.base64}`);
+        } catch {
+          /* not openable here */
+        }
+      }
       setMsg(pt('signingDocumentOpened'));
-    } catch { setMsg(pt('signingDocumentFailed')); }
-    finally { setBusy(null); }
+    } catch {
+      setMsg(pt('signingDocumentFailed'));
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -99,67 +170,191 @@ export function SigningSection({ actor, view = 'all' }: { actor: Actor; view?: S
         const mine = cur?.requiredParties.find((p: FamilySigningParty) => p.partyType === 'PLAYER') ?? null;
         const older = s.revisions.filter((r) => r.id !== cur?.id);
         return (
-          <View key={s.id} style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`signing-${s.id}`} accessibilityLabel={`${pt('signingTitle')} ${s.club.name ?? ''}`}>
+          <View
+            key={s.id}
+            style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}
+            testID={`signing-${s.id}`}
+            accessibilityLabel={`${pt('signingTitle')} ${s.club.name ?? ''}`}
+          >
             <Row>
               <Text style={{ color: colors.text, fontWeight: '600', fontSize: 15, flex: 1 }}>{s.club.name ?? '—'}</Text>
-              <Text style={{ color: tone(s.status) === 'red' ? colors.danger : tone(s.status) === 'gold' ? colors.gold : tone(s.status) === 'green' ? colors.accentText : colors.muted, fontSize: 12.5, fontWeight: '600' }}>{stLabel(s.status)}</Text>
+              <Text
+                style={{
+                  color:
+                    tone(s.status) === 'red'
+                      ? colors.danger
+                      : tone(s.status) === 'gold'
+                        ? colors.gold
+                        : tone(s.status) === 'green'
+                          ? colors.accentText
+                          : colors.muted,
+                  fontSize: 12.5,
+                  fontWeight: '600',
+                }}
+              >
+                {stLabel(s.status)}
+              </Text>
             </Row>
             {cur && (
-              <View style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }} testID={`signing-revision-${cur.id}`}>
-                <GuidanceNote icon="info" size={12}>{pt('signingRevision')} {cur.revisionNumber} · {pt('signingPresentedAt')} {fmt(cur.readyAt)}{s.expiresAt ? ` · ${pt('signingExpires')} ${fmt(s.expiresAt)}` : ''}</GuidanceNote>
-                {show('contract') && cur.contract && <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>{pt('signingStart')}: {cur.contract.startDate ?? '—'}{cur.contract.endDate ? ` · ${pt('signingEnd')}: ${cur.contract.endDate}` : ''}</Text>}
-                {view === 'contract' && !cur.contract && <GuidanceNote icon="info" size={12.5}>{pt('signingContractNone')}</GuidanceNote>}
-                {show('documents') && (cur.document ? (
-                  <View style={{ marginTop: 4 }} testID={`signing-document-${cur.id}`}>
-                    <Row>
-                      <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>{cur.document.label ?? cur.document.filename ?? pt('signingDocument')}</Text>
-                      <Button small label={pt('signingOpenDocument')} onPress={() => openDoc(s, cur.id)} disabled={busy === s.id} testID={`signing-open-${cur.id}`} />
-                    </Row>
-                    <Muted size={11.5}>{pt('signingDigest')}: <Text testID={`signing-digest-${cur.id}`} accessibilityLabel={cur.document.sha256 ?? undefined}>{shortSha(cur.document.sha256)}</Text></Muted>
-                  </View>
-                ) : <GuidanceNote icon="info" size={12.5}>{pt('signingNoDocument')}</GuidanceNote>)}
-                {show('signing') && <View style={{ marginTop: 4 }} testID={`signing-parties-${cur.id}`}>
-                  {cur.requiredParties.map((p) => (
-                    <Muted key={p.partyType} size={12}>{partyLabel(p.partyType)} · {p.status === 'COMPLETED' ? `${pt('signingPartyDone')} ${fmt(p.completedAt)}` : pt('signingPartyPending')}</Muted>
+              <View
+                style={{ marginTop: 4, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: 8 }}
+                testID={`signing-revision-${cur.id}`}
+              >
+                <GuidanceNote icon="info" size={12}>
+                  {pt('signingRevision')} {cur.revisionNumber} · {pt('signingPresentedAt')} {fmt(cur.readyAt)}
+                  {s.expiresAt ? ` · ${pt('signingExpires')} ${fmt(s.expiresAt)}` : ''}
+                </GuidanceNote>
+                {show('contract') && cur.contract && (
+                  <Text style={{ color: colors.text, fontSize: 13, marginTop: 4 }}>
+                    {pt('signingStart')}: {cur.contract.startDate ?? '—'}
+                    {cur.contract.endDate ? ` · ${pt('signingEnd')}: ${cur.contract.endDate}` : ''}
+                  </Text>
+                )}
+                {view === 'contract' && !cur.contract && (
+                  <GuidanceNote icon="info" size={12.5}>
+                    {pt('signingContractNone')}
+                  </GuidanceNote>
+                )}
+                {show('documents') &&
+                  (cur.document ? (
+                    <View style={{ marginTop: 4 }} testID={`signing-document-${cur.id}`}>
+                      <Row>
+                        <Text style={{ color: colors.text, fontSize: 12.5, flex: 1 }}>
+                          {cur.document.label ?? cur.document.filename ?? pt('signingDocument')}
+                        </Text>
+                        <Button
+                          small
+                          label={pt('signingOpenDocument')}
+                          onPress={() => openDoc(s, cur.id)}
+                          disabled={busy === s.id}
+                          testID={`signing-open-${cur.id}`}
+                        />
+                      </Row>
+                      <Muted size={11.5}>
+                        {pt('signingDigest')}:{' '}
+                        <Text testID={`signing-digest-${cur.id}`} accessibilityLabel={cur.document.sha256 ?? undefined}>
+                          {shortSha(cur.document.sha256)}
+                        </Text>
+                      </Muted>
+                    </View>
+                  ) : (
+                    <GuidanceNote icon="info" size={12.5}>
+                      {pt('signingNoDocument')}
+                    </GuidanceNote>
                   ))}
-                </View>}
+                {show('signing') && (
+                  <View style={{ marginTop: 4 }} testID={`signing-parties-${cur.id}`}>
+                    {cur.requiredParties.map((p) => (
+                      <Muted key={p.partyType} size={12}>
+                        {partyLabel(p.partyType)} ·{' '}
+                        {p.status === 'COMPLETED'
+                          ? `${pt('signingPartyDone')} ${fmt(p.completedAt)}`
+                          : pt('signingPartyPending')}
+                      </Muted>
+                    ))}
+                  </View>
+                )}
               </View>
             )}
             {show('signing', 'contract') && s.status === 'COMPLETED' && s.completion && (
               <View style={{ marginTop: 6 }} testID={`signing-completed-${s.id}`}>
-                <Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '700' }}>{pt('signingCompleted').replace('{when}', fmt(s.completion.completedAt))}</Text>
+                <Text style={{ color: colors.accentText, fontSize: 13, fontWeight: '700' }}>
+                  {pt('signingCompleted').replace('{when}', fmt(s.completion.completedAt))}
+                </Text>
                 <Muted size={12}>{pt('signingCompletedNote')}</Muted>
               </View>
             )}
-            {show('signing') && mine?.status === 'COMPLETED' && s.status !== 'COMPLETED' && <View testID={`signing-yours-done-${s.id}`}><Muted size={12}>{pt('signingYouConfirmed')} {fmt(mine.completedAt)} · {pt('signingAwaitingOthers')}</Muted></View>}
+            {show('signing') && mine?.status === 'COMPLETED' && s.status !== 'COMPLETED' && (
+              <View testID={`signing-yours-done-${s.id}`}>
+                <Muted size={12}>
+                  {pt('signingYouConfirmed')} {fmt(mine.completedAt)} · {pt('signingAwaitingOthers')}
+                </Muted>
+              </View>
+            )}
             {show('signing') && live && arm !== s.id && (
               <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
-                <Button small primary label={pt('signingSign')} onPress={() => setArm(s.id)} testID={`signing-sign-${s.id}`} />
+                <Button
+                  small
+                  primary
+                  label={pt('signingSign')}
+                  onPress={() => setArm(s.id)}
+                  testID={`signing-sign-${s.id}`}
+                />
               </Row>
             )}
             {show('signing') && live && arm === s.id && cur && s.nextAction && (
-              <View style={{ marginTop: 6, borderLeftWidth: 2, borderLeftColor: colors.gold, paddingLeft: 10, paddingVertical: 4 }} accessibilityRole="alert" testID={`signing-confirm-${s.id}`}>
-                <Text style={{ color: colors.text, fontSize: 13 }}>{pt('signingConfirmWarn').replace('{n}', String(cur.revisionNumber)).replace('{club}', s.club.name ?? '—')}</Text>
-                <GuidanceNote icon="info" size={11.5}>{pt('signingDigest')}: {shortSha(s.nextAction.documentSha256)}</GuidanceNote>
-                <GuidanceNote icon="info" size={12}>{s.honest}</GuidanceNote>
+              <View
+                style={{
+                  marginTop: 6,
+                  borderLeftWidth: 2,
+                  borderLeftColor: colors.gold,
+                  paddingLeft: 10,
+                  paddingVertical: 4,
+                }}
+                accessibilityRole="alert"
+                testID={`signing-confirm-${s.id}`}
+              >
+                <Text style={{ color: colors.text, fontSize: 13 }}>
+                  {pt('signingConfirmWarn')
+                    .replace('{n}', String(cur.revisionNumber))
+                    .replace('{club}', s.club.name ?? '—')}
+                </Text>
+                <GuidanceNote icon="info" size={11.5}>
+                  {pt('signingDigest')}: {shortSha(s.nextAction.documentSha256)}
+                </GuidanceNote>
+                <GuidanceNote icon="info" size={12}>
+                  {s.honest}
+                </GuidanceNote>
                 <Row style={{ marginTop: 6, flexWrap: 'wrap' }}>
-                  <Button small primary label={pt('signingConfirmSign').replace('{n}', String(cur.revisionNumber))} onPress={() => confirm(s)} disabled={busy === s.id} testID={`signing-confirm-sign-${s.id}`} />
-                  <Button small label={pt('signingCancel')} onPress={() => setArm(null)} testID={`signing-cancel-${s.id}`} />
+                  <Button
+                    small
+                    primary
+                    label={pt('signingConfirmSign').replace('{n}', String(cur.revisionNumber))}
+                    onPress={() => confirm(s)}
+                    disabled={busy === s.id}
+                    testID={`signing-confirm-sign-${s.id}`}
+                  />
+                  <Button
+                    small
+                    label={pt('signingCancel')}
+                    onPress={() => setArm(null)}
+                    testID={`signing-cancel-${s.id}`}
+                  />
                 </Row>
               </View>
             )}
             {show('signing') && older.length > 0 && (
               <View style={{ marginTop: 6 }}>
                 <Muted size={12}>{pt('signingOlderRevisions')}</Muted>
-                <View>{older.map((r, i) => <TimelineItem key={r.id} date={`${pt('signingRevision')} ${r.revisionNumber}`} last={i === older.length - 1}><Muted>{stLabel(r.status)} · {shortSha(r.document?.sha256 ?? null)}</Muted></TimelineItem>)}</View>
+                <View>
+                  {older.map((r, i) => (
+                    <TimelineItem
+                      key={r.id}
+                      date={`${pt('signingRevision')} ${r.revisionNumber}`}
+                      last={i === older.length - 1}
+                    >
+                      <Muted>
+                        {stLabel(r.status)} · {shortSha(r.document?.sha256 ?? null)}
+                      </Muted>
+                    </TimelineItem>
+                  ))}
+                </View>
               </View>
             )}
-            {show('signing', 'contract') && s.status !== 'COMPLETED' && <Muted size={12}>{pt('signingNotYetSigned')}</Muted>}
+            {show('signing', 'contract') && s.status !== 'COMPLETED' && (
+              <Muted size={12}>{pt('signingNotYetSigned')}</Muted>
+            )}
           </View>
         );
       })}
-      {msg && <View accessibilityLiveRegion="polite" style={{ marginTop: 6 }} testID="signing-message"><Muted size={12}>{msg}</Muted></View>}
-      <Disclosure label="About signing" testID="about-signing"><GuidanceNote size={12.5}>{pt('signingHint')}</GuidanceNote></Disclosure>
+      {msg && (
+        <View accessibilityLiveRegion="polite" style={{ marginTop: 6 }} testID="signing-message">
+          <Muted size={12}>{msg}</Muted>
+        </View>
+      )}
+      <Disclosure label="About signing" testID="about-signing">
+        <GuidanceNote size={12.5}>{pt('signingHint')}</GuidanceNote>
+      </Disclosure>
     </Card>
   );
 }

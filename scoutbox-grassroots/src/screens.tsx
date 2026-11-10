@@ -7,13 +7,33 @@ import { Icon } from '../../design-system/icons';
 import { initials } from '../../design-system/text';
 import { pressable, useDialog } from './dialog';
 import {
-  api, ApiError,
-  type Session, type Player, type PlayerDetail, type OrgRequest, type Trial,
-  type LedgerEntry, type ProofPack, type PlanInfo, type Reputation, type SearchFilters,
-  type Channel, type FiledReport, type TrialDetails,
-  type FeedItem, type FilmRoomItem, type FixtureGroup, type SavedSearch, type OrgNote,
-  type Funnel, type Invoice, type OpenTrial,
-  type Squad, type Matchday, type PathwayRecord, type Friendly,
+  api,
+  ApiError,
+  type Session,
+  type Player,
+  type PlayerDetail,
+  type OrgRequest,
+  type Trial,
+  type LedgerEntry,
+  type ProofPack,
+  type PlanInfo,
+  type Reputation,
+  type SearchFilters,
+  type Channel,
+  type FiledReport,
+  type TrialDetails,
+  type FeedItem,
+  type FilmRoomItem,
+  type FixtureGroup,
+  type SavedSearch,
+  type OrgNote,
+  type Funnel,
+  type Invoice,
+  type OpenTrial,
+  type Squad,
+  type Matchday,
+  type PathwayRecord,
+  type Friendly,
 } from './api';
 import { FootballPassportPanel, SharedPassportOpener, usePassportSummaries } from './m15screens';
 import { BoxTrainingPanel } from './m16screens';
@@ -28,9 +48,18 @@ const tt = t;
 import { confirmDestructive, DESTRUCTIVE_ACTIONS } from './confirmAction';
 
 const TAG_LABELS: Record<string, string> = {
-  first_touch: 'First touch', pace: 'Pace', positioning: 'Positioning', work_rate: 'Work rate',
-  left_foot: 'Left foot', right_foot: 'Right foot', aerial: 'Aerial', composure: 'Composure',
-  vision: 'Vision', pressing: 'Pressing', finishing: 'Finishing', distribution: 'Distribution',
+  first_touch: 'First touch',
+  pace: 'Pace',
+  positioning: 'Positioning',
+  work_rate: 'Work rate',
+  left_foot: 'Left foot',
+  right_foot: 'Right foot',
+  aerial: 'Aerial',
+  composure: 'Composure',
+  vision: 'Vision',
+  pressing: 'Pressing',
+  finishing: 'Finishing',
+  distribution: 'Distribution',
 };
 
 interface ScreenProps {
@@ -81,7 +110,10 @@ export function Toast({ text, error }: { text: string; error?: boolean }) {
 function errMsg(e: unknown): string {
   // A temporal refusal (DATE_INVALID, INTERVAL_INVALID, …) has a
   // translated sentence; anything else keeps the server's own message.
-  if (e instanceof ApiError) { const translated = t(`err.${e.code}`, ''); if (translated) return translated; }
+  if (e instanceof ApiError) {
+    const translated = t(`err.${e.code}`, '');
+    if (translated) return translated;
+  }
   return e instanceof Error ? e.message : 'Something went wrong';
 }
 
@@ -97,8 +129,12 @@ function errMsg(e: unknown): string {
 function TrustBar({ score }: { score: number }) {
   return (
     <div className="trust" title={t('term.profileSignalNote')}>
-      <span>{t('term.profileSignal')} {score}%</span>
-      <span className="bar"><i style={{ width: `${score}%` }} /></span>
+      <span>
+        {t('term.profileSignal')} {score}%
+      </span>
+      <span className="bar">
+        <i style={{ width: `${score}%` }} />
+      </span>
     </div>
   );
 }
@@ -109,9 +145,9 @@ function AgencyWall({ session }: { session: Session }) {
       <div className="wall">
         <b>The under-18 wall is active for this account.</b>
         <p>
-          Under-18 players are on ScoutBox now — and agency accounts can never list, view or contact
-          any of them. The API refuses on every endpoint, regardless of what this interface asks for.
-          Under-18 representation rules apply: no agent access, no exceptions.
+          Under-18 players are on ScoutBox now — and agency accounts can never list, view or contact any of them. The
+          API refuses on every endpoint, regardless of what this interface asks for. Under-18 representation rules
+          apply: no agent access, no exceptions.
         </p>
       </div>
     );
@@ -121,9 +157,8 @@ function AgencyWall({ session }: { session: Session }) {
       <div className="wall">
         <b>Club verification pending — under-18 profiles are hidden.</b>
         <p>
-          Only verified clubs can search or view under-18 players. Verification requires a company
-          email domain and a signed safeguarding contract; until it clears, this workspace sees the
-          adult pool only.
+          Only verified clubs can search or view under-18 players. Verification requires a company email domain and a
+          signed safeguarding contract; until it clears, this workspace sees the adult pool only.
         </p>
       </div>
     );
@@ -135,7 +170,12 @@ function AgencyWall({ session }: { session: Session }) {
 
 // One-click reporting, reachable from every screen (topbar) and from
 // profiles. Urgent reports immediately suspend communication pending review.
-export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
+export function SafetyModal({
+  session,
+  notify,
+  onClose,
+  presetPlayerId,
+}: {
   session: Session;
   notify: (text: string, error?: boolean) => void;
   onClose: () => void;
@@ -148,7 +188,12 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   const [urgent, setUrgent] = useState(false);
   const [myReports, setMyReports] = useState<FiledReport[]>([]);
 
-  useEffect(() => { api.getMyReports(session).then(setMyReports).catch(() => {}); }, [session]);
+  useEffect(() => {
+    api
+      .getMyReports(session)
+      .then(setMyReports)
+      .catch(() => {});
+  }, [session]);
 
   const submit = async () => {
     if (!reason.trim()) return notify('Describe what happened — reports need a reason.', true);
@@ -171,13 +216,23 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Report & block" tabIndex={-1} style={{ width: 'min(520px, 92vw)' }}>
+      <div
+        className="drawer"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Report & block"
+        tabIndex={-1}
+        style={{ width: 'min(520px, 92vw)' }}
+      >
         <div className="head">
           <div>
             <h3>Report &amp; block</h3>
             <div className="sub">All reports are reviewed. Urgent reports suspend communication immediately.</div>
           </div>
-          <button className="close" onClick={onClose}>Close</button>
+          <button className="close" onClick={onClose}>
+            Close
+          </button>
         </div>
         <div className="section">
           <h4>What are you reporting?</h4>
@@ -191,12 +246,27 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
         </div>
         <div className="section">
           <h4>{targetKind === 'player' ? 'Player id' : targetKind === 'scout' ? 'Scout name' : 'Club / org id'}</h4>
-          <input style={{ width: '100%' }} value={target} onChange={(e) => setTarget(e.target.value)}
-            placeholder={targetKind === 'player' ? 'e.g. pl-adeyemi' : targetKind === 'scout' ? 'e.g. the name shown on the request' : 'e.g. org-northstar'} />
+          <input
+            style={{ width: '100%' }}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            placeholder={
+              targetKind === 'player'
+                ? 'e.g. pl-adeyemi'
+                : targetKind === 'scout'
+                  ? 'e.g. the name shown on the request'
+                  : 'e.g. org-northstar'
+            }
+          />
         </div>
         <div className="section">
           <h4>What happened?</h4>
-          <input style={{ width: '100%' }} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe the behaviour" />
+          <input
+            style={{ width: '100%' }}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="Describe the behaviour"
+          />
         </div>
         <div className="section">
           <label className="chk" style={{ display: 'flex', gap: 8, color: 'var(--muted)' }}>
@@ -204,7 +274,9 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
             Urgent — suspend communication immediately pending review
           </label>
         </div>
-        <button className="primary" onClick={submit}>Submit report</button>
+        <button className="primary" onClick={submit}>
+          Submit report
+        </button>
         {myReports.length > 0 && (
           <div className="section" style={{ marginTop: 22 }}>
             <h4>Your reports — you always hear back</h4>
@@ -213,10 +285,18 @@ export function SafetyModal({ session, notify, onClose, presetPlayerId }: {
                 <div key={r.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     <span className="pill">{r.targetKind}</span>
-                    <span className="grow" style={{ fontSize: 13 }}>{r.reason}</span>
-                    <span className={`pill ${r.status === 'resolved' ? 'green' : 'gold'}`}>{r.status === 'resolved' ? 'reviewed' : 'in review'}</span>
+                    <span className="grow" style={{ fontSize: 13 }}>
+                      {r.reason}
+                    </span>
+                    <span className={`pill ${r.status === 'resolved' ? 'green' : 'gold'}`}>
+                      {r.status === 'resolved' ? 'reviewed' : 'in review'}
+                    </span>
                   </div>
-                  {r.outcome && <span className="dim" style={{ fontSize: 12.5 }}>{r.outcome}</span>}
+                  {r.outcome && (
+                    <span className="dim" style={{ fontSize: 12.5 }}>
+                      {r.outcome}
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -238,10 +318,21 @@ const FEED_LABELS: Record<FeedItem['type'], string> = {
 
 export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
   const [items, setItems] = useState<FeedItem[] | null>(null);
-  useEffect(() => { api.getFeed(session).then(setItems).catch(() => setItems([])); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getFeed(session)
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [session, tick]);
 
   if (items === null) {
-    return <div className="player-grid">{[1, 2, 3, 4, 5, 6].map((i) => <div key={i} className="player-card skeleton" style={{ height: 90 }} />)}</div>;
+    return (
+      <div className="player-grid">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
+          <div key={i} className="player-card skeleton" style={{ height: 90 }} />
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -254,11 +345,23 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
             <span className={`feed-kind ${it.type === 'report_due' ? 'urgent' : ''}`}>{FEED_LABELS[it.type]}</span>
             <span className="grow">
               <b>{it.playerName}</b>
-              {it.type === 'new_player' && <span className="dim"> — {it.position}, {it.age}{it.guardianManaged ? ' · U18 (guardian-managed)' : ''}</span>}
-              {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
-                <span className="dim"> — “{it.title}”{it.verifiedClip ? ' · Verified Clip' : ''}{it.hasVideo ? ' · Playable' : ''}</span>
+              {it.type === 'new_player' && (
+                <span className="dim">
+                  {' '}
+                  — {it.position}, {it.age}
+                  {it.guardianManaged ? ' · U18 (guardian-managed)' : ''}
+                </span>
               )}
-              {it.type === 'report_due' && <span className="dim"> — mandatory trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>}
+              {(it.type === 'new_clip' || it.type === 'shortlist_new_clip') && (
+                <span className="dim">
+                  {' '}
+                  — “{it.title}”{it.verifiedClip ? ' · Verified Clip' : ''}
+                  {it.hasVideo ? ' · Playable' : ''}
+                </span>
+              )}
+              {it.type === 'report_due' && (
+                <span className="dim"> — mandatory trial report due {it.dueAt ? fmtDate(it.dueAt) : 'soon'}</span>
+              )}
             </span>
             <span className="dim">{fmtDate(it.ts)}</span>
           </div>
@@ -272,31 +375,55 @@ export function FeedScreen({ session, tick, openPlayer }: ScreenProps) {
 
 export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
   const [deck, setDeck] = useState<FilmRoomItem[]>([]);
-  const [libraryLoading,setLibraryLoading] = useState(true);
-  const [libraryError,setLibraryError] = useState(false);
-  const [libraryReload,setLibraryReload] = useState(0);
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryError, setLibraryError] = useState(false);
+  const [libraryReload, setLibraryReload] = useState(0);
   const [index, setIndex] = useState(0);
   const [tagOptions, setTagOptions] = useState<string[]>([]);
   const [pendingTags, setPendingTags] = useState<string[]>([]);
   const viewed = useRef(new Set<string>());
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [clipSearch,setClipSearch] = useState('');
-  const [focus,setFocus] = useState(false);
-  const [playhead,setPlayhead] = useState(0);
-  const [duration,setDuration] = useState(0);
-  const [speed,setSpeed] = useState(1);
-  const [playing,setPlaying] = useState(false);
-  const [loop,setLoop] = useState(true);
-  const [mediaError,setMediaError] = useState(false);
-  const [markers,setMarkers] = useState<Record<string,number[]>>({});
-  const timecode = (seconds:number) => `${Math.floor(seconds/60).toString().padStart(2,'0')}:${Math.floor(seconds%60).toString().padStart(2,'0')}`;
-  const seek = (seconds:number) => { if(videoRef.current && duration) { videoRef.current.currentTime=Math.max(0,Math.min(duration,seconds));setPlayhead(videoRef.current.currentTime); } };
+  const [clipSearch, setClipSearch] = useState('');
+  const [focus, setFocus] = useState(false);
+  const [playhead, setPlayhead] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [speed, setSpeed] = useState(1);
+  const [playing, setPlaying] = useState(false);
+  const [loop, setLoop] = useState(true);
+  const [mediaError, setMediaError] = useState(false);
+  const [markers, setMarkers] = useState<Record<string, number[]>>({});
+  const timecode = (seconds: number) =>
+    `${Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, '0')}:${Math.floor(seconds % 60)
+      .toString()
+      .padStart(2, '0')}`;
+  const seek = (seconds: number) => {
+    if (videoRef.current && duration) {
+      videoRef.current.currentTime = Math.max(0, Math.min(duration, seconds));
+      setPlayhead(videoRef.current.currentTime);
+    }
+  };
 
   useEffect(() => {
-    setLibraryLoading(true); setLibraryError(false);
-    api.getFilmRoom(session).then(items=>{setDeck(items);setIndex(i=>Math.min(i,Math.max(0,items.length-1)));setLibraryLoading(false);}).catch(()=>{setLibraryError(true);setLibraryLoading(false);});
-    api.getScoutTags(session).then(setTagOptions).catch(() => {});
-  }, [session,libraryReload]);
+    setLibraryLoading(true);
+    setLibraryError(false);
+    api
+      .getFilmRoom(session)
+      .then((items) => {
+        setDeck(items);
+        setIndex((i) => Math.min(i, Math.max(0, items.length - 1)));
+        setLibraryLoading(false);
+      })
+      .catch(() => {
+        setLibraryError(true);
+        setLibraryLoading(false);
+      });
+    api
+      .getScoutTags(session)
+      .then(setTagOptions)
+      .catch(() => {});
+  }, [session, libraryReload]);
 
   const current = deck[index] ?? null;
 
@@ -306,18 +433,36 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
       viewed.current.add(current.media.id);
       api.recordClipView(session, current.player.id, current.media.id).catch(() => {});
     }
-    setPendingTags([]); setDuration(0); setPlayhead(0); setMediaError(false);
+    setPendingTags([]);
+    setDuration(0);
+    setPlayhead(0);
+    setMediaError(false);
   }, [current, session]);
 
-  const step = useCallback((dir: number) => {
-    setIndex((i) => Math.min(Math.max(i + dir, 0), Math.max(deck.length - 1, 0)));
-  }, [deck.length]);
+  const step = useCallback(
+    (dir: number) => {
+      setIndex((i) => Math.min(Math.max(i + dir, 0), Math.max(deck.length - 1, 0)));
+    },
+    [deck.length],
+  );
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.closest('input,textarea,select,button,video,[contenteditable="true"]') || e.ctrlKey || e.metaKey || e.altKey) return;
-      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); step(1); }
-      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+      if (
+        (e.target as HTMLElement)?.closest('input,textarea,select,button,video,[contenteditable="true"]') ||
+        e.ctrlKey ||
+        e.metaKey ||
+        e.altKey
+      )
+        return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        step(1);
+      }
+      if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+        e.preventDefault();
+        step(-1);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -329,35 +474,302 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
       await api.tagClip(session, current.player.id, current.media.id, pendingTags);
       notify('Tagged — aggregated anonymously into the player\'s "what scouts noticed".');
       setPendingTags([]);
-    } catch (e) { notify(errMsg(e), true); }
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
   };
 
-  if (libraryLoading) return <div className="suite-protected" role="status"><Icon name="video" size={32}/><p>Loading your clip library…</p></div>;
-  if (libraryError) return <div className="suite-protected" role="alert"><Icon name="video" size={32}/><p>The clip library could not be loaded.</p><button onClick={()=>setLibraryReload(v=>v+1)}>Try again</button></div>;
+  if (libraryLoading)
+    return (
+      <div className="suite-protected" role="status">
+        <Icon name="video" size={32} />
+        <p>Loading your clip library…</p>
+      </div>
+    );
+  if (libraryError)
+    return (
+      <div className="suite-protected" role="alert">
+        <Icon name="video" size={32} />
+        <p>The clip library could not be loaded.</p>
+        <button onClick={() => setLibraryReload((v) => v + 1)}>Try again</button>
+      </div>
+    );
   if (deck.length === 0) {
-    return <div className="notice">No playable footage yet. Clips appear here the moment players upload them — Verified Clips first.</div>;
+    return (
+      <div className="notice">
+        No playable footage yet. Clips appear here the moment players upload them — Verified Clips first.
+      </div>
+    );
   }
 
   return (
     <div className={`studio ${focus ? 'studio-focus' : ''}`}>
-      <header className="studio-bar"><div><Icon name="video" size={21} /><strong>Film Room</strong><span>ScoutBox studio</span></div><button aria-pressed={focus} onClick={()=>setFocus(!focus)}><Icon name="scan-line" size={16}/>{focus ? 'Show workspace' : 'Focus on footage'}</button></header>
+      <header className="studio-bar">
+        <div>
+          <Icon name="video" size={21} />
+          <strong>Film Room</strong>
+          <span>ScoutBox studio</span>
+        </div>
+        <button aria-pressed={focus} onClick={() => setFocus(!focus)}>
+          <Icon name="scan-line" size={16} />
+          {focus ? 'Show workspace' : 'Focus on footage'}
+        </button>
+      </header>
       <aside className="studio-library">
-        <div className="studio-panel-title"><h2>Clip library</h2><span>{deck.length}</span></div>
-        <label className="studio-search"><Icon name="search" size={15}/><input aria-label="Search clip library" placeholder="Find a player or clip" value={clipSearch} onChange={e=>setClipSearch(e.target.value)}/></label>
-        <div className="studio-clip-list">{deck.map((item,i)=>({item,i})).filter(({item})=>`${item.player.name} ${item.media.title}`.toLowerCase().includes(clipSearch.toLowerCase())).map(({item,i})=><button key={item.media.id} className={`studio-clip ${i===index?'selected':''}`} aria-current={i===index?'true':undefined} onClick={()=>setIndex(i)}><span className="studio-thumbnail"><video src={api.mediaUrl(item.media.url)!} muted playsInline preload="metadata" aria-hidden="true" tabIndex={-1}/><small>{String(i+1).padStart(2,'0')}</small></span><span><b>{item.player.name}</b><small>{item.media.title}</small><em>{item.player.position}{item.media.verifiedClip?' · Verified clip':''}</em></span></button>)}</div>
-        {!deck.some(item=>`${item.player.name} ${item.media.title}`.toLowerCase().includes(clipSearch.toLowerCase())) && <p className="studio-empty">No matching clips.</p>}
-        <p className="studio-library-note">Select a clip to review.<br/>Use ← and → to move through the library.</p>
+        <div className="studio-panel-title">
+          <h2>Clip library</h2>
+          <span>{deck.length}</span>
+        </div>
+        <label className="studio-search">
+          <Icon name="search" size={15} />
+          <input
+            aria-label="Search clip library"
+            placeholder="Find a player or clip"
+            value={clipSearch}
+            onChange={(e) => setClipSearch(e.target.value)}
+          />
+        </label>
+        <div className="studio-clip-list">
+          {deck
+            .map((item, i) => ({ item, i }))
+            .filter(({ item }) =>
+              `${item.player.name} ${item.media.title}`.toLowerCase().includes(clipSearch.toLowerCase()),
+            )
+            .map(({ item, i }) => (
+              <button
+                key={item.media.id}
+                className={`studio-clip ${i === index ? 'selected' : ''}`}
+                aria-current={i === index ? 'true' : undefined}
+                onClick={() => setIndex(i)}
+              >
+                <span className="studio-thumbnail">
+                  <video
+                    src={api.mediaUrl(item.media.url)!}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    aria-hidden="true"
+                    tabIndex={-1}
+                  />
+                  <small>{String(i + 1).padStart(2, '0')}</small>
+                </span>
+                <span>
+                  <b>{item.player.name}</b>
+                  <small>{item.media.title}</small>
+                  <em>
+                    {item.player.position}
+                    {item.media.verifiedClip ? ' · Verified clip' : ''}
+                  </em>
+                </span>
+              </button>
+            ))}
+        </div>
+        {!deck.some((item) =>
+          `${item.player.name} ${item.media.title}`.toLowerCase().includes(clipSearch.toLowerCase()),
+        ) && <p className="studio-empty">No matching clips.</p>}
+        <p className="studio-library-note">
+          Select a clip to review.
+          <br />
+          Use ← and → to move through the library.
+        </p>
       </aside>
       <main className="studio-viewer">
-        <div className="studio-viewer-heading"><span><i/> Source viewer</span><b>{index+1} / {deck.length}</b></div>
-        <div className="studio-screen">{current && <video ref={videoRef} key={current.media.id} src={api.mediaUrl(current.media.url)!} controls autoPlay muted loop={loop} onLoadedMetadata={e=>{setDuration(Number.isFinite(e.currentTarget.duration)?e.currentTarget.duration:0);e.currentTarget.playbackRate=speed;}} onTimeUpdate={e=>setPlayhead(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onError={()=>setMediaError(true)}/>}{mediaError && <div className="studio-media-error">This clip could not be loaded. Select another clip or try again later.</div>}</div>
-        <div className="studio-transport"><div><button aria-label="Previous clip" disabled={index===0} onClick={()=>step(-1)}><Icon name="chevron-left" size={18}/></button><button onClick={()=>seek(playhead-5)} disabled={!duration} aria-label="Back five seconds">−5s</button><button className="studio-play" onClick={()=>{const v=videoRef.current;if(v){if(v.paused)v.play().catch(()=>notify('Use the video controls to start playback.',true));else v.pause();}}} aria-label={playing?'Pause footage':'Play footage'}>{playing?<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4h3v12H5zm7 0h3v12h-3z"/></svg>:<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 3 11 7-11 7z"/></svg>}</button><button onClick={()=>seek(playhead+5)} disabled={!duration} aria-label="Forward five seconds">+5s</button><button aria-label="Next clip" disabled={index===deck.length-1} onClick={()=>step(1)}><Icon name="chevron-right" size={18}/></button></div><output>{timecode(playhead)} <span>/ {timecode(duration)}</span></output><div><select aria-label="Playback speed" value={speed} onChange={e=>{const v=Number(e.target.value);setSpeed(v);if(videoRef.current)videoRef.current.playbackRate=v;}}>{[.25,.5,1,1.5,2].map(s=><option value={s} key={s}>{s}×</option>)}</select><button aria-pressed={loop} onClick={()=>setLoop(!loop)} title="Loop footage"><Icon name="refresh-cw" size={15}/></button></div></div>
-        <div className="studio-timeline"><div className="studio-panel-title"><h2>Review timeline</h2><button disabled={!duration} onClick={()=>setMarkers(m=>({...m,[current!.media.id]:[...(m[current!.media.id]??[]),playhead]}))}><Icon name="pin" size={13}/> Mark moment</button></div><div className="studio-ruler" aria-hidden="true">{[0,.25,.5,.75,1].map(f=><span key={f}>{timecode(duration*f)}</span>)}</div><input aria-label="Playback position" type="range" min="0" max={duration||1} step="0.1" value={Math.min(playhead,duration||1)} disabled={!duration} onChange={e=>seek(Number(e.target.value))}/><div className="studio-track" aria-label="Session markers">{(markers[current!.media.id]??[]).map((time,i)=><button key={i} style={{left:`${duration?Math.min(97,time/duration*100):0}%`}} onClick={()=>seek(time)} title={`Go to marker ${i+1} at ${timecode(time)}`} aria-label={`Go to marker ${i+1} at ${timecode(time)}`}><Icon name="pin" size={13}/></button>)}</div><p>Markers are for this review session. Saved observation tags are separate.</p></div>
+        <div className="studio-viewer-heading">
+          <span>
+            <i /> Source viewer
+          </span>
+          <b>
+            {index + 1} / {deck.length}
+          </b>
+        </div>
+        <div className="studio-screen">
+          {current && (
+            <video
+              ref={videoRef}
+              key={current.media.id}
+              src={api.mediaUrl(current.media.url)!}
+              controls
+              autoPlay
+              muted
+              loop={loop}
+              onLoadedMetadata={(e) => {
+                setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0);
+                e.currentTarget.playbackRate = speed;
+              }}
+              onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)}
+              onPlay={() => setPlaying(true)}
+              onPause={() => setPlaying(false)}
+              onError={() => setMediaError(true)}
+            />
+          )}
+          {mediaError && (
+            <div className="studio-media-error">
+              This clip could not be loaded. Select another clip or try again later.
+            </div>
+          )}
+        </div>
+        <div className="studio-transport">
+          <div>
+            <button aria-label="Previous clip" disabled={index === 0} onClick={() => step(-1)}>
+              <Icon name="chevron-left" size={18} />
+            </button>
+            <button onClick={() => seek(playhead - 5)} disabled={!duration} aria-label="Back five seconds">
+              −5s
+            </button>
+            <button
+              className="studio-play"
+              onClick={() => {
+                const v = videoRef.current;
+                if (v) {
+                  if (v.paused) v.play().catch(() => notify('Use the video controls to start playback.', true));
+                  else v.pause();
+                }
+              }}
+              aria-label={playing ? 'Pause footage' : 'Play footage'}
+            >
+              {playing ? (
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M5 4h3v12H5zm7 0h3v12h-3z" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="m6 3 11 7-11 7z" />
+                </svg>
+              )}
+            </button>
+            <button onClick={() => seek(playhead + 5)} disabled={!duration} aria-label="Forward five seconds">
+              +5s
+            </button>
+            <button aria-label="Next clip" disabled={index === deck.length - 1} onClick={() => step(1)}>
+              <Icon name="chevron-right" size={18} />
+            </button>
+          </div>
+          <output>
+            {timecode(playhead)} <span>/ {timecode(duration)}</span>
+          </output>
+          <div>
+            <select
+              aria-label="Playback speed"
+              value={speed}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                setSpeed(v);
+                if (videoRef.current) videoRef.current.playbackRate = v;
+              }}
+            >
+              {[0.25, 0.5, 1, 1.5, 2].map((s) => (
+                <option value={s} key={s}>
+                  {s}×
+                </option>
+              ))}
+            </select>
+            <button aria-pressed={loop} onClick={() => setLoop(!loop)} title="Loop footage">
+              <Icon name="refresh-cw" size={15} />
+            </button>
+          </div>
+        </div>
+        <div className="studio-timeline">
+          <div className="studio-panel-title">
+            <h2>Review timeline</h2>
+            <button
+              disabled={!duration}
+              onClick={() =>
+                setMarkers((m) => ({ ...m, [current!.media.id]: [...(m[current!.media.id] ?? []), playhead] }))
+              }
+            >
+              <Icon name="pin" size={13} /> Mark moment
+            </button>
+          </div>
+          <div className="studio-ruler" aria-hidden="true">
+            {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+              <span key={f}>{timecode(duration * f)}</span>
+            ))}
+          </div>
+          <input
+            aria-label="Playback position"
+            type="range"
+            min="0"
+            max={duration || 1}
+            step="0.1"
+            value={Math.min(playhead, duration || 1)}
+            disabled={!duration}
+            onChange={(e) => seek(Number(e.target.value))}
+          />
+          <div className="studio-track" aria-label="Session markers">
+            {(markers[current!.media.id] ?? []).map((time, i) => (
+              <button
+                key={i}
+                style={{ left: `${duration ? Math.min(97, (time / duration) * 100) : 0}%` }}
+                onClick={() => seek(time)}
+                title={`Go to marker ${i + 1} at ${timecode(time)}`}
+                aria-label={`Go to marker ${i + 1} at ${timecode(time)}`}
+              >
+                <Icon name="pin" size={13} />
+              </button>
+            ))}
+          </div>
+          <p>Markers are for this review session. Saved observation tags are separate.</p>
+        </div>
       </main>
       <aside className="studio-inspector">
-        <div className="studio-panel-title"><h2>Player & observations</h2><Icon name="clipboard-list" size={17}/></div>
-        {current && <><div className="studio-player"><span className="studio-position">{current.player.position}</span><div><button onClick={()=>openPlayer(current.player.id)}>{current.player.name}<Icon name="arrow-up-right" size={15}/></button><span>{current.player.age} years{current.player.guardianManaged?' · Guardian-managed':''}</span></div></div><p className="studio-source-title" data-testid="filmroom-caption">{current.media.title}</p><dl className="studio-facts"><div><dt>Views</dt><dd>{current.media.views}</dd></div><div><dt>{t('term.profileSignal')}</dt><dd>{current.player.trustScore}%</dd></div></dl>{current.media.verifiedClip && <p className="studio-verified"><Icon name="badge-check" size={15}/> Filmed at a confirmed fixture</p>}</>}
-        <div className="studio-observations"><h3>What did you notice?</h3><p>Select the qualities you observed in this clip.</p><div className="studio-tags" aria-label="Tag what you saw">{tagOptions.map(tag=><button key={tag} aria-pressed={pendingTags.includes(tag)} onClick={()=>setPendingTags(p=>p.includes(tag)?p.filter(x=>x!==tag):[...p,tag])}><span>{TAG_LABELS[tag]??tag}</span>{pendingTags.includes(tag)&&<Icon name="check" size={13}/>}</button>)}</div><button className="primary studio-save" disabled={!pendingTags.length} onClick={submitTags}>Save observations{pendingTags.length?` (${pendingTags.length})`:''}</button><small>Tags contribute anonymously to what scouts noticed. They are not private notes.</small></div>
+        <div className="studio-panel-title">
+          <h2>Player & observations</h2>
+          <Icon name="clipboard-list" size={17} />
+        </div>
+        {current && (
+          <>
+            <div className="studio-player">
+              <span className="studio-position">{current.player.position}</span>
+              <div>
+                <button onClick={() => openPlayer(current.player.id)}>
+                  {current.player.name}
+                  <Icon name="arrow-up-right" size={15} />
+                </button>
+                <span>
+                  {current.player.age} years{current.player.guardianManaged ? ' · Guardian-managed' : ''}
+                </span>
+              </div>
+            </div>
+            <p className="studio-source-title" data-testid="filmroom-caption">
+              {current.media.title}
+            </p>
+            <dl className="studio-facts">
+              <div>
+                <dt>Views</dt>
+                <dd>{current.media.views}</dd>
+              </div>
+              <div>
+                <dt>{t('term.profileSignal')}</dt>
+                <dd>{current.player.trustScore}%</dd>
+              </div>
+            </dl>
+            {current.media.verifiedClip && (
+              <p className="studio-verified">
+                <Icon name="badge-check" size={15} /> Filmed at a confirmed fixture
+              </p>
+            )}
+          </>
+        )}
+        <div className="studio-observations">
+          <h3>What did you notice?</h3>
+          <p>Select the qualities you observed in this clip.</p>
+          <div className="studio-tags" aria-label="Tag what you saw">
+            {tagOptions.map((tag) => (
+              <button
+                key={tag}
+                aria-pressed={pendingTags.includes(tag)}
+                onClick={() => setPendingTags((p) => (p.includes(tag) ? p.filter((x) => x !== tag) : [...p, tag]))}
+              >
+                <span>{TAG_LABELS[tag] ?? tag}</span>
+                {pendingTags.includes(tag) && <Icon name="check" size={13} />}
+              </button>
+            ))}
+          </div>
+          <button className="primary studio-save" disabled={!pendingTags.length} onClick={submitTags}>
+            Save observations{pendingTags.length ? ` (${pendingTags.length})` : ''}
+          </button>
+          <small>Tags contribute anonymously to what scouts noticed. They are not private notes.</small>
+        </div>
       </aside>
     </div>
   );
@@ -368,28 +780,59 @@ export function FilmRoomScreen({ session, notify, openPlayer }: ScreenProps) {
 export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
   const [fixtures, setFixtures] = useState<FixtureGroup[]>([]);
   const [openKey, setOpenKey] = useState<string | null>(null);
-  useEffect(() => { api.getFixtures(session).then(setFixtures).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getFixtures(session)
+      .then(setFixtures)
+      .catch(() => {});
+  }, [session, tick]);
   return (
     <>
-      <CountChart title="Recorded participation" note="Players with recorded attendance at each listed fixture. A player can appear in more than one fixture." unit="players" variant="columns" items={fixtures.map(f => ({ label: `${f.date} · ${f.fixture}`, value: f.players.length }))} />
+      <CountChart
+        title="Recorded participation"
+        note="Players with recorded attendance at each listed fixture. A player can appear in more than one fixture."
+        unit="players"
+        variant="columns"
+        items={fixtures.map((f) => ({ label: `${f.date} · ${f.fixture}`, value: f.players.length }))}
+      />
       <div className="list-rows">
         {fixtures.map((f) => {
           const key = `${f.fixture}|${f.date}`;
           return (
             <div key={key} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-              <button className="desk-fixture" aria-expanded={openKey === key} onClick={() => setOpenKey(openKey === key ? null : key)}>
-                <span className="desk-fixture-date"><Icon name="calendar-days" size={18} /><time>{f.date}</time></span>
-                <span className="desk-fixture-title"><b>{f.fixture}</b><span className="dim">{f.venue}</span></span>
-                <span className="desk-fixture-count"><b>{f.players.length}</b> player{f.players.length === 1 ? '' : 's'}<small>GPS confirmed</small></span>
+              <button
+                className="desk-fixture"
+                aria-expanded={openKey === key}
+                onClick={() => setOpenKey(openKey === key ? null : key)}
+              >
+                <span className="desk-fixture-date">
+                  <Icon name="calendar-days" size={18} />
+                  <time>{f.date}</time>
+                </span>
+                <span className="desk-fixture-title">
+                  <b>{f.fixture}</b>
+                  <span className="dim">{f.venue}</span>
+                </span>
+                <span className="desk-fixture-count">
+                  <b>{f.players.length}</b> player{f.players.length === 1 ? '' : 's'}
+                  <small>GPS confirmed</small>
+                </span>
                 <Icon name="chevron-down" size={16} />
               </button>
               {openKey === key && (
                 <div className="list-rows" style={{ marginTop: 8 }}>
                   {f.players.map((p) => (
-                    <div key={p.id} className="list-row" style={{ cursor: 'pointer' }} {...pressable(() => openPlayer(p.id))}>
+                    <div
+                      key={p.id}
+                      className="list-row"
+                      style={{ cursor: 'pointer' }}
+                      {...pressable(() => openPlayer(p.id))}
+                    >
                       <span className="pill blue">{p.position}</span>
                       <span className="grow">{p.name}</span>
-                      <span className="dim">{p.age} · {t('term.profileSignal')} {p.trustScore}%</span>
+                      <span className="dim">
+                        {p.age} · {t('term.profileSignal')} {p.trustScore}%
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -405,7 +848,11 @@ export function FixturesScreen({ session, tick, openPlayer }: ScreenProps) {
 /* ------------------------------------------------------------ Compare */
 
 // Side-by-side comparison — the spreadsheet scouts keep, built in.
-export function CompareModal({ session, playerIds, onClose }: {
+export function CompareModal({
+  session,
+  playerIds,
+  onClose,
+}: {
   session: Session;
   playerIds: string[];
   onClose: () => void;
@@ -413,8 +860,9 @@ export function CompareModal({ session, playerIds, onClose }: {
   const dialogRef = useDialog<HTMLDivElement>(onClose);
   const [players, setPlayers] = useState<PlayerDetail[]>([]);
   useEffect(() => {
-    Promise.all(playerIds.map((id) => api.getPlayer(session, id).catch(() => null)))
-      .then((list) => setPlayers(list.filter((p): p is PlayerDetail => !!p)));
+    Promise.all(playerIds.map((id) => api.getPlayer(session, id).catch(() => null))).then((list) =>
+      setPlayers(list.filter((p): p is PlayerDetail => !!p)),
+    );
   }, [session, playerIds]);
 
   const rows: { label: string; get: (p: PlayerDetail) => ReactNode }[] = [
@@ -423,35 +871,66 @@ export function CompareModal({ session, playerIds, onClose }: {
     { label: 'Apps', get: (p) => p.stats?.appearances ?? '—' },
     { label: 'Goals', get: (p) => p.stats?.goals ?? '—' },
     { label: 'Assists', get: (p) => p.stats?.assists ?? '—' },
-    { label: 'Top speed', get: (p) => p.stats?.paceKmh ? `${p.stats.paceKmh} km/h` : '—' },
-    { label: 'Pass %', get: (p) => p.stats?.passCompletionPct ? `${p.stats.passCompletionPct}%` : '—' },
-    { label: 'Duels %', get: (p) => p.stats?.duelSuccessPct ? `${p.stats.duelSuccessPct}%` : '—' },
+    { label: 'Top speed', get: (p) => (p.stats?.paceKmh ? `${p.stats.paceKmh} km/h` : '—') },
+    { label: 'Pass %', get: (p) => (p.stats?.passCompletionPct ? `${p.stats.passCompletionPct}%` : '—') },
+    { label: 'Duels %', get: (p) => (p.stats?.duelSuccessPct ? `${p.stats.duelSuccessPct}%` : '—') },
     { label: 'Verified attendance', get: (p) => p.attendance.length },
     { label: 'Verified clips', get: (p) => p.media.filter((m) => m.verifiedClip).length },
     { label: 'Trial reports', get: (p) => p.trialReports.length },
-    { label: 'Combine (verified)', get: (p) => (p.drillResults ?? []).filter((r) => r.verified).map((r) => `${r.metric} ${r.value}${r.unit}`).join(', ') || '—' },
+    {
+      label: 'Combine (verified)',
+      get: (p) =>
+        (p.drillResults ?? [])
+          .filter((r) => r.verified)
+          .map((r) => `${r.metric} ${r.value}${r.unit}`)
+          .join(', ') || '—',
+    },
     { label: 'Availability', get: (p) => AVAILABILITY_LABELS[p.availability] ?? p.availability },
-    { label: 'Status', get: (p) => p.guardianManaged ? 'U18 · guardian-managed' : CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus },
+    {
+      label: 'Status',
+      get: (p) =>
+        p.guardianManaged ? 'U18 · guardian-managed' : (CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus),
+    },
   ];
 
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label="Compare" tabIndex={-1} style={{ width: 'min(980px, 94vw)' }}>
+      <div
+        className="drawer"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Compare"
+        tabIndex={-1}
+        style={{ width: 'min(980px, 94vw)' }}
+      >
         <div className="head">
-          <div><h3>Compare</h3><div className="sub">Side by side — verified data only.</div></div>
-          <button className="close" onClick={onClose}>Close</button>
+          <div>
+            <h3>Compare</h3>
+            <div className="sub">Side by side — verified data only.</div>
+          </div>
+          <button className="close" onClick={onClose}>
+            Close
+          </button>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table className="data">
             <thead>
-              <tr><th></th>{players.map((p) => <th key={p.id}>{p.name}</th>)}</tr>
+              <tr>
+                <th></th>
+                {players.map((p) => (
+                  <th key={p.id}>{p.name}</th>
+                ))}
+              </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
                 <tr key={r.label}>
                   <td style={{ color: 'var(--muted)' }}>{r.label}</td>
-                  {players.map((p) => <td key={p.id}>{r.get(p)}</td>)}
+                  {players.map((p) => (
+                    <td key={p.id}>{r.get(p)}</td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -474,11 +953,20 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
   const [comparing, setComparing] = useState(false);
 
   useEffect(() => {
-    api.searchPlayers(session, filters).then((p) => { setPlayers(p); setError(null); }).catch((e) => setError(errMsg(e)));
+    api
+      .searchPlayers(session, filters)
+      .then((p) => {
+        setPlayers(p);
+        setError(null);
+      })
+      .catch((e) => setError(errMsg(e)));
   }, [session, filters, tick]);
 
   useEffect(() => {
-    api.getSavedSearches(session).then(setSaved).catch(() => {});
+    api
+      .getSavedSearches(session)
+      .then(setSaved)
+      .catch(() => {});
   }, [session, tick]);
 
   const saveCurrent = async () => {
@@ -487,90 +975,232 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
       await api.saveSearch(session, saveName.trim(), filters);
       setSaveName('');
       setSaved(await api.getSavedSearches(session));
-      notify('Saved — you\'ll be notified the moment a new player matches.');
-    } catch (e) { notify(errMsg(e), true); }
+      notify("Saved — you'll be notified the moment a new player matches.");
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
   };
 
   const toggleCompare = (id: string) => {
-    setCompareIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 3 ? prev : [...prev, id]);
+    setCompareIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : prev.length >= 3 ? prev : [...prev, id],
+    );
   };
 
   // One batch call decorates every visible card — never N+1 passports.
-  const fpSummaries = usePassportSummaries(session, players.map((p) => p.id));
+  const fpSummaries = usePassportSummaries(
+    session,
+    players.map((p) => p.id),
+  );
 
   return (
     <>
       <AgencyWall session={session} />
-      <div className="desk-search-toolbar"><div className="desk-search-field"><Icon name="search" size={20} />
-        <input
-          type="text"
-          aria-label="Search players" placeholder="Search players by name or location"
-          value={filters.q ?? ''}
-          onChange={(e) => setFilters({ ...filters, q: e.target.value || undefined })}
-        />
-      </div><span className="desk-search-count"><b>{players.length}</b> players</span></div>
+      <div className="desk-search-toolbar">
+        <div className="desk-search-field">
+          <Icon name="search" size={20} />
+          <input
+            type="text"
+            aria-label="Search players"
+            placeholder="Search players by name or location"
+            value={filters.q ?? ''}
+            onChange={(e) => setFilters({ ...filters, q: e.target.value || undefined })}
+          />
+        </div>
+        <span className="desk-search-count">
+          <b>{players.length}</b> players
+        </span>
+      </div>
       <div className="desk-search-filters" aria-label="Player filters">
-        <select aria-label="Position" value={filters.position ?? ''} onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}>
+        <select
+          aria-label="Position"
+          value={filters.position ?? ''}
+          onChange={(e) => setFilters({ ...filters, position: e.target.value || undefined })}
+        >
           <option value="">Any position</option>
-          {POSITIONS.map((p) => <option key={p}>{p}</option>)}
+          {POSITIONS.map((p) => (
+            <option key={p}>{p}</option>
+          ))}
         </select>
-        <select aria-label="Availability" value={filters.availability ?? ''} onChange={(e) => setFilters({ ...filters, availability: e.target.value || undefined })}>
+        <select
+          aria-label="Availability"
+          value={filters.availability ?? ''}
+          onChange={(e) => setFilters({ ...filters, availability: e.target.value || undefined })}
+        >
           <option value="">Any availability</option>
-          {Object.entries(AVAILABILITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          {Object.entries(AVAILABILITY_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
         </select>
-        <select aria-label="Age group" value={filters.ageGroup ?? ''} onChange={(e) => setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })}>
+        <select
+          aria-label="Age group"
+          value={filters.ageGroup ?? ''}
+          onChange={(e) =>
+            setFilters({ ...filters, ageGroup: (e.target.value || undefined) as SearchFilters['ageGroup'] })
+          }
+        >
           <option value="">Any age group</option>
           <option value="u16">U16</option>
           <option value="u18">U18</option>
           <option value="18-21">18–21</option>
           <option value="senior">22+</option>
         </select>
-        <select aria-label="Country" value={filters.country ?? ''} onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}>
+        <select
+          aria-label="Country"
+          value={filters.country ?? ''}
+          onChange={(e) => setFilters({ ...filters, country: e.target.value || undefined })}
+        >
           <option value="">Any country</option>
-          {['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR'].map((c) => <option key={c}>{c}</option>)}
+          {['GB', 'PT', 'FR', 'SE', 'PL', 'NG', 'GH', 'AR', 'JP', 'KR'].map((c) => (
+            <option key={c}>{c}</option>
+          ))}
         </select>
         <label className="chk">
-          <input type="checkbox" checked={!!filters.newDays} onChange={(e) => setFilters({ ...filters, newDays: e.target.checked ? 7 : undefined })} />
+          <input
+            type="checkbox"
+            checked={!!filters.newDays}
+            onChange={(e) => setFilters({ ...filters, newDays: e.target.checked ? 7 : undefined })}
+          />
           New this week
         </label>
-        {Object.values(filters).some(Boolean) && <button className="f-textbtn" onClick={() => setFilters({})}>Clear filters</button>}
+        {Object.values(filters).some(Boolean) && (
+          <button className="f-textbtn" onClick={() => setFilters({})}>
+            Clear filters
+          </button>
+        )}
       </div>
-      <div className="desk-search-options"><details className="desk-save-search"><summary><Icon name="list-checks" size={16} /> Save & manage searches</summary><div className="filters club-saved-search">
-        <input type="text" placeholder="Save this search as… (alerts on new matches)" value={saveName} onChange={(e) => setSaveName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && saveCurrent()} />
-        <button onClick={saveCurrent}>Save search</button>
-        {saved.map((s) => (
-          <span key={s.id} className="pill blue" style={{ cursor: 'pointer' }} title={`by ${s.scoutName}`}>
-            <button className="linklike" onClick={() => setFilters(s.filters)}>{s.name}</button>{' '}
-            <button
-              className="linklike"
-              aria-label={`${t('confirm.deleteSavedSearch').replace('{name}', s.name)}`}
-              title="Delete"
-              onClick={() => confirmDestructive({ ...DESTRUCTIVE_ACTIONS.deleteSavedSearch, name: s.name }) && api.deleteSavedSearch(session, s.id).then(() => api.getSavedSearches(session).then(setSaved))}
-            >✕</button>
-          </span>
-        ))}
-      </div></details>
+      <div className="desk-search-options">
+        <details className="desk-save-search">
+          <summary>
+            <Icon name="list-checks" size={16} /> Save & manage searches
+          </summary>
+          <div className="filters club-saved-search">
+            <input
+              type="text"
+              placeholder="Save this search as… (alerts on new matches)"
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && saveCurrent()}
+            />
+            <button onClick={saveCurrent}>Save search</button>
+            {saved.map((s) => (
+              <span key={s.id} className="pill blue" style={{ cursor: 'pointer' }} title={`by ${s.scoutName}`}>
+                <button className="linklike" onClick={() => setFilters(s.filters)}>
+                  {s.name}
+                </button>{' '}
+                <button
+                  className="linklike"
+                  aria-label={`${t('confirm.deleteSavedSearch').replace('{name}', s.name)}`}
+                  title="Delete"
+                  onClick={() =>
+                    confirmDestructive({ ...DESTRUCTIVE_ACTIONS.deleteSavedSearch, name: s.name }) &&
+                    api.deleteSavedSearch(session, s.id).then(() => api.getSavedSearches(session).then(setSaved))
+                  }
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        </details>
         {compareIds.length >= 2 && (
-          <button className="primary" onClick={() => setComparing(true)}>Compare {compareIds.length}</button>
+          <button className="primary" onClick={() => setComparing(true)}>
+            Compare {compareIds.length}
+          </button>
         )}
       </div>
       {error && <div className="notice block">{error}</div>}
-      <div className="desk-search-context"><span><Icon name="map-pin" size={14} /> Local scouting · within 50 km</span><details><summary>Discovery criteria <Icon name="chevron-down" size={12} /></summary><p>Amateur and semi-pro players within 50 km of your ground. The radius is enforced by the server.</p><p data-ordering>{t('discover.orderingGrassroots')}</p></details></div>
+      <div className="desk-search-context">
+        <span>
+          <Icon name="map-pin" size={14} /> Local scouting · within 50 km
+        </span>
+        <details>
+          <summary>
+            Discovery criteria <Icon name="chevron-down" size={12} />
+          </summary>
+          <p>Amateur and semi-pro players within 50 km of your ground. The radius is enforced by the server.</p>
+          <p data-ordering>{t('discover.orderingGrassroots')}</p>
+        </details>
+      </div>
       {comparing && <CompareModal session={session} playerIds={compareIds} onClose={() => setComparing(false)} />}
       <div className="desk-player-register">
-        <div className="desk-register-columns" aria-hidden="true"><span>Player / location</span><span>Football profile</span><span>Availability / contract</span><span>Evidence</span><span>Compare</span></div>
+        <div className="desk-register-columns" aria-hidden="true">
+          <span>Player / location</span>
+          <span>Football profile</span>
+          <span>Availability / contract</span>
+          <span>Evidence</span>
+          <span>Compare</span>
+        </div>
         {players.map((p) => (
           <article key={p.id} className={`desk-player-record ${compareIds.includes(p.id) ? 'is-compared' : ''}`}>
-            <button className="desk-player-open" onClick={() => openPlayer(p.id)} aria-label={`Open ${p.name}'s profile`}>
-              <span className="desk-player-person"><span className="desk-position" aria-hidden="true">{p.position}</span><span><strong>{p.name}{p.identityVerified && <Icon name="badge-check" size={15} label="Identity verified" />}</strong><span className="desk-record-sub">{p.city ? `${p.city}, ` : ''}{p.country}{typeof p.distanceKm === 'number' ? ` · ${p.distanceKm} km` : ''}</span>{p.guardianManaged && <span className="desk-safeguarding">U18 · guardian-managed</span>}{p.firstTeamSeeker && <span className="desk-seeker">First-team seeker</span>}</span></span>
-              <span className="desk-player-spec"><b>{p.position} <span> / {p.age} years</span></b><span className="desk-record-sub">{sentenceCase(p.foot)} foot · {p.heightCm} cm</span>{p.level === 'semi_pro' && <span className="desk-record-sub">Semi-pro</span>}</span>
-              <span className="desk-player-status"><span className={`desk-availability ${p.availability === 'available_now' ? 'available' : ''}`}>{AVAILABILITY_LABELS[p.availability] ?? p.availability}</span><span className="desk-record-sub">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>{fpSummaries.get(p.id)?.currentClub?.name && <span className="desk-record-sub">{fpSummaries.get(p.id)!.currentClub!.name}</span>}</span>
-              <span className="desk-player-evidence">{fpSummaries.get(p.id) && <span className="desk-evidence-label">{t('fp.coverage')}: <b>{t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}</b></span>}<TrustBar score={p.trustScore} /></span>
+            <button
+              className="desk-player-open"
+              onClick={() => openPlayer(p.id)}
+              aria-label={`Open ${p.name}'s profile`}
+            >
+              <span className="desk-player-person">
+                <span className="desk-position" aria-hidden="true">
+                  {p.position}
+                </span>
+                <span>
+                  <strong>
+                    {p.name}
+                    {p.identityVerified && <Icon name="badge-check" size={15} label="Identity verified" />}
+                  </strong>
+                  <span className="desk-record-sub">
+                    {p.city ? `${p.city}, ` : ''}
+                    {p.country}
+                    {typeof p.distanceKm === 'number' ? ` · ${p.distanceKm} km` : ''}
+                  </span>
+                  {p.guardianManaged && <span className="desk-safeguarding">U18 · guardian-managed</span>}
+                  {p.firstTeamSeeker && <span className="desk-seeker">First-team seeker</span>}
+                </span>
+              </span>
+              <span className="desk-player-spec">
+                <b>
+                  {p.position} <span> / {p.age} years</span>
+                </b>
+                <span className="desk-record-sub">
+                  {sentenceCase(p.foot)} foot · {p.heightCm} cm
+                </span>
+                {p.level === 'semi_pro' && <span className="desk-record-sub">Semi-pro</span>}
+              </span>
+              <span className="desk-player-status">
+                <span className={`desk-availability ${p.availability === 'available_now' ? 'available' : ''}`}>
+                  {AVAILABILITY_LABELS[p.availability] ?? p.availability}
+                </span>
+                <span className="desk-record-sub">{CONTRACT_LABELS[p.contractStatus] ?? p.contractStatus}</span>
+                {fpSummaries.get(p.id)?.currentClub?.name && (
+                  <span className="desk-record-sub">{fpSummaries.get(p.id)!.currentClub!.name}</span>
+                )}
+              </span>
+              <span className="desk-player-evidence">
+                {fpSummaries.get(p.id) && (
+                  <span className="desk-evidence-label">
+                    {t('fp.coverage')}: <b>{t(`fp.cov.${fpSummaries.get(p.id)!.evidenceCoverage}`)}</b>
+                  </span>
+                )}
+                <TrustBar score={p.trustScore} />
+              </span>
             </button>
-            <label className="desk-compare"><input aria-label={`Compare ${p.name}`} type="checkbox" checked={compareIds.includes(p.id)} onChange={() => toggleCompare(p.id)} /><span>Compare</span></label>
+            <label className="desk-compare">
+              <input
+                aria-label={`Compare ${p.name}`}
+                type="checkbox"
+                checked={compareIds.includes(p.id)}
+                onChange={() => toggleCompare(p.id)}
+              />
+              <span>Compare</span>
+            </label>
           </article>
         ))}
-        {!players.length && !error && <div className="desk-empty">No players match these filters. Adjust your search to see more local players.</div>}
+        {!players.length && !error && (
+          <div className="desk-empty">
+            No players match these filters. Adjust your search to see more local players.
+          </div>
+        )}
       </div>
       <SharedPassportOpener session={session} notify={notify} />
     </>
@@ -581,13 +1211,32 @@ export function SearchScreen({ session, tick, notify, openPlayer }: ScreenProps)
 
 export function ShortlistScreen({ session, tick, openPlayer }: ScreenProps) {
   const [players, setPlayers] = useState<Player[]>([]);
-  useEffect(() => { api.getShortlist(session).then(setPlayers).catch(() => {}); }, [session, tick]);
-  if (!players.length) return <div className="notice">Nothing shortlisted yet — shortlist players from their profile. Every shortlist action lands on the Discovery Ledger under your name.</div>;
+  useEffect(() => {
+    api
+      .getShortlist(session)
+      .then(setPlayers)
+      .catch(() => {});
+  }, [session, tick]);
+  if (!players.length)
+    return (
+      <div className="notice">
+        Nothing shortlisted yet — shortlist players from their profile. Every shortlist action lands on the Discovery
+        Ledger under your name.
+      </div>
+    );
   return (
     <div className="player-grid">
       {players.map((p) => (
         <div key={p.id} className="player-card" {...pressable(() => openPlayer(p.id))}>
-          <div className="row1"><span className="club-player-identity"><span className="club-player-avatar" aria-hidden="true">{initials(p.name)}</span><span className="name">{p.name}</span></span><span className="pill blue">{p.position}</span></div>
+          <div className="row1">
+            <span className="club-player-identity">
+              <span className="club-player-avatar" aria-hidden="true">
+                {initials(p.name)}
+              </span>
+              <span className="name">{p.name}</span>
+            </span>
+            <span className="pill blue">{p.position}</span>
+          </div>
           <TrustBar score={p.trustScore} />
         </div>
       ))}
@@ -599,26 +1248,53 @@ export function ShortlistScreen({ session, tick, openPlayer }: ScreenProps) {
 
 export function RequestsScreen({ session, tick, openPlayer }: ScreenProps) {
   const [requests, setRequests] = useState<OrgRequest[]>([]);
-  useEffect(() => { api.getRequests(session).then(setRequests).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getRequests(session)
+      .then(setRequests)
+      .catch(() => {});
+  }, [session, tick]);
   return (
     <>
-      <CountChart title="Request responses" note="Current status of your club’s requests. Contact opens only after acceptance." unit="requests" distribution items={countBy(requests, r => r.status)} />
-      <Hint>No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request goes to the parent or guardian, never the child.</Hint>
+      <CountChart
+        title="Request responses"
+        note="Current status of your club’s requests. Contact opens only after acceptance."
+        unit="requests"
+        distribution
+        items={countBy(requests, (r) => r.status)}
+      />
+      <Hint>
+        No direct message channel: you file a request and contact unlocks only on acceptance. For under-18s the request
+        goes to the parent or guardian, never the child.
+      </Hint>
       <div className="list-rows">
         {requests.length === 0 && <div className="notice">No requests sent yet.</div>}
         {requests.map((r) => (
           <div key={r.id} className="list-row">
             <span className={`pill ${r.type === 'trial' ? 'gold' : 'blue'}`}>{r.type}</span>
             <span className="grow">
-              <a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} {...pressable(() => openPlayer(r.playerId))}>{r.playerName ?? r.playerId}</a>
-              {r.routedTo === 'guardian' && <span className="pill red" style={{ marginLeft: 8 }}>→ guardian</span>}
+              <a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} {...pressable(() => openPlayer(r.playerId))}>
+                {r.playerName ?? r.playerId}
+              </a>
+              {r.routedTo === 'guardian' && (
+                <span className="pill red" style={{ marginLeft: 8 }}>
+                  → guardian
+                </span>
+              )}
               {r.message && <span className="dim"> — “{r.message}”</span>}
             </span>
-            <span className="dim">by {r.scoutName}{r.scoutRole ? ` (${r.scoutRole})` : ''}</span>
-            <span className={`pill ${r.status === 'accepted' ? 'green' : r.status === 'declined' || r.status === 'suspended' ? 'red' : ''}`}>
+            <span className="dim">
+              by {r.scoutName}
+              {r.scoutRole ? ` (${r.scoutRole})` : ''}
+            </span>
+            <span
+              className={`pill ${r.status === 'accepted' ? 'green' : r.status === 'declined' || r.status === 'suspended' ? 'red' : ''}`}
+            >
               {r.status === 'pending' && r.routedTo === 'guardian' ? 'awaiting guardian' : r.status}
             </span>
-            {r.status === 'accepted' && r.contactChannel && <span className="pill outline-green">Channel open: {r.contactChannel}</span>}
+            {r.status === 'accepted' && r.contactChannel && (
+              <span className="pill outline-green">Channel open: {r.contactChannel}</span>
+            )}
           </div>
         ))}
       </div>
@@ -641,9 +1317,21 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   const lastTyped = useRef(0);
   const typingTimer = useRef<number | null>(null);
 
-  useEffect(() => { api.getChannels(session).then(setChannels).catch(() => {}); }, [session, tick]);
-  useEffect(() => { api.getTrials(session).then(setTrials).catch(() => {}); }, [session, tick]);
-  useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [channels, openId]);
+  useEffect(() => {
+    api
+      .getChannels(session)
+      .then(setChannels)
+      .catch(() => {});
+  }, [session, tick]);
+  useEffect(() => {
+    api
+      .getTrials(session)
+      .then(setTrials)
+      .catch(() => {});
+  }, [session, tick]);
+  useEffect(() => {
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
+  }, [channels, openId]);
 
   const open = channels.find((c) => c.id === openId) ?? null;
 
@@ -679,14 +1367,16 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
   // Outbox: a send is 'pending' until the server confirms it durable, and
   // 'failed' (with retry) if the request errors. Retries reuse the same
   // client message id, so the server never stores a duplicate.
-  const [outbox, setOutbox] = useState<{ id: string; channelId: string; text: string; attach?: string; status: 'pending' | 'failed' }[]>([]);
+  const [outbox, setOutbox] = useState<
+    { id: string; channelId: string; text: string; attach?: string; status: 'pending' | 'failed' }[]
+  >([]);
   const send = async (retryId?: string) => {
     const entry = retryId ? outbox.find((o) => o.id === retryId) : null;
     const text = entry ? entry.text : draft.trim();
     const channelId = entry ? entry.channelId : open?.id;
     if (!channelId || !text) return;
     const cid = entry ? entry.id : `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const attach = entry ? entry.attach : (attachReportId || undefined);
+    const attach = entry ? entry.attach : attachReportId || undefined;
     if (entry) {
       setOutbox((o) => o.map((x) => (x.id === cid ? { ...x, status: 'pending' } : x)));
     } else {
@@ -706,8 +1396,19 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
-      <Hint>Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the parent or guardian, never the child.</Hint>
-      {channels.length === 0 && <div className="club-message-empty"><span className="club-empty-icon"><Icon name="messages-square" size={35} /></span><h3>Your club conversations</h3><p>No open threads. Send a request; a thread opens when it's accepted.</p></div>}
+      <Hint>
+        Threads open on acceptance, stay on-platform, and are moderated and logged. For under-18s you are talking to the
+        parent or guardian, never the child.
+      </Hint>
+      {channels.length === 0 && (
+        <div className="club-message-empty">
+          <span className="club-empty-icon">
+            <Icon name="messages-square" size={35} />
+          </span>
+          <h3>Your club conversations</h3>
+          <p>No open threads. Send a request; a thread opens when it's accepted.</p>
+        </div>
+      )}
       <div className="club-messages">
         <div className="list-rows club-channel-list">
           {channels.map((c) => (
@@ -717,9 +1418,19 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
               style={{ cursor: 'pointer' }}
               {...pressable(() => setOpenId(c.id))}
             >
-              <span className="club-player-avatar" aria-hidden="true">{initials(c.playerName)}</span><span className="grow">
-                <b>{c.playerName}</b>{c.closed && <span className="pill red" style={{ marginLeft: 6 }}>Closed</span>}
-                <div className="dim">{c.counterparty === 'guardian' ? 'via guardian' : 'direct'} · {c.messages.length} msg</div>
+              <span className="club-player-avatar" aria-hidden="true">
+                {initials(c.playerName)}
+              </span>
+              <span className="grow">
+                <b>{c.playerName}</b>
+                {c.closed && (
+                  <span className="pill red" style={{ marginLeft: 6 }}>
+                    Closed
+                  </span>
+                )}
+                <div className="dim">
+                  {c.counterparty === 'guardian' ? 'via guardian' : 'direct'} · {c.messages.length} msg
+                </div>
               </span>
             </div>
           ))}
@@ -740,49 +1451,91 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 const read = mine && open.readBy?.counterparty != null && open.readBy.counterparty >= m.ts;
                 return (
                   <div key={m.id} className={`bubble ${mine ? 'mine' : 'theirs'}`}>
-                    <div className="who">{m.sender.name} · {fmtStamp(m.ts)}</div>
+                    <div className="who">
+                      {m.sender.name} · {fmtStamp(m.ts)}
+                    </div>
                     {m.text}
                     {m.attachment?.kind === 'clip' && (
                       <div style={{ marginTop: 6 }}>
                         <span className="pill blue">{m.attachment.title}</span>{' '}
                         {m.attachment.verifiedClip && <span className="pill green">Verified Clip</span>}
-                        {api.mediaUrl(m.attachment.url) && <video className="clip" style={{ marginTop: 6 }} controls preload="metadata" src={api.mediaUrl(m.attachment.url)!} />}
+                        {api.mediaUrl(m.attachment.url) && (
+                          <video
+                            className="clip"
+                            style={{ marginTop: 6 }}
+                            controls
+                            preload="metadata"
+                            src={api.mediaUrl(m.attachment.url)!}
+                          />
+                        )}
                       </div>
                     )}
                     {m.attachment?.kind === 'trial_report' && (
                       <div style={{ marginTop: 6 }}>
                         <span className="pill gold">Trial report — {m.attachment.orgName}</span>
-                        <div className="dim" style={{ fontSize: 12 }}>{m.attachment.summary}</div>
+                        <div className="dim" style={{ fontSize: 12 }}>
+                          {m.attachment.summary}
+                        </div>
                       </div>
                     )}
-                    {mine && <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>{read ? '✓✓ read' : '✓ sent'}</div>}
+                    {mine && (
+                      <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>
+                        {read ? '✓✓ read' : '✓ sent'}
+                      </div>
+                    )}
                   </div>
                 );
               })}
-              {outbox.filter((o) => o.channelId === open.id).map((o) => (
-                <div key={o.id} className={`bubble mine ${o.status === 'failed' ? 'failed' : 'pending'}`}>
-                  {o.text}
-                  <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>
-                    {o.status === 'failed'
-                      ? <>Not delivered — <button style={{ padding: 0, color: 'var(--danger)' }} onClick={() => send(o.id)}>Retry</button></>
-                      : '… sending'}
+              {outbox
+                .filter((o) => o.channelId === open.id)
+                .map((o) => (
+                  <div key={o.id} className={`bubble mine ${o.status === 'failed' ? 'failed' : 'pending'}`}>
+                    {o.text}
+                    <div className="who" style={{ textAlign: 'right', marginTop: 2 }}>
+                      {o.status === 'failed' ? (
+                        <>
+                          Not delivered —{' '}
+                          <button style={{ padding: 0, color: 'var(--danger)' }} onClick={() => send(o.id)}>
+                            Retry
+                          </button>
+                        </>
+                      ) : (
+                        '… sending'
+                      )}
+                    </div>
                   </div>
+                ))}
+              {typing && (
+                <div className="dim" style={{ fontSize: 12.5 }}>
+                  … {open.counterparty === 'guardian' ? 'the guardian is' : `${open.playerName} is`} typing
                 </div>
-              ))}
-              {typing && <div className="dim" style={{ fontSize: 12.5 }}>… {open.counterparty === 'guardian' ? 'the guardian is' : `${open.playerName} is`} typing</div>}
+              )}
             </div>
             {open.closed && (
               <div className="notice block">
-                This thread is closed — the player is no longer available to your club (block, suspension,
-                or they moved beyond the platform's reach). The history stays for audit; nothing new can be sent.
+                This thread is closed — the player is no longer available to your club (block, suspension, or they moved
+                beyond the platform's reach). The history stays for audit; nothing new can be sent.
               </div>
             )}
-            <div style={{ display: 'flex', gap: 10, opacity: open.closed ? 0.5 : 1, pointerEvents: open.closed ? 'none' : 'auto' }}>
+            <div
+              style={{
+                display: 'flex',
+                gap: 10,
+                opacity: open.closed ? 0.5 : 1,
+                pointerEvents: open.closed ? 'none' : 'auto',
+              }}
+            >
               {openPlayerReports.length > 0 && (
-                <select value={attachReportId} onChange={(e) => setAttachReportId(e.target.value)} title="Attach a filed trial report">
+                <select
+                  value={attachReportId}
+                  onChange={(e) => setAttachReportId(e.target.value)}
+                  title="Attach a filed trial report"
+                >
                   <option value="">No attachment</option>
                   {openPlayerReports.map((r) => (
-                    <option key={r.id} value={r.id}>Trial report ({fmtDate(r.filedAt)})</option>
+                    <option key={r.id} value={r.id}>
+                      Trial report ({fmtDate(r.filedAt)})
+                    </option>
                   ))}
                 </select>
               )}
@@ -793,7 +1546,9 @@ export function MessagesScreen({ session, tick, notify }: ScreenProps) {
                 onChange={(e) => onDraftChange(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && send()}
               />
-              <button className="primary" onClick={() => send()}>Send</button>
+              <button className="primary" onClick={() => send()}>
+                Send
+              </button>
             </div>
           </div>
         ) : (
@@ -821,11 +1576,17 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
   const [form, setForm] = useState<Record<string, string>>({});
   const [localTick, setLocalTick] = useState(0);
 
-  useEffect(() => { api.getTrials(session).then(setTrials).catch(() => {}); }, [session, tick, localTick]);
+  useEffect(() => {
+    api
+      .getTrials(session)
+      .then(setTrials)
+      .catch(() => {});
+  }, [session, tick, localTick]);
 
   const file = async (trialId: string) => {
     const report: Record<string, number | string> = {};
-    for (const f of REPORT_FIELDS) if (form[f.key] !== undefined && form[f.key] !== '') report[f.key] = Number(form[f.key]);
+    for (const f of REPORT_FIELDS)
+      if (form[f.key] !== undefined && form[f.key] !== '') report[f.key] = Number(form[f.key]);
     if (form.strengthNote) report.strengthNote = form.strengthNote;
     if (form.focusNote) report.focusNote = form.focusNote;
     try {
@@ -843,42 +1604,95 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
 
   return (
     <>
-      <CountChart title="Your trial programme" note="Current workflow states of your club’s recorded trials." unit="trials" distribution items={countBy(trials, r => r.status)} />
+      <CountChart
+        title="Your trial programme"
+        note="Current workflow states of your club’s recorded trials."
+        unit="trials"
+        distribution
+        items={countBy(trials, (r) => r.status)}
+      />
       {awaiting.length > 0 && (
         <div className="notice warn" style={{ marginBottom: 16 }}>
-          {awaiting.length} trial{awaiting.length > 1 ? 's' : ''} awaiting a mandatory performance report.
-          New trial requests are blocked until every report is filed — partial reports are rejected by the server.
+          {awaiting.length} trial{awaiting.length > 1 ? 's' : ''} awaiting a mandatory performance report. New trial
+          requests are blocked until every report is filed — partial reports are rejected by the server.
         </div>
       )}
       <div className="list-rows">
-        {trials.length === 0 && <div className="notice">No trials yet. Trials begin when a player accepts a trial request.</div>}
+        {trials.length === 0 && (
+          <div className="notice">No trials yet. Trials begin when a player accepts a trial request.</div>
+        )}
         {trials.map((t) => (
           <div key={t.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <span className="grow">
                 <b>{t.playerName}</b> <span className="dim">Requested by {t.scoutName}</span>
-                {t.guardianApproved && <span className="pill red" style={{ marginLeft: 8 }}>Guardian approved</span>}
+                {t.guardianApproved && (
+                  <span className="pill red" style={{ marginLeft: 8 }}>
+                    Guardian approved
+                  </span>
+                )}
                 <div className="dim">
-                  <RecordFacts items={[{label: 'Date', value: t.proposedDate ?? 'To be confirmed'}, {label: 'Venue', value: t.venue}, ...(t.status === 'awaiting_report' && t.reportDueAt ? [{label: 'Report due', value: fmtDate(t.reportDueAt)}] : [])]} />{t.notes && <p className="record-note">{t.notes}</p>}
+                  <RecordFacts
+                    items={[
+                      { label: 'Date', value: t.proposedDate ?? 'To be confirmed' },
+                      { label: 'Venue', value: t.venue },
+                      ...(t.status === 'awaiting_report' && t.reportDueAt
+                        ? [{ label: 'Report due', value: fmtDate(t.reportDueAt) }]
+                        : []),
+                    ]}
+                  />
+                  {t.notes && <p className="record-note">{t.notes}</p>}
                 </div>
               </span>
               {api.trialIcsUrl(session, t.id) && (
-                <a className="pill blue" style={{ textDecoration: 'none' }} href={api.trialIcsUrl(session, t.id)!} download={`scoutbox-trial-${t.id}.ics`}>.ics</a>
+                <a
+                  className="pill blue"
+                  style={{ textDecoration: 'none' }}
+                  href={api.trialIcsUrl(session, t.id)!}
+                  download={`scoutbox-trial-${t.id}.ics`}
+                >
+                  .ics
+                </a>
               )}
               {t.workflowState && t.workflowState !== 'legacy_accepted' && (
-                <span className={`pill ${t.workflowState === 'scheduled' ? 'blue' : t.workflowState === 'completed' ? 'green' : t.workflowState === 'cancelled' ? 'red' : 'gold'}`} data-workflow-state={t.workflowState}>{tt(`tr.state.${t.workflowState}`, t.workflowState)}</span>
+                <span
+                  className={`pill ${t.workflowState === 'scheduled' ? 'blue' : t.workflowState === 'completed' ? 'green' : t.workflowState === 'cancelled' ? 'red' : 'gold'}`}
+                  data-workflow-state={t.workflowState}
+                >
+                  {tt(`tr.state.${t.workflowState}`, t.workflowState)}
+                </span>
               )}
-              {t.caseId && <a className="pill" style={{ textDecoration: 'none' }} href={hashForRoom(t.caseId)}>{tt('rm.tab.trial')} →</a>}
-              <span className={`pill ${t.status === 'reported' ? 'green' : 'gold'}`}>{t.status === 'reported' ? 'report filed' : 'awaiting report'}</span>
+              {t.caseId && (
+                <a className="pill" style={{ textDecoration: 'none' }} href={hashForRoom(t.caseId)}>
+                  {tt('rm.tab.trial')} →
+                </a>
+              )}
+              <span className={`pill ${t.status === 'reported' ? 'green' : 'gold'}`}>
+                {t.status === 'reported' ? 'report filed' : 'awaiting report'}
+              </span>
               {t.status === 'awaiting_report' && (
-                <button onClick={() => { setFiling(filing === t.id ? null : t.id); setForm({}); }}>
+                <button
+                  onClick={() => {
+                    setFiling(filing === t.id ? null : t.id);
+                    setForm({});
+                  }}
+                >
                   {filing === t.id ? 'Cancel' : 'File report'}
                 </button>
               )}
             </div>
             {t.status === 'reported' && t.report && (
               <div className="dim" style={{ marginTop: 6 }}>
-                <RecordFacts items={[{label: 'Acceleration', value: `${t.report.acceleration}/10`}, {label: 'Sprint speed', value: `${t.report.sprintSpeedKmh} km/h`}, {label: 'Distance', value: `${t.report.distanceKm} km`}, {label: 'Pass completion', value: `${t.report.passCompletionPct}%`}, {label: 'Duels won', value: `${t.report.duelSuccessPct}%`}, {label: 'Coach rating', value: `${t.report.coachRating}/10`}]} />
+                <RecordFacts
+                  items={[
+                    { label: 'Acceleration', value: `${t.report.acceleration}/10` },
+                    { label: 'Sprint speed', value: `${t.report.sprintSpeedKmh} km/h` },
+                    { label: 'Distance', value: `${t.report.distanceKm} km` },
+                    { label: 'Pass completion', value: `${t.report.passCompletionPct}%` },
+                    { label: 'Duels won', value: `${t.report.duelSuccessPct}%` },
+                    { label: 'Coach rating', value: `${t.report.coachRating}/10` },
+                  ]}
+                />
               </div>
             )}
             {filing === t.id && (
@@ -897,11 +1711,25 @@ export function TrialsScreen({ session, tick, notify }: ScreenProps) {
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: 10, margin: '8px 0' }}>
-                  <input style={{ flex: 1 }} placeholder="One strength (goes to the player — optional)" value={form.strengthNote ?? ''} onChange={(e) => setForm({ ...form, strengthNote: e.target.value })} />
-                  <input style={{ flex: 1 }} placeholder="One focus area (goes to the player — optional)" value={form.focusNote ?? ''} onChange={(e) => setForm({ ...form, focusNote: e.target.value })} />
+                  <input
+                    style={{ flex: 1 }}
+                    placeholder="One strength (goes to the player — optional)"
+                    value={form.strengthNote ?? ''}
+                    onChange={(e) => setForm({ ...form, strengthNote: e.target.value })}
+                  />
+                  <input
+                    style={{ flex: 1 }}
+                    placeholder="One focus area (goes to the player — optional)"
+                    value={form.focusNote ?? ''}
+                    onChange={(e) => setForm({ ...form, focusNote: e.target.value })}
+                  />
                 </div>
-                <button className="primary" onClick={() => file(t.id)}>Submit full report</button>
-                <span className="dim" style={{ marginLeft: 10 }}>All six metrics are mandatory; the feedback notes reach the player even if it goes no further.</span>
+                <button className="primary" onClick={() => file(t.id)}>
+                  Submit full report
+                </button>
+                <span className="dim" style={{ marginLeft: 10 }}>
+                  All six metrics are mandatory; the feedback notes reach the player even if it goes no further.
+                </span>
               </div>
             )}
           </div>
@@ -929,23 +1757,48 @@ const LEDGER_LABELS: Record<string, string> = {
 
 export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
   const [rows, setRows] = useState<LedgerEntry[]>([]);
-  useEffect(() => { api.getLedger(session).then(setRows).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getLedger(session)
+      .then(setRows)
+      .catch(() => {});
+  }, [session, tick]);
   return (
     <>
       <Hint>Append-only: every action is timestamped to a named scout and cannot be edited or purged.</Hint>
       <div style={{ overflowX: 'auto' }}>
         <table className="data">
-          <thead><tr><th>When</th><th>Action</th><th>Player</th><th>By</th></tr></thead>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Action</th>
+              <th>Player</th>
+              <th>By</th>
+            </tr>
+          </thead>
           <tbody>
             {rows.map((r) => (
               <tr key={r.id}>
                 <td>{fmtDateTime(r.ts)}</td>
                 <td>{LEDGER_LABELS[r.type] ?? r.type}</td>
-                <td><a style={{ color: 'var(--accent-2)', cursor: 'pointer' }} {...pressable(() => openPlayer(r.playerId))}>{r.playerId}</a></td>
+                <td>
+                  <a
+                    style={{ color: 'var(--accent-2)', cursor: 'pointer' }}
+                    {...pressable(() => openPlayer(r.playerId))}
+                  >
+                    {r.playerId}
+                  </a>
+                </td>
                 <td>{r.scoutName}</td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={4} style={{ color: 'var(--muted)' }}>No entries yet — view a profile to create the first one.</td></tr>}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={4} style={{ color: 'var(--muted)' }}>
+                  No entries yet — view a profile to create the first one.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -957,7 +1810,12 @@ export function LedgerScreen({ session, tick, openPlayer }: ScreenProps) {
 
 export function ReputationScreen({ session, tick }: ScreenProps) {
   const [rep, setRep] = useState<Reputation | null>(null);
-  useEffect(() => { api.getReputation(session).then(setRep).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getReputation(session)
+      .then(setRep)
+      .catch(() => {});
+  }, [session, tick]);
   if (!rep) return null;
   return (
     <>
@@ -965,11 +1823,23 @@ export function ReputationScreen({ session, tick }: ScreenProps) {
         <h4>Track records</h4>
         <div style={{ overflowX: 'auto' }}>
           <table className="data">
-            <thead><tr><th>Scout / coach</th><th>Organisation</th><th>Discoveries</th><th>Success rate</th><th>Avg resale multiple</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Scout / coach</th>
+                <th>Organisation</th>
+                <th>Discoveries</th>
+                <th>Success rate</th>
+                <th>Avg resale multiple</th>
+              </tr>
+            </thead>
             <tbody>
               {rep.seeded.map((r) => (
                 <tr key={r.scoutName}>
-                  <td>{r.scoutName}</td><td>{r.orgName}</td><td>{r.discoveries}</td><td>{r.successRatePct}%</td><td>{r.avgResaleMultiple}×</td>
+                  <td>{r.scoutName}</td>
+                  <td>{r.orgName}</td>
+                  <td>{r.discoveries}</td>
+                  <td>{r.successRatePct}%</td>
+                  <td>{r.avgResaleMultiple}×</td>
                 </tr>
               ))}
             </tbody>
@@ -980,12 +1850,32 @@ export function ReputationScreen({ session, tick }: ScreenProps) {
         <h4>Live activity (computed from the Discovery Ledger)</h4>
         <div style={{ overflowX: 'auto' }}>
           <table className="data">
-            <thead><tr><th>Scout / coach</th><th>Organisation</th><th>Views</th><th>Contacts</th><th>Trials</th><th>Signings</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Scout / coach</th>
+                <th>Organisation</th>
+                <th>Views</th>
+                <th>Contacts</th>
+                <th>Trials</th>
+                <th>Signings</th>
+              </tr>
+            </thead>
             <tbody>
-              {rep.live.length === 0 && <tr><td colSpan={6} style={{ color: 'var(--muted)' }}>No live activity yet this session.</td></tr>}
+              {rep.live.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ color: 'var(--muted)' }}>
+                    No live activity yet this session.
+                  </td>
+                </tr>
+              )}
               {rep.live.map((r) => (
                 <tr key={`${r.scoutName}-${r.orgName}`}>
-                  <td>{r.scoutName}</td><td>{r.orgName}</td><td>{r.views}</td><td>{r.contacts}</td><td>{r.trials}</td><td>{r.signings}</td>
+                  <td>{r.scoutName}</td>
+                  <td>{r.orgName}</td>
+                  <td>{r.views}</td>
+                  <td>{r.contacts}</td>
+                  <td>{r.trials}</td>
+                  <td>{r.signings}</td>
                 </tr>
               ))}
             </tbody>
@@ -1000,7 +1890,12 @@ export function ReputationScreen({ session, tick }: ScreenProps) {
 
 export function FunnelScreen({ session, tick }: ScreenProps) {
   const [funnel, setFunnel] = useState<Funnel | null>(null);
-  useEffect(() => { api.getFunnel(session).then(setFunnel).catch(() => {}); }, [session, tick]);
+  useEffect(() => {
+    api
+      .getFunnel(session)
+      .then(setFunnel)
+      .catch(() => {});
+  }, [session, tick]);
   if (!funnel) return <div className="notice">Loading your recruitment funnel…</div>;
   const max = Math.max(...funnel.stages.map((s) => s.count), 1);
   const pct = (i: number) => {
@@ -1015,7 +1910,14 @@ export function FunnelScreen({ session, tick }: ScreenProps) {
           <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
             <div style={{ width: 150, color: 'var(--muted)', fontSize: 13 }}>{s.label}</div>
             <div style={{ flex: 1, background: 'var(--panel-2)', borderRadius: 6, overflow: 'hidden', height: 22 }}>
-              <div style={{ width: `${Math.max(2, (s.count / max) * 100)}%`, height: '100%', background: 'var(--accent)', opacity: 0.35 + 0.65 * (1 - i / funnel.stages.length) }} />
+              <div
+                style={{
+                  width: `${Math.max(2, (s.count / max) * 100)}%`,
+                  height: '100%',
+                  background: 'var(--accent)',
+                  opacity: 0.35 + 0.65 * (1 - i / funnel.stages.length),
+                }}
+              />
             </div>
             <div style={{ width: 46, fontWeight: 700, textAlign: 'right' }}>{s.count}</div>
             <div style={{ width: 70, color: 'var(--muted)', fontSize: 12, textAlign: 'right' }}>
@@ -1042,30 +1944,58 @@ export function FunnelScreen({ session, tick }: ScreenProps) {
 export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
   const [trials, setTrials] = useState<OpenTrial[]>([]);
   const [showPost, setShowPost] = useState(false);
-  const [form, setForm] = useState({ title: '', date: '', venue: '', ageGroup: 'open', positions: '' as string, notes: '' });
+  const [form, setForm] = useState({
+    title: '',
+    date: '',
+    venue: '',
+    ageGroup: 'open',
+    positions: '' as string,
+    notes: '',
+  });
   const [lookingFor, setLookingFor] = useState<string>((session.org.lookingFor ?? []).join(', '));
   const [savedLookingFor, setSavedLookingFor] = useState<string[]>(session.org.lookingFor ?? []);
   const [editingRadar, setEditingRadar] = useState(false);
   const [outcomeNotes, setOutcomeNotes] = useState<Record<string, string>>({});
-  const load = useCallback(() => { api.getOpenTrials(session).then(setTrials).catch(() => {}); }, [session]);
+  const load = useCallback(() => {
+    api
+      .getOpenTrials(session)
+      .then(setTrials)
+      .catch(() => {});
+  }, [session]);
   useEffect(load, [load, tick]);
   const today = new Date().toISOString().slice(0, 10);
-  const outstanding = trials.filter((t) => t.date < today).flatMap((t) => t.registrations.filter((r) => !r.outcome)).length;
+  const outstanding = trials
+    .filter((t) => t.date < today)
+    .flatMap((t) => t.registrations.filter((r) => !r.outcome)).length;
   const resolve = async (trialId: string, regId: string, outcome: 'invite_trial' | 'declined') => {
     try {
       await api.resolveOpenTrialOutcome(session, trialId, regId, outcome, outcomeNotes[regId]?.trim() || undefined);
-      notify(outcome === 'invite_trial' ? 'Trial invitation sent — a routed request, guardian-first for minors.' : 'Your answer is on its way — a kind no beats silence.');
+      notify(
+        outcome === 'invite_trial'
+          ? 'Trial invitation sent — a routed request, guardian-first for minors.'
+          : 'Your answer is on its way — a kind no beats silence.',
+      );
       load();
-    } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Failed', true);
+    }
   };
   return (
     <>
-      <CountChart title="Open-day registrations" note="Registrations per event. A player may register for more than one event." unit="registrations" items={trials.map(t=>({label:`${t.date} · ${t.title}`,value:t.registrations.length}))} />
-      <Hint>Local players and guardians see open days in their app and register. Under-18 registrations reach you once your club is verified.</Hint>
+      <CountChart
+        title="Open-day registrations"
+        note="Registrations per event. A player may register for more than one event."
+        unit="registrations"
+        items={trials.map((t) => ({ label: `${t.date} · ${t.title}`, value: t.registrations.length }))}
+      />
+      <Hint>
+        Local players and guardians see open days in their app and register. Under-18 registrations reach you once your
+        club is verified.
+      </Hint>
       {outstanding > 0 && (
         <div className="notice block" style={{ marginBottom: 16 }}>
-          <b>The no-ghosting rule:</b> {outstanding} player(s) from your past open day(s) are still waiting
-          for an answer. Every registrant gets an invite or a kind no before you can post the next one.
+          <b>The no-ghosting rule:</b> {outstanding} player(s) from your past open day(s) are still waiting for an
+          answer. Every registrant gets an invite or a kind no before you can post the next one.
         </div>
       )}
       {/* The local radar reads as a line; the input appears only while editing. */}
@@ -1073,72 +2003,189 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
         <h4>Local radar</h4>
         {editingRadar ? (
           <div className="filters" data-testid="radar-edit">
-            <input style={{ flex: 1 }} autoFocus aria-label="Positions you are looking for" placeholder="Positions, comma-separated (e.g. ST, CDM)" value={lookingFor} onChange={(e) => setLookingFor(e.target.value)} />
-            <button className="primary" onClick={async () => {
-              try {
-                const positions = lookingFor.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
-                await api.setLookingFor(session, positions);
-                setSavedLookingFor(positions); setEditingRadar(false);
-                notify('Saved — local players in those positions see your club highlighted.');
-              } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-            }}>Save</button>
-            <button className="linklike" onClick={() => { setLookingFor(savedLookingFor.join(', ')); setEditingRadar(false); }}>Cancel</button>
+            <input
+              style={{ flex: 1 }}
+              autoFocus
+              aria-label="Positions you are looking for"
+              placeholder="Positions, comma-separated (e.g. ST, CDM)"
+              value={lookingFor}
+              onChange={(e) => setLookingFor(e.target.value)}
+            />
+            <button
+              className="primary"
+              onClick={async () => {
+                try {
+                  const positions = lookingFor
+                    .split(',')
+                    .map((x) => x.trim().toUpperCase())
+                    .filter(Boolean);
+                  await api.setLookingFor(session, positions);
+                  setSavedLookingFor(positions);
+                  setEditingRadar(false);
+                  notify('Saved — local players in those positions see your club highlighted.');
+                } catch (e) {
+                  notify(e instanceof Error ? e.message : 'Failed', true);
+                }
+              }}
+            >
+              Save
+            </button>
+            <button
+              className="linklike"
+              onClick={() => {
+                setLookingFor(savedLookingFor.join(', '));
+                setEditingRadar(false);
+              }}
+            >
+              Cancel
+            </button>
           </div>
         ) : (
-          <p className="radar-line" data-testid="radar-read" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 14 }}>
-            <span>{savedLookingFor.length ? <>Looking for <b>{savedLookingFor.join(' · ')}</b></> : 'Not looking for anyone right now'}</span>
-            <button className="linklike" style={{ color: 'var(--sb-link)' }} data-testid="radar-edit-link" onClick={() => setEditingRadar(true)}>Edit</button>
+          <p
+            className="radar-line"
+            data-testid="radar-read"
+            style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 14 }}
+          >
+            <span>
+              {savedLookingFor.length ? (
+                <>
+                  Looking for <b>{savedLookingFor.join(' · ')}</b>
+                </>
+              ) : (
+                'Not looking for anyone right now'
+              )}
+            </span>
+            <button
+              className="linklike"
+              style={{ color: 'var(--sb-link)' }}
+              data-testid="radar-edit-link"
+              onClick={() => setEditingRadar(true)}
+            >
+              Edit
+            </button>
           </p>
         )}
       </div>
       {/* The form opens when a manager means to post; the list is the page. */}
       {!showPost ? (
-        <div style={{ margin: '4px 0 14px' }}><button className="primary" data-testid="openday-post-toggle" onClick={() => setShowPost(true)}>Post an open day</button></div>
-      ) : (
-      <div className="section" data-testid="openday-post">
-        <h4>Post an open day</h4>
-        <div className="filters" style={{ flexWrap: 'wrap' }}>
-          <input placeholder="Title (e.g. U15 open morning)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-          <input placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} />
-          <select value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}>
-            <option value="open">Open age</option>
-            <option value="u16">Under 16</option>
-            <option value="u18">Under 18</option>
-            <option value="senior">Senior</option>
-          </select>
-          <input placeholder="Positions (optional, comma-separated)" value={form.positions} onChange={(e) => setForm({ ...form, positions: e.target.value })} />
-          <input style={{ flex: 1 }} placeholder="Notes (screened — no contact details)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-          <button className="primary" onClick={async () => {
-            try {
-              await api.postOpenTrial(session, {
-                title: form.title.trim(), date: form.date, venue: form.venue.trim(), ageGroup: form.ageGroup,
-                positions: form.positions.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean),
-                notes: form.notes.trim() || undefined,
-              });
-              setForm({ title: '', date: '', venue: '', ageGroup: 'open', positions: '', notes: '' });
-              notify('Open day posted — local players can register now.');
-              setShowPost(false);
-              load();
-            } catch (e) { notify(e instanceof Error ? e.message : 'Could not post', true); }
-          }}>Post open day</button>
-          <button className="linklike" onClick={() => setShowPost(false)}>Cancel</button>
+        <div style={{ margin: '4px 0 14px' }}>
+          <button className="primary" data-testid="openday-post-toggle" onClick={() => setShowPost(true)}>
+            Post an open day
+          </button>
         </div>
-      </div>
+      ) : (
+        <div className="section" data-testid="openday-post">
+          <h4>Post an open day</h4>
+          <div className="filters" style={{ flexWrap: 'wrap' }}>
+            <input
+              placeholder="Title (e.g. U15 open morning)"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+            />
+            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+            <input
+              placeholder="Venue"
+              value={form.venue}
+              onChange={(e) => setForm({ ...form, venue: e.target.value })}
+            />
+            <select value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}>
+              <option value="open">Open age</option>
+              <option value="u16">Under 16</option>
+              <option value="u18">Under 18</option>
+              <option value="senior">Senior</option>
+            </select>
+            <input
+              placeholder="Positions (optional, comma-separated)"
+              value={form.positions}
+              onChange={(e) => setForm({ ...form, positions: e.target.value })}
+            />
+            <input
+              style={{ flex: 1 }}
+              placeholder="Notes (screened — no contact details)"
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            />
+            <button
+              className="primary"
+              onClick={async () => {
+                try {
+                  await api.postOpenTrial(session, {
+                    title: form.title.trim(),
+                    date: form.date,
+                    venue: form.venue.trim(),
+                    ageGroup: form.ageGroup,
+                    positions: form.positions
+                      .split(',')
+                      .map((x) => x.trim().toUpperCase())
+                      .filter(Boolean),
+                    notes: form.notes.trim() || undefined,
+                  });
+                  setForm({ title: '', date: '', venue: '', ageGroup: 'open', positions: '', notes: '' });
+                  notify('Open day posted — local players can register now.');
+                  setShowPost(false);
+                  load();
+                } catch (e) {
+                  notify(e instanceof Error ? e.message : 'Could not post', true);
+                }
+              }}
+            >
+              Post open day
+            </button>
+            <button className="linklike" onClick={() => setShowPost(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
       {trials.length === 0 && <div className="notice">No open days yet — post one above.</div>}
       {trials.map((t) => (
         <div key={t.id} className="section">
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
             <h4 style={{ margin: 0, flex: 1 }}>{t.title}</h4>
-            <button onClick={async () => { try { await api.deleteOpenTrial(session, t.id); load(); } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); } }}>Remove</button>
+            <button
+              onClick={async () => {
+                try {
+                  await api.deleteOpenTrial(session, t.id);
+                  load();
+                } catch (e) {
+                  notify(e instanceof Error ? e.message : 'Failed', true);
+                }
+              }}
+            >
+              Remove
+            </button>
           </div>
-          <span className="dim" data-testid={`openday-meta-${t.id}`}><RecordFacts items={[{label: 'Date', value: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? fmtDate(t.date) : t.date}, {label: 'Venue', value: t.venue}, {label: 'Age group', value: ({ u16: 'U16', u18: 'U18', '18-21': '18–21', senior: 'Senior', open: 'Open age' } as Record<string, string>)[t.ageGroup] ?? t.ageGroup}, {label: 'Positions', value: t.positions.join(', ') || '—'}, {label: 'Registered', value: t.registrations.length}]} /></span>
+          <span className="dim" data-testid={`openday-meta-${t.id}`}>
+            <RecordFacts
+              items={[
+                { label: 'Date', value: /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? fmtDate(t.date) : t.date },
+                { label: 'Venue', value: t.venue },
+                {
+                  label: 'Age group',
+                  value:
+                    (
+                      { u16: 'U16', u18: 'U18', '18-21': '18–21', senior: 'Senior', open: 'Open age' } as Record<
+                        string,
+                        string
+                      >
+                    )[t.ageGroup] ?? t.ageGroup,
+                },
+                { label: 'Positions', value: t.positions.join(', ') || '—' },
+                { label: 'Registered', value: t.registrations.length },
+              ]}
+            />
+          </span>
           {t.registrations.length > 0 && (
             <div className="list-rows" style={{ marginTop: 8 }}>
               {t.registrations.map((r) => (
                 <div key={r.id} className="list-row" style={{ flexWrap: 'wrap' }}>
-                  <span className="grow"><b>{r.playerName}</b> <span className="dim">{r.position ?? ''}{r.age ? ` · ${r.age}` : ''}</span></span>
+                  <span className="grow">
+                    <b>{r.playerName}</b>{' '}
+                    <span className="dim">
+                      {r.position ?? ''}
+                      {r.age ? ` · ${r.age}` : ''}
+                    </span>
+                  </span>
                   {r.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
                   {r.byGuardian && <span className="dim">Registered by guardian</span>}
                   {typeof r.trustScore === 'number' && <span className="dim">Trust {r.trustScore}</span>}
@@ -1155,7 +2202,9 @@ export function OpenDaysScreen({ session, tick, notify }: ScreenProps) {
                         onChange={(e) => setOutcomeNotes({ ...outcomeNotes, [r.id]: e.target.value })}
                         style={{ maxWidth: 220 }}
                       />
-                      <button className="primary" onClick={() => resolve(t.id, r.id, 'invite_trial')}>Invite to trial</button>
+                      <button className="primary" onClick={() => resolve(t.id, r.id, 'invite_trial')}>
+                        Invite to trial
+                      </button>
                       <button onClick={() => resolve(t.id, r.id, 'declined')}>Kind no</button>
                     </span>
                   )}
@@ -1179,9 +2228,18 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
   const [md, setMd] = useState({ fixture: '', date: '', venue: '', result: '' });
   const [mdPlayers, setMdPlayers] = useState<Set<string>>(new Set());
   const load = useCallback(() => {
-    api.getSquad(session).then(setSquad).catch(() => {});
-    api.getMatchdays(session).then(setMatchdays).catch(() => {});
-    api.allPlayers(session).then(setVisible).catch(() => {});
+    api
+      .getSquad(session)
+      .then(setSquad)
+      .catch(() => {});
+    api
+      .getMatchdays(session)
+      .then(setMatchdays)
+      .catch(() => {});
+    api
+      .allPlayers(session)
+      .then(setVisible)
+      .catch(() => {});
   }, [session]);
   useEffect(load, [load, tick]);
   if (!squad) return null;
@@ -1190,8 +2248,14 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
     <>
       <SquadCoverage squad={squad} />
       {squad.gaps.length > 0 && (
-        <p className="squad-gap" data-testid="squad-gap" style={{ margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 14 }}>
-          <span>Thin cover: <b>{squad.gaps.join(' · ')}</b></span>
+        <p
+          className="squad-gap"
+          data-testid="squad-gap"
+          style={{ margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', fontSize: 14 }}
+        >
+          <span>
+            Thin cover: <b>{squad.gaps.join(' · ')}</b>
+          </span>
           <button
             className="linklike"
             style={{ color: 'var(--sb-link)', fontWeight: 550 }}
@@ -1199,15 +2263,25 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
             onClick={async () => {
               try {
                 await api.setLookingFor(session, squad.suggestedLookingFor);
-                notify(`Radar updated — local ${squad.suggestedLookingFor.join('/')} players now see your club highlighted.`);
-              } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
+                notify(
+                  `Radar updated — local ${squad.suggestedLookingFor.join('/')} players now see your club highlighted.`,
+                );
+              } catch (e) {
+                notify(e instanceof Error ? e.message : 'Failed', true);
+              }
             }}
-          >Tell the local radar you're looking for {squad.suggestedLookingFor.join(', ')}</button>
+          >
+            Tell the local radar you're looking for {squad.suggestedLookingFor.join(', ')}
+          </button>
         </p>
       )}
       <div className="section">
         <h4>Squad · {squad.entries.length} players</h4>
-        {squad.entries.length === 0 && <div className="notice">Nobody rostered yet. Signings land here automatically; add the rest of your Sunday squad below.</div>}
+        {squad.entries.length === 0 && (
+          <div className="notice">
+            Nobody rostered yet. Signings land here automatically; add the rest of your Sunday squad below.
+          </div>
+        )}
         {/* Flat rows: initials, the name, the position; the row itself opens an on-platform player. No bordered name chip, no state pills. */}
         <div className="list-rows" data-testid="squad-list">
           {squad.entries.map((e) => (
@@ -1218,13 +2292,33 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
               role={e.onPlatform && e.playerId ? 'button' : undefined}
               tabIndex={e.onPlatform && e.playerId ? 0 : undefined}
               onClick={e.onPlatform && e.playerId ? () => openPlayer(e.playerId!) : undefined}
-              onKeyDown={e.onPlatform && e.playerId ? (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); openPlayer(e.playerId!); } } : undefined}
+              onKeyDown={
+                e.onPlatform && e.playerId
+                  ? (ev) => {
+                      if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault();
+                        openPlayer(e.playerId!);
+                      }
+                    }
+                  : undefined
+              }
               style={{ flexWrap: 'wrap' }}
             >
-              <span className="p-avatar" aria-hidden="true">{e.name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}</span>
+              <span className="p-avatar" aria-hidden="true">
+                {e.name
+                  .split(/\s+/)
+                  .map((w) => w[0])
+                  .filter(Boolean)
+                  .slice(0, 2)
+                  .join('')
+                  .toUpperCase()}
+              </span>
               <span className="grow" style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
                 <b className="squad-name">{e.name}</b>
-                <span className="dim">{e.position ?? '—'}{e.source === 'signing' ? ' · Signed via ScoutBox' : !e.onPlatform ? ' · Off-platform' : ''}</span>
+                <span className="dim">
+                  {e.position ?? '—'}
+                  {e.source === 'signing' ? ' · Signed via ScoutBox' : !e.onPlatform ? ' · Off-platform' : ''}
+                </span>
               </span>
               {releasing === e.id ? (
                 <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1237,65 +2331,165 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
                       style={{ minWidth: 260 }}
                     />
                   )}
-                  <button className="primary" onClick={async (ev) => {
-                    ev.stopPropagation();
-                    try {
-                      setSquad(await api.releaseSquadEntry(session, e.id, refText.trim() || undefined));
-                      setReleasing(null); setRefText('');
-                      notify(e.onPlatform
-                        ? `${e.name} released${refText.trim() ? ' with a reference' : ''} — marked available to every local club.`
-                        : `${e.name} removed from the squad list.`);
-                    } catch (err) { notify(err instanceof Error ? err.message : 'Failed', true); }
-                  }}>Confirm release</button>
-                  <button className="linklike" onClick={(ev) => { ev.stopPropagation(); setReleasing(null); setRefText(''); }}>Cancel</button>
+                  <button
+                    className="primary"
+                    onClick={async (ev) => {
+                      ev.stopPropagation();
+                      try {
+                        setSquad(await api.releaseSquadEntry(session, e.id, refText.trim() || undefined));
+                        setReleasing(null);
+                        setRefText('');
+                        notify(
+                          e.onPlatform
+                            ? `${e.name} released${refText.trim() ? ' with a reference' : ''} — marked available to every local club.`
+                            : `${e.name} removed from the squad list.`,
+                        );
+                      } catch (err) {
+                        notify(err instanceof Error ? err.message : 'Failed', true);
+                      }
+                    }}
+                  >
+                    Confirm release
+                  </button>
+                  <button
+                    className="linklike"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      setReleasing(null);
+                      setRefText('');
+                    }}
+                  >
+                    Cancel
+                  </button>
                 </span>
               ) : (
                 <>
-                  <button className="linklike" data-testid={`squad-release-${e.id}`} onClick={(ev) => { ev.stopPropagation(); setReleasing(e.id); setRefText(''); }}>Release</button>
-                  {e.onPlatform && e.playerId ? <span className="dim" aria-hidden="true">›</span> : null}
+                  <button
+                    className="linklike"
+                    data-testid={`squad-release-${e.id}`}
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      setReleasing(e.id);
+                      setRefText('');
+                    }}
+                  >
+                    Release
+                  </button>
+                  {e.onPlatform && e.playerId ? (
+                    <span className="dim" aria-hidden="true">
+                      ›
+                    </span>
+                  ) : null}
                 </>
               )}
             </div>
           ))}
         </div>
-        <details className="suite-compose"><summary>Add a player</summary><div className="filters" style={{ marginTop: 12, flexWrap: 'wrap' }}>
-          <label>Player name<input placeholder="Full name" value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} /></label>
-          <label>Position<select value={add.position} onChange={(e) => setAdd({ ...add, position: e.target.value })}>
-            <option value="">Position…</option>
-            {POSITIONS.map((p) => <option key={p}>{p}</option>)}
-          </select></label>
-          <label>ScoutBox profile<select
-            value={add.playerId}
-            onChange={(e) => {
-              const p = visible.find((x) => x.id === e.target.value);
-              setAdd({ playerId: e.target.value, name: p ? p.name : add.name, position: p ? p.position : add.position });
-            }}
-          >
-            <option value="">Off-platform (name only)</option>
-            {visible.map((p) => <option key={p.id} value={p.id}>{p.name} — {p.position}</option>)}
-          </select></label>
-          <button className="primary" onClick={async () => {
-            try {
-              setSquad(await api.addSquadEntry(session, { name: add.name.trim(), position: add.position || undefined, playerId: add.playerId || undefined }));
-              setAdd({ name: '', position: '', playerId: '' });
-              notify('Added to the squad list.');
-            } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-          }}>Add to squad</button>
-        </div></details>
+        <details className="suite-compose">
+          <summary>Add a player</summary>
+          <div className="filters" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+            <label>
+              Player name
+              <input
+                placeholder="Full name"
+                value={add.name}
+                onChange={(e) => setAdd({ ...add, name: e.target.value })}
+              />
+            </label>
+            <label>
+              Position
+              <select value={add.position} onChange={(e) => setAdd({ ...add, position: e.target.value })}>
+                <option value="">Position…</option>
+                {POSITIONS.map((p) => (
+                  <option key={p}>{p}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              ScoutBox profile
+              <select
+                value={add.playerId}
+                onChange={(e) => {
+                  const p = visible.find((x) => x.id === e.target.value);
+                  setAdd({
+                    playerId: e.target.value,
+                    name: p ? p.name : add.name,
+                    position: p ? p.position : add.position,
+                  });
+                }}
+              >
+                <option value="">Off-platform (name only)</option>
+                {visible.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.position}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="primary"
+              onClick={async () => {
+                try {
+                  setSquad(
+                    await api.addSquadEntry(session, {
+                      name: add.name.trim(),
+                      position: add.position || undefined,
+                      playerId: add.playerId || undefined,
+                    }),
+                  );
+                  setAdd({ name: '', position: '', playerId: '' });
+                  notify('Added to the squad list.');
+                } catch (e) {
+                  notify(e instanceof Error ? e.message : 'Failed', true);
+                }
+              }}
+            >
+              Add to squad
+            </button>
+          </div>
+        </details>
       </div>
-      <details className="suite-compose"><summary>Log a match day</summary>
-        <details className="f-about" style={{ marginBottom: 10 }}><summary>About</summary><div className="notice">
-          Tick who played and every rostered ScoutBox player gets <b>verified attendance, corroborated by
-          your club</b> — the strongest trust signal a grassroots player can carry.
-        </div></details>
+      <details className="suite-compose">
+        <summary>Log a match day</summary>
+        <details className="f-about" style={{ marginBottom: 10 }}>
+          <summary>About</summary>
+          <div className="notice">
+            Tick who played and every rostered ScoutBox player gets{' '}
+            <b>verified attendance, corroborated by your club</b> — the strongest trust signal a grassroots player can
+            carry.
+          </div>
+        </details>
         <div className="filters" style={{ flexWrap: 'wrap' }}>
-          <label>Fixture<input placeholder="Fixture (e.g. vs Clapton Community)" value={md.fixture} onChange={(e) => setMd({ ...md, fixture: e.target.value })} /></label>
-          <label>Date<input type="date" value={md.date} onChange={(e) => setMd({ ...md, date: e.target.value })} /></label>
-          <label>Venue<input placeholder="Venue" value={md.venue} onChange={(e) => setMd({ ...md, venue: e.target.value })} /></label>
-          <label>Result<input placeholder="Result (e.g. 2-1)" value={md.result} onChange={(e) => setMd({ ...md, result: e.target.value })} style={{ maxWidth: 120 }} /></label>
+          <label>
+            Fixture
+            <input
+              placeholder="Fixture (e.g. vs Clapton Community)"
+              value={md.fixture}
+              onChange={(e) => setMd({ ...md, fixture: e.target.value })}
+            />
+          </label>
+          <label>
+            Date
+            <input type="date" value={md.date} onChange={(e) => setMd({ ...md, date: e.target.value })} />
+          </label>
+          <label>
+            Venue
+            <input placeholder="Venue" value={md.venue} onChange={(e) => setMd({ ...md, venue: e.target.value })} />
+          </label>
+          <label>
+            Result
+            <input
+              placeholder="Result (e.g. 2-1)"
+              value={md.result}
+              onChange={(e) => setMd({ ...md, result: e.target.value })}
+              style={{ maxWidth: 120 }}
+            />
+          </label>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', margin: '10px 0' }}>
-          {platformEntries.length === 0 && <span className="dim">No platform players on the squad yet — sign or roster them first.</span>}
+          {platformEntries.length === 0 && (
+            <span className="dim">No platform players on the squad yet — sign or roster them first.</span>
+          )}
           {platformEntries.map((e) => (
             <label key={e.id} className="pill" style={{ cursor: 'pointer', userSelect: 'none' }}>
               <input
@@ -1303,7 +2497,8 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
                 checked={mdPlayers.has(e.playerId!)}
                 onChange={(ev) => {
                   const next = new Set(mdPlayers);
-                  if (ev.target.checked) next.add(e.playerId!); else next.delete(e.playerId!);
+                  if (ev.target.checked) next.add(e.playerId!);
+                  else next.delete(e.playerId!);
                   setMdPlayers(next);
                 }}
                 style={{ marginRight: 6 }}
@@ -1312,22 +2507,37 @@ export function SquadScreen({ session, tick, notify, openPlayer }: ScreenProps) 
             </label>
           ))}
         </div>
-        <button className="primary" onClick={async () => {
-          try {
-            const r = await api.logMatchday(session, { fixture: md.fixture.trim(), date: md.date, venue: md.venue.trim() || undefined, result: md.result.trim() || undefined, playerIds: [...mdPlayers] });
-            setMd({ fixture: '', date: '', venue: '', result: '' });
-            setMdPlayers(new Set());
-            notify(`Match day logged — ${r.credited} player(s) credited with coach-signed attendance.`);
-            load();
-          } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-        }}>Log match day</button>
+        <button
+          className="primary"
+          onClick={async () => {
+            try {
+              const r = await api.logMatchday(session, {
+                fixture: md.fixture.trim(),
+                date: md.date,
+                venue: md.venue.trim() || undefined,
+                result: md.result.trim() || undefined,
+                playerIds: [...mdPlayers],
+              });
+              setMd({ fixture: '', date: '', venue: '', result: '' });
+              setMdPlayers(new Set());
+              notify(`Match day logged — ${r.credited} player(s) credited with coach-signed attendance.`);
+              load();
+            } catch (e) {
+              notify(e instanceof Error ? e.message : 'Failed', true);
+            }
+          }}
+        >
+          Log match day
+        </button>
       </details>
       {matchdays.length > 0 && (
         <div className="section">
           <h4>Match-day history</h4>
           {matchdays.map((m) => (
             <div key={m.id} className="list-row">
-              <span className="grow"><b>{m.fixture}</b> <span className="dim">{m.venue}</span></span>
+              <span className="grow">
+                <b>{m.fixture}</b> <span className="dim">{m.venue}</span>
+              </span>
               {m.result && <span className="pill gold">{m.result}</span>}
               <span className="pill blue">{m.playerIds.length} credited</span>
               <span className="dim">{m.date}</span>
@@ -1343,56 +2553,133 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
   const [friendlies, setFriendlies] = useState<Friendly[]>([]);
   const [form, setForm] = useState({ ageGroup: 'open', date: '', venue: '', notes: '' });
   const [replies, setReplies] = useState<Record<string, string>>({});
-  const load = useCallback(() => { api.getFriendlies(session).then(setFriendlies).catch(() => {}); }, [session]);
+  const load = useCallback(() => {
+    api
+      .getFriendlies(session)
+      .then(setFriendlies)
+      .catch(() => {});
+  }, [session]);
   useEffect(load, [load, tick]);
   return (
     <>
-      <CountChart title="On the local board" note="Posted friendlies by age group, within your club’s local area." unit="friendlies" distribution items={countBy(friendlies, f => f.ageGroup)} />
-      <Hint>Every club within 50 km sees a posted friendly. Messages are screened and the game gets arranged here.</Hint>
-      <details className="suite-compose"><summary>Arrange a friendly</summary>
+      <CountChart
+        title="On the local board"
+        note="Posted friendlies by age group, within your club’s local area."
+        unit="friendlies"
+        distribution
+        items={countBy(friendlies, (f) => f.ageGroup)}
+      />
+      <Hint>
+        Every club within 50 km sees a posted friendly. Messages are screened and the game gets arranged here.
+      </Hint>
+      <details className="suite-compose">
+        <summary>Arrange a friendly</summary>
         <div className="filters" style={{ flexWrap: 'wrap' }}>
-          <label>Age group<select value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}>
-            <option value="open">Open age</option>
-            <option value="u16">Under 16</option>
-            <option value="u18">Under 18</option>
-            <option value="senior">Senior</option>
-          </select></label>
-          <label>Match date<input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
-          <label>Ground<input placeholder="Venue" value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} /></label>
-          <label>Match details<input style={{ flex: 1 }} placeholder="Notes (standard, referee, screened — no contact details)" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
-          <button className="primary" onClick={async () => {
-            try {
-              await api.postFriendly(session, { ageGroup: form.ageGroup, date: form.date, venue: form.venue.trim() || undefined, notes: form.notes.trim() || undefined });
-              setForm({ ageGroup: 'open', date: '', venue: '', notes: '' });
-              notify('Friendly posted — clubs within 50km can respond.');
-              load();
-            } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-          }}>Post friendly</button>
+          <label>
+            Age group
+            <select value={form.ageGroup} onChange={(e) => setForm({ ...form, ageGroup: e.target.value })}>
+              <option value="open">Open age</option>
+              <option value="u16">Under 16</option>
+              <option value="u18">Under 18</option>
+              <option value="senior">Senior</option>
+            </select>
+          </label>
+          <label>
+            Match date
+            <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+          </label>
+          <label>
+            Ground
+            <input
+              placeholder="Venue"
+              value={form.venue}
+              onChange={(e) => setForm({ ...form, venue: e.target.value })}
+            />
+          </label>
+          <label>
+            Match details
+            <input
+              style={{ flex: 1 }}
+              placeholder="Notes (standard, referee, screened — no contact details)"
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+            />
+          </label>
+          <button
+            className="primary"
+            onClick={async () => {
+              try {
+                await api.postFriendly(session, {
+                  ageGroup: form.ageGroup,
+                  date: form.date,
+                  venue: form.venue.trim() || undefined,
+                  notes: form.notes.trim() || undefined,
+                });
+                setForm({ ageGroup: 'open', date: '', venue: '', notes: '' });
+                notify('Friendly posted — clubs within 50km can respond.');
+                load();
+              } catch (e) {
+                notify(e instanceof Error ? e.message : 'Failed', true);
+              }
+            }}
+          >
+            Post friendly
+          </button>
         </div>
       </details>
-      {friendlies.length === 0 && <div className="notice">No friendlies on the local board yet — post the first one.</div>}
+      {friendlies.length === 0 && (
+        <div className="notice">No friendlies on the local board yet — post the first one.</div>
+      )}
       {friendlies.map((f) => (
         <article key={f.id} className="section friendly-board-post">
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div className="scout-friendly-identity"><span className="scout-match-date"><Icon name="calendar-days" size={17} />{f.date}</span><h4>{f.orgName}</h4>{f.venue && <span className="dim"><Icon name="map-pin" size={13} /> {f.venue}</span>}</div>
-            <span className="pill blue">{f.ageGroup==='open'?'Open age':f.ageGroup==='senior'?'Senior':f.ageGroup.toUpperCase()}</span>
-            {f.mine ? <span className="pill gold">Your post</span> : <span className="pill">{f.distanceKm} km away</span>}
-            <span className="pill">{f.responses.length} response{f.responses.length === 1 ? '' : 's'}</span>
+            <div className="scout-friendly-identity">
+              <span className="scout-match-date">
+                <Icon name="calendar-days" size={17} />
+                {f.date}
+              </span>
+              <h4>{f.orgName}</h4>
+              {f.venue && (
+                <span className="dim">
+                  <Icon name="map-pin" size={13} /> {f.venue}
+                </span>
+              )}
+            </div>
+            <span className="pill blue">
+              {f.ageGroup === 'open' ? 'Open age' : f.ageGroup === 'senior' ? 'Senior' : f.ageGroup.toUpperCase()}
+            </span>
+            {f.mine ? (
+              <span className="pill gold">Your post</span>
+            ) : (
+              <span className="pill">{f.distanceKm} km away</span>
+            )}
+            <span className="pill">
+              {f.responses.length} response{f.responses.length === 1 ? '' : 's'}
+            </span>
           </div>
-          {f.notes && <div className="dim" style={{ marginTop: 6, fontSize: 13 }}>{f.notes}</div>}
+          {f.notes && (
+            <div className="dim" style={{ marginTop: 6, fontSize: 13 }}>
+              {f.notes}
+            </div>
+          )}
           {f.mine && f.responses.length > 0 && (
             <div className="list-rows" style={{ marginTop: 8 }}>
               {f.responses.map((r) => (
                 <div key={`${r.orgId}-${r.ts}`} className="list-row">
-                  <span className="grow"><b>{r.orgName}</b>{r.message ? ` — ${r.message}` : ''}</span>
+                  <span className="grow">
+                    <b>{r.orgName}</b>
+                    {r.message ? ` — ${r.message}` : ''}
+                  </span>
                   <span className="dim">{fmtDate(r.ts)}</span>
                 </div>
               ))}
             </div>
           )}
-          {!f.mine && (
-            f.responses.some((r) => r.orgId === session.org.id) ? (
-              <div className="notice" style={{ marginTop: 8 }}>You responded — {f.orgName} has been notified.</div>
+          {!f.mine &&
+            (f.responses.some((r) => r.orgId === session.org.id) ? (
+              <div className="notice" style={{ marginTop: 8 }}>
+                You responded — {f.orgName} has been notified.
+              </div>
             ) : (
               <div className="filters" style={{ marginTop: 8 }}>
                 <input
@@ -1401,16 +2688,22 @@ export function FriendliesScreen({ session, tick, notify }: ScreenProps) {
                   value={replies[f.id] ?? ''}
                   onChange={(e) => setReplies({ ...replies, [f.id]: e.target.value })}
                 />
-                <button className="primary" onClick={async () => {
-                  try {
-                    await api.respondFriendly(session, f.id, (replies[f.id] ?? '').trim());
-                    notify(`Response sent — ${f.orgName}'s manager is notified.`);
-                    load();
-                  } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-                }}>We're up for it</button>
+                <button
+                  className="primary"
+                  onClick={async () => {
+                    try {
+                      await api.respondFriendly(session, f.id, (replies[f.id] ?? '').trim());
+                      notify(`Response sent — ${f.orgName}'s manager is notified.`);
+                      load();
+                    } catch (e) {
+                      notify(e instanceof Error ? e.message : 'Failed', true);
+                    }
+                  }}
+                >
+                  We're up for it
+                </button>
               </div>
-            )
-          )}
+            ))}
         </article>
       ))}
     </>
@@ -1427,57 +2720,120 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
   const [fed, setFed] = useState({ federation: '', registrationId: '', contactEmail: '' });
   const [fedFiled, setFedFiled] = useState(!!session.org.federationCheck);
   useEffect(() => {
-    api.getPlan(session).then(setInfo).catch(() => {});
-    api.getInvoices(session).then(setInvoices).catch(() => {});
-    api.getPathwayRecord(session).then(setRecord).catch(() => {});
+    api
+      .getPlan(session)
+      .then(setInfo)
+      .catch(() => {});
+    api
+      .getInvoices(session)
+      .then(setInvoices)
+      .catch(() => {});
+    api
+      .getPathwayRecord(session)
+      .then(setRecord)
+      .catch(() => {});
   }, [session, tick]);
   if (!info) return null;
   return (
     <>
       <div className="stat-grid" style={{ marginBottom: 22 }}>
-        <div className="stat"><div className="v">{info.plan.name}</div><div className="k">Plan</div></div>
-        <div className="stat"><div className="v">£{info.plan.pricePerMonthGBP}</div><div className="k">Per month</div></div>
-        <div className="stat"><div className="v">{info.plan.seats}</div><div className="k">Named seats</div></div>
-        <div className="stat"><div className="v">{info.plan.attributionWindowMonths} mo</div><div className="k">Attribution window</div></div>
+        <div className="stat">
+          <div className="v">{info.plan.name}</div>
+          <div className="k">Plan</div>
+        </div>
+        <div className="stat">
+          <div className="v">£{info.plan.pricePerMonthGBP}</div>
+          <div className="k">Per month</div>
+        </div>
+        <div className="stat">
+          <div className="v">{info.plan.seats}</div>
+          <div className="k">Named seats</div>
+        </div>
+        <div className="stat">
+          <div className="v">{info.plan.attributionWindowMonths} mo</div>
+          <div className="k">Attribution window</div>
+        </div>
       </div>
       {record && (
         <div className="section">
           <h4>Pathway Club record {record.pathwayClub && <span className="pill green">Pathway Club</span>}</h4>
           <div className="stat-grid" style={{ marginBottom: 10 }}>
-            <div className="stat"><div className="v">{record.progressed}</div><div className="k">Players progressed upward</div></div>
-            <div className="stat"><div className="v">{record.openDaysRun}</div><div className="k">Open days run</div></div>
-            <div className="stat"><div className="v">{record.matchdaysLogged}</div><div className="k">Match days logged</div></div>
+            <div className="stat">
+              <div className="v">{record.progressed}</div>
+              <div className="k">Players progressed upward</div>
+            </div>
+            <div className="stat">
+              <div className="v">{record.openDaysRun}</div>
+              <div className="k">Open days run</div>
+            </div>
+            <div className="stat">
+              <div className="v">{record.matchdaysLogged}</div>
+              <div className="k">Match days logged</div>
+            </div>
           </div>
-          <details className="f-about"><summary>About</summary><div className="notice">{record.note}</div></details>
+          <details className="f-about">
+            <summary>About</summary>
+            <div className="notice">{record.note}</div>
+          </details>
         </div>
       )}
       {!session.org.verified && (
         <div className="section">
           <h4>Federation-route verification {fedFiled ? '— with Trust & Safety' : ''}</h4>
           {fedFiled ? (
-            <div><div className="notice">Filed with Trust & Safety.</div>
-            <details className="f-about"><summary>About</summary><div className="notice">
-              Trust & Safety cross-checks the registration with your federation; verification (and,
-              with the safeguarding contract, under-18 visibility) follows their approval.
-            </div></details></div>
+            <div>
+              <div className="notice">Filed with Trust & Safety.</div>
+              <details className="f-about">
+                <summary>About</summary>
+                <div className="notice">
+                  Trust & Safety cross-checks the registration with your federation; verification (and, with the
+                  safeguarding contract, under-18 visibility) follows their approval.
+                </div>
+              </details>
+            </div>
           ) : (
             <>
-              <details className="f-about"><summary>About</summary><div className="notice" style={{ marginBottom: 10 }}>
-                Sunday-league clubs run on free email — that's fine here. Verify through your federation
-                registration instead: Trust & Safety checks the record, and a free-mail contact address is
-                accepted on this route.
-              </div></details>
+              <details className="f-about">
+                <summary>About</summary>
+                <div className="notice" style={{ marginBottom: 10 }}>
+                  Sunday-league clubs run on free email — that's fine here. Verify through your federation registration
+                  instead: Trust & Safety checks the record, and a free-mail contact address is accepted on this route.
+                </div>
+              </details>
               <div className="filters" style={{ flexWrap: 'wrap' }}>
-                <input placeholder="Federation (e.g. Manchester FA)" value={fed.federation} onChange={(e) => setFed({ ...fed, federation: e.target.value })} />
-                <input placeholder="Registration id" value={fed.registrationId} onChange={(e) => setFed({ ...fed, registrationId: e.target.value })} />
-                <input placeholder="Contact email (free mail OK)" value={fed.contactEmail} onChange={(e) => setFed({ ...fed, contactEmail: e.target.value })} />
-                <button className="primary" onClick={async () => {
-                  try {
-                    await api.submitFederationVerification(session, { federation: fed.federation.trim(), registrationId: fed.registrationId.trim(), contactEmail: fed.contactEmail.trim() || undefined });
-                    setFedFiled(true);
-                    notify('Federation verification filed — Trust & Safety will cross-check the registration.');
-                  } catch (e) { notify(e instanceof Error ? e.message : 'Failed', true); }
-                }}>File for verification</button>
+                <input
+                  placeholder="Federation (e.g. Manchester FA)"
+                  value={fed.federation}
+                  onChange={(e) => setFed({ ...fed, federation: e.target.value })}
+                />
+                <input
+                  placeholder="Registration id"
+                  value={fed.registrationId}
+                  onChange={(e) => setFed({ ...fed, registrationId: e.target.value })}
+                />
+                <input
+                  placeholder="Contact email (free mail OK)"
+                  value={fed.contactEmail}
+                  onChange={(e) => setFed({ ...fed, contactEmail: e.target.value })}
+                />
+                <button
+                  className="primary"
+                  onClick={async () => {
+                    try {
+                      await api.submitFederationVerification(session, {
+                        federation: fed.federation.trim(),
+                        registrationId: fed.registrationId.trim(),
+                        contactEmail: fed.contactEmail.trim() || undefined,
+                      });
+                      setFedFiled(true);
+                      notify('Federation verification filed — Trust & Safety will cross-check the registration.');
+                    } catch (e) {
+                      notify(e instanceof Error ? e.message : 'Failed', true);
+                    }
+                  }}
+                >
+                  File for verification
+                </button>
               </div>
             </>
           )}
@@ -1487,39 +2843,68 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
         <h4>Company email verification {session.org.emailDomainVerified ? '— verified' : ''}</h4>
         {session.org.emailDomainVerified ? (
           <div className="notice">
-            Domain control confirmed{session.org.emailDomain ? ` for @${session.org.emailDomain}` : ''}. This is one of the
-            safeguarding requirements for access to under-18 players.
+            Domain control confirmed{session.org.emailDomain ? ` for @${session.org.emailDomain}` : ''}. This is one of
+            the safeguarding requirements for access to under-18 players.
           </div>
         ) : (
           <>
-            <details className="f-about" style={{ marginBottom: 10 }}><summary>About</summary><div className="notice">
-              Prove control of a company mailbox — free email providers are refused. A code lands in the
-              mailbox; entering it here confirms the domain.
-            </div></details>
+            <details className="f-about" style={{ marginBottom: 10 }}>
+              <summary>About</summary>
+              <div className="notice">
+                Prove control of a company mailbox — free email providers are refused. A code lands in the mailbox;
+                entering it here confirms the domain.
+              </div>
+            </details>
             <div className="filters">
-              <label className="suite-field">Company email<input type="email" placeholder="recruitment@yourclub.com" value={verifyEmail} onChange={(e) => setVerifyEmail(e.target.value)} /></label>
-              <button onClick={async () => {
-                try {
-                  await api.requestEmailVerification(session, verifyEmail.trim());
-                  setCodeSent(true);
-                  notify('Verification code sent — check the mailbox.');
-                } catch (e) {
-                  notify(e instanceof Error ? e.message : 'Could not send the code', true);
-                }
-              }}>Send code</button>
+              <label className="suite-field">
+                Company email
+                <input
+                  type="email"
+                  placeholder="recruitment@yourclub.com"
+                  value={verifyEmail}
+                  onChange={(e) => setVerifyEmail(e.target.value)}
+                />
+              </label>
+              <button
+                onClick={async () => {
+                  try {
+                    await api.requestEmailVerification(session, verifyEmail.trim());
+                    setCodeSent(true);
+                    notify('Verification code sent — check the mailbox.');
+                  } catch (e) {
+                    notify(e instanceof Error ? e.message : 'Could not send the code', true);
+                  }
+                }}
+              >
+                Send code
+              </button>
               {codeSent && (
                 <>
-                  <label className="suite-field">Verification code<input type="text" placeholder="6-character code" value={verifyCode} onChange={(e) => setVerifyCode(e.target.value)} style={{ maxWidth: 160 }} /></label>
-                  <button className="primary" onClick={async () => {
-                    try {
-                      const r = await api.confirmEmailVerification(session, verifyCode.trim());
-                      session.org.emailDomainVerified = true;
-                      session.org.emailDomain = r.emailDomain;
-                      notify(`Domain @${r.emailDomain} verified.`);
-                    } catch (e) {
-                      notify(e instanceof Error ? e.message : 'Code rejected', true);
-                    }
-                  }}>Confirm</button>
+                  <label className="suite-field">
+                    Verification code
+                    <input
+                      type="text"
+                      placeholder="6-character code"
+                      value={verifyCode}
+                      onChange={(e) => setVerifyCode(e.target.value)}
+                      style={{ maxWidth: 160 }}
+                    />
+                  </label>
+                  <button
+                    className="primary"
+                    onClick={async () => {
+                      try {
+                        const r = await api.confirmEmailVerification(session, verifyCode.trim());
+                        session.org.emailDomainVerified = true;
+                        session.org.emailDomain = r.emailDomain;
+                        notify(`Domain @${r.emailDomain} verified.`);
+                      } catch (e) {
+                        notify(e instanceof Error ? e.message : 'Code rejected', true);
+                      }
+                    }}
+                  >
+                    Confirm
+                  </button>
                 </>
               )}
             </div>
@@ -1528,7 +2913,11 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h4>Invoices — success fees</h4>
-        {invoices.length === 0 && <div className="notice">No invoices yet. A signing recorded inside the attribution window issues one automatically.</div>}
+        {invoices.length === 0 && (
+          <div className="notice">
+            No invoices yet. A signing recorded inside the attribution window issues one automatically.
+          </div>
+        )}
         {invoices.map((inv) => (
           <div key={inv.id} className="list-row">
             <span>{inv.description}</span>
@@ -1548,10 +2937,13 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
       </div>
       <div className="section">
         <h4>Accountability</h4>
-        <details className="f-about"><summary>About</summary><div className="notice">
-          Every seat is a named individual. The API refuses any request that is not attributed to a person —
-          shared logins do not exist on ScoutBox.
-        </div></details>
+        <details className="f-about">
+          <summary>About</summary>
+          <div className="notice">
+            Every seat is a named individual. The API refuses any request that is not attributed to a person — shared
+            logins do not exist on ScoutBox.
+          </div>
+        </details>
       </div>
     </>
   );
@@ -1559,7 +2951,13 @@ export function PlanScreen({ session, tick, notify }: ScreenProps) {
 
 /* ------------------------------------------------------ Player drawer */
 
-export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }: {
+export function PlayerDrawer({
+  session,
+  playerId,
+  notify,
+  onClose,
+  onOpenRoom,
+}: {
   session: Session;
   playerId: string;
   notify: (text: string, error?: boolean) => void;
@@ -1580,37 +2978,63 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
   const [moreLike, setMoreLike] = useState<(Player & { similarity: number })[] | null>(null);
 
   useEffect(() => {
-    setPlayer(null); setProof(null); setError(null);
-    api.getPlayer(session, playerId).then(setPlayer).catch((e) => {
-      setError(
-        e instanceof ApiError && e.code === 'UNDER_18_WALL'
-          ? 'The under-18 wall: agency accounts cannot view minors. This profile does not exist for your organisation.'
-          : e instanceof ApiError && e.code === 'VERIFIED_CLUBS_ONLY'
-            ? 'Under-18 profiles are visible to verified clubs only. Complete club verification to view this player.'
-            : errMsg(e));
-    });
+    setPlayer(null);
+    setProof(null);
+    setError(null);
+    api
+      .getPlayer(session, playerId)
+      .then(setPlayer)
+      .catch((e) => {
+        setError(
+          e instanceof ApiError && e.code === 'UNDER_18_WALL'
+            ? 'The under-18 wall: agency accounts cannot view minors. This profile does not exist for your organisation.'
+            : e instanceof ApiError && e.code === 'VERIFIED_CLUBS_ONLY'
+              ? 'Under-18 profiles are visible to verified clubs only. Complete club verification to view this player.'
+              : errMsg(e),
+        );
+      });
   }, [session, playerId]);
 
   const act = async (action: 'save' | 'shortlist') => {
     try {
       await api.act(session, playerId, action);
-      notify(`${action === 'save' ? 'Saved' : 'Shortlisted'} — logged to the Discovery Ledger under ${session.scoutName}.`);
-    } catch (e) { notify(errMsg(e), true); }
+      notify(
+        `${action === 'save' ? 'Saved' : 'Shortlisted'} — logged to the Discovery Ledger under ${session.scoutName}.`,
+      );
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
   };
 
   const send = async () => {
     if (!requestType) return;
     const minor = player?.guardianManaged;
     try {
-      await api.sendRequest(session, playerId, requestType, message, requestType === 'trial' ? trialDetails : undefined);
-      notify(minor
-        ? `Sent to the parent/guardian. ${session.org.name} (${session.role}) has requested to discuss a ${requestType === 'trial' ? 'trial' : 'conversation'} — the guardian decides.`
-        : `${requestType === 'trial' ? 'Trial' : 'Contact'} request sent to the player's Scout Inbox. Contact unlocks only if they accept.`);
-      setRequestType(null); setMessage(''); setTrialDetails({});
-    } catch (e) { notify(errMsg(e), true); }
+      await api.sendRequest(
+        session,
+        playerId,
+        requestType,
+        message,
+        requestType === 'trial' ? trialDetails : undefined,
+      );
+      notify(
+        minor
+          ? `Sent to the parent/guardian. ${session.org.name} (${session.role}) has requested to discuss a ${requestType === 'trial' ? 'trial' : 'conversation'} — the guardian decides.`
+          : `${requestType === 'trial' ? 'Trial' : 'Contact'} request sent to the player's Scout Inbox. Contact unlocks only if they accept.`,
+      );
+      setRequestType(null);
+      setMessage('');
+      setTrialDetails({});
+    } catch (e) {
+      notify(errMsg(e), true);
+    }
   };
 
-  const loadProof = () => api.getProofPack(session, playerId).then(setProof).catch((e) => notify(errMsg(e), true));
+  const loadProof = () =>
+    api
+      .getProofPack(session, playerId)
+      .then(setProof)
+      .catch((e) => notify(errMsg(e), true));
 
   // Open (or re-open) this player's Recruitment Room. A room is private
   // to this organisation: the player, their guardian and every other club can
@@ -1641,32 +3065,73 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
   return (
     <>
       <div className="drawer-veil" onClick={onClose} />
-      <div className="drawer" ref={dialogRef} role="dialog" aria-modal="true" aria-label={player?.name ?? 'Player'} tabIndex={-1}>
-        {error && <><div className="notice block">{error}</div><div style={{ marginTop: 14 }}><button onClick={onClose}>Close</button></div></>}
+      <div
+        className="drawer"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={player?.name ?? 'Player'}
+        tabIndex={-1}
+      >
+        {error && (
+          <>
+            <div className="notice block">{error}</div>
+            <div style={{ marginTop: 14 }}>
+              <button onClick={onClose}>Close</button>
+            </div>
+          </>
+        )}
         {player && (
           <>
             <div className="head">
               <div>
                 <span className="club-eyebrow">Player dossier</span>
                 <h3>{player.name}</h3>
-                <div className="desk-dossier-location"><Icon name="map-pin" size={14} />{player.city ? `${player.city}, ` : ''}{player.country}</div>
+                <div className="desk-dossier-location">
+                  <Icon name="map-pin" size={14} />
+                  {player.city ? `${player.city}, ` : ''}
+                  {player.country}
+                </div>
                 <dl className="desk-dossier-facts">
-                  <div><dt>Position</dt><dd>{player.position}</dd></div>
-                  <div><dt>Age</dt><dd>{player.age}</dd></div>
-                  <div><dt>Foot</dt><dd>{sentenceCase(player.foot)}</dd></div>
-                  <div><dt>Height</dt><dd>{player.heightCm} cm</dd></div>
-                  <div><dt>Weight</dt><dd>{player.weightKg} kg</dd></div>
+                  <div>
+                    <dt>Position</dt>
+                    <dd>{player.position}</dd>
+                  </div>
+                  <div>
+                    <dt>Age</dt>
+                    <dd>{player.age}</dd>
+                  </div>
+                  <div>
+                    <dt>Foot</dt>
+                    <dd>{sentenceCase(player.foot)}</dd>
+                  </div>
+                  <div>
+                    <dt>Height</dt>
+                    <dd>{player.heightCm} cm</dd>
+                  </div>
+                  <div>
+                    <dt>Weight</dt>
+                    <dd>{player.weightKg} kg</dd>
+                  </div>
                 </dl>
                 <div className="badges" style={{ marginTop: 8 }}>
                   {player.guardianManaged && <span className="pill red">U18 · guardian-managed</span>}
-                  {typeof player.distanceKm === 'number' && <span className="pill blue">{player.distanceKm} km from your ground</span>}
+                  {typeof player.distanceKm === 'number' && (
+                    <span className="pill blue">{player.distanceKm} km from your ground</span>
+                  )}
                   {player.identityVerified && <span className="pill outline-green">Identity verified</span>}
                   <span className="pill">{AVAILABILITY_LABELS[player.availability] ?? player.availability}</span>
                   <span className="pill">{CONTRACT_LABELS[player.contractStatus] ?? player.contractStatus}</span>
-                  {player.badges.map((b) => <span key={b} className="pill gold">{b}</span>)}
+                  {player.badges.map((b) => (
+                    <span key={b} className="pill gold">
+                      {b}
+                    </span>
+                  ))}
                 </div>
               </div>
-              <button className="close" onClick={onClose}>Close</button>
+              <button className="close" onClick={onClose}>
+                Close
+              </button>
             </div>
 
             <TrustBar score={player.trustScore} />
@@ -1678,7 +3143,13 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                   {player.vouches!.map((v) => (
                     <div key={v.id} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                       <div style={{ display: 'flex', gap: 10 }}>
-                        <span className="grow"><b>{v.coachName}</b> <span className="dim">{v.role}{v.seasons ? ` · ${v.seasons}` : ''}</span></span>
+                        <span className="grow">
+                          <b>{v.coachName}</b>{' '}
+                          <span className="dim">
+                            {v.role}
+                            {v.seasons ? ` · ${v.seasons}` : ''}
+                          </span>
+                        </span>
                         <span className="pill green">Verified</span>
                       </div>
                       {v.text && <div className="dim">“{v.text}”</div>}
@@ -1690,9 +3161,9 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
 
             {player.guardianManaged && (
               <div className="notice warn" style={{ marginTop: 12 }}>
-                This player is under 18. Their account is owned by a parent/guardian: you cannot message
-                the child, ever. Requests below go to the guardian, who sees your club, your name and
-                your verified role ({session.role}).
+                This player is under 18. Their account is owned by a parent/guardian: you cannot message the child,
+                ever. Requests below go to the guardian, who sees your club, your name and your verified role (
+                {session.role}).
               </div>
             )}
 
@@ -1706,25 +3177,50 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               )}
               {player.guardianManaged ? (
                 <>
-                  <button className="primary" onClick={() => setRequestType('contact')}>Contact Guardian</button>
-                  <button className="primary" onClick={() => setRequestType('trial')}>Invite to trial (via guardian)</button>
+                  <button className="primary" onClick={() => setRequestType('contact')}>
+                    Contact Guardian
+                  </button>
+                  <button className="primary" onClick={() => setRequestType('trial')}>
+                    Invite to trial (via guardian)
+                  </button>
                 </>
               ) : (
                 <>
-                  <button className="primary" onClick={() => setRequestType('contact')}>Request contact</button>
-                  <button className="primary" onClick={() => setRequestType('trial')}>Request trial</button>
+                  <button className="primary" onClick={() => setRequestType('contact')}>
+                    Request contact
+                  </button>
+                  <button className="primary" onClick={() => setRequestType('trial')}>
+                    Request trial
+                  </button>
                 </>
               )}
               <button onClick={loadProof}>Proof Pack</button>
-              <button onClick={() => api.moreLikeThis(session, playerId).then((r) => setMoreLike(r.players)).catch((e) => notify(errMsg(e), true))}>≈ More like this</button>
+              <button
+                onClick={() =>
+                  api
+                    .moreLikeThis(session, playerId)
+                    .then((r) => setMoreLike(r.players))
+                    .catch((e) => notify(errMsg(e), true))
+                }
+              >
+                ≈ More like this
+              </button>
               {!player.guardianManaged && (
-                <button onClick={async () => {
-                  if (!confirmDestructive({ ...DESTRUCTIVE_ACTIONS.recordSigning, name: player.name })) return;
-                  try {
-                    const s = await api.recordSigning(session, playerId);
-                    notify(`Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`);
-                  } catch (e) { notify(errMsg(e), true); }
-                }}>Record signing</button>
+                <button
+                  onClick={async () => {
+                    if (!confirmDestructive({ ...DESTRUCTIVE_ACTIONS.recordSigning, name: player.name })) return;
+                    try {
+                      const s = await api.recordSigning(session, playerId);
+                      notify(
+                        `Signing recorded${s.insideAttributionWindow ? ' — inside the attribution window' : ''}. Timeline updated.`,
+                      );
+                    } catch (e) {
+                      notify(errMsg(e), true);
+                    }
+                  }}
+                >
+                  Record signing
+                </button>
               )}
               <button onClick={() => setReporting(true)}>Report</button>
             </div>
@@ -1737,7 +3233,9 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                     <div key={m.id} className="list-row" style={{ cursor: 'pointer' }}>
                       <span className="pill blue">{m.position}</span>
                       <span className="grow">{m.name}</span>
-                      <span className="dim">{m.similarity}% similar · trust {m.trustScore}</span>
+                      <span className="dim">
+                        {m.similarity}% similar · trust {m.trustScore}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1747,21 +3245,36 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
             <div className="section">
               <h4>Internal notes — your org only, never visible to the player</h4>
               <div style={{ display: 'flex', gap: 10, marginBottom: 8 }}>
-                <input style={{ flex: 1 }} placeholder='e.g. "Watched live 12/8 — second viewing needed"' value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} />
-                <button onClick={async () => {
-                  if (!noteDraft.trim()) return;
-                  try {
-                    await api.addNote(session, playerId, noteDraft.trim());
-                    setNoteDraft('');
-                    setPlayer(await api.getPlayer(session, playerId));
-                  } catch (e) { notify(errMsg(e), true); }
-                }}>Add note</button>
+                <input
+                  style={{ flex: 1 }}
+                  placeholder='e.g. "Watched live 12/8 — second viewing needed"'
+                  value={noteDraft}
+                  onChange={(e) => setNoteDraft(e.target.value)}
+                />
+                <button
+                  onClick={async () => {
+                    if (!noteDraft.trim()) return;
+                    try {
+                      await api.addNote(session, playerId, noteDraft.trim());
+                      setNoteDraft('');
+                      setPlayer(await api.getPlayer(session, playerId));
+                    } catch (e) {
+                      notify(errMsg(e), true);
+                    }
+                  }}
+                >
+                  Add note
+                </button>
               </div>
               <div className="list-rows">
                 {(player.orgNotes ?? []).map((n: OrgNote) => (
                   <div key={n.id} className="list-row">
-                    <span className="grow" style={{ fontSize: 13 }}>{n.text}</span>
-                    <span className="dim">{n.scoutName} · {fmtDate(n.ts)}</span>
+                    <span className="grow" style={{ fontSize: 13 }}>
+                      {n.text}
+                    </span>
+                    <span className="dim">
+                      {n.scoutName} · {fmtDate(n.ts)}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -1784,23 +3297,62 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 </h4>
                 {requestType === 'trial' && (
                   <div style={{ display: 'flex', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
-                    <input type="date" title="Proposed date" value={trialDetails.proposedDate ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, proposedDate: e.target.value || undefined })} />
-                    <input type="date" title="Alternative slot 1" value={trialDetails.altSlots?.[0] ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, altSlots: [e.target.value, trialDetails.altSlots?.[1] ?? ''].filter(Boolean) })} />
-                    <input type="date" title="Alternative slot 2" value={trialDetails.altSlots?.[1] ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, altSlots: [trialDetails.altSlots?.[0] ?? '', e.target.value].filter(Boolean) })} />
-                    <input style={{ flex: 1 }} placeholder="Venue (e.g. Eastport Training Centre)" value={trialDetails.venue ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, venue: e.target.value || undefined })} />
-                    <input style={{ flex: 1 }} placeholder="What to bring / notes" value={trialDetails.notes ?? ''} onChange={(e) => setTrialDetails({ ...trialDetails, notes: e.target.value || undefined })} />
+                    <input
+                      type="date"
+                      title="Proposed date"
+                      value={trialDetails.proposedDate ?? ''}
+                      onChange={(e) => setTrialDetails({ ...trialDetails, proposedDate: e.target.value || undefined })}
+                    />
+                    <input
+                      type="date"
+                      title="Alternative slot 1"
+                      value={trialDetails.altSlots?.[0] ?? ''}
+                      onChange={(e) =>
+                        setTrialDetails({
+                          ...trialDetails,
+                          altSlots: [e.target.value, trialDetails.altSlots?.[1] ?? ''].filter(Boolean),
+                        })
+                      }
+                    />
+                    <input
+                      type="date"
+                      title="Alternative slot 2"
+                      value={trialDetails.altSlots?.[1] ?? ''}
+                      onChange={(e) =>
+                        setTrialDetails({
+                          ...trialDetails,
+                          altSlots: [trialDetails.altSlots?.[0] ?? '', e.target.value].filter(Boolean),
+                        })
+                      }
+                    />
+                    <input
+                      style={{ flex: 1 }}
+                      placeholder="Venue (e.g. Eastport Training Centre)"
+                      value={trialDetails.venue ?? ''}
+                      onChange={(e) => setTrialDetails({ ...trialDetails, venue: e.target.value || undefined })}
+                    />
+                    <input
+                      style={{ flex: 1 }}
+                      placeholder="What to bring / notes"
+                      value={trialDetails.notes ?? ''}
+                      onChange={(e) => setTrialDetails({ ...trialDetails, notes: e.target.value || undefined })}
+                    />
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 10 }}>
                   <input
                     style={{ flex: 1 }}
-                    placeholder={player.guardianManaged
-                      ? `Message to the guardian (they see ${session.org.name}, ${session.role}, ${session.scoutName})`
-                      : 'Message to the player (they see your club and your name)'}
+                    placeholder={
+                      player.guardianManaged
+                        ? `Message to the guardian (they see ${session.org.name}, ${session.role}, ${session.scoutName})`
+                        : 'Message to the player (they see your club and your name)'
+                    }
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
                   />
-                  <button className="primary" onClick={() => send()}>Send</button>
+                  <button className="primary" onClick={() => send()}>
+                    Send
+                  </button>
                   <button onClick={() => setRequestType(null)}>Cancel</button>
                 </div>
                 <div className="dim" style={{ marginTop: 6, fontSize: 12.5 }}>
@@ -1823,7 +3375,10 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                   </div>
                   <div className="list-row">
                     <span className="grow">Attribution window</span>
-                    <span className="dim">{proof.attributionWindowMonths} months{proof.attributionWindowEnds ? ` — ends ${fmtDate(proof.attributionWindowEnds)}` : ''}</span>
+                    <span className="dim">
+                      {proof.attributionWindowMonths} months
+                      {proof.attributionWindowEnds ? ` — ends ${fmtDate(proof.attributionWindowEnds)}` : ''}
+                    </span>
                   </div>
                   <div className="list-row">
                     <span className="grow">Logged events for {proof.org.name}</span>
@@ -1838,12 +3393,21 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 <h4>Season output</h4>
                 <div className="stat-grid">
                   <Stat v={player.stats.appearances} k="Appearances" />
-                  {player.position === 'GK'
-                    ? <Stat v={player.stats.cleanSheets ?? 0} k="Clean sheets" />
-                    : <><Stat v={player.stats.goals} k="Goals" /><Stat v={player.stats.assists} k="Assists" /></>}
+                  {player.position === 'GK' ? (
+                    <Stat v={player.stats.cleanSheets ?? 0} k="Clean sheets" />
+                  ) : (
+                    <>
+                      <Stat v={player.stats.goals} k="Goals" />
+                      <Stat v={player.stats.assists} k="Assists" />
+                    </>
+                  )}
                   {player.stats.paceKmh != null && <Stat v={`${player.stats.paceKmh}`} k="Top speed km/h" />}
-                  {player.stats.passCompletionPct != null && <Stat v={`${player.stats.passCompletionPct}%`} k="Pass completion" />}
-                  {player.stats.duelSuccessPct != null && player.position !== 'GK' && <Stat v={`${player.stats.duelSuccessPct}%`} k="Duel success" />}
+                  {player.stats.passCompletionPct != null && (
+                    <Stat v={`${player.stats.passCompletionPct}%`} k="Pass completion" />
+                  )}
+                  {player.stats.duelSuccessPct != null && player.position !== 'GK' && (
+                    <Stat v={`${player.stats.duelSuccessPct}%`} k="Duel success" />
+                  )}
                 </div>
               </div>
             )}
@@ -1867,7 +3431,9 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                   <div key={a.id} className="list-row">
                     <span className="pill green">GPS + device ✓</span>
                     <span className="grow">{a.fixture}</span>
-                    <span className="dim">{a.venue} · {a.date}</span>
+                    <span className="dim">
+                      {a.venue} · {a.date}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -1879,9 +3445,21 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 <div className="list-rows">
                   {player.trialReports.map((r) => (
                     <div key={r.id} className="list-row record-report">
-                      <span className="grow"><b>{r.orgName}</b><span className="record-note">{r.scoutName}</span></span>
+                      <span className="grow">
+                        <b>{r.orgName}</b>
+                        <span className="record-note">{r.scoutName}</span>
+                      </span>
                       <div>
-                        <RecordFacts items={[{label: 'Acceleration', value: `${r.acceleration}/10`}, {label: 'Sprint speed', value: `${r.sprintSpeedKmh} km/h`}, {label: 'Distance', value: `${r.distanceKm} km`}, {label: 'Pass completion', value: `${r.passCompletionPct}%`}, {label: 'Duels won', value: `${r.duelSuccessPct}%`}, {label: 'Coach rating', value: `${r.coachRating}/10`}]} />
+                        <RecordFacts
+                          items={[
+                            { label: 'Acceleration', value: `${r.acceleration}/10` },
+                            { label: 'Sprint speed', value: `${r.sprintSpeedKmh} km/h` },
+                            { label: 'Distance', value: `${r.distanceKm} km` },
+                            { label: 'Pass completion', value: `${r.passCompletionPct}%` },
+                            { label: 'Duels won', value: `${r.duelSuccessPct}%` },
+                            { label: 'Coach rating', value: `${r.coachRating}/10` },
+                          ]}
+                        />
                       </div>
                     </div>
                   ))}
@@ -1893,19 +3471,26 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               <h4>Medical</h4>
               {player.medical.shared ? (
                 <div className="list-rows">
-                  <div className="list-row"><span className="pill green">Shared by player</span><span className="grow">Condition: {player.medical.conditionStatus.replace(/_/g, ' ')}</span></div>
+                  <div className="list-row">
+                    <span className="pill green">Shared by player</span>
+                    <span className="grow">Condition: {player.medical.conditionStatus.replace(/_/g, ' ')}</span>
+                  </div>
                   {player.medical.records.map((m) => (
                     <div key={m.id} className="list-row">
                       <span className="pill">{m.type}</span>
                       <span className="grow">{m.title}</span>
-                      <span className="dim">{m.date}{m.layoffWeeks ? ` · ${m.layoffWeeks} wks out` : ''}{m.cleared ? ' · cleared' : ''}</span>
+                      <span className="dim">
+                        {m.date}
+                        {m.layoffWeeks ? ` · ${m.layoffWeeks} wks out` : ''}
+                        {m.cleared ? ' · cleared' : ''}
+                      </span>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div className="notice">
-                  <Icon name="lock-keyhole" size={13} /> Medical data is player-controlled under data-protection law. This player has not switched
-                  sharing on, so nothing is visible to any organisation — including yours.
+                  <Icon name="lock-keyhole" size={13} /> Medical data is player-controlled under data-protection law.
+                  This player has not switched sharing on, so nothing is visible to any organisation — including yours.
                 </div>
               )}
             </div>
@@ -1916,9 +3501,20 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                 <div className="list-rows">
                   {player.drillResults!.map((r) => (
                     <div key={r.id} className="list-row">
-                      {r.verified ? <span className="pill green">Verified</span> : <span className="pill">Self-reported</span>}
+                      {r.verified ? (
+                        <span className="pill green">Verified</span>
+                      ) : (
+                        <span className="pill">Self-reported</span>
+                      )}
                       <span className="grow">{r.drillName}</span>
-                      <span className="dim">{r.metric}: <b style={{ color: 'var(--text)' }}>{r.value}{r.unit}</b> · {fmtDate(r.ts)}</span>
+                      <span className="dim">
+                        {r.metric}:{' '}
+                        <b style={{ color: 'var(--text)' }}>
+                          {r.value}
+                          {r.unit}
+                        </b>{' '}
+                        · {fmtDate(r.ts)}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1929,7 +3525,10 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
               <h4>Transfer timeline</h4>
               <div className="list-rows">
                 {player.timeline.map((t, i) => (
-                  <div key={i} className="list-row"><span className="pill">{t.year}</span><span className="grow">{t.event}</span></div>
+                  <div key={i} className="list-row">
+                    <span className="pill">{t.year}</span>
+                    <span className="grow">{t.event}</span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1944,14 +3543,22 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
                       <span className="pill blue">{m.kind}</span>
                       {m.verifiedClip && <span className="pill green">Verified Clip — confirmed fixture</span>}
                       <span className="grow">{m.title}</span>
-                      <span className="dim">{m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'} · {fmtDate(m.uploadedAt)}</span>
+                      <span className="dim">
+                        {m.views ?? 0} view{(m.views ?? 0) === 1 ? '' : 's'} · {fmtDate(m.uploadedAt)}
+                      </span>
                     </div>
                     {Object.keys(m.tags ?? {}).length > 0 && (
                       <div className="badges">
-                        {Object.entries(m.tags!).map(([t, n]) => <span key={t} className="pill gold">{TAG_LABELS[t] ?? t} ×{n}</span>)}
+                        {Object.entries(m.tags!).map(([t, n]) => (
+                          <span key={t} className="pill gold">
+                            {TAG_LABELS[t] ?? t} ×{n}
+                          </span>
+                        ))}
                       </div>
                     )}
-                    {api.mediaUrl(m.url) && <video className="clip" controls preload="metadata" src={api.mediaUrl(m.url)!} />}
+                    {api.mediaUrl(m.url) && (
+                      <video className="clip" controls preload="metadata" src={api.mediaUrl(m.url)!} />
+                    )}
                   </div>
                 ))}
               </div>
@@ -1987,5 +3594,10 @@ export function PlayerDrawer({ session, playerId, notify, onClose, onOpenRoom }:
 }
 
 function Stat({ v, k }: { v: ReactNode; k: string }) {
-  return <div className="stat"><div className="v">{v}</div><div className="k">{k}</div></div>;
+  return (
+    <div className="stat">
+      <div className="v">{v}</div>
+      <div className="k">{k}</div>
+    </div>
+  );
 }

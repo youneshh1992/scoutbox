@@ -1,5 +1,13 @@
 // "Who's watching you": the player's side of the Discovery Ledger, counted from its rows.
-const INSIGHT_TYPES = ['view', 'save', 'shortlist', 'contact_request', 'trial_request', 'contact_request_to_guardian', 'trial_request_to_guardian'];
+const INSIGHT_TYPES = [
+  'view',
+  'save',
+  'shortlist',
+  'contact_request',
+  'trial_request',
+  'contact_request_to_guardian',
+  'trial_request_to_guardian',
+];
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 
 export function createInsights({ ledger }) {
@@ -30,10 +38,17 @@ export function createInsights({ ledger }) {
     }).reverse();
     return {
       thisWeek: { views: count(weekly, 'view'), saves: count(weekly, 'save'), shortlists: count(weekly, 'shortlist') },
-      thisMonth: { views: count(monthly, 'view'), saves: count(monthly, 'save'), shortlists: count(monthly, 'shortlist') },
+      thisMonth: {
+        views: count(monthly, 'view'),
+        saves: count(monthly, 'save'),
+        shortlists: count(monthly, 'shortlist'),
+      },
       weeklySeries,
       byOrg: Object.values(byOrg).sort((a, b) => b.lastSeen - a.lastSeen),
-      recent: events.slice(-12).reverse().map((l) => ({ type: l.type, orgName: l.orgName, scoutName: l.scoutName, ts: l.ts })),
+      recent: events
+        .slice(-12)
+        .reverse()
+        .map((l) => ({ type: l.type, orgName: l.orgName, scoutName: l.scoutName, ts: l.ts })),
     };
   };
 }

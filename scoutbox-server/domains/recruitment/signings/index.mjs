@@ -15,29 +15,83 @@ import { sideEffectRunner } from '../../platform/sideEffects.mjs';
 import { roomRole, roomCan } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
-import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../lifecycle/lifecycle.mjs';
+import {
+  canTransitionRecruitmentCase,
+  NULL_EVIDENCE_PROVIDER,
+  RECRUITMENT_LIFECYCLE_POLICY_VERSION,
+} from '../lifecycle/lifecycle.mjs';
 import { playerLevelAfterSigning } from '../../../domain.mjs';
 import { offerStatus as canonicalOfferStatus, effectiveRevisionStatus } from '../offers/offer.mjs';
 // The current-package rule (live → completed → newest terminal).
 import { currentSigningForOffer } from '../lifecycle/journeyModel.mjs';
 import { sendSigningError, notFound, documentNotFound } from './errors.mjs';
 import {
-  SIGNING_POLICY_VERSION, SIGNING_STATUSES, SIGNING_STATUS_LABELS, SIGNING_METHODS, SIGNING_LIMITS, PARTY_TYPES,
-  MINOR_SIGNING_PATHWAY_ENABLED, minorSigningPathwayOpen,
-  payloadFingerprint, cleanText, normaliseSigningClientKey, validateContractDates, validateExpiry, requiredPartiesFor,
-  currentRevision, nextRevisionNumber, effectiveStatus, isLive, partiesComplete, findParty,
-  canStart, canAttachDocument, canMarkReady, canCompleteParty, canCancel, canVoid, canSupersede, completionGate,
-  signingIntegrity, signingConsistency, signingCorrupt,
-  signingClubView, signingRecipientView, signingAgentView, signingHistoryView, completedSigningRecord,
+  SIGNING_POLICY_VERSION,
+  SIGNING_STATUSES,
+  SIGNING_STATUS_LABELS,
+  SIGNING_METHODS,
+  SIGNING_LIMITS,
+  PARTY_TYPES,
+  MINOR_SIGNING_PATHWAY_ENABLED,
+  minorSigningPathwayOpen,
+  payloadFingerprint,
+  cleanText,
+  normaliseSigningClientKey,
+  validateContractDates,
+  validateExpiry,
+  requiredPartiesFor,
+  currentRevision,
+  nextRevisionNumber,
+  effectiveStatus,
+  isLive,
+  partiesComplete,
+  findParty,
+  canStart,
+  canAttachDocument,
+  canMarkReady,
+  canCompleteParty,
+  canCancel,
+  canVoid,
+  canSupersede,
+  completionGate,
+  signingIntegrity,
+  signingConsistency,
+  signingCorrupt,
+  signingClubView,
+  signingRecipientView,
+  signingAgentView,
+  signingHistoryView,
+  completedSigningRecord,
 } from './signing.mjs';
 
 export function registerSigning(rawCtx) {
   const ctx = { ...rawCtx, ...buildRouteHelpers(rawCtx) };
   const {
-    orgRouter, playerRouter, guardianRouter, adminRouter, nextId, notify, broadcast, findPlayer, isBlocked,
-    rateLimit, isLead, auditEntry, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
-    access = null, integration = null, evidence = null, faults = null,
-    players, unit, afterCommit,
+    orgRouter,
+    playerRouter,
+    guardianRouter,
+    adminRouter,
+    nextId,
+    notify,
+    broadcast,
+    findPlayer,
+    isBlocked,
+    rateLimit,
+    isLead,
+    auditEntry,
+    orgCanSee,
+    storage,
+    ledgerAppend,
+    billing = null,
+    refreshJourneyBadges = null,
+    isAdult = null,
+    access = null,
+    integration = null,
+    evidence = null,
+    faults = null,
+    players,
+    unit,
+    afterCommit,
     signingsFollowUps,
     recruitmentReads,
     // A grassroots signing's squad row lives in org_squad_members.
@@ -45,18 +99,39 @@ export function registerSigning(rawCtx) {
     // The document vault.
     verificationReads,
   } = ctx;
-  const vaultRecordOf = (id, orgId) => { const e = typeof id === 'string' ? verificationReads?.evidence.byId(id) ?? null : null; return e && e.orgId === orgId ? e : null; };
-  if (typeof recruitmentReads?.offers?.byId !== 'function') throw new TypeError('registerSigning needs recruitmentReads (offers) from the data layer');
+  const vaultRecordOf = (id, orgId) => {
+    const e = typeof id === 'string' ? (verificationReads?.evidence.byId(id) ?? null) : null;
+    return e && e.orgId === orgId ? e : null;
+  };
+  if (typeof recruitmentReads?.offers?.byId !== 'function')
+    throw new TypeError('registerSigning needs recruitmentReads (offers) from the data layer');
   const offerReads = recruitmentReads.offers;
-  const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
-  const caseAudit = (kase, ...entry) => ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
-  if (typeof players?.setAvailability !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
-  if (typeof signingsFollowUps?.signingPackages?.insert !== 'function' || typeof signingsFollowUps?.signings?.record !== 'function') throw new TypeError('registerSigning needs the signings/follow-ups repository from the data layer');
-  const sp = signingsFollowUps.signingPackages; const sg = signingsFollowUps.signings;
+  const caseOfOrg = (id, orgId) => {
+    const k = recruitmentReads.cases.byId(id);
+    return k && k.orgId === orgId ? k : null;
+  };
+  const caseAudit = (kase, ...entry) =>
+    ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
+  if (typeof players?.setAvailability !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function')
+    throw new TypeError(
+      'registerSigning needs the identity repository (players), unit and afterCommit from the data layer',
+    );
+  if (
+    typeof signingsFollowUps?.signingPackages?.insert !== 'function' ||
+    typeof signingsFollowUps?.signings?.record !== 'function'
+  )
+    throw new TypeError('registerSigning needs the signings/follow-ups repository from the data layer');
+  const sp = signingsFollowUps.signingPackages;
+  const sg = signingsFollowUps.signings;
 
   /** Raised inside the completion unit: the unit rolls back and the route answers with this code. */
   class SigningAbort extends Error {
-    constructor(code, message, { why = code, moved = null } = {}) { super(why); this.code = code; this.userMessage = message; this.moved = moved; }
+    constructor(code, message, { why = code, moved = null } = {}) {
+      super(why);
+      this.code = code;
+      this.userMessage = message;
+      this.moved = moved;
+    }
   }
 
   const err = (res, error, message, extra = {}) => sendSigningError(res, { error, message, ...extra }, 'signing');
@@ -66,36 +141,74 @@ export function registerSigning(rawCtx) {
   const orgOf = (orgId) => ctx.byId.org(orgId);
   const now = requestClock();
   const byOrg = (req) => ({ kind: 'org', id: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
-  const hist = (pkg, action, by, detail, at) => sp.addHistory(pkg.id, { id: nextId('aud'), at, action, by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null }, detail: detail ?? null });
-  const keyList = (pkg, act) => (Array.isArray(pkg.keys?.[act]) ? pkg.keys[act] : pkg.keys?.[act] ? [pkg.keys[act]] : []);
+  const hist = (pkg, action, by, detail, at) =>
+    sp.addHistory(pkg.id, {
+      id: nextId('aud'),
+      at,
+      action,
+      by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null },
+      detail: detail ?? null,
+    });
+  const keyList = (pkg, act) =>
+    Array.isArray(pkg.keys?.[act]) ? pkg.keys[act] : pkg.keys?.[act] ? [pkg.keys[act]] : [];
   const keyRow = (pkg, act, k) => keyList(pkg, act).find((x) => x && x.key === k) ?? null;
   const addKey = (pkg, act, entry) => sp.addKey(pkg.id, act, entry);
   const safe = sideEffectRunner('SIGNING');
   /** bumpRev's rule (domains/platform/concurrency.mjs), written through the repository. */
-  const touch = (pkg, req, at, by = req?.orgUser ?? null) => sp.patch(pkg.id, { rev: (Number.isInteger(pkg.rev) ? pkg.rev : 1) + 1, revAt: at, revBy: by ? { userId: by.id ?? null, name: by.name ?? null } : null, updatedAt: at });
+  const touch = (pkg, req, at, by = req?.orgUser ?? null) =>
+    sp.patch(pkg.id, {
+      rev: (Number.isInteger(pkg.rev) ? pkg.rev : 1) + 1,
+      revAt: at,
+      revBy: by ? { userId: by.id ?? null, name: by.name ?? null } : null,
+      updatedAt: at,
+    });
 
   // ------------------------------------------------------------- lookups
 
   const caseOf = (pkg) => caseOfOrg(pkg.caseId, pkg.orgId);
-  const offerOf = (pkg) => { const o = offerReads.byId(pkg.offerId); return o && o.orgId === pkg.orgId ? o : null; };
+  const offerOf = (pkg) => {
+    const o = offerReads.byId(pkg.offerId);
+    return o && o.orgId === pkg.orgId ? o : null;
+  };
   const offerRevisionOf = (offer, id) => (offer?.revisions ?? []).find((r) => r && r.id === id) ?? null;
   const packagesOf = (offerId, orgId) => sp.forOffer(offerId).filter((p) => p.orgId === orgId);
   const packagesOfCase = (kase) => sp.forCase(kase.id).filter((p) => p.orgId === kase.orgId);
   const subjectRemoved = (kase) => !!kase?.subjectRemovedAt || !findPlayer(kase?.playerId);
   const completedRowFor = (pkg) => sg.forPackage(pkg.id);
 
-  const consistencyOf = (pkg, offer, kase, at, look = LOOKUPS) => signingConsistency(pkg, { offer, kase, rows: [look.rowFor(pkg.id)].filter(Boolean), player: look.playerOf(pkg.playerId) ?? null }, at);
-  const LOOKUPS = Object.freeze({ offerOf, caseOf, rowFor: (id) => sg.forPackage(id), playerOf: (id) => findPlayer(id) });
+  const consistencyOf = (pkg, offer, kase, at, look = LOOKUPS) =>
+    signingConsistency(
+      pkg,
+      { offer, kase, rows: [look.rowFor(pkg.id)].filter(Boolean), player: look.playerOf(pkg.playerId) ?? null },
+      at,
+    );
+  const LOOKUPS = Object.freeze({
+    offerOf,
+    caseOf,
+    rowFor: (id) => sg.forPackage(id),
+    playerOf: (id) => findPlayer(id),
+  });
   /** The same lookups, answered from the players' offers, cases and signings read once. */
   function lookupsForPlayers(playerIds) {
     const pids = [...new Set(playerIds)];
     const offers = new Map(offerReads.forPlayers(pids).map((o) => [o.id, o]));
     const cases = new Map(pids.flatMap((pid) => recruitmentReads.cases.forPlayer(pid)).map((k) => [k.id, k]));
-    const rows = new Map(pids.flatMap((pid) => sg.forPlayer(pid)).filter((r) => r.signingPackageId).map((r) => [r.signingPackageId, r]));
+    const rows = new Map(
+      pids
+        .flatMap((pid) => sg.forPlayer(pid))
+        .filter((r) => r.signingPackageId)
+        .map((r) => [r.signingPackageId, r]),
+    );
     const players = new Map(pids.map((pid) => [pid, findPlayer(pid) ?? null]));
     return Object.freeze({
-      offerOf: (pkg) => { const o = offers.get(pkg.offerId) ?? offerReads.byId(pkg.offerId); return o && o.orgId === pkg.orgId ? o : null; },
-      caseOf: (pkg) => { const k = cases.get(pkg.caseId) ?? recruitmentReads.cases.byId(pkg.caseId); return k && k.orgId === pkg.orgId ? k : null; },
+      offerOf: (pkg) => {
+        const o = offers.get(pkg.offerId) ?? offerReads.byId(pkg.offerId);
+        return o && o.orgId === pkg.orgId ? o : null;
+      },
+      caseOf: (pkg) => {
+        const k = cases.get(pkg.caseId) ?? recruitmentReads.cases.byId(pkg.caseId);
+        return k && k.orgId === pkg.orgId ? k : null;
+      },
       rowFor: (id) => rows.get(id) ?? sg.forPackage(id),
       playerOf: (id) => (players.has(id) ? players.get(id) : findPlayer(id)),
     });
@@ -103,10 +216,14 @@ export function registerSigning(rawCtx) {
   /** Omitted from every projection unless its Offer, case and completed record agree with it. */
   function soundPackage(pkg, at, look = LOOKUPS) {
     if (!pkg || signingIntegrity(pkg).length) return false;
-    const offer = look.offerOf(pkg); const kase = look.caseOf(pkg);
+    const offer = look.offerOf(pkg);
+    const kase = look.caseOf(pkg);
     if (!offer || !kase) return false;
     const c = consistencyOf(pkg, offer, kase, at, look);
-    if (signingCorrupt(c)) { console.error(`SIGNING consistency ${pkg.id}: ${c.join(',')}`); return false; }
+    if (signingCorrupt(c)) {
+      console.error(`SIGNING consistency ${pkg.id}: ${c.join(',')}`);
+      return false;
+    }
     return true;
   }
 
@@ -114,7 +231,16 @@ export function registerSigning(rawCtx) {
     const room = ctx.findRoomForRequest(req, res);
     if (!room) return null;
     const role = roleFor(req, room);
-    if (!roomCan(role, need)) { err(res, 'SIGNING_NOT_PERMITTED', need === 'offer_view' ? 'Your role cannot read signings on this case.' : 'Only a room lead or recruitment lead can manage a signing.'); return null; }
+    if (!roomCan(role, need)) {
+      err(
+        res,
+        'SIGNING_NOT_PERMITTED',
+        need === 'offer_view'
+          ? 'Your role cannot read signings on this case.'
+          : 'Only a room lead or recruitment lead can manage a signing.',
+      );
+      return null;
+    }
     return { room, role };
   }
 
@@ -122,38 +248,80 @@ export function registerSigning(rawCtx) {
   function packageFor(req, res, need) {
     const found = sp.byId(req.params.id);
     const pkg = found && found.orgId === req.org.id ? found : null;
-    if (!pkg) { notFound(res, 'club'); return null; }
+    if (!pkg) {
+      notFound(res, 'club');
+      return null;
+    }
     const problems = signingIntegrity(pkg, { orgId: req.org.id });
-    if (problems.length) { console.error(`SIGNING integrity ${pkg.id}: ${problems.join(',')}`); err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be read.'); return null; }
-    const kase = caseOf(pkg); const offer = offerOf(pkg);
-    if (!kase || !kase.room || !offer) { notFound(res, 'club'); return null; }
+    if (problems.length) {
+      console.error(`SIGNING integrity ${pkg.id}: ${problems.join(',')}`);
+      err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be read.');
+      return null;
+    }
+    const kase = caseOf(pkg);
+    const offer = offerOf(pkg);
+    if (!kase || !kase.room || !offer) {
+      notFound(res, 'club');
+      return null;
+    }
     const consistency = consistencyOf(pkg, offer, kase, now(req));
-    if (signingCorrupt(consistency)) { console.error(`SIGNING consistency ${pkg.id}: ${consistency.join(',')}`); err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be read.'); return null; }
+    if (signingCorrupt(consistency)) {
+      console.error(`SIGNING consistency ${pkg.id}: ${consistency.join(',')}`);
+      err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be read.');
+      return null;
+    }
     const role = roleFor(req, kase);
-    if (!roomCan(role, 'offer_view')) { err(res, 'SIGNING_NOT_PERMITTED', 'Your role cannot read signings on this case.'); return null; }
-    if (need === 'manage' && !roomCan(role, 'offer_issue')) { err(res, 'SIGNING_NOT_PERMITTED', 'Only a room lead or recruitment lead can manage a signing.'); return null; }
-    if (need === 'lead' && !isLead(req.orgUser)) { err(res, 'SIGNING_NOT_PERMITTED', 'Only a recruitment lead can sign for the club or complete a signing.'); return null; }
+    if (!roomCan(role, 'offer_view')) {
+      err(res, 'SIGNING_NOT_PERMITTED', 'Your role cannot read signings on this case.');
+      return null;
+    }
+    if (need === 'manage' && !roomCan(role, 'offer_issue')) {
+      err(res, 'SIGNING_NOT_PERMITTED', 'Only a room lead or recruitment lead can manage a signing.');
+      return null;
+    }
+    if (need === 'lead' && !isLead(req.orgUser)) {
+      err(res, 'SIGNING_NOT_PERMITTED', 'Only a recruitment lead can sign for the club or complete a signing.');
+      return null;
+    }
     return { pkg, kase, offer, role, consistency };
   }
 
   function revGate(req, res, record) {
     const exp = expectedRevOf(req.body);
-    if (exp === null) { err(res, 'SIGNING_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.'); return false; }
+    if (exp === null) {
+      err(res, 'SIGNING_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.');
+      return false;
+    }
     const raw = req.body?.expectedRev ?? req.body?.expectedVersion;
-    if (!Number.isInteger(raw) || raw < 0) { err(res, 'SIGNING_REV_REQUIRED', 'expectedRev must be a non-negative integer.', { field: 'expectedRev', expected: 'integer' }); return false; }
-    return guardRev(req, res, record, { errorCode: 'SIGNING_REV_CONFLICT', current: { rev: Number.isInteger(record.rev) ? record.rev : 1, status: record.status } });
+    if (!Number.isInteger(raw) || raw < 0) {
+      err(res, 'SIGNING_REV_REQUIRED', 'expectedRev must be a non-negative integer.', {
+        field: 'expectedRev',
+        expected: 'integer',
+      });
+      return false;
+    }
+    return guardRev(req, res, record, {
+      errorCode: 'SIGNING_REV_CONFLICT',
+      current: { rev: Number.isInteger(record.rev) ? record.rev : 1, status: record.status },
+    });
   }
 
   function clientKey(req, res) {
     const k = normaliseSigningClientKey(req.body?.clientKey);
-    if (!k.ok) { err(res, k.error, k.message); return undefined; }
+    if (!k.ok) {
+      err(res, k.error, k.message);
+      return undefined;
+    }
     return k.key;
   }
   const replayOr = (pkg, act, key, fp, res, view) => {
     if (!key) return false;
     const row = keyRow(pkg, act, key);
     if (!row) return false;
-    if (row.fp === fp) { res.json({ ...view(), idempotent: true }); return true; }
+    if (row.fp === fp) {
+      res.json({ ...view(), idempotent: true });
+      return true;
+    }
     err(res, 'SIGNING_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different request.');
     return true;
   };
@@ -163,22 +331,66 @@ export function registerSigning(rawCtx) {
   /** Through the evidence upload path: digest, sniffed type, size limit; organisation-internal. */
   function storeDocument(req, res, { pkg, kind }) {
     const { dataUrl, filename, label } = req.body ?? {};
-    if (!evidence?.storeFile || !evidence?.add) { err(res, 'SIGNING_STORE_MISSING', 'Documents cannot be stored right now.'); return null; }
-    if (typeof dataUrl !== 'string' || !dataUrl) { err(res, 'SIGNING_DOCUMENT_INVALID', 'Attach the document as a data URL.', { field: 'dataUrl' }); return null; }
+    if (!evidence?.storeFile || !evidence?.add) {
+      err(res, 'SIGNING_STORE_MISSING', 'Documents cannot be stored right now.');
+      return null;
+    }
+    if (typeof dataUrl !== 'string' || !dataUrl) {
+      err(res, 'SIGNING_DOCUMENT_INVALID', 'Attach the document as a data URL.', { field: 'dataUrl' });
+      return null;
+    }
     const lab = cleanText(label, SIGNING_LIMITS.label);
-    if (!lab.ok) { err(res, 'SIGNING_INPUT_INVALID', 'The label must be short text.', { field: 'label' }); return null; }
+    if (!lab.ok) {
+      err(res, 'SIGNING_INPUT_INVALID', 'The label must be short text.', { field: 'label' });
+      return null;
+    }
     const stored = evidence.storeFile(dataUrl, filename, req);
-    if (stored?.error) { err(res, 'SIGNING_DOCUMENT_INVALID', `The file was refused: ${stored.error}.`, { field: 'dataUrl', reasons: [stored.error] }); return null; }
+    if (stored?.error) {
+      err(res, 'SIGNING_DOCUMENT_INVALID', `The file was refused: ${stored.error}.`, {
+        field: 'dataUrl',
+        reasons: [stored.error],
+      });
+      return null;
+    }
     // The digest a party will confirm is computed from the bytes that arrived and must equal the vault's.
     const m = /^data:[^;]+;base64,(.+)$/s.exec(dataUrl);
     const digest = m ? createHash('sha256').update(Buffer.from(m[1], 'base64')).digest('hex') : null;
-    if (!digest || digest !== stored.sha256) { console.error(`SIGNING digest_mismatch vault=${stored.sha256} bytes=${digest}`); err(res, 'SIGNING_DOCUMENT_INVALID', 'The stored document digest does not match its bytes; the document was not attached.', { field: 'dataUrl' }); return null; }
-    const ev = evidence.add({
-      type: 'document', source: 'club_upload', suppliedByKind: 'org_user', suppliedById: req.orgUser.id, orgId: req.org.id, claimIds: [],
-      ...stored, visibility: 'organisation_internal', retention: 'until_signing_resolution',
-      meta: { signingPackageId: pkg.id, signingDocumentKind: kind, label: lab.value },
-    }, req);
-    return { id: nextId(kind === 'executed' ? 'sgx' : 'sgd'), evidenceId: ev.id, sha256: ev.sha256, filename: ev.filename ?? null, mime: ev.mime ?? null, bytes: ev.bytes ?? null, label: lab.value, uploadedAt: now(req), uploadedBy: byOrg(req) };
+    if (!digest || digest !== stored.sha256) {
+      console.error(`SIGNING digest_mismatch vault=${stored.sha256} bytes=${digest}`);
+      err(
+        res,
+        'SIGNING_DOCUMENT_INVALID',
+        'The stored document digest does not match its bytes; the document was not attached.',
+        { field: 'dataUrl' },
+      );
+      return null;
+    }
+    const ev = evidence.add(
+      {
+        type: 'document',
+        source: 'club_upload',
+        suppliedByKind: 'org_user',
+        suppliedById: req.orgUser.id,
+        orgId: req.org.id,
+        claimIds: [],
+        ...stored,
+        visibility: 'organisation_internal',
+        retention: 'until_signing_resolution',
+        meta: { signingPackageId: pkg.id, signingDocumentKind: kind, label: lab.value },
+      },
+      req,
+    );
+    return {
+      id: nextId(kind === 'executed' ? 'sgx' : 'sgd'),
+      evidenceId: ev.id,
+      sha256: ev.sha256,
+      filename: ev.filename ?? null,
+      mime: ev.mime ?? null,
+      bytes: ev.bytes ?? null,
+      label: lab.value,
+      uploadedAt: now(req),
+      uploadedBy: byOrg(req),
+    };
   }
   /**
    * Checked before presenting, before a party confirms, at completion and before serving: the vault row must be
@@ -198,7 +410,17 @@ export function registerSigning(rawCtx) {
     const ev = vaultRecordOf(doc?.evidenceId, orgId);
     if (!ev) return null;
     const blob = ev.mediaId && storage?.read ? storage.read(ev.mediaId) : null;
-    return { document: { id: doc.id, label: doc.label ?? null, filename: ev.filename ?? null, mime: ev.mime ?? blob?.contentType ?? null, bytes: ev.bytes ?? blob?.buffer?.length ?? null, sha256: ev.sha256 ?? null }, file: blob ? { mime: ev.mime ?? blob.contentType, base64: blob.buffer.toString('base64') } : null };
+    return {
+      document: {
+        id: doc.id,
+        label: doc.label ?? null,
+        filename: ev.filename ?? null,
+        mime: ev.mime ?? blob?.contentType ?? null,
+        bytes: ev.bytes ?? blob?.buffer?.length ?? null,
+        sha256: ev.sha256 ?? null,
+      },
+      file: blob ? { mime: ev.mime ?? blob.contentType, base64: blob.buffer.toString('base64') } : null,
+    };
   }
 
   // ------------------------------------------------------------- lifecycle coupling
@@ -209,24 +431,55 @@ export function registerSigning(rawCtx) {
     if (verdict.ok) {
       const org = orgOf(room.orgId);
       let effect;
-      try { effect = ctx.applyLifecycleTransition({ req, room, to: verdict.to, reasonCodes: [], trigger, actor: actor ? { ...actor, org } : null, statusDetail: { lifecycleAction: action, clientKey: null, policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION, ...keyDetail } }); }
-      catch (e) { console.error(`SIGNING lifecycle_writer_threw ${action}: ${e?.message ?? e}`); return { applied: false, action, reason: 'writer_failed', from: room.room.status, to: null, at }; }
+      try {
+        effect = ctx.applyLifecycleTransition({
+          req,
+          room,
+          to: verdict.to,
+          reasonCodes: [],
+          trigger,
+          actor: actor ? { ...actor, org } : null,
+          statusDetail: {
+            lifecycleAction: action,
+            clientKey: null,
+            policyVersion: RECRUITMENT_LIFECYCLE_POLICY_VERSION,
+            ...keyDetail,
+          },
+        });
+      } catch (e) {
+        console.error(`SIGNING lifecycle_writer_threw ${action}: ${e?.message ?? e}`);
+        return { applied: false, action, reason: 'writer_failed', from: room.room.status, to: null, at };
+      }
       return { applied: true, action, from: effect.from, to: effect.to, at };
     }
-    if (verdict.error === 'LIFECYCLE_NO_CHANGE') return { applied: false, action, reason: 'already_there', from: room.room.status, to: room.room.status, at };
-    return { applied: false, action, reason: verdict.error, message: verdict.message ?? null, allowed: verdict.allowed ?? [], from: room.room.status, to: null, at };
+    if (verdict.error === 'LIFECYCLE_NO_CHANGE')
+      return { applied: false, action, reason: 'already_there', from: room.room.status, to: room.room.status, at };
+    return {
+      applied: false,
+      action,
+      reason: verdict.error,
+      message: verdict.message ?? null,
+      allowed: verdict.allowed ?? [],
+      from: room.room.status,
+      to: null,
+      at,
+    };
   }
 
   // ------------------------------------------------------------- notifications
 
-  const notifyPlayer = (pkg, text) => { if (!isBlocked(pkg.playerId, pkg.orgId)) notify({ kind: 'player', id: pkg.playerId }, 'recruitment_signing', text, pkg.id); };
+  const notifyPlayer = (pkg, text) => {
+    if (!isBlocked(pkg.playerId, pkg.orgId))
+      notify({ kind: 'player', id: pkg.playerId }, 'recruitment_signing', text, pkg.id);
+  };
   function notifyClubLeads(pkg, text) {
     const room = caseOf(pkg);
     const ids = new Set([room?.ownerUserId, room?.room?.leadScoutUserId, pkg.createdBy?.id].filter(Boolean));
     for (const uid of ids) notify({ kind: 'org_user', id: uid }, 'recruitment_signing', text, pkg.id);
   }
   function notifyAgent(pkg, text) {
-    const offer = offerOf(pkg); const s = offer?.agentShare;
+    const offer = offerOf(pkg);
+    const s = offer?.agentShare;
     if (!s?.agentUserId) return;
     const basis = integration?.basisFor?.({ agentUserId: s.agentUserId, clientId: pkg.playerId, at: now() });
     if (basis?.ok) notify({ kind: 'org_user', id: s.agentUserId }, 'recruitment_signing', text, pkg.id);
@@ -244,29 +497,60 @@ export function registerSigning(rawCtx) {
    */
   function recordCompletedSigning({ player, org, actor, at, pkg = null, rev = null, legacy = null }) {
     if (pkg) {
-      const existing = completedRowFor(pkg); if (existing) return { signing: existing, duplicate: true };
+      const existing = completedRowFor(pkg);
+      if (existing) return { signing: existing, duplicate: true };
       // One completed signing per Offer, whatever package claims it.
-      const byOffer = pkg.offerId ? sg.forOffer(pkg.offerId) : null; if (byOffer) return { signing: byOffer, duplicate: true };
+      const byOffer = pkg.offerId ? sg.forOffer(pkg.offerId) : null;
+      if (byOffer) return { signing: byOffer, duplicate: true };
     }
     const events = ctx.safetyReads.ledger.forPlayerOrg(player.id, org.id);
     const first = events[0] ?? null;
     const windowMonths = PLANS[org.plan].attributionWindowMonths; // orgs.plan has a CHECK against the catalogue
     const windowEnds = first ? first.ts + windowMonths * 30.44 * 24 * 3600 * 1000 : null;
-    const row = ledgerAppend({ type: 'signing', playerId: player.id, orgId: org.id, orgName: org.name, userId: actor?.id ?? null, scoutName: actor?.name ?? null });
+    const row = ledgerAppend({
+      type: 'signing',
+      playerId: player.id,
+      orgId: org.id,
+      orgName: org.name,
+      userId: actor?.id ?? null,
+      scoutName: actor?.name ?? null,
+    });
     const ts = pkg ? at : row.ts;
     const attribution = { first, windowMonths, inside: first ? ts <= windowEnds : false };
     const id = nextId('sign');
     const signing = pkg
       ? completedSigningRecord({ id, pkg, rev, player, org, actor, at: ts, attribution })
       : {
-        id, playerId: player.id, playerName: player.name, orgId: org.id, orgName: org.name, userId: actor?.id ?? null, scoutName: actor?.name ?? null,
-        ts, signedAt: ts, firstQualifyingInteraction: first, attributionWindowMonths: windowMonths, insideAttributionWindow: attribution.inside,
-        method: 'LEGACY_RECORDED', note: legacy?.note ?? null, signingPackageId: null, signingRevisionId: null, offerId: null, caseId: null, documentSha256: null, contract: null, policyVersion: SIGNING_POLICY_VERSION,
-      };
+          id,
+          playerId: player.id,
+          playerName: player.name,
+          orgId: org.id,
+          orgName: org.name,
+          userId: actor?.id ?? null,
+          scoutName: actor?.name ?? null,
+          ts,
+          signedAt: ts,
+          firstQualifyingInteraction: first,
+          attributionWindowMonths: windowMonths,
+          insideAttributionWindow: attribution.inside,
+          method: 'LEGACY_RECORDED',
+          note: legacy?.note ?? null,
+          signingPackageId: null,
+          signingRevisionId: null,
+          offerId: null,
+          caseId: null,
+          documentSha256: null,
+          contract: null,
+          policyVersion: SIGNING_POLICY_VERSION,
+        };
     signingsFollowUps.signings.record(signing);
     // A provider call never runs inside the transaction, so a rolled-back completion never issues an invoice.
     if (signing.insideAttributionWindow && billing?.invoiceForSigning) {
-      afterCommit(() => Promise.resolve(billing.invoiceForSigning(signing, org)).catch((e) => console.error(`BILLING invoice_failed signing=${signing.id}: ${e?.message ?? e}`)));
+      afterCommit(() =>
+        Promise.resolve(billing.invoiceForSigning(signing, org)).catch((e) =>
+          console.error(`BILLING invoice_failed signing=${signing.id}: ${e?.message ?? e}`),
+        ),
+      );
     }
     // Grassroots signings make semi-pros; academy/pro signings make pros.
     const levelBefore = player.level ?? 'amateur';
@@ -276,26 +560,69 @@ export function registerSigning(rawCtx) {
     const levelLines = [];
     if (levelBefore === 'amateur' && levelAfter === 'semi_pro') {
       players.addItem(player.id, 'timeline', { year, event: `Levelled up: amateur → semi-pro with ${org.name}` });
-      levelLines.push([`⬆️ You're semi-pro. ${org.name} signed you — one step up the ladder, recorded forever on your pathway.`, `${player.name} levelled up: amateur → semi-pro with ${org.name}.`]);
+      levelLines.push([
+        `⬆️ You're semi-pro. ${org.name} signed you — one step up the ladder, recorded forever on your pathway.`,
+        `${player.name} levelled up: amateur → semi-pro with ${org.name}.`,
+      ]);
     } else if (levelBefore !== 'pro' && levelAfter === 'pro') {
-      players.addItem(player.id, 'timeline', { year, event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}` });
-      levelLines.push([`⬆️ Academy/pro level reached with ${org.name}. Your grassroots journey got you here.`, `${player.name} reached academy/pro level with ${org.name}.`]);
+      players.addItem(player.id, 'timeline', {
+        year,
+        event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}`,
+      });
+      levelLines.push([
+        `⬆️ Academy/pro level reached with ${org.name}. Your grassroots journey got you here.`,
+        `${player.name} reached academy/pro level with ${org.name}.`,
+      ]);
     }
     if (org.level === 'grassroots') {
       // A player the club shadowed joins the squad all the same.
-      if (!clubSetup.squad.has(org.id, player.id)) clubSetup.squad.create({ id: nextId('sq'), orgId: org.id, playerId: player.id, name: String(player.name ?? 'Player').slice(0, CLUB_SETUP_LIMITS.name), position: player.position ?? null, source: 'signing', addedAt: ts });
+      if (!clubSetup.squad.has(org.id, player.id))
+        clubSetup.squad.create({
+          id: nextId('sq'),
+          orgId: org.id,
+          playerId: player.id,
+          name: String(player.name ?? 'Player').slice(0, CLUB_SETUP_LIMITS.name),
+          position: player.position ?? null,
+          source: 'signing',
+          addedAt: ts,
+        });
     }
-      // Written here and nowhere else for a recruitment signing.
+    // Written here and nowhere else for a recruitment signing.
     players.setAvailability(player.id, { contractStatus: 'under_contract', availability: 'not_seeking' });
-    players.addItem(player.id, 'timeline', { year, event: pkg ? `Signed with ${org.name} — signing completed in ScoutBox` : `Signed by ${org.name} — discovered on ScoutBox` });
+    players.addItem(player.id, 'timeline', {
+      year,
+      event: pkg
+        ? `Signed with ${org.name} — signing completed in ScoutBox`
+        : `Signed by ${org.name} — discovered on ScoutBox`,
+    });
     const effects = () => {
       safe('refreshJourneyBadges', () => refreshJourneyBadges?.(player));
       for (const [pText, gText] of levelLines) {
         safe('notify_level_player', () => notify({ kind: 'player', id: player.id }, 'level_up', pText, player.id));
-        if (player.guardianId) safe('notify_level_guardian', () => notify({ kind: 'guardian', id: player.guardianId }, 'level_up', gText, player.id));
+        if (player.guardianId)
+          safe('notify_level_guardian', () =>
+            notify({ kind: 'guardian', id: player.guardianId }, 'level_up', gText, player.id),
+          );
       }
-      safe('notify_signing_player', () => notify({ kind: 'player', id: player.id }, 'signing', pkg ? `🎉 ${org.name}: your signing is completed. It's on your timeline.` : `🎉 ${org.name} recorded your signing. Congratulations — it's on your timeline.`, signing.id));
-      if (player.guardianId) safe('notify_signing_guardian', () => notify({ kind: 'guardian', id: player.guardianId }, 'signing', `${org.name} ${pkg ? 'completed' : 'recorded'} ${player.name}'s signing.`, signing.id));
+      safe('notify_signing_player', () =>
+        notify(
+          { kind: 'player', id: player.id },
+          'signing',
+          pkg
+            ? `🎉 ${org.name}: your signing is completed. It's on your timeline.`
+            : `🎉 ${org.name} recorded your signing. Congratulations — it's on your timeline.`,
+          signing.id,
+        ),
+      );
+      if (player.guardianId)
+        safe('notify_signing_guardian', () =>
+          notify(
+            { kind: 'guardian', id: player.guardianId },
+            'signing',
+            `${org.name} ${pkg ? 'completed' : 'recorded'} ${player.name}'s signing.`,
+            signing.id,
+          ),
+        );
       safe('broadcast_players', () => broadcast?.('players', { playerId: player.id }));
     };
     return { signing, duplicate: false, effects };
@@ -304,8 +631,17 @@ export function registerSigning(rawCtx) {
   /** An accepted Offer or any package between this club and player means the workflow owns the signing. */
   function legacyRecordingBlocker(playerId, orgId, at = Date.now()) {
     const offers = offerReads.forOrgPlayer(orgId, playerId);
-    if (offers.some((o) => canonicalOfferStatus(o, at) === 'ACCEPTED')) return { error: 'SIGNING_CANONICAL_REQUIRED', message: 'This player accepted a canonical Offer from your club: complete the signing through the signing workflow on the case.' };
-    if (sp.forOrgPlayer(orgId, playerId).some((p) => (isLive(p, at) || effectiveStatus(p, at) === 'COMPLETED'))) return { error: 'SIGNING_CANONICAL_REQUIRED', message: 'A signing workflow exists for this player on your case: complete it there.' };
+    if (offers.some((o) => canonicalOfferStatus(o, at) === 'ACCEPTED'))
+      return {
+        error: 'SIGNING_CANONICAL_REQUIRED',
+        message:
+          'This player accepted a canonical Offer from your club: complete the signing through the signing workflow on the case.',
+      };
+    if (sp.forOrgPlayer(orgId, playerId).some((p) => isLive(p, at) || effectiveStatus(p, at) === 'COMPLETED'))
+      return {
+        error: 'SIGNING_CANONICAL_REQUIRED',
+        message: 'A signing workflow exists for this player on your case: complete it there.',
+      };
     return null;
   }
 
@@ -319,12 +655,21 @@ export function registerSigning(rawCtx) {
     if (kase.room?.status !== 'offer_accepted') blockers.push('CASE_STATE');
     // Names the closed minor pathway before anyone tries, whatever the Offer's state.
     const subject = findPlayer(kase.playerId);
-    if (subject && typeof isAdult === 'function' && !isAdult(subject) && !minorSigningPathwayOpen(orgOf(kase.orgId)?.country ?? 'GB')) blockers.push('MINOR_PATHWAY_CLOSED');
-    const accepted = offerReads.forCase(kase.id).find((o) => o.orgId === kase.orgId && canonicalOfferStatus(o, at) === 'ACCEPTED') ?? null;
+    if (
+      subject &&
+      typeof isAdult === 'function' &&
+      !isAdult(subject) &&
+      !minorSigningPathwayOpen(orgOf(kase.orgId)?.country ?? 'GB')
+    )
+      blockers.push('MINOR_PATHWAY_CLOSED');
+    const accepted =
+      offerReads.forCase(kase.id).find((o) => o.orgId === kase.orgId && canonicalOfferStatus(o, at) === 'ACCEPTED') ??
+      null;
     if (!accepted) blockers.push('OFFER_NOT_ACCEPTED');
     else {
       const rev = (accepted.revisions ?? []).find((r) => r && effectiveRevisionStatus(r, at) === 'ACCEPTED') ?? null;
-      if (rev?.recipientSnapshot?.type === 'guardian' && !minorSigningPathwayOpen(orgOf(kase.orgId)?.country ?? 'GB')) blockers.push('MINOR_PATHWAY_CLOSED');
+      if (rev?.recipientSnapshot?.type === 'guardian' && !minorSigningPathwayOpen(orgOf(kase.orgId)?.country ?? 'GB'))
+        blockers.push('MINOR_PATHWAY_CLOSED');
       const existing = packagesOf(accepted.id, kase.orgId);
       if (existing.some((p) => effectiveStatus(p, at) === 'COMPLETED')) blockers.push('ALREADY_COMPLETED');
       else if (existing.some((p) => isLive(p, at))) blockers.push('PACKAGE_LIVE');
@@ -337,17 +682,42 @@ export function registerSigning(rawCtx) {
     if (!got) return;
     const { room: kase, role } = got;
     const at = now(req);
-    const packages = packagesOfCase(kase).map((p) => ({ ...signingClubView(p, at, { orgName: orgOf(p.orgId)?.name ?? null }), integrity: [...signingIntegrity(p, { orgId: kase.orgId }), ...(offerOf(p) ? consistencyOf(p, offerOf(p), kase, at) : ['OFFER_MISSING'])] })).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    const packages = packagesOfCase(kase)
+      .map((p) => ({
+        ...signingClubView(p, at, { orgName: orgOf(p.orgId)?.name ?? null }),
+        integrity: [
+          ...signingIntegrity(p, { orgId: kase.orgId }),
+          ...(offerOf(p) ? consistencyOf(p, offerOf(p), kase, at) : ['OFFER_MISSING']),
+        ],
+      }))
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     const live = packagesOfCase(kase).find((p) => isLive(p, at)) ?? null;
     const { blockers, accepted } = startBlockers(kase, role, at);
     const legacySigning = sg.forOrgPlayer(kase.orgId, kase.playerId).find((s) => !s.signingPackageId) ?? null;
     res.json({
-      packages, livePackageId: live?.id ?? null,
-      legacySigning: legacySigning ? { id: legacySigning.id, at: legacySigning.ts ?? null, method: legacySigning.method ?? 'LEGACY_RECORDED' } : null,
-      requirements: { role, canManage: roomCan(role, 'offer_issue'), canComplete: isLead(req.orgUser), status: kase.room?.status ?? null, startBlockers: blockers, acceptedOfferId: accepted?.id ?? null },
-      vocabulary: { statuses: SIGNING_STATUSES, statusLabels: SIGNING_STATUS_LABELS, partyTypes: PARTY_TYPES, methods: SIGNING_METHODS, minorPathway: MINOR_SIGNING_PATHWAY_ENABLED },
+      packages,
+      livePackageId: live?.id ?? null,
+      legacySigning: legacySigning
+        ? { id: legacySigning.id, at: legacySigning.ts ?? null, method: legacySigning.method ?? 'LEGACY_RECORDED' }
+        : null,
+      requirements: {
+        role,
+        canManage: roomCan(role, 'offer_issue'),
+        canComplete: isLead(req.orgUser),
+        status: kase.room?.status ?? null,
+        startBlockers: blockers,
+        acceptedOfferId: accepted?.id ?? null,
+      },
+      vocabulary: {
+        statuses: SIGNING_STATUSES,
+        statusLabels: SIGNING_STATUS_LABELS,
+        partyTypes: PARTY_TYPES,
+        methods: SIGNING_METHODS,
+        minorPathway: MINOR_SIGNING_PATHWAY_ENABLED,
+      },
       policyVersion: SIGNING_POLICY_VERSION,
-      honest: 'An accepted Offer is not a signing. A signing is completed only when every required party has confirmed the exact document and a recruitment lead completes the package; only then does the case read Signed.',
+      honest:
+        'An accepted Offer is not a signing. A signing is completed only when every required party has confirmed the exact document and a recruitment lead completes the package; only then does the case read Signed.',
     });
   });
 
@@ -358,125 +728,318 @@ export function registerSigning(rawCtx) {
     const kase = caseOfOrg(offer.caseId, req.org.id);
     if (!kase || !kase.room) return notFound(res, 'club');
     const role = roleFor(req, kase);
-    if (!roomCan(role, 'offer_view')) return err(res, 'SIGNING_NOT_PERMITTED', 'Your role cannot read signings on this case.');
-    if (!roomCan(role, 'offer_issue')) return err(res, 'SIGNING_NOT_PERMITTED', 'Only a room lead or recruitment lead can open a signing.');
+    if (!roomCan(role, 'offer_view'))
+      return err(res, 'SIGNING_NOT_PERMITTED', 'Your role cannot read signings on this case.');
+    if (!roomCan(role, 'offer_issue'))
+      return err(res, 'SIGNING_NOT_PERMITTED', 'Only a room lead or recruitment lead can open a signing.');
     const at = now(req);
-    const key = clientKey(req, res); if (key === undefined) return;
+    const key = clientKey(req, res);
+    if (key === undefined) return;
     const b = req.body ?? {};
     const acceptedRev = (offer.revisions ?? []).find((r) => r && effectiveRevisionStatus(r, at) === 'ACCEPTED') ?? null;
-    const contractIn = { startDate: b.contract?.startDate ?? acceptedRev?.terms?.startDate ?? null, endDate: b.contract?.endDate ?? acceptedRev?.terms?.endDate ?? null };
+    const contractIn = {
+      startDate: b.contract?.startDate ?? acceptedRev?.terms?.startDate ?? null,
+      endDate: b.contract?.endDate ?? acceptedRev?.terms?.endDate ?? null,
+    };
     const note = cleanText(b.internalNote, SIGNING_LIMITS.internalNote);
-    if (!note.ok) return err(res, 'SIGNING_INPUT_INVALID', note.tooLong ? `Keep the note under ${SIGNING_LIMITS.internalNote} characters.` : 'The note must be text.', { field: 'internalNote' });
-    const fp = payloadFingerprint({ offerId: offer.id, contract: contractIn, internalNote: note.value, expiresAt: b.expiresAt ?? null });
+    if (!note.ok)
+      return err(
+        res,
+        'SIGNING_INPUT_INVALID',
+        note.tooLong ? `Keep the note under ${SIGNING_LIMITS.internalNote} characters.` : 'The note must be text.',
+        { field: 'internalNote' },
+      );
+    const fp = payloadFingerprint({
+      offerId: offer.id,
+      contract: contractIn,
+      internalNote: note.value,
+      expiresAt: b.expiresAt ?? null,
+    });
     if (key) {
       const prior = packagesOf(offer.id, req.org.id).find((p) => p.keys?.start?.key === key);
-      if (prior) return prior.keys.start.fp === fp ? res.json({ signing: signingClubView(prior, at, { orgName: req.org.name }), idempotent: true }) : err(res, 'SIGNING_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different request.');
+      if (prior)
+        return prior.keys.start.fp === fp
+          ? res.json({ signing: signingClubView(prior, at, { orgName: req.org.name }), idempotent: true })
+          : err(res, 'SIGNING_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different request.');
     }
-    if (subjectRemoved(kase)) return err(res, 'SIGNING_SUBJECT_REMOVED', 'This player removed their ScoutBox account. No signing is opened about a person who left.');
-    if (isBlocked(kase.playerId, kase.orgId)) return err(res, 'SIGNING_BLOCKED', 'This player (or their guardian) has blocked your organisation. No signing is opened while the block stands.');
-    const gate = canStart({ offerStatus: canonicalOfferStatus(offer, at), offerRevisionStatus: acceptedRev ? effectiveRevisionStatus(acceptedRev, at) : null, caseStatus: kase.room?.status, recipientType: acceptedRev?.recipientSnapshot?.type ?? null, jurisdiction: orgOf(kase.orgId)?.country ?? 'GB', existing: packagesOf(offer.id, req.org.id) }, at);
+    if (subjectRemoved(kase))
+      return err(
+        res,
+        'SIGNING_SUBJECT_REMOVED',
+        'This player removed their ScoutBox account. No signing is opened about a person who left.',
+      );
+    if (isBlocked(kase.playerId, kase.orgId))
+      return err(
+        res,
+        'SIGNING_BLOCKED',
+        'This player (or their guardian) has blocked your organisation. No signing is opened while the block stands.',
+      );
+    const gate = canStart(
+      {
+        offerStatus: canonicalOfferStatus(offer, at),
+        offerRevisionStatus: acceptedRev ? effectiveRevisionStatus(acceptedRev, at) : null,
+        caseStatus: kase.room?.status,
+        recipientType: acceptedRev?.recipientSnapshot?.type ?? null,
+        jurisdiction: orgOf(kase.orgId)?.country ?? 'GB',
+        existing: packagesOf(offer.id, req.org.id),
+      },
+      at,
+    );
     if (!gate.ok) return err(res, gate.error, gate.message, gate.current ? { current: gate.current } : {});
-    if (offer.playerId !== kase.playerId) { console.error(`SIGNING offer/case player mismatch ${offer.id}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'This Offer cannot be read.'); }
+    if (offer.playerId !== kase.playerId) {
+      console.error(`SIGNING offer/case player mismatch ${offer.id}`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'This Offer cannot be read.');
+    }
     const contract = validateContractDates(contractIn);
     if (!contract.ok) return err(res, contract.error, contract.message, { field: contract.field });
     const expiry = validateExpiry(b.expiresAt, { now: at });
-    if (!expiry.ok) return err(res, expiry.error, expiry.message, { field: 'expiresAt', ...(expiry.expected ? { expected: expiry.expected } : {}) });
+    if (!expiry.ok)
+      return err(res, expiry.error, expiry.message, {
+        field: 'expiresAt',
+        ...(expiry.expected ? { expected: expiry.expected } : {}),
+      });
     if (limited('signing_start', req.org.id)) return res.status(429).json(rateLimitedBody('signing_start'));
     const by = byOrg(req);
     const rev = {
-      id: nextId('spr'), revisionNumber: 1, status: 'DRAFT', createdAt: at, createdBy: by, readyAt: null, readyBy: null, completedAt: null,
-      document: null, executedDocument: null, contract: contract.contract,
-      requiredParties: requiredPartiesFor({ recipientType: acceptedRev.recipientSnapshot.type, playerId: kase.playerId, guardianId: acceptedRev.recipientSnapshot.guardianId ?? null, orgId: kase.orgId }),
-      policySnapshot: { policyVersion: SIGNING_POLICY_VERSION, jurisdiction: orgOf(kase.orgId)?.country ?? 'GB', offerPolicyVersion: offer.policyVersion ?? null },
-      supersedesRevisionId: null, supersededByRevisionId: null,
+      id: nextId('spr'),
+      revisionNumber: 1,
+      status: 'DRAFT',
+      createdAt: at,
+      createdBy: by,
+      readyAt: null,
+      readyBy: null,
+      completedAt: null,
+      document: null,
+      executedDocument: null,
+      contract: contract.contract,
+      requiredParties: requiredPartiesFor({
+        recipientType: acceptedRev.recipientSnapshot.type,
+        playerId: kase.playerId,
+        guardianId: acceptedRev.recipientSnapshot.guardianId ?? null,
+        orgId: kase.orgId,
+      }),
+      policySnapshot: {
+        policyVersion: SIGNING_POLICY_VERSION,
+        jurisdiction: orgOf(kase.orgId)?.country ?? 'GB',
+        offerPolicyVersion: offer.policyVersion ?? null,
+      },
+      supersedesRevisionId: null,
+      supersededByRevisionId: null,
     };
     const pkg = {
-      id: nextId('spk'), orgId: kase.orgId, caseId: kase.id, playerId: kase.playerId, offerId: offer.id, offerRevisionId: acceptedRev.id, transactionId: offer.transactionId ?? null,
-      status: 'DRAFT', currentRevisionId: rev.id, revisions: [rev], expiresAt: expiry.ms, internalNote: note.value,
-      keys: { start: key ? { key, fp } : null, ready: [], party: [], cancel: [], void: [], supersede: [], complete: [] },
-      history: [], completion: null, cancelledAt: null, cancelledBy: null, cancelReason: null, voidedAt: null, voidedBy: null, voidReason: null,
-      createdAt: at, createdBy: by, updatedAt: at, rev: 1, revAt: at, revBy: { userId: by.id, name: by.name }, policyVersion: SIGNING_POLICY_VERSION,
+      id: nextId('spk'),
+      orgId: kase.orgId,
+      caseId: kase.id,
+      playerId: kase.playerId,
+      offerId: offer.id,
+      offerRevisionId: acceptedRev.id,
+      transactionId: offer.transactionId ?? null,
+      status: 'DRAFT',
+      currentRevisionId: rev.id,
+      revisions: [rev],
+      expiresAt: expiry.ms,
+      internalNote: note.value,
+      keys: {
+        start: key ? { key, fp } : null,
+        ready: [],
+        party: [],
+        cancel: [],
+        void: [],
+        supersede: [],
+        complete: [],
+      },
+      history: [],
+      completion: null,
+      cancelledAt: null,
+      cancelledBy: null,
+      cancelReason: null,
+      voidedAt: null,
+      voidedBy: null,
+      voidReason: null,
+      createdAt: at,
+      createdBy: by,
+      updatedAt: at,
+      rev: 1,
+      revAt: at,
+      revBy: { userId: by.id, name: by.name },
+      policyVersion: SIGNING_POLICY_VERSION,
     };
     let stored;
-    try { stored = unit(() => { sp.insert(pkg); const fresh = hist(pkg, 'signing_created', by, { revisionId: rev.id, offerId: offer.id, offerRevisionId: acceptedRev.id }, at); caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_created', { signingPackageId: pkg.id, offerId: offer.id }); return fresh; }); }
-    catch (e) { console.error(`SIGNING start_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be opened; nothing was recorded.'); }
-    safe('broadcast', () => broadcast?.('signing_created', { orgId: stored.orgId, roomId: kase.id, signingPackageId: stored.id, offerId: offer.id }));
+    try {
+      stored = unit(() => {
+        sp.insert(pkg);
+        const fresh = hist(
+          pkg,
+          'signing_created',
+          by,
+          { revisionId: rev.id, offerId: offer.id, offerRevisionId: acceptedRev.id },
+          at,
+        );
+        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_created', {
+          signingPackageId: pkg.id,
+          offerId: offer.id,
+        });
+        return fresh;
+      });
+    } catch (e) {
+      console.error(`SIGNING start_rolled_back ${pkg.id}: ${e?.message ?? e}`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be opened; nothing was recorded.');
+    }
+    safe('broadcast', () =>
+      broadcast?.('signing_created', {
+        orgId: stored.orgId,
+        roomId: kase.id,
+        signingPackageId: stored.id,
+        offerId: offer.id,
+      }),
+    );
     res.status(201).json({ signing: signingClubView(stored, at, { orgName: req.org.name }) });
   });
 
   orgRouter.get('/signings/:id', (req, res) => {
-    const got = packageFor(req, res, 'view'); if (!got) return;
+    const got = packageFor(req, res, 'view');
+    if (!got) return;
     res.json({ signing: signingClubView(got.pkg, now(req), { orgName: req.org.name }), integrity: got.consistency });
   });
   orgRouter.get('/signings/:id/history', (req, res) => {
-    const got = packageFor(req, res, 'view'); if (!got) return;
+    const got = packageFor(req, res, 'view');
+    if (!got) return;
     res.json({ items: signingHistoryView(got.pkg), signingPackageId: got.pkg.id });
   });
   orgRouter.get('/signings/:id/document', (req, res) => {
-    const got = packageFor(req, res, 'view'); if (!got) return;
+    const got = packageFor(req, res, 'view');
+    if (!got) return;
     const which = req.query.kind === 'executed' ? 'executedDocument' : 'document';
     const revId = typeof req.query.revisionId === 'string' ? req.query.revisionId : got.pkg.currentRevisionId;
     const rev = (got.pkg.revisions ?? []).find((r) => r && r.id === revId);
-    if (rev?.[which]) { const dp = documentBytesProblem(got.pkg, rev[which]); if (dp) { console.error(`SIGNING document_${dp} ${got.pkg.id} ${rev.id} ${which}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'This document cannot be read.'); } }
+    if (rev?.[which]) {
+      const dp = documentBytesProblem(got.pkg, rev[which]);
+      if (dp) {
+        console.error(`SIGNING document_${dp} ${got.pkg.id} ${rev.id} ${which}`);
+        return err(res, 'SIGNING_STATE_UNKNOWN', 'This document cannot be read.');
+      }
+    }
     const out = rev?.[which] ? documentFile(rev[which], req.org.id) : null;
     if (!out) return documentNotFound(res, 'club');
     res.json(out);
   });
 
   orgRouter.patch('/signings/:id', (req, res) => {
-    const got = packageFor(req, res, 'manage'); if (!got) return;
-    const { pkg } = got; const at = now(req);
-    const s = canAttachDocument(pkg, at); if (!s.ok) return err(res, s.error, s.message, s.current ? { current: s.current } : {});
+    const got = packageFor(req, res, 'manage');
+    if (!got) return;
+    const { pkg } = got;
+    const at = now(req);
+    const s = canAttachDocument(pkg, at);
+    if (!s.ok) return err(res, s.error, s.message, s.current ? { current: s.current } : {});
     if (!revGate(req, res, pkg)) return;
-    const b = req.body ?? {}; const rev = currentRevision(pkg);
-    let contract = null; let internalNote;
+    const b = req.body ?? {};
+    const rev = currentRevision(pkg);
+    let contract = null;
+    let internalNote;
     if (b.contract !== undefined) {
-      const c = validateContractDates({ startDate: b.contract?.startDate ?? rev.contract?.startDate, endDate: b.contract?.endDate === undefined ? rev.contract?.endDate : b.contract?.endDate });
+      const c = validateContractDates({
+        startDate: b.contract?.startDate ?? rev.contract?.startDate,
+        endDate: b.contract?.endDate === undefined ? rev.contract?.endDate : b.contract?.endDate,
+      });
       if (!c.ok) return err(res, c.error, c.message, { field: c.field });
       contract = c.contract;
     }
     if (b.internalNote !== undefined) {
       const note = cleanText(b.internalNote, SIGNING_LIMITS.internalNote);
-      if (!note.ok) return err(res, 'SIGNING_INPUT_INVALID', note.tooLong ? `Keep the note under ${SIGNING_LIMITS.internalNote} characters.` : 'The note must be short text.', { field: 'internalNote' });
+      if (!note.ok)
+        return err(
+          res,
+          'SIGNING_INPUT_INVALID',
+          note.tooLong
+            ? `Keep the note under ${SIGNING_LIMITS.internalNote} characters.`
+            : 'The note must be short text.',
+          { field: 'internalNote' },
+        );
       internalNote = note.value;
     }
-    if (limited('signing_document_write', req.org.id)) return res.status(429).json(rateLimitedBody('signing_document_write'));
+    if (limited('signing_document_write', req.org.id))
+      return res.status(429).json(rateLimitedBody('signing_document_write'));
     let fresh;
-    try { fresh = unit(() => { let p = pkg; if (contract) p = sp.patchRevision(p.id, rev.id, { contract }); if (internalNote !== undefined) p = sp.patch(p.id, { internalNote }); p = hist(p, 'signing_draft_updated', byOrg(req), { revisionId: rev.id }, at); return touch(p, req, at); }); }
-    catch (e) { console.error(`SIGNING draft_update_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The change could not be recorded; nothing was recorded.'); }
+    try {
+      fresh = unit(() => {
+        let p = pkg;
+        if (contract) p = sp.patchRevision(p.id, rev.id, { contract });
+        if (internalNote !== undefined) p = sp.patch(p.id, { internalNote });
+        p = hist(p, 'signing_draft_updated', byOrg(req), { revisionId: rev.id }, at);
+        return touch(p, req, at);
+      });
+    } catch (e) {
+      console.error(`SIGNING draft_update_rolled_back ${pkg.id}: ${e?.message ?? e}`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'The change could not be recorded; nothing was recorded.');
+    }
     res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
   orgRouter.post('/signings/:id/document', (req, res) => {
-    const got = packageFor(req, res, 'manage'); if (!got) return;
-    const { pkg } = got; const at = now(req);
-    const s = canAttachDocument(pkg, at); if (!s.ok) return err(res, s.error, s.message, s.current ? { current: s.current } : {});
+    const got = packageFor(req, res, 'manage');
+    if (!got) return;
+    const { pkg } = got;
+    const at = now(req);
+    const s = canAttachDocument(pkg, at);
+    if (!s.ok) return err(res, s.error, s.message, s.current ? { current: s.current } : {});
     if (!revGate(req, res, pkg)) return;
-    if (limited('signing_document_write', req.org.id)) return res.status(429).json(rateLimitedBody('signing_document_write'));
-    const doc = storeDocument(req, res, { pkg, kind: 'signing' }); if (!doc) return;
+    if (limited('signing_document_write', req.org.id))
+      return res.status(429).json(rateLimitedBody('signing_document_write'));
+    const doc = storeDocument(req, res, { pkg, kind: 'signing' });
+    if (!doc) return;
     const rev = currentRevision(pkg);
     let fresh;
-    try { fresh = unit(() => { let p = sp.setDocument(pkg.id, rev.id, 'signing', doc); p = hist(p, 'signing_document_attached', byOrg(req), { revisionId: rev.id, sha256: doc.sha256 }, at); return touch(p, req, at); }); }
-    catch (e) { console.error(`SIGNING document_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The document could not be attached; nothing was recorded.'); }
+    try {
+      fresh = unit(() => {
+        let p = sp.setDocument(pkg.id, rev.id, 'signing', doc);
+        p = hist(p, 'signing_document_attached', byOrg(req), { revisionId: rev.id, sha256: doc.sha256 }, at);
+        return touch(p, req, at);
+      });
+    } catch (e) {
+      console.error(`SIGNING document_rolled_back ${pkg.id}: ${e?.message ?? e}`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'The document could not be attached; nothing was recorded.');
+    }
     res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
   orgRouter.post('/signings/:id/ready', (req, res) => {
-    const got = packageFor(req, res, 'manage'); if (!got) return;
-    const { pkg, kase } = got; const at = now(req);
-    const key = clientKey(req, res); if (key === undefined) return;
+    const got = packageFor(req, res, 'manage');
+    if (!got) return;
+    const { pkg, kase } = got;
+    const at = now(req);
+    const key = clientKey(req, res);
+    if (key === undefined) return;
     const fp = payloadFingerprint({ expiresAt: req.body?.expiresAt ?? null });
-    if (replayOr(pkg, 'ready', key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) }))) return;
-    const s = canMarkReady(pkg, at); if (!s.ok) return err(res, s.error, s.message, { ...(s.current ? { current: s.current } : {}), ...(s.field ? { field: s.field } : {}) });
+    if (replayOr(pkg, 'ready', key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) })))
+      return;
+    const s = canMarkReady(pkg, at);
+    if (!s.ok)
+      return err(res, s.error, s.message, {
+        ...(s.current ? { current: s.current } : {}),
+        ...(s.field ? { field: s.field } : {}),
+      });
     if (!revGate(req, res, pkg)) return;
-    if (isBlocked(pkg.playerId, pkg.orgId)) return err(res, 'SIGNING_BLOCKED', 'This player (or their guardian) has blocked your organisation. Nothing is presented while the block stands.');
+    if (isBlocked(pkg.playerId, pkg.orgId))
+      return err(
+        res,
+        'SIGNING_BLOCKED',
+        'This player (or their guardian) has blocked your organisation. Nothing is presented while the block stands.',
+      );
     if (subjectRemoved(kase)) return err(res, 'SIGNING_SUBJECT_REMOVED', 'This player removed their ScoutBox account.');
     let expiresAt = pkg.expiresAt;
-    if (req.body?.expiresAt !== undefined && req.body?.expiresAt !== null) { const e = validateExpiry(req.body.expiresAt, { now: at }); if (!e.ok) return err(res, e.error, e.message, { field: 'expiresAt' }); expiresAt = e.ms; }
+    if (req.body?.expiresAt !== undefined && req.body?.expiresAt !== null) {
+      const e = validateExpiry(req.body.expiresAt, { now: at });
+      if (!e.ok) return err(res, e.error, e.message, { field: 'expiresAt' });
+      expiresAt = e.ms;
+    }
     const rev = currentRevision(pkg);
     const dp = documentBytesProblem(pkg, rev.document);
-    if (dp) { console.error(`SIGNING document_${dp} ${pkg.id} ${rev.id} at ready`); return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be presented: its document cannot be verified.'); }
-    if (limited('signing_document_write', req.org.id)) return res.status(429).json(rateLimitedBody('signing_document_write'));
+    if (dp) {
+      console.error(`SIGNING document_${dp} ${pkg.id} ${rev.id} at ready`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be presented: its document cannot be verified.');
+    }
+    if (limited('signing_document_write', req.org.id))
+      return res.status(429).json(rateLimitedBody('signing_document_write'));
     const by = byOrg(req);
     let fresh;
     try {
@@ -485,53 +1048,154 @@ export function registerSigning(rawCtx) {
         p = sp.patch(p.id, { status: 'READY', expiresAt });
         if (key) p = addKey(p, 'ready', { key, fp, revisionId: rev.id, at });
         p = hist(p, 'signing_ready', by, { revisionId: rev.id, sha256: rev.document.sha256 }, at);
-        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_ready', { signingPackageId: p.id, revisionId: rev.id });
+        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_ready', {
+          signingPackageId: p.id,
+          revisionId: rev.id,
+        });
         return touch(p, req, at);
       });
-    } catch (e) { console.error(`SIGNING ready_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be presented; nothing was recorded.'); }
-    safe('broadcast', () => broadcast?.('signing_ready', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id, revisionId: rev.id }));
-    safe('notify_player', () => notifyPlayer(fresh, `${req.org.name} has presented your contract for signing. Read the exact document in ScoutBox and confirm it when you are ready; nothing is signed until you do.`));
-    safe('notify_agent', () => notifyAgent(fresh, `Your client ${findPlayer(fresh.playerId)?.name ?? ''} was presented a document to sign by ${req.org.name}. Their signature is their own act.`.replace(/\s+/g, ' ')));
+    } catch (e) {
+      console.error(`SIGNING ready_rolled_back ${pkg.id}: ${e?.message ?? e}`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be presented; nothing was recorded.');
+    }
+    safe('broadcast', () =>
+      broadcast?.('signing_ready', {
+        orgId: fresh.orgId,
+        roomId: kase.id,
+        signingPackageId: fresh.id,
+        revisionId: rev.id,
+      }),
+    );
+    safe('notify_player', () =>
+      notifyPlayer(
+        fresh,
+        `${req.org.name} has presented your contract for signing. Read the exact document in ScoutBox and confirm it when you are ready; nothing is signed until you do.`,
+      ),
+    );
+    safe('notify_agent', () =>
+      notifyAgent(
+        fresh,
+        `Your client ${findPlayer(fresh.playerId)?.name ?? ''} was presented a document to sign by ${req.org.name}. Their signature is their own act.`.replace(
+          /\s+/g,
+          ' ',
+        ),
+      ),
+    );
     res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
   function completeParty(req, res, { pkg, kase, partyType, actorKind, actorId, actorName, rateKey, orgName }) {
     const at = now(req);
-    const key = clientKey(req, res); if (key === undefined) return;
+    const key = clientKey(req, res);
+    if (key === undefined) return;
     const b = req.body ?? {};
-    const fp = payloadFingerprint({ partyType, revisionId: b.revisionId ?? null, documentSha256: b.documentSha256 ?? null });
-    const view = () => (actorKind === 'org' ? { signing: signingClubView(pkg, at, { orgName }) } : { signing: signingRecipientView(pkg, at, { orgName, partyType, forEntityId: actorId }) });
+    const fp = payloadFingerprint({
+      partyType,
+      revisionId: b.revisionId ?? null,
+      documentSha256: b.documentSha256 ?? null,
+    });
+    const view = () =>
+      actorKind === 'org'
+        ? { signing: signingClubView(pkg, at, { orgName }) }
+        : { signing: signingRecipientView(pkg, at, { orgName, partyType, forEntityId: actorId }) };
     if (key) {
       const row = keyRow(pkg, 'party', key);
       // A replay counts as the same signature only while its revision is still current; after a supersede the
       // old key does not answer `idempotent: true`.
-      if (row) { if (row.fp === fp && row.actorId === actorId && (b.revisionId ?? null) === (pkg.currentRevisionId ?? null)) return res.json({ ...view(), idempotent: true }); return err(res, 'SIGNING_IDEMPOTENCY_CONFLICT', row.fp === fp && row.actorId === actorId ? 'This clientKey signed a revision that is no longer current; sign the current revision with a new key.' : 'This clientKey was already used for a different request.'); }
+      if (row) {
+        if (row.fp === fp && row.actorId === actorId && (b.revisionId ?? null) === (pkg.currentRevisionId ?? null))
+          return res.json({ ...view(), idempotent: true });
+        return err(
+          res,
+          'SIGNING_IDEMPOTENCY_CONFLICT',
+          row.fp === fp && row.actorId === actorId
+            ? 'This clientKey signed a revision that is no longer current; sign the current revision with a new key.'
+            : 'This clientKey was already used for a different request.',
+        );
+      }
     }
     const method = b.method === undefined ? 'PLATFORM_ACKNOWLEDGMENT' : b.method;
-    if (method !== 'PLATFORM_ACKNOWLEDGMENT') return err(res, 'SIGNING_METHOD_UNKNOWN', 'That signing method is not available here.', { allowed: ['PLATFORM_ACKNOWLEDGMENT'] });
-    if (typeof b.revisionId !== 'string' || !b.revisionId) return err(res, 'SIGNING_INPUT_INVALID', 'Name the signing revision you are completing.', { field: 'revisionId' });
-    if (typeof b.documentSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(b.documentSha256)) return err(res, 'SIGNING_INPUT_INVALID', 'Confirm the document by its SHA-256 digest as shown.', { field: 'documentSha256' });
+    if (method !== 'PLATFORM_ACKNOWLEDGMENT')
+      return err(res, 'SIGNING_METHOD_UNKNOWN', 'That signing method is not available here.', {
+        allowed: ['PLATFORM_ACKNOWLEDGMENT'],
+      });
+    if (typeof b.revisionId !== 'string' || !b.revisionId)
+      return err(res, 'SIGNING_INPUT_INVALID', 'Name the signing revision you are completing.', {
+        field: 'revisionId',
+      });
+    if (typeof b.documentSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(b.documentSha256))
+      return err(res, 'SIGNING_INPUT_INVALID', 'Confirm the document by its SHA-256 digest as shown.', {
+        field: 'documentSha256',
+      });
     if (actorKind === 'org' && !revGate(req, res, pkg)) return;
-    if (isBlocked(pkg.playerId, pkg.orgId)) return err(res, actorKind === 'org' ? 'SIGNING_BLOCKED' : 'SIGNING_STATE_INVALID', actorKind === 'org' ? 'This player (or their guardian) has blocked your organisation.' : 'This signing cannot be completed right now.');
+    if (isBlocked(pkg.playerId, pkg.orgId))
+      return err(
+        res,
+        actorKind === 'org' ? 'SIGNING_BLOCKED' : 'SIGNING_STATE_INVALID',
+        actorKind === 'org'
+          ? 'This player (or their guardian) has blocked your organisation.'
+          : 'This signing cannot be completed right now.',
+      );
     if (subjectRemoved(kase)) return err(res, 'SIGNING_SUBJECT_REMOVED', 'This player removed their ScoutBox account.');
-    const g = canCompleteParty(pkg, { partyType, actorKind, actorId, revisionId: b.revisionId, documentSha256: b.documentSha256 }, at);
-    if (!g.ok) return err(res, g.error, g.message, { ...(g.current ? { current: g.current } : {}), ...(g.field ? { field: g.field } : {}) });
-    if (kase.room?.status !== 'offer_accepted') return err(res, 'SIGNING_LIFECYCLE_CONFLICT', 'The case is no longer at Offer accepted; the club must resolve it before signatures continue.', { current: { status: kase.room?.status ?? null } });
-    { const dp = documentBytesProblem(pkg, g.revision.document); if (dp) { console.error(`SIGNING document_${dp} ${pkg.id} ${g.revision.id} at party completion`); return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be confirmed: its document cannot be verified.'); } }
-    if (limited('signing_party_completion', rateKey)) return res.status(429).json(rateLimitedBody('signing_party_completion'));
+    const g = canCompleteParty(
+      pkg,
+      { partyType, actorKind, actorId, revisionId: b.revisionId, documentSha256: b.documentSha256 },
+      at,
+    );
+    if (!g.ok)
+      return err(res, g.error, g.message, {
+        ...(g.current ? { current: g.current } : {}),
+        ...(g.field ? { field: g.field } : {}),
+      });
+    if (kase.room?.status !== 'offer_accepted')
+      return err(
+        res,
+        'SIGNING_LIFECYCLE_CONFLICT',
+        'The case is no longer at Offer accepted; the club must resolve it before signatures continue.',
+        { current: { status: kase.room?.status ?? null } },
+      );
+    {
+      const dp = documentBytesProblem(pkg, g.revision.document);
+      if (dp) {
+        console.error(`SIGNING document_${dp} ${pkg.id} ${g.revision.id} at party completion`);
+        return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be confirmed: its document cannot be verified.');
+      }
+    }
+    if (limited('signing_party_completion', rateKey))
+      return res.status(429).json(rateLimitedBody('signing_party_completion'));
     const { revision: rev } = g;
     const by = { kind: actorKind, id: actorId, name: actorName };
     let fresh;
     try {
       fresh = unit(() => {
-        let p = sp.setParty(pkg.id, rev.id, partyType, { status: 'COMPLETED', completedAt: at, completedBy: by, method: 'PLATFORM_ACKNOWLEDGMENT', evidenceRef: { kind: 'platform_acknowledgment', id: nextId('sgev'), revisionId: rev.id, documentSha256: rev.document.sha256, at, actorKind, actorId, session: 'authenticated' } });
+        let p = sp.setParty(pkg.id, rev.id, partyType, {
+          status: 'COMPLETED',
+          completedAt: at,
+          completedBy: by,
+          method: 'PLATFORM_ACKNOWLEDGMENT',
+          evidenceRef: {
+            kind: 'platform_acknowledgment',
+            id: nextId('sgev'),
+            revisionId: rev.id,
+            documentSha256: rev.document.sha256,
+            at,
+            actorKind,
+            actorId,
+            session: 'authenticated',
+          },
+        });
         if (rev.status === 'READY') p = sp.patchRevision(p.id, rev.id, { status: 'IN_PROGRESS' });
         if (pkg.status === 'READY') p = sp.patch(p.id, { status: 'IN_PROGRESS' });
         if (key) p = addKey(p, 'party', { key, fp, actorId, revisionId: rev.id, at });
         p = hist(p, 'signing_party_completed', by, { revisionId: rev.id, partyType, sha256: rev.document.sha256 }, at);
-        caseAudit(kase, actorKind, actorId, actorName, 'signing_party_completed', { signingPackageId: p.id, revisionId: rev.id, partyType });
+        caseAudit(kase, actorKind, actorId, actorName, 'signing_party_completed', {
+          signingPackageId: p.id,
+          revisionId: rev.id,
+          partyType,
+        });
         p = touch(p, req, at, actorKind === 'org' ? req.orgUser : { id: actorId, name: actorName });
-        if (faults?.shouldFail?.('signing.party.after_write')) throw new Error('simulated failure after the party evidence write (development fault layer)');
+        if (faults?.shouldFail?.('signing.party.after_write'))
+          throw new Error('simulated failure after the party evidence write (development fault layer)');
         return p;
       });
     } catch (e) {
@@ -539,123 +1203,330 @@ export function registerSigning(rawCtx) {
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signature could not be recorded; nothing was recorded.');
     }
     const freshRev = currentRevision(fresh);
-    const view2 = () => (actorKind === 'org' ? { signing: signingClubView(fresh, at, { orgName }) } : { signing: signingRecipientView(fresh, at, { orgName, partyType, forEntityId: actorId }) });
-    safe('broadcast', () => broadcast?.('signing_party_completed', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id, revisionId: rev.id, partyType }));
-    if (actorKind !== 'org') safe('notify_club', () => notifyClubLeads(fresh, `${actorName ?? 'The player'} confirmed the signing document for ${findPlayer(fresh.playerId)?.name ?? 'the player'}. ${partiesComplete(freshRev) ? 'Every required party has signed: a recruitment lead can now complete the signing.' : 'Waiting on the remaining party.'}`));
-    else safe('notify_player', () => notifyPlayer(fresh, `${orgName} has signed for the club. ${partiesComplete(freshRev) ? 'Every required party has now signed; the club completes the signing next.' : 'Your signature is still needed.'}`));
+    const view2 = () =>
+      actorKind === 'org'
+        ? { signing: signingClubView(fresh, at, { orgName }) }
+        : { signing: signingRecipientView(fresh, at, { orgName, partyType, forEntityId: actorId }) };
+    safe('broadcast', () =>
+      broadcast?.('signing_party_completed', {
+        orgId: fresh.orgId,
+        roomId: kase.id,
+        signingPackageId: fresh.id,
+        revisionId: rev.id,
+        partyType,
+      }),
+    );
+    if (actorKind !== 'org')
+      safe('notify_club', () =>
+        notifyClubLeads(
+          fresh,
+          `${actorName ?? 'The player'} confirmed the signing document for ${findPlayer(fresh.playerId)?.name ?? 'the player'}. ${partiesComplete(freshRev) ? 'Every required party has signed: a recruitment lead can now complete the signing.' : 'Waiting on the remaining party.'}`,
+        ),
+      );
+    else
+      safe('notify_player', () =>
+        notifyPlayer(
+          fresh,
+          `${orgName} has signed for the club. ${partiesComplete(freshRev) ? 'Every required party has now signed; the club completes the signing next.' : 'Your signature is still needed.'}`,
+        ),
+      );
     res.json(view2());
   }
 
   orgRouter.post('/signings/:id/parties/club/complete', (req, res) => {
-    const got = packageFor(req, res, 'lead'); if (!got) return;
-    completeParty(req, res, { pkg: got.pkg, kase: got.kase, partyType: 'CLUB_SIGNATORY', actorKind: 'org', actorId: req.orgUser.id, actorName: req.orgUser.name, rateKey: `org:${req.orgUser.id}`, orgName: req.org.name });
+    const got = packageFor(req, res, 'lead');
+    if (!got) return;
+    completeParty(req, res, {
+      pkg: got.pkg,
+      kase: got.kase,
+      partyType: 'CLUB_SIGNATORY',
+      actorKind: 'org',
+      actorId: req.orgUser.id,
+      actorName: req.orgUser.name,
+      rateKey: `org:${req.orgUser.id}`,
+      orgName: req.org.name,
+    });
   });
 
   orgRouter.post('/signings/:id/executed-document', (req, res) => {
-    const got = packageFor(req, res, 'manage'); if (!got) return;
-    const { pkg } = got; const at = now(req);
+    const got = packageFor(req, res, 'manage');
+    if (!got) return;
+    const { pkg } = got;
+    const at = now(req);
     const st = effectiveStatus(pkg, at);
-    if (!['READY', 'IN_PROGRESS'].includes(st)) { const s = canVoid(pkg, at); return err(res, s.ok ? 'SIGNING_STATE_INVALID' : s.error, s.ok ? 'The executed document is attached to a presented signing.' : s.message, s.current ? { current: s.current } : {}); }
+    if (!['READY', 'IN_PROGRESS'].includes(st)) {
+      const s = canVoid(pkg, at);
+      return err(
+        res,
+        s.ok ? 'SIGNING_STATE_INVALID' : s.error,
+        s.ok ? 'The executed document is attached to a presented signing.' : s.message,
+        s.current ? { current: s.current } : {},
+      );
+    }
     if (!revGate(req, res, pkg)) return;
-    if (limited('signing_document_write', req.org.id)) return res.status(429).json(rateLimitedBody('signing_document_write'));
-    const doc = storeDocument(req, res, { pkg, kind: 'executed' }); if (!doc) return;
+    if (limited('signing_document_write', req.org.id))
+      return res.status(429).json(rateLimitedBody('signing_document_write'));
+    const doc = storeDocument(req, res, { pkg, kind: 'executed' });
+    if (!doc) return;
     const rev = currentRevision(pkg);
     let fresh;
-    try { fresh = unit(() => { let p = sp.setDocument(pkg.id, rev.id, 'executed', doc); p = hist(p, 'signing_executed_document_attached', byOrg(req), { revisionId: rev.id, sha256: doc.sha256 }, at); return touch(p, req, at); }); }
-    catch (e) { console.error(`SIGNING executed_document_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The document could not be attached; nothing was recorded.'); }
+    try {
+      fresh = unit(() => {
+        let p = sp.setDocument(pkg.id, rev.id, 'executed', doc);
+        p = hist(p, 'signing_executed_document_attached', byOrg(req), { revisionId: rev.id, sha256: doc.sha256 }, at);
+        return touch(p, req, at);
+      });
+    } catch (e) {
+      console.error(`SIGNING executed_document_rolled_back ${pkg.id}: ${e?.message ?? e}`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'The document could not be attached; nothing was recorded.');
+    }
     res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
   /** Completion gate, signing writer and lifecycle move as one unit; notifications only after it commits. */
   orgRouter.post('/signings/:id/complete', (req, res) => {
-    const got = packageFor(req, res, 'lead'); if (!got) return;
-    const { pkg, kase, offer } = got; const at = now(req);
-    const key = clientKey(req, res); if (key === undefined) return;
+    const got = packageFor(req, res, 'lead');
+    if (!got) return;
+    const { pkg, kase, offer } = got;
+    const at = now(req);
+    const key = clientKey(req, res);
+    if (key === undefined) return;
     const fp = payloadFingerprint({ complete: true });
-    if (replayOr(pkg, 'complete', key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }), lifecycle: pkg.completion?.lifecycle ?? null }))) return;
+    if (
+      replayOr(pkg, 'complete', key, fp, res, () => ({
+        signing: signingClubView(pkg, at, { orgName: req.org.name }),
+        lifecycle: pkg.completion?.lifecycle ?? null,
+      }))
+    )
+      return;
     if (pkg.status === 'COMPLETED') return err(res, 'SIGNING_ALREADY_COMPLETED', 'This signing is already completed.');
     if (!revGate(req, res, pkg)) return;
     const rev = currentRevision(pkg);
     const offerRev = offerRevisionOf(offer, pkg.offerRevisionId);
-    const otherCompleted = packagesOf(pkg.offerId, pkg.orgId).some((p) => p.id !== pkg.id && effectiveStatus(p, at) === 'COMPLETED') || !!sg.forOffer(pkg.offerId);
-    const problems = completionGate(pkg, { documentProblem: rev?.document ? documentBytesProblem(pkg, rev.document) : 'missing', now: at, offer: offer ? { ...offer, status: canonicalOfferStatus(offer, at) } : null, offerRevision: offerRev ? { ...offerRev, status: effectiveRevisionStatus(offerRev, at) } : null, kase, otherCompleted, blocked: isBlocked(pkg.playerId, pkg.orgId) });
+    const otherCompleted =
+      packagesOf(pkg.offerId, pkg.orgId).some((p) => p.id !== pkg.id && effectiveStatus(p, at) === 'COMPLETED') ||
+      !!sg.forOffer(pkg.offerId);
+    const problems = completionGate(pkg, {
+      documentProblem: rev?.document ? documentBytesProblem(pkg, rev.document) : 'missing',
+      now: at,
+      offer: offer ? { ...offer, status: canonicalOfferStatus(offer, at) } : null,
+      offerRevision: offerRev ? { ...offerRev, status: effectiveRevisionStatus(offerRev, at) } : null,
+      kase,
+      otherCompleted,
+      blocked: isBlocked(pkg.playerId, pkg.orgId),
+    });
     if (problems.length) {
       const first = problems[0];
-      if (first.startsWith('DOCUMENT_BYTES_')) { console.error(`SIGNING ${first.toLowerCase()} ${pkg.id} at completion`); return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be completed: its document cannot be verified.'); }
-      const code = first === 'EXPIRED' ? 'SIGNING_EXPIRED' : first === 'ALREADY_COMPLETED' ? 'SIGNING_ALREADY_COMPLETED' : first === 'STATE_VOIDED' ? 'SIGNING_VOIDED' : first === 'STATE_CANCELLED' ? 'SIGNING_CANCELLED' : first === 'PARTIES_INCOMPLETE' ? 'SIGNING_PARTIES_INCOMPLETE' : first === 'DOCUMENT_REQUIRED' ? 'SIGNING_DOCUMENT_REQUIRED' : first === 'DOCUMENT_MISMATCH' || first === 'EVIDENCE_INVALID' || first === 'TEMPORAL_ORDER' ? 'SIGNING_EVIDENCE_INVALID' : first === 'BLOCKED' ? 'SIGNING_BLOCKED' : first === 'LIFECYCLE_CONFLICT' ? 'SIGNING_LIFECYCLE_CONFLICT' : first === 'OFFER_NOT_ACCEPTED' || first === 'OFFER_REVISION_MISMATCH' ? 'SIGNING_OFFER_NOT_ACCEPTED' : first === 'CONFLICTING_COMPLETED_SIGNING' ? 'SIGNING_CONFLICT' : first.startsWith('STATE_') ? 'SIGNING_STATE_INVALID' : 'SIGNING_STATE_UNKNOWN';
-      return err(res, code, 'The signing cannot be completed yet.', { blockers: problems, current: { status: effectiveStatus(pkg, at) } });
+      if (first.startsWith('DOCUMENT_BYTES_')) {
+        console.error(`SIGNING ${first.toLowerCase()} ${pkg.id} at completion`);
+        return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be completed: its document cannot be verified.');
+      }
+      const code =
+        first === 'EXPIRED'
+          ? 'SIGNING_EXPIRED'
+          : first === 'ALREADY_COMPLETED'
+            ? 'SIGNING_ALREADY_COMPLETED'
+            : first === 'STATE_VOIDED'
+              ? 'SIGNING_VOIDED'
+              : first === 'STATE_CANCELLED'
+                ? 'SIGNING_CANCELLED'
+                : first === 'PARTIES_INCOMPLETE'
+                  ? 'SIGNING_PARTIES_INCOMPLETE'
+                  : first === 'DOCUMENT_REQUIRED'
+                    ? 'SIGNING_DOCUMENT_REQUIRED'
+                    : first === 'DOCUMENT_MISMATCH' || first === 'EVIDENCE_INVALID' || first === 'TEMPORAL_ORDER'
+                      ? 'SIGNING_EVIDENCE_INVALID'
+                      : first === 'BLOCKED'
+                        ? 'SIGNING_BLOCKED'
+                        : first === 'LIFECYCLE_CONFLICT'
+                          ? 'SIGNING_LIFECYCLE_CONFLICT'
+                          : first === 'OFFER_NOT_ACCEPTED' || first === 'OFFER_REVISION_MISMATCH'
+                            ? 'SIGNING_OFFER_NOT_ACCEPTED'
+                            : first === 'CONFLICTING_COMPLETED_SIGNING'
+                              ? 'SIGNING_CONFLICT'
+                              : first.startsWith('STATE_')
+                                ? 'SIGNING_STATE_INVALID'
+                                : 'SIGNING_STATE_UNKNOWN';
+      return err(res, code, 'The signing cannot be completed yet.', {
+        blockers: problems,
+        current: { status: effectiveStatus(pkg, at) },
+      });
     }
     if (subjectRemoved(kase)) return err(res, 'SIGNING_SUBJECT_REMOVED', 'This player removed their ScoutBox account.');
-    const player = findPlayer(pkg.playerId); const org = orgOf(pkg.orgId);
+    const player = findPlayer(pkg.playerId);
+    const org = orgOf(pkg.orgId);
     if (!player || !org) return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be completed.');
     if (limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
     // A SigningAbort or a throw anywhere, COMMIT included, rolls everything back and no invoice is issued.
     const by = byOrg(req);
-    let effects = null; let moved = null; let signing = null; let fresh = null;
+    let effects = null;
+    let moved = null;
+    let signing = null;
+    let fresh = null;
     try {
       fresh = unit(() => {
         // The signing row first, then the package's completion (`completion_signing_id` is a deferred key,
         // checked at COMMIT), then the revision.
         const written = recordCompletedSigning({ player, org, actor: req.orgUser, at, pkg, rev });
-        if (written.duplicate) throw new SigningAbort('SIGNING_ALREADY_COMPLETED', 'A completed signing record already exists for this package.', { why: 'duplicate_row' });
-        signing = written.signing; effects = written.effects;
-        if (faults?.shouldFail?.('signing.complete.after_row')) throw new Error('simulated failure after the signings row (development fault layer)');
+        if (written.duplicate)
+          throw new SigningAbort(
+            'SIGNING_ALREADY_COMPLETED',
+            'A completed signing record already exists for this package.',
+            { why: 'duplicate_row' },
+          );
+        signing = written.signing;
+        effects = written.effects;
+        if (faults?.shouldFail?.('signing.complete.after_row'))
+          throw new Error('simulated failure after the signings row (development fault layer)');
         let p = sp.patchRevision(pkg.id, rev.id, { status: 'COMPLETED', completedAt: at, completedBy: by });
-        p = sp.patch(p.id, { status: 'COMPLETED', completion: { signingId: signing.id, completedAt: at, completedBy: by, contract: rev.contract, documentSha256: rev.document.sha256, lifecycle: null } });
+        p = sp.patch(p.id, {
+          status: 'COMPLETED',
+          completion: {
+            signingId: signing.id,
+            completedAt: at,
+            completedBy: by,
+            contract: rev.contract,
+            documentSha256: rev.document.sha256,
+            lifecycle: null,
+          },
+        });
         // The evidence provider now finds the row this completion just wrote.
-        moved = advanceCase({ req, room: kase, action: 'confirmSignedOutcome', at, trigger: `signing:complete:${pkg.id}`, keyDetail: { signingPackageId: pkg.id, signingId: signing.id } });
-        if (!moved.applied) throw new SigningAbort('SIGNING_LIFECYCLE_CONFLICT', moved.message ?? 'The case could not be moved to Signed; nothing was recorded.', { why: `lifecycle_${moved.reason}`, moved });
+        moved = advanceCase({
+          req,
+          room: kase,
+          action: 'confirmSignedOutcome',
+          at,
+          trigger: `signing:complete:${pkg.id}`,
+          keyDetail: { signingPackageId: pkg.id, signingId: signing.id },
+        });
+        if (!moved.applied)
+          throw new SigningAbort(
+            'SIGNING_LIFECYCLE_CONFLICT',
+            moved.message ?? 'The case could not be moved to Signed; nothing was recorded.',
+            { why: `lifecycle_${moved.reason}`, moved },
+          );
         p = sp.patch(p.id, { completion: { ...p.completion, lifecycle: { from: moved.from, to: moved.to, at } } });
-        if (faults?.shouldFail?.('signing.complete.after_lifecycle')) throw new Error('simulated failure after the lifecycle moved (development fault layer)');
+        if (faults?.shouldFail?.('signing.complete.after_lifecycle'))
+          throw new Error('simulated failure after the lifecycle moved (development fault layer)');
         if (key) p = addKey(p, 'complete', { key, fp, signingId: signing.id, at });
-        p = hist(p, 'signing_completed', by, { revisionId: rev.id, signingId: signing.id, sha256: rev.document.sha256 }, at);
-        ctx.recruitmentCases.cases.link(kase.id, { signingId: signing.id }, { history: [auditEntry('org', req.orgUser.id, req.orgUser.name, 'signing_completed', { signingPackageId: p.id, signingId: signing.id, to: moved.to })] });
+        p = hist(
+          p,
+          'signing_completed',
+          by,
+          { revisionId: rev.id, signingId: signing.id, sha256: rev.document.sha256 },
+          at,
+        );
+        ctx.recruitmentCases.cases.link(
+          kase.id,
+          { signingId: signing.id },
+          {
+            history: [
+              auditEntry('org', req.orgUser.id, req.orgUser.name, 'signing_completed', {
+                signingPackageId: p.id,
+                signingId: signing.id,
+                to: moved.to,
+              }),
+            ],
+          },
+        );
         p = touch(p, req, at);
-        if (faults?.shouldFail?.('signing.complete.at_commit')) throw new Error('simulated failure at the commit of the completion unit (development fault layer)');
+        if (faults?.shouldFail?.('signing.complete.at_commit'))
+          throw new Error('simulated failure at the commit of the completion unit (development fault layer)');
         return p;
       });
     } catch (e) {
-      console.error(`SIGNING completion_rolled_back ${pkg.id}: ${e instanceof SigningAbort ? e.message : `threw ${e?.message ?? e}`}`);
-      if (e instanceof SigningAbort) return err(res, e.code, e.userMessage, e.moved ? { lifecycle: e.moved, current: { status: kase.room.status } } : {});
+      console.error(
+        `SIGNING completion_rolled_back ${pkg.id}: ${e instanceof SigningAbort ? e.message : `threw ${e?.message ?? e}`}`,
+      );
+      if (e instanceof SigningAbort)
+        return err(
+          res,
+          e.code,
+          e.userMessage,
+          e.moved ? { lifecycle: e.moved, current: { status: kase.room.status } } : {},
+        );
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be completed; nothing was recorded.');
     }
-    safe('effects', () => { if (faults?.shouldFail?.('signing.complete.effects')) throw new Error('simulated failure in the after-effects (development fault layer)'); effects?.(); });
-    safe('broadcast', () => broadcast?.('signing_completed', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id, signingId: signing.id }));
+    safe('effects', () => {
+      if (faults?.shouldFail?.('signing.complete.effects'))
+        throw new Error('simulated failure in the after-effects (development fault layer)');
+      effects?.();
+    });
+    safe('broadcast', () =>
+      broadcast?.('signing_completed', {
+        orgId: fresh.orgId,
+        roomId: kase.id,
+        signingPackageId: fresh.id,
+        signingId: signing.id,
+      }),
+    );
     safe('notify_agent', () => notifyAgent(fresh, `${org.name} completed the signing for your client ${player.name}.`));
     safe('notify_club', () => notifyClubLeads(fresh, `Signing completed for ${player.name}. The case reads Signed.`));
-    res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }), lifecycle: moved, signingId: signing.id });
+    res.json({
+      signing: signingClubView(fresh, at, { orgName: req.org.name }),
+      lifecycle: moved,
+      signingId: signing.id,
+    });
   });
 
   function closeRoute(action) {
     return (req, res) => {
-      const got = packageFor(req, res, action === 'cancel' ? 'manage' : 'lead'); if (!got) return;
-      const { pkg, kase } = got; const at = now(req);
-      const key = clientKey(req, res); if (key === undefined) return;
+      const got = packageFor(req, res, action === 'cancel' ? 'manage' : 'lead');
+      if (!got) return;
+      const { pkg, kase } = got;
+      const at = now(req);
+      const key = clientKey(req, res);
+      if (key === undefined) return;
       const reason = cleanText(req.body?.reason, SIGNING_LIMITS.reason);
       if (!reason.ok) return err(res, 'SIGNING_INPUT_INVALID', 'The reason must be short text.', { field: 'reason' });
       const fp = payloadFingerprint({ action, reason: reason.value });
-      if (replayOr(pkg, action, key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) }))) return;
+      if (replayOr(pkg, action, key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) })))
+        return;
       const g = (action === 'cancel' ? canCancel : canVoid)(pkg, at);
       if (!g.ok) return err(res, g.error, g.message, g.current ? { current: g.current } : {});
       if (!revGate(req, res, pkg)) return;
-      if (limited('signing_safety_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_safety_closure'));
-      const by = byOrg(req); const rev = currentRevision(pkg);
+      if (limited('signing_safety_closure', req.org.id))
+        return res.status(429).json(rateLimitedBody('signing_safety_closure'));
+      const by = byOrg(req);
+      const rev = currentRevision(pkg);
       const status = action === 'cancel' ? 'CANCELLED' : 'VOIDED';
       let fresh;
       try {
         fresh = unit(() => {
           let p = sp.patchRevision(pkg.id, rev.id, { status });
-          p = sp.patch(p.id, action === 'cancel' ? { status, cancelledAt: at, cancelledBy: by, cancelReason: reason.value } : { status, voidedAt: at, voidedBy: by, voidReason: reason.value });
+          p = sp.patch(
+            p.id,
+            action === 'cancel'
+              ? { status, cancelledAt: at, cancelledBy: by, cancelReason: reason.value }
+              : { status, voidedAt: at, voidedBy: by, voidReason: reason.value },
+          );
           if (key) p = addKey(p, action, { key, fp, at });
           p = hist(p, `signing_${status.toLowerCase()}`, by, { revisionId: rev.id, hadReason: !!reason.value }, at);
-          caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, `signing_${status.toLowerCase()}`, { signingPackageId: p.id });
+          caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, `signing_${status.toLowerCase()}`, {
+            signingPackageId: p.id,
+          });
           return touch(p, req, at);
         });
-      } catch (e) { console.error(`SIGNING ${action}_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be closed; nothing was recorded.'); }
+      } catch (e) {
+        console.error(`SIGNING ${action}_rolled_back ${pkg.id}: ${e?.message ?? e}`);
+        return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be closed; nothing was recorded.');
+      }
       // Literal event names: the boot-time registry scanner reads the source and cannot see a computed name.
-      if (action === 'cancel') safe('broadcast', () => broadcast?.('signing_cancelled', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id }));
-      else safe('broadcast', () => broadcast?.('signing_voided', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id }));
-      if (rev.readyAt) safe('notify_player', () => notifyPlayer(fresh, `${req.org.name} ${action === 'cancel' ? 'cancelled' : 'voided'} the signing presented to you. Nothing was signed. Your accepted Offer is unchanged.`));
+      if (action === 'cancel')
+        safe('broadcast', () =>
+          broadcast?.('signing_cancelled', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id }),
+        );
+      else
+        safe('broadcast', () =>
+          broadcast?.('signing_voided', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id }),
+        );
+      if (rev.readyAt)
+        safe('notify_player', () =>
+          notifyPlayer(
+            fresh,
+            `${req.org.name} ${action === 'cancel' ? 'cancelled' : 'voided'} the signing presented to you. Nothing was signed. Your accepted Offer is unchanged.`,
+          ),
+        );
       res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
     };
   }
@@ -664,38 +1535,93 @@ export function registerSigning(rawCtx) {
 
   /** The presented revision is SUPERSEDED and a fresh DRAFT opens with the same contract days, all parties pending. */
   orgRouter.post('/signings/:id/supersede', (req, res) => {
-    const got = packageFor(req, res, 'manage'); if (!got) return;
-    const { pkg, kase } = got; const at = now(req);
-    const key = clientKey(req, res); if (key === undefined) return;
+    const got = packageFor(req, res, 'manage');
+    if (!got) return;
+    const { pkg, kase } = got;
+    const at = now(req);
+    const key = clientKey(req, res);
+    if (key === undefined) return;
     const reason = cleanText(req.body?.reason, SIGNING_LIMITS.reason);
     if (!reason.ok) return err(res, 'SIGNING_INPUT_INVALID', 'The reason must be short text.', { field: 'reason' });
     const fp = payloadFingerprint({ supersede: true, reason: reason.value });
-    if (replayOr(pkg, 'supersede', key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) }))) return;
-    const g = canSupersede(pkg, at); if (!g.ok) return err(res, g.error, g.message, g.current ? { current: g.current } : {});
+    if (
+      replayOr(pkg, 'supersede', key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) }))
+    )
+      return;
+    const g = canSupersede(pkg, at);
+    if (!g.ok) return err(res, g.error, g.message, g.current ? { current: g.current } : {});
     if (!revGate(req, res, pkg)) return;
-    if (limited('signing_document_write', req.org.id)) return res.status(429).json(rateLimitedBody('signing_document_write'));
-    const by = byOrg(req); const prev = currentRevision(pkg);
+    if (limited('signing_document_write', req.org.id))
+      return res.status(429).json(rateLimitedBody('signing_document_write'));
+    const by = byOrg(req);
+    const prev = currentRevision(pkg);
     const acceptedRev = offerRevisionOf(got.offer, pkg.offerRevisionId);
     const rev = {
-      id: nextId('spr'), revisionNumber: nextRevisionNumber(pkg), status: 'DRAFT', createdAt: at, createdBy: by, readyAt: null, readyBy: null, completedAt: null,
-      document: null, executedDocument: null, contract: { ...prev.contract },
-      requiredParties: requiredPartiesFor({ recipientType: acceptedRev?.recipientSnapshot?.type ?? 'player', playerId: pkg.playerId, guardianId: acceptedRev?.recipientSnapshot?.guardianId ?? null, orgId: pkg.orgId }),
-      policySnapshot: { ...prev.policySnapshot }, supersedesRevisionId: prev.id, supersededByRevisionId: null,
+      id: nextId('spr'),
+      revisionNumber: nextRevisionNumber(pkg),
+      status: 'DRAFT',
+      createdAt: at,
+      createdBy: by,
+      readyAt: null,
+      readyBy: null,
+      completedAt: null,
+      document: null,
+      executedDocument: null,
+      contract: { ...prev.contract },
+      requiredParties: requiredPartiesFor({
+        recipientType: acceptedRev?.recipientSnapshot?.type ?? 'player',
+        playerId: pkg.playerId,
+        guardianId: acceptedRev?.recipientSnapshot?.guardianId ?? null,
+        orgId: pkg.orgId,
+      }),
+      policySnapshot: { ...prev.policySnapshot },
+      supersedesRevisionId: prev.id,
+      supersededByRevisionId: null,
     };
     let fresh;
     try {
       fresh = unit(() => {
-        let p = sp.patchRevision(pkg.id, prev.id, { status: 'SUPERSEDED', supersededByRevisionId: rev.id, supersededAt: at });
+        let p = sp.patchRevision(pkg.id, prev.id, {
+          status: 'SUPERSEDED',
+          supersededByRevisionId: rev.id,
+          supersededAt: at,
+        });
         p = sp.addRevision(p.id, rev);
         p = sp.patch(p.id, { currentRevisionId: rev.id, status: 'DRAFT' });
         if (key) p = addKey(p, 'supersede', { key, fp, revisionId: rev.id, at });
-        p = hist(p, 'signing_superseded', by, { revisionId: rev.id, supersedes: prev.id, hadReason: !!reason.value }, at);
-        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_superseded', { signingPackageId: p.id, revisionId: rev.id, supersedes: prev.id });
+        p = hist(
+          p,
+          'signing_superseded',
+          by,
+          { revisionId: rev.id, supersedes: prev.id, hadReason: !!reason.value },
+          at,
+        );
+        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_superseded', {
+          signingPackageId: p.id,
+          revisionId: rev.id,
+          supersedes: prev.id,
+        });
         return touch(p, req, at);
       });
-    } catch (e) { console.error(`SIGNING supersede_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be superseded; nothing was recorded.'); }
-    safe('broadcast', () => broadcast?.('signing_superseded', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id, revisionId: rev.id, supersedes: prev.id }));
-    safe('notify_player', () => notifyPlayer(fresh, `${req.org.name} withdrew the document presented to you; any confirmation you gave no longer applies. A new document will be presented before anything is signed.`));
+    } catch (e) {
+      console.error(`SIGNING supersede_rolled_back ${pkg.id}: ${e?.message ?? e}`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be superseded; nothing was recorded.');
+    }
+    safe('broadcast', () =>
+      broadcast?.('signing_superseded', {
+        orgId: fresh.orgId,
+        roomId: kase.id,
+        signingPackageId: fresh.id,
+        revisionId: rev.id,
+        supersedes: prev.id,
+      }),
+    );
+    safe('notify_player', () =>
+      notifyPlayer(
+        fresh,
+        `${req.org.name} withdrew the document presented to you; any confirmation you gave no longer applies. A new document will be presented before anything is signed.`,
+      ),
+    );
     res.status(201).json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
@@ -719,43 +1645,91 @@ export function registerSigning(rawCtx) {
   }
   function recipientPackage(req, res, { by, actorId, playerIds }) {
     const p = recipientPackages({ by, actorId, playerIds, at: now(req) }).find((x) => x.id === req.params.id) ?? null;
-    if (!p) { notFound(res, by); return null; }
+    if (!p) {
+      notFound(res, by);
+      return null;
+    }
     return p;
   }
-  const recipientView = (p, at, by, actorId) => signingRecipientView(p, at, { orgName: orgOf(p.orgId)?.name ?? null, partyType: by === 'guardian' ? 'GUARDIAN' : 'PLAYER', forEntityId: actorId });
+  const recipientView = (p, at, by, actorId) =>
+    signingRecipientView(p, at, {
+      orgName: orgOf(p.orgId)?.name ?? null,
+      partyType: by === 'guardian' ? 'GUARDIAN' : 'PLAYER',
+      forEntityId: actorId,
+    });
 
   playerRouter.get('/signings', (req, res) => {
     const at = now(req);
-    const items = recipientPackages({ by: 'player', actorId: req.player.id, playerIds: [req.player.id], at }).map((p) => recipientView(p, at, 'player', req.player.id));
-    res.json({ items, note: 'Documents presented to you for signing, exactly as the club presented them. Confirming one records your signature on that exact document; nothing is signed until every required party has confirmed and the club completes the signing.' });
+    const items = recipientPackages({ by: 'player', actorId: req.player.id, playerIds: [req.player.id], at }).map((p) =>
+      recipientView(p, at, 'player', req.player.id),
+    );
+    res.json({
+      items,
+      note: 'Documents presented to you for signing, exactly as the club presented them. Confirming one records your signature on that exact document; nothing is signed until every required party has confirmed and the club completes the signing.',
+    });
   });
   playerRouter.get('/signings/:id', (req, res) => {
-    const p = recipientPackage(req, res, { by: 'player', actorId: req.player.id, playerIds: [req.player.id] }); if (!p) return;
-    res.json({ signing: recipientView(p, now(req), 'player', req.player.id), history: signingHistoryView(p, { forRecipient: true }) });
+    const p = recipientPackage(req, res, { by: 'player', actorId: req.player.id, playerIds: [req.player.id] });
+    if (!p) return;
+    res.json({
+      signing: recipientView(p, now(req), 'player', req.player.id),
+      history: signingHistoryView(p, { forRecipient: true }),
+    });
   });
   playerRouter.get('/signings/:id/document', (req, res) => {
-    const p = recipientPackage(req, res, { by: 'player', actorId: req.player.id, playerIds: [req.player.id] }); if (!p) return;
+    const p = recipientPackage(req, res, { by: 'player', actorId: req.player.id, playerIds: [req.player.id] });
+    if (!p) return;
     const revId = typeof req.query.revisionId === 'string' ? req.query.revisionId : p.currentRevisionId;
     const rev = (p.revisions ?? []).find((r) => r && r.id === revId && r.readyAt);
-    if (rev?.document) { const dp = documentBytesProblem(p, rev.document); if (dp) { console.error(`SIGNING document_${dp} ${p.id} ${rev.id}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'This document cannot be read.'); } }
+    if (rev?.document) {
+      const dp = documentBytesProblem(p, rev.document);
+      if (dp) {
+        console.error(`SIGNING document_${dp} ${p.id} ${rev.id}`);
+        return err(res, 'SIGNING_STATE_UNKNOWN', 'This document cannot be read.');
+      }
+    }
     const out = rev?.document ? documentFile(rev.document, p.orgId) : null;
     if (!out) return documentNotFound(res, 'player');
     res.json(out);
   });
   playerRouter.post('/signings/:id/complete', (req, res) => {
-    const p = recipientPackage(req, res, { by: 'player', actorId: req.player.id, playerIds: [req.player.id] }); if (!p) return;
+    const p = recipientPackage(req, res, { by: 'player', actorId: req.player.id, playerIds: [req.player.id] });
+    if (!p) return;
     const kase = caseOf(p);
-    completeParty(req, res, { pkg: p, kase, partyType: 'PLAYER', actorKind: 'player', actorId: req.player.id, actorName: req.player.name ?? null, rateKey: `player:${req.player.id}`, orgName: orgOf(p.orgId)?.name ?? null });
+    completeParty(req, res, {
+      pkg: p,
+      kase,
+      partyType: 'PLAYER',
+      actorKind: 'player',
+      actorId: req.player.id,
+      actorName: req.player.name ?? null,
+      rateKey: `player:${req.player.id}`,
+      orgName: orgOf(p.orgId)?.name ?? null,
+    });
   });
 
   // Dormant: the guardian pathway is closed everywhere, so the list is empty and every act is refused.
-  guardianRouter.get('/signings', (req, res) => { res.json({ items: [], note: 'Signing on behalf of a player under the age of majority is not open in this jurisdiction.' }); });
+  guardianRouter.get('/signings', (req, res) => {
+    res.json({
+      items: [],
+      note: 'Signing on behalf of a player under the age of majority is not open in this jurisdiction.',
+    });
+  });
   guardianRouter.get('/signings/:id', (req, res) => notFound(res, 'guardian'));
   guardianRouter.get('/signings/:id/document', (req, res) => documentNotFound(res, 'guardian'));
   guardianRouter.post('/signings/:id/complete', (req, res) => {
-    const p = recipientPackages({ by: 'guardian', actorId: req.guardian.id, playerIds: req.guardian.childIds ?? [], at: now(req) }).find((x) => x.id === req.params.id);
+    const p = recipientPackages({
+      by: 'guardian',
+      actorId: req.guardian.id,
+      playerIds: req.guardian.childIds ?? [],
+      at: now(req),
+    }).find((x) => x.id === req.params.id);
     if (!p) return notFound(res, 'guardian');
-    return err(res, 'SIGNING_PATHWAY_CLOSED', 'Signing on behalf of a player under the age of majority is not open in this jurisdiction.');
+    return err(
+      res,
+      'SIGNING_PATHWAY_CLOSED',
+      'Signing on behalf of a player under the age of majority is not open in this jurisdiction.',
+    );
   });
 
   // ================================================================== agent (read-only)
@@ -764,14 +1738,39 @@ export function registerSigning(rawCtx) {
     if (!access?.resolveMembership?.(req, res)) return;
     const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
-    if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not open a client\'s signings.' });
-    const a = found; const at = now(req);
-    const decision = integration?.decide?.({ surface: 'client_private', clientId: a.clientId, agentUserId: req.orgUser.id, at }) ?? { allowed: false, code: 'BASIS' };
-    if (decision.allowed !== true) return res.status(403).json({ error: decision.code, rule: decision.rule ?? null, message: 'This client\'s signings are not open to you right now.' });
+    if (found.summaryOnly)
+      return res
+        .status(403)
+        .json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: "A summary row does not open a client's signings." });
+    const a = found;
+    const at = now(req);
+    const decision = integration?.decide?.({
+      surface: 'client_private',
+      clientId: a.clientId,
+      agentUserId: req.orgUser.id,
+      at,
+    }) ?? { allowed: false, code: 'BASIS' };
+    if (decision.allowed !== true)
+      return res.status(403).json({
+        error: decision.code,
+        rule: decision.rule ?? null,
+        message: "This client's signings are not open to you right now.",
+      });
     const basis = integration?.basisFor?.({ agentUserId: req.orgUser.id, clientId: a.clientId, at });
-    if (!basis?.ok || !(basis.scope ?? []).some((s) => s === 'employment' || s === 'transfer')) return res.status(403).json({ error: 'SCOPE_INSUFFICIENT', message: 'Your representation scope with this client does not cover employment or transfer.' });
-    const licence = integration?.licenceCurrentFor ? integration.licenceCurrentFor(req.orgUser.id, a.jurisdiction ?? null, at) : false;
-    if (licence !== true) return res.status(403).json({ error: 'LICENCE_NOT_CURRENT', rule: 'LICENCE', message: 'This client\'s signings are not open to you right now.' });
+    if (!basis?.ok || !(basis.scope ?? []).some((s) => s === 'employment' || s === 'transfer'))
+      return res.status(403).json({
+        error: 'SCOPE_INSUFFICIENT',
+        message: 'Your representation scope with this client does not cover employment or transfer.',
+      });
+    const licence = integration?.licenceCurrentFor
+      ? integration.licenceCurrentFor(req.orgUser.id, a.jurisdiction ?? null, at)
+      : false;
+    if (licence !== true)
+      return res.status(403).json({
+        error: 'LICENCE_NOT_CURRENT',
+        rule: 'LICENCE',
+        message: "This client's signings are not open to you right now.",
+      });
     const items = [];
     for (const p of sp.forPlayer(a.clientId)) {
       if (!soundPackage(p, at)) continue;
@@ -781,19 +1780,31 @@ export function registerSigning(rawCtx) {
       items.push(signingAgentView(p, at, { orgName: orgOf(p.orgId)?.name ?? null }));
     }
     const player = findPlayer(a.clientId);
-    res.json({ items, clientId: a.clientId, clientName: player && orgCanSee(req.org, player) ? player.name : null, honest: 'Read-only. Your client signs as themselves; ScoutBox does not let you sign, acknowledge or complete for a client.' });
+    res.json({
+      items,
+      clientId: a.clientId,
+      clientName: player && orgCanSee(req.org, player) ? player.name : null,
+      honest:
+        'Read-only. Your client signs as themselves; ScoutBox does not let you sign, acknowledge or complete for a client.',
+    });
   });
 
   // ================================================================== Trust & Safety
 
   adminRouter.post('/signings/:id/void', (req, res) => {
-    if (!req.reviewer?.id) return err(res, 'SIGNING_NOT_PERMITTED', 'Voiding a signing requires a named Trust & Safety reviewer.');
+    if (!req.reviewer?.id)
+      return err(res, 'SIGNING_NOT_PERMITTED', 'Voiding a signing requires a named Trust & Safety reviewer.');
     const pkg = sp.byId(req.params.id);
     if (!pkg) return notFound(res, 'admin');
     const at = now(req);
     const reason = cleanText(req.body?.reason, SIGNING_LIMITS.reason);
-    if (!reason.ok || !reason.value) return err(res, 'SIGNING_INPUT_INVALID', 'A recorded reason is required.', { field: 'reason' });
-    const g = canVoid(pkg, at); if (!g.ok) { const g2 = canCancel(pkg, at); if (!g2.ok) return err(res, g2.error, g2.message, g2.current ? { current: g2.current } : {}); }
+    if (!reason.ok || !reason.value)
+      return err(res, 'SIGNING_INPUT_INVALID', 'A recorded reason is required.', { field: 'reason' });
+    const g = canVoid(pkg, at);
+    if (!g.ok) {
+      const g2 = canCancel(pkg, at);
+      if (!g2.ok) return err(res, g2.error, g2.message, g2.current ? { current: g2.current } : {});
+    }
     const by = { kind: 'admin', id: req.reviewer.id, name: req.reviewer.name ?? req.reviewer.id };
     const rev = currentRevision(pkg);
     let fresh;
@@ -802,13 +1813,28 @@ export function registerSigning(rawCtx) {
         let p = sp.patchRevision(pkg.id, rev.id, { status: 'VOIDED' });
         p = sp.patch(p.id, { status: 'VOIDED', voidedAt: at, voidedBy: by, voidReason: reason.value });
         p = hist(p, 'signing_voided', by, { revisionId: rev.id, hadReason: true, byTrustAndSafety: true }, at);
-        const kase = caseOf(p); if (kase) caseAudit(kase, 'admin', by.id, by.name, 'signing_voided', { signingPackageId: p.id, byTrustAndSafety: true });
+        const kase = caseOf(p);
+        if (kase)
+          caseAudit(kase, 'admin', by.id, by.name, 'signing_voided', {
+            signingPackageId: p.id,
+            byTrustAndSafety: true,
+          });
         return touch(p, null, at, { id: by.id, name: by.name });
       });
-    } catch (e) { console.error(`SIGNING admin_void_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be voided; nothing was recorded.'); }
-    safe('broadcast', () => broadcast?.('signing_voided', { orgId: fresh.orgId, roomId: fresh.caseId, signingPackageId: fresh.id }));
-    safe('notify_club', () => notifyClubLeads(fresh, 'Trust & Safety voided a signing on one of your cases. Nothing was signed.'));
-    if (rev.readyAt) safe('notify_player', () => notifyPlayer(fresh, 'The signing presented to you was voided by Trust & Safety. Nothing was signed.'));
+    } catch (e) {
+      console.error(`SIGNING admin_void_rolled_back ${pkg.id}: ${e?.message ?? e}`);
+      return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be voided; nothing was recorded.');
+    }
+    safe('broadcast', () =>
+      broadcast?.('signing_voided', { orgId: fresh.orgId, roomId: fresh.caseId, signingPackageId: fresh.id }),
+    );
+    safe('notify_club', () =>
+      notifyClubLeads(fresh, 'Trust & Safety voided a signing on one of your cases. Nothing was signed.'),
+    );
+    if (rev.readyAt)
+      safe('notify_player', () =>
+        notifyPlayer(fresh, 'The signing presented to you was voided by Trust & Safety. Nothing was signed.'),
+      );
     res.json({ ok: true, signingPackageId: fresh.id, status: 'VOIDED' });
   });
 
@@ -826,8 +1852,21 @@ export function registerSigning(rawCtx) {
     const live = currentSigningForOffer(rows, at);
     if (!live) return null;
     const rev = currentRevision(live);
-    return { signingPackageId: live.id, status: effectiveStatus(live, at), revisionNumber: rev?.revisionNumber ?? null, presented: !!rev?.readyAt, completedAt: live.completion?.completedAt ?? null, signingId: live.completion?.signingId ?? null };
+    return {
+      signingPackageId: live.id,
+      status: effectiveStatus(live, at),
+      revisionNumber: rev?.revisionNumber ?? null,
+      presented: !!rev?.readyAt,
+      completedAt: live.completion?.completedAt ?? null,
+      signingId: live.completion?.signingId ?? null,
+    };
   }
 
-  return { recordCompletedSigning, legacyRecordingBlocker, onPlayerDeleted, summaryForOffer, packagesOfCase: (kase, at = Date.now()) => packagesOfCase(kase).filter((p) => soundPackage(p, at)) };
+  return {
+    recordCompletedSigning,
+    legacyRecordingBlocker,
+    onPlayerDeleted,
+    summaryForOffer,
+    packagesOfCase: (kase, at = Date.now()) => packagesOfCase(kase).filter((p) => soundPackage(p, at)),
+  };
 }

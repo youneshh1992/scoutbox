@@ -10,14 +10,24 @@ import { m24mock } from './m24mock';
 
 const DEMO = process.env.EXPO_PUBLIC_DEMO === '1';
 
-export type AgentRelationshipStatus = 'proposed' | 'active' | 'declined' | 'expired' | 'terminated_by_client' | 'terminated_by_agent' | 'disputed';
+export type AgentRelationshipStatus =
+  | 'proposed'
+  | 'active'
+  | 'declined'
+  | 'expired'
+  | 'terminated_by_client'
+  | 'terminated_by_agent'
+  | 'disputed';
 
 export interface AgentIdentity {
   userId: string | null;
   displayName: string | null;
   agency: { id: string; name: string } | null;
   /** Null when the agent has no profile: nobody's licence is claimed. */
-  verification: { fifaLicence: string | null; jurisdictions: { memberAssociation: string; nationalRegistration: string }[] } | null;
+  verification: {
+    fifaLicence: string | null;
+    jurisdictions: { memberAssociation: string; nationalRegistration: string }[];
+  } | null;
   honest: string;
 }
 
@@ -69,18 +79,50 @@ export interface SharedOpportunity {
 
 export interface PlayerM24 {
   list(playerId: string): Promise<{ items: AgentRelationship[]; minor?: boolean; note?: string }>;
-  act(playerId: string, id: string, action: AgentAction, input: { expectedRev: number; reason?: string; clientKey: string }): Promise<AgentRelationship>;
+  act(
+    playerId: string,
+    id: string,
+    action: AgentAction,
+    input: { expectedRev: number; reason?: string; clientKey: string },
+  ): Promise<AgentRelationship>;
   setSharing(playerId: string, id: string, share: boolean, expectedRev: number): Promise<AgentRelationship>;
   /** One disclosure at a time: answering one question must not answer the others. */
-  setDisclosure(playerId: string, id: string, key: DisclosureKey, value: boolean, expectedRev: number): Promise<AgentRelationship>;
+  setDisclosure(
+    playerId: string,
+    id: string,
+    key: DisclosureKey,
+    value: boolean,
+    expectedRev: number,
+  ): Promise<AgentRelationship>;
   sharedOpportunities(playerId: string): Promise<{ items: SharedOpportunity[]; minor?: boolean; note?: string }>;
 }
 
 const live: PlayerM24 = {
   list: (pid) => req('/player/agent/relationships', pid),
-  act: async (pid, id, action, input) => (await req<{ relationship: AgentRelationship }>(`/player/agent/relationships/${encodeURIComponent(id)}/${action}`, pid, { method: 'POST', body: JSON.stringify(input) })).relationship,
-  setSharing: async (pid, id, share, expectedRev) => (await req<{ relationship: AgentRelationship }>(`/player/agent/relationships/${encodeURIComponent(id)}/sharing`, pid, { method: 'PATCH', body: JSON.stringify({ shareWithAgencyStaff: share, expectedRev }) })).relationship,
-  setDisclosure: async (pid, id, key, value, expectedRev) => (await req<{ relationship: AgentRelationship }>(`/player/agent/relationships/${encodeURIComponent(id)}/sharing`, pid, { method: 'PATCH', body: JSON.stringify({ disclosure: { [key]: value }, expectedRev }) })).relationship,
+  act: async (pid, id, action, input) =>
+    (
+      await req<{ relationship: AgentRelationship }>(
+        `/player/agent/relationships/${encodeURIComponent(id)}/${action}`,
+        pid,
+        { method: 'POST', body: JSON.stringify(input) },
+      )
+    ).relationship,
+  setSharing: async (pid, id, share, expectedRev) =>
+    (
+      await req<{ relationship: AgentRelationship }>(
+        `/player/agent/relationships/${encodeURIComponent(id)}/sharing`,
+        pid,
+        { method: 'PATCH', body: JSON.stringify({ shareWithAgencyStaff: share, expectedRev }) },
+      )
+    ).relationship,
+  setDisclosure: async (pid, id, key, value, expectedRev) =>
+    (
+      await req<{ relationship: AgentRelationship }>(
+        `/player/agent/relationships/${encodeURIComponent(id)}/sharing`,
+        pid,
+        { method: 'PATCH', body: JSON.stringify({ disclosure: { [key]: value }, expectedRev }) },
+      )
+    ).relationship,
   sharedOpportunities: (pid) => req('/player/agent/shared-opportunities', pid),
 };
 

@@ -156,8 +156,21 @@ export function buildSeed({ demo = true } = {}) {
       medical: {
         shared: false,
         records: [
-          { id: 'md-1', type: 'injury', title: 'Hamstring strain (grade 1)', date: '2025-11-02', layoffWeeks: 3, cleared: true },
-          { id: 'md-2', type: 'clearance', title: 'Pre-season cardiac screen — clear', date: '2026-01-15', cleared: true },
+          {
+            id: 'md-1',
+            type: 'injury',
+            title: 'Hamstring strain (grade 1)',
+            date: '2025-11-02',
+            layoffWeeks: 3,
+            cleared: true,
+          },
+          {
+            id: 'md-2',
+            type: 'clearance',
+            title: 'Pre-season cardiac screen — clear',
+            date: '2026-01-15',
+            cleared: true,
+          },
         ],
         conditionStatus: 'fully_fit',
       },
@@ -183,7 +196,9 @@ export function buildSeed({ demo = true } = {}) {
       media: [med('Passing range compilation', 'video', now - 40 * day)],
       medical: {
         shared: true,
-        records: [{ id: 'md-3', type: 'clearance', title: 'Annual medical — clear', date: '2026-02-01', cleared: true }],
+        records: [
+          { id: 'md-3', type: 'clearance', title: 'Annual medical — clear', date: '2026-02-01', cleared: true },
+        ],
         conditionStatus: 'fully_fit',
       },
     }),
@@ -229,7 +244,16 @@ export function buildSeed({ demo = true } = {}) {
       media: [med('1v1 and crossing clips', 'video', now - 10 * day)],
       medical: {
         shared: false,
-        records: [{ id: 'md-4', type: 'injury', title: 'ACL reconstruction (right)', date: '2024-08-19', layoffWeeks: 38, cleared: true }],
+        records: [
+          {
+            id: 'md-4',
+            type: 'injury',
+            title: 'ACL reconstruction (right)',
+            date: '2024-08-19',
+            layoffWeeks: 38,
+            cleared: true,
+          },
+        ],
         conditionStatus: 'fully_fit',
       },
     }),
@@ -243,7 +267,15 @@ export function buildSeed({ demo = true } = {}) {
       foot: 'right',
       heightCm: 193,
       weightKg: 88,
-      stats: { appearances: 33, goals: 0, assists: 0, paceKmh: 29.5, passCompletionPct: 74, duelSuccessPct: 0, cleanSheets: 14 },
+      stats: {
+        appearances: 33,
+        goals: 0,
+        assists: 0,
+        paceKmh: 29.5,
+        passCompletionPct: 74,
+        duelSuccessPct: 0,
+        cleanSheets: 14,
+      },
       academyPlus: false,
       badges: [],
       availability: 'loan_open',
@@ -317,7 +349,16 @@ export function buildSeed({ demo = true } = {}) {
       media: [med('Screening & interceptions', 'video', now - 70 * day)],
       medical: {
         shared: true,
-        records: [{ id: 'md-5', type: 'injury', title: 'Ankle syndesmosis sprain', date: '2025-04-10', layoffWeeks: 8, cleared: true }],
+        records: [
+          {
+            id: 'md-5',
+            type: 'injury',
+            title: 'Ankle syndesmosis sprain',
+            date: '2025-04-10',
+            layoffWeeks: 8,
+            cleared: true,
+          },
+        ],
         conditionStatus: 'fully_fit',
       },
     }),
@@ -427,38 +468,67 @@ export function buildSeed({ demo = true } = {}) {
   players.forEach((p, i) => {
     p.createdAt = now - (((i * 11) % 40) + 2) * day;
   });
-  players.find((p) => p.id === 'pl-guni').createdAt = now - 3 * day;      // new this week
-  players.find((p) => p.id === 'pl-mensah').createdAt = now - 5 * day;    // new this week
+  players.find((p) => p.id === 'pl-guni').createdAt = now - 3 * day; // new this week
+  players.find((p) => p.id === 'pl-mensah').createdAt = now - 5 * day; // new this week
 
   // Seeded activity streaks (self-competition only — never leaderboards).
   players.find((p) => p.id === 'pl-adeyemi').activityLog = [now - 2 * day, now - day, now - 3600_000];
-  players.find((p) => p.id === 'pl-guni').activityLog = [now - 4 * day, now - 3 * day, now - 2 * day, now - day, now - 7200_000];
+  players.find((p) => p.id === 'pl-guni').activityLog = [
+    now - 4 * day,
+    now - 3 * day,
+    now - 2 * day,
+    now - day,
+    now - 7200_000,
+  ];
 
   // Seeded scout & coach track records (demo only); live rows are computed from the ledger. The data layer imports them
   // once, with a first installation's players, into reputation_seed.
   const reputationSeed = [
-    { scoutName: 'Maria Keane', orgName: 'Eastport FC', discoveries: 14, successRatePct: 64, avgResaleMultiple: 3.1, seeded: true },
-    { scoutName: 'Coach D. Ansah', orgName: 'Harbour City FC', discoveries: 9, successRatePct: 55, avgResaleMultiple: 2.2, seeded: true },
-    { scoutName: 'Tomás Rivera', orgName: 'North Star Sports Agency', discoveries: 21, successRatePct: 48, avgResaleMultiple: 2.8, seeded: true },
+    {
+      scoutName: 'Maria Keane',
+      orgName: 'Eastport FC',
+      discoveries: 14,
+      successRatePct: 64,
+      avgResaleMultiple: 3.1,
+      seeded: true,
+    },
+    {
+      scoutName: 'Coach D. Ansah',
+      orgName: 'Harbour City FC',
+      discoveries: 9,
+      successRatePct: 55,
+      avgResaleMultiple: 2.2,
+      seeded: true,
+    },
+    {
+      scoutName: 'Tomás Rivera',
+      orgName: 'North Star Sports Agency',
+      discoveries: 21,
+      successRatePct: 48,
+      avgResaleMultiple: 2.8,
+      seeded: true,
+    },
   ];
 
-  players.push(player({
-    id: 'pl-osei',
-    name: 'Daniel Osei',
-    dob: '2001-09-12',
-    country: 'GB',
-    city: 'London',
-    position: 'CDM',
-    foot: 'right',
-    heightCm: 181,
-    weightKg: 77,
-    stats: { appearances: 26, goals: 3, assists: 4, passCompletionPct: 84, duelSuccessPct: 66 },
-    availability: 'available_now',
-    contractStatus: 'free_agent',
-    identityVerified: true,
-    timeline: [{ year: '2023', event: 'Captain, Hackney & Leyton Sunday League' }],
-    createdAt: now - 40 * day,
-  }));
+  players.push(
+    player({
+      id: 'pl-osei',
+      name: 'Daniel Osei',
+      dob: '2001-09-12',
+      country: 'GB',
+      city: 'London',
+      position: 'CDM',
+      foot: 'right',
+      heightCm: 181,
+      weightKg: 77,
+      stats: { appearances: 26, goals: 3, assists: 4, passCompletionPct: 84, duelSuccessPct: 66 },
+      availability: 'available_now',
+      contractStatus: 'free_agent',
+      identityVerified: true,
+      timeline: [{ year: '2023', event: 'Captain, Hackney & Leyton Sunday League' }],
+      createdAt: now - 40 * day,
+    }),
+  );
 
   // Player locations from their city (grassroots-radius visibility) and the
   // one seeded semi-pro. Missing coords leave location null — which fails
@@ -492,12 +562,12 @@ function player(p) {
     availability: 'not_seeking',
     contractStatus: 'unknown',
     drills: [],
-    drillResults: [],  // at-home combine: {drillId, value, verified, ts}
-    activityLog: [],   // timestamps of football activity (streaks/goals)
+    drillResults: [], // at-home combine: {drillId, value, verified, ts}
+    activityLog: [], // timestamps of football activity (streaks/goals)
     createdAt: null,
     password: null, // optional; when set, login requires it
-    level: 'amateur',  // amateur | semi_pro | pro — set by signings, walls Grassroots
-    location: null,    // {lat, lng} — required for grassroots-radius visibility
+    level: 'amateur', // amateur | semi_pro | pro — set by signings, walls Grassroots
+    location: null, // {lat, lng} — required for grassroots-radius visibility
     ...p,
   };
 }
@@ -507,15 +577,15 @@ const CITY_COORDS = {
   Manchester: { lat: 53.483, lng: -2.244 },
   Porto: { lat: 41.158, lng: -8.629 },
   Lagos: { lat: 6.524, lng: 3.379 },
-  'Göteborg': { lat: 57.709, lng: 11.975 },
+  Göteborg: { lat: 57.709, lng: 11.975 },
   Lyon: { lat: 45.764, lng: 4.836 },
   Osaka: { lat: 34.694, lng: 135.502 },
   Rosario: { lat: -32.944, lng: -60.65 },
-  'Kraków': { lat: 50.065, lng: 19.945 },
+  Kraków: { lat: 50.065, lng: 19.945 },
   Kumasi: { lat: 6.688, lng: -1.624 },
   Busan: { lat: 35.18, lng: 129.075 },
   London: { lat: 51.507, lng: -0.128 },
-  'Gdańsk': { lat: 54.352, lng: 18.646 },
+  Gdańsk: { lat: 54.352, lng: 18.646 },
 };
 
 function att(fixture, venue, ts) {

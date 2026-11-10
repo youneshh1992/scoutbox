@@ -18,14 +18,29 @@ export const RATE_LIMIT_POLICY = {
   matching_query: { max: 240, windowMs: 3_600_000, scope: 'org', note: 'Explainable Matching queries.' },
   watchlist_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Dynamic Watchlist creates and edits.' },
   second_look_action: { max: 200, windowMs: 3_600_000, scope: 'org', note: 'Second Look review, dismiss and reopen.' },
-  nobody_missed_action: { max: 200, windowMs: 3_600_000, scope: 'org', note: 'Candidate review, dismiss and add-to-room.' },
+  nobody_missed_action: {
+    max: 200,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Candidate review, dismiss and add-to-room.',
+  },
   // Generous, to bound only a runaway client: each read scans the organisation's recruitment records.
   analytics_read: { max: 600, windowMs: 3_600_000, scope: 'org', note: 'Recruitment analytics dashboard reads.' },
 
   // Development Hub. Per actor, so a busy club cannot exhaust a quota the player then hits. Generous on items so
   // ticking off a session's actions is never mistaken for abuse.
-  development_plan_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Development Plan creates, edits and sharing changes.' },
-  development_item_write: { max: 600, windowMs: 3_600_000, scope: 'actor', note: 'Development goal, action and evidence-link writes.' },
+  development_plan_write: {
+    max: 120,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Development Plan creates, edits and sharing changes.',
+  },
+  development_item_write: {
+    max: 600,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Development goal, action and evidence-link writes.',
+  },
   development_review_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Development Review submissions.' },
 
   // player-side capture: protects device and storage, and must not punish training a lot
@@ -50,61 +65,206 @@ export const RATE_LIMIT_POLICY = {
 
   // Trial. Invitations are the abuse-sensitive one; responses are per actor. The per-player invitation cooldown
   // lives in domains/recruitment/lifecycle/trialRoutes.mjs.
-  trial_invite: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Trial invitations sent to players and guardians.' },
-  trial_schedule: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Trial schedules proposed, revised or cancelled.' },
-  trial_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Trial schedule confirmations, declines and cancellations by a player or guardian.' },
+  trial_invite: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Trial invitations sent to players and guardians.',
+  },
+  trial_schedule: {
+    max: 60,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Trial schedules proposed, revised or cancelled.',
+  },
+  trial_response: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Trial schedule confirmations, declines and cancellations by a player or guardian.',
+  },
   // Offer. Drafting shares one budget so an alias route cannot double it. Responses are keyed by the person
   // answering, not the player named (a guardian answering for two children is one person).
   offer_draft_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Offer drafts created, edited or revised.' },
   offer_issue: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Offers issued to players and guardians.' },
   offer_withdraw: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Offers withdrawn.' },
-  offer_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Offer acceptances and declines by a player or guardian.' },
+  offer_response: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Offer acceptances and declines by a player or guardian.',
+  },
   // Signing. Closure acts have their own budgets so other traffic cannot starve the act that ends a signing.
   signing_start: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Signing packages opened over accepted Offers.' },
-  signing_document_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Signing documents attached, drafts edited, packages presented or superseded.' },
-  signing_party_completion: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'A party confirming the exact signing document (player, or the club signatory).' },
-  signing_closure: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Signings completed (the canonical completion).' },
-  signing_safety_closure: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Signings cancelled or voided by the club: a safety closure with its own budget, so completion traffic cannot exhaust it.' },
+  signing_document_write: {
+    max: 120,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Signing documents attached, drafts edited, packages presented or superseded.',
+  },
+  signing_party_completion: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'A party confirming the exact signing document (player, or the club signatory).',
+  },
+  signing_closure: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Signings completed (the canonical completion).',
+  },
+  signing_safety_closure: {
+    max: 60,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Signings cancelled or voided by the club: a safety closure with its own budget, so completion traffic cannot exhaust it.',
+  },
   trial_evidence_link: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Box Cam sessions linked to a Trial.' },
   trial_attendance: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Trial attendance and completion records.' },
   // Formal recruitment decisions.
   decision_draft: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Decision drafts opened or edited.' },
-  decision_finalize: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Formal recruitment decisions finalized or superseded.' },
+  decision_finalize: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Formal recruitment decisions finalized or superseded.',
+  },
 
   // Agent core. Representation requests solicit a person, so they are limited per agent per day, on top of the
   // per-player cooldown in domains/agents/core. Lookups are bounded against enumeration.
-  agent_representation_request: { max: 40, windowMs: 86_400_000, scope: 'actor', note: 'Representation relationship requests that reach a player lookup (malformed input and the agent\'s own verification refusals do not count).' },
-  agent_player_lookup: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Player lookups from the Agent workspace.' },
-  agent_profile_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Agent profile edits and verification submissions.' },
+  agent_representation_request: {
+    max: 40,
+    windowMs: 86_400_000,
+    scope: 'actor',
+    note: "Representation relationship requests that reach a player lookup (malformed input and the agent's own verification refusals do not count).",
+  },
+  agent_player_lookup: {
+    max: 120,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Player lookups from the Agent workspace.',
+  },
+  agent_profile_write: {
+    max: 60,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Agent profile edits and verification submissions.',
+  },
   agent_affiliation_write: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Agency team and settings changes.' },
-  agent_client_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Relationship confirmations, declines, terminations and disputes by a player.' },
+  agent_client_response: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Relationship confirmations, declines, terminations and disputes by a player.',
+  },
   // Conflict & Compliance Engine.
-  compliance_context_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Compliance context creation, party additions and representation declarations by a licensed agent.' },
-  compliance_consent_request: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Consent requests sent to parties by a licensed agent.' },
-  compliance_consent_response: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'Consent grants, declines and revocations by a party.' },
-  ts_review_decision: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Attributed Trust & Safety review decisions.' },
-  ts_policy_publish: { max: 10, windowMs: 86_400_000, scope: 'actor', note: 'Policy version proposals by a Trust & Safety administrator.' },
+  compliance_context_write: {
+    max: 60,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Compliance context creation, party additions and representation declarations by a licensed agent.',
+  },
+  compliance_consent_request: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Consent requests sent to parties by a licensed agent.',
+  },
+  compliance_consent_response: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Consent grants, declines and revocations by a party.',
+  },
+  ts_review_decision: {
+    max: 120,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Attributed Trust & Safety review decisions.',
+  },
+  ts_policy_publish: {
+    max: 10,
+    windowMs: 86_400_000,
+    scope: 'actor',
+    note: 'Policy version proposals by a Trust & Safety administrator.',
+  },
   // Agent Transaction Workspace.
-  transaction_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Transaction creation, party changes, representation bindings, terms and re-evaluations by a licensed agent.' },
-  transaction_status_write: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Transaction status transitions and party confirmations.' },
-  transaction_document_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Transaction document metadata by any party to a transaction.' },
-  transaction_note_write: { max: 120, windowMs: 3_600_000, scope: 'actor', note: 'Scoped transaction notes by any party to a transaction.' },
+  transaction_write: {
+    max: 60,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Transaction creation, party changes, representation bindings, terms and re-evaluations by a licensed agent.',
+  },
+  transaction_status_write: {
+    max: 60,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Transaction status transitions and party confirmations.',
+  },
+  transaction_document_write: {
+    max: 120,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Transaction document metadata by any party to a transaction.',
+  },
+  transaction_note_write: {
+    max: 120,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Scoped transaction notes by any party to a transaction.',
+  },
   // Cross-app integration. Both notify a person and can be withdrawn and repeated, so without a quota the pair
   // would be an unbounded way to spam someone's notifications.
-  opportunity_share: { max: 60, windowMs: 3_600_000, scope: 'actor', note: 'Opportunities an agent shares with a client, and withdrawals of them.' },
-  transaction_handoff: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Transaction-workspace invitations a club issues from a recruitment case, and withdrawals of them.' },
+  opportunity_share: {
+    max: 60,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Opportunities an agent shares with a client, and withdrawals of them.',
+  },
+  transaction_handoff: {
+    max: 30,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Transaction-workspace invitations a club issues from a recruitment case, and withdrawals of them.',
+  },
 
   // Credential guessing. The per-IP /auth limiter cannot bound guessing against one account from many addresses,
   // and it counts successes, so a shared office's normal sign-ins spend it. This one is charged only for a wrong
   // guess and keyed by the identifier tried.
-  login_failure: { max: 20, windowMs: 900_000, scope: 'actor', note: 'Failed sign-in attempts, per identifier tried. A successful sign-in costs nothing.' },
+  login_failure: {
+    max: 20,
+    windowMs: 900_000,
+    scope: 'actor',
+    note: 'Failed sign-in attempts, per identifier tried. A successful sign-in costs nothing.',
+  },
 
   // One-time codes, on top of the /auth limiter and the challenge's own attempt count. Minting and sending are
   // bounded per owner; a guess is charged only when wrong.
-  email_challenge_request: { max: 5, windowMs: 3_600_000, scope: 'org', note: 'Club e-mail-domain verification codes requested (each one sends a mail).' },
-  email_challenge_confirm: { max: 20, windowMs: 900_000, scope: 'org', note: 'Wrong club e-mail verification codes presented. A correct code costs nothing.' },
-  pairing_code_mint: { max: 20, windowMs: 3_600_000, scope: 'actor', note: 'Child pairing codes minted, per guardian.' },
-  pairing_attempt: { max: 20, windowMs: 900_000, scope: 'ip', note: 'Wrong child pairing codes presented, per client address (the route is unauthenticated). A correct code costs nothing.' },
+  email_challenge_request: {
+    max: 5,
+    windowMs: 3_600_000,
+    scope: 'org',
+    note: 'Club e-mail-domain verification codes requested (each one sends a mail).',
+  },
+  email_challenge_confirm: {
+    max: 20,
+    windowMs: 900_000,
+    scope: 'org',
+    note: 'Wrong club e-mail verification codes presented. A correct code costs nothing.',
+  },
+  pairing_code_mint: {
+    max: 20,
+    windowMs: 3_600_000,
+    scope: 'actor',
+    note: 'Child pairing codes minted, per guardian.',
+  },
+  pairing_attempt: {
+    max: 20,
+    windowMs: 900_000,
+    scope: 'ip',
+    note: 'Wrong child pairing codes presented, per client address (the route is unauthenticated). A correct code costs nothing.',
+  },
 
   // outbound to people
   evidence_request: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Evidence requests to players and guardians.' },
@@ -127,7 +287,9 @@ export function memoryRateLimitProvider() {
         if (buckets.size >= 20_000) {
           for (const [k, v] of buckets) if (now - v.start > v.windowMs) buckets.delete(k);
           if (buckets.size >= 20_000) {
-            const victims = [...buckets.entries()].sort((x, y) => (x[1].n - y[1].n) || (x[1].start - y[1].start)).slice(0, Math.ceil(buckets.size / 4));
+            const victims = [...buckets.entries()]
+              .sort((x, y) => x[1].n - y[1].n || x[1].start - y[1].start)
+              .slice(0, Math.ceil(buckets.size / 4));
             for (const [k] of victims) buckets.delete(k);
           }
         }
@@ -142,7 +304,9 @@ export function memoryRateLimitProvider() {
       if (!b || now - b.start > windowMs) return { limited: false, remaining: max, resetAt: now + windowMs };
       return { limited: b.n > max, remaining: Math.max(0, max - b.n), resetAt: b.start + windowMs };
     },
-    reset(key) { buckets.delete(key); },
+    reset(key) {
+      buckets.delete(key);
+    },
     size: () => buckets.size,
   };
 }
@@ -154,8 +318,8 @@ export function memoryRateLimitProvider() {
 export function createRateLimiter({ provider = process.env.SCOUTBOX_RATE_LIMIT_PROVIDER ?? 'memory' } = {}) {
   if (provider !== 'memory') {
     throw new Error(
-      `SCOUTBOX_RATE_LIMIT_PROVIDER=${provider} is not available: no shared rate-limit backend is configured in this build. `
-      + 'Use "memory" (single instance) or add a provider before enabling it.',
+      `SCOUTBOX_RATE_LIMIT_PROVIDER=${provider} is not available: no shared rate-limit backend is configured in this build. ` +
+        'Use "memory" (single instance) or add a provider before enabling it.',
     );
   }
   const impl = memoryRateLimitProvider();

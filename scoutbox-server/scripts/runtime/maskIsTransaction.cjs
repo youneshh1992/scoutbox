@@ -14,7 +14,11 @@ class DatabaseSync extends Real {
     // cannot be deleted; a proxy that answers `undefined` for it is the
     // closest faithful stand-in for "the getter does not exist".
     return new Proxy(this, {
-      get(t, k) { if (k === 'isTransaction') return undefined; const v = Reflect.get(t, k, t); return typeof v === 'function' ? v.bind(t) : v; },
+      get(t, k) {
+        if (k === 'isTransaction') return undefined;
+        const v = Reflect.get(t, k, t);
+        return typeof v === 'function' ? v.bind(t) : v;
+      },
     });
   }
 }

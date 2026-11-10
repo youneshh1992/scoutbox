@@ -5,15 +5,29 @@
  * unavailable survives, so history still shows what was cited. A link may only
  * point at a record of the plan's own player.
  */
-import { liveCombineState, isProductionValidCombine, combineProtocol, latestCombineProtocol } from '../boxcam/combineShared.mjs';
+import {
+  liveCombineState,
+  isProductionValidCombine,
+  combineProtocol,
+  latestCombineProtocol,
+} from '../boxcam/combineShared.mjs';
 import { PROVIDERS } from '../boxcam/drills.mjs';
 import { EVIDENCE_SOURCES, EVIDENCE_SOURCE_LABELS, UNAVAILABLE_REASONS } from './shared.mjs';
 import { parseTrialDate } from '../../../domain.mjs';
 
 /** Tests assert a stored link has exactly these keys, so no content creeps in. */
 export const EVIDENCE_LINK_FIELDS = Object.freeze([
-  'id', 'planId', 'goalId', 'actionId', 'playerId', 'sourceType', 'sourceId',
-  'linkedByKind', 'linkedById', 'linkedByName', 'linkedAt',
+  'id',
+  'planId',
+  'goalId',
+  'actionId',
+  'playerId',
+  'sourceType',
+  'sourceId',
+  'linkedByKind',
+  'linkedById',
+  'linkedByName',
+  'linkedAt',
 ]);
 
 export const UNAVAILABLE_COPY = Object.freeze({
@@ -49,7 +63,8 @@ function viewerMaySeePlayer(viewer, player, { orgCanSee }) {
   if (!player) return false;
   if (viewer.kind === 'player_self') return viewer.playerId === player.id;
   if (viewer.kind === 'guardian') return viewer.childIds?.includes(player.id) ?? false;
-  if (viewer.kind === 'org_staff' || viewer.kind === 'grassroots_staff') return !!viewer.org && orgCanSee(viewer.org, player);
+  if (viewer.kind === 'org_staff' || viewer.kind === 'grassroots_staff')
+    return !!viewer.org && orgCanSee(viewer.org, player);
   return false;
 }
 
@@ -62,12 +77,18 @@ export function resolveEvidenceLink(link, { reads = {}, player, viewer, orgCanSe
   if (!viewerMaySeePlayer(viewer, player, { orgCanSee })) return unavailable(link, 'evidence_not_visible');
 
   switch (link.sourceType) {
-    case 'passport_evidence': return resolvePassportEvidence(link, { reads, player, now });
-    case 'assessment': return resolveAssessment(link, { reads, player, viewer });
-    case 'box_cam_session': return resolveBoxSession(link, { reads, player });
-    case 'combine_attempt': return resolveCombineAttempt(link, { reads, player });
-    case 'trial_report': return resolveTrialReport(link, { reads, player, viewer });
-    default: return unavailable(link, 'evidence_not_found');
+    case 'passport_evidence':
+      return resolvePassportEvidence(link, { reads, player, now });
+    case 'assessment':
+      return resolveAssessment(link, { reads, player, viewer });
+    case 'box_cam_session':
+      return resolveBoxSession(link, { reads, player });
+    case 'combine_attempt':
+      return resolveCombineAttempt(link, { reads, player });
+    case 'trial_report':
+      return resolveTrialReport(link, { reads, player, viewer });
+    default:
+      return unavailable(link, 'evidence_not_found');
   }
 }
 
@@ -77,9 +98,11 @@ function resolvePassportEvidence(link, { reads, player, now }) {
   if (e.supersededBy) return unavailable(link, 'evidence_superseded');
   if (e.expiresAt && e.expiresAt < now) return unavailable(link, 'evidence_expired');
   return {
-    sourceType: link.sourceType, sourceId: e.id,
+    sourceType: link.sourceType,
+    sourceId: e.id,
     sourceLabel: EVIDENCE_SOURCE_LABELS.passport_evidence,
-    available: true, reason: null,
+    available: true,
+    reason: null,
     title: e.label,
     provenance: TIER_PROVENANCE[e.verification?.status] ?? 'system_recorded',
     occurredAt: e.observedAt ?? e.recordedAt ?? null,
@@ -96,9 +119,11 @@ function resolveAssessment(link, { reads, player, viewer }) {
   if (!isOwningOrg && !(isSubject && a.publishedFeedback)) return unavailable(link, 'evidence_not_visible');
   if (a.state === 'draft') return unavailable(link, 'evidence_not_found');
   return {
-    sourceType: link.sourceType, sourceId: a.id,
+    sourceType: link.sourceType,
+    sourceId: a.id,
     sourceLabel: EVIDENCE_SOURCE_LABELS.assessment,
-    available: true, reason: null,
+    available: true,
+    reason: null,
     // Ratings, recommendation and reviewer notes stay out of development plans.
     title: a.context?.fixture ? `Assessment — ${a.context.fixture}` : 'Assessment',
     org: { id: a.orgId, name: null },
@@ -113,9 +138,11 @@ function resolveBoxSession(link, { reads, player }) {
   if (!s || s.playerId !== player.id) return unavailable(link, 'evidence_not_found');
   if (s.verificationState === 'invalidated') return unavailable(link, 'evidence_withdrawn');
   return {
-    sourceType: link.sourceType, sourceId: s.id,
+    sourceType: link.sourceType,
+    sourceId: s.id,
     sourceLabel: EVIDENCE_SOURCE_LABELS.box_cam_session,
-    available: true, reason: null,
+    available: true,
+    reason: null,
     title: s.drillId,
     provenance: 'box_cam_observed',
     occurredAt: s.endedAt ?? s.startedAt ?? s.createdAt ?? null,
@@ -135,16 +162,23 @@ function resolveCombineAttempt(link, { reads, player }) {
   const productionValid = isProductionValidCombine(a, session, provider);
   const proto = combineProtocol(a.protocolId, a.protocolVersion) ?? latestCombineProtocol(a.protocolId);
   return {
-    sourceType: link.sourceType, sourceId: a.id,
+    sourceType: link.sourceType,
+    sourceId: a.id,
     sourceLabel: EVIDENCE_SOURCE_LABELS.combine_attempt,
-    available: true, reason: null,
+    available: true,
+    reason: null,
     title: proto?.title ?? a.protocolId,
-    protocolId: a.protocolId, protocolVersion: a.protocolVersion,
+    protocolId: a.protocolId,
+    protocolVersion: a.protocolVersion,
     measuredValue: state === 'combine_verified' ? a.measuredValue : null,
     metricUnit: a.metricUnit,
     combineState: state,
     // A simulated result gets the demo badge whatever state it finished in.
-    provenance: provider?.testOnly ? 'simulated_demo' : (state === 'combine_verified' ? 'combine_verified' : 'box_cam_observed'),
+    provenance: provider?.testOnly
+      ? 'simulated_demo'
+      : state === 'combine_verified'
+        ? 'combine_verified'
+        : 'box_cam_observed',
     occurredAt: a.completedAt ?? a.createdAt ?? null,
     simulated: !!provider?.testOnly,
     productionValid,
@@ -162,21 +196,38 @@ function resolveTrialReport(link, { reads, player, viewer }) {
   if (!isOwningOrg) return unavailable(link, 'evidence_not_visible');
   if (t.status !== 'reported') return unavailable(link, 'evidence_not_found');
   return {
-    sourceType: link.sourceType, sourceId: t.id,
+    sourceType: link.sourceType,
+    sourceId: t.id,
     sourceLabel: EVIDENCE_SOURCE_LABELS.trial_report,
-    available: true, reason: null,
+    available: true,
+    reason: null,
     title: 'Trial report',
     provenance: 'verified_club_confirmed',
     // A stored day that is not a calendar day falls back to acceptance rather than NaN.
-    occurredAt: (() => { const d = parseTrialDate(t.proposedDate); return d.ok && d.t !== null ? d.t : (Number.isFinite(t.acceptedAt) ? t.acceptedAt : null); })(),
+    occurredAt: (() => {
+      const d = parseTrialDate(t.proposedDate);
+      return d.ok && d.t !== null ? d.t : Number.isFinite(t.acceptedAt) ? t.acceptedAt : null;
+    })(),
     simulated: false,
   };
 }
 
 /** Ownership is checked at write time as well as at read time. */
-export function validateEvidenceLink({ sourceType, sourceId, reads = {}, player, viewer, orgCanSee, now = Date.now() }) {
+export function validateEvidenceLink({
+  sourceType,
+  sourceId,
+  reads = {},
+  player,
+  viewer,
+  orgCanSee,
+  now = Date.now(),
+}) {
   if (!EVIDENCE_SOURCES.includes(String(sourceType))) {
-    return { error: 'EVIDENCE_SOURCE_UNKNOWN', allowed: EVIDENCE_SOURCES, detail: `Unknown evidence source "${sourceType}".` };
+    return {
+      error: 'EVIDENCE_SOURCE_UNKNOWN',
+      allowed: EVIDENCE_SOURCES,
+      detail: `Unknown evidence source "${sourceType}".`,
+    };
   }
   if (!sourceId || typeof sourceId !== 'string') {
     return { error: 'EVIDENCE_ID_REQUIRED', detail: 'An evidence link needs the id of an existing record.' };
@@ -202,12 +253,28 @@ export function validateEvidenceLink({ sourceType, sourceId, reads = {}, player,
 export function recordBelongsToPlayer({ reads = {}, sourceType, sourceId, playerId }) {
   const find = (list) => (list ?? []).find((x) => x.id === sourceId && x.playerId === playerId) ?? null;
   switch (sourceType) {
-    case 'passport_evidence': { const e = reads.evidence?.byId(sourceId) ?? null; return e && e.playerId === playerId ? e : null; }
-    case 'assessment': { const a = reads.assessments?.byId(sourceId) ?? null; return a && a.playerId === playerId ? a : null; }
-    case 'box_cam_session': { const s = reads.boxCam?.sessions.byId(sourceId) ?? null; return s && s.playerId === playerId ? s : null; }
-    case 'combine_attempt': { const a = reads.boxCam?.attempts.byId(sourceId) ?? null; return a && a.playerId === playerId ? a : null; }
-    case 'trial_report': { const t = reads.trials?.byId(sourceId) ?? null; return t && t.playerId === playerId ? t : null; }
-    default: return null;
+    case 'passport_evidence': {
+      const e = reads.evidence?.byId(sourceId) ?? null;
+      return e && e.playerId === playerId ? e : null;
+    }
+    case 'assessment': {
+      const a = reads.assessments?.byId(sourceId) ?? null;
+      return a && a.playerId === playerId ? a : null;
+    }
+    case 'box_cam_session': {
+      const s = reads.boxCam?.sessions.byId(sourceId) ?? null;
+      return s && s.playerId === playerId ? s : null;
+    }
+    case 'combine_attempt': {
+      const a = reads.boxCam?.attempts.byId(sourceId) ?? null;
+      return a && a.playerId === playerId ? a : null;
+    }
+    case 'trial_report': {
+      const t = reads.trials?.byId(sourceId) ?? null;
+      return t && t.playerId === playerId ? t : null;
+    }
+    default:
+      return null;
   }
 }
 

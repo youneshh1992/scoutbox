@@ -40,19 +40,31 @@ const CLUB_PORT = 8815;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-directordashboardlive-'));
 
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 const ok = (cond, m) => (cond ? say(m) : fail(m));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const FORBIDDEN = [
-  /Recruitment Score/i, /Scout Score/i, /Player Success Score/i, /Efficiency Score/i,
-  /Talent Conversion/i, /Club Intelligence/i, /Leaderboard/i, /Top Scout/i, /\bBest Scout\b/i,
+  /Recruitment Score/i,
+  /Scout Score/i,
+  /Player Success Score/i,
+  /Efficiency Score/i,
+  /Talent Conversion/i,
+  /Club Intelligence/i,
+  /Leaderboard/i,
+  /Top Scout/i,
+  /\bBest Scout\b/i,
 ];
 /** Strip the sentences that exist precisely to deny those terms. */
-const denials = (t) => t
-  .replace(/What this page will never show[\s\S]{0,900}?(?=\n\n|$)/gi, '')
-  .replace(/never .{0,80}score[^.]*\./gi, '');
+const denials = (t) =>
+  t.replace(/What this page will never show[\s\S]{0,900}?(?=\n\n|$)/gi, '').replace(/never .{0,80}score[^.]*\./gi, '');
 
 for (const port of [API_PORT, CLUB_PORT]) {
   const free = await new Promise((resolve) => {
@@ -65,7 +77,10 @@ for (const port of [API_PORT, CLUB_PORT]) {
 }
 
 console.log(`building live bundle for :${API_PORT}…`);
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-dashboard`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-dashboard`, {
+  cwd: path.join(ROOT, 'scoutbox-club'),
+  stdio: 'pipe',
+});
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
@@ -75,11 +90,21 @@ const serverProc = spawn('node', ['server.mjs'], {
 const statics = [];
 function serveDir(dir, port) {
   const root = path.join(ROOT, dir);
-  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.svg': 'image/svg+xml' };
+  const types = {
+    '.html': 'text/html',
+    '.js': 'text/javascript',
+    '.css': 'text/css',
+    '.png': 'image/png',
+    '.json': 'application/json',
+    '.svg': 'image/svg+xml',
+  };
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     let file = path.join(root, decodeURIComponent(url.pathname));
-    if (!file.startsWith(root)) { res.writeHead(403).end(); return; }
+    if (!file.startsWith(root)) {
+      res.writeHead(403).end();
+      return;
+    }
     if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
       const idx = path.join(file, 'index.html');
       file = fs.existsSync(idx) ? idx : path.join(root, 'index.html');
@@ -93,16 +118,39 @@ function serveDir(dir, port) {
 serveDir('scoutbox-club/dist-live-dashboard', CLUB_PORT);
 
 const cleanup = () => {
-  try { serverProc.kill('SIGKILL'); } catch { /* gone */ }
+  try {
+    serverProc.kill('SIGKILL');
+  } catch {
+    /* gone */
+  }
   for (const s of statics) s.close();
   fs.rmSync(DATA, { recursive: true, force: true });
 };
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(130); });
-process.on('uncaughtException', (e) => { console.error(e); cleanup(); process.exit(1); });
-process.on('unhandledRejection', (e) => { console.error(e); cleanup(); process.exit(1); });
+for (const sig of ['SIGINT', 'SIGTERM'])
+  process.on(sig, () => {
+    cleanup();
+    process.exit(130);
+  });
+process.on('uncaughtException', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error(e);
+  cleanup();
+  process.exit(1);
+});
 
-for (let i = 0; i < 160; i++) { try { if ((await fetch(`${API}/healthz`)).ok) break; } catch { /* booting */ } await sleep(250); }
+for (let i = 0; i < 160; i++) {
+  try {
+    if ((await fetch(`${API}/healthz`)).ok) break;
+  } catch {
+    /* booting */
+  }
+  await sleep(250);
+}
 console.log(`backend up on :${API_PORT}`);
 
 const j = async (method, p, body, token) => {
@@ -130,9 +178,14 @@ async function enterClub(ctx, org, name, role) {
   await page.waitForSelector('nav.sidebar', { timeout: 30000 });
   return page;
 }
-const tokenOf = (page) => page.evaluate(() => {
-  try { return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null; } catch { return null; }
-});
+const tokenOf = (page) =>
+  page.evaluate(() => {
+    try {
+      return JSON.parse(localStorage.getItem('scoutbox-club-session') ?? 'null')?.token ?? null;
+    } catch {
+      return null;
+    }
+  });
 // The dashboard root is the executive layer; the filters, the governing
 // sentence with the window, and every panel are one tap deeper. Open all three
 // before asserting.
@@ -140,15 +193,27 @@ async function openDash(page) {
   await page.waitForTimeout(500);
   for (const id of ['dash-more-filters', 'dash-about-toggle', 'dash-detail-toggle']) {
     const b = page.locator(`[data-testid="${id}"][aria-expanded="false"]`);
-    if (await b.count()) { await b.first().click(); await page.waitForTimeout(300); }
+    if (await b.count()) {
+      await b.first().click();
+      await page.waitForTimeout(300);
+    }
   }
 }
 async function goto(page, hash, selector) {
-  await page.evaluate((h) => { window.location.hash = h; }, hash);
+  await page.evaluate((h) => {
+    window.location.hash = h;
+  }, hash);
   if (selector) {
     await page.waitForSelector(selector, { timeout: 25000 }).catch(async () => {
       const where = await page.evaluate(() => location.hash);
-      const text = (await page.locator('body').innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 400);
+      const text = (
+        await page
+          .locator('body')
+          .innerText()
+          .catch(() => '')
+      )
+        .replace(/\n/g, ' ')
+        .slice(0, 400);
       fail(`navigation to ${hash} never showed ${selector} (now at ${where}): ${text}`);
     });
     if (/director-dashboard/.test(selector)) await openDash(page);
@@ -177,12 +242,15 @@ ok(!!MARIA, 'a Head of Recruitment is signed in');
   for (const id of ids) await move(id, 'under_review');
   for (const id of ids.slice(0, 5)) await move(id, 'shortlisted');
   await move(ids[0], 'trial_requested');
-  await move(ids[1], 'archived', { reasonCodes: ['insufficient_recent_evidence'], note: 'PRIVATE PROSE THAT MUST NOT SURFACE' });
+  await move(ids[1], 'archived', {
+    reasonCodes: ['insufficient_recent_evidence'],
+    note: 'PRIVATE PROSE THAT MUST NOT SURFACE',
+  });
   await move(ids[2], 'withdrawn', { reasonCodes: ['squad_space'] });
   await move(ids[3], 'withdrawn', { reasonCodes: ['insufficient_full_match'] });
   await move(ids[4], 'archived', { reasonCodes: ['timing'] });
   await move(ids[5], 'archived', { reasonCodes: ['combine_missing'] });
-  await move(ids[4], 'under_review', { reasonCodes: ['continue_monitoring'] });   // reopened
+  await move(ids[4], 'under_review', { reasonCodes: ['continue_monitoring'] }); // reopened
 
   // A second, deliberately TINY slice of work: three rooms opened from
   // Matching, two of them ended. Two endings is below the small-n threshold,
@@ -205,16 +273,20 @@ ok(!!MARIA, 'a Head of Recruitment is signed in');
 await goto(maria, DASH, '[data-screen="director-dashboard"]');
 {
   const principle = await maria.locator('[data-principle]').innerText();
-  ok(/do not measure any player/i.test(principle) && /colleague/i.test(principle),
-    'D1 the governing sentence sits above every number: the process, not the player, not the colleague');
+  ok(
+    /do not measure any player/i.test(principle) && /colleague/i.test(principle),
+    'D1 the governing sentence sits above every number: the process, not the player, not the colleague',
+  );
 
   // Inside Recruitment, not a section of its own.
   const nav = await maria.locator('nav.sidebar').innerText();
   ok(/Recruitment/i.test(nav), 'D1 the Recruitment section is present in the sidebar');
   // The destination must not have earned a top-level section of its own.
   const topLevel = (nav.match(/\n/g) ?? []).length;
-  ok(!/^\s*Director Dashboard\s*$/m.test(nav.split('Recruitment')[0] ?? ''),
-    `D1 the Director Dashboard is not a new top-level sidebar item (${topLevel} sidebar lines)`);
+  ok(
+    !/^\s*Director Dashboard\s*$/m.test(nav.split('Recruitment')[0] ?? ''),
+    `D1 the Director Dashboard is not a new top-level sidebar item (${topLevel} sidebar lines)`,
+  );
   const families = await maria.locator('[data-family]').count();
   ok(families === 7, `D1 all seven metric families render (${families})`);
 }
@@ -227,12 +299,16 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   const filterCard = maria.locator('section:has([data-no-person-filter])');
   const selects = await filterCard.locator('select').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
   ok(selects.length >= 3, `D2 the filter row offers ${selects.length} controls, all properties of the work`);
-  ok(!selects.some((s) => /scout|colleague|user|owner|person|who/i.test(s ?? '')),
-    `D2 …and not one of them names a person (${selects.join(', ')})`);
+  ok(
+    !selects.some((s) => /scout|colleague|user|owner|person|who/i.test(s ?? '')),
+    `D2 …and not one of them names a person (${selects.join(', ')})`,
+  );
   // The server refuses one anyway.
   const refused = await j('GET', '/org/recruitment-analytics?groupBy=scout', undefined, MARIA);
-  ok(refused.status === 400 && refused.body.error === 'GROUPING_BY_PERSON_REFUSED',
-    'D2 and asking the API directly for a per-person breakdown is refused by name');
+  ok(
+    refused.status === 400 && refused.body.error === 'GROUPING_BY_PERSON_REFUSED',
+    'D2 and asking the API directly for a per-person breakdown is refused by name',
+  );
 }
 
 // ------------------------------------------------------------------ D3
@@ -257,7 +333,7 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   await goto(maria, `${DASH}?window=last_30_days`, '[data-screen="director-dashboard"]');
   await maria.waitForTimeout(900);
   const strip = maria.locator('[data-trend-strip]');
-  ok(await strip.count() === 1, 'D3 the period-over-period strip renders');
+  ok((await strip.count()) === 1, 'D3 the period-over-period strip renders');
   const trendText = await strip.innerText();
   ok(/Compared with the previous period/i.test(trendText), 'D3 …and says what it is comparing against');
   const cells = await maria.locator('[data-trend]').count();
@@ -267,19 +343,28 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   ok(!/Infinity|NaN/.test(words), `D3 no comparison renders Infinity or NaN (${words})`);
   ok(!/\+?100%/.test(words) || !/from none/.test(words), 'D3 a rise from nothing is never dressed as a percentage');
 
-  ok(await maria.locator('[data-calculated-at]').count() === 1,
-    'D3 the page says when it was calculated rather than implying a live feed');
+  ok(
+    (await maria.locator('[data-calculated-at]').count()) === 1,
+    'D3 the page says when it was calculated rather than implying a live feed',
+  );
 
   const buckets = maria.locator('[data-age-buckets]').first();
-  ok(await buckets.count() === 1, 'D3 open rooms are bucketed by age as well as summarised');
-  const bucketIds = await maria.locator('[data-bucket]').evaluateAll((els) => els.map((e) => e.getAttribute('data-bucket')));
-  ok(bucketIds.length >= 5 && bucketIds.includes('60_plus'),
-    `D3 the buckets tile the whole range including an open-ended last one (${bucketIds.join(', ')})`);
+  ok((await buckets.count()) === 1, 'D3 open rooms are bucketed by age as well as summarised');
+  const bucketIds = await maria
+    .locator('[data-bucket]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-bucket')));
+  ok(
+    bucketIds.length >= 5 && bucketIds.includes('60_plus'),
+    `D3 the buckets tile the whole range including an open-ended last one (${bucketIds.join(', ')})`,
+  );
 
   // The mandate's shortest window is offered and works.
   await maria.selectOption('select[aria-label="Period"]', 'last_7_days').catch(() => {});
   await maria.waitForTimeout(900);
-  ok(/window=last_7_days/.test(await maria.evaluate(() => location.hash)), 'D3 a seven-day period is offered and reaches the URL');
+  ok(
+    /window=last_7_days/.test(await maria.evaluate(() => location.hash)),
+    'D3 a seven-day period is offered and reaches the URL',
+  );
   await maria.selectOption('select[aria-label="Period"]', 'last_365_days').catch(() => {});
   await maria.waitForTimeout(900);
 }
@@ -293,7 +378,10 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   const notAFunnel = await funnel.locator('[data-not-a-funnel]').count();
   ok(notAFunnel === 1, 'D4 the statement is a marked element, not incidental prose');
   // A room reached under_review, left it, and is still counted for it.
-  ok(/Under review/i.test(text) || /under_review/i.test(text), 'D4 a stage a room has left is still counted as reached');
+  ok(
+    /Under review/i.test(text) || /under_review/i.test(text),
+    'D4 a stage a room has left is still counted as reached',
+  );
 }
 
 // ------------------------------------------------------------------ D5
@@ -303,7 +391,10 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   ok(/looks fast/i.test(text), 'D5 time-in-stage warns that a stuck stage measures fast');
   const anyMedian = await maria.locator('[data-median]').count();
   const anySuppressed = await maria.locator('[data-suppressed]').count();
-  ok(anyMedian + anySuppressed > 0, `D5 durations render either a typical figure (${anyMedian}) or the reason there is none (${anySuppressed})`);
+  ok(
+    anyMedian + anySuppressed > 0,
+    `D5 durations render either a typical figure (${anyMedian}) or the reason there is none (${anySuppressed})`,
+  );
   const excluded = await maria.locator('[data-excluded]').count();
   ok(excluded > 0, `D5 a duration names the records it could not include (${excluded} panels)`);
 }
@@ -332,8 +423,10 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
 {
   const panels = await maria.locator('[data-metric]').count();
   const limitations = await maria.locator('[data-metric] [data-limitation]').count();
-  ok(panels > 0 && limitations >= panels,
-    `D7 every one of the ${panels} panels prints its own limitation on screen (${limitations} found)`);
+  ok(
+    panels > 0 && limitations >= panels,
+    `D7 every one of the ${panels} panels prints its own limitation on screen (${limitations} found)`,
+  );
   // Not hidden behind a disclosure.
   const hidden = await maria.locator('details [data-limitation]').count();
   ok(hidden === 0, 'D7 no limitation is tucked inside a collapsed disclosure');
@@ -345,12 +438,16 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
 {
   const panel = maria.locator('[data-metric="source_stage_reach"]');
   const note = await panel.locator('[data-association]').innerText();
-  ok(/does not show that the property caused it/i.test(note),
-    'D8 the association-only figure carries the sentence that refuses the causal reading');
+  ok(
+    /does not show that the property caused it/i.test(note),
+    'D8 the association-only figure carries the sentence that refuses the causal reading',
+  );
   const sources = await panel.locator('table.data tbody tr td:first-child').allInnerTexts();
   const sorted = sources.slice().sort((a, b) => a.localeCompare(b));
-  ok(JSON.stringify(sources) === JSON.stringify(sorted),
-    `D8 …and its sources stay alphabetical, never ranked (${sources.join(', ')})`);
+  ok(
+    JSON.stringify(sources) === JSON.stringify(sorted),
+    `D8 …and its sources stay alphabetical, never ranked (${sources.join(', ')})`,
+  );
   ok(/not a ranking of surfaces/i.test(await panel.innerText()), 'D8 the screen says so as well');
 }
 
@@ -359,14 +456,19 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   const tom = await enterClub(ctxB, 'Eastport FC', 'Tom Field', 'First-Team Scout');
   const TOM = await tokenOf(tom);
   const refused = await j('GET', '/org/recruitment-analytics', undefined, TOM);
-  ok(refused.status === 403 && refused.body.error === 'LEAD_REQUIRED', 'D9 a scout is refused the organisation-wide view');
+  ok(
+    refused.status === 403 && refused.body.error === 'LEAD_REQUIRED',
+    'D9 a scout is refused the organisation-wide view',
+  );
   const nav = await tom.locator('nav.sidebar').innerText();
   ok(!/Director Dashboard/i.test(nav), 'D9 …and it is not offered to them in the sidebar');
   await goto(tom, DASH);
   await tom.waitForTimeout(1500);
   const body = await tom.locator('body').innerText();
-  ok(!/Rooms by status/i.test(body) && !/Stages reached/i.test(body),
-    'D9 typing the link by hand shows them no figures either');
+  ok(
+    !/Rooms by status/i.test(body) && !/Stages reached/i.test(body),
+    'D9 typing the link by hand shows them no figures either',
+  );
   await tom.close();
 }
 
@@ -375,12 +477,16 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   await goto(maria, `${DASH}`, '[data-screen="director-dashboard"]');
   // The fault-injection hook (simulateFailure) is dev-only.
   const partial = await j('GET', '/org/recruitment-analytics?simulateFailure=coverage', undefined, MARIA);
-  ok(partial.status === 200 && partial.body.partial === true,
-    'D10 a family that cannot be computed still returns the page, with the failure named');
+  ok(
+    partial.status === 200 && partial.body.partial === true,
+    'D10 a family that cannot be computed still returns the page, with the failure named',
+  );
   const rendered = Object.values(partial.body.data).filter((f) => !f.error).length;
   ok(rendered === 6, `D10 the other six families are complete (${rendered})`);
-  ok(partial.body.data.coverage.detail && !/\n\s+at /.test(partial.body.data.coverage.detail),
-    'D10 the failure carries a reason, not a stack trace');
+  ok(
+    partial.body.data.coverage.detail && !/\n\s+at /.test(partial.body.data.coverage.detail),
+    'D10 the failure carries a reason, not a stack trace',
+  );
 }
 
 // ------------------------------------------------------------------ D11
@@ -390,7 +496,7 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
     await seeAll.click();
     await maria.waitForTimeout(900);
     const drill = maria.locator('[data-drilldown]');
-    ok(await drill.count() === 1, 'D11 a drill-down opens for the rooms behind the figure');
+    ok((await drill.count()) === 1, 'D11 a drill-down opens for the rooms behind the figure');
     ok((await drill.locator('[data-limitation]').count()) === 1, 'D11 …and carries the limitation with the rows');
   } else {
     say('D11 no room is stalled in this fresh fixture, so the drill-down has nothing to open (correct)');
@@ -398,11 +504,18 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   // Server-side: the row contract is bounded, stable and never carries a note.
   const rows = await j('GET', '/org/recruitment-analytics/rows?metric=stalled_rooms&limit=5000', undefined, MARIA);
   ok(rows.body.limit <= 50, `D11 a caller cannot ask for the whole table (limit clamped to ${rows.body.limit})`);
-  ok(!JSON.stringify(rows.body).includes('PRIVATE PROSE THAT MUST NOT SURFACE'),
-    'D11 no private prose reaches a drill-down row');
+  ok(
+    !JSON.stringify(rows.body).includes('PRIVATE PROSE THAT MUST NOT SURFACE'),
+    'D11 no private prose reaches a drill-down row',
+  );
   const again = await j('GET', '/org/recruitment-analytics/rows?metric=stalled_rooms&limit=25', undefined, MARIA);
-  ok(JSON.stringify(again.body.rows) === JSON.stringify((await j('GET', '/org/recruitment-analytics/rows?metric=stalled_rooms&limit=25', undefined, MARIA)).body.rows),
-    'D11 two reads of unchanged data return the same rows in the same order');
+  ok(
+    JSON.stringify(again.body.rows) ===
+      JSON.stringify(
+        (await j('GET', '/org/recruitment-analytics/rows?metric=stalled_rooms&limit=25', undefined, MARIA)).body.rows,
+      ),
+    'D11 two reads of unchanged data return the same rows in the same order',
+  );
 }
 
 // ------------------------------------------------------------------ D12
@@ -422,7 +535,9 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   ok(!/\bm20\.[a-zA-Z._]+\b/.test(fr), 'D12 no raw m20 key leaks in French');
   const frHit = FORBIDDEN.find((re) => re.test(denials(fr)));
   ok(!frHit, `D12 no forbidden vocabulary in French${frHit ? ` (${frHit})` : ''}`);
-  await maria.selectOption('select[aria-label="Langue"]', 'en').catch(() => maria.selectOption('select[aria-label="Language"]', 'en').catch(() => {}));
+  await maria
+    .selectOption('select[aria-label="Langue"]', 'en')
+    .catch(() => maria.selectOption('select[aria-label="Language"]', 'en').catch(() => {}));
   await maria.waitForTimeout(900);
 
   // Keyboard
@@ -433,15 +548,20 @@ await goto(maria, DASH, '[data-screen="director-dashboard"]');
   // 390px
   await maria.setViewportSize({ width: 390, height: 844 });
   await maria.waitForTimeout(700);
-  const overflow = await maria.evaluate(() => Math.max(
-    document.documentElement.scrollWidth - document.documentElement.clientWidth,
-    document.body.scrollWidth - document.body.clientWidth,
-  ));
+  const overflow = await maria.evaluate(() =>
+    Math.max(
+      document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      document.body.scrollWidth - document.body.clientWidth,
+    ),
+  );
   ok(overflow <= 4, `D12 the dashboard fits a 390px phone (overflow=${overflow}px)`);
   await maria.setViewportSize({ width: 1440, height: 1000 });
 }
 
-ok(errors.length === 0, `no page errors across the journey${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`);
+ok(
+  errors.length === 0,
+  `no page errors across the journey${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`,
+);
 
 await browser.close();
 cleanup();

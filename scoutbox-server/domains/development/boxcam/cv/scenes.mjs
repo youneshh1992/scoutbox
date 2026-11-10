@@ -6,7 +6,7 @@
 export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
-    a = (a + 0x6D2B79F5) >>> 0;
+    a = (a + 0x6d2b79f5) >>> 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -20,8 +20,16 @@ const clamp8 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
  * `peopleN` : [{x0,y0,x1,y1, luma}] all in 0..1
  */
 export function renderNormalised({
-  w, h, bgLuma = 130, noise = 6, ballsN = [], peopleN = [],
-  ballLuma = 242, gain = 1, rng, textureBands = 0,
+  w,
+  h,
+  bgLuma = 130,
+  noise = 6,
+  ballsN = [],
+  peopleN = [],
+  ballLuma = 242,
+  gain = 1,
+  rng,
+  textureBands = 0,
 }) {
   const px = new Uint8Array(w * h);
   for (let i = 0; i < px.length; i += 1) {
@@ -30,7 +38,7 @@ export function renderNormalised({
   // High-contrast structure away from the player, so the detector isn't just finding the brightest thing.
   if (textureBands > 0) {
     for (let b = 0; b < textureBands; b += 1) {
-      const x0 = Math.floor((b + 0.5) * (w * 0.18) / textureBands);
+      const x0 = Math.floor(((b + 0.5) * (w * 0.18)) / textureBands);
       for (let y = 0; y < Math.floor(h * 0.35); y += 1) {
         for (let x = x0; x < Math.min(w, x0 + 3); x += 1) {
           px[y * w + x] = clamp8(210 * gain);
@@ -39,8 +47,10 @@ export function renderNormalised({
     }
   }
   for (const p of peopleN) {
-    const x0 = Math.round(p.x0 * w), x1 = Math.round(p.x1 * w);
-    const y0 = Math.round(p.y0 * h), y1 = Math.round(p.y1 * h);
+    const x0 = Math.round(p.x0 * w),
+      x1 = Math.round(p.x1 * w);
+    const y0 = Math.round(p.y0 * h),
+      y1 = Math.round(p.y1 * h);
     for (let y = Math.max(0, y0); y <= Math.min(h - 1, y1); y += 1) {
       for (let x = Math.max(0, x0); x <= Math.min(w - 1, x1); x += 1) {
         px[y * w + x] = clamp8((p.luma ?? 55) * gain + (rng() - 0.5) * 4);
@@ -50,7 +60,8 @@ export function renderNormalised({
   const short = Math.min(w, h);
   for (const b of ballsN) {
     const r = Math.max(2, b.rN * short);
-    const cx = b.x * w, cy = b.y * h;
+    const cx = b.x * w,
+      cy = b.y * h;
     const luma = b.luma ?? ballLuma;
     // Fading the rim lowers contrast and roundness as motion blur does.
     const blur = b.blur ?? 0;
@@ -71,23 +82,43 @@ export function renderNormalised({
 
 export function envelope(scene, seq, atMs) {
   return {
-    encoding: 'gray8', seq, atMs, w: scene.w, h: scene.h,
+    encoding: 'gray8',
+    seq,
+    atMs,
+    w: scene.w,
+    h: scene.h,
     data: Buffer.from(scene.px).toString('base64'),
   };
 }
 
 // ------------------------------------------------------- default geometry
-export const DEFAULT_PERSON = Object.freeze({ x0: 0.40, y0: 0.32, x1: 0.54, y1: 0.93, luma: 55 });
-export const DEFAULT_BALL_RN = 0.033;      // ~6 px at 180 high, ~8 px at 240
+export const DEFAULT_PERSON = Object.freeze({ x0: 0.4, y0: 0.32, x1: 0.54, y1: 0.93, luma: 55 });
+export const DEFAULT_BALL_RN = 0.033; // ~6 px at 180 high, ~8 px at 240
 
 /** `path(tMs)` returns normalised `{x, y}`, or `null` when the ball is occluded. */
 export function sequence({
-  w = 240, h = 180, fps = 12, durationMs = 4800,
-  path, rN = DEFAULT_BALL_RN, ballLuma = 242, bgLuma = 130, noise = 6,
-  person = DEFAULT_PERSON, personAt = null,
-  cameraShakeN = 0, cameraDrift = null, cameraScale = null,
-  gain = 1, textureBands = 0, seed = 7, blur = 0,
-  dropFrame = null, jitterMs = 0, extraBalls = null, extraPeople = null,
+  w = 240,
+  h = 180,
+  fps = 12,
+  durationMs = 4800,
+  path,
+  rN = DEFAULT_BALL_RN,
+  ballLuma = 242,
+  bgLuma = 130,
+  noise = 6,
+  person = DEFAULT_PERSON,
+  personAt = null,
+  cameraShakeN = 0,
+  cameraDrift = null,
+  cameraScale = null,
+  gain = 1,
+  textureBands = 0,
+  seed = 7,
+  blur = 0,
+  dropFrame = null,
+  jitterMs = 0,
+  extraBalls = null,
+  extraPeople = null,
 } = {}) {
   const rng = mulberry32(seed);
   const jitterRng = mulberry32(seed ^ 0x9e3779b9);
@@ -96,7 +127,8 @@ export function sequence({
   let seq = 0;
   let i = 0;
   for (let t = 0; t <= durationMs; t += dtMs) {
-    const idx = i; i += 1;
+    const idx = i;
+    i += 1;
     if (dropFrame && dropFrame(idx, t)) continue;
     const at = Math.round(t + (jitterMs ? (jitterRng() - 0.5) * 2 * jitterMs : 0));
 
@@ -130,10 +162,9 @@ export function sequence({
     }
     if (extraBalls) ballsN.push(...extraBalls(t, { shake, drift, scale }));
 
-    frames.push(envelope(
-      renderNormalised({ w, h, bgLuma, noise, ballsN, peopleN, ballLuma, gain, rng, textureBands }),
-      seq, at,
-    ));
+    frames.push(
+      envelope(renderNormalised({ w, h, bgLuma, noise, ballsN, peopleN, ballLuma, gain, rng, textureBands }), seq, at),
+    );
     seq += 1;
   }
   return frames;
@@ -143,7 +174,7 @@ export function sequence({
 // Ground truth is the number of contacts a path contains by construction, never read back from the engine.
 
 /** Juggling: parabolic flights between contacts at a fixed period. */
-export function jugglePath({ contacts = 8, periodMs = 600, apexFrac = 0.30, x = 0.47, contactY = 0.83 }) {
+export function jugglePath({ contacts = 8, periodMs = 600, apexFrac = 0.3, x = 0.47, contactY = 0.83 }) {
   const apexY = contactY - apexFrac;
   return (t) => {
     if (t > contacts * periodMs) return { x, y: contactY };
@@ -166,9 +197,7 @@ export function jugglePath({ contacts = 8, periodMs = 600, apexFrac = 0.30, x = 
  * 1.2 diameters and the anchor 0.1 off the silhouette, a 1.0 tap puts the far position at 1.1. At 1.26 every second
  * strike is out of range; at 0.4 the tap doesn't clear the separation requirement.
  */
-export function touchPath({
-  touches = 10, periodMs = 500, impulseN = 0.833, tauMs = 60, x0 = 0.545, y = 0.83,
-}) {
+export function touchPath({ touches = 10, periodMs = 500, impulseN = 0.833, tauMs = 60, x0 = 0.545, y = 0.83 }) {
   const tau = tauMs / 1000;
   return (t) => {
     // Closed form, so the path is exact at any sampling rate: no integration error varying with frame rate.
@@ -203,6 +232,6 @@ export function independentBouncePath({ x = 0.18, periodMs = 500, contactY = 0.8
 }
 
 /** A ball oscillating just outside contact range without ever arriving. */
-export function nearMissPath({ x0 = 0.70, y = 0.83, amplitude = 0.02, periodMs = 600 }) {
+export function nearMissPath({ x0 = 0.7, y = 0.83, amplitude = 0.02, periodMs = 600 }) {
   return (t) => ({ x: x0 + Math.sin((t / periodMs) * Math.PI * 2) * amplitude, y });
 }

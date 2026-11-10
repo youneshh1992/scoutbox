@@ -15,15 +15,36 @@ export function createOrgViews({ clubSetup, safetyAudit }) {
   function orgSafe(o) {
     const fed = clubSetup.federation.forOrg(o.id);
     return {
-      id: o.id, name: o.name, type: o.type, level: o.level, plan: o.plan, country: o.country,
+      id: o.id,
+      name: o.name,
+      type: o.type,
+      level: o.level,
+      plan: o.plan,
+      country: o.country,
       location: o.location ? { lat: o.location.lat, lng: o.location.lng, city: o.location.city } : null,
-      federationRef: o.federationRef ? { federation: o.federationRef.federation, registrationId: o.federationRef.registrationId } : null,
-      trustedPartner: o.trustedPartner, verified: o.verified, verifiedDomain: o.verifiedDomain,
-      safeguardingContractSigned: o.safeguardingContractSigned, suspended: o.suspended,
-      emailDomain: o.emailDomain, emailDomainVerified: o.emailDomainVerified, mfaRequiredForLeads: o.mfaRequiredForLeads,
-      verificationRevokedAt: o.verificationRevokedAt, createdAt: o.createdAt,
+      federationRef: o.federationRef
+        ? { federation: o.federationRef.federation, registrationId: o.federationRef.registrationId }
+        : null,
+      trustedPartner: o.trustedPartner,
+      verified: o.verified,
+      verifiedDomain: o.verifiedDomain,
+      safeguardingContractSigned: o.safeguardingContractSigned,
+      suspended: o.suspended,
+      emailDomain: o.emailDomain,
+      emailDomainVerified: o.emailDomainVerified,
+      mfaRequiredForLeads: o.mfaRequiredForLeads,
+      verificationRevokedAt: o.verificationRevokedAt,
+      createdAt: o.createdAt,
       lookingFor: [...clubSetup.lookingFor.forOrg(o.id)],
-      federationCheck: fed ? { federation: fed.federation, registrationId: fed.registrationId, contactEmail: fed.contactEmail, status: fed.status, submittedAt: fed.submittedAt } : null,
+      federationCheck: fed
+        ? {
+            federation: fed.federation,
+            registrationId: fed.registrationId,
+            contactEmail: fed.contactEmail,
+            status: fed.status,
+            submittedAt: fed.submittedAt,
+          }
+        : null,
     };
   }
   function safeguardingCertified(org) {
@@ -37,14 +58,22 @@ export function createOrgViews({ clubSetup, safetyAudit }) {
 export function createOrgSession({ app, findOrg, users, sessionFor }) {
   function orgAuth(req, res, next) {
     const session = sessionFor(req);
-    if (session?.kind !== 'org') return res.status(401).json({ error: 'ORG_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
+    if (session?.kind !== 'org')
+      return res
+        .status(401)
+        .json({ error: 'ORG_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
     const org = findOrg(session.refId);
     if (!org) return res.status(401).json({ error: 'ORG_AUTH_REQUIRED' });
     const user = users.byId(session.userId);
     if (!user || user.orgId !== org.id) return res.status(401).json({ error: 'USER_UNKNOWN' });
-    if (user.removedAt) return res.status(401).json({ error: 'USER_REMOVED', message: 'Your access to this organisation has been removed.' });
+    if (user.removedAt)
+      return res
+        .status(401)
+        .json({ error: 'USER_REMOVED', message: 'Your access to this organisation has been removed.' });
     if (org.suspended) {
-      return res.status(403).json({ error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review.' });
+      return res
+        .status(403)
+        .json({ error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review.' });
     }
     req.org = org;
     req.orgUser = user;
@@ -56,40 +85,94 @@ export function createOrgSession({ app, findOrg, users, sessionFor }) {
 }
 
 export function registerOrgAccount({
-  app, orgs, users, safetyAudit, findOrg, unit, nextId, broadcast, createSession, loginLockedOut, noteLoginFailure,
-  devLogins, devLoginRefused, mfaGuards, orgSafe, safeguardingCertified,
+  app,
+  orgs,
+  users,
+  safetyAudit,
+  findOrg,
+  unit,
+  nextId,
+  broadcast,
+  createSession,
+  loginLockedOut,
+  noteLoginFailure,
+  devLogins,
+  devLoginRefused,
+  mfaGuards,
+  orgSafe,
+  safeguardingCertified,
 }) {
-  if (typeof users?.setRole !== 'function' || typeof mfaGuards?.mfaLocked !== 'function') throw new TypeError('registerOrgAccount needs the staff repository and the MFA guards');
+  if (typeof users?.setRole !== 'function' || typeof mfaGuards?.mfaLocked !== 'function')
+    throw new TypeError('registerOrgAccount needs the staff repository and the MFA guards');
 
   app.get('/orgs', (req, res) => {
     // The Grassroots app lists only grassroots clubs, the main app never lists them, and the Agent app lists agencies
     // only. Unpaged: the sign-in pickers have no search yet (docs/known-issues.md).
-    const filter = { grassroots: { level: 'grassroots' }, main: { notLevel: 'grassroots' }, agent: { type: 'agency' } }[req.query.platform] ?? {};
+    const filter =
+      { grassroots: { level: 'grassroots' }, main: { notLevel: 'grassroots' }, agent: { type: 'agency' } }[
+        req.query.platform
+      ] ?? {};
     const list = orgs.list(filter);
-    res.json(list.map((o) => ({
-      id: o.id, name: o.name, type: o.type, level: o.level ?? null, plan: o.plan, trustedPartner: o.trustedPartner,
-      verified: o.verified, safeguardingCertified: safeguardingCertified(o),
-      ...(o.level === 'grassroots' ? { city: o.location?.city ?? null, federation: o.federationRef?.federation ?? null } : {}),
-    })));
+    res.json(
+      list.map((o) => ({
+        id: o.id,
+        name: o.name,
+        type: o.type,
+        level: o.level ?? null,
+        plan: o.plan,
+        trustedPartner: o.trustedPartner,
+        verified: o.verified,
+        safeguardingCertified: safeguardingCertified(o),
+        ...(o.level === 'grassroots'
+          ? { city: o.location?.city ?? null, federation: o.federationRef?.federation ?? null }
+          : {}),
+      })),
+    );
   });
 
   // T&S verifies the club (federation record, email domain, safeguarding contract) before it can see any minor.
   app.post('/auth/org/register-grassroots', (req, res) => {
-    const { name, country = 'GB', city, lat, lng, federation, registrationId, scoutName, role, password } = req.body || {};
+    const {
+      name,
+      country = 'GB',
+      city,
+      lat,
+      lng,
+      federation,
+      registrationId,
+      scoutName,
+      role,
+      password,
+    } = req.body || {};
     if (password !== undefined && String(password).length < 8) {
-      return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
+      return res
+        .status(400)
+        .json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
     }
     if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' });
-    for (const [f, v, max] of [['country', country, 2], ['city', city, 80], ['federation', federation, 120], ['registrationId', registrationId, 60], ['role', role, 60]]) if (!optText(v, max)) return badField(res, f);
+    for (const [f, v, max] of [
+      ['country', country, 2],
+      ['city', city, 80],
+      ['federation', federation, 120],
+      ['registrationId', registrationId, 60],
+      ['role', role, 60],
+    ])
+      if (!optText(v, max)) return badField(res, f);
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
       if (typeof lat === 'number' || typeof lng === 'number') return badField(res, 'location');
     }
     if (typeof country !== 'string' || !country.trim() || country !== country.trim()) return badField(res, 'country');
     if (!federation?.trim() || !registrationId?.trim()) {
-      return res.status(400).json({ error: 'FEDERATION_REQUIRED', message: 'Grassroots clubs must hold a federation registration — name the federation and your registration id.' });
+      return res.status(400).json({
+        error: 'FEDERATION_REQUIRED',
+        message: 'Grassroots clubs must hold a federation registration — name the federation and your registration id.',
+      });
     }
     if (typeof lat !== 'number' || typeof lng !== 'number') {
-      return res.status(400).json({ error: 'LOCATION_REQUIRED', message: 'The 50km scouting radius is measured from your ground — a location is required.' });
+      return res.status(400).json({
+        error: 'LOCATION_REQUIRED',
+        message: 'The 50km scouting radius is measured from your ground — a location is required.',
+      });
     }
     if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' });
     const { org, user, token } = unit(() => {
@@ -108,7 +191,9 @@ export function registerOrgAccount({
     });
     broadcast('orgs');
     res.status(201).json({
-      userId: user.id, role: user.role, org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
+      userId: user.id,
+      role: user.role,
+      org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
       token,
       note: 'Registered. Adults within 50km are visible now; under-18 visibility needs verification + the safeguarding contract, reviewed by Trust & Safety.',
     });
@@ -118,41 +203,66 @@ export function registerOrgAccount({
     const { orgId, scoutName, role, platform } = req.body || {};
     if (loginLockedOut(res, `org:${orgId}`)) return;
     const org = findOrg(orgId);
-    if (!org) { noteLoginFailure(`org:${orgId}`); return res.status(404).json({ error: 'ORG_NOT_FOUND' }); }
+    if (!org) {
+      noteLoginFailure(`org:${orgId}`);
+      return res.status(404).json({ error: 'ORG_NOT_FOUND' });
+    }
     // A grassroots club exists only on ScoutBox Grassroots and every other org only on ScoutBox. An agency can still
     // log into the club app, where its representation lane lives.
     const wantsGrassroots = platform === 'grassroots';
     if (org.level === 'grassroots' && !wantsGrassroots) {
-      return res.status(403).json({ error: 'GRASSROOTS_PLATFORM_ONLY', message: 'This club is registered on ScoutBox Grassroots — log in there.' });
+      return res.status(403).json({
+        error: 'GRASSROOTS_PLATFORM_ONLY',
+        message: 'This club is registered on ScoutBox Grassroots — log in there.',
+      });
     }
     if (org.level !== 'grassroots' && wantsGrassroots) {
-      return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Grassroots is for federation-registered grassroots clubs only.' });
+      return res.status(403).json({
+        error: 'PLATFORM_MISMATCH',
+        message: 'ScoutBox Grassroots is for federation-registered grassroots clubs only.',
+      });
     }
     if (platform === 'agent' && org.type !== 'agency') {
-      return res.status(403).json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Agent is for agency organisations only.' });
+      return res
+        .status(403)
+        .json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Agent is for agency organisations only.' });
     }
     if (!optText(role, 60)) return badField(res, 'role');
     if (typeof scoutName !== 'string' || !scoutName.trim()) {
-      return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
+      return res
+        .status(400)
+        .json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
     }
-    if (scoutName.trim().length > STAFF_LIMITS.name) return res.status(400).json({ error: 'FIELD_INVALID', field: 'scoutName', message: `scoutName is at most ${STAFF_LIMITS.name} characters.` });
+    if (scoutName.trim().length > STAFF_LIMITS.name)
+      return res.status(400).json({
+        error: 'FIELD_INVALID',
+        field: 'scoutName',
+        message: `scoutName is at most ${STAFF_LIMITS.name} characters.`,
+      });
     // Unprovisioned (seeded demo) orgs skip the password as a development shortcut only.
     const passwordHash = orgs.passwordHashOf(org.id);
     if (passwordHash) {
       const check = verifyPassword(req.body?.password ?? '', passwordHash);
-      if (!check) { noteLoginFailure(`org:${orgId}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' }); }
+      if (!check) {
+        noteLoginFailure(`org:${orgId}`);
+        return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' });
+      }
       if (check === 'upgrade') orgs.setPasswordHash(org.id, hashPassword(req.body.password));
     } else if (!devLogins) {
       return devLoginRefused(res);
     }
     let user = users.byOrgAndName(orgId, scoutName);
     if (user?.removedAt) {
-      return res.status(403).json({ error: 'USER_REMOVED', message: 'This staff member\'s access was removed by the organisation.' });
+      return res
+        .status(403)
+        .json({ error: 'USER_REMOVED', message: "This staff member's access was removed by the organisation." });
     }
     // With MFA enabled the password alone never gets a session; recovery codes are one-time.
     if (user?.mfa?.enabledAt) {
       if (mfaGuards.mfaLocked(user.id)) {
-        return res.status(429).json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
+        return res
+          .status(429)
+          .json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
       }
       const { mfaCode, recoveryCode } = req.body ?? {};
       let second = false;
@@ -165,7 +275,10 @@ export function registerOrgAccount({
         if (mfaCode || recoveryCode) mfaGuards.mfaFail(user.id);
         return res.status(401).json({
           error: mfaCode || recoveryCode ? 'MFA_CODE_WRONG' : 'MFA_REQUIRED',
-          message: mfaCode || recoveryCode ? 'That code is not valid.' : 'This account uses two-factor authentication — send mfaCode (authenticator) or recoveryCode.',
+          message:
+            mfaCode || recoveryCode
+              ? 'That code is not valid.'
+              : 'This account uses two-factor authentication — send mfaCode (authenticator) or recoveryCode.',
         });
       }
       mfaGuards.clear(user.id);
@@ -182,18 +295,25 @@ export function registerOrgAccount({
         if (users.firstActive(orgId)) {
           return res.status(403).json({
             error: 'STAFF_NOT_PROVISIONED',
-            message: 'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
+            message:
+              'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
           });
         }
         // A lead-tier role, so the organisation can invite its staff.
         const requested = (role || '').trim();
         user = unit(() => {
           const created = users.create({
-            orgId, name: scoutName.trim(),
+            orgId,
+            name: scoutName.trim(),
             role: isLeadRole(requested) ? requested : 'Manager',
             provenance: 'org_password_bootstrap',
           });
-          safetyAudit.opsEvents.record({ id: nextId('ops'), at: Date.now(), kind: 'staff_bootstrapped', detail: { orgId: org.id, userId: created.id, by: created.name } });
+          safetyAudit.opsEvents.record({
+            id: nextId('ops'),
+            at: Date.now(),
+            kind: 'staff_bootstrapped',
+            detail: { orgId: org.id, userId: created.id, by: created.name },
+          });
           return created;
         });
       } else {
@@ -207,12 +327,14 @@ export function registerOrgAccount({
       }
     }
     res.json({
-      userId: user.id, role: user.role,
+      userId: user.id,
+      role: user.role,
       org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
       token: createSession('org', org.id, { userId: user.id }),
       ...(roleNote ? { roleNote } : {}),
       // A nudge, not a lockout.
-      mfaSetupRequired: !!(org.mfaRequiredForLeads && user && isLeadRole(user.role) && !user.mfa?.enabledAt) || undefined,
+      mfaSetupRequired:
+        !!(org.mfaRequiredForLeads && user && isLeadRole(user.role) && !user.mfa?.enabledAt) || undefined,
     });
   });
 }
@@ -224,19 +346,34 @@ export function registerOrgAccount({
 export function registerClubDirectory({ app, orgs, trialsForOrg, safeguardingCertified, pathwayRecord }) {
   app.get('/orgs/directory', (req, res) => {
     let page;
-    try { page = orgs.page({ type: 'club' }, readPage(req.query, ['number'])); } catch (e) { return sendPageError(res, e); }
+    try {
+      page = orgs.page({ type: 'club' }, readPage(req.query, ['number']));
+    } catch (e) {
+      return sendPageError(res, e);
+    }
     res.json({
       nextCursor: page.nextCursor,
       items: page.items.map((o) => {
         const trials = trialsForOrg(o.id);
         const reported = trials.filter((t) => t.status === 'reported' && t.report);
         const avgReportDays = reported.length
-          ? Math.round(reported.reduce((sum, t) => sum + (t.report.filedAt - t.acceptedAt), 0) / reported.length / (24 * 3600 * 1000) * 10) / 10
+          ? Math.round(
+              (reported.reduce((sum, t) => sum + (t.report.filedAt - t.acceptedAt), 0) /
+                reported.length /
+                (24 * 3600 * 1000)) *
+                10,
+            ) / 10
           : null;
         return {
-          id: o.id, name: o.name, plan: o.plan, verified: o.verified,
-          trustedPartner: o.trustedPartner, safeguardingCertified: safeguardingCertified(o),
-          trialsRun: trials.length, reportsFiled: reported.length, avgReportDays,
+          id: o.id,
+          name: o.name,
+          plan: o.plan,
+          verified: o.verified,
+          trustedPartner: o.trustedPartner,
+          safeguardingCertified: safeguardingCertified(o),
+          trialsRun: trials.length,
+          reportsFiled: reported.length,
+          avgReportDays,
           ...(o.level === 'grassroots' ? pathwayRecord(o) : {}),
         };
       }),

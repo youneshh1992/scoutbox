@@ -34,24 +34,41 @@ export type SecondLookStatus = (typeof SECOND_LOOK_STATUSES)[number];
 export const SECOND_LOOK_FILTERS = ['open', 'reviewed', 'dismissed', 'all'] as const;
 
 export const SECOND_LOOK_DISMISS_REASONS = [
-  'already_reviewed_elsewhere', 'change_not_material', 'timing_not_right',
-  'squad_need_changed', 'no_action_required', 'other',
+  'already_reviewed_elsewhere',
+  'change_not_material',
+  'timing_not_right',
+  'squad_need_changed',
+  'no_action_required',
+  'other',
 ] as const;
 
 /** Reasons a CLUB gave that no change in a player's record can ever resolve. */
 export const CLUB_SIDE_REASONS = [
-  'squad_space', 'budget', 'timing', 'registration', 'travel_logistics',
-  'eligibility', 'player_unavailable',
+  'squad_space',
+  'budget',
+  'timing',
+  'registration',
+  'travel_logistics',
+  'eligibility',
+  'player_unavailable',
 ] as const;
 
 export const NOBODY_MISSED_DISMISS_REASONS = [
-  'already_known', 'not_current_need', 'evidence_insufficient',
-  'role_mismatch_after_review', 'timing', 'other',
+  'already_known',
+  'not_current_need',
+  'evidence_insufficient',
+  'role_mismatch_after_review',
+  'timing',
+  'other',
 ] as const;
 
 /** Orderings. None of them is a quality rank. */
 export const NOBODY_MISSED_SORTS = [
-  'newest_evidence', 'last_reviewed', 'name', 'distance', 'evidence_confidence',
+  'newest_evidence',
+  'last_reviewed',
+  'name',
+  'distance',
+  'evidence_confidence',
 ] as const;
 
 export const BRIEF_STATUSES = ['draft', 'active', 'paused', 'closed', 'archived'] as const;
@@ -65,7 +82,21 @@ export const BRIEF_TRANSITIONS: Record<string, string[]> = {
   archived: [],
 };
 
-export const BRIEF_POSITIONS = ['GK', 'CB', 'RB', 'LB', 'RWB', 'LWB', 'CDM', 'CM', 'CAM', 'RW', 'LW', 'ST', 'CF'] as const;
+export const BRIEF_POSITIONS = [
+  'GK',
+  'CB',
+  'RB',
+  'LB',
+  'RWB',
+  'LWB',
+  'CDM',
+  'CM',
+  'CAM',
+  'RW',
+  'LW',
+  'ST',
+  'CF',
+] as const;
 export const BRIEF_LEVELS = ['amateur', 'semi_pro', 'pro'] as const;
 export const BRIEF_FEET = ['Left', 'Right', 'Both'] as const;
 export const BRIEF_EVIDENCE_REQUIREMENTS: { key: string; label: string }[] = [
@@ -75,8 +106,11 @@ export const BRIEF_EVIDENCE_REQUIREMENTS: { key: string; label: string }[] = [
   { key: 'combine_verified', label: 'Combine Verified result available' },
 ];
 export const BRIEF_TRUST_BANDS = [
-  'limited_evidence', 'developing_evidence', 'established_evidence',
-  'strong_evidence', 'very_strong_evidence',
+  'limited_evidence',
+  'developing_evidence',
+  'established_evidence',
+  'strong_evidence',
+  'very_strong_evidence',
 ] as const;
 
 // ------------------------------------------------------------------- shapes
@@ -294,7 +328,11 @@ export interface BriefInput {
   status?: string;
 }
 
-export interface BriefFieldError { field: string; error: string; unknown?: string[] }
+export interface BriefFieldError {
+  field: string;
+  error: string;
+  unknown?: string[];
+}
 
 /**
  * An invalid brief is REFUSED, never silently repaired — so the caller gets the
@@ -308,7 +346,11 @@ export type BriefSaveResult =
 // ----------------------------------------------------------- nobody missed
 
 /** One criterion, answered. "Why is this player here?" is always answerable. */
-export interface NobodyMissedReason { key: string; met: boolean; text: string }
+export interface NobodyMissedReason {
+  key: string;
+  met: boolean;
+  text: string;
+}
 
 export interface NobodyMissedItem {
   playerId: string;
@@ -406,9 +448,18 @@ export interface M18Api {
   createBrief(s: Session, input: BriefInput): Promise<BriefSaveResult>;
   patchBrief(s: Session, id: string, input: BriefInput): Promise<BriefSaveResult>;
 
-  nobodyMissed(s: Session, params: { briefId: string; sort?: string; limit?: number; cursor?: string }): Promise<NobodyMissedResult>;
-  reviewCandidate(s: Session, input: { briefId: string; playerId: string }): Promise<{ review: NobodyMissedReview; note?: string }>;
-  dismissCandidate(s: Session, input: { briefId: string; playerId: string; reason: string }): Promise<{ review: NobodyMissedReview; note?: string }>;
+  nobodyMissed(
+    s: Session,
+    params: { briefId: string; sort?: string; limit?: number; cursor?: string },
+  ): Promise<NobodyMissedResult>;
+  reviewCandidate(
+    s: Session,
+    input: { briefId: string; playerId: string },
+  ): Promise<{ review: NobodyMissedReview; note?: string }>;
+  dismissCandidate(
+    s: Session,
+    input: { briefId: string; playerId: string; reason: string },
+  ): Promise<{ review: NobodyMissedReview; note?: string }>;
   addCandidateToRoom(s: Session, input: { briefId: string; playerId: string }): Promise<AddToRoomResult>;
 
   evaluationCoverage(s: Session): Promise<EvaluationCoverageResult>;
@@ -438,10 +489,20 @@ async function saveBrief(path: string, init: RequestInit): Promise<BriefSaveResu
   const res = await fetch(`${API_URL}${path}`, init);
   const body = await res.json().catch(() => ({}));
   if (res.status === 400 && body?.error === 'BRIEF_CRITERION_PROHIBITED') {
-    return { ok: false, error: 'BRIEF_CRITERION_PROHIBITED', prohibited: (body.prohibited ?? []) as string[], message: String(body.message ?? '') };
+    return {
+      ok: false,
+      error: 'BRIEF_CRITERION_PROHIBITED',
+      prohibited: (body.prohibited ?? []) as string[],
+      message: String(body.message ?? ''),
+    };
   }
   if (res.status === 400 && body?.error === 'BRIEF_INVALID') {
-    return { ok: false, error: 'BRIEF_INVALID', details: (body.details ?? []) as BriefFieldError[], message: String(body.message ?? '') };
+    return {
+      ok: false,
+      error: 'BRIEF_INVALID',
+      details: (body.details ?? []) as BriefFieldError[],
+      message: String(body.message ?? ''),
+    };
   }
   if (!res.ok) throw ApiError.fromResponse(res, body);
   return { ok: true, brief: body.brief as RecruitmentBrief };
@@ -452,18 +513,26 @@ export const httpM18: M18Api = {
   secondLookItem: (s, id) => req(`/org/second-look/${id}`, { headers: H(s) }),
   secondLookChanges: (s, id) => req(`/org/second-look/${id}/changes`, { headers: H(s) }),
   reviewSecondLook: (s, id) => req(`/org/second-look/${id}/review`, { method: 'POST', headers: H(s), body: '{}' }),
-  dismissSecondLook: (s, id, reason) => req(`/org/second-look/${id}/dismiss`, { method: 'POST', headers: H(s), body: JSON.stringify({ reason }) }),
-  reopenRoom: (s, id, reasonCodes) => req(`/org/second-look/${id}/reopen-room`, { method: 'POST', headers: H(s), body: JSON.stringify({ reasonCodes }) }),
+  dismissSecondLook: (s, id, reason) =>
+    req(`/org/second-look/${id}/dismiss`, { method: 'POST', headers: H(s), body: JSON.stringify({ reason }) }),
+  reopenRoom: (s, id, reasonCodes) =>
+    req(`/org/second-look/${id}/reopen-room`, { method: 'POST', headers: H(s), body: JSON.stringify({ reasonCodes }) }),
 
   briefs: (s) => req('/org/recruitment-briefs', { headers: H(s) }),
-  brief: async (s, id) => (await req<{ brief: RecruitmentBrief }>(`/org/recruitment-briefs/${id}`, { headers: H(s) })).brief,
-  createBrief: (s, input) => saveBrief('/org/recruitment-briefs', { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  patchBrief: (s, id, input) => saveBrief(`/org/recruitment-briefs/${id}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
+  brief: async (s, id) =>
+    (await req<{ brief: RecruitmentBrief }>(`/org/recruitment-briefs/${id}`, { headers: H(s) })).brief,
+  createBrief: (s, input) =>
+    saveBrief('/org/recruitment-briefs', { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  patchBrief: (s, id, input) =>
+    saveBrief(`/org/recruitment-briefs/${id}`, { method: 'PATCH', headers: H(s), body: JSON.stringify(input) }),
 
   nobodyMissed: (s, params) => req(`/org/nobody-missed${qs({ ...params })}`, { headers: H(s) }),
-  reviewCandidate: (s, input) => req('/org/nobody-missed/review', { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  dismissCandidate: (s, input) => req('/org/nobody-missed/dismiss', { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
-  addCandidateToRoom: (s, input) => req('/org/nobody-missed/add-to-room', { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  reviewCandidate: (s, input) =>
+    req('/org/nobody-missed/review', { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  dismissCandidate: (s, input) =>
+    req('/org/nobody-missed/dismiss', { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
+  addCandidateToRoom: (s, input) =>
+    req('/org/nobody-missed/add-to-room', { method: 'POST', headers: H(s), body: JSON.stringify(input) }),
 
   evaluationCoverage: (s) => req('/org/evaluation-coverage', { headers: H(s) }),
 };

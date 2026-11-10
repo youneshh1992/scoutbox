@@ -14,10 +14,17 @@ const EXE = process.env.CHROMIUM || '/opt/pw-browsers/chromium';
 const DISCLAIMER = /reflects verification and evidence confidence — not football ability or recruitment suitability/;
 // Language that would turn an evidence score into a character or talent
 // judgement. None of it may appear on any Trust surface, in any app.
-const FORBIDDEN = /untrustworthy|suspicious|fraudulent|risky|bad player|poor player|talent score|ability score|potential score/i;
+const FORBIDDEN =
+  /untrustworthy|suspicious|fraudulent|risky|bad player|poor player|talent score|ability score|potential score/i;
 let passed = 0;
-const say = (m) => { passed++; console.log(`✓ ${m}`); };
-const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
+const say = (m) => {
+  passed++;
+  console.log(`✓ ${m}`);
+};
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  process.exit(1);
+};
 
 const browser = await chromium.launch({ executablePath: EXE });
 const errors = [];
@@ -57,7 +64,8 @@ await player.waitForSelector('text=ScoutBox Trust Score', { timeout: 20000 });
   if (!/Policy version/.test(why)) fail('player demo: the policy version is not shown');
   say('player demo: the derivation names its policy version');
   // A gap is an evidence gap, never an accusation.
-  if (!/provided by the player and not independently confirmed/.test(why)) fail('player demo: player-submitted history is not honestly labelled');
+  if (!/provided by the player and not independently confirmed/.test(why))
+    fail('player demo: player-submitted history is not honestly labelled');
   say('player demo: an unconfirmed entry is labelled as unconfirmed, not as dishonest');
 }
 await player.close();
@@ -68,7 +76,9 @@ await club.click('.org-card:has-text("Eastport FC")');
 await club.fill('.enter-row input', 'Maria Keane');
 await club.click('button:has-text("Enter workspace")');
 await club.waitForSelector('nav.sidebar', { timeout: 20000 });
-await club.evaluate(() => { location.hash = '#/search'; });
+await club.evaluate(() => {
+  location.hash = '#/search';
+});
 await club.waitForSelector('.player-card:has-text("Kola Adeyemi")', { timeout: 20000 });
 await club.click('.player-card:has-text("Kola Adeyemi")');
 await club.waitForSelector('[aria-label="Trust Profile"]', { timeout: 15000 });
@@ -85,7 +95,7 @@ await club.waitForSelector('[aria-label="Trust Profile"]', { timeout: 15000 });
   if (FORBIDDEN.test(panel)) fail('pro demo: prohibited language in the club panel');
   say('pro demo: no ability or character language reaches the club');
   // The club never sees the player's own derivation or sources.
-  if (/What could strengthen it further/i.test(panel)) fail('pro demo: the player\'s evidence gaps leaked to the club');
+  if (/What could strengthen it further/i.test(panel)) fail("pro demo: the player's evidence gaps leaked to the club");
   if (/gd-|vclm-|identityVerified/.test(panel)) fail('pro demo: source identifiers leaked to the club');
   say('pro demo: neither the evidence gaps nor any source identifier reaches the club');
 }
@@ -111,7 +121,9 @@ await grass.click('.org-card:has-text("Hackney Marsh")');
 await grass.fill('.enter-row input', 'Dee Coach');
 await grass.click('button:has-text("Enter workspace")');
 await grass.waitForSelector('nav.sidebar', { timeout: 20000 });
-await grass.evaluate(() => { location.hash = '#/search'; });
+await grass.evaluate(() => {
+  location.hash = '#/search';
+});
 await grass.waitForSelector('.player-card', { timeout: 20000 });
 await grass.locator('.player-card').first().click();
 await grass.waitForSelector('[aria-label="Trust Profile"]', { timeout: 15000 });
@@ -141,7 +153,8 @@ await admin.waitForSelector('text=ScoutBox Trust Score', { timeout: 15000 });
   say('T&S demo: the inspector states that a score cannot be set or adjusted');
   if (!/correct the underlying evidence or the policy/i.test(body)) fail('T&S demo: the remedy is not stated');
   say('T&S demo: the stated remedy is to correct the evidence or the policy, then recalculate');
-  if (await admin.locator('input[type="number"]').count()) fail('T&S demo: a numeric input on the Trust inspector could be read as a score field');
+  if (await admin.locator('input[type="number"]').count())
+    fail('T&S demo: a numeric input on the Trust inspector could be read as a score field');
   say('T&S demo: the inspector offers no field that could set a score');
   if (FORBIDDEN.test(body)) fail('T&S demo: prohibited language in the inspector');
   say('T&S demo: no ability or character language in the inspector');

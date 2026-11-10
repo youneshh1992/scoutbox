@@ -11,7 +11,11 @@ assert.deepEqual(Object.keys(native).sort(), Object.keys(mapping).sort());
 assert.deepEqual(Object.keys(portal).sort(), Object.keys(mapping).sort());
 for (const [name, paths] of Object.entries(native)) {
   assert.ok(paths.length && paths.every((d) => typeof d === 'string' && d.startsWith('M')), name);
-  assert.deepEqual([...portal[name].matchAll(/d="([^"]+)"/g)].map((m) => m[1]), paths, name);
+  assert.deepEqual(
+    [...portal[name].matchAll(/d="([^"]+)"/g)].map((m) => m[1]),
+    paths,
+    name,
+  );
 }
 assert.ok(portalSource.includes('viewBox="0 0 256 256"'));
 assert.ok(read('scoutbox-player/src/components/Icon.tsx').includes('viewBox="0 0 256 256"'));

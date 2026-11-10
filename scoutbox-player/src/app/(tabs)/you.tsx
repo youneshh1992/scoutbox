@@ -28,7 +28,8 @@ import { InviteCodeSection } from '../../components/M14Sections';
 import { ClubsCurrent, ClubsDevelopment, ClubsHistory, ClubsRequests } from '../../components/ClubsSections';
 import { AvailabilitySettings, MedicalSettings, ProfileBody } from './profile';
 
-const isRequest = (r: unknown): r is InboxRequest => !!r && typeof r === 'object' && 'createdAt' in (r as object) && 'orgName' in (r as object);
+const isRequest = (r: unknown): r is InboxRequest =>
+  !!r && typeof r === 'object' && 'createdAt' in (r as object) && 'orgName' in (r as object);
 
 export default function You() {
   const colors = useColors();
@@ -42,14 +43,29 @@ export default function You() {
     { key: 'clubs', label: pt('segClubs') },
   ];
   const [tab, setTabState] = useState(() => pickTab(TABS, params.tab));
-  useEffect(() => { if (params.tab) setTabState(pickTab(TABS, params.tab)); }, [params.tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (params.tab) setTabState(pickTab(TABS, params.tab));
+  }, [params.tab]); // eslint-disable-line react-hooks/exhaustive-deps
   // A tab or category change is a history entry on the web (the router's own navigation to the
   // same tab screen only replaces the entry), so the browser's back and forward move between them.
   const remember = (tabKey: string, sec: string) => {
     if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.history?.pushState) return;
-    try { window.history.pushState(window.history.state, '', `/you?tab=${tabKey}${sec ? `&section=${sec}` : ''}`); } catch { /* history is a convenience */ }
+    try {
+      window.history.pushState(window.history.state, '', `/you?tab=${tabKey}${sec ? `&section=${sec}` : ''}`);
+    } catch {
+      /* history is a convenience */
+    }
   };
-  const setTab = (k: string) => { setTabState(k); setChosen(null); remember(k, ''); try { router.setParams({ tab: k, section: '' }); } catch { /* links only */ } };
+  const setTab = (k: string) => {
+    setTabState(k);
+    setChosen(null);
+    remember(k, '');
+    try {
+      router.setParams({ tab: k, section: '' });
+    } catch {
+      /* links only */
+    }
+  };
 
   // the category inside Account / Clubs: the URL's `?section=` when it names one, else the last tap (no effect)
   const ACCOUNT = [
@@ -65,9 +81,20 @@ export default function You() {
   ];
   const [chosen, setChosen] = useState<string | null>(null);
   const [seenParam, setSeenParam] = useState(params.section);
-  if (params.section !== seenParam) { setSeenParam(params.section); setChosen(null); }
+  if (params.section !== seenParam) {
+    setSeenParam(params.section);
+    setChosen(null);
+  }
   const section = chosen ?? (typeof params.section === 'string' ? params.section : '');
-  const go = (k: string) => { setChosen(k); remember(tab, k); try { router.setParams({ section: k }); } catch { /* links only */ } };
+  const go = (k: string) => {
+    setChosen(k);
+    remember(tab, k);
+    try {
+      router.setParams({ section: k });
+    } catch {
+      /* links only */
+    }
+  };
   const accountSection = ACCOUNT.some((s) => s.key === section) ? section : '';
   const clubsSection = CLUBS.some((s) => s.key === section) ? section : 'current';
 
@@ -80,26 +107,50 @@ export default function You() {
   const [wrap, setWrap] = useState<SeasonWrap | null>(null);
 
   useEffect(() => {
-    if (playerId) client.getMyReports(playerId).then(setMyReports).catch(() => {});
+    if (playerId)
+      client
+        .getMyReports(playerId)
+        .then(setMyReports)
+        .catch(() => {});
   }, [playerId, notifications]);
   useEffect(() => {
-    if (playerId) client.getPrefs(playerId).then((p) => p && setPrefs(p)).catch(() => {});
+    if (playerId)
+      client
+        .getPrefs(playerId)
+        .then((p) => p && setPrefs(p))
+        .catch(() => {});
   }, [playerId]);
 
   const savePrefs = async (next: Partial<NotificationPrefs>) => {
     if (!playerId) return;
     const merged = { ...prefs, ...next };
     setPrefs(merged);
-    try { await client.setPrefs(playerId, merged); setPrefsNote('Saved.'); } catch { setPrefsNote('Could not save — try again.'); }
+    try {
+      await client.setPrefs(playerId, merged);
+      setPrefsNote('Saved.');
+    } catch {
+      setPrefsNote('Could not save — try again.');
+    }
   };
   const doExport = async () => {
     if (!playerId) return;
-    try { const data = await client.getExport(playerId); setExportPreview(JSON.stringify(data, null, 2).slice(0, 1500)); } catch { setExportPreview('Export failed — try again.'); }
+    try {
+      const data = await client.getExport(playerId);
+      setExportPreview(JSON.stringify(data, null, 2).slice(0, 1500));
+    } catch {
+      setExportPreview('Export failed — try again.');
+    }
   };
   const doDelete = async () => {
     if (!playerId) return;
     setDeleteError(null);
-    try { await client.deleteAccount(playerId); logout(); router.replace('/onboarding'); } catch (e) { setDeleteError(e instanceof Error ? e.message : 'Could not delete'); }
+    try {
+      await client.deleteAccount(playerId);
+      logout();
+      router.replace('/onboarding');
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : 'Could not delete');
+    }
   };
 
   const mediaOptions = (me?.media ?? []).map((m) => ({ id: m.id, title: m.title }));
@@ -121,22 +172,62 @@ export default function You() {
               <Text style={styles.whoName}>{me?.name ?? '—'}</Text>
               <Muted size={13}>{me ? [me.city, me.country].filter(Boolean).join(', ') : ''}</Muted>
             </View>
-            <ListRow label={pt('accProfile')} icon="user-round" onPress={() => go('profile')} testID="account-cat-profile" />
-            <ListRow label={pt('accPrivacy')} icon="shield-check" onPress={() => go('privacy')} testID="account-cat-privacy" />
-            <ListRow label={pt('accPreferences')} icon="settings-2" onPress={() => go('preferences')} testID="account-cat-preferences" />
+            <ListRow
+              label={pt('accProfile')}
+              icon="user-round"
+              onPress={() => go('profile')}
+              testID="account-cat-profile"
+            />
+            <ListRow
+              label={pt('accPrivacy')}
+              icon="shield-check"
+              onPress={() => go('privacy')}
+              testID="account-cat-privacy"
+            />
+            <ListRow
+              label={pt('accPreferences')}
+              icon="settings-2"
+              onPress={() => go('preferences')}
+              testID="account-cat-preferences"
+            />
 
             {/* The way out: Sign out ends this identity's session on the server and on the device; Switch account does the same and opens the entry screen on Sign in. */}
             <View style={{ marginTop: 26 }}>
-              <ListRow label="Switch account" icon="users" testID="switch-account" onPress={() => { logout(); router.replace('/onboarding?mode=signin'); }} />
-              <ListRow label="Sign out" icon="log-out" testID="sign-out" onPress={() => { logout(); router.replace('/onboarding'); }} />
+              <ListRow
+                label="Switch account"
+                icon="users"
+                testID="switch-account"
+                onPress={() => {
+                  logout();
+                  router.replace('/onboarding?mode=signin');
+                }}
+              />
+              <ListRow
+                label="Sign out"
+                icon="log-out"
+                testID="sign-out"
+                onPress={() => {
+                  logout();
+                  router.replace('/onboarding');
+                }}
+              />
             </View>
-            <Text style={styles.env}>{mode === 'live' ? 'Live — connected to scoutbox-server' : 'Demo — sample data'}</Text>
+            <Text style={styles.env}>
+              {mode === 'live' ? 'Live — connected to scoutbox-server' : 'Demo — sample data'}
+            </Text>
           </View>
         )}
 
         {tab === 'account' && accountSection !== '' && (
           <View testID={`account-section-${accountSection}`}>
-            <Pressable onPress={() => go('')} accessibilityRole="button" accessibilityLabel={pt('accBack')} testID="account-back" hitSlop={6} style={({ pressed }) => [styles.back, pressed && { opacity: 0.7 }]}>
+            <Pressable
+              onPress={() => go('')}
+              accessibilityRole="button"
+              accessibilityLabel={pt('accBack')}
+              testID="account-back"
+              hitSlop={6}
+              style={({ pressed }) => [styles.back, pressed && { opacity: 0.7 }]}
+            >
               <Icon name="chevron-left" size={15} color={colors.accent2} />
               <Text style={styles.backText}>{pt('accBack')}</Text>
             </Pressable>
@@ -144,16 +235,57 @@ export default function You() {
             <View style={styles.section}>
               {accountSection === 'profile' && (
                 <>
-                  <ListRow label={pt('segProfile')} onPress={() => setTab('profile')} icon="user-round" testID="account-open-profile" />
+                  <ListRow
+                    label={pt('segProfile')}
+                    onPress={() => setTab('profile')}
+                    icon="user-round"
+                    testID="account-open-profile"
+                  />
                   <AvailabilitySettings />
                   {me?.pathway && (
                     <Disclosure label="Your season" testID="account-season">
-                      {!wrap && <Row><Button small label="Show my season" onPress={async () => { try { setWrap(await client.getSeasonWrap(playerId!)); } catch { /* stays hidden */ } }} /></Row>}
+                      {!wrap && (
+                        <Row>
+                          <Button
+                            small
+                            label="Show my season"
+                            onPress={async () => {
+                              try {
+                                setWrap(await client.getSeasonWrap(playerId!));
+                              } catch {
+                                /* stays hidden */
+                              }
+                            }}
+                          />
+                        </Row>
+                      )}
                       {wrap && (
                         <View style={{ gap: 6 }}>
-                          <Text style={{ color: colors.text, fontSize: 17, fontWeight: '700' }}>{wrap.player.name} — {wrap.player.level === 'semi_pro' ? 'Semi-pro' : 'Amateur'} {wrap.player.position ?? ''}</Text>
-                          <GuidanceNote size={13}>{[wrap.season ? `${wrap.season.goals} goals` : null, wrap.season ? `${wrap.season.appearances} appearances` : null, `${wrap.verifiedAttendances} verified matches`, `${wrap.verifiedClips} verified clips`, `best streak ${wrap.bestStreak}`, `${wrap.scoutViews} scout views`, wrap.coachVouches > 0 ? `${wrap.coachVouches} coach reference${wrap.coachVouches === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ')}</GuidanceNote>
-                          {wrap.combineBests.length > 0 && <GuidanceNote size={12.5}>Combine bests: {wrap.combineBests.map((b) => `${b.metric} ${b.value}${b.unit}`).join(' · ')}</GuidanceNote>}
+                          <Text style={{ color: colors.text, fontSize: 17, fontWeight: '700' }}>
+                            {wrap.player.name} — {wrap.player.level === 'semi_pro' ? 'Semi-pro' : 'Amateur'}{' '}
+                            {wrap.player.position ?? ''}
+                          </Text>
+                          <GuidanceNote size={13}>
+                            {[
+                              wrap.season ? `${wrap.season.goals} goals` : null,
+                              wrap.season ? `${wrap.season.appearances} appearances` : null,
+                              `${wrap.verifiedAttendances} verified matches`,
+                              `${wrap.verifiedClips} verified clips`,
+                              `best streak ${wrap.bestStreak}`,
+                              `${wrap.scoutViews} scout views`,
+                              wrap.coachVouches > 0
+                                ? `${wrap.coachVouches} coach reference${wrap.coachVouches === 1 ? '' : 's'}`
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </GuidanceNote>
+                          {wrap.combineBests.length > 0 && (
+                            <GuidanceNote size={12.5}>
+                              Combine bests:{' '}
+                              {wrap.combineBests.map((b) => `${b.metric} ${b.value}${b.unit}`).join(' · ')}
+                            </GuidanceNote>
+                          )}
                           {wrap.badges.length > 0 && <GuidanceNote size={12.5}>{wrap.badges.join(' · ')}</GuidanceNote>}
                           <GuidanceNote size={11.5}>{wrap.note}</GuidanceNote>
                         </View>
@@ -171,17 +303,33 @@ export default function You() {
                   <View style={{ height: 10 }} />
                   <MedicalSettings />
                   <Disclosure label="Your data" testID="account-privacy">
-                    {isMinor && <GuidanceNote title="Guardian controls" icon="users" size={13}>Your parent or guardian owns this account and handles everything club-related. If anything on ScoutBox ever makes you uncomfortable, use the Report button or tell your guardian.</GuidanceNote>}
+                    {isMinor && (
+                      <GuidanceNote title="Guardian controls" icon="users" size={13}>
+                        Your parent or guardian owns this account and handles everything club-related. If anything on
+                        ScoutBox ever makes you uncomfortable, use the Report button or tell your guardian.
+                      </GuidanceNote>
+                    )}
                     <Row>
                       <Button small label="Preview my data export" onPress={doExport} />
-                      {exportPreview && <Button small tertiary label="Hide preview" onPress={() => setExportPreview(null)} />}
+                      {exportPreview && (
+                        <Button small tertiary label="Hide preview" onPress={() => setExportPreview(null)} />
+                      )}
                     </Row>
-                    {exportPreview && <Text style={styles.exportPreview} numberOfLines={30}>{exportPreview}…</Text>}
+                    {exportPreview && (
+                      <Text style={styles.exportPreview} numberOfLines={30}>
+                        {exportPreview}…
+                      </Text>
+                    )}
                     {!isMinor && (
                       <View style={{ gap: 8, marginTop: 6 }}>
-                        <GuidanceNote title="Account deletion" icon="shield-alert" size={13}>Deleting removes your profile, media and threads. The safety ledger keeps its append-only record (ids only).</GuidanceNote>
+                        <GuidanceNote title="Account deletion" icon="shield-alert" size={13}>
+                          Deleting removes your profile, media and threads. The safety ledger keeps its append-only
+                          record (ids only).
+                        </GuidanceNote>
                         {!confirmDelete ? (
-                          <Row><Button small danger label="Delete my account" onPress={() => setConfirmDelete(true)} /></Row>
+                          <Row>
+                            <Button small danger label="Delete my account" onPress={() => setConfirmDelete(true)} />
+                          </Row>
                         ) : (
                           <Row>
                             <Button small danger label="Yes — delete everything" onPress={doDelete} />
@@ -193,12 +341,19 @@ export default function You() {
                     )}
                   </Disclosure>
                   {myReports.length > 0 && (
-                    <Disclosure label="Safety centre" hint={`${myReports.length} report${myReports.length === 1 ? '' : 's'} you filed`} testID="account-safety">
+                    <Disclosure
+                      label="Safety centre"
+                      hint={`${myReports.length} report${myReports.length === 1 ? '' : 's'} you filed`}
+                      testID="account-safety"
+                    >
                       {myReports.map((r) => (
                         <View key={r.id} style={{ gap: 2, paddingVertical: 4 }}>
                           <Row style={{ justifyContent: 'space-between' }}>
                             <Text style={{ color: colors.text, fontSize: 13.5, flex: 1 }}>{r.reason}</Text>
-                            <Pill label={r.status === 'resolved' ? 'Reviewed' : 'In review'} tone={r.status === 'resolved' ? 'green' : 'gold'} />
+                            <Pill
+                              label={r.status === 'resolved' ? 'Reviewed' : 'In review'}
+                              tone={r.status === 'resolved' ? 'green' : 'gold'}
+                            />
                           </Row>
                           {r.outcome && <GuidanceNote size={12.5}>{r.outcome}</GuidanceNote>}
                         </View>
@@ -214,15 +369,44 @@ export default function You() {
               {accountSection === 'preferences' && (
                 <>
                   {actor ? <PreferencesSection actor={actor} isMinor={isMinor} /> : null}
-                  <Disclosure label="Notifications" hint={prefs.quietStart || prefs.quietEnd ? `Quiet ${prefs.quietStart ?? '—'} to ${prefs.quietEnd ?? '—'}` : undefined} testID="account-notifications">
+                  <Disclosure
+                    label="Notifications"
+                    hint={
+                      prefs.quietStart || prefs.quietEnd
+                        ? `Quiet ${prefs.quietStart ?? '—'} to ${prefs.quietEnd ?? '—'}`
+                        : undefined
+                    }
+                    testID="account-notifications"
+                  >
                     <Row>
                       <Muted size={13}>Quiet from</Muted>
-                      <TextInput style={styles.timeInput} placeholder="22:00" placeholderTextColor={colors.muted} value={prefs.quietStart ?? ''} onChangeText={(v) => setPrefs((p) => ({ ...p, quietStart: v || null }))} onBlur={() => savePrefs({})} accessibilityLabel="Quiet from" />
+                      <TextInput
+                        style={styles.timeInput}
+                        placeholder="22:00"
+                        placeholderTextColor={colors.muted}
+                        value={prefs.quietStart ?? ''}
+                        onChangeText={(v) => setPrefs((p) => ({ ...p, quietStart: v || null }))}
+                        onBlur={() => savePrefs({})}
+                        accessibilityLabel="Quiet from"
+                      />
                       <Muted size={13}>until</Muted>
-                      <TextInput style={styles.timeInput} placeholder="07:00" placeholderTextColor={colors.muted} value={prefs.quietEnd ?? ''} onChangeText={(v) => setPrefs((p) => ({ ...p, quietEnd: v || null }))} onBlur={() => savePrefs({})} accessibilityLabel="Quiet until" />
+                      <TextInput
+                        style={styles.timeInput}
+                        placeholder="07:00"
+                        placeholderTextColor={colors.muted}
+                        value={prefs.quietEnd ?? ''}
+                        onChangeText={(v) => setPrefs((p) => ({ ...p, quietEnd: v || null }))}
+                        onBlur={() => savePrefs({})}
+                        accessibilityLabel="Quiet until"
+                      />
                     </Row>
                     <Row>
-                      <Button small primary={schoolMute} label={`School-hours mute: ${schoolMute ? 'on' : 'off'}`} onPress={() => savePrefs({ schoolHoursMute: !schoolMute })} />
+                      <Button
+                        small
+                        primary={schoolMute}
+                        label={`School-hours mute: ${schoolMute ? 'on' : 'off'}`}
+                        onPress={() => savePrefs({ schoolHoursMute: !schoolMute })}
+                      />
                     </Row>
                     {prefsNote && <GuidanceNote size={12.5}>{prefsNote}</GuidanceNote>}
                   </Disclosure>
@@ -241,7 +425,9 @@ export default function You() {
           <View testID="clubs-page">
             <PageTabs tabs={CLUBS} value={clubsSection} onChange={go} />
             <View style={styles.section}>
-              {clubsSection === 'current' && <ClubsCurrent actor={actor} isMinor={isMinor} mediaOptions={mediaOptions} />}
+              {clubsSection === 'current' && (
+                <ClubsCurrent actor={actor} isMinor={isMinor} mediaOptions={mediaOptions} />
+              )}
               {clubsSection === 'requests' && <ClubsRequests actor={actor} isMinor={isMinor} requests={requests} />}
               {clubsSection === 'development' && <ClubsDevelopment actor={actor} />}
               {clubsSection === 'history' && <ClubsHistory actor={actor} isMinor={isMinor} requests={requests} />}
@@ -253,21 +439,36 @@ export default function You() {
   );
 }
 
-const makeStyles = (colors: Palette) => StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
-  who: { backgroundColor: colors.iconBg, borderRadius: 20, padding: 18, marginBottom: 14, gap: 4 },
-  whoName: { color: colors.text, fontSize: 24, fontWeight: '700', letterSpacing: -0.6 },
-  section: { paddingTop: 18 },
-  back: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8, alignSelf: 'flex-start' },
-  backText: { color: colors.accent2, fontSize: 13, fontWeight: '500' },
-  env: { color: colors.muted, fontSize: 11.5, marginTop: 24, textAlign: 'center' },
-  timeInput: {
-    borderWidth: 1, borderColor: colors.line, borderRadius: 8, color: colors.text,
-    paddingHorizontal: 10, paddingVertical: 6, fontSize: 13, minWidth: 72, backgroundColor: colors.bg2,
-  },
-  exportPreview: {
-    color: colors.muted, fontSize: 11, fontVariant: ['tabular-nums'], lineHeight: 15,
-    borderWidth: 1, borderColor: colors.line, borderRadius: 8, padding: 8, marginTop: 6,
-  },
-});
+const makeStyles = (colors: Palette) =>
+  StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.bg },
+    scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 32, gap: 0 },
+    who: { backgroundColor: colors.iconBg, borderRadius: 20, padding: 18, marginBottom: 14, gap: 4 },
+    whoName: { color: colors.text, fontSize: 24, fontWeight: '700', letterSpacing: -0.6 },
+    section: { paddingTop: 18 },
+    back: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingVertical: 8, alignSelf: 'flex-start' },
+    backText: { color: colors.accent2, fontSize: 13, fontWeight: '500' },
+    env: { color: colors.muted, fontSize: 11.5, marginTop: 24, textAlign: 'center' },
+    timeInput: {
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 8,
+      color: colors.text,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      fontSize: 13,
+      minWidth: 72,
+      backgroundColor: colors.bg2,
+    },
+    exportPreview: {
+      color: colors.muted,
+      fontSize: 11,
+      fontVariant: ['tabular-nums'],
+      lineHeight: 15,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 8,
+      padding: 8,
+      marginTop: 6,
+    },
+  });

@@ -14,7 +14,8 @@ export const ROOM_NAV: CaseNavModel = {
   id: 'room',
   categories: [
     {
-      id: 'overview', labelKey: 'rm.cat.overview',
+      id: 'overview',
+      labelKey: 'rm.cat.overview',
       subs: [
         { id: 'summary', labelKey: 'rm.tab.summary', legacy: ['overview'] },
         { id: 'journey', labelKey: 'rm.tab.journey' },
@@ -23,7 +24,8 @@ export const ROOM_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'player-review', labelKey: 'rm.cat.playerReview',
+      id: 'player-review',
+      labelKey: 'rm.cat.playerReview',
       subs: [
         { id: 'passport', labelKey: 'rm.tab.passport' },
         { id: 'evidence', labelKey: 'rm.tab.evidence' },
@@ -33,7 +35,8 @@ export const ROOM_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'recruitment', labelKey: 'rm.cat.recruitment',
+      id: 'recruitment',
+      labelKey: 'rm.cat.recruitment',
       subs: [
         // Internal talk first, shared communication second: the
         // Discussion never travels; Contact and Trial reach the player.
@@ -45,7 +48,8 @@ export const ROOM_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'agreement', labelKey: 'rm.cat.agreement',
+      id: 'agreement',
+      labelKey: 'rm.cat.agreement',
       subs: [
         { id: 'offer', labelKey: 'rm.tab.offer' },
         { id: 'signing', labelKey: 'rm.tab.signing' },
@@ -53,7 +57,8 @@ export const ROOM_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'history', labelKey: 'rm.cat.history',
+      id: 'history',
+      labelKey: 'rm.cat.history',
       subs: [
         { id: 'timeline', labelKey: 'rm.tab.timeline' },
         { id: 'past-trials', labelKey: 'rm.tab.past-trials' },

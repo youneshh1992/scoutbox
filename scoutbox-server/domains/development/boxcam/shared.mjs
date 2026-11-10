@@ -5,41 +5,82 @@ import crypto from 'node:crypto';
 
 // --------------------------------------------------------------- states
 export const SESSION_STATES = [
-  'not_started', 'setup_required', 'ready', 'recording', 'processing',
-  'verified', 'partially_verified', 'unable_to_verify',
-  'completed_unverified', 'cancelled', 'invalidated',
+  'not_started',
+  'setup_required',
+  'ready',
+  'recording',
+  'processing',
+  'verified',
+  'partially_verified',
+  'unable_to_verify',
+  'completed_unverified',
+  'cancelled',
+  'invalidated',
 ];
-export const TERMINAL_STATES = new Set(['verified', 'partially_verified', 'unable_to_verify', 'completed_unverified', 'cancelled', 'invalidated']);
+export const TERMINAL_STATES = new Set([
+  'verified',
+  'partially_verified',
+  'unable_to_verify',
+  'completed_unverified',
+  'cancelled',
+  'invalidated',
+]);
 export const QUALITY = ['good', 'degraded', 'insufficient'];
 export const TARGET_TYPES = ['duration', 'repetitions', 'sets', 'combined'];
-export const OBSERVATION_KINDS = Object.freeze(['active', 'presence', 'ball', 'rep', 'set', 'pause', 'interruption', 'multi_person']);
+export const OBSERVATION_KINDS = Object.freeze([
+  'active',
+  'presence',
+  'ball',
+  'rep',
+  'set',
+  'pause',
+  'interruption',
+  'multi_person',
+]);
 
 const isMs = (v) => typeof v === 'number' && Number.isFinite(v);
-const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v);
+const describe = (v) =>
+  v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v;
 /** Types one observation from the events route; an event the engine cannot read is refused, naming the field. */
 export function typeObservation(raw, at) {
   const bad = (field, what) => ({ ok: false, reason: `${at}.${field} ${what}` });
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
-  const unknown = Object.keys(raw).filter((k) => !['kind', 'fromMs', 'toMs', 'atMs', 'quality', 'confidence'].includes(k));
-  if (unknown.length) return { ok: false, reason: `${at} carries field(s) this build does not store: ${unknown.join(', ')}` };
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw))
+    return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
+  const unknown = Object.keys(raw).filter(
+    (k) => !['kind', 'fromMs', 'toMs', 'atMs', 'quality', 'confidence'].includes(k),
+  );
+  if (unknown.length)
+    return { ok: false, reason: `${at} carries field(s) this build does not store: ${unknown.join(', ')}` };
   const { kind, fromMs = null, toMs = null, atMs = null, quality = null, confidence = null } = raw;
   if (!OBSERVATION_KINDS.includes(kind)) return bad('kind', `must be one of ${OBSERVATION_KINDS.join('|')}`);
   const interval = ['active', 'presence', 'ball', 'interruption', 'multi_person'].includes(kind);
-  for (const [k, v] of [['fromMs', fromMs], ['toMs', toMs], ['atMs', atMs]]) if (v !== null && !isMs(v)) return bad(k, `must be a number (got ${describe(v)})`);
-  if (interval && (fromMs === null || toMs === null || atMs !== null)) return bad('fromMs', 'and toMs are required on an interval (and atMs is not)');
-  if ((kind === 'rep' || kind === 'set') && (atMs === null || fromMs !== null || toMs !== null)) return bad('atMs', 'is required on a point observation (and fromMs/toMs are not)');
+  for (const [k, v] of [
+    ['fromMs', fromMs],
+    ['toMs', toMs],
+    ['atMs', atMs],
+  ])
+    if (v !== null && !isMs(v)) return bad(k, `must be a number (got ${describe(v)})`);
+  if (interval && (fromMs === null || toMs === null || atMs !== null))
+    return bad('fromMs', 'and toMs are required on an interval (and atMs is not)');
+  if ((kind === 'rep' || kind === 'set') && (atMs === null || fromMs !== null || toMs !== null))
+    return bad('atMs', 'is required on a point observation (and fromMs/toMs are not)');
   if (kind === 'pause' && (fromMs === null || atMs !== null)) return bad('fromMs', 'is required on a pause');
-  if (quality !== null && (!['active', 'presence'].includes(kind) || !QUALITY.includes(quality))) return bad('quality', `must be one of ${QUALITY.join('|')} on an active or presence interval`);
-  if (confidence !== null && (kind !== 'rep' || !isMs(confidence) || confidence < 0 || confidence > 1)) return bad('confidence', 'must be a number from 0 to 1 on a rep');
+  if (quality !== null && (!['active', 'presence'].includes(kind) || !QUALITY.includes(quality)))
+    return bad('quality', `must be one of ${QUALITY.join('|')} on an active or presence interval`);
+  if (confidence !== null && (kind !== 'rep' || !isMs(confidence) || confidence < 0 || confidence > 1))
+    return bad('confidence', 'must be a number from 0 to 1 on a rep');
   return { ok: true, record: { kind, fromMs, toMs, atMs, quality, confidence } };
 }
 
 // Player copy per state: never "you didn't train" or "failed".
 export const STATE_COPY = {
   verified: 'Box Cam observed activity consistent with this drill for the recorded duration.',
-  partially_verified: 'Box Cam verified part of this session. Some activity could not be reliably observed because the player or ball left the camera view.',
-  unable_to_verify: 'ScoutBox could not reliably verify this session. Your training is not being marked as Box Cam Verified.',
-  completed_unverified: 'This session was recorded without Box Cam verification requirements being met, so it is not Box Cam Verified.',
+  partially_verified:
+    'Box Cam verified part of this session. Some activity could not be reliably observed because the player or ball left the camera view.',
+  unable_to_verify:
+    'ScoutBox could not reliably verify this session. Your training is not being marked as Box Cam Verified.',
+  completed_unverified:
+    'This session was recorded without Box Cam verification requirements being met, so it is not Box Cam Verified.',
   cancelled: 'This Box Session was cancelled before completion.',
   invalidated: 'This Box Cam result was invalidated after review and no longer counts as Box Cam Verified evidence.',
 };
@@ -78,7 +119,10 @@ export function subtractIntervals(base, cuts) {
   for (const cut of mergeIntervals(cuts)) {
     const next = [];
     for (const iv of current) {
-      if (cut.toMs <= iv.fromMs || cut.fromMs >= iv.toMs) { next.push(iv); continue; }
+      if (cut.toMs <= iv.fromMs || cut.fromMs >= iv.toMs) {
+        next.push(iv);
+        continue;
+      }
       if (cut.fromMs > iv.fromMs) next.push({ fromMs: iv.fromMs, toMs: cut.fromMs });
       if (cut.toMs < iv.toMs) next.push({ fromMs: cut.toMs, toMs: iv.toMs });
     }
@@ -105,7 +149,13 @@ export function intersectIntervals(a, b) {
 
 /** Active intervals of acceptable quality, minus pauses and interruptions, clamped to the server-known session
  *  duration. */
-export function verifiedActiveMs({ activeIntervals = [], pauses = [], interruptions = [], sessionDurationMs = 0, requiredIntervals = null }) {
+export function verifiedActiveMs({
+  activeIntervals = [],
+  pauses = [],
+  interruptions = [],
+  sessionDurationMs = 0,
+  requiredIntervals = null,
+}) {
   let usable = normIntervals(activeIntervals, sessionDurationMs).filter((iv) => iv.quality !== 'insufficient');
   // Ball-required drills: activity only counts while the ball was also visible.
   if (requiredIntervals) usable = intersectIntervals(usable, normIntervals(requiredIntervals, sessionDurationMs));
@@ -119,7 +169,9 @@ export function verifiedActiveMs({ activeIntervals = [], pauses = [], interrupti
 export function dedupeReps(reps, { sessionDurationMs = Infinity, minGapMs = 250, minConfidence = 0.5 } = {}) {
   const valid = (reps ?? [])
     .map((r) => ({ atMs: Number(r.atMs), confidence: r.confidence == null ? 1 : Number(r.confidence) }))
-    .filter((r) => Number.isFinite(r.atMs) && r.atMs >= 0 && r.atMs <= sessionDurationMs && r.confidence >= minConfidence)
+    .filter(
+      (r) => Number.isFinite(r.atMs) && r.atMs >= 0 && r.atMs <= sessionDurationMs && r.confidence >= minConfidence,
+    )
     .sort((a, b) => a.atMs - b.atMs);
   const out = [];
   for (const r of valid) {
@@ -143,7 +195,8 @@ export function targetCompleted(target, { activeMs = 0, reps = null, setsComplet
       if (!capabilities.includes('interval_completion')) return null;
       return setsCompleted >= target.value;
     case 'combined':
-      if (!capabilities.includes('rep_count') || !capabilities.includes('interval_completion') || reps == null) return null;
+      if (!capabilities.includes('rep_count') || !capabilities.includes('interval_completion') || reps == null)
+        return null;
       return setsCompleted >= (target.sets ?? 0) && reps >= (target.sets ?? 0) * (target.repsPerSet ?? 0);
     default:
       return null;
@@ -161,7 +214,17 @@ export function detectionQuality({ observedMs = 0, sessionDurationMs = 0 }) {
 
 // -------------------------------------------------- verification state
 /** Partial observed work stays under partially_verified; only no reliable observation at all is unable_to_verify. */
-export function deriveVerification({ cancelled = false, livenessPassed = false, providerAvailable = true, activeMs = 0, sessionDurationMs = 0, completed, quality, interruptionsCount = 0, unsupportedTargetMetric = false }) {
+export function deriveVerification({
+  cancelled = false,
+  livenessPassed = false,
+  providerAvailable = true,
+  activeMs = 0,
+  sessionDurationMs = 0,
+  completed,
+  quality,
+  interruptionsCount = 0,
+  unsupportedTargetMetric = false,
+}) {
   const reasons = [];
   if (cancelled) return { state: 'cancelled', reasons: ['SESSION_CANCELLED'] };
   if (!providerAvailable) reasons.push('PROVIDER_UNAVAILABLE');
@@ -197,7 +260,10 @@ export function boxStreakWeeks(sessions, now = Date.now()) {
   // The current week is still in progress, so an empty one doesn't break the streak.
   if (weeks.has(w)) streak++;
   w--;
-  while (weeks.has(w)) { streak++; w--; }
+  while (weeks.has(w)) {
+    streak++;
+    w--;
+  }
   return streak;
 }
 
@@ -235,23 +301,39 @@ export function challengeProgress(challenge, sessions) {
 
 // ------------------------------------------- development activity summary
 export const DEV_ACTIVITY_NOTE = 'This is evidence of recorded training activity. It is not proof of player ability.';
-export function developmentActivity({ sessions = [], assignments = [], drillsById = new Map(), days = 30, now = Date.now() }) {
+export function developmentActivity({
+  sessions = [],
+  assignments = [],
+  drillsById = new Map(),
+  days = 30,
+  now = Date.now(),
+}) {
   const since = now - days * 86_400_000;
-  const recent = sessions.filter((s) => TERMINAL_STATES.has(s.verificationState) && !['cancelled', 'invalidated'].includes(s.verificationState) && (s.endedAt ?? s.startedAt) >= since);
+  const recent = sessions.filter(
+    (s) =>
+      TERMINAL_STATES.has(s.verificationState) &&
+      !['cancelled', 'invalidated'].includes(s.verificationState) &&
+      (s.endedAt ?? s.startedAt) >= since,
+  );
   const verified = recent.filter((s) => ['verified', 'partially_verified'].includes(s.verificationState));
   const byCategory = new Map();
   for (const s of verified) {
     const cat = drillsById.get(s.drillId)?.category ?? 'training';
     byCategory.set(cat, (byCategory.get(cat) ?? 0) + s.verifiedActiveMs);
   }
-  const assignedRecent = assignments.filter((a) => a.createdAt >= since && a.state !== 'cancelled' && a.state !== 'superseded');
+  const assignedRecent = assignments.filter(
+    (a) => a.createdAt >= since && a.state !== 'cancelled' && a.state !== 'superseded',
+  );
   return {
     days,
     boxSessions: recent.length,
     verifiedActiveMs: verified.reduce((t, s) => t + s.verifiedActiveMs, 0),
     assigned: assignedRecent.length,
     assignedCompleted: assignedRecent.filter((a) => a.state === 'completed').length,
-    focus: [...byCategory.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([category, ms]) => ({ category, activeMs: ms })),
+    focus: [...byCategory.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([category, ms]) => ({ category, activeMs: ms })),
     note: DEV_ACTIVITY_NOTE,
   };
 }
@@ -260,11 +342,20 @@ export function developmentActivity({ sessions = [], assignments = [], drillsByI
 /** Integrity metadata for a finalized session. */
 export function resultHash(session) {
   const canonical = JSON.stringify({
-    id: session.id, playerId: session.playerId, drillId: session.drillId, drillVersion: session.drillVersion,
-    target: session.target, startedAt: session.startedAt, endedAt: session.endedAt,
-    sessionDurationMs: session.sessionDurationMs, verifiedActiveMs: session.verifiedActiveMs,
-    verifiedReps: session.verifiedReps ?? null, setsCompleted: session.setsCompleted ?? 0,
-    verificationState: session.verificationState, provider: session.provider, providerVersion: session.providerVersion,
+    id: session.id,
+    playerId: session.playerId,
+    drillId: session.drillId,
+    drillVersion: session.drillVersion,
+    target: session.target,
+    startedAt: session.startedAt,
+    endedAt: session.endedAt,
+    sessionDurationMs: session.sessionDurationMs,
+    verifiedActiveMs: session.verifiedActiveMs,
+    verifiedReps: session.verifiedReps ?? null,
+    setsCompleted: session.setsCompleted ?? 0,
+    verificationState: session.verificationState,
+    provider: session.provider,
+    providerVersion: session.providerVersion,
   });
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }
@@ -286,9 +377,16 @@ export function boxCamDetail(session) {
 /** Pages a list the route has already filtered by visibility. Returns null once it has answered a page error. */
 export function pageNewestFirst(req, res, list, { readPage, pageOf, sendPageError }) {
   let page;
-  try { page = readPage(req.query, ['number', 'string']); } catch (e) { sendPageError(res, e); return null; }
+  try {
+    page = readPage(req.query, ['number', 'string']);
+  } catch (e) {
+    sendPageError(res, e);
+    return null;
+  }
   const key = (r) => [r.createdAt, r.id];
   const after = page.after;
-  const rest = after ? list.filter((r) => r.createdAt < after[0] || (r.createdAt === after[0] && r.id < after[1])) : list;
+  const rest = after
+    ? list.filter((r) => r.createdAt < after[0] || (r.createdAt === after[0] && r.id < after[1]))
+    : list;
   return pageOf(rest.slice(0, page.limit + 1), page.limit, key);
 }

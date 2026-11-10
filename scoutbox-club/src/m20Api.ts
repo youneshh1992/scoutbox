@@ -30,10 +30,24 @@
 import { API_URL, DEMO_MODE, ApiError, type Session } from './api';
 import { demoM20 } from './m20Demo';
 
-export const FAMILY_IDS = ['pipeline', 'duration', 'aging', 'decision_record', 'coverage', 'source', 'watchlist'] as const;
+export const FAMILY_IDS = [
+  'pipeline',
+  'duration',
+  'aging',
+  'decision_record',
+  'coverage',
+  'source',
+  'watchlist',
+] as const;
 export type FamilyId = (typeof FAMILY_IDS)[number];
 
-export const WINDOW_PRESETS = ['last_7_days', 'last_30_days', 'last_90_days', 'last_180_days', 'last_365_days'] as const;
+export const WINDOW_PRESETS = [
+  'last_7_days',
+  'last_30_days',
+  'last_90_days',
+  'last_180_days',
+  'last_365_days',
+] as const;
 export type WindowPreset = (typeof WINDOW_PRESETS)[number];
 export const DEFAULT_WINDOW: WindowPreset = 'last_90_days';
 export const STALL_THRESHOLDS = [14, 30, 90] as const;
@@ -244,8 +258,14 @@ const qs = (params: Record<string, string | number | undefined | null>) => {
 
 /** The refusals a director can actually cause, kept as answers rather than errors. */
 const ANSWERABLE_REFUSALS = new Set([
-  'GROUPING_BY_PERSON_REFUSED', 'GROUPING_UNKNOWN', 'WINDOW_UNKNOWN', 'WINDOW_INVALID',
-  'SOURCE_CONTEXT_UNKNOWN', 'ROOM_PRIORITY_UNKNOWN', 'STALL_THRESHOLD_UNKNOWN', 'FAMILY_UNKNOWN',
+  'GROUPING_BY_PERSON_REFUSED',
+  'GROUPING_UNKNOWN',
+  'WINDOW_UNKNOWN',
+  'WINDOW_INVALID',
+  'SOURCE_CONTEXT_UNKNOWN',
+  'ROOM_PRIORITY_UNKNOWN',
+  'STALL_THRESHOLD_UNKNOWN',
+  'FAMILY_UNKNOWN',
 ]);
 
 export const httpM20: M20Api = {
@@ -260,7 +280,8 @@ export const httpM20: M20Api = {
     if (!res.ok) throw ApiError.fromResponse(res, body);
     return { ok: true, value: body as Dashboard };
   },
-  rows: (s, metric, params = {}) => req(`/org/recruitment-analytics/rows${qs({ metric, ...params })}`, { headers: H(s) }),
+  rows: (s, metric, params = {}) =>
+    req(`/org/recruitment-analytics/rows${qs({ metric, ...params })}`, { headers: H(s) }),
 };
 
 export const m20: M20Api = DEMO_MODE ? demoM20 : httpM20;
@@ -274,7 +295,11 @@ export const m20: M20Api = DEMO_MODE ? demoM20 : httpM20;
  */
 export function figureText(
   f: Figure | undefined,
-  words: { empty: string; suppressed: (n: number, num: number, min: number) => string; percent: (pct: number, n: number) => string },
+  words: {
+    empty: string;
+    suppressed: (n: number, num: number, min: number) => string;
+    percent: (pct: number, n: number) => string;
+  },
 ): string {
   if (!f) return words.empty;
   if (f.empty) return words.empty;
@@ -304,4 +329,9 @@ export const dayText = (d: number | null | undefined): string => {
 };
 
 /** Is this metric one the server will page rows for? */
-export const DRILLDOWN_METRICS = ['stalled_rooms', 'decision_outstanding', 'terminal_with_recorded_decision', 'overdue_trial_reports'];
+export const DRILLDOWN_METRICS = [
+  'stalled_rooms',
+  'decision_outstanding',
+  'terminal_with_recorded_decision',
+  'overdue_trial_reports',
+];

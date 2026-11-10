@@ -21,10 +21,28 @@
 import { API_URL, DEMO_MODE, ApiError, type Session } from './api';
 import { demoM21 } from './m21Demo';
 
-export const GOAL_CATEGORIES = ['technical', 'tactical', 'physical', 'psychological', 'match_understanding', 'position_specific', 'other'] as const;
+export const GOAL_CATEGORIES = [
+  'technical',
+  'tactical',
+  'physical',
+  'psychological',
+  'match_understanding',
+  'position_specific',
+  'other',
+] as const;
 export const GOAL_STATUSES = ['not_started', 'in_progress', 'blocked', 'achieved', 'stopped'] as const;
 export const ACTION_STATUSES = ['todo', 'in_progress', 'done', 'blocked', 'cancelled'] as const;
-export const ACTION_TYPES = ['training', 'assessment', 'video_review', 'match_objective', 'coach_review', 'combine', 'box_cam', 'evidence_request', 'custom'] as const;
+export const ACTION_TYPES = [
+  'training',
+  'assessment',
+  'video_review',
+  'match_objective',
+  'coach_review',
+  'combine',
+  'box_cam',
+  'evidence_request',
+  'custom',
+] as const;
 export const PLAN_STATUSES = ['draft', 'active', 'paused', 'completed', 'archived'] as const;
 export const BLOCK_REASONS = ['waiting_for_assessment', 'schedule', 'facility', 'coach_review', 'other'] as const;
 export const TARGET_STATES = ['target_met', 'target_not_met', 'no_current_valid_measurement'] as const;
@@ -36,36 +54,65 @@ export type PlanStatus = (typeof PLAN_STATUSES)[number];
 export type TargetState = (typeof TARGET_STATES)[number];
 export type PlanVisibility = 'private' | 'player_guardian' | 'shared_with_org' | 'org_private';
 
-export interface DueState { state: string; days: number | null }
+export interface DueState {
+  state: string;
+  days: number | null;
+}
 
 export interface EvidenceView {
-  linkId: string; sourceType: string; sourceId: string; sourceLabel: string;
-  available: boolean; reason: string | null; note?: string | null;
-  title?: string; provenance: string | null; occurredAt: number | null;
-  simulated: boolean; measuredValue?: number | null; metricUnit?: string | null;
+  linkId: string;
+  sourceType: string;
+  sourceId: string;
+  sourceLabel: string;
+  available: boolean;
+  reason: string | null;
+  note?: string | null;
+  title?: string;
+  provenance: string | null;
+  occurredAt: number | null;
+  simulated: boolean;
+  measuredValue?: number | null;
+  metricUnit?: string | null;
   productionValid?: boolean;
 }
 
 export interface ActionView {
-  id: string; goalId: string; type: string; title: string; status: ActionStatus;
-  dueAt: number | null; due: DueState;
+  id: string;
+  goalId: string;
+  type: string;
+  title: string;
+  status: ActionStatus;
+  dueAt: number | null;
+  due: DueState;
   assignee: { kind: string; name: string | null } | null;
-  completedAt: number | null; evidence: EvidenceView[];
+  completedAt: number | null;
+  evidence: EvidenceView[];
 }
 
 export interface TargetView {
-  state: TargetState; reason: string | null; statement: string;
-  operatorSymbol: string; value: number; metricUnit: string; protocolTitle: string;
+  state: TargetState;
+  reason: string | null;
+  statement: string;
+  operatorSymbol: string;
+  value: number;
+  metricUnit: string;
+  protocolTitle: string;
   measured: { value: number; attemptId: string; completedAt: number | null } | null;
-  note: string; limitation: string;
+  note: string;
+  limitation: string;
 }
 
 export interface GoalView {
-  id: string; title: string; description: string | null;
-  category: GoalCategory; categoryLabel: string; status: GoalStatus;
+  id: string;
+  title: string;
+  description: string | null;
+  category: GoalCategory;
+  categoryLabel: string;
+  status: GoalStatus;
   /** Only present on an achieved goal — the sentence travels with the word. */
   statusMeaning: string | null;
-  blockReason: string | null; blockNote: string | null;
+  blockReason: string | null;
+  blockNote: string | null;
   targetDate: number | null;
   target: { protocolTitle: string; operator: string; value: number; metricUnit: string } | null;
   targetState: TargetView | null;
@@ -82,41 +129,70 @@ export interface GoalView {
 export interface ReviewView {
   id: string;
   reviewerKind: 'player_reflection' | 'guardian_reflection' | 'coach_review';
-  reviewedByName: string | null; reviewedAt: number;
+  reviewedByName: string | null;
+  reviewedAt: number;
   summary: string | null;
   /** Club-side only. A player's payload carries null here and always will. */
   internalNote: string | null;
   internalNoteNote?: string | null;
   hasInternalNote: boolean;
   nextReviewAt: number | null;
-  supersedes: string | null; supersededBy: string | null;
-  goalSnapshots: { goalId: string; title: string; status: string; completion: { phrase: string }; targetStateAtReview?: { state: string } | null }[];
+  supersedes: string | null;
+  supersededBy: string | null;
+  goalSnapshots: {
+    goalId: string;
+    title: string;
+    status: string;
+    completion: { phrase: string };
+    targetStateAtReview?: { state: string } | null;
+  }[];
 }
 
 export interface TimelineEntry {
-  id: string; at: number; action: string; label: string; internal: boolean;
+  id: string;
+  at: number;
+  action: string;
+  label: string;
+  internal: boolean;
   subject: { kind: string; id: string; title: string | null };
-  byKind: string; byName: string | null;
+  byKind: string;
+  byName: string | null;
 }
 
 export interface DevelopmentPlanView {
-  policyVersion: number; principle: string; limitation: string;
+  policyVersion: number;
+  principle: string;
+  limitation: string;
   plan: {
-    id: string; playerId: string; playerName: string; title: string;
-    status: PlanStatus; visibility: PlanVisibility;
+    id: string;
+    playerId: string;
+    playerName: string;
+    title: string;
+    status: PlanStatus;
+    visibility: PlanVisibility;
     owner: { kind: 'player' | 'org'; orgId: string | null; orgName: string | null };
     createdBy: { kind: string; name: string | null } | null;
-    startDate: number | null; nextReviewAt: number | null; endDate: number | null;
+    startDate: number | null;
+    nextReviewAt: number | null;
+    endDate: number | null;
     reviewDue: DueState;
-    sharedWithOrgIds?: string[]; sharedWithOrgCount: number;
-    rev: number; revBy: string | null; revAt: number | null; updatedAt: number;
+    sharedWithOrgIds?: string[];
+    sharedWithOrgCount: number;
+    rev: number;
+    revBy: string | null;
+    revAt: number | null;
+    updatedAt: number;
   };
   summary: {
     goalsByStatus: Record<GoalStatus, number>;
-    activeGoals: number; actionsDue: number; actionsOverdue: number;
+    activeGoals: number;
+    actionsDue: number;
+    actionsOverdue: number;
     linkedEvidenceAvailable: number;
-    lastReviewAt: number | null; nextReviewAt: number | null;
-    reviewDue: DueState; note: string;
+    lastReviewAt: number | null;
+    nextReviewAt: number | null;
+    reviewDue: DueState;
+    note: string;
   };
   goals: GoalView[];
   reviews: ReviewView[];
@@ -127,20 +203,33 @@ export interface DevelopmentPlanView {
 }
 
 export interface PlanListItem {
-  id: string; playerId: string; playerName: string | null; title: string;
-  status: PlanStatus; visibility: PlanVisibility;
+  id: string;
+  playerId: string;
+  playerName: string | null;
+  title: string;
+  status: PlanStatus;
+  visibility: PlanVisibility;
   owner: { kind: 'player' | 'org'; orgId: string | null };
   goalsByStatus: Record<GoalStatus, number>;
-  activeGoals: number; actionsOverdue: number;
-  nextReviewAt: number | null; reviewDue: DueState; updatedAt: number; rev: number;
+  activeGoals: number;
+  actionsOverdue: number;
+  nextReviewAt: number | null;
+  reviewDue: DueState;
+  updatedAt: number;
+  rev: number;
 }
 
 export interface DevelopmentCatalogue {
-  policyVersion: number; principle: string; limitation: string;
+  policyVersion: number;
+  principle: string;
+  limitation: string;
   plan: { visibilityByOwner: Record<string, string[]>; statuses: string[] };
   goal: {
-    categories: string[]; categoryLabels: Record<string, string>;
-    statuses: string[]; blockReasons: string[]; achievedMeaning: string;
+    categories: string[];
+    categoryLabels: Record<string, string>;
+    statuses: string[];
+    blockReasons: string[];
+    achievedMeaning: string;
     omitted: { categories: string[]; blockReasons: string[]; reason: string };
   };
   action: { types: string[]; statuses: string[] };
@@ -155,8 +244,13 @@ export interface DevelopmentCatalogue {
 }
 
 export interface LinkableEvidence {
-  sourceType: string; sourceId: string; sourceLabel: string; title: string;
-  provenance: string | null; occurredAt: number | null; simulated: boolean;
+  sourceType: string;
+  sourceId: string;
+  sourceLabel: string;
+  title: string;
+  provenance: string | null;
+  occurredAt: number | null;
+  simulated: boolean;
 }
 
 /** A refusal a coach can actually cause, kept as an answer rather than thrown. */
@@ -167,17 +261,29 @@ export interface M21Api {
   catalogue(s: Session): Promise<DevelopmentCatalogue>;
   linkable(s: Session, playerId: string): Promise<{ items: LinkableEvidence[]; note: string }>;
   /** The first page (newest change first); `nextCursor` continues it. */
-  plans(s: Session, playerId?: string): Promise<{ items: PlanListItem[]; total: number; nextCursor: string | null; note: string }>;
+  plans(
+    s: Session,
+    playerId?: string,
+  ): Promise<{ items: PlanListItem[]; total: number; nextCursor: string | null; note: string }>;
   plan(s: Session, id: string): Promise<DevelopmentPlanView>;
   createPlan(s: Session, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
   addGoal(s: Session, planId: string, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
   updateGoal(s: Session, goalId: string, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
   addAction(s: Session, goalId: string, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
   updateAction(s: Session, actionId: string, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
-  linkEvidence(s: Session, goalId: string, body: { sourceType: string; sourceId: string }): Promise<Result<DevelopmentPlanView>>;
+  linkEvidence(
+    s: Session,
+    goalId: string,
+    body: { sourceType: string; sourceId: string },
+  ): Promise<Result<DevelopmentPlanView>>;
   unlinkEvidence(s: Session, linkId: string): Promise<DevelopmentPlanView>;
   setStatus(s: Session, planId: string, status: PlanStatus, expectedRev: number): Promise<Result<DevelopmentPlanView>>;
-  setVisibility(s: Session, planId: string, visibility: PlanVisibility, expectedRev: number): Promise<Result<DevelopmentPlanView>>;
+  setVisibility(
+    s: Session,
+    planId: string,
+    visibility: PlanVisibility,
+    expectedRev: number,
+  ): Promise<Result<DevelopmentPlanView>>;
   submitReview(s: Session, planId: string, body: Record<string, unknown>): Promise<Result<DevelopmentPlanView>>;
   shareReview(s: Session, reviewId: string, scopes?: string[]): Promise<Result<DevelopmentPlanView>>;
   history(s: Session, planId: string): Promise<{ items: TimelineEntry[]; total: number; note: string }>;
@@ -191,20 +297,53 @@ const H = (s: Session) => ({ 'content-type': 'application/json', authorization: 
  * went wrong" would hide the explanation, which is the useful part.
  */
 const ANSWERABLE = new Set([
-  'GOAL_CATEGORY_UNKNOWN', 'GOAL_STATUS_UNKNOWN', 'GOAL_TRANSITION_INVALID',
-  'ACTION_TYPE_UNKNOWN', 'ACTION_STATUS_UNKNOWN', 'ACTION_TRANSITION_INVALID',
-  'PLAN_STATUS_UNKNOWN', 'PLAN_TRANSITION_INVALID', 'PLAN_VISIBILITY_INVALID',
-  'PLAN_NOT_EDITABLE', 'PLAN_ARCHIVED', 'ACTIVE_PLAN_NEEDS_A_GOAL',
-  'BLOCK_REASON_UNKNOWN', 'TEXT_TOO_LONG', 'DATE_INVALID', 'DATE_INTERVAL_INVALID', 'DATE_IN_PAST',
-  'TARGET_SOURCE_UNSUPPORTED', 'TARGET_PROTOCOL_UNKNOWN', 'TARGET_PROTOCOL_VERSION_UNKNOWN',
-  'TARGET_METRIC_MISMATCH', 'TARGET_OPERATOR_UNKNOWN', 'TARGET_OPERATOR_INCOMPATIBLE',
-  'TARGET_VALUE_INVALID', 'TARGET_VALUE_OUT_OF_RANGE', 'TARGET_MALFORMED',
-  'EVIDENCE_SOURCE_UNKNOWN', 'EVIDENCE_NOT_LINKABLE', 'EVIDENCE_ID_REQUIRED',
-  'ASSIGNEE_INVALID', 'TOO_MANY_GOALS', 'TOO_MANY_ACTIONS', 'TOO_MANY_EVIDENCE_LINKS',
-  'TOO_MANY_ACTIVE_PLANS', 'TITLE_REQUIRED', 'CLIENT_CANNOT_ASSERT',
-  'REVIEW_EMPTY', 'REVIEW_NOT_PERMITTED', 'REVIEW_ALREADY_SUPERSEDED', 'REVIEW_NOT_CORRECTABLE',
-  'SHARE_NEEDS_SUMMARY', 'SHARE_SCOPE_UNKNOWN', 'SHARE_NOT_APPLICABLE', 'PLAN_NOT_SHAREABLE',
-  'INTERNAL_NOTE_NOT_PERMITTED', 'TEMPLATE_UNKNOWN', 'RATE_LIMITED',
+  'GOAL_CATEGORY_UNKNOWN',
+  'GOAL_STATUS_UNKNOWN',
+  'GOAL_TRANSITION_INVALID',
+  'ACTION_TYPE_UNKNOWN',
+  'ACTION_STATUS_UNKNOWN',
+  'ACTION_TRANSITION_INVALID',
+  'PLAN_STATUS_UNKNOWN',
+  'PLAN_TRANSITION_INVALID',
+  'PLAN_VISIBILITY_INVALID',
+  'PLAN_NOT_EDITABLE',
+  'PLAN_ARCHIVED',
+  'ACTIVE_PLAN_NEEDS_A_GOAL',
+  'BLOCK_REASON_UNKNOWN',
+  'TEXT_TOO_LONG',
+  'DATE_INVALID',
+  'DATE_INTERVAL_INVALID',
+  'DATE_IN_PAST',
+  'TARGET_SOURCE_UNSUPPORTED',
+  'TARGET_PROTOCOL_UNKNOWN',
+  'TARGET_PROTOCOL_VERSION_UNKNOWN',
+  'TARGET_METRIC_MISMATCH',
+  'TARGET_OPERATOR_UNKNOWN',
+  'TARGET_OPERATOR_INCOMPATIBLE',
+  'TARGET_VALUE_INVALID',
+  'TARGET_VALUE_OUT_OF_RANGE',
+  'TARGET_MALFORMED',
+  'EVIDENCE_SOURCE_UNKNOWN',
+  'EVIDENCE_NOT_LINKABLE',
+  'EVIDENCE_ID_REQUIRED',
+  'ASSIGNEE_INVALID',
+  'TOO_MANY_GOALS',
+  'TOO_MANY_ACTIONS',
+  'TOO_MANY_EVIDENCE_LINKS',
+  'TOO_MANY_ACTIVE_PLANS',
+  'TITLE_REQUIRED',
+  'CLIENT_CANNOT_ASSERT',
+  'REVIEW_EMPTY',
+  'REVIEW_NOT_PERMITTED',
+  'REVIEW_ALREADY_SUPERSEDED',
+  'REVIEW_NOT_CORRECTABLE',
+  'SHARE_NEEDS_SUMMARY',
+  'SHARE_SCOPE_UNKNOWN',
+  'SHARE_NOT_APPLICABLE',
+  'PLAN_NOT_SHAREABLE',
+  'INTERNAL_NOTE_NOT_PERMITTED',
+  'TEMPLATE_UNKNOWN',
+  'RATE_LIMITED',
 ]);
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -252,8 +391,10 @@ export const httpM21: M21Api = {
   updateAction: (s, actionId, body) => write(`/org/development/actions/${actionId}`, s, 'PATCH', body),
   linkEvidence: (s, goalId, body) => write(`/org/development/goals/${goalId}/evidence`, s, 'POST', body),
   unlinkEvidence: (s, linkId) => req(`/org/development/evidence/${linkId}`, { method: 'DELETE', headers: H(s) }),
-  setStatus: (s, planId, status, expectedRev) => write(`/org/development/plans/${planId}/status`, s, 'POST', { status, expectedRev }),
-  setVisibility: (s, planId, visibility, expectedRev) => write(`/org/development/plans/${planId}`, s, 'PATCH', { visibility, expectedRev }),
+  setStatus: (s, planId, status, expectedRev) =>
+    write(`/org/development/plans/${planId}/status`, s, 'POST', { status, expectedRev }),
+  setVisibility: (s, planId, visibility, expectedRev) =>
+    write(`/org/development/plans/${planId}`, s, 'PATCH', { visibility, expectedRev }),
   submitReview: (s, planId, body) => write(`/org/development/plans/${planId}/reviews`, s, 'POST', body),
   shareReview: (s, reviewId, scopes) => write(`/org/development/reviews/${reviewId}/share`, s, 'POST', { scopes }),
   history: (s, planId) => req(`/org/development/plans/${planId}/history`, { headers: H(s) }),

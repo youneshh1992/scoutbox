@@ -14,7 +14,8 @@ export const CLIENT_NAV: CaseNavModel = {
   id: 'client',
   categories: [
     {
-      id: 'overview', labelKey: 'clients.cat.overview',
+      id: 'overview',
+      labelKey: 'clients.cat.overview',
       subs: [
         { id: 'summary', labelKey: 'clients.tab.summary', legacy: ['overview'] },
         { id: 'journey', labelKey: 'clients.tab.journey' },
@@ -23,7 +24,8 @@ export const CLIENT_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'player', labelKey: 'clients.cat.player',
+      id: 'player',
+      labelKey: 'clients.cat.player',
       subs: [
         { id: 'profile', labelKey: 'clients.tab.profile' },
         { id: 'representation', labelKey: 'clients.tab.representation' },
@@ -31,7 +33,8 @@ export const CLIENT_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'recruitment', labelKey: 'clients.cat.recruitment',
+      id: 'recruitment',
+      labelKey: 'clients.cat.recruitment',
       subs: [
         { id: 'contacts', labelKey: 'clients.tab.contacts' },
         { id: 'trials', labelKey: 'clients.tab.trials' },
@@ -39,7 +42,8 @@ export const CLIENT_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'transaction', labelKey: 'clients.cat.transaction',
+      id: 'transaction',
+      labelKey: 'clients.cat.transaction',
       subs: [
         { id: 'offers', labelKey: 'clients.tab.offers' },
         { id: 'signings', labelKey: 'clients.tab.signings' },
@@ -47,7 +51,8 @@ export const CLIENT_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'history', labelKey: 'clients.cat.history',
+      id: 'history',
+      labelKey: 'clients.cat.history',
       subs: [
         { id: 'timeline', labelKey: 'clients.tab.timeline' },
         { id: 'past-offers', labelKey: 'clients.tab.past-offers' },
@@ -61,7 +66,8 @@ export const TRANSACTION_NAV: CaseNavModel = {
   id: 'transaction',
   categories: [
     {
-      id: 'workspace', labelKey: 'tx.cat.workspace',
+      id: 'workspace',
+      labelKey: 'tx.cat.workspace',
       subs: [
         { id: 'overview', labelKey: 'txTab.overview' },
         { id: 'parties', labelKey: 'txTab.parties' },
@@ -69,7 +75,8 @@ export const TRANSACTION_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'records', labelKey: 'tx.cat.records',
+      id: 'records',
+      labelKey: 'tx.cat.records',
       subs: [
         { id: 'documents', labelKey: 'txTab.documents' },
         { id: 'messages', labelKey: 'txTab.messages' },

@@ -2,25 +2,38 @@
 // reviewed, dismissed or acted on). Reopening a room goes through the rooms' own reopen path.
 import { PROVIDERS } from '../development/boxcam/drills.mjs';
 import {
-  SECOND_LOOK_POLICY_VERSION, SECOND_LOOK_STATUSES, canSecondLookTransition,
-  DISMISSAL_REASONS, SECOND_LOOK_DISCLAIMER, SECOND_LOOK_KIND_COPY,
-  normalizeMaterialChange, changesSinceDecision, buildSecondLookCandidate,
-  secondLookStatus, secondLookExpired, orderSecondLook, compareToSnapshot,
-  trustLevelChanges, POLICY, LIMITS, clampPage, safeM18Projection,
-  CLUB_SIDE_REASONS, REASON_CHANGE_MAP,
+  SECOND_LOOK_POLICY_VERSION,
+  SECOND_LOOK_STATUSES,
+  canSecondLookTransition,
+  DISMISSAL_REASONS,
+  SECOND_LOOK_DISCLAIMER,
+  SECOND_LOOK_KIND_COPY,
+  normalizeMaterialChange,
+  changesSinceDecision,
+  buildSecondLookCandidate,
+  secondLookStatus,
+  secondLookExpired,
+  orderSecondLook,
+  compareToSnapshot,
+  trustLevelChanges,
+  POLICY,
+  LIMITS,
+  clampPage,
+  safeM18Projection,
+  CLUB_SIDE_REASONS,
+  REASON_CHANGE_MAP,
 } from './shared.mjs';
 import { rateLimitedBody, limitCheck } from '../platform/rateLimit.mjs';
 import { now } from '../platform/clock.mjs';
 
 export function registerSecondLook(ctx) {
-  const {
-    orgRouter, nextId, notify, broadcast,
-    findPlayer, orgCanSee, isLead, vmetric, discovery, unit,
-  } = ctx;
+  const { orgRouter, nextId, notify, broadcast, findPlayer, orgCanSee, isLead, vmetric, discovery, unit } = ctx;
   const dreads = ctx.discoveryReads;
-  if (typeof dreads?.secondLook?.byKey !== 'function' || typeof discovery?.secondLook?.create !== 'function') throw new TypeError('registerSecondLook needs the discovery repository and discoveryReads from the data layer');
+  if (typeof dreads?.secondLook?.byKey !== 'function' || typeof discovery?.secondLook?.create !== 'function')
+    throw new TypeError('registerSecondLook needs the discovery repository and discoveryReads from the data layer');
   const reads = ctx.recruitmentReads;
-  if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerSecondLook needs recruitmentReads (signings) from the data layer');
+  if (typeof reads?.signings?.forPlayer !== 'function')
+    throw new TypeError('registerSecondLook needs recruitmentReads (signings) from the data layer');
 
   const limited = limitCheck(ctx.rateLimit);
 
@@ -39,8 +52,11 @@ export function registerSecondLook(ctx) {
       // A tier upgrade counts only when it happened after the record was created; evidence written with a tier is
       // a new item, not a later confirmation.
       const reviewedAt = e.verification?.reviewedAt ?? 0;
-      if (reviewedAt > since && reviewedAt > (e.recordedAt ?? 0)
-        && ['coach_confirmed', 'club_assessed', 'independent'].includes(e.verification?.status)) {
+      if (
+        reviewedAt > since &&
+        reviewedAt > (e.recordedAt ?? 0) &&
+        ['coach_confirmed', 'club_assessed', 'independent'].includes(e.verification?.status)
+      ) {
         add('evidence_quality_improved', 'evidence', e.id, reviewedAt);
       }
       // Superseded: the correcting row carries the clock, the original does not.
@@ -71,14 +87,16 @@ export function registerSecondLook(ctx) {
       // The live effective state: an invalidated bound session removes it.
       const session = sessionById.get(a.boxSessionId);
       if (session?.verificationState === 'invalidated') continue;
-      if (a.completedAt > since) add('combine_verified_added', 'combine', `${a.protocolId}@${a.protocolVersion}`, a.completedAt);
+      if (a.completedAt > since)
+        add('combine_verified_added', 'combine', `${a.protocolId}@${a.protocolVersion}`, a.completedAt);
     }
 
     // --- Box Cam -----------------------------------------------------------
     // Not one change per session: only the first development evidence since the review, or a completed
     // coach-assigned block, is material.
-    const sessions = playerSessions
-      .filter((s) => ['verified', 'partially_verified'].includes(s.verificationState) && s.finalizedAt);
+    const sessions = playerSessions.filter(
+      (s) => ['verified', 'partially_verified'].includes(s.verificationState) && s.finalizedAt,
+    );
     const fresh = sessions.filter((s) => s.finalizedAt > since);
     const hadBefore = sessions.some((s) => s.finalizedAt <= since);
     if (!hadBefore && fresh.length >= POLICY.boxCam.minSessionsForFirstEvidence) {
@@ -87,7 +105,8 @@ export function registerSecondLook(ctx) {
     }
     for (const a of boxReads.assignments.forPlayer(player.id)) {
       if (a.orgId !== org.id) continue;
-      if (a.state === 'completed' && a.updatedAt > since) add('development_block_completed', 'box_cam', a.id, a.updatedAt);
+      if (a.state === 'completed' && a.updatedAt > since)
+        add('development_block_completed', 'box_cam', a.id, a.updatedAt);
     }
 
     // --- trials, assessments, gap closure ----------------------------------
@@ -107,8 +126,10 @@ export function registerSecondLook(ctx) {
     for (const session of playerSessions) {
       const events = session.integrityEvents ?? [];
       if (!events.length) continue;
-      const backed = playerAttempts.some((a) => a.boxSessionId === session.id
-        && a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
+      const backed = playerAttempts.some(
+        (a) =>
+          a.boxSessionId === session.id && a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly,
+      );
       if (!backed) continue;
       for (const ev of events) {
         if (!(ev.at > since)) continue;
@@ -129,14 +150,14 @@ export function registerSecondLook(ctx) {
     // A club's shadow list confirms no club.
     for (const row of ctx.scoutingReads.squad.forPlayer(player.id)) {
       const o = ctx.byId.org(row.orgId);
-      if (o?.verified && row.addedAt > since) add('current_club_confirmed', 'squad_row', `${o.id}:${row.playerId}`, row.addedAt);
+      if (o?.verified && row.addedAt > since)
+        add('current_club_confirmed', 'squad_row', `${o.id}:${row.playerId}`, row.addedAt);
     }
     return changesSinceDecision(out.filter(Boolean), since);
   }
 
   /** The head of the decision chain, which last-by-timestamp would not reliably find. */
-  const latestDecision = (roomId) => reads.decisions.forRoom(roomId)
-    .find((d) => d.supersededById == null) ?? null;
+  const latestDecision = (roomId) => reads.decisions.forRoom(roomId).find((d) => d.supersededById == null) ?? null;
 
   const latestSnapshot = (roomId, decision) => {
     if (decision?.snapshot?.snapshotId) {
@@ -147,8 +168,13 @@ export function registerSecondLook(ctx) {
 
   function currentFacts(player, org) {
     const evidenceIds = ctx.scoutingReads.evidence.currentForPlayer(player.id).map((e) => e.id);
-    const assessmentIds = ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id).filter((a) => a.state !== 'draft').map((a) => a.id);
-    const combineResults = (ctx.combineProjection?.(player.id)?.results ?? []).map((r) => `${r.protocolId}@${r.protocolVersion}`);
+    const assessmentIds = ctx.scoutingReads.assessments
+      .forOrgPlayer(org.id, player.id)
+      .filter((a) => a.state !== 'draft')
+      .map((a) => a.id);
+    const combineResults = (ctx.combineProjection?.(player.id)?.results ?? []).map(
+      (r) => `${r.protocolId}@${r.protocolVersion}`,
+    );
     const trialIds = reads.trials.forOrgPlayer(org.id, player.id).map((t) => t.id);
     const references = ctx.verificationReads.references.activeForPlayer(player.id).length;
     return { evidenceIds, assessmentIds, combineResults, trialIds, references };
@@ -165,9 +191,14 @@ export function registerSecondLook(ctx) {
   /** Derived live, so a block, suspension or removal takes effect on the next read. */
   function projectCandidates(req, { playerId = null } = {}) {
     const org = req.org;
-    const rooms = reads.cases.forOrg(org.id).filter((c) => c.room
-      && ['archived', 'closed', 'withdrawn'].includes(c.room.status)
-      && (!playerId || c.playerId === playerId));
+    const rooms = reads.cases
+      .forOrg(org.id)
+      .filter(
+        (c) =>
+          c.room &&
+          ['archived', 'closed', 'withdrawn'].includes(c.room.status) &&
+          (!playerId || c.playerId === playerId),
+      );
     // Only the most recent ended room per player projects a candidate, or one new full match would raise an alert
     // per historical room. Same-millisecond ties fall back to the decision id so the choice is stable.
     const newest = new Map();
@@ -175,9 +206,10 @@ export function registerSecondLook(ctx) {
       const decision = latestDecision(room.id);
       if (!decision) continue;
       const prev = newest.get(room.playerId);
-      const fresher = !prev
-        || decision.createdAt > prev.decision.createdAt
-        || (decision.createdAt === prev.decision.createdAt && String(decision.id) > String(prev.decision.id));
+      const fresher =
+        !prev ||
+        decision.createdAt > prev.decision.createdAt ||
+        (decision.createdAt === prev.decision.createdAt && String(decision.id) > String(prev.decision.id));
       if (fresher) newest.set(room.playerId, { room, decision });
     }
 
@@ -192,9 +224,13 @@ export function registerSecondLook(ctx) {
       const snapshot = latestSnapshot(room.id, decision);
       const { profile, safe } = trustFor(player);
       const candidate = buildSecondLookCandidate({
-        room, decision, snapshot, changes,
+        room,
+        decision,
+        snapshot,
+        changes,
         trustMovement: trustLevelChanges(snapshot?.trust, profile),
-        playerVisible: true, currentTrust: safe,
+        playerVisible: true,
+        currentTrust: safe,
       });
       if (candidate) out.push({ candidate, room, player, decision, snapshot, profile, safe });
     }
@@ -220,19 +256,25 @@ export function registerSecondLook(ctx) {
         const existing = itemFor(org.id, room.id, candidate.decisionId);
         const verdict = secondLookStatus({ existing, candidate });
         // Suppression means "do not resurface as open", not "forget": the item stays in the Reviewed/Dismissed tabs.
-        if (verdict.action === 'suppress') { if (existing) live.push({ item: existing, candidate }); continue; }
+        if (verdict.action === 'suppress') {
+          if (existing) live.push({ item: existing, candidate });
+          continue;
+        }
         const at = now();
         if (verdict.action === 'create') {
           const item = discovery.secondLook.create({
             id: nextId('slk'),
-            orgId: org.id, playerId: candidate.playerId, roomId: candidate.roomId,
+            orgId: org.id,
+            playerId: candidate.playerId,
+            roomId: candidate.roomId,
             decisionId: candidate.decisionId,
             policyVersion: SECOND_LOOK_POLICY_VERSION,
             triggerType: candidate.kind,
             changeFingerprints: candidate.changeFingerprints,
             directReasonCodes: candidate.directReasonCodes,
             status: 'open',
-            createdAt: at, updatedAt: at,
+            createdAt: at,
+            updatedAt: at,
             latestChangeAt: candidate.latestChangeAt,
             history: [{ at, action: 'surfaced', by: null }],
           });
@@ -241,8 +283,12 @@ export function registerSecondLook(ctx) {
           // "a player you archived" is useless to someone who has archived dozens.
           const owner = room.ownerUserId ? ctx.byId.user(room.ownerUserId) : null;
           if (owner && owner.orgId === org.id && !owner.removedAt) {
-            notify({ kind: 'org_user', id: owner.id }, 'second_look',
-              `Second Look — ${room.playerName}: new evidence since your organisation archived this Room.`, item.id);
+            notify(
+              { kind: 'org_user', id: owner.id },
+              'second_look',
+              `Second Look — ${room.playerName}: new evidence since your organisation archived this Room.`,
+              item.id,
+            );
           }
           live.push({ item, candidate });
           continue;
@@ -254,7 +300,12 @@ export function registerSecondLook(ctx) {
           d.latestChangeAt = candidate.latestChangeAt;
           d.updatedAt = at;
         };
-        const expire = (d) => { if (secondLookExpired(d, at)) { d.status = 'expired'; d.updatedAt = at; } };
+        const expire = (d) => {
+          if (secondLookExpired(d, at)) {
+            d.status = 'expired';
+            d.updatedAt = at;
+          }
+        };
         let item = existing;
         if (verdict.action === 'reopen') {
           item = discovery.secondLook.update(existing.id, (d) => {
@@ -265,7 +316,10 @@ export function registerSecondLook(ctx) {
           });
           vmetric('second_look_created');
         } else if (verdict.action === 'update') {
-          item = discovery.secondLook.update(existing.id, (d) => { refresh(d); expire(d); });
+          item = discovery.secondLook.update(existing.id, (d) => {
+            refresh(d);
+            expire(d);
+          });
         } else if (secondLookExpired(existing, at)) {
           item = discovery.secondLook.update(existing.id, expire);
         }
@@ -276,46 +330,66 @@ export function registerSecondLook(ctx) {
   }
 
   const storedView = (i) => ({
-    id: i.id, playerId: i.playerId, roomId: i.roomId, decisionId: i.decisionId, policyVersion: i.policyVersion,
-    triggerType: i.triggerType, changeFingerprints: i.changeFingerprints, directReasonCodes: i.directReasonCodes,
-    status: i.status, createdAt: i.createdAt, updatedAt: i.updatedAt, latestChangeAt: i.latestChangeAt,
-    reviewedAt: i.reviewedAt, reviewedBy: i.reviewedBy, dismissedAt: i.dismissedAt, dismissedBy: i.dismissedBy, dismissReason: i.dismissReason,
-    reopenedAt: i.reopenedAt, reopenedBy: i.reopenedBy, history: i.history,
+    id: i.id,
+    playerId: i.playerId,
+    roomId: i.roomId,
+    decisionId: i.decisionId,
+    policyVersion: i.policyVersion,
+    triggerType: i.triggerType,
+    changeFingerprints: i.changeFingerprints,
+    directReasonCodes: i.directReasonCodes,
+    status: i.status,
+    createdAt: i.createdAt,
+    updatedAt: i.updatedAt,
+    latestChangeAt: i.latestChangeAt,
+    reviewedAt: i.reviewedAt,
+    reviewedBy: i.reviewedBy,
+    dismissedAt: i.dismissedAt,
+    dismissedBy: i.dismissedBy,
+    dismissReason: i.dismissReason,
+    reopenedAt: i.reopenedAt,
+    reopenedBy: i.reopenedBy,
+    history: i.history,
   });
 
-  const itemView = ({ item, candidate }) => safeM18Projection({
-    id: item.id,
-    orgId: item.orgId,
-    playerId: item.playerId,
-    playerName: candidate.playerName ?? null,
-    roomId: item.roomId,
-    decisionId: item.decisionId,
-    status: item.status,
-    policyVersion: item.policyVersion,
-    kind: candidate.kind,
-    kindLabel: SECOND_LOOK_KIND_COPY[candidate.kind],
-    strength: candidate.strength,
-    archivedStatus: candidate.archivedStatus,
-    archiveReasonCodes: candidate.archiveReasonCodes,
-    directReasonCodes: candidate.directReasonCodes,
-    unresolvedReasonCodes: candidate.unresolvedReasonCodes,
-    decisionAt: candidate.decisionAt,
-    changes: candidate.changes.map((c) => ({
-      type: c.type, text: c.text, relatesTo: c.relatesTo, negative: c.negative,
-      occurredAt: c.occurredAt, fingerprint: c.fingerprint,
-    })),
-    changeCount: candidate.changeCount,
-    trustMovement: candidate.trustMovement,
-    currentTrust: candidate.currentTrust,
-    summary: candidate.summary,
-    latestChangeAt: candidate.latestChangeAt,
-    reviewedAt: item.reviewedAt ?? null,
-    reviewedBy: item.reviewedBy ?? null,
-    dismissedAt: item.dismissedAt ?? null,
-    dismissReason: item.dismissReason ?? null,
-    reopenedAt: item.reopenedAt ?? null,
-    disclaimer: SECOND_LOOK_DISCLAIMER,
-  });
+  const itemView = ({ item, candidate }) =>
+    safeM18Projection({
+      id: item.id,
+      orgId: item.orgId,
+      playerId: item.playerId,
+      playerName: candidate.playerName ?? null,
+      roomId: item.roomId,
+      decisionId: item.decisionId,
+      status: item.status,
+      policyVersion: item.policyVersion,
+      kind: candidate.kind,
+      kindLabel: SECOND_LOOK_KIND_COPY[candidate.kind],
+      strength: candidate.strength,
+      archivedStatus: candidate.archivedStatus,
+      archiveReasonCodes: candidate.archiveReasonCodes,
+      directReasonCodes: candidate.directReasonCodes,
+      unresolvedReasonCodes: candidate.unresolvedReasonCodes,
+      decisionAt: candidate.decisionAt,
+      changes: candidate.changes.map((c) => ({
+        type: c.type,
+        text: c.text,
+        relatesTo: c.relatesTo,
+        negative: c.negative,
+        occurredAt: c.occurredAt,
+        fingerprint: c.fingerprint,
+      })),
+      changeCount: candidate.changeCount,
+      trustMovement: candidate.trustMovement,
+      currentTrust: candidate.currentTrust,
+      summary: candidate.summary,
+      latestChangeAt: candidate.latestChangeAt,
+      reviewedAt: item.reviewedAt ?? null,
+      reviewedBy: item.reviewedBy ?? null,
+      dismissedAt: item.dismissedAt ?? null,
+      dismissReason: item.dismissReason ?? null,
+      reopenedAt: item.reopenedAt ?? null,
+      disclaimer: SECOND_LOOK_DISCLAIMER,
+    });
 
   // ================================================================= ROUTES
 
@@ -340,7 +414,9 @@ export function registerSecondLook(ctx) {
     const offset = Math.max(0, Number(req.query.offset) || 0);
     res.json({
       items: ordered.slice(offset, offset + limit).map(itemView),
-      total: ordered.length, limit, offset,
+      total: ordered.length,
+      limit,
+      offset,
       counts: {
         open: live.filter((l) => l.item.status === 'open').length,
         reviewed: live.filter((l) => l.item.status === 'reviewed').length,
@@ -354,7 +430,10 @@ export function registerSecondLook(ctx) {
 
   function findItem(req, res) {
     const item = dreads.secondLook.forOrgById(String(req.params.id), req.org.id);
-    if (!item) { res.status(404).json({ error: 'SECOND_LOOK_NOT_FOUND' }); return null; }
+    if (!item) {
+      res.status(404).json({ error: 'SECOND_LOOK_NOT_FOUND' });
+      return null;
+    }
     return item;
   }
 
@@ -369,7 +448,8 @@ export function registerSecondLook(ctx) {
     if (!player || !orgCanSee(req.org, player)) {
       return res.json({
         item: { ...storedView(current), playerName: null, playerAvailable: false },
-        unavailableNote: 'Player data is currently unavailable to your organisation under the standing rules. Your internal record remains.',
+        unavailableNote:
+          'Player data is currently unavailable to your organisation under the standing rules. Your internal record remains.',
       });
     }
     if (!live) {
@@ -378,7 +458,9 @@ export function registerSecondLook(ctx) {
         note: 'The changes behind this item are no longer current.',
       });
     }
-    res.json({ item: itemView({ item: current, candidate: { ...live.candidate, playerName: room?.playerName ?? null } }) });
+    res.json({
+      item: itemView({ item: current, candidate: { ...live.candidate, playerName: room?.playerName ?? null } }),
+    });
   });
 
   orgRouter.get('/second-look/:id/changes', (req, res) => {
@@ -386,7 +468,10 @@ export function registerSecondLook(ctx) {
     if (!item) return;
     const player = findPlayer(item.playerId);
     if (!player || !orgCanSee(req.org, player)) {
-      return res.status(200).json({ available: false, unavailableNote: 'Player data is currently unavailable to your organisation under the standing rules.' });
+      return res.status(200).json({
+        available: false,
+        unavailableNote: 'Player data is currently unavailable to your organisation under the standing rules.',
+      });
     }
     const room = reads.cases.byId(item.roomId);
     const decision = latestDecision(item.roomId);
@@ -399,7 +484,9 @@ export function registerSecondLook(ctx) {
         at: decision?.createdAt ?? null,
         reasonCodes: decision?.reasonCodes ?? [],
         recommendation: decision?.recommendation ?? null,
-        trust: snapshot?.trust ? { score: snapshot.trust.score, band: snapshot.trust.band, policyVersion: snapshot.trust.policyVersion } : null,
+        trust: snapshot?.trust
+          ? { score: snapshot.trust.score, band: snapshot.trust.band, policyVersion: snapshot.trust.policyVersion }
+          : null,
         note: snapshot ? null : 'Previous detail unavailable — no decision-time snapshot was recorded.',
       },
       current: { trust: safe, playerName: room?.playerName ?? null },
@@ -429,7 +516,10 @@ export function registerSecondLook(ctx) {
     const at = now();
     const by = { userId: req.orgUser.id, name: req.orgUser.name };
     const stored = discovery.secondLook.update(item.id, (d) => {
-      d.status = 'reviewed'; d.reviewedAt = at; d.reviewedBy = by; d.updatedAt = at;
+      d.status = 'reviewed';
+      d.reviewedAt = at;
+      d.reviewedBy = by;
+      d.updatedAt = at;
       d.history.push({ at, action: 'reviewed', by });
     });
     vmetric('second_look_reviewed');
@@ -448,11 +538,18 @@ export function registerSecondLook(ctx) {
     const at = now();
     const by = { userId: req.orgUser.id, name: req.orgUser.name };
     const stored = discovery.secondLook.update(item.id, (d) => {
-      d.status = 'dismissed'; d.dismissedAt = at; d.dismissedBy = by; d.dismissReason = reason; d.updatedAt = at;
+      d.status = 'dismissed';
+      d.dismissedAt = at;
+      d.dismissedBy = by;
+      d.dismissReason = reason;
+      d.updatedAt = at;
       d.history.push({ at, action: 'dismissed', by, reason });
     });
     vmetric('second_look_dismissed');
-    res.json({ item: storedView(stored), note: 'Dismissed for your organisation only. Nothing about the player’s record changes.' });
+    res.json({
+      item: storedView(stored),
+      note: 'Dismissed for your organisation only. Nothing about the player’s record changes.',
+    });
   });
 
   /** The only way a Second Look reaches the pipeline, through the rooms' own reopen path. */
@@ -469,9 +566,12 @@ export function registerSecondLook(ctx) {
 
     const { out, stored } = unit(() => {
       const reopened = ctx.reopenRoom({
-        req, room, to: 'under_review',
+        req,
+        room,
+        to: 'under_review',
         reasonCodes: req.body?.reasonCodes ?? ['continue_monitoring'],
-        sourceContext: 'second_look', sourceRef: { id: item.id },
+        sourceContext: 'second_look',
+        sourceRef: { id: item.id },
       });
       if (!reopened.ok) return { out: reopened, stored: null };
       const at = now();
@@ -479,7 +579,10 @@ export function registerSecondLook(ctx) {
       return {
         out: reopened,
         stored: discovery.secondLook.update(item.id, (d) => {
-          d.status = 'reopened_room'; d.reopenedAt = at; d.reopenedBy = by; d.updatedAt = at;
+          d.status = 'reopened_room';
+          d.reopenedAt = at;
+          d.reopenedBy = by;
+          d.updatedAt = at;
           d.history.push({ at, action: 'reopened_room', by });
         }),
       };
@@ -487,7 +590,11 @@ export function registerSecondLook(ctx) {
     if (!out.ok) return res.status(out.status).json(out);
     vmetric('second_look_room_reopened');
     broadcast?.('recruitment_room_reopened_from_second_look', { orgId: req.org.id, roomId: room.id, itemId: item.id });
-    res.json({ item: storedView(stored), room: out.room, note: 'The archived decision remains in the room’s history. Reopening adds to it.' });
+    res.json({
+      item: storedView(stored),
+      room: out.room,
+      note: 'The archived decision remains in the room’s history. Reopening adds to it.',
+    });
   });
 
   ctx.secondLookCollectChanges = collectChanges;

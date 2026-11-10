@@ -177,18 +177,30 @@ export const httpStatusFor = (code) => LIFECYCLE_ERROR_HTTP[code] ?? null;
  * which record is missing.
  */
 const PUBLIC_ERROR_FIELDS = [
-  'error', 'message', 'allowed', 'to', 'actions',
-  'requires', 'evidenceReason',
-  'current', 'expectedRev', 'rev',
+  'error',
+  'message',
+  'allowed',
+  'to',
+  'actions',
+  'requires',
+  'evidenceReason',
+  'current',
+  'expectedRev',
+  'rev',
   // Contact cooldown: when the caller may try again.
   'retryAt',
   // Trial: the refused field, the days offered, the expected syntax, and the
   // missing completion requirements.
-  'field', 'offered', 'expected', 'reasons',
+  'field',
+  'offered',
+  'expected',
+  'reasons',
   // Decision: the lifecycle code under a DECISION_LIFECYCLE_CONFLICT and the
   // caller's own refused reference and `supersedes` id. The reason code lists
   // (`unknown`, `prohibited`) stay internal, as e2e/recruitment/lifecycle pins.
-  'lifecycle', 'ref', 'supersedes',
+  'lifecycle',
+  'ref',
+  'supersedes',
 ];
 
 /** Internal (500-class) errors are reduced to the code and a fixed message; the caller logs the full object. */

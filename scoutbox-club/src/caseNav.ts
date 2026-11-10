@@ -12,7 +12,8 @@ export const ROOM_NAV: CaseNavModel = {
   id: 'room',
   categories: [
     {
-      id: 'overview', labelKey: 'rm.cat.overview',
+      id: 'overview',
+      labelKey: 'rm.cat.overview',
       subs: [
         { id: 'summary', labelKey: 'rm.tab.summary', legacy: ['overview'] },
         { id: 'journey', labelKey: 'rm.tab.journey' },
@@ -23,7 +24,8 @@ export const ROOM_NAV: CaseNavModel = {
     {
       // The player's own truth layer — the Passport, Combine results and the
       // development plan — as distinct from what this club thinks (Evaluation).
-      id: 'player', labelKey: 'rm.cat.player',
+      id: 'player',
+      labelKey: 'rm.cat.player',
       subs: [
         { id: 'passport', labelKey: 'rm.tab.passport' },
         { id: 'combine', labelKey: 'rm.tab.combine' },
@@ -31,7 +33,8 @@ export const ROOM_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'evaluation', labelKey: 'rm.cat.evaluation',
+      id: 'evaluation',
+      labelKey: 'rm.cat.evaluation',
       subs: [
         { id: 'evidence', labelKey: 'rm.tab.evidence' },
         { id: 'assessments', labelKey: 'rm.tab.assessments' },
@@ -40,7 +43,8 @@ export const ROOM_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'engagement', labelKey: 'rm.cat.engagement',
+      id: 'engagement',
+      labelKey: 'rm.cat.engagement',
       subs: [
         // Internal talk first, shared communication second: the
         // Discussion never travels; Contact and Trial reach the player.
@@ -51,7 +55,8 @@ export const ROOM_NAV: CaseNavModel = {
       ],
     },
     {
-      id: 'deal', labelKey: 'rm.cat.deal',
+      id: 'deal',
+      labelKey: 'rm.cat.deal',
       subs: [
         { id: 'offer', labelKey: 'rm.tab.offer' },
         { id: 'signing', labelKey: 'rm.tab.signing' },
@@ -60,7 +65,8 @@ export const ROOM_NAV: CaseNavModel = {
     },
     {
       // Read-oriented: canonical history, never another writer.
-      id: 'history', labelKey: 'rm.cat.history',
+      id: 'history',
+      labelKey: 'rm.cat.history',
       subs: [
         { id: 'timeline', labelKey: 'rm.tab.timeline' },
         { id: 'past-decisions', labelKey: 'rm.tab.past-decisions' },

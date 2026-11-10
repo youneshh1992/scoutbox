@@ -11,23 +11,89 @@
 
 /** What a club (any organisation) receives of a player, before the per-platform rules. */
 export const ORG_PLAYER_FIELDS = Object.freeze([
-  'id', 'name', 'position', 'foot', 'heightCm', 'weightKg', 'country', 'city', 'level', 'availability', 'contractStatus',
-  'identityVerified', 'footballCategory', 'squadNumber', 'createdAt', 'firstTeamSeeker',
+  'id',
+  'name',
+  'position',
+  'foot',
+  'heightCm',
+  'weightKg',
+  'country',
+  'city',
+  'level',
+  'availability',
+  'contractStatus',
+  'identityVerified',
+  'footballCategory',
+  'squadNumber',
+  'createdAt',
+  'firstTeamSeeker',
   // the pro-market surface: deleted again for grassroots clubs below
-  'academyPlus', 'marketValueRange', 'agentName', 'contractUntil',
+  'academyPlus',
+  'marketValueRange',
+  'agentName',
+  'contractUntil',
   // football record and evidence
-  'stats', 'seasonHistory', 'badges', 'timeline', 'drills', 'media',
+  'stats',
+  'seasonHistory',
+  'badges',
+  'timeline',
+  'drills',
+  'media',
 ]);
 /** Attendance items without the GPS fix: a club never learns where a player was located. */
-export const ORG_ATTENDANCE_FIELDS = Object.freeze(['id', 'fixture', 'venue', 'date', 'verified', 'corroboratedBy', 'deviceConfirmed', 'trialId']);
+export const ORG_ATTENDANCE_FIELDS = Object.freeze([
+  'id',
+  'fixture',
+  'venue',
+  'date',
+  'verified',
+  'corroboratedBy',
+  'deviceConfirmed',
+  'trialId',
+]);
 /** Never served to an organisation, whatever the record holds. */
-export const ORG_PLAYER_NEVER = Object.freeze(['dob', 'location', 'programme', 'guardianId', 'password', 'activityLog', 'notificationPrefs', 'externalIds', 'drillResults', 'medical', 'trialReports', 'attendance']);
+export const ORG_PLAYER_NEVER = Object.freeze([
+  'dob',
+  'location',
+  'programme',
+  'guardianId',
+  'password',
+  'activityLog',
+  'notificationPrefs',
+  'externalIds',
+  'drillResults',
+  'medical',
+  'trialReports',
+  'attendance',
+]);
 /** What Trust & Safety receives of a guardian: never the password hash, never the e-mail code. */
-export const ADMIN_GUARDIAN_FIELDS = Object.freeze(['id', 'name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted', 'childIds', 'coGuardianOf', 'coGuardians', 'notificationPrefs', 'createdAt']);
+export const ADMIN_GUARDIAN_FIELDS = Object.freeze([
+  'id',
+  'name',
+  'email',
+  'emailVerified',
+  'idVerified',
+  'idvReference',
+  'disclaimerAccepted',
+  'childIds',
+  'coGuardianOf',
+  'coGuardians',
+  'notificationPrefs',
+  'createdAt',
+]);
 
-const UNSHARED_MEDICAL = Object.freeze({ shared: false, records: [], conditionStatus: 'not_shared', note: 'Medical data is player-controlled and has not been shared.' });
+const UNSHARED_MEDICAL = Object.freeze({
+  shared: false,
+  records: [],
+  conditionStatus: 'not_shared',
+  note: 'Medical data is player-controlled and has not been shared.',
+});
 const plain = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
-const pick = (record, fields) => { const out = {}; for (const f of fields) if (record[f] !== undefined) out[f] = plain(record[f]); return out; };
+const pick = (record, fields) => {
+  const out = {};
+  for (const f of fields) if (record[f] !== undefined) out[f] = plain(record[f]);
+  return out;
+};
 
 /**
  * Clubs — the organisation-facing view. `null` when the organisation may
@@ -57,21 +123,60 @@ export function orgPlayerView(player, org, helpers) {
   }
   if ((org.level ?? null) === 'grassroots') {
     // Grassroots is semi-pro and below: the pro-market surface does not exist on this platform.
-    delete view.academyPlus; delete view.marketValueRange; delete view.agentName; delete view.contractUntil;
+    delete view.academyPlus;
+    delete view.marketValueRange;
+    delete view.agentName;
+    delete view.contractUntil;
     view.distanceKm = Math.round(haversineKm(org.location, player.location) * 10) / 10;
     view.firstTeamSeeker = !!player.firstTeamSeeker; // Grassroots' own cohort
   }
   // Coach references travel with grassroots-journey players everywhere.
   if (player.level !== 'pro') view.vouches = publishedVouchesFor(player.id);
-  for (const key of ORG_PLAYER_NEVER) if (key in view && !['medical', 'trialReports', 'attendance'].includes(key)) delete view[key];
+  for (const key of ORG_PLAYER_NEVER)
+    if (key in view && !['medical', 'trialReports', 'attendance'].includes(key)) delete view[key];
   return view;
 }
 
 /** The player's own record, as the player (and, for a child, the guardian) receives it. */
-export const SELF_PLAYER_FIELDS = Object.freeze(['id', 'name', 'dob', 'country', 'city', 'position', 'foot', 'heightCm', 'weightKg', 'squadNumber',
-  'contractUntil', 'marketValueRange', 'agentName', 'academyPlus', 'firstTeamSeeker', 'availability', 'contractStatus', 'level',
-  'footballCategory', 'identityVerified', 'guardianId', 'createdAt', 'location', 'stats', 'medical', 'notificationPrefs', 'programme',
-  'media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory', 'trialReports']);
+export const SELF_PLAYER_FIELDS = Object.freeze([
+  'id',
+  'name',
+  'dob',
+  'country',
+  'city',
+  'position',
+  'foot',
+  'heightCm',
+  'weightKg',
+  'squadNumber',
+  'contractUntil',
+  'marketValueRange',
+  'agentName',
+  'academyPlus',
+  'firstTeamSeeker',
+  'availability',
+  'contractStatus',
+  'level',
+  'footballCategory',
+  'identityVerified',
+  'guardianId',
+  'createdAt',
+  'location',
+  'stats',
+  'medical',
+  'notificationPrefs',
+  'programme',
+  'media',
+  'attendance',
+  'timeline',
+  'badges',
+  'drills',
+  'drillResults',
+  'activityLog',
+  'externalIds',
+  'seasonHistory',
+  'trialReports',
+]);
 export function playerSelfView(player) {
   return pick(player, SELF_PLAYER_FIELDS);
 }
@@ -79,10 +184,29 @@ export function playerSelfView(player) {
 /** A guardian's view of their child: the child's own record plus the derived numbers (the guardian is the child's representative). */
 export function guardianChildView(player, helpers) {
   const { ageOn, computeTrustScore, trustBreakdown } = helpers;
-  return { ...playerSelfView(player), age: ageOn(player.dob), trustScore: computeTrustScore(player), trust: trustBreakdown(player) };
+  return {
+    ...playerSelfView(player),
+    age: ageOn(player.dob),
+    trustScore: computeTrustScore(player),
+    trust: trustBreakdown(player),
+  };
 }
 
-export const SELF_GUARDIAN_FIELDS = Object.freeze(['id', 'name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted', 'disclaimerAcceptedAt', 'coGuardianOf', 'notificationPrefs', 'createdAt', 'childIds', 'coGuardians']);
+export const SELF_GUARDIAN_FIELDS = Object.freeze([
+  'id',
+  'name',
+  'email',
+  'emailVerified',
+  'idVerified',
+  'idvReference',
+  'disclaimerAccepted',
+  'disclaimerAcceptedAt',
+  'coGuardianOf',
+  'notificationPrefs',
+  'createdAt',
+  'childIds',
+  'coGuardians',
+]);
 /** A guardian's own record: an allowlist, so the password hash and the e-mail code never appear. */
 export function guardianSelfView(guardian) {
   return pick(guardian, SELF_GUARDIAN_FIELDS);

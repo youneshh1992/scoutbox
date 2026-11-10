@@ -37,17 +37,61 @@
 import { isPlainObject, describe, ids } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
-import { text, int, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
-import { VERIFICATION_STATES, FACETS, JURISDICTIONS, TIERS, AGREEMENT_STATUSES, SCOPES, MAX_TERM_MONTHS, DISCLOSURE_KEYS, MAX_OPPORTUNITY_SHARES, AGENT_TRANSITIONS, CLIENT_TRANSITIONS, termEndAt } from '../domains/agents/core/shared.mjs';
+import {
+  text,
+  int,
+  bool,
+  oneOf,
+  group,
+  tableDdl,
+  bad,
+  typeSpec,
+  encode,
+  decode,
+  upsertSql,
+  quote,
+} from './fieldSpecs.mjs';
+import {
+  VERIFICATION_STATES,
+  FACETS,
+  JURISDICTIONS,
+  TIERS,
+  AGREEMENT_STATUSES,
+  SCOPES,
+  MAX_TERM_MONTHS,
+  DISCLOSURE_KEYS,
+  MAX_OPPORTUNITY_SHARES,
+  AGENT_TRANSITIONS,
+  CLIENT_TRANSITIONS,
+  termEndAt,
+} from '../domains/agents/core/shared.mjs';
 
 export const AGENT_CORE_MIGRATION = '0026_agent_core';
-export const AGENT_CORE_COLLECTIONS = Object.freeze(['agentProfiles', 'agencyAffiliations', 'representationAgreements']);
+export const AGENT_CORE_COLLECTIONS = Object.freeze([
+  'agentProfiles',
+  'agencyAffiliations',
+  'representationAgreements',
+]);
 
 // ------------------------------------------------------------------ vocabularies and limits (one definition; the routes import them)
 /** Text limits: the routes refuse longer input naming the field. */
 export const AGENT_CORE_LIMITS = Object.freeze({
-  id: 80, name: 200, displayName: 80, licenceNumber: 40, reference: 60, note: 1000, reasonCode: 40, disputeReason: 300,
-  description: 300, staffName: 80, staffRole: 60, key: 64, fp: 4000, shareNote: 300, shareTitle: 200, deadline: 40,
+  id: 80,
+  name: 200,
+  displayName: 80,
+  licenceNumber: 40,
+  reference: 60,
+  note: 1000,
+  reasonCode: 40,
+  disputeReason: 300,
+  description: 300,
+  staffName: 80,
+  staffRole: 60,
+  key: 64,
+  fp: 4000,
+  shareNote: 300,
+  shareTitle: 200,
+  deadline: 40,
 });
 const L = AGENT_CORE_LIMITS;
 /** Who an entry or a revision names. */
@@ -64,66 +108,168 @@ export const SHARE_VIA = Object.freeze(['opportunity', 'open_trial']);
 const MA_FACETS = Object.freeze(FACETS.filter((f) => f !== 'fifa_licence'));
 const FIFA_MA = 'INT';
 /** Agreement idempotency slots: the agent's request and terminate, the client's four answers. */
-export const AGREEMENT_KEY_SLOTS = Object.freeze(['request', 'confirm', 'decline', 'terminate', 'dispute', 'agentTerminate']);
-const SLOT_COLUMN = Object.freeze({ request: 'request', confirm: 'confirm', decline: 'decline', terminate: 'client_terminate', dispute: 'dispute', agentTerminate: 'agent_terminate' });
+export const AGREEMENT_KEY_SLOTS = Object.freeze([
+  'request',
+  'confirm',
+  'decline',
+  'terminate',
+  'dispute',
+  'agentTerminate',
+]);
+const SLOT_COLUMN = Object.freeze({
+  request: 'request',
+  confirm: 'confirm',
+  decline: 'decline',
+  terminate: 'client_terminate',
+  dispute: 'dispute',
+  agentTerminate: 'agent_terminate',
+});
 
-export const PROFILE_ACTIONS = Object.freeze(['agent_profile_created', 'agent_profile_updated', 'agent_verification_submitted', 'agent_verification_state_changed', 'agent_facet_rechecked']);
-export const AFFILIATION_ACTIONS = Object.freeze(['agency_affiliation_created', 'agency_affiliation_updated', 'agency_affiliation_ended']);
-export const AGREEMENT_ACTIONS = Object.freeze(['representation_requested', 'representation_confirmed', 'representation_rejected', 'representation_terminated', 'representation_disputed', 'representation_sharing_changed', 'opportunity_shared', 'opportunity_share_withdrawn']);
+export const PROFILE_ACTIONS = Object.freeze([
+  'agent_profile_created',
+  'agent_profile_updated',
+  'agent_verification_submitted',
+  'agent_verification_state_changed',
+  'agent_facet_rechecked',
+]);
+export const AFFILIATION_ACTIONS = Object.freeze([
+  'agency_affiliation_created',
+  'agency_affiliation_updated',
+  'agency_affiliation_ended',
+]);
+export const AGREEMENT_ACTIONS = Object.freeze([
+  'representation_requested',
+  'representation_confirmed',
+  'representation_rejected',
+  'representation_terminated',
+  'representation_disputed',
+  'representation_sharing_changed',
+  'opportunity_shared',
+  'opportunity_share_withdrawn',
+]);
 /** The profile fields an update names, in the order the route lists them. */
 export const PROFILE_FIELDS = Object.freeze(['displayName', 'jurisdictions', 'fifaLicenceNumber']);
-const FIELD_COLUMN = Object.freeze({ displayName: 'detail_display_name', jurisdictions: 'detail_jurisdictions', fifaLicenceNumber: 'detail_licence_number' });
+const FIELD_COLUMN = Object.freeze({
+  displayName: 'detail_display_name',
+  jurisdictions: 'detail_jurisdictions',
+  fifaLicenceNumber: 'detail_licence_number',
+});
 const SHARING_KEYS = Object.freeze(['shareWithAgencyStaff', ...DISCLOSURE_KEYS]);
-const SHARING_COLUMN = Object.freeze({ shareWithAgencyStaff: 'detail_share_with_agency_staff', clubPresence: 'detail_club_presence', contactRouting: 'detail_contact_routing', trialVisibility: 'detail_trial_visibility' });
+const SHARING_COLUMN = Object.freeze({
+  shareWithAgencyStaff: 'detail_share_with_agency_staff',
+  clubPresence: 'detail_club_presence',
+  contactRouting: 'detail_contact_routing',
+  trialVisibility: 'detail_trial_visibility',
+});
 
 // ------------------------------------------------------------------ field specs
 const idf = (k, c, o = {}) => text(k, c, L.id, o);
 const req = { req: true, nonEmpty: true };
 const REV_BY = group('revBy', [text('name', 'rev_by_name', L.name), idf('userId', 'rev_by_id')], { nullable: true });
 const PROFILE_SPEC = [
-  idf('id', 'id', req), idf('userId', 'user_id', req), idf('agencyOrgId', 'agency_org_id', req),
+  idf('id', 'id', req),
+  idf('userId', 'user_id', req),
+  idf('agencyOrgId', 'agency_org_id', req),
   text('displayName', 'display_name', L.displayName, req),
-  int('createdAt', 'created_at', { req: true }), int('updatedAt', 'updated_at', { req: true }),
-  int('rev', 'rev', { req: true }), int('revAt', 'rev_at'), REV_BY,
+  int('createdAt', 'created_at', { req: true }),
+  int('updatedAt', 'updated_at', { req: true }),
+  int('rev', 'rev', { req: true }),
+  int('revAt', 'rev_at'),
+  REV_BY,
 ];
 const FACET_SPEC = [
-  oneOf('state', 'state', VERIFICATION_STATES, { req: true }), text('reference', 'reference', L.reference, { nonEmpty: true }),
-  group('provenance', [
-    oneOf('provider', 'provenance_provider', PROVENANCE_PROVIDERS, { req: true }), oneOf('kind', 'provenance_kind', PROVENANCE_KINDS, { req: true }),
-    int('at', 'provenance_at', { req: true }), idf('reviewerId', 'provenance_reviewer_id', { nonEmpty: true }), idf('reviewId', 'provenance_review_id', { nonEmpty: true }),
-  ], { nullable: true }),
-  int('submittedAt', 'submitted_at'), int('verifiedAt', 'verified_at'), int('recheckAt', 'recheck_at'),
-  text('note', 'note', L.note), int('staleNotifiedAt', 'stale_notified_at'),
+  oneOf('state', 'state', VERIFICATION_STATES, { req: true }),
+  text('reference', 'reference', L.reference, { nonEmpty: true }),
+  group(
+    'provenance',
+    [
+      oneOf('provider', 'provenance_provider', PROVENANCE_PROVIDERS, { req: true }),
+      oneOf('kind', 'provenance_kind', PROVENANCE_KINDS, { req: true }),
+      int('at', 'provenance_at', { req: true }),
+      idf('reviewerId', 'provenance_reviewer_id', { nonEmpty: true }),
+      idf('reviewId', 'provenance_review_id', { nonEmpty: true }),
+    ],
+    { nullable: true },
+  ),
+  int('submittedAt', 'submitted_at'),
+  int('verifiedAt', 'verified_at'),
+  int('recheckAt', 'recheck_at'),
+  text('note', 'note', L.note),
+  int('staleNotifiedAt', 'stale_notified_at'),
 ];
-const KEY_GROUP = (k, col) => group(k, [text('key', `${col}_key`, L.key, req), text('fp', `${col}_fp`, L.fp, { req: true })], { nullable: true });
+const KEY_GROUP = (k, col) =>
+  group(k, [text('key', `${col}_key`, L.key, req), text('fp', `${col}_fp`, L.fp, { req: true })], { nullable: true });
 const AFFILIATION_SPEC = [
-  idf('id', 'id', req), idf('agencyOrgId', 'agency_org_id', req), idf('userId', 'user_id', req),
-  int('startedAt', 'started_at', { req: true }), int('endedAt', 'ended_at'), text('endedReason', 'ended_reason', L.reasonCode),
-  int('createdAt', 'created_at', { req: true }), int('rev', 'rev', { req: true }), int('revAt', 'rev_at'), REV_BY,
+  idf('id', 'id', req),
+  idf('agencyOrgId', 'agency_org_id', req),
+  idf('userId', 'user_id', req),
+  int('startedAt', 'started_at', { req: true }),
+  int('endedAt', 'ended_at'),
+  text('endedReason', 'ended_reason', L.reasonCode),
+  int('createdAt', 'created_at', { req: true }),
+  int('rev', 'rev', { req: true }),
+  int('revAt', 'rev_at'),
+  REV_BY,
 ];
 const AGREEMENT_SPEC = [
-  idf('id', 'id', req), idf('agentUserId', 'agent_user_id', req), idf('agencyOrgId', 'agency_org_id', req),
-  oneOf('clientKind', 'client_kind', ['player'], { req: true }), idf('clientId', 'client_id', req),
-  oneOf('jurisdiction', 'jurisdiction', JURISDICTIONS, { req: true }), bool('exclusive', 'exclusive', { req: true }),
-  int('termMonths', 'term_months', { req: true }), int('startAt', 'start_at'), int('endAt', 'end_at'),
-  oneOf('status', 'status', STORED_AGREEMENT_STATUSES, { req: true }), int('proposedAt', 'proposed_at', { req: true }),
-  int('confirmedAt', 'confirmed_at'), int('declinedAt', 'declined_at'), int('terminatedAt', 'terminated_at'),
-  oneOf('terminatedBy', 'terminated_by', TERMINATED_BY), text('terminationReasonCode', 'termination_reason_code', L.reasonCode),
-  int('disputedAt', 'disputed_at'), text('disputeReason', 'dispute_reason', L.disputeReason),
+  idf('id', 'id', req),
+  idf('agentUserId', 'agent_user_id', req),
+  idf('agencyOrgId', 'agency_org_id', req),
+  oneOf('clientKind', 'client_kind', ['player'], { req: true }),
+  idf('clientId', 'client_id', req),
+  oneOf('jurisdiction', 'jurisdiction', JURISDICTIONS, { req: true }),
+  bool('exclusive', 'exclusive', { req: true }),
+  int('termMonths', 'term_months', { req: true }),
+  int('startAt', 'start_at'),
+  int('endAt', 'end_at'),
+  oneOf('status', 'status', STORED_AGREEMENT_STATUSES, { req: true }),
+  int('proposedAt', 'proposed_at', { req: true }),
+  int('confirmedAt', 'confirmed_at'),
+  int('declinedAt', 'declined_at'),
+  int('terminatedAt', 'terminated_at'),
+  oneOf('terminatedBy', 'terminated_by', TERMINATED_BY),
+  text('terminationReasonCode', 'termination_reason_code', L.reasonCode),
+  int('disputedAt', 'disputed_at'),
+  text('disputeReason', 'dispute_reason', L.disputeReason),
   int('disputeResolvedAt', 'dispute_resolved_at'),
-  group('disputeResolution', [idf('reviewId', 'dispute_review_id', req), oneOf('outcome', 'dispute_outcome', DISPUTE_OUTCOMES, { req: true })], { nullable: true }),
+  group(
+    'disputeResolution',
+    [idf('reviewId', 'dispute_review_id', req), oneOf('outcome', 'dispute_outcome', DISPUTE_OUTCOMES, { req: true })],
+    { nullable: true },
+  ),
   bool('shareWithAgencyStaff', 'share_with_agency_staff', { req: true }),
-  group('disclosure', DISCLOSURE_KEYS.map((k) => bool(k, `disclosure_${k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}`, { req: true, def: false })), { sparse: true }),
-  int('subjectRemovedAt', 'subject_removed_at'), int('expiryNotifiedAt', 'expiry_notified_at'),
-  int('createdAt', 'created_at', { req: true }), int('rev', 'rev', { req: true }), int('revAt', 'rev_at'), REV_BY,
+  group(
+    'disclosure',
+    DISCLOSURE_KEYS.map((k) =>
+      bool(k, `disclosure_${k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}`, { req: true, def: false }),
+    ),
+    { sparse: true },
+  ),
+  int('subjectRemovedAt', 'subject_removed_at'),
+  int('expiryNotifiedAt', 'expiry_notified_at'),
+  int('createdAt', 'created_at', { req: true }),
+  int('rev', 'rev', { req: true }),
+  int('revAt', 'rev_at'),
+  REV_BY,
 ];
 const AGREEMENT_KEYS_SPEC = AGREEMENT_KEY_SLOTS.map((s) => KEY_GROUP(s, SLOT_COLUMN[s]));
 const SHARE_SPEC = [
-  idf('id', 'id', req), idf('opportunityId', 'opportunity_id', req), oneOf('via', 'via', SHARE_VIA),
-  text('title', 'title', L.shareTitle), text('orgName', 'org_name', L.name), text('deadline', 'deadline', L.deadline),
-  text('note', 'note', L.shareNote, { nonEmpty: true }), int('sharedAt', 'shared_at', { req: true }),
-  group('sharedBy', [oneOf('kind', 'shared_by_kind', ['org'], { req: true }), idf('userId', 'shared_by_user_id', req), text('name', 'shared_by_name', L.name)]),
-  int('withdrawnAt', 'withdrawn_at'), int('rev', 'rev', { req: true }), int('revAt', 'rev_at', { req: true }),
+  idf('id', 'id', req),
+  idf('opportunityId', 'opportunity_id', req),
+  oneOf('via', 'via', SHARE_VIA),
+  text('title', 'title', L.shareTitle),
+  text('orgName', 'org_name', L.name),
+  text('deadline', 'deadline', L.deadline),
+  text('note', 'note', L.shareNote, { nonEmpty: true }),
+  int('sharedAt', 'shared_at', { req: true }),
+  group('sharedBy', [
+    oneOf('kind', 'shared_by_kind', ['org'], { req: true }),
+    idf('userId', 'shared_by_user_id', req),
+    text('name', 'shared_by_name', L.name),
+  ]),
+  int('withdrawnAt', 'withdrawn_at'),
+  int('rev', 'rev', { req: true }),
+  int('revAt', 'rev_at', { req: true }),
 ];
 
 // ------------------------------------------------------------------ DDL
@@ -132,9 +278,11 @@ const inList = (c, vals) => `${c} IN (${vals.map(quote).join(',')})`;
 const stateCol = (c) => `${c} TEXT CHECK (${c} IS NULL OR ${inList(c, VERIFICATION_STATES)})`;
 const statusCol = (c) => `${c} TEXT CHECK (${c} IS NULL OR ${inList(c, AGREEMENT_STATUSES)})`;
 export const AGENT_CORE_DDL = [
-  tableDdl('agent_profiles', [...PROFILE_SPEC, text('fifaLicenceNumber', 'declared_fifa_licence_number', L.licenceNumber, { nonEmpty: true })], [
-    fk('user_id', 'org_users'), fk('agency_org_id', 'orgs'), 'UNIQUE (user_id)', 'CHECK (rev >= 1)',
-  ]),
+  tableDdl(
+    'agent_profiles',
+    [...PROFILE_SPEC, text('fifaLicenceNumber', 'declared_fifa_licence_number', L.licenceNumber, { nonEmpty: true })],
+    [fk('user_id', 'org_users'), fk('agency_org_id', 'orgs'), 'UNIQUE (user_id)', 'CHECK (rev >= 1)'],
+  ),
   'CREATE INDEX agent_profiles_agency ON agent_profiles (agency_org_id);',
   `CREATE TABLE agent_profile_jurisdictions (
   profile_id    TEXT NOT NULL REFERENCES agent_profiles(id) ON DELETE CASCADE,
@@ -143,14 +291,21 @@ export const AGENT_CORE_DDL = [
   PRIMARY KEY (profile_id, jurisdiction),
   UNIQUE (profile_id, ord)
 ) STRICT;`,
-  tableDdl('agent_profile_facets', [
-    idf('profileId', 'profile_id', req), oneOf('facet', 'facet', FACETS, { req: true }), oneOf('memberAssociation', 'member_association', JURISDICTIONS, { req: true }), ...FACET_SPEC,
-  ], [
-    'FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE',
-    'PRIMARY KEY (profile_id, facet, member_association)',
-    `CHECK ((facet = 'fifa_licence') = (member_association = '${FIFA_MA}'))`,
-    "CHECK (provenance_reviewer_id IS NULL OR provenance_provider = 'attributed_review')",
-  ]),
+  tableDdl(
+    'agent_profile_facets',
+    [
+      idf('profileId', 'profile_id', req),
+      oneOf('facet', 'facet', FACETS, { req: true }),
+      oneOf('memberAssociation', 'member_association', JURISDICTIONS, { req: true }),
+      ...FACET_SPEC,
+    ],
+    [
+      'FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE',
+      'PRIMARY KEY (profile_id, facet, member_association)',
+      `CHECK ((facet = 'fifa_licence') = (member_association = '${FIFA_MA}'))`,
+      "CHECK (provenance_reviewer_id IS NULL OR provenance_provider = 'attributed_review')",
+    ],
+  ),
   "CREATE INDEX agent_profile_facets_stale ON agent_profile_facets (recheck_at) WHERE state = 'VERIFIED' AND stale_notified_at IS NULL AND recheck_at IS NOT NULL;",
   `CREATE TABLE agent_profile_history (
   id                    TEXT PRIMARY KEY CHECK (length(id) > 0 AND length(id) <= ${L.id}),
@@ -180,10 +335,17 @@ export const AGENT_CORE_DDL = [
   CHECK ((action = 'agent_verification_state_changed') = (detail_state IS NOT NULL)),
   CHECK (detail_review_id IS NULL OR action = 'agent_verification_state_changed')
 ) STRICT;`,
-  tableDdl('agency_affiliations', [...AFFILIATION_SPEC, KEY_GROUP('keys', 'create')], [
-    fk('agency_org_id', 'orgs'), fk('user_id', 'org_users'), 'CHECK (rev >= 1)', 'CHECK (ended_at IS NULL OR ended_reason IS NOT NULL)',
-    'CHECK ((create_key IS NULL) = (create_fp IS NULL))',
-  ]),
+  tableDdl(
+    'agency_affiliations',
+    [...AFFILIATION_SPEC, KEY_GROUP('keys', 'create')],
+    [
+      fk('agency_org_id', 'orgs'),
+      fk('user_id', 'org_users'),
+      'CHECK (rev >= 1)',
+      'CHECK (ended_at IS NULL OR ended_reason IS NOT NULL)',
+      'CHECK ((create_key IS NULL) = (create_fp IS NULL))',
+    ],
+  ),
   'CREATE INDEX agency_affiliations_member ON agency_affiliations (user_id, agency_org_id);',
   'CREATE INDEX agency_affiliations_agency ON agency_affiliations (agency_org_id, ended_at);',
   'CREATE UNIQUE INDEX agency_affiliations_create_key ON agency_affiliations (agency_org_id, create_key) WHERE create_key IS NOT NULL;',
@@ -217,17 +379,27 @@ export const AGENT_CORE_DDL = [
   tier        TEXT NOT NULL CHECK (${inList('tier', TIERS)}),
   PRIMARY KEY (history_id, list, ord)
 ) STRICT;`,
-  tableDdl('representation_agreements', [...AGREEMENT_SPEC, idf('confirmedByPlayerId', 'confirmed_by_player_id', { nonEmpty: true }), ...AGREEMENT_KEYS_SPEC], [
-    fk('agent_user_id', 'org_users'), fk('agency_org_id', 'orgs'),
-    `CHECK (term_months BETWEEN 1 AND ${MAX_TERM_MONTHS})`, 'CHECK (rev >= 1)',
-    'CHECK ((confirmed_at IS NULL) = (confirmed_by_player_id IS NULL))',
-    "CHECK ((status = 'declined') = (declined_at IS NOT NULL))",
-    "CHECK ((terminated_at IS NULL) = (terminated_by IS NULL))",
-    "CHECK (status NOT IN ('terminated_by_client','terminated_by_agent') OR terminated_at IS NOT NULL)",
-    "CHECK (status <> 'disputed' OR disputed_at IS NOT NULL)",
-    'CHECK ((dispute_resolved_at IS NULL) = (dispute_review_id IS NULL))',
-    ...AGREEMENT_KEY_SLOTS.map((s) => `CHECK ((${SLOT_COLUMN[s]}_key IS NULL) = (${SLOT_COLUMN[s]}_fp IS NULL))`),
-  ]),
+  tableDdl(
+    'representation_agreements',
+    [
+      ...AGREEMENT_SPEC,
+      idf('confirmedByPlayerId', 'confirmed_by_player_id', { nonEmpty: true }),
+      ...AGREEMENT_KEYS_SPEC,
+    ],
+    [
+      fk('agent_user_id', 'org_users'),
+      fk('agency_org_id', 'orgs'),
+      `CHECK (term_months BETWEEN 1 AND ${MAX_TERM_MONTHS})`,
+      'CHECK (rev >= 1)',
+      'CHECK ((confirmed_at IS NULL) = (confirmed_by_player_id IS NULL))',
+      "CHECK ((status = 'declined') = (declined_at IS NOT NULL))",
+      'CHECK ((terminated_at IS NULL) = (terminated_by IS NULL))',
+      "CHECK (status NOT IN ('terminated_by_client','terminated_by_agent') OR terminated_at IS NOT NULL)",
+      "CHECK (status <> 'disputed' OR disputed_at IS NOT NULL)",
+      'CHECK ((dispute_resolved_at IS NULL) = (dispute_review_id IS NULL))',
+      ...AGREEMENT_KEY_SLOTS.map((s) => `CHECK ((${SLOT_COLUMN[s]}_key IS NULL) = (${SLOT_COLUMN[s]}_fp IS NULL))`),
+    ],
+  ),
   'CREATE INDEX representation_agreements_agency_agent ON representation_agreements (agency_org_id, agent_user_id);',
   'CREATE INDEX representation_agreements_client ON representation_agreements (client_id);',
   "CREATE INDEX representation_agreements_expiry ON representation_agreements (end_at) WHERE status = 'active' AND expiry_notified_at IS NULL AND end_at IS NOT NULL;",
@@ -246,11 +418,23 @@ export const AGENT_CORE_DDL = [
   PRIMARY KEY (agreement_id, policy_version_id),
   UNIQUE (agreement_id, ord)
 ) STRICT;`,
-  tableDdl('agreement_opportunity_shares', [idf('agreementId', 'agreement_id', req), int('ord', 'ord', { req: true }), ...SHARE_SPEC, KEY_GROUP('keys', 'share')], [
-    'FOREIGN KEY (agreement_id) REFERENCES representation_agreements(id) ON DELETE CASCADE',
-    fk('shared_by_user_id', 'org_users'), 'UNIQUE (agreement_id, ord)', `CHECK (ord >= 0 AND ord < ${MAX_OPPORTUNITY_SHARES})`,
-    'CHECK (rev >= 1)', 'CHECK ((share_key IS NULL) = (share_fp IS NULL))',
-  ]),
+  tableDdl(
+    'agreement_opportunity_shares',
+    [
+      idf('agreementId', 'agreement_id', req),
+      int('ord', 'ord', { req: true }),
+      ...SHARE_SPEC,
+      KEY_GROUP('keys', 'share'),
+    ],
+    [
+      'FOREIGN KEY (agreement_id) REFERENCES representation_agreements(id) ON DELETE CASCADE',
+      fk('shared_by_user_id', 'org_users'),
+      'UNIQUE (agreement_id, ord)',
+      `CHECK (ord >= 0 AND ord < ${MAX_OPPORTUNITY_SHARES})`,
+      'CHECK (rev >= 1)',
+      'CHECK ((share_key IS NULL) = (share_fp IS NULL))',
+    ],
+  ),
   'CREATE UNIQUE INDEX agreement_opportunity_shares_live ON agreement_opportunity_shares (agreement_id, opportunity_id) WHERE withdrawn_at IS NULL;',
   'CREATE UNIQUE INDEX agreement_opportunity_shares_key ON agreement_opportunity_shares (agreement_id, share_key) WHERE share_key IS NOT NULL;',
   `CREATE TABLE agreement_history (
@@ -299,14 +483,26 @@ export const AGENT_CORE_DDL = [
 ) STRICT;`,
 ].join('\n');
 export const AGENT_CORE_TABLES = Object.freeze([
-  'agent_profiles', 'agent_profile_jurisdictions', 'agent_profile_facets', 'agent_profile_history',
-  'agency_affiliations', 'agency_affiliation_tiers', 'agency_affiliation_history', 'agency_affiliation_history_tiers',
-  'representation_agreements', 'agreement_scopes', 'agreement_policy_versions', 'agreement_opportunity_shares', 'agreement_history',
-  'org_agency_settings', 'org_agency_jurisdictions',
+  'agent_profiles',
+  'agent_profile_jurisdictions',
+  'agent_profile_facets',
+  'agent_profile_history',
+  'agency_affiliations',
+  'agency_affiliation_tiers',
+  'agency_affiliation_history',
+  'agency_affiliation_history_tiers',
+  'representation_agreements',
+  'agreement_scopes',
+  'agreement_policy_versions',
+  'agreement_opportunity_shares',
+  'agreement_history',
+  'org_agency_settings',
+  'org_agency_jurisdictions',
 ]);
 
 // ------------------------------------------------------------------ typing (the one place a value is judged)
-export const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+export const refusal = (code, message, extra = {}) =>
+  Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 const labelOf = (at, raw) => `${at} ${isPlainObject(raw) && typeof raw.id === 'string' ? raw.id : ''}`.trim();
 const isId = (v) => typeof v === 'string' && v.length > 0 && v.length <= L.id;
 /** An ordered list of distinct values from `vocab`: `{ ok, list }` or a refusal naming the field. */
@@ -321,7 +517,12 @@ function typeList(v, vocab, label, field, { nonEmpty = false } = {}) {
 const typeKeys = (raw, slots, label) => {
   const keys = raw ?? {};
   if (!isPlainObject(keys)) return bad(label, 'keys', `must be an object (got ${describe(keys)})`);
-  const t = typeSpec(slots.map((s) => KEY_GROUP(s, s)), keys, `${label}.keys`); if (!t.ok) return t;
+  const t = typeSpec(
+    slots.map((s) => KEY_GROUP(s, s)),
+    keys,
+    `${label}.keys`,
+  );
+  if (!t.ok) return t;
   return { ok: true, record: Object.fromEntries(Object.entries(t.record).filter(([, v]) => v !== null)) };
 };
 /** The actor of an entry: `{ kind, userId, name, role? }`. */
@@ -329,15 +530,32 @@ function typeBy(by, label) {
   if (!isPlainObject(by)) return bad(label, 'by', `must be an object (got ${describe(by)})`);
   const extra = Object.keys(by).filter((k) => !['kind', 'userId', 'name', 'role'].includes(k));
   if (extra.length) return bad(label, 'by', `carries field(s) this build does not store: ${extra.join(', ')}`);
-  if (!AGENT_ACTOR_KINDS.includes(by.kind)) return bad(label, 'by.kind', `must be one of ${AGENT_ACTOR_KINDS.join('|')} (got ${describe(by.kind)})`);
-  if (by.userId !== null && by.userId !== undefined && !isId(by.userId)) return bad(label, 'by.userId', `must be an id (got ${describe(by.userId)})`);
-  if (by.name !== null && by.name !== undefined && !(typeof by.name === 'string' && by.name.length <= L.name)) return bad(label, 'by.name', `must be text of at most ${L.name} characters`);
-  if (by.role !== undefined && by.kind !== 'ts_reviewer') return bad(label, 'by.role', 'is a reviewer\'s only');
-  if (by.kind === 'ts_reviewer' && !(typeof by.role === 'string' && by.role.length > 0 && by.role.length <= 60)) return bad(label, 'by.role', 'names the reviewer\'s role');
-  return { ok: true, by: { kind: by.kind, userId: by.userId ?? null, name: by.name ?? null, ...(by.kind === 'ts_reviewer' ? { role: by.role } : {}) } };
+  if (!AGENT_ACTOR_KINDS.includes(by.kind))
+    return bad(label, 'by.kind', `must be one of ${AGENT_ACTOR_KINDS.join('|')} (got ${describe(by.kind)})`);
+  if (by.userId !== null && by.userId !== undefined && !isId(by.userId))
+    return bad(label, 'by.userId', `must be an id (got ${describe(by.userId)})`);
+  if (by.name !== null && by.name !== undefined && !(typeof by.name === 'string' && by.name.length <= L.name))
+    return bad(label, 'by.name', `must be text of at most ${L.name} characters`);
+  if (by.role !== undefined && by.kind !== 'ts_reviewer') return bad(label, 'by.role', "is a reviewer's only");
+  if (by.kind === 'ts_reviewer' && !(typeof by.role === 'string' && by.role.length > 0 && by.role.length <= 60))
+    return bad(label, 'by.role', "names the reviewer's role");
+  return {
+    ok: true,
+    by: {
+      kind: by.kind,
+      userId: by.userId ?? null,
+      name: by.name ?? null,
+      ...(by.kind === 'ts_reviewer' ? { role: by.role } : {}),
+    },
+  };
 }
 const byColumns = (by) => ({ by_kind: by.kind, by_id: by.userId, by_name: by.name, by_role: by.role ?? null });
-const byOf = (h) => ({ kind: h.by_kind, userId: h.by_id, name: h.by_name, ...(h.by_kind === 'ts_reviewer' ? { role: h.by_role } : {}) });
+const byOf = (h) => ({
+  kind: h.by_kind,
+  userId: h.by_id,
+  name: h.by_name,
+  ...(h.by_kind === 'ts_reviewer' ? { role: h.by_role } : {}),
+});
 /** A history entry `{ id, at, action, by, detail }`; `detail` is judged by `typeDetail(action, detail)`. */
 function typeEntry(raw, label, actions, typeDetail) {
   if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
@@ -345,9 +563,12 @@ function typeEntry(raw, label, actions, typeDetail) {
   if (unknown.length) return bad(label, 'entry', `carries field(s) this build does not store: ${unknown.join(', ')}`);
   if (!isId(raw.id)) return bad(label, 'id', `must be an id (got ${describe(raw.id)})`);
   if (!Number.isSafeInteger(raw.at)) return bad(label, 'at', `must be an integer instant (got ${describe(raw.at)})`);
-  if (!actions.includes(raw.action)) return bad(label, 'action', `must be one of ${actions.join('|')} (got ${describe(raw.action)})`);
-  const b = typeBy(raw.by, label); if (!b.ok) return b;
-  const d = typeDetail(raw.action, raw.detail ?? null, label); if (!d.ok) return d;
+  if (!actions.includes(raw.action))
+    return bad(label, 'action', `must be one of ${actions.join('|')} (got ${describe(raw.action)})`);
+  const b = typeBy(raw.by, label);
+  if (!b.ok) return b;
+  const d = typeDetail(raw.action, raw.detail ?? null, label);
+  if (!d.ok) return d;
   return { ok: true, record: { id: raw.id, at: raw.at, action: raw.action, by: b.by, detail: d.detail } };
 }
 const exactKeys = (detail, required, optional, label) => {
@@ -358,284 +579,586 @@ const exactKeys = (detail, required, optional, label) => {
   if (missing.length) return bad(label, 'detail', `lacks ${missing.join(', ')}`);
   return null;
 };
-const inVocab = (v, vocab, label, field) => (vocab.includes(v) ? null : bad(label, `detail.${field}`, `must be one of ${vocab.join('|')} (got ${describe(v)})`));
+const inVocab = (v, vocab, label, field) =>
+  vocab.includes(v) ? null : bad(label, `detail.${field}`, `must be one of ${vocab.join('|')} (got ${describe(v)})`);
 
 /** Profile history detail: none, the changed fields, or a facet's change. */
 function typeProfileDetail(action, d, label) {
-  if (action === 'agent_profile_created') return d === null ? { ok: true, detail: null } : bad(label, 'detail', 'must be null for agent_profile_created');
+  if (action === 'agent_profile_created')
+    return d === null ? { ok: true, detail: null } : bad(label, 'detail', 'must be null for agent_profile_created');
   if (action === 'agent_profile_updated') {
-    const e = exactKeys(d, ['fields'], [], label); if (e) return e;
-    const l = typeList(d.fields, PROFILE_FIELDS, label, 'detail.fields'); if (!l.ok) return l;
+    const e = exactKeys(d, ['fields'], [], label);
+    if (e) return e;
+    const l = typeList(d.fields, PROFILE_FIELDS, label, 'detail.fields');
+    if (!l.ok) return l;
     return { ok: true, detail: { fields: PROFILE_FIELDS.filter((f) => l.list.includes(f)) } };
   }
   const changes = action !== 'agent_verification_submitted';
-  const e = exactKeys(d, ['facet', 'memberAssociation', ...(changes ? ['from', 'to'] : []), ...(action === 'agent_verification_state_changed' ? ['state'] : [])], action === 'agent_verification_state_changed' ? ['reviewId'] : [], label); if (e) return e;
-  const f = inVocab(d.facet, FACETS, label, 'facet'); if (f) return f;
-  if (d.facet === 'fifa_licence' ? d.memberAssociation !== null : !JURISDICTIONS.includes(d.memberAssociation)) return bad(label, 'detail.memberAssociation', 'is null for the FIFA licence and a member association otherwise');
-  for (const k of ['from', 'to', 'state']) if (Object.hasOwn(d, k)) { const s = inVocab(d[k], VERIFICATION_STATES, label, k); if (s) return s; }
-  if (d.reviewId !== undefined && d.reviewId !== null && !isId(d.reviewId)) return bad(label, 'detail.reviewId', 'must be an id');
+  const e = exactKeys(
+    d,
+    [
+      'facet',
+      'memberAssociation',
+      ...(changes ? ['from', 'to'] : []),
+      ...(action === 'agent_verification_state_changed' ? ['state'] : []),
+    ],
+    action === 'agent_verification_state_changed' ? ['reviewId'] : [],
+    label,
+  );
+  if (e) return e;
+  const f = inVocab(d.facet, FACETS, label, 'facet');
+  if (f) return f;
+  if (d.facet === 'fifa_licence' ? d.memberAssociation !== null : !JURISDICTIONS.includes(d.memberAssociation))
+    return bad(label, 'detail.memberAssociation', 'is null for the FIFA licence and a member association otherwise');
+  for (const k of ['from', 'to', 'state'])
+    if (Object.hasOwn(d, k)) {
+      const s = inVocab(d[k], VERIFICATION_STATES, label, k);
+      if (s) return s;
+    }
+  if (d.reviewId !== undefined && d.reviewId !== null && !isId(d.reviewId))
+    return bad(label, 'detail.reviewId', 'must be an id');
   const out = { facet: d.facet, memberAssociation: d.memberAssociation };
-  if (changes) { out.from = d.from; out.to = d.to; }
-  if (action === 'agent_verification_state_changed') { out.state = d.state; if (d.reviewId) out.reviewId = d.reviewId; }
+  if (changes) {
+    out.from = d.from;
+    out.to = d.to;
+  }
+  if (action === 'agent_verification_state_changed') {
+    out.state = d.state;
+    if (d.reviewId) out.reviewId = d.reviewId;
+  }
   return { ok: true, detail: out };
 }
 /** Affiliation history detail: the roles granted (and whether by bootstrap), the change of roles, or the end's reason. */
 function typeAffiliationDetail(action, d, label) {
   if (action === 'agency_affiliation_ended') {
-    const e = exactKeys(d, ['reasonCode'], [], label); if (e) return e;
-    if (!(typeof d.reasonCode === 'string' && d.reasonCode.length <= L.reasonCode)) return bad(label, 'detail.reasonCode', `must be text of at most ${L.reasonCode} characters`);
+    const e = exactKeys(d, ['reasonCode'], [], label);
+    if (e) return e;
+    if (!(typeof d.reasonCode === 'string' && d.reasonCode.length <= L.reasonCode))
+      return bad(label, 'detail.reasonCode', `must be text of at most ${L.reasonCode} characters`);
     return { ok: true, detail: { reasonCode: d.reasonCode } };
   }
   if (action === 'agency_affiliation_created') {
-    const e = exactKeys(d, ['tiers'], ['bootstrap'], label); if (e) return e;
+    const e = exactKeys(d, ['tiers'], ['bootstrap'], label);
+    if (e) return e;
     if (d.bootstrap !== undefined && d.bootstrap !== true) return bad(label, 'detail.bootstrap', 'is true or absent');
-    const l = typeList(d.tiers, TIERS, label, 'detail.tiers', { nonEmpty: true }); if (!l.ok) return l;
+    const l = typeList(d.tiers, TIERS, label, 'detail.tiers', { nonEmpty: true });
+    if (!l.ok) return l;
     return { ok: true, detail: { tiers: l.list, ...(d.bootstrap ? { bootstrap: true } : {}) } };
   }
-  const e = exactKeys(d, ['from', 'to', 'tiers'], [], label); if (e) return e;
-  const from = typeList(d.from, TIERS, label, 'detail.from'); if (!from.ok) return from;
-  const to = typeList(d.to, TIERS, label, 'detail.to', { nonEmpty: true }); if (!to.ok) return to;
+  const e = exactKeys(d, ['from', 'to', 'tiers'], [], label);
+  if (e) return e;
+  const from = typeList(d.from, TIERS, label, 'detail.from');
+  if (!from.ok) return from;
+  const to = typeList(d.to, TIERS, label, 'detail.to', { nonEmpty: true });
+  if (!to.ok) return to;
   if (JSON.stringify(d.tiers) !== JSON.stringify(to.list)) return bad(label, 'detail.tiers', 'repeats `to`');
   return { ok: true, detail: { from: from.list, to: to.list, tiers: [...to.list] } };
 }
 /** Agreement history detail, by action and side; a request's detail is the agreement's own (checked by the caller). */
 function typeAgreementDetail(action, d, label) {
   if (action === 'representation_requested') {
-    const e = exactKeys(d, ['scope', 'termMonths', 'jurisdiction', 'policyVersions'], [], label); if (e) return e;
-    return { ok: true, detail: { scope: d.scope, termMonths: d.termMonths, jurisdiction: d.jurisdiction, policyVersions: d.policyVersions } };
+    const e = exactKeys(d, ['scope', 'termMonths', 'jurisdiction', 'policyVersions'], [], label);
+    if (e) return e;
+    return {
+      ok: true,
+      detail: {
+        scope: d.scope,
+        termMonths: d.termMonths,
+        jurisdiction: d.jurisdiction,
+        policyVersions: d.policyVersions,
+      },
+    };
   }
   if (action === 'representation_sharing_changed') {
-    const e = exactKeys(d, [], SHARING_KEYS, label); if (e) return e;
+    const e = exactKeys(d, [], SHARING_KEYS, label);
+    if (e) return e;
     if (!Object.keys(d).length) return bad(label, 'detail', 'names at least one choice');
-    for (const [k, v] of Object.entries(d)) if (typeof v !== 'boolean') return bad(label, `detail.${k}`, 'must be true or false');
-    return { ok: true, detail: Object.fromEntries(SHARING_KEYS.filter((k) => Object.hasOwn(d, k)).map((k) => [k, d[k]])) };
+    for (const [k, v] of Object.entries(d))
+      if (typeof v !== 'boolean') return bad(label, `detail.${k}`, 'must be true or false');
+    return {
+      ok: true,
+      detail: Object.fromEntries(SHARING_KEYS.filter((k) => Object.hasOwn(d, k)).map((k) => [k, d[k]])),
+    };
   }
   if (action === 'opportunity_shared' || action === 'opportunity_share_withdrawn') {
-    const e = exactKeys(d, action === 'opportunity_shared' ? ['shareId', 'via'] : ['shareId'], [], label); if (e) return e;
+    const e = exactKeys(d, action === 'opportunity_shared' ? ['shareId', 'via'] : ['shareId'], [], label);
+    if (e) return e;
     if (!isId(d.shareId)) return bad(label, 'detail.shareId', 'must be an id');
-    if (action === 'opportunity_shared' && d.via !== null && !SHARE_VIA.includes(d.via)) return bad(label, 'detail.via', `must be one of ${SHARE_VIA.join('|')} or null`);
-    return { ok: true, detail: action === 'opportunity_shared' ? { shareId: d.shareId, via: d.via } : { shareId: d.shareId } };
+    if (action === 'opportunity_shared' && d.via !== null && !SHARE_VIA.includes(d.via))
+      return bad(label, 'detail.via', `must be one of ${SHARE_VIA.join('|')} or null`);
+    return {
+      ok: true,
+      detail: action === 'opportunity_shared' ? { shareId: d.shareId, via: d.via } : { shareId: d.shareId },
+    };
   }
   if (!isPlainObject(d)) return bad(label, 'detail', `must be an object (got ${describe(d)})`);
-  const side = inVocab(d.by, TERMINATED_BY, label, 'by'); if (side) return side;
+  const side = inVocab(d.by, TERMINATED_BY, label, 'by');
+  if (side) return side;
   if (d.by === 'client') {
-    const e = exactKeys(d, ['from', 'to', 'by', 'hadReason'], [], label); if (e) return e;
-    for (const k of ['from', 'to']) { const s = inVocab(d[k], AGREEMENT_STATUSES, label, k); if (s) return s; }
+    const e = exactKeys(d, ['from', 'to', 'by', 'hadReason'], [], label);
+    if (e) return e;
+    for (const k of ['from', 'to']) {
+      const s = inVocab(d[k], AGREEMENT_STATUSES, label, k);
+      if (s) return s;
+    }
     if (typeof d.hadReason !== 'boolean') return bad(label, 'detail.hadReason', 'must be true or false');
     return { ok: true, detail: { from: d.from, to: d.to, by: 'client', hadReason: d.hadReason } };
   }
-  const e = exactKeys(d, ['by', 'phase', 'reasonCode', ...(d.by === 'trust_safety' ? ['reviewId'] : [])], [], label); if (e) return e;
-  const s = inVocab(d.phase, AGREEMENT_STATUSES, label, 'phase'); if (s) return s;
-  if (!(typeof d.reasonCode === 'string' && d.reasonCode.length <= L.reasonCode)) return bad(label, 'detail.reasonCode', `must be text of at most ${L.reasonCode} characters`);
+  const e = exactKeys(d, ['by', 'phase', 'reasonCode', ...(d.by === 'trust_safety' ? ['reviewId'] : [])], [], label);
+  if (e) return e;
+  const s = inVocab(d.phase, AGREEMENT_STATUSES, label, 'phase');
+  if (s) return s;
+  if (!(typeof d.reasonCode === 'string' && d.reasonCode.length <= L.reasonCode))
+    return bad(label, 'detail.reasonCode', `must be text of at most ${L.reasonCode} characters`);
   if (d.by === 'trust_safety' && !isId(d.reviewId)) return bad(label, 'detail.reviewId', 'must be an id');
-  return { ok: true, detail: d.by === 'trust_safety' ? { by: d.by, phase: d.phase, reviewId: d.reviewId, reasonCode: d.reasonCode } : { by: d.by, phase: d.phase, reasonCode: d.reasonCode } };
+  return {
+    ok: true,
+    detail:
+      d.by === 'trust_safety'
+        ? { by: d.by, phase: d.phase, reviewId: d.reviewId, reasonCode: d.reasonCode }
+        : { by: d.by, phase: d.phase, reasonCode: d.reasonCode },
+  };
 }
 function typeHistory(list, label, actions, typeDetail) {
   if (!Array.isArray(list)) return bad(label, 'history', `must be a list (got ${describe(list)})`);
   const out = [];
-  for (const [i, h] of list.entries()) { const t = typeEntry(h, `${label}.history[${i}]`, actions, typeDetail); if (!t.ok) return t; out.push(t.record); }
+  for (const [i, h] of list.entries()) {
+    const t = typeEntry(h, `${label}.history[${i}]`, actions, typeDetail);
+    if (!t.ok) return t;
+    out.push(t.record);
+  }
   if (new Set(out.map((h) => h.id)).size !== out.length) return bad(label, 'history', 'names an id twice');
   return { ok: true, list: out };
 }
 function typeFacet(raw, at, facet, ma) {
-  const t = typeSpec(FACET_SPEC, raw, at, ['memberAssociation']); if (!t.ok) return t;
+  const t = typeSpec(FACET_SPEC, raw, at, ['memberAssociation']);
+  if (!t.ok) return t;
   const want = facet === 'fifa_licence' ? null : ma;
-  if ((raw.memberAssociation ?? null) !== want) return bad(at, 'memberAssociation', `must be ${want === null ? 'null for the FIFA licence' : want}`);
+  if ((raw.memberAssociation ?? null) !== want)
+    return bad(at, 'memberAssociation', `must be ${want === null ? 'null for the FIFA licence' : want}`);
   const r = t.record;
-  if (r.provenance && (r.provenance.reviewerId !== null || r.provenance.reviewId !== null) && r.provenance.provider !== 'attributed_review') return bad(at, 'provenance', 'names a reviewer only for an attributed review');
-  return { ok: true, record: { state: r.state, reference: r.reference, memberAssociation: want, provenance: r.provenance, submittedAt: r.submittedAt, verifiedAt: r.verifiedAt, recheckAt: r.recheckAt, note: r.note, staleNotifiedAt: r.staleNotifiedAt } };
+  if (
+    r.provenance &&
+    (r.provenance.reviewerId !== null || r.provenance.reviewId !== null) &&
+    r.provenance.provider !== 'attributed_review'
+  )
+    return bad(at, 'provenance', 'names a reviewer only for an attributed review');
+  return {
+    ok: true,
+    record: {
+      state: r.state,
+      reference: r.reference,
+      memberAssociation: want,
+      provenance: r.provenance,
+      submittedAt: r.submittedAt,
+      verifiedAt: r.verifiedAt,
+      recheckAt: r.recheckAt,
+      note: r.note,
+      staleNotifiedAt: r.staleNotifiedAt,
+    },
+  };
 }
 /** An agent profile: the flat columns, the declared details, the facets and the history. */
 export function typeAgentProfile(raw, at = 'agentProfiles') {
   const label = labelOf(at, raw);
   if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
   const { declared, facets, history = [], ...flatPart } = raw;
-  const t = typeSpec(PROFILE_SPEC, flatPart, label); if (!t.ok) return t;
+  const t = typeSpec(PROFILE_SPEC, flatPart, label);
+  if (!t.ok) return t;
   if (!isPlainObject(declared)) return bad(label, 'declared', `must be an object (got ${describe(declared)})`);
-  const dt = typeSpec([text('fifaLicenceNumber', 'x', L.licenceNumber, { nonEmpty: true })], { fifaLicenceNumber: declared.fifaLicenceNumber ?? null }, `${label}.declared`); if (!dt.ok) return dt;
+  const dt = typeSpec(
+    [text('fifaLicenceNumber', 'x', L.licenceNumber, { nonEmpty: true })],
+    { fifaLicenceNumber: declared.fifaLicenceNumber ?? null },
+    `${label}.declared`,
+  );
+  if (!dt.ok) return dt;
   const extraDeclared = Object.keys(declared).filter((k) => !['fifaLicenceNumber', 'jurisdictions'].includes(k));
-  if (extraDeclared.length) return bad(label, 'declared', `carries field(s) this build does not store: ${extraDeclared.join(', ')}`);
-  const jur = typeList(declared.jurisdictions ?? [], JURISDICTIONS, label, 'declared.jurisdictions'); if (!jur.ok) return jur;
+  if (extraDeclared.length)
+    return bad(label, 'declared', `carries field(s) this build does not store: ${extraDeclared.join(', ')}`);
+  const jur = typeList(declared.jurisdictions ?? [], JURISDICTIONS, label, 'declared.jurisdictions');
+  if (!jur.ok) return jur;
   if (!isPlainObject(facets)) return bad(label, 'facets', `must be an object (got ${describe(facets)})`);
   const unknownFacets = Object.keys(facets).filter((k) => !FACETS.includes(k));
-  if (unknownFacets.length) return bad(label, 'facets', `carries field(s) this build does not store: ${unknownFacets.join(', ')}`);
-  const fifa = typeFacet(facets.fifa_licence, `${label}.facets.fifa_licence`, 'fifa_licence', null); if (!fifa.ok) return fifa;
+  if (unknownFacets.length)
+    return bad(label, 'facets', `carries field(s) this build does not store: ${unknownFacets.join(', ')}`);
+  const fifa = typeFacet(facets.fifa_licence, `${label}.facets.fifa_licence`, 'fifa_licence', null);
+  if (!fifa.ok) return fifa;
   const typedFacets = { fifa_licence: fifa.record };
   for (const f of MA_FACETS) {
     const byMa = facets[f] ?? {};
-    if (!isPlainObject(byMa)) return bad(label, `facets.${f}`, `must be an object keyed by member association (got ${describe(byMa)})`);
+    if (!isPlainObject(byMa))
+      return bad(label, `facets.${f}`, `must be an object keyed by member association (got ${describe(byMa)})`);
     typedFacets[f] = {};
     for (const [ma, rec] of Object.entries(byMa)) {
-      if (!JURISDICTIONS.includes(ma) || ma === FIFA_MA) return bad(label, `facets.${f}`, `names ${describe(ma)}, which is not a member association`);
-      const ft = typeFacet(rec, `${label}.facets.${f}.${ma}`, f, ma); if (!ft.ok) return ft;
+      if (!JURISDICTIONS.includes(ma) || ma === FIFA_MA)
+        return bad(label, `facets.${f}`, `names ${describe(ma)}, which is not a member association`);
+      const ft = typeFacet(rec, `${label}.facets.${f}.${ma}`, f, ma);
+      if (!ft.ok) return ft;
       typedFacets[f][ma] = ft.record;
     }
   }
-  const h = typeHistory(history, label, PROFILE_ACTIONS, typeProfileDetail); if (!h.ok) return h;
+  const h = typeHistory(history, label, PROFILE_ACTIONS, typeProfileDetail);
+  if (!h.ok) return h;
   if (t.record.rev < 1) return bad(label, 'rev', 'starts at 1');
-  return { ok: true, record: { ...t.record, declared: { fifaLicenceNumber: dt.record.fifaLicenceNumber, jurisdictions: jur.list }, facets: typedFacets, history: h.list } };
+  return {
+    ok: true,
+    record: {
+      ...t.record,
+      declared: { fifaLicenceNumber: dt.record.fifaLicenceNumber, jurisdictions: jur.list },
+      facets: typedFacets,
+      history: h.list,
+    },
+  };
 }
 /** An agency affiliation: the flat columns, its roles, its create key and its history. */
 export function typeAgencyAffiliation(raw, at = 'agencyAffiliations') {
   const label = labelOf(at, raw);
   if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
   const { tiers, keys, history = [], ...flatPart } = raw;
-  const t = typeSpec(AFFILIATION_SPEC, flatPart, label); if (!t.ok) return t;
-  const l = typeList(tiers, TIERS, label, 'tiers', { nonEmpty: true }); if (!l.ok) return l;
-  const k = typeKeys(keys, ['create'], label); if (!k.ok) return k;
-  const h = typeHistory(history, label, AFFILIATION_ACTIONS, typeAffiliationDetail); if (!h.ok) return h;
+  const t = typeSpec(AFFILIATION_SPEC, flatPart, label);
+  if (!t.ok) return t;
+  const l = typeList(tiers, TIERS, label, 'tiers', { nonEmpty: true });
+  if (!l.ok) return l;
+  const k = typeKeys(keys, ['create'], label);
+  if (!k.ok) return k;
+  const h = typeHistory(history, label, AFFILIATION_ACTIONS, typeAffiliationDetail);
+  if (!h.ok) return h;
   const r = t.record;
   if (r.rev < 1) return bad(label, 'rev', 'starts at 1');
-  if (r.endedAt !== null && r.endedReason === null) return bad(label, 'endedReason', 'is given when the membership ends');
+  if (r.endedAt !== null && r.endedReason === null)
+    return bad(label, 'endedReason', 'is given when the membership ends');
   return { ok: true, record: { ...r, tiers: l.list, keys: k.record, history: h.list } };
 }
 function typeShare(raw, at) {
   if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
   const { keys, ...flatPart } = raw;
-  const t = typeSpec(SHARE_SPEC, flatPart, at); if (!t.ok) return t;
-  const k = typeKeys(keys, ['share'], at); if (!k.ok) return k;
+  const t = typeSpec(SHARE_SPEC, flatPart, at);
+  if (!t.ok) return t;
+  const k = typeKeys(keys, ['share'], at);
+  if (!k.ok) return k;
   return { ok: true, record: { ...t.record, keys: k.record } };
 }
 /** A representation agreement: the flat columns, scope, policy versions, keys, shares and history. */
 export function typeRepresentationAgreement(raw, at = 'representationAgreements') {
   const label = labelOf(at, raw);
   if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
-  const { scope, policyVersions = [], keys, opportunityShares = [], history = [], confirmedBy = null, isRegulatoryMinor, ...flatPart } = raw;
-  const t = typeSpec(AGREEMENT_SPEC, flatPart, label); if (!t.ok) return t;
-  if (isRegulatoryMinor !== undefined && isRegulatoryMinor !== false) return bad(label, 'isRegulatoryMinor', 'is always false (a minor is refused before a request exists)');
+  const {
+    scope,
+    policyVersions = [],
+    keys,
+    opportunityShares = [],
+    history = [],
+    confirmedBy = null,
+    isRegulatoryMinor,
+    ...flatPart
+  } = raw;
+  const t = typeSpec(AGREEMENT_SPEC, flatPart, label);
+  if (!t.ok) return t;
+  if (isRegulatoryMinor !== undefined && isRegulatoryMinor !== false)
+    return bad(label, 'isRegulatoryMinor', 'is always false (a minor is refused before a request exists)');
   const r = t.record;
-  if (confirmedBy !== null && !(isPlainObject(confirmedBy) && confirmedBy.kind === 'player' && confirmedBy.id === r.clientId && Object.keys(confirmedBy).length === 2)) return bad(label, 'confirmedBy', 'is { kind: \'player\', id: <the client> } or null');
-  if ((confirmedBy === null) !== (r.confirmedAt === null)) return bad(label, 'confirmedBy', 'is set exactly when confirmedAt is');
-  const sc = typeList(scope, SCOPES, label, 'scope', { nonEmpty: true }); if (!sc.ok) return sc;
-  if (!Array.isArray(policyVersions) || policyVersions.some((p) => !isId(p)) || new Set(policyVersions).size !== policyVersions.length) return bad(label, 'policyVersions', 'must be a list of distinct policy version ids');
-  const k = typeKeys(keys, AGREEMENT_KEY_SLOTS, label); if (!k.ok) return k;
-  if (!Array.isArray(opportunityShares)) return bad(label, 'opportunityShares', `must be a list (got ${describe(opportunityShares)})`);
-  if (opportunityShares.length > MAX_OPPORTUNITY_SHARES) return bad(label, 'opportunityShares', `holds more than ${MAX_OPPORTUNITY_SHARES} shares`);
+  if (
+    confirmedBy !== null &&
+    !(
+      isPlainObject(confirmedBy) &&
+      confirmedBy.kind === 'player' &&
+      confirmedBy.id === r.clientId &&
+      Object.keys(confirmedBy).length === 2
+    )
+  )
+    return bad(label, 'confirmedBy', "is { kind: 'player', id: <the client> } or null");
+  if ((confirmedBy === null) !== (r.confirmedAt === null))
+    return bad(label, 'confirmedBy', 'is set exactly when confirmedAt is');
+  const sc = typeList(scope, SCOPES, label, 'scope', { nonEmpty: true });
+  if (!sc.ok) return sc;
+  if (
+    !Array.isArray(policyVersions) ||
+    policyVersions.some((p) => !isId(p)) ||
+    new Set(policyVersions).size !== policyVersions.length
+  )
+    return bad(label, 'policyVersions', 'must be a list of distinct policy version ids');
+  const k = typeKeys(keys, AGREEMENT_KEY_SLOTS, label);
+  if (!k.ok) return k;
+  if (!Array.isArray(opportunityShares))
+    return bad(label, 'opportunityShares', `must be a list (got ${describe(opportunityShares)})`);
+  if (opportunityShares.length > MAX_OPPORTUNITY_SHARES)
+    return bad(label, 'opportunityShares', `holds more than ${MAX_OPPORTUNITY_SHARES} shares`);
   const shares = [];
-  for (const [i, s] of opportunityShares.entries()) { const st = typeShare(s, `${label}.opportunityShares[${i}]`); if (!st.ok) return st; shares.push(st.record); }
-  if (new Set(shares.map((s) => s.id)).size !== shares.length) return bad(label, 'opportunityShares', 'names an id twice');
+  for (const [i, s] of opportunityShares.entries()) {
+    const st = typeShare(s, `${label}.opportunityShares[${i}]`);
+    if (!st.ok) return st;
+    shares.push(st.record);
+  }
+  if (new Set(shares.map((s) => s.id)).size !== shares.length)
+    return bad(label, 'opportunityShares', 'names an id twice');
   const live = shares.filter((s) => s.withdrawnAt === null).map((s) => s.opportunityId);
   if (new Set(live).size !== live.length) return bad(label, 'opportunityShares', 'shares one opportunity twice');
-  const h = typeHistory(history, label, AGREEMENT_ACTIONS, typeAgreementDetail); if (!h.ok) return h;
+  const h = typeHistory(history, label, AGREEMENT_ACTIONS, typeAgreementDetail);
+  if (!h.ok) return h;
   const requested = h.list.filter((e) => e.action === 'representation_requested');
-  const own = { scope: sc.list, termMonths: r.termMonths, jurisdiction: r.jurisdiction, policyVersions: [...policyVersions] };
-  if (requested.some((e) => JSON.stringify(e.detail) !== JSON.stringify(own))) return bad(label, 'history', 'a request entry repeats the agreement\'s own scope, term, jurisdiction and policy versions');
-  if (r.termMonths < 1 || r.termMonths > MAX_TERM_MONTHS) return bad(label, 'termMonths', `must be 1 to ${MAX_TERM_MONTHS}`);
+  const own = {
+    scope: sc.list,
+    termMonths: r.termMonths,
+    jurisdiction: r.jurisdiction,
+    policyVersions: [...policyVersions],
+  };
+  if (requested.some((e) => JSON.stringify(e.detail) !== JSON.stringify(own)))
+    return bad(
+      label,
+      'history',
+      "a request entry repeats the agreement's own scope, term, jurisdiction and policy versions",
+    );
+  if (r.termMonths < 1 || r.termMonths > MAX_TERM_MONTHS)
+    return bad(label, 'termMonths', `must be 1 to ${MAX_TERM_MONTHS}`);
   if (r.rev < 1) return bad(label, 'rev', 'starts at 1');
-  return { ok: true, record: { ...r, isRegulatoryMinor: false, confirmedBy: confirmedBy && { kind: 'player', id: confirmedBy.id }, scope: sc.list, policyVersions: [...policyVersions], keys: k.record, opportunityShares: shares, history: h.list } };
+  return {
+    ok: true,
+    record: {
+      ...r,
+      isRegulatoryMinor: false,
+      confirmedBy: confirmedBy && { kind: 'player', id: confirmedBy.id },
+      scope: sc.list,
+      policyVersions: [...policyVersions],
+      keys: k.record,
+      opportunityShares: shares,
+      history: h.list,
+    },
+  };
 }
 /** An agency's settings: `{ jurisdictions, description }`. */
 export function typeAgencySettings(raw, at = 'agencySettings') {
   if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
   const extra = Object.keys(raw).filter((k) => !['jurisdictions', 'description'].includes(k));
   if (extra.length) return bad(at, 'settings', `carries field(s) this build does not store: ${extra.join(', ')}`);
-  const j = typeList(raw.jurisdictions ?? [], JURISDICTIONS, at, 'jurisdictions'); if (!j.ok) return j;
+  const j = typeList(raw.jurisdictions ?? [], JURISDICTIONS, at, 'jurisdictions');
+  if (!j.ok) return j;
   const d = raw.description ?? '';
-  if (!(typeof d === 'string' && d.length <= L.description)) return bad(at, 'description', `must be text of at most ${L.description} characters`);
+  if (!(typeof d === 'string' && d.length <= L.description))
+    return bad(at, 'description', `must be text of at most ${L.description} characters`);
   return { ok: true, record: { jurisdictions: j.list, description: d } };
 }
 
 // ------------------------------------------------------------------ rows
 const facetRow = (profileId, facet, ma, f) => ({ ...f, profileId, facet, memberAssociation: ma });
-const FACET_ROW_SPEC = [idf('profileId', 'profile_id', req), oneOf('facet', 'facet', FACETS, { req: true }), oneOf('memberAssociation', 'member_association', JURISDICTIONS, { req: true }), ...FACET_SPEC];
+const FACET_ROW_SPEC = [
+  idf('profileId', 'profile_id', req),
+  oneOf('facet', 'facet', FACETS, { req: true }),
+  oneOf('memberAssociation', 'member_association', JURISDICTIONS, { req: true }),
+  ...FACET_SPEC,
+];
 function statements(sqlite) {
   const p = (sql) => sqlite.prepare(sql);
   return {
-    profile: p(upsertSql('agent_profiles', [...PROFILE_SPEC, text('fifaLicenceNumber', 'declared_fifa_licence_number', L.licenceNumber)])),
+    profile: p(
+      upsertSql('agent_profiles', [
+        ...PROFILE_SPEC,
+        text('fifaLicenceNumber', 'declared_fifa_licence_number', L.licenceNumber),
+      ]),
+    ),
     profileJurDel: p('DELETE FROM agent_profile_jurisdictions WHERE profile_id = ?'),
     profileJurIns: p('INSERT INTO agent_profile_jurisdictions (profile_id, ord, jurisdiction) VALUES (?, ?, ?)'),
     facetDel: p('DELETE FROM agent_profile_facets WHERE profile_id = ?'),
     facetIns: p(upsertSql('agent_profile_facets', FACET_ROW_SPEC, ['profile_id', 'facet', 'member_association'])),
-    profileHist: p(`INSERT INTO agent_profile_history (id, profile_id, ord, at, by_kind, by_id, by_name, by_role, action, detail_display_name, detail_jurisdictions, detail_licence_number, detail_facet, detail_ma, detail_from, detail_to, detail_state, detail_review_id)
+    profileHist:
+      p(`INSERT INTO agent_profile_history (id, profile_id, ord, at, by_kind, by_id, by_name, by_role, action, detail_display_name, detail_jurisdictions, detail_licence_number, detail_facet, detail_ma, detail_from, detail_to, detail_state, detail_review_id)
       VALUES (@id, @owner, @ord, @at, @by_kind, @by_id, @by_name, @by_role, @action, @detail_display_name, @detail_jurisdictions, @detail_licence_number, @detail_facet, @detail_ma, @detail_from, @detail_to, @detail_state, @detail_review_id)`),
     affiliation: p(upsertSql('agency_affiliations', [...AFFILIATION_SPEC, KEY_GROUP('keys', 'create')])),
     tierDel: p('DELETE FROM agency_affiliation_tiers WHERE affiliation_id = ?'),
     tierIns: p('INSERT INTO agency_affiliation_tiers (affiliation_id, ord, tier) VALUES (?, ?, ?)'),
-    affHist: p(`INSERT INTO agency_affiliation_history (id, affiliation_id, ord, at, by_kind, by_id, by_name, by_role, action, detail_bootstrap, detail_reason_code)
+    affHist:
+      p(`INSERT INTO agency_affiliation_history (id, affiliation_id, ord, at, by_kind, by_id, by_name, by_role, action, detail_bootstrap, detail_reason_code)
       VALUES (@id, @owner, @ord, @at, @by_kind, @by_id, @by_name, @by_role, @action, @detail_bootstrap, @detail_reason_code)`),
     affHistTier: p('INSERT INTO agency_affiliation_history_tiers (history_id, list, ord, tier) VALUES (?, ?, ?, ?)'),
-    agreement: p(upsertSql('representation_agreements', [...AGREEMENT_SPEC, idf('confirmedByPlayerId', 'confirmed_by_player_id'), ...AGREEMENT_KEYS_SPEC])),
+    agreement: p(
+      upsertSql('representation_agreements', [
+        ...AGREEMENT_SPEC,
+        idf('confirmedByPlayerId', 'confirmed_by_player_id'),
+        ...AGREEMENT_KEYS_SPEC,
+      ]),
+    ),
     scopeIns: p('INSERT INTO agreement_scopes (agreement_id, ord, scope) VALUES (?, ?, ?)'),
     policyIns: p('INSERT INTO agreement_policy_versions (agreement_id, ord, policy_version_id) VALUES (?, ?, ?)'),
-    share: p(upsertSql('agreement_opportunity_shares', [idf('agreementId', 'agreement_id', req), int('ord', 'ord', { req: true }), ...SHARE_SPEC, KEY_GROUP('keys', 'share')])),
-    agrHist: p(`INSERT INTO agreement_history (id, agreement_id, ord, at, by_kind, by_id, by_name, by_role, action, detail_by, detail_from, detail_to, detail_had_reason, detail_phase, detail_reason_code, detail_review_id, detail_share_with_agency_staff, detail_club_presence, detail_contact_routing, detail_trial_visibility, detail_share_id, detail_via)
+    share: p(
+      upsertSql('agreement_opportunity_shares', [
+        idf('agreementId', 'agreement_id', req),
+        int('ord', 'ord', { req: true }),
+        ...SHARE_SPEC,
+        KEY_GROUP('keys', 'share'),
+      ]),
+    ),
+    agrHist:
+      p(`INSERT INTO agreement_history (id, agreement_id, ord, at, by_kind, by_id, by_name, by_role, action, detail_by, detail_from, detail_to, detail_had_reason, detail_phase, detail_reason_code, detail_review_id, detail_share_with_agency_staff, detail_club_presence, detail_contact_routing, detail_trial_visibility, detail_share_id, detail_via)
       VALUES (@id, @owner, @ord, @at, @by_kind, @by_id, @by_name, @by_role, @action, @detail_by, @detail_from, @detail_to, @detail_had_reason, @detail_phase, @detail_reason_code, @detail_review_id, @detail_share_with_agency_staff, @detail_club_presence, @detail_contact_routing, @detail_trial_visibility, @detail_share_id, @detail_via)`),
-    settings: p('INSERT INTO org_agency_settings (org_id, description, updated_at) VALUES (?, ?, ?) ON CONFLICT(org_id) DO UPDATE SET description = excluded.description, updated_at = excluded.updated_at'),
+    settings: p(
+      'INSERT INTO org_agency_settings (org_id, description, updated_at) VALUES (?, ?, ?) ON CONFLICT(org_id) DO UPDATE SET description = excluded.description, updated_at = excluded.updated_at',
+    ),
     settingsJurDel: p('DELETE FROM org_agency_jurisdictions WHERE org_id = ?'),
     settingsJurIns: p('INSERT INTO org_agency_jurisdictions (org_id, ord, jurisdiction) VALUES (?, ?, ?)'),
   };
 }
 const b01 = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
-const NO_PROFILE_DETAIL = { detail_display_name: null, detail_jurisdictions: null, detail_licence_number: null, detail_facet: null, detail_ma: null, detail_from: null, detail_to: null, detail_state: null, detail_review_id: null };
+const NO_PROFILE_DETAIL = {
+  detail_display_name: null,
+  detail_jurisdictions: null,
+  detail_licence_number: null,
+  detail_facet: null,
+  detail_ma: null,
+  detail_from: null,
+  detail_to: null,
+  detail_state: null,
+  detail_review_id: null,
+};
 function profileHistoryRow(h, owner, ord) {
   const d = h.detail;
   const row = { id: h.id, owner, ord, at: h.at, action: h.action, ...byColumns(h.by), ...NO_PROFILE_DETAIL };
-  if (h.action === 'agent_profile_updated') for (const f of PROFILE_FIELDS) row[FIELD_COLUMN[f]] = d.fields.includes(f) ? 1 : 0;
+  if (h.action === 'agent_profile_updated')
+    for (const f of PROFILE_FIELDS) row[FIELD_COLUMN[f]] = d.fields.includes(f) ? 1 : 0;
   else if (d) {
-    row.detail_facet = d.facet; row.detail_ma = d.memberAssociation;
-    row.detail_from = d.from ?? null; row.detail_to = d.to ?? null; row.detail_state = d.state ?? null; row.detail_review_id = d.reviewId ?? null;
+    row.detail_facet = d.facet;
+    row.detail_ma = d.memberAssociation;
+    row.detail_from = d.from ?? null;
+    row.detail_to = d.to ?? null;
+    row.detail_state = d.state ?? null;
+    row.detail_review_id = d.reviewId ?? null;
   }
   return row;
 }
 function profileHistoryOut(h) {
   const base = { id: h.id, at: h.at, action: h.action, by: byOf(h) };
   if (h.action === 'agent_profile_created') return { ...base, detail: null };
-  if (h.action === 'agent_profile_updated') return { ...base, detail: { fields: PROFILE_FIELDS.filter((f) => h[FIELD_COLUMN[f]] === 1) } };
+  if (h.action === 'agent_profile_updated')
+    return { ...base, detail: { fields: PROFILE_FIELDS.filter((f) => h[FIELD_COLUMN[f]] === 1) } };
   const detail = { facet: h.detail_facet, memberAssociation: h.detail_ma };
-  if (h.detail_to !== null) { detail.from = h.detail_from; detail.to = h.detail_to; }
-  if (h.action === 'agent_verification_state_changed') { detail.state = h.detail_state; if (h.detail_review_id) detail.reviewId = h.detail_review_id; }
+  if (h.detail_to !== null) {
+    detail.from = h.detail_from;
+    detail.to = h.detail_to;
+  }
+  if (h.action === 'agent_verification_state_changed') {
+    detail.state = h.detail_state;
+    if (h.detail_review_id) detail.reviewId = h.detail_review_id;
+  }
   return { ...base, detail };
 }
 function affiliationHistoryRow(h, owner, ord) {
-  return { id: h.id, owner, ord, at: h.at, action: h.action, ...byColumns(h.by), detail_bootstrap: h.detail?.bootstrap ? 1 : null, detail_reason_code: h.action === 'agency_affiliation_ended' ? h.detail.reasonCode : null };
+  return {
+    id: h.id,
+    owner,
+    ord,
+    at: h.at,
+    action: h.action,
+    ...byColumns(h.by),
+    detail_bootstrap: h.detail?.bootstrap ? 1 : null,
+    detail_reason_code: h.action === 'agency_affiliation_ended' ? h.detail.reasonCode : null,
+  };
 }
 function affiliationHistoryOut(h, tiers) {
   const list = (which) => tiers.filter((t) => t.list === which).map((t) => t.tier);
   const base = { id: h.id, at: h.at, action: h.action, by: byOf(h) };
   if (h.action === 'agency_affiliation_ended') return { ...base, detail: { reasonCode: h.detail_reason_code } };
-  if (h.action === 'agency_affiliation_created') return { ...base, detail: { tiers: list('to'), ...(h.detail_bootstrap ? { bootstrap: true } : {}) } };
+  if (h.action === 'agency_affiliation_created')
+    return { ...base, detail: { tiers: list('to'), ...(h.detail_bootstrap ? { bootstrap: true } : {}) } };
   return { ...base, detail: { from: list('from'), to: list('to'), tiers: list('to') } };
 }
-const NO_AGREEMENT_DETAIL = { detail_by: null, detail_from: null, detail_to: null, detail_had_reason: null, detail_phase: null, detail_reason_code: null, detail_review_id: null, detail_share_with_agency_staff: null, detail_club_presence: null, detail_contact_routing: null, detail_trial_visibility: null, detail_share_id: null, detail_via: null };
+const NO_AGREEMENT_DETAIL = {
+  detail_by: null,
+  detail_from: null,
+  detail_to: null,
+  detail_had_reason: null,
+  detail_phase: null,
+  detail_reason_code: null,
+  detail_review_id: null,
+  detail_share_with_agency_staff: null,
+  detail_club_presence: null,
+  detail_contact_routing: null,
+  detail_trial_visibility: null,
+  detail_share_id: null,
+  detail_via: null,
+};
 function agreementHistoryRow(h, owner, ord) {
   const d = h.detail;
   const row = { id: h.id, owner, ord, at: h.at, action: h.action, ...byColumns(h.by), ...NO_AGREEMENT_DETAIL };
   if (h.action === 'representation_sharing_changed') for (const k of SHARING_KEYS) row[SHARING_COLUMN[k]] = b01(d[k]);
-  else if (h.action === 'opportunity_shared' || h.action === 'opportunity_share_withdrawn') { row.detail_share_id = d.shareId; row.detail_via = d.via ?? null; }
-  else if (h.action !== 'representation_requested') {
-    row.detail_by = d.by; row.detail_from = d.from ?? null; row.detail_to = d.to ?? null; row.detail_had_reason = b01(d.hadReason);
-    row.detail_phase = d.phase ?? null; row.detail_reason_code = d.reasonCode ?? null; row.detail_review_id = d.reviewId ?? null;
+  else if (h.action === 'opportunity_shared' || h.action === 'opportunity_share_withdrawn') {
+    row.detail_share_id = d.shareId;
+    row.detail_via = d.via ?? null;
+  } else if (h.action !== 'representation_requested') {
+    row.detail_by = d.by;
+    row.detail_from = d.from ?? null;
+    row.detail_to = d.to ?? null;
+    row.detail_had_reason = b01(d.hadReason);
+    row.detail_phase = d.phase ?? null;
+    row.detail_reason_code = d.reasonCode ?? null;
+    row.detail_review_id = d.reviewId ?? null;
   }
   return row;
 }
 function agreementHistoryOut(h, own) {
   const base = { id: h.id, at: h.at, action: h.action, by: byOf(h) };
-  if (h.action === 'representation_requested') return { ...base, detail: { scope: [...own.scope], termMonths: own.termMonths, jurisdiction: own.jurisdiction, policyVersions: [...own.policyVersions] } };
-  if (h.action === 'representation_sharing_changed') return { ...base, detail: Object.fromEntries(SHARING_KEYS.filter((k) => h[SHARING_COLUMN[k]] !== null).map((k) => [k, h[SHARING_COLUMN[k]] === 1])) };
+  if (h.action === 'representation_requested')
+    return {
+      ...base,
+      detail: {
+        scope: [...own.scope],
+        termMonths: own.termMonths,
+        jurisdiction: own.jurisdiction,
+        policyVersions: [...own.policyVersions],
+      },
+    };
+  if (h.action === 'representation_sharing_changed')
+    return {
+      ...base,
+      detail: Object.fromEntries(
+        SHARING_KEYS.filter((k) => h[SHARING_COLUMN[k]] !== null).map((k) => [k, h[SHARING_COLUMN[k]] === 1]),
+      ),
+    };
   if (h.action === 'opportunity_shared') return { ...base, detail: { shareId: h.detail_share_id, via: h.detail_via } };
   if (h.action === 'opportunity_share_withdrawn') return { ...base, detail: { shareId: h.detail_share_id } };
-  if (h.detail_by === 'client') return { ...base, detail: { from: h.detail_from, to: h.detail_to, by: 'client', hadReason: h.detail_had_reason === 1 } };
-  if (h.detail_by === 'trust_safety') return { ...base, detail: { by: 'trust_safety', phase: h.detail_phase, reviewId: h.detail_review_id, reasonCode: h.detail_reason_code } };
+  if (h.detail_by === 'client')
+    return {
+      ...base,
+      detail: { from: h.detail_from, to: h.detail_to, by: 'client', hadReason: h.detail_had_reason === 1 },
+    };
+  if (h.detail_by === 'trust_safety')
+    return {
+      ...base,
+      detail: {
+        by: 'trust_safety',
+        phase: h.detail_phase,
+        reviewId: h.detail_review_id,
+        reasonCode: h.detail_reason_code,
+      },
+    };
   return { ...base, detail: { by: h.detail_by, phase: h.detail_phase, reasonCode: h.detail_reason_code } };
 }
 
 /** Write a typed profile whole: the row, its jurisdictions and facets, and the history entries not yet stored. */
 function writeProfile(st, p, knownHistory = 0) {
-  st.profile.run(encode([...PROFILE_SPEC, text('fifaLicenceNumber', 'declared_fifa_licence_number', L.licenceNumber)], { ...p, fifaLicenceNumber: p.declared.fifaLicenceNumber }));
+  st.profile.run(
+    encode([...PROFILE_SPEC, text('fifaLicenceNumber', 'declared_fifa_licence_number', L.licenceNumber)], {
+      ...p,
+      fifaLicenceNumber: p.declared.fifaLicenceNumber,
+    }),
+  );
   st.profileJurDel.run(p.id);
   p.declared.jurisdictions.forEach((j, i) => st.profileJurIns.run(p.id, i, j));
   st.facetDel.run(p.id);
   st.facetIns.run(encode(FACET_ROW_SPEC, facetRow(p.id, 'fifa_licence', FIFA_MA, p.facets.fifa_licence)));
-  for (const f of MA_FACETS) for (const [ma, rec] of Object.entries(p.facets[f])) st.facetIns.run(encode(FACET_ROW_SPEC, facetRow(p.id, f, ma, rec)));
+  for (const f of MA_FACETS)
+    for (const [ma, rec] of Object.entries(p.facets[f]))
+      st.facetIns.run(encode(FACET_ROW_SPEC, facetRow(p.id, f, ma, rec)));
   p.history.slice(knownHistory).forEach((h, i) => st.profileHist.run(profileHistoryRow(h, p.id, knownHistory + i)));
 }
 function writeAffiliationEntry(st, owner, ord, h) {
   st.affHist.run(affiliationHistoryRow(h, owner, ord));
-  if (h.action === 'agency_affiliation_updated') h.detail.from.forEach((t, j) => st.affHistTier.run(h.id, 'from', j, t));
+  if (h.action === 'agency_affiliation_updated')
+    h.detail.from.forEach((t, j) => st.affHistTier.run(h.id, 'from', j, t));
   if (h.action !== 'agency_affiliation_ended') h.detail.tiers.forEach((t, j) => st.affHistTier.run(h.id, 'to', j, t));
 }
 /** An agreement key slot's columns. */
-const keyCols = (slot, k) => ({ [`${SLOT_COLUMN[slot]}_key`]: k?.key ?? null, [`${SLOT_COLUMN[slot]}_fp`]: k?.fp ?? null });
+const keyCols = (slot, k) => ({
+  [`${SLOT_COLUMN[slot]}_key`]: k?.key ?? null,
+  [`${SLOT_COLUMN[slot]}_fp`]: k?.fp ?? null,
+});
 function writeAffiliation(st, a, knownHistory = 0) {
   st.affiliation.run(encode([...AFFILIATION_SPEC, KEY_GROUP('keys', 'create')], { ...a, keys: a.keys.create ?? null }));
   st.tierDel.run(a.id);
@@ -643,14 +1166,30 @@ function writeAffiliation(st, a, knownHistory = 0) {
   a.history.slice(knownHistory).forEach((h, i) => writeAffiliationEntry(st, a.id, knownHistory + i, h));
 }
 function writeAgreement(st, a, { isNew, knownHistory = 0 }) {
-  st.agreement.run(encode([...AGREEMENT_SPEC, idf('confirmedByPlayerId', 'confirmed_by_player_id'), ...AGREEMENT_KEYS_SPEC], {
-    ...a, confirmedByPlayerId: a.confirmedBy?.id ?? null, ...Object.fromEntries(AGREEMENT_KEY_SLOTS.map((s) => [s, a.keys[s] ?? null])),
-  }));
+  st.agreement.run(
+    encode([...AGREEMENT_SPEC, idf('confirmedByPlayerId', 'confirmed_by_player_id'), ...AGREEMENT_KEYS_SPEC], {
+      ...a,
+      confirmedByPlayerId: a.confirmedBy?.id ?? null,
+      ...Object.fromEntries(AGREEMENT_KEY_SLOTS.map((s) => [s, a.keys[s] ?? null])),
+    }),
+  );
   if (isNew) {
     a.scope.forEach((s, i) => st.scopeIns.run(a.id, i, s));
     a.policyVersions.forEach((pv, i) => st.policyIns.run(a.id, i, pv));
   }
-  a.opportunityShares.forEach((s, i) => st.share.run(encode([idf('agreementId', 'agreement_id', req), int('ord', 'ord', { req: true }), ...SHARE_SPEC, KEY_GROUP('keys', 'share')], { ...s, agreementId: a.id, ord: i, keys: s.keys.share ?? null })));
+  a.opportunityShares.forEach((s, i) =>
+    st.share.run(
+      encode(
+        [
+          idf('agreementId', 'agreement_id', req),
+          int('ord', 'ord', { req: true }),
+          ...SHARE_SPEC,
+          KEY_GROUP('keys', 'share'),
+        ],
+        { ...s, agreementId: a.id, ord: i, keys: s.keys.share ?? null },
+      ),
+    ),
+  );
   a.history.slice(knownHistory).forEach((h, i) => st.agrHist.run(agreementHistoryRow(h, a.id, knownHistory + i)));
 }
 
@@ -660,12 +1199,29 @@ function decodeProfiles(sqlite, rows) {
   const facets = childRowsOf(sqlite, 'agent_profile_facets', 'profile_id', pids, { order: 'rowid' });
   const hist = childRowsOf(sqlite, 'agent_profile_history', 'profile_id', pids, { order: 'ord' });
   return rows.map((row) => {
-    const out = { ...decode(PROFILE_SPEC, row), declared: { fifaLicenceNumber: row.declared_fifa_licence_number, jurisdictions: jur.all(row.id).map((r) => r.jurisdiction) } };
+    const out = {
+      ...decode(PROFILE_SPEC, row),
+      declared: {
+        fifaLicenceNumber: row.declared_fifa_licence_number,
+        jurisdictions: jur.all(row.id).map((r) => r.jurisdiction),
+      },
+    };
     const f = { fifa_licence: null, ...Object.fromEntries(MA_FACETS.map((x) => [x, {}])) };
     for (const r of facets.all(row.id)) {
       const rec = decode(FACET_SPEC, r);
-      const v = { state: rec.state, reference: rec.reference, memberAssociation: r.facet === 'fifa_licence' ? null : r.member_association, provenance: rec.provenance, submittedAt: rec.submittedAt, verifiedAt: rec.verifiedAt, recheckAt: rec.recheckAt, note: rec.note, staleNotifiedAt: rec.staleNotifiedAt };
-      if (r.facet === 'fifa_licence') f.fifa_licence = v; else f[r.facet][r.member_association] = v;
+      const v = {
+        state: rec.state,
+        reference: rec.reference,
+        memberAssociation: r.facet === 'fifa_licence' ? null : r.member_association,
+        provenance: rec.provenance,
+        submittedAt: rec.submittedAt,
+        verifiedAt: rec.verifiedAt,
+        recheckAt: rec.recheckAt,
+        note: rec.note,
+        staleNotifiedAt: rec.staleNotifiedAt,
+      };
+      if (r.facet === 'fifa_licence') f.fifa_licence = v;
+      else f[r.facet][r.member_association] = v;
     }
     return { ...out, facets: f, history: hist.all(row.id).map(profileHistoryOut) };
   });
@@ -679,7 +1235,8 @@ function decodeAffiliations(sqlite, rows) {
   return rows.map((row) => {
     const rec = decode(AFFILIATION_SPEC, row);
     return {
-      ...rec, tiers: tiers.all(row.id).map((t) => t.tier),
+      ...rec,
+      tiers: tiers.all(row.id).map((t) => t.tier),
       keys: row.create_key === null ? {} : { create: { key: row.create_key, fp: row.create_fp } },
       history: hist.all(row.id).map((h) => affiliationHistoryOut(h, htiers.all(h.id))),
     };
@@ -693,14 +1250,24 @@ function decodeAgreements(sqlite, rows) {
   const hist = childRowsOf(sqlite, 'agreement_history', 'agreement_id', aids, { order: 'ord' });
   return rows.map((row) => {
     const rec = decode(AGREEMENT_SPEC, row);
-    const own = { ...rec, scope: scopes.all(row.id).map((s) => s.scope), policyVersions: pvs.all(row.id).map((p) => p.policy_version_id) };
+    const own = {
+      ...rec,
+      scope: scopes.all(row.id).map((s) => s.scope),
+      policyVersions: pvs.all(row.id).map((p) => p.policy_version_id),
+    };
     const keys = {};
-    for (const s of AGREEMENT_KEY_SLOTS) if (row[`${SLOT_COLUMN[s]}_key`] !== null) keys[s] = { key: row[`${SLOT_COLUMN[s]}_key`], fp: row[`${SLOT_COLUMN[s]}_fp`] };
+    for (const s of AGREEMENT_KEY_SLOTS)
+      if (row[`${SLOT_COLUMN[s]}_key`] !== null)
+        keys[s] = { key: row[`${SLOT_COLUMN[s]}_key`], fp: row[`${SLOT_COLUMN[s]}_fp`] };
     return {
-      ...own, isRegulatoryMinor: false,
+      ...own,
+      isRegulatoryMinor: false,
       confirmedBy: row.confirmed_by_player_id === null ? null : { kind: 'player', id: row.confirmed_by_player_id },
       keys,
-      opportunityShares: shares.all(row.id).map((s) => ({ ...decode(SHARE_SPEC, s), keys: s.share_key === null ? {} : { share: { key: s.share_key, fp: s.share_fp } } })),
+      opportunityShares: shares.all(row.id).map((s) => ({
+        ...decode(SHARE_SPEC, s),
+        keys: s.share_key === null ? {} : { share: { key: s.share_key, fp: s.share_fp } },
+      })),
       history: hist.all(row.id).map((h) => agreementHistoryOut(h, own)),
     };
   });
@@ -711,119 +1278,259 @@ export const agentCoreLive = (sqlite) => migrationApplied(sqlite, AGENT_CORE_MIG
 function readAll(sqlite) {
   return {
     agentProfiles: decodeProfiles(sqlite, sqlite.prepare('SELECT * FROM agent_profiles ORDER BY rowid').all()),
-    agencyAffiliations: decodeAffiliations(sqlite, sqlite.prepare('SELECT * FROM agency_affiliations ORDER BY rowid').all()),
-    representationAgreements: decodeAgreements(sqlite, sqlite.prepare('SELECT * FROM representation_agreements ORDER BY rowid').all()),
+    agencyAffiliations: decodeAffiliations(
+      sqlite,
+      sqlite.prepare('SELECT * FROM agency_affiliations ORDER BY rowid').all(),
+    ),
+    representationAgreements: decodeAgreements(
+      sqlite,
+      sqlite.prepare('SELECT * FROM representation_agreements ORDER BY rowid').all(),
+    ),
   };
 }
 /** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const AGENT_CORE_RECORDS = {
   names: AGENT_CORE_COLLECTIONS,
-  read(sqlite) { return agentCoreLive(sqlite) ? readAll(sqlite) : null; },
+  read(sqlite) {
+    return agentCoreLive(sqlite) ? readAll(sqlite) : null;
+  },
 };
-const playerRefCount = (sqlite, cond) => sqlite.prepare(`SELECT count(*) AS n FROM representation_agreements x WHERE ${cond}`).get().n;
-export const unresolvedPlayerReferences = (sqlite) => (agentCoreLive(sqlite) ? { agentCore: playerRefCount(sqlite, 'NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.client_id)') } : null);
-export const retainedPlayerReferences = (sqlite) => (agentCoreLive(sqlite) ? { agentCore: playerRefCount(sqlite, 'EXISTS (SELECT 1 FROM players p WHERE p.id = x.client_id AND p.deleted_at IS NOT NULL)') } : null);
+const playerRefCount = (sqlite, cond) =>
+  sqlite.prepare(`SELECT count(*) AS n FROM representation_agreements x WHERE ${cond}`).get().n;
+export const unresolvedPlayerReferences = (sqlite) =>
+  agentCoreLive(sqlite)
+    ? { agentCore: playerRefCount(sqlite, 'NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.client_id)') }
+    : null;
+export const retainedPlayerReferences = (sqlite) =>
+  agentCoreLive(sqlite)
+    ? {
+        agentCore: playerRefCount(
+          sqlite,
+          'EXISTS (SELECT 1 FROM players p WHERE p.id = x.client_id AND p.deleted_at IS NOT NULL)',
+        ),
+      }
+    : null;
 
 // ------------------------------------------------------------------ the repository
 const WRITES = new Set([
-  'create', 'save', 'redactClient', 'recordAct', 'updateDeclared', 'setFacet', 'markStaleNotified', 'setTiers', 'end',
-  'terminateByAgent', 'answerByClient', 'setSharing', 'markExpiryNotified', 'resolveDispute', 'addShare', 'withdrawShare',
+  'create',
+  'save',
+  'redactClient',
+  'recordAct',
+  'updateDeclared',
+  'setFacet',
+  'markStaleNotified',
+  'setTiers',
+  'end',
+  'terminateByAgent',
+  'answerByClient',
+  'setSharing',
+  'markExpiryNotified',
+  'resolveDispute',
+  'addShare',
+  'withdrawShare',
 ]);
 const EMPTY_SETTINGS = Object.freeze({ jurisdictions: Object.freeze([]), description: '' });
 /**
  * `createAgentCoreRepository({ sqlite, unit, now, log, policyVersionKnown })`: `profiles`, `affiliations`, `agreements` and
  * `settings`, each with its writes and queries, plus `reads` (the queries alone: `agentReads`).
  */
-export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now, log = () => {}, policyVersionKnown = () => true } = {}) {
+export function createAgentCoreRepository({
+  sqlite,
+  unit = null,
+  now = Date.now,
+  log = () => {},
+  policyVersionKnown = () => true,
+} = {}) {
   if (!sqlite) throw new TypeError('the agent core repository needs a SQLite connection (node:sqlite)');
   const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
   const cache = new Map();
-  const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };
+  const q = (sql) => {
+    let s = cache.get(sql);
+    if (!s) cache.set(sql, (s = sqlite.prepare(sql)));
+    return s;
+  };
   const st = statements(sqlite);
-  const typedOr = (type, raw, name) => { const t = type(raw, name); if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason); return t.record; };
-  const historyTaken = (h) => q('SELECT 1 FROM agent_profile_history WHERE id = ? UNION ALL SELECT 1 FROM agency_affiliation_history WHERE id = ? UNION ALL SELECT 1 FROM agreement_history WHERE id = ?').get(h.id, h.id, h.id);
-  const nextOrd = (table, owner, id) => q(`SELECT COALESCE(MAX(ord) + 1, 0) AS n FROM ${table} WHERE ${owner} = ?`).get(id).n;
-  const setRow = (table, keys, cols) => q(`UPDATE ${table} SET ${Object.keys(cols).map((c) => `${c} = @${c}`).join(', ')} WHERE ${Object.keys(keys).map((c) => `${c} = @key_${c}`).join(' AND ')}`)
-    .run({ ...Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v])), ...Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v])) });
+  const typedOr = (type, raw, name) => {
+    const t = type(raw, name);
+    if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason);
+    return t.record;
+  };
+  const historyTaken = (h) =>
+    q(
+      'SELECT 1 FROM agent_profile_history WHERE id = ? UNION ALL SELECT 1 FROM agency_affiliation_history WHERE id = ? UNION ALL SELECT 1 FROM agreement_history WHERE id = ?',
+    ).get(h.id, h.id, h.id);
+  const nextOrd = (table, owner, id) =>
+    q(`SELECT COALESCE(MAX(ord) + 1, 0) AS n FROM ${table} WHERE ${owner} = ?`).get(id).n;
+  const setRow = (table, keys, cols) =>
+    q(
+      `UPDATE ${table} SET ${Object.keys(cols)
+        .map((c) => `${c} = @${c}`)
+        .join(', ')} WHERE ${Object.keys(keys)
+        .map((c) => `${c} = @key_${c}`)
+        .join(' AND ')}`,
+    ).run({
+      ...Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v])),
+      ...Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v])),
+    });
   /** Update one row only while `where` holds; no row means a route's gate let through a change it should have refused. */
   const guarded = (table, keys, where, cols, what) => {
-    const params = { ...Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v])), ...Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v])) };
-    const sql = `UPDATE ${table} SET ${Object.keys(cols).map((c) => `${c} = @${c}`).join(', ')} WHERE ${Object.keys(keys).map((c) => `${c} = @key_${c}`).join(' AND ')}${where ? ` AND (${where})` : ''}`;
+    const params = {
+      ...Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v])),
+      ...Object.fromEntries(Object.entries(keys).map(([c, v]) => [`key_${c}`, v])),
+    };
+    const sql = `UPDATE ${table} SET ${Object.keys(cols)
+      .map((c) => `${c} = @${c}`)
+      .join(', ')} WHERE ${Object.keys(keys)
+      .map((c) => `${c} = @key_${c}`)
+      .join(' AND ')}${where ? ` AND (${where})` : ''}`;
     if (q(sql).run(params).changes !== 1) throw refusal('AGENT_CORE_STATE_CONFLICT', what);
   };
-  const leadingTo = (transitions, to) => Object.keys(transitions).filter((x) => transitions[x].includes(to)).map(quote).join(', ') || "''";
+  const leadingTo = (transitions, to) =>
+    Object.keys(transitions)
+      .filter((x) => transitions[x].includes(to))
+      .map(quote)
+      .join(', ') || "''";
   /**
    * Named acts on one table, each `act(id, input, bookkeeping)`: the act's own writes, then the bookkeeping — the history
    * entries (typed, only inserted), the rev bump (`bump: { at, by: { id | userId, name } }`) and, with `touch`,
    * `updatedAt = at` — in one operation, returning the stored record. `recordAct(id, bookkeeping)` is the bookkeeping alone.
    */
   const actsOn = ({ table, label, byId, actions, typeDetail, writeEntry }, defs) => {
-    const run = (name, id, fn, { at = null, touch = false, bump = null, history = [] } = {}) => operation(() => {
-      if (!q(`SELECT 1 FROM ${table} WHERE id = ?`).get(id)) throw refusal('AGENT_CORE_NOT_FOUND', `${table} ${id} is not a record of the repository`);
-      const h = typeHistory(history, `${label} ${id}`, actions, typeDetail); if (!h.ok) throw refusal('AGENT_CORE_INPUT_INVALID', h.reason);
-      const taken = h.list.find(historyTaken); if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
-      fn();
-      if (bump) q(`UPDATE ${table} SET rev = rev + 1, rev_at = @at, rev_by_id = @uid, rev_by_name = @name WHERE id = @id`).run({ id, at: bump.at, uid: bump.by?.id ?? bump.by?.userId ?? null, name: bump.by?.name ?? null });
-      if (touch) setRow(table, { id }, { updated_at: at });
-      for (const e of h.list) writeEntry(id, e);
-      return byId(id);
-    });
+    const run = (name, id, fn, { at = null, touch = false, bump = null, history = [] } = {}) =>
+      operation(() => {
+        if (!q(`SELECT 1 FROM ${table} WHERE id = ?`).get(id))
+          throw refusal('AGENT_CORE_NOT_FOUND', `${table} ${id} is not a record of the repository`);
+        const h = typeHistory(history, `${label} ${id}`, actions, typeDetail);
+        if (!h.ok) throw refusal('AGENT_CORE_INPUT_INVALID', h.reason);
+        const taken = h.list.find(historyTaken);
+        if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
+        fn();
+        if (bump)
+          q(
+            `UPDATE ${table} SET rev = rev + 1, rev_at = @at, rev_by_id = @uid, rev_by_name = @name WHERE id = @id`,
+          ).run({ id, at: bump.at, uid: bump.by?.id ?? bump.by?.userId ?? null, name: bump.by?.name ?? null });
+        if (touch) setRow(table, { id }, { updated_at: at });
+        for (const e of h.list) writeEntry(id, e);
+        return byId(id);
+      });
     return {
-      ...Object.fromEntries(Object.entries(defs).map(([name, fn]) => [name, (id, input = {}, bookkeeping = {}) => run(name, id, () => fn(id, input), bookkeeping)])),
+      ...Object.fromEntries(
+        Object.entries(defs).map(([name, fn]) => [
+          name,
+          (id, input = {}, bookkeeping = {}) => run(name, id, () => fn(id, input), bookkeeping),
+        ]),
+      ),
       recordAct: (id, bookkeeping = {}) => run('recordAct', id, () => {}, bookkeeping),
     };
   };
-  const one = (decoder, sql) => (...args) => { const row = q(sql).get(...args); return row ? deepFreeze(decoder(sqlite, [row])[0]) : null; };
-  const many = (decoder, sql) => (...args) => decoder(sqlite, q(sql).all(...args)).map(deepFreeze);
+  const one =
+    (decoder, sql) =>
+    (...args) => {
+      const row = q(sql).get(...args);
+      return row ? deepFreeze(decoder(sqlite, [row])[0]) : null;
+    };
+  const many =
+    (decoder, sql) =>
+    (...args) =>
+      decoder(sqlite, q(sql).all(...args)).map(deepFreeze);
   /** Newest first by cursor (`after` is the previous page's last `[rowid]`): `{ rows: [{ key, record }] }`, one row more than `limit` when there is a next page. */
-  const pageOf = (table, decoder) => ({ limit, after = null }) => {
-    const rows = q(`SELECT rowid AS rid, * FROM ${table} WHERE (? IS NULL OR rowid < ?) ORDER BY rowid DESC LIMIT ?`).all(after?.[0] ?? null, after?.[0] ?? null, limit + 1);
-    return { rows: decoder(sqlite, rows).map((record, i) => ({ key: [rows[i].rid], record: deepFreeze(record) })) };
-  };
+  const pageOf =
+    (table, decoder) =>
+    ({ limit, after = null }) => {
+      const rows = q(
+        `SELECT rowid AS rid, * FROM ${table} WHERE (? IS NULL OR rowid < ?) ORDER BY rowid DESC LIMIT ?`,
+      ).all(after?.[0] ?? null, after?.[0] ?? null, limit + 1);
+      return { rows: decoder(sqlite, rows).map((record, i) => ({ key: [rows[i].rid], record: deepFreeze(record) })) };
+    };
 
   // ---- profiles
   const profileById = one(decodeProfiles, 'SELECT * FROM agent_profiles WHERE id = ?');
   const profiles = {
-    create: (raw) => operation(() => {
-      const p = typedOr(typeAgentProfile, raw, 'agentProfiles');
-      if (profileById(p.id)) throw refusal('AGENT_CORE_DUPLICATE', `agent_profiles ${p.id} already exists`);
-      if (q('SELECT 1 FROM agent_profiles WHERE user_id = ?').get(p.userId)) throw refusal('AGENT_CORE_DUPLICATE', `agent_profiles: ${p.userId} already has a profile`);
-      const taken = p.history.find(historyTaken); if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
-      writeProfile(st, p);
-      return profileById(p.id);
-    }),
-    ...actsOn({ table: 'agent_profiles', label: 'agentProfiles', byId: profileById, actions: PROFILE_ACTIONS, typeDetail: typeProfileDetail, writeEntry: (id, h) => st.profileHist.run(profileHistoryRow(h, id, nextOrd('agent_profile_history', 'profile_id', id))) }, {
-      /** The declared details the agent changed: a display name, the jurisdictions (replaced, in order), the licence number. */
-      updateDeclared: (id, { displayName, jurisdictions, fifaLicenceNumber }) => {
-        const cols = { ...(displayName !== undefined ? { display_name: displayName } : {}), ...(fifaLicenceNumber !== undefined ? { declared_fifa_licence_number: fifaLicenceNumber } : {}) };
-        if (Object.keys(cols).length) setRow('agent_profiles', { id }, cols);
-        if (jurisdictions !== undefined) {
-          const l = typeList(jurisdictions, JURISDICTIONS, `agentProfiles ${id}`, 'declared.jurisdictions'); if (!l.ok) throw refusal('AGENT_CORE_INPUT_INVALID', l.reason);
-          st.profileJurDel.run(id);
-          l.list.forEach((j, i) => st.profileJurIns.run(id, i, j));
-        }
+    create: (raw) =>
+      operation(() => {
+        const p = typedOr(typeAgentProfile, raw, 'agentProfiles');
+        if (profileById(p.id)) throw refusal('AGENT_CORE_DUPLICATE', `agent_profiles ${p.id} already exists`);
+        if (q('SELECT 1 FROM agent_profiles WHERE user_id = ?').get(p.userId))
+          throw refusal('AGENT_CORE_DUPLICATE', `agent_profiles: ${p.userId} already has a profile`);
+        const taken = p.history.find(historyTaken);
+        if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
+        writeProfile(st, p);
+        return profileById(p.id);
+      }),
+    ...actsOn(
+      {
+        table: 'agent_profiles',
+        label: 'agentProfiles',
+        byId: profileById,
+        actions: PROFILE_ACTIONS,
+        typeDetail: typeProfileDetail,
+        writeEntry: (id, h) =>
+          st.profileHist.run(profileHistoryRow(h, id, nextOrd('agent_profile_history', 'profile_id', id))),
       },
-      /** A facet's new state (the FIFA licence under `memberAssociation: null`); a stored facet keeps no stale marker from before. */
-      setFacet: (id, { facet, memberAssociation = null, record }) => {
-        const ma = facet === 'fifa_licence' ? FIFA_MA : memberAssociation;
-        const t = typeFacet({ staleNotifiedAt: null, ...record }, `agentProfiles ${id}.facets.${facet}${ma === FIFA_MA ? '' : `.${ma}`}`, facet, memberAssociation); if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason);
-        st.facetIns.run(encode(FACET_ROW_SPEC, facetRow(id, facet, ma, t.record)));
+      {
+        /** The declared details the agent changed: a display name, the jurisdictions (replaced, in order), the licence number. */
+        updateDeclared: (id, { displayName, jurisdictions, fifaLicenceNumber }) => {
+          const cols = {
+            ...(displayName !== undefined ? { display_name: displayName } : {}),
+            ...(fifaLicenceNumber !== undefined ? { declared_fifa_licence_number: fifaLicenceNumber } : {}),
+          };
+          if (Object.keys(cols).length) setRow('agent_profiles', { id }, cols);
+          if (jurisdictions !== undefined) {
+            const l = typeList(jurisdictions, JURISDICTIONS, `agentProfiles ${id}`, 'declared.jurisdictions');
+            if (!l.ok) throw refusal('AGENT_CORE_INPUT_INVALID', l.reason);
+            st.profileJurDel.run(id);
+            l.list.forEach((j, i) => st.profileJurIns.run(id, i, j));
+          }
+        },
+        /** A facet's new state (the FIFA licence under `memberAssociation: null`); a stored facet keeps no stale marker from before. */
+        setFacet: (id, { facet, memberAssociation = null, record }) => {
+          const ma = facet === 'fifa_licence' ? FIFA_MA : memberAssociation;
+          const t = typeFacet(
+            { staleNotifiedAt: null, ...record },
+            `agentProfiles ${id}.facets.${facet}${ma === FIFA_MA ? '' : `.${ma}`}`,
+            facet,
+            memberAssociation,
+          );
+          if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason);
+          st.facetIns.run(encode(FACET_ROW_SPEC, facetRow(id, facet, ma, t.record)));
+        },
+        /** The sweep told the agent these VERIFIED facets went STALE (`[[facet, memberAssociation]]`), once each. */
+        markStaleNotified: (id, { facets, at }) => {
+          for (const [facet, ma] of facets)
+            guarded(
+              'agent_profile_facets',
+              { profile_id: id, facet, member_association: facet === 'fifa_licence' ? FIFA_MA : ma },
+              'stale_notified_at IS NULL',
+              { stale_notified_at: at },
+              `agent_profiles ${id}: ${facet} was already marked stale`,
+            );
+        },
       },
-      /** The sweep told the agent these VERIFIED facets went STALE (`[[facet, memberAssociation]]`), once each. */
-      markStaleNotified: (id, { facets, at }) => {
-        for (const [facet, ma] of facets) guarded('agent_profile_facets', { profile_id: id, facet, member_association: facet === 'fifa_licence' ? FIFA_MA : ma }, 'stale_notified_at IS NULL', { stale_notified_at: at }, `agent_profiles ${id}: ${facet} was already marked stale`);
-      },
-    }),
+    ),
     byId: profileById,
     /** The staff member's profile, or null. */
     forUser: one(decodeProfiles, 'SELECT * FROM agent_profiles WHERE user_id = ?'),
     /** The agency's profiles, oldest first (the agency audit and compliance lists). */
     forAgency: many(decodeProfiles, 'SELECT * FROM agent_profiles WHERE agency_org_id = ? ORDER BY rowid'),
     /** Every profile's facet states (the T&S metrics): `[{ facet, memberAssociation, state, recheckAt }]` per profile id. */
-    facetStates: () => q('SELECT profile_id, facet, member_association, state, recheck_at FROM agent_profile_facets ORDER BY profile_id, rowid').all()
-      .map((r) => ({ profileId: r.profile_id, facet: r.facet, memberAssociation: r.facet === 'fifa_licence' ? null : r.member_association, state: r.state, recheckAt: r.recheck_at })),
+    facetStates: () =>
+      q(
+        'SELECT profile_id, facet, member_association, state, recheck_at FROM agent_profile_facets ORDER BY profile_id, rowid',
+      )
+        .all()
+        .map((r) => ({
+          profileId: r.profile_id,
+          facet: r.facet,
+          memberAssociation: r.facet === 'fifa_licence' ? null : r.member_association,
+          state: r.state,
+          recheckAt: r.recheck_at,
+        })),
     /** Profiles holding a VERIFIED facet whose recheck date passed by `at` and that was not yet told (the sweep). */
-    staleUnnotified: many(decodeProfiles, "SELECT * FROM agent_profiles WHERE id IN (SELECT profile_id FROM agent_profile_facets WHERE state = 'VERIFIED' AND stale_notified_at IS NULL AND recheck_at IS NOT NULL AND recheck_at <= ?) ORDER BY rowid"),
+    staleUnnotified: many(
+      decodeProfiles,
+      "SELECT * FROM agent_profiles WHERE id IN (SELECT profile_id FROM agent_profile_facets WHERE state = 'VERIFIED' AND stale_notified_at IS NULL AND recheck_at IS NOT NULL AND recheck_at <= ?) ORDER BY rowid",
+    ),
     /** Every profile, newest first, by cursor (the T&S oversight list). */
     page: pageOf('agent_profiles', decodeProfiles),
   };
@@ -832,102 +1539,275 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
   const affiliationById = one(decodeAffiliations, 'SELECT * FROM agency_affiliations WHERE id = ?');
   const ACTIVE = '(started_at <= @at AND (ended_at IS NULL OR ended_at > @at))';
   const affiliations = {
-    create: (raw) => operation(() => {
-      const a = typedOr(typeAgencyAffiliation, raw, 'agencyAffiliations');
-      if (affiliationById(a.id)) throw refusal('AGENT_CORE_DUPLICATE', `agency_affiliations ${a.id} already exists`);
-      const taken = a.history.find(historyTaken); if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
-      writeAffiliation(st, a);
-      return affiliationById(a.id);
-    }),
-    ...actsOn({ table: 'agency_affiliations', label: 'agencyAffiliations', byId: affiliationById, actions: AFFILIATION_ACTIONS, typeDetail: typeAffiliationDetail, writeEntry: (id, h) => writeAffiliationEntry(st, id, nextOrd('agency_affiliation_history', 'affiliation_id', id), h) }, {
-      /** The member's roles, replaced; an ended membership does not change. */
-      setTiers: (id, { tiers }) => {
-        const l = typeList(tiers, TIERS, `agencyAffiliations ${id}`, 'tiers', { nonEmpty: true }); if (!l.ok) throw refusal('AGENT_CORE_INPUT_INVALID', l.reason);
-        if (!q('SELECT 1 FROM agency_affiliations WHERE id = ? AND ended_at IS NULL').get(id)) throw refusal('AGENT_CORE_STATE_CONFLICT', `agency_affiliations ${id} has ended`);
-        st.tierDel.run(id);
-        l.list.forEach((t, i) => st.tierIns.run(id, i, t));
+    create: (raw) =>
+      operation(() => {
+        const a = typedOr(typeAgencyAffiliation, raw, 'agencyAffiliations');
+        if (affiliationById(a.id)) throw refusal('AGENT_CORE_DUPLICATE', `agency_affiliations ${a.id} already exists`);
+        const taken = a.history.find(historyTaken);
+        if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
+        writeAffiliation(st, a);
+        return affiliationById(a.id);
+      }),
+    ...actsOn(
+      {
+        table: 'agency_affiliations',
+        label: 'agencyAffiliations',
+        byId: affiliationById,
+        actions: AFFILIATION_ACTIONS,
+        typeDetail: typeAffiliationDetail,
+        writeEntry: (id, h) =>
+          writeAffiliationEntry(st, id, nextOrd('agency_affiliation_history', 'affiliation_id', id), h),
       },
-      /** An ended membership does not reopen. */
-      end: (id, { at, reason }) => guarded('agency_affiliations', { id }, 'ended_at IS NULL', { ended_at: at, ended_reason: reason }, `agency_affiliations ${id} has already ended`),
-    }),
+      {
+        /** The member's roles, replaced; an ended membership does not change. */
+        setTiers: (id, { tiers }) => {
+          const l = typeList(tiers, TIERS, `agencyAffiliations ${id}`, 'tiers', { nonEmpty: true });
+          if (!l.ok) throw refusal('AGENT_CORE_INPUT_INVALID', l.reason);
+          if (!q('SELECT 1 FROM agency_affiliations WHERE id = ? AND ended_at IS NULL').get(id))
+            throw refusal('AGENT_CORE_STATE_CONFLICT', `agency_affiliations ${id} has ended`);
+          st.tierDel.run(id);
+          l.list.forEach((t, i) => st.tierIns.run(id, i, t));
+        },
+        /** An ended membership does not reopen. */
+        end: (id, { at, reason }) =>
+          guarded(
+            'agency_affiliations',
+            { id },
+            'ended_at IS NULL',
+            { ended_at: at, ended_reason: reason },
+            `agency_affiliations ${id} has already ended`,
+          ),
+      },
+    ),
     byId: affiliationById,
     /** The member's membership of the agency that is active at `at`, or null (every agent request). */
-    activeFor: (userId, orgId, at) => { const row = q(`SELECT * FROM agency_affiliations WHERE user_id = @userId AND agency_org_id = @orgId AND ${ACTIVE} ORDER BY rowid LIMIT 1`).get({ userId, orgId, at }); return row ? deepFreeze(decodeAffiliations(sqlite, [row])[0]) : null; },
+    activeFor: (userId, orgId, at) => {
+      const row = q(
+        `SELECT * FROM agency_affiliations WHERE user_id = @userId AND agency_org_id = @orgId AND ${ACTIVE} ORDER BY rowid LIMIT 1`,
+      ).get({ userId, orgId, at });
+      return row ? deepFreeze(decodeAffiliations(sqlite, [row])[0]) : null;
+    },
     /** Does the agency have any membership active at `at`? */
-    anyActiveIn: (orgId, at) => !!q(`SELECT 1 FROM agency_affiliations WHERE agency_org_id = @orgId AND ${ACTIVE} LIMIT 1`).get({ orgId, at }),
+    anyActiveIn: (orgId, at) =>
+      !!q(`SELECT 1 FROM agency_affiliations WHERE agency_org_id = @orgId AND ${ACTIVE} LIMIT 1`).get({ orgId, at }),
     /** The agency's memberships, oldest first (the team page, the last-admin rule). */
     forAgency: many(decodeAffiliations, 'SELECT * FROM agency_affiliations WHERE agency_org_id = ? ORDER BY rowid'),
     /** The membership created under this client key in the agency, or null. */
-    byCreateKey: one(decodeAffiliations, 'SELECT * FROM agency_affiliations WHERE agency_org_id = ? AND create_key = ?'),
+    byCreateKey: one(
+      decodeAffiliations,
+      'SELECT * FROM agency_affiliations WHERE agency_org_id = ? AND create_key = ?',
+    ),
   };
 
   // ---- agreements
   const agreementById = one(decodeAgreements, 'SELECT * FROM representation_agreements WHERE id = ?');
-  const checkPolicies = (a) => { const unknown = a.policyVersions.find((p) => !policyVersionKnown(p)); if (unknown) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${a.id}: policy version ${unknown} is not a known policy`); };
+  const checkPolicies = (a) => {
+    const unknown = a.policyVersions.find((p) => !policyVersionKnown(p));
+    if (unknown)
+      throw refusal(
+        'AGENT_CORE_INPUT_INVALID',
+        `representation_agreements ${a.id}: policy version ${unknown} is not a known policy`,
+      );
+  };
   const agreements = {
-    create: (raw) => operation(() => {
-      const a = typedOr(typeRepresentationAgreement, raw, 'representationAgreements');
-      if (agreementById(a.id)) throw refusal('AGENT_CORE_DUPLICATE', `representation_agreements ${a.id} already exists`);
-      checkPolicies(a);
-      const taken = a.history.find(historyTaken); if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
-      writeAgreement(st, a, { isNew: true });
-      return agreementById(a.id);
-    }),
-    ...actsOn({ table: 'representation_agreements', label: 'representationAgreements', byId: agreementById, actions: AGREEMENT_ACTIONS, typeDetail: typeAgreementDetail, writeEntry: (id, h) => st.agrHist.run(agreementHistoryRow(h, id, nextOrd('agreement_history', 'agreement_id', id))) }, {
-      /** The agent withdraws a request or ends the relationship (AGENT_TRANSITIONS), with the request's key. */
-      terminateByAgent: (id, { at, reasonCode, key = null }) => guarded('representation_agreements', { id }, `status IN (${leadingTo(AGENT_TRANSITIONS, 'terminated_by_agent')})`,
-        { status: 'terminated_by_agent', terminated_at: at, terminated_by: 'agent', termination_reason_code: reasonCode, ...keyCols('agentTerminate', key) }, `representation_agreements ${id} cannot be ended by its agent from where it is`),
-      /** The client's answer (CLIENT_TRANSITIONS): confirm, decline, end or dispute, with the request's key in its own slot. */
-      answerByClient: (id, { to, at, playerId, reason = null, key = null, slot }) => {
-        const cols = to === 'active' ? { status: 'active', confirmed_at: at, confirmed_by_player_id: playerId, start_at: at, end_at: termEndAt(at, q('SELECT term_months FROM representation_agreements WHERE id = ?').get(id).term_months) }
-          : to === 'declined' ? { status: 'declined', declined_at: at }
-            : to === 'terminated_by_client' ? { status: 'terminated_by_client', terminated_at: at, terminated_by: 'client', termination_reason_code: 'client_ended' }
-              : to === 'disputed' ? { status: 'disputed', disputed_at: at, dispute_reason: reason } : null;
-        if (!cols) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${id}: a client cannot move a relationship to ${to}`);
-        guarded('representation_agreements', { id }, `status IN (${leadingTo(CLIENT_TRANSITIONS, to)})`, { ...cols, ...keyCols(slot, key) }, `representation_agreements ${id} cannot move to ${to} from where it is`);
+    create: (raw) =>
+      operation(() => {
+        const a = typedOr(typeRepresentationAgreement, raw, 'representationAgreements');
+        if (agreementById(a.id))
+          throw refusal('AGENT_CORE_DUPLICATE', `representation_agreements ${a.id} already exists`);
+        checkPolicies(a);
+        const taken = a.history.find(historyTaken);
+        if (taken) throw refusal('AGENT_CORE_DUPLICATE', `history entry ${taken.id} already exists`);
+        writeAgreement(st, a, { isNew: true });
+        return agreementById(a.id);
+      }),
+    ...actsOn(
+      {
+        table: 'representation_agreements',
+        label: 'representationAgreements',
+        byId: agreementById,
+        actions: AGREEMENT_ACTIONS,
+        typeDetail: typeAgreementDetail,
+        writeEntry: (id, h) =>
+          st.agrHist.run(agreementHistoryRow(h, id, nextOrd('agreement_history', 'agreement_id', id))),
       },
-      /** The client's sharing and disclosure choices that changed. */
-      setSharing: (id, { shareWithAgencyStaff, disclosure = {} }) => {
-        const cols = { ...(shareWithAgencyStaff !== undefined ? { share_with_agency_staff: shareWithAgencyStaff ? 1 : 0 } : {}) };
-        for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(disclosure, k)) cols[`disclosure_${k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}`] = disclosure[k] ? 1 : 0;
-        if (Object.keys(cols).length) setRow('representation_agreements', { id }, cols);
+      {
+        /** The agent withdraws a request or ends the relationship (AGENT_TRANSITIONS), with the request's key. */
+        terminateByAgent: (id, { at, reasonCode, key = null }) =>
+          guarded(
+            'representation_agreements',
+            { id },
+            `status IN (${leadingTo(AGENT_TRANSITIONS, 'terminated_by_agent')})`,
+            {
+              status: 'terminated_by_agent',
+              terminated_at: at,
+              terminated_by: 'agent',
+              termination_reason_code: reasonCode,
+              ...keyCols('agentTerminate', key),
+            },
+            `representation_agreements ${id} cannot be ended by its agent from where it is`,
+          ),
+        /** The client's answer (CLIENT_TRANSITIONS): confirm, decline, end or dispute, with the request's key in its own slot. */
+        answerByClient: (id, { to, at, playerId, reason = null, key = null, slot }) => {
+          const cols =
+            to === 'active'
+              ? {
+                  status: 'active',
+                  confirmed_at: at,
+                  confirmed_by_player_id: playerId,
+                  start_at: at,
+                  end_at: termEndAt(
+                    at,
+                    q('SELECT term_months FROM representation_agreements WHERE id = ?').get(id).term_months,
+                  ),
+                }
+              : to === 'declined'
+                ? { status: 'declined', declined_at: at }
+                : to === 'terminated_by_client'
+                  ? {
+                      status: 'terminated_by_client',
+                      terminated_at: at,
+                      terminated_by: 'client',
+                      termination_reason_code: 'client_ended',
+                    }
+                  : to === 'disputed'
+                    ? { status: 'disputed', disputed_at: at, dispute_reason: reason }
+                    : null;
+          if (!cols)
+            throw refusal(
+              'AGENT_CORE_INPUT_INVALID',
+              `representation_agreements ${id}: a client cannot move a relationship to ${to}`,
+            );
+          guarded(
+            'representation_agreements',
+            { id },
+            `status IN (${leadingTo(CLIENT_TRANSITIONS, to)})`,
+            { ...cols, ...keyCols(slot, key) },
+            `representation_agreements ${id} cannot move to ${to} from where it is`,
+          );
+        },
+        /** The client's sharing and disclosure choices that changed. */
+        setSharing: (id, { shareWithAgencyStaff, disclosure = {} }) => {
+          const cols = {
+            ...(shareWithAgencyStaff !== undefined ? { share_with_agency_staff: shareWithAgencyStaff ? 1 : 0 } : {}),
+          };
+          for (const k of DISCLOSURE_KEYS)
+            if (Object.hasOwn(disclosure, k))
+              cols[`disclosure_${k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`)}`] = disclosure[k] ? 1 : 0;
+          if (Object.keys(cols).length) setRow('representation_agreements', { id }, cols);
+        },
+        /** The sweep told the agent the relationship ends soon, once. */
+        markExpiryNotified: (id, { at }) =>
+          guarded(
+            'representation_agreements',
+            { id },
+            'expiry_notified_at IS NULL',
+            { expiry_notified_at: at },
+            `representation_agreements ${id}: the expiry was already notified`,
+          ),
+        /**
+         * An attributed review decided a dispute: reinstated (the client's confirmation is unchanged; an unset term end is
+         * worked out from the start) or ended by Trust & Safety.
+         */
+        resolveDispute: (id, { outcome, reviewId, at }) => {
+          const a = q(
+            'SELECT start_at, confirmed_at, end_at, term_months FROM representation_agreements WHERE id = ?',
+          ).get(id);
+          const cols =
+            outcome === 'reinstated'
+              ? {
+                  status: 'active',
+                  ...(a.end_at === null && a.confirmed_at !== null
+                    ? { end_at: termEndAt(a.start_at ?? a.confirmed_at, a.term_months) }
+                    : {}),
+                }
+              : {
+                  status: 'terminated_by_client',
+                  terminated_at: at,
+                  terminated_by: 'trust_safety',
+                  termination_reason_code: 'dispute_upheld',
+                };
+          guarded(
+            'representation_agreements',
+            { id },
+            "status = 'disputed'",
+            { ...cols, dispute_resolved_at: at, dispute_review_id: reviewId, dispute_outcome: outcome },
+            `representation_agreements ${id} is not disputed`,
+          );
+        },
+        /** An opportunity the agent shares with the client (a new row; no agreement rev: a share changes no term). */
+        addShare: (id, { share }) => {
+          const t = typeShare(share, `representationAgreements ${id}.opportunityShares`);
+          if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason);
+          try {
+            st.share.run(
+              encode(
+                [
+                  idf('agreementId', 'agreement_id', req),
+                  int('ord', 'ord', { req: true }),
+                  ...SHARE_SPEC,
+                  KEY_GROUP('keys', 'share'),
+                ],
+                {
+                  ...t.record,
+                  agreementId: id,
+                  ord: nextOrd('agreement_opportunity_shares', 'agreement_id', id),
+                  keys: t.record.keys.share ?? null,
+                },
+              ),
+            );
+          } catch (e) {
+            if (/UNIQUE|CHECK/.test(String(e?.message)))
+              throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${id}: ${e.message}`);
+            throw e;
+          }
+        },
+        /** A share is withdrawn once; the record stays. */
+        withdrawShare: (id, { shareId, at }) =>
+          guarded(
+            'agreement_opportunity_shares',
+            { agreement_id: id, id: shareId },
+            'withdrawn_at IS NULL',
+            {
+              withdrawn_at: at,
+              rev: q('SELECT rev FROM agreement_opportunity_shares WHERE id = ?').get(shareId)?.rev + 1,
+              rev_at: at,
+            },
+            `agreement_opportunity_shares ${shareId} of representation_agreements ${id} was already withdrawn`,
+          ),
       },
-      /** The sweep told the agent the relationship ends soon, once. */
-      markExpiryNotified: (id, { at }) => guarded('representation_agreements', { id }, 'expiry_notified_at IS NULL', { expiry_notified_at: at }, `representation_agreements ${id}: the expiry was already notified`),
-      /**
-       * An attributed review decided a dispute: reinstated (the client's confirmation is unchanged; an unset term end is
-       * worked out from the start) or ended by Trust & Safety.
-       */
-      resolveDispute: (id, { outcome, reviewId, at }) => {
-        const a = q('SELECT start_at, confirmed_at, end_at, term_months FROM representation_agreements WHERE id = ?').get(id);
-        const cols = outcome === 'reinstated'
-          ? { status: 'active', ...(a.end_at === null && a.confirmed_at !== null ? { end_at: termEndAt(a.start_at ?? a.confirmed_at, a.term_months) } : {}) }
-          : { status: 'terminated_by_client', terminated_at: at, terminated_by: 'trust_safety', termination_reason_code: 'dispute_upheld' };
-        guarded('representation_agreements', { id }, "status = 'disputed'", { ...cols, dispute_resolved_at: at, dispute_review_id: reviewId, dispute_outcome: outcome }, `representation_agreements ${id} is not disputed`);
-      },
-      /** An opportunity the agent shares with the client (a new row; no agreement rev: a share changes no term). */
-      addShare: (id, { share }) => {
-        const t = typeShare(share, `representationAgreements ${id}.opportunityShares`); if (!t.ok) throw refusal('AGENT_CORE_INPUT_INVALID', t.reason);
-        try {
-          st.share.run(encode([idf('agreementId', 'agreement_id', req), int('ord', 'ord', { req: true }), ...SHARE_SPEC, KEY_GROUP('keys', 'share')], { ...t.record, agreementId: id, ord: nextOrd('agreement_opportunity_shares', 'agreement_id', id), keys: t.record.keys.share ?? null }));
-        } catch (e) { if (/UNIQUE|CHECK/.test(String(e?.message))) throw refusal('AGENT_CORE_INPUT_INVALID', `representation_agreements ${id}: ${e.message}`); throw e; }
-      },
-      /** A share is withdrawn once; the record stays. */
-      withdrawShare: (id, { shareId, at }) => guarded('agreement_opportunity_shares', { agreement_id: id, id: shareId }, 'withdrawn_at IS NULL', { withdrawn_at: at, rev: q('SELECT rev FROM agreement_opportunity_shares WHERE id = ?').get(shareId)?.rev + 1, rev_at: at }, `agreement_opportunity_shares ${shareId} of representation_agreements ${id} was already withdrawn`),
-    }),
+    ),
     byId: agreementById,
     /** The agency's agreements, oldest first (the agency figures, the client list before visibility). */
     forAgency: many(decodeAgreements, 'SELECT * FROM representation_agreements WHERE agency_org_id = ? ORDER BY rowid'),
     /** One agent's agreements in their agency, oldest first. */
-    forAgent: many(decodeAgreements, 'SELECT * FROM representation_agreements WHERE agency_org_id = ? AND agent_user_id = ? ORDER BY rowid'),
+    forAgent: many(
+      decodeAgreements,
+      'SELECT * FROM representation_agreements WHERE agency_org_id = ? AND agent_user_id = ? ORDER BY rowid',
+    ),
     /** Every agreement naming this client, oldest first (the player's My Agent, Trust, the Passport, the integration layer). */
-    forClient: many(decodeAgreements, "SELECT * FROM representation_agreements WHERE client_kind = 'player' AND client_id = ? ORDER BY rowid"),
+    forClient: many(
+      decodeAgreements,
+      "SELECT * FROM representation_agreements WHERE client_kind = 'player' AND client_id = ? ORDER BY rowid",
+    ),
     /** One agent's agreements with one client, oldest first (the request conflict and cool-down). */
-    forAgentClient: many(decodeAgreements, "SELECT * FROM representation_agreements WHERE agent_user_id = ? AND client_kind = 'player' AND client_id = ? ORDER BY rowid"),
+    forAgentClient: many(
+      decodeAgreements,
+      "SELECT * FROM representation_agreements WHERE agent_user_id = ? AND client_kind = 'player' AND client_id = ? ORDER BY rowid",
+    ),
     /** The agreement the agent requested under this client key, or null. */
-    byRequestKey: one(decodeAgreements, 'SELECT * FROM representation_agreements WHERE agency_org_id = ? AND agent_user_id = ? AND request_key = ?'),
+    byRequestKey: one(
+      decodeAgreements,
+      'SELECT * FROM representation_agreements WHERE agency_org_id = ? AND agent_user_id = ? AND request_key = ?',
+    ),
     /** Active agreements ending within `windowMs` of `at` whose agent was not yet told (the sweep). */
-    expiringUnnotified: (at, windowMs) => decodeAgreements(sqlite, q("SELECT * FROM representation_agreements WHERE status = 'active' AND expiry_notified_at IS NULL AND end_at IS NOT NULL AND end_at > ? AND end_at <= ? ORDER BY end_at").all(at, at + windowMs)).map(deepFreeze),
+    expiringUnnotified: (at, windowMs) =>
+      decodeAgreements(
+        sqlite,
+        q(
+          "SELECT * FROM representation_agreements WHERE status = 'active' AND expiry_notified_at IS NULL AND end_at IS NOT NULL AND end_at > ? AND end_at <= ? ORDER BY end_at",
+        ).all(at, at + windowMs),
+      ).map(deepFreeze),
     /** Every agreement, newest first, by cursor (the T&S oversight list). */
     page: pageOf('representation_agreements', decodeAgreements),
     /**
@@ -935,12 +1815,15 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
      * text, a pending request declined) and the client's name leaves its history. The one write that changes stored
      * history entries: the actor's id and name of the client's own entries.
      */
-    redactClient: (clientId, at) => operation(() => {
-      q(`UPDATE representation_agreements SET subject_removed_at = @at, dispute_reason = NULL,
+    redactClient: (clientId, at) =>
+      operation(() => {
+        q(`UPDATE representation_agreements SET subject_removed_at = @at, dispute_reason = NULL,
         declined_at = CASE WHEN status = 'proposed' THEN @at ELSE declined_at END, status = CASE WHEN status = 'proposed' THEN 'declined' ELSE status END
         WHERE client_kind = 'player' AND client_id = @c`).run({ at, c: clientId });
-      q("UPDATE agreement_history SET by_id = NULL, by_name = NULL WHERE by_kind = 'player' AND agreement_id IN (SELECT id FROM representation_agreements WHERE client_kind = 'player' AND client_id = ?)").run(clientId);
-    }),
+        q(
+          "UPDATE agreement_history SET by_id = NULL, by_name = NULL WHERE by_kind = 'player' AND agreement_id IN (SELECT id FROM representation_agreements WHERE client_kind = 'player' AND client_id = ?)",
+        ).run(clientId);
+      }),
   };
 
   // ---- agency settings
@@ -949,16 +1832,22 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
     forOrg: (orgId) => {
       const row = q('SELECT description FROM org_agency_settings WHERE org_id = ?').get(orgId);
       if (!row) return EMPTY_SETTINGS;
-      return deepFreeze({ jurisdictions: q('SELECT jurisdiction FROM org_agency_jurisdictions WHERE org_id = ? ORDER BY ord').all(orgId).map((r) => r.jurisdiction), description: row.description });
+      return deepFreeze({
+        jurisdictions: q('SELECT jurisdiction FROM org_agency_jurisdictions WHERE org_id = ? ORDER BY ord')
+          .all(orgId)
+          .map((r) => r.jurisdiction),
+        description: row.description,
+      });
     },
     /** Replace the agency's settings with `next` (`{ jurisdictions, description }`, typed whole). */
-    save: (orgId, next) => operation(() => {
-      const s = typedOr(typeAgencySettings, next, `agencySettings ${orgId}`);
-      st.settings.run(orgId, s.description, now());
-      st.settingsJurDel.run(orgId);
-      s.jurisdictions.forEach((j, i) => st.settingsJurIns.run(orgId, i, j));
-      return settings.forOrg(orgId);
-    }),
+    save: (orgId, next) =>
+      operation(() => {
+        const s = typedOr(typeAgencySettings, next, `agencySettings ${orgId}`);
+        st.settings.run(orgId, s.description, now());
+        st.settingsJurDel.run(orgId);
+        s.jurisdictions.forEach((j, i) => st.settingsJurIns.run(orgId, i, j));
+        return settings.forOrg(orgId);
+      }),
   };
 
   const history = {
@@ -968,26 +1857,40 @@ export function createAgentCoreRepository({ sqlite, unit = null, now = Date.now,
      */
     forAgency(orgId) {
       const out = [];
-      for (const p of profiles.forAgency(orgId)) for (const h of p.history) out.push({ kind: 'profile', entry: h, owner: p });
-      for (const a of affiliations.forAgency(orgId)) for (const h of a.history) out.push({ kind: 'affiliation', entry: h, owner: a });
-      for (const a of agreements.forAgency(orgId)) for (const h of a.history) out.push({ kind: 'agreement', entry: h, owner: a });
-      return out.sort((x, y) => (y.entry.at - x.entry.at) || String(y.entry.id).localeCompare(String(x.entry.id)));
+      for (const p of profiles.forAgency(orgId))
+        for (const h of p.history) out.push({ kind: 'profile', entry: h, owner: p });
+      for (const a of affiliations.forAgency(orgId))
+        for (const h of a.history) out.push({ kind: 'affiliation', entry: h, owner: a });
+      for (const a of agreements.forAgency(orgId))
+        for (const h of a.history) out.push({ kind: 'agreement', entry: h, owner: a });
+      return out.sort((x, y) => y.entry.at - x.entry.at || String(y.entry.id).localeCompare(String(x.entry.id)));
     },
   };
   const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
   const repo = { profiles, affiliations, agreements, settings, history };
-  const counters = { agentProfiles: q('SELECT COUNT(*) AS n FROM agent_profiles'), agencyAffiliations: q('SELECT COUNT(*) AS n FROM agency_affiliations'), representationAgreements: q('SELECT COUNT(*) AS n FROM representation_agreements') };
+  const counters = {
+    agentProfiles: q('SELECT COUNT(*) AS n FROM agent_profiles'),
+    agencyAffiliations: q('SELECT COUNT(*) AS n FROM agency_affiliations'),
+    representationAgreements: q('SELECT COUNT(*) AS n FROM representation_agreements'),
+  };
   return {
     ...repo,
     /** The queries alone, for modules and projectors that must not write (`agentReads`). */
     reads: Object.freeze(Object.fromEntries(Object.entries(repo).map(([k, v]) => [k, readOnly(v)]))),
     attach() {
-      if (!agentCoreLive(sqlite)) throw new Error(`the agent core repository needs ${AGENT_CORE_MIGRATION} recorded; it never imports an in-memory array`);
+      if (!agentCoreLive(sqlite))
+        throw new Error(
+          `the agent core repository needs ${AGENT_CORE_MIGRATION} recorded; it never imports an in-memory array`,
+        );
       return { counts: this.counts() };
     },
-    counts() { return Object.fromEntries(AGENT_CORE_COLLECTIONS.map((n) => [n, counters[n].get().n])); },
+    counts() {
+      return Object.fromEntries(AGENT_CORE_COLLECTIONS.map((n) => [n, counters[n].get().n]));
+    },
     pending: () => 0,
-    exportAll() { return AGENT_CORE_RECORDS.read(sqlite); },
+    exportAll() {
+      return AGENT_CORE_RECORDS.read(sqlite);
+    },
     log,
     now,
   };

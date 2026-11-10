@@ -8,8 +8,14 @@ import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from './policy.mjs';
 
 /** Every mutable field of a run; adding one to ObservationRun without adding it here fails the reset test. */
 export const MUTABLE_RUN_KEYS = Object.freeze([
-  'detections', 'prev', 'seenHashes', 'duplicates', 'framesSeen',
-  'staticRun', 'maxStaticRun', 'finished',
+  'detections',
+  'prev',
+  'seenHashes',
+  'duplicates',
+  'framesSeen',
+  'staticRun',
+  'maxStaticRun',
+  'finished',
 ]);
 
 /** Identity and configuration survive a reset. */
@@ -45,9 +51,7 @@ export function runStateSnapshot(run) {
 // Session runtime
 // =========================================================================
 
-export const SESSION_RUNTIME_STATES = Object.freeze([
-  'active', 'finalized', 'cancelled', 'expired', 'disconnected',
-]);
+export const SESSION_RUNTIME_STATES = Object.freeze(['active', 'finalized', 'cancelled', 'expired', 'disconnected']);
 
 /** Everything one attempt allocates lives here, so cleanup releases one thing. */
 class SessionRuntime {
@@ -67,7 +71,7 @@ class SessionRuntime {
 
   /** Idempotent: a second call changes nothing and must not throw or corrupt a counter. */
   dispose() {
-    if (this.disposed) return false;      // already clean; report "no work done"
+    if (this.disposed) return false; // already clean; report "no work done"
     for (const t of this.timers) clearTimeout(t);
     this.timers.clear();
     this.queue.clear();
@@ -92,7 +96,7 @@ class SessionRuntime {
 /** `pool` recycles finished runs through `resetRun()`, so the reuse hazard can be tested. */
 export class ObservationSessions {
   constructor({ ttlMs = 5 * 60_000, pool = false, maxPool = 8 } = {}) {
-    this.sessions = new Map();          // sessionId -> SessionRuntime
+    this.sessions = new Map(); // sessionId -> SessionRuntime
     this.ttlMs = ttlMs;
     this.poolEnabled = pool;
     this.pool = [];
@@ -148,9 +152,15 @@ export class ObservationSessions {
     return { ok: true, result };
   }
 
-  cancel(sessionId) { return this.#end(sessionId, 'cancelled'); }
-  expire(sessionId) { return this.#end(sessionId, 'expired'); }
-  disconnect(sessionId) { return this.#end(sessionId, 'disconnected'); }
+  cancel(sessionId) {
+    return this.#end(sessionId, 'cancelled');
+  }
+  expire(sessionId) {
+    return this.#end(sessionId, 'expired');
+  }
+  disconnect(sessionId) {
+    return this.#end(sessionId, 'disconnected');
+  }
 
   /** Sweep whatever has outlived its TTL. */
   sweep(nowMs = Date.now()) {
@@ -188,10 +198,14 @@ export class ObservationSessions {
 
   /** The leak test reads this. */
   footprint() {
-    let queued = 0, detections = 0, timers = 0;
+    let queued = 0,
+      detections = 0,
+      timers = 0;
     for (const rt of this.sessions.values()) {
       const f = rt.footprint();
-      queued += f.queuedFrames; detections += f.detections; timers += f.timers;
+      queued += f.queuedFrames;
+      detections += f.detections;
+      timers += f.timers;
     }
     return {
       activeSessions: this.sessions.size,

@@ -13,7 +13,8 @@ const PLATFORM_HOME_ZONE = 'Europe/London';
  * feed decorates each row at read time with the current resource its refId points to.
  */
 export function createNotifier({ notifications, prefs, store, pushSender, byId, publishEvent, eventPayloadDrops }) {
-  if (typeof prefs?.allows !== 'function') throw new TypeError('createNotifier needs the preference gate (createNotificationPrefs)');
+  if (typeof prefs?.allows !== 'function')
+    throw new TypeError('createNotifier needs the preference gate (createNotificationPrefs)');
   let suppressed = 0;
 
   function pushDeferred(audience, now = new Date()) {
@@ -50,13 +51,29 @@ export function createNotifier({ notifications, prefs, store, pushSender, byId, 
       return null;
     }
     // Cut at a character boundary: never half of an emoji's surrogate pair.
-    const cut = (t, n) => { let s = t.slice(0, n); if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1); return s; };
-    const body = typeof text === 'string' && text.length > NOTIFICATION_LIMITS.text ? `${cut(text, NOTIFICATION_LIMITS.text - 1)}…` : text;
+    const cut = (t, n) => {
+      let s = t.slice(0, n);
+      if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1);
+      return s;
+    };
+    const body =
+      typeof text === 'string' && text.length > NOTIFICATION_LIMITS.text
+        ? `${cut(text, NOTIFICATION_LIMITS.text - 1)}…`
+        : text;
     const at = Date.now();
     // Minimised now, so a bad call site fails inside its unit; delivered after the commit.
     const announce = () => {
-      const { payload, dropped, unregistered } = minimizePayload('notify', { audienceKind: audience.kind, audienceId: audience.id });
-      if (unregistered || dropped.length) { eventPayloadDrops.count += 1; eventPayloadDrops.lastEvent = 'notify'; throw new Error(`notify: the 'notify' event ${unregistered ? 'is not in the event registry' : `carried unregistered payload keys: ${dropped.join(', ')}`}`); }
+      const { payload, dropped, unregistered } = minimizePayload('notify', {
+        audienceKind: audience.kind,
+        audienceId: audience.id,
+      });
+      if (unregistered || dropped.length) {
+        eventPayloadDrops.count += 1;
+        eventPayloadDrops.lastEvent = 'notify';
+        throw new Error(
+          `notify: the 'notify' event ${unregistered ? 'is not in the event registry' : `carried unregistered payload keys: ${dropped.join(', ')}`}`,
+        );
+      }
       store.afterCommit(() => publishEvent('notify', payload));
     };
     // The same sentence about the same record, still unread, is refreshed and counted rather than pushed twice.
@@ -67,7 +84,12 @@ export function createNotifier({ notifications, prefs, store, pushSender, byId, 
       return c;
     }
     const n = notifications.create({
-      audience, type, text: body, refId, at, actionRequired,
+      audience,
+      type,
+      text: body,
+      refId,
+      at,
+      actionRequired,
       category: prefs.categoryOf(type, body) ?? null,
       deferredPush: pushDeferred(audience),
     });
@@ -77,16 +99,29 @@ export function createNotifier({ notifications, prefs, store, pushSender, byId, 
     return n;
   }
 
-  const feedFor = (kind, id, targetFor = null) => notifications.forAudience(kind, id)
-    .map((n) => (targetFor ? { ...feedItem(n), target: targetFor(n, { kind, id }) } : feedItem(n)));
+  const feedFor = (kind, id, targetFor = null) =>
+    notifications
+      .forAudience(kind, id)
+      .map((n) => (targetFor ? { ...feedItem(n), target: targetFor(n, { kind, id }) } : feedItem(n)));
 
   return { notify, feedFor, suppressedCount: () => suppressed };
 }
 
-export function registerNotificationFeed({ orgRouter, playerRouter, guardianRouter, notifications, notifier, notificationTargetFor }) {
-  if (typeof notificationTargetFor !== 'function') throw new TypeError('registerNotificationFeed needs the journeys\' notificationTargetFor');
+export function registerNotificationFeed({
+  orgRouter,
+  playerRouter,
+  guardianRouter,
+  notifications,
+  notifier,
+  notificationTargetFor,
+}) {
+  if (typeof notificationTargetFor !== 'function')
+    throw new TypeError("registerNotificationFeed needs the journeys' notificationTargetFor");
   const feed = (kind, id) => notifier.feedFor(kind, id, notificationTargetFor);
-  const read = (kind, id, res) => { notifications.markRead(kind, id); res.json({ ok: true }); };
+  const read = (kind, id, res) => {
+    notifications.markRead(kind, id);
+    res.json({ ok: true });
+  };
   orgRouter.get('/notifications', (req, res) => res.json(feed('org_user', req.orgUser.id)));
   orgRouter.post('/notifications/read', (req, res) => read('org_user', req.orgUser.id, res));
   playerRouter.get('/notifications', (req, res) => res.json(feed('player', req.player.id)));
@@ -100,22 +135,42 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const quietBound = (v) => (v == null || v === '' ? null : typeof v === 'string' && HHMM.test(v) ? v : undefined);
 
 /** A device token another account registered moves to this one, so a shared phone gets only the latest sign-in's notices. */
-export function registerDeliverySettings({ app, playerRouter, guardianRouter, players, guardians, pushTokens, sessionFor }) {
-  if (typeof players?.setNotificationPrefs !== 'function' || typeof guardians?.setNotificationPrefs !== 'function') throw new TypeError('registerDeliverySettings needs the players and guardians repositories');
+export function registerDeliverySettings({
+  app,
+  playerRouter,
+  guardianRouter,
+  players,
+  guardians,
+  pushTokens,
+  sessionFor,
+}) {
+  if (typeof players?.setNotificationPrefs !== 'function' || typeof guardians?.setNotificationPrefs !== 'function')
+    throw new TypeError('registerDeliverySettings needs the players and guardians repositories');
   const note = 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.';
   const show = (res, person) => res.json({ prefs: person.notificationPrefs ?? null, note });
   const save = (repo, person, req, res) => {
     const { quietStart, quietEnd, schoolHoursMute, timezone } = req.body || {};
-    const qs = quietBound(quietStart); const qe = quietBound(quietEnd);
-    if (qs === undefined || qe === undefined) return res.status(400).json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
-    if (timezone != null && timezone !== '' && !validateIanaZone(timezone).ok) return res.status(400).json({ error: 'TIMEZONE_INVALID', message: 'timezone must be an IANA time zone name, for example Europe/London.' });
-    if (schoolHoursMute != null && typeof schoolHoursMute !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'schoolHoursMute', message: 'schoolHoursMute must be true or false.' });
+    const qs = quietBound(quietStart);
+    const qe = quietBound(quietEnd);
+    if (qs === undefined || qe === undefined)
+      return res
+        .status(400)
+        .json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
+    if (timezone != null && timezone !== '' && !validateIanaZone(timezone).ok)
+      return res.status(400).json({
+        error: 'TIMEZONE_INVALID',
+        message: 'timezone must be an IANA time zone name, for example Europe/London.',
+      });
+    if (schoolHoursMute != null && typeof schoolHoursMute !== 'boolean')
+      return res
+        .status(400)
+        .json({ error: 'FIELD_INVALID', field: 'schoolHoursMute', message: 'schoolHoursMute must be true or false.' });
     const was = person.notificationPrefs ?? {};
     const prefs = {
-      quietStart: quietStart === undefined ? was.quietStart ?? null : qs,
-      quietEnd: quietEnd === undefined ? was.quietEnd ?? null : qe,
+      quietStart: quietStart === undefined ? (was.quietStart ?? null) : qs,
+      quietEnd: quietEnd === undefined ? (was.quietEnd ?? null) : qe,
       schoolHoursMute: schoolHoursMute ?? was.schoolHoursMute ?? null,
-      timezone: timezone === undefined ? was.timezone ?? null : (timezone || null),
+      timezone: timezone === undefined ? (was.timezone ?? null) : timezone || null,
     };
     const empty = Object.values(prefs).every((v) => v === null);
     show(res, repo.setNotificationPrefs(person.id, empty ? null : prefs));
@@ -131,8 +186,15 @@ export function registerDeliverySettings({ app, playerRouter, guardianRouter, pl
     if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
     const { token } = req.body || {};
     if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
-    if (typeof token !== 'string' || token.length > 200) return res.status(400).json({ error: 'TOKEN_INVALID', message: 'A device token is text of at most 200 characters.' });
-    if (session.kind !== 'player' && session.kind !== 'guardian') return res.status(403).json({ error: 'PUSH_NOT_AVAILABLE', message: 'Push notifications go to the Player app\'s players and guardians.' });
+    if (typeof token !== 'string' || token.length > 200)
+      return res
+        .status(400)
+        .json({ error: 'TOKEN_INVALID', message: 'A device token is text of at most 200 characters.' });
+    if (session.kind !== 'player' && session.kind !== 'guardian')
+      return res.status(403).json({
+        error: 'PUSH_NOT_AVAILABLE',
+        message: "Push notifications go to the Player app's players and guardians.",
+      });
     const { moved } = pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
     res.status(201).json({ registered: true, moved });
   });

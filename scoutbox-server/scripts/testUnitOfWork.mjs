@@ -16,20 +16,70 @@ import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
-async function test(name, fn) { if (only && !name.includes(only)) return; await fn(); passed++; console.log(`  ✓ ${name}`); }
+async function test(name, fn) {
+  if (only && !name.includes(only)) return;
+  await fn();
+  passed++;
+  console.log(`  ✓ ${name}`);
+}
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TTL = 30 * 86_400_000;
 let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const tempDir = (tag) => fs.mkdtempSync(path.join(os.tmpdir(), `sb-${tag}-`));
 const ORGS = () => [
-  { id: 'org-pro', name: 'Eastport FC', type: 'club', level: 'pro', location: { lat: 51.889, lng: 1.02, city: 'Eastport' }, plan: 'Pro', trustedPartner: true, country: 'GB', verified: true, verifiedDomain: 'eastportfc.example', safeguardingContractSigned: true },
-  { id: 'org-grass', name: 'Riverside Juniors', type: 'club', level: 'grassroots', location: { lat: 51.5, lng: -0.1, city: 'London' }, plan: 'Grassroots', trustedPartner: false, country: 'GB', verified: false, safeguardingContractSigned: false },
-  { id: 'org-agency', name: 'Northstar Agency', type: 'agency', level: null, plan: 'Pro', trustedPartner: false, country: 'FR', verified: false },
+  {
+    id: 'org-pro',
+    name: 'Eastport FC',
+    type: 'club',
+    level: 'pro',
+    location: { lat: 51.889, lng: 1.02, city: 'Eastport' },
+    plan: 'Pro',
+    trustedPartner: true,
+    country: 'GB',
+    verified: true,
+    verifiedDomain: 'eastportfc.example',
+    safeguardingContractSigned: true,
+  },
+  {
+    id: 'org-grass',
+    name: 'Riverside Juniors',
+    type: 'club',
+    level: 'grassroots',
+    location: { lat: 51.5, lng: -0.1, city: 'London' },
+    plan: 'Grassroots',
+    trustedPartner: false,
+    country: 'GB',
+    verified: false,
+    safeguardingContractSigned: false,
+  },
+  {
+    id: 'org-agency',
+    name: 'Northstar Agency',
+    type: 'agency',
+    level: null,
+    plan: 'Pro',
+    trustedPartner: false,
+    country: 'FR',
+    verified: false,
+  },
 ];
 // The first installation's seed (staff are written through their repository). The fixture player must be a valid
 // record: the identity repositories validate it at the first boot's import.
-const fixtureSeed = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2000-01-01', country: 'GB', footballCategory: 'Start', medical: { shared: false, records: [], conditionStatus: 'unknown' } }] });
+const fixtureSeed = () => ({
+  orgs: ORGS(),
+  guardians: [],
+  players: [
+    {
+      id: 'pl-1',
+      name: 'P',
+      dob: '2000-01-01',
+      country: 'GB',
+      footballCategory: 'Start',
+      medical: { shared: false, records: [], conditionStatus: 'unknown' },
+    },
+  ],
+});
 
 /** A first installation with the fixture seeded and one staff member; returns everything a test needs. */
 function boot(dir, seed = fixtureSeed()) {
@@ -43,8 +93,15 @@ function boot(dir, seed = fixtureSeed()) {
 function begins(t, fn) {
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
   let n = 0;
-  t.store.sqlite.exec = (sql) => { if (/^BEGIN/.test(sql)) n += 1; return exec(sql); };
-  try { fn(); } finally { t.store.sqlite.exec = exec; }
+  t.store.sqlite.exec = (sql) => {
+    if (/^BEGIN/.test(sql)) n += 1;
+    return exec(sql);
+  };
+  try {
+    fn();
+  } finally {
+    t.store.sqlite.exec = exec;
+  }
   return n;
 }
 /** The multi-collection operation under test: an organisation insert and update (explicit rows), a staged player write on a held record, a session row. */
@@ -52,7 +109,9 @@ function operation(t, { failLate = false, afterCommit = null } = {}) {
   let token = null;
   const result = t.unit(() => {
     t.layer.orgs.create({ id: 'org-new', name: 'New FC', type: 'club', plan: 'Pro' });
-    t.layer.orgs.update('org-pro', (d) => { d.suspended = true; });
+    t.layer.orgs.update('org-pro', (d) => {
+      d.suspended = true;
+    });
     t.layer.players.setFootballCategory('pl-1', 'In the unit');
     token = t.layer.sessions.create('player', 'pl-1').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
@@ -66,17 +125,30 @@ function operation(t, { failLate = false, afterCommit = null } = {}) {
 function assertDatabaseUntouched(t) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").n, 0, 'no inserted row');
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0, 'no updated column');
-  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Start', 'no player write');
+  assert.equal(
+    t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category,
+    'Start',
+    'no player write',
+  );
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player'").n, 0, 'no session row');
-  assert.equal(t.raw("SELECT verified FROM orgs WHERE id = 'org-grass'").verified, 1, 'the unrelated write made before the unit is kept');
+  assert.equal(
+    t.raw("SELECT verified FROM orgs WHERE id = 'org-grass'").verified,
+    1,
+    'the unrelated write made before the unit is kept',
+  );
   assert.equal(hasBlobTable(t.store.sqlite), false, 'there is no blob table');
 }
 /** Reads after a failure (a held record is a frozen copy): every read sees the committed rows. */
 function assertMemoryRestored(t, refs) {
   const { p1 } = refs;
   assert.ok(Object.isFrozen(p1), 'a held record is a frozen copy');
-  assert.equal(t.layer.players.byId('pl-1').footballCategory, 'Start', 'a read after the rollback sees the committed row');
-  assert.equal(t.layer.orgs.byId('org-new'), null); assert.equal(t.layer.orgs.count(), 3);
+  assert.equal(
+    t.layer.players.byId('pl-1').footballCategory,
+    'Start',
+    'a read after the rollback sees the committed row',
+  );
+  assert.equal(t.layer.orgs.byId('org-new'), null);
+  assert.equal(t.layer.orgs.count(), 3);
   assert.equal(t.layer.orgs.byId('org-pro').suspended, false, 'a read after the rollback sees the committed row');
   assert.equal(t.layer.orgs.byId('org-grass').verified, true);
 }
@@ -88,136 +160,235 @@ function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT verified FROM orgs WHERE id = 'org-grass'").verified, 1);
 }
 const prepare = (t) => {
-  t.layer.orgs.update('org-grass', (d) => { d.verified = true; }); // an unrelated write before the operation (explicit: it commits at once)
+  t.layer.orgs.update('org-grass', (d) => {
+    d.verified = true;
+  }); // an unrelated write before the operation (explicit: it commits at once)
   return { p1: t.layer.players.byId('pl-1') };
 };
 
 // ------------------------------------------------------------- success
 await test('unit of work: a row insert, a row update, a staged player write and a session commit together in one transaction; after-commit callbacks run once, after COMMIT', () => {
-  const dir = tempDir('uow-ok'); const t = boot(dir);
+  const dir = tempDir('uow-ok');
+  const t = boot(dir);
   const refs = prepare(t);
   const calls = [];
   let outcome = null;
-  assert.equal(begins(t, () => { outcome = operation(t, { afterCommit: () => calls.push(t.store.sqlite.isTransaction) }); }), 1, 'one transaction for the whole unit');
+  assert.equal(
+    begins(t, () => {
+      outcome = operation(t, { afterCommit: () => calls.push(t.store.sqlite.isTransaction) });
+    }),
+    1,
+    'one transaction for the whole unit',
+  );
   const { result, token } = outcome;
-  assert.equal(result, 'done'); assert.equal(t.store.sqlite.isTransaction, false);
+  assert.equal(result, 'done');
+  assert.equal(t.store.sqlite.isTransaction, false);
   assertOperationPersisted(t, token);
   assert.deepEqual(calls, [false], 'the callback ran once, outside the transaction');
-  assert.equal(t.layer.orgs.byId('org-pro').suspended, true); assert.equal(t.layer.players.byId('pl-1').footballCategory, 'In the unit');
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(t.layer.orgs.byId('org-pro').suspended, true);
+  assert.equal(t.layer.players.byId('pl-1').footballCategory, 'In the unit');
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- failure after the writes
 await test('unit of work: a failure after the writes rolls the database back and every read after it sees the committed rows; an unrelated earlier write survives; an explicit retry persists everything', () => {
-  const dir = tempDir('uow-fail'); const t = boot(dir);
+  const dir = tempDir('uow-fail');
+  const t = boot(dir);
   const refs = prepare(t);
   let err = null;
-  try { operation(t, { failLate: true }); } catch (e) { err = e; }
-  assert.match(err.message, /late failure/); assert.equal(err.unitOfWork, 'rolled_back');
+  try {
+    operation(t, { failLate: true });
+  } catch (e) {
+    err = e;
+  }
+  assert.match(err.message, /late failure/);
+  assert.equal(err.unitOfWork, 'rolled_back');
   assert.equal(t.store.sqlite.isTransaction, false);
   assertDatabaseUntouched(t);
   assertMemoryRestored(t, refs);
   // Explicit retry of the WHOLE operation.
   const { token } = operation(t);
   assertOperationPersisted(t, token);
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- failure at COMMIT
 await test('unit of work: a failure at COMMIT takes the same path — database untouched, memory restored, the unrelated earlier write kept, retry lands everything', () => {
-  const dir = tempDir('uow-commit'); const t = boot(dir);
+  const dir = tempDir('uow-commit');
+  const t = boot(dir);
   const refs = prepare(t);
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
   let explode = true;
-  t.store.sqlite.exec = (sql) => { if (explode && sql === 'COMMIT') { explode = false; throw new Error('disk full at commit'); } return exec(sql); };
+  t.store.sqlite.exec = (sql) => {
+    if (explode && sql === 'COMMIT') {
+      explode = false;
+      throw new Error('disk full at commit');
+    }
+    return exec(sql);
+  };
   let err = null;
-  try { operation(t); } catch (e) { err = e; }
-  assert.match(err.message, /disk full at commit/); assert.equal(err.unitOfWork, 'rolled_back');
+  try {
+    operation(t);
+  } catch (e) {
+    err = e;
+  }
+  assert.match(err.message, /disk full at commit/);
+  assert.equal(err.unitOfWork, 'rolled_back');
   assert.equal(t.store.sqlite.isTransaction, false);
   assertDatabaseUntouched(t);
   assertMemoryRestored(t, refs);
   const { token } = operation(t);
   assertOperationPersisted(t, token);
-  t.store.sqlite.exec = exec; t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.store.sqlite.exec = exec;
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- crash before commit
 await test('unit of work: a process killed before COMMIT leaves the pre-operation database — a restart sees no row and no player change of the operation', () => {
-  const dir = tempDir('uow-crash'); const t = boot(dir);
+  const dir = tempDir('uow-crash');
+  const t = boot(dir);
   t.store.sqlite.close();
-  const r = spawnSync(process.execPath, [path.join(HERE, 'unitOfWorkCrashChild.mjs'), dir], { encoding: 'utf8', timeout: 30_000 });
-  assert.equal(r.signal, 'SIGKILL', `the child must die by SIGKILL: status ${r.status} signal ${r.signal} ${r.stderr.slice(-300)}`);
+  const r = spawnSync(process.execPath, [path.join(HERE, 'unitOfWorkCrashChild.mjs'), dir], {
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  assert.equal(
+    r.signal,
+    'SIGKILL',
+    `the child must die by SIGKILL: status ${r.status} signal ${r.signal} ${r.stderr.slice(-300)}`,
+  );
   assert.match(r.stdout, /ABOUT_TO_CRASH/);
   const again = openStore(dir);
   const layer2 = attachDataLayer({ store: again, nextId, sessionTtlMs: TTL });
-  assert.equal(layer2.orgs.byId('org-crash'), null); assert.equal(layer2.orgs.count(), 3);
+  assert.equal(layer2.orgs.byId('org-crash'), null);
+  assert.equal(layer2.orgs.count(), 3);
   assert.equal(layer2.players.byId('pl-1').footballCategory, 'Start');
   assert.equal(layer2.orgs.byId('org-pro').suspended, false);
   assert.equal(again.sqlite.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
-  again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  again.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- nesting, async, participants
 await test('unit of work: a nested unit joins the enclosing one (an inner failure rolls everything back); several writes inside a unit are one transaction; asynchronous work is refused and rolled back; a unit cannot start inside a foreign transaction', () => {
-  const dir = tempDir('uow-nest'); const t = boot(dir);
+  const dir = tempDir('uow-nest');
+  const t = boot(dir);
   const p1 = t.layer.players.byId('pl-1');
   // Nested join: the inner failure undoes the outer insert too.
   let err = null;
   try {
     t.unit(() => {
       t.layer.orgs.create({ id: 'org-outer', name: 'Outer', type: 'club', plan: 'Pro' });
-      t.unit(() => { t.layer.players.setFootballCategory('pl-1', 'Inner'); throw new Error('inner failed'); });
+      t.unit(() => {
+        t.layer.players.setFootballCategory('pl-1', 'Inner');
+        throw new Error('inner failed');
+      });
     });
-  } catch (e) { err = e; }
-  assert.match(err.message, /inner failed/); assert.equal(err.unitOfWork, 'rolled_back');
-  assert.equal(t.layer.orgs.byId('org-outer'), null); assert.equal(p1.footballCategory, 'Start');
+  } catch (e) {
+    err = e;
+  }
+  assert.match(err.message, /inner failed/);
+  assert.equal(err.unitOfWork, 'rolled_back');
+  assert.equal(t.layer.orgs.byId('org-outer'), null);
+  assert.equal(p1.footballCategory, 'Start');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer'").n, 0);
   // Several writes in a unit are one transaction; what the unit wrote lands with it.
-  assert.equal(begins(t, () => t.unit(() => { t.layer.players.setFootballCategory('pl-1', 'Absorbed'); t.layer.orgs.create({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); })), 1, 'exactly one transaction');
-  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Absorbed'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-abs'").n, 1);
+  assert.equal(
+    begins(t, () =>
+      t.unit(() => {
+        t.layer.players.setFootballCategory('pl-1', 'Absorbed');
+        t.layer.orgs.create({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' });
+      }),
+    ),
+    1,
+    'exactly one transaction',
+  );
+  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Absorbed');
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-abs'").n, 1);
   // Asynchronous work: a SQLite transaction must never span an await.
   err = null;
-  try { t.unit(async () => { t.layer.orgs.create({ id: 'org-async', name: 'Async', type: 'club', plan: 'Pro' }); }); } catch (e) { err = e; }
-  assert.match(err.message, /synchronous/); assert.equal(t.layer.orgs.byId('org-async'), null); assert.equal(t.store.sqlite.isTransaction, false);
+  try {
+    t.unit(async () => {
+      t.layer.orgs.create({ id: 'org-async', name: 'Async', type: 'club', plan: 'Pro' });
+    });
+  } catch (e) {
+    err = e;
+  }
+  assert.match(err.message, /synchronous/);
+  assert.equal(t.layer.orgs.byId('org-async'), null);
+  assert.equal(t.store.sqlite.isTransaction, false);
   // A foreign open transaction refuses the unit before anything happens.
   t.store.sqlite.exec('BEGIN');
   assert.throws(() => t.unit(() => {}), /inside an open transaction/);
   t.store.sqlite.exec('ROLLBACK');
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test('unit of work: participants — organisations, staff and sessions take part: a failure later in the unit leaves none of them; a unit that finishes commits them together', () => {
-  const dir = tempDir('uow-parts'); const t = boot(dir);
+  const dir = tempDir('uow-parts');
+  const t = boot(dir);
   let err = null;
   try {
     t.unit(() => {
       t.layer.orgs.create({ id: 'org-x', name: 'X', type: 'club', plan: 'Pro' });
       const u = t.layer.users.create({ orgId: 'org-pro', name: 'New Staff', role: 'Scout' });
       t.layer.sessions.create('org', 'org-pro', { userId: u.id });
-      assert.equal(t.layer.users.byOrgAndName('org-pro', 'new staff')?.id, u.id, 'a read inside the unit sees its write');
+      assert.equal(
+        t.layer.users.byOrgAndName('org-pro', 'new staff')?.id,
+        u.id,
+        'a read inside the unit sees its write',
+      );
       throw new Error('late failure');
     });
-  } catch (e) { err = e; }
+  } catch (e) {
+    err = e;
+  }
   assert.match(err.message, /late failure/);
-  assert.equal(t.layer.orgs.byId('org-x'), null); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-x'").n, 0);
-  assert.equal(t.raw('SELECT COUNT(*) AS n FROM org_users').n, 1); assert.equal(t.layer.users.byOrgAndName('org-pro', 'New Staff'), null);
+  assert.equal(t.layer.orgs.byId('org-x'), null);
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-x'").n, 0);
+  assert.equal(t.raw('SELECT COUNT(*) AS n FROM org_users').n, 1);
+  assert.equal(t.layer.users.byOrgAndName('org-pro', 'New Staff'), null);
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'org'").n, 0);
-  const kept = t.unit(() => { const u = t.layer.users.create({ orgId: 'org-pro', name: 'Later Staff', role: 'Scout' }); t.layer.sessions.create('org', 'org-pro', { userId: u.id }); return u; });
+  const kept = t.unit(() => {
+    const u = t.layer.users.create({ orgId: 'org-pro', name: 'Later Staff', role: 'Scout' });
+    t.layer.sessions.create('org', 'org-pro', { userId: u.id });
+    return u;
+  });
   assert.equal(t.raw('SELECT COUNT(*) AS n FROM org_users').n, 2);
   assert.equal(t.layer.sessions.listOrgUser(kept.id).length, 1);
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test('unit of work: an after-commit callback that fails does not undo the commit; it is counted and reported, never treated as a rollback; callbacks registered outside a unit run at once', () => {
-  const dir = tempDir('uow-after'); const t = boot(dir);
+  const dir = tempDir('uow-after');
+  const t = boot(dir);
   let err = null;
-  try { operation(t, { afterCommit: () => { throw new Error('push gateway down'); } }); } catch (e) { err = e; }
+  try {
+    operation(t, {
+      afterCommit: () => {
+        throw new Error('push gateway down');
+      },
+    });
+  } catch (e) {
+    err = e;
+  }
   assert.equal(err, null, 'a delivery failure after COMMIT is not an error of the operation');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").n, 1, 'committed');
   const state = t.store.unitOfWorkState();
-  assert.equal(state.afterCommitFailures, 1); assert.match(state.lastAfterCommitError.message, /push gateway down/);
-  let ran = false; t.store.afterCommit(() => { ran = true; }); assert.equal(ran, true, 'outside a unit the callback runs immediately');
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(state.afterCommitFailures, 1);
+  assert.match(state.lastAfterCommitError.message, /push gateway down/);
+  let ran = false;
+  t.store.afterCommit(() => {
+    ran = true;
+  });
+  assert.equal(ran, true, 'outside a unit the callback runs immediately');
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ------------------------------------------------------------- BEGIN/ROLLBACK failures, poisoning, async shapes
@@ -227,108 +398,249 @@ async function withUnhandled(fn) {
   const seen = [];
   const listener = (e) => seen.push(String(e?.message ?? e));
   process.on('unhandledRejection', listener);
-  try { await fn(); await tick(); await tick(); } finally { process.off('unhandledRejection', listener); }
+  try {
+    await fn();
+    await tick();
+    await tick();
+  } finally {
+    process.off('unhandledRejection', listener);
+  }
   return seen;
 }
 
 await test('a failure at BEGIN leaves no unit open — the work never runs, no transaction is left behind, later writes and units work; a failing ROLLBACK is reported and still clears the unit', () => {
-  const dir = tempDir('uow-begin'); const t = boot(dir);
+  const dir = tempDir('uow-begin');
+  const t = boot(dir);
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
-  let failBegin = true; let invoked = 0;
-  t.store.sqlite.exec = (sql) => { if (sql === 'BEGIN IMMEDIATE' && failBegin) { failBegin = false; throw new Error('injected BEGIN failure'); } return exec(sql); };
-  assert.throws(() => t.unit(() => { invoked += 1; }), /injected BEGIN failure/);
+  let failBegin = true;
+  let invoked = 0;
+  t.store.sqlite.exec = (sql) => {
+    if (sql === 'BEGIN IMMEDIATE' && failBegin) {
+      failBegin = false;
+      throw new Error('injected BEGIN failure');
+    }
+    return exec(sql);
+  };
+  assert.throws(
+    () =>
+      t.unit(() => {
+        invoked += 1;
+      }),
+    /injected BEGIN failure/,
+  );
   assert.equal(invoked, 0, 'the work must not run when the transaction could not start');
   assert.equal(t.store.inUnitOfWork(), false, 'no fictitious unit remains active');
-  assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
+  assert.equal(t.store.unit.active(), false);
+  assert.equal(t.store.sqlite.isTransaction, false);
   t.layer.players.setFootballCategory('pl-1', 'Ordinary edit');
-  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Ordinary edit', 'a later write is real, not absorbed by a phantom unit');
-  t.unit(() => { t.layer.orgs.create({ id: 'org-after-begin', name: 'After', type: 'club', plan: 'Pro' }); });
+  assert.equal(
+    t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category,
+    'Ordinary edit',
+    'a later write is real, not absorbed by a phantom unit',
+  );
+  t.unit(() => {
+    t.layer.orgs.create({ id: 'org-after-begin', name: 'After', type: 'club', plan: 'Pro' });
+  });
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-after-begin'").n, 1, 'a later unit works');
   // A ROLLBACK that fails: reported on the error and in the state, and the unit is still closed.
   let failRollback = true;
-  t.store.sqlite.exec = (sql) => { if (sql === 'ROLLBACK' && failRollback) { failRollback = false; throw new Error('rollback exploded'); } return exec(sql); };
+  t.store.sqlite.exec = (sql) => {
+    if (sql === 'ROLLBACK' && failRollback) {
+      failRollback = false;
+      throw new Error('rollback exploded');
+    }
+    return exec(sql);
+  };
   let err = null;
-  try { t.unit(() => { t.layer.orgs.update('org-grass', (d) => { d.suspended = true; }); throw new Error('operation failed'); }); } catch (e) { err = e; }
-  assert.match(err.message, /operation failed/, 'the caller sees the operation failure'); assert.equal(err.unitOfWork, 'rolled_back');
-  assert.ok(Array.isArray(err.unitOfWorkCleanup) && /rollback exploded/.test(err.unitOfWorkCleanup.join(' ')), 'the cleanup failure is attached to the error');
+  try {
+    t.unit(() => {
+      t.layer.orgs.update('org-grass', (d) => {
+        d.suspended = true;
+      });
+      throw new Error('operation failed');
+    });
+  } catch (e) {
+    err = e;
+  }
+  assert.match(err.message, /operation failed/, 'the caller sees the operation failure');
+  assert.equal(err.unitOfWork, 'rolled_back');
+  assert.ok(
+    Array.isArray(err.unitOfWorkCleanup) && /rollback exploded/.test(err.unitOfWorkCleanup.join(' ')),
+    'the cleanup failure is attached to the error',
+  );
   assert.equal(t.store.inUnitOfWork(), false, 'the unit is closed even though cleanup failed');
   assert.ok(t.store.unitOfWorkState().cleanupFailures >= 1);
   t.store.sqlite.exec = exec;
   if (t.store.sqlite.isTransaction) t.store.sqlite.exec('ROLLBACK');
   assert.equal(t.layer.orgs.byId('org-grass').suspended, false);
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test('a nested (joined) unit that fails poisons the whole unit even when its caller catches the error — nothing commits, nothing is published', () => {
-  const dir = tempDir('uow-swallow'); const t = boot(dir);
+  const dir = tempDir('uow-swallow');
+  const t = boot(dir);
   const p1 = t.layer.players.byId('pl-1');
-  let events = 0; let outer = null; let innerSeen = null; let continued = false;
+  let events = 0;
+  let outer = null;
+  let innerSeen = null;
+  let continued = false;
   try {
     t.unit(() => {
-      t.layer.orgs.update('org-pro', (d) => { d.suspended = true; });
+      t.layer.orgs.update('org-pro', (d) => {
+        d.suspended = true;
+      });
       try {
         t.unit(() => {
           t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' });
           t.layer.players.setFootballCategory('pl-1', 'Inner');
-          t.store.afterCommit(() => { events += 1; });
+          t.store.afterCommit(() => {
+            events += 1;
+          });
           throw new Error('inner failure');
         });
-      } catch (e) { innerSeen = e.message; }
+      } catch (e) {
+        innerSeen = e.message;
+      }
       continued = true; // the caller carried on after swallowing the inner error
-      t.store.afterCommit(() => { events += 1; });
+      t.store.afterCommit(() => {
+        events += 1;
+      });
     });
-  } catch (e) { outer = e; }
-  assert.equal(innerSeen, 'inner failure'); assert.equal(continued, true);
+  } catch (e) {
+    outer = e;
+  }
+  assert.equal(innerSeen, 'inner failure');
+  assert.equal(continued, true);
   assert.ok(outer, 'the outer unit must fail: a joined unit failed inside it');
-  assert.match(outer.message, /cannot commit|joined|nested/i); assert.match(String(outer.cause?.message), /inner failure/);
+  assert.match(outer.message, /cannot commit|joined|nested/i);
+  assert.match(String(outer.cause?.message), /inner failure/);
   assert.equal(outer.unitOfWork, 'rolled_back');
-  assert.equal(t.store.sqlite.isTransaction, false); assert.equal(t.store.inUnitOfWork(), false);
-  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0, 'the outer row write did not commit');
+  assert.equal(t.store.sqlite.isTransaction, false);
+  assert.equal(t.store.inUnitOfWork(), false);
+  assert.equal(
+    t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended,
+    0,
+    'the outer row write did not commit',
+  );
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 0);
   assert.equal(events, 0, 'no after-commit callback of a failed unit runs');
-  assert.equal(t.layer.orgs.byId('org-pro').suspended, false); assert.equal(t.layer.orgs.byId('org-inner'), null); assert.equal(p1.footballCategory, 'Start');
-  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Start'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
+  assert.equal(t.layer.orgs.byId('org-pro').suspended, false);
+  assert.equal(t.layer.orgs.byId('org-inner'), null);
+  assert.equal(p1.footballCategory, 'Start');
+  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Start');
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
   // The same operation, retried without the failure, commits whole.
-  t.unit(() => { t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); t.unit(() => { t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' }); }); t.store.afterCommit(() => { events += 1; }); });
-  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 1); assert.equal(events, 1);
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.unit(() => {
+    t.layer.orgs.update('org-pro', (d) => {
+      d.suspended = true;
+    });
+    t.unit(() => {
+      t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' });
+    });
+    t.store.afterCommit(() => {
+      events += 1;
+    });
+  });
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 1);
+  assert.equal(events, 1);
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test('an organisation updated twice inside a unit: the second update sees the first, the commit writes the last; a rollback leaves the committed row; a restart reads the table', () => {
-  const dir = tempDir('uow-revert'); const t = boot(dir);
+  const dir = tempDir('uow-revert');
+  const t = boot(dir);
   t.unit(() => {
-    t.layer.orgs.update('org-pro', (d) => { d.name = 'Eastport FC (renamed)'; });
+    t.layer.orgs.update('org-pro', (d) => {
+      d.name = 'Eastport FC (renamed)';
+    });
     assert.equal(t.layer.orgs.byId('org-pro').name, 'Eastport FC (renamed)', 'a read inside the unit sees its write');
-    t.layer.orgs.update('org-pro', (d) => { assert.equal(d.name, 'Eastport FC (renamed)', 'the draft is the current row'); d.suspended = true; });
+    t.layer.orgs.update('org-pro', (d) => {
+      assert.equal(d.name, 'Eastport FC (renamed)', 'the draft is the current row');
+      d.suspended = true;
+    });
   });
-  assert.equal(t.raw("SELECT name FROM orgs WHERE id = 'org-pro'").name, 'Eastport FC (renamed)'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
-  assert.throws(() => t.unit(() => { t.layer.orgs.update('org-pro', (d) => { d.suspended = false; d.name = 'Nope'; }); throw new Error('late failure'); }), /late failure/);
-  assert.equal(t.layer.orgs.byId('org-pro').suspended, true); assert.equal(t.layer.orgs.byId('org-pro').name, 'Eastport FC (renamed)');
+  assert.equal(t.raw("SELECT name FROM orgs WHERE id = 'org-pro'").name, 'Eastport FC (renamed)');
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
+  assert.throws(
+    () =>
+      t.unit(() => {
+        t.layer.orgs.update('org-pro', (d) => {
+          d.suspended = false;
+          d.name = 'Nope';
+        });
+        throw new Error('late failure');
+      }),
+    /late failure/,
+  );
+  assert.equal(t.layer.orgs.byId('org-pro').suspended, true);
+  assert.equal(t.layer.orgs.byId('org-pro').name, 'Eastport FC (renamed)');
   // An update from inside the same organisation's update is refused.
-  assert.throws(() => t.layer.orgs.update('org-pro', () => { t.layer.orgs.update('org-pro', (d) => { d.suspended = false; }); }), /already being updated/);
+  assert.throws(
+    () =>
+      t.layer.orgs.update('org-pro', () => {
+        t.layer.orgs.update('org-pro', (d) => {
+          d.suspended = false;
+        });
+      }),
+    /already being updated/,
+  );
   t.store.sqlite.close();
   const again = openStore(dir);
   const layer2 = attachDataLayer({ store: again, nextId, sessionTtlMs: TTL });
   const pro2 = layer2.orgs.byId('org-pro');
-  assert.equal(pro2.name, 'Eastport FC (renamed)'); assert.equal(pro2.suspended, true);
-  again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  assert.equal(pro2.name, 'Eastport FC (renamed)');
+  assert.equal(pro2.suspended, true);
+  again.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test('an async function is refused BEFORE it is invoked (top-level and nested), so nothing of it ever runs; an unexpected thenable from a plain function is rolled back, its rejection is observed and counted, and the fact that its continuation is NOT cancelled is recorded, not hidden', async () => {
-  const dir = tempDir('uow-async'); const t = boot(dir);
+  const dir = tempDir('uow-async');
+  const t = boot(dir);
   const p1 = t.layer.players.byId('pl-1');
   let invoked = 0;
   const unhandled = await withUnhandled(async () => {
     // Top-level async work: refused before invocation.
     let err = null;
-    try { t.unit(async () => { invoked += 1; await tick(); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); }); } catch (e) { err = e; }
-    assert.match(err.message, /async function|synchronous/); assert.equal(invoked, 0, 'an identifiable async function never runs');
-    assert.equal(t.store.inUnitOfWork(), false); assert.equal(t.store.sqlite.isTransaction, false);
+    try {
+      t.unit(async () => {
+        invoked += 1;
+        await tick();
+        t.layer.orgs.update('org-pro', (d) => {
+          d.suspended = true;
+        });
+      });
+    } catch (e) {
+      err = e;
+    }
+    assert.match(err.message, /async function|synchronous/);
+    assert.equal(invoked, 0, 'an identifiable async function never runs');
+    assert.equal(t.store.inUnitOfWork(), false);
+    assert.equal(t.store.sqlite.isTransaction, false);
     // Nested async work: refused before invocation, and the enclosing unit cannot commit.
     err = null;
-    try { t.unit(() => { t.layer.orgs.create({ id: 'org-outer2', name: 'O', type: 'club', plan: 'Pro' }); try { t.unit(async () => { invoked += 1; }); } catch { /* swallowed */ } }); } catch (e) { err = e; }
-    assert.ok(err && err.unitOfWork === 'rolled_back'); assert.equal(invoked, 0); assert.equal(t.layer.orgs.byId('org-outer2'), null);
-    await tick(); await tick();
+    try {
+      t.unit(() => {
+        t.layer.orgs.create({ id: 'org-outer2', name: 'O', type: 'club', plan: 'Pro' });
+        try {
+          t.unit(async () => {
+            invoked += 1;
+          });
+        } catch {
+          /* swallowed */
+        }
+      });
+    } catch (e) {
+      err = e;
+    }
+    assert.ok(err && err.unitOfWork === 'rolled_back');
+    assert.equal(invoked, 0);
+    assert.equal(t.layer.orgs.byId('org-outer2'), null);
+    await tick();
+    await tick();
     assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
     assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer2'").n, 0);
     // An UNEXPECTED thenable: a plain function that returns a promise cannot be told apart before it runs.
@@ -340,121 +652,270 @@ await test('an async function is refused BEFORE it is invoked (top-level and nes
     try {
       t.unit(() => {
         t.layer.players.setFootballCategory('pl-1', 'Sync part');
-        return (async () => { await tick(); continuation += 1; throw new Error('continuation rejected'); })();
+        return (async () => {
+          await tick();
+          continuation += 1;
+          throw new Error('continuation rejected');
+        })();
       });
-    } catch (e) { err = e; }
-    assert.match(err.message, /synchronous|thenable|promise/); assert.equal(err.unitOfWork, 'rolled_back');
+    } catch (e) {
+      err = e;
+    }
+    assert.match(err.message, /synchronous|thenable|promise/);
+    assert.equal(err.unitOfWork, 'rolled_back');
     assert.equal(p1.footballCategory, 'Start', 'the synchronous part of the work is rolled back');
     assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Start');
-    await tick(); await tick();
-    assert.equal(continuation, 1, 'the continuation still ran: refusing the promise does not cancel the work (documented limitation)');
-    const stray = t.store.unitOfWorkState().strayAsyncWork;
-    assert.equal(stray.escaped, 1); assert.equal(stray.rejected, 1); assert.match(stray.lastError.message, /continuation rejected/);
-    // A resolving thenable is observed the same way (counted as escaped, not as a failure).
-    try { t.unit(() => Promise.resolve('late')); } catch { /* refused */ }
     await tick();
-    assert.equal(t.store.unitOfWorkState().strayAsyncWork.escaped, 2); assert.equal(t.store.unitOfWorkState().strayAsyncWork.rejected, 1);
+    await tick();
+    assert.equal(
+      continuation,
+      1,
+      'the continuation still ran: refusing the promise does not cancel the work (documented limitation)',
+    );
+    const stray = t.store.unitOfWorkState().strayAsyncWork;
+    assert.equal(stray.escaped, 1);
+    assert.equal(stray.rejected, 1);
+    assert.match(stray.lastError.message, /continuation rejected/);
+    // A resolving thenable is observed the same way (counted as escaped, not as a failure).
+    try {
+      t.unit(() => Promise.resolve('late'));
+    } catch {
+      /* refused */
+    }
+    await tick();
+    assert.equal(t.store.unitOfWorkState().strayAsyncWork.escaped, 2);
+    assert.equal(t.store.unitOfWorkState().strayAsyncWork.rejected, 1);
   });
   assert.deepEqual(unhandled, [], 'no unhandled rejection escapes the store');
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test('after-commit side effects that return a promise are observed — an asynchronous failure is counted and logged (never an unhandled rejection, never a rollback), a success is not, and later callbacks still run; the same holds outside a unit', async () => {
-  const dir = tempDir('uow-async-after'); const t = boot(dir);
+  const dir = tempDir('uow-async-after');
+  const t = boot(dir);
   const order = [];
   const unhandled = await withUnhandled(async () => {
     t.unit(() => {
-      t.layer.orgs.update('org-pro', (d) => { d.suspended = true; });
-      t.store.afterCommit(async () => { await tick(); order.push('async-fail'); throw new Error('async delivery failed'); });
-      t.store.afterCommit(() => { order.push('sync-fail'); throw new Error('sync delivery failed'); });
-      t.store.afterCommit(async () => { await tick(); order.push('async-ok'); return 'delivered'; });
-      t.store.afterCommit(() => { order.push('sync-ok'); });
+      t.layer.orgs.update('org-pro', (d) => {
+        d.suspended = true;
+      });
+      t.store.afterCommit(async () => {
+        await tick();
+        order.push('async-fail');
+        throw new Error('async delivery failed');
+      });
+      t.store.afterCommit(() => {
+        order.push('sync-fail');
+        throw new Error('sync delivery failed');
+      });
+      t.store.afterCommit(async () => {
+        await tick();
+        order.push('async-ok');
+        return 'delivered';
+      });
+      t.store.afterCommit(() => {
+        order.push('sync-ok');
+      });
     });
-    assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1, 'committed regardless of delivery');
+    assert.equal(
+      t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended,
+      1,
+      'committed regardless of delivery',
+    );
     assert.deepEqual(order, ['sync-fail', 'sync-ok'], 'every synchronous callback ran, in order, despite the failure');
-    await tick(); await tick(); await tick();
+    await tick();
+    await tick();
+    await tick();
     assert.deepEqual([...order].sort(), ['async-fail', 'async-ok', 'sync-fail', 'sync-ok']);
     const state = t.store.unitOfWorkState();
     assert.equal(state.afterCommitFailures, 2, 'one synchronous and one asynchronous failure counted');
     assert.equal(state.afterCommitDelivered, 2, 'two deliveries succeeded');
     assert.match(state.lastAfterCommitError.message, /async delivery failed/);
     // Outside a unit: the callback runs now; a returned promise is observed the same way.
-    t.store.afterCommit(async () => { await tick(); throw new Error('immediate async failure'); });
-    await tick(); await tick();
+    t.store.afterCommit(async () => {
+      await tick();
+      throw new Error('immediate async failure');
+    });
+    await tick();
+    await tick();
     assert.equal(t.store.unitOfWorkState().afterCommitFailures, 3);
-    assert.doesNotThrow(() => t.store.afterCommit(() => { throw new Error('immediate sync failure'); }), 'a side effect never fails the operation that registered it');
+    assert.doesNotThrow(
+      () =>
+        t.store.afterCommit(() => {
+          throw new Error('immediate sync failure');
+        }),
+      'a side effect never fails the operation that registered it',
+    );
     assert.equal(t.store.unitOfWorkState().afterCommitFailures, 4);
   });
   assert.deepEqual(unhandled, [], 'no unhandled rejection escapes the store');
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 await test('participant API: store.unit.join runs an operation inside the open unit through the poisoning boundary — a throw rethrows unchanged and poisons the unit even when caught, an asynchronous shape is refused before it runs, a result is returned, and it is refused outside a unit (no BEGIN of its own)', () => {
-  const dir = tempDir('uow-join'); const t = boot(dir);
+  const dir = tempDir('uow-join');
+  const t = boot(dir);
   assert.throws(() => t.store.unit.join(() => 1), /needs an open unit of work/);
   assert.throws(() => t.store.unit.join('nope'), /synchronous work function/);
   assert.equal(t.store.sqlite.isTransaction, false, 'a refused join opened nothing');
   // Inside a unit: a thrown operation poisons the unit although the caller catches it.
   const boom = new Error('statement failed after a write');
-  let caught = null; let outer = null; let published = 0; let result = null; let begins = 0;
+  let caught = null;
+  let outer = null;
+  let published = 0;
+  let result = null;
+  let begins = 0;
   const exec = t.store.sqlite.exec.bind(t.store.sqlite);
-  t.store.sqlite.exec = (sql) => { if (sql === 'BEGIN IMMEDIATE') begins += 1; return exec(sql); };
+  t.store.sqlite.exec = (sql) => {
+    if (sql === 'BEGIN IMMEDIATE') begins += 1;
+    return exec(sql);
+  };
   try {
     t.unit(() => {
-      result = t.store.unit.join(() => { t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); return 'joined'; });
-      try { t.store.unit.join(() => { t.layer.orgs.create({ id: 'org-half', name: 'Half', type: 'club', plan: 'Pro' }); throw boom; }); } catch (e) { caught = e; }
-      t.store.afterCommit(() => { published += 1; });
+      result = t.store.unit.join(() => {
+        t.layer.orgs.update('org-pro', (d) => {
+          d.suspended = true;
+        });
+        return 'joined';
+      });
+      try {
+        t.store.unit.join(() => {
+          t.layer.orgs.create({ id: 'org-half', name: 'Half', type: 'club', plan: 'Pro' });
+          throw boom;
+        });
+      } catch (e) {
+        caught = e;
+      }
+      t.store.afterCommit(() => {
+        published += 1;
+      });
     });
-  } catch (e) { outer = e; }
+  } catch (e) {
+    outer = e;
+  }
   t.store.sqlite.exec = exec;
-  assert.equal(result, 'joined'); assert.equal(caught, boom, 'the error is rethrown unchanged');
-  assert.ok(outer && /cannot commit/.test(outer.message) && outer.cause === boom, 'the unit fails at its end with the joined failure as cause');
-  assert.equal(outer.unitOfWork, 'rolled_back'); assert.equal(published, 0); assert.equal(begins, 1, 'join opens no transaction of its own');
-  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0); assert.equal(t.layer.orgs.byId('org-half'), null); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-half'").n, 0); assert.ok(!t.layer.orgs.byId('org-pro').suspended, 'the joined row update is restored in memory too');
-  assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
+  assert.equal(result, 'joined');
+  assert.equal(caught, boom, 'the error is rethrown unchanged');
+  assert.ok(
+    outer && /cannot commit/.test(outer.message) && outer.cause === boom,
+    'the unit fails at its end with the joined failure as cause',
+  );
+  assert.equal(outer.unitOfWork, 'rolled_back');
+  assert.equal(published, 0);
+  assert.equal(begins, 1, 'join opens no transaction of its own');
+  assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
+  assert.equal(t.layer.orgs.byId('org-half'), null);
+  assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-half'").n, 0);
+  assert.ok(!t.layer.orgs.byId('org-pro').suspended, 'the joined row update is restored in memory too');
+  assert.equal(t.store.unit.active(), false);
+  assert.equal(t.store.sqlite.isTransaction, false);
   // An asynchronous operation is refused before it is invoked, and that refusal poisons the unit too.
-  let invoked = 0; let refusal = null; outer = null;
-  try { t.unit(() => { try { t.store.unit.join(async () => { invoked += 1; }); } catch (e) { refusal = e; } }); } catch (e) { outer = e; }
-  assert.match(String(refusal?.message), /must be synchronous/); assert.equal(invoked, 0); assert.ok(outer && /cannot commit/.test(outer.message));
+  let invoked = 0;
+  let refusal = null;
+  outer = null;
+  try {
+    t.unit(() => {
+      try {
+        t.store.unit.join(async () => {
+          invoked += 1;
+        });
+      } catch (e) {
+        refusal = e;
+      }
+    });
+  } catch (e) {
+    outer = e;
+  }
+  assert.match(String(refusal?.message), /must be synchronous/);
+  assert.equal(invoked, 0);
+  assert.ok(outer && /cannot commit/.test(outer.message));
   // A clean join commits with the unit.
-  t.unit(() => { t.store.unit.join(() => t.layer.orgs.update('org-pro', (d) => { d.suspended = true; })); });
+  t.unit(() => {
+    t.store.unit.join(() =>
+      t.layer.orgs.update('org-pro', (d) => {
+        d.suspended = true;
+      }),
+    );
+  });
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
-  t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+  t.store.sqlite.close();
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('cost: a player write — standalone and inside a unit of work with an organisation update — runs exactly as many SQL statements with 2,000 players as with 20, and a rolled-back unit leaves the row as it was', () => {
   // Every statement the process runs is counted: StatementSync run / get / all / iterate and DatabaseSync exec.
   const counted = { on: false, n: 0 };
   const restore = [];
-  for (const [proto, names] of [[StatementSync.prototype, ['run', 'get', 'all', 'iterate']], [DatabaseSync.prototype, ['exec']]]) {
+  for (const [proto, names] of [
+    [StatementSync.prototype, ['run', 'get', 'all', 'iterate']],
+    [DatabaseSync.prototype, ['exec']],
+  ]) {
     for (const name of names) {
       const original = proto[name];
-      proto[name] = function counting(...args) { if (counted.on) counted.n += 1; return original.apply(this, args); };
-      restore.push(() => { proto[name] = original; });
+      proto[name] = function counting(...args) {
+        if (counted.on) counted.n += 1;
+        return original.apply(this, args);
+      };
+      restore.push(() => {
+        proto[name] = original;
+      });
     }
   }
   try {
     const statementsFor = (n) => {
       const dir = tempDir(`cost-${n}`);
-      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', footballCategory: 'Start' })) }; // the trials own the reports; a seed player carries none
+      const seed = {
+        ...fixtureSeed(),
+        players: Array.from({ length: n }, (_, i) => ({
+          id: `pl-${i}`,
+          name: `Player ${i}`,
+          dob: '2000-01-01',
+          country: 'GB',
+          footballCategory: 'Start',
+        })),
+      }; // the trials own the reports; a seed player carries none
       const t = boot(dir, seed);
       const players = t.layer.players;
-      counted.n = 0; counted.on = true;
+      counted.n = 0;
+      counted.on = true;
       players.setFootballCategory('pl-7', 'Standalone');
-      t.unit(() => { players.setFootballCategory('pl-7', 'In a unit'); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); });
+      t.unit(() => {
+        players.setFootballCategory('pl-7', 'In a unit');
+        t.layer.orgs.update('org-pro', (d) => {
+          d.suspended = true;
+        });
+      });
       counted.on = false;
       const statements = counted.n;
       // A unit that fails after the write: the row is unchanged (a held record is a frozen copy).
       const held = players.byId('pl-7');
-      assert.throws(() => t.unit(() => { players.setFootballCategory('pl-7', 'Rolled back'); throw new Error('late'); }), /late/);
-      assert.equal(held.footballCategory, 'In a unit'); assert.ok(Object.isFrozen(held)); assert.equal(players.byId('pl-7').footballCategory, 'In a unit'); assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-7'").football_category, 'In a unit');
+      assert.throws(
+        () =>
+          t.unit(() => {
+            players.setFootballCategory('pl-7', 'Rolled back');
+            throw new Error('late');
+          }),
+        /late/,
+      );
+      assert.equal(held.footballCategory, 'In a unit');
+      assert.ok(Object.isFrozen(held));
+      assert.equal(players.byId('pl-7').footballCategory, 'In a unit');
+      assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-7'").football_category, 'In a unit');
       assert.equal(players.byId(`pl-${n - 1}`).footballCategory, 'Start', 'an untouched player is unchanged');
-      t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+      t.store.sqlite.close();
+      fs.rmSync(dir, { recursive: true, force: true });
       return statements;
     };
-    const small = statementsFor(20); const large = statementsFor(2000);
+    const small = statementsFor(20);
+    const large = statementsFor(2000);
     assert.ok(small > 0, 'the counter saw the statements');
-    assert.equal(large, small, `a write's statements do not grow with the player count (20 players: ${small}, 2,000 players: ${large})`);
+    assert.equal(
+      large,
+      small,
+      `a write's statements do not grow with the player count (20 players: ${small}, 2,000 players: ${large})`,
+    );
   } finally {
     for (const undo of restore) undo();
   }
@@ -463,31 +924,59 @@ test('cost: a player write — standalone and inside a unit of work with an orga
 test('cost: a page of the org directory runs as many SQL statements with 2,000 players as with 200, and decodes only the page', () => {
   const counted = { on: false, n: 0 };
   const restore = [];
-  for (const [proto, names] of [[StatementSync.prototype, ['run', 'get', 'all', 'iterate']], [DatabaseSync.prototype, ['exec']]]) {
+  for (const [proto, names] of [
+    [StatementSync.prototype, ['run', 'get', 'all', 'iterate']],
+    [DatabaseSync.prototype, ['exec']],
+  ]) {
     for (const name of names) {
       const original = proto[name];
-      proto[name] = function counting(...args) { if (counted.on) counted.n += 1; return original.apply(this, args); };
-      restore.push(() => { proto[name] = original; });
+      proto[name] = function counting(...args) {
+        if (counted.on) counted.n += 1;
+        return original.apply(this, args);
+      };
+      restore.push(() => {
+        proto[name] = original;
+      });
     }
   }
   try {
     const pageFor = (n) => {
       const dir = tempDir(`dir-${n}`);
-      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', academyPlus: i % 7 === 0 })) };
+      const seed = {
+        ...fixtureSeed(),
+        players: Array.from({ length: n }, (_, i) => ({
+          id: `pl-${i}`,
+          name: `Player ${i}`,
+          dob: '2000-01-01',
+          country: 'GB',
+          academyPlus: i % 7 === 0,
+        })),
+      };
       const t = boot(dir, seed);
       const org = t.layer.orgs.byId('org-pro');
       t.layer.players.directoryPage(org, {}, { limit: 50, after: null }); // prepares the statements
-      counted.n = 0; counted.on = true;
+      counted.n = 0;
+      counted.on = true;
       const first = t.layer.players.directoryPage(org, {}, { limit: 50, after: null });
-      const second = t.layer.players.directoryPage(org, {}, { limit: 50, after: JSON.parse(Buffer.from(first.nextCursor, 'base64url').toString()) });
+      const second = t.layer.players.directoryPage(
+        org,
+        {},
+        { limit: 50, after: JSON.parse(Buffer.from(first.nextCursor, 'base64url').toString()) },
+      );
       counted.on = false;
       assert.equal(first.items.length + second.items.length, 100);
-      t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+      t.store.sqlite.close();
+      fs.rmSync(dir, { recursive: true, force: true });
       return counted.n;
     };
-    const small = pageFor(200); const large = pageFor(2000);
+    const small = pageFor(200);
+    const large = pageFor(2000);
     assert.ok(small > 0);
-    assert.equal(large, small, `two directory pages' statements do not grow with the player count (200 players: ${small}, 2,000 players: ${large})`);
+    assert.equal(
+      large,
+      small,
+      `two directory pages' statements do not grow with the player count (200 players: ${small}, 2,000 players: ${large})`,
+    );
   } finally {
     for (const undo of restore) undo();
   }
@@ -496,28 +985,69 @@ test('cost: a page of the org directory runs as many SQL statements with 2,000 p
 test('cost: an empty unit of work runs no statement on the organisations, the players or the guardians, however many there are', () => {
   const sqlOf = [];
   const restore = [];
-  for (const [proto, names] of [[StatementSync.prototype, ['run', 'get', 'all', 'iterate']], [DatabaseSync.prototype, ['exec']]]) {
+  for (const [proto, names] of [
+    [StatementSync.prototype, ['run', 'get', 'all', 'iterate']],
+    [DatabaseSync.prototype, ['exec']],
+  ]) {
     for (const name of names) {
       const original = proto[name];
-      proto[name] = function recording(...args) { sqlOf.push(this instanceof StatementSync ? this.sourceSQL : String(args[0])); return original.apply(this, args); };
-      restore.push(() => { proto[name] = original; });
+      proto[name] = function recording(...args) {
+        sqlOf.push(this instanceof StatementSync ? this.sourceSQL : String(args[0]));
+        return original.apply(this, args);
+      };
+      restore.push(() => {
+        proto[name] = original;
+      });
     }
   }
   try {
     const emptyUnit = (n) => {
       const dir = tempDir(`empty-${n}`);
-      const seed = { ...fixtureSeed(), orgs: [...ORGS(), ...Array.from({ length: n }, (_, i) => ({ id: `org-c${i}`, name: `Club ${i}`, type: 'club', level: 'grassroots', plan: 'Grassroots' }))], players: [...(fixtureSeed().players ?? []), ...Array.from({ length: n }, (_, i) => ({ id: `pl-c${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB' }))] };
+      const seed = {
+        ...fixtureSeed(),
+        orgs: [
+          ...ORGS(),
+          ...Array.from({ length: n }, (_, i) => ({
+            id: `org-c${i}`,
+            name: `Club ${i}`,
+            type: 'club',
+            level: 'grassroots',
+            plan: 'Grassroots',
+          })),
+        ],
+        players: [
+          ...(fixtureSeed().players ?? []),
+          ...Array.from({ length: n }, (_, i) => ({
+            id: `pl-c${i}`,
+            name: `Player ${i}`,
+            dob: '2000-01-01',
+            country: 'GB',
+          })),
+        ],
+      };
       const t = boot(dir, seed);
       sqlOf.length = 0;
       t.unit(() => {});
       const ran = [...sqlOf];
-      t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
+      t.store.sqlite.close();
+      fs.rmSync(dir, { recursive: true, force: true });
       return ran;
     };
-    const few = emptyUnit(3); const many = emptyUnit(500);
-    assert.ok(!many.some((q) => /\borgs\b/.test(q)), `no statement names the organisations (${many.filter((q) => /\borgs\b/.test(q)).join(' | ')})`);
-    assert.ok(!many.some((q) => /\b(players|guardians|guardian_children|player_\w+)\b/.test(q)), `no statement names the players or guardians (${many.filter((q) => /\b(players|guardians)\b/.test(q)).join(' | ')})`);
-    assert.equal(many.length, few.length, `the empty unit's statements do not grow with the organisations (3: ${few.length}, 500: ${many.length})`);
+    const few = emptyUnit(3);
+    const many = emptyUnit(500);
+    assert.ok(
+      !many.some((q) => /\borgs\b/.test(q)),
+      `no statement names the organisations (${many.filter((q) => /\borgs\b/.test(q)).join(' | ')})`,
+    );
+    assert.ok(
+      !many.some((q) => /\b(players|guardians|guardian_children|player_\w+)\b/.test(q)),
+      `no statement names the players or guardians (${many.filter((q) => /\b(players|guardians)\b/.test(q)).join(' | ')})`,
+    );
+    assert.equal(
+      many.length,
+      few.length,
+      `the empty unit's statements do not grow with the organisations (3: ${few.length}, 500: ${many.length})`,
+    );
   } finally {
     for (const undo of restore) undo();
   }

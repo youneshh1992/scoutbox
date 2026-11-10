@@ -3,7 +3,9 @@ const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 const p = await (await b.newContext({ viewport: { width: 1280, height: 850 } })).newPage();
 const errs = [];
 p.on('pageerror', (e) => errs.push(String(e).slice(0, 200)));
-await p.setContent(`<iframe id="f" src="http://localhost:8099/connected/" sandbox="allow-scripts" style="width:1260px;height:820px"></iframe>`);
+await p.setContent(
+  `<iframe id="f" src="http://localhost:8099/connected/" sandbox="allow-scripts" style="width:1260px;height:820px"></iframe>`,
+);
 const f = p.frameLocator('#f');
 await f.locator('#sb-bar').waitFor({ timeout: 30000 });
 await f.locator('text=Shared simulation — no live backend').waitFor({ timeout: 10000 });

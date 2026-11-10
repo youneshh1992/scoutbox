@@ -48,18 +48,26 @@ export interface CvBegin {
 
 export interface CvResult {
   protocolId: string;
-  providerId: string; providerVersion: number; engineVersion: number; cvPolicyVersion: number;
+  providerId: string;
+  providerVersion: number;
+  engineVersion: number;
+  cvPolicyVersion: number;
   outcome: 'accepted' | 'refused';
   refusalReason: string | null;
   observationQuality: { sufficient: boolean; state: string | null; reasons: string[] };
   derived: {
-    personPresent: boolean; ballPresent: boolean;
-    touchCount: number | null; juggleCount: number | null; activeDurationMs: number;
+    personPresent: boolean;
+    ballPresent: boolean;
+    touchCount: number | null;
+    juggleCount: number | null;
+    activeDurationMs: number;
   };
   /** Carried, labelled, and never rendered as an official result. */
   experimental: { exactCount: number | null; status: string; note: string };
   integrity: Record<string, unknown>;
-  serverStartedAt: number; serverEndedAt: number; serverDurationMs: number;
+  serverStartedAt: number;
+  serverEndedAt: number;
+  serverDurationMs: number;
   combineVerified: false;
   combineVerifiedBlockedBy: string;
 }
@@ -75,7 +83,12 @@ export interface CvFinalize {
 
 /** A gray8 frame envelope. `data` is transient and never stored. */
 export interface FrameEnvelope {
-  seq: number; encoding: 'gray8'; w: number; h: number; data: string; capturedAtMs: number;
+  seq: number;
+  encoding: 'gray8';
+  w: number;
+  h: number;
+  data: string;
+  capturedAtMs: number;
 }
 
 // ---------------------------------------------------------------- capture
@@ -90,7 +103,10 @@ let ctx: CanvasRenderingContext2D | null = null;
 
 /** Release the capture surface. Call when an attempt ends, for any reason. */
 export function releaseCaptureSurface(): void {
-  if (canvas) { canvas.width = 0; canvas.height = 0; }
+  if (canvas) {
+    canvas.width = 0;
+    canvas.height = 0;
+  }
   canvas = null;
   ctx = null;
 }
@@ -102,15 +118,14 @@ export function releaseCaptureSurface(): void {
  * exception here would land inside a capture interval where nobody is
  * catching it.
  */
-export function captureGray8(
-  video: HTMLVideoElement, seq: number, w: number, h: number,
-): FrameEnvelope | null {
+export function captureGray8(video: HTMLVideoElement, seq: number, w: number, h: number): FrameEnvelope | null {
   if (typeof document === 'undefined') return null;
   if (!video || !video.videoWidth || !video.videoHeight) return null;
 
   if (!canvas || canvas.width !== w || canvas.height !== h) {
     canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
+    canvas.width = w;
+    canvas.height = h;
     ctx = canvas.getContext('2d', { willReadFrequently: true });
   }
   if (!ctx) return null;
@@ -143,7 +158,13 @@ export function captureGray8(
 export interface PlayerM22 {
   readyCheck(playerId: string, body: Record<string, unknown>): Promise<ReadyCheckResult>;
   begin(playerId: string, sessionId: string, nonce: string, protocolId: string): Promise<CvBegin>;
-  sendFrames(playerId: string, sessionId: string, nonce: string, providerSessionId: string, frames: FrameEnvelope[]): Promise<{ accepted: number; lastSeq: number; droppedByServer: number }>;
+  sendFrames(
+    playerId: string,
+    sessionId: string,
+    nonce: string,
+    providerSessionId: string,
+    frames: FrameEnvelope[],
+  ): Promise<{ accepted: number; lastSeq: number; droppedByServer: number }>;
   finalize(playerId: string, sessionId: string, nonce: string, providerSessionId: string): Promise<CvFinalize>;
   cancel(playerId: string, sessionId: string, nonce: string, providerSessionId: string): Promise<unknown>;
 }
@@ -190,14 +211,18 @@ const mock: PlayerM22 = {
       combineDisabledReason: {
         code: 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
         short: 'Combine verification is not available yet for this protocol.',
-        detail: 'Real-world validation has not been completed, so ScoutBox will not publish a standardised Combine measurement from computer vision.',
+        detail:
+          'Real-world validation has not been completed, so ScoutBox will not publish a standardised Combine measurement from computer vision.',
       },
       providerHealth: { state: 'ready', combineVerifiedProtocols: [] },
     };
   },
   async begin() {
     return {
-      providerSessionId: 'pcv_demo', state: 'ready', protocolId: 'combine-box-touch-60', encoding: 'gray8',
+      providerSessionId: 'pcv_demo',
+      state: 'ready',
+      protocolId: 'combine-box-touch-60',
+      encoding: 'gray8',
       frameLimits: { minWidth: 160, minHeight: 120, maxWidth: 320, maxHeight: 240, maxFramesPerBatch: 12 },
       combineVerifiedEligible: false,
       combineDisabledReason: {
@@ -212,19 +237,36 @@ const mock: PlayerM22 = {
   },
   async finalize() {
     const result: CvResult = {
-      protocolId: 'combine-box-touch-60', providerId: 'production_cv',
-      providerVersion: 1, engineVersion: 2, cvPolicyVersion: 1,
-      outcome: 'accepted', refusalReason: null,
+      protocolId: 'combine-box-touch-60',
+      providerId: 'production_cv',
+      providerVersion: 1,
+      engineVersion: 2,
+      cvPolicyVersion: 1,
+      outcome: 'accepted',
+      refusalReason: null,
       observationQuality: { sufficient: true, state: 'sufficient', reasons: [] },
       derived: { personPresent: true, ballPresent: true, touchCount: 9, juggleCount: null, activeDurationMs: 42_000 },
-      experimental: { exactCount: 9, status: 'experimental_unvalidated', note: 'Experimental observation. Not a standardised Combine measurement.' },
+      experimental: {
+        exactCount: 9,
+        status: 'experimental_unvalidated',
+        note: 'Experimental observation. Not a standardised Combine measurement.',
+      },
       integrity: { framesAccepted: 120, framesRejected: 0, nonceBound: true, serverTimeline: true },
-      serverStartedAt: Date.now() - 42_000, serverEndedAt: Date.now(), serverDurationMs: 42_000,
-      combineVerified: false, combineVerifiedBlockedBy: 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
+      serverStartedAt: Date.now() - 42_000,
+      serverEndedAt: Date.now(),
+      serverDurationMs: 42_000,
+      combineVerified: false,
+      combineVerifiedBlockedBy: 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
     };
     return {
-      result, alreadyFinalized: false,
-      boxCamObserved: { eligible: true, failed: [], combineVerified: false, combineVerifiedNote: 'Box Cam observed is not Combine Verified.' },
+      result,
+      alreadyFinalized: false,
+      boxCamObserved: {
+        eligible: true,
+        failed: [],
+        combineVerified: false,
+        combineVerifiedNote: 'Box Cam observed is not Combine Verified.',
+      },
       provenance: 'box_cam_observed',
       combine: { eligible: false, reason: 'REAL_WORLD_VALIDATION_NOT_COMPLETED' },
       combineDisabledReason: {
@@ -234,7 +276,9 @@ const mock: PlayerM22 = {
       },
     };
   },
-  async cancel() { return { cancelled: true, result: null }; },
+  async cancel() {
+    return { cancelled: true, result: null };
+  },
 };
 
 export const m22: PlayerM22 = DEMO ? mock : live;

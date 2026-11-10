@@ -6,29 +6,70 @@ import { PLAYER_POSITIONS } from '../../repositories/identity.mjs';
 import { GRASSROOTS_LIMITS as GL, boxAround } from '../../repositories/grassroots.mjs';
 import { TRANSITION_LIMITS as VL, vouchCodeHash } from '../../repositories/transitionsVouches.mjs';
 import { randomCode } from '../../adapters.mjs';
-import { PROGRAMME_TRACKS, trackForPosition, programmeProgress, percentileAmong, inCohort } from '../../grassrootsJourney.mjs';
+import {
+  PROGRAMME_TRACKS,
+  trackForPosition,
+  programmeProgress,
+  percentileAmong,
+  inCohort,
+} from '../../grassrootsJourney.mjs';
 import { ownChild } from '../identity/children.mjs';
 import { DRILLS } from './record.mjs';
 
 const DAY_MS = 24 * 3600 * 1000;
 
 export function registerGrassrootsJourney({
-  app, playerRouter, guardianRouter, players, orgs, grassroots, clubSetup, transitionsVouches, findPlayer, findOrg, unit, seam,
-  nextId, broadcast, notify, ledgerAppend, mailer, guardianManagedOnly, recordActivity, publishedVouchesFor, scoutViewsOf,
-  pathwayRecord, openTrialView, safeguardingCertified, moderateOrRefuse,
+  app,
+  playerRouter,
+  guardianRouter,
+  players,
+  orgs,
+  grassroots,
+  clubSetup,
+  transitionsVouches,
+  findPlayer,
+  findOrg,
+  unit,
+  seam,
+  nextId,
+  broadcast,
+  notify,
+  ledgerAppend,
+  mailer,
+  guardianManagedOnly,
+  recordActivity,
+  publishedVouchesFor,
+  scoutViewsOf,
+  pathwayRecord,
+  openTrialView,
+  safeguardingCertified,
+  moderateOrRefuse,
 }) {
-  if (typeof players?.startProgramme !== 'function' || typeof pathwayRecord !== 'function' || typeof moderateOrRefuse !== 'function') throw new TypeError('registerGrassrootsJourney needs the players repository, the clubs\' pathway record and moderation');
+  if (
+    typeof players?.startProgramme !== 'function' ||
+    typeof pathwayRecord !== 'function' ||
+    typeof moderateOrRefuse !== 'function'
+  )
+    throw new TypeError(
+      "registerGrassrootsJourney needs the players repository, the clubs' pathway record and moderation",
+    );
 
   function grassrootsOnly(req, res) {
     if (req.player.level !== 'pro') return false;
-    res.status(403).json({ error: 'GRASSROOTS_ONLY', message: 'This is part of the Grassroots journey — pro-level players have moved past it.' });
+    res.status(403).json({
+      error: 'GRASSROOTS_ONLY',
+      message: 'This is part of the Grassroots journey — pro-level players have moved past it.',
+    });
     return true;
   }
   /** The guardian's grassroots child named in the path, or null with the refusal sent. */
   function grassrootsChild(req, res) {
     const child = ownChild(req, res, findPlayer);
     if (!child) return null;
-    if (child.level === 'pro') { res.status(403).json({ error: 'GRASSROOTS_ONLY' }); return null; }
+    if (child.level === 'pro') {
+      res.status(403).json({ error: 'GRASSROOTS_ONLY' });
+      return null;
+    }
     return child;
   }
 
@@ -37,7 +78,12 @@ export function registerGrassrootsJourney({
     if (grassrootsOnly(req, res)) return;
     res.json({
       current: programmeProgress(req.player),
-      tracks: Object.values(PROGRAMME_TRACKS).map(({ key, label, positions, sessions }) => ({ key, label, positions, sessionsPerWeek: sessions.length })),
+      tracks: Object.values(PROGRAMME_TRACKS).map(({ key, label, positions, sessions }) => ({
+        key,
+        label,
+        positions,
+        sessionsPerWeek: sessions.length,
+      })),
       suggested: trackForPosition(req.player.position),
     });
   });
@@ -56,7 +102,8 @@ export function registerGrassrootsJourney({
 
   playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
     if (grassrootsOnly(req, res)) return;
-    if (!req.player.programme) return res.status(409).json({ error: 'NO_PROGRAMME', message: 'Pick a training track first.' });
+    if (!req.player.programme)
+      return res.status(409).json({ error: 'NO_PROGRAMME', message: 'Pick a training track first.' });
     const session = PROGRAMME_TRACKS[req.player.programme.track]?.sessions.find((x) => x.id === req.params.id);
     if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     unit(() => {
@@ -72,9 +119,16 @@ export function registerGrassrootsJourney({
   playerRouter.get('/benchmarks', (req, res) => {
     if (grassrootsOnly(req, res)) return;
     const track = trackForPosition(req.player.position);
-    const cohortFilter = { notLevel: 'pro', exceptId: req.player.id, positions: PLAYER_POSITIONS.filter((pos) => trackForPosition(pos) === track), orNoPosition: trackForPosition(null) === track };
+    const cohortFilter = {
+      notLevel: 'pro',
+      exceptId: req.player.id,
+      positions: PLAYER_POSITIONS.filter((pos) => trackForPosition(pos) === track),
+      orNoPosition: trackForPosition(null) === track,
+    };
     const cohort = [];
-    players.scanLight(cohortFilter, (c) => { if (inCohort(req.player, c)) cohort.push(c); });
+    players.scanLight(cohortFilter, (c) => {
+      if (inCohort(req.player, c)) cohort.push(c);
+    });
     const bests = players.drillBests(cohortFilter);
     const myBest = (drillId, lowerIsBetter) => {
       const values = (req.player.drillResults ?? []).filter((r) => r.drillId === drillId).map((r) => r.value);
@@ -86,20 +140,33 @@ export function registerGrassrootsJourney({
       if (mine === null) return null;
       const cohortValues = (bests.get(d.id) ?? []).map((b) => (d.lowerIsBetter ? b.min : b.max));
       const percentile = percentileAmong(mine, cohortValues, d.lowerIsBetter);
-      return { drillId: d.id, name: d.name, metric: d.metric, unit: d.unit, value: mine, percentile, sampleSize: cohortValues.length, insufficient: percentile === null };
+      return {
+        drillId: d.id,
+        name: d.name,
+        metric: d.metric,
+        unit: d.unit,
+        value: mine,
+        percentile,
+        sampleSize: cohortValues.length,
+        insufficient: percentile === null,
+      };
     }).filter(Boolean);
-    const stats = ['goals', 'assists', 'appearances', 'passCompletionPct', 'duelSuccessPct'].map((k) => {
-      const mine = req.player.stats?.[k];
-      if (typeof mine !== 'number') return null;
-      const cohortValues = cohort.map((c) => c.stats?.[k]).filter((v) => typeof v === 'number');
-      const percentile = percentileAmong(mine, cohortValues, false);
-      return { stat: k, value: mine, percentile, sampleSize: cohortValues.length, insufficient: percentile === null };
-    }).filter(Boolean);
+    const stats = ['goals', 'assists', 'appearances', 'passCompletionPct', 'duelSuccessPct']
+      .map((k) => {
+        const mine = req.player.stats?.[k];
+        if (typeof mine !== 'number') return null;
+        const cohortValues = cohort.map((c) => c.stats?.[k]).filter((v) => typeof v === 'number');
+        const percentile = percentileAmong(mine, cohortValues, false);
+        return { stat: k, value: mine, percentile, sampleSize: cohortValues.length, insufficient: percentile === null };
+      })
+      .filter(Boolean);
     res.json({
       cohortSize: cohort.length,
-      method: 'Percentile of your best result among amateur & semi-pro players in your position group with the same measurement recorded. Cohorts under 3 comparable records show "not enough evidence" instead of a percentile. Incompatible records (other positions, pro level, missing values) are excluded.',
+      method:
+        'Percentile of your best result among amateur & semi-pro players in your position group with the same measurement recorded. Cohorts under 3 comparable records show "not enough evidence" instead of a percentile. Incompatible records (other positions, pro level, missing values) are excluded.',
       note: 'Percentiles vs amateur & semi-pro players in your position group — context, not competition.',
-      drills, stats,
+      drills,
+      stats,
     });
   });
 
@@ -107,19 +174,37 @@ export function registerGrassrootsJourney({
   playerRouter.get('/opportunities', (req, res) => {
     if (grassrootsOnly(req, res)) return;
     if (!req.player.location) return res.json({ clubs: [], note: 'Set your location to see clubs within reach.' });
-    const near = orgs.locatedInBox(boxAround(req.player.location, GRASSROOTS_RADIUS_KM), { level: 'grassroots' })
+    const near = orgs
+      .locatedInBox(boxAround(req.player.location, GRASSROOTS_RADIUS_KM), { level: 'grassroots' })
       .map((o) => ({ org: o, distanceKm: Math.round(haversineKm(o.location, req.player.location) * 10) / 10 }))
       .filter((x) => x.distanceKm <= GRASSROOTS_RADIUS_KM)
       .sort((a, b) => a.distanceKm - b.distanceKm);
-    const upcoming = Map.groupBy(grassroots.openTrials.upcomingForOrgs(near.map((x) => x.org.id), new Date().toISOString().slice(0, 10)), (t) => t.orgId);
+    const upcoming = Map.groupBy(
+      grassroots.openTrials.upcomingForOrgs(
+        near.map((x) => x.org.id),
+        new Date().toISOString().slice(0, 10),
+      ),
+      (t) => t.orgId,
+    );
     const clubs = near.map(({ org, distanceKm }) => ({
-      id: org.id, name: org.name, city: org.location.city ?? '', distanceKm,
-      verified: org.verified, safeguardingCertified: safeguardingCertified(org),
+      id: org.id,
+      name: org.name,
+      city: org.location.city ?? '',
+      distanceKm,
+      verified: org.verified,
+      safeguardingCertified: safeguardingCertified(org),
       ...pathwayRecord(org),
       lookingFor: [...clubSetup.lookingFor.forOrg(org.id)],
-      openTrials: (upcoming.get(org.id) ?? []).map((t) => ({ ...openTrialView(t), registered: t.registrations.some((r) => r.playerId === req.player.id) })),
+      openTrials: (upcoming.get(org.id) ?? []).map((t) => ({
+        ...openTrialView(t),
+        registered: t.registrations.some((r) => r.playerId === req.player.id),
+      })),
     }));
-    res.json({ radiusKm: GRASSROOTS_RADIUS_KM, clubs, lookingForYou: clubs.filter((c) => c.lookingFor.includes(req.player.position)).length });
+    res.json({
+      radiusKm: GRASSROOTS_RADIUS_KM,
+      clubs,
+      lookingForYou: clubs.filter((c) => c.lookingFor.includes(req.player.position)).length,
+    });
   });
 
   playerRouter.post('/open-trials/:id/register', (req, res) => {
@@ -128,14 +213,41 @@ export function registerGrassrootsJourney({
     const trial = grassroots.openTrials.byId(req.params.id);
     if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
     const org = findOrg(trial.orgId);
-    if (!org || !req.player.location || !org.location || haversineKm(org.location, req.player.location) > GRASSROOTS_RADIUS_KM) {
-      return res.status(403).json({ error: 'OUT_OF_RADIUS', message: 'Open days are local — this one is beyond 50km of you.' });
+    if (
+      !org ||
+      !req.player.location ||
+      !org.location ||
+      haversineKm(org.location, req.player.location) > GRASSROOTS_RADIUS_KM
+    ) {
+      return res
+        .status(403)
+        .json({ error: 'OUT_OF_RADIUS', message: 'Open days are local — this one is beyond 50km of you.' });
     }
-    if (trial.registrations.some((r) => r.playerId === req.player.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
+    if (trial.registrations.some((r) => r.playerId === req.player.id))
+      return res.status(409).json({ error: 'ALREADY_REGISTERED' });
     unit(() => {
-      grassroots.openTrials.register(trial.id, { id: nextId('otr'), playerId: req.player.id, playerName: req.player.name?.slice(0, GL.playerName) ?? null, byGuardian: false, guardianId: null, ts: Date.now() });
-      ledgerAppend({ type: 'open_trial_registration', playerId: req.player.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
-      notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${req.player.name} registered for "${trial.title}".`, trial.id);
+      grassroots.openTrials.register(trial.id, {
+        id: nextId('otr'),
+        playerId: req.player.id,
+        playerName: req.player.name?.slice(0, GL.playerName) ?? null,
+        byGuardian: false,
+        guardianId: null,
+        ts: Date.now(),
+      });
+      ledgerAppend({
+        type: 'open_trial_registration',
+        playerId: req.player.id,
+        orgId: org.id,
+        orgName: org.name,
+        userId: trial.createdByUserId,
+        scoutName: 'open day',
+      });
+      notify(
+        { kind: 'org_user', id: trial.createdByUserId },
+        'open_trial',
+        `${req.player.name} registered for "${trial.title}".`,
+        trial.id,
+      );
     });
     res.status(201).json({ registered: true });
   });
@@ -143,15 +255,30 @@ export function registerGrassrootsJourney({
   // The open days near a child, for the guardian, only from clubs allowed to see the child at all. Past days stay
   // listed, so a parent still sees the one their child registered for.
   guardianRouter.get('/children/:id/open-trials', (req, res) => {
-    const child = ownChild(req, res, findPlayer); if (!child) return;
-    if (!child.location) return res.json({ openTrials: [], note: 'Set a location on the profile to see local open days.' });
-    const list = grassroots.openTrials.inBox(boxAround(child.location, GRASSROOTS_RADIUS_KM))
+    const child = ownChild(req, res, findPlayer);
+    if (!child) return;
+    if (!child.location)
+      return res.json({ openTrials: [], note: 'Set a location on the profile to see local open days.' });
+    const list = grassroots.openTrials
+      .inBox(boxAround(child.location, GRASSROOTS_RADIUS_KM))
       .map((t) => ({ t, org: findOrg(t.orgId) }))
-      .filter(({ org }) => org?.level === 'grassroots' && org.location && haversineKm(org.location, child.location) <= GRASSROOTS_RADIUS_KM)
+      .filter(
+        ({ org }) =>
+          org?.level === 'grassroots' &&
+          org.location &&
+          haversineKm(org.location, child.location) <= GRASSROOTS_RADIUS_KM,
+      )
       .filter(({ org }) => visibleToOrg(child, org))
       .map(({ t, org }) => ({
-        id: t.id, title: t.title, date: t.date, venue: t.venue, ageGroup: t.ageGroup, positions: [...t.positions],
-        orgName: org.name, verified: org.verified, safeguardingCertified: safeguardingCertified(org),
+        id: t.id,
+        title: t.title,
+        date: t.date,
+        venue: t.venue,
+        ageGroup: t.ageGroup,
+        positions: [...t.positions],
+        orgName: org.name,
+        verified: org.verified,
+        safeguardingCertified: safeguardingCertified(org),
         distanceKm: Math.round(haversineKm(org.location, child.location) * 10) / 10,
         registered: t.registrations.some((r) => r.playerId === child.id),
       }))
@@ -160,19 +287,48 @@ export function registerGrassrootsJourney({
   });
 
   guardianRouter.post('/open-trials/:id/register', (req, res) => {
-    const child = ownChild(req, res, findPlayer, req.body?.childId); if (!child) return;
+    const child = ownChild(req, res, findPlayer, req.body?.childId);
+    if (!child) return;
     const trial = grassroots.openTrials.byId(req.params.id);
     if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
     const org = findOrg(trial.orgId);
     if (!org || !visibleToOrg(child, org)) {
-      return res.status(403).json({ error: 'VERIFIED_CLUBS_ONLY', message: 'Only verified, local clubs can receive an under-18 registration.' });
+      return res.status(403).json({
+        error: 'VERIFIED_CLUBS_ONLY',
+        message: 'Only verified, local clubs can receive an under-18 registration.',
+      });
     }
-    if (trial.registrations.some((r) => r.playerId === child.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
+    if (trial.registrations.some((r) => r.playerId === child.id))
+      return res.status(409).json({ error: 'ALREADY_REGISTERED' });
     unit(() => {
-      grassroots.openTrials.register(trial.id, { id: nextId('otr'), playerId: child.id, playerName: child.name?.slice(0, GL.playerName) ?? null, byGuardian: true, guardianId: req.guardian.id, ts: Date.now() });
-      ledgerAppend({ type: 'open_trial_registration_by_guardian', playerId: child.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
-      notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${child.name} (via guardian) registered for "${trial.title}".`, trial.id);
-      notify({ kind: 'player', id: child.id }, 'open_trial', `Your parent/guardian registered you for ${org.name}'s open day "${trial.title}" — good luck!`, trial.id);
+      grassroots.openTrials.register(trial.id, {
+        id: nextId('otr'),
+        playerId: child.id,
+        playerName: child.name?.slice(0, GL.playerName) ?? null,
+        byGuardian: true,
+        guardianId: req.guardian.id,
+        ts: Date.now(),
+      });
+      ledgerAppend({
+        type: 'open_trial_registration_by_guardian',
+        playerId: child.id,
+        orgId: org.id,
+        orgName: org.name,
+        userId: trial.createdByUserId,
+        scoutName: 'open day',
+      });
+      notify(
+        { kind: 'org_user', id: trial.createdByUserId },
+        'open_trial',
+        `${child.name} (via guardian) registered for "${trial.title}".`,
+        trial.id,
+      );
+      notify(
+        { kind: 'player', id: child.id },
+        'open_trial',
+        `Your parent/guardian registered you for ${org.name}'s open day "${trial.title}" — good luck!`,
+        trial.id,
+      );
     });
     res.status(201).json({ registered: true });
   });
@@ -190,7 +346,8 @@ export function registerGrassrootsJourney({
     setSeeker(req.player, req, res);
   });
   guardianRouter.post('/children/:id/first-team-seeker', (req, res) => {
-    const child = grassrootsChild(req, res); if (!child) return;
+    const child = grassrootsChild(req, res);
+    if (!child) return;
     setSeeker(child, req, res);
   });
 
@@ -198,35 +355,66 @@ export function registerGrassrootsJourney({
   // The coach proves control of the mailbox with a one-time code (stored only as its hash); the reference text is
   // moderated when it is submitted.
   function requestVouch(player, { coachName, coachEmail, role }, res) {
-    for (const [field, v] of [['coachName', coachName], ['coachEmail', coachEmail], ['role', role]]) {
-      if (v !== undefined && v !== null && typeof v !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
+    for (const [field, v] of [
+      ['coachName', coachName],
+      ['coachEmail', coachEmail],
+      ['role', role],
+    ]) {
+      if (v !== undefined && v !== null && typeof v !== 'string')
+        return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
     }
     const name = (coachName ?? '').trim();
     const email = (coachEmail ?? '').trim();
     if (!name || !email || !/^[^\s@]+@[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'COACH_DETAILS_REQUIRED', message: 'Name the coach and their email address.' });
+      return res
+        .status(400)
+        .json({ error: 'COACH_DETAILS_REQUIRED', message: 'Name the coach and their email address.' });
     }
-    if (name.length > VL.coachName) return res.status(400).json({ error: 'FIELD_INVALID', field: 'coachName', message: `At most ${VL.coachName} characters.` });
-    if (email.length > VL.coachEmail) return res.status(400).json({ error: 'FIELD_INVALID', field: 'coachEmail', message: `At most ${VL.coachEmail} characters.` });
+    if (name.length > VL.coachName)
+      return res
+        .status(400)
+        .json({ error: 'FIELD_INVALID', field: 'coachName', message: `At most ${VL.coachName} characters.` });
+    if (email.length > VL.coachEmail)
+      return res
+        .status(400)
+        .json({ error: 'FIELD_INVALID', field: 'coachEmail', message: `At most ${VL.coachEmail} characters.` });
     const code = randomCode(8);
     // In a unit, so the id counter commits with the row. The player's name has no limit at sign-up, so it is shortened.
-    const vouch = unit(() => transitionsVouches.vouches.create({
-      id: nextId('vch'), playerId: player.id, playerName: player.name?.slice(0, VL.name) ?? null,
-      coachName: name, coachEmail: email, role: (role ?? '').trim().slice(0, VL.role) || 'Coach',
-      status: 'pending', codeHash: vouchCodeHash(code), text: null, seasons: null, ts: Date.now(), publishedAt: null,
-      conflictOfInterest: null, withdrawn: null,
-    }));
-    mailer.send({
-      to: vouch.coachEmail,
-      subject: `Reference request for ${player.name} on ScoutBox`,
-      text: `Hi ${vouch.coachName},
+    const vouch = unit(() =>
+      transitionsVouches.vouches.create({
+        id: nextId('vch'),
+        playerId: player.id,
+        playerName: player.name?.slice(0, VL.name) ?? null,
+        coachName: name,
+        coachEmail: email,
+        role: (role ?? '').trim().slice(0, VL.role) || 'Coach',
+        status: 'pending',
+        codeHash: vouchCodeHash(code),
+        text: null,
+        seasons: null,
+        ts: Date.now(),
+        publishedAt: null,
+        conflictOfInterest: null,
+        withdrawn: null,
+      }),
+    );
+    mailer
+      .send({
+        to: vouch.coachEmail,
+        subject: `Reference request for ${player.name} on ScoutBox`,
+        text: `Hi ${vouch.coachName},
 
 ${player.name} has asked you for a coach reference on ScoutBox Grassroots.
 
 Your one-time reference code is ${code}. Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on ${player.name}'s profile.
 
 References are screened by moderation and reviewed by Trust & Safety.`,
-    }).catch((err) => console.error(`reference request ${vouch.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`));
+      })
+      .catch((err) =>
+        console.error(
+          `reference request ${vouch.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`,
+        ),
+      );
     res.status(201).json({ requested: true, vouchId: vouch.id });
   }
   playerRouter.post('/vouches/request', (req, res) => {
@@ -235,7 +423,8 @@ References are screened by moderation and reviewed by Trust & Safety.`,
     requestVouch(req.player, req.body ?? {}, res);
   });
   guardianRouter.post('/children/:id/vouches/request', (req, res) => {
-    const child = grassrootsChild(req, res); if (!child) return;
+    const child = grassrootsChild(req, res);
+    if (!child) return;
     requestVouch(child, req.body ?? {}, res);
   });
 
@@ -243,9 +432,15 @@ References are screened by moderation and reviewed by Trust & Safety.`,
   app.post('/vouch/submit', (req, res) => {
     const { code, text, seasons, conflictOfInterest } = req.body || {};
     const vouch = typeof code === 'string' && code.trim() ? transitionsVouches.vouches.pendingByCode(code) : null;
-    if (!vouch) return res.status(404).json({ error: 'CODE_INVALID', message: 'That reference code is wrong or already used.' });
-    for (const [field, v] of [['text', text], ['seasons', seasons], ['conflictOfInterest', conflictOfInterest]]) {
-      if (v !== undefined && v !== null && typeof v !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
+    if (!vouch)
+      return res.status(404).json({ error: 'CODE_INVALID', message: 'That reference code is wrong or already used.' });
+    for (const [field, v] of [
+      ['text', text],
+      ['seasons', seasons],
+      ['conflictOfInterest', conflictOfInterest],
+    ]) {
+      if (v !== undefined && v !== null && typeof v !== 'string')
+        return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
     }
     if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
     if (!moderateOrRefuse(res, text, { kind: 'coach_vouch', playerId: vouch.playerId })) return;
@@ -256,11 +451,24 @@ References are screened by moderation and reviewed by Trust & Safety.`,
         text: text.trim().slice(0, VL.text),
         seasons: seasons?.trim() ? seasons.trim().slice(0, VL.seasons) : null,
         // A declared relationship to the player ("my son", "I run their agency") must be visible, not discoverable.
-        conflictOfInterest: conflictOfInterest?.trim() ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest) : null,
+        conflictOfInterest: conflictOfInterest?.trim()
+          ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest)
+          : null,
         at: Date.now(),
       });
-      notify({ kind: 'player', id: vouch.playerId }, 'vouch', `⭐ ${vouch.coachName} published a coach reference on your profile.`, vouch.id);
-      if (player?.guardianId) notify({ kind: 'guardian', id: player.guardianId }, 'vouch', `${vouch.coachName} published a coach reference on ${player.name}'s profile.`, vouch.id);
+      notify(
+        { kind: 'player', id: vouch.playerId },
+        'vouch',
+        `⭐ ${vouch.coachName} published a coach reference on your profile.`,
+        vouch.id,
+      );
+      if (player?.guardianId)
+        notify(
+          { kind: 'guardian', id: player.guardianId },
+          'vouch',
+          `${vouch.coachName} published a coach reference on ${player.name}'s profile.`,
+          vouch.id,
+        );
     });
     broadcast('players', { playerId: vouch.playerId });
     res.status(201).json({ published: true });
@@ -285,7 +493,9 @@ References are screened by moderation and reviewed by Trust & Safety.`,
       verifiedAttendances: (p.attendance ?? []).length,
       verifiedClips: (p.media ?? []).filter((m) => m.verifiedClip).length,
       bestStreak,
-      combineBests: verifiedBests.slice(-4).map((r) => ({ drillName: r.drillName, metric: r.metric, value: r.value, unit: r.unit })),
+      combineBests: verifiedBests
+        .slice(-4)
+        .map((r) => ({ drillName: r.drillName, metric: r.metric, value: r.value, unit: r.unit })),
       badges: p.badges,
       coachVouches: publishedVouchesFor(p.id).length,
       scoutViews: scoutViewsOf(p.id),

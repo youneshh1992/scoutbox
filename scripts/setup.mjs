@@ -15,7 +15,10 @@ const APPS = ['.', 'scoutbox-server', 'scoutbox-player', 'scoutbox-club', 'scout
 // scoutbox-grassroots/node_modules and scoutbox-agent/node_modules are symlinks to scoutbox-club's — no install.
 
 let failed = false;
-const fail = (m) => { console.error(`✗ ${m}`); failed = true; };
+const fail = (m) => {
+  console.error(`✗ ${m}`);
+  failed = true;
+};
 const okay = (m) => console.log(`✓ ${m}`);
 
 // Node version: the server's own runtime contract (scoutbox-server/runtime.mjs),
@@ -27,11 +30,17 @@ else fail(`${runtime.reason} Install a supported Node.js (https://nodejs.org).`)
 for (const rel of APPS) {
   const app = rel === '.' ? 'repo tools (formatter, git hooks)' : rel;
   const dir = path.join(ROOT, rel);
-  if (!fs.existsSync(path.join(dir, 'package-lock.json'))) { fail(`${app}/package-lock.json missing — clone incomplete?`); continue; }
+  if (!fs.existsSync(path.join(dir, 'package-lock.json'))) {
+    fail(`${app}/package-lock.json missing — clone incomplete?`);
+    continue;
+  }
   const marker = path.join(dir, 'node_modules', '.package-lock.json');
   const lock = path.join(dir, 'package-lock.json');
   const fresh = fs.existsSync(marker) && fs.statSync(marker).mtimeMs >= fs.statSync(lock).mtimeMs;
-  if (fresh) { okay(`${app}: dependencies up to date`); continue; }
+  if (fresh) {
+    okay(`${app}: dependencies up to date`);
+    continue;
+  }
   console.log(`… ${app}: npm ci (matches the lockfile)`);
   try {
     execSync('npm ci', { cwd: dir, stdio: 'inherit' });
@@ -57,5 +66,8 @@ for (const shared of ['scoutbox-grassroots', 'scoutbox-agent']) {
   }
 }
 
-if (failed) { console.error('\nSetup incomplete — fix the ✗ items above.'); process.exit(1); }
+if (failed) {
+  console.error('\nSetup incomplete — fix the ✗ items above.');
+  process.exit(1);
+}
 console.log('\nSetup complete. Start everything with:  npm run dev');

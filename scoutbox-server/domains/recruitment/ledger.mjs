@@ -7,12 +7,35 @@ import { invoiceView } from '../../adapters.mjs';
 import { PLANS } from '../../catalogue.mjs';
 
 /** A ledger row as the organisation, the player or the guardian reads it. */
-export const ledgerView = (l) => ({ id: l.id, ts: l.ts, type: l.type, playerId: l.playerId, orgId: l.orgId, orgName: l.orgName, userId: l.userId, scoutName: l.scoutName, detail: l.detail });
+export const ledgerView = (l) => ({
+  id: l.id,
+  ts: l.ts,
+  type: l.type,
+  playerId: l.playerId,
+  orgId: l.orgId,
+  orgName: l.orgName,
+  userId: l.userId,
+  scoutName: l.scoutName,
+  detail: l.detail,
+});
 
-export function registerLedger({ orgRouter, safetyAudit, recruitment, signings, invoices, reputationSeed, findPlayer, isBlocked }) {
+export function registerLedger({
+  orgRouter,
+  safetyAudit,
+  recruitment,
+  signings,
+  invoices,
+  reputationSeed,
+  findPlayer,
+  isBlocked,
+}) {
   orgRouter.get('/ledger', (req, res) => {
     let page;
-    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    try {
+      page = readPage(req.query, ['number']);
+    } catch (e) {
+      return sendPageError(res, e);
+    }
     const out = safetyAudit.ledger.pageForOrg(req.org.id, page);
     res.json({ items: out.items.map(ledgerView), nextCursor: out.nextCursor });
   });
@@ -53,7 +76,11 @@ export function registerLedger({ orgRouter, safetyAudit, recruitment, signings, 
   // Newest first, by cursor (`?limit=&cursor=`); the apps read the first page.
   orgRouter.get('/invoices', (req, res) => {
     let page;
-    try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
+    try {
+      page = readPage(req.query, ['number']);
+    } catch (e) {
+      return sendPageError(res, e);
+    }
     const { items, nextCursor } = invoices.pageForOrg(req.org.id, page);
     res.json({ items: items.map(invoiceView), nextCursor });
   });
@@ -67,7 +94,11 @@ export function registerLedger({ orgRouter, safetyAudit, recruitment, signings, 
         { key: 'saves', label: 'Saves', count: count('save') },
         { key: 'shortlists', label: 'Shortlists', count: count('shortlist') },
         { key: 'requests', label: 'Requests sent', count: recruitment.requests.countForOrg(req.org.id) },
-        { key: 'accepted', label: 'Requests accepted', count: recruitment.requests.countForOrgStatus(req.org.id, 'accepted') },
+        {
+          key: 'accepted',
+          label: 'Requests accepted',
+          count: recruitment.requests.countForOrgStatus(req.org.id, 'accepted'),
+        },
         { key: 'trials', label: 'Trials booked', count: recruitment.trials.countForOrg(req.org.id) },
         { key: 'reports', label: 'Reports filed', count: recruitment.trials.countForOrgStatus(req.org.id, 'reported') },
         { key: 'signings', label: 'Signings', count: signings.countForOrg(req.org.id) },

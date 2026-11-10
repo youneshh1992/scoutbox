@@ -28,7 +28,8 @@ let pro = read('scoutbox-club-demo.html');
 let grass = read('scoutbox-grassroots-demo.html');
 
 // ---- spoke shim: portals post bus traffic to the host, receive relays back
-const CHILD_SHIM = `<script data-bus-spoke>(function(){
+const CHILD_SHIM =
+  `<script data-bus-spoke>(function(){
   var chans=[];
   function BC(name){this.name=name;this.onmessage=null;chans.push(this);}
   BC.prototype.postMessage=function(data){var n=this.name;try{parent.postMessage({__sbBus:{name:n,data:data}},'*');}catch(e){}};
@@ -39,7 +40,8 @@ const CHILD_SHIM = `<script data-bus-spoke>(function(){
 })();</scr` + `ipt>`;
 
 // ---- hub shim: the host's own bus channels + fan-out to every portal frame
-const HUB_SHIM = `<script data-bus-hub>(function(){
+const HUB_SHIM =
+  `<script data-bus-hub>(function(){
   var chans=[];
   function frames(){return Array.prototype.slice.call(document.querySelectorAll('iframe[data-sb-app]'));}
   function deliver(name,data,except){for(var i=0;i<chans.length;i++){var c=chans[i];if(c===except)continue;
@@ -63,7 +65,8 @@ const embed = (html) => JSON.stringify(html).replace(/</g, '\\u003c');
 player = player.replace(/<head>/i, () => `<head>${HUB_SHIM}`);
 player = player.replace(/<title>[^<]*<\/title>/i, () => '<title>ScoutBox — Connected Demo</title>');
 
-const SHELL = `
+const SHELL =
+  `
 <style data-sb-shell-css>
   #root { height: calc(100% - 44px) !important; margin-top: 44px; }
   #sb-bar { position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 2147483200;

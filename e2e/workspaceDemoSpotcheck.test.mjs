@@ -20,7 +20,9 @@ await page.click('.org-card:has-text("Eastport FC")');
 await page.fill('.enter-row input', 'Maria Keane');
 await page.click('button:has-text("Enter workspace")');
 await page.waitForSelector('.topbar', { timeout: 20000 });
-await page.evaluate(() => { location.hash = '#/assessments'; }); // deep link (Assessments)
+await page.evaluate(() => {
+  location.hash = '#/assessments';
+}); // deep link (Assessments)
 await page.waitForSelector('text=independence is enforced by the server', { timeout: 10000 });
 await page.selectOption('select[aria-label="Player"]', { label: 'Kola Adeyemi' });
 await page.waitForSelector('text=Evidence passport', { timeout: 10000 });
@@ -28,24 +30,38 @@ await page.waitForSelector('text=coach confirmed', { timeout: 10000 });
 await page.click('button:has-text("Compare scouts")');
 await page.waitForSelector('text=Alex Ford', { timeout: 10000 });
 say('Pro demo: assessments + passport + compare populated');
-await page.evaluate(() => { location.hash = '#/recruitment'; }); // deep link (Recruitment)
+await page.evaluate(() => {
+  location.hash = '#/recruitment';
+}); // deep link (Recruitment)
 await page.waitForSelector('text=Owner Maria Keane', { timeout: 10000 });
 await page.locator('.section button', { hasText: 'Kola Adeyemi' }).first().click();
 await page.waitForSelector('text=History (append-only)', { timeout: 5000 });
-await page.evaluate(() => { location.hash = '#/planner'; }); // deep link (Squad Planner)
+await page.evaluate(() => {
+  location.hash = '#/planner';
+}); // deep link (Squad Planner)
 await page.waitForSelector('text=no invented percentages', { timeout: 10000 });
 await page.locator('button:has-text("Candidates")').first().click();
 await page.waitForSelector('text=profile field: position', { timeout: 10000 });
 say('Pro demo: recruitment board + explainable candidates');
-await page.evaluate(() => { location.hash = '#/opportunities'; }); // deep link (Opportunities)
+await page.evaluate(() => {
+  location.hash = '#/opportunities';
+}); // deep link (Opportunities)
 await page.waitForSelector('text=U23 open trial — attackers', { timeout: 10000 });
-await page.evaluate(() => { location.hash = '#/campaigns'; }); // deep link (Campaigns)
+await page.evaluate(() => {
+  location.hash = '#/campaigns';
+}); // deep link (Campaigns)
 await page.waitForSelector('text=Remote sprint assessment', { timeout: 10000 });
-await page.evaluate(() => { location.hash = '#/video'; }); // deep link (Video Workspace)
+await page.evaluate(() => {
+  location.hash = '#/video';
+}); // deep link (Video Workspace)
 await page.waitForSelector('text=sets the trap on the CB', { timeout: 10000 });
-await page.evaluate(() => { location.hash = '#/outcomes'; }); // deep link (Outcomes)
+await page.evaluate(() => {
+  location.hash = '#/outcomes';
+}); // deep link (Outcomes)
 await page.waitForSelector('text=Filip Nowak', { timeout: 10000 });
-await page.evaluate(() => { location.hash = '#/trialdays'; }); // deep link (Trial Days)
+await page.evaluate(() => {
+  location.hash = '#/trialdays';
+}); // deep link (Trial Days)
 await page.waitForSelector('text=Check-in is blocked', { timeout: 10000 });
 say('Pro demo: opportunities, campaigns, video, outcomes, trial days all populated');
 // FR switch holds layout
@@ -60,12 +76,16 @@ await page.click('.org-card:has-text("Hackney Marsh Rovers")');
 await page.fill('.enter-row input', 'Dee Mensah');
 await page.click('button:has-text("Enter workspace")');
 await page.waitForSelector('.topbar', { timeout: 20000 });
-await page.evaluate(() => { location.hash = '#/coaches'; }); // deep link (Coaches)
+await page.evaluate(() => {
+  location.hash = '#/coaches';
+}); // deep link (Coaches)
 await page.waitForSelector('text=coach confirmed', { timeout: 10000 }).catch(() => {});
 await page.waitForSelector('text=Confirm affiliation', { timeout: 10000 });
 await page.waitForSelector('text=Dee Mensah', { timeout: 5000 });
 say('Grassroots demo: coach affiliations populated');
-await page.evaluate(() => { location.hash = '#/trialdays'; }); // deep link (Trial Days)
+await page.evaluate(() => {
+  location.hash = '#/trialdays';
+}); // deep link (Trial Days)
 await page.waitForSelector('text=Check-in is blocked', { timeout: 10000 });
 say('Grassroots demo: trial days present');
 
@@ -116,7 +136,11 @@ await page.click('nav.subnav button:has-text("Outcome tracking")');
 await page.waitForSelector('text=suppressed', { timeout: 10000 });
 say('Admin demo: disputes, staff checks, outcome suppression all populated');
 
-if (errors.length) { console.error('page errors:', errors); await demo.stop(); process.exit(1); }
+if (errors.length) {
+  console.error('page errors:', errors);
+  await demo.stop();
+  process.exit(1);
+}
 console.log('\nM12 DEMO SPOTCHECK OK — zero page errors');
 await browser.close();
 await demo.stop();

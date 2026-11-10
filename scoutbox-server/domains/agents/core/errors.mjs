@@ -60,23 +60,50 @@ export const AGENT_CORE_ERROR_HTTP = table({
 export const httpStatusFor = (code) => AGENT_CORE_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
-  'error', 'message', 'allowed', 'facet', 'memberAssociation', 'state',
-  'expectedRev', 'currentRev', 'updatedBy', 'updatedAt', 'retryAt', 'status', 'agreementId', 'field',
+  'error',
+  'message',
+  'allowed',
+  'facet',
+  'memberAssociation',
+  'state',
+  'expectedRev',
+  'currentRev',
+  'updatedBy',
+  'updatedAt',
+  'retryAt',
+  'status',
+  'agreementId',
+  'field',
   // Reason codes and policy references (codes only, never prose), the review id, the retry hint.
-  'reasons', 'policyVersions', 'reviewId', 'retryAfter',
+  'reasons',
+  'policyVersions',
+  'reviewId',
+  'retryAfter',
 ];
 
 export function publicErrorBody(out) {
   const code = out?.error;
   if (AGENT_CORE_ERROR_HTTP[code] === 500) {
-    return { ok: false, error: code, message: 'The Agent workspace cannot serve this request. This has been recorded.' };
+    return {
+      ok: false,
+      error: code,
+      message: 'The Agent workspace cannot serve this request. This has been recorded.',
+    };
   }
   const body = { ok: false };
   for (const k of PUBLIC_ERROR_FIELDS) {
     if (out?.[k] === undefined) continue;
-    body[k] = k === 'reasons' && Array.isArray(out[k])
-      ? out[k].map((r) => ({ code: r.code, ruleId: r.ruleId ?? null, ruleStatus: r.ruleStatus ?? null, regulator: r.regulator ?? null, jurisdiction: r.jurisdiction ?? null, policyVersion: r.policyVersion ?? null }))
-      : out[k];
+    body[k] =
+      k === 'reasons' && Array.isArray(out[k])
+        ? out[k].map((r) => ({
+            code: r.code,
+            ruleId: r.ruleId ?? null,
+            ruleStatus: r.ruleStatus ?? null,
+            regulator: r.regulator ?? null,
+            jurisdiction: r.jurisdiction ?? null,
+            policyVersion: r.policyVersion ?? null,
+          }))
+        : out[k];
   }
   return body;
 }
@@ -85,7 +112,11 @@ export function sendAgentError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
     console.error(`agent-core ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
-    return res.status(500).json({ ok: false, error: 'AGENT_STATE_UNKNOWN', message: 'The Agent workspace cannot serve this request. This has been recorded.' });
+    return res.status(500).json({
+      ok: false,
+      error: 'AGENT_STATE_UNKNOWN',
+      message: 'The Agent workspace cannot serve this request. This has been recorded.',
+    });
   }
   if (status === 500) console.error(`agent-core ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));

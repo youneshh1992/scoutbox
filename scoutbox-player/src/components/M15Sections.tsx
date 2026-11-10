@@ -15,9 +15,28 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Text, TextInput } from './Text';
 import { useColors, type Palette } from '../theme';
-import { RecordPanel, DetailFact, InfoNote, MetricTiles, Button, Card, Disclosure, EventRow, FactRow, Muted, Row, SectionTitle } from './ui';
+import {
+  RecordPanel,
+  DetailFact,
+  InfoNote,
+  MetricTiles,
+  Button,
+  Card,
+  Disclosure,
+  EventRow,
+  FactRow,
+  Muted,
+  Row,
+  SectionTitle,
+} from './ui';
 import { HistoryList } from './Reference';
-import { m15, type FootballPassport, type PassportActor, type PassportEvent, type PassportShare } from '../data/m15client';
+import {
+  m15,
+  type FootballPassport,
+  type PassportActor,
+  type PassportEvent,
+  type PassportShare,
+} from '../data/m15client';
 import { pt } from '../i18n';
 import { humanDate } from '../time';
 
@@ -27,23 +46,43 @@ function useLoad<T>(fn: () => Promise<T>, deps: unknown[]): [T | null, () => voi
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let ok = true;
-    fn().then((x) => { if (ok) { setV(x); setErr(null); } }).catch((e) => ok && setErr(e instanceof Error ? e.message : 'failed'));
-    return () => { ok = false; };
+    fn()
+      .then((x) => {
+        if (ok) {
+          setV(x);
+          setErr(null);
+        }
+      })
+      .catch((e) => ok && setErr(e instanceof Error ? e.message : 'failed'));
+    return () => {
+      ok = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick]);
   return [v, () => setTick((x) => x + 1), err];
 }
 
-const inputStyle = (colors: Palette) => ({
-  backgroundColor: colors.panel2, color: colors.text, borderRadius: 8,
-  paddingHorizontal: 10, paddingVertical: 8, fontSize: 13, borderWidth: 1, borderColor: colors.line,
-} as const);
+const inputStyle = (colors: Palette) =>
+  ({
+    backgroundColor: colors.panel2,
+    color: colors.text,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    borderWidth: 1,
+    borderColor: colors.line,
+  }) as const;
 
 /** The provenance as one short phrase ("Verified by club"), never a raw identifier. */
 export function provWord(provenance: string): string {
   const key = `m15prov_${provenance}` as Parameters<typeof pt>[0];
   let label: string | undefined;
-  try { label = pt(key); } catch { label = undefined; }
+  try {
+    label = pt(key);
+  } catch {
+    label = undefined;
+  }
   return label ?? pt('m15prov_unknown');
 }
 
@@ -76,18 +115,33 @@ function eventLabel(e: PassportEvent): string {
 /** A timeline event: the date and the label; the source and its plain-language copy behind the row. */
 function TimelineRow({ e, last }: { e: PassportEvent; last: boolean }) {
   return (
-    <EventRow last={last} date={/^\d{4}-\d{2}-\d{2}$/.test(e.when.display) ? humanDate(e.when.display) : e.when.display} label={eventLabel(e)} testID={`passport-event-${e.id}`}>
-      <GuidanceNote icon="info" size={12.5}>{pt('m15source')}: {provWord(e.provenance)}</GuidanceNote>
-      {e.provenanceCopy ? <GuidanceNote icon="info" size={12.5}>{e.provenanceCopy}</GuidanceNote> : null}
+    <EventRow
+      last={last}
+      date={/^\d{4}-\d{2}-\d{2}$/.test(e.when.display) ? humanDate(e.when.display) : e.when.display}
+      label={eventLabel(e)}
+      testID={`passport-event-${e.id}`}
+    >
+      <GuidanceNote icon="info" size={12.5}>
+        {pt('m15source')}: {provWord(e.provenance)}
+      </GuidanceNote>
+      {e.provenanceCopy ? (
+        <GuidanceNote icon="info" size={12.5}>
+          {e.provenanceCopy}
+        </GuidanceNote>
+      ) : null}
     </EventRow>
   );
 }
 
 const GAP_LABEL: Record<string, Parameters<typeof pt>[0]> = {
-  'gap.full_match_recent': 'm15gapMatch', 'gap.coach_reference': 'm15gapRef',
-  'gap.current_club_confirmed': 'm15gapClub', 'gap.assessment_recent': 'm15gapAssessment',
-  'gap.position_declared': 'm15gapPosition', 'gap.availability_set': 'm15gapAvailability',
-  'gap.identity_confirmed': 'm15gapIdentity', 'gap.career_history': 'm15gapCareer',
+  'gap.full_match_recent': 'm15gapMatch',
+  'gap.coach_reference': 'm15gapRef',
+  'gap.current_club_confirmed': 'm15gapClub',
+  'gap.assessment_recent': 'm15gapAssessment',
+  'gap.position_declared': 'm15gapPosition',
+  'gap.availability_set': 'm15gapAvailability',
+  'gap.identity_confirmed': 'm15gapIdentity',
+  'gap.career_history': 'm15gapCareer',
 };
 
 function SharesPanel({ actor }: { actor: PassportActor }) {
@@ -101,27 +155,52 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
       setMinted({ url: r.url, note: r.note });
       setMsg(null);
       reload();
-    } catch (e) { setMsg(e instanceof Error ? e.message : 'failed'); }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : 'failed');
+    }
   };
   return (
     <View style={{ gap: 6 }}>
-      <GuidanceNote icon="users" size={12.5}>{actor.kind === 'guardian' ? pt('m15shareGuardianNote') : pt('m15shareNote')}</GuidanceNote>
+      <GuidanceNote icon="users" size={12.5}>
+        {actor.kind === 'guardian' ? pt('m15shareGuardianNote') : pt('m15shareNote')}
+      </GuidanceNote>
       <Row>
         <Button small label={pt('m15sharePublic')} onPress={() => void create('public')} />
         <Button small label={pt('m15shareRecruitment')} onPress={() => void create('recruitment')} />
       </Row>
       {minted ? (
         <View style={{ backgroundColor: colors.panel2, borderRadius: 8, padding: 8 }}>
-          <Text selectable style={{ color: colors.text, fontSize: 12 }}>{minted.url}</Text>
-          <Muted size={11.5}>{pt('m15shareOnce')} {minted.note}</Muted>
+          <Text selectable style={{ color: colors.text, fontSize: 12 }}>
+            {minted.url}
+          </Text>
+          <Muted size={11.5}>
+            {pt('m15shareOnce')} {minted.note}
+          </Muted>
         </View>
       ) : null}
       {(shares ?? []).map((s) => (
-        <RecordPanel key={s.id} icon="network" title={s.mode === 'public' ? pt('m15sharePublicPill') : pt('m15shareRecruitmentPill')}>
+        <RecordPanel
+          key={s.id}
+          icon="network"
+          title={s.mode === 'public' ? pt('m15sharePublicPill') : pt('m15shareRecruitmentPill')}
+        >
           <DetailFact label={pt('m15shareViews')} value={s.views} />
-          {s.revokedAt
-            ? <Muted size={12}>{pt('m15shareRevoked')}</Muted>
-            : <Button small label={pt('m15shareRevoke')} onPress={async () => { try { await m15.revokeShare(actor, s.id); reload(); } catch { /* shown on reload */ } }} />}
+          {s.revokedAt ? (
+            <Muted size={12}>{pt('m15shareRevoked')}</Muted>
+          ) : (
+            <Button
+              small
+              label={pt('m15shareRevoke')}
+              onPress={async () => {
+                try {
+                  await m15.revokeShare(actor, s.id);
+                  reload();
+                } catch {
+                  /* shown on reload */
+                }
+              }}
+            />
+          )}
         </RecordPanel>
       ))}
       {msg ? <Muted size={12}>{msg}</Muted> : null}
@@ -130,9 +209,20 @@ function SharesPanel({ actor }: { actor: PassportActor }) {
 }
 
 /** The full Passport section for the Football tab (player) and guardian child view. */
-export function FootballPassportSection({ actor, isMinor, childName }: { actor: PassportActor; isMinor?: boolean; childName?: string }) {
+export function FootballPassportSection({
+  actor,
+  isMinor,
+  childName,
+}: {
+  actor: PassportActor;
+  isMinor?: boolean;
+  childName?: string;
+}) {
   const colors = useColors();
-  const [p, reload, err] = useLoad<FootballPassport>(() => m15.passport(actor), [actor.id, actor.kind === 'guardian' ? actor.childId : '']);
+  const [p, reload, err] = useLoad<FootballPassport>(
+    () => m15.passport(actor),
+    [actor.id, actor.kind === 'guardian' ? actor.childId : ''],
+  );
   const [showAll, setShowAll] = useState(false);
   const [careerOrg, setCareerOrg] = useState('');
   const [careerFrom, setCareerFrom] = useState('');
@@ -140,130 +230,305 @@ export function FootballPassportSection({ actor, isMinor, childName }: { actor: 
   const [achTitle, setAchTitle] = useState('');
   const [corrReason, setCorrReason] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
-  if (err) return <Card><SectionTitle icon="passport">{pt('m15title')}</SectionTitle><Muted>{err}</Muted></Card>;
+  if (err)
+    return (
+      <Card>
+        <SectionTitle icon="passport">{pt('m15title')}</SectionTitle>
+        <Muted>{err}</Muted>
+      </Card>
+    );
   if (!p) return null;
   const events = showAll ? p.timeline : p.timeline.slice(0, 4);
   const canShare = actor.kind === 'guardian' || !isMinor;
   const act = async (fn: () => Promise<unknown>, okMsg: string) => {
-    try { await fn(); setMsg(okMsg); reload(); } catch (e) { setMsg(`${e instanceof Error ? e.message : 'failed'}`); }
+    try {
+      await fn();
+      setMsg(okMsg);
+      reload();
+    } catch (e) {
+      setMsg(`${e instanceof Error ? e.message : 'failed'}`);
+    }
   };
   const coverage = pt(`m15cov_${p.completeness.evidenceCoverage}` as Parameters<typeof pt>[0]);
   const club = p.status.currentClub;
-  const count = (n: number, one: Parameters<typeof pt>[0], many: Parameters<typeof pt>[0]) => n === 0 ? pt('m15noneYet') : n === 1 ? pt(one) : pt(many).replace('{n}', String(n));
+  const count = (n: number, one: Parameters<typeof pt>[0], many: Parameters<typeof pt>[0]) =>
+    n === 0 ? pt('m15noneYet') : n === 1 ? pt(one) : pt(many).replace('{n}', String(n));
   // The root is seven rows: the record line, three facts, then
   // Timeline / Club history / Achievements / Share / About as rows that open.
   // The forms live inside the row they belong to (add an achievement under
   // Achievements, add a club and file a correction under Club history).
   return (
     <Card testID="passport-root">
-      <SectionTitle icon="passport">{pt('m15title')}{childName ? ` — ${childName}` : ''}</SectionTitle>
-      <GuidanceNote icon="info" size={13}>{p.identity?.label ?? pt('m15verifiedRecord')}</GuidanceNote>
+      <SectionTitle icon="passport">
+        {pt('m15title')}
+        {childName ? ` — ${childName}` : ''}
+      </SectionTitle>
+      <GuidanceNote icon="info" size={13}>
+        {p.identity?.label ?? pt('m15verifiedRecord')}
+      </GuidanceNote>
 
       {/* LEVEL 1 — the facts */}
       <View>
-        <FactRow k={pt('m15currentClub')} v={club?.orgName ?? pt('m15noClub')} sub={club ? `${club.since ? `${pt('m15since')} ${humanDate(club.since)} · ` : ''}${provWord(club.provenance)}` : null} testID="passport-club" />
-        {p.status.availability ? <FactRow k={pt('m15availability')} v={pt(`m15avail_${p.status.availability}` as Parameters<typeof pt>[0])} testID="passport-availability" /> : null}
-        <FactRow k={pt('m15evidence')} v={((w) => w.charAt(0).toUpperCase() + w.slice(1))(pt('m15coverageWord').replace('{cov}', coverage))} testID="passport-evidence" />
+        <FactRow
+          k={pt('m15currentClub')}
+          v={club?.orgName ?? pt('m15noClub')}
+          sub={
+            club
+              ? `${club.since ? `${pt('m15since')} ${humanDate(club.since)} · ` : ''}${provWord(club.provenance)}`
+              : null
+          }
+          testID="passport-club"
+        />
+        {p.status.availability ? (
+          <FactRow
+            k={pt('m15availability')}
+            v={pt(`m15avail_${p.status.availability}` as Parameters<typeof pt>[0])}
+            testID="passport-availability"
+          />
+        ) : null}
+        <FactRow
+          k={pt('m15evidence')}
+          v={((w) => w.charAt(0).toUpperCase() + w.slice(1))(pt('m15coverageWord').replace('{cov}', coverage))}
+          testID="passport-evidence"
+        />
       </View>
 
       {/* a conflict is one line and a Review; the full explanation is behind it */}
       {p.conflicts.map((c) => (
-        <Disclosure key={c.code + (c.submitted.orgName ?? '')} label={pt('m15conflictShort')} testID="passport-conflict">
+        <Disclosure
+          key={c.code + (c.submitted.orgName ?? '')}
+          label={pt('m15conflictShort')}
+          testID="passport-conflict"
+        >
           <GuidanceNote size={13}>{pt('m15conflictLine')}</GuidanceNote>
           <GuidanceNote size={13}>
-            {pt('m15conflict').replace('{auth}', c.authoritative.orgName ?? '?').replace('{self}', c.submitted.orgName ?? '?')}
+            {pt('m15conflict')
+              .replace('{auth}', c.authoritative.orgName ?? '?')
+              .replace('{self}', c.submitted.orgName ?? '?')}
           </GuidanceNote>
         </Disclosure>
       ))}
-      {p.temporalConflicts.length > 0 ? <GuidanceNote icon="info" size={12.5}>{pt('m15temporal')}</GuidanceNote> : null}
+      {p.temporalConflicts.length > 0 ? (
+        <GuidanceNote icon="info" size={12.5}>
+          {pt('m15temporal')}
+        </GuidanceNote>
+      ) : null}
 
       <View style={{ marginTop: 10 }}>
         {/* LEVEL 2 — the evidence counts and the gaps */}
         <Disclosure label={pt('m15viewEvidence')} testID="passport-evidence-detail">
-          <InfoNote icon="badge-check">{pt('m15checks').replace('{n}', String(p.completeness.eligibility.satisfied)).replace('{total}', String(p.completeness.eligibility.total))}</InfoNote>
-          <MetricTiles items={[
-            { label: pt('detailFullMatches'), value: p.evidence.fullMatches, icon: 'video' },
-            { label: pt('detailClips'), value: p.evidence.clips, icon: 'video' },
-            { label: pt('detailReferences'), value: p.evidence.references, icon: 'badge-check' },
-          ]} />
+          <InfoNote icon="badge-check">
+            {pt('m15checks')
+              .replace('{n}', String(p.completeness.eligibility.satisfied))
+              .replace('{total}', String(p.completeness.eligibility.total))}
+          </InfoNote>
+          <MetricTiles
+            items={[
+              { label: pt('detailFullMatches'), value: p.evidence.fullMatches, icon: 'video' },
+              { label: pt('detailClips'), value: p.evidence.clips, icon: 'video' },
+              { label: pt('detailReferences'), value: p.evidence.references, icon: 'badge-check' },
+            ]}
+          />
           {p.completeness.gaps.slice(0, 4).map((g) => (
-            <InfoNote key={g.id} icon="circle-help">{pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}</InfoNote>
+            <InfoNote key={g.id} icon="circle-help">
+              {pt(GAP_LABEL[g.id] ?? 'm15gapCareer')}
+            </InfoNote>
           ))}
         </Disclosure>
 
         {/* Timeline — behind one row with its count; date and label per event, the source behind each */}
-        <Disclosure label={pt('m15timelineRow')} hint={count(p.timeline.length, 'm15eventCount', 'm15events')} testID="passport-timeline">
-          <View>{events.map((e, i) => <TimelineRow key={e.id} e={e} last={i === events.length - 1} />)}</View>
+        <Disclosure
+          label={pt('m15timelineRow')}
+          hint={count(p.timeline.length, 'm15eventCount', 'm15events')}
+          testID="passport-timeline"
+        >
+          <View>
+            {events.map((e, i) => (
+              <TimelineRow key={e.id} e={e} last={i === events.length - 1} />
+            ))}
+          </View>
           {p.timeline.length > 4 ? (
-            <Row style={{ marginTop: 6 }}><Button small tertiary label={showAll ? pt('m15less') : pt('m15showAll').replace('{n}', String(p.timeline.length))} onPress={() => setShowAll((x) => !x)} testID="passport-timeline-more" /></Row>
+            <Row style={{ marginTop: 6 }}>
+              <Button
+                small
+                tertiary
+                label={showAll ? pt('m15less') : pt('m15showAll').replace('{n}', String(p.timeline.length))}
+                onPress={() => setShowAll((x) => !x)}
+                testID="passport-timeline-more"
+              />
+            </Row>
           ) : null}
         </Disclosure>
 
         {/* Club history — trials never appear here; adding a club and filing a correction sit under it */}
-        <Disclosure label={pt('m15history')} hint={count(p.clubHistory.length, 'm15clubCount', 'm15clubsCount')} testID="passport-history">
+        <Disclosure
+          label={pt('m15history')}
+          hint={count(p.clubHistory.length, 'm15clubCount', 'm15clubsCount')}
+          testID="passport-history"
+        >
           {p.clubHistory.length > 0 ? (
             <HistoryList
               testID="passport-history-list"
               rows={p.clubHistory.map((r2, i) => ({
                 index: String(i + 1).padStart(2, '0'),
                 title: `${r2.orgName}${r2.role ? ` · ${r2.role}` : ''}`,
-                sub: `${r2.from ?? '—'} → ${r2.current ? pt('m15now') : r2.to ?? '—'} · ${provWord(r2.provenance)}`,
+                sub: `${r2.from ?? '—'} → ${r2.current ? pt('m15now') : (r2.to ?? '—')} · ${provWord(r2.provenance)}`,
               }))}
             />
           ) : null}
           <Disclosure label={pt('m15careerTitle')} testID="passport-add-career">
             <GuidanceNote size={12.5}>{pt('m15careerNote')}</GuidanceNote>
             <Row>
-              <TextInput style={[inputStyle(colors), { flex: 2, minWidth: 120 }]} value={careerOrg} onChangeText={setCareerOrg} placeholder={pt('m15careerOrg')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerOrg')} />
-              <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerFrom} onChangeText={setCareerFrom} placeholder={pt('m15careerFrom')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerFrom')} />
-              <TextInput style={[inputStyle(colors), { flex: 1, minWidth: 70 }]} value={careerTo} onChangeText={setCareerTo} placeholder={pt('m15careerTo')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15careerTo')} />
-              <Button small label={pt('m15add')} onPress={() => {
-                if (!careerOrg.trim() || !careerFrom.trim()) { setMsg(pt('m15careerNeedYear')); return; }
-                void act(async () => {
-                  const r = await m15.addCareer(actor, { orgName: careerOrg.trim(), from: careerFrom.trim(), to: careerTo.trim() || undefined });
-                  setCareerOrg(''); setCareerFrom(''); setCareerTo('');
-                  if (r.note) setMsg(r.note);
-                }, pt('m15careerAdded'));
-              }} />
+              <TextInput
+                style={[inputStyle(colors), { flex: 2, minWidth: 120 }]}
+                value={careerOrg}
+                onChangeText={setCareerOrg}
+                placeholder={pt('m15careerOrg')}
+                placeholderTextColor={colors.muted}
+                accessibilityLabel={pt('m15careerOrg')}
+              />
+              <TextInput
+                style={[inputStyle(colors), { flex: 1, minWidth: 70 }]}
+                value={careerFrom}
+                onChangeText={setCareerFrom}
+                placeholder={pt('m15careerFrom')}
+                placeholderTextColor={colors.muted}
+                accessibilityLabel={pt('m15careerFrom')}
+              />
+              <TextInput
+                style={[inputStyle(colors), { flex: 1, minWidth: 70 }]}
+                value={careerTo}
+                onChangeText={setCareerTo}
+                placeholder={pt('m15careerTo')}
+                placeholderTextColor={colors.muted}
+                accessibilityLabel={pt('m15careerTo')}
+              />
+              <Button
+                small
+                label={pt('m15add')}
+                onPress={() => {
+                  if (!careerOrg.trim() || !careerFrom.trim()) {
+                    setMsg(pt('m15careerNeedYear'));
+                    return;
+                  }
+                  void act(async () => {
+                    const r = await m15.addCareer(actor, {
+                      orgName: careerOrg.trim(),
+                      from: careerFrom.trim(),
+                      to: careerTo.trim() || undefined,
+                    });
+                    setCareerOrg('');
+                    setCareerFrom('');
+                    setCareerTo('');
+                    if (r.note) setMsg(r.note);
+                  }, pt('m15careerAdded'));
+                }}
+              />
             </Row>
           </Disclosure>
           <Disclosure label={pt('m15corrTitle')} testID="passport-correction">
             <GuidanceNote size={12.5}>{pt('m15corrNote')}</GuidanceNote>
             <Row>
-              <TextInput style={[inputStyle(colors), { flex: 1 }]} value={corrReason} onChangeText={setCorrReason} placeholder={pt('m15corrPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15corrPlaceholder')} />
-              <Button small label={pt('m15corrFile')} onPress={() => {
-                if (corrReason.trim()) void act(async () => { const r = await m15.fileCorrection(actor, { targetType: 'club_history', reason: corrReason.trim() }); setCorrReason(''); setMsg(r.note); }, pt('m15corrFiled'));
-              }} />
+              <TextInput
+                style={[inputStyle(colors), { flex: 1 }]}
+                value={corrReason}
+                onChangeText={setCorrReason}
+                placeholder={pt('m15corrPlaceholder')}
+                placeholderTextColor={colors.muted}
+                accessibilityLabel={pt('m15corrPlaceholder')}
+              />
+              <Button
+                small
+                label={pt('m15corrFile')}
+                onPress={() => {
+                  if (corrReason.trim())
+                    void act(async () => {
+                      const r = await m15.fileCorrection(actor, {
+                        targetType: 'club_history',
+                        reason: corrReason.trim(),
+                      });
+                      setCorrReason('');
+                      setMsg(r.note);
+                    }, pt('m15corrFiled'));
+                }}
+              />
             </Row>
           </Disclosure>
         </Disclosure>
 
         {/* Achievements — simple rows; the source and the withdrawal behind each; adding one under the row */}
-        <Disclosure label={pt('m15achievementsRow')} hint={count(p.achievements.length, 'm15achievementCount', 'm15achievementsCount')} testID="passport-achievements">
-          <View>{p.achievements.map((a, i) => (
-            <EventRow last={i === p.achievements.length - 1} key={a.id} date={a.when ?? ''} label={a.title} testID={`passport-achievement-${a.id}`}>
-              <GuidanceNote size={12.5}>{pt('m15source')}: {provWord(a.provenance)}{a.confirmedBy ? ` · ${pt('m15confirmedBy')} ${a.confirmedBy}` : ''}</GuidanceNote>
-              {actor.kind === 'player' && a.withdrawable ? (
-                <Row><Button small tertiary label={pt('m15withdraw')} onPress={() => void act(() => m15.withdrawAchievement(actor.id, a.id), pt('m15withdrawn'))} /></Row>
-              ) : null}
-            </EventRow>
-          ))}</View>
+        <Disclosure
+          label={pt('m15achievementsRow')}
+          hint={count(p.achievements.length, 'm15achievementCount', 'm15achievementsCount')}
+          testID="passport-achievements"
+        >
+          <View>
+            {p.achievements.map((a, i) => (
+              <EventRow
+                last={i === p.achievements.length - 1}
+                key={a.id}
+                date={a.when ?? ''}
+                label={a.title}
+                testID={`passport-achievement-${a.id}`}
+              >
+                <GuidanceNote size={12.5}>
+                  {pt('m15source')}: {provWord(a.provenance)}
+                  {a.confirmedBy ? ` · ${pt('m15confirmedBy')} ${a.confirmedBy}` : ''}
+                </GuidanceNote>
+                {actor.kind === 'player' && a.withdrawable ? (
+                  <Row>
+                    <Button
+                      small
+                      tertiary
+                      label={pt('m15withdraw')}
+                      onPress={() => void act(() => m15.withdrawAchievement(actor.id, a.id), pt('m15withdrawn'))}
+                    />
+                  </Row>
+                ) : null}
+              </EventRow>
+            ))}
+          </View>
           <Disclosure label={pt('m15addAchievement')} testID="passport-add-achievement">
             <Row>
-              <TextInput style={[inputStyle(colors), { flex: 1 }]} value={achTitle} onChangeText={setAchTitle} placeholder={pt('m15achPlaceholder')} placeholderTextColor={colors.muted} accessibilityLabel={pt('m15achPlaceholder')} />
-              <Button small label={pt('m15add')} onPress={() => { if (achTitle.trim()) void act(async () => { await m15.addAchievement(actor, { title: achTitle.trim() }); setAchTitle(''); }, pt('m15achAdded')); }} />
+              <TextInput
+                style={[inputStyle(colors), { flex: 1 }]}
+                value={achTitle}
+                onChangeText={setAchTitle}
+                placeholder={pt('m15achPlaceholder')}
+                placeholderTextColor={colors.muted}
+                accessibilityLabel={pt('m15achPlaceholder')}
+              />
+              <Button
+                small
+                label={pt('m15add')}
+                onPress={() => {
+                  if (achTitle.trim())
+                    void act(async () => {
+                      await m15.addAchievement(actor, { title: achTitle.trim() });
+                      setAchTitle('');
+                    }, pt('m15achAdded'));
+                }}
+              />
             </Row>
           </Disclosure>
         </Disclosure>
 
         {canShare ? (
-          <Disclosure label={pt('m15shareTitle')} testID="passport-share"><SharesPanel actor={actor} /></Disclosure>
-        ) : <Muted size={12.5}>{pt('m15shareMinor')}</Muted>}
+          <Disclosure label={pt('m15shareTitle')} testID="passport-share">
+            <SharesPanel actor={actor} />
+          </Disclosure>
+        ) : (
+          <Muted size={12.5}>{pt('m15shareMinor')}</Muted>
+        )}
         <Disclosure label={pt('m15about')} testID="passport-about">
           <GuidanceNote size={13}>{p.note}</GuidanceNote>
         </Disclosure>
       </View>
-      {msg ? <View accessibilityLiveRegion="polite"><Muted size={12.5}>{msg}</Muted></View> : null}
+      {msg ? (
+        <View accessibilityLiveRegion="polite">
+          <Muted size={12.5}>{msg}</Muted>
+        </View>
+      ) : null}
     </Card>
   );
 }
