@@ -21,12 +21,12 @@ import { MESSAGE_LIMITS } from './repositories/channels.mjs';
 import { NOTIFICATION_LIMITS, feedItem } from './repositories/notifications.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
 import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
-import { ORG_LIMITS } from './repositories/orgs.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
 import { TRANSITION_LIMITS, vouchCodeHash } from './repositories/transitionsVouches.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
-import { registerM14 } from './domains/verification/claims/index.mjs';
+import { registerVerificationClaims } from './domains/verification/claims/index.mjs';
+import { createAdminRouter, registerReporting, registerSafetyConsole } from './domains/safety/safety.mjs';
 import { registerM15 } from './domains/verification/passport/index.mjs';
 import { registerM16 } from './domains/development/boxcam/index.mjs';
 import { registerM162 } from './domains/verification/trust/index.mjs';
@@ -100,7 +100,7 @@ import {
   nextActions,
 } from './domain.mjs';
 import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone, localParts } from './temporal.mjs';
-import { readPage, sendPageError, pageOf } from './domains/platform/paging.mjs';
+import { readPage, sendPageError } from './domains/platform/paging.mjs';
 import { AUDIT_LIMITS } from './repositories/safetyAudit.mjs';
 import { PLANS, ARCHETYPES } from './catalogue.mjs';
 import { IDENTITY_LIMITS, PLAYER_POSITIONS, PLAYER_FEET } from './repositories/identity.mjs';
@@ -600,10 +600,6 @@ function ledgerAppend(entry) {
 
 // Response allowlists for the audit records (repositories/safetyAudit.mjs).
 const ledgerView = (l) => ({ id: l.id, ts: l.ts, type: l.type, playerId: l.playerId, orgId: l.orgId, orgName: l.orgName, userId: l.userId, scoutName: l.scoutName, detail: l.detail });
-const reportView = (r) => ({ id: r.id, ts: r.ts, by: r.by, byId: r.byId, byOrgId: r.byOrgId, targetKind: r.targetKind, targetOrgId: r.targetOrgId, targetScoutName: r.targetScoutName, targetPlayerId: r.targetPlayerId, reason: r.reason, urgent: r.urgent, status: r.status, outcome: r.outcome, resolvedAt: r.resolvedAt });
-const filedReportView = reportView; // the reporter's own reports: the same fields
-const blockView = (b) => ({ id: b.id, playerId: b.playerId, orgId: b.orgId, by: b.by, reason: b.reason, ts: b.ts });
-const moderationView = (m) => ({ id: m.id, ts: m.ts, context: m.context, flags: m.flags, severity: m.severity, excerpt: m.excerpt });
 const noteView = (n) => ({ id: n.id, orgId: n.orgId, playerId: n.playerId, userId: n.userId, scoutName: n.scoutName, text: n.text, ts: n.ts });
 
 function isBlocked(playerId, orgId) {
@@ -1498,10 +1494,6 @@ guardianRouter.post('/notifications/read', (req, res) => {
   res.json({ ok: true });
 });
 
-guardianRouter.get('/reports', (req, res) => {
-  res.json(safetyAudit.reports.forReporter('guardian', req.guardian.id).map(filedReportView));
-});
-
 guardianRouter.get('/children/:id/insights', (req, res) => {
   const child = findPlayer(req.params.id);
   if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
@@ -1526,75 +1518,6 @@ guardianRouter.post('/children/:id/medical/share', (req, res) => {
   broadcast('players', { playerId: child.id });
   res.json({ shared: stored.medical.shared });
 });
-
-guardianRouter.post('/report', (req, res) => handleReport(req, res, { by: 'guardian', byId: req.guardian.id }));
-guardianRouter.post('/block', (req, res) => {
-  const { orgId, playerId, reason } = req.body || {};
-  // A block lands on the child it names. A playerId that is
-  // not this guardian's child is refused, never silently swapped for the first
-  // child; with no playerId, a guardian of exactly one child means that child.
-  if (playerId && !req.guardian.childIds.includes(playerId)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  const childId = playerId || (req.guardian.childIds.length === 1 ? req.guardian.childIds[0] : null);
-  if (!orgId || !childId) return res.status(400).json({ error: 'ORG_AND_CHILD_REQUIRED', message: playerId ? undefined : 'Name which child the block is for (playerId).' });
-  if (!optText(reason)) return badField(res, 'reason');
-  if (!byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-  unit(() => {
-    safetyAudit.blocks.add({ id: nextId('blk'), playerId: childId, orgId, by: 'guardian', reason: reason || '', ts: Date.now() });
-    ledgerAppend({ type: 'org_blocked_by_guardian', playerId: childId, orgId, orgName: byId.org(orgId).name, userId: null, scoutName: 'guardian' });
-  });
-  broadcast('players');
-  res.status(201).json({ blocked: true });
-});
-
-// One-click reporting, shared by guardian / player / org callers.
-// An urgent report immediately suspends communication pending review.
-function handleReport(req, res, actor) {
-  const { targetKind, targetOrgId, targetScoutName, targetPlayerId, reason, urgent } = req.body || {};
-  if (!['club', 'scout', 'player'].includes(targetKind)) {
-    return res.status(400).json({ error: 'TARGET_KIND_REQUIRED', allowed: ['club', 'scout', 'player'] });
-  }
-  if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
-  if (typeof reason !== 'string' || reason.trim().length > AUDIT_LIMITS.reason) return badField(res, 'reason');
-  // The report's references are text columns: an id of another type is refused, never stored.
-  for (const [field, v] of [['targetOrgId', targetOrgId], ['targetScoutName', targetScoutName], ['targetPlayerId', targetPlayerId]]) if (!optText(v, 200)) return badField(res, field);
-  if (targetOrgId && !byId.org(targetOrgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-  const report = {
-    id: nextId('rep'),
-    ts: Date.now(),
-    byOrgId: null,
-    ...actor,
-    targetKind,
-    targetOrgId: targetOrgId || null,
-    targetScoutName: targetScoutName || null,
-    targetPlayerId: targetPlayerId || null,
-    reason: String(reason).trim(),
-    urgent: !!urgent,
-    status: 'pending_review',
-    outcome: null,
-    resolvedAt: null,
-  };
-  // Reports land in the REAL review queue: the trust-and-safety admin
-  // console resolves them (POST /admin/reports/:id/resolve) and the reporter
-  // is notified with the outcome. The targetPlayerId is not checked against
-  // the players (Q4). An urgent report against an organisation suspends it
-  // at once, in the same unit: the org loses access to the reporter's players
-  // and its pending requests to them freeze.
-  const suspend = !!(report.urgent && targetOrgId);
-  const playerIds = !suspend ? [] : actor.by === 'guardian'
-    ? byId.guardian(actor.byId)?.childIds ?? []
-    : actor.by === 'player' ? [actor.byId] : [];
-  unit(() => {
-    safetyAudit.reports.file(report);
-    for (const pid of playerIds) {
-      safetyAudit.blocks.add({ id: nextId('blk'), playerId: pid, orgId: targetOrgId, by: actor.by, reason: 'suspended_pending_review', ts: Date.now() });
-      for (const r of recruitment.requests.forOrgPlayer(targetOrgId, pid).filter((x) => x.status === 'pending')) {
-        recruitment.requests.suspend(r.id); // the frozen request, with its block
-      }
-    }
-  });
-  if (suspend) broadcast('players');
-  res.status(201).json({ reportId: report.id, status: report.status, suspended: !!(report.urgent && targetOrgId) });
-}
 
 // ---------------------------------------------------------------- org auth
 app.get('/orgs', (req, res) => {
@@ -2135,13 +2058,6 @@ function contactReplyFrom(req, res, request) {
   if (check.reply && !moderateOrRefuse(res, check.reply, { kind: 'contact_reply', requestId: request.id })) return { ok: false };
   return { ok: true, reply: check.reply };
 }
-
-// One-click reporting for org users too (report a player, scout or club).
-orgRouter.post('/report', (req, res) => handleReport(req, res, { by: 'org_user', byId: req.orgUser.id, byOrgId: req.org.id }));
-
-orgRouter.get('/reports', (req, res) => {
-  res.json(safetyAudit.reports.forReporter('org_user', req.orgUser.id).map(filedReportView));
-});
 
 // Message threads for this org — only exist where a request was accepted. Pages by cursor, most recently active
 // first; `playerId` limits the page to one player's threads (a Room's inbox panel).
@@ -3294,11 +3210,6 @@ playerRouter.post('/notifications/read', (req, res) => {
 // "Who's watching you" — the player's side of the Discovery Ledger.
 playerRouter.get('/insights', (req, res) => res.json(insightsFor(req.player.id)));
 
-playerRouter.get('/reports', (req, res) => {
-  res.json(safetyAudit.reports.forReporter('player', req.player.id).map(filedReportView));
-});
-
-// Academy+ is opt-in only and player-controlled (guardian-managed for minors).
 playerRouter.post('/academyplus', (req, res) => {
   if (guardianManagedOnly(req, res)) return;
   if (switchRefused(res, req.body?.enabled, 'enabled')) return;
@@ -3796,23 +3707,6 @@ playerRouter.post('/vouches/request', (req, res) => {
   createVouchRequest(req.player, req.body ?? {}, res);
 });
 
-// One-click reporting + blocking, available to every player.
-playerRouter.post('/report', (req, res) => handleReport(req, res, { by: 'player', byId: req.player.id }));
-
-playerRouter.post('/block', (req, res) => {
-  const { orgId, reason } = req.body || {};
-  if (!orgId) return res.status(400).json({ error: 'ORG_REQUIRED' });
-  if (!reqText(orgId, 200)) return badField(res, 'orgId');
-  if (!optText(reason)) return badField(res, 'reason');
-  if (!byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-  unit(() => {
-    safetyAudit.blocks.add({ id: nextId('blk'), playerId: req.player.id, orgId, by: 'player', reason: reason || '', ts: Date.now() });
-    ledgerAppend({ type: 'org_blocked_by_player', playerId: req.player.id, orgId, orgName: byId.org(orgId).name, userId: null, scoutName: 'player' });
-  });
-  broadcast('players');
-  res.status(201).json({ blocked: true });
-});
-
 // ------------------------------------------------- pairing, prefs, export
 // Child device pairing: the guardian mints a short-lived code; the child's
 // device exchanges it for their limited login.
@@ -4120,20 +4014,7 @@ app.post('/vouch/submit', (req, res) => {
 // ------------------------------------------------------ admin (T&S) console
 // ScoutBox staff only. Prototype auth: x-admin-key (ADMIN_KEY env).
 const ADMIN_KEY = process.env.ADMIN_KEY || 'scoutbox-admin';
-const adminRouter = express.Router();
-app.use('/admin', (req, res, next) => {
-  if (req.headers['x-admin-key'] !== ADMIN_KEY) return res.status(401).json({ error: 'ADMIN_KEY_REQUIRED' });
-  // When an AUTHENTICATED reviewer session is presented beside the shared
-  // key, the key-gated admin actions are attributed to that person
-  // (derived from the session, never from a header). The shared key alone is
-  // read-only and non-authoritative for compliance.
-  const session = sessionFor(req);
-  if (session?.kind === 'ts_reviewer') {
-    const reviewer = compliancePolicies.reviewers.activeById(session.refId);
-    if (reviewer) req.reviewer = reviewer;
-  }
-  next();
-}, adminRouter);
+const adminRouter = createAdminRouter({ app, adminKey: ADMIN_KEY, sessionFor, compliancePolicies });
 
 // The attributed Trust & Safety lane. Every route here resolves
 // a specific authenticated reviewer (never the shared key) before it runs;
@@ -4147,173 +4028,7 @@ let offersDomain = null; // assigned when the Offer module registers, below
 const tsRouter = express.Router();
 app.use('/ts', (req, res, next) => (complianceDomain ? complianceDomain.reviewerAuth(req, res, next) : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' })), tsRouter);
 
-// The data-layer report with row-level detail: ids of rows the target schema
-// refused and why, and the last projection error. Public /capabilities carries
-// the counts and statuses only.
-adminRouter.get('/data-layer', (_req, res) => {
-  res.json(dataLayer.report({ details: true }));
-});
-
-adminRouter.get('/overview', (_req, res) => {
-  res.json({
-    players: players.count(),
-    guardians: guardians.count(),
-    orgs: orgs.count(),
-    openReports: safetyAudit.reports.countOpen(),
-    blocks: safetyAudit.blocks.count(),
-    moderationHits: safetyAudit.moderationLog.count(),
-    channels: channels.count(),
-    signings: signingsFollowUps.signings.count(),
-    invoices: operations.invoices.count(),
-    emailsSent: outbox.count(),
-    pushesSent: pushLog.count(),
-    sessions: sessions.count(),
-    storageEngine: store.engine,
-    groomingEscalations: safetyAudit.moderationLog.count('grooming'),
-    persisted: true, // every write is committed to the database before the handler answers
-  });
-});
-
-// Triage order: urgent first, then oldest-pending first, then resolved (newest
-// first). Paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
-adminRouter.get('/reports', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number', 'number', 'number']); } catch (e) { return sendPageError(res, e); }
-  const out = safetyAudit.reports.triagePage(page);
-  res.json({ items: out.items.map(reportView), nextCursor: out.nextCursor });
-});
-
-// On the dev transport the outbox is the delivery, so a mail whose one-time code the persisted record withholds is shown
-// with its full text while this process holds it (mailer.devDeliveredText; never saved, never backed up).
-// Both lists page by cursor, newest first (the admin app reads the first page).
-adminRouter.get('/outbox', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const out = outbox.page(page);
-  res.json({ items: out.items.map((m) => { const full = mailer.devDeliveredText(m.id); return full ? { ...m, text: full } : m; }), nextCursor: out.nextCursor });
-});
-adminRouter.get('/push-log', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  res.json(pushLog.page(page));
-});
-// Every invoice, newest first, by cursor (`?limit=&cursor=`); the admin app reads the first page.
-adminRouter.get('/invoices', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = operations.invoices.page(page);
-  res.json({ items: items.map(invoiceView), nextCursor });
-});
-// Every coach reference, newest first, by cursor (`?limit=&cursor=`); the coach's email is shown to T&S, never the code.
-adminRouter.get('/vouches', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = pageOf(transitionsVouches.vouches.page(page).rows, page.limit, (r) => r.key);
-  res.json({ items: items.map(({ record: v }) => ({ ...vouchView(v), coachEmail: v.coachEmail })), nextCursor });
-});
-adminRouter.post('/vouches/:id/revoke', (req, res) => {
-  const vouch = verificationReads.vouches.byId(req.params.id);
-  if (!vouch) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
-  unit(() => transitionsVouches.vouches.revoke(vouch.id));
-  broadcast('players', { playerId: vouch.playerId });
-  res.json({ revoked: true });
-});
-
-adminRouter.post('/reports/:id/resolve', (req, res) => {
-  const report = safetyAudit.reports.byId(req.params.id);
-  if (!report) return res.status(404).json({ error: 'REPORT_NOT_FOUND' });
-  if (report.status !== 'pending_review') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-  const { outcome, action } = req.body || {};
-  if (!outcome || !String(outcome).trim()) return res.status(400).json({ error: 'OUTCOME_REQUIRED' });
-  if (typeof outcome !== 'string' || outcome.trim().length > AUDIT_LIMITS.outcome) return badField(res, 'outcome');
-  // The resolution, the organisation's suspension and the reporter's notice commit together.
-  const resolved = unit(() => {
-    const r = safetyAudit.reports.resolve(report.id, { outcome: outcome.trim(), at: Date.now() });
-    if (action === 'suspend_org' && r.targetOrgId) orgs.update(r.targetOrgId, (d) => { d.suspended = true; });
-    if (r.by !== 'system') notify({ kind: r.by, id: r.byId }, 'report_resolved', `Your report was reviewed: ${r.outcome}`, r.id); // a system escalation has no reporter to tell
-    return r;
-  });
-  res.json(reportView(resolved));
-});
-
-// Paged by cursor, oldest first (domains/platform/paging.mjs): { items, nextCursor }.
-adminRouter.get('/clubs', (req, res) => {
-  let page;
-  try { page = orgs.page({}, readPage(req.query, ['number'])); } catch (e) { return sendPageError(res, e); }
-  res.json({ items: page.items.map((o) => ({ ...orgSafe(o), safeguardingCertified: safeguardingCertified(o) })), nextCursor: page.nextCursor });
-});
-
-// Credentialed login for organisations: Trust & Safety provisions (or
-// rotates) the club password. This is how real Pro and Grassroots users sign
-// in when dev shortcuts are off.
-adminRouter.post('/clubs/:id/credentials', (req, res) => {
-  const org = byId.org(req.params.id);
-  if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-  const { password } = req.body || {};
-  if (!password || String(password).length < 8) {
-    return res.status(400).json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
-  }
-  orgs.setPasswordHash(org.id, hashPassword(String(password)));
-  res.json({ ok: true, note: 'Credentials provisioned — the organisation signs in with this password from now on.' });
-});
-
-adminRouter.post('/clubs/:id/verification', (req, res) => {
-  const org = byId.org(req.params.id);
-  if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-  const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
-  // The switches are booleans and the domain is text or null; anything else is refused, never coerced.
-  for (const [f, v] of [['verified', verified], ['safeguardingContractSigned', safeguardingContractSigned], ['suspended', suspended]]) if (v !== undefined && typeof v !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} must be true or false.` });
-  if (verifiedDomain !== undefined && verifiedDomain !== null && !(typeof verifiedDomain === 'string' && verifiedDomain.trim().length <= ORG_LIMITS.domain)) return badField(res, 'verifiedDomain');
-  // The legacy toggle's changes carry claim-level provenance so the boolean
-  // and the claim engine never drift (one unit).
-  const updated = unit(() => {
-    orgs.update(org.id, (d) => {
-      if (verified !== undefined) d.verified = verified;
-      if (safeguardingContractSigned !== undefined) d.safeguardingContractSigned = safeguardingContractSigned;
-      if (verifiedDomain !== undefined) d.verifiedDomain = verifiedDomain?.trim() || null;
-      if (suspended !== undefined) d.suspended = suspended;
-    });
-    m14Ctx?.syncLegacyOrgVerification?.(org, req.body);
-    return byId.org(org.id);
-  });
-  broadcast('players'); // visibility rules may have changed
-  res.json({ ...orgSafe(updated), safeguardingCertified: safeguardingCertified(updated) });
-});
-
 registerGuardianIdReview({ adminRouter, guardians, safetyAudit, unit });
-
-// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
-adminRouter.get('/blocks', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const out = safetyAudit.blocks.page(page);
-  res.json({ items: out.items.map(blockView), nextCursor: out.nextCursor });
-});
-
-adminRouter.post('/blocks/:id/lift', (req, res) => {
-  // Lifting a block deletes its row (Q5, docs/decisions.md).
-  const lifted = safetyAudit.blocks.lift(req.params.id);
-  if (!lifted) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
-  broadcast('players');
-  res.json({ lifted: blockView(lifted) });
-});
-
-// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
-adminRouter.get('/moderation', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const out = safetyAudit.moderationLog.page(page);
-  res.json({ items: out.items.map(moderationView), nextCursor: out.nextCursor });
-});
-
-// Thread audit — the "all communications logged" promise, made inspectable.
-// Pages by cursor, most recently active first.
-adminRouter.get('/channels', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
-  const out = channels.page(page);
-  res.json({ items: out.items.map((c) => ({ ...channelViewFor(c, 'org'), guardianId: c.guardianId })), nextCursor: out.nextCursor });
-});
 
 // Serve uploaded media. Access is authorised, not public: either a valid
 // short-lived signature (minted only inside authorisation-checked API
@@ -4418,8 +4133,8 @@ const m13Ctx = registerM13({
 // ---------------------------------------------------- verification claims
 // Verification & Trust: independent claims, org-administered attestation,
 // Trust & Safety review, licences, disputes, references (domains/verification/claims/).
-// Returns its context so the legacy admin verification route can keep claim provenance in sync.
-const m14Ctx = registerM14({
+// Returns its context so the console's verification switch can keep claim provenance in sync.
+const verificationClaims = registerVerificationClaims({
   verification, unit,
   byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, users, orgs, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, notify, ledgerAppend, broadcast, safetyAudit,
@@ -4427,6 +4142,16 @@ const m14Ctx = registerM14({
   storage, mailer, orgSafe, recordActivity, revokeOrgUserAccess,
   grassrootsOrgOnly, guardianManagedOnly, safeguardingCertified,
   createSession, DATA_DIR,
+});
+
+// ------------------------------------------------- reports, blocks, console
+registerReporting({ playerRouter, guardianRouter, orgRouter, safetyAudit, recruitment, byId, unit, nextId, ledgerAppend, broadcast });
+registerSafetyConsole({
+  adminRouter, dataLayerReport: (opts) => dataLayer.report(opts), storeEngine: store.engine, unit, notify, broadcast, mailer,
+  players, guardians, orgs, sessions, channels, safetyAudit, signingsFollowUps, operations, outbox, pushLog,
+  transitionsVouches, verificationReads, byId,
+  orgSafe, safeguardingCertified, channelViewFor, vouchView,
+  syncLegacyOrgVerification: verificationClaims.syncLegacyOrgVerification,
 });
 
 // Canonical source-change events. Registered before the systems that write to
@@ -4465,7 +4190,7 @@ const m15Ctx = registerM15({
   byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, app, orgRouter, playerRouter, guardianRouter, adminRouter,
   nextId, notify, ledgerAppend, broadcast, safetyAudit,
   findPlayer, isBlocked, moderateOrRefuse, playerViewForOrg,
-  storage, m14: m14Ctx,
+  storage,
   recordSourceChange: srcCtx.recordSourceChange,
   passport, unit,
 });
@@ -4751,7 +4476,7 @@ signingsDomain = registerSigning({
   recruitmentEvidenceProvider: recruitmentEvidence,
   access: agentAccess,
   integration: integrationDomain.seam,
-  evidence: { storeFile: m14Ctx.storeEvidenceFile, add: m14Ctx.addEvidence },
+  evidence: { storeFile: verificationClaims.storeEvidenceFile, add: verificationClaims.addEvidence },
   faults: faultLayer,
 });
 

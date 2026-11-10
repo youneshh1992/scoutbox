@@ -192,6 +192,15 @@ test('repository: create and update(id, draft => …) write at once and return t
   refused(() => repo.update('org-none', (d) => { d.suspended = true; }), /ORG_NOT_FOUND/);
   refused(() => repo.update('org-pro', { suspended: true }), /takes a function/);
   refused(() => repo.update('org-pro', () => { repo.update('org-pro', (d) => { d.suspended = false; }); }), /ORG_UPDATE_REENTRANT/);
+  // the standing switches: only the fields given change; junk is refused, changing nothing
+  const stood = repo.setStanding('org-pro', { suspended: false, verified: true, verifiedDomain: 'pro.example' });
+  assert.deepEqual([stood.suspended, stood.verified, stood.verifiedDomain, stood.safeguardingContractSigned, stood.location.lat], [false, true, 'pro.example', pro.safeguardingContractSigned, 9]);
+  assert.equal(repo.setStanding('org-pro', { verifiedDomain: null, suspended: undefined }).verifiedDomain, null, 'null clears the domain; undefined leaves a switch alone');
+  const standing = dump(s);
+  for (const [fields, pattern] of [[{ suspended: 1 }, /suspended must be a boolean/], [{ verifiedDomain: ' x' }, /verifiedDomain must be text/], [{ plan: 'Pro' }, /plan is not a standing switch/], [null, /takes an object/]]) {
+    assert.throws(() => repo.setStanding('org-pro', fields), pattern); assert.deepEqual(dump(s), standing, 'nothing was written');
+  }
+  assert.throws(() => repo.setStanding('org-none', { suspended: true }), /ORG_NOT_FOUND/);
   // create
   const created = repo.create({ name: 'New FC', type: 'club', level: 'grassroots', location: { lat: 1, lng: 2, city: '' }, federationRef: { federation: 'FA', registrationId: 'R' }, plan: 'Grassroots', country: 'GB', passwordHash: 'scrypt$aa$bb' });
   assert.match(created.id, /^org-\d+$/, 'the id is minted'); assert.equal(created.createdAt, AT, 'stamped at creation'); assert.equal(created.location.city, null);

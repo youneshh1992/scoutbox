@@ -158,7 +158,18 @@ The rules are likely well under half of the production lines.
      `signingsDomain`.
    - (e) ~~The review-decided event.~~ Done 10 Nov: a subscription on compliance's transaction seam. No hook is
      patched in after registration any more.
-   - (f) The remaining `server.mjs` routes, converting their draft edits as they move.
+   - (f) The remaining `server.mjs` routes, converting their draft edits as they move. In stages:
+     1. ~~Safety: reports, blocks and the T&S console.~~ Done 10 Nov: `domains/safety/safety.mjs`. The console
+        registers after the verification claims and takes `syncLegacyOrgVerification` as an argument, so the
+        late `m14Ctx` lookup is gone (`registerM14` is `registerVerificationClaims`). Its two `orgs.update` edits
+        are one `orgs.setStanding(id, fields)`.
+     2. Messaging and notifications: the channel helpers and every `/channels` and `/notifications` route.
+     3. Players and children: player auth, `/player/*`, guardian child management, pairing, preferences and
+        export, with the `players.update` edits as named acts.
+     4. Club routes: org auth, search, contact and trials, film room, open trials, squad, friendlies,
+        e-mail-domain verification, ledger and plan.
+     5. The platform remainder (live sync, meta, media, capabilities, operator surface), then the remaining
+        milestone names and directories.
 
    **Names.** Each slice also renames what it touches after its domain: the milestone contexts (`m13Ctx` …
    `m29Ctx`, `m162Ctx`, `m182Ctx`) and registration functions (`registerM12` … `registerM23`) become, for

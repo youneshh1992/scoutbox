@@ -183,7 +183,7 @@ export const ORGS_TABLE = {
 };
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'setPasswordHash', 'initialize']);
+const WRITES = new Set(['create', 'update', 'setStanding', 'setPasswordHash', 'initialize']);
 
 /** `createOrgsRepository({ sqlite, nextId, unit, now, log })`: the organisation writes and queries, plus `reads` (the queries alone). */
 export function createOrgsRepository({ sqlite, nextId = null, unit = null, now = Date.now, log = () => {} }) {
@@ -247,6 +247,28 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
       if (problems.length) throw invalid(id, problems);
       const { password_hash: _keep, created_at: _never, ...cols } = params(next);
       q(UPDATE).run(cols);
+      return byId(id);
+    }),
+    /**
+     * Trust & Safety's standing switches: any of `verified`, `safeguardingContractSigned` and `suspended` (booleans) and
+     * `verifiedDomain` (text, or null to clear it). Fields left out keep their value. Returns the stored record.
+     */
+    setStanding: (id, fields) => operation(() => {
+      if (!isPlainObject(fields)) throw new TypeError('orgs.setStanding(id, { verified, safeguardingContractSigned, verifiedDomain, suspended }) takes an object');
+      const columns = { verified: 'verified', safeguardingContractSigned: 'safeguarding_contract_signed', suspended: 'suspended', verifiedDomain: 'verified_domain' };
+      const problems = [];
+      const set = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (v === undefined) continue;
+        if (!columns[k]) problems.push(`${k} is not a standing switch`);
+        else if (k === 'verifiedDomain') { if (v !== null && !textOk(v, L.domain)) problems.push(`verifiedDomain must be text of 1 to ${L.domain} characters, or null`); else set[columns[k]] = v; }
+        else if (typeof v !== 'boolean') problems.push(`${k} must be a boolean (got ${describe(v)})`);
+        else set[columns[k]] = v ? 1 : 0;
+      }
+      if (problems.length) throw invalid(id, problems);
+      if (!byId(id)) throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
+      const cols = Object.keys(set);
+      if (cols.length) q(`UPDATE orgs SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`).run({ ...set, id });
       return byId(id);
     }),
     /** Store a new password hash (or null to remove the password). Returns the stored record. */
