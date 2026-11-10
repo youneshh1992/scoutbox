@@ -25,6 +25,9 @@ end of the feature freeze.
   (`product/journey-analytics.md`).
 - **Rate limits are counted per process** (`domains/platform/rateLimit.mjs`). Fine for one server; more than one
   process would multiply every limit.
+- **Verification responses spread stored records.** The evidence routes in `domains/verification/claims/review.mjs`
+  return `evidence: ev` and `{ ...ev, mediaId: undefined }`; the root-request rejection returns `{ ...rejected, … }`
+  and the disputes list `{ ...d }`. A new column would reach the response unasked.
 
 ## Data model and product
 
@@ -69,6 +72,49 @@ end of the feature freeze.
   watchlists, Nobody Missed and the admin and club lists. Each has a comment where "load more" is needed. The
   player pickers (assessment, case, objective) walk every directory page; a large club needs a search box there.
 
+## Defects
+
+Found in the November 2026 comment trim (10 Nov). Not yet fixed.
+
+- **`?window=constructor` crashes recruitment analytics.** `WINDOW_PRESETS` (`domains/recruitment/analytics/metrics.mjs`)
+  is a plain object indexed by the client's `?window=`, so an inherited key such as `constructor` passes the
+  unknown-window check and the route answers 500. It needs a null-prototype table or an own-property check.
+- **An expired agent agreement gives a 500, not a 403.** `representationScopeProblem`
+  (`domains/agents/compliance/policy.mjs`) returns `REPRESENTATION_EXPIRED`, which the compliance error table maps but
+  `TRANSACTION_ERROR_HTTP` (`domains/agents/transactions/errors.mjs`) does not, so
+  `POST /org/agent/transactions/:id/representations` answers `TRANSACTION_STATE_UNKNOWN`.
+- **Non-text input causes 500s or is coerced.** The admin level review (`domains/verification/transitions.mjs`) calls
+  `req.body?.reason?.trim()`, which throws on a non-string. `String(...)` turns objects into text instead of refusing
+  them in `scouting.mjs` (case assign `task`, task `title`, decision `reasons`), `rooms/shared.mjs`
+  `validateDecision` (`note`) and the Room combine-request route (`instructions`). The case stage route stores
+  `reason` without a type or length check.
+- **Writes outside a unit, or side effects before commit.**
+  - Decision drafts: `cases.startDraft`, `editDraft` and `discardDraft` run outside `unit()`
+    (`domains/recruitment/lifecycle/decisionRoutes.mjs`), and `editDraft` writes no history entry.
+  - Transaction handoff: invite and withdraw (`domains/agents/integration/index.mjs`) write and notify with no unit and
+    no `afterCommit`.
+  - Signed documents: `evidence.add` writes the vault row before the unit (`domains/recruitment/signings/index.mjs`
+    `storeDocument`), so a failed unit leaves an orphan row.
+  - Offer sharing: the share-agent route (`domains/recruitment/offers/index.mjs`) calls `notify` inside the unit rather
+    than through `afterCommit`.
+  - Film Room: `GET /feed` (`domains/discovery/filmRoom.mjs`) writes the reminder-sent flag and notifies outside a unit.
+    Its view and tag counters are read-modify-write, so concurrent requests lose counts.
+- **The offer issue route returns a stale `rev`.** It answers `kase.room.rev` from the case as read before the move
+  (`domains/recruitment/offers/index.mjs`).
+- **The claims verification sweep ignores refusals.** `verificationSweep` (`domains/verification/claims/review.mjs`)
+  notifies and counts a claim whose `transition()` was refused, one thrown unit stops the rest of the sweep (unlike
+  `transitionSweep`), and its warning date uses the server's time zone.
+- **A Pro brief with a radius matches nobody.** Only Grassroots clubs may use distance, so the geography criterion is
+  false for a Pro club (`domains/discovery/matching/match.mjs`), but a Pro brief with `radiusKm` is accepted rather
+  than refused.
+- **A watchlist alert can go to a removed staff member.** The watchlist notification goes to `w.createdBy` without the
+  `removedAt` check that Second Look makes (`domains/discovery/matching/index.mjs`).
+- **The Box Cam source freeze misses some code lines.** `strippedSource` (`domains/development/boxcam/cv/freeze.mjs`)
+  drops every line starting with `*` as a comment, including code continuation lines such as
+  `* CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;` in `track.mjs`, so a change there doesn't change the freeze hash.
+- **The public passport-share limiter is its own unpruned Map** (`domains/verification/passport/sharing.mjs`) rather
+  than the shared `rateLimit`.
+
 ## Code clean-up
 
 Found in the November 2026 comment sweep. None is reachable as data loss today; each is a rule the code doesn't yet
@@ -112,8 +158,42 @@ keep, or code with nothing left to do.
 - **Stale test labels** that need rewording, not just untagging: labels with "used to" / "no longer" history in
   `e2e/agents/transactions.mjs`, `e2e/discovery/exposureCalibrationAndCoverage.mjs`, `e2e/platform/api.mjs` and
   `e2e/platform/dates.mjs`.
-- **A stray doc comment** in `domains/development/hub/shared.mjs`: the vocabulary assertion's comment sits above
-  `scanCopyForForbiddenNames`'s, attached to nothing.
+- **One rule, several definitions.** `ROLE_RANK` is defined in `lifecycle.mjs`, `journeyModel.mjs`, `contact.mjs` and
+  `trial.mjs` (`domains/recruitment/lifecycle/`) and mirrored by `roomCan` in `rooms/shared.mjs`. `PRO_STAGES` /
+  `GRASSROOTS_STAGES` are defined in both `domains/scouting/scouting.mjs` and `rooms/shared.mjs`, with nothing
+  asserting they match. `/rooms/needs-attention` spells out `DECISION_OWED_STATUSES`. `briefCriteriaToCanonical`
+  (`domains/discovery/matching/match.mjs`) copies `criterionId`'s id rule.
+- **Environment settings read directly.** `SCOUTBOX_FAST_SWEEPS` and `TEST_LICENCE_REGISTRY` are not registered in
+  `domains/platform/capabilities.mjs`, and `domains/recruitment/analytics/index.mjs` reads `NODE_ENV` directly.
+- **Text cut instead of refused.** The open-day outcome note and release reference
+  (`domains/development/grassrootsClub.mjs`) and the objectives' "shortened" texts (`objectives.mjs`) use `.slice()`.
+- **Notification copy is incomplete.** The `PREF_CATEGORY_MANDATORY` refusal (`domains/platform/notificationPrefs.mjs`)
+  names only security and account notices, but `compliance` is mandatory too, and the `/capabilities` note
+  (`operator.mjs`) does the same.
+- **Event audience and fingerprint gaps (latent).** `eventFingerprint` (`domains/platform/eventRegistry.mjs`) keys on
+  ids that the development, assessment and trial payloads don't carry, so each of those events has one fingerprint.
+  `org_member` is documented as "may currently see the subject" (`eventAudience.mjs`) but `liveSync` delivers it to
+  any org. Only `e2e/platform/contracts.mjs` uses the first, and no event uses the second.
+- **Trust and Passport calculations that do nothing.** `calculateTrustScore` (`domains/verification/trust/shared.mjs`)
+  sets `excludedComponents` to `[]` on both branches, never applies `POLICY.evidence.recencyDays`, and
+  `scoreEvidenceConfidence` ignores `now`. In `passport/shared.mjs`, `a.confirmation || true` and
+  `provRank(...) >= 0` are always true. In `compliance/policy.mjs` `evaluateMinorGate`,
+  `r.code !== 'FACET_VERIFIED' || true` filters nothing.
+- **Trust profile inconsistencies.** The org trust-profile route (`domains/verification/trust/trust.mjs`) tests
+  `req.org.type === 'grassroots'` where the rest of the code uses `org.level`, and a blocked player gets 403
+  `NOT_VISIBLE` where search conceals with 404.
+- **Draft-style updates left in compliance.** The reviewer revoke and policy approve routes
+  (`domains/agents/compliance/index.mjs`) still edit records through `reviewers.update` / `policies.update` callbacks.
+- **More probably dead code:** `JOURNEY_REQUIRED_STORES` / `JOURNEY_OPTIONAL_STORES` (empty arrays,
+  `domains/recruitment/lifecycle/journey.mjs`); the second `boxSessionId` string check and `void at;` in
+  `trialRoutes.mjs`; the unused `find` in `domains/development/hub/evidence.mjs` `recordBelongsToPlayer`; the unused
+  `roomId` in `domains/discovery/secondLook.mjs` `latestSnapshot`. `buildTrend` in
+  `domains/recruitment/analytics/dashboard.mjs` runs outside the per-family `try`, so one throw fails the dashboard.
+- **Product text with milestone codes:** the `/recruitment/offer-policy` note ("P6 writes no signing") and the
+  'M14 migration…' event reason in `domains/verification/claims/shared.mjs`; the identifier `safeM18Projection`
+  (`secondLook.mjs`).
+- **The trial evidence-unlink route** (`trialRoutes.mjs`) takes no client key and has no rate limit, unlike the other
+  trial writes. Possibly intended.
 
 ## Performance
 
