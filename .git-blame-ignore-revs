@@ -1,2 +1,5 @@
 # Commits that only reformat code. GitHub's blame view skips them automatically;
 # `npm run setup` points local `git blame` at this file too.
+
+# Format the whole repository with Biome
+ac173bc841e6de485aefcff20ceb5bd8480dab38
