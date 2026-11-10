@@ -70,10 +70,8 @@ export function registerTransactions(rawCtx) {
   const {
     byId, orgRouter, playerRouter, tsRouter, nextId, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, rateLimit, access, compliance,
-    // The cross-app integration seam. A HOLDER filled in after this module
-    // registers: it carries the recruitment-case handoff binding. Absent (a
-    // suite booting transactions alone), a transaction may not cite a
-    // recruitment case at all, which is the fail-closed answer.
+    // The cross-app integration seam: the recruitment-case handoff binding and the duplicate rule. Absent, a
+    // transaction may not cite a recruitment case at all.
     integration = null,
     recruitmentReads,
     scoutingReads,
@@ -81,6 +79,9 @@ export function registerTransactions(rawCtx) {
     channels, // a linked thread's own authorisation is read from the message threads
   } = rawCtx;
   if (typeof agentTransactions?.transactions?.recordAct !== 'function' || typeof unit !== 'function') throw new TypeError('registerTransactions needs the agent transactions repository and unit from the data layer');
+  if (typeof compliance?.onRepresentationReviewed !== 'function') throw new TypeError('registerTransactions needs the compliance engine\'s transaction seam (ctx.compliance)');
+  // A T&S decision on a declared binding lands on the transaction's own representation row.
+  compliance.onRepresentationReviewed(representationReviewed);
   const { transactions: txs, representations: repsRepo, documents: docsRepo } = agentTransactions;
 
   const now = () => Date.now();
@@ -1507,7 +1508,7 @@ export function registerTransactions(rawCtx) {
   }
 
   return {
-    onPlayerDeleted, representationReviewed,
+    onPlayerDeleted,
     agencyAuditRows: (org) => auditRows({ agencyOrgId: org.id }),
     transactionAuditRows: auditRows,
     offerReadinessFor,

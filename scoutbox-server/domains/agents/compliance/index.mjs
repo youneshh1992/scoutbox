@@ -1007,8 +1007,8 @@ export function registerCompliance(rawCtx) {
       // representation row is the TRUTH and the context's array is its
       // evaluation projection — so the reviewer's decision must land on the
       // row, not only on the projection.
-      if (r.subject?.transactionId && transactionHooks.representationReviewed) {
-        transactionHooks.representationReviewed({ transactionId: r.subject.transactionId, representationId: r.subject.representationId, outcome, by, reviewId: r.id });
+      if (r.subject?.transactionId) {
+        for (const handle of representationReviewedHandlers) handle({ transactionId: r.subject.transactionId, representationId: r.subject.representationId, outcome, by, reviewId: r.id });
       }
       const live = contextById(c.id);
       const rep = live.representations.find((x) => x.id === r.subject.representationId);
@@ -1099,13 +1099,17 @@ export function registerCompliance(rawCtx) {
    * transaction's own projection is what a club sees.
    */
   /**
-   * Filled in by the transaction workspace at registration (server.mjs), after
-   * this module is built; until then every branch that consults it is a no-op.
+   * The transaction workspace's handlers for a decided review of a declared binding. They run inside the
+   * decision's unit, so the review and its effect on the transaction commit together.
    */
-  const transactionHooks = { representationReviewed: null };
+  const representationReviewedHandlers = [];
 
   const transactionSeam = {
-    hooks: transactionHooks,
+    /** Subscribe to decided reviews of a transaction's declared binding: `fn({ transactionId, representationId, outcome, by, reviewId })`. */
+    onRepresentationReviewed(fn) {
+      if (typeof fn !== 'function') throw new TypeError('onRepresentationReviewed takes a function');
+      representationReviewedHandlers.push(fn);
+    },
     /** Open the evaluation context a transaction owns. `transactionId` is recorded for provenance in both directions. */
     openContext({ agencyOrgId, agentUserId, type, jurisdictions, transactionId, by }) {
       const c = {

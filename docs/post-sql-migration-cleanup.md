@@ -76,7 +76,7 @@ order, or from a domain reading another's context where a repository read or a p
 | `agentIntegration` holder, filled after `registerIntegration` | Lifecycle → integration (`contactRoute`, `contactTargetSnapshot`); transactions → integration (`caseBelongsTo`, `duplicateTransactionOf`, `bindHandoff`). Integration reads transactions only through `agentTransactions.reads`, and the lifecycle only through pure imports. | **Done (10 Nov):** access, compliance and integration register before the lifecycle; the lifecycle, transactions, offers, signings and journeys take `integrationDomain.seam`, and the contact routes refuse to register without it. |
 | `m28Ctx.setSigningSummary(m29Ctx.summaryForOffer)`            | Offers → signings (the summary on an offer view). Signings reads offers only through `recruitmentReads.offers` and pure imports from `offer.mjs`.                               | **Done (10 Nov):** signings register before offers, which take `signingSummary` and refuse to register without it. |
 | `m24Ctx.hooks.auditRows` wrapped to append transaction rows   | Neither: an agency's audit feed merges three repositories' rows.                                                                                                                | **Done (10 Nov):** the core takes `auditSources` (compliance's and transactions' row functions). Transaction rows need the transaction module's compliance snapshot view, so transactions now register before the core. |
-| `m25Ctx.transactionSeam.hooks.representationReviewed`         | **Two-way.** Transactions call compliance throughout (open, project, evaluate, consent, review). A T&S decision on a declared-only binding must verify or withdraw the transaction's representation, and that then re-evaluates compliance. | Compliance publishes "review decided" inside the unit of work, and transactions subscribes at wiring. This is the one place for an event. It must stay synchronous and in the same unit, so a decision and its effect on the transaction commit together. |
+| `m25Ctx.transactionSeam.hooks.representationReviewed`         | **Two-way.** Transactions call compliance throughout (open, project, evaluate, consent, review). A T&S decision on a declared-only binding must verify or withdraw the transaction's representation, and that then re-evaluates compliance. | **Done (10 Nov):** the transaction seam offers `onRepresentationReviewed(fn)`, and the transaction workspace subscribes when it registers. The handlers run inside the decision's unit. No general event bus was needed for one subscriber. |
 
 Smaller late bindings, fixed as their routes move: `m17Ctx.recruitmentEvidence` (create the provider before
 `registerM17`), `m19Ctx.matchFactsKeeper`, and the forward `let` contexts that the routes in `server.mjs` call
@@ -156,7 +156,8 @@ The rules are likely well under half of the production lines.
      `m27Ctx` are now `lifecycleDomain` and `integrationDomain`, and `registerM23` is `registerLifecycle`.
    - (d) ~~Signings before offers.~~ Done 10 Nov. `m28Ctx` and `m29Ctx` are now `offersDomain` and
      `signingsDomain`.
-   - (e) The review-decided event.
+   - (e) ~~The review-decided event.~~ Done 10 Nov: a subscription on compliance's transaction seam. No hook is
+     patched in after registration any more.
    - (f) The remaining `server.mjs` routes, converting their draft edits as they move.
 
    **Names.** Each slice also renames what it touches after its domain: the milestone contexts (`m13Ctx` …

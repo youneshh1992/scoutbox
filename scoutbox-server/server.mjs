@@ -4713,8 +4713,6 @@ transactionsDomain = registerTransactions({
   agentTransactions, unit,
   channels, // a linked thread's own authorisation
 });
-// An attributed review of a declared-only binding lands on the transaction's own representation row.
-complianceDomain.transactionSeam.hooks.representationReviewed = transactionsDomain.representationReviewed;
 
 // ------------------------------------------------------ Agent core
 // Agent profiles, agency affiliations and client-confirmed representation relationships. It asks compliance for

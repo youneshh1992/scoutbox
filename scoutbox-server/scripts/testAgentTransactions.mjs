@@ -14,6 +14,7 @@ import {
   AGENT_TRANSACTIONS_MIGRATION as MIGRATION, AGENT_TRANSACTIONS_TABLES as TABLES, AGENT_TRANSACTIONS_COLLECTIONS as COLLECTIONS,
 } from '../repositories/agentTransactions.mjs';
 import { snapshotView } from '../domains/agents/transactions/transaction.mjs';
+import { registerTransactions } from '../domains/agents/transactions/index.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -75,6 +76,14 @@ function serverOpen(dir) {
 }
 
 // ------------------------------------------------------------- schema
+test('[wiring] the workspace subscribes to decided reviews of its declared bindings when it registers, and refuses to register without the compliance seam', () => {
+  const repo = { transactions: { recordAct: () => {} }, representations: {}, documents: {}, reads: {} };
+  assert.throws(() => registerTransactions({ agentTransactions: repo, unit: () => {} }), (e) => e instanceof TypeError && /transaction seam/.test(e.message));
+  const handlers = [];
+  try { registerTransactions({ agentTransactions: repo, unit: () => {}, compliance: { onRepresentationReviewed: (fn) => handlers.push(fn) } }); } catch { /* the stub context stops registration after the subscription */ }
+  assert.equal(handlers.length, 1, 'one subscription, made before anything else registers');
+});
+
 test('[schema] 0029 is registered after 0028 and creates the sixteen STRICT tables (no JSON column), empty', () => {
   const ids = DATA_MIGRATIONS.map((m) => m.id);
   assert.equal(ids.indexOf(MIGRATION), ids.indexOf('0028_compliance_records') + 1);
