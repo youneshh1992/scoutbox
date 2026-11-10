@@ -27,7 +27,7 @@ import { roomRole } from '../rooms/shared.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { buildShared } from '../../../m12/shared.mjs';
 
-export function registerM23(rawCtx) {
+export function registerLifecycle(rawCtx) {
   // isLead, orgCanSee, audit and paginate come from one place rather than
   // being re-derived per domain.
   const ctx = { ...rawCtx, ...buildShared(rawCtx) };
@@ -35,7 +35,7 @@ export function registerM23(rawCtx) {
   // The journey reads the club's assessments too (scoutingReads).
   if (!ctx.safetyReads?.blocks) throw new TypeError('the lifecycle routes need safetyReads (the safety repository\'s queries)');
   const journeyReads = { ...recruitmentReads, ...scoutingReads, blocks: ctx.safetyReads.blocks, player: (id) => ctx.byId.player(id) };
-  if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerM23 needs recruitmentReads (contacts, offers) from the data layer');
+  if (!recruitmentReads?.contacts || !recruitmentReads?.offers) throw new TypeError('registerLifecycle needs recruitmentReads (contacts, offers) from the data layer');
 
   /**
    * Idempotency for lifecycle actions.

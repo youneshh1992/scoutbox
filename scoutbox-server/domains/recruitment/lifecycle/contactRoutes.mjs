@@ -49,15 +49,12 @@ export function registerContact(ctx) {
     // Every write is an explicit repository operation inside `unit`.
     recruitmentContactsOffers, unit, afterCommit,
     recruitmentReads,
-    // The ONE cross-app integration seam. It is a HOLDER: these routes are
-    // registered before the Agent, Compliance and Integration layers, so the
-    // methods arrive later. Until they do, `agentRoute` is absent and every
-    // contact routes to the player and to nobody else — the honest answer when
-    // nothing can resolve an agent's authority.
-    agentIntegration = null,
+    // The cross-app integration seam: who may be routed a contact besides the player.
+    integration,
   } = ctx;
 
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.contacts) throw new TypeError('registerContact needs the contacts/offers repository, unit and afterCommit from the data layer');
+  if (typeof integration?.contactRoute !== 'function' || typeof integration?.contactTargetSnapshot !== 'function') throw new TypeError('registerContact needs the cross-app integration seam (ctx.integration)');
   const contacts = recruitmentContactsOffers.contacts;
   const now = () => Date.now();
   const actorOf = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
@@ -152,18 +149,18 @@ export function registerContact(ctx) {
   function routeFor(req, room, requestedMode = 'player_only') {
     const base = recipientFor(req, room);
     if (!base.ok) return { recipient: base, routing: null };
-    if (requestedMode === 'player_only' || !agentIntegration?.contactRoute) {
+    if (requestedMode === 'player_only') {
       return {
         recipient: base,
         routing: {
           ok: true, mode: 'player_only', targets: [base.recipient], agent: null,
-          agentRefusal: requestedMode === 'player_only' ? null : 'NO_REPRESENTATION',
+          agentRefusal: null,
         },
       };
     }
     return {
       recipient: base,
-      routing: agentIntegration.contactRoute({
+      routing: integration.contactRoute({
         recipient: base.recipient, clientId: room.playerId, viewerOrgId: req.org.id, requestedMode,
       }),
     };
@@ -472,9 +469,7 @@ export function registerContact(ctx) {
       // change to the relationship does not rewrite it and the next contact is
       // routed from the authority in force then. The snapshot is what the agent's
       // own read is filtered by, so it is the record of participation, not a label.
-      const routingSnapshot = agentIntegration?.contactTargetSnapshot
-        ? agentIntegration.contactTargetSnapshot(route, at)
-        : { at, mode: route.mode, player: true, guardian: recipient.type === 'guardian', agent: null, honest: 'Routed to the recipient only: no agent authority could be resolved when this was sent.' };
+      const routingSnapshot = integration.contactTargetSnapshot(route, at);
       const history = [entry('contact_sent', by, {
         channel: 'in_app', recipientType: recipient.type, attempt: c.attempts.length + 1,
         mode: route.mode, agentParty: !!route.agent,

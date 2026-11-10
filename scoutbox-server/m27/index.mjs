@@ -20,10 +20,7 @@
  *   - it never turns a legacy adult-representation row into authority. The basis
  *     comes from `agentClientBasis`, which is `agreementGrantsAccess`.
  *
- * The seam is handed to the recruitment lifecycle (registerM23) through a holder
- * object created before it is registered, because it is registered first. Until
- * this module fills that holder, every integration question answers "no" — a
- * suite that boots the lifecycle alone routes to the player and to nobody else.
+ * It registers before the recruitment lifecycle and the transactions, which take its seam as an argument.
  */
 
 import {

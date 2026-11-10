@@ -37,7 +37,7 @@ import { registerSavedSearches } from './domains/discovery/savedSearches.mjs';
 import { removeUploadChunks } from './domains/media/uploads.mjs';
 import { registerAnalytics } from './m20/index.mjs';
 import { registerDevelopment } from './domains/development/hub/index.mjs';
-import { registerM23 } from './domains/recruitment/lifecycle/index.mjs';
+import { registerLifecycle } from './domains/recruitment/lifecycle/index.mjs';
 import { createAgentAccess } from './domains/agents/access.mjs';
 import { registerAgent } from './domains/agents/core/index.mjs';
 import { registerCompliance } from './domains/agents/compliance/index.mjs';
@@ -1352,8 +1352,8 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   // NOW — the guardian must still be this child's verified route, the club
   // must still be allowed to reach the child. Requests with no caseId keep
   // the request's own rule.
-  if (accept && found.type === 'trial' && found.caseId && m23Ctx?.trialAcceptGate) {
-    const gate = m23Ctx.trialAcceptGate({ request: found, by: 'guardian', actorId: req.guardian.id });
+  if (accept && found.type === 'trial' && found.caseId && lifecycleDomain?.trialAcceptGate) {
+    const gate = lifecycleDomain.trialAcceptGate({ request: found, by: 'guardian', actorId: req.guardian.id });
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
   }
   const respondedAt = Date.now();
@@ -1363,7 +1363,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   // The record the hooks see is the stored one.
   let request = recruitment.requests.recordResponse(found.id, { status: accept ? 'accepted' : 'declined', respondedAt, respondedBy: 'guardian' });
   // The Contact that created this request learns of the answer.
-  m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'guardian', at: respondedAt });
+  lifecycleDomain?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'guardian', at: respondedAt });
   // The answer, the channel and the trial row are ONE unit,
   // so a crash between them cannot leave an accepted request with no trial.
 
@@ -1377,7 +1377,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
       // The case learns of the acceptance through the Trial hook — a concrete
       // slot confirms the schedule and moves the case through the single
       // lifecycle writer, in the same unit as the answer.
-      m23Ctx?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name } });
+      lifecycleDomain?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name } });
     }
     notify({ kind: 'org_user', id: request.userId }, 'accepted', `The guardian of ${child.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
     // The child hears the outcome as a request outcome ("Messages and
@@ -1386,7 +1386,7 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
     notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian accepted the ${request.type} with ${request.orgName}.`, request.id);
   } else {
     ledgerAppend({ type: `${request.type}_declined_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') m23Ctx?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, message: replyCheck.reply });
+    if (request.type === 'trial') lifecycleDomain?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, message: replyCheck.reply });
     notify({ kind: 'org_user', id: request.userId }, 'declined', `The guardian of ${child.name} declined your ${request.type} request.`, request.id);
     notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian declined the ${request.type} with ${request.orgName}.`, request.id);
   }
@@ -3215,8 +3215,8 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   const slot = accept && found.type === 'trial' ? chooseTrialSlot(found.trialDetails, chosenSlot) : { ok: true, date: null };
   if (!slot.ok) return res.status(400).json(slot);
   // The recipient of a case-tied Trial invitation is re-derived now.
-  if (accept && found.type === 'trial' && found.caseId && m23Ctx?.trialAcceptGate) {
-    const gate = m23Ctx.trialAcceptGate({ request: found, by: 'player', actorId: req.player.id });
+  if (accept && found.type === 'trial' && found.caseId && lifecycleDomain?.trialAcceptGate) {
+    const gate = lifecycleDomain.trialAcceptGate({ request: found, by: 'player', actorId: req.player.id });
     if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
   }
   const respondedAt = Date.now();
@@ -3226,7 +3226,7 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   // Both respond paths stamp who answered.
   let request = recruitment.requests.recordResponse(found.id, { status: accept ? 'accepted' : 'declined', respondedAt, respondedBy: 'player' });
   // The Contact that created this request learns of the answer.
-  m23Ctx?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'player', at: respondedAt });
+  lifecycleDomain?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'player', at: respondedAt });
 
   if (accept) {
     // Only now does a contact channel exist.
@@ -3235,12 +3235,12 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
     ledgerAppend({ type: `${request.type}_accepted`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
     if (request.type === 'trial') {
       const trial = issueAcceptedTrial({ request, player: req.player, trialDate: slot.date, by: 'player', at: respondedAt, actor: { id: req.player.id, name: req.player.name } });
-      m23Ctx?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name } });
+      lifecycleDomain?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name } });
     }
     notify({ kind: 'org_user', id: request.userId }, 'accepted', `${req.player.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
   } else {
     ledgerAppend({ type: `${request.type}_declined`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') m23Ctx?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name }, message: replyCheck.reply });
+    if (request.type === 'trial') lifecycleDomain?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name }, message: replyCheck.reply });
     notify({ kind: 'org_user', id: request.userId }, 'declined', `${req.player.name} declined your ${request.type} request.`, request.id);
   }
   broadcast('requests', { playerId: req.player.id });
@@ -4142,8 +4142,6 @@ let complianceDomain = null;
 // The Agent Transaction Workspace, declared here because the
 // account-deletion sweep above runs before its registration below.
 let transactionsDomain = null;
-// The cross-app integration layer, registered after all four.
-let m27Ctx = null;
 let m28Ctx = null; // assigned when the Offer module registers, below
 let m29Ctx = null; // assigned when the Signing module registers, below
 const tsRouter = express.Router();
@@ -4608,14 +4606,7 @@ const m21Ctx = registerDevelopment({
 });
 void m21Ctx;
 
-// ------------------------------------------------- recruitment lifecycle
-// The recruitment case is canonical and the Room is a facet of it. This is the
-// OPERATING layer over them — named semantic actions with server-validated
-// transitions, and one viewer-aware projection over the records that already
-// exist. It writes status only through the Rooms' single writer
-// (ctx.applyLifecycleTransition), so `case.stage` and `room.status` cannot
-// disagree.
-
+// ------------------------------------------------- recruitment evidence
 // The evidence provider is attached to the Rooms context as well as handed to
 // the lifecycle, because the Rooms' own status route can name an evidence-bearing status. One
 // provider, reachable from every status path; a path with no provider fails
@@ -4623,17 +4614,59 @@ void m21Ctx;
 const recruitmentEvidence = createEvidenceProvider(recruitmentReads);
 m17Ctx.recruitmentEvidence = recruitmentEvidence;
 
-// ------------------------------------------------ the integration seam holder
-// The lifecycle is registered BEFORE the Agent, Compliance and Integration
-// layers, so the seam cannot be handed over as a value. This holder is: one
-// object, filled in below once `registerIntegration` exists, read at REQUEST
-// time. A build that never fills it (a suite that boots the lifecycle alone) routes every contact to the
-// player and to nobody else, which is the honest answer when nothing in the
-// process can resolve an agent's authority.
-const agentIntegration = {};
+// ------------------------------------------------------ Agent workspace
+// Agency membership, role capabilities, the agent's profile and the concealing agreement lookup: every agent
+// domain below checks through these.
+const agentAccess = createAgentAccess({ agentCore, unit, nextId, broadcast });
+// One verification provider for the agent core (facet submissions) and compliance (rechecks), so there is one
+// path to a VERIFIED facet.
+const verificationProvider = createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
 
-const m23Ctx = registerM23({
-  agentIntegration,
+// --------------------------------------------- Conflict & Compliance Engine
+// Per-reviewer Trust & Safety identity, the versioned jurisdiction policies, the Conflict Engine, the consent
+// ledger, attributed manual review and the minors gate. It re-authorises every regulated mutation when it happens.
+complianceDomain = registerCompliance({
+  ...m19Ctx,
+  isAdult, tsRouter, verificationProvider,
+  hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins: DEV_LOGINS,
+  access: agentAccess,
+  agentCore, unit,
+  compliancePolicies,
+  complianceRecords,
+});
+
+// ------------------------------------------------ Agent cross-app integration
+// The ONE layer that answers "may this agent see or do this, on this surface,
+// for this client, right now?" — for Contact routing, Trial projection, the club
+// Agent-presence badge, an opportunity share and a transaction handoff. It owns
+// no store, declares no migration and duplicates no rule: the basis is the Agent
+// core's access predicate, the licence is its facets, the policy verdict is the
+// compliance engine's through one narrow seam, and the client's disclosure choices are a field of the
+// agreement they are choices about. It reads the cases, agreements and transactions through their
+// repositories, so it registers before the lifecycle and the transactions, which take its seam.
+const integrationDomain = registerIntegration({
+  ...m19Ctx,
+  isAdult,
+  // The Rooms' own concealing case lookup and their own role ranking, passed rather
+  // than re-derived — the handoff must be as invisible to a foreign club as the
+  // case itself is.
+  findRoomForRequest: m17Ctx.findRoomForRequest,
+  access: agentAccess,
+  compliance: complianceDomain.integrationSeam,
+  recruitmentCases, // the transaction handoff is an explicit write of its case
+  agentCore, unit, // an opportunity share is an explicit write of its agreement
+  transactionReads: agentTransactions.reads, // the live transaction covering a case
+});
+
+// ------------------------------------------------- recruitment lifecycle
+// The recruitment case is canonical and the Room is a facet of it. This is the
+// OPERATING layer over them — named semantic actions with server-validated
+// transitions, and one viewer-aware projection over the records that already
+// exist. It writes status only through the Rooms' single writer
+// (ctx.applyLifecycleTransition), so `case.stage` and `room.status` cannot
+// disagree.
+const lifecycleDomain = registerLifecycle({
+  integration: integrationDomain.seam,
   recruitmentEvidenceProvider: recruitmentEvidence,
   recruitmentCases, // the formal decision row enters through the repository (and leaves it on a transport failure)
   recruitmentContactsOffers,
@@ -4666,26 +4699,6 @@ const m23Ctx = registerM23({
   guardianManagedOnly,
 });
 
-// ------------------------------------------------------ Agent workspace
-// Agency membership, role capabilities, the agent's profile and the concealing agreement lookup: every agent
-// domain below checks through these.
-const agentAccess = createAgentAccess({ agentCore, unit, nextId, broadcast });
-// One verification provider for the agent core (facet submissions) and compliance (rechecks), so there is one
-// path to a VERIFIED facet.
-const verificationProvider = createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
-
-// --------------------------------------------- Conflict & Compliance Engine
-// Per-reviewer Trust & Safety identity, the versioned jurisdiction policies, the Conflict Engine, the consent
-// ledger, attributed manual review and the minors gate. It re-authorises every regulated mutation when it happens.
-complianceDomain = registerCompliance({
-  ...m19Ctx,
-  isAdult, tsRouter, verificationProvider,
-  hashPassword, verifyPassword, createSession, sessionFor, sessions, devLogins: DEV_LOGINS,
-  access: agentAccess,
-  agentCore, unit,
-  compliancePolicies,
-  complianceRecords,
-});
 
 // ------------------------------------------------ Agent Transaction Workspace
 // The multi-party workspace (player, agent, engaging and releasing club): the transaction, its parties, its state
@@ -4696,9 +4709,7 @@ transactionsDomain = registerTransactions({
   isAdult, tsRouter,
   access: agentAccess,
   compliance: complianceDomain.transactionSeam,
-  // Transactions register before the integration layer, so the handoff binding and the duplicate rule arrive
-  // through the holder.
-  integration: agentIntegration,
+  integration: integrationDomain.seam, // the handoff binding and the duplicate rule
   agentTransactions, unit,
   channels, // a linked thread's own authorisation
 });
@@ -4718,29 +4729,6 @@ agentCoreDomain = registerAgent({
   compliance: complianceDomain.coreReviews,
   auditSources: [complianceDomain.complianceAuditRows, transactionsDomain.agencyAuditRows],
 });
-// ------------------------------------------------ Agent cross-app integration
-// The ONE layer that answers "may this agent see or do this, on this surface,
-// for this client, right now?" — for Contact routing, Trial projection, the club
-// Agent-presence badge, an opportunity share and a transaction handoff. It owns
-// no store, declares no migration and duplicates no rule: the basis is the Agent
-// core's access predicate, the licence is its facets, the policy verdict is the
-// compliance engine's through one narrow seam, and the client's disclosure choices are a field of the
-// agreement they are choices about. It is registered LAST because it reads all
-// four layers and is read by the first of them through the holder above.
-m27Ctx = registerIntegration({
-  ...m19Ctx,
-  isAdult,
-  // The Rooms' own concealing case lookup and their own role ranking, passed rather
-  // than re-derived — the handoff must be as invisible to a foreign club as the
-  // case itself is.
-  findRoomForRequest: m17Ctx.findRoomForRequest,
-  access: agentAccess,
-  compliance: complianceDomain.integrationSeam,
-  recruitmentCases, // the transaction handoff is an explicit write of its case
-  agentCore, unit, // an opportunity share is an explicit write of its agreement
-  transactionReads: agentTransactions.reads, // the live transaction covering a case
-});
-Object.assign(agentIntegration, m27Ctx.seam);
 
 // ------------------------------------------------- canonical Offer workflow
 // The authoritative Offer domain. A formal decision to progress AUTHORISES
@@ -4765,7 +4753,7 @@ m28Ctx = registerOffers({
   applyLifecycleTransition: m17Ctx.applyLifecycleTransition,
   recruitmentEvidenceProvider: recruitmentEvidence,
   access: agentAccess,
-  integration: agentIntegration,
+  integration: integrationDomain.seam,
   transactions: transactionsDomain,
 });
 
@@ -4791,7 +4779,7 @@ m29Ctx = registerSigning({
   recruitmentCases, // the case's signing link and history are written in the completion unit
   recruitmentEvidenceProvider: recruitmentEvidence,
   access: agentAccess,
-  integration: agentIntegration,
+  integration: integrationDomain.seam,
   evidence: { storeFile: m14Ctx.storeEvidenceFile, add: m14Ctx.addEvidence },
   faults: faultLayer,
 });
@@ -4806,7 +4794,7 @@ const journeyCtx = registerJourneyRoutes({
   ...m19Ctx,
   recruitmentEvidenceProvider: recruitmentEvidence,
   access: agentAccess,
-  integration: agentIntegration,
+  integration: integrationDomain.seam,
 });
 
 // -------------------------------------------------------- operator surface

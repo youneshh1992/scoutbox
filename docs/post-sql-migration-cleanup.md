@@ -73,7 +73,7 @@ order, or from a domain reading another's context where a repository read or a p
 | Late binding in `server.mjs`                                  | Direction it really runs                                                                                                                                                       | Fix                                                                                                                                                                                                |
 |---------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `Object.assign(m24Ctx.hooks, m25Ctx.hooks)`                   | Core → compliance (review items for facets and disputes, the Approach verdict). Compliance, transactions and integration use the core only for `requireCap`, `resolveMembership`, `profileOf` and `findOwnAgreement`. | **Done (10 Nov):** `domains/agents/access.mjs`; compliance registers before the core and hands it `coreReviews`. |
-| `agentIntegration` holder, filled after `registerIntegration` | Lifecycle → integration (`contactRoute`, `contactTargetSnapshot`); transactions → integration (`caseBelongsTo`, `duplicateTransactionOf`, `bindHandoff`). Integration reads transactions only through `agentTransactions.reads`, and the lifecycle only through pure imports. | Register integration before the lifecycle and transactions, and pass it in as a value. The holder goes away.                                                                                    |
+| `agentIntegration` holder, filled after `registerIntegration` | Lifecycle → integration (`contactRoute`, `contactTargetSnapshot`); transactions → integration (`caseBelongsTo`, `duplicateTransactionOf`, `bindHandoff`). Integration reads transactions only through `agentTransactions.reads`, and the lifecycle only through pure imports. | **Done (10 Nov):** access, compliance and integration register before the lifecycle; the lifecycle, transactions, offers, signings and journeys take `integrationDomain.seam`, and the contact routes refuse to register without it. |
 | `m28Ctx.setSigningSummary(m29Ctx.summaryForOffer)`            | Offers → signings (the summary on an offer view). Signings reads offers only through `recruitmentReads.offers` and pure imports from `offer.mjs`.                               | Register signings before offers and pass `summaryForOffer` to `registerOffers`.                                                                                                                    |
 | `m24Ctx.hooks.auditRows` wrapped to append transaction rows   | Neither: an agency's audit feed merges three repositories' rows.                                                                                                                | **Done (10 Nov):** the core takes `auditSources` (compliance's and transactions' row functions). Transaction rows need the transaction module's compliance snapshot view, so transactions now register before the core. |
 | `m25Ctx.transactionSeam.hooks.representationReviewed`         | **Two-way.** Transactions call compliance throughout (open, project, evaluate, consent, review). A T&S decision on a declared-only binding must verify or withdraw the transaction's representation, and that then re-evaluates compliance. | Compliance publishes "review decided" inside the unit of work, and transactions subscribes at wiring. This is the one place for an event. It must stay synchronous and in the same unit, so a decision and its effect on the transaction commit together. |
@@ -83,8 +83,8 @@ Smaller late bindings, fixed as their routes move: `m17Ctx.recruitmentEvidence` 
 (`m23Ctx` trial hooks, `m13Ctx.mfaGuards`, `m14Ctx.syncLegacyOrgVerification`, `m182Ctx`). Erasure's
 `onPlayerDeleted` fan-out becomes an explicit list of each domain's `redactPlayer`.
 
-Target order: platform and repositories → agent access → compliance → integration → transactions and the
-lifecycle → agent core routes → signings → offers → journeys. The `...m19Ctx` spreads become named arguments
+Target order: platform and repositories → agent access → compliance → integration → the lifecycle →
+transactions → agent core routes → signings → offers → journeys. The `...m19Ctx` spreads become named arguments
 along the way.
 
 ### 3. Helpers rewritten in each module
@@ -152,7 +152,8 @@ The rules are likely well under half of the production lines.
      child-management routes still mount on its router and move in (f).
    - (b) ~~Agent access, then compliance before the core.~~ Done 10 Nov. `m24Ctx`–`m26Ctx` are now
      `agentCoreDomain`, `complianceDomain` and `transactionsDomain`.
-   - (c) Integration before the lifecycle and transactions, which retires the holder.
+   - (c) ~~Integration before the lifecycle and transactions.~~ Done 10 Nov. The holder is gone; `m23Ctx` and
+     `m27Ctx` are now `lifecycleDomain` and `integrationDomain`, and `registerM23` is `registerLifecycle`.
    - (d) Signings before offers.
    - (e) The review-decided event.
    - (f) The remaining `server.mjs` routes, converting their draft edits as they move.

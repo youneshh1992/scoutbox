@@ -4,6 +4,7 @@
 // counted, never refused (Q8c-a, docs/decisions.md). Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import { checkHistoryFeed } from './historyFeedCheck.mjs';
+import { registerContact } from '../domains/recruitment/lifecycle/contactRoutes.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -215,6 +216,12 @@ test('[repository] the deletion unit\'s redactions: the contacts about the playe
   });
   assert.equal(L.repo.offers.byId('rof-1').responses[0].actorName, null, 'a read follows the redaction');
   L.close(); rm(d);
+});
+
+test('[wiring] the contact routes refuse to register without the cross-app integration seam (no silent player-only fallback)', () => {
+  const base = { recruitmentContactsOffers: { contacts: {} }, unit: () => {}, afterCommit: () => {} };
+  assert.throws(() => registerContact(base), (e) => e instanceof TypeError && /integration seam/.test(e.message));
+  assert.throws(() => registerContact({ ...base, integration: { contactRoute: () => null } }), (e) => e instanceof TypeError && /integration seam/.test(e.message));
 });
 
 test('[capabilities] the live report: explicit write mode, no pending writes, the typed tables and the player counters', () => {

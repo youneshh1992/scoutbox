@@ -206,7 +206,7 @@ async function bootOnce(dataDir, { port, probe = null } = {}) {
 
 /**
  * The FIRST requests to a freshly booted server, issued the instant /healthz answers: /healthz answering means
- * `app.listen` fired, so every `register*()` returned. It asks a late-registered module (the recruitment lifecycle, `registerM23`) for its vocabulary
+ * `app.listen` fired, so every `register*()` returned. It asks a late-registered module (the recruitment lifecycle, `registerLifecycle`) for its vocabulary
  * and asks routes over tables owned by three different repositories to answer.
  */
 const firstRequestProbe = async (base) => {
