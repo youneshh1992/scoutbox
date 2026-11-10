@@ -448,7 +448,7 @@ export function registerAgent(rawCtx) {
       // Current agency access ends now, in the same unit; the person's agent profile and every
       // historical attribution stay exactly as they are.
       const user = byId.user(aff.userId);
-      if (user && !user.removedAt) users.update(user.id, (d) => { d.removedAt = now(); d.removedById = req.orgUser.id; });
+      if (user && !user.removedAt) users.remove(user.id, { at: now(), by: req.orgUser.id });
       revokeOrgUserAccess?.(aff.userId);
     });
     res.json({ member: memberRows(req.org).find((m) => m.affiliationId === aff.id) });

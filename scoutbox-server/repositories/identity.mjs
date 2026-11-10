@@ -359,7 +359,6 @@ function lightFromRow(d) {
 export const GUARDIAN_RECORD_KEYS = Object.freeze(['id', 'name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted',
   'disclaimerAcceptedAt', 'coGuardianOf', 'notificationPrefs', 'createdAt', 'childIds', 'coGuardians']);
 const GUARDIAN_BOOLEANS = Object.freeze(['emailVerified', 'idVerified', 'disclaimerAccepted']);
-const GUARDIAN_EDITABLE = Object.freeze(['name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted', 'disclaimerAcceptedAt', 'notificationPrefs']);
 const GUARDIAN_INPUT_KEYS = Object.freeze(GUARDIAN_RECORD_KEYS.filter((k) => k !== 'coGuardians'));
 function guardianWithDefaults(raw) {
   const g = given(raw);
@@ -367,11 +366,10 @@ function guardianWithDefaults(raw) {
   if (isPlainObject(r.notificationPrefs)) r.notificationPrefs = { ...pick(r.notificationPrefs, PREFS_KEYS), ...Object.fromEntries(Object.entries(r.notificationPrefs).filter(([k]) => !PREFS_KEYS.includes(k))) };
   return r;
 }
-export function guardianRecordProblems(r, { input = true } = {}) {
+export function guardianRecordProblems(r) {
   const out = [];
-  const keys = input ? GUARDIAN_INPUT_KEYS : GUARDIAN_RECORD_KEYS;
   for (const k of Object.keys(r)) {
-    if (keys.includes(k)) continue;
+    if (GUARDIAN_INPUT_KEYS.includes(k)) continue;
     if (k === 'coGuardians') out.push('coGuardians is worked out from the co-guardians\' coGuardianOf and is not written');
     else out.push(`unknown field ${k}`);
   }
@@ -399,8 +397,6 @@ const G_COLS = ['id', 'name', 'email', 'password_hash', 'email_verified', 'email
 export const GUARDIAN_COLUMNS = Object.freeze(G_COLS);
 const G_SELECT = `SELECT ${G_COLS.join(', ')} FROM guardians`;
 const G_INSERT = `INSERT INTO guardians (${G_COLS.join(', ')}) VALUES (${G_COLS.map((c) => `@${c}`).join(', ')})`;
-const G_UPDATE_COLS = ['name', 'email', 'email_verified', 'id_verified', 'idv_reference', 'disclaimer_accepted', 'disclaimer_accepted_at', 'prefs_quiet_start', 'prefs_quiet_end', 'prefs_school_hours_mute', 'prefs_timezone'];
-const G_UPDATE = `UPDATE guardians SET ${G_UPDATE_COLS.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`;
 function guardianParams(r, { passwordHash = null, emailCodeHash = null } = {}) {
   const n = r.notificationPrefs ?? {};
   return {
@@ -770,7 +766,7 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
   };
   const listOf = (id, key) => getSubrecords(playerById(id), key);
 
-  let updatingPlayer = null; let updatingGuardian = null;
+  let updatingPlayer = null;
 
   // ---------------------------------------------------------- link operations (both sides, one unit)
   const link = (guardianId, playerId, role = 'co') => operation(() => {
@@ -1108,24 +1104,41 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       for (const p of kids) q('INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, ?)').run(r.id, p.id, p.guardian_id === r.id ? 'primary' : 'co');
       return guardianById(r.id);
     }),
-    /** `update(id, (draft) => …)`: the id, the links (`childIds`), `coGuardians`, `coGuardianOf` and the creation time never change here. */
-    update: (id, edit) => operation(() => {
-      if (typeof edit !== 'function') throw new TypeError('guardians.update(id, (draft) => …) takes a function');
-      if (updatingGuardian === id) throw refusal('GUARDIAN_UPDATE_REENTRANT', `guardian ${id} is already being updated`);
-      const before = guardianById(id);
-      if (!before) throw noGuardian(id);
-      const draft = clone(before);
-      updatingGuardian = id;
-      try { edit(draft); } finally { updatingGuardian = null; }
-      const problems = [];
-      for (const k of GUARDIAN_RECORD_KEYS) if (!GUARDIAN_EDITABLE.includes(k) && !same(draft[k], before[k])) problems.push(`${k} does not change through update${k === 'childIds' ? ' (use link / unlink / ageUp)' : ''}`);
-      if (isPlainObject(draft.notificationPrefs)) draft.notificationPrefs = { ...pick(draft.notificationPrefs, PREFS_KEYS), ...Object.fromEntries(Object.entries(draft.notificationPrefs).filter(([k]) => !PREFS_KEYS.includes(k))) };
-      if (!problems.length) problems.push(...guardianRecordProblems(draft, { input: false }));
+    /*
+     * The safeguarding gates. No act un-verifies an e-mail or withdraws an accepted disclaimer, and the first
+     * acceptance time is kept. Only Trust & Safety's ID review (`reviewIdCheck`) turns `idVerified` off again.
+     */
+    /** Mark the e-mail verified and clear the spent code's hash. A second call changes nothing. */
+    verifyEmail: (id) => operation(() => {
+      if (!q('UPDATE guardians SET email_verified = 1, email_code_hash = NULL WHERE id = ? AND email_verified = 0').run(id).changes && !guardianById(id)) throw noGuardian(id);
+      return guardianById(id);
+    }),
+    /** A passed ID check from the provider: verified, with the provider's reference. */
+    recordIdCheck: (id, { reference }) => operation(() => {
+      if (!textOk(reference, L.idvReference)) throw guardianInvalid(id, [`idvReference must be text of 1 to ${L.idvReference} characters`]);
+      if (q('UPDATE guardians SET id_verified = 1, idv_reference = ? WHERE id = ?').run(reference, id).changes !== 1) throw noGuardian(id);
+      return guardianById(id);
+    }),
+    /** Trust & Safety's review of the ID check: approve, or revoke. */
+    reviewIdCheck: (id, approved) => operation(() => {
+      if (typeof approved !== 'boolean') throw guardianInvalid(id, ['approved must be a boolean']);
+      if (q('UPDATE guardians SET id_verified = ? WHERE id = ?').run(b(approved), id).changes !== 1) throw noGuardian(id);
+      return guardianById(id);
+    }),
+    /** Accept the safeguarding disclaimer at `at`; a later acceptance keeps the first time. */
+    acceptDisclaimer: (id, at) => operation(() => {
+      if (!isClock(at)) throw new TypeError('guardians.acceptDisclaimer: `at` must be a non-negative integer timestamp (ms)');
+      if (q('UPDATE guardians SET disclaimer_accepted = 1, disclaimer_accepted_at = COALESCE(disclaimer_accepted_at, ?) WHERE id = ?').run(at, id).changes !== 1) throw noGuardian(id);
+      return guardianById(id);
+    }),
+    /** Replace the notification preferences (`{ quietStart, quietEnd, schoolHoursMute, timezone }`), or clear them with null. */
+    setNotificationPrefs: (id, prefs) => operation(() => {
+      const n = prefs ?? { quietStart: null, quietEnd: null, schoolHoursMute: null, timezone: null };
+      const problems = isPlainObject(n) && Object.keys(n).every((k) => PREFS_KEYS.includes(k)) && PREFS_KEYS.every((k) => k in n)
+        ? prefsProblems(n) : [`notificationPrefs must be { ${PREFS_KEYS.join(', ')} } or null (got ${describe(n)})`];
       if (problems.length) throw guardianInvalid(id, problems);
-      const taken = emailOwner(draft.email, id);
-      if (taken) throw refusal('EMAIL_IN_USE', `another guardian (${taken}) already uses this e-mail (compared case-insensitively)`);
-      const params = guardianParams(draft);
-      q(G_UPDATE).run(Object.fromEntries(['id', ...G_UPDATE_COLS].map((c) => [c, params[c]])));
+      if (q('UPDATE guardians SET prefs_quiet_start = ?, prefs_quiet_end = ?, prefs_school_hours_mute = ?, prefs_timezone = ? WHERE id = ?')
+        .run(n.quietStart, n.quietEnd, nb(n.schoolHoursMute), n.timezone, id).changes !== 1) throw noGuardian(id);
       return guardianById(id);
     }),
     setPasswordHash: (id, hash) => operation(() => {

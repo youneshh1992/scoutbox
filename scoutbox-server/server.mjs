@@ -7,15 +7,7 @@ import { installAsyncErrorForwarding } from './domains/platform/asyncErrors.mjs'
 // A rejected async handler answers 500 instead of ending the process.
 installAsyncErrorForwarding();
 
-// Free text in a request body is a string or absent. A value of any other
-// type would throw on `.trim()` (a 500) or be stored as an object that every
-// screen rendering it then crashes on. `optText` accepts absent or a
-// string within the length limit; everything else is a 400 at the route.
-const optText = (v, max = 500) => v === undefined || v === null || (typeof v === 'string' && v.length <= max);
-const reqText = (v, max = 500) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
-const badField = (res, field) => res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` });
-/** A switch must be sent as true or false (400 FIELD_INVALID naming it), never coerced. Returns true when refused. */
-const switchRefused = (res, v, field) => { if (typeof v === 'boolean') return false; res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be true or false.` }); return true; };
+import { optText, reqText, badField, switchRefused } from './domains/platform/input.mjs';
 import cors from 'cors';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -68,12 +60,12 @@ import { registerAudit } from './domains/platform/audit.mjs';
 import { createFaultLayer } from './domains/platform/faults.mjs';
 import { httpContractMiddleware } from './domains/platform/httpContract.mjs';
 import { integrityReport, integritySummary } from './domains/platform/integrity.mjs';
-import { orgPlayerView, guardianChildView, guardianSelfView, adminGuardianView } from './views/playerViews.mjs';
+import { orgPlayerView, guardianChildView, guardianSelfView } from './views/playerViews.mjs';
+import { registerGuardianAccount, registerGuardianIdReview } from './domains/identity/guardians.mjs';
 import { validateContactReply } from './domains/recruitment/lifecycle/contact.mjs';
 import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './domains/recruitment/lifecycle/trial.mjs';
 import { requestInstrumentation } from './domains/enterprise/enterprise.mjs';
-import { totpValid, timingSafeEqStr } from './m13/shared.mjs';
-import { hashCode } from './repositories/oneTimeCodes.mjs';
+import { totpValid } from './m13/shared.mjs';
 import {
   PROGRAMME_TRACKS, trackForPosition, programmeProgress, pathwayFor,
   earnedGrassrootsBadges, percentileAmong, inCohort,
@@ -612,7 +604,6 @@ const filedReportView = reportView; // the reporter's own reports: the same fiel
 const blockView = (b) => ({ id: b.id, playerId: b.playerId, orgId: b.orgId, by: b.by, reason: b.reason, ts: b.ts });
 const moderationView = (m) => ({ id: m.id, ts: m.ts, context: m.context, flags: m.flags, severity: m.severity, excerpt: m.excerpt });
 const noteView = (n) => ({ id: n.id, orgId: n.orgId, playerId: n.playerId, userId: n.userId, scoutName: n.scoutName, text: n.text, ts: n.ts });
-const idvView = (q) => ({ id: q.id, guardianId: q.guardianId, guardianName: q.guardianName, documentType: q.documentType, documentRef: q.documentRef, provider: q.provider, reference: q.reference, ts: q.ts, status: q.status });
 
 function isBlocked(playerId, orgId) {
   return safetyAudit.blocks.has(playerId, orgId);
@@ -1257,153 +1248,12 @@ function guardianManagedOnly(req, res) {
 }
 
 // -------------------------------------------------------------- guardians
-// Parents own every under-18 account. ID verification and the safeguarding
-// disclaimer are hard gates BEFORE any child profile can exist.
-
-app.post('/auth/guardian/signup', async (req, res) => {
-  const { name, email, password } = req.body || {};
-  if (!reqText(name, 120) || !reqText(email, 254) || !email.includes('@')) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
-  if (!password || String(password).length < 8) {
-    return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters.' });
-  }
-  if (guardians.emailTaken(email)) {
-    return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
-  }
-  const emailCode = randomCode(6);
-  const record = {
-    id: nextId('gd'),
-    name,
-    email,
-    passwordHash: hashPassword(password),
-    emailVerified: false,
-    emailCodeHash: hashCode(emailCode), // like every other one-time code, only the hash is stored
-    idVerified: false,
-    disclaimerAccepted: false,
-    createdAt: Date.now(),
-  };
-  // The row commits on its own (one transaction); the e-mail is sent afterwards, never inside a transaction.
-  let g;
-  try { g = guardians.create(record); } catch (e) {
-    if (e?.code === 'EMAIL_IN_USE') return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists — log in instead.' });
-    if (e?.code === 'GUARDIAN_RECORD_INVALID') return res.status(400).json({ error: 'GUARDIAN_INVALID', message: String(e.message) });
-    throw e;
-  }
-  await mailer.send({
-    to: email,
-    subject: 'Verify your ScoutBox guardian account',
-    text: `Hi ${name},\n\nYour ScoutBox verification code is ${emailCode}.\n\nGuardian accounts own every under-18 profile on ScoutBox — verifying your email is the first of the safeguarding gates (email → ID → disclaimer) before any child profile can exist.`,
-  });
-  res.status(201).json({
-    guardianId: g.id, guardian: guardianSelfView(g), token: createSession('guardian', g.id), emailVerificationSent: true,
-    // Dev transport has no real inbox — surface the code so the flow can
-    // complete. Never present when a live mail provider is configured.
-    ...(mailer.transport === 'dev-outbox' ? { devEmailCode: emailCode } : {}),
-  });
+// Parents own every under-18 account. The account and its safeguarding gates (e-mail, ID, disclaimer) are
+// domains/identity/guardians.mjs; the child-management routes below mount on its router.
+const { guardianRouter } = registerGuardianAccount({
+  app, guardians, safetyAudit, unit, nextId, mailer, idv, faultSeam: seam,
+  createSession, sessionFor, loginKey, loginLockedOut, noteLoginFailure, devLogins: DEV_LOGINS, devLoginRefused,
 });
-
-app.post('/auth/guardian/verify-email', (req, res) => {
-  const { guardianId, code } = req.body || {};
-  const g = byId.guardian(guardianId);
-  if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
-  if (g.emailVerified) return res.json({ emailVerified: true });
-  const codeHash = guardians.emailCodeHashOf(g.id);
-  if (!code || !codeHash || !timingSafeEqStr(hashCode(code), codeHash)) {
-    return res.status(400).json({ error: 'CODE_INVALID', message: 'That code doesn\'t match — check the email we sent you.' });
-  }
-  // One row write: verified, and the spent code's hash cleared.
-  unit(() => {
-    guardians.update(g.id, (d) => { d.emailVerified = true; });
-    guardians.setEmailCodeHash(g.id, null);
-  });
-  res.json({ emailVerified: true });
-});
-
-app.post('/auth/guardian/login', (req, res) => {
-  // A guardian can be named by id OR by email, which is two identifiers for one
-  // account. The failed-login budget is therefore charged against BOTH the
-  // identifier that was tried and the account it resolved to: a guesser who
-  // alternates id and email otherwise gets two budgets for one password.
-  const tried = `guardian:${req.body?.guardianId ?? req.body?.email}`;
-  if (loginLockedOut(res, tried)) return;
-  const g = (typeof req.body?.guardianId === 'string' ? byId.guardian(req.body.guardianId) : null) ?? guardians.byEmail(req.body?.email);
-  if (!g) { noteLoginFailure(tried); return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' }); }
-  const canonical = `guardian:${g.id}`;
-  const aliased = loginKey(canonical) !== loginKey(tried);
-  if (aliased && loginLockedOut(res, canonical)) return;
-  const hash = guardians.passwordHashOf(g.id);
-  if (hash) {
-    const check = verifyPassword(req.body?.password ?? '', hash);
-    if (!check) {
-      noteLoginFailure(tried);
-      if (aliased) noteLoginFailure(canonical);
-      return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' });
-    }
-    if (check === 'upgrade') guardians.setPasswordHash(g.id, hashPassword(req.body.password));
-  } else if (!DEV_LOGINS) {
-    return devLoginRefused(res);
-  }
-  res.json({ guardianId: g.id, guardian: guardianSelfView(g), token: createSession('guardian', g.id) });
-});
-
-function guardianAuth(req, res, next) {
-  const session = sessionFor(req);
-  const g = session?.kind === 'guardian' ? byId.guardian(session.refId) : null;
-  if (!g) return res.status(401).json({ error: 'GUARDIAN_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
-  req.guardian = g;
-  next();
-}
-
-const guardianRouter = express.Router();
-app.use('/guardian', guardianAuth, guardianRouter);
-
-// Prototype ID verification: an attestation endpoint. Production integrates a
-// document + liveness IDV provider behind this same call.
-guardianRouter.post('/verify-id', async (req, res, next) => {
-  const { documentType, documentRef } = req.body || {};
-  if (!documentType || !documentRef) {
-    return res.status(400).json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
-  }
-  if (!reqText(documentType, 60)) return badField(res, 'documentType'); // stored in the IDV queue's text column
-  // Runs through the IDV adapter (adapters.mjs): today the dev attestation; a
-  // document + liveness provider slots in behind the same call.
-  const result = await idv.verify({ name: req.guardian.name, documentType, documentRef });
-  if (!result.approved) {
-    return res.status(422).json({ error: 'IDV_REJECTED', message: 'Identity verification did not pass — check the document details.' });
-  }
-  // ONE unit of work, entered only after the provider answered (a transaction
-  // never spans the await): the column and the audit-queue entry commit
-  // together before the response.
-  try {
-    unit(() => {
-      guardians.update(req.guardian.id, (d) => { d.idVerified = true; d.idvReference = result.reference; });
-      seam('guardian.verify_id.after_row');
-      // Every check lands in the admin IDV queue for audit — and can be revoked there.
-      // A row of idv_queue in the same unit as the guardian's column (the
-      // repository refuses an entry naming a guardian that does not exist).
-      safetyAudit.idvQueue.add({
-        id: nextId('idv'), guardianId: req.guardian.id, guardianName: req.guardian.name,
-        documentType, documentRef: result.document.refLast4, provider: result.provider,
-        reference: result.reference, ts: Date.now(), status: 'approved',
-      });
-    });
-  } catch (e) {
-    return next(e); // an async handler: a failed unit reaches the error handler (500), never an unhandled rejection
-  }
-  res.json({ idVerified: true, reference: result.reference });
-});
-
-guardianRouter.post('/disclaimer', (req, res) => {
-  if (req.body?.accepted !== true) {
-    return res.status(400).json({ error: 'DISCLAIMER_NOT_ACCEPTED' });
-  }
-  guardians.update(req.guardian.id, (d) => { d.disclaimerAccepted = true; d.disclaimerAcceptedAt ??= Date.now(); });
-  res.json({ disclaimerAccepted: true });
-});
-
-// The guardian's own record: minus the password hash and the e-mail code.
-const guardianView = (g) => guardianSelfView(g);
-
-guardianRouter.get('/me', (req, res) => res.json(guardianView(req.guardian)));
 
 guardianRouter.get('/children', (req, res) => {
   res.json(
@@ -4100,8 +3950,9 @@ function prefsHandler(getTarget) {
       // A column-backed composite on both records: through the owning repository.
       if (schoolHoursMute != null && typeof schoolHoursMute !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'schoolHoursMute', message: 'schoolHoursMute must be true or false.' });
       const empty = Object.values(notificationPrefs).every((v) => v === null);
-      const write = (d) => { d.notificationPrefs = empty ? null : notificationPrefs; };
-      target = players.byId(target.id) ? players.update(target.id, write) : guardians.update(target.id, write);
+      target = players.byId(target.id)
+        ? players.update(target.id, (d) => { d.notificationPrefs = empty ? null : notificationPrefs; })
+        : guardians.setNotificationPrefs(target.id, empty ? null : notificationPrefs);
     }
     res.json({ prefs: target.notificationPrefs ?? null, note: 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.' });
   };
@@ -4198,7 +4049,7 @@ playerRouter.delete('/account', (req, res) => {
 guardianRouter.get('/export', (req, res) => {
   res.json({
     exportedAt: new Date().toISOString(),
-    guardian: guardianView(req.guardian),
+    guardian: guardianSelfView(req.guardian),
     children: req.guardian.childIds.map((id) => findPlayer(id)).filter(Boolean).map(exportPlayer),
   });
 });
@@ -4430,30 +4281,7 @@ adminRouter.post('/clubs/:id/verification', (req, res) => {
   res.json({ ...orgSafe(updated), safeguardingCertified: safeguardingCertified(updated) });
 });
 
-// Trust & Safety sees an allowlist of each guardian: never the password hash, never the e-mail code.
-// The guardians page by cursor (oldest first; `?limit=&cursor=`, `nextCursor`), the ID-check queue beside them.
-adminRouter.get('/guardians', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = guardians.page(page);
-  res.json({ guardians: items.map(adminGuardianView), nextCursor, idvQueue: safetyAudit.idvQueue.all().map(idvView) });
-});
-
-adminRouter.post('/guardians/:id/idv', (req, res) => {
-  const g = byId.guardian(req.params.id);
-  if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
-  if (switchRefused(res, req.body?.approved, 'approved')) return;
-  const approved = req.body.approved;
-  // One unit of work: the column and the review-queue row commit together
-  // (the FIRST entry of the guardian in insertion order).
-  let stored;
-  unit(() => {
-    stored = guardians.update(g.id, (d) => { d.idVerified = approved; });
-    const entry = safetyAudit.idvQueue.firstForGuardian(g.id);
-    if (entry) safetyAudit.idvQueue.setStatus(entry.id, approved ? 'approved' : 'revoked');
-  });
-  res.json(adminGuardianView(stored));
-});
+registerGuardianIdReview({ adminRouter, guardians, safetyAudit, unit });
 
 // Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
 adminRouter.get('/blocks', (req, res) => {

@@ -112,6 +112,18 @@ r = await j('/auth/guardian/verify-email', { method: 'POST', body: JSON.stringif
 ok(r.status === 200 && r.body.emailVerified, 'email code verifies the guardian');
 r = await j('/guardian/children', { method: 'POST', body: JSON.stringify({ name: 'Test Kid', dob: '2013-01-01', country: 'GB' }) }, bearer(nadiaToken));
 ok(r.status === 201, 'child onboarding opens after all three gates');
+const acceptedAt = (await j('/guardian/me', {}, bearer(nadiaToken))).body.disclaimerAcceptedAt;
+await j('/guardian/disclaimer', { method: 'POST', body: JSON.stringify({ accepted: true }) }, bearer(nadiaToken));
+r = await j('/guardian/me', {}, bearer(nadiaToken));
+ok(Number.isInteger(acceptedAt) && r.body.disclaimerAcceptedAt === acceptedAt && !('passwordHash' in r.body) && !('emailCodeHash' in r.body), 'accepting the disclaimer again keeps the first acceptance time; the self view carries no secrets');
+r = await j('/auth/guardian/verify-email', { method: 'POST', body: JSON.stringify({ guardianId: nadiaId, code: 'WRONG1' }) });
+ok(r.status === 200 && r.body.emailVerified, 'a verified e-mail stays verified');
+r = await j(`/admin/guardians/${nadiaId}/idv`, { method: 'POST', body: JSON.stringify({ approved: false }) }, admin);
+ok(r.status === 200 && r.body.idVerified === false, 'Trust & Safety revokes the ID check');
+r = await j('/guardian/children', { method: 'POST', body: JSON.stringify({ name: 'Test Kid Two', dob: '2014-01-01', country: 'GB' }) }, bearer(nadiaToken));
+ok(r.status === 403 && r.body.error === 'GUARDIAN_ID_UNVERIFIED', 'a revoked ID check closes child onboarding again');
+r = await j(`/admin/guardians/${nadiaId}/idv`, { method: 'POST', body: JSON.stringify({ approved: true }) }, admin);
+ok(r.status === 200 && r.body.idVerified === true, 'Trust & Safety can approve it again');
 
 // ---- 2. pairing (single-use, random codes)
 r = await j('/guardian/children/pl-guni/pairing-code', { method: 'POST' }, bearer(AMARA));

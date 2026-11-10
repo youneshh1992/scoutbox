@@ -216,6 +216,22 @@ export function createUsersRepository({ sqlite, nextId, unit = null, now = Date.
         .run(params({ ...draft, deliveryPrefs: prefsOf(draft.deliveryPrefs) }, { secret: m.mfa_secret, enabledAt: m.mfa_enabled_at }));
       return byId(id);
     }),
+    /**
+     * End a staff member's membership at `at`, by `by` (a staff member of the same organisation). The row stays so
+     * history remains attributed. Refused with STAFF_ALREADY_REMOVED when the account is already removed. Returns the
+     * stored record.
+     */
+    remove: (id, { at = now(), by = null } = {}) => operation(() => {
+      if (!isClock(at)) throw new TypeError('users.remove: `at` must be a non-negative integer timestamp (ms)');
+      if (by !== null && (typeof by !== 'string' || !by)) throw new TypeError('users.remove: `by` must be a staff id or null');
+      const before = byId(id);
+      if (!before) throw refusal('STAFF_NOT_FOUND', `org_users ${id} does not exist`);
+      checkRemover({ ...before, removedById: by });
+      if (q('UPDATE org_users SET removed_at = ?, removed_by_id = ? WHERE id = ? AND removed_at IS NULL').run(at, by, id).changes !== 1) {
+        throw refusal('STAFF_ALREADY_REMOVED', `org_users ${id} is already removed`);
+      }
+      return byId(id);
+    }),
     /** Begin MFA set-up with a new secret (replacing an unconfirmed one); refused once MFA is enabled. Returns the stored record. */
     startMfa: (id, secretB32) => operation(() => {
       const m = mustExist(id);

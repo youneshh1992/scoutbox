@@ -148,7 +148,7 @@ test('create: defaults fill the optional fields; junk is refused by field before
   t.close();
 });
 
-test('update(id, draft => …): the change is typed whole and written at once; the id, the guardian link, the creation time, the lists and the trial reports never change through it; a composite list set whole keeps its rows; re-entry is refused', () => {
+test('players.update(id, draft => …): the change is typed whole and written at once; the id, the guardian link, the creation time, the lists and the trial reports never change through it; a composite list set whole keeps its rows; re-entry is refused', () => {
   const t = boot();
   const after = t.players.update('pl-seeded', (d) => { d.availability = 'loan_open'; d.medical.shared = false; d.stats = { goals: 30 }; });
   assert.equal(after.availability, 'loan_open'); assert.equal(after.medical.shared, false); assert.equal(after.medical.records.length, 1, 'the medical records stay');
@@ -167,13 +167,40 @@ test('update(id, draft => …): the change is typed whole and written at once; t
   ]) assert.throws(() => t.players.update('pl-seeded', edit), (e) => e.code === 'PLAYER_RECORD_INVALID' && reason.test(e.message), String(reason));
   assert.throws(() => t.players.update('pl-seeded', () => t.players.update('pl-seeded', () => {})), (e) => e.code === 'PLAYER_UPDATE_REENTRANT');
   assert.throws(() => t.players.update('pl-seeded', { availability: 'x' }), /takes a function/);
-  const g = t.guardians.update('gd-signup', (d) => { d.emailVerified = true; d.name = 'Renamed Parent'; });
-  assert.equal(g.emailVerified, true);
-  assert.throws(() => t.guardians.update('gd-signup', (d) => { d.childIds = ['pl-adult']; }), /childIds does not change through update/);
-  assert.throws(() => t.guardians.update('gd-primary', (d) => { d.coGuardians = []; }), /coGuardians does not change through update/);
-  assert.throws(() => t.guardians.update('gd-signup', (d) => { d.email = 'PRIMARY@example.test'; }), (e) => e.code === 'EMAIL_IN_USE', 'the e-mail is unique case-insensitively');
   assert.equal(t.guardians.byEmail('Renamed@nowhere') , null);
   assert.equal(t.guardians.byEmail('SIGNUP@example.test').id, 'gd-signup');
+  t.close();
+});
+
+test('guardian acts: the safeguarding gates only move forward, except Trust & Safety\'s ID review; there is no generic update', () => {
+  const t = boot();
+  assert.equal(t.guardians.update, undefined);
+  assert.equal(t.guardians.byId('gd-signup').emailVerified, false);
+  assert.equal(t.guardians.verifyEmail('gd-signup').emailVerified, true);
+  assert.equal(t.guardians.emailCodeHashOf('gd-signup'), null, 'the spent code is cleared with the verification');
+  assert.equal(t.guardians.verifyEmail('gd-signup').emailVerified, true, 'a second verification changes nothing');
+
+  const first = t.guardians.acceptDisclaimer('gd-signup', 1000);
+  assert.deepEqual([first.disclaimerAccepted, first.disclaimerAcceptedAt], [true, 1000]);
+  assert.equal(t.guardians.acceptDisclaimer('gd-signup', 2000).disclaimerAcceptedAt, 1000, 'the first acceptance time is kept');
+  assert.throws(() => t.guardians.acceptDisclaimer('gd-signup', -1), TypeError);
+
+  const checked = t.guardians.recordIdCheck('gd-signup', { reference: 'idv-ref-1' });
+  assert.deepEqual([checked.idVerified, checked.idvReference], [true, 'idv-ref-1']);
+  assert.throws(() => t.guardians.recordIdCheck('gd-signup', { reference: '' }), (e) => e.code === 'GUARDIAN_RECORD_INVALID');
+  assert.equal(t.guardians.reviewIdCheck('gd-signup', false).idVerified, false, 'Trust & Safety can revoke');
+  assert.equal(t.guardians.reviewIdCheck('gd-signup', true).idVerified, true);
+  assert.throws(() => t.guardians.reviewIdCheck('gd-signup', 'yes'), (e) => e.code === 'GUARDIAN_RECORD_INVALID');
+
+  const prefs = { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' };
+  assert.deepEqual(t.guardians.setNotificationPrefs('gd-signup', prefs).notificationPrefs, prefs);
+  assert.equal(t.guardians.setNotificationPrefs('gd-signup', null).notificationPrefs, null);
+  assert.throws(() => t.guardians.setNotificationPrefs('gd-signup', { ...prefs, quietStart: '25:00' }), (e) => e.code === 'GUARDIAN_RECORD_INVALID');
+  assert.throws(() => t.guardians.setNotificationPrefs('gd-signup', { quietStart: '21:00' }), (e) => e.code === 'GUARDIAN_RECORD_INVALID');
+
+  for (const act of [(id) => t.guardians.verifyEmail(id), (id) => t.guardians.acceptDisclaimer(id, 1), (id) => t.guardians.recordIdCheck(id, { reference: 'r' }), (id) => t.guardians.reviewIdCheck(id, true), (id) => t.guardians.setNotificationPrefs(id, null)]) {
+    assert.throws(() => act('gd-nobody'), (e) => e.code === 'GUARDIAN_NOT_FOUND');
+  }
   t.close();
 });
 

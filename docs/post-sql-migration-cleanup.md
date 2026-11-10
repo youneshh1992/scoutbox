@@ -147,8 +147,9 @@ The rules are likely well under half of the production lines.
    route changes. `offerIntegrity` (`offer.mjs`) still checks shapes the schema now rules out; trim it once the
    batteries that test it on in-memory records have been looked at.
 3. **Wiring (item 2)** after the pilot, since row-level repositories change what each domain needs. Slices, each
-   checked against its batteries: (a) the guardian routes leave `server.mjs`, with their verification flags as
-   named acts, and `users.remove`; (b) agent access, then compliance before the core, which retires the core hooks
+   checked against its batteries: (a) ~~the guardian account and its gates leave `server.mjs`~~ (done 10 Nov:
+   `domains/identity/guardians.mjs`; the guardians repository has no draft update, and `users.remove` ends a
+   membership once; the child-management routes still mount on its router and move in (f)); (b) agent access, then compliance before the core, which retires the core hooks
    and the audit wrapper; (c) integration before the lifecycle and transactions, which retires the holder; (d)
    signings before offers; (e) the review-decided event; (f) the remaining `server.mjs` routes, converting their
    draft edits as they move.

@@ -100,6 +100,23 @@ test('update(id, draft => …): the change is typed whole and written at once; f
   assert.equal(removed.removedById, lead.id);
 });
 
+test('remove: ends a membership once, by a staff member of the same organisation; the row stays', () => {
+  const s = fresh(); const users = repoOn(s);
+  const lead = users.create({ orgId: 'org-a', name: 'Lead', role: 'Manager' });
+  const u = users.create({ orgId: 'org-a', name: 'Sam', role: 'Scout' });
+  const other = users.create({ orgId: 'org-b', name: 'Elsewhere', role: 'Manager' });
+  refused(() => users.remove(u.id, { at: NOW, by: other.id }), 'STAFF_RECORD_INVALID', 'same organisation');
+  refused(() => users.remove('usr-none', { at: NOW, by: lead.id }), 'STAFF_NOT_FOUND');
+  assert.throws(() => users.remove(u.id, { at: -1, by: lead.id }), TypeError);
+  assert.equal(users.byId(u.id).removedAt, null, 'every refused removal left the row as it was');
+  const removed = users.remove(u.id, { at: NOW + 5, by: lead.id });
+  assert.deepEqual([removed.removedAt, removed.removedById], [NOW + 5, lead.id]);
+  refused(() => users.remove(u.id, { at: NOW + 6, by: lead.id }), 'STAFF_ALREADY_REMOVED');
+  assert.equal(users.byId(u.id).removedAt, NOW + 5, 'the first removal stands');
+  assert.deepEqual(users.forOrg('org-a', { active: true }).map((x) => x.id), [lead.id]);
+  assert.equal(users.forOrg('org-a').length, 2, 'the removed row stays');
+});
+
 test('MFA: set up, confirm, a recovery code works exactly once, disable; the secret is read only through mfaSecretOf', () => {
   const s = fresh(); const users = repoOn(s);
   const u = users.create({ orgId: 'org-a', name: 'Lead', role: 'Manager' });

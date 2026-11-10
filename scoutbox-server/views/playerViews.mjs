@@ -74,10 +74,10 @@ export function guardianChildView(player, helpers) {
   return { ...rest, age: ageOn(player.dob), trustScore: computeTrustScore(player), trust: trustBreakdown(player) };
 }
 
-/** A guardian's own record: minus the password hash and the outstanding e-mail code or its hash. */
+export const SELF_GUARDIAN_FIELDS = Object.freeze(['id', 'name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted', 'disclaimerAcceptedAt', 'coGuardianOf', 'notificationPrefs', 'createdAt', 'childIds', 'coGuardians']);
+/** A guardian's own record: an allowlist, so the password hash and the e-mail code never appear. */
 export function guardianSelfView(guardian) {
-  const { password, emailCode, emailCodeHash, ...safe } = plain(guardian);
-  return safe;
+  return pick(guardian, SELF_GUARDIAN_FIELDS);
 }
 
 /** Trust & Safety: a positive allowlist; never the hash, never the code. */

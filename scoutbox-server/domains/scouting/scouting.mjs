@@ -702,7 +702,7 @@ export function registerScouting(ctx) {
     if (u.removedAt) return res.status(409).json({ error: 'ALREADY_REMOVED' });
     // One unit: the account, its sessions and the ledger row (the event streams close after the commit).
     const removed = unit(() => {
-      const out = users.update(u.id, (d) => { d.removedAt = Date.now(); d.removedById = req.orgUser.id; });
+      const out = users.remove(u.id, { at: Date.now(), by: req.orgUser.id });
       revokeOrgUserAccess(u.id);
       ledgerAppend({ type: 'staff_removed', orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
       return out;
