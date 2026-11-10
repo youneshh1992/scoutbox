@@ -1,21 +1,10 @@
 /**
- * The match facts builder and keeper (the tables: repositories/matchFacts.mjs).
+ * Builds and keeps the stored match facts that matching, the watchlists and Nobody Missed test. Nothing in them
+ * depends on the reading organisation (visibility, age and distance are the query's), so they are derived once per
+ * player. `refreshDueAt` is the next instant at which time alone changes one of them.
  *
- * `build(player)` is the facts projection that matching, the watchlists and Nobody Missed test. Nothing in it
- * depends on the organisation reading (visibility, age and distance are the query's), so it is derived once per
- * player and stored:
- *   position, secondaryPositions, availability   the Passport preferences, else the profile
- *   lastEvidenceAt, lastFootageAt                 the current (not superseded) evidence, newest instant
- *   coachReference                                an active reference, or coach-confirmed evidence
- *   clubConfirmed                                 a signing
- *   combine                                       production Combine Verified attempts whose session stands, by
- *                                                 protocol, with the best finite measurement (simulated never)
- *   trustBand                                     the Trust Score's band (verification/trust), unchanged
- *   refreshDueAt                                  the next instant at which time alone changes one of these
- *
- * The keeper: `drain()` re-derives the players the input triggers marked, registered to run before every COMMIT on
- * the connection; `sweep()` marks the rows whose time-only change is due (boot, then every minute); `start()` checks
- * the policy key and rebuilds every row when it changed.
+ * `drain()` re-derives the players the input triggers marked, before every COMMIT on the connection; `sweep()` marks
+ * the rows whose time-only change is due; `start()` rebuilds every row when the policy key changed.
  */
 import { PROVIDERS } from '../development/boxcam/drills.mjs';
 import { isAdult } from '../../domain.mjs';
@@ -59,8 +48,7 @@ export function createMatchFactsKeeper(ctx) {
     const prefs = vreads.passportPrefs.forPlayer(id); // null until the player saves preferences
     const evidence = sreads.evidence.currentForPlayer(id);
     const newest = (list) => list.reduce((m, e) => Math.max(m, e.recordedAt ?? 0), 0) || null;
-    // Production-valid Combine only: a simulated result never becomes recruitment eligibility, and an attempt whose
-    // bound session was invalidated stops counting.
+    // A simulated result is not recruitment eligibility, and an attempt whose session was invalidated stops counting.
     const verified = [...breads.attempts.forPlayer(id)].reverse()
       .filter((a) => a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
     const sessions = new Map(breads.sessions.byIds(verified.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
@@ -99,7 +87,7 @@ export function createMatchFactsKeeper(ctx) {
   }
 
   let draining = false;
-  /** Re-derive every marked player (inside the transaction that is about to commit). */
+  /** Runs inside the transaction that is about to commit. */
   function drain() {
     if (draining) return 0;
     draining = true;
@@ -117,12 +105,11 @@ export function createMatchFactsKeeper(ctx) {
     return n;
   }
 
-  /** Mark the rows whose time-only change is due; the unit's COMMIT re-derives them (and any marker left over). */
+  /** The unit's COMMIT re-derives the marked rows. */
   const sweep = (at = Date.now()) => unit(() => matchFacts.markDue(at));
 
   const policyKey = matchFactsPolicyKey({ trustPolicyVersion: TRUST_SCORE_POLICY_VERSION, simulatedEvidence: !!ctx.testProviderEnabled });
   let stop = null;
-  /** Register the drain and bring the facts up to date: every row under a new policy, else the marked and due ones. */
   function start() {
     if (stop) return;
     stop = onBeforeCommit(ctx.sqlite, drain);

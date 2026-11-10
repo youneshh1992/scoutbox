@@ -1,8 +1,6 @@
 /**
- * Who may act in the Agent workspace: agency membership, the role's capabilities, the agent's profile and the
- * concealing lookup of an agreement. Every agent domain (core, compliance, transactions, the cross-app integration,
- * offers, signings, journeys) checks through these, so the rule has one definition and no domain needs another
- * domain's routes to ask it.
+ * Who may act in the agent workspace: membership, capabilities, the agent's profile and the concealing agreement
+ * lookup, shared by every agent domain.
  */
 import { sendAgentError } from './core/errors.mjs';
 import { tiersOf, can } from './core/shared.mjs';
@@ -46,7 +44,6 @@ export function createAgentAccess({ agentCore, unit, nextId, broadcast, now = ()
     return aff;
   }
 
-  /** True when the caller's tiers include `cap`; otherwise answers 403 and returns false. */
   const requireCap = (req, res, cap) => {
     if (can(req.tiers, cap)) return true;
     sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: `Your agency role does not include "${cap}".` }, cap);

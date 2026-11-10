@@ -1,26 +1,14 @@
-// Fixture variation families and the false-touch stress suite.
-//
-// Variation families: key fixtures become PARAMETERISED FAMILIES, varying factors
-// independently and in combination, each with its expected semantic result
-// declared before execution and never read back out of the engine.
-//
-// The false-touch stress suite: a dedicated group whose entire purpose is to try to make
-// the engine count a touch that did not happen. Every case in it expects
-// ZERO touches. Any touch there is a P0.
-//
-// No demographic labels appear anywhere: the player is a rectangle, and the
-// variation axes are geometric and photometric.
+// Variation families (expected results declared before execution, never read back from the engine) and the
+// false-touch stress suite, where every case expects zero touches. The player is a rectangle: the variation axes are
+// geometric and photometric, with no demographic labels.
 
 import {
   sequence, jugglePath, touchPath, stationaryPath, rollPath,
   independentBouncePath, nearMissPath, DEFAULT_PERSON, DEFAULT_BALL_RN,
 } from './scenes.mjs';
 
-// The supported render sizes: the 480p/720p/1080p-equivalent sizes would exceed
-// the gray8 transport's 320x240 frame cap (policy FRAME_LIMITS), so these are
-// proportional synthetic dimensions instead. The
-// ratio between smallest and largest is 2x on each axis — enough that a
-// pixel-space threshold would fail loudly.
+// Real 480p–1080p would exceed the gray8 320x240 cap, so these are proportional synthetic sizes; 2x between smallest
+// and largest is enough for a pixel-space threshold to fail loudly.
 export const RESOLUTIONS = Object.freeze([
   { id: '160x120', w: 160, h: 120 },
   { id: '240x180', w: 240, h: 180 },
@@ -33,12 +21,7 @@ export const FRAME_RATES = Object.freeze([15, 24, 30]);
 // Variation families
 // =========================================================================
 
-/**
- * Every family declares its parameter space and the semantic result each
- * variant must produce. `expected.count` is what the PATH contains by
- * construction — arithmetic on the generator's own parameters, not a reading
- * taken from the detector.
- */
+/** `expected.count` is what the path contains by construction, not a reading from the detector. */
 export function variationFamilies() {
   const fams = [];
 
@@ -71,7 +54,7 @@ export function variationFamilies() {
   });
 
   // --- Family 3: frame-rate invariance on a valid juggle -----------------
-  // The SAME physical event (8 contacts over 4.8 s) sampled at three rates.
+  // The same physical event (8 contacts over 4.8 s) sampled at three rates.
   fams.push({
     family: 'juggle_valid_fps',
     axis: 'fps',
@@ -155,8 +138,7 @@ export function variationFamilies() {
     variants: SILHOUETTES.map((s) => ({
       id: `silhouette_${s.id}`,
       kind: 'juggle',
-      // The ball tracks the silhouette so the physical relationship is the
-      // same scene in every variant, not a different one.
+      // The ball tracks the silhouette, so every variant is the same physical scene.
       frames: sequence({
         path: jugglePath({ contacts: 8, x: (s.box.x0 + s.box.x1) / 2 + 0.02 }),
         person: s.box, seed: 11,
@@ -180,32 +162,17 @@ export function variationFamilies() {
       id: v.id,
       kind: 'juggle',
       frames: sequence({ path: jugglePath({ contacts: 8 }), seed: 11, ...v.opts }),
-      // Camera motion must not change the count: the player-relative frame
-      // is what the rules measure in.
+      // The rules measure in the player-relative frame, so camera motion must not change the count.
       expected: { state: 'accepted', count: 8, tolerance: 1 },
     })),
     invariant: 'count_must_match_across_variants',
   });
 
   // --- Family 10: legitimate touch pace ----------------------------------
-  // Each real touch counted once, at every plausible pace. Slow, normal,
-  // fast, and near the supported maximum.
-  // Pace varies; the strike itself is identical in every variant. That is
-  // what "pace" means — a player tapping once a second is not tapping more
-  // softly than one tapping twice a second, they are resting longer between.
-  //
-  // SUPPORTED PACE ENVELOPE. Measurement showed the engine counting within
-  // tolerance from 900 ms down to 340 ms between touches, and under-counting
-  // at 260 ms (about four touches a second) — it returned 10 of 14. The
-  // response is to NARROW THE SUPPORTED RANGE rather than loosen the
-  // detector: under-counting costs recall, and the alternative — relaxing
-  // the refractory or separation rules until the fastest pace fits — buys
-  // those four touches by weakening the defences that keep the false-touch
-  // suite at zero. A conservative engine which refuses
-  // or under-counts is preferable to one that verifies falsely.
-  //
-  // 260 ms is therefore retained as a DECLARED LIMITATION case below, not as
-  // an invariance requirement, and it is reported as a capability limit.
+  // The strike is identical in every variant; only the rest between touches changes. The engine counts within
+  // tolerance from 900 ms down to 340 ms and returned 10 of 14 at 260 ms. The supported range was narrowed rather than
+  // the refractory or separation rules relaxed, which would weaken the false-touch defences; 260 ms is kept below as
+  // a declared limitation.
   const PACES = [
     { id: 'slow', periodMs: 900, touches: 6 },
     { id: 'normal', periodMs: 500, touches: 10 },
@@ -223,19 +190,15 @@ export function variationFamilies() {
         fps: 30, durationMs: p.periodMs * p.touches,
         path: touchPath({ touches: p.touches, periodMs: p.periodMs }), seed: 23,
       }),
-      // Rapid legitimate touches must NOT be collapsed by the refractory
-      // interval. Even the fastest supported pace is comfortably outside
-      // the 180 ms refractory, so all of them must survive.
+      // Even the fastest supported pace is well outside the 180 ms refractory, so every touch must survive.
       expected: { state: 'accepted', count: p.touches, tolerance: 2 },
     })),
     invariant: 'each_real_touch_counted_once',
     supportedMinPeriodMs: SUPPORTED_MIN_TOUCH_PERIOD_MS,
   });
 
-  // --- Family 10b: the declared limitation, measured rather than assumed ---
-  // Above the supported pace the engine under-counts. That is recorded as a
-  // known, measured limit with its actual numbers, so the documentation
-  // cannot drift away from what the engine does.
+  // --- Family 10b: the declared limitation, measured ---
+  // Above the supported pace the engine under-counts; recorded with its actual numbers.
   fams.push({
     family: 'touch_pace_above_supported',
     axis: 'motionSpeed',
@@ -248,8 +211,7 @@ export function variationFamilies() {
         fps: 30, durationMs: 260 * 14,
         path: touchPath({ touches: 14, periodMs: 260 }), seed: 23,
       }),
-      // Accepted, but the count is NOT asserted against the true 14 — the
-      // point of this case is that it is outside the envelope.
+      // The count is not asserted against the true 14: this is outside the envelope.
       expected: { state: 'accepted_count_not_asserted', count: null },
     }],
     invariant: 'declared_limitation_only',
@@ -270,8 +232,7 @@ export function variationFamilies() {
   });
 
   // --- Family 12: cadence jitter -----------------------------------------
-  // Input is never perfectly periodic. Same event, increasingly
-  // irregular arrival times, using the trusted timestamps throughout.
+  // Same event, increasingly irregular arrival times, on trusted timestamps.
   fams.push({
     family: 'cadence_jitter',
     axis: 'jitterMs',
@@ -291,8 +252,7 @@ export function variationFamilies() {
 // =========================================================================
 // The false-touch stress suite
 //
-// Twenty ways to try to make the engine count a touch that never happened.
-// EVERY case expects zero. A count here is a P0 for exact measurement.
+// Twenty ways to try to make the engine count a touch that never happened. Every case expects zero.
 // =========================================================================
 
 export function falseTouchStress() {

@@ -1,24 +1,14 @@
-// Trust & Safety review, licence verification, disputes, cascades and
-// the deterministic expiry sweep.
+// Trust & Safety review, licence checks, disputes, cascades and the expiry sweep. A reviewer receives each case with
+// the automated checks, evidence, prior claims and the reason codes that forced human review.
 //
-// Honesty contract:
-//  * A human reviewer is the LAST step: every case arrives packaged with the
-//    automated checks, evidence, prior claims and the exact reason codes that
-//    forced human review.
-//  * Licence "verification" is only claimed when an authoritative source
-//    confirmed it. Uploaded documents show "Credential submitted"; a manual
-//    T&S document review is labelled as exactly that. No production
-//    governing-body registry is connected — providers ship `not_configured`,
-//    and only a LOCAL TEST fixture (env-gated) exercises the adapter.
-//  * Revocation/suspension propagates to effective badges immediately via the
-//    read-time engine; history is never deleted.
+// A licence is called verified only when an authoritative source confirmed it. No governing-body registry is
+// connected: providers ship `not_configured`, and only a local test fixture (env-gated) exercises the adapter.
 import { decideReview, normalizeDomain, domainOfEmail, domainCovered, sha256 } from './shared.mjs';
 import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
 import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.mjs';
 
 // ---------------------------------------------------------------- registry
-// Licence-registry adapter. Interface every future FA/UEFA/
-// federation integration implements. Nothing here fakes a network call.
+// The interface a governing-body register integration implements. Nothing here fakes a network call.
 export function licenceProviders() {
   const testState = process.env.TEST_LICENCE_REGISTRY; // '1' | 'down' | unset
   return [
@@ -28,8 +18,7 @@ export function licenceProviders() {
       state: testState === '1' ? 'configured' : testState === 'down' ? 'temporarily_unavailable' : 'not_configured' },
   ];
 }
-// Deterministic local fixture: exercises exact-match, ambiguous and no-match
-// paths in tests. It exists ONLY when TEST_LICENCE_REGISTRY=1.
+// Exercises the match, ambiguous and no-match paths in tests; exists only when TEST_LICENCE_REGISTRY=1.
 const TEST_REGISTRY_ROWS = [
   { identifier: 'UEFA-A-12345', holderName: 'diane okafor', licenceType: 'UEFA A Licence', issuer: 'local-test-registry', validUntil: '2028-06-30' },
   { identifier: 'UEFA-B-77777', holderName: 'sam cole', licenceType: 'UEFA B Licence', issuer: 'local-test-registry', validUntil: '2027-01-31' },
@@ -57,19 +46,15 @@ export function registerVerificationReview(ctx) {
   const orgOf = (id) => byId.org(id) ?? null;
   const claimById = (id) => reads.claims.byId(id);
   const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
-  /** Run a sequence of transitions as one unit; the first refusal undoes them all and is returned. */
+  /** The first refusal undoes them all and is returned. */
   const allOrNothing = (fn) => {
     try { unit(() => { const err = fn(); if (err) throw Object.assign(new Error(err), { transitionError: err }); }); } catch (e) { if (e.transitionError) return e.transitionError; throw e; }
     return null;
   };
-  // Attribution: the admin surface may authenticate with one SHARED key, which identifies no individual. A request
-  // may DECLARE its reviewer (x-admin-reviewer-id / x-admin-reviewer-name); every consequential decision then
-  // records that declared identity, the correlation id and the attribution mode. When no reviewer is declared,
-  // events honestly say `shared_admin_key` instead of inventing a person.
+  // The admin surface may authenticate with one shared key, which identifies no individual. A request may declare
+  // its reviewer in headers; with none declared, events say `shared_admin_key` rather than invent a person.
   const reviewerOf = (req) => {
-    // An AUTHENTICATED reviewer session, when presented
-    // beside the shared key, is the attribution — derived by the server from
-    // the session, never from a header a caller typed.
+    // An authenticated reviewer session beside the shared key wins over any header a caller typed.
     if (req?.reviewer?.id) return { id: String(req.reviewer.id).slice(0, L.id), name: String(req.reviewer.name ?? req.reviewer.id).slice(0, L.name), attribution: 'authenticated_reviewer' };
     const id = String(req?.headers?.['x-admin-reviewer-id'] ?? '').trim().slice(0, 60);
     const name = String(req?.headers?.['x-admin-reviewer-name'] ?? '').trim().slice(0, 80);
@@ -95,8 +80,7 @@ export function registerVerificationReview(ctx) {
     const { licenceType, issuer, identifier, issueDate, expiry, dataUrl, filename, holderName } = req.body ?? {};
     if (typeof licenceType !== 'string' || typeof issuer !== 'string' || !licenceType.trim() || !issuer.trim()) return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'licenceType and issuer are required.' });
     for (const [k, v] of [['identifier', identifier], ['holderName', holderName], ['filename', filename]]) if (!(v === undefined || v === null || typeof v === 'string')) return fieldInvalid(res, k, `${k} is text.`);
-    // A malformed expiry is refused, not read as "no expiry". A DATE_ONLY expiry
-    // covers the whole day (the licence is valid THROUGH that day).
+    // A malformed expiry is refused, not read as "no expiry". A day-only expiry covers the whole day.
     const exp = isAbsent(expiry) ? null : parseDateOrInstant(expiry, { dayEdge: 'end' });
     if (exp && !exp.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'expiry', message: `An expiry is a calendar day written YYYY-MM-DD (${exp.why}).`, expected: 'YYYY-MM-DD' });
     const issued = isAbsent(issueDate) ? null : parseDateOrInstant(issueDate, { dayEdge: 'start' });
@@ -108,7 +92,6 @@ export function registerVerificationReview(ctx) {
       stored = storeEvidenceFile(dataUrl, filename, req);
       if (stored.error) return res.status(422).json({ error: stored.error });
     }
-    // The issue and expiry days are the claim's validFrom / validUntil (the raw inputs are not kept twice).
     const claim = unit(() => {
       const created = createClaim({
         subjectType: 'user', subjectId: req.orgUser.id, claimType: 'LICENCE',
@@ -151,8 +134,7 @@ export function registerVerificationReview(ctx) {
     verEvent(lookup.result ? 'automated_check.passed' : 'automated_check.failed', { claimId: claim.id, subjectId: claim.subjectId, after: { provider: providerId, state: lookup.state, result: lookup.result } }, req);
     const view = () => { const c = reads.claims.byId(claim.id); return { id: c.id, status: c.status, display: c.metadata.display }; };
     if (lookup.state !== 'configured') {
-      // Fail HONEST: unavailable/unconfigured providers leave the claim
-      // pending — never "verified", never "rejected".
+      // An unavailable or unconfigured provider leaves the claim pending, neither verified nor rejected.
       const registry = { provider: providerId, state: lookup.state, checkedAt: Date.now() };
       const routed = transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'no authoritative register available' }, req, { metadata: { registry }, addReviewReasons: ['NO_AUTHORITATIVE_SOURCE', 'DOCUMENT_AUTHENTICITY_UNCONFIRMED'] });
       vmetric('routedToHumanReview');
@@ -167,8 +149,7 @@ export function registerVerificationReview(ctx) {
     }
     if (lookup.result === 'match') {
       const rec = lookup.record;
-      // The register's expiry must be readable before it can verify anything: the
-      // SELF-DECLARED expiry never stands in for an unreadable authoritative one.
+      // The self-declared expiry never stands in for an unreadable register one.
       const regUntil = isAbsent(rec.validUntil) ? null : parseDateOrInstant(rec.validUntil, { dayEdge: 'end' });
       if (regUntil && !regUntil.ok) {
         const registry = { provider: providerId, result: 'unreadable_record', checkedAt: Date.now(), reference: rec.identifier };
@@ -196,7 +177,7 @@ export function registerVerificationReview(ctx) {
       vmetric('routedToHumanReview');
       return res.json({ claim: view(), provider: { id: providerId, result: 'ambiguous' }, note: 'The register returned more than one plausible record — a human resolves ambiguity, never a guess.' });
     }
-    // no_match: absence of a record VERIFIES NOTHING and PROVES NOTHING.
+    // No record verifies nothing and proves nothing.
     const registry = { provider: providerId, result: 'no_match', checkedAt: Date.now() };
     transition(claim, 'requires_human_review', { actorKind: 'system', reason: 'registry found no matching record' }, req, { metadata: { registry }, addReviewReasons: ['DOCUMENT_AUTHENTICITY_UNCONFIRMED'] });
     vmetric('routedToHumanReview');
@@ -204,9 +185,7 @@ export function registerVerificationReview(ctx) {
   });
 
   // ================================================= evidence access
-  // T&S: everything, every read logged. Org reviewers: organisation_internal
-  // evidence of their OWN org only. Subjects: their own uploads' metadata via
-  // the subject claim view (organisations.mjs). Nothing is ever public.
+  // T&S sees everything, every read logged; org reviewers see their own org's organisation_internal evidence only.
   adminRouter.get('/verification/evidence/:id', (req, res) => {
     const ev = reads.evidence.byId(req.params.id);
     if (!ev) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
@@ -216,7 +195,6 @@ export function registerVerificationReview(ctx) {
   });
   orgRouter.get('/verification/evidence/:id', (req, res) => {
     const ev = reads.evidence.byId(req.params.id);
-    // Concealment: wrong org / wrong visibility looks identical to missing.
     if (!ev || ev.orgId !== req.org.id || ev.visibility !== 'organisation_internal') {
       return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
     }
@@ -285,8 +263,6 @@ export function registerVerificationReview(ctx) {
     res.json({ assigned: assignedTo });
   });
 
-  // Consequential decisions all REQUIRE a reason and land in the
-  // append-only event log with before/after.
   const reasonRequired = (req, res) => {
     if (typeof req.body?.reason === 'string' && req.body.reason.trim()) return true;
     res.status(400).json({ error: 'REASON_REQUIRED', message: 'Manual verification decisions require a written reason — it is audited.' });
@@ -303,8 +279,7 @@ export function registerVerificationReview(ctx) {
     const method = c.claimType === 'LICENCE' ? 'scoutbox_manual_review' : (req.body?.method && ['scoutbox_manual_review', 'federation_confirmation', 'authoritative_registry'].includes(req.body.method) ? req.body.method : 'scoutbox_manual_review');
     const err = allOrNothing(() => {
       if (c.status === 'pending') { const hop = adminTransition(c, 'requires_human_review', req, { reason: 'escalated for manual decision' }); if (hop) return hop; }
-      // A manual document review of a licence is labelled as exactly that — it is NOT a register check, and the display
-      // copy says so.
+      // A manual document review of a licence is not a register check, and the display copy says so.
       const display = c.claimType !== 'LICENCE' ? null : method === 'authoritative_registry'
         ? `Licence verified: ${c.metadata.licenceType}`
         : `${c.metadata.licenceType}: confirmed by Trust & Safety document review (not an independent register check)`.slice(0, L.display);
@@ -373,18 +348,9 @@ export function registerVerificationReview(ctx) {
     if (r.status !== 'requires_human_review') return res.status(409).json({ error: 'REQUEST_NOT_DECIDABLE', message: `Request is ${r.status}.` });
     if (!(req.body?.linkUserId === undefined || req.body?.linkUserId === null || typeof req.body.linkUserId === 'string')) return fieldInvalid(res, 'linkUserId', 'linkUserId is an account id.');
     const rev = reviewerOf(req);
-    // Organisation: attach to the matched existing org, or create a new one (inside the unit below).
     const existingOrg = r.existingOrgId ? orgOf(r.existingOrgId) : null;
-    // Applicant → account linking. Identity is NEVER established
-    // by a name: two different people can share one. The rules:
-    //  * exact match on the VERIFIED work email (mailbox control proven via
-    //    the single-use token challenge) may link authoritatively;
-    //  * name equality only surfaces review CANDIDATES — never a link;
-    //  * where candidates exist without an email match, Trust & Safety must
-    //    explicitly choose the account (linkUserId) or explicitly provision
-    //    a new one (provisionNewUser: true);
-    //  * with no candidates at all, the applicant is provisioned as a new
-    //    user per the existing workflow — no guessing.
+    // Identity is never established by a name: two people can share one. Only a match on the proven work e-mail
+    // links; a name match only surfaces candidates, and T&S must then choose an account or provision a new one.
     const norm = (s) => String(s ?? '').trim().toLowerCase();
     const activeUsers = existingOrg ? users.forOrg(existingOrg.id, { active: true }) : [];
     const emailMatches = r.emailProved ? activeUsers.filter((u) => u.email && u.email.toLowerCase() === r.workEmail) : [];
@@ -396,7 +362,7 @@ export function registerVerificationReview(ctx) {
       if (!user) return res.status(404).json({ error: 'LINK_USER_NOT_FOUND', message: 'linkUserId must be an active user of the target organisation.' });
       identityLink = 'trust_safety_selection';
     } else if (req.body?.provisionNewUser === true) {
-      identityLink = 'provisioned_new_user'; // explicit human choice to NOT link
+      identityLink = 'provisioned_new_user'; // an explicit choice not to link
     } else if (emailMatches.length === 1) {
       user = emailMatches[0];
       identityLink = 'verified_work_email';
@@ -410,8 +376,8 @@ export function registerVerificationReview(ctx) {
         })),
       });
     }
-    // Staff sign in by name: a new account cannot take a name an account of the organisation already has
-    // (removed accounts included: product decision). Refused before anything is written.
+    // Staff sign in by name, so a new account cannot take a name an account of the organisation already has (removed
+    // accounts included: a product decision).
     if (!user && existingOrg && users.byOrgAndName(existingOrg.id, r.applicantName)) {
       return res.status(409).json({ error: 'STAFF_NAME_TAKEN', message: 'An account of this organisation (current or removed) already has the applicant\'s name. Link it (linkUserId) if it is a current account and the applicant\'s; otherwise reject the request and ask the applicant to re-apply under a name that tells them apart.' });
     }
@@ -420,8 +386,6 @@ export function registerVerificationReview(ctx) {
     if (emailHolder && emailHolder.id !== user?.id && !user?.email) {
       return res.status(409).json({ error: 'STAFF_EMAIL_TAKEN', message: 'Another current staff member of this organisation has the applicant\'s work e-mail. Link that account (linkUserId) if it is the applicant\'s.' });
     }
-    // One unit: the organisation (when it is new), the applicant's account, the claims, the verified flag, the
-    // domain, the root grant and the decision commit together.
     let org = existingOrg;
     if (!user) identityLink ??= 'provisioned_new_user';
     const { approved } = unit(() => {
@@ -437,15 +401,13 @@ export function registerVerificationReview(ctx) {
       }
       if (!user) user = users.create({ orgId: org.id, name: r.applicantName.trim(), role: r.applicantRole.trim() || 'Manager', email: r.workEmail });
       else if (!user.email) user = users.update(user.id, (d) => { d.email = r.workEmail; });
-      // …organisation identity claim: established by Trust & Safety review.
       createClaim({
         subjectType: 'org', subjectId: org.id, claimType: 'ORGANISATION_IDENTITY', organisationId: org.id,
         status: 'verified', verificationMethod: 'scoutbox_manual_review', verifiedAt: Date.now(),
         verifiedBy: { kind: 'trust_safety', id: rev.id }, evidenceIds: [...r.evidenceIds],
         metadata: { rootRequest: r.id, orgType: r.orgType, website: r.website },
       });
-      // Keep the LEGACY effective flag in sync — same standing meaning: minors
-      // still additionally need the safeguarding contract.
+      // Minors still also need the safeguarding contract.
       orgs.update(org.id, (d) => { d.verified = true; });
       // Domain claim only where the mailbox proof aligns with the stated domain.
       if (r.emailProved && r.domain && domainCovered(domainOfEmail(r.workEmail), r.domain)) {
@@ -456,7 +418,6 @@ export function registerVerificationReview(ctx) {
           verifiedBy: { kind: 'trust_safety', id: rev.id }, metadata: { domain: r.domain, rootRequest: r.id },
         });
       }
-      // Root administrator authority + its claim.
       createClaim({
         subjectType: 'user', subjectId: user.id, claimType: 'ORGANISATION_ADMIN', organisationId: org.id,
         status: 'verified', verificationMethod: 'scoutbox_manual_review', verifiedAt: Date.now(),
@@ -492,7 +453,7 @@ export function registerVerificationReview(ctx) {
     res.json({ request: { ...rejected, applicantSecretHash: undefined } });
   });
 
-  // Appoint a root admin for an org that is ALREADY verified — a T&S action with a reason, never self-service.
+  // A T&S action with a reason, never self-service.
   adminRouter.post('/verification/orgs/:id/appoint-root', (req, res) => {
     const org = orgOf(req.params.id);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
@@ -515,7 +476,7 @@ export function registerVerificationReview(ctx) {
     res.status(201).json({ orgId: org.id, rootAdminUserId: user.id });
   });
 
-  // Domain requests escalated to T&S (root/contested changes).
+  // Domain requests escalated to T&S (root or contested changes).
   adminRouter.get('/verification/domain-requests', (_req, res) => {
     res.json({ items: reads.domainRequests.awaitingReview() });
   });
@@ -560,7 +521,7 @@ export function registerVerificationReview(ctx) {
     if (!(req.body?.role === undefined || req.body?.role === null || typeof req.body.role === 'string')) return fieldInvalid(res, 'role', 'role is text.');
     if (!(req.body?.current === undefined || typeof req.body.current === 'boolean')) return fieldInvalid(res, 'current', 'current is true or false.');
     const c = claimById(d.claimId);
-    // A corrected expiry is an instant or a calendar day that exists, or null; a typo is refused, not "no expiry".
+    // A typo is refused, not read as "no expiry".
     let validUntilCorrection = null;
     if (req.body?.validUntil !== undefined && !isAbsent(req.body.validUntil)) {
       const p = parseDateOrInstant(req.body.validUntil, { dayEdge: 'end' });
@@ -573,7 +534,6 @@ export function registerVerificationReview(ctx) {
     };
     const corrections = { set: { ...(req.body.role ? { role: String(req.body.role).slice(0, L.role) } : {}), ...period } };
     const rev2 = reviewerOf(req);
-    // One unit: the claim's outcome and the dispute's resolution commit together.
     let refusedWith = null;
     const resolved = (() => { try { return unit(() => {
       if (c && c.status === 'disputed') {
@@ -621,8 +581,7 @@ export function registerVerificationReview(ctx) {
     res.json({ affected: affected.length, flagged, suspended });
   });
 
-  // Organisation lifecycle from T&S (suspension uses the EXISTING org
-  // suspension mechanics; revocation is verification-specific).
+  // Suspension uses the ordinary org suspension; revocation is verification-specific.
   adminRouter.post('/verification/orgs/:id/revoke', (req, res) => {
     const org = orgOf(req.params.id);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
@@ -638,10 +597,7 @@ export function registerVerificationReview(ctx) {
   });
 
   // =============================================== legacy-route sync
-  // The admin toggle (POST /admin/clubs/:id/verification) stays
-  // functional; this hook gives its changes claim-level provenance so the two
-  // systems can never drift apart.
-  /** Called inside the legacy route's unit of work. */
+  /** Gives the admin toggle (POST /admin/clubs/:id/verification) claim-level provenance; runs inside its unit. */
   ctx.syncLegacyOrgVerification = (org, body) => {
     if (body?.verified === undefined) return;
     const existing = reads.claims.forSubject('org', org.id).find((c) => c.claimType === 'ORGANISATION_IDENTITY');
@@ -661,11 +617,10 @@ export function registerVerificationReview(ctx) {
     }
   };
 
-  // =============================================== deterministic sweep
+  // =============================================== expiry sweep
   ctx.verificationSweep = () => {
     const now = Date.now();
     let changed = 0;
-    // Indexed queries, not a scan of every claim; each claim's change commits as one unit with its notification.
     for (const c of reads.claims.expiredBy(now)) {
       unit(() => {
         transition(c, 'expired', { actorKind: 'system', eventType: 'claim.expired' });

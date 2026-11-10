@@ -1,10 +1,5 @@
-// Post-signing outcomes with restart-safe follow-up jobs · practical access: captions, honest benchmarks
-// (resumable uploads: domains/media/uploads.mjs), football-context fields · plus the persistent sweep that also
-// powers application reminders, trial-feedback escalation and upload cleanup.
-//
-// Every scheduled behaviour is a PERSISTED record examined by an idempotent
-// sweep (on boot + every 60 s). Restarts lose nothing and re-send nothing:
-// the marker that a reminder went out lives in the database, not in a timer.
+// Scheduled behaviour is a persisted record examined by an idempotent sweep (at boot and every 60 s). The marker that
+// a reminder went out lives in the database, not in a timer, so restarts lose and re-send nothing.
 
 import { isAdult, visibleToOrg } from '../../domain.mjs';
 import { deriveWorkflowState } from '../recruitment/lifecycle/trial.mjs';
@@ -33,7 +28,7 @@ export function registerOperations(ctx) {
   function scheduleFollowUps(signing) {
     let added = 0;
     for (const [milestone, days] of Object.entries(MILESTONES)) {
-      if (fu.forSigning(signing.id).some((f) => f.milestone === milestone)) continue; // idempotent
+      if (fu.forSigning(signing.id).some((f) => f.milestone === milestone)) continue;
       fu.schedule({
         id: nextId('fup'), signingId: signing.id, playerId: signing.playerId, orgId: signing.orgId,
         milestone, dueAt: (signing.signedAt ?? signing.ts ?? Date.now()) + days * 86_400_000,
@@ -57,7 +52,6 @@ export function registerOperations(ctx) {
     };
   }
 
-  // By due date, then id, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
   orgRouter.get('/followups', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
@@ -74,7 +68,7 @@ export function registerOperations(ctx) {
     if (!['registered', 'released', 'left', 'unknown'].includes(registrationStatus)) {
       return res.status(400).json({ error: 'REGISTRATION_STATUS_INVALID', allowed: ['registered', 'released', 'left', 'unknown'] });
     }
-    // A non-integer or negative matchesPlayed and an over-long text are refused, never sliced or nulled.
+    // Refused, never sliced or nulled.
     if (matchesPlayed !== undefined && matchesPlayed !== null && !(Number.isSafeInteger(matchesPlayed) && matchesPlayed >= 0)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'matchesPlayed', message: 'matchesPlayed must be a whole number of matches, or omitted when not evidenced.' });
     if (tooLong(res, 'progression', progression, LIMITS.progression) || tooLong(res, 'endReason', endReason, LIMITS.endReason) || tooLong(res, 'note', note, LIMITS.note)) return;
     if (note && !moderateOrRefuse(res, note, { kind: 'outcome_report', playerId: f.playerId, orgId: req.org.id })) return;
@@ -88,7 +82,6 @@ export function registerOperations(ctx) {
     };
     const p = findPlayer(f.playerId);
     const text = `📊 ${req.org.name} filed the ${f.milestone} follow-up on the signing — please confirm or dispute it.`;
-    // The report row, the follow-up's status and the notification commit as one unit of work.
     let done;
     try { done = unit(() => { outcomes.file(report); const fresh = fu.patch(f.id, { status: 'complete' }); if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'outcome', text, f.id); else if (p) notify({ kind: 'player', id: p.id }, 'outcome', text, f.id); return fresh; }); }
     catch (e) { console.error(`OUTCOME report_rolled_back ${f.id}: ${e?.message ?? e}`); return res.status(500).json({ error: 'OUTCOME_STATE_UNKNOWN', message: 'The report could not be filed; nothing was recorded.' }); }
@@ -106,7 +99,6 @@ export function registerOperations(ctx) {
     if (tooLong(res, 'note', note, LIMITS.note)) return;
     if (experienceRating !== undefined && experienceRating !== null && ![1, 2, 3, 4, 5].includes(experienceRating)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'experienceRating', message: 'experienceRating is 1 to 5, or omitted.' });
     if (note && !moderateOrRefuse(res, note, { kind: 'outcome_response', playerId: f.playerId })) return;
-    // The confirmation row and the report's status commit as one unit of work.
     try { unit(() => outcomes.addConfirmation(report.id, { by: actor, agree, note: note || null, experienceRating: experienceRating ?? null, at: Date.now() }, { status: agree ? 'confirmed' : 'disputed' })); }
     catch (e) { console.error(`OUTCOME response_rolled_back ${report.id}: ${e?.message ?? e}`); return res.status(500).json({ error: 'OUTCOME_STATE_UNKNOWN', message: 'The answer could not be recorded; nothing was recorded.' }); }
     res.json({ followUp: followUpView(f) });
@@ -125,8 +117,8 @@ export function registerOperations(ctx) {
   guardianRouter.post('/followups/:id/respond', (req, res) =>
     respondOutcome(req, res, req.guardian.childIds, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }));
 
-  // Admin aggregates: defined denominators, missing data named, and groups
-  // under 3 records suppressed so no individual answer is inferable.
+  // Defined denominators, missing data named, and groups under 3 records suppressed so no individual answer is
+  // inferable.
   adminRouter.get('/outcomes', (_req, res) => {
     const rows = [];
     const totals = signingsFollowUps.outcomeTotalsByOrg(); // counted in SQL, one row per organisation with a signing
@@ -153,9 +145,7 @@ export function registerOperations(ctx) {
   });
 
   // ========================================================= captions
-  // Captions for prerecorded video (upload + serve), size info on media,
-  // and honest labelling of what has no captions. Serving uses the same
-  // live entitlement rule as the media bytes themselves.
+  // Serving captions uses the same live entitlement rule as the media bytes.
   playerRouter.post('/media/:id/captions', (req, res) => {
     const m = req.player.media.find((x) => x.id === req.params.id);
     if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
@@ -183,7 +173,6 @@ export function registerOperations(ctx) {
   });
 
   // ================================================= football context
-  // Football context: competition category on the player's own profile.
   playerRouter.post('/football-category', (req, res) => {
     const c = req.body?.category;
     if (!['mens', 'womens', 'boys', 'girls', 'mixed', null].includes(c)) return res.status(400).json({ error: 'CATEGORY_INVALID' });
@@ -192,21 +181,19 @@ export function registerOperations(ctx) {
   });
 
   // ================================================================ sweep
-  // One idempotent pass over every persisted schedule. Runs at boot (catches
-  // anything that came due while the process was down) and every minute.
+  // Runs at boot (catching anything that came due while the process was down) and every minute.
   function sweep() {
     let changed = false;
     const now = Date.now();
 
-    // Backfill follow-ups for every signing (covers signings made before follow-ups
-    // existed and new ones without touching the signing endpoint), then mark due.
+    // Backfill follow-ups for signings without them, then mark due.
     for (const s of signingsFollowUps.signings.missingFollowUps(Object.keys(MILESTONES).length)) { if (scheduleFollowUps(s) > 0) changed = true; }
     for (const f of fu.dueToMark(now)) {
-      fu.patch(f.id, { status: 'due' }); // committed at once (a transaction of its own)
+      fu.patch(f.id, { status: 'due' });
       changed = true;
     }
     for (let f of fu.dueUnnotified()) {
-      f = fu.patch(f.id, { notifiedAt: now }); // committed BEFORE anything else → restart cannot double-send
+      f = fu.patch(f.id, { notifiedAt: now }); // committed before anything else, so a restart cannot double-send
       const org = byId.org(f.orgId);
       const p = findPlayer(f.playerId);
       const lead = usersOf(f.orgId)[0];
@@ -217,8 +204,7 @@ export function registerOperations(ctx) {
       changed = true;
     }
 
-    // Outstanding application outcomes nag once after 7 days. The marker is committed
-    // with the notification, so a restart re-sends nothing.
+    // Outstanding application outcomes nag once after 7 days; the marker commits with the notification.
     for (const a of scoutingReads.applications.remindersDue(now - 7 * 86_400_000)) {
       unit(() => {
         opportunitiesCampaigns.applications.update(a.id, (d) => { d.remindedAt = now; });
@@ -228,12 +214,10 @@ export function registerOperations(ctx) {
       changed = true;
     }
 
-    // Overdue trial feedback escalates once — to the club AND into the
-    // existing no-ghosting culture (admin can see it in reports volume).
-    // The query already narrows to these trials; the check below repeats the rule.
+    // Overdue trial feedback escalates once, to the club. The query already narrows to these trials; the check below
+    // repeats the rule.
     for (const t of trials.reportOverdue(now)) {
-      // A null deadline is "unknown", not "now"; a tombstoned
-      // trial has nobody to file for, so it never escalates.
+      // A null deadline is unknown, not now; a tombstoned trial has nobody to file for.
       if (Number.isFinite(t.reportDueAt) && t.reportDueAt < now && !t.report && !t.feedbackEscalatedAt && !t.subjectRemovedAt) {
         trials.escalateFeedback(t.id, { at: now });
         const lead = usersOf(t.orgId)[0];
@@ -242,17 +226,13 @@ export function registerOperations(ctx) {
       }
     }
 
-    // Trial reminders. Every marker lives on the row (`reminders`),
-    // so a restart re-sends nothing. A confirmed session within 48 h reminds
-    // the recipient once per session per revision (guardian for a minor —
-    // the recipient who accepted); a trial whose last session ended a day
-    // ago without completion, and a completed trial without an assessment
-    // after a week, remind the club lead once each. A blocked club sends the
-    // family nothing; a tombstoned trial has nobody to remind.
+    // A confirmed session within 48 h reminds the recipient (the guardian for a minor) once per session per revision.
+    // A trial whose last session ended a day ago without completion, and a completed trial without an assessment after
+    // a week, remind the club lead once each. A blocked club sends the family nothing.
     for (const t of trials.remindersDue(now)) { // only the confirmed, open trials with a reminder due
       if (t.subjectRemovedAt || !t.schedule?.confirmedAt) continue;
       if (deriveWorkflowState(t) !== 'scheduled') continue;
-      const marks = {}; // the markers this sweep sets, written once below
+      const marks = {}; // set by this sweep, written once below
       const p = findPlayer(t.playerId);
       const blocked = isBlocked(t.playerId, t.orgId);
       for (const s of t.schedule.sessions ?? []) {
@@ -285,14 +265,12 @@ export function registerOperations(ctx) {
       changed = true;
     }
 
-    // Abandoned upload sessions cleaned after 24 h (domains/media/uploads.mjs).
+    // Abandoned upload sessions are cleaned after 24 h.
     if (ctx.sweepUploads(now)) changed = true;
 
   }
 
-  // T&S ops tools: run the scheduler now, and adjust a follow-up's due date
-  // (e.g. aligning a check-in to season end). Both are ordinary authenticated
-  // admin actions, not backdoors — they change WHEN, never WHAT.
+  // Ordinary admin actions: they change when, never what.
   adminRouter.post('/sweep', (_req, res) => { sweep(); res.json({ ok: true }); });
   adminRouter.post('/followups/:id', (req, res) => {
     const f = fu.byId(req.params.id);
@@ -303,7 +281,7 @@ export function registerOperations(ctx) {
     res.json({ followUp: followUpView(fresh) });
   });
 
-  sweep(); // boot pass — catches everything that came due while down
+  sweep(); // boot pass
   const timer = setInterval(sweep, 60_000);
   timer.unref?.(); // never keeps a test process alive
 }

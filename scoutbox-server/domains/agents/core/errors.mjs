@@ -1,7 +1,4 @@
-/**
- * The Agent domain error contract. Same discipline as
- * domains/recruitment/lifecycle/errors.mjs: ONE table, no default branch, a public-field allowlist.
- */
+/** Agent core error codes and the public-field allowlist. */
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
@@ -14,8 +11,6 @@ export const AGENT_CORE_ERROR_HTTP = table({
   AGENT_SCOPE_INVALID: 400,
   AGENT_TERM_INVALID: 400,
   AGENT_JURISDICTION_INVALID: 400,
-  // The client's own disclosure choices. A malformed request is the
-  // caller's to fix, and saying so is not a 500 about our own state.
   REPRESENTATION_INPUT_INVALID: 400,
 
   // ---- 403: not yours to do (own state; nothing about a subject).
@@ -30,9 +25,7 @@ export const AGENT_CORE_ERROR_HTTP = table({
   AGENT_NATIONAL_REGISTRATION_REQUIRED: 403,
   AGENT_DOMESTIC_AUTHORISATION_REQUIRED: 403,
 
-  // ---- 404: concealment. A player who does not exist, a minor, a blocked
-  // player, a foreign agency's record and another agent's record all answer
-  // alike.
+  // ---- 404: concealment. A missing, minor or blocked player and another agency's or agent's record answer alike.
   PLAYER_NOT_FOUND: 404,
   REPRESENTATION_NOT_FOUND: 404,
   MEMBER_NOT_FOUND: 404,

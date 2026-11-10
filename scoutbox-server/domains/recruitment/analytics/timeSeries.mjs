@@ -1,32 +1,16 @@
 /**
- * Recruitment analytics: how long the process takes, and what has stopped moving.
- *
- * Pure functions over the reporting context. Two rules run through every
- * function here:
- *
- *   1. **Medians, never means.** One eighteen-month room would move a mean
- *      and tell a director nothing true about the other forty.
- *   2. **The exclusion is reported.** Every duration is computed over the
- *      records that FINISHED, which quietly flatters a club whose work is
- *      stuck: the rooms still sitting in a stage contribute nothing to that
- *      stage's median. So every duration ships with the count it could not
- *      include, and the aging family exists to catch exactly what the
- *      duration family cannot see.
+ * Recruitment analytics: how long the process takes, and what has stopped moving. Medians, never means.
+ * Durations cover only finished records, which flatters a club whose work is stuck, so each one ships with
+ * the count it excluded and the aging family covers what durations cannot see.
  */
 import { METRICS, wire, distribution, count, days, inWindow, DAY_MS } from './metrics.mjs';
 import { OPEN_ROOM_STATUSES, ROOM_STATUSES } from '../rooms/shared.mjs';
 import { transitions, openedStatus, firstReachedAt } from './funnels.mjs';
 
-/** The last moment anything at all was written to this room. */
 export const lastActivityAt = (room) =>
   (room.history ?? []).reduce((m, h) => Math.max(m, h.at ?? 0), room.createdAt ?? 0);
 
-/**
- * Every COMPLETED visit this room made to a status: which status, when it
- * started, when it ended. The visit the room is in right now is deliberately
- * absent — it has not finished, and guessing its length would be inventing a
- * timestamp.
- */
+/** Completed visits only: the current visit has not finished, and guessing its length would invent a timestamp. */
 export function stageVisits(room) {
   const ts = transitions(room);
   const out = [];
@@ -66,15 +50,14 @@ export function timeInStage(ctx) {
   let stillIn = 0;
   for (const r of ctx.rooms) {
     for (const v of stageVisits(r)) {
-      if (!inWindow(v.to, ctx.window)) continue;     // the EXIT falls in the window
+      if (!inWindow(v.to, ctx.window)) continue;     // the exit falls in the window
       byStatus.get(v.status)?.push(v.ms / DAY_MS);
     }
     if (OPEN_ROOM_STATUSES.includes(r.status)) stillIn += 1;
   }
   return {
     ...wire(METRICS.time_in_stage),
-    // Fixed vocabulary order. Sorting these by duration would produce a
-    // "slowest stage" ranking that the exclusion below makes untrue.
+    // Vocabulary order: sorting by duration would give a "slowest stage" ranking the exclusion makes untrue.
     rows: ROOM_STATUSES.map((status) => ({ status, ...distribution(byStatus.get(status) ?? []) }))
       .filter((row) => row.n > 0),
     stillInAStage: count(stillIn),
@@ -120,12 +103,7 @@ export function timeTrialRequestedToCompleted(ctx) {
 
 // ------------------------------------------------------- T5 · age of the open
 
-/**
- * Age buckets for open rooms. A distribution says what the middle looks like;
- * buckets say where the work is piling up, which is the question a director
- * actually has. Both are shown, because either alone misleads: a median of 20
- * days hides the four rooms sitting at 200.
- */
+/** Buckets show where work piles up, which a median hides: a median of 20 days hides four rooms at 200. */
 export const AGE_BUCKETS = [
   { id: '0_7', label: '0–7 days', min: 0, max: 7 },
   { id: '8_14', label: '8–14 days', min: 8, max: 14 },
@@ -141,8 +119,7 @@ export function openRoomAge(ctx) {
     ...wire(METRICS.open_room_age),
     ...distribution(ages),
     openRooms: count(open.length),
-    // Counts, so never suppressed: a club with three old rooms must be able
-    // to see all three.
+    // Counts, so never suppressed.
     buckets: AGE_BUCKETS.map((b) => ({
       id: b.id,
       label: b.label,
@@ -153,7 +130,6 @@ export function openRoomAge(ctx) {
 
 // -------------------------------------------------------- A1 · stalled work
 
-/** The thresholds a director can choose between. Nothing else is accepted. */
 export const STALL_THRESHOLDS = [14, 30, 90];
 export const DEFAULT_STALL_DAYS = 30;
 
@@ -163,7 +139,7 @@ export function stalledRooms(ctx, { thresholdDays = DEFAULT_STALL_DAYS } = {}) {
   const aged = open.map((r) => ({ room: r, idleDays: days(lastActivityAt(r), ctx.now) }));
   const rows = aged
     .filter((a) => a.idleDays >= threshold)
-    // Oldest first, then id: a stable order across reads, as the audit-log rules require.
+    // Most idle first, then id: stable across reads.
     .sort((a, b) => (b.idleDays - a.idleDays) || String(a.room.id).localeCompare(String(b.room.id)))
     .map((a) => ({
       roomId: a.room.id,
@@ -184,9 +160,8 @@ export function stalledRooms(ctx, { thresholdDays = DEFAULT_STALL_DAYS } = {}) {
 // --------------------------------------------------- A2 · overdue obligations
 
 export function overdueTrialReports(ctx) {
-  // A missing deadline is unknown, not overdue (Number(null) is 0), and a
-  // trial whose subject removed their account is not an obligation anyone
-  // can meet.
+  // A missing deadline is unknown, not overdue (Number(null) is 0), and a subject who removed their account
+  // leaves no obligation anyone can meet.
   const awaiting = ctx.trials.filter((t) => t.status === 'awaiting_report' && !t.subjectRemovedAt);
   const late = awaiting.filter((t) => Number.isFinite(t.reportDueAt) && t.reportDueAt < ctx.now);
   return {
@@ -203,7 +178,7 @@ export function overdueTrialReports(ctx) {
 
 // ----------------------------------------------------- A3 · decision missing
 
-/** The statuses the Room lifecycle itself treats as owing a decision. One definition, not two. */
+/** The statuses the Room lifecycle treats as owing a decision. */
 export const DECISION_OWED_STATUSES = ['offer_consideration', 'offer_made'];
 
 export function decisionOutstanding(ctx) {

@@ -1,15 +1,6 @@
 /**
- * The compliance domain's audit projections.
- *
- * Two audiences, two projections:
- *   - the AGENCY audit feed (`/org/audit`, `/org/agent/agency/audit`): what
- *     happened to the agency's contexts, consents and reviews — actions, ids,
- *     states, policy versions; never a reason text, never a reviewer's note,
- *     never another party's agent;
- *   - the TRUST & SAFETY audit (`/ts/compliance/audit`): every authoritative
- *     compliance decision WITH the reviewer's identity, role, reason code,
- *     evidence references, policy versions, prior and resulting state, and
- *     the record's rev at decision time.
+ * Compliance audit rows. The agency feed carries actions, ids, states and policy versions, never a reason text, a
+ * reviewer's note or another party's agent; the Trust & Safety audit carries every decision with its reviewer.
  */
 
 export const COMPLIANCE_AUDIT_ACTIONS = new Set([
@@ -65,7 +56,7 @@ export function complianceAuditRows(reads, org) {
   return rows;
 }
 
-/** The Trust & Safety decision record, newest `limit` entries: attributed, complete, minimal PII. */
+/** Newest `limit` entries: attributed, complete, minimal PII. */
 export function reviewerDecisionRows(reads, limit = 200) {
   return reads.reviews.decisionEntries(limit).map(({ review: r, entry: h }) => {
     const d = h.detail ?? {};

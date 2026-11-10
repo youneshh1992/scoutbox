@@ -1,116 +1,50 @@
 /**
- * ScoutBox Agent Transaction Workspace: the pure layer.
+ * The agent transaction workspace's pure layer: state machine, visibility, staleness and timeline rules.
  *
- * Everything here is a function over plain records and a clock. Nothing touches
- * storage, nothing answers HTTP, nothing emits. The routes in ./index.mjs call
- * these and the acceptance suite exercises them directly, so a state
- * transition, a visibility decision or a staleness verdict can never differ
- * between a route and a test.
- *
- * What a ScoutBox transaction IS: a permissioned, auditable
- * multi-party workspace that identifies parties, tracks authority, enforces
- * platform permissions, attaches compliance snapshots, classifies documents,
- * references correspondence and records history.
- *
- * What it is NOT, and this module encodes the difference rather than asserting
- * it in prose:
- *
- *   - NOT a Recruitment Case. A Case is one club's private internal
- *     workflow; recruitment cases are never written here and a transaction
- *     cannot be created from one. The only link is one-way: a transaction may
- *     cite a club's own invitation.
- *   - NOT an Offer. There is no `offer_made`, `offer_accepted`,
- *     `offer_declined` or `signed` state in TRANSACTION_STATUSES, and
- *     `offerReadiness()` computes a READINESS — a boolean and its blockers —
- *     without creating anything.
- *   - NOT a Signing. No terminal state means "signed"; the neutral
- *     terminal is CLOSED, chosen over COMPLETED exactly because "completed"
- *     reads as a concluded transfer.
- *   - NOT a negotiator. Nothing in this module proposes, accepts or
- *     values a term. Terms exist as recorded data with a version history and
- *     no evaluation of them whatsoever.
- *
- * Party roles (`individual`, `engaging_entity`, `releasing_entity`) and types
- * are imported from the conflict engine rather than re-declared, so a
- * transaction can never name a party role or a type the engine would reject.
+ * A transaction is a permissioned multi-party workspace, not an offer or a signing. Its neutral terminal is CLOSED
+ * rather than COMPLETED, because "completed" reads as a concluded transfer.
  */
 
 import { inputHashOf, PARTY_ROLES, CONTEXT_TYPES, PERMITTED_WITH_CONSENT } from '../compliance/conflict.mjs';
 
 export { PARTY_ROLES, PERMITTED_WITH_CONSENT };
 
-/**
- * Transaction types. The SAME four the conflict engine accepts, imported rather
- * than copied: a fifth type here would be a type the engine answers
- * `TYPE_UNKNOWN → INSUFFICIENT_DATA` for, which is a silent dead end rather
- * than a feature. `transfer` covers a permanent transfer, `employment_contract`
- * a free-agent engagement; there is deliberately no `renewal` type.
- */
+/** `transfer` is a permanent transfer, `employment_contract` a free-agent engagement; there is no `renewal` type. */
 export const TRANSACTION_TYPES = CONTEXT_TYPES;
 
-/** A releasing entity is meaningful only where the individual leaves someone. */
+/** A releasing entity exists only where the individual leaves someone. */
 export const RELEASING_PARTY_TYPES = Object.freeze(['transfer', 'loan']);
 
 /**
- * The state machine. Ten states, no freeform strings, and
- * none of them is an offer or a signing.
- *
- *   DRAFT               the workspace exists; parties are named but not all
- *                       confirmed. No regulated progression, no compliance
- *                       claim, no private data crosses a party boundary.
- *   PARTIES_CONFIRMED   every required party has been confirmed BY ITSELF —
- *                       the player by the player, a club by its recorded
- *                       signatory. Draft text entry is never confirmation.
- *   COMPLIANCE_PENDING  the compliance layer cannot currently permit
- *                       progression and says WHY through `pendingReason`,
- *                       never as a generic pending.
- *   COMPLIANCE_BLOCKED  an ACTIVE encoded rule prohibits the combination. A
- *                       reviewer cannot approve past it; only changed facts or
- *                       a new policy version produce a different answer.
- *   READY               ScoutBox currently permits the workflow to proceed
- *                       under the encoded rules. NOT "legally valid", NOT
- *                       "FIFA approved", NOT "transfer approved".
+ *   DRAFT               parties named but not all confirmed; no compliance claim.
+ *   PARTIES_CONFIRMED   every required party has confirmed itself (a club by its recorded signatory).
+ *   COMPLIANCE_PENDING  compliance cannot yet permit progression; `pendingReason` says why.
+ *   COMPLIANCE_BLOCKED  an active encoded rule prohibits the combination; a reviewer cannot approve past it.
+ *   READY               permitted under the encoded rules. Not "legally valid" or "FIFA approved".
  *   ACTIVE              the parties are using the workspace.
- *   ON_HOLD             explicit hold with a reason; leaving it re-checks
- *                       compliance rather than resuming on trust.
- *   CANCELLED           ended without conclusion; history preserved.
+ *   ON_HOLD             held with a reason; leaving it re-checks compliance.
+ *   CANCELLED           ended without conclusion.
  *   CLOSED              the neutral operational terminal.
- *   ARCHIVED            a retention/visibility state, never a deletion.
+ *   ARCHIVED            a retention state, never a deletion.
  */
 export const TRANSACTION_STATUSES = Object.freeze([
   'DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED',
   'READY', 'ACTIVE', 'ON_HOLD', 'CANCELLED', 'CLOSED', 'ARCHIVED',
 ]);
 
-/** States in which the workspace is still live: compliance is re-evaluated and parties may act. */
 export const LIVE_STATUSES = Object.freeze(['DRAFT', 'PARTIES_CONFIRMED', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED', 'READY', 'ACTIVE', 'ON_HOLD']);
-/** States nothing can be written into. ARCHIVED is read-only for everyone including its owner. */
 export const TERMINAL_STATUSES = Object.freeze(['CANCELLED', 'CLOSED', 'ARCHIVED']);
 
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
-/**
- * Defensive container accessor: one record without its parties array must not
- * make EVERY party's list route answer 500. A row with no parties belongs to
- * nobody, which is the safe reading as well as the tolerant one.
- */
+/** A row with no parties array belongs to nobody, rather than failing every party's list route. */
 const partiesOf = (tx) => (Array.isArray(tx?.parties) ? tx.parties : []);
 
 
-/**
- * Transitions an ACTOR may request. Deliberately does NOT contain READY,
- * COMPLIANCE_PENDING or COMPLIANCE_BLOCKED: those three are the compliance
- * layer's answer, not anyone's request, so no request body — and no client,
- * however authorised — can write them. A caller who asks for READY is refused
- * by this map; a caller who asks for ACTIVE is refused by the compliance gate,
- * with the reason.
- */
+/** READY and the COMPLIANCE_* states are absent: they are the compliance layer's answer, not anyone's request. */
 export const ACTOR_TRANSITIONS = nullProto({
   DRAFT: ['PARTIES_CONFIRMED', 'CANCELLED'],
   PARTIES_CONFIRMED: ['CANCELLED'],
-  // ACTIVE is requestable from the two compliance states on purpose: the
-  // request is then refused BY COMPLIANCE, with the real reason, instead of by
-  // the transition map with a generic one. The gate requires `clear`, so the
-  // safety is identical and the answer is more honest.
+  // Requestable so that compliance refuses it with the real reason, rather than this map with a generic one.
   COMPLIANCE_PENDING: ['ACTIVE', 'CANCELLED'],
   COMPLIANCE_BLOCKED: ['ACTIVE', 'CANCELLED'],
   READY: ['ACTIVE', 'ON_HOLD', 'CANCELLED'],
@@ -121,12 +55,7 @@ export const ACTOR_TRANSITIONS = nullProto({
   ARCHIVED: [],
 });
 
-/**
- * Transitions the COMPLIANCE layer may make when an evaluation lands. Every
- * one of them is reachable only from a state where the parties are confirmed:
- * a DRAFT is never told it is READY, because a draft makes no compliance
- * claim at all.
- */
+/** A draft makes no compliance claim, so an evaluation never moves it. */
 export const COMPLIANCE_TRANSITIONS = nullProto({
   DRAFT: [],
   PARTIES_CONFIRMED: ['READY', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED'],
@@ -140,10 +69,7 @@ export const COMPLIANCE_TRANSITIONS = nullProto({
   ARCHIVED: [],
 });
 
-/**
- * Transitions a PARTY CHANGE makes: a draft whose required parties have all confirmed is PARTIES_CONFIRMED, and a
- * transaction that loses a confirmed party falls back to it out of any compliance claim.
- */
+/** A transaction that loses a confirmed party falls back to PARTIES_CONFIRMED out of any compliance claim. */
 export const PARTY_CHANGE_TRANSITIONS = nullProto({
   DRAFT: ['PARTIES_CONFIRMED'],
   READY: ['PARTIES_CONFIRMED'],
@@ -157,7 +83,6 @@ export const actorTransitionAllowed = (from, to) =>
 export const complianceTransitionAllowed = (from, to) =>
   typeof from === 'string' && Object.hasOwn(COMPLIANCE_TRANSITIONS, from) && COMPLIANCE_TRANSITIONS[from].includes(to);
 
-/** Every status a transition map can reach, for the state-machine document and its test. */
 export const ALL_TRANSITIONS = Object.freeze(
   TRANSACTION_STATUSES.map((from) => ({
     from,
@@ -169,25 +94,15 @@ export const ALL_TRANSITIONS = Object.freeze(
 // ------------------------------------------------------------------ room roles
 
 /**
- * The seven room roles. They are the Agent module's own, deliberately NOT the
- * Recruitment Room roles: a Recruitment Room is one club's internal space and its roles carry
- * club-internal meaning that must not leak into a multi-party workspace.
- *
- * `party_guardian` exists and is never granted in this build: no minor
- * transaction pathway is production-enabled, so the role is kept without a
- * live surface.
+ * Not the Recruitment Room roles, which carry club-internal meaning. `party_guardian` is never granted: no minor
+ * transaction pathway is enabled.
  */
 export const ROOM_ROLES = Object.freeze([
   'representing_agent', 'party_individual', 'party_guardian',
   'party_club_signatory', 'party_club_member', 'agency_admin_observer', 'trust_safety',
 ]);
 
-/**
- * The room roles a viewer holds in one transaction. Pure over records the
- * caller already resolved through their own gates: the caller passes what the
- * SERVER derived (is this org a party? is this user a recorded signatory?),
- * never what a request body claimed.
- */
+/** `viewer` is what the server derived (e.g. whether the user is a recorded signatory), never a request's claim. */
 export function roomRolesFor(tx, viewer) {
   const roles = [];
   if (!tx || !viewer) return roles;
@@ -213,21 +128,14 @@ export function roomRolesFor(tx, viewer) {
 
 export { partiesOf };
 
-/** The party role a club viewer occupies in this transaction, or null. */
 export const clubPartyRoleOf = (tx, orgId) =>
   partiesOf(tx).find((p) => p && !p.removed && p.subjectKind === 'club' && p.subjectId === orgId)?.partyRole ?? null;
 
 // ------------------------------------------------------------------ documents
 
 /**
- * Document types. Each is a CLASSIFICATION of a record that lives in the
- * canonical evidence vault or nowhere at all — this module stores no bytes and
- * mints no URL, because ScoutBox already has exactly one upload path and a
- * second one would be a second security surface.
- *
- * `employment_contract_draft` and `term_sheet_draft` are drafts and say so in
- * their names: nothing here is signed, and `signedAt` is recordable only when
- * objectively known from the underlying evidence.
+ * Classifications of records in the evidence vault: no bytes are stored here, so there is no second upload path to
+ * secure. The contract and term sheet types are drafts by name because nothing here is signed.
  */
 export const DOCUMENT_TYPES = Object.freeze([
   'representation_agreement_reference',
@@ -242,15 +150,8 @@ export const DOCUMENT_TYPES = Object.freeze([
 ]);
 
 /**
- * Explicit document visibility classes. A class names PARTIES AND ROLES,
- * never a list of user ids a client supplied: the server resolves the caller's
- * room roles at read time and asks this table, so a document cannot be made
- * visible to someone by writing their id into a field.
- *
- * `T_AND_S_ONLY` is reachable by no party at all — not even the uploader —
- * which is why `canUploadVisibility` refuses it: a party cannot file something
- * into a Trust & Safety lane and a reviewer's evidence is never a party's to
- * classify.
+ * A class names roles, never user ids, so a document cannot be shown to someone by writing their id into a field.
+ * No party may file into `T_AND_S_ONLY`.
  */
 export const DOCUMENT_VISIBILITY = Object.freeze([
   'AGENT_PRIVATE',
@@ -265,17 +166,8 @@ export const DOCUMENT_VISIBILITY = Object.freeze([
 ]);
 
 /**
- * Which room roles each visibility class admits. Read as: "a viewer holding
- * any of these roles may see a document of this class".
- *
- * Two deliberate absences:
- *   - `AGENT_PRIVATE` does NOT admit `agency_admin_observer`. A same-agency
- *     colleague is one agent for conflicts and a separate person for data;
- *     the agency administrator who can see the
- *     transaction exists cannot read the representing agent's private file.
- *   - no class admits `trust_safety` except `T_AND_S_ONLY`. A reviewer reads
- *     states and ids, not the parties' documents; their read surface is
- *     `/ts/transactions` and it carries no document content.
+ * `AGENT_PRIVATE` omits `agency_admin_observer`: a same-agency colleague is one agent for conflicts but a separate
+ * person for data. Only `T_AND_S_ONLY` admits `trust_safety`; reviewers read states and ids, not documents.
  */
 const VISIBILITY_ROLES = nullProto({
   AGENT_PRIVATE: ['representing_agent'],
@@ -290,11 +182,8 @@ const VISIBILITY_ROLES = nullProto({
 });
 
 /**
- * The club-side classes are side-specific, and a role name alone cannot tell
- * the engaging club from the releasing one — both hold `party_club_signatory`.
- * So the caller passes the viewer's own party role and the class is checked
- * against the SIDE as well as the role. Without this, each club could read the
- * other's private document.
+ * Both clubs hold `party_club_signatory`, so club-side classes are also checked against the viewer's side; without
+ * this each club could read the other's private documents.
  */
 const VISIBILITY_SIDE = nullProto({
   ENGAGING_CLUB_PRIVATE: 'engaging_entity',
@@ -303,73 +192,46 @@ const VISIBILITY_SIDE = nullProto({
   RELEASING_AGENT_SHARED: 'releasing_entity',
 });
 
-/**
- * May a viewer holding `roles` (and, for a club, occupying `partyRole`) see a
- * document classified `visibility`? Unknown class → false. Fails closed.
- */
+/** `partyRole` is the viewer's side, for a club. */
 export function canSeeVisibility(visibility, roles, partyRole = null) {
   if (typeof visibility !== 'string' || !Object.hasOwn(VISIBILITY_ROLES, visibility)) return false;
   const allowed = VISIBILITY_ROLES[visibility];
   if (!Array.isArray(roles) || !roles.some((r) => allowed.includes(r))) return false;
   const side = VISIBILITY_SIDE[visibility];
   if (!side) return true;
-  // A club-side class is readable by that side's club and by the representing
-  // agent; a club sitting on the other side is refused even though it holds
-  // the same role name.
   if (roles.includes('representing_agent')) return true;
   return partyRole === side;
 }
 
-/**
- * Which classes a viewer may CREATE. Narrower than what they may read: a
- * viewer may not file a document into a lane they do not sit in, and nobody
- * may write `T_AND_S_ONLY`.
- */
+/** Narrower than what a viewer may read. */
 export function uploadableVisibilities(roles, partyRole = null) {
   const out = [];
   for (const v of DOCUMENT_VISIBILITY) {
     if (v === 'T_AND_S_ONLY') continue;
     if (!canSeeVisibility(v, roles, partyRole)) continue;
-    // A player may not classify something as shared with a club: the club-side
-    // classes belong to the club lane and the agent lane.
+    // The club-side classes belong to the club and agent lanes, not the player's.
     if (roles.includes('party_individual') && !roles.includes('representing_agent') && /CLUB|ENGAGING|RELEASING/.test(v) && v !== 'ALL_TRANSACTION_PARTIES') continue;
     out.push(v);
   }
   return out;
 }
 
-/** Note visibility reuses the document classes, minus the Trust & Safety lane. */
 export const NOTE_VISIBILITY = Object.freeze(DOCUMENT_VISIBILITY.filter((v) => v !== 'T_AND_S_ONLY'));
 
 // ------------------------------------------------------------------ compliance state
 
-/**
- * The compliance layer's answer, turned into an operational state and a REASON
- * (never a generic pending).
- *
- * `outcome` is the conflict engine's verdict; `gate` carries the
- * non-conflict refusals the transaction's own pipeline can hit before the
- * engine is consulted (a missing verified facet, an unsupported jurisdiction,
- * a verification source that is down). A blocked party — safeguarding — is
- * handled before any of this, because a block ends the question rather than
- * answering it.
- */
 export const PENDING_REASONS = Object.freeze([
   'CONSENT_REQUIRED', 'MANUAL_REVIEW', 'INSUFFICIENT_DATA', 'PROVIDER_UNAVAILABLE',
   'JURISDICTION_UNSUPPORTED', 'FACET_NOT_VERIFIED', 'PARTIES_NOT_CONFIRMED', 'REPRESENTATION_MISSING',
 ]);
-/** The refusals a snapshot can record when the facet gate answered before the engine ran (no evaluation row exists). */
+/** Refusals by the facet gate before the engine ran, so the snapshot names no evaluation row. */
 export const COMPLIANCE_GATES = Object.freeze(['FACET_NOT_VERIFIED', 'JURISDICTION_UNSUPPORTED']);
-/** Why a snapshot is no longer the one the current facts produce (snapshotStaleness). */
 export const STALENESS_REASONS = Object.freeze(['NO_SNAPSHOT', 'INPUTS_CHANGED', 'POLICY_CHANGED', 'EXPIRED']);
-/** Why a representation binding was withdrawn. */
 export const WITHDRAWN_REASONS = Object.freeze(['party_removed', 'agent_withdrew', 'subject_removed', 'review_rejected']);
 
 /**
- * The full compliance view of a stored snapshot. A snapshot stores the evaluation row it names (or the gate that
- * refused before the engine ran), the pending reason it reached, the party revision and the licence freshness; the
- * outcome, reason codes, policy versions and consent requirements are the evaluation's own, read back from its row.
- * `evaluation` is that row as the compliance seam decodes it (null for a gate snapshot). Pure.
+ * A snapshot stores only the evaluation it names (or its gate), its pending reason, the party revision and licence
+ * freshness; outcome, reasons and versions are read back from `evaluation` (null for a gate snapshot).
  */
 export function snapshotView(tx, stored, evaluation) {
   if (!stored) return null;
@@ -398,39 +260,24 @@ export function complianceStateFrom({ outcome = null, gate = null, reasons = [],
   if (outcome === 'MANUAL_REGULATORY_REVIEW_REQUIRED') return { ...base, pendingReason: 'MANUAL_REVIEW' };
   if (outcome === 'INSUFFICIENT_DATA') return { ...base, pendingReason: 'INSUFFICIENT_DATA' };
   if (outcome !== 'CLEAR') return { ...base, pendingReason: 'INSUFFICIENT_DATA' };
-  // A CLEAR engine answer with no representation recorded is not a clearance
-  // to proceed: nobody has authority in this transaction yet.
+  // With no representation recorded nobody has authority yet, so CLEAR is not a clearance.
   if (representationCount < 1) return { ...base, pendingReason: 'REPRESENTATION_MISSING' };
   return { ...base, clear: true };
 }
 
-/** The status a compliance state implies, or null where the compliance layer has nothing to say. */
 export function statusForComplianceState(state) {
   if (!state) return null;
   if (state.blocked) return 'COMPLIANCE_BLOCKED';
   if (state.clear) return 'READY';
-  // Neither of these is a compliance question yet: the parties are not all
-  // confirmed, or nobody has claimed authority. Calling them COMPLIANCE_PENDING
-  // would make PARTIES_CONFIRMED a state no transaction ever rests in, and
-  // would tell a party that compliance is outstanding when nothing has been
-  // asked of it.
+  // Not yet a compliance question: calling these COMPLIANCE_PENDING would tell a party compliance is outstanding
+  // when nothing has been asked of it.
   if (state.pendingReason === 'PARTIES_NOT_CONFIRMED' || state.pendingReason === 'REPRESENTATION_MISSING') return 'PARTIES_CONFIRMED';
   return 'COMPLIANCE_PENDING';
 }
 
 // ------------------------------------------------------------------ snapshots
 
-/**
- * The party/authority revision: a hash of everything a compliance evaluation
- * depended on. When it changes, the evaluation that was made under the old one
- * is STALE by definition rather than by a heuristic.
- *
- * It covers, exactly, eight things: the parties, the agent, the
- * representations, the consents, the licence facets, the policy versions, the
- * safeguarding state and the minor state. `inputHashOf` is the conflict
- * engine's own canonical hash, reused so the two never disagree about what
- * "the same inputs" means.
- */
+/** A hash of everything a compliance evaluation depended on: when it changes, the evaluation is stale by definition. */
 export function partyRevisionOf({ parties = [], agentUserId = null, representations = [], consents = [], facetStates = {}, policyVersions = [], blockedSubjectIds = [], minorSubjectIds = [] }) {
   return inputHashOf({
     parties: parties.filter((p) => p && !p.removed).map((p) => `${p.partyRole}:${p.subjectKind}:${p.subjectId}:${p.confirmedAt ? 'c' : 'u'}`).sort(),
@@ -444,11 +291,7 @@ export function partyRevisionOf({ parties = [], agentUserId = null, representati
   });
 }
 
-/**
- * Is the snapshot on a transaction still the one the current facts produce?
- * Returns the reason it is stale, or null. A missing snapshot is stale — the
- * absence of an evaluation is never a clearance.
- */
+/** The reason the snapshot is stale, or null. A missing snapshot is stale. */
 export function snapshotStaleness(tx, currentPartyRevision, { now = Date.now(), maxAgeMs = null } = {}) {
   const snap = tx?.compliance ?? null;
   if (!snap || !snap.evaluationId) return 'NO_SNAPSHOT';
@@ -460,14 +303,7 @@ export function snapshotStaleness(tx, currentPartyRevision, { now = Date.now(), 
 
 // ------------------------------------------------------------------ offer boundary
 
-/**
- * The ONE seam an Offer Workflow needs: a readiness boolean and its
- * blockers. It creates nothing, writes nothing and transitions nothing; the
- * caller exposes it read-only.
- *
- * There is a terms record and no Offer object, so readiness is computed from
- * the transaction's own state and never from an offer that does not exist.
- */
+/** What the Offer workflow reads: a readiness boolean and its blockers. */
 export function offerReadiness(tx, { complianceState = null, staleness = null } = {}) {
   const blockers = [];
   if (!tx) return { canStartOfferWorkflow: false, blockers: ['NO_TRANSACTION'], honest: OFFER_HONEST };
@@ -483,14 +319,12 @@ const OFFER_HONEST = 'Readiness means ScoutBox currently permits this workflow t
 
 // ------------------------------------------------------------------ party model
 
-/** Which party roles a transaction of this type requires before it can be party-confirmed. */
 export function requiredPartyRoles(type) {
   const roles = ['individual', 'engaging_entity'];
   if (RELEASING_PARTY_TYPES.includes(type)) roles.push('releasing_entity');
   return roles;
 }
 
-/** Are all required parties present, unremoved and confirmed by their own side? */
 export function partiesConfirmed(tx) {
   if (!tx) return false;
   for (const role of requiredPartyRoles(tx.type)) {
@@ -500,7 +334,6 @@ export function partiesConfirmed(tx) {
   return true;
 }
 
-/** The party roles still waiting for their own confirmation. */
 export const partiesAwaitingConfirmation = (tx) =>
   requiredPartyRoles(tx?.type).filter((role) => {
     const p = partiesOf(tx).find((x) => x && !x.removed && x.partyRole === role);
@@ -510,16 +343,8 @@ export const partiesAwaitingConfirmation = (tx) =>
 // ------------------------------------------------------------------ timeline
 
 /**
- * Audience tags for timeline entries. A history action carries the audience it
- * may reach; a viewer's timeline is the history filtered by the roles they
- * hold. `audit_only` never reaches any party's timeline — that is what keeps
- * the platform audit distinct from the user-visible timeline.
- *
- * `per_document` is not a fixed audience: an entry about a document reaches
- * exactly the parties the DOCUMENT's own visibility class admits. Announcing
- * "a document classified AGENT_PRIVATE was added" to every party would leak the
- * private thing's existence and its class to people who cannot open it, which
- * is the same disclosure the class exists to prevent.
+ * `per_document` entries reach exactly the parties the document's own class admits: announcing a private document
+ * to everyone would disclose what the class exists to hide.
  */
 export const TIMELINE_AUDIENCES = Object.freeze(['all_parties', 'agent_only', 'player_and_agent', 'club_side', 'per_document', 'audit_only']);
 
@@ -540,12 +365,10 @@ const ACTION_AUDIENCE = nullProto({
   transaction_document_removed: 'per_document',
   transaction_message_linked: 'all_parties',
   transaction_terms_recorded: 'all_parties',
-  // The agent's own lane: a representation is the agent's regulated act and a
-  // colleague's or a club's timeline is not where it belongs.
+  // A representation is the agent's own regulated act.
   transaction_representation_attached: 'agent_only',
   transaction_representation_withdrawn: 'agent_only',
   transaction_consent_requested: 'player_and_agent',
-  // Operational detail that belongs in the audit and in nobody's timeline.
   transaction_note_added: 'audit_only',
   transaction_evaluated_internal: 'audit_only',
   transaction_subject_tombstoned: 'audit_only',
@@ -553,13 +376,7 @@ const ACTION_AUDIENCE = nullProto({
 
 export const timelineAudienceOf = (action) => ACTION_AUDIENCE[action] ?? 'audit_only';
 
-/**
- * Does a viewer holding `roles` receive a timeline entry with this audience?
- *
- * `detail` matters only for `per_document`, where the document's own visibility
- * class decides. A `per_document` entry that carries no class is withheld: an
- * unclassifiable document entry fails closed rather than defaulting to everyone.
- */
+/** A `per_document` entry with no class in `detail` is withheld. */
 export function timelineVisible(audience, roles, partyRole = null, detail = null) {
   if (audience === 'audit_only') return false;
   if (!Array.isArray(roles) || !roles.length) return false;
@@ -575,7 +392,6 @@ export function timelineVisible(audience, roles, partyRole = null, detail = null
   return false;
 }
 
-/** Build one viewer's timeline from a transaction's append-only history. */
 export function timelineFor(tx, roles, partyRole = null, { limit = 200 } = {}) {
   const out = [];
   for (const h of Array.isArray(tx?.history) ? tx.history : []) {
@@ -586,12 +402,7 @@ export function timelineFor(tx, roles, partyRole = null, { limit = 200 } = {}) {
   return out.slice(-limit).reverse();
 }
 
-/**
- * Who did it, as a LABEL rather than an identity. A club never learns which
- * named person at the agency acted, a player never learns a club user's name,
- * and a reviewer appears as the attributed role — the same wording the
- * compliance audit uses, for the same reason.
- */
+/** A role label, not an identity: no party learns which named person on another side acted. */
 export function actorLabel(by) {
   if (!by) return null;
   if (by.kind === 'ts_reviewer') return { kind: 'trust_safety', label: 'Trust & Safety (attributed)' };
@@ -602,7 +413,7 @@ export function actorLabel(by) {
   return { kind: 'other', label: by.kind };
 }
 
-/** Timeline detail is codes, states and counts. Never prose, never a name, never a fee. */
+/** Codes, states and counts only: no prose, names or fees. */
 function safeTimelineDetail(detail) {
   if (!detail || typeof detail !== 'object') return null;
   const out = {};
@@ -614,7 +425,7 @@ function safeTimelineDetail(detail) {
 
 // ------------------------------------------------------------------ hold / cancel reasons
 
-/** Hold and cancellation reasons are CODES, so analytics can count them without reading prose. */
+/** Codes, so analytics can count them without reading prose. */
 export const HOLD_REASON_CODES = Object.freeze([
   'awaiting_party_decision', 'awaiting_document', 'awaiting_regulatory_answer', 'window_closed', 'party_request', 'other',
 ]);

@@ -1,34 +1,22 @@
 /**
- * The Trial engine: pure functions over the canonical trial row.
- *
- * A Trial row means AN ACCEPTED TRIAL, and its two-valued `status` is the
- * report obligation (`awaiting_report` | `reported`). Nothing in this file
- * reads `status` as a schedule and nothing writes it. The operational truth
+ * The Trial engine: pure functions over the trial row. A row exists only
+ * after acceptance, and its two-valued `status` is the report obligation
+ * (`awaiting_report` | `reported`), never a schedule. The operational truth
  * lives in its own fields:
  *
- *   caseId          the recruitment case this trial belongs to (null = legacy)
+ *   caseId          the recruitment case (null = legacy)
  *   workflowState   legacy_accepted | accepted | scheduled | completed | cancelled
  *   schedule        { timezone, revision, confirmedAt, confirmedBy, sessions[], revisions[] } | null
  *   attendance[]    append-only per-session records { sessionId, state, source, recordedBy, recordedAt, note }
  *   completion      { state: completed | cancelled, at, by, reason, phase } | null
  *   keys            idempotency keys with payload fingerprints, per action
- *   rev/revAt/revBy the trial's OWN concurrency revision (never the case's)
+ *   rev/revAt/revBy the trial's own concurrency revision (never the case's)
  *   history[]       append-only, ids/states/times only
  *   reminders       persisted markers read by the reminder sweep
  *
- * THE TRUTH MODEL THIS FILE ENFORCES
- *
- *   invitation ≠ accepted ≠ scheduled ≠ attended ≠ completed ≠ assessment ≠ decision
- *
- * so: a row exists only after acceptance; `scheduled` needs a CONFIRMED
- * revision with at least one concrete session; `completed` needs recorded
- * attendance and an ended last session; cancellation is a completion state and
- * never `trial_completed`; nothing here reads an assessment or a Box Cam
- * result; nothing here writes a case status.
- *
- * Everything is deterministic and side-effect free (clock injected) so the
- * validators, the state derivation and the projections are property-testable
- * without Express or a database.
+ * `scheduled` needs a confirmed revision with at least one session;
+ * `completed` needs recorded attendance and an ended last session;
+ * cancellation is a completion state and never `trial_completed`.
  */
 
 import { parseTrialDate, isTrialDate } from '../../../domain.mjs';
@@ -43,7 +31,7 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // ------------------------------------------------------------------ vocabulary
 
-/** The Trial's operational states. `legacy_accepted` is a read-only interpretation of a row with no operational fields. */
+/** `legacy_accepted` is a read-only interpretation of a row with no operational fields. */
 export const TRIAL_WORKFLOW_STATES = Object.freeze(['legacy_accepted', 'accepted', 'scheduled', 'completed', 'cancelled']);
 export const TRIAL_FINAL_STATES = Object.freeze(['completed', 'cancelled']);
 
@@ -55,20 +43,20 @@ export const TRIAL_WORKFLOW_LABELS = table({
   cancelled: 'Cancelled',
 });
 
-/** Contextual session kinds (Box Cam change classification N6). Minimal, closed. */
+/** Contextual session kinds. */
 export const TRIAL_SESSION_KINDS = Object.freeze(['onboarding', 'training', 'drill', 'small_sided', 'match', 'other']);
 
-/** Per-session attendance states. `not_recorded` is DERIVED, never stored. */
+/** `not_recorded` is derived, never stored. */
 export const TRIAL_ATTENDANCE_STATES = Object.freeze(['attended', 'partial', 'no_show', 'club_cancelled', 'player_withdrew']);
 export const TRIAL_ATTENDANCE_SOURCES = Object.freeze(['checkin', 'manual']);
-/** The states that count as the player having taken part. */
+/** The player took part. */
 export const TRIAL_ATTENDED_STATES = Object.freeze(['attended', 'partial']);
 
 export const TRIAL_COMPLETION_STATES = Object.freeze(['completed', 'cancelled']);
 export const TRIAL_CANCEL_ACTORS = Object.freeze(['club', 'player', 'guardian', 'system']);
-/** The record's own status: a mandatory report is owed until it is filed. */
+/** A mandatory report is owed until it is filed. */
 export const TRIAL_STATUSES = Object.freeze(['awaiting_report', 'reported']);
-/** Trial-day vocabulary (domains/scouting/journeys.mjs): a named staff member's background-check states, the day's status events, the event-consent scopes. */
+/** Trial-day vocabulary (domains/scouting/journeys.mjs): staff background-check states, day status events, event-consent scopes. */
 export const TRIAL_STAFF_CHECK_STATES = Object.freeze(['pending', 'reviewed', 'expired', 'rejected']);
 export const TRIAL_DAY_EVENT_KINDS = Object.freeze(['cancelled', 'postponed']);
 export const TRIAL_CONSENT_SCOPES = Object.freeze(['player_event_consent', 'guardian_event_consent']);
@@ -90,24 +78,23 @@ export const TRIAL_LIMITS = Object.freeze({
   /** A session is at least 15 minutes and at most 12 hours. */
   minSessionMs: 15 * 60 * 1000,
   maxSessionMs: 12 * 60 * 60 * 1000,
-  /** A schedule may not be revised more than this many times (a product bound, not a technical one). */
+  /** A product bound on schedule revisions, not a technical one. */
   revisions: 30,
   historyPage: 100,
 });
 
-/** A trial date, as a whole-day slot, is the D1 module's; instants are this module's. */
+/** A trial date (a whole-day slot) is domain.mjs's; instants are this module's. */
 export const TRIAL_INSTANT_YEAR_MIN = 2000;
 export const TRIAL_INSTANT_YEAR_MAX = 2100;
 
 // ------------------------------------------------------------------ roles
 
 /**
- * Who may do what. The same three levels are carried by
- * `roomCan` (rooms/shared.mjs) so the Room keeps one permission surface.
+ * `roomCan` (rooms/shared.mjs) carries the same three levels.
  *
- *   trial_view    viewer and above — shared Trial information is club memory
- *   trial_assess  contributor and above — a scout may assess in Trial context
- *   trial_write   room lead and above — invite, schedule, cancel, attendance, complete, link
+ *   trial_view    viewer and above
+ *   trial_assess  contributor and above: a scout may assess in Trial context
+ *   trial_write   room lead and above: invite, schedule, cancel, attendance, complete, link
  */
 const ROLE_RANK = table({ viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 });
 const NEED = table({ trial_view: 0, trial_assess: 1, trial_write: 2 });
@@ -124,10 +111,8 @@ export { payloadFingerprint };
 // ------------------------------------------------------------------ time
 
 /**
- * An organiser timezone is an exact IANA name this runtime knows. No
- * case-folding, no alias resolution, no fallback to the server's zone: a
- * schedule whose zone is unknown is refused, never guessed. The check itself
- * is the platform's (`temporal.mjs`); this keeps the Trial code.
+ * An exact IANA name this runtime knows: no case-folding, no aliases, no
+ * fallback to the server's zone. An unknown zone is refused, never guessed.
  */
 export function validateTimezone(tz) {
   const v = validateIanaZone(tz);
@@ -136,11 +121,8 @@ export function validateTimezone(tz) {
 }
 
 /**
- * The ONE parser for a Trial instant. Accepts an ISO 8601
- * date-time WITH an explicit offset or `Z`, or a finite integer millisecond
- * timestamp; anything else — a bare local time, a date-only string, a number
- * that is not an integer, text, an object — is refused. Returns UTC ms.
- * The parsing is the platform's; the year bound and code are Trial's.
+ * ISO 8601 with an explicit offset or `Z`, or an integer millisecond timestamp;
+ * a bare local time or a date-only string is refused. Returns UTC ms.
  */
 export function parseInstant(v) {
   const p = parseCanonicalInstant(v, { yearMin: TRIAL_INSTANT_YEAR_MIN, yearMax: TRIAL_INSTANT_YEAR_MAX });
@@ -148,10 +130,9 @@ export function parseInstant(v) {
   return { ok: true, ms: p.ms };
 }
 
-/** Local wall-clock parts of an instant in a zone. Deterministic; Intl-backed. */
 export const localParts = canonicalLocalParts;
 
-/** `YYYY-MM-DD` of an instant in the organiser zone — the day the family sees. */
+/** `YYYY-MM-DD` in the organiser zone: the day the family sees. */
 export function localDay(ms, timezone) {
   const p = localParts(ms, timezone);
   return `${p.year}-${p.month}-${p.day}`;
@@ -168,10 +149,7 @@ export const icsText = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/
 
 // ------------------------------------------------------------------ text
 
-/**
- * Shared text: bounded, one line where the field is a label, control
- * characters removed. Never HTML-interpreted anywhere (clients render text).
- */
+/** Never HTML-interpreted anywhere (clients render text). */
 function cleanText(raw, max, { oneLine = false } = {}) {
   if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
   if (typeof raw !== 'string') return { ok: false };
@@ -183,7 +161,7 @@ function cleanText(raw, max, { oneLine = false } = {}) {
   return { ok: true, value: s || null };
 }
 
-/** Venue for a session or an invitation: a name (required), a town, and (after acceptance only) an address. */
+/** A name (required), a town, and (after acceptance only) an address. */
 export function validateVenue(raw, { addressAllowed = true } = {}) {
   const bad = (message) => ({ ok: false, error: 'TRIAL_VENUE_INVALID', message });
   if (!isPlain(raw)) return bad('venue must be an object with at least a name.');
@@ -199,13 +177,12 @@ export function validateVenue(raw, { addressAllowed = true } = {}) {
 // ------------------------------------------------------------------ sessions
 
 const SESSION_SEQ = (id) => { const n = Number(String(id ?? '').split('-').pop()); return Number.isFinite(n) ? n : 0; };
-/** Stable session order: start time, then the monotonic id part. */
+/** Start time, then the monotonic id part. */
 export const byStartsAtThenId = (a, b) => (a.startsAt - b.startsAt) || (SESSION_SEQ(a.id) - SESSION_SEQ(b.id)) || String(a.id).localeCompare(String(b.id));
 
 /**
- * Validate ONE session as a club proposes it. `id` is assigned by the caller
- * (stable, never array position). The venue on a session may carry an
- * address: it is shared with the routed recipient after acceptance.
+ * `id` is assigned by the caller (stable, never array position). A session
+ * venue may carry an address: it is shared with the recipient after acceptance.
  */
 export function validateSessionInput(raw, { now = Date.now(), allowPast = false } = {}) {
   const bad = (message) => ({ ok: false, error: 'TRIAL_SCHEDULE_INVALID', message });
@@ -220,9 +197,8 @@ export function validateSessionInput(raw, { now = Date.now(), allowPast = false 
   const len = end.ms - start.ms;
   if (len < TRIAL_LIMITS.minSessionMs) return bad('A session is at least 15 minutes long.');
   if (len > TRIAL_LIMITS.maxSessionMs) return bad('A session is at most 12 hours long.');
-  // A NEW session cannot be placed in the past. A session the trial already
-  // has may have ended — a revision must carry it unchanged (the route checks
-  // that), so it is not refused here.
+  // A session the trial already has may have ended; a revision must carry it
+  // unchanged (the route checks that), so only new sessions are refused.
   if (!allowPast && end.ms <= now) return bad('A session cannot be scheduled entirely in the past.');
   const venue = validateVenue(raw.venue);
   if (!venue.ok) return venue;
@@ -232,10 +208,8 @@ export function validateSessionInput(raw, { now = Date.now(), allowPast = false 
 }
 
 /**
- * Validate a whole schedule proposal: one organiser timezone, 1–20 sessions,
- * no overlaps (a player cannot be in two sessions at once — enforced here,
- * never client-only), stable order. Existing ids may be carried on a
- * revision; new sessions get ids from `mintId`.
+ * One organiser timezone, 1–20 sessions, no overlaps (enforced here, never
+ * client-only). Existing ids may be carried on a revision; new ones come from `mintId`.
  */
 export function validateScheduleInput(raw, { now = Date.now(), mintId, existingIds = [] } = {}) {
   const bad = (error, message, extra = {}) => ({ ok: false, error, message, ...extra });
@@ -270,11 +244,9 @@ export function validateScheduleInput(raw, { now = Date.now(), mintId, existingI
 }
 
 /**
- * Does a new revision change something the recipient agreed to?
- * Material: the organiser timezone, the set of sessions, any session's
- * start or end, its venue name or town. Not material: instructions, the
- * venue address line, the session kind. A material change clears
- * `confirmedAt` and asks the recipient again.
+ * Material: the timezone, the set of sessions, any start or end, a venue name
+ * or town. Not material: instructions, the address line, the session kind. A
+ * material change clears `confirmedAt` and asks the recipient again.
  */
 export function materialChange(prev, next) {
   if (!prev) return true;
@@ -287,14 +259,12 @@ export function materialChange(prev, next) {
 
 // ------------------------------------------------------------------ state
 
-/** Is this a row with no operational containers? */
+/** A row with no operational containers. */
 export const isLegacyTrial = (t) => !t || t.workflowState === undefined || t.workflowState === 'legacy_accepted';
 
 /**
- * The operational state, DERIVED from the authoritative fields and compared
- * with the stored `workflowState`. The stored value is what routes assert on;
- * the derivation is what integrity checks it against, so the two can never
- * quietly disagree.
+ * Derived from the authoritative fields; integrity checks the stored
+ * `workflowState`, which routes assert on, against it.
  */
 export function deriveWorkflowState(t) {
   if (!t) return null;
@@ -305,7 +275,7 @@ export function deriveWorkflowState(t) {
   return 'accepted';
 }
 
-/** Latest attendance record per session (append-only history → current map). */
+/** Latest attendance record per session. */
 export function currentAttendance(t) {
   const out = new Map();
   for (const a of t?.attendance ?? []) {
@@ -315,13 +285,10 @@ export function currentAttendance(t) {
   return out;
 }
 
-/** The session with the latest end time in the CURRENT revision. */
+/** The latest-ending session in the current revision. */
 export const lastSession = (t) => (t?.schedule?.sessions ?? []).slice().sort((a, b) => b.endsAt - a.endsAt)[0] ?? null;
 
-/**
- * THE completion gate. Every reason is returned so the
- * refusal says what is missing rather than "no".
- */
+/** Every reason is returned so the refusal says what is missing. */
 export function canComplete(t, { now = Date.now() } = {}) {
   const reasons = [];
   if (!t) return { ok: false, error: 'TRIAL_NOT_FOUND', message: 'No such trial.' };
@@ -344,11 +311,7 @@ export function canComplete(t, { now = Date.now() } = {}) {
   return { ok: true };
 }
 
-/**
- * Which club actions the Trial's state permits (independent of role, block or
- * case). Cancellation is possible from every open state; nothing is possible
- * from a final state except reading.
- */
+/** Independent of role, block or case. Cancellation is possible from every open state. */
 export function trialStateAllows(t, action) {
   const state = deriveWorkflowState(t);
   const open = state === 'accepted' || state === 'scheduled' || state === 'legacy_accepted';
@@ -365,29 +328,22 @@ export function trialStateAllows(t, action) {
 }
 
 /**
- * Block policy. Once the player or guardian has blocked
- * the organisation, the club may only CANCEL an accepted trial (an
- * operational safety notice, not solicitation) and file the mandatory
- * report; the recipient may still decline, cancel or read. Everything else —
- * scheduling, rescheduling, attendance, completion, evidence, assessment —
- * is refused as `TRIAL_BLOCKED`.
+ * Once the player or guardian has blocked the organisation, the club may only
+ * cancel an accepted trial (a safety notice, not solicitation) and file the
+ * mandatory report; everything else is `TRIAL_BLOCKED`. The recipient may still
+ * decline, cancel or read.
  */
 export const BLOCKED_CLUB_ACTIONS_ALLOWED = Object.freeze(['cancel', 'report']);
 export const blockedAllows = (action) => BLOCKED_CLUB_ACTIONS_ALLOWED.includes(action);
 
 // ------------------------------------------------------------------ integrity
 
-/**
- * Structural soundness of a Trial row for the evidence provider and the
- * projections. A problem list, never a repair: a corrupt row is omitted and
- * counted, and never becomes evidence.
- */
+/** A problem list, never a repair: a corrupt row is omitted, counted and never evidence. */
 export function trialIntegrity(t, { orgId = null, caseId = null } = {}) {
   try {
     return trialIntegrityUnsafe(t, { orgId, caseId });
   } catch {
-    // A row so malformed that the checker itself cannot read it is exactly
-    // the row the checker exists to name. Never a throw, never a 500.
+    // The row the checker cannot read is the row it exists to name.
     return ['unreadable'];
   }
 }
@@ -424,8 +380,7 @@ function trialIntegrityUnsafe(t, { orgId = null, caseId = null } = {}) {
   if (t.attendance !== undefined) {
     if (!Array.isArray(t.attendance)) p.push('attendance');
     else {
-      // A schedule whose `sessions` is not a list was already
-      // flagged above; the attendance check must not throw over it.
+      // A non-list `sessions` was flagged above; this check must not throw over it.
       const ids = new Set((Array.isArray(t.schedule?.sessions) ? t.schedule.sessions : []).map((s) => s?.id));
       for (const a of t.attendance) {
         if (!isPlain(a) || !TRIAL_ATTENDANCE_STATES.includes(a.state) || !ids.has(a.sessionId)) { p.push('attendance.record'); break; }
@@ -444,7 +399,7 @@ function trialIntegrityUnsafe(t, { orgId = null, caseId = null } = {}) {
 const HISTORY_SEQ = (id) => { const n = Number(String(id ?? '').split('-').pop()); return Number.isFinite(n) ? n : 0; };
 export const byAtThenId = (a, b) => (a.at - b.at) || (HISTORY_SEQ(a.id) - HISTORY_SEQ(b.id));
 
-/** A session as the club and (after acceptance) the family see it. Evidence is ids only. */
+/** Evidence is ids only. */
 function sessionView(s, att, { withAddress, withInstructions, withEvidence }) {
   const a = att.get(s.id) ?? null;
   return {
@@ -457,23 +412,17 @@ function sessionView(s, att, { withAddress, withInstructions, withEvidence }) {
 }
 
 /**
- * The current schedule for a viewer. Legacy rows carry a date-only,
- * timezone-less entry, flagged.
+ * Legacy rows carry a date-only, timezone-less entry, flagged.
  *
- * The three viewers, and what each one is:
+ *   `club`             everything operational, evidence included
+ *   `family_accepted`  the player or guardian who accepted: also the venue
+ *                      address and joining instructions held back from the invitation
+ *   `agent`            times, session kinds, venue name and town, attendance;
+ *                      not the address, instructions or evidence, which belong to
+ *                      the family and the club
  *
- *   `club`             the organising club: everything operational, evidence included
- *   `family_accepted`  the player or guardian who accepted: the exact venue
- *                      address and the club's joining instructions, which were
- *                      held back from the invitation
- *   `agent`            an authorised agent reading their client's
- *                      trial. Times, session kinds, the venue's NAME and town,
- *                      attendance. Not the address, not the instructions, not
- *                      the evidence list — those belong to the family and the
- *                      club, and an agent is neither.
- *
- * An unrecognised viewer gets the narrowest of the three, so a new caller that
- * forgets to name itself under-shares rather than over-shares.
+ * An unrecognised viewer gets the narrowest view, so a caller that forgets to
+ * name itself under-shares.
  */
 export const TRIAL_SCHEDULE_VIEWERS = Object.freeze(['club', 'family_accepted', 'agent']);
 
@@ -500,7 +449,7 @@ export function scheduleView(t, viewer) {
   };
 }
 
-/** Club-side view: everything operational, never the family's emergency contact, never a Box Cam payload. */
+/** Never the family's emergency contact, never a Box Cam payload. */
 export function trialClubView(t) {
   const state = deriveWorkflowState(t);
   return {
@@ -526,10 +475,8 @@ export function trialClubView(t) {
 }
 
 /**
- * Family view (player or guardian): the shared operational edge and nothing
- * else — no caseId, no history internals, no evidence, no assessment. The
- * exact venue address and instructions are shared once accepted —
- * a Trial row exists only after acceptance, so here they always are.
+ * No caseId, history internals, evidence or assessment. The venue address and
+ * instructions are shared because a Trial row exists only after acceptance.
  */
 export function trialFamilyView(t) {
   const state = deriveWorkflowState(t);
@@ -547,7 +494,7 @@ export function trialFamilyView(t) {
   };
 }
 
-/** The journey milestone: ids, states, times, counts. Never text. */
+/** Ids, states, times, counts. Never text. */
 export function trialMilestone(t) {
   const att = currentAttendance(t);
   const sessions = t.schedule?.sessions ?? [];
@@ -564,7 +511,7 @@ export function trialMilestone(t) {
   };
 }
 
-/** The outcome line a minor's own device may show: state only (privacy matrix). */
+/** What a minor's own device may show: state only (privacy matrix). */
 export function trialOutcomeLine(t) {
   const state = deriveWorkflowState(t);
   return { id: t.id, orgName: t.orgName ?? null, workflowState: state, workflowLabel: TRIAL_WORKFLOW_LABELS[state] ?? state, guardianManaged: true };

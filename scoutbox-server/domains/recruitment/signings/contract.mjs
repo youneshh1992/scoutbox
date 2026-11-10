@@ -1,7 +1,6 @@
 /**
- * The player's canonical live contract, if any: a completed-signing row written by the one writer over a COMPLETED
- * signing package, not cancelled, whose contract end (if any) has not passed at `now`. This is the record that owns
- * `under_contract`; a self-declaration or a club's squad housekeeping never overrides it.
+ * The player's live contract, if any: a completed-signing row over a COMPLETED package, not cancelled, whose
+ * contract end has not passed. This record owns `under_contract`; a self-declaration never overrides it.
  */
 export function createContractLookup({ signingsFollowUps }) {
   if (typeof signingsFollowUps?.signings?.forPlayer !== 'function') throw new TypeError('createContractLookup needs the signings repository');

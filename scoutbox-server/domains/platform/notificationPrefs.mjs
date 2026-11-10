@@ -1,24 +1,12 @@
 /**
- * Notification preferences, enforced where notifications are made: every type
- * maps to one CATEGORY, every person has an on/off per category, and `notify()`
- * consults it before it creates a row — so an "off" category is never created
- * and never pushed, rather than created and then hidden by a client.
+ * Notification preferences, checked by `notify()` before a row is created, so
+ * a muted category is never created rather than hidden by a client.
  *
- * Two things are deliberately fixed:
+ * There is no email transport, so `emailIntent` records what the person would
+ * want once one exists; it is never described as delivery.
  *
- *   security_account is MANDATORY. Verification outcomes, account
- *   transitions and support access are not preferences; the ability to mute
- *   recruitment chatter must never mute "your account changed hands".
- *
- *   Email is not a real channel. There is no SMTP transport in this build —
- *   /capabilities reports `email_transport: local_outbox` — so the only
- *   channel preference offered is `emailIntent`: what the person WOULD want
- *   when a transport exists. It is stored and honoured by the outbox, and
- *   never described as delivery.
- *
- * Unknown category names fail closed to the safest reading: a type nobody
- * classified is delivered (a missing notification is worse than a spare one),
- * and a preference write naming an unknown category is refused.
+ * An unclassified type is delivered (a missing notification is worse than a
+ * spare one); a preference write naming an unknown category is refused.
  */
 
 export const CATEGORIES = Object.freeze({
@@ -32,44 +20,21 @@ export const CATEGORIES = Object.freeze({
   brief_updates: { label: 'Recruitment Briefs and coverage', default: true, mandatory: false },
   messages: { label: 'Messages and requests', default: true, mandatory: false },
   activity: { label: 'Recruitment outcomes and activity', default: true, mandatory: false },
-  // Off by default: nudges nobody asked for and nothing depends on. An
-  // outcome, a signing or a report deadline is not in here — those are
-  // obligations, and "conservative default" must not mean "muted by surprise".
+  // Off by default: unrequested nudges. Outcomes, signings and deadlines are not in here.
   discovery_nudges: { label: 'Discovery nudges and badges', default: false, mandatory: false },
-  // Membership changes on a Dynamic Watchlist. On by default because a
-  // watchlist is something the club deliberately asked ScoutBox to maintain —
-  // it is a requested alert, not an unsolicited nudge.
+  // On by default: the club asked ScoutBox to maintain the watchlist.
   watchlist_changes: { label: 'Dynamic Watchlist changes', default: true, mandatory: false },
-  // ONE category for the whole Development Hub, not three. The honest trade is
-  // stated rather than hidden: a
-  // person who mutes this mutes shared goals, due actions and shared reviews
-  // together. Splitting it would have produced three switches that are almost
-  // always set the same way, which is how a preferences screen stops being read.
+  // One category for the whole Hub: muting it mutes goals, actions and reviews together, since three switches
+  // would almost always be set the same way.
   development_updates: { label: 'Development plans, goals and reviews', default: true, mandatory: false },
-  // Agent relationship requests and their outcomes. On by default
-  // because a request is something a person must answer; a player who mutes
-  // it is muting solicitations, which is their right.
   representation: { label: 'Agent representation requests and changes', default: true, mandatory: false },
-  // Compliance — a review that needs answering, a consent someone is waiting
-  // on, a verification that went stale. Mandatory: muting it would mute a
-  // regulatory obligation.
+  // Mandatory: muting it would mute a regulatory obligation.
   compliance: { label: 'Regulatory review, consent and verification', default: true, mandatory: true },
-  // Transaction workspace activity — a party asked to confirm, a
-  // document shared, a status change. ONE category rather than three, for the
-  // same reason `development_updates` is one: three switches nobody sets
-  // differently is how a preferences screen stops being read. It is NOT
-  // mandatory, because operational workspace traffic is not a regulatory
-  // obligation — the compliance half of a transaction is routed to
-  // `compliance`, which is, and which a person cannot mute.
+  // Not mandatory: a transaction's compliance notices go to `compliance` instead.
   transaction_updates: { label: 'Transaction workspace activity', default: true, mandatory: false },
-  // An Offer issued, withdrawn, answered or expiring. On by default and
-  // NOT mandatory: an Offer is something a person must answer, but answering
-  // it is their own free act and a recipient may choose not to hear about
-  // Offers at all — a club is never owed a channel to a player. The category
-  // carries no term, note or rationale; the text is a factual line only.
+  // Not mandatory: a club is never owed a channel to a player.
   offer_updates: { label: 'Offers and Offer answers', default: true, mandatory: false },
-  // A document presented for signing, a party's confirmation, a
-  // completion. Not mandatory for the same reason as Offers; factual lines only.
+  // Not mandatory, for the same reason as Offers.
   signing_updates: { label: 'Signing workflow', default: true, mandatory: false },
   security_account: { label: 'Security and account', default: true, mandatory: true },
 });
@@ -80,16 +45,12 @@ export const TYPE_CATEGORY = Object.freeze({
   // recruitment rooms
   recruitment_room: 'room_changes',
   case: 'room_changes',
-  // mentions and assignments arrive as recruitment_room today; the text is
-  // classified by a second pass below so a mention is never muted as chatter.
+  // Mentions and assignments arrive as recruitment_room; categoryOf tells them apart.
   second_look: 'second_look',
   coverage: 'brief_updates',
-  // A saved-search alert is something the scout ASKED for by saving the
-  // search; it is not an unrequested nudge, so it stays on by default.
+  // The scout asked for it by saving the search, so it is not a nudge.
   saved_search: 'activity',
-  // watchlist membership changes
   watchlist: 'watchlist_changes',
-  // Development Hub: one type, one category.
   development: 'development_updates',
   // evidence and combine
   evidence: 'evidence_requests',
@@ -112,9 +73,7 @@ export const TYPE_CATEGORY = Object.freeze({
   request: 'messages',
   accepted: 'messages',
   declined: 'messages',
-  // A minor hears that their guardian accepted or declined a
-  // request for them. It is the outcome of a request, so it lives with the
-  // other request outcomes — on by default, never a discovery nudge.
+  // A minor hears their guardian's answer to a request: a request outcome, not a nudge.
   guardian_decision: 'messages',
   application: 'messages',
   campaign: 'messages',
@@ -135,16 +94,10 @@ export const TYPE_CATEGORY = Object.freeze({
   representation_terminated: 'representation',
   representation_disputed: 'representation',
   representation_expiring: 'representation',
-  // Both are about the representation relationship itself — what the
-  // client shares, and a club message the client's agent was made a party to.
   representation_disclosure: 'representation',
   representation_contact: 'representation',
-  // An opportunity an agent put in front of their client is a message about a
-  // real chance, so it lives with the other opportunity traffic, not with
-  // relationship admin.
+  // A real opportunity, so it sits with messages rather than relationship admin.
   representation_opportunity: 'messages',
-  // A club inviting a transaction workspace is workspace traffic, like every
-  // other transaction workspace notification.
   representation_transaction: 'transaction_updates',
   agent_verification: 'security_account',
   agency_membership: 'security_account',
@@ -156,13 +109,9 @@ export const TYPE_CATEGORY = Object.freeze({
   regulatory_consent_declined: 'compliance',
   regulatory_consent_revoked: 'compliance',
   agent_verification_stale: 'compliance',
-  // Agent Transaction Workspace. Workspace traffic and "we need you
-  // to do something" are operational; a compliance change is not, and goes to
-  // the mandatory category.
+  // Agent Transaction Workspace; its compliance changes go to the mandatory category.
   agent_transaction: 'transaction_updates',
-  // The canonical Offer — one type, one category.
   recruitment_offer: 'offer_updates',
-  // The signing workflow — one type, one category.
   recruitment_signing: 'signing_updates',
   agent_transaction_action: 'transaction_updates',
   agent_transaction_compliance: 'compliance',
@@ -175,9 +124,8 @@ export const TYPE_CATEGORY = Object.freeze({
 });
 
 /**
- * The category a notification belongs to. Mentions and assignments share the
- * `recruitment_room` type with ordinary room changes, so they are recognised
- * from the wording the server itself wrote — never from user text.
+ * Mentions and assignments share the `recruitment_room` type, so they are
+ * recognised from the server's own wording, never from user text.
  */
 export function categoryOf(type, text = '') {
   if (type === 'recruitment_room') {
@@ -193,22 +141,18 @@ export function defaultPrefs() {
   return { categories, emailIntent: false };
 }
 
-/**
- * The preference gate and the preference views over the stored preferences (repositories/notifications.mjs). It
- * registers no routes, so the notifier can hold the gate before any module that notifies registers.
- */
+/** Registers no routes, so the notifier can hold the gate before any module that notifies registers. */
 export function createNotificationPrefs({ notifications }) {
   if (!notifications || typeof notifications.prefsFor !== 'function') throw new TypeError('createNotificationPrefs needs the notifications repository');
 
   const find = (kind, id) => notifications.prefsFor(kind, id);
 
-  /** Effective preferences: stored over defaults, mandatory always on. */
+  /** Stored over defaults; mandatory categories always on. */
   function effective(kind, id) {
     const stored = find(kind, id);
     const out = defaultPrefs();
     if (stored) {
-      // Own keys only: `'constructor' in CATEGORIES` is true through the
-      // prototype, and a stored prototype name must never become a category.
+      // Own keys only: `'constructor' in CATEGORIES` is true through the prototype.
       for (const [k, v] of Object.entries(stored.categories)) if (Object.hasOwn(CATEGORIES, k)) out.categories[k] = v;
       out.emailIntent = stored.emailIntent;
     }
@@ -216,12 +160,7 @@ export function createNotificationPrefs({ notifications }) {
     return out;
   }
 
-  /**
-   * The enforcement point. True when a notification of this type may be
-   * created for this audience. An unknown type is delivered — a missing
-   * notification is the worse failure — and the fact is counted so the
-   * registry gap is visible.
-   */
+  /** An unknown type is delivered and counted, so the registry gap is visible. */
   const unknownTypes = new Map();
   function allows(audience, type, text) {
     const cat = categoryOf(type, text);
@@ -251,9 +190,9 @@ export function createNotificationPrefs({ notifications }) {
       return res.status(400).json({ error: 'PREFS_INVALID', message: 'categories must be an object of category → boolean.' });
     }
     for (const [k, v] of Object.entries(incoming ?? {})) {
-      // Own keys only — `__proto__`, `constructor`, `toString` are not categories.
+      // Own keys only: `__proto__`, `constructor` and `toString` are not categories.
       if (!Object.hasOwn(CATEGORIES, k)) return res.status(400).json({ error: 'PREF_CATEGORY_UNKNOWN', category: k, message: 'That is not a notification category.' });
-      // A value is true or false; anything else is refused, never coerced (a numeric 0 would read as "off" on a mandatory category).
+      // Never coerced: a numeric 0 would read as "off".
       if (typeof v !== 'boolean') return res.status(400).json({ error: 'PREFS_INVALID', category: k, message: `${k} must be true or false.` });
       if (CATEGORIES[k].mandatory && v === false) {
         return res.status(400).json({ error: 'PREF_CATEGORY_MANDATORY', category: k, message: 'Security and account notices cannot be turned off.' });

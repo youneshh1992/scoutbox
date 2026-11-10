@@ -1,18 +1,5 @@
-// A rejected promise from a route handler reaches the error middleware
-// instead of the process.
-//
-// Express 4 catches an error THROWN by a handler and passes it to next(err),
-// but it ignores the promise an `async` handler returns. Without this, a throw
-// inside an async handler is an unhandled rejection, and Node ends the process
-// on one: a single malformed request to an async route would stop the whole
-// server for every user.
-//
-// This mirrors Express's own Layer#handle_request (4.x, router/layer.js) line
-// for line and adds one thing: when the handler returns a thenable, its
-// rejection is passed to next(err). Error middleware (four arguments) keeps
-// Express's rule of being skipped on the normal path. The existing app-level
-// error handler then answers the caller with its fixed 500 body and logs the
-// detail — exactly what a synchronous throw gets.
+// Express 4 ignores the promise an async handler returns, so a rejection would be unhandled and Node would end the
+// process. This patches Express's own Layer#handle_request (4.x, router/layer.js) to pass the rejection to next(err).
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);

@@ -1,50 +1,23 @@
 /**
- * Recruitment analytics: the metric registry and the pure statistics
- * behind it.
+ * Recruitment analytics: the metric registry and its statistics. Metrics measure the recruitment process,
+ * never the worth of a player or a scout: each is a count or duration over workflow records.
  *
- * The governing rule of this module, and of all of analytics:
+ * `assertMetricRegistry` refuses a blended score, a person grouping dimension or a metric reading private
+ * text. A metric comparing groups declares `association: true` and carries ASSOCIATION_NOTE.
  *
- *     Measure the recruitment process, not the worth of the player or
- *     the scout.
- *
- * Nothing here knows what a good player looks like and nothing here knows
- * what a good scout looks like. Every metric below is a count or a duration
- * over WORKFLOW records — a room opened, a status changed, a decision
- * written down, a review left untouched. A director acts on these by
- * changing how the club works, never by forming an opinion about a person.
- *
- * Four refusals are built in rather than documented:
- *
- *   1. No blended overall number. There is no Recruitment Score, Scout
- *      Score, Player Success Score, Recruitment Efficiency Score, Talent
- *      Conversion Score or Club Intelligence Score, and `assertMetricRegistry`
- *      refuses to boot if one appears.
- *   2. No person dimension. `GROUP_DIMENSIONS` is a closed list with no
- *      person in it, and `PERSON_DIMENSIONS` exists only so a request for one
- *      can be refused by name rather than falling through to "unknown".
- *   3. No private text. Every metric declares the fields it reads; `note`,
- *      `comment` and every narrative field are absent from every declaration.
- *   4. No causation. A metric that compares groups declares
- *      `association: true` and carries the sentence that says so.
- *
- * docs/reference/recruitment-metrics.md documents the same definitions as the
- * registry here; a change to one is a change to the other.
+ * docs/reference/recruitment-metrics.md documents the same definitions; change both together.
  */
 
 export const RECRUITMENT_ANALYTICS_POLICY_VERSION = 1;
 
 /**
- * Below this many observations a RATIO or a MEDIAN is withheld and the raw
- * numerator and denominator are shown instead. Counts are never suppressed: a
- * director must be able to see their own three rooms.
- *
- * 5 rather than the SUPPRESS_MIN of 3 used for lists elsewhere, because a ratio invites a conclusion
- * that a list does not: "we convert 33% of trials" reads as a finding even
- * when it means one trial out of three.
+ * Below this many observations a ratio or median is withheld and the raw numbers shown instead; counts are
+ * never suppressed. Higher than the list SUPPRESS_MIN of 3 because "33% of trials" reads as a finding when
+ * it is one trial in three.
  */
 export const SMALL_N_MIN = 5;
 
-/** The six families a director reads, in the order the dashboard renders. */
+/** In the order the dashboard renders. */
 export const METRIC_FAMILIES = [
   { id: 'pipeline', label: 'Pipeline shape' },
   { id: 'duration', label: 'How long the process takes' },
@@ -56,40 +29,23 @@ export const METRIC_FAMILIES = [
 ];
 export const FAMILY_IDS = METRIC_FAMILIES.map((f) => f.id);
 
-/**
- * Time semantics. Every metric declares exactly one, and the payload carries
- * it, because "how many rooms" means three different things depending on
- * which of these is meant.
- */
+/** Every metric declares one, because "how many rooms" means different things under each. */
 export const TIME_SEMANTICS = {
   point_in_time: 'The state of the world now. The window does not apply.',
   window_entry: 'Counted in the window the entry event happened in (a room opened, a decision written).',
   window_completion: 'Counted in the window the completing event happened in (a room reached a terminal status, a trial finished).',
 };
 
-/**
- * The dimensions a metric may be grouped by. There is no person here and
- * there will not be one: a per-person breakdown of process counts is a scout
- * leaderboard with the ranking left as an exercise for the reader.
- */
+/** No person dimension: a per-person breakdown of process counts is a scout leaderboard. */
 export const GROUP_DIMENSIONS = ['status', 'source_context', 'priority', 'reason_category', 'brief'];
 
-/**
- * Refused by name. Without this list a request for `groupBy=scout` would fall
- * through the same "unknown dimension" path as a typo, and the refusal would
- * not say why. These are not unsupported; they are declined.
- */
+/** Refused by name, so the refusal says why instead of reading like a typo. */
 export const PERSON_DIMENSIONS = ['scout', 'user', 'owner', 'lead_scout', 'leadScout', 'assignee', 'author', 'created_by', 'createdBy', 'player'];
 
-/** The sentence that must accompany any metric comparing groups. */
 export const ASSOCIATION_NOTE =
   'ScoutBox observes that these records share this property and later reached this stage. It does not show that the property caused it: people choose where to look, and the players they find differ in ways ScoutBox does not measure.';
 
-/**
- * Names this product will never carry. Swept in source, in every payload, in
- * both client bundles and in the docs. The list is deliberately broader than
- * the six the mandate names, because the failure mode is a synonym.
- */
+/** Swept in source, payloads, client bundles and docs. Broader than the obvious names because synonyms are the failure mode. */
 export const FORBIDDEN_METRIC_NAMES = [
   'recruitment score', 'scout score', 'player success score', 'recruitment efficiency score',
   'talent conversion score', 'club intelligence score', 'scouting score', 'performance score',
@@ -102,13 +58,8 @@ export const FORBIDDEN_METRIC_NAMES = [
 const M = (id, family, name, spec) => ({ id, family, name, ...spec });
 
 /**
- * One entry per metric. `reads` is the exhaustive list of record fields the
- * projection may touch — it is asserted against the source at boot in
- * development, so a projection that quietly starts reading a decision note
- * fails loudly rather than shipping.
- *
- * `limitation` is not documentation. It is rendered on the panel, in both
- * languages, next to the number.
+ * `reads` lists every record field the projection may touch and is checked at boot in development, so a
+ * projection that starts reading a decision note fails loudly. `limitation` is rendered next to the number.
  */
 export const METRICS = {
   // ---- pipeline
@@ -144,12 +95,8 @@ export const METRICS = {
     ratio: false,
     limitation: 'Counts of formal recruitment decisions finalized in the window, by outcome — progress, hold, reject — and how many were later superseded. A process count, never a verdict on anyone: a club that rejects nine players and progresses one has run ten decisions, not ranked ten people.',
   }),
-  // The journey funnel from the CANONICAL RECORDS, not from
-  // the case's status history: a stage counts only when the record that proves
-  // it exists. Case-based: a case counts once per stage however many retries,
-  // revisions or re-invitations it carried. Beside each stage the number of
-  // cases whose lifecycle history reached the state WITHOUT such a record
-  // (legacy cases, or drift) is reported, never folded in.
+  // From the records, not the status history: a stage counts only when its proving record exists, once per
+  // case. Cases whose history reached a stage without a record are reported apart, not folded in.
   journey_evidence_funnel: M('journey_evidence_funnel', 'pipeline', 'Journey stages (from the records)', {
     unit: 'rooms',
     semantics: 'window_entry',
@@ -351,28 +298,13 @@ export const METRICS = {
 
 export const METRIC_IDS = Object.keys(METRICS);
 
-/**
- * The registry entry as it goes on the wire.
- *
- * `reads` stays behind: it is the declaration this module asserts the
- * projections against, not something a client has any use for, and publishing
- * an internal field list invites an integrator to treat it as a contract.
- * Everything else — including the limitation sentence — travels with the
- * number, because a figure without its caveat is the failure mode this
- * module exists to avoid.
- */
+/** `reads` stays server-side; the limitation travels with the number, since a figure without its caveat misleads. */
 export const wire = (m) => {
   const { reads, ...rest } = m;
   return rest;
 };
 
-/**
- * Boot assertion. Cheap, and it catches the ways this design rots silently:
- * a metric in an unknown family, a metric that is both a ratio and a
- * distribution (which unit would it carry?), a comparison metric that forgot
- * to declare itself as association only, a metric reading a private field,
- * and — the one that matters most — a forbidden name creeping in.
- */
+/** Boot assertion against the ways the registry could rot silently, above all a forbidden name creeping in. */
 export function assertMetricRegistry() {
   const privateFields = ['note', 'notes', 'comment', 'body', 'text', 'byName', 'byId', 'scoutName', 'ownerUserId'];
   for (const [id, m] of Object.entries(METRICS)) {
@@ -400,14 +332,8 @@ export function assertMetricRegistry() {
 // -------------------------------------------------------------- statistics
 
 /**
- * A ratio, with the three outcomes kept apart on the wire:
- *
- *   • nothing happened      → { n: 0, empty: true, value: null }
- *   • it happened, none met → { n: 12, value: 0 }
- *   • too few to be a rate  → { n: 4, numerator: 1, suppressed: true, value: null }
- *
- * "No rooms ended this month" and "0% of rooms that ended had a decision" are
- * different sentences and a dashboard that renders both as "0%" is lying.
+ * Keeps three outcomes apart: nothing happened (`empty`), it happened and none met (`value: 0`), and too few
+ * to be a rate (`suppressed`). "No rooms ended" and "0% had a decision" must not both render as 0%.
  */
 export function ratio(numerator, denominator, { min = SMALL_N_MIN } = {}) {
   const n = Number(denominator) || 0;
@@ -417,7 +343,6 @@ export function ratio(numerator, denominator, { min = SMALL_N_MIN } = {}) {
   return { n, numerator: num, value: num / n, empty: false, suppressed: false };
 }
 
-/** Linear-interpolated quantile over a sorted numeric array. */
 function quantile(sorted, q) {
   if (!sorted.length) return null;
   const pos = (sorted.length - 1) * q;
@@ -428,13 +353,8 @@ function quantile(sorted, q) {
 }
 
 /**
- * Median and interquartile range — never a mean. One eighteen-month room
- * would move a mean and tell a director nothing true.
- *
- * `excluded` is the count of records that could not contribute because they
- * have not finished. It travels with the figure so the exclusion cannot hide:
- * a median time-to-decision over the rooms that reached a decision is a
- * different claim from a median over all rooms, and the caller must say which.
+ * Median and interquartile range, never a mean: one eighteen-month room would move a mean. `excluded` counts
+ * unfinished records and travels with the figure so the exclusion cannot hide.
  */
 export function distribution(values, { min = SMALL_N_MIN, excluded = 0 } = {}) {
   const nums = (values ?? []).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
@@ -454,23 +374,18 @@ export function distribution(values, { min = SMALL_N_MIN, excluded = 0 } = {}) {
   };
 }
 
-/** A plain count. Never suppressed — a director may always see their own work. */
+/** Never suppressed: a director may always see their own work. */
 export const count = (n) => ({ n: Number(n) || 0, value: Number(n) || 0, empty: false, suppressed: false });
 
 import { parseStrictDateOnly } from '../../../temporal.mjs';
 
 export const DAY_MS = 86_400_000;
-/** Whole days between two instants, as a float. Durations are never rounded to zero. */
+/** As a float: durations are never rounded to zero. */
 export const days = (from, to) => (Number(to) - Number(from)) / DAY_MS;
 
 // ------------------------------------------------------------------ window
 
-/**
- * Windows are inclusive UTC calendar days, the same rule as brief date
- * boundaries. There is no local time anywhere in this codebase's
- * boundaries and analytics does not introduce one: a club in UTC+13 and a club in
- * UTC-7 both see the day boundary at the same instant, and the docs say which.
- */
+/** Windows are inclusive UTC calendar days, as for brief boundaries; there is no local time. */
 export const utcDay = (ms) => new Date(Number(ms)).toISOString().slice(0, 10);
 
 export const WINDOW_PRESETS = {
@@ -483,15 +398,13 @@ export const WINDOW_PRESETS = {
 export const DEFAULT_WINDOW = 'last_90_days';
 
 /**
- * Resolve a window to a pair of inclusive UTC calendar days. A custom range is
- * accepted only as two well-formed days in order; anything else is refused,
- * never silently repaired, because a quietly widened window changes every
- * number on the page without saying so.
+ * A custom range must be two well-formed days in order; anything else is refused, because a quietly widened
+ * window changes every number on the page.
  */
 export function resolveWindow({ preset, from, to } = {}, nowMs = Date.now()) {
   const today = utcDay(nowMs);
   if (from || to) {
-    // A day that exists: a shape-and-parse test alone would read `2026-02-30` as 2 March.
+    // A real day: a shape test alone would read `2026-02-30` as 2 March.
     const ok = (d) => parseStrictDateOnly(d).ok;
     if (!ok(from) || !ok(to)) return { error: 'WINDOW_INVALID', detail: 'from and to must both be calendar days as YYYY-MM-DD.' };
     if (from > to) return { error: 'WINDOW_INVALID', detail: 'from must not be after to.' };
@@ -504,26 +417,13 @@ export function resolveWindow({ preset, from, to } = {}, nowMs = Date.now()) {
   return { preset: key, from: utcDay(nowMs - (span - 1) * DAY_MS), to: today, days: span };
 }
 
-/** Inclusive at both ends, on the UTC calendar day of the instant. */
 export const inWindow = (ms, w) => {
   if (!Number.isFinite(Number(ms))) return false;
   const d = utcDay(ms);
   return d >= w.from && d <= w.to;
 };
 
-/**
- * Is this cohort too young to have finished? A window whose end is within
- * `typicalDays` of now cannot contain completed journeys for the rooms opened
- * near its end, so any conversion-shaped figure over it reads low.
- *
- * This is a caution, not a correction: nothing is adjusted, and the flag is
- * rendered as a sentence rather than applied as a factor.
- */
-/**
- * The window of equal length immediately before this one, for a
- * period-over-period comparison. Equal length matters: comparing a 7-day
- * window against a 30-day one would make every figure look like a collapse.
- */
+/** Equal length matters: a 7-day window against a 30-day one would make every figure look like a collapse. */
 export function previousWindow(w) {
   const from = Date.parse(`${w.from}T00:00:00Z`);
   const to = Date.parse(`${w.to}T00:00:00Z`);
@@ -531,14 +431,7 @@ export function previousWindow(w) {
   return { preset: 'previous', from: utcDay(from - span), to: utcDay(from - DAY_MS), days: Math.round(span / DAY_MS) };
 }
 
-/**
- * Compare two counts across equal windows.
- *
- * The rule that matters is the zero case: a rise from nothing has no
- * percentage, and rendering one produces Infinity or a meaningless 100%. So
- * `percentChange` is null and `upFromZero` says what actually happened —
- * the client renders the absolute change and the words "up from 0".
- */
+/** A rise from zero has no percentage, so `percentChange` is null and `upFromZero` says what happened. */
 export function compare(current, previous) {
   const c = Number(current) || 0;
   const p = Number(previous) || 0;
@@ -552,6 +445,10 @@ export function compare(current, previous) {
   };
 }
 
+/**
+ * A caution, not a correction: true when the window is too young for journeys opened in it to have finished,
+ * so a conversion-shaped figure over it reads low. Nothing is adjusted.
+ */
 export function cohortIncomplete(w, typicalDays, nowMs = Date.now()) {
   if (!Number.isFinite(typicalDays) || typicalDays <= 0) return false;
   const end = Date.parse(`${w.to}T23:59:59Z`);

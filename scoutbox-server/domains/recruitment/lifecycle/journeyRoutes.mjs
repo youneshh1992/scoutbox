@@ -1,21 +1,13 @@
 /**
  * The audience journey routes and the notification target resolver.
  *
- *   GET /player/journeys                     the player's journeys, one per club that reached them
- *   GET /guardian/children/:id/journeys      the guardian's view of a child's journeys
- *   GET /org/agent/clients/:id/journey       an authorized agent's factual view of a client's journeys
+ * The agent route proves its basis as the agent Contact, Offer and signing
+ * routes do and passes what it proved as `grants`; the projection shows only
+ * the granted kinds and never says what it withheld.
  *
- * Every route reads through `buildRecruitmentJourney` with an audience viewer;
- * nothing here writes. The agent route proves the basis exactly as the agent
- * Contact, Offer and signing routes do (membership, own agreement, the policy engine, scope,
- * licence, the client's own shares) and passes what it proved as `grants`; the
- * projection shows only the granted kinds and never says what it withheld.
- *
- * `notificationTargetFor` turns a notification's bare `refId` into the CURRENT
- * authorized resource for its audience at READ time: nothing is
- * stored, a superseded package resolves to the live one over the same Offer,
- * and a reference the audience may no longer open resolves to nothing (the
- * app shows plain text). It never resolves to a resource of another org.
+ * `notificationTargetFor` resolves a notification's `refId` at read time to the
+ * current resource its audience may open: a superseded package resolves to the
+ * live one, and a reference no longer theirs resolves to null (plain text in the app).
  */
 
 import { requestClock } from '../../platform/clock.mjs';
@@ -59,11 +51,7 @@ export function registerJourneyRoutes(ctx) {
     res.json({ items: playerJourneys({ kind: 'guardian', guardianId: req.guardian.id, playerId: req.params.id }, req.params.id, at), generatedAt: at });
   });
 
-  /**
-   * The agent's grants, proved the way each agent Contact, Offer and signing route proves them.
-   * A kind whose gate fails is simply not granted; the route itself answers
-   * 403 only when the client's record is closed to this agent altogether.
-   */
+  /** A kind whose gate fails is not granted; 403 only when the client's record is closed to this agent. */
   function agentGrants(req, a, at) {
     const grants = [];
     const decide = (surface) => integration?.decide?.({ surface, clientId: a.clientId, agentUserId: req.orgUser.id, at }) ?? { allowed: false, code: 'BASIS' };
@@ -109,13 +97,9 @@ export function registerJourneyRoutes(ctx) {
   const room = (k, tab) => (k ? { kind: 'room', roomId: k.id, tab } : null);
   const blocked = (playerId, orgId) => safetyReads.blocks.has(playerId, orgId);
   /**
-   * An agent's target is re-derived through the SAME
-   * authority the client routes prove on every read — a live representation
-   * (`client_private`), and for the Offer tab the employment/transfer scope
-   * and a current licence. An agent whose representation ended, whose licence
-   * lapsed or whose affiliation was removed keeps the row (history) and loses
-   * the destination: the row is plain text, exactly as a player's is when the
-   * resource is no longer theirs to open. A share alone never grants a target.
+   * Re-derived through the authority the client routes prove on every read. An
+   * agent whose representation ended or licence lapsed keeps the row but loses
+   * the destination. A share alone never grants a target.
    */
   function agentTarget(agentUserId, playerId, tab, at) {
     if (typeof agentUserId !== 'string' || !agentUserId) return null;
@@ -132,11 +116,7 @@ export function registerJourneyRoutes(ctx) {
     return { kind: 'client', clientId: playerId, tab };
   }
 
-  /**
-   * @param {object} n           the notification row
-   * @param {object} audience    { kind: 'player'|'guardian'|'org_user', id }
-   * @returns {object|null}      { kind, ...ids } or null when nothing current and authorized exists
-   */
+  /** @returns {object|null} `{ kind, ...ids }`, or null when nothing current and authorised exists */
   function notificationTargetFor(n, audience) {
     const ref = typeof n?.refId === 'string' ? n.refId : null;
     if (!ref) return null;

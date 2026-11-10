@@ -1,8 +1,5 @@
-// The structured opportunity board, club-run assessment campaigns and the trial-day experience. (Objectives and the
-// campaign drill guidance: domains/development/objectives.mjs.)
-//
-// Everything guardian-routed for minors, everything eligibility-checked
-// server-side (fail-closed on missing location), grassroots 50 km preserved.
+// Opportunity board, assessment campaigns and trial day. Minors are guardian-routed throughout, and eligibility fails
+// closed on a missing location.
 
 import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../../domain.mjs';
 import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../../temporal.mjs';
@@ -11,7 +8,6 @@ import { readPage, sendPageError, pageOf, offsetPage, pageSorted } from '../plat
 import { OPPORTUNITY_TYPES, OPPORTUNITY_CATEGORIES, OPPORTUNITIES_CAMPAIGNS_LIMITS as OL, FILE_CHECK_ISSUES, typeEligibility } from '../../repositories/opportunitiesCampaigns.mjs';
 import { storedName } from './passport.mjs';
 
-// Responses are built from explicit allowlists, never by spreading a stored record.
 const eligibilityView = (e) => ({ minAge: e.minAge, maxAge: e.maxAge, positionGroup: e.positionGroup, ...(e.category !== undefined ? { category: e.category } : {}), maxLevel: e.maxLevel, radiusKm: e.radiusKm });
 const slotView = (s) => ({ day: s.day, start: s.start, end: s.end, tz: s.tz });
 export const opportunityView = (o) => ({
@@ -55,22 +51,18 @@ export function registerJourneys(ctx) {
     players, users, unit, recruitment, opportunitiesCampaigns,
   } = ctx;
   if (typeof opportunitiesCampaigns?.opportunities?.create !== 'function') throw new TypeError('registerJourneys needs the opportunities and campaigns repository from the data layer');
-  // A trial-day change is a named act of the trial (recruitment.trials.addStaff, …); the records the views hand out are read-only.
+  // The views hand out read-only records; a trial-day change is a named trial operation.
   const trials = recruitment?.trials;
   if (!trials) throw new TypeError('registerJourneys needs the recruitment repository from the data layer');
 
   // ===================================================== opportunity board
-  // Over-long text is shortened.
   const OPP_TYPES = OPPORTUNITY_TYPES;
   const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
   const optionalText = (v) => v === undefined || v === null || typeof v === 'string';
   const textOrNull = (v, max) => (v ? v.slice(0, max) : null);
   const today = () => new Date().toISOString().slice(0, 10);
 
-  /**
-   * The eligibility a club may set, typed, with the grassroots rules forced (amateur and semi-pro only, the 50 km
-   * radius). Returns the record, or undefined after a 400.
-   */
+  /** The grassroots rules are forced (amateur and semi-pro only, the 50 km radius). Undefined after a 400. */
   function eligibilityOrRefuse(res, raw, org, { category } = {}) {
     if (raw !== undefined && raw !== null && (typeof raw !== 'object' || Array.isArray(raw))) return fieldInvalid(res, 'eligibility', 'eligibility is an object.');
     const e = raw ?? {};
@@ -82,7 +74,6 @@ export function registerJourneys(ctx) {
       minAge: e.minAge ?? null, maxAge: e.maxAge ?? null, positionGroup: e.positionGroup ?? 'any',
       ...(category === undefined ? {} : { category: ['mens', 'womens', 'boys', 'girls'].includes(category) ? category : 'mixed' }),
       maxLevel: grassroots ? 'semi_pro' : (e.maxLevel ?? null),
-      // The 50 km rule is not optional for grassroots orgs.
       radiusKm: grassroots ? GRASSROOTS_RADIUS_KM : (e.radiusKm ?? null),
     };
     const t = typeEligibility(record, 'eligibility', { withCategory: category !== undefined });
@@ -118,7 +109,7 @@ export function registerJourneys(ctx) {
 
   const oppOpen = (o) => o.status === 'published' && o.deadline >= today();
 
-  // A club's opportunities grow without limit (they are closed, never deleted), so the list pages, newest first.
+  // Opportunities are closed, never deleted, so the list grows without limit and pages.
   orgRouter.get('/opportunities', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -127,13 +118,11 @@ export function registerJourneys(ctx) {
     res.json({ items: items.map((r) => ({ ...opportunityView(r.opportunity), open: oppOpen(r.opportunity), ...counts[r.opportunity.id] })), nextCursor });
   });
 
-  // The board is a pure module-level function so the Agent
-  // workspace can project a confirmed client's board through exactly the
-  // same eligibility and mutual-visibility rules — one engine, not two.
+  // A module-level function so the Agent workspace projects a client's board through the same rules.
   const boardFor = (player) => opportunityBoardFor(ctx.grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf: byId.org });
 
-  // The board pages by (deadline, id), a page cut after the per-player visibility and eligibility filters. It is
-  // bounded by the open opportunities and upcoming open days, not by the player base. `cursor` is `[deadline, id]`.
+  // Paged by (deadline, id) after the per-player visibility and eligibility filters; bounded by the open
+  // opportunities and upcoming open days, not by the player base.
   const boardKey = (o) => [String(o.deadline), String(o.id)];
   const cmpBoard = (a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]);
   const boardPage = (player, page) => pageSorted(boardFor(player).sort((x, y) => cmpBoard(boardKey(x), boardKey(y))), page, boardKey, cmpBoard);
@@ -169,7 +158,6 @@ export function registerJourneys(ctx) {
     const note = textOrNull(req.body?.note, OL.note);
     if (note && !moderateOrRefuse(res, note, { kind: 'application', playerId: player.id, orgId: o.orgId })) return;
     const at = Date.now();
-    // ONE unit of work: the application, its ledger row and the club's notification commit together.
     const appn = unit(() => {
       const created = opportunitiesCampaigns.applications.create({
         id: nextId('apl'), opportunityId: o.id, orgId: o.orgId, playerId: player.id, playerName: storedName(player.name),
@@ -185,13 +173,11 @@ export function registerJourneys(ctx) {
     res.status(201).json({ application: applicationView(appn) });
   }
   const usersOf = (orgId) => users.forOrg(orgId, { active: true });
-  /** One history entry in the shared shape (detail is plain text or null). */
   const historyEntry = (byKind, byId_, byName, action, at = Date.now()) => ({ id: nextId('aud'), at, byKind, byId: byId_, byName: storedName(byName), action, detail: null });
 
   playerRouter.post('/opportunities/:id/apply', (req, res) => {
     if (req.playerIsMinor) {
-      // Minors never self-submit club-facing applications: Scout → Parent,
-      // and Parent → Club, always.
+      // Minors never apply to clubs themselves: the guardian applies.
       return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Your parent or guardian makes applications for you.' });
     }
     applyTo(req, res, req.player, { kind: 'player', id: req.player.id, name: req.player.name });
@@ -204,7 +190,6 @@ export function registerJourneys(ctx) {
     applyTo(req, res, child, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name });
   });
 
-  // A player's (or a guardian's children's) applications: a per-player list, not paged.
   function myApplications(playerIds) {
     const list = scoutingReads.applications.forPlayers(playerIds);
     const opps = new Map();
@@ -221,7 +206,6 @@ export function registerJourneys(ctx) {
     const a = scoutingReads.applications.ofPlayers(req.params.id, allowedPlayerIds);
     if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
     if (a.status !== 'submitted') return res.status(409).json({ error: 'NOT_WITHDRAWABLE', status: a.status });
-    // A guardian's withdrawal is recorded as the guardian's.
     const withdrawn = opportunitiesCampaigns.applications.update(a.id, (d) => { d.status = 'withdrawn'; d.history.push(historyEntry(actor.kind, actor.id, actor.name, 'withdrawn')); });
     res.json({ application: applicationView(withdrawn) });
   }
@@ -231,7 +215,6 @@ export function registerJourneys(ctx) {
   });
   guardianRouter.post('/applications/:id/withdraw', (req, res) => withdrawApplication(req, res, req.guardian.childIds, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }));
 
-  // One opportunity's applications: offset paging (the apps' shape), in SQL.
   orgRouter.get('/opportunities/:id/applications', (req, res) => {
     const o = scoutingReads.opportunities.ofOrg(req.params.id, req.org.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
@@ -269,8 +252,7 @@ export function registerJourneys(ctx) {
     res.json({ application: applicationView(resolved) });
   });
 
-  // No-ghosting extends to the board: closing an opportunity with unresolved
-  // applications is refused; the sweep (operations.mjs) nags outstanding ones.
+  // Closing an opportunity with unresolved applications is refused (no ghosting); the sweep nags outstanding ones.
   orgRouter.post('/opportunities/:id/close', (req, res) => {
     const o = scoutingReads.opportunities.ofOrg(req.params.id, req.org.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
@@ -282,10 +264,8 @@ export function registerJourneys(ctx) {
   });
 
   // ============================================================= campaigns
-  // Campaigns: structured remote assessments. The machine checks FILES; a
-  // HUMAN checks football. The two verdicts are never conflated.
+  // The machine checks files; a human checks football. The two verdicts are kept apart.
 
-  /** A campaign's drills from a request: the recording defaults fill what is absent; wrong types are refused. */
   function drillsOrRefuse(res, drills) {
     if (drills.length > OL.drills) return fieldInvalid(res, 'drills', `a campaign has at most ${OL.drills} drills.`);
     const out = []; const names = new Set();
@@ -337,7 +317,6 @@ export function registerJourneys(ctx) {
     res.status(201).json({ campaign: campaignView(camp) });
   });
 
-  // A club's campaigns grow without limit (never deleted), so the list pages, newest first.
   orgRouter.get('/campaigns', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -368,8 +347,7 @@ export function registerJourneys(ctx) {
     res.json({ items: campaignsFor(child) });
   });
 
-  // The automated tier: FILE checks only — the media exists, it is video,
-  // it is inside the size cap. Says nothing about drill execution.
+  // File checks only (exists, is video, within the size cap); says nothing about how the drill was done.
   function fileChecks(player, mediaId) {
     const issues = [];
     const media = mediaId ? player.media.find((m) => m.id === mediaId) : null;
@@ -377,7 +355,7 @@ export function registerJourneys(ctx) {
     else {
       if (media.kind !== 'video') issues.push(FILE_CHECK_ISSUES.not_video);
       if (!media.url && !media.id.startsWith('media-seed')) {
-        // no url → metadata-only entry (the bytes were never uploaded)
+        // metadata-only entry: the bytes were never uploaded
         issues.push(FILE_CHECK_ISSUES.not_uploaded);
       }
     }
@@ -392,8 +370,7 @@ export function registerJourneys(ctx) {
     const { eligible, reasons } = checkEligibility(camp.eligibility, player, org);
     if (!org || !orgCanSee(org, player) || !eligible) return res.status(403).json({ error: 'NOT_ELIGIBLE', reasons: reasons ?? [] });
     const existing = scoutingReads.campaignSubmissions.forCampaignPlayer(camp.id, player.id);
-    // Only attempts that actually reached review (or passed it) count against
-    // the policy — a failed FILE check never burns a football attempt.
+    // Only attempts that reached review count against the policy: a failed file check never burns an attempt.
     const activeAttempts = (existing?.attempts ?? []).filter((a) => ['submitted', 'accepted'].includes(a.status)).length;
     if (activeAttempts >= camp.attemptsAllowed) return res.status(409).json({ error: 'ATTEMPTS_EXHAUSTED', allowed: camp.attemptsAllowed });
     const { mediaId, drillName, note } = req.body ?? {};
@@ -407,12 +384,10 @@ export function registerJourneys(ctx) {
       id: nextId('att'), mediaId: mediaId || null, drillName: drillName ?? camp.drills[0].name,
       note: textOrNull(note, OL.note),
       fileChecks: checks,
-      // Human review is a SEPARATE state — an attempt passing file checks is
-      // "submitted", never "verified".
+      // Passing file checks makes an attempt "submitted", never "verified": human review is a separate state.
       status: checks.passed ? 'submitted' : 'failed_checks',
       review: null, submittedAt: Date.now(),
     };
-    // ONE unit of work: the submission (created on the first attempt), the attempt and the club's notification.
     const sub = unit(() => {
       const s = existing
         ? opportunitiesCampaigns.submissions.update(existing.id, (d) => { d.attempts.push(attempt); })
@@ -425,8 +400,8 @@ export function registerJourneys(ctx) {
   }
 
   playerRouter.post('/campaigns/:id/submit', (req, res) => {
-    // Campaign attempts are football activity (like drills), so an eligible
-    // minor may upload; all club-facing review conversation stays org↔guardian.
+    // Campaign attempts are football activity (like drills), so an eligible minor may upload; club-facing review
+    // conversation stays with the guardian.
     submitAttempt(req, res, req.player, { kind: 'player', id: req.player.id, name: req.player.name });
   });
   guardianRouter.post('/children/:childId/campaigns/:id/submit', (req, res) => {
@@ -436,7 +411,6 @@ export function registerJourneys(ctx) {
     submitAttempt(req, res, child, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name });
   });
 
-  // One campaign's review queue: a per-campaign list, not paged.
   orgRouter.get('/campaigns/:id/review-queue', (req, res) => {
     const camp = scoutingReads.campaigns.ofOrg(req.params.id, req.org.id);
     if (!camp) return res.status(404).json({ error: 'CAMPAIGN_NOT_FOUND' });
@@ -479,17 +453,14 @@ export function registerJourneys(ctx) {
   });
 
   // ============================================================= trial day
-  // Trial-day: named staff with check STATES (a reference on file is not a
-  // completed check), event consent, restricted emergency info, check-in
-  // feeding existing attendance without duplicates, honest cancellation.
+  // A reference on file is not a completed check; check-in feeds the existing attendance without duplicates.
 
   function trialFor(req, res) {
     const found = trials.byId(req.params.id);
     const t = found && found.orgId === req.org.id ? found : null;
     if (!t) { res.status(404).json({ error: 'TRIAL_NOT_FOUND' }); return null; }
-    // A tombstoned trial (its subject removed their account) can
-    // still be READ — the record of what happened is the club's — but nothing
-    // new is written about a person who left.
+    // A trial whose subject removed their account can still be read (the record is the club's), but nothing new is
+    // written about a person who left.
     if (t.subjectRemovedAt && req.method !== 'GET') {
       res.status(409).json({ error: 'TRIAL_SUBJECT_REMOVED', message: 'This player removed their ScoutBox account. The trial stays on record; it can no longer be changed.' });
       return null;
@@ -503,22 +474,19 @@ export function registerJourneys(ctx) {
   });
 
   /**
-   * A REVIEWED background check whose expiry cannot be read is not a current
-   * check: it reads `expired` (the state the trial-day gate refuses), not
-   * `reviewed` for ever (`NaN < now` is false). A missing expiry stays "no
-   * expiry recorded".
+   * A reviewed check whose expiry cannot be read reads `expired` (`NaN < now` is false, so it would otherwise stay
+   * reviewed for ever). A missing expiry stays "no expiry recorded".
    */
   function checkState(c, now = Date.now()) {
     if (!c) return 'missing';
     if (c.status === 'reviewed' && !isAbsent(c.expiresAt) && isExpiredAt(readCheckExpiry(c.expiresAt), now)) return 'expired';
     return c.status;
   }
-  /** A stored check expiry — a DATE_ONLY (valid through that day) or an instant — as the first instant it no longer holds; NaN when unreadable. */
+  /** A stored check expiry (a DATE_ONLY valid through that day, or an instant) as the first instant it no longer holds; NaN when unreadable. */
   function readCheckExpiry(v) {
     const p = parseDateOrInstant(v, { dayEdge: 'end' });
     return p.ok ? p.ms : NaN;
   }
-  /** Validate a check expiry from a request. Returns the canonical stored value, or a 400 already sent. */
   function checkExpiryOrRefuse(res, raw) {
     if (isAbsent(raw)) return null;
     const p = parseDateOrInstant(raw, { dayEdge: 'end' });
@@ -539,18 +507,9 @@ export function registerJourneys(ctx) {
       cancelled: (day.statusEvents ?? []).some((e) => e.kind === 'cancelled'),
     };
     if (side === 'org') {
-      // The emergency contact is for the day's named safety staff, not for
-      // scout browsing — it appears here and NOWHERE else (no profile views,
-      // no analytics, no exports).
-      //
-      // A block placed by the player or guardian ends the
-      // organisation's standing to hold the family's contact details. The
-      // block is evaluated on every read, like every other block in the
-      // product, so the number is withheld the moment the block exists and
-      // returns if Trust & Safety lifts it. The rest of the day view (the
-      // club's own staff, arrival and status history) is unchanged here;
-      // what a blocked club may still DO with a trial is a policy decision,
-      // not a read-side one.
+      // The emergency contact is for the day's named safety staff only: it appears here and nowhere else. A block by
+      // the player or guardian withholds it, evaluated on every read, so it returns if Trust & Safety lifts the block.
+      // What a blocked club may still do with a trial is a policy decision, not a read-side one.
       const blocked = ctx.isBlocked(t.playerId, t.orgId);
       base.emergency = blocked ? null : (day.emergency ?? null);
       base.emergencyWithheld = blocked ? 'BLOCKED' : null;
@@ -570,8 +529,7 @@ export function registerJourneys(ctx) {
       check: check ? {
         kind: String(check.kind ?? 'DBS (England & Wales)').slice(0, 60),
         ref: check.ref ? String(check.ref).slice(0, 60) : null,
-        // Filing a reference does NOT make it reviewed — Trust & Safety (or
-        // the club's safeguarding officer via T&S) moves it to 'reviewed'.
+        // Filing a reference does not make it reviewed: Trust & Safety moves it to 'reviewed'.
         status: 'pending',
         expiresAt,
         reviewedBy: null,
@@ -606,9 +564,7 @@ export function registerJourneys(ctx) {
     if (!t) return;
     const { reason, newDate } = req.body ?? {};
     if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED' });
-    // A postponement date goes through the one Trial date
-    // validator like every other trial date, and the report deadline is
-    // re-derived from the new day by the one derivation — never computed here.
+    // The report deadline is re-derived from the new day by the shared derivation, never computed here.
     const moved = kind === 'postponed' ? parseTrialDate(newDate) : { ok: true, value: null };
     if (!moved.ok) return res.status(400).json({ ...moved, field: 'newDate' });
     const event = { kind, at: Date.now(), by: req.orgUser.name, reason: String(reason).slice(0, 200), newDate: moved.value };
@@ -623,8 +579,7 @@ export function registerJourneys(ctx) {
   orgRouter.post('/trials/:id/cancel', (req, res) => cancelOrPostpone(req, res, 'cancelled'));
   orgRouter.post('/trials/:id/postpone', (req, res) => cancelOrPostpone(req, res, 'postponed'));
 
-  // The gate: check-in demands a reviewed, unexpired check on at least one
-  // named staff member AND the right consent — enforced at the action, 409.
+  // Check-in needs a reviewed, unexpired check on at least one named staff member and the right consent.
   orgRouter.post('/trials/:id/checkin', (req, res) => {
     const t = trialFor(req, res);
     if (!t) return;
@@ -639,13 +594,9 @@ export function registerJourneys(ctx) {
     }
     if (t.day.checkins.some((c) => c.playerId === t.playerId)) return res.status(409).json({ error: 'ALREADY_CHECKED_IN' });
     const checkedInAt = Date.now();
-    // ONE unit of work: the check-in and the attendance records on the
-    // trial, the player's attendance row and activity, and the ledger row
-    // commit together before the response.
     const fresh = unit(() => {
-    // A check-in is the strongest attendance source. If the trial carries a confirmed schedule, the session whose
-    // window holds this moment (from two hours before its start) gets an `attended` record with source `checkin`:
-    // once, append-only, never a judgement. A trial without a schedule records nothing new here.
+    // The session whose window holds this moment (from two hours before its start) gets one append-only `attended`
+    // record with source `checkin`. A trial without a schedule records nothing new here.
     const by = { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name };
     const sessions = t.schedule?.confirmedAt ? t.schedule.sessions : [];
     const live = sessions.find((s) => s.startsAt - 2 * 3600_000 <= checkedInAt && checkedInAt <= s.endsAt) ?? null;
@@ -654,7 +605,7 @@ export function registerJourneys(ctx) {
       checkin: { playerId: t.playerId, at: checkedInAt, byUserId: req.orgUser.id, byName: req.orgUser.name },
       attendance: attends ? { sessionId: live.id, state: 'attended', source: 'checkin', recordedBy: by, recordedAt: checkedInAt, note: null } : null,
     }, attends ? { at: checkedInAt, bump: true, revBy: req.orgUser, history: [{ id: nextId('aud'), at: checkedInAt, action: 'trial_attendance_recorded', by, detail: { sessionId: live.id, state: 'attended', source: 'checkin' } }] } : {});
-    // Feed the existing attendance record — once, coach-signed, no duplicate.
+    // Feed the existing attendance record once.
     if (p && !(p.attendance ?? []).some((a) => a.trialId === t.id)) {
       players.addItem(p.id, 'attendance', {
         id: nextId('att'), trialId: t.id, fixture: `Trial day · ${t.orgName}`,
@@ -669,7 +620,6 @@ export function registerJourneys(ctx) {
     res.json({ trial: trialDayView(fresh, 'org') });
   });
 
-  // Player/guardian side: consent, restricted emergency info, safety pack.
   function playerTrial(req, res, playerIds) {
     const found = trials.byId(req.params.id);
     const t = found && playerIds.includes(found.playerId) ? found : null;
@@ -697,8 +647,7 @@ export function registerJourneys(ctx) {
   function setEmergency(req, res, t, by) {
     const { name, phone } = req.body ?? {};
     if (!name || !phone) return res.status(400).json({ error: 'NAME_AND_PHONE_REQUIRED' });
-    // Restricted: written by the family, readable ONLY in the org's trial-day
-    // view for the named event. Never in profiles, search or exports.
+    // Readable only in the org's trial-day view for this event; never in profiles, search or exports.
     trials.setEmergencyContact(t.id, { emergency: { name: String(name).slice(0, 80), phone: String(phone).slice(0, 30), setBy: by, at: Date.now() } });
     res.json({ ok: true, note: 'Held for this event’s safety staff only.' });
   }
@@ -728,13 +677,9 @@ export function registerJourneys(ctx) {
     };
   }
 
-  // The family's list of their own trials (safety pack entry point).
   const familyTrials = (playerIds, { minorDevice = false } = {}) => trials.forPlayers(playerIds)
     .map((t) => {
-      // The workflow edge (state, confirmed sessions, completion) rides
-      // beside the day view. Family view only — never the club's internals.
-      // A minor's own device carries the guardian-managed OUTCOME LINE only:
-      // never the sessions, the address, the instructions or the history the
+      // A minor's own device gets the outcome line only, never the sessions, address, instructions or history the
       // guardian holds.
       return { ...trialDayView(t, 'family'), workflow: minorDevice ? trialOutcomeLine(t) : trialFamilyView(t) };
     });
@@ -750,11 +695,9 @@ export function registerJourneys(ctx) {
     if (t) res.json(safetyPack(t, true));
   });
 
-  // Admin review queue for staff checks — jurisdiction-appropriate wording,
-  // honest states, nothing auto-approved.
+  // Jurisdiction-appropriate wording; nothing is auto-approved.
   adminRouter.get('/staff-checks', (req, res) => {
-    // Paged by cursor (domains/platform/paging.mjs): { items, nextCursor }, oldest trial first. The admin app reads the
-    // first page only; a "load more" is not built yet (a product decision).
+    // Oldest trial first. The admin app reads only the first page; "load more" awaits a product decision.
     let page;
     try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
     const { items, nextCursor } = trials.staffChecksPage({ pendingOnly: req.query.all !== '1', ...page });
@@ -776,10 +719,8 @@ export function registerJourneys(ctx) {
 }
 
 /**
- * The player's opportunity board — what they could actually apply to, with
- * eligibility computed the same way the application gate computes it.
- * Pure over the reads and the injected rules; shared by the player, guardian and
- * Agent client-workspace readers.
+ * The player's opportunity board, with eligibility computed as the application gate computes it. Shared by the
+ * player, guardian and Agent readers.
  */
 export function opportunityBoardFor(grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads, orgOf }) {
   if (!scoutingReads?.opportunities || !grassrootsReads?.openTrials || typeof orgOf !== 'function') throw new TypeError('opportunityBoardFor needs grassrootsReads, scoutingReads and orgOf');
@@ -799,8 +740,7 @@ export function opportunityBoardFor(grassrootsReads, player, { orgCanSee, checkE
       applied: existing ? { id: existing.id, status: existing.status } : null,
     });
   }
-  // Existing grassroots open days ride the same board — integrated, not
-  // duplicated: they keep their own registration flow and records.
+  // Grassroots open days ride the same board but keep their own registration flow and records.
   for (const t of grassrootsReads.openTrials.upcoming(today)) {
     const org = orgOf(t.orgId);
     if (!org || org.suspended || !orgCanSee(org, player)) continue;

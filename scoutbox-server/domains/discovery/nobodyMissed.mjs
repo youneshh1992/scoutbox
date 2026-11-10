@@ -1,18 +1,7 @@
-// Recruitment Briefs and Nobody Missed.
+// Recruitment Briefs and Nobody Missed. A brief is boolean rules only, with no weights or hidden criteria.
 //
-// A Recruitment Brief is an EXPLICIT expression of what a club is looking for.
-// It is not a talent model, it has no weights, and it has no hidden criteria:
-// every rule is boolean and every candidate can answer "why is this player
-// here?" with the same list the club typed in.
-//
-// The order of operations below is the whole safeguarding story and never
-// changes:
-//
-//   organisation standing → player visibility → blocks / minors / radius
-//   → brief eligibility → evaluation history → Nobody Missed
-//
-// Hidden players never enter the candidate set. They are not matched and then
-// concealed — concealment after matching is how side channels are born.
+// Hidden players never enter the candidate set: they are not matched and then concealed, because concealment after
+// matching is how side channels are born.
 import {
   validateRecruitmentBrief, explainBriefCriteria, playerMatchesBrief,
   buildNobodyMissedCandidate, evaluationCoverageState,
@@ -40,23 +29,13 @@ export function registerNobodyMissed(ctx) {
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerNobodyMissed needs recruitmentReads (signings) from the data layer');
 
-  // The shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = limitCheck(ctx.rateLimit);
   const SUPPRESS_MIN = 3;
 
-  // ------------------------------------------------------------ match facts
-  // A candidate's facts are stored per player (repositories/matchFacts.mjs, kept by domains/discovery/matchFacts.mjs)
-  // and read through the match query (matching/query.mjs), the same reads matching uses.
-
-
   /**
-   * Has this organisation meaningfully evaluated this player? The nine signals the coverage policy names
-   * (EVALUATION_SIGNALS; a profile view and a search impression are deliberately absent), as SQL: the players this
-   * organisation has evaluated, one set per query (a Room, open or ended, is a case with a room; an open case is one
-   * without a room that is not closed; a deferral counts until it is due). The set is the organisation's own workflow,
-   * so it is built once and probed by id, never looked up per candidate. Each line names the same table and columns as
-   * the read it restates (the repositories' forOrgPlayer / has / isListedBy / isDeferred queries); keep the two
-   * together when either changes.
+   * The players this organisation has evaluated, as SQL over the signals in EVALUATION_SIGNALS (a Room, open or
+   * ended, is a case with a room; a deferral counts until it is due). Each line restates a repository read
+   * (forOrgPlayer / has / isListedBy / isDeferred); keep the two together when either changes.
    */
   const evaluatedSql = (orgId, at) => ({
     // NULLs are filtered out: one NULL in the set would make every NOT IN unknown, and hide every candidate.
@@ -75,20 +54,17 @@ export function registerNobodyMissed(ctx) {
 
   // ----------------------------------------------------------------- briefs
 
-  /** The organisation's briefs, most recently updated first. */
   const briefsFor = (orgId) => dreads.briefs.forOrg(orgId);
 
   function findBrief(req, res) {
     const b = dreads.briefs.forOrgById(String(req.params.id), req.org.id);
-    // A foreign brief is indistinguishable from one that does not exist.
     if (!b) { res.status(404).json({ error: 'BRIEF_NOT_FOUND' }); return null; }
     return b;
   }
 
   const briefView = (b) => ({
     id: b.id, title: b.title, status: b.status, version: b.version,
-    // `version` is the CRITERIA version historical coverage points at; `rev` is
-    // the concurrency token that moves on every accepted write.
+    // `version` is the criteria version historical coverage points at; `rev` moves on every accepted write.
     ...revMeta(b),
     criteria: b.criteria, criteriaExplained: explainBriefCriteria(b.criteria),
     activeFrom: b.activeFrom, activeUntil: b.activeUntil,
@@ -116,9 +92,7 @@ export function registerNobodyMissed(ctx) {
     if (limited('brief_write', req.org.id)) return res.status(429).json(rateLimitedBody('brief_write'));
     if (dreads.briefs.countForOrg(req.org.id) >= LIMITS.briefsPerOrg) return res.status(409).json({ error: 'BRIEFS_FULL' });
     const v = validateRecruitmentBrief(req.body ?? {}, { orgLevel: req.org.level, protocols: ctx.combineProtocolIds?.() ?? null });
-    // An invalid brief is refused, never silently repaired.
     if (!v.ok) return res.status(400).json(v);
-    // A role or vacancy reference is a short id, or absent; anything else is refused, never stored as it came.
     const refs = {};
     for (const k of ['roleId', 'vacancyId']) {
       const raw = req.body?.[k];
@@ -155,14 +129,11 @@ export function registerNobodyMissed(ctx) {
     if (!requireLead(req, res)) return;
     if (limited('brief_write', req.org.id)) return res.status(429).json(rateLimitedBody('brief_write'));
     if (b.status === 'archived') return res.status(409).json({ error: 'BRIEF_ARCHIVED' });
-    // A brief is a collaborative record: refuse a write built on a stale read
-    // rather than quietly discarding a colleague's edit.
     if (!guardRev(req, res, b, {
       errorCode: 'BRIEF_VERSION_CONFLICT',
       current: { currentVersion: b.version, status: b.status, updatedAt: b.updatedAt, updatedBy: b.revBy?.name ?? null },
     })) return;
 
-    // Everything is checked before anything is written.
     let statusTo = null;
     if (req.body?.status !== undefined) {
       const to = String(req.body.status);
@@ -193,8 +164,7 @@ export function registerNobodyMissed(ctx) {
         d.activeFrom = v.activeFrom;
         d.activeUntil = v.activeUntil;
         if (changed) {
-          // A material criteria change is a NEW version. Historical coverage keeps
-          // pointing at the version it was computed against.
+          // Historical coverage keeps pointing at the version it was computed against.
           d.criteria = v.criteria;
           d.version += 1;
           audit(d, 'org', req.orgUser.id, req.orgUser.name, 'recruitment_brief_updated', { version: d.version, criteriaChanged: true });
@@ -209,18 +179,11 @@ export function registerNobodyMissed(ctx) {
 
   // --------------------------------------------------------- nobody missed
 
-  // The window rule lives in shared.mjs so its boundaries are testable.
   const briefIsLive = (b) => briefIsLiveOn(b);
 
-  /** The organisation's reviews for this brief, by player: one query per page, not one per candidate. */
   const reviewsByPlayer = (orgId, briefId) => new Map(dreads.reviews.forBrief(orgId, briefId).map((r) => [r.playerId, r]));
 
-  /**
-   * The brief's sets, gates first, always. Every query starts from the players this organisation may
-   * see (1-3: standing, visibility, blocks/minors/radius), then the club's own criteria (4), then this
-   * organisation's evaluation history (5). `eligible` and `evaluated` are counts; `candidates` is the query of the
-   * eligible players not yet evaluated and not dismissed or already added to a Room for this brief.
-   */
+  /** Every query starts from the players this organisation may see, then applies the brief, then evaluation history. */
   function computeBrief(req, brief, at = now()) {
     const org = req.org;
     const required = briefCriteriaToCanonical(brief.criteria).required;
@@ -230,8 +193,7 @@ export function registerNobodyMissed(ctx) {
       args: [org.id, brief.id],
     };
     const eligible = matchQuery(org, required, at).count();
-    // Evaluated and closed players are the organisation's own (small) sets, so these counts are driven from them; the
-    // candidates are the eligible players in neither (counted only when a caller asks: the coverage does not).
+    // The candidate count is computed only when a caller asks: the coverage does not need it.
     const evaluatedCount = matchQuery(org, required, at, [evaluated]).count();
     return {
       eligible,
@@ -242,7 +204,6 @@ export function registerNobodyMissed(ctx) {
     };
   }
 
-  /** The keyset order of a Nobody Missed sort (the shared match orders, plus "last reviewed"), ending on the player id. */
   const nmOrder = (sort, req, brief, at) => matchOrder(sort, req.org, at, {
     last_reviewed: ['COALESCE((SELECT nr.reviewed_at FROM nobody_missed_reviews nr WHERE nr.org_id = ? AND nr.brief_id = ? AND nr.player_id = p.id), 0)', 'ASC', [req.org.id, brief.id]],
   });
@@ -265,11 +226,10 @@ export function registerNobodyMissed(ctx) {
     try { page = readMatchPage(req.query, shape); } catch (e) { return sendPageError(res, e); }
     const { eligible, evaluated, candidates, candidateCount } = computeBrief(req, brief, at);
     const coverage = evaluationCoverageState({ eligible, evaluated, suppressMin: SUPPRESS_MIN });
-    // Only the page is decoded and explained; the reasons are the brief's own criteria, each met.
     const { items, nextCursor } = pageOf(candidates.page(order, page), page.limit, keyOfRow);
     const reviewOf = reviewsByPlayer(req.org.id, brief.id);
     const cards = factsOfRows(items, req.org, at).map((facts) => {
-      // The explanation at the query's own instant, so it is the same test the query applied.
+      // Explained at the query's own instant, so it is the same test the query applied.
       const card = buildNobodyMissedCandidate({ facts, brief, match: playerMatchesBrief(facts, brief.criteria, { now: at }), evaluation: { evaluated: false }, roomOpen: false });
       if (!card) return null;
       const review = reviewOf.get(facts.playerId) ?? null;
@@ -292,7 +252,6 @@ export function registerNobodyMissed(ctx) {
     });
   });
 
-  /** Record what the club did with a candidate: the first action creates the review, later ones update it; the trail grows. */
   const setReview = (req, brief, playerId, patch) => {
     const at = now();
     const by = { userId: req.orgUser.id, name: req.orgUser.name };
@@ -308,7 +267,6 @@ export function registerNobodyMissed(ctx) {
       d.history.push({ at, state: d.state, by });
     });
   };
-  /** Wire shape: the review's own fields, listed. */
   const reviewView = (r) => ({
     id: r.id, orgId: r.orgId, briefId: r.briefId, briefVersion: r.briefVersion, playerId: r.playerId, state: r.state,
     createdAt: r.createdAt, updatedAt: r.updatedAt, reviewedBy: r.reviewedBy, reviewedAt: r.reviewedAt,
@@ -347,21 +305,14 @@ export function registerNobodyMissed(ctx) {
       state: 'dismissed', dismissReason: reason, dismissedBy: { userId: req.orgUser.id, name: req.orgUser.name }, dismissedAt: now(),
     });
     vmetric('nobody_missed_player_dismissed');
-    // Dismissal is scoped to THIS brief. It is not a global rejection and it is
-    // never written to the player's Passport.
     res.json({ review: reviewView(r), note: 'Dismissed for this brief only. Nothing is written to the player’s record.' });
   });
 
-  /**
-   * Add a candidate to a Recruitment Room. Bridges the rooms' canonical creator,
-   * so the room, its visibility check and its uniqueness rule are all the rooms'.
-   */
   orgRouter.post('/nobody-missed/add-to-room', (req, res) => {
     const ctxp = briefAndPlayer(req, res);
     if (!ctxp) return;
     if (limited('nobody_missed_action', req.org.id)) return res.status(429).json(rateLimitedBody('nobody_missed_action'));
     if (!ctx.createRoomForPlayer) return res.status(503).json({ error: 'ROOM_ENGINE_UNAVAILABLE' });
-    // One unit: the Room (or the open one it adopts) and the review commit together.
     const { out, r } = unit(() => {
       const created = ctx.createRoomForPlayer({
         req, player: ctxp.player, sourceContext: 'nobody_missed',
@@ -378,15 +329,12 @@ export function registerNobodyMissed(ctx) {
     });
     if (!out.ok) return res.status(out.status).json(out);
     vmetric('nobody_missed_player_added_to_room');
-    // A double click adds the candidate ONCE: the rooms' creator returns the
-    // existing open room rather than making a second one, and the response
-    // says so instead of reporting a creation that did not happen.
+    // A double click adds the candidate once: the rooms' creator returns the existing open room.
     res.status(out.existed ? 200 : 201).json({
       review: reviewView(r), roomId: out.roomId, room: out.room, idempotent: !!out.existed,
     });
   });
 
-  /** Organisation-private coverage across every live brief. */
   orgRouter.get('/evaluation-coverage', (req, res) => {
     const items = briefsFor(req.org.id).filter(briefIsLive).map((brief) => {
       const { eligible, evaluated } = computeBrief(req, brief);

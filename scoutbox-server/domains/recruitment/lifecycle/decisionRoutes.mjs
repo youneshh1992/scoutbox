@@ -1,24 +1,8 @@
 /**
- * Formal recruitment decision routes: the club's internal decision
- * boundary. Everything here ends at `offer_consideration`; nothing here knows
- * what an offer is.
- *
- *   GET    /org/rooms/:id/decision                  the decision surface for this case
- *   POST   /org/rooms/:id/decision/draft            open the case's ONE draft
- *   PATCH  /org/rooms/:id/decision/draft            edit it (own rev)
- *   DELETE /org/rooms/:id/decision/draft            discard it (own rev)
- *   POST   /org/rooms/:id/decision/finalize         the formal decision: row + case move, one unit
- *   POST   /org/rooms/:id/decision/supersede        finalize, explicitly replacing the current formal decision
- *   GET    /org/recruitment/decision-policy         vocabulary
- *
- * WHAT NEVER HAPPENS HERE
- *
- * No `case.status = …` (only `ctx.applyLifecycleTransition`, after the ONE
- * validator agreed); no offer row, draft, term or notification; no player or
- * guardian notification; no reading of a rating, a Trust Score, a Box Cam
- * result or an attendance record to PRODUCE an outcome; no edit of a final
- * row (a later decision supersedes it); no decision taxonomy code written
- * into the lifecycle history and no lifecycle code written into a decision.
+ * Formal recruitment decision routes: the club's internal decision boundary.
+ * A positive decision ends at `offer_consideration`; nothing here writes an
+ * offer or notifies the player or guardian. A final row is never edited; a
+ * later decision supersedes it.
  */
 
 import { roomRole, roomCan, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
@@ -54,7 +38,6 @@ export function registerDecision(ctx) {
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
   const actor = (req) => ({ userId: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
-  /** The bookkeeping of a case act by the club user on the request: one history entry. */
   const byStaff = (req, action, detail) => ({ history: [auditEntry('org', req.orgUser.id, req.orgUser.name, action, detail)] });
 
   // ------------------------------------------------------------- lookups
@@ -72,7 +55,7 @@ export function registerDecision(ctx) {
     return { room, role };
   }
 
-  /** This case's rows in chain order; corrupt FORMAL rows omitted and counted, recommendation rows left to the rooms' reading. */
+  /** Corrupt formal rows omitted and counted; recommendation rows are left to the rooms' reading. */
   function rowsOf(kase) {
     const good = [];
     let omitted = 0;
@@ -90,7 +73,7 @@ export function registerDecision(ctx) {
     return { rows: good, omitted, duplicateHeads: dup };
   }
 
-  /** The same blind rule the Room applies: a scout reads a peer's submitted assessment only after submitting their own. */
+  /** The Room's blind rule: a scout reads a peer's submitted assessment only after submitting their own. */
   function assessmentsVisible(req, kase) {
     const mine = reads.assessments.forOrgPlayer(kase.orgId, kase.playerId);
     const lead = isLead(req.orgUser);
@@ -101,7 +84,7 @@ export function registerDecision(ctx) {
 
   const subjectRemoved = (kase) => !!kase.subjectRemovedAt || !findPlayer(kase.playerId);
 
-  /** For each outcome: could the case take the corresponding lifecycle step from where it is, for this role? Edge and role only — the evidence is the decision itself. */
+  /** Edge and role only: the evidence a progress needs is the decision itself. */
   function outcomeAvailability(kase, role) {
     const status = kase.room?.status;
     return DECISION_OUTCOMES.map((outcome) => {
@@ -120,7 +103,7 @@ export function registerDecision(ctx) {
     });
   }
 
-  /** `expectedRev` is REQUIRED and is an integer — never coerced (the Trial routes' rule). */
+  /** Required, and an integer, never coerced (the Trial routes' rule). */
   function revGate(req, res, record) {
     const exp = expectedRevOf(req.body);
     if (exp === null) { err(res, 'DECISION_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.'); return false; }
@@ -129,7 +112,7 @@ export function registerDecision(ctx) {
     return guardRev(req, res, record, { errorCode: 'DECISION_VERSION_CONFLICT', current: { rev: record.rev } });
   }
 
-  /** Validate the content fields a draft or a finalize may carry. Each field is optional on a draft; all are checked when present. */
+  /** Each field is optional on a draft; all are checked when present. */
   function validateContent(body, { requireOutcome = false } = {}) {
     if (body !== undefined && body !== null && (typeof body !== 'object' || Array.isArray(body))) return { ok: false, error: 'DECISION_CONTENT_INVALID', message: 'The body must be an object.' };
     const b = body ?? {};
@@ -159,8 +142,7 @@ export function registerDecision(ctx) {
     if (!got) return;
     const { room: kase, role } = got;
     const { rows, omitted, duplicateHeads } = rowsOf(kase);
-    // Two formal rows both claiming to be current is corruption, not a tie —
-    // there is no honest "current decision" to show. Say so.
+    // Two current formal rows is corruption, not a tie: there is no honest current decision to show.
     if (duplicateHeads.length) return err(res, 'DECISION_STATE_UNKNOWN', 'This case\'s decision record cannot be read.');
     const head = chainHead(rows);
     const current = head && isFormal(head) ? decisionView(head) : null;
@@ -206,7 +188,7 @@ export function registerDecision(ctx) {
     const content = validateContent(req.body);
     if (!content.ok) return err(res, content.error, content.message, content.field ? { field: content.field } : (content.allowed ? { allowed: content.allowed } : {}));
     const fp = payloadFingerprint({ outcome: content.outcome, reasonCodes: content.reasonCodes, note: content.note, refs: content.refShapes.map((r) => `${r.kind}:${r.id}`) });
-    // Replay: the same key on the live draft, or on the formal row that draft became.
+    // The same key on the live draft, or on the formal row that draft became.
     if (key.key) {
       const dr = kase.decisionDraft;
       if (dr?.keys?.create?.key === key.key) {
@@ -286,7 +268,6 @@ export function registerDecision(ctx) {
       const key = normaliseDecisionClientKey(req.body?.clientKey);
       if (!key.ok) return err(res, key.error, key.message);
 
-      // Replay of a finalize: the same key on a formal row of this case.
       const { rows, duplicateHeads } = rowsOf(kase);
       if (duplicateHeads.length) return err(res, 'DECISION_STATE_UNKNOWN', 'This case\'s decision record cannot be read; nothing new is written on top of it.');
       const dr = kase.decisionDraft ?? null;
@@ -296,7 +277,7 @@ export function registerDecision(ctx) {
         const prior = rows.find((d) => isFormal(d) && d.keys?.finalize?.key === key.key);
         if (prior) {
           if (prior.keys.finalize.fp === fp || (dr === null && prior.keys.finalize.fp)) {
-            // The draft is gone because THIS key already finalized it; same key, same decision.
+            // The draft is gone because this key already finalised it.
             if (dr === null || prior.keys.finalize.fp === fp) return res.json({ decision: decisionView(prior), lifecycle: prior.lifecycle ?? null, idempotent: true });
           }
           return err(res, 'DECISION_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different decision.');
@@ -307,16 +288,16 @@ export function registerDecision(ctx) {
       if (!dr) return err(res, 'DECISION_INVALID_STATE', 'There is no draft to finalize. Open a draft, then finalize it.');
       if (!revGate(req, res, dr)) return;
 
-      // The content is the draft's, re-validated as a FINAL decision now.
+      // Re-validated as a final decision now.
       const content = validateContent({ outcome: dr.outcome, reasonCodes: dr.reasonCodes, note: dr.note, evidenceRefs: dr.evidenceRefs ?? [] }, { requireOutcome: true });
       if (!content.ok) return err(res, content.error, content.message, content.allowed ? { allowed: content.allowed } : {});
       const outcome = content.outcome;
       const map = OUTCOME_MAP[outcome];
-      // References are resolved AGAIN now: an assessment invalidated since the draft, a session withdrawn, a record superseded — none of it is cited.
+      // Resolved again now: an assessment invalidated, a session withdrawn or a record superseded since the draft is not cited.
       const refs = resolveRefs(content.refShapes, kase);
       if (!refs.ok) return err(res, refs.error, refs.message, { ref: refs.ref });
 
-      // Supersession: a current FORMAL decision must be named and its rev matched. An advisory recommendation at the head is simply superseded.
+      // A current formal decision must be named and its rev matched; an advisory head is simply superseded.
       const head = chainHead(rows);
       const headFormal = head && isFormal(head) ? head : null;
       let supersession = null;
@@ -338,20 +319,19 @@ export function registerDecision(ctx) {
         return err(res, 'DECISION_INVALID_STATE', 'There is no formal decision with that id to supersede.', { supersedes: supersedesRaw });
       }
 
-      // A blocked family: a hold or a rejection is internal; progressing toward an offer is not taken while the block stands.
+      // A hold or a rejection is internal; progressing toward an offer is not taken while a block stands.
       if (outcome === 'progress' && isBlocked(kase.playerId, kase.orgId)) return err(res, 'DECISION_BLOCKED', 'This player (or their guardian) has blocked your organisation. A decision to progress is not recorded while the block stands; a hold or a rejection may be.');
       if (limited('decision_finalize', req.org.id)) return res.status(429).json(rateLimitedBody('decision_finalize'));
       if (content.note && !moderateOrRefuse(res, content.note, { kind: 'recruitment_decision', orgId: req.org.id, userId: req.orgUser.id })) return;
       if (supersession?.reason && !moderateOrRefuse(res, supersession.reason, { kind: 'recruitment_decision', orgId: req.org.id, userId: req.orgUser.id })) return;
 
-      // Failure injection: the write refuses BEFORE anything is
-      // recorded — no row, no history, no case move, no notification.
+      // The write refuses before anything is recorded.
       if (ctx.operations.delivery.consumeInjectedFailure('decision')) { // used up through the delivery bookkeeping (a row)
         console.error(`DECISION transport_failed finalize case=${kase.id}`);
         return err(res, 'DECISION_TRANSPORT_REFUSED', 'The decision could not be recorded. Nothing was changed; try again.');
       }
 
-      // ---- The formal row, the case move and the draft's removal: ONE unit of work, or nothing.
+      // ---- The formal row, the case move and the draft's removal: one unit of work.
       const { visible, withheld } = assessmentsVisible(req, kase);
       const summary = summariseAssessments(visible, { withheld });
       const by = actor(req);
@@ -379,7 +359,7 @@ export function registerDecision(ctx) {
             policyVersion: DECISION_POLICY_VERSION,
           });
           if (head) decisions.markSuperseded(head.id, { by: formal.id });
-          // The case, through the ONE validator, which now sees this row as the evidence a progress needs.
+          // The validator now sees this row as the evidence a progress needs.
           let lc;
           if (from === LIFECYCLE_ACTIONS[map.action].to) {
             lc = { action: map.action, from, to: from, applied: false, reason: 'already_there', at };
@@ -400,14 +380,13 @@ export function registerDecision(ctx) {
       }
       if (refused) return err(res, 'DECISION_LIFECYCLE_CONFLICT', `The case at "${ROOM_STATUS_LABELS[from] ?? from}" cannot take the step this decision asks for (${map.action}). ${refused.message ?? ''}`.trim(), { lifecycle: refused.error, allowed: refused.allowed ?? [], current: { status: from } });
 
-      // Literal event names: the source scan that checks EMITTED_EVENTS only
-      // sees call sites with a literal name; with a variable name every boot
-      // would warn that the registry names events the server never emits.
+      // Literal event names: the EMITTED_EVENTS source scan only sees literal
+      // names, and would warn on every boot otherwise.
       const decisionEvent = { orgId: kase.orgId, roomId: kase.id, decisionId: row.id };
       if (headFormal) broadcast?.('room_decision_superseded', decisionEvent);
       else broadcast?.('room_decision_finalized', decisionEvent);
       if (TERMINAL_ROOM_STATUSES.includes(fresh.room.status)) {
-        // The Second Look contract: the same ids-only event the rooms broadcast when a room is archived.
+        // The Second Look contract: the ids-only event the rooms broadcast when a room is archived.
         broadcast?.('recruitment_room_archived', { orgId: kase.orgId, roomId: kase.id });
       }
       for (const uid of new Set([fresh.ownerUserId, fresh.room?.leadScoutUserId])) {

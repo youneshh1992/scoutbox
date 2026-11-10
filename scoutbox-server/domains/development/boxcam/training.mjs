@@ -1,14 +1,5 @@
-// Box Training: coach assignments, the Development Plan, Box
-// Challenges, disputes and Trust & Safety tooling.
-//
-// Assignments and challenges NEVER widen access: every org action passes
-// the standing gates (visibleToOrg incl. the agency/minor wall and the
-// grassroots radius, blocks, verified organisation, not suspended).
-// Agencies cannot assign Box Training at all. Coaches receive session
-// RESULTS, never raw home footage — no such footage exists server-side.
-//
-// Every record is a row of repositories/boxCam.mjs, written by an explicit operation (inside one unit of work with
-// its ledger rows and notifications), read through `boxCamReads`.
+// Assignments and challenges don't widen access: every org action passes the standing gates (visibleToOrg with the
+// agency/minor wall and grassroots radius, blocks, verified, not suspended). Agencies cannot assign Box Training.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
 import { challengeProgress, developmentActivity, fmtMs, TERMINAL_STATES, pageNewestFirst } from './shared.mjs';
@@ -55,7 +46,6 @@ export function registerBoxTraining(ctx) {
   };
   ctx.boxAssignmentView = assignmentView;
 
-  // Org-side drill registry (same versioned catalogue players see).
   orgRouter.get('/box-cam/drills', (_req, res) => res.json({ drills: ctx.drillList() }));
 
   orgRouter.post('/box-cam/assignments', (req, res) => {
@@ -64,7 +54,6 @@ export function registerBoxTraining(ctx) {
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can assign Box Training.' });
     const p = findPlayer(req.body?.playerId);
     if (!p || !orgCanSee(req.org, p)) {
-      // Concealment semantics identical to the standing rules.
       return res.status(p ? 403 : 404).json({ error: p ? (req.org.type === 'agency' && !isAdult(p) ? 'UNDER_18_WALL' : 'NOT_VISIBLE') : 'PLAYER_NOT_FOUND' });
     }
     const drill = latestDrill(String(req.body?.drillId ?? ''));
@@ -113,8 +102,7 @@ export function registerBoxTraining(ctx) {
   });
 
   orgRouter.get('/box-cam/assignments', (req, res) => {
-    // A block or visibility change after assignment hides the player again. Bounded by one club's assignments: the
-    // visibility rule is applied in code, then the page is cut.
+    // A block or visibility change after assignment hides the player again.
     const mine = reads.assignments.forOrg(req.org.id, { playerId: req.query.playerId ? String(req.query.playerId) : null })
       .filter((a) => { const p = findPlayer(a.playerId); return p && orgCanSee(req.org, p); });
     const page = pageNewestFirst(req, res, mine, { readPage, pageOf, sendPageError });
@@ -167,9 +155,7 @@ export function registerBoxTraining(ctx) {
     res.json({ assignment: assignmentView(accept(a)) });
   });
 
-  /** Assignment progress from a finalized session — completion only ever
-   *  derives from verified values; a near miss stays "partially". Runs inside
-   *  the completion's unit of work. */
+  /** Runs inside the completion's unit of work. */
   function applyAssignmentProgress(session) {
     if (!session.assignmentId) return;
     const a = reads.assignments.byId(session.assignmentId);
@@ -208,8 +194,7 @@ export function registerBoxTraining(ctx) {
       if (c.adultOnly && !isAdult(player)) return false;
       if (c.publisher.kind === 'org') {
         const org = byId.org(c.publisher.orgId);
-        // A challenge NEVER bypasses standing visibility: if the publishing
-        // org may not see this player, the player never sees the challenge.
+        // If the publishing org may not see this player, the player doesn't see the challenge.
         if (!org || org.suspended || !orgCanSee(org, player)) return false;
       }
       return true;
@@ -229,7 +214,6 @@ export function registerBoxTraining(ctx) {
     }
     // A total is a whole number of reps or minutes: a numeric string is refused.
     if (!isInt(targetTotal, 1, 100_000)) return res.status(400).json({ error: 'TARGET_INVALID' });
-    // Refused, not clamped or dropped.
     if (!isAbsent(days) && !isInt(days, 1, 60)) return fieldInvalid(res, 'days', 'A challenge runs for a whole number of days, from 1 to 60.');
     if (!isAbsent(cap) && !isInt(cap, 1, 1_000_000)) return fieldInvalid(res, 'cap', 'A cap is a whole number of participants, at least 1.');
     if (!isAbsent(adultOnly) && typeof adultOnly !== 'boolean') return fieldInvalid(res, 'adultOnly', 'adultOnly is true or false.');
@@ -290,9 +274,7 @@ export function registerBoxTraining(ctx) {
     joinChallenge(res, child, req.params.cid, { kind: 'guardian', id: req.guardian.id });
   });
 
-  /** Recompute challenge progress deterministically from distinct finalized
-   *  sessions — replays cannot double-count, sessions past the end date
-   *  never count. Runs inside the completion's unit of work. */
+  /** Runs inside the completion's unit of work. */
   function applyChallengeProgress(session, player) {
     const entries = reads.entries.forPlayer(session.playerId).filter((e) => e.status === 'active');
     if (!entries.length) return;
@@ -418,8 +400,6 @@ export function registerBoxTraining(ctx) {
     if (!d) return res.status(404).json({ error: 'DISPUTE_NOT_FOUND' });
     if (d.status !== 'open') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
     const { outcome, reason } = req.body ?? {};
-    // T&S can invalidate or let a result stand — it can never fabricate
-    // verified durations, rep counts or completion.
     if (!['stands', 'invalidated', 'provider_bug'].includes(outcome)) return res.status(400).json({ error: 'OUTCOME_REQUIRED', allowed: ['stands', 'invalidated', 'provider_bug'] });
     if (!String(reason ?? '').trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
     const s = reads.sessions.byId(d.sessionId);
@@ -452,7 +432,7 @@ export function registerBoxTraining(ctx) {
     res.json({ session: ctx.boxSessionView(restored) });
   });
 
-  // The ScoutBox challenges are a seeded catalogue: migration 0031 inserts them, never boot.
+  // The ScoutBox challenges are seeded by a migration, not at boot.
 
   return { assignmentView, challengeView, developmentPlan };
 }

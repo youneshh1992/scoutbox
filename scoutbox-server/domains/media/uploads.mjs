@@ -1,11 +1,6 @@
-// Resumable uploads: a persistent session, integrity-checked chunks, an explicit finalisation step. Nothing reports
-// success early; abandoned sessions are swept (server.mjs registers this before the operations module, whose sweep
-// calls `sweepUploads`). Data URLs remain the small-file fast path.
-//
-// Sessions are rows of `upload_sessions` (repositories/operations.mjs), received chunk numbers rows of
-// `upload_session_chunks`. The chunk bytes live on disk under DATA_DIR/upload-tmp/<id>/ and are removed only after the
-// write that ends the session commits (finalise, abort, the 24-hour sweep, the player's deletion). Over-long titles are
-// shortened to 120 characters.
+// Nothing reports success before finalisation. server.mjs registers this before the operations module, whose sweep
+// calls `sweepUploads`. Chunk bytes live under DATA_DIR/upload-tmp/<id>/ and are removed only after the write that
+// ends the session commits.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -15,12 +10,10 @@ const MAX_UPLOAD = OPERATIONS_LIMITS.maxUploadBytes;
 const CHUNK = 512 * 1024; // base64 chunks stay well under the JSON body cap
 
 const chunkDirOf = (dataDir, id) => path.join(dataDir, 'upload-tmp', id);
-/** Removes the chunk files of these sessions (after the write that ended them committed). */
 export function removeUploadChunks(dataDir, ids) {
   for (const id of ids) fs.rmSync(chunkDirOf(dataDir, id), { recursive: true, force: true });
 }
 
-/** A session as the API answers it. */
 const uploadView = (u) => ({
   id: u.id, playerId: u.playerId, size: u.size, mime: u.mime, title: u.title, sha256: u.sha256, chunkSize: u.chunkSize,
   totalChunks: u.totalChunks, received: [...u.received], status: u.status, createdAt: u.createdAt, finalisedMediaId: u.finalisedMediaId,
@@ -32,7 +25,7 @@ export function registerUploads(ctx) {
   const uploads = operations.uploads;
   const chunkDir = (id) => chunkDirOf(DATA_DIR, id);
   const invalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
-  /** Runs a write that refuses when another request ended the session first (a race): 409, as the check before it would. */
+  /** A write that refuses when another request ended the session first (a race) answers 409, as the check before it would. */
   const unlessEnded = (res, id, write) => {
     try { return write(); } catch (e) {
       if (e?.code !== 'UPLOAD_NOT_OPEN') throw e;
@@ -106,8 +99,7 @@ export function registerUploads(ctx) {
     const item = { id: nextId('media'), title: up.title, kind: up.mime.startsWith('video') ? 'video' : 'image', uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null, captions: null, sizeBytes: up.size };
     storage.saveDataUrl(item.id, `data:${up.mime};base64,${buf.toString('base64')}`);
     item.url = `/media/${item.id}`;
-    // ONE unit of work: the clip row, the upload session's state and the activity commit together before the 201; the
-    // chunks go after.
+    // The chunks are removed after the commit.
     const done = unlessEnded(res, up.id, () => unit(() => {
       players.addItem(req.player.id, 'media', item);
       const fresh = uploads.finalise(up.id, item.id);
@@ -124,14 +116,13 @@ export function registerUploads(ctx) {
     const up = ownUpload(req, res);
     if (!up) return;
     if (up.status === 'finalised') return res.status(409).json({ error: 'ALREADY_FINALISED' });
-    // An aborted or abandoned session answers as it is (aborting twice changes nothing).
+    // Aborting twice changes nothing.
     const fresh = up.status === 'open' ? unlessEnded(res, up.id, () => uploads.abort(up.id)) : up;
     if (!fresh) return;
     removeUploadChunks(DATA_DIR, [up.id]);
     res.json({ upload: uploadView(fresh) });
   });
 
-  /** Abandons the open sessions older than 24 hours and removes their chunks; true when one changed. */
   function sweepUploads(now) {
     const gone = uploads.abandonOpenBefore(now - 24 * 3600_000);
     removeUploadChunks(DATA_DIR, gone);

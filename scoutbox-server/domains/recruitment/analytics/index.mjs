@@ -1,27 +1,7 @@
 /**
- * Recruitment analytics: registration and routes.
- *
- * Three rules govern everything here, in priority order. They are the audit
- * log's rules, deliberately reused rather than reinvented, because this is
- * the same kind of surface: an administrative projection over records other
- * modules own.
- *
- *   1. **Leads only.** A scout sees their own work in their own Rooms. The
- *      organisation-wide view is administrative. Everyone else — other
- *      organisations, players, guardians, Trust & Safety — gets exactly what a
- *      route that does not exist would give them.
- *   2. **No content, and no person.** A figure says what happened and how
- *      long it took. It never carries a note, a comment, an assessment or a
- *      decision's free text, and it is never broken down by the colleague who
- *      did the work. `groupBy=scout` is refused by name, not by accident.
- *   3. **Bounded and stable.** Drill-down is cursor-paged, at most 50 rows,
- *      in an order that does not change between two reads of the same data.
- *
- * Analytics writes nothing. There is no analytics store, no materialised rollup and
- * no cache: every figure is projected from the Rooms, decisions, briefs,
- * reviews, watchlists and trials that other modules already own. A number here can
- * therefore never disagree with the record it came from, because it IS the
- * record, read differently.
+ * Recruitment analytics routes. Leads only; anyone else gets what a missing route would give. Figures carry
+ * no note, comment, assessment or free text and are never broken down by colleague. Drill-down is
+ * cursor-paged in a stable order. Nothing is stored: every figure is projected from other modules' records.
  */
 import {
   RECRUITMENT_ANALYTICS_POLICY_VERSION, METRICS, METRIC_IDS, METRIC_FAMILIES, FAMILY_IDS,
@@ -45,11 +25,7 @@ export function registerAnalytics(ctx) {
   const reportingReads = { ...recruitmentReads, ...scoutingReads, discovery: ctx.discoveryReads };
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function' || typeof recruitmentReads?.offers?.forOrg !== 'function' || typeof recruitmentReads?.signings?.forOrg !== 'function' || typeof recruitmentReads?.signingPackages?.forOrg !== 'function') throw new TypeError('registerAnalytics needs recruitmentReads (contacts, offers, signings, signingPackages) from the data layer');
 
-  // Counters only, and deliberately only two: how often the page was read and
-  // how often a drill-down was opened. There is no counter here that could be
-  // read as a measure of anybody — not a scout, not an organisation, not a
-  // player. An operational metric about an analytics page must not itself
-  // become an analytics page.
+  // Two counters only, neither of which could be read as a measure of anybody.
   metrics.analytics = {
     recruitment_analytics_read: 0,
     recruitment_analytics_rows_read: 0,
@@ -57,10 +33,7 @@ export function registerAnalytics(ctx) {
   };
   const vmetric = (k, n = 1) => { metrics.analytics[k] = (metrics.analytics[k] ?? 0) + n; };
 
-  // Boot assertion: the registry must be internally consistent before a single
-  // number is served. In development this throws; a metric with no stated
-  // limitation, a forbidden name or a private field in its declaration stops
-  // the process rather than reaching a director.
+  // A metric with no limitation, a forbidden name or a private field stops the process before serving.
   const registryShape = assertMetricRegistry();
 
   const limited = limitCheck(ctx.rateLimit);
@@ -68,11 +41,7 @@ export function registerAnalytics(ctx) {
 
   // ------------------------------------------------------------- validation
 
-  /**
-   * Parse the query into filters, refusing anything that would change every
-   * number on the page without saying so. Nothing is silently repaired: an
-   * unknown source context is a 400, not "we showed you everything instead".
-   */
+  /** Nothing is silently repaired: an unknown source context is a 400, not "everything instead". */
   function readQuery(q) {
     const groupBy = q.groupBy ?? q.group_by ?? null;
     if (groupBy) {
@@ -133,11 +102,7 @@ export function registerAnalytics(ctx) {
 
   // ------------------------------------------------------------- the catalogue
 
-  /**
-   * What every number on this page means, before any number is shown. Served
-   * separately so a client renders definitions from the server's registry
-   * rather than carrying its own copy that can drift.
-   */
+  /** Served so clients render definitions from the server's registry rather than a copy that can drift. */
   orgRouter.get('/recruitment-analytics/catalogue', (req, res) => {
     if (!requireLead(req, res)) return;
     res.json({
@@ -180,16 +145,13 @@ export function registerAnalytics(ctx) {
     const parsed = readQuery(req.query ?? {});
     if (parsed.error) return res.status(parsed.status).json(parsed);
 
-    // Fault injection is the audit log's mechanism, and it exists so the
-    // partial-failure path is exercised by a test rather than asserted in
-    // prose. It is unavailable in production, by name.
+    // Fault injection for the partial-failure test; unavailable in production.
     const fault = devFaults && req.query?.simulateFailure ? String(req.query.simulateFailure) : null;
 
     const context = contextFor(req, parsed);
     const payload = buildDashboard(context, { families: parsed.families, stallDays: parsed.stallDays, fault });
     vmetric('recruitment_analytics_read');
-    // Declared on the wire, as Discover and Matching do. Nothing on this page
-    // is ordered by how good anything is.
+    // Declared on the wire, as Discover and Matching do: nothing here is ordered by merit.
     res.set('X-ScoutBox-Ordering', 'fixed_vocabulary_then_stable_id');
     res.json(payload);
   });
@@ -197,10 +159,8 @@ export function registerAnalytics(ctx) {
   // --------------------------------------------------------------- drill-down
 
   /**
-   * The rows behind one figure, paged. Cursor is the index of the next row —
-   * the underlying order is already stable (oldest first, then id), so an
-   * offset cursor cannot skip or repeat a row between two reads of unchanged
-   * data, and a changed dataset is reported rather than papered over.
+   * The rows behind one figure, paged. The cursor is the next row's index; the order is stable (oldest first,
+   * then id), so unchanged data never skips or repeats a row.
    */
   orgRouter.get('/recruitment-analytics/rows', (req, res) => {
     if (!requireLead(req, res)) return;

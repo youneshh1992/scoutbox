@@ -1,5 +1,3 @@
-// Reports, blocks and the Trust & Safety console. Players, guardians and club staff report; players and guardians
-// block; ScoutBox staff resolve reports, lift blocks and set an organisation's standing from the console.
 import express from 'express';
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
 import { optText, reqText, badField } from '../platform/input.mjs';
@@ -11,10 +9,7 @@ export const reportView = (r) => ({ id: r.id, ts: r.ts, by: r.by, byId: r.byId, 
 const blockView = (b) => ({ id: b.id, playerId: b.playerId, orgId: b.orgId, by: b.by, reason: b.reason, ts: b.ts });
 const moderationView = (m) => ({ id: m.id, ts: m.ts, context: m.context, flags: m.flags, severity: m.severity, excerpt: m.excerpt });
 
-/**
- * The `/admin` router behind the shared key. A reviewer session presented beside the key attributes the action to that
- * person; the key alone is read-only and non-authoritative for compliance.
- */
+/** A reviewer session beside the shared key attributes the action to that person; the key alone is read-only. */
 export function createAdminRouter({ app, adminKey, sessionFor, compliancePolicies }) {
   if (typeof adminKey !== 'string' || !adminKey) throw new TypeError('createAdminRouter needs the admin key');
   const adminRouter = express.Router();
@@ -30,7 +25,6 @@ export function createAdminRouter({ app, adminKey, sessionFor, compliancePolicie
   return adminRouter;
 }
 
-/** `POST /report` and `GET /reports` for players, guardians and club staff, and `POST /block` for players and guardians. */
 export function registerReporting({ playerRouter, guardianRouter, orgRouter, safetyAudit, recruitment, byId, unit, nextId, ledgerAppend, broadcast }) {
   // An urgent report against an organisation suspends communication with the reporter's players at once, pending review.
   function handleReport(req, res, actor) {
@@ -113,7 +107,6 @@ export function registerReporting({ playerRouter, guardianRouter, orgRouter, saf
   });
 }
 
-/** The console's queues, logs and organisation controls on `adminRouter`. */
 export function registerSafetyConsole({
   adminRouter, dataLayerReport, storeEngine, unit, notify, broadcast, mailer,
   players, guardians, orgs, sessions, channels, safetyAudit, signingsFollowUps, operations, outbox, pushLog,
@@ -128,7 +121,7 @@ export function registerSafetyConsole({
     res.json(read(page));
   };
 
-  // Row-level detail of the data layer; the public /capabilities carries only counts and statuses.
+  // Row-level detail; the public /capabilities carries only counts and statuses.
   adminRouter.get('/data-layer', (_req, res) => res.json(dataLayerReport({ details: true })));
 
   adminRouter.get('/overview', (_req, res) => {
@@ -147,11 +140,11 @@ export function registerSafetyConsole({
       sessions: sessions.count(),
       storageEngine: storeEngine,
       groomingEscalations: safetyAudit.moderationLog.count('grooming'),
-      persisted: true, // every write is committed to the database before the handler answers
+      persisted: true, // every write commits before the handler answers
     });
   });
 
-  // Triage order: urgent first, then oldest pending, then resolved (newest first).
+  // Urgent first, then oldest pending, then resolved (newest first).
   adminRouter.get('/reports', (req, res) => paged(req, res, ['number', 'number', 'number'], (page) => {
     const out = safetyAudit.reports.triagePage(page);
     return { items: out.items.map(reportView), nextCursor: out.nextCursor };
@@ -221,7 +214,7 @@ export function registerSafetyConsole({
     const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
     for (const [f, v] of [['verified', verified], ['safeguardingContractSigned', safeguardingContractSigned], ['suspended', suspended]]) if (v !== undefined && typeof v !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} must be true or false.` });
     if (verifiedDomain !== undefined && verifiedDomain !== null && !(typeof verifiedDomain === 'string' && verifiedDomain.trim().length <= ORG_LIMITS.domain)) return badField(res, 'verifiedDomain');
-    // The switch is mirrored on the organisation's identity claim in the same unit, so the two never disagree.
+    // Mirrored on the organisation's identity claim in the same unit.
     const updated = unit(() => {
       orgs.setStanding(org.id, { verified, safeguardingContractSigned, suspended, verifiedDomain: verifiedDomain === undefined ? undefined : verifiedDomain?.trim() || null });
       syncLegacyOrgVerification(org, req.body);
@@ -248,7 +241,7 @@ export function registerSafetyConsole({
     return { items: out.items.map(moderationView), nextCursor: out.nextCursor };
   }));
 
-  // Every thread, most recently active first: "all communications logged", made inspectable.
+  // Most recently active first: "all communications logged", made inspectable.
   adminRouter.get('/channels', (req, res) => paged(req, res, ['number', 'number'], (page) => {
     const out = channels.page(page);
     return { items: out.items.map((c) => ({ ...channelViewFor(c, 'org'), guardianId: c.guardianId })), nextCursor: out.nextCursor };

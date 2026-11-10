@@ -1,39 +1,7 @@
-// The frame transport.
-//
-// TRANSPORT CHOICE, AND WHY
-//
-// A bounded, sampled-frame HTTP endpoint on the EXISTING authenticated player
-// router. Not a WebSocket.
-//
-// The reasoning, in the order it actually mattered:
-//
-//   1. Every standing gate already runs on this router — authentication,
-//      moderation, rate limiting, CORS, origin. A WebSocket would need each of
-//      those re-established at a new boundary, and the failure mode of getting
-//      one wrong is an unauthenticated pixel endpoint. Transport is not built
-//      for novelty.
-//
-//   2. The workload does not need a socket. Ingest measured at about
-//      0.57 ms per frame and a whole attempt at 0.01-0.02x of realtime. A
-//      batch of up to 12 frames every few hundred milliseconds is comfortably
-//      within request/response, and backpressure is expressed as an HTTP
-//      status rather than an application-level protocol nobody else speaks.
-//
-//   3. Sampling is honest about what the engine needs. The engine is
-//      frame-rate invariant in ball diameters per second and needs 12 fps
-//      sustained, not 60. A socket would invite streaming everything.
-//
-// The cost, stated: per-batch HTTP overhead, and no server-initiated push. The
-// first is small at this cadence; the second is not needed, because the client
-// has nothing to wait for mid-attempt.
-//
-// WHAT THIS ENDPOINT IS NOT
-//
-// It is not a file upload. There is no multipart handling, no image parser, no
-// content sniffing and no video. It accepts exactly one documented
-// representation — gray8, described in policy.mjs — and refuses everything
-// else by name. A JPEG posted here is `unsupported_frame_format`, not a
-// decode attempt.
+// Frames arrive as bounded HTTP batches on the authenticated player router, not a WebSocket: every standing gate
+// (auth, moderation, rate limiting, CORS, origin) already runs here. Ingest measured about 0.57 ms per frame, so a
+// batch of 12 every few hundred ms fits request/response, and the engine needs 12 fps sustained, not 60. It is not a
+// file upload: one representation (gray8, see policy.mjs), anything else refused by name.
 
 import {
   FRAME_LIMITS, FRAME_ENCODING, CANDIDATE_PROTOCOLS, refusedClientFields,
@@ -44,7 +12,6 @@ import { combineEligibility, boxCamObservedEligible, COMBINE_DISABLED_REASON } f
 import { nonceMatches } from '../../../../repositories/boxCam.mjs';
 import { limitCheck } from '../../../platform/rateLimit.mjs';
 
-/** Canonical typed errors, mapped to HTTP once, here. */
 const HTTP_FOR = {
   [PROVIDER_ERRORS.FRAME_TOO_LARGE]: 413,
   [PROVIDER_ERRORS.UNSUPPORTED_FRAME_FORMAT]: 415,
@@ -74,20 +41,13 @@ const FRAME_ERROR_TO_PROVIDER = {
   [FRAME_ERRORS.BATCH_TOO_LARGE]: PROVIDER_ERRORS.QUEUE_OVERFLOW,
 };
 
-/**
- * Error sanitization. The client learns the typed code and nothing
- * about the server's internals. No stack, no file path, no engine message.
- */
+/** The client learns the typed code only: no stack, path or engine message. */
 function fail(res, code, extra = {}) {
   const status = HTTP_FOR[code] ?? 400;
   return res.status(status).json({ error: code, ...extra });
 }
 
-/**
- * The client supplies frames, never a measurement. A body, or a frame
- * envelope, that names a field the server derives (FORBIDDEN_CLIENT_FIELDS) is
- * refused by name with a 422, never silently ignored. Returns true once refused.
- */
+/** A body or frame envelope naming a server-derived field is refused with a 422. Returns true once refused. */
 function refuseClientFields(res, ...objects) {
   const fields = [...new Set(objects.flatMap((o) => refusedClientFields(o)))];
   if (!fields.length) return false;
@@ -96,9 +56,8 @@ function refuseClientFields(res, ...objects) {
 }
 
 export function registerProductionCvRoutes(ctx) {
-  // A CV result is a row of repositories/boxCam.mjs, recorded once; the session's provider binding is an explicit
-  // session update. The nonce is checked against the session's stored hash, then the plain value the client sent is
-  // what binds the in-memory provider session.
+  // The nonce is checked against the session's stored hash, then the plain value sent binds the in-memory provider
+  // session.
   const {
     playerRouter, adminRouter, vmetric, broadcast, boxCam, boxCamReads: reads,
   } = ctx;
@@ -113,12 +72,7 @@ export function registerProductionCvRoutes(ctx) {
   // Provider session lifecycle
   // ====================================================================
 
-  /**
-   * Open a provider session bound to an existing, authenticated, live Box Cam
-   * session. Every element of the binding is established here, on the
-   * server, from the server's own record — the client supplies only the nonce
-   * it was given, and that is compared, never adopted.
-   */
+  /** The binding comes from the server's record; the client's nonce is compared, never adopted. */
   playerRouter.post('/box-cam/sessions/:id/cv/begin', (req, res) => {
     if (limited('box_cv_session_create', req.player.id)) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 30 });
@@ -131,8 +85,7 @@ export function registerProductionCvRoutes(ctx) {
       return fail(res, PROVIDER_ERRORS.INVALID_STATE, { status: s.status });
     }
     if (Date.now() > s.expiresAt) return fail(res, PROVIDER_ERRORS.SESSION_EXPIRED);
-    // No accepted Box Cam observed result without liveness. Checked at
-    // the start too, so an attempt cannot be recorded and then rejected.
+    // Liveness is checked at the start too, so an attempt cannot be recorded and then rejected.
     if (!s.livenessPassedAt) {
       return fail(res, PROVIDER_ERRORS.INVALID_STATE, { detail: 'liveness has not been established for this session' });
     }
@@ -159,21 +112,15 @@ export function registerProductionCvRoutes(ctx) {
       protocolId: begun.protocolId,
       frameLimits: begun.frameLimits,
       encoding: FRAME_ENCODING,
-      // Said at the beginning of the attempt, not discovered at the end.
       combineVerifiedEligible: false,
       combineDisabledReason: COMBINE_DISABLED_REASON,
     });
   });
 
-  /**
-   * Frame ingest. One documented representation, hard bounds, typed
-   * rejections, and nothing retained.
-   */
   playerRouter.post('/box-cam/sessions/:id/cv/frames', (req, res) => {
     if (limited('box_cv_frames', req.player.id)) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 5 });
     }
-    // A content type that is not JSON is refused before anything is read.
     const ctype = String(req.headers['content-type'] ?? '');
     if (!ctype.includes('application/json')) {
       return fail(res, PROVIDER_ERRORS.UNSUPPORTED_FRAME_FORMAT, {
@@ -203,7 +150,7 @@ export function registerProductionCvRoutes(ctx) {
 
     const accepted = [];
     for (const raw of frames) {
-      // Decode at the boundary. The decoded buffer never leaves this loop.
+      // The decoded buffer never leaves this loop.
       const d = decodeFrame(raw);
       if (!d.ok) {
         return fail(res, FRAME_ERROR_TO_PROVIDER[d.error] ?? PROVIDER_ERRORS.UNSUPPORTED_FRAME_FORMAT, {
@@ -223,8 +170,7 @@ export function registerProductionCvRoutes(ctx) {
     }
 
     const after = provider.get(providerSessionId);
-    // No per-frame notification, ever. This response is the only thing
-    // the client learns, and it is a receipt, not an event.
+    // No per-frame notification: this receipt is all the client learns.
     res.json({
       accepted: accepted.length,
       lastSeq: after?.lastSeq ?? null,
@@ -234,14 +180,9 @@ export function registerProductionCvRoutes(ctx) {
     });
   });
 
-  /**
-   * Finalize once, into the canonical result.
-   *
-   * The result is persisted as derived metadata only: no frame bytes,
-   * no base64, no buffers.
-   */
+  /** Persisted as derived metadata only: no frame bytes, base64 or buffers. */
   playerRouter.post('/box-cam/sessions/:id/cv/finalize', (req, res) => {
-    // The declared `box_cv_finalize` policy (domains/platform/rateLimit.mjs); it only bounds a retry loop.
+    // Only bounds a retry loop.
     if (limited('box_cv_finalize', req.player.id)) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 5 });
     }
@@ -253,8 +194,6 @@ export function registerProductionCvRoutes(ctx) {
 
     const providerSessionId = String(body.providerSessionId ?? s.cvProviderSessionId ?? '');
 
-    // A session already finalized in a previous call returns its stored
-    // result rather than running anything again.
     const existing = reads.cvResults.byProviderSession(providerSessionId);
     if (existing) {
       return res.json({ result: existing, alreadyFinalized: true, ...observedView(s, existing) });
@@ -268,7 +207,6 @@ export function registerProductionCvRoutes(ctx) {
     });
     if (!fin.ok) return fail(res, fin.error, { state: fin.state });
 
-    // Recorded once, as the provider built it (the session's result id is this row's key).
     const result = boxCam.cvResults.record(fin.result);
 
     vmetric(result.outcome === 'accepted' ? 'box_cam_cv_accepted' : 'box_cam_cv_refused');
@@ -291,16 +229,11 @@ export function registerProductionCvRoutes(ctx) {
     const providerSessionId = String((req.body ?? {}).providerSessionId ?? s.cvProviderSessionId ?? '');
     const r = provider.cancel({ providerSessionId, boxCamSessionId: s.id });
     if (!r.ok) return fail(res, r.error);
-    // A cancelled attempt mints no result. Stated in the response so a client
-    // cannot interpret silence as success.
+    // Stated in the response so a client can't read silence as success.
     res.json({ cancelled: true, result: null, state: r.state ?? 'cancelled' });
   });
 
-  /**
-   * The Box Cam observed view, evaluated independently of Combine
-   * and reported with both answers side by side so neither can be mistaken
-   * for the other.
-   */
+  /** Box Cam observed and Combine answers side by side, so neither is mistaken for the other. */
   function observedView(s, result) {
     const observed = boxCamObservedEligible({
       providerHealth: provider.health().state,
@@ -323,13 +256,8 @@ export function registerProductionCvRoutes(ctx) {
   // ====================================================================
 
   /**
-   * Structured checks. The client maps copy; the server never sends a
-   * sentence it expects to be rendered verbatim.
-   *
-   * The important part of the shape: a Ready Check can legitimately say
-   * observation is ready AND that Combine verification is unavailable, because
-   * those are different questions. Both appear, always, so the distinction is
-   * visible rather than inferred.
+   * Structured checks; the client maps copy. Observation readiness and Combine availability are separate questions and
+   * both always appear.
    */
   playerRouter.post('/box-cam/cv/ready-check', (req, res) => {
     if (limited('box_cv_ready_check', req.player.id)) {
@@ -340,9 +268,7 @@ export function registerProductionCvRoutes(ctx) {
     const checks = [];
     const add = (id, state, reasonCode = null, detail = null) => checks.push({ id, state, reasonCode, detail });
 
-    // Client-reported environment facts. They are used ONLY to advise the
-    // player during setup; nothing here contributes to a measurement, so a
-    // client that lies about them gains nothing but bad advice.
+    // Client-reported facts only advise during setup; lying about them gains nothing but bad advice.
     const cam = String(b.cameraPermission ?? 'unknown');
     add('camera_permission',
       cam === 'granted' ? 'pass' : 'fail',
@@ -368,9 +294,7 @@ export function registerProductionCvRoutes(ctx) {
     add('provider_health', ['ready', 'degraded'].includes(health.state) ? 'pass' : 'fail',
       ['ready', 'degraded'].includes(health.state) ? null : 'PROVIDER_UNAVAILABLE', { state: health.state });
 
-    // Observation checks the client cannot self-assess are reported as
-    // "unknown" rather than assumed to pass — the same honesty the Box Cam Ready
-    // Check applies to lighting and framing.
+    // Checks the client cannot self-assess are "unknown", not assumed to pass.
     add('person_region', b.personDetected === true ? 'pass' : (b.personDetected === false ? 'fail' : 'unknown'),
       b.personDetected === false ? 'PERSON_NOT_DETECTED' : null);
     add('ball_detection', b.ballDetected === true ? 'pass' : (b.ballDetected === false ? 'fail' : 'unknown'),
@@ -388,7 +312,6 @@ export function registerProductionCvRoutes(ctx) {
 
     res.json({
       checks,
-      // Two answers, always both present.
       observationReady,
       combineVerificationAvailable: combine.eligible,
       combineDisabledReason: combine.eligible ? null : COMBINE_DISABLED_REASON,
@@ -403,9 +326,7 @@ export function registerProductionCvRoutes(ctx) {
   adminRouter.get('/box-cam/cv/results/:providerSessionId', (req, res) => {
     const r = reads.cvResults.byProviderSession(req.params.providerSessionId);
     if (!r) return res.status(404).json({ error: 'NOT_FOUND' });
-    // Deliberately a projection rather than the whole record: there is no raw
-    // frame viewer, and the count is uneditable by construction —
-    // there is no write route for it anywhere in this file.
+    // A projection: there is no raw frame viewer and no write route for the count.
     res.json({
       diagnostics: {
         protocolId: r.protocolId,

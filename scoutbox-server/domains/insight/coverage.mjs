@@ -1,12 +1,9 @@
-// Recruitment coverage and observation planning (fixtures, plans, assignments: repositories/insightCoverage.mjs).
-// Travel times are never invented; candidate suggestions only ever contain
-// players the org can see under the standing rules.
+// Travel times are never invented; candidate suggestions contain only players the org can see.
 import { parseStrictDateOnly } from '../../temporal.mjs';
 import { validAmountMinor, CURRENCIES } from '../recruitment/money.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
 import { INSIGHT_LIMITS as L } from '../../repositories/insightCoverage.mjs';
 
-/** The defaults a plan takes when the lead gives none. */
 export const PLAN_DEFAULTS = Object.freeze({ label: 'Coverage plan', goalObservations: 5, windowDays: 60 });
 const TRAVEL_NOTE = 'Travel time/route estimates unavailable — no routing provider is configured. The budget figure is user-entered, not a confirmed cost.';
 /** A fixture's public id: an own fixture's id, or `fr-` / `tr-` and the friendly's or open day's id. */
@@ -16,7 +13,7 @@ export const publicFixtureId = ({ kind, id }) => (kind === 'own' ? id : `${PREFI
 const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
 const absent = (v) => v === undefined || v === null;
 const isId = (v) => typeof v === 'string' && v.length > 0 && v.length <= L.id;
-/** Optional free text: absent → null; not text → undefined (refused); over-long text is shortened. */
+/** absent → null; not text → undefined (refused); over-long text is shortened. */
 const optText = (v, max) => (absent(v) ? null : typeof v !== 'string' ? undefined : v.trim().slice(0, max) || null);
 
 export function registerCoverage(ctx) {
@@ -64,15 +61,14 @@ export function registerCoverage(ctx) {
     res.status(201).json({ fixture: fixtureView(f) });
   });
 
-  // Read-time union (one SQL query): own fixture records + platform events the org can already see (every
-  // friendly on the board, every open day). Nothing scraped, nothing duplicated into new rows. Each carries its `ref`
-  // (kind and id) for an assignment.
+  // A read-time union of own fixtures and platform events the org can already see (board friendlies, open days):
+  // nothing scraped, nothing copied into new rows.
   const observableView = (o) => (o.fixture
     ? { ...fixtureView(o.fixture), ref: o.ref }
     : { id: o.publicId, source: o.ref.kind, competition: o.competition, home: o.home, away: o.away, date: o.date, location: o.location ? { ...o.location } : null, ref: o.ref });
   const withoutRef = ({ ref, ...f }) => f;
 
-  /** A page of the observable fixtures by date (then id); `cursor` is `[date, id]`. */
+  /** `cursor` is `[date, id]`. */
   orgRouter.get('/coverage/fixtures', (req, res) => {
     let page;
     try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }
@@ -129,8 +125,7 @@ export function registerCoverage(ctx) {
       if (!CURRENCIES.includes(currency)) return fieldInvalid(res, 'travelCurrency', `travelCurrency must be one of ${CURRENCIES.join(', ')}.`);
       travelBudget = { amountMinor: b.travelBudgetMinor, currency, enteredBy: req.orgUser.name ?? null };
     } else if (!absent(b.travelCurrency)) return fieldInvalid(res, 'travelCurrency', 'travelCurrency goes with travelBudgetMinor.');
-    // Targets: only players this org can currently see — the others are dropped, never refused, so the answer never
-    // says who is hidden. Never a leak path.
+    // Invisible players are dropped, never refused, so the answer never says who is hidden.
     const targets = rawTargets.map(findPlayer).filter((p) => p && orgCanSee(req.org, p)).map((p) => p.id);
     const warnings = [];
     const dup = assignments.liveForFixture(req.org.id, fixture.ref);
@@ -150,7 +145,7 @@ export function registerCoverage(ctx) {
     res.status(201).json({ assignment: view, warnings: view.warnings });
   });
 
-  /** The organisation's live assignments (a scout's own only, unless a lead), newest first, a page at a time. */
+  /** A scout sees only their own assignments, unless a lead. */
   orgRouter.get('/coverage/assignments', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
@@ -177,9 +172,8 @@ export function registerCoverage(ctx) {
     res.json({ assignment: assignmentView(assignments.cancel(a.id, Date.now())) });
   });
 
-  // Suggested visits: upcoming fixtures near ≥2 of the org's active-interest
-  // players (open cases + shortlist), matched by declared locations within
-  // 30 km. A heuristic, labelled as one — no schedules are scraped.
+  // Upcoming fixtures near two or more of the org's active-interest players (open cases and shortlist), by declared
+  // locations within 30 km. A labelled heuristic; no schedules are scraped.
   orgRouter.get('/coverage/suggestions', (req, res) => {
     const interest = new Set([
       ...ctx.recruitmentReads.cases.forOrg(req.org.id).filter((c) => !['closed'].includes(c.stage)).map((c) => c.playerId),

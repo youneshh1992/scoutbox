@@ -1,19 +1,5 @@
-// At-Home Combine pure engine + standardized protocol registry.
-//
-// At-Home Combine is a MEASUREMENT LAYER over Box Cam. It does not add a
-// second camera/observation stack: every Combine Attempt binds to a real
-// Box Cam session and inherits all of its integrity (server-minted id,
-// nonce, liveness, monotonic events, drift bounds, server-derived values,
-// client fields ignored, no upload-to-verify). This module is the pure,
-// unit-testable part: the versioned protocol registry, the measurement
-// derivation, personal bests and the club comparison — all pure functions
-// over plain data.
-//
-// "Combine Verified" is not decoration. It means, precisely: the result was
-// measured from a standardized ScoutBox Combine Protocol, during a live Box
-// Cam session, using a detector/provider that genuinely supports the metric,
-// with liveness + calibration passed, the measurement server-derived, and
-// integrity intact. If any of that is untrue, another honest state is used.
+// "Combine Verified" means: measured from a standardised ScoutBox Combine Protocol during a live Box Cam session, by
+// a provider that supports the metric, with liveness and calibration passed, server-derived, integrity intact.
 import crypto from 'node:crypto';
 
 // ------------------------------------------------------------------ states
@@ -38,16 +24,11 @@ export const COMBINE_STATE_COPY = {
   cancelled: 'This Combine Attempt was cancelled before completion.',
 };
 
-// Capabilities beyond the Box Cam detector set that FUTURE athletic protocols
-// need. No provider in this environment has them — not even the deterministic
-// test provider — so those protocols can never be Combine Verified here. This
-// is the honest boundary: we architect them, we never fake them.
+// Capabilities future athletic protocols need. No provider has them, not even the test one.
 export const FUTURE_CAPABILITIES = ['spatial_scale', 'timing_gate', 'target_zone'];
 
 // ------------------------------------------------------------- protocols
-// Every protocol is versioned. A historical attempt pins protocolId +
-// protocolVersion + measurementAlgorithmVersion forever; a rule change is a
-// NEW version and never rewrites past measurements.
+// An attempt pins protocolId, protocolVersion and measurementAlgorithmVersion; a rule change is a new version.
 const protocol = (p) => ({
   status: 'active',
   captureContexts: ['at_home', 'club', 'event'],
@@ -101,8 +82,7 @@ export const COMBINE_PROTOCOLS = [
     drillId: 'box-control', drillTarget: { type: 'duration', value: 60_000 },
     metricType: 'duration', metricUnit: 'seconds', direction: 'higher', precision: 'tenths',
     protocolWindowMs: 60_000,
-    // Duration only — this is the metric the production WEB provider genuinely
-    // supports, so Box Control 60 can be Combine Verified in production today.
+    // Duration only: the metric the web provider supports, so this can be Combine Verified today.
     requiredCapabilities: ['player_presence', 'ball_presence', 'active_duration'],
     setupRequirements: 'Whole 3m × 3m training area in frame.',
     cameraRequirements: 'Landscape, ~4m distance, entire area visible.',
@@ -149,10 +129,8 @@ export const COMBINE_PROTOCOLS = [
     safetyNotes: 'Bodyweight only. Stop on any pain. Not medical advice.',
   }),
 
-  // --------- FUTURE athletic protocols: architected, never fabricated -----
-  // Each needs a capability no provider (test included) has, so its
-  // measurementCapability is permanently `not_configured` here and no attempt
-  // can ever be Combine Verified until a real detector ships.
+  // --------- future athletic protocols -----
+  // Each needs a capability no provider has, so it stays `not_configured` until a real detector ships.
   protocol({
     id: 'combine-agility-5-10-5', version: 1, title: '5-10-5 Agility', category: 'athletic',
     description: 'Standardized 5-10-5 pro-agility shuttle. Requires spatial calibration and automated timing gates.',
@@ -196,17 +174,8 @@ export const COMBINE_PROTOCOLS = [
 ];
 
 /**
- * The LIVE Combine state of a stored attempt.
- *
- * A stored attempt keeps the state it finished in. That is not always the
- * state it is in now: if Trust & Safety later invalidates the Box Cam session
- * the attempt was bound to, the measurement stops counting immediately, and a
- * restore brings it back. Computed at read time so invalidation is reflected
- * everywhere without ever rewriting the attempt.
- *
- * There is exactly ONE definition of this rule: the Combine's `effectiveState`
- * and the objective targets both call it, and a second copy would eventually
- * give a different answer.
+ * The live Combine state of a stored attempt: if T&S invalidates the bound session the measurement stops counting,
+ * and a restore brings it back.
  */
 export function liveCombineState(attempt, boundSession) {
   if (!attempt) return null;
@@ -216,17 +185,8 @@ export function liveCombineState(attempt, boundSession) {
 }
 
 /**
- * Is this attempt evidence a PRODUCTION measurement condition may rely on?
- *
- * Three things must all hold, and each has bitten something before:
- *   • the attempt is Combine Verified *right now* (not as it was stored);
- *   • it carries a measured value, never an estimate or a null;
- *   • it was not produced by a test-only provider. A deterministic fixture is
- *     labelled simulated everywhere it appears, and a demo number must never
- *     satisfy a real target.
- *
- * `provider` is the PROVIDERS entry for `attempt.provider`; the caller passes
- * it so this stays a pure function.
+ * Evidence a real measurement condition may rely on: Combine Verified now (not as stored), a measured value, and not
+ * from a test-only provider (a demo number must not satisfy a real target).
  */
 export function isProductionValidCombine(attempt, boundSession, provider) {
   if (!attempt || attempt.measuredValue == null) return false;
@@ -237,27 +197,17 @@ export function isProductionValidCombine(attempt, boundSession, provider) {
 export const combineProtocol = (id, version) => COMBINE_PROTOCOLS.find((p) => p.id === id && p.version === Number(version)) ?? null;
 export const latestCombineProtocol = (id) => COMBINE_PROTOCOLS.filter((p) => p.id === id).sort((a, b) => b.version - a.version)[0] ?? null;
 
-/** Is this protocol's metric genuinely measurable by the given provider
- *  capabilities? Pure set-containment — the single honesty gate that keeps
- *  unsupported measurements out of Combine Verified. */
 export function measurementSupported(protocolDef, providerCapabilities = []) {
   const caps = new Set(providerCapabilities);
   return (protocolDef.requiredCapabilities ?? []).every((c) => caps.has(c));
 }
 
-/** The public measurement-capability status for a protocol given the
- *  best available production/active provider capabilities. */
 export function measurementCapability(protocolDef, providerCapabilities = []) {
   return measurementSupported(protocolDef, providerCapabilities) ? 'configured' : 'not_configured';
 }
 
 // ---------------------------------------------------------- measurement
-/** Derive a Combine measurement from a FINALIZED bound Box Cam session.
- *  Everything comes from the session's server-derived values — never a
- *  client field. Returns the measured value, the measurement state and the
- *  Combine state, with machine-readable reasons. No projection or
- *  extrapolation ever happens: a short-observed window is partial, not
- *  scaled up. */
+/** From the finalized session's server-derived values only. A short-observed window is partial, not scaled up. */
 export function measureAttempt({ protocolDef, session, calibrationPassed, providerCapabilities = [], mode = 'verified' }) {
   const reasons = [];
   const fail = (combineState, r, extra = {}) => ({ combineState, measurementState: combineState === 'combine_verified' ? 'measured' : combineState, measuredValue: null, reasons: [...reasons, r].filter(Boolean), ...extra });
@@ -265,21 +215,14 @@ export function measureAttempt({ protocolDef, session, calibrationPassed, provid
   if (!protocolDef) return fail('protocol_invalid', 'PROTOCOL_UNKNOWN');
   if (!session) return fail('protocol_invalid', 'SESSION_MISSING');
 
-  // Honesty gate: the active provider must genuinely support every required
-  // capability. Otherwise the measurement is unavailable — never estimated.
   if (!measurementSupported(protocolDef, providerCapabilities)) {
     return fail('measurement_unavailable', 'MEASUREMENT_NOT_SUPPORTED', {
       missingCapabilities: protocolDef.requiredCapabilities.filter((c) => !providerCapabilities.includes(c)),
     });
   }
 
-  // The bound session must itself be a legitimate Box Cam result. Note that
-  // whether the session's *drill target* completed is irrelevant to a
-  // Combine — a Combine has its own metric and measurement window. So
-  // `verified` and `partially_verified` are treated identically here (both
-  // mean Box Cam observed reliably); only a total observation failure, a
-  // missing liveness/provider, cancellation or invalidation blocks a
-  // measurement.
+  // The session's drill target is irrelevant to a Combine, which has its own window, so `verified` and
+  // `partially_verified` are treated alike.
   if (session.verificationState === 'invalidated') return fail('invalidated', 'SESSION_INVALIDATED');
   if (session.verificationState === 'cancelled') return fail('cancelled', 'SESSION_CANCELLED');
   if (session.verificationState === 'completed_unverified') return fail('protocol_invalid', 'LIVENESS_OR_PROVIDER_MISSING');
@@ -287,9 +230,7 @@ export function measureAttempt({ protocolDef, session, calibrationPassed, provid
   if (!['verified', 'partially_verified'].includes(session.verificationState)) return fail('protocol_invalid', 'SESSION_NOT_FINALIZED');
 
   const windowMs = protocolDef.protocolWindowMs;
-  // The measurement is valid only if the standardized window was actually
-  // observed. The window is "fully observed" when the server-known session
-  // duration reaches it (±1 ms). A short capture is partial — NEVER projected.
+  // The window is fully observed when the server-known session duration reaches it (±1 ms).
   const observedMs = Math.min(session.sessionDurationMs ?? 0, windowMs);
   const windowFullyObserved = (session.sessionDurationMs ?? 0) >= windowMs - 1;
   let measuredValue = null;
@@ -313,7 +254,6 @@ export function measureAttempt({ protocolDef, session, calibrationPassed, provid
       return fail('measurement_unavailable', 'METRIC_NOT_SUPPORTED');
   }
 
-  // Calibration binding, where the protocol requires it.
   if ((protocolDef.calibrationRequirements ?? []).length > 0 && !calibrationPassed) {
     return fail('protocol_invalid', 'CALIBRATION_NOT_PASSED', { measuredValue });
   }
@@ -323,9 +263,7 @@ export function measureAttempt({ protocolDef, session, calibrationPassed, provid
     return { combineState: 'partially_measured', measurementState: 'practice', measuredValue, reasons: [...reasons, 'PRACTICE_ATTEMPT'], practice: true, observedMs, windowMs };
   }
 
-  // Combine Verified needs the full standardized window observed at good
-  // quality. Otherwise it is a recorded measurement, not Combine Verified —
-  // no projection, no estimation.
+  // Combine Verified needs the full window observed at good quality; otherwise it's a recorded measurement.
   if (!windowFullyObserved) {
     reasons.push('MEASUREMENT_WINDOW_INCOMPLETE');
     return { combineState: 'partially_measured', measurementState: 'partially_measured', measuredValue, observedMs, windowMs, reasons };
@@ -337,8 +275,7 @@ export function measureAttempt({ protocolDef, session, calibrationPassed, provid
   return { combineState: 'combine_verified', measurementState: 'measured', measuredValue, observedMs, windowMs, reasons };
 }
 
-/** Format a measured value for display at the protocol's declared precision.
- *  Never invents precision the calibration/metric cannot support. */
+/** At the protocol's declared precision, never more. */
 export function formatCombineValue(protocolDef, value) {
   if (value == null) return '—';
   switch (protocolDef.precision) {
@@ -350,9 +287,7 @@ export function formatCombineValue(protocolDef, value) {
   }
 }
 
-/** Personal best for a protocol@version, respecting metric direction. Only
- *  compares attempts with the SAME protocol id + version + metric semantics,
- *  and only Combine-Verified attempts whose bound session still stands. */
+/** Per protocol@version, respecting metric direction; only Combine-Verified attempts whose session still stands. */
 export function personalBest(attempts) {
   const verified = (attempts ?? []).filter((a) => a.effectiveState === 'combine_verified' && a.measuredValue != null);
   if (verified.length === 0) return null;
@@ -364,10 +299,6 @@ export function personalBest(attempts) {
   }, null);
 }
 
-/** Canonical Combine result hash — integrity provenance, not a blockchain.
- *  Covers player, attempt, protocol@version, bound session, the accepted
- *  metric input, the measured value, provider/version, algorithm version,
- *  completion time and integrity state. */
 export function combineResultHash(attempt) {
   const canonical = JSON.stringify({
     playerId: attempt.playerId, attemptId: attempt.id,
@@ -381,9 +312,7 @@ export function combineResultHash(attempt) {
   return crypto.createHash('sha256').update(canonical).digest('hex');
 }
 
-/** Build a comparison matrix for a set of players over a set of protocols.
- *  Missing results are null (never zero); no overall ranking is produced —
- *  clubs sort individual columns themselves. */
+/** Missing results are null, not zero; there is no overall ranking, clubs sort columns themselves. */
 export function comparisonMatrix({ players, protocols, bestByPlayerProtocol }) {
   return {
     protocols: protocols.map((p) => ({ id: p.id, version: p.version, title: p.title, metricUnit: p.metricUnit, direction: p.direction })),

@@ -1,26 +1,11 @@
-// Observation quality and refusal precedence.
-//
-// TWO things live here, and both exist to stop a number being trusted more
-// than the observation behind it deserves.
+// Observation quality and refusal precedence: both stop a number being trusted more than its observation deserves.
 
 import { CAPTURE_REQUIREMENTS, DETECTION, EVENT_RULES, CONFIDENCE } from './policy.mjs';
 
 // =========================================================================
 // 1. OBSERVATION QUALITY
-//
-// This is NOT a player score. It is never shown as ability, never compared
-// between players, never stored on a player record. It answers exactly one
-// question:
-//
-//     is this attempt observable enough to support the claimed measurement?
-//
-// It deliberately resolves to a STATE with reasons, not a headline
-// figure. A numeric margin exists internally because thresholds need
-// numbers, but it is not exposed as a rating.
-//
-// Its inputs are properties of the CAPTURE — continuity, cadence, lighting,
-// occlusion, duplicates. Its inputs are never the count, never the speed,
-// never the Trust Score, never who the player is.
+// Not a player score: is this attempt observable enough to support the measurement? A state with reasons, from
+// properties of the capture (continuity, cadence, lighting, occlusion, duplicates), never the count or the player.
 
 export const QUALITY_THRESHOLDS = Object.freeze({
   minUsableFrameFrac: 0.8,        // unit — frames the detector could read at all
@@ -33,13 +18,7 @@ export const QUALITY_THRESHOLDS = Object.freeze({
   maxLowFpsFrac: CAPTURE_REQUIREMENTS.maxLowFpsFrac,
 });
 
-/**
- * Project observation quality.
- *
- * The point: two attempts that happen to derive the same count but
- * have 98% and 60% tracking continuity must not receive identical treatment.
- * The count is not an input here, so it cannot rescue a bad capture.
- */
+/** The count is not an input, so it cannot rescue a bad capture. */
 export function observationQuality({ continuity, cadence, duplicates = 0, framesSeen = 0, ambiguousIntervals = 0, eventCount = 0 }) {
   const reasons = [];
   const n = Math.max(1, continuity.frames);
@@ -64,17 +43,15 @@ export function observationQuality({ continuity, cadence, duplicates = 0, frames
   if (continuity.trackResets > QUALITY_THRESHOLDS.maxTrackResets) {
     reasons.push({ code: 'excessive_track_resets', value: continuity.trackResets, threshold: QUALITY_THRESHOLDS.maxTrackResets });
   }
-  // Cadence needs enough intervals to be measurable at all. A capture
-  // collapsed to a couple of distinct frames has no meaningful frame rate,
-  // and claiming one here outranks — and hides — the real finding.
+  // A capture collapsed to a couple of distinct frames has no meaningful frame rate; claiming one would hide the
+  // real finding.
   if (cadence.intervalCount >= 3 && cadence.effectiveFps < QUALITY_THRESHOLDS.minEffectiveFps) {
     reasons.push({ code: 'insufficient_frame_rate', value: cadence.effectiveFps, threshold: QUALITY_THRESHOLDS.minEffectiveFps });
   }
   if (cadence.lowFpsFrac > QUALITY_THRESHOLDS.maxLowFpsFrac) {
     reasons.push({ code: 'frame_rate_dropped_too_often', value: round3(cadence.lowFpsFrac), threshold: QUALITY_THRESHOLDS.maxLowFpsFrac });
   }
-  // Ambiguity is measured against the number of decisions actually made, so
-  // a short attempt is not flattered by a small absolute count.
+  // Against decisions made, so a short attempt isn't flattered by a small absolute count.
   const decisions = Math.max(1, eventCount + ambiguousIntervals);
   const ambFrac = ambiguousIntervals / decisions;
   if (ambFrac > QUALITY_THRESHOLDS.maxAmbiguousIntervalFrac) {
@@ -84,7 +61,7 @@ export function observationQuality({ continuity, cadence, duplicates = 0, frames
   return {
     state: reasons.length === 0 ? 'sufficient' : 'insufficient',
     reasons,
-    // Measurements, for diagnostics. Not a rating, and not player-facing.
+    // For diagnostics; not player-facing.
     measured: {
       usableFrameFrac: round3(usableFrac),
       ballContinuity: round3(continuity.ballCoverage),
@@ -101,17 +78,8 @@ export function observationQuality({ continuity, cadence, duplicates = 0, frames
 // =========================================================================
 // 2. REFUSAL PRECEDENCE
 //
-// Several failure conditions routinely coexist: a dark capture usually also
-// has no ball, and often a poor frame rate too. If the reported reason
-// depends on which check happened to run first, the same attempt can be
-// refused for different reasons on different runs — and a support desk
-// cannot work with that.
-//
-// So precedence is an explicit ORDERED LIST, applied to a set of detected
-// conditions. The order runs from "nothing could have worked" to "the
-// observation was made but was not good enough", because that is the order
-// in which a person can act on the answer: fix the provider, then the
-// device, then the light, then the scene, then the technique.
+// Failures coexist (a dark capture usually has no ball either), so the reported reason comes from an explicit order,
+// not whichever check ran first. It runs in the order a person can act: provider, device, light, scene, technique.
 
 export const REFUSAL_PRECEDENCE = Object.freeze([
   'provider_unavailable',        // nothing could have been observed at all
@@ -131,13 +99,7 @@ export const REFUSAL_PRECEDENCE = Object.freeze([
 
 const PRECEDENCE_INDEX = new Map(REFUSAL_PRECEDENCE.map((c, i) => [c, i]));
 
-/**
- * Choose ONE primary reason deterministically, keeping the rest as
- * secondary diagnostics.
- *
- * Sorting by a total order on the codes means the answer cannot depend on
- * iteration order, Set ordering, or the sequence in which checks ran.
- */
+/** One primary reason by a total order on the codes; the rest are secondary diagnostics. */
 export function primaryRefusal(conditions) {
   const known = [...new Set(conditions)].filter((c) => PRECEDENCE_INDEX.has(c));
   if (known.length === 0) return { primaryReason: null, secondaryDiagnostics: [] };

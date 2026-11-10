@@ -1,8 +1,6 @@
 /**
- * Deterministic fault injection for development and test ("what does the Room
- * look like when Trust is slow?"), driven by an environment variable. It
- * REFUSES to exist in production: the module exports nothing usable when NODE_ENV=production, and a production boot with
- * SCOUTBOX_FAULTS set is a fatal configuration problem (capabilities.mjs).
+ * Deterministic fault injection for development and test. Inert in production,
+ * where SCOUTBOX_FAULTS is also refused at boot (capabilities.mjs).
  *
  *   SCOUTBOX_FAULTS='delay:/org/players/STAR/trust:1500;unavailable:/org/rooms/STAR'
  *
@@ -22,10 +20,8 @@
  */
 
 export const FAULT_KINDS = ['delay', 'unavailable', 'timeout', 'retryable', 'fatal', 'internal'];
-// `internal:STEP[:N]` is not a route fault: a domain that owns a multi-store unit
-// of work (signing completion) asks `shouldFail(STEP)` at a named seam
-// and throws when a rule names it, for the first N hits (default 1). It proves
-// the rollback path with a real failure, and cannot exist in production.
+// `internal:STEP[:N]` is not a route fault: a unit of work asks `shouldFail(STEP)` at a named seam and throws for the
+// first N hits (default 1), to exercise its rollback path.
 
 export function parseFaultRules(spec = '') {
   return String(spec).split(';').map((s) => s.trim()).filter(Boolean).map((rule) => {
@@ -74,7 +70,6 @@ export function createFaultLayer({ env = process.env } = {}) {
     }
   };
 
-  /** Runtime control for the suites. Refused entirely in production. */
   function install(app) {
     app.use(middleware);
     if (!enabled) return;
@@ -88,7 +83,6 @@ export function createFaultLayer({ env = process.env } = {}) {
     });
   }
 
-  /** Development only: does a rule name this internal seam (and has it hits left)? Always false in production. */
   function shouldFail(step) {
     if (!enabled) return false;
     const rule = rules.find((r) => r.kind === 'internal' && r.pattern === step);

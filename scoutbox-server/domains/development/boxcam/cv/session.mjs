@@ -1,54 +1,20 @@
-// Observation session runtime: creation, reset, isolation, cleanup.
-//
-// The rule this file exists to enforce:
-//
-//   Before ScoutBox learns to verify more, prove that each attempt starts
-//   clean, ends clean, and cannot inherit certainty from missing observations
-//   or another session.
-//
-// Two failure modes are guarded here, and they are different:
-//
-//   1. STATE LEAK BETWEEN SESSIONS. The obvious defence is "make a new
-//      object", and it is not enough: a runtime that pools or recycles
-//      tracker instances silently defeats it. So the reset contract is
-//      explicit, single-entry, and tested by comparing a RESET instance
-//      against a FRESH one field by field.
-//
-//   2. RESOURCE LEAK. A session that is cancelled, expires or whose client
-//      vanishes must release everything it holds, and releasing twice must
-//      be harmless.
-//
-// Runtime state is keyed by session id ONLY. Never by player, protocol
-// or organisation — one player may legitimately have two sessions open, and
-// keying by anything coarser silently merges them.
+// Each attempt must start and end clean. A new object isn't enough if runs are pooled, so reset is one explicit
+// function, tested against a fresh instance field by field. Runtime state is keyed by session id only: one player
+// may have two sessions open.
 
 import { ObservationRun } from './engine.mjs';
 import { FrameQueue } from './frames.mjs';
 import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from './policy.mjs';
 
-/**
- * The canonical initial value of every mutable field an observation run
- * holds. `resetRun()` restores exactly this, and the completeness test
- * compares a reset instance against a fresh one using these keys.
- *
- * Adding a mutable field to ObservationRun without adding it here makes
- * `assertResetStateEqualsFreshState()` fail — which is the point.
- */
+/** Every mutable field of a run; adding one to ObservationRun without adding it here fails the reset test. */
 export const MUTABLE_RUN_KEYS = Object.freeze([
   'detections', 'prev', 'seenHashes', 'duplicates', 'framesSeen',
   'staticRun', 'maxStaticRun', 'finished',
 ]);
 
-/** Fields that deliberately survive a reset: identity and configuration. */
+/** Identity and configuration survive a reset. */
 export const PERSISTENT_RUN_KEYS = Object.freeze(['eventKind']);
 
-/**
- * THE reset contract. One function, not scattered assignments.
- *
- * Restores every mutable field to its canonical initial value while leaving
- * configuration alone, so a recycled instance is indistinguishable from a
- * new one.
- */
 export function resetRun(run) {
   run.detections = [];
   run.prev = null;
@@ -61,13 +27,7 @@ export function resetRun(run) {
   return run;
 }
 
-/**
- * A comparable snapshot of a run's mutable state.
- *
- * Sets and arrays are reduced to sizes and contents so that a fresh instance
- * and a reset instance can be deep-compared without object identity getting
- * in the way.
- */
+/** Sets and arrays reduced to contents, so fresh and reset instances deep-compare without object identity. */
 export function runStateSnapshot(run) {
   return {
     detections: run.detections.length,
@@ -89,11 +49,7 @@ export const SESSION_RUNTIME_STATES = Object.freeze([
   'active', 'finalized', 'cancelled', 'expired', 'disconnected',
 ]);
 
-/**
- * One session's runtime footprint. Everything the observation of a single
- * attempt allocates lives on this object and nowhere else, so cleanup is a
- * matter of releasing one thing rather than remembering seven.
- */
+/** Everything one attempt allocates lives here, so cleanup releases one thing. */
 class SessionRuntime {
   constructor({ sessionId, eventKind, createdAtMs, ttlMs }) {
     this.sessionId = sessionId;
@@ -109,11 +65,7 @@ class SessionRuntime {
     this.result = null;
   }
 
-  /**
-   * Release everything. Idempotent by construction: a second call
-   * finds the fields already empty and changes nothing, and must not throw,
-   * double-resolve or corrupt a counter.
-   */
+  /** Idempotent: a second call changes nothing and must not throw or corrupt a counter. */
   dispose() {
     if (this.disposed) return false;      // already clean; report "no work done"
     for (const t of this.timers) clearTimeout(t);
@@ -137,14 +89,7 @@ class SessionRuntime {
   }
 }
 
-/**
- * The registry.
- *
- * `pool` exists so the reuse hazard can be TESTED rather than assumed away.
- * When pooling is enabled, finished runs are recycled through
- * `resetRun()` instead of discarded — which is exactly the arrangement that
- * would leak state if the reset contract were incomplete.
- */
+/** `pool` recycles finished runs through `resetRun()`, so the reuse hazard can be tested. */
 export class ObservationSessions {
   constructor({ ttlMs = 5 * 60_000, pool = false, maxPool = 8 } = {}) {
     this.sessions = new Map();          // sessionId -> SessionRuntime
@@ -155,14 +100,12 @@ export class ObservationSessions {
     this.stats = { created: 0, finalized: 0, cancelled: 0, expired: 0, disconnected: 0, pooledReuses: 0 };
   }
 
-  /** Keyed by session id only. */
   create({ sessionId, eventKind, nowMs = Date.now() }) {
     if (this.sessions.has(sessionId)) {
       throw new Error(`session ${sessionId} already exists`);
     }
     const rt = new SessionRuntime({ sessionId, eventKind, createdAtMs: nowMs, ttlMs: this.ttlMs });
     if (this.poolEnabled && this.pool.length) {
-      // Recycle a previously used run object through the reset contract.
       const recycled = this.pool.pop();
       recycled.eventKind = eventKind;
       resetRun(recycled);
@@ -180,11 +123,6 @@ export class ObservationSessions {
     return rt;
   }
 
-  /**
-   * An id that is not currently live is simply not found. There is no
-   * path that resurrects a disposed runtime, and none that attaches a frame
-   * to a session other than the one named.
-   */
   ingest({ sessionId, frame, nowMs = Date.now() }) {
     const rt = this.get(sessionId);
     if (!rt) return { ok: false, error: 'SESSION_NOT_FOUND' };
@@ -214,7 +152,7 @@ export class ObservationSessions {
   expire(sessionId) { return this.#end(sessionId, 'expired'); }
   disconnect(sessionId) { return this.#end(sessionId, 'disconnected'); }
 
-  /** Sweep whatever has outlived its TTL. No stale object lingers. */
+  /** Sweep whatever has outlived its TTL. */
   sweep(nowMs = Date.now()) {
     let swept = 0;
     for (const [id, rt] of this.sessions) {
@@ -232,7 +170,7 @@ export class ObservationSessions {
     // Ending twice is harmless and reports that nothing more was done.
     if (rt.disposed) return { ok: true, alreadyClean: true };
     rt.state = state;
-    // A cancelled, expired or disconnected attempt mints NO result.
+    // A cancelled, expired or disconnected attempt mints no result.
     rt.result = null;
     this.stats[state] += 1;
     this.#release(rt);
@@ -248,7 +186,7 @@ export class ObservationSessions {
     this.sessions.delete(rt.sessionId);
   }
 
-  /** What the runtime is currently holding — the leak test reads this. */
+  /** The leak test reads this. */
   footprint() {
     let queued = 0, detections = 0, timers = 0;
     for (const rt of this.sessions.values()) {

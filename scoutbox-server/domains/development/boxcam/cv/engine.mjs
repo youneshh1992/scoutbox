@@ -1,19 +1,10 @@
-// The observation engine: an ORCHESTRATOR over three separated layers.
+// Orchestrates the layers, applies the quality gate and picks one refusal reason:
 //
 //   frames ─▶ [1] detect.mjs ─▶ [2] track.mjs ─▶ [3] protocol.mjs ─▶ result
 //                                     │
 //                                     └──▶ quality.mjs ─▶ sufficient? refuse?
 //
-// Almost nothing is decided in this file. That is deliberate: detection,
-// tracking and protocol interpretation are independently testable and
-// independently replaceable, and this file's only job is to run them in
-// order, apply the quality gate, and choose one refusal reason
-// deterministically.
-//
-// Determinism: no clock, no randomness, no module-level mutable state. The
-// same frames in the same order produce byte-identical output. Session
-// isolation is therefore structural — two runs cannot interfere because
-// there is nothing shared for them to interfere through.
+// No clock, randomness or shared state: the same frames produce byte-identical output.
 
 import { CV_ENGINE_VERSION, CONFIDENCE, DETECTION, EVENT_RULES, CAPTURE_REQUIREMENTS } from './policy.mjs';
 import { detectFrame } from './detect.mjs';
@@ -21,10 +12,8 @@ import { buildTracks, relativeMotion } from './track.mjs';
 import { interpret } from './protocol.mjs';
 import { observationQuality, primaryRefusal, qualityToRefusalConditions } from './quality.mjs';
 
-// A capture must contain at least this many DISTINCT frames to be an
-// observation at all, and no more than this fraction may be duplicates.
-// Both exist because a still photograph repeated is otherwise reducible to a
-// single analysed frame, which then sails through every later check.
+// Minimum distinct frames and maximum duplicate fraction: otherwise a repeated still photograph reduces to one
+// analysed frame that passes every later check.
 const MIN_ANALYSED_FRAMES = 10;
 const MAX_DUPLICATE_FRAC = 0.5;
 
@@ -41,15 +30,12 @@ export class ObservationRun {
     this.finished = false;
   }
 
-  /** Ingest one decoded frame. The frame is not retained beyond `prev`. */
+  /** The frame is not retained beyond `prev`. */
   processFrame(frame) {
     if (this.finished) throw new Error('ObservationRun already finished');
     this.framesSeen += 1;
 
-    // An identical frame is the same observation submitted twice. It
-    // advances nothing except the staleness accounting — which it MUST
-    // advance, or a repeated still photograph collapses to one analysed
-    // frame and sails through every later check.
+    // An identical frame advances only the staleness accounting, which it must, or a repeated still passes.
     if (this.seenHashes.has(frame.hash)) {
       this.duplicates += 1;
       this.staticRun += 1;
@@ -73,7 +59,6 @@ export class ObservationRun {
     };
   }
 
-  /** Release every retained reference. */
   dispose() {
     this.prev = null;
     this.detections = [];
@@ -81,13 +66,7 @@ export class ObservationRun {
     this.finished = true;
   }
 
-  /**
-   * Derive the measurement.
-   *
-   * Conditions are COLLECTED, then one primary reason is chosen by the
-   * precedence table — rather than returning at the first failing check,
-   * which would make the reported reason depend on check order.
-   */
+  /** Conditions are collected, then the precedence table picks one, so the reason doesn't depend on check order. */
   finish({ protocolWindowMs = null } = {}) {
     this.finished = true;
     this.prev = null;
@@ -132,10 +111,7 @@ export class ObservationRun {
     if (c.ballCoverage < 1 - EVENT_RULES.maxBallMissingFrac) conditions.push('ball_not_detected');
     if (c.rivalBallFrames / frames > 0.1) conditions.push('protocol_violation');
     if (tracks.occlusion.broken) conditions.push('observation_discontinuity');
-    // Cadence is only diagnosable with enough intervals to measure one. A
-    // capture collapsed to a couple of distinct frames by duplication has no
-    // meaningful frame rate, and reporting "insufficient frame rate" there
-    // outranks — and hides — the real finding, which is that someone held a
+    // Too few distinct frames have no meaningful frame rate; "insufficient frame rate" would hide that someone held a
     // still image to the lens.
     if (tracks.cadence.intervalCount >= 3
       && tracks.cadence.effectiveFps > 0
@@ -143,9 +119,8 @@ export class ObservationRun {
       conditions.push('insufficient_frame_rate');
     }
 
-    // Layers 2→3. Interpretation runs even when conditions exist, because
-    // the quality projection needs the ambiguous-interval count — but its
-    // output is discarded unless everything passes.
+    // Runs even when conditions exist, because quality needs the ambiguous-interval count; output is discarded unless
+    // everything passes.
     const motion = relativeMotion(tracks);
     const interpreted = this.eventKind === 'duration'
       ? { events: [], ambiguousIntervals: 0, transitions: [], finalState: 'READY' }
@@ -157,8 +132,6 @@ export class ObservationRun {
       ? usable.reduce((a, e) => a + e.confidence, 0) / usable.length
       : (withBoth.length ? withBoth.reduce((a, x) => a + x.ball.confidence, 0) / withBoth.length : 0);
 
-    // Observation quality. Its inputs are properties of the
-    // CAPTURE; the count is not among them and cannot rescue a bad capture.
     const quality = observationQuality({
       continuity: c,
       cadence: tracks.cadence,
@@ -169,11 +142,8 @@ export class ObservationRun {
     });
     if (quality.state !== 'sufficient') conditions.push(...qualityToRefusalConditions(quality));
 
-    // Never knowingly mint an exact measurement with a known recall
-    // limitation. If a large share of the strikes the tracker actually saw
-    // had to be discarded by the refractory window, the attempt is running
-    // faster than the validated envelope and the honest answer is a refusal,
-    // not an under-count presented as a measurement.
+    // If many observed strikes were discarded by the refractory window, the attempt is faster than the validated
+    // envelope: refuse rather than present an under-count.
     const suppressed = interpreted.suppressedByRefractory ?? 0;
     const strikesSeen = usable.length + suppressed;
     if (this.eventKind !== 'duration' && strikesSeen > 0

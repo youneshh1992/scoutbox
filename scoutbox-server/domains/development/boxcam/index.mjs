@@ -1,10 +1,6 @@
-// Box Cam + Development Intelligence registration point. Focused modules receive the shared server context and
-// register on the authenticated routers, so every standing gate runs before any Box Cam handler.
-//
-// Persistence is limited to what Box Cam genuinely introduces: sessions (aggregated observations, never raw frames
-// or video), assignments, challenges (+entries), disputes and privacy prefs, Combine requests and attempts, and CV
-// results. The drill registry is versioned code, and the Football Passport PROJECTS Box Cam data — it is never
-// copied.
+// Modules register on the authenticated routers, so every standing gate runs before any Box Cam handler. Sessions
+// store aggregated observations, never raw frames or video; the Football Passport projects Box Cam data, never
+// copies it.
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { DRILLS, PROVIDERS } from './drills.mjs';
 import { registerBoxCamSessions } from './sessions.mjs';
@@ -13,11 +9,9 @@ import { registerCombine } from './combine.mjs';
 import { registerProductionCvRoutes } from './cv/routes.mjs';
 
 export function registerBoxCam(ctx) {
-  // Box Cam, Combine and the CV results are tables (repositories/boxCam.mjs); every module writes through `boxCam`
-  // and reads through `boxCamReads`.
   if (typeof ctx.boxCam?.sessions?.create !== 'function' || !ctx.boxCamReads) throw new TypeError('registerBoxCam needs the Box Cam repository from the data layer');
 
-  // Privacy-safe operational metrics — counters only, never player labels.
+  // Counters only: no player labels.
   metrics.boxCam = {
     box_sessions_started: 0, box_sessions_completed: 0, box_sessions_verified: 0,
     box_sessions_partial: 0, box_sessions_unverifiable: 0, box_session_active_seconds: 0,
@@ -48,7 +42,7 @@ export function registerBoxCam(ctx) {
   };
   registerBoxTraining(shared);   // sets onSessionFinalized/prefs/views on ctx
   registerBoxCamSessions(shared); // sets boxMintSession/boxCompleteSession/boxSessionView
-  registerCombine(shared);        // At-Home Combine — chains onSessionFinalized, reuses Box Cam
-  registerProductionCvRoutes(shared);      // production CV: frame transport, Ready Check, diagnostics
+  registerCombine(shared);        // chains onSessionFinalized
+  registerProductionCvRoutes(shared);
   return shared;
 }

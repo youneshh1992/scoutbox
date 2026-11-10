@@ -1,20 +1,8 @@
 /**
- * ScoutBox Agent core: the pure layer.
+ * The agent core's pure layer: verification facets, affiliations, permissions and agreements.
  *
- * Everything here is a function over plain records and a clock. Nothing touches
- * storage, nothing answers HTTP. The routes in ./index.mjs call these and the
- * acceptance suite exercises them directly, so a permission decision or a
- * status derivation can never differ between a route and a test.
- *
- *   - the licensed natural person is an org user plus an agent profile; the
- *     agency is an org of type 'agency' and holds no licence;
- *   - membership is an agency affiliation with a window and roles;
- *     membership alone authorises no regulated action;
- *   - verification is a set of FACETS with fail-honest states; a self-entered
- *     licence number is never a verified licence; there is no register API
- *     and none is pretended;
- *   - private client access exists only through an ACTIVE, client-confirmed
- *     relationship, re-derived from the record and the clock on every read.
+ * The licence belongs to the person (an org user with an agent profile), never the agency, and membership alone
+ * authorises no regulated action. A self-entered licence number is never a verified licence.
  */
 
 import { isExpiredAt, readInstant } from '../../../temporal.mjs';
@@ -23,7 +11,6 @@ export const AGENT_POLICY_VERSION = 1;
 
 // -------------------------------------------------------------- verification
 
-/** Honest verification states for one facet. */
 export const VERIFICATION_STATES = Object.freeze([
   'UNVERIFIED',              // nothing declared, or declared and nothing submitted
   'PENDING',                 // submitted; a provider or attributed review has not answered
@@ -34,9 +21,8 @@ export const VERIFICATION_STATES = Object.freeze([
 ]);
 
 /**
- * The regulatory facets, kept separate (never one boolean): a FIFA licence, a
- * national registration and a domestic activity authorisation — e.g. the U.S.
- * Soccer background check + SafeSport — are different facts with different clocks.
+ * Separate facts with separate clocks: a FIFA licence, a national registration and a domestic activity
+ * authorisation (e.g. the U.S. Soccer background check and SafeSport).
  */
 export const FACETS = Object.freeze(['fifa_licence', 'national_registration', 'domestic_authorisation', 'minors_authorisation']);
 
@@ -59,11 +45,8 @@ export const newFacets = () => ({
 });
 
 /**
- * Effective state of one facet at `now`: VERIFIED decays to STALE past
- * recheckAt. A recheck clock that is PRESENT but cannot be read (NaN, an ISO
- * string, a numeric string) reads STALE: fail closed. An ABSENT clock
- * (null/undefined) means no shelf life and does not decay — the same
- * absent-versus-unreadable rule as agreement terms below.
+ * VERIFIED decays to STALE past `recheckAt`. An unreadable recheck clock reads STALE; an absent one means no shelf
+ * life, as with agreement terms below.
  */
 export function effectiveFacetState(facet, now = Date.now()) {
   if (!facet || !facet.state) return 'UNVERIFIED';
@@ -72,10 +55,8 @@ export function effectiveFacetState(facet, now = Date.now()) {
 }
 
 /**
- * Verification provider abstraction. Production has NO provider:
- * a submission goes PENDING and then MANUAL_REVIEW_REQUIRED, and it says so.
- * The synthetic local provider exists for development and tests only, is
- * switched on by an environment flag, and its provenance names it.
+ * Production has no provider: a submission goes PENDING then MANUAL_REVIEW_REQUIRED. The synthetic test provider is
+ * switched on by an environment flag and named in its provenance.
  */
 export function evaluateSubmission({ facet, reference, testProviderEnabled = false, now = Date.now() }) {
   const ref = String(reference ?? '').trim();
@@ -109,7 +90,7 @@ export function requiredFacetsFor(jurisdiction) {
   return req;
 }
 
-/** Objective verification check: every required facet is VERIFIED now. Returns the first failure or null. */
+/** The first required facet not VERIFIED now, or null. */
 export function verificationGap(profile, jurisdiction, now = Date.now()) {
   if (!profile) return { error: 'AGENT_PROFILE_REQUIRED', facet: null, state: null };
   for (const { facet, ma } of requiredFacetsFor(jurisdiction)) {
@@ -132,10 +113,7 @@ export const normaliseTiers = (raw) => {
   return out;
 };
 
-/**
- * The same absent-versus-unreadable rule as an agreement term: a start or end
- * that is not a finite instant (e.g. ±Infinity) is unreadable and fails closed.
- */
+/** As with an agreement term, a start or end that is not a finite instant fails closed. */
 export const affiliationActive = (a, now = Date.now()) =>
   !!a && readInstant(a.startedAt) !== null && a.startedAt <= now
   && (boundaryAbsent(a.endedAt) || (readInstant(a.endedAt) !== null && a.endedAt > now));
@@ -143,14 +121,8 @@ export const affiliationActive = (a, now = Date.now()) =>
 export const tiersOf = (a) => (a ? normaliseTiers(a.tiers) : []);
 
 /**
- * The server-side permission matrix. Capability → the roles
- * that hold it. Enforced by `can()` on every route; the client only mirrors
- * it for convenience. A capability absent from this table is held by nobody.
- *
- * `clients.read.own` is the licensed agent's own relationships. The agency's
- * administrative and support roles see a SUMMARY row (name + status) for a
- * client only where that client chose to share with agency staff — never the
- * client's data (privacy matrix "Other Agent at Same Agency").
+ * Capability → the roles that hold it; a capability absent here is held by nobody. Agency staff see only a summary
+ * row of a client who chose to share with them, never the client's data.
  */
 export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
   'me.read':                    TIERS,
@@ -161,8 +133,7 @@ export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
   'clients.request':            ['licensed_agent'],
   'clients.terminate':          ['licensed_agent'],
   'clients.opportunities.read': ['licensed_agent'],
-  // Bringing an opportunity to a client's attention is a regulated
-  // act of the licensed individual, not agency admin work.
+  // A regulated act of the licensed individual, not agency admin work.
   'clients.opportunities.share': ['licensed_agent'],
   'players.lookup':             ['licensed_agent'],
   'inbox.read':                 TIERS,
@@ -172,15 +143,9 @@ export const PERMISSIONS = Object.freeze(Object.assign(Object.create(null), {
   'agency.settings.write':      ['agency_admin'],
   'agency.audit.read':          ['agency_admin'],
   'agency.compliance.read':     ['agency_admin', 'licensed_agent'],
-  // The compliance workspace. Reading one's own compliance state is
-  // every member's; opening a context, declaring a representation and
-  // requesting consent are regulated acts of the licensed individual only.
+  // Writing compliance contexts and transactions is a regulated act of the licensed individual only.
   'compliance.read':            TIERS,
   'compliance.contexts.write':  ['licensed_agent'],
-  // The transaction workspace. Reading the agency's transactions is every
-  // member's; opening one, changing its parties, binding a representation,
-  // recording terms and moving its status are regulated acts of the licensed
-  // individual only, never generic agency staff.
   'transactions.read':          TIERS,
   'transactions.write':         ['licensed_agent'],
 }));
@@ -192,13 +157,10 @@ export function can(tiers, capability) {
   return Array.isArray(tiers) && tiers.some((t) => allowed.includes(t));
 }
 
-/** Capabilities a set of roles holds — for the client's convenience only. */
+/** For the client's convenience only; `can()` is enforced on every route. */
 export const capabilitiesOf = (tiers) => Object.keys(PERMISSIONS).filter((c) => can(tiers, c));
 
-/**
- * Role-change invariants: nobody grants themselves agency_admin, and the last
- * admin cannot be demoted or removed.
- */
+/** Nobody grants themselves agency_admin, and the last admin cannot be demoted or removed. */
 export function affiliationChangeProblem({ affiliations, target, actorUserId, nextTiers, now = Date.now(), ending = false }) {
   const admins = affiliations.filter((a) => affiliationActive(a, now) && tiersOf(a).includes('agency_admin'));
   const targetIsAdmin = tiersOf(target).includes('agency_admin');
@@ -241,28 +203,13 @@ export function termMonthsOf(raw) {
 export const termEndAt = (startAt, months) => startAt + months * MONTH_MS;
 
 /**
- * A temporal boundary on an agreement is one of exactly two things:
- *
- *   ABSENT (null / undefined) — an OPEN boundary. This is legal and common: a
- *     proposal is written with `startAt: null, endAt: null` (domains/agents/core/index.mjs), and
- *     an open-ended mandate is contract-legal for an entity under FFAR 12(5).
- *     An absent boundary keeps its meaning and constrains nothing.
- *
- *   PRESENT — a claim about time that an authorization decision is about to rely
- *     on. It must be READABLE (a finite number of epoch ms) and it must be
- *     SATISFIED. Anything else — an ISO-8601 string from an imported row, a NaN
- *     left by a failed Date.parse, a numeric string, an Infinity — is a boundary
- *     we cannot evaluate, and an unevaluable boundary in a security decision must
- *     REFUSE, never be ignored.
- *
- * Both boundaries matter: a mandate whose term starts next year grants no access
- * today, and `NaN` must not pass as "not expired" just because `NaN <= now` is false.
+ * An absent boundary is open and constrains nothing (proposals are written with `startAt: null, endAt: null`, and an
+ * open-ended mandate is legal for an entity under FFAR 12(5)). A present boundary must be a finite instant: an ISO
+ * string, NaN or Infinity cannot be evaluated and refuses, since `NaN <= now` is false.
  */
 const boundaryAbsent = (v) => v === null || v === undefined;
-/** A present boundary as a finite number, or null when it cannot be read. */
 const readBoundary = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-/** Has a PRESENT end boundary been reached, or is it unreadable? Either way: over. */
 function endBoundaryPassed(endAt, now) {
   if (boundaryAbsent(endAt)) return false;          // open-ended never expires
   const n = readBoundary(endAt);
@@ -270,7 +217,6 @@ function endBoundaryPassed(endAt, now) {
   return n <= now;                                  // `endAt === now` is over
 }
 
-/** Has a PRESENT start boundary been reached? An absent start is already open. */
 function startBoundaryReached(startAt, now) {
   if (boundaryAbsent(startAt)) return true;         // open start
   const n = readBoundary(startAt);
@@ -279,81 +225,48 @@ function startBoundaryReached(startAt, now) {
 }
 
 /**
- * Does the agreement's TERM cover `now`? Exported so the term rule can be
- * asserted directly rather than only through a route's response.
- *
- * Note on the status vocabulary: a not-yet-started mandate is still an `active`
- * agreement — AGREEMENT_STATUSES has no "not yet in force" value, deliberately,
- * because adding one would change the API contract. So a future-start
- * row keeps reading as `active` in a projection (truthfully: it is a live
- * agreement) while granting no access at all. Access is the question this
- * function answers; status is a different question.
+ * A mandate that has not started still reads `active` (there is no "not yet in force" status, which would change the
+ * API contract) but grants no access: access and status are different questions.
  */
 export function agreementTermCoversNow(a, now = Date.now()) {
   if (!a) return false;
   return startBoundaryReached(a.startAt, now) && !endBoundaryPassed(a.endAt, now);
 }
 
-/** The status a record HAS at `now`: an active agreement past its end reads as expired. */
+/** An active agreement past its end reads as expired. */
 export function effectiveAgreementStatus(a, now = Date.now()) {
   if (!a) return null;
   if (a.status === 'active' && endBoundaryPassed(a.endAt, now)) return 'expired';
   return a.status;
 }
 
-/**
- * THE access predicate: private client
- * access exists only for the agent named on an ACTIVE, client-confirmed,
- * unexpired relationship WHOSE TERM COVERS NOW. Nothing else — not a proposal,
- * not a dispute, not a colleague's agreement, not agency membership, not a
- * mandate that has yet to begin — grants it. The caller applies the block and
- * visibility gates separately.
- */
+/** Private client access, for the agent named on an agreement in force. The caller applies block and visibility gates. */
 export function agreementGrantsAccess(a, agentUserId, now = Date.now()) {
   return agreementInForce(a, now) && a.agentUserId === agentUserId;
 }
 
 /**
- * Is the agreement a CURRENT representation at `now`, whoever asks: it names an agent, the client confirmed it, its
- * status is active and its term covers now (started, not ended). The one rule behind the access predicate above and
- * every "is this player represented" read (Trust, the Passport headline), so none of them counts a mandate that has
- * not started yet.
+ * Names an agent, client-confirmed, active and within its term. Also behind every "is this player represented" read
+ * (Trust, the Passport headline), so none counts a mandate that has not started.
  */
 export function agreementInForce(a, now = Date.now()) {
   if (!a || typeof a.agentUserId !== 'string' || !a.agentUserId || a.confirmedAt == null) return false;
-  // effectiveAgreementStatus covers the END boundary (including unreadable); the start boundary is checked here.
+  // effectiveAgreementStatus covers the end boundary; the start is checked here.
   if (effectiveAgreementStatus(a, now) !== 'active') return false;
   return startBoundaryReached(a.startAt, now);
 }
 
 /**
- * The client's DISCLOSURE choices, stored on the agreement they are
- * choices about. Each is a separate answer to a separate question, and each
- * DEFAULTS TO FALSE: a player who has said nothing has not agreed to their agent
- * being routed a club's message, shown on a club's screen, or given their trial
- * schedule. Confirming a representation relationship is not consenting to any of
- * those three; they are asked and answered one at a time.
- *
- * This lives here, beside `shareWithAgencyStaff`, because it is a field of the
- * relationship record — not in a separate store and not in a second consent
- * ledger (the compliance domain owns the regulatory one).
- *
- * There is deliberately no key for "my agent may receive a club's message
- * INSTEAD of me". That routing cannot be delivered honestly: the player's Inbox row is what "delivered"
- * means for a Contact, so a message with no player row would need an
- * agent-side Inbox with its own response path — a second contact system. A club
- * may add the agent beside the player; it cannot replace them.
+ * Each defaults to false: confirming a representation is not consenting to the agent being routed a club's message,
+ * shown on a club's screen or given the trial schedule. There is no "instead of me" routing key, because a contact
+ * is delivered by the player's Inbox row; a club may add the agent beside the player, never replace them.
  */
 export const DISCLOSURE_KEYS = Object.freeze(['clubPresence', 'contactRouting', 'trialVisibility']);
 export const DISCLOSURE_DEFAULT = Object.freeze({ clubPresence: false, contactRouting: false, trialVisibility: false });
 
 /**
- * The opportunity shares an agent has made to this client belong to the
- * relationship they were made under: a share is an act inside one
- * representation relationship, it dies with it, and it carries no authority of
- * its own. Capped per relationship, and the cap answers with a named refusal
- * rather than losing the oldest, because an audit trail that silently forgets
- * is not one.
+ * Shares belong to the relationship they were made under. At the cap a share is refused by name rather than dropping
+ * the oldest, so the audit trail never silently forgets.
  */
 export const MAX_OPPORTUNITY_SHARES = 200;
 
@@ -375,13 +288,11 @@ export const shareView = (s) => ({
 export function normaliseDisclosure(raw) {
   const out = { ...DISCLOSURE_DEFAULT };
   if (!raw || typeof raw !== 'object') return Object.freeze(out);
-  // Only an explicit `true` is a yes. A truthy string, a 1 and an absent key are
-  // all "they have not said yes".
+  // Only an explicit `true` is a yes.
   for (const k of DISCLOSURE_KEYS) if (raw[k] === true) out[k] = true;
   return Object.freeze(out);
 }
 
-/** Whether a NEW request from this agent to this player is blocked by an existing record. */
 export function requestConflict(agreements, { agentUserId, playerId, now = Date.now() }) {
   for (const a of agreements) {
     if (!a || a.agentUserId !== agentUserId || a.clientId !== playerId) continue;
@@ -424,7 +335,7 @@ export const agentTransitionAllowed = (a, to, now = Date.now()) => transitionAll
 
 export const historyEntry = (id, at, action, by, detail = null) => ({ id, at, action, by, detail });
 
-/** What an agreement looks like to the AGENT side. No client PII beyond the id; the caller adds the live client identity it is allowed to show. */
+/** No client PII beyond the id; the caller adds the live client identity it may show. */
 export function agreementForAgent(a, now = Date.now()) {
   if (!a) return null;
   return {
@@ -437,9 +348,7 @@ export function agreementForAgent(a, now = Date.now()) {
     declinedAt: a.declinedAt ?? null, terminatedAt: a.terminatedAt ?? null, terminatedBy: a.terminatedBy ?? null,
     terminationReasonCode: a.terminationReasonCode ?? null, disputedAt: a.disputedAt ?? null,
     shareWithAgencyStaff: !!a.shareWithAgencyStaff,
-    // The agent sees the client's disclosure choices, because they are the
-    // agent's own permissions: an agent who is not routed a club's message
-    // should know that, rather than wonder why nothing arrives.
+    // The agent's own permissions: an agent not routed a club's message should know why nothing arrives.
     disclosure: normaliseDisclosure(a.disclosure),
     subjectRemovedAt: a.subjectRemovedAt ?? null,
     policyVersion: AGENT_POLICY_VERSION,
@@ -449,7 +358,6 @@ export function agreementForAgent(a, now = Date.now()) {
   };
 }
 
-/** What an agreement looks like to the PLAYER side. */
 export function agreementForClient(a, now = Date.now()) {
   const base = agreementForAgent(a, now);
   if (!base) return null;

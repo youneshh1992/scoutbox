@@ -1,5 +1,3 @@
-// Organisation accounts: the session check in front of `/org`, the organisation as the apps see it, the sign-in
-// pickers, Grassroots club registration, staff log-in (with the second factor) and the public club directory.
 import crypto from 'node:crypto';
 import express from 'express';
 import { optText, reqText, badField } from '../platform/input.mjs';
@@ -10,9 +8,8 @@ import { isLeadRole } from '../../roles.mjs';
 import { totpValid } from './totp.mjs';
 
 /**
- * `orgSafe(org)`: the organisation as the apps see it, an allowlist (the password hash is never on the record). What
- * the club is looking for and its federation-route request are club setup rows, added explicitly.
- * `safeguardingCertified(org)`: earned and losable — verification, a signed contract and no unresolved urgent report.
+ * `orgSafe` is an allowlist (the password hash is never on the record). `safeguardingCertified` is earned and
+ * losable: verification, a signed contract and no unresolved urgent report.
  */
 export function createOrgViews({ clubSetup, safetyAudit }) {
   function orgSafe(o) {
@@ -36,10 +33,7 @@ export function createOrgViews({ clubSetup, safetyAudit }) {
   return { orgSafe, safeguardingCertified };
 }
 
-/**
- * The `/org` router behind the session check, created before the domains that mount on it. A session is minted per
- * named staff member, so the token resolves to both the organisation and the person: no shared workspace access.
- */
+/** A session is minted per named staff member, so the token resolves to the organisation and the person. */
 export function createOrgSession({ app, findOrg, users, sessionFor }) {
   function orgAuth(req, res, next) {
     const session = sessionFor(req);
@@ -61,7 +55,6 @@ export function createOrgSession({ app, findOrg, users, sessionFor }) {
   return { orgRouter };
 }
 
-/** The sign-in pickers, Grassroots registration and staff log-in, all on `app`. */
 export function registerOrgAccount({
   app, orgs, users, safetyAudit, findOrg, unit, nextId, broadcast, createSession, loginLockedOut, noteLoginFailure,
   devLogins, devLoginRefused, mfaGuards, orgSafe, safeguardingCertified,
@@ -69,9 +62,8 @@ export function registerOrgAccount({
   if (typeof users?.setRole !== 'function' || typeof mfaGuards?.mfaLocked !== 'function') throw new TypeError('registerOrgAccount needs the staff repository and the MFA guards');
 
   app.get('/orgs', (req, res) => {
-    // Platform separation starts at the login screen: the Grassroots app lists only grassroots clubs, the main app
-    // never lists them, and the Agent app lists agency organisations only. Unpaged: the sign-in pickers have no
-    // search yet (docs/known-issues.md).
+    // The Grassroots app lists only grassroots clubs, the main app never lists them, and the Agent app lists agencies
+    // only. Unpaged: the sign-in pickers have no search yet (docs/known-issues.md).
     const filter = { grassroots: { level: 'grassroots' }, main: { notLevel: 'grassroots' }, agent: { type: 'agency' } }[req.query.platform] ?? {};
     const list = orgs.list(filter);
     res.json(list.map((o) => ({
@@ -81,8 +73,7 @@ export function registerOrgAccount({
     })));
   });
 
-  // Registration is open to federation-registered grassroots clubs; verification (federation record, email domain,
-  // safeguarding contract) is checked by T&S before the club can see any minor — the same bar every club faces.
+  // T&S verifies the club (federation record, email domain, safeguarding contract) before it can see any minor.
   app.post('/auth/org/register-grassroots', (req, res) => {
     const { name, country = 'GB', city, lat, lng, federation, registrationId, scoutName, role, password } = req.body || {};
     if (password !== undefined && String(password).length < 8) {
@@ -128,8 +119,8 @@ export function registerOrgAccount({
     if (loginLockedOut(res, `org:${orgId}`)) return;
     const org = findOrg(orgId);
     if (!org) { noteLoginFailure(`org:${orgId}`); return res.status(404).json({ error: 'ORG_NOT_FOUND' }); }
-    // Hard platform separation: a grassroots club exists only on ScoutBox Grassroots; every other org exists only on
-    // ScoutBox. An agency can still log into the club app, where its representation lane lives.
+    // A grassroots club exists only on ScoutBox Grassroots and every other org only on ScoutBox. An agency can still
+    // log into the club app, where its representation lane lives.
     const wantsGrassroots = platform === 'grassroots';
     if (org.level === 'grassroots' && !wantsGrassroots) {
       return res.status(403).json({ error: 'GRASSROOTS_PLATFORM_ONLY', message: 'This club is registered on ScoutBox Grassroots — log in there.' });
@@ -145,7 +136,7 @@ export function registerOrgAccount({
       return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
     }
     if (scoutName.trim().length > STAFF_LIMITS.name) return res.status(400).json({ error: 'FIELD_INVALID', field: 'scoutName', message: `scoutName is at most ${STAFF_LIMITS.name} characters.` });
-    // Provisioned orgs require their password; unprovisioned (seeded demo) orgs are a development shortcut only.
+    // Unprovisioned (seeded demo) orgs skip the password as a development shortcut only.
     const passwordHash = orgs.passwordHashOf(org.id);
     if (passwordHash) {
       const check = verifyPassword(req.body?.password ?? '', passwordHash);
@@ -158,8 +149,7 @@ export function registerOrgAccount({
     if (user?.removedAt) {
       return res.status(403).json({ error: 'USER_REMOVED', message: 'This staff member\'s access was removed by the organisation.' });
     }
-    // A user who enabled MFA never gets a session from the password alone; recovery codes are one-time; wrong codes
-    // count towards the lock.
+    // With MFA enabled the password alone never gets a session; recovery codes are one-time.
     if (user?.mfa?.enabledAt) {
       if (mfaGuards.mfaLocked(user.id)) {
         return res.status(429).json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
@@ -168,7 +158,7 @@ export function registerOrgAccount({
       let second = false;
       if (mfaCode) second = totpValid(users.mfaSecretOf(user.id), mfaCode);
       else if (recoveryCode) {
-        // Spending a code deletes its row, and only the call that deleted it passes.
+        // Only the call that deleted the code's row passes.
         second = users.useRecoveryCode(user.id, crypto.createHash('sha256').update(String(recoveryCode)).digest('hex'));
       }
       if (!second) {
@@ -180,12 +170,11 @@ export function registerOrgAccount({
       }
       mfaGuards.clear(user.id);
     }
-    // Roles are assigned by the organisation, never by the person logging in. An organisation with real credentials
-    // gets staff accounts only through server-controlled flows: the registering administrator, a lead's invitation,
-    // or — exactly once — the first login with the organisation password, which bootstraps the administrator of an
-    // organisation provisioned without one. The role sent with a login is ignored there, so nobody with the shared
-    // password can make themselves staff or rewrite another person's role. Unprovisioned (seeded demo) organisations
-    // keep the development shortcut: a login names its own role. That path is refused outside development above.
+    // An organisation with real credentials gets staff accounts only through server-controlled flows: the registering
+    // administrator, a lead's invitation, or once, the first login with the organisation password, which bootstraps
+    // an administrator. The role sent with that login is ignored, so nobody with the shared password can make
+    // themselves staff or rewrite another's role. Seeded demo organisations let a login name its own role, refused
+    // outside development above.
     const credentialed = !!passwordHash;
     let roleNote;
     if (!user) {
@@ -196,7 +185,7 @@ export function registerOrgAccount({
             message: 'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
           });
         }
-        // A lead-tier role is required so the organisation can invite its staff.
+        // A lead-tier role, so the organisation can invite its staff.
         const requested = (role || '').trim();
         user = unit(() => {
           const created = users.create({
@@ -222,15 +211,15 @@ export function registerOrgAccount({
       org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
       token: createSession('org', org.id, { userId: user.id }),
       ...(roleNote ? { roleNote } : {}),
-      // A policy nudge, never a lockout: existing users keep access and are steered through MFA setup.
+      // A nudge, not a lockout.
       mfaSetupRequired: !!(org.mfaRequiredForLeads && user && isLeadRole(user.role) && !user.mfa?.enabledAt) || undefined,
     });
   });
 }
 
 /**
- * The club directory players browse: verified identity and how clubs actually behave (trials run, report turnaround).
- * Grassroots clubs wear their development record instead of resale multiples. Paged by cursor, oldest club first.
+ * Verified identity and how clubs actually behave (trials run, report turnaround). Grassroots clubs show their
+ * development record instead of resale multiples.
  */
 export function registerClubDirectory({ app, orgs, trialsForOrg, safeguardingCertified, pathwayRecord }) {
   app.get('/orgs/directory', (req, res) => {

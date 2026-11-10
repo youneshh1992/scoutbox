@@ -1,31 +1,13 @@
 /**
- * Development Hub: stores, routes and wiring.
+ * Development Hub routes. Evidence is a reference resolved live; the Hub copies
+ * no facts from other stores.
  *
- * The Hub is WORKFLOW. It records what was agreed, who is doing it, what
- * evidence was cited and what a reviewer saw. It holds no fact about a player
- * that another store already holds: every piece of evidence is a reference
- * resolved live, the Passport stays canonical, and nothing here writes into
- * Trust, Matching or the Director Dashboard.
+ * Every live event carries an `orgId` and reaches only that organisation: an
+ * event keyed by playerId alone would reach every club that can see the
+ * player, leaking a private plan. Players hear by notification instead.
  *
- * Two structural decisions are worth stating up front, because they are not
- * obvious from the route list.
- *
- * **Live events are organisation-private, always.** Every event the Hub broadcasts
- * carries an `orgId` and reaches that organisation's own streams and nobody
- * else's. Player-facing changes travel by notification instead, which is
- * directed at exactly one person and passes through their preferences on the
- * way. The alternative — an event carrying only a playerId — is delivered by
- * the existing rules to every organisation that can currently see the player,
- * which for a private development plan would be a leak dressed as a cache
- * ping. Making every event org-private is the version of the private-plan
- * promise with no edge cases.
- *
- * **Idempotency is natural, not a key store.** A retried create is recognised
- * by being the same create — same actor, same content, inside a short window —
- * and returns the record that already exists, the way the rooms handle a repeated
- * decision. No new store, nothing to expire, and it survives a restart in the
- * only way that matters: the duplicate it would have prevented is the one the
- * client is retrying right now.
+ * A retried create (same actor, same content, within a short window) returns
+ * the existing record rather than using an idempotency key store.
  */
 import {
   DEVELOPMENT_POLICY_VERSION, DEVELOPMENT_PRINCIPLE, ACHIEVED_MEANING,
@@ -51,11 +33,6 @@ import { now } from '../../platform/clock.mjs';
 /** How close together two identical creates must be to count as one retry. */
 const IDEMPOTENCY_WINDOW_MS = 60_000;
 
-/**
- * The Hub's records are tables of the development repository (repositories/development.mjs): plans, goals,
- * actions, evidence links and reviews, with one history table. Every route that writes runs in one unit of work and
- * writes through the repository.
- */
 export const DEVELOPMENT_HUB_STORES = Object.freeze([
   'developmentPlans', 'developmentGoals', 'developmentActions',
   'developmentEvidenceLinks', 'developmentReviews',
@@ -66,17 +43,15 @@ export function registerDevelopment(ctx) {
     byId, users, nextId, notify, broadcast, findPlayer, orgCanSee, isLead,
     orgRouter, playerRouter, guardianRouter, audit, isAdult, unit,
     recruitmentReads, scoutingReads,
-    development, developmentReads, // the Hub's own records
-    boxCamReads, // Box Cam sessions and Combine attempts, the Hub's linkable evidence and target states
+    development, developmentReads,
+    boxCamReads, // Box Cam sessions and Combine attempts: linkable evidence and target states
   } = ctx;
   const reads = { ...recruitmentReads, ...scoutingReads, development: developmentReads, boxCam: boxCamReads };
   if (typeof reads?.trials?.byId !== 'function') throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
   if (typeof development?.plans?.create !== 'function' || !developmentReads) throw new TypeError('registerDevelopment needs the development repository from the data layer');
-  /** A plain, editable copy of a stored (read-only) record: a route edits it, then writes it whole through the repository. */
+  /** Stored records are read-only; a route edits a copy and writes it whole. */
   const copy = (r) => structuredClone(r);
 
-  // Boot assertion. A development server whose own vocabulary has drifted
-  // towards a rating does not start.
   const vocabulary = assertDevelopmentVocabulary();
 
   metrics.development = {
@@ -95,13 +70,8 @@ export function registerDevelopment(ctx) {
   // ------------------------------------------------------------- primitives
 
   /**
-   * Every event the Hub emits is organisation-private and carries ids only.
-   *
-   * The names are written out as literal `broadcast('…')` call sites rather
-   * than dispatched from a variable. That is deliberate: a test suite greps
-   * the server tree for literal call sites and fails if they disagree with
-   * `EMITTED_EVENTS`, and an event sent through a variable is invisible to
-   * that check — and to anyone grepping for where a name is used.
+   * Literal `broadcast('…')` call sites, not a variable: a test greps for them
+   * and checks them against `EMITTED_EVENTS`. Payloads carry ids only.
    */
   const EMITTERS = Object.freeze({
     development_plan_created: (p) => broadcast('development_plan_created', p),
@@ -117,13 +87,10 @@ export function registerDevelopment(ctx) {
   const emit = (event, orgId, payload) => {
     if (!orgId) return;
     const send = EMITTERS[event];
-    // An unregistered development event is a bug in this module, not a thing
-    // to silently drop: the registry already fails closed, and so does this.
     if (!send) throw new Error(`The Development Hub tried to emit unregistered event "${event}".`);
     send({ orgId, ...payload });
   };
 
-  /** Organisations that should be told about a change to this plan. */
   const audienceOrgs = (plan) => (plan.owner.kind === 'org'
     ? [plan.owner.orgId]
     : (plan.visibility === 'shared_with_org' ? (plan.sharedWithOrgIds ?? []) : []));
@@ -132,11 +99,7 @@ export function registerDevelopment(ctx) {
     for (const orgId of audienceOrgs(plan)) emit(event, orgId, { planId: plan.id, ...payload });
   };
 
-  /**
-   * Tell a person something happened, through the preference-aware channel.
-   * `development` is one notification type mapping to one category, so a
-   * person who does not want development mail turns off one switch.
-   */
+  /** A minor's notifications go to the guardian. */
   const tellPlayer = (plan, text) => {
     const p = findPlayer(plan.playerId);
     if (!p) return;
@@ -160,14 +123,9 @@ export function registerDevelopment(ctx) {
   const writeHistory = (record, actor, action, detail = null) =>
     audit(record, actor.kind, actor.id, actor.name, action, detail);
 
-  /**
-   * A create that is the same create, by the same actor, moments ago, is a
-   * retry rather than a second record. (Plans ask the repository: reads.development.plans.recentCreate.)
-   */
   const recentDuplicate = (list, match, at) =>
     list.find((r) => at - (r.createdAt ?? 0) < IDEMPOTENCY_WINDOW_MS && match(r)) ?? null;
 
-  /** Refuse a body that asserts something the server derives. */
   const refuseDerived = (req, res) => {
     const bad = refusedClientFields(req.body);
     if (!bad.length) return false;
@@ -181,13 +139,7 @@ export function registerDevelopment(ctx) {
 
   // ------------------------------------------------------------ resolution
 
-  /**
-   * Resolve a plan for this request, or answer it.
-   *
-   * Authorisation comes before existence in the ANSWER even though the lookup
-   * has to come first: a viewer without access gets 404, so a plan id cannot
-   * be probed for existence from outside.
-   */
+  /** A viewer without access gets 404, so plan ids cannot be probed. */
   function resolvePlan(req, res, planId, viewer) {
     const bundle = collectPlan(developmentReads, planId);
     const notFound = () => {
@@ -218,16 +170,12 @@ export function registerDevelopment(ctx) {
     plan.updatedAt = now();
     bumpRev(plan, { by: { id: actor.id, name: actor.name } });
   };
-  /** Mark the plan changed (its updatedAt and rev), as a write of the plan: called inside the route's unit. */
+  /** Called inside the route's unit. */
   const touchPlan = (planId, actor) => development.plans.update(planId, (d) => { touch(d, actor); });
 
   // ------------------------------------------------------------- catalogue
 
-  /**
-   * What the Hub is, and what it refuses to be, served from the server's own
-   * vocabulary so a client renders definitions rather than carrying a copy
-   * that drifts.
-   */
+  /** Served so clients render the server's vocabulary rather than a copy. */
   const catalogue = () => ({
     policyVersion: DEVELOPMENT_POLICY_VERSION,
     principle: DEVELOPMENT_PRINCIPLE,
@@ -237,8 +185,6 @@ export function registerDevelopment(ctx) {
       categories: GOAL_CATEGORIES, categoryLabels: GOAL_CATEGORY_LABELS,
       statuses: GOAL_STATUSES, transitions: GOAL_TRANSITIONS,
       blockReasons: BLOCK_REASONS, achievedMeaning: ACHIEVED_MEANING,
-      // Said in the catalogue, not only in a document: the availability goal
-      // category and the injury block reason are absent, and this is why.
       omitted: {
         categories: ['availability_rehabilitation'],
         blockReasons: ['injury_or_unavailable'],
@@ -257,7 +203,6 @@ export function registerDevelopment(ctx) {
     capabilities: CAPABILITIES,
     reminders: {
       scheduler: 'none',
-      // Honest about dates: there is no scheduler.
       note: 'Due and overdue are worked out when you open the page. ScoutBox has no background scheduler in this build and does not send reminders while the app is closed.',
     },
     neverBuilt: {
@@ -292,7 +237,6 @@ export function registerDevelopment(ctx) {
     const end = parseDate(body?.endDate ?? existing?.endDate, { field: 'endDate' });
     if (end.error) return end;
 
-    // Dates that describe an impossible interval are refused, not reordered.
     if (start.value != null && end.value != null && end.value < start.value) {
       return { error: 'DATE_INTERVAL_INVALID', detail: 'The end date cannot be before the start date.' };
     }
@@ -305,7 +249,7 @@ export function registerDevelopment(ctx) {
       return { error: 'TEMPLATE_UNKNOWN', allowed: PLAN_TEMPLATES.map((t) => t.id), detail: `Unknown template "${templateId}".` };
     }
 
-    // A plan always has a start: an emptied start keeps the stored one (a new plan starts at creation).
+    // An emptied start keeps the stored one; a new plan starts at creation.
     return { value: { title: title.value, visibility, startDate: start.value ?? existing?.startDate ?? null, nextReviewAt: nextReview.value, endDate: end.value, templateId } };
   }
 
@@ -363,34 +307,19 @@ export function registerDevelopment(ctx) {
 
   // ------------------------------------------------------------- the routes
 
-  /**
-   * The same surface on three routers. Mounting once rather than three times
-   * is not only brevity: it means a player, a guardian and a coach are checked
-   * by the same code, so an authorisation rule cannot be right on two of them
-   * and forgotten on the third.
-   */
+  /** One surface on the player, guardian and org routers, so all three share one authorisation path. */
   function mount(router, { viewerOf, ownerKindFor, subjectFor, rateKeyFor }) {
     const V = (req) => viewerOf(req);
 
     router.get('/development/catalogue', (_req, res) => res.json(catalogue()));
 
-    /**
-     * What this viewer could cite for this player, as ids and labels.
-     *
-     * Without this a "link evidence" control has nothing to offer, and every
-     * client would end up assembling its own list from four different reads —
-     * each applying its own idea of what is visible. The list is built by the
-     * same resolver the links themselves use, so an item that would resolve to
-     * unavailable is never offered in the first place.
-     */
+    /** Built with the links' own resolver, so nothing offered resolves as unavailable. */
     router.get('/development/linkable-evidence', (req, res) => {
       const viewer = V(req);
       const player = findPlayer(String(req.query.playerId ?? (viewer.kind === 'player_self' ? viewer.playerId : '')));
       if (!player) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
       const subject = { ...player, isMinor: !isAdult(player) };
 
-      // The same authorisation the plan itself gets: a viewer who could not
-      // read a plan for this player is told the player does not exist here.
       const canSee = viewer.kind === 'player_self' ? viewer.playerId === player.id
         : viewer.kind === 'guardian' ? (viewer.childIds ?? []).includes(player.id)
           : !!viewer.org && orgCanSee(viewer.org, player);
@@ -425,10 +354,8 @@ export function registerDevelopment(ctx) {
     });
 
     // ---- list
-    // The plans this viewer may read, newest change first then id, paged by cursor (`?limit=&cursor=` →
-    // `{ items, nextCursor, total }`). The candidates come from an indexed query (one player's, one guardian's
-    // children's, or the plans one organisation owns or was shared); the access rule is applied in code, so the page
-    // is cut from the filtered list. The count is of plans THIS viewer may read.
+    // The access rule is applied in code, so the page is cut from the filtered list and the total counts only
+    // plans this viewer may read.
     router.get('/development/plans', (req, res) => {
       const viewer = V(req);
       let page;
@@ -452,7 +379,7 @@ export function registerDevelopment(ctx) {
         if (planAccess(viewer, plan, { player: subject, orgCanSee, isLead }).read) readable.push({ plan, subject });
       }
       const keyOf = (r) => [r.plan.updatedAt, r.plan.id];
-      // Most recently updated first, id as the tie-break: the repository's order, and the cursor's.
+      // Must match the repository's order, which the cursor relies on.
       const cmpKey = (a, b) => (b[0] - a[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0);
       const { items, nextCursor } = pageSorted(readable, page, keyOf, cmpKey);
       const counts = dev.listCounts(items.map((r) => r.plan.id));
@@ -480,8 +407,6 @@ export function registerDevelopment(ctx) {
       const parsed = validatePlanBody(req.body, { ownerKind });
       if (parsed.error) return res.status(400).json(parsed);
 
-      // A draft may be empty; an active plan may not. Decided explicitly
-      // rather than left to whichever route happened to check.
       const goalBodies = Array.isArray(req.body?.goals) ? req.body.goals : [];
       const wantsActive = String(req.body?.status ?? 'draft') === 'active';
       if (!PLAN_STATUSES.includes(String(req.body?.status ?? 'draft'))) {
@@ -512,8 +437,6 @@ export function registerDevelopment(ctx) {
         return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
       }
 
-      // Goals are validated BEFORE the plan is written, so a bad third goal
-      // does not leave a half-built plan behind.
       const prepared = [];
       for (const gb of goalBodies) {
         const g = validateGoalBody(gb, {});
@@ -534,9 +457,7 @@ export function registerDevelopment(ctx) {
         nextReviewAt: parsed.value.nextReviewAt,
         endDate: parsed.value.endDate,
         templateId: parsed.value.templateId,
-        // The objectives bridge: a plan may record where the idea came from.
-        // Recording an origin is not adopting the record — the objective and
-        // its Passport projection are untouched.
+        // Records where the idea came from; the objective itself is untouched.
         originObjectiveId: originObjectiveFor(req.body?.originObjectiveId, player, res),
         createdAt: at, updatedAt: at,
         rev: 1, revAt: at, revBy: { userId: actor.id, name: actor.name },
@@ -592,8 +513,7 @@ export function registerDevelopment(ctx) {
       Object.assign(plan, parsed.value);
       if (visibilityChanged) {
         writeHistory(plan, actor, 'plan_visibility_changed', { to: plan.visibility });
-        // Narrowing a player-owned plan withdraws every share with it: a plan
-        // that is no longer shared is no longer shared with anyone.
+        // Narrowing a player-owned plan's visibility withdraws every share.
         if (plan.owner.kind === 'player' && plan.visibility !== 'shared_with_org' && (plan.sharedWithOrgIds ?? []).length) {
           withdrawn.push(...plan.sharedWithOrgIds);
           plan.sharedWithOrgIds = [];
@@ -667,15 +587,13 @@ export function registerDevelopment(ctx) {
       if (typeof orgId !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'orgId', message: 'orgId names the organisation, as text.' });
       if (req.body?.revoke !== undefined && typeof req.body.revoke !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'revoke', message: 'revoke is true or false.' });
       const org = byId.org(orgId);
-      // The organisation must be one that can actually see this player.
-      // Sharing with a club that cannot see the player would create access
-      // the visibility rules deny everywhere else.
+      // Sharing with a club that cannot see the player would grant access the visibility rules deny.
       if (!org || !orgCanSee(org, player)) {
         return res.status(404).json({ error: 'ORG_NOT_FOUND', detail: 'No such organisation is available to share with.' });
       }
       const revoke = req.body?.revoke === true;
       const actor = actorOf(viewer, req);
-      // Live events and notifications are queued while the change is worked out, and sent inside the unit (events wait for the commit).
+      // Run inside the unit; events wait for the commit.
       const effects = [];
 
       if (revoke) {
@@ -759,16 +677,13 @@ export function registerDevelopment(ctx) {
         return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
       }
       if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
-      // Two coaches editing one goal is the case this guard exists for.
-      // The conflict body carries the goal's id and status and NOT its title:
-      // the other person's edit is content, and the caller reloads through its
-      // own authorised read rather than learning it from a 409.
+      // The conflict body omits the title: the other person's edit is content,
+      // which the caller reloads through its own authorised read.
       if (!guardRev(req, res, goal, { errorCode: 'DEVELOPMENT_GOAL_VERSION_CONFLICT', current: { goalId: goal.id, status: goal.status } })) return undefined;
 
       const actor = actorOf(viewer, req);
       const at = now();
 
-      // Status is its own transition, checked before anything else changes.
       let statusChanged = null;
       if (req.body?.status != null && req.body.status !== goal.status) {
         const to = String(req.body.status);
@@ -878,8 +793,7 @@ export function registerDevelopment(ctx) {
       if (['archived', 'completed'].includes(plan.status)) return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
       if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
 
-      // A player may tick their OWN assigned action even on a club plan they
-      // cannot otherwise edit — that is the point of assigning it to them.
+      // An assignee may tick their own action on a plan they cannot otherwise edit.
       const assignedToViewer = action.assignee?.kind === 'player' && viewer.kind === 'player_self' && action.assignee.id === viewer.playerId;
       const assignedToGuardian = action.assignee?.kind === 'guardian' && viewer.kind === 'guardian' && action.assignee.id === viewer.guardianId;
       const mayTick = access.writeGoals || assignedToViewer || assignedToGuardian;
@@ -899,8 +813,6 @@ export function registerDevelopment(ctx) {
         action.completedAt = to === 'done' ? at : null;
       }
 
-      // A person who only holds the action can tick it; changing its title,
-      // type, due date or assignee is still a plan edit.
       if (!access.writeGoals) {
         const editing = ['title', 'type', 'dueAt', 'assignee'].some((k) => Object.prototype.hasOwnProperty.call(req.body ?? {}, k));
         if (editing) return res.status(403).json({ error: 'DEVELOPMENT_NOT_PERMITTED', capability: 'writeGoals', message: 'You can mark this action done, but not change it.' });
@@ -915,8 +827,7 @@ export function registerDevelopment(ctx) {
       unit(() => {
         development.actions.update(action.id, () => action);
         if (statusChanged?.to === 'done') {
-          // The goal does NOT move. Completing an action is completing an
-          // action — no code path here touches goal.status.
+          // Completing an action never moves its goal's status.
           emitAll('development_action_completed', plan, { actionId: action.id });
           if (plan.owner.kind === 'org' && actor.kind !== 'org') tellOrg(plan.owner.orgId, `${player.name} completed a development action: ${action.title}`);
         }
@@ -954,7 +865,6 @@ export function registerDevelopment(ctx) {
       });
       if (parsed.error) return res.status(parsed.error === 'EVIDENCE_NOT_FOUND' ? 404 : 400).json(parsed);
 
-      // Linking the same evidence twice is one link, not two.
       const existing = mine.find((l) => l.sourceType === parsed.value.sourceType && l.sourceId === parsed.value.sourceId);
       if (existing) {
         vmetric('development_idempotent_retries');
@@ -1033,7 +943,6 @@ export function registerDevelopment(ctx) {
       const parsed = validateReview({ body: req.body, access, viewer, now: now() });
       if (parsed.error) return res.status(parsed.error === 'REVIEW_NOT_PERMITTED' ? 403 : 400).json(parsed);
 
-      // A correction is a new review that names the one it replaces.
       let superseded = null;
       if (req.body?.supersedes) {
         const target = reviews.find((r) => r.id === String(req.body.supersedes));
@@ -1069,12 +978,11 @@ export function registerDevelopment(ctx) {
         createdAt: at,
         history: [],
       };
-      // A player's own reflection is theirs to read back, always.
+      // A reflection is always visible to the player.
       if (review.reviewerKind !== 'coach_review') review.sharedWithPlayerAt = at;
 
       writeHistory(review, actor, 'review_submitted', { kind: review.reviewerKind, note: !!review.internalNote });
       if (review.sharedWithPlayerAt && review.reviewerKind === 'coach_review') writeHistory(review, actor, 'review_shared');
-      // The corrected review is marked by the correction naming it (`supersedes`); its own history records it.
       unit(() => {
         development.reviews.create(review);
         if (superseded) development.reviews.update(superseded.id, (d) => { writeHistory(d, actor, 'review_superseded'); });
@@ -1094,7 +1002,7 @@ export function registerDevelopment(ctx) {
       return res.status(201).json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
 
-    /** Share an already-submitted review's summary. The note is never shared. */
+    /** Shares the summary only; the internal note is never shared. */
     router.post('/development/reviews/:reviewId/share', (req, res) => {
       if (refuseDerived(req, res)) return;
       const viewer = V(req);
@@ -1170,12 +1078,7 @@ export function registerDevelopment(ctx) {
     return goal;
   }
 
-  /**
-   * The objectives bridge. A plan or goal may record that it grew out of an
-   * existing development objective — by id, on explicit user action, and only
-   * for this player. Nothing about the objective record, its routes or its
-   * Passport projection changes; the Hub reads an id and stores an id.
-   */
+  /** Returns false once it has answered 404; the objective itself is never changed. */
   function originObjectiveFor(raw, player, res) {
     if (raw == null || raw === '') return null;
     const found = typeof raw === 'string' ? developmentReads.objectives.byId(raw) : null;
@@ -1198,8 +1101,7 @@ export function registerDevelopment(ctx) {
       if (req.playerIsMinor) {
         return {
           player,
-          // The existing safeguarding model, unchanged: a minor's records are
-          // created and managed by their guardian.
+          // Safeguarding: a minor's records are created by their guardian.
           minorRefusal: {
             error: 'GUARDIAN_MANAGED',
             message: 'A guardian creates and manages development plans for a player under 18. You can read the plan here.',
@@ -1238,8 +1140,7 @@ export function registerDevelopment(ctx) {
     rateKeyFor: (req) => `org:${req.org.id}`,
     subjectFor: (req, res) => {
       const p = findPlayer(String(req.body?.playerId ?? ''));
-      // Not visible is not found. A club cannot use plan creation to discover
-      // that a player exists outside its wall.
+      // Not visible is not found, so plan creation cannot probe for players.
       if (!p || !orgCanSee(req.org, p)) {
         res.status(404).json({ error: 'PLAYER_NOT_FOUND', message: 'No such player is available to your organisation.' });
         return null;

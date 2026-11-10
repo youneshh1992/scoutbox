@@ -1,71 +1,17 @@
-// The capability separation.
-//
-// THE ONE IDEA THIS FILE EXISTS FOR
-//
-// The Combine blocker is enforced by STRUCTURE rather than by emptiness: the
-// provider genuinely observes, so an empty capability list would be a weak
-// kind of safety that holds only while the provider does nothing. Instead a
-// provider has TWO capability lists, and they are never the same object.
-//
-//   observationCapabilities()  what the engine can actually see. Drives Box
-//                              Cam observed. Real, and honest about it.
-//
-//   combineCapabilities()      what may be used to mint a STANDARDISED,
-//                              COMPARABLE Combine measurement. Filtered
-//                              through the real-world validation record, per
-//                              protocol. Currently empty for every protocol.
-//
-// `measurementSupported()` in boxcam/combineShared.mjs is set containment over
-// whichever list it is handed. Hand it the observation list and a synthetic
-// success mints Combine Verified. Hand it the combine list and it cannot,
-// because the list is empty until a versioned real-world validation record
-// exists for that specific protocol at this engine and policy version.
-//
-// So the governing rule —
-//
-//   "The transport may deliver evidence to the engine. It may never grant the
-//    engine permission to claim more than the evidence justifies."
-//
-// — is implemented as: the transport feeds observationCapabilities, and only
-// a validation record feeds combineCapabilities.
-//
-// WHY NOT A BOOLEAN FLAG
-//
-// A flag (`combineEnabled = false`) can be flipped by configuration, by an
-// environment variable, or by someone who believes the synthetic numbers are
-// good enough. This cannot: `combineCapabilities()` derives its answer from
-// `realWorldValidationPass()`, which reads a versioned record that must name a
-// matching engine version, policy version and dataset. There is no argument
-// you can pass to this module to make it say yes.
+// A provider has two capability lists. observationCapabilities() is what the engine can see and drives Box Cam
+// observed. combineCapabilities() is what may mint a comparable Combine measurement: filtered per protocol through
+// the real-world validation record, and currently empty. `measurementSupported()` is set containment, so handing it
+// the observation list would mint Combine Verified from synthetic success. This is not a flag because a flag can be
+// flipped by configuration; no argument to this module makes it say yes without a matching versioned record.
 
 import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION, CANDIDATE_PROTOCOLS } from './policy.mjs';
 import { realWorldValidationPass, REAL_WORLD_VALIDATION } from './validation.mjs';
 
-/**
- * What the v2 engine genuinely observes, in the Box Cam capability vocabulary.
- *
- * Each entry is a claim this repository can defend with a measurement (the
- * recorded synthetic evaluation: cv/evaluation.json, cv/holdout.json):
- *
- *   player_presence   detect.mjs finds a person region
- *   ball_presence     detect.mjs finds a ball blob
- *   active_motion     tracking produces player-relative motion
- *   active_duration   server-owned timeline over usable samples
- *   rep_count         protocol.mjs contact state machine (no false touches
- *                     across the adversarial scenes and holdout generations)
- *
- * Deliberately absent, because the engine cannot do them and a claim here
- * would flow straight into a product surface:
- *
- *   foot_classification   no left/right foot discrimination exists
- *   technique_signals     no technique model exists
- *   interval_completion   no work/rest interval detection exists
- */
+/** Each entry is backed by the recorded synthetic evaluation (cv/evaluation.json, cv/holdout.json). */
 export const OBSERVATION_CAPABILITIES = Object.freeze([
   'player_presence', 'ball_presence', 'active_motion', 'active_duration', 'rep_count',
 ]);
 
-/** Capabilities the engine explicitly does NOT have, stated so it is checkable. */
 export const NON_CAPABILITIES = Object.freeze({
   foot_classification: 'No left/right foot discrimination exists in the engine.',
   technique_signals: 'No technique model exists. ScoutBox does not score how a touch looked.',
@@ -76,15 +22,8 @@ export const NON_CAPABILITIES = Object.freeze({
 });
 
 /**
- * The Combine-eligible capability list for one protocol.
- *
- * Returns `[]` unless a current, passing, versioned real-world validation
- * record exists for that protocol at THIS engine and policy version.
- *
- * `providerCapabilities` is the provider's observation list. Note it is
- * intersected, never unioned: validation can only ever permit a subset of
- * what the provider actually observes. A validation record for a capability
- * the provider does not have grants nothing.
+ * `[]` unless a passing real-world validation record exists for the protocol at this engine and policy version.
+ * Intersected with the provider's observation list, so validation only permits a subset of what it observes.
  */
 export function combineCapabilities(protocolId, {
   providerCapabilities = OBSERVATION_CAPABILITIES,
@@ -93,34 +32,14 @@ export function combineCapabilities(protocolId, {
   policyVersion = BOX_CAM_CV_POLICY_VERSION,
 } = {}) {
   const verdict = realWorldValidationPass(protocolId, { table, engineVersion, policyVersion });
-  // DEFENSIVE, AND NOT PARANOIA.
-  //
-  // `realWorldValidationPass()` returns an OBJECT, `{ pass, status, problems }`,
-  // which is always truthy. Read as a boolean, `if (!verdict) return []` would
-  // never fire and every protocol would come back Combine-eligible: the single
-  // most important gate in ScoutBox, open, from a truthiness mistake that
-  // reviews well.
-  //
-  // So the test is not "is it truthy" but "is it EXACTLY the boolean true".
-  // Anything else — an object, a string, undefined, a future refactor that
-  // changes the return shape — denies. The failure mode of this function must
-  // be closed, and `=== true` is what makes the closed direction the default
-  // rather than the exception.
+  // The verdict is an always-truthy object; `=== true` makes any other shape deny.
   if (verdict?.pass !== true) return [];
   const candidate = CANDIDATE_PROTOCOLS[protocolId];
   if (!candidate) return [];
-  // Only the capabilities this protocol's measurement actually requires, and
-  // only those the provider genuinely has.
   return candidate.requires.filter((c) => providerCapabilities.includes(c));
 }
 
-/**
- * Why a protocol is not Combine-eligible, in machine-readable form.
- *
- * Returned alongside the empty list so no caller has to infer the reason, and
- * so the reason appears in the capability report and in the player-facing copy
- * rather than being a silent absence.
- */
+/** Why a protocol is not Combine-eligible, so the reason reaches the report and player copy. */
 export function combineEligibility(protocolId, opts = {}) {
   const candidate = CANDIDATE_PROTOCOLS[protocolId] ?? null;
   if (!candidate) {
@@ -150,14 +69,12 @@ export function combineEligibility(protocolId, opts = {}) {
   return { eligible: true, capabilities: caps, reason: null };
 }
 
-/** Every candidate protocol's eligibility, for the capability report. */
 export function combineEligibilityMatrix(opts = {}) {
   const out = {};
   for (const id of Object.keys(CANDIDATE_PROTOCOLS)) out[id] = combineEligibility(id, opts);
   return out;
 }
 
-/** The protocols that are actually Combine-verified-capable right now. */
 export function combineVerifiedProtocols(opts = {}) {
   return Object.entries(combineEligibilityMatrix(opts))
     .filter(([, v]) => v.eligible)
@@ -165,20 +82,10 @@ export function combineVerifiedProtocols(opts = {}) {
 }
 
 // =========================================================================
-// Box Cam observed eligibility, evaluated INDEPENDENTLY
+// Box Cam observed eligibility, evaluated independently
 // =========================================================================
-//
-// Box Cam observed and Combine Verified are different claims with different
-// evidence bars, and collapsing them is the mistake this file guards against.
-//
-//   Box Cam observed  "this activity was genuinely observed happening"
-//   Combine Verified  "this is a standardised, comparable measurement"
-//
-// The first is a statement about an event. The second is a statement about a
-// NUMBER, and a number invites comparison between players, which is what
-// makes it need real-world validation. Observation needs the activity to have
-// been seen; it does not need the count to be exact, and a Box Cam session
-// never required an exact count.
+// Box Cam observed is a claim about an event; Combine Verified is a comparable number, which is what needs
+// real-world validation. Observation doesn't need an exact count.
 
 export const BOX_CAM_OBSERVED_REQUIREMENTS = Object.freeze([
   'provider_ready',
@@ -192,14 +99,7 @@ export const BOX_CAM_OBSERVED_REQUIREMENTS = Object.freeze([
   'supported_drill',
 ]);
 
-/**
- * Decide Box Cam observed for one finalized provider result.
- *
- * Deliberately does NOT require an exact count: a Box Cam session never
- * did, and requiring one here would silently import the Combine evidence bar
- * into a claim that does not need it — which would look conservative and
- * would in fact be a category error.
- */
+/** Doesn't require an exact count: that would import the Combine evidence bar into a claim that doesn't need it. */
 export function boxCamObservedEligible({
   providerHealth,
   sessionLive,
@@ -219,9 +119,7 @@ export function boxCamObservedEligible({
   const d = result?.derived ?? {};
   add('person_present', !!d.personPresent);
   add('ball_present_if_drill_requires', drillRequiresBall ? !!d.ballPresent : true);
-  // "Activity progressed" means the observation contains motion over time, not
-  // that a target was met. A refused attempt has not progressed; an accepted
-  // one with a positive active duration has.
+  // Motion over time, not a target met.
   add('activity_progressed', result?.outcome === 'accepted' && Number(d.activeDurationMs) > 0);
   add('integrity_ok', result?.integrity?.ok !== false);
   add('observation_quality_sufficient', result?.observationQuality?.sufficient === true);
@@ -229,17 +127,13 @@ export function boxCamObservedEligible({
   return {
     eligible: failed.length === 0,
     failed,
-    // Said explicitly on every result, passing or not, so no reader can infer
-    // that a successful observation implies a verified measurement.
+    // On every result, so a successful observation isn't read as a verified measurement.
     combineVerified: false,
     combineVerifiedNote: 'Box Cam observed is not Combine Verified. Combine verification for CV protocols remains disabled pending real-world validation.',
   };
 }
 
-/**
- * The single sentence every surface uses for this. One string, so the product
- * cannot drift into four differently-worded explanations of the same fact.
- */
+/** The one wording every surface uses. */
 export const COMBINE_DISABLED_REASON = Object.freeze({
   code: 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
   short: 'Combine verification is not available yet for this protocol.',

@@ -1,18 +1,12 @@
-// Saved searches: "Tell me when a left-footed U16 winger joins" — the club feed made personal.
+// Saved searches. When a player joins, SQL narrows the saved searches of current staff to those the player could
+// match, and the whole filter is then applied to the player as the club sees them.
 //
-// A saved search is a row of `saved_searches` (repositories/operations.mjs), its filters typed columns; the scout's
-// name is read live from the staff row. When a player joins, SQL narrows the saved searches of current staff to those
-// whose position, foot, country and availability the player could match, and the whole filter is then applied to the
-// player as the club sees them.
-//
-// Filters are refused when junk (400 FIELD_INVALID naming `filters.<key>`): an unknown key, a value of the wrong type,
-// a position, foot, availability or age group outside the vocabulary, a newDays that is not a whole number of days.
 // An empty or blank string, `false` or null means "no filter", as the apps send it.
 import { SAVED_SEARCH_FILTERS, SEARCH_AGE_GROUPS, OPERATIONS_LIMITS } from '../../repositories/operations.mjs';
 import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from '../../repositories/identity.mjs';
 
 const L = OPERATIONS_LIMITS;
-const unset = (v) => v === undefined || v === null || v === false || (typeof v === 'string' && !v.trim()); // an empty or blank box: no filter
+const unset = (v) => v === undefined || v === null || v === false || (typeof v === 'string' && !v.trim());
 const RULES = {
   q: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= L.searchQ,
   position: (v) => PLAYER_POSITIONS.includes(v),
@@ -55,13 +49,11 @@ function matchesSearch(view, f) {
   return true;
 }
 
-/** A saved search as the API answers it. */
 const searchView = (s) => ({ id: s.id, orgId: s.orgId, userId: s.userId, scoutName: s.scoutName, name: s.name, filters: { ...s.filters }, createdAt: s.createdAt });
 
 export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerViewForOrg, reqText, savedSearches }) {
   if (typeof savedSearches?.create !== 'function') throw new TypeError('registerSavedSearches needs the saved-searches repository');
 
-  // Called whenever a player joins: alert the staff whose saved search matches.
   function checkSavedSearches(player) {
     for (const ss of savedSearches.candidatesFor({ position: player.position ?? null, foot: player.foot ?? null, country: player.country ?? null, availability: player.availability ?? null })) {
       const org = byId.org(ss.orgId);

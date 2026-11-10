@@ -1,272 +1,145 @@
-// Real Box Cam CV v1: the policy surface.
-//
-// Every threshold the observation engine uses lives HERE, in one frozen
-// object, for one reason: a threshold that is
-// scattered through the engine can be quietly relaxed to make a test pass.
-// A threshold that sits in a single named policy object, is version-stamped,
-// and is asserted by the evaluation harness cannot be moved without the move
-// being visible in a diff and in a measured result.
-//
-// The rule this file serves:
-//   Observe narrowly. Measure honestly. Refuse when uncertain.
-//   A refused measurement is acceptable. A falsely verified one is not.
+// Every engine threshold lives here, version-stamped and asserted by the evaluation harness, so it cannot be relaxed
+// to make a test pass without showing in a diff and a measured result. A refused measurement is acceptable; a falsely
+// verified one is not.
 
 export const BOX_CAM_CV_POLICY_VERSION = 1;
 
-// The engine's own version. v2: the three-layer split, the
-// contact state machine, normalised units, quality gate, refusal precedence.
-// Event semantics changed materially, so the version moves rather than
-// pretending one version produced two behaviours. BOX_CAM_CV_POLICY_VERSION
-// stays at 1: version 1 encompasses pre-release development of this policy,
-// and no released result exists under it.
-// Bumped whenever a rule changes in a way that
-// could change a count. A stored result keeps the version that produced it —
-// history is never re-derived under a new engine.
+// Bumped whenever a rule change could change a count. A stored result keeps the version that produced it.
 export const CV_ENGINE_VERSION = 2;
 
-// The provider that this engine backs. `production_cv` keeps its id: a test
-// implementation is never renamed into a production one.
 export const CV_PROVIDER_ID = 'production_cv';
 
 // ---------------------------------------------------------------- frames
-//
-// Support only documented formats; do not auto-decode arbitrary files.
-//
-// The transport accepts exactly ONE encoding: `gray8` — a raw 8-bit
-// luminance plane, width × height bytes, row-major, no header, no
-// compression, base64 in transit. This is a deliberate security decision as
-// much as a simplicity one: there is no image parser, so there is no image
-// parser to attack. A malformed payload is a length mismatch, not a decoder
-// exploit. A browser produces it with canvas `getImageData` and a luminance
-// reduction — the same thing any real client would do before inference.
+// The only encoding is `gray8`: a raw 8-bit luminance plane, width × height bytes, row-major, base64 in transit. With
+// no image parser there is no parser to attack; a malformed payload is a length mismatch. A browser produces it with
+// canvas `getImageData` and a luminance reduction.
 export const FRAME_ENCODING = 'gray8';
 
 export const FRAME_LIMITS = Object.freeze({
   minWidth: 160, minHeight: 120,
   maxWidth: 320, maxHeight: 240,
-  // A frame is exactly w*h bytes. The cap is the largest legal frame plus
-  // base64 expansion and JSON overhead, so an oversized body is refused on
-  // size before anything tries to interpret it.
+  // A frame is exactly w*h bytes, so an oversized body is refused on size before anything interprets it.
   maxBytes: 320 * 240,
   maxFramesPerBatch: 12,
   maxBatchesPerSession: 120,
-  // The in-process queue is bounded. Frames beyond it are dropped
-  // according to the documented policy, never buffered indefinitely.
+  // Frames beyond the bounded queue are dropped, not buffered.
   maxQueuedFrames: 24,
 });
 
-// Capture conditions the engine will accept at all. Anything
-// outside these is refused at Ready Check rather than silently degraded.
+// Anything outside these is refused at Ready Check rather than silently degraded.
 export const CAPTURE_REQUIREMENTS = Object.freeze({
   minFps: 6,
   maxFps: 30,
   minWidth: FRAME_LIMITS.minWidth,
   minHeight: FRAME_LIMITS.minHeight,
-  // Below this sustained cadence an exact count cannot
-  // be established, because contacts fall between observations.
+  // Below this sustained cadence contacts fall between observations, so no exact count.
   minSustainedFps: 12,
-  // unit — fraction of the attempt that may sit below minSustainedFps before
-  // exact measurement is refused.
+  // Fraction of the attempt that may sit below minSustainedFps before exact measurement is refused.
   maxLowFpsFrac: 0.2,
-  // unit — jitter band on the per-interval cadence test. An interval counts
-  // as "low" only if it is more than 15% longer than the nominal minimum.
-  // Without this band a capture held at exactly minSustainedFps is condemned
-  // by millisecond timestamp rounding alone: 12 fps is an 83.33 ms interval,
-  // integer timestamps alternate 83/84 ms, and every 84 reads as 11.9 fps.
-  // Real cadence loss is a sustained gap, not a rounding artefact.
+  // An interval is "low" only if more than 15% over nominal. Without the band, 12 fps (83.33 ms) is condemned by
+  // integer timestamps alternating 83/84 ms, every 84 reading as 11.9 fps.
   lowFpsIntervalTolerance: 1.15,
-  // Only orientations actually exercised by the evaluation fixtures.
+  // Only orientations exercised by the evaluation fixtures.
   supportedOrientations: Object.freeze(['landscape', 'portrait']),
-  // Web only. No native device tests exist, so no native claim.
+  // No native device tests exist, so no native claim.
   supportedPlatforms: Object.freeze(['web']),
 });
 
 // ------------------------------------------------------------- detection
-//
-// These are the numbers the engine actually applies. Each says what it is
-// for, because an unexplained constant is a threshold nobody can audit.
 export const DETECTION = Object.freeze({
-  // A ball candidate is a bright connected blob. These bound its size as a
-  // fraction of frame area — too small is noise, too large is not a ball.
+  // A ball candidate is a bright blob; its size as a fraction of frame area.
   ballMinAreaFrac: 0.0008,
   ballMaxAreaFrac: 0.05,
   // Luminance margin above the local background for a pixel to be ball-like.
   ballMinContrast: 40,
-  // A blob must be roughly round: 1.0 is a perfect circle by the
-  // area-to-bounding-box test. Anything flatter is a limb, a shadow or a line.
+  // 1.0 is a perfect circle by the area-to-bounding-box test; flatter is a limb, shadow or line.
   ballMinRoundness: 0.55,
-  // A person candidate is a large non-background region.
   personMinAreaFrac: 0.01,
-  // Below this mean luminance the scene cannot be read reliably and the
-  // attempt is refused as insufficient_visibility. It is never estimated.
+  // Below this mean luminance the attempt is refused as insufficient_visibility.
   minMeanLuma: 28,
-  // Below this, the frame has no usable structure at all (a covered lens, a
-  // flat wall) even if it is bright. Deliberately LOW: a legitimate capture
-  // against a plain background has little global variance, and an aggressive
-  // value here reports a well-lit scene as "too dark", which is a wrong
-  // refusal reason — refusing for the wrong stated reason is its own
-  // dishonesty, even though the attempt is refused either way.
+  // Below this the frame has no usable structure (covered lens, flat wall). Kept low because a capture against a
+  // plain background has little variance, and a higher value refuses a well-lit scene as "too dark".
   minLumaStdDev: 3,
-  // A run of frames whose inter-frame difference is
-  // under this floor is a static image or a frozen stream, not activity.
+  // Inter-frame difference under this is a static image or frozen stream.
   staticFrameMaxMeanDiff: 1.2,
-  // How many consecutive static frames before the sequence is called static.
   staticRunFrames: 6,
 });
 
 // ------------------------------------------------------------ event rules
-//
-// Touch and juggle rules, in normalized geometry.
-//
-// EVERY spatial threshold here is expressed in BALL DIAMETERS, and every
-// velocity in ball diameters per second. That is the whole resolution- and
-// frame-rate-invariance story in one sentence: the same physical scene shot
-// at 240x180 or 960x720, at 15 fps or 60 fps, yields the same numbers,
-// because the ball is the ruler and seconds are the clock. Pixel-space and
-// per-frame constants are what make a detector silently resolution- and
-// cadence-dependent, so there are none left in the event rules.
+// Distances are in ball diameters and times in milliseconds, so the same scene at any resolution or frame rate
+// yields the same numbers: the ball is the ruler and seconds are the clock.
 //
 // Unit key:  d  = ball diameters        d/s = ball diameters per second
 //            ms = milliseconds          —   = dimensionless ratio
 export const EVENT_RULES = Object.freeze({
-  // unit ms — refractory. Two contacts closer together in TIME than this
-  // are one contact observed twice. Milliseconds, never frames, so the
-  // rule means the same thing at every cadence.
+  // ms: two contacts closer than this are one contact observed twice.
   touchRefractoryMs: 180,
   juggleRefractoryMs: 300,
 
-  // unit d — a juggle contact must be followed by a flight clearing this
-  // many ball diameters, measured relative to the player. Stops a ball
-  // resting on the ground with detector jitter producing counts.
+  // d: a juggle contact must be followed by a flight this high relative to the player, so a resting ball's jitter
+  // doesn't count.
   juggleMinFlightDiameters: 0.9,
 
-  // unit d/s — a touch is an impulse: the ball's velocity vector, in the
-  // player's frame of reference, must change by at least this much.
+  // d/s: a touch is a change in the ball's velocity, in the player's frame of reference, of at least this.
   touchMinImpulseDiametersPerSec: 4.5,
 
-  // unit d — contact range: distance from the ball centroid to the NEAREST
-  // EDGE of the player region. Contact means touching, so this is about one
-  // ball width, allowing for the silhouette's imprecision.
-  //
-  // A larger range (5.5, a frame-diagonal fraction, was tried) has no
-  // physical justification: at five ball-widths a ball bouncing on its own
-  // across the room counts as "in contact with the player", and the
-  // false-touch suite scored nine touches on a ball nobody went near.
-  // Contact range is not "somewhere in the same scene".
+  // d: ball centroid to the nearest edge of the player region; about one ball width, allowing for silhouette
+  // imprecision. At five widths the false-touch suite counted touches on a ball nobody went near.
   touchMaxContactDiameters: 1.2,
 
-  // unit d — the ball must be DISPLACED this far from where it was last
-  // struck before another contact can be counted. This is the spatial half
-  // of the debounce: the refractory timer alone cannot stop a ball
-  // resting against a foot from re-triggering, because time keeps passing.
-  //
-  // The value is a fraction of a ball width because that is what a ball
-  // mastery touch physically does — a toe-tap nudges the ball a little, it
-  // does not send it a ball-and-a-bit away. A larger value (1.2 was tried)
-  // silently suppresses genuine touches at anything above a slow pace: the
-  // ball never travels far enough to "separate", so the state machine latches
-  // after the first contact and a 14-touch attempt counts 1.
-  //
-  // Lowering a debounce is the classic way to make a test pass, so it is
-  // justified against measurement rather than convenience: with this value
-  // the 20-case false-touch stress suite must remain at ZERO false touches.
-  // If it ever does not, this number is wrong and the answer is to narrow
-  // supported pace, not to raise it and lose real touches.
+  // d: the ball must move this far from where it was last struck before another contact counts; the spatial half of
+  // the debounce, since a ball resting against a foot outlasts any timer. A toe-tap only nudges the ball, so at 1.2
+  // the state machine latched and a 14-touch attempt counted 1. The false-touch stress suite must stay at zero with
+  // this value; if not, narrow the supported pace rather than raise it.
   touchMinSeparationDiameters: 0.35,
 
-  // unit ms — the ball must have been continuously within contact range for
-  // at least this long before an impulse can be read as a contact. A real
-  // approach is continuous: the ball arrives, it does not materialise. A ball
-  // that is far away and then adjacent for two frames has jumped, and the
-  // apparent velocity change on arrival is a detector artefact, not a strike.
+  // ms: continuously in contact range this long before an impulse reads as a contact. A ball that jumps from far to
+  // adjacent is a detector artefact, not a strike.
   touchMinApproachMs: 120,
 
   // --- gap policy -------------------------------------------------------
-  // A SHORT gap may be bridged: the track survives and the count stays exact.
-  // A LONG gap may not: continuity is broken, and an exact measurement is
-  // refused rather than interpolated across the missing evidence.
-  //
-  // Both limits apply, because they describe different things. The frame
-  // count is the TRACKER's tolerance for consecutive missing observations;
-  // the millisecond limit is the physical one and is cadence-independent, so
-  // four dropped frames at 30 fps (133 ms) and four at 8 fps (500 ms) are not
-  // treated as the same event.
+  // A short gap is bridged; a long one refuses an exact measurement rather than interpolate. Both limits apply: the
+  // frame count is the tracker's tolerance, the ms limit the physical one (four frames at 30 fps is 133 ms, at 8 fps
+  // 500 ms).
   maxRecoverableMissingFrames: 4,
   maxRecoverableFrameGapMs: 400,
-  // Retained names, same values — read by existing call sites.
+  // Aliases read by other call sites.
   maxBallGapFrames: 4,
   maxBallGapMs: 400,
 
   // --- supported cadence envelope ---------------------------------------
-  // Measured, not aspired to: the engine counts within tolerance down to
-  // 340 ms between touches and under-counts at 260 ms. Anything faster is
-  // outside the validated envelope and must not be certified as exact.
+  // Measured: within tolerance down to 340 ms between touches, under-counts at 260 ms.
   minimumSupportedTouchIntervalMs: 340,
-  // unit — fraction of contact-range impulses that may be suppressed by the
-  // refractory window before the attempt is judged to be running faster than
-  // the engine can resolve. Derived from OBSERVATION (impulses the tracker
-  // saw and the protocol layer had to discard), never from a player-reported
-  // count and never from the number of touches finally emitted.
+  // Fraction of contact-range impulses the refractory window may suppress before the attempt is judged too fast.
+  // Derived from observed impulses, not from the touches finally emitted.
   maxRefractorySuppressedFrac: 0.25,
 
-  // unit — fraction of the attempt the ball may be missing in total.
+  // Fraction of the attempt the ball may be missing in total.
   maxBallMissingFrac: 0.25,
 
-  // unit — a rival blob this close in size to the primary is a second ball.
+  // A rival blob this close in size to the primary is a second ball.
   secondBallMinAreaRatio: 0.6,
 
-  // unit — the largest per-sample change in the apparent size of the player
-  // region that can be treated as the SAME frame of reference continuing.
-  //
-  // This value is derived, not chosen. Motion is measured in the player's
-  // frame, so when the whole image scales by a factor s between two samples,
-  // the player-relative position of a completely stationary ball appears to
-  // change by (s-1) * |rel|. Expressed in the units the protocol layer
-  // actually thresholds, that is a fabricated velocity of
-  //
-  //     (s - 1) * (|rel| / d) / dt      diameters per second
-  //
-  // The budget: it must stay below `touchMinImpulseDiametersPerSec` (4.5) at
-  // the worst case, which is the highest supported cadence (30 fps, dt = 1/30)
-  // and a ball at the far side of its working range from the player centre.
-  // Measured across the fixture set, |rel| / d runs to about 3.5 diameters
-  // there. So
-  //
-  //     (s - 1) * 3.5 * 30 < 4.5   =>   s - 1 < 0.043
-  //
-  // and 0.04 is that bound rounded down. The floor underneath it is detector
-  // noise: the player region is hundreds of pixels tall even in the smallest
-  // supported frame, so a one-pixel edge wobble is about 1.1%. The threshold
-  // therefore sits between a 1% noise floor and a 4.3% danger point, which is
-  // why it is stable rather than lucky.
-  //
-  // This replaced a 1.4x test, and the replacement is the whole point. 1.4x
-  // asked "is this a different person?" — an identity question. The question
-  // that matters for counting is "did the frame of reference move enough to
-  // fabricate an impulse?", and the answer to that is thirty times smaller.
-  // A holdout case found the gap: an 18% zoom sailed under the identity test
-  // and manufactured a touch.
+  // Largest per-sample change in the player region's apparent size still treated as the same frame of reference.
+  // Scaling by s moves a stationary ball by (s-1)·|rel|, a fabricated velocity of (s-1)·(|rel|/d)/dt d/s. That must
+  // stay under touchMinImpulseDiametersPerSec (4.5) at 30 fps with |rel|/d ≈ 3.5 (the fixtures' worst case):
+  // (s-1)·3.5·30 < 4.5 ⇒ s-1 < 0.043. A one-pixel edge wobble is about 1.1%, so 0.04 sits between noise and danger.
+  // An identity-style 1.4× test let an 18% zoom manufacture a touch.
   maxFrameScaleStepPerSample: 0.04,
 });
 // ---------------------------------------------------------- confidence
 //
-// This is MODEL CERTAINTY about an observation. It is never rendered as
-// a football-quality figure, and `refusedConfidenceFields()` below exists to
-// make that failure mode loud rather than subtle.
+// Model certainty about an observation, never rendered as a football-quality figure.
 export const CONFIDENCE = Object.freeze({
-  // Below this aggregate confidence the attempt is refused rather than
-  // reported. Prefer refusal over false verification.
+  // Below this aggregate confidence the attempt is refused.
   minAcceptable: 0.62,
   // A single event below this does not count toward the total.
   minPerEvent: 0.5,
-  // The fraction of frames in which the ball had to be detected with usable
-  // confidence for the observation to be considered complete.
+  // Fraction of frames in which the ball must be detected with usable confidence.
   minDetectionCoverage: 0.7,
 });
 
 // ------------------------------------------------------------- outcomes
-//
-// `accepted` is one value among many, and deliberately not the default.
 export const OBSERVATION_STATES = Object.freeze([
   'accepted',
   'insufficient_confidence',
@@ -280,8 +153,7 @@ export const OBSERVATION_STATES = Object.freeze([
   'unsupported_event_cadence',
 ]);
 
-// Reader-facing sentences. A refusal describes the OBSERVATION,
-// never the player. "Could not verify", never "you failed".
+// A refusal describes the observation, not the player: "could not verify", never "you failed".
 export const STATE_COPY = Object.freeze({
   accepted: 'This attempt was observed and measured.',
   insufficient_confidence: 'Could not verify this attempt — not enough visual confidence in what was observed.',
@@ -295,17 +167,14 @@ export const STATE_COPY = Object.freeze({
   unsupported_event_cadence: 'Could not verify this attempt — the touches came faster than ScoutBox can reliably count, so no exact result was produced.',
 });
 
-// Provider health.
 export const PROVIDER_HEALTH = Object.freeze([
   'not_configured', 'configured', 'warming', 'ready', 'degraded', 'unavailable',
 ]);
 
 // ------------------------------------------------- client-supplied fields
 //
-// The client may supply FRAMES. It may not supply a measurement.
-// These names are refused BY NAME rather than ignored, so that an attempt to
-// self-report is a loud 422 in a log rather than a silent no-op that someone
-// later mistakes for acceptance.
+// The client supplies frames, not a measurement. These names are refused with a 422 rather than ignored, so an
+// attempt to self-report is visible in a log.
 export const FORBIDDEN_CLIENT_FIELDS = Object.freeze([
   'touches', 'touchCount', 'reps', 'repCount', 'juggles', 'juggleCount',
   'count', 'measurement', 'value', 'result', 'verified', 'verifiedReps',
@@ -318,8 +187,7 @@ export function refusedClientFields(body) {
   return FORBIDDEN_CLIENT_FIELDS.filter((f) => Object.prototype.hasOwnProperty.call(body, f));
 }
 
-// From the other direction: confidence must never be rendered as
-// a player-quality value. The suite scans copy for these shapes.
+// Confidence must not be rendered as a player-quality value; the suite scans copy for these shapes.
 export const FORBIDDEN_CONFIDENCE_PHRASINGS = Object.freeze([
   /player\s+confidence/i,
   /confidence\s+(?:score|rating)\s*[:=]?\s*\d/i,
@@ -340,9 +208,7 @@ export function scanCopyForConfidenceMisuse(pairs) {
 
 // ------------------------------------------------------- protocol scope
 //
-// The smallest set that can be made genuinely reliable. Presence in this
-// list means "the engine has a documented rule for it", NOT "it is enabled
-// in production". Enablement is decided by measured evaluation in gate.mjs.
+// Presence here means the engine has a rule for it, not that it is enabled; gate.mjs decides that by evaluation.
 export const CANDIDATE_PROTOCOLS = Object.freeze({
   'combine-box-touch-60': Object.freeze({
     eventKind: 'touch',
@@ -361,16 +227,11 @@ export const CANDIDATE_PROTOCOLS = Object.freeze({
   }),
 });
 
-// The capabilities this engine can genuinely offer when it is healthy.
-// `rep_count` appears here because the engine HAS a counting rule; whether
-// any protocol may USE it in production is the gate's decision, not this
-// list's.
+// What the engine can offer when healthy. Whether a protocol may use `rep_count` is the gate's decision.
 export const ENGINE_CAPABILITIES = Object.freeze([
   'player_presence', 'ball_presence', 'active_motion', 'active_duration', 'rep_count',
 ]);
 
-// Capabilities the engine explicitly does NOT have, stated so that nothing
-// silently assumes them.
 export const ENGINE_NON_CAPABILITIES = Object.freeze({
   foot_classification: 'Which foot touched the ball is not observed. No limb classification is attempted.',
   technique_signals: 'No technique judgement of any kind is produced.',

@@ -1,5 +1,3 @@
-// The HTTP envelope around every route: proxy trust, the CORS allowlist, baseline response headers, the HTTP contract
-// and the body parser; the static app hosting; and the error contract, which answers last.
 import fs from 'node:fs';
 import path from 'node:path';
 import cors from 'cors';
@@ -7,20 +5,16 @@ import express from 'express';
 import { httpContractMiddleware } from './httpContract.mjs';
 import { RATE_LIMIT_POLICY } from './rateLimit.mjs';
 
-// Headers a browser client may READ cross-origin: Retry-After lets it honour a 429 instead of guessing, the request id
-// lets a person quote one when something goes wrong, the ordering header states how a list was sorted.
+// Headers a browser client may read cross-origin.
 const EXPOSED_HEADERS = ['Retry-After', 'X-Request-Id', 'X-ScoutBox-Ordering', 'X-ScoutBox-Schema'];
 
-/** Installed before every route. `trustProxy` is the parsed SCOUTBOX_TRUST_PROXY (httpTrust.mjs). */
+/** `trustProxy` is the parsed SCOUTBOX_TRUST_PROXY (httpTrust.mjs). */
 export function installHttpBaseline({ app, trustProxy, schemaVersion }) {
   if (typeof schemaVersion !== 'function' || !trustProxy) throw new TypeError('installHttpBaseline needs the parsed proxy setting and schemaVersion');
-  // Without proxy trust a server behind a platform proxy keys every per-IP limit on the proxy's address; set carelessly
-  // a direct client could pick its own. An invalid value refuses to boot in production.
+  // Unset behind a proxy, every per-IP limit keys on the proxy; set carelessly, a direct client could pick its own address.
   app.set('trust proxy', trustProxy.setting);
 
-  // ScoutBox authenticates with bearer tokens, not cookies, so a wildcard would not be an open door on its own; but no
-  // origin policy at all is not something a deployment should discover by reading the source. With
-  // SCOUTBOX_ALLOWED_ORIGINS unset, development stays permissive and the capability report says so.
+  // Bearer tokens, not cookies, so a wildcard is not an open door on its own. Unset, this stays permissive.
   const allowed = String(process.env.SCOUTBOX_ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
   app.use(cors(allowed.length
     ? {
@@ -30,7 +24,6 @@ export function installHttpBaseline({ app, trustProxy, schemaVersion }) {
       }
     : { exposedHeaders: EXPOSED_HEADERS }));
 
-  // These replace no authorisation check; they only stop a browser doing something helpful with our responses.
   app.use((_req, res, next) => {
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('Referrer-Policy', 'no-referrer');
@@ -40,13 +33,12 @@ export function installHttpBaseline({ app, trustProxy, schemaVersion }) {
     next();
   });
 
-  // The contract wraps res.json BEFORE the body parser, so a malformed-body 400 carries the same retry and schema
-  // headers as every other error. 20 MB because media still travels as data URLs on the upload path.
+  // Before the body parser, so a malformed-body 400 carries the same headers. 20 MB because uploads are data URLs.
   app.use(httpContractMiddleware({ ratePolicy: RATE_LIMIT_POLICY, schemaVersion }));
   app.use(express.json({ limit: '20mb' }));
 }
 
-/** Single-container deploys: the Docker build drops the built web apps under public/, served beside the API. */
+/** Single-container deploys: the Docker build puts the web apps under public/. */
 export function registerAppHosting({ app, publicDir }) {
   for (const [route, dir] of [['/app', 'club'], ['/console', 'admin'], ['/grassroots', 'grassroots'], ['/agent', 'agent']]) {
     const full = path.join(publicDir, dir);
@@ -58,11 +50,7 @@ export function registerAppHosting({ app, publicDir }) {
   }
 }
 
-/**
- * The error contract, installed after every route. Known request faults (a 25 MB body, malformed JSON) answer with
- * their own code, so a client can tell them from a crash; anything unexpected is a 500 with fixed text, and the detail
- * goes to the log, not the caller.
- */
+/** Installed after every route. Anything unexpected is a 500 with fixed text; the detail goes to the log. */
 export function installErrorContract(app) {
   app.use((err, req, res, _next) => {
     const known = (() => {

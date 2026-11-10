@@ -1,9 +1,5 @@
 /**
- * The Agent domain's contribution to the operational audit feed.
- *
- * Same row shape as domains/platform/audit.mjs and the same rule: what happened and who
- * did it, never what was said. Reason text, dispute text and licence
- * references never reach this projection; the subject is named only if the
+ * The agent core's audit rows: what happened and who did it, never what was said. The subject is named only if the
  * organisation may currently see the player.
  */
 
@@ -26,12 +22,10 @@ function safeDetail(detail) {
 
 const actorOf = (h) => (h?.by?.kind === 'org' || h?.by?.kind === 'agent'
   ? { userId: h.by.userId ?? null, name: h.by.name ?? null }
-  // An attributed reviewer is named as a role in the agency feed; the
-  // identity itself lives in the Trust & Safety audit.
+  // A reviewer appears as a role here; the identity lives in the Trust & Safety audit.
   : h?.by?.kind === 'ts_reviewer' ? { userId: null, name: 'Trust & Safety (attributed)' }
     : h?.by?.kind ? { userId: null, name: h.by.kind === 'player' ? 'Player' : h.by.kind } : null);
 
-/** Audit rows for one agency organisation, from the agent core's reads. */
 export function agentAuditRows(agentReads, org, { findPlayer, orgCanSee }) {
   const rows = [];
   const subjects = new Map();

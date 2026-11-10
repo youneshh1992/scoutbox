@@ -1,6 +1,5 @@
-// Player accounts: adult self sign-up, log-in, a child's device pairing, the session check in front of `/player`, the
-// account's own view and aging-up. Under-18 profiles are owned by a verified guardian and created from the guardian's
-// account (children.mjs); the sign-up refuses a minor.
+// Under-18 profiles are owned by a verified guardian and created from the guardian's account (children.mjs); the
+// sign-up refuses a minor.
 import express from 'express';
 import { parseDobStrict } from '../../temporal.mjs';
 import { adultAgeFor, ageOn, isAdult, computeTrustScore, trustBreakdown, trustTier, computeStreak, weeklyGoal, nextActions } from '../../domain.mjs';
@@ -11,9 +10,8 @@ import { pathwayFor, programmeProgress } from '../../grassrootsJourney.mjs';
 import { playerSelfView } from '../../views/playerViews.mjs';
 
 /**
- * Refuses (and answers) a profile a sign-up or a guardian's child creation carries, by field, instead of storing or
- * coercing it. A date of birth that cannot be read is refused rather than stored: it would fail closed as "age
- * unknown", but the account's age could then never be established. Returns true when refused.
+ * A date of birth that cannot be read is refused rather than stored: it would fail closed as "age unknown", but the
+ * account's age could then never be established. Returns true when refused.
  */
 export function profileRefused(res, body) {
   const bad = (status, payload) => { res.status(status).json(payload); return true; };
@@ -36,10 +34,7 @@ export function profileRefused(res, body) {
 
 const optional = (v) => (v === undefined || v === null || v === '' ? null : v);
 
-/**
- * A new player record from a refused-or-accepted profile body. Without coordinates the player is not visible to
- * grassroots clubs: the radius rule fails closed.
- */
+/** Without coordinates the player is not visible to grassroots clubs: the radius rule fails closed. */
 export function newPlayerRecord(body, id) {
   return {
     id, name: body.name, dob: body.dob, country: body.country ?? 'GB',
@@ -50,9 +45,8 @@ export function newPlayerRecord(body, id) {
 }
 
 /**
- * The `/player` router behind the session check, created before the domains that mount on it. `guardianManagedOnly`
- * refuses (and answers) what a parent manages for a child account: messages, notifications and club interaction. The
- * child keeps football activity (uploads, stats, drills, attendance).
+ * `guardianManagedOnly` refuses what a parent manages for a child account (messages, notifications, club
+ * interaction). The child keeps football activity (uploads, stats, drills, attendance).
  */
 export function createPlayerSession({ app, findPlayer, sessionFor }) {
   function playerAuth(req, res, next) {
@@ -73,10 +67,7 @@ export function createPlayerSession({ app, findPlayer, sessionFor }) {
   return { playerRouter, guardianManagedOnly };
 }
 
-/**
- * Sign-up, log-in and the child's pairing exchange on `app`; `/player/me` and aging-up on the player router. New
- * accounts need a password; seed identities without one are demo logins, open only while dev logins are enabled.
- */
+/** Seed identities without a password are demo logins, open only while dev logins are enabled. */
 export function registerPlayerAccount({
   app, playerRouter, players, guardians, findPlayer, codes, unit, seam, nextId, rateLimit, broadcast, notify, ledgerAppend,
   createSession, loginLockedOut, noteLoginFailure, devLogins, devLoginRefused, checkSavedSearches, publishedVouchesFor, vouchesFor,
@@ -113,7 +104,7 @@ export function registerPlayerAccount({
   });
 
   app.post('/auth/player/login', (req, res) => {
-    // The lockout is checked before the lookup, so an unknown id and a real one are refused alike once the budget is gone.
+    // Checked before the lookup, so an unknown id and a real one are refused alike once the budget is gone.
     if (loginLockedOut(res, `player:${req.body?.playerId}`)) return;
     const p = findPlayer(req.body?.playerId);
     if (!p) { noteLoginFailure(`player:${req.body?.playerId}`); return res.status(404).json({ error: 'PLAYER_NOT_FOUND' }); }
@@ -128,10 +119,9 @@ export function registerPlayerAccount({
     res.json({ playerId: p.id, name: p.name, token: createSession('player', p.id) });
   });
 
-  // The child's device exchanges the code its guardian minted (children.mjs) for the child's limited login.
   app.post('/auth/player/pair', (req, res) => {
     const { code } = req.body || {};
-    // A wrong code is charged per client address, on top of the /auth limiter; a correct one costs nothing.
+    // A wrong code is charged per client address, on top of the /auth limiter.
     const source = req.ip ?? req.socket?.remoteAddress ?? '?';
     if (rateLimit.peek('pairing_attempt', source).remaining === 0) return res.status(429).json(rateLimitedBody('pairing_attempt'));
     const live = codes.peekPairingCode(code);
@@ -141,8 +131,7 @@ export function registerPlayerAccount({
       rateLimit.limited('pairing_attempt', source);
       return res.status(404).json({ error: 'CODE_INVALID', message: 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.' });
     }
-    // The code is consumed and the session created in one unit, so a failure anywhere, COMMIT included, keeps the
-    // code live and creates no session.
+    // One unit, so a failure anywhere, COMMIT included, keeps the code live and creates no session.
     let token = null;
     unit(() => {
       const consumed = codes.consumePairingCode(code);
@@ -172,8 +161,7 @@ export function registerPlayerAccount({
     });
   });
 
-  // The day a guardian-owned player is an adult, ownership moves to them, with their consent; the guardian is told
-  // and the ledger records it.
+  // The day a guardian-owned player turns 18, ownership moves to them with their consent.
   playerRouter.post('/aging-up/complete', (req, res) => {
     if (!isAdult(req.player)) return res.status(403).json({ error: 'STILL_A_MINOR', message: 'The transition unlocks on your 18th birthday (age of majority in your country).' });
     if (!req.player.guardianId) return res.status(400).json({ error: 'ALREADY_OWNED', message: 'You already own this account.' });

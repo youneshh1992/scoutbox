@@ -1,39 +1,8 @@
-// The constant freeze.
-//
-// A holdout only means something if the thing being tested did not move
-// between "we froze it" and "we measured it". Otherwise the holdout is just
-// another development fixture with a more impressive name: run it, see a
-// number you dislike, nudge a threshold, run it again, and the separation
-// that made it a holdout is gone without anyone deciding to throw it away.
-//
-// So the constants that determine an observation are hashed, and the hashes
-// are RECORDED HERE AS LITERALS. The holdout harness refuses to run against a
-// drifted freeze. Changing a threshold is allowed — it just cannot be done
-// quietly, and it invalidates the holdout result that was measured under the
-// old one.
-//
-// What is frozen is everything that can change a count:
-//
-//   policy      engine and policy version, provider id, frame encoding
-//   frame       transport limits (size, batch, queue)
-//   capture     the cadence envelope a capture must satisfy
-//   detection   what counts as a ball, a person, a usable frame
-//   contact     the event rules: impulse, range, separation, refractory, gaps
-//   confidence  the acceptance floors
-//   quality     the sufficiency thresholds
-//   geometry    the normalisation constants the layers measure in
-//
-//   source      the observation layers themselves, comment-stripped
-//
-// Source is frozen because a change to the layer CODE — a different
-// normalisation order, a reordered guard — changes what the engine counts
-// without moving a single threshold, so a constants-only freeze would report
-// itself intact while the holdout result underneath it went stale. Generation
-// 1 of the holdout found exactly such a defect in the tracking layer.
-//
-// Deliberately NOT frozen: the fixtures, the scene generator, the harness.
-// Those are the measuring instrument, and an instrument may be extended. The
-// freeze covers the thing being measured.
+// The constants and observation-layer source that can change a count are hashed, and the hashes recorded here as
+// literals; the holdout harness refuses to run against a drifted freeze, so a threshold can't be nudged quietly
+// between freezing and measuring. Layer source is frozen too because a code change (a reordered guard) can change
+// counts without moving a threshold. The fixtures, scene generator and harness are the measuring instrument and are
+// not frozen.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -47,49 +16,28 @@ import { QUALITY_THRESHOLDS } from './quality.mjs';
 import { canonicalJson } from '../../../platform/values.mjs';
 
 /**
- * Geometry constants that live in the layer code rather than in policy,
- * mirrored here so the freeze covers them too.
- *
- * These are duplicated values, and that is a deliberate trade. The
- * alternative — parsing the source files — would hash comments and
- * formatting, so a reworded comment would read as a threshold change. The
- * duplication is checked: `assertGeometryMirrorsSource()` below reads the
- * real source and fails if a mirrored number no longer appears in it.
+ * Geometry constants in the layer code, mirrored so the freeze covers them. `geometryMirrorCheck()` fails if a
+ * mirrored number no longer appears in the source.
  */
 export const GEOMETRY_CONSTANTS = Object.freeze({
-  // detect.mjs — the connected-component cap that bounds detection cost.
+  // detect.mjs: the connected-component cap that bounds detection cost.
   maxComponents: 64,
-  // track.mjs — the person-region POSITION discontinuity test. A silhouette
-  // whose centre moves more than half a body width in one sample is a
-  // different frame of reference, not the same one moved. The corresponding
-  // SCALE test is not here: it lives in policy as
-  // EVENT_RULES.maxFrameScaleStepPerSample, because unlike this one its value
-  // is derived from the impulse threshold rather than from what a body does.
+  // track.mjs: a silhouette centre moving over half a body width in one sample is a different frame of reference.
+  // The scale test is EVENT_RULES.maxFrameScaleStepPerSample, derived from the impulse threshold.
   personCentreJumpFracOfWidth: 0.5,
-  // track.mjs — beyond this ratio the apparent ball size has changed so much
-  // that the track is following a different object.
+  // track.mjs: beyond this ball-size ratio the track is following a different object.
   ballDiameterResetRatio: 2.2,
-  // protocol.mjs — a ball this close to the frame edge has a clipped blob and
-  // therefore an unreliable centroid, in ball diameters.
+  // protocol.mjs: in ball diameters, a ball this close to the frame edge has a clipped, unreliable centroid.
   minEdgeDiametersForImpulse: 0.5,
 });
 
-/**
- * The observation layers whose CODE is frozen. Not the engine orchestrator,
- * which only wires them, and not the fixtures or harness, which measure.
- */
 export const FROZEN_SOURCES = Object.freeze(['detect.mjs', 'track.mjs', 'protocol.mjs', 'quality.mjs']);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Strip comments and collapse whitespace before hashing.
- *
- * This is crude — it is line-based, so it would not survive a `/* *​/` block
- * opened and closed on lines that also carry code — and crude is the right
- * trade here. The alternative of hashing raw bytes would make every reworded
- * comment read as a behavioural change, and a freeze that cries wolf on
- * comment edits is a freeze people learn to re-record without reading.
+ * Line-based, so trailing comments on code lines are hashed. Raw bytes would make every reworded comment read as a
+ * behavioural change.
  */
 export function strippedSource(text) {
   return text
@@ -100,7 +48,6 @@ export function strippedSource(text) {
     .replace(/\s+/g, ' ');
 }
 
-/** Per-file digests of the observation layers. */
 export function sourceDigests({ dir = HERE } = {}) {
   const out = {};
   for (const f of FROZEN_SOURCES) {
@@ -109,7 +56,7 @@ export function sourceDigests({ dir = HERE } = {}) {
   return out;
 }
 
-/** The frozen surface, grouped so a drift report can name what moved. */
+/** Grouped so a drift report can name what moved. */
 export function frozenGroups() {
   return {
     policy: {
@@ -129,18 +76,11 @@ export function frozenGroups() {
   };
 }
 
-/**
- * Canonical serialisation: keys sorted at every level, arrays kept in order.
- *
- * Without this the checksum depends on declaration order, so reordering two
- * unrelated policy lines would report a threshold change and reordering a
- * changed line back would hide one.
- */
+/** Keys sorted, so the checksum doesn't depend on declaration order. */
 export { canonicalJson };
 
 function sha256(s) { return createHash('sha256').update(s, 'utf8').digest('hex'); }
 
-/** Per-group checksums plus one over the whole surface. */
 export function computeChecksums(groups = frozenGroups()) {
   const out = {};
   for (const [name, g] of Object.entries(groups)) out[name] = sha256(canonicalJson(g)).slice(0, 16);
@@ -149,11 +89,8 @@ export function computeChecksums(groups = frozenGroups()) {
 }
 
 /**
- * THE FREEZE RECORD.
- *
- * Recorded before the holdout was generated or run. If a checksum below stops
- * matching the live constants, the holdout result measured under it is stale
- * — not wrong, stale — and must be regenerated and re-run under a new freeze.
+ * Recorded before the holdout was generated or run. If a checksum stops matching, the holdout result is stale and
+ * must be regenerated and re-run under a new freeze.
  */
 export const FREEZE = Object.freeze({
   freezeId: 'm22-v2-freeze-3',
@@ -180,12 +117,7 @@ export const FREEZE = Object.freeze({
   }),
 });
 
-/**
- * The freeze history. A freeze that can be re-recorded silently is not a
- * freeze, so every one that has existed stays here with the reason it was
- * superseded — including, in the case of generation 1, the admission that its
- * holdout result was invalidated by a fix rather than by a threshold change.
- */
+/** Every freeze stays here with the reason it was superseded, so none is re-recorded silently. */
 export const FREEZE_HISTORY = Object.freeze([
   Object.freeze({
     freezeId: 'm22-v2-freeze-1',
@@ -214,13 +146,7 @@ export const FREEZE_HISTORY = Object.freeze([
   }),
 ]);
 
-/**
- * Compare the live constants against the freeze record.
- *
- * Returns the drifted group names rather than a bare boolean, because "the
- * contact parameters moved" and "the frame transport limits moved" call for
- * completely different responses.
- */
+/** Names the drifted groups, because different groups moving call for different responses. */
 export function freezeStatus() {
   const live = computeChecksums();
   const drifted = [];
@@ -238,13 +164,7 @@ export function freezeStatus() {
   };
 }
 
-/**
- * The mirrored geometry constants must still exist in the source they were
- * copied from. This is the check that keeps the duplication honest: if
- * someone changes `1.4` to `1.6` in track.mjs, the freeze checksum would not
- * move — it hashes the mirror — so the mirror itself is verified against the
- * file.
- */
+/** The checksum hashes the mirror, so the mirror is checked against the source it was copied from. */
 export function geometryMirrorCheck({ readFile } = {}) {
   const expectations = [
     { file: 'detect.mjs', needles: ['maxComponents = 64'] },

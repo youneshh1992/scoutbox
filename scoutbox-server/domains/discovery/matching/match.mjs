@@ -1,23 +1,8 @@
 /**
- * The explainable match engine. There is exactly one of these.
+ * The match engine: does a player satisfy every required criterion, and which preferred ones are met? Nothing is
+ * graded, so no caller can derive a score. Briefs and Nobody Missed use it too, with every criterion required.
  *
- * `matchPlayerToCriteria(facts, criteria)` answers two questions and nothing
- * else:
- *
- *   does this player satisfy every REQUIRED criterion?
- *   which PREFERRED criteria are met?
- *
- * There is no score, no weight, no ordering hint and no summary number — a
- * caller cannot derive one from the output because nothing here is graded.
- *
- * `playerMatchesBrief` (briefs, Nobody Missed) delegates to this function with
- * every criterion in the required class (see `briefCriteriaToCanonical`), so
- * Nobody Missed and Matching evaluate the same facts through the same code. A
- * second engine would let the two disagree about what a club asked for.
- *
- * Fail closed, always: a fact that is missing does not satisfy a criterion
- * about it. An unknown age is not "probably fine", and a distance that could
- * not be established is not "probably near".
+ * Fail closed: a missing fact does not satisfy a criterion about it.
  */
 import { EVIDENCE_REQUIREMENTS, TRUST_BANDS } from '../shared.mjs';
 import { MATCH_POLICY_VERSION, criteriaVersion } from './criteria.mjs';
@@ -25,17 +10,12 @@ import { ageOn, haversineKm } from '../../../domain.mjs';
 import { bornByForAge } from '../../../repositories/identity.mjs';
 import { bandRankExpr } from '../../../repositories/matchFacts.mjs';
 
-// Built on first use, never at module load: domains/discovery/shared.mjs imports this
-// module, so TRUST_BANDS may still be initialising while this file evaluates.
+// Built on first use: shared.mjs imports this module, so TRUST_BANDS may still be initialising when it evaluates.
 let BAND_RANK_MEMO = null;
 const bandRank = () => (BAND_RANK_MEMO ??= Object.fromEntries(TRUST_BANDS.map((b, i) => [b, i])));
 const LEVEL_RANK = { amateur: 0, semi_pro: 1, pro: 2 };
 
-/**
- * Evaluate one criterion. `key` is the reason key the brief consumers read,
- * `text` the sentence shown to the person. `now` is passed in rather than
- * read, so an explanation is reproducible.
- */
+/** `now` is passed in rather than read, so an explanation is reproducible. */
 function evaluate(c, facts, { now = Date.now() } = {}) {
   switch (c.type) {
     case 'position': {
@@ -58,9 +38,7 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
     case 'geography': {
       if (facts.distanceKm == null) return { key: 'location', met: false, text: 'Distance could not be established' };
       if (facts.distanceKm > c.value) return { key: 'location', met: false, text: 'Outside the permitted search area' };
-      // Deliberately no number: explaining a match must not become a way to
-      // learn where a player (often a child) lives. Where the organisation is
-      // already authorised to see distance, the card shows it separately.
+      // No number: explaining a match must not become a way to learn where a player (often a child) lives.
       return { key: 'location', met: true, text: 'Within the club’s permitted search area' };
     }
     case 'level': {
@@ -70,20 +48,16 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
           ? { key: 'level', met: true, text: 'Within the level criteria' }
           : { key: 'level', met: false, text: 'Plays at a level outside the criteria' };
       }
-      // `lte`: only a pro player against a semi-pro ceiling fails, and an
-      // unknown level does not block.
+      // An unknown level does not block.
       if (c.value === 'semi_pro' && facts.level === 'pro') return { key: 'level', met: false, text: 'Plays at a level above the criteria' };
       if (facts.level && LEVEL_RANK[facts.level] > LEVEL_RANK[c.value]) return { key: 'level', met: false, text: 'Plays at a level above the criteria' };
       return { key: 'level', met: true, text: 'Within the level criteria' };
     }
     case 'foot': {
       if (!facts.foot) return { key: 'foot', met: false, text: 'Preferred foot is not on record' };
-      // Case-insensitive on purpose: the vocabulary is written "Right" and the
-      // stored fact "right", and a literal comparison would make the foot
-      // criterion unsatisfiable for every real player while passing synthetic tests.
+      // Case-insensitive: the vocabulary is written "Right" and the stored fact "right".
       const want = c.values.map((v) => String(v).toLowerCase());
       const have = String(facts.foot).toLowerCase();
-      // "Both" satisfies a criterion for either foot.
       return want.includes(have) || have === 'both'
         ? { key: 'foot', met: true, text: `Matches foot criteria (${facts.foot})` }
         : { key: 'foot', met: false, text: 'Does not match the foot criteria' };
@@ -103,8 +77,6 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
     case 'evidence_recency': {
       const at = c.evidenceKind === 'any' ? facts.lastEvidenceAt : facts.lastFootageAt;
       const key = `recency:${c.evidenceKind}:${c.value}`;
-      // A missing date is not recent. Treating "we do not know when" as "just
-      // now" would put stale records in front of a recruiter as fresh ones.
       if (!at) return { key, met: false, text: 'No dated evidence on record' };
       const days = Math.floor((now - at) / 86_400_000);
       return days <= c.value
@@ -127,8 +99,7 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
     case 'combine_measurement': {
       const key = `combineValue:${c.protocol}`;
       const v = facts.combineMeasurements?.[c.protocol];
-      // Only a production-valid Combine Verified measurement reaches the facts
-      // projection, so a simulated result can never satisfy a threshold.
+      // Simulated results never reach the facts projection.
       if (v == null) return { key, met: false, text: `No ${c.protocol} Combine Verified measurement` };
       const met = c.operator === 'gte' ? v >= c.value : v <= c.value;
       return met
@@ -136,47 +107,42 @@ function evaluate(c, facts, { now = Date.now() } = {}) {
         : { key, met: false, text: `${c.protocol} ${v} does not meet the club’s threshold (${c.operator === 'gte' ? '≥' : '≤'} ${c.value})` };
     }
     default:
-      // Unreachable through validateCriteria; if it is ever reached, fail
-      // closed rather than treat an unknown test as satisfied.
+      // Unreachable through validateCriteria.
       return { key: `unknown:${c.type}`, met: false, text: 'This criterion cannot be evaluated' };
   }
 }
 
-/**
- * The SAME test as `evaluate`, as an SQL condition over a match query's row (`players p` joined to
- * `player_match_facts f`, repositories/matchFacts.mjs), so a match set is a query instead of a loop. One case per
- * criterion type, each the JS rule above restated; scripts/testMatchFacts.mjs runs both over generated facts and
- * criteria and requires them to agree. Fail closed exactly as `evaluate` does: an unknown fact meets nothing.
- * `org` decides what the club may know (distance only for a Grassroots club), `now` the instant of the read.
- */
-/** A player's age on `now` in SQL (ageOn's rule: whole UTC years, one fewer before the birthday), or NULL. */
+/** ageOn's rule in SQL: whole UTC years, one fewer before the birthday. */
 export const AGE_SQL = (now) => {
   const d = new Date(now);
   return { sql: "(? - CAST(substr(p.birth_date, 1, 4) AS INTEGER) - (? < substr(p.birth_date, 6, 5)))", args: [d.getUTCFullYear(), `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`] };
 };
-export const BAND_RANK_SQL = (col = 'f.trust_band') => bandRankExpr(col); // the facts' band index is on the same expression
+export const BAND_RANK_SQL = (col = 'f.trust_band') => bandRankExpr(col); // the facts' band index is on this expression
 const LEVEL_RANK_SQL = `COALESCE(CASE p.level ${Object.entries(LEVEL_RANK).map(([l, i]) => `WHEN '${l}' THEN ${i}`).join(' ')} END, -1)`;
 const json = (vs) => JSON.stringify(vs);
+/**
+ * The same test as `evaluate`, as an SQL condition over `players p` joined to `player_match_facts f`.
+ * scripts/testMatchFacts.mjs runs both over generated facts and requires them to agree.
+ */
 export function criterionSql(c, { now, org }) {
   switch (c.type) {
     case 'position': return c.primaryOnly
       ? { sql: 'f.position IN (SELECT value FROM json_each(?))', args: [json(c.values)] }
-      // The players whose position or a secondary position is listed, as one indexed set probed by id.
       : { sql: 'p.id IN (SELECT player_id FROM player_match_facts WHERE position IN (SELECT value FROM json_each(?)) UNION SELECT player_id FROM player_match_fact_positions WHERE code IN (SELECT value FROM json_each(?)))', args: [json(c.values), json(c.values)] };
     case 'age': {
-      // ageOn's rule as day comparisons (temporal.mjs ageOnMs: N at 00:00 UTC on the birthday): age ≥ n exactly when the
-      // birth day is on or before n years before today, so no per-row function is called and the index can serve it.
+      // Age ≥ n exactly when the birth day is on or before n years before today (age N starts at 00:00 UTC on the
+      // birthday), so no per-row function is called and the index can serve it.
       const lo = c.operator === 'between' ? c.values[0] : (c.operator === 'gte' ? c.value : null);
       const hi = c.operator === 'between' ? c.values[1] : (c.operator === 'lte' ? c.value : null);
       return { sql: `p.birth_date IS NOT NULL${lo != null ? ' AND p.birth_date <= ?' : ''}${hi != null ? ' AND p.birth_date > ?' : ''}`, args: [...(lo != null ? [bornByForAge(lo, now)] : []), ...(hi != null ? [bornByForAge(hi + 1, now)] : [])] };
     }
     case 'geography':
-      // The distance exists only where the club may see it (views/playerViews.mjs: a Grassroots club's, in tenths).
+      // Only a Grassroots club may see distance (views/playerViews.mjs).
       if ((org?.level ?? null) !== 'grassroots' || !org.location) return { sql: '0', args: [] };
       return { sql: 'distance_tenths(?, ?, p.lat, p.lng) IS NOT NULL AND distance_tenths(?, ?, p.lat, p.lng) / 10.0 <= ?', args: [org.location.lat, org.location.lng, org.location.lat, org.location.lng, c.value] };
     case 'level':
       if (c.operator === 'in') return { sql: 'p.level IN (SELECT value FROM json_each(?))', args: [json(c.values)] };
-      // An unknown level does not block; a known one above the ceiling does.
+      // An unknown level does not block.
       return { sql: `${LEVEL_RANK_SQL} <= ?`, args: [LEVEL_RANK[c.value] ?? -1] };
     case 'foot':
       return { sql: "p.foot IS NOT NULL AND (lower_js(p.foot) IN (SELECT value FROM json_each(?)) OR lower_js(p.foot) = 'both')", args: [json(c.values.map((v) => String(v).toLowerCase()))] };
@@ -200,10 +166,7 @@ export function criterionSql(c, { now, org }) {
   }
 }
 
-/**
- * The engine's facts for one row of a match query (repositories/matchFacts.mjs `query(...).page`) and its child rows
- * (`childrenOf`), the organisation's part (age, the Grassroots distance) worked out here as the org view does.
- */
+/** Age and the Grassroots distance are worked out here as the org view does. */
 export function factsOfRow(row, children, { org, now }) {
   const age = ageOn(row.birth_date, now);
   const combine = children?.combine ?? {};
@@ -236,13 +199,6 @@ export function factsOfRow(row, children, { org, now }) {
   };
 }
 
-/**
- * The whole answer for one player.
- *
- * `matchesRequired` is the only thing that decides membership. `preferredMet`
- * and `preferredTotal` are a count of the club's own criteria — never a score,
- * never normalised, never ordered against another player.
- */
 export function matchPlayerToCriteria(facts, criteria = {}, { now = Date.now() } = {}) {
   const required = (criteria.required ?? []).map((c) => ({ criterionId: c.id, type: c.type, ...evaluate(c, facts, { now }) }));
   const preferred = (criteria.preferred ?? []).map((c) => ({ criterionId: c.id, type: c.type, ...evaluate(c, facts, { now }) }));
@@ -254,15 +210,11 @@ export function matchPlayerToCriteria(facts, criteria = {}, { now = Date.now() }
     preferredTotal: preferred.length,
     policyVersion: MATCH_POLICY_VERSION,
     criteriaVersion: criteriaVersion(criteria),
-    // Said out loud in the payload so no consumer has to guess.
     note: 'Criteria the club wrote, evaluated as facts. Preferred criteria are counted, never scored.',
   };
 }
 
-/**
- * Translate a Recruitment Brief's criteria into the canonical vocabulary.
- * Everything a brief carries is REQUIRED: that is what a brief means.
- */
+/** Everything a brief carries is required. */
 export function briefCriteriaToCanonical(criteria = {}) {
   const required = [];
   const add = (type, operator, body) => {
@@ -285,11 +237,6 @@ export function briefCriteriaToCanonical(criteria = {}) {
   return { required, preferred: [], schemaVersion: 1 };
 }
 
-/**
- * The brief contract (`matchBrief`), computed by the match engine. The order
- * of the reasons follows the brief's own order, and each carries the brief's
- * key, `met` flag and words.
- */
 export function matchBrief(facts, briefCriteria = {}, opts = {}) {
   const canonical = briefCriteriaToCanonical(briefCriteria);
   const result = matchPlayerToCriteria(facts, canonical, opts);

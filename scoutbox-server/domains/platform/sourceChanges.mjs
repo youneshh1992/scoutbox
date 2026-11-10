@@ -1,32 +1,15 @@
 /**
- * Canonical source-change events: an honest clock for changes whose records
- * carry none. `positionHistory.from` is the FOOTBALL date the player started
- * a position and `prefs.updatedAt` moves on any preference edit, so neither
- * dates a `position_changed`. Rather than guess a timestamp from a record that
- * means something else:
- *
- *   1. where a canonical row already carries an honest clock (a signing's `ts`,
- *      a squad row's `addedAt`, a verified claim's `verifiedAt`, a Box Cam
- *      session's invalidation), the collector reads THAT clock;
- *   2. where no clock exists at all (a position preference edit), the write
- *      site appends an event here, with the time it actually happened.
- *
- * This store is append-only and holds no player content: a type, the canonical
- * source identity, when it happened, and a small structured detail used for
- * copy. It is not a second copy of anything.
- *
- * The store is the source_changes table (repositories/safetyAudit.mjs): a
- * recorded change is one explicit write that also drops the OLDEST rows beyond
- * the cap (SOURCE_CHANGE_CAP), in the caller's unit of work when one is open.
+ * A clock for changes whose records carry none: `positionHistory.from` is the
+ * football date a player started a position and `prefs.updatedAt` moves on any
+ * preference edit, so neither dates a `position_changed`. Where a row already
+ * has an honest clock (a signing's `ts`, say) the collector reads that instead.
+ * Append-only, no player content; the oldest rows beyond SOURCE_CHANGE_CAP are dropped.
  */
 
 export function createSourceChanges({ nextId, safetyAudit }) {
   if (typeof safetyAudit?.sourceChanges?.record !== 'function' || typeof nextId !== 'function') throw new TypeError('createSourceChanges needs the safety-audit repository and nextId');
 
-  /**
-   * Append a canonical source change. `occurredAt` must be the moment the fact
-   * changed — never a record's creation time standing in for a different event.
-   */
+  /** `occurredAt` is when the fact changed, never a record's creation time standing in for it. */
   const recordSourceChange = ({ playerId, type, sourceSystem, sourceId, occurredAt = Date.now(), detail = null }) => {
     if (!playerId || !type || !sourceSystem) return null;
     return safetyAudit.sourceChanges.record({
@@ -38,7 +21,7 @@ export function createSourceChanges({ nextId, safetyAudit }) {
     });
   };
 
-  /** Every recorded change for a player, oldest first. */
+  /** Oldest first. */
   const sourceChangesFor = (playerId) => safetyAudit.sourceChanges.forPlayer(playerId);
 
   return { recordSourceChange, sourceChangesFor };

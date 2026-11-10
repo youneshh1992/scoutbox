@@ -1,35 +1,9 @@
 /**
- * Signing & Contract Completion: the routes and the ONE writer.
+ * Signing routes and `recordCompletedSigning`, the only writer of a completed signing.
  *
- *   Offer accepted → package opened (explicit club act) → document attached
- *   (exact bytes, digest) → presented (READY) → each required party completes
- *   against the exact revision → canonical completion → the completed signing
- *   written once → lifecycle `signed` → player `contractStatus: 'under_contract'`.
- *
- * Routes
- *   GET    /org/rooms/:id/signing                    packages of the case + what may happen next
- *   POST   /org/offers/:id/signing                   open a package over an ACCEPTED Offer revision
- *   GET    /org/signings/:id · /history · /document  the club reads its own
- *   PATCH  /org/signings/:id                         contract days / note, DRAFT only
- *   POST   /org/signings/:id/document                attach the exact document (DRAFT only)
- *   POST   /org/signings/:id/ready                   present it: READY
- *   POST   /org/signings/:id/parties/club/complete   the club signatory (a recruitment lead) completes
- *   POST   /org/signings/:id/executed-document       the executed document as evidence
- *   POST   /org/signings/:id/complete                the completion gate → the ONE writer
- *   POST   /org/signings/:id/cancel · /void · /supersede
- *   GET    /player/signings · /:id · /:id/document   the presented revision only
- *   POST   /player/signings/:id/complete             the player's own act
- *   GET    /guardian/signings…                       dormant (pathway closed)
- *   GET    /org/agent/clients/:id/signings           read-only, over Offers the client shared
- *   POST   /admin/signings/:id/void                  a NAMED reviewer voids; never a party
- *
- * Never here: a route that signs for someone else; a body field that names
- * the actor, their role, or a time; a write of a completed signing outside
- * `recordCompletedSigning`; an accepted Offer turning into anything by itself.
- *
- * The repository hands out deep-frozen records: an in-place edit throws. Every
- * write is an explicit repository operation inside the route's unit of work that
- * returns the fresh record, which the route then uses.
+ * Offer accepted → package opened (club act) → exact document attached → presented (READY) → each required
+ * party completes against the exact revision → completion → lifecycle `signed` → `under_contract`.
+ * Nobody signs for someone else, and no body field names the actor, their role or a time.
  */
 
 import { PLANS } from '../../../catalogue.mjs';
@@ -44,7 +18,7 @@ import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { canTransitionRecruitmentCase, NULL_EVIDENCE_PROVIDER, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../lifecycle/lifecycle.mjs';
 import { playerLevelAfterSigning } from '../../../domain.mjs';
 import { offerStatus as canonicalOfferStatus, effectiveRevisionStatus } from '../offers/offer.mjs';
-// The ONE current-package rule (live → completed → newest terminal).
+// The current-package rule (live → completed → newest terminal).
 import { currentSigningForOffer } from '../lifecycle/journeyModel.mjs';
 import { sendSigningError, notFound, documentNotFound } from './errors.mjs';
 import {
@@ -63,28 +37,24 @@ export function registerSigning(rawCtx) {
     orgRouter, playerRouter, guardianRouter, adminRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, auditEntry, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
     access = null, integration = null, evidence = null, faults = null,
-    // `afterCommit` defers a side effect until COMMIT returned.
     players, unit, afterCommit,
     signingsFollowUps,
     recruitmentReads,
-    // A grassroots signing's squad row is a row of org_squad_members.
+    // A grassroots signing's squad row lives in org_squad_members.
     clubSetup,
-    // The document vault is the verification repository's evidence.
+    // The document vault.
     verificationReads,
   } = ctx;
-  /** The vault record `id` owned by `orgId`, or null. */
   const vaultRecordOf = (id, orgId) => { const e = typeof id === 'string' ? verificationReads?.evidence.byId(id) ?? null : null; return e && e.orgId === orgId ? e : null; };
   if (typeof recruitmentReads?.offers?.byId !== 'function') throw new TypeError('registerSigning needs recruitmentReads (offers) from the data layer');
   const offerReads = recruitmentReads.offers;
-  /** A case of this organisation, or null. */
   const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
-  /** A case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...entry) => ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
   if (typeof players?.setAvailability !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
   if (typeof signingsFollowUps?.signingPackages?.insert !== 'function' || typeof signingsFollowUps?.signings?.record !== 'function') throw new TypeError('registerSigning needs the signings/follow-ups repository from the data layer');
   const sp = signingsFollowUps.signingPackages; const sg = signingsFollowUps.signings;
 
-  /** A refusal raised INSIDE the completion unit: the unit rolls back, the route answers with this code (never a 500). */
+  /** Raised inside the completion unit: the unit rolls back and the route answers with this code. */
   class SigningAbort extends Error {
     constructor(code, message, { why = code, moved = null } = {}) { super(why); this.code = code; this.userMessage = message; this.moved = moved; }
   }
@@ -96,13 +66,12 @@ export function registerSigning(rawCtx) {
   const orgOf = (orgId) => ctx.byId.org(orgId);
   const now = requestClock();
   const byOrg = (req) => ({ kind: 'org', id: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
-  // Each helper is an explicit repository write that returns the fresh record.
   const hist = (pkg, action, by, detail, at) => sp.addHistory(pkg.id, { id: nextId('aud'), at, action, by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null }, detail: detail ?? null });
   const keyList = (pkg, act) => (Array.isArray(pkg.keys?.[act]) ? pkg.keys[act] : pkg.keys?.[act] ? [pkg.keys[act]] : []);
   const keyRow = (pkg, act, k) => keyList(pkg, act).find((x) => x && x.key === k) ?? null;
   const addKey = (pkg, act, entry) => sp.addKey(pkg.id, act, entry);
   const safe = sideEffectRunner('SIGNING');
-  /** bumpRev's rule (domains/platform/concurrency.mjs) written through the repository: rev + 1, revAt, revBy, updatedAt. */
+  /** bumpRev's rule (domains/platform/concurrency.mjs), written through the repository. */
   const touch = (pkg, req, at, by = req?.orgUser ?? null) => sp.patch(pkg.id, { rev: (Number.isInteger(pkg.rev) ? pkg.rev : 1) + 1, revAt: at, revBy: by ? { userId: by.id ?? null, name: by.name ?? null } : null, updatedAt: at });
 
   // ------------------------------------------------------------- lookups
@@ -116,12 +85,8 @@ export function registerSigning(rawCtx) {
   const completedRowFor = (pkg) => sg.forPackage(pkg.id);
 
   const consistencyOf = (pkg, offer, kase, at, rowFor = (id) => sg.forPackage(id)) => signingConsistency(pkg, { offer, kase, rows: [rowFor(pkg.id)].filter(Boolean), player: findPlayer(pkg.playerId) ?? null }, at);
-  /** The lookups soundPackage makes, one query each. */
   const LOOKUPS = Object.freeze({ offerOf, caseOf, rowFor: (id) => sg.forPackage(id) });
-  /**
-   * The same lookups for the packages of `playerIds`, answered from the players' offers, cases and signings read once
-   * rather than three queries a package; anything they do not hold is asked of the repository.
-   */
+  /** The same lookups, answered from the players' offers, cases and signings read once. */
   function lookupsForPlayers(playerIds) {
     const pids = [...new Set(playerIds)];
     const offers = new Map(offerReads.forPlayers(pids).map((o) => [o.id, o]));
@@ -133,7 +98,7 @@ export function registerSigning(rawCtx) {
       rowFor: (id) => rows.get(id) ?? sg.forPackage(id),
     });
   }
-  /** A sound row whose Offer, case and completed record do not contradict it; anything else is omitted from every projection. */
+  /** Omitted from every projection unless its Offer, case and completed record agree with it. */
   function soundPackage(pkg, at, look = LOOKUPS) {
     if (!pkg || signingIntegrity(pkg).length) return false;
     const offer = look.offerOf(pkg); const kase = look.caseOf(pkg);
@@ -151,7 +116,7 @@ export function registerSigning(rawCtx) {
     return { room, role };
   }
 
-  /** A package of THIS organisation, sound, with its case and its Offer — or concealed. `need`: 'view' | 'manage' | 'lead'. */
+  /** A sound package of this organisation, or concealed. `need`: 'view' | 'manage' | 'lead'. */
   function packageFor(req, res, need) {
     const found = sp.byId(req.params.id);
     const pkg = found && found.orgId === req.org.id ? found : null;
@@ -191,9 +156,9 @@ export function registerSigning(rawCtx) {
     return true;
   };
 
-  // ------------------------------------------------------------- documents (ONE upload path: m14)
+  // ------------------------------------------------------------- documents
 
-  /** Store bytes through the m14 seam: digest, sniffed type, size limit; a vault row owned by this club, organisation-internal, never public. */
+  /** Through the evidence upload path: digest, sniffed type, size limit; organisation-internal. */
   function storeDocument(req, res, { pkg, kind }) {
     const { dataUrl, filename, label } = req.body ?? {};
     if (!evidence?.storeFile || !evidence?.add) { err(res, 'SIGNING_STORE_MISSING', 'Documents cannot be stored right now.'); return null; }
@@ -202,8 +167,7 @@ export function registerSigning(rawCtx) {
     if (!lab.ok) { err(res, 'SIGNING_INPUT_INVALID', 'The label must be short text.', { field: 'label' }); return null; }
     const stored = evidence.storeFile(dataUrl, filename, req);
     if (stored?.error) { err(res, 'SIGNING_DOCUMENT_INVALID', `The file was refused: ${stored.error}.`, { field: 'dataUrl', reasons: [stored.error] }); return null; }
-    // Defence in depth: the digest a party will confirm is computed here
-    // from the exact bytes that arrived, and must equal what the vault recorded.
+    // The digest a party will confirm is computed from the bytes that arrived and must equal the vault's.
     const m = /^data:[^;]+;base64,(.+)$/s.exec(dataUrl);
     const digest = m ? createHash('sha256').update(Buffer.from(m[1], 'base64')).digest('hex') : null;
     if (!digest || digest !== stored.sha256) { console.error(`SIGNING digest_mismatch vault=${stored.sha256} bytes=${digest}`); err(res, 'SIGNING_DOCUMENT_INVALID', 'The stored document digest does not match its bytes; the document was not attached.', { field: 'dataUrl' }); return null; }
@@ -215,9 +179,8 @@ export function registerSigning(rawCtx) {
     return { id: nextId(kind === 'executed' ? 'sgx' : 'sgd'), evidenceId: ev.id, sha256: ev.sha256, filename: ev.filename ?? null, mime: ev.mime ?? null, bytes: ev.bytes ?? null, label: lab.value, uploadedAt: now(req), uploadedBy: byOrg(req) };
   }
   /**
-   * The bytes in the vault ARE the document the parties confirm. Before a revision is presented, before a party
-   * confirms, at completion and before the bytes are served, the vault row must be this package's own and the bytes must
-   * hash to the digest on the revision and on the row. Anything else is corruption: refused, never repaired, never served.
+   * Checked before presenting, before a party confirms, at completion and before serving: the vault row must be
+   * this package's and its bytes must hash to the revision's digest. Anything else is refused, never repaired.
    */
   function documentBytesProblem(pkg, doc) {
     if (!doc?.evidenceId || !doc.sha256) return 'missing';
@@ -236,7 +199,7 @@ export function registerSigning(rawCtx) {
     return { document: { id: doc.id, label: doc.label ?? null, filename: ev.filename ?? null, mime: ev.mime ?? blob?.contentType ?? null, bytes: ev.bytes ?? blob?.buffer?.length ?? null, sha256: ev.sha256 ?? null }, file: blob ? { mime: ev.mime ?? blob.contentType, base64: blob.buffer.toString('base64') } : null };
   }
 
-  // ------------------------------------------------------------- lifecycle coupling (the ONE validator, the ONE writer)
+  // ------------------------------------------------------------- lifecycle coupling
 
   function advanceCase({ req = null, room, action, at, trigger, actor = null, keyDetail = {} }) {
     const role = req && !actor ? roleFor(req, room) : 'recruitment_admin';
@@ -267,32 +230,25 @@ export function registerSigning(rawCtx) {
     if (basis?.ok) notify({ kind: 'org_user', id: s.agentUserId }, 'recruitment_signing', text, pkg.id);
   }
 
-  // ================================================================== THE ONE WRITER
+  // ================================================================== completed signing writer
 
   /**
-   * The only function in the repository that records a completed signing and the
-   * only place a recruitment signing sets a player's `contractStatus`, level,
-   * timeline, squad row, availability and success-fee invoice. Reached by the
-   * canonical completion (with a package and its evidence) and, for legacy
-   * non-Offer recruitments only, by the legacy route in server.mjs.
+   * The only place a recruitment signing records a completed signing and sets a player's contract status,
+   * level, timeline, squad row, availability and success-fee invoice. Called by the completion and, for
+   * non-Offer recruitments, the legacy route.
    *
-   * Idempotent per package: a second call for the same package returns the
-   * existing row and performs nothing. Authoritative writes happen first and
-   * synchronously INSIDE the caller's unit of work (the ledger row, the
-   * signings row, the player's level / contract columns, the timeline facet and
-   * the grassroots squad entry commit together or not at all); the success-fee
-   * invoice is issued after COMMIT; notifications and broadcasts run after,
-   * each under `safe()`.
+   * Idempotent per package. The authoritative writes run inside the caller's unit; the invoice is issued after
+   * commit, and notifications after that under `safe()`.
    */
   function recordCompletedSigning({ player, org, actor, at, pkg = null, rev = null, legacy = null }) {
     if (pkg) {
       const existing = completedRowFor(pkg); if (existing) return { signing: existing, duplicate: true };
-      // One completed signing per Offer, whatever package claims it — a structural check, not a timing one.
+      // One completed signing per Offer, whatever package claims it.
       const byOffer = pkg.offerId ? sg.forOffer(pkg.offerId) : null; if (byOffer) return { signing: byOffer, duplicate: true };
     }
     const events = ctx.safetyReads.ledger.forPlayerOrg(player.id, org.id);
     const first = events[0] ?? null;
-    const windowMonths = PLANS[org.plan].attributionWindowMonths; // orgs.plan is one of the catalogue's plans (its CHECK)
+    const windowMonths = PLANS[org.plan].attributionWindowMonths; // orgs.plan has a CHECK against the catalogue
     const windowEnds = first ? first.ts + windowMonths * 30.44 * 24 * 3600 * 1000 : null;
     const row = ledgerAppend({ type: 'signing', playerId: player.id, orgId: org.id, orgName: org.name, userId: actor?.id ?? null, scoutName: actor?.name ?? null });
     const ts = pkg ? at : row.ts;
@@ -305,20 +261,15 @@ export function registerSigning(rawCtx) {
         ts, signedAt: ts, firstQualifyingInteraction: first, attributionWindowMonths: windowMonths, insideAttributionWindow: attribution.inside,
         method: 'LEGACY_RECORDED', note: legacy?.note ?? null, signingPackageId: null, signingRevisionId: null, offerId: null, caseId: null, documentSha256: null, contract: null, policyVersion: SIGNING_POLICY_VERSION,
       };
-    // The row written at once by the repository, inside the caller's unit (a legacy recording's unit, the completion unit).
     signingsFollowUps.signings.record(signing);
-    // The revenue event: a signing inside the attribution window issues the success-fee invoice through the billing adapter — once per
-    // signing, AFTER the signing committed (an external provider call never runs inside the transaction; the dev ledger's row is saved
-    // right after it is issued). A rolled-back completion therefore never issues an invoice.
-    // The invoice is a row of its own table, written by the adapter in its own transaction; the table holds one per signing.
+    // A provider call never runs inside the transaction, so a rolled-back completion never issues an invoice.
     if (signing.insideAttributionWindow && billing?.invoiceForSigning) {
       afterCommit(() => Promise.resolve(billing.invoiceForSigning(signing, org)).catch((e) => console.error(`BILLING invoice_failed signing=${signing.id}: ${e?.message ?? e}`)));
     }
-    // A signing moves the player's level: grassroots signings make semi-pros, academy/pro signings make pros.
+    // Grassroots signings make semi-pros; academy/pro signings make pros.
     const levelBefore = player.level ?? 'amateur';
     const levelAfter = playerLevelAfterSigning(org.level);
     players.setLevel(player.id, levelAfter);
-    // The timeline is rows of player_timeline, appended through the repository inside this unit.
     const year = String(new Date(ts).getFullYear());
     const levelLines = [];
     if (levelBefore === 'amateur' && levelAfter === 'semi_pro') {
@@ -329,10 +280,10 @@ export function registerSigning(rawCtx) {
       levelLines.push([`⬆️ Academy/pro level reached with ${org.name}. Your grassroots journey got you here.`, `${player.name} reached academy/pro level with ${org.name}.`]);
     }
     if (org.level === 'grassroots') {
-      // A row of org_squad_members, in this unit; a player the club shadowed joins the squad all the same.
+      // A player the club shadowed joins the squad all the same.
       if (!clubSetup.squad.has(org.id, player.id)) clubSetup.squad.create({ id: nextId('sq'), orgId: org.id, playerId: player.id, name: String(player.name ?? 'Player').slice(0, CLUB_SETUP_LIMITS.name), position: player.position ?? null, source: 'signing', addedAt: ts });
     }
-    // `under_contract` means a real contract was executed: written here and nowhere else for a recruitment signing.
+      // Written here and nowhere else for a recruitment signing.
     players.setAvailability(player.id, { contractStatus: 'under_contract', availability: 'not_seeking' });
     players.addItem(player.id, 'timeline', { year, event: pkg ? `Signed with ${org.name} — signing completed in ScoutBox` : `Signed by ${org.name} — discovered on ScoutBox` });
     const effects = () => {
@@ -348,11 +299,7 @@ export function registerSigning(rawCtx) {
     return { signing, duplicate: false, effects };
   }
 
-  /**
-   * The legacy route may record a signing only for a recruitment that never
-   * went through the canonical Offer: an accepted Offer or any package between
-   * this club and player means the canonical workflow owns the signing.
-   */
+  /** An accepted Offer or any package between this club and player means the workflow owns the signing. */
   function legacyRecordingBlocker(playerId, orgId, at = Date.now()) {
     const offers = offerReads.forOrgPlayer(orgId, playerId);
     if (offers.some((o) => canonicalOfferStatus(o, at) === 'ACCEPTED')) return { error: 'SIGNING_CANONICAL_REQUIRED', message: 'This player accepted a canonical Offer from your club: complete the signing through the signing workflow on the case.' };
@@ -360,7 +307,7 @@ export function registerSigning(rawCtx) {
     return null;
   }
 
-  // ================================================================== CLUB
+  // ================================================================== club
 
   function startBlockers(kase, role, at) {
     const blockers = [];
@@ -368,7 +315,7 @@ export function registerSigning(rawCtx) {
     if (subjectRemoved(kase)) blockers.push('SUBJECT_REMOVED');
     if (isBlocked(kase.playerId, kase.orgId)) blockers.push('BLOCKED');
     if (kase.room?.status !== 'offer_accepted') blockers.push('CASE_STATE');
-    // For a player under the age of majority the readiness names the closed pathway before anyone tries, whatever the Offer's state.
+    // Names the closed minor pathway before anyone tries, whatever the Offer's state.
     const subject = findPlayer(kase.playerId);
     if (subject && typeof isAdult === 'function' && !isAdult(subject) && !minorSigningPathwayOpen(orgOf(kase.orgId)?.country ?? 'GB')) blockers.push('MINOR_PATHWAY_CLOSED');
     const accepted = offerReads.forCase(kase.id).find((o) => o.orgId === kase.orgId && canonicalOfferStatus(o, at) === 'ACCEPTED') ?? null;
@@ -448,7 +395,6 @@ export function registerSigning(rawCtx) {
       history: [], completion: null, cancelledAt: null, cancelledBy: null, cancelReason: null, voidedAt: null, voidedBy: null, voidReason: null,
       createdAt: at, createdBy: by, updatedAt: at, rev: 1, revAt: at, revBy: { userId: by.id, name: by.name }, policyVersion: SIGNING_POLICY_VERSION,
     };
-    // The package, its history and the case audit commit as one unit of work.
     let stored;
     try { stored = unit(() => { sp.insert(pkg); const fresh = hist(pkg, 'signing_created', by, { revisionId: rev.id, offerId: offer.id, offerRevisionId: acceptedRev.id }, at); caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_created', { signingPackageId: pkg.id, offerId: offer.id }); return fresh; }); }
     catch (e) { console.error(`SIGNING start_rolled_back ${pkg.id}: ${e?.message ?? e}`); return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be opened; nothing was recorded.'); }
@@ -547,7 +493,6 @@ export function registerSigning(rawCtx) {
     res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
-  /** A party completion, shared by the player route and the club-signatory route. */
   function completeParty(req, res, { pkg, kase, partyType, actorKind, actorId, actorName, rateKey, orgName }) {
     const at = now(req);
     const key = clientKey(req, res); if (key === undefined) return;
@@ -556,10 +501,8 @@ export function registerSigning(rawCtx) {
     const view = () => (actorKind === 'org' ? { signing: signingClubView(pkg, at, { orgName }) } : { signing: signingRecipientView(pkg, at, { orgName, partyType, forEntityId: actorId }) });
     if (key) {
       const row = keyRow(pkg, 'party', key);
-      // A replay is "the same signature" only while the
-      // revision it signed is still the package's current one. After a
-      // supersede voided that confirmation, the old key does not answer
-      // `idempotent: true` as if the signature still stood.
+      // A replay counts as the same signature only while its revision is still current; after a supersede the
+      // old key does not answer `idempotent: true`.
       if (row) { if (row.fp === fp && row.actorId === actorId && (b.revisionId ?? null) === (pkg.currentRevisionId ?? null)) return res.json({ ...view(), idempotent: true }); return err(res, 'SIGNING_IDEMPOTENCY_CONFLICT', row.fp === fp && row.actorId === actorId ? 'This clientKey signed a revision that is no longer current; sign the current revision with a new key.' : 'This clientKey was already used for a different request.'); }
     }
     const method = b.method === undefined ? 'PLATFORM_ACKNOWLEDGMENT' : b.method;
@@ -576,8 +519,6 @@ export function registerSigning(rawCtx) {
     if (limited('signing_party_completion', rateKey)) return res.status(429).json(rateLimitedBody('signing_party_completion'));
     const { revision: rev } = g;
     const by = { kind: actorKind, id: actorId, name: actorName };
-    // A party completion is its own unit of work — the party, the statuses, the key, the history, the case audit
-    // and the rev move together or not at all.
     let fresh;
     try {
       fresh = unit(() => {
@@ -623,11 +564,7 @@ export function registerSigning(rawCtx) {
     res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
-  /**
-   * The completion gate → the ONE writer → the ONE lifecycle writer, as one
-   * unit: if any step refuses or throws, the unit rolls back and nothing
-   * is persisted. Notifications and broadcasts run only after persistence.
-   */
+  /** Completion gate, signing writer and lifecycle move as one unit; notifications only after it commits. */
   orgRouter.post('/signings/:id/complete', (req, res) => {
     const got = packageFor(req, res, 'lead'); if (!got) return;
     const { pkg, kase, offer } = got; const at = now(req);
@@ -650,26 +587,20 @@ export function registerSigning(rawCtx) {
     const player = findPlayer(pkg.playerId); const org = orgOf(pkg.orgId);
     if (!player || !org) return err(res, 'SIGNING_STATE_UNKNOWN', 'This signing cannot be completed.');
     if (limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
-    // ---- the unit of work
-    // The package, the ledger row, the signings row, the player's level and
-    // contract columns, the timeline facet, the squad entry and the case lifecycle
-    // (status, stage, rev, instants, history, links) commit
-    // together: a refusal (SigningAbort) or a throw anywhere — a statement,
-    // COMMIT itself — rolls the transaction back and restores every record and
-    // held reference; nothing is persisted and no invoice is issued.
+    // A SigningAbort or a throw anywhere, COMMIT included, rolls everything back and no invoice is issued.
     const by = byOrg(req);
     let effects = null; let moved = null; let signing = null; let fresh = null;
     try {
       fresh = unit(() => {
-        // The signing row first (recordCompletedSigning → signings.record), then the package's completion columns in
-        // one patch — `completion_signing_id` is a deferred key, checked at COMMIT — then the revision.
+        // The signing row first, then the package's completion (`completion_signing_id` is a deferred key,
+        // checked at COMMIT), then the revision.
         const written = recordCompletedSigning({ player, org, actor: req.orgUser, at, pkg, rev });
         if (written.duplicate) throw new SigningAbort('SIGNING_ALREADY_COMPLETED', 'A completed signing record already exists for this package.', { why: 'duplicate_row' });
         signing = written.signing; effects = written.effects;
         if (faults?.shouldFail?.('signing.complete.after_row')) throw new Error('simulated failure after the signings row (development fault layer)');
         let p = sp.patchRevision(pkg.id, rev.id, { status: 'COMPLETED', completedAt: at, completedBy: by });
         p = sp.patch(p.id, { status: 'COMPLETED', completion: { signingId: signing.id, completedAt: at, completedBy: by, contract: rev.contract, documentSha256: rev.document.sha256, lifecycle: null } });
-        // The lifecycle asks the ONE validator with the real evidence provider — which now finds the row this completion just wrote.
+        // The evidence provider now finds the row this completion just wrote.
         moved = advanceCase({ req, room: kase, action: 'confirmSignedOutcome', at, trigger: `signing:complete:${pkg.id}`, keyDetail: { signingPackageId: pkg.id, signingId: signing.id } });
         if (!moved.applied) throw new SigningAbort('SIGNING_LIFECYCLE_CONFLICT', moved.message ?? 'The case could not be moved to Signed; nothing was recorded.', { why: `lifecycle_${moved.reason}`, moved });
         p = sp.patch(p.id, { completion: { ...p.completion, lifecycle: { from: moved.from, to: moved.to, at } } });
@@ -729,7 +660,7 @@ export function registerSigning(rawCtx) {
   orgRouter.post('/signings/:id/cancel', closeRoute('cancel'));
   orgRouter.post('/signings/:id/void', closeRoute('void'));
 
-  /** The document changes: the presented revision is SUPERSEDED, a fresh DRAFT revision opens with the same contract days, every party pending again. */
+  /** The presented revision is SUPERSEDED and a fresh DRAFT opens with the same contract days, all parties pending. */
   orgRouter.post('/signings/:id/supersede', (req, res) => {
     const got = packageFor(req, res, 'manage'); if (!got) return;
     const { pkg, kase } = got; const at = now(req);
@@ -766,9 +697,9 @@ export function registerSigning(rawCtx) {
     res.status(201).json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
-  // ================================================================== RECIPIENT
+  // ================================================================== recipient
 
-  /** Packages presented to this person, re-authorised live: the addressed adult, over an Offer they accepted, on a sound row. */
+  /** Re-authorised live: the addressed adult, over an Offer they accepted, on a sound row. */
   function recipientPackages({ by, actorId, playerIds, at }) {
     const out = [];
     const look = lookupsForPlayers(playerIds);
@@ -815,7 +746,7 @@ export function registerSigning(rawCtx) {
     completeParty(req, res, { pkg: p, kase, partyType: 'PLAYER', actorKind: 'player', actorId: req.player.id, actorName: req.player.name ?? null, rateKey: `player:${req.player.id}`, orgName: orgOf(p.orgId)?.name ?? null });
   });
 
-  // Guardian routes are dormant: the pathway is closed in every jurisdiction, so the list is empty and every act is refused.
+  // Dormant: the guardian pathway is closed everywhere, so the list is empty and every act is refused.
   guardianRouter.get('/signings', (req, res) => { res.json({ items: [], note: 'Signing on behalf of a player under the age of majority is not open in this jurisdiction.' }); });
   guardianRouter.get('/signings/:id', (req, res) => notFound(res, 'guardian'));
   guardianRouter.get('/signings/:id/document', (req, res) => documentNotFound(res, 'guardian'));
@@ -825,7 +756,7 @@ export function registerSigning(rawCtx) {
     return err(res, 'SIGNING_PATHWAY_CLOSED', 'Signing on behalf of a player under the age of majority is not open in this jurisdiction.');
   });
 
-  // ================================================================== AGENT (read-only, re-authorised)
+  // ================================================================== agent (read-only)
 
   orgRouter.get('/agent/clients/:id/signings', (req, res) => {
     if (!access?.resolveMembership?.(req, res)) return;
@@ -851,7 +782,7 @@ export function registerSigning(rawCtx) {
     res.json({ items, clientId: a.clientId, clientName: player && orgCanSee(req.org, player) ? player.name : null, honest: 'Read-only. Your client signs as themselves; ScoutBox does not let you sign, acknowledge or complete for a client.' });
   });
 
-  // ================================================================== T&S (explicit, audited, never a party)
+  // ================================================================== Trust & Safety
 
   adminRouter.post('/signings/:id/void', (req, res) => {
     if (!req.reviewer?.id) return err(res, 'SIGNING_NOT_PERMITTED', 'Voiding a signing requires a named Trust & Safety reviewer.');
@@ -881,13 +812,13 @@ export function registerSigning(rawCtx) {
 
   // ================================================================== hooks
 
-  /** Deletion: names nulled, the record kept; no new write about a person who left. */
+  /** Names nulled, records kept. */
   function onPlayerDeleted(playerId, at) {
-    // One repository operation inside the deletion unit — the player's names nulled, subject_removed_at set, the records kept.
+    // Inside the deletion unit.
     sp.redactPlayer(playerId, at);
   }
 
-  /** A minimal, identity-free summary for the Offer views and the journey: ids and the status word. */
+  /** Identity-free: ids and the status word. */
   function summaryForOffer(offerId, orgId, at = Date.now()) {
     const rows = packagesOf(offerId, orgId).filter((p) => soundPackage(p, at));
     const live = currentSigningForOffer(rows, at);

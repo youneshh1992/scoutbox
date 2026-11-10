@@ -1,23 +1,12 @@
 /**
- * Recruitment analytics: decision record hygiene, coverage of the club's own stated demand, and
- * dynamic watchlists as a work surface.
- *
- * "Decision record hygiene" is a careful name. Nothing in this file measures
- * whether a decision was RIGHT. It measures whether the club wrote down what
- * it did, whether it later revised it, and what kind of reason it recorded —
- * facts about the record, not about the judgement and never about the person
- * who made it.
- *
- * The coverage family answers the one question a director can act on without
- * any opinion about a player at all: *is the demand we ourselves wrote down
- * being worked?*
+ * Recruitment analytics: decision record hygiene, coverage of the club's own stated demand, and dynamic
+ * watchlists. Hygiene is about whether the club wrote down what it did, never whether a decision was right.
  */
 import { METRICS, wire, ratio, count, distribution, days, inWindow } from './metrics.mjs';
 import { REASON_CODES } from '../rooms/shared.mjs';
 import { briefIsLiveOn } from '../../discovery/shared.mjs';
 import { firstTerminalAt } from './funnels.mjs';
 
-/** The four codes that mean "we could not tell, for want of evidence". */
 export const EVIDENCE_REASON_CODES = REASON_CODES.evidence;
 
 // -------------------------------------------- D1 · did the ending get written
@@ -49,20 +38,14 @@ export function supersededDecisionRate(ctx) {
   return {
     ...wire(METRICS.superseded_decision_rate),
     ...ratio(superseded, inWin.length),
-    // Rendered deliberately without a good/bad colour. Changing your mind on
-    // new information is the behaviour Second Look was built to produce.
+    // No good/bad colour: changing your mind on new information is what Second Look is for.
     neutral: true,
   };
 }
 
 // ------------------------------------------- D3 · endings limited by evidence
 
-/**
- * The one figure in analytics that points at something a director can actually fix.
- * If a third of endings are recorded as "we could not tell", the constraint is
- * the club's evidence pipeline, not its judgement — and unlike almost every
- * other analytics number, acting on it changes a process rather than a person.
- */
+/** Points at the club's evidence pipeline rather than its judgement, so acting on it changes a process. */
 export function evidenceLimitedExits(ctx) {
   let ended = 0;
   let evidenceLimited = 0;
@@ -95,8 +78,7 @@ export function reopenRate(ctx) {
     const at = firstTerminalAt(r);
     if (at == null || !inWindow(at, ctx.window)) continue;
     endedInWindow += 1;
-    // Any transition after the first ending is a reopening, whether it came
-    // through the Room's own reopen path or through Second Look's bridge.
+    // Any transition after the first ending is a reopening, by either reopen path.
     if ((r.transitions ?? []).some((t) => t.at > at)) reopened += 1;
   }
   return {
@@ -110,9 +92,8 @@ export function reopenRate(ctx) {
 // ---------------------------------------------------------- C1 · live briefs
 
 export function briefsLive(ctx) {
-  // Point-in-time: liveness is asked of TODAY, never of the window's end.
-  // "Which briefs were live last March" is a different question this build
-  // does not answer, and answering it approximately would be worse.
+  // Point-in-time: liveness is asked of today, never of the window's end; this build cannot say which briefs
+  // were live last March.
   const live = ctx.briefs.filter((b) => briefIsLiveOn(b, ctx.today));
   return {
     ...wire(METRICS.briefs_live),
@@ -130,13 +111,8 @@ export function briefsLive(ctx) {
 // -------------------------------------------- C2/C3 · is the demand worked
 
 /**
- * Nobody Missed surfaces players who are eligible under the club's OWN brief
- * and have not entered its evaluation workflow. Backlog is how many are still
- * untouched; the review rate is how many the club has looked at.
- *
- * Dismissing a candidate counts as reviewing them. That is intentional: the
- * question is whether the club looked, not what it concluded — the second
- * question is a football judgement and none of ScoutBox's business.
+ * Players eligible under the club's own live briefs who have not entered its workflow. Dismissing a candidate
+ * counts as reviewing: the question is whether the club looked, not what it concluded.
  */
 export function nobodyMissedCoverage(ctx) {
   const liveIds = new Set(ctx.briefs.filter((b) => briefIsLiveOn(b, ctx.today)).map((b) => b.id));
@@ -212,9 +188,8 @@ export function watchlistActivity(ctx) {
       ...count(events.length),
       entered: count(entered),
       left: count(left),
-      // Without this the number reads as "players whose situation changed",
-      // which it is not. Watchlists have no scheduler: membership is worked out when
-      // somebody opens a list, so this counts recalculations.
+      // Watchlists have no scheduler: membership is recalculated when someone opens a list, so this counts
+      // recalculations, not players whose situation changed.
       derivedOnRead: true,
       refreshNote: 'ScoutBox does not recompute watchlists in the background. These are the changes found when someone opened a list — a list nobody opened records nothing.',
     },

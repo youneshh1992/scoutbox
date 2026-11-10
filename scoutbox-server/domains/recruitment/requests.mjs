@@ -1,19 +1,17 @@
-// Scout Inbox requests: the one writer of an org → player/guardian request row, the one writer of an accepted
-// trial, the recipient's view of a request, and the club's direct request route and lists.
+// Scout Inbox requests: the writers of an org → player/guardian request row and of an accepted trial, the
+// recipient's view of a request, and the club's direct request route and lists.
 //
-// There is no direct message channel anywhere in this API. An org can only file a request; contact unlocks on
-// acceptance. For minors the request never reaches the child — it routes to the guardian, and any conversation that
-// opens is between adults.
+// There is no direct message channel: an org files a request and contact unlocks on acceptance. A minor's request
+// goes to the guardian, never the child, and any conversation that opens is between adults.
 import { isAdult, visibleToOrg, validateTrialDetails, trialReportDueAt } from '../../domain.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { validateContactReply } from './lifecycle/contact.mjs';
 
 /**
- * A request row as its RECIPIENT may see it: no org id, no user id, no internal Contact link. `caseId` is the club's
- * workflow id and never travels; the trial the recipient's own acceptance created is THEIR record (what
- * /player/trials and /guardian/trials list), so its id does, for the Inbox to deep-link to it. The address line and
- * the instructions of an invitation are shared after acceptance only, never in the Inbox view.
+ * No org id, user id or Contact link, and never `caseId`. The trial id does travel: the recipient's own acceptance
+ * created that record, and the Inbox deep-links to it. An invitation's address and instructions are shared only
+ * after acceptance.
  */
 export const requestForRecipient = ({ orgId, userId, contactId, caseId, recipient, keys, trialId, ...visible }) => {
   const out = { ...visible, trialId: trialId ?? null };
@@ -26,15 +24,13 @@ export const requestForRecipient = ({ orgId, userId, contactId, caseId, recipien
 
 export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify, broadcast, safeguardingCertified, moderateOrRefuse }) {
   /**
-   * THE one writer of an org → player/guardian request row. The Contact workflow's send, the Trial invitation, an
-   * open-day invitation and the direct request route all reach the Inbox through it: the same routing (scout →
-   * parent, never scout → child), the same ledger entry, the same notifications, the same `inbox` ping.
+   * The only writer of an org → player/guardian request row. The Contact send, the Trial invitation, an open-day
+   * invitation and the direct request route all use it, so routing (scout → parent, never scout → child), the
+   * ledger entry and the notifications are the same.
    *
-   * `guardianId` lets a caller that has already resolved the guardian route (the Contact workflow checks the record,
-   * the child link and the verification gates) name it; otherwise the player's own link is used. `notice` words the
-   * notifications for a caller with its own occasion (`{ kind, toGuardian, toPlayer }`). `workflow` lets the Trial
-   * invitation write its case link, recipient snapshot and client key in the same create (`{ caseId, recipient, keys }`).
-   * Returns the stored, read-only row.
+   * `guardianId` names a guardian route the caller already resolved; otherwise the player's own link is used.
+   * `notice` words the notifications (`{ kind, toGuardian, toPlayer }`); `workflow` carries the Trial invitation's
+   * case link, recipient snapshot and client key (`{ caseId, recipient, keys }`).
    */
   function issueRecruitmentRequest({
     org, orgUser, player, type, message = '', trialDetails = null,
@@ -81,16 +77,14 @@ export function createRequestWriters({ recruitment, nextId, ledgerAppend, notify
   }
 
   /**
-   * THE one writer of an accepted trial. Both respond routes — the adult's own and the guardian's on a minor's
-   * behalf — call this with the slot they already validated (`chooseTrialSlot`), so the two rows cannot drift apart:
-   * same fields, same clock (`at` is the response instant stamped on the request), same deadline derivation.
-   * `trialDate` is a validated `YYYY-MM-DD` or null (date to be confirmed); `trialReportDueAt` never returns NaN.
+   * The only writer of an accepted trial. Both respond routes (the adult's own and the guardian's) call it with the
+   * slot they validated, so the two rows cannot drift apart. `trialDate` is `YYYY-MM-DD` or null (to be confirmed).
    */
   function issueAcceptedTrial({ request, player, trialDate, by, at, actor = null }) {
     const details = request.trialDetails ?? {};
-    // Accepting one of a slot-based invitation's concrete slots IS the schedule confirmation: the trial is born
-    // `scheduled` with revision 1 confirmed by the recipient. A date-only or undated invitation is born `accepted`
-    // with no schedule — a date the club typed is not a confirmed schedule, and nothing is fabricated from it.
+    // Accepting a concrete slot is the schedule confirmation: the trial is born `scheduled`, revision 1 confirmed
+    // by the recipient. A date-only or undated invitation is born `accepted` with no schedule: a date the club typed
+    // is not a confirmed schedule.
     const slot = Array.isArray(details.slots) ? details.slots.find((s) => s && s.day === trialDate) ?? null : null;
     const recipient = { type: by, playerId: player.id, guardianId: by === 'guardian' ? (actor?.id ?? null) : null, minor: by === 'guardian', at };
     const who = { kind: by, id: actor?.id ?? null, name: actor?.name ?? null };
@@ -177,9 +171,8 @@ export function registerClubRequests({ orgRouter, recruitment, findPlayer, isBlo
     if (!moderateOrRefuse(res, message, { kind: 'org_request_message', orgId: req.org.id, userId: req.orgUser.id })) return;
 
     if (type === 'trial') {
-      // Trial reports are mandatory: an org with an unfiled report for a past trial cannot request new trials until
-      // it files. A report can never be filed for a subject who removed their account, so a tombstoned trial does not
-      // hold the organisation hostage.
+      // An unfiled report for a past trial blocks new trial requests. A tombstoned trial can never be reported, so it
+      // does not block.
       const overdue = recruitment.trials.forOrgStatus(req.org.id, 'awaiting_report').filter((t) => !t.subjectRemovedAt);
       if (overdue.length > 0) {
         return res.status(409).json({
@@ -199,8 +192,7 @@ export function registerClubRequests({ orgRouter, recruitment, findPlayer, isBlo
       trialDetails = check.details;
       if (trialDetails.notes && !moderateOrRefuse(res, trialDetails.notes, { kind: 'trial_notes', orgId: req.org.id })) return;
     }
-    // A second path to the same inbox row as a canonical Contact send or Trial invitation, so it draws on the SAME
-    // budgets and keeps the same one-pending rule: a club cannot flood a player through this door.
+    // The same inbox row as a Contact send or Trial invitation, so the same budgets and one-pending rule apply.
     const pendingSame = recruitment.requests.forOrgPlayer(req.org.id, p.id).find((r) => r.type === type && r.status === 'pending' && !r.subjectRemovedAt);
     if (pendingSame) return res.status(409).json({ error: 'REQUEST_PENDING', message: `A ${type} request to this player is already awaiting an answer.`, requestId: pendingSame.id });
     if (rateLimit.limited(type === 'trial' ? 'trial_invite' : 'contact_send', req.org.id)) return res.status(429).json(rateLimitedBody(type === 'trial' ? 'trial_invite' : 'contact_send'));

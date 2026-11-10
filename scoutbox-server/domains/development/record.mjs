@@ -1,14 +1,9 @@
-// The player's own football record: the home feed, the portable CV, "who's watching you", clips, medical records,
-// verified attendance, the timeline, stats, the at-home combine, Academy+, availability and location. A child keeps
-// all football activity; what a parent manages (Academy+, medical sharing, availability) is refused to a child here
-// and set from the guardian's account instead.
+// The player's own football record. A child keeps all football activity; Academy+, medical sharing and availability
+// are refused to a child here and set from the guardian's account.
 import { optText, reqText, badField, switchRefused, dateOnlyOrRefuse } from '../platform/input.mjs';
 import { ageOn, computeTrustScore, trustBreakdown, trustTier, computeStreak, weeklyGoal, nextActions } from '../../domain.mjs';
 
-/**
- * The standardised at-home drills. A result recorded on video is marked verified (the video's presence today; the
- * computer-vision analysis sits behind the same call).
- */
+/** A result recorded on video is marked verified on the video's presence alone; analysis would sit behind the same call. */
 export const DRILLS = [
   { id: 'drill-sprint-ladder', name: 'Sprint ladder — 6×30m', metric: 'best 30m time', unit: 's', benchmark: 4.2, lowerIsBetter: true },
   { id: 'drill-passing-gates', name: 'Passing gates — both feet', metric: 'gates hit of 20', unit: '/20', benchmark: 14, lowerIsBetter: false },
@@ -17,8 +12,8 @@ export const DRILLS = [
 ];
 
 const AVAILABILITY = ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'];
-// `under_contract` is written only by the completed-signing writer, and while a canonical live contract stands no
-// self-declared word replaces it. The other words are the player's own reading of their situation.
+// `under_contract` is written only by the completed-signing writer, and no self-declared status replaces a live
+// contract.
 const SELF_DECLARABLE_CONTRACT_STATUSES = ['expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown'];
 const STAT_FIELDS = ['appearances', 'goals', 'assists', 'paceKmh', 'passCompletionPct', 'duelSuccessPct', 'cleanSheets'];
 const STAT_COUNTS = ['appearances', 'goals', 'assists', 'cleanSheets'];
@@ -29,13 +24,12 @@ export function registerPlayerRecord({
   ledgerAppend, insightsFor, canonicalContractFor,
 }) {
   if (typeof players?.recordStats !== 'function' || typeof recordActivity !== 'function') throw new TypeError('registerPlayerRecord needs the players repository and the activity recorder');
-  // A refusal from the players repository (a value its table cannot hold) is the client's 400.
+  // The repository refusing a value its table cannot hold is the client's 400.
   const invalidPlayer = (res, e) => {
     if (e?.code !== 'PLAYER_RECORD_INVALID' && e?.code !== 'PLAYER_SUBRECORD_INVALID') throw e;
     res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
   };
 
-  // The home feed: the weekly scout report first, then activity.
   playerRouter.get('/feed', (req, res) => {
     const p = req.player;
     const ins = insightsFor(p.id);
@@ -59,7 +53,6 @@ export function registerPlayerRecord({
     res.json(items);
   });
 
-  // The portable verified CV: the player owns their record.
   playerRouter.get('/cv', (req, res) => {
     const p = req.player;
     const score = computeTrustScore(p);
@@ -84,7 +77,6 @@ export function registerPlayerRecord({
     });
   });
 
-  // The player's side of the Discovery Ledger.
   playerRouter.get('/insights', (req, res) => res.json(insightsFor(req.player.id)));
 
   playerRouter.post('/academyplus', (req, res) => {

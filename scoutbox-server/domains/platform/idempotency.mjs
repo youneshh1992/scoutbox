@@ -7,7 +7,7 @@ import { canonicalJson } from './values.mjs';
 
 export const CLIENT_KEY_MAX = 64;
 
-/** A client key is text, trimmed, 1–64 characters. Absent or '' is no key; anything else is refused, never coerced. */
+/** Absent or '' is no key; anything other than text is refused, never coerced. */
 export function normaliseClientKey(raw, error = 'CLIENT_KEY_INVALID') {
   if (raw === undefined || raw === null || raw === '') return { ok: true, key: null };
   if (typeof raw !== 'string') return { ok: false, error, message: 'clientKey must be text.' };
@@ -16,8 +16,5 @@ export function normaliseClientKey(raw, error = 'CLIENT_KEY_INVALID') {
   return { ok: true, key: k };
 }
 
-/**
- * A fingerprint of the parts of a request that make it "the same request". It is serialised deeply: a retry under the
- * same key with different nested terms (a different list of parties, say) is a different request.
- */
+/** Deep, so a retry with different nested terms (a different list of parties, say) is a different request. */
 export const payloadFingerprint = (parts) => canonicalJson(parts);

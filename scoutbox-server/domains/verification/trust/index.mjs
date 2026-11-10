@@ -1,20 +1,15 @@
-// ScoutBox Trust Score: a DERIVED evidence-confidence summary. Nothing is
-// persisted — every read recomputes from canonical sources. It adds no new authentication and, critically, no new authorization:
-// every route registers on the EXISTING authenticated routers so the
-// standing gates run before any handler here.
+// Trust Score: an evidence-confidence summary recomputed on every read; nothing is persisted.
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { POLICY, TRUST_SCORE_POLICY_VERSION, policyWeightsTotal } from './shared.mjs';
 import { registerTrust } from './trust.mjs';
 
 export function registerTrustScore(ctx) {
-  // Fail fast rather than ship a silently mis-weighted policy.
   const total = policyWeightsTotal(POLICY);
   if (total !== 100) throw new Error(`Trust Score policy weights must total 100, got ${total}`);
-  // Exposed so the boot assertions can report it alongside the other
-  // configuration checks instead of duplicating the arithmetic.
+  // For the boot assertions, so they do not duplicate the arithmetic.
   ctx.trustWeightsTotal = total;
 
-  // Privacy-safe, aggregate-only metrics — never a player id or name.
+  // Aggregate counters only, never a player id or name.
   metrics.trust = {
     trust_profile_viewed: 0, trust_explanation_viewed: 0,
     trust_band_limited_evidence: 0, trust_band_developing_evidence: 0,

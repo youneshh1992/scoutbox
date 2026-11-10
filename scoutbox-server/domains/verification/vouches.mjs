@@ -1,5 +1,5 @@
-// A coach reference as every profile shows it: an allowlist, never the coach's e-mail or the code. An e-mail-code
-// reference proves mailbox control, NOT coach identity, and says so wherever it travels.
+// Never the coach's e-mail or the code. An e-mail-code reference proves mailbox control, not coach identity, and says
+// so wherever it travels.
 
 export function vouchView(v) {
   return {

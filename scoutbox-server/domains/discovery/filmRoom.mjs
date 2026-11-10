@@ -4,7 +4,7 @@ import { ageOn, isAdult, visibleToOrg } from '../../domain.mjs';
 import { utcDayOf } from '../../temporal.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 
-/** The scout tag vocabulary: structured and professional, no free text. */
+/** Structured tags, no free text. */
 export const SCOUT_TAGS = Object.freeze([
   'first_touch', 'pace', 'positioning', 'work_rate', 'left_foot', 'right_foot',
   'aerial', 'composure', 'vision', 'pressing', 'finishing', 'distribution',
@@ -12,7 +12,6 @@ export const SCOUT_TAGS = Object.freeze([
 
 export function registerFilmRoom({ orgRouter, players, recruitment, safetyAudit, findPlayer, isBlocked, unit, ledgerAppend, notify, broadcast, playerViewForOrg }) {
   orgRouter.get('/filmroom', (req, res) => {
-    // Verified clips first, then the most viewed.
     let page;
     try { page = readPage(req.query, ['number', 'number', 'string', 'number']); } catch (e) { return sendPageError(res, e); }
     const { items, nextCursor } = players.clipPage(req.org, page);
@@ -32,7 +31,6 @@ export function registerFilmRoom({ orgRouter, players, recruitment, safetyAudit,
     });
   });
 
-  /** The clip named in the path on a player the organisation may see, or null with the refusal sent. */
   function visibleClip(req, res) {
     const p = findPlayer(req.params.pid);
     if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) { res.status(404).json({ error: 'NOT_FOUND' }); return null; }
@@ -41,7 +39,6 @@ export function registerFilmRoom({ orgRouter, players, recruitment, safetyAudit,
     return { p, m };
   }
 
-  // Per-clip view counts: an honest scouting signal back to the player.
   orgRouter.post('/players/:pid/media/:mid/view', (req, res) => {
     const found = visibleClip(req, res);
     if (!found) return;
@@ -52,7 +49,7 @@ export function registerFilmRoom({ orgRouter, players, recruitment, safetyAudit,
     res.json({ views });
   });
 
-  // "What scouts noticed": structured tags, aggregated anonymously for the player.
+  // Aggregated anonymously for the player.
   orgRouter.post('/players/:pid/media/:mid/tags', (req, res) => {
     const found = visibleClip(req, res);
     if (!found) return;
@@ -74,12 +71,11 @@ export function registerFilmRoom({ orgRouter, players, recruitment, safetyAudit,
 
   orgRouter.get('/tags', (_req, res) => res.json(SCOUT_TAGS));
 
-  // The club home feed: what changed since you last looked.
   orgRouter.get('/feed', (req, res) => {
     const FOURTEEN_DAYS = Date.now() - 14 * 24 * 3600 * 1000;
     const items = [];
     const shortlisted = new Set(safetyAudit.ledger.playersListedBy(req.org.id, ['shortlist', 'save']));
-    // The newest 40 of each kind from SQL (the visibility rule is the query's); the page is the newest 40 of all.
+    // The newest 40 of each kind; the page is the newest 40 of all.
     const recent = players.recentFor(req.org, FOURTEEN_DAYS, 40);
     for (const p of recent.players) {
       items.push({ type: 'new_player', ts: p.createdAt, playerId: p.id, playerName: p.name, position: p.position, age: ageOn(p.dob), guardianManaged: !isAdult(p) });
@@ -91,12 +87,10 @@ export function registerFilmRoom({ orgRouter, players, recruitment, safetyAudit,
         mediaId: m.id, title: m.title, hasVideo: !!m.url, verifiedClip: !!m.verifiedClip,
       });
     }
-    // A trial whose subject removed their account has no report to file, so it is neither listed as due nor
-    // reminded about.
+    // A trial whose subject removed their account has no report to file.
     for (const t of recruitment.trials.forOrgStatus(req.org.id, 'awaiting_report').filter((x) => !x.subjectRemovedAt)) {
       const dueAt = Number.isFinite(t.reportDueAt) ? t.reportDueAt : null;
       items.push({ type: 'report_due', ts: dueAt ?? Date.now(), playerId: t.playerId, playerName: t.playerName, trialId: t.id, dueAt });
-      // A one-shot reminder when the mandatory report is due within 48h.
       if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
         recruitment.trials.markReportReminderSent(t.id);
         const request = recruitment.requests.byId(t.requestId);
@@ -107,7 +101,6 @@ export function registerFilmRoom({ orgRouter, players, recruitment, safetyAudit,
     res.json(items.slice(0, 40));
   });
 
-  // Fixture-graph scouting: the (fixture, date) groups of verified attendances, newest date first.
   orgRouter.get('/fixtures', (req, res) => {
     let page;
     try { page = readPage(req.query, ['string', 'string']); } catch (e) { return sendPageError(res, e); }

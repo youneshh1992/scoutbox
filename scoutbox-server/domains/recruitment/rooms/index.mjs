@@ -1,13 +1,5 @@
-// Recruitment Rooms registration point.
-//
-// Registered LAST, because a Room consumes every layer beneath it: cases,
-// assessments, evidence, trials, missing evidence and transitions, the
-// Football Passport, Box Cam, the At-Home Combine and the Trust Score. It owns
-// the club's decision layer and nothing else.
-//
-// Every route registers on the EXISTING authenticated `orgRouter`, so bearer
-// sessions, removed users, org suspension, `visibleToOrg`, blocks and
-// moderation all run before any Room handler — a Room grants no access.
+// Registered last: a Room consumes cases, assessments, evidence, trials, the Passport, Box Cam, the Combine
+// and the Trust Score. Routes sit on the authenticated `orgRouter`, so a Room grants no access of its own.
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { registerRooms } from './rooms.mjs';
@@ -19,9 +11,7 @@ import {
 
 export function registerRecruitmentRooms(ctx) {
 
-  // Boot assertions. These are cheap and they catch the two ways this design
-  // could rot silently: a room status that maps to no stage, and the case stage
-  // vocabulary drifting away from the copy this module maps onto.
+  // Boot assertions: every room status maps to a stage and every transition target is a status.
   for (const s of ROOM_STATUSES) {
     for (const level of ['pro', 'grassroots']) {
       const stage = stageForRoomStatus(s, level);
@@ -35,7 +25,6 @@ export function registerRecruitmentRooms(ctx) {
   for (const list of Object.values(ROOM_TRANSITIONS)) {
     for (const to of list) if (!ROOM_STATUSES.includes(to)) throw new Error(`Rooms: transition target "${to}" is not a room status.`);
   }
-  // A protected characteristic must never be recordable as a recruitment reason.
   const overlap = ALL_REASON_CODES.filter((c) => PROHIBITED_REASON_CODES.includes(c));
   if (overlap.length) throw new Error(`Rooms: prohibited reason code(s) present in the taxonomy: ${overlap.join(', ')}`);
 
@@ -53,11 +42,9 @@ export function registerRecruitmentRooms(ctx) {
     room_evidence_requested: 0,
     room_comment_added: 0,
   };
-  // Counters only. No player id, no player name, no organisation name.
+  // Counters only: no player or organisation identifiers.
   const vmetric = (k, n = 1) => { metrics.rooms[k] = (metrics.rooms[k] ?? 0) + n; };
 
-  // The case layer's shared helpers are the ones a Room must use — `isLead`,
-  // `orgCanSee` and the append-only `audit` are reused rather than re-derived.
   const shared = { ...ctx, ...buildRouteHelpers(ctx), vmetric };
   registerRooms(shared);
   return shared;

@@ -25,10 +25,7 @@ export function channelViewFor(c, viewer) {
   };
 }
 
-/**
- * Opening a thread for an accepted request, and the `/channels` routes for club staff, adult players and guardians.
- * Returns `{ openChannel }` for the acceptance routes, which open the thread inside their own unit.
- */
+/** Returns `{ openChannel }` for the acceptance routes, which open the thread inside their own unit. */
 export function registerMessaging({
   orgRouter, playerRouter, guardianRouter, channels, recruitment, byId, isBlocked,
   unit, nextId, notify, broadcast, ledgerAppend, moderateOrRefuse, guardianManagedOnly,
@@ -54,7 +51,6 @@ export function registerMessaging({
     });
   }
 
-  // A message's attachment reference as a safe, shareable summary.
   function buildAttachment(channel, body, senderSide) {
     const { attachMediaId, attachTrialReportId } = body || {};
     if (!attachMediaId && !attachTrialReportId) return { ok: true, attachment: null };
@@ -75,7 +71,7 @@ export function registerMessaging({
     };
   }
 
-  /** The text and retry id, checked before moderation, or null once a 400 has been sent. Junk is refused, never cut. */
+  /** Null once a 400 has been sent. Junk is refused, never cut. */
   function messageInput(req, res) {
     const { text, clientMsgId = null } = req.body || {};
     if (typeof text !== 'string' || !text.trim()) { res.status(400).json({ error: 'TEXT_REQUIRED' }); return null; }
@@ -112,7 +108,6 @@ export function registerMessaging({
     return messageView(msg);
   }
 
-  // The thread a route names, if it is the caller's.
   const orgThread = (req) => { const c = channels.byId(req.params.id); return c && c.orgId === req.org.id ? c : null; };
   const guardianThread = (req) => { const c = channels.byId(req.params.id); return c && c.guardianId === req.guardian.id ? c : null; };
   const playerThread = (req) => { const c = channels.byId(req.params.id); return c && c.playerId === req.player.id && c.counterparty === 'player' ? c : null; };
@@ -154,7 +149,7 @@ export function registerMessaging({
   const notFound = (res) => res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
 
   // ------------------------------------------------------------ club staff
-  // Most recently active first; `playerId` limits the page to one player's threads (a Room's inbox panel).
+  // `playerId` limits the page to one player's threads (a Room's inbox panel).
   orgRouter.get('/channels', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
@@ -163,7 +158,7 @@ export function registerMessaging({
     const out = channels.pageForOrg(req.org.id, { playerId: playerId ?? null }, page);
     res.json({ items: out.items.map((c) => ({ ...channelViewFor(c, 'org'), closed: !!channelClosedForOrg(c, req.org) })), nextCursor: out.nextCursor });
   });
-  // The inbox figures on the home screens: messages from players and guardians since the club last opened each thread.
+  // Messages from players and guardians since the club last opened each thread.
   orgRouter.get('/channels/counts', (req, res) => res.json(channels.countsForOrg(req.org.id)));
   orgRouter.post('/channels/:id/messages', (req, res) => {
     const channel = orgThread(req);

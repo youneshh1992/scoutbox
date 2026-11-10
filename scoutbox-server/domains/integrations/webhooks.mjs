@@ -1,13 +1,11 @@
-// Outgoing webhooks: the destination guard and the body signature (webhooks and delivery callbacks).
 import crypto from 'node:crypto';
 
 /** The HMAC a receiver checks: over the event id, the timestamp and the exact body. */
 export const signBody = (secret, eventId, ts, body) =>
   crypto.createHmac('sha256', secret).update(`${eventId}.${ts}.${body}`).digest('hex');
 
-// SSRF guard: outgoing webhooks may never reach internal/private
-// infrastructure. Loopback is allowed ONLY under ALLOW_LOCAL_WEBHOOKS=1
-// (the test receiver) — documented, explicit, off by default.
+// SSRF guard: outgoing webhooks never reach private infrastructure. Loopback is allowed only under
+// ALLOW_LOCAL_WEBHOOKS=1 (the test receiver).
 const PRIVATE_HOST = /^(localhost|.*\.local|.*\.internal|.*\.lan)$/i;
 const PRIVATE_IP = /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|::1$|f[cd][0-9a-f]{2}:|fe80:)/i;
 export function webhookUrlProblem(rawUrl) {

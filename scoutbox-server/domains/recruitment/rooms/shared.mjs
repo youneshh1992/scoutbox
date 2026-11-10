@@ -1,40 +1,13 @@
-// Recruitment Rooms: the pure engine.
-//
-// A Recruitment Room is the club's DECISION layer over a player. The Football
-// Passport remains the player's TRUTH layer. Nothing here re-derives player
-// truth; it decides, records and explains what a club did with it.
-//
-// Everything in this file is a pure function over plain data so the state
-// machine, the reason taxonomy and the safe projections can be unit-tested
-// without Express, a database or a session.
-//
-// The load-bearing architectural decision, and the reason this file has no
-// pipeline of its own: the recruitment case is ALREADY "the workspace
-// layer OVER existing requests, trials and signings". A Room is a FACET of a
-// case, not a second pipeline. `room.status` is the one canonical status and
-// `case.stage` is a pure derivation of it (`stageForRoomStatus`), written by a
-// single function, so the two can never disagree.
+// Recruitment Rooms: the pure engine. A Room is a facet of a recruitment case, not a second pipeline:
+// `room.status` is the status and `case.stage` is derived from it by `stageForRoomStatus`.
 
 // ---------------------------------------------------------------- statuses
 
-/**
- * A lookup table indexed by data we did not write.
- *
- * A plain object literal inherits from `Object.prototype`, so
- * `TABLE['constructor']` and `TABLE['toString']` are truthy — which means a
- * client posting `{ action: "constructor" }`, or a stored status of
- * `"__proto__"`, walks past every `if (!TABLE[key])` guard in the codebase and
- * then crashes on a property the inherited value does not have. Every table
- * below that is indexed by a client value or a stored value has a NULL
- * prototype, so a key we did not define answers `undefined` and the guards
- * that were already written start working.
- */
+// Tables indexed by client or stored values have a null prototype, so a key like "constructor" or
+// "__proto__" answers undefined instead of slipping past `if (!TABLE[key])` guards.
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
-// The canonical room status set. Every status maps onto exactly one case stage.
-// The case is canonical, the room is a facet of it, and this table is the
-// single lifecycle authority for both — a second, competing lifecycle
-// vocabulary would leave two sets of stages fighting each other.
+// Every status maps onto exactly one case stage.
 export const ROOM_STATUSES = [
   'watching',
   'under_review',
@@ -47,7 +20,7 @@ export const ROOM_STATUSES = [
   'trial_completed',
   'offer_consideration',
   'offer_made',
-  'offer_accepted',    // accepted IN SCOUTBOX — not a signing (see below)
+  'offer_accepted',    // accepted in ScoutBox; not a signing
   'offer_declined',    // the player declined; distinct from the club withdrawing
   'signed',
   'on_hold',           // paused deliberately, still live
@@ -68,9 +41,7 @@ export const ROOM_STATUS_LABELS = table({
   trial_completed: 'Trial completed',
   offer_consideration: 'Offer consideration',
   offer_made: 'Offer made',
-  // Deliberate wording. This label is what a person reads, and it must not
-  // imply a playing contract, a registration or a completed transfer — the
-  // player has accepted a ScoutBox proposal and nothing more.
+  // Must not imply a playing contract, a registration or a completed transfer.
   offer_accepted: 'Accepted in ScoutBox',
   offer_declined: 'Offer declined by player',
   signed: 'Signed',
@@ -80,32 +51,19 @@ export const ROOM_STATUS_LABELS = table({
   closed: 'Closed',
 });
 
-// `superseded` is deliberately NOT a room status: a decision is superseded by a
-// later decision, which the append-only decision memory already models.
-// A room that is no longer being pursued is `archived`, `withdrawn` or `closed`.
+// `superseded` is not a room status: the append-only decision memory models superseded decisions.
 
 export const TERMINAL_ROOM_STATUSES = ['signed', 'withdrawn', 'archived', 'closed'];
 
-/**
- * Where a newly opened Room starts.
- *
- * Declared here, with the status set it belongs to, rather than spelled
- * `'watching'` at each creation site. The lifecycle re-exports it as `LIFECYCLE_INITIAL`
- * so the lifecycle can name it in its own vocabulary without owning a second
- * copy of the value.
- */
 export const INITIAL_ROOM_STATUS = 'watching';
 
 export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter((s) => !TERMINAL_ROOM_STATUSES.includes(s));
 
-// Case stage vocabularies, mirrored here so the mapping is declarative. These
-// MUST stay equal to domains/scouting/scouting.mjs PRO_STAGES / GRASSROOTS_STAGES; a boot
-// assertion in domains/recruitment/rooms/index.mjs fails loudly if they ever drift apart.
+// Must equal PRO_STAGES / GRASSROOTS_STAGES in domains/scouting/scouting.mjs.
 export const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 export const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
-/** Every stage a case can hold, at either level (the case table's vocabulary). */
 export const CASE_STAGES = [...new Set([...PRO_STAGES, ...GRASSROOTS_STAGES])];
-/** The case's own priority (the Room keeps ROOM_PRIORITIES), its sign-off outcomes and its approval states. */
+/** The case's own priority (the Room keeps ROOM_PRIORITIES), sign-off outcomes and approval states. */
 export const CASE_PRIORITIES = ['high', 'medium', 'low'];
 export const CASE_DECISION_OUTCOMES = ['sign', 'pass', 'monitor'];
 export const CASE_APPROVAL_STATES = ['pending', 'approved', 'rejected'];
@@ -114,8 +72,6 @@ const STAGE_MAP = table({
   pro: table({
     watching: 'identified',
     under_review: 'review',
-    // A planned approach and a delivered one are both part of reviewing
-    // the player; neither is an observation or a trial.
     contact_planned: 'review',
     contacted: 'review',
     shortlisted: 'observation',
@@ -128,8 +84,7 @@ const STAGE_MAP = table({
     offer_accepted: 'decision',
     offer_declined: 'decision',
     signed: 'closed',
-    // A hold is a live case awaiting a person, not a closed one. It maps
-    // to review because that is what resuming it means.
+    // A hold is live; resuming it means review.
     on_hold: 'review',
     withdrawn: 'closed',
     archived: 'closed',
@@ -139,7 +94,6 @@ const STAGE_MAP = table({
     watching: 'review',
     under_review: 'review',
     contact_planned: 'review',
-    // The grassroots vocabulary already has the right word for this.
     contacted: 'awaiting_response',
     shortlisted: 'review',
     priority: 'review',
@@ -160,23 +114,12 @@ const STAGE_MAP = table({
 
 export const orgStageKind = (orgLevel) => (orgLevel === 'grassroots' ? 'grassroots' : 'pro');
 
-/** The canonical case stage for a room status. One direction, one writer. */
 export function stageForRoomStatus(status, orgLevel) {
   return STAGE_MAP[orgStageKind(orgLevel)][status] ?? null;
 }
 
-/**
- * The room status a case stage MEANS — the inverse of a lossy
- * projection, and therefore never an authoritative write.
- *
- * Eighteen statuses collapse onto six stages, so `decision` alone means any of
- * `offer_consideration`, `offer_made`, `offer_accepted` or `offer_declined`.
- * Its single legitimate use is room CREATION: a Room adopting an existing
- * case reads the stage to decide where the new workspace starts. It is
- * deliberately NOT used to move an existing room — `POST /org/cases/:id/stage`
- * refuses a Room outright rather than round-tripping a client's stage through
- * a mapping that cannot tell those four statuses apart.
- */
+// The inverse of a lossy projection (`decision` covers four statuses), so it is only used to choose where a
+// new Room adopting a case starts, never to move an existing room.
 const CANONICAL_STATUS_FOR_STAGE = table({
   identified: 'watching',
   review: 'under_review',
@@ -196,15 +139,10 @@ export function roomStatusForStage(stage, orgLevel) {
 
 // ------------------------------------------------------------- transitions
 
-// The full transition table. Anything not listed is refused — there is no
-// "any status to any status" escape hatch, and nothing here is inferred from a
-// Trust Score, a Combine result or an assessment rating.
+// Anything not listed is refused.
 export const ROOM_TRANSITIONS = table({
   watching: ['under_review', 'shortlisted', 'contact_planned', 'on_hold', 'withdrawn', 'archived'],
   under_review: ['watching', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'on_hold', 'withdrawn', 'archived'],
-  // The two contact states. A club that has AGREED to approach a player
-  // and one that has not are otherwise indistinguishable, and a club awaiting a
-  // reply has nowhere to sit. Neither is a trial and neither is an observation.
   contact_planned: ['contacted', 'under_review', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
   contacted: ['shortlisted', 'priority', 'trial_requested', 'offer_consideration', 'under_review', 'on_hold', 'withdrawn', 'archived'],
   shortlisted: ['under_review', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'on_hold', 'withdrawn', 'archived'],
@@ -213,72 +151,31 @@ export const ROOM_TRANSITIONS = table({
   trial_scheduled: ['trial_completed', 'trial_requested', 'on_hold', 'withdrawn', 'archived'],
   trial_completed: ['offer_consideration', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
   offer_consideration: ['offer_made', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived'],
-  // THE LEGAL BOUNDARY, EXPRESSED AS STATES RATHER THAN AS COPY.
-  //
-  // `offer_made → offer_accepted` is the player saying yes in ScoutBox.
-  // `offer_accepted → signed` is a separate, separately-authorised act that
-  // requires confirmed joining evidence. Nothing derives the second from the
-  // first: see domains/recruitment/lifecycle/lifecycle.mjs, where `signed` carries a precondition that
-  // an acceptance can never satisfy.
-  //
-  // `offer_made → signed` is KEPT. Removing it would not add safety — the
-  // precondition on `signed` is what does that — and it would delete a real
-  // situation: a club that concluded a signing outside ScoutBox and is
-  // recording the outcome. There is still no jump to `signed` from watching,
-  // archived or closed.
+  // `offer_accepted` is the player saying yes in ScoutBox; `signed` needs confirmed joining evidence (see
+  // STATUS_EVIDENCE_REQUIRED). `offer_made → signed` stays for a signing concluded outside ScoutBox.
   offer_made: ['offer_accepted', 'offer_declined', 'signed', 'offer_consideration', 'on_hold', 'withdrawn', 'archived'],
-  // Accepted in ScoutBox. Still not a signing, and reachable only by the
-  // recipient's own act.
+  // Reachable only by the recipient's own act.
   offer_accepted: ['signed', 'on_hold', 'withdrawn', 'archived', 'closed'],
-  // The player said no. Deliberately NOT the same as the club withdrawing:
-  // collapsing the two would misattribute whose decision it was.
+  // Distinct from the club withdrawing, so the decision is attributed correctly.
   offer_declined: ['under_review', 'shortlisted', 'priority', 'on_hold', 'withdrawn', 'archived', 'closed'],
-  // Signed is where recruitment ends; the room may only be filed away after it.
   signed: ['closed'],
-  // A hold is LIVE, not terminal. It is a case with a reason and
-  // (optionally) a date to look again, and every ordinary route out of it
-  // stays open.
-  // `resumeCase` returns the case to the state it was held
-  // FROM (domains/recruitment/lifecycle/lifecycle.mjs resolves the target and is the ONE edge out of a
-  // hold into a held-from state). This row deliberately names NONE of the
-  // states a recipient's answer reaches (contacted, trial_scheduled,
-  // trial_completed, offer_made, offer_accepted, signed): while a case is
-  // paused, nothing else — not the recipient's answer, not a hand move on the
-  // legacy route — takes it out of the hold. Its two evidence-bearing exits
-  // (trial_requested, offer_consideration) keep their preconditions.
+  // `resumeCase` is the only way back to the held-from state. This row names none of the states a
+  // recipient's answer reaches, so nothing else takes a paused case out of the hold.
   on_hold: ['under_review', 'shortlisted', 'priority', 'contact_planned', 'trial_requested', 'offer_consideration', 'withdrawn', 'archived', 'closed'],
-  // Reopening is a first-class move, not a delete-and-recreate.
   withdrawn: ['under_review', 'archived', 'closed'],
   archived: ['under_review', 'closed'],
   closed: ['under_review'],
 });
 
-/**
- * Statuses that assert a DURABLE FACT and therefore require a record proving it.
- *
- * The requirement lives HERE, keyed by TARGET status, and is returned by
- * `validateTransition` — the one function every status path calls, including
- * the legacy `POST /org/rooms/:id/status` route, which takes a client-supplied
- * status string. Checked anywhere else, that route would be a side door: a
- * club at `offer_made` could post `{ status: 'signed' }` and the lifecycle
- * would assert a football-business fact no record supports.
- * Keying by target and not by (from, to) is deliberate: it means
- * `offer_made -> signed` and `offer_accepted -> signed` carry the IDENTICAL
- * requirement, and no future edge can be added that quietly skips it.
- *
- * Kinds are resolved by an injected provider. A caller with no provider must
- * FAIL CLOSED: an unresolvable requirement is an unmet one.
- */
+// Keyed by target status and returned by `validateTransition`, which every status path calls, including the
+// legacy status route that takes a client string, so no edge into these statuses can skip its evidence.
+// A caller with no evidence provider must fail closed.
 export const STATUS_EVIDENCE_REQUIRED = table({
   contacted: { kind: 'contact_delivered', note: 'a contact must have been delivered or recorded' },
-  // Not a new status, not a new edge: `trial_requested` says a trial was asked for, and
-  // the record that proves it is the invitation the recipient can see.
   trial_requested: { kind: 'trial_invited', note: 'a trial invitation must have been sent to the player or their guardian' },
   trial_scheduled: { kind: 'trial_confirmed', note: 'a trial schedule must have been confirmed with at least one concrete session' },
   trial_completed: { kind: 'trial_completed', note: 'a trial must have been completed' },
-  // Not a new status, not a new edge: considering an offer is the club's formal decision to progress, and
-  // the record that proves it is a finalized formal decision on this case. A
-  // draft, an advisory recommendation or a superseded decision proves nothing.
+  // A draft, advisory or superseded decision proves nothing.
   offer_consideration: { kind: 'decision_progress', note: 'a finalized recruitment decision to progress must exist for this case' },
   offer_made: { kind: 'offer_sent', note: 'an offer must have been sent' },
   offer_accepted: { kind: 'offer_accepted_by_recipient', note: 'the recipient must have accepted their own offer' },
@@ -286,41 +183,21 @@ export const STATUS_EVIDENCE_REQUIRED = table({
   signed: { kind: 'confirmed_join', note: 'a confirmed joining or registration record must exist' },
 });
 
-/**
- * The status a NEW Room starts at when it adopts an existing case.
- *
- * Opening a workspace is not a claim about the world. Room creation is an
- * inbound edge to whatever status it lands on, and it runs no transition
- * table and no evidence gate — so if the case's legacy stage mapped onto an
- * evidence-bearing status, creation would be the one inbound edge that carries
- * none of the burden every other inbound edge carries. Grassroots
- * `awaiting_response` maps to `trial_completed`, and no trial need ever have
- * happened.
- *
- * Those adoptions start at `under_review` instead: open, honest, and the state
- * the club is actually in. The original stage is recorded in the creation
- * activity, so the club's own record of where it had got to is not lost.
- *
- * Stated as a property rather than as a special case for `awaiting_response`:
- * no stage in any vocabulary, present or future, can start a room at a status
- * that asserts something the records do not prove.
- */
+// Room creation runs no transition table or evidence gate, so an adopted stage that maps onto an
+// evidence-bearing status (grassroots `awaiting_response` → `trial_completed`) starts at `under_review`
+// instead. The original stage is kept in the creation activity.
 export function adoptionStatusForStage(stage, orgLevel) {
   const mapped = roomStatusForStage(stage, orgLevel);
   if (!mapped) return 'watching';
   return STATUS_EVIDENCE_REQUIRED[mapped] ? 'under_review' : mapped;
 }
 
-/** Statuses that end active pursuit and therefore demand a recorded reason. */
 export const REASON_REQUIRED_STATUSES = ['withdrawn', 'archived', 'closed'];
 
-/** Statuses that are a reopen of a previously ended room. */
 export const REOPENED_FROM = ['withdrawn', 'archived', 'closed'];
 
-/**
- * Statuses at which the evidence-confidence the club could see is worth
- * preserving, so ScoutBox can later answer "what did they see at the time?".
- */
+// Statuses at which the evidence confidence the club could see is snapshotted, to answer "what did they
+// see at the time?".
 export const SNAPSHOT_STATUSES = [
   'shortlisted', 'priority', 'trial_requested',
   'offer_consideration', 'offer_made', 'signed',
@@ -329,10 +206,6 @@ export const SNAPSHOT_STATUSES = [
 
 export const canTransition = (from, to) => (ROOM_TRANSITIONS[from] ?? []).includes(to);
 
-/**
- * Validate a requested status change. Returns `{ ok, error, message, reopen,
- * needsReason, snapshot }` — never throws, never mutates.
- */
 export function validateTransition(from, to, { reasonCodes = [] } = {}) {
   if (!ROOM_STATUSES.includes(to)) {
     return { ok: false, error: 'ROOM_STATUS_UNKNOWN', message: `"${to}" is not a Recruitment Room status.` };
@@ -361,21 +234,13 @@ export function validateTransition(from, to, { reasonCodes = [] } = {}) {
     reopen: REOPENED_FROM.includes(from) && !REOPENED_FROM.includes(to),
     needsReason,
     snapshot: SNAPSHOT_STATUSES.includes(to),
-    // Statuses that assert a durable fact must name the record that
-    // proves it. Returned here, on the ONE validator every status route
-    // already calls, so no caller can reach an evidence-bearing status
-    // without being told that evidence is required.
     requiresEvidence: STATUS_EVIDENCE_REQUIRED[to]?.kind ?? null,
   };
 }
 
 // -------------------------------------------------------- reason taxonomy
 
-/**
- * The structured reason taxonomy. A reason is a code plus an optional private
- * note; only the CODE is machine-readable, so a future Second Look can reason
- * about "why was this player archived?" without reading anybody's free text.
- */
+// Only the code is machine-readable, so later analysis never has to read anybody's free text.
 export const REASON_CODES = {
   football: [
     'technical_fit', 'tactical_fit', 'physical_profile', 'position_need', 'development_upside',
@@ -396,14 +261,8 @@ export const ALL_REASON_CODES = Object.values(REASON_CODES).flat();
 export const reasonCategory = (code) =>
   Object.keys(REASON_CODES).find((cat) => REASON_CODES[cat].includes(code)) ?? null;
 
-/**
- * Reasons that must never be recordable, in any club, for any player. These are
- * refused with their own error code rather than a generic "unknown code" so the
- * refusal is unambiguous in an audit and cannot be mistaken for a typo.
- *
- * A club may still decline a player — it simply may not record a protected
- * trait as the reason, and ScoutBox will not carry one into its analytics.
- */
+// Refused with their own error code so an audit cannot mistake the refusal for a typo. A club may still
+// decline a player; it may not record a protected trait as the reason.
 export const PROHIBITED_REASON_CODES = [
   'race', 'ethnicity', 'skin_colour', 'skin_color',
   'nationality', 'nationality_preference', 'national_origin', 'immigration_status',
@@ -414,21 +273,14 @@ export const PROHIBITED_REASON_CODES = [
   'pregnancy', 'marital_status', 'political_opinion', 'union_membership',
 ];
 
-/**
- * Evidence-shaped reasons. A room archived for one of these may become worth a
- * second look when the missing evidence arrives — this is the contract the
- * future Second Look product consumes.
- */
+// Evidence-shaped reasons: an archived room may be worth a second look when the missing evidence arrives.
 export const REVISITABLE_REASON_CODES = [...REASON_CODES.evidence, 'trial_needed', 'continue_monitoring'];
 
 export function validateReasonCodes(codes) {
   if (!Array.isArray(codes)) {
     return { ok: false, error: 'ROOM_REASONS_INVALID', message: 'Reasons must be a list of reason codes.' };
   }
-  // Coerce only what is already a string. `String(value)` invokes the value's
-  // own `toString`, so `[{ toString: 1 }]` in a request body would throw
-  // "Cannot convert object to primitive value" out of the route as a 500. A reason code that is not a
-  // string is not a reason code, and saying so is the whole check.
+  // `String(value)` would call a body value's own `toString` and can throw, so non-strings are refused.
   if (codes.some((c) => c != null && typeof c !== 'string')) {
     return { ok: false, error: 'ROOM_REASONS_INVALID', message: 'Each reason must be a reason code, given as text.' };
   }
@@ -463,11 +315,6 @@ export const RECOMMENDATIONS = [
   'no_decision', 'continue_watching', 'shortlist', 'priority', 'trial', 'offer', 'archive',
 ];
 
-/**
- * Validate a decision entry. A decision is a human judgement: nothing here
- * reads a Trust Score, a Combine measurement or an assessment rating, and
- * nothing infers a recommendation from them.
- */
 export function validateDecision({ recommendation, reasonCodes = [], note = null } = {}) {
   if (!RECOMMENDATIONS.includes(recommendation)) {
     return { ok: false, error: 'ROOM_RECOMMENDATION_UNKNOWN', message: 'That is not a ScoutBox recruitment recommendation.' };
@@ -485,11 +332,7 @@ export function validateDecision({ recommendation, reasonCodes = [], note = null
 
 // --------------------------------------------------------------- readiness
 
-/**
- * Deterministic workflow completeness. This is NOT a score and NOT a
- * recommendation: it counts what has been done and what is outstanding, and
- * every item is a plain fact a human could check themselves.
- */
+// Workflow completeness, not a score or a recommendation: each item is a fact a human could check.
 export function decisionReadiness({
   assessmentsAssigned = 0, assessmentsSubmitted = 0,
   recentFullMatch = false, coachReference = false,
@@ -542,7 +385,7 @@ export function decisionReadiness({
   ];
   return {
     items,
-    // Counts, deliberately — never a percentage, never a readiness score.
+    // Counts, never a percentage or score.
     complete: items.filter((i) => i.complete).length,
     total: items.length,
     blockers: items.filter((i) => i.outstanding).map((i) => ({ key: i.key, text: i.outstanding })),
@@ -551,11 +394,7 @@ export function decisionReadiness({
   };
 }
 
-/**
- * A word, never a number. Adding a second numeric score to a product that
- * already has a Trust Score is exactly how a Trust Score becomes a player
- * rating by accident.
- */
+// A word, never a number: a second numeric score next to the Trust Score would read as a player rating.
 export const ROOM_HEALTH = ['decision_recorded', 'trial_pending', 'assessment_outstanding', 'waiting_on_evidence', 'ready_for_review'];
 
 export const ROOM_HEALTH_LABELS = {
@@ -577,24 +416,17 @@ export function roomHealth({ readiness, hasCurrentDecision = false, status = 'wa
 
 // ------------------------------------------------------------- permissions
 
-/**
- * Room roles mapped onto the EXISTING org permission architecture — no
- * parallel RBAC. `isLead` is the one existing tier (a regex over the user's
- * role, domains/platform/routeHelpers.mjs); case restriction is the one existing per-user gate.
- */
+// Room roles on top of the existing org permissions: `isLead` (domains/platform/routeHelpers.mjs) and case
+// restriction.
 export function roomRole({ room, user, isLead }) {
   if (!room || !user) return null;
   if (isLead) return 'recruitment_admin';
   if (room.ownerUserId === user.id || room.room?.leadScoutUserId === user.id) return 'room_lead';
   const assigned = (room.assignments ?? []).some((a) => a.userId === user.id);
-  // A restricted room admits only its lead, its assignees and recruitment leads.
   if (room.restricted && !assigned) return null;
-  // Once a room is filed away its discussion is institutional memory: everyone
-  // still reads it, but only a room lead or a recruitment admin can add to it.
+  // A filed-away room's discussion is read-only except to a room lead or recruitment admin.
   if (TERMINAL_ROOM_STATUSES.includes(room.room?.status)) return 'viewer';
-  // Everyone else at a recruitment organisation is recruitment staff. ScoutBox
-  // has no read-only staff tier today, so an unrestricted, open room makes a
-  // colleague a contributor rather than a spectator.
+  // ScoutBox has no read-only staff tier, so other recruitment staff contribute to an open room.
   return 'contributor';
 }
 
@@ -617,30 +449,18 @@ export const roomCan = (role, action) => {
     reassign_owner: 2,
     archive: 2,
     reopen: 2,
-    // Contact. History is club memory (anyone who can read the room);
-    // drafting, sending, recording and cancelling are outward-facing acts with
-    // a real person on the other end, and sit with the room lead.
+    // Reading history is open to any reader; outward-facing acts sit with the room lead.
     contact_view: 0,
     contact_write: 2,
-    // Trial. Shared Trial information is club
-    // memory; a scout may assess in Trial context; inviting, scheduling,
-    // cancelling, attendance, completion and evidence links are outward or
-    // operational acts and sit with the room lead. `request_trial` above is
-    // the same level and is what the invitation route checks.
+    // `request_trial` above is what the invitation route checks.
     trial_view: 0,
     trial_assess: 1,
     trial_write: 2,
-    // Formal recruitment decision. Reading the decision is club
-    // memory; drafting and finalizing are the recruitment act and sit with
-    // the room lead, exactly where `record_decision` already sits. A scout
-    // contributes assessments and discussion, not the decision.
+    // A scout contributes assessments and discussion, not the decision.
     decision_view: 0,
     decision_draft: 2,
     decision_finalize: 2,
-    // The canonical Offer. Reading an Offer is club memory (the
-    // internal note is a club note); drafting, issuing, withdrawing and
-    // revising are the outward-facing recruitment act and sit with the room
-    // lead, exactly where `record_decision` and `decision_finalize` sit.
+    // The internal offer note is a club note, so any reader may see it.
     offer_view: 0,
     offer_draft: 2,
     offer_issue: 2,
@@ -651,16 +471,12 @@ export const roomCan = (role, action) => {
 
 // ----------------------------------------------------------- source context
 
-/** Where a room came from. Workflow provenance only — never a player score. */
+/** Where a room came from: workflow provenance only. */
 export const SOURCE_CONTEXTS = [
   'search', 'watchlist', 'shortlist', 'opportunity', 'recommendation', 'campaign', 'passport',
-  // A room opened from a Nobody Missed brief, or reopened from a
-  // Second Look. Recorded so the funnel can later tell a reactivation from an
-  // organic discovery — never exposed to the player.
+  // Kept distinct so the funnel can tell a reactivation from an organic discovery. Never shown to the player.
   'nobody_missed', 'second_look',
-  // An explainable-matching result, or a Dynamic Watchlist. Kept
-  // distinct so the funnel can later tell a saved-criteria origin from a
-  // one-off query — never exposed to the player.
+  // Kept distinct so the funnel can tell a saved-criteria origin from a one-off query.
   'matching', 'dynamic_watchlist',
   'direct',
 ];
@@ -688,10 +504,6 @@ export const EVIDENCE_REVIEW_STATES = ['not_reviewed', 'reviewing', 'reviewed', 
 
 export const ROOM_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
 
-/**
- * Internal workflow urgency — how soon the CLUB needs to act. It says nothing
- * about the player and is never exposed outside the organisation.
- */
 export const ROOM_PRIORITY_NOTE = 'Internal workflow urgency for your organisation. It is not a judgement of the player and is never shown to them.';
 
 // -------------------------------------------------------------- activity
@@ -705,12 +517,8 @@ export const ROOM_EVENT_TYPES = [
   'room_decision_recorded', 'room_tag_changed', 'room_priority_changed',
 ];
 
-/**
- * Project the append-only `case.history` rows the case layer writes into typed
- * room activity. Ordering is stable and total: timestamp first, then the
- * monotonic numeric part of the event id as a tiebreak, so two events written
- * in the same millisecond never swap places between reads.
- */
+// The numeric suffix of the event id breaks timestamp ties, so events written in the same millisecond keep
+// their order between reads.
 export function roomActivity(history = [], { limit = 50, cursor = null } = {}) {
   const seq = (id) => {
     const n = Number(String(id ?? '').split('-').pop());
@@ -736,13 +544,8 @@ export function roomActivity(history = [], { limit = 50, cursor = null } = {}) {
 
 // ------------------------------------------------------------- snapshots
 
-/**
- * A decision-time snapshot records what evidence confidence the club COULD see
- * when it decided, plus the minimal references needed to explain the decision
- * later. It deliberately does NOT freeze the Passport: giant JSON snapshots rot,
- * and a frozen copy of restricted player data is exactly the stale-cache
- * authorization bypass a snapshot must not create.
- */
+// Records what evidence confidence the club could see, plus references to explain the decision later. It
+// does not freeze the Passport: a frozen copy of restricted player data would bypass later access checks.
 export function buildRoomSnapshot({ trustSnapshot = null, sourceRefs = {}, trigger, at = Date.now() }) {
   return {
     at,
@@ -752,8 +555,7 @@ export function buildRoomSnapshot({ trustSnapshot = null, sourceRefs = {}, trigg
           score: trustSnapshot.score,
           band: trustSnapshot.band,
           policyVersion: trustSnapshot.policyVersion,
-          // Component LEVELS only — the per-component coverage numbers that
-          // safeTrustProjection withholds from a club never enter the store.
+          // Levels only: the per-component coverage that safeTrustProjection withholds never enters the store.
           componentLevels: Object.fromEntries(
             Object.entries(trustSnapshot.components ?? {}).map(([k, c]) => [k, c.level]),
           ),
@@ -762,9 +564,7 @@ export function buildRoomSnapshot({ trustSnapshot = null, sourceRefs = {}, trigg
       : null,
     sourceRefs: {
       passportVersion: sourceRefs.passportVersion ?? null,
-      // The Passport CONTENT revision at decision time. passportVersion
-      // is the projection schema version and never moves; this one does, so a
-      // later Second Look can say whether the Passport truth itself changed.
+      // passportVersion is the projection schema version and never moves; the revision tracks content.
       passportRevision: sourceRefs.passportRevision ?? null,
       evidenceIds: (sourceRefs.evidenceIds ?? []).slice(0, 40),
       assessmentIds: (sourceRefs.assessmentIds ?? []).slice(0, 20),
@@ -782,10 +582,7 @@ export const ROOM_DEV_NOTE = 'Box Cam activity shows verified training evidence.
 export const ROOM_PRIVACY_NOTE = 'This room is private to your organisation. The player, their guardian and every other club can never see it.';
 export const ROOM_UNAVAILABLE_NOTE = 'Player data is currently unavailable to your organisation under the standing rules. Your internal record remains.';
 
-/**
- * A room row for a list. Carries no player-private field and no source detail —
- * the list is a workflow view, not a back door into a Passport.
- */
+/** A room row for a list. Carries no player-private field and no source detail. */
 export function roomSummary(room, { player = null, trust = null, openTasks = 0, health = null, lastActivityAt = null, visible = true } = {}) {
   return {
     roomId: room.id,
@@ -813,14 +610,13 @@ export function roomSummary(room, { player = null, trust = null, openTasks = 0, 
   };
 }
 
-/** Aggregate funnel counts for one organisation. No player identifiers. */
 export function roomFunnel(rooms = []) {
   const byStatus = {};
   for (const r of rooms) byStatus[r.room?.status] = (byStatus[r.room?.status] ?? 0) + 1;
   return roomFunnelFromCounts(byStatus, rooms.length);
 }
 
-/** The same funnel from Room counts by status (`{ status: n }`, as the cases repository's GROUP BY answers). */
+/** The same funnel from Room counts by status, as the cases repository's GROUP BY answers. */
 export function roomFunnelFromCounts(byStatus = {}, total = Object.values(byStatus).reduce((t, n) => t + n, 0)) {
   const counts = Object.fromEntries(ROOM_STATUSES.map((s) => [s, byStatus[s] ?? 0]));
   const active = OPEN_ROOM_STATUSES.reduce((t, s) => t + counts[s], 0);
@@ -837,11 +633,7 @@ export function roomFunnelFromCounts(byStatus = {}, total = Object.values(byStat
   };
 }
 
-/**
- * The Second Look contract. A domain event carrying machine-readable
- * reasons and no private free text, so a future product can ask "has the
- * reason this player was archived stopped applying?" without reading notes.
- */
+// Machine-readable reasons and no private free text.
 export function secondLookEvent(room, decision) {
   return {
     type: 'recruitment_room_archived',
@@ -853,7 +645,7 @@ export function secondLookEvent(room, decision) {
     revisitable: (decision?.reasonCodes ?? []).some((c) => REVISITABLE_REASON_CODES.includes(c)),
     decisionAt: decision?.createdAt ?? room.room.updatedAt,
     sourceVersionRefs: decision?.snapshot?.sourceRefs ?? null,
-    // Deliberately absent: note, comments, assessment content, player name.
+    // Absent: note, comments, assessment content, player name.
   };
 }
 

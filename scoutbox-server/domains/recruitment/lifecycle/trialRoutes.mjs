@@ -1,36 +1,12 @@
 /**
- * Trial routes: the club side of one operational workflow, and the
- * recipient's confirmation/decline/cancel of it.
+ * Trial routes: the club side of the workflow, and the recipient's
+ * confirmation, decline or cancellation of it.
  *
- *   GET   /org/rooms/:id/trials                          trials for the case, routing, case gate
- *   POST  /org/rooms/:id/trials                          send an INVITATION (a request, type trial)
- *   GET   /org/rooms/:id/trials/:tid                     one trial, its evidence and its assessments
- *   POST  /org/rooms/:id/trials/:tid/schedule            propose / confirm a schedule revision
- *   POST  /org/rooms/:id/trials/:tid/reschedule          same handler; a revision of a confirmed schedule
- *   POST  /org/rooms/:id/trials/:tid/cancel              cancel (allowed while blocked — a safety notice)
- *   POST  /org/rooms/:id/trials/:tid/sessions/:sid/attendance
- *   POST  /org/rooms/:id/trials/:tid/complete            the completion gate
- *   POST  /org/rooms/:id/trials/:tid/sessions/:sid/evidence         link a Box Cam session
- *   POST  /org/rooms/:id/trials/:tid/evidence/:eid/unlink
- *   GET   /org/rooms/:id/trials/:tid/evidence            trialEvidenceView[]
- *   GET   /org/recruitment/trial-policy                  vocabulary
- *   POST  /player|guardian/trials/:id/confirm-schedule   recipient confirms a revision
- *   POST  /player|guardian/trials/:id/decline-schedule
- *   POST  /player|guardian/trials/:id/cancel
- *
- * There is deliberately NO acceptance route here. The recipient accepts the
- * invitation through the respond route that already exists; that route calls
- * the single Trial writer (`issueAcceptedTrial`) and then `ctx.onTrialAccepted`
- * (registered here), so the case advances through the single lifecycle writer
- * in the SAME unit as the answer. One Inbox, one response path, one
- * trial writer.
- *
- * WHAT NEVER HAPPENS HERE
- *
- * No `case.status = …` (only `ctx.applyLifecycleTransition`); no write to a
- * Box Cam session; no read of an assessment body; no numeric confidence or
- * score; no recipient identity trusted from a client — every recipient is
- * re-derived from the live player, organisation, guardian records and clock.
+ * There is no acceptance route here. The recipient accepts through the
+ * existing respond route, which calls the Trial writer (`issueAcceptedTrial`)
+ * and then `ctx.onTrialAccepted` (registered here), so the case advances in
+ * the same unit as the answer. Every recipient is re-derived from the live
+ * player, organisation, guardian records and clock, never trusted from a client.
  */
 
 import { visibleToOrg, chooseTrialSlot } from '../../../domain.mjs';
@@ -61,7 +37,6 @@ export function registerTrial(ctx) {
     scoutingReads, // the assessments
     boxCamReads, // Box Cam sessions and their CV results
   } = ctx;
-  // Every trial and request write is a named act of the repository (trials.cancel, requests.linkTrial, …) inside `unit`.
   if (typeof unit !== 'function' || !recruitment?.trials) throw new TypeError('registerTrial needs the recruitment repository and unit from the data layer');
   const { trials } = recruitment;
   const { cases } = ctx.recruitmentCases; // the case's links and history are explicit writes in the same unit
@@ -75,13 +50,13 @@ export function registerTrial(ctx) {
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-  /** One history entry, ONE clock. */
+  /** One history entry, one clock. */
   const entry = (action, by, detail, at) => ({ id: nextId('aud'), at, action, by, detail: detail ?? null });
-  /** The bookkeeping of an act: its history entry and the rev bump (by the club member, or null for the family), with the client key it came with. */
+  /** The history entry and rev bump of an act (revBy null for the family), with its client key. */
   const acted = (at, revBy, action, by, detail, key = null) => ({ at, bump: true, revBy, history: [entry(action, by, detail, at)], key });
   const attendedCount = (t) => [...currentAttendance(t).values()].filter((a) => ['attended', 'partial'].includes(a.state)).length;
 
-  /** Idempotency keys are per action, bounded, with a payload fingerprint. */
+  /** Per action, bounded, with a payload fingerprint. */
   function keyCheck(t, action, key, fp) {
     if (!key) return { replay: false };
     const list = Array.isArray(t.keys?.[action]) ? t.keys[action] : [];
@@ -90,7 +65,7 @@ export function registerTrial(ctx) {
     return prior.fp === fp ? { replay: true } : { conflict: true };
   }
 
-  /** The case statuses from which a trial may be requested: every in-edge of `trial_requested`, plus itself (a second invitation after a decline). */
+  /** Every in-edge of `trial_requested`, plus itself (a second invitation after a decline). */
   const TRIAL_CASE_STATUSES = Object.freeze([
     ...Object.keys(ROOM_TRANSITIONS).filter((s) => (ROOM_TRANSITIONS[s] ?? []).includes('trial_requested')),
     'trial_requested',
@@ -111,7 +86,7 @@ export function registerTrial(ctx) {
     return { room, role };
   }
 
-  /** This case's trials (case-bound) plus this org's legacy trials for the same player (read-only interpretation), corrupt rows omitted and counted. */
+  /** This case's trials plus this org's legacy trials for the player (read-only), corrupt rows omitted and counted. */
   function trialsOf(room) {
     const good = [];
     let omitted = 0;
@@ -144,7 +119,7 @@ export function registerTrial(ctx) {
     return s;
   }
 
-  /** The recipient rule, in Trial vocabulary. Computed now, never trusted from a client. */
+  /** The recipient rule in Trial vocabulary. Computed now, never trusted from a client. */
   const RECIPIENT_CODES = Object.freeze({ CONTACT_BLOCKED: 'TRIAL_BLOCKED', CONTACT_GUARDIAN_REQUIRED: 'TRIAL_GUARDIAN_REQUIRED', CONTACT_RECIPIENT_UNAVAILABLE: 'TRIAL_RECIPIENT_UNAVAILABLE' });
   function recipientFor(org, playerId) {
     const r = resolveContactRecipient({ player: findPlayer(playerId), org, guardians: guardians.forPlayer(playerId), isAdult, visibleToOrg, isBlocked, now: new Date() });
@@ -155,10 +130,9 @@ export function registerTrial(ctx) {
   const routingView = (r) => (r.ok ? { available: true, type: r.recipient.type, minor: r.recipient.minor } : { available: false, type: null, minor: null, reason: r.error });
 
   /**
-   * RE-AUTHORISATION on every club mutation, in order: role (done by
-   * roomFor), org membership (orgAuth), block policy, recipient validity (visibility, club
-   * verification for minors, guardian route) for the actions that reach the
-   * recipient, subject removed, state.
+   * Re-authorisation on every club mutation, after the role check in roomFor:
+   * subject removed, block policy, recipient validity for actions that reach
+   * the recipient, then state.
    */
   function reauth(req, res, room, t, action) {
     if (t?.subjectRemovedAt) { err(res, 'TRIAL_SUBJECT_REMOVED', 'This player removed their ScoutBox account. The trial stays on record; it can no longer be changed.'); return null; }
@@ -180,24 +154,21 @@ export function registerTrial(ctx) {
     return { recipient };
   }
 
-  /** `expectedRev` is REQUIRED on a mutation of an existing trial; absent is refused, never coerced. */
+  /** Required on a mutation of an existing trial; absent is refused, never coerced. */
   function revGate(req, res, t) {
     const exp = expectedRevOf(req.body);
     if (exp === null) { err(res, 'TRIAL_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.'); return false; }
-    // No coercion: a rev is a JSON integer, never "3", 3.5, -1,
-    // an object or a list. The shared guard folds numeric strings; the Trial
-    // does not.
+    // A rev is a JSON integer, never "3", 3.5 or -1: the shared guard folds
+    // numeric strings and the Trial does not.
     const rawRev = req.body?.expectedRev ?? req.body?.expectedVersion;
     if (!Number.isInteger(rawRev) || rawRev < 0) { err(res, 'TRIAL_REV_REQUIRED', 'expectedRev must be a non-negative integer.', { field: 'expectedRev', expected: 'integer' }); return false; }
     return guardRev(req, res, t, { errorCode: 'TRIAL_VERSION_CONFLICT', current: { workflowState: deriveWorkflowState(t) } });
   }
 
   /**
-   * The lifecycle coupling. The Trial never writes a case status: it asks the
-   * ONE validator whether the semantic action is possible — with the real
-   * evidence provider, which now sees this request or trial — and, if so,
-   * writes through the ONE status writer. A recipient-driven advance names
-   * the recipient as actor; a club-driven one names the club user.
+   * The Trial writes no case status: it asks the validator (whose evidence
+   * provider now sees this request or trial) and writes through the status
+   * writer. A recipient-driven advance names the recipient as actor.
    */
   function advanceCase({ req = null, room, action, at, trigger, actor = null, keyDetail = {} }) {
     const role = req ? roleFor(req, room) : 'recruitment_admin';
@@ -211,7 +182,7 @@ export function registerTrial(ctx) {
     return { applied: false, reason: verdict.error, at };
   }
 
-  /** The routed recipient's notification audience (guardian for minors). */
+  /** The guardian for minors. */
   function recipientAudience(t) {
     const p = findPlayer(t.playerId);
     if (!p) return null;
@@ -271,11 +242,9 @@ export function registerTrial(ctx) {
   // ---------------------------------------------------------- invitation
 
   /**
-   * The invitation body: 1–3 slots (each a UTC instant pair in the organiser
-   * timezone), a venue (name + town shared now; address after acceptance), a
-   * message, optional post-acceptance instructions. Every slot lands on a
-   * distinct calendar day in the organiser zone, because the recipient picks
-   * a DAY through the existing Inbox (`chosenSlot`).
+   * Every slot lands on a distinct day in the organiser zone, because the
+   * recipient picks a day through the existing Inbox (`chosenSlot`). Venue name
+   * and town are shared now; the address only after acceptance.
    */
   function validateInvitation(body, { now: at }) {
     const bad = (error, message, extra = {}) => ({ ok: false, error, message, ...extra });
@@ -321,7 +290,6 @@ export function registerTrial(ctx) {
     if (!inv.ok) return err(res, inv.error, inv.message, inv.field ? { field: inv.field } : (inv.allowed ? { allowed: inv.allowed } : {}));
     const fp = payloadFingerprint({ slots: inv.slots.map((s) => [s.startsAt, s.endsAt]), venue: inv.venue.name, message: inv.message });
 
-    // Replay of the same invitation: the same request row, not a second one.
     const mine = recruitment.requests.forCase(room.id).filter((r) => r.type === 'trial' && r.orgId === room.orgId);
     if (key.key) {
       const prior = mine.find((r) => r.keys?.invite?.key === key.key);
@@ -329,18 +297,14 @@ export function registerTrial(ctx) {
       if (prior) return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different invitation.');
     }
 
-    // The case gate: one gate, the case status. The club plans a trial
-    // from where the lifecycle allows `trial_requested`.
     if (!TRIAL_CASE_STATUSES.includes(room.room.status)) {
       return err(res, 'TRIAL_CASE_STATE', `A case at "${ROOM_STATUS_LABELS[room.room.status] ?? room.room.status}" cannot request a trial.`, { allowed: TRIAL_CASE_STATUSES });
     }
-    // One live invitation at a time; one open trial at a time.
     const pending = mine.find((r) => r.status === 'pending');
     if (pending) return err(res, 'TRIAL_ALREADY_INVITED', 'An invitation is already waiting for an answer.', { current: { requestId: pending.id } });
     const openTrial = trialsOf(room).list.find((t) => t.caseId === room.id && !['completed', 'cancelled'].includes(deriveWorkflowState(t)));
     if (openTrial) return err(res, 'TRIAL_INVALID_STATE', 'This case already has an open trial. Complete or cancel it before inviting again.', { current: { trialId: openTrial.id, workflowState: deriveWorkflowState(openTrial) } });
-    // Deterministic anti-spam: a declined invitation cannot be followed by
-    // another to the same player within the Contact cooldown window.
+    // A declined invitation cannot be followed by another within the Contact cooldown.
     const declined = mine.filter((r) => r.status === 'declined' && Number.isFinite(r.respondedAt) && at - r.respondedAt < CONTACT_LIMITS.cooldownMs);
     if (declined.length) {
       const latest = Math.max(...declined.map((r) => r.respondedAt));
@@ -348,7 +312,7 @@ export function registerTrial(ctx) {
     }
     if (limited('trial_invite', req.org.id)) return res.status(429).json(rateLimitedBody('trial_invite'));
 
-    // RE-DERIVED NOW: block, visibility (agency / unverified club walls), guardian route.
+    // Re-derived now: block, visibility (agency and unverified-club walls), guardian route.
     const auth = reauth(req, res, room, null, 'invite');
     if (!auth) return;
     const recipient = auth.recipient;
@@ -356,8 +320,7 @@ export function registerTrial(ctx) {
     if (!moderateOrRefuse(res, inv.message, { kind: 'trial_invitation', orgId: req.org.id, userId: req.orgUser.id })) return;
     if (inv.instructions && !moderateOrRefuse(res, inv.instructions, { kind: 'trial_instructions', orgId: req.org.id, userId: req.orgUser.id })) return;
 
-    // Failure injection: the transport refuses, NOTHING is
-    // written — no request row, no case move, no notification.
+    // The transport refuses: nothing is written, no case move, no notification.
     if (ctx.operations.delivery.consumeInjectedFailure('trial')) { // used up through the delivery bookkeeping (a row)
       console.error(`TRIAL transport_failed invitation case=${room.id}`);
       return err(res, 'TRIAL_TRANSPORT_REFUSED', 'The invitation could not be delivered. Nothing was sent; try again.');
@@ -371,12 +334,10 @@ export function registerTrial(ctx) {
         proposedDate: inv.slots[0].day, altSlots: inv.slots.slice(1).map((s) => s.day),
         venue: inv.venue.town ? `${inv.venue.name}, ${inv.venue.town}` : inv.venue.name, notes: '',
         slots: inv.slots,
-        // Shared with the routed recipient AFTER acceptance only;
-        // stripped from every recipient-facing view of the request.
+        // Shared with the recipient after acceptance only; stripped from every recipient-facing view.
         private: (inv.venue.address ?? null) !== null || (inv.instructions ?? null) !== null ? { venueAddress: inv.venue.address ?? null, instructions: inv.instructions ?? null } : null,
       },
       guardianId: recipient.guardianId, at,
-      // The case link, the recipient snapshot and the client key are part of the one create.
       workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
     });
     cases.link(room.id, { requestId: request.id }, { history: [auditEntry('org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', { requestId: request.id, recipientType: recipient.type, slotCount: inv.slots.length })] });
@@ -398,7 +359,7 @@ export function registerTrial(ctx) {
     res.json({ trial: trialClubView(t), evidence: evidenceViews(t), assessments: assessmentsFor(req, t), canWrite: trialRoleAllows(got.role, 'trial_write'), canAssess: trialRoleAllows(got.role, 'trial_assess'), blocked: isBlocked(t.playerId, t.orgId) });
   });
 
-  /** Assessments in this trial's context that THIS user may see (the blind rule). Existence and state only. */
+  /** Assessments in this trial's context that this user may see (the blind rule). Existence and state only. */
   function assessmentsFor(req, t) {
     const mine = scoutingReads.assessments.forOrgPlayer(t.orgId, t.playerId).filter((a) => a.context?.trialId === t.id);
     const lead = isLead(req.orgUser);
@@ -435,10 +396,8 @@ export function registerTrial(ctx) {
     if (limited('trial_schedule', req.org.id)) return res.status(429).json(rateLimitedBody('trial_schedule'));
     if ((t.schedule?.revisions?.length ?? 0) >= TRIAL_LIMITS.revisions) return err(res, 'TRIAL_INVALID_STATE', `A trial schedule may be revised at most ${TRIAL_LIMITS.revisions} times.`);
 
-    // Ended sessions are history: a revision must carry every session that
-    // has already ended, unchanged, and every session that has attendance
-    // recorded. Corrections to what happened are refused
-    // here — attendance has its own append-only route.
+    // A revision must carry every ended or attendance-recorded session
+    // unchanged; attendance has its own append-only route.
     const att = currentAttendance(t);
     for (const prev of t.schedule?.sessions ?? []) {
       const ended = prev.endsAt <= at;
@@ -460,8 +419,7 @@ export function registerTrial(ctx) {
     const wasConfirmed = !!t.schedule?.confirmedAt;
     const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, TRIAL_LIMITS.reason) || null : null;
 
-    // A material change asks the recipient again; a cosmetic one keeps
-    // the confirmation the recipient already gave.
+    // A cosmetic change keeps the confirmation the recipient already gave.
     const keepsConfirmation = wasConfirmed && !material;
     const workflowState = deriveWorkflowState({ ...t, schedule: { confirmedAt: keepsConfirmation ? t.schedule.confirmedAt : null, sessions } });
     const fresh = unit(() => trials.proposeSchedule(t.id, {
@@ -496,7 +454,7 @@ export function registerTrial(ctx) {
     const kc = keyCheck(t, 'cancel', key.key, fp);
     if (kc.conflict) return err(res, 'TRIAL_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different cancellation.');
     if (kc.replay) return res.json({ trial: trialClubView(t), idempotent: true });
-    // Cancelling is allowed while blocked (a safety notice, not solicitation).
+    // Allowed while blocked: a safety notice, not solicitation.
     const auth = reauth(req, res, room, t, 'cancel');
     if (!auth) return;
     if (!revGate(req, res, t)) return;
@@ -574,7 +532,7 @@ export function registerTrial(ctx) {
     let moved = null;
     const fresh = unit(() => {
       trials.complete(t.id, { at, by }, acted(at, req.orgUser, 'trial_completed', by, { sessionCount: t.schedule.sessions.length, attendedSessions: attendedCount(t) }, { act: 'complete', key: key.key, fp }));
-      // The case advances THROUGH the single writer, in the same unit; the evidence provider reads the completed trial.
+      // The evidence provider reads the completed trial.
       moved = t.caseId ? advanceCase({ req, room, action: 'completeTrial', at, trigger: `trial:complete:${t.id}`, keyDetail: { trialId: t.id } }) : { applied: false, reason: 'legacy_no_case', at };
       return trials.recordLifecycle(t.id, { lifecycle: moved });
     });
@@ -586,23 +544,19 @@ export function registerTrial(ctx) {
   // ------------------------------------------------------- Box Cam evidence
 
   /**
-   * Link authorisation. Every condition is checked NOW
-   * against the live session, player and organisation. A session that fails
-   * any of them answers `TRIAL_BOXCAM_INCOMPATIBLE` (404-band: the club
-   * cannot tell "not yours" from "does not exist"), except the two states a
-   * club may legitimately learn about a session it may see: not final, and
-   * withdrawn.
+   * Checked now against the live session, player and organisation. A failure
+   * answers `TRIAL_BOXCAM_INCOMPATIBLE` (404-band, so "not yours" and "does not
+   * exist" look alike), except not-final and withdrawn, which a club may learn
+   * about a session it may see.
    */
   function linkAuthorisation(req, room, boxSessionId) {
     if (typeof boxSessionId !== 'string' || !boxSessionId) return { ok: false, error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'boxSessionId must be a session id.' };
-    // Consent is decided BEFORE the session is looked up,
-    // so a club without consent gets the same answer for a real session and a
-    // fabricated id — the refusal never confirms that footage exists.
+    // Consent is decided before the session lookup, so the refusal never
+    // confirms that footage exists.
     const player = findPlayer(room.playerId);
     if (!player || !orgCanSee(req.org, player)) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
-    // The Combine consent rule, reused unchanged: the player's recruitment
-    // opt-in or an active Combine request from this organisation. A trial is
-    // not consent to the player's home footage.
+    // The Combine consent rule: the player's recruitment opt-in or an active
+    // Combine request from this organisation. A trial is not consent to home footage.
     if (!combineOrgMaySeeResults?.(req.org, player)) return { ok: false, error: 'EVIDENCE_CONSENT_REQUIRED', message: 'This player has not shared Box Cam activity with your organisation.' };
     const s = typeof boxSessionId === 'string' ? boxCamReads.sessions.byId(boxSessionId) : null;
     if (!s || s.playerId !== room.playerId) return { ok: false, error: 'TRIAL_BOXCAM_INCOMPATIBLE', message: 'No Box Cam session of this player with that id is available to your organisation.' };
@@ -634,14 +588,13 @@ export function registerTrial(ctx) {
     const la = linkAuthorisation(req, room, boxSessionId);
     if (!la.ok) return err(res, la.error, la.message);
     if (!revGate(req, res, t)) return;
-    // Idempotent on (trialSessionId, boxSessionId): linking twice is a replay.
+    // Idempotent on (trialSessionId, boxSessionId).
     const existing = s.evidence.find((e) => e.kind === 'box_cam_session' && e.sessionId === la.session.id && !e.removedAt);
     if (existing) return res.json({ trial: trialClubView(t), evidence: evidenceViews(t), idempotent: true });
     if (s.evidence.filter((e) => !e.removedAt).length >= TRIAL_LIMITS.evidencePerSession) return err(res, 'TRIAL_INVALID_STATE', `A session cites at most ${TRIAL_LIMITS.evidencePerSession} Box Cam sessions.`);
     if (limited('trial_evidence_link', req.org.id)) return res.status(429).json(rateLimitedBody('trial_evidence_link'));
     const by = orgActor(req);
-    // Reference only: the session id and the link event. Nothing is
-    // copied; provenance is read live at projection time.
+    // Reference only; provenance is read live at projection time.
     const fresh = unit(() => trials.linkEvidence(t.id, { sessionId: s.id, evidence: { id: nextId('tev'), kind: 'box_cam_session', sessionId: la.session.id, linkedAt: at, linkedBy: by, removedAt: null, removedBy: null } },
       acted(at, req.orgUser, 'trial_evidence_linked', by, { trialSessionId: s.id, kind: 'box_cam_session', sessionId: la.session.id }, { act: 'link', key: key.key, fp })));
     broadcast('trial_evidence_linked', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
@@ -662,18 +615,14 @@ export function registerTrial(ctx) {
     if (!hit) return err(res, 'TRIAL_SESSION_NOT_FOUND', 'No such evidence link on this trial.');
     if (!revGate(req, res, t)) return;
     if (hit.removedAt) return res.json({ trial: trialClubView(t), evidence: evidenceViews(t), idempotent: true });
-    // Tombstoned, never erased: the link row stays with its removal time.
     const fresh = unit(() => trials.unlinkEvidence(t.id, { evidenceId: hit.id, at, by: orgActor(req) },
       acted(at, req.orgUser, 'trial_evidence_unlinked', orgActor(req), { trialSessionId: sess.id, sessionId: hit.sessionId })));
     res.json({ trial: trialClubView(fresh), evidence: evidenceViews(fresh) });
   });
 
   /**
-   * The Box Cam sessions of this player that the club COULD cite now: ids and
-   * neutral metadata only (drill, captured time, verification state, the
-   * simulated flag, whether already linked). Consent is evaluated now with the
-   * same rule as linking; without it the list is empty and says why. Never a
-   * result, a trace, a nonce or a confidence.
+   * Ids and neutral metadata only; never a result, a trace, a nonce or a
+   * confidence. Consent uses the linking rule; without it the list is empty and says why.
    */
   orgRouter.get('/rooms/:id/trials/:tid/evidence/candidates', (req, res) => {
     const got = roomFor(req, res, 'trial_view');
@@ -682,7 +631,6 @@ export function registerTrial(ctx) {
     if (!t) return;
     const player = findPlayer(t.playerId);
     if (!player || t.subjectRemovedAt) return res.json({ items: [], consent: false, reason: 'TRIAL_SUBJECT_REMOVED' });
-    // A block is named as a block (the tab already says so); visibility loss is named as unavailability.
     if (isBlocked(t.playerId, t.orgId)) return res.json({ items: [], consent: false, reason: 'TRIAL_BLOCKED' });
     if (!orgCanSee(req.org, player)) return res.json({ items: [], consent: false, reason: 'TRIAL_RECIPIENT_UNAVAILABLE' });
     if (!combineOrgMaySeeResults?.(req.org, player)) return res.json({ items: [], consent: false, reason: 'EVIDENCE_CONSENT_REQUIRED' });
@@ -704,12 +652,10 @@ export function registerTrial(ctx) {
   });
 
   /**
-   * `trialEvidenceView`. Read live from the source;
-   * never `trace[]`, `nonce`, `obs.*`, frames, or a numeric confidence. A
-   * refusal is projected with the existing player-facing sentence under a
-   * neutral state; an invalidated session projects as withdrawn; a session
-   * that no longer exists projects as unavailable. The link row is history
-   * either way.
+   * Read live; never `trace[]`, `nonce`, `obs.*`, frames or a numeric
+   * confidence. A refusal shows the player-facing sentence under a neutral
+   * state; an invalidated session shows as withdrawn, a missing one as
+   * unavailable. The link row is history either way.
    */
   function evidenceViews(t) {
     const out = [];
@@ -726,7 +672,6 @@ export function registerTrial(ctx) {
     const invalidated = bs.verificationState === 'invalidated' || bs.status === 'cancelled' || bs.verificationState === 'cancelled';
     const session = { id: bs.id, drillId: bs.drillId ?? null, protocolId: bs.protocolId ?? null, capturedAt: bs.endedAt ?? bs.startedAt ?? bs.createdAt ?? null, verificationState: bs.verificationState ?? null, simulated: !!PROVIDERS[bs.provider]?.testOnly, invalidated };
     if (invalidated) return { ...base, session, observation: { state: 'evidence_withdrawn', copy: 'This Box Cam session was withdrawn after review; no observation is available.', qualityState: null, experimental: null }, providerVersion: bs.providerVersion ?? null, engineVersion: null, cvPolicyVersion: null };
-    // The latest CV result recorded for this session.
     const cv = boxCamReads.cvResults.latestForSession(bs.id);
     let observation;
     if (!cv) {
@@ -744,10 +689,9 @@ export function registerTrial(ctx) {
   // --------------------------------------------------------------- hooks
 
   /**
-   * Called by the existing respond routes BEFORE an acceptance of a
-   * case-tied Trial invitation is recorded: the recipient is
-   * re-derived now and must be the person answering. Also the failure
-   * injection point for acceptance — refused here, nothing is written.
+   * Called by the respond routes before an acceptance of a case-tied
+   * invitation is recorded: the recipient is re-derived now and must be the
+   * person answering. Also the acceptance failure-injection point.
    */
   ctx.trialAcceptGate = ({ request, by, actorId }) => {
     const room = recruitmentReads.cases.byId(request.caseId);
@@ -765,7 +709,7 @@ export function registerTrial(ctx) {
     return { ok: true };
   };
 
-  /** After the single writer created the trial row: link it to the case and, if the slot was concrete, confirm the case's trial_scheduled. Same unit as the answer. */
+  /** Links the new trial to the case and, if the slot was concrete, confirms trial_scheduled, in the answer's unit. */
   ctx.onTrialAccepted = ({ request, trial, at, actor }) => {
     recruitment.requests.linkTrial(request.id, { trialId: trial.id }); // in the respond route's unit
     const room = recruitmentReads.cases.byId(request.caseId);
@@ -799,7 +743,6 @@ export function registerTrial(ctx) {
 
   // ------------------------------------------------------- recipient routes
 
-  /** The trial for this recipient, and the recipient re-derived now. */
   function recipientTrial(req, res, { by, actorId, playerIds }) {
     const found = trials.byId(req.params.id);
     const t = found && playerIds.includes(found.playerId) ? found : null;
@@ -807,8 +750,7 @@ export function registerTrial(ctx) {
     if (t.subjectRemovedAt) { err(res, 'TRIAL_SUBJECT_REMOVED', 'This trial can no longer be changed.'); return null; }
     const org = orgOf(t.orgId);
     const r = resolveContactRecipient({ player: findPlayer(t.playerId), org: org ?? { id: t.orgId }, guardians: guardians.forPlayer(t.playerId), isAdult, visibleToOrg, isBlocked, now: new Date() });
-    // A blocked organisation cannot be confirmed with — but the recipient may
-    // still cancel (the decline path). The caller decides which.
+    // The recipient may still cancel a blocked organisation's trial; the caller decides.
     const blocked = !r.ok && r.error === 'CONTACT_BLOCKED';
     if (!r.ok && !blocked) { err(res, RECIPIENT_CODES[r.error] ?? 'TRIAL_RECIPIENT_UNAVAILABLE', by === 'guardian' ? 'You are no longer the verified guardian route for this player.' : 'This trial is not yours to act on.'); return null; }
     if (!blocked && r.recipient.type !== by) { err(res, 'TRIAL_RECIPIENT_UNAVAILABLE', by === 'guardian' ? 'This player now manages their own trials.' : 'This trial is managed by your parent or guardian.'); return null; }
@@ -843,7 +785,7 @@ export function registerTrial(ctx) {
           at, by: who, recipient: { type: by, playerId: t.playerId, guardianId: by === 'guardian' ? actorId : null, minor: by === 'guardian', at },
           workflowState: deriveWorkflowState({ ...t, schedule: { ...t.schedule, confirmedAt: at } }),
         }, acted(at, null, 'trial_schedule_confirmed', who, { revision: t.schedule.revision, sessionCount: t.schedule.sessions.length }));
-        // The evidence provider reads the confirmed trial; the case moves through the single writer in the same unit.
+      // The evidence provider reads the confirmed trial.
         const moved = room ? advanceCase({ room, action: 'confirmTrial', at, trigger: `trial:confirm:${t.id}`, actor: who, keyDetail: { trialId: t.id } }) : { applied: false, reason: 'legacy_no_case', at };
         return trials.recordLifecycle(t.id, { lifecycle: moved });
       });
@@ -930,5 +872,5 @@ export function registerTrial(ctx) {
   return { trialsOf, evidenceViews, trialEvidenceView, TRIAL_CASE_STATUSES };
 }
 
-/** Exported for the evidence-side unit tests: the slot chooser the respond routes use. */
+/** Re-exported for the unit tests: the slot chooser the respond routes use. */
 export { chooseTrialSlot, parseInstant };

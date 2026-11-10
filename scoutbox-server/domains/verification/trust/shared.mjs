@@ -1,37 +1,23 @@
-// ScoutBox Trust Score: policy + pure deterministic engine.
+// Trust Score: how strongly is this player's football record supported by trustworthy, current and attributable
+// evidence? Not a talent score or a recommendation, and it grants no permission.
 //
-// The Trust Score answers ONE question: how strongly is this player's
-// football record supported by trustworthy, current and attributable
-// evidence? It is NOT a talent score, not a recruitment recommendation, not
-// a judgement of character, and it NEVER grants a single permission.
-//
-// Design rules encoded here:
-//   • Derived, never persisted as mutable truth — every read recomputes.
-//   • Every weight/cap/threshold/band lives in POLICY (versioned). No magic
-//     numbers in handlers or components.
-//   • Fact-specific authority: a provenance is scored for the KIND of fact it
-//     actually supports, not through one universal rank.
-//   • Performance value is invisible to this engine. A Combine measurement's
-//     NUMBER is never read — only that a valid standardized measurement
-//     exists. 40 touches and 250 touches contribute identically.
-//   • Volume cannot buy trust: every category is capped and uses diminishing
-//     returns, and no single category can reach 100 alone.
+//   • A provenance is scored for the kind of fact it supports, not through one universal rank.
+//   • A Combine measurement's value is never read, only that a valid standardised measurement exists.
+//   • Every category is capped with diminishing returns, so volume cannot buy trust.
 //   • Prestige, popularity, recruitment outcomes and payment are not inputs.
-//     They are simply never read.
-//   • Missing evidence is limited evidence, never dishonesty.
-//   • Adding evidence must never LOWER a score (monotonicity).
+//   • Missing evidence is limited evidence, not dishonesty.
+//   • Adding evidence must not lower a score.
 import crypto from 'node:crypto';
 
 export const TRUST_SCORE_POLICY_VERSION = 1;
 
 // ---------------------------------------------------------------- policy
-// Curves are tables of basis points (0–10000) of the component cap, indexed
-// by the count of DISTINCT canonical evidence items. The last entry is the
-// cap: any further volume adds nothing.
+// Curves are basis points (0–10000) of the component cap, indexed by the count of distinct evidence items; the last
+// entry is the cap.
 export const POLICY = {
   version: TRUST_SCORE_POLICY_VERSION,
 
-  // Component weights — must total 100.
+  // Must total 100.
   weights: {
     identity: 15,
     footballHistory: 20,
@@ -49,9 +35,7 @@ export const POLICY = {
     { id: 'very_strong_evidence', label: 'Very strong evidence', min: 90, max: 100 },
   ],
 
-  // Identity confidence from the structured assurance level (never a
-  // legacy boolean). A ScoutBox document review is honestly worth less than
-  // an authoritative source.
+  // A ScoutBox document review is worth less than an authoritative source.
   identity: {
     authoritative: 10000,
     organisation_attested: 8500,
@@ -59,9 +43,7 @@ export const POLICY = {
     none: 0,
   },
 
-  // Fact-specific authority for a CLUB-AFFILIATION fact. (Box Cam is
-  // deliberately absent: it is strong authority for observed activity and no
-  // authority at all for club affiliation.)
+  // Authority for a club-affiliation fact. Box Cam is absent: it is authority for observed activity, not affiliation.
   historyProvenance: {
     authoritative_registry: 10000,
     verified_club_confirmed: 10000,
@@ -72,22 +54,18 @@ export const POLICY = {
     guardian_submitted: 2500,
     player_submitted: 2500,
   },
-  // Attributable-evidence "mass" needed for full football-history coverage.
-  // Using a SUM (not a mean) keeps the score monotonic: adding an honest
-  // self-submitted entry can only ever help, never dilute a confirmed one.
+  // A sum, not a mean, keeps the score monotonic: a self-submitted entry cannot dilute a confirmed one.
   history: { targetConfirmedMass: 2 },
 
-  // Distinct verified relationships (club / coach). Prestige is never read.
   relationships: { curve: [0, 5000, 7500, 9000, 10000] },
 
-  // Evidence confidence has TWO sub-sources with their own sub-caps, so
-  // neither can max the category alone.
+  // Two sub-sources with their own sub-caps, so neither can max the category alone.
   evidence: {
     recordsCurve: [0, 4000, 6000, 7500, 8500, 9200, 10000],
     recordsSubCap: 6000,
     boxCamCurve: [0, 4500, 6500, 8000, 8800, 9400, 10000],
     boxCamSubCap: 6000,
-    recencyDays: 365, // recency applies to CURRENT evidence coverage only
+    recencyDays: 365, // applies to current evidence coverage only
     provenance: {
       authoritative_registry: 10000, verified_club_confirmed: 10000,
       verified_coach_confirmed: 8000, scoutbox_reviewed: 7000,
@@ -96,15 +74,12 @@ export const POLICY = {
     },
   },
 
-  // Combine confidence: coverage across DISTINCT standardized protocols.
-  // Repeating one protocol 100 times is one protocol's worth of coverage.
+  // Coverage across distinct protocols: repeating one protocol is one protocol's worth.
   combine: { protocolCurve: [0, 5500, 8000, 9200, 10000] },
 
-  // References/assessments: existence + provenance only. The CONTENT of an
-  // assessment (a 4/10 or a 9/10) is never read.
+  // Existence and provenance only; the content of an assessment is never read.
   references: { curve: [0, 5500, 8000, 10000] },
 
-  // Component confidence labels (neutral, evidence-focused).
   levels: [
     { id: 'none', label: 'Not yet established', min: 0 },
     { id: 'limited', label: 'Limited', min: 2500 },
@@ -116,7 +91,6 @@ export const POLICY = {
 
 export const TRUST_DISCLAIMER = 'ScoutBox Trust Score reflects verification and evidence confidence — not football ability or recruitment suitability.';
 
-// Machine-readable change reasons. No restricted source IDs.
 export const TRUST_CHANGE_REASONS = [
   'IDENTITY_CONFIRMED', 'CURRENT_CLUB_CONFIRMED', 'CAREER_RECORD_CONFIRMED',
   'COACH_RELATIONSHIP_CONFIRMED', 'REFERENCE_CONFIRMED', 'BOX_CAM_EVIDENCE_ADDED',
@@ -127,15 +101,12 @@ export const TRUST_CHANGE_REASONS = [
 // ------------------------------------------------------------- primitives
 const clampBp = (bp) => Math.max(0, Math.min(10000, Math.round(bp)));
 
-/** Diminishing returns: a policy curve indexed by DISTINCT evidence count.
- *  Beyond the table's end the cap applies — volume stops mattering. */
 export function applyDiminishingReturns(count, curve) {
   if (!Array.isArray(curve) || curve.length === 0) return 0;
   const n = Math.max(0, Math.floor(Number(count) || 0));
   return clampBp(curve[Math.min(n, curve.length - 1)]);
 }
 
-/** The neutral band for a 0–100 score. Deterministic at every boundary. */
 export function trustBandForScore(score, policy = POLICY) {
   const s = Math.max(0, Math.min(100, Math.round(Number(score) || 0)));
   const band = policy.bands.find((b) => s >= b.min && s <= b.max) ?? policy.bands[0];
@@ -148,29 +119,23 @@ const levelFor = (coverageBp, policy = POLICY) => {
   return { id: out.id, label: out.label };
 };
 
-/** Canonical de-duplication. The same underlying fact reaches this
- *  engine through the Passport, the timeline, club history and Box Cam
- *  projections; we score the canonical SOURCE once, never the projection. */
+/** The same fact arrives through several projections (Passport, timeline, club history, Box Cam); the source is
+ *  scored once. */
 export function canonicalTrustSources(items) {
   const seen = new Map();
   for (const it of items ?? []) {
     if (!it || !it.key) continue;
     const prev = seen.get(it.key);
-    // Keep the strongest statement of the same canonical fact.
     if (!prev || (Number(it.strengthBp) || 0) > (Number(prev.strengthBp) || 0)) seen.set(it.key, it);
   }
   return [...seen.values()];
 }
 
-/** Which components apply to THIS player. A minor is never scored
- *  against evidence categories that cannot legally or architecturally exist
- *  for them — the weight leaves the DENOMINATOR instead of scoring zero. */
+/** A component that cannot exist for a player leaves the denominator rather than scoring zero. */
 export function eligibleTrustComponents(playerContext = {}, policy = POLICY) {
   const eligible = { ...policy.weights };
   const excluded = [];
-  // (No whole component is adult-only today: relationships handles the
-  // agency facet internally by simply not counting agency relationships for
-  // minors, which cannot exist under the standing rules.)
+  // No whole component is adult-only today: relationships drops agency relationships for minors itself.
   return { eligible, excluded, adultOnlyFacets: playerContext.isAdult ? [] : ['agency_representation'] };
 }
 
@@ -184,7 +149,6 @@ const component = (weight, coverageBp, { reasons = [], strengths = [], gaps = []
 });
 
 // ------------------------------------------------------- component scorers
-/** Identity confidence from the structured assurance level. */
 export function scoreIdentityConfidence({ assurance = null }, policy = POLICY) {
   const w = policy.weights.identity;
   const bp = policy.identity[assurance ?? 'none'] ?? 0;
@@ -208,8 +172,7 @@ export function scoreIdentityConfidence({ assurance = null }, policy = POLICY) {
   });
 }
 
-/** Football-history confidence: attributable-evidence mass over the
- *  canonical club-history rows. Historical facts never decay. */
+/** Historical facts never decay. */
 export function scoreFootballHistoryConfidence({ rows = [] }, policy = POLICY) {
   const w = policy.weights.footballHistory;
   const canonical = canonicalTrustSources(rows.map((r) => ({
@@ -240,15 +203,11 @@ export function scoreFootballHistoryConfidence({ rows = [] }, policy = POLICY) {
   });
 }
 
-/** Verified-relationship confidence. Counts DISTINCT relationships by
- *  provenance strength. Club prestige is never an input — the organisation's
- *  name, level, size and reputation are not read here at all. */
 export function scoreRelationshipConfidence({ relationships = [], isAdult = true }, policy = POLICY) {
   const w = policy.weights.relationships;
   const usable = (relationships ?? []).filter((r) => {
     if (!r || !r.verified) return false;
-    // Agency representation cannot exist for a minor — excluded, never
-    // counted as a missing/failed category for them.
+    // Agency representation cannot exist for a minor, so it is not counted as missing.
     if (r.kind === 'agency' && !isAdult) return false;
     return true;
   });
@@ -266,18 +225,13 @@ export function scoreRelationshipConfidence({ relationships = [], isAdult = true
   });
 }
 
-/** Evidence confidence: provenance-bearing football evidence plus Box Cam
- *  observed evidence, each with its own sub-cap so neither alone can max the
- *  category. Quantity is explicitly NOT truth — both use diminishing returns. */
 export function scoreEvidenceConfidence({ evidenceItems = [], boxCamSessions = [], now = Date.now(), allowSimulatedEvidence = false }, policy = POLICY) {
   const w = policy.weights.evidence;
   const p = policy.evidence;
   const recs = canonicalTrustSources((evidenceItems ?? []).map((e) => ({
     key: e.key, strengthBp: p.provenance[e.provenance] ?? 0, item: e,
   }))).filter((c) => c.strengthBp > 0);
-  // Box Cam: only genuine, non-simulated observed sessions count toward
-  // production trust. Simulated (test-provider) sessions are excluded unless
-  // this is an explicitly simulated demo context.
+  // Simulated (test-provider) sessions count only in an explicitly simulated context.
   const box = canonicalTrustSources((boxCamSessions ?? [])
     .filter((s) => (allowSimulatedEvidence || !s.simulated))
     .filter((s) => ['verified', 'partially_verified'].includes(s.verificationState))
@@ -298,22 +252,13 @@ export function scoreEvidenceConfidence({ evidenceItems = [], boxCamSessions = [
   });
 }
 
-/** Combine confidence: coverage across DISTINCT standardized protocols with
- *  a currently-valid Combine Verified result.
- *
- *  THE INVARIANT: the measured VALUE is never read. A 40-touch and a
- *  250-touch Box Touch 60, both Combine Verified with the same integrity,
- *  contribute exactly the same. Repeating one protocol is one protocol's
- *  coverage; a personal best adds no trust. `partially_measured` does not
- *  count here (it may still count as Box Cam evidence). Simulated
- *  (test-provider) results never contribute to production trust. */
+/** The measured value is never read: a personal best adds no trust. `partially_measured` does not count here (it may
+ *  still count as Box Cam evidence). */
 export function scoreCombineConfidence({ attempts = [], allowSimulatedEvidence = false }, policy = POLICY) {
   const w = policy.weights.combine;
   const valid = (attempts ?? []).filter((a) => a
     && a.combineState === 'combine_verified'
     && (allowSimulatedEvidence || !a.simulated));
-  // Distinct canonical protocol coverage (protocolId@version) — NOT attempt
-  // count, and never the measured value.
   const protocols = canonicalTrustSources(valid.map((a) => ({
     key: `protocol:${a.protocolId}@${a.protocolVersion}`, strengthBp: 10000, a,
   })));
@@ -335,9 +280,7 @@ export function scoreCombineConfidence({ attempts = [], allowSimulatedEvidence =
   });
 }
 
-/** References / assessments confidence — provenance and existence only. The
- *  CONTENT of an assessment never affects the score: a 4/10 and a 9/10 from
- *  the same verified evaluator are identical evidence. */
+/** A 4/10 and a 9/10 from the same verified evaluator are identical evidence. */
 export function scoreReferencesConfidence({ references = [], assessments = [] }, policy = POLICY) {
   const w = policy.weights.references;
   const items = canonicalTrustSources([
@@ -358,9 +301,7 @@ export function scoreReferencesConfidence({ references = [], assessments = [] },
 }
 
 // ------------------------------------------------------------ the engine
-/** Deterministic Trust Score. Integer/basis-point math throughout with a
- *  single documented rounding at the end (round-half-up to a whole number),
- *  so the same inputs always produce the same score. */
+/** Basis-point arithmetic with a single rounding at the end, so the same inputs always produce the same score. */
 export function calculateTrustScore(input, policy = POLICY) {
   const {
     playerContext = { isAdult: true },
@@ -388,11 +329,8 @@ export function calculateTrustScore(input, policy = POLICY) {
     references: scoreReferencesConfidence({ references, assessments }, policy),
   };
 
-  // Denominator = the components that apply to THIS player. Ineligible
-  // categories leave the denominator rather than scoring zero.
   const availableWeight = Object.values(components).reduce((t, c) => t + c.availableWeight, 0);
   const earnedBp = Object.values(components).reduce((t, c) => t + c.earnedWeightBp, 0);
-  // earnedBp is Σ(weight × coverageBp); normalise against availableWeight×10000.
   const score = availableWeight === 0 ? 0
     : Math.max(0, Math.min(100, Math.round((earnedBp / (availableWeight * 10000)) * 100)));
 
@@ -424,9 +362,6 @@ export function calculateTrustScore(input, policy = POLICY) {
 
 export const buildTrustProfile = calculateTrustScore;
 
-/** Viewer-safe projection. Restricted source data never leaves
- *  through this projection: no source IDs, no guardian identities, no
- *  assessment content, no T&S reasons, no verification evidence. */
 export function safeTrustProjection(profile, viewer, { publicAllowed = false } = {}) {
   const base = {
     score: profile.score, band: profile.band, bandLabel: profile.bandLabel,
@@ -440,8 +375,7 @@ export function safeTrustProjection(profile, viewer, { publicAllowed = false } =
       return { ...base, viewer, components: profile.components, strengths: profile.strengths, gaps: profile.gaps, explanations: profile.explanations, context: profile.context };
     case 'pro_club':
     case 'grassroots_club':
-      // Safe, high-level reasons only — the component levels and the public
-      // wording of each signal, never the underlying records.
+      // Component levels and the public wording of each signal, never the underlying records.
       return {
         ...base, viewer,
         explanations: profile.explanations.map((e) => ({ component: e.component, level: e.level, levelLabel: e.levelLabel, weight: e.weight })),
@@ -455,7 +389,6 @@ export function safeTrustProjection(profile, viewer, { publicAllowed = false } =
   }
 }
 
-/** Compact batch summary for player lists — no N+1 passport builds. */
 export function trustSummary(profile) {
   return {
     score: profile.score, band: profile.band, bandLabel: profile.bandLabel,
@@ -464,8 +397,7 @@ export function trustSummary(profile) {
   };
 }
 
-/** Deterministic reason codes for a score change. Never exposes a
- *  restricted source ID — only what kind of evidence changed. */
+/** Only what kind of evidence changed, never a source id. */
 export function trustChangeReasons(before, after) {
   const out = [];
   if (!before || !after) return out;
@@ -485,8 +417,7 @@ export function trustChangeReasons(before, after) {
   return out;
 }
 
-/** Snapshot DTO for Recruitment Rooms — score AT decision time
- *  with the policy version and component summary that produced it. */
+/** The score at a Recruitment Room decision, with the policy version that produced it. */
 export function trustSnapshot(profile, { at = Date.now() } = {}) {
   return {
     at, score: profile.score, band: profile.band, policyVersion: profile.policyVersion,
@@ -498,8 +429,6 @@ export function trustSnapshot(profile, { at = Date.now() } = {}) {
   };
 }
 
-/** Policy self-check: weights must total 100. Exported so tests and boot can
- *  both assert it rather than trusting the table by eye. */
 export function policyWeightsTotal(policy = POLICY) {
   return Object.values(policy.weights).reduce((t, n) => t + n, 0);
 }

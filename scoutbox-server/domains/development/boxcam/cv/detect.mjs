@@ -1,29 +1,15 @@
-// LAYER 1: DETECTION.
-//
-//   input:  one frame
-//   output: observed objects and features
-//
-// This layer has NO knowledge of Box Touch, Box Juggle, counts, protocols or
-// verification. It cannot: nothing here is passed a protocol id. That is the
-// point of the separation — a learned detector can replace this file without
-// touching a single line of protocol semantics, and conversely no protocol
-// rule can reach in and bias a detection.
-//
-// It never produces, stores or returns anything that could identify a
-// person: a person is a bounding box and an area, and that is all.
+// Layer 1: one frame in, observed objects out. It is never passed a protocol id, so a learned detector could replace
+// it without touching protocol semantics. A person is a bounding box and an area, nothing that could identify them.
 
 import { DETECTION } from './policy.mjs';
 import { frameStats, meanAbsDiff } from './frames.mjs';
 
-/** Bright-blob threshold. We only ever look for bright, round things. */
+/** Bright-blob threshold: only bright, round things are sought. */
 export function brightThreshold(stats) {
   return Math.min(250, stats.mean + Math.max(DETECTION.ballMinContrast, stats.stdDev * 1.6));
 }
 
-/**
- * Four-connected component scan above `thr`, with a hard component cap so a
- * pathological frame cannot produce unbounded work.
- */
+/** Four-connected scan above `thr`, with a component cap so a pathological frame can't produce unbounded work. */
 function components(frame, thr, { maxComponents = 64 } = {}) {
   const { w, h, pixels } = frame;
   const seen = new Uint8Array(w * h);
@@ -87,13 +73,8 @@ export function detectBall(frame, stats) {
 }
 
 /**
- * Person region — a large non-background mass, excluding ball-bright pixels
- * (without that exclusion the ball sits inside the region and every
- * proximity test passes trivially).
- *
- * Returns a box and an area fraction. No landmarks, no keypoints, no
- * descriptor, nothing that could be matched against another frame or another
- * person.
+ * Excludes ball-bright pixels, or the ball sits inside the region and every proximity test passes trivially. No
+ * landmarks, keypoints or descriptor that could be matched against another person.
  */
 export function detectPerson(frame, stats) {
   const area = frame.w * frame.h;
@@ -118,19 +99,12 @@ export function detectPerson(frame, stats) {
     x0: minX, y0: minY, x1: maxX, y1: maxY,
     cx: sumX / count, cy: sumY / count,
     areaFrac: count / area,
-    // Fill ratio of the bounding box. A single silhouette fills much of its
-    // box; two separated people share one wide box they barely fill. The
-    // tracking layer uses this — detection only measures it.
+    // Fill ratio: two separated people share one wide box they barely fill.
     fill: count / Math.max(1, (maxX - minX + 1) * (maxY - minY + 1)),
   };
 }
 
-/**
- * The whole of Layer 1 for one frame.
- *
- * `prevFrame` is used only for the inter-frame difference; it is not
- * retained here.
- */
+/** `prevFrame` is used only for the inter-frame difference and isn't retained. */
 export function detectFrame(frame, prevFrame = null) {
   const stats = frameStats(frame);
   const tooDark = stats.mean < DETECTION.minMeanLuma || stats.stdDev < DETECTION.minLumaStdDev;

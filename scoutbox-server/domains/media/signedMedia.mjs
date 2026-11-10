@@ -1,8 +1,6 @@
-// Media is not public. Every /media path that leaves the API is rewritten to a short-lived HMAC-signed URL when the
-// (already authorisation-checked) response is serialised, so a caller only holds links to media it was allowed to see.
-// Possession of a URL is not authority: the signature binds the URL to the minting session, and the serve route
-// re-checks that session's CURRENT entitlement (blocks, suspension, radius, level, guardianship) on every fetch.
-// Direct bearer-authenticated fetches are accepted too, under the same check.
+// Every /media path leaving the API is rewritten to a short-lived signed URL bound to the minting session, and the
+// serve route re-checks that session's current entitlement (blocks, suspension, radius, level, guardianship) on every
+// fetch: possessing a URL is not authority.
 import crypto from 'node:crypto';
 import { visibleToOrg } from '../../domain.mjs';
 
@@ -10,9 +8,8 @@ import { visibleToOrg } from '../../domain.mjs';
 const MEDIA_URL_TTL_MS = 15 * 60 * 1000;
 
 /**
- * Install the signing serialiser (before any route answers) and the /media/:id route. The key comes from MEDIA_SECRET
- * only; production refuses to boot without it (productionConfigProblems). In development an unset key is a fresh
- * random one per process, never stored: links minted before a restart stop verifying, and clients re-mint them.
+ * Production refuses to boot without MEDIA_SECRET. In development an unset key is a fresh random one per process, so
+ * links minted before a restart stop verifying and clients re-mint them.
  */
 export function installSignedMedia({ app, byId, sessions, mediaDeletions, storage, sessionFor, isBlocked }) {
   if (typeof sessionFor !== 'function' || typeof isBlocked !== 'function' || typeof byId?.mediaOwner !== 'function') throw new TypeError('installSignedMedia needs sessionFor, isBlocked and the media-owner lookup');
@@ -28,7 +25,7 @@ export function installSignedMedia({ app, byId, sessions, mediaDeletions, storag
     return `/media/${m[1]}?e=${exp}&s=${mediaSig(m[1], exp, sid)}&v=${sid}`;
   }
 
-  // Copy-on-write deep walk: never mutates the objects behind a response.
+  // Copy-on-write: never mutates the objects behind a response.
   function signMediaDeep(value, sid) {
     if (typeof value === 'string') return value.startsWith('/media/') ? signMediaPath(value, sid) : value;
     if (Array.isArray(value)) {
@@ -56,7 +53,7 @@ export function installSignedMedia({ app, byId, sessions, mediaDeletions, storag
     next();
   });
 
-  // The one media entitlement rule, for signed and bearer fetches alike, against the session's current standing.
+  // One rule for signed and bearer fetches alike, against the session's current standing.
   function sessionMayAccessMedia(session, mediaId) {
     if (!session) return false;
     const owner = byId.mediaOwner(mediaId);
@@ -73,15 +70,12 @@ export function installSignedMedia({ app, byId, sessions, mediaDeletions, storag
   app.get('/media/:id', (req, res) => {
     const id = req.params.id;
     if (!/^[a-z0-9-]+$/i.test(id)) return res.status(400).json({ error: 'BAD_MEDIA_ID' });
-    // A file whose owner was deleted is never served, whether or not the file itself is gone yet (the queue entry is
-    // the decision).
+    // The queue entry is the decision: a deleted owner's file is never served, whether or not it is gone yet.
     if (mediaDeletions.isQueued(id)) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-    // A signed URL: the minting session must still exist, be live and be entitled right now.
     const exp = Number(req.query.e ?? 0);
     const sid = String(req.query.v ?? '');
     let session = null;
     if (sid && exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp, sid)) session = sessions.bySid(sid);
-    // A direct bearer fetch (native clients, tests).
     session ??= sessionFor(req);
     if (!sessionMayAccessMedia(session, id)) {
       return res.status(401).json({ error: 'MEDIA_AUTH_REQUIRED', message: 'Media links are short-lived and tied to your login — refetch the profile for a fresh link.' });

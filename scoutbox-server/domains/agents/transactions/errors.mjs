@@ -1,23 +1,8 @@
 /**
- * The transaction domain error contract. ONE table, no default
- * branch, a public-field allowlist.
+ * Transaction error codes and the public-field allowlist.
  *
- * The refusals this table exists to keep indistinguishable: a transaction that does not exist, one belonging to another agency,
- * one belonging to another club, and one belonging to another player all answer
- * `TRANSACTION_NOT_FOUND` with the same body. Naming a party who does not
- * exist, who is a minor, who is invisible to the caller's organisation or who
- * has blocked it all answer `TRANSACTION_PARTY_NOT_FOUND` with the same body. A
- * caller who can tell those apart has an oracle.
- *
- * Once a caller can already READ a transaction, concealment has nothing left to
- * protect there, and a 404 on a record they are looking at would be a lie. A
- * party who becomes unavailable AFTER the fact therefore stops the writes with
- * `TRANSACTION_PARTY_UNAVAILABLE` — one code for removed, invisible, blocked
- * and minor alike, so it still distinguishes nothing.
- *
- * A refusal never carries: a document's content, a note's text, a fee term, a
- * counterparty's name, another agency's agent, a reviewer's reason, a player's
- * date of birth, or the word "blocked".
+ * A missing transaction and another tenant's answer the same `TRANSACTION_NOT_FOUND`; a missing, minor, invisible or
+ * blocking party the same `TRANSACTION_PARTY_NOT_FOUND`. A refusal never says "blocked".
  */
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
@@ -30,16 +15,13 @@ export const TRANSACTION_ERROR_HTTP = table({
   NOTE_INPUT_INVALID: 400,
   TERMS_INPUT_INVALID: 400,
 
-  // ---- 403: not yours to do. Only ever about the CALLER's own state.
+  // ---- 403: not yours to do. Only ever about the caller's own state.
   TRANSACTION_ACTION_NOT_PERMITTED: 403,
   TRANSACTION_PARTY_CONFIRMATION_NOT_PERMITTED: 403,
   DOCUMENT_VISIBILITY_NOT_PERMITTED: 403,
   SIGNATORY_REQUIRED: 403,
   AGENT_VERIFICATION_REQUIRED: 403,
-  // The facet gate this module calls (`compliance.facetGateProblem`) can answer
-  // with any of the compliance domain's objective licence refusals, not just
-  // AGENT_VERIFICATION_REQUIRED. Each must be declared here, or a lapsed licence
-  // would reach the caller as a 500 about OUR state instead of a 403 about theirs.
+  // `compliance.facetGateProblem` can answer with any of these; undeclared, a lapsed licence would surface as a 500.
   AGENT_LICENCE_INACTIVE: 403,
   AGENT_VERIFICATION_STALE: 403,
   AGENT_NATIONAL_REGISTRATION_REQUIRED: 403,
@@ -59,14 +41,10 @@ export const TRANSACTION_ERROR_HTTP = table({
   // ---- 409: the record is not where the caller thought it was.
   TRANSACTION_VERSION_CONFLICT: 409,
   TRANSACTION_IDEMPOTENCY_CONFLICT: 409,
-  // The request is fine; a live transaction already covers this
-  // individual, this type and these clubs. 409, because there is nothing in the
-  // request to fix — the caller continues in the one that exists, or ends it.
+  // Nothing in the request to fix: the caller continues in the live transaction, or ends it.
   TRANSACTION_DUPLICATE_CONTEXT: 409,
-  // A transaction that cites a recruitment case must be
-  // answering that club's own invitation. These four are 409: the citation is
-  // well-formed and the caller is permitted, but the invitation is not there,
-  // not open, not about this client, or not addressed to this agency.
+  // The citation is well-formed, but the case's invitation is missing, closed, about another client or addressed
+  // to another agency.
   HANDOFF_NOT_FOUND: 409,
   HANDOFF_NOT_OPEN: 409,
   HANDOFF_SUBJECT_MISMATCH: 409,
@@ -84,11 +62,8 @@ export const TRANSACTION_ERROR_HTTP = table({
   TRANSACTION_COMPLIANCE_PENDING: 422,
   TRANSACTION_COMPLIANCE_BLOCKED: 422,
   TRANSACTION_COMPLIANCE_STALE: 422,
-  // A party to an EXISTING transaction is no longer available to the caller's
-  // organisation. Uniform across "removed", "no longer visible", "blocked" and
-  // "now a minor", so it is not an oracle — and honest, unlike a 404 on a record
-  // the caller can still read. (Naming a party on CREATE stays the uniform
-  // TRANSACTION_PARTY_NOT_FOUND, because there the caller IS probing.)
+  // A party to a transaction the caller can already read: one code for removed, invisible, blocked and minor, since
+  // a 404 on a visible record would be a lie. Naming a party on create stays TRANSACTION_PARTY_NOT_FOUND.
   TRANSACTION_PARTY_UNAVAILABLE: 422,
   CONSENT_REQUIRED: 422,
   REGULATORY_REVIEW_REQUIRED: 422,
@@ -137,5 +112,5 @@ export function sendTransactionError(res, out, where) {
   return res.status(status).json(publicErrorBody(out));
 }
 
-/** The ONE concealment refusal. Used for every "you may not know whether this exists" answer. */
+/** Every "you may not know whether this exists" answer. */
 export const notFound = (res, where) => sendTransactionError(res, { error: 'TRANSACTION_NOT_FOUND', message: 'No transaction with that reference is available to you.' }, where);

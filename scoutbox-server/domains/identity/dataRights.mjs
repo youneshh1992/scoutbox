@@ -1,14 +1,12 @@
-// Data rights: a player's full export, and the account deletion. A deletion keeps the append-only ledger (the audit and
-// attribution basis, ids only) but removes the person's content everywhere it is held.
+// A deletion keeps the append-only ledger (the audit and attribution basis, ids only) but removes the person's content
+// everywhere it is held.
 import { guardianSelfView, playerSelfView } from '../../views/playerViews.mjs';
 import { ownChild } from './children.mjs';
 
 /**
- * `erasePlayer(id)`: one unit. The player row becomes the retained record and its lists and links go, every session
- * and pairing code is revoked, the removal of the media files is queued, and each `redactors` entry
- * (`(playerId, at) => …`, run in order) tombstones or redacts what its domain holds of the person. The files
- * themselves go after COMMIT (and again at every boot and sweep until they are gone); while one is queued, /media/:id
- * never serves it. Returns false for an unknown player.
+ * Each `redactors` entry (`(playerId, at) => …`, run in order) tombstones or redacts what its domain holds of the
+ * person. The files go after COMMIT (and again at every boot and sweep until gone); while one is queued, /media/:id
+ * never serves it.
  */
 export function createPlayerErasure({ unit, seam, findPlayer, players, sessions, codes, mediaDeletions, uploads, storage, removeUploadChunks, dataDir, broadcast, redactors }) {
   if (!Array.isArray(redactors) || !redactors.every((r) => typeof r === 'function')) throw new TypeError('createPlayerErasure needs each domain\'s redactor as a function');
@@ -34,7 +32,6 @@ export function createPlayerErasure({ unit, seam, findPlayer, players, sessions,
   };
 }
 
-/** `GET /player/export`, `DELETE /player/account`, and the guardian's export of every child and deletion of one. */
 export function registerDataRights({
   playerRouter, guardianRouter, findPlayer, erasePlayer, requestsFor, requestForRecipient, threadsFor, notificationFeed,
   insightsFor, ledgerFor, ledgerView,

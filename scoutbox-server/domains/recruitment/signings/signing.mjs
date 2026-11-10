@@ -1,23 +1,11 @@
 /**
- * The signing domain, pure.
+ * The signing domain, pure: every function takes a record and answers.
  *
- *   Recruitment Decision ≠ Offer ≠ Offer Acceptance ≠ Signing ≠ Contract effective
- *
- * A signing PACKAGE is the workflow record: opened by an
- * explicit club act over an ACCEPTED Offer revision, carrying immutable signing
- * REVISIONS (the exact document, its digest, the required parties, the contract
- * dates), the parties' completion evidence, keys, history and a rev. A
- * completed signing is a different thing: the authoritative
- * record that the canonical completion writes exactly once, and that the
- * lifecycle's `signed` state rests on. Nothing here writes; every function
- * takes a record and answers.
- *
- * Frozen principles: an accepted Offer creates no package; a package
- * is opened by an authorised human; completion needs every required party's
- * evidence against the exact current revision; a partial, cancelled, voided,
- * expired or superseded package is not a signing; no historical signature is
- * inferred; an agent never signs as anyone; ScoutBox executes no agreement and
- * claims no legal effect beyond the workflow and evidence it records.
+ * A package is the workflow record, opened by a club act over an accepted Offer revision, with immutable
+ * revisions (exact document, digest, required parties, contract dates). A completed signing is a separate
+ * record, written once by the completion, that the lifecycle's `signed` state rests on. A partial, cancelled,
+ * voided, expired or superseded package is not a signing; an agent never signs as anyone; ScoutBox claims no
+ * legal effect beyond the workflow and evidence it records.
  */
 
 import { parseStrictDateOnly, parseInstant, readInstant, isExpiredAt, isOrderedInterval, DAY_MS } from '../../../temporal.mjs';
@@ -27,7 +15,7 @@ export const SIGNING_POLICY_VERSION = 1;
 
 export const SIGNING_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED', 'EXPIRED', 'SUPERSEDED']);
 export const SIGNING_TERMINAL = Object.freeze(['COMPLETED', 'CANCELLED', 'VOIDED', 'EXPIRED']);
-/** Statuses a package can be STORED in. EXPIRED is derived at read time and never written; SUPERSEDED is a revision's status, never the package's. */
+/** EXPIRED is derived at read time and never stored; SUPERSEDED belongs to revisions only. */
 export const SIGNING_STORED_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED']);
 export const SIGNING_REVISION_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED', 'SUPERSEDED']);
 export const SIGNING_STATUS_LABELS = Object.freeze({
@@ -43,12 +31,12 @@ export const SIGNING_STATUS_LABELS = Object.freeze({
 
 export const PARTY_TYPES = Object.freeze(['PLAYER', 'GUARDIAN', 'CLUB_SIGNATORY']);
 export const PARTY_STATUSES = Object.freeze(['PENDING', 'COMPLETED']);
-/** Only methods this build implements. An unknown method fails closed. */
+/** Only methods this build implements; an unknown method fails closed. */
 export const SIGNING_METHODS = Object.freeze(['PLATFORM_ACKNOWLEDGMENT', 'UPLOAD_EXECUTED_DOCUMENT']);
-/** Who may be recorded as completing a party of each type. Never an agent, never a club user for a player. */
+/** Never an agent, never a club user for a player. */
 export const PARTY_ACTOR_KINDS = Object.freeze({ PLAYER: ['player'], GUARDIAN: ['guardian'], CLUB_SIGNATORY: ['org'] });
 
-/** The minor signing pathway is CLOSED in every jurisdiction in this build: a guardian-addressed Offer cannot open a package. */
+/** Closed in every jurisdiction in this build: a guardian-addressed Offer cannot open a package. */
 export const MINOR_SIGNING_PATHWAY_ENABLED = Object.freeze({ GB: false, ENG: false, INT: false, USA: false, DEFAULT: false });
 const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 export const minorSigningPathwayOpen = (jurisdiction, policy = MINOR_SIGNING_PATHWAY_ENABLED) =>
@@ -75,7 +63,6 @@ export function cleanText(raw, max) {
 
 export const normaliseSigningClientKey = (raw) => platformClientKey(raw, 'SIGNING_CLIENT_KEY_INVALID');
 
-/** Contract dates are DATE_ONLY days, start ≤ end, and a plausible length. */
 export function validateContractDates({ startDate, endDate } = {}) {
   const s = parseStrictDateOnly(startDate);
   if (!s.ok) return { ok: false, error: 'SIGNING_CONTRACT_DATES_INVALID', field: 'startDate', message: 'The contract start must be a real calendar day (YYYY-MM-DD).' };
@@ -90,7 +77,7 @@ export function validateContractDates({ startDate, endDate } = {}) {
   return { ok: true, contract: { startDate: s.value, endDate: end }, startT: s.t, endT };
 }
 
-/** A signing expiry: an instant, ≥ 1 h and ≤ 90 d from the request's server instant. Absent → the default. */
+/** Absent means the default expiry. */
 export function validateExpiry(raw, { now }) {
   if (raw === undefined || raw === null || raw === '') return { ok: true, ms: now + SIGNING_LIMITS.defaultExpiryMs, defaulted: true };
   const p = parseInstant(raw);
@@ -100,7 +87,7 @@ export function validateExpiry(raw, { now }) {
   return { ok: true, ms: p.ms, defaulted: false };
 }
 
-/** The required parties for a package, snapshotted per revision. A guardian recipient is refused upstream while the pathway is closed. */
+/** Snapshotted per revision. A guardian recipient is refused upstream while the pathway is closed. */
 export function requiredPartiesFor({ recipientType, playerId, guardianId = null, orgId }) {
   const parties = [];
   if (recipientType === 'guardian') parties.push({ partyType: 'GUARDIAN', forEntityId: guardianId, forPlayerId: playerId, status: 'PENDING', completedAt: null, completedBy: null, evidenceRef: null, method: null });
@@ -116,11 +103,7 @@ export const nextRevisionNumber = (pkg) => (pkg?.revisions ?? []).reduce((m, r) 
 export const isTerminal = (status) => SIGNING_TERMINAL.includes(status);
 const LIVE = ['DRAFT', 'READY', 'IN_PROGRESS'];
 
-/**
- * The package's status as the world reads it: the stored word, or EXPIRED when
- * a live package's expiry has passed at `now` (lazy, never written). An
- * unknown stored word is not live and not anything else: null.
- */
+/** The stored status, or EXPIRED once a live package's expiry has passed (never written). Unknown reads null. */
 export function effectiveStatus(pkg, now) {
   const st = pkg?.status;
   if (!SIGNING_STORED_STATUSES.includes(st)) return null;
@@ -138,9 +121,8 @@ export const findParty = (rev, partyType, forEntityId = null) => partiesOf(rev).
 
 // ------------------------------------------------------------- gates
 
-/** May a package be opened over this Offer now? */
 export function canStart({ offerStatus, offerRevisionStatus, caseStatus, recipientType, jurisdiction, existing = [] }, now) {
-  // The most specific truth first: a completed or live package over this Offer names itself before the lifecycle does.
+  // A completed or live package over this Offer is named before the lifecycle refusal.
   const completed = existing.find((p) => effectiveStatus(p, now) === 'COMPLETED');
   if (completed) return { ok: false, error: 'SIGNING_ALREADY_COMPLETED', message: 'A completed signing already exists for this Offer.', current: { signingPackageId: completed.id } };
   const live = existing.find((p) => isLive(p, now));
@@ -152,7 +134,6 @@ export function canStart({ offerStatus, offerRevisionStatus, caseStatus, recipie
   return { ok: true };
 }
 
-/** A refusal named after the state that stopped a mutation on a package the caller may read. */
 export function stateRefusal(pkg, now, allowed) {
   const st = effectiveStatus(pkg, now);
   if (st === null) return { ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'This signing cannot be read.' };
@@ -166,7 +147,6 @@ export const canCancel = (pkg, now) => stateRefusal(pkg, now, ['DRAFT', 'READY',
 export const canVoid = (pkg, now) => stateRefusal(pkg, now, ['READY', 'IN_PROGRESS']);
 export const canSupersede = (pkg, now) => stateRefusal(pkg, now, ['READY', 'IN_PROGRESS']);
 
-/** DRAFT → READY needs the exact document, valid contract dates and at least one required party. */
 export function canMarkReady(pkg, now) {
   const s = stateRefusal(pkg, now, ['DRAFT']);
   if (!s.ok) return s;
@@ -178,14 +158,10 @@ export function canMarkReady(pkg, now) {
   return { ok: true, status: 'DRAFT' };
 }
 
-/**
- * May this actor complete this party on the current revision now?
- * The actor is the authenticated session, never a body claim. A party is
- * completed against the exact current revision, whose digest the actor names.
- */
+/** The actor is the authenticated session, and names the digest of the exact current revision. */
 export function canCompleteParty(pkg, { partyType, actorKind, actorId, revisionId, documentSha256 }, now) {
-  // A confirmation that names a revision this package has already superseded is told so, whatever the package's
-  // live state (a DRAFT awaiting re-presentation included) — the party's own act is what the answer is about.
+  // A superseded revision is reported as such whatever the package's live state, including a DRAFT awaiting
+  // re-presentation.
   if (isLive(pkg, now) && revisionId !== pkg.currentRevisionId) {
     const older = (pkg.revisions ?? []).find((r) => r && r.id === revisionId && r.status === 'SUPERSEDED');
     if (older) return { ok: false, error: 'SIGNING_SUPERSEDED', message: 'That signing revision was replaced. Sign the current revision once it is presented.', current: { revisionId: pkg.currentRevisionId } };
@@ -206,10 +182,7 @@ export function canCompleteParty(pkg, { partyType, actorKind, actorId, revisionI
   return { ok: true, revision: rev, party };
 }
 
-/**
- * The completion gate: every mandatory condition, all named. Only an
- * empty list lets the canonical completion run.
- */
+/** Every unmet condition, named; only an empty list lets completion run. */
 export function completionGate(pkg, { now, offer, offerRevision, kase, otherCompleted = false, blocked = false, documentProblem = null }) {
   const problems = [];
   if (documentProblem) problems.push(`DOCUMENT_BYTES_${String(documentProblem).toUpperCase()}`);
@@ -245,11 +218,7 @@ export function completionGate(pkg, { now, offer, offerRevision, kase, otherComp
 
 // ------------------------------------------------------------- integrity
 
-/**
- * Is this row a signing package this server could have written? Every
- * problem is named; a row with any is refused on read and on write, omitted
- * from every projection, and never repaired.
- */
+/** Is this a package this server could have written? A row with any problem is refused and never repaired. */
 export function signingIntegrity(pkg, { orgId = null } = {}) {
   const problems = [];
   if (!pkg || typeof pkg !== 'object') return ['row'];
@@ -262,7 +231,7 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
   const exp = readInstant(pkg.expiresAt);
   if (pkg.expiresAt !== null && pkg.expiresAt !== undefined && exp === null) problems.push('expires_at');
   if (exp !== null && c0 !== null && exp <= c0) problems.push('expiry_before_created');
-  // A stored expiry no act could have set (beyond the maximum from the latest instant the package was worked on) is tampering, not a longer-lived package.
+  // An expiry beyond the maximum from the last time the package was worked on is tampering.
   if (exp !== null) {
     const worked = Math.max(c0 ?? 0, ...(Array.isArray(pkg.revisions) ? pkg.revisions.flatMap((r) => [readInstant(r?.createdAt) ?? 0, readInstant(r?.readyAt) ?? 0]) : [0]));
     if (worked > 0 && exp > worked + SIGNING_LIMITS.maxExpiryMs + DAY_MS) problems.push('expiry_beyond_max');
@@ -283,8 +252,7 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
       if (['READY', 'IN_PROGRESS', 'COMPLETED'].includes(r.status) && (rr === null || !r.document?.evidenceId || !r.document?.sha256)) problems.push('presented_without_document');
       if (!Array.isArray(r.requiredParties) || r.requiredParties.length === 0) problems.push('parties');
       else {
-        // The required parties are the package's own — one recipient party (PLAYER or GUARDIAN), one CLUB_SIGNATORY,
-        // each naming the package's player and club. Anything else is a party this server never wrote.
+        // One recipient party (PLAYER or GUARDIAN) and one CLUB_SIGNATORY, naming the package's player and club.
         const types = r.requiredParties.map((p) => p?.partyType);
         if (new Set(types).size !== types.length) problems.push('party_duplicate');
         if (!types.includes('PLAYER') && !types.includes('GUARDIAN')) problems.push('party_recipient_missing');
@@ -300,7 +268,6 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
             if (pc === null || !p.completedBy || !SIGNING_METHODS.includes(p.method) || !p.evidenceRef) problems.push('party_evidence');
             if (pc !== null && rr !== null && pc < rr) problems.push('party_before_ready');
             if (p.completedBy && !(PARTY_ACTOR_KINDS[p.partyType] ?? []).includes(p.completedBy.kind)) problems.push('party_actor_kind');
-            // The evidence reference names THIS revision, THIS document's digest, THIS actor, at THIS instant.
             const ev = p.evidenceRef;
             if (ev && typeof ev === 'object') {
               if (ev.revisionId !== r.id) problems.push('party_evidence_revision');
@@ -331,12 +298,12 @@ export function signingIntegrity(pkg, { orgId = null } = {}) {
   return problems;
 }
 
-/** ACCEPTED-Offer coupling: a package whose Offer or case contradicts it is corruption. */
+/** A package whose Offer or case contradicts it is corruption. */
 export function signingConsistency(pkg, { offer, kase, rows = null, player = null }, now) {
   const problems = [];
   const st = effectiveStatus(pkg, now);
-  // The completed-signing record and the package agree, or the package is corruption; the player's own
-  // contract status is a projection that may lawfully move (they can declare a later change), so a divergence is a warning.
+  // The completed-signing row and the package must agree. The player's contract status may lawfully move later,
+  // so a divergence there is only a warning.
   if (Array.isArray(rows)) {
     const mine = rows.filter((s) => s && s.signingPackageId === pkg.id);
     if (st === 'COMPLETED' && mine.length === 0) problems.push('COMPLETED_WITHOUT_ROW');
@@ -347,8 +314,7 @@ export function signingConsistency(pkg, { offer, kase, rows = null, player = nul
   if (player && st === 'COMPLETED' && player.contractStatus !== 'under_contract') problems.push('PLAYER_CONTRACT_STATUS_DIVERGED');
   if (offer && (offer.orgId !== pkg.orgId || offer.playerId !== pkg.playerId || offer.caseId !== pkg.caseId)) problems.push('OFFER_REFERENCE_MISMATCH');
   if (kase && (kase.orgId !== pkg.orgId || kase.playerId !== pkg.playerId)) problems.push('CASE_REFERENCE_MISMATCH');
-  // The package is bound to the ACCEPTED Offer revision. A binding to a revision the Offer does not hold,
-  // one that was superseded or withdrawn, or one whose answer was not an acceptance, is a package this server never wrote.
+  // Bound to a revision the Offer lacks, or one superseded, withdrawn or not accepted, is corruption.
   const revs = Array.isArray(offer?.revisions) ? offer.revisions : null;
   if (revs && revs.length) {
     const bound = revs.find((r) => r && r.id === pkg.offerRevisionId) ?? null;
@@ -368,7 +334,7 @@ export const signingCorrupt = (problems) => (problems ?? []).some((p) => SIGNING
 const actorView = (a) => (a ? { kind: a.kind ?? null, name: a.name ?? null } : null);
 const partyView = (p, { forClub }) => ({
   partyType: p.partyType, status: p.status, completedAt: p.completedAt ?? null, method: p.method ?? null,
-  // Who completed is identity: the club sees its own signatory and the fact of the player's act; a recipient sees the kinds only.
+  // The club sees who completed; a recipient sees the kinds only.
   completedBy: forClub ? actorView(p.completedBy) : (p.completedBy ? { kind: p.completedBy.kind ?? null, name: null } : null),
 });
 const documentView = (d) => (d ? { id: d.id ?? null, label: d.label ?? null, filename: d.filename ?? null, mime: d.mime ?? null, bytes: d.bytes ?? null, sha256: d.sha256 ?? null } : null);
@@ -384,7 +350,6 @@ function revisionView(r, { forClub }) {
   };
 }
 
-/** What the recipient must do next, if anything. */
 export function nextActionFor(pkg, now, { partyType, forEntityId }) {
   const st = effectiveStatus(pkg, now);
   if (!['READY', 'IN_PROGRESS'].includes(st)) return null;
@@ -411,7 +376,7 @@ export function signingClubView(pkg, now, { orgName = null } = {}) {
   };
 }
 
-/** The recipient reads the package only from READY: the exact presented revision, never a draft, never the note. */
+/** From READY only: the exact presented revision, never a draft or the note. */
 export function signingRecipientView(pkg, now, { orgName = null, partyType, forEntityId } = {}) {
   const st = effectiveStatus(pkg, now);
   const presented = (pkg.revisions ?? []).filter((r) => r && r.readyAt);
@@ -430,7 +395,7 @@ export function signingRecipientView(pkg, now, { orgName = null, partyType, forE
   };
 }
 
-/** The agent reads state and progress of a package over an Offer the client shared: no document bytes, no note, no signatory identity beyond the kind. */
+/** State and progress only: no document bytes, no note, no signatory identity beyond the kind. */
 export function signingAgentView(pkg, now, { orgName = null } = {}) {
   const st = effectiveStatus(pkg, now);
   const rev = currentRevision(pkg);
@@ -452,12 +417,8 @@ export function signingHistoryView(pkg, { forRecipient = false } = {}) {
 }
 
 /**
- * The completed signing record, shaped so every existing
- * reader keeps working (`ts`, `playerName`, `orgName`, `userId`, `scoutName`,
- * `insideAttributionWindow`) and every signing-workflow fact is on it by reference: the
- * package, the revision, the Offer, the case, the document digest, the
- * contract days, the method and the parties' provenance summary. Never a
- * term, never a fee, never the note.
+ * Keeps the fields existing readers use (`ts`, `playerName`, `orgName`, `userId`, `scoutName`,
+ * `insideAttributionWindow`) and references the workflow facts. Never a term, a fee or the note.
  */
 export function completedSigningRecord({ id, pkg, rev, player, org, actor, at, attribution }) {
   return {

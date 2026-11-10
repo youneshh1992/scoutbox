@@ -1,39 +1,7 @@
-// The holdout set.
-//
-// WHY THIS FILE EXISTS, STATED PLAINLY
-//
-// Every number in evaluation.json was produced by material the engine was
-// developed against. Thresholds were moved because those fixtures disagreed
-// with them; fixture bugs were found because the engine disagreed with the
-// fixtures. That is a legitimate and productive loop, and it is also exactly
-// the loop that makes a development score unable to predict anything. It
-// measures fit, not generalisation.
-//
-// The holdout is material the engine has never been tuned against:
-//
-//   * DISJOINT SEEDS. Development uses seeds 7, 11, 23 and 61. The holdout
-//     draws from a block starting at 9001, so no rendered noise field, no
-//     cadence jitter sequence and no camera shake sequence is shared.
-//
-//   * DIFFERENT PARAMETER VALUES. Not merely re-seeded versions of the
-//     development cases — different resolutions, different frame rates,
-//     different paces, different ball scales, different silhouettes. A
-//     holdout that re-renders 240x180 at 24 fps with a new noise seed tests
-//     the noise generator, not the engine.
-//
-//   * THE SAME DECLARED ENVELOPE. Every parameter still sits inside what
-//     policy says is supported. A holdout drawn from outside the supported
-//     range would fail for a reason that is already documented, which proves
-//     nothing and tempts a reader to widen the envelope to recover the score.
-//
-// THE HOLDOUT IS RUN ONCE, under a recorded constant freeze. If a
-// threshold moves afterwards, the recorded result is stale and the holdout
-// must be regenerated with fresh seeds — not re-run until it agrees.
-//
-// Its numbers are reported SEPARATELY from the development numbers. They
-// are never averaged together. A merged figure would let a strong development
-// score carry a weak holdout score, which is precisely the information the
-// holdout exists to expose.
+// Material the engine has never been tuned against, so it measures generalisation rather than fit: seeds disjoint
+// from development (which uses 7, 11, 23, 61), different parameter values, all inside the supported envelope. Run
+// once under a recorded freeze; if a threshold moves, regenerate with fresh seeds rather than re-run until it agrees.
+// Reported separately from development numbers, never averaged with them.
 
 import {
   sequence, jugglePath, touchPath, stationaryPath, rollPath,
@@ -41,18 +9,9 @@ import {
 } from './scenes.mjs';
 
 /**
- * GENERATIONS.
- *
- * A holdout is spent the moment it is used to diagnose something. Generation 1
- * did exactly that — HT05 exposed a tracking-layer defect — so its cases are
- * now seen material: the fix was designed while looking at them, and re-running
- * them would measure how well the fix addresses the case it was derived from,
- * which is not a question anyone needs answered. They move into the
- * development set as permanent regressions (`consumedHoldoutCases()`), and a
- * fresh generation with new seeds AND new parameter values takes over.
- *
- * This ledger is the record. A generation that is `consumed` never returns to
- * holdout duty.
+ * A holdout is spent once it diagnoses something: its cases become development regressions
+ * (`consumedHoldoutCases()`) and a fresh generation with new seeds and values takes over. A consumed generation
+ * doesn't return to holdout duty.
  */
 export const HOLDOUT_GENERATIONS = Object.freeze([
   Object.freeze({
@@ -111,11 +70,7 @@ export const ACTIVE_GENERATION = HOLDOUT_GENERATIONS.find((g) => g.status === 'a
 export const HOLDOUT_SEED_BASE = ACTIVE_GENERATION.seedBase;
 export const DEV_SEEDS = Object.freeze([7, 11, 23, 61]);
 
-/**
- * Per-generation parameter values. Generation 2 is not generation 1 re-seeded:
- * every axis takes values neither the development set nor generation 1 used,
- * because generation 1's values were looked at during the fix.
- */
+/** Each generation takes values no earlier set used, because earlier values were looked at during fixes. */
 export const GENERATION_PARAMETERS = Object.freeze({
   1: Object.freeze({
     resolutions: Object.freeze([
@@ -167,16 +122,9 @@ export const GENERATION_PARAMETERS = Object.freeze({
   }),
 });
 
-/** Back-compat alias for the active generation's parameters. */
 export const HOLDOUT_PARAMETERS = GENERATION_PARAMETERS[ACTIVE_GENERATION.generation];
 
 
-/**
- * Per-generation scene shapes. Silhouettes and camera behaviours cannot be
- * derived from the numeric parameter table, so they are listed per generation
- * — and, like every other axis, generation 2's are shapes generation 1 did not
- * use.
- */
 const SHAPES = {
   1: {
     jugglePeriodMs: 660,
@@ -203,8 +151,7 @@ const SHAPES = {
       { id: 'still', opts: {} },
       { id: 'drift', opts: { cameraDrift: (t) => ({ dx: 0.045 * Math.cos(t / 1250), dy: 0.03 * Math.sin(t / 1600) }) } },
       { id: 'shake', opts: { cameraShakeN: 0.011 } },
-      // Generations 1 and 2 both found defects on the scale axis, so
-      // generation 3 pushes it further again rather than declaring it solved.
+      // Earlier generations found defects on the scale axis, so this one pushes it further.
       { id: 'zoom', opts: { cameraScale: (t) => 1 + 0.11 * Math.sin(t / 1700) } },
     ],
   },
@@ -219,11 +166,7 @@ const SHAPES = {
       { id: 'still', opts: {} },
       { id: 'drift', opts: { cameraDrift: (t) => ({ dx: 0.038 * Math.sin(t / 1450), dy: 0.026 * Math.cos(t / 980) }) } },
       { id: 'shake', opts: { cameraShakeN: 0.013 } },
-      // Generation 1 found that abrupt scale changes were the dangerous case,
-      // so generation 2 varies scale HARDER rather than backing off: a faster
-      // oscillation with a larger amplitude, plus a step pulse in the
-      // adversarial group below. A holdout that avoids the axis a previous
-      // generation found a defect on is not a holdout, it is a victory lap.
+      // Generation 1 found abrupt scale changes dangerous, so this varies scale harder (plus a step pulse below).
       { id: 'zoom', opts: { cameraScale: (t) => 1 + 0.085 * Math.sin(t / 1300) } },
     ],
   },
@@ -233,13 +176,7 @@ const SHAPES = {
 // Holdout counting families
 // =========================================================================
 
-/**
- * Build the counting families for one generation.
- *
- * Ground truth is always the contact count the PATH contains by construction
- * — arithmetic on the generator's own parameters — never a reading taken back
- * out of the engine.
- */
+/** Ground truth is the contact count the path contains by construction, never a reading from the engine. */
 export function holdoutFamilies({ generation = ACTIVE_GENERATION.generation } = {}) {
   const P = GENERATION_PARAMETERS[generation];
   const H = SHAPES[generation];
@@ -292,7 +229,7 @@ export function holdoutFamilies({ generation = ACTIVE_GENERATION.generation } = 
   });
 
   // --- H3: frame-rate invariance, juggle ----------------------------------
-  // The SAME physical event sampled at three rates.
+  // The same physical event sampled at three rates.
   fams.push({
     family: 'holdout_juggle_fps',
     axis: 'fps',
@@ -341,10 +278,8 @@ export function holdoutFamilies({ generation = ACTIVE_GENERATION.generation } = 
     invariant: 'count_must_match_across_variants',
   });
 
-  // --- H6: photometry — ball contrast and background varied TOGETHER ------
-  // Development varied these on separate axes. Varying them together is the
-  // combination most likely to expose a threshold that only holds while one
-  // of them is nominal.
+  // --- H6: photometry — ball contrast and background varied together ------
+  // Together, to expose a threshold that only holds while one of them is nominal.
   fams.push({
     family: 'holdout_photometry',
     axis: 'ballLuma+bgLuma',
@@ -369,8 +304,7 @@ export function holdoutFamilies({ generation = ACTIVE_GENERATION.generation } = 
     variants: H.silhouettes.map((s) => ({
       id: `ho_silhouette_${s.id}`,
       kind: 'juggle',
-      // The ball tracks the silhouette, so every variant is the same physical
-      // scene rather than a different one.
+      // The ball tracks the silhouette, so every variant is the same physical scene.
       frames: sequence({
         w: base.w, h: base.h, fps: baseFps, durationMs: smallJuggle * jp,
         path: jugglePath({
@@ -394,8 +328,7 @@ export function holdoutFamilies({ generation = ACTIVE_GENERATION.generation } = 
       id: `ho_cam_${c.id}`,
       kind: 'juggle',
       frames: juggleBase(c.opts, S(8)),
-      // Camera motion must not change the count: the rules measure in the
-      // player's frame, in ball diameters.
+      // The rules measure in the player's frame, in ball diameters, so camera motion must not change the count.
       expected: { state: 'accepted', count: smallJuggle, tolerance: 1 },
     })),
     invariant: 'count_must_match_across_variants',
@@ -441,9 +374,7 @@ export function holdoutFamilies({ generation = ACTIVE_GENERATION.generation } = 
 // =========================================================================
 // Holdout adversarial group
 //
-// Fresh ways to try to manufacture a touch, none of them a re-seeded FT case.
-// Every one expects zero. A false touch here is a P0 exactly as it is in
-// development — the holdout does not get a softer standard for being harder.
+// Fresh ways to manufacture a touch, none a re-seeded FT case. Every one expects zero.
 // =========================================================================
 
 export function holdoutFalseTouchStress({ generation = ACTIVE_GENERATION.generation } = {}) {
@@ -541,11 +472,8 @@ export function holdoutFalseTouchStress({ generation = ACTIVE_GENERATION.generat
       }),
   ];
 
-  // Generation 2 presses harder on the axis generation 1 found a defect on.
-  // The fix made the measurement invariant to any global similarity transform,
-  // so these must all read zero for a structural reason rather than because
-  // their magnitudes happen to sit under a threshold — which is exactly the
-  // claim worth testing.
+  // The fix made the measurement invariant to any global similarity transform, so these must read zero for a
+  // structural reason, not because their magnitudes sit under a threshold.
   if (generation >= 2) {
     cases.push(
       c('HT13_step_zoom_in_and_hold',
@@ -573,12 +501,8 @@ export function holdoutFalseTouchStress({ generation = ACTIVE_GENERATION.generat
     );
   }
 
-  // Generation 3 attacks the FIX itself. The scale-step bound is justified by
-  // an argument — that a per-sample change under 4% cannot fabricate an
-  // impulse over 4.5 d/s — and an argument is exactly the kind of thing a
-  // holdout should try to break. These cases sit just under the bound,
-  // accumulate under it, or approach the frame of reference from directions
-  // the derivation did not consider.
+  // Attacks the scale-step bound's derivation (under 4% per sample cannot fabricate 4.5 d/s): cases just under it,
+  // accumulating under it, or from directions the derivation didn't consider.
   if (generation >= 3) {
     const dtMs = 1000 / baseFps;
     cases.push(
@@ -586,9 +510,7 @@ export function holdoutFalseTouchStress({ generation = ACTIVE_GENERATION.generat
         'Camera scales by just under the per-sample bound on every single frame, compounding to well over 2x.',
         {
           path: stationaryPath(near),
-          // 3.5% per sample: under the 4% flag on every step, so nothing is
-          // ever flagged, and the question is whether the per-step residual
-          // stays under the impulse threshold as the derivation claims.
+          // 3.5% per sample is never flagged; does the per-step residual stay under the impulse threshold?
           cameraScale: (t) => 1.035 ** (t / dtMs),
           durationMs: 25 * dtMs,
         }),
@@ -628,16 +550,7 @@ export function holdoutSeeds({ generation = ACTIVE_GENERATION.generation } = {})
   return [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 40].map((n) => b + n);
 }
 
-/**
- * Consumed holdout material, for the DEVELOPMENT harness to run as permanent
- * regressions.
- *
- * Once a case has been used to diagnose a defect it is seen material and can
- * never go back to holdout duty — but it is also the single most valuable
- * regression in the suite, because it is the only case known to have caught
- * something. Throwing it away to keep the holdout pure would be the worst of
- * both.
- */
+/** Consumed holdout cases, run by the development harness as regressions: the only cases known to have caught something. */
 export function consumedHoldoutCases() {
   const out = [];
   for (const g of HOLDOUT_GENERATIONS) {

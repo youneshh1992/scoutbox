@@ -1,22 +1,8 @@
 /**
- * Development Reviews: append-only, and corrected by supersession.
- *
- * A review is a statement about what was true at a moment. That is the whole
- * value of it: six months later, "we agreed in August that these two goals
- * were in progress" is only useful if nobody has since edited August. So there
- * is no PATCH route for a submitted review anywhere, and this module offers
- * no function that mutates one.
- *
- * Corrections are real and necessary — a reviewer picks the wrong plan, or
- * writes the wrong date — and they work by appending a new review that names
- * the one it replaces. Both stay readable. The superseded review is marked,
- * not hidden: a record that quietly vanishes when corrected is a record nobody
- * can rely on.
- *
- * The snapshot records enough goal state to explain what the reviewer
- * was looking at, and deliberately not the Passport. A review is a note about
- * a plan; a copy of the player's canonical evidence inside it would be a second
- * Passport with a date stamp, frozen and slowly becoming wrong.
+ * Development Reviews record what was true at a moment, so they are
+ * append-only: a correction is a new review naming the one it replaces, and
+ * both stay readable. Snapshots hold goal state and evidence ids, never a
+ * copy of the Passport.
  */
 import {
   DEVELOPMENT_HUB_LIMITS, REVIEWER_KINDS, SHARE_SCOPES, boundedText, parseDate,
@@ -24,14 +10,6 @@ import {
 } from './shared.mjs';
 import { evaluateTarget } from './targets.mjs';
 
-/**
- * Build the goal snapshots for a review.
- *
- * Per goal: its status, how many actions stood where, which evidence was
- * cited (ids only — the content is resolved live when the review is read, so
- * a snapshot cannot preserve a claim the evidence has since withdrawn), and
- * the target state if the goal had a target.
- */
 export function buildGoalSnapshots({ goals, actions, links, attempts, sessions }) {
   const actionsByGoal = new Map();
   for (const a of actions) {
@@ -58,24 +36,14 @@ export function buildGoalSnapshots({ goals, actions, links, attempts, sessions }
         status: g.status,
         actionCounts: { total: counts.total, done: counts.done, blocked: counts.blocked, cancelled: counts.cancelled },
         completion: completionPhrase(counts),
-        // References, not evidence: the same rule as everywhere else in the hub.
         evidenceRefs: (linksByGoal.get(g.id) ?? []).map((l) => ({ sourceType: l.sourceType, sourceId: l.sourceId })),
-        // What the measurement said at review time — and, because it is
-        // re-evaluated on read for the CURRENT state elsewhere, this is
-        // explicitly labelled as the state then.
+        // The state then; the current state is re-evaluated on read elsewhere.
         targetStateAtReview: target ? { state: target.state, reason: target.reason, measured: target.measured?.value ?? null } : null,
       };
     });
 }
 
-/**
- * Validate a review submission.
- *
- * `reviewerKind` is not the caller's to choose freely: it follows from who
- * they are. A club cannot file a "Player reflection", and a player cannot file
- * a "Coach review" — the label is the provenance, and a provenance the subject
- * can set is not provenance.
- */
+/** `reviewerKind` is provenance, so it follows from the viewer, not the body. */
 export function validateReview({ body, access, viewer, now }) {
   const kind = viewer.kind === 'player_self' ? 'player_reflection'
     : viewer.kind === 'guardian' ? 'guardian_reflection'
@@ -92,9 +60,6 @@ export function validateReview({ body, access, viewer, now }) {
   const summary = boundedText(body?.summary, DEVELOPMENT_HUB_LIMITS.summaryMax, { field: 'summary' });
   if (summary.error) return summary;
 
-  // An internal note is a club talking to itself. A player or guardian has no
-  // "internal" — they have their own words, which are the summary — so an
-  // attempt to send one is refused rather than silently dropped.
   let internalNote = null;
   if (body?.internalNote != null && body.internalNote !== '') {
     if (!access.readInternal) {
@@ -118,7 +83,6 @@ export function validateReview({ body, access, viewer, now }) {
   let shareScopes = [];
   if (body?.shareWithPlayer) {
     if (!access.readInternal) {
-      // A player's own reflection is theirs; there is nothing to "share".
       return { error: 'SHARE_NOT_APPLICABLE', detail: 'Only a club review can be shared with the player.' };
     }
     if (!summary.value) {
@@ -142,12 +106,7 @@ export function validateReview({ body, access, viewer, now }) {
   };
 }
 
-/**
- * Validate a correction. The review being corrected must belong to the same
- * plan, must not already have been superseded, and must have been written by
- * the same side of the wall: a club corrects its own review, a player their
- * own reflection. Nobody corrects somebody else's record.
- */
+/** A club corrects its own review, a player or guardian their own reflection. */
 export function validateSupersession({ target, plan, reviews, viewer, access }) {
   if (!target) return { error: 'REVIEW_NOT_FOUND' };
   if (target.planId !== plan.id) return { error: 'REVIEW_NOT_FOUND' };
@@ -166,7 +125,6 @@ export function validateSupersession({ target, plan, reviews, viewer, access }) 
   return { value: target };
 }
 
-/** Bounded, newest-first page of reviews. Stable across reads. */
 export function pageReviews(reviews, { limit, cursor }) {
   const all = reviews.slice().sort((a, b) => b.reviewedAt - a.reviewedAt || String(b.id).localeCompare(String(a.id)));
   const size = Math.min(Math.max(Number(limit) || 25, 1), DEVELOPMENT_HUB_LIMITS.reviewsPageMax);

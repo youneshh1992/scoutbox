@@ -1,8 +1,6 @@
 /**
- * The compliance domain error contract. ONE table, no default branch, a
- * public-field allowlist. A refusal never carries a hidden minor, another
- * agent's agreement, a club that was not already shared, a fee term or a
- * reviewer's private note.
+ * Compliance error codes and the public-field allowlist. A refusal never carries a hidden minor, another agent's
+ * agreement, a fee term or a reviewer's private note.
  */
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
@@ -91,7 +89,7 @@ export const PUBLIC_ERROR_FIELDS = [
   'required', 'reasons', 'policyVersions', 'consentsOutstanding', 'consentKind', 'reviewId', 'contextId', 'outcome', 'reason', 'role',
 ];
 
-/** Reasons reach the wire as codes and rule references only — never prose, never a name. */
+/** Codes and rule references only, never prose or a name. */
 const publicReason = (r) => ({ code: r.code, ruleId: r.ruleId ?? null, ruleStatus: r.ruleStatus ?? null, regulator: r.regulator ?? null, jurisdiction: r.jurisdiction ?? null, policyVersion: r.policyVersion ?? null, ...(r.partyRoles ? { partyRoles: r.partyRoles } : {}), ...(r.partyRole ? { partyRole: r.partyRole } : {}) });
 
 export function publicErrorBody(out) {

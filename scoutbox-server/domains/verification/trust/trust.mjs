@@ -1,17 +1,6 @@
-// Trust Score: canonical source gathering + viewer-safe routes.
-//
-// This module NEVER stores a score. Every read recomputes from canonical
-// sources, so a revoked claim, an invalidated Combine result or an expired
-// piece of evidence is reflected immediately and deterministically.
-//
-// Canonical sources are read through the systems that already own them —
-// effective verification claims, the Passport assembly (which already folds
-// duplicate self-entries into authoritative rows), Box Cam sessions and
-// Combine attempts — so the same underlying fact is counted once and
-// the UI projection is never what gets scored.
-//
-// The Trust Score grants no permission whatsoever: every route below runs the
-// standing authorization gates FIRST and the score is only ever a payload.
+// Trust Score source gathering and routes. Sources are read through the systems that own them (effective claims,
+// the Passport assembly, which already folds duplicate self-entries into authoritative rows, Box Cam), so the same
+// fact is counted once and a UI projection is never what gets scored.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { effectiveStatus, assuranceForClaim } from '../claims/shared.mjs';
 import { agreementInForce } from '../../agents/core/shared.mjs';
@@ -29,16 +18,11 @@ export function registerTrust(ctx) {
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
-  // Simulated (test-provider) evidence may only influence the score in an
-  // explicitly simulated environment. In production the flag is false, so
-  // local_test results contribute nothing — and the projection says so.
+  // Simulated (test-provider) evidence counts only in an explicitly simulated environment, and the projection says so.
   const allowSimulatedEvidence = () => !!ctx.testProviderEnabled;
 
-  // ------------------------------------------------- canonical source maps
-  /** Strongest EFFECTIVE identity assurance for a player. Prefers the
-   *  structured claim assurance; falls back to the legacy compatibility
-   *  boolean only when no structured claim exists — and then states honestly
-   *  that it was a ScoutBox review. */
+  // ------------------------------------------------- source maps
+  /** Falls back to `identityVerified` only when no claim exists, and then reports it as a ScoutBox review. */
   function identitySource(player) {
     const claims = ctx.verificationReads.claims.forSubjectId(player.id).filter((c) => c.claimType === 'PERSON_IDENTITY');
     let best = null;
@@ -54,7 +38,6 @@ export function registerTrust(ctx) {
     return player.identityVerified ? { assurance: 'scoutbox_document_review' } : null;
   }
 
-  /** Canonical club-history rows with a stable de-duplication key. */
   function historySource(full) {
     return (full?.history?.rows ?? []).map((r, i) => ({
       key: r.source?.id ? `hist:${r.source.type ?? 'row'}:${r.source.id}`
@@ -64,9 +47,7 @@ export function registerTrust(ctx) {
     }));
   }
 
-  /** Verified relationships. Prestige is NOT read: no org name, level, size
-   *  or reputation influences anything here — only that the relationship is
-   *  verified and distinct. */
+  /** Prestige is not read: only that the relationship is verified and distinct. */
   function relationshipSource(player) {
     const out = [];
     // A club's shadow list is not a relationship.
@@ -83,11 +64,8 @@ export function registerTrust(ctx) {
       out.push({ key: `rel:coach:${r.coachUserId ?? r.byUserId ?? r.id}`, kind: 'coach', verified });
     }
     const now = Date.now();
-    // The agent relationships (repositories/agentCore.mjs): only a relationship IN FORCE — naming a licensed
-    // individual, confirmed by the client, active, its term covering now — is a verified relationship
-    // (agreementInForce is the access predicate's own rule, so a mandate that has not started counts for nothing). The
-    // key is the AGENCY, so one client represented by two agencies is two relationships and moving between agents
-    // inside one agency is not.
+    // Only an agreement in force counts (the access predicate's own rule, so a mandate not yet started counts for
+    // nothing). Keyed on the agency, so moving between agents inside one agency is not a new relationship.
     for (const a of ctx.agentReads.agreements.forClient(player.id)) {
       if (!agreementInForce(a, now)) continue;
       out.push({ key: `rel:agency:${a.agencyOrgId}`, kind: 'agency', verified: true });
@@ -95,7 +73,6 @@ export function registerTrust(ctx) {
     return out;
   }
 
-  /** Evidence records mapped to their canonical provenance. */
   function evidenceSource(player) {
     return ctx.scoutingReads.evidence.currentForPlayer(player.id)
       .filter((e) => !(e.expiresAt && e.expiresAt < Date.now()))
@@ -108,7 +85,6 @@ export function registerTrust(ctx) {
       }));
   }
 
-  /** Box Cam observed sessions (finalized, still standing). */
   function boxCamSource(player) {
     return ctx.boxCamReads.sessions.forPlayer(player.id)
       .filter((s) => s.finalizedAt)
@@ -120,10 +96,8 @@ export function registerTrust(ctx) {
       }));
   }
 
-  /** Combine attempts with their LIVE effective state — an attempt whose
-   *  bound Box Cam session was invalidated stops contributing immediately,
-   *  and a restore brings it back, with no penalty either way. The measured
-   *  VALUE is deliberately not included in this projection at all. */
+  /** An attempt whose session was invalidated stops contributing, and a restore brings it back. The measured value
+   *  is not in this projection at all. */
   function combineSource(player) {
     const attempts = [...ctx.boxCamReads.attempts.forPlayer(player.id)].reverse();
     const sessions = new Map(ctx.boxCamReads.sessions.byIds(attempts.map((a) => a.boxSessionId)).map((s) => [s.id, s]));
@@ -148,20 +122,16 @@ export function registerTrust(ctx) {
       });
   }
 
-  /** Assessments contribute by ATTRIBUTION only — the rating content is never
-   *  read, so a 4/10 and a 9/10 from the same verified evaluator are
-   *  identical evidence. */
+  /** Attribution only: the rating content is never read. */
   function assessmentSource(player) {
     return ctx.scoutingReads.assessments.forPlayer(player.id)
       .filter((a) => a.state !== 'draft')
       .map((a) => ({ key: `asmt:${a.id}`, verifiedSource: !!byId.org(a.orgId)?.verified }));
   }
 
-  /** Build the full Trust Profile for a player. `full` is an already-built
-   *  light Passport assembly when the caller has one (batch reuse). */
+  /** `full` is an already-built light Passport assembly when the caller has one. */
   function buildFor(player, { full = null } = {}) {
-    // Only the club history of the Passport is a trust source, so without an assembly at hand the history is
-    // read alone (passportHistoryFor: the Passport's own definition), not the whole light Passport.
+    // Only the Passport's club history is a trust source, so without an assembly the history is read alone.
     const assembled = full ?? (ctx.passportHistoryFor ? { history: ctx.passportHistoryFor(player) } : null) ?? ctx.assemblePassport?.(player, { light: true }) ?? null;
     return calculateTrustScore({
       playerContext: { isAdult: isAdult(player) },
@@ -180,8 +150,6 @@ export function registerTrust(ctx) {
   ctx.buildTrustProfile = buildFor;
   ctx.trustSummaryFor = (player, opts) => trustSummary(buildFor(player, opts));
   ctx.trustSnapshotFor = (player) => trustSnapshot(buildFor(player));
-  // Snapshot an ALREADY-built profile, so a caller that has one (a Recruitment
-  // Room capturing decision context) does not rebuild it just to snapshot it.
   ctx.trustSnapshotOf = (profile) => trustSnapshot(profile);
   ctx.safeTrustProjection = safeTrustProjection;
 
@@ -196,8 +164,7 @@ export function registerTrust(ctx) {
     res.json({ trust: safeTrustProjection(p, 'self') });
   });
 
-  // The explanation ("Why this score?") is the same derivation — surfaced
-  // separately so the metric distinguishes a view from a drill-down.
+  // The same derivation, separate so the metric distinguishes a view from a drill-down.
   playerRouter.get('/trust-profile/explain', (req, res) => {
     const p = buildFor(req.player);
     vmetric?.('trust_explanation_viewed');
@@ -217,8 +184,7 @@ export function registerTrust(ctx) {
   });
 
   // ================================================================== CLUB
-  // The standing gates run FIRST and are entirely independent of the score:
-  // a Trust Score of 100 opens no door that a score of 0 would not.
+  // A Trust Score of 100 opens no door that a score of 0 would not.
   orgRouter.get('/players/:id/trust-profile', (req, res) => {
     const p = findPlayer(req.params.id);
     if (!p || !orgCanSee(req.org, p)) return res.status(p ? 403 : 404).json({ error: p ? 'NOT_VISIBLE' : 'PLAYER_NOT_FOUND' });
@@ -227,14 +193,13 @@ export function registerTrust(ctx) {
     res.json({ playerId: p.id, trust: safeTrustProjection(buildFor(p), viewer) });
   });
 
-  /** Batch summaries for player lists. Light assembly per player, no
-   *  full timeline build, and never a ranking — the caller sorts. */
+  /** Returned in the order requested, never ranked. */
   orgRouter.get('/trust-summaries', (req, res) => {
     const ids = String(req.query.playerIds ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 100);
     const items = [];
     for (const id of ids) {
       const p = findPlayer(id);
-      if (!p || !orgCanSee(req.org, p)) continue; // silently omitted — no leak
+      if (!p || !orgCanSee(req.org, p)) continue; // omitted silently, so absence leaks nothing
       items.push({ playerId: p.id, ...trustSummary(buildFor(p)) });
     }
     res.json({
@@ -244,9 +209,7 @@ export function registerTrust(ctx) {
   });
 
   // =================================================================== T&S
-  // Trust & Safety can inspect the full derivation but cannot type a score:
-  // there is no write route at all. A wrong score is fixed by correcting the
-  // underlying evidence or the policy, then recalculating.
+  // There is no write route: a wrong score is fixed by correcting the evidence or the policy.
   adminRouter.get('/trust/:playerId', (req, res) => {
     const p = findPlayer(req.params.playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });

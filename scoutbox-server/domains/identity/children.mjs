@@ -1,6 +1,3 @@
-// A guardian's management of their children: creating a child's profile behind the safeguarding gates, the co-guardian,
-// the child's availability and medical sharing (club interaction is the parent's call), the digest, the insights, the
-// full communications log, and the pairing code for the child's device. The account and its gates are guardians.mjs.
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { reqText, switchRefused } from '../platform/input.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
@@ -11,7 +8,6 @@ import { profileRefused, newPlayerRecord } from './players.mjs';
 
 const CHILD_AVAILABILITY = ['available_now', 'end_of_season', 'not_seeking'];
 
-/** The guardian's child named by `id`, or null with the 404 sent. */
 export function ownChild(req, res, findPlayer, id = req.params.id) {
   const child = findPlayer(id);
   if (child && req.guardian.childIds.includes(child.id)) return child;
@@ -30,7 +26,6 @@ export function registerChildren({
     res.json(req.guardian.childIds.map((id) => findPlayer(id)).filter(Boolean).map((p) => guardianChildView(p, viewHelpers)));
   });
 
-  // The gates in order: a verified e-mail, a passed ID check, the accepted disclaimer.
   guardianRouter.post('/children', (req, res) => {
     if (req.guardian.emailVerified === false) {
       return res.status(403).json({ error: 'EMAIL_UNVERIFIED', message: 'Verify your email address first — the code is in your inbox.' });
@@ -46,7 +41,7 @@ export function registerChildren({
     if (ageOn(body.dob) >= adultAgeFor(body.country ?? 'GB')) {
       return res.status(400).json({ error: 'NOT_A_MINOR', message: 'Adults create their own account with player sign-up.' });
     }
-    // The child row and its primary link are one create; the guardian's childIds follow from the link.
+    // The guardian's childIds follow from the primary link.
     let child;
     try {
       unit(() => {
@@ -61,7 +56,7 @@ export function registerChildren({
     res.status(201).json({ playerId: child.id, player: guardianChildView(child, viewHelpers) });
   });
 
-  // A second parent or guardian sharing the same children. They pass the gates themselves before they can act.
+  // A co-guardian passes the gates themselves before they can act.
   guardianRouter.post('/coguardian', (req, res) => {
     const { name, email } = req.body || {};
     if (!name || !email) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
@@ -125,8 +120,7 @@ export function registerChildren({
     });
   });
 
-  // Every communication about the children is on the ledger, and the parent can read all of it: newest first,
-  // paged by cursor.
+  // Every communication about the children is on the ledger, and the parent can read all of it.
   guardianRouter.get('/log', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }

@@ -1,13 +1,7 @@
 /**
- * Boot-time integrity check over Rooms, players and organisations. Every
- * invariant below is also enforced by a handler (a Room refuses to be created
- * while one is open for the same organisation and player); this catches data
- * that arrived by another road, such as a hand-edited row. It REPORTS and never
- * repairs: a silent repair chooses which of two conflicting records wins, and
- * that is a decision for a person with the context, not for a boot script.
- *
- * The report is logged and surfaced on /capabilities as counts; the pure
- * function is exported so a suite can hand it broken records directly.
+ * Boot-time integrity check for data that bypassed the handlers, such as a
+ * hand-edited row. It reports and never repairs: choosing which of two
+ * conflicting records wins needs a person with the context.
  */
 import { OPEN_ROOM_STATUSES } from '../recruitment/rooms/shared.mjs';
 
@@ -23,34 +17,26 @@ const dupes = (items, keyOf) => {
   return out;
 };
 
-/**
- * `records` holds the `players` and `orgs` to check against (plain arrays: the server reads them from their
- * repositories); `cases` are the recruitment-cases repository's Rooms. Keys and ids only — never a name, a note or a
- * date of birth.
- * @returns {{ ok: boolean, checked: number, violations: Array<{code:string, key:string, ids:string[]}> }}
- */
+/** Reports keys and ids only, never a name, note or date of birth. */
 export function integrityReport(records, { cases: allCases = [] } = {}) {
   const violations = [];
   const push = (code, list) => { for (const d of list) violations.push({ code, key: String(d.key), ids: d.ids.map(String) }); };
 
   const cases = allCases.filter((c) => c && c.room);
-  // One OPEN Room per organisation and player (a closed history may repeat).
+  // Closed Rooms for the same organisation and player may repeat.
   push('ROOM_OPEN_DUPLICATE', dupes(
     cases.filter((c) => OPEN_ROOM_STATUSES.includes(c.room.status)),
     (c) => `${c.orgId}:${c.playerId}`,
   ));
   push('CASE_ID_DUPLICATE', dupes(allCases, (c) => c?.id));
   push('PLAYER_ID_DUPLICATE', dupes(records.players ?? [], (p) => p?.id));
-  // Brief ids, one Second Look item per (organisation, room, decision cycle), one fingerprint per item and a brief's
-  // rev ≥ 1 are the discovery tables' own keys and CHECKs (repositories/discovery.mjs), so they are not checked here.
-  // A Room must belong to an organisation and a player that exist.
+  // Brief and Second Look invariants are enforced by the discovery tables' own keys and CHECKs.
   const orgIds = new Set((records.orgs ?? []).map((o) => o?.id));
   const playerIds = new Set((records.players ?? []).map((p) => p?.id));
   for (const c of cases) {
     if (!orgIds.has(c.orgId)) violations.push({ code: 'ROOM_ORPHAN_ORG', key: String(c.orgId), ids: [String(c.id)] });
     if (!playerIds.has(c.playerId)) violations.push({ code: 'ROOM_ORPHAN_PLAYER', key: String(c.playerId), ids: [String(c.id)] });
   }
-  // A rev-guarded record carries a positive integer rev.
   for (const c of cases) if (!Number.isInteger(c.room.rev) || c.room.rev < 1) violations.push({ code: 'ROOM_REV_INVALID', key: String(c.room.rev), ids: [String(c.id)] });
 
   const checked = cases.length + (records.players ?? []).length + (records.orgs ?? []).length;
@@ -62,7 +48,7 @@ export function integrityReport(records, { cases: allCases = [] } = {}) {
   };
 }
 
-/** Counts by code — what /capabilities shows. Never the keys. */
+/** What /capabilities shows: counts, never the keys. */
 export const integritySummary = (report) => ({
   ok: report.ok,
   checked: report.checked,

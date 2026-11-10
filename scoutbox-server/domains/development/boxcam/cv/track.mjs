@@ -1,29 +1,10 @@
-// LAYER 2: TRACKING.
-//
-//   input:  detections + trusted timestamps
-//   output: ball track, person track, player-relative motion, continuity,
-//           occlusion state
-//
-// No protocol-specific scoring happens here. This layer does not know what a
-// touch is. It knows where things were, when, how reliably, and how long the
-// gaps were.
-//
-// The one idea that makes the rest of the engine scale-free lives here: every
-// spatial quantity is emitted in BALL DIAMETERS and every velocity in ball
-// diameters per second. A scene at twice the resolution has a ball twice as
-// wide, so the normalised numbers are identical — and a scene at four times
-// the frame rate has quarter-length intervals, so the per-second numbers are
-// identical too.
+// Layer 2: detections and trusted timestamps in; ball and person tracks, player-relative motion, continuity and
+// occlusion out. Distances are emitted in ball diameters and velocities in diameters per second, which is what makes
+// the engine scale- and frame-rate-free.
 
 import { EVENT_RULES, CAPTURE_REQUIREMENTS } from './policy.mjs';
 
-/**
- * Build tracks from a detection stream.
- *
- * Pure: same detections in, same tracks out. No clock, no randomness, no
- * module-level state — which is what makes session isolation structural
- * rather than a discipline someone has to remember.
- */
+/** Pure: no clock, randomness or module state, so session isolation is structural. */
 export function buildTracks(detections) {
   const samples = [];
   let lastDiameter = null;
@@ -34,9 +15,7 @@ export function buildTracks(detections) {
 
   for (const d of detections) {
     if (d.ball) {
-      // A sudden implausible change in apparent ball size means we are no
-      // longer tracking the same object; the track resets rather than
-      // silently continuing with a different referent.
+      // An implausible change in apparent ball size means a different object: reset the track.
       if (lastDiameter && (d.ball.diameter > lastDiameter * 2.2 || d.ball.diameter < lastDiameter / 2.2)) {
         resets += 1;
       }
@@ -54,39 +33,26 @@ export function buildTracks(detections) {
 
     const person = d.person ?? null;
     const ball = d.ball ?? null;
-    // A person region that jumps in size or position between frames is not
-    // the same observation continued — it is a new one. Because motion is
-    // measured in the player's frame, an unflagged jump shifts that frame and
-    // reads as the BALL moving. Flag it so the protocol layer can drop the
-    // affected samples rather than interpret them as a contact.
+    // Motion is measured in the player's frame, so an unflagged jump in the person region reads as the ball moving.
+    // Flag it so the protocol layer drops those samples.
     let personJump = false;
     if (person && lastPerson) {
       const wPrev = lastPerson.x1 - lastPerson.x0, hPrev = lastPerson.y1 - lastPerson.y0;
       const wNow = person.x1 - person.x0, hNow = person.y1 - person.y0;
       const cPrev = { x: (lastPerson.x0 + lastPerson.x1) / 2, y: (lastPerson.y0 + lastPerson.y1) / 2 };
       const cNow = { x: (person.x0 + person.x1) / 2, y: (person.y0 + person.y1) / 2 };
-      // SCALE. The player region is the frame of reference and also, being
-      // large, the least noisy measurement available of how the whole image is
-      // scaling. A change beyond the derived per-sample budget means the frame
-      // of reference is zooming — whether because the camera zoomed, because
-      // the player moved toward the lens, or because the region has started to
-      // clip against a frame edge and its centre is no longer where the player
-      // is. All three make the relative velocities across that sample
-      // meaningless, and all three are caught by the same test.
+      // Scale: the player region, being large, is the least noisy measure of image scaling. Beyond the per-sample budget
+      // the frame of reference is zooming (camera zoom, player approaching the lens, or the region clipping an edge).
       const tol = EVENT_RULES.maxFrameScaleStepPerSample;
       const scaleJump = wPrev > 0 && hPrev > 0
         && (Math.abs(wNow / wPrev - 1) > tol || Math.abs(hNow / hPrev - 1) > tol);
-      // POSITION. A separate question with a separate answer: the player
-      // genuinely moves, and moving is not a discontinuity. This stays at the
-      // identity scale — half a body width in one sample is a different
-      // observation, not the same one continued.
+      // Position: the player moves, which isn't a discontinuity; half a body width in one sample is.
       const shiftJump = Math.hypot(cNow.x - cPrev.x, cNow.y - cPrev.y) > Math.max(wPrev, 1) * 0.5;
       personJump = scaleJump || shiftJump;
       if (personJump) resets += 1;
     }
     if (person) lastPerson = person;
-    // Player-relative position: cancels rigid camera motion, because the
-    // ball and the player move together when the camera does.
+    // Player-relative position cancels rigid camera motion.
     const rel = (ball && person)
       ? { x: ball.x - (person.x0 + person.x1) / 2, y: ball.y - (person.y0 + person.y1) / 2 }
       : null;
@@ -111,19 +77,17 @@ export function buildTracks(detections) {
   const withBoth = samples.filter((s) => s.ball && s.person);
   const n = samples.length || 1;
 
-  // Cadence, measured from the trusted timestamps rather than assumed:
-  // input is never assumed to be perfectly periodic.
+  // Cadence is measured from the trusted timestamps, not assumed periodic.
   const intervals = [];
   for (let i = 1; i < samples.length; i += 1) intervals.push(samples[i].atMs - samples[i - 1].atMs);
   const medianIntervalMs = median(intervals);
   const effectiveFps = medianIntervalMs > 0 ? 1000 / medianIntervalMs : 0;
-  // An interval is "low" only if it exceeds the nominal minimum-cadence
-  // interval by more than the documented jitter band (see policy).
+  // See lowFpsIntervalTolerance in policy.
   const lowIntervalMs = (1000 / CAPTURE_REQUIREMENTS.minSustainedFps)
     * CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;
   const lowFpsIntervals = intervals.filter((iv) => iv > lowIntervalMs).length;
 
-  // Active duration counts only spans where BOTH were visible at both ends.
+  // Active duration counts only spans where both were visible at both ends.
   let activeMs = 0;
   for (let i = 1; i < samples.length; i += 1) {
     const a = samples[i - 1], b = samples[i];
@@ -153,8 +117,7 @@ export function buildTracks(detections) {
       intervalCount: intervals.length,
     },
     activeMs,
-    // Occlusion state is a fact about the track, not a verdict about the
-    // attempt. The protocol layer decides what to do about it.
+    // A fact about the track, not a verdict; the protocol layer decides.
     occlusion: {
       broken: maxGapFrames > EVENT_RULES.maxBallGapFrames || maxGapMs > EVENT_RULES.maxBallGapMs,
       maxGapFrames,
@@ -163,14 +126,7 @@ export function buildTracks(detections) {
   };
 }
 
-/**
- * Player-relative motion in NORMALISED units, for the samples that have both
- * a ball and a player.
- *
- * Returns, per usable triple, the velocity change (impulse) in ball
- * diameters per second and the ball-to-player distance in ball diameters.
- * The protocol layer thresholds these; it never sees a pixel.
- */
+/** Per usable triple: the impulse in diameters per second and the ball-to-player distance in diameters. */
 export function relativeMotion(tracks) {
   const pts = tracks.samples.filter((s) => s.ball && s.person && s.rel);
   const out = [];
@@ -186,8 +142,7 @@ export function relativeMotion(tracks) {
     out.push({
       seq: b.seq,
       atMs: b.atMs,
-      // Ball position in the player's frame, in ball diameters. The protocol
-      // layer measures displacement between contacts with this.
+      // In the player's frame, in ball diameters: displacement between contacts is measured with this.
       relX: b.rel.x / d,
       relY: b.rel.y / d,
       // Distance to the player region, in ball diameters.
@@ -197,17 +152,14 @@ export function relativeMotion(tracks) {
       impulseDiametersPerSec: Math.hypot(v2x - v1x, v2y - v1y),
       speedDiametersPerSec: Math.hypot(v2x, v2y),
       confidence: (a.ball.confidence + b.ball.confidence + c.ball.confidence) / 3,
-      // Frame-edge proximity, in diameters: a clipped blob has an unreliable
-      // centroid and must not be allowed to manufacture an impulse.
+      // In diameters: a clipped blob has an unreliable centroid and must not manufacture an impulse.
       edgeDiameters: Math.min(
         b.ball.x, b.ball.y, b.w - b.ball.x, b.h - b.ball.y,
       ) / d,
-      // The interval either side, so the protocol layer can tell a genuine
-      // adjacency from one that spans a dropped-frame gap.
+      // So the protocol layer can tell genuine adjacency from one spanning a dropped-frame gap.
       gapBeforeMs: b.atMs - a.atMs,
       gapAfterMs: c.atMs - b.atMs,
-      // True when the player frame of reference moved discontinuously across
-      // this triple, which makes its relative velocities meaningless.
+      // The player frame moved discontinuously, so the relative velocities are meaningless.
       frameJump: !!(a.personJump || b.personJump || c.personJump),
     });
   }

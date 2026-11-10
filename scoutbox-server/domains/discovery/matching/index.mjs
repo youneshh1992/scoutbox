@@ -1,19 +1,7 @@
 /**
- * Explainable Matching and Dynamic Watchlists: routes.
- *
- * The order below is the whole security design and it is not negotiable:
- *
- *   organisation standing → authorization → visibility → blocks →
- *   minor/guardian/agency → grassroots radius → candidate facts → matching
- *
- * Matching is the LAST step. A match is one SQL query over the players the
- * organisation may see (identity's `visibleWhere`: the whole visibility rule —
- * standing, the under-18 wall, the Grassroots radius, the blocks) joined to
- * their stored facts (repositories/matchFacts.mjs), with each required
- * criterion as a condition (match.mjs `criterionSql`, beside its JS test). The
- * visibility conditions come first in every query, so there is no path by
- * which a criterion can be evaluated against a player the club is not allowed
- * to know exists — including through a count.
+ * Matching and Dynamic Watchlists: routes. Matching is the last step: every query starts from the players the
+ * organisation may see (identity's `visibleWhere`), so no criterion is ever evaluated against a player the club may
+ * not know exists, including through a count.
  */
 import {
   validateCriteria, criteriaVersion, describeCriteria, CRITERION_TYPES,
@@ -32,8 +20,7 @@ import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 import { now } from '../../platform/clock.mjs';
 import { limitCheck } from '../../platform/rateLimit.mjs';
 
-/** Every ordering matching offers. None of them is a match quality rank, and the
- *  default is deliberately the least suggestive thing that is still useful. */
+/** None of these is a match quality rank; the default is the least suggestive one that is still useful. */
 export const MATCH_SORTS = ['recent_evidence', 'name', 'age', 'evidence_confidence', 'distance'];
 export const DEFAULT_MATCH_SORT = 'recent_evidence';
 
@@ -50,17 +37,12 @@ export function registerMatching(ctx) {
 
   const combineProtocolIds = () => (ctx.combineProtocolIds?.() ?? null);
 
-  // ------------------------------------------------------ candidate universe
-
   const { EMPTY_QUERY, matchQuery, factsOfRows, visibleFactsOf, matchOrder, keyOfRow, readMatchPage } = createMatchReads({ players, matchFacts });
 
-  /** Resolve the criteria a request is asking about: a brief, or an explicit
-   *  set. A brief's criteria are all required — that is what a brief means. */
   function resolveCriteria(req, body) {
     if (body?.briefId) {
       const brief = dreads.briefs.forOrgById(String(body.briefId), req.org.id);
-      // A brief from another organisation is not "forbidden", it does not
-      // exist. Anything else is a membership oracle.
+      // Another organisation's brief does not exist, rather than being forbidden: anything else is a membership oracle.
       if (!brief) return { ok: false, status: 404, body: { error: 'BRIEF_NOT_FOUND' } };
       return { ok: true, criteria: briefCriteriaToCanonical(brief.criteria), brief };
     }
@@ -72,7 +54,6 @@ export function registerMatching(ctx) {
     return { ok: true, criteria: v.criteria, brief: null };
   }
 
-  /** One match card. Only fields this organisation could already read. */
   function matchView(facts, result, org) {
     return {
       playerId: facts.playerId,
@@ -82,8 +63,6 @@ export function registerMatching(ctx) {
       age: facts.age,
       trustBand: facts.trustBand,
       trustNote: 'Evidence confidence — not football ability.',
-      // Distance is shown only where this organisation is already authorised
-      // to see it; the match explanation itself never carries a number.
       distanceKm: org.level === 'grassroots' ? facts.distanceKm ?? null : null,
       required: result.required.map(({ criterionId, met, text }) => ({ criterionId, met, text })),
       preferred: result.preferred.map(({ criterionId, met, text }) => ({ criterionId, met, text })),
@@ -106,8 +85,7 @@ export function registerMatching(ctx) {
       policyVersion: MATCH_POLICY_VERSION,
       schemaVersion: CRITERIA_SCHEMA_VERSION,
       combineProtocols: combineProtocolIds() ?? [],
-      // Suggestions, not a whitelist: the availability criterion still accepts
-      // any value, and this only stops a club guessing a spelling.
+      // Suggestions, not a whitelist.
       availabilityValues: AVAILABILITY_VALUES,
       note: 'Every criterion is a fact test your club writes. There is no hidden criterion, no weighting and no overall match score.',
     });
@@ -121,7 +99,6 @@ export function registerMatching(ctx) {
     if (!resolved.ok) return res.status(resolved.status).json(resolved.body);
 
     const sort = MATCH_SORTS.includes(req.body?.sort) ? req.body.sort : DEFAULT_MATCH_SORT;
-    // Distance ordering is only meaningful where distance is authorised.
     if (sort === 'distance' && (req.org.level ?? 'pro') !== 'grassroots') {
       return res.status(400).json({ error: 'SORT_NOT_AVAILABLE', message: 'Distance ordering is only available where your organisation is authorised to see distance.' });
     }
@@ -130,7 +107,6 @@ export function registerMatching(ctx) {
     let page;
     try { page = readMatchPage(req.body, shape); } catch (e) { return sendPageError(res, e); }
 
-    // One query over every player this organisation can see; only the page is decoded and explained.
     const query = matchQuery(req.org, resolved.criteria.required, at);
     const { items, nextCursor } = pageOf(query.page(order, page), page.limit, keyOfRow);
     const total = query.count();
@@ -139,8 +115,7 @@ export function registerMatching(ctx) {
     res.set('X-ScoutBox-Ordering', `${sort},player_id`);
     res.json({
       items: factsOfRows(items, req.org, at).map((facts) => matchView(facts, matchPlayerToCriteria(facts, resolved.criteria, { now: at }), req.org)),
-      // The total is over VISIBLE matches. There is deliberately no
-      // "considered" figure that would reveal players this club cannot see.
+      // Over visible matches only: a "considered" figure would reveal players this club cannot see.
       total,
       nextCursor,
       limit: page.limit,
@@ -179,8 +154,6 @@ export function registerMatching(ctx) {
     ...extra,
   });
 
-  /** The criteria a watchlist evaluates right now: its own, or the linked
-   *  brief's when it is live-linked. The mode is explicit, never inferred. */
   function effectiveCriteria(w) {
     if (w.mode === 'live_linked' && w.sourceType === 'brief') {
       const brief = dreads.briefs.forOrgById(w.sourceId, w.orgId);
@@ -193,7 +166,7 @@ export function registerMatching(ctx) {
   orgRouter.get('/watchlists', (req, res) => {
     const status = req.query.status ? String(req.query.status) : null;
     if (status !== null && !WATCHLIST_STATUSES.includes(status)) return res.status(400).json({ error: 'WATCHLIST_STATUS_UNKNOWN', statuses: WATCHLIST_STATUSES });
-    // Archived watchlists accumulate, so the list pages (newest activity first, id as the stable tie-break).
+    // Archived watchlists accumulate, so the list pages.
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
     const { rows, total } = dreads.watchlists.page(req.org.id, { status, after: page.after, limit: page.limit });
@@ -218,7 +191,6 @@ export function registerMatching(ctx) {
     }
     const mode = WATCHLIST_MODES.includes(req.body?.mode) ? req.body.mode : null;
     if (!mode) return res.status(400).json({ error: 'WATCHLIST_MODE_REQUIRED', modes: WATCHLIST_MODES, message: 'Choose whether this watchlist follows the Recruitment Brief or keeps its own saved criteria.' });
-    // An unknown source type or a notify that is not true or false is refused, not read as the default.
     if (req.body?.sourceType != null && !WATCHLIST_SOURCES.includes(req.body.sourceType)) return res.status(400).json({ error: 'WATCHLIST_SOURCE_UNKNOWN', sources: WATCHLIST_SOURCES });
     if (req.body?.notify != null && typeof req.body.notify !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'notify', message: 'notify must be true or false.' });
 
@@ -230,8 +202,7 @@ export function registerMatching(ctx) {
       const brief = dreads.briefs.forOrgById(String(req.body?.briefId ?? ''), req.org.id);
       if (!brief) return res.status(404).json({ error: 'BRIEF_NOT_FOUND' });
       sourceId = brief.id;
-      // Even a live-linked watchlist stores the criteria it was created from,
-      // so its history stays readable if the brief is later archived.
+      // Stored even when live-linked, so the history stays readable if the brief is later archived.
       criteria = briefCriteriaToCanonical(brief.criteria);
     } else {
       if (mode === 'live_linked') return res.status(400).json({ error: 'WATCHLIST_MODE_INVALID', message: 'Only a watchlist linked to a Recruitment Brief can follow it live.' });
@@ -258,8 +229,7 @@ export function registerMatching(ctx) {
       schemaVersion: CRITERIA_SCHEMA_VERSION,
       notify: req.body?.notify ?? true,
       createdBy: req.orgUser.id,
-      // The person is attributed, but the organisation owns the list: if they
-      // leave, the watchlist stays and keeps their name on its creation.
+      // The organisation owns the list: if the creator leaves, it stays and keeps their name.
       createdByName: req.orgUser.name,
       createdAt: at,
       updatedAt: at,
@@ -278,17 +248,11 @@ export function registerMatching(ctx) {
 
   const findWatchlist = (req, res) => {
     const w = dreads.watchlists.forOrgById(String(req.params.id), req.org.id);
-    // Another organisation's id is a 404, exactly as a nonexistent id is.
     if (!w) { res.status(404).json({ error: 'WATCHLIST_NOT_FOUND' }); return null; }
     return w;
   };
 
-  /**
-   * Derive membership now, compare it with the last derivation, record what
-   * changed and why. This is the reconciliation the product is honest about:
-   * it runs when somebody reads the watchlist, not on a timer that does not
-   * exist in this build.
-   */
+  /** Runs when somebody reads the watchlist; there is no timer. */
   function reconcile(req, w, { record = true } = {}) {
     const { criteria, brief } = effectiveCriteria(w);
     const blocked = watchlistBlockedState({ status: w.status, mode: w.mode, brief });
@@ -296,15 +260,14 @@ export function registerMatching(ctx) {
       return { blocked, query: EMPTY_QUERY, total: 0, at: now(), summary: membershipSummary({}), criteria: criteria ?? { required: [], preferred: [] } };
     }
 
-    // The membership is the match query's ids (every visible player meeting every required criterion); facts
-    // are decoded only for the players who left and are still visible, to name the criterion they no longer meet.
+    // Facts are decoded only for leavers still visible, to name the criterion they no longer meet.
     const at = now();
     const query = matchQuery(req.org, criteria.required, at);
     const current = query.ids();
 
     const cv = criteriaVersion(criteria);
     const briefVersion = brief?.version ?? null;
-    // The membership the last reconciliation recorded: null before the first one.
+    // Null before the first reconciliation.
     const last = dreads.watchlists.membership(w.id);
     const criteriaChanged = last != null && w.lastCriteriaVersion != null && w.lastCriteriaVersion !== cv;
     const briefChanged = last != null && briefVersion != null && w.lastBriefVersion != null && w.lastBriefVersion !== briefVersion;
@@ -313,11 +276,8 @@ export function registerMatching(ctx) {
     const previousMatch = (playerId) => (last?.required.has(playerId) ? { required: last.required.get(playerId) } : null);
     const first = previous == null;
     const diff = reconcileMembership(previous ?? [], current);
-    // An entering player was not a member, so their explanation never reads a current evaluation; a leaver's does.
     const currentById = new Map(visibleFactsOf(req.org, diff.left, at).map((facts) => [facts.playerId, { result: matchPlayerToCriteria(facts, criteria, { now: at }) }]));
 
-    // An explicit upsert, in one unit — the membership derived now, the transitions not recorded before, the
-    // reconciliation clock, and the grouped notification all commit together.
     if (record && w.status !== 'archived') {
       const events = [];
       for (const playerId of diff.entered) {
@@ -338,11 +298,8 @@ export function registerMatching(ctx) {
         });
         events.push({ playerId, transition: 'left', ...reason });
       }
-      // Only the required lines are kept, and only their met flags: enough to
-      // name the criterion that flipped next time, without storing a player
-      // record that would go stale or leak.
-      // A member meets every required criterion (that is what the query admitted), so its flags are all true; the
-      // ids are already in code-point order.
+      // Only the required met flags are kept: enough to name the criterion that flipped next time, without storing a
+      // player record that would go stale or leak. A member met every required criterion, so all are true.
       const members = current.map((playerId) => ({ playerId, required: criteria.required.map((c) => ({ criterionId: c.id, met: true })) }));
       unit(() => {
         const appended = discovery.watchlists.reconcile(w.id, {
@@ -351,15 +308,12 @@ export function registerMatching(ctx) {
             id: nextId('wlh'), watchlistId: w.id, orgId: w.orgId, playerId: e.playerId, transition: e.transition,
             reason: e.reason, criterionId: e.criterionId, text: e.text, criteriaVersion: cv, briefVersion,
             policyVersion: MATCH_POLICY_VERSION, at,
-            // The same transition observed twice is one transition.
             fingerprint: transitionFingerprint({ watchlistId: w.id, playerId: e.playerId, criteriaVersion: cv, transition: e.transition, reason: e.reason }),
           })),
         });
         for (const e of appended) vmetric?.(e.transition === 'entered' ? 'watchlist_player_entered' : 'watchlist_player_left');
         if (events.length && !first) {
           broadcast?.('watchlist_membership_changed', { orgId: w.orgId, watchlistId: w.id });
-          // One grouped notification per watchlist, and only when the person
-          // asked for them: bulk criteria edits must not become a wall of noise.
           if (w.notify !== false && w.status === 'active') {
             const n = membershipNotification({
               watchlistName: w.name,
@@ -389,16 +343,8 @@ export function registerMatching(ctx) {
   }
 
   /**
-   * The "what changed" summary, taken from the recorded history rather than
-   * from THIS read's diff.
-   *
-   * The difference matters. A diff is consumed by whoever reads first: the
-   * client refetches when a colleague's edit arrives over SSE, the second read
-   * legitimately finds nothing new, and the person who opened the page is told
-   * nothing changed when in fact two players had just left. Reading it back
-   * from the history makes the answer stable — every reader sees the same last
-   * change, with the time it happened — and the history is the durable record
-   * anyway, so there is no second source of truth here.
+   * Taken from the recorded history, not this read's diff: a diff is consumed by whoever reads first (the client
+   * refetches on a colleague's SSE event), so the person who opened the page would be told nothing changed.
    */
   function lastChangeSummary(w, currentCount) {
     const batch = dreads.events.lastBatch(w.id);
@@ -407,7 +353,6 @@ export function registerMatching(ctx) {
     const left = batch.filter((h) => h.transition === 'left').map((h) => h.playerId);
     return {
       ...membershipSummary({ entered, left, unchanged: [] }),
-      // `current` is the membership derived just now, not a count from history.
       current: currentCount,
       changedAt: at || null,
     };
@@ -421,8 +366,7 @@ export function registerMatching(ctx) {
     let page;
     try { page = readMatchPage(req.query, shape); } catch (e) { return sendPageError(res, e); }
     const r = reconcile(req, w);
-    const fresh = dreads.watchlists.byId(w.id) ?? w; // the reconciliation clock this read recorded
-    // The members page by cursor in SQL, in the declared order; only the page is decoded and explained.
+    const fresh = dreads.watchlists.byId(w.id) ?? w; // carries the reconciliation clock this read recorded
     const { items, nextCursor } = pageOf(r.query.page(order, page), page.limit, keyOfRow);
     res.set('X-ScoutBox-Ordering', `${sort},player_id`);
     res.json({
@@ -442,15 +386,12 @@ export function registerMatching(ctx) {
     const w = findWatchlist(req, res);
     if (!w) return;
     if (limited('watchlist_write', req.org.id)) return res.status(429).json({ error: 'RATE_LIMITED', action: 'watchlist_write' });
-    // The shared concurrency contract: a write built on a stale read is
-    // refused and says who moved it, through the same 409 shape as everywhere.
     if (!guardRev(req, res, w, {
       errorCode: 'WATCHLIST_VERSION_CONFLICT',
       current: { name: w.name, status: w.status, mode: w.mode },
     })) return;
 
     const before = { name: w.name, mode: w.mode, status: w.status, criteriaVersion: w.criteriaVersion };
-    // Everything is checked before anything is written.
     const set = {};
     if (req.body?.name !== undefined) {
       if (typeof req.body.name !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'name', message: 'The name must be text.' });
@@ -497,7 +438,6 @@ export function registerMatching(ctx) {
   orgRouter.get('/watchlists/:id/history', (req, res) => {
     const w = findWatchlist(req, res);
     if (!w) return;
-    // The transitions grow without limit, so they page through SQL (newest first, id descending).
     let req2;
     try { req2 = readPage(req.query, ['number', 'string']); } catch (e) {
       if (e?.code === 'PAGE_CURSOR_INVALID') return res.status(400).json({ error: 'HISTORY_CURSOR_INVALID', message: 'That page no longer exists — start again from the first page.' });
@@ -508,8 +448,7 @@ export function registerMatching(ctx) {
     res.json({
       items: page.map((h) => {
         const p = findPlayer(h.playerId);
-        // A player who has since become invisible keeps their transition in
-        // the history, but their name does not come back out of it.
+        // A player who has since become invisible keeps the transition, but not their name or id.
         const visible = p && orgCanSee(req.org, p);
         return {
           id: h.id,
@@ -530,11 +469,6 @@ export function registerMatching(ctx) {
     });
   });
 
-  /**
-   * The Room bridge. It does not create a Room itself: it calls the canonical
-   * rooms' creator, so every standing gate, the one-open-room rule and the
-   * activity trail behave exactly as they do from anywhere else.
-   */
   orgRouter.post('/watchlists/:id/room', (req, res) => {
     const w = findWatchlist(req, res);
     if (!w) return;
@@ -546,16 +480,12 @@ export function registerMatching(ctx) {
     if (!created) return res.status(500).json({ error: 'ROOM_BRIDGE_UNAVAILABLE' });
     if (!created.ok) return res.status(created.status ?? 409).json({ error: created.error });
     vmetric?.('watchlist_player_to_room');
-    // Only a genuinely new Room is an event; re-adding a player who already
-    // has one is idempotent and must not look like a second creation.
+    // Re-adding a player who already has a Room is idempotent and is not an event.
     if (!created.existed) broadcast?.('matching_room_created', { orgId: req.org.id, roomId: created.roomId });
     res.status(created.existed ? 200 : 201).json({
       roomId: created.roomId,
       existed: created.existed,
       room: created.room,
-      // A Room and a watchlist answer different questions. The player stays on
-      // the list while they still match; being evaluated is not a reason to
-      // stop tracking whether they still meet the criteria.
       note: 'A Recruitment Room was opened. This player stays on the watchlist while they still match your criteria.',
     });
   });

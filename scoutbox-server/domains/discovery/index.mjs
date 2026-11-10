@@ -1,10 +1,5 @@
-// Discovery registration point: Second Look and Nobody Missed.
-//
-// Registered last because both systems read the whole stack (decision memory, rooms, the Passport, observed
-// evidence and its confidence, assessments, trials, the missing-evidence engine). Every route registers on the
-// authenticated `orgRouter`, so sessions, removed users, organisation suspension, `visibleToOrg`, blocks and
-// moderation all run before any discovery handler. Neither system is player-facing: there is no player, guardian or
-// public route here.
+// Registered last because both systems read the whole stack. Every route is on the authenticated `orgRouter`; there
+// is no player, guardian or public route here.
 import { buildRouteHelpers } from '../platform/routeHelpers.mjs';
 import { metrics } from '../enterprise/enterprise.mjs';
 import { registerSecondLook } from './secondLook.mjs';
@@ -16,12 +11,11 @@ import {
   SECOND_LOOK_TRANSITIONS, BRIEF_STATUSES, BRIEF_TRANSITIONS,
 } from './shared.mjs';
 
-// Discovery persists WORKFLOW, never player truth: candidate eligibility and material changes are derived live on
-// every read so a block, a removal or a visibility change takes effect immediately. The workflow (briefs, Nobody
-// Missed reviews, Second Look items) lives in the discovery repository's tables (repositories/discovery.mjs).
+// Discovery stores only workflow: eligibility and material changes are derived on every read so a block, removal or
+// visibility change takes effect immediately.
 
 export function registerDiscovery(ctx) {
-  // Boot assertions: cheap, and they catch the two ways this design could rot.
+  // Boot assertions on the vocabulary tables.
   for (const [reason, types] of Object.entries(REASON_CHANGE_MAP)) {
     for (const t of types) {
       if (!CHANGE_TYPES.includes(t)) throw new Error(`Second Look: reason "${reason}" maps to unknown change type "${t}".`);
@@ -30,7 +24,6 @@ export function registerDiscovery(ctx) {
   for (const p of POSITIONS) {
     if (!POSITION_GROUP_OF[p]) throw new Error(`Second Look: position "${p}" has no group.`);
   }
-  // A protected characteristic must never be an allowed brief criterion.
   const allowed = ['positions', 'minAge', 'maxAge', 'radiusKm', 'maxLevel', 'foot', 'availability', 'evidenceRequirements', 'minTrustBand', 'combineProtocols'];
   for (const a of allowed) {
     if (PROHIBITED_BRIEF_FIELDS.some((p) => a.toLowerCase() === p)) throw new Error(`Second Look: "${a}" is both allowed and prohibited.`);
@@ -52,8 +45,7 @@ export function registerDiscovery(ctx) {
     policyVersion: SECOND_LOOK_POLICY_VERSION,
     coveragePolicyVersion: EVALUATION_COVERAGE_POLICY_VERSION,
   };
-  // Counters only. No player id, no player name, no organisation name, and
-  // nothing that could identify who was missed or reconsidered.
+  // Counters only: nothing that could identify who was missed or reconsidered.
   const vmetric = (k, n = 1) => { metrics.secondLook[k] = (metrics.secondLook[k] ?? 0) + n; };
 
   const shared = { ...ctx, ...buildRouteHelpers(ctx), vmetric };

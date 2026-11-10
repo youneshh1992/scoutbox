@@ -1,6 +1,4 @@
-// The Grassroots club's operations: open trial days (and the answer every registrant is owed), what the club is
-// looking for, the squad with release-with-a-reference, match-day attendance, the pathway record and the friendlies
-// board. The player's side of these is the Grassroots journey (grassroots.mjs).
+// Grassroots club operations. The player's side is grassroots.mjs.
 import { optText, reqText, badField, dateOnlyOrRefuse } from '../platform/input.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { isAdult, visibleToOrg, computeTrustScore, haversineKm, GRASSROOTS_RADIUS_KM } from '../../domain.mjs';
@@ -8,7 +6,7 @@ import { GRASSROOTS_LIMITS as GL, boxAround } from '../../repositories/grassroot
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from '../../repositories/clubSetup.mjs';
 import { TRANSITION_LIMITS } from '../../repositories/transitionsVouches.mjs';
 
-/** Refuses (and answers) a route used by a club that is not on ScoutBox Grassroots. Returns true when refused. */
+/** Answers 403 and returns true for a club not on ScoutBox Grassroots. */
 export function grassrootsOrgOnly(req, res) {
   if (req.org.level !== 'grassroots') {
     res.status(403).json({ error: 'GRASSROOTS_ORGS_ONLY', message: 'Open days are a ScoutBox Grassroots feature.' });
@@ -23,17 +21,14 @@ const registrationView = (r) => ({
   id: r.id, playerId: r.playerId, playerName: r.playerName, byGuardian: r.byGuardian, ...(r.guardianId ? { guardianId: r.guardianId } : {}),
   ts: r.ts, outcome: r.outcome, outcomeNote: r.outcomeNote, outcomeAt: r.outcomeAt,
 });
-/** The positions an open day asks for: absent is none; otherwise a list of at most 20 short texts (repeats dropped). */
+/** Absent is none; null means invalid; repeats are dropped. */
 function openDayPositions(v) {
   if (v === undefined || v === null) return [];
   if (!Array.isArray(v) || v.length > GL.positions || !v.every((x) => typeof x === 'string' && x.trim() && x.trim().length <= GL.position)) return null;
   return [...new Set(v.map((x) => x.trim()))];
 }
 
-/**
- * Registers the club routes and returns `pathwayRecord(org)` (players the club developed who went on to sign higher
- * up) and `openTrialView(t)`, which the directory and the player's journey show too.
- */
+/** Returns `pathwayRecord(org)` and `openTrialView(t)`, which the directory and the player's journey also use. */
 export function registerGrassrootsClub({
   orgRouter, players, grassroots, clubSetup, transitionsVouches, signings, findPlayer, findOrg, unit, seam, nextId,
   ledgerAppend, notify, broadcast, moderateOrRefuse, playerViewForOrg, recordActivity, canonicalContractFor, issueRecruitmentRequest,
@@ -49,8 +44,7 @@ export function registerGrassrootsClub({
   // ------------------------------------------------------------------ open trial days
   orgRouter.post('/open-trials', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
-    // The no-ghosting rule: nobody — least of all a kid at their first session — leaves an open day without an
-    // answer. Unresolved past registrants block the next posting, as unfiled trial reports block new trials.
+    // No ghosting: unanswered past registrants block the next posting, as unfiled trial reports block new trials.
     const today = new Date().toISOString().slice(0, 10);
     const unresolved = grassroots.openTrials.unresolvedBefore(req.org.id, today);
     if (unresolved > 0) {
@@ -63,8 +57,7 @@ export function registerGrassrootsClub({
     if (!reqText(title, GL.title) || !date || !reqText(venue, GL.venue)) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
     if (!optText(ageGroup, GL.ageGroup)) return badField(res, 'ageGroup');
     if (!optText(notes, GL.notes)) return badField(res, 'notes');
-    // The rule above and the upcoming lists compare the date as a string, so it must be a real day: other text would
-    // be "upcoming for ever" and never become a past day whose registrants are owed an answer.
+    // Dates are compared as strings, so other text would stay "upcoming" for ever and escape the rule above.
     if (!dateOnlyOrRefuse(res, date, 'date')) return;
     const wanted = openDayPositions(positions);
     if (!wanted) return fieldInvalid(res, 'positions', `positions is a list of at most ${GL.positions} positions, each text of at most ${GL.position} characters.`);
@@ -82,7 +75,6 @@ export function registerGrassrootsClub({
     res.status(201).json({ openTrial: { ...openTrialView(trial), registrations: [] } });
   });
 
-  /** The club's open days, newest first, a page at a time (the apps read the first page). */
   orgRouter.get('/open-trials', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     let page;
@@ -102,7 +94,7 @@ export function registerGrassrootsClub({
     });
   });
 
-  // Deleting stamps the open day; it leaves every list (a coverage assignment naming it keeps its key).
+  // A soft delete, so a coverage assignment naming it keeps its key.
   orgRouter.delete('/open-trials/:id', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     if (!grassroots.openTrials.remove(req.org.id, req.params.id, Date.now())) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
@@ -110,8 +102,7 @@ export function registerGrassrootsClub({
     res.json({ deleted: true });
   });
 
-  // What the club is looking for powers the players' opportunity radar, which matches position codes against the
-  // player's position: codes only, at most five.
+  // Codes only: the players' opportunity radar matches them against the player's position.
   orgRouter.post('/looking-for', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     const positions = req.body?.positions;
@@ -123,7 +114,6 @@ export function registerGrassrootsClub({
     res.json({ lookingFor });
   });
 
-  // Every open-day registrant gets an answer: an invitation (a real, properly routed trial request) or a kind no.
   orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     const trial = grassroots.openTrials.forOrgById(req.org.id, req.params.id);
@@ -140,8 +130,8 @@ export function registerGrassrootsClub({
       const r = grassroots.openTrials.resolve(trial.id, reg.id, { outcome, note: outcomeNote, at: Date.now() });
       if (p && visibleToOrg(p, req.org)) {
         if (outcome === 'invite_trial') {
-          // Through THE request writer, so the routing is guardian-first for a minor; only the notifications are
-          // worded for the open day. Several pending invitations per player stay allowed (product decision).
+          // The shared request writer routes a minor's request to the guardian. Several pending invitations per
+          // player are allowed (product decision).
           issueRecruitmentRequest({
             org: req.org, orgUser: req.orgUser, player: p, type: 'trial',
             message: outcomeNote || `We liked what we saw at "${trial.title}" — come for a proper trial.`,
@@ -169,7 +159,7 @@ export function registerGrassrootsClub({
   });
 
   // ------------------------------------------------------------------ squad and match days
-  // The squad is rows of org_squad_members; a club's shadow list (the Pro squad planner) is never part of it.
+  // The Pro squad planner's shadow list is not part of the squad.
   function squadView(org) {
     const entries = clubSetup.squad.forOrg(org.id).map((e) => {
       const p = e.playerId ? findPlayer(e.playerId) : null;
@@ -203,8 +193,6 @@ export function registerGrassrootsClub({
     res.status(201).json(squadView(req.org));
   });
 
-  // Release with a reference: availability restored, and optionally a club-authored reference published on the way
-  // out (the club's identity is the session).
   orgRouter.post('/squad/:entryId/release', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     const entry = clubSetup.squad.byId(req.params.entryId);
@@ -217,8 +205,7 @@ export function registerGrassrootsClub({
       clubSetup.squad.remove(entry.id);
       const p = entry.playerId ? findPlayer(entry.playerId) : null;
       if (p) {
-        // Leaving THIS club's squad does not speak for a contract another club completed in ScoutBox: the canonical
-        // contract stays with its writer.
+        // A contract another club completed in ScoutBox still stands after this release.
         const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
         if (!other) players.setAvailability(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
         seam('squad.release.after_row');
@@ -240,7 +227,6 @@ export function registerGrassrootsClub({
     res.json(squadView(req.org));
   });
 
-  // One Saturday action that gives the whole squad verified, coach-signed attendance.
   orgRouter.post('/matchday', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     const { fixture, venue, date, result, playerIds } = req.body || {};
@@ -253,11 +239,11 @@ export function registerGrassrootsClub({
     if (!Array.isArray(ids) || ids.length > GL.matchdayPlayers || !ids.every((x) => typeof x === 'string' && x.length > 0 && x.length <= GL.id)) {
       return fieldInvalid(res, 'playerIds', `playerIds is a list of at most ${GL.matchdayPlayers} player ids.`);
     }
-    const onSquad = new Set(clubSetup.squad.playerIds(req.org.id)); // the squad only, never the shadow list
+    const onSquad = new Set(clubSetup.squad.playerIds(req.org.id));
     const credited = [];
     const fixtureText = fixture.trim();
     unit(() => {
-      for (const pid of new Set(ids)) { // a player listed twice is credited once
+      for (const pid of new Set(ids)) {
         if (!onSquad.has(pid)) continue;
         const p = findPlayer(pid);
         if (!p || !visibleToOrg(p, req.org)) continue;
@@ -280,7 +266,6 @@ export function registerGrassrootsClub({
     res.status(201).json({ credited: credited.length, matchdays: grassroots.matchdays.countForOrg(req.org.id) });
   });
 
-  /** The club's match days, newest first, a page at a time (the apps read the first page). */
   orgRouter.get('/matchdays', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     let page;
@@ -293,7 +278,7 @@ export function registerGrassrootsClub({
   });
 
   // ------------------------------------------------------------------ pathway record
-  // Grassroots reputation currency: not resale multiples — players developed.
+  // Players the club was involved with who later signed for a non-grassroots club.
   function pathwayRecord(org) {
     const orgSignings = signings.forOrg(org.id);
     const registrants = grassroots.openTrials.registrantsOf(org.id);
@@ -324,7 +309,6 @@ export function registerGrassrootsClub({
   });
 
   // ------------------------------------------------------------------ friendlies board
-  // Club-to-club within the same 50km radius: trial matches are how grassroots scouting actually happens.
   const friendlyView = (f, viewer) => {
     const other = findOrg(f.orgId);
     const mine = f.orgId === viewer.id;
@@ -353,7 +337,7 @@ export function registerGrassrootsClub({
     res.status(201).json({ friendly: friendlyView(friendly, req.org) });
   });
 
-  /** The local board: the club's own friendlies and those posted within the radius, by match date, a page at a time. */
+  /** The club's own friendlies and those posted within the radius. */
   orgRouter.get('/friendlies', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     let page;

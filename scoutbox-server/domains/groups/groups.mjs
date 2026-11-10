@@ -1,13 +1,7 @@
-// Multi-club and federation workspaces.
-// The one rule everything here enforces: effective access is the
-// INTERSECTION of (actor is a live group member) ∧ (a live, unexpired,
-// unrevoked grant names them) ∧ (the resource still exists and its owner
-// still owns it) ∧ (every player involved is CURRENTLY visible to the
-// RECEIVING org under the standing safeguarding rules). Group membership by
-// itself shares nothing, and no group administrator can hand out access the
-// receiving club could not hold on its own.
-//
-// Groups and grants are rows of repositories/groups.mjs, read through `groupReads`.
+// Effective access is the intersection of: the actor is a live group member, a live unexpired grant names them, the
+// resource still exists under the same owner, and every player involved is currently visible to the receiving org.
+// Membership alone shares nothing, and no group administrator can hand out access the receiving club could not hold
+// on its own.
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { GRANT_RESOURCE_KINDS, GROUP_LIMITS as L, typeExpiresDays, grantExpiry } from '../../repositories/groups.mjs';
 
@@ -52,7 +46,6 @@ export function registerGroups(ctx) {
     res.status(201).json({ group: groupView(g) });
   });
 
-  // Every group, newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
   adminRouter.get('/groups', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -71,8 +64,7 @@ export function registerGroups(ctx) {
     });
   });
 
-  // Delegated administration: the admin org invites; the invited org's lead
-  // accepts. Nobody is added to a group silently.
+  // The admin org invites and the invited org's lead accepts: nobody is added to a group silently.
   orgRouter.post('/groups/:id/invite', (req, res) => {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);
@@ -82,7 +74,6 @@ export function registerGroups(ctx) {
     if (target.type === 'agency') return res.status(403).json({ error: 'AGENCIES_EXCLUDED', message: 'Agency organisations cannot join club/federation workspaces.' });
     if (g.memberOrgIds.includes(target.id) || g.pendingInvites.some((i) => i.orgId === target.id)) return res.status(409).json({ error: 'ALREADY_INVITED' });
     if (g.memberOrgIds.length + g.pendingInvites.length >= L.members) return res.status(409).json({ error: 'GROUP_LIMIT', message: `A group holds at most ${L.members} members and invites.` });
-    // The invite and its notification are one unit.
     const out = unit(() => {
       const next = groups.groups.invite(g.id, { orgId: target.id, invitedBy: req.org.id, at: Date.now() });
       const lead = leadOf(target.id);
@@ -104,9 +95,8 @@ export function registerGroups(ctx) {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);
     if (!g || !g.memberOrgIds.includes(req.org.id)) return res.status(404).json({ error: 'NOT_A_MEMBER' });
-    // Departure: grants in either direction whose owner no longer shares a group with any of their recipients end now,
-    // in the same unit as the departure. (A grant whose other recipients still share a group stays live for them; the
-    // shared read re-checks membership for every reader.)
+    // Grants whose owner no longer shares a group with any recipient end in the same unit. A grant whose other
+    // recipients still share a group stays live for them; the shared read re-checks membership for every reader.
     const killed = unit(() => {
       groups.groups.leave(g.id, req.org.id);
       return groups.grants.endUnshared(req.org.id, Date.now());
@@ -114,7 +104,6 @@ export function registerGroups(ctx) {
     res.json({ left: true, grantsEnded: killed, note: 'Your records stay yours — leaving removes group access in both directions, never ownership.' });
   });
 
-  // Group templates: the admin org designates shared assessment templates.
   orgRouter.post('/groups/:id/templates', (req, res) => {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);
@@ -145,7 +134,7 @@ export function registerGroups(ctx) {
     if (kind === 'assessment') { const a = ctx.scoutingReads.assessments.byId(id); return !!a && a.orgId === orgId && a.state !== 'draft'; }
     return false;
   }
-  /** `toOrgIds`: absent is none; otherwise a list of organisation ids. The members other than the sharer, once each. */
+  /** `toOrgIds` absent is none. Returns the members other than the sharer, once each. */
   function recipientsOf(res, g, toOrgIds, orgId) {
     if (toOrgIds === undefined || toOrgIds === null) return [];
     if (!Array.isArray(toOrgIds) || toOrgIds.length > L.members || !toOrgIds.every((id) => typeof id === 'string')) {
@@ -155,8 +144,7 @@ export function registerGroups(ctx) {
     return [...new Set(toOrgIds)].filter((id) => g.memberOrgIds.includes(id) && id !== orgId);
   }
 
-  // What WOULD the recipient see? Same code path as the real read — the
-  // preview can therefore never promise more than the grant delivers.
+  // The same code path as the real read, so the preview can never promise more than the grant delivers.
   function resourceViewFor(grant, receivingOrg) {
     const eligible = (pid) => { const p = findPlayer(pid); return p && orgCanSee(receivingOrg, p); };
     if (grant.resourceKind === 'shortlist') {
@@ -220,7 +208,6 @@ export function registerGroups(ctx) {
     const recipients = listed.filter((id) => byId.org(id)?.type !== 'agency');
     if (!recipients.length) return res.status(400).json({ error: 'RECIPIENTS_REQUIRED', message: 'Name at least one other member organisation.' });
     const at = Date.now();
-    // The grant and its notifications are one unit.
     const grant = unit(() => {
       const out = groups.grants.create({
         id: nextId('gnt'), groupId: g.id, fromOrgId: req.org.id, fromOrgName: req.org.name,
@@ -236,8 +223,7 @@ export function registerGroups(ctx) {
     res.status(201).json({ grant: grantView(grant) });
   });
 
-  // The grants the organisation gave, newest first, paged by cursor (`nextCursor` pages `given`), and the grants it
-  // can read now (live, and the owner still shares a group with it).
+  // `nextCursor` pages `given`; the readable grants are live ones whose owner still shares a group with the reader.
   orgRouter.get('/grants', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -251,7 +237,6 @@ export function registerGroups(ctx) {
     });
   });
 
-  // How many grants the organisation gave, and how many it can read now (the Network screen's count).
   orgRouter.get('/grants/counts', (req, res) => res.json(groupReads.grants.countsFor(req.org.id, Date.now())));
 
   orgRouter.post('/grants/:id/revoke', (req, res) => {
@@ -262,7 +247,7 @@ export function registerGroups(ctx) {
     res.json({ grant: grantView(next), note: 'Effective immediately: the shared read, media entitlements and event delivery all re-check the grant live.' });
   });
 
-  // The shared read — every condition of the intersection, evaluated NOW.
+  // Every condition of the intersection, evaluated now.
   orgRouter.get('/shared/:grantId', (req, res) => {
     const gr = groupReads.grants.byId(req.params.grantId);
     if (!gr || !gr.toOrgIds.includes(req.org.id)) return res.status(404).json({ error: 'GRANT_NOT_FOUND' });
@@ -271,7 +256,7 @@ export function registerGroups(ctx) {
     res.json({ grantId: gr.id, from: gr.fromOrgName, resource: resourceViewFor(gr, req.org) });
   });
 
-  // Aggregate reporting for the admin org — n<3 suppression everywhere.
+  // n<3 suppression everywhere.
   orgRouter.get('/groups/:id/report', (req, res) => {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);

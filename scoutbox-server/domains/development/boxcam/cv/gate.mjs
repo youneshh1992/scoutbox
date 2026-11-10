@@ -1,17 +1,5 @@
-// The production enablement gate.
-//
-// This module answers exactly one question, for one protocol at a time:
-//
-//     may a Combine attempt on this protocol, observed by this provider,
-//     honestly become "Combine Verified" in production?
-//
-// It is a separate file from the provider on purpose. The provider's job is
-// to observe; the gate's job is to refuse to let observation become a claim
-// until the evidence for that claim exists. Merging them is how a product
-// ends up shipping a badge it cannot justify.
-//
-// The rule that shapes everything here: the gate must read MEASURED
-// evaluation output. It may not contain `passed = true`.
+// May a Combine attempt on this protocol, observed by this provider, become "Combine Verified"? Separate from the
+// provider, which observes. The gate reads measured evaluation output; it may not contain `passed = true`.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,27 +10,18 @@ import { realWorldValidationPass, validationSummary } from './validation.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const EVAL_PATH = path.join(HERE, 'evaluation.json');
 
-/**
- * The acceptance criteria, fixed BEFORE the evaluation was run and
- * deliberately not softened after seeing it.
- *
- * Note the last one. It is the criterion that actually decides production
- * enablement, and it is not a number.
- */
+/** Fixed before the evaluation was run, not softened after. The last one decides enablement and is not a number. */
 export const ACCEPTANCE_CRITERIA = Object.freeze({
   maxFalseVerifications: 0,          // any is a P0.
   maxNondeterministic: 0,            // the same fixture must answer the same way.
   maxMeanAbsCountError: 1.0,         // on fixtures that should be accepted.
   maxAbsCountError: 2,               // no single fixture may be wilder than this.
   minCorrectVerdictRate: 1.0,        // every fixture must land on its declared truth.
-  // The honest one: a counting claim about real football
-  // requires evidence from real football. Synthetic geometry can prove the
-  // engine is deterministic and that it refuses what it promises to refuse.
-  // It cannot show that a touch in a living room is a touch to this engine.
+  // A counting claim about real football needs evidence from real football.
   requiresRealWorldValidation: true,
 });
 
-/** Read the measured evaluation artefact, or report honestly that there is none. */
+/** The measured evaluation artefact, or a report that there is none. */
 export function readEvaluation({ evalPath = EVAL_PATH } = {}) {
   try {
     const raw = fs.readFileSync(evalPath, 'utf8');
@@ -53,12 +32,7 @@ export function readEvaluation({ evalPath = EVAL_PATH } = {}) {
   }
 }
 
-/**
- * Evaluate the criteria against a measured report.
- *
- * Returns every reason the gate is closed, not just the first, because a
- * reader deciding whether to invest in closing it needs the whole list.
- */
+/** Every reason the gate is closed, not just the first. */
 export function evaluateGate(report) {
   const failures = [];
   if (!report) return { open: false, failures: ['no measured evaluation artefact exists'] };
@@ -85,21 +59,12 @@ export function evaluateGate(report) {
   if (rate < ACCEPTANCE_CRITERIA.minCorrectVerdictRate) {
     failures.push(`correct-verdict rate ${(rate * 100).toFixed(1)}% is below ${(ACCEPTANCE_CRITERIA.minCorrectVerdictRate * 100).toFixed(0)}%`);
   }
-  // NOTE: the real-world validation criterion is deliberately NOT checked
-  // here. A synthetic evaluation artefact must never be able to assert its
-  // own real-world validity — that is exactly the bypass this separation exists to
-  // prevent. It is checked in `protocolProductionEnabled()` against the
-  // server-side versioned record in validation.mjs, which no evaluation
-  // run, client or request can write.
+  // Real-world validation isn't checked here, so a synthetic artefact can't assert its own real-world validity. It is
+  // checked in `protocolProductionEnabled()` against validation.mjs.
   return { open: failures.length === 0, failures };
 }
 
-/**
- * May this protocol be production-verified here?
- *
- * Conjunctive by construction. Every clause must hold, and each one that
- * does not is named, so a "no" is always explicable.
- */
+/** Every clause must hold, and each failing one is named. */
 export function protocolProductionEnabled(protocolId, {
   providerConfigured = false,
   providerHealth = 'not_configured',
@@ -131,16 +96,7 @@ export function protocolProductionEnabled(protocolId, {
   const evalRes = evaluateGate(evaluation);
   if (!evalRes.open) reasons.push(...evalRes.failures);
 
-  // THE HARD BLOCKER, applied last and independently.
-  //
-  // Everything above can be perfect: provider healthy, every capability
-  // present, every synthetic fixture passing, zero false verifications. None
-  // of it is evidence that this engine counts real football correctly, and
-  // production verification requires that evidence.
-  //
-  // The record is read from server-side release configuration. It cannot be
-  // set by a client, a request body, a provider payload, or an environment
-  // variable alone.
+  // The hard blocker, applied last: everything above can pass without evidence that the engine counts real football.
   const rw = realWorldValidationPass(protocolId, {
     engineVersion: CV_ENGINE_VERSION,
     policyVersion: BOX_CAM_CV_POLICY_VERSION,
@@ -160,7 +116,6 @@ export function protocolProductionEnabled(protocolId, {
   };
 }
 
-/** A whole-matrix view for `/capabilities` and the documentation. */
 export function productionMatrix(opts = {}) {
   const out = {};
   for (const id of Object.keys(CANDIDATE_PROTOCOLS)) {

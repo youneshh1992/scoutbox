@@ -1,30 +1,13 @@
 /**
- * The recruitment journey MODEL: pure functions over records that
- * someone else owns.
+ * The recruitment journey model: pure functions over records the projector
+ * (journey.mjs) gathers. It derives the stage, the completed stages, the
+ * current resource of each kind, the next action, the journey's classification
+ * and each audience's timeline visibility.
  *
- * Nothing here reads a database, writes a field or keeps state. The projector
- * (journey.mjs) gathers a case's canonical records and hands them in; this
- * module answers these questions of them:
- *
- *   - which canonical STAGE the case is at (a workflow description derived
- *     from the frozen 18-state lifecycle plus the facts around it — never a
- *     nineteenth lifecycle state, never stored)
- *   - which stages have been COMPLETED, and on what basis
- *   - which resource is CURRENT when several exist (one deterministic rule per
- *     kind, so no app re-derives it differently)
- *   - the NEXT ACTION the server derives (clients never manufacture one)
- *   - whether the journey is CANONICAL, LEGACY, PARTIALLY CANONICAL or in an
- *     INTEGRITY ERROR, and why
- *   - which timeline events each audience may see
- *
- * THE DIRECTION OF TRUTH. Evidence informs assessment; assessment informs
- * discussion; discussion informs an explicit human decision; a decision is not
- * an Offer; an Offer is not an acceptance; an acceptance is not a signing; a
- * signing in progress is not `signed`. Every function here reads those
- * boundaries and none of them crosses one: a next action is a suggestion of
- * the ONE thing a person could do now, never an act the server performs.
- *
- * NO SCORE. There is no readiness number, probability or progress percentage.
+ * A decision is not an Offer, an Offer is not an acceptance, an acceptance is
+ * not a signing and a signing in progress is not `signed`. A next action is a
+ * suggestion of what a person could do now, never an act the server performs.
+ * There is no readiness score or progress percentage.
  */
 
 import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES } from '../rooms/shared.mjs';
@@ -39,16 +22,14 @@ export const JOURNEY_POLICY_VERSION = 1;
 // ---------------------------------------------------------------- stages
 
 /**
- * The canonical journey vocabulary. `discovery` precedes a case (a player
- * seen in search or matched) and never appears on one; the pipeline stages
- * are the ones a case walks; `paused` and `ended` describe a case that is
- * not walking. This is a DESCRIPTION of where the lifecycle is, mapped from
- * the frozen 18 states; it adds no state to them.
+ * `discovery` precedes a case (seen in search or matched) and never appears on
+ * one; `paused` and `ended` describe a case that is not progressing. A
+ * description mapped from the lifecycle states, adding no state to them.
  */
 export const JOURNEY_STAGES = Object.freeze([
   'discovery', 'watching', 'review', 'contact', 'trial', 'assessment', 'decision', 'offer', 'acceptance', 'signing', 'signed', 'paused', 'ended',
 ]);
-/** The stages a case COMPLETES, in order. `completedStages` is a subset of these. */
+/** The stages a case completes, in order. */
 export const PIPELINE_STAGES = Object.freeze(['watching', 'review', 'contact', 'trial', 'assessment', 'decision', 'offer', 'acceptance', 'signing', 'signed']);
 
 const STAGE_OF_STATUS = Object.freeze(Object.assign(Object.create(null), {
@@ -65,11 +46,9 @@ const STAGE_OF_STATUS = Object.freeze(Object.assign(Object.create(null), {
 }));
 
 /**
- * The canonical stage for a lifecycle status, refined by two facts the
- * lifecycle does not carry: after a completed trial the case is at
- * `assessment` until a submitted assessment exists, then at `decision` until
- * a formal decision stands; after an acceptance it is at `signing` once a
- * package was opened. Unknown status → null (corruption, named elsewhere).
+ * The stage for a lifecycle status, refined by facts the lifecycle does not
+ * carry: after a completed trial, `assessment` until an assessment is submitted,
+ * then `decision`; after an acceptance, `signing` once a package was opened.
  */
 export function canonicalStageFor(status, facts = {}) {
   const base = STAGE_OF_STATUS[status];
@@ -81,20 +60,15 @@ export function canonicalStageFor(status, facts = {}) {
 
 // ------------------------------------------------------- deterministic order
 
-/** Newest first: a later instant wins; equal instants fall back to the id, descending, so two reads agree. */
+/** Newest first; equal instants fall back to the id, descending, so two reads agree. */
 const newestFirst = (atOf) => (a, b) => ((Number(atOf(b)) || 0) - (Number(atOf(a)) || 0)) || String(b?.id ?? '').localeCompare(String(a?.id ?? ''));
 const latest = (rows, atOf) => (rows.length ? rows.slice().sort(newestFirst(atOf))[0] : null);
 
 // ------------------------------------------------- current-resource selection
 
 /**
- * THE current Contact of a case. Order of preference, each tier
- * newest first:
- *   1. delivered and awaiting a response (the live conversation)
- *   2. responded or recorded (the last completed approach)
- *   3. a draft (something the club is preparing)
- *   4. failed
- * Cancelled records are never current. Returns null when nothing qualifies.
+ * The current Contact, newest first within each tier: delivered and awaiting a
+ * response, then responded or recorded, then a draft, then failed. Cancelled is never current.
  */
 export function currentContactForCase(contacts) {
   const rows = (contacts ?? []).filter((c) => c && c.status !== 'cancelled');
@@ -106,10 +80,8 @@ export function currentContactForCase(contacts) {
 }
 
 /**
- * THE current Trial of a case: a live one (accepted or scheduled) over a
- * completed one over a cancelled one over a legacy acceptance, newest first
- * within each tier. A pending invitation has no Trial yet; the projector
- * reports the request separately.
+ * The current Trial: live (accepted or scheduled), then completed, then
+ * cancelled, then a legacy acceptance. A pending invitation has no Trial yet.
  */
 export function currentTrialForCase(trials) {
   const rows = (trials ?? []).filter(Boolean);
@@ -121,14 +93,14 @@ export function currentTrialForCase(trials) {
     ?? tier((t) => st(t) === 'legacy_accepted', (t) => t.acceptedAt);
 }
 
-/** THE current assessment: the latest submitted one, else the latest draft. */
+/** The latest submitted assessment, else the latest draft. */
 export function currentAssessmentForCase(assessments) {
   const rows = (assessments ?? []).filter(Boolean);
   return latest(rows.filter((a) => a.state !== 'draft'), (a) => a.submittedAt ?? a.createdAt)
     ?? latest(rows.filter((a) => a.state === 'draft'), (a) => a.updatedAt ?? a.createdAt);
 }
 
-/** THE current decision: the formal chain head (nothing supersedes it), else the advisory head. Never a draft. */
+/** The formal chain head, else the advisory head. Never a draft. */
 export function currentDecisionForCase(decisions) {
   const rows = (decisions ?? []).filter((d) => d && !d.supersededById && d.state !== 'draft');
   const oldestLast = (atOf) => (a, b) => ((Number(atOf(a)) || 0) - (Number(atOf(b)) || 0)) || String(a.id).localeCompare(String(b.id));
@@ -139,13 +111,9 @@ export function currentDecisionForCase(decisions) {
 }
 
 /**
- * THE current Offer of a case, with the revision that matters to the reader:
- *   1. a live Offer (a DRAFT or ISSUED current revision) — the club's working
- *      Offer; at most one exists by the domain's own rule
- *   2. an ACCEPTED Offer, newest first (the one a signing hangs off)
- *   3. the newest Offer of any other status (declined, withdrawn, expired)
- * The `revision` is the LIVE revision (what the recipient was sent) when one
- * exists, else the current (draft) revision.
+ * The current Offer: a live one (at most one exists), then the newest
+ * accepted (the one a signing hangs off), then the newest of any status.
+ * `revision` is the live revision (what the recipient was sent), else the current draft.
  */
 export function currentOfferForCase(offers, now) {
   const rows = (offers ?? []).filter(Boolean);
@@ -158,12 +126,7 @@ export function currentOfferForCase(offers, now) {
   return { offer, revision, status: st(offer), liveStatus: offerLiveStatus(offer, now) };
 }
 
-/**
- * THE current signing package over an Offer (or over a case): a live package
- * (DRAFT, READY, IN_PROGRESS at `now`) over a COMPLETED one over the newest
- * terminal one, so an expired package never masks a live one. One place, so
- * no app re-derives it.
- */
+/** A live package, then a COMPLETED one, then the newest terminal one, so an expired package never masks a live one. */
 export function currentSigningForOffer(packages, now) {
   const rows = (packages ?? []).filter(Boolean);
   const tier = (pred) => latest(rows.filter(pred), (p) => p.createdAt);
@@ -186,53 +149,40 @@ const firstReach = (history, statuses) => {
 };
 
 /**
- * Which pipeline stages this case has completed, each with the BASIS that
- * proves it: `canonical` (a record in the domain store), `lifecycle` (the
- * case's own history reached the state, with no canonical record behind it —
- * a legacy fact, reported as such and never dressed up), or absent.
- *
- * @param {object} facts  see journey.mjs `journeyFacts` — the canonical
- *   records already scoped to this case, plus the case history.
+ * Completed pipeline stages, each with its basis: `canonical` (a domain
+ * record) or `lifecycle` (the case history reached the state with no record
+ * behind it, a legacy fact reported as such).
  */
 export function completedStagesFor(facts) {
   const out = [];
   const push = (stage, basis, at, ref) => out.push({ stage, basis, at: isFiniteAt(at) ? Number(at) : null, ...ref });
   const h = facts.history ?? [];
-  // watching: the case exists (its room was opened).
   const opened = firstReach(h, ROOM_STATUSES) ?? facts.createdAt ?? null;
   push('watching', 'lifecycle', opened, {});
-  // review: any status past watching was ever reached.
   const reviewAt = firstReach(h, ROOM_STATUSES.filter((s) => s !== 'watching' && s !== 'on_hold' && !TERMINAL_ROOM_STATUSES.includes(s)));
   if (reviewAt !== null) push('review', 'lifecycle', reviewAt, {});
-  // contact: a canonical evidence-bearing Contact, else the lifecycle reached contacted.
   const evidenceContact = latestBy(facts.contacts, (c) => CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt, (c) => c.deliveredAt ?? c.occurredAt ?? c.recordedAt);
   if (evidenceContact) push('contact', 'canonical', evidenceContact.deliveredAt ?? evidenceContact.occurredAt ?? evidenceContact.recordedAt, { contactId: evidenceContact.id });
   else { const at = firstReach(h, ['contacted']); if (at !== null) push('contact', 'lifecycle', at, {}); }
-  // trial: a completed canonical Trial, else the lifecycle reached trial_completed.
   const doneTrial = latestBy(facts.trials, (t) => deriveWorkflowState(t) === 'completed', (t) => t.completion?.at);
   if (doneTrial) push('trial', 'canonical', doneTrial.completion?.at, { trialId: doneTrial.id });
   else { const at = firstReach(h, ['trial_completed']); if (at !== null) push('trial', 'lifecycle', at, {}); }
-  // assessment: a submitted assessment by this club of this player.
   const assessed = latestBy(facts.assessments, (a) => a.state !== 'draft', (a) => a.submittedAt ?? a.createdAt);
   if (assessed) push('assessment', 'canonical', assessed.submittedAt ?? assessed.createdAt, { assessmentId: assessed.id });
-  // decision: a finalized formal decision (any outcome) that still stands.
   const decided = (facts.decisions ?? []).filter((d) => d && d.kind === 'formal' && d.state !== 'draft' && !d.supersededById);
   const decision = decided.length ? decided.slice().sort(newestFirst((d) => d.createdAt))[0] : null;
   if (decision) push('decision', 'canonical', decision.createdAt, { decisionId: decision.id });
   else { const at = firstReach(h, ['offer_consideration']); if (at !== null) push('decision', 'lifecycle', at, {}); }
-  // offer: an Offer whose live revision was issued (issued, answered, expired or withdrawn after issue all count as "an Offer was made").
+  // Issued, answered, expired or withdrawn after issue all count as "an Offer was made".
   const issued = (facts.offers ?? []).map((o) => ({ o, r: liveRevision(o) })).filter((x) => x.r);
   const firstIssued = issued.length ? issued.slice().sort((a, b) => (Number(a.r.issuedAt) || 0) - (Number(b.r.issuedAt) || 0))[0] : null;
   if (firstIssued) push('offer', 'canonical', firstIssued.r.issuedAt, { offerId: firstIssued.o.id, offerRevisionId: firstIssued.r.id });
   else { const at = firstReach(h, ['offer_made']); if (at !== null) push('offer', 'lifecycle', at, {}); }
-  // acceptance: an ACCEPTED live revision.
   const accepted = issued.filter((x) => effectiveRevisionStatus(x.r, facts.now) === 'ACCEPTED').sort((a, b) => (Number(a.r.respondedAt) || 0) - (Number(b.r.respondedAt) || 0))[0] ?? null;
   if (accepted) push('acceptance', 'canonical', accepted.r.respondedAt, { offerId: accepted.o.id, offerRevisionId: accepted.r.id });
   else { const at = firstReach(h, ['offer_accepted']); if (at !== null) push('acceptance', 'lifecycle', at, {}); }
-  // signing: a COMPLETED package.
   const completedPkg = latestBy(facts.packages, (p) => signingEffectiveStatus(p, facts.now) === 'COMPLETED', (p) => p.completion?.completedAt);
   if (completedPkg) push('signing', 'canonical', completedPkg.completion?.completedAt, { signingPackageId: completedPkg.id, completedSigningId: completedPkg.completion?.signingId ?? null });
-  // signed: the lifecycle is (or was) at signed, proved by a supporting signing row when one exists.
   const signedAt = firstReach(h, ['signed']);
   if (signedAt !== null || facts.status === 'signed') {
     const row = facts.signingRow ?? null;
@@ -248,10 +198,8 @@ function latestBy(rows, pred, atOf) {
 // ------------------------------------------------------------ next action
 
 /**
- * Every next-action code the server can derive, with the stage it belongs to,
- * whether it is a CLUB act or something the club is WAITING on, the Room tab
- * it points to and, where the act IS a lifecycle action, that action's name
- * (so the permission rule is the lifecycle's own).
+ * `kind` is a club act, something the club awaits, or none. Where the act is a
+ * lifecycle action it is named, so the permission rule is the lifecycle's own.
  */
 export const NEXT_ACTIONS = Object.freeze(Object.assign(Object.create(null), {
   REVIEW_PLAYER:            { stage: 'watching',   kind: 'club',  tab: 'overview',    lifecycleAction: 'startReview' },
@@ -281,24 +229,14 @@ export const NEXT_ACTIONS = Object.freeze(Object.assign(Object.create(null), {
 }));
 export const NEXT_ACTION_CODES = Object.freeze(Object.keys(NEXT_ACTIONS));
 
-/** Room-role rank, the same ladder domains/recruitment/rooms/shared.mjs and lifecycle.mjs use. */
 const ROLE_RANK = { viewer: 0, contributor: 1, room_lead: 2, recruitment_admin: 3 };
-/** The role each non-lifecycle permission needs (the domain routes remain the authority; this only says whether to offer the act). */
+/** Only says whether to offer the act; the domain routes remain the authority. */
 const PERMISSION_MIN_ROLE = Object.freeze({ contact_write: 'room_lead', trial_write: 'room_lead', assess: 'contributor', decide: 'room_lead', offer_write: 'room_lead', signing_manage: 'room_lead', signing_lead: 'recruitment_admin' });
 const rankOf = (role) => ROLE_RANK[role] ?? -1;
 
 /**
- * THE next action. Derived from the lifecycle status and the current
- * resources; returns the code, the stage, the kind, the Room tab, the
- * resource ids the act concerns and whether THIS viewer may take it. A
- * `blockedBy` list names why an otherwise-due act cannot be taken (a block,
- * a removed subject); it never invents an act to get past them.
- *
- * @param {object} p
- *   status, role, isLead, now, blocked, subjectRemoved,
- *   contact (current), trial (current), trialRequest (pending invitation),
- *   assessed (bool), decision (current formal head), offer ({offer, revision, status, liveStatus} | null),
- *   signing (current package | null), signingRow (signing row | null)
+ * `blockedBy` names why an otherwise-due act cannot be taken (a block, a
+ * removed subject); it never invents an act to get past them.
  */
 export function nextActionFor(p) {
   const { status, now = Date.now() } = p;
@@ -371,12 +309,7 @@ function finish(code, refs, p) {
   };
 }
 
-/**
- * The PLAYER's (or guardian's) next action across the records that reached
- * them. Only things they themselves can answer: a contact, a trial
- * invitation, a proposed schedule, an issued Offer, a signature. Nothing
- * about the club's process.
- */
+/** Only things the player or guardian can answer themselves; nothing about the club's process. */
 export const PLAYER_NEXT_ACTIONS = Object.freeze(['RESPOND_TO_CONTACT', 'RESPOND_TO_TRIAL_INVITATION', 'CONFIRM_TRIAL_SCHEDULE', 'RESPOND_TO_OFFER', 'SIGN', 'NONE']);
 export function playerNextActionFor({ pendingContactRequest = null, pendingTrialRequest = null, trialAwaitingConfirmation = null, issuedOffer = null, signingPending = null }) {
   if (signingPending) return { code: 'SIGN', resources: { signingPackageId: signingPending.id } };
@@ -387,11 +320,7 @@ export function playerNextActionFor({ pendingContactRequest = null, pendingTrial
   return { code: 'NONE', resources: {} };
 }
 
-/**
- * The player-facing STAGE word: only stages that involve the player, derived
- * from records that reached them. Never "watching", "review", "priority" or
- * anything about the club's internal pipeline.
- */
+/** Only stages that involve the player; never anything about the club's internal pipeline. */
 export const PLAYER_STAGES = Object.freeze(['contacted', 'trial_invited', 'trial_scheduled', 'trial_completed', 'offer_received', 'offer_accepted', 'offer_declined', 'signing', 'signed', 'none']);
 export function playerStageFor({ contacts = [], trialRequests = [], trials = [], offer = null, signing = null, signingRow = null, now = Date.now() }) {
   if (signingRow || (signing && signingEffectiveStatus(signing, now) === 'COMPLETED')) return 'signed';
@@ -417,37 +346,28 @@ export function playerStageFor({ contacts = [], trialRequests = [], trials = [],
 
 export const JOURNEY_CLASSIFICATIONS = Object.freeze(['canonical', 'legacy', 'partially_canonical', 'integrity_error']);
 
-/** Journey-level integrity codes. The domain codes (offer/signing consistency) are folded in as they are. */
+/** Domain codes (offer/signing consistency) are folded in as they are. */
 export const JOURNEY_INTEGRITY_CODES = Object.freeze([
   'LIFECYCLE_STATE_UNKNOWN', 'PLAYER_MISMATCH', 'CLUB_MISMATCH', 'CASE_MISMATCH',
   'STALE_POINTER', 'LIFECYCLE_AHEAD_OF_EVIDENCE', 'LIFECYCLE_BEHIND_TERMINAL_EVIDENCE', 'EVIDENCE_AHEAD_OF_LIFECYCLE', 'HISTORY_MALFORMED', 'TEMPORAL_ORDER',
-  // A structurally corrupt record that NAMES this case
-  // (an Offer, a package, a Contact or a Trial that fails its own integrity
-  // check) is omitted from the projection — and the omission is a problem,
-  // never a quiet downgrade to "legacy" with a live-looking next action.
+  // A corrupt record naming this case is omitted from the projection, and the
+  // omission is a problem, not a quiet downgrade to "legacy".
   'RECORD_CORRUPT',
 ]);
 
 /**
- * validateRecruitmentJourney. Detects — and never repairs — a
- * lifecycle/resource combination that cannot both be true, a history entry
- * naming a record that no longer exists, a record that names another
- * player/club/case, a lifecycle ahead of its evidence, a lifecycle behind a
- * terminal record, and malformed time. Returns the problems and the
- * classification:
+ * Detects, never repairs, impossible lifecycle/resource combinations, stale
+ * pointers, foreign records, a lifecycle ahead of its evidence or behind a
+ * terminal record, and malformed time.
  *
- *   canonical            every evidence-bearing state the case reached is
- *                        backed by a canonical record
- *   legacy               the case reached evidence-bearing states through
- *                        the legacy status route and no canonical record
- *                        exists for any of them — reported as such
+ *   canonical            every evidence-bearing state reached is backed by a record
+ *   legacy               evidence-bearing states reached through the legacy status
+ *                        route, with no record for any of them
  *   partially_canonical  some backed, some not
- *   integrity_error      a problem in the list above
+ *   integrity_error      any problem
  *
- * A history entry that CLAIMS a canonical record (it carries a contactId,
- * trialId, decisionId, offerId or signingPackageId, or a `trigger` from a
- * domain) is the line between legacy and error: a claimed record that is
- * missing is an error; a state reached with no claim is legacy.
+ * A history entry that claims a record (an id, or a domain `trigger`) whose
+ * record is missing is an error; a state reached with no claim is legacy.
  */
 export function validateRecruitmentJourney(facts) {
   const problems = new Set();
@@ -462,16 +382,12 @@ export function validateRecruitmentJourney(facts) {
     offer: new Set((facts.offers ?? []).map((o) => o.id)),
     package: new Set((facts.packages ?? []).map((p) => p.id)),
   };
-  // Foreign references among the records that name this case.
   for (const r of facts.foreign ?? []) problems.add(r);
-  // Claimed pointers on the history.
   const reached = { contacted: null, trial_requested: null, trial_scheduled: null, trial_completed: null, offer_consideration: null, offer_made: null, offer_accepted: null, offer_declined: null, signed: null };
   for (const h of facts.history ?? []) {
     if (!h || typeof h !== 'object') continue;
-    // A malformed instant is corruption. Out-of-order instants are NOT: the
-    // history is append-only and the timeline sorts by instant, so a later
-    // entry with an earlier instant (a test clock, a clock step) is shown where
-    // its instant puts it, never re-ordered into a believable fake sequence.
+    // A malformed instant is corruption; out-of-order instants (a test clock, a
+    // clock step) are not, and the timeline shows them where their instant puts them.
     if (h.at !== undefined && !isFiniteAt(h.at)) problems.add('TEMPORAL_ORDER');
     if (h.action !== 'room_status_changed') continue;
     const d = h.detail ?? {};
@@ -484,14 +400,11 @@ export function validateRecruitmentJourney(facts) {
     if (d.offerId && !ids.offer.has(d.offerId)) problems.add('STALE_POINTER');
     if (d.signingPackageId && !ids.package.has(d.signingPackageId)) problems.add('STALE_POINTER');
   }
-  // The case's own link to a completed signing row is a
-  // claim like any other. Every writer of `links.signingId` checks the row
-  // exists, so a link that names no row is corruption — a stale pointer,
-  // never a legacy `signed`. (Absent ids on the facts: the check is skipped.)
+  // Every writer of `links.signingId` checks the row exists, so a link naming
+  // no row is a stale pointer, not a legacy `signed`.
   if ((Number(facts.corruptRecords) || 0) > 0) problems.add('RECORD_CORRUPT');
   const linkedSigning = kase?.links?.signingId;
   if (typeof linkedSigning === 'string' && linkedSigning && facts.signingRowIds instanceof Set && !facts.signingRowIds.has(linkedSigning)) problems.add('STALE_POINTER');
-  // Evidence per reached state.
   const evidence = {
     contacted: (facts.contacts ?? []).some((c) => CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt),
     trial_requested: (facts.trialRequests ?? []).length > 0 || (facts.trials ?? []).length > 0,
@@ -509,19 +422,13 @@ export function validateRecruitmentJourney(facts) {
     if (evidence[state]) { backed += 1; continue; }
     if (r.claimed) problems.add('LIFECYCLE_AHEAD_OF_EVIDENCE'); else unbacked += 1;
   }
-  // The CURRENT state must be backed too (a state reached by hand with a claim is caught above; the current state with no history is checked here).
+  // The current state with no history entry must be backed too.
   if (Object.hasOwn(evidence, status) && !evidence[status] && !reached[status]) unbacked += 1;
-  // Terminal evidence the lifecycle lags behind.
   const completedPkg = (facts.packages ?? []).some((p) => signingEffectiveStatus(p, now) === 'COMPLETED');
   if ((completedPkg || facts.signingRow) && status !== 'signed' && !TERMINAL_ROOM_STATUSES.includes(status) && status !== 'on_hold') problems.add('LIFECYCLE_BEHIND_TERMINAL_EVIDENCE');
-  // Evidence AHEAD of the lifecycle: a canonical record proves
-  // a state this case never recorded reaching (an accepted revision on a case
-  // whose history never reached offer_accepted; a delivered Contact with no
-  // `contacted` ever recorded). Every canonical writer moves the case in the
-  // same unit of work and rolls back when it cannot, so this is drift — named,
-  // never repaired, and never turned into invented history entries. A held or
-  // ended case is exempt: its evidence may legitimately outlive its last live
-  // state (a trial completed after the hold, a package voided after closure).
+  // Every domain writer moves the case in the same unit of work, so a record
+  // proving a state the case never reached is drift: named, never repaired.
+  // A held or ended case is exempt: its evidence may outlive its last live state.
   if (!TERMINAL_ROOM_STATUSES.includes(status) && status !== 'on_hold') {
     const ahead = [
       ['contacted', evidence.contacted],
@@ -549,10 +456,9 @@ const claimOf = (d) => !!(d.contactId || d.trialId || d.requestId || d.decisionI
 // ---------------------------------------------------------------- timeline
 
 /**
- * Which audiences may see each timeline event kind. The club sees
- * everything on its own case; the player, guardian and an authorized agent
- * see only the events that involved them. `trust_safety` sees ids-only
- * milestones for moderation, never rationale (which no event carries).
+ * The club sees everything on its own case; the player, guardian and an
+ * authorised agent see only events that involved them; `trust_safety` sees
+ * ids-only milestones, never rationale.
  */
 export const TIMELINE_VISIBILITY = Object.freeze({
   room_created: ['club', 'trust_safety'],
@@ -593,9 +499,9 @@ export const TIMELINE_VISIBILITY = Object.freeze({
 export const TIMELINE_AUDIENCES = Object.freeze(['club', 'player', 'guardian', 'agent', 'trust_safety']);
 export const timelineVisibleTo = (kind, audience) => (TIMELINE_VISIBILITY[kind] ?? []).includes(audience);
 
-/** The Offer history actions that are journey milestones (drafts and views are not). */
+/** Offer history actions that are journey milestones (drafts and views are not). */
 export const OFFER_TIMELINE_ACTIONS = Object.freeze(['offer_draft_created', 'offer_issued', 'offer_superseded', 'offer_withdrawn', 'offer_accepted', 'offer_declined']);
-/** The signing history actions that are journey milestones (document attachments carry a digest and are not). */
+/** Signing history actions that are journey milestones (document attachments carry a digest and are not). */
 export const SIGNING_TIMELINE_ACTIONS = Object.freeze(['signing_created', 'signing_ready', 'signing_party_completed', 'signing_completed', 'signing_cancelled', 'signing_voided', 'signing_superseded']);
 
 /** A history entry stripped to ids, words and an instant — never a digest, a term, a note or a name of the other side. */

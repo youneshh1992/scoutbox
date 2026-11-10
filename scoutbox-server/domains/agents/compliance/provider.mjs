@@ -1,16 +1,9 @@
 /**
- * The fail-honest regulatory verification provider abstraction.
+ * The regulatory verification provider. There is no live FIFA, FA or U.S. Soccer register integration: the
+ * production provider is `none` (every answer goes to attributed review), and the synthetic one is a test double that
+ * verifies only its own tagged references and names itself in every provenance record.
  *
- * ScoutBox has NO live FIFA, FA or U.S. Soccer register integration and none
- * is pretended. The interface exists so that a real adapter can be attached
- * behind the same state vocabulary later; today the production provider is
- * `none` (every answer is MANUAL_REVIEW_REQUIRED, routed to attributed review)
- * and the synthetic provider is a LOCAL TEST DOUBLE, switched on only by an
- * environment flag, that verifies nothing but its own tagged references and
- * names itself in every provenance record.
- *
- * UNAVAILABLE never silently permits anything: the route answers 503 and
- * writes nothing.
+ * UNAVAILABLE never permits anything: the route answers 503 and writes nothing.
  */
 
 import { RECHECK_MS } from '../core/shared.mjs';
@@ -42,10 +35,7 @@ function syntheticAnswer(facet, reference, now) {
   return manual(facet, now);
 }
 
-/**
- * Build the provider. `synthetic: true` only when AGENT_VERIFICATION_TEST_PROVIDER=1
- * (development and tests). Production callers get `none`.
- */
+/** `synthetic: true` only when AGENT_VERIFICATION_TEST_PROVIDER=1. */
 export function createVerificationProvider({ synthetic = false } = {}) {
   const answer = (facet) => ({ reference, now = Date.now() }) => (synthetic ? syntheticAnswer(facet, reference, now) : manual(facet, now));
   return Object.freeze({
@@ -66,7 +56,7 @@ export function createVerificationProvider({ synthetic = false } = {}) {
   });
 }
 
-/** Map a provider answer to what is stored on the facet. UNAVAILABLE stores nothing (the caller refuses). */
+/** UNAVAILABLE stores nothing; the caller refuses. */
 export function facetFromProviderAnswer(answer, { reference, memberAssociation, now }) {
   if (!answer || answer.state === 'UNAVAILABLE') return null;
   const state = answer.state === 'STALE' ? 'VERIFIED' : answer.state === 'NOT_VERIFIED' ? 'UNVERIFIED' : answer.state;

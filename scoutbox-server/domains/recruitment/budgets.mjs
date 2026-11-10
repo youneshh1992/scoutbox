@@ -3,7 +3,7 @@
 import { convertMinor, validAmountMinor, CURRENCIES, BUDGET_LINE_KINDS as LINE_KINDS, BUDGET_SCHEDULES as SCHEDULES } from './money.mjs';
 import { readDateOnly } from '../../temporal.mjs';
 
-// Exported for direct fixture testing — ALL integer arithmetic.
+// Exported for fixture tests. Integer arithmetic only.
 export function computeScenarioTotals(scenario) {
   const termMonths = scenario.termMonths;
   const perCurrency = {};
@@ -19,7 +19,7 @@ export function computeScenarioTotals(scenario) {
     const total = l.amountMinor * occurrences(l.schedule);
     if (l.confirmed) b.confirmedMinor += total; else b.estimatedMinor += total;
   }
-  // Combined total ONLY when explicit FX assumptions cover every currency.
+  // A combined total only when explicit FX assumptions cover every currency.
   let combined = null;
   const currencies = Object.keys(perCurrency);
   if (currencies.length === 1) {

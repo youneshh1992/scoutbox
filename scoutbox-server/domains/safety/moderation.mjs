@@ -5,11 +5,9 @@ import { moderateText } from '../../domain.mjs';
 export function createModeration({ safetyAudit, unit, nextId }) {
   if (typeof safetyAudit?.moderationLog?.record !== 'function' || typeof unit !== 'function') throw new TypeError('createModeration needs the safety-audit repository and unit');
 
-  /** Screen `text`; on a hit the refusal is sent and false returned. */
   return function moderateOrRefuse(res, text, context) {
     const check = moderateText(text);
     if (check.ok) return true;
-    // The hit and, for grooming-pattern language, its escalation commit together.
     unit(() => {
       safetyAudit.moderationLog.record({ id: nextId('mod'), ts: Date.now(), context, flags: check.flags, severity: check.severity, excerpt: String(text).slice(0, 140) });
       if (check.severity === 'grooming') {

@@ -1,41 +1,22 @@
 /**
- * The recruitment evidence provider.
+ * The recruitment evidence provider: answers whether a record exists that
+ * supports a lifecycle status, from stores it does not own and never writes.
  *
- * A lifecycle status that asserts a durable football-business fact must be
- * supported by a record that independently establishes it. This module is the
- * only thing that answers "does that record exist?", and it answers from
- * canonical stores it does not own and never writes.
- *
- * THE DIRECTION OF CAUSATION, WHICH IS THE WHOLE POINT
- *
- *   signing truth  ->  lifecycle
- *   lifecycle      -/-> signing truth
- *
- * A signing is not lifecycle bookkeeping. Creating one issues a success-fee
- * invoice, moves the player's level, sets `contractStatus: 'under_contract'`
- * and adds them to a squad. So the lifecycle reads signings and never writes them: a
- * recruitment status can follow a signing, but no recruitment status may cause
- * one. If that were reversed, moving a case on a screen would bill a club.
- *
- * Contact, Trial, Decision and Offer evidence run in the same direction
- * (record truth -> lifecycle). A kind this provider cannot answer gets
- * `not_implemented`, which refuses the transition: the product cannot prove
- * it happened, so it does not let the lifecycle claim it did.
+ * Causation runs one way: record -> lifecycle. A signing issues a success-fee
+ * invoice, changes the player's level and contract status and adds them to a
+ * squad, so moving a case on a screen must never create one. A kind this
+ * provider cannot answer gets `not_implemented`, which refuses the transition.
  */
 
 import { CONTACT_EVIDENCE_STATUSES, contactIntegrity } from './contact.mjs';
 import { trialIntegrity, deriveWorkflowState } from './trial.mjs';
-// The Offer domain's pure evidence predicate. The lifecycle asks; the
-// Offer store answers; nothing here writes an Offer or a status.
 import { offerEvidence } from '../offers/offer.mjs';
 
 const OFFER_EVIDENCE_KINDS = Object.freeze(['offer_sent', 'offer_accepted_by_recipient', 'offer_declined_by_recipient']);
 
-/** Every kind the lifecycle can ask about. Anything else is a programming error. */
 export const EVIDENCE_KINDS = Object.freeze([
   'contact_delivered',
   'trial_invited',
-  // The ONE decision-shaped kind: a finalized formal decision to progress.
   'decision_progress',
   'trial_confirmed',
   'trial_completed',
@@ -46,49 +27,33 @@ export const EVIDENCE_KINDS = Object.freeze([
 ]);
 
 /**
- * Is this signing record usable as proof that THIS case's player joined THIS
- * club?
- *
- * Three independent checks, because each closes a different hole:
- *   - same organisation — a rival's signing is not this club's business
- *   - same player       — another player's signing proves nothing about this one
- *   - not cancelled     — a reversed signing is not a signing
+ * Is this signing proof that this case's player joined this club? Same org,
+ * same player, not cancelled.
  */
 function signingSupports(signing, kase, packages = null) {
   if (!signing) return false;
   if (signing.orgId !== kase.orgId) return false;
   if (signing.playerId !== kase.playerId) return false;
   if (signing.cancelledAt || signing.revokedAt || signing.voidedAt) return false;
-  // A row that names a signing package is evidence only if that package exists, is COMPLETED and names
-  // this row back — a row planted beside a live package proves nothing. A row with no package is judged below.
+    // A row naming a package is evidence only if that package is COMPLETED and
+    // names this row back; a row planted beside a live package proves nothing.
   if (signing.signingPackageId) {
     const pkg = Array.isArray(packages) ? packages.find((x) => x && x.id === signing.signingPackageId) ?? null : null;
     if (!pkg || pkg.status !== 'COMPLETED' || pkg.completion?.signingId !== signing.id || pkg.orgId !== kase.orgId || pkg.playerId !== kase.playerId) return false;
-    // A canonical package proves the case it was opened on,
-    // not another case of the same club and player.
+    // A package proves the case it was opened on, not another case of the same club and player.
     if (pkg.caseId !== kase.id) return false;
     return true;
   }
-  // A row with no package proves a joining only for a case that
-  // existed when it was recorded. A historical row from years before this
-  // case was opened is not this case's outcome.
+  // A row with no package proves a joining only for a case that existed when it was recorded.
   const ts = Number(signing.ts); const opened = Number(kase.createdAt);
   if (Number.isFinite(ts) && Number.isFinite(opened) && ts < opened) return false;
   return true;
 }
 
 /**
- * Build the provider over a live database.
- *
- * `reads` carries the recruitment repositories' queries:
- * `contacts` and `offers` (the contacts/offers repository),
- * `signings` and `signingPackages` (the signings repository), `requests` and `trials`
- * (the recruitment repository), `decisions` (the recruitment-cases repository). A missing one is a
+ * `reads` carries the recruitment repositories' queries (contacts, offers,
+ * signings, signingPackages, requests, trials, decisions). A missing one is a
  * broken composition, answered as an unavailable store, never as "no record".
- *
- * Pure with respect to the database: it reads and returns a verdict. It never
- * creates, mutates or caches, so asking the same question twice cannot change
- * the answer.
  */
 export function createEvidenceProvider(reads = {}) {
   return {
@@ -96,22 +61,17 @@ export function createEvidenceProvider(reads = {}) {
      * @returns {{satisfied: boolean, reason?: string, sourceType?: string, sourceId?: string}}
      */
     check(kind, { kase, now: at } = {}) {
-      // The lifecycle passes its own clock; a caller that passes none gets
-      // the real one. An Offer expiry is judged at THIS instant.
+      // An Offer expiry is judged at the lifecycle's instant.
       const now = Number.isFinite(at) ? at : Date.now();
       if (!EVIDENCE_KINDS.includes(kind)) {
-        // An unknown kind is a bug in the caller, not a business answer.
-        // Fail closed and name it, rather than defaulting either way.
         return { satisfied: false, reason: 'unknown_evidence_kind' };
       }
       if (!kase) return { satisfied: false, reason: 'no_case' };
 
       if (kind === 'confirmed_join') {
-        // A missing store is not "no signings". If the
-        // queries are absent the composition is broken, and answering
-        // "unsatisfied" would be indistinguishable from answering truthfully.
+        // A missing store is a broken composition; "unsatisfied" would look like a truthful answer.
         if (typeof reads.signings?.forOrgPlayer !== 'function') return { satisfied: false, reason: 'signings_store_unavailable' };
-        // A package proves only the case it was opened on, so this case's packages are all signingSupports can use.
+        // A package proves only the case it was opened on.
         const packages = typeof reads.signingPackages?.forCase === 'function' ? reads.signingPackages.forCase(kase.id) : null;
         const hit = reads.signings.forOrgPlayer(kase.orgId, kase.playerId).find((s) => signingSupports(s, kase, packages));
         return hit
@@ -120,12 +80,8 @@ export function createEvidenceProvider(reads = {}) {
       }
 
       if (kind === 'contact_delivered') {
-        // A contact record exists for THIS org and
-        // THIS player, is not cancelled, and reached a state that means the
-        // recipient could have received it — delivered in-app, answered, or
-        // recorded as having happened outside ScoutBox. A draft is not
-        // evidence; a failed attempt is not evidence; a corrupt record is not
-        // evidence. A missing store is a broken database, not "no contact".
+        // Delivered in-app, answered, or recorded as happening outside ScoutBox.
+        // Drafts, failed attempts and corrupt records are not evidence.
         if (typeof reads.contacts?.forOrgPlayer !== 'function') return { satisfied: false, reason: 'contacts_store_unavailable' };
         const hit = reads.contacts.forOrgPlayer(kase.orgId, kase.playerId).find((c) => c && c.orgId === kase.orgId && c.playerId === kase.playerId
           && CONTACT_EVIDENCE_STATUSES.includes(c.status) && !c.cancelledAt && contactIntegrity(c).length === 0);
@@ -134,17 +90,10 @@ export function createEvidenceProvider(reads = {}) {
           : { satisfied: false, reason: 'no_contact_delivered' };
       }
 
-      // ---- Trial evidence. Same direction as every other kind: trial
-      // truth -> lifecycle. The provider reads the requests and trials of the
-      // case (`reads.requests`, `reads.trials`) and writes nothing.
+      // ---- Trial evidence.
       if (kind === 'trial_invited') {
-        // An authorised invitation that was actually delivered — a
-        // request row of type `trial` FOR THIS CASE (caseId on the request),
-        // issued through the single request writer, still pending or
-        // accepted. A declined or suspended invitation proves nothing; a
-        // draft, a room task and the `planTrial` action alone prove nothing;
-        // a legacy request with no caseId is not evidence for a case it was
-        // never tied to.
+        // A delivered `trial` request tied to this case by caseId, still pending
+        // or accepted. The `planTrial` action alone, or a request with no caseId, proves nothing.
         if (typeof reads.requests?.forCase !== 'function') return { satisfied: false, reason: 'requests_store_unavailable' };
         const hit = reads.requests.forCase(kase.id).find((r) => r && r.type === 'trial' && r.caseId === kase.id && r.orgId === kase.orgId
           && r.playerId === kase.playerId && ['pending', 'accepted'].includes(r.status) && !r.subjectRemovedAt);
@@ -154,12 +103,9 @@ export function createEvidenceProvider(reads = {}) {
       }
 
       if (kind === 'trial_confirmed' || kind === 'trial_completed') {
-        // A Trial row for THIS case, structurally sound, whose
-        // stored operational state matches what its own fields derive.
         // `legacy_accepted` never satisfies `trial_confirmed` (no confirmed
-        // schedule exists) and `reported` never satisfies `trial_completed`
-        // (a report is not completion). A tombstoned trial still answers —
-        // history stays honest after the person left.
+        // schedule) and `reported` never satisfies `trial_completed` (a report is
+        // not completion). A tombstoned trial still answers, so history stays honest.
         if (typeof reads.trials?.forCase !== 'function') return { satisfied: false, reason: 'trials_store_unavailable' };
         const own = reads.trials.forCase(kase.id).filter((t) => t && t.caseId === kase.id && t.orgId === kase.orgId && t.playerId === kase.playerId
           && trialIntegrity(t, { orgId: kase.orgId, caseId: kase.id }).length === 0);
@@ -175,10 +121,8 @@ export function createEvidenceProvider(reads = {}) {
           : { satisfied: false, reason: 'no_completed_trial' };
       }
 
-      // ---- Decision evidence. `offer_consideration` needs a FINALIZED formal
-      // decision to progress. A draft is not a decision; a superseded decision
-      // does not speak; an advisory recommendation is not a formal decision. Same direction as every
-      // other kind: decision truth -> lifecycle; nothing written.
+      // ---- Decision evidence: a finalised, current, formal decision to
+      // progress. Drafts and advisory recommendations do not count.
       if (kind === 'decision_progress') {
         if (typeof reads.decisions?.forRoom !== 'function') return { satisfied: false, reason: 'decisions_store_unavailable' };
         const hit = reads.decisions.forRoom(kase.id).find((d) => d && typeof d === 'object' && d.kind === 'formal' && d.state !== 'draft' && d.outcome === 'progress'
@@ -188,13 +132,10 @@ export function createEvidenceProvider(reads = {}) {
           : { satisfied: false, reason: 'no_finalized_progress_decision' };
       }
 
-      // ---- Offer evidence. Answered from the canonical Offer store through
-      // a pure predicate owned by the Offer domain (offers/offer.mjs): an ISSUED
-      // revision satisfies `offer_sent`; a response row on that revision, by
-      // the recipient the revision was addressed to, satisfies the accepted
-      // or declined kind. A draft is not an Offer sent; a club user naming
-      // `recordOfferAccepted` with no recipient response is refused here.
-      // Reads; never writes.
+      // ---- Offer evidence, via the Offer domain's predicate: an issued
+      // revision satisfies `offer_sent`; a response by the addressed recipient
+      // satisfies accepted or declined. `recordOfferAccepted` with no recipient
+      // response is refused here.
       if (OFFER_EVIDENCE_KINDS.includes(kind)) {
         if (typeof reads.offers?.forCase !== 'function') return { satisfied: false, reason: 'offers_store_unavailable' };
         return offerEvidence(reads.offers.forCase(kase.id), kase, kind, now);

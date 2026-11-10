@@ -1,20 +1,8 @@
-// LAYER 3: PROTOCOL INTERPRETATION.
+// Layer 3: tracked observations (ball diameters, seconds) in; touch and juggle events out. The only layer that
+// knows protocol semantics.
 //
-//   input:  tracked observations (normalised: ball diameters, seconds)
-//   output: touch events, juggle events, protocol violations
-//
-// Box Touch and Box Juggle semantics live HERE and nowhere else. Neither the
-// detector nor the tracker contains `if (protocol === 'box_touch_60')`; they
-// cannot, because neither is passed a protocol id.
-//
-// -------------------------------------------------------------------------
-// THE CONTACT STATE MACHINE
-//
-// A touch is NOT a threshold comparison evaluated independently per frame.
-// That design lets sustained proximity increment a counter forever, which is
-// exactly the gaming vector to close. Instead one
-// physical contact walks a machine, and the machine can only emit once per
-// traversal:
+// A touch is not a per-frame threshold, which would let sustained proximity count forever. One physical contact
+// walks this machine, which emits once per traversal:
 //
 //     READY ──ball enters contact range──▶ APPROACHING
 //       ▲                                      │
@@ -34,13 +22,8 @@
 //       │                                      ▼
 //       └──────────────────────────────── REFRACTORY
 //
-// Properties this buys, each of which is a named regression:
-//   * prolonged contact counts once — the machine sits in CONFIRMED and
-//     cannot re-emit without passing through SEPARATING first;
-//   * rapid legitimate touches stay distinct — separation is spatial, so a
-//     genuinely re-struck ball leaves and returns and traverses again;
-//   * a dropped frame around contact cannot double-count — re-entry to
-//     APPROACHING requires an observed separation, not merely a gap.
+// So prolonged contact counts once, rapid touches stay distinct (separation is spatial), and a dropped frame can't
+// double-count (re-entry needs an observed separation, not a gap).
 
 import { EVENT_RULES } from './policy.mjs';
 
@@ -48,12 +31,7 @@ export const CONTACT_STATES = Object.freeze([
   'READY', 'APPROACHING', 'CONTACT_CANDIDATE', 'CONTACT_CONFIRMED', 'SEPARATING', 'REFRACTORY',
 ]);
 
-/**
- * Box Touch: discrete ball-contact events.
- *
- * `motion` is the normalised stream from Layer 2. Everything below is in
- * ball diameters and seconds; there is not a pixel in this function.
- */
+/** Box Touch. `motion` is Layer 2's normalised stream: ball diameters and seconds, no pixels. */
 export function interpretTouches(motion, {
   refractoryMs = EVENT_RULES.touchRefractoryMs,
   minImpulse = EVENT_RULES.touchMinImpulseDiametersPerSec,
@@ -64,25 +42,16 @@ export function interpretTouches(motion, {
 } = {}) {
   const events = [];
   const transitions = [];
-  // When the ball most recently entered contact range, so that a contact can
-  // require a continuous approach rather than a sudden appearance.
+  // So a contact can require a continuous approach rather than a sudden appearance.
   let inRangeSinceMs = null;
   let prevInRange = false;
   let state = 'READY';
   let lastEmitMs = -Infinity;
   let ambiguousIntervals = 0;
-  // Contact-range impulses the refractory window had to discard. This is the
-  // honest signal for over-cadence: if the engine keeps seeing strikes it is not
-  // allowed to count, the activity is running faster than it can resolve.
-  // Derived from what the tracker OBSERVED, never from a player-reported
-  // number and never from the count finally emitted.
+  // Impulses the refractory window discarded: the over-cadence signal, from what the tracker observed.
   let suppressedByRefractory = 0;
-  // Where the ball was, in the player's frame, at the moment of the last
-  // confirmed contact. Separation is measured from HERE, not from the
-  // player: in Box Touch the ball stays at the foot for the whole attempt,
-  // so distance-from-player never grows and the machine would latch after a
-  // single event. What actually distinguishes two touches is that the ball
-  // was displaced from where it was last struck and then struck again.
+  // Separation is measured from the last struck position, not the player: in Box Touch the ball stays at the foot, so
+  // distance from the player never grows and the machine would latch after one event.
   let contactAt = null;
 
   const go = (next, at, why) => {
@@ -93,10 +62,8 @@ export function interpretTouches(motion, {
   };
 
   for (const m of motion) {
-    // A sample whose neighbours are separated by a long gap cannot support a
-    // contact decision: the velocity either side is not comparable. The
-    // machine drops to READY and the interval is recorded as ambiguous,
-    // which the quality layer later counts against continuity.
+    // Across a long gap the velocities either side aren't comparable: drop to READY and record the interval as
+    // ambiguous, which counts against continuity.
     if (m.gapBeforeMs > maxGapMs || m.gapAfterMs > maxGapMs) {
       ambiguousIntervals += 1;
       go('READY', m.atMs, 'observation_gap');
@@ -107,9 +74,7 @@ export function interpretTouches(motion, {
       go('READY', m.atMs, 'ball_at_frame_edge');
       continue;
     }
-    // The player frame of reference moved discontinuously here, so the
-    // relative velocities across this triple describe the detector changing
-    // its mind about the silhouette, not the ball being struck.
+    // The player frame jumped: these relative velocities describe the silhouette changing, not a strike.
     if (m.frameJump) {
       ambiguousIntervals += 1;
       go('READY', m.atMs, 'player_region_discontinuity');
@@ -117,29 +82,20 @@ export function interpretTouches(motion, {
     }
 
     const inRange = m.distDiameters <= maxContact;
-    // Dwell clock: starts when the ball ENTERS contact range and runs until
-    // it leaves. It is deliberately independent of the machine's state — a
-    // ball resting at the foot through several taps never leaves range, so
-    // its approach is never in question and the clock must not restart.
+    // Dwell clock: independent of machine state, because a ball resting at the foot through several taps never leaves
+    // range and the clock must not restart.
     if (inRange && !prevInRange) inRangeSinceMs = m.atMs;
     if (!inRange) inRangeSinceMs = null;
     prevInRange = inRange;
     const impulsive = m.impulseDiametersPerSec >= minImpulse;
-    // Displacement from the last struck position, in ball diameters — OR
-    // leaving contact range altogether, which is separation by any measure.
+    // Displaced from the last struck position, or out of contact range altogether.
     const movedAway = contactAt
       ? Math.hypot(m.relX - contactAt.x, m.relY - contactAt.y) > minSeparation
       : false;
     const separated = movedAway || m.distDiameters > maxContact + minSeparation;
 
-    // The machine may need to traverse SEVERAL states within one sample:
-    // after a contact it passes CONFIRMED → SEPARATING → REFRACTORY → READY →
-    // APPROACHING, and if each of those consumed a sample, the effective
-    // refractory would be the declared one PLUS four frame intervals — a
-    // latency that varies with cadence and silently lengthens the debounce at
-    // low frame rates. That is exactly the frame-rate dependence the
-    // normalised units exist to eliminate, so transitions are allowed to
-    // settle within the sample, bounded so a cycle cannot spin.
+    // Transitions settle within one sample (bounded, so a cycle cannot spin). If each consumed a sample, the refractory
+    // would grow by four frame intervals, a cadence-dependent debounce.
     let steps = 0;
     let settled = false;
     while (!settled && steps < CONTACT_STATES.length + 1) {
@@ -158,23 +114,13 @@ export function interpretTouches(motion, {
       case 'APPROACHING':
         if (!inRange) { go('READY', m.atMs, 'left_range_without_contact'); break; }
         if (!impulsive) break;
-        // A continuous approach is required. Without it, a ball that is
-        // distant and then adjacent for a frame or two registers a contact on
-        // the apparent velocity of its own arrival.
+        // Without a continuous approach, a ball that jumps adjacent registers a contact on its own arrival velocity.
         if (inRangeSinceMs == null || m.atMs - inRangeSinceMs < minApproachMs) break;
-        // The contact IS this sample: an impulse delivered while the ball is
-        // within contact range. Candidate and confirmation therefore resolve
-        // in the same iteration, and the event is stamped and scored here.
-        //
-        // Waiting one more sample before confirming, and requiring the ball
-        // still to be adjacent then, is backwards — a struck ball is
-        // leaving. It drops nearly every genuine touch, and the counts fall
-        // as pace rises, because a faster touch clears contact range sooner.
+        // The contact is this sample, so candidate and confirmation resolve together. Confirming a sample later, with the
+        // ball still adjacent, drops genuine touches: a struck ball is leaving, and faster touches leave sooner.
         go('CONTACT_CANDIDATE', m.atMs, 'impulse_detected');
         if (m.atMs - lastEmitMs < refractoryMs) {
-          // Temporal half of the debounce: too soon after the last contact to
-          // be a separate one. Occupy CONFIRMED so it cannot re-trigger, and
-          // emit nothing.
+          // Temporal half of the debounce: too soon to be separate. Occupy CONFIRMED so it can't re-trigger.
           suppressedByRefractory += 1;
           go('CONTACT_CONFIRMED', m.atMs, 'suppressed_within_refractory');
           break;
@@ -192,37 +138,19 @@ export function interpretTouches(motion, {
         break;
 
       case 'CONTACT_CANDIDATE':
-        // Retained for trace completeness; the machine passes straight
-        // through it within a single iteration.
+        // Passed through within one iteration; kept for the trace.
         go('CONTACT_CONFIRMED', m.atMs, 'contact_confirmed');
         break;
 
       case 'CONTACT_CONFIRMED':
-        // Sustained contact stays here. It cannot emit again: the only way
-        // out is an observed displacement from the struck position.
-        //
+        // Sustained contact stays here; the only way out is displacement from the struck position.
         if (separated || !inRange) go('SEPARATING', m.atMs, 'ball_separated');
         break;
 
       case 'SEPARATING':
-        // NOT counted here, and the reason is a real limitation rather than
-        // an oversight.
-        //
-        // `impulsive` is a velocity CHANGE threshold, and friction
-        // deceleration immediately after a legitimate strike produces a
-        // change of the same magnitude when sampled at video rates. Counting
-        // impulses in this state therefore counts the decaying tail of every
-        // genuine touch, and a perfectly valid attempt condemns itself as
-        // running too fast. There is no reliable way to separate "a new
-        // strike arriving too soon" from "the previous strike still
-        // decaying" with this detector, so the engine does not pretend to.
-        //
-        // Consequence, stated plainly: over-cadence detection is PARTIAL. It
-        // fires when the machine has re-armed and a blocked strike reaches
-        // APPROACHING, and it misses over-cadence activity that arrives while
-        // the machine is still separating. That limitation is one more
-        // reason the production gate stays closed for exact Box Touch
-        // measurement.
+        // Impulses aren't counted as suppressed here: friction just after a strike changes velocity as much as a new
+        // strike, so every touch's tail would count. Over-cadence detection is therefore partial (it misses strikes while
+        // separating), one more reason the gate stays closed for exact Box Touch.
         if (m.atMs - lastEmitMs >= refractoryMs) go('REFRACTORY', m.atMs, 'refractory_elapsed');
         break;
 
@@ -240,12 +168,8 @@ export function interpretTouches(motion, {
 }
 
 /**
- * Box Juggle: contact → flight → contact.
- *
- * A juggle contact is a REVERSAL of vertical motion in the player's frame,
- * followed by a flight clearing `minFlight` ball diameters. Explicitly NOT
- * peak counting: a peak is the top of a flight, and counting peaks
- * conflates apex with contact and double-counts a bouncing ball.
+ * Box Juggle: a reversal of vertical motion in the player's frame followed by a flight of `minFlight` diameters. Not
+ * peak counting, which conflates apex with contact and double-counts a bouncing ball.
  */
 export function interpretJuggles(motion, {
   refractoryMs = EVENT_RULES.juggleRefractoryMs,
@@ -282,7 +206,7 @@ export function interpretJuggles(motion, {
   return { events, transitions: [], finalState: 'READY', ambiguousIntervals, suppressedByRefractory: 0 };
 }
 
-/** Dispatch by event kind. The ONLY place protocol identity is consulted. */
+/** The only place protocol identity is consulted. */
 export function interpret(eventKind, motion, opts = {}) {
   if (eventKind === 'touch') return interpretTouches(motion, opts);
   if (eventKind === 'juggle') return interpretJuggles(motion, opts);

@@ -1,14 +1,6 @@
-// Passport sharing: revocable opaque links.
-//
-// Tokens are high-entropy, stored ONLY as SHA-256 hashes, expiring and
-// revocable. A share can only ever NARROW what a viewer would legitimately
-// see — it never bypasses safeguarding, blocks, the agency/minor wall or
-// the grassroots radius:
-//   * public shares resolve anonymously to the SAFE PUBLIC projection;
-//   * recruitment shares resolve ONLY through an authenticated organisation
-//     session and re-run the standing orgCanSee gates.
-// Unknown, revoked, expired and removed-subject tokens are indistinguishable
-// (404 concealment), and the public resolver is rate-limited.
+// Passport sharing. Tokens are stored only as SHA-256 hashes. A share can only narrow what a viewer would see: a
+// public share resolves to the public projection, a recruitment share only inside an authenticated organisation
+// session that re-runs the standing gates.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { mintShareSecret, sha256, shareProblem, SHARE_MODES } from './shared.mjs';
 import { PASSPORT_LIMITS } from '../../../repositories/passport.mjs';
@@ -31,12 +23,11 @@ export function registerPassportSharing(ctx) {
   function createShare(res, player, body, createdBy) {
     const mode = String(body.mode ?? 'public');
     if (!SHARE_MODES.includes(mode)) return res.status(400).json({ error: 'MODE_INVALID', allowed: SHARE_MODES });
-    // A lifetime that is not a whole number of days from 1 to 90 is refused, not clamped.
+    // Refused, not clamped.
     const days = body.expiresDays === undefined || body.expiresDays === null ? DAYS.default : body.expiresDays;
     if (!Number.isInteger(days) || days < DAYS.min || days > DAYS.max) return res.status(400).json({ error: 'FIELD_INVALID', field: 'expiresDays', message: `A whole number of days from ${DAYS.min} to ${DAYS.max}.` });
     const secret = mintShareSecret();
     const now = Date.now();
-    // One unit: the share with its ledger row and notification.
     const share = unit(() => {
       const created = passport.shares.create({
         id: nextId('pshr'), playerId: player.id, mode, tokenHash: sha256(secret),
@@ -48,8 +39,7 @@ export function registerPassportSharing(ctx) {
       return created;
     });
     vmetric('share_created');
-    // The secret exists ONLY in this response — QR codes should encode
-    // exactly this URL and nothing else.
+    // The secret exists only in this response; a QR code should encode exactly this URL.
     return res.status(201).json({
       share: shareView(share),
       url: mode === 'public' ? `/passport/shared/${secret}` : `/org/passport/shared/${secret}`,
@@ -59,8 +49,7 @@ export function registerPassportSharing(ctx) {
     });
   }
 
-  // Adults manage their own shares; a minor's shares are guardian-managed
-  // (existing DOB/country adult check — no new age system).
+  // A minor's shares are guardian-managed.
   playerRouter.post('/football-passport/shares', (req, res) => {
     if (!isAdult(req.player)) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Your parent or guardian manages Passport sharing.' });
     createShare(res, req.player, req.body ?? {}, { kind: 'player', id: req.player.id });
@@ -83,7 +72,6 @@ export function registerPassportSharing(ctx) {
   function revoke(res, share, by) {
     if (!share) return res.status(404).json({ error: 'SHARE_NOT_FOUND' });
     if (share.revokedAt) return res.status(409).json({ error: 'ALREADY_REVOKED' });
-    // One unit: the revocation with its ledger row.
     const revoked = unit(() => {
       const r = passport.shares.update(share.id, (d) => { d.revokedAt = Date.now(); d.revokedBy = by; });
       ledgerAppend({ type: 'passport_share_revoked', playerId: share.playerId, orgId: null, detail: { shareId: share.id, by: by.kind } });
@@ -105,7 +93,6 @@ export function registerPassportSharing(ctx) {
   adminRouter.post('/passport/shares/:id/revoke', (req, res) => {
     revoke(res, shares.byId(req.params.id), { kind: 'trust_safety', id: 'admin' });
   });
-  // Every share, newest first, by cursor (`?limit=&cursor=`).
   adminRouter.get('/passport/shares', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -114,8 +101,7 @@ export function registerPassportSharing(ctx) {
   });
 
   // --------------------------------------------------- public resolution
-  // Rate limiting: deterministic fixed-window counter per client address —
-  // enumeration gets 429 long before the keyspace matters (24 random bytes).
+  // Enumeration hits 429 long before the keyspace (24 random bytes) matters.
   const attempts = new Map();
   const RATE = { windowMs: 60_000, max: 30 };
   function rateLimited(ip) {
@@ -134,25 +120,21 @@ export function registerPassportSharing(ctx) {
   }
 
   app.get('/passport/shared/:token', (req, res) => {
-    res.set('X-Robots-Tag', 'noindex, nofollow'); // never search-indexed
+    res.set('X-Robots-Tag', 'noindex, nofollow');
     if (rateLimited(req.ip ?? 'unknown')) return res.status(429).json({ error: 'RATE_LIMITED' });
     const { share, player, problem } = resolveShare(req.params.token);
-    // Concealment: unknown, revoked, expired, removed-subject and
-    // wrong-mode all look identical from outside.
+    // Unknown, revoked, expired, removed-subject and wrong-mode all look identical from outside.
     if (problem || share.mode !== 'public') return res.status(404).json({ error: 'PASSPORT_NOT_FOUND' });
     passport.shares.recordView(share.id);
     vmetric('share_opened_public');
     res.json(buildFootballPassport(player, 'public', { shareMode: 'public' }));
   });
 
-  // Recruitment shares require an authenticated organisation session AND
-  // re-run every standing gate — the link locates, it never authorises.
+  // The link locates, it never authorises.
   orgRouter.get('/passport/shared/:token', (req, res) => {
     const { share, player, problem } = resolveShare(req.params.token);
     if (problem || share.mode !== 'recruitment') return res.status(404).json({ error: 'PASSPORT_NOT_FOUND' });
     if (!orgCanSee(req.org, player)) {
-      // The share cannot widen: agencies still never reach minors, the
-      // grassroots radius still applies, blocks still apply.
       return res.status(403).json({ error: req.org.type === 'agency' && !isAdult(player) ? 'UNDER_18_WALL' : 'NOT_VISIBLE' });
     }
     passport.shares.recordView(share.id);

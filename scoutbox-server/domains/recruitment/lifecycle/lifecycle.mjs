@@ -1,27 +1,10 @@
 /**
- * The recruitment lifecycle: semantic actions over one transition table.
- *
- * `case.room.status` is the canonical lifecycle state; `case.stage` is a pure
- * derivation of it (status → stage, never stage → status); `case.history` is
- * the append-only record of how it got there. There is no stored "journey" —
- * the journey is a projection (journey.mjs), computed on read.
- *
- * WHY THERE IS NO `PATCH stage = X`
- *
- * A generic stage setter makes the client the author of the lifecycle, and
- * then every rule about what may follow what lives in whichever caller
- * remembered it. Instead this file exposes SEMANTIC ACTIONS — planContact,
- * completeTrial, recordOfferAccepted — each of which names one real event, maps
- * to exactly one target state, and carries its own preconditions.
- *
- * WHAT THIS FILE DELIBERATELY CANNOT DO
- *
- * It cannot fabricate the evidence a transition requires. `signed` needs a
- * confirmed joining record; `trial_completed` needs a completed trial. Those
- * records belong to other modules, so the preconditions are declared here and
- * RESOLVED THROUGH AN INJECTED PROVIDER. A provider without the evidence
- * answers "no such evidence" and the transition is refused — never a
- * placeholder trial or offer.
+ * The recruitment lifecycle as semantic actions over one transition table.
+ * `case.room.status` is the state; `case.stage` derives from it; the journey is
+ * computed on read (journey.mjs). There is no generic stage setter: each action
+ * names one real event and carries its own preconditions. Evidence a transition
+ * needs (a completed trial, a confirmed joining record) lives in other modules
+ * and is checked through an injected provider.
  */
 
 import {
@@ -31,29 +14,16 @@ import {
 
 export const RECRUITMENT_LIFECYCLE_POLICY_VERSION = 1;
 
-/**
- * States that end the case. `on_hold` is NOT among them: a hold is a live case
- * with a reason and possibly a date, and every ordinary route out of it stays
- * open. Treating a pause as an ending is how paused work disappears.
- */
+/** `on_hold` is not terminal: a hold is a live, paused case and every route out of it stays open. */
 export const LIFECYCLE_TERMINAL = Object.freeze([...TERMINAL_ROOM_STATUSES]);
 export const LIFECYCLE_REOPENABLE = Object.freeze(['withdrawn', 'archived', 'closed']);
 const REOPENABLE = LIFECYCLE_REOPENABLE;
 
-/**
- * The initial state of a newly opened case. An ALIAS, not a second
- * declaration: the rooms module owns the status set, so it owns where a room
- * starts.
- */
 export const LIFECYCLE_INITIAL = INITIAL_ROOM_STATUS;
 
 /**
- * Structured reason codes for lifecycle movement.
- *
- * Deliberately NOT prose: a reason a machine cannot group is a reason nobody
- * can report on. These describe WHY THE CASE MOVED. They are separate from
- * the 20 decision reason codes (rooms/shared.mjs), which describe why a club
- * DECIDED something — a decision is an opinion, a transition is an event.
+ * Why a case moved (an event), as opposed to the decision reason codes in
+ * rooms/shared.mjs, which say why a club decided something (an opinion).
  */
 export const LIFECYCLE_REASON_CODES = Object.freeze([
   'contact_planned',
@@ -77,42 +47,23 @@ export const LIFECYCLE_REASON_CODES = Object.freeze([
 const REASON_SET = new Set(LIFECYCLE_REASON_CODES);
 
 /**
- * Preconditions a target state requires from a DURABLE RECORD elsewhere.
- *
- * ONE TABLE, and this is a local name for it — not a copy and not an export.
- * Two tables would give two answers to one question (a route consulting the
- * other one would walk `offer_made` → `signed` past the requirement). It is
- * deliberately NOT exported, so it never reads as a second precondition
- * table; callers import `STATUS_EVIDENCE_REQUIRED` by its real name.
- *
- * `kind` is resolved by the evidence provider. A provider that does not know a
- * kind must answer `{ satisfied: false, reason: 'not_implemented' }` — never
- * `true`, and never by inventing a row.
+ * Preconditions a target state requires from a durable record elsewhere: a
+ * local alias for the one shared table, not exported. A provider that does not
+ * know a kind must answer `{ satisfied: false, reason: 'not_implemented' }`.
  */
 const LIFECYCLE_PRECONDITIONS = STATUS_EVIDENCE_REQUIRED;
 
 /**
- * Semantic actions. Each names one real event and maps to exactly one state.
+ * `roles` uses the room role vocabulary. No action is performable by a player
+ * or guardian: the case moves because their response exists, via a precondition.
  *
- * `roles` lists who may perform it, using the room role vocabulary. There is
- * no action here performable by a player or a guardian: a player responds to
- * their own contact, trial or offer, and the case moves BECAUSE that response
- * exists — through the precondition, never by the player addressing the case.
+ * `applicableFrom` narrows which edges an action may describe. Three actions land
+ * on `under_review`; without it each would be offered from a withdrawn case,
+ * writing a different reason code for the same move into the history.
  *
- * `applicableFrom` narrows WHICH of the transition table's edges an action may
- * traverse. Three actions land on `under_review`; without this they would
- * all be offered from a withdrawn case at once — three names for one move, each
- * writing a different reason code into the history. "Resumed from hold" on a
- * case that was never on hold is a false record, and an analytics consumer
- * counting `case_reopened` would undercount every reopen taken under another
- * name. The transition table is unchanged; only the action that may describe
- * a given edge narrows, so the recorded reason matches the event.
+ * Null prototype so `{ action: "constructor" }` fails the lookup instead of
+ * crashing on `.roles`.
  */
-// NULL PROTOTYPE, deliberately. A plain object literal answers truthy for
-// `constructor`, `toString`, `valueOf`, `hasOwnProperty` and `__proto__`, so a
-// client posting `{ action: "constructor" }` would pass the
-// `!LIFECYCLE_ACTIONS[action]` guard and crash reading `.roles` — a 500 from
-// one word of request body. With no prototype, an undefined key is `undefined`.
 export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null), {
   startReview:        { to: 'under_review',        reason: 'club_decision',              roles: ['contributor', 'room_lead', 'recruitment_admin'], applicableFrom: (f) => !TERMINAL_ROOM_STATUSES.includes(f) && f !== 'on_hold' },
   planContact:        { to: 'contact_planned',     reason: 'contact_planned',            roles: ['room_lead', 'recruitment_admin'] },
@@ -128,12 +79,8 @@ export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null)
   recordOfferDeclined:{ to: 'offer_declined',      reason: 'player_declined',            roles: ['room_lead', 'recruitment_admin'] },
   confirmSignedOutcome:{ to: 'signed',             reason: 'signed_outcome',             roles: ['recruitment_admin'] },
   holdCase:           { to: 'on_hold',             reason: 'on_hold',                    roles: ['room_lead', 'recruitment_admin'] },
-  // A hold is a pause, not a rewind. Resuming returns the
-  // case to the state it was held FROM — a live Offer stays "Offer made", an
-  // accepted Offer stays "Offer accepted" and the signing can continue — when
-  // that state's own evidence still stands. `to` is the fallback (a case with
-  // no hold on its history, or whose held-from evidence is gone) and the
-  // static target the vocabulary and the legacy route's role parity read.
+  // A hold is a pause, not a rewind: resuming returns to the held-from state
+  // when its evidence still stands. `to` is the fallback and the static target.
   resumeCase:         { to: 'under_review',        reason: 'hold_resumed',               roles: ['room_lead', 'recruitment_admin'], applicableFrom: (f) => f === 'on_hold', resolveTo: resumeTargetFor },
   rejectCase:         { to: 'archived',            reason: 'rejected',                   roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
   withdrawCase:       { to: 'withdrawn',           reason: 'withdrawn',                  roles: ['room_lead', 'recruitment_admin'], reasonCodesRequired: true },
@@ -143,11 +90,7 @@ export const LIFECYCLE_ACTIONS = Object.freeze(Object.assign(Object.create(null)
 
 export const LIFECYCLE_ACTION_NAMES = Object.freeze(Object.keys(LIFECYCLE_ACTIONS));
 
-/**
- * The state a held case was held FROM: the newest `on_hold` entry on its
- * append-only history names it. Null when the history carries no hold (a case
- * planted at on_hold).
- */
+/** The state a held case was held from, per the newest `on_hold` history entry; null if none. */
 export function heldFromStatus(kase) {
   const h = Array.isArray(kase?.history) ? kase.history : [];
   for (let i = h.length - 1; i >= 0; i -= 1) {
@@ -160,13 +103,10 @@ export function heldFromStatus(kase) {
 }
 
 /**
- * Where `resumeCase` takes a case: the held-from state when it is a
- * live state whose evidence (if the state needs any) still stands; otherwise
- * the fallback `under_review`. The resume is its own edge — the `on_hold`
- * table row names no evidence-bearing state on purpose, so nothing but a
- * resume takes a paused case forward. Evidence is asked of the ONE provider
- * exactly as a forward move would ask it — nothing here trusts the history's
- * word that the state was earned.
+ * Where `resumeCase` goes: the held-from state if it is live and its evidence
+ * still stands (asked of the provider, not trusted from history); otherwise
+ * `under_review`. The `on_hold` table row names no evidence-bearing state, so
+ * only a resume takes a paused case forward.
  */
 function resumeTargetFor(kase, { evidence = NULL_EVIDENCE_PROVIDER, now = Date.now() } = {}) {
   const fallback = 'under_review';
@@ -180,7 +120,7 @@ function resumeTargetFor(kase, { evidence = NULL_EVIDENCE_PROVIDER, now = Date.n
   return from;
 }
 
-/** The state an action would move THIS case to — static for every action but `resumeCase`. */
+/** The state an action would move this case to: static for every action but `resumeCase`. */
 export function lifecycleTargetFor(kase, action, context = {}) {
   const def = LIFECYCLE_ACTIONS[action];
   if (!def) return null;
@@ -195,23 +135,14 @@ const roleAllows = (role, allowed) => {
   return allowed.some((r) => have >= ROLE_RANK[r]);
 };
 
-/**
- * An evidence provider that knows nothing: the default, and deliberately
- * useless. Every kind answers "not implemented", so a transition that needs
- * durable evidence is REFUSED unless a real provider is supplied. Defaulting
- * to satisfied would let the lifecycle assert things no record supports.
- */
+/** The default provider: every kind is unsatisfied, so evidence-gated moves need a real provider. */
 export const NULL_EVIDENCE_PROVIDER = Object.freeze({
   check: () => ({ satisfied: false, reason: 'not_implemented' }),
 });
 
 /**
- * Derived workflow conditions.
- *
- * These are questions about the case that are ANSWERED BY LOOKING, not stored.
- * `decision_pending` and `trial_in_progress` live here rather than in
- * ROOM_STATUSES because storing a derivation creates a second truth that can
- * disagree with the first.
+ * Conditions answered by looking at the case, not stored, so they cannot
+ * disagree with the status.
  */
 export function derivedConditions(ctx) {
   const { status, hasCurrentDecision = false, activeTrial = false, offerAwaitingResponse = false } = ctx;
@@ -226,9 +157,7 @@ export function derivedConditions(ctx) {
 }
 
 /**
- * THE validator. One function, used by every route, the projector's
- * next-action list, and the test suite — so "what may happen next" has exactly
- * one implementation.
+ * The one validator, used by routes, the projector's next-action list and tests.
  *
  * @returns {{ok: true, to, reason} | {ok: false, error, message, allowed?}}
  */
@@ -238,11 +167,8 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     evidence = NULL_EVIDENCE_PROVIDER,
     reasonCodes = [],
     now = Date.now(),
-    // Availability probe: "could this action be taken, given a reason?" as
-    // opposed to "is this exact request valid?". `availableActions` asks the
-    // first question, because a reason is supplied when the action is
-    // performed, not when it is offered. A flag rather than a fake reason
-    // code, so no placeholder reason can leak into a response body.
+    // "Could this be taken, given a reason?": a reason is supplied when the
+    // action is performed, not when it is offered.
     forAvailability = false,
   } = context;
 
@@ -256,7 +182,6 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
 
   const from = kase.room.status;
   if (!ROOM_STATUSES.includes(from)) {
-    // Corruption, not a workflow decision — say so rather than guessing.
     return { ok: false, error: 'LIFECYCLE_STATE_UNKNOWN', message: 'The recruitment case is in a state this build does not recognise.' };
   }
 
@@ -269,10 +194,8 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
   if (from === to) {
     return { ok: false, error: 'LIFECYCLE_NO_CHANGE', message: 'The case is already in that state.', allowed };
   }
-  // A resolving action (resumeCase) is its own edge: the table keeps the
-  // evidence-bearing states OUT of the `on_hold` row on purpose, so that
-  // nothing but a resume takes a paused case back into one. The target is
-  // still a live, known state and still meets its precondition below.
+    // resumeCase is its own edge: the `on_hold` row omits the evidence-bearing
+    // states it may return to. The target still meets its precondition below.
   const ownEdge = !!def.resolveTo && ROOM_STATUSES.includes(to) && !TERMINAL_ROOM_STATUSES.includes(to);
   if (!allowed.includes(to) && !ownEdge) {
     return {
@@ -283,10 +206,8 @@ export function canTransitionRecruitmentCase(kase, action, context = {}) {
     };
   }
 
-  // The edge exists, but this action is not the one that describes it. Three
-  // actions reach `under_review`; only one of them is truthful from any given
-  // state, and the untruthful ones would write the wrong reason code into a
-  // history that nothing ever rewrites.
+  // The edge exists, but this action does not describe it; the wrong reason
+  // code would be written into an append-only history.
   if (def.applicableFrom && !def.applicableFrom(from)) {
     return {
       ok: false,
@@ -324,27 +245,15 @@ export function availableActions(kase, context = {}) {
   );
 }
 
-/** Validate a lifecycle reason code. */
 export const isLifecycleReason = (code) => REASON_SET.has(code);
 
 /** At most this many reasons on one transition — the same ceiling decisions use. */
 const MAX_LIFECYCLE_REASONS = 6;
 
 /**
- * Validate the reason codes on a lifecycle transition.
- *
- * WHY THIS EXISTS RATHER THAN REUSING THE DECISION VALIDATOR
- *
- * There are two reason taxonomies and they describe different things. The 20
- * decision codes say why a club DECIDED something — an opinion about a player.
- * `LIFECYCLE_REASON_CODES` say why a case MOVED — an event in a process. The
- * two sets do not overlap by a single code, and recording a judgement about
- * the player as the reason a case closed would be a category error written
- * into an append-only history.
- *
- * The PROHIBITED set is shared deliberately and keeps the rooms error code. A
- * protected characteristic can never be recorded as a reason for anything, and
- * that rule must not have two implementations that can drift.
+ * Lifecycle reasons say why a case moved; decision codes say what a club
+ * concluded about a player. The sets do not overlap. The prohibited set is
+ * shared with decisions, and keeps the rooms error code.
  */
 export function validateLifecycleReasons(codes) {
   if (!Array.isArray(codes)) {
@@ -380,24 +289,16 @@ export function validateLifecycleReasons(codes) {
 }
 
 /**
- * May this role perform this action AT ALL, ignoring where the case is?
- *
- * Exported for one caller: the idempotent-replay path, which answers before
- * the case is re-validated (the case has already moved, so full validation
- * would refuse the replay of a transition that genuinely happened). A replay
- * is still an action, and someone who could never have performed it must not
- * be told it succeeded.
+ * May this role perform this action at all, wherever the case is? Used by the
+ * idempotent-replay path: the case has already moved, so full validation would
+ * refuse a genuine replay, but someone who could never act must not be told it succeeded.
  */
 export function actionPermittedForRole(action, role) {
   const def = LIFECYCLE_ACTIONS[action];
   return !!def && roleAllows(role, def.roles);
 }
 
-/**
- * The funnel's view of a status. Analytics counts `room_status_changed`
- * entries in `room.history`; `on_hold` and `offer_declined` are real states
- * but deliberately not progress.
- */
+/** The funnel's view of a status: `on_hold` and `offer_declined` are real states but not progress. */
 export function toAnalyticsRecruitmentStage(status) {
   if (status === 'on_hold' || status === 'offer_declined') return null; // real, but not progress
   return ROOM_STATUSES.includes(status) ? status : null;

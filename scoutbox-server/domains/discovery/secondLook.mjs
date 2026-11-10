@@ -1,17 +1,5 @@
-// Second Look: change collection, workflow state and the org routes.
-//
-// The engine in shared.mjs decides WHAT counts as a material change and
-// whether it relates to the reason a club gave. This file's only jobs are to
-// gather the raw facts from canonical stores the workflow state a
-// recruiter creates, and serve it back — organisation-private, on the existing
-// authenticated router, never to a player.
-//
-// Two rules govern everything here:
-//   1. Second Look owns no player truth. It reads canonical stores and stores
-//      only workflow: which item a recruiter reviewed, dismissed or acted on.
-//   2. Second Look never mutates the recruitment pipeline. Reopening a room
-//      goes through the rooms' own reopen path, so there is exactly one
-//      transition table, one decision memory and one activity trail.
+// Second Look owns no player truth: it reads the source stores and stores only workflow (which item a recruiter
+// reviewed, dismissed or acted on). Reopening a room goes through the rooms' own reopen path.
 import { PROVIDERS } from '../development/boxcam/drills.mjs';
 import {
   SECOND_LOOK_POLICY_VERSION, SECOND_LOOK_STATUSES, canSecondLookTransition,
@@ -34,17 +22,10 @@ export function registerSecondLook(ctx) {
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerSecondLook needs recruitmentReads (signings) from the data layer');
 
-  // The shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = limitCheck(ctx.rateLimit);
 
   // ------------------------------------------------------ change collection
 
-  /**
-   * Gather every canonical fact about this player that changed after `since`,
-   * and normalise it. Nothing here copies a source payload — only the change
-   * type, the canonical source identity and the clock travel, which is what
-   * makes the fingerprint stable across projections.
-   */
   function collectChanges(player, org, since) {
     const out = [];
     const add = (type, sourceSystem, sourceId, occurredAt, detail) =>
@@ -55,9 +36,8 @@ export function registerSecondLook(ctx) {
       if (e.recordedAt > since && !e.correctionOf) {
         add(e.claimType === 'footage' ? 'full_match_added' : 'evidence_added', 'evidence', e.id, e.recordedAt);
       }
-      // A tier upgrade is a real strengthening of the record — but ONLY when it
-      // happened after the record was created. Evidence written with a tier at
-      // creation time is a new item, not a later confirmation of an old one.
+      // A tier upgrade counts only when it happened after the record was created; evidence written with a tier is
+      // a new item, not a later confirmation.
       const reviewedAt = e.verification?.reviewedAt ?? 0;
       if (reviewedAt > since && reviewedAt > (e.recordedAt ?? 0)
         && ['coach_confirmed', 'club_assessed', 'independent'].includes(e.verification?.status)) {
@@ -80,9 +60,7 @@ export function registerSecondLook(ctx) {
     }
 
     // --- Combine -----------------------------------------------------------
-    // PRODUCTION ONLY. A result captured through a test-only provider is
-    // labelled simulated everywhere else in the product and must never become
-    // production recruitment evidence here either.
+    // A result from a test-only provider is labelled simulated elsewhere and is not recruitment evidence.
     const boxReads = ctx.boxCamReads;
     const playerAttempts = [...boxReads.attempts.forPlayer(player.id)].reverse();
     const playerSessions = boxReads.sessions.forPlayer(player.id);
@@ -97,8 +75,7 @@ export function registerSecondLook(ctx) {
     }
 
     // --- Box Cam -----------------------------------------------------------
-    // Never one change per session: that is notification spam, not news. Only
-    // the FIRST development evidence since the review, or a completed
+    // Not one change per session: only the first development evidence since the review, or a completed
     // coach-assigned block, is material.
     const sessions = playerSessions
       .filter((s) => ['verified', 'partially_verified'].includes(s.verificationState) && s.finalizedAt);
@@ -126,15 +103,10 @@ export function registerSecondLook(ctx) {
     }
 
     // --- Combine integrity -------------------------------------------------
-    // The Box Cam session keeps an append-only integrity history, so an
-    // invalidation is a first-class change, fingerprinted on the SESSION: one
-    // invalidation stays one change however many projections (Combine,
-    // Passport timeline, Trust) reflect it.
+    // Fingerprinted on the session, so one invalidation stays one change however many projections reflect it.
     for (const session of playerSessions) {
       const events = session.integrityEvents ?? [];
       if (!events.length) continue;
-      // Only sessions that actually backed a production Combine result matter
-      // to a recruitment decision.
       const backed = playerAttempts.some((a) => a.boxSessionId === session.id
         && a.combineState === 'combine_verified' && !PROVIDERS[a.provider]?.testOnly);
       if (!backed) continue;
@@ -145,19 +117,16 @@ export function registerSecondLook(ctx) {
       }
     }
 
-    // --- canonical source changes with their own clocks --------------------
-    // Position changes and confirmed current clubs read a real clock or do
-    // not fire at all: no other timestamp means the same thing.
+    // --- source changes with their own clocks -------------------------------
+    // These read the clock of the change itself or do not fire: no other timestamp means the same thing.
     for (const c of ctx.sourceChangesFor?.(player.id) ?? []) {
       if (!(c.occurredAt > since)) continue;
       if (c.type === 'position_changed') add('position_changed', c.sourceSystem, c.sourceId, c.occurredAt, c.detail);
     }
-    // A confirmed current club: each of these rows carries the clock of the
-    // moment the confirmation happened, so no timestamp is invented.
     for (const sg of reads.signings.forPlayer(player.id)) {
       if (!sg.endedAt && sg.ts > since) add('current_club_confirmed', 'signing', sg.id, sg.ts);
     }
-    // The player's squad rows in one indexed query (a club's shadow list confirms no club).
+    // A club's shadow list confirms no club.
     for (const row of ctx.scoutingReads.squad.forPlayer(player.id)) {
       const o = ctx.byId.org(row.orgId);
       if (o?.verified && row.addedAt > since) add('current_club_confirmed', 'squad_row', `${o.id}:${row.playerId}`, row.addedAt);
@@ -165,7 +134,7 @@ export function registerSecondLook(ctx) {
     return changesSinceDecision(out.filter(Boolean), since);
   }
 
-  /** The head of the decision chain — exact, unlike last-by-timestamp. */
+  /** The head of the decision chain, which last-by-timestamp would not reliably find. */
   const latestDecision = (roomId) => reads.decisions.forRoom(roomId)
     .find((d) => d.supersededById == null) ?? null;
 
@@ -176,7 +145,6 @@ export function registerSecondLook(ctx) {
     return decision?.snapshot ?? null;
   };
 
-  /** Current canonical facts, for the snapshot comparison. */
   function currentFacts(player, org) {
     const evidenceIds = ctx.scoutingReads.evidence.currentForPlayer(player.id).map((e) => e.id);
     const assessmentIds = ctx.scoutingReads.assessments.forOrgPlayer(org.id, player.id).filter((a) => a.state !== 'draft').map((a) => a.id);
@@ -194,22 +162,14 @@ export function registerSecondLook(ctx) {
 
   // ------------------------------------------------------------- projection
 
-  /**
-   * Scan this organisation's ended rooms and project current Second Look
-   * candidates. Derived live: nothing is cached, so a block, a suspension or a
-   * removal takes effect on the very next read.
-   */
+  /** Derived live, so a block, suspension or removal takes effect on the next read. */
   function projectCandidates(req, { playerId = null } = {}) {
     const org = req.org;
     const rooms = reads.cases.forOrg(org.id).filter((c) => c.room
       && ['archived', 'closed', 'withdrawn'].includes(c.room.status)
       && (!playerId || c.playerId === playerId));
-    // A club may have opened, archived and later opened a SECOND room for the
-    // same player. "Since we last decided" has exactly one answer, so only the
-    // most recent ended room per player projects a candidate — otherwise one
-    // new full match raises one alert per historical room. Ties on the
-    // decision clock (same-millisecond writes) fall back to the decision id so
-    // the choice is stable across reads.
+    // Only the most recent ended room per player projects a candidate, or one new full match would raise an alert
+    // per historical room. Same-millisecond ties fall back to the decision id so the choice is stable.
     const newest = new Map();
     for (const room of rooms) {
       const decision = latestDecision(room.id);
@@ -224,7 +184,7 @@ export function registerSecondLook(ctx) {
     const out = [];
     for (const { room, decision } of newest.values()) {
       const player = findPlayer(room.playerId);
-      // Gates run BEFORE anything is computed about the player.
+      // Gates run before anything is computed about the player.
       const visible = !!player && orgCanSee(org, player);
       if (!visible) continue;
       const changes = collectChanges(player, org, decision.createdAt);
@@ -243,23 +203,13 @@ export function registerSecondLook(ctx) {
 
   // ---------------------------------------------------------- persistence
 
-  /**
-   * An item belongs to ONE decision cycle. A club that reopens a room, reviews
-   * again and archives again has made a NEW decision — so the next material
-   * change surfaces a fresh item against that newest cycle, rather than
-   * colliding with the terminal item from the previous one.
-   */
+  // An item belongs to one decision cycle: re-archiving a reopened room is a new decision, so the next change
+  // surfaces a fresh item rather than colliding with the previous cycle's terminal one.
   const itemFor = (orgId, roomId, decisionId) => dreads.secondLook.byKey(orgId, roomId, decisionId);
 
   /**
-   * Reconcile persisted workflow state with what the world now looks like.
-   * The cooldown is per change-fingerprint, so the SAME evidence can never
-   * regenerate a handled item no matter how many projections it appears in —
-   * and genuinely new evidence can, immediately.
-   *
-   * Derived when the queue is read (there is no scheduler), and recorded as explicit upserts: every item this read
-   * creates, resurfaces, updates or expires, with the owner's notification, commits in one unit. A read that finds
-   * nothing new writes nothing.
+   * Reconciles stored workflow state with current facts when the queue is read (there is no scheduler). Everything
+   * one read creates, resurfaces, updates or expires commits in one unit; a read that finds nothing new writes nothing.
    */
   function reconcile(req, { playerId = null } = {}) {
     const org = req.org;
@@ -269,8 +219,7 @@ export function registerSecondLook(ctx) {
       for (const { candidate, room } of projected) {
         const existing = itemFor(org.id, room.id, candidate.decisionId);
         const verdict = secondLookStatus({ existing, candidate });
-        // A handled item still exists: it belongs in the Reviewed and Dismissed
-        // tabs. Suppression means "do not resurface as open", not "forget".
+        // Suppression means "do not resurface as open", not "forget": the item stays in the Reviewed/Dismissed tabs.
         if (verdict.action === 'suppress') { if (existing) live.push({ item: existing, candidate }); continue; }
         const at = now();
         if (verdict.action === 'create') {
@@ -288,11 +237,8 @@ export function registerSecondLook(ctx) {
             history: [{ at, action: 'surfaced', by: null }],
           });
           vmetric('second_look_created');
-          // Internal only — an org_user audience, never the player or guardian.
-          // The player is named: this notification goes to the scout who owned
-          // the Room, visibility was already established above, and "a player you
-          // previously archived" would give the recipient nothing to act on
-          // when they have archived dozens.
+          // Names the player: it goes only to the scout who owned the Room, visibility is established above, and
+          // "a player you archived" is useless to someone who has archived dozens.
           const owner = room.ownerUserId ? ctx.byId.user(room.ownerUserId) : null;
           if (owner && owner.orgId === org.id && !owner.removedAt) {
             notify({ kind: 'org_user', id: owner.id }, 'second_look',
@@ -329,7 +275,6 @@ export function registerSecondLook(ctx) {
     });
   }
 
-  /** The stored item as the review, dismiss and reopen routes answer it: its own fields, listed, and no org id. */
   const storedView = (i) => ({
     id: i.id, playerId: i.playerId, roomId: i.roomId, decisionId: i.decisionId, policyVersion: i.policyVersion,
     triggerType: i.triggerType, changeFingerprints: i.changeFingerprints, directReasonCodes: i.directReasonCodes,
@@ -338,7 +283,6 @@ export function registerSecondLook(ctx) {
     reopenedAt: i.reopenedAt, reopenedBy: i.reopenedBy, history: i.history,
   });
 
-  /** Wire shape. Carries facts the club could already read, and no org id. */
   const itemView = ({ item, candidate }) => safeM18Projection({
     id: item.id,
     orgId: item.orgId,
@@ -354,8 +298,6 @@ export function registerSecondLook(ctx) {
     archivedStatus: candidate.archivedStatus,
     archiveReasonCodes: candidate.archiveReasonCodes,
     directReasonCodes: candidate.directReasonCodes,
-    // Reasons the club gave that player evidence can never resolve, reported
-    // so no surface can imply otherwise.
     unresolvedReasonCodes: candidate.unresolvedReasonCodes,
     decisionAt: candidate.decisionAt,
     changes: candidate.changes.map((c) => ({
@@ -412,7 +354,6 @@ export function registerSecondLook(ctx) {
 
   function findItem(req, res) {
     const item = dreads.secondLook.forOrgById(String(req.params.id), req.org.id);
-    // A foreign item is indistinguishable from one that never existed.
     if (!item) { res.status(404).json({ error: 'SECOND_LOOK_NOT_FOUND' }); return null; }
     return item;
   }
@@ -424,8 +365,7 @@ export function registerSecondLook(ctx) {
     const current = live?.item ?? item;
     const room = reads.cases.byId(item.roomId);
     const player = findPlayer(item.playerId);
-    // The player may have become invisible since the item was created. The
-    // internal workflow record survives; the player projection does not.
+    // The player may have become invisible since: the workflow record survives, the player projection does not.
     if (!player || !orgCanSee(req.org, player)) {
       return res.json({
         item: { ...storedView(current), playerName: null, playerAvailable: false },
@@ -441,7 +381,6 @@ export function registerSecondLook(ctx) {
     res.json({ item: itemView({ item: current, candidate: { ...live.candidate, playerName: room?.playerName ?? null } }) });
   });
 
-  /** The focused before/now comparison — relevant rows only, never a Passport dump. */
   orgRouter.get('/second-look/:id/changes', (req, res) => {
     const item = findItem(req, res);
     if (!item) return;
@@ -461,7 +400,6 @@ export function registerSecondLook(ctx) {
         reasonCodes: decision?.reasonCodes ?? [],
         recommendation: decision?.recommendation ?? null,
         trust: snapshot?.trust ? { score: snapshot.trust.score, band: snapshot.trust.band, policyVersion: snapshot.trust.policyVersion } : null,
-        // Never fabricate a previous value we did not record.
         note: snapshot ? null : 'Previous detail unavailable — no decision-time snapshot was recorded.',
       },
       current: { trust: safe, playerName: room?.playerName ?? null },
@@ -514,16 +452,10 @@ export function registerSecondLook(ctx) {
       d.history.push({ at, action: 'dismissed', by, reason });
     });
     vmetric('second_look_dismissed');
-    // Dismissal changes nothing about the player's record — it is a private
-    // note about this organisation's own queue.
     res.json({ item: storedView(stored), note: 'Dismissed for your organisation only. Nothing about the player’s record changes.' });
   });
 
-  /**
-   * Reopen the linked room. This is the ONLY way a Second Look reaches the
-   * pipeline, it requires an explicit recruiter action, and it runs through
-   * the rooms' own reopen path rather than touching the case here.
-   */
+  /** The only way a Second Look reaches the pipeline, through the rooms' own reopen path. */
   orgRouter.post('/second-look/:id/reopen-room', (req, res) => {
     const item = findItem(req, res);
     if (!item) return;
@@ -535,7 +467,6 @@ export function registerSecondLook(ctx) {
     if (!player || !orgCanSee(req.org, player)) return res.status(403).json({ error: 'NOT_VISIBLE' });
     if (!ctx.reopenRoom) return res.status(503).json({ error: 'ROOM_ENGINE_UNAVAILABLE' });
 
-    // One unit: the Room reopens and the item records it, or neither happens.
     const { out, stored } = unit(() => {
       const reopened = ctx.reopenRoom({
         req, room, to: 'under_review',

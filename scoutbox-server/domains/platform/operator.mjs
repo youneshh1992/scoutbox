@@ -1,6 +1,4 @@
-// The operator surface: health, the public catalogue meta, and what this deployment can and cannot actually do.
-// ScoutBox is careful to be honest about missing capability inside the product; /capabilities is the same honesty
-// pointed at whoever runs it. States and counts only: no keys, hosts, connection strings or subjects.
+// Health, meta and /capabilities. States and counts only: no keys, hosts, connection strings or subjects.
 import { PLANS } from '../../catalogue.mjs';
 import { buildCapabilityReport, productionConfigProblems } from './capabilities.mjs';
 import { integritySummary } from './integrity.mjs';
@@ -59,7 +57,7 @@ export function registerCapabilities({ app, rateLimit, providerStatus, trustProx
   });
 }
 
-/** Refuse configuration that would be unsafe in production; development only logs it. */
+/** Development only logs the problems. */
 export function assertProductionConfig({ trustWeightsTotal }) {
   const problems = productionConfigProblems({ trustWeightsTotal: trustWeightsTotal ?? null });
   for (const p of problems) console.error(`CONFIG ${p.code}: ${p.message}`);

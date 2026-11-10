@@ -1,6 +1,6 @@
-// A club's own verification submissions: proving control of a company mailbox, and the federation route for
-// grassroots clubs that run on free e-mail (Trust & Safety checks the registration). Either is one of the
-// safeguarding requirements before a club can see under-18 players; the decision itself is Trust & Safety's.
+// A club's own verification submissions: company-mailbox control, or the federation route for grassroots clubs on
+// free e-mail. Either is one of the safeguarding requirements before a club can see under-18 players; the decision
+// is Trust & Safety's.
 import { reqText } from '../platform/input.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { CLUB_SETUP_LIMITS } from '../../repositories/clubSetup.mjs';
@@ -22,11 +22,9 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
         message: 'Free email providers don\'t prove domain control. No club domain? Use federation verification instead — your federation registration is checked by Trust & Safety.',
       });
     }
-    // Every request sends a mail, so requests are bounded per organisation.
     if (rateLimit.limited('email_challenge_request', req.org.id)) return res.status(429).json(rateLimitedBody('email_challenge_request'));
-    // The challenge row (a hash; 30 minutes; one live challenge per organisation, the previous one replaced) is
-    // durable BEFORE the mail is sent. The plain code exists in the issue result and the mail only: `secrets` keeps
-    // it out of the persisted outbox record. A mail that fails to send leaves the row to expire or be replaced.
+    // The challenge row is durable before the mail is sent; `secrets` keeps the plain code out of the persisted
+    // outbox record. A mail that fails to send leaves the row to expire or be replaced.
     const { code } = codes.issueEmailChallenge(req.org.id, email);
     await mailer.send({
       to: email,
@@ -39,9 +37,8 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
 
   orgRouter.post('/verification/email/confirm', (req, res) => {
     const { code } = req.body || {};
-    // A wrong code is charged against the organisation's confirm budget (a correct one costs nothing) and counted on
-    // the challenge, which is cancelled after too many. The budget is tested before the code is judged, so a correct
-    // guess after it is gone is refused rather than rewarded: exactly `max` wrong codes are judged.
+    // Only a wrong code is charged against the budget. The budget is tested before the code is judged, so a correct
+    // guess after it is gone is refused rather than rewarded.
     if (rateLimit.peek('email_challenge_confirm', req.org.id).remaining === 0) return res.status(429).json(rateLimitedBody('email_challenge_confirm'));
     const check = codes.checkEmailChallenge(req.org.id, code);
     if (check.status === 'none') {
@@ -57,8 +54,7 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
         attemptsRemaining,
       });
     }
-    // The challenge is consumed and the domain verified in one unit: a failure anywhere, the COMMIT included, keeps
-    // the challenge live and the organisation unverified, and the retry lands both.
+    // A failure anywhere, the COMMIT included, keeps the challenge live so the retry lands both.
     const updated = unit(() => {
       const consumed = codes.consumeEmailChallenge(req.org.id, code);
       if (!consumed) throw new Error('email challenge: the challenge changed between the check and the confirmation');
@@ -69,7 +65,7 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
     res.json({ emailDomainVerified: true, emailDomain: updated.emailDomain });
   });
 
-  // One request per club, replaced on resubmission.
+  // Replaced on resubmission.
   orgRouter.post('/verification/federation', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
     const { federation, registrationId, contactEmail } = req.body || {};

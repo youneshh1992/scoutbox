@@ -1,5 +1,4 @@
-// The in-app notification feed: audience = { kind: 'player' | 'guardian' | 'org_user', id }. The feed always keeps
-// the record; quiet hours and the minors' school-hours mute only hold back the push (`deferredPush`).
+// The feed always keeps the record; quiet hours and the minors' school-hours mute only hold back the push.
 import { NOTIFICATION_LIMITS, feedItem } from '../../repositories/notifications.mjs';
 import { validateIanaZone, localParts } from '../../temporal.mjs';
 import { isAdult } from '../../domain.mjs';
@@ -10,9 +9,8 @@ import { minimizePayload } from '../platform/eventRegistry.mjs';
 const PLATFORM_HOME_ZONE = 'Europe/London';
 
 /**
- * `notify(audience, type, text, refId, { actionRequired })` creates (or coalesces) one row, inside the caller's unit
- * when one is open; the push and the live `notify` event wait for its commit. `feedFor(kind, id, targetFor)` is the
- * feed, each row decorated at read time with the current resource its refId points to, when a resolver is given.
+ * `notify` writes inside the caller's unit when one is open; the push and the live event wait for its commit. The
+ * feed decorates each row at read time with the current resource its refId points to.
  */
 export function createNotifier({ notifications, prefs, store, pushSender, byId, publishEvent, eventPayloadDrops }) {
   if (typeof prefs?.allows !== 'function') throw new TypeError('createNotifier needs the preference gate (createNotificationPrefs)');
@@ -46,7 +44,7 @@ export function createNotifier({ notifications, prefs, store, pushSender, byId, 
   }
 
   function notify(audience, type, text, refId = null, { actionRequired = null } = {}) {
-    // A category the person turned off is never created (the mandatory security category cannot be turned off).
+    // The mandatory security category cannot be turned off.
     if (!prefs.allows(audience, type, text)) {
       suppressed += 1;
       return null;
@@ -85,7 +83,6 @@ export function createNotifier({ notifications, prefs, store, pushSender, byId, 
   return { notify, feedFor, suppressedCount: () => suppressed };
 }
 
-/** `GET /notifications` and `POST /notifications/read` for club staff, players and guardians. */
 export function registerNotificationFeed({ orgRouter, playerRouter, guardianRouter, notifications, notifier, notificationTargetFor }) {
   if (typeof notificationTargetFor !== 'function') throw new TypeError('registerNotificationFeed needs the journeys\' notificationTargetFor');
   const feed = (kind, id) => notifier.feedFor(kind, id, notificationTargetFor);
@@ -100,14 +97,9 @@ export function registerNotificationFeed({ orgRouter, playerRouter, guardianRout
 }
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-/** A quiet-hours bound: null when cleared, undefined when not HH:MM. */
 const quietBound = (v) => (v == null || v === '' ? null : typeof v === 'string' && HHMM.test(v) ? v : undefined);
 
-/**
- * How pushes reach the Player app's people: the quiet hours and the minors' school-hours mute (`/prefs` for players
- * and guardians; the in-app feed always keeps the record), and the device-token registration. A device token another
- * account registered moves to this one, so a shared phone receives only the notices of whoever signed in last.
- */
+/** A device token another account registered moves to this one, so a shared phone gets only the latest sign-in's notices. */
 export function registerDeliverySettings({ app, playerRouter, guardianRouter, players, guardians, pushTokens, sessionFor }) {
   if (typeof players?.setNotificationPrefs !== 'function' || typeof guardians?.setNotificationPrefs !== 'function') throw new TypeError('registerDeliverySettings needs the players and guardians repositories');
   const note = 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.';
@@ -118,7 +110,6 @@ export function registerDeliverySettings({ app, playerRouter, guardianRouter, pl
     if (qs === undefined || qe === undefined) return res.status(400).json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
     if (timezone != null && timezone !== '' && !validateIanaZone(timezone).ok) return res.status(400).json({ error: 'TIMEZONE_INVALID', message: 'timezone must be an IANA time zone name, for example Europe/London.' });
     if (schoolHoursMute != null && typeof schoolHoursMute !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'schoolHoursMute', message: 'schoolHoursMute must be true or false.' });
-    // An absent field keeps what is stored.
     const was = person.notificationPrefs ?? {};
     const prefs = {
       quietStart: quietStart === undefined ? was.quietStart ?? null : qs,

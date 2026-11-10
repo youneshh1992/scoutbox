@@ -1,41 +1,8 @@
 /**
- * ScoutBox Agent Transaction Workspace: routes.
+ * Agent transaction workspace routes: the agent, club-party, player-party and Trust & Safety lanes.
  *
- * The canonical multi-party workspace connecting Player ↔ Agent ↔ Engaging
- * Club ↔ Releasing Club. Four lanes, mounted on the canonical routers so the
- * existing session, org and player gates run before anything here:
- *
- *   /org/agent/transactions/*   the representing agent's workspace (agency
- *                               session + membership + licensed_agent)
- *   /org/transactions/*         a CLUB party's lane (club session; binding
- *                               acts need the recorded signatory)
- *   /player/transactions/*      the individual party's lane
- *   /ts/transactions/*          attributed Trust & Safety: states and ids,
- *                               no document content, no notes, no messages
- *
- * Every material mutation re-derives, at mutation time, in this order (the
- * "Step N" comments below count along it): authenticate → actor → transaction → conceal foreign → party role →
- * capability → representation authority → blocks/safeguarding → jurisdiction
- * policy → licence facets → conflict → consent → minor gate → manual review →
- * status transition → rev/idempotency → mutate → audit/event. Nothing in a
- * request body is trusted for any of those facts.
- *
- * Every write route is one unit of work (its compliance evaluation, review item, handoff binding, notifications
- * and events included): a refusal after a write that must not stand rolls the
- * whole unit back; a refusal that records a compliance answer commits it.
- *
- * THE FOUR SEPARATIONS, encoded rather than asserted:
- *
- *   transaction ≠ recruitment case  the recruitment case store is not imported,
- *                                   read or written anywhere in this file.
- *   transaction ≠ offer             no offer record, no offer state; only
- *                                   `offerReadiness()` — a boolean and its
- *                                   blockers.
- *   transaction ≠ signing           the signing store is not imported, read or
- *                                   written; no player contract state moves.
- *   compliance ≠ transaction        the verdict comes from the compliance engine
- *                                   through one narrow seam; this module owns
- *                                   no rule, no policy and no consent row.
+ * Every write route is one unit of work: a refusal after a write that must not stand rolls the whole unit back; a
+ * refusal that records a compliance answer commits it.
  */
 
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
@@ -71,8 +38,7 @@ export function registerTransactions(rawCtx) {
   const {
     byId, orgRouter, playerRouter, tsRouter, nextId, notify, broadcast,
     findPlayer, isBlocked, isAdult, orgCanSee, rateLimit, access, compliance,
-    // The cross-app integration seam: the recruitment-case handoff binding and the duplicate rule. Absent, a
-    // transaction may not cite a recruitment case at all.
+    // Absent, a transaction may not cite a recruitment case at all.
     integration = null,
     recruitmentReads,
     scoutingReads,
@@ -81,11 +47,9 @@ export function registerTransactions(rawCtx) {
   } = rawCtx;
   if (typeof agentTransactions?.transactions?.recordAct !== 'function' || typeof unit !== 'function') throw new TypeError('registerTransactions needs the agent transactions repository and unit from the data layer');
   if (typeof compliance?.onRepresentationReviewed !== 'function') throw new TypeError('registerTransactions needs the compliance engine\'s transaction seam (ctx.compliance)');
-  // A T&S decision on a declared binding lands on the transaction's own representation row.
   compliance.onRepresentationReviewed(representationReviewed);
   const { transactions: txs, representations: repsRepo, documents: docsRepo } = agentTransactions;
 
-  /** A history entry, for an act's bookkeeping or a whole record's history. */
   const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
   const byAgent = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const byClubUser = (req) => ({ kind: 'club_user', userId: req.orgUser.id, name: req.orgUser.name, orgId: req.org.id });
@@ -97,19 +61,12 @@ export function registerTransactions(rawCtx) {
     if (!k.ok) { sendTransactionError(res, { error: 'TRANSACTION_CLIENT_KEY_INVALID', message: k.message }, 'clientKey'); return undefined; }
     return k.key;
   };
-  /**
-   * A text field of the request: trimmed and cut to `max` (over-long free text may still be shortened); '' when absent;
-   * `undefined` when it is not text at all — junk the route refuses, naming the field, rather than coercing.
-   */
+  /** Trimmed and cut to `max`; '' when absent; `undefined` (refused by the route) when not text. */
   const text = (v, max) => (v === undefined || v === null ? '' : typeof v === 'string' ? v.trim().slice(0, max) : undefined);
-  /** An id field: '' when absent; `undefined` (refused, naming the field) when not text or longer than any id. Never cut. */
+  /** '' when absent; `undefined` (refused) when not text or longer than any id. Never cut. */
   const idText = (v) => { const t = v === undefined || v === null ? '' : typeof v === 'string' ? v.trim() : undefined; return t !== undefined && t.length > ID_MAX ? undefined : t; };
-  /** Answer `out` and roll the unit back. */
   const refuse = (res, out, where) => { sendTransactionError(res, out, where); throw ROLLBACK; };
-  /**
-   * Run a route's writes as ONE unit of work. `work` returns the function that answers once the unit committed; a
-   * refusal that must leave nothing behind answers and throws ROLLBACK (`refuse`).
-   */
+  /** `work` returns the function that answers once the unit has committed. */
   const inUnit = (work) => {
     let reply;
     try { reply = unit(work); } catch (e) { if (e === ROLLBACK) return; throw e; }
@@ -117,22 +74,13 @@ export function registerTransactions(rawCtx) {
   };
 
   /**
-   * Record an accepted mutation with a ROLE rather than a person.
-   *
-   * `rev` is a token every party to the transaction sees, and the canonical
-   * `revBy` carries the display name of whoever moved it — which is right inside
-   * one organisation and wrong here: it would tell the individual which named
-   * person at the club had last touched the record, and a club which named
-   * person at the agency had. The audit keeps the real actor in
-   * `history[].by`; the shared token carries the role, and the 409 conflict body
-   * then says "Club signatory changed this" rather than naming someone.
+   * The rev is labelled with a role, not a person: every party sees it, and a person's name would tell the individual
+   * who at the club last touched the record (and a club who at the agency). The audit keeps the real actor.
    */
   const roleRev = (by) => ({ at: now(), label: actorLabel(by)?.label ?? null });
-  /** An act's bookkeeping on the transaction: its entries, and with `touch` the change instant. */
   const txBook = (by, history = [], { touch = false } = {}) => ({ at: now(), touch, history });
-  /** The route's one rev bump, labelled with the role, after its acts. */
   const bumpTx = (txId, by) => txs.recordAct(txId, { bump: roleRev(by) });
-  /** On a binding or a document: its entries and a rev bump labelled with the role (or with `revBy`, a person). */
+  /** On a binding or a document: labelled with the role, or with `revBy` (a person) when given. */
   const rowBook = (by, history = [], revBy = null) => ({ history, bump: { at: now(), by: revBy ?? { userId: null, name: roleRev(by).label } } });
 
   const txById = (id) => (typeof id === 'string' ? txs.byId(id) : null);
@@ -143,14 +91,11 @@ export function registerTransactions(rawCtx) {
 
   // ============================================================ compliance integration
 
-  /** The snapshot as every reader sees it: the stored columns, with the outcome, reasons and versions of its evaluation row. */
   const complianceOf = (tx) => snapshotView(tx, tx.compliance, tx.compliance?.evaluationId ? compliance.evaluationById(tx.compliance.evaluationId) : null);
 
   /**
-   * The party/authority revision: the hash every staleness verdict is measured
-   * against. Recomputed from LIVE records on every read and every write, never
-   * cached, because a cached revision is exactly the stale fact it exists to
-   * detect. `reps` may be handed over by a list that read them in one batch.
+   * The hash staleness is measured against. Recomputed from live records, never cached: a cached revision is exactly
+   * the stale fact it exists to detect.
    */
   function currentPartyRevision(tx, { reps = null } = {}) {
     const consents = compliance.consentsFor(tx.contextId);
@@ -173,11 +118,8 @@ export function registerTransactions(rawCtx) {
   }
 
   /**
-   * The safeguarding gate. A block ends the question before any rule is
-   * consulted: it is checked BEFORE relationship scope and before the engine,
-   * and its refusal is the uniform concealment answer, so "blocked" is never
-   * distinguishable from "does not exist". A regulatory CLEAR never overrides
-   * it, which is why it lives here and not inside the conflict engine.
+   * Checked before relationship scope and the engine, and refused with the uniform concealment answer so "blocked"
+   * reads as "does not exist". It lives here, not in the conflict engine, so a regulatory clear cannot override it.
    */
   function safeguardingProblem(tx) {
     for (const p of partiesOf(tx)) {
@@ -185,8 +127,7 @@ export function registerTransactions(rawCtx) {
       const pl = findPlayer(p.subjectId);
       if (!pl) return 'SUBJECT_GONE';
       if (isBlocked(pl.id, tx.agencyOrgId)) return 'BLOCKED';
-      // Minors fail closed: no minor transaction pathway is production-enabled
-      // in any jurisdiction (MINOR_PATHWAY_PRODUCTION_ENABLED).
+      // No minor transaction pathway is enabled in any jurisdiction (MINOR_PATHWAY_PRODUCTION_ENABLED).
       if (!isAdult(pl)) return 'MINOR';
       const org = orgById(tx.agencyOrgId);
       if (!org || !orgCanSee(org, pl)) return 'NOT_VISIBLE';
@@ -194,12 +135,7 @@ export function registerTransactions(rawCtx) {
     return null;
   }
 
-  /**
-   * Re-evaluate compliance NOW over the transaction's stored rows and record the snapshot (inside the route's unit).
-   * Called on every material mutation, after the mutation's own act, and never trusted from a previous request: this is
-   * what makes "an old evaluation authorises a new mutation" impossible rather than guarded against. Returns the verdict
-   * and the stored transaction.
-   */
+  /** Called after every material mutation's own act, so an old evaluation can never authorise a new mutation. */
   function recheckCompliance(txId, by) {
     const tx = txById(txId);
     const ctx = compliance.contextById(tx.contextId);
@@ -207,9 +143,7 @@ export function registerTransactions(rawCtx) {
     const confirmed = partiesConfirmed(tx);
     const guard = safeguardingProblem(tx);
     if (guard) {
-      // Safeguarding is not a compliance verdict and must not be reported as
-      // one: the transaction stops, the snapshot is not refreshed, and the
-      // caller's refusal is the uniform 404.
+      // Not a compliance verdict: the snapshot is not refreshed, and the caller answers the uniform 404.
       return { safeguarding: guard, state: null, result: null, tx };
     }
     const gate = compliance.facetGateProblem(tx.agentUserId, tx.jurisdictions);
@@ -227,13 +161,7 @@ export function registerTransactions(rawCtx) {
     return { safeguarding: null, state, result, tx: applyComplianceSnapshot(tx, { state, result, ctx, by }) };
   }
 
-  /**
-   * Record the snapshot and let it move the status through the COMPLIANCE
-   * transition map only. An actor can never reach READY,
-   * COMPLIANCE_PENDING or COMPLIANCE_BLOCKED by asking. The snapshot names the
-   * evaluation it was taken from (or the gate that refused before the engine
-   * ran); its outcome, reasons and versions are that evaluation's own.
-   */
+  /** The status moves through the compliance transition map only: no actor reaches READY or the COMPLIANCE_* states. */
   function applyComplianceSnapshot(tx, { state, result, ctx, by }) {
     const prev = complianceOf(tx)?.state ?? null;
     const actor = by ?? bySystem('compliance re-evaluation');
@@ -263,10 +191,8 @@ export function registerTransactions(rawCtx) {
   }
 
   /**
-   * The staleness verdict for a READ: reported, never repaired, and never a
-   * clearance. A policy version published for the transaction's jurisdiction
-   * flags its compliance context; the transaction reads that flag as
-   * POLICY_CHANGED, beside its own.
+   * Reported on a read, never repaired. A new policy version flags the compliance context, which reads here as
+   * POLICY_CHANGED beside the transaction's own flag.
    */
   const stalenessOf = (tx, { view = complianceOf(tx), reps = null } = {}) => {
     const flagged = tx.reEvaluationPending || !!compliance.contextById(tx.contextId)?.reEvaluationPending;
@@ -285,19 +211,10 @@ export function registerTransactions(rawCtx) {
     return org && orgCanSee(org, pl) ? pl.name : null;
   };
 
-  /**
-   * Does this recruitment case belong to this organisation? Asked before a club
-   * is shown a case reference, so the engaging club sees only ITS OWN case id —
-   * a reference copied from somewhere else stays invisible.
-   *
-   * Asked of the integration seam, NOT of the recruitment domain's store: this module
-   * does not read it, and that boundary is worth more than the one line it would
-   * save. No seam registered → false, so the reference simply does not appear.
-   */
+  /** Asked before a club is shown a case reference, so it sees only its own case id, never one copied from elsewhere. */
   const recruitmentCaseBelongsTo = (caseId, orgId) =>
     integration?.caseBelongsTo ? integration.caseBelongsTo(caseId, orgId) === true : false;
 
-  /** The bindings and live documents of many transactions, read in one batch per table (a list's projection). */
   const batchFor = (list) => {
     const ids = list.map((t) => t.id);
     const reps = repsRepo.forTransactions(ids);
@@ -305,13 +222,7 @@ export function registerTransactions(rawCtx) {
     return { reps, docs };
   };
 
-  /**
-   * One transaction, projected for ONE viewer. Everything a party may see is
-   * decided here from the roles the server derived; nothing is filtered in a
-   * client. The derived convenience ids (`playerId`, `engagingOrgId`,
-   * `releasingOrgId`) are computed from `parties[]`, which stays the single
-   * truth — the only shape that can carry a party's confirmation and its history.
-   */
+  /** One transaction, projected for one viewer from the roles the server derived. */
   function projectTransaction(tx, viewer, batch = null) {
     const roles = roomRolesFor(tx, viewer);
     const partyRole = viewer.kind === 'club' ? clubPartyRoleOf(tx, viewer.orgId) : viewer.kind === 'player' ? 'individual' : null;
@@ -325,15 +236,12 @@ export function registerTransactions(rawCtx) {
     const consents = compliance.consentsFor(tx.contextId);
     return {
       id: tx.id, type: tx.type, status: tx.status, jurisdictions: tx.jurisdictions,
-      // Derived from parties[]; present because a client should not have to
-      // search an array for the one party it cares about.
+      // Conveniences derived from parties[], which stays the truth.
       playerId: live.find((p) => p.partyRole === 'individual')?.subjectId ?? null,
       engagingOrgId: live.find((p) => p.partyRole === 'engaging_entity')?.subjectId ?? null,
       releasingOrgId: live.find((p) => p.partyRole === 'releasing_entity')?.subjectId ?? null,
       viewerRoles: roles, viewerPartyRole: partyRole,
-      // The agency's identity is shared with every party: a party is entitled
-      // to know who represents whom. The AGENT's individual name is shared
-      // too — they are a party's representative, not a hidden actor.
+      // Every party is entitled to know who represents whom.
       agency: isAgent || roles.length ? { id: tx.agencyOrgId, name: orgById(tx.agencyOrgId)?.name ?? null } : null,
       parties: partiesOf(tx).map((p) => ({
         id: p.id, partyRole: p.partyRole, subjectKind: p.subjectKind, subjectId: p.subjectId,
@@ -344,13 +252,8 @@ export function registerTransactions(rawCtx) {
       requiredPartyRoles: requiredPartyRoles(tx.type),
       awaitingConfirmation: partiesAwaitingConfirmation(tx),
       partiesConfirmed: partiesConfirmed(tx),
-      /**
-       * Representation bindings. Every party sees WHO represents WHICH party
-       * and on what basis — the privacy matrix gives a club "the agent's
-       * identity and verification state, the agreement's existence and scope,
-       * NOT its fee terms". The agreement id is the agent's own reference and
-       * is shown only to the agent.
-       */
+      // Every party sees who represents which party and on what basis, never fee terms. The agreement id is the
+      // agent's own reference.
       representations: reps.map((r) => ({
         id: r.id, partyRole: r.partyRole, agentUserId: r.agentUserId, status: r.status,
         declaredOnly: !!r.declaredOnly, basis: r.agreementId ? 'client_confirmed_agreement' : 'declared',
@@ -358,18 +261,8 @@ export function registerTransactions(rawCtx) {
         verifiedAt: r.verifiedAt ?? null, withdrawnAt: r.withdrawnAt ?? null, createdAt: r.createdAt,
         ...(isAgent ? { agreementId: r.agreementId ?? null, reviewId: r.reviewId ?? null, firstActAt: r.firstActAt ?? null } : {}),
       })),
-      /**
-       * The compliance projection. Outcome and reason CODES for every party
-       * (a summary: outcome and codes, never the other side's agents); the policy versions and the evaluation reference for
-       * the agent, who is the party the rules bind.
-       *
-       * `clear` is the CURRENT answer, so a stale snapshot is never presented as
-       * one: a client that reads only this field would otherwise be told the
-       * transaction is clear on the strength of an evaluation that no longer
-       * matches the facts. The recorded verdict stays visible as `snapshotClear`
-       * beside the staleness reason, because "what the last evaluation said" is
-       * a real and useful fact — it is just not a clearance.
-       */
+      // `clear` is the current answer, so a client reading only it is never told a stale snapshot clears the
+      // transaction; `snapshotClear` keeps what the last evaluation said.
       compliance: state ? {
         outcome: state.outcome, pendingReason: stale ? (state.pendingReason ?? 'SNAPSHOT_STALE') : state.pendingReason,
         blocked: state.blocked, clear: state.clear && !stale, snapshotClear: state.clear,
@@ -378,12 +271,7 @@ export function registerTransactions(rawCtx) {
         ...(isAgent ? { evaluationId: view.evaluationId, contextId: view.contextId, policyVersions: view.policyVersions, verificationFreshness: view.verificationFreshness } : {}),
         honest: 'ScoutBox has evaluated its own encoded rules. It has not determined anyone\'s legal rights and no governing body has approved anything.',
       } : { outcome: null, pendingReason: 'PARTIES_NOT_CONFIRMED', blocked: false, clear: false, reasonCodes: [], consentRequirements: [], evaluatedAt: null, stale: 'NO_SNAPSHOT', staleness: 'NO_SNAPSHOT', honest: 'No compliance evaluation has been recorded for this transaction yet.' },
-      /**
-       * The consent view: required parties and each answer's state, projected
-       * from the compliance ledger. A party sees its OWN consent in full and
-       * another party's as a state only — never its particulars, never who
-       * signed it.
-       */
+      // A party sees its own consent in full and another party's as a state only.
       consents: consents.map((k) => {
         const mine = (viewer.kind === 'player' && k.subject?.kind === 'player' && k.subject.id === viewer.playerId)
           || (viewer.kind === 'club' && k.subject?.kind === 'club' && k.subject.id === viewer.orgId);
@@ -395,17 +283,11 @@ export function registerTransactions(rawCtx) {
         };
       }),
       documents: liveDocs.filter((d) => canSeeVisibility(d.visibility, roles, partyRole) && !d.supersededBy).map((d) => documentView(d, roles, partyRole)),
-      // Notes reuse the visibility classes; a note nobody may see is absent,
-      // not redacted, so its existence is not disclosed either.
+      // Absent, not redacted, so a hidden note's existence is not disclosed.
       notes: tx.notes.filter((n) => canSeeVisibility(n.visibility, roles, partyRole)).map((n) => ({ id: n.id, visibility: n.visibility, text: n.text, at: n.at, actor: actorLabel(n.by) })),
       linkedThreads: tx.linkedThreads.map((t) => ({ id: t.id, channelId: t.channelId, linkedAt: t.linkedAt, actor: actorLabel(t.linkedBy), readable: channelReadableBy(t.channelId, viewer) })),
-      // The recruitment-case reference is visible ONLY to the representing agent
-      // and to the club that OWNS that case. A club's internal recruitment case
-      // is club-private: the individual does not
-      // learn its id, Trust & Safety has no use for it, and a releasing club must
-      // never learn the engaging club's internal case — which is precisely what
-      // an unconditional field here would tell all three. Absent, not
-      // redacted, so its existence is not disclosed either.
+      // The recruitment case is club-private: only the agent and the club that owns it see the reference. A
+      // releasing club in particular must not learn the engaging club's internal case. Absent, not redacted.
       links: {
         trialId: tx.links.trialId ?? null,
         opportunityId: tx.links.opportunityId ?? null,
@@ -425,25 +307,19 @@ export function registerTransactions(rawCtx) {
     };
   }
 
-  /** What a viewer may see of one document. Never the bytes: this module stores none. */
   const documentView = (d, roles, partyRole) => ({
     id: d.id, documentType: d.documentType, visibility: d.visibility, version: d.version,
     label: d.label, ownerKind: d.owner?.kind ?? null, ownerPartyRole: d.ownerPartyRole ?? null,
     uploadedAt: d.createdAt, actor: actorLabel(d.uploadedBy),
     expiresAt: d.expiresAt ?? null, expired: isExpiredAt(d.expiresAt, now()), // an unreadable expiry reads expired, never "current"
-    // A signature instant is recordable only when objectively known from the underlying evidence; no writer knows
-    // one, so none is stored and none is claimed.
+    // No writer objectively knows a signature instant, so none is claimed.
     signedAt: null, supersedes: d.supersedes ?? null,
     evidence: d.evidenceRef ? { kind: d.evidenceRef.kind, present: true } : null,
     downloadable: !!d.evidenceRef && canSeeVisibility(d.visibility, roles, partyRole),
     ...revMeta(d),
   });
 
-  /**
-   * Does this viewer pass the CANONICAL channel authorization for a linked
-   * thread? Transaction membership is never the answer: the link says a
-   * conversation exists, and reading it still needs the Inbox's own gate.
-   */
+  /** Transaction membership does not make a linked thread readable: the Inbox's own gate decides. */
   function channelReadableBy(channelId, viewer) {
     const ch = channels.byId(channelId);
     if (!ch) return false;
@@ -452,7 +328,6 @@ export function registerTransactions(rawCtx) {
     return false;
   }
 
-  /** Which transitions this viewer may currently request. Compliance-driven states never appear. */
   function allowedTransitionsFor(tx, roles) {
     if (!roles.includes('representing_agent')) return [];
     return (ACTOR_TRANSITIONS[tx.status] ?? []).slice();
@@ -460,18 +335,15 @@ export function registerTransactions(rawCtx) {
 
   // ============================================================ resolution + authorization
 
-  /** Steps 1–6 for the AGENT lane. Conceals every transaction that is not this agent's own. */
   function ownTransaction(req, res, id, { write = false } = {}) {
     if (!access.resolveMembership(req, res)) return null;
     if (!access.requireCap(req, res, write ? 'transactions.write' : 'transactions.read')) return null;
     const tx = txById(id);
-    // Same-agency privacy: a colleague's transaction is 404, not 403, so the
-    // existence of a colleague's client work is not disclosed.
+    // A colleague's transaction is 404, not 403, so a colleague's client work is not disclosed.
     if (!tx || tx.agencyOrgId !== req.org.id || tx.agentUserId !== req.orgUser.id) { notFound(res, 'transaction'); return null; }
     return tx;
   }
 
-  /** Steps 1–6 for the CLUB lane. A club that is not a party sees nothing. */
   function clubTransaction(req, res, id, { signatory = false } = {}) {
     if (req.org.type !== 'club') { notFound(res, 'transaction'); return null; }
     const tx = txById(id);
@@ -485,7 +357,6 @@ export function registerTransactions(rawCtx) {
     return tx;
   }
 
-  /** Steps 1–6 for the PLAYER lane. */
   function playerTransaction(req, res, id) {
     if (req.playerIsMinor) { notFound(res, 'transaction'); return null; }
     const tx = txById(id);
@@ -497,31 +368,24 @@ export function registerTransactions(rawCtx) {
   const agentViewer = (req) => ({ kind: 'agency', orgId: req.org.id, userId: req.orgUser.id, agencyAdmin: can(req.tiers, 'agency.compliance.read') });
   const playerViewer = (req) => ({ kind: 'player', playerId: req.player.id });
 
-  /** Steps 8 and 15 for any write: safeguarding, then liveness. */
   function writableOr(res, tx, where) {
     const guard = safeguardingProblem(tx);
-    // The READ stays available: the transaction is the parties' own record of
-    // what happened, and like the compliance records it stays readable with
-    // the person tombstoned out of it. The WRITE stops, and says so in terms
-    // that are identical for removed, invisible, blocked and minor — so the
-    // refusal is honest to a caller who can already see the record, and is
-    // still not an oracle.
+    // The record stays readable; the write stops with one answer for removed, invisible, blocked and minor, so the
+    // refusal is not an oracle.
     if (guard) { sendTransactionError(res, { error: 'TRANSACTION_PARTY_UNAVAILABLE', message: 'A party to this transaction is no longer available to your organisation. Nothing further can be written to it; its record stays.' }, where); return false; }
     if (tx.status === 'ARCHIVED') { sendTransactionError(res, { error: 'TRANSACTION_ARCHIVED', status: tx.status, message: 'An archived transaction is read-only.' }, where); return false; }
     if (!LIVE_STATUSES.includes(tx.status)) { sendTransactionError(res, { error: 'TRANSACTION_NOT_LIVE', status: tx.status, message: 'This transaction has ended. Its record stays; nothing further can be written to it.' }, where); return false; }
     return true;
   }
-  /** The rev guard inside a unit: a stale rev answers 409 and rolls back whatever the unit already wrote. */
+  /** A stale rev answers 409 and rolls back whatever the unit already wrote. */
   const guardRevOrRollback = (req, res, record, opts) => { if (!guardRev(req, res, record, opts)) throw ROLLBACK; };
   const TX_CONFLICT = (tx) => ({ errorCode: 'TRANSACTION_VERSION_CONFLICT', current: { status: tx.status } });
 
   // ============================================================ party resolution
 
   /**
-   * Resolve one named party against LIVE records (canonical ids, never
-   * names). Uniform concealment: a player who does not exist, a minor, a
-   * player the agency cannot see and a player who blocked the agency all
-   * answer the same 404, so the route is not an age or a block oracle.
+   * A missing player, a minor, an invisible player and one who blocked the agency all answer the same 404, so the
+   * route is not an age or a block oracle.
    */
   function resolveParty(req, res, raw, { type }) {
     const shapeOk = raw !== null && typeof raw === 'object' && !Array.isArray(raw) && [raw.partyRole, raw.subjectKind, raw.subjectId].every((v) => typeof v === 'string');
@@ -547,22 +411,16 @@ export function registerTransactions(rawCtx) {
     return party(org.id);
   }
 
-  /** Notify a party that the workspace needs something from it. Ids and states only. */
   function notifyParty(tx, party, type, message) {
     if (party.subjectKind === 'player') notify({ kind: 'player', id: party.subjectId }, type, message, tx.id);
     else for (const u of rawCtx.verificationReads.admins.activeForOrg(party.subjectId)) notify({ kind: 'org_user', id: u.userId }, type, message, tx.id);
   }
 
-  /**
-   * The duplicate rule, asked of the indexed candidates: the live transactions of this type naming this individual.
-   * The rule itself is the integration seam's one definition (`duplicateTransactionOf`); absent (a suite booting
-   * transactions alone), none.
-   */
+  /** Without the integration seam (a suite booting transactions alone), nothing is a duplicate. */
   const duplicateOf = ({ individualId, type, engagingOrgId, releasingOrgId }) => (integration?.duplicateTransactionOf
     ? integration.duplicateTransactionOf(txs.liveForIndividual(individualId, type), { clientId: individualId, type, engagingOrgId, releasingOrgId, terminalStatuses: TERMINAL_STATUSES, partiesOf: (t) => t.parties })
     : null);
 
-  /** A list page of `rows` ({ key, record }) and its cursor. */
   const pageItems = (rows, limit) => { const p = pageOf(rows, limit, (r) => r.key); return { records: p.items.map((r) => r.record), nextCursor: p.nextCursor }; };
   const statusFilterOr400 = (req, res) => {
     if (req.query.status === undefined || req.query.status === '') return null;
@@ -577,9 +435,7 @@ export function registerTransactions(rawCtx) {
     if (!access.requireCap(req, res, 'transactions.read')) return;
     const status = statusFilterOr400(req, res); if (status === undefined) return;
     let pageReq; try { pageReq = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-    // Personal to the agent: a colleague's transactions are not listed and
-    // their count is not disclosed either. Newest first, by cursor; the counts
-    // are over every transaction of the agent's, not this page.
+    // A colleague's transactions are neither listed nor counted. The counts cover all the agent's, not this page.
     const { records, nextCursor } = pageItems(txs.agentPage({ agencyOrgId: req.org.id, agentUserId: req.orgUser.id, status, ...pageReq }).rows, pageReq.limit);
     const viewer = agentViewer(req);
     const batch = batchFor(records);
@@ -594,15 +450,7 @@ export function registerTransactions(rawCtx) {
     });
   });
 
-  /**
-   * Create a transaction. Opened by the licensed agent; each party owns its
-   * lane. A club's own lane is its party routes; a club cannot open a
-   * transaction and neither can agency support staff.
-   *
-   * Creation grants NO authority: the parties are named, not confirmed;
-   * no representation exists; no consent exists; the status is DRAFT and the
-   * compliance projection says PARTIES_NOT_CONFIRMED.
-   */
+  /** Only the licensed agent opens one. Creation grants no authority: parties are named, not confirmed. */
   orgRouter.post('/agent/transactions', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
     if (!access.requireCap(req, res, 'transactions.write')) return;
@@ -624,9 +472,7 @@ export function registerTransactions(rawCtx) {
       }
     }
     if (limitedOr429(res, 'transaction_write', req.orgUser.id)) return;
-    // Step 10: the agent's own facets under the applicable policy set. A
-    // transaction is regulated infrastructure; an unverified licence does not
-    // open one.
+    // An unverified licence does not open a transaction.
     const gate = compliance.facetGateProblem(req.orgUser.id, jurisdictions);
     if (gate) return sendTransactionError(res, { ...gate, message: gate.error === 'JURISDICTION_UNSUPPORTED' ? 'No encoded policy covers this jurisdiction. A transaction cannot be opened for it.' : `A regulated action needs a VERIFIED ${gate.facet}${gate.memberAssociation ? ` (${gate.memberAssociation})` : ''}; it is ${gate.state}.` }, 'create');
     const parties = [];
@@ -636,9 +482,7 @@ export function registerTransactions(rawCtx) {
       parties.push(party);
     }
 
-    // An optional reference back to the recruitment case whose
-    // club invited this workspace, and the duplicate rule. Both are REFERENCES:
-    // nothing about the case is copied in, and the case's own truth stays its own.
+    // A reference only: nothing about the recruitment case is copied in.
     const caseRef = typeof b.recruitmentCaseId === 'string' && b.recruitmentCaseId ? b.recruitmentCaseId : null;
     const individualId = parties.find((p) => p.partyRole === 'individual')?.subjectId ?? null;
     if (individualId) {
@@ -647,20 +491,15 @@ export function registerTransactions(rawCtx) {
         engagingOrgId: parties.find((p) => p.partyRole === 'engaging_entity')?.subjectId ?? null,
         releasingOrgId: parties.find((p) => p.partyRole === 'releasing_entity')?.subjectId ?? null,
       });
-      // Same individual, same type, same clubs on both sides, and the earlier one
-      // still live. A loan beside a transfer, or a second engaging club, is a
-      // legitimately separate transaction and is NOT refused.
+      // A loan beside a transfer, or a second engaging club, is a separate transaction and is not refused.
       if (dup) return sendTransactionError(res, { error: 'TRANSACTION_DUPLICATE_CONTEXT', transactionId: dup.id, message: 'A live transaction already covers this individual, this type and these clubs. Continue in that one, or end it first.' }, 'create');
     }
     if (caseRef && !integration?.bindHandoff) return sendTransactionError(res, { error: 'HANDOFF_NOT_FOUND', message: 'A recruitment case cannot be referenced in this build.' }, 'create');
     const at = now();
     const id = nextId('atx');
     inUnit(() => {
-      // A workspace that cites a recruitment case must be answering that
-      // club's own invitation, and the invitation must have been addressed to this
-      // agency. Bound in the same unit as the transaction, so a refusal leaves
-      // nothing behind: a citation that does not check out creates no transaction
-      // at all, rather than a transaction with a reference nobody authorised.
+      // A cited case must have invited this agency. Bound in the same unit, so a citation that does not check out
+      // creates no transaction at all.
       if (caseRef) {
         const problem = integration.bindHandoff({
           recruitmentCaseId: caseRef, transactionId: id, agencyOrgId: req.org.id,
@@ -709,8 +548,6 @@ export function registerTransactions(rawCtx) {
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
       txs.addParty(tx.id, { party, key: key ? { key, fp } : null }, txBook(byAgent(req), [entry('transaction_party_added', byAgent(req), { partyRole: party.partyRole, subjectKind: party.subjectKind })]));
-      // A party change invalidates every prior clearance: the compliance
-      // snapshot is recomputed here and now, not carried over.
       partyChanged(tx.id, byAgent(req));
       bumpTx(tx.id, byAgent(req));
       broadcast('agent_transaction_party_changed', { orgId: tx.agencyOrgId, txId: tx.id, partyRole: party.partyRole });
@@ -720,11 +557,7 @@ export function registerTransactions(rawCtx) {
     });
   });
 
-  /**
-   * Remove a party. History is never overwritten: the row stays with its
-   * `removedAt`, every representation naming that role is withdrawn, and the
-   * transaction drops back out of any compliance claim it had.
-   */
+  /** The party row stays with its `removedAt`; every representation naming that role is withdrawn. */
   orgRouter.post('/agent/transactions/:id/parties/:pid/remove', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true }); if (!tx) return;
     if (!writableOr(res, tx, 'parties')) return;
@@ -746,11 +579,7 @@ export function registerTransactions(rawCtx) {
     });
   });
 
-  /**
-   * What a party change does, in one place so it cannot be done differently in
-   * two routes: a confirmed transaction that loses its confirmation set falls
-   * back out of READY/ACTIVE, and compliance is re-evaluated immediately.
-   */
+  /** A transaction that loses its confirmation set falls back out of READY/ACTIVE, and compliance is re-evaluated. */
   function partyChanged(txId, by) {
     let tx = txById(txId);
     if (!partiesConfirmed(tx) && ['READY', 'ACTIVE', 'COMPLIANCE_PENDING', 'COMPLIANCE_BLOCKED'].includes(tx.status)) {
@@ -766,13 +595,8 @@ export function registerTransactions(rawCtx) {
   }
 
   /**
-   * THE regulated mutation of this module: bind a representation to this transaction.
-   *
-   * "Active for this player" is not authority for this transaction: the
-   * agreement is re-read now, its scope must cover this transaction's type and
-   * every one of its jurisdictions, the facets must be verified now, and the
-   * conflict engine must answer now with this binding included. A refusal at
-   * any step records no binding.
+   * An agreement active for this player is not by itself authority here: its scope must cover this type and every
+   * jurisdiction, and the conflict engine must answer with this binding included.
    */
   orgRouter.post('/agent/transactions/:id/representations', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true }); if (!tx) return;
@@ -793,8 +617,7 @@ export function registerTransactions(rawCtx) {
     if (liveRepsOf(tx.id).some((r) => r.partyRole === partyRole && r.agentUserId === req.orgUser.id)) {
       return sendTransactionError(res, { error: 'TRANSACTION_PARTY_EXISTS', partyRole, message: 'You already represent this party in this transaction.' }, 'representations');
     }
-    // Step 8: safeguarding before scope, so a blocked party is never
-    // distinguishable from an unknown one by comparing refusals.
+    // Safeguarding before scope, so a blocked party reads the same as an unknown one.
     let agreement = null; let declaredOnly = false; let scope = []; let jurisdictions = [];
     if (party.subjectKind === 'player') {
       const pl = findPlayer(party.subjectId);
@@ -811,17 +634,13 @@ export function registerTransactions(rawCtx) {
       if (problem) return sendTransactionError(res, { ...problem, message: problem.error === 'REPRESENTATION_SCOPE_INSUFFICIENT' ? 'The relationship does not cover this transaction\'s scope or jurisdiction.' : 'No active, client-confirmed relationship covers this party.' }, 'representations');
       scope = agreement.scope ?? []; jurisdictions = agreement.jurisdiction ? [agreement.jurisdiction] : [];
     } else {
-      // An entity client with no ScoutBox agreement is DECLARED ONLY and needs
-      // attributed review; it is never a verified binding.
+      // An entity client has no ScoutBox agreement: declared only, pending attributed review.
       declaredOnly = true;
     }
-    // Step 10: facets now.
     const gate = compliance.facetGateProblem(req.orgUser.id, tx.jurisdictions);
     if (gate) return sendTransactionError(res, { ...gate, message: gate.error === 'JURISDICTION_UNSUPPORTED' ? 'No encoded policy covers this jurisdiction.' : `A regulated action needs a VERIFIED ${gate.facet}${gate.memberAssociation ? ` (${gate.memberAssociation})` : ''}; it is ${gate.state}.` }, 'representations');
     inUnit(() => {
-      // Steps 11–14: conflict, consent, minor gate and review, with the proposed
-      // binding included. No binding is recorded if the answer is not permissive;
-      // the evaluation itself is, and the transaction's snapshot names it.
+      // A refusal records no binding, but the evaluation and the snapshot naming it commit.
       const ctx = compliance.contextById(tx.contextId);
       const live = liveRepsOf(tx.id);
       compliance.project(ctx, { parties: partiesOf(tx), representations: live });
@@ -846,8 +665,7 @@ export function registerTransactions(rawCtx) {
       const reviewReasons = result.reasons.filter((r) => r.code !== 'FACET_VERIFIED');
       const snapshot = { outcome: result.outcome, evaluationId: result.evaluationId, evaluatedAt: result.evaluatedAt };
       if (needsReview && !declaredOnly) {
-        // No binding is recorded: the binding the caller asked for does not
-        // exist, and a review item exists instead.
+        // A review item instead of the binding.
         const review = compliance.createReview({ kind: 'conflict_evaluation', agencyOrgId: tx.agencyOrgId, agentUserId: req.orgUser.id, subject: { contextId: ctx.id, transactionId: tx.id, partyRole }, reasons: reviewReasons, policyVersions: result.policyVersions, snapshot, requestedBy: byAgent(req) });
         return snapshotAndRefuse(complianceStateFrom({ outcome: result.outcome, reasons: result.reasons, representationCount: live.length, partiesConfirmed: partiesConfirmed(tx) }),
           { error: 'REGULATORY_REVIEW_REQUIRED', reasons: review.reasons, policyVersions: result.policyVersions, outcome: result.outcome, contextId: ctx.id, message: 'The deciding rule\'s operative status is uncertain or not encoded. An attributed review item was created; nothing proceeds until it is resolved under a named policy version.' });
@@ -869,10 +687,7 @@ export function registerTransactions(rawCtx) {
       txs.recordAct(tx.id, txBook(byAgent(req), [entry('transaction_representation_attached', byAgent(req), { partyRole, status })]));
       recheckCompliance(tx.id, byAgent(req));
       bumpTx(tx.id, byAgent(req));
-      // A declared-only binding is RECORDED and NOT EFFECTIVE. It answers 422 with
-      // the review it created rather than 201, for the same reason compliance
-      // does: a 201 reads as "this is now in force", and it is not — an
-      // attributed reviewer has to confirm it first.
+      // Recorded but not effective until reviewed: 422 rather than 201, which would read as "now in force".
       if (declaredOnly) {
         return () => sendTransactionError(res, { error: 'REGULATORY_REVIEW_REQUIRED', reasons: reviewReasons, policyVersions: result.policyVersions, outcome: result.outcome, contextId: ctx.id, partyRole, message: 'Representation of an entity with no ScoutBox agreement is recorded as declared and needs attributed review. It is not effective until a named reviewer confirms it.' }, 'representations');
       }
@@ -910,13 +725,7 @@ export function registerTransactions(rawCtx) {
     });
   });
 
-  /**
-   * An actor-requested status transition. Only the representing agent may
-   * request one, only through ACTOR_TRANSITIONS, and a move INTO the live
-   * workflow (ACTIVE) additionally requires a compliance snapshot that is
-   * clear AND current — recomputed in this request, not read from the page the
-   * caller was looking at.
-   */
+  /** A move to ACTIVE needs a snapshot that is clear and current, recomputed in this request. */
   orgRouter.post('/agent/transactions/:id/status', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true }); if (!tx) return;
     const b = req.body ?? {};
@@ -924,8 +733,7 @@ export function registerTransactions(rawCtx) {
     const to = b.to;
     if (tx.status === 'ARCHIVED') return sendTransactionError(res, { error: 'TRANSACTION_ARCHIVED', status: tx.status, message: 'An archived transaction is read-only.' }, 'status');
     const guard = safeguardingProblem(tx);
-    // ARCHIVED is the one transition a safeguarding stop must not prevent:
-    // shelving a record the workspace can no longer act on is the safe move.
+    // Archiving stays possible: shelving a record nobody can act on is the safe move.
     if (guard && to !== 'ARCHIVED') return sendTransactionError(res, { error: 'TRANSACTION_PARTY_UNAVAILABLE', message: 'A party to this transaction is no longer available to your organisation. It can be archived; it cannot be progressed.' }, 'status');
     const key = clientKeyOr400(req, res); if (key === undefined) return;
     const reasonCode = text(b.reasonCode, 60);
@@ -933,44 +741,33 @@ export function registerTransactions(rawCtx) {
     if (reasonCode === undefined) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'reasonCode', message: 'reasonCode must be text.' }, 'status');
     if (reason === undefined) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'reason', message: 'reason must be text.' }, 'status');
     const fp = payloadFingerprint({ to, reasonCode, reason });
-    // The idempotency check comes BEFORE the transition check: a replay of a
-    // transition that already happened must answer "already done", not "you
-    // cannot do that from here" — which is what the caller would see, since the
-    // transition it is replaying is exactly what moved the transaction.
+    // Before the transition check: a replay must answer "already done", not "not allowed from here".
     if (key && tx.keys[`status:${key}`]) { if (tx.keys[`status:${key}`].fp === fp) return res.json({ transaction: projectTransaction(tx, agentViewer(req)), idempotent: true }); return sendTransactionError(res, { error: 'TRANSACTION_IDEMPOTENCY_CONFLICT' }, 'status'); }
     if (!actorTransitionAllowed(tx.status, to)) return sendTransactionError(res, { error: 'TRANSACTION_TRANSITION_NOT_ALLOWED', from: tx.status, to, allowed: ACTOR_TRANSITIONS[tx.status] ?? [], message: 'That is not a transition this transaction can make from its current state.' }, 'status');
     if (limitedOr429(res, 'transaction_status_write', req.orgUser.id)) return;
     if (to === 'PARTIES_CONFIRMED') {
       if (!partiesConfirmed(tx)) return sendTransactionError(res, { error: 'TRANSACTION_PARTIES_NOT_CONFIRMED', awaiting: partiesAwaitingConfirmation(tx), message: 'Every required party must confirm its own participation first. Naming a party is not confirming it.' }, 'status');
     }
-    // A reason code is the vocabulary of the move it explains: a hold, a cancellation or a closure needs one of its own,
-    // and a move that takes none is refused one.
+    // A hold, cancellation or closure needs a code of its own kind; any other move takes none.
     const codes = REASON_CODES_FOR[to] ?? null;
     if (codes ? !codes.includes(reasonCode) : reasonCode !== '') return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'reasonCode', allowed: codes ?? [], ...(codes ? {} : { message: `A move to ${to} takes no reason code.` }) }, 'status');
     inUnit(() => {
       if (to === 'ACTIVE') {
-        // A stale snapshot authorises nothing. Refusing FIRST — before the
-        // re-check — is deliberate: it means the caller cannot enter the live
-        // workflow on facts they have not seen, because they must re-evaluate and
-        // read the new answer before asking again. The re-check below is the
-        // second guard, not the only one. The flag and the entry commit with the refusal.
+        // Refused before the re-check, so the caller cannot enter the live workflow on facts they have not seen:
+        // they must re-evaluate and read the answer first. The flag commits with the refusal.
         const stale0 = stalenessOf(tx);
         if (stale0) {
           txs.flagStale(tx.id, {}, txBook(byAgent(req), [entry('transaction_compliance_stale', byAgent(req), { staleness: stale0 })], { touch: true }));
           bumpTx(tx.id, byAgent(req));
           return () => sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_STALE', staleness: stale0, message: 'The recorded compliance evaluation no longer matches the current facts. Re-evaluate and read the new answer before progressing.' }, 'status');
         }
-        // Leaving a hold never resumes on trust: compliance is re-checked
-        // here, in this request, and the answer decides (and is recorded either way).
         const { safeguarding, state, tx: after } = recheckCompliance(tx.id, byAgent(req));
         // A refusal below commits the re-evaluation and the rev it moved.
         if (!safeguarding && (state?.blocked || !state?.clear || !actorTransitionAllowed(after.status, to))) bumpTx(tx.id, byAgent(req));
         if (safeguarding) return () => notFound(res, 'status');
         if (state?.blocked) return () => sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_BLOCKED', outcome: state.outcome, reasons: state.reasonCodes.map((code) => ({ code })), message: 'An encoded ACTIVE rule prohibits this combination. A reviewer cannot approve past it; only changed facts or a new policy version can.' }, 'status');
         if (!state?.clear) return () => sendTransactionError(res, { error: 'TRANSACTION_COMPLIANCE_PENDING', pendingReason: state?.pendingReason ?? null, outcome: state?.outcome ?? null, reasons: (state?.reasonCodes ?? []).map((code) => ({ code })), message: 'This transaction cannot progress while compliance is outstanding.' }, 'status');
-        // Re-check the transition: the re-evaluation above may have moved the
-        // status, and the caller's transition must still be legal from where the
-        // transaction now is.
+        // The re-evaluation may have moved the status.
         if (!actorTransitionAllowed(after.status, to)) return () => sendTransactionError(res, { error: 'TRANSACTION_TRANSITION_NOT_ALLOWED', from: after.status, to, allowed: ACTOR_TRANSITIONS[after.status] ?? [] }, 'status');
       }
       // A stale rev rolls back the re-evaluation above with the rest.
@@ -984,9 +781,7 @@ export function registerTransactions(rawCtx) {
         const ctx = compliance.contextById(tx.contextId);
         if (ctx) compliance.closeContext(ctx, byAgent(req));
       }
-      // Literal event names, one call site each: the event registry audit reads
-      // broadcast call sites textually, so a name that only ever appears inside a
-      // ternary is a registered event the audit cannot see being emitted.
+      // Literal event names, one call site each: the event registry audit reads broadcast call sites textually.
       const payload = { orgId: tx.agencyOrgId, txId: tx.id, status: to };
       if (to === 'ON_HOLD') broadcast('agent_transaction_held', payload);
       else if (to === 'CANCELLED') broadcast('agent_transaction_cancelled', payload);
@@ -1000,27 +795,20 @@ export function registerTransactions(rawCtx) {
     });
   });
 
-  /**
-   * Request a party's consent from inside the workspace. Delegates to the
-   * compliance ledger through the SAME function its own route uses: there is one
-   * set of rules about when a consent may exist and one place it is recorded.
-   */
+  /** Delegates to the same function as the compliance ledger's own route. */
   orgRouter.post('/agent/transactions/:id/consents/request', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true }); if (!tx) return;
     if (!writableOr(res, tx, 'consents')) return;
     const ctx = compliance.contextById(tx.contextId);
     if (!ctx) return notFound(res, 'consents');
-    // The projection is the context's evaluation input, rebuilt from the transaction's own rows (its own write); the
-    // consent route then runs its own unit and answers only after it committed.
+    // The projection is its own write, outside the consent route's unit.
     compliance.project(ctx, { parties: partiesOf(tx), representations: liveRepsOf(tx.id) });
     compliance.requestConsent(req, res, ctx);
   });
 
   /**
-   * Record a terms version: terms as data. Data only: ScoutBox does not validate a fee, a
-   * cap or a duration, does not propose, does not accept and does not value —
-   * because validating a suspended rule would be wrong and proposing would
-   * make ScoutBox the negotiator.
+   * Terms are recorded as data, not validated: validating a suspended fee rule would be wrong, and proposing terms
+   * would make ScoutBox the negotiator.
    */
   orgRouter.post('/agent/transactions/:id/terms', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true }); if (!tx) return;
@@ -1045,15 +833,13 @@ export function registerTransactions(rawCtx) {
     });
   });
 
-  /** Reference an Opportunity this transaction came from. By reference; the opportunity is not mutated. */
   orgRouter.post('/agent/transactions/:id/links', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true }); if (!tx) return;
     if (!writableOr(res, tx, 'links')) return;
     const opportunityId = idText(req.body?.opportunityId);
     if (!opportunityId) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'opportunityId' }, 'links');
     const opp = scoutingReads.opportunities.byId(opportunityId);
-    // A link to an opportunity the agent cannot see would disclose that it
-    // exists, so an unknown and an invisible opportunity answer alike.
+    // An unknown and an invisible opportunity answer alike.
     const engaging = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'engaging_entity');
     if (!opp || !engaging || opp.orgId !== engaging.subjectId) return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'opportunityId', message: 'No opportunity of the engaging club matches that reference.' }, 'links');
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
@@ -1067,13 +853,7 @@ export function registerTransactions(rawCtx) {
 
   // ============================================================ documents
 
-  /**
-   * Add a document to the workspace. This module stores NO bytes:
-   * `evidenceRef` points at a record in the canonical evidence vault, and a
-   * document without one is a placeholder that says so rather than a file that
-   * does not exist. There is exactly one upload path in ScoutBox and this is
-   * not a second one.
-   */
+  /** No bytes are stored here: `evidenceRef` points into the evidence vault, and without one a document is a placeholder. */
   function addDocument(req, res, tx, { roles, partyRole, owner, by, rateKey }) {
     if (!writableOr(res, tx, 'documents')) return;
     if (limitedOr429(res, 'transaction_document_write', rateKey)) return;
@@ -1092,14 +872,12 @@ export function registerTransactions(rawCtx) {
       const shapeOk = typeof ref === 'object' && !Array.isArray(ref) && ref.kind === 'verification_evidence' && typeof ref.id === 'string' && ref.id.trim() && ref.id.trim().length <= ID_MAX;
       if (!shapeOk) return sendTransactionError(res, { error: 'DOCUMENT_INPUT_INVALID', field: 'evidenceRef', allowed: ['verification_evidence'], message: 'A document reference is { kind: "verification_evidence", id } naming a record in the canonical evidence vault.' }, 'documents');
       const ev = rawCtx.verificationReads.evidence.byId(ref.id.trim());
-      // The uploader must own the evidence: a reference is not a way to reach
-      // someone else's file, and an unknown id and a foreign id answer alike.
+      // The uploader must own the evidence; an unknown id and a foreign id answer alike.
       const mine = ev && ((owner.kind === 'club' && ev.orgId === owner.id) || (owner.kind === 'player' && ev.playerId === owner.id) || (owner.kind === 'agent' && ev.orgId === tx.agencyOrgId));
       if (!ev || !mine) return sendTransactionError(res, { error: 'DOCUMENT_INPUT_INVALID', field: 'evidenceRef', message: 'No evidence record of yours matches that reference.' }, 'documents');
       evidenceRef = { kind: 'verification_evidence', id: ev.id };
     }
-    // An integer timestamp, an ISO 8601 instant with an offset, or a
-    // calendar day (valid through that day) — never a coerced numeric string.
+    // A calendar day is valid through that day.
     const expP = isAbsent(b.expiresAt) ? null : parseDateOrInstant(b.expiresAt, { dayEdge: 'end' });
     if (expP && !expP.ok) return sendTransactionError(res, { error: 'DOCUMENT_INPUT_INVALID', field: 'expiresAt', message: `An expiry must be a timestamp, an ISO 8601 date-time with an offset, or a calendar day (${expP.why}).` }, 'documents');
     const expiresAt = expP ? expP.ms : null;
@@ -1120,8 +898,7 @@ export function registerTransactions(rawCtx) {
       const stored = docsRepo.create(d);
       txs.recordAct(tx.id, txBook(by, [entry('transaction_document_added', by, { documentType, visibility })], { touch: true }));
       broadcast('agent_transaction_document_added', { orgId: tx.agencyOrgId, txId: tx.id, docId: d.id });
-      // Only the parties the CLASS admits hear about it: a notification is a
-      // disclosure, and an AGENT_PRIVATE document discloses nothing to anyone.
+      // A notification is a disclosure: only parties the visibility class admits hear of it.
       if (visibility !== 'AGENT_PRIVATE') {
         for (const p of partiesOf(tx).filter((x) => !x.removed)) {
           const otherRoles = p.subjectKind === 'player' ? ['party_individual'] : ['party_club_signatory'];
@@ -1136,7 +913,7 @@ export function registerTransactions(rawCtx) {
     });
   }
 
-  /** Read a document's reference. Reauthorized every time: a reference is never a standing permission. */
+  /** Reauthorised every time: a reference is never a standing permission. */
   function readDocumentReference(req, res, tx, { roles, partyRole }) {
     const d = docsOf(tx.id).find((x) => x.id === req.params.docId);
     if (!d || !canSeeVisibility(d.visibility, roles, partyRole)) return sendTransactionError(res, { error: 'DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' }, 'documents');
@@ -1162,7 +939,7 @@ export function registerTransactions(rawCtx) {
     const tx = ownTransaction(req, res, req.params.id); if (!tx) return;
     readDocumentReference(req, res, tx, { roles: roomRolesFor(tx, agentViewer(req)), partyRole: null });
   });
-  /** A new version supersedes the old one; the old row is kept, never edited but for its link. */
+  /** The old row is kept, untouched but for its link. */
   orgRouter.post('/agent/transactions/:id/documents/:docId/supersede', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true }); if (!tx) return;
     if (!writableOr(res, tx, 'documents')) return;
@@ -1190,12 +967,7 @@ export function registerTransactions(rawCtx) {
 
   // ============================================================ notes
 
-  /**
-   * A scoped note. Notes carry the SAME visibility classes as documents,
-   * so there is one vocabulary rather than two, and no global notes bucket
-   * exists: every note names the lane it belongs to and is absent — not
-   * redacted — for anyone that lane excludes.
-   */
+  /** Notes use the documents' visibility classes: each names its lane and is absent for anyone the lane excludes. */
   function addNote(req, res, tx, { roles, partyRole, by, rateKey }) {
     if (!writableOr(res, tx, 'notes')) return;
     if (limitedOr429(res, 'transaction_note_write', rateKey)) return;
@@ -1242,7 +1014,7 @@ export function registerTransactions(rawCtx) {
     if (req.org.type !== 'club') return res.json({ items: [], nextCursor: null, note: 'Transaction party lanes are for club organisations.' });
     let pageReq; try { pageReq = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
     const viewer = clubViewer(req);
-    // Newest first, by cursor: a club's list grows with every transaction it is named in.
+    // Paged: a club's list grows with every transaction it is named in.
     const { records, nextCursor } = pageItems(txs.clubPage({ orgId: req.org.id, ...pageReq }).rows, pageReq.limit);
     const batch = batchFor(records);
     res.json({
@@ -1257,7 +1029,7 @@ export function registerTransactions(rawCtx) {
     const tx = clubTransaction(req, res, req.params.id); if (!tx) return;
     res.json({ transaction: projectTransaction(tx, clubViewer(req)), signatory: clubViewer(req).signatory });
   });
-  /** The club confirms its own participation. Only a recorded signatory binds the club. */
+  /** Only a recorded signatory binds the club. */
   orgRouter.post('/transactions/:id/confirm', (req, res) => {
     const tx = clubTransaction(req, res, req.params.id, { signatory: true }); if (!tx) return;
     if (!writableOr(res, tx, 'confirm')) return;
@@ -1297,11 +1069,7 @@ export function registerTransactions(rawCtx) {
     const tx = clubTransaction(req, res, req.params.id); if (!tx) return;
     res.json({ items: timelineFor(tx, roomRolesFor(tx, clubViewer(req)), req.txPartyRole), note: 'The timeline is what this club may see of what happened.' });
   });
-  /**
-   * Link a canonical Inbox thread into the workspace. The linker must pass the
-   * CHANNEL's own authorization — transaction membership is never enough —
-   * and linking discloses only that a conversation exists.
-   */
+  /** The linker must pass the channel's own authorisation; linking discloses only that a conversation exists. */
   orgRouter.post('/transactions/:id/messages/link', (req, res) => {
     const tx = clubTransaction(req, res, req.params.id, { signatory: true }); if (!tx) return;
     if (!writableOr(res, tx, 'messages')) return;
@@ -1323,7 +1091,7 @@ export function registerTransactions(rawCtx) {
       return () => res.status(201).json({ transaction: projectTransaction(stored, clubViewer(req)) });
     });
   });
-  /** Reference a trial of THIS club for THIS individual. A reference only; no assessment crosses. */
+  /** A trial of this club for this individual, by reference: no assessment crosses. */
   orgRouter.post('/transactions/:id/links', (req, res) => {
     const tx = clubTransaction(req, res, req.params.id, { signatory: true }); if (!tx) return;
     if (!writableOr(res, tx, 'links')) return;
@@ -1356,7 +1124,7 @@ export function registerTransactions(rawCtx) {
     const tx = playerTransaction(req, res, req.params.id); if (!tx) return;
     res.json({ transaction: projectTransaction(tx, playerViewer(req)) });
   });
-  /** The individual confirms their own participation. Nobody confirms for them. */
+  /** Nobody confirms for the individual. */
   playerRouter.post('/transactions/:id/confirm', (req, res) => {
     const tx = playerTransaction(req, res, req.params.id); if (!tx) return;
     if (!writableOr(res, tx, 'confirm')) return;
@@ -1395,12 +1163,7 @@ export function registerTransactions(rawCtx) {
 
   // ============================================================ TRUST & SAFETY lane
 
-  /**
-   * Attributed Trust & Safety read. States, ids and party roles — never a
-   * document's content, never a note, never a message, never a term. A
-   * reviewer's job here is to see whether the platform's own rules were
-   * applied, not to read the parties' papers.
-   */
+  /** States, ids and party roles only: a reviewer checks the platform's rules were applied, not the parties' papers. */
   const tsView = (tx, batch = null) => {
     const reps = batch ? batch.reps(tx.id) : repsOf(tx.id);
     const view = complianceOf(tx);
@@ -1422,7 +1185,7 @@ export function registerTransactions(rawCtx) {
     const batch = batchFor(records);
     res.json({ items: records.map((t) => tsView(t, batch)), nextCursor, statuses: TRANSACTION_STATUSES, note: 'States, ids and party roles only. Transaction documents, notes, messages and terms are the parties\' and are not exposed here.' });
   });
-  /** Process metrics only: durations and counts. No agent is ranked and no player is ranked. */
+  /** Durations and counts only; no agent or player is ranked. */
   tsRouter.get('/transactions/metrics', (_req, res) => {
     const m = txs.metrics();
     const median = (xs) => (xs.length ? xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)] : null);
@@ -1441,7 +1204,7 @@ export function registerTransactions(rawCtx) {
       note: 'Process metrics only. No agent, club or player is ranked, and no subscription or payment status enters any transaction outcome.',
     });
   });
-  // Registered BEFORE the `:id` route, or Express would read "metrics" as an id.
+  // Registered before the `:id` route, or Express would read "metrics" as an id.
   tsRouter.get('/transactions/:id', (req, res) => {
     const tx = txById(req.params.id);
     if (!tx) return notFound(res, 'ts');
@@ -1453,25 +1216,14 @@ export function registerTransactions(rawCtx) {
 
   // ============================================================ lifecycle hooks
 
-  /**
-   * Player account removal. The transaction keeps its shape — ids,
-   * roles, states, times — and loses the person: the party row is tombstoned
-   * and every actor label that named the player is emptied, inside the
-   * deletion's unit. Nothing is resurrected into a list, because the projection
-   * reads the live player record and finds none.
-   */
+  /** The transaction keeps its ids, roles, states and times and loses the person: party row and labels are emptied. */
   function onPlayerDeleted(playerId, at = now()) {
     agentTransactions.forgetPlayer(playerId, at, () => ({ id: nextId('aud'), at, action: 'transaction_subject_tombstoned', by: bySystem('account deletion'), detail: { partyRole: 'individual' } }));
   }
 
   /**
-   * An attributed reviewer decided a declared-only binding (an entity client
-   * with no ScoutBox agreement). The representation binding row is the truth, so the decision lands here, inside the review's unit;
-   * the compliance context's array is re-projected on the next evaluation.
-   *
-   * An approval records NO act by the agent: `firstActAt` stays null until the
-   * agent themselves acts, so a later party-specific consent is still "in
-   * advance" — the same rule compliance applies to its own review-verified rows.
+   * A reviewer decided a declared-only binding. An approval records no act by the agent: `firstActAt` stays null, so a
+   * later party-specific consent still counts as given in advance.
    */
   function representationReviewed({ transactionId, representationId, outcome, by, reviewId }) {
     const tx = txById(transactionId);
@@ -1487,14 +1239,8 @@ export function registerTransactions(rawCtx) {
   }
 
   /**
-   * The ONE seam the Offer domain reads. A transaction is
-   * "available to this Offer" only when the asking club is its ENGAGING
-   * entity and the transaction is linked to exactly the recruitment case the
-   * Offer is on; anything else answers null, so a club cannot learn that a
-   * transaction exists by naming its id from an unrelated case. Readiness is
-   * re-derived NOW from the live compliance snapshot and staleness — never
-   * from anything the Offer stored. Read-only: no transaction is created,
-   * moved or touched here, and no Offer is.
+   * The seam the Offer domain reads. Null unless the asking club is the engaging entity and the transaction is linked
+   * to exactly the Offer's case, so a club cannot probe for a transaction by id from an unrelated case.
    */
   function offerReadinessFor(transactionId, { orgId, caseId } = {}) {
     if (typeof transactionId !== 'string' || !transactionId || !orgId || !caseId) return null;

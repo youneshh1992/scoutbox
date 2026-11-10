@@ -1,7 +1,6 @@
-// Live sync: authenticated, scoped server-sent events. EventSource cannot send headers and long-lived bearer tokens
-// never belong in URLs, so a client first mints a short-lived connect ticket over its bearer session
-// (POST /events/ticket), then opens GET /events?ticket=…. Every event carries an id; on reconnect the client passes the
-// last id it saw and missed events replay from a ring buffer, so a dropped connection catches up instead of going quiet.
+// Live sync over server-sent events. EventSource cannot send headers and bearer tokens must not go in URLs, so a client
+// mints a short-lived ticket (POST /events/ticket) and opens GET /events?ticket=…. Missed events replay from a ring
+// buffer on reconnect.
 import { visibleToOrg } from '../../domain.mjs';
 import { audienceFor } from './eventAudience.mjs';
 import { minimizePayload } from './eventRegistry.mjs';
@@ -19,7 +18,7 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
   const sseTickets = new Map(); // ticket -> { sid, expiresAt }
   let eventSeq = 0;
   const eventLog = []; // ring buffer of { id, event, payload, ts }
-  // Payloads the registry did not allow, counted for /capabilities.
+  // Counted for /capabilities.
   const eventPayloadDrops = { count: 0, lastEvent: null };
 
   function sseIdentityFor(session) {
@@ -39,22 +38,17 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
     return null;
   }
 
-  // Authorisation happens at DELIVERY time, from live records: an identity captured at connect never grandfathers a
-  // suspended org or a lifted entitlement into continuing to receive events.
+  // Authorisation is checked at delivery from live records, so suspension takes effect on open streams.
   function liveOrg(identity) {
     const org = byId.org(identity.orgId);
     return org && !org.suspended ? org : null;
   }
 
-  // Channel and player events reach only the parties entitled to them. Catalogue events without a payload (orgs, open
-  // days, friendlies, bare refresh pings) carry no data and go to every authenticated stream; the refetch they trigger
-  // is itself authorisation-checked.
+  // Catalogue pings carry no data and go to every stream; the refetch they trigger is authorisation-checked.
   function shouldDeliver(identity, event, payload) {
-    // A suspended or deleted org's open stream goes silent immediately, catalogue pings included.
     const org = identity.kind === 'org' ? liveOrg(identity) : null;
     if (identity.kind === 'org' && !org) return false;
     if (identity.kind === 'org' && identity.userId) {
-      // Staff removal takes effect on open streams too, not just reconnects.
       const u = byId.user(identity.userId);
       if (!u || u.removedAt) return false;
     }
@@ -72,9 +66,8 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
       if (identity.kind === 'guardian') return payload.audienceKind === 'guardian' && payload.audienceId === identity.guardianId;
       return false;
     }
-    // An event carrying an orgId is ORGANISATION-PRIVATE: it goes to that club's own streams and to nobody else, not
-    // the player it names, not their guardian, not a rival club that can see the player. Checked BEFORE the playerId
-    // rule below, which would otherwise deliver it to the subject.
+    // An orgId makes an event private to that club. Checked before the playerId rule, which would deliver it to the
+    // subject and to every club that can see them.
     if (payload.orgId) {
       return identity.kind === 'org' && org.id === payload.orgId;
     }
@@ -85,8 +78,7 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
       if (identity.kind === 'guardian') return p.guardianId === identity.guardianId;
       return visibleToOrg(p, org) && !isBlocked(p.id, org.id);
     }
-    // Nothing falls through to "deliver to everyone": a default of true would let the NEXT event with a new payload
-    // shape inherit broadcast-to-all. The audience is declared per event name, and an unclassified name fails closed.
+    // No default of true, so a new payload shape cannot inherit broadcast-to-all; unclassified names fail closed.
     switch (audienceFor(event)) {
       case 'public_safe': return true;
       case 'trust_safety_only': return identity.kind === 'admin';
@@ -95,7 +87,7 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
       case 'org_member': return identity.kind === 'org';
       case 'org_private':
       default:
-        // An organisation-private event that did not name its organisation is a classification bug. Nobody gets it.
+        // An org-private event without an orgId is a classification bug; nobody gets it.
         return false;
     }
   }
@@ -105,14 +97,13 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
   }
 
   /**
-   * Write one already-minimised event to the replay log and the live streams: the transport half of broadcast(), with
-   * no registry check. notify() registers it as an afterCommit effect of the row it wrote, so a `notify` frame is never
-   * on a stream or in the replay log for a row the database does not hold.
+   * broadcast() without the registry check. notify() runs it after its row commits, so a `notify` frame never
+   * refers to a row the database does not hold.
    */
   function publishEvent(event, payload) {
     const row = { id: ++eventSeq, event, payload, ts: Date.now() };
     if (event !== 'typing') {
-      // typing is transient by design: never buffered, never replayed
+      // typing is never replayed
       eventLog.push(row);
       if (eventLog.length > EVENT_LOG_CAP) eventLog.splice(0, eventLog.length - EVENT_LOG_CAP);
     }
@@ -123,9 +114,7 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
   }
 
   function broadcast(event, rawPayload = {}) {
-    // The registry is the only authority on what an event may carry. A key it does not list is stripped before
-    // anything reaches a stream or the replay log, and in development it throws: a new key on a live event is a
-    // privacy decision somebody has to make on purpose.
+    // Unlisted keys are stripped, and throw in development: a new key on a live event is a privacy decision.
     const { payload, dropped, unregistered } = minimizePayload(event, rawPayload);
     if (unregistered || dropped.length) {
       eventPayloadDrops.count += 1;
@@ -136,13 +125,13 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
       if ((process.env.NODE_ENV ?? 'development') !== 'production') throw new Error(msg);
       console.error(`EVENT ${msg} — stripped`);
     }
-    // Inside a unit of work the change is not committed yet: the event goes out once COMMIT returned, and never for a
-    // rolled-back operation. The registry check above still runs now, so a bad call site fails the unit.
+    // Inside a unit, send after commit (never for a rollback). The check above still runs now, so a bad call site
+    // fails the unit.
     if (store.inUnitOfWork?.()) { store.afterCommit(() => broadcast(event, rawPayload)); return; }
     publishEvent(event, payload);
   }
 
-  /** Close every open stream of one staff member (their removal). */
+  /** On staff removal. */
   function closeStreamsOf(userId) {
     for (const client of [...sseClients]) {
       if (client.identity?.kind === 'org' && client.identity.userId === userId) {
@@ -157,7 +146,7 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
     if (!sseIdentityFor(session)) return res.status(401).json({ error: 'AUTH_REQUIRED', message: 'Log in first — live sync is scoped to your account.' });
     for (const [t, v] of sseTickets) if (v.expiresAt < Date.now()) sseTickets.delete(t);
     const ticket = newToken();
-    // The ticket names the session by its sid; no bearer token is held anywhere.
+    // Holds the session's sid, never a bearer token.
     sseTickets.set(ticket, { sid: session.sid, expiresAt: Date.now() + SSE_TICKET_TTL_MS });
     res.json({ ticket, expiresInMs: SSE_TICKET_TTL_MS });
   });
@@ -167,9 +156,8 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
     if (!t || t.expiresAt < Date.now()) {
       return res.status(401).json({ error: 'TICKET_INVALID', message: 'Mint a fresh connect ticket (POST /events/ticket) and reconnect.' });
     }
-    // Identity resolves at connect time from the live session, so logout or suspension invalidates streams even inside
-    // a ticket's lifetime.
-    const identity = sseIdentityFor(sessions.bySid(t.sid)); // live sessions only
+    // Resolved from the live session, so logout invalidates a ticket within its lifetime.
+    const identity = sseIdentityFor(sessions.bySid(t.sid));
     if (!identity) return res.status(401).json({ error: 'SESSION_INVALID', message: 'Log in again — this session is no longer valid.' });
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.flushHeaders();
@@ -178,8 +166,7 @@ export function createLiveSync({ app, store, sessions, byId, users, channels, fi
     if (lastId > 0) {
       const bufferStart = eventLog.length > 0 ? eventLog[0].id : eventSeq + 1;
       if (lastId > eventSeq || lastId < bufferStart - 1) {
-        // The server restarted (ids reset) or the buffer evicted what was missed: never drop updates silently, tell
-        // the client to refetch everything.
+        // A restart reset the ids or the buffer evicted what was missed: the client must refetch everything.
         res.write(`data: ${JSON.stringify({ event: 'resync', ts: Date.now() })}\n\n`);
       } else {
         for (const row of eventLog) {

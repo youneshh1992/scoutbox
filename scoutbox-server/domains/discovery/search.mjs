@@ -8,14 +8,10 @@ import { ARCHETYPES } from '../../catalogue.mjs';
 
 const AGE_GROUPS = { u16: { ageBelow: 16 }, u18: { ageBelow: 18 }, '18-21': { ageAtLeast: 18, ageBelow: 22 }, senior: { ageAtLeast: 22 } };
 
-/** A scouting note as its organisation reads it. */
 const noteView = (n) => ({ id: n.id, orgId: n.orgId, playerId: n.playerId, userId: n.userId, scoutName: n.scoutName, text: n.text, ts: n.ts });
 
 export function registerPlayerSearch({ orgRouter, players, safetyAudit, findPlayer, isBlocked, ledgerAppend, broadcast, nextId, playerViewForOrg }) {
-  /**
-   * The `k` players the organisation may see that are most like `base` (domain.mjs similarityScore), best first; a
-   * tie keeps the creation order. Ranked over light rows: only the winners are decoded by the caller.
-   */
+  /** Best first; a tie keeps creation order. Ranked over light rows so only the winners are decoded. */
   function mostSimilar(base, org, k) {
     const best = [];
     players.scanLight({ visibleTo: org, exceptId: base.id }, (c) => {
@@ -29,20 +25,18 @@ export function registerPlayerSearch({ orgRouter, players, safetyAudit, findPlay
 
   orgRouter.get('/players', (req, res) => {
     const { q, position, academyPlus, availability, country, ageGroup, newDays } = req.query;
-    // A filter sent twice arrives as a list: refused by name, never bound into the query.
+    // A filter sent twice arrives as a list.
     for (const f of ['q', 'position', 'academyPlus', 'availability', 'country', 'ageGroup', 'newDays']) {
       if (req.query[f] !== undefined && typeof req.query[f] !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is given once, as text.` });
     }
-    // An unknown age group or a day count that is not a whole number of days is refused, not read as "any".
     if (ageGroup && !Object.hasOwn(AGE_GROUPS, ageGroup)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'ageGroup', message: `ageGroup is one of ${Object.keys(AGE_GROUPS).join(', ')}.` });
     if (newDays && !(/^\d{1,5}$/.test(newDays) && Number(newDays) > 0)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'newDays', message: 'newDays is a whole number of days, from 1.' });
     let page;
     try { page = readPage(req.query, players.directoryCursorShape(req.org)); } catch (e) { return sendPageError(res, e); }
-    // The whole visibility rule (the wall, the Grassroots radius, the blocks), the filters, the search and the
-    // declared order are the query's, so the page is exact; the view still applies the rule at the source.
-    //   Pro / agency: Academy+ first (a boosted, opted-in cohort), then PROFILE COMPLETENESS (never ability), then the id.
-    //   Grassroots: First Team Seekers first (need-based, never purchasable), then the nearest ground (to 0.1 km, as
-    //   shown), then completeness, then the id. The id makes the order total, so two reads never swap equal players.
+    // Visibility, filters and order are the query's, so the page is exact; the view still applies the rule.
+    //   Pro / agency: Academy+ first (an opted-in cohort), then profile completeness (not ability).
+    //   Grassroots: First Team Seekers first (need-based, not purchasable), then the nearest ground (to 0.1 km, as
+    //   shown), then completeness.
     const result = players.directoryPage(req.org, {
       position: position || undefined, availability: availability || undefined, country: country || undefined,
       academyPlus: academyPlus === 'true' || undefined, ...(AGE_GROUPS[ageGroup] ?? {}),
@@ -80,7 +74,7 @@ export function registerPlayerSearch({ orgRouter, players, safetyAudit, findPlay
     res.json({ ...view, orgNotes, similarPlayers: { note: 'Statistical similarity — a lead, not a verdict.', players: similar, archetypes } });
   });
 
-  // Internal scouting notes: shared inside the organisation, never visible to the player or any other organisation.
+  // Scouting notes are shared inside the organisation only, not with the player or any other organisation.
   orgRouter.post('/players/:id/notes', (req, res) => {
     const p = findPlayer(req.params.id);
     if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
@@ -114,7 +108,7 @@ export function registerPlayerSearch({ orgRouter, players, safetyAudit, findPlay
 
   orgRouter.get('/shortlist', (req, res) => {
     const ids = safetyAudit.ledger.playersListedBy(req.org.id);
-    // A shortlisted player who has since deleted their account is simply absent (the ledger row stays, id only).
+    // A player who has deleted their account is absent; the ledger row stays, id only.
     res.json(ids.map((id) => findPlayer(id)).filter(Boolean).map((p) => playerViewForOrg(p, req.org)).filter(Boolean));
   });
 }

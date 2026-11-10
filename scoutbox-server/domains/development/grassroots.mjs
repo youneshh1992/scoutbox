@@ -1,7 +1,5 @@
-// The Grassroots journey, exclusive to amateur and semi-pro players: free training programmes, honest benchmarks
-// against the player's cohort, the opportunity radar and local open days, First Team Seekers, coach references and
-// the season wrap. Adults act for themselves; for a child, registration, the seeker flag and a reference request are
-// the guardian's, from the guardian's account.
+// The Grassroots journey, for amateur and semi-pro players. For a child, registration, the seeker flag and a
+// reference request are the guardian's, from the guardian's account.
 import { switchRefused } from '../platform/input.mjs';
 import { GRASSROOTS_RADIUS_KM, haversineKm, visibleToOrg } from '../../domain.mjs';
 import { PLAYER_POSITIONS } from '../../repositories/identity.mjs';
@@ -63,18 +61,16 @@ export function registerGrassrootsJourney({
     if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     unit(() => {
       players.addItem(req.player.id, 'programme.completed', { sessionId: session.id, ts: Date.now() });
-      recordActivity(req.player); // programme work feeds the streak and the weekly goal
+      recordActivity(req.player);
       broadcast('players', { playerId: req.player.id });
     });
     res.json({ current: programmeProgress(players.byId(req.player.id)) });
   });
 
-  // Context, never a leaderboard: percentiles among amateur and semi-pro players in the same position group. A
-  // cohort too small to compare says so instead of giving a number.
+  // Percentiles among non-pro players in the same position group, never a leaderboard. A cohort too small to
+  // compare says so instead of giving a number.
   playerRouter.get('/benchmarks', (req, res) => {
     if (grassrootsOnly(req, res)) return;
-    // The cohort (inCohort: not pro, the same position track) is a SQL filter: light rows for the stats, one GROUP BY
-    // for the drill bests.
     const track = trackForPosition(req.player.position);
     const cohortFilter = { notLevel: 'pro', exceptId: req.player.id, positions: PLAYER_POSITIONS.filter((pos) => trackForPosition(pos) === track), orNoPosition: trackForPosition(null) === track };
     const cohort = [];
@@ -181,7 +177,7 @@ export function registerGrassrootsJourney({
     res.status(201).json({ registered: true });
   });
 
-  // ------------------------------------------------------------ First Team Seekers: need-based, free, never purchasable
+  // ------------------------------------------------------------ First Team Seekers: need-based, never purchasable
   const setSeeker = (player, req, res) => {
     if (switchRefused(res, req.body?.enabled, 'enabled')) return;
     const stored = players.setFirstTeamSeeker(player.id, req.body.enabled);
@@ -213,7 +209,7 @@ export function registerGrassrootsJourney({
     if (name.length > VL.coachName) return res.status(400).json({ error: 'FIELD_INVALID', field: 'coachName', message: `At most ${VL.coachName} characters.` });
     if (email.length > VL.coachEmail) return res.status(400).json({ error: 'FIELD_INVALID', field: 'coachEmail', message: `At most ${VL.coachEmail} characters.` });
     const code = randomCode(8);
-    // In a unit, so the id counter commits with the row. A player's name has no limit at sign-up: it is shortened, never refused.
+    // In a unit, so the id counter commits with the row. The player's name has no limit at sign-up, so it is shortened.
     const vouch = unit(() => transitionsVouches.vouches.create({
       id: nextId('vch'), playerId: player.id, playerName: player.name?.slice(0, VL.name) ?? null,
       coachName: name, coachEmail: email, role: (role ?? '').trim().slice(0, VL.role) || 'Coach',
@@ -270,7 +266,7 @@ References are screened by moderation and reviewed by Trust & Safety.`,
     res.status(201).json({ published: true });
   });
 
-  // ------------------------------------------------------------ the season wrap: the year in one card
+  // ------------------------------------------------------------ the season wrap
   playerRouter.get('/season-wrap', (req, res) => {
     if (grassrootsOnly(req, res)) return;
     const p = req.player;

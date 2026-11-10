@@ -1,18 +1,6 @@
 /**
- * The transaction domain's audit projection.
- *
- * The platform audit is NOT the user-visible timeline, and this file is
- * where that distinction lives: a timeline entry is filtered by the audience
- * tag its action carries, an audit row is filtered only by the tenant asking.
- * The audit therefore holds rows no party's timeline shows — a note being
- * added, an internal re-evaluation, a subject being tombstoned — and it names
- * the actor's role rather than repeating a person.
- *
- * What an audit row carries: actor, transaction, party role, the
- * compliance snapshot reference, old and new state, timestamp, reason code and
- * evidence references. What it never carries: a note's text, a document's
- * content, a term's numbers, a fee, a counterparty's name, a reviewer's
- * reason, or any personal field of the individual.
+ * The transaction domain's audit rows. Unlike the timeline, they are filtered only by the tenant asking, so they hold
+ * rows no party's timeline shows; they carry no note text, document content, fee or personal field.
  */
 
 export const TRANSACTION_AUDIT_ACTIONS = new Set([
@@ -26,7 +14,7 @@ export const TRANSACTION_AUDIT_ACTIONS = new Set([
   'transaction_subject_tombstoned',
 ]);
 
-/** The actor as a ROLE. A club never learns which named person at the agency acted, and vice versa. */
+/** The actor as a role: a club never learns which named person at the agency acted, and vice versa. */
 const actorOf = (h) => {
   const by = h?.by;
   if (!by) return null;
@@ -38,7 +26,7 @@ const actorOf = (h) => {
   return { role: by.kind, userId: null, name: null };
 };
 
-/** Detail is codes, states and counts. The allowlist is the whole mechanism. */
+/** Codes, states and counts only. */
 function safeDetail(detail) {
   if (!detail || typeof detail !== 'object') return null;
   const out = {};
@@ -48,14 +36,7 @@ function safeDetail(detail) {
   return Object.keys(out).length ? out : null;
 }
 
-/**
- * Audit rows for a tenant or one transaction.
- *
- * `agencyOrgId` gives the agency its own rows (they are merged into the agency
- * audit feed beside the agent core and compliance rows); `transactionId` gives the
- * attributed Trust & Safety read one transaction's rows. `snapshotOf(tx)` is the
- * transaction's compliance snapshot as the routes read it (the evaluation row it names).
- */
+/** `agencyOrgId` feeds the agency audit; `transactionId` the Trust & Safety read of one transaction. */
 export function transactionAuditRows({ reads, snapshotOf }, { agencyOrgId = null, transactionId = null } = {}) {
   const rows = [];
   let txs; let reps; let docs;

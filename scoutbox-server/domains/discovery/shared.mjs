@@ -1,28 +1,9 @@
-// Second Look + Nobody Missed: the pure engine and its policy.
+// Second Look (has something changed about a player since the club's decision, relevant to the reason it gave?)
+// and Nobody Missed (which eligible players match the club's own criteria but never entered its workflow?).
+// Neither scores or ranks players; every output is a list of plain facts.
 //
-// Two systems, one file of deterministic rules:
-//
-//   Second Look   — has something MATERIALLY changed about a player since our
-//                   club last made a recruitment decision, and is that change
-//                   relevant to the reason we gave?
-//   Nobody Missed — are there eligible players who match our OWN stated
-//                   criteria but have never meaningfully entered our
-//                   evaluation workflow?
-//
-// Neither decides who is talented, who deserves a contract, who was wrongly
-// rejected, or who will succeed. There is no score anywhere in this file — no
-// potential score, no missed-talent score, no probability, no ranking. Both
-// systems work from explicit club criteria, deterministic evidence changes and
-// exact rule-based comparisons, and every output can be read back to a human as
-// a list of plain facts.
-//
-// Everything here is pure: no Express, no database handle, no session.
-//
-// The one exception to "no imports" is the explainable match engine.
-// `playerMatchesBrief` delegates to it so that Nobody Missed and Matching
-// cannot drift apart. The import is circular (the engine reads this file's
-// vocabulary), which is safe because the engine touches that vocabulary only
-// inside function bodies — see the lazy band rank in matching/match.mjs.
+// The import of the match engine is circular (it reads this file's vocabulary), which is safe because the engine
+// touches that vocabulary only inside function bodies — see the lazy band rank in matching/match.mjs.
 import { matchBrief } from './matching/match.mjs';
 import { parseStrictDateOnly, isDayWithin, isAbsent } from '../../temporal.mjs';
 
@@ -32,10 +13,6 @@ import { parseStrictDateOnly, isDayWithin, isAbsent } from '../../temporal.mjs';
 
 export const SECOND_LOOK_POLICY_VERSION = 1;
 
-/**
- * Normalised material change types. Source systems each have their own
- * vocabulary; Second Look speaks exactly these.
- */
 export const CHANGE_TYPES = [
   // evidence
   'full_match_added',
@@ -49,9 +26,8 @@ export const CHANGE_TYPES = [
   // standardized measurement
   'combine_verified_added',
   'combine_verified_invalidated',
-  // A restoration is its own change. Trust & Safety restoring a result
-  // after a provider bug is news to a club that saw it disappear, and saying
-  // nothing would leave the earlier "no longer valid" note standing forever.
+  // A restoration is news to a club that saw the result disappear; without it the "no longer valid" note would
+  // stand for ever.
   'combine_verified_restored',
   // development activity
   'development_evidence_started',
@@ -65,7 +41,7 @@ export const CHANGE_TYPES = [
   'evidence_gap_closed',
 ];
 
-/** A change that reduces the evidence available. Never framed as wrongdoing. */
+/** A change that reduces the evidence available. Not framed as wrongdoing. */
 export const NEGATIVE_CHANGE_TYPES = [
   'evidence_removed', 'evidence_disputed',
   'verified_reference_revoked', 'combine_verified_invalidated',
@@ -91,17 +67,7 @@ export const CHANGE_COPY = {
   evidence_gap_closed: 'An evidence gap your organisation raised has been filled.',
 };
 
-/**
- * The reason → change mapping. This is the heart of Second Look: the rooms' archive
- * reasons are structured precisely so this table can ask whether the reason a
- * club gave may no longer apply.
- *
- * A reason absent from this table NEVER resolves from player evidence alone.
- * `squad_space`, `budget`, `timing`, `registration` and `travel_logistics` are
- * facts about the CLUB, not the player — no amount of new footage makes a
- * squad place appear, and claiming otherwise would be a lie dressed as a
- * feature.
- */
+/** Which changes may mean the archive reason a club gave no longer applies. */
 export const REASON_CHANGE_MAP = {
   insufficient_recent_evidence: ['full_match_added', 'evidence_added', 'evidence_quality_improved', 'evidence_gap_closed'],
   insufficient_full_match: ['full_match_added', 'evidence_gap_closed'],
@@ -109,34 +75,24 @@ export const REASON_CHANGE_MAP = {
   combine_missing: ['combine_verified_added', 'combine_verified_restored'],
   trial_needed: ['trial_completed'],
   continue_monitoring: ['full_match_added', 'verified_reference_added', 'combine_verified_added', 'trial_completed', 'current_club_confirmed', 'evidence_gap_closed'],
-  // Physical development is read as EVIDENCE becoming available, never as a
-  // prediction about a body. The copy stays evidence-based.
+  // Physical development is read as evidence becoming available, not as a prediction about a body.
   physical_profile: ['development_block_completed', 'combine_verified_added'],
-  // A role judgement can only be revisited on evidence that could actually
-  // change it — a new full match or a completed trial, not a reference.
+  // A role judgement is revisited only on evidence that could change it, not a reference.
   technical_fit: ['full_match_added', 'trial_completed'],
   tactical_fit: ['full_match_added', 'trial_completed'],
   development_upside: ['development_block_completed', 'full_match_added'],
-  // "Not a priority right now" is a soft judgement, so it CAN be revisited —
-  // but only on evidence substantial enough to change the picture, never on a
-  // trickle of small updates.
+  // A soft judgement, revisited only on substantial evidence, not a trickle of small updates.
   not_current_priority: ['full_match_added', 'verified_reference_added', 'combine_verified_added', 'trial_completed'],
   position_need: ['position_changed'],
-  // A decision taken on a trial outcome can be revisited when a LATER trial is
-  // completed and reported — nothing else about the player changes it.
   trial_outcome: ['trial_completed'],
-  // Club-side reasons: facts about the CLUB, not the player. No amount of new
-  // footage makes a squad place or a budget appear, and saying otherwise would
-  // be a lie dressed up as a feature.
+  // Facts about the club, not the player: no new footage makes a squad place or a budget appear.
   squad_space: [],
   budget: [],
   timing: [],
   registration: [],
   travel_logistics: [],
   eligibility: [],
-  // Availability is a fact about the player, but ScoutBox emits no
-  // availability-changed event today, so this cannot be resolved honestly yet.
-  // Recorded as a limitation rather than faked.
+  // A player fact, but nothing emits an availability-changed event yet.
   player_unavailable: [],
 };
 
@@ -148,32 +104,26 @@ export const CLUB_SIDE_REASONS = Object.entries(REASON_CHANGE_MAP)
 export const POLICY = {
   version: SECOND_LOOK_POLICY_VERSION,
 
-  // A general (non-reason-matching) change must clear a higher bar, so an
-  // unrelated trickle of updates never resurfaces an archived player.
+  // A change unrelated to the reason must clear a higher bar, so a trickle of updates does not resurface a player:
+  // this many distinct changes, or one substantial one.
   generalThreshold: {
-    // At least this many distinct material changes …
     minChanges: 2,
-    // … or one change of a kind that is substantial on its own.
     substantialTypes: ['full_match_added', 'verified_reference_added', 'combine_verified_added', 'trial_completed'],
   },
 
-  // Box Cam must not become notification spam: a single training session is
-  // never a Second Look. Only the first development evidence since the review,
-  // or a completed coach-assigned block, counts.
+  // A single training session is not a Second Look: only the first development evidence since the review, or a
+  // completed coach-assigned block, counts.
   boxCam: {
     countSessionsAsChange: false,
     minSessionsForFirstEvidence: 1,
   },
 
-  // Once an item has been reviewed or dismissed, the SAME evidence cannot
-  // regenerate it. Materially different evidence can, immediately.
+  // Once reviewed or dismissed, the same evidence cannot regenerate an item; new evidence can, immediately.
   cooldownDays: 30,
 
-  // An open item nobody acts on eventually stops being news.
   expiryDays: 120,
 
-  // A decision older than this is still valid input — Second Look has no
-  // upper bound on how long ago a club decided. Recorded for documentation.
+  // No upper bound on how long ago a club decided.
   maxDecisionAgeDays: null,
 };
 
@@ -189,7 +139,6 @@ export const SECOND_LOOK_TRANSITIONS = {
 
 export const canSecondLookTransition = (from, to) => (SECOND_LOOK_TRANSITIONS[from] ?? []).includes(to);
 
-/** Categories, not numbers. Ordering is by category then recency. */
 export const SECOND_LOOK_KINDS = ['direct_reason_resolved', 'significant_new_evidence', 'evidence_removed', 'general_update'];
 
 export const SECOND_LOOK_KIND_COPY = {
@@ -206,11 +155,7 @@ export const DISMISSAL_REASONS = [
   'squad_need_changed', 'no_action_required', 'other',
 ];
 
-/**
- * Copy the product is allowed to use, and copy it is not. The forbidden list is
- * swept in tests: Second Look must never tell a club it was wrong, and must
- * never tell it what to do.
- */
+// Tests sweep output for the forbidden copy: Second Look must not tell a club it was wrong or what to do.
 export const SECOND_LOOK_DISCLAIMER =
   'Second Look reports what changed in a player’s record since your decision. It does not judge that decision and does not recommend whether to sign anyone.';
 
@@ -222,11 +167,7 @@ export const FORBIDDEN_COPY = [
 
 // ------------------------------------------------------- change normalization
 
-/**
- * Normalise any source-system fact into a deterministic change record.
- * Nothing here copies a source payload: only the identity, the clock and the
- * type travel.
- */
+/** Normalise a source-system fact into a change record. Only identity, time and type travel, not the payload. */
 export function normalizeMaterialChange({ type, subjectId, sourceSystem, sourceId, occurredAt, detail = null }) {
   if (!CHANGE_TYPES.includes(type)) return null;
   if (!occurredAt || !Number.isFinite(occurredAt)) return null;
@@ -243,19 +184,13 @@ export function normalizeMaterialChange({ type, subjectId, sourceSystem, sourceI
   };
 }
 
-/**
- * A stable identity for a change, used for dedupe, cooldown, history and
- * notification idempotency. Deliberately excludes the timestamp: the same
- * source fact seen twice is the same change, whenever it is observed.
- */
+/** Excludes the timestamp: the same source fact seen twice is the same change. */
 export const changeFingerprint = ({ type, sourceSystem, sourceId }) =>
   `${type}:${sourceSystem}:${sourceId ?? 'none'}`;
 
 /**
- * One real-world change often reaches Second Look through several systems at once — a
- * Combine result appears in the Combine projection, in the Passport and as a
- * Trust component movement. Dedupe by canonical identity, keeping the earliest
- * observation so the timeline stays honest.
+ * One real-world change often arrives through several systems at once (a Combine result appears in the Combine
+ * projection, the Passport and Trust). Keep the earliest observation.
  */
 export function dedupeMaterialChanges(changes = []) {
   const byPrint = new Map();
@@ -267,10 +202,6 @@ export function dedupeMaterialChanges(changes = []) {
   return [...byPrint.values()].sort((a, b) => (b.occurredAt - a.occurredAt) || a.fingerprint.localeCompare(b.fingerprint));
 }
 
-/**
- * Keep only changes that happened strictly after the decision. Evidence that
- * already existed when the club decided is not news — the club saw it.
- */
 export function changesSinceDecision(changes = [], decisionAt) {
   if (!Number.isFinite(decisionAt)) return [];
   const now = Date.now();
@@ -283,16 +214,11 @@ export function changesSinceDecision(changes = [], decisionAt) {
 
 // ------------------------------------------------------------ reason matching
 
-/**
- * Does this change relate to that archive reason? Returns the matching reason
- * codes, never a score. An empty result is the common, correct answer.
- */
 export function secondLookReasonMatch(change, reasonCodes = []) {
   if (!change) return [];
   return reasonCodes.filter((code) => (REASON_CHANGE_MAP[code] ?? []).includes(change.type));
 }
 
-/** Was the general-change bar cleared, independently of any reason? */
 export function meetsGeneralThreshold(changes = []) {
   const positive = changes.filter((c) => !c.negative);
   if (positive.some((c) => POLICY.generalThreshold.substantialTypes.includes(c.type))) return true;
@@ -301,13 +227,7 @@ export function meetsGeneralThreshold(changes = []) {
 
 // -------------------------------------------------- snapshot vs current state
 
-/**
- * Compare the decision-time snapshot with the current canonical state.
- *
- * Where the snapshot cannot reconstruct a field, this says so rather than
- * inventing a previous value — `available: false` means "previous detail
- * unavailable", never "it was zero".
- */
+/** `available: false` means the snapshot cannot reconstruct the previous value, not that it was zero. */
 export function compareToSnapshot(snapshot, current) {
   const row = (key, label, was, now, wasKnown) => ({
     key, label, was: wasKnown ? was : null, now, available: !!wasKnown,
@@ -334,15 +254,8 @@ export function compareToSnapshot(snapshot, current) {
 }
 
 /**
- * Derive Trust movement from the snapshot's component LEVELS.
- *
- * The stored snapshot deliberately drops per-component coverage (a club may
- * not see it), so `trustChangeReasons` cannot read it. Rather than persist
- * coverage we were not allowed to show, this compares levels — coarser, but
- * honest, and it keeps the existing vocabulary.
- *
- * Trust movement is CONTEXT. It is never a trigger on its own: Second Look requires
- * the underlying facts, and `buildSecondLookCandidate` enforces that.
+ * Trust movement from the snapshot's component levels. The snapshot drops per-component coverage because a club
+ * may not see it, so levels are compared instead. Movement is context only, never a trigger on its own.
  */
 const LEVEL_RANK = { none: 0, limited: 1, established: 2, strong: 3, very_strong: 4 };
 
@@ -372,20 +285,13 @@ const levelId = (v) => (typeof v === 'string' ? v : v?.id ?? null);
 
 // -------------------------------------------------------- candidate assembly
 
-/**
- * Build one Second Look candidate for one archived room.
- *
- * Returns `null` when the player should not be surfaced at all — that is the
- * common case and is not an error.
- */
+/** `null` (the common case) when the player should not be surfaced. */
 export function buildSecondLookCandidate({
   room, decision, snapshot, changes = [], trustMovement = [],
   playerVisible = true, currentTrust = null, now = Date.now(),
 }) {
-  // Preconditions, in order.
   if (!room || !decision) return null;
   if (!playerVisible) return null;
-  // A room the club is actively working is not a Second Look — it is open work.
   if (!['archived', 'closed', 'withdrawn'].includes(room.room?.status)) return null;
 
   const material = changesSinceDecision(changes, decision.createdAt);
@@ -404,11 +310,9 @@ export function buildSecondLookCandidate({
       ? 'significant_new_evidence' : 'general_update';
   } else if (negative.length) kind = 'evidence_removed';
 
-  // Not every change clears the bar. Saying nothing is a valid outcome.
   if (!kind) return null;
 
-  // A reason a club gave that could NOT be resolved by player evidence is
-  // reported as still standing, so the UI can never imply otherwise.
+  // Club-side reasons are reported as still standing so the UI cannot imply otherwise.
   const unresolved = reasonCodes.filter((c) => CLUB_SIDE_REASONS.includes(c));
 
   return {
@@ -423,14 +327,11 @@ export function buildSecondLookCandidate({
     kind,
     kindLabel: SECOND_LOOK_KIND_COPY[kind],
     strength: direct.length ? 'direct' : 'general',
-    // One item per player, carrying every change — never three alerts for one
-    // Combine result.
     changes: directed.map(({ change, relatesTo }) => ({ ...change, relatesTo })),
     changeCount: material.length,
     directReasonCodes: [...new Set(direct.flatMap((d) => d.relatesTo))],
     unresolvedReasonCodes: unresolved,
     changeFingerprints: material.map((c) => c.fingerprint).sort(),
-    // Supporting context only. Never the reason the item exists.
     trustMovement,
     currentTrust,
     latestChangeAt: material[0].occurredAt,
@@ -442,8 +343,7 @@ export function buildSecondLookCandidate({
 
 function secondLookSummary({ kind, direct, material }) {
   if (kind === 'direct_reason_resolved') {
-    // Lead with the most substantial change, not merely the most recent: a new
-    // full match is the headline, a tier upgrade on the same day is not.
+    // Lead with the most substantial change, not merely the most recent.
     const headline = direct.find((d) => POLICY.generalThreshold.substantialTypes.includes(d.change.type)) ?? direct[0];
     return `${CHANGE_COPY[headline.change.type]} This relates to the reason recorded when the room was closed.`;
   }
@@ -453,11 +353,7 @@ function secondLookSummary({ kind, direct, material }) {
   return `${material.length} material ${material.length === 1 ? 'change' : 'changes'} since your review.`;
 }
 
-/**
- * Should an item be (re)surfaced, given what this club already did with the
- * same evidence? The cooldown is per-fingerprint-set: the same evidence cannot
- * come back, genuinely new evidence can, immediately.
- */
+/** Should an item be (re)surfaced, given what this club already did with the same evidence? */
 export function secondLookStatus({ existing, candidate, now = Date.now() }) {
   if (!existing) return { action: 'create', reason: 'new' };
   const seen = new Set(existing.changeFingerprints ?? []);
@@ -483,7 +379,6 @@ const hasSubstantial = (candidate, fingerprints) =>
 export const secondLookExpired = (item, now = Date.now()) =>
   item.status === 'open' && now - (item.latestChangeAt ?? item.createdAt) > POLICY.expiryDays * 86_400_000;
 
-/** Direct relevance first, then newest material change. Never a priority score. */
 export const orderSecondLook = (items = []) => items.slice().sort((a, b) =>
   (KIND_ORDER[a.kind] - KIND_ORDER[b.kind])
   || (b.latestChangeAt - a.latestChangeAt)
@@ -495,12 +390,8 @@ export const orderSecondLook = (items = []) => items.slice().sort((a, b) =>
 
 export const EVALUATION_COVERAGE_POLICY_VERSION = 1;
 
-/**
- * What counts as MEANINGFULLY EVALUATED. Versioned, documented, and
- * deliberately conservative: a profile view is not an evaluation. Passive
- * impressions are excluded both because they are not evaluation and because the
- * store that holds them is lossy by design.
- */
+// What counts as meaningfully evaluated. Passive impressions are excluded: they are not evaluation, and the store
+// that holds them is lossy.
 export const EVALUATION_SIGNALS = [
   { key: 'room_open', label: 'An open Recruitment Room exists' },
   { key: 'room_decided', label: 'A Recruitment Room reached a recorded decision' },
@@ -515,7 +406,7 @@ export const EVALUATION_SIGNALS = [
 
 export const EVALUATION_SIGNAL_KEYS = EVALUATION_SIGNALS.map((s) => s.key);
 
-/** Signals that explicitly do NOT count, recorded so the exclusion is auditable. */
+/** Recorded so the exclusion is auditable. */
 export const NON_EVALUATION_SIGNALS = [
   { key: 'profile_view', why: 'Opening a profile is not an evaluation.' },
   { key: 'search_impression', why: 'Appearing in a result list is not an evaluation.' },
@@ -524,18 +415,12 @@ export const NON_EVALUATION_SIGNALS = [
 
 export const COVERAGE_POLICY = {
   version: EVALUATION_COVERAGE_POLICY_VERSION,
-  // A player decided on recently is not "missed" — the club just looked.
-  // Second Look, not Nobody Missed, handles them if evidence changes.
+  // A recently decided player is not "missed"; Second Look handles them if evidence changes.
   recentDecisionDays: 90,
-  // An assessment older than this no longer counts as current evaluation.
   assessmentFreshDays: 365,
   note: 'Evaluation Coverage measures how many eligible players entered your evaluation workflow. It is not a measure of scouting quality, player talent, or freedom from bias.',
 };
 
-/**
- * Is this player meaningfully evaluated by this organisation?
- * Returns the signals, so "why is this player not here?" is always answerable.
- */
 export function isMeaningfullyEvaluated(signals = {}, { now = Date.now() } = {}) {
   const hits = EVALUATION_SIGNAL_KEYS.filter((k) => !!signals[k]);
   const recentDecisionAt = signals.lastDecisionAt ?? null;
@@ -578,11 +463,7 @@ export const EVIDENCE_REQUIREMENTS = [
 
 export const TRUST_BANDS = ['limited_evidence', 'developing_evidence', 'established_evidence', 'strong_evidence', 'very_strong_evidence'];
 
-/**
- * Criteria a brief may NEVER contain. Reuses the rooms' protected-characteristic
- * list so the two systems cannot drift apart, plus the recruitment-specific
- * proxies a brief could otherwise smuggle a protected trait through.
- */
+/** Protected characteristics, plus the proxies a brief could smuggle one through. */
 export const PROHIBITED_BRIEF_FIELDS = [
   'race', 'ethnicity', 'skin_colour', 'skin_color', 'religion', 'faith', 'caste',
   'disability', 'medical_condition', 'mental_health',
@@ -594,8 +475,7 @@ export const PROHIBITED_BRIEF_FIELDS = [
 
 export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protocols = null } = {}) {
   const errs = [];
-  // A field of the wrong type is refused, naming it, rather than coerced (an object title, a list that is not a
-  // list, an unknown foot or Combine protocol). Over-long free text is shortened.
+  // A field of the wrong type is refused rather than coerced; over-long free text is shortened.
   if (input.title != null && typeof input.title !== 'string') errs.push({ field: 'title', error: 'FIELD_INVALID' });
   const title = typeof input.title === 'string' ? input.title.trim().slice(0, 120) : '';
   if (!title && !errs.length) errs.push({ field: 'title', error: 'BRIEF_TITLE_REQUIRED' });
@@ -605,7 +485,6 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protoco
     return [...new Set(input[k].map(String))];
   };
 
-  // A protected characteristic must never become a recruitment filter.
   const offered = Object.keys(input).map((k) => k.toLowerCase().replace(/[^a-z]+/g, '_'));
   const prohibited = offered.filter((k) => PROHIBITED_BRIEF_FIELDS.some((p) => k === p || k.includes(p)));
   if (prohibited.length) {
@@ -647,8 +526,7 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protoco
   const availability = input.availability ?? null;
   if (availability !== null && typeof availability !== 'string') errs.push({ field: 'availability', error: 'FIELD_INVALID' });
 
-  // The window bounds are calendar days that EXIST: an unreadable `activeUntil`
-  // must not compare as "never passed" and keep a brief live for ever.
+  // An unreadable `activeUntil` must not compare as "never passed" and keep a brief live for ever.
   const activeFrom = isAbsent(input.activeFrom) ? null : input.activeFrom;
   const activeUntil = isAbsent(input.activeUntil) ? null : input.activeUntil;
   if (activeFrom !== null && !parseStrictDateOnly(activeFrom).ok) errs.push({ field: 'activeFrom', error: 'DATE_INVALID' });
@@ -674,7 +552,6 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protoco
   return { ok: true, title, criteria, activeFrom: activeFrom ?? null, activeUntil: activeUntil ?? null };
 }
 
-/** A brief's criteria in plain language. There are no hidden criteria. */
 export function explainBriefCriteria(criteria = {}) {
   const out = [];
   if (criteria.positions?.length) out.push({ key: 'positions', label: 'Position', value: criteria.positions.join(', ') });
@@ -695,25 +572,11 @@ export function explainBriefCriteria(criteria = {}) {
 
 // --------------------------------------------------------------- matching
 
-
-/**
- * Does this player match this brief? Boolean rules only — no weights, no
- * scoring, no preference ordering. Every criterion produces an explicit
- * `met`/`not_met` reason so "why is this player here?" is always answerable.
- *
- * `facts` is the lightweight match projection, never a full Passport.
- */
+/** Every criterion a brief carries is required. `facts` is the match projection, not a Passport. */
 export function playerMatchesBrief(facts, criteria = {}, opts = {}) {
-  // A thin adapter over the ONE explainable match engine (matching/match.mjs).
-  // Everything a brief carries is REQUIRED. There is deliberately no second
-  // matching implementation for this one to drift from.
   return matchBrief(facts, criteria, opts);
 }
 
-/**
- * A Nobody Missed candidate: a matching, visible, never-evaluated player with
- * the full explanation of why they are here.
- */
 export function buildNobodyMissedCandidate({ facts, brief, match, evaluation, roomOpen }) {
   if (!match.matched) return null;
   if (roomOpen) return null;              // already being evaluated
@@ -728,7 +591,6 @@ export function buildNobodyMissedCandidate({ facts, brief, match, evaluation, ro
     age: facts.age,
     trustBand: facts.trustBand,
     trustNote: 'Evidence confidence — not football ability.',
-    // "Why is this player here?" — every criterion, plus the workflow fact.
     reasons: [
       ...match.reasons,
       { key: 'no_room', met: true, text: 'No Recruitment Room in your organisation' },
@@ -737,10 +599,7 @@ export function buildNobodyMissedCandidate({ facts, brief, match, evaluation, ro
   };
 }
 
-/**
- * Evaluation coverage. A count over a declared denominator, named honestly.
- * Small groups are suppressed using the platform's existing convention.
- */
+/** Small groups are suppressed, as elsewhere on the platform. */
 export function evaluationCoverageState({ eligible, evaluated, suppressMin = 3 }) {
   const notYet = Math.max(0, eligible - evaluated);
   if (eligible > 0 && eligible < suppressMin) {
@@ -770,7 +629,7 @@ export const NM_DISMISSAL_REASONS = [
   'role_mismatch_after_review', 'timing', 'other',
 ];
 
-/** Default orderings. None of them is a quality rank. */
+/** None of these orderings is a quality rank. */
 export const NM_SORTS = ['newest_evidence', 'last_reviewed', 'name', 'distance', 'evidence_confidence'];
 
 export function orderNobodyMissed(items = [], sort = 'newest_evidence') {
@@ -810,10 +669,6 @@ export const clampPage = (n, fallback = LIMITS.pageSize) => {
   return Number.isFinite(v) && v > 0 ? Math.min(Math.floor(v), LIMITS.maxPageSize) : fallback;
 };
 
-/**
- * The viewer-safe projection. Discovery output is organisation-private and carries
- * only facts the club could already read about the player.
- */
 export function safeM18Projection(item) {
   if (!item) return null;
   const { orgId, ...rest } = item;
@@ -821,13 +676,8 @@ export function safeM18Projection(item) {
 }
 
 /**
- * Is a Recruitment Brief live on a given calendar day?
- *
- * `activeFrom` / `activeUntil` are calendar days ('YYYY-MM-DD'), inclusive at
- * both ends, compared as UTC calendar-day strings. There is no time-of-day and
- * no time zone on a brief: a brief that runs "until the 30th" is live for the
- * whole of the 30th everywhere, and stops being live at the first UTC instant
- * of the 31st. Pure so the boundary can be tested without a clock.
+ * `activeFrom` / `activeUntil` are UTC calendar days, inclusive: a brief "until the 30th" stops being live at the
+ * first UTC instant of the 31st.
  */
 export function briefIsLiveOn(b, today = new Date().toISOString().slice(0, 10)) {
   if (!b || b.status !== 'active') return false;

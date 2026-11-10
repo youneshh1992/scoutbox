@@ -1,9 +1,5 @@
-// Guardian accounts and the safeguarding gates in front of every under-18 profile: a verified e-mail, a passed ID
-// check and the accepted disclaimer, in that order, before a guardian can create a child (the child routes check
-// the flags). Trust & Safety reviews each ID check and can revoke it.
-//
-// The flags are written only through the guardians repository's acts, and no act moves the e-mail or the
-// disclaimer back.
+// A guardian needs a verified e-mail, a passed ID check and the accepted disclaimer, in that order, before creating a
+// child; the child routes check the flags. No act moves the e-mail or the disclaimer back.
 import express from 'express';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { reqText, badField, switchRefused } from '../platform/input.mjs';
@@ -17,11 +13,6 @@ const idvView = (q) => ({
   provider: q.provider, reference: q.reference, ts: q.ts, status: q.status,
 });
 
-/**
- * The guardian's sign-up, e-mail verification and log-in on `app`, the session check, and the authenticated
- * `/guardian` router with the ID check, the disclaimer and `/me`. Returns `{ guardianAuth, guardianRouter }`; the
- * child-management routes (children.mjs) mount on that router.
- */
 export function registerGuardianAccount({
   app, guardians, safetyAudit, unit, nextId, mailer, idv, faultSeam,
   createSession, sessionFor, loginKey, loginLockedOut, noteLoginFailure, devLogins, devLoginRefused,
@@ -46,7 +37,7 @@ export function registerGuardianAccount({
       disclaimerAccepted: false,
       createdAt: Date.now(),
     };
-    // The row commits on its own; the e-mail goes out afterwards, never inside a transaction.
+    // The e-mail goes out after the row commits, never inside a transaction.
     let g;
     try { g = guardians.create(record); } catch (e) {
       if (e?.code === 'EMAIL_IN_USE') return emailInUse();
@@ -124,8 +115,7 @@ export function registerGuardianAccount({
     if (!result.approved) {
       return res.status(422).json({ error: 'IDV_REJECTED', message: 'Identity verification did not pass — check the document details.' });
     }
-    // Entered only after the provider answered: a transaction never spans the await. The flag and the review-queue
-    // entry commit together.
+    // Entered only after the provider answered: a transaction never spans the await.
     try {
       unit(() => {
         guardians.recordIdCheck(req.guardian.id, { reference: result.reference });
@@ -153,7 +143,6 @@ export function registerGuardianAccount({
   return { guardianAuth, guardianRouter };
 }
 
-/** Trust & Safety's guardian list with the ID-check queue, and the review that approves or revokes a check. */
 export function registerGuardianIdReview({ adminRouter, guardians, safetyAudit, unit }) {
   adminRouter.get('/guardians', (req, res) => {
     let page;

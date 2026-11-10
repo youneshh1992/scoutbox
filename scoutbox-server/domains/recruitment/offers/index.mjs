@@ -1,31 +1,6 @@
 /**
- * Canonical Offer Workflow routes.
- *
- *   GET    /org/rooms/:id/offers                     the Offer surface for a case
- *   POST   /org/rooms/:id/offers                     create a DRAFT Offer (explicit club act)
- *   GET    /org/offers/:id                           one Offer, club view
- *   PATCH  /org/offers/:id/draft                     edit the DRAFT revision (own rev)
- *   POST   /org/offers/:id/issue                     ISSUE the exact revision → offer_made
- *   POST   /org/offers/:id/withdraw                  withdraw a DRAFT or an unanswered ISSUED revision
- *   POST   /org/offers/:id/revise                    open a new DRAFT revision on an Offer
- *   GET    /org/offers/:id/history                   append-only history
- *   GET    /org/recruitment/offer-policy             vocabulary
- *
- *   GET    /player/offers  · /player/offers/:id      the recipient's issued Offers
- *   POST   /player/offers/:id/accept · /decline      the recipient's own act → offer_accepted / offer_declined
- *   POST   /player/offers/:id/share-agent            an adult client shares one Offer with their representing agent
- *   GET    /player/offers/:id/documents/:docId       a document on an issued revision
- *   (the same five under /guardian/… for a guardian-controlled recipient)
- *
- *   GET    /org/agent/clients/:id/offers             read-only projection, only of Offers the client shared
- *
- * WHAT NEVER HAPPENS HERE
- *
- * No `case.status = …` (only `ctx.applyLifecycleTransition`, after the ONE
- * validator agreed with the real evidence provider); no signing read or
- * write; no `signed`, no `under_contract`; no internal decision rationale,
- * assessment, Box Cam observation or transaction note in any payload; no
- * body claim about who the caller is; no client clock.
+ * Offer routes, for the club, the recipient (player or guardian) and a shared agent. Case status moves only
+ * through `ctx.applyLifecycleTransition`, after the lifecycle validator agreed with the real evidence provider.
  */
 
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
@@ -47,28 +22,22 @@ import {
 } from './offer.mjs';
 
 export function registerOffers(rawCtx) {
-  // isLead, orgCanSee and audit come from
-  // one place, so an Offer is led, concealed and audited by exactly the rules
-  // a Room is.
+  // Shared helpers, so an Offer is led, concealed and audited by the same rules as a Room.
   const ctx = { ...rawCtx, ...buildRouteHelpers(rawCtx) };
   const {
     guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, auditEntry, orgCanSee, isAdult, storage,
     access = null, integration = null, transactions = null, faults = null,
-    signingSummary, // the signings domain's `summaryForOffer(offerId, orgId, at)`
-    // Every Offer write is an explicit repository operation (offers.create / update) inside `unit`.
+    signingSummary,
     recruitmentContactsOffers, unit, afterCommit,
     recruitmentReads,
-    verificationReads, // the document vault is the verification repository's evidence
+    verificationReads, // the document vault
   } = ctx;
-  /** A vault record by id, or null. */
   const vaultRecord = (id) => (typeof id === 'string' ? verificationReads?.evidence.byId(id) ?? null : null);
-  /** A case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...entry) => ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
   if (typeof unit !== 'function' || typeof afterCommit !== 'function' || !recruitmentContactsOffers?.offers) throw new TypeError('registerOffers needs the contacts/offers repository, unit and afterCommit from the data layer');
   if (typeof signingSummary !== 'function') throw new TypeError('registerOffers needs the signings domain\'s summaryForOffer (ctx.signingSummary)');
   const offers = recruitmentContactsOffers.offers;
-  /** A case of this organisation, or null. */
   const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
 
   const err = (res, error, message, extra = {}) => sendOfferError(res, { error, message, ...extra }, 'offer');
@@ -78,18 +47,16 @@ export function registerOffers(rawCtx) {
   const orgOf = (orgId) => ctx.byId.org(orgId);
   const now = requestClock();
   const byOrg = (req) => ({ kind: 'org', id: req.orgUser.id, name: req.orgUser.name, role: req.orgUser.role ?? null });
-  /** A history entry for an act (appended by the repository with the act). */
   const entry = (action, by, detail, at) => ({ id: nextId('aud'), at, action, by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null }, detail: detail ?? null });
 
-  /** Idempotency keys live on the record, one list per act, never overwritten. */
+  /** Idempotency keys live on the record, one list per act. */
   const keyRow = (offer, act, k) => (offer.keys?.[act] ?? []).find((x) => x && x.key === k) ?? null;
   /**
-   * A refusal decided INSIDE a unit of work (the case cannot take the move the
-   * Offer asks for): thrown so the unit rolls back the Offer rows and the case
-   * together, then answered by the route — never a 500.
+   * A refusal decided inside a unit (the case cannot take the move the Offer asks for): thrown so the unit
+   * rolls back the Offer and the case together, then answered by the route rather than as a 500.
    */
   class OfferRefusal extends Error { constructor(body) { super(body.error); this.body = body; } }
-  /** Run `work` as one unit; an OfferRefusal it throws is answered with its code. Returns undefined when it answered. */
+  /** Returns undefined when it has already answered. */
   const inUnit = (res, work) => {
     try { return { value: unit(work) }; } catch (e) {
       if (!(e instanceof OfferRefusal)) throw e;
@@ -99,22 +66,16 @@ export function registerOffers(rawCtx) {
     }
   };
 
-  /**
-   * A side effect (event, notification, audit line) that throws
-   * after the authoritative state was persisted must not turn a real success
-   * into a 500 — the client would retry and the replay would say "done"
-   * anyway. Logged, never fatal.
-   */
+  // A side effect that throws after the state was persisted is logged, not turned into a 500 the client
+  // would retry.
   const safe = sideEffectRunner('OFFER');
 
-  // A read-only signing summary on every Offer view (ids and the status word).
-  // An accepted Offer with no package reads `signing: null`: nothing is inferred.
+  // An accepted Offer with no signing package reads `signing: null`: nothing is inferred.
   const withSigning = (o, at, view) => ({ ...view, signing: signingSummary(o.id, o.orgId, at) });
   const clubView = (o, at) => withSigning(o, at, offerClubView(o, at));
 
   // ------------------------------------------------------------- lookups
 
-  /** Room + role + capability, through the Room's concealing lookup. */
   function roomFor(req, res, need) {
     const room = ctx.findRoomForRequest(req, res);
     if (!room) return null;
@@ -126,7 +87,7 @@ export function registerOffers(rawCtx) {
     return { room, role };
   }
 
-  /** An Offer of THIS organisation, or concealed. Then the room, through the same lookup. */
+  /** An Offer of this organisation, or concealed. */
   function offerFor(req, res, need) {
     const found = offers.byId(req.params.id);
     const o = found && found.orgId === req.org.id ? found : null;
@@ -135,8 +96,6 @@ export function registerOffers(rawCtx) {
     if (problems.length) { console.error(`OFFER integrity ${o.id}: ${problems.join(',')}`); err(res, 'OFFER_STATE_UNKNOWN', 'This Offer cannot be read.'); return null; }
     const room = caseOfOrg(o.caseId, req.org.id);
     if (!room || !room.room) { notFound(res, 'club'); return null; }
-    // The Offer's player is the case's player, and the
-    // Offer and the case cannot say two things that are both false.
     if (o.playerId !== room.playerId) { console.error(`OFFER integrity ${o.id}: player_mismatch`); err(res, 'OFFER_STATE_UNKNOWN', 'This Offer cannot be read.'); return null; }
     const consistency = offerCaseConsistency(o, room, now(req));
     if (offerCaseCorrupt(consistency)) { console.error(`OFFER consistency ${o.id}: ${consistency.join(',')}`); err(res, 'OFFER_STATE_UNKNOWN', 'This Offer cannot be read.'); return null; }
@@ -152,7 +111,7 @@ export function registerOffers(rawCtx) {
   const liveOfferOf = (kase, at) => offersOfCase(kase).find((o) => ['DRAFT', 'ISSUED'].includes(offerStatus(o, at))) ?? null;
   const subjectRemoved = (kase) => !!kase.subjectRemovedAt || !findPlayer(kase.playerId);
 
-  /** The recipient rule, re-derived now — never trusted from the record. */
+  /** The recipient rule, re-derived now rather than trusted from the record. */
   function recipientFor(org, playerId, at) {
     const r = resolveContactRecipient({ player: findPlayer(playerId), org, guardians: guardians.forPlayer(playerId), isAdult, visibleToOrg, isBlocked, now: new Date(at) });
     if (r.ok) return r;
@@ -161,10 +120,8 @@ export function registerOffers(rawCtx) {
   }
 
   /**
-   * `expectedRev` is REQUIRED on every club mutation of an existing Offer and
-   * is an integer — never coerced. ONE rev, the Offer's: every change
-   * to any revision, and every recipient answer, moves it; a client edits the
-   * Offer it was looking at, whichever revision that touches.
+   * `expectedRev` is required on every club mutation of an existing Offer and is never coerced. There is one
+   * rev, the Offer's: every revision change and every recipient answer moves it.
    */
   function revGate(req, res, record) {
     const exp = expectedRevOf(req.body);
@@ -174,7 +131,6 @@ export function registerOffers(rawCtx) {
     return guardRev(req, res, record, { errorCode: 'OFFER_REV_CONFLICT', current: { rev: Number.isInteger(record.rev) ? record.rev : 1, status: record.status } });
   }
 
-  /** A document reference names a vault record THIS organisation owns. */
   function resolveDocuments(refs, orgId) {
     const out = [];
     for (const d of refs) {
@@ -185,7 +141,7 @@ export function registerOffers(rawCtx) {
     return { ok: true, documents: out };
   }
 
-  /** What blocks a draft or an issue right now — codes for the screen, checked again on the mutation. */
+  /** Blocker codes for the screen; the mutation checks them again. */
   function blockersFor(kase, role, at, { forIssue = false, offer = null } = {}) {
     const blockers = [];
     const status = kase.room?.status ?? null;
@@ -213,11 +169,7 @@ export function registerOffers(rawCtx) {
 
   // ------------------------------------------------------- lifecycle coupling
 
-  /**
-   * The Trial pattern: ask the ONE validator, with the real evidence provider,
-   * then write through the ONE writer. A recipient-driven move names the
-   * recipient as actor. Returns the effect; never throws, never assigns status.
-   */
+  /** Validate with the real evidence provider, then write through the lifecycle writer. Never throws. */
   function advanceCase({ req = null, room, action, at, trigger, actor = null, keyDetail = {} }) {
     const role = req && !actor ? roleFor(req, room) : 'recruitment_admin';
     const verdict = canTransitionRecruitmentCase(room, action, { role, evidence: evidenceProvider(), now: at });
@@ -246,7 +198,7 @@ export function registerOffers(rawCtx) {
     if (snap.type === 'guardian' && snap.guardianId) notify({ kind: 'guardian', id: snap.guardianId }, 'recruitment_offer', text, offerId);
     else notify({ kind: 'player', id: snap.playerId }, 'recruitment_offer', text, offerId);
   }
-  /** The shared agent hears a factual line only when the client shared the Offer and still may. */
+  /** Only while the client has shared the Offer and the agent basis still holds. */
   function notifyAgent(offer, text) {
     const s = offer.agentShare;
     if (!s?.agentUserId) return;
@@ -254,7 +206,7 @@ export function registerOffers(rawCtx) {
     if (basis?.ok) notify({ kind: 'org_user', id: s.agentUserId }, 'recruitment_offer', text, offer.id);
   }
 
-  // ================================================================== CLUB
+  // ================================================================== club
 
   orgRouter.get('/rooms/:id/offers', (req, res) => {
     const got = roomFor(req, res, 'offer_view');
@@ -303,7 +255,6 @@ export function registerOffers(rawCtx) {
         return err(res, 'OFFER_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different Offer.');
       }
     }
-    // The create gate, in order: subject, block, case state, decision, one live Offer per case.
     if (subjectRemoved(kase)) return err(res, 'OFFER_SUBJECT_REMOVED', 'This player removed their ScoutBox account. No Offer is written about a person who left.');
     if (isBlocked(kase.playerId, kase.orgId)) return err(res, 'OFFER_BLOCKED', 'This player (or their guardian) has blocked your organisation. No Offer is drafted while the block stands.');
     if (kase.room?.status !== 'offer_consideration') return err(res, 'OFFER_STATE_INVALID', `An Offer is drafted from Offer consideration; this case is at "${ROOM_STATUS_LABELS[kase.room?.status] ?? kase.room?.status}".`, { current: { status: kase.room?.status ?? null } });
@@ -392,12 +343,9 @@ export function registerOffers(rawCtx) {
   });
 
   /**
-   * ISSUE — the most important mutation. Everything is re-resolved
-   * now: role (offerFor), org/case ownership (offerFor), state, expectedRev,
-   * subject, block, recipient (adult / guardian route / minor pathway),
-   * transaction readiness, expiry validity, document ownership, and then the
-   * lifecycle through the ONE validator. Built in memory; persisted once with
-   * the case move, or not at all.
+   * Everything is re-resolved at issue: role, ownership, state, rev, subject, block, recipient (adult,
+   * guardian route, minor pathway), transaction readiness, expiry and document ownership. The revision and
+   * the case move persist together or not at all.
    */
   orgRouter.post('/offers/:id/issue', (req, res) => {
     const got = offerFor(req, res, 'offer_issue');
@@ -420,7 +368,6 @@ export function registerOffers(rawCtx) {
     if (subjectRemoved(kase)) return err(res, 'OFFER_SUBJECT_REMOVED', 'This player removed their ScoutBox account. No Offer is issued to a person who left.');
     if (isBlocked(kase.playerId, kase.orgId)) return err(res, 'OFFER_BLOCKED', 'This player (or their guardian) has blocked your organisation. An Offer is not issued while the block stands.');
     if (!['offer_consideration', 'offer_made'].includes(kase.room?.status)) return err(res, 'OFFER_LIFECYCLE_CONFLICT', `The case at "${ROOM_STATUS_LABELS[kase.room?.status] ?? kase.room?.status}" cannot take an issued Offer.`, { current: { status: kase.room?.status ?? null } });
-    // The exact revision, re-validated as an ISSUED one: complete terms, a real expiry in range.
     const terms = validateTerms(rev.terms, { requireComplete: true });
     if (!terms.ok) return err(res, terms.error, terms.message, { field: terms.field });
     const expiry = validateExpiry(rev.expiresAt, { now: at, required: true });
@@ -430,14 +377,14 @@ export function registerOffers(rawCtx) {
       const ev = vaultRecord(d.evidenceId);
       if (!ev || ev.orgId !== kase.orgId) return err(res, 'OFFER_DOCUMENT_INVALID', 'A document on this draft no longer belongs to your organisation.', { field: 'documents' });
     }
-    // The recipient, resolved NOW: an adult player, or a guardian route — and the minor pathway is closed in this build.
+    // The recipient resolved now; the minor pathway is closed in this build.
     const org = orgOf(kase.orgId) ?? { id: kase.orgId };
     const rec = recipientFor(org, kase.playerId, at);
     if (!rec.ok) return err(res, rec.error, rec.message);
     if (rec.recipient.minor && !minorOfferPathwayOpen(org.country ?? 'GB')) {
       return err(res, 'OFFER_RECIPIENT_INVALID', 'This player is under the age of majority. No jurisdiction policy for an Offer to a minor is encoded in this build, so the Offer is not issued.', { reasons: ['MINOR_PATHWAY_CLOSED'] });
     }
-    // Transaction readiness, re-evaluated now, never from the draft's snapshot.
+    // Transaction readiness re-evaluated now, not from the draft's snapshot.
     let readiness = null;
     if (offer.transactionId) {
       const r = transactions?.offerReadinessFor?.(offer.transactionId, { orgId: kase.orgId, caseId: kase.id }) ?? null;
@@ -447,8 +394,7 @@ export function registerOffers(rawCtx) {
     }
     if (limited('offer_issue', req.org.id)) return res.status(429).json(rateLimitedBody('offer_issue'));
 
-    // ---- Freeze the revision; supersede the previous issued one; then the case —
-    // one unit: a case that cannot take the step rolls the Offer back with it.
+    // One unit: a case that cannot take the step rolls the Offer back with it.
     const by = byOrg(req);
     const prevIssued = (offer.revisions ?? []).find((r) => r.id === rev.supersedesRevisionId && r.status === 'ISSUED') ?? null;
     let moved = null;
@@ -503,12 +449,11 @@ export function registerOffers(rawCtx) {
     if (reasonRaw !== undefined && reasonRaw !== null && (typeof reasonRaw !== 'string' || reasonRaw.length > OFFER_LIMITS.withdrawReason)) return err(res, 'OFFER_INPUT_INVALID', `A reason is text under ${OFFER_LIMITS.withdrawReason} characters.`, { field: 'reason' });
     const reason = typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
     if (!revGate(req, res, offer)) return;
-    // A block does not stop a withdrawal: it is a closure, and the recipient is not approached.
+    // A block does not stop a withdrawal: it closes the Offer and does not approach the recipient.
     if (limited('offer_withdraw', req.org.id)) return res.status(429).json(rateLimitedBody('offer_withdraw'));
     const by = byOrg(req);
     const wasIssued = w.from === 'ISSUED';
-    // An issued Offer withdrawn from Offer made steps the case back to Offer consideration:
-    // the decision still stands, and the club may reissue. A withdrawn draft moves nothing.
+    // Withdrawing an issued Offer steps the case back to Offer consideration: the decision still stands.
     let moved = { applied: false, action: null, reason: 'draft', from: kase.room.status, to: kase.room.status, at };
     const withdrawn = unit(() => {
       offers.withdrawRevision(offer.id, { revisionId: rev.id, at, by, reason });
@@ -529,7 +474,6 @@ export function registerOffers(rawCtx) {
     res.json({ offer: clubView(withdrawn, at), lifecycle: moved });
   });
 
-  /** A new DRAFT revision on an Offer whose current revision is issued, expired, withdrawn or declined. */
   orgRouter.post('/offers/:id/revise', (req, res) => {
     const got = offerFor(req, res, 'offer_draft');
     if (!got) return;
@@ -590,23 +534,16 @@ export function registerOffers(rawCtx) {
     });
   });
 
-  // ================================================================== RECIPIENT
+  // ================================================================== recipient
 
   /**
-   * The recipient's Offers: issued revisions addressed to the caller (or, for a
-   * guardian, to a child they currently control), re-authorised against the
-   * live recipient rule on every read — a route that a lost guardianship or a
-   * new block changes at once.
-   */
-  /**
-   * A row a recipient or an agent may be shown is one
-   * whose own shape is sound AND whose case does not contradict it. A row that
-   * fails is omitted — never repaired, never shown as a lesser truth.
+   * Shown to a recipient or agent only if the row is sound and its case does not contradict it; otherwise
+   * omitted, never repaired.
    */
   function soundOffer(o, at) {
     if (!o || offerIntegrity(o).length) return false;
     const k = caseOfOrg(o.caseId, o.orgId);
-    if (!k) return true; // no case to disagree with; the row's own integrity carried it
+    if (!k) return true;
     if (k.playerId !== o.playerId) { console.error(`OFFER integrity ${o.id}: player_mismatch`); return false; }
     const c = offerCaseConsistency(o, k, at);
     if (offerCaseCorrupt(c)) { console.error(`OFFER consistency ${o.id}: ${c.join(',')}`); return false; }
@@ -618,7 +555,7 @@ export function registerOffers(rawCtx) {
     for (const o of offers.forPlayers(playerIds)) {
       if (!soundOffer(o, at)) continue;
       const live = liveRevision(o);
-      if (!live) continue; // a draft — or a draft withdrawn before issue — is invisible, not redacted
+      if (!live) continue; // never issued: invisible, not redacted
       const snap = live.recipientSnapshot;
       if (!snap || snap.type !== by) continue;
       if (by === 'guardian' && snap.guardianId !== actorId) continue;
@@ -637,8 +574,6 @@ export function registerOffers(rawCtx) {
   const caseOpenFor = (o) => { const k = caseOfOrg(o.caseId, o.orgId); return !k || k.room?.status === 'offer_made'; };
   const recipientView = (o, at) => withSigning(o, at, offerRecipientView(o, at, { orgName: orgOf(o.orgId)?.name ?? null, caseOpen: caseOpenFor(o) }));
 
-  /** A read receipt for the live revision: a fact about delivery, never a status. Returns the stored Offer (unchanged when it was already recorded). */
-  /** Does this viewer still need a receipt for the live revision? (No live revision: nothing to receipt.) */
   function receiptDue(o, { kind, id }) {
     const cur = liveRevision(o);
     return !!cur && !(o.readReceipts ?? []).some((r) => r && r.revisionId === cur.id && r.viewerKind === kind && r.viewerId === id);
@@ -654,8 +589,8 @@ export function registerOffers(rawCtx) {
       const at = now(req);
       const actorId = by === 'guardian' ? req.guardian.id : req.player.id;
       const playerIds = by === 'guardian' ? req.guardian.childIds : [req.player.id];
-      // The list shows the full terms, so listing IS the recipient's first sight of a revision: one receipt per live revision, persisted once.
-      // A unit of work is opened only when a receipt is new: a list already seen is a read and nothing else.
+      // Listing shows the full terms, so it counts as the recipient's first sight of each live revision. A unit
+      // is opened only when a receipt is new.
       const viewer = { kind: by, id: actorId };
       const listed = recipientOffers({ by, actorId, playerIds, at });
       const unseen = listed.filter((o) => receiptDue(o, viewer));
@@ -680,12 +615,8 @@ export function registerOffers(rawCtx) {
   }
 
   /**
-   * ACCEPT / DECLINE: explicit, exact revision, own act. Order:
-   * concealing lookup → the recipient rule NOW (an adult player; a guardian
-   * still controlling this child; the minor pathway) → the block rule
-   * (decline is closure and allowed; accept is not) → the exact revision
-   * gate → rev → rate → append the response → the case through the ONE
-   * validator with the recipient as actor.
+   * Accept or decline one exact revision, as the recipient's own act. A block allows a decline (it is a
+   * closure) but not an acceptance. The case moves through the lifecycle validator with the recipient as actor.
    */
   function respondHandler(by, responseType) {
     return (req, res) => {
@@ -699,13 +630,11 @@ export function registerOffers(rawCtx) {
       if (!key.ok) return err(res, key.error, key.message);
       const revisionId = req.body?.revisionId;
       if (typeof revisionId !== 'string' || !revisionId) return err(res, 'OFFER_INPUT_INVALID', 'Name the exact revision you are answering (revisionId).', { field: 'revisionId' });
-      // Replay: the same key produced this exact response already.
       const priorResp = key.key ? (o.responses ?? []).find((x) => x && x.clientKey === key.key) : null;
       if (priorResp) {
         if (priorResp.revisionId === revisionId && priorResp.responseType === responseType && priorResp.actorId === actorId) return res.json({ offer: recipientView(o, at), lifecycle: o.lifecycle ?? null, idempotent: true });
         return err(res, 'OFFER_IDEMPOTENCY_CONFLICT', 'This clientKey was already used for a different answer.');
       }
-      // The recipient rule NOW.
       const player = findPlayer(o.playerId);
       const org = orgOf(o.orgId) ?? { id: o.orgId };
       const r = resolveContactRecipient({ player, org, guardians: player ? guardians.forPlayer(player.id) : [], isAdult, visibleToOrg, isBlocked, now: new Date(at) });
@@ -734,15 +663,11 @@ export function registerOffers(rawCtx) {
 
       const who = { kind: by, id: actorId, name: actorName };
       const response = { id: nextId('rofa'), revisionId: rev.id, responseType, actorType: by, actorId, actorName, forPlayerId: o.playerId, occurredAt: at, reason, clientKey: key.key };
-      // The club may have a NEW DRAFT open beside the live revision. The
-      // recipient's answer to the live revision is authoritative: the unissued
-      // draft is discarded (it was never anyone's Offer), and the answered
-      // revision becomes the current one. Recorded, never silent.
+      // The answer to the live revision discards any unissued draft beside it and makes the answered revision
+      // current.
       const draftBeside = currentRevision(o);
       const discard = draftBeside && draftBeside.id !== rev.id && draftBeside.status === 'DRAFT' ? draftBeside : null;
-      // The case moves BECAUSE the recipient acted — through the ONE validator, which sees this response as its
-      // evidence: the answer is written first, then the case asked, in one unit. A case that cannot record the
-      // answer rolls the answer back with it.
+      // The answer is written before the case move so the validator sees it as evidence; one unit.
       const room = caseOfOrg(o.caseId, o.orgId);
       let moved = { applied: false, action: null, reason: 'no_case', at };
       const done = inUnit(res, () => {
@@ -750,7 +675,7 @@ export function registerOffers(rawCtx) {
         if (room) {
           moved = advanceCase({ room, action: responseType === 'accepted' ? 'recordOfferAccepted' : 'recordOfferDeclined', at, trigger: `offer:${responseType}:${o.id}`, actor: who, keyDetail: { offerId: o.id, revisionId: rev.id } });
           if (!moved.applied && moved.reason !== 'already_there') {
-            // The case is somewhere an answer cannot move it (on hold, withdrawn…). The Offer is not answered into a state the case cannot record.
+            // On hold, withdrawn and so on: the Offer is not answered into a state the case cannot record.
             throw new OfferRefusal({ error: 'OFFER_LIFECYCLE_CONFLICT', message: 'This Offer cannot be answered right now; the club has paused or ended the case. Nothing was recorded.', lifecycle: moved.reason });
           }
         }
@@ -762,10 +687,8 @@ export function registerOffers(rawCtx) {
       });
       if (!done) return;
       const answered = done.value;
-      // A development-only fault seam after the answer and the case move were
-      // persisted: the caller sees a failure, the
-      // store carries the whole answer, and a retry with the same clientKey
-      // replays it (idempotent) without a second move or a second notification.
+      // Development-only fault seam after persisting: a retry with the same clientKey replays without a second
+      // move or notification.
       if (faults?.shouldFail?.('offer.respond.after_persist')) throw new Error('simulated failure after the answer was persisted (development fault layer)');
       if (room) safe('offer_responded', () => broadcast?.('offer_responded', { orgId: o.orgId, roomId: room.id, offerId: o.id, status: currentRevision(answered)?.status ?? null }));
       safe('notifyClub', () => notifyClub(o, `${actorName} ${responseType} Offer revision ${rev.revisionNumber} for ${room?.playerName ?? player?.name ?? 'the player'}${responseType === 'accepted' ? ' — accepted in ScoutBox; signing pending' : ''}.`));
@@ -774,13 +697,13 @@ export function registerOffers(rawCtx) {
     };
   }
 
-  /** An adult client shares ONE Offer with their currently representing agent. A guardian route cannot share. */
+  /** An adult client shares one Offer with their representing agent. A guardian route cannot share. */
   playerRouter.post('/offers/:id/share-agent', (req, res) => {
     const o = recipientOffer(req, res, { by: 'player', actorId: req.player.id, playerIds: [req.player.id] });
     if (!o) return;
     const at = now(req);
     if (!isAdult(req.player)) return err(res, 'OFFER_NOT_PERMITTED', 'Sharing an Offer with an agent is an adult client\'s own act.');
-    // Un-sharing needs no agent at all: a client whose mandate has ended must still be able to clear the share.
+    // Un-sharing needs no agent, so a client whose mandate ended can still clear the share.
     if (req.body?.share === false) {
       const history = o.agentShare ? [entry('offer_agent_share_withdrawn', { kind: 'player', id: req.player.id, name: req.player.name }, null, at)] : [];
       const cleared = unit(() => offers.setAgentShare(o.id, { share: null }, { at, touch: true, history }));
@@ -791,8 +714,7 @@ export function registerOffers(rawCtx) {
     let agreement = sole.agreement;
     if (agreementId) { const named = ctx.agentReads.agreements.byId(agreementId); agreement = named && named.clientId === req.player.id && integration?.basisFor?.({ agentUserId: named.agentUserId, clientId: req.player.id, at })?.ok ? named : null; }
     if (!agreement) return err(res, 'OFFER_INPUT_INVALID', sole.ambiguous ? 'You have more than one active agent. Name the agreement (agreementId) you are sharing with.' : 'No active representation agreement to share with.', { field: 'agreementId' });
-    // A share is the recipient's own fact about their agent: it changes no term
-    // and must not make the club's next edit conflict. No rev bump.
+    // A share changes no term, so it does not bump the rev and cannot make the club's next edit conflict.
     const shared = unit(() => {
       const fresh = offers.setAgentShare(o.id, { share: { agentUserId: agreement.agentUserId, agreementId: agreement.id, at, by: { kind: 'player', id: req.player.id } } }, {
         at, touch: true, history: [entry('offer_agent_shared', { kind: 'player', id: req.player.id, name: req.player.name }, { agreementId: agreement.id }, at)],
@@ -809,7 +731,7 @@ export function registerOffers(rawCtx) {
       const playerIds = by === 'guardian' ? req.guardian.childIds : [req.player.id];
       const o = recipientOffer(req, res, { by, actorId, playerIds });
       if (!o) return;
-      // Only a document on an ISSUED (or answered) revision addressed to this recipient; never a draft's.
+      // Only a document on an issued (or answered) revision, never a draft's.
       const rev = (o.revisions ?? []).find((r) => wasIssued(r) && (r.documents ?? []).some((d) => d.id === req.params.docId));
       const doc = rev ? rev.documents.find((d) => d.id === req.params.docId) : null;
       if (!doc) return documentNotFound(res, by);
@@ -831,14 +753,11 @@ export function registerOffers(rawCtx) {
   guardianRouter.post('/offers/:id/decline', respondHandler('guardian', 'declined'));
   guardianRouter.get('/offers/:id/documents/:docId', documentHandler('guardian'));
 
-  // ================================================================== AGENT
+  // ================================================================== agent
 
   /**
-   * Read-only projection: only Offers the client explicitly shared,
-   * and only while the agent's basis, scope and licence hold NOW — the
-   * `client_private` agent decision plus an employment/transfer scope. A
-   * same-agency colleague, an agency administrator and an agent whose mandate
-   * lapsed all see nothing, and nothing says an Offer exists.
+   * Only Offers the client shared with this agent, and only while the agent's basis, employment/transfer scope
+   * and licence hold now. Anyone else sees nothing, including whether an Offer exists.
    */
   orgRouter.get('/agent/clients/:id/offers', (req, res) => {
     if (!access?.resolveMembership?.(req, res)) return;
@@ -852,17 +771,15 @@ export function registerOffers(rawCtx) {
     const basis = integration?.basisFor?.({ agentUserId: req.orgUser.id, clientId: a.clientId, at });
     const scopeOk = !!basis?.ok && (basis.scope ?? []).some((s) => s === 'employment' || s === 'transfer');
     if (!scopeOk) return res.status(403).json({ error: 'SCOPE_INSUFFICIENT', message: 'Your representation scope with this client does not cover employment or transfer.' });
-    // The licence is consulted NOW. `client_private` is not a regulated action,
-    // so the decision above never asks; an Offer is employment business, and an agent
-    // whose required facets are not verified reads nothing. Fail closed when
-    // the fact cannot be asked.
+    // `client_private` is not a regulated action, so the decision above never checks the licence; an Offer is
+    // employment business, so it is checked here, failing closed.
     const licenceCurrent = integration?.licenceCurrentFor ? integration.licenceCurrentFor(req.orgUser.id, a.jurisdiction ?? null, at) : false;
     if (licenceCurrent !== true) return res.status(403).json({ error: 'LICENCE_NOT_CURRENT', rule: 'LICENCE', message: 'This client\'s Offers are not open to you right now.' });
     const player = findPlayer(a.clientId);
     const items = [];
     for (const o of offers.forPlayer(a.clientId)) {
       if (!soundOffer(o, at)) continue;
-      if (!o.agentShare || o.agentShare.agentUserId !== req.orgUser.id) continue; // not shared with THIS agent: invisible
+      if (!o.agentShare || o.agentShare.agentUserId !== req.orgUser.id) continue;
       if (!liveRevision(o)) continue;
       items.push(withSigning(o, at, offerAgentView(o, at, { orgName: orgOf(o.orgId)?.name ?? null })));
     }

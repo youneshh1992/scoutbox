@@ -1,19 +1,15 @@
-// Drill guidance and development objectives (feedback → objectives → reassessment).
-//
-// Objectives and drill reviews are rows of the development repository (repositories/development.mjs). Junk is
-// refused with the field named (400 FIELD_INVALID, EVIDENCE_INVALID, DATE_INVALID); over-long objective, progress
-// and outcome text is shortened.
+// Drill guidance and development objectives (feedback → objectives → reassessment). Over-long objective, progress
+// and outcome text is shortened rather than refused.
 import { DEVELOPMENT_LIMITS as DL } from '../../repositories/development.mjs';
 import { parseDate } from './hub/shared.mjs';
 
-/** The recording guidance, the same for every combine drill (a drill is "reviewed" only once a named person reviewed it). */
+/** The same for every combine drill. */
 export const DRILL_RECORDING = Object.freeze({
   equipment: 'Any phone camera ≥ 720p', distance: 'Full drill area in frame', surface: 'Flat grass or turf',
   camera: 'Fixed position, side-on, no zooming during the attempt',
 });
 const DEFAULT_REVIEWER = 'T&S football staff';
 
-// Responses are built from explicit allowlists, never by spreading a stored record.
 const itemView = (i) => ({ id: i.id, text: i.text, exerciseRefs: [...i.exerciseRefs], baselineEvidenceIds: [...i.baselineEvidenceIds] });
 const reassessmentView = (r) => ({
   id: r.id, requestedBy: { kind: r.requestedBy.kind, id: r.requestedBy.id, name: r.requestedBy.name }, requestedAt: r.requestedAt, status: r.status,
@@ -51,9 +47,7 @@ export function registerObjectives(ctx) {
     return [...list];
   };
 
-  // Drill library guidance: recording instructions + review status for
-  // the existing combine drills. Nothing is "professionally validated" unless
-  // a named reviewer actually reviewed it — drills start unreviewed.
+  // A drill counts as reviewed only once a named reviewer reviewed it.
   const guidanceOf = (drillId, review) => ({
     drillId, recording: { ...DRILL_RECORDING },
     coachReview: review ? { status: 'reviewed', reviewer: review.reviewer, at: review.reviewedAt } : { status: 'unreviewed', reviewer: null, at: null },
@@ -80,9 +74,8 @@ export function registerObjectives(ctx) {
   });
 
   // ======================================================== objectives
-  // Feedback → objectives → reassessment. Private assessments never leak
-  // into objectives; only the published feedback record can seed one, and
-  // sharing progress back is the player's (or guardian's) explicit choice.
+  // Only published feedback can seed an objective, never a private assessment. Sharing progress back is the
+  // player's (or guardian's) explicit choice.
 
   function createObjective(req, res, player, actor) {
     const { feedbackId, objectives } = req.body ?? {};
@@ -135,8 +128,7 @@ export function registerObjectives(ctx) {
   /** The objective `id` if it belongs to one of these players, or null. */
   const objectiveOf = (id, playerIds) => { const o = reads.objectives.byId(id); return o && playerIds.includes(o.playerId) ? o : null; };
 
-  // Progress: players (minors included — it's football activity) log
-  // completions and follow-up evidence against their own objectives.
+  // Minors may log progress themselves: it is football activity.
   playerRouter.post('/objectives/:id/progress', (req, res) => {
     const o = objectiveOf(req.params.id, [req.player.id]);
     if (!o) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });

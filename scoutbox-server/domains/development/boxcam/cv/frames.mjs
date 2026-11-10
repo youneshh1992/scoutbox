@@ -1,15 +1,5 @@
-// Frame intake: validation, decoding, bounded buffering.
-//
-// This is the only place in ScoutBox where a pixel enters the server, so it
-// is written defensively and kept small enough to read in one sitting.
-//
-// Two privacy invariants hold here and are asserted by the suite:
-//   * a decoded frame NEVER leaves this module's caller chain, and
-//   * no frame, and nothing derived pixel-wise from a frame, is persisted or
-//     logged.
-//
-// A frame's entire lifetime is: validate → decode into a Uint8Array →
-// hand to the engine → drop the reference. Nothing writes it anywhere.
+// The only place a pixel enters the server. A frame is validated, decoded into a Uint8Array, handed to the engine and
+// dropped; no frame, or anything derived pixel-wise from one, is persisted or logged.
 
 import crypto from 'node:crypto';
 import { FRAME_ENCODING, FRAME_LIMITS } from './policy.mjs';
@@ -23,20 +13,12 @@ export const FRAME_ERRORS = Object.freeze({
   BATCH_TOO_LARGE: 'BATCH_TOO_LARGE',
 });
 
-/**
- * Validate and decode one frame envelope.
- *
- * Returns `{ ok: true, frame }` or `{ ok: false, error, detail }`. It never
- * throws on hostile input: a caller that has to wrap this in try/catch will
- * eventually forget to, and a decoder that throws is a decoder that can be
- * used to crash a route.
- */
+/** Never throws on hostile input, so it can't be used to crash a route. */
 export function decodeFrame(raw) {
   if (!raw || typeof raw !== 'object') {
     return { ok: false, error: FRAME_ERRORS.FRAME_MALFORMED, detail: 'frame is not an object' };
   }
-  // Exactly one documented encoding. Anything else is refused by name
-  // rather than sniffed — there is deliberately no format detection here.
+  // One encoding; anything else is refused by name, not sniffed.
   if (raw.encoding !== FRAME_ENCODING) {
     return {
       ok: false,
@@ -62,8 +44,7 @@ export function decodeFrame(raw) {
   if (typeof raw.data !== 'string') {
     return { ok: false, error: FRAME_ERRORS.FRAME_MALFORMED, detail: 'data must be a base64 string' };
   }
-  // Refuse on the ENCODED length before allocating, so an oversized payload
-  // never becomes a large buffer.
+  // Refuse on the encoded length before allocating.
   if (raw.data.length > Math.ceil(FRAME_LIMITS.maxBytes / 3) * 4 + 8) {
     return { ok: false, error: FRAME_ERRORS.FRAME_TOO_LARGE, detail: 'encoded frame exceeds the byte cap' };
   }
@@ -73,10 +54,8 @@ export function decodeFrame(raw) {
   } catch {
     return { ok: false, error: FRAME_ERRORS.FRAME_MALFORMED, detail: 'data is not decodable base64' };
   }
-  // Node's base64 decoder is lenient: it silently ignores characters outside
-  // the alphabet instead of failing. The length check below is therefore the
-  // real validation, and it is exact — a gray8 plane is w*h bytes, no more
-  // and no less. This is what makes "there is no parser to attack" true.
+  // Node's base64 decoder silently ignores characters outside the alphabet, so the exact w*h length check below is
+  // the real validation.
   if (buf.length !== expected) {
     return {
       ok: false,
@@ -100,26 +79,13 @@ export function decodeFrame(raw) {
       w,
       h,
       pixels: new Uint8Array(buf.buffer, buf.byteOffset, buf.length),
-      // Content hash: the defence against duplicate frames inflating a
-      // count. It is a hash of PIXELS, which is derived data and not an
-      // image — it cannot be inverted into a picture, and it is never stored
-      // on the session record.
+      // Defends against duplicates inflating a count. A pixel hash can't be inverted into a picture and isn't stored.
       hash: crypto.createHash('sha256').update(buf).digest('base64url').slice(0, 22),
     },
   };
 }
 
-/**
- * A bounded, session-scoped frame queue.
- *
- * Capacity is fixed. When full, the documented policy is to DROP
- * THE OLDEST and record the drop, never to grow. Dropping is visible in the
- * integrity record, so an attempt that was only partly observed cannot
- * quietly present itself as fully observed.
- *
- * Keyed by session id by construction: an instance belongs to exactly one
- * session and is discarded with it.
- */
+/** When full it drops the oldest and records the drop, so a partly observed attempt can't pass as fully observed. */
 export class FrameQueue {
   constructor({ capacity = FRAME_LIMITS.maxQueuedFrames } = {}) {
     this.capacity = capacity;
@@ -144,7 +110,6 @@ export class FrameQueue {
     return out;
   }
 
-  /** Release every reference. Called on finalize and on teardown. */
   clear() {
     this.items = [];
   }
@@ -152,7 +117,6 @@ export class FrameQueue {
   get size() { return this.items.length; }
 }
 
-/** Cheap whole-frame statistics, computed once and reused (the visibility checks). */
 export function frameStats(frame) {
   const px = frame.pixels;
   let sum = 0;
@@ -166,7 +130,7 @@ export function frameStats(frame) {
   return { mean, stdDev: Math.sqrt(varSum / px.length) };
 }
 
-/** Mean absolute inter-frame difference — the static/frozen detector. */
+/** Mean absolute inter-frame difference: the static/frozen detector. */
 export function meanAbsDiff(a, b) {
   if (!a || !b || a.pixels.length !== b.pixels.length) return Infinity;
   let sum = 0;

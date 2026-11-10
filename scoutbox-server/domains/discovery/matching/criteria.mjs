@@ -1,43 +1,19 @@
 /**
- * The canonical criteria schema.
- *
- * A criterion is a fact test the CLUB wrote. ScoutBox evaluates it and says
- * whether it was met. There is no weighting, no scoring and no hidden rule:
- * everything a match depends on is one of the typed criteria below, and every
- * one of them is shown to the person who wrote it.
- *
- * Two classes, and the distinction is the whole point:
- *
- *   required   decides whether the player is in the match set at all
- *   preferred  adds context; a player still matches when it is not met
- *
- * Preferred criteria are counted ("2 of 3 met") and never converted into a
- * percentage, a rank, a tier or any other overall figure. A count of the
- * club's own criteria is a fact; a score would be a judgement ScoutBox has no
- * business making.
- *
- * Operators live in ONE table. A client submits criteria, never an
- * evaluator: there is no path by which a caller can supply code, a weight or
- * a result.
+ * The criteria schema. `required` criteria decide whether a player is in the match set; `preferred` ones add context
+ * and are counted ("2 of 3 met"), never turned into a percentage, rank or score: a count of the club's own criteria
+ * is a fact, a score would be a judgement.
  */
 import {
   POSITIONS, TRUST_BANDS, EVIDENCE_REQUIREMENTS, PROHIBITED_BRIEF_FIELDS,
 } from '../shared.mjs';
 
-/** The semantic interpretation rules. Bump when the MEANING of a criterion
- *  changes, even if its shape does not — a stored explanation is only
+/** Bump when the meaning of a criterion changes, even if its shape does not: a stored explanation is only
  *  comparable to a new one at the same policy version. */
 export const MATCH_POLICY_VERSION = 1;
-/** The shape of a stored criteria set. */
 export const CRITERIA_SCHEMA_VERSION = 1;
 
 export const CRITERION_CLASSES = ['required', 'preferred'];
 
-/**
- * Every operator ScoutBox can evaluate, and what it means. Nothing else is
- * accepted; an unknown operator is a refusal, never a silently skipped
- * criterion.
- */
 export const OPERATORS = {
   in: { arity: 'list', note: 'the fact is one of the listed values' },
   equals: { arity: 'scalar', note: 'the fact equals the value' },
@@ -54,19 +30,12 @@ const LEVELS = ['amateur', 'semi_pro', 'pro'];
 const FEET = ['Left', 'Right', 'Both'];
 
 /**
- * The availability values ScoutBox records today, published in the vocabulary
- * so a club picks one instead of guessing a spelling that would silently match
- * nobody. Deliberately NOT enforced: a deployment may legitimately carry a
- * value this list has not caught up with, and refusing it would be ScoutBox
- * overruling a fact it holds.
+ * Published so a club picks a value instead of guessing a spelling that matches nobody. Not enforced: stored data may
+ * carry a value this list has not caught up with.
  */
 export const AVAILABILITY_VALUES = ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'];
 
-/**
- * The v1 criterion vocabulary. Only facts ScoutBox can evaluate honestly from
- * data it already holds — nothing inferred from video, nothing speculative,
- * and no training-volume proxy for ability.
- */
+/** Only facts ScoutBox already holds: nothing inferred from video, and no training-volume proxy for ability. */
 export const CRITERION_TYPES = {
   position: {
     operators: ['in'],
@@ -101,13 +70,11 @@ export const CRITERION_TYPES = {
     label: 'Recruitment area',
     validate: (c) => {
       const km = Number(c.value);
-      // A negative or absurd radius is a refusal, not a clamp that quietly
-      // means something else than the club asked for.
+      // Refused rather than clamped to something the club did not ask for.
       if (!Number.isFinite(km) || km <= 0 || km > LIMITS.maxRadiusKm) return 'CRITERION_VALUE_OUT_OF_RANGE';
       return null;
     },
     normalise: (c, { orgLevel }) => ({
-      // The grassroots ceiling is a platform rule and outranks the club's number.
       value: orgLevel === 'grassroots' ? Math.min(Number(c.value), 50) : Number(c.value),
     }),
   },
@@ -189,15 +156,12 @@ export const CRITERION_TYPES = {
 };
 export const CRITERION_TYPE_NAMES = Object.freeze(Object.keys(CRITERION_TYPES));
 
-/** Bounds that stop a pathological criteria set without constraining a
- *  legitimate club. */
 export const LIMITS = {
   maxCriteria: 24,
   maxRequired: 16,
   maxPreferred: 16,
-  // A literal, not POSITIONS.length: domains/discovery/shared.mjs imports the engine, so
-  // the vocabulary is still initialising when this module is first evaluated.
-  // Membership in POSITIONS is checked at call time, where it is safe.
+  // A literal, not POSITIONS.length: shared.mjs imports the engine, so the vocabulary is still initialising when this
+  // module is first evaluated.
   maxPositions: 13,
   maxRadiusKm: 20000,
   maxRecencyDays: 3650,
@@ -207,19 +171,11 @@ export const LIMITS = {
 
 const uniqStrings = (v) => (Array.isArray(v) ? [...new Set(v.map((x) => String(x)))] : []);
 
-/** A criterion type that names a protected characteristic is refused outright,
- *  in whatever shape it arrives. */
 export const isProhibitedCriterion = (type) => {
   const k = String(type ?? '').toLowerCase().replace(/[^a-z]+/g, '_');
   return PROHIBITED_BRIEF_FIELDS.some((p) => k === p || k.includes(p));
 };
 
-/**
- * Validate and normalise a whole criteria set.
- *
- * Every criterion carries a stable id. Nothing is ever silently dropped: an
- * unknown type, operator or value is a refusal.
- */
 export function validateCriteria(input = {}, { orgLevel = 'pro', protocols = null } = {}) {
   const details = [];
   const out = { required: [], preferred: [] };
@@ -233,8 +189,7 @@ export function validateCriteria(input = {}, { orgLevel = 'pro', protocols = nul
     return { ok: false, error: 'CRITERIA_TOO_MANY', limit: LIMITS.maxCriteria, message: `A criteria set may hold at most ${LIMITS.maxCriteria} criteria.` };
   }
 
-  // A protected characteristic is refused before anything else, with its own
-  // code, so the refusal is unambiguous in an audit.
+  // Refused first, with its own code, so the refusal is unambiguous in an audit.
   const prohibited = raw.map((c) => c.type).filter(isProhibitedCriterion);
   if (prohibited.length) {
     return {
@@ -255,8 +210,7 @@ export function validateCriteria(input = {}, { orgLevel = 'pro', protocols = nul
 
     const body = def.normalise(c, { orgLevel, protocols });
     const id = criterionId(c.type, c.operator, body);
-    // The same test twice is one test — a duplicate would double-count in the
-    // preferred coverage and read as two different facts.
+    // A duplicate would double-count in the preferred coverage.
     if (seen.has(`${c.class}:${id}`)) continue;
     seen.add(`${c.class}:${id}`);
     out[c.class].push({ id, type: c.type, operator: c.operator, class: c.class, ...body });
@@ -271,17 +225,13 @@ export function validateCriteria(input = {}, { orgLevel = 'pro', protocols = nul
   return { ok: true, criteria: { ...out, schemaVersion: CRITERIA_SCHEMA_VERSION } };
 }
 
-/** A stable id for a criterion: same test, same id, whatever the key order. */
+/** Same test, same id, whatever the key order. */
 export function criterionId(type, operator, body = {}) {
   const parts = Object.keys(body).sort().map((k) => `${k}=${Array.isArray(body[k]) ? [...body[k]].sort().join('|') : body[k]}`);
   return `${type}:${operator}${parts.length ? `:${parts.join(',')}` : ''}`;
 }
 
-/**
- * A deterministic version token for a criteria set. Two sets that test the
- * same things produce the same token, so a watchlist can tell "the criteria
- * changed" from "the criteria were re-saved".
- */
+/** Lets a watchlist tell "the criteria changed" from "the criteria were re-saved". */
 export function criteriaVersion(criteria = {}) {
   const hit = VERSION_MEMO.get(criteria);
   if (hit) return hit;
@@ -292,15 +242,8 @@ export function criteriaVersion(criteria = {}) {
 }
 
 /**
- * The version of a criteria SET is a property of the set, and a matching run
- * asks for it once per candidate. Profiling showed that recomputing it
- * recomputing it dominated the cost of a match: 3.3 µs of a 5.1 µs
- * eight-criterion evaluation was this hash, run again for every player.
- *
- * A WeakMap keyed on the set itself is safe because a validated criteria set
- * is never mutated in place — validateCriteria builds a fresh object, and the
- * routes replace rather than edit. If that ever stops being true, the memo is
- * wrong and this comment is where to look.
+ * A matching run asks for the version once per candidate, and the hash dominated the cost of a match. Keying on the
+ * set is safe only because a validated criteria set is never mutated in place (the routes replace rather than edit).
  */
 const VERSION_MEMO = new WeakMap();
 
@@ -310,7 +253,6 @@ function hash32(s) {
   return h.toString(16).padStart(8, '0');
 }
 
-/** The criteria set in plain language, for a summary line. */
 export function describeCriteria(criteria = {}) {
   const one = (c) => {
     switch (c.type) {

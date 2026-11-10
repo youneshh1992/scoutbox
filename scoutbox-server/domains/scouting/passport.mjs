@@ -1,18 +1,12 @@
-// Player evidence passport, and coach identity and affiliations.
-//
-// The principle: evidence reliability is a property of HOW a claim was
-// verified, never of how often someone opens the app. Tiers are earned by
-// the verifying actor's authority, corrections supersede without erasing,
-// and "insufficient evidence" is a first-class display state.
+// Evidence reliability is a property of how a claim was verified, never of how often someone opens the app. Tiers
+// are earned by the verifying actor's authority, corrections supersede without erasing, and "insufficient evidence"
+// is a first-class display state.
 
 import { parseDateOrInstant, parseStrictDateOnly, isAbsent, readInstant } from '../../temporal.mjs';
 import { offsetPage } from '../platform/paging.mjs';
 import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scoutingEvidence.mjs';
 
-// Evidence, coach affiliations and squad invitations live in the scouting evidence repository. Over-long text is
-// shortened.
-
-/** A text field from a request: undefined/null → null; text → shortened to `max`; anything else → a 400 sent, returns undefined. */
+/** undefined/null → null; text → shortened to `max`; anything else → a 400 sent, returns undefined. */
 export function textOrRefuse(res, raw, field, max, { required = false } = {}) {
   if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) {
     if (required) { res.status(400).json({ error: `${field.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}_REQUIRED`, field }); return undefined; }
@@ -23,9 +17,9 @@ export function textOrRefuse(res, raw, field, max, { required = false } = {}) {
 }
 
 /**
- * A person's or organisation's name as the evidence tables store it: text, at most `max` characters, or null. Names
- * come from other domains (a player's signup has no length limit; an org dispute stores "scout · club"), so they are
- * shortened here rather than refused: refusing would block a real user's action. See docs/known-issues.md.
+ * A name as the evidence tables store it: text, at most `max` characters, or null. Names come from other domains (a
+ * player's signup has no length limit; an org dispute stores "scout · club"), so they are shortened rather than
+ * refused: refusing would block a real user's action. See docs/known-issues.md.
  */
 export const storedName = (name, max = LIMITS.name) => (name === undefined || name === null ? null : String(name).slice(0, max));
 
@@ -35,25 +29,16 @@ export function registerPassport(ctx) {
     orgRouter, playerRouter, guardianRouter, adminRouter,
     orgCanSee, paginate, audit, guardianOwnsChild, freshness, activeAffiliation,
     moderateOrRefuse, isAdult, scoutingReads, scoutingEvidence, unit,
-    clubSetup, // an approved invitation adds the squad row through the club setup repository
+    clubSetup,
     transitionsVouches, verificationReads, // coach references are rows of vouches
   } = ctx;
   if (typeof scoutingEvidence?.evidence?.create !== 'function' || typeof unit !== 'function') throw new TypeError('registerPassport needs the scouting evidence repository and unit from the data layer');
-  /** The player's own record, or null. */
   const ownEvidence = (id, playerId) => { const e = scoutingReads.evidence.byId(id); return e && e.playerId === playerId ? e : null; };
-  /** The admin lists' offset paging (the `{ total, limit, offset, items }` shape the admin app reads). */
 
   // ------------------------------------------------------------ evidence core
-  /** The evidence record a route creates (not yet written): one event, one clock read. */
   function newEvidence({ player, claimType, label, value, units, season, source, mediaIds, observedAt, note, tier, method, reviewer, correctionOf }) {
-    // ONE EVENT, ONE CLOCK READ: `recordedAt`, `verification.reviewedAt` and
-    // `expiresAt` are one instant. Second Look asks "was this evidence
-    // UPGRADED after it was recorded?" by testing `reviewedAt > recordedAt`;
-    // separate clock reads could land 1ms apart and make a brand-new upload
-    // look like a later upgrade of itself (a club told its evidence improved
-    // when nothing had been reviewed). Reading the clock once makes
-    // `reviewedAt === recordedAt` true by construction for evidence created
-    // with a tier.
+    // One clock read: Second Look asks whether evidence was upgraded after it was recorded (`reviewedAt > recordedAt`),
+    // and separate reads could land 1ms apart and make a new upload look like a later upgrade of itself.
     const at = Date.now();
     const rec = {
       id: nextId('evd'),
@@ -64,15 +49,11 @@ export function registerPassport(ctx) {
       units: units ? String(units).slice(0, LIMITS.units) : null,
       season: season ? String(season).slice(0, LIMITS.season) : null,
       source: { kind: source.kind, id: source.id, name: storedName(source.name, LIMITS.sourceName) ?? '' }, // kind: 'player'|'guardian'|'org'
-      // An evidence date the route has already validated (readInstant keeps a
-      // finite number and drops anything else to null).
       observedAt: readInstant(observedAt),
       recordedAt: at,
       mediaIds: Array.isArray(mediaIds) ? mediaIds.filter((m) => player.media.some((x) => x.id === m)) : [],
       verification: {
-        // Honest ladder: self_reported | coach_confirmed | club_assessed.
-        // 'independent' exists in the schema but no route can set it — there
-        // is no integrated independent-measurement provider.
+        // 'independent' exists in the schema but no route sets it: there is no independent-measurement provider.
         status: tier,
         method: method ?? null,
         reviewerId: reviewer?.id ?? null,
@@ -88,7 +69,6 @@ export function registerPassport(ctx) {
     };
     return rec;
   }
-  /** Append an audit entry to a record draft (the shared history shape). */
   const auditDraft = (rec, byKind, byId, byName, action, detail = null) => audit(rec, byKind, byId, storedName(byName), action, detail === null ? null : String(detail).slice(0, LIMITS.detail));
 
   function evidenceView(rec) {
@@ -102,9 +82,8 @@ export function registerPassport(ctx) {
     };
   }
 
-  // The composed passport: evidence records PLUS the honest relabelling
-  // of every other "verified" surface. Reliability ≠ ability: nothing here
-  // scores the player, it only describes how each claim was checked.
+  // Evidence records plus the honest relabelling of every other "verified" surface. Reliability is not ability:
+  // nothing here scores the player.
   function composePassport(player) {
     const records = scoutingReads.evidence.forPlayer(player.id).map(evidenceView);
     const legacy = [];
@@ -138,7 +117,6 @@ export function registerPassport(ctx) {
         activeRecords: active.length,
         byTier,
         corroborated: active.filter((r) => r.verification.status !== 'self_reported').length,
-        // Insufficient evidence is said out loud, not padded over.
         insufficient: active.length + legacy.length < 3,
         note: 'Provenance describes how each claim was checked — it is not a rating of football ability, and app usage frequency plays no part in it.',
       },
@@ -156,8 +134,7 @@ export function registerPassport(ctx) {
     if (!(mediaIds === undefined || mediaIds === null || (Array.isArray(mediaIds) && mediaIds.every((m) => typeof m === 'string')))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'mediaIds', message: 'mediaIds is a list of media ids.' });
     if (note && !moderateOrRefuse(res, note, { kind: 'evidence_note', playerId: player.id })) return;
     if (!moderateOrRefuse(res, label, { kind: 'evidence_label', playerId: player.id })) return;
-    // An observation date is a calendar day or an instant that
-    // exists, and not in the future — evidence of something that has not happened is not evidence.
+    // Evidence of something that has not happened is not evidence.
     let observed = null;
     if (!isAbsent(observedAt)) {
       const p = parseDateOrInstant(observedAt, { dayEdge: 'start' });
@@ -182,9 +159,8 @@ export function registerPassport(ctx) {
   });
 
   playerRouter.post('/evidence', (req, res) => {
-    // Children keep their football life: logging evidence is a football
-    // activity (like stats and drills), so minors may self-report — the tier
-    // says exactly what that is worth.
+    // Logging evidence is football activity (like stats and drills), so minors may self-report; the tier says what
+    // that is worth.
     submitClaim(req, res, req.player, 'player', req.player.id, req.player.name, 'self_reported', 'self_entry', null);
   });
 
@@ -217,7 +193,6 @@ export function registerPassport(ctx) {
       method: 'correction', correctionOf: orig.id,
     });
     auditDraft(draft, actor.kind, actor.id, actor.name, 'created_as_correction', reason);
-    // The correction and the superseded original commit together.
     const rec = unit(() => {
       const created = scoutingEvidence.evidence.create(draft);
       scoutingEvidence.evidence.update(orig.id, (o) => { o.supersededBy = created.id; auditDraft(o, actor.kind, actor.id, actor.name, 'superseded', reason); });
@@ -268,9 +243,7 @@ export function registerPassport(ctx) {
       { id: req.orgUser.id, name: req.orgUser.name });
   });
 
-  // Corroboration: an authorised club (or a club-confirmed coach at that
-  // club) upgrades a self-reported claim. The original stays; a verification
-  // event lands on its history.
+  // An authorised club (or a club-confirmed coach there) upgrades a self-reported claim; the original stays.
   orgRouter.post('/evidence/:id/corroborate', (req, res) => {
     const rec = scoutingReads.evidence.byId(req.params.id);
     if (!rec) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
@@ -286,7 +259,6 @@ export function registerPassport(ctx) {
       reviewerName: storedName(req.orgUser.name),
       reviewedAt: Date.now(),
     };
-    // The upgrade and its notifications commit together.
     const fresh = unit(() => {
       const next = scoutingEvidence.evidence.update(rec.id, (e) => { e.verification = verification; auditDraft(e, 'org', req.org.id, req.org.name, 'corroborated', verification.status); });
       notify({ kind: 'player', id: p.id }, 'evidence', `✅ ${req.org.name} corroborated "${rec.label}" on your evidence passport.`, rec.id);
@@ -319,7 +291,6 @@ export function registerPassport(ctx) {
     if (!['upheld', 'rejected'].includes(resolution)) return res.status(400).json({ error: 'RESOLUTION_REQUIRED', allowed: ['upheld', 'rejected'] });
     const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.resolutionNote); if (note === undefined) return;
     const at = Date.now();
-    // The resolution, any downgrade and the player's notification commit together.
     const fresh = unit(() => {
       const next = scoutingEvidence.evidence.update(rec.id, (e) => {
         const target = e.disputes.find((x) => x.id === d.id);
@@ -335,11 +306,8 @@ export function registerPassport(ctx) {
   });
 
   // ============================================================ affiliations
-  // Coach affiliations: the club vouches for the coach, with dates, a
-  // conflict declaration and a revocation switch. A confirmed affiliation
-  // grants exactly ONE privilege — the coach-confirmed evidence tier at that
-  // club. It does NOT grant discovery access, player-data editing, or any
-  // contact channel with minors; those walls are untouched.
+  // A confirmed affiliation grants one privilege: the coach-confirmed evidence tier at that club. Not discovery
+  // access, player-data editing, or any contact channel with minors.
 
   function affiliationView(a) {
     const { history, ...rest } = a;
@@ -365,7 +333,7 @@ export function registerPassport(ctx) {
       id: nextId('aff'), orgId: req.org.id, orgName: storedName(req.org.name),
       coachName, coachEmail, role, from,
       to: null,
-      status: 'confirmed', // the CLUB is the confirmer — this endpoint runs under org auth
+      status: 'confirmed', // the club is the confirmer: this route runs under org auth
       confirmedBy: { userId: req.orgUser.id, name: storedName(req.orgUser.name) },
       conflictOfInterest,
       createdAt: Date.now(),
@@ -408,9 +376,8 @@ export function registerPassport(ctx) {
     res.json({ withdrawn: { at: stored.withdrawn.at, by: stored.withdrawn.by, reason: stored.withdrawn.reason }, note: 'The record is kept for history; it no longer appears on any profile view.' });
   });
 
-  // Squad invitations — the controlled onboarding path. A minor's invitation
-  // goes to the guardian, an adult's to the player; nobody lands on a squad
-  // list (or gets an account) without an approval.
+  // A minor's invitation goes to the guardian, an adult's to the player; nobody joins a squad (or gets an account)
+  // without an approval.
   orgRouter.post('/squad/invite', (req, res) => {
     const p = findPlayer(req.body?.playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
@@ -435,7 +402,6 @@ export function registerPassport(ctx) {
     });
     res.status(201).json({ invite });
   });
-  // The answer, the squad row and the notification commit together.
   function respondSquadInvite(req, res, invite, approverLabel) {
     const { accept } = req.body ?? {};
     const at = Date.now();

@@ -1,15 +1,11 @@
-// Player-controlled opportunity suitability.
-// Preferences are PRIVATE to the player (guardian for under-18s). Clubs never
-// see raw preferences — only per-application summaries the player/guardian
-// explicitly approved. Suitability NEVER overrides mandatory eligibility
-// (which stays in the checkEligibility path) and never widens the
-// grassroots 50 km ceiling.
+// Preferences are private to the player (the guardian for under-18s): clubs see only per-application summaries the
+// player or guardian approved. Suitability never overrides mandatory eligibility and never widens the grassroots
+// 50 km ceiling.
 import { blankPreferences, typePreferences, typeStructured } from '../../repositories/opportunitiesCampaigns.mjs';
 import { opportunityView } from './journeys.mjs';
 import { slotsOverlap } from './slots.mjs';
 
-// Preferences, requirements and approved summaries live in repositories/opportunitiesCampaigns.mjs. Reading
-// preferences writes nothing: a player who never saved any gets the blank defaults. Over-long text is shortened.
+// Reading preferences writes nothing: a player who never saved any gets the blank defaults.
 const prefsView = (p) => ({
   commitments: p.commitments.map((s) => ({ day: s.day, start: s.start, end: s.end, tz: s.tz, label: s.label })),
   availableSlots: p.availableSlots.map((s) => ({ day: s.day, start: s.start, end: s.end, tz: s.tz, label: s.label })),
@@ -37,10 +33,7 @@ export function registerSuitability(ctx) {
 
   const prefsFor = (playerId) => scoutingReads.playerPrefs.forPlayer(playerId) ?? blankPreferences(playerId);
 
-  /**
-   * Apply a PUT body to the stored (or blank) preferences: the fields sent replace the ones stored. Returns the whole
-   * typed record, or undefined after a 400.
-   */
+  /** The fields sent replace the stored ones. Returns the whole typed record, or undefined after a 400. */
   function prefsOrRefuse(res, playerId, body, { adult }) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return fieldInvalid(res, 'body', 'Preferences are a JSON object.');
     const known = ['commitments', 'availableSlots', 'travelLimitKm', 'transport', 'relocation', 'ambitions', 'environment', 'accessibility', 'compensation'];
@@ -51,10 +44,9 @@ export function registerSuitability(ctx) {
     const slotsIn = (list) => (Array.isArray(list) ? list.map((x) => (x && typeof x === 'object' ? { ...x, label: x.label === undefined || x.label === '' ? null : shorten(x.label, 60) } : x)) : list);
     if (body.commitments !== undefined) next.commitments = slotsIn(body.commitments);
     if (body.availableSlots !== undefined) next.availableSlots = slotsIn(body.availableSlots);
-    // A travel limit beyond 500 km is held at 500; a non-number is refused by the typer.
     if (body.travelLimitKm !== undefined) next.travelLimitKm = typeof body.travelLimitKm === 'number' && Number.isFinite(body.travelLimitKm) ? Math.max(0, Math.min(500, body.travelLimitKm)) : body.travelLimitKm;
     if (body.transport !== undefined) next.transport = body.transport;
-    // Relocation preference is an ADULT field — never collected for minors.
+    // An adult field: never collected for minors.
     if (body.relocation !== undefined) next.relocation = adult ? body.relocation : null;
     if (body.ambitions !== undefined) next.ambitions = body.ambitions ? shorten(body.ambitions, 300) : null;
     if (body.environment !== undefined) next.environment = Array.isArray(body.environment) ? body.environment.map((e) => shorten(e, 40)) : body.environment;
@@ -98,8 +90,7 @@ export function registerSuitability(ctx) {
   });
 
   // ---------------------------------------------- structured requirements
-  // Additive: an opportunity may declare structured requirements; free-text
-  // `schedule`/`requirements` stay untouched. Replaced whole.
+  // Free-text `schedule` and `requirements` stay untouched; this record is replaced whole.
   orgRouter.put('/opportunities/:id/structured-requirements', (req, res) => {
     const o = scoutingReads.opportunities.ofOrg(req.params.id, req.org.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
@@ -129,8 +120,7 @@ export function registerSuitability(ctx) {
     const s = opp.structured;
     const add = (dimension, verdict, reason, source) => out.push({ dimension, verdict, reason, source });
 
-    // schedule: a required slot that overlaps a commitment = conflict; one
-    // that fits an available slot = compatible; otherwise unknown.
+    // schedule: overlapping a commitment is a conflict, fitting an available slot is compatible, else unknown.
     if (!s?.trainingSlots?.length) add('schedule', 'unknown', 'the club has not published structured training times', 'opportunity');
     else if (!prefs.commitments.length && !prefs.availableSlots.length) add('schedule', 'unknown', 'no commitments or availability recorded yet', 'your preferences');
     else {
@@ -147,7 +137,7 @@ export function registerSuitability(ctx) {
       else add('schedule', 'unknown', 'no overlap with a recorded commitment, but availability is incomplete', 'your preferences');
     }
 
-    // travel: coarse distance only; travel TIME is honestly unavailable.
+    // travel: coarse distance only; travel time is unavailable.
     if (!org?.location || !player.location) add('travel', 'unknown', 'location missing on one side (never guessed)', 'locations');
     else {
       const km = Math.round(haversineKm(org.location, player.location));
@@ -157,7 +147,6 @@ export function registerSuitability(ctx) {
       else add('travel', 'conflict', `${note}; beyond your ${prefs.travelLimitKm} km limit`, `distance vs your ${prefs.travelLimitKm} km limit`);
     }
 
-    // relocation (adults only)
     if (s?.relocationRequired) {
       if (!isAdult(player)) add('relocation', 'conflict', 'this opportunity expects relocation — not applicable to under-18 players', 'safeguarding');
       else if (prefs.relocation === 'no') add('relocation', 'conflict', 'the role expects relocation and your preference is not to relocate', 'your preferences');
@@ -165,7 +154,6 @@ export function registerSuitability(ctx) {
       else add('relocation', 'unknown', 'relocation expected — you have not set a preference', 'your preferences');
     } else add('relocation', 'compatible', 'no relocation required', 'opportunity');
 
-    // compensation
     if (s?.feeMinor != null && s.feeMinor > 0) {
       const max = prefs.compensation?.maxFeeMinor;
       if (max == null) add('compensation', 'unknown', 'the opportunity has a participation fee and you have not set a maximum', 'fees');
@@ -176,14 +164,13 @@ export function registerSuitability(ctx) {
       add('compensation', 'conflict', 'you need expenses covered and this opportunity does not cover them', 'fees');
     } else add('compensation', 'compatible', s ? 'no fee; expense needs met' : 'no fee declared', 'fees');
 
-    // environment
     if (!prefs.environment.length || !s?.environment?.length) add('environment', 'unknown', 'environment preferences or club tags not set', 'preferences');
     else {
       const hit = prefs.environment.filter((e) => s.environment.includes(e));
       add('environment', hit.length ? 'compatible' : 'unknown', hit.length ? `matches: ${hit.join(', ')}` : 'no declared overlap — worth a conversation', 'your preferences vs club tags');
     }
 
-    // accessibility: compare needs against DECLARED accommodations only.
+    // accessibility: needs against declared accommodations only.
     if (!prefs.accessibility.length) add('accessibility', 'compatible', 'no accessibility requirements recorded', 'your preferences');
     else if (!s?.accommodations?.length) add('accessibility', 'unknown', 'you listed requirements; the club has not declared its accommodations — nothing is assumed either way', 'club declaration');
     else {
@@ -215,9 +202,8 @@ export function registerSuitability(ctx) {
   });
 
   // ------------------------------------- player-approved summary for clubs
-  // The ONLY way any suitability output reaches an org: attached to that
-  // player's own application, verdict summaries only (no raw preferences, no
-  // reasons that carry commitments/needs), explicitly approved.
+  // The only way suitability output reaches an org: verdict summaries attached to the player's own application,
+  // explicitly approved.
   function shareHandler(actorKind) {
     return (req, res) => {
       const playerId = actorKind === 'guardian' ? req.params.id : req.player.id;
@@ -232,8 +218,7 @@ export function registerSuitability(ctx) {
       const org = byId.org(a.orgId);
       if (req.body?.share === false) { opportunitiesCampaigns.applications.update(a.id, (d) => { d.suitabilitySummary = null; }); return res.json({ shared: false }); }
       const verdicts = verdictsFor(player, prefsFor(playerId), o, org);
-      // Summary = dimension + verdict ONLY. Reasons stay private: they can
-      // contain commitments, needs and limits.
+      // Dimension and verdict only: reasons can contain commitments, needs and limits.
       const saved = opportunitiesCampaigns.applications.update(a.id, (d) => {
         d.suitabilitySummary = { approvedAt: Date.now(), approvedBy: actorKind, verdicts: verdicts.map(({ dimension, verdict }) => ({ dimension, verdict })) };
       });

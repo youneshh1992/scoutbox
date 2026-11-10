@@ -1,10 +1,5 @@
-// Structured scouting assessments, the evidence-focused video workspace,
-// the recruitment department workspace and tactical fit.
-//
-// Assessments are private recruitment records by default; only an explicit
-// publish step creates player/guardian-visible feedback. Second opinions are
-// blind SERVER-SIDE: another scout's report is not delivered to you until
-// your own is submitted. "Not observed" is never averaged as zero.
+// Assessments are private recruitment records; only the publish-feedback route makes anything player- or
+// guardian-visible.
 
 import { roomRole, roomCan, CASE_PRIORITIES, CASE_DECISION_OUTCOMES } from '../recruitment/rooms/shared.mjs';
 
@@ -37,15 +32,13 @@ export function registerScouting(ctx) {
   const { templates, assessments, segments, playlists } = scoutingAssessments;
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function' || typeof reads?.trials?.byId !== 'function') throw new TypeError('registerScouting needs recruitmentReads (signings, requests, trials) from the data layer');
-  /** A trial of this organisation, or null. */
   const caseOfOrg = (id, orgId) => { const k = reads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
   const orgTrial = (id, orgId) => { const t = reads.trials.byId(id); return t && t.orgId === orgId ? t : null; };
   const { cases } = recruitmentCases;
 
   // ------------------------------------------------- templates
-  // Position-specific templates with DESCRIPTIVE anchors (a 3 means the sentence, not a feeling). The v1 templates are
-  // seeded by a migration; a lead publishes a new version, and historical assessments keep the version they used.
-  // Over-long text is shortened.
+  // Anchors are descriptive (a 3 means the sentence, not a feeling). A lead publishes a new version; historical
+  // assessments keep the version they used.
   const { templates: templateReads, assessments: assessmentReads, segments: segmentReads, playlists: playlistReads } = scoutingReads;
   const currentTemplateFor = (positionGroup) => templateReads.currentFor(positionGroup);
   const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
@@ -81,9 +74,8 @@ export function registerScouting(ctx) {
 
   // --------------------------------------------------------- assessments
   function assessmentAccessList(req, playerId) {
-    // The blind rule, enforced where the data leaves the server: a scout
-    // sees OTHER scouts' assessments of a player only after submitting
-    // their own (leads see everything — they commission the second opinion).
+    // The blind rule: a scout sees other scouts' assessments of a player only after submitting their own. Leads see
+    // everything; they commission the second opinion.
     const mine = assessmentReads.forOrgPlayer(req.org.id, playerId);
     if (isLead(req.orgUser)) return mine;
     const iSubmitted = mine.some((a) => a.scoutUserId === req.orgUser.id && a.state !== 'draft');
@@ -96,11 +88,7 @@ export function registerScouting(ctx) {
     return rest;
   }
 
-  /**
-   * The ordinary context fields of a request (fixture, date, minutes watched, viewing, opponent level): checked and
-   * shortened. Returns the fields present in `context` or writes the refusal and returns undefined. The trial fields are
-   * judged by the callers (fixed at creation).
-   */
+  /** Returns the checked fields, or writes the refusal and returns undefined. The trial fields are fixed at creation. */
   function contextFieldsOrRefuse(res, context) {
     if (context === undefined || context === null) return {};
     if (typeof context !== 'object' || Array.isArray(context)) { res.status(400).json({ error: 'CONTEXT_INVALID' }); return undefined; }
@@ -132,12 +120,7 @@ export function registerScouting(ctx) {
     return out;
   }
 
-  /**
-   * Resolve and authorise `context.trialId` / `context.trialSessionId`.
-   * Returns `{ trialId, trialSessionId }` (both null when absent) or writes
-   * the refusal and returns null. Ids are strings; anything else is refused
-   * rather than coerced.
-   */
+  /** Returns `{ trialId, trialSessionId }` (both null when absent), or writes the refusal and returns null. */
   function validateTrialContext(req, res, context, p) {
     const rawTrial = context && typeof context === 'object' ? context.trialId : undefined;
     const rawSession = context && typeof context === 'object' ? context.trialSessionId : undefined;
@@ -170,8 +153,7 @@ export function registerScouting(ctx) {
     } else {
       list = assessmentReads.forOrgScout(req.org.id, req.orgUser.id);
     }
-    // `?trialId=` narrows to one Trial's assessments — through the
-    // same access list (blind rule intact), never around it.
+    // Narrowing by trial goes through the same access list, so the blind rule holds.
     if (req.query.trialId != null) {
       const tid = String(req.query.trialId);
       const t = orgTrial(tid, req.org.id);
@@ -196,17 +178,12 @@ export function registerScouting(ctx) {
     }
     const fields = contextFieldsOrRefuse(res, context);
     if (fields === undefined) return;
-    // An assessment may be written IN THE CONTEXT of a Trial (and
-    // optionally one of its sessions). The Trial must be this org's, for
-    // this player, still with a subject, and the author must hold the
-    // room's `trial_assess` permission. The assessment stays an ordinary
-    // assessment: same blind rule, same single feedback door.
     const trialCtx = validateTrialContext(req, res, context, p);
     if (!trialCtx) return;
     const draft = {
       id: nextId('ass'), orgId: req.org.id, playerId: p.id, playerName: storedName(p.name),
       scoutUserId: req.orgUser.id, scoutName: storedName(req.orgUser.name),
-      templateId: tmpl.id, templateVersion: tmpl.version, // immutability: the report keeps its scale (the version's attributes)
+      templateId: tmpl.id, templateVersion: tmpl.version, // the report keeps the scale it was written against
       context: { fixture: null, date: null, minutesWatched: null, viewing: null, opponentLevel: null, ...fields, trialId: trialCtx.trialId, trialSessionId: trialCtx.trialSessionId },
       ratings: [], state: 'draft', recommendation: null,
       secondOpinionOf: secondOpinionOf ?? null,
@@ -218,7 +195,6 @@ export function registerScouting(ctx) {
     res.status(201).json({ assessment: assessmentView(a) });
   });
 
-  /** One rating evidence reference from a request: checked and shortened, or the refusal written and undefined. */
   function evidenceRefOrRefuse(res, ref, at) {
     if (!ref || typeof ref !== 'object' || Array.isArray(ref)) return fieldInvalid(res, at, 'An evidence reference is an object.');
     const unknown = Object.keys(ref).find((k) => !REF_FIELDS.includes(k));
@@ -266,9 +242,8 @@ export function registerScouting(ctx) {
             const s = segmentReads.byId(ref.segmentId);
             if (!s || s.orgId !== req.org.id || s.playerId !== a.playerId) return res.status(400).json({ error: 'SEGMENT_INVALID', segmentId: ref.segmentId });
           }
-          // A rating may cite a Trial session, or a Box Cam session
-          // that is LINKED (and not unlinked) to this assessment's trial —
-          // by reference only. Nothing of the observation travels here.
+          // A rating may cite a trial session, or a Box Cam session linked (and not unlinked) to this assessment's
+          // trial, by reference only.
           if (ref.trialSessionId !== undefined || ref.boxSessionId !== undefined) {
             const t = a.context?.trialId ? orgTrial(a.context.trialId, req.org.id) : null;
             if (!t) return res.status(400).json({ error: 'TRIAL_EVIDENCE_REF_INVALID', message: 'Trial evidence references need an assessment written in the context of a trial.' });
@@ -283,8 +258,6 @@ export function registerScouting(ctx) {
     }
     let nextContext;
     if (context) {
-      // The Trial context is fixed at creation — an assessment is
-      // not re-pointed at another trial or session after the fact.
       if (typeof context !== 'object' || Array.isArray(context)) return res.status(400).json({ error: 'CONTEXT_INVALID' });
       const { trialId, trialSessionId } = context;
       if ((trialId !== undefined && trialId !== a.context?.trialId) || (trialSessionId !== undefined && trialSessionId !== a.context?.trialSessionId)) {
@@ -315,15 +288,13 @@ export function registerScouting(ctx) {
     if (a.state !== 'draft') return res.status(409).json({ error: 'ALREADY_SUBMITTED' });
     if (!a.ratings.length) return res.status(400).json({ error: 'RATINGS_REQUIRED' });
     if (!a.recommendation) return res.status(400).json({ error: 'RECOMMENDATION_REQUIRED', message: 'Every submitted assessment carries a final recommendation with reasons.' });
-    // The submission and its ledger entry commit together.
     const next = unit(() => {
       const done = assessments.update(a.id, (d) => { d.state = 'submitted'; d.submittedAt = Date.now(); audit(d, 'org', req.orgUser.id, storedName(req.orgUser.name), 'submitted'); });
       ledgerAppend({ type: 'assessment_submitted', playerId: a.playerId, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
       return done;
     });
-    // An open Room re-reads on this (org-private, ids only): a
-    // colleague's submitted assessment changes the case's next action, and
-    // nothing else told the Room. The subject is not named on the stream.
+    // An open Room re-reads on this: a colleague's submission changes the case's next action. Ids only; the subject
+    // is not named on the stream.
     broadcast('assessment_submitted', { orgId: req.org.id, assessmentId: a.id });
     res.json({ assessment: assessmentView(next) });
   });
@@ -343,8 +314,7 @@ export function registerScouting(ctx) {
     res.json({ assessment: assessmentView(next) });
   });
 
-  // Side-by-side comparison across scouts and dates. "Not observed" never
-  // enters an average; observedCount is shown instead of pretending.
+  // "Not observed" never enters an average; observedCount is shown instead.
   orgRouter.get('/players/:id/assessment-compare', (req, res) => {
     const list = assessmentAccessList(req, req.params.id).filter((a) => a.state !== 'draft');
     if (!list.length) return res.json({ assessments: [], attributes: [], note: 'No submitted assessments you can see yet — the blind rule hides colleagues’ reports until your own is submitted.' });
@@ -371,8 +341,7 @@ export function registerScouting(ctx) {
     });
   });
 
-  // Publishing feedback is a deliberate, separate act — the ONLY door from
-  // private recruitment records to the player/guardian side.
+  // The only route from private recruitment records to the player/guardian side.
   orgRouter.post('/assessments/:id/publish-feedback', (req, res) => {
     const a = ownAssessment(req);
     if (!a) return res.status(404).json({ error: 'ASSESSMENT_NOT_FOUND' });
@@ -385,7 +354,6 @@ export function registerScouting(ctx) {
     if (!text) return res.status(400).json({ error: 'TEXT_REQUIRED' });
     if (!moderateOrRefuse(res, text, { kind: 'published_feedback', playerId: a.playerId, orgId: req.org.id })) return;
     const p = findPlayer(a.playerId);
-    // The publication and its notifications commit together.
     const next = unit(() => {
       const done = assessments.update(a.id, (d) => {
         d.publishedFeedback = { text: text.slice(0, A_LIMITS.feedback), byUserId: req.orgUser.id, byName: storedName(req.orgUser.name), at: Date.now() };
@@ -420,10 +388,8 @@ export function registerScouting(ctx) {
   });
 
   // ========================================================= video segments
-  // Video segments: annotations stored AGAINST source media (no duplicated
-  // files), org-private workflow records — never public comments, never a
-  // channel to a child. Media access itself keeps the signed-URL + live
-  // entitlement rules.
+  // Segments annotate the source media (no copied files) and are org-private: never public, never a channel to a
+  // child.
 
   function mediaOwner(mediaId) {
     return byId.mediaOwner(mediaId);
@@ -448,7 +414,7 @@ export function registerScouting(ctx) {
       startS, endS,
       labels: (labels ?? []).map((l) => l.trim().slice(0, A_LIMITS.label)).filter(Boolean).slice(0, A_LIMITS.labels),
       eventType: ev, note: text,
-      drawing: drawing ?? null, // simple overlay shapes, stored as data
+      drawing: drawing ?? null,
       createdAt: Date.now(),
     });
     res.status(201).json({ segment: segmentView(seg) });
@@ -497,8 +463,7 @@ export function registerScouting(ctx) {
   });
 
   // ===================================================== recruitment cases
-  // Recruitment cases: the workspace layer OVER existing requests, trials
-  // and signings — cases LINK to those records, they never duplicate them.
+  // Cases link to requests, trials and signings; they never copy them.
 
   const stagesFor = (org) => (org.level === 'grassroots' ? GRASSROOTS_STAGES : PRO_STAGES);
 
@@ -506,14 +471,12 @@ export function registerScouting(ctx) {
     if (!c.restricted) return true;
     return c.ownerUserId === req.orgUser.id || c.assignments.some((a) => a.userId === req.orgUser.id) || isLead(req.orgUser);
   }
-  function caseView(c) { return c; } // history is intentionally included: it is append-only
-  /** The bookkeeping of a case act by the club user on the request: one history entry. */
+  function caseView(c) { return c; } // history is included: it is append-only
   const byStaff = (req, action, detail = null) => ({ history: [auditEntry('org', req.orgUser.id, req.orgUser.name, action, detail)] });
 
   orgRouter.get('/cases', (req, res) => {
-    // Newest first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs). The access rule (caseAccess)
-    // and the stage are applied in SQL and only the page is decoded. The apps read the first page only; a "load more"
-    // is not built yet (a product decision).
+    // The access rule and the stage filter run in SQL. The apps read only the first page; "load more" awaits a
+    // product decision.
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
     const stage = req.query.stage === undefined || req.query.stage === '' ? null : req.query.stage;
@@ -573,8 +536,6 @@ export function registerScouting(ctx) {
   orgRouter.post('/cases/:id/tasks', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
-    // A task is given to someone in THIS organisation, as
-    // the Room task route already requires; a foreign or unknown user id is refused.
     const assigneeRaw = req.body?.assigneeUserId ? String(req.body.assigneeUserId) : null;
     if (assigneeRaw && !byId.user(assigneeRaw, (u) => u.orgId === req.org.id && !u.removedAt)) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
     const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
@@ -596,20 +557,9 @@ export function registerScouting(ctx) {
   orgRouter.post('/cases/:id/stage', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
-    // `case.stage` is a DERIVATION of `case.room.status` once the case has
-    // a Room facet, and a derivation is not writable. Accepting a stage here
-    // would be a side door around the lifecycle: no transition table, no
-    // evidence requirement, no history entry and no rev bump, leaving the two
-    // representations of one case disagreeing.
-    //
-    // Translating the stage back into a status is NOT a safe alternative. The
-    // mapping is lossy — eighteen statuses collapse onto six stages — so
-    // `decision` alone means any of `offer_consideration`, `offer_made`,
-    // `offer_accepted` or `offer_declined`, and its inverse would move a room
-    // at `offer_made` BACKWARDS. A lossy inverse cannot be an authoritative
-    // write, which is exactly why authority runs status → stage and not back.
-    //
-    // A plain case (no Room) has no lifecycle, so it is untouched.
+    // On a case with a Room the stage is derived from room.status, so it is not writable here: that would bypass the
+    // lifecycle (transitions, evidence, history, rev). Mapping a stage back to a status is lossy (eighteen statuses
+    // onto six stages) and could move a room backwards.
     if (c.room) {
       return res.status(409).json({
         error: 'STAGE_NOT_SETTABLE_ON_ROOM',
@@ -627,9 +577,7 @@ export function registerScouting(ctx) {
     res.json({ case: caseView(fresh) });
   });
 
-  // Decisions: on Pro, a "sign" decision by a non-lead needs lead approval
-  // (the configured approval requirement); grassroots and pass/monitor
-  // decisions record directly. Every decision keeps reasons + actor.
+  // On Pro, a non-lead's sign decision needs lead approval; grassroots and other outcomes record directly.
   orgRouter.post('/cases/:id/decision', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
@@ -644,9 +592,7 @@ export function registerScouting(ctx) {
     }
     const fresh = unit(() => {
       cases.recordDecision(c.id, { decision: { outcome, reasons: String(reasons).slice(0, 500), byUserId: req.orgUser.id, byName: req.orgUser.name, approvedBy: null, at: Date.now() } }, byStaff(req, 'decision', outcome));
-      // Recording the decision is the point of this route; moving the case
-      // is not. On a Room the stage is derived from the lifecycle status, so
-      // writing it here would desync the two. The decision stands either way.
+      // On a Room the stage is derived from the lifecycle status, so only a plain case moves stage.
       return c.room ? cases.byId(c.id) : cases.setStage(c.id, { stage: 'decision' });
     });
     res.json({ case: caseView(fresh) });
@@ -687,9 +633,7 @@ export function registerScouting(ctx) {
     res.json({ case: caseView(fresh) });
   });
 
-  // Staff management: list + removal. Removal is immediate and structural
-  // (sessions gone, SSE silenced, media re-checks fail) but the user ROW
-  // stays so decisions and history remain attributable.
+  // Removal revokes access at once, but the user row stays so decisions and history remain attributable.
   orgRouter.get('/staff', (req, res) => {
     res.json(users.forOrg(req.org.id).map((u) => ({ id: u.id, name: u.name, role: u.role, lead: isLead(u), removedAt: u.removedAt ?? null })));
   });
@@ -700,7 +644,6 @@ export function registerScouting(ctx) {
     const u = byId.user(req.params.userId, (x) => x.orgId === req.org.id);
     if (!u) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
     if (u.removedAt) return res.status(409).json({ error: 'ALREADY_REMOVED' });
-    // One unit: the account, its sessions and the ledger row (the event streams close after the commit).
     const removed = unit(() => {
       const out = users.remove(u.id, { at: Date.now(), by: req.orgUser.id });
       revokeOrgUserAccess(u.id);
@@ -711,10 +654,8 @@ export function registerScouting(ctx) {
   });
 
   // ============================================================ tactical fit
-  // Tactical fit: transparent, rule-based matching. Criteria met / not met /
-  // unknown, each with its data source — never a fabricated percentage,
+  // Rule-based matching: met / not met / unknown, each with its data source. Never a fabricated percentage,
   // potential rating, salary estimate or transfer value.
-  // Over-long text is shortened.
 
   const groups = { GK: ['GK'], DEF: ['CB', 'RB', 'LB', 'RWB', 'LWB'], MID: ['CDM', 'CM', 'CAM'], ATT: ['ST', 'CF', 'RW', 'LW'] };
   function groupFor(position) {
@@ -743,8 +684,8 @@ export function registerScouting(ctx) {
     if (roles.length > SL.roles) return fieldInvalid(res, 'roles', `At most ${SL.roles} roles.`);
     if (!(windows === undefined || windows === null || Array.isArray(windows))) return fieldInvalid(res, 'windows', 'windows is a list.');
     if ((windows ?? []).length > SL.windows) return fieldInvalid(res, 'windows', `At most ${SL.windows} windows.`);
-    // A role keeps its id across saves (so its vacancies and shadow entries keep their role); a client-supplied id must
-    // be one of THIS club's current roles, and a role without one is new.
+    // A role keeps its id across saves so its vacancies and shadow entries keep their role; a supplied id must be one
+    // of this club's current roles.
     const current = new Set(clubSetup.tactical.roleIds(req.org.id));
     const shaped = [];
     for (const [i, r] of roles.entries()) {
@@ -799,9 +740,8 @@ export function registerScouting(ctx) {
   });
 
   /**
-   * Each criterion's verdict as SQL over the player row, beside evaluateCriterion (which keeps the sources and
-   * stays the answer on the page): `met`, and `unknown` where the JS returns unknown; anything else is not met.
-   * `at` is the clock of the age cutoffs (ageOn's rule, as bornByForAge computes it).
+   * Each criterion's verdict in SQL, mirroring evaluateCriterion (which still gives the answer and its sources).
+   * `at` is the clock for the age cutoffs.
    */
   const CRITERION_SQL = {
     positionGroup: (v) => ({ met: ['p.position IN (SELECT value FROM json_each(?))', [JSON.stringify(groups[v] ?? [])]] }),
@@ -823,7 +763,6 @@ export function registerScouting(ctx) {
       : [`(CASE WHEN ${met[0]} THEN 'm' ELSE 'n' END)`, met[1]];
   }
   function evaluateCriterion(c, p, view) {
-    // Returns { verdict: 'met'|'not_met'|'unknown', source }
     const src = (field) => `profile field: ${field}`;
     switch (c.key) {
       case 'positionGroup':
@@ -866,8 +805,6 @@ export function registerScouting(ctx) {
     const shadowed = new Set(scoutingReads.shadow.forOrg(req.org.id).map((s) => s.playerId));
     let page;
     try { page = readPage(req.query, ['number', 'number', 'number']); } catch (e) { return sendPageError(res, e); }
-    // Paged by cursor in SQL. A required criterion not met excludes the player in the query; the order is the most
-    // required criteria met, then the fewest unknowns, then the creation order.
     const at = Date.now();
     // Sorted by key, so the statement depends only on which criteria a role names (a bounded set of shapes); the
     // values are bound. The sums and the AND are the same in any order.
@@ -882,7 +819,7 @@ export function registerScouting(ctx) {
     }, page);
     const candidates = result.items
       .map((p) => ({ p, view: playerViewForOrg(p, req.org) }))
-      .filter((x) => x.view) // the wall, the radius, the blocks — same as search
+      .filter((x) => x.view) // same visibility rules as search
       .map(({ p, view }) => {
         const evaluate = (list) => list.map((c) => ({ ...c, ...evaluateCriterion(c, p, view) }));
         const required = evaluate(role.required);
@@ -907,8 +844,6 @@ export function registerScouting(ctx) {
     });
   });
 
-  // Squad planner: current squad + shadow candidates + contract ends +
-  // vacancies in one view. Grassroots keeps its existing gap analysis.
   // The shadow list is its own table: a club considering a player is not that player's club, so nothing that
   // reads the squad (match days, release, the passport, the Trust score) sees a shadow entry.
   orgRouter.post('/squad/shadow', (req, res) => {

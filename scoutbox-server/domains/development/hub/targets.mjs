@@ -1,67 +1,37 @@
 /**
- * Objective targets.
- *
- * Some development goals define their own measurement. "Improve Box Touch 60
- * from 140 to 160+" is a goal whose objective is stated in the goal itself, so
- * ScoutBox can honestly say whether the stated number has been reached without
- * claiming anything about the player beyond it.
- *
- * Three rules shape this file, and the third is the important one:
- *
- *   1. A target is a COMPARISON, not a formula. One metric, one
- *      operator, one number. There is no expression language here and there
- *      will not be one: an evaluable formula is a score with extra steps.
- *
- *   2. Only production-valid evidence can satisfy a production target.
- *      The predicate is the Combine's own `isProductionValidCombine` — a demo or
- *      test-provider result is labelled simulated everywhere it appears and
- *      must never quietly cross a real threshold.
- *
- *   3. Meeting a target NEVER marks the goal achieved. Nothing in
- *      this file writes anything. It answers one question — is the stated
- *      measurement currently met — and a human decides what that means for
- *      the wider football objective, which a single number does not contain.
- *
- * Honest limitation, stated once here and carried on every payload: the only
- * source that can satisfy a target is an At-Home Combine attempt. Box Cam
- * sessions record observed training, not a verified metric; assessments record
- * an evaluator's opinion on a scale that is not comparable across templates.
- * Pretending either could satisfy a numeric threshold would be exactly the
- * fake quantification the hub forbids.
+ * Objective targets: one Combine metric, one operator, one number. A
+ * comparison, not a formula, since a formula is a score by another name.
+ * Only production-valid results count, and meeting a target never marks the
+ * goal achieved; a person decides that.
  */
 import {
   COMBINE_PROTOCOLS, combineProtocol, latestCombineProtocol, isProductionValidCombine,
 } from '../boxcam/combineShared.mjs';
 import { PROVIDERS } from '../boxcam/drills.mjs';
 
-/** Sources a target may measure against. Deliberately one. */
+/**
+ * Box Cam sessions record observed training, not a verified metric, and
+ * assessment scales are not comparable across templates, so only Combine
+ * attempts can satisfy a target.
+ */
 export const TARGET_SOURCES = Object.freeze(['combine_attempt']);
 
 export const TARGET_OPERATORS = Object.freeze(['gte', 'gt', 'lte', 'lt', 'eq']);
 
 export const OPERATOR_SYMBOLS = Object.freeze({ gte: '≥', gt: '>', lte: '≤', lt: '<', eq: '=' });
 
-/** The three states a target can be in. There is no fourth, and no number. */
 export const TARGET_STATES = Object.freeze(['target_met', 'target_not_met', 'no_current_valid_measurement']);
 
 export const TARGET_LIMITATION =
   'A target compares one standardized Combine measurement against one number the goal states. It says whether that measurement has been reached — not whether the player has developed.';
 
-/** Machine-readable reasons a target has no current measurement. */
 export const NO_MEASUREMENT_REASONS = Object.freeze([
   'no_attempts', 'no_production_valid_attempt', 'protocol_version_mismatch', 'measurement_invalidated',
 ]);
 
 const MAX_TARGET_VALUE = 100_000;
 
-/**
- * Validate a target a client asked to attach to a goal.
- *
- * Nothing is repaired. An unknown protocol, an operator pointing the wrong way
- * down the metric, a fractional value on an integer metric — each is a 400
- * with the reason, because every one of them means the author was describing
- * something other than what they typed.
- */
+/** Nothing is repaired: each mismatch is a 400 with its reason. */
 export function validateTarget(raw) {
   if (raw == null) return { value: null };
   if (typeof raw !== 'object' || Array.isArray(raw)) {
@@ -87,9 +57,7 @@ export function validateTarget(raw) {
     };
   }
 
-  // Version is pinned at creation: a measurement taken under a different
-  // version of the protocol is a different measurement, and silently comparing
-  // across versions is how a target starts lying.
+  // Pinned at creation: results are never compared across protocol versions.
   const version = raw.protocolVersion == null || raw.protocolVersion === ''
     ? latestCombineProtocol(protocolId)?.version
     : Number(raw.protocolVersion);
@@ -98,8 +66,6 @@ export function validateTarget(raw) {
     return { error: 'TARGET_PROTOCOL_VERSION_UNKNOWN', protocolId, protocolVersion: version, detail: `Protocol ${protocolId} has no version ${raw.protocolVersion}.` };
   }
 
-  // The metric is a property of the protocol, not of the request. A client
-  // that names a different one is describing a measurement that does not exist.
   const metricType = raw.metricType == null || raw.metricType === '' ? proto.metricType : String(raw.metricType);
   if (metricType !== proto.metricType) {
     return {
@@ -112,9 +78,7 @@ export function validateTarget(raw) {
   if (!TARGET_OPERATORS.includes(operator)) {
     return { error: 'TARGET_OPERATOR_UNKNOWN', allowed: TARGET_OPERATORS, detail: `Unknown operator "${operator}".` };
   }
-  // An operator that points down a higher-is-better metric encodes "get
-  // worse". It is almost always a mistake, and it is never a development
-  // target, so it is refused rather than stored.
+  // An operator pointing against the metric's direction would set out to get worse.
   const wantsMore = ['gte', 'gt'].includes(operator);
   const wantsLess = ['lte', 'lt'].includes(operator);
   if (proto.direction === 'higher' && wantsLess) {
@@ -123,8 +87,7 @@ export function validateTarget(raw) {
   if (proto.direction === 'lower' && wantsMore) {
     return { error: 'TARGET_OPERATOR_INCOMPATIBLE', operator, direction: proto.direction, detail: `${proto.title} improves as the number falls, so a "${OPERATOR_SYMBOLS[operator]}" target would set out to get worse.` };
   }
-  // Equality on a measurement with sub-unit precision is unreachable in
-  // practice; refusing it is kinder than storing a target that can never be met.
+  // Exact equality is unreachable on a sub-unit measurement.
   if (operator === 'eq' && proto.precision !== 'integer') {
     return { error: 'TARGET_OPERATOR_INCOMPATIBLE', operator, detail: `${proto.title} is measured to ${proto.precision}, so an exact-equality target could never be reached.` };
   }
@@ -136,9 +99,7 @@ export function validateTarget(raw) {
   if (proto.precision === 'integer' && !Number.isInteger(value)) {
     return { error: 'TARGET_VALUE_INVALID', detail: `${proto.title} is counted in whole ${proto.metricUnit}, so the target must be a whole number.` };
   }
-  // A protocol with a fixed measurement window cannot produce a number larger
-  // than the window: "80 seconds of control in a 60-second protocol" is not an
-  // ambitious target, it is an impossible one.
+  // A fixed-window protocol cannot measure a duration longer than its window.
   if (proto.metricType === 'duration' && proto.protocolWindowMs) {
     const ceiling = proto.protocolWindowMs / 1000;
     if (value > ceiling) {
@@ -151,14 +112,12 @@ export function validateTarget(raw) {
       sourceType, protocolId, protocolVersion: proto.version,
       metricType: proto.metricType, metricUnit: proto.metricUnit,
       operator, value,
-      // Frozen at creation so a later protocol revision cannot change what a
-      // stored target meant when it was agreed.
+      // Frozen so a later protocol revision cannot change what was agreed.
       protocolTitle: proto.title, direction: proto.direction, precision: proto.precision,
     },
   };
 }
 
-/** Does one measurement satisfy the comparison? Pure, and the only place it happens. */
 export function compare(measured, operator, target) {
   switch (operator) {
     case 'gte': return measured >= target;
@@ -170,13 +129,7 @@ export function compare(measured, operator, target) {
   }
 }
 
-/**
- * The best production-valid attempt for a target, or null.
- *
- * "Best" means best in the protocol's own direction — the highest count, the
- * lowest time. Ties break on the earliest completion, so the same data always
- * yields the same attempt.
- */
+/** Best in the protocol's direction; ties go to the earliest completion. */
 export function bestValidAttempt({ attempts, sessions, target }) {
   const sessionById = sessions instanceof Map ? sessions : new Map((sessions ?? []).map((s) => [s.id, s]));
   const candidates = (attempts ?? []).filter((a) =>
@@ -195,13 +148,8 @@ export function bestValidAttempt({ attempts, sessions, target }) {
 }
 
 /**
- * Evaluate a target against a player's Combine attempts, right now.
- *
- * Three states, three different sentences: "not met" and "not measured" are
- * different facts and must never render the same way. A target whose only
- * supporting result was invalidated returns to `no_current_valid_measurement`,
- * and the reason says which of the four situations it is, so history stays
- * honest rather than preserving a success the evidence has withdrawn.
+ * "Not met" and "not measured" are different facts. A target whose supporting
+ * result was invalidated returns to `no_current_valid_measurement`.
  */
 export function evaluateTarget({ target, attempts, sessions }) {
   if (!target) return null;
@@ -222,10 +170,6 @@ export function evaluateTarget({ target, attempts, sessions }) {
   const best = bestValidAttempt({ attempts, sessions, target });
 
   if (!best) {
-    // Which absence is it? A player who has never attempted the protocol, one
-    // whose only attempts were simulated, one who used a different version,
-    // and one whose result was invalidated are four different situations and
-    // a coach reading the plan needs to know which.
     const sessionById = sessions instanceof Map ? sessions : new Map((sessions ?? []).map((s) => [s.id, s]));
     let reason = 'no_attempts';
     if (forProtocol.length) {
@@ -258,8 +202,6 @@ export function evaluateTarget({ target, attempts, sessions }) {
       protocolVersion: best.protocolVersion,
       combineVerified: true,
     },
-    // Meeting a target never marks the goal achieved: said on the payload rather than only in a document, because
-    // this is the exact moment somebody would otherwise tick the goal automatically.
     note: met
       ? 'The stated measurement has been reached. Whether the wider development goal is achieved is a decision for the plan owner or reviewer — one measurement is not the whole objective.'
       : 'The stated measurement has not been reached yet.',

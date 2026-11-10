@@ -1,39 +1,12 @@
 /**
- * The canonical Offer domain: pure functions over one stored Offer and a
- * clock. Nothing here reads storage, answers HTTP or writes a case status.
+ * The Offer domain: pure functions over one stored Offer and a clock.
  *
- * THE CHAIN THIS MODULE KEEPS DISTINCT
+ * A recruitment decision, an offer, an offer acceptance and a signing are four different things: an accepted
+ * Offer is not a signing. An issued revision is immutable; changed terms are a new revision, and an answer
+ * names one exact issued revision. Responses record who answered (a guardian is never written as the player).
  *
- *   recruitment decision ≠ offer ≠ offer acceptance ≠ signing
- *
- *   - a positive recruitment decision moves the case to `offer_consideration` and
- *     creates NOTHING here;
- *   - an Offer exists only through an explicit, authorised club action;
- *   - only an ISSUED revision can move the lifecycle to `offer_made`;
- *   - an issued revision is immutable; changed terms are a NEW revision;
- *     acceptance and decline name one exact issued revision;
- *   - superseded, withdrawn and expired revisions cannot be accepted;
- *   - an accepted Offer is NOT a signing: no signing package, no `signed`
- *     state, no `under_contract`.
- *
- * THE RECORD
- *
- *   offer            the logical container: org, case, player, decision
- *                    provenance, an optional transaction reference, the
- *                    revision chain, the append-only response history, the
- *                    read receipts, the idempotency keys, the audit history
- *   offer.revisions  exact revisions. DRAFT is editable under rev control;
- *                    ISSUE freezes it; every later state is terminal FOR THAT
- *                    REVISION. The container's `status` mirrors the current
- *                    revision's stored status for the journey projection.
- *   offer.responses  one authoritative recipient response per revision,
- *                    append-only, with actor provenance (a guardian is never
- *                    written as the player).
- *
- * EXPIRY is a UTC_INSTANT on the revision, parsed by the canonical
- * temporal parser. `effectiveRevisionStatus` reads an ISSUED revision whose
- * expiry has passed — or cannot be read — as EXPIRED without any job having
- * run: the security decision never depends on a materialised status.
+ * `effectiveRevisionStatus` reads an issued revision whose expiry has passed, or cannot be read, as EXPIRED
+ * without any job having run, so access never depends on a materialised status.
  */
 
 import { parseInstant, parseStrictDateOnly, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../../../temporal.mjs';
@@ -47,7 +20,7 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // ------------------------------------------------------------------ vocabulary
 
-/** The seven revision statuses. Nothing else exists; `viewed` is a receipt, not a status. */
+/** `viewed` is a read receipt, not a status. */
 export const OFFER_STATUSES = Object.freeze(['DRAFT', 'ISSUED', 'ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']);
 export const OFFER_TERMINAL_STATUSES = Object.freeze(['ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']);
 
@@ -61,10 +34,7 @@ export const OFFER_STATUS_LABELS = table({
   SUPERSEDED: 'Superseded by a later revision',
 });
 
-/**
- * Revision transitions. Terminal at revision level. There is no edge out
- * of ACCEPTED: a later contract workflow or an explicit restart owns that.
- */
+/** No edge out of ACCEPTED: a later contract workflow or an explicit restart owns that. */
 export const OFFER_REVISION_TRANSITIONS = table({
   DRAFT: ['ISSUED', 'WITHDRAWN'],
   ISSUED: ['ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED'],
@@ -76,14 +46,11 @@ export const OFFER_REVISION_TRANSITIONS = table({
 });
 
 /**
- * The one Offer context supported. A transfer or a loan needs a
- * releasing club, which is the transaction's business; the engaging
- * club's Offer to the player stays distinct from club-to-club terms, and a
- * context this build cannot model honestly is refused rather than approximated.
+ * A transfer or loan needs a releasing club and club-to-club terms this build cannot model, so only direct
+ * recruitment is supported.
  */
 export const OFFER_TYPES = Object.freeze(['direct_recruitment']);
 
-/** Recipient response kinds. One authoritative response per active revision. */
 export const OFFER_RESPONSE_TYPES = Object.freeze(['accepted', 'declined']);
 export const OFFER_RESPONSE_ACTORS = Object.freeze(['player', 'guardian']);
 
@@ -99,19 +66,14 @@ export const OFFER_LIMITS = Object.freeze({
   documents: 10,
   revisions: 20,
   clientKey: CLIENT_KEY_MAX,
-  /** An issued Offer must expire at least one hour after issue and within 180 days. */
   minExpiryMs: 60 * 60 * 1000,
   maxExpiryMs: 180 * DAY_MS,
   historyPage: 200,
 });
 
 /**
- * Minor recipients. No jurisdiction-specific legal policy for an Offer
- * to a minor is encoded in this build, so the pathway is CLOSED everywhere:
- * an Offer whose recipient resolves to a guardian route is refused at ISSUE
- * with `OFFER_RECIPIENT_INVALID`. The guardian routes exist and are
- * fail-closed; they act only where a future policy opens this table. Read
- * from a table rather than hard-coded so enabling one is a policy change.
+ * No jurisdiction's legal policy for an Offer to a minor is encoded yet, so the pathway is closed everywhere:
+ * an Offer whose recipient resolves to a guardian is refused at issue. Opening one is a change to this table.
  */
 export const MINOR_OFFER_PATHWAY_ENABLED = Object.freeze({ GB: false, ENG: false, INT: false, USA: false, DEFAULT: false });
 export const minorOfferPathwayOpen = (jurisdiction, policy = MINOR_OFFER_PATHWAY_ENABLED) =>
@@ -130,9 +92,8 @@ function cleanText(raw, max, { oneLine = false } = {}) {
   if (typeof raw !== 'string') return { ok: false };
   // eslint-disable-next-line no-control-regex
   let s = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
-  // Directional and zero-width format controls are stripped — they
-  // let a message read differently from what was typed (bidi spoofing) and
-  // survive into logs; ordinary Unicode text is kept as typed.
+  // Directional and zero-width controls are stripped: they let a message read differently from what was
+  // typed (bidi spoofing).
   s = s.replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '');
   if (oneLine) s = s.replace(/[\r\n]+/g, ' ');
   s = s.trim();
@@ -141,14 +102,8 @@ function cleanText(raw, max, { oneLine = false } = {}) {
 }
 
 /**
- * The structured terms: deliberately narrow. A role, a squad, a start
- * day, an optional end day, and conditions in the club's own words. No
- * compensation field exists in this product and none is invented; nothing
- * here is a legal clause and nothing here is an executed contract.
- *
- * Every field is optional on a DRAFT; `startDate` is required at ISSUE
- * (`requireComplete`). Days are DATE_ONLY (a contract starts on a day, not at
- * an instant); the pair must be ordered.
+ * Deliberately narrow terms. There is no compensation field, and nothing here is a legal clause or a
+ * contract. `startDate` is required at issue; days are calendar days, not instants.
  */
 export function validateTerms(raw, { requireComplete = false } = {}) {
   const bad = (field, message, extra = {}) => ({ ok: false, error: 'OFFER_TERMS_INVALID', field, message, ...extra });
@@ -179,7 +134,6 @@ export function validateTerms(raw, { requireComplete = false } = {}) {
   return { ok: true, terms: { offerType, role: role.value, squad: squad.value, startDate, endDate, conditions: conditions.value } };
 }
 
-/** The recipient-visible message and the club-private note: two fields, never one. */
 export function validateMessages({ recipientMessage, internalNote } = {}) {
   const bad = (field, message) => ({ ok: false, error: 'OFFER_INPUT_INVALID', field, message });
   const m = cleanText(recipientMessage, OFFER_LIMITS.recipientMessage);
@@ -189,12 +143,7 @@ export function validateMessages({ recipientMessage, internalNote } = {}) {
   return { ok: true, recipientMessage: m.value, internalNote: n.value };
 }
 
-/**
- * The expiry: a UTC_INSTANT with an explicit offset or Z, or
- * integer milliseconds — never a bare local time, never the client's clock.
- * At ISSUE it must lie at least an hour ahead of the server's now and within
- * 180 days. A DRAFT may carry none.
- */
+/** An instant with an explicit offset, or milliseconds; never the client's clock. */
 export function validateExpiry(raw, { now, required = false } = {}) {
   const bad = (message, extra = {}) => ({ ok: false, error: 'OFFER_EXPIRY_INVALID', field: 'expiresAt', message, ...extra });
   if (isAbsent(raw)) return required ? bad('An issued Offer needs an expiry.') : { ok: true, ms: null };
@@ -207,7 +156,7 @@ export function validateExpiry(raw, { now, required = false } = {}) {
   return { ok: true, ms: p.ms };
 }
 
-/** Document references: the canonical evidence vault by id, with a label; no bytes, no paths. */
+/** References to the evidence vault by id, with a label; no bytes, no paths. */
 export function validateDocumentRefs(raw) {
   const bad = (message, extra = {}) => ({ ok: false, error: 'OFFER_DOCUMENT_INVALID', field: 'documents', message, ...extra });
   if (raw === undefined) return { ok: true, documents: undefined };
@@ -229,11 +178,7 @@ export function validateDocumentRefs(raw) {
 
 // ------------------------------------------------------------------ status
 
-/**
- * The status a revision HAS at `now`. Stored ISSUED with a passed — or
- * unreadable — expiry reads EXPIRED. Every other stored status reads as
- * stored. A stored status this build does not know reads as corruption.
- */
+/** Stored ISSUED with a passed or unreadable expiry reads EXPIRED; an unknown stored status reads as null. */
 export function effectiveRevisionStatus(rev, now) {
   if (!rev || !OFFER_STATUSES.includes(rev.status)) return null;
   if (rev.status === 'ISSUED' && isExpiredAt(rev.expiresAt ?? NaN, now)) return 'EXPIRED';
@@ -242,15 +187,13 @@ export function effectiveRevisionStatus(rev, now) {
 
 export const currentRevision = (offer) => (offer?.revisions ?? []).find((r) => r && r.id === offer.currentRevisionId) ?? null;
 
-/** A revision the recipient was ever shown: it left DRAFT by being ISSUED (a withdrawn draft never was). */
+/** A withdrawn draft was never issued. */
 export const wasIssued = (r) => !!r && r.status !== 'DRAFT' && readInstant(r.issuedAt) !== null;
 
 /**
- * The LIVE revision — the one the recipient sees and may answer: the latest
- * revision that was ever issued. Distinct from the CURRENT revision, which is
- * the club's working one (a new draft while revision N is out). While the
- * club drafts revision N+1, revision N stays answerable; issuing N+1
- * supersedes N; an answer to N discards the unissued draft.
+ * The latest revision ever issued: the one the recipient sees and may answer. The current revision is the
+ * club's working one, so while N+1 is drafted N stays answerable; issuing N+1 supersedes N, and an answer to
+ * N discards the draft.
  */
 export function liveRevision(offer) {
   const issued = (offer?.revisions ?? []).filter(wasIssued);
@@ -262,13 +205,11 @@ export function liveStatus(offer, now) {
   return l ? effectiveRevisionStatus(l, now) : null;
 }
 
-/** The Offer's status is its current revision's effective status. */
 export function offerStatus(offer, now) {
   const cur = currentRevision(offer);
   return cur ? effectiveRevisionStatus(cur, now) : null;
 }
 
-/** May a new revision be drafted on this Offer? Not over an accepted one, not over a live draft. */
 export function canRevise(offer, now) {
   const st = offerStatus(offer, now);
   if (st === null) return { ok: false, error: 'OFFER_STATE_UNKNOWN' };
@@ -278,12 +219,6 @@ export function canRevise(offer, now) {
   return { ok: true, from: st };
 }
 
-/**
- * THE acceptance/decline gate, for one exact revision at `now`.
- * Returns the refusal that names why, or ok. Order: the revision must exist on
- * this Offer, be the current one, be ISSUED (not expired), and carry no
- * response yet.
- */
 export function canRespondToRevision(offer, revisionId, now) {
   const rev = (offer?.revisions ?? []).find((r) => r && r.id === revisionId) ?? null;
   if (!rev) return { ok: false, error: 'OFFER_NOT_FOUND' };
@@ -299,7 +234,6 @@ export function canRespondToRevision(offer, revisionId, now) {
   return { ok: true, revision: rev };
 }
 
-/** May the club withdraw this revision? A DRAFT or an ISSUED, unanswered, unexpired revision. */
 export function canWithdrawRevision(offer, now) {
   const rev = currentRevision(offer);
   if (!rev) return { ok: false, error: 'OFFER_STATE_UNKNOWN' };
@@ -310,7 +244,7 @@ export function canWithdrawRevision(offer, now) {
   return { ok: false, error: 'OFFER_STATE_INVALID', message: `A revision that is ${OFFER_STATUS_LABELS[st] ?? st} is not withdrawn.`, current: { status: st } };
 }
 
-/** Which recipient may answer an issued revision: the one snapshotted at ISSUE, re-checked by the route against the live recipient rule. */
+/** Matches the recipient snapshotted at issue; the route re-checks the live recipient rule. */
 export function responderMatches(rev, { kind, actorId, playerId }) {
   const snap = rev?.recipientSnapshot;
   if (!snap || snap.playerId !== playerId) return false;
@@ -319,15 +253,11 @@ export function responderMatches(rev, { kind, actorId, playerId }) {
   return kind === 'player' && actorId === playerId;
 }
 
-/** The next revision number: monotonic, never reused. */
 export const nextRevisionNumber = (offer) => (offer?.revisions ?? []).reduce((m, r) => Math.max(m, Number.isInteger(r?.revisionNumber) ? r.revisionNumber : 0), 0) + 1;
 
 // ------------------------------------------------------------------ integrity
 
-/**
- * Structural integrity of a stored Offer, for a route to refuse to serve or
- * mutate a corrupt row rather than reason over it. Never repairs.
- */
+/** Structural integrity of a stored Offer, so a route refuses a corrupt row. Never repairs. */
 export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
   const problems = [];
   if (!offer || typeof offer !== 'object') return ['missing'];
@@ -345,18 +275,13 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
       if (!Number.isInteger(r.revisionNumber) || r.revisionNumber < 1 || nums.has(r.revisionNumber)) problems.push('revision_number');
       nums.add(r.revisionNumber);
       if (!OFFER_STATUSES.includes(r.status)) problems.push('revision_status');
-      // A revision that left DRAFT by being issued carries the instant it was
-      // issued and a readable expiry; a draft withdrawn before issue carries
-      // neither, and the instant it was withdrawn instead.
+      // A draft withdrawn before issue has no issue instant or expiry.
       const issuedLike = ['ISSUED', 'ACCEPTED', 'DECLINED', 'SUPERSEDED', 'EXPIRED'].includes(r.status);
       if (issuedLike && readInstant(r.issuedAt) === null) problems.push('issued_at');
       if (issuedLike && readInstant(r.expiresAt) === null) problems.push('expires_at');
       if (r.status === 'WITHDRAWN' && readInstant(r.withdrawnAt) === null) problems.push('withdrawn_at');
       if (r.status === 'WITHDRAWN' && r.issuedAt !== null && r.issuedAt !== undefined && readInstant(r.issuedAt) === null) problems.push('issued_at');
-      // Temporal order and bounds. A revision issued before it
-      // was drafted, answered or withdrawn before it was issued, or open for
-      // longer than the issue rule ever allows, is corruption — and corruption
-      // never widens authority (the row is refused, never read as live).
+      // Out-of-order or out-of-bounds instants are corruption, and the row is refused rather than read as live.
       const c0 = readInstant(r.createdAt); const i0 = readInstant(r.issuedAt); const x0 = readInstant(r.expiresAt);
       if (c0 !== null && i0 !== null && i0 < c0) problems.push('issued_before_created');
       if (i0 !== null && readInstant(r.respondedAt) !== null && readInstant(r.respondedAt) < i0) problems.push('responded_before_issued');
@@ -370,10 +295,8 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
     }
     if (typeof offer.currentRevisionId !== 'string' || !ids.has(offer.currentRevisionId)) problems.push('current_revision');
     else {
-      // The pointer names the LATEST revision. The one shape in
-      // which a later revision exists is a draft discarded by an acceptance of
-      // the revision before it (recorded WITHDRAWN); any other later revision
-      // means two revisions each claim to be current.
+      // The only revision allowed after the current one is a draft discarded when the previous revision was
+      // accepted (recorded WITHDRAWN).
       const cur = offer.revisions.find((r) => r && r.id === offer.currentRevisionId);
       if (cur && offer.revisions.some((r) => r && r !== cur && Number.isInteger(r.revisionNumber) && r.revisionNumber > cur.revisionNumber && r.status !== 'WITHDRAWN')) problems.push('current_revision_not_latest');
     }
@@ -391,12 +314,9 @@ export function offerIntegrity(offer, { orgId = null, caseId = null } = {}) {
 }
 
 /**
- * Case/Offer consistency. The case is the authority for where
- * recruitment stands; the Offer is the authority for what was proposed and
- * answered. Two readings that cannot both be true are CORRUPTION (refused,
- * never repaired on read); a case the club moved away from Offer made while
- * a revision is still out is a WARNING the club surface shows and the
- * recipient view reflects as "not answerable right now".
+ * The case says where recruitment stands, the Offer what was proposed and answered. Readings that cannot both
+ * be true are corruption, refused and not repaired. A case moved away from offer_made while a revision is out
+ * is only a warning, and the recipient sees "not answerable right now".
  */
 export const OFFER_CASE_CORRUPTION = Object.freeze(['ACCEPTED_BUT_CASE_DECLINED', 'DECLINED_BUT_CASE_ACCEPTED']);
 export function offerCaseConsistency(offer, kase, now) {
@@ -414,24 +334,14 @@ export const offerCaseCorrupt = (problems) => (problems ?? []).some((p) => OFFER
 // ------------------------------------------------------------------ evidence
 
 /**
- * The lifecycle evidence for the three offer kinds, read from the
- * canonical rows and written nowhere. Same direction as every other kind:
- * offer truth → lifecycle; lifecycle never → offer truth.
- *
- *   offer_sent                    an Offer of THIS case whose CURRENT revision
- *                                 is ISSUED and unexpired at `now`, or has
- *                                 been answered (an accepted or declined
- *                                 revision was sent too)
- *   offer_accepted_by_recipient   the current revision is ACCEPTED, with a
- *                                 recipient response row that names the
- *                                 snapshotted recipient
- *   offer_declined_by_recipient   likewise, DECLINED
+ * offer_sent: the live revision is ISSUED and unexpired, or was answered.
+ * offer_accepted_by_recipient / offer_declined_by_recipient: the live revision is ACCEPTED / DECLINED with a
+ * response row from the snapshotted recipient.
  */
 export function offerEvidence(offers, kase, kind, now) {
   if (!Array.isArray(offers)) return { satisfied: false, reason: 'offers_store_unavailable' };
   const own = offers.filter((o) => o && o.caseId === kase.id && o.orgId === kase.orgId && o.playerId === kase.playerId && offerIntegrity(o, { orgId: kase.orgId, caseId: kase.id }).length === 0);
-  // The LIVE revision is what the recipient was sent; a draft the club is
-  // working on beside it is not evidence of anything.
+  // A draft beside the live revision is not evidence of anything.
   const withStatus = own.map((o) => ({ o, rev: liveRevision(o) })).filter((x) => x.rev).map((x) => ({ ...x, st: effectiveRevisionStatus(x.rev, now) }));
   if (kind === 'offer_sent') {
     const hit = withStatus.find((x) => x.st === 'ISSUED' || x.st === 'ACCEPTED' || x.st === 'DECLINED');
@@ -470,7 +380,7 @@ function revisionBase(r, now) {
   };
 }
 
-/** The club's view: everything, including the internal note and the provenance references. */
+/** The club's view, including the internal note and provenance references. */
 export function offerClubView(offer, now) {
   const cur = currentRevision(offer);
   return {
@@ -495,12 +405,7 @@ export function offerClubView(offer, now) {
   };
 }
 
-/**
- * The recipient's view (player or guardian): the ISSUED revisions and their
- * outcomes, the recipient message, the documents, the expiry. Never the
- * internal note, never a draft, never the decision or transaction reference,
- * never the readiness blockers.
- */
+/** The recipient's view: never the internal note, a draft, the decision or transaction reference, or readiness. */
 export function offerRecipientView(offer, now, { orgName = null, caseOpen = true } = {}) {
   const issued = (offer.revisions ?? []).filter(wasIssued).sort((a, b) => a.revisionNumber - b.revisionNumber);
   const curIssued = liveRevision(offer);
@@ -513,8 +418,7 @@ export function offerRecipientView(offer, now, { orgName = null, caseOpen = true
     currentRevision: curIssued ? revisionBase(curIssued, now) : null,
     revisions: issued.map((r) => revisionBase(r, now)),
     awaitingYourResponse: st === 'ISSUED' && caseOpen,
-    // An issued revision whose case the club has paused or moved cannot
-    // be answered right now; the recipient is told so instead of hitting a 409.
+    // A paused or moved case cannot be answered; the recipient is told so instead of hitting a 409.
     answerable: st === 'ISSUED' && caseOpen,
     notAnswerableReason: st === 'ISSUED' && !caseOpen ? 'CASE_PAUSED' : null,
     responses: (offer.responses ?? []).map((x) => ({ id: x.id, revisionId: x.revisionId, responseType: x.responseType, actorType: x.actorType, occurredAt: x.occurredAt })),
@@ -524,7 +428,7 @@ export function offerRecipientView(offer, now, { orgName = null, caseOpen = true
   };
 }
 
-/** The agent's view: read-only terms and state of a client's Offer the client shared; never the internal note, never documents. */
+/** The agent's view of an Offer the client shared: never the internal note or documents. */
 export function offerAgentView(offer, now, { orgName = null } = {}) {
   const v = offerRecipientView(offer, now, { orgName });
   return {
@@ -540,11 +444,11 @@ export function offerAgentView(offer, now, { orgName = null } = {}) {
 
 // ------------------------------------------------------------------ history
 
-/** Time, then the monotonic id part — two entries in one millisecond never swap. */
+/** The numeric id suffix breaks ties within a millisecond. */
 const SEQ = (id) => { const n = Number(String(id ?? '').split('-').pop()); return Number.isFinite(n) ? n : 0; };
 export const byAtThenId = (a, b) => (a.at - b.at) || (SEQ(a.id) - SEQ(b.id));
 
-/** Entries a person can read: ids, states, times, actor kind and name only. */
+/** Ids, states, times, actor kind and name only. */
 export function offerHistoryView(offer, { forRecipient = false } = {}) {
   return (offer.history ?? []).slice().sort(byAtThenId)
     .filter((h) => !forRecipient || !/draft|internal/.test(h.action))

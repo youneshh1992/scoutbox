@@ -1,11 +1,7 @@
 /**
- * Lookups by id through the repositories' indexes: a player, guardian, staff member or
- * organisation is found by its id in constant time, never by scanning the whole collection. Every route module
- * receives these as `byId` in its context.
- *
- * Each lookup answers the record view, or null when there is none. The optional `where` is a further condition
- * the record must meet (`byId.user(id, (u) => u.orgId === org.id && !u.removedAt)`); when it does not, the answer
- * is null too.
+ * `byId` in every route context. The optional `where` is a further condition
+ * the record must meet, e.g. `byId.user(id, (u) => u.orgId === org.id)`; a
+ * record that fails it is null.
  */
 const matching = (rec, where) => (rec && (!where || where(rec)) ? rec : null);
 
@@ -18,7 +14,7 @@ export function createLookups({ players, guardians, users, orgs }) {
     guardian: (id, where) => matching(guardians.byId(id), where),
     user: (id, where) => matching(users.byId(id), where),
     org: (id, where) => matching(orgs.byId(id), where),
-    /** The player whose media list holds this clip (a clip id is unique across players). */
+    /** Clip ids are unique across players. */
     mediaOwner: (mediaId) => players.byMediaId(mediaId),
   });
 }

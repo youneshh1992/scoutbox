@@ -1,29 +1,11 @@
-// Golden observation fixtures.
-//
-// HONESTY NOTE, first, because everything below depends on it:
-//
-//   These fixtures are SYNTHETIC. They are rendered geometry — a bright disc
-//   and a dark rectangle on a noisy background — not football. They can
-//   demonstrate that the engine is deterministic, that its rules fire on the
-//   structure they claim to fire on, and above all that it REFUSES the cases
-//   it promises to refuse. They cannot demonstrate that it counts touches
-//   correctly on real video of a real player, and nothing in this repository
-//   can, because there is no real football video here and private user
-//   media must not be added.
-//
-//   That gap is not a caveat to be buried. It is the reason the production
-//   enablement gate in gate.mjs requires real-world validation evidence that
-//   this environment cannot supply.
-//
-// Every fixture declares its EXPECTED outcome as data, before any
-// measurement is taken, so that tuning against a result is visible as a diff
-// to a ground-truth constant rather than invisible as a threshold nudge.
-
+// Golden observation fixtures. Synthetic (a bright disc and a dark rectangle on noise), so they show the engine is
+// deterministic and refuses what it promises to refuse, not that it counts real touches; there is no real football
+// video here and private user media must not be added. That is why gate.mjs requires real-world validation.
+// Expected outcomes are declared as data, so tuning against a result shows as a diff to a ground-truth constant.
 import { FRAME_LIMITS } from './policy.mjs';
 import { sequence, touchPath } from './scenes.mjs';
 
-// Deterministic PRNG — fixtures must be byte-identical on every run (a count
-// that differs nondeterministically for the same fixture is a defect).
+// Fixtures must be byte-identical on every run.
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -37,10 +19,7 @@ function mulberry32(seed) {
 const W = 240;
 const H = 180;
 
-/**
- * Render one gray8 scene. Everything is drawn from explicit geometry: there
- * is no image asset anywhere in ScoutBox, and none is introduced here.
- */
+/** Drawn from explicit geometry: there is no image asset in ScoutBox. */
 function render({ w = W, h = H, bg = 130, noise = 6, ball = null, balls = null,
   people = [], gain = 1, rng }) {
   const px = new Uint8Array(w * h);
@@ -70,7 +49,6 @@ function render({ w = W, h = H, bg = 130, noise = 6, ball = null, balls = null,
 
 const clamp8 = (v) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
 
-/** Wrap a rendered scene in the wire envelope the frame route accepts. */
 function envelope(scene, seq, atMs) {
   return {
     encoding: 'gray8',
@@ -86,10 +64,7 @@ function envelope(scene, seq, atMs) {
 
 const PERSON = { x0: 96, y0: 58, x1: 130, y1: 168, luma: 55 };
 
-/**
- * A juggling ball: parabolic flights between contacts at a fixed cadence.
- * Contacts are the ground truth — `bounces` of them, by construction.
- */
+/** Parabolic flights between contacts; `bounces` contacts by construction. */
 function juggleFrames({ bounces = 8, fps = 12, seed = 11, apexFrac = 0.30 }) {
   const rng = mulberry32(seed);
   const frames = [];
@@ -110,14 +85,6 @@ function juggleFrames({ bounces = 8, fps = 12, seed = 11, apexFrac = 0.30 }) {
   return frames;
 }
 
-/**
- * Ground touches — delegated to the shared physics model in scenes.mjs.
- *
- * There is ONE description of what a touch is, in scenes.mjs. A local copy
- * would silently keep asserting old physics when the shared model is
- * corrected, and the fixture would fail for a reason that has nothing to do
- * with the engine.
- */
 function touchFrames({ touches = 10, fps = 12, seed = 23 }) {
   return sequence({
     w: W, h: H, fps, durationMs: 500 * touches,
@@ -135,13 +102,8 @@ function plainFrames({ n = 40, dtMs = 83, seed = 5, ...scene }) {
 }
 
 // ------------------------------------------------------------- the set
-//
-// `expected.state` is the outcome the engine MUST produce. Where a count is
-// asserted it is the count the geometry actually contains.
-//
-// `tolerance` exists only for accepted counting fixtures and is stated per
-// fixture rather than globally, so a loose tolerance cannot hide behind an
-// average.
+// A count asserted is the count the geometry contains. `tolerance` is per fixture so a loose one can't hide behind
+// an average.
 
 export function goldenFixtures() {
   return [
@@ -184,8 +146,7 @@ export function goldenFixtures() {
       frames: (() => {
         const rng = mulberry32(11);
         const base = juggleFrames({ bounces: 8, seed: 11 });
-        // Re-render at low gain rather than post-darkening, so the fixture is
-        // a genuinely dark capture and not a bright one with a filter.
+        // Low gain rather than post-darkening, so it's a genuinely dark capture.
         const out = [];
         const periodMs = 600, dtMs = 83, contactY = 150, apex = contactY - H * 0.30;
         let seq = 0;
@@ -204,12 +165,8 @@ export function goldenFixtures() {
       id: 'G6_long_occlusion',
       kind: 'juggle',
       description: 'Valid juggling, but the ball leaves the visible area for a long run of frames.',
-      // GROUND TRUTH: the ball IS detected for most of the attempt and then
-      // lost for nine consecutive frames, so this is an
-      // `observation_discontinuity`, not `ball_not_detected`. The declared
-      // truth was revised on semantic grounds before seeing whether the
-      // engine agreed (git has the change), so it is a visible edit to a
-      // declared truth rather than an invisible nudge.
+      // The ball is detected for most of the attempt then lost for nine consecutive frames: an
+      // `observation_discontinuity`, not `ball_not_detected`.
       frames: (() => {
         const rng = mulberry32(11);
         const out = [];
@@ -250,9 +207,7 @@ export function goldenFixtures() {
           people: [PERSON, { x0: 20, y0: 60, x1: 56, y1: 168, luma: 58 }], rng,
         }), i, i * 83));
       })(),
-      // Two dark masses merge into one wide person region. The engine must
-      // not attempt to decide which is the account holder; whatever it
-      // reports, it must not be a confident count attributed to one of them.
+      // Two dark masses merge into one person region. The engine must not report a confident count attributed to either.
       expected: { state: 'any_refusal_or_uncounted', count: null },
     },
     {
@@ -276,8 +231,7 @@ export function goldenFixtures() {
         const last = live[live.length - 1];
         const frozen = Array.from({ length: 12 }, (_, i) => ({
           ...last, seq: live.length + i, atMs: last.atMs + (i + 1) * 83,
-          // Not byte-identical: one pixel differs, so the duplicate-hash
-          // defence does NOT catch this. Only the static-run rule does.
+          // One pixel differs, so only the static-run rule catches this, not the duplicate hash.
           data: nudge(last.data),
         }));
         return [...live, ...frozen];
@@ -307,8 +261,7 @@ export function goldenFixtures() {
           }), i, i * 83);
         });
       })(),
-      // The ball is not being played. Anything counted here is a FALSE
-      // POSITIVE, which is a P0.
+      // The ball is not being played: anything counted is a false positive.
       expected: { state: 'accepted_with_zero_or_refusal', count: 0 },
     },
     {
@@ -316,10 +269,7 @@ export function goldenFixtures() {
       kind: 'juggle',
       description: 'Valid juggling with occasional retransmitted frames (about one in four).',
       frames: (() => {
-        // A realistic retransmission rate. "Duplicates do not inflate the
-        // count" and "a capture that is half duplicates is still acceptable"
-        // are different properties, and the second must not be true, so
-        // G14 tests it separately.
+        // A realistic retransmission rate. A capture that is half duplicates must not be acceptable; G14 tests that.
         const base = juggleFrames({ bounces: 8 });
         const out = [];
         let seq = 0;
@@ -346,8 +296,7 @@ export function goldenFixtures() {
         }
         return out;
       })(),
-      // A capture that is half retransmission is a degraded capture, whatever
-      // the derived count happens to be (the duplicate/frozen-frame rate).
+      // Half retransmission is degraded, whatever the derived count.
       expected: { state: 'protocol_violation', count: null },
     },
   ];

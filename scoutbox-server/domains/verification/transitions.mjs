@@ -1,10 +1,5 @@
-// Consent-based academy transition + second-chance network.
-// A transition is a consent lifecycle: nothing is visible to any org without an
-// explicit, revocable, expiring grant; nothing about a player is labelled
-// "released"; agencies stay structurally walled from transition packs.
-//
-// Cases, packs, grants and history live in repositories/transitionsVouches.mjs. Input is checked before anything is
-// written; junk is refused with 400 FIELD_INVALID naming the field.
+// Consent-based academy transitions. Nothing is visible to a club without an explicit, revocable, expiring grant;
+// nothing about a player is labelled "released"; agencies never receive transition packs.
 import { isPlainObject } from '../../repositories/recruitment.mjs';
 import { TRANSITION_LIMITS as L, PACK_KINDS } from '../../repositories/transitionsVouches.mjs';
 
@@ -23,13 +18,13 @@ export function registerTransitions(ctx) {
 
   // ------------------------------------------------------------ input
   const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
-  /** Optional free text: null when absent or empty, shortened to `max`; undefined after refusing junk. */
+  /** Undefined after refusing junk. */
   const optText = (res, v, field, max) => {
     if (v === undefined || v === null || v === '') return null;
     if (typeof v !== 'string') return fieldInvalid(res, field, `${field} is text.`);
     return v.slice(0, max);
   };
-  /** A whole number of days in range, the default when absent; undefined after refusing anything else (refused, not clamped). */
+  /** Undefined after refusing junk (refused, not clamped). */
   const days = (res, v, field, { min, max, default: def }) => {
     if (v === undefined || v === null) return def;
     if (!Number.isInteger(v) || v < min || v > max) return fieldInvalid(res, field, `A whole number of days from ${min} to ${max}.`);
@@ -42,7 +37,7 @@ export function registerTransitions(ctx) {
   const SYSTEM = { kind: 'system', id: 'sweep', name: 'system' };
   const firstStaff = (orgId) => users.firstActive(orgId);
 
-  // ------------------------------------------------------------ views (allowlists)
+  // ------------------------------------------------------------ views
   const recipientView = (r) => ({ orgId: r.orgId, orgName: r.orgName, grantedAt: r.grantedAt, expiresAt: r.expiresAt, revokedAt: r.revokedAt, viewedAt: r.viewedAt });
   const caseView = (t) => ({
     id: t.id, playerId: t.playerId, playerName: t.playerName,
@@ -56,10 +51,8 @@ export function registerTransitions(ctx) {
   });
 
   // ============================================================ helpers
-  // Evidence pack whitelist: ONLY records the player side owns or was given.
-  // Club-private material (assessments, notes, video annotations) can never
-  // ride along — publishing feedback is the one door, and only the
-  // published text crosses it. Ids the player does not own are dropped.
+  // Only records the player side owns or was given: club-private material cannot ride along, and of an assessment
+  // only published feedback crosses. Ids the player does not own are dropped.
   function buildPack(player, sel) {
     const own = (list, ok) => [...new Set(list ?? [])].filter(ok);
     return {
@@ -68,7 +61,7 @@ export function registerTransitions(ctx) {
       feedbackIds: own(sel?.feedbackIds, (id) => { const a = ctx.scoutingReads.assessments.byId(id); return !!a && a.playerId === player.id && !!a.publishedFeedback; }),
     };
   }
-  /** The selection as sent: an object of id lists, or nothing. Undefined after refusing junk. */
+  /** Undefined after refusing junk. */
   function readSelection(res, sel) {
     if (sel === undefined || sel === null) return {};
     if (!isPlainObject(sel)) return fieldInvalid(res, 'pack', 'Send an object with mediaIds, evidenceIds and feedbackIds.');
@@ -100,7 +93,7 @@ export function registerTransitions(ctx) {
       return res.status(400).json({ error: 'PACK_EMPTY', message: 'Select at least one item you own (your media, your evidence passport records, or feedback published to you). Club-private reports cannot be included without the club publishing them to you first.' });
     }
     const now = Date.now();
-    // In a unit, so the id counter commits with the rows.
+    // In a unit so the id counter commits with the rows.
     const t = unit(() => transitionCases.create({
       id: nextId('trn'), playerId: player.id, playerName: clip(player.name),
       startedBy: { kind: actor.kind, id: actor.id, name: clip(actor.name) },
@@ -136,27 +129,23 @@ export function registerTransitions(ctx) {
     return t;
   }
 
-  /** The index of the organisation's live grant (not revoked, not expired at `at`), or -1. */
   const activeIndex = (t, orgId, at = Date.now()) => t.recipients.findIndex((r) => r.orgId === orgId && !r.revokedAt && r.expiresAt > at);
 
   function addRecipient(req, res, t, actor) {
     if (t.status !== 'open') return res.status(409).json({ error: 'CASE_CLOSED', status: t.status });
-    // A period that ended before the sweep marked the case expired: closed all the same (a grant would expire before it began).
+    // The sweep may not have marked the case expired yet.
     if (t.periodEndsAt <= Date.now()) return res.status(409).json({ error: 'CASE_CLOSED', status: 'expired' });
     const orgId = orgIdOf(res, req.body?.orgId); if (orgId === undefined) return;
     const grant = days(res, req.body?.days, 'days', L.grantDays); if (grant === undefined) return;
     const org = byId.org(orgId);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     const player = findPlayer(t.playerId);
-    // The receiving club must be able to see this player under ALL standing
-    // rules (verification for minors, agency wall, grassroots radius+level).
     if (org.type === 'agency') return res.status(403).json({ error: 'AGENCIES_EXCLUDED', message: 'Transition packs go to clubs, never agencies.' });
     if (!orgCanSee(org, player)) return res.status(403).json({ error: 'RECIPIENT_NOT_ELIGIBLE', message: 'That club cannot currently see this player (verification, level or distance rules) — a transition grant never overrides eligibility.' });
     if (activeIndex(t, org.id) >= 0) return res.status(409).json({ error: 'ALREADY_GRANTED' });
     const now = Date.now();
     const r = { orgId: org.id, orgName: clip(org.name), grantedAt: now, expiresAt: Math.min(now + grant * DAY, t.periodEndsAt), revokedAt: null, viewedAt: null };
     const staff = firstStaff(org.id);
-    // The grant, its history entry and the club's notification commit together.
     unit(() => {
       transitionCases.grant(t.id, { recipient: r }, { history: [entry(actor, 'recipient_added', { orgId: org.id })] });
       if (staff) notify({ kind: 'org_user', id: staff.id }, 'transition', `📦 A player has shared a transition evidence pack with ${org.name}. Open Transitions to review it.`, t.id);
@@ -172,7 +161,6 @@ export function registerTransitions(ctx) {
     const r = t.recipients[i];
     const staff = firstStaff(r.orgId);
     let stored;
-    // The revocation, its history entry and the club's acknowledgement request commit together.
     unit(() => {
       stored = transitionCases.revokeGrant(t.id, { ord: i, at: Date.now() }, { history: [entry(actor, 'recipient_revoked', { orgId: r.orgId })] });
       if (staff) {
@@ -199,7 +187,7 @@ export function registerTransitions(ctx) {
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     const now = Date.now();
     const stored = unit(() => transitionCases.place(t.id, {
-      placement: { orgId: org.id, orgName: clip(org.name), at: now, note }, followUpDueAt: now + FOLLOW_UP_DAYS * DAY, at: now, // the placement check-in
+      placement: { orgId: org.id, orgName: clip(org.name), at: now, note }, followUpDueAt: now + FOLLOW_UP_DAYS * DAY, at: now,
     }, { history: [entry(actor, 'placed', { orgId: org.id })] }));
     res.json({ transition: caseView(stored), note: 'Case closed by placement — its history stays. Your registered level changes only through a signing or an audited level review, never automatically.' });
   }
@@ -209,7 +197,7 @@ export function registerTransitions(ctx) {
     [guardianRouter, (req) => ({ kind: 'guardian', id: req.guardian.id, name: req.guardian.name }), 'guardian'],
   ]) {
     const base = own === 'player' ? '/transitions' : '/children-transitions';
-    // A player's or a guardian's own cases, newest first (a short, per-player list: not paged).
+    // A short per-player list: not paged.
     router.get(base, (req, res) => {
       const list = own === 'player' ? transitionCases.forPlayer(req.player.id) : transitionCases.forPlayers(req.guardian.childIds);
       res.json({ items: list.slice().reverse().map(caseView) });
@@ -230,8 +218,7 @@ export function registerTransitions(ctx) {
 
   // ------------------------------------------------------------ club side
   orgRouter.get('/transitions', (req, res) => {
-    // Only cases where THIS org holds a live grant — there is no browsable
-    // pool of "released players", and no list of minors.
+    // There is no browsable pool of "released players": only cases where this org holds a live grant.
     const now = Date.now();
     const mine = transitionCases.grantedTo(req.org.id, now);
     res.json({
@@ -245,9 +232,7 @@ export function registerTransitions(ctx) {
     if (!t) return res.status(404).json({ error: 'TRANSITION_NOT_FOUND' });
     const i = t.status === 'open' ? activeIndex(t, req.org.id) : -1;
     const player = findPlayer(t.playerId);
-    // Live, every read: grant + standing visibility rules.
     if (i < 0 || !orgCanSee(req.org, player)) return res.status(403).json({ error: 'TRANSITION_ACCESS_REVOKED', message: 'This pack is not (or no longer) shared with your club.' });
-    // The grant's last view and the ledger row commit together.
     unit(() => {
       transitionCases.recordView(t.id, { ord: i, at: Date.now() });
       ledgerAppend({ type: 'transition_pack_view', playerId: player.id, orgId: req.org.id, orgName: req.org.name, userId: req.orgUser.id, scoutName: req.orgUser.name });
@@ -255,7 +240,7 @@ export function registerTransitions(ctx) {
     res.json({ transitionId: t.id, playerName: t.playerName, note: t.note, pack: packView(player, t.pack) });
   });
 
-  // Audited level review — the ONLY path that changes level outside signings.
+  // The only path that changes level outside signings.
   adminRouter.post('/players/:id/level-review', (req, res) => {
     const p = findPlayer(req.params.id);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
@@ -263,7 +248,6 @@ export function registerTransitions(ctx) {
     if (!['amateur', 'semi_pro', 'pro'].includes(level)) return res.status(400).json({ error: 'BAD_LEVEL' });
     if (!req.body?.reason?.trim()) return res.status(400).json({ error: 'REASON_REQUIRED', message: 'Level reviews are audited — record the basis for the change.' });
     const from = p.level;
-    // The level column and the ledger entry commit together or not at all.
     unit(() => {
       players.setLevel(p.id, level);
       ledgerAppend({ type: 'level_review', playerId: p.id, orgId: null, orgName: 'Trust & Safety', userId: null, scoutName: 'T&S level review', detail: { from, to: level, reason: String(req.body.reason).slice(0, 300) } });
@@ -271,10 +255,7 @@ export function registerTransitions(ctx) {
     res.json({ playerId: p.id, from, to: level, note: 'Recorded in the append-only ledger. An academy departure never changes level automatically — this review is the deliberate, audited path.' });
   });
 
-  // Transition follow-ups + expiry, run on the minute sweep (server.mjs). Indexed
-  // queries find only the due cases; each change commits on its own unit (with
-  // its notification), and a failure is logged, so one never holds back the rest
-  // or escapes the timer.
+  // Each case commits in its own unit and a failure is logged, so one never holds back the rest or escapes the timer.
   function transitionSweep() {
     const now = Date.now();
     let changed = 0;

@@ -1,11 +1,6 @@
-// Imports, integrations, portable player identity (repositories/integrations.mjs).
-// Design decisions that are safety features, not gaps:
-//  * Bulk import creates ORG-PRIVATE prospect records, never platform player
-//    accounts. A CSV can therefore never mint a discoverable minor.
-//  * Identity is provider + externalId. Name similarity alone NEVER merges —
-//    it queues an identity review for a human with the right permissions.
-//  * Outgoing webhooks are signed, tenant-scoped, retried with bounds, and
-//    SSRF-guarded. Connectors report "not configured" until credentialed.
+// Bulk import creates org-private prospect records, never platform player accounts, so a CSV can never mint a
+// discoverable minor. Identity is provider + externalId: name similarity alone never merges; it queues a review for a
+// human with the right permissions.
 import crypto from 'node:crypto';
 import { parseDobStrict } from '../../temporal.mjs';
 import { signBody, webhookUrlProblem } from './webhooks.mjs';
@@ -14,7 +9,7 @@ import { PROSPECT_FIELDS, PROSPECT_POSITIONS as POSITIONS, API_SCOPES, WEBHOOK_E
 
 export const EXPORT_CONTRACT_VERSION = '2026-09-01.v1';
 
-// Minimal, quote-aware CSV parser (RFC 4180 subset: quoted fields, "" escape).
+// Quote-aware CSV parser (RFC 4180 subset: quoted fields, "" escape).
 export function parseCsv(text) {
   const rows = [];
   let row = [], field = '', inQ = false;
@@ -47,11 +42,10 @@ export function registerImports(ctx) {
   } = ctx;
   if (!integrations?.batches) throw new TypeError('registerImports needs the integrations repository (ctx.integrations)');
   const { batches, prospects, reviews, apiKeys, endpoints, deliveries } = integrations;
-  // An exhausted webhook delivery's ops event is a row of ops_events (repositories/safetyAudit.mjs), written at once.
   const opsEvent = (row) => safetyAudit.opsEvents.record(row);
   const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
   const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-  /** A refusal of the repository the route can answer (a live duplicate, a stale dry run); anything else is a defect. */
+  /** A refusal the route can answer (a live duplicate, a stale dry run); anything else is a defect. */
   const refused = (res, e) => {
     if (e?.code === 'IMPORT_IDENTITY_TAKEN') return res.status(409).json({ error: 'ALREADY_IMPORTED', message: `${e.provider} ${e.externalId} is already one of your live prospects. Validate the file again for a fresh report.` });
     throw e;
@@ -81,13 +75,12 @@ export function registerImports(ctx) {
       for (const f of PROSPECT_FIELDS) {
         if (colFor[f] === undefined) continue;
         rec[f] = String(raw[colFor[f]] ?? '').trim();
-        // A cell longer than the field holds is a row error (kept cut to the limit), never stored whole.
+        // An over-long cell is a row error (kept cut to the limit), never stored whole.
         if (rec[f].length > L.record[f]) { errors.push(`${f} exceeds ${L.record[f]} characters`); rec[f] = rec[f].slice(0, L.record[f]); }
       }
       if (!rec.name) errors.push('name is required');
       if (!rec.provider || !rec.externalId) errors.push('provider and externalId are required — identity is never name-only');
-      // The platform DOB rule (shape, a day that exists, not in the future),
-      // then the import's own floor.
+      // The platform DOB rule, then the import's own floor.
       if (rec.dob) {
         const d = parseDobStrict(rec.dob, Date.now());
         if (!d.ok) errors.push(d.why === 'wrong shape' || d.why === 'not text' ? 'dob must be YYYY-MM-DD' : `dob out of range (${d.why})`);
@@ -106,8 +99,7 @@ export function registerImports(ctx) {
         if (prospects.liveKeyTaken(org.id, rec.provider, rec.externalId)) disposition = 'already_imported';
         else if (linkedPlayer) { disposition = 'linked_player_exists'; matchPlayerId = linkedPlayer.id; }
         else if (rec.dob) {
-          // Same name + same dob on a platform player the org can already see
-          // → AMBIGUOUS. Queued for review, never auto-merged.
+          // Same name and dob as a platform player the org can see is ambiguous: queued for review, never auto-merged.
           const candidate = players.byNameAndDob(rec.name, rec.dob);
           if (candidate && orgCanSee(org, candidate)) { disposition = 'ambiguous_identity'; matchPlayerId = candidate.id; }
         }
@@ -136,7 +128,7 @@ export function registerImports(ctx) {
     if (rows.length > L.rows + 1) return res.status(400).json({ error: 'CSV_TOO_LARGE', message: `Max ${L.rows} rows per batch.` });
     const header = rows[0];
     if (header.length > L.columns || header.some((h) => h.length > L.header)) return fieldInvalid(res, 'csv', `The header row holds at most ${L.columns} column names of at most ${L.header} characters each.`);
-    // The mapping is refused rather than ignored where it does not say something the import can do.
+    // A mapping the import cannot honour is refused rather than ignored.
     if (mapping !== undefined && mapping !== null) {
       if (!isObject(mapping)) return fieldInvalid(res, 'mapping', 'mapping is an object from CSV column name to prospect field.');
       for (const [col, field] of Object.entries(mapping)) {
@@ -155,11 +147,10 @@ export function registerImports(ctx) {
       committedAt: null, reversedAt: null, createdProspectIds: [],
       history: [{ id: nextId('aud'), at, byKind: 'org_user', byId: req.orgUser.id, byName: req.orgUser.name, action: 'validated', detail: summary }],
     });
-    // This IS the dry run: nothing was written except the batch record.
+    // The dry run writes only the batch record.
     res.status(201).json({ batch: { ...batch, rows: batch.rows.slice(0, 200) }, dryRun: true, note: 'Nothing imported yet — review the report, then POST /imports/:id/commit with {confirm:true}.' });
   });
 
-  // Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }; each batch without its rows.
   orgRouter.get('/imports', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -177,7 +168,7 @@ export function registerImports(ctx) {
     const b = batches.forOrgById(req.org.id, req.params.id);
     if (!b) return res.status(404).json({ error: 'BATCH_NOT_FOUND' });
     if (req.body?.confirm !== true) return res.status(400).json({ error: 'CONFIRM_REQUIRED', message: 'Committing writes records — send {confirm:true} after reviewing the dry run.' });
-    if (b.status === 'committed') return res.json({ batch: b, note: 'Already committed (idempotent).' }); // idempotent commit
+    if (b.status === 'committed') return res.json({ batch: b, note: 'Already committed (idempotent).' });
     if (b.status !== 'validated') return res.status(409).json({ error: 'BATCH_NOT_COMMITTABLE', status: b.status });
     const at = Date.now();
     const created = b.rows.filter((r) => r.disposition === 'create').map((r) => prospectFrom(r.record, { batchId: b.id, orgId: req.org.id, at }));
@@ -187,7 +178,6 @@ export function registerImports(ctx) {
     }));
     let committed;
     try {
-      // The prospects, the reviews, the batch's status and history and the webhook deliveries commit together.
       unit(() => {
         committed = batches.commit(b.id, { at, by: { id: req.orgUser.id, name: req.orgUser.name }, prospects: created, reviews: queued, historyId: nextId('aud') });
         emitWebhook(req.org.id, 'import.committed', { batchId: b.id, created: created.length });
@@ -201,12 +191,12 @@ export function registerImports(ctx) {
     const b = batches.forOrgById(req.org.id, req.params.id);
     if (!b) return res.status(404).json({ error: 'BATCH_NOT_FOUND' });
     if (b.status !== 'committed') return res.status(409).json({ error: 'NOT_COMMITTED' });
-    // The batch's own prospects: nothing edits a prospect after its import, so none is kept back.
+    // Nothing edits a prospect after its import, so none is kept back.
     const { removed } = batches.reverse(b.id, { at: Date.now(), by: { id: req.orgUser.id, name: req.orgUser.name }, historyId: nextId('aud') });
     res.json({ removed, kept: [], note: 'All records from this batch were reversed.' });
   });
 
-  /** A prospect from a validated row's record: an empty optional cell is absent (null). */
+  /** An empty optional cell is absent (null). */
   function prospectFrom(rec, { batchId, orgId, at }) {
     return {
       id: nextId('prs'), orgId, batchId,
@@ -218,7 +208,6 @@ export function registerImports(ctx) {
   }
 
   // ------------------------------------------------------------- prospects
-  // Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
   orgRouter.get('/prospects', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
@@ -241,9 +230,7 @@ export function registerImports(ctx) {
     if (action === 'link') {
       const p = findPlayer(r.candidatePlayerId);
       if (!p || !orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'You can only link identities on players currently visible to your organisation.' });
-      // Provenance is PRESERVED, never overwritten: external ids accumulate,
-      // and player-owned profile fields are untouched by the claim. ONE unit of
-      // work: the external-id row, the review's resolution and its webhook deliveries.
+      // Provenance is preserved: external ids accumulate, and player-owned profile fields are untouched by the claim.
       unit(() => {
         if (!(p.externalIds ?? []).some((e) => e.provider === r.record.provider && e.externalId === r.record.externalId)) {
           players.addItem(p.id, 'externalIds', { provider: r.record.provider, externalId: r.record.externalId, source: `import:${r.batchId}`, by: req.orgUser.name, at, reviewId: r.id });
@@ -252,7 +239,7 @@ export function registerImports(ctx) {
         emitWebhook(req.org.id, 'identity.resolved', { reviewId: r.id, resolution: 'linked' });
       });
     } else if (action === 'separate') {
-      // One live prospect per provider and external id — the same rule the import applies.
+      // One live prospect per provider and external id, as on import.
       if (prospects.liveKeyTaken(req.org.id, r.record.provider, r.record.externalId)) return res.status(409).json({ error: 'ALREADY_IMPORTED', message: `${r.record.provider} ${r.record.externalId} is already one of your live prospects.` });
       try {
         unit(() => {
@@ -277,7 +264,7 @@ export function registerImports(ctx) {
     if (!requireLead(req, res)) return;
     const { scopes, label } = req.body ?? {};
     if (scopes === undefined || scopes === null || (Array.isArray(scopes) && !scopes.length)) return res.status(400).json({ error: 'SCOPES_REQUIRED', message: `Pick at least one of: ${API_SCOPES.join(', ')}` });
-    // An unknown or repeated scope is refused, not silently dropped.
+    // An unknown or repeated scope is refused, not dropped.
     if (!Array.isArray(scopes)) return fieldInvalid(res, 'scopes', `scopes is a list of: ${API_SCOPES.join(', ')}`);
     const wrong = scopes.findIndex((s) => !API_SCOPES.includes(s));
     if (wrong >= 0) return fieldInvalid(res, `scopes[${wrong}]`, `Pick from: ${API_SCOPES.join(', ')}`);
@@ -316,7 +303,7 @@ export function registerImports(ctx) {
     };
   }
 
-  // Versioned export contract. Tenant-scoped: an org exports ITS OWN records.
+  // Versioned export contract; an org exports only its own records.
   app.get('/api/v1/export/prospects', apiKeyAuth('export:prospects'), (req, res) => {
     res.json({
       contract: EXPORT_CONTRACT_VERSION, kind: 'prospects', orgId: req.apiOrg.id,
@@ -327,7 +314,7 @@ export function registerImports(ctx) {
   });
 
   app.get('/api/v1/export/shortlist', apiKeyAuth('export:shortlist'), (req, res) => {
-    // Live visibility re-check on every export row — revoked access exports nothing.
+    // Visibility is re-checked on every row: revoked access exports nothing.
     const ids = safetyAudit.ledger.playersListedBy(req.apiOrg.id);
     const visible = ids.map(findPlayer).filter((p) => p && orgCanSee(req.apiOrg, p));
     res.json({
@@ -352,7 +339,7 @@ export function registerImports(ctx) {
     const problem = webhookUrlProblem(url);
     if (problem) return res.status(400).json({ error: 'WEBHOOK_URL_REJECTED', message: problem });
     if (events === undefined || events === null || (Array.isArray(events) && !events.length)) return res.status(400).json({ error: 'EVENTS_REQUIRED', message: `Subscribe to at least one of: ${WEBHOOK_EVENTS.join(', ')}` });
-    // An unknown or repeated event is refused, not silently dropped.
+    // An unknown or repeated event is refused, not dropped.
     if (!Array.isArray(events)) return fieldInvalid(res, 'events', `events is a list of: ${WEBHOOK_EVENTS.join(', ')}`);
     const wrong = events.findIndex((e) => !WEBHOOK_EVENTS.includes(e));
     if (wrong >= 0) return fieldInvalid(res, `events[${wrong}]`, `Subscribe to: ${WEBHOOK_EVENTS.join(', ')}`);
@@ -387,8 +374,8 @@ export function registerImports(ctx) {
     res.json({ items: deliveries.recentForEndpoint(w.id, 100) });
   });
 
-  // Tenant-scoped emission: only endpoints belonging to `orgId` ever see the event. Each delivery is a row written at
-  // once — inside the caller's unit of work when one is open, so it commits with the change it announces.
+  // Only endpoints of `orgId` see the event. Each delivery row joins the caller's unit when one is open, so it commits
+  // with the change it announces.
   function emitWebhook(orgId, type, data) {
     if (!orgId) return;
     const at = Date.now();
@@ -401,17 +388,16 @@ export function registerImports(ctx) {
     }
   }
 
-  // Bounded retry ladder. SCOUTBOX_FAST_SWEEPS compresses it for the test suite —
-  // the LOGIC under test is identical, only the waits shrink.
+  // SCOUTBOX_FAST_SWEEPS shrinks the waits for the test suite; the logic is the same.
   const RETRY_MS = process.env.SCOUTBOX_FAST_SWEEPS === '1'
     ? [0, 300, 600, 900, 1200]
     : [0, 60_000, 300_000, 1_800_000, 7_200_000];
   const MAX_ATTEMPTS = RETRY_MS.length;
-  // Deliveries being sent right now: a sweep that starts while an earlier one awaits the receiver skips them (each
-  // attempt is a numbered row; two sweeps must never send the same delivery at once).
+  // A sweep that starts while an earlier one awaits the receiver skips these, so two sweeps never send one delivery at
+  // once.
   const inFlight = new Set();
 
-  /** One attempt; returns true when it recorded an ops event. */
+  /** Returns true when it recorded an ops event. */
   async function deliverOne(d) {
     const w = endpoints.byId(d.endpointId);
     if (!w || !w.active) { deliveries.abandon(d.id); return false; }
@@ -459,9 +445,8 @@ export function registerImports(ctx) {
   }
 
   // ----------------------------------------------------------- connectors
-  // Registry of documented provider interfaces. NOTHING here activates
-  // without real credentials + an authorised interface — and none exist in
-  // this environment, so every connector honestly reports not_configured.
+  // Nothing activates without real credentials and an authorised interface, and none exist here, so every connector
+  // reports not_configured.
   const CONNECTORS = [
     { id: 'stats-feed', name: 'Match statistics feed', kind: 'inbound', envKey: 'CONNECTOR_STATS_KEY' },
     { id: 'fed-registry', name: 'Federation registration lookup', kind: 'inbound', envKey: 'CONNECTOR_FED_KEY' },

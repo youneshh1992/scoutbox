@@ -1,9 +1,6 @@
-// Overlooked-player and exposure review; scout calibration and decision-quality review; the missing-evidence
-// assistant (a transparent, versioned rule engine). Records are rows of repositories/insightCoverage.mjs.
-// Shared honesty rules: no inference of protected characteristics, no public
-// rankings, no pay-for-priority, small aggregates suppressed, absent evidence
-// is NEVER recorded as poor ability, and exposure metrics carry their
-// denominators and windows instead of claims about discrimination.
+// No inference of protected characteristics, no public rankings, no pay-for-priority, small aggregates suppressed,
+// absent evidence never recorded as poor ability, and exposure metrics carry their denominators and windows instead of
+// claims about discrimination.
 import crypto from 'node:crypto';
 import { exposureHook } from '../enterprise/enterprise.mjs';
 import { parseStrictDateOnly } from '../../temporal.mjs';
@@ -13,16 +10,13 @@ import { EVIDENCE_RULE_IDS, CALIBRATION_CONFIDENCE, INSIGHT_LIMITS, typeSubmissi
 const EXPOSURE_WINDOW_DAYS = 90;
 const STALE_DAYS = 180;
 const DAY_MS = 86_400_000;
-/** How long a reviewer may defer a player, in days (default 7). */
 export const REVIEW_LATER_DAYS = Object.freeze({ min: 1, max: 60, default: 7 });
-/** How many players one impressions report may name. */
 export const IMPRESSIONS_MAX = 50;
 const fieldInvalid = (res, field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return undefined; };
 const isId = (v) => typeof v === 'string' && v.length > 0 && v.length <= INSIGHT_LIMITS.id;
 /**
- * A rule's hit within what a suggestion stores: the explanation shortened to INSIGHT_LIMITS.explanation, the cited
- * records to the first INSIGHT_LIMITS.records (a player with hundreds of clips, or a 20-attribute rubric never observed,
- * would otherwise exceed them and fail the read — and with it the Room view that runs the rules).
+ * Bounds a rule's hit to INSIGHT_LIMITS: a player with hundreds of clips, or a 20-attribute rubric never observed,
+ * would otherwise exceed them and fail the read, and with it the Room view that runs the rules.
  */
 export function boundGap(hit) {
   const max = INSIGHT_LIMITS.explanation;
@@ -44,15 +38,14 @@ export function registerInsight(ctx) {
   // ============================================================== exposure
   const dayKey = (ts = Date.now()) => Math.floor(ts / 86_400_000);
   function recordExposure(orgId, playerId, kind) {
-    // Dedupe: one event per (org, player, kind, day) — the table's unique key; the id is minted only for a new one.
+    // One event per (org, player, kind, day), the table's unique key.
     const at = Date.now();
     const dk = dayKey(at);
     if (exposure.has(orgId, playerId, kind, dk)) return false;
     return exposure.record({ id: nextId('exp'), orgId, playerId, kind, day: dk, at });
   }
 
-  // Passive capture at the response layer: profile + passport reads become
-  // exposure events without touching the profile and passport handlers.
+  // Passive capture at the response layer, so the profile and passport handlers stay untouched.
   exposureHook.fn = (req, res) => {
     if (!req.org || req.method !== 'GET' || res.statusCode !== 200) return;
     const fullPath = String(req.originalUrl ?? '').split('?')[0];
@@ -62,7 +55,7 @@ export function registerInsight(ctx) {
     if (mPassport) recordExposure(req.org.id, mPassport[1], 'evidence_view');
   };
 
-  // Impressions: the client reports which players a search actually rendered.
+  // The client reports which players a search actually rendered.
   orgRouter.post('/exposure/impressions', (req, res) => {
     const ids = req.body?.playerIds;
     if (!Array.isArray(ids) || ids.length > IMPRESSIONS_MAX || !ids.every(isId)) return fieldInvalid(res, 'playerIds', `playerIds must be a list of at most ${IMPRESSIONS_MAX} player ids.`);
@@ -100,17 +93,15 @@ export function registerInsight(ctx) {
   orgRouter.get('/exposure/report', (req, res) => {
     if (!requireLead(req, res)) return;
     const funnel = funnelFor(req.org.id);
-    // Birth-quarter distribution of players this org ASSESSED in the window —
-    // an aggregate lens on selection patterns, suppressed under n<3 and
-    // explicitly not a discrimination verdict.
+    // Birth-quarter distribution of players this org assessed in the window: suppressed under n<3, and not a
+    // discrimination verdict.
     const sinceTs = Date.now() - EXPOSURE_WINDOW_DAYS * 86_400_000;
     const assessed = ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft' && a.createdAt >= sinceTs);
     const quarters = { Q1: 0, Q2: 0, Q3: 0, Q4: 0 };
     for (const a of assessed) {
       const p = findPlayer(a.playerId);
-      // The UTC month of a READABLE birth day: `getMonth()` on a UTC-midnight
-      // date reads the previous month in any zone west of Greenwich (1 April
-      // births would count in Q1 on a server in New York).
+      // The UTC month: `getMonth()` on a UTC-midnight date reads the previous month west of Greenwich (1 April births
+      // would count in Q1 on a server in New York).
       const day = parseStrictDateOnly(p?.dob);
       if (day.ok) quarters[`Q${Math.floor(new Date(day.t).getUTCMonth() / 3) + 1}`]++;
     }
@@ -127,15 +118,13 @@ export function registerInsight(ctx) {
     });
   });
 
-  // "Not yet assessed" queue — eligible, visible players with exposure but no
-  // submitted assessment from this org, oldest exposure first.
+  // Visible players with exposure but no submitted assessment from this org, oldest exposure first.
   function reviewQueueFor(org) {
     const assessedIds = new Set(ctx.scoutingReads.assessments.forOrg(org.id).filter((a) => a.state !== 'draft').map((a) => a.playerId));
-    // One GROUP BY: each player the organisation saw in the window with the first day, oldest first.
     return exposure.firstSeen(org.id, windowStartDay())
       .filter(({ playerId }) => !assessedIds.has(playerId))
       .map(({ playerId, firstDay }) => ({ player: findPlayer(playerId), firstSeenDay: firstDay }))
-      .filter((x) => x.player && orgCanSee(org, x.player)); // live eligibility, always
+      .filter((x) => x.player && orgCanSee(org, x.player)); // live eligibility
   }
 
   orgRouter.get('/review-queue', (req, res) => {
@@ -146,7 +135,6 @@ export function registerInsight(ctx) {
       deferredUntil: later.get(player.id) ?? null,
       staleAssessment: null,
     }));
-    // Stale evaluations: assessed long ago, still on shortlist/watch.
     const staleCut = Date.now() - STALE_DAYS * 86_400_000;
     const submitted = ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft');
     const stale = submitted
@@ -163,21 +151,19 @@ export function registerInsight(ctx) {
     const raw = req.body?.days;
     const days = raw === undefined || raw === null ? REVIEW_LATER_DAYS.default : raw;
     if (!Number.isInteger(days) || days < REVIEW_LATER_DAYS.min || days > REVIEW_LATER_DAYS.max) return fieldInvalid(res, 'days', `days must be a whole number from ${REVIEW_LATER_DAYS.min} to ${REVIEW_LATER_DAYS.max}.`);
-    // Only a player the organisation can see now can be deferred (the same answer as the evidence gaps for any other).
+    // Only a player the organisation can see now can be deferred.
     const p = findPlayer(req.params.playerId);
     if (!p || !orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
     reviewLater.defer({ id: nextId('rvl'), orgId: req.org.id, playerId: p.id, byUserId: req.orgUser.id, dueAt: Date.now() + days * DAY_MS, remindedAt: null });
     res.json({ deferredDays: days });
   });
 
-  // Controlled discovery rotation: a deterministic weekly slice of currently
-  // ELIGIBLE players this org has not assessed — visibility rules first,
-  // rotation second, so an ineligible player can never enter through it.
+  // A deterministic weekly slice of eligible players this org has not assessed. Visibility comes first, so an
+  // ineligible player can never enter through the rotation.
   orgRouter.get('/discovery-rotation', (req, res) => {
     const week = Math.floor(dayKey() / 7);
     const assessedIds = new Set(ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft').map((a) => a.playerId));
-    // The pool is the query's (the whole visibility rule), read as light rows; the six with the smallest weekly hash
-    // byte win, a tie keeping the creation order, and only they are decoded.
+    // The six with the smallest weekly hash byte win (ties keep creation order); only they are decoded.
     const best = [];
     players.scanLight({ visibleTo: req.org }, (p) => {
       if (assessedIds.has(p.id)) return;
@@ -194,7 +180,7 @@ export function registerInsight(ctx) {
     });
   });
 
-  // Limited player visibility: coarse counts only, no org identities.
+  // Coarse counts only, no org identities.
   playerRouter.get('/exposure', (req, res) => {
     const mine = exposure.forPlayer(req.player.id, windowStartDay());
     const band = (n) => (n === 0 ? '0' : n <= 5 ? '1–5' : n <= 20 ? '6–20' : '20+');
@@ -207,10 +193,7 @@ export function registerInsight(ctx) {
     });
   });
 
-  /**
-   * The insight sweep: each deferral that fell due is marked reminded in one unit with its reminder; the exposure
-   * events before the window (which no reader looks at) are deleted.
-   */
+  /** Exposure events before the window are deleted: no reader looks at them. */
   function insightSweep() {
     const at = Date.now();
     let changed = 0;
@@ -231,11 +214,11 @@ export function registerInsight(ctx) {
   orgRouter.post('/calibration', (req, res) => {
     if (!requireLead(req, res)) return;
     const b = req.body ?? {};
-    const tmpl = ctx.scoutingReads.templates.currentById(b.templateId); // the current version
+    const tmpl = ctx.scoutingReads.templates.currentById(b.templateId);
     if (!tmpl) return res.status(404).json({ error: 'TEMPLATE_NOT_FOUND' });
     if (b.title !== undefined && b.title !== null && typeof b.title !== 'string') return fieldInvalid(res, 'title', 'title must be text.');
     const title = (typeof b.title === 'string' ? b.title.trim() : '').slice(0, INSIGHT_LIMITS.calibrationTitle) || 'Calibration session';
-    // Reference footage must be footage this org can legitimately see NOW.
+    // Reference footage must be footage this org can see now.
     if (b.mediaId !== undefined && b.mediaId !== null && !isId(b.mediaId)) return fieldInvalid(res, 'mediaId', 'mediaId must be a media id.');
     const mediaId = b.mediaId ?? null;
     if (mediaId) {
@@ -250,7 +233,7 @@ export function registerInsight(ctx) {
     if (ids.length < 2) return res.status(400).json({ error: 'PARTICIPANTS_REQUIRED', message: 'Calibration needs at least two participating scouts.' });
     const s = unit(() => {
       const created = calibration.create({
-        id: nextId('cal'), orgId: req.org.id, title, templateId: tmpl.id, templateVersion: tmpl.version, // rubric pinned — later template edits change nothing here
+        id: nextId('cal'), orgId: req.org.id, title, templateId: tmpl.id, templateVersion: tmpl.version, // rubric pinned: later template edits change nothing here
         mediaId, participants: ids, submissions: [], notes: [], status: 'open', createdBy: req.orgUser.id, createdAt: Date.now(), closedAt: null,
       });
       for (const uid of ids) notify({ kind: 'org_user', id: uid }, 'calibration', `🎯 You were added to calibration “${created.title}”. Watch the reference footage and submit blind — you cannot see colleagues’ ratings until you do.`, created.id);
@@ -259,7 +242,6 @@ export function registerInsight(ctx) {
     res.status(201).json({ session: sessionView(s, req) });
   });
 
-  /** A session as its viewer may see it: an explicit allowlist, the pinned rubric read from the template version. */
   function sessionView(s, req) {
     const mySubmitted = s.submissions.some((x) => x.userId === req.orgUser.id);
     const released = s.status === 'closed' || mySubmitted;
@@ -272,8 +254,7 @@ export function registerInsight(ctx) {
       status: s.status, createdBy: s.createdBy, createdAt: s.createdAt, closedAt: s.closedAt,
       mediaUrl: footageAccessible ? `/media/${s.mediaId}` : null,
       footageNote: s.mediaId && !footageAccessible ? 'Reference footage is no longer accessible to your organisation.' : null,
-      // BLIND: until you submit (or a lead closes the session), you see only
-      // who has submitted — never what.
+      // Blind: until you submit (or a lead closes the session), you see who has submitted, never what.
       submissions: s.submissions.map((x) => (released
         ? { userId: x.userId, userName: x.userName, ratings: x.ratings.map((r) => ({ ...r })), confidence: x.confidence, submittedAt: x.submittedAt }
         : { userId: x.userId, userName: x.userName, submittedAt: x.submittedAt })),
@@ -304,7 +285,6 @@ export function registerInsight(ctx) {
     };
   }
 
-  /** The sessions a viewer may see, newest first, a page at a time (a lead sees every session of the organisation). */
   orgRouter.get('/calibration', (req, res) => {
     let page;
     try { page = readPage(req.query, ['number', 'string']); } catch (e) { return sendPageError(res, e); }
@@ -357,8 +337,7 @@ export function registerInsight(ctx) {
     res.status(201).json({ notes: fresh.notes.map((n) => ({ at: n.at, byUserId: n.byUserId, byName: n.byName, text: n.text })) });
   });
 
-  // Decision-quality review: earlier recommendations next to what happened
-  // SINCE — with the causal disclaimer stated in the payload itself.
+  // Earlier recommendations next to what happened since, with the causal disclaimer in the payload.
   orgRouter.get('/decision-review', (req, res) => {
     if (!requireLead(req, res)) return;
     const orgSubmitted = ctx.scoutingReads.assessments.forOrg(req.org.id).filter((a) => a.state !== 'draft');
@@ -468,7 +447,6 @@ export function registerInsight(ctx) {
   if (RULES.map((r) => r.id).join() !== EVIDENCE_RULE_IDS.join()) throw new Error('insight: the evidence-gap rules and the stored rule vocabulary (EVIDENCE_RULE_IDS) differ');
   const RULE_ACTION = Object.fromEntries(RULES.map((r) => [r.id, r.action]));
 
-  /** A suggestion as the club sees it: an explicit allowlist, the rule's action copy from the registry. */
   const suggestionView = (s) => ({
     id: s.id, orgId: s.orgId, playerId: s.playerId, playerName: s.playerName, ruleId: s.ruleId, ruleVersion: s.ruleVersion,
     records: [...s.records], explanation: s.explanation, action: RULE_ACTION[s.ruleId], status: s.status,
@@ -476,9 +454,8 @@ export function registerInsight(ctx) {
   });
 
   /**
-   * Run the rules for one player and record the result as one upsert: open suggestions that no longer fire become
-   * 'supplied' (the gap closed), new hits become 'suggested', and an open one is rewritten only when its records or
-   * explanation changed.
+   * Open suggestions that no longer fire become 'supplied', new hits become 'suggested', and an open one is rewritten
+   * only when its records or explanation changed.
    */
   function computeGaps(org, player) {
     const found = [];
@@ -500,30 +477,23 @@ export function registerInsight(ctx) {
     });
   });
 
-  // The one path that turns a deterministic gap into a player-facing ask.
-  // Extracted from the route so a Recruitment Room raises an evidence
-  // request through exactly this code — same anti-pestering window, same
-  // guardian routing, same whitelisted player-safe wording. Returns a result
-  // object rather than writing a response, so both callers share the rules.
+  // The one path that turns a gap into a player-facing ask, shared with the Recruitment Room so both get the same
+  // anti-pestering window, guardian routing and player-safe wording.
   function requestEvidenceGap({ org, suggestionId, playerId = null }) {
-    // `playerId`: when the caller acts from a Recruitment Room, the
-    // suggestion must be about that room's player; any other player's
-    // suggestion reads as not found, the same answer as a fabricated id.
+    // From a Room, the suggestion must be about that room's player; any other reads as not found.
     const found = suggestions.forOrgById(org.id, suggestionId);
     const s = found && (playerId === null || found.playerId === playerId) ? found : null;
     if (!s) return { ok: false, status: 404, error: 'SUGGESTION_NOT_FOUND' };
     if (s.status !== 'suggested') return { ok: false, status: 409, error: 'NOT_OPEN', detail: { status: s.status } };
     const p = findPlayer(s.playerId);
     if (!p || !orgCanSee(org, p)) return { ok: false, status: 403, error: 'NOT_VISIBLE' };
-    // Anti-pestering: one open request per player+rule; a fresh request within
-    // 14 days of the last one is refused.
+    // Anti-pestering: one open request per player and rule, and none within 14 days of the last.
     const at = Date.now();
     if (suggestions.recentRequest(org.id, s.playerId, s.ruleId, at - 14 * DAY_MS, s.id)) return { ok: false, status: 429, error: 'RECENTLY_REQUESTED', message: 'You asked for this within the last 14 days — give them time.' };
-    // PLAYER-VISIBLE text is built from the request action only — club-private
-    // observations never travel in the explanation.
+    // Player-visible text comes from the rule's action only; club-private observations never travel.
     const audience = !isAdult(p) && p.guardianId ? { kind: 'guardian', id: p.guardianId } : { kind: 'player', id: p.id };
     const who = audience.kind === 'guardian' ? `${p.name}'s profile` : 'your profile';
-    // One unit: the status and the ask commit together (a Room caller's unit joins this one).
+    // A Room caller's unit joins this one.
     const fresh = unit(() => {
       const moved = suggestions.setStatus(s.id, 'requested', at);
       notify(audience, 'evidence_request', `📎 ${org.name} would find ${who} easier to assess with more evidence: ${playerSafeText(s)} You choose what (and whether) to add.`, s.id);
@@ -539,7 +509,7 @@ export function registerInsight(ctx) {
   });
 
   function playerSafeText(s) {
-    // Whitelisted per rule — references the PLAYER's own records only.
+    // Whitelisted per rule; refers to the player's own records only.
     const map = {
       no_recent_footage: 'a recent clip would help (the current footage is older than 6 months).',
       single_match_sample: 'a clip from a second match would give a fuller picture.',

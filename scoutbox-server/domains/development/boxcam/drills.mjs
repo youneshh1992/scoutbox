@@ -1,12 +1,5 @@
-// Box Cam drill registry + observation provider contracts.
-//
-// A deliberately BOUNDED first library: each drill is a versioned detector
-// contract. A drill only ever claims the verification capabilities its
-// detector genuinely has — where automated repetition counting is not
-// reliable (Box Wall from a single phone angle), the drill ships as
-// active_duration_only and says so, rather than fabricating counts.
-// Sessions pin drillId@drillVersion forever; a future detector version is a
-// NEW measurement and never rewrites history.
+// Each drill is a versioned detector contract and claims only the capabilities its detector really has. Sessions
+// pin drillId@drillVersion; a new detector version is a new measurement and doesn't rewrite history.
 
 export const CAPABILITIES = [
   'player_presence', 'ball_presence', 'active_motion', 'active_duration',
@@ -49,9 +42,7 @@ export const DRILLS = [
     id: 'box-wall', version: 1, title: 'Box Wall', category: 'passing',
     summary: 'Wall passes — pass, control, repeat.',
     targetTypes: ['repetitions'],
-    // HONESTY: single-phone wall-pass rep counting is not reliable without
-    // an additional angle. This drill verifies presence + active duration;
-    // automated rep counting is explicitly not configured.
+    // Wall-pass rep counting isn't reliable from a single phone angle, so this drill verifies active duration only.
     verificationCapabilities: ['player_presence', 'ball_presence', 'active_duration'],
     repSupport: 'not_configured',
     repSupportNote: 'Automated wall-pass repetition counting is not configured for a single camera angle. Box Cam verifies your active training time; your repetition target is shown against active time, not fabricated counts.',
@@ -97,25 +88,11 @@ export const drillByIdVersion = (id, version) => DRILLS.find((d) => d.id === id 
 export const latestDrill = (id) => DRILLS.filter((d) => d.id === id).sort((a, b) => b.version - a.version)[0] ?? null;
 
 // ------------------------------------------------- observation providers
-// The BoxCamObservationProvider contract: prepare / processFrame / finish /
-// capabilities / health. The server registry below describes what each
-// provider can HONESTLY do in this environment; a session only verifies the
-// intersection of drill capabilities and provider capabilities.
+// A session only verifies the intersection of drill capabilities and provider capabilities.
 export const PROVIDERS = {
-  // A REAL server-side computer-vision provider. Executable code, not a
-  // capability claim — see cv/provider.mjs (orchestration) and the v2 engine
-  // in cv/{detect,track,protocol,quality}.mjs (all observation semantics).
-  //
-  // `capabilities` here is the OBSERVATION list: what the engine can actually
-  // see, evidenced by the recorded synthetic evaluation (cv/evaluation.json,
-  // cv/holdout.json: golden fixtures, variation families, adversarial scenes
-  // and holdout generations, with no false touches).
-  //
-  // It is deliberately NOT the list that authorises a Combine measurement.
-  // Combine eligibility is derived per protocol from the versioned real-world
-  // validation record (cv/eligibility.mjs) and is currently EMPTY for every
-  // protocol. Health and observation capability say what this can see;
-  // neither says what it may certify.
+  // `capabilities` is what the engine can observe, per the synthetic evaluation (cv/evaluation.json,
+  // cv/holdout.json). It does not authorise a Combine measurement: that comes per protocol from the real-world
+  // validation record (cv/eligibility.mjs), currently empty for every protocol.
   production_cv: {
     id: 'production_cv', version: 1,
     status: 'configured',
@@ -134,7 +111,7 @@ export const PROVIDERS = {
   local_test: {
     id: 'local_test', version: 1,
     status: 'configured',
-    testOnly: true, // NEVER shown as real Box Cam evidence in production
+    testOnly: true, // never shown as real Box Cam evidence
     capabilities: [...CAPABILITIES],
     note: 'Deterministic test/demo fixture. Simulated observations are always labelled as simulated.',
   },
@@ -147,6 +124,5 @@ export function providerFor(id, { testProviderEnabled = false } = {}) {
   return p;
 }
 
-// Liveness challenges — establish live-session presence, NOT identity.
-// No facial recognition, no biometric claim.
+// Liveness challenges establish live-session presence, not identity: no facial recognition or biometric claim.
 export const LIVENESS_CHALLENGES = ['raise_right_hand', 'show_ball', 'left_foot_touch', 'step_into_zone'];

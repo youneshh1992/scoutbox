@@ -1,12 +1,8 @@
 /**
- * The Conflict-of-Interest Engine (pure, deterministic). Everything it reads
- * is passed in. Given the same inputs, policy set and clock it returns the
- * same result and the same `inputHash`.
+ * The conflict-of-interest engine: pure and deterministic, with a stable `inputHash` for the same inputs and clock.
  *
- * It evaluates the LICENSED INDIVIDUAL (plus connected agents), never the
- * agency organisation. It applies encoded rule entries with their operative
- * status; where the deciding rule is UNDER_LEGAL_REVIEW or UNKNOWN, or the
- * applicable policies contradict, it returns review — never a guess.
+ * It evaluates the licensed individual (plus connected agents), never the agency. Where the deciding rule is under
+ * legal review or unknown, or the policies contradict, it returns review rather than a guess.
  */
 
 import { createHash } from 'node:crypto';
@@ -26,15 +22,9 @@ export const PERMITTED_WITH_CONSENT = 'PERMITTED_DUAL_REPRESENTATION_CONSENT_REQ
 export const OUTCOME_ALIASES = Object.freeze({ PERMITTED_WITH_CONSENT });
 
 /**
- * Severity order for aggregation: the most severe outcome wins; all reasons are kept.
- *
- * PROHIBITED_CONFLICT dominates everything. A prohibition under an ACTIVE rule is a
- * definite answer, while "needs attributed review" and "insufficient data" are the
- * ABSENCE of one — so no missing fact and no uncertain rule can soften it, and the
- * domain layer must never record a representation for a prohibited combination as
- * merely "declared, pending review". No reviewer could approve such an item anyway
- * (REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE), so recording it would leave the agent shown
- * as acting for a party they must not act for, on an item that can never resolve.
+ * The most severe outcome wins; all reasons are kept. A prohibition under an active rule is a definite answer, while
+ * review and insufficient data are the absence of one, so neither may soften it into "declared, pending review" (an
+ * item no reviewer could ever approve).
  */
 const SEVERITY = Object.freeze({ PROHIBITED_CONFLICT: 4, INSUFFICIENT_DATA: 3, MANUAL_REGULATORY_REVIEW_REQUIRED: 2, [PERMITTED_WITH_CONSENT]: 1, CLEAR: 0 });
 export const mostSevere = (a, b) => (SEVERITY[a] >= SEVERITY[b] ? a : b);
@@ -59,10 +49,9 @@ export const inputHashOf = (inputs) => createHash('sha256').update(canonicalJson
 export function consentSufficiency(consent, { partyRole, agentUserId, contextId, firstActAt = null, requireParticulars = false, activePolicyIds = [] }) {
   if (!consent) return { ok: false, reasonCode: 'CONSENT_MISSING' };
   if (consent.kind !== 'dual_representation') return { ok: false, reasonCode: 'CONSENT_MISSING' };
-  // A revocation is a fact in its own right (the ledger derives status 'revoked'): it is reported before anything else.
+  // A revocation is reported before anything else.
   if (consent.revokedAt != null || consent.status === 'revoked') return { ok: false, reasonCode: 'CONSENT_REVOKED' };
-  // A grant is dated by a READABLE instant: `typeof NaN === 'number'`, and an
-  // undated grant would pass the in-advance test below (`NaN > firstActAt` is false).
+  // An unreadable grant date would pass the in-advance test below (`NaN > firstActAt` is false).
   if (consent.status !== 'granted' || readInstant(consent.grantedAt) === null) return { ok: false, reasonCode: consent.status === 'declined' ? 'CONSENT_DECLINED' : 'CONSENT_MISSING' };
   if (consent.contextId !== contextId) return { ok: false, reasonCode: 'CONSENT_WRONG_CONTEXT' };
   if (consent.agentUserId !== agentUserId) return { ok: false, reasonCode: 'CONSENT_WRONG_AGENT' };

@@ -1,19 +1,9 @@
 /**
- * The Offer domain error contract. ONE table, no default branch, a
- * public-field allowlist.
+ * The Offer error table: no default branch, and only allowlisted fields reach the client.
  *
- * The refusals this table keeps indistinguishable: an Offer that
- * does not exist, one in another organisation, one addressed to another
- * player, one a colleague at the same agency is not entitled to, and a
- * document that is not on an issued revision the caller may read all answer
- * `OFFER_NOT_FOUND` / `OFFER_DOCUMENT_NOT_FOUND` with the same body. A caller
- * who can tell those apart has an oracle.
- *
- * Once a caller can already READ an Offer, concealment has nothing left to
- * protect there: a refusal names the STATE that stopped the action
- * (expired, withdrawn, superseded, already answered) and nothing else — never
- * an internal note, a decision rationale, a transaction blocker's detail, a
- * reviewer, or the word "blocked" to a recipient.
+ * A missing Offer, one in another organisation, one addressed to another player, one a same-agency colleague
+ * may not see, and a document not on a readable issued revision all get the same 404 body, so the refusal is
+ * not an oracle. Once a caller can read an Offer, a refusal names only the state that stopped the action.
  */
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
@@ -27,11 +17,11 @@ export const OFFER_ERROR_HTTP = table({
   OFFER_CLIENT_KEY_INVALID: 400,
   OFFER_REV_REQUIRED: 400,
 
-  // ---- 403: not yours to do. Only ever about the CALLER's own standing.
+  // ---- 403: about the caller's own standing only.
   OFFER_NOT_PERMITTED: 403,
   OFFER_BLOCKED: 403,
 
-  // ---- 404: concealment. Every one of these is the same body.
+  // ---- 404: concealment; every one is the same body.
   OFFER_NOT_FOUND: 404,
   OFFER_DOCUMENT_NOT_FOUND: 404,
 
@@ -82,6 +72,5 @@ export function sendOfferError(res, out, where) {
   return res.status(status).json(publicErrorBody(out));
 }
 
-/** The ONE concealment refusal. */
 export const notFound = (res, where) => sendOfferError(res, { error: 'OFFER_NOT_FOUND', message: 'No Offer with that reference is available to you.' }, where);
 export const documentNotFound = (res, where) => sendOfferError(res, { error: 'OFFER_DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' }, where);

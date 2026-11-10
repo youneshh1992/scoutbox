@@ -1,25 +1,7 @@
 /**
- * The one Development Plan projection.
- *
- * `buildDevelopmentPlan()` is the only function that turns stored development
- * records into something a person reads. Every route returns its output, and
- * no route assembles a plan for itself. That centralisation is the mechanism
- * behind three separate promises:
- *
- *   • visibility is applied ONCE, from `planAccess`, so an internal note
- *     cannot be forgotten on the fourth surface that renders a review;
- *   • every derived field — due state, target state, evidence availability,
- *     completion counts — is derived HERE, at read time, so no stored number
- *     can drift away from the records it summarises;
- *   • the shape of the answer is the same everywhere, which is what makes the
- *     acceptance suite's "no score anywhere" assertion meaningful rather than
- *     a check of one endpoint.
- *
- * What it deliberately does not produce: any number that reads as a measure of
- * the player. Goals are counted by status, actions by completion, evidence by
- * availability. Nothing is combined, weighted or normalised, because the moment
- * three counts become one figure, that figure is a Development Score whatever
- * the field is called.
+ * The Development Plan projection every route returns. Derived fields are
+ * computed at read time. Counts are never combined or weighted: three counts
+ * merged into one figure would be a Development Score by another name.
  */
 import {
   DEVELOPMENT_POLICY_VERSION, DEVELOPMENT_PRINCIPLE, ACHIEVED_MEANING,
@@ -34,12 +16,8 @@ export const PLAN_LIMITATION =
   'A Development Plan records what was agreed, what was done and what evidence was cited. It is a record of work, not a measurement of the player.';
 
 /**
- * Timeline vocabulary, and the allowlist that keeps it out of activity
- * spam. An action not in this table never reaches a timeline, so a save
- * that changed nothing, a read, and a draft edit are absent by construction
- * rather than by a filter somebody has to remember to apply.
- *
- * `internal: true` means the entry stays inside the owning organisation.
+ * An allowlist: history actions not listed here never reach a timeline.
+ * `internal: true` entries stay inside the owning organisation.
  */
 export const TIMELINE_ACTIONS = Object.freeze({
   plan_created: { label: 'Plan created', internal: false },
@@ -49,8 +27,7 @@ export const TIMELINE_ACTIONS = Object.freeze({
   plan_archived: { label: 'Plan archived', internal: false },
   plan_shared: { label: 'Plan shared', internal: false },
   plan_unshared: { label: 'Sharing withdrawn', internal: false },
-  // Who a club's plan is visible to is a club decision; the fact of the change
-  // stays inside the club even when the plan itself is shared.
+  // A club decision; stays internal even when the plan is shared.
   plan_visibility_changed: { label: 'Visibility changed', internal: true },
   goal_created: { label: 'Goal created', internal: false },
   goal_updated: { label: 'Goal updated', internal: false },
@@ -68,21 +45,12 @@ export const TIMELINE_ACTIONS = Object.freeze({
 
 export const TIMELINE_ACTION_NAMES = Object.freeze(Object.keys(TIMELINE_ACTIONS));
 
-/**
- * Every record belonging to one plan: `{ plan, goals, actions, links, reviews }`, or null. One indexed query per
- * table (`reads.plans.collect`, the development repository's `developmentReads`).
- */
+/** `{ plan, goals, actions, links, reviews }`, or null. */
 export function collectPlan(reads, planId) {
   return reads.plans.collect(planId);
 }
 
-/**
- * The plan, as one viewer may see it.
- *
- * `access` comes from `planAccess()` and is not recomputed here: one
- * authorisation decision per request, applied consistently, is easier to audit
- * than four consistent ones.
- */
+/** `access` comes from `planAccess()` and is not recomputed here. */
 export function buildDevelopmentPlan({
   reads = {}, planId, player, viewer, access, orgCanSee, now = Date.now(), collected = null,
 }) {
@@ -124,8 +92,7 @@ export function buildDevelopmentPlan({
         return {
           id: a.id, goalId: a.goalId, type: a.type, title: a.title,
           status: a.status, dueAt: a.dueAt ?? null,
-          // Overdue is a fact about a date. It is never attributed to a person,
-          // and no copy turns it into one.
+          // Overdue describes a date and is never attributed to a person.
           due: ['done', 'cancelled'].includes(a.status) ? { state: 'not_applicable', days: null } : due,
           assignee: a.assignee ? { kind: a.assignee.kind, name: a.assignee.name } : null,
           completedAt: a.completedAt ?? null,
@@ -139,7 +106,6 @@ export function buildDevelopmentPlan({
         id: g.id, planId: g.planId, title: g.title, description: g.description ?? null,
         category: g.category, categoryLabel: GOAL_CATEGORY_LABELS[g.category] ?? g.category,
         status: g.status,
-        // The sentence travels with the word, every time it appears.
         statusMeaning: g.status === 'achieved' ? ACHIEVED_MEANING : null,
         blockReason: g.status === 'blocked' ? (g.blockReason ?? null) : null,
         blockNote: g.status === 'blocked' ? (g.blockNote ?? null) : null,
@@ -152,8 +118,6 @@ export function buildDevelopmentPlan({
         createdAt: g.createdAt, updatedAt: g.updatedAt, completedAt: g.completedAt ?? null,
         rev: g.rev ?? 1, revAt: g.revAt ?? null, revBy: g.revBy?.name ?? null,
         actions: actionViews,
-        // Counts, and a sentence made of counts. No ratio field exists for a
-        // client to render as a percentage of a player.
         actionCounts: counts,
         completion: completionPhrase(counts),
         evidence,
@@ -165,9 +129,7 @@ export function buildDevelopmentPlan({
     .slice()
     .sort((a, b) => b.reviewedAt - a.reviewedAt || String(b.id).localeCompare(String(a.id)))
     .map((r) => reviewView(r, access))
-    // A player never receives the row of a review that was never shared with
-    // them. Stripping the note but keeping the row would still say "the club
-    // wrote something about you on 12 August", which is not ours to disclose.
+    // Drop unshared coach reviews entirely: even an empty row would disclose that the club wrote one.
     .filter((r) => access.readInternal || r.summary != null || r.reviewerKind !== 'coach_review');
 
   return {
@@ -211,8 +173,7 @@ function planView(plan, { player, access, now }) {
     origin: plan.originObjectiveId
       ? { kind: 'development_objective', id: plan.originObjectiveId }
       : (plan.originTrialId ? { kind: 'trial', id: plan.originTrialId } : null),
-    // Who a plan is shared with is management information, shown to whoever
-    // may change it and to nobody else.
+    // Shown only to those who may change it.
     sharedWithOrgIds: access.manage ? (plan.sharedWithOrgIds ?? []) : undefined,
     sharedWithOrgCount: (plan.sharedWithOrgIds ?? []).length,
     createdAt: plan.createdAt,
@@ -225,11 +186,7 @@ function planView(plan, { player, access, now }) {
   };
 }
 
-/**
- * The deterministic summary. Every field is a count or a date, and the
- * whole object is reproducible from the records — read it twice on unchanged
- * data and it is byte-identical.
- */
+/** Counts and dates only; deterministic for unchanged records. */
 export function planSummary({ plan, goals, reviews, now }) {
   const byStatus = Object.fromEntries(GOAL_STATUSES.map((s) => [s, 0]));
   let actionsDue = 0;
@@ -254,25 +211,17 @@ export function planSummary({ plan, goals, reviews, now }) {
     lastReviewAt: lastReview?.reviewedAt ?? null,
     nextReviewAt: plan.nextReviewAt ?? null,
     reviewDue: reviewDueState(plan.nextReviewAt, now),
-    // Said out loud on the payload, because a summary block is exactly where a
-    // reader expects to find a headline number.
     note: 'These are counts of agreed work. There is no overall figure here, and ScoutBox does not calculate one.',
   };
 }
 
-/**
- * The development timeline.
- *
- * Built by projecting the append-only `history` that `audit()` already writes
- * on every record. There is no separate event log, so the timeline cannot
- * disagree with the record it describes.
- */
+/** Projected from each record's append-only `history`; there is no separate event log. */
 export function buildTimeline({ plan, goals, actions, reviews, access }) {
   const out = [];
   const push = (record, kind, subjectId, subjectTitle) => {
     for (const h of record.history ?? []) {
       const def = TIMELINE_ACTIONS[h.action];
-      if (!def) continue; // not timeline-worthy: reads, saves and no-op edits never appear
+      if (!def) continue;
       if (def.internal && !access.readInternal) continue;
       out.push({
         id: h.id,
@@ -283,8 +232,7 @@ export function buildTimeline({ plan, goals, actions, reviews, access }) {
         subject: { kind, id: subjectId, title: subjectTitle },
         byKind: h.byKind,
         byName: h.byName ?? null,
-        // `detail` is written by the server, never by a person: it carries a
-        // status name or an id, never a note, a summary or free text.
+        // Server-written: a status or an id, never free text.
         detail: h.detail ?? null,
       });
     }
@@ -298,11 +246,7 @@ export function buildTimeline({ plan, goals, actions, reviews, access }) {
   return out.sort((a, b) => b.at - a.at || String(b.id).localeCompare(String(a.id)));
 }
 
-/**
- * A plan as it appears in a list. Same visibility rules, far less work: no
- * evidence resolution and no target evaluation, because a list of twenty plans
- * must not scan every Combine attempt twenty times.
- */
+/** No evidence resolution or target evaluation, to keep lists cheap. */
 export function planListItem({ plan, player, goals, actions, now }) {
   const byStatus = Object.fromEntries(GOAL_STATUSES.map((s) => [s, 0]));
   for (const g of goals) byStatus[g.status] = (byStatus[g.status] ?? 0) + 1;

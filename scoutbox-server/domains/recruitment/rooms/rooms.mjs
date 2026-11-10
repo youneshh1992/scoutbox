@@ -1,18 +1,5 @@
-// Recruitment Rooms: stores, the room projector and the org routes.
-//
-// A Room is the CLUB's private decision workspace around one player. It is a
-// facet of the recruitment case, never a second pipeline: `room.status` is
-// canonical and `case.stage` is derived from it by `statusMove` alone.
-//
-// Three rules govern every line below.
-//   1. The Room composes canonical projections; it never re-derives player
-//      truth and never stores a copy of it.
-//   2. The Room is not authorization. `orgCanSee` re-runs on EVERY read, so a
-//      block, a suspension, a removal or a visibility change stops the player
-//      projections immediately — the internal record remains, the player data
-//      does not.
-//   3. Nothing the player, their guardian, another club or (by default) Trust
-//      & Safety can read is ever written here.
+// Recruitment Rooms: the room projector and the org routes. `orgCanSee` re-runs on every read, so a block,
+// suspension or visibility change hides the player projections at once while the club's internal record stays.
 import {
   ROOM_STATUSES, ROOM_STATUS_LABELS, OPEN_ROOM_STATUSES, ROOM_TRANSITIONS, REOPENED_FROM,
   PRO_STAGES, GRASSROOTS_STAGES, stageForRoomStatus, roomStatusForStage,
@@ -28,9 +15,8 @@ import {
 } from './shared.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
-// The lifecycle's own role table, so the legacy status route and the
-// semantic-action route agree on WHO may reach a state (a room lead could reach
-// `signed` here while `confirmSignedOutcome` needs a recruitment lead).
+// The lifecycle's role table, so this legacy status route and the semantic-action route agree on who may
+// reach a state (`signed` needs a recruitment lead, not a room lead).
 import { LIFECYCLE_ACTIONS } from '../lifecycle/lifecycle.mjs';
 
 import { readPage, sendPageError } from '../../platform/paging.mjs';
@@ -42,7 +28,7 @@ export function registerRooms(ctx) {
     byId, users, orgRouter, adminRouter, nextId, notify, ledgerAppend, broadcast,
     findPlayer, moderateOrRefuse, playerViewForOrg, orgCanSee, isLead, auditEntry, vmetric,
     faults = null,
-    recruitmentCases, unit, dueAtOrRefuse, // every case and room write is an explicit repository operation, inside `unit` when it touches more than one row
+    recruitmentCases, unit, dueAtOrRefuse,
     recruitmentEvidence,
   } = ctx;
   const reads = ctx.recruitmentReads;
@@ -54,28 +40,16 @@ export function registerRooms(ctx) {
   // ------------------------------------------------------------- utilities
 
   const orgUsers = (orgId) => users.forOrg(orgId, { active: true });
-  // The staff index, not a scan of the club's staff.
   const orgUser = (orgId, userId) => { const u = byId.user(userId); return u && u.orgId === orgId && !u.removedAt ? u : null; };
 
-  // Fixed-window counters for the abuse surfaces; nothing here is
-  // security-critical state. One shared limiter, one named policy per action.
   const limited = limitCheck(ctx.rateLimit);
 
-  // Comment bodies are stored inert: markup is removed on write, so no renderer
-  // anywhere — ours or a future one — can be talked into executing it.
+  // Markup is stripped on write so no renderer, present or future, can execute it.
   const plainText = (s, max) => String(s ?? '').replace(/<[^>]*>/g, '').replace(/[<>]/g, '').trim().slice(0, max);
   const isRoom = (c) => !!c?.room;
 
-  /**
-   * The player header inside a Room.
-   *
-   * `playerViewForOrg` carries a LEGACY `trustScore` from the original
-   * safeguarding heuristic, separate from the Trust Score. Two different
-   * numbers both called "trust" in one header is exactly how an
-   * evidence-confidence score gets read as a player rating, so the Room shows
-   * one: the Trust Score, with its disclaimer attached. The legacy field is
-   * untouched everywhere else — this is a presentation decision local to Rooms.
-   */
+  // `playerViewForOrg` carries a legacy safeguarding `trustScore`. Two numbers called "trust" in one header
+  // would read as a player rating, so the Room drops it and shows only the Trust Score with its disclaimer.
   function roomPlayerView(player, org) {
     const view = playerViewForOrg(player, org);
     if (!view) return null;
@@ -83,7 +57,6 @@ export function registerRooms(ctx) {
     return rest;
   }
 
-  /** An assessment's `context` is a word or an object; the Room list row shows a short label. */
   function assessmentContextLabel(ctx) {
     if (ctx == null) return null;
     if (typeof ctx === 'string') return ctx;
@@ -93,10 +66,7 @@ export function registerRooms(ctx) {
     return ctx.trialId ? 'trial' : null;
   }
 
-  /**
-   * The single writer of room status: the move `cases.moveRoom` makes. `case.stage` is derived here and only here, and
-   * the move bumps the Room's rev, so the shared reopen bridge gets the concurrency token for free.
-   */
+  /** The only writer of room status; `case.stage` is derived here. The move bumps the Room's rev. */
   function statusMove(status, org, by = null) {
     const at = now();
     const open = OPEN_ROOM_STATUSES.includes(status);
@@ -109,11 +79,7 @@ export function registerRooms(ctx) {
 
   // ---------------------------------------------------------- room lookup
 
-  /**
-   * Org-scoped lookup with 404 concealment. A room belonging to another club is
-   * indistinguishable from a room that does not exist — the response, the
-   * status code and the body are identical.
-   */
+  /** A room belonging to another club gets the same 404 as one that does not exist. */
   function findRoom(req, res) {
     const found = reads.cases.byId(req.params.id);
     const c = found && found.orgId === req.org.id && isRoom(found) ? found : null;
@@ -136,18 +102,15 @@ export function registerRooms(ctx) {
     return true;
   }
 
-  /** A history entry for an act of the club user on the request. */
   const activity = (req, type, detail = null) => auditEntry('org', req.orgUser.id, req.orgUser.name, type, detail);
-  /** The bookkeeping of a Room act: its history entries, with the Room's last activity moved to now. */
+  /** A Room act's history entries, with the Room's last activity moved to now. */
   const touched = (...history) => ({ at: now(), touch: true, history });
 
   // ------------------------------------------------------ source gathering
 
   /**
-   * Everything the Room knows about a player comes from here, and every branch
-   * is gated. When the player is not currently visible this returns
-   * `{ visible: false }` and NOTHING else — no cached name, no stale Passport,
-   * no last-known Trust Score.
+   * When the player is not currently visible this returns `{ visible: false }` and nothing else: no cached
+   * name, stale Passport or last-known Trust Score.
    */
   function sources(room, org, { light = false } = {}) {
     const player = findPlayer(room.playerId);
@@ -156,8 +119,7 @@ export function registerRooms(ctx) {
     const viewerKind = org.type === 'agency' ? 'agency'
       : org.level === 'grassroots' ? 'grassroots_club' : 'pro_club';
 
-    // One light Passport assembly per player, shared with the Trust engine so
-    // the batch path never assembles it twice.
+  // Shared with the Trust engine so the Passport is assembled once.
     const full = ctx.assemblePassport?.(player, { light: true }) ?? null;
     const trustProfile = full && ctx.buildTrustProfile ? ctx.buildTrustProfile(player, { full }) : null;
     const trust = trustProfile ? ctx.safeTrustProjection(trustProfile, viewerKind) : null;
@@ -166,8 +128,7 @@ export function registerRooms(ctx) {
 
     const passport = ctx.buildFootballPassport?.(player, viewerKind, { orgId: org.id }) ?? null;
 
-    // Combine obeys the identical dual consent rule the Combine applies: the standing
-    // gates AND (the player's recruitment opt-in OR this org's own request).
+  // Combine's dual consent: the standing gates and (the player's recruitment opt-in or this org's request).
     const maySeeCombine = ctx.combineOrgMaySeeResults?.(org, player) ?? false;
     const combine = maySeeCombine ? (ctx.combineProjection?.(player.id) ?? null) : null;
     const combineRequests = ctx.boxCamReads.requests.forOrg(org.id, { playerId: player.id }).reverse() // oldest first
@@ -185,7 +146,6 @@ export function registerRooms(ctx) {
   // ------------------------------------------------------- room components
 
   const roomComments = (roomId) => reads.comments.forRoom(roomId);
-  /** A comment of this Room, or null. */
   const commentOf = (id, roomId) => { const c = reads.comments.byId(id); return c && c.roomId === roomId ? c : null; };
   const roomDecisions = (roomId) => reads.decisions.forRoom(roomId).slice().sort((a, b) => a.createdAt - b.createdAt);
   const currentDecision = (roomId) => { const all = roomDecisions(roomId); return all.length ? all[all.length - 1] : null; };
@@ -197,8 +157,7 @@ export function registerRooms(ctx) {
       author: { userId: c.authorId, name: c.authorName },
       body: c.deletedAt ? null : c.body,
       deleted: !!c.deletedAt,
-      // A deleted comment is tombstoned, never erased: the thread and the audit
-      // trail stay intact and the author stays attributable.
+      // Tombstoned, never erased, so the thread and audit trail stay intact.
       deletedAt: c.deletedAt ?? null,
       edited: !!c.editedAt,
       editedAt: c.editedAt ?? null,
@@ -228,32 +187,27 @@ export function registerRooms(ctx) {
       note: d.note, by: d.by, createdAt: d.createdAt,
       supersededById: d.supersededById ?? null,
       snapshot: d.snapshot ?? null,
-      // A formal decision is the same row with an outcome; any other row is
-      // an advisory recommendation.
+      // A formal decision is the same row with an outcome; any other row is advisory.
       kind: d.kind === 'formal' ? 'formal' : 'recommendation',
       outcome: d.kind === 'formal' ? d.outcome ?? null : null,
       lifecycle: d.kind === 'formal' ? d.lifecycle ?? null : null,
     };
   }
 
-  /** Assessments for this org only, through the existing blind-until-submit rule. */
+  /** Assessments for this org only, through the blind-until-submit rule. */
   function assessmentsFor(req, room) {
     const mine = ctx.scoutingReads.assessments.forOrgPlayer(req.org.id, room.playerId);
     const lead = isLead(req.orgUser);
     const ownNonDraft = mine.some((a) => a.scoutUserId === req.orgUser.id && a.state !== 'draft');
     return mine
-      // Calibration policy: a scout cannot read a peer's submitted
-      // assessment until they have submitted their own. The Room surfaces
-      // assessments; it does not become a way around that.
+      // A scout cannot read a peer's submitted assessment until they have submitted their own.
       .filter((a) => lead || a.scoutUserId === req.orgUser.id || (a.state !== 'draft' && ownNonDraft))
       .map((a) => ({
         id: a.id, scoutUserId: a.scoutUserId, scoutName: a.scoutName,
         templateId: a.templateId, templateVersion: a.templateVersion,
-        // An assessment's recommendation is `{ verdict, reasons }`; the Room reads the
-        // verdict WORD only. The reasons are the scout's rationale and belong to the
-        // assessment surface, not to a list row — and the client expects a word here.
+        // The verdict word only: the reasons are the scout's rationale and stay on the assessment surface.
         state: a.state, recommendation: typeof a.recommendation === 'string' ? a.recommendation : (a.recommendation?.verdict ?? null),
-        // Likewise the context: a word or a short label (fixture · date, or "trial"), never the object.
+        // A word or a short label (fixture · date, or "trial"), never the object.
         context: assessmentContextLabel(a.context), createdAt: a.createdAt, submittedAt: a.submittedAt ?? null,
       }));
   }
@@ -265,13 +219,8 @@ export function registerRooms(ctx) {
   };
 
   /**
-   * The org-visible evidence list, plus the Room's own private review state.
-   *
-   * The Passport's club projection deliberately returns `evidence` as a SUMMARY
-   * object (`{fullMatches, clips, references, lastEvidenceDays, …}`), not a row
-   * list — so the Room reads the canonical evidence rows itself (scoutingReads) and keeps
-   * the summary for the header. Access is already settled: `sources()` returned
-   * `visible: true`, which means `orgCanSee` passed on this read.
+   * The Passport's club projection gives `evidence` as a summary object, not rows, so the Room reads the
+   * evidence rows itself. `sources()` has already checked `orgCanSee` on this read.
    */
   function evidenceFor(req, room, srcs) {
     const state = reads.evidenceStates.forRoom(room.id);
@@ -284,13 +233,11 @@ export function registerRooms(ctx) {
         value: e.value ?? null,
         units: e.units ?? null,
         season: e.season ?? null,
-        // Provenance travels with every item — never flattened to a tick.
         provenance: e.verification?.status ?? 'self_reported',
         source: { kind: e.source?.kind ?? null, name: e.source?.name ?? null },
         recordedAt: e.recordedAt ?? null,
         observedAt: e.observedAt ?? null,
-        // Counts only: the dispute reason is a conversation between the player
-        // and Trust & Safety, and never reaches a recruiting club.
+        // Counts only: the dispute reason stays between the player and Trust & Safety.
         openDisputes: (e.disputes ?? []).filter((d) => d.status === 'open').length,
       }));
     return list.map((e) => {
@@ -348,13 +295,9 @@ export function registerRooms(ctx) {
     });
   }
 
-  // ---------------------------------------------------------- THE PROJECTOR
+  // ----------------------------------------------------------- projector
 
-  /**
-   * `buildRecruitmentRoom` is the one place a Room is assembled. The client
-   * never joins source endpoints itself — every branch below has already been
-   * through the gate that owns it.
-   */
+  /** The one place a Room is assembled; every branch has been through the gate that owns it. */
   function buildRecruitmentRoom(room, req) {
     const org = req.org;
     const srcs = sources(room, org);
@@ -378,9 +321,6 @@ export function registerRooms(ctx) {
         ? { userId: room.room.leadScoutUserId, name: orgUser(org.id, room.room.leadScoutUserId)?.name ?? 'Former colleague' }
         : null,
       viewerRole: role,
-      // Concurrency token: moves on every accepted workflow mutation, so
-      // a second scout editing a stale copy is refused rather than silently
-      // overwriting the first.
       ...revMeta(room.room),
       createdAt: room.createdAt,
       updatedAt: room.room.updatedAt,
@@ -390,8 +330,7 @@ export function registerRooms(ctx) {
       privacyNote: ROOM_PRIVACY_NOTE,
     };
 
-    // Internal work is always available — it belongs to the club, not to the
-    // player record. Player projections are not.
+    // Internal work belongs to the club and is always shown; player projections are not.
     const tasks = (room.tasks ?? []).map(taskView);
     const comments = roomComments(room.id).sort((a, b) => b.createdAt - a.createdAt).slice(0, LIMITS.pageSize).map((c) => commentView(c, { orgId: org.id }));
     const decisions = roomDecisions(room.id).map(decisionView);
@@ -447,7 +386,7 @@ export function registerRooms(ctx) {
   }
   ctx.buildRecruitmentRoom = buildRecruitmentRoom;
 
-  // ================================================================= ROUTES
+  // ================================================================= routes
 
   // ------------------------------------------------------------- room list
 
@@ -471,7 +410,7 @@ export function registerRooms(ctx) {
       assignee: req.query.assignee ? String(req.query.assignee) : null,
     };
 
-    // The search needs the player's visibility, so it is the one filter applied in code, as the rows are read.
+    // The search needs the player's visibility, so it is the one filter applied in code.
     const q = String(req.query.q ?? '').trim().toLowerCase();
     const matches = q ? (c) => {
       const p = findPlayer(c.playerId);
@@ -481,11 +420,8 @@ export function registerRooms(ctx) {
         || ROOM_STATUS_LABELS[c.status].toLowerCase().includes(q);
     } : null;
 
-    // Most recent activity first, paged by cursor ({ items, nextCursor }; domains/platform/paging.mjs).
     const { items: pageRows, nextCursor } = reads.cases.roomPageForViewer(req.org.id, viewer, filter, page, matches);
 
-    // One light assembly per player on the page, shared between the Passport
-    // and Trust engines — no per-row source round trip.
     const items = pageRows.map((c) => {
       const srcs = sources(c, req.org, { light: true });
       const readiness = null;
@@ -507,13 +443,13 @@ export function registerRooms(ctx) {
     });
   });
 
-  /** Needs-attention: deterministic, no priority scoring of any kind. Read as sets, not per Room. */
+  /** Deterministic signals, no priority scoring. Read as sets, not per Room. */
   orgRouter.get('/rooms/needs-attention', (req, res) => {
     const orgId = req.org.id;
     const open = reads.cases.roomRowsForViewer(orgId, { userId: req.orgUser.id, isLead: isLead(req.orgUser) }, { statuses: OPEN_ROOM_STATUSES });
     const overdue = reads.cases.overdueTaskCounts(orgId, now());
-    const supplied = ctx.insightReads.suggestions.playerIdsWithStatus(orgId, 'supplied'); // one indexed query
-    const doneCombine = ctx.boxCamReads.requests.completedPlayerIds(orgId); // one indexed query
+    const supplied = ctx.insightReads.suggestions.playerIdsWithStatus(orgId, 'supplied');
+    const doneCombine = ctx.boxCamReads.requests.completedPlayerIds(orgId);
     const reported = reads.trials.playerIdsForOrgStatus(orgId, 'reported');
     const decided = reads.decisions.roomIdsForOrg(orgId);
     const items = [];
@@ -544,21 +480,18 @@ export function registerRooms(ctx) {
   // ----------------------------------------------------------- create room
 
   /**
-   * Open a Room for a player (inside the caller's unit): adopt this org's open case for the player if one exists — a
-   * Room is a facet of the case, so a club never ends up with a case and a room that disagree about where the player
-   * is in the pipeline — or create the case with the facet in one write. Returns the fresh case.
+   * Open a Room for a player inside the caller's unit: adopt this org's open case for the player if there is
+   * one, so a case and a room never disagree, or create the case with the Room in one write.
    */
   function openRoom({ req, player, sourceContext, sourceRef, priority = 'normal', restricted = false, vacancyId = null, withSourceRef = true }) {
     const existingCase = reads.cases.forOrgPlayer(req.org.id, player.id).find((c) => c.stage !== 'closed' && !isRoom(c));
     const adopted = !!existingCase;
     const at = now();
-    // The case already had a stage — keep its meaning rather than resetting the club's pipeline position to the
-    // start, without asserting a fact the records cannot prove (see `adoptionStatus`).
+    // Keep an adopted case's stage rather than restarting the pipeline, without asserting unproven facts.
     const inheritedStage = adopted ? (existingCase.stage ?? null) : null;
     const status = inheritedStage ? adoptionStatusForStage(inheritedStage, req.org.level) : INITIAL_ROOM_STATUS;
     const move = statusMove(status, req.org, req.orgUser);
     const by = { userId: req.orgUser.id, name: req.orgUser.name };
-    // Opening the Room is its first revision.
     const room = {
       status, priority, tags: [], leadScoutUserId: req.orgUser.id,
       sourceContext, sourceRef: withSourceRef ? sourceRef : null, openedBy: by,
@@ -585,7 +518,7 @@ export function registerRooms(ctx) {
     const { playerId, sourceContext, priority, restricted, vacancyId } = req.body ?? {};
     const p = findPlayer(playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    // A room cannot be used to bookmark a player the club may not see.
+    // A room cannot bookmark a player the club may not see.
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE', message: 'This player is not visible to your organisation under the standing rules.' });
     if (vacancyId && !ctx.scoutingReads.vacancies.ofOrg(vacancyId, req.org.id)) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
 
@@ -616,10 +549,8 @@ export function registerRooms(ctx) {
     if (!room) return;
     const { priority, tags, leadScoutUserId, ownerUserId, restricted, deadline } = req.body ?? {};
 
-    // Guard the fields where a lost update changes who is responsible
-    // for a decision or how urgent it is. Tags and a deadline are not worth a
-    // conflict — demanding a rev for every trivial edit teaches people to send
-    // whatever number makes the error go away.
+    // Rev-guard only the fields where a lost update changes who is responsible or how urgent it is; demanding
+    // a rev for tags teaches people to send whatever number makes the error go away.
     const workflowFields = priority !== undefined || leadScoutUserId !== undefined
       || ownerUserId !== undefined || restricted !== undefined;
     if (workflowFields && !guardRev(req, res, room.room, {
@@ -627,7 +558,7 @@ export function registerRooms(ctx) {
       current: { status: room.room.status, priority: room.room.priority, updatedAt: room.room.updatedAt },
     })) return;
 
-    // Every field is judged before anything is written: a refusal leaves the room exactly as it was.
+    // Every field is judged before anything is written.
     if (priority !== undefined) {
       if (!ROOM_PRIORITIES.includes(priority)) return res.status(400).json({ error: 'ROOM_PRIORITY_UNKNOWN' });
       if (!requireCan(req, res, room, 'set_status')) return;
@@ -650,8 +581,7 @@ export function registerRooms(ctx) {
     }
     let owner = null;
     if (ownerUserId !== undefined) {
-      // A departed owner must never leave a room unusable: any recruitment
-      // lead can reassign it, not only the owner.
+      // Any recruitment lead can reassign, so a departed owner never leaves a room unusable.
       if (!requireCan(req, res, room, 'reassign_owner')) return;
       owner = orgUser(req.org.id, ownerUserId);
       if (!owner) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
@@ -679,19 +609,15 @@ export function registerRooms(ctx) {
     const room = findRoom(req, res);
     if (!room) return;
     if (!requireCan(req, res, room, 'set_status')) return;
-    // A stale transition is the dangerous one: shortlisting and archiving race,
-    // and the loser would otherwise overwrite the winner's decision context.
+    // Shortlisting and archiving race; the loser would overwrite the winner's decision context.
     if (!guardRev(req, res, room.room, {
       errorCode: 'ROOM_VERSION_CONFLICT',
       current: { status: room.room.status, statusLabel: ROOM_STATUS_LABELS[room.room.status], updatedAt: room.room.updatedAt },
     })) return;
 
     const to = String(req.body?.status ?? '');
-    // Role parity. Every state a semantic action reaches carries that
-    // action's role requirement HERE too; otherwise this route is the side
-    // door around it (a room lead reaching `signed`, which the lifecycle
-    // reserves for a recruitment lead). A state no action names keeps the
-    // Room's `set_status` rule.
+    // A state a lifecycle action reaches needs that action's role here too, or this route would let a room
+    // lead reach `signed`, which the lifecycle reserves for a recruitment lead.
     const namingActions = Object.values(LIFECYCLE_ACTIONS).filter((a) => a.to === to);
     if (namingActions.length) {
       const role = roleFor(req, room);
@@ -707,13 +633,8 @@ export function registerRooms(ctx) {
     const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
     if (!check.ok) return res.status(check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400).json(check);
 
-    // A status that asserts a durable fact needs the record proving it.
-    //
-    // This route takes a status string from the client, so without this gate it
-    // is a side door around the lifecycle: `offer_made` + `{status:'signed'}`
-    // would land on `signed` with no signing in the database. The
-    // requirement is keyed by TARGET status in domains/recruitment/rooms/shared.mjs, so every path to
-    // `signed` carries the identical burden and no future edge can skip it.
+    // This route takes a client status string, so without this gate `offer_made` + `{status:'signed'}` would
+    // land on `signed` with no signing on record.
     if (check.requiresEvidence) {
       const verdict = recruitmentEvidence.check(check.requiresEvidence, { kase: room });
       if (verdict.satisfied !== true) {
@@ -730,7 +651,6 @@ export function registerRooms(ctx) {
     const ends = ['archived', 'closed', 'withdrawn'].includes(to);
     let snapshot = null;
     const fresh = unit(() => {
-      // Snapshot the evidence confidence the club could see AT this moment.
       if (check.snapshot) snapshot = captureSnapshot(room, req, `status:${to}`);
       const reopened = check.reopen ? { by: { userId: req.orgUser.id, name: req.orgUser.name }, at: now(), from, reasonCodes: reasons.codes } : undefined;
       cases.moveRoom(room.id, { ...statusMove(to, req.org, req.orgUser), reopened }, {
@@ -739,12 +659,10 @@ export function registerRooms(ctx) {
           activity(req, 'room_status_changed', { from, to, reasonCodes: reasons.codes, note: note ? true : false }),
         ],
       });
-      // Keep the case's sign-off artefact consistent so "closing needs a decision"
-      // stays true without a second decision store fighting this one.
+      // Keeps the case's sign-off consistent so "closing needs a decision" holds.
       const signOff = to === 'signed' ? { outcome: 'sign', reasons: reasons.codes.join(', ') || 'signed' } : ends ? { outcome: 'pass', reasons: reasons.codes.join(', ') } : null;
       if (signOff) cases.recordDecision(room.id, { decision: { ...signOff, byUserId: req.orgUser.id, byName: req.orgUser.name, approvedBy: null, at: now() } });
-      // A status that ends pursuit records a decision so the reason survives as
-      // machine-readable decision memory, not as a status flag alone.
+      // Recorded as a decision so the reason survives as machine-readable decision memory.
       if (ends) recordDecision(room, req, { recommendation: 'archive', reasonCodes: reasons.codes, note, snapshot, trigger: `status:${to}` });
       return cases.byId(room.id);
     });
@@ -764,20 +682,13 @@ export function registerRooms(ctx) {
   });
 
   /**
-   * The ONE reopen path, shared with Second Look.
-   *
-   * A Second Look never reopens a room by itself — a recruiter does, and when
-   * they do, the move runs through exactly this code: the same transition
-   * table, the same reason requirement, the same snapshot capture, the same
-   * append-only decision memory and the same activity trail. Second Look supplies only
-   * the source context so the reopen is attributable later.
+   * The one reopen path, shared with Second Look: a recruiter's reopen runs the same transition table,
+   * reason requirement, snapshot and decision memory. Second Look supplies only the source context.
    */
   ctx.reopenRoom = ({ req, room, to = 'under_review', reasonCodes = [], sourceContext = null, sourceRef = null }) => {
     const role = roleFor(req, room);
     if (!roomCan(role, 'reopen')) return { ok: false, status: 403, error: 'ROOM_PERMISSION_REQUIRED' };
-    // A reopen reopens something CLOSED. A live room (contacted,
-    // shortlisted, on hold…) pulled back to under_review through this bridge
-    // would rewrite a live case under a "reopened" label; it is refused.
+    // Only closed rooms reopen; pulling a live room back under a "reopened" label would rewrite a live case.
     if (!REOPENED_FROM.includes(room.room.status)) {
       return { ok: false, status: 409, error: 'ROOM_NOT_REOPENABLE', message: `A room at ${ROOM_STATUS_LABELS[room.room.status] ?? room.room.status} is not closed, so it cannot be reopened.`, current: { status: room.room.status } };
     }
@@ -786,10 +697,7 @@ export function registerRooms(ctx) {
     const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
     if (!check.ok) return { ok: false, status: check.error === 'ROOM_TRANSITION_INVALID' ? 409 : 400, ...check };
 
-    // Same gate as the status route. `to` is a parameter here, and the
-    // Second Look bridge supplies it, so an evidence-bearing target must be
-    // refused on this path too rather than trusted because the caller is
-    // internal.
+    // `to` comes from the Second Look bridge, so the evidence gate applies here too.
     if (check.requiresEvidence) {
       const verdict = recruitmentEvidence.check(check.requiresEvidence, { kase: room });
       if (verdict.satisfied !== true) {
@@ -812,48 +720,31 @@ export function registerRooms(ctx) {
   };
   ctx.findRoomForRequest = findRoom;
   ctx.roomIsRoom = isRoom;
-  // The decision-time snapshot, captured by the formal decision
-  // route through exactly the code the advisory recommendation uses.
+  // The formal decision route captures its snapshot through the same code as the advisory recommendation.
   ctx.captureRoomSnapshot = (room, req, trigger) => captureSnapshot(room, req, trigger);
 
   /**
-   * The lifecycle write seam, shared with the lifecycle module.
-   *
-   * The lifecycle owns which semantic actions exist and what each one requires; it does
-   * NOT own how a status is written. That stays here, in `statusMove` and
-   * `cases.moveRoom` — the single writer, which derives `case.stage` and bumps the rev — so there
-   * is exactly one place where the two representations can be made to agree.
-   *
-   * The caller has already validated the transition. This performs it and
-   * appends the history entry the funnel reads, in that order, so a status
-   * that moved is always a status with a recorded reason for moving.
+   * The lifecycle write seam. The lifecycle decides which actions exist and what they require; the status
+   * is still written only by `statusMove` and `cases.moveRoom`. The caller has already validated the
+   * transition; the status and its history entry are written together.
    */
   ctx.applyLifecycleTransition = ({ req, room, to, reasonCodes = [], trigger = 'lifecycle', actor = null, statusDetail = null }) => {
     const from = room.room.status;
-    // A case may move BECAUSE a recipient acted (a guardian accepted
-    // a concrete trial slot), through this same writer. The recipient never
-    // addresses the case; the caller passes who acted, and the history entry
-    // names them by kind rather than pretending a club user did it. Absent an
-    // actor, the club user on the request is the actor.
+    // A case may move because a recipient acted (a guardian accepted a trial slot); the history entry then
+    // names that actor by kind rather than a club user.
     const org = actor?.org ?? req.org;
     const by = actor ? { id: actor.id ?? null, name: actor.name ?? null } : req.orgUser;
     const reopens = REOPENED_FROM.includes(from) && OPEN_ROOM_STATUSES.includes(to);
     const write = (type, detail) => (actor
       ? auditEntry(actor.kind ?? 'system', actor.id ?? null, actor.name ?? null, type, detail)
       : activity(req, type, detail));
-    // One unit (joining the caller's): the status, the stage, the rev and the history entries together, or nothing.
     const fresh = unit(() => {
       // The lifecycle's resume is its own edge out of on_hold, beside the transition table.
       const resume = from === 'on_hold' && !canTransition(from, to);
       cases.moveRoom(room.id, { ...statusMove(to, org, by), resume, ...(reopens ? { reopened: { by: { userId: by.id ?? null, name: by.name ?? null }, at: now(), from, reasonCodes } } : {}) });
-      // A development-only fault seam between the status write
-      // and the history entry: the unit is refused whole, so status, stage,
-      // rev, instants and history stay exactly as they were.
+      // Development-only fault seam: the unit is refused whole, so nothing from the status write survives.
       if (faults?.shouldFail?.('lifecycle.after_status')) throw new Error('simulated failure after the status write (development fault layer)');
-      // The same action name the funnel reads. A second name would
-      // mean a second funnel, silently disagreeing with the first. The caller's
-      // `statusDetail` (the semantic action, the policy version, the record that
-      // moved the case) is part of the same entry.
+      // The same action name the funnel reads; a second name would mean a second, disagreeing funnel.
       return cases.recordAct(room.id, {
         history: [
           ...(reopens ? [write('room_reopened', { from, to, reasonCodes })] : []),
@@ -863,18 +754,13 @@ export function registerRooms(ctx) {
     });
     if (reopens) vmetric('recruitment_room_reopened');
     vmetric('recruitment_room_status_changed');
-    // Open Rooms re-read the journey on this event (ids and words only).
     broadcast?.('recruitment_case_moved', { orgId: room.orgId, roomId: room.id, from, to });
     return { from, to, room: fresh };
   };
 
   /**
-   * The ONE room creator reachable from another module, shared with Nobody
-   * Missed. A candidate added from a brief gets a room through exactly
-   * the same path as one added from Discover: the same visibility check, the
-   * same uniqueness rule, the same adoption of an existing case. Nobody Missed supplies
-   * only the source context, so the funnel can later distinguish a room opened
-   * from a brief from one opened organically.
+   * The room creator for other modules (Nobody Missed): same visibility check, uniqueness rule and case
+   * adoption as Discover. The caller supplies only the source context.
    */
   ctx.createRoomForPlayer = ({ req, player, sourceContext = 'direct', sourceRef = null }) => {
     if (!orgCanSee(req.org, player)) return { ok: false, status: 403, error: 'NOT_VISIBLE' };
@@ -901,15 +787,12 @@ export function registerRooms(ctx) {
         trustSnapshot: trust,
         trigger,
         sourceRefs: {
-          // passportVersion is the projection schema version (always 1).
-          // passportRevision is the CONTENT revision, so a later
-          // Second Look can say whether the Passport truth itself moved.
+          // passportVersion is the schema version (always 1); passportRevision tracks content.
           passportVersion: full?.passportVersion ?? null,
           passportRevision: ctx.passportRevisionOf?.(room.playerId) ?? null,
           evidenceIds: ctx.scoutingReads.evidence.currentForPlayer(room.playerId).map((e) => e.id),
           assessmentIds: ctx.scoutingReads.assessments.forOrgPlayer(room.orgId, room.playerId).filter((a) => a.state !== 'draft').map((a) => a.id),
-          // Protocol coverage at decision time — which standardized tests had a
-          // verified result, never the measured values themselves.
+          // Which tests had a verified result, never the measured values.
           combineResults: (ctx.combineProjection?.(room.playerId)?.results ?? [])
             .map((r) => `${r.protocolId}@${r.protocolVersion}`),
           trialIds: (room.links?.trialIds ?? []),
@@ -983,8 +866,7 @@ export function registerRooms(ctx) {
       return row;
     });
     vmetric('room_comment_added');
-    // Internal only: a mention notifies a colleague in this organisation and
-    // nobody else. No player, guardian, coach, other club or email.
+    // Mentions notify colleagues in this organisation only.
     for (const uid of mentions) {
       if (uid === req.orgUser.id) continue;
       notify({ kind: 'org_user', id: uid }, 'recruitment_room', `${req.orgUser.name} mentioned you in the Recruitment Room for ${room.playerName ?? 'a removed player'}.`, room.id);
@@ -1017,8 +899,6 @@ export function registerRooms(ctx) {
     if (!c) return res.status(404).json({ error: 'ROOM_COMMENT_NOT_FOUND' });
     const lead = isLead(req.orgUser);
     if (c.authorId !== req.orgUser.id && !lead) return res.status(403).json({ error: 'ROOM_COMMENT_NOT_AUTHOR' });
-    // Tombstone, never erase: the thread keeps its shape and the audit trail
-    // keeps its attribution.
     const saved = unit(() => {
       const row = comments.remove(c.id, { at: now(), by: { userId: req.orgUser.id, name: req.orgUser.name } });
       cases.recordAct(room.id, { history: [activity(req, 'room_comment_deleted', { commentId: c.id })] });
@@ -1042,7 +922,6 @@ export function registerRooms(ctx) {
     let assignee = null;
     if (req.body?.assigneeUserId) {
       assignee = orgUser(req.org.id, String(req.body.assigneeUserId));
-      // A task can only be given to someone in this organisation.
       if (!assignee) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
     }
     const linkedResourceType = LINKED_RESOURCE_TYPES.includes(req.body?.linkedResourceType) ? req.body.linkedResourceType : null;
@@ -1059,8 +938,7 @@ export function registerRooms(ctx) {
     };
     cases.addTask(room.id, { task: t }, touched(activity(req, 'room_task_created', { taskId: t.id, assigneeUserId: t.assigneeUserId })));
     vmetric('room_task_created');
-    // A room task is STAFF work. It is never sent to the player: a player-facing
-    // ask must go through the evidence-request or Combine-request workflow.
+    // Staff work only: a player-facing ask goes through the evidence-request or Combine-request workflow.
     if (assignee && assignee.id !== req.orgUser.id) {
       notify({ kind: 'org_user', id: assignee.id }, 'recruitment_room', `${req.orgUser.name} assigned you a task in the Recruitment Room for ${room.playerName ?? 'a removed player'}: ${title}`, room.id);
     }
@@ -1076,7 +954,6 @@ export function registerRooms(ctx) {
     const mine = t.assigneeUserId === req.orgUser.id || t.createdBy?.userId === req.orgUser.id;
     if (!mine && !roomCan(role, 'assign')) return res.status(403).json({ error: 'ROOM_PERMISSION_REQUIRED', message: 'Only the assignee, the creator or a room lead can change this task.' });
 
-    // Both fields are judged before anything is written.
     let status;
     if (req.body?.status !== undefined) {
       status = String(req.body.status);
@@ -1111,18 +988,13 @@ export function registerRooms(ctx) {
       supersedes: prev?.id ?? null, supersededById: null,
       snapshot: snapshot ? { at: snapshot.at, trust: snapshot.trust, sourceRefs: snapshot.sourceRefs, snapshotId: snapshot.id } : null,
     };
-    // Append-only: a revision SUPERSEDES its predecessor, it never rewrites it.
     const saved = decisions.create(d);
     if (prev) decisions.markSuperseded(prev.id, { by: d.id });
     const fresh = cases.recordAct(room.id, { history: [activity(req, 'room_decision_recorded', { decisionId: d.id, recommendation, reasonCodes })] });
     vmetric('room_decision_recorded');
     if (['archived', 'closed', 'withdrawn'].includes(fresh.room.status)) {
-      // The Second Look contract: a typed, machine-readable domain event with
-      // reason CODES and no private free text.
-      // The STREAM carries ids only. secondLookEvent() remains the
-      // internal shape (reason codes, revisitability, source refs) for the
-      // Second Look engine and its tests; none of that belongs on a live
-      // channel whose only consumer refetches through an authorised read.
+      // The stream carries ids only; its consumer refetches through an authorised read. secondLookEvent()
+      // is the internal shape.
       broadcast?.('recruitment_room_archived', { orgId: room.orgId, roomId: room.id });
     }
     return saved;
@@ -1138,11 +1010,8 @@ export function registerRooms(ctx) {
     const clientKey = key.key;
     if (clientKey) {
       const dup = reads.decisions.forRoom(room.id).find((d) => d.clientKey === clientKey);
-      // Idempotent submit: the same key returns the same decision instead of
-      // stacking a duplicate onto the decision memory. The
-      // same key with DIFFERENT content is a different request wearing the
-      // same name, and a key that named a formal decision is not this
-      // route's to replay — both are conflicts, never a silent old answer.
+      // The same key returns the same decision. The same key with different content, or one that named a
+      // formal decision, is a conflict rather than a silent old answer.
       if (dup) {
         const codesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).map((x) => String(x)))].sort().join(',');
         const same = dup.kind !== 'formal' && (dup.recommendation ?? null) === (req.body?.recommendation ?? null)
@@ -1151,10 +1020,7 @@ export function registerRooms(ctx) {
         return res.status(200).json({ decision: decisionView(dup), idempotent: true });
       }
     }
-    // A decision is pinned to the room revision it was written against.
-    // Two colleagues deciding at once therefore produce ONE accepted decision
-    // and one conflict — never two rows both claiming to be current. The
-    // history stays append-only either way: nothing here edits a past decision.
+    // Pinned to the room revision, so two colleagues deciding at once get one decision and one conflict.
     if (!guardRev(req, res, room.room, {
       errorCode: 'ROOM_VERSION_CONFLICT',
       current: { status: room.room.status, updatedAt: room.room.updatedAt },
@@ -1204,8 +1070,7 @@ export function registerRooms(ctx) {
     if (note && !moderateOrRefuse(res, note, { kind: 'recruitment_room_evidence_note', orgId: req.org.id })) return;
 
     const existing = reads.evidenceStates.forRoom(room.id).find((x) => x.evidenceId === evidence.id);
-    // The review state and the note belong to the ROOM. The evidence record
-    // itself is the player's and is not touched.
+    // The review state belongs to the Room; the player's evidence record is not touched.
     const row = unit(() => {
       const saved = existing
         ? evidenceStates.review(existing.id, { state, note: note ?? existing.note, byId: req.orgUser.id, byName: req.orgUser.name, at: now() })
@@ -1235,20 +1100,15 @@ export function registerRooms(ctx) {
     res.status(201).json({ assignment: a });
   });
 
-  /** Raise an evidence request through the evidence-request engine — same rules, no shortcut. */
+  /** Raise an evidence request through the evidence-request engine. */
   orgRouter.post('/rooms/:id/evidence-requests', (req, res) => {
     const room = findRoom(req, res);
     if (!room) return;
     if (!requireCan(req, res, room, 'request_evidence')) return;
     if (!ctx.requestEvidenceGap) return res.status(503).json({ error: 'EVIDENCE_ENGINE_UNAVAILABLE' });
     const suggestionId = String(req.body?.suggestionId ?? '');
-    // Deliberately no free-text field: a scout can never send their own words
-    // to a player or a guardian from inside a private room. The engine's
-    // whitelisted, rule-derived wording is the only thing that travels.
-    // The suggestion must be about THIS room's player. A
-    // room's request authority never reaches another player's profile — not
-    // even one this org may otherwise see — so the id is scoped to the room.
-    // One unit: the request, its notice and the Room's activity entry commit together, or none of them.
+    // No free-text field: a scout's own words never reach a player or guardian from a private room; only the
+    // engine's rule-derived wording travels. The suggestion is scoped to this room's player.
     const out = unit(() => {
       const r = ctx.requestEvidenceGap({ org: req.org, suggestionId, playerId: room.playerId });
       if (r.ok) cases.recordAct(room.id, touched(activity(req, 'room_evidence_requested', { suggestionId, ruleId: r.suggestion.ruleId, routedTo: r.routedTo })));
@@ -1269,7 +1129,6 @@ export function registerRooms(ctx) {
     if (!req.org.verified) return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can create a Club Combine.' });
     if (limited('room_combine_request', req.org.id)) return res.status(429).json(rateLimitedBody('room_combine_request'));
 
-    // Refused, not coerced: protocol ids are text, the title text, the deadline a real day.
     const { protocolIds, title = null, deadline = null } = req.body ?? {};
     if (protocolIds !== undefined && (!Array.isArray(protocolIds) || protocolIds.some((x) => typeof x !== 'string'))) return res.status(400).json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'protocolIds is a list of protocol ids.' });
     if (title !== null && typeof title !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'title', message: 'A title is text.' });
@@ -1277,13 +1136,11 @@ export function registerRooms(ctx) {
     const ids = Array.isArray(protocolIds) ? [...new Set(protocolIds)] : [];
     if (!ids.length) return res.status(400).json({ error: 'PROTOCOLS_REQUIRED' });
     if (ids.length > 20) return res.status(400).json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'A Club Combine asks for at most 20 protocols.' });
-    // Protocols are selected from the standardized registry. A room can never
-    // invent one or change one's rules.
+    // Protocols come from the standardised registry; a room cannot invent or change one.
     for (const pid of ids) if (!ctx.combineProtocolActive?.(pid)) return res.status(404).json({ error: 'PROTOCOL_UNKNOWN', protocolId: pid });
     const instructions = req.body?.instructions ? String(req.body.instructions) : null;
     if (instructions && !moderateOrRefuse(res, instructions, { kind: 'combine_request', orgId: req.org.id })) return;
 
-    // One unit: the request, its ledger row and notification, and the Room's activity.
     const out = unit(() => {
       const o = ctx.createCombineRequests({
         org: req.org, orgUser: req.orgUser, playerIds: [room.playerId],
@@ -1297,17 +1154,12 @@ export function registerRooms(ctx) {
     res.status(201).json({ request: ctx.combineRequestView?.(out.created[0]) ?? out.created[0] });
   });
 
-  /**
-   * Link a canonical record to this room. Trials, contact requests and signings
-   * are created by their own workflows — the Room references them, exactly as
-   * cases already do, so there is never a duplicate trial or signing row.
-   */
+  /** Trials, contact requests and signings are created by their own workflows; the Room only links them. */
   orgRouter.post('/rooms/:id/link', (req, res) => {
     const room = findRoom(req, res);
     if (!room) return;
     if (!requireCan(req, res, room, 'assign')) return;
     const { trialId, signingId, requestId } = req.body ?? {};
-    // Every reference is checked before anything is written.
     const foundTrial = trialId ? reads.trials.byId(trialId) : null;
     const t = foundTrial && foundTrial.orgId === req.org.id && foundTrial.playerId === room.playerId ? foundTrial : null;
     if (trialId && !t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
@@ -1325,18 +1177,14 @@ export function registerRooms(ctx) {
     res.json({ links: fresh.links });
   });
 
-  /** Organisation-private recruitment funnel. No cross-club comparison exists. */
+  /** Organisation-private recruitment funnel. */
   orgRouter.get('/rooms-funnel', (req, res) => {
     res.json(roomFunnelFromCounts(reads.cases.roomStatusCounts(req.org.id)));
   });
 
   // ------------------------------------------------------------------ T&S
 
-  /**
-   * Trust & Safety does NOT browse club decision rooms. This surface reports
-   * platform-level counts and nothing from inside any room: no status, no
-   * comment, no decision, no reason, no player and no organisation.
-   */
+  /** Platform-level counts only: nothing from inside any room. */
   adminRouter.get('/rooms/overview', (req, res) => {
     const counts = ctx.recruitmentCases.counts();
     res.json({
@@ -1345,13 +1193,7 @@ export function registerRooms(ctx) {
     });
   });
 
-  // ------------------------------------------- legacy stage route alignment
-  //
-  // There is deliberately no stage → status bridge here. `roomStatusForStage`
-  // is the inverse of a lossy projection (eighteen statuses onto six stages),
-  // so `decision` alone means any of four statuses and a bridge would move a
-  // room at `offer_made` backwards — past the transition table, the evidence
-  // gate, the history append and the rev bump. `POST /org/cases/:id/stage`
-  // refuses a Room and names the lifecycle route instead; `statusMove` stays
-  // the only writer.
+  // There is no stage → status bridge: `roomStatusForStage` is lossy, so a bridge could move a room at
+  // `offer_made` backwards past the transition table and evidence gate. `POST /org/cases/:id/stage` refuses a
+  // Room instead.
 }

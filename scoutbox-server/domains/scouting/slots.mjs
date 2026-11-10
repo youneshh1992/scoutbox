@@ -1,10 +1,8 @@
-// ----- time slots with time zones. A slot is
-// {day: 'mon'.., start: 'HH:MM', end: 'HH:MM', tz: IANA string}.
-// Comparison converts both slots to minutes-from-week-start in UTC.
+// A slot is {day: 'mon'.., start: 'HH:MM', end: 'HH:MM', tz: IANA string}, compared as minutes from the week's start
+// in UTC.
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 export function tzOffsetMinutes(tz, ref = new Date('2026-01-15T12:00:00Z')) {
-  // Offset of `tz` from UTC at a fixed reference instant (stable for tests;
-  // DST-precise comparison would need per-date evaluation — documented).
+  // The offset at a fixed reference instant (stable for tests); DST-precise comparison would need per-date evaluation.
   try {
     const s = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'longOffset' })
       .formatToParts(ref).find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';

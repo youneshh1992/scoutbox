@@ -1,18 +1,10 @@
 /**
- * The versioned jurisdiction policy content.
+ * Seed policy versions, reviewed against the primary sources read on 18 September 2026
+ * (docs/reference/agent-regulatory-snapshot-2026-09.md). Later versions are published through the dual-controlled
+ * Trust & Safety route, not by editing this file.
  *
- * These are DATA, reviewed against the primary sources read on 18 September
- * 2026 (docs/reference/agent-regulatory-snapshot-2026-09.md). They seed the
- * policy-version table every evaluation reads; a later version is published
- * through the attributed, dual-controlled Trust & Safety route — never by
- * editing this file on a live system. Nothing here is legal advice; every
- * entry names its source, version, effective date and retrieval date.
- *
- * Two facts are stored separately on every rule, on purpose:
- *   - the TEXT exists in the current edition (`sourceRef`, `textStatus`), and
- *   - the rule is currently OPERATIVE (`ruleStatus`).
- * A rule that exists in text while its enforcement is suspended is a row with
- * `ruleStatus: SUSPENDED` or `UNDER_LEGAL_REVIEW`, never a deleted row.
+ * Whether a rule's text exists (`sourceRef`, `textStatus`) and whether it is operative (`ruleStatus`) are stored
+ * separately: a suspended rule is a row with `ruleStatus: SUSPENDED` or `UNDER_LEGAL_REVIEW`, never a deleted row.
  */
 
 export const RULE_STATUSES = Object.freeze([
@@ -27,20 +19,17 @@ export const RULE_STATUSES = Object.freeze([
 
 export const TEXT_STATUSES = Object.freeze(['CURRENT', 'CURRENT_BUT_SUSPENDED', 'CURRENT_WITH_PARTIAL_SUSPENSION', 'UNCERTAIN_OPERATIVE_STATUS', 'HISTORICAL', 'SUPERSEDED', 'ANNOUNCED']);
 
-/** The parties of a transaction (the engine's vocabulary; conflict.mjs re-exports it). */
 export const PARTY_ROLES = Object.freeze(['individual', 'engaging_entity', 'releasing_entity']);
-/** The consents the ledger knows (only `dual_representation` is requested by a route today). */
+/** Only `dual_representation` is requested by a route today. */
 export const CONSENT_KINDS = Object.freeze(['dual_representation', 'agency_performance', 'guardian_approach', 'guardian_agreement', 'legal_advice_ack']);
-/** The minors approach-timing formulas the engine computes (policy.mjs earliestPermittedApproachAt). */
+/** Computed by policy.mjs `earliestPermittedApproachAt`. */
 export const TIMING_FORMULAS = Object.freeze(['academic_year_16', 'six_months_before_first_contract_age']);
 /** How a published override applies (only national entries exist). */
 export const OVERRIDE_SCOPES = Object.freeze(['national']);
 
 /**
- * The rule parameters a policy version may carry, by name, with their type. The engine reads parameters by name
- * (policy.mjs, conflict.mjs, the consent route), so a name it does not know is a typo that would silently change
- * nothing: publishing one is refused, like a value of the wrong type. A new parameter needs a build that reads it, and
- * is added here with it. Types:
+ * The engine reads parameters by name, so an unknown name is a typo that would silently change nothing: publishing
+ * one is refused, like a value of the wrong type. Types:
  *   flag      true or false
  *   count     a whole number, 0 or more
  *   text      free text, at most 200 characters
@@ -68,7 +57,6 @@ export const RULE_PARAMS = Object.freeze({
 });
 export const RULE_PARAM_TEXT_MAX = 200;
 const DAY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
-/** Is `v` a calendar day written YYYY-MM-DD (a day that exists)? */
 export function isCalendarDay(v) {
   const m = typeof v === 'string' ? DAY_RE.exec(v) : null;
   if (!m) return false;
@@ -77,10 +65,7 @@ export function isCalendarDay(v) {
 }
 const isMonthDay = (v) => typeof v === 'string' && /^\d{2}-\d{2}$/.test(v) && isCalendarDay(`2000-${v}`);
 const plain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
-/**
- * Type a rule's `params` against RULE_PARAMS: `{ ok: true, params }` (a fresh copy, keys in the given order) or
- * `{ ok: false, field, why }` naming the parameter, never its value.
- */
+/** `{ ok: true, params }` (a fresh copy) or `{ ok: false, field, why }` naming the parameter, never its value. */
 export function typeRuleParams(params) {
   if (params === undefined || params === null) return { ok: true, params: {} };
   if (!plain(params)) return { ok: false, field: 'params', why: 'must be an object of named parameters' };

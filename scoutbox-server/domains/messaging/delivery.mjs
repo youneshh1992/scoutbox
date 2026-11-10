@@ -1,18 +1,7 @@
-// Delivery and response centre.
-// Transactional-outbox architecture: the notifications table
-// (repositories/notifications.mjs) is the single canonical in-app record (the business action
-// happens exactly once). The dispatcher creates per-channel dispatch rows
-// AFTER the fact and retries only the SENDING — a retry can therefore never
-// duplicate the business action.
-// Status ladder (forward-only): queued → accepted → delivered → opened → actioned.
-// "delivered"/"opened" are set ONLY from confirmed provider callbacks — email
-// acceptance is never reported as read.
-//
-// A notification's dispatches are created in one unit of work; each
-// send — its attempt, its status, the outbox row, the injected failure it used and,
-// when the retries run out, the ops event and the webhook intent — is one unit; a
-// provider callback event commits with its seen marker; an acknowledgment with the
-// notification's contract.
+// Transactional outbox: the notification row is the one in-app record, so the business action happens once. The
+// dispatcher creates per-channel dispatch rows after the fact and retries only the sending, so a retry never
+// duplicates the action. Status is forward-only (queued → accepted → delivered → opened → actioned), and delivered and
+// opened come only from confirmed provider callbacks: email acceptance is never reported as read.
 import crypto from 'node:crypto';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { timingSafeEqStr as timingSafeEq } from '../identity/totp.mjs';
@@ -32,21 +21,16 @@ export function registerDelivery(ctx) {
   if (typeof operations?.delivery?.markSeen !== 'function') throw new TypeError('registerDelivery needs the operations repository (ctx.operations)');
   if (typeof emitWebhook !== 'function' || typeof webhookSweep !== 'function') throw new TypeError('registerDelivery needs the webhook emitter and sweep (registerImports)');
   const bookkeeping = operations.delivery;
-  // An exhausted retry's ops event is a row of ops_events (repositories/safetyAudit.mjs), written at once
-  // (in the sweep's unit of work when one is open).
   const opsEvent = (row) => safetyAudit.opsEvents.record(row);
-  // Notifications older than the delivery centre's start get an in-app record only — no
-  // retroactive email blast; admin-injected provider failures (tests/monitoring) are used up one send at a time.
+  // Notifications older than the delivery centre's start get an in-app record only: no retroactive email blast.
 
-  // Local fake provider: deterministic, in-process, honestly labelled.
-  // Real email/SMS/push transport is NOT configured in this environment.
+  // Real email/SMS/push transport is not configured in this environment.
   const PROVIDER = 'local-fake';
   const CALLBACK_STATUSES = ['delivered', 'opened', 'bounced', 'failed'];
   const CALLBACK_SECRET = process.env.DELIVERY_CALLBACK_SECRET || 'local-fake-callback-secret';
   function fakeSend(channel, to, text) {
     if (bookkeeping.consumeInjectedFailure(channel)) return { ok: false, error: 'injected provider failure' };
     const providerMessageId = `fm_${crypto.randomBytes(8).toString('hex')}`;
-    // The delivery record is an outbox row, written in the send's unit with the dispatch's attempt and status.
     outbox.append({ id: nextId('mail'), at: Date.now(), channel, to, text: String(text).slice(0, 300), providerMessageId, provider: PROVIDER });
     return { ok: true, providerMessageId };
   }
@@ -54,13 +38,11 @@ export function registerDelivery(ctx) {
   // ------------------------------------------------- audience → destinations
   function destinationsFor(n) {
     const a = n.audience;
-    const dests = [{ channel: 'in_app', to: `${a.kind}:${a.id}` }]; // canonical, always
+    const dests = [{ channel: 'in_app', to: `${a.kind}:${a.id}` }]; // always
     if (a.kind === 'player') {
       const p = findPlayer(a.id);
       if (p && !isAdult(p)) {
-        // Guardian-approved destinations only: a minor's external channels are
-        // the guardian's. The child's in-app record stays (contentless flows
-        // are handled at notification-creation time by the notification rules).
+        // A minor's external channels are the guardian's. The child's in-app record stays.
         dests.push({ channel: 'email', to: null, skip: 'guardian_routed — external delivery for under-18s goes to the guardian record' });
       } else if (p?.email) {
         dests.push({ channel: 'email', to: p.email });
@@ -79,8 +61,7 @@ export function registerDelivery(ctx) {
   }
 
   function quietHoldUntil(n) {
-    // Reuses the pushDeferred decision recorded on the notification: if push
-    // was deferred at creation, external channels hold for a re-check cycle.
+    // If push was deferred at creation, external channels hold for a re-check cycle.
     return n.deferredPush ? Date.now() + (process.env.SCOUTBOX_FAST_SWEEPS === '1' ? 500 : 15 * 60_000) : null;
   }
 
@@ -90,19 +71,17 @@ export function registerDelivery(ctx) {
   const MAX_ATTEMPTS = RETRY_MS.length;
 
   // --------------------------------------------------------------- sweeper
-  /** One sweep item in its own unit of work; a refusal is logged by id and the sweep goes on with the next item. */
+  /** A refusal is logged by id and the sweep goes on with the next item. */
   const item = (what, work) => {
     try { return unit(work); } catch (err) { console.error(`delivery sweep: ${what} was not processed (${err?.code ?? err?.message ?? err})`); return 0; }
   };
-  /** The organisation of a staff audience (null for a player, a guardian or a staff member who no longer exists). */
   const orgOfAudience = (a) => (a.kind === 'org_user' ? byId.user(a.id)?.orgId ?? null : null);
   const shortReason = (v) => (v == null || v === '' ? null : String(v).slice(0, 500));
 
   function dispatchSweep() {
     let changed = 0;
-    // 1. Create the dispatches of every notification the centre has not dispatched yet (the `dispatched_at` marker,
-    //    set in the same unit): one unit per notification. A notice that already has dispatches only gets its marker.
-    //    A refused one keeps no marker and is tried again by the next sweep.
+    // 1. Dispatch every notification without a `dispatched_at` marker (set in the same unit). A notice that already
+    //    has dispatches only gets its marker; a refused one keeps none and is retried by the next sweep.
     const centreSince = bookkeeping.centreSince();
     for (let afterSeq = 0, batch; (batch = notifications.undispatched({ afterSeq })).length; afterSeq = batch[batch.length - 1].seq) {
       for (const { notification: n } of batch) {
@@ -133,7 +112,7 @@ export function registerDelivery(ctx) {
         });
       }
     }
-    // 2. Attempt the external sends that are due: one unit per dispatch, holding everything the send wrote.
+    // 2. Attempt the external sends that are due.
     for (const due of dispatches.due(Date.now())) {
       changed += item(`dispatch ${due.id}`, () => {
         const n = notifications.byId(due.notificationId);
@@ -156,7 +135,7 @@ export function registerDelivery(ctx) {
         return 1;
       });
     }
-    // 3. Mirror in-app reads → opened (meaningfully measured for in_app only).
+    // 3. Mirror in-app reads → opened (meaningful for in_app only).
     for (const d of dispatches.unopenedInAppRead()) {
       changed += item(`dispatch ${d.id}`, () => { const at = Date.now(); dispatches.patch(d.id, RANK[d.status] < RANK.opened ? { openedAt: at, status: 'opened' } : { openedAt: at }); return 1; });
     }
@@ -164,11 +143,8 @@ export function registerDelivery(ctx) {
   }
 
   // ------------------------------------------------ action-required notices
-  // notifyAction: same canonical notification + an acknowledgement contract,
-  // written in ONE repository operation (`notify` passes the contract
-  // through to the create or the coalesce, so the row and its contract are
-  // never two writes). A notification the person's preferences mute is null
-  // here as it is from notify(); the caller gets null, never a crash.
+  // One repository operation writes the notification and its acknowledgement contract. A notification muted by the
+  // person's preferences is null here, as from notify().
   function notifyAction(audience, type, text, refId, deadlineMs) {
     const n = notify(audience, type, text, refId, { actionRequired: { deadline: deadlineMs ?? null } });
     if (!n) return null;
@@ -183,10 +159,7 @@ export function registerDelivery(ctx) {
       if (!n || n.audience.kind !== audience.kind || n.audience.id !== audience.id) return res.status(404).json({ error: 'NOTIFICATION_NOT_FOUND' });
       if (!n.actionRequired) return res.status(400).json({ error: 'NO_ACTION_REQUIRED' });
       if (!n.actionRequired.ackedAt) {
-        // The acknowledgment on the notification row and the dispatch
-        // rows' status changes (every row of the notice, a terminal skipped row
-        // included — it keeps its status and gains actionedAt) commit together
-        // or not at all: both repositories join this unit.
+        // Every dispatch row of the notice gains actionedAt, a terminal skipped row included (it keeps its status).
         unit(() => {
           const at = Date.now();
           const acked = notifications.ack(n.id, audience, { at });
@@ -204,17 +177,16 @@ export function registerDelivery(ctx) {
   orgRouter.post('/notifications/:id/ack', ackHandler('org_user'));
 
   // ------------------------------------------------------ provider callbacks
-  // Signed, idempotent, out-of-order-safe. The fake provider posts here in
-  // tests; a real provider integration would use the same contract.
+  // Signed, idempotent and safe out of order. The fake provider posts here in tests; a real one would use the same
+  // contract.
   app.post('/callbacks/delivery', (req, res) => {
     const ts = String(req.headers['x-provider-timestamp'] ?? '');
     const sig = String(req.headers['x-provider-signature'] ?? '');
     const body = JSON.stringify(req.body ?? {});
     if (!ts || Math.abs(Date.now() - Number(ts)) > 5 * 60_000) return res.status(401).json({ error: 'TIMESTAMP_INVALID', message: 'Callbacks older than 5 minutes are rejected (replay protection).' });
     if (!timingSafeEq(sig, signBody(CALLBACK_SECRET, 'callback', ts, body))) return res.status(401).json({ error: 'SIGNATURE_INVALID' });
-    // The whole batch is checked before anything is applied; junk is refused naming the field, never skipped or
-    // read as "now". An event is { callbackId (1–200 characters), providerMessageId (text), status (delivered, opened,
-    // bounced or failed), at (a whole-number timestamp; omitted or null means now), reason (text, optional) }.
+    // The whole batch is checked before anything is applied; junk is refused naming the field, never skipped or read
+    // as "now". `at` omitted or null means now.
     const events = req.body?.events ?? [];
     const invalid = (field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
     if (!Array.isArray(events)) return invalid('events', 'events is a list of delivery events.');
@@ -229,8 +201,8 @@ export function registerDelivery(ctx) {
       if (ev.reason != null && typeof ev.reason !== 'string') return invalid(f('reason'), 'reason is text.');
     }
     let applied = 0, duplicates = 0;
-    // Each event commits with its seen marker (a row of delivery_callbacks_seen; the newest 5,000 are kept), so a
-    // crash can never leave an id remembered and its change lost.
+    // Each event commits with its seen marker (the newest 5,000 are kept), so a crash can never leave an id remembered
+    // and its change lost.
     for (const ev of events) {
       const outcome = unit(() => {
         if (!bookkeeping.markSeen(ev.callbackId, Date.now())) return 'duplicate'; // idempotent
@@ -246,8 +218,7 @@ export function registerDelivery(ctx) {
           if (d.deliveredAt == null) patch.deliveredAt = patch.openedAt ?? d.openedAt; // out-of-order: opened implies delivered
           if (RANK[d.status] < RANK.opened) patch.status = 'opened';
         } else {
-          // A failure report never un-delivers: recorded alongside, status only
-          // moves to failed if nothing better was ever confirmed.
+          // A failure report never un-delivers: status moves to failed only if nothing better was confirmed.
           patch.failReason = (ev.reason || ev.status).slice(0, 120);
           if (RANK[d.status] <= RANK.accepted) { patch.status = 'failed'; patch.failedAt = Date.now(); }
         }
@@ -261,8 +232,7 @@ export function registerDelivery(ctx) {
   });
 
   // ------------------------------------------------------------------ views
-  // A club's staff dispatches, newest first, paged by cursor. The view is an allowlist: the fields the club's
-  // delivery screen shows, the attempts as outcomes and times.
+  // The attempts are shown as outcomes and times.
   const orgDeliveryView = (d) => ({
     id: d.id, notificationId: d.notificationId, audience: { kind: d.audience.kind, id: d.audience.id }, orgId: d.orgId, channel: d.channel, to: d.to,
     provider: d.provider, status: d.status, skipReason: d.skipReason, providerMessageId: d.providerMessageId,
@@ -279,9 +249,7 @@ export function registerDelivery(ctx) {
 
   orgRouter.put('/delivery/prefs', (req, res) => {
     const { quietStart, quietEnd, email } = req.body ?? {};
-    // The switch is a boolean or absent (on); anything else is refused.
     if (!(email === undefined || email === null || typeof email === 'boolean')) return res.status(400).json({ error: 'FIELD_INVALID', field: 'email', message: 'email is true or false.' });
-    // Quiet hours are HH:MM or absent.
     const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
     for (const [f, v] of [['quietStart', quietStart], ['quietEnd', quietEnd]]) if (v != null && !(typeof v === 'string' && HHMM.test(v))) return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is a time written HH:MM.` });
     const saved = users.update(req.orgUser.id, (d) => {
@@ -301,12 +269,8 @@ export function registerDelivery(ctx) {
   });
 
   adminRouter.post('/delivery/inject-failure', (req, res) => {
-    // `contact` makes the next in-app Contact sends fail at the
-    // transport, so the honest `failed` state can be exercised end to end.
-    // `trial` makes the next Trial invitation, acceptance or
-    // completion refuse at the transport with NOTHING written.
-    // `decision` makes the next formal decision finalize refuse
-    // before anything is written.
+    // `contact`, `trial` and `decision` make the next send of that kind fail at the transport, so the honest failure
+    // states can be exercised end to end; `trial` and `decision` refuse with nothing written.
     const channel = req.body?.channel ?? 'email';
     const count = req.body?.count ?? 1;
     if (!['email', 'push', 'contact', 'trial', 'decision'].includes(channel)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'channel', message: 'channel is email, push, contact, trial or decision.' });
@@ -319,7 +283,7 @@ export function registerDelivery(ctx) {
     res.json({ processed: dispatchSweep() });
   });
 
-  // Boot + interval — restart-safe because every dispatch row is persisted.
+  // Restart-safe: every dispatch row is persisted.
   dispatchSweep();
   const timer = setInterval(() => { dispatchSweep(); webhookSweep(); }, process.env.SCOUTBOX_FAST_SWEEPS === '1' ? 400 : 60_000);
   timer.unref();

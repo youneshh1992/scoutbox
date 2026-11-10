@@ -1,31 +1,22 @@
 /**
- * The formal recruitment decision engine: pure functions over the canonical
- * room decision row and the case's single draft.
+ * The formal recruitment decision: pure functions over the room decision row
+ * and the case's single draft. A formal decision is a row in the same
+ * append-only memory as the room's recommendations, with extra fields:
  *
- * THE CHAIN OF TRUTH THIS FILE ENFORCES
- *
- *   evidence ≠ observation ≠ assessment ≠ discussion ≠ decision ≠ offer ≠ signing
- *
- * A formal decision is a row in the SAME append-only decision memory as the
- * room's recommendations, with additional fields:
- *
- *   kind              'formal'   (absent → read as 'recommendation')
+ *   kind              'formal' (absent → read as 'recommendation')
  *   outcome           progress | hold | reject
- *   recommendation    the recommendation value the outcome maps onto, so every
- *                     reader — Second Look, journey, analytics, Nobody Missed —
- *                     keeps reading ONE chain (offer / continue_watching / archive)
- *   state             'final' (a formal row is only ever final; a DRAFT lives
- *                     on the case as `kase.decisionDraft` and is not a decision)
- *   rev               the decision's OWN revision (1 at finalize, bumped when superseded)
- *   evidenceRefs[]    references + minimal immutable metadata, never copies
- *   assessmentSummary counts and ids at decision time — never an average
- *   lifecycle         what the decision did to the case, through the ONE writer
+ *   recommendation    the recommendation the outcome maps onto, so Second Look,
+ *                     the journey, analytics and Nobody Missed keep reading one chain
+ *   state             always 'final'; a draft lives on `kase.decisionDraft`
+ *   rev               the decision's own revision (1 at finalise, bumped when superseded)
+ *   evidenceRefs[]    references plus minimal immutable metadata, never copies
+ *   assessmentSummary counts and ids at decision time, never an average
+ *   lifecycle         what the decision did to the case
  *   supersession      { reason, of } on a row that replaced a previous final one
  *   keys              idempotency keys with payload fingerprints
  *
- * Nothing here reads a Trust Score, a Box Cam result, an attendance record or
- * an assessment rating to PRODUCE an outcome. Every outcome is typed by a
- * human on the request. Nothing here writes a case status.
+ * Every outcome is typed by a human; nothing here derives one from a Trust
+ * Score, Box Cam result, attendance or rating.
  */
 
 import { validateReasonCodes, REASON_CODES } from '../rooms/shared.mjs';
@@ -40,14 +31,9 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // ------------------------------------------------------------------ vocabulary
 
-/** The three operational outcomes a club can formally decide. */
 export const DECISION_OUTCOMES = Object.freeze(['progress', 'hold', 'reject']);
 
-/**
- * Outcome → the recommendation the row also carries, the semantic
- * lifecycle action the outcome asks for, and the lifecycle reason codes that
- * action needs (LIFECYCLE taxonomy, never the decision taxonomy).
- */
+/** Lifecycle reasons here are from the lifecycle taxonomy, not the decision taxonomy. */
 export const OUTCOME_MAP = table({
   progress: { recommendation: 'offer', action: 'considerOffer', lifecycleReasons: [], label: 'Progress to offer consideration' },
   hold: { recommendation: 'continue_watching', action: 'holdCase', lifecycleReasons: [], label: 'Hold' },
@@ -57,7 +43,7 @@ export const OUTCOME_MAP = table({
 export const DECISION_KINDS = Object.freeze(['recommendation', 'formal']);
 export const DECISION_STATES = Object.freeze(['draft', 'final']);
 
-/** What a decision may cite. Each kind is validated against the case's own records. */
+/** Each kind is validated against the case's own records. */
 export const EVIDENCE_REF_KINDS = Object.freeze(['assessment', 'trial', 'box_cam_session', 'passport_evidence']);
 
 export const DECISION_LIMITS = Object.freeze({
@@ -82,7 +68,6 @@ export const isFormal = (d) => decisionKind(d) === 'formal';
 
 // ------------------------------------------------------------------ validation
 
-/** The outcome typed by a human. A key we did not define is nothing. */
 export function validateOutcome(raw) {
   if (typeof raw !== 'string' || !has(OUTCOME_MAP, raw)) {
     return { ok: false, error: 'DECISION_OUTCOME_INVALID', message: 'The outcome must be one of progress, hold or reject.', allowed: DECISION_OUTCOMES };
@@ -90,11 +75,7 @@ export function validateOutcome(raw) {
   return { ok: true, outcome: raw };
 }
 
-/**
- * Decision reasons come from the DECISION taxonomy (opinions about a
- * player's fit), never from the lifecycle taxonomy (events that happened to a
- * case). A reject needs at least one, like an archive always has.
- */
+/** Decision reasons are opinions about fit (decision taxonomy), not case events. A reject needs at least one. */
 export function validateDecisionReasons(raw, { outcome = null } = {}) {
   if (raw === undefined || raw === null) raw = [];
   const r = validateReasonCodes(raw);
@@ -113,11 +94,7 @@ export function validateNote(raw, { field = 'note', max = DECISION_LIMITS.note }
   return { ok: true, text: text || null };
 }
 
-/**
- * The shape of an evidence reference, before it is checked against the case.
- * `{ kind, id }` only; anything else on it is dropped — a reference carries
- * no content of its own.
- */
+/** `{ kind, id }` only: a reference carries no content of its own. */
 export function validateEvidenceRefShapes(raw) {
   if (raw === undefined || raw === null) return { ok: true, refs: [] };
   if (!Array.isArray(raw)) return { ok: false, error: 'DECISION_EVIDENCE_INVALID', message: 'evidenceRefs must be a list.', field: 'evidenceRefs' };
@@ -137,17 +114,13 @@ export function validateEvidenceRefShapes(raw) {
 }
 
 /**
- * Resolve each reference against THIS case's own records.
- * A reference to another organisation's assessment, another player's trial,
- * a Box Cam session not linked on one of this case's trials, or a test-only
- * session in production is refused as `DECISION_CASE_MISMATCH` — the same
- * body whether the record exists elsewhere or not at all. The metadata kept
- * is the minimum needed to read the decision later without re-querying:
- * who assessed and when, the trial's state, the session's verification
- * state, the claim type. Never a rating, a note, a trace or a value.
+ * A reference outside this case (another org's assessment, another player's
+ * trial, a Box Cam session not linked on this case's trials, a test-only
+ * session in production) is `DECISION_CASE_MISMATCH`, with the same body
+ * whether the record exists elsewhere or not. Metadata kept is the minimum to
+ * read the decision later: never a rating, a note, a trace or a value.
  */
 export function resolveEvidenceRefs(refs, { reads = {}, kase, testProviderEnabled = false, providers = {} }) {
-  // This club's trials of this player: the only ones a ref may name.
   const caseTrials = typeof reads.trials?.forOrgPlayer === 'function' ? reads.trials.forOrgPlayer(kase.orgId, kase.playerId) : [];
   const out = [];
   for (const ref of refs) {
@@ -192,9 +165,8 @@ export function resolveEvidenceRefs(refs, { reads = {}, kase, testProviderEnable
 // ------------------------------------------------------------------ integrity
 
 /**
- * A formal row this build can read. Anything else is omitted from decision
- * lists, counted, logged — and never repaired. Recommendation rows are not
- * judged here; the rooms module owns their reading.
+ * Anything else is omitted from decision lists, counted and logged, never
+ * repaired. Recommendation rows are judged by the rooms module.
  */
 export function decisionIntegrity(d, { orgId = null, caseId = null } = {}) {
   const problems = [];
@@ -217,7 +189,7 @@ export function decisionIntegrity(d, { orgId = null, caseId = null } = {}) {
   return problems;
 }
 
-/** Among a case's rows, more than one formal row with no successor is corruption, not a tie. */
+/** More than one formal row with no successor is corruption, not a tie. */
 export function duplicateFinalHeads(rows) {
   const heads = rows.filter((d) => isFormal(d) && !d.supersededById);
   return heads.length > 1 ? heads.map((d) => d.id) : [];
@@ -225,7 +197,6 @@ export function duplicateFinalHeads(rows) {
 
 // ------------------------------------------------------------------ chain
 
-/** The chain head: the one row nothing supersedes. */
 export function chainHead(rows) {
   const heads = rows.filter((d) => d && !d.supersededById);
   if (heads.length === 0) return null;
@@ -233,20 +204,15 @@ export function chainHead(rows) {
   return heads[heads.length - 1];
 }
 
-/** Stable order for history: createdAt, then id. */
 export const byCreatedThenId = (a, b) => ((a.createdAt ?? 0) - (b.createdAt ?? 0)) || String(a.id).localeCompare(String(b.id));
 
 // ------------------------------------------------------------------ summaries
 
 /**
- * The assessment inputs a decision maker may see, summarised WITHOUT a single
- * number that stands for the player. Per assessor: their verdict,
- * how many attributes they rated, how many they marked not observed, their
- * confidence mix, how many evidence references they attached. Across
- * assessors: the verdict counts and whether they agree. Never an average.
- *
- * `visible` is the list the blind rule already lets this viewer see;
- * `withheld` is how many the rule withholds — said, not hidden.
+ * Assessments summarised without a single number standing for the player:
+ * per assessor, verdict and counts; across assessors, verdict counts and
+ * agreement. Never an average. `withheld` is how many the blind rule withholds,
+ * said rather than hidden.
  */
 export function summariseAssessments(visible, { withheld = 0 } = {}) {
   const submitted = visible.filter((a) => a && a.state !== 'draft');
@@ -284,7 +250,7 @@ export function summariseAssessments(visible, { withheld = 0 } = {}) {
   };
 }
 
-/** The immutable metadata a formal row keeps about the assessments it saw: ids and counts. */
+/** Ids and counts only. */
 export function assessmentSnapshot(summary) {
   return {
     submitted: summary.submitted,
@@ -294,11 +260,7 @@ export function assessmentSnapshot(summary) {
   };
 }
 
-/**
- * Evidence a decision maker can cite, listed as ids and neutral metadata.
- * Box Cam observations appear as a STATE — observed, no reliable
- * observation, withdrawn — never as a recommendation.
- */
+/** Box Cam observations appear as a state (observed, no reliable observation, withdrawn), never a recommendation. */
 export function evidenceCandidates({ reads = {}, kase, assessmentsVisible, trialEvidenceViews = null, providers = {}, testProviderEnabled = false }) {
   const caseTrials = typeof reads.trials?.forOrgPlayer === 'function' ? reads.trials.forOrgPlayer(kase.orgId, kase.playerId) : [];
   const trials = caseTrials
@@ -332,7 +294,7 @@ export function evidenceCandidates({ reads = {}, kase, assessmentsVisible, trial
 
 // ------------------------------------------------------------------ views
 
-/** A formal or legacy row, for the club. The note is club-private and travels only here. */
+/** The note is club-private and travels only here. */
 export function decisionView(d, { omitNote = false } = {}) {
   const formal = isFormal(d);
   return {
@@ -362,7 +324,6 @@ export function decisionView(d, { omitNote = false } = {}) {
   };
 }
 
-/** The case's draft, for the club. Labelled as what it is: not a decision. */
 export function draftView(dr) {
   if (!dr) return null;
   return {
@@ -382,7 +343,7 @@ export function draftView(dr) {
   };
 }
 
-/** The journey milestone a formal decision projects: ids, outcome, time, who. Never the note. */
+/** Never the note. */
 export function decisionMilestone(d) {
   return {
     id: d.id,
@@ -400,10 +361,7 @@ export function decisionMilestone(d) {
 
 // ------------------------------------------------------------------ readiness
 
-/**
- * Workflow completeness for a decision — what has been DONE, never whether the
- * player is good enough. Every item is a fact a person could check.
- */
+/** What has been done, never whether the player is good enough. */
 export function decisionRequirements({ role, canFinalize, status, submittedAssessments, completedTrials, blocked, subjectRemoved, draft, hasFinal, availability }) {
   return {
     canDraft: !!canFinalize && !subjectRemoved,

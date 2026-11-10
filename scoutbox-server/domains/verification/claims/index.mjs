@@ -1,9 +1,5 @@
-// Verification & Trust: claims, evidence and the review flow. Handlers register on the existing authenticated
-// routers, so every standing gate (bearer sessions, org suspension, guardian ownership, visibleToOrg, blocks,
-// moderation) runs first.
-//
-// Verification proves FACTS; authorization decides ACCESS. Nothing registered here loosens visibleToOrg, guardian
-// routing, adult-only representation, the grassroots radius, or any other standing rule.
+// Verification: claims, evidence and the review flow. Verification proves facts; authorisation decides access, and
+// nothing here loosens a standing visibility rule.
 import crypto from 'node:crypto';
 import {
   bootstrapVerification, transitionChanges, effectiveStatus,
@@ -21,7 +17,7 @@ export function registerVerificationClaims(ctx) {
   const reads = verification.reads;
   bootstrapVerification({ verification, orgs: ctx.orgs.list() });
 
-  // -------- verification metrics: counters only, never names/emails.
+  // -------- metrics: counters only, never names or e-mails.
   metrics.verification = {
     requestsCreated: 0, autoPrechecksPassed: 0, routedToHumanReview: 0,
     approvals: 0, rejections: 0, disputes: 0, expiries: 0, revocations: 0,
@@ -30,7 +26,7 @@ export function registerVerificationClaims(ctx) {
   const vmetric = (k) => { metrics.verification[k] = (metrics.verification[k] ?? 0) + 1; };
   const cut = (v, max) => (v === null || v === undefined ? null : String(v).slice(0, max));
 
-  // -------- append-only verification event log. The before/after payloads become one detail line.
+  // -------- append-only event log
   function verEvent(type, fields = {}, req = null) {
     return verification.events.append({
       id: nextId('vevt'), ts: Date.now(), type,
@@ -39,9 +35,8 @@ export function registerVerificationClaims(ctx) {
       actorName: cut(fields.actorName ?? req?.orgUser?.name ?? null, VERIFICATION_LIMITS.name),
       actorOrgId: fields.actorOrgId ?? req?.org?.id ?? null,
       requestId: cut(req?.correlationId ?? req?.headers?.['x-request-id'] ?? null, VERIFICATION_LIMITS.requestId),
-      // How the actor identity was established — 'declared_reviewer'
-      // (a named T&S reviewer declared on the request) vs 'shared_admin_key'
-      // (the shared prototype admin credential; no individual identity).
+      // 'declared_reviewer' (a named T&S reviewer declared on the request) or 'shared_admin_key' (the shared admin
+      // credential, no individual identity).
       attribution: fields.attribution ?? null,
       claimId: fields.claimId ?? null, subjectId: fields.subjectId ?? null,
       orgId: fields.orgId ?? null, detail: eventDetail(fields.before, fields.after),
@@ -49,7 +44,7 @@ export function registerVerificationClaims(ctx) {
     });
   }
 
-  // -------- claim construction. THE only creator.
+  // -------- the only claim creator
   function createClaim(fields, req = null) {
     const now = Date.now();
     return verification.atomically(() => {
@@ -80,15 +75,13 @@ export function registerVerificationClaims(ctx) {
     return null;
   }
 
-  // -------- guarded transition: one call site shape for every status change. `claim` is a claim or its id; `also`
-  // carries what the same move records besides its own effects: `set` (corrected fields: role, period, currency,
-  // authority), `metadata` (display, registry), `reviewReasons` (replaced), `addReviewReasons`, `addRiskFlags`.
-  // Returns null on success or an error code.
+  // -------- every status change. `also` carries what the same move records besides its own effects: `set`
+  // (corrected fields), `metadata`, `reviewReasons` (replaced), `addReviewReasons`, `addRiskFlags`. Returns null on
+  // success or an error code.
   function transition(claim, to, opts, req = null, also = {}) {
     const id = typeof claim === 'string' ? claim : claim.id;
     let err = null;
-    // The one-open-claim rules (one identity claim per user; one current affiliation per user, organisation and type):
-    // a claim may not return to an open or verified state while the person has opened another in the meantime.
+    // A claim may not return to an open or verified state while the person has opened another in the meantime.
     const clash = openClash(id, to);
     if (clash) return clash;
     verification.atomically(() => {
@@ -115,15 +108,14 @@ export function registerVerificationClaims(ctx) {
     return null;
   }
 
-  // -------- evidence records. Files go through the same storage
-  // engine as media but are NEVER exposed on public/static paths — retrieval
-  // is a dedicated, authorised route in review.mjs. `claimIds` link the record to those claims at once.
+  // -------- evidence records. Files share the media storage but are never on a public or static path; retrieval is
+  // an authorised route in review.mjs.
   function addEvidence(fields, req = null) {
     return verification.atomically(() => {
       const ev = verification.evidence.create({
         id: nextId('vevd'), receivedAt: Date.now(), claimIds: [], mediaId: null,
         sha256: null, mime: null, bytes: null, filename: null, meta: {},
-        checks: { malwareScan: 'not_configured' }, // no scanner exists — never pretend one ran
+        checks: { malwareScan: 'not_configured' }, // no scanner exists; never pretend one ran
         retention: 'until_claim_resolution', visibility: 'trust_and_safety',
         expiresAt: null, ...fields,
       });
@@ -139,20 +131,17 @@ export function registerVerificationClaims(ctx) {
     const problem = evidenceFileProblem({ mime, bytes: buf.length, filename: filename ?? 'evidence', buffer: buf });
     if (problem) return { error: problem };
     const id = nextId('vfil');
-    // sanitized server name = our own id; the original name is metadata only
+    // Stored under our own id; the original name is metadata only.
     ctx.storage.saveDataUrl(id, `data:${mime};base64,${buf.toString('base64')}`);
     return {
-      // The digest is of the exact bytes (not a UTF-8 decoding), so it names the file a signing document refers to.
+      // Of the exact bytes (not a UTF-8 decoding), so it names the file a signing document refers to.
       mediaId: id, sha256: crypto.createHash('sha256').update(buf).digest('hex'), mime, bytes: buf.length, filename: String(filename ?? '').slice(0, VERIFICATION_LIMITS.filename),
-      // contentSignature is format identification (magic bytes), NOT malware
-      // scanning — malwareScan stays not_configured and is never conflated.
+      // contentSignature is format identification (magic bytes), not malware scanning.
       checks: { malwareScan: 'not_configured', contentSignature: 'matched_claimed_type' },
     };
   }
 
-  // -------- verification-permission guard. Server-enforced; a disabled
-  // button is never the control. Root-level operations additionally require
-  // an MFA-enabled account.
+  // -------- permission guard. Root operations also need an MFA-enabled account.
   function requireVer(req, res, atLeast, { root = false } = {}) {
     if (!hasVerLevel(reads, req.org.id, req.orgUser.id, atLeast)) {
       res.status(403).json({ error: 'VERIFICATION_PERMISSION_REQUIRED', message: `This needs ${atLeast.replace(/_/g, ' ')} authority for your organisation.` });
@@ -165,14 +154,10 @@ export function registerVerificationClaims(ctx) {
     return true;
   }
 
-  /** The organisations a list of claims names, by id (one lookup each, through the index). */
   const orgsFor = (claims) => new Map([...new Set(claims.map((c) => c.organisationId).filter(Boolean))].map((id) => [id, byId.org(id)]).filter(([, o]) => o));
 
   function publicProfileForUser(userId, now = Date.now()) {
-    // Removed/deactivated accounts lose CURRENT public verification at once:
-    // the removed state feeds the read-time engine on every projection — no
-    // cached boolean can bypass it. Closed historical periods stay visible
-    // as history (truth is not erased).
+    // A removed account loses current public verification at once; closed historical periods stay visible.
     const user = byId.user(userId);
     const claims = reads.claims.forSubject('user', userId);
     return toPublicVerificationProfile({

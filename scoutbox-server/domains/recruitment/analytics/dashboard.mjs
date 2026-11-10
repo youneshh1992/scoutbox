@@ -1,22 +1,10 @@
 /**
- * Recruitment analytics: the reporting context and the dashboard assembly.
+ * Recruitment analytics: the reporting context and the dashboard.
  *
- * Two things happen here and nothing else.
- *
- * **One pass, then many metrics.** Twenty metrics computed independently would
- * be twenty reads of every recruitment collection. So each collection is read
- * for this organisation exactly once, projected to the few fields the metrics
- * declared, indexed, and then every family reads from that.
- *
- * **Each family fails alone.** A dashboard that drops a panel when one
- * projection throws is lying about coverage — the director reads five panels
- * and believes they are looking at the whole picture. Every family is computed
- * inside its own boundary; a family that throws yields an error in its own
- * slot and the rest of the page renders, with the failure named on screen.
- *
- * The context carries no note, no comment, no assessment text and no actor
- * identity. `subjectOf` is the only place a player's name can enter a payload,
- * and it asks `orgCanSee` first, every time.
+ * Each collection is read once per organisation, projected to the fields the metrics declared, and shared by
+ * every family. Each family is computed inside its own boundary, so one that throws shows a named failure in
+ * its slot instead of a silently shorter page. `subjectOf` is the only place a player's name can enter a
+ * payload, and it asks `orgCanSee` every time.
  */
 import {
   RECRUITMENT_ANALYTICS_POLICY_VERSION, METRIC_FAMILIES, FAMILY_IDS, SMALL_N_MIN,
@@ -41,12 +29,8 @@ export { ROOM_PRIORITIES };
 // ------------------------------------------------------------ the context
 
 /**
- * Project one Room to the fields the metric registry declared, and no others.
- *
- * `history` is kept because every analytics duration is derived from it, but the
- * projection strips `byId` and `byName` off every entry: the analytics layer
- * must not be able to attribute a status change to a person even by accident,
- * because that is the raw material of a leaderboard.
+ * `history` entries lose `byId` and `byName`, so analytics cannot attribute a status change to a person even
+ * by accident: that is the raw material of a leaderboard.
  */
 function projectRoom(c) {
   const room = {
@@ -66,10 +50,7 @@ function projectRoom(c) {
   return room;
 }
 
-/**
- * The decision fields analytics may read. `note` and `by` are not among them;
- * kind, state and the outcome WORD are, for decision_outcomes.
- */
+/** Never `note` or `by`. */
 const formalFields = (d) => ({
   kind: d.kind === 'formal' ? 'formal' : 'recommendation',
   state: d.state === 'draft' ? 'draft' : 'final',
@@ -124,8 +105,7 @@ export function buildReportingContext({
     decisionsByRoom.get(d.roomId).push(d);
   }
 
-  // The briefs, reviews, Second Look items, watchlists and their transitions come from `reads.discovery`; a context
-  // built without it (a unit fixture) has none.
+  // A context built without `reads.discovery` (a unit fixture) has no briefs, reviews or watchlists.
   const discovery = reads.discovery ?? null;
   let briefs = [...(discovery?.briefs.forOrg(orgId) ?? [])];
   if (filters.briefId) {
@@ -167,24 +147,16 @@ export function buildReportingContext({
     decisionsByRoom,
     briefs,
     nmReviews: (discovery?.reviews.forOrg(orgId) ?? []).filter((r) => briefIds.has(r.briefId)),
-    // A room filter narrows Second Look too — an item is about a room, and
-    // showing whole-club Second Look figures under a "source: matching" label
-    // would answer a question the director did not ask.
+    // A room filter narrows Second Look too, or whole-club figures would sit under a "source: matching" label.
     secondLook: (discovery?.secondLook.forOrg(orgId) ?? []).filter((i) => !roomFiltered || keptRoomIds.has(i.roomId)),
     watchlists: discovery?.watchlists.forOrg(orgId) ?? [],
     watchlistHistory: discovery?.events.forOrg(orgId) ?? [],
     trials: reads.trials?.forOrg(orgId) ?? [],
-    // The canonical records the journey funnel counts. Org-scoped and
-    // room-filtered like decisions; ids, states and instants only reach the
-    // projection (the metric's `reads` declaration is asserted at boot).
-    // A context built without `reads` (a unit fixture) has none.
     contacts: (reads.contacts?.forOrg(orgId) ?? []).filter((c) => keptRoomIds.has(c.caseId)),
     assessments: reads.assessments?.forOrg(orgId) ?? [],
     offers: (reads.offers?.forOrg(orgId) ?? []).filter((o) => keptRoomIds.has(o.caseId)),
     packages: (reads.signingPackages?.forOrg(orgId) ?? []).filter((p) => keptRoomIds.has(p.caseId)),
     signings: reads.signings?.forOrg(orgId) ?? [],
-    // Trial invitations (requests of type trial tied to a case) for
-    // the process counts. Ids, states and times only reach the projection.
     requests: (reads.requests?.forOrg(orgId) ?? []).filter((r) => r.type === 'trial'),
     typicalDaysToTerminal,
     subjectOf,
@@ -194,10 +166,8 @@ export function buildReportingContext({
 // ------------------------------------------------------------- the families
 
 /**
- * Which filters each family can honestly honour. A filter that cannot apply is
- * NOT silently ignored: the family reports that it was not applied, so a
- * director who filtered to one brief is never shown a whole-club number under
- * that filter's label.
+ * Which filters each family can honour. One that cannot apply is reported as not applied, so a director who
+ * filtered to one brief never sees a whole-club number under that label.
  */
 const FAMILY_FILTERS = {
   pipeline: ['sourceContext', 'priority'],
@@ -258,15 +228,8 @@ const FAMILY_BUILDERS = {
 };
 
 /**
- * Period-over-period, on the three headline PERIOD-ACTIVITY counts.
- *
- * Deliberately only those three, and deliberately only counts. A trend on a
- * point-in-time figure ("active rooms, up 12%") is meaningless — the window
- * does not apply to it — and a trend on a rate compounds two small samples
- * into one confident-looking number.
- *
- * The previous window is the same LENGTH, immediately before: comparing seven
- * days against thirty would make every figure look like a collapse.
+ * Period-over-period on three period-activity counts only. A trend on a point-in-time figure is meaningless
+ * (the window does not apply), and one on a rate compounds two small samples.
  */
 function buildTrend(ctx) {
   const prev = previousWindow(ctx.window);
@@ -298,14 +261,7 @@ function buildTrend(ctx) {
   };
 }
 
-/**
- * Build the dashboard. Every family is computed inside its own boundary: one
- * family throwing leaves the others intact and produces a named failure rather
- * than a silently shorter page.
- *
- * `fault` is the audit log's fault-injection hook, so the partial-failure path is
- * exercised by a test rather than asserted in prose.
- */
+/** `fault` is the fault-injection hook, so the partial-failure path is exercised by a test. */
 export function buildDashboard(ctx, { families = FAMILY_IDS, stallDays = DEFAULT_STALL_DAYS, fault = null } = {}) {
   const wanted = families.filter((f) => FAMILY_IDS.includes(f));
   const out = {};
@@ -328,8 +284,7 @@ export function buildDashboard(ctx, { families = FAMILY_IDS, stallDays = DEFAULT
         family,
         label: METRIC_FAMILIES.find((f) => f.id === family)?.label ?? family,
         error: 'FAMILY_UNAVAILABLE',
-        // The message, not the stack: an operator needs the reason, a
-        // recruitment director must not be shown a trace.
+        // The message, not the stack.
         detail: String(err?.message ?? err).slice(0, 200),
       };
     }
@@ -340,9 +295,7 @@ export function buildDashboard(ctx, { families = FAMILY_IDS, stallDays = DEFAULT
     window: ctx.window,
     filters: ctx.filters,
     smallNMinimum: SMALL_N_MIN,
-    // Read-time projection: this figure was true when the request was served
-    // and is not refreshed behind the reader. The client renders it as
-    // "calculated at ..." rather than implying a live stream.
+    // Computed when the request was served, not refreshed; the client says "calculated at …".
     calculatedAt: ctx.now,
     liveStream: false,
     trend: buildTrend(ctx),
@@ -351,8 +304,7 @@ export function buildDashboard(ctx, { families = FAMILY_IDS, stallDays = DEFAULT
     families: wanted,
     partial: failed.length > 0,
     unavailable: failed,
-    // The sentence the whole analytics page is built around. It is on the wire, not
-    // only in the client, so an integrator cannot strip it by accident.
+    // On the wire, not only in the client, so an integrator cannot drop it by accident.
     note: 'These figures measure your recruitment process — how work moves, how long it takes and what is waiting. They do not measure any player’s ability or potential, and they do not measure any colleague’s performance.',
     data: out,
   };

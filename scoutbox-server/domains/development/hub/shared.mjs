@@ -1,45 +1,23 @@
 /**
- * Development Hub: the vocabulary, the limits, and the rules that are
- * pure functions of a record.
- *
- * Everything in this file is data or a pure function. No route, no store, no
- * clock beyond the one it is handed. That matters because the hub rests on a
- * small number of decisions that must be readable in one place and
- * asserted at boot rather than discovered in production:
- *
- *   • what a Plan, a Goal and an Action may be — status by status
- *   • which transitions are possible, so "invalid transition" is a refusal
- *     with a reason rather than a silently accepted write
- *   • what the hub will never build
- *
- * The last one is the point. ScoutBox documents and
- * coordinates development; it does not claim to measure a player's worth,
- * ceiling or future. There is no Development Score here and no place to put
- * one: `assertDevelopmentVocabulary()` runs at boot and refuses to start a
- * development server whose own vocabulary has drifted towards a rating.
+ * Development Hub vocabulary, limits and pure rules. ScoutBox documents and
+ * coordinates development; it does not rate a player, and
+ * `assertDevelopmentVocabulary()` refuses to boot if the vocabulary drifts
+ * towards a rating.
  */
 
 import { parseDateOrInstant } from '../../../temporal.mjs';
 
 export const DEVELOPMENT_POLICY_VERSION = 1;
 
-/**
- * The central rule, carried on the wire so a client renders the server's
- * sentence rather than its own paraphrase of it.
- */
+/** Sent on the wire so clients render the server's sentence, not a paraphrase. */
 export const DEVELOPMENT_PRINCIPLE =
   'Document and coordinate development. ScoutBox does not measure a player’s worth, ceiling or future.';
 
 // ---------------------------------------------------------------- never built
 
 /**
- * Names the hub refuses. Not a lint list — `assertDevelopmentVocabulary()` scans
- * every label this module exports against it at boot, and the routes refuse a
- * client-supplied field whose name matches one.
- *
- * They are refused for one reason each, and the reason is the same reason:
- * a single blended figure invites a decision about a person that the figure
- * cannot support. "82" answers a question nobody can ask honestly.
+ * Names the hub refuses: a single blended figure invites a decision about a
+ * person that the figure cannot support. Scanned against exported labels at boot.
  */
 export const FORBIDDEN_DEVELOPMENT_NAMES = Object.freeze([
   'Development Score', 'Potential Score', 'Improvement Score',
@@ -49,12 +27,8 @@ export const FORBIDDEN_DEVELOPMENT_NAMES = Object.freeze([
 ]);
 
 /**
- * The same refusal in identifier form. Kept separate from the names above for
- * a reason that is easy to get wrong: the copy scan looks for the NAMES in
- * prose, and prose is allowed — required, in fact — to say the word while
- * denying it. "ScoutBox does not measure a player's ceiling" must not fail a
- * check for the field `ceiling`. Names are scanned in copy; identifiers are
- * checked against payload keys.
+ * The same refusal as payload keys. Kept apart from the names because copy may
+ * say a word while denying it ("does not measure a player's ceiling").
  */
 export const FORBIDDEN_FIELD_NAMES = Object.freeze([
   'developmentScore', 'development_score',
@@ -79,48 +53,27 @@ export const REFUSED_CLIENT_FIELDS = Object.freeze([
 
 // -------------------------------------------------------------- plan vocabulary
 
-/**
- * Who owns a Plan. Exactly two, and ownership is fixed for the life of the
- * record: a player's own plan is never "handed to" a club, and a club's plan
- * is never adopted by the player. A club that wants its own plan creates one;
- * a player who wants a club to see theirs shares it.
- */
+/** Ownership is fixed for the life of a plan; it is never transferred. */
 export const PLAN_OWNER_KINDS = Object.freeze(['player', 'org']);
 
 /**
- * Visibility is stated at creation and never derived from who created the
- * record. The two look identical for a coach-created plan and mean
- * opposite things:
- *
+ * Stated at creation, never derived from who created the record.
  *   org_private       the club's own working plan; the player does not see it
  *   shared_with_org   the player's plan, which a named club may read
  */
 export const PLAN_VISIBILITY = Object.freeze(['private', 'player_guardian', 'shared_with_org', 'org_private']);
 
 /**
- * Which visibilities each owner kind may choose. Fail closed on anything else.
- *
- * The two axes are different and the vocabulary reflects it: a player's plan
- * can reach outward to named organisations (`shared_with_org`); a club's plan
- * can reach inward to the player (`player_guardian`). A club cannot make its
- * own plan visible to a second club, and a player cannot mark a plan
- * `org_private` — those combinations have no meaning and are refused rather
- * than accepted and then ignored.
- *
- * `private` on a MINOR's plan still means the guardian can see it. A guardian
- * manages a minor's account; a plan the guardian could not read would be a
- * safeguarding gap dressed up as privacy.
+ * A player's plan reaches outward to named clubs; a club's plan reaches inward
+ * to the player. `private` on a minor's plan still lets the guardian read it:
+ * hiding it from them would be a safeguarding gap.
  */
 export const VISIBILITY_BY_OWNER = Object.freeze({
   player: Object.freeze(['private', 'player_guardian', 'shared_with_org']),
   org: Object.freeze(['org_private', 'player_guardian']),
 });
 
-/**
- * Plan status. Deliberately unlike the rooms' `ROOM_STATUSES`, which does
- * contain `closed`: a Room closes, a plan does not, and the ambiguity is
- * removed rather than copied.
- */
+/** Unlike `ROOM_STATUSES` there is no `closed`: a Room closes, a plan does not. */
 export const PLAN_STATUSES = Object.freeze(['draft', 'active', 'paused', 'completed', 'archived']);
 export const PLAN_TERMINAL = Object.freeze(['archived']);
 
@@ -135,12 +88,8 @@ export const PLAN_TRANSITIONS = Object.freeze({
 // -------------------------------------------------------------- goal vocabulary
 
 /**
- * Goal categories.
- *
- * `availability / rehabilitation` is DELIBERATELY ABSENT: there is no medical
- * vocabulary, no consent model for health data and no retention rule for it
- * anywhere in ScoutBox. Adding the category would create a place for a coach
- * to type a diagnosis into a record built for football coaching.
+ * No availability/rehabilitation category: ScoutBox has no consent or retention
+ * model for health data, so there must be no place to type a diagnosis.
  */
 export const GOAL_CATEGORIES = Object.freeze([
   'technical', 'tactical', 'physical', 'psychological',
@@ -160,10 +109,9 @@ export const GOAL_CATEGORY_LABELS = Object.freeze({
 export const GOAL_STATUSES = Object.freeze(['not_started', 'in_progress', 'blocked', 'achieved', 'stopped']);
 
 /**
- * A goal that nobody started cannot have been achieved through this plan —
- * so `not_started → achieved` is refused, and the reviewer moves it through
- * `in_progress` first. `achieved` and `stopped` are reversible on purpose: a
- * reviewer who marked the wrong goal corrects it, and the history keeps both.
+ * `not_started → achieved` is refused: a goal nobody started was not achieved
+ * through this plan. `achieved` and `stopped` are reversible so a reviewer can
+ * correct a mistake; the history keeps both.
  */
 export const GOAL_TRANSITIONS = Object.freeze({
   not_started: Object.freeze(['in_progress', 'blocked', 'stopped']),
@@ -173,22 +121,12 @@ export const GOAL_TRANSITIONS = Object.freeze({
   stopped: Object.freeze(['in_progress', 'not_started']),
 });
 
-/**
- * Structured reasons a goal is blocked.
- *
- * `injury_or_unavailable` is ABSENT for the same reason the availability
- * category is: there is no safe vocabulary for it. A blocked goal can say
- * `other` with the author's own words, which keeps health information out of
- * a structured, filterable field.
- */
+/** No injury reason, for the same health-data reason as the categories. */
 export const BLOCK_REASONS = Object.freeze([
   'waiting_for_assessment', 'schedule', 'facility', 'coach_review', 'other',
 ]);
 
-/**
- * The sentence that travels with every achieved goal, in the payload, so no
- * surface can render the word without it.
- */
+/** Sent with every achieved goal so no surface renders the word without it. */
 export const ACHIEVED_MEANING =
   'Achieved means the plan owner or reviewer marked this agreed objective complete. It is not a ScoutBox finding that the player permanently possesses this ability.';
 
@@ -209,16 +147,12 @@ export const ACTION_TRANSITIONS = Object.freeze({
   cancelled: Object.freeze([]),
 });
 
-/** Who an action may be assigned to. Never a person in another organisation. */
+/** An `org_user` assignee must belong to the plan's organisation. */
 export const ASSIGNEE_KINDS = Object.freeze(['player', 'guardian', 'org_user']);
 
 // ---------------------------------------------------------- evidence vocabulary
 
-/**
- * Canonical stores a development link may point at. Every one of these
- * is READ; none is written by the hub, and the link record carries no content
- * from any of them — only `{sourceType, sourceId}`.
- */
+/** A link stores only `{sourceType, sourceId}`, never content from the source. */
 export const EVIDENCE_SOURCES = Object.freeze([
   'passport_evidence', 'assessment', 'box_cam_session', 'combine_attempt', 'trial_report',
 ]);
@@ -252,11 +186,7 @@ export const SHARE_SCOPES = Object.freeze(['summary', 'goals', 'actions']);
 
 // ----------------------------------------------------------------------- limits
 
-/**
- * Bounds, in one table. These bound abuse, not ambition: a plan with
- * twenty goals is already a plan nobody will work through, and the refusal
- * says so rather than truncating silently.
- */
+/** These bound abuse; over a limit is refused, never truncated. */
 export const DEVELOPMENT_HUB_LIMITS = Object.freeze({
   activePlansPerOwner: 5,
   goalsPerPlan: 20,
@@ -274,12 +204,7 @@ export const DEVELOPMENT_HUB_LIMITS = Object.freeze({
 
 // ------------------------------------------------------------- the goal library
 
-/**
- * A small, fixed list of common development themes. It is identical for
- * every player and every position, it is offered as text to paste into a title,
- * and it is not a recommendation. Nothing here reads the player, so nothing
- * here can be mistaken for a personalised suggestion.
- */
+/** The same for every player, so it cannot read as a personalised suggestion. */
 export const GOAL_LIBRARY = Object.freeze([
   { id: 'first_touch', category: 'technical', title: 'First touch under pressure' },
   { id: 'scanning', category: 'match_understanding', title: 'Scanning before receiving possession' },
@@ -293,10 +218,7 @@ export const GOAL_LIBRARY = Object.freeze([
 export const GOAL_LIBRARY_NOTE =
   'Common development themes. The same list is shown to everyone — it is not a recommendation and it does not read this player’s record.';
 
-/**
- * Plan templates: structure only. A template contains headings, not
- * advice, and makes no claim about what suits a position or a player.
- */
+/** Structure only: headings, not advice. */
 export const PLAN_TEMPLATES = Object.freeze([
   {
     id: 'technical_development', title: 'Technical Development',
@@ -317,7 +239,6 @@ export const TEMPLATE_NOTE =
 
 // ------------------------------------------------------------------ pure helpers
 
-/** UTC calendar day — the brief date semantics, reused, not re-derived. */
 export const utcDay = (ms) => {
   const d = new Date(ms);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
@@ -327,12 +248,8 @@ export const utcDay = (ms) => {
 export const daysBetween = (a, b) => Math.round((utcDay(b) - utcDay(a)) / 86_400_000);
 
 /**
- * Due state for a dated thing. Derived at READ time, every time.
- *
- * There is no scheduler in this build. Nothing wakes up at midnight
- * to mark an action overdue, and nothing will send a reminder to a player who
- * does not open the app. This function is the entire mechanism, and the copy
- * that renders it says so rather than implying a background service.
+ * Derived at read time. There is no scheduler and no reminders; the copy that
+ * renders this must not imply a background service.
  */
 export function dueState(dueAt, now) {
   if (dueAt == null) return { state: 'no_due_date', days: null };
@@ -343,7 +260,6 @@ export function dueState(dueAt, now) {
   return { state: 'upcoming', days };
 }
 
-/** Review due state from `nextReviewAt`. Same read-time honesty. */
 export function reviewDueState(nextReviewAt, now) {
   const d = dueState(nextReviewAt, now);
   if (d.state === 'no_due_date') return { state: 'no_review_scheduled', days: null };
@@ -352,7 +268,7 @@ export function reviewDueState(nextReviewAt, now) {
   return { state: 'review_upcoming', days: d.days };
 }
 
-/** Bounded, trimmed text. Returns null for empty; never truncates silently; refuses anything that is not text. */
+/** Trimmed text; null for empty; over-long text is refused, not truncated. */
 export function boundedText(raw, max, { field }) {
   if (raw == null || raw === '') return { value: null };
   if (typeof raw !== 'string') return { error: 'FIELD_INVALID', field, detail: `${field} is text.` };
@@ -365,11 +281,9 @@ export function boundedText(raw, max, { field }) {
 }
 
 /**
- * A date the caller supplied, as an instant. Rejects nonsense rather than
- * repairing it. Accepted: a calendar day (`YYYY-MM-DD`, read as the start of
- * that UTC day), an ISO 8601 date-time WITH an offset or Z, or an integer
- * timestamp. A bare local time and an ambiguous `02/03/2026` are refused:
- * they would be read in the server's zone and the engine's locale.
+ * Accepts `YYYY-MM-DD` (start of that UTC day), ISO 8601 with an offset or Z,
+ * or an integer timestamp. Bare local times and `02/03/2026` are refused: they
+ * would be read in the server's zone and locale.
  */
 export function parseDate(raw, { field }) {
   if (raw == null || raw === '') return { value: null };
@@ -380,17 +294,12 @@ export function parseDate(raw, { field }) {
   return { value: p.ms };
 }
 
-/** One transition check for all three record kinds. */
 export function transitionAllowed(table, from, to) {
   if (from === to) return true;
   return (table[from] ?? []).includes(to);
 }
 
-/**
- * Action counts, as counts. The shape deliberately has no ratio field:
- * a client renders "3 of 5 actions completed", and there is no number here
- * that reads as a percentage of a player.
- */
+/** Counts only, no ratio: nothing here should read as a percentage of a player. */
 export function actionCounts(actions) {
   const counts = { total: 0, todo: 0, in_progress: 0, done: 0, blocked: 0, cancelled: 0, overdue: 0 };
   for (const a of actions) {
@@ -400,10 +309,7 @@ export function actionCounts(actions) {
   return counts;
 }
 
-/**
- * The completion sentence. Cancelled actions leave the denominator, because
- * "3 of 5" where two were called off is a worse answer than "3 of 3".
- */
+/** Cancelled actions leave the denominator. */
 export function completionPhrase(counts) {
   const total = counts.total - counts.cancelled;
   return { done: counts.done, of: total, phrase: `${counts.done} of ${total} actions completed` };
@@ -411,31 +317,7 @@ export function completionPhrase(counts) {
 
 // ------------------------------------------------------------- boot assertion
 
-/**
- * Refuse to boot a development server whose own vocabulary has drifted.
- *
- * The same pattern as `assertMetricRegistry`, applied to the risk the hub
- * actually carries. It checks three things:
- *
- *   1. no label, category, status or template title contains a forbidden name;
- *   2. every status in every vocabulary appears in its transition table, and
- *      every transition target is itself a known status — an unreachable or
- *      undefined state is a bug that surfaces as a mystifying 400 months later;
- *   3. the visibility map only names known visibilities.
- *
- * Development and test throw. Production returns the problems, because a
- * running recruitment platform that refuses to start is its own outage.
- */
-/**
- * Scan `[where, text]` pairs for a forbidden product name.
- *
- * A separate exported function rather than a closure inside the assertion,
- * because the vocabulary tables are frozen — which is the right thing for them
- * to be, and which makes "prove the assertion actually bites" impossible to
- * test by mutating them. The scanner is the biting mechanism, so the suite
- * tests it directly with a poisoned pair and separately asserts the real
- * tables pass.
- */
+/** Exported so tests can feed it a poisoned pair: the real tables are frozen. */
 export function scanCopyForForbiddenNames(pairs) {
   const problems = [];
   const forbidden = FORBIDDEN_DEVELOPMENT_NAMES.map((n) => n.toLowerCase());
@@ -446,6 +328,11 @@ export function scanCopyForForbiddenNames(pairs) {
   return problems;
 }
 
+/**
+ * Checks for forbidden names in copy, transition tables that name unknown
+ * statuses, and unknown visibilities. Throws outside production; production
+ * returns the problems because refusing to start is its own outage.
+ */
 export function assertDevelopmentVocabulary({ mode = process.env.NODE_ENV ?? 'development' } = {}) {
   const problems = scanCopyForForbiddenNames([
     ...Object.entries(GOAL_CATEGORY_LABELS).map(([k, v]) => [`GOAL_CATEGORY_LABELS.${k}`, v]),
@@ -499,10 +386,9 @@ export function assertDevelopmentVocabulary({ mode = process.env.NODE_ENV ?? 'de
 }
 
 /**
- * Refuse a client body that tries to send something the server derives.
- * Returns the offending keys; the caller answers 400 rather than stripping
- * them, because a client that sent `targetMet` believes it is authoritative
- * and needs to be told it is not.
+ * Keys a client may not send because the server derives them. The caller
+ * answers 400 rather than stripping them, so the client learns it is not
+ * authoritative.
  */
 export function refusedClientFields(body) {
   if (!body || typeof body !== 'object') return [];
@@ -510,12 +396,7 @@ export function refusedClientFields(body) {
   return Object.keys(body).filter((k) => lower.has(k.toLowerCase()));
 }
 
-/**
- * Walk a response payload and report any key that names something the hub refuses
- * to compute. Used by the acceptance suite against real responses, so "there
- * is no Development Score" is verified on the wire rather than asserted in a
- * document. Arrays and nested objects are walked; values are never inspected.
- */
+/** Used by tests on real responses. Walks keys only, never values. */
 export function scanPayloadForForbiddenFields(value, path = '$', found = []) {
   if (Array.isArray(value)) {
     value.forEach((v, i) => scanPayloadForForbiddenFields(v, `${path}[${i}]`, found));

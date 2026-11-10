@@ -1,25 +1,10 @@
-// At-Home Combine: standardized, measurable tests recorded live with
-// Box Cam. This module is a MEASUREMENT LAYER over Box Cam, not a second camera
-// stack: every Combine Attempt binds a server-minted Box Cam session
-// (ctx.boxMintSession) and is completed through the shared Box Cam completion
-// path (ctx.boxCompleteSession), inheriting all Box Cam integrity. The
-// Combine measurement is derived — server-side, from the session's own
-// server-derived values — in the onSessionFinalized hook. Clients never
-// supply a measured value, a Combine state or a provenance.
+// Combine is a measurement layer over Box Cam: every attempt binds a server-minted Box Cam session and completes
+// through the shared Box Cam path. The measurement is derived server-side in the onSessionFinalized hook; clients
+// never supply a value, a state or a provenance.
 //
-// The one honesty gate that everything rests on: a protocol's metric can only
-// be Combine Verified if the ACTIVE observation provider genuinely supports
-// every capability the protocol requires. Production web capture supports
-// active_duration only, so only Box Control 60 is Combine Verified in
-// production today; count/interval protocols report "measurement not yet
-// supported on this device" and are exercised in the demo/test provider,
-// always labelled simulated. Future athletic protocols need capabilities no
-// provider has — not even the test one — so their sprint/jump/distance
-// numbers are never fabricated anywhere.
-//
-// Requests and attempts are rows of repositories/boxCam.mjs, written by explicit operations (an attempt with its
-// minted session in one unit of work; the measurement inside the session's completion unit), read through
-// `boxCamReads`.
+// A protocol can only be Combine Verified if the active provider supports every capability it requires. Web capture
+// supports active_duration only, so only Box Control 60 is Combine Verified today; count/interval protocols run under
+// the test provider, labelled simulated. Athletic protocols need capabilities no provider has.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { ageOrNull, endOfDayExclusive, parseStrictDateOnly, isAbsent } from '../../../temporal.mjs';
 import { latestDrill, PROVIDERS, providerFor } from './drills.mjs';
@@ -47,31 +32,15 @@ export function registerCombine(ctx) {
 
   const orgCanSee = (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id);
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
-  // THE age rule: a missing dob is a null age, by rule.
+  // A missing dob is a null age.
   const ageOf = (p) => ageOrNull(p?.dob, Date.now());
   const prodProvider = PROVIDERS[PROD_PROVIDER_ID];
 
   // ------------------------------------------------------ the Combine gate
-  //
-  // THE distinction the gate turns on. A provider's `capabilities` list is what it
-  // can OBSERVE. That is the right input for Box Cam, and the wrong input for
-  // Combine, because a Combine measurement is a standardised, comparable
-  // NUMBER and comparability is a claim about the real world.
-  //
-  // `production_cv` genuinely observes touches, so handing its observation
-  // list to `measurementSupported()` would mint Combine Verified off synthetic
-  // evidence alone. Instead its Combine list is derived per protocol from the
-  // versioned real-world validation record, and is currently empty for every
-  // protocol. No argument to this function can change that — see
-  // cv/eligibility.mjs.
-  //
-  // Other providers are unaffected: `web_client` is honestly limited and
-  // `local_test` is test-only and already cannot reach production.
-  // NOTE ON THE CONSTANT ABOVE. `PROD_PROVIDER_ID` is 'web_client' ("the best
-  // honest provider available here"); it does NOT mean production_cv.
-  // Comparing against it would hand production_cv its OBSERVATION list and
-  // open the gate completely, so the comparison is against the literal CV
-  // provider id.
+  // A provider's `capabilities` list is what it can observe. A Combine measurement is a comparable number, which is a
+  // claim about the real world, so production_cv's Combine list comes per protocol from the real-world validation
+  // record instead (cv/eligibility.mjs), currently empty. `PROD_PROVIDER_ID` is 'web_client', not production_cv:
+  // comparing against it would hand production_cv its observation list and open the gate.
   const combineCapsFor = (providerId, protocolId) => {
     const prov = PROVIDERS[providerId];
     if (!prov) return [];
@@ -79,8 +48,6 @@ export function registerCombine(ctx) {
     return combineCapabilities(protocolId, { providerCapabilities: prov.capabilities ?? [] });
   };
 
-  // Rate limits: attempt creation and request creation. The shared limiter and
-  // its named policy (see domains/platform/rateLimit.mjs).
   const limited = limitCheck(ctx.rateLimit);
 
   // ------------------------------------------------------------- views
@@ -89,18 +56,12 @@ export function registerCombine(ctx) {
     description: p.description, metricType: p.metricType, metricUnit: p.metricUnit,
     direction: p.direction, precision: p.precision, protocolWindowMs: p.protocolWindowMs,
     requiredCapabilities: p.requiredCapabilities,
-    // Honest, device-aware MEASUREMENT capability across the providers a
-    // player can actually use, with production_cv gated by real-world
-    // validation (its Combine list, never its observation list). Currently
-    // this is web_client's honest list plus an empty CV list, so ball
-    // protocols stay not_configured — which is the truth about MEASUREMENT.
-    // The test/demo provider can simulate the rest.
+    // production_cv contributes its Combine list, not its observation list, so ball protocols stay not_configured.
     measurementCapability: measurementCapability(p, [
       ...combineCapsFor(PROD_PROVIDER_ID, p.id),
       ...combineCapsFor(CV_PROVIDER_ID, p.id),
     ]),
-    // OBSERVATION capability, reported separately and never collapsed into the
-    // line above: the CV engine can genuinely see these activities.
+    // Reported separately from measurement: the CV engine can see these activities.
     observationCapability: measurementCapability(p, PROVIDERS[CV_PROVIDER_ID]?.capabilities ?? []),
     demoSupported: testProviderEnabled && measurementSupported(p, PROVIDERS.local_test.capabilities),
     setupRequirements: p.setupRequirements, cameraRequirements: p.cameraRequirements,
@@ -115,12 +76,8 @@ export function registerCombine(ctx) {
 
   function boundSession(a) { return reads.sessions.byId(a.boxSessionId); }
 
-  // Effective (live) Combine state: a Combine Verified result whose bound Box
-  // Cam session is later invalidated by Trust & Safety immediately stops
-  // counting; a restore brings it back. Computed at read time so invalidation
-  // is reflected everywhere without rewriting the stored attempt.
-  // The rule itself lives in combineShared.mjs as `liveCombineState` so the
-  // objective targets ask the same question and cannot get a different answer.
+  // Computed at read time: invalidating the bound session stops a Combine Verified result counting, and a restore
+  // brings it back, without rewriting the attempt.
   const effectiveState = (a) => liveCombineState(a, boundSession(a));
 
   function verificationChecklist(a, proto) {
@@ -164,7 +121,6 @@ export function registerCombine(ctx) {
   };
   ctx.combineAttemptView = attemptView;
 
-  /** The player's attempts, newest created first. */
   const playerAttempts = (playerId) => reads.attempts.forPlayer(playerId);
   /** Verified attempts with their live state: the bound sessions read in one batch. */
   const verifiedAttempts = (playerId) => {
@@ -188,8 +144,7 @@ export function registerCombine(ctx) {
   }
 
   // ---------------------------------------------------- projection (passport/club)
-  // A recruitment-safe projection of a player's verified Combine results. Never
-  // exposes raw video, DOB, private notes or integrity internals.
+  // Recruitment-safe: no raw video, DOB, private notes or integrity internals.
   function combineProjection(playerId) {
     const bests = bestsFor(playerId);
     const results = [...bests.values()].filter(Boolean).map((a) => {
@@ -209,8 +164,7 @@ export function registerCombine(ctx) {
     };
   }
   ctx.combineProjection = combineProjection;
-  // Safe facts for other surfaces (Rooms, Watchlists) — factual
-  // measurements only, never an athletic/talent score.
+  // Factual measurements for Rooms and Watchlists, never an athletic or talent score.
   ctx.combineFacts = (playerId) => {
     const proj = combineProjection(playerId);
     const map = {};
@@ -218,9 +172,7 @@ export function registerCombine(ctx) {
     return { hasCombineVerifiedResults: proj.hasCombineVerifiedResults, combineProtocolResults: map };
   };
 
-  // The same standardized registry, readable by a club so a Club Combine (and
-  // a Recruitment Room) SELECTS from it rather than hard-coding protocol ids.
-  // Read-only definitions: no player data of any kind.
+  // Clubs and Recruitment Rooms select protocols from the registry rather than hard-coding ids.
   orgRouter.get('/combine/protocols', (_req, res) => {
     res.json({
       protocols: COMBINE_PROTOCOLS.map(protocolPublic),
@@ -298,12 +250,7 @@ export function registerCombine(ctx) {
     if (!provider) return res.status(403).json({ error: 'PROVIDER_UNAVAILABLE' });
     if (provider.status === 'not_configured') return res.status(503).json({ error: 'PROVIDER_NOT_CONFIGURED', message: 'No production computer-vision provider is configured. This is stated honestly rather than simulated.' });
 
-    // THE honesty gate. If the active provider cannot genuinely measure this
-    // protocol's metric, there is no verified (or practice) measurement to be
-    // had — we say so rather than estimate. (Under the gated test provider,
-    // the count/duration/interval library is supported; future athletic
-    // protocols need capabilities no provider has, so they stay unsupported
-    // everywhere.)
+    // If the provider cannot measure this protocol's metric there is no verified or practice attempt.
     const combineCaps = combineCapsFor(provider.id, proto.id);
     if (!measurementSupported(proto, combineCaps)) {
       vmetric('combine_measurement_provider_error');
@@ -313,17 +260,14 @@ export function registerCombine(ctx) {
         message: observationOnly
           ? 'Box Cam can observe this activity, but Combine verification is not available yet for this protocol. Real-world validation has not been completed.'
           : 'This Combine measurement is not yet supported on this device. ScoutBox does not estimate or fabricate a result.',
-        // Distinguishes "the engine cannot see this" from "the engine sees it
-        // but is not permitted to certify it" — different facts, different
-        // remedies, and collapsing them is how a blocker gets argued away.
+        // "Cannot see this" and "sees it but may not certify it" have different remedies.
         reason: observationOnly ? 'REAL_WORLD_VALIDATION_NOT_COMPLETED' : 'MEASUREMENT_NOT_SUPPORTED',
         observationSupported: observationOnly,
         missingCapabilities: proto.requiredCapabilities.filter((c) => !combineCaps.includes(c)),
       });
     }
 
-    // Attempt limits apply to VERIFIED attempts only — practice is for
-    // rehearsal and is generously (not punitively) capped.
+    // Attempt limits apply to verified attempts only; practice is capped generously.
     const since = Date.now() - proto.windowMs;
     if (mode === 'verified') {
       const recent = reads.attempts.count(req.player.id, proto.id, { mode: 'verified', since });
@@ -387,15 +331,13 @@ export function registerCombine(ctx) {
       return res.status(400).json({ error: 'FIELD_INVALID', field: 'checks', message: 'Calibration checks are a list of at most 10 check names.' });
     }
     const checks = rawChecks ?? [];
-    // First-library protocols need standardized geometry only (passes when
-    // the Ready Check geometry passes). Physical-scale calibration (Box
-    // Marker) is required by future protocols, which are unsupported anyway.
+    // Current protocols need standardised geometry only. Physical-scale calibration (Box Marker) is for future
+    // protocols, which are unsupported anyway.
     const passed = required.length === 0 ? true : required.every((r) => checks.includes(r));
     const next = boxCam.attempts.calibrate(a.id, { passed, checks: [...checks], at: Date.now() });
     res.json({ attempt: attemptView(next, { includeIntegrity: true }), calibrationPassed: passed });
   });
 
-  // Complete: reuse the shared Box Cam completion path (finalize + hook).
   playerRouter.post('/combine/attempts/:id/complete', (req, res) => {
     const a = ownAttempt(req.player.id, req.params.id);
     if (!a) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
@@ -434,7 +376,7 @@ export function registerCombine(ctx) {
     const r = measureAttempt({
       protocolDef: proto, session,
       calibrationPassed,
-      // The Combine-eligible list, never the observation list.
+      // The Combine-eligible list, not the observation list.
       providerCapabilities: combineCapsFor(session.provider, a.protocolId),
       mode: a.mode,
     });
@@ -453,7 +395,7 @@ export function registerCombine(ctx) {
     }
     broadcast('player_development_evidence_changed', { playerId: player.id });
   }
-  // Chain onto the existing hook so Box Training AND Combine both run.
+  // Chain onto the existing hook so Box Training and Combine both run.
   const prevHook = ctx.onSessionFinalized;
   ctx.onSessionFinalized = (session, player) => { prevHook?.(session, player); applyCombineProgress(session, player); };
 
@@ -473,12 +415,9 @@ export function registerCombine(ctx) {
       note: 'Completing a Club Combine means the standardized tests were completed and Combine Verified. It does not mean the club has selected, endorsed or rejected the player.',
     };
   };
-  /** Which required protocols have a Combine-Verified attempt inside the
-   *  request window (after it was created, before its deadline). */
   function requiredDone(r) {
     const done = new Set();
-    // A deadline is a DATE_ONLY covering the whole day; an unreadable
-    // one is a window that has already closed, never one that stays open.
+    // A deadline covers the whole day; an unreadable one is a closed window, not an open one.
     const deadlineMs = r.deadline ? (endOfDayExclusive(r.deadline) ?? -Infinity) : Infinity;
     for (const a of verifiedAttempts(r.playerId)) {
       if (!r.protocolIds.includes(a.protocolId)) continue;
@@ -513,17 +452,14 @@ export function registerCombine(ctx) {
   });
 
   // ================================================================== CLUB
-  // The one creator for Club Combine requests. Extracted from the route so a
-  // Recruitment Room can raise a request through exactly this code path
-  // instead of growing a second copy of it. Callers do their own eligibility,
-  // rate-limit and moderation checks first — this only creates.
+  // Shared with Recruitment Rooms. Callers do their own eligibility, rate-limit and moderation checks first.
   function createRequests({ org, orgUser, playerIds, protocolIds, title, deadline, instructions }) {
     const created = [];
     const skipped = [];
     // One unit: every request, its ledger row and its notification commit together.
     unit(() => { for (const pid of playerIds) {
       const p = findPlayer(pid);
-      // Standing gates hold exactly as elsewhere — a request never widens access.
+      // A request doesn't widen access.
       if (!p || !orgCanSee(org, p)) { skipped.push({ playerId: pid, reason: p ? 'NOT_VISIBLE' : 'PLAYER_NOT_FOUND' }); continue; }
       const r = boxCam.requests.create({
         id: nextId('creq'), orgId: org.id, orgName: org.name,
@@ -546,9 +482,8 @@ export function registerCombine(ctx) {
   ctx.combineRequestView = requestView;
   ctx.combineProtocolActive = (pid) => { const proto = latestCombineProtocol(pid); return !!proto && proto.status === 'active'; };
 
-  // Create a Combine request / Club Combine: a verified, non-agency,
-  // non-suspended org selects STANDARDIZED protocols (it cannot alter their
-  // rules) for eligible players it can already see. No new access is granted.
+  // A verified, non-agency, non-suspended org selects standardised protocols (it cannot alter their rules) for
+  // players it can already see.
   orgRouter.post('/combine/requests', (req, res) => {
     if (limited('room_combine_request', req.org.id)) return res.status(429).json(rateLimitedBody('room_combine_request'));
     if (req.org.type === 'agency') return res.status(403).json({ error: 'AGENCY_NOT_ELIGIBLE', message: 'Agencies cannot request At-Home Combines.' });
@@ -577,7 +512,6 @@ export function registerCombine(ctx) {
   });
 
   orgRouter.get('/combine/requests', (req, res) => {
-    // Bounded by one club's requests: the visibility rule applied in code, then the page cut.
     const mine = reads.requests.forOrg(req.org.id, { playerId: req.query.playerId ? String(req.query.playerId) : null })
       .filter((r) => { const p = findPlayer(r.playerId); return p && orgCanSee(req.org, p); });
     const page = pageNewestFirst(req, res, mine, { readPage, pageOf, sendPageError });
@@ -593,17 +527,14 @@ export function registerCombine(ctx) {
     res.json({ request: requestView(next) });
   });
 
-  // Club sees a visible player's verified Combine results (recruitment-safe).
-  // Access requires the standing gates AND either the player's recruitment
-  // opt-in OR an active/completed request from THIS org (responding to a
-  // request implies consent). Never raw video, DOB, notes or integrity.
+  // Needs the standing gates and either the player's recruitment opt-in or an active/completed request from this org
+  // (responding to a request implies consent).
   function orgMaySeeResults(org, p) {
     if (!orgCanSee(org, p)) return false;
     if (reads.prefs.sharesForRecruitment(p.id)) return true;
     return reads.requests.activeBetween(org.id, p.id);
   }
-  // Shared with the Recruitment Rooms so a Room applies the identical consent rule
-  // rather than inventing a laxer one. A room is not consent.
+  // Shared with Recruitment Rooms: a room is not consent.
   ctx.combineOrgMaySeeResults = orgMaySeeResults;
   orgRouter.get('/combine/players/:id', (req, res) => {
     const p = findPlayer(req.params.id);
@@ -635,10 +566,8 @@ export function registerCombine(ctx) {
   });
 
   // ================================================================== T&S
-  // Trust & Safety reviews the BOUND Box Cam session (existing dispute/
-  // invalidate/restore tooling). Combine attempts reflect that live: an
-  // invalidated session drops Combine Verified everywhere. T&S never types a
-  // replacement number.
+  // T&S reviews the bound Box Cam session; an invalidated session drops Combine Verified everywhere. T&S cannot type
+  // a replacement number.
   adminRouter.get('/combine/attempts/:id', (req, res) => {
     const a = reads.attempts.byId(req.params.id);
     if (!a) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });

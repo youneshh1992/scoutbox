@@ -1,20 +1,8 @@
 /**
- * ScoutBox Agent core: routes.
+ * Agent core routes: profile, agency, clients and the player's My Agent.
  *
- * Mounted on the canonical routers (`/org/agent/*`, `/player/agent/*`,
- * `/admin/agent/*`) so the existing session, org and player gates apply
- * before anything here runs. Every mutation re-derives authority at mutation
- * time from the live records and the clock, in this order:
- *
- *   authenticate → resolve user → resolve agency membership → conceal foreign
- *   resource → role → relationship / access basis → block / safeguarding →
- *   objective verification (regulated only) → rev / idempotency → mutate →
- *   history → event → notification.
- *
- * Compliance review and transactions live in ../compliance and ../transactions;
- * the core asks compliance through the functions it is given. There is NO route here through which the
- * shared Trust & Safety key can verify or reject a licence, resolve a dispute
- * or override a state (G-C0).
+ * The shared Trust & Safety key cannot verify or reject a licence, resolve a dispute or override a state here (G-C0);
+ * that needs an attributed reviewer in the compliance domain.
  */
 
 import { visibleToOrg } from '../../../domain.mjs';
@@ -60,20 +48,19 @@ export function registerAgent(rawCtx) {
   const { profiles, affiliations, agreements, settings } = agentCore;
 
   const testProviderEnabled = process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1';
-  /** A history entry, for an act's bookkeeping or a whole record's history. */
   const entry = (action, by, detail = null) => ({ id: nextId('aud'), at: now(), action, by, detail });
   const hist = (record, action, by, detail = null) => {
     record.history ??= [];
     record.history.push(entry(action, by, detail));
   };
-  /** An act's rev bump, attributed to `by` (an org user or a player `{ id, name }`). */
+  /** `by` is an org user or a player `{ id, name }`. */
   const bumped = (by, at = now()) => ({ bump: { at, by } });
   const byOrg = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
 
   // ------------------------------------------------------------ input (junk is refused, naming the field)
   const invalid = (res, field, message, scope = 'input') => { sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field, message }, scope); return undefined; };
-  /** Optional text: undefined when absent, null when empty, the trimmed text otherwise; refused when not text or over `max`. */
+  /** undefined when absent, null when empty; refused when not text or over `max`. */
   const optText = (res, v, field, max, scope) => {
     if (v === undefined) return undefined;
     if (v === null) return null;
@@ -82,7 +69,7 @@ export function registerAgent(rawCtx) {
     if (t.length > max) return invalid(res, field, `${field} must be at most ${max} characters.`, scope) ?? false;
     return t || null;
   };
-  /** A list of distinct values from `vocab`, or false after refusing it with `code`. */
+  /** Distinct values from `vocab`, or false after refusing with `code`. */
   const listOf = (res, v, vocab, code, field, scope) => {
     if (!Array.isArray(v) || v.some((x) => !vocab.includes(x)) || new Set(v).size !== v.length) {
       sendAgentError(res, { error: code, field, allowed: vocab, message: `${field} must be a list of distinct values from: ${vocab.join(', ')}.` }, scope);
@@ -95,7 +82,7 @@ export function registerAgent(rawCtx) {
   const activeAffiliationOf = (userId, orgId) => affiliations.activeFor(userId, orgId, now());
   const agreementsOfAgency = (orgId) => agreements.forAgency(orgId);
 
-  /** `?limit=&cursor=` for a list paged newest first by rowid; null after answering a junk page with 400. */
+  /** Paged newest first by rowid; null after answering a junk page with 400. */
   const pageQuery = (req, res) => { try { return readPage(req.query, ['number']); } catch (e) { sendPageError(res, e); return null; } };
 
   const limitedOr429 = refuseWhenLimited(rateLimit);
@@ -184,7 +171,7 @@ export function registerAgent(rawCtx) {
         if (typeof a.endAt === 'number' && a.endAt - t <= EXPIRY_ALERT_MS) {
           counts.expiringSoon += 1;
           alerts.push({ kind: 'expiring', agreementId: a.id, endAt: a.endAt });
-          // The one notification per agreement comes from the sweep (agentSweep), not from this read.
+          // The sweep, not this read, sends the one notification per agreement.
         }
       } else if (st === 'proposed') counts.pending += 1;
       else if (st === 'disputed') { counts.disputed += 1; alerts.push({ kind: 'disputed', agreementId: a.id }); }
@@ -242,7 +229,7 @@ export function registerAgent(rawCtx) {
       if (jurisdictions !== undefined) declared.jurisdictions = jurisdictions;
       if (licenceNumber !== undefined && licenceNumber !== p.declared.fifaLicenceNumber) {
         declared.fifaLicenceNumber = licenceNumber;
-        // A changed declaration invalidates the verified licence: the verified reference is no longer the declared one.
+        // The verified reference is no longer the declared one.
         const licence = p.facets.fifa_licence;
         if (licence.state === 'VERIFIED' && licence.reference !== licenceNumber) {
           profiles.setFacet(p.id, { facet: 'fifa_licence', record: { ...licence, state: 'UNVERIFIED', note: 'The declared licence number changed; re-submit for verification.' } });
@@ -256,12 +243,7 @@ export function registerAgent(rawCtx) {
     res.status(200).json({ profile: profileView(updated) });
   });
 
-  /**
-   * Submit a facet for verification. Production has no register provider, so
-   * the honest outcome is MANUAL_REVIEW_REQUIRED (queued for attributed Trust &
-   * Safety review) with a note that says exactly why. The synthetic provider (flag) exists
-   * for development and tests and names itself in the provenance.
-   */
+  /** With no register provider in production, a submission goes to attributed Trust & Safety review. */
   orgRouter.post('/agent/profile/facets/:facet/submit', (req, res) => {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'verification.submit')) return;
@@ -277,10 +259,8 @@ export function registerAgent(rawCtx) {
     const ma = facet === 'fifa_licence' ? null : String(rawMa ?? '').trim().toUpperCase();
     // A national facet belongs to a member association; INT is FIFA level, not one.
     if (facet !== 'fifa_licence' && (ma === 'INT' || !JURISDICTIONS.includes(ma))) return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS.filter((j) => j !== 'INT') }, 'facet');
-    // Minors authorisation is recorded, never activated: no production minors pathway exists.
-    // ONE provider abstraction (fail-honest). Without it, the core's
-    // synthetic/none evaluation; with it, the same states plus UNAVAILABLE,
-    // which writes nothing and answers 503 — an outage is never a permission.
+    // Minors authorisation is recorded, never activated: no minors pathway exists.
+    // A provider adds UNAVAILABLE, which writes nothing and answers 503: an outage is never a permission.
     const outcome = verificationProvider
       ? verificationProvider[FACET_METHOD[facet]]({ reference, now: now() })
       : evaluateSubmission({ facet, reference, testProviderEnabled, now: now() });
@@ -366,7 +346,6 @@ export function registerAgent(rawCtx) {
     const user = users.byOrgAndName(req.org.id, name);
     if (user?.removedAt) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED', message: 'This person\'s access was removed; removal is not undone from the team page.' }, 'team');
     if (user && activeAffiliationOf(user.id, req.org.id)) return sendAgentError(res, { error: 'MEMBER_ALREADY_AFFILIATED' }, 'team');
-    // One unit: the account (when new), the membership and its notice.
     const aff = unit(() => {
       const member = user ?? users.create({ orgId: req.org.id, name, role: role ?? 'Agency staff', createdAt: now() });
       const draft = {
@@ -410,8 +389,7 @@ export function registerAgent(rawCtx) {
     unit(() => {
       affiliations.end(aff.id, { at: now(), reason: reason ?? 'left' }, { ...bumped(req.orgUser), history: [entry('agency_affiliation_ended', byOrg(req), { reasonCode: reason ?? 'left' })] });
       broadcast('agency_affiliation_ended', { orgId: req.org.id, userId: aff.userId });
-      // Current agency access ends now, in the same unit; the person's agent profile and every
-      // historical attribution stay exactly as they are.
+      // The person's agent profile and historical attributions stay as they are.
       const user = byId.user(aff.userId);
       if (user && !user.removedAt) users.remove(user.id, { at: now(), by: req.orgUser.id });
       revokeOrgUserAccess?.(aff.userId);
@@ -458,7 +436,6 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'agency.audit.read')) return;
     const all = agentAuditRows(agentCore.reads, req.org, { findPlayer, orgCanSee });
-    // Compliance rows (contexts, consents, attributed reviews) ride the same feed, same shape.
     for (const rowsOf of auditSources) all.push(...rowsOf(req.org));
     all.sort((a, b) => (b.at - a.at) || String(b.id).localeCompare(String(a.id)));
     const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 25));
@@ -518,13 +495,7 @@ export function registerAgent(rawCtx) {
     res.json({ items: rows, scopes: SCOPES, maxTermMonths: MAX_TERM_MONTHS, jurisdictions: JURISDICTIONS });
   });
 
-  /**
-   * Request a relationship with an ADULT player. A REGULATED action (an
-   * Approach), so the objective verification check applies: the agent's
-   * required facets must be VERIFIED. In production a facet is VERIFIED only by
-   * an attributed reviewer (G-C0); development and tests use the synthetic
-   * provider.
-   */
+  /** An approach is a regulated act, so the agent's required facets must be VERIFIED (by an attributed reviewer, G-C0). */
   orgRouter.post('/agent/clients/request', (req, res) => {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'clients.request')) return;
@@ -553,14 +524,11 @@ export function registerAgent(rawCtx) {
         return sendAgentError(res, { error: 'REPRESENTATION_IDEMPOTENCY_CONFLICT' }, 'request');
       }
     }
-    // Verification before the subject check, and the subject check must not leak: a
-    // player who does not exist, a minor, a blocked player and an invisible
-    // player answer alike, and the verification refusal (own state) comes
-    // first so a refused agent learns nothing about the subject either way.
+    // Verification (own state) comes before the subject check, so a refused agent learns nothing about the subject;
+    // a missing, minor, blocked and invisible player then answer alike.
     const gap = verificationGap(profileOf(req.orgUser.id), jurisdiction, now());
     if (gap) return sendAgentError(res, { ...gap, message: gap.error === 'AGENT_PROFILE_REQUIRED' ? 'Create your agent profile first.' : `A regulated action needs a VERIFIED ${gap.facet}${gap.memberAssociation ? ` (${gap.memberAssociation})` : ''}; it is ${gap.state}.` }, 'request');
-    // The quota counts attempts that reach a SUBJECT — solicitation and
-    // enumeration — not malformed input or the agent's own refusals.
+    // The quota counts attempts that reach a subject (solicitation and enumeration), not the agent's own refusals.
     if (limitedOr429(res, 'agent_representation_request', req.orgUser.id)) return;
     const player = findPlayer(playerId);
     if (!player || !isAdult(player) || !visibleToOrg(player, req.org) || isBlocked(player.id, req.org.id)) {
@@ -568,11 +536,8 @@ export function registerAgent(rawCtx) {
     }
     const conflict = requestConflict(agreements.forAgentClient(req.orgUser.id, player.id), { agentUserId: req.orgUser.id, playerId: player.id, now: now() });
     if (conflict) return sendAgentError(res, { ...conflict, message: conflict.error === 'REPRESENTATION_COOLDOWN' ? 'A recent request to this player was declined or ended; wait before asking again.' : 'A relationship with this player already exists or is pending.' }, 'request');
-    // An Approach is a regulated act — the versioned policy layer has
-    // the last word at mutation time (registration and domestic authorisation
-    // under the applicable national rules; the exclusive-agreement window,
-    // which is UNDER_LEGAL_REVIEW, goes to attributed review, never a block,
-    // and never names the other agent).
+    // The policy layer has the last word: the exclusive-agreement window is under legal review, so it goes to
+    // attributed review rather than a block, and never names the other agent.
     const { decision, policySet } = compliance.authorizeApproach({ profile: profileOf(req.orgUser.id), jurisdiction, player, agentUserId: req.orgUser.id });
     const policyVersions = policySet.policies.map((x) => x.id);
     if (decision.facetGaps.length) { const g = decision.facetGaps[0]; return sendAgentError(res, { error: g.code, facet: g.facet, memberAssociation: g.memberAssociation, state: g.state, message: `A regulated action needs a VERIFIED ${g.facet}${g.memberAssociation ? ` (${g.memberAssociation})` : ''}; it is ${g.state}.` }, 'request'); }
@@ -724,8 +689,7 @@ export function registerAgent(rawCtx) {
       const code = to === 'active' && st !== 'proposed' ? 'REPRESENTATION_NOT_ACTIVE' : st === 'disputed' ? 'REPRESENTATION_DISPUTED' : 'REPRESENTATION_NOT_ACTIVE';
       return sendAgentError(res, { error: code, status: st, message: to === 'active' ? 'This request is no longer open — the agent may have withdrawn it.' : 'This relationship is not in a state that allows that.' }, action);
     }
-    // A block against the agency ends solicitation; confirming through it
-    // is refused rather than silently allowed.
+    // A block against the agency ends solicitation, so confirming through it is refused.
     if (to === 'active' && isBlocked(req.player.id, a.agencyOrgId)) return sendAgentError(res, { error: 'REPRESENTATION_NOT_ACTIVE', status: st, message: 'You have blocked this agency. Lift the block first if you want to confirm.' }, action);
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: { status: st } })) return;
     const t = now();
@@ -740,8 +704,7 @@ export function registerAgent(rawCtx) {
       else if (event === 'representation_disputed') broadcast('representation_disputed', ev);
       else broadcast('representation_terminated', ev);
       notify({ kind: 'org_user', id: out.agentUserId }, notifyType, notifyText, out.id);
-      // A dispute becomes an attributed review item. The
-      // reason stays with the client; the reviewer sees only that one exists.
+      // The reason stays with the client; the reviewer sees only that one exists.
       if (to === 'disputed') compliance.representationDisputed(out, byPlayer(req));
       return out;
     });
@@ -766,15 +729,8 @@ export function registerAgent(rawCtx) {
   }));
 
   /**
-   * The client's own choices about this relationship: whether agency staff see a
-   * summary row, and the three separate DISCLOSURE choices
-   * that decide whether their agent is a routable party on a club's contact,
-   * appears on a club's screen, or is given their trial schedule.
-   *
-   * ONE route, because they are one record and each change is one rev and one
-   * history entry. Each key is read only when the body actually carries it, so a
-   * client answering one question does not silently answer the other two, and
-   * only an explicit `true` is a yes.
+   * The agency-staff summary choice and the three disclosure choices. Each key is read only when the body carries it,
+   * so answering one question does not silently answer the others.
    */
   playerRouter.patch('/agent/relationships/:id/sharing', (req, res) => {
     if (req.playerIsMinor) return sendAgentError(res, { error: 'AGENT_ACTION_NOT_PERMITTED' }, 'sharing');
@@ -788,10 +744,8 @@ export function registerAgent(rawCtx) {
     if (body.disclosure !== undefined && (body.disclosure === null || typeof body.disclosure !== 'object' || Array.isArray(body.disclosure))) {
       return sendAgentError(res, { error: 'REPRESENTATION_INPUT_INVALID', field: 'disclosure', message: `disclosure must be an object with any of: ${DISCLOSURE_KEYS.join(', ')}.` }, 'sharing');
     }
-    // Each disclosure is a yes or a no, and nothing else. A key sent as a
-    // truthy string or a 1 is REFUSED rather than read as a no: coercing it
-    // would silently turn OFF a choice the client was trying to turn on, and a
-    // privacy setting is the last place to guess at an intention.
+    // A truthy string or a 1 is refused rather than read as no, which would silently turn off a choice the client
+    // was trying to turn on.
     if (body.disclosure !== undefined) {
       for (const k of DISCLOSURE_KEYS) {
         if (Object.hasOwn(body.disclosure, k) && typeof body.disclosure[k] !== 'boolean') {
@@ -804,11 +758,7 @@ export function registerAgent(rawCtx) {
     const changed = {};
     if (body.shareWithAgencyStaff !== undefined && body.shareWithAgencyStaff !== a.shareWithAgencyStaff) changed.shareWithAgencyStaff = body.shareWithAgencyStaff;
     if (body.disclosure !== undefined) {
-      // Turning a disclosure OFF is immediate and needs no reason: it stops the
-      // next contact being routed, the next club screen naming the agent and the
-      // next read of the trial schedule. What was already validly routed stays
-      // in the record, because rewriting history would be a lie about what
-      // happened.
+      // Turning a disclosure off is immediate and needs no reason; what was already validly routed stays recorded.
       const current = normaliseDisclosure(a.disclosure);
       for (const k of DISCLOSURE_KEYS) if (Object.hasOwn(body.disclosure, k) && body.disclosure[k] !== current[k]) changed[k] = body.disclosure[k];
     }
@@ -832,9 +782,7 @@ export function registerAgent(rawCtx) {
   });
 
   // ============================================================ ADMIN: read only
-  // Trust & Safety may LOOK. There is deliberately no admin mutation in this
-  // module: verifying a licence, resolving a dispute or overriding a state
-  // requires attributed reviewer identity (G-C0) and belongs to the compliance domain.
+  // The shared key may only look; every decision needs an attributed reviewer (G-C0).
   adminRouter.get('/agent/relationships', (req, res) => {
     const page = pageQuery(req, res); if (!page) return;
     const { items, nextCursor } = pageOf(agreements.page(page).rows, page.limit, (r) => r.key);
@@ -844,9 +792,8 @@ export function registerAgent(rawCtx) {
       note: 'Read-only. No Trust & Safety action on agent relationships or licences exists in this build (gate G-C0).',
     });
   });
-  // States and provenance only. The declared number and the submitted
-  // reference are withheld: the shared key is not an attributed reviewer and
-  // has no use for them, and an oversight view needs the STATE.
+  // States and provenance only: the shared key is not an attributed reviewer, so the declared number and reference
+  // are withheld.
   const facetForOversight = (f) => (f ? { state: f.state, storedState: f.storedState, provenance: f.provenance, submittedAt: f.submittedAt, verifiedAt: f.verifiedAt, recheckAt: f.recheckAt } : null);
   adminRouter.get('/agent/profiles', (req, res) => {
     const page = pageQuery(req, res); if (!page) return;
@@ -872,7 +819,7 @@ export function registerAgent(rawCtx) {
   });
 
   // ============================================================ deletion hook
-  /** Player account removal (inside the deletion's unit): each relationship becomes an id-only tombstone. */
+  /** Inside the deletion's unit: each relationship becomes an id-only tombstone. */
   function onPlayerDeleted(playerId, at = now()) {
     agreements.redactClient(playerId, at);
   }

@@ -1,28 +1,14 @@
 /**
- * Dynamic Watchlists: the pure part.
- *
- * A watchlist is saved criteria, not a saved list of players. Membership is
- * DERIVED from the current visible candidates every time it is read, because
- * the alternative — a stored list of player ids treated as truth — goes stale
- * in exactly the ways that matter: a player is blocked, ages out, or their
- * evidence expires, and nobody wrote to the watchlist to say so.
- *
- * Honest limitation, stated here and in the product: this build has no
- * scheduler. Nothing recomputes while the application is closed. Membership is
- * correct as of the last read, and the UI says when that was. What this module
- * provides is the reconciliation that turns "the list I derived last time" and
- * "the list I derive now" into a set of explained transitions.
+ * Dynamic Watchlists: the pure part. A watchlist is saved criteria; membership is derived on every read, because a
+ * stored list goes stale when a player is blocked, ages out or their evidence expires. There is no scheduler, so
+ * membership is correct as of the last read, and the UI says when that was.
  */
 
 export const WATCHLIST_MODES = ['live_linked', 'snapshot'];
 export const WATCHLIST_STATUSES = ['active', 'paused', 'archived'];
 export const WATCHLIST_SOURCES = ['brief', 'saved_search', 'criteria'];
 
-/**
- * Why a player entered or left. Deliberately factual: every one of these names
- * a change in the club's own criteria or in a recorded fact, and none of them
- * says anything about whether the player got better or worse.
- */
+/** None of these says whether the player got better or worse. */
 export const ENTRY_REASONS = {
   criterion_now_met: 'A required criterion is now met',
   criteria_changed: 'The saved criteria changed',
@@ -38,20 +24,12 @@ export const EXIT_REASONS = {
 };
 
 /**
- * Reasons that must never be spelled out. Losing visibility can mean the
- * player blocked this club, or a safeguarding rule changed, or the account was
- * removed. Naming which one would leak exactly what the rule exists to
- * protect, so all of them surface as `unavailable`.
+ * Losing visibility can mean the player blocked this club, a safeguarding rule changed, or the account was removed.
+ * Naming which would leak what the rule protects, so all of them surface as `unavailable`.
  */
 export const PRIVACY_SAFE_EXIT = 'unavailable';
 
-/**
- * Compare the previous derived membership with the current one.
- *
- * `previous` and `current` are arrays of player ids. Returns the three sets
- * plus a stable ordering, so two reconciliations of the same change produce
- * the same output and the same fingerprints.
- */
+/** Sorted, so two reconciliations of the same change produce the same output and fingerprints. */
 export function reconcileMembership(previous = [], current = []) {
   const before = new Set(previous);
   const after = new Set(current);
@@ -61,22 +39,14 @@ export function reconcileMembership(previous = [], current = []) {
   return { entered, left, unchanged, changed: entered.length > 0 || left.length > 0 };
 }
 
-/**
- * The deterministic identity of one membership transition. Two reconciliations
- * that observe the same transition under the same criteria produce the same
- * fingerprint, so a transition is never notified or recorded twice.
- */
+/** The same transition under the same criteria has the same fingerprint, so it is not notified twice. */
 export function transitionFingerprint({ watchlistId, playerId, criteriaVersion, transition, reason }) {
   return `wl:${watchlistId}:${playerId}:${criteriaVersion}:${transition}:${reason}`;
 }
 
 /**
- * Which required criterion changed? Given the previous and current per-player
- * match results, name the criterion that actually flipped rather than saying
- * "something changed".
- *
- * When the criteria set itself changed, comparing criterion by criterion would be misleading, so the caller passes
- * `criteriaChanged` and gets the honest answer instead.
+ * Names the criterion that flipped. When the criteria set itself changed, comparing criterion by criterion would
+ * mislead, so `criteriaChanged` short-circuits it.
  */
 export function explainTransition({ previousMatch, currentMatch, criteriaChanged, briefChanged, transition }) {
   if (briefChanged) {
@@ -89,7 +59,6 @@ export function explainTransition({ previousMatch, currentMatch, criteriaChanged
     if (!previousMatch) {
       return { reason: 'newly_visible', criterionId: null, text: ENTRY_REASONS.newly_visible };
     }
-    // Exactly the criteria that went false → true.
     const before = new Map((previousMatch.required ?? []).map((r) => [r.criterionId, r.met]));
     const flipped = (currentMatch.required ?? []).filter((r) => r.met && before.get(r.criterionId) === false);
     if (flipped.length) {
@@ -101,10 +70,8 @@ export function explainTransition({ previousMatch, currentMatch, criteriaChanged
     }
     return { reason: 'criterion_now_met', criterionId: null, text: ENTRY_REASONS.criterion_now_met };
   }
-  // Left.
   if (!currentMatch) {
-    // No current evaluation at all: the player is not in the visible candidate
-    // universe any more. Why is not ours to say.
+    // No longer visible; why is not ours to say.
     return { reason: PRIVACY_SAFE_EXIT, criterionId: null, text: EXIT_REASONS.unavailable };
   }
   const failed = (currentMatch.required ?? []).filter((r) => !r.met);
@@ -118,11 +85,6 @@ export function explainTransition({ previousMatch, currentMatch, criteriaChanged
   return { reason: PRIVACY_SAFE_EXIT, criterionId: null, text: EXIT_REASONS.unavailable };
 }
 
-/**
- * The one-line summary a watchlist header shows. Counts of the club's own
- * criteria set, never a statement about player quality: "3 newly matched" is
- * three players who now satisfy rules the club wrote, and nothing more.
- */
 export function membershipSummary({ entered = [], left = [], unchanged = [] }) {
   return {
     newlyMatched: entered.length,
@@ -133,11 +95,7 @@ export function membershipSummary({ entered = [], left = [], unchanged = [] }) {
   };
 }
 
-/**
- * Group membership changes into at most one notification per watchlist.
- * Twenty-five players entering after a brief edit is one sentence, not
- * twenty-five notifications.
- */
+/** At most one notification per watchlist: 25 players entering after a brief edit is one sentence. */
 export function membershipNotification({ watchlistName, entered = [], left = [], reason }) {
   if (!entered.length && !left.length) return null;
   const bulk = reason === 'criteria_changed' || reason === 'brief_changed';
@@ -155,8 +113,7 @@ export function membershipNotification({ watchlistName, entered = [], left = [],
   };
 }
 
-/** A watchlist that cannot currently produce matches, and why. Never a zero
- *  presented as a factual "no players match". */
+/** A watchlist that cannot produce matches says why, rather than showing zero as "no players match". */
 export function watchlistBlockedState({ status, mode, brief }) {
   if (status === 'archived') return { blocked: true, code: 'WATCHLIST_ARCHIVED', message: 'This watchlist is archived. Its history is kept; membership is no longer maintained.' };
   if (status === 'paused') return { blocked: false, paused: true, code: 'WATCHLIST_PAUSED', message: 'This watchlist is paused. Membership is still shown, and no change notifications are sent.' };

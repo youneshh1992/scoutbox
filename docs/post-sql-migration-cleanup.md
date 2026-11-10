@@ -102,8 +102,11 @@ updates (item 1).
 
 ### 4. Comments
 
-About 10k comment lines in `domains/`. Many are "what never happens here" essays that restate invariants already
-enforced in code. Trim them to the surprising parts as each file is touched.
+~~About 10k comment lines in `domains/`. Many are "what never happens here" essays that restate invariants already
+enforced in code. Trim them to the surprising parts as each file is touched.~~ Done 10 Nov: comment lines in
+`domains/` went from 11.9k to 5.0k, with no code token changed. What is left is the reasons (privacy, safeguarding,
+ordering, concurrency), domain and regulatory facts, and the terms the enums define. New comments follow the rule in
+`CLAUDE.md`.
 
 ### 5. Box Cam computer vision
 
@@ -213,4 +216,4 @@ The rules are likely well under half of the production lines.
    `m29Ctx`, `m162Ctx`, `m182Ctx`) and registration functions (`registerM12` … `registerM23`) become, for
    example, `rooms` and `registerRooms`, and the milestone directories fold into `domains/` (item 6). Since 10 Nov
    `grep -E 'm[0-9]+Ctx|registerM[0-9]'` finds nothing in the code.
-4. **Comments (item 4)** as files are touched.
+4. ~~**Comments (item 4)** as files are touched.~~ Done 10 Nov.

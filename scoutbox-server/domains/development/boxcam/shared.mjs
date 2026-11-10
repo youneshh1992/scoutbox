@@ -1,14 +1,6 @@
-// Box Cam pure engine.
-//
-// Box Cam is ScoutBox's first-party observed training evidence system. The
-// strongest statement it is ever allowed to make is: "ScoutBox Box Cam
-// observed activity consistent with this supported drill for X active
-// minutes/repetitions during a live capture session." Observation and
-// evaluation are different concepts — nothing in this module rates a
-// player, and elapsed clock time is NEVER active-training time.
-//
-// Everything here is a pure function over plain data so the engine is
-// unit-testable to the millisecond without a server.
+// The strongest claim Box Cam may make: "ScoutBox Box Cam observed activity consistent with this supported drill
+// for X active minutes/repetitions during a live capture session." It observes, it doesn't rate a player, and
+// elapsed clock time is not active-training time.
 import crypto from 'node:crypto';
 
 // --------------------------------------------------------------- states
@@ -24,10 +16,7 @@ export const OBSERVATION_KINDS = Object.freeze(['active', 'presence', 'ball', 'r
 
 const isMs = (v) => typeof v === 'number' && Number.isFinite(v);
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v);
-/**
- * One accepted observation as the events route maps it, `{ kind, fromMs?, toMs?, atMs?, quality?, confidence? }`: an
- * event the engine cannot read is refused, naming the field. `{ ok, record }` or `{ ok: false, reason }`.
- */
+/** Types one observation from the events route; an event the engine cannot read is refused, naming the field. */
 export function typeObservation(raw, at) {
   const bad = (field, what) => ({ ok: false, reason: `${at}.${field} ${what}` });
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
@@ -45,7 +34,7 @@ export function typeObservation(raw, at) {
   return { ok: true, record: { kind, fromMs, toMs, atMs, quality, confidence } };
 }
 
-// Honest per-state player copy — never "you didn't train", never "failed".
+// Player copy per state: never "you didn't train" or "failed".
 export const STATE_COPY = {
   verified: 'Box Cam observed activity consistent with this drill for the recorded duration.',
   partially_verified: 'Box Cam verified part of this session. Some activity could not be reliably observed because the player or ball left the camera view.',
@@ -56,9 +45,7 @@ export const STATE_COPY = {
 };
 
 // ------------------------------------------------------------- intervals
-/** Normalise raw {fromMs,toMs} pairs: numeric, ordered, clamped to
- *  [0, maxMs]; invalid or empty spans vanish. Nothing outside the session
- *  window can ever count. */
+/** Normalise raw {fromMs,toMs} pairs: ordered and clamped to [0, maxMs]; invalid or empty spans are dropped. */
 export function normIntervals(list, maxMs) {
   const out = [];
   for (const iv of list ?? []) {
@@ -74,8 +61,7 @@ export function normIntervals(list, maxMs) {
   return out.sort((a, b) => a.fromMs - b.fromMs || a.toMs - b.toMs);
 }
 
-/** Merge overlapping/adjacent intervals (quality-agnostic union). Duplicate
- *  and nested intervals collapse — double-reporting never doubles time. */
+/** Quality-agnostic union: double-reported time doesn't double. */
 export function mergeIntervals(list) {
   const sorted = [...(list ?? [])].sort((a, b) => a.fromMs - b.fromMs);
   const out = [];
@@ -87,8 +73,6 @@ export function mergeIntervals(list) {
   return out;
 }
 
-/** Subtract cut intervals (pauses, interruptions, multi-person periods)
- *  from base intervals. */
 export function subtractIntervals(base, cuts) {
   let current = mergeIntervals(base);
   for (const cut of mergeIntervals(cuts)) {
@@ -105,8 +89,6 @@ export function subtractIntervals(base, cuts) {
 
 export const sumIntervals = (list) => (list ?? []).reduce((s, iv) => s + (iv.toMs - iv.fromMs), 0);
 
-/** Intersection of two interval sets (e.g. active ∩ ball-visible for
- *  ball-required drills). */
 export function intersectIntervals(a, b) {
   const A = mergeIntervals(a);
   const B = mergeIntervals(b);
@@ -121,24 +103,19 @@ export function intersectIntervals(a, b) {
   return mergeIntervals(out);
 }
 
-/** Verified active-training time: the union of active observation intervals
- *  of acceptable quality, minus paused/interrupted/unreliable periods, all
- *  clamped to the SERVER-known session duration. Elapsed time is never a
- *  substitute. */
+/** Active intervals of acceptable quality, minus pauses and interruptions, clamped to the server-known session
+ *  duration. */
 export function verifiedActiveMs({ activeIntervals = [], pauses = [], interruptions = [], sessionDurationMs = 0, requiredIntervals = null }) {
   let usable = normIntervals(activeIntervals, sessionDurationMs).filter((iv) => iv.quality !== 'insufficient');
-  // Ball-required drills: activity only counts while the required
-  // observation (e.g. the ball) was also visible.
+  // Ball-required drills: activity only counts while the ball was also visible.
   if (requiredIntervals) usable = intersectIntervals(usable, normIntervals(requiredIntervals, sessionDurationMs));
   const cuts = [...normIntervals(pauses, sessionDurationMs), ...normIntervals(interruptions, sessionDurationMs)];
   return sumIntervals(subtractIntervals(usable, cuts));
 }
 
 // ------------------------------------------------------------------ reps
-/** Deduplicate repetition observations: sorted by time, confidence-gated,
- *  physically-impossible rapid duplicates collapsed (min gap per drill),
- *  anything outside the session window dropped. Two detectors reporting
- *  the same instant count once. */
+/** Confidence-gated, windowed reps with physically impossible rapid duplicates (under the drill's min gap)
+ *  collapsed. */
 export function dedupeReps(reps, { sessionDurationMs = Infinity, minGapMs = 250, minConfidence = 0.5 } = {}) {
   const valid = (reps ?? [])
     .map((r) => ({ atMs: Number(r.atMs), confidence: r.confidence == null ? 1 : Number(r.confidence) }))
@@ -153,10 +130,8 @@ export function dedupeReps(reps, { sessionDurationMs = Infinity, minGapMs = 250,
 }
 
 // ----------------------------------------------------------- completion
-/** Target completion strictly from VERIFIED values. 1 ms / 1 rep under
- *  target is NOT completed — near misses are recorded, never rounded up.
- *  Returns null when the pinned drill/provider cannot verify the target's
- *  metric (honesty over fabrication). */
+/** Strictly from verified values: near misses aren't rounded up. Null when the drill/provider cannot verify the
+ *  target's metric. */
 export function targetCompleted(target, { activeMs = 0, reps = null, setsCompleted = 0 }, capabilities = []) {
   switch (target?.type) {
     case 'duration':
@@ -176,7 +151,6 @@ export function targetCompleted(target, { activeMs = 0, reps = null, setsComplet
 }
 
 // -------------------------------------------------------------- quality
-/** Session-level detection quality from observed coverage of the session. */
 export function detectionQuality({ observedMs = 0, sessionDurationMs = 0 }) {
   if (sessionDurationMs <= 0) return 'insufficient';
   const ratio = observedMs / sessionDurationMs;
@@ -186,10 +160,7 @@ export function detectionQuality({ observedMs = 0, sessionDurationMs = 0 }) {
 }
 
 // -------------------------------------------------- verification state
-/** Derive the final verification state + machine-readable reasons.
- *  A session the player finished is never erased: partial observed work
- *  stays recorded under partially_verified; only a total absence of
- *  reliable observation becomes unable_to_verify. */
+/** Partial observed work stays under partially_verified; only no reliable observation at all is unable_to_verify. */
 export function deriveVerification({ cancelled = false, livenessPassed = false, providerAvailable = true, activeMs = 0, sessionDurationMs = 0, completed, quality, interruptionsCount = 0, unsupportedTargetMetric = false }) {
   const reasons = [];
   if (cancelled) return { state: 'cancelled', reasons: ['SESSION_CANCELLED'] };
@@ -211,10 +182,8 @@ export function deriveVerification({ cancelled = false, livenessPassed = false, 
 }
 
 // -------------------------------------------------------------- streak
-/** Box Streak: consistency against PLANNED training weeks — at least one
- *  finalized session with verified activity in each consecutive training
- *  week counting back from the current week. Rest days never matter; only
- *  whole weeks with zero sessions end a streak. */
+/** Consecutive weeks with verified activity, counting back from now. Rest days don't matter; only a whole week
+ *  without a session ends a streak. */
 export function boxStreakWeeks(sessions, now = Date.now()) {
   const WEEK = 7 * 86_400_000;
   const weekIndex = (t) => Math.floor(t / WEEK);
@@ -225,8 +194,7 @@ export function boxStreakWeeks(sessions, now = Date.now()) {
   );
   let streak = 0;
   let w = weekIndex(now);
-  // The current week counts if it already has a session; otherwise it is
-  // still in progress and does not break the streak.
+  // The current week is still in progress, so an empty one doesn't break the streak.
   if (weeks.has(w)) streak++;
   w--;
   while (weeks.has(w)) { streak++; w--; }
@@ -234,8 +202,7 @@ export function boxStreakWeeks(sessions, now = Date.now()) {
 }
 
 // ------------------------------------------------------------ Box Best
-/** Personal bests per drill@version. Comparisons never cross detector
- *  versions — box-control@1 and @2 are different measurements. */
+/** Per drill@version: different detector versions are different measurements. */
 export function boxBests(sessions) {
   const bests = new Map();
   for (const s of sessions ?? []) {
@@ -250,9 +217,6 @@ export function boxBests(sessions) {
 }
 
 // ---------------------------------------------------- challenge progress
-/** Deterministic challenge progress from distinct finalized sessions inside
- *  the challenge window. A replayed/duplicate session id never counts
- *  twice; sessions after the end date never count. */
 export function challengeProgress(challenge, sessions) {
   const seen = new Set();
   let total = 0;
@@ -270,8 +234,6 @@ export function challengeProgress(challenge, sessions) {
 }
 
 // ------------------------------------------- development activity summary
-/** Aggregate development activity — evidence of recorded training
- *  activity, explicitly NOT proof of player ability. */
 export const DEV_ACTIVITY_NOTE = 'This is evidence of recorded training activity. It is not proof of player ability.';
 export function developmentActivity({ sessions = [], assignments = [], drillsById = new Map(), days = 30, now = Date.now() }) {
   const since = now - days * 86_400_000;
@@ -295,8 +257,7 @@ export function developmentActivity({ sessions = [], assignments = [], drillsByI
 }
 
 // ----------------------------------------------------- result integrity
-/** Canonical result hash — integrity metadata for a finalized session.
- *  (Provenance plumbing, not a blockchain.) */
+/** Integrity metadata for a finalized session. */
 export function resultHash(session) {
   const canonical = JSON.stringify({
     id: session.id, playerId: session.playerId, drillId: session.drillId, drillVersion: session.drillVersion,
@@ -313,7 +274,6 @@ export const fmtMs = (ms) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
-/** The honest Box Cam provenance detail line for one session. */
 export function boxCamDetail(session) {
   const base = 'Recorded live through ScoutBox Box Cam.';
   if (session.verifiedReps != null) {
@@ -323,12 +283,7 @@ export function boxCamDetail(session) {
 }
 
 // ------------------------------------------------------------------- paging
-/**
- * One page of a newest-first list the route has already filtered (an organisation's assignments, challenges or
- * Combine requests: bounded by one club's, the visibility rule applied in code before the page is cut).
- * `?limit=&cursor=` → `{ items, nextCursor }`; junk refused with 400 (domains/platform/paging.mjs). Returns null once
- * it has answered a page error.
- */
+/** Pages a list the route has already filtered by visibility. Returns null once it has answered a page error. */
 export function pageNewestFirst(req, res, list, { readPage, pageOf, sendPageError }) {
   let page;
   try { page = readPage(req.query, ['number', 'string']); } catch (e) { sendPageError(res, e); return null; }

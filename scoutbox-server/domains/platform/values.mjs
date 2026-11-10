@@ -1,5 +1,3 @@
-/** Plain-value helpers shared by repositories and domains. */
-
 /** Freezes a value and everything it holds. Already-frozen branches are left alone. */
 export const deepFreeze = (v) => {
   if (v !== null && typeof v === 'object' && !Object.isFrozen(v)) {
@@ -9,10 +7,7 @@ export const deepFreeze = (v) => {
   return v;
 };
 
-/**
- * JSON with keys sorted at every level and arrays kept in order, so two equal values always serialise the same way.
- * An undefined value serialises as null.
- */
+/** Keys sorted at every level, so equal values serialise identically. Undefined serialises as null. */
 export function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value && typeof value === 'object') {

@@ -1,11 +1,9 @@
 // Organisation verification: personal claims, work-email proof, the club Verification console, official domains,
 // the verification-admin hierarchy (with dual control), squad invitations, conflict declarations and coach references.
 //
-// Authority model: a person can never verify themselves. Employment and
-// role facts are confirmed by an AUTHORISED ORGANISATION ADMINISTRATOR of a
-// VERIFIED organisation; domain control is evidence of mailbox control, never
-// of employment. Where no authority exists, the case routes to Trust & Safety
-// as a prepared human-review case — humans are the LAST step, not the first.
+// A person can never verify themselves. Employment and role facts are confirmed by an authorised administrator of a
+// verified organisation; domain control is evidence of mailbox control, not of employment. Where no authority
+// exists, the case routes to Trust & Safety as a prepared human-review case.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
 import {
@@ -43,7 +41,6 @@ export function registerOrganisationVerification(ctx) {
   const onlyOrg = (req, r) => (r && r.orgId === req.org.id ? r : null);
   const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
 
-  // Subject's own view of a claim: status + reasons + own evidence summaries.
   // Never someone else's evidence, never reviewer notes.
   const subjectClaimView = (claim) => {
     const org = claim.organisationId ? orgOf(claim.organisationId) : null;
@@ -66,8 +63,7 @@ export function registerOrganisationVerification(ctx) {
     };
   };
   function humanReviewExplanation(claim) {
-    // The UI must explain WHY, in plain language, without leaking
-    // internal security rules.
+    // Plain language, without leaking internal security rules.
     const bits = [];
     if (claim.reviewReasons.includes('ROOT_ORGANISATION_BOOTSTRAP')) bits.push('an authorised organisation administrator has not yet been established for this organisation');
     if (claim.reviewReasons.includes('NO_AUTHORITATIVE_SOURCE')) bits.push('no authorised administrator or authoritative registry can confirm this automatically');
@@ -128,7 +124,7 @@ export function registerOrganisationVerification(ctx) {
     } else if (!note?.trim()) {
       return res.status(400).json({ error: 'EVIDENCE_REQUIRED', message: 'Attach a document or a note.' });
     }
-    // Duplicate-evidence hash detection (risk signal, not a verdict).
+    // A risk signal, not a verdict.
     const dup = fileFields.sha256 && reads.evidence.digestSeen(fileFields.sha256, req.orgUser.id);
     const ev = unit(() => {
       const added = addEvidence({
@@ -145,12 +141,9 @@ export function registerOrganisationVerification(ctx) {
   function applyStatus(claim, to, req, opts = {}, also = {}) {
     return transition(claim, to, { actorKind: req.orgUser ? 'org_user' : 'system', actorId: req.orgUser?.id, actorName: req.orgUser?.name, ...opts }, req, also);
   }
-  /** The claim when it is the caller's own (a user subject), or null: concealment, no cross-tenant existence leak. */
+  /** Null for anyone else's claim, so its existence does not leak across tenants. */
   const onlyMine = (req, c) => (c && c.subjectId === req.orgUser.id && c.subjectType === 'user' ? c : null);
 
-  // Submit → deterministic pre-review pipeline: completeness, dedupe,
-  // conflicts, risk flags, decision, routing, packaged case. All automated —
-  // the only humans afterwards are the AUTHORITATIVE ones.
   orgRouter.post('/verification/claims/:id/submit', (req, res) => {
     const claim = onlyMine(req, reads.claims.byId(req.params.id));
     if (!claim) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
@@ -170,7 +163,7 @@ export function registerOrganisationVerification(ctx) {
     res.json({ claim: subjectClaimView(reads.claims.byId(claim.id)) });
   });
 
-  /** Inside the caller's unit: the deterministic pre-review pipeline for claim `claimId` (just moved to pending). */
+  /** The automated pre-review pipeline; runs inside the caller's unit on a claim just moved to pending. */
   function routeClaim(claimId, req) {
     const claim = reads.claims.byId(claimId);
     const org = claim.organisationId ? orgOf(claim.organisationId) : null;
@@ -226,8 +219,7 @@ export function registerOrganisationVerification(ctx) {
     });
   });
 
-  // ----- work-email proof. One-time token; failure counting; the code
-  // travels ONLY in the email (local fake transport in this environment).
+  // ----- work-email proof. The code travels only in the e-mail.
   orgRouter.post('/verification/work-email', async (req, res) => {
     if (typeof req.body?.email !== 'string') return res.status(400).json({ error: 'EMAIL_SYNTAX' });
     const email = req.body.email.trim().toLowerCase();
@@ -250,10 +242,10 @@ export function registerOrganisationVerification(ctx) {
     const { code, email } = req.body ?? {};
     if (!(email === undefined || email === null || typeof email === 'string')) return res.status(400).json({ error: 'EMAIL_SYNTAX' });
     if (!(code === undefined || code === null || typeof code === 'string')) return fieldInvalid(res, 'code', 'code is text.');
-    // Validate first: the token is consumed only together with the evidence and the claims it proves (one unit).
+    // The token is consumed only together with the evidence and the claims it proves.
     const peek = ctx.peekToken({ purpose: 'work_email', secret: code, email: email ?? null, subjectId: req.orgUser.id });
     if (peek.error) {
-      // count failures against open tokens for this user (risk signal)
+      // A risk signal.
       verification.tokens.recordFailedAttempts(req.orgUser.id, 'work_email');
       vmetric('emailChallengeFailures');
       return res.status(peek.error === 'TOKEN_EXPIRED' ? 410 : 401).json({ error: peek.error });
@@ -323,7 +315,7 @@ export function registerOrganisationVerification(ctx) {
   // ============================================== safe public projections
   orgRouter.get('/verification/public/user/:id', (req, res) => res.json(publicProfileForUser(req.params.id)));
   orgRouter.get('/verification/public/org/:id', (req, res) => res.json(publicProfileForOrg(req.params.id)));
-  // Batch endpoint so list screens do ONE call, not N.
+  // So list screens make one call, not N.
   orgRouter.get('/verification/public/users', (req, res) => {
     const ids = String(req.query.ids ?? '').split(',').filter(Boolean).slice(0, 100);
     res.json({ profiles: ids.map((id) => publicProfileForUser(id)) });
@@ -336,9 +328,7 @@ export function registerOrganisationVerification(ctx) {
     if (!requireVer(req, res, 'verification_viewer')) return;
     const mine = reads.claims.forOrgStaff(req.org.id);
     const now = Date.now();
-    // "Currently verified" derives from the EFFECTIVE engine: a raw
-    // status of 'verified' does not count when org standing, account removal
-    // or expiry suppresses it at read time.
+    // A raw status of 'verified' does not count when org standing, account removal or expiry suppresses it.
     const effCurrent = (c) => {
       const u = byId.user(c.subjectId);
       return effectiveStatus(c, { org: req.org, subjectRemoved: !u || !!u.removedAt, now }).current;
@@ -358,8 +348,7 @@ export function registerOrganisationVerification(ctx) {
     });
   });
 
-  // Prepared request rows: identity state, email/domain status, risk
-  // flags and history — the admin decides on a PACKAGED case.
+  // The admin decides on a prepared case.
   const requestRow = (claim) => {
     const user = byId.user(claim.subjectId);
     const identity = userClaims(claim.subjectId).find((c) => c.claimType === 'PERSON_IDENTITY');
@@ -384,14 +373,11 @@ export function registerOrganisationVerification(ctx) {
     res.json({ items: rows, note: 'Decisions are audited. You cannot decide your own request.' });
   });
 
-  // The confirmation decision: confirm / correct role / correct dates /
-  // mark former / reject / request more information.
   orgRouter.post('/verification/requests/:claimId/decide', (req, res) => {
     if (!requireVer(req, res, 'verification_reviewer')) return;
     const found = reads.claims.byId(req.params.claimId);
     const claim = found && found.organisationId === req.org.id && found.subjectType === 'user' ? found : null;
     if (!claim) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
-    // Self-verification prohibition — server-side, always, with an event.
     if (claim.subjectId === req.orgUser.id) {
       verEvent('security.self_verification_blocked', { claimId: claim.id, subjectId: claim.subjectId, orgId: req.org.id, reason: 'reviewer attempted to decide own claim' }, req);
       return res.status(403).json({ error: 'SELF_VERIFICATION_FORBIDDEN', message: 'You cannot be the authoritative confirmer of your own claim. Another authorised administrator must decide it.' });
@@ -399,7 +385,6 @@ export function registerOrganisationVerification(ctx) {
     if (!['pending', 'automated_checks_passed'].includes(claim.status)) {
       return res.status(409).json({ error: 'CLAIM_NOT_DECIDABLE', message: `The request is ${claim.status} — it may already be decided, withdrawn or escalated.` });
     }
-    // A suspended / unverified / revoked organisation cannot attest.
     if (!orgCanAttest(req.org)) {
       return res.status(403).json({ error: 'ORG_NOT_ELIGIBLE', message: `This organisation is ${ctx.orgVerificationStatus(req.org)} and cannot confirm staff verification right now.` });
     }
@@ -408,7 +393,7 @@ export function registerOrganisationVerification(ctx) {
     if (!(role === undefined || role === null || typeof role === 'string')) return fieldInvalid(res, 'role', 'role is text.');
     const pair = claim.metadata?.pairId ? reads.claims.byPair(claim.metadata.pairId).filter((c) => ['pending', 'automated_checks_passed'].includes(c.status)) : [];
     const targets = pair.length ? pair : [claim];
-    /** One unit: every target moves (or none does). A refused transition throws inside the unit and is answered 409. */
+    /** Every target moves or none does; a refusal is answered 409. */
     const decide = (to, extra = {}, before = null) => {
       try {
         unit(() => {
@@ -443,7 +428,7 @@ export function registerOrganisationVerification(ctx) {
       if (untilP && !untilP.ok) return res.status(400).json({ error: 'DATE_INVALID', field: 'validUntil', message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${untilP.why}).`, expected: untilP.expected });
       const from = fromP ? fromP.ms : Date.now();
       const until = untilP ? untilP.ms : (action === 'mark_former' ? Date.now() : null);
-      // Ordering is checked only when the club STATED both ends; a defaulted start is "now" by convention, not a claim.
+      // Checked only when the club stated both ends: a defaulted start is "now" by convention, not a claim.
       if (fromP && untilP && !(from < until)) return res.status(400).json({ error: 'INTERVAL_INVALID', field: 'validUntil', message: 'The period must end after it starts.' });
       const err = decide('verified', { validFrom: from, validUntil: until, current: action !== 'mark_former' }, correct);
       if (err) return res.status(409).json({ error: err });
@@ -463,7 +448,6 @@ export function registerOrganisationVerification(ctx) {
     res.json({ decided: action, claims: targets.map((c) => subjectClaimView(reads.claims.byId(c.id))) });
   });
 
-  // ----- staff registry with filters
   orgRouter.get('/verification/staff', (req, res) => {
     if (!requireVer(req, res, 'verification_viewer')) return;
     const { state, current, method, role } = req.query;
@@ -486,7 +470,7 @@ export function registerOrganisationVerification(ctx) {
     });
   });
 
-  // ----- employment change: close the period, keep the truth.
+  // ----- employment change: the period closes, the history stays.
   orgRouter.post('/verification/staff/:userId/departed', (req, res) => {
     if (!requireVer(req, res, 'verification_reviewer')) return;
     if (req.params.userId === req.orgUser.id) return res.status(403).json({ error: 'SELF_VERIFICATION_FORBIDDEN', message: 'Ask another administrator to record your own departure.' });
@@ -498,7 +482,7 @@ export function registerOrganisationVerification(ctx) {
     unit(() => {
       for (const c of claims) {
         verEvent('claim.corrected', { claimId: c.id, subjectId: c.subjectId, orgId: req.org.id, before: { current: true }, after: { current: false, validUntil: until }, reason: 'marked departed' }, req);
-        verification.claims.closePeriod(c.id, { until, at: Date.now() }); // history is NOT erased — the verified period closes
+        verification.claims.closePeriod(c.id, { until, at: Date.now() });
       }
       // Powers tied to the relationship end immediately.
       for (const a of reads.admins.activeFor(req.org.id, req.params.userId)) {
@@ -655,7 +639,7 @@ export function registerOrganisationVerification(ctx) {
     }
     const [approved, a] = unit(() => {
       const tr = verification.rootTransfers.approve(t.id, { at: Date.now(), by: req.orgUser.id });
-      // An existing active root grant is not duplicated (one active grant per person and level).
+      // One active grant per person and level.
       const held = reads.admins.activeFor(req.org.id, t.toUserId).find((x) => x.level === 'verification_root_admin');
       const grant = held ?? verification.admins.create({ id: nextId('vadm'), orgId: req.org.id, userId: t.toUserId, level: 'verification_root_admin', status: 'active', invitedBy: t.proposedBy, createdAt: Date.now(), acceptedAt: Date.now(), revokedAt: null, revokedBy: null });
       verEvent('admin.accepted', { orgId: req.org.id, subjectId: t.toUserId, after: { level: 'verification_root_admin', dualControl: `approved by ${req.orgUser.id}` } }, req);
@@ -718,16 +702,14 @@ export function registerOrganisationVerification(ctx) {
     if (email && (typeof email !== 'string' || emailProblem(email))) return res.status(400).json({ error: 'EMAIL_SYNTAX' }); // a string only: emailProblem would coerce an array
     if (!(squad === undefined || squad === null || typeof squad === 'string')) return fieldInvalid(res, 'squad', 'squad is text.');
     if (!(playerId === undefined || playerId === null || playerId === '' || typeof playerId === 'string')) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    // Recipient binding: when the invite targets an EXISTING ScoutBox
-    // player, the token is bound to that identity and nobody else can attach
-    // it. (Player targeting uses the standing visibility rules — an invite
-    // is not a discovery bypass.)
+    // An invite to an existing player binds the token to that identity. Targeting uses the standing visibility rules,
+    // so an invite is not a discovery bypass.
     let targetPlayer = null;
     if (playerId) {
       targetPlayer = findPlayer(playerId);
       if (!targetPlayer) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
       if (!visibleToOrg(targetPlayer, req.org) || isBlocked(targetPlayer.id, req.org.id)) {
-        return res.status(404).json({ error: 'PLAYER_NOT_FOUND' }); // concealment — no probing hidden players
+        return res.status(404).json({ error: 'PLAYER_NOT_FOUND' }); // no probing for hidden players
       }
     }
     let secret = null;
@@ -752,9 +734,7 @@ export function registerOrganisationVerification(ctx) {
     res.json({ items: reads.playerInvites.forOrg(req.org.id) });
   });
 
-  // Acceptance NEVER creates identity claims and never bypasses guardianship:
-  // adults accept themselves; a minor's invite can only be accepted by their
-  // guardian (existing DOB/country adult check — no new age system).
+  // Acceptance creates no identity claim and never bypasses guardianship: a minor's invite is accepted by their guardian.
   playerRouter.post('/invites/accept', (req, res) => {
     if (!isAdult(req.player)) {
       return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Your guardian accepts club invitations for you.' });
@@ -767,9 +747,7 @@ export function registerOrganisationVerification(ctx) {
     return acceptInvite(res, req.body?.code, child, req.guardian);
   });
   function acceptInvite(res, code, player, guardian, claimedEmail = null) {
-    // Recipient binding: peek first, run EVERY binding check, and only
-    // then consume — a wrong-recipient attempt must never burn the rightful
-    // recipient's single-use secret.
+    // Peek, check every binding, then consume: a wrong-recipient attempt must not burn the rightful recipient's secret.
     if (!(code === undefined || code === null || typeof code === 'string')) return res.status(404).json({ error: 'TOKEN_UNKNOWN' });
     const out = ctx.peekToken({ purpose: 'player_invite', secret: code });
     if (out.error) return res.status(out.error === 'TOKEN_EXPIRED' ? 410 : 404).json({ error: out.error });
@@ -778,18 +756,13 @@ export function registerOrganisationVerification(ctx) {
     if (!inv) return res.status(404).json({ error: 'INVITE_NOT_FOUND' });
     const org = orgOf(inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
-    // 1. Identity-targeted invite: only the named player (adult flow) or that
-    //    exact child through their EXISTING guardian relationship may accept.
+    // An identity-targeted invite: only the named player, or that child through their guardian.
     if (out.token.subjectId && out.token.subjectId !== player.id) {
       verEvent('security.self_verification_blocked', { orgId: inv.orgId, subjectId: player.id, reason: 'invite recipient mismatch (identity-bound)', after: { invite: inv.id } });
       return res.status(403).json({ error: 'INVITE_RECIPIENT_MISMATCH', message: 'This invitation names a different recipient. Codes cannot be transferred.' });
     }
-    // 2. Address-targeted invite: the accepting side must be associated with
-    //    the recipient mailbox. Guardians have verified account emails — the
-    //    guardian's own address must match. Player accounts carry no email,
-    //    so an accepting adult confirms the recipient address; possession of
-    //    the code alone is not enough. (Documented limitation: for adults
-    //    this is address knowledge + code possession, not mailbox re-proof.)
+    // An address-targeted invite: a guardian's verified account e-mail must match. Player accounts carry no e-mail,
+    // so an adult confirms the recipient address: address knowledge plus the code, not mailbox re-proof.
     if (out.token.email) {
       const supplied = guardian ? String(guardian.email ?? '').toLowerCase() : String(claimedEmail ?? '').toLowerCase();
       if (supplied !== out.token.email) {
@@ -797,7 +770,7 @@ export function registerOrganisationVerification(ctx) {
       }
     }
     const accepted = unit(() => {
-      ctx.useToken(out.token); // all binding checks passed — consume now
+      ctx.useToken(out.token);
       const next = verification.playerInvites.accept(inv.id, { playerId: player.id, at: Date.now(), guardianId: guardian?.id ?? null });
       verEvent('claim.created', { orgId: inv.orgId, subjectId: player.id, after: { invite: inv.id, guardianApproved: !!guardian } });
       notify({ kind: 'org_user', id: inv.byUserId }, 'verification', `${player.name} accepted your squad invitation${guardian ? ' (guardian-approved)' : ''}.`, inv.id);
@@ -808,9 +781,8 @@ export function registerOrganisationVerification(ctx) {
 
   // ================================================ coach references
   orgRouter.post('/verification/references', (req, res) => {
-    // The author needs a CURRENT, EFFECTIVE verified role at this org — and
-    // the player must already be visible under the standing safeguarding
-    // rules. Verification proves facts; it grants no extra access.
+    // The author needs a current, effective verified role at this org, and the player must already be visible:
+    // verification grants no extra access.
     const roleClaim = userClaims(req.orgUser.id).find((c) => c.organisationId === req.org.id && /ROLE|AFFILIATION/.test(c.claimType) && effectiveStatus(c, { org: req.org }).current);
     if (!roleClaim) return res.status(403).json({ error: 'VERIFIED_ROLE_REQUIRED', message: 'Structured references need a currently verified role at this organisation.' });
     const p = findPlayer(req.body?.playerId);
@@ -841,7 +813,6 @@ export function registerOrganisationVerification(ctx) {
         status: 'active', withdrawnAt: null, withdrawReason: null, createdAt: Date.now(),
       });
       verEvent('claim.created', { orgId: req.org.id, subjectId: p.id, after: { reference: created.id, provenance: created.provenanceSnapshot.claimId } }, req);
-      // Guardian routing for minors — existing DOB/country logic, untouched.
       if (isAdult(p)) notify({ kind: 'player', id: p.id }, 'verification', `${req.orgUser.name} (${req.org.name}) added a structured reference to your profile.`, created.id);
       else if (p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'verification', `${req.orgUser.name} (verified at ${req.org.name}) added a structured reference for ${p.name}. You can review it in the app.`, created.id);
       return created;
@@ -890,7 +861,6 @@ export function registerOrganisationVerification(ctx) {
   });
 
   const ownReference = (req, r) => (r && r.orgId === req.org.id && r.coachUserId === req.orgUser.id ? r : null);
-  // Player/guardian read their references, with honest provenance wording.
   const refPlayerView = (r) => ({
     id: r.id, version: r.version, coachName: r.coachName, orgName: r.orgName, roleAtTime: r.roleAtTime,
     relationship: r.relationship, capacity: r.capacity, fromYear: r.fromYear, toYear: r.toYear,
@@ -912,15 +882,13 @@ export function registerOrganisationVerification(ctx) {
   });
 
   // ====================================== root organisation bootstrap
-  // Public application — deterministic checks first, humans last. The
-  // applicant gets a single-use applicant secret binding follow-up calls.
+  // A public application. The applicant secret binds the follow-up calls.
   app.post('/auth/org/verification/apply', async (req, res) => {
     const b = req.body ?? {};
     const required = ['orgName', 'orgType', 'country', 'website', 'applicantName', 'applicantRole', 'workEmail'];
     for (const k of [...required, 'federation', 'domain', 'officialContact']) if (!(b[k] === undefined || b[k] === null || typeof b[k] === 'string')) return fieldInvalid(res, k, `${k} is text.`);
     const missing = required.filter((k) => !String(b[k] ?? '').trim());
     if (missing.length) return res.status(400).json({ error: 'FIELDS_REQUIRED', missing });
-    // Declarations are a fixed statement: { authorised: true|false }, or none.
     const decl = b.declarations;
     if (!(decl === undefined || decl === null || (typeof decl === 'object' && !Array.isArray(decl) && Object.keys(decl).every((k) => k === 'authorised') && typeof decl.authorised === 'boolean'))) {
       return fieldInvalid(res, 'declarations', 'declarations is { authorised: true } or { authorised: false }.');
@@ -933,9 +901,7 @@ export function registerOrganisationVerification(ctx) {
     if (domain.length > L.domain) return fieldInvalid(res, 'domain', 'The domain is too long.');
     if (String(b.workEmail).length > L.email) return res.status(400).json({ error: 'EMAIL_TOO_LONG' });
     const emailDom = domainOfEmail(b.workEmail);
-    // ---- deterministic automated checks. No network fetch happens here:
-    // DNS/https probing from this environment is not implemented — recorded
-    // honestly as not_configured rather than pretended.
+    // ---- automated checks. DNS and https probing are not implemented, so they are recorded as not_configured.
     const dupOrg = ctx.orgs.byName(String(b.orgName));
     const dupDomainOrg = domain ? reads.domains.verifiedElsewhere(domain) : null;
     const dupRequest = reads.rootRequests.openDuplicate(domain, String(b.orgName).trim().toLowerCase());
@@ -1033,8 +999,7 @@ export function registerOrganisationVerification(ctx) {
     const r = rootReqBySecret(req, res); if (!r) return;
     if (r.status !== 'collecting_evidence') return res.status(409).json({ error: 'ALREADY_SUBMITTED' });
     if (!r.emailProved) return res.status(422).json({ error: 'EMAIL_NOT_PROVED', message: 'Confirm the emailed code first.' });
-    // A first administrator with no existing ScoutBox authority is
-    // ALWAYS a human decision. Everything else was prepared automatically.
+    // A first administrator with no existing ScoutBox authority is always a human decision.
     const { reasons } = decideReview({
       claimType: 'ORGANISATION_IDENTITY', isFirstOrgAdmin: true,
       duplicateOrg: r.checks.duplicateOrganisation === 'flagged' || r.checks.domainAlreadyVerifiedElsewhere === 'flagged',

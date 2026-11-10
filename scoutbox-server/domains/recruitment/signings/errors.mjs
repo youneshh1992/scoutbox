@@ -1,15 +1,9 @@
 /**
- * The Signing domain error contract. ONE table, no default branch,
- * a public-field allowlist.
+ * The Signing error table: no default branch, and only allowlisted fields reach the client.
  *
- * Concealment: a signing package that does not exist, one in
- * another organisation, one addressed to another player, one an agent is
- * not entitled to, and a document that is not on a revision the caller may
- * read all answer `SIGNING_NOT_FOUND` / `SIGNING_DOCUMENT_NOT_FOUND` with
- * the same body. Once a caller can already READ a package, a refusal names
- * the STATE that stopped the act and nothing else — never an internal note,
- * a party's identity the caller may not see, or the word "blocked" to a
- * recipient.
+ * A missing package, one in another organisation, one addressed to another player, one an agent may not see,
+ * and a document not on a readable revision all get the same 404 body. Once a caller can read a package, a
+ * refusal names only the state that stopped the act.
  */
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
@@ -24,12 +18,12 @@ export const SIGNING_ERROR_HTTP = table({
   SIGNING_REV_REQUIRED: 400,
   SIGNING_METHOD_UNKNOWN: 400,
 
-  // ---- 403: not yours to do. Only ever about the CALLER's own standing.
+  // ---- 403: about the caller's own standing only.
   SIGNING_NOT_PERMITTED: 403,
   SIGNING_BLOCKED: 403,
   SIGNING_AUTHORITY_LOST: 403,
 
-  // ---- 404: concealment. Every one of these is the same body.
+  // ---- 404: concealment; every one is the same body.
   SIGNING_NOT_FOUND: 404,
   SIGNING_DOCUMENT_NOT_FOUND: 404,
 
@@ -92,6 +86,5 @@ export function sendSigningError(res, out, where) {
   return res.status(status).json(publicErrorBody(out));
 }
 
-/** The ONE concealment refusal. */
 export const notFound = (res, where) => sendSigningError(res, { error: 'SIGNING_NOT_FOUND', message: 'No signing with that reference is available to you.' }, where);
 export const documentNotFound = (res, where) => sendSigningError(res, { error: 'SIGNING_DOCUMENT_NOT_FOUND', message: 'No document with that reference is available to you.' }, where);

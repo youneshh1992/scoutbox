@@ -1,7 +1,5 @@
 /**
- * Event audiences: a view over the canonical event registry
- * (`eventRegistry.mjs`). Every event name is classified, and anything unknown
- * FAILS CLOSED to org_private.
+ * A view over `eventRegistry.mjs`. Unknown events fail closed to org_private.
  *
  *   player_private      only the subject player (and their guardian)
  *   guardian_private    only the guardian
@@ -14,13 +12,11 @@ import { EVENT_REGISTRY, AUDIENCES as REGISTRY_AUDIENCES, audienceFor as registr
 
 export const AUDIENCES = REGISTRY_AUDIENCES;
 
-/** event name → audience, derived from the registry. */
 export const EVENT_AUDIENCE = Object.freeze(
   Object.fromEntries(Object.entries(EVENT_REGISTRY).map(([name, def]) => [name, def.audience])),
 );
 
-/** Unknown names are org_private — the most restrictive useful default. */
 export const audienceFor = registryAudienceFor;
 
-/** Names an event carrying no classification, for the boot assertion. */
+/** For the boot assertion. */
 export const unclassifiedEvents = (names) => names.filter((n) => !(n in EVENT_REGISTRY));

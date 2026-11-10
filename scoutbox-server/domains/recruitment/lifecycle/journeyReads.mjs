@@ -1,14 +1,9 @@
 /**
- * The recruitment reads of one player's journeys, read once.
- *
- * A player's journey list builds one journey per Room, and each journey reads about a dozen record sets: the case,
- * the club's cases, requests, trials and signings of the player, and the case's contacts, offers, packages and
- * decisions. Asked per case, that is a dozen queries and their decodes for every club the player is talking to.
- * `playerJourneyReads` reads each set once for all of the player's cases, in bulk, and answers the journeys from it.
- *
- * It answers exactly what `reads` would: the same records in the same (insertion) order. It holds only what it
- * read for this player and these cases; any other question (another player, another case, an id it did not read)
- * goes to `reads`. It is a read of one request: it never sees a write, so it must not outlive the request.
+ * Bulk reads for one player's journeys. Each journey reads about a dozen record
+ * sets; asked per case that is a dozen queries per club. This reads each set once
+ * for all the player's cases and answers exactly what `reads` would, in the same
+ * order, deferring anything else to `reads`. It never sees a write, so it must
+ * not outlive the request.
  */
 
 const groupBy = (records, key) => {
@@ -18,13 +13,9 @@ const groupBy = (records, key) => {
 };
 const indexById = (...lists) => { const out = new Map(); for (const list of lists) for (const r of list) out.set(r.id, r); return out; };
 
-/**
- * `cases` are the player's cases (from `reads.cases.forPlayer(playerId)`); the journeys are built for these.
- */
 export function playerJourneyReads(reads, playerId, cases) {
   const caseIds = cases.map((k) => k.id);
   const pairKey = (orgId, pid) => `${orgId}\u0000${pid}`;
-  // The player's records (every forOrgPlayer question about this player is a filter of these).
   const byPlayer = {
     cases,
     requests: reads.requests.forPlayer(playerId),
@@ -32,8 +23,8 @@ export function playerJourneyReads(reads, playerId, cases) {
     signings: reads.signings.forPlayer(playerId),
     contacts: reads.contacts.forPlayer(playerId),
   };
-  // The records naming these cases, whoever they name as the player (a record that names the case but another
-  // player is corrupt, and the journey must still see it to count it).
+  // Records naming these cases, whoever they name as the player: one naming
+  // another player is corrupt, and the journey must still see it to count it.
   const byCase = {
     requests: reads.requests.forCases(caseIds),
     trials: reads.trials.forCases(caseIds),

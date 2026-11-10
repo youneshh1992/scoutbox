@@ -1,24 +1,6 @@
 /**
- * The cross-app integration SEAM: the one database-bound layer that
- * resolves the facts `domains/agents/integration/integration.mjs` decides on.
- *
- * `integration.mjs` is pure and knows no records. This file is the opposite: it
- * reads the canonical stores through their OWN gates — `findPlayer`, `isAdult`,
- * `isBlocked`, `orgCanSee`, the agent's `profileOf`, the compliance policy verdict —
- * assembles the facts, and hands them to `agentSurfaceDecision`. No app resolves those
- * facts for itself, so "can this agent see this?" has exactly one answer
- * everywhere.
- *
- * What this module deliberately does NOT do:
- *
- *   - it declares no store. Every fact it reads is already somebody's truth;
- *     the client's disclosure choices live on the representation agreement that
- *     they are choices ABOUT.
- *   - it opens no second Inbox, no second Trial workflow, no second transaction
- *     workflow and no Offer lane. The agent-facing routes here are READS of
- *     records the canonical systems own.
- *   - it never turns a legacy adult-representation row into authority. The basis
- *     comes from `agentClientBasis`, which is `agreementGrantsAccess`.
+ * The cross-app integration seam: resolves, through each domain's own gates, the facts the pure rules in
+ * `integration.mjs` decide on, so "can this agent see this?" has one answer everywhere.
  *
  * It registers before the recruitment lifecycle and the transactions, which take its seam as an argument.
  */
@@ -61,20 +43,12 @@ export function registerIntegration(ctx) {
   if (typeof agentCore?.agreements?.recordAct !== 'function' || typeof unit !== 'function') throw new TypeError('registerIntegration needs the agent core repository and unit from the data layer');
   if (typeof recruitmentReads?.contacts?.forAgent !== 'function') throw new TypeError('registerIntegration needs recruitmentReads (contacts) from the data layer');
   const { cases } = recruitmentCases;
-  /** A case history entry in the one shape every case writer uses. */
-  /** The bookkeeping of a handoff act: its one case history entry. */
   const handoffHistory = (at, action, by, detail) => ({ history: [{ id: nextId('aud'), at, byKind: 'org', byId: by.userId ?? null, byName: by.name ?? null, action, detail }] });
 
 
   /**
-   * The shared rate-limit provider, not a second one. Both of this module's writes end in a
-   * notification to a person and both can be repeated after being taken back, so
-   * each carries a quota like every comparable write in the codebase.
-   *
-   * The quota is charged only once a request has passed authorization and is
-   * about to change something: a refused caller should not be able to spend the
-   * budget of the club or the agent they are impersonating, and a malformed body
-   * is not an act.
+   * Charged only once a request has passed authorisation and is about to change something, so a refused caller
+   * cannot spend the budget of the club or agent they are impersonating.
    */
   const limitedOr429 = refuseWhenLimited(rateLimit);
   const clientKeyOf = (req, res) => {
@@ -86,10 +60,8 @@ export function registerIntegration(ctx) {
     ?? byId.user(userId)?.name ?? null;
 
   /**
-   * The case, through the Room lifecycle's own concealing lookup and role ranking —
-   * not a second copy of either. `need` is 'view' or 'write'; a handoff is a
-   * decision about the club's external conduct, so it needs the same rank the
-   * formal decision does.
+   * A handoff is a decision about the club's external conduct, so writing it needs the same rank as the formal
+   * decision.
    */
   function roomForHandoff(req, res, need) {
     const kase = ctx.findRoomForRequest(req, res);
@@ -114,11 +86,7 @@ export function registerIntegration(ctx) {
   const basisFor = ({ agentUserId, clientId, at = now() }) =>
     agentClientBasis({ agreements: agreementsFor(clientId), agentUserId, clientId, now: at });
 
-  /**
-   * Every agent who currently represents this client. A row that names no
-   * individual (a legacy row) can never appear here: the predicate is asked
-   * about the agent the row itself names, so a null agent fails its own test.
-   */
+  /** A row naming no agent fails the predicate, because it is asked about the agent the row names. */
   function activeAgentsFor(clientId, at = now()) {
     const out = [];
     for (const a of agreementsFor(clientId)) {
@@ -129,10 +97,8 @@ export function registerIntegration(ctx) {
   }
 
   /**
-   * The ONE agent a third party (a club) may be routed to, when there is exactly
-   * one. Two active agents and nothing to choose between them is ambiguity, and
-   * ambiguity fails closed: ScoutBox does not pick a player's representative for
-   * them, and guessing would give one agent an approach the other never saw.
+   * Two active agents is ambiguity and fails closed: ScoutBox does not pick a player's representative, and guessing
+   * would give one agent an approach the other never saw.
    */
   function soleActiveAgentFor(clientId, at = now()) {
     const all = activeAgentsFor(clientId, at);
@@ -142,18 +108,13 @@ export function registerIntegration(ctx) {
 
   // ---------------------------------------------------------------- facts
 
-  /** The agent's required facets are VERIFIED for the agreement's jurisdiction, now. */
   function licenceCurrentFor(agentUserId, jurisdiction, at = now()) {
     const p = access?.profileOf ? access.profileOf(agentUserId) : null;
     if (!p) return false;
     return !verificationGap(p, jurisdiction, at);
   }
 
-  /**
-   * The compliance layer's CURRENT answer for a regulated surface, through the
-   * one narrow seam the compliance module (domains/agents/compliance/) exposes. No seam registered → `null`, which the
-   * decision reads as "not evaluated", which is not clear.
-   */
+  /** No compliance seam → null, which the decision reads as "not evaluated", not clear. */
   function complianceClearFor(surface, agentUserId, jurisdiction) {
     const action = POLICY_ACTION_FOR_SURFACE[surface] ?? null;
     if (!action || !compliance?.clearFor) return null;
@@ -162,25 +123,12 @@ export function registerIntegration(ctx) {
   }
 
   /**
-   * An explicit, separate player share for a surface that needs one.
-   *
-   * There is NO writer for an agent-directed Passport or evidence share in this
-   * build: the Passport's share links (`passport_shares`) are link tokens a person opens, not a standing
-   * grant to a named agent, and a link a player sent their agent is the player
-   * handing over a URL, not ScoutBox granting the agent a projection. So this
-   * answers false, `passport_shared` and `evidence_shared` refuse with
-   * SHARE_REQUIRED, and the surfaces stay declared rather than deleted — the
-   * question gets asked and answered, which is the honest state of the build.
+   * Nothing writes an agent-directed Passport or evidence share (Passport share links are tokens a person opens, not
+   * a grant to a named agent), so those surfaces refuse with SHARE_REQUIRED.
    */
   const sharedFor = () => false;
 
-  /**
-   * THE decision, with every fact resolved from a canonical source.
-   *
-   * `viewerOrgId` is the third party whose screen or action this is (a club).
-   * Its block against the player counts too: a club that a player blocked does
-   * not reach them through their agent.
-   */
+  /** `viewerOrgId` is the third party (a club): a club the player blocked does not reach them through their agent. */
   function decide({ surface, clientId, agentUserId, viewerOrgId = null, at = now() }) {
     const basis = basisFor({ agentUserId, clientId, at });
     const agreement = basis.ok ? agreementById(basis.agreementId) : null;
@@ -192,9 +140,7 @@ export function registerIntegration(ctx) {
       basis,
       subjectPresent,
       isAdult: !!player && isAdult(player),
-      // The encoded minor pathway is production-disabled in every jurisdiction
-      // this build knows. Read from the policy layer rather than hard-coded
-      // false, so enabling one is a policy change and not an edit here.
+      // Read from the policy layer, so enabling a minor pathway is a policy change and not an edit here.
       minorPathwayOpen: jurisdiction ? MINOR_PATHWAY_PRODUCTION_ENABLED[jurisdiction] === true : false,
       blocked: !!player && (
         (basis.agencyOrgId ? isBlocked(player.id, basis.agencyOrgId) : false)
@@ -210,12 +156,8 @@ export function registerIntegration(ctx) {
   // ------------------------------------------------------- contact routing
 
   /**
-   * Who a club's contact may validly reach right now.
-   *
-   * The club never names the agent — it asks for a MODE. This resolves the
-   * player's own representative, decides `contact_participation` for that agent,
-   * and returns the routing. Called at compose time for the preview AND again at
-   * send time, so authority is re-derived rather than remembered.
+   * The club asks for a mode, never names the agent. Called at compose time and again at send time, so authority is
+   * re-derived rather than remembered.
    */
   function contactRoute({ recipient, clientId, viewerOrgId, requestedMode = 'player_only', at = now() }) {
     if (!recipient) return { ok: false, error: 'CONTACT_RECIPIENT_UNAVAILABLE' };
@@ -237,10 +179,8 @@ export function registerIntegration(ctx) {
   // ------------------------------------------------------- club presence
 
   /**
-   * The three facet STATE WORDS for one jurisdiction. A per-association map is
-   * the agent's own business: which jurisdictions they are registered in is a
-   * fact about them that no player was asked to disclose, so only the agreement's
-   * own jurisdiction is read, and a missing one is absent rather than guessed.
+   * Only the agreement's own jurisdiction: where else the agent is registered is their business, not something the
+   * player chose to disclose.
    */
   const flatFacets = (states, jurisdiction) => (states ? {
     fifa_licence: typeof states.fifa_licence === 'string' ? states.fifa_licence : null,
@@ -248,11 +188,7 @@ export function registerIntegration(ctx) {
     domestic_authorisation: jurisdiction ? states.domestic_authorisation?.[jurisdiction] ?? null : null,
   } : null);
 
-  /**
-   * The Club-facing "represented by" projection, answered from the
-   * PLAYER's own disclosure choice. A club does not learn who represents a
-   * player because the player exists; it learns because the player said so.
-   */
+  /** A club learns who represents a player only because the player chose to disclose it. */
   function clubPresenceFor({ player, viewerOrgId, at = now() }) {
     if (!player) return null;
     const { agreement } = soleActiveAgentFor(player.id, at);
@@ -266,8 +202,6 @@ export function registerIntegration(ctx) {
       decision,
       agent: { displayName: profile?.displayName ?? user?.name ?? null },
       agency: { id: org?.id ?? null, name: org?.name ?? null },
-      // Flattened to the ONE jurisdiction this relationship names, so the badge
-      // carries three state words and not a map of everywhere this agent works.
       facets: flatFacets(compliance?.facetStatesFor ? compliance.facetStatesFor(agreement.agentUserId) : null, agreement.jurisdiction),
     });
   }
@@ -275,15 +209,8 @@ export function registerIntegration(ctx) {
   // ------------------------------------------------- agent-facing reads
 
   /**
-   * The contacts a club routed to THIS agent. Reading is gated on the
-   * live basis, and the items are exactly those whose recorded routing snapshot
-   * names this agent — so revoking `contactRouting` stops new contacts arriving
-   * without erasing the ones the agent legitimately already received (history
-   * is not rewritten).
-   *
-   * Thread isolation: no `caseId`, no case status, no club-private note, no
-   * other player, no recruitment ranking. The club's own recruitment process is
-   * not on the other side of this door.
+   * Filtered by the routing snapshot, so revoking `contactRouting` stops new contacts without erasing ones already
+   * received. Nothing of the club's recruitment case crosses.
    */
   orgRouter.get('/agent/clients/:id/contacts', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
@@ -307,16 +234,13 @@ export function registerIntegration(ctx) {
         status: c.status,
         channel: c.channel,
         subject: c.subject ?? null,
-        // The club addressed this message to the agent as well as to the
-        // player, which is what "routed" means. Nothing the club wrote for
-        // itself is here.
+        // Routed means the club addressed this to the agent as well as the player.
         body: c.body ?? null,
         routedAt: snap.at,
         routedMode: snap.mode,
         deliveredAt: c.deliveredAt ?? null,
         respondedAt: c.respondedAt ?? null,
-        // The client's own answer, because it answered a message the agent was
-        // a party to. The client's free-text reply is theirs and stays out.
+        // The kind of answer only; the client's free-text reply stays theirs.
         responseKind: c.response?.kind ?? null,
       });
     }
@@ -329,15 +253,8 @@ export function registerIntegration(ctx) {
   });
 
   /**
-   * That a Trial exists, and its scheduling. Never its assessment,
-   * never its report, never a Box Cam payload, never the exact venue address or
-   * the club's joining instructions — those were held back from the invitation
-   * until the FAMILY accepted and they remain the family's.
-   *
-   * There is no coordination write here, and no route in this build through
-   * which an agent confirms, reschedules, cancels or attends a Trial. The mandate
-   * forbids a second Trial workflow, and confirming a schedule for the player
-   * would be exactly that.
+   * That a trial exists and its scheduling, without the assessment, report, Box Cam footage, venue address or joining
+   * instructions (those were held back until the family accepted). An agent cannot act on a trial for the player.
    */
   orgRouter.get('/agent/clients/:id/trials', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
@@ -367,13 +284,11 @@ export function registerIntegration(ctx) {
         workflowLabel: TRIAL_WORKFLOW_LABELS[state] ?? state,
         legacy: isLegacyTrial(t),
         acceptedAt: t.acceptedAt ?? null,
-        // The viewer is 'agent': not the club, not the accepted family. The
-        // address, the instructions and the evidence list are absent, not
-        // redacted — an absent field cannot leak.
+        // As the 'agent' viewer: address, instructions and evidence are absent, not redacted.
         schedule: trialScheduleView(t, 'agent'),
         awaitingClientConfirmation: !!t.schedule && !t.schedule.confirmedAt,
         completion: t.completion ? { state: t.completion.state, at: t.completion.at } : null,
-        // WHETHER a report obligation exists, never what it says.
+        // Whether a report obligation exists, never what it says.
         reportObligation: t.status === 'awaiting_report' ? 'outstanding' : t.status === 'reported' ? 'filed' : null,
       });
     }
@@ -390,18 +305,8 @@ export function registerIntegration(ctx) {
   // --------------------------------------------------- opportunity share
 
   /**
-   * The agent brings an opportunity to their client's attention.
-   *
-   * The opportunity must ALREADY be on the client's own board — the board is
-   * rebuilt here through `opportunityBoardFor`, the same function the player's
-   * own screen uses, under the same mutual-visibility and eligibility rules. An
-   * agent therefore cannot surface something their client could not already
-   * find, and a club's private recruitment case, its watchlist and its matching
-   * weights have no path into this route at all.
-   *
-   * `Do not auto-apply Player`: this writes a share and a notification.
-   * Applying stays the player's own act on the player's own route, and there is
-   * no parameter here that could start one.
+   * The opportunity must already be on the client's own board, rebuilt with the player screen's function, so an agent
+   * cannot surface anything the client could not find. Applying stays the player's own act.
    */
   orgRouter.post('/agent/clients/:id/opportunities/:oppId/share', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
@@ -415,8 +320,6 @@ export function registerIntegration(ctx) {
     const note = plainShared(req.body?.note, 300);
     if (note === null) return res.status(400).json({ error: 'AGENT_INPUT_INVALID', field: 'note', message: 'A note must be text.' });
 
-    // Idempotency and the duplicate rule are the same question asked twice: the
-    // same key replays, and the same opportunity is already shared.
     if (key) {
       const hit = a.opportunityShares.find((s) => s && s.keys?.share?.key === key);
       if (hit) {
@@ -436,20 +339,13 @@ export function registerIntegration(ctx) {
           : 'You cannot share an opportunity with this client right now.',
       });
     }
-    // Charged here: after authorization, so a refused agent never spends the
-    // budget, and BEFORE the board is searched, like
-    // `agent_representation_request` — an unbounded loop of share attempts is
-    // both a way to make a client's notifications ring and a way to probe the
-    // board one id at a time, and the uniform 404 below only hides which answer
-    // it got, not how many times it asked. Sharing and withdrawing draw on one
-    // budget, so the share/withdraw loop cannot outlive it either.
+    // Before the board is searched: unlimited attempts could probe the board one id at a time, and the uniform 404
+    // hides only the answer, not the count. Sharing and withdrawing share one budget.
     if (limitedOr429(res, 'opportunity_share', req.orgUser.id)) return;
     const player = findPlayer(a.clientId);
     const board = opportunityBoardFor(ctx.grassrootsReads, player, { orgCanSee, checkEligibility, distanceBand, scoutingReads: ctx.scoutingReads, orgOf: ctx.byId.org });
     const opp = board.find((o) => o && o.id === req.params.oppId) ?? null;
-    // A uniform 404: whether the opportunity does not exist, is closed, or is
-    // simply not one this client is eligible for, the agent learns the same
-    // thing. Anything else is an existence oracle over the whole board.
+    // Missing, closed and ineligible answer alike, or this is an existence oracle over the board.
     if (!opp) return res.status(404).json({ error: 'OPPORTUNITY_NOT_AVAILABLE', message: 'That opportunity is not on this client\'s board.' });
 
     const already = a.opportunityShares.find((s) => s && s.opportunityId === opp.id && !s.withdrawnAt);
@@ -457,8 +353,6 @@ export function registerIntegration(ctx) {
     if (a.opportunityShares.length >= MAX_OPPORTUNITY_SHARES) {
       return res.status(409).json({ error: 'OPPORTUNITY_SHARE_LIMIT', message: `This relationship already holds ${MAX_OPPORTUNITY_SHARES} shares, which is the most one record keeps.` });
     }
-    // The per-record cap above bounds STORAGE for one relationship. It does not
-    // bound the rate and it does not span clients; the quota above does both.
 
     const at = now();
     const share = unit(() => {
@@ -472,7 +366,7 @@ export function registerIntegration(ctx) {
         keys: key ? { share: { key, fp: payloadFingerprint({ opportunityId: opp.id, note }) } } : {},
         rev: 1, revAt: at,
       };
-      // A share is a row of its agreement (no agreement rev: a share changes no term).
+      // No agreement rev: a share changes no term.
       agentCore.agreements.addShare(a.id, { share: draft }, { history: [{ id: nextId('aud'), at, action: 'opportunity_shared', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: draft.id, via: draft.via } }] });
       broadcast('agent_opportunity_shared', { orgId: a.agencyOrgId, agreementId: a.id, agentUserId: req.orgUser.id });
       notify({ kind: 'player', id: a.clientId }, 'representation_opportunity',
@@ -485,7 +379,7 @@ export function registerIntegration(ctx) {
     });
   });
 
-  /** Withdraw a share. The record stays, marked — it happened. */
+  /** The record stays, marked withdrawn. */
   orgRouter.post('/agent/clients/:id/opportunities/shares/:shareId/withdraw', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
     if (!access.requireCap(req, res, 'clients.opportunities.share')) return;
@@ -495,29 +389,21 @@ export function registerIntegration(ctx) {
     const share = a.opportunityShares.find((s) => s.id === req.params.shareId);
     if (!share) return res.status(404).json({ error: 'OPPORTUNITY_SHARE_NOT_FOUND' });
     if (share.withdrawnAt) return res.json({ share: shareView(share), idempotent: true });
-    // Withdrawing needs no live basis check: an agent whose relationship has
-    // ended must still be able to take back something they put in front of a
-    // client, and taking something away can never widen anyone's access.
-    //
-    // It does draw on the same quota as sharing, because it is the other half of
-    // the loop the quota exists to close.
+    // No live basis check: an agent whose relationship ended can still take back a share, which widens nobody's
+    // access. It draws on the sharing quota, being the other half of the share/withdraw loop.
     if (limitedOr429(res, 'opportunity_share', req.orgUser.id)) return;
     const at = now();
     const updated = unit(() => agentCore.agreements.withdrawShare(a.id, { shareId: share.id, at }, { history: [{ id: nextId('aud'), at, action: 'opportunity_share_withdrawn', by: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name }, detail: { shareId: share.id } }] }));
     res.json({ share: shareView(updated.opportunityShares.find((x) => x.id === share.id)) });
   });
 
-  /** The agent's own list for one client. */
   orgRouter.get('/agent/clients/:id/opportunities/shares', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
     const found = access.findOwnAgreement(req, res, req.params.id);
     if (!found) return;
     if (found.summaryOnly) return res.status(403).json({ error: 'AGENT_ACTION_NOT_PERMITTED' });
-    // The same gate the other two client-scoped reads use. A share list is a list of
-    // things said to a particular client, so it closes when the mandate does — the
-    // agent's own history of having acted is not a standing window onto a person who
-    // is no longer their client. `client_private` and not `opportunity_share`: this
-    // is a read of the relationship, not the regulated act of making a suggestion.
+    // Closes when the mandate does: an agent's history of acting is not a window onto a former client.
+    // `client_private`, because this reads the relationship rather than making a suggestion.
     const decision = decide({ surface: 'client_private', clientId: found.clientId, agentUserId: req.orgUser.id });
     if (decision.allowed !== true) {
       return res.status(403).json({ error: decision.code, rule: decision.rule, message: 'This client\'s record is not open to you right now.' });
@@ -525,12 +411,7 @@ export function registerIntegration(ctx) {
     res.json({ items: found.opportunityShares.map(shareView).sort((x, y) => y.sharedAt - x.sharedAt) });
   });
 
-  /**
-   * The player's own view of what their agents have put in front of them.
-   * Read from the agreements that are active NOW: a share made under a
-   * relationship that has since ended stops appearing, because the suggestion
-   * was part of that relationship. Nothing here applies for anybody.
-   */
+  /** Only active agreements: a share made under a relationship that has ended stops appearing. */
   playerRouter.get('/agent/shared-opportunities', (req, res) => {
     if (req.playerIsMinor) return res.json({ items: [], minor: true });
     const items = [];
@@ -549,23 +430,15 @@ export function registerIntegration(ctx) {
 
   // ------------------------------------ formal decision → transaction
 
-  /**
-   * Whether a finalised formal decision to PROGRESS is the current head of this
-   * case's decision chain. The one thing that crosses the boundary is this
-   * boolean: not the reasons, not the note, not the evidence, not the author
-   * ("Do not expose the internal decision itself").
-   */
+  /** Only this boolean crosses the boundary, never the internal decision itself. */
   function hasFinalProgressDecision(kase) {
     const rows = recruitmentReads.decisions.forRoom(kase.id).filter((d) => d.orgId === kase.orgId);
-    // `chainHead` and `isFormal` are the formal decision's own — an advisory recommendation is not
-    // a formal decision, and a superseded row is not the head.
     const head = chainHead(rows);
     return !!head && isFormal(head) && head.state === 'final' && head.outcome === 'progress' && !head.supersededById;
   }
 
   const handoffOf = (kase) => kase.transactionHandoff ?? null;
 
-  /** The live transaction, if any, that already covers this club's context. */
   function liveTransactionFor(kase) {
     return duplicateTransactionOf(transactionReads.transactions.liveForIndividual(kase.playerId, 'employment_contract'), {
       clientId: kase.playerId,
@@ -577,15 +450,11 @@ export function registerIntegration(ctx) {
     });
   }
 
-  /** Every fact `handoffBlockers` needs, resolved from canonical sources. */
   function handoffFacts(req, kase, { canWrite }) {
     const player = findPlayer(kase.playerId);
     const h = handoffOf(kase);
     const live = liveTransactionFor(kase);
-    // "current compliance can be evaluated". Asked of the client's own
-    // agent where there is one; where the player is unrepresented there is no
-    // agent to evaluate and the question does not arise, so it is satisfied —
-    // the transaction's own creation gate will ask it of whoever opens one.
+    // An unrepresented player has no agent to evaluate; the transaction's creation gate asks whoever opens one.
     const { agreement } = soleActiveAgentFor(kase.playerId);
     const complianceEvaluable = agreement
       ? (compliance?.clearFor ? compliance.clearFor({ agentUserId: agreement.agentUserId, jurisdiction: agreement.jurisdiction, action: 'declare_representation' }).clear === true : false)
@@ -604,12 +473,7 @@ export function registerIntegration(ctx) {
     };
   }
 
-  /**
-   * What the club may see of the handoff. Deliberately thin: the state, when,
-   * who by (a name, because the club's own staff acted), and whether the client
-   * is represented — never WHO represents them unless the player's own
-   * `clubPresence` choice says so, and never the transaction's contents.
-   */
+  /** Whether the client is represented, never by whom (that is the player's `clubPresence` choice). */
   const handoffView = (h, kase) => (h ? {
     id: h.id,
     status: effectiveHandoffStatus(h),
@@ -625,13 +489,7 @@ export function registerIntegration(ctx) {
     honest: 'An invitation to open a transaction workspace. It is not an offer, it carries no terms and no fee, and it commits nobody to anything. The workspace itself is opened by a licensed agent, and every party confirms their own participation.',
   } : null);
 
-  /**
-   * The readiness view. The club sees whether the entrypoint is available
-   * and, if not, every reason — as codes, so the surface can word them and no
-   * internal rationale rides along. "Visibility of button is not authorization":
-   * the mutation below calls the very same function, so a club that forces the
-   * request gets the same answer the screen showed.
-   */
+  /** The mutation below calls the same `handoffBlockers`, so forcing the request gets the answer the screen showed. */
   orgRouter.get('/rooms/:id/transaction-handoff', (req, res) => {
     const got = roomForHandoff(req, res, 'view');
     if (!got) return;
@@ -642,8 +500,7 @@ export function registerIntegration(ctx) {
     res.json({
       handoff: handoffView(h, kase),
       available: blockers.length === 0,
-      // A club that cannot write is told that, and nothing else about the case's
-      // readiness — a viewer does not get a checklist of what a lead could do.
+      // A viewer does not get a checklist of what a lead could do.
       blockers: canWrite ? blockers : ['HANDOFF_NOT_PERMITTED'],
       blockerVocabulary: HANDOFF_BLOCKERS,
       action: 'inviteToTransaction',
@@ -651,7 +508,6 @@ export function registerIntegration(ctx) {
     });
   });
 
-  /** The explicit authorised club action. */
   orgRouter.post('/rooms/:id/transaction-handoff', (req, res) => {
     const got = roomForHandoff(req, res, 'write');
     if (!got) return;
@@ -669,11 +525,8 @@ export function registerIntegration(ctx) {
         message: 'This case cannot be handed to a transaction workspace right now.',
       });
     }
-    // Charged after every blocker, so a club that is not permitted to hand off
-    // cannot spend the budget, and before the two notifications this sends. Only
-    // 'invited' and 'accepted' block a new invitation — a withdrawn one may be
-    // re-issued, deliberately — so without a quota invite/withdraw/invite is an
-    // unbounded way to make a player's and an agent's notifications ring.
+    // A withdrawn invitation may be re-issued, so without a quota invite/withdraw/invite could ring a player's and an
+    // agent's notifications without limit.
     if (limitedOr429(res, 'transaction_handoff', kase.orgId)) return;
     const { agreement } = soleActiveAgentFor(kase.playerId);
     const at = now();
@@ -681,12 +534,9 @@ export function registerIntegration(ctx) {
       id: nextId('hof'), caseId: kase.id, orgId: kase.orgId, playerId: kase.playerId,
       status: 'invited', invitedAt: at, invitedBy: { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name },
       acceptedAt: null, withdrawnAt: null, transactionId: null,
-      // WHETHER the client is represented, resolved now. Not who: that is the
-      // player's disclosure to make, and the handoff does not become a back door
-      // to an agent's identity.
+      // Whether, not who: the handoff must not become a back door to the agent's identity.
       representedAtInvitation: !!agreement,
-      // The agency is recorded so the invitation can be delivered, and because
-      // the transaction that answers it must come from this agency and no other.
+      // The transaction that answers the invitation must come from this agency.
       invitedAgencyOrgId: agreement?.agencyOrgId ?? null,
       invitedAgentUserId: agreement?.agentUserId ?? null,
       keys: { invite: key ? { key } : null },
@@ -694,9 +544,7 @@ export function registerIntegration(ctx) {
     };
     cases.inviteHandoff(kase.id, { handoff: h }, handoffHistory(at, 'transaction_handoff_invited', h.invitedBy, { handoffId: h.id, represented: h.representedAtInvitation }));
     broadcast('transaction_handoff_invited', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
-    // The agent hears, because they are the one who can open the workspace. The
-    // player hears too, because a club has moved from thinking to acting about
-    // them and they should never learn that from their agent alone.
+    // The player hears too: they should never learn a club is acting on them from their agent alone.
     if (agreement?.agentUserId) {
       notify({ kind: 'org_user', id: agreement.agentUserId }, 'representation_transaction',
         `${req.org.name} has invited a transaction workspace for one of your clients. Opening it is your action, and it commits nobody to anything.`, h.id);
@@ -706,7 +554,6 @@ export function registerIntegration(ctx) {
     res.status(201).json({ handoff: handoffView(h, kase), note: 'Invited. A licensed agent opens the workspace, and every party confirms for themselves.' });
   });
 
-  /** Withdraw the invitation. A club may always take back its own invitation. */
   orgRouter.post('/rooms/:id/transaction-handoff/withdraw', (req, res) => {
     const got = roomForHandoff(req, res, 'write');
     if (!got) return;
@@ -714,9 +561,7 @@ export function registerIntegration(ctx) {
     const h = handoffOf(kase);
     if (!h) return res.status(404).json({ error: 'HANDOFF_NOT_FOUND' });
     if (h.status === 'withdrawn') return res.json({ handoff: handoffView(h, kase), idempotent: true });
-    // An invitation that has already been taken up is history: withdrawing it
-    // would not close the transaction, and pretending otherwise would be a lie
-    // about what the club can still control.
+    // Withdrawing a taken-up invitation would not close the transaction, so it is refused.
     if (h.status === 'accepted') {
       return res.status(409).json({ error: 'HANDOFF_ALREADY_ACCEPTED', transactionId: h.transactionId, message: 'A workspace has already been opened from this invitation. Withdrawing the invitation would not close it — act in the workspace instead.' });
     }
@@ -732,11 +577,7 @@ export function registerIntegration(ctx) {
     res.json({ handoff: handoffView(fresh.transactionHandoff, fresh) });
   });
 
-  /**
-   * The AGENT's side of the invitation: the handoffs standing for this
-   * agent's own clients. A reference and an id — enough to open a transaction
-   * from, and nothing about the club's recruitment thinking.
-   */
+  /** Enough to open a transaction from, and nothing of the club's recruitment thinking. */
   orgRouter.get('/agent/handoffs', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
     if (!access.requireCap(req, res, 'transactions.read')) return;
@@ -745,8 +586,7 @@ export function registerIntegration(ctx) {
       const h = kase?.transactionHandoff;
       if (!h || h.invitedAgentUserId !== req.orgUser.id) continue;
       if (effectiveHandoffStatus(h) !== 'invited') continue;
-      // Re-derived NOW: an invitation sent while the relationship was active is
-      // not an entitlement after it ends.
+      // An invitation sent while the relationship was active is not an entitlement after it ends.
       const basis = basisFor({ agentUserId: req.orgUser.id, clientId: h.playerId });
       if (!basis.ok) continue;
       const club = byId.org(h.orgId);
@@ -768,12 +608,8 @@ export function registerIntegration(ctx) {
   });
 
   /**
-   * Called by the transactions module (domains/agents/transactions/) when a transaction names a `recruitmentCaseId`: the
-   * invitation is marked taken up and bound to that transaction, so the club can
-   * see one was opened without seeing inside it, and so a second transaction
-   * cannot be opened from the same invitation.
-   *
-   * Returns a refusal code or null. The transaction route obeys it.
+   * Binds the invitation to the transaction citing it, so the club sees one was opened and a second cannot be opened
+   * from it. Returns a refusal code or null.
    */
   function bindHandoff({ recruitmentCaseId, transactionId, agencyOrgId, agentUserId, clientId, at = now() }) {
     const kase = recruitmentReads.cases.byId(recruitmentCaseId);
@@ -782,9 +618,7 @@ export function registerIntegration(ctx) {
     if (!h) return 'HANDOFF_NOT_FOUND';
     if (h.playerId !== clientId) return 'HANDOFF_SUBJECT_MISMATCH';
     if (effectiveHandoffStatus(h) !== 'invited') return 'HANDOFF_NOT_OPEN';
-    // The invitation was addressed to one agency. Another agency's agent cannot
-    // answer it, even for the same client — that would let an invitation become
-    // a general licence to open a workspace citing this club.
+    // Otherwise an invitation would become a general licence to open a workspace citing this club.
     if (h.invitedAgencyOrgId && h.invitedAgencyOrgId !== agencyOrgId) return 'HANDOFF_NOT_ADDRESSED';
     if (h.invitedAgentUserId && h.invitedAgentUserId !== agentUserId) return 'HANDOFF_NOT_ADDRESSED';
     cases.acceptHandoff(kase.id, { at, transactionId }, handoffHistory(at, 'transaction_handoff_accepted', { userId: agentUserId, name: null }, { handoffId: h.id }));
@@ -796,15 +630,9 @@ export function registerIntegration(ctx) {
   const seam = {
     // decisions
     decide,
-    /**
-     * Does this recruitment case belong to this organisation? The transactions module asks this
-     * before it shows a club a case reference, so that the transaction module
-     * never has to read the cases itself.
-     */
     caseBelongsTo: (caseId, orgId) => recruitmentReads.cases.byId(caseId)?.orgId === orgId,
     basisFor,
-    // The licence fact for a read that is not a regulated ACTION but is
-    // agent work all the same (the Offer projection). One predicate, here.
+    // For agent work that is not a regulated action (the Offer projection).
     licenceCurrentFor,
     activeAgentsFor,
     soleActiveAgentFor,
@@ -814,7 +642,7 @@ export function registerIntegration(ctx) {
     routingModes: CONTACT_ROUTING_MODES,
     // projections
     clubPresenceFor,
-    // the formal decision → transaction handoff, for the transactions create route to bind
+    // handoff
     bindHandoff,
     duplicateTransactionOf,
     handoffStatuses: HANDOFF_STATUSES,

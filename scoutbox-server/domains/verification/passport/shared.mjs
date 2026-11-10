@@ -1,36 +1,23 @@
-// Football Passport pure engine.
-//
-// The Passport is a PROJECTION over existing ScoutBox records (evidence,
-// verification claims/references, trials, assessments, opportunities, objectives,
-// transitions, signings, representation) plus a handful of narrowly scoped
-// Passport records (self-submitted career entries, achievements, preferences,
-// shares, corrections). Nothing here stores a second copy of a fact that
-// another system owns; nothing here scores a player.
-//
-// Everything in this file is a pure function over plain data so the engine
-// is unit-testable without a server.
+// Football Passport engine: a projection over records other systems own, plus a few narrowly scoped Passport
+// records (self-submitted career entries, achievements, preferences, shares, corrections). It scores nobody.
 import { agreementInForce } from '../../agents/core/shared.mjs';
 import crypto from 'node:crypto';
 import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../../recruitment/lifecycle/trial.mjs';
 import { parseStrictDateOnly } from '../../../temporal.mjs';
 
 // ------------------------------------------------------------- provenance
-// One vocabulary for "where did this come from". Ordered least→most
-// authoritative; ranking is used ONLY for conflict precedence per field,
-// never rendered as a score.
+// Ordered least to most authoritative; the rank is used only for conflict precedence, never shown as a score.
 export const PROVENANCE = [
   'player_submitted', 'guardian_submitted', 'system_recorded',
   'historical_migration',
-  // First-party observed training evidence — stronger than a player's
-  // own submission, deliberately weaker than a ScoutBox review or any
-  // organisation confirmation. Never an authoritative current-club source.
+  // Observed training: stronger than a player's own submission, weaker than a ScoutBox review or any organisation
+  // confirmation, and never an authoritative current-club source.
   'box_cam_observed',
   'scoutbox_reviewed', 'verified_coach_confirmed',
   'verified_club_confirmed', 'authoritative_registry',
 ];
 export const provRank = (p) => PROVENANCE.indexOf(p);
 
-/** Map a verification claim's method onto Passport provenance. */
 export function provenanceFromMethod(method) {
   switch (method) {
     case 'authoritative_registry':
@@ -44,7 +31,7 @@ export function provenanceFromMethod(method) {
   }
 }
 
-// Honest per-provenance copy (EN defaults; clients translate by code).
+// English defaults; clients translate by code.
 export const PROVENANCE_COPY = {
   player_submitted: 'Provided by the player. ScoutBox has not independently confirmed this item.',
   guardian_submitted: 'Provided by the player’s guardian. ScoutBox has not independently confirmed this item.',
@@ -58,8 +45,7 @@ export const PROVENANCE_COPY = {
 };
 
 // ------------------------------------------------------------- visibility
-// Narrowing-only levels. An item's level comes from its SOURCE policy;
-// player/guardian selections may narrow, never widen.
+// An item's level comes from its source's policy; player or guardian selections may narrow it, never widen it.
 export const VISIBILITY = ['public', 'recruitment', 'private', 'guardian_only', 'trust_and_safety'];
 export const VIEWERS = ['self', 'guardian', 'pro_club', 'grassroots_club', 'agency', 'other_player', 'public', 'trust_safety'];
 
@@ -77,9 +63,8 @@ export function viewerSees(viewer, visibility) {
   }
 }
 
-// ------------------------------------------------- date precision honesty
-// Football history rarely has exact days. We keep the SOURCE precision:
-// 'day' | 'month' | 'year'; nothing invents a date it was never given.
+// ------------------------------------------------- date precision
+// Football history rarely has exact days, so the source precision is kept: no date is invented.
 export function normWhen(input) {
   if (input == null) return null;
   if (typeof input === 'number' && Number.isFinite(input)) {
@@ -91,7 +76,6 @@ export function normWhen(input) {
     if (!Number.isInteger(y) || y < 1900 || y > 2100) return null;
     const m = input.month ?? input.m;
     if (m != null && Number.isFinite(Number(m))) {
-      // A month that does not exist is refused, not clamped to one that does.
       const mm = Number(m);
       if (!Number.isInteger(mm) || mm < 1 || mm > 12) return null;
       return { t: Date.UTC(y, mm - 1, 1), precision: 'month', y, m: mm };
@@ -101,7 +85,7 @@ export function normWhen(input) {
   if (typeof input === 'string') {
     const dm = /^(\d{4}-\d{2}-\d{2})/.exec(input);
     if (dm) {
-      // A day-precision history date is a day that exists (30 February does not roll to March).
+      // 30 February is refused, not rolled to March.
       const d = parseStrictDateOnly(dm[1]);
       return d.ok ? normWhen(d.t) : null;
     }
@@ -119,22 +103,16 @@ export function whenDisplay(w) {
   return new Date(w.t).toISOString().slice(0, 10);
 }
 
-// ------------------------------------------------------ canonical event id
-// Derived events are deterministic: same source ⇒ same id, no duplicates on
-// re-projection. sourceType + sourceId + semantic IS the identity.
+// ------------------------------------------------------ event id
+// Same source, same id, so re-projection makes no duplicates.
 export const evId = (sourceType, sourceId, semantic) => `pev:${sourceType}:${sourceId}:${semantic}`;
 
 // --------------------------------------------------------------- timeline
-// Input: pre-normalised source arrays (assembled server-side). Output:
-// deterministic, deduplicated, reverse-chronological events with provenance,
-// visibility and a traceable source reference. Ties sort by precision
-// (finer first) then id — stable under equal timestamps.
 export function buildTimeline(src) {
   const events = [];
   const push = (e) => { if (e.when) events.push(e); };
   const org = (id, name) => (id || name ? { id: id ?? null, name: name ?? null } : null);
 
-  // Affiliation claims (already annotated with effective status).
   for (const { claim, eff } of src.affiliations ?? []) {
     if (!eff.displayable) continue;
     const prov = provenanceFromMethod(claim.verificationMethod);
@@ -162,7 +140,6 @@ export function buildTimeline(src) {
     }
   }
 
-  // Self/guardian-submitted career entries.
   for (const c of src.careerEntries ?? []) {
     if (c.withdrawnAt) continue;
     const o = org(null, c.orgName);
@@ -170,8 +147,7 @@ export function buildTimeline(src) {
       id: evId('career', c.id, 'club_joined'), type: 'club_joined', when: normWhen(c.from),
       title: { org: c.orgName, role: c.role ?? null }, org: o,
       provenance: c.submittedBy === 'guardian' ? 'guardian_submitted' : 'player_submitted',
-      // Self-submitted history is recruitment-visible with honest provenance;
-      // it reaches the PUBLIC passport only by explicit selection.
+      // Reaches the public Passport only by explicit selection.
       visibility: 'recruitment', publicEligible: true, current: !c.to, source: { type: 'career_entry', id: c.id },
     });
     if (c.to) {
@@ -184,7 +160,6 @@ export function buildTimeline(src) {
     }
   }
 
-  // Squad membership (invite-approved; grassroots club lists).
   for (const s of src.squads ?? []) {
     push({
       id: evId('squad', `${s.orgId}:${s.rowId}`, 'club_joined'), type: 'club_joined',
@@ -194,15 +169,11 @@ export function buildTimeline(src) {
     });
   }
 
-  // Trials. A trial is NEVER employment. Participation may become publicly
-  // visible only by explicit selection; outcomes stay private by default.
+  // A trial is not employment. Participation becomes public only by explicit selection; outcomes stay private.
   for (const t of src.trials ?? []) {
     const o = org(t.orgId, t.orgName);
-    // A row that carries the operational workflow says whether the player
-    // actually attended — the entry is keyed on a recorded attendance
-    // (attended/partial), never on acceptance, and dated by the first
-    // attended session. A legacy row (`legacy_accepted`) has no attendance
-    // records; it stands for its accepted day and says so (`legacy`).
+    // Keyed on a recorded attendance, not acceptance, and dated by the first attended session. A legacy row has no
+    // attendance records, so it stands for its accepted day and says so (`legacy`).
     if (isLegacyTrial(t)) {
       push({
         id: evId('trial', t.id, 'trial_attended'), type: 'trial_attended',
@@ -228,8 +199,6 @@ export function buildTimeline(src) {
     if (t.report) {
       push({
         id: evId('trial', t.id, 'trial_outcome'), type: 'trial_outcome',
-        // The report writer stamps `filedAt`; `at` is read for rows and
-        // fixtures that carry the older name.
         when: normWhen(t.report.filedAt ?? t.report.at ?? t.proposedDate ?? t.acceptedAt), title: { org: o?.name }, org: o,
         provenance: 'verified_club_confirmed', visibility: 'private_own_org',
         source: { type: 'trial', id: t.id },
@@ -237,8 +206,7 @@ export function buildTimeline(src) {
     }
   }
 
-  // Assessments: existence only, and only once feedback exists for the
-  // player OR for the assessing org itself (raw notes never travel).
+  // Assessments: existence only; raw notes never travel.
   for (const a of src.assessments ?? []) {
     push({
       id: evId('assessment', a.id, 'assessment_completed'), type: 'assessment_completed',
@@ -248,7 +216,6 @@ export function buildTimeline(src) {
     });
   }
 
-  // Coach references: snapshot provenance, never rewritten.
   for (const r of src.references ?? []) {
     push({
       id: evId('reference', r.id, 'reference_received'), type: 'reference_received',
@@ -258,8 +225,7 @@ export function buildTimeline(src) {
     });
   }
 
-  // Evidence: only footage-class additions make the timeline (summary covers
-  // the rest); self-reported provenance stays honest.
+  // Only footage makes the timeline; the summary covers the rest.
   for (const e of src.evidence ?? []) {
     if (e.claimType !== 'footage' || e.superseded) continue;
     push({
@@ -270,7 +236,6 @@ export function buildTimeline(src) {
     });
   }
 
-  // Development objectives — private by default.
   for (const oj of src.objectives ?? []) {
     push({
       id: evId('objective', oj.id, 'development_objective_created'), type: 'development_objective_created',
@@ -286,7 +251,6 @@ export function buildTimeline(src) {
     }
   }
 
-  // Opportunity applications — the player's own activity; outcomes private.
   for (const ap of src.applications ?? []) {
     push({
       id: evId('application', ap.id, 'opportunity_application'), type: 'opportunity_application',
@@ -296,7 +260,6 @@ export function buildTimeline(src) {
     });
   }
 
-  // Transitions — confidential.
   for (const t of src.transitions ?? []) {
     push({
       id: evId('transition', t.id, 'transition_opened'), type: 'transition_opened',
@@ -312,7 +275,6 @@ export function buildTimeline(src) {
     }
   }
 
-  // Signings — club-confirmed career outcomes.
   for (const s of src.signings ?? []) {
     push({
       id: evId('signing', s.id, 'signed'), type: 'signed', when: normWhen(s.ts),
@@ -321,7 +283,6 @@ export function buildTimeline(src) {
     });
   }
 
-  // Post-signing outcome reports — progression notes (recruitment view).
   for (const o2 of src.outcomes ?? []) {
     push({
       id: evId('outcome', o2.id, 'role_or_squad_changed'), type: 'role_or_squad_changed',
@@ -331,7 +292,6 @@ export function buildTimeline(src) {
     });
   }
 
-  // Achievements: provenance follows confirmation state.
   for (const a of src.achievements ?? []) {
     if (a.withdrawnAt) continue;
     push({
@@ -342,9 +302,7 @@ export function buildTimeline(src) {
     });
   }
 
-  // Box Cam: meaningful sessions only (the caller pre-filters — the
-  // career timeline is never flooded with every minor session; detailed
-  // history lives in Box Training).
+  // The caller passes meaningful sessions only, so the timeline is not flooded with every minor session.
   for (const b of src.boxSessions ?? []) {
     push({
       id: evId('box_session', b.id, 'box_session_completed'), type: 'box_session_completed',
@@ -364,7 +322,6 @@ export function buildTimeline(src) {
     });
   }
 
-  // Position changes (self-declared history).
   for (const p of src.positionHistory ?? []) {
     push({
       id: evId('position', p.id, 'position_change'), type: 'position_change', when: normWhen(p.from),
@@ -373,8 +330,7 @@ export function buildTimeline(src) {
     });
   }
 
-  // Dedupe on canonical id, then deterministic ordering: newest first,
-  // finer precision first on ties, id as the final tiebreak.
+  // Newest first, finer precision first on ties, then id.
   const seen = new Map();
   for (const e of events) if (!seen.has(e.id)) seen.set(e.id, e);
   const precRank = { day: 0, month: 1, year: 2 };
@@ -383,10 +339,8 @@ export function buildTimeline(src) {
 }
 
 // ------------------------------------------------------------ club history
-// Best-evidence career rows. Authoritative rows win display for the same
-// organisation/period; self entries that duplicate an authoritative row are
-// folded into it (and flagged for the self view). A trial NEVER creates a
-// club-history row.
+// Self entries that duplicate an authoritative row are folded into it (and flagged for the self view). A trial
+// never creates a club-history row.
 export function clubHistory(src) {
   const rows = [];
   for (const { claim, eff } of src.affiliations ?? []) {
@@ -432,14 +386,8 @@ export function clubHistory(src) {
 }
 
 // --------------------------------------------------------- current status
-// Field-level precedence: authoritative registry > verified club >
-// verified coach > ScoutBox review > guardian > player. Player input NEVER
-// silently wins over an authoritative current record — it becomes a flagged
-// conflict for the self view instead.
-/**
- * The representation headline: the player's active, client-confirmed agent relationship (repositories/agentCore.mjs),
- * naming the licensed individual and their agency.
- */
+// Player input never silently wins over an authoritative current record: it becomes a flagged conflict for the self
+// view instead.
 export function currentStatus({ history, prefs, agreements = [], identity = null, now = Date.now() }) {
   const authoritative = history.rows.find((r) => r.current && provRank(r.provenance) >= provRank('scoutbox_reviewed'));
   const selfCurrent = history.rows.find((r) => r.current && (r.provenance === 'player_submitted' || r.provenance === 'guardian_submitted'));
@@ -453,8 +401,7 @@ export function currentStatus({ history, prefs, agreements = [], identity = null
   }
   const anyCurrent = history.rows.find((r) => r.current);
   const currentClub = authoritative ?? anyCurrent ?? null;
-  // The relationship in force now (agreementInForce: the access predicate's own rule, so a mandate that has not
-  // started yet is not the headline).
+  // The access predicate's own rule, so a mandate that has not started yet is not the headline.
   const activeRep = (agreements ?? []).find((a) => agreementInForce(a, now)) ?? null;
   return {
     currentClub: currentClub && {
@@ -478,8 +425,7 @@ export function currentStatus({ history, prefs, agreements = [], identity = null
 }
 
 // -------------------------------------------------- temporal consistency
-// Impossible chronology becomes a TEMPORAL_CONFLICT flag for correction —
-// never an automatic fraud accusation.
+// Impossible chronology is flagged for correction, not treated as fraud.
 export function temporalConflicts({ events = [], history = [], dob = null }) {
   const out = [];
   const dobT = dob ? normWhen(String(dob))?.t ?? null : null;
@@ -496,13 +442,11 @@ export function temporalConflicts({ events = [], history = [], dob = null }) {
 }
 
 // ------------------------------------------------------------- gap engine
-// Deterministic, versioned, non-shaming. Each rule: stable id, version,
-// condition over facts, explanation code (clients translate), suggested
-// action, auto-resolution = condition turning false. NO AI, NO scores.
+// A gap resolves itself when its condition turns false.
 export const GAP_RULES_VERSION = 2;
 export const GAP_RULES = [
   { id: 'gap.full_match_recent', v: 1, category: 'match_evidence', test: (f) => !f.hasRecentFullMatch },
-  // v2: contextual and optional — never daily-training pressure.
+  // Contextual and optional: not daily-training pressure.
   { id: 'gap.training_evidence', v: 2, category: 'training', test: (f) => !f.hasRecentTrainingEvidence },
   { id: 'gap.coach_reference', v: 1, category: 'references', test: (f) => f.referenceCount === 0 },
   { id: 'gap.current_club_confirmed', v: 1, category: 'club_history', test: (f) => !f.hasConfirmedCurrentClub },
@@ -516,7 +460,7 @@ export function evaluateGaps(facts) {
   return GAP_RULES.filter((r) => r.test(facts)).map((r) => ({ id: r.id, version: r.v, category: r.category }));
 }
 
-// Deterministic descriptors — coverage words, never ability, never a score.
+// Coverage words, not ability or a score.
 export function completeness(facts) {
   const gaps = evaluateGaps(facts);
   const satisfied = GAP_RULES.length - gaps.length;
@@ -527,8 +471,7 @@ export function completeness(facts) {
     evidenceCoverage,
     gaps,
     eligibility: {
-      // "x of y generic checks": the denominator is EXACTLY the versioned
-      // generic rule list above — never a club's confidential criteria.
+      // The denominator is the generic rule list, never a club's confidential criteria.
       satisfied, total: GAP_RULES.length, rulesVersion: GAP_RULES_VERSION,
       missing: gaps.map((g) => g.id),
     },
@@ -540,9 +483,7 @@ export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).diges
 export const mintShareSecret = () => crypto.randomBytes(24).toString('base64url');
 export { SHARE_MODES } from '../../../repositories/passport.mjs';
 
-/** Pure share validation (no consumption — shares are multi-use until
- *  revoked/expired). Exact failure codes; unknown & revoked & expired all
- *  surface identically at the route (404 concealment). */
+/** Shares are multi-use until revoked or expired. The route shows every failure as the same 404. */
 export function shareProblem(share, { now = Date.now(), playerRemoved = false } = {}) {
   if (!share) return 'SHARE_UNKNOWN';
   if (share.revokedAt) return 'SHARE_REVOKED';
@@ -552,8 +493,7 @@ export function shareProblem(share, { now = Date.now(), playerRemoved = false } 
 }
 
 // ------------------------------------------------------------- projection
-// The ONE viewer filter. Client apps receive already-filtered payloads and
-// never reconstruct the Passport from raw endpoints.
+// Client apps receive already-filtered payloads and never reconstruct the Passport from raw endpoints.
 const OWN_ORG_VIS = new Set(['recruitment_own_org', 'private_own_org']);
 function eventVisibleTo(e, viewer, { orgId = null, publicSelections = new Set() } = {}) {
   const vis = e.visibility;
@@ -562,35 +502,18 @@ function eventVisibleTo(e, viewer, { orgId = null, publicSelections = new Set() 
   if (viewer === 'guardian') return vis !== 'trust_and_safety';
   if (viewer === 'public' || viewer === 'other_player') {
     if (vis === 'public') return true;
-    // Opt-in public items: allowed ONLY where the source is public-eligible.
     return !!e.publicEligible && publicSelections.has(e.id);
   }
-  // org viewers (pro/grassroots/agency — upstream gates already applied)
+  // Organisation viewers: the standing gates have already run.
   if (vis === 'public' || vis === 'recruitment') return true;
   if (OWN_ORG_VIS.has(vis)) return !!orgId && e.org?.id === orgId;
   return false;
 }
 
 /**
- * The Football Passport CONTENT revision.
- *
- * `passportVersion` is the projection SCHEMA version and is deliberately still
- * the constant 1. What a decision snapshot needs is a token that says *which Passport truth* a club was looking at when it
- * decided. This is that token: a stable hash over the canonical inputs.
- *
- * Two properties matter more than the hash itself:
- *
- *   1. It does NOT move on a read. Everything derived from "now" — the rolling
- *      development-activity window, `lastEvidenceDays`, the recency flags in
- *      completeness — is excluded, because otherwise the revision would change
- *      overnight while nothing about the player had changed.
- *   2. It DOES move when passport truth moves: club history and its provenance,
- *      the confirmed current club, position, identity assurance, evidence
- *      identity and verification tier, references, achievements and their
- *      confirmations, and verified Combine results.
- *
- * It is a fingerprint, not a sequence: it cannot be compared for order, only
- * for equality, which is exactly what "is this the same Passport I saw?" needs.
+ * A fingerprint of the Passport's content, so a decision snapshot can say which Passport a club saw
+ * (`passportVersion` is the schema version). Everything derived from "now" is excluded, or the revision would change
+ * overnight while nothing about the player had. Comparable for equality only, not order.
  */
 export function passportRevision(full) {
   if (!full) return null;
@@ -616,8 +539,7 @@ export function passportRevision(full) {
     push('ach', `${a.id}:${a.confirmation ? 'confirmed' : 'self'}:${a.withdrawnAt ? 'withdrawn' : 'live'}`);
   }
   for (const c of [...(full.combine?.results ?? [])].sort((a, b) => (String(a.protocolId) < String(b.protocolId) ? -1 : 1))) {
-    // An invalidated session drops its result from this set entirely, so the
-    // revision moves on invalidation and moves back on restoration.
+    // An invalidated result is absent here, so the revision moves on invalidation and back on restoration.
     push('cmb', `${c.protocolId}@${c.protocolVersion ?? ''}:${c.measuredValue ?? ''}:${c.combineVerified ? 1 : 0}`);
   }
   for (const c of [...(full.revisionSources?.careerEntries ?? [])].sort((a, b) => (a.id < b.id ? -1 : 1))) {
@@ -651,19 +573,16 @@ export function projectPassport(full, viewer, opts = {}) {
     }));
 
   const base = {
-    // Schema version of this projection and the CONTENT revision of the
-    // canonical facts behind it.
     passportVersion: 1,
     passportRevision: passportRevision(full),
     player: {
       id: full.player.id, name: full.player.name,
       age: full.player.age, position: full.player.position ?? null,
-      // location: city-level only; precise coordinates never leave the
-      // existing discovery surfaces.
+      // City only; precise coordinates never leave the discovery surfaces.
       location: full.player.city ?? null,
       level: full.player.level ?? null,
     },
-    identity: full.identity, // structured identity assurance (or null)
+    identity: full.identity,
     status: full.status,
     note: 'A Football Passport describes evidence and provenance. It is not a rating of football ability and not a ScoutBox endorsement.',
   };
@@ -694,11 +613,9 @@ export function projectPassport(full, viewer, opts = {}) {
     case 'agency': {
       return {
         ...base, viewer,
-        // Existing redaction policy holds: a minor's location is stripped
-        // from every org view (mirrors playerViewForOrg).
+        // A minor's location is stripped from every org view, as in playerViewForOrg.
         player: { ...base.player, location: full.player.minor ? null : base.player.location },
-        // Conflict flags are a conversation between the player and T&S —
-        // recruiting orgs get the resolved display, never the dispute.
+        // Conflict flags are between the player and T&S: recruiting orgs get the resolved display, not the dispute.
         status: {
           currentClub: full.status.currentClub,
           positions: full.status.positions,
@@ -716,14 +633,9 @@ export function projectPassport(full, viewer, opts = {}) {
         trials: (full.trialsForOrg ?? []).map((t) => ({ id: t.id, org: t.orgName, date: t.proposedDate ?? null, hasReport: !!t.report })),
         availability: full.status.availability,
         representation: viewer === 'agency' || full.player.age >= 18 ? full.status.representation : null,
-        // Development activity is an aggregate the player (or guardian)
-        // explicitly opted into sharing for recruitment — never raw home
-        // sessions, never automatic.
+        // Development activity and Combine results are aggregates shown only on the player's or guardian's explicit
+        // recruitment opt-in. A club's own Combine request reads results through the Combine endpoint instead.
         developmentActivity: full.boxShareRecruitment ? full.developmentActivity ?? null : null,
-        // At-Home Combine verified results, aggregate and recruitment-safe —
-        // shown to a recruiting org only on the player's/guardian's explicit
-        // recruitment opt-in. A club's own Combine request reads results
-        // through the dedicated Combine endpoint instead.
         combine: full.boxShareRecruitment ? full.combine ?? null : null,
         shareMode,
       };
@@ -736,7 +648,7 @@ export function projectPassport(full, viewer, opts = {}) {
         identity: full.identity ? { confirmed: full.identity.confirmed, assurance: full.identity.assurance, label: full.identity.label } : null,
         status: {
           currentClub: full.status.currentClub && provRank(full.status.currentClub.provenance) >= provRank('scoutbox_reviewed')
-            ? full.status.currentClub : null, // public shows CONFIRMED current club only
+            ? full.status.currentClub : null, // confirmed current club only
         },
         timeline: filterEvents('public'),
         clubHistory: historyRows('public').filter((r) => provRank(r.provenance) >= provRank('scoutbox_reviewed') || publicSelections.has(`hist:${r.orgName}`)),
@@ -769,8 +681,7 @@ function achievementView(a, viewer) {
   return {
     id: a.id, title: a.title, orgName: a.orgName ?? null, when: a.when ? whenDisplay(normWhen(a.when)) : null,
     provenance: a.confirmation ? a.confirmation.provenance : (a.submittedBy === 'guardian' ? 'guardian_submitted' : 'player_submitted'),
-    // The ORGANISATION stands behind a confirmation — individual staff
-    // identity is never exposed to the player through the Passport.
+    // The organisation stands behind a confirmation; staff identity is not exposed to the player.
     confirmedBy: a.confirmation ? a.confirmation.orgName ?? null : null,
     provenanceCopy: a.confirmation ? PROVENANCE_COPY[a.confirmation.provenance] : PROVENANCE_COPY[a.submittedBy === 'guardian' ? 'guardian_submitted' : 'player_submitted'],
     ...(viewer === 'self' || viewer === 'guardian' ? { withdrawable: !a.confirmation } : {}),

@@ -1,12 +1,8 @@
 /**
- * The policy evaluation layer (pure).
+ * The pure policy evaluation layer: routes hand it the policy set, facet states and clock rather than branching on
+ * country.
  *
- * Routes never say `if (country === 'GB')`. They hand the applicable policy
- * set, the agent's facet states, the subject and the clock to this module and
- * get a structured decision back. Everything here is a function over plain
- * records; nothing reads storage, nothing answers HTTP.
- *
- * Frozen semantics (DR-52, docs/product/agents.md):
+ * Rule statuses (DR-52, docs/product/agents.md):
  *   ACTIVE                 applied
  *   SUSPENDED              not applied; reason RULE_SUSPENDED; never a permission
  *   PARTIALLY_SUSPENDED    params.activeLimbs applied; the rest as SUSPENDED
@@ -34,12 +30,8 @@ export const POLICY_FACETS = Object.freeze(['fifa_licence', 'national_registrati
 const DAY = 24 * 60 * 60 * 1000;
 
 /**
- * A policy boundary (`effectiveFrom` / `effectiveTo`) as an instant: a strict
- * DATE_ONLY (UTC midnight of that day) or a finite integer timestamp; NaN
- * otherwise. `Date.parse` alone would read `2026-02-30` as 2 March, so a
- * policy could start on a day that does not exist. NaN fails every window
- * comparison, so an unreadable boundary means the version is never selected
- * (closed).
+ * Strict, because `Date.parse` reads `2026-02-30` as 2 March. NaN fails every window comparison, so an unreadable
+ * boundary means the version is never selected.
  */
 const dateMs = (iso) => {
   if (typeof iso === 'string') { const p = parseStrictDateOnly(iso); return p.ok ? p.t : NaN; }
@@ -48,7 +40,7 @@ const dateMs = (iso) => {
 
 // ------------------------------------------------------------ versions
 
-/** The published version of a jurisdiction that is in effect at `now` (latest policyVersion wins among the effective ones). */
+/** The latest policyVersion among those in effect wins. */
 export function selectPolicyVersion(rows, jurisdiction, now = Date.now()) {
   let best = null;
   for (const r of rows ?? []) {
@@ -61,11 +53,7 @@ export function selectPolicyVersion(rows, jurisdiction, now = Date.now()) {
   return best;
 }
 
-/**
- * The applicable policy set for a list of member associations. FIFA (`INT`)
- * always applies; each other MA contributes its national entry. A missing
- * entry is reported, never silently skipped.
- */
+/** FIFA (`INT`) always applies. A missing national entry is reported, never skipped. */
 export function applicablePolicySet(rows, memberAssociations, now = Date.now()) {
   const mas = [...new Set(['INT', ...(memberAssociations ?? []).filter((m) => typeof m === 'string' && m && m !== 'INT')])];
   const policies = []; const missing = [];
@@ -76,7 +64,6 @@ export function applicablePolicySet(rows, memberAssociations, now = Date.now()) 
   return { policies, missing, memberAssociations: mas };
 }
 
-/** Find a rule entry in a policy set, with its owning version. */
 export function findRule(policySet, ruleId) {
   for (const p of policySet ?? []) {
     if (p?.rules && Object.hasOwn(p.rules, ruleId)) return { rule: p.rules[ruleId], policy: p };
@@ -84,7 +71,7 @@ export function findRule(policySet, ruleId) {
   return null;
 }
 
-/** The rule's operative status at `now` (PENDING_IMPLEMENTATION before its own effectiveFrom stays pending; after, it reads as ACTIVE). */
+/** PENDING_IMPLEMENTATION reads as ACTIVE from the rule's own effectiveFrom. */
 export function ruleStatusAt(entry, now = Date.now()) {
   if (!entry?.rule) return 'UNKNOWN';
   const st = entry.rule.ruleStatus;
@@ -106,7 +93,7 @@ const reasonOf = (code, entry, extra = {}) => ({
   ...extra,
 });
 
-/** Look up a rule and stamp its status; a missing rule is an UNKNOWN entry so it still produces a reason. */
+/** A missing rule is an UNKNOWN entry, so it still produces a reason. */
 export function ruleAt(policySet, ruleId, now = Date.now()) {
   const found = findRule(policySet, ruleId);
   if (!found) return { ruleId, rule: null, policy: null, status: 'UNKNOWN' };
@@ -115,12 +102,7 @@ export function ruleAt(policySet, ruleId, now = Date.now()) {
 
 // ------------------------------------------------------------ scope
 
-/**
- * Jurisdiction resolution. `national` when every MA in play
- * is the same national association with an encoded national policy;
- * `international` when INT or more than one MA is involved; `unknown` when
- * nothing usable was supplied.
- */
+/** `national` for a single non-INT association; `international` when INT or several are involved. */
 export function resolveScope(jurisdictions) {
   const mas = [...new Set((jurisdictions ?? []).map((j) => (typeof j === 'string' ? j : j?.memberAssociation)).filter((m) => typeof m === 'string' && m))];
   if (!mas.length) return { scope: 'unknown', memberAssociations: [] };
@@ -138,7 +120,6 @@ const facetStateOf = (facets, facet, ma) => {
   return typeof g === 'string' ? g : (g?.state ?? 'UNVERIFIED');
 };
 
-/** Map a required facet's effective state to the objective refusal the route answers with. */
 export function facetRefusalCode(facet, state) {
   if (state === 'VERIFIED') return null;
   if (state === 'STALE') return 'AGENT_VERIFICATION_STALE';
@@ -168,11 +149,7 @@ const finish = (d, policySet) => {
   return d;
 };
 
-/**
- * Require a facet under a rule: an ACTIVE rule that names the facet makes it
- * mandatory (fail closed on anything but VERIFIED); a non-ACTIVE rule only
- * contributes a reason.
- */
+/** An active rule makes the facet mandatory; a non-active one only contributes a reason. */
 function requireFacet(d, entry, facet, ma, facets, flag) {
   const st = entry.status;
   if (st === 'ACTIVE' || st === 'JURISDICTION_OVERRIDE') {
@@ -197,16 +174,8 @@ function requireFacet(d, entry, facet, ma, facets, flag) {
 }
 
 /**
- * Evaluate the policy for a regulated action.
- *
- * @param {object} p
- * @param {string} p.action           one of POLICY_ACTIONS
- * @param {string[]} p.memberAssociations  the MAs the act touches (the agreement's jurisdiction; a context's parties' MAs)
- * @param {object} p.facets           the agent's facets as effective states: { fifa_licence: 'VERIFIED', national_registration: { ENG: 'VERIFIED' }, domestic_authorisation: {…}, minors_authorisation: {…} }
- * @param {object[]} p.policySet      applicable policy rows (from applicablePolicySet)
- * @param {string[]} p.missingPolicies  MAs with no encoded entry
- * @param {object[]} [p.otherExclusiveAgreements]  other agents' active EXCLUSIVE agreements with the subject, ANONYMISED: [{ endAt }]
- * @param {number} p.now
+ * `facets` are effective states, e.g. `{ fifa_licence: 'VERIFIED', national_registration: { ENG: 'VERIFIED' } }`.
+ * `otherExclusiveAgreements` are other agents' active exclusive agreements, anonymised to `[{ endAt }]`.
  */
 export function evaluatePolicy({ action, memberAssociations = [], facets = {}, policySet = [], missingPolicies = [], otherExclusiveAgreements = [], now = Date.now() }) {
   const d = emptyDecision();
@@ -220,7 +189,7 @@ export function evaluatePolicy({ action, memberAssociations = [], facets = {}, p
   }
   const mas = [...new Set(['INT', ...memberAssociations.filter((m) => m && m !== 'INT')])];
 
-  // The FIFA licence: personal, required for every regulated act (FIFA-8.1 / 11.1 / 12.2, ACTIVE).
+  // The FIFA licence is personal and required for every regulated act (FIFA-8.1 / 11.1 / 12.2).
   requireFacet(d, ruleAt(policySet, 'FIFA-8.1', now), 'fifa_licence', null, facets, null);
   const approachRule = ruleAt(policySet, action === 'approach_minor' ? 'FIFA-13.1' : 'FIFA-12.2', now);
   if (approachRule.status !== 'ACTIVE') d.reasons.push(reasonOf(approachRule.status === 'UNKNOWN' ? 'POLICY_NOT_ENCODED' : 'RULE_STATUS_UNCERTAIN', approachRule));
@@ -239,19 +208,18 @@ export function evaluatePolicy({ action, memberAssociations = [], facets = {}, p
   }
   if (action === 'approach_minor') {
     const acc = ruleAt(policySet, 'FIFA-13.2', now);
-    // FIFA minors accreditation: recorded as a facet on the INT scope. Required by the ACTIVE rule.
+    // FIFA minors accreditation is recorded as a facet on the INT scope.
     requireFacet(d, acc, 'minors_authorisation', 'INT', facets, 'requiresMinorAccreditation');
   }
 
-  // Exclusive-agreement approach window (FIFA-16.1b / ENG-8.1b): UNDER_LEGAL_REVIEW →
-  // manual review whenever the rule WOULD decide, never a block, never the other agent's identity.
+  // Exclusive-agreement approach window (FIFA-16.1b / ENG-8.1b): while under legal review, manual review whenever
+  // the rule would decide, never a block and never the other agent's identity.
   if ((action === 'approach_adult') && (otherExclusiveAgreements ?? []).length) {
     for (const ruleId of ['FIFA-16.1b', ...mas.filter((m) => m !== 'INT').map((m) => `${m}-8.1b`)]) {
       const e = ruleAt(policySet, ruleId, now);
       if (!e.rule) continue;
       if (e.status === 'ACTIVE') {
-        // If a body ever settles this rule as ACTIVE, the text's own window applies: an approach is
-        // permitted only in the final two months of the other agreement.
+        // The text's own window: an approach only in the final two months of the other agreement.
         const windowMs = (e.rule.params?.exclusivityWindowMonths ?? 2) * 30 * DAY;
         const insideWindow = otherExclusiveAgreements.every((a) => typeof a?.endAt === 'number' && a.endAt - now <= windowMs);
         if (!insideWindow) { d.blocked = true; d.reasons.push(reasonOf('EXCLUSIVITY_WINDOW_CLOSED', e)); }
@@ -270,9 +238,7 @@ export function evaluatePolicy({ action, memberAssociations = [], facets = {}, p
 
 /** FFAR "Minor" / FA "Minor": under 18. A separate predicate from the visibility age of majority (DR-14). */
 export function isRegulatoryMinor(dob, now = Date.now()) {
-  // `new Date(null)` is the EPOCH, not an invalid date, and V8 rolls 30 February
-  // over to March: either would give a confident wrong age. Anything parseDob
-  // rejects is unknown, and unknown blocks (evaluateMinorGate).
+  // `new Date(null)` is the epoch and V8 rolls 30 February into March; an unparseable dob is unknown, which blocks.
   const day = parseDob(dob);
   if (day === null) return null;
   const b = new Date(`${day}T00:00:00Z`);
@@ -284,15 +250,10 @@ export function isRegulatoryMinor(dob, now = Date.now()) {
 }
 
 /**
- * The earliest permitted approach date for a minor under ONE jurisdiction's
- * timing rule, or null with a reason when the parameter is not encoded.
- * England: 1 September of the Academic Year (1 Sep–31 Aug) in which the minor
- * reaches 16 (FA 2026-27 reg. 5.1). FIFA: six months before the employing
- * country's first-contract age — a parameter that is UNKNOWN everywhere.
+ * England: 1 September of the academic year (1 Sep–31 Aug) in which the minor reaches 16 (FA 2026-27 reg. 5.1).
+ * FIFA: six months before the employing country's first-contract age, a parameter unknown everywhere.
  */
 export function earliestPermittedApproachAt(dob, entry, { employingCountry = null } = {}) {
-  // `new Date(null)` is the epoch and `new Date('2010-02-30')` is 2 March; a
-  // formula over either would give a confident, wrong date, hence parseDob.
   const day = parseDob(dob);
   if (day === null || !entry?.rule) return { at: null, reason: 'MINOR_TIMING_NOT_ENCODED' };
   const b = new Date(`${day}T00:00:00Z`);
@@ -318,20 +279,8 @@ export function earliestPermittedApproachAt(dob, entry, { employingCountry = nul
 export const MINOR_PATHWAY_PRODUCTION_ENABLED = Object.freeze({ ENG: false, INT: false, USA: false });
 
 /**
- * The minors compliance gate: jurisdiction-aware, guardian-first,
- * accreditation-bound, fail-closed. Evaluates readiness; it exposes no
- * discovery and the route layer never lets an agency see a minor.
- *
- * @param {object} p
- * @param {string} p.dob                       the minor's date of birth (server record, never client-supplied)
- * @param {string} p.memberAssociation         the minor's jurisdiction
- * @param {string} [p.employingCountry]        for the FIFA formula
- * @param {object} p.facets                    the agent's facets (effective states)
- * @param {object[]} p.policySet
- * @param {string[]} p.missingPolicies
- * @param {object[]} p.guardianConsents        [{ kind, grantedAt, revokedAt, subjectId }] for THIS minor and THIS agent
- * @param {boolean} p.blocked                  block / safeguarding state
- * @param {number} p.now
+ * Readiness only; no route lets an agency see a minor. `dob` is the server's record, never client-supplied;
+ * `guardianConsents` are for this minor and this agent.
  */
 export function evaluateMinorGate({ dob, memberAssociation, employingCountry = null, facets = {}, policySet = [], missingPolicies = [], guardianConsents = [], blocked = false, now = Date.now() }) {
   const d = emptyDecision();
@@ -342,7 +291,7 @@ export function evaluateMinorGate({ dob, memberAssociation, employingCountry = n
   if (!minor) { d.reasons.push({ code: 'NOT_A_MINOR', ruleId: null, ruleStatus: 'ACTIVE', regulator: null, jurisdiction: memberAssociation ?? null, policyVersion: null }); return finish(d, policySet); }
   if (blocked) { d.blocked = true; d.reasons.push({ code: 'SAFEGUARDING_BLOCK', ruleId: null, ruleStatus: 'ACTIVE', regulator: null, jurisdiction: memberAssociation ?? null, policyVersion: null }); }
 
-  // Which timing rule governs: the minor's national ACTIVE entry; else FIFA's formula (parameter unknown → INSUFFICIENT_DATA).
+  // The minor's national timing rule, else FIFA's formula (whose parameter is unknown, so INSUFFICIENT_DATA).
   const national = memberAssociation && memberAssociation !== 'INT' ? policySet.find((p) => p.jurisdiction === memberAssociation) : null;
   const timingRuleId = national ? Object.keys(national.rules ?? {}).find((id) => national.rules[id]?.params?.formula) ?? null : null;
   const timing = timingRuleId ? ruleAt(policySet, timingRuleId, now) : ruleAt(policySet, 'FIFA-13.1', now);
@@ -364,13 +313,13 @@ export function evaluateMinorGate({ dob, memberAssociation, employingCountry = n
       d.reasons.push(reasonOf('MINOR_TIMING_SATISFIED', timing));
     }
   }
-  // Licence, registration, minors authorisation — the individual's own facets, never the agency's.
+  // The individual's own facets, never the agency's.
   const licence = evaluatePolicy({ action: 'approach_minor', memberAssociations: [memberAssociation].filter(Boolean), facets, policySet, missingPolicies: [], now });
   for (const k of ['requiresNationalRegistration', 'requiresDomesticAuthorisation', 'requiresMinorAccreditation', 'requiresManualReview']) if (licence[k]) d[k] = true;
   if (licence.blocked) d.blocked = true;
   d.facetGaps.push(...licence.facetGaps);
   d.reasons.push(...licence.reasons.filter((r) => r.code !== 'FACET_VERIFIED' || true));
-  // Guardian first: a prior, unrevoked approach consent must PRE-EXIST (no retroactive consent).
+  // The guardian's unrevoked approach consent must pre-exist; it cannot be retroactive.
   const approachConsent = (guardianConsents ?? []).find((c) => c && c.kind === 'guardian_approach' && readInstant(c.grantedAt) !== null && c.grantedAt <= now && c.revokedAt == null);
   if (!approachConsent) { d.requiresGuardian = true; d.reasons.push(reasonOf('GUARDIAN_CONSENT_REQUIRED', timing, { consentKind: 'guardian_approach' })); }
   else d.reasons.push(reasonOf('GUARDIAN_CONSENT_PRESENT', timing, { consentKind: 'guardian_approach' }));
@@ -379,11 +328,7 @@ export function evaluateMinorGate({ dob, memberAssociation, employingCountry = n
 
 // ------------------------------------------------------------ representation scope
 
-/**
- * The action must fit the agreement. No exceptions are
- * invented: anything but an ACTIVE, client-confirmed, unexpired agreement
- * whose scope and jurisdiction cover the act is refused.
- */
+/** Agreement scopes that cover each context type. */
 export const CONTEXT_TYPE_SCOPES = Object.freeze({
   employment_contract: ['employment'],
   transfer: ['transfer', 'employment'],
@@ -400,7 +345,7 @@ export function representationScopeProblem({ agreement, effectiveStatus, confirm
   const scope = Array.isArray(agreement.scope) ? agreement.scope : [];
   if (!needed.some((s) => scope.includes(s))) return { error: 'REPRESENTATION_SCOPE_INSUFFICIENT', agreementId: agreement.id, required: needed };
   const j = agreement.jurisdiction ?? null;
-  // An agreement declared for one national association does not authorise an act in another; INT covers international dimension only.
+  // An agreement for one national association does not authorise an act in another; INT covers only the international dimension.
   const foreign = memberAssociations.filter((m) => m && m !== 'INT' && j && j !== 'INT' && m !== j);
   if (foreign.length) return { error: 'REPRESENTATION_SCOPE_INSUFFICIENT', agreementId: agreement.id, required: memberAssociations };
   return null;

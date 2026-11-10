@@ -1,18 +1,7 @@
-// Box Cam sessions: server-owned identity, liveness, structured
-// observation ingestion and server-derived results.
-//
-// Integrity model: the SERVER mints every Box Session (id + fresh nonce +
-// liveness challenge + expiry). Clients stream aggregated observation
-// events (never per-frame rows) bound to the session nonce with a strictly
-// monotonic sequence and drift-bounded timestamps. The final result is
-// derived exclusively from ACCEPTED observations and the server's own
-// clock — client-supplied `verifiedActiveMs`, `verifiedReps`,
-// `verificationState` or provenance fields are ignored wherever they
-// appear. Box Cam Verified can only originate here: an uploaded video can
-// never become `box_cam_observed`.
-//
-// A session is a row of repositories/boxCam.mjs. The nonce is stored only as its hash; the accepted observations are
-// appended as rows per batch (`sessions.recordBatch`) and read once, by finalize.
+// The server mints every Box Session (id, nonce, liveness challenge, expiry). Clients stream aggregated observation
+// events bound to the nonce with a strictly monotonic sequence and drift-bounded timestamps. The result is derived
+// only from accepted observations and the server's clock; client-supplied result or provenance fields are ignored.
+// An uploaded video cannot become `box_cam_observed`. The nonce is stored only as its hash.
 import crypto from 'node:crypto';
 import { isAdult } from '../../../domain.mjs';
 import {
@@ -61,7 +50,6 @@ export function registerBoxCamSessions(ctx) {
   const guardianOwnsChild = (g, id) => g.childIds.includes(id);
 
   // ----------------------------------------------------------- rate limits
-  // The shared limiter and its named policy (see domains/platform/rateLimit.mjs).
   const limited = limitCheck(ctx.rateLimit);
 
   const caps = (session) => {
@@ -93,7 +81,6 @@ export function registerBoxCamSessions(ctx) {
     provenanceLabel: s.verificationState === 'verified' ? 'Box Cam Verified' : s.verificationState === 'partially_verified' ? 'Captured by Box Cam' : null,
     provenanceDetail: s.verificationState && ['verified', 'partially_verified'].includes(s.verificationState) ? boxCamDetail(s) : null,
     createdAt: s.createdAt,
-    // The integrity facts are constants of every server-minted session (worked out, not stored).
     ...(includeIntegrity ? { resultHash: s.resultHash ?? null, integrity: s.id ? { minted: 'server', drift: DRIFT_MS } : null, lastSeq: s.lastSeq, batches: s.batches } : {}),
   });
   ctx.boxSessionView = sessionView;
@@ -129,11 +116,8 @@ export function registerBoxCamSessions(ctx) {
     };
   }
 
-  // Server-owned session minting, shared with the At-Home Combine layer
-  // so a Combine Attempt binds to a REAL Box Cam session and inherits
-  // every integrity property here — the client never mints a session. Returns
-  // `{ session, nonce }`; the caller hands the nonce back once. It joins the
-  // caller's unit of work (the attempt is written with it).
+  // Shared with Combine so an attempt binds to a real Box Cam session. Joins the caller's unit of work; the caller
+  // hands the nonce back once.
   ctx.boxMintSession = ({ player, drill, target, provider, captureContext = null }) => {
     const { nonce, record } = newSession({ player, drill, target, provider, captureContext });
     const session = boxCam.sessions.create(record);
@@ -231,15 +215,11 @@ export function registerBoxCamSessions(ctx) {
     if (reads.sessions.storedIntervals(s.id) > MAX_STORED_INTERVALS) return res.status(429).json({ error: 'RATE_LIMITED', message: 'Observation storage limit reached.' });
 
     const elapsed = Date.now() - s.startedAt;
-    // Real providers are bound to the server's clock (+ bounded drift): a
-    // client cannot claim observation time that has not actually passed.
-    // The TEST-ONLY fixture provider simulates the passage of time through
-    // its observation stream (bounded by the session TTL) — such sessions
-    // are always labelled simulated and can never exist in production.
+    // Real providers are bound to the server's clock plus bounded drift. The test-only fixture provider simulates
+    // time through its observation stream (bounded by the session TTL); its sessions are labelled simulated.
     const simulated = !!PROVIDERS[s.provider]?.testOnly;
     const maxMs = simulated ? SESSION_TTL_MS : elapsed + DRIFT_MS;
-    // Whole-batch sequencing: any non-monotonic/duplicate sequence rejects
-    // the batch — replays and re-submissions never merge silently.
+    // A non-monotonic or duplicate sequence rejects the whole batch, so replays don't merge silently.
     let seq = s.lastSeq;
     const observations = [];
     for (const e of batch) {
@@ -270,7 +250,6 @@ export function registerBoxCamSessions(ctx) {
   });
 
   // ------------------------------------------------------------- finalize
-  /** The finished session's result (what `sessions.finish` stores), worked out from the session and its accepted stream. */
   function finalize(s, obs, { cancelled = false } = {}) {
     const d = { ...s };
     const drill = drillByIdVersion(d.drillId, d.drillVersion);
@@ -278,9 +257,8 @@ export function registerBoxCamSessions(ctx) {
     const capabilities = caps(d);
     const now = Date.now();
     d.endedAt = now;
-    // The server clock owns session duration — never a client field. For
-    // the test-only fixture provider, simulated duration is the extent of
-    // the accepted observation stream (deterministic, TTL-bounded).
+    // The server clock owns session duration. For the test-only fixture provider it is the extent of the accepted
+    // observation stream.
     const simulated = !!provider?.testOnly;
     if (simulated) {
       let maxObserved = 0;
@@ -342,12 +320,8 @@ export function registerBoxCamSessions(ctx) {
     return { status, endedAt, sessionDurationMs, verifiedActiveMs: d.verifiedActiveMs, verifiedReps, setsCompleted, targetCompleted: d.targetCompleted, quality, interruptionsCount, verificationState, verificationReasons, resultHash: hash, finalizedAt };
   }
 
-  // Shared completion: finalize + notifications + the onSessionFinalized hook
-  // (which drives assignment/challenge AND Combine measurement). Both the
-  // Box Cam complete route and the At-Home Combine complete route call this,
-  // so there is one code path. One unit of work:
-  // the session, its assignment, entries, attempt, requests, ledger rows and
-  // notifications commit together or not at all.
+  // Shared by the Box Cam and Combine complete routes. The onSessionFinalized hook drives assignments, challenges
+  // and Combine measurement, all in one unit of work.
   function completeSession(sessionId, p) {
     const s = unit(() => {
       const done = boxCam.sessions.finish(sessionId, finalize(reads.sessions.byId(sessionId), reads.sessions.observationsOf(sessionId)));
@@ -396,8 +370,7 @@ export function registerBoxCamSessions(ctx) {
     const note = String(req.body?.note ?? '').slice(0, 300);
     if (!note.trim()) return res.status(400).json({ error: 'NOTE_REQUIRED' });
     if (!moderateOrRefuse(res, note, { kind: 'box_cam_note', playerId: req.player.id })) return;
-    // A note is the player's words — provenance stays player_submitted_note
-    // and never mixes with Box Cam observations.
+    // A note is the player's words: provenance stays player_submitted_note, apart from Box Cam observations.
     const next = boxCam.sessions.setNote(s.id, { note });
     res.json({ session: sessionView(next) });
   });
@@ -438,11 +411,8 @@ export function registerBoxCamSessions(ctx) {
   });
 
   // ------------------------------------------------------------- clips
-  // Optional Box Clip: reuses the EXISTING media pipeline (the client
-  // uploads through /player/media as usual, with normal media provenance)
-  // and then tags that media item as Box Cam captured. Raw session video is
-  // never uploaded or retained by Box Cam itself — retainRawVideo=false is
-  // structural: no route accepts it.
+  // A Box Clip is uploaded through /player/media as usual, then tagged as Box Cam captured. Box Cam itself never
+  // receives raw session video.
   playerRouter.post('/box-cam/sessions/:id/clip', (req, res) => {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s || !TERMINAL_STATES.has(s.status)) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
@@ -452,8 +422,6 @@ export function registerBoxCamSessions(ctx) {
     }
     const media = (req.player.media ?? []).find((m) => m.id === req.body?.mediaId);
     if (!media) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-    // ONE unit of work: the media row's Box Cam provenance, the session's clip
-    // reference and the ledger row commit together.
     const next = unit(() => {
       ctx.players.patchItem(req.player.id, 'media', { id: media.id }, { capturedBy: 'box_cam', boxSessionId: s.id });
       const row = boxCam.sessions.attachClip(s.id, { mediaId: media.id });
