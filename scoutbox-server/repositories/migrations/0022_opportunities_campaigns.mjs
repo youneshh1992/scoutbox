@@ -7,7 +7,7 @@ import { CLUB_SETUP_MIGRATION } from '../clubSetup.mjs';
 import { OPPORTUNITIES_CAMPAIGNS_MIGRATION, OPPORTUNITIES_CAMPAIGNS_DDL, OPPORTUNITIES_CAMPAIGNS_TABLES } from '../opportunitiesCampaigns.mjs';
 
 export const id = OPPORTUNITIES_CAMPAIGNS_MIGRATION;
-export const note = 'opportunities, applications, campaigns (drills, rubric, submissions, attempts) and player suitability preferences become typed tables (S9d)';
+export const note = 'opportunities, applications, campaigns (drills, rubric, submissions, attempts) and player suitability preferences become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

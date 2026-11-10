@@ -5,7 +5,7 @@
  *   { id, ts, audience: { kind, id }, type, text, refId, read, repeatCount, groupKey, category, deferredPush,
  *     dispatchedAt[, actionRequired: { deadline, ackedAt, ackedBy }] }
  *   `groupKey` is worked out (`type:refId` when there is a refId) and `ackedBy` is the audience's id: neither is
- *   stored. `dispatchedAt` is the delivery centre's marker (m13/delivery.mjs): when it made the notice's dispatches.
+ *   stored. `dispatchedAt` is the delivery centre's marker (domains/messaging/delivery.mjs): when it made the notice's dispatches.
  *   Responses use `feedItem` (an allowlist), never the record.
  * Preference record: { audienceKind, audienceId, categories: { [category]: boolean }, emailIntent, updatedAt }.
  *

@@ -8,7 +8,7 @@ import { GROUPS_MIGRATION } from '../groups.mjs';
 import { GRASSROOTS_MIGRATION, GRASSROOTS_DDL, GRASSROOTS_TABLES } from '../grassroots.mjs';
 
 export const id = GRASSROOTS_MIGRATION;
-export const note = 'Open days (positions, registrations), match days (credited players) and the friendlies board (responses) become typed tables (S13d)';
+export const note = 'Open days (positions, registrations), match days (credited players) and the friendlies board (responses) become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

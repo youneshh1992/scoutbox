@@ -1,5 +1,5 @@
 // Test fixtures: signing packages, completed signings, follow-ups and outcome reports in the EXACT shapes the
-// writers produce (domains/recruitment/signings/index.mjs and signing.mjs; m12/operations.mjs the follow-ups, reports
+// writers produce (domains/recruitment/signings/index.mjs and signing.mjs; domains/operations/followUps.mjs the follow-ups, reports
 // and confirmations). Synthetic ids and names only. The ids agree with the other recruitment fixtures: case-1 is the
 // room of pl-adult with the draft offer rof-1 (revision rofr-1); org-pro, staff usr-1 (Maria).
 import { NOW } from './coreIdentityTestFixtures.mjs';
@@ -59,20 +59,20 @@ export const legacySigning = (over = {}) => ({
   id: 'sign-legacy', playerId: 'pl-child1', playerName: 'Kid One', orgId: ORG.id, orgName: ORG.name, userId: BY.id, scoutName: BY.name,
   ts: T.legacy, signedAt: T.legacy, firstQualifyingInteraction: null, attributionWindowMonths: 18, insideAttributionWindow: false, note: 'Signed at the open day.', ...over,
 });
-/** m12/operations.mjs scheduleFollowUps for sign-2 (3m due, the others scheduled). */
+/** domains/operations/followUps.mjs scheduleFollowUps for sign-2 (3m due, the others scheduled). */
 export const followUpsFor = (signingId = 'sign-2', playerId = 'pl-adult', signedAt = T.completed) => [
   { id: `fup-${signingId}-3m`, signingId, playerId, orgId: ORG.id, milestone: '3m', dueAt: signedAt + 91 * DAY, status: 'due', notifiedAt: signedAt + 91 * DAY + MIN, createdAt: signedAt + HOUR },
   { id: `fup-${signingId}-6m`, signingId, playerId, orgId: ORG.id, milestone: '6m', dueAt: signedAt + 182 * DAY, status: 'scheduled', notifiedAt: null, createdAt: signedAt + HOUR },
   { id: `fup-${signingId}-12m`, signingId, playerId, orgId: ORG.id, milestone: '12m', dueAt: signedAt + 365 * DAY, status: 'scheduled', notifiedAt: null, createdAt: signedAt + HOUR },
 ];
-/** m12/operations.mjs the report and a confirmation. */
+/** domains/operations/followUps.mjs the report and a confirmation. */
 export const outcomeReport = (over = {}) => ({
   id: 'out-1', followUpId: 'fup-sign-2-3m', signingId: 'sign-2', playerId: 'pl-adult', orgId: ORG.id, by: { kind: 'org', id: BY.id, name: BY.name },
   registrationStatus: 'registered', matchesPlayed: 7, progression: 'Regular starter', endReason: null, note: null, status: 'confirmed',
   confirmations: [{ by: { kind: 'player', id: 'pl-adult', name: 'Adult Signup' }, agree: true, note: 'All good.', experienceRating: 5, at: T.completed + 92 * DAY }], at: T.completed + 91 * DAY + 2 * HOUR, ...over,
 });
 /** The four collections. */
-export const S8D_FIX = () => ({
+export const SIGNINGS_FIX = () => ({
   signingPackages: [draftPackage(), completedPackage()],
   signings: [canonicalSigning(), legacySigning()],
   followUps: [...followUpsFor()].map((f) => (f.milestone === '3m' ? { ...f, status: 'complete' } : f)),

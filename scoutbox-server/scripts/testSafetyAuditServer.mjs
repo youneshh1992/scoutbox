@@ -42,7 +42,7 @@ const KEYS = {
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
    
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {
@@ -206,7 +206,7 @@ await test('[compat] a REAL adult account deletion retains every audit row that 
 
 // ============================================================= [cutover] the tables, the coupled units, the strict reference at boot
 await test('[cutover] the cutover and the save points: a fresh boot records 0013_safety_audit after 0012 and creates the eight tables and the file has no blob table (the data layer reports the domain); a player\'s block and its ledger row are committed together before the 201; the IDV entry commits with the guardian\'s column before the 200 — both failure seams and the real COMMIT leave nothing, the retry lands, a SIGKILL right after the response loses nothing, a restart serves it; an urgent report whose unit fails at the REAL COMMIT is answered 500 and leaves neither the report nor its suspension block, and the retry lands each ONCE; the block lift is durable before its response', async () => {
-  const dir = tempDir('s6b-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
+  const dir = tempDir('s6b-cutover'); let S = await boot(dir, { SCOUTBOX_FAST_SWEEPS: '' });
   assert.ok(live(dir), 'the boot recorded 0013');
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-7)), ['0012_channels', MIGRATION, '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']);
   for (const t of Object.values(TABLES)) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
@@ -231,7 +231,7 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0013
   const ok = await act(); assert.equal(ok.status, 200, ok.text);
   assert.deepEqual(dbState(), { idVerified: 1, audit: ['approved'] }, 'the column and the entry are committed when the response is sent'); assert.deepEqual(await view(S), [true, ['approved']]);
   await S.kill(); assert.deepEqual(dbState(), { idVerified: 1, audit: ['approved'] }, 'a SIGKILL right after the response loses nothing');
-  S = await boot(dir, { M13_FAST_RETRY: '' }); assert.deepEqual(await view(S), [true, ['approved']], 'a restart serves the committed state');
+  S = await boot(dir, { SCOUTBOX_FAST_SWEEPS: '' }); assert.deepEqual(await view(S), [true, ['approved']], 'a restart serves the committed state');
   // An urgent report and its suspension are one unit: a failure at the REAL COMMIT leaves neither, the retry lands each once.
   const maria = await orgLogin(S);
   const reportOf = (reason) => snap(dir, (c) => c.all('SELECT id FROM reports WHERE reason = ?', reason));

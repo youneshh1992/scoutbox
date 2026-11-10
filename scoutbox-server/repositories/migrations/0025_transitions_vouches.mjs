@@ -6,7 +6,7 @@ import { PASSPORT_MIGRATION } from '../passport.mjs';
 import { TRANSITIONS_MIGRATION, TRANSITIONS_DDL, TRANSITIONS_TABLES } from '../transitionsVouches.mjs';
 
 export const id = TRANSITIONS_MIGRATION;
-export const note = 'Transition cases (pack items, grants, history) and coach references become typed tables (S10c)';
+export const note = 'Transition cases (pack items, grants, history) and coach references become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

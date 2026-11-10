@@ -8,7 +8,7 @@ import { COMPLIANCE_RECORDS_MIGRATION } from '../complianceRecords.mjs';
 import { AGENT_TRANSACTIONS_MIGRATION, AGENT_TRANSACTIONS_DDL, AGENT_TRANSACTIONS_TABLES } from '../agentTransactions.mjs';
 
 export const id = AGENT_TRANSACTIONS_MIGRATION;
-export const note = 'agent transactions, their representation bindings and their documents become typed tables (S11c)';
+export const note = 'agent transactions, their representation bindings and their documents become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

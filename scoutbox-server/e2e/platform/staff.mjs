@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { freePort } from '../../scripts/testPort.mjs';
-import { totp } from '../../m13/shared.mjs';
+import { totp } from '../../domains/identity/totp.mjs';
 
 const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = await freePort();
@@ -38,7 +38,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const login = async (scoutName, role) => { const r = await j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName, role }); ok(r.status === 200, `${scoutName} signs in`); return r.body; };
 const inviteCodeFor = async (to) => (await j('GET', '/admin/outbox', undefined, null, ADMIN)).body.items.filter((m) => m.to === to).at(0)?.text.match(/invite code: ([0-9a-f]+)/)?.[1];
 
-child = spawn('node', ['server.mjs'], { cwd: SERVER_DIR, env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, M13_QUIET_LOGS: '1' }, stdio: 'ignore' });
+child = spawn('node', ['server.mjs'], { cwd: SERVER_DIR, env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, SCOUTBOX_QUIET_LOGS: '1' }, stdio: 'ignore' });
 for (let i = 0; ; i++) {
   try { if ((await fetch(`${API}/health`)).ok) break; } catch { /* booting */ }
   if (i > 80) throw new Error('server did not boot');

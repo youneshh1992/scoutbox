@@ -31,7 +31,7 @@ import {
 } from '../../domains/recruitment/lifecycle/journeyModel.mjs';
 import { LIFECYCLE_ACTIONS, canTransitionRecruitmentCase, heldFromStatus, lifecycleTargetFor } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { memoryRateLimitProvider } from '../../domains/platform/rateLimit.mjs';
-import { journeyEvidenceFunnel } from '../../m20/funnels.mjs';
+import { journeyEvidenceFunnel } from '../../domains/recruitment/analytics/funnels.mjs';
 import { isAdult } from '../../domain.mjs';
 const LATEST_SCHEMA = Number(DATA_MIGRATIONS.map((m) => m.id).sort().at(-1).slice(0, 4)); // the latest table migration's number
 
@@ -74,7 +74,7 @@ section('HTTP — booting a real server (test clock, synthetic agent verificatio
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -481,7 +481,7 @@ section('D — cross-player: no player A resource may advance player B\'s case')
   const anyCase = (Array.isArray(cases) ? cases : cases?.items ?? []).find((c) => c.playerId === pB) ?? null;
   const ritaStaff = (await j('GET', '/org/staff', undefined, rita.token)).body;
   if (anyCase && ritaStaff?.[0]) { const r = await j('POST', `/org/cases/${anyCase.id}/tasks`, { title: 'x', assigneeUserId: ritaStaff[0].id }, maria.token); neg(r.status === 404 && r.body?.error === 'USER_NOT_IN_ORG', 'D8 a case task for a user of another org: USER_NOT_IN_ORG'); }
-  else { negatives += 1; passed += 1; console.log('✓ [neg] D8 (no M12 case row to test against; proven by source in Z)'); }
+  else { negatives += 1; passed += 1; console.log('✓ [neg] D8 (no workspace case row to test against; proven by source in Z)'); }
 }
 
 // ================================================================ E — cross-org
@@ -1222,9 +1222,9 @@ section('Z — boundary invariants, read from the source');
   neg([['/players/:id/notes', 'domains/discovery/search.mjs'], ['/players/:id/morelike', 'domains/discovery/search.mjs'], ['/players/:id/proofpack', 'domains/recruitment/ledger.mjs']].every(([r, f]) => { const i = src(f).indexOf(`orgRouter.${r.includes('morelike') || r.includes('proofpack') ? 'get' : 'post'}('${r}'`); return i > 0 && /isBlocked\(p\.id, req\.org\.id\)/.test(src(f).slice(i, i + 700)); }), 'Z9 notes, morelike and proofpack check the block');
   neg(/combineOrgMaySeeResults[\s\S]*boxCamReads\.sessions\.byId/.test(src('domains/recruitment/lifecycle/trialRoutes.mjs').slice(src('domains/recruitment/lifecycle/trialRoutes.mjs').indexOf('function linkAuthorisation'))), 'Z10 consent is decided before the session lookup');
   neg(/\['delivered', 'responded'\]\.includes\(c\.status\)/.test(src('domains/recruitment/lifecycle/contactRoutes.mjs')), 'Z11 the send replay reports current truth');
-  neg(/DECISION_IDEMPOTENCY_CONFLICT/.test(src('domains/recruitment/rooms/rooms.mjs')), 'Z12 the M17 decision replay fingerprints content');
+  neg(/DECISION_IDEMPOTENCY_CONFLICT/.test(src('domains/recruitment/rooms/rooms.mjs')), 'Z12 the Rooms decision replay fingerprints content');
   neg(/pkg\.currentRevisionId \?\? null\)\) return res\.json\(\{ \.\.\.view\(\), idempotent: true/.test(src('domains/recruitment/signings/index.mjs')), 'Z13 a party signature key replays only for the current revision');
-  neg(/USER_NOT_IN_ORG/.test(src('domains/scouting/scouting.mjs')), 'Z14 an M12 case task requires an org member');
+  neg(/USER_NOT_IN_ORG/.test(src('domains/scouting/scouting.mjs')), 'Z14 a workspace case task requires an org member');
   neg(/lifecycle\.after_status/.test(src('domains/recruitment/rooms/rooms.mjs')) && /offer\.respond\.after_persist/.test(src('domains/recruitment/offers/index.mjs')), 'Z15 the two fault seams sit inside the writers they prove');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => /visibilitychange/.test(src(f)) && /'pageshow'/.test(src(f))), 'Z16 the three web apps re-read on focus, pageshow and visibility');
   neg(['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every((f) => { const s = strip(src(f)); const i = s.indexOf('api.onChange(session'); const block = s.slice(i, i + 400); return !/payload\.(status|to|from|stage)/.test(block); }), 'Z17 no app reads a status, a stage or a target state off an event payload');

@@ -1,6 +1,6 @@
 // Recruitment budget and deal scenarios.
 // Money is integer minor units end to end; market values are never invented.
-import { convertMinor, BUDGET_LINE_KINDS as LINE_KINDS, BUDGET_SCHEDULES as SCHEDULES } from '../../m13/shared.mjs';
+import { convertMinor, validAmountMinor, CURRENCIES, BUDGET_LINE_KINDS as LINE_KINDS, BUDGET_SCHEDULES as SCHEDULES } from './money.mjs';
 import { readDateOnly } from '../../temporal.mjs';
 
 // Exported for direct fixture testing — ALL integer arithmetic.
@@ -52,7 +52,6 @@ export function computeScenarioTotals(scenario) {
 export function registerBudgets(ctx) {
   const {
     orgRouter, nextId, isLead, requireLead, canViewFinance,
-    validAmountMinor, CURRENCIES,
     recruitmentCases, // a budget change is one explicit write of its case
   } = ctx;
   const { cases } = recruitmentCases;
@@ -96,7 +95,6 @@ export function registerBudgets(ctx) {
       .filter((a) => a.date !== null);
   }
 
-  ctx.computeScenarioTotals = computeScenarioTotals;
 
   orgRouter.post('/cases/:id/budget/scenarios', (req, res) => {
     const c = caseFor(req, res); if (!c) return;

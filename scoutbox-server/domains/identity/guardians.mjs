@@ -9,7 +9,7 @@ import { readPage, sendPageError } from '../platform/paging.mjs';
 import { reqText, badField, switchRefused } from '../platform/input.mjs';
 import { hashCode } from '../../repositories/oneTimeCodes.mjs';
 import { hashPassword, verifyPassword, randomCode } from '../../adapters.mjs';
-import { timingSafeEqStr } from '../../m13/shared.mjs';
+import { timingSafeEqStr } from './totp.mjs';
 import { guardianSelfView, adminGuardianView } from '../../views/playerViews.mjs';
 
 const idvView = (q) => ({

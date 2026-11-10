@@ -43,13 +43,13 @@ const fail = (m) => { console.error(`✗ ${m}`); process.exit(1); };
 const A = { 'x-admin-key': 'scoutbox-admin', 'content-type': 'application/json' };
 
 console.log('building live bundles for :4006…');
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live14`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live14`, { cwd: path.join(ROOT, 'scoutbox-grassroots'), stdio: 'pipe' });
-execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live14`, { cwd: path.join(ROOT, 'scoutbox-admin'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, { cwd: path.join(ROOT, 'scoutbox-club'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, { cwd: path.join(ROOT, 'scoutbox-grassroots'), stdio: 'pipe' });
+execSync(`VITE_API_URL=${API} npx vite build --outDir dist-live-verification`, { cwd: path.join(ROOT, 'scoutbox-admin'), stdio: 'pipe' });
 
 const serverProc = spawn('node', ['server.mjs'], {
   cwd: path.join(ROOT, 'scoutbox-server'),
-  env: { ...process.env, PORT: String(API_PORT), DATA_DIR: DATA, M13_QUIET_LOGS: '1' },
+  env: { ...process.env, PORT: String(API_PORT), DATA_DIR: DATA, SCOUTBOX_QUIET_LOGS: '1' },
   stdio: 'ignore',
 });
 const statics = [];
@@ -70,9 +70,9 @@ function serveDir(dir, port) {
   srv.listen(port);
   statics.push(srv);
 }
-serveDir('scoutbox-club/dist-live14', 8395);
-serveDir('scoutbox-grassroots/dist-live14', 8396);
-serveDir('scoutbox-admin/dist-live14', 8397);
+serveDir('scoutbox-club/dist-live-verification', 8395);
+serveDir('scoutbox-grassroots/dist-live-verification', 8396);
+serveDir('scoutbox-admin/dist-live-verification', 8397);
 
 process.on('exit', () => { try { serverProc.kill('SIGKILL'); } catch {} for (const s of statics) s.close(); });
 for (let i = 0; i < 60; i++) { try { const r = await fetch(`${API}/healthz`); if (r.ok) break; } catch {} await new Promise((r) => setTimeout(r, 250)); }
@@ -257,7 +257,7 @@ const lead = await clubLogin(leadCtx, 'Maria Keane', 'Head of Recruitment');
   await lead.click('nav.sidebar .nav-sec.open .nav-child:has-text("Verification")');
   await lead.waitForSelector('text=Ma vérification, text=My verification', { timeout: 15000 }).catch(() => {});
   if ((await title(lead)) !== 'Organisation / Verification') fail(`N2: Verification title (${await title(lead)})`);
-  say('N2: Organisation → Verification opens the M14 console from the sidebar');
+  say('N2: Organisation → Verification opens the verification console from the sidebar');
   await goHash(lead, 'trials');
   if ((await title(lead)) !== 'Recruitment / Trials & Reports') fail('N2: Trials reachable');
   say('N2: Recruitment → Trials reachable; no route lost');
@@ -423,7 +423,7 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   await grass.waitForTimeout(300);
   const d = await grass.evaluate(() => { const s = document.querySelector('nav.sidebar'); return { dir: getComputedStyle(s).flexDirection, w: Math.round(s.getBoundingClientRect().width), scrollW: document.documentElement.scrollWidth }; });
   if (d.dir !== 'column' || d.scrollW > 390) fail(`N6: grassroots phone drawer (${JSON.stringify(d)})`);
-  say('N6: the grassroots phone drawer is a column with no horizontal overflow (P2.5 defect D1 closed)');
+  say('N6: the grassroots phone drawer is a column with no horizontal overflow');
 }
 
 // ============================================================ N8 — T&S
@@ -437,7 +437,7 @@ const grassCtx = await browser.newContext({ viewport: { width: 1280, height: 800
   const groups = await admin.locator('nav.sidebar button').allInnerTexts();
   const expect = ['Home', 'Cases', 'Evidence', 'Verification', 'Safety', 'Operations', 'Delivery & Billing', 'Agents', 'System'];
   if (!expect.every((g) => groups.some((x) => x.includes(g)))) fail(`N8: admin groups (${groups.join('|')})`);
-  say('N8: T&S console shows nine grouped destinations instead of 22+ flat tabs (M24D: Cases and Operations each split so no group lists more than five)');
+  say('N8: T&S console shows nine grouped destinations instead of 22+ flat tabs (Cases and Operations each split so no group lists more than five)');
   const tour = [
     ['Cases', ['Report queue', 'Evidence disputes', 'Ver. disputes', 'Support desk']],
     ['Evidence', ['Passport', 'Box Cam', 'Trust']],
@@ -649,7 +649,7 @@ const fresh = async (p) => { await goHash(p, 'feed'); await p.reload(); await p.
     if (!(await p.locator('nav.sidebar button.nav-section.active').innerText()).includes(section)) fail(`N15 desktop: ${task}: parent not active`);
     matrix[task] = { desktop: n };
   }
-  say(`N15 desktop: all seven destinations found from a fresh login (M24D: at most three taps — section, group, page) — ${TASKS.map(([t]) => `${t} ${matrix[t].desktop}`).join(', ')} interactions`);
+  say(`N15 desktop: all seven destinations found from a fresh login (at most three taps — section, group, page) — ${TASKS.map(([t]) => `${t} ${matrix[t].desktop}`).join(', ')} interactions`);
   await ctx.close();
 }
 {

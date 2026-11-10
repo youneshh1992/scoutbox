@@ -580,7 +580,7 @@ export function roomHealth({ readiness, hasCurrentDecision = false, status = 'wa
 /**
  * Room roles mapped onto the EXISTING org permission architecture — no
  * parallel RBAC. `isLead` is the one existing tier (a regex over the user's
- * role, m12/shared.mjs); case restriction is the one existing per-user gate.
+ * role, domains/platform/routeHelpers.mjs); case restriction is the one existing per-user gate.
  */
 export function roomRole({ room, user, isLead }) {
   if (!room || !user) return null;

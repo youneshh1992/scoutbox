@@ -17,7 +17,7 @@
  */
 import {
   validateCriteria, criteriaVersion, describeCriteria, CRITERION_TYPES,
-  OPERATORS, LIMITS as M19_LIMITS, MATCH_POLICY_VERSION, CRITERIA_SCHEMA_VERSION,
+  OPERATORS, LIMITS as MATCHING_LIMITS, MATCH_POLICY_VERSION, CRITERIA_SCHEMA_VERSION,
   AVAILABILITY_VALUES,
 } from './criteria.mjs';
 import { matchPlayerToCriteria, briefCriteriaToCanonical } from './match.mjs';
@@ -40,7 +40,7 @@ export function registerMatching(ctx) {
     players, orgRouter, nextId, findPlayer, orgCanSee,
     isLead, requireLead, audit, vmetric, notify, broadcast, discovery, unit, matchFacts,
   } = ctx;
-  if (typeof matchFacts?.query !== 'function' || typeof players?.visibleWhere !== 'function') throw new TypeError('registerMatching needs the matchFacts repository and the players\' visibleWhere (S14j)');
+  if (typeof matchFacts?.query !== 'function' || typeof players?.visibleWhere !== 'function') throw new TypeError('registerMatching needs the matchFacts repository and the players\' visibleWhere');
   const dreads = ctx.discoveryReads;
   if (typeof dreads?.watchlists?.page !== 'function' || typeof discovery?.watchlists?.reconcile !== 'function') throw new TypeError('registerMatching needs the discovery repository and discoveryReads from the data layer');
 
@@ -101,7 +101,7 @@ export function registerMatching(ctx) {
       operators: Object.entries(OPERATORS).map(([id, o]) => ({ id, ...o })),
       sorts: MATCH_SORTS,
       defaultSort: DEFAULT_MATCH_SORT,
-      limits: M19_LIMITS,
+      limits: MATCHING_LIMITS,
       policyVersion: MATCH_POLICY_VERSION,
       schemaVersion: CRITERIA_SCHEMA_VERSION,
       combineProtocols: combineProtocolIds() ?? [],
@@ -210,10 +210,10 @@ export function registerMatching(ctx) {
   orgRouter.post('/watchlists', (req, res) => {
     if (limited('watchlist_write', req.org.id)) return res.status(429).json({ error: 'RATE_LIMITED', action: 'watchlist_write' });
     if (req.body?.name != null && typeof req.body.name !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'name', message: 'The name must be text.' });
-    const name = String(req.body?.name ?? '').trim().slice(0, M19_LIMITS.maxNameLength);
+    const name = String(req.body?.name ?? '').trim().slice(0, MATCHING_LIMITS.maxNameLength);
     if (!name) return res.status(400).json({ error: 'WATCHLIST_NAME_REQUIRED', message: 'Give this watchlist a name your colleagues will recognise.' });
-    if (dreads.watchlists.openCount(req.org.id) >= M19_LIMITS.watchlistsPerOrg) {
-      return res.status(409).json({ error: 'WATCHLIST_LIMIT_REACHED', limit: M19_LIMITS.watchlistsPerOrg, message: 'Archive a watchlist before creating another.' });
+    if (dreads.watchlists.openCount(req.org.id) >= MATCHING_LIMITS.watchlistsPerOrg) {
+      return res.status(409).json({ error: 'WATCHLIST_LIMIT_REACHED', limit: MATCHING_LIMITS.watchlistsPerOrg, message: 'Archive a watchlist before creating another.' });
     }
     const mode = WATCHLIST_MODES.includes(req.body?.mode) ? req.body.mode : null;
     if (!mode) return res.status(400).json({ error: 'WATCHLIST_MODE_REQUIRED', modes: WATCHLIST_MODES, message: 'Choose whether this watchlist follows the Recruitment Brief or keeps its own saved criteria.' });
@@ -453,7 +453,7 @@ export function registerMatching(ctx) {
     const set = {};
     if (req.body?.name !== undefined) {
       if (typeof req.body.name !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field: 'name', message: 'The name must be text.' });
-      const name = req.body.name.trim().slice(0, M19_LIMITS.maxNameLength);
+      const name = req.body.name.trim().slice(0, MATCHING_LIMITS.maxNameLength);
       if (!name) return res.status(400).json({ error: 'WATCHLIST_NAME_REQUIRED' });
       set.name = name;
     }
@@ -559,6 +559,5 @@ export function registerMatching(ctx) {
     });
   });
 
-  ctx.m19Reconcile = reconcile;
   void isLead; void requireLead;
 }

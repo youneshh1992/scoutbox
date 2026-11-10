@@ -32,7 +32,7 @@ import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, num, oneOf, group, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql } from './fieldSpecs.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
-import { CURRENCIES } from '../m13/shared.mjs';
+import { CURRENCIES } from '../domains/recruitment/money.mjs';
 
 export const INSIGHT_COVERAGE_MIGRATION = '0033_insight_coverage';
 export const INSIGHT_COVERAGE_COLLECTIONS = Object.freeze(['exposureEvents', 'reviewLater', 'evidenceSuggestions', 'calibrationSessions', 'fixtures', 'coveragePlans', 'coverageAssignments']);

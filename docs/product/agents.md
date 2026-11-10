@@ -125,8 +125,8 @@ Every encoded rule comes from [`../reference/agent-regulatory-snapshot-2026-09.m
 - Links to opportunities, trials and threads are references only; a linked thread still needs Inbox authorisation. No projection reads club recruitment data.
 - Events are ids-only. Compliance notifications go to the mandatory `compliance` category; other traffic to mutable `transaction_updates`.
 
-### Integration decision layer (`m27/`)
-- `m27` alone decides an agent's access to other apps' work.
+### Integration decision layer (`domains/agents/integration/`)
+- The integration layer alone decides an agent's access to other apps' work.
 - Fixed rule order, first refusal wins: SURFACE → BASIS → SUBJECT → AGE → BLOCK → SCOPE → DISCLOSURE → SHARE → LICENCE → COMPLIANCE. Ten surfaces, all adult-only; regulated ones (contact, trial coordination, opportunity share, transaction initiation) need `employment` or `transfer` scope. `trial_coordination` is declared with no route.
 - Basis = `agentClientBasis` wrapping `agreementGrantsAccess` for a named agent; returns `agentUserId`. Not a basis: unconfirmed, disputed, outside `startAt`–`endAt`, a colleague's, or legacy. Unreadable values in security decisions (bad start/end dates, missing dob) mean refuse, never ignore.
 - `sharedFor` is always false: there is no agent-side share writer; only the player shares.

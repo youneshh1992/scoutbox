@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.mjs';
-import { createSessionsRepository, SESSIONS_CUTOVER_MIGRATION } from '../repositories/sessions.mjs';
+import { createSessionsRepository, SESSIONS_TABLE_MIGRATION } from '../repositories/sessions.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
@@ -20,7 +20,7 @@ import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 // The checks below that drive the runner on a raw connection run exactly migrations
 // 0001–0004; the later ones have their own suites (e.g. testCoreSchema). The full
 // registered list is what attachDataLayer and the real-server checks below run.
-const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
+const IDENTITY_BASE_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { freePort } from './testPort.mjs';
 
@@ -55,19 +55,19 @@ const openRaw = (dir) => { const s = new DatabaseSync(path.join(dir, 'scoutbox.d
 // ------------------------------------------------------------- the migration
 test('migration 0003 on a new database: the sessions table starts empty, the lifetime is recorded, the repository attaches on the record, and a re-run is a no-op', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  const r = runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
-  assert.ok(r.ran.includes(SESSIONS_CUTOVER_MIGRATION));
+  const r = runDataMigrations(s, IDENTITY_BASE_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  assert.ok(r.ran.includes(SESSIONS_TABLE_MIGRATION));
   assert.equal(s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n, 0);
   assert.equal(s.prepare("SELECT value FROM meta WHERE key = 'sessionTtlMs'").get().value, String(TTL));
   assert.deepEqual(createSessionsRepository({ sqlite: s, sessionTtlMs: TTL }).attach(), { engine: 'sqlite', rows: 0 });
-  assert.deepEqual(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, []);
+  assert.deepEqual(runDataMigrations(s, IDENTITY_BASE_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, []);
   s.close();
 });
 
 // ------------------------------------------------------------- the repository
 const liveRepo = (opts = {}) => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: opts.sessionTtlMs ?? TTL } });
+  runDataMigrations(s, IDENTITY_BASE_MIGRATIONS, { context: { sessionTtlMs: opts.sessionTtlMs ?? TTL } });
   seedUser(s, 'usr-1', 'org-a'); seedUser(s, 'usr-2', 'org-a'); seedUser(s, 'usr-3', 'org-b');
   const repo = createSessionsRepository({ sqlite: s, sessionTtlMs: TTL, ...opts });
   repo.attach();
@@ -107,7 +107,7 @@ test('repository: a non-default lifetime is honoured, and changing it between bo
   let clock = 5_000_000;
   const dir = tempDir('s2-ttl');
   const s = new DatabaseSync(path.join(dir, 'scoutbox.db')); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: 7 * DAY } });
+  runDataMigrations(s, IDENTITY_BASE_MIGRATIONS, { context: { sessionTtlMs: 7 * DAY } });
   let repo = createSessionsRepository({ sqlite: s, sessionTtlMs: 7 * DAY, now: () => clock }); repo.attach();
   const { token, session } = repo.create('player', 'pl-1');
   assert.equal(session.expiresAt, clock + 7 * DAY);
@@ -227,7 +227,7 @@ await atest('server: plain-token sessions in a fixture are stored as hashes, the
   writeFixture(dir, seed, { idCounter: 1000 }); // the sessions go into their table, hashed
   const port = await freePort();
   const boot = () => new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc, log: () => log }); });
     proc.stderr.on('data', (d) => { log += d; });
@@ -288,7 +288,7 @@ await atest('server: plain-token sessions in a fixture are stored as hashes, the
     assert.equal((await j('GET', '/player/me', undefined, login.body.token)).status, 200);
     const cap = await j('GET', '/capabilities');
     assert.equal(cap.body.dataLayer.domains.sessions.mode, 'live');
-    assert.ok(cap.body.dataLayer.migrations.includes(SESSIONS_CUTOVER_MIGRATION));
+    assert.ok(cap.body.dataLayer.migrations.includes(SESSIONS_TABLE_MIGRATION));
     assert.ok(!JSON.stringify(cap.body).includes(login.body.token));
   } finally {
     await stop(S);
@@ -305,7 +305,7 @@ await atest('server: media links are signed with MEDIA_SECRET only — a link su
   writeFixture(dir, seed, { idCounter: 1000 });
   const port = await freePort();
   const boot = (env) => new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, MEDIA_SECRET: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, MEDIA_SECRET: '', ...env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc }); });
     proc.stderr.on('data', (d) => { log += d; });
@@ -350,7 +350,7 @@ await atest('server (review correction 2): player and org sessions survive the a
   ];
   writeFixture(dir, seed, { idCounter: 1000 });
   const port = await freePort();
-  const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   proc.stdout.on('data', (d) => { log += d; }); proc.stderr.on('data', (d) => { log += d; });
   await new Promise((resolve, reject) => {
@@ -377,7 +377,7 @@ await atest('server (review correction 2): player and org sessions survive the a
     assert.ok(!fs.readFileSync(path.join(backup.dir, 'scoutbox.db'), 'latin1').includes('dbjson-kola-token'));
     const restoreDir = tempDir('s2-restore'); fs.cpSync(backup.dir, restoreDir, { recursive: true });
     const port2 = await freePort();
-    const restored = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const restored = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log2 = ''; restored.stdout.on('data', (d) => { log2 += d; }); restored.stderr.on('data', (d) => { log2 += d; });
     try {
       await new Promise((resolve, reject) => {

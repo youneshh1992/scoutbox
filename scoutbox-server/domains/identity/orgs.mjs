@@ -7,7 +7,7 @@ import { readPage, sendPageError } from '../platform/paging.mjs';
 import { STAFF_LIMITS } from '../../repositories/users.mjs';
 import { hashPassword, verifyPassword } from '../../adapters.mjs';
 import { isLeadRole } from '../../roles.mjs';
-import { totpValid } from '../../m13/shared.mjs';
+import { totpValid } from './totp.mjs';
 
 /**
  * `orgSafe(org)`: the organisation as the apps see it, an allowlist (the password hash is never on the record). What

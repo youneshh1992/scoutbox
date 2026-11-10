@@ -41,7 +41,7 @@ end of the feature freeze.
   the claims' list knows (for example `yandex` or `zoho`) can verify a club's domain. The shared list can't simply be
   reused, because it also refuses `mail.` hosts, and a club's own `mail.club.example` mailbox does prove control of its
   domain. The fix is one shared list with that difference made explicit.
-- **A coach affiliation is matched to a staff member by display name**, not by account (`m12/shared.mjs`). Keying it
+- **A coach affiliation is matched to a staff member by display name**, not by account (`domains/platform/routeHelpers.mjs`). Keying it
   by account would restrict affiliations to people with a login: a product question.
 - **Assessment templates are shared by every club.** When one club's lead publishes a new version of a position
   template (`POST /org/assessment-templates`), it becomes the current template for every club: other clubs' new
@@ -103,15 +103,15 @@ keep, or code with nothing left to do.
   and `scripts/testRecruitmentContactsOffers.mjs` compare two dumps with no save between them. `s3File` in
   `scripts/coreIdentityTestFixtures.mjs` and the "stale legacy table" test in `scripts/testCoreIdentityServer.mjs`
   still build old `collections` files. One `testUnitOfWork` label still says "memory restored".
-- **Milestone names left in code.** Folders `m12/`, `m13/`, `m20/`, `m27/`; identifiers such as `registerM12`,
-  `M23_ERROR_HTTP`, `S8D_KEY_OWNERS`, `*_CUTOVER_MIGRATION`; env vars `M13_FAST_RETRY` and `M13_QUIET_LOGS`; test
-  files named `m23Live.test.mjs` and similar; and strings that carry tags: error messages ("(S13e)", "M16.2 trust
-  policy weights…"), migration `note` strings, the `report()` write modes in `repositories/index.mjs`, the
-  `/capabilities` note "moved from the snapshot blob", and test request bodies ("P5.6C suite: …").
-- **Stale test labels** that need rewording, not just untagging: `e2e/platform/storeGuarantees.mjs` calls M23 "the
-  LAST-registered module" (others register after it); labels with "used to" / "no longer" history in
+- **Milestone names left in the apps.** The server and the browser suites are clean, but the apps still use them:
+  files such as `m18Api.ts`, `m20Demo.ts`, `M15Sections.tsx` and `m13tabs.tsx` (about 90 files across the player, Pro,
+  Grassroots and admin apps), i18n keys (`m19.*`, `m20.*`, `m21.*`), `data-testid="m22-cv"`, the admin route
+  `/admin/m22/validation`, committed screenshot names (`m24f3-after-*.png`) and the agent app's copy ("P5.6A gate
+  G-C0"). `e2e/launcher.html` is release notes laid out by milestone. Renaming them is a pass over each app with its
+  tests.
+- **Stale test labels** that need rewording, not just untagging: labels with "used to" / "no longer" history in
   `e2e/agents/transactions.mjs`, `e2e/discovery/exposureCalibrationAndCoverage.mjs`, `e2e/platform/api.mjs` and
-  `e2e/platform/dates.mjs`; milestone names used as feature names in recruitment and development labels.
+  `e2e/platform/dates.mjs`.
 - **A stray doc comment** in `domains/development/hub/shared.mjs`: the vocabulary assertion's comment sits above
   `scanCopyForForbiddenNames`'s, attached to nothing.
 

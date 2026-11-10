@@ -207,7 +207,7 @@ export function registerVerificationClaims(ctx) {
 
   const tick = () => shared.verificationSweep?.();
   tick();
-  const timer = setInterval(tick, process.env.M13_FAST_RETRY === '1' ? 500 : 60_000);
+  const timer = setInterval(tick, process.env.SCOUTBOX_FAST_SWEEPS === '1' ? 500 : 60_000);
   timer.unref();
   return shared;
 }

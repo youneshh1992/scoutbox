@@ -8,7 +8,7 @@ import { AGENT_TRANSACTIONS_MIGRATION } from '../agentTransactions.mjs';
 import { DEVELOPMENT_MIGRATION, DEVELOPMENT_DDL, DEVELOPMENT_TABLES } from '../development.mjs';
 
 export const id = DEVELOPMENT_MIGRATION;
-export const note = 'development objectives, drill-guidance reviews and the Development Hub (plans, goals, actions, evidence links, reviews, history) become typed tables (S12a)';
+export const note = 'development objectives, drill-guidance reviews and the Development Hub (plans, goals, actions, evidence links, reviews, history) become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

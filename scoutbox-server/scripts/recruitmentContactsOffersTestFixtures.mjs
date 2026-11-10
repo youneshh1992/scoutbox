@@ -104,7 +104,7 @@ export const withdrawnOffer = (over = {}) => draftOffer({ id: 'rof-4', caseId: '
 export const contactRequest = (id, contactId, over = {}) => p4bInvitation({ id, type: 'contact', subject: 'Next season', contactId, trialDetails: null, keys: { invite: { key: `client-${id}`, fp: `fp-${id}` } }, ...over });
 
 /** The standard contact/offer graph beside the request and case fixtures: five contacts and four offers. */
-export const S8C_FIX = () => ({
+export const CONTACTS_OFFERS_FIX = () => ({
   recruitmentContacts: [draftContact(), respondedContact(), nullKeyContact(), externalContact(), cancelledContact()],
   recruitmentOffers: [draftOffer(), acceptedOffer(), declinedOffer(), withdrawnOffer()],
 });

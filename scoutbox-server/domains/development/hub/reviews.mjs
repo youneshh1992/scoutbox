@@ -19,7 +19,7 @@
  * Passport with a date stamp, frozen and slowly becoming wrong.
  */
 import {
-  M21_LIMITS, REVIEWER_KINDS, SHARE_SCOPES, boundedText, parseDate,
+  DEVELOPMENT_HUB_LIMITS, REVIEWER_KINDS, SHARE_SCOPES, boundedText, parseDate,
   actionCounts, completionPhrase,
 } from './shared.mjs';
 import { evaluateTarget } from './targets.mjs';
@@ -89,7 +89,7 @@ export function validateReview({ body, access, viewer, now }) {
     return { error: 'REVIEW_NOT_PERMITTED', detail: 'You cannot add a reflection to this plan.' };
   }
 
-  const summary = boundedText(body?.summary, M21_LIMITS.summaryMax, { field: 'summary' });
+  const summary = boundedText(body?.summary, DEVELOPMENT_HUB_LIMITS.summaryMax, { field: 'summary' });
   if (summary.error) return summary;
 
   // An internal note is a club talking to itself. A player or guardian has no
@@ -100,7 +100,7 @@ export function validateReview({ body, access, viewer, now }) {
     if (!access.readInternal) {
       return { error: 'INTERNAL_NOTE_NOT_PERMITTED', detail: 'Only the organisation that owns this plan can record an internal note.' };
     }
-    const n = boundedText(body.internalNote, M21_LIMITS.noteMax, { field: 'internalNote' });
+    const n = boundedText(body.internalNote, DEVELOPMENT_HUB_LIMITS.noteMax, { field: 'internalNote' });
     if (n.error) return n;
     internalNote = n.value;
   }
@@ -169,7 +169,7 @@ export function validateSupersession({ target, plan, reviews, viewer, access }) 
 /** Bounded, newest-first page of reviews. Stable across reads. */
 export function pageReviews(reviews, { limit, cursor }) {
   const all = reviews.slice().sort((a, b) => b.reviewedAt - a.reviewedAt || String(b.id).localeCompare(String(a.id)));
-  const size = Math.min(Math.max(Number(limit) || 25, 1), M21_LIMITS.reviewsPageMax);
+  const size = Math.min(Math.max(Number(limit) || 25, 1), DEVELOPMENT_HUB_LIMITS.reviewsPageMax);
   let start = 0;
   if (cursor) {
     const idx = all.findIndex((r) => r.id === String(cursor));

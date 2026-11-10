@@ -18,7 +18,7 @@
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
-export const M28_ERROR_HTTP = table({
+export const OFFER_ERROR_HTTP = table({
   // ---- 400: fix the request.
   OFFER_INPUT_INVALID: 400,
   OFFER_TERMS_INVALID: 400,
@@ -55,7 +55,7 @@ export const M28_ERROR_HTTP = table({
   OFFER_STATE_UNKNOWN: 500,
 });
 
-export const httpStatusFor = (code) => M28_ERROR_HTTP[code] ?? null;
+export const httpStatusFor = (code) => OFFER_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
   'error', 'message', 'field', 'allowed', 'expected', 'current', 'expectedRev', 'currentRev',
@@ -64,7 +64,7 @@ export const PUBLIC_ERROR_FIELDS = [
 
 export function publicErrorBody(out) {
   const code = out?.error;
-  if (M28_ERROR_HTTP[code] === 500) {
+  if (OFFER_ERROR_HTTP[code] === 500) {
     return { ok: false, error: code, message: 'The Offer service cannot serve this request. This has been recorded.' };
   }
   const body = { ok: false };
@@ -75,10 +75,10 @@ export function publicErrorBody(out) {
 export function sendOfferError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
-    console.error(`M28 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
+    console.error(`offers ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
     return res.status(500).json({ ok: false, error: 'OFFER_STATE_UNKNOWN', message: 'The Offer service cannot serve this request. This has been recorded.' });
   }
-  if (status === 500) console.error(`M28 ${where} ${out.error} — ${JSON.stringify(out)}`);
+  if (status === 500) console.error(`offers ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }
 

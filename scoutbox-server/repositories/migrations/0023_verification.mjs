@@ -9,7 +9,7 @@ import { OPPORTUNITIES_CAMPAIGNS_MIGRATION } from '../opportunitiesCampaigns.mjs
 import { VERIFICATION_MIGRATION, VERIFICATION_DDL, VERIFICATION_TABLES } from '../verification.mjs';
 
 export const id = VERIFICATION_MIGRATION;
-export const note = 'verification claims, events, evidence, tokens, administrators, root transfers and applications, disputes, references, squad invitations, conflicts, domain requests and verified domains become typed tables (S10a)';
+export const note = 'verification claims, events, evidence, tokens, administrators, root transfers and applications, disputes, references, squad invitations, conflicts, domain requests and verified domains become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

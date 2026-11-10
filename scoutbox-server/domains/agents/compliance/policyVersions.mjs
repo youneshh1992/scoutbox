@@ -124,13 +124,13 @@ const S10 = src('U.S. Soccer — Player Agents', 'read 18 Sep 2026', '2024-01-01
 
 const rule = (ruleStatus, textStatus, sourceRef, params = {}, note = null, extra = {}) => ({ ruleStatus, textStatus, sourceRef, params, note, ...extra });
 
-const FIFA_UNCERTAIN_NOTE = 'Circular 1873 (30 Dec 2023) suspended enforcement "until the European Court of Justice renders a final decision"; the CJEU decided C-209/23 on 16 Jul 2026 and referred proportionality to the national court; FIFA has issued no instrument since. The operative status is not conclusively established (P5.6A L-1, DR-46). The engine returns MANUAL_REGULATORY_REVIEW_REQUIRED wherever this rule would decide an outcome and no national ACTIVE entry applies.';
+const FIFA_UNCERTAIN_NOTE = 'Circular 1873 (30 Dec 2023) suspended enforcement "until the European Court of Justice renders a final decision"; the CJEU decided C-209/23 on 16 Jul 2026 and referred proportionality to the national court; FIFA has issued no instrument since. The operative status is not conclusively established (L-1, DR-46). The engine returns MANUAL_REGULATORY_REVIEW_REQUIRED wherever this rule would decide an outcome and no national ACTIVE entry applies.';
 
 /** FFAR 2025 edition with the enforcement statuses of 18 Sep 2026. */
 export const JP_FIFA_2025_1 = Object.freeze({
   id: 'jp-fifa-2025-1', regulator: 'FIFA', jurisdiction: 'INT', policyVersion: 1, supersedes: null,
   effectiveFrom: '2025-01-01', effectiveTo: null,
-  status: 'published', publishedBy: [{ kind: 'system', id: 'migration-2306', name: 'seeded from P5.6A regulatory snapshot (18 Sep 2026)' }],
+  status: 'published', publishedBy: [{ kind: 'system', id: 'migration-2306', name: 'seeded from the regulatory snapshot (18 Sep 2026)' }],
   rules: {
     'FIFA-8.1':   rule('ACTIVE', 'CURRENT', [S1], { licenceRequired: true, licenceHolder: 'natural_person' }, 'A licence is issued to a natural person; strictly personal and non-transferable.'),
     'FIFA-11.1':  rule('ACTIVE', 'CURRENT', [S1, S3], { onlyLicensedAgentPerforms: true }, 'Only a Football Agent may perform Football Agent Services. CJEU: the licence requirement "may be justified".'),
@@ -144,7 +144,7 @@ export const JP_FIFA_2025_1 = Object.freeze({
       { overrides: [{ jurisdiction: 'ENG', scope: 'national', overrideRuleId: 'ENG-6.4' }] }),
     'FIFA-12.10': rule('UNDER_LEGAL_REVIEW', 'UNCERTAIN_OPERATIVE_STATUS', [S1, S2, S3, S4], { connectedAgentsAreOne: true, sameAgencyConnected: true }, FIFA_UNCERTAIN_NOTE,
       { overrides: [{ jurisdiction: 'ENG', scope: 'national', overrideRuleId: 'ENG-6.5' }] }),
-    'FIFA-13.1':  rule('ACTIVE', 'CURRENT', [S1], { formula: 'six_months_before_first_contract_age', firstContractAge: {}, guardianConsentBeforeApproach: true }, 'The first-professional-contract age is the employing country\'s law and is NOT encoded for any country (P5.6A L-6): the parameter is UNKNOWN → INSUFFICIENT_DATA.'),
+    'FIFA-13.1':  rule('ACTIVE', 'CURRENT', [S1], { formula: 'six_months_before_first_contract_age', firstContractAge: {}, guardianConsentBeforeApproach: true }, 'The first-professional-contract age is the employing country\'s law and is NOT encoded for any country (L-6): the parameter is UNKNOWN → INSUFFICIENT_DATA.'),
     'FIFA-13.2':  rule('ACTIVE', 'CURRENT', [S1, S5], { minorsAccreditationRequired: true, validityYears: 3 }),
     'FIFA-14.2':  rule('UNDER_LEGAL_REVIEW', 'UNCERTAIN_OPERATIVE_STATUS', [S1, S2, S3], { informational: true }, 'Client-pays and the fee framework; no fee rule is enforced by ScoutBox (P-5).'),
     'FIFA-14.9':  rule('ACTIVE', 'CURRENT', [S1], { informational: true, noFeeForMinorWithoutProContract: true }),
@@ -161,7 +161,7 @@ export const JP_FIFA_2025_1 = Object.freeze({
 export const JP_ENG_2026_27_1 = Object.freeze({
   id: 'jp-eng-2026-27-1', regulator: 'FA', jurisdiction: 'ENG', policyVersion: 1, supersedes: null,
   effectiveFrom: '2026-06-01', effectiveTo: null,
-  status: 'published', publishedBy: [{ kind: 'system', id: 'migration-2306', name: 'seeded from P5.6A regulatory snapshot (18 Sep 2026)' }],
+  status: 'published', publishedBy: [{ kind: 'system', id: 'migration-2306', name: 'seeded from the regulatory snapshot (18 Sep 2026)' }],
   rules: {
     'ENG-2.1':  rule('ACTIVE', 'CURRENT', [S7, S8], { nationalRegistrationRequired: true, requiresFifaLicence: true }, 'Before any regulated conduct an agent must be an FA Registered Football Agent; registration requires a FIFA licence.'),
     'ENG-2.10': rule('ACTIVE', 'CURRENT', [S7], { cascadeFromFifaLicence: true }, 'FIFA licence suspended or withdrawn → FA registration automatically suspended or withdrawn.'),
@@ -178,7 +178,7 @@ export const JP_ENG_2026_27_1 = Object.freeze({
     'ENG-6.5':  rule('ACTIVE', 'CURRENT', [S7, S8], { connectedAgentsAreOne: true, sameAgencyConnected: true }, 'An agent and a Connected Football Agent may not act for different parties in the same National Transaction except under 6.3.'),
     'ENG-7.2':  rule('ACTIVE', 'CURRENT', [S7, S8], { informational: true }, 'Client pays (with the USD 200,000 engaging-club exception, 7.3). Recorded, never enforced (DR-31).'),
     'ENG-7.10': rule('ACTIVE', 'CURRENT', [S7, S8], { informational: true, noFeeForMinorWithoutProContract: true }),
-    'ENG-7.13': rule('PARTIALLY_SUSPENDED', 'CURRENT_WITH_PARTIAL_SUSPENSION', [S7], { informational: true, activeLimbs: [] }, 'Clearing House: not covered by the 2026-27 Guidance, likely shaded (P5.6A L-7). No payment channel exists.'),
+    'ENG-7.13': rule('PARTIALLY_SUSPENDED', 'CURRENT_WITH_PARTIAL_SUSPENSION', [S7], { informational: true, activeLimbs: [] }, 'Clearing House: not covered by the 2026-27 Guidance, likely shaded (L-7). No payment channel exists.'),
     'ENG-8.1b': rule('UNDER_LEGAL_REVIEW', 'UNCERTAIN_OPERATIVE_STATUS', [S7, S3], { exclusivityWindowMonths: 2 }, 'Exclusive-agreement approach window: in the 2026-27 text; doubtful after the CJEU judgment (L-2). Manual review, never a hard block.'),
     'ENG-8.3g': rule('ACTIVE', 'CURRENT', [S7, S8], { informational: true, lodgeWithinDays: 14 }, 'Lodging duties. ScoutBox keeps records; it does not file (L-16).'),
   },
@@ -188,7 +188,7 @@ export const JP_ENG_2026_27_1 = Object.freeze({
 export const JP_USA_2024_1 = Object.freeze({
   id: 'jp-usa-2024-1', regulator: 'USSF', jurisdiction: 'USA', policyVersion: 1, supersedes: null,
   effectiveFrom: '2024-01-01', effectiveTo: null,
-  status: 'published', publishedBy: [{ kind: 'system', id: 'migration-2306', name: 'seeded from P5.6A regulatory snapshot (18 Sep 2026)' }],
+  status: 'published', publishedBy: [{ kind: 'system', id: 'migration-2306', name: 'seeded from the regulatory snapshot (18 Sep 2026)' }],
   rules: {
     'USA-LIC':   rule('ACTIVE', 'CURRENT', [S10], { licenceRequired: true }, 'Effective 1 Jan 2024 U.S. Soccer enforces the FFAR; any agent in its jurisdiction must be FIFA-licensed.'),
     'USA-BGC':   rule('ACTIVE', 'CURRENT', [S10], { domesticAuthorisationRequired: true, kind: 'background_check_safesport' }, 'Background check and SafeSport training required for all agents operating in the United States; scope is a counsel item (R-U2).'),

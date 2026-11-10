@@ -85,7 +85,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   const extra = mapped.filter((id) => !IDS.includes(id));
   ok(missing.length === 0 && extra.length === 0, `all ${IDS.length} legacy destinations mapped exactly once (missing: ${missing.join(',') || '—'}; extra: ${extra.join(',') || '—'})`);
 
-  section(`${app} — P2.5 groups: presentation overlay, structurally sound`);
+  section(`${app} — groups: presentation overlay, structurally sound`);
   const problems = nav.validateNavConfig();
   for (const p of problems) console.error(`   ${p}`);
   ok(problems.length === 0, 'every child of a grouped section is in exactly one group, and every group item is a real child');
@@ -94,10 +94,10 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   const views = nav.groupedChildren(rec);
   // The five rule: no group lists more than five pages (three to four is the target).
   ok(views.every((g) => g.children.length <= nav.NAV_MAX_PER_CATEGORY), `no group has more than ${nav.NAV_MAX_PER_CATEGORY} pages (max ${Math.max(...views.map((g) => g.children.length))})`);
-  ok(views.every((g) => g.children.length <= 4), `M24D: every Recruitment group holds four pages or fewer (${views.map((g) => `${g.id} ${g.children.length}`).join(', ')})`);
-  ok(views.map((g) => g.id).join(',') === (app === 'scoutbox-club' ? 'discover,pipeline,outreach,evaluation,intelligence,outcomes,analytics' : 'discover,pipeline,outreach,evaluation,intelligence,outcomes,analytics,planning'), `M24D: the Recruitment groups are Discover · Pipeline · Outreach · Evaluation · Intelligence · Outcomes · Analytics${app === 'scoutbox-club' ? '' : ' · Planning'} (${views.map((g) => g.id).join(',')})`);
-  ok(nav.groupOf(rec, 'briefs')?.id === 'outreach' && nav.groupOf(rec, 'campaigns')?.id === 'outreach', 'M24D: Campaigns and Recruitment Briefs are Outreach');
-  ok(nav.groupOf(rec, 'outcomes')?.id === 'outcomes' && nav.groupOf(rec, 'trialdays')?.id === 'evaluation' && nav.groupOf(rec, 'matching')?.id === 'intelligence', 'M24D: Signings & Outcomes are Outcomes, Trial Days are Evaluation, Player Matching is Intelligence');
+  ok(views.every((g) => g.children.length <= 4), `every Recruitment group holds four pages or fewer (${views.map((g) => `${g.id} ${g.children.length}`).join(', ')})`);
+  ok(views.map((g) => g.id).join(',') === (app === 'scoutbox-club' ? 'discover,pipeline,outreach,evaluation,intelligence,outcomes,analytics' : 'discover,pipeline,outreach,evaluation,intelligence,outcomes,analytics,planning'), `the Recruitment groups are Discover · Pipeline · Outreach · Evaluation · Intelligence · Outcomes · Analytics${app === 'scoutbox-club' ? '' : ' · Planning'} (${views.map((g) => g.id).join(',')})`);
+  ok(nav.groupOf(rec, 'briefs')?.id === 'outreach' && nav.groupOf(rec, 'campaigns')?.id === 'outreach', 'Campaigns and Recruitment Briefs are Outreach');
+  ok(nav.groupOf(rec, 'outcomes')?.id === 'outcomes' && nav.groupOf(rec, 'trialdays')?.id === 'evaluation' && nav.groupOf(rec, 'matching')?.id === 'intelligence', 'Signings & Outcomes are Outcomes, Trial Days are Evaluation, Player Matching is Intelligence');
   ok(views.reduce((n, g) => n + g.children.length, 0) === rec.children.length, 'the grouped view shows every child exactly once');
   const disc = views[0];
   ok(disc.id === 'discover' && disc.children[0].id === 'search', 'Recruitment opens on Discover → Players, so the most-used page is still first');
@@ -120,7 +120,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   const broken3 = [{ ...rec, groups: [...rec.groups, { id: 'ghost', labelKey: 'x', items: ['not-a-page'] }] }];
   ok(nav.validateNavConfig(broken3).some((p) => /not a child/.test(p)), 'a group item that is not a child is reported');
 
-  section(`${app} — P2.5 closure: phone strip = same pages as the desktop accordion`);
+  section(`${app} — closure: phone strip = same pages as the desktop accordion`);
   // The strip is presentation. For every role and every group, the pages it
   // shows (visible + More) must be exactly the pages the desktop accordion
   // shows, in the same order, and no page may be both visible and in More.
@@ -166,7 +166,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   const pipe = nav.stripLayout(rec, 'rooms');
   // Pipeline is four pages and shows whole on a phone; the More
   // mechanism now serves Intelligence, whose four names fit a row only two at a time.
-  ok(pipe.visible.map((c) => c.id).join() === 'recruitment,rooms,requests,opportunities' && pipe.overflow.length === 0, `M24D: Pipeline (Cases, Rooms, Requests, Opportunities) shows whole — no More (${pipe.visible.map((c) => c.id)})`);
+  ok(pipe.visible.map((c) => c.id).join() === 'recruitment,rooms,requests,opportunities' && pipe.overflow.length === 0, `Pipeline (Cases, Rooms, Requests, Opportunities) shows whole — no More (${pipe.visible.map((c) => c.id)})`);
   const intel = nav.stripLayout(rec, 'secondlook');
   ok(intel.visible.map((c) => c.id).join() === 'matching,watchlists' && intel.overflow.map((c) => c.id).join() === 'secondlook,nobodymissed' && intel.overflow.every((c) => !c.primary), `Intelligence: Matching and Watchlists visible; Second Look and Nobody Missed behind More (${intel.visible.map((c) => c.id)} | ${intel.overflow.map((c) => c.id)})`);
   ok(nav.stripLayout(rec, 'matching').activeInOverflow === null && intel.activeInOverflow?.id === 'secondlook', 'active-state mapping: Matching is a visible tab, Second Look is marked on More');
@@ -176,7 +176,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   const scoutRec = nav.filterSections(SCOUT).find((s) => s.id === 'recruitment');
   ok(JSON.stringify(nav.stripLayout(scoutRec, 'rooms').visible.map((c) => c.id)) === JSON.stringify(pipe.visible.map((c) => c.id)), 'role visibility: the scout strip matches the lead strip for Pipeline');
 
-  section(`${app} — M24D: no navigation category holds more than five entries`);
+  section(`${app} — no navigation category holds more than five entries`);
   // Every section's groups, every group's pages, every ungrouped section's
   // pages, for every role: the configuration itself (`validateNavConfig`
   // reports a breach) and the filtered views the sidebar draws.
@@ -196,8 +196,8 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
     ok(nav.validateNavConfig(flat).some((p) => /pages in an ungrouped section/.test(p)), 'an ungrouped section with more than five pages is reported by the validator');
   }
   const orgSec = nav.NAV_SECTIONS.find((s) => s.id === 'organisation');
-  if (app === 'scoutbox-club') ok(!!orgSec.groups && orgSec.groups.length === 2 && orgSec.groups.every((g) => g.items.length === 3), 'M24D: Pro Organisation (six pages) is two groups of three — Administration and Operations');
-  else ok(!orgSec.groups && orgSec.children.length <= 5, `M24D: Grassroots Club lists ${orgSec.children.length} pages, within five, ungrouped`);
+  if (app === 'scoutbox-club') ok(!!orgSec.groups && orgSec.groups.length === 2 && orgSec.groups.every((g) => g.items.length === 3), 'Pro Organisation (six pages) is two groups of three — Administration and Operations');
+  else ok(!orgSec.groups && orgSec.children.length <= 5, `Grassroots Club lists ${orgSec.children.length} pages, within five, ungrouped`);
   ok(tr(rec.children.find((c) => c.id === 'recruitment').labelKey) === 'Cases' || dictionaries(app).en.has('nav2.recruitment'), 'the Cases page no longer shares its name with the Pipeline group');
   for (const c of rec.children) if (c.shortKey && !c.shortKey.startsWith('navshort.')) fail(`${c.id}: short label key must be a navshort.* key`);
   ok(true, 'short strip labels are i18n keys (checked against both dictionaries below)');
@@ -224,12 +224,12 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   console.log(`✓ resolver maps every destination (${IDS.length} checks folded)`);
   ok(nav.resolveNavigationLocation('verification').sectionId === 'organisation', 'direct /verification highlights Organisation');
   ok(nav.resolveNavigationLocation('assessments').sectionId === 'recruitment', 'direct /assessments highlights Recruitment');
-  ok(nav.resolveNavigationLocation('search').sectionId === 'recruitment', 'P2.5: direct /search highlights Recruitment (Discover is its first group)');
-  ok(nav.resolveNavigationLocation('ledger').sectionId === 'recruitment', 'P2.5: direct /ledger highlights Recruitment (Analytics)');
+  ok(nav.resolveNavigationLocation('search').sectionId === 'recruitment', 'direct /search highlights Recruitment (Discover is its first group)');
+  ok(nav.resolveNavigationLocation('ledger').sectionId === 'recruitment', 'direct /ledger highlights Recruitment (Analytics)');
   if (app === 'scoutbox-grassroots') {
-    ok(nav.resolveNavigationLocation('squad').sectionId === 'players', 'P2.5: direct /squad highlights Players');
-    ok(nav.resolveNavigationLocation('network').sectionId === 'organisation', 'P2.5: direct /network highlights Club');
-    ok(nav.resolveNavigationLocation('coverage').sectionId === 'recruitment', 'P2.5: direct /coverage highlights Recruitment (Planning group)');
+    ok(nav.resolveNavigationLocation('squad').sectionId === 'players', 'direct /squad highlights Players');
+    ok(nav.resolveNavigationLocation('network').sectionId === 'organisation', 'direct /network highlights Club');
+    ok(nav.resolveNavigationLocation('coverage').sectionId === 'recruitment', 'direct /coverage highlights Recruitment (Planning group)');
   }
   const unknown = nav.resolveNavigationLocation('nonexistent');
   ok(unknown.sectionId === null && unknown.itemId === null, 'unknown path highlights nothing');
@@ -301,12 +301,12 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   // mechanism as the Rooms route.
   ok(nav.screenFromHash('#/recruitment/second-look') === 'secondlook', 'Second Look deep link resolves');
   ok(nav.screenFromHash('#/recruitment/nobody-missed') === 'nobodymissed', 'Nobody Missed deep link resolves');
-  ok(nav.screenFromHash('#/secondlook') === 'secondlook' && nav.screenFromHash('#/briefs') === 'briefs', 'M18 destinations keep a flat hash too');
+  ok(nav.screenFromHash('#/secondlook') === 'secondlook' && nav.screenFromHash('#/briefs') === 'briefs', 'Second Look and Brief destinations keep a flat hash too');
   ok(nav.hashForScreen('secondlook') === '#/recruitment/second-look'
-    && nav.hashForScreen('nobodymissed') === '#/recruitment/nobody-missed', 'M18 named hashes round-trip');
+    && nav.hashForScreen('nobodymissed') === '#/recruitment/nobody-missed', 'Nobody Missed and Second Look named hashes round-trip');
   ok(nav.screenFromHash('#/recruitment/briefs/brf-7') === 'briefs', 'brief deep link resolves to the Briefs destination');
 
-  section(`${app} — M19 deep links`);
+  section(`${app} — matching and watchlist deep links`);
   ok(nav.screenFromHash('#/recruitment/matching') === 'matching', 'Player Matching deep link resolves');
   ok(nav.screenFromHash('#/recruitment/watchlists') === 'watchlists', 'the parent of a watchlist deep link resolves to Dynamic Watchlists');
   ok(nav.screenFromHash('#/recruitment/watchlists/wl-7') === 'watchlists', 'watchlist deep link resolves to the Dynamic Watchlists destination');
@@ -314,9 +314,9 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.watchlistFromHash('#/recruitment/watchlists') === null && nav.watchlistFromHash('#/recruitment/watchlists/') === null,
     'a watchlist hash without an id carries no id');
   ok(nav.screenFromHash('#/recruitment/watchlists/') === null && nav.screenFromHash('#/recruitment/matching/') === null,
-    'trailing-slash M19 hashes stay rejected');
-  ok(nav.screenFromHash('#/matching') === 'matching' && nav.screenFromHash('#/watchlists') === 'watchlists', 'M19 destinations keep a flat hash too');
-  ok(nav.hashForScreen('matching') === '#/recruitment/matching' && nav.hashForScreen('watchlists') === '#/recruitment/watchlists', 'M19 named hashes round-trip');
+    'trailing-slash matching and watchlist hashes stay rejected');
+  ok(nav.screenFromHash('#/matching') === 'matching' && nav.screenFromHash('#/watchlists') === 'watchlists', 'matching and watchlist destinations keep a flat hash too');
+  ok(nav.hashForScreen('matching') === '#/recruitment/matching' && nav.hashForScreen('watchlists') === '#/recruitment/watchlists', 'matching and watchlist named hashes round-trip');
   ok(nav.hashForWatchlist('wl-7') === '#/recruitment/watchlists/wl-7', 'the app writes the watchlist hash it can read back');
   // The criteria payload rides in the hash and is opaque: the client only has
   // to be able to read back what it wrote. The SERVER re-validates every
@@ -333,7 +333,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
     && nav.briefFromHash('') === null, 'malformed brief deep links rejected');
   ok(nav.hashForBrief('brf-7') === '#/recruitment/briefs/brf-7', 'brief hash round-trip');
   ok(nav.briefFromHash('#/recruitment/second-look') === null && nav.roomFromHash('#/recruitment/second-look') === null,
-    'a named M18 hash is not mistaken for a parameterised one');
+    'a named Second Look hash is not mistaken for a parameterised one');
   for (const id of ['secondlook', 'nobodymissed', 'briefs']) {
     ok(nav.resolveNavigationLocation(id).sectionId === 'recruitment', `${id} highlights Recruitment`);
   }
@@ -409,7 +409,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   }
   console.log(`✓ resolver maps every destination (${AGENT_IDS.length} checks folded)`);
   ok(nav.resolveNavigationLocation('profile').sectionId === 'home', 'direct /profile highlights Home');
-  ok(nav.resolveNavigationLocation('compliance').sectionId === 'home', 'direct /compliance highlights Home (P5.6C)');
+  ok(nav.resolveNavigationLocation('compliance').sectionId === 'home', 'direct /compliance highlights Home');
   ok(nav.resolveNavigationLocation('transactions').sectionId === 'transactions', 'direct /transactions highlights Transactions');
   ok(nav.resolveNavigationLocation('nonexistent').sectionId === null && nav.resolveNavigationLocation('nonexistent').itemId === null, 'unknown path highlights nothing');
 
@@ -434,11 +434,11 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   section(`${app} — hash deep links (strict)`);
   ok(nav.screenFromHash('#/clients') === 'clients' && nav.screenFromHash('#/agency') === 'agency' && nav.screenFromHash('#/inbox') === 'inbox', 'flat hashes parse');
   ok(nav.screenFromHash('#/nope') === null && nav.screenFromHash('#foo') === null && nav.screenFromHash('') === null && nav.screenFromHash('#/Clients') === null, 'unknown, malformed and wrongly-cased hashes rejected');
-  ok(nav.screenFromHash('#/clients/rep-7') === 'clients' && nav.clientFromHash('#/clients/rep-7')?.id === 'rep-7' && nav.clientFromHash('#/clients/rep-7')?.tab === 'summary', 'a client deep link resolves to Clients and carries the id (Overview › Summary by default — M24B)');
+  ok(nav.screenFromHash('#/clients/rep-7') === 'clients' && nav.clientFromHash('#/clients/rep-7')?.id === 'rep-7' && nav.clientFromHash('#/clients/rep-7')?.tab === 'summary', 'a client deep link resolves to Clients and carries the id (Overview › Summary by default)');
   ok(nav.clientFromHash('#/clients/rep-7/opportunities')?.tab === 'opportunities' && nav.screenFromHash('#/clients/rep-7/activity') === 'clients', 'a client tab deep link carries its tab');
   ok(nav.clientFromHash('#/clients/rep-7/offer') === null && nav.screenFromHash('#/clients/rep-7/offer') === null, 'an unknown client tab (offer) is rejected outright');
   ok(nav.clientFromHash('#/clients/') === null && nav.clientFromHash('#/clients/a/b/c') === null && nav.clientFromHash('#/clients/../x') === null && nav.clientFromHash('') === null, 'malformed client deep links rejected');
-  ok(nav.hashForClient('rep-7') === '#/clients/rep-7' && nav.hashForClient('rep-7', 'activity') === '#/clients/rep-7/overview/activity' && nav.clientFromHash('#/clients/rep-7/activity')?.tab === 'activity', 'client hashes round-trip (M24B: a link names its category; the legacy flat form still reads)');
+  ok(nav.hashForClient('rep-7') === '#/clients/rep-7' && nav.hashForClient('rep-7', 'activity') === '#/clients/rep-7/overview/activity' && nav.clientFromHash('#/clients/rep-7/activity')?.tab === 'activity', 'client hashes round-trip (a link names its category; the legacy flat form still reads)');
   ok(nav.screenFromHash('#/agency/team') === 'agency' && nav.agencyTabFromHash('#/agency/team') === 'team' && nav.agencyTabFromHash('#/agency/billing') === null && nav.screenFromHash('#/agency/billing') === null, 'agency tab deep links are strict');
   ok(nav.hashForAgency('overview') === '#/agency' && nav.hashForAgency('settings') === '#/agency/settings', 'agency hashes round-trip');
   // Transaction deep links. Strict: the id shape is fixed, and a tab the
@@ -450,7 +450,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
   ok(nav.transactionFromHash('#/transactions/atx-7/offer') === null && nav.screenFromHash('#/transactions/atx-7/offer') === null, 'an offer tab on a transaction is rejected outright');
   ok(nav.transactionFromHash('#/transactions/atx-7/signing') === null && nav.transactionFromHash('#/transactions/atx-7/fees') === null, 'so are signing and fees');
   ok(nav.transactionFromHash('#/transactions/') === null && nav.transactionFromHash('#/transactions/rep-7') === null && nav.transactionFromHash('#/transactions/../x') === null && nav.transactionFromHash('#/transactions/atx-7/a/b') === null, 'malformed transaction deep links rejected, including a client id in a transaction slot');
-  ok(nav.hashForTransaction('atx-7') === '#/transactions/atx-7' && nav.hashForTransaction('atx-7', 'documents') === '#/transactions/atx-7/records/documents' && nav.transactionFromHash('#/transactions/atx-7/documents')?.tab === 'documents', 'transaction hashes round-trip (M24B: a link names its category; the legacy flat form still reads)');
+  ok(nav.hashForTransaction('atx-7') === '#/transactions/atx-7' && nav.hashForTransaction('atx-7', 'documents') === '#/transactions/atx-7/records/documents' && nav.transactionFromHash('#/transactions/atx-7/documents')?.tab === 'documents', 'transaction hashes round-trip (a link names its category; the legacy flat form still reads)');
   for (const id of AGENT_IDS) if (nav.screenFromHash(nav.hashForScreen(id)) !== id) fail(`hash round-trip for ${id}`); else passed++;
   console.log('✓ every screen hash the app writes, it can read back (7 folded)');
   ok(nav.screenFromHash('#/compliance/ctx-7') === 'compliance' && nav.contextFromHash('#/compliance/ctx-7') === 'ctx-7', 'a compliance context deep link resolves and carries its id');
@@ -474,7 +474,7 @@ for (const [app, IDS, expectSections] of [['scoutbox-club', PRO_IDS, 5], ['scout
 // the Trust & Safety console's groups, the Player's bottom navigation and
 // recruitment categories. Every list of choices a person is shown holds at
 // most five entries — the brief's rule, asserted on the real configuration.
-section('M24D — the five rule in every application');
+section('the five rule in every application');
 {
   const agent = await loadNav('scoutbox-agent');
   for (const sec of agent.NAV_SECTIONS) if (sec.children.length > 5) fail(`agent ${sec.id}: ${sec.children.length} pages`); else passed++;

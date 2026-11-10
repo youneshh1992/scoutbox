@@ -10,9 +10,10 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import {
-  totp, totpValid, b32encode, convertMinor, slotsOverlap, webhookUrlProblem,
-} from '../../m13/shared.mjs';
+import { totp, totpValid, b32encode } from '../../domains/identity/totp.mjs';
+import { convertMinor } from '../../domains/recruitment/money.mjs';
+import { slotsOverlap } from '../../domains/scouting/slots.mjs';
+import { webhookUrlProblem } from '../../domains/integrations/webhooks.mjs';
 import { computeScenarioTotals } from '../../domains/recruitment/budgets.mjs';
 import { ageOn, isAdult } from '../../domain.mjs';
 
@@ -33,8 +34,8 @@ const ok = (cond, msg) => { if (cond) { passed++; console.log(`✓ ${msg}`); } e
 const section = (name) => console.log(`\n— ${name} —`);
 
 const ENV = {
-  ...process.env, PORT: String(PORT), DATA_DIR, M13_FAST_RETRY: '1',
-  ALLOW_LOCAL_WEBHOOKS: '1', M13_QUIET_LOGS: '1',
+  ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_FAST_SWEEPS: '1',
+  ALLOW_LOCAL_WEBHOOKS: '1', SCOUTBOX_QUIET_LOGS: '1',
 };
 let server = null;
 const children = [];

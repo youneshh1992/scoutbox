@@ -14,7 +14,7 @@ import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import { createNotificationPrefs, registerNotificationPrefs, CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
 import { createNotifier, registerNotificationFeed } from '../domains/messaging/notify.mjs';
 import { createOperationsRepository } from '../repositories/operations.mjs';
-import { registerDelivery } from '../m13/delivery.mjs';
+import { registerDelivery } from '../domains/messaging/delivery.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir, freshFile, FIXTURE, ORGS, USERS, SESSIONS, openRaw, dump, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
@@ -302,20 +302,22 @@ test('preferences through the real module over the repository: defaults are the 
   s.close(); rm(dir);
 });
 
-test('m13 notifyAction: a muted notification (the gate returned null) yields null instead of crashing, and an allowed one carries the acknowledgment contract', () => {
+test('notifyAction: a muted notification (the gate returned null) yields null instead of crashing, and an allowed one carries the acknowledgment contract', () => {
   const dir = tempDir('ntf-action'); fixtureFile(dir);
   const s = openRaw(dir);
   const repo = bare(s); const dispatches = createDispatchesRepository({ sqlite: s, now: () => NOW }); const outboxPush = createOutboxPushRepository({ sqlite: s, now: () => NOW });
   const router = { post() {}, get() {}, put() {} };
   let muted = false;
   const notify = (audience, type, text, refId = null, { actionRequired = null } = {}) => (muted ? null : repo.create({ audience, type, text, refId, category: 'security_account', deferredPush: false, actionRequired }));
-  const ctx = { notifications: repo, dispatches, outbox: outboxPush.outbox, users: [], app: { post() {} }, orgRouter: router, playerRouter: router, guardianRouter: router, adminRouter: router, nextId, persist() {}, persistNow() {}, notify, findPlayer: () => null, isAdult: () => true, signBody: () => '', timingSafeEq: () => false, unit: (w) => w(), operations: createOperationsRepository({ sqlite: s, now: () => NOW }) };
+  const ctx = { notifications: repo, dispatches, outbox: outboxPush.outbox, users: [], app: { post() {} }, orgRouter: router, playerRouter: router, guardianRouter: router, adminRouter: router, nextId, persist() {}, persistNow() {}, notify, findPlayer: () => null, isAdult: () => true, emitWebhook: () => {}, webhookSweep: () => 0, unit: (w) => w(), operations: createOperationsRepository({ sqlite: s, now: () => NOW }) };
   const saveInterval = globalThis.setInterval; globalThis.setInterval = () => ({ unref() {} });
-  try { registerDelivery(ctx); } finally { globalThis.setInterval = saveInterval; }
-  const n = ctx.notifyAction(STAFF, 'transition', 'Withdrawn.', 'trn-1', NOW + HOUR);
+  let notifyAction;
+  try { ({ notifyAction } = registerDelivery(ctx)); } finally { globalThis.setInterval = saveInterval; }
+  assert.throws(() => registerDelivery({ ...ctx, emitWebhook: undefined }), /needs the webhook emitter/);
+  const n = notifyAction(STAFF, 'transition', 'Withdrawn.', 'trn-1', NOW + HOUR);
   assert.deepEqual(plain(n.actionRequired), { deadline: NOW + HOUR, ackedAt: null, ackedBy: null });
   muted = true;
-  assert.equal(ctx.notifyAction(STAFF, 'transition', 'Withdrawn.', 'trn-1', NOW + HOUR), null, 'muted: null, no throw');
+  assert.equal(notifyAction(STAFF, 'transition', 'Withdrawn.', 'trn-1', NOW + HOUR), null, 'muted: null, no throw');
   s.close(); rm(dir);
 });
 

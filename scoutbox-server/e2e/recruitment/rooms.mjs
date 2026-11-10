@@ -38,7 +38,7 @@ const section = (name) => console.log(`\n— ${name} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ======================================================= U1 state machine
-section('U1 — the room state machine is explicit, total and mapped onto M12');
+section('U1 — the room state machine is explicit, total and mapped onto the case stages');
 {
   // No count of the statuses: a count is a census, not an invariant. The
   // invariant — the one that makes the room a facet and not a second pipeline —
@@ -333,7 +333,7 @@ section('U6 — list rows, tags and limits');
 
 // ================================================= HTTP journeys and abuse
 section('HTTP — the real routes');
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1' };
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', BOX_CAM_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 {
@@ -371,7 +371,7 @@ const created = await j('POST', '/org/rooms', { playerId: ADULT.id, sourceContex
 ok(created.status === 201 && created.body.room?.roomId, 'the room is created');
 const ROOM = created.body.room.roomId;
 ok(created.body.room.status === 'watching', 'a new room starts at watching');
-ok(created.body.room.stage === 'identified', 'the canonical M12 stage was derived, not invented');
+ok(created.body.room.stage === 'identified', 'the canonical case stage was derived, not invented');
 ok(created.body.room.sourceContext === 'search', 'the workflow provenance is recorded');
 ok(typeof created.body.room.trust?.score === 'number', 'the room composes the Trust Score');
 ok(/not football ability/i.test(created.body.room.trust.note), 'the Trust Score arrives with its disclaimer');
@@ -384,7 +384,7 @@ ok(/private to your organisation/i.test(created.body.room.privacyNote), 'the roo
   const s = JSON.stringify(created.body.room);
   neg(!/"records":\[[^\]]/.test(s.slice(s.indexOf('"medical"'), s.indexOf('"medical"') + 200)), 'the room projection carries no medical record');
   // One number called Trust Score in a Room, never two.
-  neg(!('trustScore' in (created.body.room.player ?? {})), 'the legacy safeguarding trustScore is not shown beside the M16.2 Trust Score');
+  neg(!('trustScore' in (created.body.room.player ?? {})), 'the legacy safeguarding trustScore is not shown beside the Trust Score');
   neg(!('trust' in (created.body.room.player ?? {})), 'the legacy trust breakdown is not shown in the room header');
   neg(!s.includes('guardianId'), 'the room projection carries no guardian identity');
   neg(!/"password"/.test(s), 'the room projection carries no credential field');
@@ -933,8 +933,8 @@ section('Restricted rooms and unauthenticated surfaces');
     neg(commentAsOutsider.status === 403, 'an unrelated colleague cannot comment into a restricted room');
   } else {
     neg(true, 'restricted-room creation unavailable in this fixture; the restriction rule is covered by the m12 case suite');
-    neg(true, 'restricted rooms reuse the M12 case restriction gate verbatim');
-    ok(true, 'restriction is the existing M12 gate');
+    neg(true, 'restricted rooms reuse the case restriction gate verbatim');
+    ok(true, 'restriction is the existing case gate');
     neg(true, 'restricted rooms hide from unrelated colleagues by that same gate');
   }
   for (const [method, url] of [['GET', '/org/rooms'], ['POST', '/org/rooms'], ['GET', '/org/rooms/needs-attention'], ['GET', '/org/rooms-funnel']]) {

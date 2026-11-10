@@ -3,7 +3,7 @@
  * snapshots, room decisions and room evidence states.
  *
  * Every field is a typed column with the vocabulary CHECKs of the domain rules (domains/recruitment/rooms/shared.mjs,
- * domains/recruitment/lifecycle/decision.mjs, m13/shared.mjs, m27/integration.mjs). A case's history has one entry shape
+ * domains/recruitment/lifecycle/decision.mjs, domains/recruitment/money.mjs, domains/agents/integration/integration.mjs). A case's history has one entry shape
  * (`{ id, at, byKind, byId, byName, action, detail }`), and a decision's `snapshot` is read from the room_snapshots row
  * it names (it is that row, never a second copy). The idempotency keys are columns of their owner (a draft's create key,
  * a decision's finalize and draft keys, a handoff's invite key).
@@ -29,8 +29,8 @@ import { isPlainObject } from './recruitment.mjs';
 import { writeChecks, writeKit } from './writes.mjs';
 import { ROOM_STATUSES, ROOM_PRIORITIES, ROOM_TRANSITIONS, SOURCE_CONTEXTS, TASK_STATES, LINKED_RESOURCE_TYPES, EVIDENCE_REVIEW_STATES, RECOMMENDATIONS, LIMITS, CASE_STAGES, CASE_PRIORITIES, CASE_DECISION_OUTCOMES, CASE_APPROVAL_STATES } from '../domains/recruitment/rooms/shared.mjs';
 import { DECISION_OUTCOMES, DECISION_KINDS, DECISION_STATES, EVIDENCE_REF_KINDS, DECISION_LIMITS } from '../domains/recruitment/lifecycle/decision.mjs';
-import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../m13/shared.mjs';
-import { HANDOFF_STATUSES } from '../m27/integration.mjs';
+import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../domains/recruitment/money.mjs';
+import { HANDOFF_STATUSES } from '../domains/agents/integration/integration.mjs';
 
 export const RECRUITMENT_CASES_MIGRATION = '0016_recruitment_cases';
 export const RECRUITMENT_CASES_COLLECTIONS = Object.freeze(['recruitmentCases', 'roomComments', 'roomSnapshots', 'roomDecisions', 'roomEvidenceState']);

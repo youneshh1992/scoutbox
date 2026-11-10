@@ -181,7 +181,7 @@ section('§6 — no production code creates or repairs a collection in memory');
 async function bootOnce(dataDir, { port, probe = null } = {}) {
   const base = `http://localhost:${port}`;
   const proc = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, M13_QUIET_LOGS: '1', SCOUTBOX_SEED_DEMO: '0' },
+    env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_SEED_DEMO: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   children.push(proc);
@@ -245,7 +245,7 @@ const first = await bootOnce(BARE_DIR, { port: PORT_BASE, probe: firstRequestPro
   ok(first.up, `the server boots on a database holding one organisation and one player${first.up ? '' : `:\n${first.log.slice(-900)}`}`);
   const p = first.probe;
   ok(p?.login === true, 'the very first request to a freshly booted server authenticates');
-  neg(p?.lifecycle === 200, 'and the LAST-registered module (M23) already serves its routes on that first request');
+  neg(p?.lifecycle === 200, 'and the lifecycle, registered late, already serves its routes on that first request');
   ok(Array.isArray(p?.lifecycleBody?.actions) && p.lifecycleBody.actions.length === 19, 'answering with all 19 lifecycle actions, so the module is composed and not half-registered');
   neg(p?.reviewQueue === 200, 'and a route over the review-later deferrals answers on the first request');
   neg(p?.notes !== undefined && p.notes < 500, 'and a route over the club notes answers on its own terms, not with a 500');

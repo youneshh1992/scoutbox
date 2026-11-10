@@ -35,7 +35,7 @@
 import { PLANS } from '../../../catalogue.mjs';
 import { createHash } from 'node:crypto';
 import { CLUB_SETUP_LIMITS } from '../../../repositories/clubSetup.mjs';
-import { buildShared } from '../../../m12/shared.mjs';
+import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { roomRole, roomCan } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
@@ -58,7 +58,7 @@ import {
 const TEST_CLOCK = process.env.SCOUTBOX_TEST_CLOCK === '1';
 
 export function registerSigning(rawCtx) {
-  const ctx = { ...rawCtx, ...buildShared(rawCtx) };
+  const ctx = { ...rawCtx, ...buildRouteHelpers(rawCtx) };
   const {
     orgRouter, playerRouter, guardianRouter, adminRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, auditEntry, orgCanSee, storage, ledgerAppend, billing = null, refreshJourneyBadges = null, isAdult = null,
@@ -81,7 +81,7 @@ export function registerSigning(rawCtx) {
   /** A case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...entry) => ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
   if (typeof players?.setAvailability !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
-  if (typeof signingsFollowUps?.signingPackages?.insert !== 'function' || typeof signingsFollowUps?.signings?.record !== 'function') throw new TypeError('registerSigning needs the signings/follow-ups repository (S8d) from the data layer');
+  if (typeof signingsFollowUps?.signingPackages?.insert !== 'function' || typeof signingsFollowUps?.signings?.record !== 'function') throw new TypeError('registerSigning needs the signings/follow-ups repository from the data layer');
   const sp = signingsFollowUps.signingPackages; const sg = signingsFollowUps.signings;
 
   /** A refusal raised INSIDE the completion unit: the unit rolls back, the route answers with this code (never a 500). */

@@ -59,7 +59,7 @@ function matchesSearch(view, f) {
 const searchView = (s) => ({ id: s.id, orgId: s.orgId, userId: s.userId, scoutName: s.scoutName, name: s.name, filters: { ...s.filters }, createdAt: s.createdAt });
 
 export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerViewForOrg, reqText, savedSearches }) {
-  if (typeof savedSearches?.create !== 'function') throw new TypeError('registerSavedSearches needs the saved-searches repository (S13e)');
+  if (typeof savedSearches?.create !== 'function') throw new TypeError('registerSavedSearches needs the saved-searches repository');
 
   // Called whenever a player joins: alert the staff whose saved search matches.
   function checkSavedSearches(player) {

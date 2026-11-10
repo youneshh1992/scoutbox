@@ -414,8 +414,8 @@ section('§8 — the source itself carries no score, no ranking and no player su
 // ========================== §9 registry, preferences, limits, migration
 section('§9 — the matching events, notifications, limits and schema are all declared');
 {
-  const M19_EVENTS = ['watchlist_created', 'watchlist_updated', 'watchlist_membership_changed', 'watchlist_archived', 'matching_room_created'];
-  for (const e of M19_EVENTS) {
+  const MATCHING_EVENTS = ['watchlist_created', 'watchlist_updated', 'watchlist_membership_changed', 'watchlist_archived', 'matching_room_created'];
+  for (const e of MATCHING_EVENTS) {
     ok(isRegistered(e), `${e} is in the event registry`);
     abuse(56, audienceFor(e) === 'org_private', `${e} never leaves the organisation that owns it`);
     neg(EVENT_REGISTRY[e].payload.every((k) => /Id$/.test(k)), `${e} carries ids only — never a player name, a criterion or a count`);
@@ -499,7 +499,7 @@ section('§9b — age boundaries, time-driven change, and the things matching mu
 
 // ============================================================ HTTP boot
 section('§10 — a clean database boots with matching in place');
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1' };
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', BOX_CAM_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env, base) {

@@ -136,7 +136,7 @@ section('HTTP — booting a real server (test clock, synthetic agent verificatio
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -644,12 +644,12 @@ section('Z — the boundaries, read from the source: one writer per truth, no au
   const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
   const files = (dir) => readdirSync(path.join(ROOT, dir)).filter((f) => f.endsWith('.mjs')).map((f) => `${dir}/${f}`);
-  const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['m12', 'm13', 'domains/development', 'domains/identity', 'domains/development/boxcam', 'domains/discovery', 'domains/discovery/matching', 'm20', 'domains/development/hub', 'domains/development/boxcam/cv', 'm27', 'domains/platform', 'domains/recruitment/rooms', 'domains/recruitment/lifecycle', 'domains/recruitment/offers', 'domains/recruitment/signings', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust', 'domains/agents/core', 'domains/agents/compliance', 'domains/agents/transactions'].flatMap(files)];
+  const serverFiles = ['server.mjs', 'seed.mjs', 'domain.mjs', ...['domains/operations', 'domains/messaging', 'domains/integrations', 'domains/insight', 'domains/groups', 'domains/enterprise', 'domains/development', 'domains/identity', 'domains/development/boxcam', 'domains/discovery', 'domains/discovery/matching', 'domains/recruitment/analytics', 'domains/development/hub', 'domains/development/boxcam/cv', 'domains/agents/integration', 'domains/platform', 'domains/recruitment/rooms', 'domains/recruitment/lifecycle', 'domains/recruitment/offers', 'domains/recruitment/signings', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust', 'domains/agents/core', 'domains/agents/compliance', 'domains/agents/transactions'].flatMap(files)];
   // A Room's status is written by one act (cases.moveRoom); nothing assigns it on a record.
   const statusWriters = serverFiles.filter((f) => /\.moveRoom\(|\.room\.status\s*=[^=]/.test(strip(src(f))));
   neg(statusWriters.length === 1 && statusWriters[0] === 'domains/recruitment/rooms/rooms.mjs', `Z1 exactly one file writes room.status on a live case: ${statusWriters.join(', ')}`);
   const stageWriters = serverFiles.filter((f) => /(?:kase|room|c|k)\.stage\s*=[^=]/.test(strip(src(f))));
-  neg(stageWriters.every((f) => ['domains/recruitment/rooms/rooms.mjs', 'domains/scouting/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded M12 routes: ${stageWriters.join(', ')}`);
+  neg(stageWriters.every((f) => ['domains/recruitment/rooms/rooms.mjs', 'domains/scouting/scouting.mjs'].includes(f)), `Z2 case.stage is written only by the ONE writer and the room-guarded workspace routes: ${stageWriters.join(', ')}`);
   // The column is written through the identity repository (`players.setAvailability(id, { contractStatus: 'under_contract', … })`), never assigned on the record, and only by the signings domain.
   const ucWriters = serverFiles.filter((f) => /contractStatus\s*=\s*'under_contract'|players\.setAvailability\([^\n]*contractStatus: 'under_contract'/.test(strip(src(f))));
   neg(ucWriters.length === 1 && ucWriters[0] === 'domains/recruitment/signings/index.mjs', `#26 Z3 'under_contract' is written in exactly one file: ${ucWriters.join(', ')}`);

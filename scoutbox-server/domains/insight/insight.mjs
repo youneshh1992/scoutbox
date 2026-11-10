@@ -50,7 +50,6 @@ export function registerInsight(ctx) {
     if (exposure.has(orgId, playerId, kind, dk)) return false;
     return exposure.record({ id: nextId('exp'), orgId, playerId, kind, day: dk, at });
   }
-  ctx.recordExposure = recordExposure;
 
   // Passive capture at the response layer: profile + passport reads become
   // exposure events without touching the profile and passport handlers.
@@ -226,7 +225,6 @@ export function registerInsight(ctx) {
     exposure.prune(dayKey(at) - EXPOSURE_WINDOW_DAYS);
     return changed;
   }
-  ctx.insightSweep = insightSweep;
 
   // =========================================================== calibration
   const activeStaffOf = (orgId, uid) => byId.user(uid, (u) => u.orgId === orgId && !u.removedAt);
@@ -533,8 +531,6 @@ export function registerInsight(ctx) {
     });
     return { ok: true, suggestion: suggestionView(fresh), routedTo: audience.kind };
   }
-  ctx.requestEvidenceGap = requestEvidenceGap;
-  ctx.computeEvidenceGaps = computeGaps;
 
   orgRouter.post('/evidence-gaps/:id/request', (req, res) => {
     const out = requestEvidenceGap({ org: req.org, suggestionId: req.params.id });
@@ -567,4 +563,6 @@ export function registerInsight(ctx) {
     if (s.status !== 'supplied') return res.status(409).json({ error: 'NOT_SUPPLIED', message: 'Mark reviewed once the gap shows as supplied.' });
     res.json({ suggestion: suggestionView(suggestions.setStatus(s.id, 'reviewed', Date.now())) });
   });
+
+  return { insightSweep, requestEvidenceGap, computeEvidenceGaps: computeGaps };
 }

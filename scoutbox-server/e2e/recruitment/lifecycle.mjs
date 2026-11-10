@@ -29,9 +29,9 @@ import {
   STATUS_EVIDENCE_REQUIRED, adoptionStatusForStage, PRO_STAGES, GRASSROOTS_STAGES,
   ALL_REASON_CODES,
 } from '../../domains/recruitment/rooms/shared.mjs';
-import { M23_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { LIFECYCLE_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { FUNNEL_STAGES, stagesReached } from '../../m20/funnels.mjs';
+import { FUNNEL_STAGES, stagesReached } from '../../domains/recruitment/analytics/funnels.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 
 const PORT = 5700 + Math.floor(Math.random() * 200);
@@ -214,7 +214,7 @@ section('U5 — analytics compatibility is explicit');
   for (const s of ['watching', 'under_review', 'shortlisted', 'priority', 'trial_requested', 'trial_scheduled', 'trial_completed', 'offer_consideration', 'offer_made', 'signed']) {
     if (toAnalyticsRecruitmentStage(s) !== s) fail(`legacy status ${s} no longer maps to itself`);
   }
-  ok(true, '#34c all ten pre-M23 funnel statuses are unchanged');
+  ok(true, '#34c all ten original funnel statuses are unchanged');
 }
 
 section('H7-H8, H13-H14, H18-H20 — determinism, legacy mapping and isolation (pure)');
@@ -284,7 +284,7 @@ section('H7-H8, H13-H14, H18-H20 — determinism, legacy mapping and isolation (
     if (!projected.ok || projected.lifecycle.currentStage !== st) { mappedAll = false; fail('H13 legacy status ' + st + ' does not project as itself'); }
     if (!projected.lifecycle.label || projected.lifecycle.label === st) { mappedAll = false; fail('H13 legacy status ' + st + ' has no human label'); }
   }
-  ok(mappedAll, 'H13 all 13 pre-M23 statuses still exist, keep their transitions, project as themselves and carry a label');
+  ok(mappedAll, 'H13 all 13 original statuses still exist, keep their transitions, project as themselves and carry a label');
 
   // H14 — an unknown legacy status is refused, never coerced.
   const weird = mkCase('case-W', 'oT', 'pT', '__unknown_old_status__');
@@ -549,7 +549,7 @@ process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); 
 /** Start a server on the shared PORT and DATA_DIR, and wait for it to answer. */
 async function boot() {
   const proc = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1' }, stdio: 'ignore',
+    env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1' }, stdio: 'ignore',
   });
   children.push(proc);
   proc.unref();
@@ -589,7 +589,7 @@ section('J — the positive journeys');
 {
   // J1 — an existing room case projects.
   const j1 = await j('GET', `/org/rooms/${ROOM}/journey`, undefined, maria.token);
-  ok(j1.status === 200 && j1.body.ok === true, 'J1 an M17-created case projects through the canonical journey');
+  ok(j1.status === 200 && j1.body.ok === true, 'J1 a Rooms-created case projects through the canonical journey');
   ok(j1.body.lifecycle.currentStage === 'watching', 'J1b with its real current stage');
   ok(j1.body.lifecycle.policyVersion === RECRUITMENT_LIFECYCLE_POLICY_VERSION, 'J1c and the policy version it was computed under');
   ok(Array.isArray(j1.body.nextActions) && j1.body.nextActions.includes('startReview'), 'J1d and deterministic next actions');
@@ -837,7 +837,7 @@ section('H1-H6 — the signed boundary, attacked from every write path');
   // H3 — the legacy stage route cannot express `signed` at all.
   const stageNames = ['identified', 'review', 'observation', 'trial', 'invited', 'awaiting_response', 'decision', 'closed'];
   neg(stageNames.every((st) => roomStatusForStage(st, 'academy') !== 'signed'),
-    'H3 no legacy M12 stage maps to `signed` — the compatibility path cannot express it');
+    'H3 no legacy workspace stage maps to `signed` — the compatibility path cannot express it');
   neg(stageNames.every((st) => roomStatusForStage(st, 'grassroots') !== 'signed'),
     'H3b in either vocabulary');
 
@@ -873,10 +873,10 @@ section('Legacy compatibility — an old case still reads');
   if (legacy.status === 201) {
     const LID = legacy.body.room.roomId;
     const viaOldRoute = await j('POST', `/org/rooms/${LID}/status`, { status: 'under_review' }, maria.token);
-    ok(viaOldRoute.status === 200, 'J12 the pre-M23 status route still works');
+    ok(viaOldRoute.status === 200, 'J12 the original status route still works');
     const proj = await j('GET', `/org/rooms/${LID}/journey`, undefined, maria.token);
     ok(proj.status === 200 && proj.body.lifecycle.currentStage === 'under_review',
-      '#27 J12b and the case it produced projects through the M23 journey unchanged');
+      '#27 J12b and the case it produced projects through the canonical journey unchanged');
     ok(proj.body.history.entries.some((e) => e.to === 'under_review'),
       'J12c its history, written by the old route, is read by the new projector');
   } else {
@@ -908,7 +908,7 @@ section('V — two reason taxonomies, and the route must use the right one');
   for (const c of ['nationality', 'religion', 'disability', 'postcode']) {
     const v = validateLifecycleReasons([c]);
     neg(v.ok === false && v.error === 'ROOM_REASON_PROHIBITED',
-      `V6 "${c}" is refused as a prohibited characteristic, with M17's own error code`);
+      `V6 "${c}" is refused as a prohibited characteristic, with the Rooms' own error code`);
   }
   neg(validateLifecycleReasons(Array.from({ length: 7 }, () => 'case_closed').map((c, i) => (i ? `${c}` : c))).ok === true,
     'V7 duplicates collapse rather than tripping the ceiling');
@@ -1325,7 +1325,7 @@ section('W — write-site audit: every path that can move a case, and the ones t
   const revBefore = room.body?.room?.rev;
   const legacyDecision = await j('POST', `/org/cases/${ROOM}/decision`, { outcome: 'monitor', reasons: 'keep watching through the spring' }, maria.token);
   ok(legacyDecision.status === 200 && legacyDecision.body?.case?.decision?.outcome === 'monitor',
-    'W8 an M12 decision on a Room is still recorded — the route is not broken, only disarmed');
+    'W8 a workspace decision on a Room is still recorded — the route is not broken, only disarmed');
   neg(legacyDecision.body?.case?.stage !== 'decision',
     'W9 but it does not write the derived stage behind the lifecycle\'s back');
   const roomAfter = await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token);
@@ -1431,24 +1431,24 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // files themselves and required to have a status. A list written by hand
   // here would pass forever while the module grew a code nobody mapped, silently
   // falling through to 400.
-  const M23_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'domains', 'recruitment', 'lifecycle');
+  const LIFECYCLE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'domains', 'recruitment', 'lifecycle');
   // errors.mjs is swept too: `sendDomainError` — the one place that PRODUCES
   // `LIFECYCLE_INTERNAL` — lives in it. Its table rows are
   // `CODE: status,` and do not match a producing shape, so the sweep still
   // sees only what can actually be sent.
-  const sources = readdirSync(M23_DIR).filter((f) => f.endsWith('.mjs'));
+  const sources = readdirSync(LIFECYCLE_DIR).filter((f) => f.endsWith('.mjs'));
   const produced = new Set();
   for (const f of sources) {
-    const text = readFileSync(path.join(M23_DIR, f), 'utf8');
+    const text = readFileSync(path.join(LIFECYCLE_DIR, f), 'utf8');
     // Two producing shapes: a literal `error: 'CODE'` and the routes'
     // `err(res, 'CODE', …)` helper, which builds exactly that literal.
     for (const m of text.matchAll(/(?:error:|err\(res,)\s*'([A-Z][A-Z0-9_]+)'/g)) produced.add(m[1]);
   }
-  ok(produced.size >= 15, `Y1 ${produced.size} error codes found in the M23 source, mechanically`);
+  ok(produced.size >= 15, `Y1 ${produced.size} error codes found in the lifecycle source, mechanically`);
 
   const unmapped = [...produced].filter((c) => httpStatusFor(c) === null);
   for (const c of unmapped) console.error(`   unmapped: ${c}`);
-  neg(unmapped.length === 0, 'Y2 every error code the M23 source can produce has an HTTP status in the one table');
+  neg(unmapped.length === 0, 'Y2 every error code the lifecycle source can produce has an HTTP status in the one table');
 
   // The converse. A table entry for a code nothing produces is dead weight that
   // makes the table look more complete than it is. `ROOM_VERSION_CONFLICT` is
@@ -1458,7 +1458,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // `TRIAL_VERSION_CONFLICT` is the same guard, named for the
   // Trial record: raised through `errorCode:` in trialRoutes, never as `error:`.
   const EXTERNAL = new Set(['ROOM_VERSION_CONFLICT', 'CONTACT_VERSION_CONFLICT', 'TRIAL_VERSION_CONFLICT']);
-  const orphaned = Object.keys(M23_ERROR_HTTP).filter((c) => !produced.has(c) && !EXTERNAL.has(c));
+  const orphaned = Object.keys(LIFECYCLE_ERROR_HTTP).filter((c) => !produced.has(c) && !EXTERNAL.has(c));
   for (const c of orphaned) console.error(`   orphaned: ${c}`);
   neg(orphaned.length === 0, 'Y3 and the table contains no code nothing can produce');
 
@@ -1471,7 +1471,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
   // 429: the Contact cooldown is a deterministic per-recipient
   // refusal with a retry time, and 429 is the status that means exactly that.
   const BANDS = [400, 403, 404, 409, 422, 429, 500];
-  const offBand = Object.entries(M23_ERROR_HTTP).filter(([, s]) => !BANDS.includes(s));
+  const offBand = Object.entries(LIFECYCLE_ERROR_HTTP).filter(([, s]) => !BANDS.includes(s));
   neg(offBand.length === 0, `Y6 every status in the table is one of ${BANDS.join('/')}`);
 
   // An internal error must not hand the client the implementation.
@@ -1514,7 +1514,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
     for (const k of Object.keys(body ?? {})) if (!ALLOWED_KEYS.has(k)) strayKeys.push(`${label}.${k}`);
   }
   for (const s of strayKeys) console.error(`   stray key: ${s}`);
-  neg(strayKeys.length === 0, 'Y11 no refusal M23 itself produces carries a field outside the published error shape');
+  neg(strayKeys.length === 0, 'Y11 no refusal the lifecycle itself produces carries a field outside the published error shape');
 
   // And the one body that IS excluded still may not carry a user id, which is
   // what actually matters. Checked rather than assumed, because the exclusion above
@@ -1527,7 +1527,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
     for (const { label, body } of conflicts) {
       for (const k of Object.keys(body ?? {})) if (!CONFLICT_KEYS.has(k)) widened.push(`${label}.${k}`);
     }
-    neg(widened.length === 0, 'Y11c the 409 body is exactly M18.1\'s conflict contract, not that contract plus M23 detail');
+    neg(widened.length === 0, 'Y11c the 409 body is exactly the shared conflict contract, not that contract plus lifecycle detail');
     const carriesNarrative = conflicts.some(({ body }) => {
       const text = JSON.stringify(body ?? {});
       return LIFECYCLE_REASON_CODES.some((c) => text.includes(c)) || /note|reason|narrative/i.test(Object.keys(body ?? {}).join(' '));
@@ -1611,7 +1611,7 @@ section('Z — what the lifecycle deliberately does NOT ship, asserted rather th
     'Z13 with the honest reason: this deployment cannot check it yet, so it fails CLOSED');
 }
 
-section('S — the subsystems M23 must not have touched');
+section('S — the subsystems the lifecycle must not touch');
 {
   // The lifecycle adds no Match Score and alters neither Trust nor Combine
   // eligibility. Asserted by taking a reading, moving the lifecycle, and
@@ -1651,7 +1651,7 @@ section('S — the subsystems M23 must not have touched');
   neg(stable(before.plans) === stable(after.plans),
     'S3 and create no Development Plan');
   neg(stable(before.combine) === stable(after.combine),
-    'S4 and change no Combine eligibility — M22 is untouched by recruitment workflow');
+    'S4 and change no Combine eligibility — Box Cam CV is untouched by recruitment workflow');
   neg(stable(before.secondLook) === stable(after.secondLook),
     'S5 and raise no Second Look item — a transition is not canonical material evidence');
 

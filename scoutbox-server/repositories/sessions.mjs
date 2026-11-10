@@ -18,7 +18,7 @@ import { migrationApplied } from './database.mjs';
 export const SESSION_KINDS = Object.freeze(['player', 'guardian', 'org', 'ts_reviewer']);
 export const SESSION_VIAS = Object.freeze(['sso']);
 export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
-export const SESSIONS_CUTOVER_MIGRATION = '0003_sessions_live';
+export const SESSIONS_TABLE_MIGRATION = '0003_sessions_live';
 
 export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 
@@ -31,7 +31,7 @@ const toRow = (r) => {
   return row;
 };
 /** The table is trusted only once its migration is recorded. */
-const cutOver = (sqlite) => migrationApplied(sqlite, SESSIONS_CUTOVER_MIGRATION);
+const cutOver = (sqlite) => migrationApplied(sqlite, SESSIONS_TABLE_MIGRATION);
 
 /** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const SESSIONS_TABLE = {
@@ -76,7 +76,7 @@ export function createSessionsRepository({ sqlite, sessionTtlMs = DEFAULT_SESSIO
 
     /** Boot: refuse to run without the migration record; align expires_at with the configured lifetime. */
     attach() {
-      if (!stmt.cutover.get(SESSIONS_CUTOVER_MIGRATION)) throw new Error(`sessions: the cutover record ${SESSIONS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
+      if (!stmt.cutover.get(SESSIONS_TABLE_MIGRATION)) throw new Error(`sessions: the cutover record ${SESSIONS_TABLE_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
       const stored = Number(stmt.metaGet.get('sessionTtlMs')?.value) || null;
       if (stored !== sessionTtlMs) {
         stmt.retime.run(sessionTtlMs);

@@ -12,12 +12,12 @@ node e2e/buildConnectedDemo.mjs   # build scoutbox-connected-demo.html (the test
 node e2e/demoOffline.test.mjs  # bundles work with zero network
 node e2e/crosstab.test.mjs     # club tab ↔ player tab: one real conversation
 node e2e/uiSpotcheck.test.mjs  # feature surfaces incl. pairing + email gates
-node e2e/m162DemoSpotcheck.test.mjs   # Trust Score story across all four bundles
+node e2e/trustScoreDemoSpotcheck.test.mjs   # Trust Score story across all four bundles
 ```
 
 The `*Live.test.mjs` suites are different: each spawns its own backend on its
 own port, builds its own bundles and drives several apps at once, so they need
-no demo host. `m162Live.test.mjs` covers the M16.2 Trust Profile journeys.
+no demo host. `trustScoreLive.test.mjs` covers the Trust Profile journeys.
 
 Requires a Chromium binary; set `CHROMIUM` if it is not at
 `/opt/pw-browsers/chromium`, and `playwright-core` available (any of the app

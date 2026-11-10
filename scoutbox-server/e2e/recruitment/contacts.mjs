@@ -40,7 +40,7 @@ import {
 } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
-import { M23_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { LIFECYCLE_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
@@ -128,7 +128,7 @@ section('U — the Contact state machine is total, closed and null-prototype');
   ok(canContactAction({ status: 'delivered' }, 'respond', {}).ok, 'the recipient responds without a club role');
   neg(!canContactAction({ status: 'draft' }, 'respond', {}).ok, 'and cannot respond to a draft, which they can never see');
   ok(roomCan('room_lead', 'contact_write') && roomCan('viewer', 'contact_view') && !roomCan('contributor', 'contact_write'),
-    'M17\'s roomCan carries the same two actions, so the Room has one permission table');
+    'the Rooms\' roomCan carries the same two actions, so the Room has one permission table');
   neg(!contactRoleAllows('recruitment_admin', 'constructor') && !contactRoleAllows('constructor', 'contact_view'),
     'a prototype key is neither a role nor an action');
 }
@@ -332,7 +332,7 @@ section('V — registry, limits and schema');
   for (const a of ['contact_draft', 'contact_send', 'contact_external_record', 'contact_response']) ok(RATE_LIMIT_POLICY[a]?.max > 0, `rate-limit policy ${a} exists (${RATE_LIMIT_POLICY[a].max}/window)`);
   ok(RATE_LIMIT_POLICY.contact_response.scope === 'actor', 'the response limit is per actor, so a club cannot exhaust a recipient\'s quota');
   ok(DATA_MIGRATIONS.length === LATEST_SCHEMA && DATA_MIGRATIONS.some((m) => m.id === '0017_recruitment_contacts_offers'), 'the current schema: table migration 0017 creates the contacts (later steps may add migrations, never remove this one)');
-  for (const code of Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('CONTACT_'))) {
+  for (const code of Object.keys(LIFECYCLE_ERROR_HTTP).filter((c) => c.startsWith('CONTACT_'))) {
     ok([400, 403, 404, 409, 422, 429, 500].includes(httpStatusFor(code)), `${code} → ${httpStatusFor(code)}`);
   }
 }
@@ -342,7 +342,7 @@ section('HTTP — booting a real server');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -460,7 +460,7 @@ const J = {};
   ok(await historyLen(J.RID) === J.histAtPlanned + 1, 'J7c exactly one case history entry was appended');
   const jrS = (await j('GET', `/org/rooms/${J.RID}/journey`, undefined, maria.token)).body;
   const moved = jrS.history.entries.find((e) => e.to === 'contacted');
-  ok(moved && moved.reasonCodes.length === 0 && moved.kind === 'room_status_changed', 'J7d it is the same room_status_changed entry M20\'s funnel reads');
+  ok(moved && moved.reasonCodes.length === 0 && moved.kind === 'room_status_changed', 'J7d it is the same room_status_changed entry the analytics funnel reads');
   ok(jrS.contact.contacts.some((c) => c.id === J.CID && c.status === 'delivered'), 'J7e the journey lists the contact milestone');
   const inboxAfter = (await j('GET', '/player/inbox', undefined, kola.token)).body.items;
   J.request = inboxAfter.find((r) => r.type === 'contact' && r.subject === 'Interest from Eastport');
@@ -1023,7 +1023,7 @@ section('E — every refusal, swept at once; the contract');
   // CONTACT_ACTION_UNKNOWN is the validator's answer to an action name that no
   // route can pass it (actions are bound to routes), so it is provable only in
   // group U. Everything else must have been provoked for real.
-  const contactCodes = Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('CONTACT_') && httpStatusFor(c) < 500 && c !== 'CONTACT_ACTION_UNKNOWN');
+  const contactCodes = Object.keys(LIFECYCLE_ERROR_HTTP).filter((c) => c.startsWith('CONTACT_') && httpStatusFor(c) < 500 && c !== 'CONTACT_ACTION_UNKNOWN');
   const unseen = contactCodes.filter((c) => !codesSeen.has(c));
   ok(unseen.length === 0, `E8 every non-internal CONTACT_ code was provoked over HTTP${unseen.length ? ` (missing: ${unseen.join(', ')})` : ''}`);
   for (const e of ERROR_BODIES) {

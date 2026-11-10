@@ -28,7 +28,7 @@
  * body claim about who the caller is; no client clock.
  */
 
-import { buildShared } from '../../../m12/shared.mjs';
+import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { roomRole, roomCan, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
@@ -50,7 +50,7 @@ export function registerOffers(rawCtx) {
   // isLead, orgCanSee and audit come from
   // one place, so an Offer is led, concealed and audited by exactly the rules
   // a Room is.
-  const ctx = { ...rawCtx, ...buildShared(rawCtx) };
+  const ctx = { ...rawCtx, ...buildRouteHelpers(rawCtx) };
   const {
     guardians, orgRouter, playerRouter, guardianRouter, nextId, notify, broadcast, findPlayer, isBlocked,
     rateLimit, isLead, moderateOrRefuse, auditEntry, orgCanSee, isAdult, storage,

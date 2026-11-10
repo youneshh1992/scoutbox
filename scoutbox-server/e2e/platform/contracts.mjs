@@ -195,7 +195,7 @@ section('§8 — every notification type is classified, mentions are recognised 
   neg(categoryOf('message', 'someone wrote "mentioned you" in a message') !== 'mentions', 'user text saying "mentioned you" in another type is NOT a mention');
   neg(categoryOf('never_seen_type') === null, 'an unknown type is unclassified (and, below, delivered)');
   // The server's notify() call sites: every literal type is classified.
-  const srv = ['server.mjs', 'domains/identity/players.mjs', 'domains/development/grassroots.mjs', 'domains/recruitment/inbox.mjs', 'domains/recruitment/requests.mjs', 'domains/recruitment/clubTrials.mjs', 'domains/discovery/filmRoom.mjs', 'domains/development/grassrootsClub.mjs', 'domains/messaging/channels.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'm13/delivery.mjs', 'domains/enterprise/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'domains/discovery/secondLook.mjs', 'domains/discovery/nobodyMissed.mjs', 'grassrootsJourney.mjs']
+  const srv = ['server.mjs', 'domains/identity/players.mjs', 'domains/development/grassroots.mjs', 'domains/recruitment/inbox.mjs', 'domains/recruitment/requests.mjs', 'domains/recruitment/clubTrials.mjs', 'domains/discovery/filmRoom.mjs', 'domains/development/grassrootsClub.mjs', 'domains/messaging/channels.mjs', 'domains/scouting/journeys.mjs', 'domains/scouting/scouting.mjs', 'domains/messaging/delivery.mjs', 'domains/enterprise/enterprise.mjs', 'domains/verification/claims/index.mjs', 'domains/verification/passport/index.mjs', 'domains/development/boxcam/combine.mjs', 'domains/development/boxcam/index.mjs', 'domains/recruitment/rooms/rooms.mjs', 'domains/discovery/secondLook.mjs', 'domains/discovery/nobodyMissed.mjs', 'grassrootsJourney.mjs']
     .filter((f) => fs.existsSync(path.join(SERVER_DIR, f)));
   const types = new Set();
   for (const f of srv) for (const m of fs.readFileSync(path.join(SERVER_DIR, f), 'utf8').matchAll(/notify\??\.?\([^,]+,\s*'([a-z_]+)'/g)) types.add(m[1]);
@@ -449,7 +449,7 @@ section('§19 — the request log carries no personal data');
   ok(/t: Date\.now\(\), id: req\.correlationId, m: req\.method, p: fullPath/.test(line), 'the structured log line is time, id, method, path, status, duration');
   neg(!/authorization|token|body|email|dob|query/.test(line), 'and nothing else');
   const files = fs.readdirSync(SERVER_DIR).filter((f) => f.endsWith('.mjs'));
-  for (const d of ['m12', 'm13', 'domains/development/boxcam', 'domains/discovery', 'domains/platform', 'domains/recruitment/rooms', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust']) for (const f of fs.readdirSync(path.join(SERVER_DIR, d)).filter((x) => x.endsWith('.mjs'))) files.push(`${d}/${f}`);
+  for (const d of ['domains/operations', 'domains/messaging', 'domains/integrations', 'domains/insight', 'domains/groups', 'domains/enterprise', 'domains/development/boxcam', 'domains/discovery', 'domains/platform', 'domains/recruitment/rooms', 'domains/scouting', 'domains/verification', 'domains/verification/claims', 'domains/verification/passport', 'domains/verification/trust']) for (const f of fs.readdirSync(path.join(SERVER_DIR, d)).filter((x) => x.endsWith('.mjs'))) files.push(`${d}/${f}`);
   const leaks = [];
   for (const f of files) {
     const s = fs.readFileSync(path.join(SERVER_DIR, f), 'utf8');
@@ -462,7 +462,7 @@ section('§19 — the request log carries no personal data');
 
 // ============================================================ HTTP boot
 section('§20 — a clean database boots, migrates and passes integrity');
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1' };
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', BOX_CAM_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env, base) {
@@ -775,7 +775,7 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
   await sleep(800);
   const PPORT = PORT + 10; const PBASE = `http://localhost:${PPORT}`;
   const PDATA = mkdtempSync(path.join(tmpdir(), 'sbx-m182prod-'));
-  const prodEnv = { ...process.env, NODE_ENV: 'production', PORT: String(PPORT), DATA_DIR: PDATA, M13_QUIET_LOGS: '1', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'm182-test-admin-key-not-real' }; // a real deployment names its own admin key
+  const prodEnv = { ...process.env, NODE_ENV: 'production', PORT: String(PPORT), DATA_DIR: PDATA, SCOUTBOX_QUIET_LOGS: '1', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', ADMIN_KEY: 'm182-test-admin-key-not-real' }; // a real deployment names its own admin key
   const withFaults = spawn(process.execPath, [SERVER], { env: { ...prodEnv, SCOUTBOX_FAULTS: 'unavailable:/org/players' }, stdio: 'ignore' });
   children.push(withFaults);
   const exited = await new Promise((resolve) => { const t = setTimeout(() => resolve(null), 8000); withFaults.on('exit', (code) => { clearTimeout(t); resolve(code); }); });

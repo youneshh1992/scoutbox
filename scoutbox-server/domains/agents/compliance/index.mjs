@@ -48,7 +48,7 @@ export const CONSENT_STATUSES = Object.freeze(['requested', 'granted', 'declined
 /** Reason codes only a policy version can settle: a reviewer may not "approve" past them. */
 export const POLICY_LEVEL_REASONS = Object.freeze(['RULE_STATUS_UNCERTAIN', 'POLICY_NOT_ENCODED', 'NO_ACTIVE_RULE_DECIDES', 'SCOPE_MIXED', 'EXCLUSIVITY_WINDOW_DOUBTFUL']);
 
-const REVIEWER_LEGACY_NOTE = 'Records made before P5.6C through the shared admin key carry attribution "shared_admin_key" and are preserved as legacy/unattributed. They were never rewritten and are not authoritative compliance decisions.';
+const REVIEWER_LEGACY_NOTE = 'Records made through the shared admin key before reviewers had their own sign-in carry attribution "shared_admin_key" and are preserved as legacy/unattributed. They were never rewritten and are not authoritative compliance decisions.';
 
 export function registerCompliance(rawCtx) {
   const {

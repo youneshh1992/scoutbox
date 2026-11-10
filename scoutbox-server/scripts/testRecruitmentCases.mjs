@@ -14,7 +14,7 @@ import { NOW, TTL, tempDir, USERS, hasBlobTable } from './coreIdentityTestFixtur
 import { ROOM_STATUSES, OPEN_ROOM_STATUSES, CASE_STAGES, TASK_STATES, roomRole } from '../domains/recruitment/rooms/shared.mjs';
 import { pageSorted } from '../domains/platform/paging.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, SCOUT, saveFixture } from './recruitmentTestFixtures.mjs';
-import { roomCase, m12Case, comment, snapshot, trustedSnapshot, recommendation, formalDecision, evidenceState, hist, S8B_FIX, persisted, TC } from './recruitmentCasesTestFixtures.mjs';
+import { roomCase, plainCase, comment, snapshot, trustedSnapshot, recommendation, formalDecision, evidenceState, hist, ROOM_CASES_FIX, persisted, TC } from './recruitmentCasesTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -43,7 +43,7 @@ const storedAs = (stored, written, at) => {
 /** Act bookkeeping for the suite: one history entry. */
 const entry = (id, action, detail = null) => ({ history: [hist(id, NOW, action, detail)] });
 const S8A = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
-const fixtureCollections = (over = {}) => ({ notifications: [], dispatches: [], ...S8A(), ...S8B_FIX(), ...over });
+const fixtureCollections = (over = {}) => ({ notifications: [], dispatches: [], ...S8A(), ...ROOM_CASES_FIX(), ...over });
 const file = (tag, over = {}) => saveFixture(tempDir(`s8b-${tag}`), fixtureCollections(over));
 const refused = (fn, pattern, label = '') => { let err = null; try { fn(); } catch (e) { err = e; } assert.ok(err, `${label}: expected a refusal`); assert.match(String(err.message), pattern, `${label}: ${err.message}`); return err; };
 /** Write the fixtures, with `over`, into a new database and expect the write refused, atomically: no case or room row written. */
@@ -79,9 +79,9 @@ test('[schema] migration 0016 is registered between 0015 and 0017 and creates th
   F.close(); rm(d);
 });
 
-test('[fixtures][typed] every writer shape — the room case (the facet with its reopen and tags, both task literals, assignments, the draft and its key, the handoff and its key, the budget with its lines, FX and actuals), the M12 case with its approval and sign-off, a bare M12 case, the deleted player\'s case, a comment with its edit and tombstone, a snapshot with and without trust, the recommendation and the formal decision, an evidence state — is written through the repository and reads back as written, in insertion order; the decision\'s snapshot is the row it names', () => {
+test('[fixtures][typed] every writer shape — the room case (the facet with its reopen and tags, both task literals, assignments, the draft and its key, the handoff and its key, the budget with its lines, FX and actuals), the workspace case with its approval and sign-off, a bare workspace case, the deleted player\'s case, a comment with its edit and tombstone, a snapshot with and without trust, the recommendation and the formal decision, an evidence state — is written through the repository and reads back as written, in insertion order; the decision\'s snapshot is the row it names', () => {
   const d = file('typed'); const back = readRecords(d);
-  const fix = S8B_FIX();
+  const fix = ROOM_CASES_FIX();
   for (const n of COLLECTIONS) {
     assert.deepEqual(back[n].map((r) => r.id), fix[n].map((r) => r.id), `${n} in insertion order`);
     fix[n].forEach((r, i) => storedAs(plain(back[n][i]), persisted(r), `${n} ${r.id}`));
@@ -95,10 +95,10 @@ test('[fixtures][typed] every writer shape — the room case (the facet with its
     assert.equal(col(r, "SELECT finalize_key FROM room_decisions WHERE id = 'rdec-2'"), 'fin-key-1');
     assert.equal(col(r, "SELECT due_at FROM case_tasks WHERE case_id = 'case-1'"), TC.moved + 2 * 24 * 3600_000, 'an instant due date');
     assert.equal(col(r, "SELECT due_day FROM case_tasks WHERE case_id = 'case-2'"), '2026-11-20', 'a day due date');
-    assert.equal(col(r, "SELECT detail_text FROM case_history WHERE id = 'aud-c2-1'"), 'identified', 'an M12 text detail');
+    assert.equal(col(r, "SELECT detail_text FROM case_history WHERE id = 'aud-c2-1'"), 'identified', 'a workspace text detail');
     assert.equal(JSON.parse(col(r, "SELECT detail_json FROM case_history WHERE id = 'aud-c1-1'")).status, 'under_review', 'an object detail');
     assert.equal(col(r, "SELECT count(*) FROM case_budget_lines WHERE case_id = 'case-1'"), 2);
-    assert.equal(col(r, "SELECT room_status FROM recruitment_cases WHERE id = 'case-2'"), null, 'an M12 case has no Room facet');
+    assert.equal(col(r, "SELECT room_status FROM recruitment_cases WHERE id = 'case-2'"), null, 'an workspace case has no Room facet');
   });
   // an absent field reads back as null, an absent list as empty
   const bare = back.recruitmentCases.find((c) => c.id === 'case-legacy');
@@ -106,19 +106,19 @@ test('[fixtures][typed] every writer shape — the room case (the facet with its
   rm(d);
 });
 
-test('[fixtures][typed] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type value, a due date that is neither a day nor an instant, a duplicate id, the M27 `by` history literal, a room row naming no case, a link naming no request, a decision chain crossing rooms, a decision citing another room\'s snapshot', () => {
-  const fix = S8B_FIX();
+test('[fixtures][typed] a write STOPS with the ids on a record the tables cannot hold — nothing written: an unknown field (top level and nested), a status outside the vocabulary, an off-type value, a due date that is neither a day nor an instant, a duplicate id, the integration `by` history literal, a room row naming no case, a link naming no request, a decision chain crossing rooms, a decision citing another room\'s snapshot', () => {
+  const fix = ROOM_CASES_FIX();
   const withCase = (over) => ({ recruitmentCases: [roomCase(over), ...fix.recruitmentCases.slice(1)] });
   refusedSave('unknown', withCase({ legacyFlag: true }), /RECRUITMENT_CASES_INPUT_INVALID: recruitment_cases case-1 legacyFlag: is not stored as written/);
   refusedSave('nested unknown', withCase({ room: { ...roomCase().room, colour: 'red' } }), /recruitment_cases case-1 room\.colour: is not stored as written/);
   refusedSave('vocabulary', withCase({ room: { ...roomCase().room, status: 'shortlist' } }), /recruitment_cases case-1 row: CHECK constraint failed: room_status IS NULL OR room_status IN/);
   refusedSave('off-type', withCase({ createdAt: 'yesterday' }), /recruitment_cases case-1 row: cannot store TEXT value in INTEGER column recruitment_cases\.created_at/);
   refusedSave('due date', withCase({ tasks: [{ ...roomCase().tasks[0], dueAt: 'soon' }] }), /recruitment_cases case-1 task tsk-[\w-]+: CHECK constraint failed: due_day/);
-  refusedSave('duplicate id', { recruitmentCases: [...fix.recruitmentCases, m12Case()] }, /RECRUITMENT_CASES_DUPLICATE: recruitment_cases case-2 already exists/);
+  refusedSave('duplicate id', { recruitmentCases: [...fix.recruitmentCases, plainCase()] }, /RECRUITMENT_CASES_DUPLICATE: recruitment_cases case-2 already exists/);
   refusedSave('m27 history literal', withCase({ history: [{ id: 'aud-x', at: TC.decided, action: 'transaction_handoff_invited', by: { kind: 'org', userId: SCOUT.userId, name: SCOUT.name }, detail: null }] }), /recruitment_cases case-1 history\[0\]\.by: is not stored as written/);
   refusedSave('room case', { roomComments: [...fix.roomComments, comment({ id: 'rcmt-9', roomId: 'case-nowhere' })] }, /room_comments rcmt-9 row: FOREIGN KEY constraint failed/);
   refusedSave('link', withCase({ links: { requestIds: ['req-nowhere'], trialIds: ['trial-1'], signingId: null } }), /recruitment_cases case-1 link: FOREIGN KEY constraint failed/);
-  const other = m12Case({ id: 'case-other', playerId: 'pl-adult', links: { requestIds: [], trialIds: [], signingId: null }, history: [], approvals: [], decision: null });
+  const other = plainCase({ id: 'case-other', playerId: 'pl-adult', links: { requestIds: [], trialIds: [], signingId: null }, history: [], approvals: [], decision: null });
   refusedSave('chain', { recruitmentCases: [...fix.recruitmentCases, other], roomDecisions: [recommendation({ roomId: 'case-other', snapshot: null }), formalDecision()] }, /room_decisions rdec-2 row: FOREIGN KEY constraint failed/);
   refusedSave('snapshot room', { recruitmentCases: [...fix.recruitmentCases, other], roomSnapshots: [snapshot({ roomId: 'case-other' }), trustedSnapshot()] }, /room_decisions rdec-1 row: FOREIGN KEY constraint failed/);
 });
@@ -148,10 +148,10 @@ test('[repository] explicit writes: every record a query returns is read-only (a
   refused(() => R.comments.edit('rcmt-3', { body: 'Back again', at: NOW }), /room_comments rcmt-3 is deleted/);
   refused(() => R.evidenceStates.create(evidenceState({ id: 'rev-2' })), /UNIQUE constraint failed: room_evidence_states\.room_id, room_evidence_states\.evidence_id/);
   refused(() => R.decisions.markSuperseded('rdec-1', { by: 'rdec-2' }), /room_decisions rdec-1 is already superseded/);
-  refused(() => R.cases.create(m12Case({ id: 'case-9', ownerUserId: 'usr-nobody' })), /recruitment_cases case-9 row: FOREIGN KEY constraint failed/);
-  refused(() => R.cases.create(m12Case({ id: 'case-9', links: { requestIds: [], trialIds: ['trial-1', 'trial-1'], signingId: null } })), /recruitment_cases case-9 trial link trial-1: UNIQUE constraint failed/);
+  refused(() => R.cases.create(plainCase({ id: 'case-9', ownerUserId: 'usr-nobody' })), /recruitment_cases case-9 row: FOREIGN KEY constraint failed/);
+  refused(() => R.cases.create(plainCase({ id: 'case-9', links: { requestIds: [], trialIds: ['trial-1', 'trial-1'], signingId: null } })), /recruitment_cases case-9 trial link trial-1: UNIQUE constraint failed/);
   assert.equal(withRo(d, caseDump), before, 'nothing was written by a refused operation');
-  const c9 = R.cases.create(m12Case({ id: 'case-9', links: { requestIds: [], trialIds: [], signingId: null }, history: [] }));
+  const c9 = R.cases.create(plainCase({ id: 'case-9', links: { requestIds: [], trialIds: [], signingId: null }, history: [] }));
   assert.equal(c9.id, 'case-9'); assert.ok(R.cases.byId('case-9'));
   assert.throws(() => { c9.priority = 'high'; }, /read only|Cannot assign/, 'a returned record is read-only');
   L.close(); rm(d);
@@ -262,7 +262,7 @@ test('[repository] the per-viewer lists in SQL: over sixty varied cases, every v
       tasks: Array.from({ length: rnd(3) }, (_, k) => ({ id: `tsk-x${k}`, title: 'Do', dueAt: due(), assigneeUserId: pick([...STAFF, null]), status: pick(TASK_STATES), createdAt: TC.created })),
       links: { requestIds: [], trialIds: [], signingId: null }, history: [],
     };
-    if (rnd(4) === 0) { made.push(m12Case({ ...base, approvals: [], decision: null })); continue; }
+    if (rnd(4) === 0) { made.push(plainCase({ ...base, approvals: [], decision: null })); continue; }
     const tags = ['watch', 'u18', 'left'].filter(() => rnd(2));
     made.push(roomCase({ ...base, decisionDraft: null, transactionHandoff: null, budget: null, room: { ...roomCase().room, status: pick(ROOM_STATUSES), tags, leadScoutUserId: pick([...STAFF, null]), updatedAt: TC.moved + rnd(5) * H, reopened: null } }));
   }
@@ -328,7 +328,7 @@ test('[repository] decisions: an advisory recommendation and its supersession, a
   R.decisions.markSuperseded('rdec-2', { by: 'rdec-9' });
   assert.deepEqual(plain(dec.snapshot), { at: snap.at, trust: null, sourceRefs: plain(snap.sourceRefs), snapshotId: 'rsnap-9' });
   withRo(d, (r) => { assert.equal(col(r, "SELECT superseded_by_id FROM room_decisions WHERE id = 'rdec-2'"), 'rdec-9'); assert.equal(col(r, "SELECT snapshot_id FROM room_decisions WHERE id = 'rdec-9'"), 'rsnap-9'); });
-  R.cases.create(m12Case({ id: 'case-x', links: { requestIds: [], trialIds: [], signingId: null }, history: [] }));
+  R.cases.create(plainCase({ id: 'case-x', links: { requestIds: [], trialIds: [], signingId: null }, history: [] }));
   refused(() => R.decisions.create(recommendation({ id: 'rdec-x', roomId: 'case-x', supersedes: 'rdec-9', supersededById: null, snapshot: null })), /room_decisions rdec-x row: FOREIGN KEY constraint failed/);
   refused(() => R.decisions.create(recommendation({ id: 'rdec-y', roomId: 'case-x', supersedes: null, supersededById: null, snapshot: { snapshotId: 'rsnap-9' } })), /room_decisions rdec-y row: FOREIGN KEY constraint failed/);
   L.close(); rm(d);

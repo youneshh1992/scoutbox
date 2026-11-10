@@ -16,7 +16,7 @@ import {
   consumeToken, toPublicVerificationProfile, verLevelFor, orgVerificationStatus,
  arrayTokenStore,
 } from '../../domains/verification/claims/shared.mjs';
-import { totp } from '../../m13/shared.mjs';
+import { totp } from '../../domains/identity/totp.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
 
 const PORT = pickPort(4600, 300, [0, 300]); // never a fetch-blocked port
@@ -31,7 +31,7 @@ const ok = (cond, msg) => { if (cond) { passed++; console.log(`✓ ${msg}`); } e
 const section = (name) => console.log(`\n— ${name} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_FAST_RETRY: '1', M13_QUIET_LOGS: '1', TEST_LICENCE_REGISTRY: '1' };
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_FAST_SWEEPS: '1', SCOUTBOX_QUIET_LOGS: '1', TEST_LICENCE_REGISTRY: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function startServer(port = PORT, dataDir = DATA_DIR, extraEnv = {}) {
@@ -495,7 +495,7 @@ let umaAffId;
   // Expiring claim + deterministic sweep: Eve confirmed with a short validity.
   r = await j('POST', `/org/verification/requests/${eveAffId}/decide`, { action: 'confirm', validUntil: Date.now() + 1500 }, maria.token);
   ok(r.status === 200, 'claim verified with an explicit validity end');
-  await sleep(2600); // M13_FAST_RETRY sweep interval is 500ms
+  await sleep(2600); // SCOUTBOX_FAST_SWEEPS sweep interval is 500ms
   const st = await j('GET', '/org/verification/me', undefined, eve.token);
   ok(st.body.claims.find((c) => c.id === eveAffId)?.status === 'expired', 'expiry processor moved verified → expired (nothing deleted)');
   const notifs = await j('GET', '/org/notifications', undefined, eve.token);

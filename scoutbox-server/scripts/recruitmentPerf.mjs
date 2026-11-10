@@ -4,7 +4,7 @@
 // 1. Builds a database in a temporary directory: the synthetic population (scripts/perfPopulation.mjs) and the
 //    recruitment graph of the recruitment test fixtures (a Room case with its request, trial, comments, snapshots,
 //    decisions, evidence states, contacts, offers, signing packages, signings, follow-ups and outcome report, plus an
-//    M12 case, a legacy case and a tombstoned one), cloned with fresh ids onto real clubs and players. One club is
+//    workspace case, a legacy case and a tombstoned one), cloned with fresh ids onto real clubs and players. One club is
 //    busy (BUSY clones); the rest of the clones spread over the other clubs, and one player is in many of them.
 //    Every record is written through its repository (scripts/dataLayerFixture.mjs), so it is typed as a route's write is.
 // 2. Boots the real server on that directory and times the hot reads over HTTP (sequential, after a warm-up), for
@@ -29,9 +29,9 @@ import { createSigningsFollowUpsRepository } from '../repositories/signingsFollo
 import { syntheticPopulation } from './perfPopulation.mjs';
 import { tempDir, NOW } from './coreIdentityTestFixtures.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest } from './recruitmentTestFixtures.mjs';
-import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
-import { S8C_FIX } from './recruitmentContactsOffersTestFixtures.mjs';
-import { S8D_FIX } from './signingsFollowUpsTestFixtures.mjs';
+import { ROOM_CASES_FIX } from './recruitmentCasesTestFixtures.mjs';
+import { CONTACTS_OFFERS_FIX } from './recruitmentContactsOffersTestFixtures.mjs';
+import { SIGNINGS_FIX } from './signingsFollowUpsTestFixtures.mjs';
 import { spawnChild } from './testChildren.mjs';
 import { freePort } from './testPort.mjs';
 
@@ -59,7 +59,7 @@ const shifted = (v) => (Array.isArray(v) ? v.map(shifted) : v && typeof v === 'o
 const TEMPLATE = () => {
   const t = {
     requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()],
-    ...S8B_FIX(), ...S8C_FIX(), ...S8D_FIX(),
+    ...ROOM_CASES_FIX(), ...CONTACTS_OFFERS_FIX(), ...SIGNINGS_FIX(),
   };
   t.signings = t.signings.filter((x) => x.id !== 'sign-legacy');
   return shifted(t);
@@ -116,7 +116,7 @@ async function boot(dir) {
   const started = t0();
   return new Promise((resolve, reject) => {
     const args = process.env.PERF_CPU_PROF ? ['--cpu-prof', `--cpu-prof-dir=${process.env.PERF_CPU_PROF}`] : [];
-    const proc = spawnChild(process.execPath, [...args, path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [...args, path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     const get = async (p, token, init = {}) => {
       const r = await fetch(`http://127.0.0.1:${port}${p}`, { ...init, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...(init.headers ?? {}) } });

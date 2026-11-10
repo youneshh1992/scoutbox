@@ -25,7 +25,7 @@ import {
   agreementGrantsAccess, requestConflict, AGENT_TRANSITIONS, CLIENT_TRANSITIONS, clientTransitionAllowed,
   agentTransitionAllowed, agreementForAgent, agreementForClient, agreementSummaryForStaff,
 } from '../../domains/agents/core/shared.mjs';
-import { M24_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/agents/core/errors.mjs';
+import { AGENT_CORE_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/agents/core/errors.mjs';
 import { AGENT_AUDIT_ACTIONS } from '../../domains/agents/core/audit.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
@@ -207,8 +207,8 @@ section('D — agreement statuses, transitions, the access predicate and the coo
   // Every record names its licensed individual and says what it is.
   ok(/not a representation contract/.test(agreementForAgent(a, T0).honest) && /client confirmed it/.test(agreementForAgent(a, T0).honest) && agreementForAgent(a, T0).legacy === undefined, 'D37 a relationship record says it is not a representation contract, only what the client confirmed (no legacy kind remains)');
   // Errors.
-  ok(Object.getPrototypeOf(M24_ERROR_HTTP) === null && M24_ERROR_HTTP.constructor === undefined, 'D38 the error table is null-prototype');
-  neg(M24_ERROR_HTTP.PLAYER_NOT_FOUND === 404 && M24_ERROR_HTTP.REPRESENTATION_NOT_FOUND === 404 && M24_ERROR_HTTP.AGENT_VERIFICATION_REQUIRED === 403 && M24_ERROR_HTTP.REPRESENTATION_COOLDOWN === 429 && M24_ERROR_HTTP.LAST_ADMIN === 409, 'D39 codes map to the right statuses');
+  ok(Object.getPrototypeOf(AGENT_CORE_ERROR_HTTP) === null && AGENT_CORE_ERROR_HTTP.constructor === undefined, 'D38 the error table is null-prototype');
+  neg(AGENT_CORE_ERROR_HTTP.PLAYER_NOT_FOUND === 404 && AGENT_CORE_ERROR_HTTP.REPRESENTATION_NOT_FOUND === 404 && AGENT_CORE_ERROR_HTTP.AGENT_VERIFICATION_REQUIRED === 403 && AGENT_CORE_ERROR_HTTP.REPRESENTATION_COOLDOWN === 429 && AGENT_CORE_ERROR_HTTP.LAST_ADMIN === 409, 'D39 codes map to the right statuses');
   const pub = publicErrorBody({ error: 'PLAYER_NOT_FOUND', stack: 'x', internal: 'y', message: 'm' });
   neg(pub.stack === undefined && pub.internal === undefined && pub.error === 'PLAYER_NOT_FOUND' && PUBLIC_ERROR_FIELDS.includes('message'), 'D40 error bodies are whitelisted fields only');
   ok(AGENT_AUDIT_ACTIONS.has('representation_requested') && AGENT_AUDIT_ACTIONS.has('agency_affiliation_ended') && AGENT_AUDIT_ACTIONS.has('representation_sharing_changed') && !AGENT_AUDIT_ACTIONS.has('representation_resolved'), 'D41 the audit projection lists lifecycle actions (including the client\'s content-free sharing toggle) and no resolution action');
@@ -241,7 +241,7 @@ section('HTTP — booting a real server (synthetic verification provider ON)');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }

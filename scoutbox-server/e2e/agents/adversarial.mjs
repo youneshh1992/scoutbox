@@ -27,7 +27,7 @@ import {
 } from '../../domains/agents/compliance/policy.mjs';
 import { TRANSACTION_STATUSES, DOCUMENT_TYPES, DOCUMENT_VISIBILITY, TIMELINE_AUDIENCES } from '../../domains/agents/transactions/transaction.mjs';
 import { isAdult, ageOn, parseDob } from '../../domain.mjs';
-import { agentClientBasis } from '../../m27/integration.mjs';
+import { agentClientBasis } from '../../domains/agents/integration/integration.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
@@ -266,7 +266,7 @@ process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); 
 
 async function boot(env = {}) {
   const proc = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', SCOUTBOX_TEST_CLOCK: '1', ...env },
+    env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', SCOUTBOX_TEST_CLOCK: '1', ...env },
     stdio: 'ignore',
   });
   children.push(proc); proc.unref();
@@ -634,7 +634,7 @@ section('AA/live — one account, two names, ONE budget');
 }
 
 console.log(`\nagents/adversarial: ${passed} checks passed, ${negatives} negative/security/privacy checks (${Math.round((negatives / passed) * 100)}%)`);
-if (process.exitCode) console.error('\nSOME P5.6F HARDENING CHECKS FAILED');
+if (process.exitCode) console.error('\nSOME AGENT HARDENING CHECKS FAILED');
 else console.log('all agents/adversarial checks passed');
 await stop(server);
 process.exit(process.exitCode ?? 0);

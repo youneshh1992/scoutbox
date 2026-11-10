@@ -8,7 +8,7 @@ import { DISCOVERY_MIGRATION } from '../discovery.mjs';
 import { INSIGHT_COVERAGE_MIGRATION, INSIGHT_COVERAGE_DDL, INSIGHT_COVERAGE_TABLES } from '../insightCoverage.mjs';
 
 export const id = INSIGHT_COVERAGE_MIGRATION;
-export const note = 'Exposure events, review-later deferrals, evidence suggestions, calibration sessions, fixtures, coverage plans and coverage assignments become typed tables (S12d)';
+export const note = 'Exposure events, review-later deferrals, evidence suggestions, calibration sessions, fixtures, coverage plans and coverage assignments become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

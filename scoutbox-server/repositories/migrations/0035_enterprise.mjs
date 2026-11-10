@@ -8,7 +8,7 @@ import { INTEGRATIONS_MIGRATION } from '../integrations.mjs';
 import { ENTERPRISE_MIGRATION, ENTERPRISE_DDL, ENTERPRISE_TABLES } from '../enterprise.mjs';
 
 export const id = ENTERPRISE_MIGRATION;
-export const note = 'Staff invites, SSO configurations and sign-in states, support tickets and support access grants become typed tables (S13b)';
+export const note = 'Staff invites, SSO configurations and sign-in states, support tickets and support access grants become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

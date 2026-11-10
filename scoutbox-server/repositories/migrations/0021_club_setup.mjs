@@ -7,7 +7,7 @@ import { SCOUTING_ASSESSMENTS_MIGRATION } from '../scoutingAssessments.mjs';
 import { CLUB_SETUP_MIGRATION, CLUB_SETUP_DDL, CLUB_SETUP_TABLES } from '../clubSetup.mjs';
 
 export const id = CLUB_SETUP_MIGRATION;
-export const note = 'tactical setups (roles, criteria, windows), squads, shadow lists, looking-for, federation checks and vacancies become typed tables (S9c)';
+export const note = 'tactical setups (roles, criteria, windows), squads, shadow lists, looking-for, federation checks and vacancies become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

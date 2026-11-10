@@ -28,7 +28,7 @@ const hash = (code) => crypto.createHash('sha256').update(String(code).trim().to
 async function boot(dir, env = {}) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
    
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {

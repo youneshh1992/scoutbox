@@ -111,8 +111,8 @@ let accepted = 0;
 let refused = 0;
 let correct = 0;
 
-console.log(`M22 CV evaluation — engine v${CV_ENGINE_VERSION}, policy v${BOX_CAM_CV_POLICY_VERSION}`);
-console.log(`${fixtures.length} golden fixtures (synthetic; see m22/fixtures.mjs for what that does and does not prove)\n`);
+console.log(`Box Cam CV evaluation — engine v${CV_ENGINE_VERSION}, policy v${BOX_CAM_CV_POLICY_VERSION}`);
+console.log(`${fixtures.length} golden fixtures (synthetic; see cv/fixtures.mjs for what that does and does not prove)\n`);
 
 for (const fx of fixtures) {
   const { result, decodeErrors } = evaluate(fx);

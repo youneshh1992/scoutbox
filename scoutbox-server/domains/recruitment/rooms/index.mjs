@@ -8,7 +8,7 @@
 // Every route registers on the EXISTING authenticated `orgRouter`, so bearer
 // sessions, removed users, org suspension, `visibleToOrg`, blocks and
 // moderation all run before any Room handler — a Room grants no access.
-import { buildShared } from '../../../m12/shared.mjs';
+import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { registerRooms } from './rooms.mjs';
 import {
@@ -17,7 +17,7 @@ import {
 } from './shared.mjs';
 
 
-export function registerM17(ctx) {
+export function registerRecruitmentRooms(ctx) {
 
   // Boot assertions. These are cheap and they catch the two ways this design
   // could rot silently: a room status that maps to no stage, and the case stage
@@ -27,17 +27,17 @@ export function registerM17(ctx) {
       const stage = stageForRoomStatus(s, level);
       const vocab = level === 'grassroots' ? GRASSROOTS_STAGES : PRO_STAGES;
       if (!stage || !vocab.includes(stage)) {
-        throw new Error(`M17: room status "${s}" maps to "${stage}", which is not a ${level} case stage.`);
+        throw new Error(`Rooms: room status "${s}" maps to "${stage}", which is not a ${level} case stage.`);
       }
     }
-    if (!ROOM_TRANSITIONS[s]) throw new Error(`M17: room status "${s}" has no transition list.`);
+    if (!ROOM_TRANSITIONS[s]) throw new Error(`Rooms: room status "${s}" has no transition list.`);
   }
   for (const list of Object.values(ROOM_TRANSITIONS)) {
-    for (const to of list) if (!ROOM_STATUSES.includes(to)) throw new Error(`M17: transition target "${to}" is not a room status.`);
+    for (const to of list) if (!ROOM_STATUSES.includes(to)) throw new Error(`Rooms: transition target "${to}" is not a room status.`);
   }
   // A protected characteristic must never be recordable as a recruitment reason.
   const overlap = ALL_REASON_CODES.filter((c) => PROHIBITED_REASON_CODES.includes(c));
-  if (overlap.length) throw new Error(`M17: prohibited reason code(s) present in the taxonomy: ${overlap.join(', ')}`);
+  if (overlap.length) throw new Error(`Rooms: prohibited reason code(s) present in the taxonomy: ${overlap.join(', ')}`);
 
   metrics.rooms = {
     recruitment_room_created: 0,
@@ -58,7 +58,7 @@ export function registerM17(ctx) {
 
   // The case layer's shared helpers are the ones a Room must use — `isLead`,
   // `orgCanSee` and the append-only `audit` are reused rather than re-derived.
-  const shared = { ...ctx, ...buildShared(ctx), vmetric };
+  const shared = { ...ctx, ...buildRouteHelpers(ctx), vmetric };
   registerRooms(shared);
   return shared;
 }

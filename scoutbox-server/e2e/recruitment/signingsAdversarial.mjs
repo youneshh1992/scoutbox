@@ -67,7 +67,7 @@ const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -842,7 +842,7 @@ section('Z — the P7 invariants, re-proven at this tip');
   neg(rp.length === 2 && rp.map((p) => p.partyType).join() === 'PLAYER,CLUB_SIGNATORY', 'ZD/ZE the required parties are explicit; completion needs both (gate, above)');
   neg(canCompleteParty({ id: 'x', orgId: 'o1', playerId: 'p1', status: 'READY', currentRevisionId: 'r', createdAt: T0, revisions: [{ id: 'r', status: 'READY', readyAt: T0, document: { sha256: SHA_A }, requiredParties: rp }] }, { partyType: 'PLAYER', actorKind: 'org', actorId: 'agent', revisionId: 'r', documentSha256: SHA_A }, T0 + 1).error === 'SIGNING_NOT_PERMITTED', 'ZF an agent cannot sign as the player');
   const src = readFileSync(path.join(HERE, '..', '..', 'server.mjs'), 'utf8') + readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'signings', 'index.mjs'), 'utf8');
-  const files = ['domains/recruitment/signings/index.mjs', 'domains/recruitment/signings/signing.mjs', 'domains/recruitment/offers/index.mjs', 'domains/recruitment/lifecycle/journey.mjs', 'domains/recruitment/lifecycle/lifecycle.mjs', 'server.mjs', 'domains/development/record.mjs', 'domains/verification/claims/index.mjs', 'domains/recruitment/rooms/index.mjs', 'm12/index.mjs'].map((f) => [f, readFileSync(path.join(HERE, '..', '..', f), 'utf8')]);
+  const files = ['domains/recruitment/signings/index.mjs', 'domains/recruitment/signings/signing.mjs', 'domains/recruitment/offers/index.mjs', 'domains/recruitment/lifecycle/journey.mjs', 'domains/recruitment/lifecycle/lifecycle.mjs', 'server.mjs', 'domains/development/record.mjs', 'domains/verification/claims/index.mjs', 'domains/recruitment/rooms/index.mjs'].map((f) => [f, readFileSync(path.join(HERE, '..', '..', f), 'utf8')]);
   neg(files.filter(([f, s]) => !f.startsWith('repositories/') && /db\.signings\.push\(|signings\.record\(/.test(s)).map(([f]) => f).join() === 'domains/recruitment/signings/index.mjs' && files.filter(([, s]) => /contractStatus\s*=\s*'under_contract'|players\.setAvailability\([^\n]*contractStatus: 'under_contract'/.test(s)).map(([f]) => f).join() === 'domains/recruitment/signings/index.mjs', 'ZK/ZM the ONE writer of db.signings (through signings.record) and of under_contract (drift guard; written through players.setAvailability)');
   neg(!/status\s*=\s*'signed'/.test(files.find(([f]) => f === 'domains/recruitment/signings/index.mjs')[1]), 'ZL m29 never assigns signed');
   neg(!/trustScore|computeTrustScore/.test(files.find(([f]) => f === 'domains/recruitment/signings/index.mjs')[1] + files.find(([f]) => f === 'domains/recruitment/signings/signing.mjs')[1]), 'ZP the signing module never touches the Trust Score');

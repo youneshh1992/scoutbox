@@ -6,7 +6,7 @@ import { migrationApplied } from '../database.mjs';
 import { COUNTERS_DDL, ID_COUNTER_FLOOR } from '../counters.mjs';
 
 export const id = '0039_retire_blob';
-export const note = 'The blob store is retired: the collections table is dropped and the id counter becomes a row of counters (S14a)';
+export const note = 'The blob store is retired: the collections table is dropped and the id counter becomes a row of counters';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

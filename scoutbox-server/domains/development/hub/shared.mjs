@@ -257,7 +257,7 @@ export const SHARE_SCOPES = Object.freeze(['summary', 'goals', 'actions']);
  * twenty goals is already a plan nobody will work through, and the refusal
  * says so rather than truncating silently.
  */
-export const M21_LIMITS = Object.freeze({
+export const DEVELOPMENT_HUB_LIMITS = Object.freeze({
   activePlansPerOwner: 5,
   goalsPerPlan: 20,
   actionsPerGoal: 20,
@@ -480,7 +480,7 @@ export function assertDevelopmentVocabulary({ mode = process.env.NODE_ENV ?? 'de
   }
 
   if (problems.length && mode !== 'production') {
-    throw new Error(`M21 development vocabulary invalid:\n  ${problems.join('\n  ')}`);
+    throw new Error(`Development Hub vocabulary invalid:\n  ${problems.join('\n  ')}`);
   }
   return {
     policyVersion: DEVELOPMENT_POLICY_VERSION,

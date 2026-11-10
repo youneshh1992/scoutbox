@@ -157,7 +157,7 @@ section('HTTP — booting a real server');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -289,7 +289,7 @@ const B = {};
 
   // minor path through the same writer
   const gReq = await j('POST', '/org/players/pl-guni/request', { type: 'trial', message: 'U15 assessment for Guni.', proposedDate: FUTURE, altSlots: [FUTURE2] }, maria.token);
-  neg(expect(gReq, 409, 'REPORTS_OUTSTANDING'), 'B12 (M12 gate, unchanged) an unfiled report blocks a new trial request');
+  neg(expect(gReq, 409, 'REPORTS_OUTSTANDING'), 'B12 (the report gate, unchanged) an unfiled report blocks a new trial request');
   ok((await j('POST', `/org/trials/${B.trialId}/report`, { ...REPORT, strengthNote: 'Composed under pressure.', focusNote: 'Weak-foot passing.' }, maria.token)).status === 201, 'B12b the report is filed');
   const gReq2 = await j('POST', '/org/players/pl-guni/request', { type: 'trial', message: 'U15 assessment for Guni.', proposedDate: FUTURE, altSlots: [FUTURE2] }, maria.token);
   ok(gReq2.status === 201 && gReq2.body.routedTo === 'guardian', 'B12c the minor\'s invitation is routed to the guardian');

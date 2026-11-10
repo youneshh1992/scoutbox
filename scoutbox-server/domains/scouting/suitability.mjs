@@ -6,6 +6,7 @@
 // grassroots 50 km ceiling.
 import { blankPreferences, typePreferences, typeStructured } from '../../repositories/opportunitiesCampaigns.mjs';
 import { opportunityView } from './journeys.mjs';
+import { slotsOverlap } from './slots.mjs';
 
 // Preferences, requirements and approved summaries live in repositories/opportunitiesCampaigns.mjs. Reading
 // preferences writes nothing: a player who never saved any gets the blank defaults. Over-long text is shortened.
@@ -27,7 +28,7 @@ const named = (reason, label) => {
 export function registerSuitability(ctx) {
   const {
     byId, orgRouter, playerRouter, guardianRouter, scoutingReads, opportunitiesCampaigns,
-    findPlayer, isAdult, haversineKm, slotsOverlap, coarseArea,
+    findPlayer, isAdult, haversineKm, coarseArea,
   } = ctx;
   if (typeof opportunitiesCampaigns?.preferences?.save !== 'function') throw new TypeError('registerSuitability needs the opportunities and campaigns repository from the data layer');
 

@@ -8,7 +8,7 @@ import { AGENT_CORE_MIGRATION } from '../agentCore.mjs';
 import { COMPLIANCE_POLICIES_MIGRATION, COMPLIANCE_POLICIES_DDL, COMPLIANCE_POLICIES_TABLES, insertSeededPolicies } from '../compliancePolicies.mjs';
 
 export const id = COMPLIANCE_POLICIES_MIGRATION;
-export const note = 'Trust & Safety reviewers and jurisdiction policy versions become typed tables; the seeded policy versions are inserted (S11b-1)';
+export const note = 'Trust & Safety reviewers and jurisdiction policy versions become typed tables; the seeded policy versions are inserted';
 
 export function up(sqlite, { now = Date.now() } = {}) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

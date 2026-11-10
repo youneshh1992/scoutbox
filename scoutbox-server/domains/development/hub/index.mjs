@@ -33,7 +33,7 @@ import {
   GOAL_CATEGORIES, GOAL_CATEGORY_LABELS, GOAL_STATUSES, GOAL_TRANSITIONS, BLOCK_REASONS,
   ACTION_TYPES, ACTION_STATUSES, ACTION_TRANSITIONS,
   EVIDENCE_SOURCES, EVIDENCE_SOURCE_LABELS, REVIEWER_KINDS, REVIEWER_KIND_LABELS, SHARE_SCOPES,
-  M21_LIMITS, GOAL_LIBRARY, GOAL_LIBRARY_NOTE, PLAN_TEMPLATES, TEMPLATE_NOTE,
+  DEVELOPMENT_HUB_LIMITS, GOAL_LIBRARY, GOAL_LIBRARY_NOTE, PLAN_TEMPLATES, TEMPLATE_NOTE,
   FORBIDDEN_DEVELOPMENT_NAMES, assertDevelopmentVocabulary, refusedClientFields,
   boundedText, parseDate, transitionAllowed, dueState, reviewDueState,
 } from './shared.mjs';
@@ -55,7 +55,7 @@ const IDEMPOTENCY_WINDOW_MS = 60_000;
  * actions, evidence links and reviews, with one history table. Every route that writes runs in one unit of work and
  * writes through the repository.
  */
-export const M21_STORES = Object.freeze([
+export const DEVELOPMENT_HUB_STORES = Object.freeze([
   'developmentPlans', 'developmentGoals', 'developmentActions',
   'developmentEvidenceLinks', 'developmentReviews',
 ]);
@@ -119,7 +119,7 @@ export function registerDevelopment(ctx) {
     const send = EMITTERS[event];
     // An unregistered development event is a bug in this module, not a thing
     // to silently drop: the registry already fails closed, and so does this.
-    if (!send) throw new Error(`M21 tried to emit unregistered event "${event}".`);
+    if (!send) throw new Error(`The Development Hub tried to emit unregistered event "${event}".`);
     send({ orgId, ...payload });
   };
 
@@ -252,7 +252,7 @@ export function registerDevelopment(ctx) {
     timeline: { actions: Object.keys(TIMELINE_ACTIONS) },
     goalLibrary: { items: GOAL_LIBRARY, note: GOAL_LIBRARY_NOTE },
     templates: { items: PLAN_TEMPLATES, note: TEMPLATE_NOTE },
-    limits: M21_LIMITS,
+    limits: DEVELOPMENT_HUB_LIMITS,
     viewerKinds: VIEWER_KINDS,
     capabilities: CAPABILITIES,
     reminders: {
@@ -270,7 +270,7 @@ export function registerDevelopment(ctx) {
   // ------------------------------------------------------------ validation
 
   function validatePlanBody(body, { ownerKind, existing = null }) {
-    const title = boundedText(body?.title ?? existing?.title, M21_LIMITS.titleMax, { field: 'title' });
+    const title = boundedText(body?.title ?? existing?.title, DEVELOPMENT_HUB_LIMITS.titleMax, { field: 'title' });
     if (title.error) return title;
     if (!title.value) return { error: 'TITLE_REQUIRED', detail: 'A development plan needs a title.' };
 
@@ -310,11 +310,11 @@ export function registerDevelopment(ctx) {
   }
 
   function validateGoalBody(body, { existing = null }) {
-    const title = boundedText(body?.title ?? existing?.title, M21_LIMITS.titleMax, { field: 'title' });
+    const title = boundedText(body?.title ?? existing?.title, DEVELOPMENT_HUB_LIMITS.titleMax, { field: 'title' });
     if (title.error) return title;
     if (!title.value) return { error: 'TITLE_REQUIRED', detail: 'A development goal needs a title.' };
 
-    const description = boundedText(body?.description ?? existing?.description, M21_LIMITS.descriptionMax, { field: 'description' });
+    const description = boundedText(body?.description ?? existing?.description, DEVELOPMENT_HUB_LIMITS.descriptionMax, { field: 'description' });
     if (description.error) return description;
 
     const category = body?.category ?? existing?.category;
@@ -336,7 +336,7 @@ export function registerDevelopment(ctx) {
   }
 
   function validateActionBody(body, { plan, player, existing = null }) {
-    const title = boundedText(body?.title ?? existing?.title, M21_LIMITS.titleMax, { field: 'title' });
+    const title = boundedText(body?.title ?? existing?.title, DEVELOPMENT_HUB_LIMITS.titleMax, { field: 'title' });
     if (title.error) return title;
     if (!title.value) return { error: 'TITLE_REQUIRED', detail: 'An action needs a title.' };
 
@@ -415,7 +415,7 @@ export function registerDevelopment(ctx) {
           };
         })
         .sort((a, b) => (b.occurredAt ?? 0) - (a.occurredAt ?? 0) || String(a.sourceId).localeCompare(String(b.sourceId)))
-        .slice(0, M21_LIMITS.listPageMax);
+        .slice(0, DEVELOPMENT_HUB_LIMITS.listPageMax);
 
       res.set('X-ScoutBox-Ordering', 'newest_first_then_id');
       res.json({
@@ -490,14 +490,14 @@ export function registerDevelopment(ctx) {
       if (wantsActive && !goalBodies.length) {
         return res.status(400).json({ error: 'ACTIVE_PLAN_NEEDS_A_GOAL', detail: 'An active plan needs at least one goal. Save it as a draft if you are not ready.' });
       }
-      if (goalBodies.length > M21_LIMITS.goalsPerPlan) {
-        return res.status(400).json({ error: 'TOO_MANY_GOALS', max: M21_LIMITS.goalsPerPlan });
+      if (goalBodies.length > DEVELOPMENT_HUB_LIMITS.goalsPerPlan) {
+        return res.status(400).json({ error: 'TOO_MANY_GOALS', max: DEVELOPMENT_HUB_LIMITS.goalsPerPlan });
       }
 
       const ownerOrgId = ownerKind === 'org' ? req.org.id : null;
       const activeCount = developmentReads.plans.openCount(player.id, ownerKind, ownerOrgId);
-      if (activeCount >= M21_LIMITS.activePlansPerOwner) {
-        return res.status(400).json({ error: 'TOO_MANY_ACTIVE_PLANS', max: M21_LIMITS.activePlansPerOwner, detail: 'Complete or archive an existing plan first.' });
+      if (activeCount >= DEVELOPMENT_HUB_LIMITS.activePlansPerOwner) {
+        return res.status(400).json({ error: 'TOO_MANY_ACTIVE_PLANS', max: DEVELOPMENT_HUB_LIMITS.activePlansPerOwner, detail: 'Complete or archive an existing plan first.' });
       }
 
       const actor = actorOf(viewer, req);
@@ -716,8 +716,8 @@ export function registerDevelopment(ctx) {
         return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status, detail: `A ${plan.status} plan cannot take new goals.` });
       }
       if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
-      if (goals.length >= M21_LIMITS.goalsPerPlan) {
-        return res.status(400).json({ error: 'TOO_MANY_GOALS', max: M21_LIMITS.goalsPerPlan, detail: 'A plan with twenty goals is a plan nobody will work through.' });
+      if (goals.length >= DEVELOPMENT_HUB_LIMITS.goalsPerPlan) {
+        return res.status(400).json({ error: 'TOO_MANY_GOALS', max: DEVELOPMENT_HUB_LIMITS.goalsPerPlan, detail: 'A plan with twenty goals is a plan nobody will work through.' });
       }
 
       const parsed = validateGoalBody(req.body, {});
@@ -786,7 +786,7 @@ export function registerDevelopment(ctx) {
           if (!BLOCK_REASONS.includes(reason)) {
             return res.status(400).json({ error: 'BLOCK_REASON_UNKNOWN', allowed: BLOCK_REASONS, detail: 'A blocked goal needs a reason from the list. ScoutBox does not offer a health reason and does not record one.' });
           }
-          const note = boundedText(req.body?.blockNote, M21_LIMITS.blockNoteMax, { field: 'blockNote' });
+          const note = boundedText(req.body?.blockNote, DEVELOPMENT_HUB_LIMITS.blockNoteMax, { field: 'blockNote' });
           if (note.error) return res.status(400).json(note);
           goal.blockReason = reason;
           goal.blockNote = note.value;
@@ -834,8 +834,8 @@ export function registerDevelopment(ctx) {
       if (['archived', 'completed'].includes(plan.status)) return res.status(409).json({ error: 'PLAN_NOT_EDITABLE', status: plan.status });
       if (limited('development_item_write', rateKeyFor(req))) return res.status(429).json(rateLimitedBody('development_item_write'));
       const mine = actions.filter((a) => a.goalId === goal.id);
-      if (mine.length >= M21_LIMITS.actionsPerGoal) {
-        return res.status(400).json({ error: 'TOO_MANY_ACTIONS', max: M21_LIMITS.actionsPerGoal });
+      if (mine.length >= DEVELOPMENT_HUB_LIMITS.actionsPerGoal) {
+        return res.status(400).json({ error: 'TOO_MANY_ACTIONS', max: DEVELOPMENT_HUB_LIMITS.actionsPerGoal });
       }
 
       const parsed = validateActionBody(req.body, { plan, player });
@@ -944,8 +944,8 @@ export function registerDevelopment(ctx) {
 
       const key = targetKind === 'goal' ? 'goalId' : 'actionId';
       const mine = links.filter((l) => l[key] === holder.id);
-      if (mine.length >= M21_LIMITS.evidenceLinksPerTarget) {
-        return res.status(400).json({ error: 'TOO_MANY_EVIDENCE_LINKS', max: M21_LIMITS.evidenceLinksPerTarget });
+      if (mine.length >= DEVELOPMENT_HUB_LIMITS.evidenceLinksPerTarget) {
+        return res.status(400).json({ error: 'TOO_MANY_EVIDENCE_LINKS', max: DEVELOPMENT_HUB_LIMITS.evidenceLinksPerTarget });
       }
 
       const parsed = validateEvidenceLink({
@@ -1132,7 +1132,7 @@ export function registerDevelopment(ctx) {
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
       const all = buildTimeline({ ...bundle, access: bundle.access });
-      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), M21_LIMITS.historyPageMax);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), DEVELOPMENT_HUB_LIMITS.historyPageMax);
       let start = 0;
       if (req.query.cursor) {
         const idx = all.findIndex((r) => r.id === String(req.query.cursor));
@@ -1250,7 +1250,7 @@ export function registerDevelopment(ctx) {
 
   return {
     developmentCatalogue: catalogue,
-    developmentStores: M21_STORES,
+    developmentStores: DEVELOPMENT_HUB_STORES,
     developmentVocabulary: vocabulary,
     evidenceLinkFields: EVIDENCE_LINK_FIELDS,
   };

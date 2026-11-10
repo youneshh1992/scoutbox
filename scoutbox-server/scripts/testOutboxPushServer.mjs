@@ -31,7 +31,7 @@ const PLACEHOLDER = '[code withheld — delivered to the recipient only]';
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env };
+    const childEnv = { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', ...env };
     const proc = spawnChild(process.execPath, [server], { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
    
     let log = '';
@@ -115,7 +115,7 @@ await test('mail records are durable when their route answers: the staff invite\
 
 // ============================================================= the push record
 await test('a message\'s push record is written once its notification is durable (the after-commit effect), for the right person, and survives a restart', async () => {
-  const dir = tempDir('s14d-push'); let S = await boot(dir, { M13_FAST_RETRY: '' });
+  const dir = tempDir('s14d-push'); let S = await boot(dir, { SCOUTBOX_FAST_SWEEPS: '' });
   const maria = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const kola = await playerLogin(S, 'pl-adeyemi');
   const channel = await adultChannel(S, maria, kola);
   const before = stored(dir).pushLog.length;
@@ -123,7 +123,7 @@ await test('a message\'s push record is written once its notification is durable
   const row = await until(async () => { const p = stored(dir).pushLog; return p.length > before ? p.at(-1) : null; }, 4000);
   assert.ok(row, 'the push row is in the table'); assert.deepEqual(row.audience, { kind: 'player', id: 'pl-adeyemi' }); assert.equal(row.title, 'ScoutBox'); assert.equal(row.transport, 'dev-log');
   assert.ok(q1(dir, "SELECT 1 AS one FROM notifications WHERE audience_kind = 'player' AND audience_id = 'pl-adeyemi' AND type = 'message'"), 'its notification is durable');
-  await S.kill(); S = await boot(dir, { M13_FAST_RETRY: '' });
+  await S.kill(); S = await boot(dir, { SCOUTBOX_FAST_SWEEPS: '' });
   assert.ok(stored(dir).pushLog.some((p) => p.id === row.id), 'the row survives a SIGKILL and a restart');
   await S.stop(); rm(dir);
 });
@@ -211,7 +211,7 @@ await test('POST /org/invites and POST /org/verification/player-invites refuse a
 
 await test('the push sender hands the live provider (intercepted locally) each registered token of the audience, one call per token', async () => {
   const d = tempDir('s14d-expo'); const stubLog = path.join(d, '..', `${path.basename(d)}-expo.log`);
-  const X = await boot(d, { M13_FAST_RETRY: '', EXPO_ACCESS_TOKEN: 'synthetic-not-a-real-token', EXPO_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testExpoStub.mjs')}` });
+  const X = await boot(d, { SCOUTBOX_FAST_SWEEPS: '', EXPO_ACCESS_TOKEN: 'synthetic-not-a-real-token', EXPO_STUB_LOG: stubLog, NODE_OPTIONS: `--import=${path.join(HERE, 'testExpoStub.mjs')}` });
   const m = await orgLogin(X, 'org-eastport', 'Maria Keane', 'Head of Recruitment'); const k = await playerLogin(X, 'pl-adeyemi');
   for (const token of ['ExponentPushToken[synthetic-1]', 'ExponentPushToken[synthetic-2]']) assert.equal((await X.j('POST', '/push/register', { token }, k)).status, 201);
   const channel = await adultChannel(X, m, k); await sleep(300); fs.writeFileSync(stubLog, '');

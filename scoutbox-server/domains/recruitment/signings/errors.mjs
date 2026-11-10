@@ -14,7 +14,7 @@
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
-export const M29_ERROR_HTTP = table({
+export const SIGNING_ERROR_HTTP = table({
   // ---- 400: fix the request.
   SIGNING_INPUT_INVALID: 400,
   SIGNING_CONTRACT_DATES_INVALID: 400,
@@ -65,7 +65,7 @@ export const M29_ERROR_HTTP = table({
   SIGNING_STORE_MISSING: 500,
 });
 
-export const httpStatusFor = (code) => M29_ERROR_HTTP[code] ?? null;
+export const httpStatusFor = (code) => SIGNING_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
   'error', 'message', 'field', 'allowed', 'expected', 'current', 'expectedRev', 'currentRev',
@@ -74,7 +74,7 @@ export const PUBLIC_ERROR_FIELDS = [
 
 export function publicErrorBody(out) {
   const code = out?.error;
-  if (M29_ERROR_HTTP[code] === 500) {
+  if (SIGNING_ERROR_HTTP[code] === 500) {
     return { ok: false, error: code, message: 'The Signing service cannot serve this request. This has been recorded.' };
   }
   const body = { ok: false };
@@ -85,10 +85,10 @@ export function publicErrorBody(out) {
 export function sendSigningError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
-    console.error(`M29 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
+    console.error(`signings ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
     return res.status(500).json({ ok: false, error: 'SIGNING_STATE_UNKNOWN', message: 'The Signing service cannot serve this request. This has been recorded.' });
   }
-  if (status === 500) console.error(`M29 ${where} ${out.error} — ${JSON.stringify(out)}`);
+  if (status === 500) console.error(`signings ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }
 

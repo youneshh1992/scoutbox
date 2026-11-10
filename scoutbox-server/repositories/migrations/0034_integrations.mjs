@@ -8,7 +8,7 @@ import { INSIGHT_COVERAGE_MIGRATION } from '../insightCoverage.mjs';
 import { INTEGRATIONS_MIGRATION, INTEGRATIONS_DDL, INTEGRATIONS_TABLES } from '../integrations.mjs';
 
 export const id = INTEGRATIONS_MIGRATION;
-export const note = 'Import batches, prospects, identity reviews, API keys, webhook endpoints and webhook deliveries become typed tables (S13a)';
+export const note = 'Import batches, prospects, identity reviews, API keys, webhook endpoints and webhook deliveries become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

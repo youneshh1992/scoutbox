@@ -30,7 +30,7 @@ async function serverUnderTest() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sb-api-e2e-'));
   const port = await new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); }); });
   const { API_URL: _u, ...env } = process.env;
-  const child = spawn(process.execPath, [path.join(SERVER_DIR, 'server.mjs')], { env: { ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [path.join(SERVER_DIR, 'server.mjs')], { env: { ...env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   child.stdout.on('data', (d) => { log += d; }); child.stderr.on('data', (d) => { log += d; });
   // `ok` exits the process on the first failure: the server and its directory go with it.

@@ -7,7 +7,7 @@
 // the evidence provider answers "store unavailable", and the offers stay an optional phase.
 import { buildRecruitmentJourney as journey } from '../domains/recruitment/lifecycle/journey.mjs';
 import { createEvidenceProvider as provider } from '../domains/recruitment/lifecycle/evidence.mjs';
-import { buildReportingContext as reportingContext } from '../m20/dashboard.mjs';
+import { buildReportingContext as reportingContext } from '../domains/recruitment/analytics/dashboard.mjs';
 import { resolveEvidenceLink as resolveLink, recordBelongsToPlayer as belongs, validateEvidenceLink as validateLink } from '../domains/development/hub/evidence.mjs';
 import { resolveEvidenceRefs as resolveRefs, evidenceCandidates as candidates } from '../domains/recruitment/lifecycle/decision.mjs';
 import { buildDevelopmentPlan as buildPlan } from '../domains/development/hub/plan.mjs';

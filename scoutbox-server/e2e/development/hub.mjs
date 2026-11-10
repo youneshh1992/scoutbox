@@ -30,7 +30,7 @@ import {
   PLAN_OWNER_KINDS, PLAN_VISIBILITY, VISIBILITY_BY_OWNER, PLAN_STATUSES, PLAN_TRANSITIONS,
   GOAL_CATEGORIES, GOAL_STATUSES, GOAL_TRANSITIONS, BLOCK_REASONS,
   ACTION_TYPES, ACTION_STATUSES, ACTION_TRANSITIONS, EVIDENCE_SOURCES,
-  REVIEWER_KINDS, SHARE_SCOPES, M21_LIMITS, GOAL_LIBRARY, PLAN_TEMPLATES,
+  REVIEWER_KINDS, SHARE_SCOPES, DEVELOPMENT_HUB_LIMITS, GOAL_LIBRARY, PLAN_TEMPLATES,
   FORBIDDEN_DEVELOPMENT_NAMES, FORBIDDEN_FIELD_NAMES,
   assertDevelopmentVocabulary, scanCopyForForbiddenNames, refusedClientFields, scanPayloadForForbiddenFields,
   transitionAllowed, dueState, reviewDueState, actionCounts, completionPhrase,
@@ -44,7 +44,7 @@ import { EVIDENCE_LINK_FIELDS, summariseEvidence } from '../../domains/developme
 import { planAccess, canAssign, reviewView, VIEWER_KINDS, CAPABILITIES } from '../../domains/development/hub/permissions.mjs';
 import { buildTimeline, TIMELINE_ACTIONS, planSummary } from '../../domains/development/hub/plan.mjs';
 import { buildGoalSnapshots, pageReviews } from '../../domains/development/hub/reviews.mjs';
-import { M21_STORES } from '../../domains/development/hub/index.mjs';
+import { DEVELOPMENT_HUB_STORES } from '../../domains/development/hub/index.mjs';
 import { PAGE_LIMITS } from '../../domains/platform/paging.mjs';
 import { DEVELOPMENT_COLLECTIONS, DEVELOPMENT_MIGRATION } from '../../repositories/development.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
@@ -129,7 +129,7 @@ section('§1 — the vocabulary is internally consistent, and refuses a rating')
     'no block reason invites a medical detail');
 
   // ---- statuses, and the transitions that make them meaningful
-  ok(PLAN_STATUSES.length === 5 && !PLAN_STATUSES.includes('closed'), 'plan statuses avoid the ambiguous "closed" M17 uses for a Room');
+  ok(PLAN_STATUSES.length === 5 && !PLAN_STATUSES.includes('closed'), 'plan statuses avoid the ambiguous "closed" the Rooms use for a Room');
   ok(GOAL_STATUSES.length === 5 && ACTION_STATUSES.length === 5, 'goal and action statuses are the five the mandate names');
   N(20, !transitionAllowed(GOAL_TRANSITIONS, 'not_started', 'achieved'),
     'a goal nobody started cannot go straight to achieved');
@@ -183,7 +183,7 @@ section('§2 — derived figures are counts, never a combined number');
   ok(reviewDueState(NOW - DAY, NOW).state === 'review_overdue' && reviewDueState(null, NOW).state === 'no_review_scheduled',
     'review due states are derived the same way');
   ok(utcDay(Date.UTC(2026, 5, 15, 23, 59)) === utcDay(Date.UTC(2026, 5, 15, 0, 1)) && daysBetween(NOW, NOW + DAY) === 1,
-    'dates are UTC calendar days — the M18.2 semantics, reused');
+    'dates are UTC calendar days — the shared date semantics, reused');
   N(52, parseDate('not-a-date', { field: 'dueAt' }).error === 'DATE_INVALID', 'a malformed date is refused, not repaired');
   N(49, boundedText('x'.repeat(200), 120, { field: 'title' }).error === 'TEXT_TOO_LONG', 'over-long text is refused, never silently truncated');
 }
@@ -259,7 +259,7 @@ section('§3 — objective targets: one comparison, three states, no formula');
   ok(isProductionValidCombine(attempt({}), sessions[0], PROVIDERS.web_client) === true
     && isProductionValidCombine(attempt({ provider: 'local_test' }), sessions[0], PROVIDERS.local_test) === false
     && liveCombineState(attempt({}), sessions[1]) === 'invalidated',
-    'the shared predicate answers all three cases the same way M16.1 does');
+    'the shared predicate answers all three cases the same way Box Cam does');
   ok(compare(5, 'gte', 5) && !compare(4, 'gt', 4) && compare(3, 'lt', 4), 'the comparison itself is one pure function');
   ok(bestValidAttempt({ attempts: [attempt({ id: 'a', value: 161 }), attempt({ id: 'b', value: 170 })], sessions, target: T }).id === 'b',
     'best means best in the protocol’s own direction');
@@ -272,7 +272,7 @@ section('§4 — evidence links hold references, and nothing else');
 {
   ok(!EVIDENCE_LINK_FIELDS.some((f) => /label|title|value|note|summary|content|text/i.test(f)),
     `an evidence link may carry only ${EVIDENCE_LINK_FIELDS.length} id-and-provenance fields, none of them content`);
-  ok(EVIDENCE_SOURCES.length === 5, 'five canonical evidence sources, all of them read-only to M21');
+  ok(EVIDENCE_SOURCES.length === 5, 'five canonical evidence sources, all of them read-only to the Development Hub');
 
   const player = { id: 'p1', name: 'A Player' };
   const other = { id: 'p2', name: 'Another' };
@@ -299,7 +299,7 @@ section('§4 — evidence links hold references, and nothing else');
 
   ok(R({ sourceType: 'passport_evidence', sourceId: 'evd-ok' }, self).available === true, 'live Passport evidence resolves');
   ok(R({ sourceType: 'passport_evidence', sourceId: 'evd-ok' }, self).provenance === 'verified_coach_confirmed',
-    'provenance comes from the canonical M15 vocabulary — no new labels');
+    'provenance comes from the canonical Passport vocabulary — no new labels');
   N(9, R({ sourceType: 'passport_evidence', sourceId: 'evd-theirs' }, self).reason === 'evidence_not_found',
     'evidence belonging to a different player cannot be resolved onto this plan');
   N(10, recordBelongsToPlayer({ db, sourceType: 'passport_evidence', sourceId: 'evd-theirs', playerId: 'p1' }) === null,
@@ -450,8 +450,8 @@ section('§6 — the timeline is meaningful events, and the stores are workflow'
   const paged = pageReviews([{ id: 'r1', reviewedAt: 3 }, { id: 'r2', reviewedAt: 2 }, { id: 'r3', reviewedAt: 1 }], { limit: 2 });
   ok(paged.value.items.length === 2 && paged.value.nextCursor === 'r2', 'reviews page newest-first with a stable cursor');
   N(67, pageReviews([], { limit: 2, cursor: 'nope' }).error === 'REVIEW_CURSOR_INVALID', 'a malformed pagination cursor is refused, not ignored');
-  ok(pageReviews(Array.from({ length: 200 }, (_, i) => ({ id: `r${i}`, reviewedAt: i })), { limit: 999 }).value.items.length === M21_LIMITS.reviewsPageMax,
-    `a page is capped at ${M21_LIMITS.reviewsPageMax} however large a limit is asked for`);
+  ok(pageReviews(Array.from({ length: 200 }, (_, i) => ({ id: `r${i}`, reviewedAt: i })), { limit: 999 }).value.items.length === DEVELOPMENT_HUB_LIMITS.reviewsPageMax,
+    `a page is capped at ${DEVELOPMENT_HUB_LIMITS.reviewsPageMax} however large a limit is asked for`);
 }
 
 // =========================================================================
@@ -465,15 +465,15 @@ section('§7 — migration, stores and the clean-boot proof');
   const recorded = (dir) => { const st = openLayer(dir); try { return st.sqlite.prepare('SELECT id, applied_at FROM data_migrations WHERE id = ?').all(DEVELOPMENT_MIGRATION).map((r) => `${r.id}@${r.applied_at}`); } finally { st.close(); } };
   const first = recorded(freshDir);
   const fresh = readRecords(freshDir);
-  for (const s of M21_STORES) neg(Array.isArray(fresh[s]) && fresh[s].length === 0, `a clean database holds db.${s} as an empty table`);
+  for (const s of DEVELOPMENT_HUB_STORES) neg(Array.isArray(fresh[s]) && fresh[s].length === 0, `a clean database holds db.${s} as an empty table`);
   ok(first.length === 1 && recorded(freshDir).join() === first.join(), 'a second open applies no migration again');
-  ok(M21_STORES.every((s) => DEVELOPMENT_COLLECTIONS.includes(s)), 'every M21 store is a collection of the development repository');
+  ok(DEVELOPMENT_HUB_STORES.every((s) => DEVELOPMENT_COLLECTIONS.includes(s)), 'every Development Hub store is a collection of the development repository');
 
   // The whole point: a store that exists only because the seed made it breaks
-  // every database the seed did not write. Prove no M21 store depends on the
+  // every database the seed did not write. Prove no Development Hub store depends on the
   // seed — the seed must not mention them at all.
   const seedSrc = code('scoutbox-server/seed.mjs');
-  for (const s of M21_STORES) {
+  for (const s of DEVELOPMENT_HUB_STORES) {
     ok(!new RegExp(`\\b${s}\\b`).test(seedSrc), `the demo seed never creates db.${s} — the migration is its only source`);
   }
 
@@ -487,15 +487,15 @@ section('§7 — migration, stores and the clean-boot proof');
     'M21 invents no limiter of its own');
 
   // Events: registered, org-private, ids only.
-  const m21Events = EVENT_NAMES.filter((n) => n.startsWith('development_'));
-  ok(m21Events.length === 8, `all eight M21 events are in the canonical registry (${m21Events.length})`);
-  for (const e of m21Events) {
+  const hubEvents = EVENT_NAMES.filter((n) => n.startsWith('development_'));
+  ok(hubEvents.length === 8, `all eight Development Hub events are in the canonical registry (${hubEvents.length})`);
+  for (const e of hubEvents) {
     const def = EVENT_REGISTRY[e];
     N(65, def.audience === 'org_private', `${e} is organisation-private`);
     N(66, def.payload.every((k) => /Id$/.test(k)), `${e} carries ids only, never content`);
-    neg(def.analyticsEligible === false, `${e} is not analytics-eligible — M20 gains no development ranking`);
+    neg(def.analyticsEligible === false, `${e} is not analytics-eligible — recruitment analytics gains no development ranking`);
   }
-  N(66, assertEventRegistry({ emitted: m21Events, mode: 'production' }).length === 0, 'the registry assertion passes for the M21 names');
+  N(66, assertEventRegistry({ emitted: hubEvents, mode: 'production' }).length === 0, 'the registry assertion passes for the Development Hub names');
   N(66, assertEventRegistry({ emitted: ['development_made_up'], mode: 'production' }).length > 0, 'an unregistered development event fails closed');
 
   // Notifications: one category, and mandatory categories untouched.
@@ -504,7 +504,7 @@ section('§7 — migration, stores and the clean-boot proof');
   ok(Object.keys(CATEGORIES).filter((c) => c.startsWith('development')).length === 1, 'exactly one, not three');
   ok(TYPE_CATEGORY.development === 'development_updates' && categoryOf('development') === 'development_updates',
     'the development notification type maps to it');
-  ok(CATEGORIES.security_account.mandatory === true, 'security_account is still mandatory — M21 changed nothing there');
+  ok(CATEGORIES.security_account.mandatory === true, 'security_account is still mandatory — the Development Hub changed nothing there');
 }
 
 // =========================================================================
@@ -520,8 +520,8 @@ section('§8 — the client cannot assert what the server derives');
 }
 
 // ============================================================ HTTP boot
-section('§9 — a clean database boots with M21 in place');
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1' };
+section('§9 — a clean database boots with the Development Hub in place');
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', BOX_CAM_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env, base) {
@@ -556,7 +556,7 @@ const amara = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' 
 ok([maria, tom, rita, alex, dee, kola, guni, amara].every((a) => a?.token), 'HTTP actors logged in');
 {
   const h = await j('GET', '/healthz');
-  ok(h.body.schemaVersion === SCHEMA_VERSION, `/healthz reports schema ${SCHEMA_VERSION} with the M21 migration applied`);
+  ok(h.body.schemaVersion === SCHEMA_VERSION, `/healthz reports schema ${SCHEMA_VERSION} with the Development Hub migration applied`);
 }
 
 // The clean-boot proof against a REAL boot, not an in-process object.
@@ -566,7 +566,7 @@ ok([maria, tom, rita, alex, dee, kola, guni, amara].every((a) => a?.token), 'HTT
   const list = await j('GET', '/player/development/plans', undefined, kola.token);
   ok(list.status === 200 && list.body.items.length === 0, 'the plan list reads clean on a fresh database with no development records');
   const miss = await j('GET', '/player/development/plans/devplan-nope', undefined, kola.token);
-  ok(miss.status === 404, 'reading a nonexistent plan touches every M21 store and answers 404 rather than throwing');
+  ok(miss.status === 404, 'reading a nonexistent plan touches every Development Hub store and answers 404 rather than throwing');
   const hist = await j('GET', '/player/development/plans/devplan-nope/history', undefined, kola.token);
   ok(hist.status === 404, 'and so does its history');
 }
@@ -665,10 +665,10 @@ let planId = null; let goalId = null; let actionId = null;
 
   N(50, (await j('POST', `/player/development/plans/${planId}/goals`, { title: 'y', category: 'technical' }, kola.token)).status !== 500, 'goal creation stays well-behaved under repetition');
   // Fill to the limit.
-  for (let i = 0; i < M21_LIMITS.goalsPerPlan + 2; i++) await j('POST', `/player/development/plans/${planId}/goals`, { title: `Filler ${i}`, category: 'other' }, kola.token);
+  for (let i = 0; i < DEVELOPMENT_HUB_LIMITS.goalsPerPlan + 2; i++) await j('POST', `/player/development/plans/${planId}/goals`, { title: `Filler ${i}`, category: 'other' }, kola.token);
   N(50, (await j('POST', `/player/development/plans/${planId}/goals`, { title: 'One too many', category: 'other' }, kola.token)).body.error === 'TOO_MANY_GOALS',
     'a plan refuses more goals than anyone will work through');
-  for (let i = 0; i < M21_LIMITS.actionsPerGoal + 2; i++) await j('POST', `/player/development/goals/${goalId}/actions`, { title: `Filler ${i}`, type: 'custom' }, kola.token);
+  for (let i = 0; i < DEVELOPMENT_HUB_LIMITS.actionsPerGoal + 2; i++) await j('POST', `/player/development/goals/${goalId}/actions`, { title: `Filler ${i}`, type: 'custom' }, kola.token);
   N(51, (await j('POST', `/player/development/goals/${goalId}/actions`, { title: 'One too many', type: 'custom' }, kola.token)).body.error === 'TOO_MANY_ACTIONS',
     'a goal refuses an unbounded action list');
 
@@ -722,7 +722,7 @@ let minorPlan = null;
     'a guardian cannot create a plan for a child who is not theirs');
   N(37, (await j('POST', '/guardian/development/plans', { playerId: 'pl-guni', title: 'x', visibility: 'private' }, kola.token)).status === 401,
     'a player token cannot act on the guardian surface');
-  N(5, (await j('GET', `/org/development/plans/${minorPlan}`, undefined, alex.token)).status === 404, 'an agency gains no access to a minor’s plan through M21');
+  N(5, (await j('GET', `/org/development/plans/${minorPlan}`, undefined, alex.token)).status === 404, 'an agency gains no access to a minor’s plan through the Development Hub');
   N(38, (await j('GET', `/org/development/plans/${minorPlan}`, undefined, rita.token)).status === 404, 'nor does an unrelated club');
 }
 
@@ -831,7 +831,7 @@ section('§16 — concurrency, archive, and the plan that stops accepting writes
     'a stale revision is refused with 409, not silently applied');
   const conflict = (await j('PATCH', `/org/development/goals/${g.id}`, { title: 'Stale', expectedRev: g.rev - 1 }, maria.token)).body;
   ok(conflict.error === 'DEVELOPMENT_GOAL_VERSION_CONFLICT' && conflict.currentRev === g.rev,
-    'the conflict body is the shared M18.2 shape, so the shared notice renders it');
+    'the conflict body is the shared conflict shape, so the shared notice renders it');
   N(26, conflict.updatedBy !== undefined && !('title' in conflict), 'the conflict says who moved it, never what they wrote — the caller keeps its own draft');
   ok((await j('PATCH', `/org/development/goals/${g.id}`, { title: 'Improve scanning before receiving', expectedRev: g.rev }, maria.token)).status === 200,
     'the current revision is accepted');
@@ -947,7 +947,7 @@ section('§16b — a longer adversarial pass over the whole surface');
   const emptied = await j('PATCH', `/player/development/plans/${datePlan}`, { startDate: '' }, kola.token);
   ok(emptied.status === 200 && Number.isSafeInteger(emptied.body.plan.startDate), 'an emptied start date keeps the stored start (a plan always has one)');
   const hBig = await j('GET', `/org/development/plans/${clubPlan}/history?limit=9999`, undefined, maria.token);
-  N(67, hBig.body.items.length <= M21_LIMITS.historyPageMax, 'and so is a history page');
+  N(67, hBig.body.items.length <= DEVELOPMENT_HUB_LIMITS.historyPageMax, 'and so is a history page');
 
   // ---- cross-surface probes
   N(6, (await j('GET', '/guardian/development/plans/devplan-guessed', undefined, amara.token)).status === 404, 'a guessed plan id is not found on the guardian surface either');
@@ -1128,7 +1128,7 @@ section('§17 — G1–G15, the positive journeys');
     'and the refusal distinguishes "cannot observe" from "observes but may not certify"');
   const afterProd = (await j('GET', `/org/development/plans/${c3Plan}`, undefined, maria.token)).body.goals.find((x) => x.id === c3Goal).targetState;
   ok(afterProd.state === 'no_current_valid_measurement',
-    'and the M21 development target is still not met after that attempt');
+    'and the development target is still not met after that attempt');
   ok(evaluateTarget({
     target: validateTarget({ sourceType: 'combine_attempt', protocolId: 'combine-box-control-60', operator: 'gte', value: 30 }).value,
     attempts: [{ id: 'a', playerId: 'p', protocolId: 'combine-box-control-60', protocolVersion: 1, provider: 'web_client', combineState: 'combine_verified', measuredValue: 41, boxSessionId: 's', completedAt: NOW }],
@@ -1228,7 +1228,7 @@ section('§17 — G1–G15, the positive journeys');
 }
 
 // =========================================================================
-section('§18 — notifications, events and what M21 must not touch');
+section('§18 — notifications, events and what the Development Hub must not touch');
 {
   const prefs = await j('GET', '/player/notification-preferences', undefined, kola.token);
   const catOf = (b) => (b?.preferences?.categories ?? []).find((c) => c.id === 'development_updates');
@@ -1240,7 +1240,7 @@ section('§18 — notifications, events and what M21 must not touch');
   N(70, (prefs.body.preferences.categories ?? []).filter((c) => /development/.test(c.id)).length === 1,
     'one development switch, not a stream of near-identical ones');
   neg((await j('PUT', '/player/notification-preferences', { categories: { security_account: false } }, kola.token)).body.error === 'PREF_CATEGORY_MANDATORY',
-    'and M21 changed nothing about the mandatory security category');
+    'and the Development Hub changed nothing about the mandatory security category');
   await j('PUT', '/player/notification-preferences', { categories: { development_updates: true } }, kola.token);
   N(45, ((await j('GET', '/player/notifications', undefined, guni.token)).body?.items ?? []).every((n2) => !/Eastport development/i.test(n2.text ?? '')),
     'no notification about an organisation-private plan reached an unrelated player');

@@ -19,7 +19,7 @@
 
 import { visibleToOrg } from '../../../domain.mjs';
 import { AGENT_CORE_LIMITS as LIM, PROFILE_FIELDS } from '../../../repositories/agentCore.mjs';
-import { buildShared } from '../../../m12/shared.mjs';
+import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { opportunityBoardFor } from '../../scouting/journeys.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
@@ -44,7 +44,7 @@ import {
  * the functions `(org) => rows` whose rows join the agency's audit feed.
  */
 export function registerAgent(rawCtx) {
-  const ctx = { ...rawCtx, ...buildShared(rawCtx) };
+  const ctx = { ...rawCtx, ...buildRouteHelpers(rawCtx) };
   const {
     byId, players, users, notifications, orgRouter, playerRouter, adminRouter, nextId, notify, broadcast,
     findPlayer, isBlocked, playerViewForOrg, orgSafe, revokeOrgUserAccess, rateLimit, isAdult,
@@ -453,7 +453,7 @@ export function registerAgent(rawCtx) {
     res.json({
       agents: rows,
       informational: true,
-      honest: 'Informational only. Nothing here verifies, approves or overrides a regulatory state; attributed Trust & Safety review of agent licences is a P5.6C prerequisite (G-C0).',
+      honest: 'Informational only. Nothing here verifies, approves or overrides a regulatory state; attributed Trust & Safety review of agent licences is not available yet (G-C0).',
     });
   });
 
@@ -844,7 +844,7 @@ export function registerAgent(rawCtx) {
     res.json({
       items: items.map((r) => ({ ...agreementForAgent(r.record, now()), history: undefined })), nextCursor,
       readOnly: true,
-      note: 'Read-only. No Trust & Safety action on agent relationships or licences exists in this build (P5.6A gate G-C0).',
+      note: 'Read-only. No Trust & Safety action on agent relationships or licences exists in this build (gate G-C0).',
     });
   });
   // States and provenance only. The declared number and the submitted
@@ -870,7 +870,7 @@ export function registerAgent(rawCtx) {
       }),
       nextCursor,
       readOnly: true,
-      note: 'Read-only oversight: states and provenance. Licence numbers and submitted references are not shown; attributed review (P5.6C) is where they would be needed.',
+      note: 'Read-only oversight: states and provenance. Licence numbers and submitted references are not shown; attributed review is where they would be needed.',
     });
   });
 
@@ -910,7 +910,7 @@ export function registerAgent(rawCtx) {
     }
   }
   agentSweep();
-  setInterval(agentSweep, process.env.M13_FAST_RETRY === '1' ? 500 : 60_000).unref();
+  setInterval(agentSweep, process.env.SCOUTBOX_FAST_SWEEPS === '1' ? 500 : 60_000).unref();
 
   return {
     onPlayerDeleted, agentSweep, effectiveAgreementStatus, agreementGrantsAccess, testProviderEnabled,

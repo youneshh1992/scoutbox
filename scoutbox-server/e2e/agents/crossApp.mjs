@@ -29,14 +29,14 @@ import {
   clubAgentPresence, surfaceIsRegulated, surfaceScopes,
   HANDOFF_STATUSES, HANDOFF_BLOCKERS, HANDOFF_TTL_MS, effectiveHandoffStatus,
   handoffBlockers, duplicateTransactionOf,
-} from '../../m27/integration.mjs';
+} from '../../domains/agents/integration/integration.mjs';
 import {
   agreementGrantsAccess, agreementInForce, effectiveAgreementStatus, PERMISSIONS, can,
   MAX_OPPORTUNITY_SHARES, SCOPES,
 } from '../../domains/agents/core/shared.mjs';
 import { CONTACT_MODES, CONTACT_STATUSES, contactIntegrity, contactView, contactMilestone } from '../../domains/recruitment/lifecycle/contact.mjs';
-import { M23_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
-import { M26_ERROR_HTTP } from '../../domains/agents/transactions/errors.mjs';
+import { LIFECYCLE_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { TRANSACTION_ERROR_HTTP } from '../../domains/agents/transactions/errors.mjs';
 import { TERMINAL_STATUSES } from '../../domains/agents/transactions/transaction.mjs';
 import { TRIAL_SCHEDULE_VIEWERS } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { POLICY_ACTIONS, MINOR_PATHWAY_PRODUCTION_ENABLED } from '../../domains/agents/compliance/policy.mjs';
@@ -280,12 +280,12 @@ section('pure AG/AH — events and notifications: ids only, and the right catego
 section('pure AO — the error tables have no default, so a new code cannot inherit a status');
 {
   ok(httpStatusFor('CONTACT_MODE_INVALID') === 400, 'AO-p1 an unknown routing mode is 400: the request is wrong and the caller can fix it');
-  ok(M23_ERROR_HTTP.CONTACT_MODE_INVALID === 400, 'AO-p2 and it is IN the table — an undeclared code answers 500, which is how this one was caught');
-  ok(M26_ERROR_HTTP.TRANSACTION_DUPLICATE_CONTEXT === 409, 'AO-p3 a duplicate context is 409: nothing in the request to fix');
+  ok(LIFECYCLE_ERROR_HTTP.CONTACT_MODE_INVALID === 400, 'AO-p2 and it is IN the table — an undeclared code answers 500, which is how this one was caught');
+  ok(TRANSACTION_ERROR_HTTP.TRANSACTION_DUPLICATE_CONTEXT === 409, 'AO-p3 a duplicate context is 409: nothing in the request to fix');
   for (const c of ['HANDOFF_NOT_FOUND', 'HANDOFF_NOT_OPEN', 'HANDOFF_SUBJECT_MISMATCH', 'HANDOFF_NOT_ADDRESSED']) {
-    ok(M26_ERROR_HTTP[c] === 409, `AO-p4 ${c} is 409: the citation is well-formed, the invitation is not there for it`);
+    ok(TRANSACTION_ERROR_HTTP[c] === 409, `AO-p4 ${c} is 409: the citation is well-formed, the invitation is not there for it`);
   }
-  neg(!Object.keys(M23_ERROR_HTTP).some((c) => /agent|representation|disclosure/i.test(c) && M23_ERROR_HTTP[c] >= 500), 'AO-p5 no integration code answers 5xx — a refusal is never presented as our fault');
+  neg(!Object.keys(LIFECYCLE_ERROR_HTTP).some((c) => /agent|representation|disclosure/i.test(c) && LIFECYCLE_ERROR_HTTP[c] >= 500), 'AO-p5 no integration code answers 5xx — a refusal is never presented as our fault');
   const corrupt = contactIntegrity({ id: 'rct-x', status: 'delivered', channel: 'in_app', playerId: 'pl-kola', recipient: { type: 'player' }, deliveredAt: T0, contactMode: 'agent_only' });
   neg(corrupt.includes('contact_mode_unknown'), 'AO-p6 a stored mode this build does not recognise is named as corruption, not read as permission');
   const badSnap = contactIntegrity({ id: 'rct-y', status: 'draft', channel: 'in_app', playerId: 'pl-kola', routingSnapshot: { at: T0, mode: 'both', agent: { agentUserId: 'usr-ana' } } });
@@ -314,7 +314,7 @@ const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', SCOUTBOX_TEST_CLOCK: '1', ...env }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', SCOUTBOX_TEST_CLOCK: '1', ...env }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -475,7 +475,7 @@ section('G — the opportunity share: the client\'s own board is the gate');
 
 section('H/I/J — contact routing, its reauthorization, and Inbox isolation');
 {
-  const kase = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', reason: 'P5.6E integration' }, maria.token);
+  const kase = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', reason: 'cross-app integration' }, maria.token);
   const RID = kase.body?.room?.roomId ?? kase.body?.existingRoomId;
   ok(!!RID, 'H1 a recruitment case exists');
   const jr0 = (await j('GET', `/org/rooms/${RID}/journey`, undefined, maria.token)).body;
@@ -1265,7 +1265,7 @@ section('AV — the two new writes draw on the platform\'s own quotas');
   // offer_consideration the ordinary way: shortlist, draft, finalise.
   // A player this suite has not otherwise touched: pl-svensson is removed by #34
   // and pl-adeyemi is the case above.
-  const second = await j('POST', '/org/rooms', { playerId: 'pl-alvarez', reason: 'P5.6E repair §25' }, maria.token);
+  const second = await j('POST', '/org/rooms', { playerId: 'pl-alvarez', reason: 'cross-app repair' }, maria.token);
   const RID2 = second.body?.room?.roomId ?? second.body?.existingRoomId ?? null;
   const jr2 = (await j('GET', `/org/rooms/${RID2}/journey`, undefined, maria.token)).body;
   await j('POST', `/org/rooms/${RID2}/lifecycle`, { action: 'shortlist', expectedRev: jr2?.case?.rev }, maria.token);

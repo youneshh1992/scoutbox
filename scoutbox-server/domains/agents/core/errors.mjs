@@ -5,7 +5,7 @@
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
-export const M24_ERROR_HTTP = table({
+export const AGENT_CORE_ERROR_HTTP = table({
   // ---- 400: fix the request.
   AGENT_INPUT_INVALID: 400,
   AGENT_CLIENT_KEY_INVALID: 400,
@@ -64,7 +64,7 @@ export const M24_ERROR_HTTP = table({
   AGENT_STATE_UNKNOWN: 500,
 });
 
-export const httpStatusFor = (code) => M24_ERROR_HTTP[code] ?? null;
+export const httpStatusFor = (code) => AGENT_CORE_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
   'error', 'message', 'allowed', 'facet', 'memberAssociation', 'state',
@@ -75,7 +75,7 @@ export const PUBLIC_ERROR_FIELDS = [
 
 export function publicErrorBody(out) {
   const code = out?.error;
-  if (M24_ERROR_HTTP[code] === 500) {
+  if (AGENT_CORE_ERROR_HTTP[code] === 500) {
     return { ok: false, error: code, message: 'The Agent workspace cannot serve this request. This has been recorded.' };
   }
   const body = { ok: false };
@@ -91,9 +91,9 @@ export function publicErrorBody(out) {
 export function sendAgentError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
-    console.error(`M24 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
+    console.error(`agent-core ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
     return res.status(500).json({ ok: false, error: 'AGENT_STATE_UNKNOWN', message: 'The Agent workspace cannot serve this request. This has been recorded.' });
   }
-  if (status === 500) console.error(`M24 ${where} ${out.error} — ${JSON.stringify(out)}`);
+  if (status === 500) console.error(`agent-core ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }

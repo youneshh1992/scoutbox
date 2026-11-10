@@ -28,15 +28,15 @@ import {
   ASSOCIATION_NOTE, WINDOW_PRESETS, DEFAULT_WINDOW,
   assertMetricRegistry, ratio, distribution, count, wire, utcDay, resolveWindow, inWindow,
   cohortIncomplete, previousWindow, compare, days, DAY_MS,
-} from '../../m20/metrics.mjs';
+} from '../../domains/recruitment/analytics/metrics.mjs';
 import {
   FUNNEL_STAGES, REASON_CATEGORIES, transitions, openedStatus, stagesReached,
   firstReachedAt, firstTerminalAt, REACH_STAGES,
-} from '../../m20/funnels.mjs';
-import { stageVisits, lastActivityAt, STALL_THRESHOLDS, DECISION_OWED_STATUSES, AGE_BUCKETS } from '../../m20/timeSeries.mjs';
-import { EVIDENCE_REASON_CODES } from '../../m20/cohorts.mjs';
-import { buildDashboard } from '../../m20/dashboard.mjs';
-import { DRILLDOWN_METRICS } from '../../m20/index.mjs';
+} from '../../domains/recruitment/analytics/funnels.mjs';
+import { stageVisits, lastActivityAt, STALL_THRESHOLDS, DECISION_OWED_STATUSES, AGE_BUCKETS } from '../../domains/recruitment/analytics/timeSeries.mjs';
+import { EVIDENCE_REASON_CODES } from '../../domains/recruitment/analytics/cohorts.mjs';
+import { buildDashboard } from '../../domains/recruitment/analytics/dashboard.mjs';
+import { DRILLDOWN_METRICS } from '../../domains/recruitment/analytics/index.mjs';
 import { ROOM_STATUSES, TERMINAL_ROOM_STATUSES, OPEN_ROOM_STATUSES, SOURCE_CONTEXTS, ROOM_PRIORITIES, REASON_CODES } from '../../domains/recruitment/rooms/shared.mjs';
 import { EVENT_NAMES } from '../../domains/platform/eventRegistry.mjs';
 import { CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
@@ -68,8 +68,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 /** Source with comments stripped: a sweep must not be satisfied by prose. */
 const code = (rel) => read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-const M20_FILES = ['metrics', 'funnels', 'timeSeries', 'cohorts', 'dashboard', 'index']
-  .map((f) => [`m20/${f}.mjs`, code(`scoutbox-server/m20/${f}.mjs`)]);
+const ANALYTICS_FILES = ['metrics', 'funnels', 'timeSeries', 'cohorts', 'dashboard', 'index']
+  .map((f) => [`analytics/${f}.mjs`, code(`scoutbox-server/domains/recruitment/analytics/${f}.mjs`)]);
 
 const DAY = DAY_MS;
 const NOW = Date.UTC(2026, 5, 15, 12);
@@ -104,7 +104,7 @@ section('the metric registry is internally consistent');
   for (const [n, name] of forbidden) {
     const inRegistry = METRIC_IDS.some((id) => `${id} ${METRICS[id].name}`.toLowerCase().includes(name));
     N(n, !inRegistry, `no metric is called "${name}"`);
-    const inSource = M20_FILES.some(([f, src]) => f !== 'm20/metrics.mjs' && new RegExp(name.replace(/ /g, '[ _]?'), 'i').test(src));
+    const inSource = ANALYTICS_FILES.some(([f, src]) => f !== 'analytics/metrics.mjs' && new RegExp(name.replace(/ /g, '[ _]?'), 'i').test(src));
     N(n, !inSource, `and "${name}" appears in no projection (only in the refusal list itself)`);
   }
   N(7, !METRIC_IDS.some((id) => /leaderboard|ranking|rank/i.test(`${id} ${METRICS[id].name}`)),
@@ -165,7 +165,7 @@ section('no person is a dimension');
 section('private text and personal identity are not analytics data');
 
 {
-  for (const [file, src] of M20_FILES) {
+  for (const [file, src] of ANALYTICS_FILES) {
     N(19, !/\.note\b/.test(src), `${file}: never reads a decision or room note`);
     // Property READS only: metrics.mjs names these same fields as string
     // literals in the list it refuses metrics for declaring, and that list is
@@ -175,7 +175,7 @@ section('private text and personal identity are not analytics data');
   }
   // The projection must STRIP identity, not merely decline to read it: a
   // history entry passed through whole would carry byName into every payload.
-  const dash = code('scoutbox-server/m20/dashboard.mjs');
+  const dash = code('scoutbox-server/domains/recruitment/analytics/dashboard.mjs');
   N(21, /at: h\.at,\s*action: h\.action/.test(dash) && !/byKind/.test(dash),
     'projectRoom rebuilds each history entry from at/action/detail and drops the actor');
   N(22, /const projectDecision[\s\S]{0,400}?\}\);/.test(dash) && !/note: d\.note|by: d\.by/.test(dash),
@@ -343,7 +343,7 @@ const room = (id, createdAt, steps, extra = {}) => {
 
   ok(FUNNEL_STAGES[0] === 'watching' && FUNNEL_STAGES[FUNNEL_STAGES.length - 1] === 'signed',
     'the ladder runs from watching to signed, in the vocabulary’s own order');
-  ok(REASON_CATEGORIES.join(',') === Object.keys(REASON_CODES).join(','), 'reason categories are M17’s, not a second taxonomy');
+  ok(REASON_CATEGORIES.join(',') === Object.keys(REASON_CODES).join(','), 'reason categories are the Rooms’, not a second taxonomy');
   ok(REACH_STAGES.every((s) => ROOM_STATUSES.includes(s)), 'the association metric reaches only real statuses');
 }
 
@@ -448,10 +448,10 @@ section('nothing new is emitted, notified or stored');
 
 {
   const eventCount = EVENT_NAMES.length;
-  N(28, !M20_FILES.some(([, src]) => /broadcast\(/.test(src)), 'M20 emits no live event — a dashboard is a read');
-  N(29, !M20_FILES.some(([, src]) => /notify\(/.test(src)), 'M20 notifies nobody: a dashboard that pushes numbers at people is a performance review');
+  N(28, !ANALYTICS_FILES.some(([, src]) => /broadcast\(/.test(src)), 'M20 emits no live event — a dashboard is a read');
+  N(29, !ANALYTICS_FILES.some(([, src]) => /notify\(/.test(src)), 'M20 notifies nobody: a dashboard that pushes numbers at people is a performance review');
   ok(eventCount === EVENT_NAMES.length && Object.keys(CATEGORIES).length >= 13,
-    `the event registry (${eventCount}) and notification categories (${Object.keys(CATEGORIES).length}) are untouched by M20`);
+    `the event registry (${eventCount}) and notification categories (${Object.keys(CATEGORIES).length}) are untouched by recruitment analytics`);
 
   // N30–N33 are claims about the table migrations on a fresh file.
   const MIG_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m20-mig-'));
@@ -475,8 +475,8 @@ section('nothing new is emitted, notified or stored');
 }
 
 // ============================================================ HTTP boot
-section('a clean database boots with M20 in place');
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1' };
+section('a clean database boots with recruitment analytics in place');
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', BOX_CAM_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env, base) {
@@ -507,7 +507,7 @@ const kola = (await j('POST', '/auth/player/login', { playerId: 'pl-adeyemi' }))
 ok([maria, tom, rita, kola].every((x) => x?.token), 'HTTP actors logged in');
 {
   const h = await j('GET', '/healthz');
-  ok(h.body.schemaVersion === SCHEMA_VERSION, `/healthz reports schema ${SCHEMA_VERSION} with the M20 migration applied`);
+  ok(h.body.schemaVersion === SCHEMA_VERSION, `/healthz reports schema ${SCHEMA_VERSION} with the analytics migration applied`);
 }
 
 // =========================================================================
@@ -623,7 +623,7 @@ const roomIds = [];
   await move(roomIds[5], 'archived', { reasonCodes: ['combine_missing'] });
   // …and one of them comes back, because reopening is first-class.
   const reopened = await move(roomIds[4], 'under_review', { reasonCodes: ['continue_monitoring'] });
-  ok(reopened.status < 300, 'an archived room is reopened, as M17 allows');
+  ok(reopened.status < 300, 'an archived room is reopened, as the Rooms allow');
 }
 
 {

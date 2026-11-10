@@ -17,6 +17,7 @@ export function registerTransitions(ctx) {
     notify, notifyAction, ledgerAppend, findPlayer, isAdult,
     orgCanSee, emitWebhook, players, unit, users, transitionsVouches,
   } = ctx;
+  if (typeof notifyAction !== 'function' || typeof emitWebhook !== 'function') throw new TypeError('registerTransitions needs notifyAction (registerDelivery) and emitWebhook (registerImports)');
   if (typeof transitionsVouches?.transitionCases?.grant !== 'function' || typeof unit !== 'function') throw new TypeError('registerTransitions needs the transitions repository and unit from the data layer');
   const { transitionCases } = transitionsVouches;
 
@@ -160,7 +161,7 @@ export function registerTransitions(ctx) {
       transitionCases.grant(t.id, { recipient: r }, { history: [entry(actor, 'recipient_added', { orgId: org.id })] });
       if (staff) notify({ kind: 'org_user', id: staff.id }, 'transition', `📦 A player has shared a transition evidence pack with ${org.name}. Open Transitions to review it.`, t.id);
     });
-    emitWebhook?.(org.id, 'transition.granted', { transitionId: t.id });
+    emitWebhook(org.id, 'transition.granted', { transitionId: t.id });
     res.status(201).json({ recipient: recipientView(r) });
   }
 
@@ -180,7 +181,7 @@ export function registerTransitions(ctx) {
           t.id, Date.now() + 7 * DAY);
       }
     });
-    emitWebhook?.(r.orgId, 'transition.revoked', { transitionId: t.id });
+    emitWebhook(r.orgId, 'transition.revoked', { transitionId: t.id });
     res.json({ recipient: recipientView(stored.recipients[i]), honest: 'Future platform access is revoked. Already-downloaded copies cannot be remotely erased — the withdrawal notice asks the club to delete them.' });
   }
 
@@ -270,7 +271,7 @@ export function registerTransitions(ctx) {
     res.json({ playerId: p.id, from, to: level, note: 'Recorded in the append-only ledger. An academy departure never changes level automatically — this review is the deliberate, audited path.' });
   });
 
-  // Transition follow-ups + expiry — runs on the shared slow tick (m13/index.mjs). Indexed
+  // Transition follow-ups + expiry, run on the minute sweep (server.mjs). Indexed
   // queries find only the due cases; each change commits on its own unit (with
   // its notification), and a failure is logged, so one never holds back the rest
   // or escapes the timer.
@@ -291,5 +292,5 @@ export function registerTransitions(ctx) {
     }
     return changed;
   }
-  ctx.transitionSweep = transitionSweep;
+  return { transitionSweep };
 }

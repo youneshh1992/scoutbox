@@ -6,7 +6,7 @@
 import { IDENTITY_DDL, CORE_IDENTITY_LIVE_MIGRATION, CORE_IDENTITY_INIT_META } from '../identity.mjs';
 
 export const id = CORE_IDENTITY_LIVE_MIGRATION;
-export const note = 'players, guardians and guardian_children become typed tables (S4a; explicit writes and SQL reads since S14h)';
+export const note = 'players, guardians and guardian_children become typed tables (explicit writes, SQL reads)';
 export { IDENTITY_DDL };
 
 export function up(sqlite) {

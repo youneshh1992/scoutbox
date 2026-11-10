@@ -14,9 +14,9 @@ import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { playerJourneyReads } from '../domains/recruitment/lifecycle/journeyReads.mjs';
 import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture } from './recruitmentTestFixtures.mjs';
-import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
-import { S8C_FIX } from './recruitmentContactsOffersTestFixtures.mjs';
-import { S8D_FIX, draftPackage, completedPackage, canonicalSigning, legacySigning, followUpsFor, outcomeReport, srevision, parties, sdoc, shist, BY, SHA, SHA2, T } from './signingsFollowUpsTestFixtures.mjs';
+import { ROOM_CASES_FIX } from './recruitmentCasesTestFixtures.mjs';
+import { CONTACTS_OFFERS_FIX } from './recruitmentContactsOffersTestFixtures.mjs';
+import { SIGNINGS_FIX, draftPackage, completedPackage, canonicalSigning, legacySigning, followUpsFor, outcomeReport, srevision, parties, sdoc, shist, BY, SHA, SHA2, T } from './signingsFollowUpsTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -40,11 +40,11 @@ const rowsOf = (s, t) => s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all().ma
 const col = (s, sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? Object.values({ ...r })[0] : undefined; };
 const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)?.sql ?? null;
 const openRaw = (dir) => { const s = new DatabaseSync(dbFile(dir)); s.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;'); return s; };
-const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
+const RECRUITMENT_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
 
 /** A database holding the recruitment fixtures, written through the repositories. `four` overrides one of the four signing collections (undefined omits it). */
 const fixtureCollections = ({ more = {}, ...four } = {}) => {
-  const fix = S8D_FIX(); const db = { ...S8B_FIX(), ...S8C_FIX(), ...S8A_FIX(), ...more };
+  const fix = SIGNINGS_FIX(); const db = { ...ROOM_CASES_FIX(), ...CONTACTS_OFFERS_FIX(), ...RECRUITMENT_FIX(), ...more };
   for (const name of COLLECTIONS) { const v = Object.hasOwn(four, name) ? four[name] : fix[name]; if (v !== undefined) db[name] = v; }
   return db;
 };
@@ -86,7 +86,7 @@ test('[schema] migration 0018 is registered last and creates the ten typed STRIC
   assert.equal(hasBlobTable(s), false, 'no blob table');
   assert.deepEqual(plain(back.signingPackages), [typed('signingPackages', draftPackage()), typed('signingPackages', completedPackage())]);
   assert.deepEqual(plain(back.signings), [typed('signings', canonicalSigning()), typed('signings', legacySigning())]);
-  assert.deepEqual(plain(back.followUps), S8D_FIX().followUps.map((f) => typed('followUps', f)));
+  assert.deepEqual(plain(back.followUps), SIGNINGS_FIX().followUps.map((f) => typed('followUps', f)));
   assert.deepEqual(plain(back.outcomeReports), [typed('outcomeReports', outcomeReport())]);
   assert.equal(back.signings[1].method, 'LEGACY_RECORDED'); assert.deepEqual(back.signings[0].firstQualifyingInteraction, { id: 'led-1', ts: T.started - 24 * 3600 * 1000, type: 'view' }); assert.equal(back.signings[1].signingPackageId, null);
   assert.equal(col(s, "SELECT method FROM signings WHERE id = 'sign-legacy'"), 'LEGACY_RECORDED'); assert.equal(col(s, "SELECT inside_attribution_window FROM signings WHERE id = 'sign-2'"), 1);

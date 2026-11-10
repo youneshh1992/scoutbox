@@ -8,7 +8,7 @@ import { DEVELOPMENT_MIGRATION } from '../development.mjs';
 import { BOX_CAM_MIGRATION, BOX_CAM_DDL, BOX_CAM_TABLES, seedScoutboxChallenges } from '../boxCam.mjs';
 
 export const id = BOX_CAM_MIGRATION;
-export const note = 'Box Cam preferences, challenges, assignments, sessions and disputes, Combine requests and attempts, and production CV results become typed tables (S12b)';
+export const note = 'Box Cam preferences, challenges, assignments, sessions and disputes, Combine requests and attempts, and production CV results become typed tables';
 
 export function up(sqlite, { now = Date.now() } = {}) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

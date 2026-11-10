@@ -43,7 +43,7 @@ import {
   materialChange, deriveWorkflowState, isLegacyTrial, currentAttendance, canComplete, trialStateAllows, blockedAllows,
   trialIntegrity, trialClubView, trialFamilyView, trialMilestone, trialOutcomeLine, normaliseTrialClientKey, trialRoleAllows,
 } from '../../domains/recruitment/lifecycle/trial.mjs';
-import { M23_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { LIFECYCLE_ERROR_HTTP, httpStatusFor } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
@@ -198,10 +198,10 @@ section('U — states, gates and views');
 // ================================================================ P — policy
 section('P — error bands, rate policies, events, migration, evidence, permissions');
 {
-  const TRIAL_CODES = Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('TRIAL_'));
+  const TRIAL_CODES = Object.keys(LIFECYCLE_ERROR_HTTP).filter((c) => c.startsWith('TRIAL_'));
   ok(TRIAL_CODES.length >= 24, `P1 ${TRIAL_CODES.length} TRIAL_* codes carry an HTTP band`);
   ok(httpStatusFor('TRIAL_REV_REQUIRED') === 400 && httpStatusFor('TRIAL_NOT_PERMITTED') === 403 && httpStatusFor('TRIAL_NOT_FOUND') === 404 && httpStatusFor('TRIAL_VERSION_CONFLICT') === 409 && httpStatusFor('TRIAL_GUARDIAN_REQUIRED') === 422 && httpStatusFor('TRIAL_INVITE_COOLDOWN') === 429 && httpStatusFor('TRIAL_TRANSPORT_REFUSED') === 500, 'P2 the bands: 400 input, 403 permission, 404 absence, 409 state, 422 recipient, 429 cooldown, 500 transport');
-  neg(TRIAL_CODES.every((c) => [400, 403, 404, 409, 422, 429, 500].includes(M23_ERROR_HTTP[c])), 'P2b no TRIAL code lands outside the declared bands');
+  neg(TRIAL_CODES.every((c) => [400, 403, 404, 409, 422, 429, 500].includes(LIFECYCLE_ERROR_HTTP[c])), 'P2b no TRIAL code lands outside the declared bands');
   for (const a of ['trial_invite', 'trial_schedule', 'trial_response', 'trial_evidence_link', 'trial_attendance']) ok(RATE_LIMIT_POLICY[a]?.max > 0 && RATE_LIMIT_POLICY[a].windowMs > 0, `P3 rate policy ${a} (${RATE_LIMIT_POLICY[a]?.max}/window, ${RATE_LIMIT_POLICY[a]?.scope})`);
   ok(RATE_LIMIT_POLICY.trial_response.scope === 'actor' && RATE_LIMIT_POLICY.trial_invite.scope === 'org', 'P3b responses are limited per actor; invitations per organisation');
   const EVENTS = ['trial_invited', 'trial_accepted', 'trial_declined', 'trial_scheduled', 'trial_rescheduled', 'trial_cancelled', 'trial_attendance_recorded', 'trial_completed', 'trial_evidence_linked'];
@@ -244,7 +244,7 @@ section('HTTP — booting a real server (test clock enabled)');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -361,7 +361,7 @@ const J = {};
   ok(await stage(J.RID) === 'trial_scheduled', 'J10b and the case advanced to trial_scheduled in the same save — the writer, not the trial, moved it');
   neg(/^tses-\d+$/.test(t1.schedule.sessions[0].id) && t1.schedule.sessions[0].id !== p.trialDetails.slots[0].id, 'J10c the session id is a minted id — not an array position, not the slot id');
   ok(t1.schedule.sessions[0].venue.address === 'Gate B, Dome Road' && t1.schedule.sessions[0].instructions === 'Ask for Priya at reception.', 'J11 the club view of the trial carries the address and instructions it wrote');
-  ok(t1.legacy === false && t1.reportStatus === 'awaiting_report' && t1.hasReport === false, 'J12 the M12 report obligation is untouched: awaiting_report, no report');
+  ok(t1.legacy === false && t1.reportStatus === 'awaiting_report' && t1.hasReport === false, 'J12 the report obligation is untouched: awaiting_report, no report');
   J.SID = t1.schedule.sessions[0].id;
   neg((await trialsOf(J.RID)).invitation.status === 'accepted' && (await trialsOf(J.RID)).invitation.trialId === J.TID, 'J13 the invitation is now accepted and points at the trial');
 
@@ -602,7 +602,7 @@ const M = {};
   const gRevokedCancel = collect('guardian revoked cancel', await j('POST', `/guardian/trials/${M.TID}/cancel`, { reason: 'x' }, amara.token));
   neg(expect(gRevokedCancel, 422, 'TRIAL_GUARDIAN_REQUIRED'), 'M14b an unverified guardian cannot act on the trial');
   const clubCancelOk = await j('POST', `/org/rooms/${M.RID}/trials/${M.TID}/cancel`, { expectedRev: gc.body.trial.rev, reason: 'We cannot proceed without a verified guardian.', clientKey: 'M-cancel' }, maria.token);
-  if (clubCancelOk.body?.trial?.completion?.phase !== 'scheduled') console.error('   M15 completion', JSON.stringify(clubCancelOk.body?.trial?.completion), JSON.stringify(gc.body?.trial?.workflowState));
+  if (clubCancelOk.body?.trial?.completion?.phase !== 'scheduled') console.error('   trial completion', JSON.stringify(clubCancelOk.body?.trial?.completion), JSON.stringify(gc.body?.trial?.workflowState));
   ok(expect(clubCancelOk, 200, null) && clubCancelOk.body.trial.workflowState === 'cancelled' && clubCancelOk.body.trial.completion.cancelledBy === 'club' && clubCancelOk.body.trial.completion.phase === 'scheduled', 'M15 the club may still CANCEL — a safety notice needs no recipient re-derivation; the completion records who cancelled and at what phase');
   await j('POST', '/admin/guardians/gd-amara/idv', { approved: true }, undefined, ADMIN);
   neg(await stage(M.RID) === 'trial_scheduled', 'M15b the case keeps its stage; cancellation is a trial fact, not a lifecycle regression');

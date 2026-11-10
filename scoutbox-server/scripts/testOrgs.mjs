@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction } from '../repositories/database.mjs';
-import { createOrgsRepository, orgRecordProblems, typeOrgSnapshotRow, ORGS_TABLE, ORGS_CUTOVER_MIGRATION, ORG_RECORD_KEYS } from '../repositories/orgs.mjs';
+import { createOrgsRepository, orgRecordProblems, typeOrgSnapshotRow, ORGS_TABLE, ORGS_TABLE_MIGRATION, ORG_RECORD_KEYS } from '../repositories/orgs.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
@@ -23,7 +23,7 @@ import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 // The checks below that drive the runner on a raw connection run exactly migrations
 // 0001–0004; the later ones have their own suites (e.g. testCoreSchema). The full
 // registered list is what attachDataLayer and the real-server checks below run.
-const S3_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
+const IDENTITY_BASE_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
 import { freePort } from './testPort.mjs';
 
@@ -67,7 +67,7 @@ const recordOf = ({ password: _pw, ...r }, createdAt = AT) => ({
 /** A migrated in-memory database with the fixture's organisations, and its repository. */
 function fresh({ orgs = ORGS(), now = () => AT } = {}) {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, IDENTITY_BASE_MIGRATIONS, { context: { sessionTtlMs: TTL } });
   const repo = createOrgsRepository({ sqlite: s, nextId, now });
   if (orgs) repo.initialize(orgs);
   return { s, repo };
@@ -122,7 +122,7 @@ test('typing: a record takes its defaults (null, false, the creation time), ever
 // ------------------------------------------------------------- the migration
 test('migration 0004 on a new database: orgs is the typed table (no facet column) while org_users (0001\'s final form) and sessions keep referencing it, the first installation is pending, and a failure before commit leaves no trace', () => {
   const s = new DatabaseSync(':memory:'); s.exec('PRAGMA foreign_keys = ON;');
-  assert.ok(runDataMigrations(s, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran.includes(ORGS_CUTOVER_MIGRATION));
+  assert.ok(runDataMigrations(s, IDENTITY_BASE_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran.includes(ORGS_TABLE_MIGRATION));
   const orgsSql = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'orgs'").get().sql;
   assert.match(orgsSql, /STRICT/); assert.ok(!/facets_json/.test(orgsSql), 'no facet storage');
   const after = s.prepare("SELECT sql FROM sqlite_master WHERE name = 'org_users'").get().sql;
@@ -164,7 +164,7 @@ test('migration 0004 on a new database: orgs is the typed table (no facet column
   f.close();
   assert.equal(fileDigest(dir), before, 'nothing of the failed attempt reached the file');
   f = openRaw(dir);
-  assert.deepEqual(runDataMigrations(f, S3_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_CUTOVER_MIGRATION]);
+  assert.deepEqual(runDataMigrations(f, IDENTITY_BASE_MIGRATIONS, { context: { sessionTtlMs: TTL } }).ran, [ORGS_TABLE_MIGRATION]);
   f.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -366,7 +366,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
   writeFixture(dir, seed, { idCounter: 1000 });
   const port = await freePort();
   const boot = () => new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve({ proc, log: () => log }); });
     proc.stderr.on('data', (d) => { log += d; });
@@ -477,7 +477,7 @@ await atest('server: a fixture database boots; registration, settings, suspensio
   } finally { await stop(S); }
   const restoreDir = tempDir('s3-restore'); fs.cpSync(backupDir, restoreDir, { recursive: true });
   const port2 = await freePort();
-  const restored = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const restored = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, PORT: String(port2), DATA_DIR: restoreDir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let log2 = ''; restored.stdout.on('data', (d) => { log2 += d; }); restored.stderr.on('data', (d) => { log2 += d; });
   try {
     await new Promise((resolve, reject) => { restored.stdout.on('data', () => { if (/listening on/.test(log2)) resolve(); }); restored.on('exit', (c) => reject(new Error(`restored server exited ${c}: ${log2}`))); setTimeout(() => reject(new Error(`restore timeout: ${log2}`)), 20_000).unref(); });

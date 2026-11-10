@@ -40,7 +40,7 @@ process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); 
 
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(proc);
   let log = '';
   proc.stdout.on('data', (b) => { log += b; }); proc.stderr.on('data', (b) => { log += b; });
@@ -165,7 +165,7 @@ section('2 — a fixture with legacy + formal rows and a draft restores byte-fai
   const stale = await s.j('PATCH', '/org/rooms/case-x/decision/draft', { note: 'x', expectedRev: 1 }, L.token);
   neg(stale.status === 409 && stale.body.error === 'DECISION_VERSION_CONFLICT' && stale.body.currentRev === 2, 'the draft rev is enforced from the fixture');
   const legacyRoute = await s.j('GET', '/org/rooms/case-x/decisions', undefined, L.token);
-  ok(legacyRoute.status === 200 && legacyRoute.body.current?.id === 'rdec-formal-2' && legacyRoute.body.history.length === 3, 'the M17 route reads the same three rows and the same head');
+  ok(legacyRoute.status === 200 && legacyRoute.body.current?.id === 'rdec-formal-2' && legacyRoute.body.history.length === 3, 'the Rooms route reads the same three rows and the same head');
   const jr = await s.j('GET', '/org/rooms/case-x/journey', undefined, L.token);
   ok(jr.status === 200 && jr.body.decisions.formal?.id === 'rdec-formal-2' && jr.body.decisions.draft?.id === 'rdraft-3' && jr.body.lifecycle.currentStage === 'on_hold', 'the journey projects the formal head, the draft and the case stage');
   const after = await s.stop();
@@ -267,7 +267,7 @@ section('3 — corrupt formal rows are named and omitted; duplicate heads are co
 }
 
 // ======================================================= 4 — legacy rows
-section('4 — legacy M17 rows read as advisory and keep their chain; P5 judges only formal rows');
+section('4 — legacy advisory row read as advisory and keep their chain; P5 judges only formal rows');
 {
   const DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-legacy-'));
   const db = baseDb();
@@ -283,9 +283,9 @@ section('4 — legacy M17 rows read as advisory and keep their chain; P5 judges 
   ok(s.up, 'the server boots on a legacy-only decision memory');
   const L = await lead(s);
   const sf = await s.j('GET', '/org/rooms/case-x/decision', undefined, L.token);
-  ok(sf.status === 200 && sf.body.current === null && sf.body.advisory?.id === 'rdec-l2' && sf.body.advisory.kind === 'recommendation' && sf.body.advisory.recommendation === 'offer' && sf.body.omitted === 0, 'an M17 "offer" recommendation at the head is ADVISORY — not a formal decision, not current');
+  ok(sf.status === 200 && sf.body.current === null && sf.body.advisory?.id === 'rdec-l2' && sf.body.advisory.kind === 'recommendation' && sf.body.advisory.recommendation === 'offer' && sf.body.omitted === 0, 'an advisory "offer" recommendation at the head is ADVISORY — not a formal decision, not current');
   neg(!db.roomDecisions.some(isFormal) && sf.body.requirements.hasFinal === false, 'no legacy row is read as formal, whatever it recommends');
-  ok(sf.body.history.length === 3 && sf.body.omitted === 0 && !s.log().includes('DECISION integrity'), 'an odd legacy row (no actor, no reason) is served as M17 always served it — P5 does not judge it');
+  ok(sf.body.history.length === 3 && sf.body.omitted === 0 && !s.log().includes('DECISION integrity'), 'an odd legacy row (no actor, no reason) is served as the Rooms always served it — P5 does not judge it');
   const byHand = await s.j('POST', '/org/rooms/case-x/lifecycle', { action: 'considerOffer', expectedRev: 2 }, L.token);
   neg(byHand.status === 422 && byHand.body.error === 'LIFECYCLE_EVIDENCE_REQUIRED' && byHand.body.evidenceReason === 'no_finalized_progress_decision', 'and the advisory "offer" does not evidence offer_consideration');
   const after = await s.stop();

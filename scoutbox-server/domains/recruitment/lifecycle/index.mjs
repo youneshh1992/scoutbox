@@ -25,12 +25,12 @@ import { registerTrial } from './trialRoutes.mjs';
 import { registerDecision } from './decisionRoutes.mjs';
 import { roomRole } from '../rooms/shared.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
-import { buildShared } from '../../../m12/shared.mjs';
+import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 
 export function registerLifecycle(rawCtx) {
   // isLead, orgCanSee, audit and paginate come from one place rather than
   // being re-derived per domain.
-  const ctx = { ...rawCtx, ...buildShared(rawCtx) };
+  const ctx = { ...rawCtx, ...buildRouteHelpers(rawCtx) };
   const { recruitmentReads, scoutingReads, orgRouter, isLead } = ctx;
   // The journey reads the club's assessments too (scoutingReads).
   if (!ctx.safetyReads?.blocks) throw new TypeError('the lifecycle routes need safetyReads (the safety repository\'s queries)');

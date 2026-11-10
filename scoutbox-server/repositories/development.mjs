@@ -35,7 +35,7 @@ import { isPlainObject, ids, describe } from './recruitment.mjs';
 import { transaction, migrationApplied, childRowsOf } from './database.mjs';
 import { deepFreeze } from './scoutingEvidence.mjs';
 import { text, int, num, bool, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, insertSql, flat } from './fieldSpecs.mjs';
-import { PLAN_OWNER_KINDS, PLAN_VISIBILITY, VISIBILITY_BY_OWNER, PLAN_STATUSES, GOAL_CATEGORIES, GOAL_STATUSES, BLOCK_REASONS, ACTION_TYPES, ACTION_STATUSES, ASSIGNEE_KINDS, EVIDENCE_SOURCES, REVIEWER_KINDS, SHARE_SCOPES, PLAN_TEMPLATES, M21_LIMITS, completionPhrase } from '../domains/development/hub/shared.mjs';
+import { PLAN_OWNER_KINDS, PLAN_VISIBILITY, VISIBILITY_BY_OWNER, PLAN_STATUSES, GOAL_CATEGORIES, GOAL_STATUSES, BLOCK_REASONS, ACTION_TYPES, ACTION_STATUSES, ASSIGNEE_KINDS, EVIDENCE_SOURCES, REVIEWER_KINDS, SHARE_SCOPES, PLAN_TEMPLATES, DEVELOPMENT_HUB_LIMITS, completionPhrase } from '../domains/development/hub/shared.mjs';
 import { TARGET_SOURCES, TARGET_OPERATORS, TARGET_STATES, NO_MEASUREMENT_REASONS } from '../domains/development/hub/targets.mjs';
 
 export const DEVELOPMENT_MIGRATION = '0030_development';
@@ -64,8 +64,8 @@ export const TARGET_PRECISIONS = Object.freeze(['integer', 'tenths', 'hundredths
 export const DEVELOPMENT_LIMITS = Object.freeze({
   id: 80, name: 200, objectiveItems: 2, objectiveText: 200, exerciseRefs: 4, exerciseRef: 200, evidenceIds: 50,
   progressNote: 300, outcomeNote: 500, reviewer: 60, detail: 40, metricUnit: 40, protocolTitle: 120,
-  title: M21_LIMITS.titleMax, description: M21_LIMITS.descriptionMax, blockNote: M21_LIMITS.blockNoteMax,
-  summary: M21_LIMITS.summaryMax, note: M21_LIMITS.noteMax,
+  title: DEVELOPMENT_HUB_LIMITS.titleMax, description: DEVELOPMENT_HUB_LIMITS.descriptionMax, blockNote: DEVELOPMENT_HUB_LIMITS.blockNoteMax,
+  summary: DEVELOPMENT_HUB_LIMITS.summaryMax, note: DEVELOPMENT_HUB_LIMITS.noteMax,
 });
 const L = DEVELOPMENT_LIMITS;
 

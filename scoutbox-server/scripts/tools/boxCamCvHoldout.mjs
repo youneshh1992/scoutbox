@@ -44,16 +44,16 @@ import { freezeStatus, geometryMirrorCheck, FREEZE } from '../../domains/develop
 import { CV_ENGINE_VERSION, BOX_CAM_CV_POLICY_VERSION } from '../../domains/development/boxcam/cv/policy.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const M22 = path.join(HERE, '..', '..', 'domains', 'development', 'boxcam', 'cv');
-const OUT = path.join(M22, 'holdout.json');
-const DEV_EVAL = path.join(M22, 'evaluation.json');
+const CV_DIR = path.join(HERE, '..', '..', 'domains', 'development', 'boxcam', 'cv');
+const OUT = path.join(CV_DIR, 'holdout.json');
+const DEV_EVAL = path.join(CV_DIR, 'evaluation.json');
 
 const pad = (s, n) => String(s).padEnd(n);
 const round3 = (n) => Math.round(n * 1000) / 1000;
 
 // ------------------------------------------------------- preconditions
 
-console.log(`M22 holdout — engine v${CV_ENGINE_VERSION}, policy v${BOX_CAM_CV_POLICY_VERSION}`);
+console.log(`Box Cam CV holdout — engine v${CV_ENGINE_VERSION}, policy v${BOX_CAM_CV_POLICY_VERSION}`);
 console.log(`freeze ${FREEZE.freezeId} recorded ${FREEZE.frozenAt}`);
 console.log(`holdout generation ${ACTIVE_GENERATION.generation}, seed base ${ACTIVE_GENERATION.seedBase}\n`);
 
@@ -69,12 +69,12 @@ if (consumed.length) {
     console.log(`  false touches found: ${g.result.falseTouches}`);
     console.log(`  ${g.consumedBecause.replace(/\s+/g, ' ')}`);
   }
-  console.log('  These cases are now permanent development regressions (see m22CvEval).\n');
+  console.log('  These cases are now permanent development regressions (see scripts/tools/boxCamCvEvaluation.mjs).\n');
 }
 
 const fz = freezeStatus();
 if (!fz.intact) {
-  console.error('m22Holdout: REFUSING TO RUN — the constant freeze has drifted.\n');
+  console.error('boxCamCvHoldout: REFUSING TO RUN — the constant freeze has drifted.\n');
   for (const d of fz.drifted) {
     console.error(`  ${pad(d.group, 12)} recorded ${d.recorded}  live ${d.live}`);
   }
@@ -89,10 +89,10 @@ if (!fz.intact) {
 console.log('freeze intact           yes — all eight constant groups match the record');
 
 const mirror = geometryMirrorCheck({
-  readFile: (f) => fs.readFileSync(path.join(M22, f), 'utf8'),
+  readFile: (f) => fs.readFileSync(path.join(CV_DIR, f), 'utf8'),
 });
 if (!mirror.ok) {
-  console.error('m22Holdout: REFUSING TO RUN — a mirrored geometry constant no longer appears in its source:');
+  console.error('boxCamCvHoldout: REFUSING TO RUN — a mirrored geometry constant no longer appears in its source:');
   for (const m of mirror.missing) console.error(`  ${m.file}: ${m.needle}`);
   process.exit(2);
 }
@@ -101,7 +101,7 @@ console.log('geometry mirror         verified against detect/track/protocol sour
 const seeds = holdoutSeeds();
 const collisions = seeds.filter((s) => DEV_SEEDS.includes(s));
 if (collisions.length) {
-  console.error(`m22Holdout: REFUSING TO RUN — holdout seeds collide with development seeds: ${collisions.join(', ')}`);
+  console.error(`boxCamCvHoldout: REFUSING TO RUN — holdout seeds collide with development seeds: ${collisions.join(', ')}`);
   process.exit(2);
 }
 console.log(`seeds disjoint          yes — holdout ${seeds.length} seeds, none in [${DEV_SEEDS.join(', ')}]\n`);

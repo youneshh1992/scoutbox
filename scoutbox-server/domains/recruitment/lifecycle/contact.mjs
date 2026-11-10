@@ -91,7 +91,7 @@ export const RESPONSE_KINDS = Object.freeze(['accepted', 'declined']);
  * The routing modes a club may ask for. The player is a target in
  * both: `both` adds their agent BESIDE them. There is deliberately no mode that
  * reaches an agent INSTEAD of the player (see `contactRouting` in
- * `m27/integration.mjs` for why).
+ * `domains/agents/integration/integration.mjs` for why).
  */
 export const CONTACT_MODES = Object.freeze(['player_only', 'both']);
 

@@ -41,10 +41,12 @@ export function registerRooms(ctx) {
     findPlayer, moderateOrRefuse, playerViewForOrg, orgCanSee, isLead, auditEntry, vmetric,
     faults = null,
     recruitmentCases, unit, dueAtOrRefuse, // every case and room write is an explicit repository operation, inside `unit` when it touches more than one row
+    recruitmentEvidence,
   } = ctx;
   const reads = ctx.recruitmentReads;
   if (typeof reads?.signings?.forPlayer !== 'function') throw new TypeError('registerRooms needs recruitmentReads (signings) from the data layer');
   if (typeof unit !== 'function' || !recruitmentCases?.cases) throw new TypeError('registerRooms needs the recruitment-cases repository and unit from the data layer');
+  if (typeof recruitmentEvidence?.check !== 'function') throw new TypeError('registerRooms needs the recruitment evidence provider');
   const { cases, comments, snapshots, decisions, evidenceStates } = recruitmentCases;
 
   // ------------------------------------------------------------- utilities
@@ -711,12 +713,8 @@ export function registerRooms(ctx) {
     // would land on `signed` with no signing in the database. The
     // requirement is keyed by TARGET status in domains/recruitment/rooms/shared.mjs, so every path to
     // `signed` carries the identical burden and no future edge can skip it.
-    //
-    // FAILS CLOSED. No provider attached means the requirement cannot be
-    // resolved, and an unresolvable requirement is an unmet one.
     if (check.requiresEvidence) {
-      const verdict = ctx.recruitmentEvidence?.check(check.requiresEvidence, { kase: room })
-        ?? { satisfied: false, reason: 'no_evidence_provider' };
+      const verdict = recruitmentEvidence.check(check.requiresEvidence, { kase: room });
       if (verdict.satisfied !== true) {
         return res.status(422).json({
           error: 'ROOM_EVIDENCE_REQUIRED',
@@ -790,10 +788,9 @@ export function registerRooms(ctx) {
     // Same gate as the status route. `to` is a parameter here, and the
     // Second Look bridge supplies it, so an evidence-bearing target must be
     // refused on this path too rather than trusted because the caller is
-    // internal. Fails closed for the same reason.
+    // internal.
     if (check.requiresEvidence) {
-      const verdict = ctx.recruitmentEvidence?.check(check.requiresEvidence, { kase: room })
-        ?? { satisfied: false, reason: 'no_evidence_provider' };
+      const verdict = recruitmentEvidence.check(check.requiresEvidence, { kase: room });
       if (verdict.satisfied !== true) {
         return { ok: false, status: 422, error: 'ROOM_EVIDENCE_REQUIRED', requires: check.requiresEvidence, evidenceReason: verdict.reason ?? 'unsatisfied' };
       }

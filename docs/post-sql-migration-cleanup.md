@@ -108,8 +108,11 @@ batteries. They are evaluation tooling and can move out of `domains/`.
 
 ### 6. Milestone modules
 
-`m20/` is recruitment analytics and `m27/` is the agent cross-app integration, both real features. `m12/` and `m13/`
-hold shared helpers and delivery. Fold them into `domains/` under domain names. Nothing to delete.
+~~`m20/` is recruitment analytics and `m27/` is the agent cross-app integration, both real features. `m12/` and `m13/`
+hold shared helpers and delivery. Fold them into `domains/` under domain names. Nothing to delete.~~ Done 10 Nov:
+`domains/recruitment/analytics/`, `domains/agents/integration/`, `domains/messaging/delivery.mjs`,
+`domains/operations/followUps.mjs`; the helpers are `domains/platform/routeHelpers.mjs`, `domains/identity/totp.mjs`,
+`domains/recruitment/money.mjs`, `domains/scouting/slots.mjs` and `domains/integrations/webhooks.mjs`.
 
 ### 7. Tests
 
@@ -128,7 +131,7 @@ The rules are likely well under half of the production lines.
 ## Plan
 
 1. **Low-risk clean-ups, in any order:** shared helpers (item 3), move the Box Cam evaluation tooling (item 5),
-   fold the milestone modules (item 6).
+   ~~fold the milestone modules (item 6)~~ (done 10 Nov).
 2. **Item 1, writes through named acts: done for the state machines, stopped 10 Nov.** Converted: offers, contacts,
    recruitment cases and Rooms, trials and requests, agent transactions, compliance and core, verification and
    transitions, Box Cam. Over 150 draft edits became named acts guarded in SQL by the state they move from, and
@@ -136,8 +139,8 @@ The rules are likely well under half of the production lines.
    replace the cross-record checks. The shared write kit is `repositories/writes.mjs`. Most repositories shrank by
    10–26% in characters (`verification.mjs` grew); the case for the work was soundness rather than size.
    About 60 draft edits remain (`users` 6, `orgs` 6, then 1–5 per repository; `players` has none since 10 Nov and no
-   `update`), none of them in a multi-step state machine, and none left in `server.mjs` since 10 Nov (the rest are in
-   the milestone modules, enterprise and the claims review). Convert each one when its route
+   `update`), none of them in a multi-step state machine, and none left in `server.mjs` since 10 Nov (they are spread across the
+   scouting, development, discovery, Passport, enterprise and claims-review modules). Convert each one when its route
    moves into `domains/` (item 2), so every line is touched once. Two groups go first, in wiring slice (a):
    - the guardian verification flags (`emailVerified`, `idVerified`, `disclaimerAccepted`), which gate minors'
      safety, become one-way acts guarded in SQL;
@@ -187,11 +190,21 @@ The rules are likely well under half of the production lines.
         route registers after the signings domain, so its `signingsDomain?.` lookups are gone. The two draft edits
         are `users.setRole` and `orgs.verifyEmailDomain`. The coach-reference submission joined the Grassroots
         journey.
-     5. The platform remainder (live sync, meta, media, capabilities, operator surface), then the remaining
-        milestone names and directories.
+     5. ~~The platform remainder, then the remaining milestone names and directories.~~ Done 10 Nov:
+        `domains/platform/liveSync.mjs`, `http.mjs` (the envelope, app hosting, the error contract) and `operator.mjs`
+        (health, meta, capabilities, the production config check), `domains/media/signedMedia.mjs`,
+        `domains/identity/sessions.mjs` (sessions, logout, the login budget), and the helpers that lived in
+        `server.mjs` (moderation, activity and badges, coach-reference views, insights, the canonical contract
+        lookup). `server.mjs` holds no route handler. The two milestone registration groups are explicit calls in
+        `server.mjs`: imports, delivery, transitions and insight return their hooks (`emitWebhook`, `notifyAction`,
+        the sweeps, the evidence-gap reads) instead of writing them onto a shared context, and the Rooms take the
+        evidence provider at registration. Source changes are a factory (`createSourceChanges`). The milestone
+        directories, contexts, registration functions, identifiers (`M23_ERROR_HTTP` and the like), env vars
+        (`SCOUTBOX_QUIET_LOGS`, `SCOUTBOX_FAST_SWEEPS`), the browser suites' file names and the tags in strings and
+        test labels are renamed after their features; what is left is in the apps (`known-issues.md`).
 
    **Names.** Each slice also renames what it touches after its domain: the milestone contexts (`m13Ctx` …
    `m29Ctx`, `m162Ctx`, `m182Ctx`) and registration functions (`registerM12` … `registerM23`) become, for
-   example, `rooms` and `registerRooms`, and the milestone directories fold into `domains/` (item 6). By the end of
-   (f), `grep -E 'm[0-9]+Ctx|registerM[0-9]'` finds nothing.
+   example, `rooms` and `registerRooms`, and the milestone directories fold into `domains/` (item 6). Since 10 Nov
+   `grep -E 'm[0-9]+Ctx|registerM[0-9]'` finds nothing in the code.
 4. **Comments (item 4)** as files are touched.

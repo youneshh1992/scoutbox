@@ -25,7 +25,7 @@ import {
   timelineFor, timelineAudienceOf, timelineVisible, actorLabel, TIMELINE_AUDIENCES,
   HOLD_REASON_CODES, CANCEL_REASON_CODES, CLOSE_REASON_CODES, TRANSACTION_LIMITS, RELEASING_PARTY_TYPES, PENDING_REASONS,
 } from '../../domains/agents/transactions/transaction.mjs';
-import { M26_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/agents/transactions/errors.mjs';
+import { TRANSACTION_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/agents/transactions/errors.mjs';
 import { TRANSACTION_AUDIT_ACTIONS, transactionAuditRows } from '../../domains/agents/transactions/audit.mjs';
 import { PERMISSIONS, can } from '../../domains/agents/core/shared.mjs';
 import { CONTEXT_TYPES, PARTY_ROLES as ENGINE_PARTY_ROLES, PERMITTED_WITH_CONSENT } from '../../domains/agents/compliance/conflict.mjs';
@@ -216,8 +216,8 @@ section('pure — the offer boundary is a readiness boolean and its blockers');
 
 section('pure — the error contract conceals, and never carries private material');
 {
-  ok(M26_ERROR_HTTP.TRANSACTION_NOT_FOUND === 404 && M26_ERROR_HTTP.TRANSACTION_PARTY_NOT_FOUND === 404 && M26_ERROR_HTTP.DOCUMENT_NOT_FOUND === 404, 'Z-p1 every "you may not know whether this exists" answer is 404');
-  ok(M26_ERROR_HTTP.TRANSACTION_COMPLIANCE_BLOCKED === 422 && M26_ERROR_HTTP.TRANSACTION_COMPLIANCE_STALE === 422 && M26_ERROR_HTTP.TRANSACTION_TRANSITION_NOT_ALLOWED === 409, 'Z-p2 a policy refusal is 422; a state refusal is 409');
+  ok(TRANSACTION_ERROR_HTTP.TRANSACTION_NOT_FOUND === 404 && TRANSACTION_ERROR_HTTP.TRANSACTION_PARTY_NOT_FOUND === 404 && TRANSACTION_ERROR_HTTP.DOCUMENT_NOT_FOUND === 404, 'Z-p1 every "you may not know whether this exists" answer is 404');
+  ok(TRANSACTION_ERROR_HTTP.TRANSACTION_COMPLIANCE_BLOCKED === 422 && TRANSACTION_ERROR_HTTP.TRANSACTION_COMPLIANCE_STALE === 422 && TRANSACTION_ERROR_HTTP.TRANSACTION_TRANSITION_NOT_ALLOWED === 409, 'Z-p2 a policy refusal is 422; a state refusal is 409');
   neg(!PUBLIC_ERROR_FIELDS.includes('text') && !PUBLIC_ERROR_FIELDS.includes('label') && !PUBLIC_ERROR_FIELDS.includes('name') && !PUBLIC_ERROR_FIELDS.includes('fee'), 'Z-p3 no note text, no document label, no name and no fee is a public error field');
   const body = publicErrorBody({ error: 'TRANSACTION_NOT_FOUND', message: 'No transaction', stack: 'x', internalNote: 'Ana', text: 'secret', fee: '12%', reasons: [{ code: 'C', ruleId: 'R', note: 'prose' }] });
   neg(body.stack === undefined && body.internalNote === undefined && body.text === undefined && body.fee === undefined, 'Z-p4 the allowlist drops everything it does not name');
@@ -278,7 +278,7 @@ section('HTTP — booting a real server (synthetic verification provider ON)');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -366,8 +366,8 @@ let ANA, DAN, BEN, FAY, ZOE, ANA_ID, DAN_ID, REL_KOLA, REL_THEO, REL_CHINEDU, RE
   ok(r3.status === 201 && (await j('POST', `/player/agent/relationships/${REL_CHINEDU}/confirm`, { expectedRev: 1 }, chinedu.token)).body.relationship.status === 'active', 'S7 Dan ↔ Chinedu: ENG, confirmed');
   const r4 = await req(ANA.token, 'pl-carvalho', { jurisdiction: 'INT', scope: ['employment'] }); REL_MATEUS = r4.body?.relationship?.id;
   ok(r4.status === 201 && (await j('POST', `/player/agent/relationships/${REL_MATEUS}/confirm`, { expectedRev: 1 }, mateus.token)).body.relationship.status === 'active', 'S8 Ana ↔ Mateus: INT employment, confirmed');
-  const a1 = await j('POST', '/admin/verification/orgs/org-eastport/appoint-root', { userId: maria.userId, reason: 'P5.6D suite: engaging club signatory' }, PRIYA.token, ADMIN);
-  const a2 = await j('POST', '/admin/verification/orgs/org-harbour/appoint-root', { userId: devA.userId, reason: 'P5.6D suite: releasing club signatory' }, PRIYA.token, ADMIN);
+  const a1 = await j('POST', '/admin/verification/orgs/org-eastport/appoint-root', { userId: maria.userId, reason: 'transactions suite: engaging club signatory' }, PRIYA.token, ADMIN);
+  const a2 = await j('POST', '/admin/verification/orgs/org-harbour/appoint-root', { userId: devA.userId, reason: 'transactions suite: releasing club signatory' }, PRIYA.token, ADMIN);
   ok(a1.status === 201 && a2.status === 201, `S9 Trust & Safety records a signatory for each club, attributed to a named reviewer (${a1.status}/${a2.status} ${a1.body?.error ?? ''}${a2.body?.error ?? ''})`);
 }
 
@@ -817,7 +817,7 @@ section('AF/AG/AH — the state and mobile contracts the browser journeys rely o
   const t = (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body.transaction;
   neg(typeof t.status === 'string' && (t.compliance.pendingReason !== null || t.compliance.clear || t.compliance.blocked), 'AF1 every compliance state reaches the client as a WORD, so no surface has to rely on colour alone');
   ok(Array.isArray(t.viewerRoles) && Array.isArray(t.allowedTransitions), 'AF2 the projection tells the client which actions exist, so a disabled control is never a guess');
-  ok(existsSync(path.join(ROOT, 'e2e', 'm23AgentTransactionLive.test.mjs')), 'AH1 a real browser journey exists for the transaction workspace');
+  ok(existsSync(path.join(ROOT, 'e2e', 'agentTransactionLive.test.mjs')), 'AH1 a real browser journey exists for the transaction workspace');
   ok(existsSync(path.join(ROOT, 'scoutbox-agent', 'src', 'transactions.tsx')), 'AG1 the agent app has a transactions screen, exercised at 1440/1280/390/360 by the live suite');
 }
 
@@ -919,7 +919,7 @@ section('Z — every refusal in this run: a code, and no private field');
   // the agent core and compliance domains are contracts of their own; this suite asserts that
   // nothing OUTSIDE a declared contract reaches a caller.
   const CANONICAL = ['ORG_AUTH_REQUIRED', 'PLAYER_AUTH_REQUIRED', 'AUTH_REQUIRED', 'ORG_NOT_FOUND', 'USER_NOT_FOUND', 'GRASSROOTS_PLATFORM_ONLY', 'PLATFORM_MISMATCH', 'ORG_NOT_VERIFIED', 'ALREADY_ROOT_ADMIN', 'NOT_FOUND', 'BLOCK_EXISTS'];
-  const unmapped = [...codes].filter((c) => !Object.hasOwn(M26_ERROR_HTTP, c) && !CANONICAL.includes(c) && !/^(AGENT_|REPRESENTATION_|CONSENT_|REVIEWER_|COMPLIANCE_|CONTEXT_|JURISDICTION_|REGULATORY_|POLICY_|PARTY_|SIGNATORY_|REVIEW_)/.test(c));
+  const unmapped = [...codes].filter((c) => !Object.hasOwn(TRANSACTION_ERROR_HTTP, c) && !CANONICAL.includes(c) && !/^(AGENT_|REPRESENTATION_|CONSENT_|REVIEWER_|COMPLIANCE_|CONTEXT_|JURISDICTION_|REGULATORY_|POLICY_|PARTY_|SIGNATORY_|REVIEW_)/.test(c));
   neg(unmapped.length === 0, `Z12 every refusal code belongs to a declared contract${unmapped.length ? `: ${unmapped.join(', ')}` : ''}`);
 }
 

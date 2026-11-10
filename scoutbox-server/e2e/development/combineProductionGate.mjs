@@ -234,7 +234,7 @@ section('§60 — the future-validated fixture (test-only, torn down)');
 // =====================================================================
 //
 // A trusted, complete, version-matched validation record, constructed HERE in
-// a local object. It is never written to m22/validation.mjs, never read from
+// a local object. It is never written to cv/validation.mjs, never read from
 // the environment and never reachable from a request.
 
 const futureRecord = {
@@ -304,11 +304,11 @@ ok(combineVerifiedProtocols().length === 0,
 const before = combineVerifiedProtocols().length;
 process.env.SCOUTBOX_COMBINE_CV_ENABLED = '1';
 process.env.BOX_CAM_TEST_PROVIDER = '1';
-process.env.M22_REAL_WORLD_VALIDATION = 'passed';
+process.env.CV_REAL_WORLD_VALIDATION = 'passed';
 ok(combineVerifiedProtocols().length === before && before === 0,
   'no environment variable opens the gate — it reads a versioned record, not config');
 delete process.env.SCOUTBOX_COMBINE_CV_ENABLED;
-delete process.env.M22_REAL_WORLD_VALIDATION;
+delete process.env.CV_REAL_WORLD_VALIDATION;
 
 // =====================================================================
 section('§66/§67 — matching does not see an unvalidated result');

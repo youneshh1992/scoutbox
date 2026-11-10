@@ -22,7 +22,7 @@
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
-export const M26_ERROR_HTTP = table({
+export const TRANSACTION_ERROR_HTTP = table({
   // ---- 400: fix the request.
   TRANSACTION_INPUT_INVALID: 400,
   TRANSACTION_CLIENT_KEY_INVALID: 400,
@@ -101,7 +101,7 @@ export const M26_ERROR_HTTP = table({
   TRANSACTION_STATE_UNKNOWN: 500,
 });
 
-export const httpStatusFor = (code) => M26_ERROR_HTTP[code] ?? null;
+export const httpStatusFor = (code) => TRANSACTION_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
   'error', 'message', 'field', 'allowed', 'status', 'from', 'to', 'expectedRev', 'currentRev',
@@ -114,7 +114,7 @@ const publicReason = (r) => ({ code: r.code, ruleId: r.ruleId ?? null, ruleStatu
 
 export function publicErrorBody(out) {
   const code = out?.error;
-  if (M26_ERROR_HTTP[code] === 500) {
+  if (TRANSACTION_ERROR_HTTP[code] === 500) {
     return { ok: false, error: code, message: 'The transaction service cannot serve this request. This has been recorded.' };
   }
   const body = { ok: false };
@@ -130,10 +130,10 @@ export function publicErrorBody(out) {
 export function sendTransactionError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
-    console.error(`M26 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
+    console.error(`transactions ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
     return res.status(500).json({ ok: false, error: 'TRANSACTION_STATE_UNKNOWN', message: 'The transaction service cannot serve this request. This has been recorded.' });
   }
-  if (status === 500) console.error(`M26 ${where} ${out.error} — ${JSON.stringify(out)}`);
+  if (status === 500) console.error(`transactions ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }
 

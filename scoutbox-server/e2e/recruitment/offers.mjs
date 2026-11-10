@@ -34,7 +34,7 @@ import {
   effectiveRevisionStatus, offerStatus, canRevise, canRespondToRevision, canWithdrawRevision, responderMatches,
   offerIntegrity, offerEvidence, offerClubView, offerRecipientView, offerAgentView,
 } from '../../domains/recruitment/offers/offer.mjs';
-import { M28_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/recruitment/offers/errors.mjs';
+import { OFFER_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/recruitment/offers/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { CATEGORIES, TYPE_CATEGORY } from '../../domains/platform/notificationPrefs.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
@@ -106,17 +106,17 @@ section('A — model and store: seven statuses, terminal at revision level, one 
   neg(evs.every((e) => EVENT_REGISTRY[e].payload.every((k) => ['orgId', 'roomId', 'offerId', 'status'].includes(k))), 'A15b and no event payload may carry a term, a note, an expiry, a reason or a recipient');
   ok(CATEGORIES.offer_updates?.mandatory === false && CATEGORIES.offer_updates.default === true && TYPE_CATEGORY.recruitment_offer === 'offer_updates', 'A16 one notification category, on by default, not mandatory: a recipient may choose not to hear about Offers');
   // Errors.
-  const codes = Object.keys(M28_ERROR_HTTP);
-  ok(codes.length === 23 && codes.every((c) => /^OFFER_/.test(c)) && [400, 403, 404, 409, 422, 500].every((s) => Object.values(M28_ERROR_HTTP).includes(s)), 'A17 23 OFFER_* codes across six status bands, in one table');
-  neg(M28_ERROR_HTTP.__proto__ === undefined && M28_ERROR_HTTP.constructor === undefined && M28_ERROR_HTTP.toString === undefined, 'A18 the error table has no prototype: an unknown code cannot inherit a status');
-  ok(M28_ERROR_HTTP.OFFER_NOT_FOUND === 404 && M28_ERROR_HTTP.OFFER_DOCUMENT_NOT_FOUND === 404 && M28_ERROR_HTTP.OFFER_BLOCKED === 403 && M28_ERROR_HTTP.OFFER_EXPIRED === 409 && M28_ERROR_HTTP.OFFER_RECIPIENT_INVALID === 422 && M28_ERROR_HTTP.OFFER_COMPLIANCE_BLOCKED === 422, 'A19 the bands: concealment 404, own standing 403, state 409, world 422');
+  const codes = Object.keys(OFFER_ERROR_HTTP);
+  ok(codes.length === 23 && codes.every((c) => /^OFFER_/.test(c)) && [400, 403, 404, 409, 422, 500].every((s) => Object.values(OFFER_ERROR_HTTP).includes(s)), 'A17 23 OFFER_* codes across six status bands, in one table');
+  neg(OFFER_ERROR_HTTP.__proto__ === undefined && OFFER_ERROR_HTTP.constructor === undefined && OFFER_ERROR_HTTP.toString === undefined, 'A18 the error table has no prototype: an unknown code cannot inherit a status');
+  ok(OFFER_ERROR_HTTP.OFFER_NOT_FOUND === 404 && OFFER_ERROR_HTTP.OFFER_DOCUMENT_NOT_FOUND === 404 && OFFER_ERROR_HTTP.OFFER_BLOCKED === 403 && OFFER_ERROR_HTTP.OFFER_EXPIRED === 409 && OFFER_ERROR_HTTP.OFFER_RECIPIENT_INVALID === 422 && OFFER_ERROR_HTTP.OFFER_COMPLIANCE_BLOCKED === 422, 'A19 the bands: concealment 404, own standing 403, state 409, world 422');
   neg(publicErrorBody({ error: 'OFFER_STATE_UNKNOWN', message: 'x', stack: 's', detail: 'd' }).message !== 'x' && !has(publicErrorBody({ error: 'OFFER_STATE_INVALID', message: 'm', stack: 's', internal: 'i' }), 'stack'), 'A20 a 500 body is generic and no body carries a field outside the allowlist');
   ok(PUBLIC_ERROR_FIELDS.includes('reasons') && PUBLIC_ERROR_FIELDS.includes('blockers') && !PUBLIC_ERROR_FIELDS.includes('note') && !PUBLIC_ERROR_FIELDS.includes('rationale'), 'A21 the allowlist carries reasons and blockers as codes, never a note or rationale');
   // The drift guard: every code the m28 source can produce is in the table.
   const rawSrc = readdirSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', f), 'utf8')).join('\n');
   const src = rawSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/[^'"\n]\/\/ .*$/gm, ''); // code only: comments explain what is NOT done
   const produced = new Set([...src.matchAll(/(?:error: |err\(res, )'(OFFER_[A-Z_]+)'/g)].map((m) => m[1]));
-  const unmapped = [...produced].filter((c) => M28_ERROR_HTTP[c] === undefined);
+  const unmapped = [...produced].filter((c) => OFFER_ERROR_HTTP[c] === undefined);
   neg(produced.size >= 20 && unmapped.length === 0, `A22 every OFFER_* code the m28 source produces (${produced.size}) is in the table${unmapped.length ? `: ${unmapped.join(',')}` : ''}`);
   neg(!/db\.signings|under_contract|'signed'/.test(src), 'A23 the m28 source never names db.signings, under_contract or the signed state');
   neg(!/case\.status\s*=|room\.status\s*=|\.status = verdict\.to/.test(src) && /applyLifecycleTransition/.test(src), 'A24 m28 never assigns a case status; it calls the ONE writer');
@@ -234,7 +234,7 @@ section('HTTP — booting a real server (test clock, synthetic agent verificatio
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }

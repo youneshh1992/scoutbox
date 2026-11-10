@@ -788,7 +788,7 @@ export function orderNobodyMissed(items = [], sort = 'newest_evidence') {
 // SHARED
 // =====================================================================
 
-export const M18_EVENT_TYPES = [
+export const SECOND_LOOK_EVENT_TYPES = [
   'second_look_created', 'second_look_reviewed', 'second_look_dismissed',
   'recruitment_room_reopened_from_second_look',
   'recruitment_brief_created', 'recruitment_brief_activated', 'recruitment_brief_updated',

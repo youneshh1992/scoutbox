@@ -19,7 +19,7 @@ OUT="${TMPDIR:-/tmp}/scoutbox-contention"
 LISTEN="node $TOOLS/listeners.mjs"
 rm -rf "$OUT"; mkdir -p "$OUT"
 
-SUITES="m23AgentLive m23AgentComplianceLive m23AgentTransactionLive m23AgentIntegrationLive m23AgentGrassrootsLive"
+SUITES="agentOnboardingLive agentComplianceLive agentTransactionLive agentIntegrationLive grassrootsNoAgentLive"
 # every API / static port the five suites bind (see each suite's header)
 PORTS=4028,4029,4030,4040,4051,8728,8729,8730,8740,8828,8829,8830,8840,8851,8929,8930,9029,9030,9040,9140,9151
 

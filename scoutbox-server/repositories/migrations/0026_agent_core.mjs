@@ -7,7 +7,7 @@ import { TRANSITIONS_MIGRATION } from '../transitionsVouches.mjs';
 import { AGENT_CORE_MIGRATION, AGENT_CORE_DDL, AGENT_CORE_TABLES } from '../agentCore.mjs';
 
 export const id = AGENT_CORE_MIGRATION;
-export const note = 'agent profiles, agency affiliations, representation agreements and agency settings become typed tables (S11a)';
+export const note = 'agent profiles, agency affiliations, representation agreements and agency settings become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

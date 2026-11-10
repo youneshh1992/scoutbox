@@ -40,7 +40,7 @@ const RETAINED_ROW = (id, deletedAt, birthDate, country) => ({
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
    
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {

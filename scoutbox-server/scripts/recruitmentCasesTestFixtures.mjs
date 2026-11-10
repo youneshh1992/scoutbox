@@ -10,11 +10,11 @@ const MIN = 60_000; const HOUR = 60 * MIN; const DAY = 24 * HOUR;
 export const TC = Object.freeze({ created: NOW - 10 * DAY, opened: NOW - 9 * DAY, moved: NOW - 5 * DAY, reopened: NOW - 3 * DAY, decided: NOW - 2 * DAY, filed: NOW - HOUR });
 const by = () => ({ userId: SCOUT.userId, name: SCOUT.name });
 
-/** m12/shared.mjs `audit()` / m13/shared.mjs `histAppend()`: the history literal every case writer appends. */
+/** domains/platform/routeHelpers.mjs `audit()` and `histAppend()`: the history literal every case writer appends. */
 export const hist = (id, at, action, detail = null, over = {}) => ({ id, at, byKind: 'org', byId: SCOUT.userId, byName: SCOUT.name, action, detail, ...over });
 
-/** domains/scouting/scouting.mjs — the M12 case literal (no room, no budget). */
-export const m12Case = (over = {}) => ({
+/** domains/scouting/scouting.mjs — the workspace case literal (no room, no budget). */
+export const plainCase = (over = {}) => ({
   id: 'case-2', orgId: ORG.id, playerId: 'pl-child1', playerName: 'Child pl-child1',
   vacancyId: null, ownerUserId: SCOUT.userId, ownerName: SCOUT.name,
   stage: 'identified', priority: 'medium', deadline: null, restricted: false,
@@ -63,14 +63,14 @@ export const roomCase = (over = {}) => ({
   ...over,
 });
 
-/** domains/scouting/scouting.mjs — a bare M12 case: a vacancy, a deadline day, nothing assigned yet. */
-export const legacyCase = (over = {}) => m12Case({
+/** domains/scouting/scouting.mjs — a bare workspace case: a vacancy, a deadline day, nothing assigned yet. */
+export const legacyCase = (over = {}) => plainCase({
   id: 'case-legacy', playerId: 'pl-child2', playerName: 'Child pl-child2', vacancyId: 'vac-9', priority: 'low', deadline: '2026-12-01',
   assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null },
   history: [hist('aud-l-1', TC.created, 'created', 'identified')], ...over,
 });
 /** The case after its player's account deletion: `playerName` null, `subjectRemovedAt` set (nothing else changes). */
-export const tombstonedCase = (over = {}) => m12Case({ id: 'case-gone', playerId: 'pl-gone-long-ago', playerName: null, subjectRemovedAt: T.removed, links: { requestIds: [], trialIds: [], signingId: null }, history: [hist('aud-g-1', TC.created, 'created', 'identified')], assignments: [], tasks: [], approvals: [], decision: null, ...over });
+export const tombstonedCase = (over = {}) => plainCase({ id: 'case-gone', playerId: 'pl-gone-long-ago', playerName: null, subjectRemovedAt: T.removed, links: { requestIds: [], trialIds: [], signingId: null }, history: [hist('aud-g-1', TC.created, 'created', 'identified')], assignments: [], tasks: [], approvals: [], decision: null, ...over });
 
 /** domains/recruitment/rooms/rooms.mjs — a comment, its edit and its tombstone. */
 export const comment = (over = {}) => ({ id: 'rcmt-1', roomId: 'case-1', orgId: ORG.id, authorId: SCOUT.userId, authorName: SCOUT.name, body: 'Quick on the turn.', replyToId: null, mentions: [SCOUT.userId], createdAt: TC.moved, editedAt: null, editCount: 0, deletedAt: null, ...over });
@@ -97,9 +97,9 @@ export const formalDecision = (over = {}) => ({
 /** domains/recruitment/rooms/rooms.mjs — an evidence review state, overwritten in place. */
 export const evidenceState = (over = {}) => ({ id: 'rev-1', roomId: 'case-1', orgId: ORG.id, evidenceId: 'ev-1', state: 'reviewed', note: 'Good angle.', byId: SCOUT.userId, byName: SCOUT.name, at: TC.moved + 5 * MIN, ...over });
 
-/** The standard case graph: the room case, the M12 case, the legacy case, the tombstoned case; their room rows. */
-export const S8B_FIX = () => ({
-  recruitmentCases: [roomCase(), m12Case(), legacyCase(), tombstonedCase()],
+/** The standard case graph: the room case, the workspace case, the legacy case, the tombstoned case; their room rows. */
+export const ROOM_CASES_FIX = () => ({
+  recruitmentCases: [roomCase(), plainCase(), legacyCase(), tombstonedCase()],
   roomComments: [comment(), editedComment(), tombstonedComment()],
   roomSnapshots: [snapshot(), trustedSnapshot()],
   roomDecisions: [recommendation(), formalDecision()],

@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { M29_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/recruitment/signings/errors.mjs';
+import { SIGNING_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/recruitment/signings/errors.mjs';
 import {
   SIGNING_STATUSES, SIGNING_STORED_STATUSES, SIGNING_METHODS, PARTY_TYPES, MINOR_SIGNING_PATHWAY_ENABLED, minorSigningPathwayOpen,
   payloadFingerprint, validateContractDates, validateExpiry, requiredPartiesFor, effectiveStatus, canStart, canCompleteParty, completionGate,
@@ -70,9 +70,9 @@ section('A — model and store: vocabulary, validators, gates, integrity, error 
   neg(!SIGNING_STATUSES.includes('SIGNED'), 'A5 no SIGNED workflow status: the word belongs to the case lifecycle alone');
   ok(PARTY_TYPES.join() === 'PLAYER,GUARDIAN,CLUB_SIGNATORY' && SIGNING_METHODS.join() === 'PLATFORM_ACKNOWLEDGMENT,UPLOAD_EXECUTED_DOCUMENT', 'A6 three party types; only the two implemented methods');
   neg(Object.values(MINOR_SIGNING_PATHWAY_ENABLED).every((v) => v === false) && ['GB', 'ENG', 'INT', 'USA', 'FR', 'KR', 'ZZ', '', null, '__proto__', 'constructor'].every((j) => minorSigningPathwayOpen(j) === false), '#15 A7 the minor signing pathway is closed in every jurisdiction, including unknown and prototype keys');
-  const codesList = Object.keys(M29_ERROR_HTTP);
-  ok(codesList.length === 37 && codesList.every((c) => /^SIGNING_/.test(c)) && [400, 403, 404, 409, 422, 500].every((s) => Object.values(M29_ERROR_HTTP).includes(s)), `A8 ${codesList.length} SIGNING_* codes across six status bands, in one table`);
-  neg(M29_ERROR_HTTP.__proto__ === undefined && M29_ERROR_HTTP.constructor === undefined, 'A9 the error table has no prototype');
+  const codesList = Object.keys(SIGNING_ERROR_HTTP);
+  ok(codesList.length === 37 && codesList.every((c) => /^SIGNING_/.test(c)) && [400, 403, 404, 409, 422, 500].every((s) => Object.values(SIGNING_ERROR_HTTP).includes(s)), `A8 ${codesList.length} SIGNING_* codes across six status bands, in one table`);
+  neg(SIGNING_ERROR_HTTP.__proto__ === undefined && SIGNING_ERROR_HTTP.constructor === undefined, 'A9 the error table has no prototype');
   neg(!has(publicErrorBody({ error: 'SIGNING_STATE_UNKNOWN', stack: 'x', row: { secret: 1 } }), 'secret') && !PUBLIC_ERROR_FIELDS.includes('stack'), 'A10 a 500 body carries no internals');
   ok(payloadFingerprint({ contract: { startDate: '2027-07-01', endDate: null } }) !== payloadFingerprint({ contract: { startDate: '2027-07-02', endDate: null } }) && payloadFingerprint({ a: { b: 1, c: 2 } }) === payloadFingerprint({ a: { c: 2, b: 1 } }), 'A11 the fingerprint is deep and canonical');
   const cd = validateContractDates({ startDate: '2027-07-01', endDate: '2029-06-30' });
@@ -127,7 +127,7 @@ section('HTTP — booting a real server (test clock, synthetic agent verificatio
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }

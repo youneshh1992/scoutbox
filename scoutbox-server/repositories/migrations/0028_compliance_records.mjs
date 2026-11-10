@@ -9,7 +9,7 @@ import { COMPLIANCE_POLICIES_MIGRATION } from '../compliancePolicies.mjs';
 import { COMPLIANCE_RECORDS_MIGRATION, COMPLIANCE_RECORDS_DDL, COMPLIANCE_RECORDS_TABLES } from '../complianceRecords.mjs';
 
 export const id = COMPLIANCE_RECORDS_MIGRATION;
-export const note = 'compliance contexts and their evaluations, regulatory reviews and consents (with revocations) become typed tables (S11b-2)';
+export const note = 'compliance contexts and their evaluations, regulatory reviews and consents (with revocations) become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

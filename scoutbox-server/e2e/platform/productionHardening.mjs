@@ -43,12 +43,12 @@ section('§1 — the concurrency token is read strictly');
 {
   ok(expectedRevOf({ expectedRev: 3 }) === 3, 'expectedRev is read');
   ok(expectedRevOf({ expectedVersion: 4 }) === 4, 'expectedVersion is accepted as the same thing');
-  ok(expectedRevOf({}) === null, 'an absent token means "unchanged pre-M18.1 behaviour", not rev 0');
+  ok(expectedRevOf({}) === null, 'an absent token means "unchanged behaviour without a rev token", not rev 0');
   neg(Number.isNaN(expectedRevOf({ expectedRev: 'soon' })), 'a non-numeric token is malformed, never coerced to 0');
   neg(Number.isNaN(expectedRevOf({ expectedRev: 2.5 })), 'a fractional token is malformed');
   neg(Number.isNaN(expectedRevOf({ expectedRev: -1 })), 'a negative token is malformed');
   neg(expectedRevOf({ expectedRev: '' }) === null, 'an empty string is absent, not zero');
-  ok(revOf({}) === 1 && revOf({ rev: 7 }) === 7, 'a record written before M18.1 reads as rev 1');
+  ok(revOf({}) === 1 && revOf({ rev: 7 }) === 7, 'a record written before revs existed reads as rev 1');
 }
 
 section('§2 — an accepted mutation always moves the token');
@@ -270,7 +270,7 @@ section('§40 — one provenance vocabulary, total and ranked')
 
 // ============================================================ HTTP sections
 section('HTTP — the real routes');
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', BOX_CAM_TEST_PROVIDER: '1', SCOUTBOX_ALLOWED_ORIGINS: 'https://club.example' };
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', BOX_CAM_TEST_PROVIDER: '1', SCOUTBOX_ALLOWED_ORIGINS: 'https://club.example' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 {
@@ -327,7 +327,7 @@ section('§4 — the concurrency token is validated, not trusted');
   const replay = await j('PATCH', `/org/recruitment-briefs/${brief.id}`, { title: 'y', expectedRev: 1 }, tom.token);
   neg(replay.status === 409, 'replaying the stale rev again still loses — retrying is not a way to win');
   const legacy = await j('PATCH', `/org/recruitment-briefs/${brief.id}`, { title: 'Left-sided CM (v3)' }, maria.token);
-  ok(legacy.status === 200, 'a caller that sends no token keeps the pre-M18.1 behaviour (nothing existing breaks)');
+  ok(legacy.status === 200, 'a caller that sends no token keeps the behaviour without a rev token (nothing existing breaks)');
 }
 
 section('§5 — a conflict body is safe to show a colleague');
@@ -743,7 +743,7 @@ section('§19b — Trust & Safety has no default reach into recruitment decision
   neg([401, 403, 404].includes(briefs.status), 'nor Recruitment Briefs — the default is no access, by design');
 }
 
-section('§2b — an unauthenticated caller reaches none of the M18.1 surfaces');
+section('§2b — an unauthenticated caller reaches none of the rev-guarded surfaces');
 {
   for (const url of ['/org/second-look', '/org/nobody-missed', '/org/recruitment-briefs', '/org/rooms']) {
     const r = await j('GET', url);

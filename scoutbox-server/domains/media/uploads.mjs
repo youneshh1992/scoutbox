@@ -1,5 +1,5 @@
 // Resumable uploads: a persistent session, integrity-checked chunks, an explicit finalisation step. Nothing reports
-// success early; abandoned sessions are swept (m12/index.mjs registers this before the operations module, whose sweep
+// success early; abandoned sessions are swept (server.mjs registers this before the operations module, whose sweep
 // calls `sweepUploads`). Data URLs remain the small-file fast path.
 //
 // Sessions are rows of `upload_sessions` (repositories/operations.mjs), received chunk numbers rows of
@@ -28,7 +28,7 @@ const uploadView = (u) => ({
 
 export function registerUploads(ctx) {
   const { nextId, broadcast, playerRouter, moderateOrRefuse, storage, DATA_DIR, players, unit, operations } = ctx;
-  if (typeof operations?.uploads?.open !== 'function') throw new TypeError('registerUploads needs the operations repository (S13e)');
+  if (typeof operations?.uploads?.open !== 'function') throw new TypeError('registerUploads needs the operations repository');
   const uploads = operations.uploads;
   const chunkDir = (id) => chunkDirOf(DATA_DIR, id);
   const invalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });

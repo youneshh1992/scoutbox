@@ -26,8 +26,8 @@ const ok = (cond, msg) => { if (cond) { passed++; console.log(`✓ ${msg}`); } e
 const section = (name) => console.log(`\n— ${name} —`);
 
 const ENV = {
-  ...process.env, PORT: String(PORT), DATA_DIR, M13_FAST_RETRY: '1',
-  ALLOW_LOCAL_WEBHOOKS: '1', M13_QUIET_LOGS: '1',
+  ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_FAST_SWEEPS: '1',
+  ALLOW_LOCAL_WEBHOOKS: '1', SCOUTBOX_QUIET_LOGS: '1',
 };
 let server = null;
 const children = [];

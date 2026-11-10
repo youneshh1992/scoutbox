@@ -2,7 +2,7 @@
  * Delivery dispatches and their attempts (`dispatches`, `dispatch_attempts`).
  *
  * A dispatch is one notification on one channel: every notification gets an `in_app` row (delivered at once) and an
- * `email` row (sent through the provider, skipped, or held for quiet hours). The delivery centre (m13/delivery.mjs)
+ * `email` row (sent through the provider, skipped, or held for quiet hours). The delivery centre (domains/messaging/delivery.mjs)
  * creates them, records each send and moves them along the status ladder; the provider callback and the
  * acknowledgment move them further. An attempt is a send { at, ok, error } or a quiet-hours re-check note { at, note }
  * (never counted as a send).
@@ -23,7 +23,7 @@ export const DISPATCH_TABLES = Object.freeze(['dispatches', 'dispatch_attempts']
 export const DISPATCHES_COLLECTION = 'dispatches';
 export const DISPATCH_CHANNELS = Object.freeze(['in_app', 'email']);
 export const DISPATCH_PROVIDERS = Object.freeze(['in_app', 'local-fake']);
-/** The ladder (queued/held → accepted → delivered → opened → actioned) and its side states; the RANK lives in m13/delivery.mjs. */
+/** The ladder (queued/held → accepted → delivered → opened → actioned) and its side states; the RANK lives in domains/messaging/delivery.mjs. */
 export const DISPATCH_STATUSES = Object.freeze(['queued', 'held_quiet_hours', 'accepted', 'delivered', 'opened', 'actioned', 'skipped', 'failed', 'retrying']);
 export const AUDIENCE_KINDS = Object.freeze(['player', 'guardian', 'org_user']);
 export const DISPATCH_LIMITS = Object.freeze({ id: 80, address: 320, skipReason: 200, providerMessageId: 80, failReason: 500, note: 200, error: 500 });

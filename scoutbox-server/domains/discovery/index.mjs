@@ -5,7 +5,7 @@
 // authenticated `orgRouter`, so sessions, removed users, organisation suspension, `visibleToOrg`, blocks and
 // moderation all run before any discovery handler. Neither system is player-facing: there is no player, guardian or
 // public route here.
-import { buildShared } from '../../m12/shared.mjs';
+import { buildRouteHelpers } from '../platform/routeHelpers.mjs';
 import { metrics } from '../enterprise/enterprise.mjs';
 import { registerSecondLook } from './secondLook.mjs';
 import { registerNobodyMissed } from './nobodyMissed.mjs';
@@ -20,24 +20,24 @@ import {
 // every read so a block, a removal or a visibility change takes effect immediately. The workflow (briefs, Nobody
 // Missed reviews, Second Look items) lives in the discovery repository's tables (repositories/discovery.mjs).
 
-export function registerM18(ctx) {
+export function registerDiscovery(ctx) {
   // Boot assertions: cheap, and they catch the two ways this design could rot.
   for (const [reason, types] of Object.entries(REASON_CHANGE_MAP)) {
     for (const t of types) {
-      if (!CHANGE_TYPES.includes(t)) throw new Error(`M18: reason "${reason}" maps to unknown change type "${t}".`);
+      if (!CHANGE_TYPES.includes(t)) throw new Error(`Second Look: reason "${reason}" maps to unknown change type "${t}".`);
     }
   }
   for (const p of POSITIONS) {
-    if (!POSITION_GROUP_OF[p]) throw new Error(`M18: position "${p}" has no group.`);
+    if (!POSITION_GROUP_OF[p]) throw new Error(`Second Look: position "${p}" has no group.`);
   }
   // A protected characteristic must never be an allowed brief criterion.
   const allowed = ['positions', 'minAge', 'maxAge', 'radiusKm', 'maxLevel', 'foot', 'availability', 'evidenceRequirements', 'minTrustBand', 'combineProtocols'];
   for (const a of allowed) {
-    if (PROHIBITED_BRIEF_FIELDS.some((p) => a.toLowerCase() === p)) throw new Error(`M18: "${a}" is both allowed and prohibited.`);
+    if (PROHIBITED_BRIEF_FIELDS.some((p) => a.toLowerCase() === p)) throw new Error(`Second Look: "${a}" is both allowed and prohibited.`);
   }
-  for (const r of EVIDENCE_REQUIREMENTS) if (!r.key || !r.label) throw new Error('M18: evidence requirement missing key or label.');
-  for (const s of SECOND_LOOK_STATUSES) if (!SECOND_LOOK_TRANSITIONS[s]) throw new Error(`M18: status "${s}" has no transition list.`);
-  for (const s of BRIEF_STATUSES) if (!BRIEF_TRANSITIONS[s]) throw new Error(`M18: brief status "${s}" has no transition list.`);
+  for (const r of EVIDENCE_REQUIREMENTS) if (!r.key || !r.label) throw new Error('Second Look: evidence requirement missing key or label.');
+  for (const s of SECOND_LOOK_STATUSES) if (!SECOND_LOOK_TRANSITIONS[s]) throw new Error(`Second Look: status "${s}" has no transition list.`);
+  for (const s of BRIEF_STATUSES) if (!BRIEF_TRANSITIONS[s]) throw new Error(`Second Look: brief status "${s}" has no transition list.`);
 
   metrics.secondLook = {
     second_look_created: 0,
@@ -56,7 +56,7 @@ export function registerM18(ctx) {
   // nothing that could identify who was missed or reconsidered.
   const vmetric = (k, n = 1) => { metrics.secondLook[k] = (metrics.secondLook[k] ?? 0) + n; };
 
-  const shared = { ...ctx, ...buildShared(ctx), vmetric };
+  const shared = { ...ctx, ...buildRouteHelpers(ctx), vmetric };
   registerSecondLook(shared);
   registerNobodyMissed(shared);
   return shared;

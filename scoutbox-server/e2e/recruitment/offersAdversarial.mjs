@@ -27,7 +27,7 @@ import {
   canRespondToRevision, offerIntegrity, offerCaseConsistency, offerCaseCorrupt, offerEvidence, offerRecipientView, offerAgentView, offerClubView,
   minorOfferPathwayOpen, MINOR_OFFER_PATHWAY_ENABLED, responderMatches,
 } from '../../domains/recruitment/offers/offer.mjs';
-import { M28_ERROR_HTTP } from '../../domains/recruitment/offers/errors.mjs';
+import { OFFER_ERROR_HTTP } from '../../domains/recruitment/offers/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { isAdult, adultAgeFor } from '../../domain.mjs';
@@ -118,7 +118,7 @@ section('L/M — pure: notification category, event registry audiences and paylo
   const src = readdirSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers')).filter((f) => f.endsWith('.mjs')).map((f) => readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', f), 'utf8')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   neg(!/req\.body\??\.(status|role|verified|licensed|isAdult|canAccept|isGuardian|isAgent|complianceClear|currentRevision|playerId|orgId|caseId|occurredAt|issuedAt|revisionNumber|actorId)\b/.test(src), 'T-p1 client trust audit: m28 never reads status/role/verified/licensed/isAdult/canAccept/isGuardian/isAgent/complianceClear/currentRevision/playerId/orgId/caseId/occurredAt/revisionNumber/actorId from a request body');
   neg(!/dangerouslySetInnerHTML/.test(readFileSync(path.join(HERE, '..', '..', '..', 'scoutbox-club', 'src', 'offerPanel.tsx'), 'utf8')) && !/dangerouslySetInnerHTML/.test(readFileSync(path.join(HERE, '..', '..', '..', 'scoutbox-agent', 'src', 'screens.tsx'), 'utf8')), 'T-p2 no Offer field is rendered as HTML in the club or agent app');
-  ok(Object.keys(M28_ERROR_HTTP).length === 23, 'T-p3 the 23-code error table is unchanged by hardening');
+  ok(Object.keys(OFFER_ERROR_HTTP).length === 23, 'T-p3 the 23-code error table is unchanged by hardening');
   const bidi = validateMessages({ recipientMessage: 'Join‮evil‬ us​ now', internalNote: 'a⁦b⁩c' });
   neg(bidi.recipientMessage === 'Joinevil us now' && bidi.internalNote === 'abc', 'T-p4 bidi and zero-width format controls are stripped from messages (spoof-proof), ordinary text kept');
   ok(validateTerms({ role: 'Ailier — «gauche» / 左ウイング' }).terms.role === 'Ailier — «gauche» / 左ウイング', 'T-p5 legitimate Unicode is kept as typed');
@@ -131,7 +131,7 @@ section('HTTP — booting a real server (test clock, synthetic agent verificatio
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }

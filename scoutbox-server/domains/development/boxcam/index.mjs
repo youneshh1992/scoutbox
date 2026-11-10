@@ -10,12 +10,12 @@ import { DRILLS, PROVIDERS } from './drills.mjs';
 import { registerBoxCamSessions } from './sessions.mjs';
 import { registerBoxTraining } from './training.mjs';
 import { registerCombine } from './combine.mjs';
-import { registerM22Routes } from './cv/routes.mjs';
+import { registerProductionCvRoutes } from './cv/routes.mjs';
 
-export function registerM16(ctx) {
+export function registerBoxCam(ctx) {
   // Box Cam, Combine and the CV results are tables (repositories/boxCam.mjs); every module writes through `boxCam`
   // and reads through `boxCamReads`.
-  if (typeof ctx.boxCam?.sessions?.create !== 'function' || !ctx.boxCamReads) throw new TypeError('registerM16 needs the Box Cam repository from the data layer');
+  if (typeof ctx.boxCam?.sessions?.create !== 'function' || !ctx.boxCamReads) throw new TypeError('registerBoxCam needs the Box Cam repository from the data layer');
 
   // Privacy-safe operational metrics — counters only, never player labels.
   metrics.boxCam = {
@@ -49,6 +49,6 @@ export function registerM16(ctx) {
   registerBoxTraining(shared);   // sets onSessionFinalized/prefs/views on ctx
   registerBoxCamSessions(shared); // sets boxMintSession/boxCompleteSession/boxSessionView
   registerCombine(shared);        // At-Home Combine — chains onSessionFinalized, reuses Box Cam
-  registerM22Routes(shared);      // production CV: frame transport, Ready Check, diagnostics
+  registerProductionCvRoutes(shared);      // production CV: frame transport, Ready Check, diagnostics
   return shared;
 }

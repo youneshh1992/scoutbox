@@ -11,9 +11,9 @@ import { runDataMigrations } from '../repositories/database.mjs';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
 
 /** The registered migrations 0001–0004: what an old-format file (s3File) has applied before migration 0005 runs. */
-export const S3_MIGRATIONS = Object.freeze(DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id)));
+export const IDENTITY_BASE_MIGRATIONS = Object.freeze(DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id)));
 /** The ids 0005 and later, in order. */
-export const S4_MIGRATION_IDS = Object.freeze(DATA_MIGRATIONS.filter((m) => !S3_MIGRATIONS.includes(m)).map((m) => m.id));
+export const LATER_MIGRATION_IDS = Object.freeze(DATA_MIGRATIONS.filter((m) => !IDENTITY_BASE_MIGRATIONS.includes(m)).map((m) => m.id));
 
 export const DAY = 86_400_000;
 export const TTL = 30 * DAY;
@@ -95,7 +95,7 @@ export function s3File(dir, { players = FIXTURE().players, guardians = FIXTURE()
   for (const [name, value] of Object.entries({ users, sessions, orgs, players, guardians, ...extra })) if (!omit.includes(name)) put.run(name, JSON.stringify(value));
   for (const [name, text] of Object.entries(rawBlobs)) s.prepare('INSERT INTO collections (name, value) VALUES (?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value').run(name, text);
   s.prepare("INSERT INTO meta (key, value) VALUES ('idCounter', '1000'), ('savedAt', ?), ('saveSeq', ?)").run(String(T0), String(saveSeq));
-  runDataMigrations(s, S3_MIGRATIONS, { now: T0, context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, IDENTITY_BASE_MIGRATIONS, { now: T0, context: { sessionTtlMs: TTL } });
   if (shadowRows) {
     for (const g of shadowRows.guardians ?? []) s.prepare('INSERT INTO guardians (id, name, email) VALUES (?, ?, ?)').run(g.id, g.name, g.email);
     for (const p of shadowRows.players ?? []) s.prepare('INSERT INTO players (id, name, birth_date, country, guardian_id) VALUES (?, ?, ?, ?, ?)').run(p.id, p.name, p.dob, p.country, p.guardianId ?? null);
@@ -109,7 +109,7 @@ export function freshFile(dir) {
   const s = new DatabaseSync(path.join(dir, 'scoutbox.db'));
   s.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
   s.exec(BASE_DDL);
-  runDataMigrations(s, S3_MIGRATIONS, { now: T0, context: { sessionTtlMs: TTL } });
+  runDataMigrations(s, IDENTITY_BASE_MIGRATIONS, { now: T0, context: { sessionTtlMs: TTL } });
   s.close();
 }
 

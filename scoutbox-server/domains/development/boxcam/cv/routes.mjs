@@ -94,7 +94,7 @@ function refuseClientFields(res, ...objects) {
   return true;
 }
 
-export function registerM22Routes(ctx) {
+export function registerProductionCvRoutes(ctx) {
   // A CV result is a row of repositories/boxCam.mjs, recorded once; the session's provider binding is an explicit
   // session update. The nonce is checked against the session's stored hash, then the plain value the client sent is
   // what binds the in-memory provider session.
@@ -424,5 +424,4 @@ export function registerM22Routes(ctx) {
     });
   });
 
-  ctx.m22Provider = provider;
 }

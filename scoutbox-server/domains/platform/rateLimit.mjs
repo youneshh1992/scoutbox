@@ -113,7 +113,7 @@ export const RATE_LIMIT_POLICY = {
   signing_document_write: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Signing documents attached, drafts edited, packages presented or superseded.' },
   signing_party_completion: { max: 30, windowMs: 3_600_000, scope: 'actor', note: 'A party confirming the exact signing document (player, or the club signatory).' },
   signing_closure: { max: 30, windowMs: 3_600_000, scope: 'org', note: 'Signings completed (the canonical completion).' },
-  signing_safety_closure: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Signings cancelled or voided by the club: a safety closure with its own budget, so completion traffic cannot exhaust it (P7.1 §68).' },
+  signing_safety_closure: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Signings cancelled or voided by the club: a safety closure with its own budget, so completion traffic cannot exhaust it.' },
   trial_evidence_link: { max: 60, windowMs: 3_600_000, scope: 'org', note: 'Box Cam sessions linked to a Trial.' },
   trial_attendance: { max: 120, windowMs: 3_600_000, scope: 'org', note: 'Trial attendance and completion records.' },
   // Formal recruitment decisions. Drafting is cheap and frequent;

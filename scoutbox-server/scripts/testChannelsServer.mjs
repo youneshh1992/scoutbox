@@ -36,7 +36,7 @@ const REPORT = { acceleration: 7, sprintSpeedKmh: 31, distanceKm: 6.2, passCompl
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
    
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {
@@ -243,7 +243,7 @@ await test('[compat] account deletion reproduces today\'s behaviour (D-B, as app
 
 // ============================================================= [cutover] the tables, the durable points, the crash windows
 await test('[cutover] the cutover and the save points: a fresh boot records 0012_channels after 0011 and creates channels, messages and message_attachments and the file has no blob table (the data layer reports the domain); the thread opened by an acceptance is committed with the request\'s answer and survives a SIGKILL right after the response; a message is in the file before the sender hears 201 (SIGKILL right after); a message whose unit fails at the REAL COMMIT (internal:unit.sqlite_commit) is answered 500 and leaves no message and no ledger row, and the retry lands once at the next position; a receipt is in the file when its route answers', async () => {
-  const dir = tempDir('s7d-cutover'); let S = await boot(dir, { M13_FAST_RETRY: '' });
+  const dir = tempDir('s7d-cutover'); let S = await boot(dir, { SCOUTBOX_FAST_SWEEPS: '' });
   assert.ok(live(dir), 'the boot recorded 0012');
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id FROM data_migrations ORDER BY applied_at, id').map((r) => r.id).filter((id) => id < '0019').slice(-8)), ['0011_outbox_push', MIGRATION, '0013_safety_audit', '0014_player_erasure', '0015_recruitment', '0016_recruitment_cases', '0017_recruitment_contacts_offers', '0018_signings_follow_ups']); // 0013–0018 follow on the same boot
   for (const t of ['channels', 'messages', 'message_attachments']) assert.ok(q1(dir, "SELECT 1 AS one FROM sqlite_master WHERE type = 'table' AND name = ?", t), `${t} exists`);
@@ -256,14 +256,14 @@ await test('[cutover] the cutover and the save points: a fresh boot records 0012
   const afterKill = snap(dir, (c) => ({ threads: c.all('SELECT seq, id, request_id FROM channels ORDER BY seq'), request: requestRows(c).find((r) => r.id === req.body.requestId) }));
   assert.equal(afterKill.threads.length, 1, 'the thread is in the file although the process was killed right after the answer'); assert.equal(afterKill.threads[0].request_id, req.body.requestId); assert.equal(afterKill.request.status, 'accepted'); assert.equal(afterKill.request.contactChannel, afterKill.threads[0].id, 'the answer and the thread it opened are both in the file');
   const channelId = afterKill.threads[0].id;
-  S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria2 = await orgLogin(S);
+  S = await boot(dir, { SCOUTBOX_FAST_SWEEPS: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria2 = await orgLogin(S);
   assert.deepEqual((await S.j('GET', '/player/channels', undefined, kola)).body.map((c) => c.id), [channelId]);
   const m1 = await S.j('POST', `/player/channels/${channelId}/messages`, { text: 'Synthetic message durable before 201.', attachMediaId: MEDIA_ID }, kola); assert.equal(m1.status, 201, m1.text);
   await S.kill();
   assert.deepEqual(snap(dir, (c) => c.all('SELECT id, position FROM messages WHERE channel_id = ? ORDER BY position', channelId)), [{ id: m1.body.id, position: 0 }], 'the message is in the file when the sender hears 201');
   assert.equal(q1(dir, 'SELECT kind FROM message_attachments WHERE message_id = ?', m1.body.id).kind, 'clip');
   // The real COMMIT failure (a message is one unit with its ledger row and notifications).
-  S = await boot(dir, { M13_FAST_RETRY: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria3 = await orgLogin(S);
+  S = await boot(dir, { SCOUTBOX_FAST_SWEEPS: '' }); kola = await playerLogin(S, 'pl-adeyemi'); const maria3 = await orgLogin(S);
   assert.equal((await S.j('POST', '/__faults', { rules: 'internal:unit.sqlite_commit:1' })).status, 200);
   const ledgerBefore = ledgerRows(dir).filter((l) => l.type === 'message').length;
   const m2 = await S.j('POST', `/org/channels/${channelId}/messages`, { text: 'Synthetic message whose unit fails at COMMIT.' }, maria3); assert.equal(m2.status, 500, 'the sender hears the failure');

@@ -34,7 +34,7 @@ const digestDir = (dir) => {
   return h.digest('hex');
 };
 const runProbe = (bin, dir, { mask = false } = {}) => {
-  const r = spawnSync(bin, [...(mask ? ['--require', MASK] : []), PROBE, dir], { encoding: 'utf8', env: { ...process.env, M13_QUIET_LOGS: '1' } });
+  const r = spawnSync(bin, [...(mask ? ['--require', MASK] : []), PROBE, dir], { encoding: 'utf8', env: { ...process.env, SCOUTBOX_QUIET_LOGS: '1' } });
   const line = r.stdout.trim().split('\n').filter((l) => l.startsWith('{')).pop();
   return { status: r.status, out: line ? JSON.parse(line) : null, stderr: r.stderr };
 };
@@ -92,7 +92,7 @@ test('[simulation] with isTransaction masked, the store refuses the runtime as u
 
 test('[simulation] the server refuses to boot on the masked runtime: non-zero exit, NODE_UNSUPPORTED before "listening on", data directory never created', () => {
   const dir = path.join(tempDir('rt-mask-server'), 'data');
-  const r = spawnSync(process.execPath, ['--require', MASK, path.join(SERVER, 'server.mjs')], { encoding: 'utf8', env: { ...process.env, DATA_DIR: dir, PORT: '0', M13_QUIET_LOGS: '1' }, timeout: 30_000 });
+  const r = spawnSync(process.execPath, ['--require', MASK, path.join(SERVER, 'server.mjs')], { encoding: 'utf8', env: { ...process.env, DATA_DIR: dir, PORT: '0', SCOUTBOX_QUIET_LOGS: '1' }, timeout: 30_000 });
   const log = `${r.stdout}\n${r.stderr}`;
   assert.notEqual(r.status, 0, `the server must not start: exit ${r.status}`);
   assert.match(log, /NODE_UNSUPPORTED/);

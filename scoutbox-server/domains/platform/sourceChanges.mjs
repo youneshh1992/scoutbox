@@ -20,14 +20,14 @@
  * the cap (SOURCE_CHANGE_CAP), in the caller's unit of work when one is open.
  */
 
-export function registerSourceChanges(ctx) {
-  const { nextId, safetyAudit } = ctx;
+export function createSourceChanges({ nextId, safetyAudit }) {
+  if (typeof safetyAudit?.sourceChanges?.record !== 'function' || typeof nextId !== 'function') throw new TypeError('createSourceChanges needs the safety-audit repository and nextId');
 
   /**
    * Append a canonical source change. `occurredAt` must be the moment the fact
    * changed — never a record's creation time standing in for a different event.
    */
-  ctx.recordSourceChange = ({ playerId, type, sourceSystem, sourceId, occurredAt = Date.now(), detail = null }) => {
+  const recordSourceChange = ({ playerId, type, sourceSystem, sourceId, occurredAt = Date.now(), detail = null }) => {
     if (!playerId || !type || !sourceSystem) return null;
     return safetyAudit.sourceChanges.record({
       id: nextId('srcc'),
@@ -39,5 +39,7 @@ export function registerSourceChanges(ctx) {
   };
 
   /** Every recorded change for a player, oldest first. */
-  ctx.sourceChangesFor = (playerId) => safetyAudit.sourceChanges.forPlayer(playerId);
+  const sourceChangesFor = (playerId) => safetyAudit.sourceChanges.forPlayer(playerId);
+
+  return { recordSourceChange, sourceChangesFor };
 }

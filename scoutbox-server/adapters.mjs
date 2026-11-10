@@ -196,7 +196,7 @@ const SUCCESS_FEE_MINOR_BY_PLAN = { Pro: 150_000, Academy: 50_000, Agency: 200_0
 const DEFAULT_SUCCESS_FEE_MINOR = 100_000;
 
 export function createBilling({ invoices, nextId }) {
-  if (typeof invoices?.issue !== 'function') throw new TypeError('createBilling needs the invoices repository (S13e)');
+  if (typeof invoices?.issue !== 'function') throw new TypeError('createBilling needs the invoices repository');
   return {
     provider: 'dev-ledger',
     /** Issues the signing's invoice (once: a second call for one signing answers the first invoice). */

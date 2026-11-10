@@ -33,7 +33,7 @@ const DECISION_NOTE = 'Internal decision note: proceed.';
 async function boot(dir, env = {}, server = SERVER) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [server], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
    
     let log = '';
     const j = async (method, p, body, token, headers = {}) => { const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined }); const text = await r.text(); let parsed = null; try { parsed = JSON.parse(text); } catch { /* no body */ } return { status: r.status, body: parsed, text }; };

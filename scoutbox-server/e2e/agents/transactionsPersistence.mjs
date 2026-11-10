@@ -42,7 +42,7 @@ process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); 
 
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, M13_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(proc);
   let log = '';
   proc.stdout.on('data', (b) => { log += b; }); proc.stderr.on('data', (b) => { log += b; });
@@ -97,7 +97,7 @@ section('2 — a case, a context and an agreement: nothing moves, and nothing is
   db.orgs.push({ id: 'org-a', name: 'Agency', type: 'agency', level: 'agency', plan: 'Agency', verified: false, location: null });
   db.players.push({ id: 'pl-1', name: 'Adult Player', dob: '1998-04-02', country: 'GB', city: 'London', media: [], attendance: [], trialReports: [], badges: [], timeline: [], medical: { shared: false, records: [], conditionStatus: 'unknown' }, level: 'amateur', location: { lat: 51.5, lng: -0.1 } });
   db.users.push({ id: 'usr-1', orgId: 'org-a', name: 'Agency Agent', role: 'Agent', createdAt: 1 }); // the agent the context and the agreement name, and the case's owner
-  db.recruitmentCases.push({ id: 'case-1', orgId: 'org-a', playerId: 'pl-1', playerName: 'Adult Player', vacancyId: null, ownerUserId: 'usr-1', ownerName: 'Agency Agent', stage: 'identified', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: null, decisionDraft: null, transactionHandoff: null, budget: null, subjectRemovedAt: null }); // the M12 case literal (the typed table refuses a partial one)
+  db.recruitmentCases.push({ id: 'case-1', orgId: 'org-a', playerId: 'pl-1', playerName: 'Adult Player', vacancyId: null, ownerUserId: 'usr-1', ownerName: 'Agency Agent', stage: 'identified', priority: 'medium', deadline: null, restricted: false, assignments: [], tasks: [], approvals: [], decision: null, links: { requestIds: [], trialIds: [], signingId: null }, createdAt: 1, history: [], room: null, decisionDraft: null, transactionHandoff: null, budget: null, subjectRemovedAt: null }); // the workspace case literal (the typed table refuses a partial one)
   // The context is a row of the compliance records, planted in the writer's whole literal.
   db.complianceContexts = [{ id: 'ctx-1', agencyOrgId: 'org-a', agentUserId: 'usr-1', type: 'transfer', jurisdictions: ['ENG'], parties: [], representations: [], resolvedFacts: [], reEvaluationPending: false, reviewRejectedAt: null, status: 'open', openedAt: 1, closedAt: null, keys: {}, rev: 1, revAt: 1, revBy: null, history: [] }];
   // The agreement is a row of the agent core, planted in the writer's whole literal (the typed create refuses a partial one).

@@ -7,7 +7,7 @@ import { SIGNINGS_FOLLOWUPS_MIGRATION } from '../signingsFollowUps.mjs';
 import { SCOUTING_EVIDENCE_MIGRATION, SCOUTING_EVIDENCE_DDL, SCOUTING_EVIDENCE_TABLES } from '../scoutingEvidence.mjs';
 
 export const id = SCOUTING_EVIDENCE_MIGRATION;
-export const note = 'evidence passport records (media links, disputes, history), coach affiliations (history) and squad invitations become typed tables (S9a)';
+export const note = 'evidence passport records (media links, disputes, history), coach affiliations (history) and squad invitations become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

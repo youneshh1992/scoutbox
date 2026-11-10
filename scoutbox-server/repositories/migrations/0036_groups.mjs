@@ -7,7 +7,7 @@ import { ENTERPRISE_MIGRATION } from '../enterprise.mjs';
 import { GROUPS_MIGRATION, GROUPS_DDL, GROUPS_TABLES } from '../groups.mjs';
 
 export const id = GROUPS_MIGRATION;
-export const note = 'Group workspaces (members, invites, shared templates, programmes) and group grants (recipients) become typed tables (S13c)';
+export const note = 'Group workspaces (members, invites, shared templates, programmes) and group grants (recipients) become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

@@ -39,7 +39,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const admin = async (p) => (await j('GET', p, undefined, null, ADMIN)).body;
 const feed = async (who, token) => (await j('GET', `/${who}/notifications`, undefined, token)).body;
 
-child = spawn('node', ['server.mjs'], { cwd: SERVER_DIR, env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, M13_QUIET_LOGS: '1' }, stdio: 'ignore' });
+child = spawn('node', ['server.mjs'], { cwd: SERVER_DIR, env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, SCOUTBOX_QUIET_LOGS: '1' }, stdio: 'ignore' });
 for (let i = 0; ; i++) {
   try { if ((await fetch(`${API}/health`)).ok) break; } catch { /* booting */ }
   if (i > 80) throw new Error('server did not boot');

@@ -39,7 +39,7 @@ server code: [`../docs/architecture.md`](../docs/architecture.md).
 | `node e2e/platform/api.mjs` | The API battery. Starts its own freshly seeded server on a free port and a temporary `DATA_DIR`, and removes both. To test a server you started yourself, pass both `API_URL` and that server's `DATA_DIR`; `API_URL` alone is refused, because the persistence checks read the data directory. |
 | `npm run perf:recruitment -- [players] [clones] [busy]` | Recruitment at scale through the real server: synthetic players and cloned recruitment graphs, hot-route timings, one write's log volume, the sweep queries. `PERF_ONLY=<path>` limits it to matching routes, for a CPU profile. |
 | `node scripts/tools/boxCamCvEvaluation.mjs` | Re-measures the Box Cam engine against its golden fixtures and rewrites `domains/development/boxcam/cv/evaluation.json`, which the Combine production gate reads. Run it when the engine changes and commit the result. `scripts/tools/boxCamCvHoldout.mjs` is the matching holdout run (`domains/development/boxcam/cv/holdout.json`). |
-| `node e2e/operations/clubOperations.mjs` | Delivery, webhook, backup and restore end to end (sets `M13_FAST_RETRY`, `ALLOW_LOCAL_WEBHOOKS`). |
+| `node e2e/operations/clubOperations.mjs` | Delivery, webhook, backup and restore end to end (sets `SCOUTBOX_FAST_SWEEPS`, `ALLOW_LOCAL_WEBHOOKS`). |
 
 Test-only knobs: `TEST_ONLY=<name>` filters cases inside some batteries (for example,
 `testUnitOfWork`, `testRecruitmentServer`). `SCOUTBOX_TEST_NODE_BINS=/a/node:/b/node`
@@ -77,8 +77,8 @@ are refused in production.
 | **`SCOUTBOX_FAULTS`** | Dev fault injection, e.g. `delay:/org/players/*/trust:1500;unavailable:/org/rooms/*` (also `POST /__faults`) | off. Ignored and fatal in production |
 | **`SCOUTBOX_TEST_CLOCK`** | `1` enables test-clock routes (m23 / m28) | off |
 | **`ALLOW_LOCAL_WEBHOOKS`** | `1` permits loopback webhook targets (tests) | off (SSRF guard) |
-| **`M13_FAST_RETRY`** | `1` compresses retry ladders and sweep intervals (tests) | off |
-| **`M13_QUIET_LOGS`** | `1` silences boot and per-request logs | off |
+| **`SCOUTBOX_FAST_SWEEPS`** | `1` compresses retry ladders and sweep intervals (tests) | off |
+| **`SCOUTBOX_QUIET_LOGS`** | `1` silences boot and per-request logs | off |
 
 A trust-weights total other than 100 is also fatal (`TRUST_WEIGHTS_INVALID`).
 
@@ -118,7 +118,7 @@ These routes exist (`domains/enterprise/enterprise.mjs`). Admin routes need the 
 - Backups contain personal (seed) data but no server secrets: `ADMIN_KEY` and
   `MEDIA_SECRET` live only in the environment.
 
-## External adapters (`adapters.mjs`, `m13/delivery.mjs`)
+## External adapters (`adapters.mjs`, `domains/messaging/delivery.mjs`)
 
 Every external service has a dev transport that fully works, and tests use it. Setting
 the named variable switches the adapter. Production refuses `ONFIDO_API_TOKEN`, `STRIPE_SECRET_KEY` and `S3_BUCKET`
@@ -150,7 +150,7 @@ the named variable switches the adapter. Production refuses `ONFIDO_API_TOKEN`, 
   and counted on `/capabilities`. They are never repaired.
 - **Background jobs.** Webhook deliveries, delivery dispatches, follow-ups, transition
   expiry, review reminders and the media-removal sweep are stored as persisted state.
-  Interval timers (about 60 s, faster with `M13_FAST_RETRY`) sweep them with bounded
+  Interval timers (about 60 s, faster with `SCOUTBOX_FAST_SWEEPS`) sweep them with bounded
   retries. Media files queued for removal are removed after commit, again at boot, and
   every minute until the removal is confirmed.
 - **Rate limits** are per process (`domains/platform/rateLimit.mjs`, `RATE_LIMIT_POLICY` is the

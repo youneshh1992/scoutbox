@@ -4,7 +4,7 @@
  * The outbox has two sources, told apart by `source` in the table and by their keys in the record:
  *   mailer   { id, ts, to, subject, text, transport, delivered }   adapters.mjs createMailer.send: `text` withholds
  *            every one-time code passed as a secret; `delivered` is the provider's answer (true on the dev outbox);
- *   delivery { id, at, channel, to, text, providerMessageId, provider }   m13/delivery.mjs, the local fake provider's
+ *   delivery { id, at, channel, to, text, providerMessageId, provider }   domains/messaging/delivery.mjs, the local fake provider's
  *            record of an accepted e-mail dispatch (`text` the first 300 characters of the notice).
  *
  * One row per device token: registering a token another account holds moves it to the new account, so a phone

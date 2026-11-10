@@ -23,7 +23,7 @@ import { PLANS } from '../catalogue.mjs';
 import { transaction, migrationApplied } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 
-export const ORGS_CUTOVER_MIGRATION = '0004_orgs_live';
+export const ORGS_TABLE_MIGRATION = '0004_orgs_live';
 /** `meta` key holding the initialisation state (`pending` | `done`). */
 export const ORGS_INIT_META = 'orgsInit';
 export const ORG_TYPES = Object.freeze(['club', 'agency']);
@@ -155,7 +155,7 @@ function fromDb(d) {
 }
 const passwordProblem = (h) => (h === null || textOk(h, L.passwordHash) ? null : `the password hash must be text of 1 to ${L.passwordHash} characters or null`);
 
-const cutOver = (sqlite) => migrationApplied(sqlite, ORGS_CUTOVER_MIGRATION);
+const cutOver = (sqlite) => migrationApplied(sqlite, ORGS_TABLE_MIGRATION);
 
 // ------------------------------------------------------------------ the whole-domain read
 /**
@@ -188,7 +188,7 @@ const WRITES = new Set(['create', 'update', 'setStanding', 'verifyEmailDomain', 
 /** `createOrgsRepository({ sqlite, nextId, unit, now, log })`: the organisation writes and queries, plus `reads` (the queries alone). */
 export function createOrgsRepository({ sqlite, nextId = null, unit = null, now = Date.now, log = () => {} }) {
   if (!sqlite) throw new TypeError('the organisations repository needs a SQLite connection (node:sqlite); organisations have no in-memory fallback');
-  if (!cutOver(sqlite)) throw new Error(`orgs: the cutover record ${ORGS_CUTOVER_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
+  if (!cutOver(sqlite)) throw new Error(`orgs: the cutover record ${ORGS_TABLE_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`);
   const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
   const cache = new Map();
   const q = (sql) => { let s = cache.get(sql); if (!s) cache.set(sql, (s = sqlite.prepare(sql))); return s; };

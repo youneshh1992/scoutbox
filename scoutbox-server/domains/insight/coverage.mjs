@@ -2,6 +2,7 @@
 // Travel times are never invented; candidate suggestions only ever contain
 // players the org can see under the standing rules.
 import { parseStrictDateOnly } from '../../temporal.mjs';
+import { validAmountMinor, CURRENCIES } from '../recruitment/money.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
 import { INSIGHT_LIMITS as L } from '../../repositories/insightCoverage.mjs';
 
@@ -21,7 +22,7 @@ const optText = (v, max) => (absent(v) ? null : typeof v !== 'string' ? undefine
 export function registerCoverage(ctx) {
   const {
     byId, orgRouter, nextId, notify, findPlayer, orgCanSee, isLead, requireLead, haversineKm,
-    validAmountMinor, CURRENCIES, insightCoverage, unit,
+    insightCoverage, unit,
   } = ctx;
   if (!insightCoverage || typeof unit !== 'function') throw new TypeError('registerCoverage needs the insight and coverage repository and the unit of work');
   const { fixtures, plans, assignments } = insightCoverage;

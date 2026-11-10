@@ -9,8 +9,8 @@ import { metrics } from '../../enterprise/enterprise.mjs';
 import { registerPassportCore } from './passport.mjs';
 import { registerPassportSharing } from './sharing.mjs';
 
-export function registerM15(ctx) {
-  if (typeof ctx.passport?.passportPrefs?.save !== 'function') throw new TypeError('registerM15 needs the passport repository from the data layer');
+export function registerFootballPassport(ctx) {
+  if (typeof ctx.passport?.passportPrefs?.save !== 'function') throw new TypeError('registerFootballPassport needs the passport repository from the data layer');
   // Privacy-safe product metrics — counters only, no PII, no recruiter
   // identity exposure to players.
   metrics.passport = {

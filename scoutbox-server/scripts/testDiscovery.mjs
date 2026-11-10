@@ -11,7 +11,7 @@ import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
 import { openStore } from '../store.mjs';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { fixtureDb, ORG, SCOUT, p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest } from './recruitmentTestFixtures.mjs';
-import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
+import { ROOM_CASES_FIX } from './recruitmentCasesTestFixtures.mjs';
 import {
   DISCOVERY_MIGRATION as MIGRATION, DISCOVERY_TABLES as TABLES, DISCOVERY_COLLECTIONS as COLLECTIONS,
   typeBrief, typeReview, typeSecondLookItem, typeWatchlist, typeCriterion, typeMembers, typeMembershipEvent,
@@ -102,7 +102,7 @@ function serverOpen(dir) {
   return { store, repo: layer.discovery, unit: (w) => store.unitOfWork(w), close: () => store.sqlite.close() };
 }
 /** The case graph (case-1, the room of pl-adult at org-pro, with decisions rdec-1 and its head rdec-2) and the requests and trial it links. */
-const CASES_FIX = () => ({ notifications: [], dispatches: [], requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()], ...S8B_FIX() });
+const CASES_FIX = () => ({ notifications: [], dispatches: [], requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()], ...ROOM_CASES_FIX() });
 /** A watchlist is created unreconciled; its membership and transitions come from a reconciliation (needing the whole fixture). */
 const writersFor = (fix) => ({
   dynamicWatchlists: (L, records) => {
@@ -316,7 +316,7 @@ test('[fixtures] a record written through the repository is typed, a missing ref
   assert.deepEqual(back.dynamicWatchlists[0].members, [{ playerId: 'pl-a', required: [] }]);
   assert.deepEqual(back.watchlistHistory.map((e) => e.id), ['wlh-1']);
   // the mutual links read back as the literals: a case's requests and trials, a decision chain
-  assert.deepEqual(back.recruitmentCases.map((c) => c.links), S8B_FIX().recruitmentCases.map((c) => plain(c.links)));
+  assert.deepEqual(back.recruitmentCases.map((c) => c.links), ROOM_CASES_FIX().recruitmentCases.map((c) => plain(c.links)));
   assert.deepEqual(back.roomDecisions.map((d) => [d.id, d.supersedes, d.supersededById]), [['rdec-1', null, 'rdec-2'], ['rdec-2', 'rdec-1', null]]);
   refused(() => write(dir, { secondLookItems: [item({ id: 'slk-9', decisionId: 'rdec-none' })] }), /DISCOVERY_REFERENCE_MISSING.*rdec-none/);
   refused(() => write(dir, { secondLookItems: [item({ id: 'slk-8', triggerType: 'trust_change' })] }), /DISCOVERY_INPUT_INVALID.*triggerType/, 'the journey battery\'s old planted trigger is refused');

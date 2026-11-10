@@ -32,11 +32,11 @@ import { parseDob, ageOn, isAdult, adultAgeFor, parseTrialDate, trialReportDueAt
 import { effectiveFacetState, affiliationActive, agreementGrantsAccess, effectiveAgreementStatus, verificationGap } from '../../domains/agents/core/shared.mjs';
 import { selectPolicyVersion, ruleStatusAt, isRegulatoryMinor, evaluateMinorGate, earliestPermittedApproachAt } from '../../domains/agents/compliance/policy.mjs';
 import { consentSufficiency } from '../../domains/agents/compliance/conflict.mjs';
-import { effectiveHandoffStatus, HANDOFF_TTL_MS } from '../../m27/integration.mjs';
+import { effectiveHandoffStatus, HANDOFF_TTL_MS } from '../../domains/agents/integration/integration.mjs';
 import { effectiveStatus as licenceEffectiveStatus } from '../../domains/verification/claims/shared.mjs';
 import { validateExternalRecord, cooldownFor, CONTACT_LIMITS } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { parseInstant as trialParseInstant, validateTimezone, validateSessionInput, validateScheduleInput, localDay, icsLocal, TRIAL_LIMITS } from '../../domains/recruitment/lifecycle/trial.mjs';
-import { resolveWindow, previousWindow } from '../../m20/metrics.mjs';
+import { resolveWindow, previousWindow } from '../../domains/recruitment/analytics/metrics.mjs';
 import { briefIsLiveOn, validateRecruitmentBrief } from '../../domains/discovery/shared.mjs';
 import { normWhen } from '../../domains/verification/passport/shared.mjs';
 import { parseDate as devParseDate } from '../../domains/development/hub/shared.mjs';
@@ -366,7 +366,7 @@ section('P/pure — zone independence: identical answers under TZ=UTC and TZ=Ame
   const probe = `
     const T = await import(${JSON.stringify(path.join(HERE, '..', '..', 'temporal.mjs'))});
     const D = await import(${JSON.stringify(path.join(HERE, '..', '..', 'domain.mjs'))});
-    const M = await import(${JSON.stringify(path.join(HERE, '..', '..', 'm20', 'metrics.mjs'))});
+    const M = await import(${JSON.stringify(path.join(HERE, '..', '..', 'domains', 'recruitment', 'analytics', 'metrics.mjs'))});
     const t0 = ${T0};
     const out = {
       tzOffsetOfEpoch: new Date(0).getTimezoneOffset(),
@@ -404,7 +404,7 @@ section('P/pure — zone independence: identical answers under TZ=UTC and TZ=Ame
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', SCOUTBOX_TEST_CLOCK: '1', ...env }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', SCOUTBOX_TEST_CLOCK: '1', ...env }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }

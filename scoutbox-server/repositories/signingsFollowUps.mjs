@@ -25,7 +25,7 @@ export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';
 export const SIGNINGS_FOLLOWUPS_COLLECTIONS = Object.freeze(['signingPackages', 'signings', 'followUps', 'outcomeReports']);
 export const SIGNINGS_FOLLOWUPS_TABLES = Object.freeze(['signing_packages', 'signing_revisions', 'signing_documents', 'signing_revision_parties', 'signing_history', 'signings', 'signing_parties', 'follow_ups', 'outcome_reports', 'outcome_report_confirmations']);
 /** The owner tables of the shared idempotency_keys table (created by 0018; other domains keep their keys as columns). */
-export const S8D_KEY_OWNERS = Object.freeze(['signing_packages']);
+export const SIGNINGS_KEY_OWNERS = Object.freeze(['signing_packages']);
 
 export const SIGNING_STORED_STATUSES = Object.freeze(['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED']);
 export const SIGNING_REVISION_STATUSES = Object.freeze([...SIGNING_STORED_STATUSES, 'SUPERSEDED']);

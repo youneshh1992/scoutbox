@@ -1,5 +1,5 @@
 // Delivery dispatches through the REAL server (server.mjs booted as a child process on temporary data directories,
-// synthetic seed records only, M13_FAST_RETRY so the sweep runs every 400 ms and the retry ladder is [0, 300, 600,
+// synthetic seed records only, SCOUTBOX_FAST_SWEEPS so the sweep runs every 400 ms and the retry ladder is [0, 300, 600,
 // 900] ms). Each send is ONE unit of work (its attempt, its status, the outbox row, the injected
 // failure it used and, on the last failure, the ops event and the webhook intent) — a unit whose real COMMIT fails
 // leaves none of them and the next pass sends once; the retry ladder with the quiet-hours note; provider callbacks
@@ -34,7 +34,7 @@ const until = async (check, ms = 10_000, step = 40) => { const t0 = Date.now(); 
 async function boot(dir, env = {}) {
   const port = await freePort();
   return new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', M13_FAST_RETRY: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_FAST_SWEEPS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
    
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {

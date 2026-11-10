@@ -40,7 +40,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DECISION_OUTCOMES, OUTCOME_MAP, EVIDENCE_REF_KINDS, DECISION_LIMITS, DECISION_POLICY_VERSION, validateOutcome, validateDecisionReasons, validateNote, validateEvidenceRefShapes, decisionIntegrity, duplicateFinalHeads, chainHead, summariseAssessments, assessmentSnapshot, decisionView, draftView, decisionMilestone, decisionRequirements, normaliseDecisionClientKey } from '../../domains/recruitment/lifecycle/decision.mjs';
-import { M23_ERROR_HTTP } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { LIFECYCLE_ERROR_HTTP } from '../../domains/recruitment/lifecycle/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { STATUS_EVIDENCE_REQUIRED, ROOM_TRANSITIONS, ROOM_STATUSES, roomCan, PROHIBITED_REASON_CODES, REVISITABLE_REASON_CODES } from '../../domains/recruitment/rooms/shared.mjs';
@@ -79,16 +79,16 @@ const BAD_TYPES = [{}, [], null, true, false, 1, 1.5, -1, '', ' '];
 section('U — vocabulary and validation: three outcomes, one taxonomy, nothing coerced');
 {
   ok(DECISION_OUTCOMES.join(',') === 'progress,hold,reject', 'U1 exactly three operational outcomes');
-  ok(OUTCOME_MAP.progress.recommendation === 'offer' && OUTCOME_MAP.progress.action === 'considerOffer' && LIFECYCLE_ACTIONS.considerOffer.to === 'offer_consideration', 'U2 progress maps onto the M17 `offer` recommendation and the considerOffer action — ending at offer_consideration');
+  ok(OUTCOME_MAP.progress.recommendation === 'offer' && OUTCOME_MAP.progress.action === 'considerOffer' && LIFECYCLE_ACTIONS.considerOffer.to === 'offer_consideration', 'U2 progress maps onto the advisory `offer` recommendation and the considerOffer action — ending at offer_consideration');
   ok(OUTCOME_MAP.hold.recommendation === 'continue_watching' && LIFECYCLE_ACTIONS[OUTCOME_MAP.hold.action].to === 'on_hold', 'U3 hold maps onto continue_watching and on_hold');
   ok(OUTCOME_MAP.reject.recommendation === 'archive' && LIFECYCLE_ACTIONS[OUTCOME_MAP.reject.action].to === 'archived' && OUTCOME_MAP.reject.lifecycleReasons.join() === 'rejected', 'U4 reject maps onto archive and rejectCase, carrying the LIFECYCLE reason `rejected` — not a decision reason');
   neg(!Object.values(OUTCOME_MAP).some((m) => LIFECYCLE_ACTIONS[m.action].to === 'offer_made' || LIFECYCLE_ACTIONS[m.action].to === 'signed'), 'U5 no outcome reaches offer_made or signed');
   for (const k of [...PROTO_KEYS, ...BAD_TYPES, 'PROGRESS', 'Progress', ' progress', 'offer', 'sign', 'archive', 'accept']) {
     const v = validateOutcome(k);
-    neg(v.ok === false && v.error === 'DECISION_OUTCOME_INVALID' && Array.isArray(v.allowed), `U6 ${JSON.stringify(k)} is not an outcome (prototype keys, other types, case, M17 words)`);
+    neg(v.ok === false && v.error === 'DECISION_OUTCOME_INVALID' && Array.isArray(v.allowed), `U6 ${JSON.stringify(k)} is not an outcome (prototype keys, other types, case, Room words)`);
   }
   neg(validateOutcome('__proto__').ok === false && validateOutcome('constructor').ok === false, 'U6b the map is a null-prototype table: inherited names resolve to nothing');
-  ok(validateDecisionReasons(['tactical_fit', 'Position_Need']).codes.join() === 'tactical_fit,position_need', 'U7 decision reasons come from the M17 taxonomy, normalised');
+  ok(validateDecisionReasons(['tactical_fit', 'Position_Need']).codes.join() === 'tactical_fit,position_need', 'U7 decision reasons come from the Rooms taxonomy, normalised');
   neg(validateDecisionReasons([], { outcome: 'reject' }).error === 'DECISION_REASON_INVALID', 'U8 a rejection with no reason is refused');
   ok(validateDecisionReasons([], { outcome: 'hold' }).ok && validateDecisionReasons(undefined, { outcome: 'progress' }).ok, 'U8b hold and progress may carry none');
   for (const bad of ['rejected', 'on_hold', 'club_decision', 'trial_completed', 'case_closed']) neg(validateDecisionReasons([bad]).error === 'DECISION_REASON_INVALID', `U9 the LIFECYCLE reason "${bad}" is not a decision reason (two taxonomies)`);
@@ -152,7 +152,7 @@ section('U — chain, integrity, summaries, views');
   const legacy = { id: 'd-1', roomId: 'c', orgId: 'o', recommendation: 'shortlist', reasonCodes: ['tactical_fit'], note: 'n', by: { userId: 'u', name: 'U' }, createdAt: 1, supersededById: 'd-2' };
   const formal = { id: 'd-2', roomId: 'c', orgId: 'o', kind: 'formal', state: 'final', outcome: 'progress', recommendation: 'offer', reasonCodes: [], note: null, by: { userId: 'u', name: 'U' }, createdAt: 2, supersedes: 'd-1', supersededById: null, rev: 1, evidenceRefs: [{ kind: 'assessment', id: 'a' }], lifecycle: { applied: true } };
   ok(chainHead([legacy, formal]).id === 'd-2' && chainHead([]) === null, 'U26 the chain head is the one row nothing supersedes');
-  ok(decisionView(legacy).kind === 'recommendation' && decisionView(legacy).outcome === null && decisionView(legacy).state === 'final', 'U27 a legacy M17 row reads as an advisory recommendation, never as a formal decision');
+  ok(decisionView(legacy).kind === 'recommendation' && decisionView(legacy).outcome === null && decisionView(legacy).state === 'final', 'U27 a legacy advisory row reads as an advisory recommendation, never as a formal decision');
   ok(decisionView(formal).kind === 'formal' && decisionView(formal).outcomeLabel === 'Progress to offer consideration' && decisionView(formal).evidenceCount === 1 && decisionView(formal).policyVersion === DECISION_POLICY_VERSION, 'U28 a formal row reads with its outcome, label, evidence count and policy version');
   ok(decisionView(formal, { omitNote: true }).note === undefined && decisionView(formal, { omitNote: true }).hasNote === false, 'U28b the note can be omitted from a view; hasNote stays honest');
   neg(decisionMilestone({ ...formal, note: 'PRIVATE' }).note === undefined && !has(decisionMilestone({ ...formal, note: 'PRIVATE' }), 'PRIVATE'), 'U29 the journey milestone never carries the note');
@@ -180,9 +180,9 @@ section('U — chain, integrity, summaries, views');
 // ================================================================ P — policy
 section('P — policy: error bands, rate policies, events, permissions, the ONE widening, no new states');
 {
-  const codes = Object.keys(M23_ERROR_HTTP).filter((c) => c.startsWith('DECISION_'));
-  ok(codes.length >= 18, `P1 ${codes.length} DECISION_* codes are in the M23 error table`);
-  const band = (c) => M23_ERROR_HTTP[c];
+  const codes = Object.keys(LIFECYCLE_ERROR_HTTP).filter((c) => c.startsWith('DECISION_'));
+  ok(codes.length >= 18, `P1 ${codes.length} DECISION_* codes are in the lifecycle error table`);
+  const band = (c) => LIFECYCLE_ERROR_HTTP[c];
   ok(['DECISION_OUTCOME_INVALID', 'DECISION_REASON_INVALID', 'DECISION_CONTENT_INVALID', 'DECISION_EVIDENCE_INVALID', 'DECISION_CASE_MISMATCH', 'DECISION_CLIENT_KEY_INVALID', 'DECISION_REV_REQUIRED'].every((c) => band(c) === 400), 'P2 validation codes are 400');
   ok(band('DECISION_NOT_PERMITTED') === 403 && band('DECISION_BLOCKED') === 403 && band('DECISION_NOT_FOUND') === 404, 'P3 permission 403, not-found 404');
   ok(['DECISION_INVALID_STATE', 'DECISION_ALREADY_FINAL', 'DECISION_VERSION_CONFLICT', 'DECISION_IDEMPOTENCY_CONFLICT', 'DECISION_LIFECYCLE_CONFLICT', 'DECISION_SUBJECT_REMOVED'].every((c) => band(c) === 409), 'P4 state codes are 409');
@@ -205,7 +205,7 @@ section('P — policy: error bands, rate policies, events, permissions, the ONE 
   const verdictWith = (rows) => canTransitionRecruitmentCase(kase, 'considerOffer', { role: 'room_lead', evidence: createEvidenceProvider({ roomDecisions: rows, recruitmentContacts: [], trials: [], requests: [] }) });
   ok(verdictWith([mk({})]).ok === true, 'P15 a finalized progress decision on this case satisfies considerOffer');
   neg(verdictWith([]).error === 'LIFECYCLE_EVIDENCE_REQUIRED', 'P16 with no decision, considerOffer is refused by the validator');
-  neg(verdictWith([{ id: 'd', roomId: 'c', orgId: 'o', playerId: 'p', recommendation: 'offer', createdAt: 1, supersededById: null }]).error === 'LIFECYCLE_EVIDENCE_REQUIRED', 'P17 an advisory M17 "offer" recommendation is NOT a formal decision — refused');
+  neg(verdictWith([{ id: 'd', roomId: 'c', orgId: 'o', playerId: 'p', recommendation: 'offer', createdAt: 1, supersededById: null }]).error === 'LIFECYCLE_EVIDENCE_REQUIRED', 'P17 an advisory "offer" recommendation is NOT a formal decision — refused');
   neg(verdictWith([mk({ outcome: 'hold', recommendation: 'continue_watching' })]).error === 'LIFECYCLE_EVIDENCE_REQUIRED', 'P18 a formal hold proves nothing for offer_consideration');
   neg(verdictWith([mk({ supersededById: 'later' })]).error === 'LIFECYCLE_EVIDENCE_REQUIRED', 'P19 a superseded progress decision proves nothing');
   neg(verdictWith([mk({ state: 'draft' })]).error === 'LIFECYCLE_EVIDENCE_REQUIRED' && verdictWith([mk({ roomId: 'other' })]).error === 'LIFECYCLE_EVIDENCE_REQUIRED' && verdictWith([mk({ orgId: 'x' })]).error === 'LIFECYCLE_EVIDENCE_REQUIRED', 'P20 a draft, another case\'s or another organisation\'s decision proves nothing');
@@ -216,7 +216,7 @@ section('HTTP — booting a real server (test clock enabled)');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 160 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -320,7 +320,7 @@ const J = {};
   neg(expect(byHand, 409, 'LIFECYCLE_TRANSITION_INVALID'), 'J3 moving to offer_consideration BY HAND from under_review is refused');
   // An advisory (legacy-route) recommendation first — the two kinds share one chain.
   const adv = await j('POST', `/org/rooms/${J.RID}/decisions`, { recommendation: 'trial', reasonCodes: ['trial_needed'], note: S_ROOM, expectedRev: await caseRev(J.RID) }, maria.token);
-  ok(adv.status === 201 || adv.status === 200, 'J4 a scout records an advisory recommendation ("trial") through the M17 route, with a club-private note');
+  ok(adv.status === 201 || adv.status === 200, 'J4 a scout records an advisory recommendation ("trial") through the Rooms route, with a club-private note');
   J.ADV = adv.body.decision.id;
   const s1 = await surface(J.RID);
   ok(s1.body.current === null && s1.body.advisory?.id === J.ADV && s1.body.advisory.kind === 'recommendation' && s1.body.history.length === 1, 'J5 the surface shows it as ADVISORY — not a formal decision, not "current"');
@@ -372,7 +372,7 @@ const J = {};
   ok(s3.body.current?.id === J.DEC && s3.body.advisory === null && s3.body.draft === null && s3.body.history.length === 2 && s3.body.history[0].id === J.DEC && s3.body.history[1].id === J.ADV && s3.body.history[1].supersededById === J.DEC && s3.body.requirements.hasFinal === true, 'J24 the surface: the formal row is current, the draft is gone, the history holds both rows in order, the advisory superseded');
   const legacy = (await j('GET', `/org/rooms/${J.RID}/decisions`, undefined, maria.token)).body;
   const rows = legacy.history;
-  ok(Array.isArray(rows) && legacy.current?.id === J.DEC && rows.some((d) => d.id === J.DEC && d.kind === 'formal' && d.outcome === 'progress' && d.recommendation === 'offer'), 'J25 the M17 decisions route reads the SAME row — one chain, one store');
+  ok(Array.isArray(rows) && legacy.current?.id === J.DEC && rows.some((d) => d.id === J.DEC && d.kind === 'formal' && d.outcome === 'progress' && d.recommendation === 'offer'), 'J25 the Rooms decisions route reads the SAME row — one chain, one store');
   const room = (await j('GET', `/org/rooms/${J.RID}`, undefined, maria.token)).body.room;
   ok(room.decision?.current?.id === J.DEC && room.decision.current.recommendation === 'offer', 'J25b the Room projection\'s current decision is the formal row');
   const jr = await journey(J.RID);
@@ -454,7 +454,7 @@ const R = {};
   R.DEC = fin.body.decision.id;
   ok(await stage(R.RID) === 'archived', 'R5b the case is archived');
   const frames = await sse.stop();
-  ok(/room_decision_finalized/.test(frames) && /recruitment_room_archived/.test(frames), 'R6 both the decision event and M17\'s recruitment_room_archived (the Second Look contract) were broadcast');
+  ok(/room_decision_finalized/.test(frames) && /recruitment_room_archived/.test(frames), 'R6 both the decision event and the Rooms\' recruitment_room_archived (the Second Look contract) were broadcast');
   const act = (await j('GET', `/org/rooms/${R.RID}/activity?limit=50`, undefined, maria.token)).body;
   const h = (act.items ?? act).find((x) => x.type === 'room_status_changed' && (x.detail?.to === 'archived'));
   ok((h?.to ?? h?.detail?.to) === 'archived' && (h.reasonCodes ?? h.detail?.reasonCodes ?? []).includes('rejected') && (h.decisionId ?? h.detail?.decisionId) === R.DEC && (h.lifecycleAction ?? h.detail?.lifecycleAction) === 'rejectCase', 'R7 the lifecycle history carries the LIFECYCLE reason `rejected`, the action, and the decision id — two taxonomies, linked by id');

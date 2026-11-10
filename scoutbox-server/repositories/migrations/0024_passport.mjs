@@ -7,7 +7,7 @@ import { VERIFICATION_MIGRATION } from '../verification.mjs';
 import { PASSPORT_MIGRATION, PASSPORT_DDL, PASSPORT_TABLES } from '../passport.mjs';
 
 export const id = PASSPORT_MIGRATION;
-export const note = 'Passport preferences, career entries, achievements, share links and correction requests become typed tables (S10b)';
+export const note = 'Passport preferences, career entries, achievements, share links and correction requests become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

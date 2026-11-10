@@ -7,7 +7,7 @@ import { migrationApplied } from '../database.mjs';
 import { MATCH_FACTS_DDL, matchFactsTriggersDdl } from '../matchFacts.mjs';
 
 export const id = '0040_match_facts';
-export const note = 'The match facts: a per-player projection kept by triggers on its inputs, read by matching and Nobody Missed (S14j)';
+export const note = 'The match facts: a per-player projection kept by triggers on its inputs, read by matching and Nobody Missed';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

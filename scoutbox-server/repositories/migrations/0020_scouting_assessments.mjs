@@ -8,7 +8,7 @@ import { SCOUTING_EVIDENCE_MIGRATION } from '../scoutingEvidence.mjs';
 import { SCOUTING_ASSESSMENTS_MIGRATION, SCOUTING_ASSESSMENTS_DDL, SCOUTING_ASSESSMENTS_TABLES, insertSeedTemplates } from '../scoutingAssessments.mjs';
 
 export const id = SCOUTING_ASSESSMENTS_MIGRATION;
-export const note = 'assessment templates, assessments (ratings, cited evidence, history), video segments and playlists become typed tables; the v1 templates are inserted (S9b)';
+export const note = 'assessment templates, assessments (ratings, cited evidence, history), video segments and playlists become typed tables; the v1 templates are inserted';
 
 export function up(sqlite, { now = Date.now() } = {}) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

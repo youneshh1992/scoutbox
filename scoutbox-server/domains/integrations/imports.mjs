@@ -8,6 +8,7 @@
 //    SSRF-guarded. Connectors report "not configured" until credentialed.
 import crypto from 'node:crypto';
 import { parseDobStrict } from '../../temporal.mjs';
+import { signBody, webhookUrlProblem } from './webhooks.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { PROSPECT_FIELDS, PROSPECT_POSITIONS as POSITIONS, API_SCOPES, WEBHOOK_EVENTS, INTEGRATIONS_LIMITS as L } from '../../repositories/integrations.mjs';
 
@@ -41,8 +42,8 @@ export function parseCsv(text) {
 export function registerImports(ctx) {
   const {
     byId, orgRouter, adminRouter, app, nextId,
-    requireLead, orgCanSee, webhookUrlProblem,
-    signBody, findPlayer, players, unit, safetyAudit, integrations,
+    requireLead, orgCanSee,
+    findPlayer, players, unit, safetyAudit, integrations,
   } = ctx;
   if (!integrations?.batches) throw new TypeError('registerImports needs the integrations repository (ctx.integrations)');
   const { batches, prospects, reviews, apiKeys, endpoints, deliveries } = integrations;
@@ -399,11 +400,10 @@ export function registerImports(ctx) {
       });
     }
   }
-  ctx.emitWebhook = emitWebhook;
 
-  // Bounded retry ladder. M13_FAST_RETRY compresses it for the test suite —
+  // Bounded retry ladder. SCOUTBOX_FAST_SWEEPS compresses it for the test suite —
   // the LOGIC under test is identical, only the waits shrink.
-  const RETRY_MS = process.env.M13_FAST_RETRY === '1'
+  const RETRY_MS = process.env.SCOUTBOX_FAST_SWEEPS === '1'
     ? [0, 300, 600, 900, 1200]
     : [0, 60_000, 300_000, 1_800_000, 7_200_000];
   const MAX_ATTEMPTS = RETRY_MS.length;
@@ -457,7 +457,6 @@ export function registerImports(ctx) {
     }
     return due.length;
   }
-  ctx.webhookSweep = webhookSweep;
 
   // ----------------------------------------------------------- connectors
   // Registry of documented provider interfaces. NOTHING here activates
@@ -481,4 +480,6 @@ export function registerImports(ctx) {
   adminRouter.get('/imports', (_req, res) => {
     res.json({ items: batches.recent(50) });
   });
+
+  return { emitWebhook, webhookSweep };
 }

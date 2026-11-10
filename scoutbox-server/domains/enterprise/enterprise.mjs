@@ -12,7 +12,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { totpValid, b32encode, timingSafeEqStr } from '../../m13/shared.mjs';
+import { totpValid, b32encode, timingSafeEqStr } from '../identity/totp.mjs';
+import { signBody } from '../integrations/webhooks.mjs';
 import { devLoginsEnabled } from '../platform/capabilities.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { ENTERPRISE_LIMITS, typeRefs } from '../../repositories/enterprise.mjs';
@@ -56,7 +57,7 @@ export function requestInstrumentation() {
       try { exposureHook.fn?.(req, res); } catch { /* exposure capture must never break a request */ }
       // Structured log line. REDACTION: no auth headers, no tokens, no bodies,
       // no emails — method/path/status/timing/correlation id only.
-      if (process.env.M13_QUIET_LOGS !== '1') {
+      if (process.env.SCOUTBOX_QUIET_LOGS !== '1') {
         console.log(JSON.stringify({ t: Date.now(), id: req.correlationId, m: req.method, p: fullPath.slice(0, 120), s: res.statusCode, ms: Math.round(ms) }));
       }
     });
@@ -88,7 +89,7 @@ export function createMfaGuards() {
 export function registerEnterprise(ctx) {
   const {
     byId, users, sessions, orgs, mediaDeletions, codes, notifications, dispatches, outbox, pushLog, pushTokens, channels, safetyAudit, recruitment, recruitmentCases, players, app, orgRouter, adminRouter, nextId, notify,
-    mailer, requireLead, isLead, paginate, histAppend, timingSafeEq, signBody,
+    mailer, requireLead, isLead, paginate, histAppend,
     storage, DATA_DIR, backupDatabase, unit, enterprise, enterpriseReads, schemaVersion,
   } = ctx;
   if (!enterprise || !enterpriseReads) throw new TypeError('registerEnterprise needs the enterprise repository (ctx.enterprise, ctx.enterpriseReads)');

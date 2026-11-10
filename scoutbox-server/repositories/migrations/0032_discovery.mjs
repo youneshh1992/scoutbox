@@ -8,7 +8,7 @@ import { BOX_CAM_MIGRATION } from '../boxCam.mjs';
 import { DISCOVERY_MIGRATION, DISCOVERY_DDL, DISCOVERY_TABLES } from '../discovery.mjs';
 
 export const id = DISCOVERY_MIGRATION;
-export const note = 'Recruitment Briefs, Nobody Missed reviews, Second Look items and Dynamic Watchlists with their membership history become typed tables (S12c)';
+export const note = 'Recruitment Briefs, Nobody Missed reviews, Second Look items and Dynamic Watchlists with their membership history become typed tables';
 
 export function up(sqlite) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

@@ -477,7 +477,7 @@ section('supported cadence envelope (§29, §30)');
   // guarantee the engine cannot honour.
   const detected = r.state === 'unsupported_event_cadence';
   console.log(`    over-cadence attempt → ${r.state}${r.count == null ? '' : `/${r.count}`} `
-    + `(detection is partial by design; see M22_CV_EVALUATION.md)`);
+    + `(detection is partial by design; see CV_EVALUATION.md)`);
   ok(true, 'over_cadence_detection_limitation_is_recorded',
     detected ? 'detected on this fixture' : 'not detected on this fixture — limitation stands');
 

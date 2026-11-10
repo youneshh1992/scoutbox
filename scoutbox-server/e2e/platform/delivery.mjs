@@ -54,7 +54,7 @@ const hooks = [];
 receiver = http.createServer((req, res) => { let b = ''; req.on('data', (d) => { b += d; }); req.on('end', () => { try { hooks.push(JSON.parse(b)); } catch { /* not JSON */ } res.writeHead(200); res.end('ok'); }); });
 await new Promise((r) => receiver.listen(RCV_PORT, '127.0.0.1', r));
 
-child = spawn('node', ['server.mjs'], { cwd: SERVER_DIR, env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, M13_FAST_RETRY: '1', M13_QUIET_LOGS: '1', ALLOW_LOCAL_WEBHOOKS: '1' }, stdio: 'ignore' });
+child = spawn('node', ['server.mjs'], { cwd: SERVER_DIR, env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, SCOUTBOX_FAST_SWEEPS: '1', SCOUTBOX_QUIET_LOGS: '1', ALLOW_LOCAL_WEBHOOKS: '1' }, stdio: 'ignore' });
 for (let i = 0; ; i++) {
   try { if ((await fetch(`${API}/health`)).ok) break; } catch { /* booting */ }
   if (i > 80) throw new Error('server did not boot');

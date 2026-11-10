@@ -7,7 +7,7 @@
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
-export const M25_ERROR_HTTP = table({
+export const COMPLIANCE_ERROR_HTTP = table({
   // ---- 400: fix the request.
   COMPLIANCE_INPUT_INVALID: 400,
   CONTEXT_INPUT_INVALID: 400,
@@ -83,7 +83,7 @@ export const M25_ERROR_HTTP = table({
   COMPLIANCE_STATE_UNKNOWN: 500,
 });
 
-export const httpStatusFor = (code) => M25_ERROR_HTTP[code] ?? null;
+export const httpStatusFor = (code) => COMPLIANCE_ERROR_HTTP[code] ?? null;
 
 export const PUBLIC_ERROR_FIELDS = [
   'error', 'message', 'allowed', 'facet', 'memberAssociation', 'state', 'code',
@@ -96,7 +96,7 @@ const publicReason = (r) => ({ code: r.code, ruleId: r.ruleId ?? null, ruleStatu
 
 export function publicErrorBody(out) {
   const code = out?.error;
-  if (M25_ERROR_HTTP[code] === 500) {
+  if (COMPLIANCE_ERROR_HTTP[code] === 500) {
     return { ok: false, error: code, message: 'The compliance service cannot serve this request. This has been recorded.' };
   }
   const body = { ok: false };
@@ -112,9 +112,9 @@ export function publicErrorBody(out) {
 export function sendComplianceError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
-    console.error(`M25 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
+    console.error(`compliance ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
     return res.status(500).json({ ok: false, error: 'COMPLIANCE_STATE_UNKNOWN', message: 'The compliance service cannot serve this request. This has been recorded.' });
   }
-  if (status === 500) console.error(`M25 ${where} ${out.error} — ${JSON.stringify(out)}`);
+  if (status === 500) console.error(`compliance ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }

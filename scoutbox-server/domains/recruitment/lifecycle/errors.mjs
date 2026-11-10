@@ -17,7 +17,7 @@
  * and `e2e/recruitment/lifecycle` fails the moment a producible code is missing from the table.
  *
  * Null-prototype, because it is indexed by strings that originate in request
- * bodies and stored records. `M23_ERROR_HTTP['constructor']` must be absent,
+ * bodies and stored records. `LIFECYCLE_ERROR_HTTP['constructor']` must be absent,
  * not a function.
  */
 
@@ -35,7 +35,7 @@ const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
  *   422  the request and the case are fine; the EVIDENCE is not there
  *   500  this build is wrong, or its data is. Never the caller's to fix.
  */
-export const M23_ERROR_HTTP = table({
+export const LIFECYCLE_ERROR_HTTP = table({
   // ---- 400: fix the request.
   LIFECYCLE_STAGE_NOT_SETTABLE: 400,
   LIFECYCLE_ACTION_UNKNOWN: 400,
@@ -221,12 +221,12 @@ export const M23_ERROR_HTTP = table({
 });
 
 /** The codes that mean "this build or its data is broken", not "your request was". */
-export const M23_INTERNAL_ERRORS = Object.freeze(
-  Object.keys(M23_ERROR_HTTP).filter((c) => M23_ERROR_HTTP[c] === 500),
+export const LIFECYCLE_INTERNAL_ERRORS = Object.freeze(
+  Object.keys(LIFECYCLE_ERROR_HTTP).filter((c) => LIFECYCLE_ERROR_HTTP[c] === 500),
 );
 
 /** Status for a code, or `null` if the table has never heard of it. No default. */
-export const httpStatusFor = (code) => M23_ERROR_HTTP[code] ?? null;
+export const httpStatusFor = (code) => LIFECYCLE_ERROR_HTTP[code] ?? null;
 
 /**
  * Fields a client may see on an error body.
@@ -278,7 +278,7 @@ const PUBLIC_ERROR_FIELDS = [
  */
 export function publicErrorBody(out) {
   const code = out?.error;
-  if (M23_ERROR_HTTP[code] === 500) {
+  if (LIFECYCLE_ERROR_HTTP[code] === 500) {
     return {
       ok: false,
       error: code,
@@ -298,7 +298,7 @@ export function publicErrorBody(out) {
  * Shared by the lifecycle routes and the Contact routes so there is exactly
  * one place where a code becomes a status:
  *
- *   1. The status comes from `M23_ERROR_HTTP`. There is no default branch,
+ *   1. The status comes from `LIFECYCLE_ERROR_HTTP`. There is no default branch,
  *      so a code the table has never been told about becomes a 500 AND a log
  *      line naming it — a loud unknown rather than a quiet 400.
  *   2. The body is projected through `publicErrorBody`.
@@ -306,13 +306,13 @@ export function publicErrorBody(out) {
 export function sendDomainError(res, out, where) {
   const status = httpStatusFor(out?.error);
   if (status === null) {
-    console.error(`M23 ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
+    console.error(`lifecycle ${where} UNMAPPED_ERROR ${out?.error} — ${JSON.stringify(out)}`);
     return res.status(500).json({
       ok: false,
       error: 'LIFECYCLE_INTERNAL',
       message: 'The recruitment journey cannot be served for this case. This has been recorded.',
     });
   }
-  if (status === 500) console.error(`M23 ${where} ${out.error} — ${JSON.stringify(out)}`);
+  if (status === 500) console.error(`lifecycle ${where} ${out.error} — ${JSON.stringify(out)}`);
   return res.status(status).json(publicErrorBody(out));
 }

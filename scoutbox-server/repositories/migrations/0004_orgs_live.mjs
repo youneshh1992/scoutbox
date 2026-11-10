@@ -3,10 +3,10 @@
  * foreign keys OFF (the runner checks `foreign_key_check` before committing) because `org_users` references `orgs`.
  * `meta.orgsInit` starts `pending`: the data layer initialises the table from the seed once, on the first boot.
  */
-import { ORGS_CUTOVER_MIGRATION, ORGS_INIT_META, ORGS_DDL } from '../orgs.mjs';
+import { ORGS_TABLE_MIGRATION, ORGS_INIT_META, ORGS_DDL } from '../orgs.mjs';
 
-export const id = ORGS_CUTOVER_MIGRATION;
-export const note = 'organisations become a typed table (S3; explicit writes and SQL reads since S14g); the staff table is 0001\'s';
+export const id = ORGS_TABLE_MIGRATION;
+export const note = 'organisations become a typed table (explicit writes, SQL reads); the staff table is 0001\'s';
 export const foreignKeysOff = true;
 export { ORGS_DDL };
 

@@ -60,7 +60,7 @@ for (const [app, expectCats] of [['scoutbox-club', ['overview', 'player', 'evalu
   // Every function the Room had is still reachable: the old flat tab ids.
   const OLD = ['overview', 'passport', 'evidence', 'assessments', 'combine', 'development', 'discussion', 'contact', 'trial', 'activity', 'decision', 'offer', 'signing'];
   const lost = OLD.filter((id) => !ds.resolveTab(model, id));
-  ok(lost.length === 0, `every pre-M24B Room function is still a subcategory (lost: ${lost.join(',') || '—'})`);
+  ok(lost.length === 0, `every older Room tab is still a subcategory (lost: ${lost.join(',') || '—'})`);
   // Deep links: the app writes "<id>/<category>/<sub>", reads it back, and keeps reading the legacy form.
   for (const sub of ds.allSubs(model)) {
     const h = nav.hashForRoom('case-7', sub);
@@ -78,7 +78,7 @@ for (const [app, expectCats] of [['scoutbox-club', ['overview', 'player', 'evalu
   ok(nav.roomTabFromHash('#/recruitment/rooms/case-7/overview') === 'summary', 'the legacy "overview" tab resolves to Overview › Summary');
   ok(nav.roomTabFromHash('#/recruitment/rooms/case-7/history') === 'timeline', 'a category alone opens its first page');
   ok(nav.roomFromHash('#/recruitment/rooms/case-7/nope') === null && nav.roomFromHash('#/recruitment/rooms/case-7/deal/nope') === null && nav.roomFromHash('#/recruitment/rooms/case-7/history/offer') === null && nav.roomFromHash('#/recruitment/rooms/case-7/deal/offer/x') === null, 'unknown category, unknown sub, sub under the wrong category, and a third segment all reject');
-  ok(nav.roomFromHash('#/recruitment/rooms/a/b') === null && nav.roomFromHash('#/recruitment/rooms/../x') === null, 'the M17 malformed-link cases still reject');
+  ok(nav.roomFromHash('#/recruitment/rooms/a/b') === null && nav.roomFromHash('#/recruitment/rooms/../x') === null, 'the malformed Room links still reject');
   ok(nav.screenFromHash(nav.hashForRoom('case-7', 'offer')) === 'rooms' && nav.screenFromHash(nav.hashForRoom('case-7', 'timeline')) === 'rooms', 'a category/sub deep link resolves to the Rooms destination');
 }
 
@@ -100,9 +100,9 @@ for (const [app, expectCats] of [['scoutbox-club', ['overview', 'player', 'evalu
   for (const tab of SERVER_CLIENT_TABS) if (!ds.resolveTab(m.CLIENT_NAV, tab)) fail(`server client tab "${tab}" resolves to nothing`); else passed++;
   console.log('✓ the client tabs the server emits (contacts, offers) resolve (2 folded)');
   const OLD_CLIENT = ['overview', 'representation', 'opportunities', 'contacts', 'trials', 'offers', 'activity'];
-  ok(OLD_CLIENT.every((id) => ds.resolveTab(m.CLIENT_NAV, id)), 'every pre-M24B client tab is still a subcategory');
+  ok(OLD_CLIENT.every((id) => ds.resolveTab(m.CLIENT_NAV, id)), 'every older flat client tab is still a subcategory');
   const OLD_TX = ['overview', 'parties', 'compliance', 'documents', 'messages', 'timeline'];
-  ok(OLD_TX.every((id) => ds.resolveTab(m.TRANSACTION_NAV, id)), 'every pre-M24B transaction tab is still a subcategory');
+  ok(OLD_TX.every((id) => ds.resolveTab(m.TRANSACTION_NAV, id)), 'every older flat transaction tab is still a subcategory');
   // Private functions are ABSENT from the agent's models, not hidden.
   const agentSubs = new Set([...ds.allSubs(m.CLIENT_NAV), ...ds.allSubs(m.TRANSACTION_NAV)]);
   for (const forbidden of ['assessments', 'decision', 'discussion', 'secondlook', 'evidence', 'passport', 'past-decisions', 'inbox']) if (agentSubs.has(forbidden)) fail(`the agent model carries a club-private subcategory: ${forbidden}`); else passed++;
@@ -127,12 +127,12 @@ for (const [app, expectCats] of [['scoutbox-club', ['overview', 'player', 'evalu
   for (const p of problems) console.error(`   ${p}`);
   ok(problems.length === 0, 'the model is structurally sound');
   ok(ds.widestCategory(model) <= MAX, `no category holds more than ${MAX} subcategories (widest: ${ds.widestCategory(model)})`);
-  ok(model.categories.map((c) => c.id).join(',') === 'journey,contact,trial,offer,signing', 'M24D: five categories — My journey · Club contact · Trial · Offer · Signing (the Board is a page of the journey)');
-  ok(model.categories.length <= 5, `M24D: the player's recruitment navigation has at most five categories (${model.categories.length})`);
-  ok(model.categories.find((c) => c.id === 'journey').subs.map((s) => s.id).join(',') === 'overview,activity,board', 'M24D: My journey is Overview · Activity · Board');
-  ok(m.playerLocation('board', undefined).category === 'journey' && m.playerLocation('board', undefined).sub === 'board', 'M24D: a link to the old Board category opens My journey › Board');
-  ok(m.playerLocation('board', 'board-invites').sub === 'board' && m.playerLocation(undefined, 'board-fit').sub === 'board', 'M24D: links to the old Board pages land on the Board page');
-  ok(m.playerLocation('journey', 'stage').sub === 'overview' && m.playerLocation('journey', 'tasks').sub === 'overview', 'M24D: links to Current stage and Tasks land on the Overview that now carries them');
+  ok(model.categories.map((c) => c.id).join(',') === 'journey,contact,trial,offer,signing', 'five categories — My journey · Club contact · Trial · Offer · Signing (the Board is a page of the journey)');
+  ok(model.categories.length <= 5, `the player's recruitment navigation has at most five categories (${model.categories.length})`);
+  ok(model.categories.find((c) => c.id === 'journey').subs.map((s) => s.id).join(',') === 'overview,activity,board', 'My journey is Overview · Activity · Board');
+  ok(m.playerLocation('board', undefined).category === 'journey' && m.playerLocation('board', undefined).sub === 'board', 'a link to the old Board category opens My journey › Board');
+  ok(m.playerLocation('board', 'board-invites').sub === 'board' && m.playerLocation(undefined, 'board-fit').sub === 'board', 'links to the old Board pages land on the Board page');
+  ok(m.playerLocation('journey', 'stage').sub === 'overview' && m.playerLocation('journey', 'tasks').sub === 'overview', 'links to Current stage and Tasks land on the Overview that now carries them');
   const subs = new Set(ds.allSubs(model));
   for (const forbidden of ['watchlist', 'priority', 'assessments', 'decision', 'discussion', 'secondlook', 'shortlist', 'notes', 'evidence']) if (subs.has(forbidden)) fail(`the player model carries a club-private page: ${forbidden}`); else passed++;
   console.log('✓ no club-private page (watchlist, priority, assessment, decision, discussion, Second Look, shortlist, notes, evidence) exists in the player model (9 folded)');

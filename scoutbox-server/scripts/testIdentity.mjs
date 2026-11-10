@@ -56,9 +56,9 @@ await test('finance tier: every lead plus finance and treasurer roles see deal a
   assert.equal(isFinanceUser({ role: 'Treasurer' }), true);
   assert.equal(isFinanceUser(null), false);
 });
-await test('finance tier: m13 canViewFinance is the roles.mjs rule, not a copy', async () => {
-  const src = (await import('node:fs')).readFileSync(new URL('../m13/shared.mjs', import.meta.url), 'utf8');
-  assert.match(src, /const canViewFinance = isFinanceUser;/);
+await test('finance tier: the route helpers\' canViewFinance is the roles.mjs rule, not a copy', async () => {
+  const { buildRouteHelpers } = await import('../domains/platform/routeHelpers.mjs');
+  assert.equal(buildRouteHelpers({ nextId: () => 'x', isBlocked: () => false }).canViewFinance, isFinanceUser);
 });
 
 // ---------------------------------------------------------- httpTrust.mjs
@@ -224,7 +224,7 @@ await test('first boot (real server): production starts with no people or clubs,
   const PROD_ENV = { NODE_ENV: 'production', MEDIA_SECRET: PROD.MEDIA_SECRET, ADMIN_KEY: PROD.ADMIN_KEY };
   const port = await freePort();
   const boot = (dir, env) => new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, SCOUTBOX_SEED_DEMO: '', ...env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [path.join(HERE, '..', 'server.mjs')], { env: { ...process.env, SCOUTBOX_SEED_DEMO: '', ...env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     proc.stdout.on('data', (d) => { log += d; if (/listening on/.test(log)) resolve(proc); });
     proc.stderr.on('data', (d) => { log += d; });

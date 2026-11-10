@@ -22,7 +22,7 @@ import { SEEDED_POLICY_VERSIONS, RULE_STATUSES } from '../../domains/agents/comp
 import { selectPolicyVersion, applicablePolicySet, ruleAt, resolveScope, evaluatePolicy, evaluateMinorGate, earliestPermittedApproachAt, isRegulatoryMinor, representationScopeProblem, MINOR_PATHWAY_PRODUCTION_ENABLED, POLICY_FACETS } from '../../domains/agents/compliance/policy.mjs';
 import { evaluateConflict, consentSufficiency, CONFLICT_OUTCOMES, PERMITTED_WITH_CONSENT, OUTCOME_ALIASES, conflictSummaryForParty, inputHashOf, mostSevere } from '../../domains/agents/compliance/conflict.mjs';
 import { createVerificationProvider, facetFromProviderAnswer, PROVIDER_STATES } from '../../domains/agents/compliance/provider.mjs';
-import { M25_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/agents/compliance/errors.mjs';
+import { COMPLIANCE_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/agents/compliance/errors.mjs';
 import { COMPLIANCE_AUDIT_ACTIONS } from '../../domains/agents/compliance/audit.mjs';
 import { PERMISSIONS, can, FACETS } from '../../domains/agents/core/shared.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
@@ -229,8 +229,8 @@ section('U/V/W — the minors gate: jurisdiction-aware, guardian-first, accredit
 // ============================================================ Z — contracts (pure)
 section('Z — error contract, permissions, registry, notifications, rate policies, stores');
 {
-  ok(Object.getPrototypeOf(M25_ERROR_HTTP) === null && M25_ERROR_HTTP.constructor === undefined, 'Z3 the error table is null-prototype');
-  neg(M25_ERROR_HTTP.REVIEWER_AUTH_REQUIRED === 401 && M25_ERROR_HTTP.REPRESENTATION_CONFLICT === 403 && M25_ERROR_HTTP.CONSENT_REQUIRED === 422 && M25_ERROR_HTTP.REGULATORY_REVIEW_REQUIRED === 422 && M25_ERROR_HTTP.REGULATORY_PROVIDER_UNAVAILABLE === 503 && M25_ERROR_HTTP.CONTEXT_NOT_FOUND === 404 && M25_ERROR_HTTP.REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE === 409, 'Z4 codes map to the right statuses');
+  ok(Object.getPrototypeOf(COMPLIANCE_ERROR_HTTP) === null && COMPLIANCE_ERROR_HTTP.constructor === undefined, 'Z3 the error table is null-prototype');
+  neg(COMPLIANCE_ERROR_HTTP.REVIEWER_AUTH_REQUIRED === 401 && COMPLIANCE_ERROR_HTTP.REPRESENTATION_CONFLICT === 403 && COMPLIANCE_ERROR_HTTP.CONSENT_REQUIRED === 422 && COMPLIANCE_ERROR_HTTP.REGULATORY_REVIEW_REQUIRED === 422 && COMPLIANCE_ERROR_HTTP.REGULATORY_PROVIDER_UNAVAILABLE === 503 && COMPLIANCE_ERROR_HTTP.CONTEXT_NOT_FOUND === 404 && COMPLIANCE_ERROR_HTTP.REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE === 409, 'Z4 codes map to the right statuses');
   const pub = publicErrorBody({ error: 'CONSENT_REQUIRED', stack: 'x', reviewerNote: 'private', reasons: [{ code: 'CONSENT_REQUIRED', ruleId: 'ENG-6.3', ruleStatus: 'ACTIVE', note: 'prose', agentUserId: 'A' }], consentsOutstanding: [{ partyRole: 'individual', consentKind: 'dual_representation', reasonCode: 'CONSENT_MISSING', agentUserId: 'A' }] });
   neg(pub.stack === undefined && pub.reviewerNote === undefined && pub.reasons[0].note === undefined && pub.reasons[0].agentUserId === undefined && pub.consentsOutstanding[0].agentUserId === undefined && PUBLIC_ERROR_FIELDS.includes('reasons'), 'Z5 error bodies are whitelisted; reasons and outstanding consents shed prose and agent ids');
   ok(can(['licensed_agent'], 'compliance.contexts.write') && can(['analyst'], 'compliance.read'), 'Z6 the matrix grants context writes to licensed agents only and reads to every member');
@@ -256,7 +256,7 @@ section('HTTP — booting a real server (synthetic verification provider ON)');
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, M13_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
+  const proc = spawn(process.execPath, [SERVER], { env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1', ...env }, stdio: 'ignore' });
   children.push(proc); proc.unref();
   let up = false;
   for (let i = 0; i < 400 && !up; i++) { try { up = (await fetch(`${BASE}/healthz`)).ok; } catch { /* booting */ } if (!up) await sleep(250); }
@@ -496,7 +496,7 @@ let CTX1, CTX1_REV, KOLA_CONSENT, CLUB_CONSENT, MARIA_ID;
   neg(expect(collect('P13', await j('POST', `/org/compliance/consents/${CLUB_CONSENT}/grant`, { acknowledgedParticulars: true, acknowledgedLegalAdvice: true }, harbour.token)), 404, 'CONSENT_NOT_FOUND'), 'P13 another club cannot see or answer it');
   neg(expect(collect('P14', await j('POST', `/org/compliance/consents/${CLUB_CONSENT}/grant`, { acknowledgedParticulars: true, acknowledgedLegalAdvice: true }, ANA.token)), 404, 'CONSENT_NOT_FOUND'), 'P14 the agent cannot consent on the club\'s behalf');
   MARIA_ID = maria.userId;
-  const appoint = await j('POST', '/admin/verification/orgs/org-eastport/appoint-root', { userId: MARIA_ID, reason: 'P5.6C suite: club signatory' }, PRIYA.token, ADMIN);
+  const appoint = await j('POST', '/admin/verification/orgs/org-eastport/appoint-root', { userId: MARIA_ID, reason: 'compliance suite: club signatory' }, PRIYA.token, ADMIN);
     ok(appoint.status === 201 && appoint.body.rootAdminUserId === MARIA_ID, 'P15 Trust & Safety records Maria as Eastport\'s verification root (the club signatory), attributed to Priya\'s session');
   const cg = await j('POST', `/org/compliance/consents/${CLUB_CONSENT}/grant`, { acknowledgedParticulars: true, acknowledgedLegalAdvice: true }, maria.token);
   ok(cg.status === 200 && cg.body.consent.status === 'granted', 'P16 the signatory grants for the club');

@@ -150,7 +150,6 @@ operation can write, in temporary directories only, never `scoutbox-server/data/
 
 ## Code layout
 
-New server code goes in `scoutbox-server/domains/<domain>/`. Some older code is still in milestone-named folders
-(`m12/`, `m13/`, `m20/`, `m27/`), and the platform routes (live sync, meta, media, capabilities) are still in
-`server.mjs`; move them into their domain when you next work on them. End-to-end batteries
-live in `scoutbox-server/e2e/<domain>/`, named after what they check.
+Server code is in `scoutbox-server/domains/<domain>/`; `server.mjs` holds no route handlers, only the wiring that creates each
+domain and hands it what it needs, in dependency order. End-to-end batteries live in `scoutbox-server/e2e/<domain>/`,
+named after what they check.

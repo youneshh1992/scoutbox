@@ -31,7 +31,7 @@ const neg = (cond, msg) => { negatives++; ok(cond, `[neg] ${msg}`); };
 const section = (name) => console.log(`\n— ${name} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, M13_FAST_RETRY: '1', M13_QUIET_LOGS: '1', TEST_LICENCE_REGISTRY: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' };
+const ENV = { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_FAST_SWEEPS: '1', SCOUTBOX_QUIET_LOGS: '1', TEST_LICENCE_REGISTRY: '1', AGENT_VERIFICATION_TEST_PROVIDER: '1' };
 const children = [];
 process.on('exit', () => { for (const c of children) { try { c.kill('SIGKILL'); } catch { /* gone */ } } });
 {

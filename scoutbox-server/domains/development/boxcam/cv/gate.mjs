@@ -112,7 +112,7 @@ export function protocolProductionEnabled(protocolId, {
   const candidate = CANDIDATE_PROTOCOLS[protocolId] ?? null;
 
   if (!candidate) {
-    reasons.push('this protocol has no M22 observation rule');
+    reasons.push('this protocol has no computer-vision observation rule');
   }
   if (!providerConfigured) {
     reasons.push('the production observation provider is not configured');

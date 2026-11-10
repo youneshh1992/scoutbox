@@ -85,7 +85,7 @@ test('[schema] migration 0015 is registered before 0016–0018 and creates the s
   F.close(); rm(d);
 });
 
-test('[fixtures] every writer shape is written into its columns and reads back as written (an absent field null, an absent list empty, the trial-day container, the five key lists and the reminder map always present): the P4B invitation (slots, private details, invitation key, recipient), the contact, the open-day literal, the legacy and the minor\'s invitations, the scheduled, accepted, M12-shaped, worked and cancelled trials', () => {
+test('[fixtures] every writer shape is written into its columns and reads back as written (an absent field null, an absent list empty, the trial-day container, the five key lists and the reminder map always present): the P4B invitation (slots, private details, invitation key, recipient), the contact, the open-day literal, the legacy and the minor\'s invitations, the scheduled, accepted, workspace-shaped, worked and cancelled trials', () => {
   const all = EVERY_TRIAL_SHAPE();
   const d = file('typed', all); const S = { db: readRecords(d) };
   assert.deepEqual(S.db.requests.map((r) => r.id), all.requests.map((r) => r.id)); assert.deepEqual(S.db.trials.map((t) => t.id), all.trials.map((t) => t.id));

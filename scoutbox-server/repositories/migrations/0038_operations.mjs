@@ -9,7 +9,7 @@ import { GRASSROOTS_MIGRATION } from '../grassroots.mjs';
 import { OPERATIONS_MIGRATION, OPERATIONS_DDL, OPERATIONS_TABLES, seedOperationsRows } from '../operations.mjs';
 
 export const id = OPERATIONS_MIGRATION;
-export const note = 'Upload sessions, saved searches, invoices, the demo reputation seed and the delivery centre\'s bookkeeping become typed tables (S13e)';
+export const note = 'Upload sessions, saved searches, invoices, the demo reputation seed and the delivery centre\'s bookkeeping become typed tables';
 
 export function up(sqlite, { now }) {
   if (!sqlite.isTransaction) throw new Error(`${id}: up() runs inside the migration runner's transaction only`);

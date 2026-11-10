@@ -32,7 +32,7 @@ export function registerNobodyMissed(ctx) {
     players, orgRouter, nextId, findPlayer, orgCanSee,
     isLead, requireLead, audit, vmetric, suppress, discovery, unit, matchFacts,
   } = ctx;
-  if (typeof matchFacts?.query !== 'function') throw new TypeError('registerNobodyMissed needs the matchFacts repository (S14j)');
+  if (typeof matchFacts?.query !== 'function') throw new TypeError('registerNobodyMissed needs the matchFacts repository');
   const { matchQuery, factsOfRows, readMatchPage, matchOrder, keyOfRow } = createMatchReads({ players, matchFacts });
   const dreads = ctx.discoveryReads;
   if (typeof dreads?.briefs?.forOrg !== 'function' || typeof discovery?.briefs?.create !== 'function') throw new TypeError('registerNobodyMissed needs the discovery repository and discoveryReads from the data layer');
@@ -402,6 +402,5 @@ export function registerNobodyMissed(ctx) {
     });
   });
 
-  ctx.m18ComputeBrief = computeBrief;
   void NOBODY_MISSED_STATES; void isLead; void suppress;
 }

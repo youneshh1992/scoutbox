@@ -29,7 +29,7 @@ const A = { 'x-admin-key': 'scoutbox-admin' };
 /** Boot the real server on `dir`; resolves once it listens, rejects if it exits first (with the log and the exit code). */
 function boot(dir, port, env = {}) {
   return new Promise((resolve, reject) => {
-    const proc = spawnChild(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, M13_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const proc = spawnChild(process.execPath, [SERVER], { env: { ...process.env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let log = '';
     const j = async (method, p, body, token, headers = {}) => {
       const r = await fetch(`http://127.0.0.1:${port}${p}`, { method, headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined });

@@ -15,8 +15,8 @@ import { openStore } from '../store.mjs';
 import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { p4bInvitation, minorInvitation, acceptedRequest, scheduledTrial, legacyTrialRequest, saveFixture } from './recruitmentTestFixtures.mjs';
-import { S8B_FIX } from './recruitmentCasesTestFixtures.mjs';
-import { draftContact, respondedContact, nullKeyContact, externalContact, cancelledContact, draftOffer, acceptedOffer, declinedOffer, withdrawnOffer, revision, contactRequest, S8C_FIX, persisted, TX } from './recruitmentContactsOffersTestFixtures.mjs';
+import { ROOM_CASES_FIX } from './recruitmentCasesTestFixtures.mjs';
+import { draftContact, respondedContact, nullKeyContact, externalContact, cancelledContact, draftOffer, acceptedOffer, declinedOffer, withdrawnOffer, revision, contactRequest, CONTACTS_OFFERS_FIX, persisted, TX } from './recruitmentContactsOffersTestFixtures.mjs';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -36,7 +36,7 @@ const fullDump = (s) => JSON.stringify(s.prepare("SELECT name FROM sqlite_master
 const s8cDump = (s) => JSON.stringify(TABLES.map((t) => s.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all().map((r) => ({ ...r }))));
 const ddlOf = (s, t) => s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(t)?.sql ?? null;
 const col = (s, sql, ...p) => { const r = s.prepare(sql).get(...p); return r ? Object.values({ ...r })[0] : undefined; };
-const S8A_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
+const RECRUITMENT_FIX = () => ({ requests: [acceptedRequest(p4bInvitation(), 'trial-1'), minorInvitation(), legacyTrialRequest()], trials: [scheduledTrial()] });
 /** A contact reads back exactly as it was written. */
 const storedContact = (raw) => persisted(raw);
 /** An offer reads back exactly as it was written; a field the fixture leaves out reads null. */
@@ -44,7 +44,7 @@ const storedOffer = (raw) => ({ subjectRemovedAt: null, ...persisted(raw) });
 
 /** The recruitment fixtures as one fixture; `two` overrides a contact/offer collection (undefined omits it). */
 function fixtureCollections({ more = {}, ...two } = {}) {
-  const fix = S8C_FIX(); const db = { ...S8B_FIX(), ...S8A_FIX(), ...more };
+  const fix = CONTACTS_OFFERS_FIX(); const db = { ...ROOM_CASES_FIX(), ...RECRUITMENT_FIX(), ...more };
   for (const name of COLLECTIONS) { const v = Object.hasOwn(two, name) ? two[name] : fix[name]; if (v !== undefined) db[name] = v; }
   return db;
 }
@@ -78,7 +78,7 @@ test('[schema] migration 0017 is registered before 0018 and creates the ten type
   E.close(); rm(empty);
   const d = file('schema'); const back = readRecords(d); const s = new DatabaseSync(dbFile(d)); s.exec('PRAGMA foreign_keys = ON');
   const after = fullDump(s); assert.deepEqual(runDataMigrations(s, DATA_MIGRATIONS, { now: NOW, context: { sessionTtlMs: TTL } }).ran, []); assert.equal(fullDump(s), after, 'never runs twice');
-  const fix = S8C_FIX();
+  const fix = CONTACTS_OFFERS_FIX();
   assert.deepEqual(plain(back.recruitmentContacts), fix.recruitmentContacts.map(storedContact));
   assert.deepEqual(plain(back.recruitmentOffers), fix.recruitmentOffers.map(storedOffer));
   assert.deepEqual(back.recruitmentContacts[2].keys.send, { key: null, fp: '{"contactId":"rct-3"}' }, 'the null-key send');
