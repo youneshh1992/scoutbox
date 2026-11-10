@@ -821,15 +821,16 @@ section('M — minors through the chain; malformed DOB fails closed');
   neg(s.status === 200 && (gInbox ?? []).some((r) => r.type === 'contact') && !(kInbox ?? []).some((r) => r.orgId === 'org-eastport' && r.type === 'contact' && r.routedTo === 'player'), 'M2 a Contact to a minor routes to the guardian, never to the child');
   const gj = await j('GET', '/guardian/children/pl-guni/journeys', undefined, amara.token);
   neg(gj.status === 200 && !has(gj.body, 'offer') || gj.status === 200, 'M4 the guardian\'s view of the child carries no Offer (none may exist)');
-  // A malformed DOB cannot be STORED: the players repository types every write, so an offline edit planting
-  // `dob: 'not-a-date'` is refused as a whole (the unit rolls back naming the player and the field; the stored record
-  // stays the readable minor it was). The route-level claim (an unreadable age is never an adult) is kept by the
-  // sign-up refusals and by the wall below.
+  // A malformed DOB cannot be STORED: a player is created with a date of birth the repository types, and no act
+  // rewrites it afterwards, so an offline create carrying `dob: 'not-a-date'` is refused naming the player and the field,
+  // and the stored minor stays the readable minor she was. The route-level claim (an unreadable age is never an adult)
+  // is kept by the sign-up refusals and by the wall below.
   await down(server, 'SIGTERM');
   let refusal = null;
-  { const L = openLayer(DATA_DIR); try { L.unit(() => L.layer.players.update('pl-guni', (pl) => { pl.dob = 'not-a-date'; })); } catch (e) { refusal = e; } finally { L.close(); } }
+  let rewritable = true;
+  { const L = openLayer(DATA_DIR); try { const acts = Object.keys(L.layer.players).filter((k) => typeof L.layer.players[k] === 'function' && !(k in L.layer.players.reads)); rewritable = acts.includes('update') || acts.some((k) => /dob|birth/i.test(k)); L.unit(() => L.layer.players.create({ id: 'pl-baddob', name: 'Synthetic Unreadable', dob: 'not-a-date', country: 'GB' })); } catch (e) { refusal = e; } finally { L.close(); } }
   server = await boot(); await relogin();
-  neg(refusal?.code === 'PLAYER_RECORD_INVALID' && /player pl-guni\): dob must be a YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a a malformed DOB cannot be stored: the write is refused naming the player and the field, the stored date is unchanged');
+  neg(!rewritable && refusal?.code === 'PLAYER_RECORD_INVALID' && /player pl-baddob\): dob must be a YYYY-MM-DD date/.test(String(refusal?.message)) && (await j('GET', '/guardian/children', undefined, amara.token)).body.find((k) => k.id === 'pl-guni')?.dob === '2012-02-10', 'M8a a malformed DOB cannot be stored: no act rewrites a date of birth, a create carrying one is refused naming the player and the field, and the stored date is unchanged');
   const wall2 = await j('GET', '/org/players/pl-guni', undefined, alex.token);
   neg(wall2.status === 403 && wall2.body?.error === 'UNDER_18_WALL', 'M8 the wall for an agency holds (the minor is still a minor)');
   const av = await j('POST', '/player/availability', { availability: 'available_now' }, P['pl-guni'].token);

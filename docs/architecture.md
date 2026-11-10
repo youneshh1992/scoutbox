@@ -67,7 +67,9 @@ transaction documents are evidence records.
   agent core still types a `create` from its field specs; its acts have no JavaScript copy of the columns. A
   verification claim's status moves only along `CLAIM_TRANSITIONS` and from the status its caller judged the move
   from, so a stale decision is refused. A Box Cam act is guarded by the state it moves from (a session's result is
-  worked out once, while it is recording; an attempt is measured once, while it is ready). The shared checks, the guarded update and the mapping of a field spec to
+  worked out once, while it is recording; an attempt is measured once, while it is ready). A player's columns change
+  only through acts named for the change (`setAvailability`, `recordStats`, `startProgramme`), which the table's
+  checks judge; the players' `create` still types the whole record. The shared checks, the guarded update and the mapping of a field spec to
   columns are `repositories/writes.mjs`.
 - **Whole-record updates** (every other domain, for now): `create(record)` and `update(id, (draft) => …)`. The update
   hands the callback a plain copy, types the whole record, writes it at once, refuses unknown fields and returns the

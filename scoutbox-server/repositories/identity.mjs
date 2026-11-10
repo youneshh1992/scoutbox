@@ -12,8 +12,8 @@
  *     programme: null | { track, startedAt, completed: [...] },
  *     media, attendance, timeline, badges, drills, drillResults, activityLog, externalIds, seasonHistory,
  *     trialReports }
- * The lists are rows of the `player_*` tables (playerSubrecords.mjs), written only through `addItem`, `setItems` and
- * `patchItem`; `trialReports` is the trials' reports (the recruitment tables), written nowhere here.
+ * A player's columns change only through the named acts (`setAvailability`, `recordStats`, …). The lists are rows of the
+ * `player_*` tables (playerSubrecords.mjs), written only through `addItem`, `setItems` and `patchItem`; `trialReports` is the trials' reports (the recruitment tables), written nowhere here.
  *
  * Guardian record: { id, name, email, emailVerified, idVerified, idvReference, disclaimerAccepted, disclaimerAcceptedAt,
  *   coGuardianOf, notificationPrefs, createdAt, childIds, coGuardians }
@@ -38,6 +38,7 @@
  * `meta.coreIdentityInit` is `pending` (set by the migration).
  */
 import { transaction, migrationApplied } from './database.mjs';
+import { isConstraintError } from './writes.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
 import { isAdult, ADULT_AGE, GRASSROOTS_RADIUS_KM, TRUST, computeTrustScore, trustScoreFromFacts, haversineKm } from '../domain.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
@@ -171,7 +172,6 @@ const textOk = (v, max, min = 1) => typeof v === 'string' && v.length >= min && 
 const optTextOk = (v, max) => v === null || textOk(v, max);
 const intIn = (v, [lo, hi]) => Number.isSafeInteger(v) && v >= lo && v <= hi;
 const clone = (v) => (v === null || typeof v !== 'object' ? v : JSON.parse(JSON.stringify(v)));
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const pick = (o, keys) => Object.fromEntries(keys.map((k) => [k, o?.[k] === undefined ? null : o[k]]));
 const given = (raw) => Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== undefined)); // an undefined field is an absent one
@@ -182,6 +182,8 @@ export const PLAYER_SCALAR_KEYS = Object.freeze(['id', 'name', 'dob', 'country',
   'footballCategory', 'identityVerified', 'guardianId', 'createdAt']);
 const STATS_KEYS = Object.freeze(['appearances', 'goals', 'assists', 'paceKmh', 'passCompletionPct', 'duelSuccessPct', 'cleanSheets']);
 const STATS_COUNTS = Object.freeze(['appearances', 'goals', 'assists', 'cleanSheets']);
+const STATS_COLUMN = Object.freeze({ appearances: 'stats_appearances', goals: 'stats_goals', assists: 'stats_assists', paceKmh: 'stats_pace_kmh',
+  passCompletionPct: 'stats_pass_completion_pct', duelSuccessPct: 'stats_duel_success_pct', cleanSheets: 'stats_clean_sheets' });
 const PREFS_KEYS = Object.freeze(['quietStart', 'quietEnd', 'schoolHoursMute', 'timezone']);
 export const PLAYER_RECORD_KEYS = Object.freeze([...PLAYER_SCALAR_KEYS, 'location', 'stats', 'medical', 'notificationPrefs', 'programme', ...PLAYER_SUBRECORD_KEYS, 'trialReports']);
 const PLAYER_BOOLEANS = Object.freeze(['academyPlus', 'firstTeamSeeker', 'identityVerified']);
@@ -282,6 +284,10 @@ function prefsProblems(n) {
   if (!optTextOk(n.timezone, L.timezone)) out.push(`notificationPrefs.timezone must be text of 1 to ${L.timezone} characters or null`);
   return out;
 }
+const NO_PREFS = Object.freeze({ quietStart: null, quietEnd: null, schoolHoursMute: null, timezone: null });
+/** A whole replacement of the preferences: every key present, no other. */
+const prefsReplacementProblems = (n) => (isPlainObject(n) && Object.keys(n).every((k) => PREFS_KEYS.includes(k)) && PREFS_KEYS.every((k) => k in n)
+  ? prefsProblems(n) : [`notificationPrefs must be { ${PREFS_KEYS.join(', ')} } or null (got ${describe(n)})`]);
 const passwordProblem = (h) => (h === null || textOk(h, L.passwordHash) ? null : `the password hash must be text of 1 to ${L.passwordHash} characters or null`);
 
 const P_COLS = ['id', 'name', 'birth_date', 'country', 'city', 'position', 'foot', 'height_cm', 'weight_kg', 'squad_number', 'contract_until_date',
@@ -625,7 +631,10 @@ export const IDENTITY_RECORDS = {
 };
 
 // ------------------------------------------------------------------ the repositories
-const WRITES = new Set(['create', 'update', 'setPasswordHash', 'setEmailCodeHash', 'addItem', 'setItems', 'patchItem', 'link', 'unlink', 'ageUp', 'erase']);
+const WRITES = new Set(['create', 'setPasswordHash', 'setEmailCodeHash', 'addItem', 'setItems', 'patchItem', 'link', 'unlink', 'ageUp', 'erase',
+  'setAvailability', 'setLevel', 'setFootballCategory', 'setAcademyPlus', 'setFirstTeamSeeker', 'setMedicalSharing', 'setConditionStatus',
+  'setLocation', 'recordStats', 'startProgramme', 'setNotificationPrefs',
+  'verifyEmail', 'recordIdCheck', 'reviewIdCheck', 'acceptDisclaimer']);
 const SCAN_BATCH = 500;
 
 /**
@@ -761,12 +770,32 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
     checkSubKey(key);
     const rec = playerById(id);
     if (!rec) throw noPlayer(id);
-    if (key === 'programme.completed' && rec.programme === null) throw subRefusal(`player ${id}: programme is null, so programme.completed cannot be written (start a programme first with players.update)`);
+    if (key === 'programme.completed' && rec.programme === null) throw subRefusal(`player ${id}: programme is null, so programme.completed cannot be written (start a programme first with players.startProgramme)`);
     return { rec, current: getSubrecords(rec, key) ?? [] };
   };
   const listOf = (id, key) => getSubrecords(playerById(id), key);
 
-  let updatingPlayer = null;
+  /**
+   * Write some columns of a live player. `cols` holds values, bound as parameters; `computed` holds SQL expressions of
+   * the row's own columns, and comes from the act's code, never from a caller. A constraint failure (a CHECK, a STRICT
+   * type) is a PLAYER_RECORD_INVALID naming the columns. Returns the stored record.
+   */
+  const setColumns = (id, cols, computed = {}) => operation(() => {
+    const names = [...Object.keys(cols), ...Object.keys(computed)];
+    const bad = Object.keys(cols).filter((c) => cols[c] !== null && typeof cols[c] === 'object');
+    if (bad.length) throw playerInvalid(id, bad.map((c) => `${c} must be a single value`));
+    const assign = [...Object.keys(cols).map((c) => `${c} = @${c}`), ...Object.entries(computed).map(([c, sql]) => `${c} = ${sql}`)].join(', ');
+    const params = Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v]));
+    let changes;
+    try { changes = q(`UPDATE players SET ${assign} WHERE id = @id AND deleted_at IS NULL`).run({ ...params, id }).changes; } catch (e) {
+      if (isConstraintError(e)) throw playerInvalid(id, [`${names.join(', ')}: ${e.message}`]);
+      throw e;
+    }
+    if (changes !== 1) throw noPlayer(id);
+    refreshProfileSignals(sqlite, [id]);
+    return playerById(id);
+  });
+  const flagOf = (id, field, v) => { if (typeof v !== 'boolean') throw playerInvalid(id, [`${field} must be a boolean`]); return v ? 1 : 0; };
 
   // ---------------------------------------------------------- link operations (both sides, one unit)
   const link = (guardianId, playerId, role = 'co') => operation(() => {
@@ -813,39 +842,57 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
       refreshProfileSignals(sqlite, [r.id]);
       return playerById(r.id);
     }),
-    /**
-     * `update(id, (draft) => …)`: the draft is a plain copy of the record; the change is typed whole and written at
-     * once. The id, the guardian link, the creation time, the lists (`addItem` / `setItems` / `patchItem`) and the trial
-     * reports never change here; an unknown field is refused. Returns the stored record.
+    /*
+     * The named acts, one per change a route makes. Each writes its own columns; the table's CHECKs judge the values,
+     * and a refusal names the player and the field.
      */
-    update: (id, edit) => operation(() => {
-      if (typeof edit !== 'function') throw new TypeError('players.update(id, (draft) => …) takes a function');
-      if (updatingPlayer === id) throw refusal('PLAYER_UPDATE_REENTRANT', `player ${id} is already being updated`);
-      const before = playerById(id);
-      if (!before) throw noPlayer(id);
-      const draft = clone(before);
-      updatingPlayer = id;
-      try { edit(draft); } finally { updatingPlayer = null; }
-      const problems = [];
-      for (const k of ['id', 'guardianId', 'createdAt', ...PLAYER_SUBRECORD_KEYS, 'trialReports']) if (!same(draft[k], before[k])) problems.push(`${k} does not change through update${PLAYER_SUBRECORD_KEYS.includes(k) ? ` (use players.addItem / setItems / patchItem)` : k === 'guardianId' ? ' (use link / unlink / ageUp)' : ''}`);
-      // A composite's list is its rows: set whole or left out, it keeps the rows; a different list is refused.
-      if (isPlainObject(draft.medical)) { if (draft.medical.records === undefined) draft.medical.records = before.medical.records; else if (!same(draft.medical.records, before.medical.records)) problems.push('medical.records does not change through update (use players.addItem / setItems)'); }
-      if (isPlainObject(draft.programme)) {
-        const was = before.programme?.completed ?? [];
-        draft.programme = { track: null, startedAt: null, ...draft.programme };
-        if (draft.programme.completed === undefined) draft.programme.completed = was; else if (!same(draft.programme.completed, was)) problems.push('programme.completed does not change through update (use players.addItem / setItems)');
-      } else if (draft.programme === null && (before.programme?.completed ?? []).length) problems.push(`programme cannot be set to null while ${before.programme.completed.length} programme.completed row(s) exist; clear them first with players.setItems(id, 'programme.completed', [])`);
-      if (isPlainObject(draft.stats)) draft.stats = { ...pick(draft.stats, STATS_KEYS), ...Object.fromEntries(Object.entries(draft.stats).filter(([k]) => !STATS_KEYS.includes(k))) };
-      if (isPlainObject(draft.notificationPrefs)) draft.notificationPrefs = { ...pick(draft.notificationPrefs, PREFS_KEYS), ...Object.fromEntries(Object.entries(draft.notificationPrefs).filter(([k]) => !PREFS_KEYS.includes(k))) };
-      if (draft.city === '') draft.city = null;
-      const { trialReports: _derived, ...typed } = draft;
-      if (!problems.length) problems.push(...playerRecordProblems(typed));
-      if (problems.length) throw playerInvalid(id, problems);
-      const params = playerParams(typed);
-      q(P_UPDATE).run(Object.fromEntries(['id', ...P_UPDATE_COLS].map((c) => [c, params[c]])));
-      refreshProfileSignals(sqlite, [id]);
+    /** The availability, the contract status, or both (`{ availability, contractStatus }`, absent ones kept). */
+    setAvailability: (id, { availability, contractStatus } = {}) => {
+      const cols = {};
+      if (availability !== undefined) cols.availability = availability;
+      if (contractStatus !== undefined) cols.contract_status = contractStatus;
+      if (!Object.keys(cols).length) throw new TypeError('players.setAvailability needs availability, contractStatus or both');
+      return setColumns(id, cols);
+    },
+    setLevel: (id, level) => setColumns(id, { level }),
+    /** The competition category, or null. */
+    setFootballCategory: (id, category) => setColumns(id, { football_category: category }),
+    setAcademyPlus: (id, on) => setColumns(id, { academy_plus: flagOf(id, 'academyPlus', on) }),
+    setFirstTeamSeeker: (id, on) => setColumns(id, { first_team_seeker: flagOf(id, 'firstTeamSeeker', on) }),
+    setMedicalSharing: (id, shared) => setColumns(id, { medical_shared: flagOf(id, 'medical.shared', shared) }),
+    setConditionStatus: (id, status) => setColumns(id, { medical_condition_status: status }),
+    /** `{ lat, lng }` and nothing else. */
+    setLocation: (id, location) => {
+      if (!isPlainObject(location) || Object.keys(location).some((k) => k !== 'lat' && k !== 'lng')) throw playerInvalid(id, [`location must be { lat, lng } (got ${describe(location)})`]);
+      return setColumns(id, { lat: location.lat, lng: location.lng });
+    },
+    /**
+     * Record current-season stats: the fields given replace theirs, the others are kept, and the appearances, goals
+     * and assists read 0 rather than unknown once anything is recorded.
+     */
+    recordStats: (id, stats) => {
+      if (!isPlainObject(stats)) throw playerInvalid(id, [`stats must be an object (got ${describe(stats)})`]);
+      const unknown = Object.keys(stats).filter((k) => !STATS_KEYS.includes(k));
+      if (unknown.length) throw playerInvalid(id, unknown.map((k) => `stats.${k} is not a stat`));
+      const cols = Object.fromEntries(Object.entries(stats).map(([k, v]) => [STATS_COLUMN[k], v]));
+      const zeroIfUnknown = Object.fromEntries(['appearances', 'goals', 'assists'].filter((k) => stats[k] === undefined).map((k) => [STATS_COLUMN[k], `COALESCE(${STATS_COLUMN[k]}, 0)`]));
+      return setColumns(id, cols, zeroIfUnknown);
+    },
+    /** Start (or switch to) a training track at `at`: the completed sessions of the previous track go in the same unit. */
+    startProgramme: (id, track, at) => operation(() => {
+      if (!isClock(at)) throw new TypeError('players.startProgramme: `at` must be a non-negative integer timestamp (ms)');
+      const stored = setColumns(id, { programme_track: track, programme_started_at: at });
+      if (!stored.programme.completed.length) return stored;
+      st['programme.completed'].deleteAll.run(id);
       return playerById(id);
     }),
+    /** Replace the notification preferences (`{ quietStart, quietEnd, schoolHoursMute, timezone }`), or clear them with null. */
+    setNotificationPrefs: (id, prefs) => {
+      const n = prefs ?? NO_PREFS;
+      const problems = prefsReplacementProblems(n);
+      if (problems.length) throw playerInvalid(id, problems);
+      return setColumns(id, { prefs_quiet_start: n.quietStart, prefs_quiet_end: n.quietEnd, prefs_school_hours_mute: nb(n.schoolHoursMute), prefs_timezone: n.timezone });
+    },
     /** Store a new password hash (or null). Returns the stored record. */
     setPasswordHash: (id, hash) => operation(() => {
       const pw = passwordProblem(hash); if (pw) throw playerInvalid(id, [pw]);
@@ -1133,9 +1180,8 @@ export function createIdentityRepositories({ sqlite, log = () => {}, unit = null
     }),
     /** Replace the notification preferences (`{ quietStart, quietEnd, schoolHoursMute, timezone }`), or clear them with null. */
     setNotificationPrefs: (id, prefs) => operation(() => {
-      const n = prefs ?? { quietStart: null, quietEnd: null, schoolHoursMute: null, timezone: null };
-      const problems = isPlainObject(n) && Object.keys(n).every((k) => PREFS_KEYS.includes(k)) && PREFS_KEYS.every((k) => k in n)
-        ? prefsProblems(n) : [`notificationPrefs must be { ${PREFS_KEYS.join(', ')} } or null (got ${describe(n)})`];
+      const n = prefs ?? NO_PREFS;
+      const problems = prefsReplacementProblems(n);
       if (problems.length) throw guardianInvalid(id, problems);
       if (q('UPDATE guardians SET prefs_quiet_start = ?, prefs_quiet_end = ?, prefs_school_hours_mute = ?, prefs_timezone = ? WHERE id = ?')
         .run(n.quietStart, n.quietEnd, nb(n.schoolHoursMute), n.timezone, id).changes !== 1) throw noGuardian(id);

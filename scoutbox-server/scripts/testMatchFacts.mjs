@@ -61,8 +61,8 @@ test('triggers: every input table carries its triggers; a relevant change marks 
   }
   assert.deepEqual(t.dirty().sort(), FIXTURE().players.map((p) => p.id).sort(), 'the seed import marked every player (the keeper derives them at start)');
   t.clearDirty();
-  t.layer.players.update('pl-adult', (d) => { d.position = 'CM'; });
-  assert.deepEqual(t.dirty(), ['pl-adult'], 'a position change marks the player');
+  t.layer.players.setAvailability('pl-adult', { availability: 'loan_open' });
+  assert.deepEqual(t.dirty(), ['pl-adult'], 'an availability change marks the player');
   t.clearDirty();
   t.sqlite.prepare('UPDATE players SET prefs_timezone = ? WHERE id = ?').run('Europe/London', 'pl-adult');
   assert.deepEqual(t.dirty(), [], 'a column the facts do not read marks nothing');
@@ -87,10 +87,10 @@ test('pre-commit work: it runs inside transaction() and a unit of work before CO
   let fail = false;
   const stop = onBeforeCommit(t.sqlite, () => { seen.push(t.sqlite.isTransaction); if (fail) throw new Error('derivation failed'); });
   transaction(t.sqlite, () => t.sqlite.prepare("UPDATE players SET name = 'Renamed' WHERE id = 'pl-adult'").run());
-  t.unit(() => t.layer.players.update('pl-adult', (d) => { d.name = 'Renamed Again'; }));
+  t.unit(() => t.sqlite.prepare("UPDATE players SET name = 'Renamed Again' WHERE id = 'pl-adult'").run());
   assert.deepEqual(seen, [true, true], 'inside the open transaction, once per commit');
   fail = true;
-  assert.throws(() => t.unit(() => t.layer.players.update('pl-adult', (d) => { d.name = 'Lost'; })), /derivation failed/);
+  assert.throws(() => t.unit(() => t.sqlite.prepare("UPDATE players SET name = 'Lost' WHERE id = 'pl-adult'").run()), /derivation failed/);
   assert.equal(t.layer.players.byId('pl-adult').name, 'Renamed Again', 'the unit rolled back');
   assert.throws(() => transaction(t.sqlite, () => t.sqlite.prepare("UPDATE players SET name = 'Lost' WHERE id = 'pl-adult'").run()), /derivation failed/);
   assert.equal(t.layer.players.byId('pl-adult').name, 'Renamed Again', 'the transaction rolled back');
@@ -130,8 +130,8 @@ test('keeper: start derives every player; a write is re-derived before its COMMI
   assert.equal(t.dirty().length, 0, 'the COMMIT left no mark');
 
   // A write outside any unit (the repository's own transaction) is derived too.
-  t.layer.players.update('pl-seeded', (d) => { d.position = 'GK'; d.availability = 'loan_open'; });
-  assert.equal(t.layer.matchFacts.row('pl-seeded').position, 'GK');
+  t.layer.players.setAvailability('pl-seeded', { availability: 'loan_open' });
+  assert.equal(t.layer.matchFacts.row('pl-seeded').availability, 'loan_open');
 
   t.layer.players.erase('pl-seeded');
   assert.equal(t.layer.matchFacts.row('pl-seeded'), null, 'a retained (erased) player has no facts');

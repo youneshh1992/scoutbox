@@ -3,8 +3,8 @@
  * The organisation and Trust & Safety views are POSITIVE allowlists built field
  * by field — never a spread of the record with a few keys deleted — so a field
  * added to the record later is not served to them until a decision puts it on a
- * list. The guardian's own views are the whole record minus its secrets: the
- * guardian is the child's representative. The functions are pure: they take
+ * list. The player's own view and the guardian's are allowlists of the whole
+ * record without its secrets: the guardian is the child's representative. The functions are pure: they take
  * the record (or its read-only view) and the helpers the rule needs, and
  * return a fresh object.
  */
@@ -67,11 +67,19 @@ export function orgPlayerView(player, org, helpers) {
   return view;
 }
 
-/** A guardian's view of their child: the whole record minus the password hash, plus the derived numbers (the guardian is the child's representative). */
+/** The player's own record, as the player (and, for a child, the guardian) receives it. */
+export const SELF_PLAYER_FIELDS = Object.freeze(['id', 'name', 'dob', 'country', 'city', 'position', 'foot', 'heightCm', 'weightKg', 'squadNumber',
+  'contractUntil', 'marketValueRange', 'agentName', 'academyPlus', 'firstTeamSeeker', 'availability', 'contractStatus', 'level',
+  'footballCategory', 'identityVerified', 'guardianId', 'createdAt', 'location', 'stats', 'medical', 'notificationPrefs', 'programme',
+  'media', 'attendance', 'timeline', 'badges', 'drills', 'drillResults', 'activityLog', 'externalIds', 'seasonHistory', 'trialReports']);
+export function playerSelfView(player) {
+  return pick(player, SELF_PLAYER_FIELDS);
+}
+
+/** A guardian's view of their child: the child's own record plus the derived numbers (the guardian is the child's representative). */
 export function guardianChildView(player, helpers) {
   const { ageOn, computeTrustScore, trustBreakdown } = helpers;
-  const { password, ...rest } = plain(player);
-  return { ...rest, age: ageOn(player.dob), trustScore: computeTrustScore(player), trust: trustBreakdown(player) };
+  return { ...playerSelfView(player), age: ageOn(player.dob), trustScore: computeTrustScore(player), trust: trustBreakdown(player) };
 }
 
 export const SELF_GUARDIAN_FIELDS = Object.freeze(['id', 'name', 'email', 'emailVerified', 'idVerified', 'idvReference', 'disclaimerAccepted', 'disclaimerAcceptedAt', 'coGuardianOf', 'notificationPrefs', 'createdAt', 'childIds', 'coGuardians']);

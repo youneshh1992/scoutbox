@@ -80,7 +80,7 @@ export function registerSigning(rawCtx) {
   const caseOfOrg = (id, orgId) => { const k = recruitmentReads.cases.byId(id); return k && k.orgId === orgId ? k : null; };
   /** A case history entry is an explicit write of its case (never an in-place push on the read-only view). */
   const caseAudit = (kase, ...entry) => ctx.recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
-  if (typeof players?.update !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
+  if (typeof players?.setAvailability !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function') throw new TypeError('registerSigning needs the identity repository (players), unit and afterCommit from the data layer');
   if (typeof signingsFollowUps?.signingPackages?.insert !== 'function' || typeof signingsFollowUps?.signings?.record !== 'function') throw new TypeError('registerSigning needs the signings/follow-ups repository (S8d) from the data layer');
   const sp = signingsFollowUps.signingPackages; const sg = signingsFollowUps.signings;
 
@@ -320,7 +320,7 @@ export function registerSigning(rawCtx) {
     // A signing moves the player's level: grassroots signings make semi-pros, academy/pro signings make pros.
     const levelBefore = player.level ?? 'amateur';
     const levelAfter = playerLevelAfterSigning(org.level);
-    players.update(player.id, (d) => { d.level = levelAfter; });
+    players.setLevel(player.id, levelAfter);
     // The timeline is rows of player_timeline, appended through the repository inside this unit.
     const year = String(new Date(ts).getFullYear());
     const levelLines = [];
@@ -336,7 +336,7 @@ export function registerSigning(rawCtx) {
       if (!clubSetup.squad.has(org.id, player.id)) clubSetup.squad.create({ id: nextId('sq'), orgId: org.id, playerId: player.id, name: String(player.name ?? 'Player').slice(0, CLUB_SETUP_LIMITS.name), position: player.position ?? null, source: 'signing', addedAt: ts });
     }
     // `under_contract` means a real contract was executed: written here and nowhere else for a recruitment signing.
-    players.update(player.id, (d) => { d.contractStatus = 'under_contract'; d.availability = 'not_seeking'; });
+    players.setAvailability(player.id, { contractStatus: 'under_contract', availability: 'not_seeking' });
     players.addItem(player.id, 'timeline', { year, event: pkg ? `Signed with ${org.name} — signing completed in ScoutBox` : `Signed by ${org.name} — discovered on ScoutBox` });
     const effects = () => {
       safe('refreshJourneyBadges', () => refreshJourneyBadges?.(player));

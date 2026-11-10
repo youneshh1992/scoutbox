@@ -29,7 +29,7 @@ const ORGS = () => [
 ];
 // The first installation's seed (staff are written through their repository). The fixture player must be a valid
 // record: the identity repositories validate it at the first boot's import.
-const fixtureSeed = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2000-01-01', country: 'GB', city: 'Start', medical: { shared: false, records: [], conditionStatus: 'unknown' } }] });
+const fixtureSeed = () => ({ orgs: ORGS(), guardians: [], players: [{ id: 'pl-1', name: 'P', dob: '2000-01-01', country: 'GB', footballCategory: 'Start', medical: { shared: false, records: [], conditionStatus: 'unknown' } }] });
 
 /** A first installation with the fixture seeded and one staff member; returns everything a test needs. */
 function boot(dir, seed = fixtureSeed()) {
@@ -53,7 +53,7 @@ function operation(t, { failLate = false, afterCommit = null } = {}) {
   const result = t.unit(() => {
     t.layer.orgs.create({ id: 'org-new', name: 'New FC', type: 'club', plan: 'Pro' });
     t.layer.orgs.update('org-pro', (d) => { d.suspended = true; });
-    t.layer.players.update('pl-1', (d) => { d.city = 'In the unit'; });
+    t.layer.players.setFootballCategory('pl-1', 'In the unit');
     token = t.layer.sessions.create('player', 'pl-1').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
     // The work fails after every write.
@@ -66,7 +66,7 @@ function operation(t, { failLate = false, afterCommit = null } = {}) {
 function assertDatabaseUntouched(t) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").n, 0, 'no inserted row');
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0, 'no updated column');
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Start', 'no player write');
+  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Start', 'no player write');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player'").n, 0, 'no session row');
   assert.equal(t.raw("SELECT verified FROM orgs WHERE id = 'org-grass'").verified, 1, 'the unrelated write made before the unit is kept');
   assert.equal(hasBlobTable(t.store.sqlite), false, 'there is no blob table');
@@ -75,7 +75,7 @@ function assertDatabaseUntouched(t) {
 function assertMemoryRestored(t, refs) {
   const { p1 } = refs;
   assert.ok(Object.isFrozen(p1), 'a held record is a frozen copy');
-  assert.equal(t.layer.players.byId('pl-1').city, 'Start', 'a read after the rollback sees the committed row');
+  assert.equal(t.layer.players.byId('pl-1').footballCategory, 'Start', 'a read after the rollback sees the committed row');
   assert.equal(t.layer.orgs.byId('org-new'), null); assert.equal(t.layer.orgs.count(), 3);
   assert.equal(t.layer.orgs.byId('org-pro').suspended, false, 'a read after the rollback sees the committed row');
   assert.equal(t.layer.orgs.byId('org-grass').verified, true);
@@ -83,7 +83,7 @@ function assertMemoryRestored(t, refs) {
 function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-new'").n, 1);
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'In the unit');
+  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'In the unit');
   assert.ok(t.layer.sessions.byToken(token), 'the session minted inside the unit is live');
   assert.equal(t.raw("SELECT verified FROM orgs WHERE id = 'org-grass'").verified, 1);
 }
@@ -103,7 +103,7 @@ await test('unit of work: a row insert, a row update, a staged player write and 
   assert.equal(result, 'done'); assert.equal(t.store.sqlite.isTransaction, false);
   assertOperationPersisted(t, token);
   assert.deepEqual(calls, [false], 'the callback ran once, outside the transaction');
-  assert.equal(t.layer.orgs.byId('org-pro').suspended, true); assert.equal(t.layer.players.byId('pl-1').city, 'In the unit');
+  assert.equal(t.layer.orgs.byId('org-pro').suspended, true); assert.equal(t.layer.players.byId('pl-1').footballCategory, 'In the unit');
   t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -151,7 +151,7 @@ await test('unit of work: a process killed before COMMIT leaves the pre-operatio
   const again = openStore(dir);
   const layer2 = attachDataLayer({ store: again, nextId, sessionTtlMs: TTL });
   assert.equal(layer2.orgs.byId('org-crash'), null); assert.equal(layer2.orgs.count(), 3);
-  assert.equal(layer2.players.byId('pl-1').city, 'Start');
+  assert.equal(layer2.players.byId('pl-1').footballCategory, 'Start');
   assert.equal(layer2.orgs.byId('org-pro').suspended, false);
   assert.equal(again.sqlite.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   again.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
@@ -166,15 +166,15 @@ await test('unit of work: a nested unit joins the enclosing one (an inner failur
   try {
     t.unit(() => {
       t.layer.orgs.create({ id: 'org-outer', name: 'Outer', type: 'club', plan: 'Pro' });
-      t.unit(() => { t.layer.players.update('pl-1', (d) => { d.city = 'Inner'; }); throw new Error('inner failed'); });
+      t.unit(() => { t.layer.players.setFootballCategory('pl-1', 'Inner'); throw new Error('inner failed'); });
     });
   } catch (e) { err = e; }
   assert.match(err.message, /inner failed/); assert.equal(err.unitOfWork, 'rolled_back');
-  assert.equal(t.layer.orgs.byId('org-outer'), null); assert.equal(p1.city, 'Start');
+  assert.equal(t.layer.orgs.byId('org-outer'), null); assert.equal(p1.footballCategory, 'Start');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-outer'").n, 0);
   // Several writes in a unit are one transaction; what the unit wrote lands with it.
-  assert.equal(begins(t, () => t.unit(() => { t.layer.players.update('pl-1', (d) => { d.city = 'Absorbed'; }); t.layer.orgs.create({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); })), 1, 'exactly one transaction');
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Absorbed'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-abs'").n, 1);
+  assert.equal(begins(t, () => t.unit(() => { t.layer.players.setFootballCategory('pl-1', 'Absorbed'); t.layer.orgs.create({ id: 'org-abs', name: 'Abs', type: 'club', plan: 'Pro' }); })), 1, 'exactly one transaction');
+  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Absorbed'); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-abs'").n, 1);
   // Asynchronous work: a SQLite transaction must never span an await.
   err = null;
   try { t.unit(async () => { t.layer.orgs.create({ id: 'org-async', name: 'Async', type: 'club', plan: 'Pro' }); }); } catch (e) { err = e; }
@@ -240,8 +240,8 @@ await test('a failure at BEGIN leaves no unit open — the work never runs, no t
   assert.equal(invoked, 0, 'the work must not run when the transaction could not start');
   assert.equal(t.store.inUnitOfWork(), false, 'no fictitious unit remains active');
   assert.equal(t.store.unit.active(), false); assert.equal(t.store.sqlite.isTransaction, false);
-  t.layer.players.update('pl-1', (d) => { d.city = 'Ordinary edit'; });
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Ordinary edit', 'a later write is real, not absorbed by a phantom unit');
+  t.layer.players.setFootballCategory('pl-1', 'Ordinary edit');
+  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Ordinary edit', 'a later write is real, not absorbed by a phantom unit');
   t.unit(() => { t.layer.orgs.create({ id: 'org-after-begin', name: 'After', type: 'club', plan: 'Pro' }); });
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-after-begin'").n, 1, 'a later unit works');
   // A ROLLBACK that fails: reported on the error and in the state, and the unit is still closed.
@@ -269,7 +269,7 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
       try {
         t.unit(() => {
           t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' });
-          t.layer.players.update('pl-1', (d) => { d.city = 'Inner'; });
+          t.layer.players.setFootballCategory('pl-1', 'Inner');
           t.store.afterCommit(() => { events += 1; });
           throw new Error('inner failure');
         });
@@ -286,8 +286,8 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0, 'the outer row write did not commit');
   assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 0);
   assert.equal(events, 0, 'no after-commit callback of a failed unit runs');
-  assert.equal(t.layer.orgs.byId('org-pro').suspended, false); assert.equal(t.layer.orgs.byId('org-inner'), null); assert.equal(p1.city, 'Start');
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Start'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
+  assert.equal(t.layer.orgs.byId('org-pro').suspended, false); assert.equal(t.layer.orgs.byId('org-inner'), null); assert.equal(p1.footballCategory, 'Start');
+  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Start'); assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
   // The same operation, retried without the failure, commits whole.
   t.unit(() => { t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); t.unit(() => { t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' }); }); t.store.afterCommit(() => { events += 1; }); });
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1); assert.equal(t.raw("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-inner'").n, 1); assert.equal(events, 1);
@@ -339,13 +339,13 @@ await test('an async function is refused BEFORE it is invoked (top-level and nes
     err = null;
     try {
       t.unit(() => {
-        t.layer.players.update('pl-1', (d) => { d.city = 'Sync part'; });
+        t.layer.players.setFootballCategory('pl-1', 'Sync part');
         return (async () => { await tick(); continuation += 1; throw new Error('continuation rejected'); })();
       });
     } catch (e) { err = e; }
     assert.match(err.message, /synchronous|thenable|promise/); assert.equal(err.unitOfWork, 'rolled_back');
-    assert.equal(p1.city, 'Start', 'the synchronous part of the work is rolled back');
-    assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-1'").city, 'Start');
+    assert.equal(p1.footballCategory, 'Start', 'the synchronous part of the work is rolled back');
+    assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-1'").football_category, 'Start');
     await tick(); await tick();
     assert.equal(continuation, 1, 'the continuation still ran: refusing the promise does not cancel the work (documented limitation)');
     const stray = t.store.unitOfWorkState().strayAsyncWork;
@@ -436,19 +436,19 @@ test('cost: a player write — standalone and inside a unit of work with an orga
   try {
     const statementsFor = (n) => {
       const dir = tempDir(`cost-${n}`);
-      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', city: 'Start' })) }; // the trials own the reports; a seed player carries none
+      const seed = { ...fixtureSeed(), players: Array.from({ length: n }, (_, i) => ({ id: `pl-${i}`, name: `Player ${i}`, dob: '2000-01-01', country: 'GB', footballCategory: 'Start' })) }; // the trials own the reports; a seed player carries none
       const t = boot(dir, seed);
       const players = t.layer.players;
       counted.n = 0; counted.on = true;
-      players.update('pl-7', (d) => { d.city = 'Standalone'; });
-      t.unit(() => { players.update('pl-7', (d) => { d.city = 'In a unit'; }); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); });
+      players.setFootballCategory('pl-7', 'Standalone');
+      t.unit(() => { players.setFootballCategory('pl-7', 'In a unit'); t.layer.orgs.update('org-pro', (d) => { d.suspended = true; }); });
       counted.on = false;
       const statements = counted.n;
       // A unit that fails after the write: the row is unchanged (a held record is a frozen copy).
       const held = players.byId('pl-7');
-      assert.throws(() => t.unit(() => { players.update('pl-7', (d) => { d.city = 'Rolled back'; }); throw new Error('late'); }), /late/);
-      assert.equal(held.city, 'In a unit'); assert.ok(Object.isFrozen(held)); assert.equal(players.byId('pl-7').city, 'In a unit'); assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-7'").city, 'In a unit');
-      assert.equal(players.byId(`pl-${n - 1}`).city, 'Start', 'an untouched player is unchanged');
+      assert.throws(() => t.unit(() => { players.setFootballCategory('pl-7', 'Rolled back'); throw new Error('late'); }), /late/);
+      assert.equal(held.footballCategory, 'In a unit'); assert.ok(Object.isFrozen(held)); assert.equal(players.byId('pl-7').footballCategory, 'In a unit'); assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-7'").football_category, 'In a unit');
+      assert.equal(players.byId(`pl-${n - 1}`).footballCategory, 'Start', 'an untouched player is unchanged');
       t.store.sqlite.close(); fs.rmSync(dir, { recursive: true, force: true });
       return statements;
     };

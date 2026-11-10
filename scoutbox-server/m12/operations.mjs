@@ -187,7 +187,7 @@ export function registerOperations(ctx) {
   playerRouter.post('/football-category', (req, res) => {
     const c = req.body?.category;
     if (!['mens', 'womens', 'boys', 'girls', 'mixed', null].includes(c)) return res.status(400).json({ error: 'CATEGORY_INVALID' });
-    players.update(req.player.id, (d) => { d.footballCategory = c; });
+    players.setFootballCategory(req.player.id, c);
     res.json({ footballCategory: c });
   });
 

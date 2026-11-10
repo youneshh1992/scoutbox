@@ -1,0 +1,300 @@
+// The player's own football record: the home feed, the portable CV, "who's watching you", clips, medical records,
+// verified attendance, the timeline, stats, the at-home combine, Academy+, availability and location. A child keeps
+// all football activity; what a parent manages (Academy+, medical sharing, availability) is refused to a child here
+// and set from the guardian's account instead.
+import { optText, reqText, badField, switchRefused, dateOnlyOrRefuse } from '../platform/input.mjs';
+import { ageOn, computeTrustScore, trustBreakdown, trustTier, computeStreak, weeklyGoal, nextActions } from '../../domain.mjs';
+
+/**
+ * The standardised at-home drills. A result recorded on video is marked verified (the video's presence today; the
+ * computer-vision analysis sits behind the same call).
+ */
+export const DRILLS = [
+  { id: 'drill-sprint-ladder', name: 'Sprint ladder — 6×30m', metric: 'best 30m time', unit: 's', benchmark: 4.2, lowerIsBetter: true },
+  { id: 'drill-passing-gates', name: 'Passing gates — both feet', metric: 'gates hit of 20', unit: '/20', benchmark: 14, lowerIsBetter: false },
+  { id: 'drill-shooting-arc', name: 'Shooting arc — 20 finishes', metric: 'on-target finishes', unit: '/20', benchmark: 12, lowerIsBetter: false },
+  { id: 'drill-first-touch', name: 'First touch — wall rebounds', metric: 'touches in 60s', unit: '', benchmark: 45, lowerIsBetter: false },
+];
+
+const AVAILABILITY = ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'];
+// `under_contract` is written only by the completed-signing writer, and while a canonical live contract stands no
+// self-declared word replaces it. The other words are the player's own reading of their situation.
+const SELF_DECLARABLE_CONTRACT_STATUSES = ['expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown'];
+const STAT_FIELDS = ['appearances', 'goals', 'assists', 'paceKmh', 'passCompletionPct', 'duelSuccessPct', 'cleanSheets'];
+const STAT_COUNTS = ['appearances', 'goals', 'assists', 'cleanSheets'];
+const FRESH_START = 'Fresh Start';
+
+export function registerPlayerRecord({
+  playerRouter, players, unit, seam, nextId, broadcast, storage, guardianManagedOnly, moderateOrRefuse, recordActivity,
+  ledgerAppend, insightsFor, canonicalContractFor,
+}) {
+  if (typeof players?.recordStats !== 'function' || typeof recordActivity !== 'function') throw new TypeError('registerPlayerRecord needs the players repository and the activity recorder');
+  // A refusal from the players repository (a value its table cannot hold) is the client's 400.
+  const invalidPlayer = (res, e) => {
+    if (e?.code !== 'PLAYER_RECORD_INVALID' && e?.code !== 'PLAYER_SUBRECORD_INVALID') throw e;
+    res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
+  };
+
+  // The home feed: the weekly scout report first, then activity.
+  playerRouter.get('/feed', (req, res) => {
+    const p = req.player;
+    const ins = insightsFor(p.id);
+    const topClip = p.media.slice().sort((a, b) => (b.views ?? 0) - (a.views ?? 0))[0] ?? null;
+    const items = [{
+      type: 'weekly_report',
+      ts: Date.now(),
+      report: {
+        views: ins.thisWeek.views,
+        shortlists: ins.thisWeek.shortlists,
+        streak: computeStreak(p.activityLog),
+        weeklyGoal: weeklyGoal(p.activityLog),
+        topClip: topClip ? { title: topClip.title, views: topClip.views ?? 0, verified: !!topClip.verifiedClip } : null,
+        suggestion: nextActions(p)[0] ?? null,
+      },
+    }];
+    for (const e of ins.recent.slice(0, 8)) items.push({ type: 'scouting_event', ts: e.ts, orgName: e.orgName, eventType: e.type });
+    const noticed = {};
+    for (const m of p.media) for (const [tag, n] of Object.entries(m.tags ?? {})) noticed[tag] = (noticed[tag] ?? 0) + n;
+    if (Object.keys(noticed).length) items.push({ type: 'scouts_noticed', ts: Date.now() - 1, tags: noticed });
+    res.json(items);
+  });
+
+  // The portable verified CV: the player owns their record.
+  playerRouter.get('/cv', (req, res) => {
+    const p = req.player;
+    const score = computeTrustScore(p);
+    res.json({
+      generatedAt: new Date().toISOString(),
+      player: {
+        name: p.name, age: ageOn(p.dob), country: p.country, position: p.position, foot: p.foot,
+        heightCm: p.heightCm, weightKg: p.weightKg, identityVerified: p.identityVerified,
+      },
+      trust: { score, tier: trustTier(score), breakdown: trustBreakdown(p) },
+      seasonStats: p.stats,
+      verifiedAttendance: p.attendance.map((a) => ({ fixture: a.fixture, venue: a.venue, date: a.date })),
+      verifiedClips: p.media.filter((m) => m.verifiedClip).map((m) => ({ title: m.title, uploadedAt: m.uploadedAt })),
+      trialReports: p.trialReports.map((r) => ({
+        orgName: r.orgName, filedAt: r.filedAt,
+        acceleration: r.acceleration, sprintSpeedKmh: r.sprintSpeedKmh, distanceKm: r.distanceKm,
+        passCompletionPct: r.passCompletionPct, duelSuccessPct: r.duelSuccessPct, coachRating: r.coachRating,
+      })),
+      combine: p.drillResults,
+      timeline: p.timeline,
+      note: 'Generated by ScoutBox. Attendance is GPS+device verified; trial reports are filed by clubs; trust is never purchasable.',
+    });
+  });
+
+  // The player's side of the Discovery Ledger.
+  playerRouter.get('/insights', (req, res) => res.json(insightsFor(req.player.id)));
+
+  playerRouter.post('/academyplus', (req, res) => {
+    if (guardianManagedOnly(req, res)) return;
+    if (switchRefused(res, req.body?.enabled, 'enabled')) return;
+    const on = req.body.enabled;
+    let stored;
+    unit(() => {
+      stored = players.setAcademyPlus(req.player.id, on);
+      seam('academyplus.after_row');
+      if (on && !stored.badges.includes(FRESH_START)) players.addItem(req.player.id, 'badges', FRESH_START);
+      if (!on && stored.badges.includes(FRESH_START)) players.setItems(req.player.id, 'badges', stored.badges.filter((b) => b !== FRESH_START));
+      stored = players.byId(req.player.id);
+      broadcast('players', { playerId: req.player.id });
+    });
+    res.json({ academyPlus: stored.academyPlus, badges: stored.badges });
+  });
+
+  playerRouter.post('/badges', (req, res) => {
+    const { badges } = req.body || {};
+    if (!Array.isArray(badges)) return res.status(400).json({ error: 'BADGES_MUST_BE_ARRAY' });
+    const stored = players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String));
+    broadcast('players', { playerId: req.player.id });
+    res.json({ badges: stored });
+  });
+
+  // A clip upload. `dataUrl` carries the video (about 12MB at most); the storage adapter writes it.
+  playerRouter.post('/media', (req, res) => {
+    const { title, kind = 'video', dataUrl, attendanceId } = req.body || {};
+    if (!reqText(title, 160)) return res.status(400).json({ error: 'TITLE_REQUIRED' });
+    if (!optText(kind, 20)) return badField(res, 'kind');
+    if (!moderateOrRefuse(res, title, { kind: 'media_title', playerId: req.player.id })) return;
+    const item = { id: nextId('media'), title, kind, uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null };
+    if (dataUrl) {
+      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return res.status(400).json({ error: 'BAD_DATA_URL' });
+      if (dataUrl.length > 16_000_000) return res.status(413).json({ error: 'FILE_TOO_LARGE', message: 'Uploads are capped at ~12MB in this prototype.' });
+      if (!storage.saveDataUrl(item.id, dataUrl)) return res.status(400).json({ error: 'BAD_DATA_URL' });
+      item.url = `/media/${item.id}`;
+    }
+    // The Verified Clip seal: footage linked to one of the player's GPS- and device-confirmed attendances.
+    if (attendanceId) {
+      const att = req.player.attendance.find((a) => a.id === attendanceId);
+      if (!att) return res.status(400).json({ error: 'ATTENDANCE_NOT_FOUND', message: 'A verified clip must link one of YOUR verified attendances.' });
+      if (!item.url) return res.status(400).json({ error: 'FILE_REQUIRED_FOR_VERIFIED_CLIP', message: 'Attach the actual footage to claim the Verified Clip seal.' });
+      item.verifiedClip = att.id;
+    }
+    try {
+      unit(() => {
+        players.addItem(req.player.id, 'media', item);
+        seam('media.after_row');
+        recordActivity(req.player);
+        broadcast('players', { playerId: req.player.id });
+      });
+    } catch (e) { return invalidPlayer(res, e); }
+    res.status(201).json({ media: item, trustScore: computeTrustScore(players.byId(req.player.id)) });
+  });
+
+  // Medical sharing is the player's call by data-protection law; for a child, the guardian's.
+  playerRouter.post('/medical/share', (req, res) => {
+    if (guardianManagedOnly(req, res)) return;
+    if (switchRefused(res, req.body?.shared, 'shared')) return;
+    const stored = players.setMedicalSharing(req.player.id, req.body.shared);
+    broadcast('players', { playerId: req.player.id });
+    res.json({ shared: stored.medical.shared });
+  });
+
+  playerRouter.post('/medical/records', (req, res) => {
+    const { type, title, date, layoffWeeks, cleared, conditionStatus } = req.body || {};
+    if (date && !dateOnlyOrRefuse(res, date, 'date')) return;
+    for (const [f, v, max] of [['type', type, 40], ['title', title, 160], ['conditionStatus', conditionStatus, 40]]) if (!optText(v, max)) return badField(res, f);
+    if (layoffWeeks != null && !(typeof layoffWeeks === 'number' && Number.isFinite(layoffWeeks) && layoffWeeks >= 0 && layoffWeeks <= 520)) return badField(res, 'layoffWeeks');
+    if (cleared != null && typeof cleared !== 'boolean') return badField(res, 'cleared');
+    try {
+      unit(() => {
+        if (conditionStatus) players.setConditionStatus(req.player.id, conditionStatus);
+        seam('medical.records.after_row');
+        if (title) {
+          players.addItem(req.player.id, 'medical.records', { id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
+        }
+        broadcast('players', { playerId: req.player.id });
+      });
+    } catch (e) { return invalidPlayer(res, e); }
+    res.status(201).json(players.byId(req.player.id).medical);
+  });
+
+  // The location powers the grassroots radius. No organisation's view carries the coordinates, only the distance.
+  playerRouter.post('/location', (req, res) => {
+    const { lat, lng } = req.body || {};
+    if (typeof lat !== 'number' || typeof lng !== 'number' || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      return res.status(400).json({ error: 'BAD_COORDINATES' });
+    }
+    players.setLocation(req.player.id, { lat, lng });
+    broadcast('players', { playerId: req.player.id });
+    res.json({ ok: true });
+  });
+
+  playerRouter.post('/availability', (req, res) => {
+    if (guardianManagedOnly(req, res)) return;
+    const { availability, contractStatus } = req.body || {};
+    const contractStatuses = ['under_contract', ...SELF_DECLARABLE_CONTRACT_STATUSES];
+    if (availability && !AVAILABILITY.includes(availability)) return res.status(400).json({ error: 'BAD_AVAILABILITY', allowed: AVAILABILITY });
+    if (contractStatus && !contractStatuses.includes(contractStatus)) return res.status(400).json({ error: 'BAD_CONTRACT_STATUS', allowed: contractStatuses });
+    if (contractStatus === 'under_contract') {
+      return res.status(403).json({ error: 'CONTRACT_STATUS_NOT_SELF_DECLARABLE', message: 'Under contract is recorded when a signing completes in ScoutBox; it cannot be declared here.', allowed: SELF_DECLARABLE_CONTRACT_STATUSES });
+    }
+    if (contractStatus) {
+      const canonical = canonicalContractFor(req.player.id);
+      if (canonical) {
+        return res.status(409).json({ error: 'CONTRACT_STATUS_CANONICAL', message: 'Your contract status is set by a signing completed in ScoutBox and cannot be changed here while that contract stands.', contractStatus: req.player.contractStatus, endDate: canonical.endDate ?? null });
+      }
+    }
+    const stored = availability || contractStatus
+      ? players.setAvailability(req.player.id, { ...(availability ? { availability } : {}), ...(contractStatus ? { contractStatus } : {}) })
+      : req.player;
+    broadcast('players', { playerId: req.player.id });
+    res.json({ availability: stored.availability, contractStatus: stored.contractStatus });
+  });
+
+  // Verified match attendance needs the fixture, venue, date, GPS and the device.
+  playerRouter.post('/attendance', (req, res) => {
+    const { fixture, venue, date, gps, deviceId } = req.body || {};
+    const missing = ['fixture', 'venue', 'date'].filter((f) => !req.body?.[f]);
+    if (!gps || typeof gps.lat !== 'number' || typeof gps.lng !== 'number') missing.push('gps{lat,lng}');
+    if (!deviceId) missing.push('deviceId');
+    if (missing.length) {
+      return res.status(400).json({ error: 'ATTENDANCE_UNVERIFIABLE', message: 'Verified attendance needs fixture, venue, date, GPS and device data.', missing });
+    }
+    if (!dateOnlyOrRefuse(res, date, 'date')) return;
+    // The row stores gps as two columns: anything else on it is refused, not trimmed.
+    if (Object.keys(gps).some((k) => k !== 'lat' && k !== 'lng')) return res.status(400).json({ error: 'GPS_INVALID', message: 'gps is { lat, lng } and nothing else.' });
+    const item = { id: nextId('att'), fixture, venue, date, gps: { lat: gps.lat, lng: gps.lng }, deviceConfirmed: true, verified: true };
+    try {
+      unit(() => {
+        players.addItem(req.player.id, 'attendance', item);
+        seam('attendance.after_row');
+        recordActivity(req.player);
+        ledgerAppend({ type: 'attendance_verified', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
+        broadcast('players', { playerId: req.player.id });
+      });
+    } catch (e) { return invalidPlayer(res, e); }
+    res.status(201).json({ attendance: item, trustScore: computeTrustScore(players.byId(req.player.id)) });
+  });
+
+  playerRouter.post('/timeline', (req, res) => {
+    const { year, event } = req.body || {};
+    if (!year || !event) return res.status(400).json({ error: 'YEAR_AND_EVENT_REQUIRED' });
+    if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
+    players.addItem(req.player.id, 'timeline', { year: String(year), event: String(event) });
+    broadcast('players', { playerId: req.player.id });
+    res.status(201).json({ timeline: players.byId(req.player.id).timeline });
+  });
+
+  // `season` (e.g. "2024/25") files the numbers into the season history instead of the current season.
+  playerRouter.post('/stats', (req, res) => {
+    const updates = {};
+    for (const f of STAT_FIELDS) {
+      const v = req.body?.[f];
+      if (v === undefined) continue;
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || (STAT_COUNTS.includes(f) && !Number.isSafeInteger(v)) || (f.endsWith('Pct') && v > 100)) return res.status(400).json({ error: 'BAD_STAT', field: f });
+      updates[f] = v;
+    }
+    const season = typeof req.body?.season === 'string' && req.body.season.trim() ? req.body.season.trim() : null;
+    unit(() => {
+      if (season) {
+        const history = (req.player.seasonHistory ?? []).map((s) => ({ ...s }));
+        const existing = history.find((s) => s.season === season);
+        if (existing) Object.assign(existing, updates);
+        else history.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
+        history.sort((a, b) => (a.season < b.season ? 1 : -1));
+        players.setItems(req.player.id, 'seasonHistory', history);
+      } else {
+        players.recordStats(req.player.id, updates);
+      }
+      seam('stats.after_row');
+      recordActivity(req.player);
+      broadcast('players', { playerId: req.player.id });
+    });
+    const stored = players.byId(req.player.id);
+    res.json({ stats: stored.stats, seasonHistory: stored.seasonHistory });
+  });
+
+  playerRouter.get('/drills', (req, res) => {
+    res.json(DRILLS.map((d) => ({
+      ...d,
+      completed: (req.player.drills ?? []).includes(d.id),
+      best: (req.player.drillResults ?? [])
+        .filter((r) => r.drillId === d.id)
+        .sort((a, b) => (d.lowerIsBetter ? a.value - b.value : b.value - a.value))[0] ?? null,
+    })));
+  });
+
+  playerRouter.post('/drills/:id/complete', (req, res) => {
+    const drill = DRILLS.find((d) => d.id === req.params.id);
+    if (!drill) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
+    const { value, videoDataUrl } = req.body || {};
+    const numeric = value !== undefined && value !== null && value !== '' ? Number(value) : null;
+    if (numeric !== null && (Number.isNaN(numeric) || numeric < 0)) return res.status(400).json({ error: 'BAD_VALUE' });
+    unit(() => {
+      if (!(req.player.drills ?? []).includes(drill.id)) players.addItem(req.player.id, 'drills', drill.id);
+      if (numeric !== null) {
+        players.addItem(req.player.id, 'drillResults', {
+          id: nextId('combine'), drillId: drill.id, drillName: drill.name, metric: drill.metric, unit: drill.unit,
+          value: numeric, verified: !!videoDataUrl, ts: Date.now(),
+        });
+      }
+      seam('drills.complete.after_row');
+      recordActivity(req.player);
+      broadcast('players', { playerId: req.player.id });
+    });
+    const stored = players.byId(req.player.id);
+    res.json({ drills: stored.drills, drillResults: stored.drillResults });
+  });
+}

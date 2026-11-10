@@ -95,7 +95,7 @@ test('erase: a deleted player keeps EXACTLY the agreed row — id, the deletion 
   const snapshotOfTable = () => JSON.stringify(t.all('SELECT * FROM players ORDER BY rowid'));
   const tableBefore = snapshotOfTable();
   assert.throws(() => t.players.erase('pl-seeded'), /pl-seeded .*retained/);
-  assert.throws(() => t.players.update('pl-seeded', (d) => { d.city = 'X'; }), /does not exist/);
+  assert.throws(() => t.players.setFootballCategory('pl-seeded', 'X'), /does not exist/);
   assert.throws(() => t.players.link('gd-co', 'pl-child1', 'co'), /does not exist/);
   assert.throws(() => t.players.create(asCreate({ ...adult(), id: 'pl-seeded' })), /pl-seeded .*retained/, 'a deleted account is not re-created under its id');
   assert.throws(() => t.players.erase('pl-nobody'), /does not exist/);
@@ -149,7 +149,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   const stateOf = () => JSON.stringify({ row: t.row('pl-child1'), children: t.childRows('pl-child1'), links: t.links('pl-child1'), sessions: t.raw("SELECT COUNT(*) AS n FROM sessions WHERE kind = 'player' AND ref_id = 'pl-child1'").n, queue: t.raw('SELECT COUNT(*) AS n FROM media_deletions').n, codes: t.raw("SELECT COUNT(*) AS n FROM pairing_codes WHERE player_id = 'pl-child1'").n, ledger: t.all('SELECT * FROM ledger ORDER BY seq') });
   const before = stateOf();
   // An unrelated write committed before the unit.
-  t.players.update('pl-seeded', (d) => { d.city = 'Northgate'; });
+  t.players.setFootballCategory('pl-seeded', 'Northgate');
   const fileBefore = t.fileDump();
   const attempt = (label, failHow) => {
     assert.throws(() => t.unit(() => {
@@ -165,7 +165,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
     assert.deepEqual([...t.guardians.byId('gd-primary').childIds], [...kids], `${label}: the guardian lists the child as before`); assert.deepEqual([...kids], ['pl-child1', 'pl-child2']);
     assert.equal(t.players.isRetained('pl-child1'), false); assert.equal(t.players.retainedCount(), 0); assert.equal(t.players.exists('pl-child1'), true);
     assert.deepEqual(t.players.byGuardian('gd-primary').map((p) => p.id), ['pl-child1', 'pl-child2']); assert.deepEqual(t.guardians.linksOf('pl-child1'), [{ guardianId: 'gd-primary', role: 'primary' }, { guardianId: 'gd-co', role: 'co' }]);
-    assert.equal(t.players.byId('pl-seeded').city, 'Northgate', `${label}: the unrelated earlier write survives`);
+    assert.equal(t.players.byId('pl-seeded').footballCategory, 'Northgate', `${label}: the unrelated earlier write survives`);
   };
   attempt('failure after the writes', () => { throw new Error('synthetic failure after the erase'); });
   attempt('failure at the real COMMIT', () => t.store.failCommitOfOpenTransaction());
@@ -176,7 +176,7 @@ test('unit of work: an erase inside a unit that fails after every write — and 
   assert.equal(t.players.byId('pl-child1'), null); assert.deepEqual([...t.guardians.byId('gd-primary').childIds], ['pl-child2']); assert.equal(t.players.retainedCount(), 1);
   assert.throws(() => t.unit(() => t.players.erase('pl-child1', { at: NOW })), /retained/);
   assert.equal(JSON.stringify(t.all('SELECT * FROM ledger ORDER BY seq')), ledgerBefore, 'the ledger row naming the deleted child is exactly as it was');
-  assert.equal(t.raw("SELECT city FROM players WHERE id = 'pl-seeded'").city, 'Northgate', 'the unrelated earlier write is in the row');
+  assert.equal(t.raw("SELECT football_category FROM players WHERE id = 'pl-seeded'").football_category, 'Northgate', 'the unrelated earlier write is in the row');
   t.close(); fs.rmSync(dir, { recursive: true, force: true });
 });
 

@@ -7,7 +7,7 @@ import { installAsyncErrorForwarding } from './domains/platform/asyncErrors.mjs'
 // A rejected async handler answers 500 instead of ending the process.
 installAsyncErrorForwarding();
 
-import { optText, reqText, badField, switchRefused } from './domains/platform/input.mjs';
+import { optText, reqText, badField, dateOnlyOrRefuse } from './domains/platform/input.mjs';
 import cors from 'cors';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -20,7 +20,7 @@ import { STAFF_LIMITS } from './repositories/users.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
 import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
-import { TRANSITION_LIMITS, vouchCodeHash } from './repositories/transitionsVouches.mjs';
+import { TRANSITION_LIMITS } from './repositories/transitionsVouches.mjs';
 import { registerM12 } from './m12/index.mjs';
 import { registerM13 } from './m13/index.mjs';
 import { registerVerificationClaims } from './domains/verification/claims/index.mjs';
@@ -48,35 +48,44 @@ import { createVerificationProvider } from './domains/agents/compliance/provider
 import { createEvidenceProvider } from './domains/recruitment/lifecycle/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './domains/development/boxcam/combineShared.mjs';
 import { registerSourceChanges } from './domains/platform/sourceChanges.mjs';
-import { audienceFor, EVENT_AUDIENCE } from './domains/platform/eventAudience.mjs';
+import { audienceFor } from './domains/platform/eventAudience.mjs';
 import { createRateLimiter, rateLimitedBody, RATE_LIMIT_POLICY } from './domains/platform/rateLimit.mjs';
 import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionConfigProblems } from './domains/platform/capabilities.mjs';
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './domains/platform/eventRegistry.mjs';
 import { createNotificationPrefs, registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';
-import { createNotifier, registerNotificationFeed } from './domains/messaging/notify.mjs';
+import { createNotifier, registerNotificationFeed, registerDeliverySettings } from './domains/messaging/notify.mjs';
 import { registerMessaging, channelViewFor } from './domains/messaging/channels.mjs';
 import { registerAudit } from './domains/platform/audit.mjs';
 import { createFaultLayer } from './domains/platform/faults.mjs';
 import { httpContractMiddleware } from './domains/platform/httpContract.mjs';
 import { integrityReport, integritySummary } from './domains/platform/integrity.mjs';
-import { orgPlayerView, guardianChildView, guardianSelfView } from './views/playerViews.mjs';
+import { orgPlayerView } from './views/playerViews.mjs';
 import { registerGuardianAccount, registerGuardianIdReview } from './domains/identity/guardians.mjs';
+import { createPlayerSession, registerPlayerAccount } from './domains/identity/players.mjs';
+import { registerChildren } from './domains/identity/children.mjs';
+import { createPlayerErasure, registerDataRights } from './domains/identity/dataRights.mjs';
+import { DRILLS, registerPlayerRecord } from './domains/development/record.mjs';
+import { registerGrassrootsJourney } from './domains/development/grassroots.mjs';
+import { registerRequestInbox } from './domains/recruitment/inbox.mjs';
 import { validateContactReply } from './domains/recruitment/lifecycle/contact.mjs';
 import { icsLocal as trialIcsLocal, icsText as trialIcsText } from './domains/recruitment/lifecycle/trial.mjs';
 import { requestInstrumentation } from './domains/enterprise/enterprise.mjs';
 import { totpValid } from './m13/shared.mjs';
+import { earnedGrassrootsBadges } from './grassrootsJourney.mjs';
 import {
-  PROGRAMME_TRACKS, trackForPosition, programmeProgress, pathwayFor,
-  earnedGrassrootsBadges, percentileAmong, inCohort,
-} from './grassrootsJourney.mjs';
-import {
-  hashPassword, verifyPassword, newToken, randomCode, makeRateLimiter,
-  createMailer, createPushSender, createIdvProvider, createBilling, createStorage,
+  hashPassword,
+  verifyPassword,
+  newToken,
+  makeRateLimiter,
+  createMailer,
+  createPushSender,
+  createIdvProvider,
+  createBilling,
+  createStorage,
 } from './adapters.mjs';
 import {
-  adultAgeFor,
   ageOn,
   isAdult,
   visibleToOrg,
@@ -85,7 +94,6 @@ import {
   validateTrialReport,
   TRIAL_REPORT_FIELDS,
   parseTrialDate,
-  isTrialDate,
   trialReportDueAt,
   validateTrialDetails,
   chooseTrialSlot,
@@ -93,32 +101,16 @@ import {
   moderateText,
   haversineKm,
   GRASSROOTS_RADIUS_KM,
-  playerLevelAfterSigning,
-  trustTier,
   computeStreak,
-  weeklyGoal,
-  nextActions,
 } from './domain.mjs';
-import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone } from './temporal.mjs';
+import { readInstant, utcDayOf } from './temporal.mjs';
 import { readPage, sendPageError } from './domains/platform/paging.mjs';
 import { AUDIT_LIMITS } from './repositories/safetyAudit.mjs';
 import { PLANS, ARCHETYPES } from './catalogue.mjs';
-import { IDENTITY_LIMITS, PLAYER_POSITIONS, PLAYER_FEET } from './repositories/identity.mjs';
+
 import { invoiceView } from './adapters.mjs';
 import { createLookups } from './domains/platform/lookups.mjs';
 import { createMatchFactsKeeper } from './domains/discovery/matchFacts.mjs';
-
-/**
- * A DATE_ONLY a client typed (open day, match day, friendly,
- * attendance, medical record) is a calendar day that exists, or a 400.
- * Returns true when it is; false after sending the refusal.
- */
-function dateOnlyOrRefuse(res, value, field) {
-  const p = parseStrictDateOnly(value);
-  if (p.ok) return true;
-  res.status(400).json({ error: 'DATE_INVALID', field, message: `${field} must be a calendar day written YYYY-MM-DD (${p.why}).`, expected: 'YYYY-MM-DD' });
-  return false;
-}
 
 const PORT = process.env.PORT || 4000;
 
@@ -859,138 +851,15 @@ app.get('/meta', (_req, res) => {
   });
 });
 
-// ------------------------------------------------------------- player auth
-// Real sessions: signup/login/pair mint a bearer token. New accounts require
-// a password (scrypt-hashed); seed identities carry no password and stay
-// open as demo logins — production seeds always set one.
-
-// Self sign-up is adults only. Under-18 accounts are OWNED by a verified
-// guardian and can only be created through the guardian flow below — the API
-// itself refuses a minor self-signup.
-/**
- * The profile fields a sign-up or a guardian's child creation may carry, refused by name (400 FIELD_INVALID)
- * instead of stored or coerced: the name 1–120 characters, the country and city text, the position and foot from
- * their vocabularies, height and weight whole numbers in range, the coordinates numbers in range.
- */
-function profileFieldRefused(res, body) {
-  const bad = (field, message) => { res.status(400).json({ error: 'FIELD_INVALID', field, message }); return true; };
-  const absent = (v) => v === undefined || v === null || v === '';
-  if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > IDENTITY_LIMITS.name) return bad('name', `name must be text of 1 to ${IDENTITY_LIMITS.name} characters.`);
-  if (body.country !== undefined && !(typeof body.country === 'string' && body.country.length >= 1 && body.country.length <= IDENTITY_LIMITS.country)) return bad('country', `country must be text of 1 to ${IDENTITY_LIMITS.country} characters.`);
-  if (!absent(body.city) && !(typeof body.city === 'string' && body.city.length <= IDENTITY_LIMITS.city)) return bad('city', `city must be text of at most ${IDENTITY_LIMITS.city} characters.`);
-  if (!absent(body.position) && !PLAYER_POSITIONS.includes(body.position)) return bad('position', `position must be one of ${PLAYER_POSITIONS.join(', ')}.`);
-  if (!absent(body.foot) && !PLAYER_FEET.includes(body.foot)) return bad('foot', `foot must be one of ${PLAYER_FEET.join(', ')}.`);
-  for (const f of ['heightCm', 'weightKg']) {
-    const [lo, hi] = IDENTITY_LIMITS[f];
-    if (!absent(body[f]) && !(Number.isSafeInteger(body[f]) && body[f] >= lo && body[f] <= hi)) return bad(f, `${f} must be a whole number from ${lo} to ${hi}.`);
-  }
-  for (const [f, lim] of [['lat', 90], ['lng', 180]]) if (!absent(body[f]) && !(typeof body[f] === 'number' && Number.isFinite(body[f]) && Math.abs(body[f]) <= lim)) return bad(f, `${f} must be a number from -${lim} to ${lim}.`);
-  return false;
-}
-const optional = (v) => (v === undefined || v === null || v === '' ? null : v);
-
-app.post('/auth/player/signup', (req, res) => {
-  const { name, dob, country = 'GB', position, foot, password } = req.body || {};
-  if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
-  if (profileFieldRefused(res, req.body)) return;
-  // A date of birth that cannot be READ is refused here, not stored: it would
-  // fail closed as "age unknown", but the account's age could then never be
-  // established. A real day, not in the future, not implausibly old.
-  if (!parseDobStrict(dob, Date.now()).ok) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
-  if (!password || String(password).length < 8) {
-    return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters — your profile is yours alone.' });
-  }
-  const required = adultAgeFor(country);
-  if (ageOn(dob) < required) {
-    return res.status(403).json({
-      error: 'GUARDIAN_REQUIRED',
-      message: `Under-${required} profiles are owned by a parent or guardian. A guardian must verify their ID, accept the safeguarding disclaimer, and create the profile from their own account.`,
-    });
-  }
-  const p = {
-    id: nextId('pl'),
-    name,
-    dob,
-    country,
-    city: optional(req.body.city),
-    position: optional(position),
-    foot: optional(foot),
-    heightCm: optional(req.body.heightCm),
-    weightKg: optional(req.body.weightKg),
-    createdAt: Date.now(),
-    passwordHash: hashPassword(password),
-    // Optional coordinates: without them the player simply is not visible to
-    // grassroots clubs (the radius rule fails closed, never open).
-    location: typeof req.body.lat === 'number' && typeof req.body.lng === 'number'
-      ? { lat: req.body.lat, lng: req.body.lng } : null,
-  };
-
-  // One unit of work: the player row, the saved-search notifications and the
-  // session; the broadcast and any push go out after COMMIT.
-  let created; let token;
-  try {
-    unit(() => {
-      created = players.create(p);
-      checkSavedSearches(created);
-      token = createSession('player', created.id);
-      broadcast('players');
-    });
-  } catch (e) {
-    if (e?.code === 'PLAYER_RECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
-    throw e;
-  }
-  res.status(201).json({ playerId: created.id, player: JSON.parse(JSON.stringify(created)), token });
-});
-
-app.post('/auth/player/login', (req, res) => {
-  // Lockout first — before the lookup, so an unknown id and a real one
-  // are refused identically once the budget is gone.
-  if (loginLockedOut(res, `player:${req.body?.playerId}`)) return;
-  const p = findPlayer(req.body?.playerId);
-  if (!p) { noteLoginFailure(`player:${req.body?.playerId}`); return res.status(404).json({ error: 'PLAYER_NOT_FOUND' }); }
-  const hash = players.passwordHashOf(p.id);
-  if (hash) {
-    const check = verifyPassword(req.body?.password ?? '', hash);
-    if (!check) { noteLoginFailure(`player:${p.id}`); return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' }); }
-    if (check === 'upgrade') players.setPasswordHash(p.id, hashPassword(req.body.password)); // upgrade a plain-text record to scrypt
-  } else if (!DEV_LOGINS) {
-    return devLoginRefused(res);
-  }
-  res.json({ playerId: p.id, name: p.name, token: createSession('player', p.id) });
-});
-
-function playerAuth(req, res, next) {
-  const session = sessionFor(req);
-  const p = session?.kind === 'player' ? findPlayer(session.refId) : null;
-  if (!p) return res.status(401).json({ error: 'PLAYER_AUTH_REQUIRED', message: 'Log in again — this session is no longer valid.' });
-  req.player = p;
-  req.playerIsMinor = !isAdult(p);
-  next();
-}
-
-// Refuses guardian-managed actions on a child account. Parents manage all
-// messages, notifications and club interactions; the child keeps football
-// activities (uploads, stats, drills, attendance).
-function guardianManagedOnly(req, res) {
-  if (req.playerIsMinor) {
-    res.status(403).json({
-      error: 'GUARDIAN_MANAGED',
-      message: 'This setting is managed by your parent or guardian.',
-    });
-    return true;
-  }
-  return false;
-}
-
-// The authenticated routers. The guardian's is created with the guardian account, below.
+// The authenticated routers. The guardian's is created with the guardian account, below; the player account's
+// routes are domains/identity/players.mjs.
 const orgRouter = express.Router();
 app.use('/org', orgAuth, orgRouter);
-const playerRouter = express.Router();
-app.use('/player', playerAuth, playerRouter);
+const { playerRouter, guardianManagedOnly } = createPlayerSession({ app, findPlayer, sessionFor });
 
 // -------------------------------------------------------------- guardians
 // Parents own every under-18 account. The account and its safeguarding gates (e-mail, ID, disclaimer) are
-// domains/identity/guardians.mjs; the child-management routes below mount on its router.
+// domains/identity/guardians.mjs; managing the children is domains/identity/children.mjs.
 const { guardianRouter } = registerGuardianAccount({
   app, guardians, safetyAudit, unit, nextId, mailer, idv, faultSeam: seam,
   createSession, sessionFor, loginKey, loginLockedOut, noteLoginFailure, devLogins: DEV_LOGINS, devLoginRefused,
@@ -1000,235 +869,6 @@ const { guardianRouter } = registerGuardianAccount({
 const { openChannel } = registerMessaging({
   orgRouter, playerRouter, guardianRouter, channels, recruitment, byId, isBlocked,
   unit, nextId, notify, broadcast, ledgerAppend, moderateOrRefuse, guardianManagedOnly,
-});
-
-guardianRouter.get('/children', (req, res) => {
-  res.json(
-    req.guardian.childIds
-      .map((id) => findPlayer(id))
-      .filter(Boolean)
-      .map((p) => guardianChildView(p, VIEW_HELPERS))
-  );
-});
-
-// Creating a child profile requires BOTH gates: verified ID + accepted disclaimer.
-guardianRouter.post('/children', (req, res) => {
-  if (req.guardian.emailVerified === false) {
-    return res.status(403).json({ error: 'EMAIL_UNVERIFIED', message: 'Verify your email address first — the code is in your inbox.' });
-  }
-  if (!req.guardian.idVerified) {
-    return res.status(403).json({ error: 'GUARDIAN_ID_UNVERIFIED', message: 'Verify your identity before onboarding a child.' });
-  }
-  if (!req.guardian.disclaimerAccepted) {
-    return res.status(403).json({ error: 'DISCLAIMER_REQUIRED', message: 'Accept the safeguarding disclaimer before onboarding a child.' });
-  }
-  const { name, dob, country = 'GB', position, foot, heightCm, weightKg } = req.body || {};
-  if (!name || !dob) return res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
-  if (profileFieldRefused(res, req.body)) return;
-  // A date of birth that cannot be READ is refused here, not stored: it would
-  // fail closed as "age unknown", but the account's age could then never be
-  // established. A real day, not in the future, not implausibly old.
-  if (!parseDobStrict(dob, Date.now()).ok) return res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
-  if (ageOn(dob) >= adultAgeFor(country)) {
-    return res.status(400).json({ error: 'NOT_A_MINOR', message: 'Adults create their own account with player sign-up.' });
-  }
-  const p = {
-    id: nextId('pl'),
-    name,
-    dob,
-    country,
-    guardianId: req.guardian.id,
-    position: optional(position),
-    foot: optional(foot),
-    heightCm: optional(heightCm),
-    weightKg: optional(weightKg),
-    createdAt: Date.now(),
-    location: typeof req.body.lat === 'number' && typeof req.body.lng === 'number'
-      ? { lat: req.body.lat, lng: req.body.lng } : null,
-  };
-
-  // One unit of work: the child row and its primary link (the guardian's
-  // childIds follow from the link), the saved-search notifications; the
-  // broadcast and any push go out after COMMIT.
-  let child;
-  try {
-    unit(() => {
-      child = players.create(p);
-      checkSavedSearches(child);
-      broadcast('players');
-    });
-  } catch (e) {
-    if (e?.code === 'PLAYER_RECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
-    throw e;
-  }
-  res.status(201).json({ playerId: child.id, player: guardianChildView(child, VIEW_HELPERS) });
-});
-
-// Scout Inbox for minors lives with the GUARDIAN. Club-first identity:
-// the parent sees the verified club and the sender's verified role.
-// Newest first, paged by cursor: { items, nextCursor }.
-guardianRouter.get('/inbox', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const { items, nextCursor } = recruitment.requests.pageForGuardianOf(req.guardian.childIds, page);
-  res.json({ items: items.map(requestForRecipient), nextCursor });
-});
-
-guardianRouter.post('/requests/:id/respond', (req, res) => {
-  const candidate = recruitment.requests.byId(req.params.id);
-  const found = candidate && candidate.routedTo === 'guardian' && req.guardian.childIds.includes(candidate.playerId) ? candidate : null;
-  if (!found) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-  if (found.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-  const child = findPlayer(found.playerId);
-  const { accept, chosenSlot } = req.body || {};
-  const replyCheck = contactReplyFrom(req, res, found);
-  if (!replyCheck.ok) return;
-  // A block the guardian placed AFTER the request arrived: they may still
-  // decline it, but accepting would open a thread with an organisation they
-  // blocked, so that is refused.
-  if (accept && isBlocked(found.playerId, found.orgId)) {
-    return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
-  }
-  if (found.contactId && rateLimit.limited('contact_response', `guardian:${req.guardian.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
-  // The slot is checked BEFORE the answer is recorded, so a refused
-  // slot leaves the request pending rather than accepted-with-the-wrong-day.
-  const slot = accept && found.type === 'trial' ? chooseTrialSlot(found.trialDetails, chosenSlot) : { ok: true, date: null };
-  if (!slot.ok) return res.status(400).json(slot);
-  // A Trial invitation tied to a recruitment case re-derives its recipient
-  // NOW — the guardian must still be this child's verified route, the club
-  // must still be allowed to reach the child. Requests with no caseId keep
-  // the request's own rule.
-  if (accept && found.type === 'trial' && found.caseId && lifecycleDomain?.trialAcceptGate) {
-    const gate = lifecycleDomain.trialAcceptGate({ request: found, by: 'guardian', actorId: req.guardian.id });
-    if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
-  }
-  const respondedAt = Date.now();
-  // One unit of work: the answer, the Contact, the channel and the trial
-  // commit together or not at all.
-  const answered = unit(() => {
-  // The record the hooks see is the stored one.
-  let request = recruitment.requests.recordResponse(found.id, { status: accept ? 'accepted' : 'declined', respondedAt, respondedBy: 'guardian' });
-  // The Contact that created this request learns of the answer.
-  lifecycleDomain?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'guardian', at: respondedAt });
-  // The answer, the channel and the trial row are ONE unit,
-  // so a crash between them cannot leave an accepted request with no trial.
-
-  if (accept) {
-    // The conversation that opens is between adults: club staff and guardian.
-    const channel = openChannel(request);
-    request = recruitment.requests.attachChannel(request.id, { channelId: channel.id });
-    ledgerAppend({ type: `${request.type}_accepted_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') {
-      const trial = issueAcceptedTrial({ request, player: child, trialDate: slot.date, by: 'guardian', at: respondedAt, actor: { id: req.guardian.id, name: req.guardian.name } });
-      // The case learns of the acceptance through the Trial hook — a concrete
-      // slot confirms the schedule and moves the case through the single
-      // lifecycle writer, in the same unit as the answer.
-      lifecycleDomain?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name } });
-    }
-    notify({ kind: 'org_user', id: request.userId }, 'accepted', `The guardian of ${child.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
-    // The child hears the outcome as a request outcome ("Messages and
-    // requests"), the same category the club's own accepted/declined rows
-    // use — not as a discovery nudge, which is off by default.
-    notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian accepted the ${request.type} with ${request.orgName}.`, request.id);
-  } else {
-    ledgerAppend({ type: `${request.type}_declined_by_guardian`, playerId: child.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') lifecycleDomain?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, message: replyCheck.reply });
-    notify({ kind: 'org_user', id: request.userId }, 'declined', `The guardian of ${child.name} declined your ${request.type} request.`, request.id);
-    notify({ kind: 'player', id: child.id }, 'guardian_decision', `Your parent/guardian declined the ${request.type} with ${request.orgName}.`, request.id);
-  }
-  broadcast('requests', { playerId: child.id });
-  return recruitment.requests.byId(request.id);
-  });
-  res.json(requestForRecipient(answered));
-});
-
-// The weekly parent digest: everything that happened around your children.
-guardianRouter.get('/digest', (req, res) => {
-  const week = Date.now() - 7 * 24 * 3600 * 1000;
-  const children = req.guardian.childIds.map((id) => findPlayer(id)).filter(Boolean);
-  res.json({
-    generatedAt: new Date().toISOString(),
-    children: children.map((c) => {
-      const ins = insightsFor(c.id);
-      return {
-        id: c.id,
-        name: c.name,
-        views: ins.thisWeek.views,
-        shortlists: ins.thisWeek.shortlists,
-        streak: computeStreak(c.activityLog),
-        weeklyGoal: weeklyGoal(c.activityLog),
-        newRequests: recruitment.requests.forPlayer(c.id).filter((r) => r.createdAt >= week).length,
-        activityThisWeek: (c.activityLog ?? []).filter((ts) => ts >= week).length,
-      };
-    }),
-    note: 'Only verified clubs can see your children, and every action above is on the ledger.',
-  });
-});
-
-// Guardian sets the child's availability ("open to trials" etc.) —
-// club interaction is the parent's call, so this control lives here.
-guardianRouter.post('/children/:id/availability', (req, res) => {
-  const child = findPlayer(req.params.id);
-  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  const AV = ['available_now', 'end_of_season', 'not_seeking'];
-  const { availability } = req.body || {};
-  if (!AV.includes(availability)) return res.status(400).json({ error: 'BAD_AVAILABILITY', allowed: AV });
-  const stored = players.update(child.id, (d) => { d.availability = availability; });
-  broadcast('players', { playerId: child.id });
-  res.json({ availability: stored.availability });
-});
-
-// Co-guardian: a second parent/guardian sharing the same children.
-guardianRouter.post('/coguardian', (req, res) => {
-  const { name, email } = req.body || {};
-  if (!name || !email) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
-  if (!reqText(name, IDENTITY_LIMITS.name)) return res.status(400).json({ error: 'FIELD_INVALID', field: 'name', message: `name must be text of 1 to ${IDENTITY_LIMITS.name} characters.` });
-  if (!reqText(email, IDENTITY_LIMITS.email) || !email.includes('@')) return res.status(400).json({ error: 'FIELD_INVALID', field: 'email', message: 'email must be an e-mail address.' });
-  const co = {
-    id: nextId('gd'),
-    name,
-    email,
-    idVerified: false, // must still verify + accept before acting
-    disclaimerAccepted: false,
-    childIds: [...req.guardian.childIds],
-    coGuardianOf: req.guardian.id,
-    createdAt: Date.now(),
-  };
-  // One unit: the co-guardian's row and its co links (one per child). The primary's coGuardians list is worked out
-  // from the co-guardians' coGuardianOf.
-  try {
-    guardians.create(co);
-  } catch (e) {
-    if (e?.code === 'EMAIL_IN_USE') return res.status(409).json({ error: 'EMAIL_IN_USE', message: 'A guardian account with this email already exists.' });
-    if (e?.code === 'GUARDIAN_RECORD_INVALID') return res.status(400).json({ error: 'GUARDIAN_INVALID', message: String(e.message) });
-    throw e;
-  }
-  res.status(201).json({ guardianId: co.id, note: 'The co-guardian must verify their ID and accept the disclaimer before they can act.' });
-});
-
-guardianRouter.get('/children/:id/insights', (req, res) => {
-  const child = findPlayer(req.params.id);
-  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  res.json(insightsFor(child.id));
-});
-
-// All communications are logged, and the parent can read the full log.
-// Newest first, paged by cursor (domains/platform/paging.mjs): { items, nextCursor }.
-guardianRouter.get('/log', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const out = safetyAudit.ledger.pageForPlayers(req.guardian.childIds, page);
-  res.json({ items: out.items.map(ledgerView), nextCursor: out.nextCursor });
-});
-
-// Guardian controls the child's medical sharing and availability.
-guardianRouter.post('/children/:id/medical/share', (req, res) => {
-  const child = findPlayer(req.params.id);
-  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  if (switchRefused(res, req.body?.shared, 'shared')) return;
-  const stored = players.update(child.id, (d) => { d.medical.shared = req.body.shared; });
-  broadcast('players', { playerId: child.id });
-  res.json({ shared: stored.medical.shared });
 });
 
 // ---------------------------------------------------------------- org auth
@@ -2308,7 +1948,7 @@ orgRouter.post('/squad/:entryId/release', (req, res) => {
       // for a contract another club completed in ScoutBox. The squad row goes;
       // the canonical contract truth stays with its writer.
       const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
-      if (!other) players.update(p.id, (d) => { d.availability = 'available_now'; d.contractStatus = 'free_agent'; });
+      if (!other) players.setAvailability(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
       seam('squad.release.after_row');
       if (referenceText) {
         // A row of vouches, published at once (the club's identity is the session; no email, no code).
@@ -2638,935 +2278,6 @@ orgRouter.get('/reputation', (_req, res) => {
     if (type === 'signing') live[key].signings += n;
   }
   res.json({ seeded: operations.reputationSeed.all(), live: Object.values(live) });
-});
-
-// ------------------------------------------------------------ player routes
-
-playerRouter.get('/me', (req, res) => {
-  const { password, ...safe } = req.player;
-  const score = computeTrustScore(req.player);
-  res.json({
-    ...safe,
-    age: ageOn(req.player.dob),
-    trustScore: score,
-    trust: trustBreakdown(req.player),
-    tier: trustTier(score),
-    streak: computeStreak(req.player.activityLog),
-    weeklyGoal: weeklyGoal(req.player.activityLog),
-    nextActions: nextActions(req.player),
-    // Aging-up: an adult still linked to a guardian is offered ownership.
-    agingUp: isAdult(req.player) && req.player.guardianId ? { eligible: true } : null,
-    // The Grassroots journey (null for pro-level players).
-    pathway: pathwayFor(req.player, { vouchCount: publishedVouchesFor(req.player.id).length }),
-    programme: programmeProgress(req.player),
-    vouches: verificationReads.vouches.forPlayer(req.player.id).map(vouchView),
-  });
-});
-
-// Aging-up transition: the day a guardian-owned player is an adult, ownership
-// moves to them — explicit consent, guardian notified, ledger records it.
-playerRouter.post('/aging-up/complete', (req, res) => {
-  if (!isAdult(req.player)) return res.status(403).json({ error: 'STILL_A_MINOR', message: 'The transition unlocks on your 18th birthday (age of majority in your country).' });
-  if (!req.player.guardianId) return res.status(400).json({ error: 'ALREADY_OWNED', message: 'You already own this account.' });
-  const guardian = byId.guardian(req.player.guardianId);
-  // One unit of work: the primary link goes on both sides (players.ageUp), the
-  // timeline entry, the ledger row and the two notifications commit together;
-  // the pushes and the broadcast go out after COMMIT.
-  unit(() => {
-    players.ageUp(req.player.id);
-    if (guardian) notify({ kind: 'guardian', id: guardian.id }, 'aging_up', `${req.player.name} is 18 — their account is now their own. Their history stays intact, and thank you for keeping it safe.`, req.player.id);
-    players.addItem(req.player.id, 'timeline', { year: String(new Date().getFullYear()), event: 'Turned 18 — took ownership of this ScoutBox account' });
-    ledgerAppend({ type: 'account_transitioned', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
-    notify({ kind: 'player', id: req.player.id }, 'aging_up', 'Your account is now fully yours. Availability, medical sharing and club contact are your calls from here.', req.player.id);
-    broadcast('players', { playerId: req.player.id });
-  });
-  res.json({ ok: true, owned: true });
-});
-
-// The player-side home feed: weekly scout report first, then activity.
-playerRouter.get('/feed', (req, res) => {
-  const p = req.player;
-  const ins = insightsFor(p.id);
-  const topClip = p.media.slice().sort((a, b) => (b.views ?? 0) - (a.views ?? 0))[0] ?? null;
-  const items = [];
-  items.push({
-    type: 'weekly_report',
-    ts: Date.now(),
-    report: {
-      views: ins.thisWeek.views,
-      shortlists: ins.thisWeek.shortlists,
-      streak: computeStreak(p.activityLog),
-      weeklyGoal: weeklyGoal(p.activityLog),
-      topClip: topClip ? { title: topClip.title, views: topClip.views ?? 0, verified: !!topClip.verifiedClip } : null,
-      suggestion: nextActions(p)[0] ?? null,
-    },
-  });
-  for (const e of ins.recent.slice(0, 8)) {
-    items.push({ type: 'scouting_event', ts: e.ts, orgName: e.orgName, eventType: e.type });
-  }
-  const noticed = {};
-  for (const m of p.media) for (const [tag, n] of Object.entries(m.tags ?? {})) noticed[tag] = (noticed[tag] ?? 0) + n;
-  if (Object.keys(noticed).length) {
-    items.push({ type: 'scouts_noticed', ts: Date.now() - 1, tags: noticed });
-  }
-  res.json(items);
-});
-
-// Portable Verified Sports CV — the player owns their record.
-playerRouter.get('/cv', (req, res) => {
-  const p = req.player;
-  const score = computeTrustScore(p);
-  res.json({
-    generatedAt: new Date().toISOString(),
-    player: {
-      name: p.name, age: ageOn(p.dob), country: p.country, position: p.position, foot: p.foot,
-      heightCm: p.heightCm, weightKg: p.weightKg, identityVerified: p.identityVerified,
-    },
-    trust: { score, tier: trustTier(score), breakdown: trustBreakdown(p) },
-    seasonStats: p.stats,
-    verifiedAttendance: p.attendance.map((a) => ({ fixture: a.fixture, venue: a.venue, date: a.date })),
-    verifiedClips: p.media.filter((m) => m.verifiedClip).map((m) => ({ title: m.title, uploadedAt: m.uploadedAt })),
-    trialReports: p.trialReports.map((r) => ({
-      orgName: r.orgName, filedAt: r.filedAt,
-      acceleration: r.acceleration, sprintSpeedKmh: r.sprintSpeedKmh, distanceKm: r.distanceKm,
-      passCompletionPct: r.passCompletionPct, duelSuccessPct: r.duelSuccessPct, coachRating: r.coachRating,
-    })),
-    combine: p.drillResults,
-    timeline: p.timeline,
-    note: 'Generated by ScoutBox. Attendance is GPS+device verified; trial reports are filed by clubs; trust is never purchasable.',
-  });
-});
-
-// Scout Inbox — org identity is summarised, org ids are stripped; the player
-// sees who wants them and decides. No message thread exists until acceptance.
-// A CHILD's inbox never carries a message or a contact channel: they see only
-// guardian-managed status updates. No direct messages to children. Ever.
-// Newest first, paged by cursor: { items, nextCursor }.
-playerRouter.get('/inbox', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number']); } catch (e) { return sendPageError(res, e); }
-  const { items: rows, nextCursor } = recruitment.requests.pageForPlayer(req.player.id, page);
-  if (req.playerIsMinor) {
-    return res.json({
-      items: rows
-        .map((r) => ({
-          id: r.id,
-          type: r.type,
-          orgName: r.orgName,
-          orgVerified: r.orgVerified,
-          status: r.status,
-          guardianManaged: true,
-          note:
-            r.status === 'pending'
-              ? `${r.orgName} contacted your parent/guardian about a ${r.type === 'trial' ? 'trial' : 'conversation'}. They will decide together with you.`
-              : r.status === 'accepted'
-                ? `Your parent/guardian accepted the ${r.type} with ${r.orgName}.`
-                : `Your parent/guardian declined the ${r.type} with ${r.orgName}.`,
-        })),
-      nextCursor,
-    });
-  }
-  res.json({ items: rows.map(requestForRecipient), nextCursor });
-});
-
-playerRouter.post('/requests/:id/respond', (req, res) => {
-  if (guardianManagedOnly(req, res)) return; // minors never respond — guardians do
-  const found = onlyIf(recruitment.requests.byId(req.params.id), (r) => r.playerId === req.player.id && r.routedTo === 'player');
-  if (!found) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-  if (found.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-  const { accept, chosenSlot } = req.body || {};
-  const replyCheck = contactReplyFrom(req, res, found);
-  if (!replyCheck.ok) return;
-  // Same rule as the guardian route: a blocked organisation can be declined,
-  // never accepted.
-  if (accept && isBlocked(req.player.id, found.orgId)) {
-    return res.status(403).json({ error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block before accepting.' });
-  }
-  if (found.contactId && rateLimit.limited('contact_response', `player:${req.player.id}`)) return res.status(429).json(rateLimitedBody('contact_response'));
-  // Slot checked before the answer is recorded (see the guardian route).
-  const slot = accept && found.type === 'trial' ? chooseTrialSlot(found.trialDetails, chosenSlot) : { ok: true, date: null };
-  if (!slot.ok) return res.status(400).json(slot);
-  // The recipient of a case-tied Trial invitation is re-derived now.
-  if (accept && found.type === 'trial' && found.caseId && lifecycleDomain?.trialAcceptGate) {
-    const gate = lifecycleDomain.trialAcceptGate({ request: found, by: 'player', actorId: req.player.id });
-    if (!gate.ok) return res.status(gate.status).json({ error: gate.error, message: gate.message });
-  }
-  const respondedAt = Date.now();
-  // One unit of work: the answer, the Contact, the channel and the trial
-  // commit together or not at all.
-  const answered = unit(() => {
-  // Both respond paths stamp who answered.
-  let request = recruitment.requests.recordResponse(found.id, { status: accept ? 'accepted' : 'declined', respondedAt, respondedBy: 'player' });
-  // The Contact that created this request learns of the answer.
-  lifecycleDomain?.onRequestResponded?.({ request, accept: !!accept, message: replyCheck.reply, by: 'player', at: respondedAt });
-
-  if (accept) {
-    // Only now does a contact channel exist.
-    const channel = openChannel(request);
-    request = recruitment.requests.attachChannel(request.id, { channelId: channel.id });
-    ledgerAppend({ type: `${request.type}_accepted`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') {
-      const trial = issueAcceptedTrial({ request, player: req.player, trialDate: slot.date, by: 'player', at: respondedAt, actor: { id: req.player.id, name: req.player.name } });
-      lifecycleDomain?.onTrialAccepted?.({ request, trial, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name } });
-    }
-    notify({ kind: 'org_user', id: request.userId }, 'accepted', `${req.player.name} accepted your ${request.type} request — thread open.`, request.contactChannel);
-  } else {
-    ledgerAppend({ type: `${request.type}_declined`, playerId: req.player.id, orgId: request.orgId, orgName: request.orgName, userId: request.userId, scoutName: request.scoutName });
-    if (request.type === 'trial') lifecycleDomain?.onTrialDeclined?.({ request, at: respondedAt, actor: { kind: 'player', id: req.player.id, name: req.player.name }, message: replyCheck.reply });
-    notify({ kind: 'org_user', id: request.userId }, 'declined', `${req.player.name} declined your ${request.type} request.`, request.id);
-  }
-  broadcast('requests', { playerId: req.player.id });
-  return recruitment.requests.byId(request.id);
-  });
-  res.json(requestForRecipient(answered));
-});
-
-// "Who's watching you" — the player's side of the Discovery Ledger.
-playerRouter.get('/insights', (req, res) => res.json(insightsFor(req.player.id)));
-
-playerRouter.post('/academyplus', (req, res) => {
-  if (guardianManagedOnly(req, res)) return;
-  if (switchRefused(res, req.body?.enabled, 'enabled')) return;
-  // ONE unit of work: the column and the badge commit together.
-  let stored;
-  unit(() => {
-    stored = players.update(req.player.id, (d) => { d.academyPlus = req.body.enabled; });
-    seam('academyplus.after_row');
-    if (stored.academyPlus && !stored.badges.includes('Fresh Start')) players.addItem(req.player.id, 'badges', 'Fresh Start');
-    if (!stored.academyPlus && stored.badges.includes('Fresh Start')) players.setItems(req.player.id, 'badges', stored.badges.filter((b) => b !== 'Fresh Start'));
-    stored = players.byId(req.player.id);
-    broadcast('players', { playerId: req.player.id });
-  });
-  res.json({ academyPlus: stored.academyPlus, badges: stored.badges });
-});
-
-playerRouter.post('/badges', (req, res) => {
-  const { badges } = req.body || {};
-  if (!Array.isArray(badges)) return res.status(400).json({ error: 'BADGES_MUST_BE_ARRAY' });
-  const stored = players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String)); // the whole list rewritten as rows, duplicates kept as given
-  broadcast('players', { playerId: req.player.id });
-  res.json({ badges: stored });
-});
-
-// Media upload. `dataUrl` carries the actual video (~12MB cap; the storage
-// adapter writes it to disk, object storage slots in behind the same endpoint).
-playerRouter.post('/media', (req, res) => {
-  const { title, kind = 'video', dataUrl, attendanceId } = req.body || {};
-  if (!reqText(title, 160)) return res.status(400).json({ error: 'TITLE_REQUIRED' }); // an object title would crash every screen showing it
-  if (!optText(kind, 20)) return badField(res, 'kind');
-  if (!moderateOrRefuse(res, title, { kind: 'media_title', playerId: req.player.id })) return;
-  const item = { id: nextId('media'), title, kind, uploadedAt: new Date().toISOString(), url: null, views: 0, tags: {}, verifiedClip: null };
-  if (dataUrl) {
-    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
-      return res.status(400).json({ error: 'BAD_DATA_URL' });
-    }
-    if (dataUrl.length > 16_000_000) {
-      return res.status(413).json({ error: 'FILE_TOO_LARGE', message: 'Uploads are capped at ~12MB in this prototype.' });
-    }
-    if (!storage.saveDataUrl(item.id, dataUrl)) return res.status(400).json({ error: 'BAD_DATA_URL' });
-    item.url = `/media/${item.id}`;
-  }
-  // The Verified Clip seal: footage linked to a GPS+device-confirmed fixture.
-  if (attendanceId) {
-    const att = req.player.attendance.find((a) => a.id === attendanceId);
-    if (!att) return res.status(400).json({ error: 'ATTENDANCE_NOT_FOUND', message: 'A verified clip must link one of YOUR verified attendances.' });
-    if (!item.url) return res.status(400).json({ error: 'FILE_REQUIRED_FOR_VERIFIED_CLIP', message: 'Attach the actual footage to claim the Verified Clip seal.' });
-    item.verifiedClip = att.id;
-  }
-  // ONE unit of work: the clip row and the activity it records (the log
-  // entry, any badge, its notification) commit together before the 201.
-  try {
-    unit(() => {
-      players.addItem(req.player.id, 'media', item);
-      seam('media.after_row');
-      recordActivity(req.player);
-      broadcast('players', { playerId: req.player.id });
-    });
-  } catch (e) {
-    if (e?.code === 'PLAYER_RECORD_INVALID' || e?.code === 'PLAYER_SUBRECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
-    throw e;
-  }
-  res.status(201).json({ media: item, trustScore: computeTrustScore(players.byId(req.player.id)) });
-});
-
-// Medical data is player-controlled per data-protection law.
-// For a minor, that control sits with the guardian.
-playerRouter.post('/medical/share', (req, res) => {
-  if (guardianManagedOnly(req, res)) return;
-  if (switchRefused(res, req.body?.shared, 'shared')) return;
-  const stored = players.update(req.player.id, (d) => { d.medical.shared = req.body.shared; });
-  broadcast('players', { playerId: req.player.id });
-  res.json({ shared: stored.medical.shared });
-});
-
-playerRouter.post('/medical/records', (req, res) => {
-  const { type, title, date, layoffWeeks, cleared, conditionStatus } = req.body || {};
-  if (date && !dateOnlyOrRefuse(res, date, 'date')) return; // a medical record is dated on a day that exists
-  // Each field has its type; nothing else is stored.
-  for (const [f, v, max] of [['type', type, 40], ['title', title, 160], ['conditionStatus', conditionStatus, 40]]) if (!optText(v, max)) return badField(res, f);
-  if (layoffWeeks != null && !(typeof layoffWeeks === 'number' && Number.isFinite(layoffWeeks) && layoffWeeks >= 0 && layoffWeeks <= 520)) return badField(res, 'layoffWeeks');
-  if (cleared != null && typeof cleared !== 'boolean') return badField(res, 'cleared');
-  // ONE unit of work: the condition column and the record
-  // (a facet of the same player) commit together before the response, so a
-  // crash after the answer can never leave the column without its record.
-  try {
-    unit(() => {
-      if (conditionStatus) players.update(req.player.id, (d) => { d.medical.conditionStatus = conditionStatus; });
-      seam('medical.records.after_row');
-      if (title) {
-        players.addItem(req.player.id, 'medical.records', { id: nextId('md'), type: type || 'note', title, date: date || new Date().toISOString().slice(0, 10), layoffWeeks: layoffWeeks ?? null, cleared: cleared ?? null });
-      }
-      broadcast('players', { playerId: req.player.id });
-    });
-  } catch (e) {
-    if (e?.code === 'PLAYER_RECORD_INVALID' || e?.code === 'PLAYER_SUBRECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
-    throw e;
-  }
-  res.status(201).json(players.byId(req.player.id).medical);
-});
-
-// Location powers the Grassroots 50km radius. Coordinates never appear in
-// any org view — only the computed distance does.
-playerRouter.post('/location', (req, res) => {
-  const { lat, lng } = req.body || {};
-  if (typeof lat !== 'number' || typeof lng !== 'number' || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-    return res.status(400).json({ error: 'BAD_COORDINATES' });
-  }
-  players.update(req.player.id, (d) => { d.location = { lat, lng }; });
-  broadcast('players', { playerId: req.player.id });
-  res.json({ ok: true });
-});
-
-// The player's self-service declaration. `under_contract` is CANONICAL
-// contract truth and is written by exactly one thing — the completed-signing
-// writer (signingsDomain) — so it cannot be self-declared here, and
-// while a canonical live contract stands no self-declared word replaces it.
-// The other five words remain the player's own to declare (their intent and
-// their reading of a contract ScoutBox did not write); availability is always
-// theirs.
-const SELF_DECLARABLE_CONTRACT_STATUSES = ['expiring_summer', 'scholarship_ending', 'release_approaching', 'free_agent', 'unknown'];
-playerRouter.post('/availability', (req, res) => {
-  if (guardianManagedOnly(req, res)) return;
-  const { availability, contractStatus } = req.body || {};
-  const AV = ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'];
-  const CS = ['under_contract', ...SELF_DECLARABLE_CONTRACT_STATUSES];
-  if (availability && !AV.includes(availability)) return res.status(400).json({ error: 'BAD_AVAILABILITY', allowed: AV });
-  if (contractStatus && !CS.includes(contractStatus)) return res.status(400).json({ error: 'BAD_CONTRACT_STATUS', allowed: CS });
-  if (contractStatus === 'under_contract') {
-    return res.status(403).json({ error: 'CONTRACT_STATUS_NOT_SELF_DECLARABLE', message: 'Under contract is recorded when a signing completes in ScoutBox; it cannot be declared here.', allowed: SELF_DECLARABLE_CONTRACT_STATUSES });
-  }
-  if (contractStatus) {
-    const canonical = canonicalContractFor(req.player.id);
-    if (canonical) {
-      return res.status(409).json({ error: 'CONTRACT_STATUS_CANONICAL', message: 'Your contract status is set by a signing completed in ScoutBox and cannot be changed here while that contract stands.', contractStatus: req.player.contractStatus, endDate: canonical.endDate ?? null });
-    }
-  }
-  const stored = availability || contractStatus
-    ? players.update(req.player.id, (d) => { if (availability) d.availability = availability; if (contractStatus) d.contractStatus = contractStatus; })
-    : req.player;
-  broadcast('players', { playerId: req.player.id });
-  res.json({ availability: stored.availability, contractStatus: stored.contractStatus });
-});
-
-// Verified Match Attendance: fixture + venue + date + GPS + device required.
-// (Prototype verification; production = geofence + device attestation.)
-playerRouter.post('/attendance', (req, res) => {
-  const { fixture, venue, date, gps, deviceId } = req.body || {};
-  const missing = ['fixture', 'venue', 'date'].filter((f) => !req.body?.[f]);
-  if (!gps || typeof gps.lat !== 'number' || typeof gps.lng !== 'number') missing.push('gps{lat,lng}');
-  if (!deviceId) missing.push('deviceId');
-  if (missing.length) {
-    return res.status(400).json({ error: 'ATTENDANCE_UNVERIFIABLE', message: 'Verified attendance needs fixture, venue, date, GPS and device data.', missing });
-  }
-  if (!dateOnlyOrRefuse(res, date, 'date')) return; // verified attendance on a day that exists
-  // The attendance row stores gps as two columns: a gps carrying anything else is refused, not silently trimmed.
-  if (Object.keys(gps).some((k) => k !== 'lat' && k !== 'lng')) return res.status(400).json({ error: 'GPS_INVALID', message: 'gps is { lat, lng } and nothing else.' });
-  const item = { id: nextId('att'), fixture, venue, date, gps: { lat: gps.lat, lng: gps.lng }, deviceConfirmed: true, verified: true };
-  // ONE unit of work: the attendance row, the activity it records and the
-  // ledger row commit together before the 201. A fixture or venue the table
-  // cannot hold (not text) is refused by the repository and answered 400.
-  try {
-    unit(() => {
-      players.addItem(req.player.id, 'attendance', item);
-      seam('attendance.after_row');
-      recordActivity(req.player);
-      ledgerAppend({ type: 'attendance_verified', playerId: req.player.id, orgId: null, orgName: 'ScoutBox', userId: null, scoutName: 'system' });
-      broadcast('players', { playerId: req.player.id });
-    });
-  } catch (e) {
-    if (e?.code === 'PLAYER_RECORD_INVALID' || e?.code === 'PLAYER_SUBRECORD_INVALID') return res.status(400).json({ error: 'PLAYER_INVALID', message: String(e.message) });
-    throw e;
-  }
-  res.status(201).json({ attendance: item, trustScore: computeTrustScore(players.byId(req.player.id)) });
-});
-
-playerRouter.post('/timeline', (req, res) => {
-  const { year, event } = req.body || {};
-  if (!year || !event) return res.status(400).json({ error: 'YEAR_AND_EVENT_REQUIRED' });
-  if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
-  players.addItem(req.player.id, 'timeline', { year: String(year), event: String(event) }); // one row, committed before the response
-  broadcast('players', { playerId: req.player.id });
-  res.status(201).json({ timeline: players.byId(req.player.id).timeline });
-});
-
-// Children keep their football life: stats edits and drills stay open.
-// Passing `season` (e.g. "2024/25") files the numbers into season history
-// instead of the current season.
-playerRouter.post('/stats', (req, res) => {
-  const FIELDS = ['appearances', 'goals', 'assists', 'paceKmh', 'passCompletionPct', 'duelSuccessPct', 'cleanSheets'];
-  const updates = {};
-  for (const f of FIELDS) {
-    if (req.body?.[f] !== undefined) {
-      // A number, never text turned into one; the counts whole, the percentages at most 100.
-      const v = req.body[f];
-      const count = ['appearances', 'goals', 'assists', 'cleanSheets'].includes(f);
-      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || (count && !Number.isSafeInteger(v)) || (f.endsWith('Pct') && v > 100)) return res.status(400).json({ error: 'BAD_STAT', field: f });
-      updates[f] = v;
-    }
-  }
-  const season = typeof req.body?.season === 'string' && req.body.season.trim() ? req.body.season.trim() : null;
-  // ONE unit of work: the stat columns (or the season facet) and the activity
-  // bookkeeping — the activity log, any badge it earns and its notification —
-  // commit together.
-  unit(() => {
-    if (season) {
-      // The season history is rows of player_season_history; the whole
-      // (sorted) list is rewritten.
-      const history = (req.player.seasonHistory ?? []).map((s) => ({ ...s }));
-      const existing = history.find((s) => s.season === season);
-      if (existing) Object.assign(existing, updates);
-      else history.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
-      history.sort((a, b) => (a.season < b.season ? 1 : -1));
-      players.setItems(req.player.id, 'seasonHistory', history);
-    } else {
-      players.update(req.player.id, (d) => { d.stats = { ...(d.stats ?? {}), appearances: d.stats?.appearances ?? 0, goals: d.stats?.goals ?? 0, assists: d.stats?.assists ?? 0, ...updates }; });
-    }
-    seam('stats.after_row');
-    recordActivity(req.player);
-    broadcast('players', { playerId: req.player.id });
-  });
-  const stored = players.byId(req.player.id);
-  res.json({ stats: stored.stats, seasonHistory: stored.seasonHistory });
-});
-
-// The at-home verified combine: standardised drills with a measurable metric.
-// Recording the drill on video marks the result VERIFIED (prototype: video
-// presence; production runs computer-vision analysis behind the same call).
-export const DRILLS = [
-  { id: 'drill-sprint-ladder', name: 'Sprint ladder — 6×30m', metric: 'best 30m time', unit: 's', benchmark: 4.2, lowerIsBetter: true },
-  { id: 'drill-passing-gates', name: 'Passing gates — both feet', metric: 'gates hit of 20', unit: '/20', benchmark: 14, lowerIsBetter: false },
-  { id: 'drill-shooting-arc', name: 'Shooting arc — 20 finishes', metric: 'on-target finishes', unit: '/20', benchmark: 12, lowerIsBetter: false },
-  { id: 'drill-first-touch', name: 'First touch — wall rebounds', metric: 'touches in 60s', unit: '', benchmark: 45, lowerIsBetter: false },
-];
-
-playerRouter.get('/drills', (req, res) => {
-  res.json(
-    DRILLS.map((d) => ({
-      ...d,
-      completed: (req.player.drills ?? []).includes(d.id),
-      // A player who has never completed a drill has no `drillResults` yet (a
-      // sign-up creates none; the first completion appends the array). Read as
-      // empty.
-      best: (req.player.drillResults ?? [])
-        .filter((r) => r.drillId === d.id)
-        .sort((a, b) => (d.lowerIsBetter ? a.value - b.value : b.value - a.value))[0] ?? null,
-    }))
-  );
-});
-
-playerRouter.post('/drills/:id/complete', (req, res) => {
-  const drill = DRILLS.find((d) => d.id === req.params.id);
-  if (!drill) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
-  const { value, videoDataUrl } = req.body || {};
-  const numeric = value !== undefined && value !== null && value !== '' ? Number(value) : null;
-  if (numeric !== null && (Number.isNaN(numeric) || numeric < 0)) return res.status(400).json({ error: 'BAD_VALUE' });
-  // ONE unit of work: the drill row, the result row and the activity commit together.
-  unit(() => {
-    if (!(req.player.drills ?? []).includes(drill.id)) players.addItem(req.player.id, 'drills', drill.id);
-    if (numeric !== null) {
-      players.addItem(req.player.id, 'drillResults', {
-        id: nextId('combine'),
-        drillId: drill.id,
-        drillName: drill.name,
-        metric: drill.metric,
-        unit: drill.unit,
-        value: numeric,
-        verified: !!videoDataUrl, // video-backed = combine-verified
-        ts: Date.now(),
-      });
-    }
-    seam('drills.complete.after_row');
-    recordActivity(req.player);
-    broadcast('players', { playerId: req.player.id });
-  });
-  const stored = players.byId(req.player.id);
-  res.json({ drills: stored.drills, drillResults: stored.drillResults });
-});
-
-// ---------------------------------------------- the Grassroots journey
-// Everything in this block is exclusive to amateur/semi-pro players.
-function grassrootsOnly(req, res) {
-  if (req.player.level === 'pro') {
-    res.status(403).json({ error: 'GRASSROOTS_ONLY', message: 'This is part of the Grassroots journey — pro-level players have moved past it.' });
-    return true;
-  }
-  return false;
-}
-
-// Free structured training programmes, built from the verified combine.
-playerRouter.get('/programme', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  res.json({
-    current: programmeProgress(req.player),
-    tracks: Object.values(PROGRAMME_TRACKS).map(({ key, label, positions, sessions }) => ({ key, label, positions, sessionsPerWeek: sessions.length })),
-    suggested: trackForPosition(req.player.position),
-  });
-});
-
-playerRouter.post('/programme', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  const track = PROGRAMME_TRACKS[req.body?.track];
-  if (!track) return res.status(400).json({ error: 'TRACK_NOT_FOUND' });
-  // track and startedAt are columns; `completed` is rows of
-  // player_programme_completions. ONE unit of work: the new track and the
-  // reset of the completed sessions commit together.
-  unit(() => {
-    players.update(req.player.id, (d) => { d.programme = { track: track.key, startedAt: Date.now(), completed: d.programme?.completed ?? [] }; });
-    seam('programme.select.after_row');
-    players.setItems(req.player.id, 'programme.completed', []);
-    broadcast('players', { playerId: req.player.id });
-  });
-  res.status(201).json({ current: programmeProgress(players.byId(req.player.id)) });
-});
-
-playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  if (!req.player.programme) return res.status(409).json({ error: 'NO_PROGRAMME', message: 'Pick a training track first.' });
-  const track = PROGRAMME_TRACKS[req.player.programme.track];
-  const session = track?.sessions.find((x) => x.id === req.params.id);
-  if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-  // ONE unit of work: the completion row and the activity commit together.
-  unit(() => {
-    players.addItem(req.player.id, 'programme.completed', { sessionId: session.id, ts: Date.now() });
-    recordActivity(req.player); // programme work feeds streaks + the weekly goal
-    broadcast('players', { playerId: req.player.id });
-  });
-  res.json({ current: programmeProgress(players.byId(req.player.id)) });
-});
-
-// Honest context, never a leaderboard: percentiles vs the amateur/semi-pro
-// cohort in the same position group. Small cohorts return null.
-playerRouter.get('/benchmarks', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  // The cohort (grassrootsJourney.mjs inCohort: not pro, the same position track) is a SQL filter, read as light
-  // rows for the statistics and as one GROUP BY for the drill bests; nobody is decoded.
-  const track = trackForPosition(req.player.position);
-  const cohortFilter = { notLevel: 'pro', exceptId: req.player.id, positions: PLAYER_POSITIONS.filter((pos) => trackForPosition(pos) === track), orNoPosition: trackForPosition(null) === track };
-  const cohort = [];
-  players.scanLight(cohortFilter, (c) => { if (inCohort(req.player, c)) cohort.push(c); });
-  const bests = players.drillBests(cohortFilter);
-  const drillBests = (playerX, drillId, lowerIsBetter) => {
-    const results = (playerX.drillResults ?? []).filter((r) => r.drillId === drillId);
-    if (!results.length) return null;
-    const values = results.map((r) => r.value);
-    return lowerIsBetter ? Math.min(...values) : Math.max(...values);
-  };
-  const drills = DRILLS.map((d) => {
-    const mine = drillBests(req.player, d.id, d.lowerIsBetter);
-    if (mine === null) return null;
-    const cohortValues = (bests.get(d.id) ?? []).map((b) => (d.lowerIsBetter ? b.min : b.max));
-    const percentile = percentileAmong(mine, cohortValues, d.lowerIsBetter);
-    // Sample size and method travel with every comparison; a
-    // too-small cohort says "not enough evidence" instead of a number.
-    return { drillId: d.id, name: d.name, metric: d.metric, unit: d.unit, value: mine, percentile, sampleSize: cohortValues.length, insufficient: percentile === null };
-  }).filter(Boolean);
-  const statKeys = ['goals', 'assists', 'appearances', 'passCompletionPct', 'duelSuccessPct'];
-  const stats = statKeys.map((k) => {
-    const mine = req.player.stats?.[k];
-    if (typeof mine !== 'number') return null;
-    const cohortValues = cohort.map((c) => c.stats?.[k]).filter((v) => typeof v === 'number');
-    const percentile = percentileAmong(mine, cohortValues, false);
-    return { stat: k, value: mine, percentile, sampleSize: cohortValues.length, insufficient: percentile === null };
-  }).filter(Boolean);
-  res.json({
-    cohortSize: cohort.length,
-    method: 'Percentile of your best result among amateur & semi-pro players in your position group with the same measurement recorded. Cohorts under 3 comparable records show "not enough evidence" instead of a percentile. Incompatible records (other positions, pro level, missing values) are excluded.',
-    note: 'Percentiles vs amateur & semi-pro players in your position group — context, not competition.',
-    drills, stats,
-  });
-});
-
-// The opportunity radar: the 50km rule, pointed the player's way.
-playerRouter.get('/opportunities', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  if (!req.player.location) return res.json({ clubs: [], note: 'Set your location to see clubs within reach.' });
-  const near = orgs.locatedInBox(boxAround(req.player.location, GRASSROOTS_RADIUS_KM), { level: 'grassroots' })
-    .map((o) => ({ org: o, distanceKm: Math.round(haversineKm(o.location, req.player.location) * 10) / 10 }))
-    .filter((x) => x.distanceKm <= GRASSROOTS_RADIUS_KM)
-    .sort((a, b) => a.distanceKm - b.distanceKm);
-  // The clubs' upcoming open days in one query.
-  const upcoming = Map.groupBy(grassroots.openTrials.upcomingForOrgs(near.map((x) => x.org.id), new Date().toISOString().slice(0, 10)), (t) => t.orgId);
-  const clubs = near
-    .map(({ org, distanceKm }) => ({
-      id: org.id, name: org.name, city: org.location.city ?? '', distanceKm,
-      verified: org.verified, safeguardingCertified: safeguardingCertified(org),
-      ...pathwayRecord(org),
-      lookingFor: [...clubSetup.lookingFor.forOrg(org.id)],
-      openTrials: (upcoming.get(org.id) ?? []).map((t) => ({ ...openTrialView(t), registered: t.registrations.some((r) => r.playerId === req.player.id) })),
-    }));
-  res.json({ radiusKm: GRASSROOTS_RADIUS_KM, clubs, lookingForYou: clubs.filter((c) => c.lookingFor.includes(req.player.position)).length });
-});
-
-// Open trial days near the player. Adults register directly; minors see them
-// but registration belongs to the guardian — Scout → Parent, always.
-playerRouter.post('/open-trials/:id/register', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  if (guardianManagedOnly(req, res)) return;
-  const trial = grassroots.openTrials.byId(req.params.id);
-  if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
-  const org = byId.org(trial.orgId);
-  if (!org || !req.player.location || !org.location || haversineKm(org.location, req.player.location) > GRASSROOTS_RADIUS_KM) {
-    return res.status(403).json({ error: 'OUT_OF_RADIUS', message: 'Open days are local — this one is beyond 50km of you.' });
-  }
-  if (trial.registrations.some((r) => r.playerId === req.player.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
-  // ONE unit of work: the registration, the ledger row and the notification commit together.
-  unit(() => {
-    grassroots.openTrials.register(trial.id, { id: nextId('otr'), playerId: req.player.id, playerName: req.player.name?.slice(0, GL.playerName) ?? null, byGuardian: false, guardianId: null, ts: Date.now() });
-    ledgerAppend({ type: 'open_trial_registration', playerId: req.player.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
-    notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${req.player.name} registered for "${trial.title}".`, trial.id);
-  });
-  res.status(201).json({ registered: true });
-});
-
-// First Team Seekers: Grassroots' own cohort — need-based, free, never
-// purchasable. Adults set it themselves; guardians set it for children.
-playerRouter.post('/first-team-seeker', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  if (guardianManagedOnly(req, res)) return;
-  if (switchRefused(res, req.body?.enabled, 'enabled')) return;
-  const stored = players.update(req.player.id, (d) => { d.firstTeamSeeker = req.body.enabled; });
-  broadcast('players', { playerId: req.player.id });
-  res.json({ firstTeamSeeker: stored.firstTeamSeeker });
-});
-
-// Coach vouches: a named, verified local coach is the most valuable
-// credential an amateur can hold. The coach proves mailbox control with a
-// one-time code; the text is moderated like every other message.
-// The code is stored only as its SHA-256 hash (the coach's email carries it); junk is refused, not coerced.
-function createVouchRequest(player, { coachName, coachEmail, role }, res) {
-  const VL = TRANSITION_LIMITS;
-  for (const [field, v] of [['coachName', coachName], ['coachEmail', coachEmail], ['role', role]]) {
-    if (v !== undefined && v !== null && typeof v !== 'string') return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
-  }
-  const name = (coachName ?? '').trim();
-  const email = (coachEmail ?? '').trim();
-  if (!name || !email || !/^[^\s@]+@[^\s@]+$/.test(email)) {
-    return res.status(400).json({ error: 'COACH_DETAILS_REQUIRED', message: 'Name the coach and their email address.' });
-  }
-  if (name.length > VL.coachName) return res.status(400).json({ error: 'FIELD_INVALID', field: 'coachName', message: `At most ${VL.coachName} characters.` });
-  if (email.length > VL.coachEmail) return res.status(400).json({ error: 'FIELD_INVALID', field: 'coachEmail', message: `At most ${VL.coachEmail} characters.` });
-  const code = randomCode(8);
-  const vouch = unit(() => transitionsVouches.vouches.create({ // in a unit, so the id counter commits with the row
-    id: nextId('vch'), playerId: player.id, playerName: player.name?.slice(0, VL.name) ?? null, // names have no limit at signup: shortened, never refused
-    coachName: name, coachEmail: email, role: (role ?? '').trim().slice(0, VL.role) || 'Coach',
-    status: 'pending', codeHash: vouchCodeHash(code), text: null, seasons: null, ts: Date.now(), publishedAt: null,
-    conflictOfInterest: null, withdrawn: null,
-  }));
-  mailer.send({
-    to: vouch.coachEmail,
-    subject: `Reference request for ${player.name} on ScoutBox`,
-    text: `Hi ${vouch.coachName},
-
-${player.name} has asked you for a coach reference on ScoutBox Grassroots.
-
-Your one-time reference code is ${code}. Submitting with it confirms this mailbox is yours; your name and role will appear with the reference on ${player.name}'s profile.
-
-References are screened by moderation and reviewed by Trust & Safety.`,
-  }).catch((err) => console.error(`reference request ${vouch.id}: the mail was not recorded or sent (${err?.code ?? err?.message ?? err})`)); // observed, never an unhandled rejection
-  res.status(201).json({ requested: true, vouchId: vouch.id });
-}
-
-// The season wrap: everything the year added up to, in one card.
-playerRouter.get('/season-wrap', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  const p = req.player;
-  // Longest streak ever, from the activity log.
-  const DAY_MS = 24 * 3600 * 1000;
-  const days = [...new Set((p.activityLog ?? []).map((ts) => Math.floor(ts / DAY_MS)))].sort((a, b) => a - b);
-  let bestStreak = 0;
-  let run = 0;
-  for (let i = 0; i < days.length; i++) {
-    run = i > 0 && days[i] === days[i - 1] + 1 ? run + 1 : 1;
-    bestStreak = Math.max(bestStreak, run);
-  }
-  const verifiedBests = (p.drillResults ?? []).filter((r) => r.verified);
-  res.json({
-    generatedAt: new Date().toISOString(),
-    player: { name: p.name, position: p.position, level: p.level ?? 'amateur' },
-    season: p.stats ?? null,
-    verifiedAttendances: (p.attendance ?? []).length,
-    verifiedClips: (p.media ?? []).filter((m) => m.verifiedClip).length,
-    bestStreak,
-    combineBests: verifiedBests.slice(-4).map((r) => ({ drillName: r.drillName, metric: r.metric, value: r.value, unit: r.unit })),
-    badges: p.badges,
-    coachVouches: publishedVouchesFor(p.id).length,
-    scoutViews: safetyAudit.ledger.countForPlayer(p.id, 'view'),
-    note: 'Your season, verified. Every number above is backed by the ledger — no vanity metrics.',
-  });
-});
-
-playerRouter.post('/vouches/request', (req, res) => {
-  if (grassrootsOnly(req, res)) return;
-  if (guardianManagedOnly(req, res)) return;
-  createVouchRequest(req.player, req.body ?? {}, res);
-});
-
-// ------------------------------------------------- pairing, prefs, export
-// Child device pairing: the guardian mints a short-lived code; the child's
-// device exchanges it for their limited login.
-guardianRouter.post('/children/:id/pairing-code', (req, res) => {
-  const child = findPlayer(req.params.id);
-  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  if (rateLimit.limited('pairing_code_mint', req.guardian.id)) return res.status(429).json(rateLimitedBody('pairing_code_mint'));
-  // A row of pairing_codes — random (CSPRNG, never id-derived), stored as a
-  // hash, 15-minute lifetime, one live code per child (the previous one
-  // replaced) — durable BEFORE the response is sent. The plain code exists in
-  // this response only.
-  const { code, expiresAt } = codes.issuePairingCode(child.id);
-  res.status(201).json({ code, expiresAt });
-});
-
-app.post('/auth/player/pair', (req, res) => {
-  const { code } = req.body || {};
-  // A wrong code is charged per client address (a correct one costs
-  // nothing), on top of the per-IP /auth limiter; the budget is tested first.
-  const source = req.ip ?? req.socket?.remoteAddress ?? '?';
-  if (rateLimit.peek('pairing_attempt', source).remaining === 0) return res.status(429).json(rateLimitedBody('pairing_attempt')); // exactly `max` wrong codes are judged; the next attempt is refused
-  const live = codes.peekPairingCode(code);
-  const p = live ? findPlayer(live.playerId) : null;
-  if (!live || !p) {
-    if (live && !p) codes.revokePairingCodesFor(live.playerId); // a code whose player is gone (never written by this server) is dead
-    rateLimit.limited('pairing_attempt', source);
-    return res.status(404).json({ error: 'CODE_INVALID', message: 'That pairing code is wrong or expired — ask your parent/guardian for a fresh one.' });
-  }
-  // ONE unit of work: the code is consumed (its row deleted) and the child's
-  // session created together — a failure anywhere, the real COMMIT included,
-  // keeps the code live and creates no session; a crash between the two
-  // cannot leave a committed session beside a still-live code.
-  let token = null;
-  unit(() => {
-    const consumed = codes.consumePairingCode(code);
-    if (!consumed || consumed.playerId !== p.id) throw new Error('pairing: the code changed between the check and the exchange');
-    seam('pairing.after_consume');
-    token = createSession('player', p.id);
-  });
-  res.json({ playerId: p.id, name: p.name, token });
-});
-
-// Device push-token registration (used when EXPO_ACCESS_TOKEN switches the push adapter live; stored in dev too).
-// Players and guardians only (the Player app's accounts; staff are notified in their portal and by e-mail).
-// One row per device token: a token another account registered moves to this one, so a shared phone receives only
-// the notices of the account that last signed in on it.
-app.post('/push/register', (req, res) => {
-  const session = sessionFor(req);
-  if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
-  const { token } = req.body || {};
-  if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
-  // A device token is a string (Expo's ExponentPushToken[…]) of at most 200 characters; anything else is refused.
-  if (typeof token !== 'string' || token.length > 200) return res.status(400).json({ error: 'TOKEN_INVALID', message: 'A device token is text of at most 200 characters.' });
-  if (session.kind !== 'player' && session.kind !== 'guardian') return res.status(403).json({ error: 'PUSH_NOT_AVAILABLE', message: 'Push notifications go to the Player app\'s players and guardians.' });
-  const { moved } = pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
-  res.status(201).json({ registered: true, moved });
-});
-
-// Guardian view of open trial days near a child, and registration — the
-// guardian decides, the child never talks to anyone. Minor registrations
-// only reach clubs allowed to see the child (verified + local).
-guardianRouter.get('/children/:id/open-trials', (req, res) => {
-  const child = findPlayer(req.params.id);
-  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  if (!child.location) return res.json({ openTrials: [], note: 'Set a location on the profile to see local open days.' });
-  // The open days hosted inside the radius's box (one query; past ones too, so a parent still sees the day their
-  // child registered for); the exact distance and visibility here.
-  const list = grassroots.openTrials.inBox(boxAround(child.location, GRASSROOTS_RADIUS_KM))
-    .map((t) => ({ t, org: byId.org(t.orgId) }))
-    .filter(({ org }) => org?.level === 'grassroots' && org.location && haversineKm(org.location, child.location) <= GRASSROOTS_RADIUS_KM)
-    .filter(({ org }) => visibleToOrg(child, org)) // only clubs that may see the child at all
-    .map(({ t, org }) => ({
-      id: t.id, title: t.title, date: t.date, venue: t.venue, ageGroup: t.ageGroup, positions: [...t.positions],
-      orgName: org.name, verified: org.verified, safeguardingCertified: safeguardingCertified(org),
-      distanceKm: Math.round(haversineKm(org.location, child.location) * 10) / 10,
-      registered: t.registrations.some((r) => r.playerId === child.id),
-    }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-  res.json({ openTrials: list });
-});
-
-guardianRouter.post('/open-trials/:id/register', (req, res) => {
-  const child = findPlayer(req.body?.childId);
-  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  const trial = grassroots.openTrials.byId(req.params.id);
-  if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
-  const org = byId.org(trial.orgId);
-  if (!org || !visibleToOrg(child, org)) {
-    return res.status(403).json({ error: 'VERIFIED_CLUBS_ONLY', message: 'Only verified, local clubs can receive an under-18 registration.' });
-  }
-  if (trial.registrations.some((r) => r.playerId === child.id)) return res.status(409).json({ error: 'ALREADY_REGISTERED' });
-  // ONE unit of work: the registration, the ledger row and the notifications commit together.
-  unit(() => {
-    grassroots.openTrials.register(trial.id, { id: nextId('otr'), playerId: child.id, playerName: child.name?.slice(0, GL.playerName) ?? null, byGuardian: true, guardianId: req.guardian.id, ts: Date.now() });
-    ledgerAppend({ type: 'open_trial_registration_by_guardian', playerId: child.id, orgId: org.id, orgName: org.name, userId: trial.createdByUserId, scoutName: 'open day' });
-    notify({ kind: 'org_user', id: trial.createdByUserId }, 'open_trial', `${child.name} (via guardian) registered for "${trial.title}".`, trial.id);
-    notify({ kind: 'player', id: child.id }, 'open_trial', `Your parent/guardian registered you for ${org.name}'s open day "${trial.title}" — good luck!`, trial.id);
-  });
-  res.status(201).json({ registered: true });
-});
-
-guardianRouter.post('/children/:id/first-team-seeker', (req, res) => {
-  const child = findPlayer(req.params.id);
-  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  if (child.level === 'pro') return res.status(403).json({ error: 'GRASSROOTS_ONLY' });
-  if (switchRefused(res, req.body?.enabled, 'enabled')) return;
-  const stored = players.update(child.id, (d) => { d.firstTeamSeeker = req.body.enabled; });
-  broadcast('players', { playerId: child.id });
-  res.json({ firstTeamSeeker: stored.firstTeamSeeker });
-});
-
-guardianRouter.post('/children/:id/vouches/request', (req, res) => {
-  const child = findPlayer(req.params.id);
-  if (!child || !req.guardian.childIds.includes(child.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  if (child.level === 'pro') return res.status(403).json({ error: 'GRASSROOTS_ONLY' });
-  createVouchRequest(child, req.body ?? {}, res);
-});
-
-// Notification preferences — quiet hours + the minors' school-hours mute.
-function prefsHandler(getTarget) {
-  return (req, res) => {
-    let target = getTarget(req);
-    if (req.method === 'POST') {
-      const { quietStart, quietEnd, schoolHoursMute, timezone } = req.body || {};
-      // Quiet hours are HH:MM wall-clock values in a named zone.
-      const hhmm = (v) => v == null || v === '' ? null : (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : undefined);
-      const qs = hhmm(quietStart); const qe = hhmm(quietEnd);
-      if (qs === undefined || qe === undefined) return res.status(400).json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
-      if (timezone != null && timezone !== '' && !validateIanaZone(timezone).ok) return res.status(400).json({ error: 'TIMEZONE_INVALID', message: 'timezone must be an IANA time zone name, for example Europe/London.' });
-      const notificationPrefs = {
-        quietStart: quietStart === undefined ? target.notificationPrefs?.quietStart ?? null : qs,
-        quietEnd: quietEnd === undefined ? target.notificationPrefs?.quietEnd ?? null : qe,
-        schoolHoursMute: schoolHoursMute ?? target.notificationPrefs?.schoolHoursMute ?? null,
-        timezone: timezone === undefined ? target.notificationPrefs?.timezone ?? null : (timezone || null),
-      };
-      // A column-backed composite on both records: through the owning repository.
-      if (schoolHoursMute != null && typeof schoolHoursMute !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'schoolHoursMute', message: 'schoolHoursMute must be true or false.' });
-      const empty = Object.values(notificationPrefs).every((v) => v === null);
-      target = players.byId(target.id)
-        ? players.update(target.id, (d) => { d.notificationPrefs = empty ? null : notificationPrefs; })
-        : guardians.setNotificationPrefs(target.id, empty ? null : notificationPrefs);
-    }
-    res.json({ prefs: target.notificationPrefs ?? null, note: 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.' });
-  };
-}
-playerRouter.get('/prefs', prefsHandler((req) => req.player));
-playerRouter.post('/prefs', prefsHandler((req) => req.player));
-guardianRouter.get('/prefs', prefsHandler((req) => req.guardian));
-guardianRouter.post('/prefs', prefsHandler((req) => req.guardian));
-
-// Data rights: full export, and deletion that keeps the append-only ledger
-// (audit/attribution basis) but removes the person's content.
-function exportPlayer(p) {
-  const { password, ...profile } = p;
-  return {
-    exportedAt: new Date().toISOString(),
-    profile,
-    requests: recruitment.requests.forPlayer(p.id).map(requestForRecipient),
-    threads: channels.forPlayer(p.id).map((c) => channelViewFor(c, 'player')),
-    notifications: notificationFeed.feed('player', p.id),
-    insights: insightsFor(p.id),
-    ledgerEvents: safetyAudit.ledger.forPlayer(p.id).map(ledgerView),
-  };
-}
-
-function deletePlayerData(playerId) {
-  const p = findPlayer(playerId);
-  if (!p) return false;
-  const at = Date.now();
-  const mediaIds = p.media.map((m) => m.id);
-  let uploadIds = [];
-  // ONE unit of work: the player row becomes the retained record and its
-  // links go, the removal of the media FILES is queued in the same
-  // transaction, every session of the person is revoked and every table that
-  // names the person is tombstoned or redacted — all of it commits or none of it. The files themselves are removed only after COMMIT
-  // (and again at every boot and sweep until they are gone); while an entry is
-  // queued, /media/:id never serves the file.
-  unit(() => {
-  mediaDeletions.enqueue(mediaIds, { playerId, at });
-  sessions.revokeFor('player', playerId);
-  codes.revokePairingCodesFor(playerId); // before the player row
-  // The row is not deleted — it is reduced to the retained record (id,
-  // deleted_at, birth_date, country; placeholders and NULL elsewhere: the full
-  // birth date and the country code are kept by product decision), the child
-  // rows and links go, the guardians stop listing the id, and nothing serves
-  // it as an account from here on.
-  players.erase(playerId, { at });
-  seam('player.delete.after_erase');
-  // Requests and trials become id-only tombstones rather than
-  // vanishing. A recruitment case that reached a trial keeps the record that
-  // the trial happened (and the numbers the club itself filed); the person
-  // is gone from it. The case's status is NOT touched here — deletion is not
-  // a lifecycle event, and no path other than the lifecycle writer moves a
-  // case. The case's copy of the name goes with the person.
-  recruitment.redactPlayer(playerId, at);
-  recruitmentCases.redactPlayer(playerId, at); // the case's copy of the name goes, in this unit
-  scoutingAssessments.assessments.redactPlayer(playerId); // the club keeps its assessments; the player's name goes, in this unit
-  recruitmentContactsOffers.contacts.redactPlayer(playerId); // the reply's words go; the contact stays
-  grassroots.openTrials.redactPlayer(playerId); // the registration keeps the id; the name goes, in this unit
-  uploadIds = operations.uploads.removeForPlayer(playerId); // the player's upload sessions go, in this unit (their chunk files after COMMIT)
-  // Agent relationships become id-only tombstones (no name is
-  // stored on them; the dispute text and any player-authored history names go).
-  agentCoreDomain?.onPlayerDeleted?.(playerId, at);
-  // Compliance contexts and consents keep only the id.
-  complianceDomain?.onPlayerDeleted?.(playerId, at);
-  // A transaction keeps its ids, roles, states and times and loses
-  // the person; every representation naming the subject is withdrawn.
-  transactionsDomain?.onPlayerDeleted?.(playerId, at);
-  // Offers keep ids, states and times and lose the person's name and words.
-  offersDomain?.onPlayerDeleted?.(playerId, at);
-  signingsDomain?.onPlayerDeleted?.(playerId, at);
-  // Every thread of the player goes, guardian–club threads included, with its
-  // messages, attachments and receipts, inside this unit (D-B, docs/decisions.md;
-  // that settled scope, not retention).
-  channels.deleteForPlayer(playerId);
-  notifications.deleteForAudience('player', playerId); // the person's rows go in this unit; their preferences are retained (no cascade, by decision)
-  // (Every guardian's childIds was spliced by players.erase, with the link rows.)
-  // Ledger rows stay (append-only audit + attribution) but carry only ids.
-  broadcast('players'); // deferred until COMMIT inside the unit
-  });
-  // After COMMIT: the filesystem boundary. A failure here keeps the queue entry; the next boot or sweep retries.
-  mediaDeletions.process(storage);
-  removeUploadChunks(DATA_DIR, uploadIds);
-  return true;
-}
-
-playerRouter.get('/export', (req, res) => res.json(exportPlayer(req.player)));
-
-playerRouter.delete('/account', (req, res) => {
-  if (req.playerIsMinor) return res.status(403).json({ error: 'GUARDIAN_MANAGED', message: 'Ask your parent/guardian to delete this profile.' });
-  deletePlayerData(req.player.id);
-  res.json({ deleted: true });
-});
-
-guardianRouter.get('/export', (req, res) => {
-  res.json({
-    exportedAt: new Date().toISOString(),
-    guardian: guardianSelfView(req.guardian),
-    children: req.guardian.childIds.map((id) => findPlayer(id)).filter(Boolean).map(exportPlayer),
-  });
-});
-
-guardianRouter.delete('/children/:id', (req, res) => {
-  if (!req.guardian.childIds.includes(req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  deletePlayerData(req.params.id);
-  res.json({ deleted: true });
 });
 
 // ------------------------------------------------------------- directory
@@ -4129,6 +2840,59 @@ const journeyCtx = registerJourneyRoutes({
   integration: integrationDomain.seam,
 });
 const notificationFeed = registerNotificationFeed({ orgRouter, playerRouter, guardianRouter, notifications, notifier, notificationTargetFor: journeyCtx.notificationTargetFor });
+
+// ------------------------------------------------------ players and children
+// Registered last: the inbox answers through the lifecycle and opens threads, the export reads the feed, and the
+// erasure reaches every domain that holds a player.
+registerPlayerAccount({
+  app, playerRouter, players, guardians, findPlayer, codes, unit, seam, nextId, rateLimit, broadcast, notify, ledgerAppend,
+  createSession, loginLockedOut, noteLoginFailure, devLogins: DEV_LOGINS, devLoginRefused, checkSavedSearches, publishedVouchesFor,
+  vouchesFor: (playerId) => verificationReads.vouches.forPlayer(playerId).map(vouchView),
+});
+registerChildren({
+  guardianRouter, players, guardians, findPlayer, codes, unit, nextId, rateLimit, broadcast, checkSavedSearches, insightsFor,
+  requestsFor: (playerId) => recruitment.requests.forPlayer(playerId),
+  ledgerPageForPlayers: (ids, page) => safetyAudit.ledger.pageForPlayers(ids, page), ledgerView, viewHelpers: VIEW_HELPERS,
+});
+registerPlayerRecord({
+  playerRouter, players, unit, seam, nextId, broadcast, storage, guardianManagedOnly, moderateOrRefuse, recordActivity,
+  ledgerAppend, insightsFor, canonicalContractFor,
+});
+registerGrassrootsJourney({
+  playerRouter, guardianRouter, players, orgs, grassroots, clubSetup, transitionsVouches, findPlayer, findOrg: byId.org, unit, seam,
+  nextId, broadcast, notify, ledgerAppend, mailer, guardianManagedOnly, recordActivity, publishedVouchesFor,
+  scoutViewsOf: (playerId) => safetyAudit.ledger.countForPlayer(playerId, 'view'), pathwayRecord, openTrialView, safeguardingCertified,
+});
+registerRequestInbox({
+  playerRouter, guardianRouter, requests: recruitment.requests, findPlayer, unit, rateLimit, isBlocked, contactReplyFrom,
+  requestForRecipient, lifecycle: lifecycleDomain, openChannel, issueAcceptedTrial, ledgerAppend, notify, broadcast, guardianManagedOnly,
+});
+registerDeliverySettings({ app, playerRouter, guardianRouter, players, guardians, pushTokens, sessionFor });
+const erasePlayer = createPlayerErasure({
+  unit, seam, findPlayer, players, sessions, codes, mediaDeletions, uploads: operations.uploads, storage, removeUploadChunks, dataDir: DATA_DIR, broadcast,
+  // Each domain's part of a deletion, in this order, inside the deletion's unit.
+  redactors: [
+    (id, at) => recruitment.redactPlayer(id, at), // requests and trials become id-only tombstones
+    (id, at) => recruitmentCases.redactPlayer(id, at), // a case keeps its status and the club's numbers; the name goes
+    (id) => scoutingAssessments.assessments.redactPlayer(id),
+    (id) => recruitmentContactsOffers.contacts.redactPlayer(id), // the reply's words go; the contact stays
+    (id) => grassroots.openTrials.redactPlayer(id),
+    agentCoreDomain.onPlayerDeleted,
+    complianceDomain.onPlayerDeleted,
+    transactionsDomain.onPlayerDeleted,
+    offersDomain.onPlayerDeleted,
+    signingsDomain.onPlayerDeleted,
+    // Every thread of the player, guardian–club threads included (D-B, docs/decisions.md).
+    (id) => channels.deleteForPlayer(id),
+    (id) => notifications.deleteForAudience('player', id), // the preferences are kept, by decision
+  ],
+});
+registerDataRights({
+  playerRouter, guardianRouter, findPlayer, erasePlayer, requestForRecipient, notificationFeed, insightsFor, ledgerView,
+  requestsFor: (playerId) => recruitment.requests.forPlayer(playerId),
+  threadsFor: (playerId) => channels.forPlayer(playerId).map((c) => channelViewFor(c, 'player')),
+  ledgerFor: (playerId) => safetyAudit.ledger.forPlayer(playerId),
+});
 
 // -------------------------------------------------------- operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be

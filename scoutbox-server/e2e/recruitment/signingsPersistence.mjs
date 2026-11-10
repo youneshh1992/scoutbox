@@ -105,7 +105,7 @@ section('1 — the migration: fresh boot at the latest schema with the signing t
   const casesBefore = JSON.stringify([...db1.recruitmentCases, legacyCase].map((c) => [c.id, c.room?.status ?? null]));
   const signingsBefore = JSON.stringify([...db1.signings, legacySigning]);
   // Planted between boots through the repositories, in one unit: the case, its legacy row, and Kim under contract.
-  { const L = openLayer(DIR); try { L.unit(() => { L.layer.recruitmentCases.cases.create(legacyCase); L.layer.signingsFollowUps.signings.record(legacySigning); L.layer.players.update('pl-kim', (p) => { p.contractStatus = 'under_contract'; }); }); } finally { L.close(); } }
+  { const L = openLayer(DIR); try { L.unit(() => { L.layer.recruitmentCases.cases.create(legacyCase); L.layer.signingsFollowUps.signings.record(legacySigning); L.layer.players.setAvailability('pl-kim', { contractStatus: 'under_contract' }); }); } finally { L.close(); } }
   const s2 = await bootOn(DIR, PORT);
   ok(s2.up && (await s2.j('GET', '/healthz')).body.schemaVersion === LATEST_SCHEMA, '1.5 the planted legacy file boots at the latest schema');
   const m = (await s2.j('POST', '/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', role: 'Head of Recruitment' })).body;

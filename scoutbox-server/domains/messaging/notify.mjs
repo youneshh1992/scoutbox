@@ -98,3 +98,51 @@ export function registerNotificationFeed({ orgRouter, playerRouter, guardianRout
   guardianRouter.post('/notifications/read', (req, res) => read('guardian', req.guardian.id, res));
   return { feed };
 }
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+/** A quiet-hours bound: null when cleared, undefined when not HH:MM. */
+const quietBound = (v) => (v == null || v === '' ? null : typeof v === 'string' && HHMM.test(v) ? v : undefined);
+
+/**
+ * How pushes reach the Player app's people: the quiet hours and the minors' school-hours mute (`/prefs` for players
+ * and guardians; the in-app feed always keeps the record), and the device-token registration. A device token another
+ * account registered moves to this one, so a shared phone receives only the notices of whoever signed in last.
+ */
+export function registerDeliverySettings({ app, playerRouter, guardianRouter, players, guardians, pushTokens, sessionFor }) {
+  if (typeof players?.setNotificationPrefs !== 'function' || typeof guardians?.setNotificationPrefs !== 'function') throw new TypeError('registerDeliverySettings needs the players and guardians repositories');
+  const note = 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.';
+  const show = (res, person) => res.json({ prefs: person.notificationPrefs ?? null, note });
+  const save = (repo, person, req, res) => {
+    const { quietStart, quietEnd, schoolHoursMute, timezone } = req.body || {};
+    const qs = quietBound(quietStart); const qe = quietBound(quietEnd);
+    if (qs === undefined || qe === undefined) return res.status(400).json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
+    if (timezone != null && timezone !== '' && !validateIanaZone(timezone).ok) return res.status(400).json({ error: 'TIMEZONE_INVALID', message: 'timezone must be an IANA time zone name, for example Europe/London.' });
+    if (schoolHoursMute != null && typeof schoolHoursMute !== 'boolean') return res.status(400).json({ error: 'FIELD_INVALID', field: 'schoolHoursMute', message: 'schoolHoursMute must be true or false.' });
+    // An absent field keeps what is stored.
+    const was = person.notificationPrefs ?? {};
+    const prefs = {
+      quietStart: quietStart === undefined ? was.quietStart ?? null : qs,
+      quietEnd: quietEnd === undefined ? was.quietEnd ?? null : qe,
+      schoolHoursMute: schoolHoursMute ?? was.schoolHoursMute ?? null,
+      timezone: timezone === undefined ? was.timezone ?? null : (timezone || null),
+    };
+    const empty = Object.values(prefs).every((v) => v === null);
+    show(res, repo.setNotificationPrefs(person.id, empty ? null : prefs));
+  };
+  playerRouter.get('/prefs', (req, res) => show(res, req.player));
+  playerRouter.post('/prefs', (req, res) => save(players, req.player, req, res));
+  guardianRouter.get('/prefs', (req, res) => show(res, req.guardian));
+  guardianRouter.post('/prefs', (req, res) => save(guardians, req.guardian, req, res));
+
+  // Players and guardians only: club staff are notified in their portal and by e-mail.
+  app.post('/push/register', (req, res) => {
+    const session = sessionFor(req);
+    if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
+    const { token } = req.body || {};
+    if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
+    if (typeof token !== 'string' || token.length > 200) return res.status(400).json({ error: 'TOKEN_INVALID', message: 'A device token is text of at most 200 characters.' });
+    if (session.kind !== 'player' && session.kind !== 'guardian') return res.status(403).json({ error: 'PUSH_NOT_AVAILABLE', message: 'Push notifications go to the Player app\'s players and guardians.' });
+    const { moved } = pushTokens.register({ kind: session.kind, refId: session.refId, token, ts: Date.now() });
+    res.status(201).json({ registered: true, moved });
+  });
+}

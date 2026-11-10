@@ -148,27 +148,47 @@ test('create: defaults fill the optional fields; junk is refused by field before
   t.close();
 });
 
-test('players.update(id, draft => …): the change is typed whole and written at once; the id, the guardian link, the creation time, the lists and the trial reports never change through it; a composite list set whole keeps its rows; re-entry is refused', () => {
+test('player acts: each named act writes its own columns at once and the table judges the value; there is no generic update', () => {
   const t = boot();
-  const after = t.players.update('pl-seeded', (d) => { d.availability = 'loan_open'; d.medical.shared = false; d.stats = { goals: 30 }; });
-  assert.equal(after.availability, 'loan_open'); assert.equal(after.medical.shared, false); assert.equal(after.medical.records.length, 1, 'the medical records stay');
-  assert.deepEqual(after.stats, { appearances: null, goals: 30, assists: null, paceKmh: null, passCompletionPct: null, duelSuccessPct: null, cleanSheets: null });
+  assert.equal(t.players.update, undefined);
+  const before = t.players.byId('pl-seeded');
+  const after = t.players.setAvailability('pl-seeded', { availability: 'loan_open' });
+  assert.equal(after.availability, 'loan_open'); assert.equal(after.contractStatus, before.contractStatus, 'an absent field is kept');
   const s = second(t.dir); assert.equal(s.prepare("SELECT availability FROM players WHERE id = 'pl-seeded'").get().availability, 'loan_open', 'written at once'); s.close();
-  const kept = t.players.update('pl-seeded', (d) => { d.programme = { track: 'CM', startedAt: NOW }; });
-  assert.deepEqual(kept.programme.completed.length, 1, 'a programme set without its list keeps the completed rows');
-  for (const [edit, reason] of [
-    [(d) => { d.guardianId = 'gd-primary'; }, /guardianId does not change through update/],
-    [(d) => { d.badges.push('x'); }, /badges does not change through update/],
-    [(d) => { d.medical.records = []; }, /medical\.records does not change through update/],
-    [(d) => { d.programme = null; }, /programme cannot be set to null while 1 programme\.completed row/],
-    [(d) => { d.trialReports = [{}]; }, /trialReports does not change through update/],
-    [(d) => { d.futureField = 1; }, /unknown field futureField/],
-    [(d) => { d.foot = 'both'; }, /foot must be one of/],
-  ]) assert.throws(() => t.players.update('pl-seeded', edit), (e) => e.code === 'PLAYER_RECORD_INVALID' && reason.test(e.message), String(reason));
-  assert.throws(() => t.players.update('pl-seeded', () => t.players.update('pl-seeded', () => {})), (e) => e.code === 'PLAYER_UPDATE_REENTRANT');
-  assert.throws(() => t.players.update('pl-seeded', { availability: 'x' }), /takes a function/);
-  assert.equal(t.guardians.byEmail('Renamed@nowhere') , null);
-  assert.equal(t.guardians.byEmail('SIGNUP@example.test').id, 'gd-signup');
+  assert.deepEqual(Object.fromEntries(['availability', 'contractStatus'].map((k) => [k, t.players.setAvailability('pl-seeded', { availability: 'not_seeking', contractStatus: 'free_agent' })[k]])), { availability: 'not_seeking', contractStatus: 'free_agent' });
+  assert.equal(t.players.setMedicalSharing('pl-seeded', false).medical.records.length, before.medical.records.length, 'the medical records stay');
+  assert.equal(t.players.setLevel('pl-seeded', 'semi_pro').level, 'semi_pro');
+  assert.deepEqual(t.players.setLocation('pl-seeded', { lat: 51.5, lng: -0.1 }).location, { lat: 51.5, lng: -0.1 });
+
+  // Stats: the given fields replace theirs, the others stay, and the three counts read 0 once anything is recorded.
+  t.players.recordStats('pl-adult', { paceKmh: 30 });
+  assert.deepEqual(t.players.recordStats('pl-adult', { goals: 3 }).stats, { appearances: 0, goals: 3, assists: 0, paceKmh: 30, passCompletionPct: null, duelSuccessPct: null, cleanSheets: null });
+
+  // A new track clears the previous track's completed sessions in the same act.
+  assert.equal(before.programme.completed.length, 1);
+  const started = t.players.startProgramme('pl-seeded', 'midfield', NOW);
+  assert.deepEqual([started.programme.track, started.programme.startedAt, started.programme.completed.length], ['midfield', NOW, 0]);
+
+  const prefs = { quietStart: '21:00', quietEnd: '07:00', schoolHoursMute: true, timezone: 'Europe/London' };
+  assert.deepEqual(t.players.setNotificationPrefs('pl-adult', prefs).notificationPrefs, prefs);
+  assert.equal(t.players.setNotificationPrefs('pl-adult', null).notificationPrefs, null);
+
+  for (const [act, reason] of [
+    [() => t.players.setAvailability('pl-seeded', { availability: 'whenever' }), /availability/],
+    [() => t.players.setLevel('pl-seeded', 'legend'), /level/],
+    [() => t.players.setAcademyPlus('pl-seeded', 'yes'), /academyPlus must be a boolean/],
+    [() => t.players.setLocation('pl-seeded', { lat: 91, lng: 0 }), /lat/],
+    [() => t.players.setLocation('pl-seeded', { lat: 1, lng: 1, alt: 3 }), /location must be \{ lat, lng \}/],
+    [() => t.players.recordStats('pl-seeded', { goals: 2.5 }), /stats_goals/],
+    [() => t.players.recordStats('pl-seeded', { passCompletionPct: 101 }), /stats_pass_completion_pct/],
+    [() => t.players.recordStats('pl-seeded', { rating: 9 }), /stats\.rating is not a stat/],
+    [() => t.players.recordStats('pl-seeded', { goals: { sql: '99' } }), /stats_goals must be a single value/],
+    [() => t.players.setConditionStatus('pl-seeded', { sql: "'x'" }), /medical_condition_status must be a single value/],
+    [() => t.players.setNotificationPrefs('pl-seeded', { quietStart: '21:00' }), /notificationPrefs must be/],
+  ]) assert.throws(act, (e) => e.code === 'PLAYER_RECORD_INVALID' && e.message.includes('player pl-seeded') && reason.test(e.message), String(reason));
+  assert.throws(() => t.players.setLevel('pl-none', 'pro'), (e) => e.code === 'PLAYER_NOT_FOUND');
+  assert.throws(() => t.players.setAvailability('pl-seeded', {}), TypeError);
+  assert.equal(t.players.byId('pl-seeded').level, 'semi_pro', 'a refused act wrote nothing');
   t.close();
 });
 
@@ -257,7 +277,7 @@ test('erase: the row stays as the retained record (id, deletion instant, birth d
 
 test('units of work: an operation joins the open unit; a refusal or a throw rolls the whole unit back with nothing to restore in memory; an empty unit touches no identity table', () => {
   const t = boot();
-  assert.throws(() => t.unit(() => { t.players.update('pl-adult', (d) => { d.availability = 'loan_open'; }); t.players.addItem('pl-adult', 'badges', 'X'); throw new Error('boom'); }), /boom/);
+  assert.throws(() => t.unit(() => { t.players.setAvailability('pl-adult', { availability: 'loan_open' }); t.players.addItem('pl-adult', 'badges', 'X'); throw new Error('boom'); }), /boom/);
   const p = t.players.byId('pl-adult');
   assert.equal(p.availability, 'not_seeking'); assert.deepEqual(p.badges, []);
   assert.throws(() => t.unit(() => { t.guardians.create({ id: 'gd-x', name: 'X', email: 'x@example.test' }); t.players.create({ id: 'pl-y', name: 'Y', dob: '2015-01-01', country: 'GB' }); }), (e) => e.code === 'MINOR_WITHOUT_GUARDIAN');
@@ -292,21 +312,20 @@ test('scans: visibleCandidates applies the under-18 wall (by the country\'s age 
   t.close();
 });
 
-test('players.profile_signal is computeTrustScore of the record after every kind of write (create, update, addItem, setItems, the seed import), and is never written by update', () => {
+test('players.profile_signal is computeTrustScore of the record after every kind of write (create, the named acts, addItem, setItems, the seed import), and no act takes it as a field', () => {
   const t = boot();
   const check = (label) => { for (const p of t.players.list({})) assert.equal(t.get('SELECT profile_signal AS v FROM players WHERE id = ?', p.id).v, computeTrustScore(p), `${label}: ${p.id}`); };
   check('the seed import');
   t.players.create({ id: 'pl-new', name: 'New Player', dob: '1999-01-01', country: 'GB', position: 'CM', foot: 'left', heightCm: 175, weightKg: 70, stats: { appearances: 3 } });
   check('create (a complete profile)');
-  t.players.update('pl-new', (d) => { d.identityVerified = true; d.foot = null; });
-  check('update (identity, an incomplete profile)');
+  t.players.recordStats('pl-new', { goals: 4 });
+  check('an act (stats)');
   for (let i = 0; i < 7; i += 1) t.players.addItem('pl-new', 'media', { id: `med-n${i}`, title: `Clip ${i}`, kind: 'video', uploadedAt: new Date(NOW).toISOString(), url: null, views: 0, tags: {}, verifiedClip: null });
   check('addItem (clips, past the cap)');
   t.players.setItems('pl-new', 'attendance', [{ id: 'att-n1', fixture: 'Cup', venue: 'Ground', date: '2026-01-01', verified: true }]);
   check('setItems (attendance)');
   t.players.setItems('pl-new', 'media', []);
   check('setItems (clips cleared)');
-  assert.throws(() => t.players.update('pl-new', (d) => { d.profileSignal = 99; }), /unknown field profileSignal/, 'the figure is not a field of the record');
   assert.throws(() => t.players.addItem('pl-new', 'media', { id: 'med-bad', title: 'Bad', kind: 'video', uploadedAt: '1 May 2026' }), /uploadedAt is not a UTC instant/, 'a clip\'s upload time is an ISO instant');
   t.close();
 });
@@ -332,7 +351,7 @@ test('the directory page is exact and in its declared order: the whole visibilit
   assert.deepEqual(walk('org-pro', { text: 'ávi' }, 50), ['pl-d04'], 'an accented city matched as JavaScript lowers it');
   assert.deepEqual(walk('org-pro', { text: 'child pl-child1' }, 50), ['pl-child1'], 'a name');
   assert.deepEqual(walk('org-pro', { text: 'nowhere' }, 50), [], 'nothing');
-  t.players.update('pl-child1', (d) => { d.city = 'Hiddenham'; });
+  t.store.sqlite.prepare("UPDATE players SET city = 'Hiddenham' WHERE id = 'pl-child1'").run();
   assert.deepEqual(walk('org-pro', { text: 'hiddenham' }, 50), [], 'a minor\'s city is never shown, so never matched');
   // The antimeridian: a club at 179.9°E sees a player 20 km away at 179.9°W, and not one 60 km away.
   t.layer.orgs.create({ id: 'org-fiji', name: 'Taveuni FC', type: 'club', level: 'grassroots', plan: 'Grassroots', country: 'FJ', verified: true, location: { lat: -16.8, lng: 179.9, city: 'Waiyevo' } });

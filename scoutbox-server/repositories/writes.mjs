@@ -11,7 +11,7 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
 const describe = (v) => (v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v);
 const SQLITE_CONSTRAINT = 19;
 /** A constraint failure: CHECK, NOT NULL, UNIQUE, a foreign key, or a STRICT column refusing a value's type. */
-const isConstraintError = (e) => e?.code === 'ERR_SQLITE_ERROR' && (e.errcode & 0xff) === SQLITE_CONSTRAINT;
+export const isConstraintError = (e) => e?.code === 'ERR_SQLITE_ERROR' && (e.errcode & 0xff) === SQLITE_CONSTRAINT;
 
 export function writeChecks(prefix) {
   const refusal = (what, message) => { const code = `${prefix}_${what}`; return Object.assign(new Error(`${code}: ${message}`), { code }); };

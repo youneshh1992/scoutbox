@@ -80,8 +80,9 @@ order, or from a domain reading another's context where a repository read or a p
 
 Smaller late bindings, fixed as their routes move: `m17Ctx.recruitmentEvidence` (create the provider before
 `registerM17`), `m19Ctx.matchFactsKeeper`, and the forward `let` contexts that the routes in `server.mjs` call
-(`m23Ctx` trial hooks, `m13Ctx.mfaGuards`, `m14Ctx.syncLegacyOrgVerification`, `m182Ctx`). Erasure's
-`onPlayerDeleted` fan-out becomes an explicit list of each domain's `redactPlayer`.
+(`m23Ctx` trial hooks, `m13Ctx.mfaGuards`, `m14Ctx.syncLegacyOrgVerification`, `m182Ctx`). ~~Erasure's
+`onPlayerDeleted` fan-out becomes an explicit list of each domain's `redactPlayer`.~~ Done 10 Nov: `createPlayerErasure`
+takes the list of redactors.
 
 Target order: platform and repositories → agent access → compliance → integration → the lifecycle →
 transactions → agent core routes → signings → offers → journeys. The `...m19Ctx` spreads become named arguments
@@ -134,8 +135,8 @@ The rules are likely well under half of the production lines.
    those repositories have no JavaScript validator: a create must read back as written, and composite foreign keys
    replace the cross-record checks. The shared write kit is `repositories/writes.mjs`. Most repositories shrank by
    10–26% in characters (`verification.mjs` grew); the case for the work was soundness rather than size.
-   About 78 draft edits remain (`players` 16, `users` 7, `orgs` 7, then 1–5 per repository), none of them in a
-   multi-step state machine, and most of them in the routes still in `server.mjs`. Convert each one when its route
+   About 62 draft edits remain (`users` 7, `orgs` 7, then 1–5 per repository; `players` has none since 10 Nov and no
+   `update`), none of them in a multi-step state machine, and most of them in the routes still in `server.mjs`. Convert each one when its route
    moves into `domains/` (item 2), so every line is touched once. Two groups go first, in wiring slice (a):
    - the guardian verification flags (`emailVerified`, `idVerified`, `disclaimerAccepted`), which gate minors'
      safety, become one-way acts guarded in SQL;
@@ -167,10 +168,15 @@ The rules are likely well under half of the production lines.
         preference gate is built before the notifier (`createNotificationPrefs`), so `notificationAllows`,
         `m182Ctx` and the `notificationsSuppressed` counter are gone. The feed routes register after the journeys
         and take `notificationTargetFor`, replacing the `journeyCtx?.` lookup. The org and player routers are
-        created before the guardian account, so `openChannel` exists before the acceptance routes. Left for
-        (3): the player export still reaches the feed (`notificationFeed`) by a forward reference.
-     3. Players and children: player auth, `/player/*`, guardian child management, pairing, preferences and
-        export, with the `players.update` edits as named acts.
+        created before the guardian account, so `openChannel` exists before the acceptance routes.
+     3. ~~Players and children.~~ Done 10 Nov: `domains/identity/players.mjs` (sign-up, log-in, pairing, `/me`,
+        aging-up), `children.mjs` (the guardian's child management), `dataRights.mjs` (export and erasure),
+        `domains/development/record.mjs` (the football record) and `grassroots.mjs` (the Grassroots journey),
+        `domains/recruitment/inbox.mjs` (the player's and guardian's inbox, one answer path for both), and the
+        quiet hours and push registration in `domains/messaging/notify.mjs`. They register after the feed and the
+        lifecycle, so the export's forward reference and the inbox's `lifecycleDomain?.` lookups are gone. Every
+        `players.update` edit, the five outside these routes included, is a named act, and `players.update` is
+        gone.
      4. Club routes: org auth, search, contact and trials, film room, open trials, squad, friendlies,
         e-mail-domain verification, ledger and plan.
      5. The platform remainder (live sync, meta, media, capabilities, operator surface), then the remaining

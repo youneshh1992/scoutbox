@@ -20,7 +20,7 @@ const idvView = (q) => ({
 /**
  * The guardian's sign-up, e-mail verification and log-in on `app`, the session check, and the authenticated
  * `/guardian` router with the ID check, the disclaimer and `/me`. Returns `{ guardianAuth, guardianRouter }`; the
- * child-management routes still in server.mjs mount on that router.
+ * child-management routes (children.mjs) mount on that router.
  */
 export function registerGuardianAccount({
   app, guardians, safetyAudit, unit, nextId, mailer, idv, faultSeam,
