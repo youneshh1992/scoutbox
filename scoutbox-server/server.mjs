@@ -17,8 +17,6 @@ import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer } from './repositories/index.mjs';
 import { STAFF_LIMITS } from './repositories/users.mjs';
-import { MESSAGE_LIMITS } from './repositories/channels.mjs';
-import { NOTIFICATION_LIMITS, feedItem } from './repositories/notifications.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
 import { GRASSROOTS_LIMITS, boxAround } from './repositories/grassroots.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from './repositories/clubSetup.mjs';
@@ -56,7 +54,9 @@ import { buildCapabilityReport, demoSeedEnabled, devLoginsEnabled, productionCon
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { minimizePayload, assertEventRegistry, EVENT_NAMES } from './domains/platform/eventRegistry.mjs';
-import { registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';
+import { createNotificationPrefs, registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';
+import { createNotifier, registerNotificationFeed } from './domains/messaging/notify.mjs';
+import { registerMessaging, channelViewFor } from './domains/messaging/channels.mjs';
 import { registerAudit } from './domains/platform/audit.mjs';
 import { createFaultLayer } from './domains/platform/faults.mjs';
 import { httpContractMiddleware } from './domains/platform/httpContract.mjs';
@@ -99,7 +99,7 @@ import {
   weeklyGoal,
   nextActions,
 } from './domain.mjs';
-import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone, localParts } from './temporal.mjs';
+import { parseDobStrict, parseStrictDateOnly, readInstant, utcDayOf, validateIanaZone } from './temporal.mjs';
 import { readPage, sendPageError } from './domains/platform/paging.mjs';
 import { AUDIT_LIMITS } from './repositories/safetyAudit.mjs';
 import { PLANS, ARCHETYPES } from './catalogue.mjs';
@@ -708,273 +708,11 @@ function loginLockedOut(res, identifier) {
 const noteLoginFailure = (identifier) => { rateLimit.limited('login_failure', loginKey(identifier)); };
 
 // ------------------------------------------------------------ notifications
-// In-app notification feed. audience = {kind: 'player'|'guardian'|'org_user', id}.
-// (Push / email delivery is a production integration behind this same record.)
-// Quiet hours + the minors' school-hours mute apply to PUSH delivery: the
-// in-app feed always receives the record, but `deferredPush` marks anything
-// that production push infra must hold back.
-// Quiet hours and the school-hours mute are WALL-CLOCK rules
-// for the person, so they are evaluated in a named zone — the person's own
-// when their preferences carry one, otherwise the platform's home zone —
-// never in whatever zone the server process happens to run in.
-const PLATFORM_HOME_ZONE = 'Europe/London';
-function pushDeferred(audience, now = new Date()) {
-  let prefs = null;
-  let minor = false;
-  if (audience.kind === 'player') {
-    const p = findPlayer(audience.id);
-    prefs = p?.notificationPrefs;
-    minor = p ? !isAdult(p) : false;
-  } else if (audience.kind === 'guardian') {
-    prefs = byId.guardian(audience.id)?.notificationPrefs;
-  }
-  const zone = validateIanaZone(prefs?.timezone).ok ? prefs.timezone : PLATFORM_HOME_ZONE;
-  const wall = localParts(now.getTime(), zone);
-  const minutes = Number(wall.hour) * 60 + Number(wall.minute);
-  const schoolMute = prefs?.schoolHoursMute ?? minor; // minors muted in school hours by default
-  const day = new Date(Date.UTC(Number(wall.year), Number(wall.month) - 1, Number(wall.day))).getUTCDay();
-  if (schoolMute && day >= 1 && day <= 5 && minutes >= 8 * 60 + 30 && minutes <= 15 * 60 + 30) return true;
-  if (prefs?.quietStart && prefs?.quietEnd) {
-    const [qsH, qsM] = prefs.quietStart.split(':').map(Number);
-    const [qeH, qeM] = prefs.quietEnd.split(':').map(Number);
-    const qs = qsH * 60 + (qsM || 0);
-    const qe = qeH * 60 + (qeM || 0);
-    const inQuiet = qs <= qe ? minutes >= qs && minutes < qe : minutes >= qs || minutes < qe;
-    if (inQuiet) return true;
-  }
-  return false;
-}
-
-// How long an identical UNREAD notification stays coalescible: six hours, the
-// repository's `coalesceMs` (repositories/notifications.mjs), which also owns
-// the scan that decides what coalesces.
-
-// The preference gate. Assigned once the preference module has
-// registered (below); until then everything is allowed, which is the safe
-// direction for the few notifications seeding may create at boot.
-let notificationAllows = () => true;
-let m182Ctx = null; // assigned when the preference and audit modules register, below
+// The preference gate exists before anything that notifies; its routes register with the other preference routes.
+const notificationPrefs = createNotificationPrefs({ notifications });
+const notifier = createNotifier({ notifications, prefs: notificationPrefs, store, pushSender, byId, publishEvent, eventPayloadDrops });
+const { notify } = notifier;
 let agentCoreDomain = null; // assigned when the Agent core registers, below
-const notificationsSuppressed = { count: 0 };
-
-/**
- * Create (or coalesce) one notification: a row of the `notifications` table
- * (repositories/notifications.mjs), written at once — inside the unit of work
- * of the action it announces when one is open, so it commits or rolls back
- * with it, in a transaction of its own otherwise. `actionRequired:
- * { deadline }` attaches an acknowledgment contract in the same write (m13
- * notifyAction). Text longer than the table keeps is shortened (it can carry
- * names people typed). Returns the stored record or null when the person's
- * preferences mute it.
- *
- * Its external effects — the push and the `notify` event on the live streams
- * and in the replay log — are store.afterCommit effects: inside a unit they
- * wait for its COMMIT and are dropped with its rollback; outside one the row
- * is already committed and they run at once. A provider error after COMMIT is
- * a delivery failure, counted by the store, never a rollback.
- */
-function notify(audience, type, text, refId = null, { actionRequired = null } = {}) {
-  // A category the person has turned off is never CREATED — not
-  // created and hidden, not created and un-pushed. The mandatory
-  // security_account category cannot be turned off, so it never lands here.
-  if (!notificationAllows(audience, type, text)) {
-    notificationsSuppressed.count += 1;
-    return null;
-  }
-  // Cut at a character boundary: never half of an emoji's surrogate pair.
-  const cut = (t, n) => { let s = t.slice(0, n); if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1); return s; };
-  const body = typeof text === 'string' && text.length > NOTIFICATION_LIMITS.text ? `${cut(text, NOTIFICATION_LIMITS.text - 1)}…` : text;
-  // Coalesce identical unread notifications. The same sentence about the same
-  // record arriving twice is not two pieces of news: it would push the recipient's
-  // phone twice and bury the twenty other rows in their bell. So an existing
-  // unread row whose last occurrence was within six hours is refreshed and
-  // counted rather than duplicated — and no second push is sent. Once the
-  // recipient has READ it, a new occurrence is genuinely new and gets its own
-  // row. The refreshed row keeps its position in the feed.
-  const at = Date.now();
-  // The event the feed listeners get; minimised through the registry NOW (a
-  // bad call site fails here, inside the unit if there is one), delivered
-  // after the commit.
-  const announce = () => {
-    const { payload, dropped, unregistered } = minimizePayload('notify', { audienceKind: audience.kind, audienceId: audience.id });
-    if (unregistered || dropped.length) { eventPayloadDrops.count += 1; eventPayloadDrops.lastEvent = 'notify'; throw new Error(`notify: the 'notify' event ${unregistered ? 'is not in the event registry' : `carried unregistered payload keys: ${dropped.join(', ')}`}`); }
-    store.afterCommit(() => publishEvent('notify', payload));
-  };
-  const existing = notifications.findCoalescible({ audience, type, text: body, refId, at });
-  if (existing) {
-    const c = notifications.coalesce(existing.id, { at, actionRequired });
-    announce();
-    return c;
-  }
-
-  // `groupKey` (worked out from type and refId) lets any reader fold
-  // several DIFFERENT updates about the same record into "3 changes in …"
-  // rather than three rows, without the server deciding presentation.
-  // `category` is what the preference gate matched.
-  const n = notifications.create({
-    audience, type, text: body, refId, at, actionRequired,
-    category: m182Ctx?.notificationCategoryOf?.(type, body) ?? null,
-    deferredPush: pushDeferred(audience),
-  });
-  // Push delivery honours quiet hours / school-hours mute; the in-app feed
-  // above always keeps the record either way. The promise is RETURNED so the
-  // store observes it: a rejected delivery is counted and logged instead of
-  // becoming an unhandled rejection, and is never mistaken for a rollback.
-  if (!n.deferredPush) store.afterCommit(() => pushSender.send(audience, 'ScoutBox', body));
-  announce();
-  return n;
-}
-
-function notificationsFor(kind, id) {
-  // Each row is decorated at READ time with the current,
-  // authorized resource its refId points to (or null). Nothing is stored.
-  // The feed is the repository's (newest insertion first), each row an allowlist.
-  const resolve = journeyCtx?.notificationTargetFor;
-  return notifications.forAudience(kind, id)
-    .map((n) => (resolve ? { ...feedItem(n), target: resolve(n, { kind, id }) } : feedItem(n)));
-}
-
-function markNotificationsRead(kind, id) {
-  notifications.markRead(kind, id);
-}
-
-// ---------------------------------------------------------------- channels
-// A channel is the ONLY conversation surface, and it exists solely because a
-// request was accepted. For minors the counterparty is the guardian — the
-// child is never in the thread. Every message is moderated and logged.
-// The thread is a row of the `channels` table (repositories/channels.mjs), written
-// at once inside the acceptance route's unit of work with the request's answer.
-// The repository refuses a second thread for one request and a request,
-// organisation or guardian that does not exist; it returns the stored thread.
-// Names have no limit at signup: a thread keeps them shortened, never refused.
-const threadName = (v) => (typeof v === 'string' ? v.slice(0, MESSAGE_LIMITS.name) : v);
-function openChannel(request) {
-  const channel = {
-    id: nextId('chan'),
-    requestId: request.id,
-    playerId: request.playerId,
-    playerName: threadName(request.playerName),
-    orgId: request.orgId,
-    orgName: threadName(request.orgName),
-    orgVerified: request.orgVerified,
-    scoutName: threadName(request.scoutName),
-    scoutRole: threadName(request.scoutRole),
-    counterparty: request.routedTo, // 'player' | 'guardian'
-    guardianId: request.guardianId,
-    createdAt: Date.now(),
-    messages: [],
-    // Read receipts: last time each side opened the thread.
-    readBy: { org: null, counterparty: null },
-  };
-  return channels.open(channel);
-}
-
-// Resolve a message attachment reference into a safe, shareable summary.
-function buildAttachment(channel, body, senderSide) {
-  const { attachMediaId, attachTrialReportId } = body || {};
-  if (!attachMediaId && !attachTrialReportId) return { ok: true, attachment: null };
-  const player = findPlayer(channel.playerId);
-  if (attachMediaId) {
-    const m = player?.media.find((x) => x.id === attachMediaId);
-    if (!m) return { ok: false, error: 'MEDIA_NOT_FOUND' };
-    return { ok: true, attachment: { kind: 'clip', mediaId: m.id, title: m.title, url: m.url, verifiedClip: !!m.verifiedClip } };
-  }
-  const r = player?.trialReports.find((x) => x.id === attachTrialReportId && (senderSide !== 'org' || x.orgId === channel.orgId));
-  if (!r) return { ok: false, error: 'TRIAL_REPORT_NOT_FOUND' };
-  return {
-    ok: true,
-    attachment: {
-      kind: 'trial_report', reportId: r.id, orgName: r.orgName,
-      summary: `accel ${r.acceleration}/10 · ${r.sprintSpeedKmh} km/h · ${r.distanceKm} km · pass ${r.passCompletionPct}% · duels ${r.duelSuccessPct}% · coach ${r.coachRating}/10`,
-    },
-  };
-}
-
-/**
- * A message route's text and retry id, checked before moderation: `{ text, clientMsgId }`, or null once a 400 has
- * been sent. Junk is refused, never cut down.
- */
-function messageInput(req, res) {
-  const { text, clientMsgId = null } = req.body || {};
-  if (typeof text !== 'string' || !text.trim()) { res.status(400).json({ error: 'TEXT_REQUIRED' }); return null; }
-  if (text.trim().length > MESSAGE_LIMITS.text) { fieldInvalid(res, 'text', `A message is at most ${MESSAGE_LIMITS.text} characters.`); return null; }
-  if (clientMsgId !== null && clientMsgId !== '' && (typeof clientMsgId !== 'string' || clientMsgId.length > MESSAGE_LIMITS.clientMsgId)) { fieldInvalid(res, 'clientMsgId', `clientMsgId is text of at most ${MESSAGE_LIMITS.clientMsgId} characters.`); return null; }
-  return { text: text.trim(), clientMsgId: clientMsgId || null };
-}
-
-function postMessage(channel, rawSender, text, attachment = null, clientMsgId = null) {
-  const sender = { ...rawSender, name: threadName(rawSender.name) };
-  // Idempotency: a retried send with the same client id returns the message
-  // that already landed instead of duplicating it.
-  const dup = clientMsgId ? channels.byClientMsgId(channel.id, sender, clientMsgId) : null;
-  if (dup) return messageView(dup);
-  // One unit: the message (and its attachment), its ledger row and its
-  // notifications commit together, before the sender hears 201.
-  const msg = unit(() => {
-    const stored = channels.appendMessage(channel.id, { id: nextId('msg'), ts: Date.now(), sender, text, attachment, ...(clientMsgId ? { clientMsgId } : {}) });
-    ledgerAppend({ type: 'message', playerId: channel.playerId, orgId: channel.orgId, orgName: channel.orgName, userId: sender.kind === 'org_user' ? sender.id : null, scoutName: sender.name });
-    // The counterparty an org user's message notifies (a player's or guardian's message notifies the org users below).
-    const recipient = channel.counterparty === 'guardian'
-      ? { kind: 'guardian', id: channel.guardianId }
-      : { kind: 'player', id: channel.playerId };
-    if (sender.kind !== 'org_user') {
-      // notify every org user who has messaged or created the request
-      const userIds = new Set(channels.staffSenders(channel.id));
-      const req = recruitment.requests.byId(channel.requestId);
-      if (req) userIds.add(req.userId);
-      for (const uid of userIds) {
-        if (uid) notify({ kind: 'org_user', id: uid }, 'message', `${sender.name} replied in the ${channel.playerName} thread.`, channel.id);
-      }
-    } else if (recipient.id) {
-      notify(recipient, 'message', `${channel.orgName} (${channel.scoutRole}) sent a message.`, channel.id);
-    }
-    return stored;
-  });
-  broadcast('messages', { channelId: channel.id });
-  return messageView(msg);
-}
-
-// The thread a route names, if it is the caller's: the organisation's, the guardian's, or an adult player's own.
-const orgThread = (req) => { const c = channels.byId(req.params.id); return c && c.orgId === req.org.id ? c : null; };
-const guardianThread = (req) => { const c = channels.byId(req.params.id); return c && c.guardianId === req.guardian.id ? c : null; };
-const playerThread = (req) => { const c = channels.byId(req.params.id); return c && c.playerId === req.player.id && c.counterparty === 'player' ? c : null; };
-
-// Re-check a channel's standing on every use. A block, a suspension, or a
-// player leaving the org's platform (level or radius change) closes the
-// communication path; the history stays as audit but nothing new moves.
-function channelClosedForOrg(channel, org) {
-  const p = findPlayer(channel.playerId);
-  if (!p) return { error: 'CHANNEL_CLOSED', message: 'This player account no longer exists.' };
-  if (isBlocked(p.id, org.id)) return { error: 'BLOCKED', message: 'This player (or their guardian) has blocked your organisation.' };
-  if (!visibleToOrg(p, org)) return { error: 'CHANNEL_CLOSED', message: 'This player is no longer available to your organisation — the thread is closed (history retained for audit).' };
-  return null;
-}
-
-function channelClosedForCounterparty(channel, playerId) {
-  const org = byId.org(channel.orgId);
-  if (!org) return { error: 'CHANNEL_CLOSED', message: 'This organisation no longer exists.' };
-  if (org.suspended) return { error: 'ORG_SUSPENDED', message: 'This organisation is suspended pending a safety review — the thread is paused.' };
-  if (isBlocked(playerId, org.id)) return { error: 'BLOCKED', message: 'You have blocked this organisation. Lift the block to continue the conversation.' };
-  return null;
-}
-
-// Channel view without internal ids the caller shouldn't hold (an allowlist: the organisation's id only for the
-// organisation itself, the guardian's id never).
-const attachmentView = (a) => (a === null ? null : a.kind === 'clip'
-  ? { kind: 'clip', mediaId: a.mediaId, title: a.title, url: a.url, verifiedClip: a.verifiedClip }
-  : { kind: 'trial_report', reportId: a.reportId, orgName: a.orgName, summary: a.summary });
-function messageView(m) {
-  return { id: m.id, ts: m.ts, sender: { kind: m.sender.kind, id: m.sender.id, name: m.sender.name }, text: m.text, attachment: attachmentView(m.attachment), ...(m.clientMsgId !== undefined ? { clientMsgId: m.clientMsgId } : {}) };
-}
-function channelViewFor(c, viewer) {
-  return {
-    id: c.id, requestId: c.requestId, playerId: c.playerId, playerName: c.playerName,
-    ...(viewer === 'org' ? { orgId: c.orgId } : {}),
-    orgName: c.orgName, orgVerified: c.orgVerified, scoutName: c.scoutName, scoutRole: c.scoutRole, counterparty: c.counterparty,
-    createdAt: c.createdAt, lastActivityAt: c.lastActivityAt, messages: c.messages.map(messageView),
-    readBy: { org: c.readBy.org, counterparty: c.readBy.counterparty },
-  };
-}
 
 // Football activity feeds the streak/weekly-goal habit loop.
 function recordActivity(player) {
@@ -1244,12 +982,24 @@ function guardianManagedOnly(req, res) {
   return false;
 }
 
+// The authenticated routers. The guardian's is created with the guardian account, below.
+const orgRouter = express.Router();
+app.use('/org', orgAuth, orgRouter);
+const playerRouter = express.Router();
+app.use('/player', playerAuth, playerRouter);
+
 // -------------------------------------------------------------- guardians
 // Parents own every under-18 account. The account and its safeguarding gates (e-mail, ID, disclaimer) are
 // domains/identity/guardians.mjs; the child-management routes below mount on its router.
 const { guardianRouter } = registerGuardianAccount({
   app, guardians, safetyAudit, unit, nextId, mailer, idv, faultSeam: seam,
   createSession, sessionFor, loginKey, loginLockedOut, noteLoginFailure, devLogins: DEV_LOGINS, devLoginRefused,
+});
+
+// ------------------------------------------------------------- message threads
+const { openChannel } = registerMessaging({
+  orgRouter, playerRouter, guardianRouter, channels, recruitment, byId, isBlocked,
+  unit, nextId, notify, broadcast, ledgerAppend, moderateOrRefuse, guardianManagedOnly,
 });
 
 guardianRouter.get('/children', (req, res) => {
@@ -1392,38 +1142,6 @@ guardianRouter.post('/requests/:id/respond', (req, res) => {
   res.json(requestForRecipient(answered));
 });
 
-// Guardian-side message threads (adult-to-adult, moderated, logged).
-guardianRouter.get('/channels', (req, res) => {
-  res.json(channels.forGuardian(req.guardian.id).map((c) => channelViewFor(c, 'guardian')));
-});
-
-guardianRouter.post('/channels/:id/messages', (req, res) => {
-  const channel = guardianThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  const closed = channelClosedForCounterparty(channel, channel.playerId);
-  if (closed) return res.status(403).json(closed);
-  const input = messageInput(req, res); if (!input) return;
-  if (!moderateOrRefuse(res, input.text, { kind: 'guardian_message', channelId: channel.id })) return;
-  const att = buildAttachment(channel, req.body, 'guardian');
-  if (!att.ok) return res.status(400).json({ error: att.error });
-  res.status(201).json(postMessage(channel, { kind: 'guardian', id: req.guardian.id, name: req.guardian.name }, input.text, att.attachment, input.clientMsgId));
-});
-
-guardianRouter.post('/channels/:id/read', (req, res) => {
-  const channel = guardianThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  const readBy = channels.markRead(channel.id, 'counterparty', Date.now());
-  broadcast('messages', { channelId: channel.id });
-  res.json({ readBy: { org: readBy.org, counterparty: readBy.counterparty } });
-});
-
-guardianRouter.post('/channels/:id/typing', (req, res) => {
-  const channel = guardianThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  broadcast('typing', { channelId: channel.id, side: 'counterparty' });
-  res.json({ ok: true });
-});
-
 // The weekly parent digest: everything that happened around your children.
 guardianRouter.get('/digest', (req, res) => {
   const week = Date.now() - 7 * 24 * 3600 * 1000;
@@ -1486,12 +1204,6 @@ guardianRouter.post('/coguardian', (req, res) => {
     throw e;
   }
   res.status(201).json({ guardianId: co.id, note: 'The co-guardian must verify their ID and accept the disclaimer before they can act.' });
-});
-
-guardianRouter.get('/notifications', (req, res) => res.json(notificationsFor('guardian', req.guardian.id)));
-guardianRouter.post('/notifications/read', (req, res) => {
-  markNotificationsRead('guardian', req.guardian.id);
-  res.json({ ok: true });
 });
 
 guardianRouter.get('/children/:id/insights', (req, res) => {
@@ -1717,8 +1429,6 @@ function orgAuth(req, res, next) {
   next();
 }
 
-const orgRouter = express.Router();
-app.use('/org', orgAuth, orgRouter);
 
 // ----------------------------------------------------------------- search
 orgRouter.get('/players', (req, res) => {
@@ -2058,58 +1768,6 @@ function contactReplyFrom(req, res, request) {
   if (check.reply && !moderateOrRefuse(res, check.reply, { kind: 'contact_reply', requestId: request.id })) return { ok: false };
   return { ok: true, reply: check.reply };
 }
-
-// Message threads for this org — only exist where a request was accepted. Pages by cursor, most recently active
-// first; `playerId` limits the page to one player's threads (a Room's inbox panel).
-orgRouter.get('/channels', (req, res) => {
-  let page;
-  try { page = readPage(req.query, ['number', 'number']); } catch (e) { return sendPageError(res, e); }
-  const { playerId } = req.query;
-  if (playerId !== undefined && (typeof playerId !== 'string' || !playerId || playerId.length > MESSAGE_LIMITS.id)) return fieldInvalid(res, 'playerId', 'playerId is the id of a player, as text.');
-  const out = channels.pageForOrg(req.org.id, { playerId: playerId ?? null }, page);
-  res.json({ items: out.items.map((c) => ({ ...channelViewFor(c, 'org'), closed: !!channelClosedForOrg(c, req.org) })), nextCursor: out.nextCursor });
-});
-
-// The inbox figures the home screens show: the organisation's threads and the messages from players and guardians
-// since the club last opened each thread.
-orgRouter.get('/channels/counts', (req, res) => res.json(channels.countsForOrg(req.org.id)));
-
-orgRouter.post('/channels/:id/messages', (req, res) => {
-  const channel = orgThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  // Eligibility is rechecked on every send, not just when the channel opened.
-  const closed = channelClosedForOrg(channel, req.org);
-  if (closed) return res.status(403).json(closed);
-  const input = messageInput(req, res); if (!input) return;
-  if (!moderateOrRefuse(res, input.text, { kind: 'org_message', channelId: channel.id })) return;
-  const att = buildAttachment(channel, req.body, 'org');
-  if (!att.ok) return res.status(400).json({ error: att.error });
-  // postMessage notifies the counterparty (guardian or adult player).
-  const msg = postMessage(channel, { kind: 'org_user', id: req.orgUser.id, name: `${req.orgUser.name} · ${req.orgUser.role || 'Scout'} · ${req.org.name}` }, input.text, att.attachment, input.clientMsgId);
-  res.status(201).json(msg);
-});
-
-orgRouter.post('/channels/:id/read', (req, res) => {
-  const channel = orgThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  const readBy = channels.markRead(channel.id, 'org', Date.now());
-  broadcast('messages', { channelId: channel.id });
-  res.json({ readBy: { org: readBy.org, counterparty: readBy.counterparty } });
-});
-
-orgRouter.post('/channels/:id/typing', (req, res) => {
-  const channel = orgThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  if (channelClosedForOrg(channel, req.org)) return res.status(403).json({ error: 'CHANNEL_CLOSED' });
-  broadcast('typing', { channelId: channel.id, side: 'org' });
-  res.json({ ok: true });
-});
-
-orgRouter.get('/notifications', (req, res) => res.json(notificationsFor('org_user', req.orgUser.id)));
-orgRouter.post('/notifications/read', (req, res) => {
-  markNotificationsRead('org_user', req.orgUser.id);
-  res.json({ ok: true });
-});
 
 // ------------------------------------------------------- film room & feed
 
@@ -2983,8 +2641,6 @@ orgRouter.get('/reputation', (_req, res) => {
 });
 
 // ------------------------------------------------------------ player routes
-const playerRouter = express.Router();
-app.use('/player', playerAuth, playerRouter);
 
 playerRouter.get('/me', (req, res) => {
   const { password, ...safe } = req.player;
@@ -3163,48 +2819,6 @@ playerRouter.post('/requests/:id/respond', (req, res) => {
   return recruitment.requests.byId(request.id);
   });
   res.json(requestForRecipient(answered));
-});
-
-// Adult players talk in their own threads; a child never has one.
-playerRouter.get('/channels', (req, res) => {
-  if (req.playerIsMinor) return res.json([]); // threads live with the guardian
-  res.json(channels.forPlayer(req.player.id, { counterparty: 'player' }).map((c) => channelViewFor(c, 'player')));
-});
-
-playerRouter.post('/channels/:id/messages', (req, res) => {
-  if (guardianManagedOnly(req, res)) return;
-  const channel = playerThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  const closed = channelClosedForCounterparty(channel, req.player.id);
-  if (closed) return res.status(403).json(closed);
-  const input = messageInput(req, res); if (!input) return;
-  if (!moderateOrRefuse(res, input.text, { kind: 'player_message', channelId: channel.id })) return;
-  const att = buildAttachment(channel, req.body, 'player');
-  if (!att.ok) return res.status(400).json({ error: att.error });
-  res.status(201).json(postMessage(channel, { kind: 'player', id: req.player.id, name: req.player.name }, input.text, att.attachment, input.clientMsgId));
-});
-
-playerRouter.post('/channels/:id/read', (req, res) => {
-  if (guardianManagedOnly(req, res)) return;
-  const channel = playerThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  const readBy = channels.markRead(channel.id, 'counterparty', Date.now());
-  broadcast('messages', { channelId: channel.id });
-  res.json({ readBy: { org: readBy.org, counterparty: readBy.counterparty } });
-});
-
-playerRouter.post('/channels/:id/typing', (req, res) => {
-  if (guardianManagedOnly(req, res)) return;
-  const channel = playerThread(req);
-  if (!channel) return res.status(404).json({ error: 'CHANNEL_NOT_FOUND' });
-  broadcast('typing', { channelId: channel.id, side: 'counterparty' });
-  res.json({ ok: true });
-});
-
-playerRouter.get('/notifications', (req, res) => res.json(notificationsFor('player', req.player.id)));
-playerRouter.post('/notifications/read', (req, res) => {
-  markNotificationsRead('player', req.player.id);
-  res.json({ ok: true });
 });
 
 // "Who's watching you" — the player's side of the Discovery Ledger.
@@ -3866,7 +3480,7 @@ function exportPlayer(p) {
     profile,
     requests: recruitment.requests.forPlayer(p.id).map(requestForRecipient),
     threads: channels.forPlayer(p.id).map((c) => channelViewFor(c, 'player')),
-    notifications: notificationsFor('player', p.id),
+    notifications: notificationFeed.feed('player', p.id),
     insights: insightsFor(p.id),
     ledgerEvents: safetyAudit.ledger.forPlayer(p.id).map(ledgerView),
   };
@@ -4161,22 +3775,17 @@ registerSafetyConsole({
 const srcCtx = { nextId, safetyAudit }; // source changes are rows of source_changes, written through the repository
 registerSourceChanges(srcCtx);
 
-// Preferences, audit and fault injection. Registered here, after the routers
-// exist and before the modules that emit notifications, so
-// the preference gate is in place for every notify() call that follows.
-m182Ctx = {
-  byId, players, guardians, safetyReads, scoutingReads, verificationReads, agentReads, complianceReads, developmentReads, development, boxCamReads, discoveryReads, insightReads, grassrootsReads, recruitmentReads, notifications, orgRouter, playerRouter, guardianRouter, findPlayer,
-  // The same standing-gate composition m12/shared.mjs uses.
+// The preference routes and the club's audit feed.
+registerNotificationPrefs({ prefs: notificationPrefs, orgRouter, playerRouter, guardianRouter });
+registerAudit({
+  recruitmentReads, discoveryReads, developmentReads, agentReads, complianceReads, safetyReads, orgRouter, findPlayer,
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
   requireLead: (req, res) => {
     if (isLeadRole(req.orgUser?.role)) return true;
     res.status(403).json({ error: 'LEAD_REQUIRED', message: 'Only recruitment leads and directors can do this.' });
     return false;
   },
-};
-const prefsModule = registerNotificationPrefs(m182Ctx);
-notificationAllows = prefsModule.allows;
-registerAudit(m182Ctx);
+});
 
 // One rate limiter for the whole server. Every limited action is named
 // in RATE_LIMIT_POLICY with its window and scope, and the capability report
@@ -4519,6 +4128,7 @@ const journeyCtx = registerJourneyRoutes({
   access: agentAccess,
   integration: integrationDomain.seam,
 });
+const notificationFeed = registerNotificationFeed({ orgRouter, playerRouter, guardianRouter, notifications, notifier, notificationTargetFor: journeyCtx.notificationTargetFor });
 
 // -------------------------------------------------------- operator surface
 // What this deployment can and cannot actually do. ScoutBox is careful to be
@@ -4542,8 +4152,8 @@ app.get('/capabilities', (_req, res) => {
       },
       notifications: {
         preferencesEnforced: true,
-        suppressedByPreference: notificationsSuppressed.count,
-        unknownTypes: Object.keys(m182Ctx.notificationUnknownTypes?.() ?? {}),
+        suppressedByPreference: notifier.suppressedCount(),
+        unknownTypes: Object.keys(notificationPrefs.unknownTypes()),
         note: 'Preferences are applied before a notification is created. security_account cannot be turned off.',
       },
       faultInjection: {

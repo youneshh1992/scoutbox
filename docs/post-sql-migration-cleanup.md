@@ -163,7 +163,12 @@ The rules are likely well under half of the production lines.
         registers after the verification claims and takes `syncLegacyOrgVerification` as an argument, so the
         late `m14Ctx` lookup is gone (`registerM14` is `registerVerificationClaims`). Its two `orgs.update` edits
         are one `orgs.setStanding(id, fields)`.
-     2. Messaging and notifications: the channel helpers and every `/channels` and `/notifications` route.
+     2. ~~Messaging and notifications.~~ Done 10 Nov: `domains/messaging/notify.mjs` and `channels.mjs`. The
+        preference gate is built before the notifier (`createNotificationPrefs`), so `notificationAllows`,
+        `m182Ctx` and the `notificationsSuppressed` counter are gone. The feed routes register after the journeys
+        and take `notificationTargetFor`, replacing the `journeyCtx?.` lookup. The org and player routers are
+        created before the guardian account, so `openChannel` exists before the acceptance routes. Left for
+        (3): the player export still reaches the feed (`notificationFeed`) by a forward reference.
      3. Players and children: player auth, `/player/*`, guardian child management, pairing, preferences and
         export, with the `players.update` edits as named acts.
      4. Club routes: org auth, search, contact and trials, film room, open trials, squad, friendlies,

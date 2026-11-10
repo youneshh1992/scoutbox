@@ -193,11 +193,12 @@ export function defaultPrefs() {
   return { categories, emailIntent: false };
 }
 
-export function registerNotificationPrefs(ctx) {
-  const { notifications, orgRouter, playerRouter, guardianRouter } = ctx;
-  // Stored preferences live in repositories/notifications.mjs; this module
-  // keeps the vocabulary, the validation, the effective view and the gate.
-  if (!notifications || typeof notifications.prefsFor !== 'function') throw new TypeError('registerNotificationPrefs needs the notifications repository (ctx.notifications)');
+/**
+ * The preference gate and the preference views over the stored preferences (repositories/notifications.mjs). It
+ * registers no routes, so the notifier can hold the gate before any module that notifies registers.
+ */
+export function createNotificationPrefs({ notifications }) {
+  if (!notifications || typeof notifications.prefsFor !== 'function') throw new TypeError('createNotificationPrefs needs the notifications repository');
 
   const find = (kind, id) => notifications.prefsFor(kind, id);
 
@@ -265,15 +266,17 @@ export function registerNotificationPrefs(ctx) {
     res.json({ preferences: view(kind, id) });
   }
 
+  return { allows, effective, categoryOf, view, update, unknownTypes: () => Object.fromEntries(unknownTypes) };
+}
+
+/** `GET` and `PUT /notification-preferences` for club staff, players and guardians. */
+export function registerNotificationPrefs({ prefs, orgRouter, playerRouter, guardianRouter }) {
+  if (typeof prefs?.view !== 'function') throw new TypeError('registerNotificationPrefs needs the preferences from createNotificationPrefs');
+  const { view, update } = prefs;
   orgRouter.get('/notification-preferences', (req, res) => res.json({ preferences: view('org_user', req.orgUser.id) }));
   orgRouter.put('/notification-preferences', (req, res) => update('org_user', req.orgUser.id, req.body, res));
   playerRouter.get('/notification-preferences', (req, res) => res.json({ preferences: view('player', req.player.id) }));
   playerRouter.put('/notification-preferences', (req, res) => update('player', req.player.id, req.body, res));
   guardianRouter.get('/notification-preferences', (req, res) => res.json({ preferences: view('guardian', req.guardian.id) }));
   guardianRouter.put('/notification-preferences', (req, res) => update('guardian', req.guardian.id, req.body, res));
-
-  ctx.notificationAllows = allows;
-  ctx.notificationCategoryOf = categoryOf;
-  ctx.notificationUnknownTypes = () => Object.fromEntries(unknownTypes);
-  return { allows, effective, categoryOf };
 }

@@ -11,7 +11,8 @@ import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/
 import { createNotificationsRepository, feedItem, NOTIFICATIONS_MIGRATION, NOTIFICATION_TABLES, NOTIFY_COALESCE_MS, NOTIFICATION_LIMITS } from '../repositories/notifications.mjs';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
-import { registerNotificationPrefs, CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
+import { createNotificationPrefs, registerNotificationPrefs, CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
+import { createNotifier, registerNotificationFeed } from '../domains/messaging/notify.mjs';
 import { createOperationsRepository } from '../repositories/operations.mjs';
 import { registerDelivery } from '../m13/delivery.mjs';
 import { openStore } from '../store.mjs';
@@ -273,7 +274,9 @@ test('preferences through the real module over the repository: defaults are the 
   const dir = tempDir('ntf-prefs'); fixtureFile(dir, { notificationPrefs: [pref({ audienceKind: 'guardian', audienceId: 'g-1', categories: { combine: false, security_account: false } })] });
   const s = openRaw(dir); const repo = bare(s);
   const routes = {}; const stubFor = (prefix) => ({ get(p, h) { routes[`get ${prefix}${p}`] = h; }, put(p, h) { routes[`put ${prefix}${p}`] = h; } });
-  const { allows, effective } = registerNotificationPrefs({ notifications: repo, orgRouter: stubFor('/org'), playerRouter: stubFor('/player'), guardianRouter: stubFor('/guardian') });
+  const prefs = createNotificationPrefs({ notifications: repo });
+  registerNotificationPrefs({ prefs, orgRouter: stubFor('/org'), playerRouter: stubFor('/player'), guardianRouter: stubFor('/guardian') });
+  const { allows, effective } = prefs;
   const res = () => { const r = { code: 200, body: null, status(c) { r.code = c; return r; }, json(b) { r.body = b; return r; } }; return r; };
   const put = (body) => { const r = res(); routes['put /org/notification-preferences']({ orgUser: { id: 'usr-1' }, body }, r); return r; };
   assert.equal(allows(STAFF, 'recruitment_room', 'Maria mentioned you'), true, 'a mention is delivered by default');
@@ -290,8 +293,12 @@ test('preferences through the real module over the repository: defaults are the 
     r = put(body); assert.equal(r.code, 400, JSON.stringify(body)); assert.equal(r.body.error, code, JSON.stringify(body));
   }
   r = put({ emailIntent: true }); assert.equal(r.code, 200); assert.equal(repo.prefsFor('org_user', 'usr-1').emailIntent, true); assert.deepEqual(plain(repo.prefsFor('org_user', 'usr-1').categories), { mentions: false }, 'a write without categories keeps the stored ones');
-  assert.throws(() => registerNotificationPrefs({ orgRouter: stubFor('/x'), playerRouter: stubFor('/x'), guardianRouter: stubFor('/x') }), /needs the notifications repository/);
+  assert.throws(() => createNotificationPrefs({}), /needs the notifications repository/);
+  assert.throws(() => registerNotificationPrefs({ orgRouter: stubFor('/x'), playerRouter: stubFor('/x'), guardianRouter: stubFor('/x') }), /needs the preferences/);
   assert.ok(CATEGORY_NAMES.includes('security_account'));
+  // The notifier holds the gate from construction, and the feed decorates every row through the journeys' resolver.
+  assert.throws(() => createNotifier({ notifications: repo }), /needs the preference gate/);
+  assert.throws(() => registerNotificationFeed({ orgRouter: stubFor('/x'), playerRouter: stubFor('/x'), guardianRouter: stubFor('/x'), notifications: repo, notifier: {} }), /needs the journeys' notificationTargetFor/);
   s.close(); rm(dir);
 });
 

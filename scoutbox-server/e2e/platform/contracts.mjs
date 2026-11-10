@@ -21,7 +21,7 @@ import {
   EVENT_REGISTRY, EVENT_NAMES, AUDIENCES, minimizePayload, eventFingerprint, assertEventRegistry, isRegistered,
 } from '../../domains/platform/eventRegistry.mjs';
 import { EVENT_AUDIENCE, audienceFor } from '../../domains/platform/eventAudience.mjs';
-import { CATEGORIES, TYPE_CATEGORY, categoryOf, defaultPrefs, registerNotificationPrefs } from '../../domains/platform/notificationPrefs.mjs';
+import { CATEGORIES, TYPE_CATEGORY, categoryOf, defaultPrefs, createNotificationPrefs } from '../../domains/platform/notificationPrefs.mjs';
 import { integrityReport, integritySummary } from '../../domains/platform/integrity.mjs';
 import { parseFaultRules, createFaultLayer } from '../../domains/platform/faults.mjs';
 import { productionConfigProblems } from '../../domains/platform/capabilities.mjs';
@@ -212,7 +212,7 @@ section('§9 — defaults are conservative without muting an obligation, and the
     neg(TYPE_CATEGORY[t] !== 'discovery_nudges', `${t} is an obligation or a request, never a nudge that defaults off`);
   }
   neg(d.emailIntent === false, 'nobody is opted into email they never asked for');
-  // In-process enforcement with stub routers. The stored preferences are
+  // In-process enforcement. The stored preferences are
   // rows of the notification tables, so the module is given a real repository
   // on a temporary in-memory database (every table migration applied); the
   // stored "security_account: false" is planted as a stored row — the
@@ -223,8 +223,7 @@ section('§9 — defaults are conservative without muting an obligation, and the
   prefsDb.prepare("INSERT INTO orgs (id, name, type, level, plan, created_at) VALUES ('org-a', 'Org A', 'club', 'pro', 'Pro', 0)").run();
   for (const [id, name] of [['u-tom', 'Tom'], ['u-maria', 'Maria']]) prefsDb.prepare("INSERT INTO org_users (id, org_id, name, name_key, role, created_at) VALUES (?, 'org-a', ?, ?, 'Scout', ?)").run(id, name, name.toLowerCase(), Date.now());
   const notifications = createNotificationsRepository({ sqlite: prefsDb, now: Date.now });
-  const stub = { get() {}, put() {} };
-  const { allows, effective } = registerNotificationPrefs({ db: {}, notifications, orgRouter: stub, playerRouter: stub, guardianRouter: stub, persist() {} });
+  const { allows, effective } = createNotificationPrefs({ notifications });
   const tom = { kind: 'org_user', id: 'u-tom' }; const maria = { kind: 'org_user', id: 'u-maria' };
   ok(allows(tom, 'recruitment_room', 'Maria mentioned you'), 'a mention is delivered by default');
   notifications.updatePrefs('org_user', 'u-tom', { categories: { mentions: false, security_account: false }, emailIntent: false });
