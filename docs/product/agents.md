@@ -45,7 +45,7 @@ Every encoded rule comes from [`../reference/agent-regulatory-snapshot-2026-09.m
 
 **Minors**
 - Agents never see under-18s (`/org/agent/players` or anywhere); no route takes a minor as subject.
-- A minor named as a party gets the same `PARTY_NOT_FOUND` 404 as an unknown, blocked or invisible player, so refusals never reveal age. A client-supplied `dob` or guardian flag is ignored.
+- A minor named as a party gets the same `PARTY_NOT_FOUND` 404 as an unknown, blocked or invisible player, so refusals never reveal age. A party naming its own `dob` or guardian flag is refused (`CONTEXT_INPUT_INVALID`, `problem: unknown_field`).
 - `MINOR_PATHWAY_PRODUCTION_ENABLED` is false for ENG, INT and USA; `evaluateMinorGate` shows subject-free readiness only ("pathway not enabled").
 - Guardian-managed accounts have no agent consents (`{items:[], minor:true}`); actions return `COMPLIANCE_ACTION_NOT_PERMITTED`.
 - `canAgentAccessMinor` must never feed `visibleToOrg`/`orgCanSee`.
@@ -77,7 +77,7 @@ Every encoded rule comes from [`../reference/agent-regulatory-snapshot-2026-09.m
 - Revocation stops future acts immediately and undoes nothing; a revoked consent needs a new request. No fee, terms or other party's data on the card. Notifications are in the mandatory `compliance` category.
 
 **Attributed T&S reviewers**
-- Reviewers are rows of `ts_reviewers` (roles `trust_safety_reviewer`, `trust_safety_admin`; scrypt-hashed secrets); `/auth/reviewer/login` creates a `ts_reviewer` session. A `reviewerId` or timestamp in the body is ignored. The shared admin key is read-only and decides nothing.
+- Reviewers are rows of `ts_reviewers` (roles `trust_safety_reviewer`, `trust_safety_admin`; scrypt-hashed secrets); `/auth/reviewer/login` creates a `ts_reviewer` session. A decision naming its own `reviewerId` or timestamp is refused by name; the reviewer is the session's. The shared admin key is read-only and decides nothing.
 - Revocation kills sessions but keeps past decisions attributed; at least one admin must remain. Bootstrap via `TS_REVIEWER_BOOTSTRAP_*` only; no reviewer is invented and nothing is back-filled.
 - Approvals need evidence. Reviewers resolve facts only: they cannot override an ACTIVE prohibition (`REVIEW_CANNOT_OVERRIDE_ACTIVE_RULE`) or decide on an uncertain rule (`REVIEW_REQUIRES_POLICY_VERSION`). Decided items are superseded, never edited.
 

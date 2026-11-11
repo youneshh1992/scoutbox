@@ -13,6 +13,8 @@ export const COMPLIANCE_ERROR_HTTP = table({
   CONSENT_INPUT_INVALID: 400,
   REVIEW_INPUT_INVALID: 400,
   COMPLIANCE_CLIENT_KEY_INVALID: 400,
+  // A malformed expectedRev, as platform/concurrency.mjs guardRev refuses it.
+  EXPECTED_REV_INVALID: 400,
 
   // ---- 401: no attributable identity.
   REVIEWER_AUTH_REQUIRED: 401,
@@ -99,6 +101,10 @@ export const PUBLIC_ERROR_FIELDS = [
   'status',
   'agreementId',
   'field',
+  'problem',
+  'min',
+  'max',
+  'expected',
   'required',
   'reasons',
   'policyVersions',

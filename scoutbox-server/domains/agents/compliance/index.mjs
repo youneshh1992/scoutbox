@@ -7,7 +7,6 @@
  */
 
 import { visibleToOrg } from '../../../domain.mjs';
-import { parseStrictDateOnly } from '../../../temporal.mjs';
 import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
@@ -23,6 +22,8 @@ import {
   JURISDICTIONS,
 } from '../core/shared.mjs';
 import { sendComplianceError } from './errors.mjs';
+import { parseInput, filled } from '../../platform/schemas.mjs';
+import { COMPLIANCE_INPUT, complianceParseOptions } from './schemas.mjs';
 import { RULE_STATUSES, CONSENT_KINDS } from './policyVersions.mjs';
 
 export { CONSENT_KINDS };
@@ -127,8 +128,15 @@ export function registerCompliance(rawCtx) {
   });
   const bySystem = (name) => ({ kind: 'system', userId: null, name });
   const limitedOr429 = refuseWhenLimited(rateLimit);
-  const clientKeyOr400 = (req, res) => {
-    const k = normaliseClientKey(req.body?.clientKey);
+  /** The request input read with its schema (COMPLIANCE_INPUT), or `undefined` once the refusal is sent. */
+  const inputOr400 = (res, name, input, root = 'body') => {
+    const parsed = parseInput(COMPLIANCE_INPUT[name], input ?? {}, complianceParseOptions(name, root));
+    if (parsed.ok) return parsed.value;
+    sendComplianceError(res, parsed, name);
+    return undefined;
+  };
+  const clientKeyOr400 = (body, res) => {
+    const k = normaliseClientKey(body.clientKey);
     if (!k.ok) {
       sendComplianceError(res, { error: 'COMPLIANCE_CLIENT_KEY_INVALID', message: k.message }, 'clientKey');
       return undefined;
@@ -216,8 +224,10 @@ export function registerCompliance(rawCtx) {
 
   /** Uniform refusal for an unknown id, a wrong secret and a revoked reviewer. */
   app.post('/auth/reviewer/login', (req, res) => {
-    const id = String(req.body?.reviewerId ?? '').trim();
-    const secret = String(req.body?.secret ?? '');
+    const b = inputOr400(res, 'reviewerLogin', req.body);
+    if (!b) return;
+    const id = b.reviewerId.trim();
+    const secret = b.secret;
     // The failed-login budget is checked before the secret, keyed by the identifier whatever its state, so the 429
     // reveals nothing the uniform refusal withholds.
     const bucket = `reviewer:${id.toLowerCase()}`;
@@ -290,60 +300,11 @@ export function registerCompliance(rawCtx) {
   });
   tsRouter.post('/reviewers', (req, res) => {
     if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
-    const b = req.body ?? {};
-    for (const k of ['id', 'name', 'secret'])
-      if (typeof b[k] !== 'string')
-        return sendComplianceError(
-          res,
-          { error: 'COMPLIANCE_INPUT_INVALID', field: k, message: `${k} must be text.` },
-          'reviewers',
-        );
-    if (b.role !== undefined && typeof b.role !== 'string')
-      return sendComplianceError(
-        res,
-        { error: 'COMPLIANCE_INPUT_INVALID', field: 'role', allowed: REVIEWER_ROLES },
-        'reviewers',
-      );
-    const id = b.id.trim();
-    const name = b.name.trim().slice(0, 80);
+    const b = inputOr400(res, 'newReviewer', req.body);
+    if (!b) return;
+    const { id, secret } = b;
+    const name = b.name.trim();
     const role = b.role ?? 'trust_safety_reviewer';
-    const secret = b.secret;
-    if (!/^[a-z0-9][a-z0-9-]{2,39}$/i.test(id) || !name)
-      return sendComplianceError(
-        res,
-        {
-          error: 'COMPLIANCE_INPUT_INVALID',
-          field: 'id',
-          message: 'id (3–40 chars, letters, digits, dashes) and name are required.',
-        },
-        'reviewers',
-      );
-    if (!REVIEWER_ROLES.includes(role))
-      return sendComplianceError(
-        res,
-        { error: 'COMPLIANCE_INPUT_INVALID', field: 'role', allowed: REVIEWER_ROLES },
-        'reviewers',
-      );
-    if (secret.length < 12)
-      return sendComplianceError(
-        res,
-        {
-          error: 'COMPLIANCE_INPUT_INVALID',
-          field: 'secret',
-          message: 'A reviewer secret needs at least 12 characters.',
-        },
-        'reviewers',
-      );
-    if (b.secret.length > 200)
-      return sendComplianceError(
-        res,
-        {
-          error: 'COMPLIANCE_INPUT_INVALID',
-          field: 'secret',
-          message: 'A reviewer secret has at most 200 characters.',
-        },
-        'reviewers',
-      );
     if (reviewerById(id)) return sendComplianceError(res, { error: 'REVIEWER_EXISTS' }, 'reviewers');
     const r = createReviewer({ id, name, role, secret, createdBy: byReviewer(req) });
     res.status(201).json({ reviewer: publicReviewer(r) });
@@ -352,13 +313,9 @@ export function registerCompliance(rawCtx) {
     if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
     const r = reviewerById(req.params.id);
     if (!r) return sendComplianceError(res, { error: 'REVIEWER_NOT_FOUND' }, 'reviewers');
+    const b = inputOr400(res, 'reviewerRevocation', req.body);
+    if (!b) return;
     if (r.status === 'revoked') return res.json({ reviewer: publicReviewer(r), idempotent: true });
-    if (req.body?.reason !== undefined && req.body.reason !== null && typeof req.body.reason !== 'string')
-      return sendComplianceError(
-        res,
-        { error: 'COMPLIANCE_INPUT_INVALID', field: 'reason', message: 'reason must be text.' },
-        'reviewers',
-      );
     if (r.role === 'trust_safety_admin' && reviewers.activeCount('trust_safety_admin') <= 1)
       return sendComplianceError(
         res,
@@ -371,12 +328,7 @@ export function registerCompliance(rawCtx) {
         d.status = 'revoked';
         d.revokedAt = now();
         d.revokedBy = { id: req.reviewer.id, name: req.reviewer.name };
-        hist(d, 'reviewer_revoked', byReviewer(req), {
-          reason:
-            String(req.body?.reason ?? '')
-              .trim()
-              .slice(0, 200) || null,
-        });
+        hist(d, 'reviewer_revoked', byReviewer(req), { reason: filled(b.reason) });
         bumpRev(d, { by: req.reviewer, at: now() });
       });
       revokeReviewerSessions(r.id);
@@ -416,71 +368,22 @@ export function registerCompliance(rawCtx) {
     rev: p.rev ?? 1,
   });
   /**
-   * `{ row }` or `{ field, message }`. The route checks the shape a person types; the repository types the rule
-   * parameters against the engine's vocabulary, and its refusal names the field.
+   * `{ row }` or `{ field, problem, message }` for a body its schema has read. The schema checks each field and the
+   * rule parameters' types; the repository checks them again as it stores them, and its refusal names the field.
    */
   function policyFromBody(b, req) {
-    const errs = [];
-    if (!/^jp-[a-z]{2,6}-[0-9a-z-]{2,20}$/i.test(String(b.id ?? ''))) errs.push('id');
-    if (!JURISDICTIONS.includes(b.jurisdiction)) errs.push('jurisdiction');
-    if (!Number.isInteger(b.policyVersion) || b.policyVersion < 1) errs.push('policyVersion');
-    // A real calendar day in bounds, not merely the shape of one.
-    if (!parseStrictDateOnly(b.effectiveFrom).ok) errs.push('effectiveFrom');
-    if (b.effectiveTo != null && !parseStrictDateOnly(b.effectiveTo).ok) errs.push('effectiveTo');
-    if (
-      b.effectiveTo != null &&
-      parseStrictDateOnly(b.effectiveFrom).ok &&
-      parseStrictDateOnly(b.effectiveTo).ok &&
-      !(b.effectiveFrom < b.effectiveTo)
-    )
-      errs.push('effectiveTo');
-    if (b.regulator !== undefined && b.regulator !== null && typeof b.regulator !== 'string') errs.push('regulator');
-    if (b.supersedes !== undefined && b.supersedes !== null && typeof b.supersedes !== 'string')
-      errs.push('supersedes');
-    if (!b.rules || typeof b.rules !== 'object' || Array.isArray(b.rules) || !Object.keys(b.rules).length)
-      errs.push('rules');
-    else
-      for (const [id, r] of Object.entries(b.rules)) {
-        if (!RULE_STATUSES.includes(r?.ruleStatus)) errs.push(`rules.${id}.ruleStatus`);
-        if (
-          !Array.isArray(r?.sourceRef) ||
-          !r.sourceRef.length ||
-          r.sourceRef.some((s) => !s?.source || !s?.retrievedDate)
-        )
-          errs.push(`rules.${id}.sourceRef`);
-        if (r && typeof r === 'object' && r.note !== undefined && r.note !== null && typeof r.note !== 'string')
-          errs.push(`rules.${id}.note`);
-      }
-    if (errs.length) return { field: errs[0], message: `Invalid policy fields: ${errs.join(', ')}.` };
+    if (b.effectiveTo != null && !(b.effectiveFrom < b.effectiveTo))
+      return { field: 'effectiveTo', problem: 'invalid', message: 'effectiveTo must be after effectiveFrom.' };
     const at = now();
-    const unknown = Object.keys(b).filter(
-      (k) =>
-        ![
-          'id',
-          'regulator',
-          'jurisdiction',
-          'policyVersion',
-          'supersedes',
-          'effectiveFrom',
-          'effectiveTo',
-          'rules',
-          'expectedRev',
-          'clientKey',
-        ].includes(k),
-    );
-    if (unknown.length)
-      return { field: unknown[0], message: `This build stores no policy field ${unknown.join(', ')}.` };
     const row = {
       id: b.id,
-      regulator: String(b.regulator ?? '').slice(0, 20) || 'UNKNOWN',
+      regulator: filled(b.regulator) ?? 'UNKNOWN',
       jurisdiction: b.jurisdiction,
       policyVersion: b.policyVersion,
       supersedes: b.supersedes ?? null,
       effectiveFrom: b.effectiveFrom,
       effectiveTo: b.effectiveTo ?? null,
-      rules: Object.fromEntries(
-        Object.entries(b.rules).map(([id, r]) => [id, { ...r, note: String(r.note ?? '').slice(0, 1000) || null }]),
-      ),
+      rules: Object.fromEntries(Object.entries(b.rules).map(([id, r]) => [id, { ...r, note: r.note || null }])),
       status: 'proposed',
       proposedBy: { id: req.reviewer.id, name: req.reviewer.name, at },
       approvedBy: null,
@@ -513,13 +416,10 @@ export function registerCompliance(rawCtx) {
   tsRouter.post('/compliance/policies', (req, res) => {
     if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
     if (limitedOr429(res, 'ts_policy_publish', req.reviewer.id)) return;
-    const built = policyFromBody(req.body ?? {}, req);
-    if (!built.row)
-      return sendComplianceError(
-        res,
-        { error: 'POLICY_INPUT_INVALID', field: built.field, message: built.message },
-        'policies',
-      );
+    const b = inputOr400(res, 'newPolicy', req.body);
+    if (!b) return;
+    const built = policyFromBody(b, req);
+    if (!built.row) return sendComplianceError(res, { error: 'POLICY_INPUT_INVALID', ...built }, 'policies');
     if (policies.exists(built.row.id)) return sendComplianceError(res, { error: 'POLICY_VERSION_EXISTS' }, 'policies');
     let p;
     try {
@@ -534,6 +434,7 @@ export function registerCompliance(rawCtx) {
   });
   tsRouter.post('/compliance/policies/:id/approve', (req, res) => {
     if (!requireReviewerRole(req, res, 'trust_safety_admin')) return;
+    if (!inputOr400(res, 'policyApproval', req.body)) return;
     const p = policies.byId(req.params.id);
     if (!p) return sendComplianceError(res, { error: 'POLICY_NOT_FOUND' }, 'policies');
     if (p.status !== 'proposed')
@@ -798,12 +699,9 @@ export function registerCompliance(rawCtx) {
         { error: 'AGENT_VERIFICATION_REQUIRED', message: 'Create your agent profile first.' },
         'recheck',
       );
-    const ma =
-      facet === 'fifa_licence'
-        ? null
-        : String(req.body?.memberAssociation ?? '')
-            .trim()
-            .toUpperCase();
+    const b = inputOr400(res, 'facetRecheck', req.body);
+    if (!b) return;
+    const ma = facet === 'fifa_licence' ? null : (b.memberAssociation?.toUpperCase() ?? '');
     const cur = facetRecord(p, facet, ma);
     if (!cur || !cur.reference)
       return sendComplianceError(
@@ -1227,39 +1125,9 @@ export function registerCompliance(rawCtx) {
     }
     return c;
   }
+  /** A party its schema has read, resolved to a subject this agency may name. */
   const resolveParty = (req, res, raw) => {
-    if (
-      raw === null ||
-      typeof raw !== 'object' ||
-      Array.isArray(raw) ||
-      [raw.partyRole, raw.subjectKind, raw.subjectId].some((v) => typeof v !== 'string')
-    ) {
-      sendComplianceError(
-        res,
-        {
-          error: 'CONTEXT_INPUT_INVALID',
-          field: 'parties',
-          message:
-            'Each party needs partyRole (individual | engaging_entity | releasing_entity), subjectKind (player | club) and subjectId, as text.',
-        },
-        'party',
-      );
-      return null;
-    }
     const { partyRole, subjectKind, subjectId } = raw;
-    if (!PARTY_ROLES.includes(partyRole) || !['player', 'club'].includes(subjectKind) || !subjectId) {
-      sendComplianceError(
-        res,
-        {
-          error: 'CONTEXT_INPUT_INVALID',
-          field: 'parties',
-          message:
-            'Each party needs partyRole (individual | engaging_entity | releasing_entity), subjectKind (player | club) and subjectId.',
-        },
-        'party',
-      );
-      return null;
-    }
     if (subjectKind === 'player') {
       if (partyRole !== 'individual') {
         sendComplianceError(
@@ -1363,46 +1231,13 @@ export function registerCompliance(rawCtx) {
   orgRouter.post('/agent/compliance/contexts', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
     if (!access.requireCap(req, res, 'compliance.contexts.write')) return;
-    const b = req.body ?? {};
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'newContext', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    const type = String(b.type ?? '');
-    if (!CONTEXT_TYPES.includes(type))
-      return sendComplianceError(
-        res,
-        { error: 'CONTEXT_INPUT_INVALID', field: 'type', allowed: CONTEXT_TYPES },
-        'contexts',
-      );
-    if (!Array.isArray(b.jurisdictions) || b.jurisdictions.some((j) => typeof j !== 'string'))
-      return sendComplianceError(
-        res,
-        {
-          error: 'CONTEXT_INPUT_INVALID',
-          field: 'jurisdictions',
-          message:
-            'jurisdictions must be a non-empty list of three-letter member-association codes (INT for FIFA level).',
-        },
-        'contexts',
-      );
+    const { type } = b;
     const jurisdictions = [...new Set(b.jurisdictions.map((j) => j.toUpperCase()))];
-    if (!jurisdictions.length || jurisdictions.length > 10 || jurisdictions.some((j) => !/^[A-Z]{3}$/.test(j)))
-      return sendComplianceError(
-        res,
-        {
-          error: 'CONTEXT_INPUT_INVALID',
-          field: 'jurisdictions',
-          message:
-            'jurisdictions must be a non-empty list of up to ten three-letter member-association codes (INT for FIFA level).',
-        },
-        'contexts',
-      );
-    if (b.parties !== undefined && b.parties !== null && (!Array.isArray(b.parties) || b.parties.length > 6))
-      return sendComplianceError(
-        res,
-        { error: 'CONTEXT_INPUT_INVALID', field: 'parties', message: 'parties must be a list of at most six parties.' },
-        'contexts',
-      );
-    const fp = payloadFingerprint({ type, jurisdictions, parties: Array.isArray(b.parties) ? b.parties : [] });
+    const fp = payloadFingerprint({ type, jurisdictions, parties: b.parties ?? [] });
     if (key) {
       const hit = contexts.byCreateKey(req.org.id, req.orgUser.id, key);
       if (hit) {
@@ -1420,7 +1255,7 @@ export function registerCompliance(rawCtx) {
     if (limitedOr429(res, 'compliance_context_write', req.orgUser.id)) return;
     if (!facetGate(req, res, p, jurisdictions)) return;
     const parties = [];
-    for (const raw of Array.isArray(b.parties) ? b.parties : []) {
+    for (const raw of b.parties ?? []) {
       const party = resolveParty(req, res, raw);
       if (!party) return;
       if (parties.some((x) => x.partyRole === party.partyRole))
@@ -1470,6 +1305,7 @@ export function registerCompliance(rawCtx) {
   orgRouter.post('/agent/compliance/contexts/:id/evaluate', (req, res) => {
     const c = ownContext(req, res, req.params.id);
     if (!c) return;
+    if (!inputOr400(res, 'evaluation', req.body)) return;
     if (c.status !== 'open') return sendComplianceError(res, { error: 'CONTEXT_CLOSED' }, 'evaluate');
     const { result, ctx } = unit(() => {
       const result = evaluateAndRecord(c, byOrg(req));
@@ -1481,8 +1317,10 @@ export function registerCompliance(rawCtx) {
     const c = ownContext(req, res, req.params.id, { write: true });
     if (!c) return;
     if (c.status !== 'open') return sendComplianceError(res, { error: 'CONTEXT_CLOSED' }, 'parties');
+    const b = inputOr400(res, 'newParty', req.body);
+    if (!b) return;
     if (limitedOr429(res, 'compliance_context_write', req.orgUser.id)) return;
-    const party = resolveParty(req, res, req.body);
+    const party = resolveParty(req, res, b);
     if (!party) return;
     if (c.parties.some((x) => x.partyRole === party.partyRole && !x.removed))
       return sendComplianceError(res, { error: 'CONTEXT_PARTY_EXISTS' }, 'parties');
@@ -1511,21 +1349,10 @@ export function registerCompliance(rawCtx) {
     const c = ownContext(req, res, req.params.id, { write: true });
     if (!c) return;
     if (c.status !== 'open') return sendComplianceError(res, { error: 'CONTEXT_CLOSED' }, 'representations');
-    const b = req.body ?? {};
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'declaration', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    if (typeof b.partyRole !== 'string')
-      return sendComplianceError(
-        res,
-        { error: 'COMPLIANCE_INPUT_INVALID', field: 'partyRole', allowed: PARTY_ROLES },
-        'representations',
-      );
-    if (b.agreementId !== undefined && b.agreementId !== null && typeof b.agreementId !== 'string')
-      return sendComplianceError(
-        res,
-        { error: 'COMPLIANCE_INPUT_INVALID', field: 'agreementId', message: 'agreementId must be text.' },
-        'representations',
-      );
     const partyRole = b.partyRole;
     const party = c.parties.find((x) => x.partyRole === partyRole && !x.removed);
     if (!party) return sendComplianceError(res, { error: 'PARTY_NOT_FOUND' }, 'representations');
@@ -1549,7 +1376,7 @@ export function registerCompliance(rawCtx) {
     let agreement = null;
     let declaredOnly = false;
     if (party.subjectKind === 'player') {
-      const found = typeof b.agreementId === 'string' ? agentReads.agreements.byId(b.agreementId) : null;
+      const found = b.agreementId ? agentReads.agreements.byId(b.agreementId) : null;
       agreement =
         found &&
         found.agentUserId === req.orgUser.id &&
@@ -1757,6 +1584,7 @@ export function registerCompliance(rawCtx) {
     if (!c) return;
     const rep = c.representations.find((r) => r.id === req.params.repId && r.agentUserId === req.orgUser.id);
     if (!rep) return sendComplianceError(res, { error: 'CONTEXT_NOT_FOUND' }, 'withdraw');
+    if (!inputOr400(res, 'contextRev', req.body)) return;
     if (rep.status === 'withdrawn') return res.json({ context: contextForAgent(c), idempotent: true });
     if (!guardRev(req, res, c, { errorCode: 'CONTEXT_VERSION_CONFLICT', current: {} })) return;
     const { result, ctx } = unit(() => {
@@ -1787,6 +1615,7 @@ export function registerCompliance(rawCtx) {
   orgRouter.post('/agent/compliance/contexts/:id/close', (req, res) => {
     const c = ownContext(req, res, req.params.id, { write: true });
     if (!c) return;
+    if (!inputOr400(res, 'contextRev', req.body)) return;
     if (c.status === 'closed') return res.json({ context: contextForAgent(c), idempotent: true });
     if (!guardRev(req, res, c, { errorCode: 'CONTEXT_VERSION_CONFLICT', current: {} })) return;
     const ctx = unit(() => {
@@ -1854,22 +1683,10 @@ export function registerCompliance(rawCtx) {
   function requestDualRepresentationConsent(req, res, given) {
     const c = contextById(given.id) ?? given; // as stored now: the transaction seam projects it first
     if (c.status !== 'open') return sendComplianceError(res, { error: 'CONTEXT_CLOSED' }, 'consents');
-    const b = req.body ?? {};
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'consentRequest', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    if (typeof b.partyRole !== 'string')
-      return sendComplianceError(
-        res,
-        { error: 'COMPLIANCE_INPUT_INVALID', field: 'partyRole', allowed: PARTY_ROLES },
-        'consents',
-      );
-    for (const f of ['fullParticularsProvided', 'legalAdviceOffered', 'proposedFeeDisclosed'])
-      if (b[f] !== undefined && typeof b[f] !== 'boolean')
-        return sendComplianceError(
-          res,
-          { error: 'COMPLIANCE_INPUT_INVALID', field: f, message: `${f} must be true or false.` },
-          'consents',
-        );
     const partyRole = b.partyRole;
     const party = c.parties.find((x) => x.partyRole === partyRole && !x.removed);
     if (!party) return sendComplianceError(res, { error: 'PARTY_NOT_FOUND' }, 'consents');
@@ -1946,9 +1763,9 @@ export function registerCompliance(rawCtx) {
       declinedAt: null,
       declinedBy: null,
       particulars: {
-        fullParticularsProvided: !!b.fullParticularsProvided,
-        legalAdviceOffered: !!b.legalAdviceOffered,
-        proposedFeeDisclosed: !!b.proposedFeeDisclosed,
+        fullParticularsProvided: b.fullParticularsProvided === true,
+        legalAdviceOffered: b.legalAdviceOffered === true,
+        proposedFeeDisclosed: b.proposedFeeDisclosed === true,
         acknowledged: null,
       },
       policyVersions: set.policies.map((x) => x.id),
@@ -2001,7 +1818,9 @@ export function registerCompliance(rawCtx) {
         action,
       );
     if (limitedOr429(res, 'compliance_consent_response', rateKey)) return;
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, action === 'grant' ? 'consentGrant' : 'consentAnswer', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
     const fp = payloadFingerprint({ action });
     if (key && k.keys?.[action]?.key === key) {
@@ -2044,8 +1863,8 @@ export function registerCompliance(rawCtx) {
     if (st !== 'requested') return sendComplianceError(res, { error: 'CONSENT_NOT_PENDING', status: st }, action);
     if (!guardRev(req, res, k, { errorCode: 'CONSENT_VERSION_CONFLICT', current: { status: st } })) return;
     if (action === 'grant') {
-      const ackP = req.body?.acknowledgedParticulars === true;
-      const ackL = req.body?.acknowledgedLegalAdvice === true;
+      const ackP = b.acknowledgedParticulars === true;
+      const ackL = b.acknowledgedLegalAdvice === true;
       if (!ackP || !ackL)
         return sendComplianceError(
           res,
@@ -2162,14 +1981,12 @@ export function registerCompliance(rawCtx) {
   const reviewById = (id) => (typeof id === 'string' ? reviews.byId(id) : null);
   /** Open items first, each part oldest first. The T&S app reads only the first page. */
   const queuePage = (req, res, { forReviewer }) => {
-    const status = req.query.status ? String(req.query.status) : null;
-    if (status !== null && !REVIEW_STATUSES.includes(status)) {
-      sendComplianceError(res, { error: 'REVIEW_INPUT_INVALID', field: 'status', allowed: REVIEW_STATUSES }, 'reviews');
-      return null;
-    }
+    const q = inputOr400(res, 'reviewQueue', req.query, 'query');
+    if (!q) return null;
+    const status = q.status ?? null;
     let page;
     try {
-      page = readPage(req.query, ['number', 'number', 'number']);
+      page = readPage(q, ['number', 'number', 'number']);
     } catch (e) {
       sendPageError(res, e);
       return null;
@@ -2230,6 +2047,7 @@ export function registerCompliance(rawCtx) {
   tsRouter.post('/compliance/reviews/:id/start', (req, res) => {
     const r = reviewById(req.params.id);
     if (!r) return sendComplianceError(res, { error: 'REVIEW_NOT_FOUND' }, 'start');
+    if (!inputOr400(res, 'reviewStart', req.body)) return;
     if (r.status === 'IN_REVIEW' && r.startedBy?.id === req.reviewer.id)
       return res.json({ review: reviewPublic(r, { forReviewer: true }), idempotent: true });
     if (r.status !== 'PENDING')
@@ -2250,58 +2068,27 @@ export function registerCompliance(rawCtx) {
     if (limitedOr429(res, 'ts_review_decision', req.reviewer.id)) return;
     const r = reviewById(req.params.id);
     if (!r) return sendComplianceError(res, { error: 'REVIEW_NOT_FOUND' }, 'resolve');
-    const b = req.body ?? {};
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'reviewResolution', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    for (const f of ['outcome', 'reasonCode', 'reason'])
-      if (b[f] !== undefined && b[f] !== null && typeof b[f] !== 'string')
-        return sendComplianceError(
-          res,
-          { error: 'REVIEW_INPUT_INVALID', field: f, message: `${f} must be text.` },
-          'resolve',
-        );
-    if (
-      b.evidenceRefs !== undefined &&
-      b.evidenceRefs !== null &&
-      (!Array.isArray(b.evidenceRefs) ||
-        b.evidenceRefs.some((e) => typeof e !== 'string') ||
-        b.evidenceRefs.length > 10)
-    )
-      return sendComplianceError(
-        res,
-        {
-          error: 'REVIEW_INPUT_INVALID',
-          field: 'evidenceRefs',
-          message: 'evidenceRefs must be a list of at most ten texts.',
-        },
-        'resolve',
-      );
-    const outcome = b.outcome ?? '';
-    const reasonCode = String(b.reasonCode ?? '')
-      .trim()
-      .slice(0, 60);
-    const reason = String(b.reason ?? '')
-      .trim()
-      .slice(0, 1000);
-    const evidenceRefs = [...new Set((b.evidenceRefs ?? []).map((e) => e.trim().slice(0, 200)).filter(Boolean))];
+    const { outcome } = b;
+    const reasonCode = filled(b.reasonCode) ?? '';
+    const reason = filled(b.reason) ?? '';
+    const evidenceRefs = [...new Set((b.evidenceRefs ?? []).map(filled).filter(Boolean))];
     const fp = payloadFingerprint({ outcome, reasonCode, reason, evidenceRefs });
     if (key && r.keys?.resolve?.key === key) {
       if (r.keys.resolve.fp === fp)
         return res.json({ review: reviewPublic(r, { forReviewer: true }), idempotent: true });
       return sendComplianceError(res, { error: 'REVIEW_IDEMPOTENCY_CONFLICT' }, 'resolve');
     }
-    if (!['APPROVED', 'REJECTED'].includes(outcome))
-      return sendComplianceError(
-        res,
-        { error: 'REVIEW_INPUT_INVALID', field: 'outcome', allowed: ['APPROVED', 'REJECTED'] },
-        'resolve',
-      );
     if (!reasonCode || !reason)
       return sendComplianceError(
         res,
         {
           error: 'REVIEW_INPUT_INVALID',
           field: !reasonCode ? 'reasonCode' : 'reason',
+          problem: 'required',
           message: 'A reason code and a written reason are required.',
         },
         'resolve',
@@ -2312,6 +2099,7 @@ export function registerCompliance(rawCtx) {
         {
           error: 'REVIEW_INPUT_INVALID',
           field: 'evidenceRefs',
+          problem: 'required',
           message: 'An approval must cite at least one evidence reference.',
         },
         'resolve',
@@ -2600,16 +2388,20 @@ export function registerCompliance(rawCtx) {
     if (!r) return sendComplianceError(res, { error: 'REVIEW_NOT_FOUND' }, 'cancel');
     if (r.status !== 'PENDING' && r.status !== 'IN_REVIEW')
       return sendComplianceError(res, { error: 'REVIEW_NOT_PENDING', status: r.status }, 'cancel');
-    if (req.body?.reason !== undefined && req.body.reason !== null && typeof req.body.reason !== 'string')
+    const b = inputOr400(res, 'reviewClosure', req.body);
+    if (!b) return;
+    const reason = filled(b.reason);
+    if (!reason)
       return sendComplianceError(
         res,
-        { error: 'REVIEW_INPUT_INVALID', field: 'reason', message: 'reason must be text.' },
+        {
+          error: 'REVIEW_INPUT_INVALID',
+          field: 'reason',
+          problem: 'required',
+          message: 'A written reason is required.',
+        },
         'cancel',
       );
-    const reason = String(req.body?.reason ?? '')
-      .trim()
-      .slice(0, 400);
-    if (!reason) return sendComplianceError(res, { error: 'REVIEW_INPUT_INVALID', field: 'reason' }, 'cancel');
     if (!guardRev(req, res, r, { errorCode: 'REVIEW_VERSION_CONFLICT', current: { status: r.status } })) return;
     const decision = {
       reviewerId: req.reviewer.id,
@@ -2654,16 +2446,20 @@ export function registerCompliance(rawCtx) {
       );
     if (r.supersededBy)
       return sendComplianceError(res, { error: 'REVIEW_ALREADY_EXISTS', reviewId: r.supersededBy }, 'supersede');
-    if (req.body?.reason !== undefined && req.body.reason !== null && typeof req.body.reason !== 'string')
+    const b = inputOr400(res, 'reviewClosure', req.body);
+    if (!b) return;
+    const reason = filled(b.reason);
+    if (!reason)
       return sendComplianceError(
         res,
-        { error: 'REVIEW_INPUT_INVALID', field: 'reason', message: 'reason must be text.' },
+        {
+          error: 'REVIEW_INPUT_INVALID',
+          field: 'reason',
+          problem: 'required',
+          message: 'A written reason is required.',
+        },
         'supersede',
       );
-    const reason = String(req.body?.reason ?? '')
-      .trim()
-      .slice(0, 400);
-    if (!reason) return sendComplianceError(res, { error: 'REVIEW_INPUT_INVALID', field: 'reason' }, 'supersede');
     if (!guardRev(req, res, r, { errorCode: 'REVIEW_VERSION_CONFLICT', current: { status: r.status } })) return;
     const { next, old } = unit(() => {
       const next = createReview({

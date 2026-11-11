@@ -1756,21 +1756,35 @@ let EVE_REVIEW, EVE_REVIEW2;
     'R9 Marcus starts the review; it is attributed to him',
   );
   const before = Date.now();
-  const res = await j(
-    'POST',
-    `/ts/compliance/reviews/${EVE_REVIEW}/resolve`,
-    {
-      outcome: 'APPROVED',
-      reasonCode: 'fa_list_match',
-      reason: 'Listed on the FA register of 18 Sep 2026.',
-      evidenceRefs: ['FA registered agents list 2026-09-18, row 412'],
-      reviewerId: 'tsr-dev-admin',
-      decidedAt: 1_000,
-      at: 1_000,
-      clientKey: 'eve-fa-1',
-    },
-    MARCUS.token,
-  );
+  const decisionBody = {
+    outcome: 'APPROVED',
+    reasonCode: 'fa_list_match',
+    reason: 'Listed on the FA register of 18 Sep 2026.',
+    evidenceRefs: ['FA registered agents list 2026-09-18, row 412'],
+    clientKey: 'eve-fa-1',
+  };
+  for (const [field, value] of [
+    ['reviewerId', 'tsr-dev-admin'],
+    ['decidedAt', 1_000],
+    ['at', 1_000],
+  ]) {
+    const forged = await j(
+      'POST',
+      `/ts/compliance/reviews/${EVE_REVIEW}/resolve`,
+      { ...decisionBody, [field]: value },
+      MARCUS.token,
+    );
+    neg(
+      forged.status === 400 &&
+        forged.body.error === 'REVIEW_INPUT_INVALID' &&
+        forged.body.field === field &&
+        forged.body.problem === 'unknown_field',
+      `A14b a resolution naming its own ${field} is refused by name`,
+    );
+  }
+  const stillOpen = await j('GET', `/ts/compliance/reviews/${EVE_REVIEW}`, undefined, MARCUS.token);
+  neg(stillOpen.body.review.status === 'IN_REVIEW', 'A14c a refused resolution decides nothing');
+  const res = await j('POST', `/ts/compliance/reviews/${EVE_REVIEW}/resolve`, decisionBody, MARCUS.token);
   ok(
     res.status === 200 &&
       res.body.review.status === 'APPROVED' &&
@@ -1781,7 +1795,7 @@ let EVE_REVIEW, EVE_REVIEW2;
   );
   neg(
     res.body.review.decision.reviewer.id !== 'tsr-dev-admin',
-    'A16 a forged reviewerId in the body is ignored: Marcus cannot be mistaken for Priya (#2)',
+    'A16 the decision names the session reviewer: Marcus cannot be mistaken for Priya (#2)',
   );
   neg(
     res.body.review.decision.at >= before && res.body.review.decidedAt >= before,
@@ -2111,33 +2125,34 @@ let CTX1, CTX1_REV, KOLA_CONSENT, CLUB_CONSENT, MARIA_ID;
       JSON.stringify(minorTry.body) === JSON.stringify(noneTry.body),
     'K13 a minor and a non-existent player answer with byte-identical bodies (#23)',
   );
-  neg(
-    expect(
-      collect(
-        'K14',
-        await j(
-          'POST',
-          '/org/agent/compliance/contexts',
+  const contextsBeforeK14 = (await j('GET', '/org/agent/compliance/contexts', undefined, ANA.token)).body.items.length;
+  const k14 = collect(
+    'K14',
+    await j(
+      'POST',
+      '/org/agent/compliance/contexts',
+      {
+        type: 'employment_contract',
+        jurisdictions: ['ENG'],
+        parties: [
           {
-            type: 'employment_contract',
-            jurisdictions: ['ENG'],
-            parties: [
-              {
-                partyRole: 'individual',
-                subjectKind: 'player',
-                subjectId: 'pl-tomasz',
-                guardianConsent: true,
-                dob: '2000-01-01',
-              },
-            ],
+            partyRole: 'individual',
+            subjectKind: 'player',
+            subjectId: 'pl-tomasz',
+            guardianConsent: true,
+            dob: '2000-01-01',
           },
-          ANA.token,
-        ),
-      ),
-      404,
-      'PARTY_NOT_FOUND',
+        ],
+      },
+      ANA.token,
     ),
-    'K14 a forged guardian consent and a client-supplied date of birth change nothing (#19, #20)',
+  );
+  neg(
+    expect(k14, 400, 'CONTEXT_INPUT_INVALID') &&
+      k14.body.field === 'parties[0].guardianConsent' &&
+      k14.body.problem === 'unknown_field' &&
+      (await j('GET', '/org/agent/compliance/contexts', undefined, ANA.token)).body.items.length === contextsBeforeK14,
+    'K14 a forged guardian consent or a client-supplied date of birth is refused by name, and nothing is opened (#19, #20)',
   );
   neg(
     expect(
@@ -2553,16 +2568,30 @@ let CTX1, CTX1_REV, KOLA_CONSENT, CLUB_CONSENT, MARIA_ID;
     ),
     'AA2 a stale rev on a consent is refused',
   );
+  const forgedGrant = await j(
+    'POST',
+    `/player/agent/consents/${KOLA_CONSENT}/grant`,
+    { acknowledgedParticulars: true, acknowledgedLegalAdvice: true, grantedAt: 1_000, clientKey: 'kola-forged' },
+    kola.token,
+  );
+  neg(
+    expect(forgedGrant, 400, 'CONSENT_INPUT_INVALID') &&
+      forgedGrant.body.field === 'grantedAt' &&
+      forgedGrant.body.problem === 'unknown_field' &&
+      (await j('GET', '/player/agent/consents', undefined, kola.token)).body.items.find((k) => k.id === KOLA_CONSENT)
+        ?.status === 'requested',
+    'P8a a grant naming its own grantedAt is refused, and the consent stays requested',
+  );
   const t1 = Date.now();
   const grant = await j(
     'POST',
     `/player/agent/consents/${KOLA_CONSENT}/grant`,
-    { acknowledgedParticulars: true, acknowledgedLegalAdvice: true, grantedAt: 1_000, clientKey: 'kola-grant' },
+    { acknowledgedParticulars: true, acknowledgedLegalAdvice: true, clientKey: 'kola-grant' },
     kola.token,
   );
   ok(
     grant.status === 200 && grant.body.consent.status === 'granted' && grant.body.consent.grantedAt >= t1,
-    "P8 Kola grants; the timestamp is the server's (a client-supplied grantedAt is ignored)",
+    "P8 Kola grants; the timestamp is the server's",
   );
   ok(
     (
@@ -2892,17 +2921,25 @@ section('S/T — revocation, stale client submits, party change invalidates the 
       ),
       404,
       null,
-    ) &&
-      (
-        await j(
-          'POST',
-          `/org/agent/compliance/contexts/${CTX1}/evaluate`,
-          { outcome: 'CLEAR', clearance: 'CLEAR' },
-          ANA.token,
-        )
-      ).body.evaluation.outcome === 'CLEAR',
-    'T7 the agent has no override route and an outcome in the body changes nothing (#27)',
+    ),
+    'T6 the agent has no override route (#27)',
   );
+  {
+    const forged = await j(
+      'POST',
+      `/org/agent/compliance/contexts/${CTX1}/evaluate`,
+      { outcome: 'CLEAR', clearance: 'CLEAR' },
+      ANA.token,
+    );
+    const clean = await j('POST', `/org/agent/compliance/contexts/${CTX1}/evaluate`, {}, ANA.token);
+    neg(
+      expect(forged, 400, 'CONTEXT_INPUT_INVALID') &&
+        forged.body.field === 'outcome' &&
+        forged.body.problem === 'unknown_field' &&
+        clean.body.evaluation.outcome === 'CLEAR',
+      'T7 an outcome in the body is refused by name; the engine alone decides it (#27)',
+    );
+  }
   // A prohibited combination refused at mutation time, nothing recorded.
   const ctx2 = await j(
     'POST',
@@ -3835,6 +3872,189 @@ section('policy — dual-control publication; historical snapshots keep their ve
         (x) => x.partyRole === 'engaging_entity' && x.reasonCode === 'CONSENT_POLICY_VERSION_STALE',
       ),
     "#16 the club consent granted under the previous England version is not carried into v2: re-evaluation requires it again (the individual's later decline stands)",
+  );
+}
+
+// ============================================================ IN — input is valid as sent, or refused
+section('IN — strict bodies and queries: a wrong type, an unknown field or over-long text is refused by name');
+{
+  const refusedAs = (r, status, code, field, problem) =>
+    expect(r, status, code) && r.body.field === field && r.body.problem === problem;
+  neg(
+    refusedAs(
+      collect('IN1', await j('POST', '/auth/reviewer/login', { reviewerId: { id: 'tsr-dev-admin' }, secret: 'x' })),
+      400,
+      'COMPLIANCE_INPUT_INVALID',
+      'reviewerId',
+      'not_text',
+    ),
+    'IN1 a reviewer id that is not text is refused, not turned into "[object Object]"',
+  );
+  const longName = await j(
+    'POST',
+    '/ts/reviewers',
+    { id: 'tsr-long-name', name: 'N'.repeat(81), secret: 'a-long-enough-secret' },
+    PRIYA.token,
+  );
+  neg(
+    refusedAs(collect('IN2', longName), 400, 'COMPLIANCE_INPUT_INVALID', 'name', 'too_long') &&
+      longName.body.max === 80 &&
+      !(await j('GET', '/ts/reviewers', undefined, PRIYA.token)).body.items.some((r) => r.id === 'tsr-long-name'),
+    'IN2 a reviewer name over 80 characters is refused with its limit, not cut, and nobody is created',
+  );
+  neg(
+    refusedAs(
+      collect('IN3', await j('POST', '/ts/reviewers/tsr-dev-admin2/revoke', { reason: { why: 'x' } }, PRIYA.token)),
+      400,
+      'COMPLIANCE_INPUT_INVALID',
+      'reason',
+      'not_text',
+    ) &&
+      (await j('GET', '/ts/reviewers', undefined, PRIYA.token)).body.items.find((r) => r.id === 'tsr-dev-admin2')
+        ?.status === 'active',
+    'IN3 a revocation reason that is not text is refused and revokes nobody',
+  );
+  const rule = (extra) => ({
+    ruleStatus: 'ACTIVE',
+    sourceRef: [{ source: 'Synthetic test source', retrievedDate: '2026-09-18' }],
+    ...extra,
+  });
+  const policy = (rules, extra = {}) => ({
+    id: 'jp-eng-input-1',
+    jurisdiction: 'ENG',
+    policyVersion: 9,
+    effectiveFrom: '2027-01-01',
+    rules,
+    ...extra,
+  });
+  const propose = async (label, body) => collect(label, await j('POST', '/ts/compliance/policies', body, PRIYA.token));
+  neg(
+    refusedAs(
+      await propose('IN4', policy({ 'X-1': rule({ params: { licenceRequird: true } }) })),
+      400,
+      'POLICY_INPUT_INVALID',
+      'rules.X-1.params.licenceRequird',
+      'unknown_field',
+    ),
+    'IN4 a misspelt rule parameter is refused by name: the engine would never read it',
+  );
+  neg(
+    refusedAs(
+      await propose('IN5', policy({ 'X-1': rule({ params: { licenceRequired: 'yes' } }) })),
+      400,
+      'POLICY_INPUT_INVALID',
+      'rules.X-1.params.licenceRequired',
+      'not_boolean',
+    ),
+    'IN5 a rule parameter of the wrong type is refused',
+  );
+  const longNote = await propose('IN6', policy({ 'X-1': rule({ note: 'n'.repeat(1001) }) }));
+  neg(
+    refusedAs(longNote, 400, 'POLICY_INPUT_INVALID', 'rules.X-1.note', 'too_long') && longNote.body.max === 1000,
+    'IN6 a rule note over 1000 characters is refused with its limit, not cut',
+  );
+  neg(
+    refusedAs(
+      await propose('IN7', policy({ 'X-1': rule() }, { effectiveFrom: '2027-01-01T00:00:00Z' })),
+      400,
+      'POLICY_INPUT_INVALID',
+      'effectiveFrom',
+      'not_a_date',
+    ),
+    'IN7 a date-time is not a calendar day',
+  );
+  neg(
+    refusedAs(
+      await propose('IN8', policy({ 'X-1': rule() }, { effectiveTo: '2026-12-31' })),
+      400,
+      'POLICY_INPUT_INVALID',
+      'effectiveTo',
+      'invalid',
+    ) &&
+      !(await j('GET', '/ts/compliance/policies', undefined, PRIYA.token)).body.items.some(
+        (p) => p.id === 'jp-eng-input-1',
+      ),
+    'IN8 a policy that ends before it begins is refused, and none of these proposals was stored',
+  );
+  neg(
+    refusedAs(
+      collect(
+        'IN9',
+        await j(
+          'POST',
+          '/org/agent/compliance/contexts',
+          { type: 'employment_contract', jurisdictions: ['EN'] },
+          ANA.token,
+        ),
+      ),
+      400,
+      'CONTEXT_INPUT_INVALID',
+      'jurisdictions[0]',
+      'invalid',
+    ),
+    'IN9 a jurisdiction that is not a three-letter code is refused by position',
+  );
+  neg(
+    refusedAs(
+      collect(
+        'IN10',
+        await j(
+          'POST',
+          '/org/agent/compliance/facets/national_registration/recheck',
+          { memberAssociation: 'ENGLAND' },
+          ANA.token,
+        ),
+      ),
+      400,
+      'COMPLIANCE_INPUT_INVALID',
+      'memberAssociation',
+      'invalid',
+    ),
+    'IN10 a recheck names a three-letter member association or none',
+  );
+  neg(
+    refusedAs(
+      collect('IN11', await j('GET', '/ts/compliance/reviews?status=PENDING&sort=oldest', undefined, MARCUS.token)),
+      400,
+      'REVIEW_INPUT_INVALID',
+      'sort',
+      'unknown_field',
+    ) &&
+      refusedAs(
+        collect('IN12', await j('GET', '/ts/compliance/reviews?status=pending', undefined, MARCUS.token)),
+        400,
+        'REVIEW_INPUT_INVALID',
+        'status',
+        'not_allowed',
+      ),
+    'IN11 the review queue takes only the parameters it reads, and a status that exists',
+  );
+  const before = (await j('GET', `/ts/compliance/reviews/${EVE_REVIEW}`, undefined, MARCUS.token)).body.review;
+  const longReason = await j(
+    'POST',
+    `/ts/compliance/reviews/${EVE_REVIEW}/resolve`,
+    { outcome: 'REJECTED', reasonCode: 'x', reason: 'r'.repeat(1001) },
+    MARCUS.token,
+  );
+  const after = (await j('GET', `/ts/compliance/reviews/${EVE_REVIEW}`, undefined, MARCUS.token)).body.review;
+  neg(
+    refusedAs(collect('IN13', longReason), 400, 'REVIEW_INPUT_INVALID', 'reason', 'too_long') &&
+      longReason.body.max === 1000 &&
+      after.rev === before.rev,
+    'IN13 a review reason over 1000 characters is refused with its limit, not cut, and the review is unchanged',
+  );
+  neg(
+    refusedAs(
+      collect(
+        'IN14',
+        await j('POST', `/ts/compliance/reviews/${EVE_REVIEW}/start`, { expectedRev: '3' }, MARCUS.token),
+      ),
+      400,
+      'EXPECTED_REV_INVALID',
+      'expectedRev',
+      'not_number',
+    ),
+    'IN14 an expectedRev written as text is refused as a malformed rev, not a 500',
   );
 }
 
