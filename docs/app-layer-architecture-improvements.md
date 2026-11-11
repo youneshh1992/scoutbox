@@ -71,15 +71,7 @@ its own, and only the functions a route uses are loaded) and because its schemas
 
 Move routes over one domain at a time, fixing the input defects in `known-issues.md` as each domain moves.
 
-### 2. Narrow, declared dependencies per domain
-
-Each domain exports a factory that names the small set of things it needs (its own repository, other domains' read
-interfaces, `unit`, `afterCommit`, `notify`, …) and returns what it offers to others. `server.mjs` becomes a short list
-of those calls in dependency order. Remove the cycles in the import graph, and make `domains/platform/` depend on
-nothing above it: the audit rows, room statuses and Box Cam eligibility it imports today should be handed to it by
-their domains. Split the very large route modules along these lines.
-
-### 3. Enforced write and side-effect rules
+### 2. Enforced write and side-effect rules
 
 Turn the conventions into checks:
 
@@ -88,12 +80,43 @@ Turn the conventions into checks:
 
 Fix the defects these checks turn up.
 
-### 4. Named acts everywhere
+### 3. Behavioural tests instead of source scans
+
+Several batteries read the server's source and check it with regular expressions (offers, offersAdversarial,
+signings, signingsAdversarial, decisions, journey, journeyAdversarial, agents, crossApp, trustScore). A scan pins how
+the code is spelled rather than what it does: a correct refactor fails it, and an incorrect one written differently
+passes. Steps 2–4 rewrite exactly the code these scans read, so do this before them. Replace each scan with a test of
+the behaviour it stands for:
+
+- **"Never reads a trusted fact from the body"** (`req.body.playerId`, `req.body.status`, …): once a route reads a
+  strict schema, send each such field and expect `400` with `problem: 'unknown_field'`.
+- **"Never writes another domain's state"** (an Offer never names a signing): do the act, then read the other domain
+  and check nothing changed there.
+- **"Goes through the one writer" and "rolls back together"**: make the writer fail with the fault seam
+  (`SCOUTBOX_FAULTS` / `POST /__faults`, `internal:STEP`, e.g. `lifecycle.after_status`), then check that every row
+  the act touches is unchanged.
+- **"A failing side effect is never a 500"**: add an `internal:` seam to the domain's side-effect runner (signings
+  has `signing.complete.effects`), fail it, and check the route still answers with the data committed.
+- **"Which rate budget a route draws on"**: spend a budget through one route and check the routes that share it are
+  refused, and those that don't are not.
+- **"No app renders a field as raw HTML"** (a grep of app files for `dangerouslySetInnerHTML`): this is not a server
+  test. Turn on Biome's `noDangerouslySetInnerHtml` rule (linting is off in `biome.json` today) and run it in CI,
+  which also covers every app file rather than two.
+
+### 4. Narrow, declared dependencies per domain
+
+Each domain exports a factory that names the small set of things it needs (its own repository, other domains' read
+interfaces, `unit`, `afterCommit`, `notify`, …) and returns what it offers to others. `server.mjs` becomes a short list
+of those calls in dependency order. Remove the cycles in the import graph, and make `domains/platform/` depend on
+nothing above it: the audit rows, room statuses and Box Cam eligibility it imports today should be handed to it by
+their domains. Split the very large route modules along these lines.
+
+### 5. Named acts everywhere
 
 Move the remaining whole-record repositories to named acts, remove `update(id, draft)`, and rewrite the "Writes"
 section of `architecture.md` as one rule rather than a rule and its exceptions.
 
-### 5. TypeScript
+### 6. TypeScript
 
 Convert the server to TypeScript once steps 1–4 have settled the shapes that are worth typing: request input (from the
 step 1 schemas), each domain's declared dependencies and interface (step 2), and the repositories' named acts (step 4).
@@ -102,7 +125,7 @@ Typing the code before those refactors would mean writing the types twice. Start
 between a build step and running `.ts` directly with Node's type stripping, which affects the minimum Node version in
 `runtime.mjs`.
 
-### 6. Error wording in the clients
+### 7. Error wording in the clients
 
 Independent of steps 1–5, and frontend work. About a hundred places in the apps show the server's `message` directly
 (`notify(e.message)`), so people read developer English, untranslated. Add one shared client helper that turns a
