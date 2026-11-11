@@ -1262,7 +1262,7 @@ r = await j(
   },
   bearer(HACKNEY),
 );
-ok(r.status === 400 && r.body.field === 'positions', 'a position that is not text is refused (was dropped)');
+ok(r.status === 400 && r.body.field === 'positions[1]', 'a position that is not text is refused (was dropped)');
 r = await j(
   '/org/open-trials',
   {
@@ -1410,6 +1410,56 @@ ok(
 );
 r = await j('/player/opportunity-board?cursor=junk', {}, bearer(KOLA));
 ok(r.status === 400 && r.body.error === 'PAGE_CURSOR_INVALID', '… and refuses a junk cursor');
+
+// ---- the player's record, Grassroots and objectives: each field as sent, or refused
+const postAs = (url, body, token) => j(url, { method: 'POST', body: JSON.stringify(body) }, bearer(token));
+r = await postAs('/player/timeline', { year: '2026', event: 'e'.repeat(301) }, KOLA);
+ok(
+  r.status === 400 && r.body.field === 'event' && r.body.problem === 'too_long',
+  'IN10 a timeline event over 300 characters is refused',
+);
+r = await postAs('/player/badges', { badges: ['a', 'b', 'c', 'd', 'e', 'f', 'g'] }, KOLA);
+ok(
+  r.status === 400 && r.body.error === 'BADGES_MUST_BE_ARRAY' && r.body.problem === 'too_long',
+  'IN11 more than six badges are refused, not cut',
+);
+r = await postAs('/player/badges', { badges: [7] }, KOLA);
+ok(
+  r.status === 400 && r.body.field === 'badges[0]',
+  'IN12 a badge that is not text is refused (it was turned into text)',
+);
+r = await postAs('/player/drills/drill-first-touch/complete', { value: '12' }, KOLA);
+ok(
+  r.status === 400 && r.body.error === 'BAD_VALUE',
+  'IN13 a drill result written as text is refused, not read as a number',
+);
+r = await postAs('/player/stats', { goals: 3, minutes: 90 }, KOLA);
+ok(
+  r.status === 400 && r.body.field === 'minutes' && r.body.problem === 'unknown_field',
+  'IN14 a stat the record does not keep is refused, not ignored',
+);
+r = await postAs('/player/location', { lat: '51.5', lng: -0.1 }, KOLA);
+ok(
+  r.status === 400 && r.body.error === 'BAD_COORDINATES' && r.body.field === 'lat',
+  'IN15 a latitude written as text is refused',
+);
+r = await postAs('/player/objectives', { feedbackId: 'asm-none', objectives: [{ text: 'o'.repeat(201) }] }, KOLA);
+ok(
+  r.status === 400 && r.body.field === 'objectives[0].text' && r.body.problem === 'too_long',
+  'IN16 an objective over 200 characters is refused, not cut',
+);
+r = await postAs('/vouch/submit', { code: 'not-a-code', text: 5 }, null);
+ok(
+  r.status === 400 && r.body.field === 'text' && r.body.problem === 'not_text',
+  'IN17 a reference that is not text is refused',
+);
+r = await postAs('/org/matchday', { fixture: 'Hackney v Leyton', date: '2099-06-08', result: 'r'.repeat(21) }, HACKNEY);
+ok(
+  r.status === 400 && r.body.field === 'result' && r.body.problem === 'too_long',
+  'IN18 a matchday result over 20 characters is refused',
+);
+r = await postAs('/org/friendlies', { date: '08/06/2099' }, HACKNEY);
+ok(r.status === 400 && r.body.error === 'DATE_INVALID', 'IN19 a friendly on a day not written YYYY-MM-DD is refused');
 
 // ---- 14. storage + SQLite persistence on disk
 // DATA_DIR is the server's own directory (see serverUnderTest), never a guess.

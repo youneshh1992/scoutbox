@@ -1,6 +1,7 @@
 // The player's own football record. A child keeps all football activity; Academy+, medical sharing and availability
 // are refused to a child here and set from the guardian's account.
-import { optText, reqText, badField, switchRefused, dateOnlyOrRefuse } from '../platform/input.mjs';
+import { filled } from '../platform/schemas.mjs';
+import { SELF_DECLARABLE_CONTRACT_STATUSES, STAT_COUNTS, STAT_FIELDS, developmentInput } from './schemas.mjs';
 import {
   ageOn,
   computeTrustScore,
@@ -47,26 +48,6 @@ export const DRILLS = [
   },
 ];
 
-const AVAILABILITY = ['available_now', 'end_of_season', 'loan_open', 'overseas_open', 'not_seeking'];
-// `under_contract` is written only by the completed-signing writer, and no self-declared status replaces a live
-// contract.
-const SELF_DECLARABLE_CONTRACT_STATUSES = [
-  'expiring_summer',
-  'scholarship_ending',
-  'release_approaching',
-  'free_agent',
-  'unknown',
-];
-const STAT_FIELDS = [
-  'appearances',
-  'goals',
-  'assists',
-  'paceKmh',
-  'passCompletionPct',
-  'duelSuccessPct',
-  'cleanSheets',
-];
-const STAT_COUNTS = ['appearances', 'goals', 'assists', 'cleanSheets'];
 const FRESH_START = 'Fresh Start';
 
 export function registerPlayerRecord({
@@ -160,8 +141,9 @@ export function registerPlayerRecord({
 
   playerRouter.post('/academyplus', (req, res) => {
     if (guardianManagedOnly(req, res)) return;
-    if (switchRefused(res, req.body?.enabled, 'enabled')) return;
-    const on = req.body.enabled;
+    const body = developmentInput(res, 'enabled', req.body);
+    if (!body) return;
+    const on = body.enabled;
     let stored;
     unit(() => {
       stored = players.setAcademyPlus(req.player.id, on);
@@ -180,18 +162,19 @@ export function registerPlayerRecord({
   });
 
   playerRouter.post('/badges', (req, res) => {
-    const { badges } = req.body || {};
-    if (!Array.isArray(badges)) return res.status(400).json({ error: 'BADGES_MUST_BE_ARRAY' });
-    const stored = players.setItems(req.player.id, 'badges', badges.slice(0, 6).map(String));
+    const body = developmentInput(res, 'badges', req.body);
+    if (!body) return;
+    const stored = players.setItems(req.player.id, 'badges', body.badges);
     broadcast('players', { playerId: req.player.id });
     res.json({ badges: stored });
   });
 
   // A clip upload. `dataUrl` carries the video (about 12MB at most); the storage adapter writes it.
   playerRouter.post('/media', (req, res) => {
-    const { title, kind = 'video', dataUrl, attendanceId } = req.body || {};
-    if (!reqText(title, 160)) return res.status(400).json({ error: 'TITLE_REQUIRED' });
-    if (!optText(kind, 20)) return badField(res, 'kind');
+    const body = developmentInput(res, 'media', req.body);
+    if (!body) return;
+    const { title, kind = 'video', dataUrl, attendanceId } = body;
+    if (!filled(title)) return res.status(400).json({ error: 'TITLE_REQUIRED', field: 'title', problem: 'required' });
     if (!moderateOrRefuse(res, title, { kind: 'media_title', playerId: req.player.id })) return;
     const item = {
       id: nextId('media'),
@@ -204,8 +187,7 @@ export function registerPlayerRecord({
       verifiedClip: null,
     };
     if (dataUrl) {
-      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:'))
-        return res.status(400).json({ error: 'BAD_DATA_URL' });
+      if (!dataUrl.startsWith('data:')) return res.status(400).json({ error: 'BAD_DATA_URL' });
       if (dataUrl.length > 16_000_000)
         return res
           .status(413)
@@ -244,27 +226,17 @@ export function registerPlayerRecord({
   // Medical sharing is the player's call by data-protection law; for a child, the guardian's.
   playerRouter.post('/medical/share', (req, res) => {
     if (guardianManagedOnly(req, res)) return;
-    if (switchRefused(res, req.body?.shared, 'shared')) return;
-    const stored = players.setMedicalSharing(req.player.id, req.body.shared);
+    const body = developmentInput(res, 'shared', req.body);
+    if (!body) return;
+    const stored = players.setMedicalSharing(req.player.id, body.shared);
     broadcast('players', { playerId: req.player.id });
     res.json({ shared: stored.medical.shared });
   });
 
   playerRouter.post('/medical/records', (req, res) => {
-    const { type, title, date, layoffWeeks, cleared, conditionStatus } = req.body || {};
-    if (date && !dateOnlyOrRefuse(res, date, 'date')) return;
-    for (const [f, v, max] of [
-      ['type', type, 40],
-      ['title', title, 160],
-      ['conditionStatus', conditionStatus, 40],
-    ])
-      if (!optText(v, max)) return badField(res, f);
-    if (
-      layoffWeeks != null &&
-      !(typeof layoffWeeks === 'number' && Number.isFinite(layoffWeeks) && layoffWeeks >= 0 && layoffWeeks <= 520)
-    )
-      return badField(res, 'layoffWeeks');
-    if (cleared != null && typeof cleared !== 'boolean') return badField(res, 'cleared');
+    const body = developmentInput(res, 'medicalRecord', req.body);
+    if (!body) return;
+    const { type, title, date, layoffWeeks, cleared, conditionStatus } = body;
     try {
       unit(() => {
         if (conditionStatus) players.setConditionStatus(req.player.id, conditionStatus);
@@ -289,10 +261,9 @@ export function registerPlayerRecord({
 
   // The location powers the grassroots radius. No organisation's view carries the coordinates, only the distance.
   playerRouter.post('/location', (req, res) => {
-    const { lat, lng } = req.body || {};
-    if (typeof lat !== 'number' || typeof lng !== 'number' || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-      return res.status(400).json({ error: 'BAD_COORDINATES' });
-    }
+    const body = developmentInput(res, 'location', req.body);
+    if (!body) return;
+    const { lat, lng } = body;
     players.setLocation(req.player.id, { lat, lng });
     broadcast('players', { playerId: req.player.id });
     res.json({ ok: true });
@@ -300,12 +271,9 @@ export function registerPlayerRecord({
 
   playerRouter.post('/availability', (req, res) => {
     if (guardianManagedOnly(req, res)) return;
-    const { availability, contractStatus } = req.body || {};
-    const contractStatuses = ['under_contract', ...SELF_DECLARABLE_CONTRACT_STATUSES];
-    if (availability && !AVAILABILITY.includes(availability))
-      return res.status(400).json({ error: 'BAD_AVAILABILITY', allowed: AVAILABILITY });
-    if (contractStatus && !contractStatuses.includes(contractStatus))
-      return res.status(400).json({ error: 'BAD_CONTRACT_STATUS', allowed: contractStatuses });
+    const body = developmentInput(res, 'availability', req.body);
+    if (!body) return;
+    const { availability, contractStatus } = body;
     if (contractStatus === 'under_contract') {
       return res.status(403).json({
         error: 'CONTRACT_STATUS_NOT_SELF_DECLARABLE',
@@ -338,8 +306,10 @@ export function registerPlayerRecord({
 
   // Verified match attendance needs the fixture, venue, date, GPS and the device.
   playerRouter.post('/attendance', (req, res) => {
-    const { fixture, venue, date, gps, deviceId } = req.body || {};
-    const missing = ['fixture', 'venue', 'date'].filter((f) => !req.body?.[f]);
+    const body = developmentInput(res, 'attendance', req.body);
+    if (!body) return;
+    const { fixture, venue, date, gps, deviceId } = body;
+    const missing = ['fixture', 'venue', 'date'].filter((f) => !filled(body[f]));
     if (!gps || typeof gps.lat !== 'number' || typeof gps.lng !== 'number') missing.push('gps{lat,lng}');
     if (!deviceId) missing.push('deviceId');
     if (missing.length) {
@@ -349,10 +319,6 @@ export function registerPlayerRecord({
         missing,
       });
     }
-    if (!dateOnlyOrRefuse(res, date, 'date')) return;
-    // The row stores gps as two columns: anything else on it is refused, not trimmed.
-    if (Object.keys(gps).some((k) => k !== 'lat' && k !== 'lng'))
-      return res.status(400).json({ error: 'GPS_INVALID', message: 'gps is { lat, lng } and nothing else.' });
     const item = {
       id: nextId('att'),
       fixture,
@@ -384,19 +350,24 @@ export function registerPlayerRecord({
   });
 
   playerRouter.post('/timeline', (req, res) => {
-    const { year, event } = req.body || {};
+    const body = developmentInput(res, 'timeline', req.body);
+    if (!body) return;
+    const year = filled(body.year);
+    const event = filled(body.event);
     if (!year || !event) return res.status(400).json({ error: 'YEAR_AND_EVENT_REQUIRED' });
     if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
-    players.addItem(req.player.id, 'timeline', { year: String(year), event: String(event) });
+    players.addItem(req.player.id, 'timeline', { year, event });
     broadcast('players', { playerId: req.player.id });
     res.status(201).json({ timeline: players.byId(req.player.id).timeline });
   });
 
   // `season` (e.g. "2024/25") files the numbers into the season history instead of the current season.
   playerRouter.post('/stats', (req, res) => {
+    const body = developmentInput(res, 'stats', req.body);
+    if (!body) return;
     const updates = {};
     for (const f of STAT_FIELDS) {
-      const v = req.body?.[f];
+      const v = body[f];
       if (v === undefined) continue;
       if (
         typeof v !== 'number' ||
@@ -408,7 +379,7 @@ export function registerPlayerRecord({
         return res.status(400).json({ error: 'BAD_STAT', field: f });
       updates[f] = v;
     }
-    const season = typeof req.body?.season === 'string' && req.body.season.trim() ? req.body.season.trim() : null;
+    const season = filled(body.season);
     unit(() => {
       if (season) {
         const history = (req.player.seasonHistory ?? []).map((s) => ({ ...s }));
@@ -444,9 +415,10 @@ export function registerPlayerRecord({
   playerRouter.post('/drills/:id/complete', (req, res) => {
     const drill = DRILLS.find((d) => d.id === req.params.id);
     if (!drill) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
-    const { value, videoDataUrl } = req.body || {};
-    const numeric = value !== undefined && value !== null && value !== '' ? Number(value) : null;
-    if (numeric !== null && (Number.isNaN(numeric) || numeric < 0)) return res.status(400).json({ error: 'BAD_VALUE' });
+    const body = developmentInput(res, 'drillComplete', req.body);
+    if (!body) return;
+    const { videoDataUrl } = body;
+    const numeric = body.value ?? null;
     unit(() => {
       if (!(req.player.drills ?? []).includes(drill.id)) players.addItem(req.player.id, 'drills', drill.id);
       if (numeric !== null) {

@@ -1,9 +1,9 @@
 // Grassroots club operations. The player's side is grassroots.mjs.
-import { optText, reqText, badField, dateOnlyOrRefuse } from '../platform/input.mjs';
+import { filled } from '../platform/schemas.mjs';
+import { OPEN_DAY_OUTCOMES, developmentInput } from './schemas.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { isAdult, visibleToOrg, computeTrustScore, haversineKm, GRASSROOTS_RADIUS_KM } from '../../domain.mjs';
 import { GRASSROOTS_LIMITS as GL, boxAround } from '../../repositories/grassroots.mjs';
-import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from '../../repositories/clubSetup.mjs';
 import { TRANSITION_LIMITS } from '../../repositories/transitionsVouches.mjs';
 
 /** Answers 403 and returns true for a club not on ScoutBox Grassroots. */
@@ -21,7 +21,6 @@ const POSITION_GROUPS = {
   MID: ['CDM', 'CM', 'CAM'],
   ATT: ['ST', 'CF', 'RW', 'LW'],
 };
-const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
 const registrationView = (r) => ({
   id: r.id,
   playerId: r.playerId,
@@ -33,17 +32,6 @@ const registrationView = (r) => ({
   outcomeNote: r.outcomeNote,
   outcomeAt: r.outcomeAt,
 });
-/** Absent is none; null means invalid; repeats are dropped. */
-function openDayPositions(v) {
-  if (v === undefined || v === null) return [];
-  if (
-    !Array.isArray(v) ||
-    v.length > GL.positions ||
-    !v.every((x) => typeof x === 'string' && x.trim() && x.trim().length <= GL.position)
-  )
-    return null;
-  return [...new Set(v.map((x) => x.trim()))];
-}
 
 /** Returns `pathwayRecord(org)` and `openTrialView(t)`, which the directory and the player's journey also use. */
 export function registerGrassrootsClub({
@@ -88,6 +76,8 @@ export function registerGrassrootsClub({
   // ------------------------------------------------------------------ open trial days
   orgRouter.post('/open-trials', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
+    const body = developmentInput(res, 'openTrial', req.body);
+    if (!body) return;
     // No ghosting: unanswered past registrants block the next posting, as unfiled trial reports block new trials.
     const today = new Date().toISOString().slice(0, 10);
     const unresolved = grassroots.openTrials.unresolvedBefore(req.org.id, today);
@@ -97,20 +87,11 @@ export function registerGrassrootsClub({
         message: `${unresolved} player(s) from your past open day(s) are still waiting for an answer. Resolve them (invite or a kind no) before posting the next one.`,
       });
     }
-    const { title, date, venue, ageGroup, positions, notes } = req.body || {};
-    if (!reqText(title, GL.title) || !date || !reqText(venue, GL.venue))
-      return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
-    if (!optText(ageGroup, GL.ageGroup)) return badField(res, 'ageGroup');
-    if (!optText(notes, GL.notes)) return badField(res, 'notes');
-    // Dates are compared as strings, so other text would stay "upcoming" for ever and escape the rule above.
-    if (!dateOnlyOrRefuse(res, date, 'date')) return;
-    const wanted = openDayPositions(positions);
-    if (!wanted)
-      return fieldInvalid(
-        res,
-        'positions',
-        `positions is a list of at most ${GL.positions} positions, each text of at most ${GL.position} characters.`,
-      );
+    // Dates are compared as strings, so the schema refuses anything but a calendar day: other text would stay
+    // "upcoming" for ever and escape the rule above.
+    const { title, date, venue, ageGroup, positions, notes } = body;
+    if (!filled(title) || !date || !filled(venue)) return res.status(400).json({ error: 'TITLE_DATE_VENUE_REQUIRED' });
+    const wanted = [...new Set((positions ?? []).map((x) => x.trim()))];
     if (notes && !moderateOrRefuse(res, notes, { kind: 'open_trial_notes', orgId: req.org.id })) return;
     const trial = unit(() => {
       const t = grassroots.openTrials.create({
@@ -143,9 +124,11 @@ export function registerGrassrootsClub({
 
   orgRouter.get('/open-trials', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
+    const query = developmentInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -182,20 +165,9 @@ export function registerGrassrootsClub({
   // Codes only: the players' opportunity radar matches them against the player's position.
   orgRouter.post('/looking-for', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
-    const positions = req.body?.positions;
-    if (!Array.isArray(positions) || positions.length > CLUB_SETUP_LIMITS.lookingFor)
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'positions',
-        message: `positions is a list of at most ${CLUB_SETUP_LIMITS.lookingFor} position codes.`,
-      });
-    const wrong = positions.findIndex((p) => !LOOKING_FOR_POSITIONS.includes(p));
-    if (wrong >= 0)
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: `positions[${wrong}]`,
-        message: `Use position codes: ${LOOKING_FOR_POSITIONS.join(', ')}.`,
-      });
+    const body = developmentInput(res, 'lookingFor', req.body);
+    if (!body) return;
+    const { positions } = body;
     const lookingFor = clubSetup.lookingFor.set(req.org.id, [...new Set(positions)]);
     broadcast('orgs');
     res.json({ lookingFor });
@@ -203,15 +175,19 @@ export function registerGrassrootsClub({
 
   orgRouter.post('/open-trials/:id/registrations/:regId/outcome', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
+    const body = developmentInput(res, 'openDayOutcome', req.body);
+    if (!body) return;
     const trial = grassroots.openTrials.forOrgById(req.org.id, req.params.id);
     const reg = trial?.registrations.find((r) => r.id === req.params.regId);
     if (!trial || !reg) return res.status(404).json({ error: 'REGISTRATION_NOT_FOUND' });
     if (reg.outcome) return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const { outcome, note } = req.body || {};
-    if (!['invite_trial', 'declined'].includes(outcome)) return res.status(400).json({ error: 'OUTCOME_INVALID' });
-    if (!optText(note, 10_000)) return badField(res, 'note');
+    const { outcome, note } = body;
+    if (!outcome)
+      return res
+        .status(400)
+        .json({ error: 'OUTCOME_INVALID', field: 'outcome', problem: 'required', allowed: OPEN_DAY_OUTCOMES });
     if (note && !moderateOrRefuse(res, note, { kind: 'open_day_outcome', orgId: req.org.id })) return;
-    const outcomeNote = note?.trim() ? note.trim().slice(0, GL.outcomeNote) : null;
+    const outcomeNote = filled(note);
     const p = findPlayer(reg.playerId);
     const answered = unit(() => {
       const r = grassroots.openTrials.resolve(trial.id, reg.id, { outcome, note: outcomeNote, at: Date.now() });
@@ -296,10 +272,10 @@ export function registerGrassrootsClub({
 
   orgRouter.post('/squad', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
-    const { name, position, playerId } = req.body || {};
-    if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' });
-    if (!optText(position, 40)) return badField(res, 'position');
-    if (!optText(playerId, 80)) return badField(res, 'playerId');
+    const body = developmentInput(res, 'squad', req.body);
+    if (!body) return;
+    const { name, position, playerId } = body;
+    if (!filled(name)) return res.status(400).json({ error: 'NAME_REQUIRED', field: 'name', problem: 'required' });
     if (playerId) {
       const p = findPlayer(playerId);
       if (!p || !visibleToOrg(p, req.org)) return res.status(403).json({ error: 'PLAYER_NOT_VISIBLE' });
@@ -308,7 +284,7 @@ export function registerGrassrootsClub({
     clubSetup.squad.create({
       id: nextId('sq'),
       orgId: req.org.id,
-      name: String(name).trim(),
+      name: name.trim(),
       position: position || null,
       playerId: playerId || null,
       source: 'manual',
@@ -319,14 +295,11 @@ export function registerGrassrootsClub({
 
   orgRouter.post('/squad/:entryId/release', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
+    const body = developmentInput(res, 'release', req.body);
+    if (!body) return;
     const entry = clubSetup.squad.byId(req.params.entryId);
     if (!entry || entry.orgId !== req.org.id) return res.status(404).json({ error: 'SQUAD_ENTRY_NOT_FOUND' });
-    const raw = (req.body || {}).referenceText;
-    if (raw !== undefined && raw !== null && typeof raw !== 'string')
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'referenceText', message: 'The reference is text.' });
-    const referenceText = raw ? raw.trim().slice(0, TRANSITION_LIMITS.text) : '';
+    const referenceText = filled(body.referenceText) ?? '';
     if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id }))
       return;
     unit(() => {
@@ -384,23 +357,11 @@ export function registerGrassrootsClub({
 
   orgRouter.post('/matchday', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
-    const { fixture, venue, date, result, playerIds } = req.body || {};
-    if (!fixture || !date) return res.status(400).json({ error: 'FIXTURE_AND_DATE_REQUIRED' });
-    if (!reqText(fixture, GL.fixture))
-      return fieldInvalid(res, 'fixture', `fixture is text of at most ${GL.fixture} characters.`);
-    if (!optText(venue, GL.venue))
-      return fieldInvalid(res, 'venue', `venue is text of at most ${GL.venue} characters.`);
-    if (!optText(result, GL.result))
-      return fieldInvalid(res, 'result', `result is text of at most ${GL.result} characters (e.g. 3-1).`);
-    if (!dateOnlyOrRefuse(res, date, 'date')) return;
-    const ids = playerIds === undefined || playerIds === null ? [] : playerIds;
-    if (
-      !Array.isArray(ids) ||
-      ids.length > GL.matchdayPlayers ||
-      !ids.every((x) => typeof x === 'string' && x.length > 0 && x.length <= GL.id)
-    ) {
-      return fieldInvalid(res, 'playerIds', `playerIds is a list of at most ${GL.matchdayPlayers} player ids.`);
-    }
+    const body = developmentInput(res, 'matchday', req.body);
+    if (!body) return;
+    const { fixture, venue, date, result } = body;
+    if (!filled(fixture) || !date) return res.status(400).json({ error: 'FIXTURE_AND_DATE_REQUIRED' });
+    const ids = body.playerIds ?? [];
     const onSquad = new Set(clubSetup.squad.playerIds(req.org.id));
     const credited = [];
     const fixtureText = fixture.trim();
@@ -453,9 +414,11 @@ export function registerGrassrootsClub({
 
   orgRouter.get('/matchdays', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
+    const query = developmentInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -543,15 +506,10 @@ export function registerGrassrootsClub({
 
   orgRouter.post('/friendlies', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
-    const { ageGroup, date, venue, notes } = req.body || {};
-    if (!date) return res.status(400).json({ error: 'DATE_REQUIRED' });
-    for (const [f, v, max] of [
-      ['ageGroup', ageGroup, GL.ageGroup],
-      ['venue', venue, GL.venue],
-      ['notes', notes, GL.notes],
-    ])
-      if (!optText(v, max)) return badField(res, f);
-    if (!dateOnlyOrRefuse(res, date, 'date')) return;
+    const body = developmentInput(res, 'friendly', req.body);
+    if (!body) return;
+    const { ageGroup, date, venue, notes } = body;
+    if (!date) return res.status(400).json({ error: 'DATE_REQUIRED', field: 'date', problem: 'required' });
     if (notes && !moderateOrRefuse(res, notes, { kind: 'friendly_notes', orgId: req.org.id })) return;
     const friendly = grassroots.friendlies.create({
       id: nextId('fr'),
@@ -571,9 +529,11 @@ export function registerGrassrootsClub({
   /** The club's own friendlies and those posted within the radius. */
   orgRouter.get('/friendlies', (req, res) => {
     if (grassrootsOrgOnly(req, res)) return;
+    const query = developmentInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['string', 'string']);
+      page = readPage(query, ['string', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -592,15 +552,16 @@ export function registerGrassrootsClub({
     const friendly = grassroots.friendlies.byId(req.params.id);
     if (!friendly) return res.status(404).json({ error: 'FRIENDLY_NOT_FOUND' });
     if (friendly.orgId === req.org.id) return res.status(400).json({ error: 'OWN_POST' });
-    const { message } = req.body || {};
-    if (!optText(message, 10_000)) return badField(res, 'message');
+    const body = developmentInput(res, 'friendlyResponse', req.body);
+    if (!body) return;
+    const { message } = body;
     if (message && !moderateOrRefuse(res, message, { kind: 'friendly_response', orgId: req.org.id })) return;
     if (friendly.responses.some((r) => r.orgId === req.org.id))
       return res.status(409).json({ error: 'ALREADY_RESPONDED' });
     unit(() => {
       grassroots.friendlies.respond(friendly.id, {
         orgId: req.org.id,
-        message: message ? message.trim().slice(0, GL.message) : '',
+        message: filled(message) ?? '',
         respondedByUserId: req.orgUser.id,
         ts: Date.now(),
       });

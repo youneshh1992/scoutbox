@@ -196,7 +196,7 @@ section('D — units of work');
     'the blocked club reads the player as absent',
   );
   // Moderation: a grooming hit and its escalation.
-  const hit = await j('POST', '/player/timeline', { year: 2026, event: 'keep this a secret from everyone' }, adult);
+  const hit = await j('POST', '/player/timeline', { year: '2026', event: 'keep this a secret from everyone' }, adult);
   ok(hit.status === 400 && hit.body.error === 'MODERATION_BLOCKED', 'a grooming-pattern text is blocked');
   const mod = (await admin('/admin/moderation')).body.items;
   ok(

@@ -120,7 +120,7 @@ export const DEVELOPMENT_HISTORY_ACTIONS = Object.freeze([
 export const TARGET_METRIC_TYPES = Object.freeze(['count', 'time', 'distance', 'duration', 'set', 'percentage']);
 export const TARGET_DIRECTIONS = Object.freeze(['higher', 'lower']);
 export const TARGET_PRECISIONS = Object.freeze(['integer', 'tenths', 'hundredths', 'centimetres']);
-/** Text limits. The routes shorten over-long objective, progress and outcome text; everything else over a limit is refused. */
+/** Text limits. Over a limit is refused at the route (domains/development/schemas.mjs), never shortened. */
 export const DEVELOPMENT_LIMITS = Object.freeze({
   id: 80,
   name: 200,

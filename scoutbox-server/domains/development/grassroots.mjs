@@ -1,6 +1,6 @@
 // The Grassroots journey, for amateur and semi-pro players. For a child, registration, the seeker flag and a
 // reference request are the guardian's, from the guardian's account.
-import { switchRefused } from '../platform/input.mjs';
+import { developmentInput } from './schemas.mjs';
 import { GRASSROOTS_RADIUS_KM, haversineKm, visibleToOrg } from '../../domain.mjs';
 import { PLAYER_POSITIONS } from '../../repositories/identity.mjs';
 import { GRASSROOTS_LIMITS as GL, boxAround } from '../../repositories/grassroots.mjs';
@@ -90,7 +90,9 @@ export function registerGrassrootsJourney({
 
   playerRouter.post('/programme', (req, res) => {
     if (grassrootsOnly(req, res)) return;
-    const track = PROGRAMME_TRACKS[req.body?.track];
+    const body = developmentInput(res, 'programme', req.body);
+    if (!body) return;
+    const track = Object.hasOwn(PROGRAMME_TRACKS, body.track ?? '') ? PROGRAMME_TRACKS[body.track] : null;
     if (!track) return res.status(400).json({ error: 'TRACK_NOT_FOUND' });
     unit(() => {
       players.startProgramme(req.player.id, track.key, Date.now());
@@ -102,6 +104,7 @@ export function registerGrassrootsJourney({
 
   playerRouter.post('/programme/sessions/:id/complete', (req, res) => {
     if (grassrootsOnly(req, res)) return;
+    if (!developmentInput(res, 'none', req.body)) return;
     if (!req.player.programme)
       return res.status(409).json({ error: 'NO_PROGRAMME', message: 'Pick a training track first.' });
     const session = PROGRAMME_TRACKS[req.player.programme.track]?.sessions.find((x) => x.id === req.params.id);
@@ -210,6 +213,7 @@ export function registerGrassrootsJourney({
   playerRouter.post('/open-trials/:id/register', (req, res) => {
     if (grassrootsOnly(req, res)) return;
     if (guardianManagedOnly(req, res)) return;
+    if (!developmentInput(res, 'none', req.body)) return;
     const trial = grassroots.openTrials.byId(req.params.id);
     if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
     const org = findOrg(trial.orgId);
@@ -287,7 +291,9 @@ export function registerGrassrootsJourney({
   });
 
   guardianRouter.post('/open-trials/:id/register', (req, res) => {
-    const child = ownChild(req, res, findPlayer, req.body?.childId);
+    const body = developmentInput(res, 'guardianRegister', req.body);
+    if (!body) return;
+    const child = ownChild(req, res, findPlayer, body.childId);
     if (!child) return;
     const trial = grassroots.openTrials.byId(req.params.id);
     if (!trial) return res.status(404).json({ error: 'OPEN_TRIAL_NOT_FOUND' });
@@ -335,8 +341,9 @@ export function registerGrassrootsJourney({
 
   // ------------------------------------------------------------ First Team Seekers: need-based, never purchasable
   const setSeeker = (player, req, res) => {
-    if (switchRefused(res, req.body?.enabled, 'enabled')) return;
-    const stored = players.setFirstTeamSeeker(player.id, req.body.enabled);
+    const body = developmentInput(res, 'enabled', req.body);
+    if (!body) return;
+    const stored = players.setFirstTeamSeeker(player.id, body.enabled);
     broadcast('players', { playerId: player.id });
     res.json({ firstTeamSeeker: stored.firstTeamSeeker });
   };
@@ -354,15 +361,10 @@ export function registerGrassrootsJourney({
   // ------------------------------------------------------------ coach references
   // The coach proves control of the mailbox with a one-time code (stored only as its hash); the reference text is
   // moderated when it is submitted.
-  function requestVouch(player, { coachName, coachEmail, role }, res) {
-    for (const [field, v] of [
-      ['coachName', coachName],
-      ['coachEmail', coachEmail],
-      ['role', role],
-    ]) {
-      if (v !== undefined && v !== null && typeof v !== 'string')
-        return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
-    }
+  function requestVouch(player, input, res) {
+    const body = developmentInput(res, 'vouchRequest', input);
+    if (!body) return;
+    const { coachName, coachEmail, role } = body;
     const name = (coachName ?? '').trim();
     const email = (coachEmail ?? '').trim();
     if (!name || !email || !/^[^\s@]+@[^\s@]+$/.test(email)) {
@@ -370,14 +372,6 @@ export function registerGrassrootsJourney({
         .status(400)
         .json({ error: 'COACH_DETAILS_REQUIRED', message: 'Name the coach and their email address.' });
     }
-    if (name.length > VL.coachName)
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'coachName', message: `At most ${VL.coachName} characters.` });
-    if (email.length > VL.coachEmail)
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'coachEmail', message: `At most ${VL.coachEmail} characters.` });
     const code = randomCode(8);
     // In a unit, so the id counter commits with the row. The player's name has no limit at sign-up, so it is shortened.
     const vouch = unit(() =>
@@ -387,7 +381,7 @@ export function registerGrassrootsJourney({
         playerName: player.name?.slice(0, VL.name) ?? null,
         coachName: name,
         coachEmail: email,
-        role: (role ?? '').trim().slice(0, VL.role) || 'Coach',
+        role: (role ?? '').trim() || 'Coach',
         status: 'pending',
         codeHash: vouchCodeHash(code),
         text: null,
@@ -420,40 +414,32 @@ References are screened by moderation and reviewed by Trust & Safety.`,
   playerRouter.post('/vouches/request', (req, res) => {
     if (grassrootsOnly(req, res)) return;
     if (guardianManagedOnly(req, res)) return;
-    requestVouch(req.player, req.body ?? {}, res);
+    requestVouch(req.player, req.body, res);
   });
   guardianRouter.post('/children/:id/vouches/request', (req, res) => {
     const child = grassrootsChild(req, res);
     if (!child) return;
-    requestVouch(child, req.body ?? {}, res);
+    requestVouch(child, req.body, res);
   });
 
   // The coach's submission, on `app`: the code from the e-mailed request is the coach's only credential.
   app.post('/vouch/submit', (req, res) => {
-    const { code, text, seasons, conflictOfInterest } = req.body || {};
-    const vouch = typeof code === 'string' && code.trim() ? transitionsVouches.vouches.pendingByCode(code) : null;
+    const body = developmentInput(res, 'vouchSubmit', req.body);
+    if (!body) return;
+    const { code, text, seasons, conflictOfInterest } = body;
+    const vouch = code?.trim() ? transitionsVouches.vouches.pendingByCode(code) : null;
     if (!vouch)
       return res.status(404).json({ error: 'CODE_INVALID', message: 'That reference code is wrong or already used.' });
-    for (const [field, v] of [
-      ['text', text],
-      ['seasons', seasons],
-      ['conflictOfInterest', conflictOfInterest],
-    ]) {
-      if (v !== undefined && v !== null && typeof v !== 'string')
-        return res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} is text.` });
-    }
     if (!text || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
     if (!moderateOrRefuse(res, text, { kind: 'coach_vouch', playerId: vouch.playerId })) return;
     const player = findPlayer(vouch.playerId);
     // Publishing clears the code (single use); the reference and both notifications commit together.
     unit(() => {
       transitionsVouches.vouches.publish(vouch.id, {
-        text: text.trim().slice(0, VL.text),
-        seasons: seasons?.trim() ? seasons.trim().slice(0, VL.seasons) : null,
+        text: text.trim(),
+        seasons: seasons?.trim() || null,
         // A declared relationship to the player ("my son", "I run their agency") must be visible, not discoverable.
-        conflictOfInterest: conflictOfInterest?.trim()
-          ? conflictOfInterest.trim().slice(0, VL.conflictOfInterest)
-          : null,
+        conflictOfInterest: conflictOfInterest?.trim() || null,
         at: Date.now(),
       });
       notify(

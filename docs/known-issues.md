@@ -165,8 +165,6 @@ keep, or code with nothing left to do.
   (`domains/discovery/matching/match.mjs`) copies `criterionId`'s id rule.
 - **Environment settings read directly.** `SCOUTBOX_FAST_SWEEPS` and `TEST_LICENCE_REGISTRY` are not registered in
   `domains/platform/capabilities.mjs`, and `domains/recruitment/analytics/index.mjs` reads `NODE_ENV` directly.
-- **Text cut instead of refused.** The open-day outcome note and release reference
-  (`domains/development/grassrootsClub.mjs`) and the objectives' "shortened" texts (`objectives.mjs`) use `.slice()`.
 - **Notification copy is incomplete.** The `PREF_CATEGORY_MANDATORY` refusal (`domains/platform/notificationPrefs.mjs`)
   names only security and account notices, but `compliance` is mandatory too, and the `/capabilities` note
   (`operator.mjs`) does the same.

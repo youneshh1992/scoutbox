@@ -1,7 +1,8 @@
-// Drill guidance and development objectives (feedback → objectives → reassessment). Over-long objective, progress
-// and outcome text is shortened rather than refused.
+// Drill guidance and development objectives (feedback → objectives → reassessment).
 import { DEVELOPMENT_LIMITS as DL } from '../../repositories/development.mjs';
+import { filled } from '../platform/schemas.mjs';
 import { parseDate } from './hub/shared.mjs';
+import { developmentInput } from './schemas.mjs';
 
 /** The same for every combine drill. */
 export const DRILL_RECORDING = Object.freeze({
@@ -89,11 +90,10 @@ export function registerObjectives(ctx) {
       .json({ error: 'EVIDENCE_INVALID', field, message: `${field} names evidence that is not this player's.` });
     return undefined;
   };
-  const isText = (v) => typeof v === 'string';
   /** A list of the player's own evidence ids (absent is none), or undefined after a 400. */
   const ownEvidence = (res, list, playerId, field) => {
     if (list === undefined || list === null) return [];
-    if (!Array.isArray(list) || list.length > DL.evidenceIds || !list.every(isText))
+    if (list.length > DL.evidenceIds)
       return fieldInvalid(res, field, `${field} is a list of at most ${DL.evidenceIds} evidence ids.`);
     if (new Set(list).size !== list.length) return fieldInvalid(res, field, `${field} names an evidence item twice.`);
     const i = list.findIndex((id) => scoutingReads.evidence.byId(id)?.playerId !== playerId);
@@ -124,12 +124,11 @@ export function registerObjectives(ctx) {
   adminRouter.get('/drill-guidance', (_req, res) => res.json({ items: guidance() }));
 
   adminRouter.post('/drill-guidance/:drillId/review', (req, res) => {
+    const body = developmentInput(res, 'drillReview', req.body);
+    if (!body) return;
     const drill = DRILLS.find((d) => d.id === req.params.drillId);
     if (!drill) return res.status(404).json({ error: 'DRILL_NOT_FOUND' });
-    const raw = req.body?.reviewer;
-    if (raw !== undefined && raw !== null && !isText(raw))
-      return fieldInvalid(res, 'reviewer', "reviewer is the reviewer's name, as text.");
-    const reviewer = (raw ?? '').trim().slice(0, DL.reviewer) || DEFAULT_REVIEWER;
+    const reviewer = filled(body.reviewer) ?? DEFAULT_REVIEWER;
     const review = development.drillReviews.record({ drillId: drill.id, reviewer, reviewedAt: Date.now() });
     res.json({ guidance: guidanceOf(drill.id, review) });
   });
@@ -139,47 +138,32 @@ export function registerObjectives(ctx) {
   // player's (or guardian's) explicit choice.
 
   function createObjective(req, res, player, actor) {
-    const { feedbackId, objectives } = req.body ?? {};
-    const found = typeof feedbackId === 'string' ? scoutingReads.assessments.byId(feedbackId) : null;
+    const body = developmentInput(res, 'objective', req.body);
+    if (!body) return undefined;
+    const { feedbackId, objectives } = body;
+    const found = feedbackId ? scoutingReads.assessments.byId(feedbackId) : null;
     const a = found && found.playerId === player.id && found.publishedFeedback ? found : null;
     if (!a)
       return res.status(404).json({
         error: 'PUBLISHED_FEEDBACK_NOT_FOUND',
         message: 'Objectives grow from feedback a club chose to publish — private assessments cannot seed them.',
       });
-    if (!Array.isArray(objectives) || objectives.length < 1 || objectives.length > DL.objectiveItems) {
+    if (!objectives || objectives.length < 1 || objectives.length > DL.objectiveItems) {
       return res
         .status(400)
         .json({ error: 'ONE_OR_TWO_OBJECTIVES', message: 'One or two focused objectives — not a laundry list.' });
     }
     const items = [];
     for (const [i, o] of objectives.entries()) {
-      const at = `objectives[${i}]`;
-      if (!o || typeof o !== 'object' || Array.isArray(o))
-        return fieldInvalid(res, at, 'an objective is an object { text, exerciseRefs, baselineEvidenceIds }.');
-      if (!isText(o.text) || !o.text.trim())
-        return fieldInvalid(res, `${at}.text`, 'every objective says what to work on, as text.');
-      const refs = o.exerciseRefs ?? [];
-      if (
-        !Array.isArray(refs) ||
-        refs.length > DL.exerciseRefs ||
-        !refs.every((r) => isText(r) && r.trim() && r.length <= DL.exerciseRef)
-      ) {
-        return fieldInvalid(
-          res,
-          `${at}.exerciseRefs`,
-          `exerciseRefs is a list of at most ${DL.exerciseRefs} exercise names of up to ${DL.exerciseRef} characters.`,
-        );
-      }
-      const evidence = ownEvidence(res, o.baselineEvidenceIds, player.id, `${at}.baselineEvidenceIds`);
+      const evidence = ownEvidence(res, o.baselineEvidenceIds, player.id, `objectives[${i}].baselineEvidenceIds`);
       if (!evidence) return undefined;
       items.push({
-        text: o.text.trim().slice(0, DL.objectiveText),
-        exerciseRefs: [...refs],
+        text: o.text.trim(),
+        exerciseRefs: [...(o.exerciseRefs ?? [])],
         baselineEvidenceIds: evidence,
       });
     }
-    const reviewAt = parseDate(req.body?.reviewAt, { field: 'reviewAt' });
+    const reviewAt = parseDate(body.reviewAt, { field: 'reviewAt' });
     if (reviewAt.error) return res.status(400).json(reviewAt);
     const rec = unit(() =>
       development.objectives.create({
@@ -237,12 +221,10 @@ export function registerObjectives(ctx) {
   playerRouter.post('/objectives/:id/progress', (req, res) => {
     const o = objectiveOf(req.params.id, [req.player.id]);
     if (!o) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
-    const { note = null, evidenceId = null, objectiveId = null } = req.body ?? {};
-    if (note !== null && !isText(note)) return fieldInvalid(res, 'note', 'note is text.');
-    if (
-      evidenceId !== null &&
-      (!isText(evidenceId) || scoutingReads.evidence.byId(evidenceId)?.playerId !== req.player.id)
-    )
+    const body = developmentInput(res, 'progress', req.body);
+    if (!body) return undefined;
+    const { note = null, evidenceId = null, objectiveId = null } = body;
+    if (evidenceId !== null && scoutingReads.evidence.byId(evidenceId)?.playerId !== req.player.id)
       return res.status(400).json({ error: 'EVIDENCE_INVALID' });
     if (objectiveId !== null && !o.objectives.some((x) => x.id === objectiveId))
       return fieldInvalid(res, 'objectiveId', "objectiveId names one of this objective's items.");
@@ -252,7 +234,7 @@ export function registerObjectives(ctx) {
           id: nextId('prg'),
           at: Date.now(),
           objectiveId,
-          note: note && note.trim() ? note.slice(0, DL.progressNote) : null,
+          note: filled(note) ? note : null,
           evidenceId,
         });
       });
@@ -263,12 +245,12 @@ export function registerObjectives(ctx) {
   });
 
   function setSharing(req, res, playerIds) {
+    const body = developmentInput(res, 'objectiveShare', req.body);
+    if (!body) return undefined;
     const o = objectiveOf(req.params.id, playerIds);
     if (!o) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
-    const { orgId, enabled } = req.body ?? {};
-    if (!isText(orgId) || !byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-    if (typeof enabled !== 'boolean')
-      return fieldInvalid(res, 'enabled', 'enabled is true (share with this club) or false (stop sharing).');
+    const { orgId, enabled } = body;
+    if (!orgId || !byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     const fresh = unit(() =>
       development.objectives.update(o.id, (d) => {
         if (enabled && !d.sharing.orgIds.includes(orgId)) d.sharing.orgIds.push(orgId);
@@ -288,6 +270,7 @@ export function registerObjectives(ctx) {
   guardianRouter.post('/objectives/:id/share', (req, res) => setSharing(req, res, req.guardian.childIds));
 
   function requestReassessment(req, res, playerIds, actor) {
+    if (!developmentInput(res, 'none', req.body)) return undefined;
     const o = objectiveOf(req.params.id, playerIds);
     if (!o) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
     if (!o.sharing.orgIds.includes(o.orgId))
@@ -339,9 +322,10 @@ export function registerObjectives(ctx) {
     if (!r || o.orgId !== req.org.id) return res.status(404).json({ error: 'REASSESSMENT_NOT_FOUND' });
     if (!o.sharing.orgIds.includes(req.org.id)) return res.status(403).json({ error: 'SHARING_REVOKED' });
     if (r.status !== 'requested') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const { note, evidenceIds } = req.body ?? {};
-    if (note !== undefined && note !== null && !isText(note)) return fieldInvalid(res, 'note', 'note is text.');
-    if (!note || !note.trim())
+    const body = developmentInput(res, 'reassessmentOutcome', req.body);
+    if (!body) return undefined;
+    const { note, evidenceIds } = body;
+    if (!filled(note))
       return res
         .status(400)
         .json({ error: 'NOTE_REQUIRED', message: 'Reassessment outcomes point at evidence, not vibes.' });
@@ -350,7 +334,7 @@ export function registerObjectives(ctx) {
     if (!moderateOrRefuse(res, note, { kind: 'reassessment_outcome', playerId: o.playerId, orgId: req.org.id }))
       return undefined;
     const outcome = {
-      note: note.slice(0, DL.outcomeNote),
+      note,
       evidenceIds: evidence,
       byUserId: req.orgUser.id,
       byName: req.orgUser.name ?? null,
