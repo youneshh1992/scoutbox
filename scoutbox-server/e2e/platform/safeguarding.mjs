@@ -131,6 +131,53 @@ section('C — junk refused at the route');
     (await admin('/admin/reports?cursor=WzFd')).body?.error === 'PAGE_CURSOR_INVALID',
     'a blocks cursor is not a reports cursor: 400 PAGE_CURSOR_INVALID',
   );
+  // Safety input is valid as sent or refused.
+  const mine = async () => (await j('GET', '/player/reports', undefined, adult)).body.length;
+  const before = await mine();
+  const textUrgent = await j(
+    'POST',
+    '/player/report',
+    { targetKind: 'club', targetOrgId: 'org-eastport', reason: 'Synthetic.', urgent: 'false' },
+    adult,
+  );
+  neg(
+    textUrgent.status === 400 && textUrgent.body.field === 'urgent' && textUrgent.body.problem === 'not_boolean',
+    'IN1 "urgent" written as text is refused: "false" used to be read as urgent and suspend the club',
+  );
+  const kind = await j('POST', '/player/report', { targetKind: 'agent', reason: 'Synthetic.' }, adult);
+  neg(
+    kind.status === 400 && kind.body.error === 'TARGET_KIND_REQUIRED' && kind.body.allowed?.includes('club'),
+    'IN2 an unknown target kind keeps TARGET_KIND_REQUIRED, listing the kinds',
+  );
+  const status = await j(
+    'POST',
+    '/player/report',
+    { targetKind: 'scout', targetScoutName: 'Synthetic Scout', reason: 'Synthetic.', status: 'resolved' },
+    adult,
+  );
+  neg(
+    status.status === 400 && status.body.field === 'status' && status.body.problem === 'unknown_field',
+    'IN3 a report cannot arrive already resolved',
+  );
+  ok((await mine()) === before, 'IN4 and none of the refused reports was filed');
+  const listOrg = await j('POST', '/player/block', { orgId: ['org-harbour'] }, adult);
+  neg(listOrg.status === 400 && listOrg.body.field === 'orgId', 'IN5 a block naming its club with a list is refused');
+  const pw = await j('POST', '/admin/clubs/org-harbour/credentials', { password: 123456789 }, null, ADMIN);
+  neg(
+    pw.status === 400 && pw.body.field === 'password',
+    'IN6 a club password that is not text is refused, not hashed as text',
+  );
+  const standing = await j(
+    'POST',
+    '/admin/clubs/org-harbour/verification',
+    { verifiedDomain: 'harbour.example', orgName: 'Renamed' },
+    null,
+    ADMIN,
+  );
+  neg(
+    standing.status === 400 && standing.body.field === 'orgName',
+    'IN7 the standing switches take nothing the console does not send',
+  );
 }
 
 section('D — units of work');

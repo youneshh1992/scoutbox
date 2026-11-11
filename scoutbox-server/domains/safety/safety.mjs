@@ -1,8 +1,7 @@
 import express from 'express';
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
-import { optText, reqText, badField } from '../platform/input.mjs';
-import { AUDIT_LIMITS } from '../../repositories/safetyAudit.mjs';
-import { ORG_LIMITS } from '../../repositories/orgs.mjs';
+import { filled, presentOrRefuse } from '../platform/schemas.mjs';
+import { REPORT_TARGETS, safetyInput } from './schemas.mjs';
 import { hashPassword, invoiceView } from '../../adapters.mjs';
 
 export const reportView = (r) => ({
@@ -65,18 +64,15 @@ export function registerReporting({
 }) {
   // An urgent report against an organisation suspends communication with the reporter's players at once, pending review.
   function handleReport(req, res, actor) {
-    const { targetKind, targetOrgId, targetScoutName, targetPlayerId, reason, urgent } = req.body || {};
-    if (!['club', 'scout', 'player'].includes(targetKind)) {
-      return res.status(400).json({ error: 'TARGET_KIND_REQUIRED', allowed: ['club', 'scout', 'player'] });
-    }
-    if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
-    if (typeof reason !== 'string' || reason.trim().length > AUDIT_LIMITS.reason) return badField(res, 'reason');
-    for (const [field, v] of [
-      ['targetOrgId', targetOrgId],
-      ['targetScoutName', targetScoutName],
-      ['targetPlayerId', targetPlayerId],
-    ])
-      if (!optText(v, 200)) return badField(res, field);
+    const body = safetyInput(res, 'report', req.body);
+    if (!body) return;
+    const { targetKind, targetOrgId, targetScoutName, targetPlayerId, urgent } = body;
+    if (!targetKind)
+      return res
+        .status(400)
+        .json({ error: 'TARGET_KIND_REQUIRED', field: 'targetKind', problem: 'required', allowed: REPORT_TARGETS });
+    const reason = filled(body.reason);
+    if (!presentOrRefuse(res, reason, 'reason')) return;
     if (targetOrgId && !byId.org(targetOrgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     const report = {
       id: nextId('rep'),
@@ -87,8 +83,8 @@ export function registerReporting({
       targetOrgId: targetOrgId || null,
       targetScoutName: targetScoutName || null,
       targetPlayerId: targetPlayerId || null,
-      reason: String(reason).trim(),
-      urgent: !!urgent,
+      reason,
+      urgent: urgent === true,
       status: 'pending_review',
       outcome: null,
       resolvedAt: null,
@@ -143,7 +139,9 @@ export function registerReporting({
   );
   guardianRouter.post('/report', (req, res) => handleReport(req, res, { by: 'guardian', byId: req.guardian.id }));
   guardianRouter.post('/block', (req, res) => {
-    const { orgId, playerId, reason } = req.body || {};
+    const body = safetyInput(res, 'guardianBlock', req.body);
+    if (!body) return;
+    const { orgId, playerId, reason } = body;
     // A playerId that is not this guardian's child is refused, never swapped for another child; with no playerId, a
     // guardian of exactly one child means that child.
     if (playerId && !req.guardian.childIds.includes(playerId))
@@ -154,7 +152,6 @@ export function registerReporting({
         error: 'ORG_AND_CHILD_REQUIRED',
         message: playerId ? undefined : 'Name which child the block is for (playerId).',
       });
-    if (!optText(reason)) return badField(res, 'reason');
     if (!byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     addBlock(res, { playerId: childId, orgId, by: 'guardian', reason });
   });
@@ -171,10 +168,10 @@ export function registerReporting({
   );
   playerRouter.post('/report', (req, res) => handleReport(req, res, { by: 'player', byId: req.player.id }));
   playerRouter.post('/block', (req, res) => {
-    const { orgId, reason } = req.body || {};
-    if (!orgId) return res.status(400).json({ error: 'ORG_REQUIRED' });
-    if (!reqText(orgId, 200)) return badField(res, 'orgId');
-    if (!optText(reason)) return badField(res, 'reason');
+    const body = safetyInput(res, 'playerBlock', req.body);
+    if (!body) return;
+    const { orgId, reason } = body;
+    if (!orgId) return res.status(400).json({ error: 'ORG_REQUIRED', field: 'orgId', problem: 'required' });
     if (!byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     addBlock(res, { playerId: req.player.id, orgId, by: 'player', reason });
   });
@@ -211,9 +208,11 @@ export function registerSafetyConsole({
   if (typeof syncLegacyOrgVerification !== 'function')
     throw new TypeError("registerSafetyConsole needs the verification claims' syncLegacyOrgVerification");
   const paged = (req, res, cursor, read) => {
+    const query = safetyInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, cursor);
+      page = readPage(query, cursor);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -282,6 +281,7 @@ export function registerSafetyConsole({
   adminRouter.post('/vouches/:id/revoke', (req, res) => {
     const vouch = verificationReads.vouches.byId(req.params.id);
     if (!vouch) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
+    if (!safetyInput(res, 'none', req.body)) return;
     unit(() => transitionsVouches.vouches.revoke(vouch.id));
     broadcast('players', { playerId: vouch.playerId });
     res.json({ revoked: true });
@@ -291,11 +291,13 @@ export function registerSafetyConsole({
     const report = safetyAudit.reports.byId(req.params.id);
     if (!report) return res.status(404).json({ error: 'REPORT_NOT_FOUND' });
     if (report.status !== 'pending_review') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const { outcome, action } = req.body || {};
-    if (!outcome || !String(outcome).trim()) return res.status(400).json({ error: 'OUTCOME_REQUIRED' });
-    if (typeof outcome !== 'string' || outcome.trim().length > AUDIT_LIMITS.outcome) return badField(res, 'outcome');
+    const body = safetyInput(res, 'resolve', req.body);
+    if (!body) return;
+    const { action } = body;
+    const outcome = filled(body.outcome);
+    if (!presentOrRefuse(res, outcome, 'outcome')) return;
     const resolved = unit(() => {
-      const r = safetyAudit.reports.resolve(report.id, { outcome: outcome.trim(), at: Date.now() });
+      const r = safetyAudit.reports.resolve(report.id, { outcome, at: Date.now() });
       if (action === 'suspend_org' && r.targetOrgId) orgs.setStanding(r.targetOrgId, { suspended: true });
       if (r.by !== 'system')
         notify({ kind: r.by, id: r.byId }, 'report_resolved', `Your report was reviewed: ${r.outcome}`, r.id); // a system escalation has no reporter to tell
@@ -305,9 +307,11 @@ export function registerSafetyConsole({
   });
 
   adminRouter.get('/clubs', (req, res) => {
+    const query = safetyInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = orgs.page({}, readPage(req.query, ['number']));
+      page = orgs.page({}, readPage(query, ['number']));
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -321,33 +325,24 @@ export function registerSafetyConsole({
   adminRouter.post('/clubs/:id/credentials', (req, res) => {
     const org = byId.org(req.params.id);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-    const { password } = req.body || {};
-    if (!password || String(password).length < 8) {
+    const body = safetyInput(res, 'credentials', req.body);
+    if (!body) return;
+    const { password } = body;
+    if (!password || password.length < 8) {
       return res
         .status(400)
         .json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
     }
-    orgs.setPasswordHash(org.id, hashPassword(String(password)));
+    orgs.setPasswordHash(org.id, hashPassword(password));
     res.json({ ok: true, note: 'Credentials provisioned — the organisation signs in with this password from now on.' });
   });
 
   adminRouter.post('/clubs/:id/verification', (req, res) => {
     const org = byId.org(req.params.id);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-    const { verified, safeguardingContractSigned, verifiedDomain, suspended } = req.body || {};
-    for (const [f, v] of [
-      ['verified', verified],
-      ['safeguardingContractSigned', safeguardingContractSigned],
-      ['suspended', suspended],
-    ])
-      if (v !== undefined && typeof v !== 'boolean')
-        return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} must be true or false.` });
-    if (
-      verifiedDomain !== undefined &&
-      verifiedDomain !== null &&
-      !(typeof verifiedDomain === 'string' && verifiedDomain.trim().length <= ORG_LIMITS.domain)
-    )
-      return badField(res, 'verifiedDomain');
+    const body = safetyInput(res, 'clubStanding', req.body);
+    if (!body) return;
+    const { verified, safeguardingContractSigned, verifiedDomain, suspended } = body;
     // Mirrored on the organisation's identity claim in the same unit.
     const updated = unit(() => {
       orgs.setStanding(org.id, {
@@ -356,7 +351,7 @@ export function registerSafetyConsole({
         suspended,
         verifiedDomain: verifiedDomain === undefined ? undefined : verifiedDomain?.trim() || null,
       });
-      syncLegacyOrgVerification(org, req.body);
+      syncLegacyOrgVerification(org, body);
       return byId.org(org.id);
     });
     broadcast('players'); // visibility rules may have changed
@@ -371,6 +366,7 @@ export function registerSafetyConsole({
   );
   // Lifting a block deletes its row (Q5, docs/decisions.md).
   adminRouter.post('/blocks/:id/lift', (req, res) => {
+    if (!safetyInput(res, 'none', req.body)) return;
     const lifted = safetyAudit.blocks.lift(req.params.id);
     if (!lifted) return res.status(404).json({ error: 'BLOCK_NOT_FOUND' });
     broadcast('players');
