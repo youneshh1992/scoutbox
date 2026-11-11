@@ -61,6 +61,7 @@ import {
   normaliseDecisionClientKey,
 } from '../../domains/recruitment/lifecycle/decision.mjs';
 import { LIFECYCLE_ERROR_HTTP } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { DECISION_INPUT_CODES } from '../../domains/recruitment/lifecycle/decisionRoutes.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import {
@@ -589,6 +590,11 @@ section('P — policy: error bands, rate policies, events, permissions, the ONE 
       'DECISION_REV_REQUIRED',
     ].every((c) => band(c) === 400),
     'P2 validation codes are 400',
+  );
+  const inputCodes = [...Object.values(DECISION_INPUT_CODES.codes), ...Object.values(DECISION_INPUT_CODES.fieldCodes)];
+  ok(
+    inputCodes.every((c) => band(c) === 400),
+    'P2b every code the decision input schemas give a refusal is a 400 in the table',
   );
   ok(
     band('DECISION_NOT_PERMITTED') === 403 && band('DECISION_BLOCKED') === 403 && band('DECISION_NOT_FOUND') === 404,
@@ -1916,18 +1922,51 @@ section('X — content: prototype keys, invalid types, XSS, limits, taxonomies o
     ),
     'X14 a non-text supersession reason is refused, not crashed on',
   );
+  const objectSupersedes = await supersede(RID, {
+    expectedRev: 1,
+    supersedes: { id: s.current.id },
+    supersedesRev: 1,
+    supersessionReason: 'x',
+  });
   neg(
-    expect(
-      await supersede(RID, {
-        expectedRev: 1,
-        supersedes: { id: s.current.id },
-        supersedesRev: 1,
-        supersessionReason: 'x',
-      }),
-      409,
-      'DECISION_ALREADY_FINAL',
-    ),
-    'X15 supersedes as an object is not the id',
+    expect(objectSupersedes, 400, 'DECISION_CONTENT_INVALID') &&
+      objectSupersedes.body.field === 'supersedes' &&
+      objectSupersedes.body.problem === 'not_text',
+    'X15 supersedes as an object is refused as input, not read as the id',
+  );
+  const forgedKind = await patch(RID, { expectedRev: 1, kind: 'formal' });
+  neg(
+    expect(forgedKind, 400, 'DECISION_CONTENT_INVALID') &&
+      forgedKind.body.field === 'kind' &&
+      forgedKind.body.problem === 'unknown_field',
+    'X15b a draft edit cannot name its own kind: an undeclared field is refused',
+  );
+  const refWithContent = await patch(RID, {
+    expectedRev: 1,
+    evidenceRefs: [{ kind: 'assessment', id: 'asm-x', rating: 5 }],
+  });
+  neg(
+    expect(refWithContent, 400, 'DECISION_EVIDENCE_INVALID') &&
+      refWithContent.body.field === 'evidenceRefs[0].rating' &&
+      refWithContent.body.problem === 'unknown_field',
+    'X15c a reference carries no content of its own: an extra key is refused, by its path',
+  );
+  const longNote = await patch(RID, { expectedRev: 1, note: 'x'.repeat(DECISION_LIMITS.note + 1) });
+  neg(
+    expect(longNote, 400, 'DECISION_CONTENT_INVALID') &&
+      longNote.body.problem === 'too_long' &&
+      longNote.body.max === DECISION_LIMITS.note,
+    'X15d an over-long note says what was wrong and the limit, for the client to word',
+  );
+  const forgedDiscard = await j(
+    'DELETE',
+    `/org/rooms/${RID}/decision/draft`,
+    { expectedRev: 1, force: true },
+    maria.token,
+  );
+  neg(
+    expect(forgedDiscard, 400, 'DECISION_CONTENT_INVALID') && forgedDiscard.body.problem === 'unknown_field',
+    'X15e a discard takes only the rev',
   );
   await discard(RID, 1);
   neg(

@@ -21,10 +21,14 @@ const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 export const LIFECYCLE_ERROR_HTTP = table({
   LIFECYCLE_STAGE_NOT_SETTABLE: 400,
   LIFECYCLE_ACTION_UNKNOWN: 400,
+  LIFECYCLE_INPUT_INVALID: 400,
+  LIFECYCLE_CLIENT_KEY_INVALID: 400,
   LIFECYCLE_REASONS_INVALID: 400,
   LIFECYCLE_REASONS_TOO_MANY: 400,
   LIFECYCLE_REASON_UNKNOWN: 400,
   LIFECYCLE_REASON_REQUIRED: 400,
+  // A malformed expectedRev, refused as `guardRev` refuses it everywhere.
+  EXPECTED_REV_INVALID: 400,
   // The rooms' rule: a protected characteristic can never be a reason for anything.
   ROOM_REASON_PROHIBITED: 400,
 
@@ -201,6 +205,10 @@ const PUBLIC_ERROR_FIELDS = [
   'lifecycle',
   'ref',
   'supersedes',
+  // An input refusal: what was wrong with the field, and the bound it broke.
+  'problem',
+  'min',
+  'max',
 ];
 
 /** Internal (500-class) errors are reduced to the code and a fixed message; the caller logs the full object. */

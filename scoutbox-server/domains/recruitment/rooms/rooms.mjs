@@ -65,8 +65,9 @@ import {
   idList,
   inputOrRefuse,
   oneOf,
+  REV_FIELD_CODES,
+  REV_FIELDS,
   text,
-  wholeNumber,
 } from '../../platform/schemas.mjs';
 
 const NOTE_MAX = 2000;
@@ -77,7 +78,6 @@ const COMBINE_TITLE_MAX = 120;
 const COMBINE_INSTRUCTIONS_MAX = 300;
 const COMBINE_PROTOCOLS_MAX = 20;
 
-const REV = { expectedRev: v.nullish(wholeNumber({ min: 0 })), expectedVersion: v.nullish(wholeNumber({ min: 0 })) };
 // Reason codes are cleaned and judged against the taxonomy by validateReasonCodes, which keeps its own codes.
 const reasonCodes = v.nullish(v.array(v.string()));
 const REASON_CODES_CODES = { 'reasonCodes.*': 'ROOM_REASONS_INVALID' };
@@ -92,7 +92,7 @@ const NewRoom = v.strictObject({
 const NEW_ROOM_CODES = { fieldCodes: { priority: 'ROOM_PRIORITY_UNKNOWN' } };
 // The tag count has its own code, so it is judged in the route.
 const RoomEdit = v.strictObject({
-  ...REV,
+  ...REV_FIELDS,
   priority: v.optional(oneOf(ROOM_PRIORITIES)),
   tags: v.optional(v.array(text(LIMITS.tagLength))),
   leadScoutUserId: v.optional(v.nullable(id)),
@@ -100,14 +100,16 @@ const RoomEdit = v.strictObject({
   restricted: v.optional(flag),
   deadline: v.optional(dueDate),
 });
-const ROOM_EDIT_CODES = { fieldCodes: { priority: 'ROOM_PRIORITY_UNKNOWN', 'tags.*': 'ROOM_TAGS_INVALID' } };
+const ROOM_EDIT_CODES = {
+  fieldCodes: { ...REV_FIELD_CODES, priority: 'ROOM_PRIORITY_UNKNOWN', 'tags.*': 'ROOM_TAGS_INVALID' },
+};
 const StatusMove = v.strictObject({
-  ...REV,
+  ...REV_FIELDS,
   status: oneOf(ROOM_STATUSES),
   reasonCodes,
   note: v.nullish(text(NOTE_MAX)),
 });
-const STATUS_MOVE_CODES = { fieldCodes: { status: 'ROOM_STATUS_UNKNOWN', ...REASON_CODES_CODES } };
+const STATUS_MOVE_CODES = { fieldCodes: { ...REV_FIELD_CODES, status: 'ROOM_STATUS_UNKNOWN', ...REASON_CODES_CODES } };
 const NewComment = v.strictObject({
   body: v.nullish(text(LIMITS.commentBody)),
   replyToId: v.nullish(id),
@@ -129,14 +131,15 @@ const TaskEdit = v.strictObject({
 const TASK_EDIT_CODES = { fieldCodes: { status: 'ROOM_TASK_STATE_UNKNOWN' } };
 // `clientKey` keeps the platform's idempotency-key rule (normaliseClientKey).
 const NewDecision = v.strictObject({
-  ...REV,
+  ...REV_FIELDS,
   clientKey: v.optional(v.unknown()),
   recommendation: oneOf(RECOMMENDATIONS),
   reasonCodes,
-  note: v.nullish(text(NOTE_MAX)),
+  // validateDecision judges the length, as ROOM_NOTE_TOO_LONG.
+  note: v.nullish(v.string()),
 });
 const DECISION_CODES = {
-  fieldCodes: { recommendation: 'ROOM_RECOMMENDATION_UNKNOWN', note: 'ROOM_NOTE_TOO_LONG', ...REASON_CODES_CODES },
+  fieldCodes: { ...REV_FIELD_CODES, recommendation: 'ROOM_RECOMMENDATION_UNKNOWN', ...REASON_CODES_CODES },
 };
 const EvidenceReview = v.strictObject({
   state: oneOf(EVIDENCE_REVIEW_STATES),

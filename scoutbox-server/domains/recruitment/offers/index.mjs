@@ -17,7 +17,7 @@ import {
 import { resolveContactRecipient } from '../lifecycle/contact.mjs';
 import { visibleToOrg } from '../../../domain.mjs';
 import * as v from 'valibot';
-import { flag, id, parseInput, text, wholeNumber } from '../../platform/schemas.mjs';
+import { flag, id, parseInput, REV_FIELDS, text } from '../../platform/schemas.mjs';
 import { sendOfferError, notFound, documentNotFound } from './errors.mjs';
 import {
   OFFER_POLICY_VERSION,
@@ -58,15 +58,14 @@ import {
 
 // `clientKey` keeps the platform's idempotency-key rule (normaliseOfferClientKey).
 const KEY = { clientKey: v.optional(v.unknown()) };
-const REV = { expectedRev: v.nullish(wholeNumber({ min: 0 })), expectedVersion: v.nullish(wholeNumber({ min: 0 })) };
 const NewOffer = v.strictObject({ ...OFFER_CONTENT_FIELDS, ...KEY, transactionId: v.nullish(v.string()) });
-const DraftEdit = v.strictObject({ ...OFFER_CONTENT_FIELDS, ...REV });
-const IssueRequest = v.strictObject({ ...KEY, ...REV });
-const WithdrawRequest = v.strictObject({ ...KEY, ...REV, reason: v.nullish(text(OFFER_LIMITS.withdrawReason)) });
-const RevisionRequest = v.strictObject({ ...OFFER_CONTENT_FIELDS, ...KEY, ...REV });
+const DraftEdit = v.strictObject({ ...OFFER_CONTENT_FIELDS, ...REV_FIELDS });
+const IssueRequest = v.strictObject({ ...KEY, ...REV_FIELDS });
+const WithdrawRequest = v.strictObject({ ...KEY, ...REV_FIELDS, reason: v.nullish(text(OFFER_LIMITS.withdrawReason)) });
+const RevisionRequest = v.strictObject({ ...OFFER_CONTENT_FIELDS, ...KEY, ...REV_FIELDS });
 const OfferAnswer = v.strictObject({
   ...KEY,
-  ...REV,
+  ...REV_FIELDS,
   revisionId: id,
   reason: v.nullish(text(OFFER_LIMITS.declineReason)),
 });

@@ -23,6 +23,26 @@ import { roomRole } from '../rooms/shared.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { requestClock } from '../../platform/clock.mjs';
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
+import { normaliseClientKey } from '../../platform/idempotency.mjs';
+import * as v from 'valibot';
+import { oneOf, parseInput, REV_FIELD_CODES, REV_FIELDS } from '../../platform/schemas.mjs';
+
+// The reasons are judged against the lifecycle taxonomy by validateLifecycleReasons, which keeps its codes.
+const LifecycleAct = v.strictObject({
+  ...REV_FIELDS,
+  action: oneOf(LIFECYCLE_ACTION_NAMES),
+  reasonCodes: v.nullish(v.array(v.string())),
+  // The platform's idempotency-key rule (normaliseClientKey).
+  clientKey: v.optional(v.unknown()),
+});
+export const LIFECYCLE_INPUT_CODES = Object.freeze({
+  codes: { FIELD_INVALID: 'LIFECYCLE_INPUT_INVALID' },
+  fieldCodes: {
+    ...REV_FIELD_CODES,
+    action: 'LIFECYCLE_ACTION_UNKNOWN',
+    'reasonCodes.*': 'LIFECYCLE_REASONS_INVALID',
+  },
+});
 
 export function registerLifecycle(rawCtx) {
   const ctx = { ...rawCtx, ...buildRouteHelpers(rawCtx) };
@@ -90,8 +110,6 @@ export function registerLifecycle(rawCtx) {
     const room = ctx.findRoomForRequest(req, res);
     if (!room) return undefined;
 
-    const { action, reasonCodes = [], clientKey = null } = req.body ?? {};
-
     // Refused by name, so it is unambiguous in a log rather than looking like a typo.
     if (req.body?.stage !== undefined || req.body?.status !== undefined) {
       return sendDomainError(
@@ -104,17 +122,17 @@ export function registerLifecycle(rawCtx) {
         'lifecycle',
       );
     }
-    if (typeof action !== 'string' || !LIFECYCLE_ACTIONS[action]) {
+    const input = parseInput(LifecycleAct, req.body ?? {}, LIFECYCLE_INPUT_CODES);
+    if (!input.ok)
       return sendDomainError(
         res,
-        {
-          error: 'LIFECYCLE_ACTION_UNKNOWN',
-          message: 'Unknown recruitment action.',
-          actions: LIFECYCLE_ACTION_NAMES,
-        },
+        input.error === 'LIFECYCLE_ACTION_UNKNOWN' ? { ...input, actions: LIFECYCLE_ACTION_NAMES } : input,
         'lifecycle',
       );
-    }
+    const { action, reasonCodes = [] } = input.value;
+    const key = normaliseClientKey(input.value.clientKey, 'LIFECYCLE_CLIENT_KEY_INVALID');
+    if (!key.ok) return sendDomainError(res, key, 'lifecycle');
+    const clientKey = key.key;
 
     // The lifecycle taxonomy, not the decision taxonomy: a judgement about a
     // player must not become the record of what happened to a case.

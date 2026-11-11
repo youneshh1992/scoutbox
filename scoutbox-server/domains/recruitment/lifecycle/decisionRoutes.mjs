@@ -44,6 +44,42 @@ import {
   decisionRequirements,
 } from './decision.mjs';
 import { now } from '../../platform/clock.mjs';
+import * as v from 'valibot';
+import { id, oneOf, parseInput, REV_FIELDS, text, wholeNumber } from '../../platform/schemas.mjs';
+
+// Shape and type only: the reason taxonomy, the note's cleaning and the references' case are judged by
+// validateContent, which also re-judges a stored draft at finalize.
+const CONTENT = {
+  outcome: v.nullish(oneOf(DECISION_OUTCOMES)),
+  reasonCodes: v.nullish(v.array(v.string())),
+  note: v.nullish(text(DECISION_LIMITS.note)),
+  evidenceRefs: v.nullish(
+    v.pipe(v.array(v.strictObject({ kind: oneOf(EVIDENCE_REF_KINDS), id })), v.maxLength(DECISION_LIMITS.evidenceRefs)),
+  ),
+};
+// `clientKey` keeps the platform's idempotency-key rule (normaliseDecisionClientKey).
+const KEY = { clientKey: v.optional(v.unknown()) };
+const NewDraft = v.strictObject({ ...CONTENT, ...KEY });
+const DraftEdit = v.strictObject({ ...CONTENT, ...REV_FIELDS });
+const DraftDiscard = v.strictObject(REV_FIELDS);
+const Finalize = v.strictObject({
+  ...KEY,
+  ...REV_FIELDS,
+  supersedes: v.nullish(id),
+  supersedesRev: v.nullish(wholeNumber({ min: 0 })),
+  supersessionReason: v.nullish(text(DECISION_LIMITS.supersessionReason)),
+});
+export const DECISION_INPUT_CODES = Object.freeze({
+  codes: { FIELD_INVALID: 'DECISION_CONTENT_INVALID' },
+  fieldCodes: {
+    outcome: 'DECISION_OUTCOME_INVALID',
+    'reasonCodes.*': 'DECISION_REASON_INVALID',
+    'evidenceRefs.*': 'DECISION_EVIDENCE_INVALID',
+    expectedRev: 'DECISION_REV_REQUIRED',
+    expectedVersion: 'DECISION_REV_REQUIRED',
+    supersedesRev: 'DECISION_REV_REQUIRED',
+  },
+});
 
 export function registerDecision(ctx) {
   const {
@@ -72,6 +108,13 @@ export function registerDecision(ctx) {
   const { cases, decisions } = recruitmentCases;
 
   const err = (res, error, message, extra = {}) => sendDomainError(res, { error, message, ...extra }, 'decision');
+  /** The request body read with its schema, or `undefined` once the refusal is sent. */
+  const decisionInput = (res, schema, body) => {
+    const parsed = parseInput(schema, body ?? {}, DECISION_INPUT_CODES);
+    if (parsed.ok) return parsed.value;
+    sendDomainError(res, parsed, 'decision');
+    return undefined;
+  };
   const limited = limitCheck(rateLimit);
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
@@ -295,9 +338,11 @@ export function registerDecision(ctx) {
     const got = roomFor(req, res, 'decision_draft');
     if (!got) return;
     const { room: kase } = got;
-    const key = normaliseDecisionClientKey(req.body?.clientKey);
+    const body = decisionInput(res, NewDraft, req.body);
+    if (!body) return;
+    const key = normaliseDecisionClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
-    const content = validateContent(req.body);
+    const content = validateContent(body);
     if (!content.ok)
       return err(
         res,
@@ -381,7 +426,9 @@ export function registerDecision(ctx) {
         'DECISION_SUBJECT_REMOVED',
         'This player removed their ScoutBox account. The draft can no longer be changed.',
       );
-    const content = validateContent(req.body);
+    const body = decisionInput(res, DraftEdit, req.body);
+    if (!body) return;
+    const content = validateContent(body);
     if (!content.ok)
       return err(
         res,
@@ -420,6 +467,7 @@ export function registerDecision(ctx) {
     const { room: kase } = got;
     const dr = kase.decisionDraft;
     if (!dr) return err(res, 'DECISION_NOT_FOUND', 'This case has no draft decision.');
+    if (!decisionInput(res, DraftDiscard, req.body)) return;
     if (!revGate(req, res, dr)) return;
     cases.discardDraft(
       kase.id,
@@ -437,7 +485,9 @@ export function registerDecision(ctx) {
       if (!got) return;
       const { room: kase, role } = got;
       const at = now();
-      const key = normaliseDecisionClientKey(req.body?.clientKey);
+      const body = decisionInput(res, Finalize, req.body);
+      if (!body) return;
+      const key = normaliseDecisionClientKey(body.clientKey);
       if (!key.ok) return err(res, key.error, key.message);
 
       const { rows, duplicateHeads } = rowsOf(kase);
@@ -448,7 +498,7 @@ export function registerDecision(ctx) {
           "This case's decision record cannot be read; nothing new is written on top of it.",
         );
       const dr = kase.decisionDraft ?? null;
-      const supersedesRaw = req.body?.supersedes;
+      const supersedesRaw = body.supersedes ?? null;
       const fp = dr
         ? payloadFingerprint({
             draftId: dr.id,
@@ -513,7 +563,7 @@ export function registerDecision(ctx) {
             },
           );
         }
-        const sr = req.body?.supersedesRev;
+        const sr = body.supersedesRev;
         if (!Number.isInteger(sr) || sr < 0)
           return err(res, 'DECISION_REV_REQUIRED', "supersedesRev must be the current decision's rev, as an integer.", {
             field: 'supersedesRev',
@@ -527,7 +577,7 @@ export function registerDecision(ctx) {
             'The formal decision changed while you were looking. Reload and try again.',
             { current: { decisionId: headFormal.id, rev: headRev } },
           );
-        const reason = validateNote(req.body?.supersessionReason, {
+        const reason = validateNote(body.supersessionReason, {
           field: 'supersessionReason',
           max: DECISION_LIMITS.supersessionReason,
         });

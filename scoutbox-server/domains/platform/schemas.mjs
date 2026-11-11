@@ -77,6 +77,20 @@ export const idList = (max) => v.pipe(v.array(id), v.maxLength(max));
 export const wholeNumber = ({ min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER } = {}) =>
   v.pipe(v.number(), v.safeInteger(), v.minValue(min), v.maxValue(max));
 
+/**
+ * The optimistic-concurrency fields `guardRev` reads (platform/concurrency.mjs). With REV_FIELD_CODES a malformed
+ * one is refused as EXPECTED_REV_INVALID, as `guardRev` itself refuses it; a domain with its own rev code maps
+ * these fields to that instead.
+ */
+export const REV_FIELDS = Object.freeze({
+  expectedRev: v.nullish(wholeNumber({ min: 0 })),
+  expectedVersion: v.nullish(wholeNumber({ min: 0 })),
+});
+export const REV_FIELD_CODES = Object.freeze({
+  expectedRev: 'EXPECTED_REV_INVALID',
+  expectedVersion: 'EXPECTED_REV_INVALID',
+});
+
 // A vocabulary's refusal message → its values, so the refusal can list them as `allowed`. An issue does not name the
 // schema it came from, but its message is the one written here.
 const ALLOWED = new Map();

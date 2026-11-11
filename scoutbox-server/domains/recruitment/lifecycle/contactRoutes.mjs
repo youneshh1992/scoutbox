@@ -39,6 +39,34 @@ import {
 } from './contact.mjs';
 import { now } from '../../platform/clock.mjs';
 
+import * as v from 'valibot';
+import { parseInput, REV_FIELD_CODES, REV_FIELDS } from '../../platform/schemas.mjs';
+
+// Shape and type only. validateContactContent cleans the words and judges their length (markup is stripped
+// first, so the raw text may run longer than the limit), and modeOf words the one refusal of a mode.
+const WORDS = { subject: v.nullish(v.string()), body: v.nullish(v.string()), contactMode: v.nullish(v.string()) };
+// `clientKey` keeps the platform's idempotency-key rule (normaliseClientKey).
+const KEY = { clientKey: v.optional(v.unknown()) };
+const NewContact = v.strictObject({ ...WORDS, ...KEY });
+const ContactEdit = v.strictObject({ ...WORDS, ...REV_FIELDS });
+const ContactCancel = v.strictObject(REV_FIELDS);
+const ContactSend = v.strictObject({ ...KEY, ...REV_FIELDS });
+// The channel, the time and the recipient are judged by validateExternalRecord, which keeps their codes.
+const ExternalContact = v.strictObject({
+  ...KEY,
+  channel: v.optional(v.unknown()),
+  occurredAt: v.optional(v.unknown()),
+  summary: v.nullish(v.string()),
+  recipientType: v.optional(v.string()),
+});
+export const CONTACT_INPUT_CODES = Object.freeze({
+  codes: { FIELD_INVALID: 'CONTACT_CONTENT_INVALID' },
+  fieldCodes: {
+    ...REV_FIELD_CODES,
+    contactMode: 'CONTACT_MODE_INVALID',
+  },
+});
+
 export function registerContact(ctx) {
   const {
     guardians,
@@ -149,6 +177,14 @@ export function registerContact(ctx) {
    * again at send. An unrecognised value is refused rather than read as
    * `player_only`, which would hide a client bug behind a safe default.
    */
+  /** The request body read with its schema, or `undefined` once the refusal is sent. */
+  const contactInput = (res, schema, body) => {
+    const parsed = parseInput(schema, body ?? {}, CONTACT_INPUT_CODES);
+    if (parsed.ok) return parsed.value;
+    sendDomainError(res, parsed, 'contact');
+    return undefined;
+  };
+
   function modeOf(res, body) {
     const raw = body?.contactMode;
     if (raw === undefined || raw === null || raw === '') return 'player_only';
@@ -335,11 +371,13 @@ export function registerContact(ctx) {
     if (!got) return;
     const { room } = got;
 
-    const key = normaliseClientKey(req.body?.clientKey);
+    const input = contactInput(res, NewContact, req.body);
+    if (!input) return;
+    const key = normaliseClientKey(input.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
-    const content = validateContactContent(req.body ?? {});
+    const content = validateContactContent(input);
     if (!content.ok) return err(res, content.error, content.message);
-    const mode = modeOf(res, req.body);
+    const mode = modeOf(res, input);
     if (mode === null) return;
     // The same words to the player alone and to the player and agent are two
     // different contacts, so the mode is part of the fingerprint.
@@ -431,9 +469,10 @@ export function registerContact(ctx) {
     if (!c) return;
     const verdict = canContactAction(c, 'edit', { role });
     if (!verdict.ok) return err(res, verdict.error, verdict.message);
+    const body = contactInput(res, ContactEdit, req.body);
+    if (!body) return;
     if (!revGate(req, res, c)) return;
 
-    const body = req.body ?? {};
     const content = validateContactContent({
       subject: body.subject === undefined ? c.subject : body.subject,
       body: body.body === undefined ? c.body : body.body,
@@ -476,6 +515,7 @@ export function registerContact(ctx) {
     if (!c) return;
     const verdict = canContactAction(c, 'cancel', { role });
     if (!verdict.ok) return err(res, verdict.error, verdict.message);
+    if (!contactInput(res, ContactCancel, req.body)) return;
     if (!revGate(req, res, c)) return;
     const at = now();
     // The draft text is kept: cancelling records that nothing was sent.
@@ -498,7 +538,9 @@ export function registerContact(ctx) {
     const c = findContact(req, res, room);
     if (!c) return;
 
-    const key = normaliseClientKey(req.body?.clientKey);
+    const input = contactInput(res, ContactSend, req.body);
+    if (!input) return;
+    const key = normaliseClientKey(input.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     if (key.key) {
       // A send key is bound to the Contact it first sent.
@@ -698,9 +740,10 @@ export function registerContact(ctx) {
     if (!got) return;
     const { room } = got;
 
-    const key = normaliseClientKey(req.body?.clientKey);
+    const body = contactInput(res, ExternalContact, req.body);
+    if (!body) return;
+    const key = normaliseClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
-    const body = req.body ?? {};
     if (body.recipientType === undefined)
       return err(
         res,

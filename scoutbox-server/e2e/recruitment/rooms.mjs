@@ -925,6 +925,11 @@ section('R5 — status changes, snapshots and the decision-time record');
     badPriority.status === 400 && badPriority.body.error === 'ROOM_PRIORITY_UNKNOWN',
     'an unknown priority is refused before the rev check',
   );
+  const textRev = await j('PATCH', `/org/rooms/${ROOM}`, { priority: 'high', expectedRev: '1' }, maria.token);
+  neg(
+    textRev.status === 400 && textRev.body.error === 'EXPECTED_REV_INVALID' && textRev.body.field === 'expectedRev',
+    'a rev sent as text is refused with the platform rev code, not read as a number',
+  );
   const toPriority = await j('POST', `/org/rooms/${ROOM}/status`, { status: 'priority' }, maria.token);
   ok(toPriority.status === 200, 'the room moves to priority');
   const combineNow = (await j('GET', `/org/combine/players/${ADULT.id}`, undefined, maria.token)).body;

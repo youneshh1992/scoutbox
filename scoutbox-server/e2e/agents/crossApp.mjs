@@ -1483,19 +1483,26 @@ section('H/I/J — contact routing, its reauthorization, and Inbox isolation');
     maria.token,
   );
   ok(
-    forged.status === 201,
-    `#30 a body naming a represented party is accepted as a draft ${forged.status === 201 ? '' : `${forged.status} ${JSON.stringify(forged.body).slice(0, 250)}`}`,
+    forged.status === 400 && forged.body.problem === 'unknown_field',
+    `#30 a body naming a represented party is refused: routing fields are never taken from the request ${forged.status === 400 ? '' : `${forged.status} ${JSON.stringify(forged.body).slice(0, 250)}`}`,
+  );
+  const clean = await j(
+    'POST',
+    `/org/rooms/${RID}/contacts`,
+    { body: 'Hello.', contactMode: 'player_only' },
+    maria.token,
   );
   neg(
-    forged.body.contact.routedToAgent === false &&
-      forged.body.contact.contactMode === 'player_only' &&
-      forged.body.contact.recipient?.type !== 'agent',
-    '#30b and every forged field is ignored: the server derives the mode, the routing and the recipient',
+    clean.status === 201 &&
+      clean.body.contact.routedToAgent === false &&
+      clean.body.contact.contactMode === 'player_only' &&
+      clean.body.contact.recipient?.type !== 'agent',
+    '#30b the server derives the mode, the routing and the recipient',
   );
   await j(
     'POST',
-    `/org/rooms/${RID}/contacts/${forged.body.contact.id}/cancel`,
-    { expectedRev: forged.body.contact.rev },
+    `/org/rooms/${RID}/contacts/${clean.body.contact.id}/cancel`,
+    { expectedRev: clean.body.contact.rev },
     maria.token,
   );
   globalThis.__RID = RID;

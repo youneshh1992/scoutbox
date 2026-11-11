@@ -43,6 +43,9 @@ import {
   ALL_REASON_CODES,
 } from '../../domains/recruitment/rooms/shared.mjs';
 import { LIFECYCLE_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../domains/recruitment/lifecycle/errors.mjs';
+import { DECISION_INPUT_CODES } from '../../domains/recruitment/lifecycle/decisionRoutes.mjs';
+import { CONTACT_INPUT_CODES } from '../../domains/recruitment/lifecycle/contactRoutes.mjs';
+import { LIFECYCLE_INPUT_CODES } from '../../domains/recruitment/lifecycle/index.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../../domains/recruitment/analytics/funnels.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
@@ -1088,6 +1091,40 @@ section('Negatives — isolation, authority, concurrency, privacy');
   );
   neg(fMove.status === 404, '#3 and a foreign org transition is 404, not 403 — no existence leak');
   neg(!JSON.stringify(fMove.body).includes(ADULT.id), '#17 and the refusal names no player');
+
+  const objectKey = await j(
+    'POST',
+    `/org/rooms/${ROOM}/lifecycle`,
+    { action: 'startReview', clientKey: { k: 1 }, expectedRev: cur.case.rev },
+    maria.token,
+  );
+  neg(
+    objectKey.status === 400 && objectKey.body.error === 'LIFECYCLE_CLIENT_KEY_INVALID',
+    'a client key that is not text is refused, not stored on the case history',
+  );
+  const forgedTo = await j(
+    'POST',
+    `/org/rooms/${ROOM}/lifecycle`,
+    { action: 'startReview', to: 'signed', expectedRev: cur.case.rev },
+    maria.token,
+  );
+  neg(
+    forgedTo.status === 400 &&
+      forgedTo.body.error === 'LIFECYCLE_INPUT_INVALID' &&
+      forgedTo.body.field === 'to' &&
+      forgedTo.body.problem === 'unknown_field',
+    'an action cannot name its own target: an undeclared field is refused',
+  );
+  const textReason = await j(
+    'POST',
+    `/org/rooms/${ROOM}/lifecycle`,
+    { action: 'startReview', reasonCodes: 'all_of_them', expectedRev: cur.case.rev },
+    maria.token,
+  );
+  neg(
+    textReason.status === 400 && textReason.body.error === 'LIFECYCLE_REASONS_INVALID',
+    'reasons that are not a list are refused with the reasons code',
+  );
 
   // #5 — arbitrary stage patch.
   const patch = await j(
@@ -2312,9 +2349,14 @@ section('Y — the error contract: one table, no default, nothing internal in th
     // Three producing shapes: a literal `error: 'CODE'`, the routes'
     // `err(res, 'CODE', …)` helper, which builds exactly that literal, and the
     // shared client-key rule called with the domain's code.
-    for (const m of text.matchAll(/(?:error:|err\(\s*res,|platformClientKey\(\s*raw,)\s*'([A-Z][A-Z0-9_]+)'/g))
+    for (const m of text.matchAll(
+      /(?:error:|err\(\s*res,|platformClientKey\(\s*raw,|normaliseClientKey\([^,()]+,)\s*'([A-Z][A-Z0-9_]+)'/g,
+    ))
       produced.add(m[1]);
   }
+  // The input schemas' refusal codes are data, exported by the routes that use them.
+  for (const t of [DECISION_INPUT_CODES, CONTACT_INPUT_CODES, LIFECYCLE_INPUT_CODES])
+    for (const c of [...Object.values(t.codes), ...Object.values(t.fieldCodes)]) produced.add(c);
   ok(produced.size >= 15, `Y1 ${produced.size} error codes found in the lifecycle source, mechanically`);
 
   const unmapped = [...produced].filter((c) => httpStatusFor(c) === null);
@@ -2409,6 +2451,12 @@ section('Y — the error contract: one table, no default, nothing internal in th
     'expectedRev',
     'rev',
     'retryAt',
+    // An input refusal: the field, what was wrong with it, and the bound it broke.
+    'field',
+    'problem',
+    'min',
+    'max',
+    'expected',
   ]);
   const strayKeys = [];
   for (const { label, body } of ERROR_BODIES_FROM_E) {

@@ -2302,6 +2302,29 @@ section('X — content at the HTTP boundary');
     ),
     'X3c and a body far over the limit',
   );
+  const forgedStatus = collect(
+    'forged status',
+    await j('POST', `/org/rooms/${RID}/contacts`, { body: 'ok', status: 'delivered' }, maria.token),
+  );
+  neg(
+    expect(forgedStatus, 400, 'CONTACT_CONTENT_INVALID', '') &&
+      forgedStatus.body.field === 'status' &&
+      forgedStatus.body.problem === 'unknown_field',
+    'X3d a draft cannot name its own status: an undeclared field is refused',
+  );
+  const forgedRecipient = collect(
+    'forged recipient',
+    await j(
+      'POST',
+      `/org/rooms/${RID}/contacts/external`,
+      { channel: 'phone', occurredAt: Date.now(), recipientType: 'player', recipientId: 'pl-someone-else' },
+      maria.token,
+    ),
+  );
+  neg(
+    expect(forgedRecipient, 400, 'CONTACT_CONTENT_INVALID', '') && forgedRecipient.body.problem === 'unknown_field',
+    'X3e a recorded contact cannot name its own recipient: it is derived, and a sent one is refused',
+  );
   neg(
     expect(
       collect('bad key', await j('POST', `/org/rooms/${RID}/contacts`, { body: 'ok', clientKey: 42 }, maria.token)),
@@ -2776,6 +2799,12 @@ section('E — every refusal, swept at once; the contract');
     'expectedRev',
     'rev',
     'retryAt',
+    // An input refusal: the field, what was wrong with it, and the bound it broke.
+    'field',
+    'problem',
+    'min',
+    'max',
+    'expected',
   ]);
   const strays = [];
   for (const { label, body } of ERROR_BODIES) {
