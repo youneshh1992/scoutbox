@@ -1557,6 +1557,26 @@ ok(
   afterFirst === notifCountBefore + 1 && afterSecond === afterFirst,
   'due reminder sent exactly once — idempotent across repeated sweeps',
 );
+// Operations input is valid as sent or refused; nothing refused files a report.
+for (const [body, field, error, what] of [
+  [
+    { registrationStatus: 'registered', matchesPlayed: '4' },
+    'matchesPlayed',
+    'FIELD_INVALID',
+    'matches written as text',
+  ],
+  [{ registrationStatus: 'transferred' }, 'registrationStatus', 'REGISTRATION_STATUS_INVALID', 'an unknown status'],
+  [{ registrationStatus: 'registered', note: 'n'.repeat(301) }, 'note', 'FIELD_INVALID', 'a note over 300 characters'],
+  [
+    { registrationStatus: 'registered', status: 'confirmed' },
+    'status',
+    'FIELD_INVALID',
+    'a report naming its own state',
+  ],
+]) {
+  r = await post(`/org/followups/${fup.id}/report`, body, bearer(MARIA));
+  ok(r.status === 400 && r.body.field === field && r.body.error === error, `IN1 ${what} is refused, naming ${field}`);
+}
 r = await post(
   `/org/followups/${fup.id}/report`,
   { registrationStatus: 'registered', matchesPlayed: 4, progression: 'Regular U23 starter' },
@@ -1584,6 +1604,13 @@ ok(
     ]),
   'a follow-up is answered from an allowlist',
 );
+r = await post(`/player/followups/${fup.id}/respond`, { agree: 'true', experienceRating: 4 }, bearer(SVEN));
+ok(
+  r.status === 400 && r.body.error === 'AGREE_REQUIRED' && r.body.problem === 'not_boolean',
+  'IN2 agreement written as text is refused',
+);
+r = await post(`/player/followups/${fup.id}/respond`, { agree: true, experienceRating: 4.5 }, bearer(SVEN));
+ok(r.status === 400 && r.body.field === 'experienceRating', 'IN3 a rating between the stars is refused');
 r = await post(`/player/followups/${fup.id}/respond`, { agree: true, experienceRating: 4 }, bearer(SVEN));
 ok(
   r.status === 200 && r.body.followUp.outcomeState === 'confirmed',
@@ -1711,6 +1738,8 @@ ok(
 capRes = await fetch(`${API}/media/${upMedia}/captions`);
 ok(capRes.status === 401, 'anonymous caption fetch refused');
 // football context + honest benchmarks
+r = await post('/player/football-category', {}, bearer(KOLA));
+ok(r.status === 400 && r.body.error === 'CATEGORY_INVALID', 'IN4 a category must be named (null clears it)');
 r = await post('/player/football-category', { category: 'mens' }, bearer(KOLA));
 ok(r.status === 200, 'player sets competition category');
 r = await j('/player/benchmarks', {}, bearer(OSEI));

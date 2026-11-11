@@ -4,6 +4,7 @@
 import { isAdult, visibleToOrg } from '../../domain.mjs';
 import { deriveWorkflowState } from '../recruitment/lifecycle/trial.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
+import { operationsInput } from './schemas.mjs';
 
 const MILESTONES = { '3m': 91, '6m': 182, '12m': 365 };
 
@@ -44,20 +45,6 @@ export function registerOperations(ctx) {
     throw new TypeError('registerOperations needs the signings/follow-ups repository from the data layer');
   const fu = signingsFollowUps.followUps;
   const outcomes = signingsFollowUps.outcomeReports;
-  const LIMITS = { progression: 200, endReason: 200, note: 300 };
-  const tooLong = (res, field, value, max) => {
-    if (value === undefined || value === null) return false;
-    if (typeof value !== 'string') {
-      res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` });
-      return true;
-    }
-    if (value.length > max) {
-      res.status(400).json({ error: 'FIELD_TOO_LONG', field, max, message: `Keep ${field} under ${max} characters.` });
-      return true;
-    }
-    return false;
-  };
-
   const usersOf = (orgId) => users.forOrg(orgId, { active: true });
 
   // ========================================================= outcomes
@@ -126,9 +113,11 @@ export function registerOperations(ctx) {
   }
 
   orgRouter.get('/followups', (req, res) => {
+    const query = operationsInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'string']);
+      page = readPage(query, ['number', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -141,29 +130,9 @@ export function registerOperations(ctx) {
     const f = found && found.orgId === req.org.id ? found : null;
     if (!f) return res.status(404).json({ error: 'FOLLOWUP_NOT_FOUND' });
     if (outcomes.forFollowUp(f.id)) return res.status(409).json({ error: 'ALREADY_REPORTED' });
-    const { registrationStatus, matchesPlayed, progression, endReason, note } = req.body ?? {};
-    if (!['registered', 'released', 'left', 'unknown'].includes(registrationStatus)) {
-      return res
-        .status(400)
-        .json({ error: 'REGISTRATION_STATUS_INVALID', allowed: ['registered', 'released', 'left', 'unknown'] });
-    }
-    // Refused, never sliced or nulled.
-    if (
-      matchesPlayed !== undefined &&
-      matchesPlayed !== null &&
-      !(Number.isSafeInteger(matchesPlayed) && matchesPlayed >= 0)
-    )
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'matchesPlayed',
-        message: 'matchesPlayed must be a whole number of matches, or omitted when not evidenced.',
-      });
-    if (
-      tooLong(res, 'progression', progression, LIMITS.progression) ||
-      tooLong(res, 'endReason', endReason, LIMITS.endReason) ||
-      tooLong(res, 'note', note, LIMITS.note)
-    )
-      return;
+    const body = operationsInput(res, 'outcomeReport', req.body);
+    if (!body) return;
+    const { registrationStatus, matchesPlayed, progression, endReason, note } = body;
     if (note && !moderateOrRefuse(res, note, { kind: 'outcome_report', playerId: f.playerId, orgId: req.org.id }))
       return;
     const report = {
@@ -174,7 +143,7 @@ export function registerOperations(ctx) {
       orgId: f.orgId,
       by: { kind: 'org', id: req.orgUser.id, name: req.orgUser.name },
       registrationStatus,
-      matchesPlayed: typeof matchesPlayed === 'number' ? matchesPlayed : null, // evidence-based where it exists, null otherwise
+      matchesPlayed: matchesPlayed ?? null, // evidence-based where it exists, null otherwise
       progression: progression || null,
       endReason: endReason || null,
       note: note || null,
@@ -209,15 +178,9 @@ export function registerOperations(ctx) {
     if (!report) return res.status(404).json({ error: 'REPORT_NOT_FOUND' });
     if (report.confirmations.some((c) => c.by.id === actor.id))
       return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-    const { agree, note, experienceRating } = req.body ?? {};
-    if (typeof agree !== 'boolean') return res.status(400).json({ error: 'AGREE_REQUIRED' });
-    if (tooLong(res, 'note', note, LIMITS.note)) return;
-    if (experienceRating !== undefined && experienceRating !== null && ![1, 2, 3, 4, 5].includes(experienceRating))
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'experienceRating',
-        message: 'experienceRating is 1 to 5, or omitted.',
-      });
+    const body = operationsInput(res, 'outcomeAnswer', req.body);
+    if (!body) return;
+    const { agree, note, experienceRating } = body;
     if (note && !moderateOrRefuse(res, note, { kind: 'outcome_response', playerId: f.playerId })) return;
     try {
       unit(() =>
@@ -292,7 +255,9 @@ export function registerOperations(ctx) {
   playerRouter.post('/media/:id/captions', (req, res) => {
     const m = req.player.media.find((x) => x.id === req.params.id);
     if (!m) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-    const vtt = String(req.body?.vtt ?? '');
+    const body = operationsInput(res, 'captions', req.body);
+    if (!body) return;
+    const vtt = body.vtt ?? '';
     if (!vtt.trim().startsWith('WEBVTT'))
       return res
         .status(400)
@@ -325,9 +290,9 @@ export function registerOperations(ctx) {
 
   // ================================================= football context
   playerRouter.post('/football-category', (req, res) => {
-    const c = req.body?.category;
-    if (!['mens', 'womens', 'boys', 'girls', 'mixed', null].includes(c))
-      return res.status(400).json({ error: 'CATEGORY_INVALID' });
+    const body = operationsInput(res, 'footballCategory', req.body);
+    if (!body) return;
+    const c = body.category;
     players.setFootballCategory(req.player.id, c);
     res.json({ footballCategory: c });
   });
@@ -490,18 +455,19 @@ export function registerOperations(ctx) {
   }
 
   // Ordinary admin actions: they change when, never what.
-  adminRouter.post('/sweep', (_req, res) => {
+  adminRouter.post('/sweep', (req, res) => {
+    if (!operationsInput(res, 'none', req.body)) return;
     sweep();
     res.json({ ok: true });
   });
   adminRouter.post('/followups/:id', (req, res) => {
     const f = fu.byId(req.params.id);
     if (!f) return res.status(404).json({ error: 'FOLLOWUP_NOT_FOUND' });
-    if (!Number.isSafeInteger(req.body?.dueAt))
-      return res.status(400).json({ error: 'DUE_AT_REQUIRED', message: 'dueAt is an integer instant (milliseconds).' });
+    const body = operationsInput(res, 'dueAt', req.body);
+    if (!body) return;
     let fresh;
     try {
-      fresh = fu.patch(f.id, { dueAt: req.body.dueAt });
+      fresh = fu.patch(f.id, { dueAt: body.dueAt });
     } catch (e) {
       console.error(`OUTCOME due_at_rolled_back ${f.id}: ${e?.message ?? e}`);
       return res.status(500).json({ error: 'OUTCOME_STATE_UNKNOWN' });
