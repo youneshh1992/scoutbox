@@ -7,9 +7,21 @@ const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
 const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
 
+import * as v from 'valibot';
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
+import {
+  dayOrBlank,
+  dueDate,
+  flag,
+  id,
+  inputOrRefuse,
+  oneOf,
+  requiredText,
+  text,
+  wholeNumber,
+} from '../platform/schemas.mjs';
 import { CRITERIA_KEYS, CLUB_SETUP_LIMITS, typeTacticalSetup } from '../../repositories/clubSetup.mjs';
-import { parseStrictDateOnly } from '../../temporal.mjs';
+import { CASE_TEXT_LIMITS as CASE_TEXT } from '../../repositories/recruitmentCases.mjs';
 import { bornByForAge } from '../../repositories/identity.mjs';
 import {
   POSITION_GROUPS,
@@ -18,11 +30,183 @@ import {
   VIEWINGS,
   ASSESSMENT_LIMITS as A_LIMITS,
 } from '../../repositories/scoutingAssessments.mjs';
-import { textOrRefuse, storedName } from './passport.mjs';
+import { storedName } from './passport.mjs';
 
-const CONTEXT_FIELDS = Object.freeze(['fixture', 'date', 'minutesWatched', 'viewing', 'opponentLevel']);
-const REF_FIELDS = Object.freeze(['segmentId', 'trialSessionId', 'boxSessionId', 't', 'label']);
-const nonEmptyText = (v) => typeof v === 'string' && v.trim().length > 0;
+const SL = CLUB_SETUP_LIMITS;
+const nonEmptyText = (x) => typeof x === 'string' && x.trim().length > 0;
+const blankToNull = (x) => (typeof x === 'string' && !x.trim() ? null : x);
+const refId = v.pipe(v.string(), v.minLength(1), v.maxLength(A_LIMITS.ref));
+
+// A whole map checked at once, so a refusal names the map rather than one of its keys.
+const Anchors = v.pipe(
+  v.record(v.string(), v.unknown()),
+  v.check(
+    (a) =>
+      !Array.isArray(a) &&
+      Object.entries(a).every(([k, x]) => ANCHOR_LEVELS.includes(k) && nonEmptyText(x) && x.length <= A_LIMITS.anchor),
+    `must map the levels ${ANCHOR_LEVELS.join(', ')} to a descriptive sentence of at most ${A_LIMITS.anchor} characters`,
+  ),
+);
+const NewTemplate = v.strictObject({
+  positionGroup: oneOf(POSITION_GROUPS),
+  attributes: v.pipe(
+    v.array(
+      v.strictObject({
+        id: requiredText(A_LIMITS.attrId),
+        label: requiredText(A_LIMITS.attrLabel),
+        anchors: v.nullish(Anchors),
+      }),
+    ),
+    v.minLength(2),
+    v.maxLength(A_LIMITS.attributes),
+  ),
+});
+const TEMPLATE_CODES = {
+  fieldCodes: {
+    positionGroup: 'POSITION_GROUP_INVALID',
+    attributes: 'ATTRIBUTES_INVALID',
+    'attributes.id': 'ATTRIBUTES_INVALID',
+    'attributes.label': 'ATTRIBUTES_INVALID',
+  },
+};
+
+const Context = v.strictObject({
+  fixture: v.nullish(text(A_LIMITS.fixture)),
+  date: v.nullish(dayOrBlank),
+  minutesWatched: v.nullish(wholeNumber({ min: 1, max: A_LIMITS.minutesWatched })),
+  viewing: v.nullish(oneOf(VIEWINGS)),
+  opponentLevel: v.nullish(text(A_LIMITS.opponentLevel)),
+  trialId: v.nullish(id),
+  trialSessionId: v.nullish(id),
+});
+const CONTEXT_CODES = {
+  context: 'CONTEXT_INVALID',
+  'context.trialId': 'TRIAL_CONTEXT_INVALID',
+  'context.trialSessionId': 'TRIAL_CONTEXT_INVALID',
+};
+const NewAssessment = v.strictObject({
+  playerId: id,
+  positionGroup: v.nullish(oneOf(POSITION_GROUPS)),
+  context: v.nullish(Context),
+  secondOpinionOf: v.nullish(id),
+});
+const NEW_ASSESSMENT_CODES = { fieldCodes: { ...CONTEXT_CODES, positionGroup: 'NO_TEMPLATE' } };
+const EvidenceRef = v.strictObject({
+  segmentId: v.nullish(refId),
+  trialSessionId: v.nullish(refId),
+  boxSessionId: v.nullish(refId),
+  t: v.nullish(v.pipe(v.number(), v.minValue(0))),
+  label: v.nullish(text(A_LIMITS.refLabel)),
+});
+const Rating = v.strictObject({
+  attrId: id,
+  rating: v.nullish(wholeNumber({ min: 1, max: 5 })),
+  notObserved: v.nullish(flag),
+  confidence: v.nullish(oneOf(CONFIDENCE)),
+  note: v.nullish(text(A_LIMITS.ratingNote)),
+  evidenceRefs: v.nullish(v.pipe(v.array(EvidenceRef), v.maxLength(A_LIMITS.refs))),
+});
+const AssessmentEdit = v.strictObject({
+  ratings: v.nullish(v.array(Rating)),
+  context: v.nullish(Context),
+  recommendation: v.nullish(v.strictObject({ verdict: oneOf(VERDICTS), reasons: v.nullish(text(A_LIMITS.reasons)) })),
+});
+const ASSESSMENT_EDIT_CODES = {
+  fieldCodes: {
+    ...CONTEXT_CODES,
+    'ratings.attrId': 'ATTR_UNKNOWN',
+    'ratings.rating': 'RATING_INVALID',
+    'ratings.confidence': 'CONFIDENCE_INVALID',
+    'recommendation.verdict': 'VERDICT_INVALID',
+  },
+};
+const Review = v.strictObject({ note: v.nullish(text(A_LIMITS.reviewNote)) });
+const Feedback = v.strictObject({ text: v.nullish(text(A_LIMITS.feedback)) });
+
+const NewSegment = v.strictObject({
+  startS: v.pipe(v.number(), v.minValue(0)),
+  endS: v.number(),
+  // Checked as one list, so the refusal names `labels`.
+  labels: v.nullish(
+    v.pipe(
+      v.array(v.unknown()),
+      v.check(
+        (ls) => ls.length <= A_LIMITS.labels && ls.every((l) => typeof l === 'string' && l.length <= A_LIMITS.label),
+        `must be a list of at most ${A_LIMITS.labels} short texts of at most ${A_LIMITS.label} characters`,
+      ),
+    ),
+  ),
+  eventType: v.nullish(text(A_LIMITS.eventType)),
+  note: v.nullish(text(A_LIMITS.segmentNote)),
+  drawing: v.nullish(
+    v.pipe(
+      v.record(v.string(), v.unknown()),
+      v.check(
+        (d) => !Array.isArray(d) && JSON.stringify(d).length <= A_LIMITS.drawing,
+        `must be an object of overlay shapes of at most ${A_LIMITS.drawing} characters`,
+      ),
+    ),
+  ),
+});
+const SEGMENT_CODES = { fieldCodes: { startS: 'TIMESTAMPS_INVALID', endS: 'TIMESTAMPS_INVALID' } };
+const NewPlaylist = v.strictObject({ name: v.nullish(text(A_LIMITS.playlistName)) });
+const PlaylistItem = v.strictObject({ segmentId: id });
+
+const NewCase = v.strictObject({
+  playerId: id,
+  vacancyId: v.nullish(id),
+  priority: v.nullish(oneOf(CASE_PRIORITIES)),
+  deadline: v.optional(dueDate),
+  restricted: v.nullish(flag),
+});
+const Assignment = v.strictObject({
+  userId: id,
+  task: v.nullish(text(CASE_TEXT.task)),
+  dueAt: v.optional(dueDate),
+});
+const NewTask = v.strictObject({
+  title: v.nullish(text(CASE_TEXT.title)),
+  assigneeUserId: v.nullish(id),
+  dueAt: v.optional(dueDate),
+});
+const stageChange = (stages) => v.strictObject({ stage: oneOf(stages), reason: v.nullish(text(CASE_TEXT.reasons)) });
+const PRO_STAGE_CHANGE = stageChange(PRO_STAGES);
+const GRASSROOTS_STAGE_CHANGE = stageChange(GRASSROOTS_STAGES);
+const STAGE_CODES = { fieldCodes: { stage: 'STAGE_INVALID' } };
+const Decision = v.strictObject({
+  outcome: oneOf(CASE_DECISION_OUTCOMES),
+  reasons: requiredText(CASE_TEXT.reasons),
+});
+const DECISION_CODES = { fieldCodes: { outcome: 'OUTCOME_INVALID', reasons: 'REASONS_REQUIRED' } };
+const ApprovalAnswer = v.strictObject({ approve: flag });
+const CaseLinks = v.strictObject({
+  requestId: v.nullish(id),
+  trialId: v.nullish(id),
+  signingId: v.nullish(id),
+});
+
+// A role's and a window's other fields are judged by the tactical setup's typing in the repository.
+const Tactical = v.strictObject({
+  formation: requiredText(SL.formation),
+  planningHorizon: v.nullish(text(SL.planningHorizon)),
+  roles: v.pipe(
+    v.array(
+      v.looseObject({
+        id: v.nullish(id),
+        name: requiredText(SL.roleName),
+        description: v.nullish(text(SL.description)),
+      }),
+    ),
+    v.maxLength(SL.roles),
+  ),
+  windows: v.nullish(v.pipe(v.array(v.looseObject({ name: v.nullish(text(SL.windowName)) })), v.maxLength(SL.windows))),
+});
+const NewVacancy = v.strictObject({
+  roleId: id,
+  notes: v.nullish(text(SL.notes)),
+  window: v.nullish(text(SL.windowName)),
+});
+const NewShadow = v.strictObject({ playerId: id, roleId: v.nullish(id) });
 export function registerScouting(ctx) {
   const {
     byId,
@@ -96,42 +280,15 @@ export function registerScouting(ctx) {
 
   orgRouter.post('/assessment-templates', (req, res) => {
     if (!requireLead(req, res)) return;
-    const { positionGroup, attributes } = req.body ?? {};
-    if (!POSITION_GROUPS.includes(positionGroup)) return res.status(400).json({ error: 'POSITION_GROUP_INVALID' });
-    if (
-      !Array.isArray(attributes) ||
-      attributes.length < 2 ||
-      attributes.length > A_LIMITS.attributes ||
-      attributes.some((a) => !a || typeof a !== 'object' || !nonEmptyText(a.id) || !nonEmptyText(a.label))
-    ) {
-      return res.status(400).json({
-        error: 'ATTRIBUTES_INVALID',
-        message: `Two to ${A_LIMITS.attributes} attributes, each with id + label (+ descriptive anchors).`,
-      });
-    }
+    const body = inputOrRefuse(res, NewTemplate, req.body, TEMPLATE_CODES);
+    if (!body) return;
+    const { positionGroup } = body;
     const attrs = [];
-    for (const [i, a] of attributes.entries()) {
-      const id = a.id.trim().slice(0, A_LIMITS.attrId);
-      if (attrs.some((x) => x.id === id))
+    for (const a of body.attributes) {
+      const attrId = a.id.trim();
+      if (attrs.some((x) => x.id === attrId))
         return res.status(400).json({ error: 'ATTRIBUTES_INVALID', message: 'Each attribute id appears once.' });
-      const anchors = a.anchors ?? {};
-      if (
-        !anchors ||
-        typeof anchors !== 'object' ||
-        Array.isArray(anchors) ||
-        Object.entries(anchors).some(([k, v]) => !ANCHOR_LEVELS.includes(k) || !nonEmptyText(v))
-      ) {
-        return fieldInvalid(
-          res,
-          `attributes[${i}].anchors`,
-          `Anchors map the levels ${ANCHOR_LEVELS.join(', ')} to a descriptive sentence.`,
-        );
-      }
-      attrs.push({
-        id,
-        label: a.label.trim().slice(0, A_LIMITS.attrLabel),
-        anchors: Object.fromEntries(Object.entries(anchors).map(([k, v]) => [k, v.slice(0, A_LIMITS.anchor)])),
-      });
+      attrs.push({ id: attrId, label: a.label.trim(), anchors: { ...(a.anchors ?? {}) } });
     }
     const prev = currentTemplateFor(positionGroup);
     const t = templates.create({
@@ -164,77 +321,18 @@ export function registerScouting(ctx) {
     return rest;
   }
 
-  /** Returns the checked fields, or writes the refusal and returns undefined. The trial fields are fixed at creation. */
-  function contextFieldsOrRefuse(res, context) {
-    if (context === undefined || context === null) return {};
-    if (typeof context !== 'object' || Array.isArray(context)) {
-      res.status(400).json({ error: 'CONTEXT_INVALID' });
-      return undefined;
-    }
-    const unknown = Object.keys(context).find(
-      (k) => !CONTEXT_FIELDS.includes(k) && k !== 'trialId' && k !== 'trialSessionId',
-    );
-    if (unknown)
-      return fieldInvalid(
-        res,
-        `context.${unknown}`,
-        `An assessment's context holds ${[...CONTEXT_FIELDS, 'trialId', 'trialSessionId'].join(', ')}.`,
-      );
+  /** The context fields the request names, blanks read as none. The trial fields are fixed at creation. */
+  function contextFields(context) {
     const out = {};
-    for (const [k, max] of [
-      ['fixture', A_LIMITS.fixture],
-      ['opponentLevel', A_LIMITS.opponentLevel],
-    ]) {
-      if (!(k in context)) continue;
-      const v = textOrRefuse(res, context[k], `context.${k}`, max);
-      if (v === undefined) return undefined;
-      out[k] = v;
-    }
-    if ('date' in context) {
-      if (context.date === null || context.date === '') out.date = null;
-      else {
-        const d = parseStrictDateOnly(context.date);
-        if (!d.ok) {
-          res.status(400).json({
-            error: 'DATE_INVALID',
-            field: 'context.date',
-            message: `date is a calendar day (YYYY-MM-DD) (${d.why}).`,
-            expected: d.expected,
-          });
-          return undefined;
-        }
-        out.date = context.date;
-      }
-    }
-    if ('minutesWatched' in context) {
-      const m = context.minutesWatched;
-      if (m === null) out.minutesWatched = null;
-      else if (
-        typeof m === 'number' &&
-        Number.isFinite(m) &&
-        Math.round(m) >= 1 &&
-        Math.round(m) <= A_LIMITS.minutesWatched
-      )
-        out.minutesWatched = Math.round(m);
-      else
-        return fieldInvalid(
-          res,
-          'context.minutesWatched',
-          `minutesWatched is a number of minutes from 1 to ${A_LIMITS.minutesWatched}.`,
-        );
-    }
-    if ('viewing' in context) {
-      if (context.viewing !== null && !VIEWINGS.includes(context.viewing))
-        return fieldInvalid(res, 'context.viewing', `viewing is ${VIEWINGS.join(' or ')}.`);
-      out.viewing = context.viewing;
-    }
+    for (const k of ['fixture', 'opponentLevel', 'date']) if (k in (context ?? {})) out[k] = blankToNull(context[k]);
+    for (const k of ['minutesWatched', 'viewing']) if (k in (context ?? {})) out[k] = context[k];
     return out;
   }
 
   /** Returns `{ trialId, trialSessionId }` (both null when absent), or writes the refusal and returns null. */
   function validateTrialContext(req, res, context, p) {
-    const rawTrial = context && typeof context === 'object' ? context.trialId : undefined;
-    const rawSession = context && typeof context === 'object' ? context.trialSessionId : undefined;
+    const rawTrial = context?.trialId;
+    const rawSession = context?.trialSessionId;
     if (rawTrial == null && rawSession == null) return { trialId: null, trialSessionId: null };
     if (rawTrial == null) {
       res.status(400).json({
@@ -242,10 +340,6 @@ export function registerScouting(ctx) {
         message: 'A trial session belongs to a trial; give the trialId too.',
         field: 'trialId',
       });
-      return null;
-    }
-    if (typeof rawTrial !== 'string' || !rawTrial) {
-      res.status(400).json({ error: 'TRIAL_CONTEXT_INVALID', field: 'trialId', expected: 'string' });
       return null;
     }
     const t = orgTrial(rawTrial, req.org.id);
@@ -273,10 +367,6 @@ export function registerScouting(ctx) {
     }
     let trialSessionId = null;
     if (rawSession != null) {
-      if (typeof rawSession !== 'string' || !rawSession) {
-        res.status(400).json({ error: 'TRIAL_CONTEXT_INVALID', field: 'trialSessionId', expected: 'string' });
-        return null;
-      }
       if (!(t.schedule?.sessions ?? []).some((s) => s?.id === rawSession)) {
         res.status(404).json({ error: 'TRIAL_SESSION_NOT_FOUND' });
         return null;
@@ -316,15 +406,15 @@ export function registerScouting(ctx) {
   });
 
   orgRouter.post('/assessments', (req, res) => {
-    const { playerId, positionGroup, context, secondOpinionOf } = req.body ?? {};
-    const p = findPlayer(playerId);
+    const body = inputOrRefuse(res, NewAssessment, req.body, NEW_ASSESSMENT_CODES);
+    if (!body) return;
+    const { positionGroup, context, secondOpinionOf } = body;
+    const p = findPlayer(body.playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
     const tmpl = currentTemplateFor(positionGroup ?? groupFor(p.position));
     if (!tmpl) return res.status(400).json({ error: 'NO_TEMPLATE' });
-    if (secondOpinionOf !== undefined && secondOpinionOf !== null) {
-      if (typeof secondOpinionOf !== 'string')
-        return fieldInvalid(res, 'secondOpinionOf', 'secondOpinionOf is an assessment id.');
+    if (secondOpinionOf != null) {
       const first = assessmentReads.byId(secondOpinionOf);
       if (!first || first.orgId !== req.org.id) return res.status(404).json({ error: 'FIRST_OPINION_NOT_FOUND' });
       if (first.scoutUserId === req.orgUser.id)
@@ -332,8 +422,7 @@ export function registerScouting(ctx) {
           .status(400)
           .json({ error: 'NOT_INDEPENDENT', message: 'A second opinion comes from a different scout.' });
     }
-    const fields = contextFieldsOrRefuse(res, context);
-    if (fields === undefined) return;
+    const fields = contextFields(context);
     const trialCtx = validateTrialContext(req, res, context, p);
     if (!trialCtx) return;
     const draft = {
@@ -371,28 +460,11 @@ export function registerScouting(ctx) {
     res.status(201).json({ assessment: assessmentView(a) });
   });
 
-  function evidenceRefOrRefuse(res, ref, at) {
-    if (!ref || typeof ref !== 'object' || Array.isArray(ref))
-      return fieldInvalid(res, at, 'An evidence reference is an object.');
-    const unknown = Object.keys(ref).find((k) => !REF_FIELDS.includes(k));
-    if (unknown) return fieldInvalid(res, `${at}.${unknown}`, `An evidence reference holds ${REF_FIELDS.join(', ')}.`);
+  /** A stored evidence reference holds only the fields given. */
+  function evidenceRef(ref) {
     const out = {};
-    for (const k of ['segmentId', 'trialSessionId', 'boxSessionId']) {
-      if (ref[k] === undefined || ref[k] === null) continue;
-      if (typeof ref[k] !== 'string' || !ref[k] || ref[k].length > A_LIMITS.ref)
-        return fieldInvalid(res, `${at}.${k}`, `${k} is an id.`);
-      out[k] = ref[k];
-    }
-    if (ref.t !== undefined && ref.t !== null) {
-      if (!(typeof ref.t === 'number' && Number.isFinite(ref.t) && ref.t >= 0))
-        return fieldInvalid(res, `${at}.t`, 't is a number of seconds, 0 or more.');
-      out.t = ref.t;
-    }
-    if (ref.label !== undefined && ref.label !== null) {
-      const l = textOrRefuse(res, ref.label, `${at}.label`, A_LIMITS.refLabel);
-      if (l === undefined) return undefined;
-      if (l !== null) out.label = l;
-    }
+    for (const k of ['segmentId', 'trialSessionId', 'boxSessionId', 't']) if (ref[k] != null) out[k] = ref[k];
+    if (nonEmptyText(ref.label)) out.label = ref.label;
     return out;
   }
 
@@ -405,36 +477,28 @@ export function registerScouting(ctx) {
         error: 'NOT_A_DRAFT',
         message: 'Submitted assessments are immutable; commission a second opinion or a new viewing instead.',
       });
-    const { ratings, context, recommendation } = req.body ?? {};
+    const body = inputOrRefuse(res, AssessmentEdit, req.body, ASSESSMENT_EDIT_CODES);
+    if (!body) return;
+    const { ratings, context, recommendation } = body;
     // Every field is checked before anything is written.
     let nextRatings;
-    if (ratings !== undefined && ratings !== null) {
-      if (!Array.isArray(ratings)) return fieldInvalid(res, 'ratings', 'ratings is a list.');
+    if (ratings != null) {
       nextRatings = [];
-      for (const [i, r] of ratings.entries()) {
-        if (!r || typeof r !== 'object' || Array.isArray(r))
-          return fieldInvalid(res, `ratings[${i}]`, 'A rating is an object.');
+      for (const r of ratings) {
         const attr = a.attributesSnapshot.find((x) => x.id === r.attrId);
         if (!attr) return res.status(400).json({ error: 'ATTR_UNKNOWN', attrId: r.attrId });
         if (nextRatings.some((x) => x.attrId === r.attrId))
           return res
             .status(400)
             .json({ error: 'ATTR_DUPLICATE', attrId: r.attrId, message: 'Each attribute is rated once.' });
-        if (!r.notObserved && !(Number.isInteger(r.rating) && r.rating >= 1 && r.rating <= 5))
+        if (!r.notObserved && r.rating == null)
           return res.status(400).json({
             error: 'RATING_INVALID',
             message: 'Each attribute is a whole number 1–5, or explicitly "not observed" — never a silent zero.',
           });
-        if (r.confidence !== undefined && r.confidence !== null && !CONFIDENCE.includes(r.confidence))
-          return res.status(400).json({ error: 'CONFIDENCE_INVALID', allowed: CONFIDENCE });
-        const note = textOrRefuse(res, r.note, `ratings[${i}].note`, A_LIMITS.ratingNote);
-        if (note === undefined) return;
-        if (r.evidenceRefs !== undefined && r.evidenceRefs !== null && !Array.isArray(r.evidenceRefs))
-          return fieldInvalid(res, `ratings[${i}].evidenceRefs`, 'evidenceRefs is a list.');
         const refs = [];
-        for (const [j, raw] of (r.evidenceRefs ?? []).slice(0, A_LIMITS.refs).entries()) {
-          const ref = evidenceRefOrRefuse(res, raw, `ratings[${i}].evidenceRefs[${j}]`);
-          if (ref === undefined) return;
+        for (const raw of r.evidenceRefs ?? []) {
+          const ref = evidenceRef(raw);
           if (ref.segmentId) {
             const s = segmentReads.byId(ref.segmentId);
             if (!s || s.orgId !== req.org.id || s.playerId !== a.playerId)
@@ -473,15 +537,13 @@ export function registerScouting(ctx) {
           rating: r.notObserved ? null : r.rating,
           notObserved: !!r.notObserved,
           confidence: r.confidence ?? 'medium',
-          note,
+          note: blankToNull(r.note ?? null),
           evidenceRefs: refs,
         });
       }
     }
     let nextContext;
     if (context) {
-      if (typeof context !== 'object' || Array.isArray(context))
-        return res.status(400).json({ error: 'CONTEXT_INVALID' });
       const { trialId, trialSessionId } = context;
       if (
         (trialId !== undefined && trialId !== a.context?.trialId) ||
@@ -492,16 +554,14 @@ export function registerScouting(ctx) {
           message: 'The trial an assessment belongs to is set when it is created.',
         });
       }
-      const fields = contextFieldsOrRefuse(res, context);
-      if (fields === undefined) return;
-      nextContext = { ...a.context, ...fields };
+      nextContext = { ...a.context, ...contextFields(context) };
     }
     let nextRecommendation;
     if (recommendation) {
-      if (!VERDICTS.includes(recommendation.verdict)) return res.status(400).json({ error: 'VERDICT_INVALID' });
-      const reasons = textOrRefuse(res, recommendation.reasons, 'recommendation.reasons', A_LIMITS.reasons);
-      if (reasons === undefined) return;
-      nextRecommendation = { verdict: recommendation.verdict, reasons: reasons ?? '' };
+      nextRecommendation = {
+        verdict: recommendation.verdict,
+        reasons: blankToNull(recommendation.reasons ?? null) ?? '',
+      };
     }
     const next = assessments.update(a.id, (d) => {
       if (nextRatings) d.ratings = nextRatings;
@@ -549,8 +609,9 @@ export function registerScouting(ctx) {
     const a = ownAssessment(req);
     if (!a) return res.status(404).json({ error: 'ASSESSMENT_NOT_FOUND' });
     if (a.state !== 'submitted') return res.status(409).json({ error: 'NOT_SUBMITTED' });
-    const note = textOrRefuse(res, req.body?.note, 'note', A_LIMITS.reviewNote);
-    if (note === undefined) return;
+    const body = inputOrRefuse(res, Review, req.body);
+    if (!body) return;
+    const note = blankToNull(body.note ?? null);
     const next = assessments.update(a.id, (d) => {
       d.state = 'reviewed';
       d.reviewedAt = Date.now();
@@ -627,17 +688,16 @@ export function registerScouting(ctx) {
         .status(409)
         .json({ error: 'NOT_SUBMITTED', message: 'Submit the assessment before publishing feedback from it.' });
     if (a.publishedFeedback) return res.status(409).json({ error: 'ALREADY_PUBLISHED' });
-    const raw = req.body?.text;
-    if (raw !== undefined && raw !== null && typeof raw !== 'string')
-      return fieldInvalid(res, 'text', 'text must be text.');
-    const text = (raw ?? '').trim();
+    const body = inputOrRefuse(res, Feedback, req.body);
+    if (!body) return;
+    const text = (body.text ?? '').trim();
     if (!text) return res.status(400).json({ error: 'TEXT_REQUIRED' });
     if (!moderateOrRefuse(res, text, { kind: 'published_feedback', playerId: a.playerId, orgId: req.org.id })) return;
     const p = findPlayer(a.playerId);
     const next = unit(() => {
       const done = assessments.update(a.id, (d) => {
         d.publishedFeedback = {
-          text: text.slice(0, A_LIMITS.feedback),
+          text,
           byUserId: req.orgUser.id,
           byName: storedName(req.orgUser.name),
           at: Date.now(),
@@ -707,38 +767,15 @@ export function registerScouting(ctx) {
     const owner = mediaOwner(req.params.id);
     if (!owner) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
     if (!orgCanSee(req.org, owner)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    const { startS, endS, labels, eventType, note, drawing } = req.body ?? {};
-    const isSeconds = (v) => typeof v === 'number' && Number.isFinite(v);
-    if (
-      !isSeconds(startS) ||
-      !isSeconds(endS) ||
-      !(startS >= 0) ||
-      !(endS > startS) ||
-      endS - startS > A_LIMITS.segmentSeconds
-    )
+    const body = inputOrRefuse(res, NewSegment, req.body, SEGMENT_CODES);
+    if (!body) return;
+    const { startS, endS, labels, drawing } = body;
+    if (!(endS > startS) || endS - startS > A_LIMITS.segmentSeconds)
       return res
         .status(400)
         .json({ error: 'TIMESTAMPS_INVALID', message: 'start ≥ 0, end > start, segment ≤ 10 minutes.' });
-    if (
-      labels !== undefined &&
-      labels !== null &&
-      (!Array.isArray(labels) || labels.some((l) => typeof l !== 'string'))
-    )
-      return fieldInvalid(res, 'labels', 'labels is a list of short texts.');
-    const ev = textOrRefuse(res, eventType, 'eventType', A_LIMITS.eventType);
-    if (ev === undefined) return;
-    const text = textOrRefuse(res, note, 'note', A_LIMITS.segmentNote);
-    if (text === undefined) return;
-    if (
-      drawing !== undefined &&
-      drawing !== null &&
-      (typeof drawing !== 'object' || Array.isArray(drawing) || JSON.stringify(drawing).length > A_LIMITS.drawing)
-    )
-      return fieldInvalid(
-        res,
-        'drawing',
-        `drawing is an object of overlay shapes (at most ${A_LIMITS.drawing} characters).`,
-      );
+    const ev = blankToNull(body.eventType ?? null);
+    const text = blankToNull(body.note ?? null);
     if (text && !moderateOrRefuse(res, text, { kind: 'segment_note', playerId: owner.id, orgId: req.org.id })) return;
     const seg = segments.create({
       id: nextId('seg'),
@@ -748,10 +785,7 @@ export function registerScouting(ctx) {
       createdBy: { userId: req.orgUser.id, name: storedName(req.orgUser.name) },
       startS,
       endS,
-      labels: (labels ?? [])
-        .map((l) => l.trim().slice(0, A_LIMITS.label))
-        .filter(Boolean)
-        .slice(0, A_LIMITS.labels),
+      labels: (labels ?? []).map((l) => l.trim()).filter(Boolean),
       eventType: ev,
       note: text,
       drawing: drawing ?? null,
@@ -792,15 +826,14 @@ export function registerScouting(ctx) {
   });
 
   orgRouter.post('/playlists', (req, res) => {
-    const raw = req.body?.name;
-    if (raw !== undefined && raw !== null && typeof raw !== 'string')
-      return fieldInvalid(res, 'name', 'name must be text.');
-    const name = (raw ?? '').trim();
+    const body = inputOrRefuse(res, NewPlaylist, req.body);
+    if (!body) return;
+    const name = (body.name ?? '').trim();
     if (!name) return res.status(400).json({ error: 'NAME_REQUIRED' });
     const pl = playlists.create({
       id: nextId('pls'),
       orgId: req.org.id,
-      name: name.slice(0, A_LIMITS.playlistName),
+      name,
       createdBy: { userId: req.orgUser.id, name: storedName(req.orgUser.name) },
       segmentIds: [],
       createdAt: Date.now(),
@@ -812,7 +845,9 @@ export function registerScouting(ctx) {
     const found = playlistReads.byId(req.params.id);
     const pl = found && found.orgId === req.org.id ? found : null;
     if (!pl) return res.status(404).json({ error: 'PLAYLIST_NOT_FOUND' });
-    const segFound = typeof req.body?.segmentId === 'string' ? segmentReads.byId(req.body.segmentId) : null;
+    const body = inputOrRefuse(res, PlaylistItem, req.body);
+    if (!body) return;
+    const segFound = segmentReads.byId(body.segmentId);
     const seg = segFound && segFound.orgId === req.org.id ? segFound : null;
     if (!seg) return res.status(404).json({ error: 'SEGMENT_NOT_FOUND' });
     const next = pl.segmentIds.includes(seg.id)
@@ -867,8 +902,10 @@ export function registerScouting(ctx) {
   });
 
   orgRouter.post('/cases', (req, res) => {
-    const { playerId, vacancyId, priority, deadline, restricted } = req.body ?? {};
-    const p = findPlayer(playerId);
+    const body = inputOrRefuse(res, NewCase, req.body);
+    if (!body) return;
+    const { vacancyId, priority, deadline, restricted } = body;
+    const p = findPlayer(body.playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
     if (vacancyId && !scoutingReads.vacancies.ofOrg(vacancyId, req.org.id))
@@ -884,7 +921,7 @@ export function registerScouting(ctx) {
       ownerUserId: req.orgUser.id,
       ownerName: req.orgUser.name,
       stage: stagesFor(req.org)[0],
-      priority: CASE_PRIORITIES.includes(priority) ? priority : 'medium',
+      priority: priority ?? 'medium',
       deadline: due,
       restricted: !!restricted,
       assignments: [],
@@ -926,15 +963,17 @@ export function registerScouting(ctx) {
     if (!c) return;
     if (c.ownerUserId !== req.orgUser.id && !isLead(req.orgUser))
       return res.status(403).json({ error: 'OWNER_OR_LEAD_REQUIRED' });
-    const u = byId.user(req.body?.userId, (x) => x.orgId === req.org.id && !x.removedAt);
+    const body = inputOrRefuse(res, Assignment, req.body);
+    if (!body) return;
+    const u = byId.user(body.userId, (x) => x.orgId === req.org.id && !x.removedAt);
     if (!u) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
-    const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
+    const dueAt = dueAtOrRefuse(res, body.dueAt);
     if (dueAt === undefined) return;
     const asg = {
       id: nextId('asg'),
       userId: u.id,
       name: u.name,
-      task: String(req.body?.task ?? 'Scout this player').slice(0, 200),
+      task: body.task?.trim() || 'Scout this player',
       dueAt,
       status: 'open',
       createdAt: Date.now(),
@@ -952,14 +991,16 @@ export function registerScouting(ctx) {
   orgRouter.post('/cases/:id/tasks', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
-    const assigneeRaw = req.body?.assigneeUserId ? String(req.body.assigneeUserId) : null;
+    const body = inputOrRefuse(res, NewTask, req.body);
+    if (!body) return;
+    const assigneeRaw = body.assigneeUserId ?? null;
     if (assigneeRaw && !byId.user(assigneeRaw, (u) => u.orgId === req.org.id && !u.removedAt))
       return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
-    const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
+    const dueAt = dueAtOrRefuse(res, body.dueAt);
     if (dueAt === undefined) return;
     const t = {
       id: nextId('tsk'),
-      title: String(req.body?.title ?? '').slice(0, 200),
+      title: (body.title ?? '').trim(),
       dueAt,
       assigneeUserId: assigneeRaw,
       status: 'open',
@@ -999,9 +1040,11 @@ export function registerScouting(ctx) {
         use: `POST /org/rooms/${c.id}/lifecycle`,
       });
     }
-    const stages = stagesFor(req.org);
-    const { stage, reason } = req.body ?? {};
-    if (!stages.includes(stage)) return res.status(400).json({ error: 'STAGE_INVALID', allowed: stages });
+    const schema = req.org.level === 'grassroots' ? GRASSROOTS_STAGE_CHANGE : PRO_STAGE_CHANGE;
+    const body = inputOrRefuse(res, schema, req.body, STAGE_CODES);
+    if (!body) return;
+    const { stage } = body;
+    const reason = blankToNull(body.reason ?? null);
     if (stage === 'closed' && !c.decision)
       return res
         .status(409)
@@ -1018,18 +1061,14 @@ export function registerScouting(ctx) {
   orgRouter.post('/cases/:id/decision', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
-    const { outcome, reasons } = req.body ?? {};
-    if (!CASE_DECISION_OUTCOMES.includes(outcome)) return res.status(400).json({ error: 'OUTCOME_INVALID' });
-    if (!reasons || !String(reasons).trim())
-      return res.status(400).json({
-        error: 'REASONS_REQUIRED',
-        message: 'Decisions carry reasons — they outlive the people who made them.',
-      });
+    const body = inputOrRefuse(res, Decision, req.body, DECISION_CODES);
+    if (!body) return;
+    const { outcome, reasons } = body;
     const needsApproval = req.org.level !== 'grassroots' && outcome === 'sign' && !isLead(req.orgUser);
     if (needsApproval) {
       const appr = {
         id: nextId('apr'),
-        decision: { outcome, reasons: String(reasons).slice(0, 500) },
+        decision: { outcome, reasons },
         requestedBy: { userId: req.orgUser.id, name: req.orgUser.name },
         status: 'pending',
         requestedAt: Date.now(),
@@ -1044,7 +1083,7 @@ export function registerScouting(ctx) {
         {
           decision: {
             outcome,
-            reasons: String(reasons).slice(0, 500),
+            reasons,
             byUserId: req.orgUser.id,
             byName: req.orgUser.name,
             approvedBy: null,
@@ -1065,7 +1104,9 @@ export function registerScouting(ctx) {
     if (!requireLead(req, res)) return;
     const appr = c.approvals.find((x) => x.id === req.params.aid);
     if (!appr || appr.status !== 'pending') return res.status(404).json({ error: 'APPROVAL_NOT_FOUND' });
-    const approve = !!req.body?.approve;
+    const body = inputOrRefuse(res, ApprovalAnswer, req.body);
+    if (!body) return;
+    const { approve } = body;
     const at = Date.now();
     const fresh = unit(() => {
       let after = cases.resolveApproval(
@@ -1103,7 +1144,9 @@ export function registerScouting(ctx) {
   orgRouter.post('/cases/:id/link', (req, res) => {
     const c = findCase(req, res);
     if (!c) return;
-    const { requestId, trialId, signingId } = req.body ?? {};
+    const body = inputOrRefuse(res, CaseLinks, req.body);
+    if (!body) return;
+    const { requestId, trialId, signingId } = body;
     // Every reference is checked before anything is written.
     const request = requestId ? reads.requests.byId(requestId) : null;
     if (requestId && !(request && request.orgId === req.org.id && request.playerId === c.playerId))
@@ -1167,9 +1210,6 @@ export function registerScouting(ctx) {
   function groupFor(position) {
     return Object.keys(groups).find((g) => groups[g].includes(position)) ?? 'MID';
   }
-  const SL = CLUB_SETUP_LIMITS;
-  const isText = (v) => typeof v === 'string';
-  const optionalText = (v) => v === undefined || v === null || isText(v);
   const tacticalView = (t) =>
     t
       ? {
@@ -1225,56 +1265,43 @@ export function registerScouting(ctx) {
 
   orgRouter.post('/tactical', (req, res) => {
     if (!requireLead(req, res)) return;
-    const { formation, roles, windows, planningHorizon } = req.body ?? {};
-    if (!formation || !Array.isArray(roles)) return res.status(400).json({ error: 'FORMATION_AND_ROLES_REQUIRED' });
-    if (!isText(formation) || !formation.trim()) return fieldInvalid(res, 'formation', 'formation is text.');
-    if (!optionalText(planningHorizon)) return fieldInvalid(res, 'planningHorizon', 'planningHorizon is text.');
-    if (roles.length > SL.roles) return fieldInvalid(res, 'roles', `At most ${SL.roles} roles.`);
-    if (!(windows === undefined || windows === null || Array.isArray(windows)))
-      return fieldInvalid(res, 'windows', 'windows is a list.');
-    if ((windows ?? []).length > SL.windows) return fieldInvalid(res, 'windows', `At most ${SL.windows} windows.`);
+    const body = inputOrRefuse(res, Tactical, req.body);
+    if (!body) return;
+    const { formation, roles, windows, planningHorizon } = body;
     // A role keeps its id across saves so its vacancies and shadow entries keep their role; a supplied id must be one
     // of this club's current roles.
     const current = new Set(clubSetup.tactical.roleIds(req.org.id));
     const shaped = [];
     for (const [i, r] of roles.entries()) {
-      const at = `roles[${i}]`;
-      if (!r || typeof r !== 'object' || Array.isArray(r)) return fieldInvalid(res, at, 'Each role is an object.');
-      if (r.id !== undefined && r.id !== null && !current.has(r.id))
+      if (r.id != null && !current.has(r.id))
         return fieldInvalid(
           res,
-          `${at}.id`,
+          `roles[${i}].id`,
           "A role id must be one of this club's current roles; leave it out for a new role.",
         );
-      if (!isText(r.name) || !r.name.trim()) return fieldInvalid(res, `${at}.name`, 'Each role has a name.');
-      if (!optionalText(r.description)) return fieldInvalid(res, `${at}.description`, 'description is text.');
       shaped.push({
         ...r,
         id: r.id ?? nextId('role'),
-        name: r.name.trim().slice(0, SL.roleName),
-        description: (r.description ?? '').slice(0, SL.description),
+        name: r.name.trim(),
+        description: r.description ?? '',
         positionGroup: r.positionGroup ?? 'MID',
         category: r.category ?? 'mixed',
         required: r.required ?? [],
         preferred: r.preferred ?? [],
       });
     }
-    const shapedWindows = (windows ?? []).map((w) =>
-      w && typeof w === 'object' && !Array.isArray(w)
-        ? {
-            ...w,
-            name: isText(w.name) ? w.name.slice(0, SL.windowName) : (w.name ?? ''),
-            opens: w.opens ?? null,
-            closes: w.closes ?? null,
-          }
-        : w,
-    );
+    const shapedWindows = (windows ?? []).map((w) => ({
+      ...w,
+      name: w.name ?? '',
+      opens: w.opens ?? null,
+      closes: w.closes ?? null,
+    }));
     const label = 'tactical';
     const typed = typeTacticalSetup(
       {
         orgId: req.org.id,
-        formation: formation.trim().slice(0, SL.formation),
-        planningHorizon: planningHorizon ? planningHorizon.slice(0, SL.planningHorizon) : null,
+        formation: formation.trim(),
+        planningHorizon: planningHorizon || null,
         windows: shapedWindows,
         roles: shaped,
         updatedAt: Date.now(),
@@ -1295,24 +1322,24 @@ export function registerScouting(ctx) {
   });
 
   orgRouter.post('/vacancies', (req, res) => {
-    const { roleId, notes, window } = req.body ?? {};
-    const role = isText(roleId) ? scoutingReads.tacticalSetups.roleOf(req.org.id, roleId) : null;
+    const body = inputOrRefuse(res, NewVacancy, req.body);
+    if (!body) return;
+    const { roleId, notes, window } = body;
+    const role = scoutingReads.tacticalSetups.roleOf(req.org.id, roleId);
     if (!role) return res.status(404).json({ error: 'ROLE_NOT_FOUND', message: 'Define the tactical role first.' });
-    if (!optionalText(notes)) return fieldInvalid(res, 'notes', 'notes is text.');
-    if (!optionalText(window)) return fieldInvalid(res, 'window', 'window is text (the name of a transfer window).');
-    const v = clubSetup.vacancies.create({
+    const vacancy = clubSetup.vacancies.create({
       id: nextId('vac'),
       orgId: req.org.id,
       roleId,
       roleName: role.name,
-      window: window ? window.slice(0, SL.windowName) : null,
-      notes: notes ? notes.slice(0, SL.notes) : null,
+      window: window || null,
+      notes: notes || null,
       status: 'open',
       createdBy: storedName(req.orgUser.name),
       createdAt: Date.now(),
       closedAt: null,
     });
-    res.status(201).json({ vacancy: vacancyView(v) });
+    res.status(201).json({ vacancy: vacancyView(vacancy) });
   });
 
   // The club's vacancies grow without limit (they are closed, never deleted), so the list pages, newest first.
@@ -1483,14 +1510,13 @@ export function registerScouting(ctx) {
   // The shadow list is its own table: a club considering a player is not that player's club, so nothing that
   // reads the squad (match days, release, the passport, the Trust score) sees a shadow entry.
   orgRouter.post('/squad/shadow', (req, res) => {
-    const { playerId, roleId } = req.body ?? {};
-    const p = findPlayer(playerId);
+    const body = inputOrRefuse(res, NewShadow, req.body);
+    if (!body) return;
+    const { roleId } = body;
+    const p = findPlayer(body.playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    if (
-      !(roleId === undefined || roleId === null) &&
-      !(isText(roleId) && scoutingReads.tacticalSetups.roleOf(req.org.id, roleId))
-    )
+    if (roleId != null && !scoutingReads.tacticalSetups.roleOf(req.org.id, roleId))
       return res
         .status(404)
         .json({ error: 'ROLE_NOT_FOUND', message: "roleId must be one of the club's tactical roles." });

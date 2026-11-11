@@ -102,7 +102,7 @@ const HANDOFF_STORED = HANDOFF_STATUSES.filter((s) => s !== 'expired');
 const SOURCE_REF_KINDS = ['evidence', 'assessment', 'combine', 'trial'];
 const CODE_MAX = 64;
 const KEY_MAX = DECISION_LIMITS.clientKey;
-const TEXT = {
+const TEXT = Object.freeze({
   reasons: 500,
   trigger: 120,
   action: 64,
@@ -113,7 +113,9 @@ const TEXT = {
   label: 80,
   fxRate: 32,
   evidenceNote: 1000,
-};
+});
+/** The free-text limits of a case's columns. */
+export const CASE_TEXT_LIMITS = TEXT;
 
 // ------------------------------------------------------------------ DDL
 const inList = (col, vocab) => `CHECK (${col} IS NULL OR ${col} IN (${vocab.map((v) => `'${v}'`).join(',')}))`;

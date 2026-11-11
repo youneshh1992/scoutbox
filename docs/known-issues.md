@@ -83,9 +83,8 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
   (`domains/agents/compliance/policy.mjs`) returns `REPRESENTATION_EXPIRED`, which the compliance error table maps but
   `TRANSACTION_ERROR_HTTP` (`domains/agents/transactions/errors.mjs`) does not, so
   `POST /org/agent/transactions/:id/representations` answers `TRANSACTION_STATE_UNKNOWN`.
-- **Non-text input is coerced.** `String(...)` turns objects into text instead of refusing them in `scouting.mjs`
-  (case assign `task`, task `title`, decision `reasons`), `rooms/shared.mjs` `validateDecision` (`note`) and the Room
-  combine-request route (`instructions`). The case stage route stores `reason` without a type or length check.
+- **Non-text input is coerced.** `String(...)` turns objects into text instead of refusing them in `rooms/shared.mjs`
+  `validateDecision` (`note`) and the Room combine-request route (`instructions`).
 - **Writes outside a unit, or side effects before commit.**
   - Decision drafts: `cases.startDraft`, `editDraft` and `discardDraft` run outside `unit()`
     (`domains/recruitment/lifecycle/decisionRoutes.mjs`), and `editDraft` writes no history entry.

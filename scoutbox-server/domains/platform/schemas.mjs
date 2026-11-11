@@ -9,7 +9,7 @@
  * value that was sent.
  */
 import * as v from 'valibot';
-import { parseInstant, parseStrictDateOnly } from '../../temporal.mjs';
+import { isAbsent, parseDateOrInstant, parseInstant, parseStrictDateOnly } from '../../temporal.mjs';
 
 export const TEXT_MAX = 500;
 export const ID_MAX = 80;
@@ -23,6 +23,12 @@ const coded = (requirement, error, expected) => {
 };
 
 const isDateOnly = coded((x) => parseStrictDateOnly(x).ok, 'DATE_INVALID', 'YYYY-MM-DD');
+const isDayOrBlank = coded((x) => x === '' || parseStrictDateOnly(x).ok, 'DATE_INVALID', 'YYYY-MM-DD');
+const isDue = coded(
+  (x) => isAbsent(x) || parseDateOrInstant(x).ok,
+  'DATE_INVALID',
+  'YYYY-MM-DD, ISO 8601 with offset or Z, or integer milliseconds',
+);
 const isInstant = coded(
   (x) => parseInstant(x).ok,
   'TIMESTAMP_INVALID',
@@ -48,8 +54,16 @@ export const idList = (max) => v.pipe(v.array(id), v.maxLength(max));
 export const wholeNumber = ({ min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER } = {}) =>
   v.pipe(v.number(), v.safeInteger(), v.minValue(min), v.maxValue(max));
 
-/** One of a fixed vocabulary. */
-export const oneOf = (values) => v.picklist(values, `must be one of ${values.join(', ')}`);
+// A vocabulary's refusal message → its values, so the refusal can list them as `allowed`. An issue does not name the
+// schema it came from, but its message is the one written here.
+const ALLOWED = new Map();
+
+/** One of a fixed vocabulary. Its refusal carries `allowed`. */
+export const oneOf = (values) => {
+  const message = `must be one of ${values.join(', ')}`;
+  ALLOWED.set(message, Object.freeze([...values]));
+  return v.picklist(values, message);
+};
 
 /** A calendar day, YYYY-MM-DD (temporal.mjs). Anything else, including a non-string, is DATE_INVALID. */
 export const dateOnly = v.pipe(
@@ -66,11 +80,48 @@ export const instant = v.pipe(
   ),
 );
 
+/** A day the form may leave empty: `''` is accepted here, and the route reads it as no day. */
+export const dayOrBlank = v.pipe(
+  v.unknown(),
+  v.guard(
+    isDayOrBlank,
+    (issue) => `must be a calendar day written YYYY-MM-DD (${parseStrictDateOnly(issue.input).why})`,
+  ),
+);
+
+/**
+ * A due date: a calendar day (the deadline is the end of it) or an instant, or absent (undefined, null or `''`). The
+ * route converts it with `parseDateOrInstant`.
+ */
+export const dueDate = v.pipe(
+  v.unknown(),
+  v.guard(
+    isDue,
+    (issue) =>
+      `must be a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${parseDateOrInstant(issue.input).why})`,
+  ),
+);
+
+// The API names a nested field as `ratings[0].evidenceRefs[1].t`.
 const fieldOf = (issue, root) => {
-  const keys = (issue.path ?? []).map((p) => String(p.key));
-  const field = keys.length ? keys.join('.') : root;
+  let field = '';
+  for (const p of issue.path ?? []) field += typeof p.key === 'number' ? `[${p.key}]` : `${field ? '.' : ''}${p.key}`;
+  if (!field) field = root;
   return field.length > FIELD_MAX ? `${field.slice(0, FIELD_MAX)}…` : field;
 };
+
+/** `fieldCodes` keys name a field without its list positions: `ratings.confidence`, or `terms.*` for a subtree. */
+function fieldCodeFor(issue, fieldCodes) {
+  const keys = (issue.path ?? []).map((p) => p.key).filter((k) => typeof k !== 'number');
+  if (!keys.length) return null;
+  const exact = keys.join('.');
+  if (Object.hasOwn(fieldCodes, exact)) return fieldCodes[exact];
+  for (let n = keys.length; n > 0; n--) {
+    const subtree = `${keys.slice(0, n).join('.')}.*`;
+    if (Object.hasOwn(fieldCodes, subtree)) return fieldCodes[subtree];
+  }
+  return null;
+}
 
 const isKeyIssue = (issue) =>
   issue.type === 'strict_object' || issue.type === 'object' || issue.type === 'loose_object';
@@ -114,9 +165,9 @@ function phraseFor(issue) {
 /**
  * `{ ok: true, value }`, or `{ ok: false, error, field, message, expected? }` for the first problem found. `root`
  * names the input as a whole when it is the input itself that is wrong. `codes` renames this module's codes for a
- * domain whose contract has its own, e.g. `{ FIELD_INVALID: 'TRANSACTION_INPUT_INVALID' }`. `fieldCodes` gives a
- * top-level field (and everything inside it) a code of its own, e.g. `{ terms: 'TERMS_INPUT_INVALID' }`; it wins over
- * `codes`.
+ * domain whose contract has its own, e.g. `{ FIELD_INVALID: 'TRANSACTION_INPUT_INVALID' }`. `fieldCodes` gives one
+ * field a code of its own (`{ 'ratings.confidence': 'CONFIDENCE_INVALID' }`), or a field and everything inside it
+ * (`{ 'terms.*': 'TERMS_INPUT_INVALID' }`); it wins over `codes`.
  */
 export function parseInput(schema, input, { root = 'body', codes = {}, fieldCodes = {} } = {}) {
   // Valibot's object schemas take an array as an object, so `[]` would pass as a body with no fields.
@@ -129,18 +180,16 @@ export function parseInput(schema, input, { root = 'body', codes = {}, fieldCode
   const issue = result.issues[0];
   const field = fieldOf(issue, root);
   const known = CODED.get(issue.requirement);
-  const top = issue.path?.[0]?.key;
+  const allowed = ALLOWED.get(issue.message);
   const error =
-    (Object.hasOwn(fieldCodes, top) ? fieldCodes[top] : null) ??
-    codes[known?.error ?? 'FIELD_INVALID'] ??
-    known?.error ??
-    'FIELD_INVALID';
+    fieldCodeFor(issue, fieldCodes) ?? codes[known?.error ?? 'FIELD_INVALID'] ?? known?.error ?? 'FIELD_INVALID';
   return {
     ok: false,
     error,
     field,
     message: `${field} ${issue.message}.`,
     ...(known?.expected ? { expected: known.expected } : {}),
+    ...(allowed ? { allowed } : {}),
   };
 }
 

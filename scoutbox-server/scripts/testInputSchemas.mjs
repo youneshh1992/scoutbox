@@ -7,6 +7,8 @@ import * as v from 'valibot';
 import {
   ID_MAX,
   dateOnly,
+  dayOrBlank,
+  dueDate,
   flag,
   id,
   idList,
@@ -107,11 +109,17 @@ test('nothing is coerced: numeric strings, fractions, "true", numbers for text a
   }
 });
 
+test('a value outside a vocabulary is refused with the allowed values', () => {
+  const r = refusal({ title: 'x', kind: 'match' });
+  assert.deepEqual(r.allowed, ['trial', 'visit']);
+  assert.equal('allowed' in refusal({ title: 1 }), false);
+});
+
 test('a nested problem is named by its path', () => {
   const r = refusal({ title: 'x', documents: [{ evidenceId: 'ev-1' }, { evidenceId: 9 }] });
-  assert.equal(r.field, 'documents.1.evidenceId');
-  assert.equal(r.message, 'documents.1.evidenceId must be text.');
-  assert.equal(refusal({ title: 'x', documents: [{ evidenceId: 'ev-1', extra: 1 }] }).field, 'documents.0.extra');
+  assert.equal(r.field, 'documents[1].evidenceId');
+  assert.equal(r.message, 'documents[1].evidenceId must be text.');
+  assert.equal(refusal({ title: 'x', documents: [{ evidenceId: 'ev-1', extra: 1 }] }).field, 'documents[0].extra');
 });
 
 test('a bad calendar day is DATE_INVALID with the expected shape, whatever its type; a bad instant is TIMESTAMP_INVALID', () => {
@@ -156,17 +164,55 @@ test('a domain can rename the codes for its own contract; codes it does not rena
   );
 });
 
-test('a field code covers that field and everything inside it, wins over codes, and does not catch other fields', () => {
-  const fieldCodes = { title: 'TITLE_REQUIRED', documents: 'DOCUMENT_INPUT_INVALID', startsOn: 'TRIAL_DATE_INVALID' };
+test('a field code names one field (list positions left out) or, with .*, a field and everything inside it', () => {
+  const fieldCodes = {
+    title: 'TITLE_REQUIRED',
+    'documents.evidenceId': 'EVIDENCE_REF_INVALID',
+    'playerIds.*': 'PLAYERS_INVALID',
+    startsOn: 'TRIAL_DATE_INVALID',
+  };
   const codes = { FIELD_INVALID: 'TRIAL_INPUT_INVALID' };
   assert.equal(refusal({}, Body, { fieldCodes }).error, 'TITLE_REQUIRED');
   assert.equal(
-    refusal({ title: 'x', documents: [{ evidenceId: 1 }] }, Body, { fieldCodes }).error,
-    'DOCUMENT_INPUT_INVALID',
+    refusal({ title: 'x', documents: [{ evidenceId: 'e' }, { evidenceId: 1 }] }, Body, { fieldCodes }).error,
+    'EVIDENCE_REF_INVALID',
   );
+  assert.equal(refusal({ title: 'x', documents: 'none' }, Body, { fieldCodes }).error, 'FIELD_INVALID');
+  assert.equal(
+    refusal({ title: 'x', documents: [{ evidenceId: 'e', x: 1 }] }, Body, { fieldCodes }).error,
+    'FIELD_INVALID',
+  );
+  assert.equal(refusal({ title: 'x', playerIds: 'p' }, Body, { fieldCodes }).error, 'PLAYERS_INVALID');
+  assert.equal(refusal({ title: 'x', playerIds: ['p', 2] }, Body, { fieldCodes }).error, 'PLAYERS_INVALID');
   assert.equal(refusal({ title: 'x', startsOn: 'soon' }, Body, { fieldCodes, codes }).error, 'TRIAL_DATE_INVALID');
   assert.equal(refusal({ title: 'x', count: 'many' }, Body, { fieldCodes, codes }).error, 'TRIAL_INPUT_INVALID');
   assert.equal(refusal({ title: 'x', constructor: 1 }, Body, { fieldCodes: {} }).error, 'FIELD_INVALID');
+});
+
+test('dayOrBlank takes a day or an empty string; dueDate takes a day, an instant or nothing, else DATE_INVALID', () => {
+  const S = v.strictObject({ on: v.nullish(dayOrBlank), due: v.optional(dueDate) });
+  for (const ok of [
+    {},
+    { on: '' },
+    { on: null },
+    { on: '2026-11-20' },
+    { due: '' },
+    { due: null },
+    { due: '2026-11-20' },
+    { due: '2026-11-20T10:00:00Z' },
+    { due: 1700000000000 },
+  ])
+    assert.equal(parseInput(S, ok).ok, true, JSON.stringify(ok));
+  for (const [bad, field] of [
+    [{ on: '2026-02-30' }, 'on'],
+    [{ on: 5 }, 'on'],
+    [{ due: 'friday' }, 'due'],
+    [{ due: '2026-11-20T10:00' }, 'due'],
+  ]) {
+    const r = refusal(bad, S);
+    assert.equal(r.error, 'DATE_INVALID', JSON.stringify(bad));
+    assert.equal(r.field, field);
+  }
 });
 
 test('an over-long unknown key is named, but cut short', () => {

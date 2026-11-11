@@ -686,6 +686,34 @@ r = await post(
   bearer(MARIA),
 );
 ok(r.status === 201, 'lead assigns a scout');
+// Junk in a case write is refused naming the field, never turned into text or quietly replaced by a default.
+for (const [url, body, field, error] of [
+  [`/org/cases/${caseId}/assign`, { userId: sam.userId, task: { what: 'watch' } }, 'task', 'FIELD_INVALID'],
+  [`/org/cases/${caseId}/tasks`, { title: ['Call the agent'] }, 'title', 'FIELD_INVALID'],
+  [`/org/cases/${caseId}/stage`, { stage: 'observation', reason: { why: 'x' } }, 'reason', 'FIELD_INVALID'],
+  [`/org/cases/${caseId}/stage`, { stage: 'observation', reason: 'r'.repeat(501) }, 'reason', 'FIELD_INVALID'],
+  [`/org/cases/${caseId}/stage`, { stage: 'invited' }, 'stage', 'STAGE_INVALID'],
+  [`/org/cases/${caseId}/decision`, { outcome: 'sign', reasons: ['fast'] }, 'reasons', 'REASONS_REQUIRED'],
+  [`/org/cases/${caseId}/decision`, { outcome: 'sign', reasons: 'Fast', note: 'x' }, 'note', 'FIELD_INVALID'],
+  ['/org/cases', { playerId: 'pl-svensson', priority: 'urgent' }, 'priority', 'FIELD_INVALID'],
+  ['/org/cases', { playerId: 'pl-svensson', restricted: 'yes' }, 'restricted', 'FIELD_INVALID'],
+]) {
+  const bad = await post(url, body, bearer(MARIA));
+  ok(
+    bad.status === 400 && bad.body.error === error && bad.body.field === field,
+    `${url.replace(caseId, ':id')} refuses ${JSON.stringify(body[field] ?? body).slice(0, 40)} naming ${field} (${error})`,
+  );
+}
+r = await post(`/org/cases/${caseId}/stage`, { stage: 'invited' }, bearer(MARIA));
+ok(
+  JSON.stringify(r.body.allowed) ===
+    JSON.stringify(['identified', 'review', 'observation', 'trial', 'decision', 'closed']),
+  "a stage outside the club's flow is refused with the stages it may use",
+);
+ok(
+  (await j(`/org/cases/${caseId}`, {}, bearer(MARIA))).body.case.tasks.length === 0,
+  'and the refused task was not written',
+);
 r = await post(`/org/cases/${caseId}/stage`, { stage: 'observation', reason: 'assigned viewing' }, bearer(SAM));
 ok(r.status === 200, 'assigned scout advances the stage');
 r = await post(
@@ -695,6 +723,11 @@ r = await post(
 );
 ok(r.status === 202 && r.body.approval, 'a non-lead sign decision awaits approval');
 const aprId = r.body.approval.id;
+r = await post(`/org/cases/${caseId}/approvals/${aprId}`, {}, bearer(MARIA));
+ok(
+  r.status === 400 && r.body.field === 'approve',
+  'an approval answer that says neither yes nor no is refused (it read as a rejection)',
+);
 r = await post(`/org/cases/${caseId}/approvals/${aprId}`, { approve: true }, bearer(SAM));
 ok(r.status === 403, 'the requester cannot approve their own decision (lead required)');
 r = await post(`/org/cases/${caseId}/approvals/${aprId}`, { approve: true }, bearer(MARIA));
