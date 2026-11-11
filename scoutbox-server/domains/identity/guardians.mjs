@@ -2,7 +2,8 @@
 // child; the child routes check the flags. No act moves the e-mail or the disclaimer back.
 import express from 'express';
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { reqText, badField, switchRefused } from '../platform/input.mjs';
+import { filled } from '../platform/schemas.mjs';
+import { identityInput, PASSWORD_MIN } from './schemas.mjs';
 import { hashCode } from '../../repositories/oneTimeCodes.mjs';
 import { hashPassword, verifyPassword, randomCode } from '../../adapters.mjs';
 import { timingSafeEqStr } from './totp.mjs';
@@ -41,10 +42,13 @@ export function registerGuardianAccount({
     throw new TypeError('registerGuardianAccount needs the guardians repository and unit from the data layer');
 
   app.post('/auth/guardian/signup', async (req, res) => {
-    const { name, email, password } = req.body || {};
-    if (!reqText(name, 120) || !reqText(email, 254) || !email.includes('@'))
-      return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
-    if (!password || String(password).length < 8) {
+    const body = identityInput(res, 'guardianSignup', req.body);
+    if (!body) return;
+    const name = filled(body.name);
+    const email = filled(body.email);
+    const { password } = body;
+    if (!name || !email || !email.includes('@')) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
+    if (!password || password.length < PASSWORD_MIN) {
       return res.status(400).json({ error: 'PASSWORD_REQUIRED', message: 'Pick a password of at least 8 characters.' });
     }
     const emailInUse = () =>
@@ -91,8 +95,10 @@ export function registerGuardianAccount({
   });
 
   app.post('/auth/guardian/verify-email', (req, res) => {
-    const { guardianId, code } = req.body || {};
-    const g = typeof guardianId === 'string' ? guardians.byId(guardianId) : null;
+    const body = identityInput(res, 'verifyEmail', req.body);
+    if (!body) return;
+    const { guardianId, code } = body;
+    const g = guardianId ? guardians.byId(guardianId) : null;
     if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
     if (g.emailVerified) return res.json({ emailVerified: true });
     const codeHash = guardians.emailCodeHashOf(g.id);
@@ -108,11 +114,12 @@ export function registerGuardianAccount({
   app.post('/auth/guardian/login', (req, res) => {
     // A guardian can be named by id or by e-mail. The failed-login budget is charged against both the identifier
     // tried and the account it resolved to, or alternating the two would give a guesser two budgets.
-    const tried = `guardian:${req.body?.guardianId ?? req.body?.email}`;
+    const body = identityInput(res, 'guardianLogin', req.body);
+    if (!body) return;
+    const tried = `guardian:${body.guardianId ?? body.email}`;
     if (loginLockedOut(res, tried)) return;
     const g =
-      (typeof req.body?.guardianId === 'string' ? guardians.byId(req.body.guardianId) : null) ??
-      guardians.byEmail(req.body?.email);
+      (body.guardianId ? guardians.byId(body.guardianId) : null) ?? (body.email ? guardians.byEmail(body.email) : null);
     if (!g) {
       noteLoginFailure(tried);
       return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
@@ -122,13 +129,13 @@ export function registerGuardianAccount({
     if (aliased && loginLockedOut(res, canonical)) return;
     const hash = guardians.passwordHashOf(g.id);
     if (hash) {
-      const check = verifyPassword(req.body?.password ?? '', hash);
+      const check = verifyPassword(body.password ?? '', hash);
       if (!check) {
         noteLoginFailure(tried);
         if (aliased) noteLoginFailure(canonical);
         return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This account is password-protected.' });
       }
-      if (check === 'upgrade') guardians.setPasswordHash(g.id, hashPassword(req.body.password));
+      if (check === 'upgrade') guardians.setPasswordHash(g.id, hashPassword(body.password));
     } else if (!devLogins) {
       return devLoginRefused(res);
     }
@@ -150,13 +157,15 @@ export function registerGuardianAccount({
   app.use('/guardian', guardianAuth, guardianRouter);
 
   guardianRouter.post('/verify-id', async (req, res, next) => {
-    const { documentType, documentRef } = req.body || {};
+    const body = identityInput(res, 'verifyId', req.body);
+    if (!body) return;
+    const documentType = filled(body.documentType);
+    const documentRef = filled(body.documentRef);
     if (!documentType || !documentRef) {
       return res
         .status(400)
         .json({ error: 'DOCUMENT_REQUIRED', message: 'ID verification needs a document type and reference.' });
     }
-    if (!reqText(documentType, 60)) return badField(res, 'documentType'); // stored in the queue's text column
     const result = await idv.verify({ name: req.guardian.name, documentType, documentRef });
     if (!result.approved) {
       return res
@@ -187,7 +196,9 @@ export function registerGuardianAccount({
   });
 
   guardianRouter.post('/disclaimer', (req, res) => {
-    if (req.body?.accepted !== true) return res.status(400).json({ error: 'DISCLAIMER_NOT_ACCEPTED' });
+    const body = identityInput(res, 'disclaimer', req.body);
+    if (!body) return;
+    if (body.accepted !== true) return res.status(400).json({ error: 'DISCLAIMER_NOT_ACCEPTED' });
     guardians.acceptDisclaimer(req.guardian.id, Date.now());
     res.json({ disclaimerAccepted: true });
   });
@@ -199,9 +210,11 @@ export function registerGuardianAccount({
 
 export function registerGuardianIdReview({ adminRouter, guardians, safetyAudit, unit }) {
   adminRouter.get('/guardians', (req, res) => {
+    const query = identityInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -216,8 +229,9 @@ export function registerGuardianIdReview({ adminRouter, guardians, safetyAudit, 
   adminRouter.post('/guardians/:id/idv', (req, res) => {
     const g = guardians.byId(req.params.id);
     if (!g) return res.status(404).json({ error: 'GUARDIAN_NOT_FOUND' });
-    if (switchRefused(res, req.body?.approved, 'approved')) return;
-    const approved = req.body.approved;
+    const body = identityInput(res, 'idReview', req.body);
+    if (!body) return;
+    const { approved } = body;
     // The review is recorded on the guardian's first queue entry.
     let stored;
     unit(() => {

@@ -1,11 +1,11 @@
 import crypto from 'node:crypto';
 import express from 'express';
-import { optText, reqText, badField } from '../platform/input.mjs';
+import { filled } from '../platform/schemas.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { STAFF_LIMITS } from '../../repositories/users.mjs';
 import { hashPassword, verifyPassword } from '../../adapters.mjs';
 import { isLeadRole } from '../../roles.mjs';
 import { totpValid } from './totp.mjs';
+import { identityInput, PASSWORD_MIN } from './schemas.mjs';
 
 /**
  * `orgSafe` is an allowlist (the password hash is never on the record). `safeguardingCertified` is earned and
@@ -106,11 +106,13 @@ export function registerOrgAccount({
     throw new TypeError('registerOrgAccount needs the staff repository and the MFA guards');
 
   app.get('/orgs', (req, res) => {
+    const query = identityInput(res, 'orgsQuery', req.query, 'query');
+    if (!query) return;
     // The Grassroots app lists only grassroots clubs, the main app never lists them, and the Agent app lists agencies
     // only. Unpaged: the sign-in pickers have no search yet (docs/known-issues.md).
     const filter =
       { grassroots: { level: 'grassroots' }, main: { notLevel: 'grassroots' }, agent: { type: 'agency' } }[
-        req.query.platform
+        query.platform
       ] ?? {};
     const list = orgs.list(filter);
     res.json(
@@ -132,61 +134,51 @@ export function registerOrgAccount({
 
   // T&S verifies the club (federation record, email domain, safeguarding contract) before it can see any minor.
   app.post('/auth/org/register-grassroots', (req, res) => {
-    const {
-      name,
-      country = 'GB',
-      city,
-      lat,
-      lng,
-      federation,
-      registrationId,
-      scoutName,
-      role,
-      password,
-    } = req.body || {};
-    if (password !== undefined && String(password).length < 8) {
+    const body = identityInput(res, 'registerGrassroots', req.body);
+    if (!body) return;
+    const { country = 'GB', lat, lng, password } = body;
+    const name = filled(body.name);
+    const federation = filled(body.federation);
+    const registrationId = filled(body.registrationId);
+    const scoutName = filled(body.scoutName);
+    if (password != null && password.length < PASSWORD_MIN) {
       return res
         .status(400)
         .json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
     }
-    if (!reqText(name, 120)) return res.status(400).json({ error: 'NAME_REQUIRED' });
-    for (const [f, v, max] of [
-      ['country', country, 2],
-      ['city', city, 80],
-      ['federation', federation, 120],
-      ['registrationId', registrationId, 60],
-      ['role', role, 60],
-    ])
-      if (!optText(v, max)) return badField(res, f);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-      if (typeof lat === 'number' || typeof lng === 'number') return badField(res, 'location');
-    }
-    if (typeof country !== 'string' || !country.trim() || country !== country.trim()) return badField(res, 'country');
-    if (!federation?.trim() || !registrationId?.trim()) {
+    if (!name) return res.status(400).json({ error: 'NAME_REQUIRED' });
+    if (!country.trim() || country !== country.trim())
+      return res.status(400).json({
+        error: 'FIELD_INVALID',
+        field: 'country',
+        problem: 'invalid',
+        message: 'country must be a country code.',
+      });
+    if (!federation || !registrationId) {
       return res.status(400).json({
         error: 'FEDERATION_REQUIRED',
         message: 'Grassroots clubs must hold a federation registration — name the federation and your registration id.',
       });
     }
-    if (typeof lat !== 'number' || typeof lng !== 'number') {
+    if (lat == null || lng == null) {
       return res.status(400).json({
         error: 'LOCATION_REQUIRED',
         message: 'The 50km scouting radius is measured from your ground — a location is required.',
       });
     }
-    if (!reqText(scoutName, 120)) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' });
+    if (!scoutName) return res.status(400).json({ error: 'SCOUT_NAME_REQUIRED' });
     const { org, user, token } = unit(() => {
       const created = orgs.create({
-        name: name.trim(),
+        name,
         type: 'club',
         level: 'grassroots',
-        location: { lat, lng, city: city?.trim() || null },
-        federationRef: { federation: federation.trim(), registrationId: registrationId.trim() },
+        location: { lat, lng, city: filled(body.city) },
+        federationRef: { federation, registrationId },
         plan: 'Grassroots',
         country,
-        passwordHash: password ? hashPassword(String(password)) : null,
+        passwordHash: password ? hashPassword(password) : null,
       });
-      const admin = users.create({ orgId: created.id, name: scoutName.trim(), role: role?.trim() || 'Manager' });
+      const admin = users.create({ orgId: created.id, name: scoutName, role: filled(body.role) ?? 'Manager' });
       return { org: created, user: admin, token: createSession('org', created.id, { userId: admin.id }) };
     });
     broadcast('orgs');
@@ -200,9 +192,11 @@ export function registerOrgAccount({
   });
 
   app.post('/auth/org/login', (req, res) => {
-    const { orgId, scoutName, role, platform } = req.body || {};
+    const body = identityInput(res, 'orgLogin', req.body);
+    if (!body) return;
+    const { orgId, scoutName, role, platform } = body;
     if (loginLockedOut(res, `org:${orgId}`)) return;
-    const org = findOrg(orgId);
+    const org = orgId ? findOrg(orgId) : null;
     if (!org) {
       noteLoginFailure(`org:${orgId}`);
       return res.status(404).json({ error: 'ORG_NOT_FOUND' });
@@ -227,27 +221,20 @@ export function registerOrgAccount({
         .status(403)
         .json({ error: 'PLATFORM_MISMATCH', message: 'ScoutBox Agent is for agency organisations only.' });
     }
-    if (!optText(role, 60)) return badField(res, 'role');
-    if (typeof scoutName !== 'string' || !scoutName.trim()) {
+    if (!filled(scoutName)) {
       return res
         .status(400)
         .json({ error: 'SCOUT_NAME_REQUIRED', message: 'Every session is attributed to a named individual.' });
     }
-    if (scoutName.trim().length > STAFF_LIMITS.name)
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'scoutName',
-        message: `scoutName is at most ${STAFF_LIMITS.name} characters.`,
-      });
     // Unprovisioned (seeded demo) orgs skip the password as a development shortcut only.
     const passwordHash = orgs.passwordHashOf(org.id);
     if (passwordHash) {
-      const check = verifyPassword(req.body?.password ?? '', passwordHash);
+      const check = verifyPassword(body.password ?? '', passwordHash);
       if (!check) {
         noteLoginFailure(`org:${orgId}`);
         return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' });
       }
-      if (check === 'upgrade') orgs.setPasswordHash(org.id, hashPassword(req.body.password));
+      if (check === 'upgrade') orgs.setPasswordHash(org.id, hashPassword(body.password));
     } else if (!devLogins) {
       return devLoginRefused(res);
     }
@@ -264,12 +251,12 @@ export function registerOrgAccount({
           .status(429)
           .json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
       }
-      const { mfaCode, recoveryCode } = req.body ?? {};
+      const { mfaCode, recoveryCode } = body;
       let second = false;
       if (mfaCode) second = totpValid(users.mfaSecretOf(user.id), mfaCode);
       else if (recoveryCode) {
         // Only the call that deleted the code's row passes.
-        second = users.useRecoveryCode(user.id, crypto.createHash('sha256').update(String(recoveryCode)).digest('hex'));
+        second = users.useRecoveryCode(user.id, crypto.createHash('sha256').update(recoveryCode).digest('hex'));
       }
       if (!second) {
         if (mfaCode || recoveryCode) mfaGuards.mfaFail(user.id);
@@ -345,9 +332,11 @@ export function registerOrgAccount({
  */
 export function registerClubDirectory({ app, orgs, trialsForOrg, safeguardingCertified, pathwayRecord }) {
   app.get('/orgs/directory', (req, res) => {
+    const query = identityInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = orgs.page({ type: 'club' }, readPage(req.query, ['number']));
+      page = orgs.page({ type: 'club' }, readPage(query, ['number']));
     } catch (e) {
       return sendPageError(res, e);
     }

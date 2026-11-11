@@ -60,6 +60,7 @@ These are the product's first principles for under-18s. Everything below refines
 **Authentication**
 - No public registration exists for staff or agencies. Self-registration is limited to Grassroots clubs (`/auth/org/register-grassroots`) and Player sign-up.
 - Credentials: Pro and Agent use organisation/agency, name, password and role; Trust & Safety an admin key only; the Player app a guardian's email and password (`/auth/guardian/login`) or an 18+ player's id and password (`/auth/player/login`). Player sign-up is adult player, guardian (email code, ID, disclaimer, child) or pairing code.
+- Sign-up and login input is valid as sent or refused, naming the field, before any account is looked up or created: a field the form does not have (a sign-up naming its own guardian), an id, name or password that is not text, a height written as text, an app (`platform`) ScoutBox does not have. A malformed date of birth is `DOB_INVALID` whatever its type.
 - No fake social sign-in; demo identities only in demo or development builds; no password or token logged; one submission at a time; server refusals shown as real errors, keeping non-sensitive input.
 - Only a 401 ends a session. A 403 is the answer to one request and does not end the session.
 - Production boot refuses unsafe configuration: the Box Cam test provider, a missing media secret, dev login, or fault injection. Trust Score weights that do not total 100 are fatal in every mode.

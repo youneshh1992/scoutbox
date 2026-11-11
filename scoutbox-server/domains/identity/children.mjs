@@ -1,12 +1,10 @@
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { reqText, switchRefused } from '../platform/input.mjs';
+import { filled } from '../platform/schemas.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { adultAgeFor, ageOn, computeStreak, weeklyGoal } from '../../domain.mjs';
-import { IDENTITY_LIMITS } from '../../repositories/identity.mjs';
 import { guardianChildView } from '../../views/playerViews.mjs';
-import { profileRefused, newPlayerRecord } from './players.mjs';
-
-const CHILD_AVAILABILITY = ['available_now', 'end_of_season', 'not_seeking'];
+import { profileOrRefuse, newPlayerRecord } from './players.mjs';
+import { identityInput } from './schemas.mjs';
 
 export function ownChild(req, res, findPlayer, id = req.params.id) {
   const child = findPlayer(id);
@@ -62,8 +60,8 @@ export function registerChildren({
         message: 'Accept the safeguarding disclaimer before onboarding a child.',
       });
     }
-    const body = req.body || {};
-    if (profileRefused(res, body)) return;
+    const body = profileOrRefuse(res, 'child', req.body);
+    if (!body) return;
     if (ageOn(body.dob) >= adultAgeFor(body.country ?? 'GB')) {
       return res
         .status(400)
@@ -87,18 +85,18 @@ export function registerChildren({
 
   // A co-guardian passes the gates themselves before they can act.
   guardianRouter.post('/coguardian', (req, res) => {
-    const { name, email } = req.body || {};
+    const body = identityInput(res, 'coGuardian', req.body);
+    if (!body) return;
+    const name = filled(body.name);
+    const email = filled(body.email);
     if (!name || !email) return res.status(400).json({ error: 'NAME_AND_EMAIL_REQUIRED' });
-    if (!reqText(name, IDENTITY_LIMITS.name))
+    if (!email.includes('@'))
       return res.status(400).json({
         error: 'FIELD_INVALID',
-        field: 'name',
-        message: `name must be text of 1 to ${IDENTITY_LIMITS.name} characters.`,
+        field: 'email',
+        problem: 'invalid',
+        message: 'email must be an e-mail address.',
       });
-    if (!reqText(email, IDENTITY_LIMITS.email) || !email.includes('@'))
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'email', message: 'email must be an e-mail address.' });
     const co = {
       id: nextId('gd'),
       name,
@@ -129,9 +127,9 @@ export function registerChildren({
   guardianRouter.post('/children/:id/availability', (req, res) => {
     const child = childOf(req, res);
     if (!child) return;
-    const { availability } = req.body || {};
-    if (!CHILD_AVAILABILITY.includes(availability))
-      return res.status(400).json({ error: 'BAD_AVAILABILITY', allowed: CHILD_AVAILABILITY });
+    const body = identityInput(res, 'childAvailability', req.body);
+    if (!body) return;
+    const { availability } = body;
     const stored = players.setAvailability(child.id, { availability });
     broadcast('players', { playerId: child.id });
     res.json({ availability: stored.availability });
@@ -140,8 +138,9 @@ export function registerChildren({
   guardianRouter.post('/children/:id/medical/share', (req, res) => {
     const child = childOf(req, res);
     if (!child) return;
-    if (switchRefused(res, req.body?.shared, 'shared')) return;
-    const stored = players.setMedicalSharing(child.id, req.body.shared);
+    const body = identityInput(res, 'medicalShare', req.body);
+    if (!body) return;
+    const stored = players.setMedicalSharing(child.id, body.shared);
     broadcast('players', { playerId: child.id });
     res.json({ shared: stored.medical.shared });
   });
@@ -176,9 +175,11 @@ export function registerChildren({
 
   // Every communication about the children is on the ledger, and the parent can read all of it.
   guardianRouter.get('/log', (req, res) => {
+    const query = identityInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -190,6 +191,7 @@ export function registerChildren({
   guardianRouter.post('/children/:id/pairing-code', (req, res) => {
     const child = childOf(req, res);
     if (!child) return;
+    if (!identityInput(res, 'none', req.body)) return;
     if (rateLimit.limited('pairing_code_mint', req.guardian.id))
       return res.status(429).json(rateLimitedBody('pairing_code_mint'));
     const { code, expiresAt } = codes.issuePairingCode(child.id);

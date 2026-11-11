@@ -13,51 +13,35 @@ import {
   weeklyGoal,
   nextActions,
 } from '../../domain.mjs';
-import { IDENTITY_LIMITS, PLAYER_POSITIONS, PLAYER_FEET } from '../../repositories/identity.mjs';
 import { hashPassword, verifyPassword } from '../../adapters.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { pathwayFor, programmeProgress } from '../../grassrootsJourney.mjs';
 import { playerSelfView } from '../../views/playerViews.mjs';
+import { identityInput, PASSWORD_MIN } from './schemas.mjs';
 
 /**
- * A date of birth that cannot be read is refused rather than stored: it would fail closed as "age unknown", but the
- * account's age could then never be established. Returns true when refused.
+ * The profile as the schema read it (schemas.mjs `PROFILE`), with a name and a readable date of birth, or `undefined`
+ * once the 400 has been sent. A date of birth that cannot be read is refused rather than stored: it would fail closed
+ * as "age unknown", but the account's age could then never be established.
  */
-export function profileRefused(res, body) {
-  const bad = (status, payload) => {
-    res.status(status).json(payload);
-    return true;
-  };
-  const field = (f, message) => bad(400, { error: 'FIELD_INVALID', field: f, message });
-  const absent = (v) => v === undefined || v === null || v === '';
-  if (!body.name || !body.dob) return bad(400, { error: 'NAME_AND_DOB_REQUIRED' });
-  if (typeof body.name !== 'string' || !body.name.trim() || body.name.length > IDENTITY_LIMITS.name)
-    return field('name', `name must be text of 1 to ${IDENTITY_LIMITS.name} characters.`);
-  if (
-    body.country !== undefined &&
-    !(typeof body.country === 'string' && body.country.length >= 1 && body.country.length <= IDENTITY_LIMITS.country)
-  )
-    return field('country', `country must be text of 1 to ${IDENTITY_LIMITS.country} characters.`);
-  if (!absent(body.city) && !(typeof body.city === 'string' && body.city.length <= IDENTITY_LIMITS.city))
-    return field('city', `city must be text of at most ${IDENTITY_LIMITS.city} characters.`);
-  if (!absent(body.position) && !PLAYER_POSITIONS.includes(body.position))
-    return field('position', `position must be one of ${PLAYER_POSITIONS.join(', ')}.`);
-  if (!absent(body.foot) && !PLAYER_FEET.includes(body.foot))
-    return field('foot', `foot must be one of ${PLAYER_FEET.join(', ')}.`);
-  for (const f of ['heightCm', 'weightKg']) {
-    const [lo, hi] = IDENTITY_LIMITS[f];
-    if (!absent(body[f]) && !(Number.isSafeInteger(body[f]) && body[f] >= lo && body[f] <= hi))
-      return field(f, `${f} must be a whole number from ${lo} to ${hi}.`);
+export function profileOrRefuse(res, schema, input) {
+  const body = identityInput(res, schema, input);
+  if (!body) return undefined;
+  if (!body.name || !body.dob) {
+    res.status(400).json({ error: 'NAME_AND_DOB_REQUIRED' });
+    return undefined;
   }
-  for (const [f, lim] of [
-    ['lat', 90],
-    ['lng', 180],
-  ])
-    if (!absent(body[f]) && !(typeof body[f] === 'number' && Number.isFinite(body[f]) && Math.abs(body[f]) <= lim))
-      return field(f, `${f} must be a number from -${lim} to ${lim}.`);
-  if (!parseDobStrict(body.dob, Date.now()).ok)
-    return bad(400, { error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
-  return false;
+  if (!body.name.trim()) {
+    res
+      .status(400)
+      .json({ error: 'FIELD_INVALID', field: 'name', problem: 'blank', message: 'name must not be blank.' });
+    return undefined;
+  }
+  if (!parseDobStrict(body.dob, Date.now()).ok) {
+    res.status(400).json({ error: 'DOB_INVALID', message: 'Enter a date of birth as YYYY-MM-DD.' });
+    return undefined;
+  }
+  return body;
 }
 
 const optional = (v) => (v === undefined || v === null || v === '' ? null : v);
@@ -132,9 +116,9 @@ export function registerPlayerAccount({
     throw new TypeError('registerPlayerAccount needs the players repository and the saved-search check');
 
   app.post('/auth/player/signup', (req, res) => {
-    const body = req.body || {};
-    if (profileRefused(res, body)) return;
-    if (!body.password || String(body.password).length < 8) {
+    const body = profileOrRefuse(res, 'playerSignup', req.body);
+    if (!body) return;
+    if (!body.password || body.password.length < PASSWORD_MIN) {
       return res.status(400).json({
         error: 'PASSWORD_REQUIRED',
         message: 'Pick a password of at least 8 characters — your profile is yours alone.',
@@ -170,21 +154,23 @@ export function registerPlayerAccount({
   });
 
   app.post('/auth/player/login', (req, res) => {
+    const body = identityInput(res, 'playerLogin', req.body);
+    if (!body) return;
     // Checked before the lookup, so an unknown id and a real one are refused alike once the budget is gone.
-    if (loginLockedOut(res, `player:${req.body?.playerId}`)) return;
-    const p = findPlayer(req.body?.playerId);
+    if (loginLockedOut(res, `player:${body.playerId}`)) return;
+    const p = body.playerId ? findPlayer(body.playerId) : null;
     if (!p) {
-      noteLoginFailure(`player:${req.body?.playerId}`);
+      noteLoginFailure(`player:${body.playerId}`);
       return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     }
     const hash = players.passwordHashOf(p.id);
     if (hash) {
-      const check = verifyPassword(req.body?.password ?? '', hash);
+      const check = verifyPassword(body.password ?? '', hash);
       if (!check) {
         noteLoginFailure(`player:${p.id}`);
         return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This profile is password-protected.' });
       }
-      if (check === 'upgrade') players.setPasswordHash(p.id, hashPassword(req.body.password));
+      if (check === 'upgrade') players.setPasswordHash(p.id, hashPassword(body.password));
     } else if (!devLogins) {
       return devLoginRefused(res);
     }
@@ -192,7 +178,9 @@ export function registerPlayerAccount({
   });
 
   app.post('/auth/player/pair', (req, res) => {
-    const { code } = req.body || {};
+    const body = identityInput(res, 'pair', req.body);
+    if (!body) return;
+    const { code } = body;
     // A wrong code is charged per client address, on top of the /auth limiter.
     const source = req.ip ?? req.socket?.remoteAddress ?? '?';
     if (rateLimit.peek('pairing_attempt', source).remaining === 0)
@@ -240,6 +228,7 @@ export function registerPlayerAccount({
 
   // The day a guardian-owned player turns 18, ownership moves to them with their consent.
   playerRouter.post('/aging-up/complete', (req, res) => {
+    if (!identityInput(res, 'none', req.body)) return;
     if (!isAdult(req.player))
       return res.status(403).json({
         error: 'STILL_A_MINOR',

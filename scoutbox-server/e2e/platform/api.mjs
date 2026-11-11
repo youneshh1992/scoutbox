@@ -130,6 +130,52 @@ ok(r.status === 200, 'logout succeeds');
 r = await j('/player/me', {}, bearer(lockedToken));
 ok(r.status === 401, 'logged-out token is dead');
 
+// Identity input is valid as sent or refused, naming the field.
+{
+  const post = (path, body) => j(path, { method: 'POST', body: JSON.stringify(body) });
+  const pw = await post('/auth/player/signup', {
+    name: 'Num Pw',
+    dob: '2000-01-01',
+    country: 'GB',
+    password: 123456789,
+  });
+  ok(
+    pw.status === 400 && pw.body.field === 'password' && pw.body.problem === 'not_text',
+    'IN1 a password that is not text is refused, not hashed as the text it would be turned into',
+  );
+  const forged = await post('/auth/player/signup', {
+    name: 'Forged Owner',
+    dob: '2000-01-01',
+    country: 'GB',
+    password: 'longenough1',
+    guardianId: 'gd-amara',
+  });
+  ok(
+    forged.status === 400 && forged.body.field === 'guardianId' && forged.body.problem === 'unknown_field',
+    'IN2 a sign-up naming its own guardian is refused: a guardian creates a child from their own account',
+  );
+  const idObj = await post('/auth/player/login', { playerId: { $ne: null }, password: 'x' });
+  ok(
+    idObj.status === 400 && idObj.body.field === 'playerId' && idObj.body.problem === 'not_text',
+    'IN3 a login naming its player with an object is refused before any lookup',
+  );
+  const staff = await post('/auth/org/login', { orgId: 'org-eastport', scoutName: ['Maria Keane'] });
+  ok(
+    staff.status === 400 && staff.body.field === 'scoutName' && staff.body.problem === 'not_text',
+    'IN4 a staff login naming the person with a list is refused',
+  );
+  const platform = await post('/auth/org/login', { orgId: 'org-eastport', scoutName: 'Maria Keane', platform: 'web' });
+  ok(
+    platform.status === 400 && platform.body.field === 'platform' && platform.body.allowed?.includes('grassroots'),
+    'IN5 a login from an app ScoutBox does not have is refused, not read as the club app',
+  );
+  const orgs = await j('/orgs?platform=everything');
+  ok(
+    orgs.status === 400 && orgs.body.field === 'platform',
+    'IN6 an unknown app filter on the club list is refused, not answered with every organisation',
+  );
+}
+
 const login = async (playerId, password) =>
   (await j('/auth/player/login', { method: 'POST', body: JSON.stringify({ playerId, password }) })).body.token;
 const KOLA = await login('pl-adeyemi');
@@ -192,6 +238,29 @@ r = await j(
   bearer(nadiaToken),
 );
 ok(r.status === 201, 'child onboarding opens after all three gates');
+{
+  const kids = async () => (await j('/guardian/children', {}, bearer(nadiaToken))).body.length;
+  const before = await kids();
+  const tall = await j(
+    '/guardian/children',
+    { method: 'POST', body: JSON.stringify({ name: 'Tall Kid', dob: '2013-01-01', country: 'GB', heightCm: '150' }) },
+    bearer(nadiaToken),
+  );
+  ok(
+    tall.status === 400 && tall.body.field === 'heightCm' && tall.body.problem === 'not_number',
+    'IN7 a height written as text is refused, not stored or read as a number',
+  );
+  ok((await kids()) === before, 'IN8 and the refused child was not created');
+  const share = await j(
+    '/guardian/children/' + r.body.playerId + '/medical/share',
+    { method: 'POST', body: JSON.stringify({ shared: 'false' }) },
+    bearer(nadiaToken),
+  );
+  ok(
+    share.status === 400 && share.body.field === 'shared' && share.body.problem === 'not_boolean',
+    'IN9 a medical-sharing switch written as text is refused, not read as "on"',
+  );
+}
 const acceptedAt = (await j('/guardian/me', {}, bearer(nadiaToken))).body.disclaimerAcceptedAt;
 await j('/guardian/disclaimer', { method: 'POST', body: JSON.stringify({ accepted: true }) }, bearer(nadiaToken));
 r = await j('/guardian/me', {}, bearer(nadiaToken));
