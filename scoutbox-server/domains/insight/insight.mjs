@@ -3,25 +3,18 @@
 // claims about discrimination.
 import crypto from 'node:crypto';
 import { exposureHook } from '../enterprise/enterprise.mjs';
-import { parseStrictDateOnly } from '../../temporal.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
-import {
-  EVIDENCE_RULE_IDS,
-  CALIBRATION_CONFIDENCE,
-  INSIGHT_LIMITS,
-  typeSubmission,
-} from '../../repositories/insightCoverage.mjs';
+import { EVIDENCE_RULE_IDS, INSIGHT_LIMITS, typeSubmission } from '../../repositories/insightCoverage.mjs';
+import { filled, presentOrRefuse } from '../platform/schemas.mjs';
+import { REVIEW_LATER_DAYS, insightInput } from './schemas.mjs';
 
 const EXPOSURE_WINDOW_DAYS = 90;
 const STALE_DAYS = 180;
 const DAY_MS = 86_400_000;
-export const REVIEW_LATER_DAYS = Object.freeze({ min: 1, max: 60, default: 7 });
-export const IMPRESSIONS_MAX = 50;
 const fieldInvalid = (res, field, message) => {
   res.status(400).json({ error: 'FIELD_INVALID', field, message });
   return undefined;
 };
-const isId = (v) => typeof v === 'string' && v.length > 0 && v.length <= INSIGHT_LIMITS.id;
 /**
  * Bounds a rule's hit to INSIGHT_LIMITS: a player with hundreds of clips, or a 20-attribute rubric never observed,
  * would otherwise exceed them and fail the read, and with it the Room view that runs the rules.
@@ -79,9 +72,9 @@ export function registerInsight(ctx) {
 
   // The client reports which players a search actually rendered.
   orgRouter.post('/exposure/impressions', (req, res) => {
-    const ids = req.body?.playerIds;
-    if (!Array.isArray(ids) || ids.length > IMPRESSIONS_MAX || !ids.every(isId))
-      return fieldInvalid(res, 'playerIds', `playerIds must be a list of at most ${IMPRESSIONS_MAX} player ids.`);
+    const body = insightInput(res, 'impressions', req.body);
+    if (!body) return;
+    const ids = body.playerIds;
     // Players this organisation cannot see are skipped, never refused: a refusal would say who is hidden.
     const recorded = unit(
       () =>
@@ -218,14 +211,9 @@ export function registerInsight(ctx) {
   });
 
   orgRouter.post('/review-queue/:playerId/later', (req, res) => {
-    const raw = req.body?.days;
-    const days = raw === undefined || raw === null ? REVIEW_LATER_DAYS.default : raw;
-    if (!Number.isInteger(days) || days < REVIEW_LATER_DAYS.min || days > REVIEW_LATER_DAYS.max)
-      return fieldInvalid(
-        res,
-        'days',
-        `days must be a whole number from ${REVIEW_LATER_DAYS.min} to ${REVIEW_LATER_DAYS.max}.`,
-      );
+    const body = insightInput(res, 'later', req.body);
+    if (!body) return;
+    const days = body.days ?? REVIEW_LATER_DAYS.default;
     // Only a player the organisation can see now can be deferred.
     const p = findPlayer(req.params.playerId);
     if (!p || !orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
@@ -309,17 +297,12 @@ export function registerInsight(ctx) {
   const activeStaffOf = (orgId, uid) => byId.user(uid, (u) => u.orgId === orgId && !u.removedAt);
   orgRouter.post('/calibration', (req, res) => {
     if (!requireLead(req, res)) return;
-    const b = req.body ?? {};
-    const tmpl = ctx.scoutingReads.templates.currentById(b.templateId);
+    const b = insightInput(res, 'calibration', req.body);
+    if (!b) return;
+    const tmpl = b.templateId ? ctx.scoutingReads.templates.currentById(b.templateId) : null;
     if (!tmpl) return res.status(404).json({ error: 'TEMPLATE_NOT_FOUND' });
-    if (b.title !== undefined && b.title !== null && typeof b.title !== 'string')
-      return fieldInvalid(res, 'title', 'title must be text.');
-    const title =
-      (typeof b.title === 'string' ? b.title.trim() : '').slice(0, INSIGHT_LIMITS.calibrationTitle) ||
-      'Calibration session';
+    const title = filled(b.title) ?? 'Calibration session';
     // Reference footage must be footage this org can see now.
-    if (b.mediaId !== undefined && b.mediaId !== null && !isId(b.mediaId))
-      return fieldInvalid(res, 'mediaId', 'mediaId must be a media id.');
     const mediaId = b.mediaId ?? null;
     if (mediaId) {
       const owner = byId.mediaOwner(mediaId);
@@ -330,14 +313,6 @@ export function registerInsight(ctx) {
         });
     }
     const ids = b.participantUserIds;
-    if (!Array.isArray(ids) || ids.length > INSIGHT_LIMITS.participants || !ids.every(isId))
-      return fieldInvalid(
-        res,
-        'participantUserIds',
-        `participantUserIds must be a list of at most ${INSIGHT_LIMITS.participants} staff ids.`,
-      );
-    if (new Set(ids).size !== ids.length)
-      return fieldInvalid(res, 'participantUserIds', 'participantUserIds names a scout twice.');
     const stranger = ids.find((uid) => !activeStaffOf(req.org.id, uid));
     if (stranger)
       return fieldInvalid(
@@ -450,9 +425,11 @@ export function registerInsight(ctx) {
   }
 
   orgRouter.get('/calibration', (req, res) => {
+    const query = insightInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'string']);
+      page = readPage(query, ['number', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -494,11 +471,10 @@ export function registerInsight(ctx) {
       return res
         .status(409)
         .json({ error: 'ALREADY_SUBMITTED', message: 'Blind submissions are final — one per participant.' });
-    const b = req.body ?? {};
-    if (!Array.isArray(b.ratings) || !b.ratings.length) return res.status(400).json({ error: 'RATINGS_REQUIRED' });
-    const confidence = b.confidence === undefined || b.confidence === null ? 'medium' : b.confidence;
-    if (!CALIBRATION_CONFIDENCE.includes(confidence))
-      return fieldInvalid(res, 'confidence', `confidence must be one of ${CALIBRATION_CONFIDENCE.join(', ')}.`);
+    const b = insightInput(res, 'submission', req.body);
+    if (!b) return;
+    if (!b.ratings?.length) return res.status(400).json({ error: 'RATINGS_REQUIRED', field: 'ratings' });
+    const confidence = b.confidence ?? 'medium';
     const sub = typeSubmission(
       {
         userId: req.orgUser.id,
@@ -526,6 +502,7 @@ export function registerInsight(ctx) {
 
   orgRouter.post('/calibration/:id/close', (req, res) => {
     if (!requireLead(req, res)) return;
+    if (!insightInput(res, 'none', req.body)) return;
     const s = calibration.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     res.json({ session: sessionView(calibration.close(s.id, Date.now()), req) });
@@ -540,8 +517,10 @@ export function registerInsight(ctx) {
       return res
         .status(409)
         .json({ error: 'SUBMIT_FIRST', message: 'Discussion notes open after your blind submission.' });
-    const t = req.body?.text;
-    if (typeof t !== 'string' || !t.trim()) return fieldInvalid(res, 'text', 'text must be a non-empty note.');
+    const body = insightInput(res, 'note', req.body);
+    if (!body) return;
+    const t = filled(body.text);
+    if (!presentOrRefuse(res, t, 'text', { error: 'FIELD_INVALID' })) return;
     if (s.notes.length >= INSIGHT_LIMITS.notes)
       return res
         .status(409)
@@ -550,7 +529,7 @@ export function registerInsight(ctx) {
       at: Date.now(),
       byUserId: req.orgUser.id,
       byName: req.orgUser.name ?? null,
-      text: t.trim().slice(0, INSIGHT_LIMITS.note),
+      text: t,
     });
     res
       .status(201)
@@ -793,6 +772,7 @@ export function registerInsight(ctx) {
   }
 
   orgRouter.post('/evidence-gaps/:id/request', (req, res) => {
+    if (!insightInput(res, 'none', req.body)) return;
     const out = requestEvidenceGap({ org: req.org, suggestionId: req.params.id });
     if (!out.ok)
       return res
@@ -815,12 +795,14 @@ export function registerInsight(ctx) {
   }
 
   orgRouter.post('/evidence-gaps/:id/dismiss', (req, res) => {
+    if (!insightInput(res, 'none', req.body)) return;
     const s = suggestions.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SUGGESTION_NOT_FOUND' });
     res.json({ suggestion: suggestionView(suggestions.setStatus(s.id, 'dismissed', Date.now())) });
   });
 
   orgRouter.post('/evidence-gaps/:id/reviewed', (req, res) => {
+    if (!insightInput(res, 'none', req.body)) return;
     const s = suggestions.forOrgById(req.org.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SUGGESTION_NOT_FOUND' });
     if (s.status !== 'supplied')

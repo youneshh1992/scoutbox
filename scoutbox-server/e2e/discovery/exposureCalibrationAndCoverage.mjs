@@ -504,7 +504,7 @@ section('junk refused, paging, explicit upserts');
   );
   const attr = cal2.attributesSnapshot[0].id;
   r = await j('POST', `/org/calibration/${cal2.id}/submit`, { ratings: [{ attrId: attr, value: 9 }] }, scout2.token);
-  ok(field(r, 'ratings'), 'calibration: a rating of 9 is refused, not clamped to 5');
+  ok(field(r, 'ratings[0].value'), 'calibration: a rating of 9 is refused, not clamped to 5');
   r = await j(
     'POST',
     `/org/calibration/${cal2.id}/submit`,
@@ -619,6 +619,71 @@ section('junk refused, paging, explicit upserts');
   ok(
     r.body.items.every((a) => a.scoutUserId === scout2.userId),
     'a scout sees only their own assignments',
+  );
+
+  // Insight input is valid as sent or refused: text over its limit is not cut, nothing the form lacks is taken.
+  const fixtures = async () => (await j('GET', '/org/coverage/fixtures?limit=100', undefined, maria.token)).body.items;
+  const before = (await fixtures()).length;
+  r = await j('POST', '/org/coverage/fixtures', { home: 'H'.repeat(81), away: 'B', date: '2026-10-02' }, maria.token);
+  ok(
+    r.status === 400 && r.body.field === 'home' && r.body.problem === 'too_long' && r.body.max === 80,
+    'IN1 a team name over 80 characters is refused, not cut',
+  );
+  r = await j(
+    'POST',
+    '/org/coverage/fixtures',
+    { home: 'A', away: 'B', date: '2026-10-02', lat: '51.5', lng: 0 },
+    maria.token,
+  );
+  ok(
+    r.status === 400 && r.body.field === 'lat' && r.body.problem === 'not_number',
+    'IN2 a latitude written as text is refused',
+  );
+  r = await j('POST', '/org/coverage/fixtures', { home: 'A', away: 'B', date: 20261002 }, maria.token);
+  ok(
+    r.status === 400 && r.body.error === 'DATE_INVALID' && r.body.field === 'date',
+    'IN3 a date written as a number is DATE_INVALID',
+  );
+  r = await j(
+    'POST',
+    '/org/coverage/fixtures',
+    { home: 'A', away: 'B', date: '2026-10-02', orgId: 'org-hackneymarsh' },
+    maria.token,
+  );
+  ok(
+    r.status === 400 && r.body.field === 'orgId' && r.body.problem === 'unknown_field',
+    'IN4 a fixture cannot name the club it belongs to',
+  );
+  ok((await fixtures()).length === before, 'IN5 and none of the refused fixtures was stored');
+  r = await j('POST', '/org/coverage-plans', { label: 'L'.repeat(101) }, maria.token);
+  ok(
+    r.status === 400 && r.body.field === 'label' && r.body.problem === 'too_long',
+    'IN6 a plan label over its limit is refused, not cut',
+  );
+  r = await j(
+    'POST',
+    '/org/coverage/assignments',
+    { fixtureId: fx.id, scoutUserId: scout2.userId, travelCurrency: 'XYZ' },
+    maria.token,
+  );
+  ok(
+    r.status === 400 && r.body.field === 'travelCurrency' && r.body.allowed?.includes('GBP'),
+    'IN7 an unknown currency is refused, listing the allowed ones',
+  );
+  r = await j(
+    'POST',
+    '/org/coverage/assignments',
+    { fixtureId: fx.id, scoutUserId: scout2.userId, travelBudgetMinor: '500' },
+    maria.token,
+  );
+  ok(
+    r.status === 400 && r.body.error === 'AMOUNT_INVALID' && r.body.field === 'travelBudgetMinor',
+    'IN8 a travel budget written as text is AMOUNT_INVALID',
+  );
+  r = await j('POST', '/org/review-queue/pl-adeyemi/later', { days: '7' }, maria.token);
+  ok(
+    r.status === 400 && r.body.field === 'days' && r.body.problem === 'not_number',
+    'IN9 a deferral written as text is refused',
   );
 }
 

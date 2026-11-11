@@ -1,8 +1,9 @@
 // Travel times are never invented; candidate suggestions contain only players the org can see.
-import { parseStrictDateOnly } from '../../temporal.mjs';
-import { validAmountMinor, CURRENCIES } from '../recruitment/money.mjs';
+import { validAmountMinor } from '../recruitment/money.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
 import { INSIGHT_LIMITS as L } from '../../repositories/insightCoverage.mjs';
+import { filled } from '../platform/schemas.mjs';
+import { insightInput } from './schemas.mjs';
 
 export const PLAN_DEFAULTS = Object.freeze({ label: 'Coverage plan', goalObservations: 5, windowDays: 60 });
 const TRAVEL_NOTE =
@@ -16,9 +17,6 @@ const fieldInvalid = (res, field, message) => {
   return undefined;
 };
 const absent = (v) => v === undefined || v === null;
-const isId = (v) => typeof v === 'string' && v.length > 0 && v.length <= L.id;
-/** absent → null; not text → undefined (refused); over-long text is shortened. */
-const optText = (v, max) => (absent(v) ? null : typeof v !== 'string' ? undefined : v.trim().slice(0, max) || null);
 
 export function registerCoverage(ctx) {
   const {
@@ -87,39 +85,30 @@ export function registerCoverage(ctx) {
 
   // ============================================================ coverage
   orgRouter.post('/coverage/fixtures', (req, res) => {
-    const b = req.body ?? {};
-    if (typeof b.home !== 'string' || !b.home.trim() || typeof b.away !== 'string' || !b.away.trim() || absent(b.date))
+    const b = insightInput(res, 'fixture', req.body);
+    if (!b) return;
+    const home = filled(b.home);
+    const away = filled(b.away);
+    if (!home || !away || absent(b.date))
       return res.status(400).json({ error: 'FIXTURE_FIELDS', message: 'home, away and date are required.' });
-    const day = parseStrictDateOnly(b.date);
-    if (!day.ok || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.date)))
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'date',
-        message: 'date must be a calendar day written YYYY-MM-DD.',
-        expected: 'YYYY-MM-DD',
-      });
-    const competition = optText(b.competition, L.competition);
-    if (competition === undefined) return fieldInvalid(res, 'competition', 'competition must be text.');
+    const competition = filled(b.competition);
     let location = null;
     if (!absent(b.lat) || !absent(b.lng)) {
-      const okLat = typeof b.lat === 'number' && Number.isFinite(b.lat) && Math.abs(b.lat) <= 90;
-      const okLng = typeof b.lng === 'number' && Number.isFinite(b.lng) && Math.abs(b.lng) <= 180;
-      if (!okLat || !okLng)
+      if (absent(b.lat) || absent(b.lng))
         return fieldInvalid(
           res,
-          okLat ? 'lng' : 'lat',
+          absent(b.lat) ? 'lat' : 'lng',
           'A location needs both lat (−90 to 90) and lng (−180 to 180) as numbers.',
         );
-      if (!absent(b.city) && typeof b.city !== 'string') return fieldInvalid(res, 'city', 'city must be text.');
-      location = { lat: b.lat, lng: b.lng, city: (b.city ?? '').trim().slice(0, L.city) };
+      location = { lat: b.lat, lng: b.lng, city: (b.city ?? '').trim() };
     } else if (!absent(b.city)) return fieldInvalid(res, 'city', 'city is recorded with a location (lat and lng).');
     const f = fixtures.create({
       id: nextId('fix'),
       orgId: req.org.id,
       competition,
-      home: b.home.trim().slice(0, L.team),
-      away: b.away.trim().slice(0, L.team),
-      date: String(b.date),
+      home,
+      away,
+      date: b.date,
       location,
       createdBy: req.orgUser.name ?? null,
       createdAt: Date.now(),
@@ -146,9 +135,11 @@ export function registerCoverage(ctx) {
 
   /** `cursor` is `[date, id]`. */
   orgRouter.get('/coverage/fixtures', (req, res) => {
+    const query = insightInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['string', 'string']);
+      page = readPage(query, ['string', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -159,27 +150,13 @@ export function registerCoverage(ctx) {
 
   orgRouter.post('/coverage-plans', (req, res) => {
     if (!requireLead(req, res)) return;
-    const b = req.body ?? {};
-    const label = absent(b.label) ? PLAN_DEFAULTS.label : optText(b.label, L.label);
-    if (label === undefined) return fieldInvalid(res, 'label', 'label must be text.');
-    const competition = optText(b.competition, L.competition);
-    if (competition === undefined) return fieldInvalid(res, 'competition', 'competition must be text.');
-    const region = optText(b.region, L.region);
-    if (region === undefined) return fieldInvalid(res, 'region', 'region must be text.');
-    const goal = absent(b.goalObservations) ? PLAN_DEFAULTS.goalObservations : b.goalObservations;
-    if (!Number.isInteger(goal) || goal < L.goal[0] || goal > L.goal[1])
-      return fieldInvalid(
-        res,
-        'goalObservations',
-        `goalObservations must be a whole number from ${L.goal[0]} to ${L.goal[1]}.`,
-      );
-    const windowDays = absent(b.windowDays) ? PLAN_DEFAULTS.windowDays : b.windowDays;
-    if (!Number.isInteger(windowDays) || windowDays < L.windowDays[0] || windowDays > L.windowDays[1])
-      return fieldInvalid(
-        res,
-        'windowDays',
-        `windowDays must be a whole number from ${L.windowDays[0]} to ${L.windowDays[1]}.`,
-      );
+    const b = insightInput(res, 'plan', req.body);
+    if (!b) return;
+    const label = filled(b.label);
+    const competition = filled(b.competition);
+    const region = filled(b.region);
+    const goal = b.goalObservations ?? PLAN_DEFAULTS.goalObservations;
+    const windowDays = b.windowDays ?? PLAN_DEFAULTS.windowDays;
     const p = plans.create({
       id: nextId('cvp'),
       orgId: req.org.id,
@@ -206,18 +183,14 @@ export function registerCoverage(ctx) {
 
   orgRouter.post('/coverage/assignments', (req, res) => {
     if (!requireLead(req, res)) return;
-    const b = req.body ?? {};
-    const found =
-      typeof b.fixtureId === 'string' ? insightCoverage.observable.byPublicId(req.org.id, b.fixtureId) : null;
+    const b = insightInput(res, 'assignment', req.body);
+    if (!b) return;
+    const found = b.fixtureId ? insightCoverage.observable.byPublicId(req.org.id, b.fixtureId) : null;
     const fixture = found ? observableView(found) : null;
     if (!fixture) return res.status(404).json({ error: 'FIXTURE_NOT_FOUND' });
-    const scout = byId.user(b.scoutUserId, (u) => u.orgId === req.org.id && !u.removedAt);
+    const scout = b.scoutUserId ? byId.user(b.scoutUserId, (u) => u.orgId === req.org.id && !u.removedAt) : null;
     if (!scout) return res.status(404).json({ error: 'SCOUT_NOT_FOUND' });
-    const rawTargets = absent(b.targetPlayerIds) ? [] : b.targetPlayerIds;
-    if (!Array.isArray(rawTargets) || rawTargets.length > L.targets || !rawTargets.every(isId))
-      return fieldInvalid(res, 'targetPlayerIds', `targetPlayerIds must be a list of at most ${L.targets} player ids.`);
-    if (new Set(rawTargets).size !== rawTargets.length)
-      return fieldInvalid(res, 'targetPlayerIds', 'targetPlayerIds names a player twice.');
+    const rawTargets = b.targetPlayerIds ?? [];
     let travelBudget = null;
     if (!absent(b.travelBudgetMinor)) {
       if (!validAmountMinor(b.travelBudgetMinor) || b.travelBudgetMinor < 0)
@@ -226,9 +199,7 @@ export function registerCoverage(ctx) {
           field: 'travelBudgetMinor',
           message: 'travelBudgetMinor must be a non-negative whole number of minor units (pence/cents).',
         });
-      const currency = absent(b.travelCurrency) ? 'GBP' : b.travelCurrency;
-      if (!CURRENCIES.includes(currency))
-        return fieldInvalid(res, 'travelCurrency', `travelCurrency must be one of ${CURRENCIES.join(', ')}.`);
+      const currency = b.travelCurrency ?? 'GBP';
       travelBudget = { amountMinor: b.travelBudgetMinor, currency, enteredBy: req.orgUser.name ?? null };
     } else if (!absent(b.travelCurrency))
       return fieldInvalid(res, 'travelCurrency', 'travelCurrency goes with travelBudgetMinor.');
@@ -275,9 +246,11 @@ export function registerCoverage(ctx) {
 
   /** A scout sees only their own assignments, unless a lead. */
   orgRouter.get('/coverage/assignments', (req, res) => {
+    const query = insightInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'string']);
+      page = readPage(query, ['number', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -295,11 +268,10 @@ export function registerCoverage(ctx) {
     if (a.scoutUserId !== req.orgUser.id && !isLead(req.orgUser))
       return res.status(403).json({ error: 'NOT_YOUR_ASSIGNMENT' });
     if (a.observedAt) return res.status(409).json({ error: 'ALREADY_COMPLETED' });
-    const assessmentId = req.body?.assessmentId ?? null;
-    if (
-      assessmentId !== null &&
-      (!isId(assessmentId) || ctx.scoutingReads.assessments.byId(assessmentId)?.orgId !== req.org.id)
-    ) {
+    const body = insightInput(res, 'complete', req.body);
+    if (!body) return;
+    const assessmentId = body.assessmentId ?? null;
+    if (assessmentId !== null && ctx.scoutingReads.assessments.byId(assessmentId)?.orgId !== req.org.id) {
       return fieldInvalid(res, 'assessmentId', 'assessmentId must name one of your organisation’s assessments.');
     }
     res.json({ assignment: assignmentView(assignments.complete(a.id, { at: Date.now(), assessmentId })) });
@@ -307,6 +279,7 @@ export function registerCoverage(ctx) {
 
   orgRouter.post('/coverage/assignments/:id/cancel', (req, res) => {
     if (!requireLead(req, res)) return;
+    if (!insightInput(res, 'none', req.body)) return;
     const a = assignments.forOrgById(req.org.id, req.params.id);
     if (!a) return res.status(404).json({ error: 'ASSIGNMENT_NOT_FOUND' });
     res.json({ assignment: assignmentView(assignments.cancel(a.id, Date.now())) });
