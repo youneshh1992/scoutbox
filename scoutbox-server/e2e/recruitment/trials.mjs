@@ -1315,6 +1315,39 @@ const S = {};
       cosmetic.body.trial.revisions[1].confirmedAt > 0,
     'S3 revisions are append-only: the first is superseded, the second is current and carries the standing confirmation',
   );
+  const forgedSession = collect(
+    'forged session field',
+    await j(
+      'POST',
+      `/org/rooms/${S.RID}/trials/${S.TID}/reschedule`,
+      body([{ id: S.SID, startsAt: base + 2 * H, endsAt: base + 4 * H, venue: V(), attendance: 'attended' }], {
+        expectedRev: 2,
+      }),
+      maria.token,
+    ),
+  );
+  neg(
+    expect(forgedSession, 400, 'TRIAL_SCHEDULE_INVALID') &&
+      forgedSession.body.field === 'sessions[0].attendance' &&
+      forgedSession.body.problem === 'unknown_field',
+    'S3c a session carries no attendance of its own: an undeclared field is refused, by its path',
+  );
+  const longReason = collect(
+    'over-long reschedule reason',
+    await j(
+      'POST',
+      `/org/rooms/${S.RID}/trials/${S.TID}/reschedule`,
+      body([{ id: S.SID, startsAt: base + 2 * H, endsAt: base + 4 * H, venue: V() }], {
+        expectedRev: 2,
+        reason: 'x'.repeat(TRIAL_LIMITS.reason + 1),
+      }),
+      maria.token,
+    ),
+  );
+  neg(
+    expect(longReason, 400, 'TRIAL_CONTENT_INVALID') && longReason.body.max === TRIAL_LIMITS.reason,
+    'S3d an over-long reason is refused, not cut short on the revision the family reads',
+  );
   // A material revision clears it.
   const material = await j(
     'POST',
@@ -1376,6 +1409,14 @@ const S = {};
   neg(
     expect(compProposed, 409, 'TRIAL_INVALID_STATE') && compProposed.body.current?.workflowState === 'accepted',
     'S6b nor can it complete — the state gate answers before the completion gate',
+  );
+  const forgedDecline = collect(
+    'forged decline field',
+    await j('POST', `/player/trials/${S.TID}/decline-schedule`, { reason: 'Exams.', cancelTrial: true }, mateus.token),
+  );
+  neg(
+    expect(forgedDecline, 400, 'TRIAL_CONTENT_INVALID') && forgedDecline.body.problem === 'unknown_field',
+    'S7a a family answer takes only its reason: an undeclared field is refused',
   );
   const declined = await j(
     'POST',
@@ -1651,19 +1692,32 @@ const A = {};
     );
   }
   const rating = collect(
-    'rating in note',
+    'rating with attendance',
     await j(
       'POST',
       `/org/rooms/${A.RID}/trials/${A.TID}/sessions/${A.SID}/attendance`,
-      { state: 'attended', rating: 5, expectedRev: t.rev, note: 'x'.repeat(TRIAL_LIMITS.note + 1) },
+      { state: 'attended', rating: 5, expectedRev: t.rev },
       maria.token,
       at(s + 10 * MIN),
     ),
   );
   neg(
-    expect(rating, 400, 'TRIAL_ATTENDANCE_INVALID'),
-    'A3 an over-long note is refused; there is no rating field to accept',
+    expect(rating, 400, 'TRIAL_CONTENT_INVALID') &&
+      rating.body.field === 'rating' &&
+      rating.body.problem === 'unknown_field',
+    'A3 there is no rating field to accept: attendance records what happened, never how it went',
   );
+  const longNote = collect(
+    'over-long note',
+    await j(
+      'POST',
+      `/org/rooms/${A.RID}/trials/${A.TID}/sessions/${A.SID}/attendance`,
+      { state: 'attended', expectedRev: t.rev, note: 'x'.repeat(TRIAL_LIMITS.note + 1) },
+      maria.token,
+      at(s + 10 * MIN),
+    ),
+  );
+  neg(expect(longNote, 400, 'TRIAL_ATTENDANCE_INVALID'), 'A3b an over-long note is refused');
   const ghost = collect(
     'ghost session',
     await j(
@@ -3349,13 +3403,20 @@ section('X — content: text is text, prototype keys are nothing, wrong types ar
   neg(arrayBody.status === 400, 'X1b a JSON array body is refused (400)');
   neg((await trialsOf(RID)).invitation === null, 'X2 none of those wrote an invitation');
   const xss = `<script>alert(1)</script> Come and train "with" us & bring boots; see you, then.`;
+  const polluting = collect(
+    'prototype keys',
+    await invite(RID, maria.token, { message: 'Hello', constructor: { prototype: { polluted: true } } }),
+  );
+  neg(
+    polluting.status === 400 && polluting.body.field === 'constructor' && polluting.body.problem === 'unknown_field',
+    'X3a a prototype key in the body is refused as an undeclared field',
+  );
   const inv = await invite(RID, maria.token, {
     message: xss,
     instructions: 'Line one\nLine two, with a comma; and a semicolon',
     __proto__: { admin: true },
-    constructor: { prototype: { polluted: true } },
   });
-  ok(inv.status === 201, 'X3 a message with markup and punctuation is accepted as TEXT; prototype keys are ignored');
+  ok(inv.status === 201, 'X3 a message with markup and punctuation is accepted as TEXT');
   ok(
     {}.polluted === undefined && {}.admin === undefined,
     "X3b the suite's own prototype is untouched (and the server answered normally)",

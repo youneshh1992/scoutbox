@@ -48,6 +48,62 @@ import {
   byStartsAtThenId,
   parseInstant,
 } from './trial.mjs';
+import * as v from 'valibot';
+import { id, oneOf, parseInput, REV_FIELDS, text } from '../../platform/schemas.mjs';
+
+// Shape and type only. The trial validators judge times, zones, lengths, vocabularies and the venue's cleaning,
+// and keep their own codes; times are `unknown` here because parseInstant words their refusal.
+const words = v.nullish(v.string());
+const Venue = v.strictObject({ name: words, town: words, address: words });
+const Slot = v.strictObject({ kind: words, startsAt: v.unknown(), endsAt: v.unknown() });
+const Session = v.strictObject({
+  id: words,
+  kind: words,
+  startsAt: v.unknown(),
+  endsAt: v.unknown(),
+  venue: v.optional(Venue),
+  instructions: words,
+});
+// `clientKey` keeps the platform's idempotency-key rule (normaliseTrialClientKey).
+const KEY = { clientKey: v.optional(v.unknown()) };
+const Invitation = v.strictObject({
+  ...KEY,
+  timezone: words,
+  venue: v.optional(Venue),
+  slots: v.nullish(v.array(Slot)),
+  message: words,
+  instructions: words,
+});
+const ScheduleProposal = v.strictObject({
+  ...KEY,
+  ...REV_FIELDS,
+  timezone: words,
+  sessions: v.nullish(v.array(Session)),
+  reason: v.nullish(text(TRIAL_LIMITS.reason)),
+});
+const ClubCancel = v.strictObject({ ...KEY, ...REV_FIELDS, reason: words });
+// What happened, never how it went: the refusal lists the states.
+const Attendance = v.strictObject({ ...KEY, ...REV_FIELDS, state: oneOf(TRIAL_ATTENDANCE_STATES), note: words });
+const Completion = v.strictObject({ ...KEY, ...REV_FIELDS });
+const EvidenceLink = v.strictObject({ ...KEY, ...REV_FIELDS, boxSessionId: v.nullish(id) });
+const EvidenceUnlink = v.strictObject(REV_FIELDS);
+const ScheduleConfirm = v.strictObject(REV_FIELDS);
+const RecipientAnswer = v.strictObject({ ...REV_FIELDS, reason: words });
+export const TRIAL_INPUT_CODES = Object.freeze({
+  codes: { FIELD_INVALID: 'TRIAL_CONTENT_INVALID' },
+  fieldCodes: {
+    expectedRev: 'TRIAL_REV_REQUIRED',
+    expectedVersion: 'TRIAL_REV_REQUIRED',
+    timezone: 'TRIAL_TIMEZONE_INVALID',
+    'venue.*': 'TRIAL_VENUE_INVALID',
+    'slots.*': 'TRIAL_SLOTS_INVALID',
+    'sessions.*': 'TRIAL_SCHEDULE_INVALID',
+    'sessions.venue.*': 'TRIAL_VENUE_INVALID',
+    state: 'TRIAL_ATTENDANCE_INVALID',
+    note: 'TRIAL_ATTENDANCE_INVALID',
+    boxSessionId: 'TRIAL_EVIDENCE_REF_INVALID',
+  },
+});
 
 export function registerTrial(ctx) {
   const {
@@ -85,6 +141,13 @@ export function registerTrial(ctx) {
   const now = requestClock();
   const limited = limitCheck(rateLimit);
   const err = (res, error, message, extra = {}) => sendDomainError(res, { error, message, ...extra }, 'trial');
+  /** The request body read with its schema, or `undefined` once the refusal is sent. */
+  const trialInput = (res, schema, body) => {
+    const parsed = parseInput(schema, body ?? {}, TRIAL_INPUT_CODES);
+    if (parsed.ok) return parsed.value;
+    sendDomainError(res, parsed, 'trial');
+    return undefined;
+  };
   const orgActor = (req) => ({ kind: 'org', userId: req.orgUser.id, name: req.orgUser.name });
   const orgOf = (orgId) => ctx.byId.org(orgId);
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
@@ -473,9 +536,11 @@ export function registerTrial(ctx) {
     const { room } = got;
     const at = now(req);
 
-    const key = normaliseTrialClientKey(req.body?.clientKey);
+    const body = trialInput(res, Invitation, req.body);
+    if (!body) return;
+    const key = normaliseTrialClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
-    const inv = validateInvitation(req.body, { now: at });
+    const inv = validateInvitation(body, { now: at });
     if (!inv.ok)
       return err(
         res,
@@ -665,11 +730,13 @@ export function registerTrial(ctx) {
     const t = findTrial(req, res, room);
     if (!t) return;
     const at = now(req);
-    const key = normaliseTrialClientKey(req.body?.clientKey);
+    const body = trialInput(res, ScheduleProposal, req.body);
+    if (!body) return;
+    const key = normaliseTrialClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
 
     const existingIds = (t.schedule?.sessions ?? []).map((s) => s.id);
-    const check = validateScheduleInput(req.body, { now: at, mintId: () => nextId('tses'), existingIds });
+    const check = validateScheduleInput(body, { now: at, mintId: () => nextId('tses'), existingIds });
     if (!check.ok)
       return err(
         res,
@@ -740,8 +807,7 @@ export function registerTrial(ctx) {
     const material = materialChange(t.schedule, { timezone: check.schedule.timezone, sessions });
     const revision = (t.schedule?.revision ?? 0) + 1;
     const wasConfirmed = !!t.schedule?.confirmedAt;
-    const reason =
-      typeof req.body?.reason === 'string' ? req.body.reason.trim().slice(0, TRIAL_LIMITS.reason) || null : null;
+    const reason = body.reason?.trim() || null;
 
     // A cosmetic change keeps the confirmation the recipient already gave.
     const keepsConfirmation = wasConfirmed && !material;
@@ -797,9 +863,11 @@ export function registerTrial(ctx) {
     const t = findTrial(req, res, room);
     if (!t) return;
     const at = now(req);
-    const key = normaliseTrialClientKey(req.body?.clientKey);
+    const body = trialInput(res, ClubCancel, req.body);
+    if (!body) return;
+    const key = normaliseTrialClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
-    const reasonRaw = req.body?.reason;
+    const reasonRaw = body.reason;
     if (typeof reasonRaw !== 'string' || !reasonRaw.trim())
       return err(res, 'TRIAL_CONTENT_INVALID', 'A cancellation needs a reason the family will read.', {
         field: 'reason',
@@ -851,9 +919,11 @@ export function registerTrial(ctx) {
     const t = findTrial(req, res, room);
     if (!t) return;
     const at = now(req);
-    const key = normaliseTrialClientKey(req.body?.clientKey);
+    const body = trialInput(res, Attendance, req.body);
+    if (!body) return;
+    const key = normaliseTrialClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
-    const state = req.body?.state;
+    const { state } = body;
     if (!TRIAL_ATTENDANCE_STATES.includes(state))
       return err(
         res,
@@ -861,7 +931,7 @@ export function registerTrial(ctx) {
         `Attendance must be one of ${TRIAL_ATTENDANCE_STATES.join(', ')}. It records what happened, never how it went.`,
         { allowed: TRIAL_ATTENDANCE_STATES },
       );
-    const noteRaw = req.body?.note;
+    const noteRaw = body.note;
     if (
       noteRaw !== undefined &&
       noteRaw !== null &&
@@ -921,7 +991,9 @@ export function registerTrial(ctx) {
     const t = findTrial(req, res, room);
     if (!t) return;
     const at = now(req);
-    const key = normaliseTrialClientKey(req.body?.clientKey);
+    const body = trialInput(res, Completion, req.body);
+    if (!body) return;
+    const key = normaliseTrialClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const fp = payloadFingerprint({ complete: t.id });
     const kc = keyCheck(t, 'complete', key.key, fp);
@@ -1042,9 +1114,11 @@ export function registerTrial(ctx) {
     const t = findTrial(req, res, room);
     if (!t) return;
     const at = now(req);
-    const key = normaliseTrialClientKey(req.body?.clientKey);
+    const body = trialInput(res, EvidenceLink, req.body);
+    if (!body) return;
+    const key = normaliseTrialClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
-    const boxSessionId = req.body?.boxSessionId;
+    const { boxSessionId } = body;
     const fp = payloadFingerprint({
       trialSessionId: req.params.sid,
       boxSessionId: typeof boxSessionId === 'string' ? boxSessionId : null,
@@ -1110,6 +1184,7 @@ export function registerTrial(ctx) {
     const t = findTrial(req, res, room);
     if (!t) return;
     const at = now(req);
+    if (!trialInput(res, EvidenceUnlink, req.body)) return;
     const auth = reauth(req, res, room, t, 'link');
     if (!auth) return;
     let hit = null;
@@ -1455,6 +1530,7 @@ export function registerTrial(ctx) {
       const playerIds = by === 'guardian' ? req.guardian.childIds : [req.player.id];
       const got = recipientTrial(req, res, { by, actorId, playerIds });
       if (!got) return;
+      if (!trialInput(res, ScheduleConfirm, req.body)) return;
       const { trial: t, blocked } = got;
       if (blocked)
         return err(
@@ -1535,6 +1611,8 @@ export function registerTrial(ctx) {
       const playerIds = by === 'guardian' ? req.guardian.childIds : [req.player.id];
       const got = recipientTrial(req, res, { by, actorId, playerIds });
       if (!got) return;
+      const body = trialInput(res, RecipientAnswer, req.body);
+      if (!body) return;
       const { trial: t } = got;
       const at = now(req);
       if (!t.schedule || t.schedule.confirmedAt)
@@ -1543,7 +1621,7 @@ export function registerTrial(ctx) {
         return err(res, 'TRIAL_INVALID_STATE', 'This trial has ended.');
       if (t.schedule.declinedAt) return res.json({ trial: trialFamilyView(t), idempotent: true });
       if (limited('trial_response', `${by}:${actorId}`)) return res.status(429).json(rateLimitedBody('trial_response'));
-      const reasonRaw = req.body?.reason;
+      const reasonRaw = body.reason;
       if (
         reasonRaw !== undefined &&
         reasonRaw !== null &&
@@ -1578,13 +1656,15 @@ export function registerTrial(ctx) {
       const playerIds = by === 'guardian' ? req.guardian.childIds : [req.player.id];
       const got = recipientTrial(req, res, { by, actorId, playerIds });
       if (!got) return;
+      const body = trialInput(res, RecipientAnswer, req.body);
+      if (!body) return;
       const { trial: t } = got;
       const at = now(req);
       const state = deriveWorkflowState(t);
       if (['completed', 'cancelled'].includes(state))
         return res.json({ trial: trialFamilyView(t), idempotent: state === 'cancelled' });
       if (limited('trial_response', `${by}:${actorId}`)) return res.status(429).json(rateLimitedBody('trial_response'));
-      const reasonRaw = req.body?.reason;
+      const reasonRaw = body.reason;
       if (
         reasonRaw !== undefined &&
         reasonRaw !== null &&

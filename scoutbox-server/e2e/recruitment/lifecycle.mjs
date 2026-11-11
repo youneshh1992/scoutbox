@@ -46,6 +46,7 @@ import { LIFECYCLE_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../doma
 import { DECISION_INPUT_CODES } from '../../domains/recruitment/lifecycle/decisionRoutes.mjs';
 import { CONTACT_INPUT_CODES } from '../../domains/recruitment/lifecycle/contactRoutes.mjs';
 import { LIFECYCLE_INPUT_CODES } from '../../domains/recruitment/lifecycle/index.mjs';
+import { TRIAL_INPUT_CODES } from '../../domains/recruitment/lifecycle/trialRoutes.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../../domains/recruitment/analytics/funnels.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
@@ -2355,7 +2356,7 @@ section('Y — the error contract: one table, no default, nothing internal in th
       produced.add(m[1]);
   }
   // The input schemas' refusal codes are data, exported by the routes that use them.
-  for (const t of [DECISION_INPUT_CODES, CONTACT_INPUT_CODES, LIFECYCLE_INPUT_CODES])
+  for (const t of [DECISION_INPUT_CODES, CONTACT_INPUT_CODES, LIFECYCLE_INPUT_CODES, TRIAL_INPUT_CODES])
     for (const c of [...Object.values(t.codes), ...Object.values(t.fieldCodes)]) produced.add(c);
   ok(produced.size >= 15, `Y1 ${produced.size} error codes found in the lifecycle source, mechanically`);
 
