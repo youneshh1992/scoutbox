@@ -8,8 +8,8 @@ import { totpValid, b32encode, timingSafeEqStr } from '../identity/totp.mjs';
 import { signBody } from '../integrations/webhooks.mjs';
 import { devLoginsEnabled } from '../platform/capabilities.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { ENTERPRISE_LIMITS, typeRefs } from '../../repositories/enterprise.mjs';
-import { STAFF_LIMITS } from '../../repositories/users.mjs';
+import { filled, presentOrRefuse } from '../platform/schemas.mjs';
+import { enterpriseInput } from './schemas.mjs';
 import { grantView as grantExport } from '../groups/groups.mjs';
 
 // ---------------------------------------------------- request instrumentation
@@ -171,30 +171,15 @@ export function registerEnterprise(ctx) {
     revokedAt: i.revokedAt,
     userId: i.userId,
   });
-  const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
   const sha256 = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
-  const L = ENTERPRISE_LIMITS;
 
   orgRouter.post('/invites', (req, res) => {
     if (!requireLead(req, res)) return;
-    const { email, name, role } = req.body ?? {};
-    if (typeof email !== 'string' || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
-      return res.status(400).json({ error: 'EMAIL_INVALID' }); // a string only: RegExp.test would coerce an array
-    if (email.length > L.email)
-      return res
-        .status(400)
-        .json({ error: 'EMAIL_INVALID', message: `An e-mail address has at most ${L.email} characters.` });
-    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
-    if (name.trim().length > L.inviteName)
-      return fieldInvalid(res, 'name', `name is at most ${L.inviteName} characters.`);
-    if (
-      !(
-        role === undefined ||
-        role === null ||
-        (typeof role === 'string' && role.trim() && role.trim().length <= L.role)
-      )
-    )
-      return fieldInvalid(res, 'role', `role is text of 1 to ${L.role} characters.`);
+    const body = enterpriseInput(res, 'invite', req.body);
+    if (!body) return;
+    const { email } = body;
+    const name = filled(body.name);
+    if (!presentOrRefuse(res, name, 'name')) return;
     if (users.activeByEmail(req.org.id, email)) {
       return res
         .status(409)
@@ -206,8 +191,8 @@ export function registerEnterprise(ctx) {
       id: nextId('inv'),
       orgId: req.org.id,
       email,
-      name: name.trim(),
-      role: typeof role === 'string' ? role.trim() : 'Scout',
+      name,
+      role: filled(body.role) ?? 'Scout',
       tokenHash: sha256(code),
       status: 'pending',
       invitedBy: req.orgUser.name ?? null,
@@ -235,9 +220,11 @@ export function registerEnterprise(ctx) {
   });
 
   orgRouter.get('/invites', (req, res) => {
+    const query = enterpriseInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -247,6 +234,7 @@ export function registerEnterprise(ctx) {
 
   orgRouter.post('/invites/:id/revoke', (req, res) => {
     if (!requireLead(req, res)) return;
+    if (!enterpriseInput(res, 'none', req.body)) return;
     const inv = enterpriseReads.invites.forOrgById(req.org.id, req.params.id);
     if (!inv) return res.status(404).json({ error: 'INVITE_NOT_FOUND' });
     res.json({ invite: inviteView(enterprise.invites.revoke(inv.id, Date.now())) });
@@ -254,10 +242,10 @@ export function registerEnterprise(ctx) {
 
   // The emailed code is the proof of invitation; it is looked up by its hash.
   app.post('/auth/org/accept-invite', (req, res) => {
-    const { token, scoutName } = req.body ?? {};
-    if (!(scoutName === undefined || scoutName === null || typeof scoutName === 'string'))
-      return fieldInvalid(res, 'scoutName', 'scoutName is text.');
-    const inv = typeof token === 'string' && token ? enterpriseReads.invites.byTokenHash(sha256(token)) : null;
+    const body = enterpriseInput(res, 'acceptInvite', req.body);
+    if (!body) return;
+    const { token } = body;
+    const inv = token ? enterpriseReads.invites.byTokenHash(sha256(token)) : null;
     if (!inv || inv.status !== 'pending') return res.status(404).json({ error: 'INVITE_INVALID' });
     if (inv.expiresAt < Date.now()) {
       enterprise.invites.expire(inv.id);
@@ -265,9 +253,7 @@ export function registerEnterprise(ctx) {
     }
     const org = byId.org(inv.orgId);
     if (!org || org.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
-    const name = scoutName?.trim() || inv.name;
-    if (name.length > STAFF_LIMITS.name)
-      return fieldInvalid(res, 'scoutName', `scoutName is at most ${STAFF_LIMITS.name} characters.`);
+    const name = filled(body.scoutName) ?? inv.name;
     // Staff sign in by name, so a name belongs to one account of the organisation (removed ones included): the
     // invited name's account is bound when current and restored when removed (product decision), with the invite's
     // role; any other taken name is refused.
@@ -373,6 +359,7 @@ export function registerEnterprise(ctx) {
   const { mfaLocked, mfaFail } = ctx.mfaGuards;
 
   orgRouter.post('/mfa/setup', (req, res) => {
+    if (!enterpriseInput(res, 'none', req.body)) return;
     if (req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_ALREADY_ENABLED' });
     const secretB32 = b32encode(crypto.randomBytes(20));
     users.startMfa(req.orgUser.id, secretB32);
@@ -384,13 +371,15 @@ export function registerEnterprise(ctx) {
   });
 
   orgRouter.post('/mfa/verify', (req, res) => {
+    const body = enterpriseInput(res, 'mfaCode', req.body);
+    if (!body) return;
     const secret = users.mfaSecretOf(req.orgUser.id);
     if (!secret || req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_PENDING' });
     if (mfaLocked(req.orgUser.id))
       return res
         .status(429)
         .json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
-    if (!totpValid(secret, req.body?.code)) {
+    if (!totpValid(secret, body.code)) {
       mfaFail(req.orgUser.id);
       return res.status(401).json({ error: 'MFA_CODE_WRONG' });
     }
@@ -408,8 +397,10 @@ export function registerEnterprise(ctx) {
 
   orgRouter.post('/mfa/disable', (req, res) => {
     // Disabling needs a current valid code (proof of control).
+    const body = enterpriseInput(res, 'mfaCode', req.body);
+    if (!body) return;
     if (!req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_ENABLED' });
-    if (!totpValid(users.mfaSecretOf(req.orgUser.id), req.body?.code))
+    if (!totpValid(users.mfaSecretOf(req.orgUser.id), body.code))
       return res.status(401).json({ error: 'MFA_CODE_WRONG' });
     users.disableMfa(req.orgUser.id);
     res.json({ enabled: false });
@@ -417,14 +408,10 @@ export function registerEnterprise(ctx) {
 
   orgRouter.put('/security', (req, res) => {
     if (!requireLead(req, res)) return;
-    if (typeof req.body?.mfaRequiredForLeads !== 'boolean')
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'mfaRequiredForLeads',
-        message: 'mfaRequiredForLeads must be true or false.',
-      });
+    const body = enterpriseInput(res, 'security', req.body);
+    if (!body) return;
     const updated = orgs.update(req.org.id, (d) => {
-      d.mfaRequiredForLeads = req.body.mfaRequiredForLeads;
+      d.mfaRequiredForLeads = body.mfaRequiredForLeads;
     });
     res.json({
       mfaRequiredForLeads: updated.mfaRequiredForLeads,
@@ -447,7 +434,9 @@ export function registerEnterprise(ctx) {
   });
 
   orgRouter.post('/sessions/revoke', (req, res) => {
-    const sid = String(req.body?.sid ?? '');
+    const body = enterpriseInput(res, 'revokeSession', req.body);
+    if (!body) return;
+    const sid = body.sid ?? '';
     const revoked = sid ? sessions.revokeOwn(req.orgUser.id, sid) : 0;
     res.json({ revoked });
   });
@@ -466,7 +455,9 @@ export function registerEnterprise(ctx) {
 
   orgRouter.put('/sso', (req, res) => {
     if (!requireLead(req, res)) return;
-    const issuer = String(req.body?.issuer ?? '');
+    const body = enterpriseInput(res, 'sso', req.body);
+    if (!body) return;
+    const issuer = body.issuer ?? '';
     if (issuer !== 'local-test-idp') {
       return res.status(400).json({
         error: 'IDP_UNAVAILABLE',
@@ -517,7 +508,9 @@ export function registerEnterprise(ctx) {
 
   app.post('/auth/sso/start', (req, res) => {
     if (testIdpOnly(res)) return;
-    const org = byId.org(req.body?.orgId);
+    const body = enterpriseInput(res, 'ssoStart', req.body);
+    if (!body) return;
+    const org = body.orgId ? byId.org(body.orgId) : null;
     const cfg = org && enterpriseReads.sso.forOrg(org.id);
     if (!cfg)
       return res
@@ -542,17 +535,17 @@ export function registerEnterprise(ctx) {
   if (DEV) {
     // Authenticates as whatever email the tester picks: it exists to exercise the relying-party logic.
     app.get('/testidp/authorize', (req, res) => {
-      const { client_id: clientId, state, nonce, email, groups } = req.query;
+      const query = enterpriseInput(res, 'testIdpQuery', req.query, 'query');
+      if (!query) return;
+      const { client_id: clientId, state, nonce, email, groups } = query;
       if (!clientId || !state || !nonce || !email)
         return res.status(400).json({ error: 'IDP_PARAMS', message: 'client_id, state, nonce, email required' });
       const code = signToken({
         typ: 'code',
-        sub: `idp-${crypto.createHash('sha256').update(String(email)).digest('hex').slice(0, 12)}`,
-        email: String(email),
-        nonce: String(nonce),
-        groups: String(groups ?? '')
-          .split(',')
-          .filter(Boolean),
+        sub: `idp-${crypto.createHash('sha256').update(email).digest('hex').slice(0, 12)}`,
+        email,
+        nonce,
+        groups: (groups ?? '').split(',').filter(Boolean),
         iat: Date.now(),
         exp: Date.now() + 5 * 60_000,
       });
@@ -562,8 +555,10 @@ export function registerEnterprise(ctx) {
 
   app.post('/auth/sso/callback', (req, res) => {
     if (testIdpOnly(res)) return;
-    const { code, state } = req.body ?? {};
-    const st = typeof state === 'string' && state ? enterpriseReads.ssoStates.byStateHash(sha256(state)) : null;
+    const body = enterpriseInput(res, 'ssoCallback', req.body);
+    if (!body) return;
+    const { code, state } = body;
+    const st = state ? enterpriseReads.ssoStates.byStateHash(sha256(state)) : null;
     // Single use even on failure: the database decides, so two callbacks racing on one state cannot both pass.
     if (!st || st.usedAt || st.expiresAt < Date.now() || !enterprise.ssoStates.markUsed(st.id, Date.now())) {
       return res
@@ -643,25 +638,18 @@ export function registerEnterprise(ctx) {
 
   // A ticket references a case or an import of the organisation by id; nothing is copied.
   orgRouter.post('/support', (req, res) => {
-    const { subject, body, refs } = req.body ?? {};
-    if (typeof subject !== 'string' || !subject.trim()) return res.status(400).json({ error: 'SUBJECT_REQUIRED' });
-    if (body != null && typeof body !== 'string')
-      return res.status(400).json({ error: 'FIELD_INVALID', field: 'body' });
-    const r = typeRefs(refs ?? [], 'refs');
-    if (!r.ok)
-      return fieldInvalid(
-        res,
-        r.field ?? 'refs',
-        `${r.reason}. A reference is { kind: 'case' | 'import', id }, at most ${L.refs}.`,
-      );
+    const input = enterpriseInput(res, 'ticket', req.body);
+    if (!input) return;
+    const subject = filled(input.subject);
+    if (!presentOrRefuse(res, subject, 'subject')) return;
     const t = enterprise.tickets.create({
       id: nextId('tkt'),
       orgId: req.org.id,
       byUserId: req.orgUser.id,
       byName: req.orgUser.name ?? null,
-      subject: subject.slice(0, L.subject),
-      body: (body ?? '').slice(0, L.body),
-      refs: r.value,
+      subject,
+      body: input.body ?? '',
+      refs: input.refs ?? [],
       status: 'open',
       replies: [],
       createdAt: Date.now(),
@@ -670,9 +658,11 @@ export function registerEnterprise(ctx) {
   });
 
   orgRouter.get('/support', (req, res) => {
+    const query = enterpriseInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -681,15 +671,18 @@ export function registerEnterprise(ctx) {
 
   orgRouter.post('/support/:id/approve-access', (req, res) => {
     if (!requireLead(req, res)) return;
+    if (!enterpriseInput(res, 'none', req.body)) return;
     const g = enterpriseReads.grants.pendingFor(req.org.id, req.params.id);
     if (!g) return res.status(404).json({ error: 'NO_PENDING_REQUEST' });
     res.json({ grant: enterprise.grants.approve(g.id, { by: req.orgUser.name ?? null, at: Date.now() }) });
   });
 
   adminRouter.get('/support', (req, res) => {
+    const query = enterpriseInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -704,15 +697,15 @@ export function registerEnterprise(ctx) {
   adminRouter.post('/support/:id/reply', (req, res) => {
     const t = enterpriseReads.tickets.byId(req.params.id);
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
-    const { text, close } = req.body ?? {};
-    if (typeof text !== 'string' || !text.trim()) return fieldInvalid(res, 'text', 'A reply is text.');
-    if (!(close === undefined || close === null || typeof close === 'boolean'))
-      return fieldInvalid(res, 'close', 'close is true or false.');
+    const body = enterpriseInput(res, 'reply', req.body);
+    if (!body) return;
+    const text = filled(body.text);
+    if (!presentOrRefuse(res, text, 'text', { error: 'FIELD_INVALID' })) return;
     const ticket = unit(() => {
       const out = enterprise.tickets.reply(
         t.id,
-        { at: Date.now(), by: 'Trust & Safety', text: text.slice(0, L.reply) },
-        { close: close === true },
+        { at: Date.now(), by: 'Trust & Safety', text },
+        { close: body.close === true },
       );
       const lead = byId.user(t.byUserId);
       if (lead) notify({ kind: 'org_user', id: lead.id }, 'support', `Support replied on “${t.subject}”.`, t.id);
@@ -724,10 +717,9 @@ export function registerEnterprise(ctx) {
   adminRouter.post('/support/:id/request-access', (req, res) => {
     const t = enterpriseReads.tickets.byId(req.params.id);
     if (!t) return res.status(404).json({ error: 'TICKET_NOT_FOUND' });
-    const raw = req.body?.hours;
-    if (!(raw === undefined || raw === null || (Number.isInteger(raw) && raw >= L.hours[0] && raw <= L.hours[1])))
-      return fieldInvalid(res, 'hours', `hours is a whole number from ${L.hours[0]} to ${L.hours[1]}.`);
-    const hours = raw ?? 24;
+    const body = enterpriseInput(res, 'accessRequest', req.body);
+    if (!body) return;
+    const hours = body.hours ?? 24;
     const g = unit(() => {
       const out = enterprise.grants.request({
         id: nextId('sag'),
@@ -791,6 +783,7 @@ export function registerEnterprise(ctx) {
   }
 
   adminRouter.post('/backup', (req, res) => {
+    if (!enterpriseInput(res, 'none', req.body)) return;
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const dir = path.join(DATA_DIR, 'backups', stamp);
     // A restore is "copy this directory into a new, empty DATA_DIR and boot". A queued removal naming a clip a live
@@ -911,7 +904,9 @@ export function registerEnterprise(ctx) {
   });
 
   adminRouter.post('/backup/verify', (req, res) => {
-    const dir = path.join(DATA_DIR, 'backups', path.basename(String(req.body?.dir ?? '')));
+    const body = enterpriseInput(res, 'backupDir', req.body);
+    if (!body) return;
+    const dir = path.join(DATA_DIR, 'backups', path.basename(body.dir));
     let manifest;
     try {
       manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));

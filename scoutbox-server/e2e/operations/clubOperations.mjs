@@ -761,7 +761,10 @@ let inviteUserToken = null;
   r = await j('POST', '/auth/org/accept-invite', { token: revokedCode });
   ok(!!revokedCode && r.status === 404 && r.body.error === 'INVITE_INVALID', "a revoked invite's code accepts nothing");
   r = await j('POST', '/auth/org/accept-invite', { token: ['not', 'a', 'code'] });
-  ok(r.status === 404, 'a code that is not text finds nothing');
+  ok(
+    r.status === 400 && r.body.field === 'token' && r.body.problem === 'not_text',
+    'a code that is not text is refused before any lookup',
+  );
   r = await j('GET', '/org/invites?limit=1', undefined, maria.token);
   ok(
     r.status === 200 &&
@@ -807,6 +810,71 @@ let inviteUserToken = null;
   }
   r = await adminPost(`/admin/support/${junkTicket.id}/request-access`, {});
   ok(r.status === 201 && r.body.grant.hours === 24, 'access hours default to 24');
+  // Enterprise input is valid as sent or refused: text over its limit is not cut, a field the form lacks is refused.
+  {
+    const tickets = async () => (await j('GET', '/org/support', undefined, maria.token)).body.items.length;
+    const before = await tickets();
+    r = await j('POST', '/org/support', { subject: 'S'.repeat(161) }, maria.token);
+    ok(
+      r.status === 400 && r.body.field === 'subject' && r.body.problem === 'too_long' && r.body.max === 160,
+      'IN1 a ticket subject over 160 characters is refused, not cut',
+    );
+    r = await j('POST', '/org/support', { subject: 'Long body', body: 'b'.repeat(2001) }, maria.token);
+    ok(r.status === 400 && r.body.field === 'body', 'IN2 a ticket body over its limit is refused, not cut');
+    r = await j(
+      'POST',
+      '/org/support',
+      { subject: 'Ref note', refs: [{ kind: 'case', id: 'c-1', note: 'x' }] },
+      maria.token,
+    );
+    ok(
+      r.status === 400 && r.body.field === 'refs[0].note' && r.body.problem === 'unknown_field',
+      'IN3 a reference carrying a field of its own is refused, naming it',
+    );
+    r = await j('POST', '/org/support', { subject: 'Status', status: 'closed' }, maria.token);
+    ok(r.status === 400 && r.body.field === 'status', 'IN4 a ticket cannot be opened with a status of its own');
+    ok((await tickets()) === before, 'IN5 and none of the refused tickets was stored');
+    r = await adminPost(`/admin/support/${junkTicket.id}/reply`, { text: 'r'.repeat(2001) });
+    ok(
+      r.status === 400 && r.body.field === 'text' && r.body.problem === 'too_long',
+      'IN6 a reply over its limit is refused, not cut',
+    );
+    r = await j('POST', '/org/invites', { email: ['a@b.example'], name: 'List Mail' }, maria.token);
+    ok(
+      r.status === 400 && r.body.error === 'EMAIL_INVALID' && r.body.field === 'email',
+      'IN7 an invite email that is not text is EMAIL_INVALID',
+    );
+    r = await j('POST', '/org/invites', { email: 'n'.repeat(250) + '@x.example', name: 'Long Mail' }, maria.token);
+    ok(
+      r.status === 400 && r.body.error === 'EMAIL_INVALID' && r.body.problem === 'too_long',
+      'IN8 an invite email over its limit is EMAIL_INVALID',
+    );
+    r = await j('PUT', '/org/security', { mfaRequiredForLeads: 'true' }, maria.token);
+    ok(
+      r.status === 400 && r.body.field === 'mfaRequiredForLeads' && r.body.problem === 'not_boolean',
+      'IN9 the MFA switch written as text is refused, not read as on',
+    );
+    r = await j('POST', '/org/sessions/revoke', { sid: { $ne: null } }, maria.token);
+    ok(
+      r.status === 400 && r.body.field === 'sid',
+      'IN10 a session id that is not text is refused, not turned into text',
+    );
+    r = await j('PUT', '/org/sso', { issuer: ['local-test-idp'] }, maria.token);
+    ok(
+      r.status === 400 && r.body.field === 'issuer',
+      'IN11 an issuer written as a list is refused, not read as its text',
+    );
+    r = await j('POST', '/auth/sso/start', { orgId: { id: 'org-eastport' } });
+    ok(
+      r.status === 400 && r.body.field === 'orgId',
+      'IN12 an SSO start naming its organisation with an object is refused',
+    );
+    r = await j('GET', '/org/invites?limit=1&status=pending', undefined, maria.token);
+    ok(
+      r.status === 400 && r.body.field === 'status' && r.body.problem === 'unknown_field',
+      'IN13 the invite list refuses a filter it does not have',
+    );
+  }
   r = await j('GET', '/org/support?limit=1', undefined, maria.token);
   ok(
     r.status === 200 && r.body.items[0]?.id === junkTicket.id && typeof r.body.nextCursor === 'string',
