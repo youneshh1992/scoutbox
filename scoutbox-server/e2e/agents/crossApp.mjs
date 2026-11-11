@@ -2045,24 +2045,31 @@ section('R — the case reference reaches the two parties who own it, and nobody
 section('body forgery — the server derives, the request never decides');
 {
   const RID = globalThis.__RID;
-  const forgedShare = await j(
-    'POST',
-    `/org/agent/clients/${REP}/opportunities/${globalThis.__OPP}/share`,
-    { clientKey: key(), sharedBy: { name: 'Somebody Else' }, withdrawnAt: null, rev: 99 },
-    ana.token,
-  );
-  if (forgedShare.status === 201) {
-    ok(
-      forgedShare.body.share.sharedByName === 'Ana Agent' && forgedShare.body.share.rev === 1,
-      '#31 a forged author and rev on a share reach no field — the store decides',
-    );
-    await j(
+  const sharesOf = async () =>
+    JSON.stringify((await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token)).body);
+  const sharesBefore = await sharesOf();
+  let shareRefused = true;
+  for (const [field, value] of [
+    ['sharedBy', { name: 'Somebody Else' }],
+    ['withdrawnAt', null],
+    ['rev', 99],
+  ]) {
+    const r = await j(
       'POST',
-      `/org/agent/clients/${REP}/opportunities/shares/${forgedShare.body.share.id}/withdraw`,
-      {},
+      `/org/agent/clients/${REP}/opportunities/${globalThis.__OPP}/share`,
+      { clientKey: key(), [field]: value },
       ana.token,
     );
-  } else ok(forgedShare.status === 409, '#31 (already shared, which is itself the duplicate rule holding)');
+    shareRefused &&=
+      expect(r, 400, 'AGENT_INPUT_INVALID') && r.body.field === field && r.body.problem === 'unknown_field';
+  }
+  neg(
+    shareRefused && (await sharesOf()) === sharesBefore,
+    '#31 a forged author, withdrawal or rev on a share is refused by name, and no share is made — the store decides',
+  );
+  const handoffOf = async () =>
+    JSON.stringify((await j('GET', `/org/rooms/${RID}/transaction-handoff`, undefined, maria.token)).body);
+  const handoffBefore = await handoffOf();
   const forgedHof = await j(
     'POST',
     `/org/rooms/${RID}/transaction-handoff`,
@@ -2070,8 +2077,10 @@ section('body forgery — the server derives, the request never decides');
     maria.token,
   );
   neg(
-    forgedHof.status === 409 && forgedHof.body.error === 'HANDOFF_EXISTS',
-    '#32 a forged handoff state reaches nothing: the standing invitation is what the server knows about',
+    expect(forgedHof, 400, 'AGENT_INPUT_INVALID') &&
+      forgedHof.body.problem === 'unknown_field' &&
+      (await handoffOf()) === handoffBefore,
+    '#32 a forged handoff state is refused and reaches nothing: the standing invitation is what the server knows about',
   );
   // #32b. A disclosure is a yes or a no. A truthy string is not read as either —
   // it is refused, because coercing it would turn OFF a choice the client was
@@ -2682,13 +2691,16 @@ section('AP — every cross-app route, swept by actor and by id');
     { disclosure: { somethingElse: true }, expectedRev: REV },
     kola.token,
   );
-  if (unknownKey.status === 200) {
-    REV = unknownKey.body.relationship.rev;
-    neg(
-      !Object.hasOwn(unknownKey.body.relationship.disclosure, 'somethingElse'),
-      'AP16 an unknown disclosure key reaches no field — the three are the three',
-    );
-  } else neg(unknownKey.status === 409, 'AP16 (a rev conflict, which is the concurrency guard holding)');
+  const afterUnknown = (await j('GET', '/player/agent/relationships', undefined, kola.token)).body.items.find(
+    (r) => r.id === REP,
+  );
+  neg(
+    expect(unknownKey, 400, 'REPRESENTATION_INPUT_INVALID') &&
+      unknownKey.body.field === 'disclosure.somethingElse' &&
+      unknownKey.body.problem === 'unknown_field' &&
+      afterUnknown.rev === REV,
+    'AP16 an unknown disclosure key is refused by name and changes nothing — the three are the three',
+  );
   // Withdrawing a share: only the agent who shared it, only once, only a real one.
   const mine = await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token);
   const anyShare = (mine.body?.items ?? [])[0]?.id ?? 'sh-nope';
@@ -2785,12 +2797,7 @@ section('AR — authority is re-derived at READ time, not cached at grant time')
         (await j('GET', `/org/agent/clients/${rid}/contacts`, undefined, ana.token)).status === 200,
         'AR3 as does the routed-contact projection',
       );
-      const term = await j(
-        'POST',
-        `/player/agent/relationships/${rid}/terminate`,
-        { expectedRev: rev, reasonCode: 'client_choice' },
-        theo.token,
-      );
+      const term = await j('POST', `/player/agent/relationships/${rid}/terminate`, { expectedRev: rev }, theo.token);
       ok(term.status === 200, 'AR4 the client ends the mandate');
       for (const [label, url] of [
         ['trials', `/org/agent/clients/${rid}/trials`],
@@ -2970,25 +2977,28 @@ section('AS — history, the write contracts, and the verbs that do not exist');
     ),
     'AS6 a note that is not text is refused before anything is written',
   );
-  // An over-long note is cut at the documented cap by the SAME shared helper the
-  // Contact domain uses — one sanitiser, one limit, no second rule for this lane.
-  const longNote = await j(
-    'POST',
-    `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
-    { clientKey: key(), note: 'x'.repeat(5000) },
-    ana.token,
+  // An over-long note is refused with its limit; the Contact domain's sanitiser then cleans what is stored.
+  const sharesBeforeLong = JSON.stringify(
+    (await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token)).body,
   );
-  if (longNote.status === 201) {
-    ok(
-      (longNote.body.share.note ?? '').length <= 300,
-      `AS7 a note far past the limit is cut to the cap, not stored whole (${(longNote.body.share.note ?? '').length})`,
-    );
-    await j('POST', `/org/agent/clients/${REP}/opportunities/shares/${longNote.body.share.id}/withdraw`, {}, ana.token);
-  } else
-    neg(
-      collect('AS7', longNote).status === 409,
-      `AS7 (already shared, which is the duplicate rule holding: ${longNote.body?.error})`,
-    );
+  const longNote = collect(
+    'AS7',
+    await j(
+      'POST',
+      `/org/agent/clients/${REP}/opportunities/${OPP}/share`,
+      { clientKey: key(), note: 'x'.repeat(5000) },
+      ana.token,
+    ),
+  );
+  neg(
+    expect(longNote, 400, 'AGENT_INPUT_INVALID') &&
+      longNote.body.field === 'note' &&
+      longNote.body.problem === 'too_long' &&
+      longNote.body.max === 300 &&
+      JSON.stringify((await j('GET', `/org/agent/clients/${REP}/opportunities/shares`, undefined, ana.token)).body) ===
+        sharesBeforeLong,
+    'AS7 a note past the 300-character limit is refused with its limit, not cut, and nothing is shared',
+  );
 
   // The handoff's own permission and state contracts, over HTTP.
   neg(

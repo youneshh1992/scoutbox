@@ -6,6 +6,8 @@ export const AGENT_CORE_ERROR_HTTP = table({
   // ---- 400: fix the request.
   AGENT_INPUT_INVALID: 400,
   AGENT_CLIENT_KEY_INVALID: 400,
+  // A malformed expectedRev, as platform/concurrency.mjs guardRev refuses it.
+  EXPECTED_REV_INVALID: 400,
   AGENT_TIERS_INVALID: 400,
   AGENT_FACET_INVALID: 400,
   AGENT_SCOPE_INVALID: 400,
@@ -74,6 +76,10 @@ export const PUBLIC_ERROR_FIELDS = [
   'status',
   'agreementId',
   'field',
+  'problem',
+  'min',
+  'max',
+  'expected',
   // Reason codes and policy references (codes only, never prose), the review id, the retry hint.
   'reasons',
   'policyVersions',

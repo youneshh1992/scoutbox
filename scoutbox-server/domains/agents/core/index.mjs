@@ -14,6 +14,8 @@ import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
 import { sendAgentError } from './errors.mjs';
+import { parseInput, filled } from '../../platform/schemas.mjs';
+import { AGENT_INPUT, agentParseOptions } from './schemas.mjs';
 import { agentAuditRows } from './audit.mjs';
 import { feedItem } from '../../../repositories/notifications.mjs';
 import { facetFromProviderAnswer, FACET_METHOD } from '../compliance/provider.mjs';
@@ -111,36 +113,15 @@ export function registerAgent(rawCtx) {
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
 
   // ------------------------------------------------------------ input (junk is refused, naming the field)
-  const invalid = (res, field, message, scope = 'input') => {
-    sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field, message }, scope);
+  /** The request input read with its schema (AGENT_INPUT), or `undefined` once the refusal is sent. */
+  const inputOr400 = (res, name, input, root = 'body') => {
+    const parsed = parseInput(AGENT_INPUT[name], input ?? {}, agentParseOptions(name, root));
+    if (parsed.ok) return parsed.value;
+    sendAgentError(res, parsed, name);
     return undefined;
   };
-  /** undefined when absent, null when empty; refused when not text or over `max`. */
-  const optText = (res, v, field, max, scope) => {
-    if (v === undefined) return undefined;
-    if (v === null) return null;
-    if (typeof v !== 'string') return invalid(res, field, `${field} must be text.`, scope) ?? false;
-    const t = v.trim();
-    if (t.length > max) return invalid(res, field, `${field} must be at most ${max} characters.`, scope) ?? false;
-    return t || null;
-  };
-  /** Distinct values from `vocab`, or false after refusing with `code`. */
-  const listOf = (res, v, vocab, code, field, scope) => {
-    if (!Array.isArray(v) || v.some((x) => !vocab.includes(x)) || new Set(v).size !== v.length) {
-      sendAgentError(
-        res,
-        {
-          error: code,
-          field,
-          allowed: vocab,
-          message: `${field} must be a list of distinct values from: ${vocab.join(', ')}.`,
-        },
-        scope,
-      );
-      return false;
-    }
-    return [...v];
-  };
+  /** Text a schema has read: undefined when absent, null when blank, else trimmed. */
+  const given = (v) => (v === undefined ? undefined : filled(v));
 
   // ------------------------------------------------------------ lookups
   const activeAffiliationOf = (userId, orgId) => affiliations.activeFor(userId, orgId, now());
@@ -148,8 +129,10 @@ export function registerAgent(rawCtx) {
 
   /** Paged newest first by rowid; null after answering a junk page with 400. */
   const pageQuery = (req, res) => {
+    const q = inputOr400(res, 'page', req.query, 'query');
+    if (!q) return null;
     try {
-      return readPage(req.query, ['number']);
+      return readPage(q, ['number']);
     } catch (e) {
       sendPageError(res, e);
       return null;
@@ -158,8 +141,8 @@ export function registerAgent(rawCtx) {
 
   const limitedOr429 = refuseWhenLimited(rateLimit);
 
-  const clientKeyOr400 = (req, res) => {
-    const k = normaliseClientKey(req.body?.clientKey);
+  const clientKeyOr400 = (body, res) => {
+    const k = normaliseClientKey(body.clientKey);
     if (!k.ok) {
       sendAgentError(res, { error: 'AGENT_CLIENT_KEY_INVALID', message: k.message }, 'clientKey');
       return undefined;
@@ -324,29 +307,22 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'profile.write.own')) return;
     if (limitedOr429(res, 'agent_profile_write', req.orgUser.id)) return;
-    const b = req.body ?? {};
-    const displayName = optText(res, b.displayName, 'displayName', LIM.displayName, 'profile');
-    if (displayName === false) return;
+    const b = inputOr400(res, 'profile', req.body);
+    if (!b) return;
+    const displayName = given(b.displayName);
     if (displayName === null)
       return sendAgentError(
         res,
-        { error: 'AGENT_INPUT_INVALID', field: 'displayName', message: 'displayName must not be empty.' },
+        {
+          error: 'AGENT_INPUT_INVALID',
+          field: 'displayName',
+          problem: 'blank',
+          message: 'displayName must not be empty.',
+        },
         'profile',
       );
-    let jurisdictions;
-    if (b.jurisdictions !== undefined) {
-      jurisdictions = listOf(
-        res,
-        b.jurisdictions,
-        JURISDICTIONS,
-        'AGENT_JURISDICTION_INVALID',
-        'jurisdictions',
-        'profile',
-      );
-      if (!jurisdictions) return;
-    }
-    const licenceNumber = optText(res, b.fifaLicenceNumber, 'fifaLicenceNumber', LIM.licenceNumber, 'profile');
-    if (licenceNumber === false) return;
+    const { jurisdictions } = b;
+    const licenceNumber = given(b.fifaLicenceNumber);
     const p = profileOf(req.orgUser.id);
     if (!p) {
       const created = unit(() => {
@@ -431,23 +407,16 @@ export function registerAgent(rawCtx) {
         { error: 'AGENT_PROFILE_REQUIRED', message: 'Create your agent profile first.' },
         'facet',
       );
-    const reference = optText(res, req.body?.reference, 'reference', LIM.reference, 'facet');
-    if (reference === false) return;
+    const b = inputOr400(res, 'facetSubmission', req.body);
+    if (!b) return;
+    const reference = filled(b.reference);
     if (!reference)
       return sendAgentError(
         res,
-        { error: 'AGENT_INPUT_INVALID', field: 'reference', message: 'A reference is required.' },
+        { error: 'AGENT_INPUT_INVALID', field: 'reference', problem: 'required', message: 'A reference is required.' },
         'facet',
       );
-    const rawMa = req.body?.memberAssociation;
-    if (facet !== 'fifa_licence' && rawMa !== undefined && typeof rawMa !== 'string')
-      return invalid(res, 'memberAssociation', 'memberAssociation must be a member-association code.', 'facet');
-    const ma =
-      facet === 'fifa_licence'
-        ? null
-        : String(rawMa ?? '')
-            .trim()
-            .toUpperCase();
+    const ma = facet === 'fifa_licence' ? null : (filled(b.memberAssociation)?.toUpperCase() ?? '');
     // A national facet belongs to a member association; INT is FIFA level, not one.
     if (facet !== 'fifa_licence' && (ma === 'INT' || !JURISDICTIONS.includes(ma)))
       return sendAgentError(
@@ -594,15 +563,18 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'agency.team.write')) return;
     if (limitedOr429(res, 'agent_affiliation_write', req.org.id)) return;
-    const name = optText(res, req.body?.name, 'name', LIM.staffName, 'team');
-    if (name === false) return;
-    if (!name) return sendAgentError(res, { error: 'AGENT_INPUT_INVALID', field: 'name' }, 'team');
-    const tiers = listOf(res, req.body?.tiers, TIERS, 'AGENT_TIERS_INVALID', 'tiers', 'team');
-    if (!tiers) return;
-    if (!tiers.length) return sendAgentError(res, { error: 'AGENT_TIERS_INVALID', allowed: TIERS }, 'team');
-    const role = optText(res, req.body?.role, 'role', LIM.staffRole, 'team');
-    if (role === false) return;
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'newMember', req.body);
+    if (!b) return;
+    const name = filled(b.name);
+    if (!name)
+      return sendAgentError(
+        res,
+        { error: 'AGENT_INPUT_INVALID', field: 'name', problem: 'required', message: 'A name is required.' },
+        'team',
+      );
+    const { tiers } = b;
+    const role = given(b.role);
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
     const fp = payloadFingerprint({ name: name.toLowerCase(), tiers });
     if (key) {
@@ -664,9 +636,9 @@ export function registerAgent(rawCtx) {
     if (limitedOr429(res, 'agent_affiliation_write', req.org.id)) return;
     const aff = activeAffiliationOf(req.params.userId, req.org.id);
     if (!aff) return sendAgentError(res, { error: 'MEMBER_NOT_FOUND' }, 'team');
-    const tiers = listOf(res, req.body?.tiers, TIERS, 'AGENT_TIERS_INVALID', 'tiers', 'team');
-    if (!tiers) return;
-    if (!tiers.length) return sendAgentError(res, { error: 'AGENT_TIERS_INVALID', allowed: TIERS }, 'team');
+    const b = inputOr400(res, 'memberTiers', req.body);
+    if (!b) return;
+    const { tiers } = b;
     const problem = affiliationChangeProblem({
       affiliations: affiliations.forAgency(req.org.id),
       target: aff,
@@ -707,8 +679,9 @@ export function registerAgent(rawCtx) {
     if (limitedOr429(res, 'agent_affiliation_write', req.org.id)) return;
     const aff = activeAffiliationOf(req.params.userId, req.org.id);
     if (!aff) return sendAgentError(res, { error: 'MEMBER_NOT_FOUND' }, 'team');
-    const reason = optText(res, req.body?.reason, 'reason', LIM.reasonCode, 'team');
-    if (reason === false) return;
+    const b = inputOr400(res, 'memberEnd', req.body);
+    if (!b) return;
+    const reason = given(b.reason);
     const problem = affiliationChangeProblem({
       affiliations: affiliations.forAgency(req.org.id),
       target: aff,
@@ -746,27 +719,13 @@ export function registerAgent(rawCtx) {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'agency.settings.write')) return;
     if (limitedOr429(res, 'agent_affiliation_write', req.org.id)) return;
-    const b = req.body ?? {};
+    const b = inputOr400(res, 'settings', req.body);
+    if (!b) return;
     const current = settings.forOrg(req.org.id);
-    let jurisdictions = [...current.jurisdictions];
-    if (b.jurisdictions !== undefined) {
-      jurisdictions = listOf(
-        res,
-        b.jurisdictions,
-        JURISDICTIONS,
-        'AGENT_JURISDICTION_INVALID',
-        'jurisdictions',
-        'settings',
-      );
-      if (!jurisdictions) return;
-    }
+    const jurisdictions = b.jurisdictions ?? [...current.jurisdictions];
     let description = current.description;
     if (b.description !== undefined) {
-      if (b.description !== null && typeof b.description !== 'string')
-        return invalid(res, 'description', 'description must be text.', 'settings');
       const d = b.description ?? '';
-      if (d.length > LIM.description)
-        return invalid(res, 'description', `description must be at most ${LIM.description} characters.`, 'settings');
       if (d && !moderateOrRefuse(res, d, { kind: 'agency_settings', orgId: req.org.id })) return;
       description = d;
     }
@@ -801,13 +760,15 @@ export function registerAgent(rawCtx) {
   orgRouter.get('/agent/agency/audit', (req, res) => {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'agency.audit.read')) return;
+    const q = inputOr400(res, 'auditQuery', req.query, 'query');
+    if (!q) return;
     const all = agentAuditRows(agentCore.reads, req.org, { findPlayer, orgCanSee });
     for (const rowsOf of auditSources) all.push(...rowsOf(req.org));
     all.sort((a, b) => b.at - a.at || String(b.id).localeCompare(String(a.id)));
-    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 25));
+    const limit = q.limit === undefined ? 25 : Number(q.limit);
     let start = 0;
-    if (req.query.cursor) {
-      const idx = all.findIndex((r) => r.id === String(req.query.cursor));
+    if (q.cursor) {
+      const idx = all.findIndex((r) => r.id === q.cursor);
       if (idx < 0) return res.status(400).json({ error: 'AUDIT_CURSOR_INVALID' });
       start = idx + 1;
     }
@@ -823,10 +784,10 @@ export function registerAgent(rawCtx) {
   orgRouter.get('/agent/players', (req, res) => {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'players.lookup')) return;
+    const query = inputOr400(res, 'playerLookup', req.query, 'query');
+    if (!query) return;
     if (limitedOr429(res, 'agent_player_lookup', req.orgUser.id)) return;
-    const q = String(req.query.q ?? '')
-      .trim()
-      .toLowerCase();
+    const q = (query.q ?? '').trim().toLowerCase();
     if (q.length < 2) return res.json({ items: [], note: 'Type at least two characters.' });
     const items = [];
     // Adults and the visibility rule's SQL part are in the query, a batch at a time, stopping at twenty.
@@ -885,33 +846,20 @@ export function registerAgent(rawCtx) {
   orgRouter.post('/agent/clients/request', (req, res) => {
     if (!resolveMembership(req, res)) return;
     if (!requireCap(req, res, 'clients.request')) return;
-    const b = req.body ?? {};
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'clientRequest', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    let scope = ['employment'];
-    if (b.scope !== undefined) {
-      const raw = Array.isArray(b.scope) ? b.scope : typeof b.scope === 'string' ? [b.scope] : null;
-      if (!raw || raw.length === 0 || raw.some((x) => !SCOPES.includes(x)) || new Set(raw).size !== raw.length)
-        return sendAgentError(res, { error: 'AGENT_SCOPE_INVALID', allowed: SCOPES }, 'request');
-      scope = [...raw];
-    }
-    const termMonths = b.termMonths === undefined || b.termMonths === null ? DEFAULT_TERM_MONTHS : b.termMonths;
-    if (!Number.isInteger(termMonths) || termMonths < 1 || termMonths > MAX_TERM_MONTHS)
+    const scope = b.scope ?? ['employment'];
+    const termMonths = b.termMonths ?? DEFAULT_TERM_MONTHS;
+    const jurisdiction = (filled(b.jurisdiction) ?? 'INT').toUpperCase();
+    if (!JURISDICTIONS.includes(jurisdiction))
       return sendAgentError(
         res,
-        { error: 'AGENT_TERM_INVALID', message: `termMonths must be a whole number from 1 to ${MAX_TERM_MONTHS}.` },
+        { error: 'AGENT_JURISDICTION_INVALID', field: 'jurisdiction', problem: 'not_allowed', allowed: JURISDICTIONS },
         'request',
       );
-    if (b.jurisdiction !== undefined && typeof b.jurisdiction !== 'string')
-      return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS }, 'request');
-    const jurisdiction = (b.jurisdiction ?? 'INT').toUpperCase();
-    if (!JURISDICTIONS.includes(jurisdiction))
-      return sendAgentError(res, { error: 'AGENT_JURISDICTION_INVALID', allowed: JURISDICTIONS }, 'request');
-    if (b.exclusive !== undefined && typeof b.exclusive !== 'boolean')
-      return invalid(res, 'exclusive', 'exclusive must be true or false.', 'request');
     const exclusive = b.exclusive === true;
-    if (b.playerId !== undefined && typeof b.playerId !== 'string')
-      return invalid(res, 'playerId', 'playerId must be a player id.', 'request');
     const playerId = b.playerId ?? '';
     const fp = payloadFingerprint({ playerId, scope, termMonths, jurisdiction, exclusive });
     if (key) {
@@ -1086,10 +1034,11 @@ export function registerAgent(rawCtx) {
       return;
     }
     const a = found;
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'agentTermination', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    const reasonCode = optText(res, req.body?.reasonCode, 'reasonCode', LIM.reasonCode, 'terminate') ?? 'agent_ended';
-    if (reasonCode === false) return;
+    const reasonCode = filled(b.reasonCode) ?? 'agent_ended';
     const fp = payloadFingerprint({ reasonCode });
     if (key && a.keys.agentTerminate?.key === key) {
       if (a.keys.agentTerminate.fp === fp)
@@ -1287,12 +1236,11 @@ export function registerAgent(rawCtx) {
     const found = typeof req.params.id === 'string' ? agreements.byId(req.params.id) : null;
     const a = found && found.clientId === req.player.id ? found : null;
     if (!a) return sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, action);
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, reasonField ? 'playerDispute' : 'playerAnswer', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    const reason = reasonField
-      ? (optText(res, req.body?.[reasonField], reasonField, LIM.disputeReason, action) ?? null)
-      : null;
-    if (reason === false) return;
+    const reason = reasonField ? filled(b[reasonField]) : null;
     if (
       reason &&
       !moderateOrRefuse(res, reason, { kind: 'representation', playerId: req.player.id, orgId: a.agencyOrgId })
@@ -1417,51 +1365,10 @@ export function registerAgent(rawCtx) {
     const found = typeof req.params.id === 'string' ? agreements.byId(req.params.id) : null;
     const a = found && found.clientId === req.player.id ? found : null;
     if (!a) return sendAgentError(res, { error: 'REPRESENTATION_NOT_FOUND' }, 'sharing');
-    const body = req.body ?? {};
-    if (body.shareWithAgencyStaff !== undefined && typeof body.shareWithAgencyStaff !== 'boolean') {
-      return sendAgentError(
-        res,
-        {
-          error: 'REPRESENTATION_INPUT_INVALID',
-          field: 'shareWithAgencyStaff',
-          message:
-            'shareWithAgencyStaff is true or false. Send the choice as a boolean; nothing is assumed from another kind of value.',
-        },
-        'sharing',
-      );
-    }
-    if (
-      body.disclosure !== undefined &&
-      (body.disclosure === null || typeof body.disclosure !== 'object' || Array.isArray(body.disclosure))
-    ) {
-      return sendAgentError(
-        res,
-        {
-          error: 'REPRESENTATION_INPUT_INVALID',
-          field: 'disclosure',
-          message: `disclosure must be an object with any of: ${DISCLOSURE_KEYS.join(', ')}.`,
-        },
-        'sharing',
-      );
-    }
     // A truthy string or a 1 is refused rather than read as no, which would silently turn off a choice the client
     // was trying to turn on.
-    if (body.disclosure !== undefined) {
-      for (const k of DISCLOSURE_KEYS) {
-        if (Object.hasOwn(body.disclosure, k) && typeof body.disclosure[k] !== 'boolean') {
-          return sendAgentError(
-            res,
-            {
-              error: 'REPRESENTATION_INPUT_INVALID',
-              field: `disclosure.${k}`,
-              message:
-                'Each disclosure is true or false. Send the choice as a boolean; nothing is assumed from another kind of value.',
-            },
-            'sharing',
-          );
-        }
-      }
-    }
+    const body = inputOr400(res, 'sharing', req.body);
+    if (!body) return;
     if (!guardRev(req, res, a, { errorCode: 'REPRESENTATION_VERSION_CONFLICT', current: {} })) return;
 
     const changed = {};

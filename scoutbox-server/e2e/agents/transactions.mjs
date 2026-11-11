@@ -2442,7 +2442,7 @@ section('K — scoped notes, absent rather than redacted for the lanes they excl
     !tl.some((e) => e.action === 'transaction_note_added'),
     "M1 a note is audit-only: it appears in NOBODY's timeline, including its author's",
   );
-  const audit = (await j('GET', '/org/agent/agency/audit?limit=100', undefined, tomas.token)).body.items;
+  const audit = (await j('GET', '/org/agent/agency/audit?limit=50', undefined, tomas.token)).body.items;
   ok(
     audit.some((r) => r.domain === 'transaction' && r.action === 'transaction_note_added'),
     'M2 …and it IS in the platform audit, which is the distinction',

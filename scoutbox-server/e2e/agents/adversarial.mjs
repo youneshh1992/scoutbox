@@ -806,12 +806,17 @@ section('J/live — a minor is indistinguishable from a player who does not exis
     ),
   );
   neg(
-    expect(forged, 404, null),
-    `J6 forging dob, isAdult, guardianConsent and minorPathway in the body does not open the minor pathway — 404 ${forged.body?.error}`,
+    expect(forged, 400, 'AGENT_INPUT_INVALID') && forged.body.problem === 'unknown_field',
+    `J6 forging dob, isAdult, guardianConsent or minorPathway in the body is refused as a field the request does not take — ${forged.status} ${forged.body?.error}`,
   );
   ok(
-    JSON.stringify(forged.body) === JSON.stringify(ghost.body),
-    'J6b and the forged request is refused identically to the ghost — the client cannot assert its way past a server-side age rule',
+    forged.body.field === 'dob' && !JSON.stringify(forged.body).includes('pl-guni'),
+    'J6b …naming the forged field, never the player: the client cannot assert its way past a server-side age rule, and the refusal says nothing about the subject',
+  );
+  const clientsAfter = await j('GET', '/org/agent/clients', undefined, ada.token);
+  neg(
+    !JSON.stringify(clientsAfter.body ?? {}).includes('pl-guni'),
+    'J6c and no relationship with the minor was proposed',
   );
   const players = await j('GET', '/org/agent/players?q=Guni', undefined, ada.token);
   neg(
@@ -849,7 +854,7 @@ section('V/live — deep links after authority loss, and history is not access')
   const term = await j(
     'POST',
     `/org/agent/clients/${REP}/terminate`,
-    { reason: 'ending it', clientKey: key() },
+    { reasonCode: 'agent_ended', clientKey: key() },
     ada.token,
   );
   ok(term.status === 200, `V2 the agent terminated her own mandate (${term.status})`);

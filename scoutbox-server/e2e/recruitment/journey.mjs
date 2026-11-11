@@ -1561,7 +1561,7 @@ section('F — audiences: the player, the guardian, the agent');
   const end = await j(
     'POST',
     `/player/agent/relationships/${REP}/terminate`,
-    { reasonCode: 'player_ended', expectedRev: mine?.rev ?? 2 },
+    { expectedRev: mine?.rev ?? 2 },
     P['pl-adeyemi'].token,
   );
   const gone = await agentJourney(REP, ana.token);

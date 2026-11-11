@@ -1555,7 +1555,7 @@ let ANA_PROFILE_REV;
     ),
     'H11 a stale profile rev is refused',
   );
-  const change = await j('POST', '/org/agent/profile', { fifaLicenceNumber: 'FIFA-9999', rev }, ANA.token);
+  const change = await j('POST', '/org/agent/profile', { fifaLicenceNumber: 'FIFA-9999', expectedRev: rev }, ANA.token);
   neg(
     change.status === 200 &&
       change.body.profile.facets.fifa_licence.state === 'UNVERIFIED' &&
@@ -2783,6 +2783,88 @@ section('S — the subsystems Agent must not touch');
   neg(
     expect(await j('POST', '/org/agent/clients/' + REL + '/apply', { opportunityId: 'x' }, ANA.token), 404, null),
     "S14 no route lets the agent APPLY for the client — applying is the player's act",
+  );
+}
+
+// ============================================================ IN — input is valid as sent, or refused
+section('IN — strict bodies and queries: nothing is coerced, clamped or ignored');
+{
+  const refusedAs = (r, code, field, problem) =>
+    r.status === 400 && r.body?.error === code && r.body.field === field && r.body.problem === problem;
+  const request = async (label, extra) =>
+    collect(
+      label,
+      await j(
+        'POST',
+        '/org/agent/clients/request',
+        { playerId: 'pl-adeyemi', jurisdiction: 'ENG', clientKey: `in-${label}`, ...extra },
+        ANA.token,
+      ),
+    );
+  const clientRows = async () =>
+    (await j('GET', '/org/agent/clients', undefined, ANA.token)).body.items.map((r) => `${r.id}@${r.rev}`).join();
+  const clientsBefore = await clientRows();
+  neg(
+    refusedAs(await request('IN1', { scope: 'employment' }), 'AGENT_SCOPE_INVALID', 'scope', 'not_list'),
+    'IN1 a scope sent as one text, not a list, is refused rather than wrapped in one',
+  );
+  neg(
+    refusedAs(await request('IN2', { termMonths: '12' }), 'AGENT_TERM_INVALID', 'termMonths', 'not_number') &&
+      refusedAs(await request('IN2b', { termMonths: 25 }), 'AGENT_TERM_INVALID', 'termMonths', 'too_large'),
+    'IN2 a term written as text, or past the 24-month cap, is refused with its own code',
+  );
+  neg(
+    refusedAs(await request('IN3', { scope: ['employment', 'employment'] }), 'AGENT_SCOPE_INVALID', 'scope', 'invalid'),
+    'IN3 a scope naming a value twice is refused',
+  );
+  neg((await clientRows()) === clientsBefore, 'IN4 none of those refused requests proposed a relationship');
+  neg(
+    refusedAs(
+      collect('IN5', await j('GET', '/org/agent/agency/audit?limit=100', undefined, tomas.token)),
+      'AGENT_INPUT_INVALID',
+      'limit',
+      'too_large',
+    ) &&
+      refusedAs(
+        collect('IN5b', await j('GET', '/org/agent/agency/audit?limit=ten', undefined, tomas.token)),
+        'AGENT_INPUT_INVALID',
+        'limit',
+        'not_whole_number',
+      ),
+    'IN5 an audit page past 50, or one that is not a number, is refused instead of clamped or defaulted',
+  );
+  neg(
+    refusedAs(
+      collect('IN6', await j('GET', '/org/agent/players?q=Kola&minAge=10', undefined, ANA.token)),
+      'AGENT_INPUT_INVALID',
+      'minAge',
+      'unknown_field',
+    ),
+    'IN6 the player lookup takes only the parameter it reads',
+  );
+  const team = async () => JSON.stringify((await j('GET', '/org/agent/agency/team', undefined, tomas.token)).body);
+  const teamBefore = await team();
+  neg(
+    refusedAs(
+      collect(
+        'IN7',
+        await j('PATCH', `/org/agent/agency/team/${BEN_ID}`, { tiers: ['analyst', 'analyst'] }, tomas.token),
+      ),
+      'AGENT_TIERS_INVALID',
+      'tiers',
+      'invalid',
+    ) &&
+      refusedAs(
+        collect(
+          'IN7b',
+          await j('PATCH', '/org/agent/agency/settings', { description: 'x', tagline: 'y' }, tomas.token),
+        ),
+        'AGENT_INPUT_INVALID',
+        'tagline',
+        'unknown_field',
+      ) &&
+      (await team()) === teamBefore,
+    'IN7 duplicate tiers and an agency setting this build does not store are refused, and the team is unchanged',
   );
 }
 

@@ -17,6 +17,9 @@ import { opportunityBoardFor } from '../../scouting/journeys.mjs';
 import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { plainShared } from '../../recruitment/lifecycle/contact.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
+import { inputOrRefuse } from '../../platform/schemas.mjs';
+import { AGENT_INPUT, agentParseOptions } from '../core/schemas.mjs';
+import { AGENT_CORE_LIMITS } from '../../../repositories/agentCore.mjs';
 import { chainHead, isFormal } from '../../recruitment/lifecycle/decision.mjs';
 import { roomRole, roomCan } from '../../recruitment/rooms/shared.mjs';
 import { TERMINAL_STATUSES } from '../transactions/transaction.mjs';
@@ -95,8 +98,10 @@ export function registerIntegration(ctx) {
    * cannot spend the budget of the club or agent they are impersonating.
    */
   const limitedOr429 = refuseWhenLimited(rateLimit);
-  const clientKeyOf = (req, res) => {
-    const k = normaliseClientKey(req.body?.clientKey);
+  /** The request input read with its schema (core/schemas.mjs), or `undefined` once the refusal is sent. */
+  const inputOr400 = (res, name, input) => inputOrRefuse(res, AGENT_INPUT[name], input ?? {}, agentParseOptions(name));
+  const clientKeyOf = (body, res) => {
+    const k = normaliseClientKey(body.clientKey);
     if (!k.ok) {
       res.status(400).json({ error: 'AGENT_CLIENT_KEY_INVALID', message: k.message });
       return undefined;
@@ -400,11 +405,11 @@ export function registerIntegration(ctx) {
         .json({ error: 'AGENT_ACTION_NOT_PERMITTED', message: 'A summary row does not permit sharing.' });
     const a = found;
 
-    const key = clientKeyOf(req, res);
+    const b = inputOr400(res, 'opportunityShare', req.body);
+    if (!b) return;
+    const key = clientKeyOf(b, res);
     if (key === undefined) return;
-    const note = plainShared(req.body?.note, 300);
-    if (note === null)
-      return res.status(400).json({ error: 'AGENT_INPUT_INVALID', field: 'note', message: 'A note must be text.' });
+    const note = plainShared(b.note, AGENT_CORE_LIMITS.shareNote);
 
     if (key) {
       const hit = a.opportunityShares.find((s) => s && s.keys?.share?.key === key);
@@ -521,6 +526,7 @@ export function registerIntegration(ctx) {
     const a = found;
     const share = a.opportunityShares.find((s) => s.id === req.params.shareId);
     if (!share) return res.status(404).json({ error: 'OPPORTUNITY_SHARE_NOT_FOUND' });
+    if (!inputOr400(res, 'none', req.body)) return;
     if (share.withdrawnAt) return res.json({ share: shareView(share), idempotent: true });
     // No live basis check: an agent whose relationship ended can still take back a share, which widens nobody's
     // access. It draws on the sharing quota, being the other half of the share/withdraw loop.
@@ -678,7 +684,9 @@ export function registerIntegration(ctx) {
     const got = roomForHandoff(req, res, 'write');
     if (!got) return;
     const { kase, canWrite } = got;
-    const key = clientKeyOf(req, res);
+    const b = inputOr400(res, 'handoffInvite', req.body);
+    if (!b) return;
+    const key = clientKeyOf(b, res);
     if (key === undefined) return;
     const existing = handoffOf(kase);
     if (existing && key && existing.keys?.invite?.key === key) {
@@ -762,6 +770,7 @@ export function registerIntegration(ctx) {
     const { kase } = got;
     const h = handoffOf(kase);
     if (!h) return res.status(404).json({ error: 'HANDOFF_NOT_FOUND' });
+    if (!inputOr400(res, 'none', req.body)) return;
     if (h.status === 'withdrawn') return res.json({ handoff: handoffView(h, kase), idempotent: true });
     // Withdrawing a taken-up invitation would not close the transaction, so it is refused.
     if (h.status === 'accepted') {

@@ -653,7 +653,7 @@ section('4 — a real workspace survives a restart byte for byte');
       ana.token,
     );
     ok(holdReplay.body.idempotent === true, 'and so does the status key');
-    const audit = await s.j('GET', '/org/agent/agency/audit?limit=100', undefined, tomas.token);
+    const audit = await s.j('GET', '/org/agent/agency/audit?limit=50', undefined, tomas.token);
     ok(
       audit.status === 200 &&
         audit.body.items.some((r) => r.domain === 'transaction' && r.action === 'transaction_created'),

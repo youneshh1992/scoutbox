@@ -2024,7 +2024,7 @@ section('K — agent authority loss mid-journey: the projection narrows or close
   const ended = await j(
     'POST',
     `/player/agent/relationships/${REP}/terminate`,
-    { reasonCode: 'player_ended', expectedRev: mine?.rev ?? 2 },
+    { expectedRev: mine?.rev ?? 2 },
     P['pl-adeyemi'].token,
   );
   const afterEnd = await agentJourney(REP, ana.token);
