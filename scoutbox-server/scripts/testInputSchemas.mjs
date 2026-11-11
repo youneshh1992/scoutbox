@@ -8,13 +8,16 @@ import {
   ID_MAX,
   PROBLEMS,
   dateOnly,
+  dateWrittenAs,
   dayOrBlank,
   dueDate,
   flag,
   id,
   idList,
+  idsText,
   inputOrRefuse,
   instant,
+  listedIds,
   oneOf,
   oneShapeOf,
   parseInput,
@@ -303,6 +306,28 @@ test('oneShapeOf picks the shape by its key, refuses another value with allowed,
   assert.equal(refusal({}, S).problem, 'required');
   assert.equal(refusal({ type: 'contact', date: '2026-03-01' }, S).problem, 'unknown_field');
   assert.equal(refusal({ type: 'contact', message: { t: 1 } }, S).problem, 'not_text');
+});
+
+test('idsText takes up to max comma-separated ids written once, and refuses more rather than dropping them', () => {
+  const Q = v.strictObject({ ids: v.optional(idsText(3)) });
+  assert.deepEqual(listedIds(parseInput(Q, { ids: 'a,,b,c' }).value.ids), ['a', 'b', 'c']);
+  assert.deepEqual(listedIds(undefined), []);
+  const many = refusal({ ids: 'a,b,c,d' }, Q, { root: 'query' });
+  assert.equal(many.field, 'ids');
+  assert.equal(many.problem, 'too_long');
+  assert.equal(many.max, 3);
+  assert.equal(refusal({ ids: `a,${'x'.repeat(ID_MAX + 1)}` }, Q).max, ID_MAX);
+  assert.equal(refusal({ ids: ['a', 'b'] }, Q).problem, 'not_text');
+});
+
+test('dateWrittenAs judges a domain date with its own test and refuses it as DATE_INVALID with its expected form', () => {
+  const D = v.strictObject({ from: dateWrittenAs((x) => x === '2020', 'YYYY') });
+  assert.equal(parseInput(D, { from: '2020' }).ok, true);
+  const bad = refusal({ from: { y: 2020 } }, D);
+  assert.equal(bad.error, 'DATE_INVALID');
+  assert.equal(bad.problem, 'not_a_date');
+  assert.equal(bad.expected, 'YYYY');
+  assert.equal(bad.field, 'from');
 });
 
 console.log(`${passed} input-schema checks passed`);

@@ -4,8 +4,23 @@
 // A person can never verify themselves. Employment and role facts are confirmed by an authorised administrator of a
 // verified organisation; domain control is evidence of mailbox control, not of employment. Where no authority
 // exists, the case routes to Trust & Safety as a prepared human-review case.
+import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
+import {
+  ID_MAX,
+  dueDate,
+  filled,
+  flag,
+  id,
+  idsText,
+  inputOrRefuse,
+  listedIds,
+  oneOf,
+  presentOrRefuse,
+  text,
+  wholeNumber,
+} from '../../platform/schemas.mjs';
 import {
   emailProblem,
   domainOfEmail,
@@ -20,7 +35,108 @@ import {
   VER_LEVELS,
   sha256,
 } from './shared.mjs';
-import { VERIFICATION_LIMITS as L, CONFLICT_KINDS } from '../../../repositories/verification.mjs';
+import {
+  VERIFICATION_LIMITS as L,
+  CLAIM_STATES,
+  CONFLICT_KINDS,
+  METHODS,
+  ROOT_ORG_TYPES,
+} from '../../../repositories/verification.mjs';
+
+// ------------------------------------------------------------- input
+const optText = (max) => v.nullish(text(max));
+// A one-time code from an e-mail or an invitation (a 32-character base64url secret); anything longer cannot match.
+const code = optText(64);
+/** A file is optional when a note says what the evidence is. */
+const EvidenceUpload = v.strictObject({
+  dataUrl: v.nullish(v.string()),
+  filename: optText(L.filename),
+  note: optText(L.note),
+});
+const Affiliation = v.strictObject({ role: optText(L.role), validFrom: v.optional(dueDate) });
+const WorkEmail = v.strictObject({ email: text(L.email) });
+const WorkEmailConfirm = v.strictObject({ code, email: optText(L.email) });
+const EMAIL_CODES = { fieldCodes: { email: 'EMAIL_SYNTAX' } };
+const Reason = v.strictObject({ reason: optText(L.reason) });
+const PublicUsersQuery = v.strictObject({ ids: v.optional(idsText(100)) });
+const DECISIONS = ['confirm', 'correct_role', 'mark_former', 'reject', 'request_info'];
+const Decision = v.strictObject({
+  action: oneOf(DECISIONS),
+  role: optText(L.role),
+  validFrom: v.optional(dueDate),
+  validUntil: v.optional(dueDate),
+  reason: optText(L.reason),
+});
+const DECISION_CODES = { fieldCodes: { action: 'ACTION_UNKNOWN' } };
+const StaffQuery = v.strictObject({
+  state: v.optional(oneOf(CLAIM_STATES)),
+  current: v.optional(oneOf(['true', 'false'])),
+  method: v.optional(oneOf(METHODS)),
+  role: v.optional(text(L.role)),
+});
+const STAFF_QUERY_CODES = { root: 'query' };
+const Departure = v.strictObject({ validUntil: v.optional(dueDate) });
+const NewDomain = v.strictObject({ domain: optText(L.domain), challengeEmail: optText(L.email) });
+const DOMAIN_CODES = { fieldCodes: { domain: 'DOMAIN_INVALID' } };
+const Code = v.strictObject({ code });
+const AdminGrant = v.strictObject({ userId: id, level: oneOf(VER_LEVELS) });
+const ADMIN_GRANT_CODES = { fieldCodes: { level: 'LEVEL_UNKNOWN' } };
+const Conflict = v.strictObject({ kind: oneOf(CONFLICT_KINDS), subject: optText(L.subject), note: optText(L.note) });
+const CONFLICT_CODES = { fieldCodes: { kind: 'KIND_UNKNOWN' } };
+const PlayerInvite = v.strictObject({
+  name: optText(L.inviteeName),
+  squad: optText(L.squad),
+  email: optText(L.email),
+  // '' is the form's "no player".
+  playerId: optText(ID_MAX),
+});
+const InviteAnswer = v.strictObject({ code, email: optText(L.email) });
+const GuardianInviteAnswer = v.strictObject({ code, childId: id });
+const year = v.nullish(wholeNumber({ min: 1900, max: 2100 }));
+const NewReference = v.strictObject({
+  playerId: id,
+  relationship: optText(L.relationship),
+  capacity: optText(L.capacity),
+  fromYear: year,
+  toYear: year,
+  strengths: optText(L.strengths),
+  development: optText(L.development),
+  summary: optText(L.summary),
+});
+const ReferenceWithdrawal = v.strictObject({ reason: optText(L.withdrawReason) });
+const ReferenceCorrection = v.strictObject({
+  strengths: optText(L.strengths),
+  development: optText(L.development),
+  summary: optText(L.summary),
+});
+const APPLICATION_REQUIRED = [
+  'orgName',
+  'orgType',
+  'country',
+  'website',
+  'applicantName',
+  'applicantRole',
+  'workEmail',
+];
+const secret = optText(64);
+const Application = v.strictObject({
+  orgName: optText(L.orgName),
+  orgType: v.nullish(oneOf(ROOT_ORG_TYPES)),
+  country: optText(L.country),
+  website: optText(L.website),
+  applicantName: optText(L.applicantName),
+  applicantRole: optText(L.applicantRole),
+  workEmail: optText(L.email),
+  federation: optText(L.federation),
+  domain: optText(L.domain),
+  officialContact: optText(L.officialContact),
+  declarations: v.nullish(v.strictObject({ authorised: flag })),
+});
+const APPLICATION_CODES = { fieldCodes: { orgType: 'ORG_TYPE_UNKNOWN' } };
+const ApplicationEmailConfirm = v.strictObject({ applicantSecret: secret, code });
+const ApplicationEvidence = v.strictObject({ applicantSecret: secret, ...EvidenceUpload.entries });
+const ApplicationSubmit = v.strictObject({ applicantSecret: secret });
+const ApplicationStatusQuery = v.strictObject({ applicantSecret: v.optional(text(64)) });
 
 const AFFILIATION_TYPE = (org) =>
   org.type === 'agency'
@@ -86,7 +202,6 @@ export function registerOrganisationVerification(ctx) {
   };
   const emailFailsFor = (userId) => reads.tokens.failedAttempts(userId, 'work_email');
   const onlyOrg = (req, r) => (r && r.orgId === req.org.id ? r : null);
-  const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
 
   // Never someone else's evidence, never reviewer notes.
   const subjectClaimView = (claim) => {
@@ -206,17 +321,16 @@ export function registerOrganisationVerification(ctx) {
         .status(409)
         .json({ error: 'CLAIM_NOT_EDITABLE', message: 'Evidence can only be added before review completes.' });
     }
-    const { dataUrl, filename, note } = req.body ?? {};
-    if (!(note === undefined || note === null || typeof note === 'string'))
-      return fieldInvalid(res, 'note', 'note is text.');
-    if (!(filename === undefined || filename === null || typeof filename === 'string'))
-      return fieldInvalid(res, 'filename', 'filename is text.');
+    const body = inputOrRefuse(res, EvidenceUpload, req.body ?? {});
+    if (!body) return;
+    const { dataUrl, filename } = body;
+    const note = filled(body.note);
     let fileFields = {};
     if (dataUrl) {
       const stored = storeEvidenceFile(dataUrl, filename, req);
       if (stored.error) return res.status(422).json({ error: stored.error });
       fileFields = stored;
-    } else if (!note?.trim()) {
+    } else if (!note) {
       return res.status(400).json({ error: 'EVIDENCE_REQUIRED', message: 'Attach a document or a note.' });
     }
     // A risk signal, not a verdict.
@@ -231,7 +345,7 @@ export function registerOrganisationVerification(ctx) {
           orgId: req.org.id,
           claimIds: [claim.id],
           ...fileFields,
-          meta: { note: String(note ?? '').slice(0, L.note) },
+          meta: { note: note ?? '' },
           visibility: ['PERSON_IDENTITY', 'LICENCE'].includes(claim.claimType)
             ? 'trust_and_safety'
             : 'organisation_internal',
@@ -334,20 +448,12 @@ export function registerOrganisationVerification(ctx) {
 
   // ----- professional affiliation request (creates the linked pair)
   orgRouter.post('/verification/affiliation', (req, res) => {
-    if (!(req.body?.role === undefined || req.body?.role === null || typeof req.body.role === 'string'))
-      return fieldInvalid(res, 'role', 'role is text.');
-    const role = String(req.body?.role ?? req.orgUser.role ?? '')
-      .trim()
-      .slice(0, L.role);
-    if (!role) return res.status(400).json({ error: 'ROLE_REQUIRED' });
-    const startP = isAbsent(req.body?.validFrom) ? null : parseDateOrInstant(req.body.validFrom, { dayEdge: 'start' });
-    if (startP && !startP.ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'validFrom',
-        message: `validFrom is a calendar day (YYYY-MM-DD) or an instant (${startP.why}).`,
-        expected: startP.expected,
-      });
+    const body = inputOrRefuse(res, Affiliation, req.body ?? {});
+    if (!body) return;
+    // The account's own role, which no schema has read, may be longer than a claim's.
+    const role = body.role != null ? filled(body.role) : (filled(req.orgUser.role)?.slice(0, L.role) ?? null);
+    if (!presentOrRefuse(res, role, 'role')) return;
+    const startP = isAbsent(body.validFrom) ? null : parseDateOrInstant(body.validFrom, { dayEdge: 'start' });
     const [affType, roleType] = AFFILIATION_TYPE(req.org);
     const existing = userClaims(req.orgUser.id).filter(
       (c) =>
@@ -386,8 +492,9 @@ export function registerOrganisationVerification(ctx) {
 
   // ----- work-email proof. The code travels only in the e-mail.
   orgRouter.post('/verification/work-email', async (req, res) => {
-    if (typeof req.body?.email !== 'string') return res.status(400).json({ error: 'EMAIL_SYNTAX' });
-    const email = req.body.email.trim().toLowerCase();
+    const body = inputOrRefuse(res, WorkEmail, req.body ?? {}, EMAIL_CODES);
+    if (!body) return;
+    const email = body.email.trim().toLowerCase();
     const problem = emailProblem(email);
     if (problem) return res.status(400).json({ error: problem });
     const dom = domainOfEmail(email);
@@ -421,11 +528,9 @@ export function registerOrganisationVerification(ctx) {
   });
 
   orgRouter.post('/verification/work-email/confirm', (req, res) => {
-    const { code, email } = req.body ?? {};
-    if (!(email === undefined || email === null || typeof email === 'string'))
-      return res.status(400).json({ error: 'EMAIL_SYNTAX' });
-    if (!(code === undefined || code === null || typeof code === 'string'))
-      return fieldInvalid(res, 'code', 'code is text.');
+    const body = inputOrRefuse(res, WorkEmailConfirm, req.body ?? {}, EMAIL_CODES);
+    if (!body) return;
+    const { code, email } = body;
     // The token is consumed only together with the evidence and the claims it proves.
     const peek = ctx.peekToken({
       purpose: 'work_email',
@@ -495,10 +600,10 @@ export function registerOrganisationVerification(ctx) {
   orgRouter.post('/verification/claims/:id/dispute', (req, res) => {
     const claim = onlyMine(req, reads.claims.byId(req.params.id));
     if (!claim) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
-    if (!(req.body?.reason === undefined || req.body?.reason === null || typeof req.body.reason === 'string'))
-      return fieldInvalid(res, 'reason', 'reason is text.');
-    const reason = String(req.body?.reason ?? '').trim();
-    if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED' });
+    const body = inputOrRefuse(res, Reason, req.body ?? {});
+    if (!body) return;
+    const reason = filled(body.reason);
+    if (!presentOrRefuse(res, reason, 'reason')) return;
     return openDispute(res, claim, { byKind: 'org_user', byId: req.orgUser.id, byName: req.orgUser.name }, reason, req);
   });
   function openDispute(res, claim, by, reason, req) {
@@ -548,11 +653,9 @@ export function registerOrganisationVerification(ctx) {
   orgRouter.get('/verification/public/org/:id', (req, res) => res.json(publicProfileForOrg(req.params.id)));
   // So list screens make one call, not N.
   orgRouter.get('/verification/public/users', (req, res) => {
-    const ids = String(req.query.ids ?? '')
-      .split(',')
-      .filter(Boolean)
-      .slice(0, 100);
-    res.json({ profiles: ids.map((id) => publicProfileForUser(id)) });
+    const query = inputOrRefuse(res, PublicUsersQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
+    res.json({ profiles: listedIds(query.ids).map((id) => publicProfileForUser(id)) });
   });
   playerRouter.get('/verification/org/:id', (req, res) => res.json(publicProfileForOrg(req.params.id)));
   guardianRouter.get('/verification/org/:id', (req, res) => res.json(publicProfileForOrg(req.params.id)));
@@ -660,11 +763,11 @@ export function registerOrganisationVerification(ctx) {
         message: `This organisation is ${ctx.orgVerificationStatus(req.org)} and cannot confirm staff verification right now.`,
       });
     }
-    const { action, role, validFrom, validUntil, reason } = req.body ?? {};
-    if (!(reason === undefined || reason === null || typeof reason === 'string'))
-      return fieldInvalid(res, 'reason', 'reason is text.');
-    if (!(role === undefined || role === null || typeof role === 'string'))
-      return fieldInvalid(res, 'role', 'role is text.');
+    const body = inputOrRefuse(res, Decision, req.body ?? {}, DECISION_CODES);
+    if (!body) return;
+    const { action, validFrom, validUntil } = body;
+    const role = filled(body.role);
+    const reason = filled(body.reason);
     const pair = claim.metadata?.pairId
       ? reads.claims
           .byPair(claim.metadata.pairId)
@@ -707,9 +810,9 @@ export function registerOrganisationVerification(ctx) {
       let correct = null;
       let roleNow = roleClaim?.role ?? null;
       if (action === 'correct_role') {
-        if (!role?.trim()) return res.status(400).json({ error: 'ROLE_REQUIRED' });
+        if (!presentOrRefuse(res, role, 'role')) return;
         if (roleClaim) {
-          roleNow = String(role).trim().slice(0, L.role);
+          roleNow = role;
           correct = () => {
             verEvent(
               'claim.corrected',
@@ -718,7 +821,7 @@ export function registerOrganisationVerification(ctx) {
                 subjectId: claim.subjectId,
                 orgId: req.org.id,
                 before: { role: roleClaim.role },
-                after: { role: String(role).trim() },
+                after: { role },
               },
               req,
             );
@@ -727,21 +830,7 @@ export function registerOrganisationVerification(ctx) {
         }
       }
       const fromP = isAbsent(validFrom) ? null : parseDateOrInstant(validFrom, { dayEdge: 'start' });
-      if (fromP && !fromP.ok)
-        return res.status(400).json({
-          error: 'DATE_INVALID',
-          field: 'validFrom',
-          message: `validFrom is a calendar day (YYYY-MM-DD) or an instant (${fromP.why}).`,
-          expected: fromP.expected,
-        });
       const untilP = isAbsent(validUntil) ? null : parseDateOrInstant(validUntil, { dayEdge: 'end' });
-      if (untilP && !untilP.ok)
-        return res.status(400).json({
-          error: 'DATE_INVALID',
-          field: 'validUntil',
-          message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${untilP.why}).`,
-          expected: untilP.expected,
-        });
       const from = fromP ? fromP.ms : Date.now();
       const until = untilP ? untilP.ms : action === 'mark_former' ? Date.now() : null;
       // Checked only when the club stated both ends: a defaulted start is "now" by convention, not a claim.
@@ -762,33 +851,30 @@ export function registerOrganisationVerification(ctx) {
         claim.id,
       );
     } else if (action === 'reject') {
-      if (!reason?.trim())
-        return res.status(400).json({
-          error: 'REASON_REQUIRED',
+      if (
+        !presentOrRefuse(res, reason, 'reason', {
           message: 'A rejection needs a reason — it is shown to the person and audited.',
-        });
+        })
+      )
+        return;
       const err = decide('rejected');
       if (err) return res.status(409).json({ error: err });
       notify(
         { kind: 'org_user', id: claim.subjectId },
         'verification',
-        `${req.org.name} declined the verification request: ${String(reason).slice(0, 140)}`,
+        `${req.org.name} declined the verification request: ${reason.slice(0, 140)}`,
         claim.id,
       );
-    } else if (action === 'request_info') {
+    } else {
       unit(() => {
         for (const c of targets) applyStatus(c, 'collecting_evidence', req, { reason });
       });
       notify(
         { kind: 'org_user', id: claim.subjectId },
         'verification',
-        `${req.org.name} asks for more information on your verification request${reason ? `: ${String(reason).slice(0, 140)}` : ''}.`,
+        `${req.org.name} asks for more information on your verification request${reason ? `: ${reason.slice(0, 140)}` : ''}.`,
         claim.id,
       );
-    } else {
-      return res
-        .status(400)
-        .json({ error: 'ACTION_UNKNOWN', message: 'Use confirm, correct_role, mark_former, reject or request_info.' });
     }
     ctx.ledgerAppend?.({
       type: 'verification_decision',
@@ -802,13 +888,15 @@ export function registerOrganisationVerification(ctx) {
 
   orgRouter.get('/verification/staff', (req, res) => {
     if (!requireVer(req, res, 'verification_viewer')) return;
-    const { state, current, method, role } = req.query;
+    const query = inputOrRefuse(res, StaffQuery, req.query ?? {}, STAFF_QUERY_CODES);
+    if (!query) return;
+    const { state, current, method, role } = query;
     let rows = reads.claims.forOrgStaff(req.org.id).filter((c) => !['unverified'].includes(c.status));
     if (state) rows = rows.filter((c) => c.status === state);
     if (current === 'true') rows = rows.filter((c) => c.current !== false);
     if (current === 'false') rows = rows.filter((c) => c.current === false);
     if (method) rows = rows.filter((c) => c.verificationMethod === method);
-    if (role) rows = rows.filter((c) => (c.role ?? '').toLowerCase().includes(String(role).toLowerCase()));
+    if (role) rows = rows.filter((c) => (c.role ?? '').toLowerCase().includes(role.toLowerCase()));
     res.json({
       items: rows.map((c) => {
         const u = byId.user(c.subjectId);
@@ -842,14 +930,9 @@ export function registerOrganisationVerification(ctx) {
       .forOrgSubject(req.org.id, req.params.userId)
       .filter((c) => c.status === 'verified' && c.current !== false);
     if (!claims.length) return res.status(404).json({ error: 'NO_CURRENT_VERIFIED_CLAIMS' });
-    const untilP = isAbsent(req.body?.validUntil) ? null : parseDateOrInstant(req.body.validUntil, { dayEdge: 'end' });
-    if (untilP && !untilP.ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'validUntil',
-        message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${untilP.why}).`,
-        expected: untilP.expected,
-      });
+    const body = inputOrRefuse(res, Departure, req.body ?? {});
+    if (!body) return;
+    const untilP = isAbsent(body.validUntil) ? null : parseDateOrInstant(body.validUntil, { dayEdge: 'end' });
     const until = untilP ? untilP.ms : Date.now();
     unit(() => {
       for (const c of claims) {
@@ -896,13 +979,10 @@ export function registerOrganisationVerification(ctx) {
 
   orgRouter.post('/verification/domains', async (req, res) => {
     if (!requireVer(req, res, 'verification_admin')) return;
-    for (const k of ['domain', 'challengeEmail'])
-      if (!(req.body?.[k] === undefined || req.body?.[k] === null || typeof req.body[k] === 'string'))
-        return fieldInvalid(res, k, `${k} is text.`);
-    const domain = normalizeDomain(req.body?.domain);
-    const challengeEmail = String(req.body?.challengeEmail ?? '')
-      .trim()
-      .toLowerCase();
+    const body = inputOrRefuse(res, NewDomain, req.body ?? {}, DOMAIN_CODES);
+    if (!body) return;
+    const domain = normalizeDomain(body.domain);
+    const challengeEmail = (body.challengeEmail ?? '').trim().toLowerCase();
     if (!domain || !domain.includes('.') || domain.length > L.domain)
       return res.status(400).json({ error: 'DOMAIN_INVALID' });
     if (isFreeMail(domain) || isDisposable(domain))
@@ -970,9 +1050,9 @@ export function registerOrganisationVerification(ctx) {
     const r = onlyOrg(req, reads.domainRequests.byId(req.params.id));
     if (!r) return res.status(404).json({ error: 'DOMAIN_REQUEST_NOT_FOUND' });
     if (r.status !== 'email_challenge') return res.status(409).json({ error: 'NOT_IN_EMAIL_CHALLENGE' });
-    if (!(req.body?.code === undefined || req.body?.code === null || typeof req.body.code === 'string'))
-      return fieldInvalid(res, 'code', 'code is text.');
-    const peek = ctx.peekToken({ purpose: 'domain_email', secret: req.body?.code });
+    const body = inputOrRefuse(res, Code, req.body ?? {});
+    if (!body) return;
+    const peek = ctx.peekToken({ purpose: 'domain_email', secret: body.code });
     if (peek.error || peek.token.refId !== r.id) {
       if (!peek.error) ctx.useToken(peek.token); // a valid code for another request is spent
       vmetric('emailChallengeFailures');
@@ -1034,9 +1114,9 @@ export function registerOrganisationVerification(ctx) {
   });
 
   orgRouter.post('/verification/admins', (req, res) => {
-    const { userId, level } = req.body ?? {};
-    if (!VER_LEVELS.includes(level)) return res.status(400).json({ error: 'LEVEL_UNKNOWN' });
-    if (typeof userId !== 'string') return res.status(404).json({ error: 'USER_NOT_FOUND' });
+    const body = inputOrRefuse(res, AdminGrant, req.body ?? {}, ADMIN_GRANT_CODES);
+    if (!body) return;
+    const { userId, level } = body;
     const needsRoot = ['verification_admin', 'verification_root_admin'].includes(level);
     if (!requireVer(req, res, needsRoot ? 'verification_root_admin' : 'verification_admin', { root: needsRoot }))
       return;
@@ -1169,6 +1249,8 @@ export function registerOrganisationVerification(ctx) {
         message: 'Another administrator (or Trust & Safety) must change your authority.',
       });
     if (a.status !== 'active') return res.status(409).json({ error: 'ALREADY_REVOKED' });
+    const body = inputOrRefuse(res, Reason, req.body ?? {});
+    if (!body) return;
     if (isRootRow) {
       if (reads.admins.activeRootCount(req.org.id) <= 1) {
         return res.status(409).json({
@@ -1182,7 +1264,7 @@ export function registerOrganisationVerification(ctx) {
       const next = verification.admins.revoke(a.id, { at: Date.now(), by: req.orgUser.id });
       verEvent(
         'admin.revoked',
-        { orgId: req.org.id, subjectId: a.userId, reason: String(req.body?.reason ?? 'revoked by organisation') },
+        { orgId: req.org.id, subjectId: a.userId, reason: filled(body.reason) ?? 'revoked by organisation' },
         req,
       );
       return next;
@@ -1195,21 +1277,16 @@ export function registerOrganisationVerification(ctx) {
 
   // ========================================== conflict declarations
   orgRouter.post('/verification/conflicts', (req, res) => {
-    const { kind, subject, note } = req.body ?? {};
-    const KINDS = CONFLICT_KINDS;
-    if (!KINDS.includes(kind)) return res.status(400).json({ error: 'KIND_UNKNOWN', kinds: KINDS });
-    for (const [k, v] of [
-      ['subject', subject],
-      ['note', note],
-    ])
-      if (!(v === undefined || v === null || typeof v === 'string')) return fieldInvalid(res, k, `${k} is text.`);
+    const body = inputOrRefuse(res, Conflict, req.body ?? {}, CONFLICT_CODES);
+    if (!body) return;
+    const { kind } = body;
     const c = verification.conflicts.create({
       id: nextId('vcoi'),
       userId: req.orgUser.id,
       orgId: req.org.id,
       kind,
-      subject: String(subject ?? '').slice(0, L.subject),
-      note: String(note ?? '').slice(0, L.note),
+      subject: body.subject ?? '',
+      note: body.note ?? '',
       createdAt: Date.now(),
       withdrawnAt: null,
     });
@@ -1246,15 +1323,13 @@ export function registerOrganisationVerification(ctx) {
         error: 'INVITE_RATE_LIMIT',
         message: `Deterministic limit: ${INVITES_PER_DAY} invitations per organisation per day.`,
       });
-    const { name, squad, playerId } = req.body ?? {};
-    const email = typeof req.body?.email === 'string' ? req.body.email.trim() : req.body?.email;
-    if (typeof name !== 'string' || !name.trim()) return res.status(400).json({ error: 'NAME_REQUIRED' });
-    if (email && (typeof email !== 'string' || emailProblem(email)))
-      return res.status(400).json({ error: 'EMAIL_SYNTAX' }); // a string only: emailProblem would coerce an array
-    if (!(squad === undefined || squad === null || typeof squad === 'string'))
-      return fieldInvalid(res, 'squad', 'squad is text.');
-    if (!(playerId === undefined || playerId === null || playerId === '' || typeof playerId === 'string'))
-      return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+    const body = inputOrRefuse(res, PlayerInvite, req.body ?? {}, EMAIL_CODES);
+    if (!body) return;
+    const { playerId } = body;
+    const name = filled(body.name);
+    if (!presentOrRefuse(res, name, 'name')) return;
+    const email = filled(body.email);
+    if (email && emailProblem(email)) return res.status(400).json({ error: 'EMAIL_SYNTAX', field: 'email' });
     // An invite to an existing player binds the token to that identity. Targeting uses the standing visibility rules,
     // so an invite is not a discovery bypass.
     let targetPlayer = null;
@@ -1272,8 +1347,8 @@ export function registerOrganisationVerification(ctx) {
         orgId: req.org.id,
         byUserId: req.orgUser.id,
         byName: req.orgUser.name == null ? null : String(req.orgUser.name).slice(0, L.name),
-        name: String(name).trim().slice(0, L.inviteeName),
-        squad: String(squad ?? '').slice(0, L.squad),
+        name,
+        squad: body.squad ?? '',
         status: 'pending',
         playerId: null,
         targetPlayerId: targetPlayer?.id ?? null,
@@ -1320,17 +1395,19 @@ export function registerOrganisationVerification(ctx) {
         .status(403)
         .json({ error: 'GUARDIAN_MANAGED', message: 'Your guardian accepts club invitations for you.' });
     }
-    return acceptInvite(res, req.body?.code, req.player, null, req.body?.email ?? null);
+    const body = inputOrRefuse(res, InviteAnswer, req.body ?? {});
+    if (!body) return;
+    return acceptInvite(res, body.code, req.player, null, body.email ?? null);
   });
   guardianRouter.post('/invites/accept', (req, res) => {
-    const child = byId.player(req.body?.childId, (p) => req.guardian.childIds.includes(p.id));
+    const body = inputOrRefuse(res, GuardianInviteAnswer, req.body ?? {});
+    if (!body) return;
+    const child = byId.player(body.childId, (p) => req.guardian.childIds.includes(p.id));
     if (!child) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-    return acceptInvite(res, req.body?.code, child, req.guardian);
+    return acceptInvite(res, body.code, child, req.guardian);
   });
   function acceptInvite(res, code, player, guardian, claimedEmail = null) {
     // Peek, check every binding, then consume: a wrong-recipient attempt must not burn the rightful recipient's secret.
-    if (!(code === undefined || code === null || typeof code === 'string'))
-      return res.status(404).json({ error: 'TOKEN_UNKNOWN' });
     const out = ctx.peekToken({ purpose: 'player_invite', secret: code });
     if (out.error) return res.status(out.error === 'TOKEN_EXPIRED' ? 410 : 404).json({ error: out.error });
     const found = reads.playerInvites.byId(out.token.refId);
@@ -1354,7 +1431,7 @@ export function registerOrganisationVerification(ctx) {
     // An address-targeted invite: a guardian's verified account e-mail must match. Player accounts carry no e-mail,
     // so an adult confirms the recipient address: address knowledge plus the code, not mailbox re-proof.
     if (out.token.email) {
-      const supplied = guardian ? String(guardian.email ?? '').toLowerCase() : String(claimedEmail ?? '').toLowerCase();
+      const supplied = (guardian ? (guardian.email ?? '') : (claimedEmail ?? '')).trim().toLowerCase();
       if (supplied !== out.token.email) {
         return res.status(403).json({
           error: 'INVITE_RECIPIENT_MISMATCH',
@@ -1405,7 +1482,9 @@ export function registerOrganisationVerification(ctx) {
         error: 'VERIFIED_ROLE_REQUIRED',
         message: 'Structured references need a currently verified role at this organisation.',
       });
-    const p = findPlayer(req.body?.playerId);
+    const body = inputOrRefuse(res, NewReference, req.body ?? {});
+    if (!body) return;
+    const p = findPlayer(body.playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id)) {
       return res.status(403).json({
@@ -1414,30 +1493,16 @@ export function registerOrganisationVerification(ctx) {
           'A verified role does not widen player visibility — the standing consent and safeguarding rules decide who you can reference.',
       });
     }
-    const { relationship, capacity, fromYear, toYear, strengths, development, summary } = req.body ?? {};
-    for (const [k, v] of [
-      ['relationship', relationship],
-      ['summary', summary],
-      ['capacity', capacity],
-      ['strengths', strengths],
-      ['development', development],
-    ]) {
-      if (!(v === undefined || v === null || typeof v === 'string')) return fieldInvalid(res, k, `${k} is text.`);
-    }
-    if (!relationship?.trim() || !summary?.trim())
-      return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'relationship and summary are required.' });
-    const yearOf = (v) =>
-      v === undefined || v === null || v === ''
-        ? { ok: true, year: null }
-        : (Number.isInteger(v) || (typeof v === 'string' && /^\d{4}$/.test(v.trim()))) &&
-            Number(v) >= 1900 &&
-            Number(v) <= 2100
-          ? { ok: true, year: Number(v) }
-          : { ok: false };
-    const fy = yearOf(fromYear);
-    if (!fy.ok) return fieldInvalid(res, 'fromYear', 'fromYear is a year between 1900 and 2100.');
-    const ty = yearOf(toYear);
-    if (!ty.ok) return fieldInvalid(res, 'toYear', 'toYear is a year between 1900 and 2100.');
+    const relationship = filled(body.relationship);
+    const summary = filled(body.summary);
+    const missing = [...(relationship ? [] : ['relationship']), ...(summary ? [] : ['summary'])];
+    if (missing.length)
+      return res.status(400).json({
+        error: 'FIELDS_REQUIRED',
+        missing,
+        problem: 'required',
+        message: 'relationship and summary are required.',
+      });
     const ref = unit(() => {
       const created = verification.references.create({
         id: nextId('vref'),
@@ -1459,15 +1524,11 @@ export function registerOrganisationVerification(ctx) {
           verifiedAt: roleClaim.verifiedAt,
           snapshotAt: Date.now(),
         },
-        relationship: String(relationship).slice(0, L.relationship),
-        capacity: String(capacity ?? '').slice(0, L.capacity),
-        fromYear: fy.year,
-        toYear: ty.year,
-        structured: {
-          strengths: String(strengths ?? '').slice(0, L.strengths),
-          development: String(development ?? '').slice(0, L.development),
-          summary: String(summary).slice(0, L.summary),
-        },
+        relationship,
+        capacity: body.capacity ?? '',
+        fromYear: body.fromYear ?? null,
+        toYear: body.toYear ?? null,
+        structured: { strengths: body.strengths ?? '', development: body.development ?? '', summary },
         status: 'active',
         withdrawnAt: null,
         withdrawReason: null,
@@ -1509,13 +1570,12 @@ export function registerOrganisationVerification(ctx) {
     const ref = ownReference(req, reads.references.byId(req.params.id));
     if (!ref) return res.status(404).json({ error: 'REFERENCE_NOT_FOUND' });
     if (ref.status !== 'active') return res.status(409).json({ error: 'NOT_ACTIVE' });
-    if (typeof req.body?.reason !== 'string' || !req.body.reason.trim())
-      return res.status(400).json({ error: 'REASON_REQUIRED' });
+    const body = inputOrRefuse(res, ReferenceWithdrawal, req.body ?? {});
+    if (!body) return;
+    const reason = filled(body.reason);
+    if (!presentOrRefuse(res, reason, 'reason')) return;
     const withdrawn = unit(() => {
-      const next = verification.references.withdraw(ref.id, {
-        at: Date.now(),
-        reason: req.body.reason.slice(0, L.withdrawReason),
-      });
+      const next = verification.references.withdraw(ref.id, { at: Date.now(), reason });
       verEvent(
         'claim.corrected',
         {
@@ -1539,11 +1599,15 @@ export function registerOrganisationVerification(ctx) {
     const old = ownReference(req, reads.references.byId(req.params.id));
     if (!old) return res.status(404).json({ error: 'REFERENCE_NOT_FOUND' });
     if (old.status !== 'active') return res.status(409).json({ error: 'NOT_ACTIVE' });
-    for (const k of ['strengths', 'development', 'summary'])
-      if (!(req.body?.[k] === undefined || req.body?.[k] === null || typeof req.body[k] === 'string'))
-        return fieldInvalid(res, k, `${k} is text.`);
-    if (typeof req.body?.summary === 'string' && !req.body.summary.trim())
-      return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'A reference keeps its summary.' });
+    const body = inputOrRefuse(res, ReferenceCorrection, req.body ?? {});
+    if (!body) return;
+    if (typeof body.summary === 'string' && !filled(body.summary))
+      return res.status(400).json({
+        error: 'FIELDS_REQUIRED',
+        missing: ['summary'],
+        problem: 'required',
+        message: 'A reference keeps its summary.',
+      });
     const next = unit(() => {
       verification.references.supersede(old.id);
       const created = verification.references.create({
@@ -1552,9 +1616,9 @@ export function registerOrganisationVerification(ctx) {
         version: old.version + 1,
         supersedesId: old.id,
         structured: {
-          strengths: String(req.body?.strengths ?? old.structured.strengths).slice(0, L.strengths),
-          development: String(req.body?.development ?? old.structured.development).slice(0, L.development),
-          summary: String(req.body?.summary ?? old.structured.summary).slice(0, L.summary),
+          strengths: body.strengths ?? old.structured.strengths,
+          development: body.development ?? old.structured.development,
+          summary: filled(body.summary) ?? old.structured.summary,
         },
         createdAt: Date.now(),
       });
@@ -1620,45 +1684,19 @@ export function registerOrganisationVerification(ctx) {
   // ====================================== root organisation bootstrap
   // A public application. The applicant secret binds the follow-up calls.
   app.post('/auth/org/verification/apply', async (req, res) => {
-    const b = req.body ?? {};
-    const required = ['orgName', 'orgType', 'country', 'website', 'applicantName', 'applicantRole', 'workEmail'];
-    for (const k of [...required, 'federation', 'domain', 'officialContact'])
-      if (!(b[k] === undefined || b[k] === null || typeof b[k] === 'string'))
-        return fieldInvalid(res, k, `${k} is text.`);
-    const missing = required.filter((k) => !String(b[k] ?? '').trim());
-    if (missing.length) return res.status(400).json({ error: 'FIELDS_REQUIRED', missing });
+    const b = inputOrRefuse(res, Application, req.body ?? {}, APPLICATION_CODES);
+    if (!b) return;
+    const missing = APPLICATION_REQUIRED.filter((k) => !filled(b[k]));
+    if (missing.length) return res.status(400).json({ error: 'FIELDS_REQUIRED', missing, problem: 'required' });
     const decl = b.declarations;
-    if (
-      !(
-        decl === undefined ||
-        decl === null ||
-        (typeof decl === 'object' &&
-          !Array.isArray(decl) &&
-          Object.keys(decl).every((k) => k === 'authorised') &&
-          typeof decl.authorised === 'boolean')
-      )
-    ) {
-      return fieldInvalid(res, 'declarations', 'declarations is { authorised: true } or { authorised: false }.');
-    }
-    const ORG_TYPES = [
-      'professional club',
-      'academy',
-      'grassroots club',
-      'federation/association',
-      'agency',
-      'other approved football organisation',
-    ];
-    if (!ORG_TYPES.includes(b.orgType)) return res.status(400).json({ error: 'ORG_TYPE_UNKNOWN', types: ORG_TYPES });
     const problem = emailProblem(b.workEmail);
-    if (problem) return res.status(400).json({ error: problem });
+    if (problem) return res.status(400).json({ error: problem, field: 'workEmail' });
     const domain = normalizeDomain(b.domain || b.website);
-    if (domain.length > L.domain) return fieldInvalid(res, 'domain', 'The domain is too long.');
-    if (String(b.workEmail).length > L.email) return res.status(400).json({ error: 'EMAIL_TOO_LONG' });
     const emailDom = domainOfEmail(b.workEmail);
     // ---- automated checks. DNS and https probing are not implemented, so they are recorded as not_configured.
-    const dupOrg = ctx.orgs.byName(String(b.orgName));
+    const dupOrg = ctx.orgs.byName(b.orgName);
     const dupDomainOrg = domain ? reads.domains.verifiedElsewhere(domain) : null;
-    const dupRequest = reads.rootRequests.openDuplicate(domain, String(b.orgName).trim().toLowerCase());
+    const dupRequest = reads.rootRequests.openDuplicate(domain, b.orgName.trim().toLowerCase());
     const checks = {
       emailSyntax: 'passed',
       emailDomainAlignment: domainCovered(emailDom, domain) ? 'passed' : 'mismatch',
@@ -1678,16 +1716,16 @@ export function registerOrganisationVerification(ctx) {
       const created = verification.rootRequests.create({
         id: nextId('vroot'),
         status: 'collecting_evidence',
-        orgName: String(b.orgName).trim().slice(0, L.orgName),
+        orgName: b.orgName.trim(),
         orgType: b.orgType,
-        country: String(b.country).slice(0, L.country),
-        federation: String(b.federation ?? '').slice(0, L.federation) || null,
-        website: String(b.website).slice(0, L.website),
+        country: b.country,
+        federation: b.federation || null,
+        website: b.website,
         domain,
-        applicantName: String(b.applicantName).trim().slice(0, L.applicantName),
-        applicantRole: String(b.applicantRole).trim().slice(0, L.applicantRole),
-        workEmail: String(b.workEmail).toLowerCase(),
-        officialContact: String(b.officialContact ?? '').slice(0, L.officialContact) || null,
+        applicantName: b.applicantName.trim(),
+        applicantRole: b.applicantRole.trim(),
+        workEmail: b.workEmail.toLowerCase(),
+        officialContact: b.officialContact || null,
         declarations: decl ? { authorised: decl.authorised } : null,
         checks,
         riskFlags: flags,
@@ -1722,9 +1760,11 @@ export function registerOrganisationVerification(ctx) {
     });
   });
 
-  const rootReqBySecret = (req, res) => {
+  /** The secret travels in the body, or in the query string of an older client. */
+  const rootReqBySecret = (req, res, bodySecret) => {
     const r = reads.rootRequests.byId(req.params.id);
-    if (!r || r.applicantSecretHash !== sha256(String(req.body?.applicantSecret ?? req.query?.applicantSecret ?? ''))) {
+    const querySecret = typeof req.query?.applicantSecret === 'string' ? req.query.applicantSecret : '';
+    if (!r || r.applicantSecretHash !== sha256(bodySecret ?? querySecret)) {
       res.status(404).json({ error: 'REQUEST_NOT_FOUND' }); // concealment — no probing which ids exist
       return null;
     }
@@ -1732,11 +1772,11 @@ export function registerOrganisationVerification(ctx) {
   };
 
   app.post('/auth/org/verification/apply/:id/confirm-email', (req, res) => {
-    const r = rootReqBySecret(req, res);
+    const body = inputOrRefuse(res, ApplicationEmailConfirm, req.body ?? {});
+    if (!body) return;
+    const r = rootReqBySecret(req, res, body.applicantSecret);
     if (!r) return;
-    if (!(req.body?.code === undefined || req.body?.code === null || typeof req.body.code === 'string'))
-      return fieldInvalid(res, 'code', 'code is text.');
-    const peek = ctx.peekToken({ purpose: 'root_email', secret: req.body?.code, email: r.workEmail });
+    const peek = ctx.peekToken({ purpose: 'root_email', secret: body.code, email: r.workEmail });
     if (peek.error || peek.token.refId !== r.id) {
       if (!peek.error) ctx.useToken(peek.token);
       vmetric('emailChallengeFailures');
@@ -1751,21 +1791,20 @@ export function registerOrganisationVerification(ctx) {
   });
 
   app.post('/auth/org/verification/apply/:id/evidence', (req, res) => {
-    const r = rootReqBySecret(req, res);
+    const body = inputOrRefuse(res, ApplicationEvidence, req.body ?? {});
+    if (!body) return;
+    const r = rootReqBySecret(req, res, body.applicantSecret);
     if (!r) return;
     if (!['collecting_evidence', 'requires_human_review'].includes(r.status))
       return res.status(409).json({ error: 'REQUEST_CLOSED' });
-    const { dataUrl, filename, note } = req.body ?? {};
-    if (!(note === undefined || note === null || typeof note === 'string'))
-      return fieldInvalid(res, 'note', 'note is text.');
-    if (!(filename === undefined || filename === null || typeof filename === 'string'))
-      return fieldInvalid(res, 'filename', 'filename is text.');
+    const { dataUrl, filename } = body;
+    const note = filled(body.note);
     let fileFields = {};
     if (dataUrl) {
       const stored = storeEvidenceFile(dataUrl, filename, req);
       if (stored.error) return res.status(422).json({ error: stored.error });
       fileFields = stored;
-    } else if (!note?.trim()) return res.status(400).json({ error: 'EVIDENCE_REQUIRED' });
+    } else if (!note) return res.status(400).json({ error: 'EVIDENCE_REQUIRED' });
     const dup = fileFields.sha256 && reads.evidence.digestSeen(fileFields.sha256);
     const ev = unit(() => {
       const added = addEvidence({
@@ -1776,7 +1815,7 @@ export function registerOrganisationVerification(ctx) {
         orgId: null,
         claimIds: [],
         ...fileFields,
-        meta: { note: String(note ?? '').slice(0, L.note), rootRequest: r.id },
+        meta: { note: note ?? '', rootRequest: r.id },
         visibility: 'trust_and_safety',
       });
       if (dup) verification.rootRequests.addRiskFlags(r.id, { codes: ['DUPLICATE_EVIDENCE_HASH'] });
@@ -1786,7 +1825,9 @@ export function registerOrganisationVerification(ctx) {
   });
 
   app.post('/auth/org/verification/apply/:id/submit', (req, res) => {
-    const r = rootReqBySecret(req, res);
+    const body = inputOrRefuse(res, ApplicationSubmit, req.body ?? {});
+    if (!body) return;
+    const r = rootReqBySecret(req, res, body.applicantSecret);
     if (!r) return;
     if (r.status !== 'collecting_evidence') return res.status(409).json({ error: 'ALREADY_SUBMITTED' });
     if (!r.emailProved)
@@ -1813,8 +1854,10 @@ export function registerOrganisationVerification(ctx) {
   });
 
   app.get('/auth/org/verification/apply/:id/status', (req, res) => {
+    const query = inputOrRefuse(res, ApplicationStatusQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     const r = reads.rootRequests.byId(req.params.id);
-    if (!r || r.applicantSecretHash !== sha256(String(req.query.applicantSecret ?? '')))
+    if (!r || r.applicantSecretHash !== sha256(query.applicantSecret ?? ''))
       return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     res.json({
       id: r.id,

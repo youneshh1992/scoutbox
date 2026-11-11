@@ -10,11 +10,13 @@ import {
   OFFSET_PAGE_CODES,
   dayOrBlank,
   dueDate,
+  filled,
   flag,
   id,
   idList,
   inputOrRefuse,
   oneOf,
+  presentOrRefuse,
   text,
 } from '../platform/schemas.mjs';
 import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scoutingEvidence.mjs';
@@ -57,20 +59,6 @@ const InviteAnswer = v.strictObject({ accept: flag });
 const DisputeQuery = v.strictObject({ all: v.optional(oneOf(['0', '1'])), ...OFFSET_PAGE });
 const PageQuery = v.strictObject(OFFSET_PAGE);
 const QUERY = { root: 'query', fieldCodes: OFFSET_PAGE_CODES };
-
-/** Text with something in it, trimmed; blank or absent is null. The schema has checked it is text. */
-const filled = (s) => (typeof s === 'string' && s.trim() ? s.trim() : null);
-/** Sends `<FIELD>_REQUIRED` (coachName → COACH_NAME_REQUIRED) and returns false when `value` is null. */
-function presentOrRefuse(res, value, field, message) {
-  if (value !== null) return true;
-  res.status(400).json({
-    error: `${field.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}_REQUIRED`,
-    field,
-    problem: 'required',
-    ...(message ? { message } : {}),
-  });
-  return false;
-}
 
 /**
  * A name as the evidence tables store it: text, at most `max` characters, or null. Names come from other domains (a
@@ -316,7 +304,10 @@ export function registerPassport(ctx) {
     if (!body) return;
     const { value } = body;
     const reason = filled(body.reason);
-    if (!presentOrRefuse(res, reason, 'reason', 'Corrections carry a reason — the history stays traceable.')) return;
+    if (
+      !presentOrRefuse(res, reason, 'reason', { message: 'Corrections carry a reason — the history stays traceable.' })
+    )
+      return;
     const note = filled(body.note);
     if (!moderateOrRefuse(res, reason, { kind: 'evidence_correction', playerId: orig.playerId })) return;
     const player = findPlayer(orig.playerId);

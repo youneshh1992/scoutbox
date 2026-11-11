@@ -1094,6 +1094,27 @@ ok(
   r.status === 400 && r.body.field === 'contactEmail',
   'a federation contact that is not an e-mail address is refused',
 );
+r = await j(
+  '/org/verification/federation',
+  { method: 'POST', body: JSON.stringify({ federation: 'Manchester FA', registrationId: '   ' }) },
+  bearer(MOSS),
+);
+ok(
+  r.status === 400 && r.body.error === 'FEDERATION_REQUIRED' && r.body.field === 'registrationId',
+  'a blank registration is no registration, named as the field missing',
+);
+r = await j(
+  '/org/verification/federation',
+  {
+    method: 'POST',
+    body: JSON.stringify({ federation: 'Manchester FA', registrationId: 'MFA-2210', status: 'approved' }),
+  },
+  bearer(MOSS),
+);
+ok(
+  r.status === 400 && r.body.field === 'status' && r.body.problem === 'unknown_field',
+  'a federation request that names its own status is refused',
+);
 r = await j('/admin/clubs', {}, admin);
 ok(
   r.body.items.find((o) => o.id === 'org-mossside')?.federationCheck?.status === 'pending',

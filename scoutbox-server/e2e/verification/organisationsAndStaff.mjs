@@ -1470,12 +1470,12 @@ section('junk input is refused at the route (typed tables)');
   };
   bad(
     await j('POST', '/auth/org/verification/apply', { ...apply, declarations: { authorised: 'yes' } }),
-    'declarations',
+    'declarations.authorised',
     'a declaration that is not true or false',
   );
   bad(
     await j('POST', '/auth/org/verification/apply', { ...apply, declarations: { authorised: true, extra: 1 } }),
-    'declarations',
+    'declarations.extra',
     'a declaration with an unknown statement',
   );
   bad(
@@ -1524,6 +1524,103 @@ section('junk input is refused at the route (typed tables)');
       .status === 'open',
     'and the refused resolution changed nothing',
   );
+}
+
+section('verification input is read strictly: no unknown fields, nothing cut, every answer explicit');
+{
+  let r = await j('POST', '/org/verification/affiliation', { role: 'Scout', status: 'verified' }, eve.token);
+  ok(
+    r.status === 400 && r.body.field === 'status' && r.body.problem === 'unknown_field',
+    'a request that names its own claim status is refused, naming the field',
+  );
+  r = await j(
+    'POST',
+    '/org/verification/licence',
+    { licenceType: 'UEFA C', issuer: 'UEFA', verificationMethod: 'authoritative_registry' },
+    eve.token,
+  );
+  ok(
+    r.status === 400 && r.body.field === 'verificationMethod' && r.body.problem === 'unknown_field',
+    'a licence that names its own verification method is refused',
+  );
+  const conflictsBefore = (await j('GET', '/org/verification/conflicts', undefined, eve.token)).body.items.length;
+  r = await j('POST', '/org/verification/conflicts', { kind: 'other', note: 'n'.repeat(401) }, eve.token);
+  ok(
+    r.status === 400 && r.body.field === 'note' && r.body.problem === 'too_long' && r.body.max === 400,
+    'an over-long conflict note is refused with its limit, not cut',
+  );
+  r = await j('POST', '/org/verification/conflicts', { kind: 'rivalry' }, eve.token);
+  ok(
+    r.status === 400 && r.body.error === 'KIND_UNKNOWN' && r.body.allowed.includes('family_relationship'),
+    'an unknown conflict kind is refused with the kinds allowed',
+  );
+  ok(
+    (await j('GET', '/org/verification/conflicts', undefined, eve.token)).body.items.length === conflictsBefore,
+    'and no refused declaration is stored',
+  );
+  r = await j('POST', '/org/verification/work-email', { email: ['tom@eastport.example'] }, tom.token);
+  ok(r.status === 400 && r.body.error === 'EMAIL_SYNTAX', 'a work e-mail that is not text keeps its own code');
+  r = await j('POST', '/guardian/invites/accept', { code: 'abc' }, amara.token);
+  ok(r.status === 400 && r.body.field === 'childId', "a guardian's invitation answer names the child");
+
+  const mine = (await j('GET', '/org/verification/me', undefined, tom.token)).body.claims[0];
+  r = await j('POST', `/admin/verification/claims/${mine.id}/approve`, { reason: 'x', method: 'gut_feeling' }, null, A);
+  ok(
+    r.status === 400 && r.body.field === 'method' && r.body.allowed.includes('scoutbox_manual_review'),
+    'an approval naming an unknown method is refused, not quietly read as a manual review',
+  );
+  ok(
+    (await j('GET', `/admin/verification/cases/${mine.id}`, undefined, null, A)).body.claim.status === mine.status,
+    'and the claim is unchanged',
+  );
+  r = await j('POST', `/admin/verification/claims/${mine.id}/suspend`, { reason: '   ' }, null, A);
+  ok(r.status === 400 && r.body.error === 'REASON_REQUIRED', 'a blank reason is no reason');
+
+  r = await j('POST', '/org/verification/domains', { domain: 'strict-probe.example' }, maria.token, {
+    'x-mfa-code': totp(maria.mfaSecret),
+  });
+  ok(r.status === 201 && r.body.request.status === 'requires_human_review', 'a new root domain goes to review');
+  const domainRequest = r.body.request.id;
+  r = await j('POST', `/admin/verification/domain-requests/${domainRequest}/decide`, { reason: 'checked' }, null, A);
+  ok(
+    r.status === 400 && r.body.field === 'approve' && r.body.problem === 'required',
+    'a domain decision must say approve: true or false (a missing answer was read as a rejection)',
+  );
+  r = await j(
+    'POST',
+    `/admin/verification/domain-requests/${domainRequest}/decide`,
+    { reason: 'checked', approve: 'yes' },
+    null,
+    A,
+  );
+  ok(r.status === 400 && r.body.problem === 'not_boolean', 'and "yes" is not an answer');
+  ok(
+    (await j('GET', '/admin/verification/domain-requests', undefined, null, A)).body.items.some(
+      (d) => d.id === domainRequest,
+    ),
+    'the refused decisions left the request awaiting review',
+  );
+  r = await j(
+    'POST',
+    `/admin/verification/domain-requests/${domainRequest}/decide`,
+    { reason: 'not theirs', approve: false },
+    null,
+    A,
+  );
+  ok(r.status === 200 && r.body.request.status !== 'requires_human_review', 'an explicit false decides it');
+
+  const ids = Array.from({ length: 101 }, (_, i) => `u${i}`).join(',');
+  r = await j('GET', `/org/verification/public/users?ids=${ids}`, undefined, tom.token);
+  ok(
+    r.status === 400 && r.body.field === 'ids' && r.body.max === 100,
+    'a batch of more than 100 profiles is refused, not cut to 100',
+  );
+  r = await j('GET', '/admin/verification/queue?status=everything', undefined, null, A);
+  ok(r.status === 400 && r.body.field === 'status' && r.body.allowed.includes('disputed'), 'an unknown queue status');
+  r = await j('GET', '/admin/verification/queue?sort=oldest', undefined, null, A);
+  ok(r.status === 400 && r.body.problem === 'unknown_field', 'a queue filter the queue does not have');
+  r = await j('GET', '/org/verification/staff?state=whatever', undefined, maria.token);
+  ok(r.status === 400 && r.body.field === 'state', 'an unknown staff state is refused rather than matching nobody');
 }
 
 section('one open identity claim per user, reinstatement included');

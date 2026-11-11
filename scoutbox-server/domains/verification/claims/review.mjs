@@ -3,9 +3,65 @@
 //
 // A licence is called verified only when an authoritative source confirmed it. No governing-body registry is
 // connected: providers ship `not_configured`, and only a local test fixture (env-gated) exercises the adapter.
+import * as v from 'valibot';
 import { decideReview, normalizeDomain, domainOfEmail, domainCovered, sha256 } from './shared.mjs';
 import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
-import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.mjs';
+import { VERIFICATION_LIMITS as L, CLAIM_TYPES } from '../../../repositories/verification.mjs';
+import {
+  dueDate,
+  filled,
+  flag,
+  id,
+  idList,
+  inputOrRefuse,
+  oneOf,
+  presentOrRefuse,
+  text,
+} from '../../platform/schemas.mjs';
+
+// ------------------------------------------------------------- input
+const optText = (max) => v.nullish(text(max));
+// The reason is required (decisionBody); each decision stores it in a column of its own size.
+const reason = (max = L.reason) => optText(max);
+const NewLicence = v.strictObject({
+  licenceType: optText(L.licenceType),
+  issuer: optText(L.issuer),
+  identifier: optText(L.identifier),
+  holderName: optText(L.holderName),
+  issueDate: v.optional(dueDate),
+  expiry: v.optional(dueDate),
+  dataUrl: v.nullish(v.string()),
+  filename: optText(L.filename),
+});
+const LicenceCheck = v.strictObject({ providerId: optText(L.provider) });
+const QUEUE_STATES = ['requires_human_review', 'disputed', 'suspended'];
+const QueueQuery = v.strictObject({
+  orgId: v.optional(id),
+  country: v.optional(text(L.country)),
+  claimType: v.optional(oneOf(CLAIM_TYPES)),
+  status: v.optional(oneOf(QUEUE_STATES)),
+});
+const Assignment = v.strictObject({ reviewer: optText(L.assignedTo) });
+const Decision = v.strictObject({ reason: reason() });
+const APPROVAL_METHODS = ['scoutbox_manual_review', 'federation_confirmation', 'authoritative_registry'];
+const Approval = v.strictObject({ reason: reason(), method: v.optional(oneOf(APPROVAL_METHODS)) });
+const RootApproval = v.strictObject({
+  reason: reason(L.decisionReason),
+  linkUserId: v.nullish(id),
+  provisionNewUser: v.optional(flag),
+});
+const RootRejection = v.strictObject({ reason: reason(L.decisionReason) });
+const RootAppointment = v.strictObject({ reason: reason(L.appointedReason), userId: v.nullish(id) });
+const DomainDecision = v.strictObject({ reason: reason(), approve: flag });
+// The resolution keeps `<action>: <reason>` in L.resolution characters.
+const DisputeResolution = v.strictObject({
+  reason: reason(300),
+  action: oneOf(['reinstate', 'revoke', 'correct', 'dismiss']),
+  role: optText(L.role),
+  current: v.optional(flag),
+  validUntil: v.optional(dueDate),
+});
+const AuthorityFlag = v.strictObject({ reason: reason(L.flaggedReason), suspendClaimIds: v.nullish(idList(500)) });
 
 // ---------------------------------------------------------------- registry
 // The interface a governing-body register integration implements. Nothing here fakes a network call.
@@ -95,7 +151,6 @@ export function registerVerificationReview(ctx) {
 
   const orgOf = (id) => byId.org(id) ?? null;
   const claimById = (id) => reads.claims.byId(id);
-  const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
   /** The first refusal undoes them all and is returned. */
   const allOrNothing = (fn) => {
     try {
@@ -139,7 +194,15 @@ export function registerVerificationReview(ctx) {
       also,
     );
   };
-  const reasonText = (req) => String(req.body.reason);
+  /** The body with its reason trimmed, or undefined once the 400 is sent: a manual decision always says why. */
+  const decisionBody = (req, res, schema) => {
+    const body = inputOrRefuse(res, schema, req.body ?? {});
+    if (!body) return undefined;
+    const why = filled(body.reason);
+    const message = 'Manual verification decisions require a written reason — it is audited.';
+    if (!presentOrRefuse(res, why, 'reason', { message })) return undefined;
+    return { ...body, reason: why };
+  };
 
   // ============================================================ licences
   orgRouter.get('/verification/licence-providers', (_req, res) => {
@@ -150,32 +213,22 @@ export function registerVerificationReview(ctx) {
   });
 
   orgRouter.post('/verification/licence', (req, res) => {
-    const { licenceType, issuer, identifier, issueDate, expiry, dataUrl, filename, holderName } = req.body ?? {};
-    if (typeof licenceType !== 'string' || typeof issuer !== 'string' || !licenceType.trim() || !issuer.trim())
-      return res.status(400).json({ error: 'FIELDS_REQUIRED', message: 'licenceType and issuer are required.' });
-    for (const [k, v] of [
-      ['identifier', identifier],
-      ['holderName', holderName],
-      ['filename', filename],
-    ])
-      if (!(v === undefined || v === null || typeof v === 'string')) return fieldInvalid(res, k, `${k} is text.`);
-    // A malformed expiry is refused, not read as "no expiry". A day-only expiry covers the whole day.
+    const body = inputOrRefuse(res, NewLicence, req.body ?? {});
+    if (!body) return;
+    const { issueDate, expiry, dataUrl, filename } = body;
+    const licenceType = filled(body.licenceType);
+    const issuer = filled(body.issuer);
+    const missing = [...(licenceType ? [] : ['licenceType']), ...(issuer ? [] : ['issuer'])];
+    if (missing.length)
+      return res.status(400).json({
+        error: 'FIELDS_REQUIRED',
+        missing,
+        problem: 'required',
+        message: 'licenceType and issuer are required.',
+      });
+    // A day-only expiry covers the whole day.
     const exp = isAbsent(expiry) ? null : parseDateOrInstant(expiry, { dayEdge: 'end' });
-    if (exp && !exp.ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'expiry',
-        message: `An expiry is a calendar day written YYYY-MM-DD (${exp.why}).`,
-        expected: 'YYYY-MM-DD',
-      });
     const issued = isAbsent(issueDate) ? null : parseDateOrInstant(issueDate, { dayEdge: 'start' });
-    if (issued && !issued.ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'issueDate',
-        message: `An issue date is a calendar day written YYYY-MM-DD (${issued.why}).`,
-        expected: 'YYYY-MM-DD',
-      });
     if (issued && exp && !(issued.ms < exp.ms))
       return res
         .status(400)
@@ -198,10 +251,11 @@ export function registerVerificationReview(ctx) {
           validFrom: issued ? issued.ms : null,
           validUntil: exp ? exp.ms : null,
           metadata: {
-            licenceType: String(licenceType).slice(0, L.licenceType),
-            issuer: String(issuer).slice(0, L.issuer),
-            identifier: String(identifier ?? '').slice(0, L.identifier) || null,
-            holderName: String(holderName ?? req.orgUser.name).slice(0, L.holderName),
+            licenceType,
+            issuer,
+            identifier: filled(body.identifier),
+            // The account's name, which no schema has read, may be longer than a holder name.
+            holderName: filled(body.holderName) ?? String(req.orgUser.name ?? '').slice(0, L.holderName),
             display: 'Credential submitted — verification pending', // never "Licence verified" from an upload
           },
         },
@@ -236,19 +290,13 @@ export function registerVerificationReview(ctx) {
     if (!claim) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
     if (!['collecting_evidence', 'pending'].includes(claim.status))
       return res.status(409).json({ error: 'ALREADY_SUBMITTED' });
-    if (
-      !(
-        req.body?.providerId === undefined ||
-        req.body?.providerId === null ||
-        (typeof req.body.providerId === 'string' && req.body.providerId.length <= L.provider)
-      )
-    )
-      return fieldInvalid(res, 'providerId', `providerId is text of at most ${L.provider} characters.`);
+    const body = inputOrRefuse(res, LicenceCheck, req.body ?? {});
+    if (!body) return;
     if (claim.status === 'collecting_evidence') {
       const err = transition(claim, 'pending', { actorKind: 'org_user', actorId: req.orgUser.id }, req);
       if (err) return res.status(409).json({ error: err });
     }
-    const providerId = String(req.body?.providerId ?? 'local-test-registry');
+    const providerId = body.providerId ?? 'local-test-registry';
     const lookup = lookupCredential({
       providerId,
       identifier: claim.metadata.identifier,
@@ -406,15 +454,14 @@ export function registerVerificationReview(ctx) {
 
   // ==================================================== T&S review queue
   adminRouter.get('/verification/queue', (req, res) => {
+    const query = inputOrRefuse(res, QueueQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     const now = Date.now();
-    const q = (k) => (typeof req.query[k] === 'string' && req.query[k] ? req.query[k] : null);
-    const [orgId, country, claimType, status] = ['orgId', 'country', 'claimType', 'status'].map(q);
-    const states = ['requires_human_review', 'disputed', 'suspended'];
-    const claims = reads.claims.inStatuses(status ? states.filter((s2) => s2 === status) : states, {
-      orgId,
-      claimType,
+    const claims = reads.claims.inStatuses(query.status ? [query.status] : QUEUE_STATES, {
+      orgId: query.orgId ?? null,
+      claimType: query.claimType ?? null,
     });
-    const roots = reads.rootRequests.awaitingReview(country);
+    const roots = reads.rootRequests.awaitingReview(query.country ?? null);
     const queueAges = claims.filter((c) => c.status === 'requires_human_review').map((c) => now - c.updatedAt);
     res.json({
       humanReview: claims.filter((c) => c.status === 'requires_human_review').map(adminClaimRow),
@@ -466,9 +513,9 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/cases/:id/assign', (req, res) => {
     const c = claimById(req.params.id);
     if (!c) return res.status(404).json({ error: 'CASE_NOT_FOUND' });
-    if (!(req.body?.reviewer === undefined || req.body?.reviewer === null || typeof req.body.reviewer === 'string'))
-      return fieldInvalid(res, 'reviewer', 'reviewer is text.');
-    const assignedTo = String(req.body?.reviewer ?? 'Trust & Safety').slice(0, L.assignedTo);
+    const body = inputOrRefuse(res, Assignment, req.body ?? {});
+    if (!body) return;
+    const assignedTo = filled(body.reviewer) ?? 'Trust & Safety';
     unit(() => {
       verification.claims.assign(c.id, { assignedTo });
       verEvent('review.assigned', { claimId: c.id, after: { reviewer: assignedTo } });
@@ -476,29 +523,16 @@ export function registerVerificationReview(ctx) {
     res.json({ assigned: assignedTo });
   });
 
-  const reasonRequired = (req, res) => {
-    if (typeof req.body?.reason === 'string' && req.body.reason.trim()) return true;
-    res.status(400).json({
-      error: 'REASON_REQUIRED',
-      message: 'Manual verification decisions require a written reason — it is audited.',
-    });
-    return false;
-  };
-
   adminRouter.post('/verification/claims/:id/approve', (req, res) => {
     const c = claimById(req.params.id);
     if (!c) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, Approval);
+    if (!body) return;
     if (!['requires_human_review', 'automated_checks_passed', 'pending'].includes(c.status)) {
       return res.status(409).json({ error: 'CLAIM_NOT_DECIDABLE', message: `Claim is ${c.status}.` });
     }
-    const method =
-      c.claimType === 'LICENCE'
-        ? 'scoutbox_manual_review'
-        : req.body?.method &&
-            ['scoutbox_manual_review', 'federation_confirmation', 'authoritative_registry'].includes(req.body.method)
-          ? req.body.method
-          : 'scoutbox_manual_review';
+    // A licence is only ever verified by a register through the licence check, never by a reviewer naming one.
+    const method = c.claimType === 'LICENCE' ? 'scoutbox_manual_review' : (body.method ?? 'scoutbox_manual_review');
     const err = allOrNothing(() => {
       if (c.status === 'pending') {
         const hop = adminTransition(c, 'requires_human_review', req, { reason: 'escalated for manual decision' });
@@ -518,7 +552,7 @@ export function registerVerificationReview(ctx) {
         c,
         'verified',
         req,
-        { method, reason: reasonText(req), eventType: 'review.approved' },
+        { method, reason: body.reason, eventType: 'review.approved' },
         {
           set: { authorityType: 'trust_safety', authorityId: 'admin' },
           metadata: display ? { display } : {},
@@ -539,7 +573,8 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/claims/:id/reject', (req, res) => {
     const c = claimById(req.params.id);
     if (!c) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, Decision);
+    if (!body) return;
     if (!['requires_human_review', 'automated_checks_passed', 'pending'].includes(c.status)) {
       return res.status(409).json({ error: 'CLAIM_NOT_DECIDABLE' });
     }
@@ -548,14 +583,14 @@ export function registerVerificationReview(ctx) {
         const hop = adminTransition(c, 'requires_human_review', req, { reason: 'escalated' });
         if (hop) return hop;
       }
-      return adminTransition(c, 'rejected', req, { reason: reasonText(req), eventType: 'review.rejected' });
+      return adminTransition(c, 'rejected', req, { reason: body.reason, eventType: 'review.rejected' });
     });
     if (err) return res.status(409).json({ error: err });
     if (c.subjectType === 'user')
       notify(
         { kind: 'org_user', id: c.subjectId },
         'verification',
-        `Trust & Safety declined a verification request: ${String(req.body.reason).slice(0, 140)}`,
+        `Trust & Safety declined a verification request: ${body.reason.slice(0, 140)}`,
         c.id,
       );
     res.json({ claim: claimById(c.id) });
@@ -564,14 +599,15 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/claims/:id/request-info', (req, res) => {
     const c = claimById(req.params.id);
     if (!c) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
-    const err = adminTransition(c, 'collecting_evidence', req, { reason: reasonText(req) });
+    const body = decisionBody(req, res, Decision);
+    if (!body) return;
+    const err = adminTransition(c, 'collecting_evidence', req, { reason: body.reason });
     if (err) return res.status(409).json({ error: err });
     if (c.subjectType === 'user')
       notify(
         { kind: 'org_user', id: c.subjectId },
         'verification',
-        `Trust & Safety needs more evidence: ${String(req.body.reason).slice(0, 140)}`,
+        `Trust & Safety needs more evidence: ${body.reason.slice(0, 140)}`,
         c.id,
       );
     res.json({ claim: claimById(c.id) });
@@ -584,14 +620,15 @@ export function registerVerificationReview(ctx) {
     adminRouter.post(`/verification/claims/:id/${action}`, (req, res) => {
       const c = claimById(req.params.id);
       if (!c) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
-      if (!reasonRequired(req, res)) return;
-      const err = adminTransition(c, target, req, { reason: reasonText(req), eventType: `claim.${target}` });
+      const body = decisionBody(req, res, Decision);
+      if (!body) return;
+      const err = adminTransition(c, target, req, { reason: body.reason, eventType: `claim.${target}` });
       if (err) return res.status(409).json({ error: err });
       if (c.subjectType === 'user')
         notify(
           { kind: 'org_user', id: c.subjectId },
           'verification',
-          `A verification claim was ${target} by Trust & Safety: ${String(req.body.reason).slice(0, 140)}. You can dispute this.`,
+          `A verification claim was ${target} by Trust & Safety: ${body.reason.slice(0, 140)}. You can dispute this.`,
           c.id,
         );
       res.json({
@@ -604,12 +641,13 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/claims/:id/reinstate', (req, res) => {
     const c = claimById(req.params.id);
     if (!c) return res.status(404).json({ error: 'CLAIM_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, Decision);
+    if (!body) return;
     if (!['suspended', 'revoked', 'disputed'].includes(c.status))
       return res.status(409).json({ error: 'NOT_REINSTATABLE' });
     const err = adminTransition(c, 'verified', req, {
       method: c.verificationMethod,
-      reason: reasonText(req),
+      reason: body.reason,
       eventType: 'claim.reinstated',
     });
     if (err) return res.status(409).json({ error: err });
@@ -620,13 +658,10 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/root-requests/:id/approve', (req, res) => {
     const r = reads.rootRequests.byId(req.params.id);
     if (!r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, RootApproval);
+    if (!body) return;
     if (r.status !== 'requires_human_review')
       return res.status(409).json({ error: 'REQUEST_NOT_DECIDABLE', message: `Request is ${r.status}.` });
-    if (
-      !(req.body?.linkUserId === undefined || req.body?.linkUserId === null || typeof req.body.linkUserId === 'string')
-    )
-      return fieldInvalid(res, 'linkUserId', 'linkUserId is an account id.');
     const rev = reviewerOf(req);
     const existingOrg = r.existingOrgId ? orgOf(r.existingOrgId) : null;
     // Identity is never established by a name: two people can share one. Only a match on the proven work e-mail
@@ -644,15 +679,15 @@ export function registerVerificationReview(ctx) {
     );
     let user = null;
     let identityLink = null;
-    if (req.body?.linkUserId) {
-      user = activeUsers.find((u) => u.id === req.body.linkUserId) ?? null;
+    if (body.linkUserId) {
+      user = activeUsers.find((u) => u.id === body.linkUserId) ?? null;
       if (!user)
         return res.status(404).json({
           error: 'LINK_USER_NOT_FOUND',
           message: 'linkUserId must be an active user of the target organisation.',
         });
       identityLink = 'trust_safety_selection';
-    } else if (req.body?.provisionNewUser === true) {
+    } else if (body.provisionNewUser === true) {
       identityLink = 'provisioned_new_user'; // an explicit choice not to link
     } else if (emailMatches.length === 1) {
       user = emailMatches[0];
@@ -785,7 +820,7 @@ export function registerVerificationReview(ctx) {
       const decided = verification.rootRequests.approve(r.id, {
         at: Date.now(),
         by: rev,
-        reason: reasonText(req).slice(0, L.decisionReason),
+        reason: body.reason,
         identityLink,
         resultOrgId: org.id,
         resultUserId: user.id,
@@ -824,7 +859,8 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/root-requests/:id/reject', (req, res) => {
     const r = reads.rootRequests.byId(req.params.id);
     if (!r) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, RootRejection);
+    if (!body) return;
     if (!['requires_human_review', 'collecting_evidence'].includes(r.status))
       return res.status(409).json({ error: 'REQUEST_NOT_DECIDABLE' });
     const rev = reviewerOf(req);
@@ -832,7 +868,7 @@ export function registerVerificationReview(ctx) {
       const next = verification.rootRequests.reject(r.id, {
         at: Date.now(),
         by: rev,
-        reason: reasonText(req).slice(0, L.decisionReason),
+        reason: body.reason,
       });
       verEvent(
         'review.rejected',
@@ -855,16 +891,14 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/orgs/:id/appoint-root', (req, res) => {
     const org = orgOf(req.params.id);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, RootAppointment);
+    if (!body) return;
     if (!org.verified)
       return res.status(409).json({
         error: 'ORG_NOT_VERIFIED',
         message: 'Verify the organisation first — root authority only exists inside a verified organisation.',
       });
-    const user =
-      typeof req.body?.userId === 'string'
-        ? byId.user(req.body.userId, (u) => u.orgId === org.id && !u.removedAt)
-        : null;
+    const user = body.userId ? byId.user(body.userId, (u) => u.orgId === org.id && !u.removedAt) : null;
     if (!user) return res.status(404).json({ error: 'USER_NOT_FOUND' });
     if (reads.admins.activeFor(org.id, user.id).some((a) => a.level === 'verification_root_admin')) {
       return res.status(409).json({ error: 'ALREADY_ROOT_ADMIN' });
@@ -891,7 +925,7 @@ export function registerVerificationReview(ctx) {
         verificationMethod: 'scoutbox_manual_review',
         verifiedAt: Date.now(),
         verifiedBy: { kind: 'trust_safety', id: reviewerOf(req).id },
-        metadata: { appointedReason: reasonText(req).slice(0, L.appointedReason) },
+        metadata: { appointedReason: body.reason },
       });
     });
     notify(
@@ -910,11 +944,12 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/domain-requests/:id/decide', (req, res) => {
     const r = reads.domainRequests.byId(req.params.id);
     if (!r) return res.status(404).json({ error: 'DOMAIN_REQUEST_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, DomainDecision);
+    if (!body) return;
     if (r.status !== 'requires_human_review') return res.status(409).json({ error: 'NOT_DECIDABLE' });
     const org = orgOf(r.orgId);
     const rev = reviewerOf(req);
-    const approve = req.body?.approve === true && !!org;
+    const approve = body.approve && !!org;
     const decided = unit(() => {
       if (approve) {
         if (!reads.domains.has(org.id, r.domain))
@@ -941,7 +976,7 @@ export function registerVerificationReview(ctx) {
           {
             orgId: org.id,
             after: { domain: r.domain, via: 'trust_safety' },
-            reason: reasonText(req),
+            reason: body.reason,
             actorKind: 'trust_safety',
             actorId: rev.id,
             actorName: rev.name,
@@ -950,7 +985,7 @@ export function registerVerificationReview(ctx) {
           req,
         );
       } else {
-        verEvent('review.rejected', { orgId: r.orgId, after: { domainRequest: r.id }, reason: reasonText(req) });
+        verEvent('review.rejected', { orgId: r.orgId, after: { domainRequest: r.id }, reason: body.reason });
       }
       return verification.domainRequests.decide(r.id, { approve, at: Date.now(), by: rev });
     });
@@ -969,35 +1004,21 @@ export function registerVerificationReview(ctx) {
     const d = reads.disputes.byId(req.params.id);
     if (!d) return res.status(404).json({ error: 'DISPUTE_NOT_FOUND' });
     if (d.status !== 'open') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    if (!reasonRequired(req, res)) return;
-    const { action } = req.body ?? {}; // reinstate | revoke | correct | dismiss
-    if (!['reinstate', 'revoke', 'correct', 'dismiss'].includes(action))
-      return fieldInvalid(res, 'action', 'action is reinstate, revoke, correct or dismiss.');
-    if (!(req.body?.role === undefined || req.body?.role === null || typeof req.body.role === 'string'))
-      return fieldInvalid(res, 'role', 'role is text.');
-    if (!(req.body?.current === undefined || typeof req.body.current === 'boolean'))
-      return fieldInvalid(res, 'current', 'current is true or false.');
+    const body = decisionBody(req, res, DisputeResolution);
+    if (!body) return;
+    const { action } = body;
     const c = claimById(d.claimId);
-    // A typo is refused, not read as "no expiry".
-    let validUntilCorrection = null;
-    if (req.body?.validUntil !== undefined && !isAbsent(req.body.validUntil)) {
-      const p = parseDateOrInstant(req.body.validUntil, { dayEdge: 'end' });
-      if (!p.ok)
-        return res.status(400).json({
-          error: 'DATE_INVALID',
-          field: 'validUntil',
-          message: `validUntil is a calendar day (YYYY-MM-DD) or an instant (${p.why}).`,
-          expected: p.expected,
-        });
-      validUntilCorrection = p.ms;
-    }
+    // Sent as null or '', the expiry is cleared.
     const period = {
-      ...(req.body.validUntil !== undefined ? { validUntil: validUntilCorrection } : {}),
-      ...(req.body.current !== undefined ? { current: !!req.body.current } : {}),
+      ...(body.validUntil !== undefined
+        ? {
+            validUntil: isAbsent(body.validUntil) ? null : parseDateOrInstant(body.validUntil, { dayEdge: 'end' }).ms,
+          }
+        : {}),
+      ...(body.current !== undefined ? { current: body.current } : {}),
     };
-    const corrections = {
-      set: { ...(req.body.role ? { role: String(req.body.role).slice(0, L.role) } : {}), ...period },
-    };
+    const role = filled(body.role);
+    const corrections = { set: { ...(role ? { role } : {}), ...period } };
     const rev2 = reviewerOf(req);
     let refusedWith = null;
     const resolved = (() => {
@@ -1008,16 +1029,16 @@ export function registerVerificationReview(ctx) {
             if (action === 'reinstate' || action === 'dismiss')
               err = adminTransition(c, 'verified', req, {
                 method: c.verificationMethod,
-                reason: reasonText(req),
+                reason: body.reason,
                 eventType: 'claim.reinstated',
               });
-            else if (action === 'revoke') err = adminTransition(c, 'revoked', req, { reason: reasonText(req) });
+            else if (action === 'revoke') err = adminTransition(c, 'revoked', req, { reason: body.reason });
             else if (action === 'correct')
               err = adminTransition(
                 c,
                 'verified',
                 req,
-                { method: c.verificationMethod, reason: reasonText(req), eventType: 'claim.corrected' },
+                { method: c.verificationMethod, reason: body.reason, eventType: 'claim.corrected' },
                 corrections,
               );
             // A refused outcome (e.g. the person opened a new claim meanwhile) leaves the dispute open, nothing half-done.
@@ -1028,14 +1049,14 @@ export function registerVerificationReview(ctx) {
               claimId: c.id,
               subjectId: c.subjectId,
               orgId: c.organisationId,
-              reason: reasonText(req),
+              reason: body.reason,
               actorKind: 'trust_safety',
             });
           }
           return verification.disputes.resolve(d.id, {
             at: Date.now(),
             by: rev2,
-            resolution: `${action}: ${reasonText(req).slice(0, 300)}`,
+            resolution: `${action}: ${body.reason}`,
           });
         });
       } catch (e) {
@@ -1065,20 +1086,21 @@ export function registerVerificationReview(ctx) {
     });
   });
   adminRouter.post('/verification/authorities/:userId/flag', (req, res) => {
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, AuthorityFlag);
+    if (!body) return;
     const affected = reads.claims.byAuthority(req.params.userId);
-    const toSuspend = new Set(Array.isArray(req.body?.suspendClaimIds) ? req.body.suspendClaimIds : []);
+    const toSuspend = new Set(body.suspendClaimIds ?? []);
     let flagged = 0,
       suspended = 0;
     unit(() => {
       for (const c of affected) {
         if (toSuspend.has(c.id) && c.status === 'verified') {
-          const err = adminTransition(c, 'suspended', req, { reason: reasonText(req) });
+          const err = adminTransition(c, 'suspended', req, { reason: body.reason });
           if (!err) suspended++;
         } else if (!c.metadata.flaggedForReview) {
           verification.claims.flagForReview(c.id, {
             at: Date.now(),
-            reason: reasonText(req).slice(0, L.flaggedReason),
+            reason: body.reason,
           });
           verEvent('review.requested', {
             claimId: c.id,
@@ -1098,18 +1120,19 @@ export function registerVerificationReview(ctx) {
   adminRouter.post('/verification/orgs/:id/revoke', (req, res) => {
     const org = orgOf(req.params.id);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
-    if (!reasonRequired(req, res)) return;
+    const body = decisionBody(req, res, Decision);
+    if (!body) return;
     unit(() => {
       orgs.update(org.id, (d) => {
         d.verificationRevokedAt = Date.now();
         d.verified = false;
       }); // the effective flag follows immediately
       for (const c of reads.claims.forSubject('org', org.id)) {
-        if (c.status === 'verified') adminTransition(c, 'revoked', req, { reason: reasonText(req) });
+        if (c.status === 'verified') adminTransition(c, 'revoked', req, { reason: body.reason });
       }
       verEvent('claim.revoked', {
         orgId: org.id,
-        reason: reasonText(req),
+        reason: body.reason,
         actorKind: 'trust_safety',
         after: { organisation: 'revoked' },
       });

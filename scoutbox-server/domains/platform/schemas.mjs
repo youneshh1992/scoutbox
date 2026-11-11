@@ -110,6 +110,26 @@ export const CURSOR_PAGE = Object.freeze({ limit: v.optional(v.string()), cursor
 /** A list of at most `max` ids. */
 export const idList = (max) => v.pipe(v.array(id), v.maxLength(max));
 
+/** The ids in `?ids=a,b,c`, in the order given; empty entries are skipped. */
+export const listedIds = (s) => (s ? s.split(',').filter(Boolean) : []);
+
+/**
+ * `?ids=a,b,c` for a batch read: written once, as text, naming at most `max` ids of at most ID_MAX characters each.
+ * More are refused rather than dropped. The route reads them with `listedIds`.
+ */
+export const idsText = (max) =>
+  v.pipe(
+    v.string(),
+    v.check(
+      coded((s) => listedIds(s).length <= max, { problem: 'too_long', max }),
+      `must name at most ${max} ids`,
+    ),
+    v.check(
+      coded((s) => listedIds(s).every((x) => x.length <= ID_MAX), { problem: 'too_long', max: ID_MAX }),
+      `must name ids of at most ${ID_MAX} characters`,
+    ),
+  );
+
 /** A whole number (never a numeric string) from `min` to `max`. */
 export const wholeNumber = ({ min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER } = {}) =>
   v.pipe(v.number(), v.safeInteger(), v.minValue(min), v.maxValue(max));
@@ -186,6 +206,13 @@ export const dueDate = v.pipe(
       `must be a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${parseDateOrInstant(issue.input).why})`,
   ),
 );
+
+/**
+ * A date a domain writes its own way (a football date of a year, a month or a day, for example): `test` judges the
+ * value as sent. Refused as DATE_INVALID with `expected`, like the shared dates.
+ */
+export const dateWrittenAs = (test, expected) =>
+  v.pipe(v.unknown(), v.guard(coded(test, { ...DAY, expected }), `must be a date written ${expected}`));
 
 // The API names a nested field as `ratings[0].evidenceRefs[1].t`.
 const fieldOf = (issue, root) => {
@@ -288,6 +315,24 @@ export function parseInput(schema, input, { root = 'body', codes = {}, fieldCode
     ...(known?.expected ? { expected: known.expected } : {}),
     ...(allowed ? { allowed } : {}),
   };
+}
+
+/** Text with something other than spaces in it, trimmed; blank or absent is null. For a value a schema has read. */
+export const filled = (s) => (typeof s === 'string' && s.trim() ? s.trim() : null);
+
+/**
+ * A field a domain requires under a code of its own, `<FIELD>_REQUIRED` (coachName → COACH_NAME_REQUIRED) unless
+ * `error` names another. Sends the 400 with problem: required and returns false when `value` is null.
+ */
+export function presentOrRefuse(res, value, field, { error, message } = {}) {
+  if (value !== null && value !== undefined) return true;
+  res.status(400).json({
+    error: error ?? `${field.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}_REQUIRED`,
+    field,
+    problem: 'required',
+    ...(message ? { message } : {}),
+  });
+  return false;
 }
 
 /** The parsed value, or `undefined` once the 400 has been sent. */

@@ -21,6 +21,7 @@ import {
   OFFSET_PAGE_CODES,
   dayOrBlank,
   dueDate,
+  filled,
   inputOrRefuse,
   oneOf,
   requiredText,
@@ -100,8 +101,6 @@ const StaffCheckReview = v.strictObject({ status: oneOf(['reviewed', 'rejected']
 const STAFF_CHECK_CODES = { fieldCodes: { status: 'STATUS_INVALID' } };
 const PageQuery = v.strictObject(CURSOR_PAGE);
 const StaffChecksQuery = v.strictObject({ ...CURSOR_PAGE, all: v.optional(oneOf(['0', '1'])) });
-/** Text with something in it, trimmed; blank or absent is null. The schema has checked it is text. */
-const filled = (s) => (typeof s === 'string' && s.trim() ? s.trim() : null);
 
 const eligibilityView = (e) => ({
   minAge: e.minAge,
