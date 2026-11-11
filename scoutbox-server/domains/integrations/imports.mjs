@@ -5,6 +5,8 @@ import crypto from 'node:crypto';
 import { parseDobStrict } from '../../temporal.mjs';
 import { signBody, webhookUrlProblem } from './webhooks.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
+import { filled } from '../platform/schemas.mjs';
+import { integrationsInput } from './schemas.mjs';
 import {
   PROSPECT_FIELDS,
   PROSPECT_POSITIONS as POSITIONS,
@@ -68,7 +70,6 @@ export function registerImports(ctx) {
   const { batches, prospects, reviews, apiKeys, endpoints, deliveries } = integrations;
   const opsEvent = (row) => safetyAudit.opsEvents.record(row);
   const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
-  const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
   /** A refusal the route can answer (a live duplicate, a stale dry run); anything else is a defect. */
   const refused = (res, e) => {
     if (e?.code === 'IMPORT_IDENTITY_TAKEN')
@@ -166,9 +167,9 @@ export function registerImports(ctx) {
 
   orgRouter.post('/imports', (req, res) => {
     if (!requireLead(req, res)) return;
-    const { csv, mapping } = req.body ?? {};
-    if (csv !== undefined && csv !== null && typeof csv !== 'string')
-      return fieldInvalid(res, 'csv', 'csv is the text of the CSV file.');
+    const body = integrationsInput(res, 'importBatch', req.body);
+    if (!body) return;
+    const { csv, mapping } = body;
     const rows = parseCsv(csv);
     if (rows.length < 2)
       return res.status(400).json({ error: 'CSV_EMPTY', message: 'Need a header row plus at least one data row.' });
@@ -182,20 +183,9 @@ export function registerImports(ctx) {
         `The header row holds at most ${L.columns} column names of at most ${L.header} characters each.`,
       );
     // A mapping the import cannot honour is refused rather than ignored.
-    if (mapping !== undefined && mapping !== null) {
-      if (!isObject(mapping))
-        return fieldInvalid(res, 'mapping', 'mapping is an object from CSV column name to prospect field.');
-      for (const [col, field] of Object.entries(mapping)) {
-        if (!header.includes(col))
-          return fieldInvalid(res, 'mapping', `mapping names a column the CSV does not have (${col.slice(0, 40)}).`);
-        if (field !== null && !PROSPECT_FIELDS.includes(field))
-          return fieldInvalid(
-            res,
-            `mapping.${col.slice(0, 40)}`,
-            `Map a column to one of ${PROSPECT_FIELDS.join(', ')} (or null).`,
-          );
-      }
-    }
+    for (const col of Object.keys(mapping ?? {}))
+      if (!header.includes(col))
+        return fieldInvalid(res, 'mapping', `mapping names a column the CSV does not have (${col.slice(0, 40)}).`);
     const { missingCols, results } = validateRows(req.org, header, rows.slice(1), mapping);
     if (missingCols.length)
       return res.status(400).json({
@@ -241,9 +231,11 @@ export function registerImports(ctx) {
   });
 
   orgRouter.get('/imports', (req, res) => {
+    const query = integrationsInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -260,7 +252,9 @@ export function registerImports(ctx) {
     if (!requireLead(req, res)) return;
     const b = batches.forOrgById(req.org.id, req.params.id);
     if (!b) return res.status(404).json({ error: 'BATCH_NOT_FOUND' });
-    if (req.body?.confirm !== true)
+    const body = integrationsInput(res, 'commit', req.body);
+    if (!body) return;
+    if (body.confirm !== true)
       return res.status(400).json({
         error: 'CONFIRM_REQUIRED',
         message: 'Committing writes records — send {confirm:true} after reviewing the dry run.',
@@ -312,6 +306,7 @@ export function registerImports(ctx) {
     const b = batches.forOrgById(req.org.id, req.params.id);
     if (!b) return res.status(404).json({ error: 'BATCH_NOT_FOUND' });
     if (b.status !== 'committed') return res.status(409).json({ error: 'NOT_COMMITTED' });
+    if (!integrationsInput(res, 'none', req.body)) return;
     // Nothing edits a prospect after its import, so none is kept back.
     const { removed } = batches.reverse(b.id, {
       at: Date.now(),
@@ -343,9 +338,11 @@ export function registerImports(ctx) {
 
   // ------------------------------------------------------------- prospects
   orgRouter.get('/prospects', (req, res) => {
+    const query = integrationsInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -362,7 +359,9 @@ export function registerImports(ctx) {
     const r = reviews.forOrgById(req.org.id, req.params.id);
     if (!r) return res.status(404).json({ error: 'REVIEW_NOT_FOUND' });
     if (r.status !== 'open') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const action = req.body?.action;
+    const body = integrationsInput(res, 'identityResolve', req.body);
+    if (!body) return;
+    const { action } = body;
     const at = Date.now();
     let resolved;
     if (action === 'link') {
@@ -419,25 +418,21 @@ export function registerImports(ctx) {
 
   orgRouter.post('/api-keys', (req, res) => {
     if (!requireLead(req, res)) return;
-    const { scopes, label } = req.body ?? {};
-    if (scopes === undefined || scopes === null || (Array.isArray(scopes) && !scopes.length))
+    // An unknown or repeated scope is refused, not dropped.
+    const body = integrationsInput(res, 'apiKey', req.body);
+    if (!body) return;
+    const { scopes } = body;
+    if (!scopes?.length)
       return res
         .status(400)
         .json({ error: 'SCOPES_REQUIRED', message: `Pick at least one of: ${API_SCOPES.join(', ')}` });
-    // An unknown or repeated scope is refused, not dropped.
-    if (!Array.isArray(scopes)) return fieldInvalid(res, 'scopes', `scopes is a list of: ${API_SCOPES.join(', ')}`);
-    const wrong = scopes.findIndex((s) => !API_SCOPES.includes(s));
-    if (wrong >= 0) return fieldInvalid(res, `scopes[${wrong}]`, `Pick from: ${API_SCOPES.join(', ')}`);
-    if (new Set(scopes).size !== scopes.length) return fieldInvalid(res, 'scopes', 'scopes names a scope twice.');
-    if (label !== undefined && label !== null && typeof label !== 'string')
-      return fieldInvalid(res, 'label', 'label is text.');
     const plaintext = `sbk_${crypto.randomBytes(24).toString('hex')}`;
     const k = apiKeys.create({
       id: nextId('key'),
       orgId: req.org.id,
       scopes: [...scopes],
       keyHash: crypto.createHash('sha256').update(plaintext).digest('hex'),
-      label: String(label ?? 'API key').slice(0, L.label),
+      label: filled(body.label) ?? 'API key',
       createdBy: req.orgUser.name,
       createdAt: Date.now(),
       revokedAt: null,
@@ -452,6 +447,7 @@ export function registerImports(ctx) {
     if (!requireLead(req, res)) return;
     const k = apiKeys.forOrgById(req.org.id, req.params.id);
     if (!k) return res.status(404).json({ error: 'KEY_NOT_FOUND' });
+    if (!integrationsInput(res, 'none', req.body)) return;
     apiKeys.revoke(k.id, Date.now());
     res.json({ ok: true });
   });
@@ -522,24 +518,20 @@ export function registerImports(ctx) {
 
   orgRouter.post('/webhooks', (req, res) => {
     if (!requireLead(req, res)) return;
-    const { url, events } = req.body ?? {};
-    if (typeof url === 'string' && url.length > L.url)
-      return fieldInvalid(res, 'url', `url is at most ${L.url} characters.`);
+    // An unknown or repeated event is refused, not dropped.
+    const body = integrationsInput(res, 'webhook', req.body);
+    if (!body) return;
+    const { url, events } = body;
     const problem = webhookUrlProblem(url);
     if (problem) return res.status(400).json({ error: 'WEBHOOK_URL_REJECTED', message: problem });
-    if (events === undefined || events === null || (Array.isArray(events) && !events.length))
+    if (!events?.length)
       return res
         .status(400)
         .json({ error: 'EVENTS_REQUIRED', message: `Subscribe to at least one of: ${WEBHOOK_EVENTS.join(', ')}` });
-    // An unknown or repeated event is refused, not dropped.
-    if (!Array.isArray(events)) return fieldInvalid(res, 'events', `events is a list of: ${WEBHOOK_EVENTS.join(', ')}`);
-    const wrong = events.findIndex((e) => !WEBHOOK_EVENTS.includes(e));
-    if (wrong >= 0) return fieldInvalid(res, `events[${wrong}]`, `Subscribe to: ${WEBHOOK_EVENTS.join(', ')}`);
-    if (new Set(events).size !== events.length) return fieldInvalid(res, 'events', 'events names an event twice.');
     const w = endpoints.create({
       id: nextId('whk'),
       orgId: req.org.id,
-      url: String(url),
+      url,
       events: [...events],
       secret: `whsec_${crypto.randomBytes(24).toString('hex')}`,
       secretPrev: null,
@@ -558,6 +550,7 @@ export function registerImports(ctx) {
     if (!requireLead(req, res)) return;
     const w = endpoints.forOrgById(req.org.id, req.params.id);
     if (!w) return res.status(404).json({ error: 'WEBHOOK_NOT_FOUND' });
+    if (!integrationsInput(res, 'none', req.body)) return;
     const rotated = endpoints.rotate(w.id, {
       secret: `whsec_${crypto.randomBytes(24).toString('hex')}`,
       prevValidUntil: Date.now() + 24 * 3600_000,
@@ -572,6 +565,7 @@ export function registerImports(ctx) {
     if (!requireLead(req, res)) return;
     const w = endpoints.forOrgById(req.org.id, req.params.id);
     if (!w) return res.status(404).json({ error: 'WEBHOOK_NOT_FOUND' });
+    if (!integrationsInput(res, 'none', req.body)) return;
     endpoints.deactivate(w.id);
     res.json({ ok: true });
   });

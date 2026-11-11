@@ -507,6 +507,27 @@ section('CSV import, identity, API keys, webhooks');
   ok(r.status === 400 && r.body.field === 'mapping', 'a mapping naming a column the CSV does not have is refused');
   r = await j('POST', '/org/imports', { csv: `${head}\nA B,,,,,p,1,`, mapping: { name: 'shoeSize' } }, maria.token);
   ok(r.status === 400 && r.body.field === 'mapping.name', 'a mapping to a field prospects do not have is refused');
+  r = await j('POST', '/org/api-keys', { scopes: ['export:prospects'], label: 'k'.repeat(61) }, maria.token);
+  ok(
+    r.status === 400 && r.body.field === 'label' && r.body.problem === 'too_long',
+    'IN1 an API key label over 60 characters is refused, not cut',
+  );
+  r = await j('POST', '/org/api-keys', { scopes: ['export:prospects'], orgId: 'org-hackneymarsh' }, maria.token);
+  ok(r.status === 400 && r.body.field === 'orgId', 'IN2 a key cannot be made for another club');
+  r = await j(
+    'POST',
+    '/org/webhooks',
+    { url: ['https://hooks.example.test/x'], events: ['import.committed'] },
+    maria.token,
+  );
+  ok(
+    r.status === 400 && r.body.field === 'url' && r.body.problem === 'not_text',
+    'IN3 a webhook URL in a list is refused, not read as its text',
+  );
+  r = await j('POST', `/org/imports/${b2}/commit`, { confirm: 'true' }, maria.token);
+  ok(r.status === 400 && r.body.error === 'CONFIRM_REQUIRED', 'IN4 a commit confirmed with text is not a confirmation');
+  r = await j('GET', '/org/prospects?limit=1&status=live', undefined, maria.token);
+  ok(r.status === 400 && r.body.field === 'status', 'IN5 the prospect list refuses a filter it does not have');
   r = await j(
     'POST',
     '/org/imports',
