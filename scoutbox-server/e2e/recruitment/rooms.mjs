@@ -694,6 +694,14 @@ const ROOM = created.body.room.roomId;
 ok(created.body.room.status === 'watching', 'a new room starts at watching');
 ok(created.body.room.stage === 'identified', 'the canonical case stage was derived, not invented');
 ok(created.body.room.sourceContext === 'search', 'the workflow provenance is recorded');
+const freeFormSource = await j('POST', '/org/rooms', { playerId: ADULT.id, sourceContext: 'my notes' }, maria.token);
+neg(
+  freeFormSource.status === 400 &&
+    freeFormSource.body.field === 'sourceContext' &&
+    freeFormSource.body.problem === 'not_allowed' &&
+    freeFormSource.body.allowed.includes('search'),
+  'a free-form source context is refused, not recorded as "direct"',
+);
 ok(typeof created.body.room.trust?.score === 'number', 'the room composes the Trust Score');
 ok(/not football ability/i.test(created.body.room.trust.note), 'the Trust Score arrives with its disclaimer');
 ok(created.body.room.passport?.passportVersion != null, 'the room composes the authorized Football Passport');
@@ -842,8 +850,12 @@ section('R5 — status changes, snapshots and the decision-time record');
   const bogus = await j('POST', `/org/rooms/${ROOM}/status`, { status: 'super_shortlisted' }, maria.token);
   neg(bogus.status === 400 && bogus.body.error === 'ROOM_STATUS_UNKNOWN', '[16] an invented status is refused');
   const forgedStage = await j('PATCH', `/org/rooms/${ROOM}`, { stage: 'closed', status: 'signed' }, maria.token);
+  const afterForgedStage = (await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token)).body.room;
   neg(
-    forgedStage.status === 200 && forgedStage.body.room.status === 'shortlisted',
+    forgedStage.status === 400 &&
+      forgedStage.body.problem === 'unknown_field' &&
+      afterForgedStage.status === 'shortlisted' &&
+      afterForgedStage.stage === s2.body.room.stage,
     '[16] status and stage cannot be forged through the metadata route',
   );
 
@@ -870,12 +882,12 @@ section('R5 — status changes, snapshots and the decision-time record');
   const after = (await j('GET', `/org/players/${ADULT.id}/trust-profile`, undefined, maria.token)).body;
   neg(after.trust.score === before.trust.score, '[21] a room cannot change the player’s Trust Score');
   neg(
-    forgeTrust.body.room.trust.score === before.trust.score,
-    '[20] a forged Trust Score in the request body is ignored',
+    forgeTrust.status === 400 && forgeTrust.body.problem === 'unknown_field',
+    '[20] a forged Trust Score in the request body is refused',
   );
 
   // #38 a Trust Score change never moves the room by itself
-  const statusBefore = forgeTrust.body.room.status;
+  const statusBefore = afterForgedStage.status;
   const reread = await j('GET', `/org/rooms/${ROOM}`, undefined, maria.token);
   neg(
     reread.body.room.status === statusBefore,
@@ -889,7 +901,32 @@ section('R5 — status changes, snapshots and the decision-time record');
     { status: 'priority', combine: { measuredValue: 999 } },
     maria.token,
   );
-  ok(forgeCombine.status === 200, 'the room moves to priority');
+  neg(
+    forgeCombine.status === 400 && forgeCombine.body.problem === 'unknown_field',
+    '[22] a Combine measurement in a status move is refused',
+  );
+  const objectStatusNote = await j(
+    'POST',
+    `/org/rooms/${ROOM}/status`,
+    { status: 'priority', note: ['not', 'text'] },
+    maria.token,
+  );
+  neg(
+    objectStatusNote.status === 400 && objectStatusNote.body.field === 'note',
+    'a status note that is not text is refused',
+  );
+  const longTag = await j('PATCH', `/org/rooms/${ROOM}`, { tags: ['x'.repeat(41)] }, maria.token);
+  neg(
+    longTag.status === 400 && longTag.body.error === 'ROOM_TAGS_INVALID' && longTag.body.field === 'tags[0]',
+    'an over-long tag is refused, not cut',
+  );
+  const badPriority = await j('PATCH', `/org/rooms/${ROOM}`, { priority: 'asap', expectedRev: 0 }, maria.token);
+  neg(
+    badPriority.status === 400 && badPriority.body.error === 'ROOM_PRIORITY_UNKNOWN',
+    'an unknown priority is refused before the rev check',
+  );
+  const toPriority = await j('POST', `/org/rooms/${ROOM}/status`, { status: 'priority' }, maria.token);
+  ok(toPriority.status === 200, 'the room moves to priority');
   const combineNow = (await j('GET', `/org/combine/players/${ADULT.id}`, undefined, maria.token)).body;
   neg(!JSON.stringify(combineNow).includes('999'), '[22] a room cannot write a Combine result');
   const passportNow = (await j('GET', `/org/players/${ADULT.id}/football-passport`, undefined, maria.token)).body;
@@ -1014,6 +1051,30 @@ section('R4 — a Combine request reuses the standardized protocols');
   neg(invented.status === 404 && invented.body.error === 'PROTOCOL_UNKNOWN', 'a room cannot invent a Combine protocol');
   const none = await j('POST', `/org/rooms/${ROOM}/combine-requests`, { protocolIds: [] }, maria.token);
   neg(none.status === 400, 'a Combine request with no protocol is refused');
+  const objectInstructions = await j(
+    'POST',
+    `/org/rooms/${ROOM}/combine-requests`,
+    { protocolIds: [pid], instructions: { text: 'Film it outdoors' } },
+    maria.token,
+  );
+  neg(
+    objectInstructions.status === 400 &&
+      objectInstructions.body.field === 'instructions' &&
+      objectInstructions.body.problem === 'not_text',
+    'Combine instructions that are not text are refused, not stored as "[object Object]"',
+  );
+  const longInstructions = await j(
+    'POST',
+    `/org/rooms/${ROOM}/combine-requests`,
+    { protocolIds: [pid], instructions: 'x'.repeat(301) },
+    maria.token,
+  );
+  neg(
+    longInstructions.status === 400 &&
+      longInstructions.body.problem === 'too_long' &&
+      longInstructions.body.max === 300,
+    'Combine instructions over the limit are refused, not cut',
+  );
   const agencyCombine = await j('POST', `/org/rooms/${ROOM}/combine-requests`, { protocolIds: [pid] }, alex.token);
   neg(
     agencyCombine.status === 404 || agencyCombine.status === 403,
@@ -1172,6 +1233,38 @@ section('R7 — decision memory, archive and reopen');
       `a ${typeof bad === 'number' ? 'numeric' : 'too-long'} client key is refused, not cut or coerced into another key`,
     );
   }
+
+  const objectNote = await j(
+    'POST',
+    `/org/rooms/${ROOM}/decisions`,
+    { recommendation: 'trial', reasonCodes: ['tactical_fit'], note: { text: 'Wants a look' } },
+    maria.token,
+  );
+  neg(
+    objectNote.status === 400 && objectNote.body.field === 'note' && objectNote.body.problem === 'not_text',
+    'a decision note that is not text is refused, not stored as "[object Object]"',
+  );
+  neg(
+    !validateDecision({ recommendation: 'trial', note: { toString: () => 'x' } }).ok,
+    'the decision rule itself refuses a note that is not text',
+  );
+  const longNote = await j(
+    'POST',
+    `/org/rooms/${ROOM}/decisions`,
+    { recommendation: 'trial', reasonCodes: ['tactical_fit'], note: 'x'.repeat(2001) },
+    maria.token,
+  );
+  neg(longNote.status === 400 && longNote.body.error === 'ROOM_NOTE_TOO_LONG', 'an over-long decision note is refused');
+  const numericReason = await j(
+    'POST',
+    `/org/rooms/${ROOM}/decisions`,
+    { recommendation: 'trial', reasonCodes: [7] },
+    maria.token,
+  );
+  neg(
+    numericReason.status === 400 && numericReason.body.error === 'ROOM_REASONS_INVALID',
+    'a reason code that is not text is refused with the reasons code',
+  );
 
   const hist = await j('GET', `/org/rooms/${ROOM}/decisions`, undefined, maria.token);
   ok(hist.body.history.length >= 2, 'the decision history keeps every entry');

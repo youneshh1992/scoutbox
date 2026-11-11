@@ -411,10 +411,13 @@ export function validateDecision({ recommendation, reasonCodes = [], note = null
       message: 'Archiving needs at least one reason so the decision stays useful later.',
     };
   }
-  if (note != null && String(note).length > 2000) {
+  if (note != null && typeof note !== 'string') {
+    return { ok: false, error: 'FIELD_INVALID', field: 'note', problem: 'not_text', message: 'note must be text.' };
+  }
+  if (note != null && note.length > 2000) {
     return { ok: false, error: 'ROOM_NOTE_TOO_LONG', message: 'Keep the internal note under 2000 characters.' };
   }
-  return { ok: true, recommendation, codes: reasons.codes, note: note == null ? null : String(note) };
+  return { ok: true, recommendation, codes: reasons.codes, note: note ?? null };
 }
 
 // --------------------------------------------------------------- readiness
@@ -832,9 +835,13 @@ export const clampPage = (n, fallback = LIMITS.pageSize) => {
 
 /** Tags are internal labels. A tag that reads as a protected trait is refused. */
 export function validateTag(raw) {
-  const tag = String(raw ?? '')
-    .trim()
-    .slice(0, LIMITS.tagLength);
+  if (typeof raw !== 'string' || raw.length > LIMITS.tagLength)
+    return {
+      ok: false,
+      error: 'ROOM_TAGS_INVALID',
+      message: `A tag is text of at most ${LIMITS.tagLength} characters.`,
+    };
+  const tag = raw.trim();
   if (!tag) return { ok: false, error: 'ROOM_TAG_EMPTY', message: 'A tag needs some text.' };
   const flat = tag.toLowerCase().replace(/[^a-z]+/g, '_');
   if (PROHIBITED_REASON_CODES.some((c) => flat === c || flat.startsWith(`${c}_`) || flat.endsWith(`_${c}`))) {

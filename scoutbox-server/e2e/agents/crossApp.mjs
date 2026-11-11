@@ -1309,7 +1309,7 @@ section("G — the opportunity share: the client's own board is the gate");
 
 section('H/I/J — contact routing, its reauthorization, and Inbox isolation');
 {
-  const kase = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', reason: 'cross-app integration' }, maria.token);
+  const kase = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi' }, maria.token);
   const RID = kase.body?.room?.roomId ?? kase.body?.existingRoomId;
   ok(!!RID, 'H1 a recruitment case exists');
   const jr0 = (await j('GET', `/org/rooms/${RID}/journey`, undefined, maria.token)).body;
@@ -3215,7 +3215,7 @@ section("AV — the two new writes draw on the platform's own quotas");
   // offer_consideration the ordinary way: shortlist, draft, finalise.
   // A player this suite has not otherwise touched: pl-svensson is removed by #34
   // and pl-adeyemi is the case above.
-  const second = await j('POST', '/org/rooms', { playerId: 'pl-alvarez', reason: 'cross-app repair' }, maria.token);
+  const second = await j('POST', '/org/rooms', { playerId: 'pl-alvarez' }, maria.token);
   const RID2 = second.body?.room?.roomId ?? second.body?.existingRoomId ?? null;
   const jr2 = (await j('GET', `/org/rooms/${RID2}/journey`, undefined, maria.token)).body;
   await j('POST', `/org/rooms/${RID2}/lifecycle`, { action: 'shortlist', expectedRev: jr2?.case?.rev }, maria.token);

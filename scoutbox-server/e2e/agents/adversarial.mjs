@@ -1045,7 +1045,7 @@ section('N/live — private club recruitment intelligence stays private');
   // invented ids would be worthless: both 404 whatever the rule is. So the club
   // opens a genuine case first, confirms it can read it, and only then is the
   // agency's refusal compared against an id that never existed.
-  const made = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', sourceContext: 'scouted' }, maria.token);
+  const made = await j('POST', '/org/rooms', { playerId: 'pl-adeyemi', sourceContext: 'search' }, maria.token);
   const caseId = made.body?.room?.roomId ?? made.body?.roomId ?? made.body?.existingRoomId ?? null;
   ok(!!caseId, `N3 the club opened a real recruitment case (${made.status}, id ${caseId})`);
   const clubOwn = await j('GET', `/org/rooms/${caseId}`, undefined, maria.token);

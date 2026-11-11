@@ -54,9 +54,110 @@ import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { LIFECYCLE_ACTIONS } from '../lifecycle/lifecycle.mjs';
 
 import { readPage, sendPageError } from '../../platform/paging.mjs';
-import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
 import { now } from '../../platform/clock.mjs';
 import { normaliseClientKey } from '../../platform/idempotency.mjs';
+import * as v from 'valibot';
+import {
+  dayOrBlank,
+  dueDate,
+  flag,
+  id,
+  idList,
+  inputOrRefuse,
+  oneOf,
+  text,
+  wholeNumber,
+} from '../../platform/schemas.mjs';
+
+const NOTE_MAX = 2000;
+const EVIDENCE_NOTE_MAX = 1000;
+const ASSESSMENT_KIND_MAX = 60;
+// The Combine request's own limits (`createRequests`).
+const COMBINE_TITLE_MAX = 120;
+const COMBINE_INSTRUCTIONS_MAX = 300;
+const COMBINE_PROTOCOLS_MAX = 20;
+
+const REV = { expectedRev: v.nullish(wholeNumber({ min: 0 })), expectedVersion: v.nullish(wholeNumber({ min: 0 })) };
+// Reason codes are cleaned and judged against the taxonomy by validateReasonCodes, which keeps its own codes.
+const reasonCodes = v.nullish(v.array(v.string()));
+const REASON_CODES_CODES = { 'reasonCodes.*': 'ROOM_REASONS_INVALID' };
+
+const NewRoom = v.strictObject({
+  playerId: id,
+  sourceContext: v.nullish(oneOf(SOURCE_CONTEXTS)),
+  priority: v.nullish(oneOf(ROOM_PRIORITIES)),
+  restricted: v.nullish(flag),
+  vacancyId: v.nullish(id),
+});
+const NEW_ROOM_CODES = { fieldCodes: { priority: 'ROOM_PRIORITY_UNKNOWN' } };
+// The tag count has its own code, so it is judged in the route.
+const RoomEdit = v.strictObject({
+  ...REV,
+  priority: v.optional(oneOf(ROOM_PRIORITIES)),
+  tags: v.optional(v.array(text(LIMITS.tagLength))),
+  leadScoutUserId: v.optional(v.nullable(id)),
+  ownerUserId: v.optional(id),
+  restricted: v.optional(flag),
+  deadline: v.optional(dueDate),
+});
+const ROOM_EDIT_CODES = { fieldCodes: { priority: 'ROOM_PRIORITY_UNKNOWN', 'tags.*': 'ROOM_TAGS_INVALID' } };
+const StatusMove = v.strictObject({
+  ...REV,
+  status: oneOf(ROOM_STATUSES),
+  reasonCodes,
+  note: v.nullish(text(NOTE_MAX)),
+});
+const STATUS_MOVE_CODES = { fieldCodes: { status: 'ROOM_STATUS_UNKNOWN', ...REASON_CODES_CODES } };
+const NewComment = v.strictObject({
+  body: v.nullish(text(LIMITS.commentBody)),
+  replyToId: v.nullish(id),
+  mentions: v.nullish(idList(LIMITS.mentionsPerComment)),
+});
+const CommentEdit = v.strictObject({ body: v.nullish(text(LIMITS.commentBody)) });
+const NewTask = v.strictObject({
+  title: v.nullish(text(LIMITS.taskTitle)),
+  description: v.nullish(text(LIMITS.taskDescription)),
+  assigneeUserId: v.nullish(id),
+  linkedResourceType: v.nullish(oneOf(LINKED_RESOURCE_TYPES)),
+  linkedResourceId: v.nullish(id),
+  dueAt: v.optional(dueDate),
+});
+const TaskEdit = v.strictObject({
+  status: v.optional(oneOf(TASK_STATES)),
+  assigneeUserId: v.optional(v.nullable(id)),
+});
+const TASK_EDIT_CODES = { fieldCodes: { status: 'ROOM_TASK_STATE_UNKNOWN' } };
+// `clientKey` keeps the platform's idempotency-key rule (normaliseClientKey).
+const NewDecision = v.strictObject({
+  ...REV,
+  clientKey: v.optional(v.unknown()),
+  recommendation: oneOf(RECOMMENDATIONS),
+  reasonCodes,
+  note: v.nullish(text(NOTE_MAX)),
+});
+const DECISION_CODES = {
+  fieldCodes: { recommendation: 'ROOM_RECOMMENDATION_UNKNOWN', note: 'ROOM_NOTE_TOO_LONG', ...REASON_CODES_CODES },
+};
+const EvidenceReview = v.strictObject({
+  state: oneOf(EVIDENCE_REVIEW_STATES),
+  note: v.nullish(text(EVIDENCE_NOTE_MAX)),
+});
+const EVIDENCE_REVIEW_CODES = { fieldCodes: { state: 'ROOM_EVIDENCE_STATE_UNKNOWN' } };
+const AssessmentAssignment = v.strictObject({
+  userId: id,
+  kind: v.nullish(text(ASSESSMENT_KIND_MAX)),
+  dueAt: v.optional(dueDate),
+});
+const EvidenceRequest = v.strictObject({ suggestionId: id });
+// Duplicates are dropped before the protocol count is judged, so the list itself is bounded only loosely.
+const CombineRequest = v.strictObject({
+  protocolIds: v.nullish(idList(COMBINE_PROTOCOLS_MAX * 5)),
+  title: v.nullish(text(COMBINE_TITLE_MAX)),
+  deadline: v.nullish(dayOrBlank),
+  instructions: v.nullish(text(COMBINE_INSTRUCTIONS_MAX)),
+});
+const RoomLinks = v.strictObject({ trialId: v.nullish(id), signingId: v.nullish(id), requestId: v.nullish(id) });
+
 export function registerRooms(ctx) {
   const {
     byId,
@@ -740,7 +841,9 @@ export function registerRooms(ctx) {
 
   orgRouter.post('/rooms', (req, res) => {
     if (limited('room_create', req.org.id)) return res.status(429).json(rateLimitedBody('room_create'));
-    const { playerId, sourceContext, priority, restricted, vacancyId } = req.body ?? {};
+    const body = inputOrRefuse(res, NewRoom, req.body ?? {}, NEW_ROOM_CODES);
+    if (!body) return;
+    const { playerId, sourceContext, priority, restricted, vacancyId } = body;
     const p = findPlayer(playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     // A room cannot bookmark a player the club may not see.
@@ -768,10 +871,10 @@ export function registerRooms(ctx) {
       openRoom({
         req,
         player: p,
-        sourceContext: normaliseSourceContext(sourceContext),
+        sourceContext: sourceContext ?? 'direct',
         sourceRef: null,
-        priority: ROOM_PRIORITIES.includes(priority) ? priority : 'normal',
-        restricted: !!restricted,
+        priority: priority ?? 'normal',
+        restricted: restricted ?? false,
         vacancyId: vacancyId ?? null,
         withSourceRef: false,
       }),
@@ -799,7 +902,9 @@ export function registerRooms(ctx) {
   orgRouter.patch('/rooms/:id', (req, res) => {
     const room = findRoom(req, res);
     if (!room) return;
-    const { priority, tags, leadScoutUserId, ownerUserId, restricted, deadline } = req.body ?? {};
+    const body = inputOrRefuse(res, RoomEdit, req.body ?? {}, ROOM_EDIT_CODES);
+    if (!body) return;
+    const { priority, tags, leadScoutUserId, ownerUserId, restricted, deadline } = body;
 
     // Rev-guard only the fields where a lost update changes who is responsible or how urgent it is; demanding
     // a rev for tags teaches people to send whatever number makes the error go away.
@@ -815,13 +920,9 @@ export function registerRooms(ctx) {
       return;
 
     // Every field is judged before anything is written.
-    if (priority !== undefined) {
-      if (!ROOM_PRIORITIES.includes(priority)) return res.status(400).json({ error: 'ROOM_PRIORITY_UNKNOWN' });
-      if (!requireCan(req, res, room, 'set_status')) return;
-    }
+    if (priority !== undefined && !requireCan(req, res, room, 'set_status')) return;
     let cleanTags;
     if (tags !== undefined) {
-      if (!Array.isArray(tags)) return res.status(400).json({ error: 'ROOM_TAGS_INVALID' });
       if (tags.length > LIMITS.tagsPerRoom) return res.status(400).json({ error: 'ROOM_TAGS_TOO_MANY' });
       const out = [];
       for (const raw of tags) {
@@ -860,7 +961,7 @@ export function registerRooms(ctx) {
         tags: cleanTags,
         leadScoutUserId,
         owner: owner ?? undefined,
-        restricted: restricted === undefined ? undefined : !!restricted,
+        restricted,
         deadline: deadline === undefined ? undefined : due,
       },
       { ...touched(...history), bump: workflowFields, revBy: req.orgUser },
@@ -887,7 +988,9 @@ export function registerRooms(ctx) {
     )
       return;
 
-    const to = String(req.body?.status ?? '');
+    const body = inputOrRefuse(res, StatusMove, req.body ?? {}, STATUS_MOVE_CODES);
+    if (!body) return;
+    const to = body.status;
     // A state a lifecycle action reaches needs that action's role here too, or this route would let a room
     // lead reach `signed`, which the lifecycle reserves for a recruitment lead.
     const namingActions = Object.values(LIFECYCLE_ACTIONS).filter((a) => a.to === to);
@@ -902,9 +1005,9 @@ export function registerRooms(ctx) {
           required: [...new Set(namingActions.flatMap((a) => a.roles))],
         });
     }
-    const reasons = validateReasonCodes(req.body?.reasonCodes ?? []);
+    const reasons = validateReasonCodes(body.reasonCodes ?? []);
     if (!reasons.ok) return res.status(400).json(reasons);
-    const note = req.body?.note == null ? null : plainText(req.body.note, 2000);
+    const note = body.note == null ? null : plainText(body.note, NOTE_MAX);
     if (note && !moderateOrRefuse(res, note, { kind: 'recruitment_room', orgId: req.org.id })) return;
 
     const check = validateTransition(room.room.status, to, { reasonCodes: reasons.codes });
@@ -1208,19 +1311,19 @@ export function registerRooms(ctx) {
     if (limited('room_comment', `${room.id}:${req.orgUser.id}`)) {
       return res.status(429).json(rateLimitedBody('room_comment'));
     }
-    const body = plainText(req.body?.body, LIMITS.commentBody);
+    const input = inputOrRefuse(res, NewComment, req.body ?? {});
+    if (!input) return;
+    const body = plainText(input.body, LIMITS.commentBody);
     if (!body) return res.status(400).json({ error: 'ROOM_COMMENT_EMPTY' });
     if (!moderateOrRefuse(res, body, { kind: 'recruitment_room_comment', orgId: req.org.id })) return;
 
-    const replyToId = req.body?.replyToId ? String(req.body.replyToId) : null;
+    const replyToId = input.replyToId ?? null;
     if (replyToId) {
       // A comment id from another room is a 404 here, not a cross-room reply.
       const parent = commentOf(replyToId, room.id);
       if (!parent) return res.status(404).json({ error: 'ROOM_COMMENT_NOT_FOUND' });
     }
-    const mentions = [...new Set((Array.isArray(req.body?.mentions) ? req.body.mentions : []).map(String))]
-      .filter((uid) => orgUser(req.org.id, uid))
-      .slice(0, LIMITS.mentionsPerComment);
+    const mentions = [...new Set(input.mentions ?? [])].filter((uid) => orgUser(req.org.id, uid));
 
     const c = {
       id: nextId('rcmt'),
@@ -1263,7 +1366,9 @@ export function registerRooms(ctx) {
     if (c.authorId !== req.orgUser.id)
       return res.status(403).json({ error: 'ROOM_COMMENT_NOT_AUTHOR', message: 'Only the author can edit a comment.' });
     if (c.deletedAt) return res.status(409).json({ error: 'ROOM_COMMENT_DELETED' });
-    const body = plainText(req.body?.body, LIMITS.commentBody);
+    const input = inputOrRefuse(res, CommentEdit, req.body ?? {});
+    if (!input) return;
+    const body = plainText(input.body, LIMITS.commentBody);
     if (!body) return res.status(400).json({ error: 'ROOM_COMMENT_EMPTY' });
     if (!moderateOrRefuse(res, body, { kind: 'recruitment_room_comment', orgId: req.org.id })) return;
     const saved = unit(() => {
@@ -1296,21 +1401,21 @@ export function registerRooms(ctx) {
     if (!room) return;
     if (!requireCan(req, res, room, 'create_task')) return;
     if ((room.tasks ?? []).length >= LIMITS.tasksPerRoom) return res.status(409).json({ error: 'ROOM_TASKS_FULL' });
-    const title = plainText(req.body?.title, LIMITS.taskTitle);
+    const input = inputOrRefuse(res, NewTask, req.body ?? {});
+    if (!input) return;
+    const title = plainText(input.title, LIMITS.taskTitle);
     if (!title) return res.status(400).json({ error: 'ROOM_TASK_TITLE_REQUIRED' });
     if (!moderateOrRefuse(res, title, { kind: 'recruitment_room_task', orgId: req.org.id })) return;
-    const description = req.body?.description ? plainText(req.body.description, LIMITS.taskDescription) : null;
+    const description = input.description ? plainText(input.description, LIMITS.taskDescription) || null : null;
 
     let assignee = null;
-    if (req.body?.assigneeUserId) {
-      assignee = orgUser(req.org.id, String(req.body.assigneeUserId));
+    if (input.assigneeUserId) {
+      assignee = orgUser(req.org.id, input.assigneeUserId);
       if (!assignee) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
     }
-    const linkedResourceType = LINKED_RESOURCE_TYPES.includes(req.body?.linkedResourceType)
-      ? req.body.linkedResourceType
-      : null;
+    const linkedResourceType = input.linkedResourceType ?? null;
 
-    const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
+    const dueAt = dueAtOrRefuse(res, input.dueAt);
     if (dueAt === undefined) return;
     const t = {
       id: nextId('tsk'),
@@ -1321,7 +1426,7 @@ export function registerRooms(ctx) {
       status: 'open',
       dueAt,
       linkedResourceType,
-      linkedResourceId: linkedResourceType ? String(req.body?.linkedResourceId ?? '') || null : null,
+      linkedResourceId: linkedResourceType ? (input.linkedResourceId ?? null) : null,
       createdBy: { userId: req.orgUser.id, name: req.orgUser.name },
       createdAt: now(),
       completedAt: null,
@@ -1357,20 +1462,20 @@ export function registerRooms(ctx) {
         message: 'Only the assignee, the creator or a room lead can change this task.',
       });
 
-    let status;
-    if (req.body?.status !== undefined) {
-      status = String(req.body.status);
-      if (!TASK_STATES.includes(status)) return res.status(400).json({ error: 'ROOM_TASK_STATE_UNKNOWN' });
+    const input = inputOrRefuse(res, TaskEdit, req.body ?? {}, TASK_EDIT_CODES);
+    if (!input) return;
+    const { status } = input;
+    if (status !== undefined) {
       const from = t.status ?? 'open';
       if (from !== status && !canTaskTransition(from, status))
         return res.status(409).json({ error: 'ROOM_TASK_TRANSITION_INVALID', from, to: status });
     }
     let assignee;
-    if (req.body?.assigneeUserId !== undefined) {
+    if (input.assigneeUserId !== undefined) {
       if (!roomCan(role, 'assign')) return res.status(403).json({ error: 'ROOM_PERMISSION_REQUIRED' });
-      if (req.body.assigneeUserId === null) assignee = null;
+      if (input.assigneeUserId === null) assignee = null;
       else {
-        assignee = orgUser(req.org.id, String(req.body.assigneeUserId));
+        assignee = orgUser(req.org.id, input.assigneeUserId);
         if (!assignee) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
       }
     }
@@ -1427,7 +1532,9 @@ export function registerRooms(ctx) {
     if (!room) return;
     if (!requireCan(req, res, room, 'record_decision')) return;
 
-    const key = normaliseClientKey(req.body?.clientKey, 'ROOM_CLIENT_KEY_INVALID');
+    const body = inputOrRefuse(res, NewDecision, req.body ?? {}, DECISION_CODES);
+    if (!body) return;
+    const key = normaliseClientKey(body.clientKey, 'ROOM_CLIENT_KEY_INVALID');
     if (!key.ok) return res.status(400).json({ error: key.error, message: key.message });
     const clientKey = key.key;
     if (clientKey) {
@@ -1435,11 +1542,11 @@ export function registerRooms(ctx) {
       // The same key returns the same decision. The same key with different content, or one that named a
       // formal decision, is a conflict rather than a silent old answer.
       if (dup) {
-        const codesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).map((x) => String(x)))].sort().join(',');
+        const codesOf = (xs) => [...new Set(xs ?? [])].sort().join(',');
         const same =
           dup.kind !== 'formal' &&
-          (dup.recommendation ?? null) === (req.body?.recommendation ?? null) &&
-          codesOf(dup.reasonCodes) === codesOf(req.body?.reasonCodes);
+          (dup.recommendation ?? null) === body.recommendation &&
+          codesOf(dup.reasonCodes) === codesOf(body.reasonCodes);
         if (!same)
           return res.status(409).json({
             error: 'DECISION_IDEMPOTENCY_CONFLICT',
@@ -1457,12 +1564,12 @@ export function registerRooms(ctx) {
     )
       return;
     const check = validateDecision({
-      recommendation: req.body?.recommendation,
-      reasonCodes: req.body?.reasonCodes ?? [],
-      note: req.body?.note ?? null,
+      recommendation: body.recommendation,
+      reasonCodes: body.reasonCodes ?? [],
+      note: body.note ?? null,
     });
     if (!check.ok) return res.status(400).json(check);
-    const note = check.note == null ? null : plainText(check.note, 2000);
+    const note = check.note == null ? null : plainText(check.note, NOTE_MAX);
     if (note && !moderateOrRefuse(res, note, { kind: 'recruitment_room_decision', orgId: req.org.id })) return;
 
     const { snapshot, d, fresh } = unit(() => {
@@ -1499,12 +1606,13 @@ export function registerRooms(ctx) {
     const room = findRoom(req, res);
     if (!room) return;
     if (!requireCan(req, res, room, 'comment')) return;
-    const state = String(req.body?.state ?? '');
-    if (!EVIDENCE_REVIEW_STATES.includes(state)) return res.status(400).json({ error: 'ROOM_EVIDENCE_STATE_UNKNOWN' });
+    const input = inputOrRefuse(res, EvidenceReview, req.body ?? {}, EVIDENCE_REVIEW_CODES);
+    if (!input) return;
+    const { state } = input;
     const found = ctx.scoutingReads.evidence.byId(req.params.eid);
     const evidence = found && found.playerId === room.playerId ? found : null;
     if (!evidence) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
-    const note = req.body?.note ? plainText(req.body.note, 1000) : null;
+    const note = input.note ? plainText(input.note, EVIDENCE_NOTE_MAX) || null : null;
     if (note && !moderateOrRefuse(res, note, { kind: 'recruitment_room_evidence_note', orgId: req.org.id })) return;
 
     const existing = reads.evidenceStates.forRoom(room.id).find((x) => x.evidenceId === evidence.id);
@@ -1545,10 +1653,12 @@ export function registerRooms(ctx) {
     const room = findRoom(req, res);
     if (!room) return;
     if (!requireCan(req, res, room, 'assign')) return;
-    const u = orgUser(req.org.id, String(req.body?.userId ?? ''));
+    const input = inputOrRefuse(res, AssessmentAssignment, req.body ?? {});
+    if (!input) return;
+    const u = orgUser(req.org.id, input.userId);
     if (!u) return res.status(404).json({ error: 'USER_NOT_IN_ORG' });
-    const kind = plainText(req.body?.kind, 60) || 'Assessment';
-    const dueAt = dueAtOrRefuse(res, req.body?.dueAt);
+    const kind = plainText(input.kind, ASSESSMENT_KIND_MAX) || 'Assessment';
+    const dueAt = dueAtOrRefuse(res, input.dueAt);
     if (dueAt === undefined) return;
     const a = {
       id: nextId('asg'),
@@ -1581,7 +1691,9 @@ export function registerRooms(ctx) {
     if (!room) return;
     if (!requireCan(req, res, room, 'request_evidence')) return;
     if (!ctx.requestEvidenceGap) return res.status(503).json({ error: 'EVIDENCE_ENGINE_UNAVAILABLE' });
-    const suggestionId = String(req.body?.suggestionId ?? '');
+    const input = inputOrRefuse(res, EvidenceRequest, req.body ?? {});
+    if (!input) return;
+    const { suggestionId } = input;
     // No free-text field: a scout's own words never reach a player or guardian from a private room; only the
     // engine's rule-derived wording travels. The suggestion is scoped to this room's player.
     const out = unit(() => {
@@ -1625,33 +1737,24 @@ export function registerRooms(ctx) {
     if (limited('room_combine_request', req.org.id))
       return res.status(429).json(rateLimitedBody('room_combine_request'));
 
-    const { protocolIds, title = null, deadline = null } = req.body ?? {};
-    if (protocolIds !== undefined && (!Array.isArray(protocolIds) || protocolIds.some((x) => typeof x !== 'string')))
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'protocolIds is a list of protocol ids.' });
-    if (title !== null && typeof title !== 'string')
-      return res.status(400).json({ error: 'FIELD_INVALID', field: 'title', message: 'A title is text.' });
-    if (!isAbsent(deadline) && !parseStrictDateOnly(deadline).ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'deadline',
-        message: 'A deadline is a calendar day written YYYY-MM-DD.',
-        expected: 'YYYY-MM-DD',
-      });
-    const ids = Array.isArray(protocolIds) ? [...new Set(protocolIds)] : [];
+    const input = inputOrRefuse(res, CombineRequest, req.body ?? {});
+    if (!input) return;
+    const { title = null, deadline = null } = input;
+    const ids = [...new Set(input.protocolIds ?? [])];
     if (!ids.length) return res.status(400).json({ error: 'PROTOCOLS_REQUIRED' });
-    if (ids.length > 20)
+    if (ids.length > COMBINE_PROTOCOLS_MAX)
       return res.status(400).json({
         error: 'FIELD_INVALID',
         field: 'protocolIds',
-        message: 'A Club Combine asks for at most 20 protocols.',
+        problem: 'too_long',
+        max: COMBINE_PROTOCOLS_MAX,
+        message: `A Club Combine asks for at most ${COMBINE_PROTOCOLS_MAX} protocols.`,
       });
     // Protocols come from the standardised registry; a room cannot invent or change one.
     for (const pid of ids)
       if (!ctx.combineProtocolActive?.(pid))
         return res.status(404).json({ error: 'PROTOCOL_UNKNOWN', protocolId: pid });
-    const instructions = req.body?.instructions ? String(req.body.instructions) : null;
+    const instructions = input.instructions?.trim() || null;
     if (instructions && !moderateOrRefuse(res, instructions, { kind: 'combine_request', orgId: req.org.id })) return;
 
     const out = unit(() => {
@@ -1661,7 +1764,7 @@ export function registerRooms(ctx) {
         playerIds: [room.playerId],
         protocolIds: ids,
         title,
-        deadline: isAbsent(deadline) ? null : deadline,
+        deadline: deadline || null,
         instructions,
       });
       if (o.created.length)
@@ -1681,7 +1784,9 @@ export function registerRooms(ctx) {
     const room = findRoom(req, res);
     if (!room) return;
     if (!requireCan(req, res, room, 'assign')) return;
-    const { trialId, signingId, requestId } = req.body ?? {};
+    const input = inputOrRefuse(res, RoomLinks, req.body ?? {});
+    if (!input) return;
+    const { trialId, signingId, requestId } = input;
     const foundTrial = trialId ? reads.trials.byId(trialId) : null;
     const t =
       foundTrial && foundTrial.orgId === req.org.id && foundTrial.playerId === room.playerId ? foundTrial : null;
