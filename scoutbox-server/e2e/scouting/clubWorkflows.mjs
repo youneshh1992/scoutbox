@@ -1125,6 +1125,18 @@ for (const [body, field] of [
     `an opportunity with a bad ${field} is refused, naming the field`,
   );
 }
+for (const [body, field, problem] of [
+  [{ type: 'trial', title: 'x'.repeat(121), deadline: future }, 'title', 'too_long'],
+  [{ type: 'trial', title: 'X', deadline: future, status: 'closed' }, 'status', 'unknown_field'],
+  [{ type: 'trial', title: 'X', deadline: future, orgId: 'org-harbour' }, 'orgId', 'unknown_field'],
+  [{ type: 'trial', title: 'X', deadline: future, requirements: ['a'.repeat(121)] }, 'requirements[0]', 'too_long'],
+]) {
+  r = await post('/org/opportunities', body, bearer(MARIA));
+  ok(
+    r.status === 400 && r.body.field === field && r.body.problem === problem,
+    `an opportunity with ${field} ${problem.replace('_', ' ')} is refused, not cut off or taken`,
+  );
+}
 // A guardian's withdrawal is recorded as the guardian's act.
 r = await post(
   `/guardian/applications/${(await j('/guardian/applications', {}, bearer(AMARA))).body.find((a) => a.opportunityId === oppKids).id}/withdraw`,
@@ -1228,6 +1240,25 @@ for (const [body, field] of [
   ok(
     r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === field,
     `a campaign with a bad ${field} is refused, naming the field`,
+  );
+}
+for (const [body, field, problem] of [
+  [{ title: 'X', deadline: future, drills: [{ name: 'a', duration: 30 }] }, 'drills[0].duration', 'unknown_field'],
+  [
+    { title: 'X', deadline: future, drills: [{ name: 'a', recording: { camera: 1 } }] },
+    'drills[0].recording.camera',
+    'not_text',
+  ],
+  [
+    { title: 'X', deadline: future, drills: [{ name: 'a' }], rubric: [{ criterion: '' }] },
+    'rubric[0].criterion',
+    'blank',
+  ],
+]) {
+  r = await post('/org/campaigns', body, bearer(MARIA));
+  ok(
+    r.status === 400 && r.body.field === field && r.body.problem === problem,
+    `a campaign with a bad ${field} is refused`,
   );
 }
 r = await post(`/player/campaigns/${campId}/submit`, { mediaId: sprintMedia, drillName: 'keepy-uppies' }, bearer(KOLA));
@@ -1371,6 +1402,23 @@ const trial = trials.find((t) => t.playerId === 'pl-svensson');
 ok(!!trial, 'trial record exists');
 r = await post(`/org/trials/${trial.id}/checkin`, {}, bearer(MARIA));
 ok(r.status === 409 && r.body.error === 'STAFF_CHECK_REQUIRED', 'check-in blocked without a REVIEWED staff check');
+// Trial-day safety records are refused unless they are text as sent; they were turned into text and cut.
+for (const [body, field, problem] of [
+  [{ name: { first: 'Priya' }, role: 'Safeguarding Lead' }, 'name', 'not_text'],
+  [{ name: 'Priya Shah', role: 'Safeguarding Lead', check: { ref: 4471 } }, 'check.ref', 'not_text'],
+  [{ name: 'Priya Shah', role: 'x'.repeat(61) }, 'role', 'too_long'],
+  [{ name: 'Priya Shah', role: 'Coach', check: { status: 'reviewed' } }, 'check.status', 'unknown_field'],
+]) {
+  r = await post(`/org/trials/${trial.id}/staff`, body, bearer(MARIA));
+  ok(
+    r.status === 400 && r.body.field === field && r.body.problem === problem,
+    `trial staff with a bad ${field} is refused`,
+  );
+}
+ok(
+  (await j(`/org/trials/${trial.id}/day`, {}, bearer(MARIA))).body.trial.staff.length === 0,
+  'and no refused staff member was recorded',
+);
 r = await post(
   `/org/trials/${trial.id}/staff`,
   {
@@ -1400,12 +1448,26 @@ r = await post(`/player/trials/${trial.id}/consent`, {}, bearer(SVEN));
 ok(r.status === 201, 'adult player gives event consent');
 r = await post(
   `/player/trials/${trial.id}/emergency-contact`,
+  { name: 'Lena Svensson', phone: 46700001122 },
+  bearer(SVEN),
+);
+ok(
+  r.status === 400 && r.body.field === 'phone' && r.body.problem === 'not_text',
+  'an emergency phone number that is not text is refused',
+);
+r = await post(
+  `/player/trials/${trial.id}/emergency-contact`,
   { name: 'Lena Svensson', phone: '+46 70 000 11 22' },
   bearer(SVEN),
 );
 ok(r.status === 200, 'restricted emergency contact filed');
 r = await j('/org/players/pl-svensson', {}, bearer(MARIA));
 ok(!JSON.stringify(r.body).includes('70 000 11 22'), 'emergency contact NEVER appears in the scouting profile');
+r = await post(`/org/trials/${trial.id}/arrival`, { address: 'x'.repeat(201) }, bearer(MARIA));
+ok(
+  r.status === 400 && r.body.field === 'address' && r.body.max === 200,
+  'an over-long arrival address is refused with its limit, not cut off',
+);
 r = await post(
   `/org/trials/${trial.id}/arrival`,
   { time: '09:30', address: 'Gate B, Eastport Training Ground', notes: 'Ask for Priya at reception.' },
@@ -1425,6 +1487,16 @@ r = await j(`/player/trials/${trial.id}/safety-pack`, {}, bearer(SVEN));
 ok(
   r.body.pack.staff[0].check.status === 'reviewed' && r.body.pack.checksExplained.includes('truth'),
   'safety pack shows who was checked and what that means',
+);
+r = await post(`/org/trials/${trial.id}/postpone`, { reason: 'Waterlogged pitch', newDate: 20270101 }, bearer(MARIA));
+ok(
+  r.status === 400 && r.body.error === 'TRIAL_DATE_INVALID' && r.body.field === 'newDate',
+  'a new trial date that is not text is refused',
+);
+r = await post(`/org/trials/${trial.id}/cancel`, { reason: ['rain'] }, bearer(MARIA));
+ok(
+  r.status === 400 && r.body.field === 'reason' && r.body.problem === 'not_text',
+  'a cancel reason that is not text is refused',
 );
 r = await post(`/org/trials/${trial.id}/postpone`, { reason: 'Waterlogged pitch', newDate: future }, bearer(MARIA));
 ok(r.status === 200, 'postponement recorded + parties notified');

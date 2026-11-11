@@ -2,7 +2,7 @@
 // closed on a missing location.
 
 import { GRASSROOTS_RADIUS_KM, parseTrialDate, trialReportDueAt } from '../../domain.mjs';
-import { parseStrictDateOnly, parseDateOrInstant, isExpiredAt, isAbsent } from '../../temporal.mjs';
+import { parseDateOrInstant, isExpiredAt, isAbsent } from '../../temporal.mjs';
 import { trialFamilyView, trialOutcomeLine } from '../recruitment/lifecycle/trial.mjs';
 import { readPage, sendPageError, pageOf, offsetPage, pageSorted } from '../platform/paging.mjs';
 import {
@@ -14,7 +14,94 @@ import {
 } from '../../repositories/opportunitiesCampaigns.mjs';
 import { storedName } from './passport.mjs';
 import * as v from 'valibot';
-import { OFFSET_PAGE, OFFSET_PAGE_CODES, inputOrRefuse } from '../platform/schemas.mjs';
+import {
+  CURSOR_PAGE,
+  ID_MAX,
+  OFFSET_PAGE,
+  OFFSET_PAGE_CODES,
+  dayOrBlank,
+  dueDate,
+  inputOrRefuse,
+  oneOf,
+  requiredText,
+  text,
+  wholeNumber,
+} from '../platform/schemas.mjs';
+
+const optText = (max) => v.nullish(text(max));
+const NewOpportunity = v.strictObject({
+  type: oneOf(OPPORTUNITY_TYPES),
+  title: optText(OL.title),
+  deadline: v.optional(dayOrBlank),
+  team: optText(OL.team),
+  ageGroup: optText(OL.ageGroup),
+  role: optText(OL.role),
+  description: optText(OL.description),
+  schedule: optText(OL.schedule),
+  category: v.nullish(oneOf(OPPORTUNITY_CATEGORIES)),
+  capacity: v.nullish(wholeNumber({ min: 1 })),
+  requirements: v.nullish(v.pipe(v.array(requiredText(OL.requirement)), v.maxLength(OL.requirements))),
+  // eligibilityOrRefuse applies the grassroots rules and the eligibility typer.
+  eligibility: v.optional(v.unknown()),
+});
+const OPPORTUNITY_CODES = { fieldCodes: { type: 'TYPE_INVALID' } };
+const ApplicationNote = v.strictObject({ note: optText(OL.note) });
+const ApplicationOutcome = v.strictObject({ decision: oneOf(['accepted', 'declined']), note: optText(OL.outcomeNote) });
+const DECISION_CODES = { fieldCodes: { decision: 'DECISION_INVALID' } };
+const Drill = v.strictObject({
+  name: requiredText(OL.drillName),
+  instructions: optText(OL.instructions),
+  recording: v.nullish(
+    v.strictObject({
+      equipment: optText(OL.recording),
+      distance: optText(OL.recording),
+      surface: optText(OL.recording),
+      camera: optText(OL.recording),
+    }),
+  ),
+});
+const NewCampaign = v.strictObject({
+  title: optText(OL.title),
+  deadline: v.optional(dayOrBlank),
+  drills: v.nullish(v.pipe(v.array(Drill), v.maxLength(OL.drills))),
+  attemptsAllowed: v.nullish(wholeNumber({ min: 1, max: OL.attemptsAllowed })),
+  rubric: v.nullish(
+    v.pipe(
+      v.array(v.strictObject({ criterion: requiredText(OL.criterion), guidance: optText(OL.guidance) })),
+      v.maxLength(OL.rubric),
+    ),
+  ),
+  eligibility: v.optional(v.unknown()),
+});
+// An empty mediaId is an attempt with no clip: it fails the file checks rather than the request.
+const Attempt = v.strictObject({ mediaId: optText(ID_MAX), drillName: v.nullish(v.string()), note: optText(OL.note) });
+const AttemptReview = v.strictObject({
+  decision: oneOf(['accepted', 'returned']),
+  reasons: optText(OL.reasons),
+  rubricNotes: optText(OL.rubricNotes),
+});
+// The trial-day lengths are the trial table's.
+const TrialStaff = v.strictObject({
+  name: optText(80),
+  role: optText(60),
+  check: v.nullish(v.strictObject({ kind: optText(60), ref: optText(60), expiresAt: v.optional(dueDate) })),
+});
+const Arrival = v.strictObject({
+  time: optText(40),
+  address: optText(200),
+  notes: optText(300),
+  collection: optText(300),
+});
+const TrialCancel = v.strictObject({ reason: optText(200) });
+const TrialPostpone = v.strictObject({ reason: optText(200), newDate: v.nullish(v.string()) });
+const POSTPONE_CODES = { fieldCodes: { newDate: 'TRIAL_DATE_INVALID' } };
+const EmergencyContact = v.strictObject({ name: optText(80), phone: optText(30) });
+const StaffCheckReview = v.strictObject({ status: oneOf(['reviewed', 'rejected']), expiresAt: v.optional(dueDate) });
+const STAFF_CHECK_CODES = { fieldCodes: { status: 'STATUS_INVALID' } };
+const PageQuery = v.strictObject(CURSOR_PAGE);
+const StaffChecksQuery = v.strictObject({ ...CURSOR_PAGE, all: v.optional(oneOf(['0', '1'])) });
+/** Text with something in it, trimmed; blank or absent is null. The schema has checked it is text. */
+const filled = (s) => (typeof s === 'string' && s.trim() ? s.trim() : null);
 
 const eligibilityView = (e) => ({
   minAge: e.minAge,
@@ -197,8 +284,6 @@ export function registerJourneys(ctx) {
     res.status(400).json({ error: 'FIELD_INVALID', field, message });
     return undefined;
   };
-  const optionalText = (v) => v === undefined || v === null || typeof v === 'string';
-  const textOrNull = (v, max) => (v ? v.slice(0, max) : null);
   const today = () => new Date().toISOString().slice(0, 10);
 
   /** The grassroots rules are forced (amateur and semi-pro only, the 50 km radius). Undefined after a 400. */
@@ -240,31 +325,11 @@ export function registerJourneys(ctx) {
   }
 
   orgRouter.post('/opportunities', (req, res) => {
-    const b = req.body ?? {};
-    if (!OPP_TYPES.includes(b.type)) return res.status(400).json({ error: 'TYPE_INVALID', allowed: OPP_TYPES });
-    if (typeof b.title !== 'string' || !b.title.trim()) return res.status(400).json({ error: 'TITLE_REQUIRED' });
-    if (!b.deadline) return res.status(400).json({ error: 'DEADLINE_REQUIRED' });
-    if (!parseStrictDateOnly(b.deadline).ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'deadline',
-        message: 'A deadline is a calendar day written YYYY-MM-DD.',
-        expected: 'YYYY-MM-DD',
-      });
-    for (const f of ['team', 'ageGroup', 'role', 'description', 'schedule'])
-      if (!optionalText(b[f])) return fieldInvalid(res, f, `${f} is text.`);
-    if (b.category !== undefined && b.category !== null && !OPPORTUNITY_CATEGORIES.includes(b.category))
-      return fieldInvalid(res, 'category', `category is one of ${OPPORTUNITY_CATEGORIES.join(', ')}.`);
-    if (b.capacity !== undefined && b.capacity !== null && !(Number.isSafeInteger(b.capacity) && b.capacity >= 1))
-      return fieldInvalid(res, 'capacity', 'capacity is a whole number of places (1 or more), or null for no limit.');
-    if (
-      b.requirements !== undefined &&
-      b.requirements !== null &&
-      (!Array.isArray(b.requirements) ||
-        b.requirements.length > OL.requirements ||
-        b.requirements.some((r) => typeof r !== 'string' || !r.trim()))
-    )
-      return fieldInvalid(res, 'requirements', `requirements is a list of at most ${OL.requirements} lines of text.`);
+    const b = inputOrRefuse(res, NewOpportunity, req.body ?? {}, OPPORTUNITY_CODES);
+    if (!b) return;
+    if (!filled(b.title)) return res.status(400).json({ error: 'TITLE_REQUIRED', field: 'title', problem: 'required' });
+    if (!b.deadline)
+      return res.status(400).json({ error: 'DEADLINE_REQUIRED', field: 'deadline', problem: 'required' });
     if (b.description && !moderateOrRefuse(res, b.description, { kind: 'opportunity', orgId: req.org.id })) return;
     const category = b.category ?? 'mixed';
     const eligibility = eligibilityOrRefuse(res, b.eligibility, req.org, { category });
@@ -275,17 +340,17 @@ export function registerJourneys(ctx) {
       orgName: storedName(req.org.name),
       orgLevel: req.org.level ?? 'pro',
       type: b.type,
-      title: b.title.slice(0, OL.title),
-      team: textOrNull(b.team, OL.team),
+      title: b.title,
+      team: b.team || null,
       category,
-      ageGroup: textOrNull(b.ageGroup, OL.ageGroup),
-      role: textOrNull(b.role, OL.role),
-      description: textOrNull(b.description, OL.description),
-      schedule: textOrNull(b.schedule, OL.schedule),
+      ageGroup: b.ageGroup || null,
+      role: b.role || null,
+      description: b.description || null,
+      schedule: b.schedule || null,
       deadline: b.deadline,
       capacity: b.capacity ?? null,
       eligibility,
-      requirements: (b.requirements ?? []).map((r) => r.slice(0, OL.requirement)),
+      requirements: b.requirements ?? [],
       status: 'published',
       createdBy: storedName(req.orgUser.name),
       createdAt: Date.now(),
@@ -300,9 +365,11 @@ export function registerJourneys(ctx) {
 
   // Opportunities are closed, never deleted, so the list grows without limit and pages.
   orgRouter.get('/opportunities', (req, res) => {
+    const query = inputOrRefuse(res, PageQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -345,9 +412,11 @@ export function registerJourneys(ctx) {
     );
 
   playerRouter.get('/opportunity-board', (req, res) => {
+    const query = inputOrRefuse(res, PageQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['string', 'string']);
+      page = readPage(query, ['string', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -362,9 +431,11 @@ export function registerJourneys(ctx) {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(403).json({ error: 'NOT_YOUR_CHILD' });
     const child = findPlayer(req.params.id);
     if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+    const query = inputOrRefuse(res, PageQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['string', 'string']);
+      page = readPage(query, ['string', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -384,8 +455,9 @@ export function registerJourneys(ctx) {
     if (o.capacity && scoutingReads.opportunities.applicationCounts([o.id])[o.id].applications >= o.capacity) {
       return res.status(409).json({ error: 'CAPACITY_FULL' });
     }
-    if (!optionalText(req.body?.note)) return fieldInvalid(res, 'note', 'note is text.');
-    const note = textOrNull(req.body?.note, OL.note);
+    const body = inputOrRefuse(res, ApplicationNote, req.body ?? {});
+    if (!body) return;
+    const note = body.note || null;
     if (note && !moderateOrRefuse(res, note, { kind: 'application', playerId: player.id, orgId: o.orgId })) return;
     const at = Date.now();
     const appn = unit(() => {
@@ -507,9 +579,10 @@ export function registerJourneys(ctx) {
     if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
     if (a.outcome) return res.status(409).json({ error: 'ALREADY_RESOLVED' });
     if (a.status === 'withdrawn') return res.status(409).json({ error: 'WITHDRAWN' });
-    const { decision, note } = req.body ?? {};
-    if (!['accepted', 'declined'].includes(decision)) return res.status(400).json({ error: 'DECISION_INVALID' });
-    if (!optionalText(note)) return fieldInvalid(res, 'note', 'note is text.');
+    const body = inputOrRefuse(res, ApplicationOutcome, req.body ?? {}, DECISION_CODES);
+    if (!body) return;
+    const { decision } = body;
+    const note = body.note || null;
     if (note && !moderateOrRefuse(res, note, { kind: 'application_outcome', playerId: a.playerId, orgId: req.org.id }))
       return;
     const at = Date.now();
@@ -520,7 +593,7 @@ export function registerJourneys(ctx) {
         d.status = decision;
         d.outcome = {
           decision,
-          note: textOrNull(note, OL.outcomeNote),
+          note,
           byUserId: req.orgUser.id,
           byName: storedName(req.orgUser.name),
           at,
@@ -561,37 +634,22 @@ export function registerJourneys(ctx) {
   // ============================================================= campaigns
   // The machine checks files; a human checks football. The two verdicts are kept apart.
 
+  /** The schema has checked each drill's shape; this refuses a repeated name and fills the recording defaults. */
   function drillsOrRefuse(res, drills) {
-    if (drills.length > OL.drills) return fieldInvalid(res, 'drills', `a campaign has at most ${OL.drills} drills.`);
     const out = [];
     const names = new Set();
     for (const [i, d] of drills.entries()) {
-      const at = `drills[${i}]`;
-      if (!d || typeof d !== 'object' || Array.isArray(d))
-        return fieldInvalid(res, at, 'a drill is an object { name, instructions, recording }.');
-      if (typeof d.name !== 'string' || !d.name.trim())
-        return fieldInvalid(res, `${at}.name`, 'every drill has a name.');
-      if (!optionalText(d.instructions)) return fieldInvalid(res, `${at}.instructions`, 'instructions is text.');
-      if (
-        d.recording !== undefined &&
-        d.recording !== null &&
-        (typeof d.recording !== 'object' || Array.isArray(d.recording))
-      )
-        return fieldInvalid(res, `${at}.recording`, 'recording is an object.');
+      if (names.has(d.name)) return fieldInvalid(res, `drills[${i}].name`, `two drills are called "${d.name}".`);
+      names.add(d.name);
       const r = d.recording ?? {};
-      for (const f of ['equipment', 'distance', 'surface', 'camera'])
-        if (!optionalText(r[f])) return fieldInvalid(res, `${at}.recording.${f}`, `${f} is text.`);
-      const name = d.name.slice(0, OL.drillName);
-      if (names.has(name)) return fieldInvalid(res, `${at}.name`, `two drills are called "${name}".`);
-      names.add(name);
       out.push({
-        name,
-        instructions: (d.instructions ?? '').slice(0, OL.instructions),
+        name: d.name,
+        instructions: d.instructions ?? '',
         recording: {
-          equipment: (r.equipment ?? 'Any phone camera').slice(0, OL.recording),
-          distance: (r.distance ?? 'Full area in frame').slice(0, OL.recording),
-          surface: (r.surface ?? 'Flat grass/turf').slice(0, OL.recording),
-          camera: (r.camera ?? 'Fixed, side-on').slice(0, OL.recording),
+          equipment: r.equipment ?? 'Any phone camera',
+          distance: r.distance ?? 'Full area in frame',
+          surface: r.surface ?? 'Flat grass/turf',
+          camera: r.camera ?? 'Fixed, side-on',
         },
       });
     }
@@ -599,47 +657,22 @@ export function registerJourneys(ctx) {
   }
 
   orgRouter.post('/campaigns', (req, res) => {
-    const b = req.body ?? {};
-    if (typeof b.title !== 'string' || !b.title.trim() || !Array.isArray(b.drills) || !b.drills.length)
-      return res.status(400).json({ error: 'TITLE_AND_DRILLS_REQUIRED' });
-    if (!b.deadline) return res.status(400).json({ error: 'DEADLINE_REQUIRED' });
-    if (!parseStrictDateOnly(b.deadline).ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'deadline',
-        message: 'A deadline is a calendar day written YYYY-MM-DD.',
-        expected: 'YYYY-MM-DD',
-      });
+    const b = inputOrRefuse(res, NewCampaign, req.body ?? {});
+    if (!b) return;
+    if (!filled(b.title) || !b.drills?.length) return res.status(400).json({ error: 'TITLE_AND_DRILLS_REQUIRED' });
+    if (!b.deadline)
+      return res.status(400).json({ error: 'DEADLINE_REQUIRED', field: 'deadline', problem: 'required' });
     const attemptsAllowed = b.attemptsAllowed ?? 2;
-    if (!Number.isSafeInteger(attemptsAllowed) || attemptsAllowed < 1 || attemptsAllowed > OL.attemptsAllowed)
-      return fieldInvalid(res, 'attemptsAllowed', `attemptsAllowed is a whole number from 1 to ${OL.attemptsAllowed}.`);
     const drills = drillsOrRefuse(res, b.drills);
     if (!drills) return;
-    const rubricIn = b.rubric ?? [];
-    if (!Array.isArray(rubricIn) || rubricIn.length > OL.rubric)
-      return fieldInvalid(res, 'rubric', `rubric is a list of at most ${OL.rubric} criteria.`);
-    const rubric = [];
-    for (const [i, r] of rubricIn.entries()) {
-      if (
-        !r ||
-        typeof r !== 'object' ||
-        typeof r.criterion !== 'string' ||
-        !r.criterion.trim() ||
-        !optionalText(r.guidance)
-      )
-        return fieldInvalid(res, `rubric[${i}]`, 'a rubric line is { criterion, guidance } (text).');
-      rubric.push({
-        criterion: r.criterion.slice(0, OL.criterion),
-        guidance: (r.guidance ?? '').slice(0, OL.guidance),
-      });
-    }
+    const rubric = (b.rubric ?? []).map((r) => ({ criterion: r.criterion, guidance: r.guidance ?? '' }));
     const eligibility = eligibilityOrRefuse(res, b.eligibility, req.org);
     if (!eligibility) return;
     const camp = opportunitiesCampaigns.campaigns.create({
       id: nextId('cmp'),
       orgId: req.org.id,
       orgName: storedName(req.org.name),
-      title: b.title.slice(0, OL.title),
+      title: b.title,
       drills,
       deadline: b.deadline,
       attemptsAllowed,
@@ -654,9 +687,11 @@ export function registerJourneys(ctx) {
   });
 
   orgRouter.get('/campaigns', (req, res) => {
+    const query = inputOrRefuse(res, PageQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -720,16 +755,15 @@ export function registerJourneys(ctx) {
     ).length;
     if (activeAttempts >= camp.attemptsAllowed)
       return res.status(409).json({ error: 'ATTEMPTS_EXHAUSTED', allowed: camp.attemptsAllowed });
-    const { mediaId, drillName, note } = req.body ?? {};
-    if (!optionalText(mediaId) || (mediaId && mediaId.length > 80))
-      return fieldInvalid(res, 'mediaId', "mediaId is the id of one of the player's media items.");
+    const body = inputOrRefuse(res, Attempt, req.body ?? {});
+    if (!body) return;
+    const { mediaId, drillName, note } = body;
     if (drillName !== undefined && drillName !== null && !camp.drills.some((d) => d.name === drillName))
       return fieldInvalid(
         res,
         'drillName',
         `drillName is one of this campaign's drills: ${camp.drills.map((d) => d.name).join(', ')}.`,
       );
-    if (!optionalText(note)) return fieldInvalid(res, 'note', 'note is text.');
     if ((existing?.attempts.length ?? 0) >= OL.attempts)
       return res.status(409).json({
         error: 'ATTEMPTS_EXHAUSTED',
@@ -742,7 +776,7 @@ export function registerJourneys(ctx) {
       id: nextId('att'),
       mediaId: mediaId || null,
       drillName: drillName ?? camp.drills[0].name,
-      note: textOrNull(note, OL.note),
+      note: note || null,
       fileChecks: checks,
       // Passing file checks makes an attempt "submitted", never "verified": human review is a separate state.
       status: checks.passed ? 'submitted' : 'failed_checks',
@@ -818,11 +852,10 @@ export function registerJourneys(ctx) {
     if (!attempt) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
     if (attempt.status !== 'submitted')
       return res.status(409).json({ error: 'NOT_REVIEWABLE', status: attempt.status });
-    const { decision, reasons, rubricNotes } = req.body ?? {};
-    if (!['accepted', 'returned'].includes(decision)) return res.status(400).json({ error: 'DECISION_INVALID' });
-    if (!optionalText(reasons)) return fieldInvalid(res, 'reasons', 'reasons is text.');
-    if (!optionalText(rubricNotes)) return fieldInvalid(res, 'rubricNotes', 'rubricNotes is text.');
-    if (decision === 'returned' && (!reasons || !reasons.trim())) {
+    const body = inputOrRefuse(res, AttemptReview, req.body ?? {}, DECISION_CODES);
+    if (!body) return;
+    const { decision, reasons, rubricNotes } = body;
+    if (decision === 'returned' && !filled(reasons)) {
       return res.status(400).json({
         error: 'REASONS_REQUIRED',
         message: 'A returned attempt tells the player exactly what to fix and how to resubmit.',
@@ -845,8 +878,8 @@ export function registerJourneys(ctx) {
             byName: storedName(req.orgUser.name),
             at: Date.now(),
             kind: 'human_review',
-            reasons: textOrNull(reasons, OL.reasons),
-            rubricNotes: textOrNull(rubricNotes, OL.rubricNotes),
+            reasons: reasons || null,
+            rubricNotes: rubricNotes || null,
           };
         })
         .attempts.find((x) => x.id === attempt.id);
@@ -958,18 +991,22 @@ export function registerJourneys(ctx) {
   orgRouter.post('/trials/:id/staff', (req, res) => {
     const t = trialFor(req, res);
     if (!t) return;
-    const { name, role, check } = req.body ?? {};
+    const body = inputOrRefuse(res, TrialStaff, req.body ?? {});
+    if (!body) return;
+    const { check } = body;
+    const name = filled(body.name);
+    const role = filled(body.role);
     if (!name || !role) return res.status(400).json({ error: 'NAME_AND_ROLE_REQUIRED' });
     const expiresAt = check ? checkExpiryOrRefuse(res, check.expiresAt) : null;
     if (expiresAt === undefined) return;
     const s = {
       id: nextId('stf'),
-      name: String(name).slice(0, 80),
-      role: String(role).slice(0, 60),
+      name,
+      role,
       check: check
         ? {
-            kind: String(check.kind ?? 'DBS (England & Wales)').slice(0, 60),
-            ref: check.ref ? String(check.ref).slice(0, 60) : null,
+            kind: filled(check.kind) ?? 'DBS (England & Wales)',
+            ref: filled(check.ref),
             // Filing a reference does not make it reviewed: Trust & Safety moves it to 'reviewed'.
             status: 'pending',
             expiresAt,
@@ -989,16 +1026,18 @@ export function registerJourneys(ctx) {
   orgRouter.post('/trials/:id/arrival', (req, res) => {
     const t = trialFor(req, res);
     if (!t) return;
-    const { time, address, notes, collection } = req.body ?? {};
+    const body = inputOrRefuse(res, Arrival, req.body ?? {});
+    if (!body) return;
+    const { time, address, notes, collection } = body;
     if (notes && !moderateOrRefuse(res, notes, { kind: 'trial_arrival', playerId: t.playerId, orgId: req.org.id }))
       return;
     const fresh = trials.setArrival(t.id, {
       arrival: {
-        time: time ? String(time).slice(0, 40) : null,
-        address: address ? String(address).slice(0, 200) : null,
-        notes: notes ? String(notes).slice(0, 300) : null,
+        time: time || null,
+        address: address || null,
+        notes: notes || null,
       },
-      collection: collection ? { policy: String(collection).slice(0, 300) } : null,
+      collection: collection ? { policy: collection } : null,
     });
     notifyTrialParties(
       fresh,
@@ -1016,8 +1055,16 @@ export function registerJourneys(ctx) {
   function cancelOrPostpone(req, res, kind) {
     const t = trialFor(req, res);
     if (!t) return;
-    const { reason, newDate } = req.body ?? {};
-    if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED' });
+    const body = inputOrRefuse(
+      res,
+      kind === 'postponed' ? TrialPostpone : TrialCancel,
+      req.body ?? {},
+      kind === 'postponed' ? POSTPONE_CODES : {},
+    );
+    if (!body) return;
+    const { newDate } = body;
+    const reason = filled(body.reason);
+    if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED', field: 'reason', problem: 'required' });
     // The report deadline is re-derived from the new day by the shared derivation, never computed here.
     const moved = kind === 'postponed' ? parseTrialDate(newDate) : { ok: true, value: null };
     if (!moved.ok) return res.status(400).json({ ...moved, field: 'newDate' });
@@ -1025,7 +1072,7 @@ export function registerJourneys(ctx) {
       kind,
       at: Date.now(),
       by: req.orgUser.name,
-      reason: String(reason).slice(0, 200),
+      reason,
       newDate: moved.value,
     };
     const fresh = trials.recordDayStatus(
@@ -1179,11 +1226,14 @@ export function registerJourneys(ctx) {
   });
 
   function setEmergency(req, res, t, by) {
-    const { name, phone } = req.body ?? {};
+    const body = inputOrRefuse(res, EmergencyContact, req.body ?? {});
+    if (!body) return;
+    const name = filled(body.name);
+    const phone = filled(body.phone);
     if (!name || !phone) return res.status(400).json({ error: 'NAME_AND_PHONE_REQUIRED' });
     // Readable only in the org's trial-day view for this event; never in profiles, search or exports.
     trials.setEmergencyContact(t.id, {
-      emergency: { name: String(name).slice(0, 80), phone: String(phone).slice(0, 30), setBy: by, at: Date.now() },
+      emergency: { name, phone, setBy: by, at: Date.now() },
     });
     res.json({ ok: true, note: 'Held for this event’s safety staff only.' });
   }
@@ -1238,13 +1288,15 @@ export function registerJourneys(ctx) {
   // Jurisdiction-appropriate wording; nothing is auto-approved.
   adminRouter.get('/staff-checks', (req, res) => {
     // Oldest trial first. The admin app reads only the first page; "load more" awaits a product decision.
+    const query = inputOrRefuse(res, StaffChecksQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'number']);
+      page = readPage(query, ['number', 'number']);
     } catch (e) {
       return sendPageError(res, e);
     }
-    const { items, nextCursor } = trials.staffChecksPage({ pendingOnly: req.query.all !== '1', ...page });
+    const { items, nextCursor } = trials.staffChecksPage({ pendingOnly: query.all !== '1', ...page });
     res.json({ items: items.map((r) => ({ ...r, check: { ...r.check, state: checkState(r.check) } })), nextCursor });
   });
 
@@ -1252,9 +1304,9 @@ export function registerJourneys(ctx) {
     const t = trials.byId(req.params.trialId);
     const s = t?.day?.staff.find((x) => x.id === req.params.staffId);
     if (!s?.check) return res.status(404).json({ error: 'CHECK_NOT_FOUND' });
-    const { status, expiresAt } = req.body ?? {};
-    if (!['reviewed', 'rejected'].includes(status))
-      return res.status(400).json({ error: 'STATUS_INVALID', allowed: ['reviewed', 'rejected'] });
+    const body = inputOrRefuse(res, StaffCheckReview, req.body ?? {}, STAFF_CHECK_CODES);
+    if (!body) return;
+    const { status, expiresAt } = body;
     const exp = checkExpiryOrRefuse(res, expiresAt);
     if (exp === undefined) return;
     const fresh = trials.reviewStaffCheck(t.id, {
