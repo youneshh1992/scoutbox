@@ -68,6 +68,11 @@ end of the feature freeze.
 - **The sign-in screens list every organisation.** `GET /orgs` returns the whole list for the club picker; it isn't
   paged because the apps have no search, so clubs past the first page couldn't find themselves. It needs a name
   search before there are many clubs. *Feature* (Founder, 7 Nov).
+- **Screens show the server's error message.** About a hundred places in the apps (`notify(e.message)`, and the Rooms
+  screens' fallback) put the API's `message` on screen. It is developer English, untranslated, and for routes moved
+  to the input schemas it is the generic wording (`reasons is required.`) rather than the hand-written sentence some
+  routes had. The fix is client-side wording from each refusal's `problem`
+  ([`app-layer-architecture-improvements.md`](app-layer-architecture-improvements.md), step 6).
 - **The apps read only the first page of paged lists** (50 items): the player directory, the Film Room, matching,
   watchlists, Nobody Missed and the admin and club lists. Each has a comment where "load more" is needed. The
   player pickers (assessment, case, objective) walk every directory page; a large club needs a search box there.

@@ -5,8 +5,10 @@
  * `inputOrRefuse` (which answers the 400 itself) or `parseInput` (which returns the refusal for a domain's own error
  * sender). Schemas check shape and type only and never convert a value: input is valid as sent, or refused.
  *
- * Refusal messages are written here from the issue's kind, never taken from valibot, whose default messages quote the
- * value that was sent.
+ * A refusal says what was wrong in fields a client can read: `error`, `field`, `problem` (one of PROBLEMS) and the
+ * values the problem needs (`max`, `min`, `allowed`, `expected`). Clients turn those into the words a screen shows.
+ * `message` is English for developers and logs, not for display. It is written here from the issue's kind, never
+ * taken from valibot, whose default messages quote the value that was sent.
  */
 import * as v from 'valibot';
 import { isAbsent, parseDateOrInstant, parseInstant, parseStrictDateOnly } from '../../temporal.mjs';
@@ -15,26 +17,47 @@ export const TEXT_MAX = 500;
 export const ID_MAX = 80;
 const FIELD_MAX = 200;
 
-// A guard's requirement → the error code and `expected` its refusal carries instead of FIELD_INVALID.
+/** What a refusal's `problem` can say. */
+export const PROBLEMS = Object.freeze([
+  'required',
+  'unknown_field',
+  'not_object',
+  'not_list',
+  'not_text',
+  'not_boolean',
+  'not_number',
+  'not_whole_number',
+  'blank',
+  'too_short',
+  'too_long',
+  'too_small',
+  'too_large',
+  'not_allowed',
+  'not_a_date',
+  'not_a_timestamp',
+  'invalid',
+]);
+
+// A check's requirement → the problem it reports, and the code and `expected` that replace FIELD_INVALID.
 const CODED = new Map();
-const coded = (requirement, error, expected) => {
-  CODED.set(requirement, { error, expected });
+const coded = (requirement, { problem, error, expected }) => {
+  CODED.set(requirement, { problem, error, expected });
   return requirement;
 };
 
-const isDateOnly = coded((x) => parseStrictDateOnly(x).ok, 'DATE_INVALID', 'YYYY-MM-DD');
-const isDayOrBlank = coded((x) => x === '' || parseStrictDateOnly(x).ok, 'DATE_INVALID', 'YYYY-MM-DD');
-const isDue = coded(
-  (x) => isAbsent(x) || parseDateOrInstant(x).ok,
-  'DATE_INVALID',
-  'YYYY-MM-DD, ISO 8601 with offset or Z, or integer milliseconds',
-);
-const isInstant = coded(
-  (x) => parseInstant(x).ok,
-  'TIMESTAMP_INVALID',
-  'ISO 8601 with offset or Z, or integer milliseconds',
-);
-const hasText = (s) => s.trim().length > 0;
+const DAY = { problem: 'not_a_date', error: 'DATE_INVALID', expected: 'YYYY-MM-DD' };
+const isDateOnly = coded((x) => parseStrictDateOnly(x).ok, DAY);
+const isDayOrBlank = coded((x) => x === '' || parseStrictDateOnly(x).ok, DAY);
+const isDue = coded((x) => isAbsent(x) || parseDateOrInstant(x).ok, {
+  ...DAY,
+  expected: 'YYYY-MM-DD, ISO 8601 with offset or Z, or integer milliseconds',
+});
+const isInstant = coded((x) => parseInstant(x).ok, {
+  problem: 'not_a_timestamp',
+  error: 'TIMESTAMP_INVALID',
+  expected: 'ISO 8601 with offset or Z, or integer milliseconds',
+});
+const hasText = coded((s) => s.trim().length > 0, { problem: 'blank' });
 
 /** Text of at most `max` characters; may be empty. */
 export const text = (max = TEXT_MAX) => v.pipe(v.string(), v.maxLength(max));
@@ -126,44 +149,51 @@ function fieldCodeFor(issue, fieldCodes) {
 const isKeyIssue = (issue) =>
   issue.type === 'strict_object' || issue.type === 'object' || issue.type === 'loose_object';
 
-/** What was wrong, without the value that was sent. Used for every issue whose schema sets no message of its own. */
-function phraseFor(issue) {
-  const many = (n) => (typeof issue.input === 'string' ? `${n} characters` : `${n} items`);
-  if (isKeyIssue(issue) && issue.expected === 'never') return 'is not a field this request takes';
-  if (issue.input === undefined && issue.kind === 'schema') return 'is required';
+/** The problem, the values it needs, and an English phrase for it, none of which quote the value that was sent. */
+function describe(issue) {
+  const known = CODED.get(issue.requirement);
+  const n = issue.requirement;
+  const many = `${n} ${typeof issue.input === 'string' ? 'characters' : 'items'}`;
+  if (isKeyIssue(issue) && issue.expected === 'never')
+    return { problem: 'unknown_field', phrase: 'is not a field this request takes' };
+  if (issue.input === undefined && issue.kind === 'schema') return { problem: 'required', phrase: 'is required' };
+  if (known?.problem === 'blank') return { problem: 'blank', phrase: 'must not be blank' };
+  if (known) return { problem: known.problem, phrase: 'is not valid' };
   switch (issue.type) {
     case 'string':
-      return 'must be text';
+      return { problem: 'not_text', phrase: 'must be text' };
     case 'boolean':
-      return 'must be true or false';
+      return { problem: 'not_boolean', phrase: 'must be true or false' };
     case 'number':
-      return 'must be a number';
+      return { problem: 'not_number', phrase: 'must be a number' };
     case 'array':
-      return 'must be a list';
+      return { problem: 'not_list', phrase: 'must be a list' };
     case 'object':
     case 'strict_object':
     case 'loose_object':
-      return 'must be an object';
+    case 'record':
+      return { problem: 'not_object', phrase: 'must be an object' };
     case 'picklist':
-      return 'is not one of the allowed values';
+      return { problem: 'not_allowed', phrase: 'is not one of the allowed values' };
     case 'max_length':
-      return `must be at most ${many(issue.requirement)} long`;
+      return { problem: 'too_long', max: n, phrase: `must be at most ${many} long` };
     case 'min_length':
-      return issue.requirement === 1 ? 'must not be empty' : `must be at least ${many(issue.requirement)} long`;
+      return { problem: 'too_short', min: n, phrase: n === 1 ? 'must not be empty' : `must be at least ${many} long` };
     case 'integer':
     case 'safe_integer':
-      return 'must be a whole number';
+      return { problem: 'not_whole_number', phrase: 'must be a whole number' };
     case 'min_value':
-      return `must be at least ${issue.requirement}`;
+      return { problem: 'too_small', min: n, phrase: `must be at least ${n}` };
     case 'max_value':
-      return `must be at most ${issue.requirement}`;
+      return { problem: 'too_large', max: n, phrase: `must be at most ${n}` };
     default:
-      return 'is not valid';
+      return { problem: 'invalid', phrase: 'is not valid' };
   }
 }
+const phraseFor = (issue) => describe(issue).phrase;
 
 /**
- * `{ ok: true, value }`, or `{ ok: false, error, field, message, expected? }` for the first problem found. `root`
+ * `{ ok: true, value }`, or `{ ok: false, error, field, problem, message, …values }` for the first problem found. `root`
  * names the input as a whole when it is the input itself that is wrong. `codes` renames this module's codes for a
  * domain whose contract has its own, e.g. `{ FIELD_INVALID: 'TRANSACTION_INPUT_INVALID' }`. `fieldCodes` gives one
  * field a code of its own (`{ 'ratings.confidence': 'CONFIDENCE_INVALID' }`), or a field and everything inside it
@@ -173,7 +203,7 @@ export function parseInput(schema, input, { root = 'body', codes = {}, fieldCode
   // Valibot's object schemas take an array as an object, so `[]` would pass as a body with no fields.
   if (Array.isArray(input) && isKeyIssue(schema)) {
     const error = codes.FIELD_INVALID ?? 'FIELD_INVALID';
-    return { ok: false, error, field: root, message: `${root} must be an object.` };
+    return { ok: false, error, field: root, problem: 'not_object', message: `${root} must be an object.` };
   }
   const result = v.safeParse(schema, input, { abortEarly: true, message: phraseFor });
   if (result.success) return { ok: true, value: result.output };
@@ -181,13 +211,17 @@ export function parseInput(schema, input, { root = 'body', codes = {}, fieldCode
   const field = fieldOf(issue, root);
   const known = CODED.get(issue.requirement);
   const allowed = ALLOWED.get(issue.message);
+  const { problem, min, max } = describe(issue);
   const error =
     fieldCodeFor(issue, fieldCodes) ?? codes[known?.error ?? 'FIELD_INVALID'] ?? known?.error ?? 'FIELD_INVALID';
   return {
     ok: false,
     error,
     field,
+    problem,
     message: `${field} ${issue.message}.`,
+    ...(min !== undefined ? { min } : {}),
+    ...(max !== undefined ? { max } : {}),
     ...(known?.expected ? { expected: known.expected } : {}),
     ...(allowed ? { allowed } : {}),
   };

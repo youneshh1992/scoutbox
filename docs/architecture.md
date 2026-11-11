@@ -15,8 +15,11 @@ a write is durable when its transaction commits. How to run and configure the se
    `400 FIELD_INVALID` / `DATE_INVALID` naming the field. It doesn't clamp, cut off or coerce. Over-long free text
    may still be shortened. A route declares its input as a valibot `v.strictObject` built from the shared field
    schemas in `domains/platform/schemas.mjs`, and reads it with `inputOrRefuse` (or `parseInput` where the domain
-   sends its own errors), which refuses undeclared fields and writes every refusal message. Routes not yet moved
-   over still check their input by hand.
+   sends its own errors), which refuses undeclared fields. A refusal names the field by its path
+   (`ratings[0].note`) and says what was wrong as a `problem` (`required`, `too_long`, `not_allowed`, … — `PROBLEMS`
+   in that module) with the values it needs (`max`, `min`, `allowed`, `expected`). Its `message` is English for
+   developers, not for display: the apps word refusals themselves. Routes not yet moved over still check their input
+   by hand.
 3. **Explicit writes.** Routes call repository operations (`signings.record(…)`, `followUps.schedule(…)`). They never
    edit a record in place and expect something else to notice.
 4. **One source of truth per domain.** No dual writes, and no in-memory copies of a table.

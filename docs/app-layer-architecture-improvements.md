@@ -62,7 +62,8 @@ its own, and only the functions a route uses are loaded) and because its schemas
   the way out.
 - No coercing or transforming actions (`v.transform`, `v.toNumber` and similar): input is valid as sent or refused.
 - Valibot's issues, with their field paths, are mapped to the existing error codes in one place in
-  `domains/platform/`.
+  `domains/platform/`. A refusal carries a machine-readable `problem` and the values it needs (`max`, `allowed`, …);
+  its English `message` is for developers. Wording for people belongs to the clients (step 6).
 - Shape and type checks live in the schema; checks that span fields or need stored data (an expiry after now, a
   document belonging to this case) stay in the route or the repository.
 - Shared schemas (dates, ids, money, free text with its length limit) are defined once and imported, like the other
@@ -100,6 +101,14 @@ Typing the code before those refactors would mean writing the types twice. Start
 `domains/platform/`, then convert domain by domain, with `strict` on and `tsc --noEmit` in CI. Decide at the start
 between a build step and running `.ts` directly with Node's type stripping, which affects the minimum Node version in
 `runtime.mjs`.
+
+### 6. Error wording in the clients
+
+Independent of steps 1–5, and frontend work. About a hundred places in the apps show the server's `message` directly
+(`notify(e.message)`), so people read developer English, untranslated. Add one shared client helper that turns a
+refusal's `error`, `field`, `problem` and values into a sentence from the app's translations, with screens giving
+their own field labels and wording for the codes that need it (as the offer panel already does with `of.err.<code>`).
+Write it so it can move to a shared package, and move the screens over to it one app at a time.
 
 ## Until then
 

@@ -1425,14 +1425,24 @@ section('group workspaces as tables');
   ok(r.status === 400 && r.body.field === 'expiresDays', 'expiresDays out of range is refused (it was clamped)');
   r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays: '30' });
   ok(r.status === 400 && r.body.field === 'expiresDays', 'expiresDays that is not a number is refused');
-  for (const expiresDays of [181, 2.5]) {
+  for (const [expiresDays, problem] of [
+    [181, 'too_large'],
+    [2.5, 'not_whole_number'],
+  ]) {
     r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays });
-    ok(r.status === 400 && r.body.field === 'expiresDays', `expiresDays ${expiresDays} is refused`);
+    ok(
+      r.status === 400 && r.body.field === 'expiresDays' && r.body.problem === problem,
+      `expiresDays ${expiresDays} is refused as ${problem}${problem === 'too_large' ? ' with its max' : ''}`,
+    );
+    if (problem === 'too_large') ok(r.body.max === 180, 'the refusal carries the limit a client needs to explain it');
   }
   r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays: 30, expiresDay: 7 });
   ok(
-    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'expiresDay',
-    'a field the grant does not take is refused by name, not silently dropped',
+    r.status === 400 &&
+      r.body.error === 'FIELD_INVALID' &&
+      r.body.field === 'expiresDay' &&
+      r.body.problem === 'unknown_field',
+    'a field the grant does not take is refused by name and problem, not silently dropped',
   );
   r = await j(
     'POST',

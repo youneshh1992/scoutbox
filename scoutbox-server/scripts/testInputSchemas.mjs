@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import * as v from 'valibot';
 import {
   ID_MAX,
+  PROBLEMS,
   dateOnly,
   dayOrBlank,
   dueDate,
@@ -70,6 +71,7 @@ test('a field the schema does not declare is refused by name, including inherite
     assert.equal(r.error, 'FIELD_INVALID');
     assert.equal(r.field, key);
     assert.equal(r.message, `${key} is not a field this request takes.`);
+    assert.equal(r.problem, 'unknown_field');
   }
 });
 
@@ -78,34 +80,52 @@ test('a missing required field, or a body that is not an object, is refused nami
     ok: false,
     error: 'FIELD_INVALID',
     field: 'title',
+    problem: 'required',
     message: 'title is required.',
   });
   for (const body of [undefined, null, 'title', [], 7]) assert.equal(refusal(body).field, 'body');
   assert.equal(refusal(undefined, Body, { root: 'query' }).field, 'query');
 });
 
-test('nothing is coerced: numeric strings, fractions, "true", numbers for text and out-of-range values are refused', () => {
+test('nothing is coerced, and each refusal says what was wrong as a problem with its values: numeric strings, fractions, "true", numbers for text and out-of-range values are refused', () => {
   const cases = [
-    [{ title: 'x', count: '3' }, 'count', 'count must be a number.'],
-    [{ title: 'x', count: 2.5 }, 'count', 'count must be a whole number.'],
-    [{ title: 'x', count: 11 }, 'count', 'count must be at most 10.'],
-    [{ title: 'x', count: 0 }, 'count', 'count must be at least 1.'],
-    [{ title: 'x', urgent: 'true' }, 'urgent', 'urgent must be true or false.'],
-    [{ title: 42 }, 'title', 'title must be text.'],
-    [{ title: '   ' }, 'title', 'title must not be blank.'],
-    [{ title: 'x'.repeat(41) }, 'title', 'title must be at most 40 characters long.'],
-    [{ title: 'x', note: null }, 'note', 'note must be text.'],
-    [{ title: 'x', kind: 'match' }, 'kind', 'kind must be one of trial, visit.'],
-    [{ title: 'x', ownerId: '' }, 'ownerId', 'ownerId must not be empty.'],
-    [{ title: 'x', ownerId: 'i'.repeat(ID_MAX + 1) }, 'ownerId', `ownerId must be at most ${ID_MAX} characters long.`],
-    [{ title: 'x', playerIds: ['a', 'b', 'c', 'd'] }, 'playerIds', 'playerIds must be at most 3 items long.'],
-    [{ title: 'x', playerIds: 'pl-1' }, 'playerIds', 'playerIds must be a list.'],
+    [{ title: 'x', count: '3' }, 'count', 'count must be a number.', { problem: 'not_number' }],
+    [{ title: 'x', count: 2.5 }, 'count', 'count must be a whole number.', { problem: 'not_whole_number' }],
+    [{ title: 'x', count: 11 }, 'count', 'count must be at most 10.', { problem: 'too_large', max: 10 }],
+    [{ title: 'x', count: 0 }, 'count', 'count must be at least 1.', { problem: 'too_small', min: 1 }],
+    [{ title: 'x', urgent: 'true' }, 'urgent', 'urgent must be true or false.', { problem: 'not_boolean' }],
+    [{ title: 42 }, 'title', 'title must be text.', { problem: 'not_text' }],
+    [{ title: '   ' }, 'title', 'title must not be blank.', { problem: 'blank' }],
+    [{ title: 'x'.repeat(41) }, 'title', 'title must be at most 40 characters long.', { problem: 'too_long', max: 40 }],
+    [{ title: 'x', note: null }, 'note', 'note must be text.', { problem: 'not_text' }],
+    [
+      { title: 'x', kind: 'match' },
+      'kind',
+      'kind must be one of trial, visit.',
+      { problem: 'not_allowed', allowed: ['trial', 'visit'] },
+    ],
+    [{ title: 'x', ownerId: '' }, 'ownerId', 'ownerId must not be empty.', { problem: 'too_short', min: 1 }],
+    [
+      { title: 'x', ownerId: 'i'.repeat(ID_MAX + 1) },
+      'ownerId',
+      `ownerId must be at most ${ID_MAX} characters long.`,
+      { problem: 'too_long', max: ID_MAX },
+    ],
+    [
+      { title: 'x', playerIds: ['a', 'b', 'c', 'd'] },
+      'playerIds',
+      'playerIds must be at most 3 items long.',
+      { problem: 'too_long', max: 3 },
+    ],
+    [{ title: 'x', playerIds: 'pl-1' }, 'playerIds', 'playerIds must be a list.', { problem: 'not_list' }],
   ];
-  for (const [input, field, message] of cases) {
+  for (const [input, field, message, values] of cases) {
     const r = refusal(input);
     assert.equal(r.error, 'FIELD_INVALID', JSON.stringify(input));
     assert.equal(r.field, field);
     assert.equal(r.message, message);
+    for (const [k, want] of Object.entries(values)) assert.deepEqual(r[k], want, `${JSON.stringify(input)}: ${k}`);
+    assert.ok(PROBLEMS.includes(r.problem));
   }
 });
 
@@ -128,11 +148,13 @@ test('a bad calendar day is DATE_INVALID with the expected shape, whatever its t
     assert.equal(r.error, 'DATE_INVALID', JSON.stringify(day));
     assert.equal(r.field, 'startsOn');
     assert.equal(r.expected, 'YYYY-MM-DD');
+    assert.equal(r.problem, 'not_a_date');
     assert.match(r.message, /^startsOn must be a calendar day written YYYY-MM-DD \(.+\)\.$/);
   }
   for (const at of ['2026-11-20T10:00', '1700000000000', 1.5, '2026-11-20']) {
     const r = refusal({ title: 'x', at });
     assert.equal(r.error, 'TIMESTAMP_INVALID', JSON.stringify(at));
+    assert.equal(r.problem, 'not_a_timestamp');
     assert.equal(r.expected, 'ISO 8601 with offset or Z, or integer milliseconds');
   }
   assert.equal(parseInput(Body, { title: 'x', at: 1700000000000 }).ok, true);
@@ -236,7 +258,7 @@ test('inputOrRefuse returns the value, or answers 400 with the refusal body and 
   assert.equal(res.sent, null);
   assert.equal(inputOrRefuse(res, Body, { title: 'x', startsOn: 'tomorrow' }), undefined);
   assert.equal(res.code, 400);
-  assert.deepEqual(Object.keys(res.sent).sort(), ['error', 'expected', 'field', 'message']);
+  assert.deepEqual(Object.keys(res.sent).sort(), ['error', 'expected', 'field', 'message', 'problem']);
   assert.equal(res.sent.error, 'DATE_INVALID');
 });
 
