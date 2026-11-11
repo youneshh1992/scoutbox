@@ -77,6 +77,7 @@ export const SUITES = [
   'testSigningsFollowUps',
   'testSchema',
   'testPaging',
+  'testInputSchemas',
   'testPlatformHelpers',
   'testWiring',
   'testSuiteRunner',

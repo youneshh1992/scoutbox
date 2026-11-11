@@ -13,7 +13,10 @@ a write is durable when its transaction commits. How to run and configure the se
 2. **Valid input only.** Each field is a typed column with its domain's CHECKs. There are no JSON side columns for
    junk (`extra_json`, `absent_keys_json`). The route refuses bad input with the domain's code, or with
    `400 FIELD_INVALID` / `DATE_INVALID` naming the field. It doesn't clamp, cut off or coerce. Over-long free text
-   may still be shortened.
+   may still be shortened. A route declares its input as a valibot `v.strictObject` built from the shared field
+   schemas in `domains/platform/schemas.mjs`, and reads it with `inputOrRefuse` (or `parseInput` where the domain
+   sends its own errors), which refuses undeclared fields and writes every refusal message. Routes not yet moved
+   over still check their input by hand.
 3. **Explicit writes.** Routes call repository operations (`signings.record(…)`, `followUps.schedule(…)`). They never
    edit a record in place and expect something else to notice.
 4. **One source of truth per domain.** No dual writes, and no in-memory copies of a table.
