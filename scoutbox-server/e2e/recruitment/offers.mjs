@@ -55,8 +55,14 @@ import {
   offerClubView,
   offerRecipientView,
   offerAgentView,
+  OFFER_INPUT_CODES,
 } from '../../domains/recruitment/offers/offer.mjs';
-import { OFFER_ERROR_HTTP, PUBLIC_ERROR_FIELDS, publicErrorBody } from '../../domains/recruitment/offers/errors.mjs';
+import {
+  OFFER_ERROR_HTTP,
+  PUBLIC_ERROR_FIELDS,
+  publicErrorBody,
+  sendOfferError,
+} from '../../domains/recruitment/offers/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { CATEGORIES, TYPE_CATEGORY } from '../../domains/platform/notificationPrefs.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
@@ -281,7 +287,29 @@ section('A — model and store: seven statuses, terminal at revision level, one 
       !PUBLIC_ERROR_FIELDS.includes('rationale'),
     'A21 the allowlist carries reasons and blockers as codes, never a note or rationale',
   );
-  // The drift guard: every code the m28 source can produce is in the table.
+  // The drift guard: every code the input rules can give a refusal is in the table, and a code that is not fails closed.
+  const inputCodes = [...Object.values(OFFER_INPUT_CODES.codes), ...Object.values(OFFER_INPUT_CODES.fieldCodes)];
+  const unmapped = inputCodes.filter((c) => OFFER_ERROR_HTTP[c] === undefined);
+  neg(
+    unmapped.length === 0,
+    `A22 every code the Offer input rules give a refusal is in the table${unmapped.length ? `: ${unmapped.join(',')}` : ''}`,
+  );
+  const sent = {};
+  const fakeRes = {
+    status(code) {
+      sent.status = code;
+      return this;
+    },
+    json(body) {
+      sent.body = body;
+      return this;
+    },
+  };
+  sendOfferError(fakeRes, { error: 'OFFER_NOT_A_CODE', message: 'secret detail' }, 'battery');
+  neg(
+    sent.status === 500 && sent.body.error === 'OFFER_STATE_UNKNOWN' && !has(sent.body, 'secret'),
+    'A22b a code missing from the table fails closed: a generic 500, never the detail',
+  );
   const rawSrc = readdirSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers'))
     .filter((f) => f.endsWith('.mjs'))
     .map((f) => readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', f), 'utf8'))
@@ -290,12 +318,6 @@ section('A — model and store: seven statuses, terminal at revision level, one 
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/^\s*\/\/.*$/gm, '')
     .replace(/[^'"\n]\/\/ .*$/gm, ''); // code only: comments explain what is NOT done
-  const produced = new Set([...src.matchAll(/(?:error:\s*|err\(\s*res,\s*)'(OFFER_[A-Z_]+)'/g)].map((m) => m[1]));
-  const unmapped = [...produced].filter((c) => OFFER_ERROR_HTTP[c] === undefined);
-  neg(
-    produced.size >= 20 && unmapped.length === 0,
-    `A22 every OFFER_* code the m28 source produces (${produced.size}) is in the table${unmapped.length ? `: ${unmapped.join(',')}` : ''}`,
-  );
   neg(
     !/db\.signings|under_contract|'signed'/.test(src),
     'A23 the m28 source never names db.signings, under_contract or the signed state',
@@ -351,21 +373,21 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
   );
   neg(
     validateTerms({}, { requireComplete: true }).error === 'OFFER_TERMS_INVALID' &&
-      validateTerms({}, { requireComplete: true }).field === 'startDate',
+      validateTerms({}, { requireComplete: true }).field === 'terms.startDate',
     'A32 but an ISSUED revision names its start day',
   );
   for (const bad of ['transfer', 'loan', 'trial', 'signing', ...PROTO_KEYS])
     neg(
       validateTerms({ offerType: bad }).error === 'OFFER_TERMS_INVALID' &&
-        validateTerms({ offerType: bad }).field === 'offerType',
+        validateTerms({ offerType: bad }).field === 'terms.offerType',
       `A33 offerType "${bad}" refused (one context)`,
     );
   for (const bad of [[], 'x', 1, true])
     neg(validateTerms(bad).field === 'terms', `A34 terms of type ${JSON.stringify(bad)} refused`);
   neg(
-    validateTerms({ role: 'x'.repeat(81) }).field === 'role' &&
-      validateTerms({ squad: 1 }).field === 'squad' &&
-      validateTerms({ conditions: 'x'.repeat(1001) }).field === 'conditions',
+    validateTerms({ role: 'x'.repeat(81) }).field === 'terms.role' &&
+      validateTerms({ squad: 1 }).field === 'terms.squad' &&
+      validateTerms({ conditions: 'x'.repeat(1001) }).field === 'terms.conditions',
     'A35 role/squad/conditions bounded and typed',
   );
   ok(
@@ -374,20 +396,19 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
     'A36 text is trimmed, one-lined and stripped of control characters',
   );
   neg(
-    !Object.keys(validateTerms({ salary: 1, wage: 2, fee: 3, role: 'x' }).terms).some((k) =>
-      /salary|wage|fee|compensation/.test(k),
-    ),
-    'A37 no compensation field exists and none is invented',
+    validateTerms({ salary: 1, wage: 2, fee: 3, role: 'x' }).field === 'terms.salary' &&
+      !Object.keys(validateTerms({ role: 'x' }).terms).some((k) => /salary|wage|fee|compensation/.test(k)),
+    'A37 no compensation field exists: one that is sent is refused by name, and none is invented',
   );
   for (const bad of ['2027-02-29', '2027-13-01', '01/07/2027', '2027-7-1', 'next season', 1, '2027-07-01T00:00:00Z'])
     neg(
-      validateTerms({ startDate: bad }).field === 'startDate',
+      validateTerms({ startDate: bad }).field === 'terms.startDate',
       `A38 startDate ${JSON.stringify(bad)} is not a calendar day (strict DATE_ONLY)`,
     );
   ok(validateTerms({ startDate: '2028-02-29' }).terms.startDate === '2028-02-29', 'A38b a real leap day is accepted');
   neg(
-    validateTerms({ startDate: '2027-07-01', endDate: '2027-07-01' }).field === 'endDate' &&
-      validateTerms({ startDate: '2027-07-01', endDate: '2027-06-30' }).field === 'endDate',
+    validateTerms({ startDate: '2027-07-01', endDate: '2027-07-01' }).field === 'terms.endDate' &&
+      validateTerms({ startDate: '2027-07-01', endDate: '2027-06-30' }).field === 'terms.endDate',
     'A39 the end day must be after the start day',
   );
   // messages
@@ -473,11 +494,12 @@ section('A — pure engine: validation, status derivation, gates, integrity, evi
       `A48 ${JSON.stringify(bad).slice(0, 40)} is not a document list`,
     );
   neg(
-    !has(
-      validateDocumentRefs([{ evidenceId: 'e', label: 'l', bytes: 'AAAA', path: '/etc/passwd' }]).documents,
-      'AAAA',
-    ) && !has(validateDocumentRefs([{ evidenceId: 'e', path: '/x' }]).documents, '/x'),
-    'A49 a reference carries an id and a label only — no bytes, no path',
+    validateDocumentRefs([{ evidenceId: 'e', label: 'l', bytes: 'AAAA', path: '/etc/passwd' }]).field ===
+      'documents[0].bytes' &&
+      validateDocumentRefs([{ evidenceId: 'e', path: '/x' }]).field === 'documents[0].path' &&
+      JSON.stringify(Object.keys(validateDocumentRefs([{ evidenceId: 'e', label: 'l' }]).documents[0])) ===
+        JSON.stringify(['evidenceId', 'label']),
+    'A49 a reference carries an id and a label only — bytes or a path are refused by name',
   );
   // status derivation and lazy expiry
   const issued = (over = {}) => ({
@@ -1106,8 +1128,10 @@ const K = {};
   );
   neg(expect(collect('B4', await surface(K.RID, rita.token)), 404, 'ROOM_NOT_FOUND'), 'B4 and cannot read the surface');
   for (const [body, code, field] of [
-    [{ terms: { offerType: 'loan' } }, 'OFFER_TERMS_INVALID', 'offerType'],
-    [{ terms: { startDate: '2027-02-29' } }, 'OFFER_TERMS_INVALID', 'startDate'],
+    [{ terms: { offerType: 'loan' } }, 'OFFER_TERMS_INVALID', 'terms.offerType'],
+    [{ terms: { startDate: '2027-02-29' } }, 'OFFER_TERMS_INVALID', 'terms.startDate'],
+    [{ terms: { salary: 1 } }, 'OFFER_TERMS_INVALID', 'terms.salary'],
+    [{ terms: {}, offerType: 'direct_recruitment' }, 'OFFER_INPUT_INVALID', 'offerType'],
     [{ terms: 'x' }, 'OFFER_TERMS_INVALID', 'terms'],
     [{ internalNote: 'x'.repeat(2001) }, 'OFFER_INPUT_INVALID', 'internalNote'],
     [{ expiresAt: 'next week' }, 'OFFER_EXPIRY_INVALID', 'expiresAt'],
@@ -2776,9 +2800,13 @@ section("Z — temporal regressions: every Offer instant through P5.7, none thro
     mateus.token,
     at(T0 + 2 * DAY),
   );
+  const answered = await pAccept(K.MAT.OID, { revisionId: K.MAT.R, clientKey: key() }, mateus.token, at(T0 + 2 * DAY));
   ok(
-    futureSpoof.status === 200 && futureSpoof.body.offer.responses[0].occurredAt === T0 + 2 * DAY,
-    "Z6 the response time is the server's clock; a body claim of when is ignored",
+    futureSpoof.status === 400 &&
+      futureSpoof.body.field === 'occurredAt' &&
+      answered.status === 200 &&
+      answered.body.offer.responses[0].occurredAt === T0 + 2 * DAY,
+    "Z6 the response time is the server's clock; a body claim of when is refused",
   );
 }
 

@@ -846,7 +846,7 @@ section('F — races: issue vs issue, issue vs edit, issue vs withdraw, two revi
     e[0].status === 409 && e[0].body.error === 'OFFER_REV_CONFLICT' && e[1].status === 200,
     `F6 stale expectedRev vs current: only the current one lands (${codes(e)})`,
   );
-  // client-chosen revision fields are ignored
+  // client-chosen revision fields are refused, and the server derives them
   const forged = await editDraft(OID, {
     terms: TERMS,
     revisionNumber: 99,
@@ -856,12 +856,15 @@ section('F — races: issue vs issue, issue vs edit, issue vs withdraw, two revi
     caseId: 'case-forged',
     expectedRev: (await getOffer(OID)).body.offer.rev,
   });
+  const afterForgedEdit = (await getOffer(OID)).body.offer;
   neg(
-    forged.status === 200 &&
-      forged.body.offer.currentRevision.revisionNumber === w2.revisions.length &&
-      forged.body.offer.playerId === 'pl-carvalho' &&
-      forged.body.offer.caseId === RID,
-    'F7 revisionNumber / currentRevisionId / playerId / caseId in a body are ignored — the server derives them',
+    forged.status === 400 &&
+      forged.body.error === 'OFFER_INPUT_INVALID' &&
+      forged.body.field === 'revisionNumber' &&
+      afterForgedEdit.currentRevision.revisionNumber === w2.revisions.length &&
+      afterForgedEdit.playerId === 'pl-carvalho' &&
+      afterForgedEdit.caseId === RID,
+    'F7 revisionNumber / currentRevisionId / playerId / caseId in a body are refused — the server derives them',
   );
   const two = await Promise.all([
     create(RID, { terms: TERMS, clientKey: key() }),

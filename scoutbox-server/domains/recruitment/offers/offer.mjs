@@ -9,7 +9,9 @@
  * without any job having run, so access never depends on a materialised status.
  */
 
-import { parseInstant, parseStrictDateOnly, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../../../temporal.mjs';
+import * as v from 'valibot';
+import { parseInstant, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../../../temporal.mjs';
+import { ID_MAX, dayOrBlank, oneOf, parseInput, requiredText } from '../../platform/schemas.mjs';
 import {
   normaliseClientKey as platformClientKey,
   payloadFingerprint,
@@ -20,7 +22,6 @@ export const OFFER_POLICY_VERSION = 1;
 
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 const has = (t, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(t, k);
-const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // ------------------------------------------------------------------ vocabulary
 
@@ -103,11 +104,58 @@ export const normaliseOfferClientKey = (raw) => platformClientKey(raw, 'OFFER_CL
 
 export { payloadFingerprint };
 
-// ------------------------------------------------------------------ terms
+// ------------------------------------------------------------------ input
+
+// Offer text is measured after cleanText strips control characters, so the schemas check only that it is text.
+const offerText = v.nullish(v.string());
+
+/**
+ * Deliberately narrow terms. There is no compensation field, and nothing here is a legal clause or a
+ * contract. `startDate` is required at issue; days are calendar days, not instants.
+ */
+export const OfferTerms = v.strictObject({
+  offerType: v.nullish(oneOf(OFFER_TYPES)),
+  role: offerText,
+  squad: offerText,
+  conditions: offerText,
+  startDate: v.nullish(dayOrBlank),
+  endDate: v.nullish(dayOrBlank),
+});
+export const OfferDocuments = v.pipe(
+  v.array(v.strictObject({ evidenceId: requiredText(ID_MAX), label: offerText })),
+  v.maxLength(OFFER_LIMITS.documents),
+);
+/** The fields every Offer write may carry; `clientKey` and `expiresAt` are judged by their own rules below. */
+export const OFFER_CONTENT_FIELDS = {
+  terms: v.nullish(OfferTerms),
+  recipientMessage: offerText,
+  internalNote: offerText,
+  expiresAt: v.optional(v.unknown()),
+  documents: v.optional(OfferDocuments),
+};
+
+/** Shape refusals carry the Offer contract's codes. */
+export const OFFER_INPUT_CODES = Object.freeze({
+  codes: { FIELD_INVALID: 'OFFER_INPUT_INVALID' },
+  fieldCodes: {
+    'terms.*': 'OFFER_TERMS_INVALID',
+    'documents.*': 'OFFER_DOCUMENT_INVALID',
+    expectedRev: 'OFFER_REV_REQUIRED',
+    expectedVersion: 'OFFER_REV_REQUIRED',
+  },
+});
+
+const refusal = (error, field, problem, message, extra = {}) => ({
+  ok: false,
+  error,
+  field,
+  problem,
+  message,
+  ...extra,
+});
 
 function cleanText(raw, max, { oneLine = false } = {}) {
   if (raw === undefined || raw === null || raw === '') return { ok: true, value: null };
-  if (typeof raw !== 'string') return { ok: false };
   // eslint-disable-next-line no-control-regex
   let s = raw.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '');
   // Directional and zero-width controls are stripped: they let a message read differently from what was
@@ -115,139 +163,104 @@ function cleanText(raw, max, { oneLine = false } = {}) {
   s = s.replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, '');
   if (oneLine) s = s.replace(/[\r\n]+/g, ' ');
   s = s.trim();
-  if (s.length > max) return { ok: false, tooLong: true };
+  if (s.length > max) return { ok: false };
   return { ok: true, value: s || null };
 }
+/** The cleaned text of each `[field, raw, max, oneLine]`, or the refusal for the first that is too long. */
+function cleanAll(error, parts) {
+  const out = {};
+  for (const [field, raw, max, oneLine] of parts) {
+    const c = cleanText(raw, max, { oneLine });
+    if (!c.ok) return refusal(error, field, 'too_long', `${field} must be at most ${max} characters.`, { max });
+    out[field.split('.').at(-1)] = c.value;
+  }
+  return { ok: true, values: out };
+}
 
-/**
- * Deliberately narrow terms. There is no compensation field, and nothing here is a legal clause or a
- * contract. `startDate` is required at issue; days are calendar days, not instants.
- */
 export function validateTerms(raw, { requireComplete = false } = {}) {
-  const bad = (field, message, extra = {}) => ({ ok: false, error: 'OFFER_TERMS_INVALID', field, message, ...extra });
-  if (raw !== undefined && raw !== null && !isPlain(raw)) return bad('terms', 'terms must be an object.');
-  const t = raw ?? {};
-  const offerType = t.offerType === undefined || t.offerType === null ? 'direct_recruitment' : t.offerType;
-  if (!OFFER_TYPES.includes(offerType))
-    return bad('offerType', `offerType must be one of ${OFFER_TYPES.join(', ')}.`, { allowed: OFFER_TYPES });
-  const role = cleanText(t.role, OFFER_LIMITS.role, { oneLine: true });
-  if (!role.ok)
-    return bad(
-      'role',
-      role.tooLong ? `Keep the role under ${OFFER_LIMITS.role} characters.` : 'The role must be text.',
-    );
-  const squad = cleanText(t.squad, OFFER_LIMITS.squad, { oneLine: true });
-  if (!squad.ok)
-    return bad(
-      'squad',
-      squad.tooLong ? `Keep the squad under ${OFFER_LIMITS.squad} characters.` : 'The squad must be text.',
-    );
-  const conditions = cleanText(t.conditions, OFFER_LIMITS.conditions);
-  if (!conditions.ok)
-    return bad(
-      'conditions',
-      conditions.tooLong
-        ? `Keep the conditions under ${OFFER_LIMITS.conditions} characters.`
-        : 'Conditions must be text.',
-    );
-  let startDate = null;
-  if (!isAbsent(t.startDate)) {
-    const p = parseStrictDateOnly(t.startDate);
-    if (!p.ok)
-      return bad('startDate', `The start date must be a calendar day written YYYY-MM-DD (${p.why}).`, {
-        expected: 'YYYY-MM-DD',
-      });
-    startDate = p.value;
-  }
-  let endDate = null;
-  if (!isAbsent(t.endDate)) {
-    const p = parseStrictDateOnly(t.endDate);
-    if (!p.ok)
-      return bad('endDate', `The end date must be a calendar day written YYYY-MM-DD (${p.why}).`, {
-        expected: 'YYYY-MM-DD',
-      });
-    endDate = p.value;
-  }
+  // An object schema would take an array as an object with no fields.
+  if (Array.isArray(raw)) return refusal('OFFER_TERMS_INVALID', 'terms', 'not_object', 'terms must be an object.');
+  const parsed = parseInput(v.strictObject({ terms: v.nullish(OfferTerms) }), { terms: raw }, OFFER_INPUT_CODES);
+  if (!parsed.ok) return parsed;
+  const t = parsed.value.terms ?? {};
+  const L = OFFER_LIMITS;
+  const text = cleanAll('OFFER_TERMS_INVALID', [
+    ['terms.role', t.role, L.role, true],
+    ['terms.squad', t.squad, L.squad, true],
+    ['terms.conditions', t.conditions, L.conditions, false],
+  ]);
+  if (!text.ok) return text;
+  const startDate = t.startDate || null;
+  const endDate = t.endDate || null;
   if (startDate && endDate && !(startDate < endDate))
-    return bad('endDate', 'The end date must be after the start date.');
-  if (requireComplete && !startDate) return bad('startDate', 'An issued Offer names the day it would start.');
+    return refusal('OFFER_TERMS_INVALID', 'terms.endDate', 'invalid', 'The end date must be after the start date.');
+  if (requireComplete && !startDate)
+    return refusal(
+      'OFFER_TERMS_INVALID',
+      'terms.startDate',
+      'required',
+      'An issued Offer names the day it would start.',
+    );
   return {
     ok: true,
-    terms: { offerType, role: role.value, squad: squad.value, startDate, endDate, conditions: conditions.value },
+    terms: { offerType: t.offerType ?? 'direct_recruitment', ...text.values, startDate, endDate },
   };
 }
 
 export function validateMessages({ recipientMessage, internalNote } = {}) {
-  const bad = (field, message) => ({ ok: false, error: 'OFFER_INPUT_INVALID', field, message });
-  const m = cleanText(recipientMessage, OFFER_LIMITS.recipientMessage);
-  if (!m.ok)
-    return bad(
-      'recipientMessage',
-      m.tooLong ? `Keep the message under ${OFFER_LIMITS.recipientMessage} characters.` : 'The message must be text.',
-    );
-  const n = cleanText(internalNote, OFFER_LIMITS.internalNote);
-  if (!n.ok)
-    return bad(
-      'internalNote',
-      n.tooLong
-        ? `Keep the internal note under ${OFFER_LIMITS.internalNote} characters.`
-        : 'The internal note must be text.',
-    );
-  return { ok: true, recipientMessage: m.value, internalNote: n.value };
+  const parsed = parseInput(
+    v.strictObject({ recipientMessage: offerText, internalNote: offerText }),
+    { recipientMessage, internalNote },
+    OFFER_INPUT_CODES,
+  );
+  if (!parsed.ok) return parsed;
+  const text = cleanAll('OFFER_INPUT_INVALID', [
+    ['recipientMessage', recipientMessage, OFFER_LIMITS.recipientMessage, false],
+    ['internalNote', internalNote, OFFER_LIMITS.internalNote, false],
+  ]);
+  if (!text.ok) return text;
+  return { ok: true, recipientMessage: text.values.recipientMessage, internalNote: text.values.internalNote };
 }
 
 /** An instant with an explicit offset, or milliseconds; never the client's clock. */
 export function validateExpiry(raw, { now, required = false } = {}) {
-  const bad = (message, extra = {}) => ({
-    ok: false,
-    error: 'OFFER_EXPIRY_INVALID',
-    field: 'expiresAt',
-    message,
-    ...extra,
-  });
-  if (isAbsent(raw)) return required ? bad('An issued Offer needs an expiry.') : { ok: true, ms: null };
+  const bad = (problem, message, extra = {}) => refusal('OFFER_EXPIRY_INVALID', 'expiresAt', problem, message, extra);
+  if (isAbsent(raw)) return required ? bad('required', 'An issued Offer needs an expiry.') : { ok: true, ms: null };
   const p = parseInstant(raw);
   if (!p.ok)
     return bad(
+      'not_a_timestamp',
       `expiresAt must be an ISO 8601 date-time with an explicit offset or Z, or a millisecond timestamp (${p.why}).`,
       { expected: p.expected },
     );
   if (Number.isFinite(now)) {
     if (p.ms < now + OFFER_LIMITS.minExpiryMs)
-      return bad('An Offer must stay open for at least an hour after it is issued.');
-    if (p.ms > now + OFFER_LIMITS.maxExpiryMs) return bad('An Offer cannot stay open for more than 180 days.');
+      return bad('too_small', 'An Offer must stay open for at least an hour after it is issued.', {
+        min: now + OFFER_LIMITS.minExpiryMs,
+      });
+    if (p.ms > now + OFFER_LIMITS.maxExpiryMs)
+      return bad('too_large', 'An Offer cannot stay open for more than 180 days.', {
+        max: now + OFFER_LIMITS.maxExpiryMs,
+      });
   }
   return { ok: true, ms: p.ms };
 }
 
 /** References to the evidence vault by id, with a label; no bytes, no paths. */
 export function validateDocumentRefs(raw) {
-  const bad = (message, extra = {}) => ({
-    ok: false,
-    error: 'OFFER_DOCUMENT_INVALID',
-    field: 'documents',
-    message,
-    ...extra,
-  });
   if (raw === undefined) return { ok: true, documents: undefined };
-  if (!Array.isArray(raw)) return bad('documents must be a list.');
-  if (raw.length > OFFER_LIMITS.documents) return bad(`An Offer carries at most ${OFFER_LIMITS.documents} documents.`);
+  const parsed = parseInput(v.strictObject({ documents: OfferDocuments }), { documents: raw }, OFFER_INPUT_CODES);
+  if (!parsed.ok) return parsed;
   const out = [];
-  const seen = new Set();
-  for (const d of raw) {
-    if (!isPlain(d) || typeof d.evidenceId !== 'string' || !d.evidenceId.trim())
-      return bad('Each document names an evidence record by id.');
-    const id = d.evidenceId.trim();
-    if (seen.has(id)) return bad('A document appears twice.');
-    seen.add(id);
-    const label = cleanText(d.label, OFFER_LIMITS.documentLabel, { oneLine: true });
-    if (!label.ok)
-      return bad(
-        label.tooLong
-          ? `Keep a document label under ${OFFER_LIMITS.documentLabel} characters.`
-          : 'A document label must be text.',
-      );
-    out.push({ evidenceId: id, label: label.value });
+  for (const [i, d] of parsed.value.documents.entries()) {
+    const docId = d.evidenceId.trim();
+    if (out.some((x) => x.evidenceId === docId))
+      return refusal('OFFER_DOCUMENT_INVALID', `documents[${i}].evidenceId`, 'invalid', 'A document appears twice.');
+    const label = cleanAll('OFFER_DOCUMENT_INVALID', [
+      [`documents[${i}].label`, d.label, OFFER_LIMITS.documentLabel, true],
+    ]);
+    if (!label.ok) return label;
+    out.push({ evidenceId: docId, label: label.values.label });
   }
   return { ok: true, documents: out };
 }
@@ -656,18 +669,18 @@ export function offerRecipientView(offer, now, { orgName = null, caseOpen = true
 
 /** The agent's view of an Offer the client shared: never the internal note or documents. */
 export function offerAgentView(offer, now, { orgName = null } = {}) {
-  const v = offerRecipientView(offer, now, { orgName });
+  const view = offerRecipientView(offer, now, { orgName });
   return {
-    id: v.id,
-    clientId: v.playerId,
-    club: v.club,
-    type: v.type,
-    status: v.status,
-    statusLabel: v.statusLabel,
-    currentRevision: v.currentRevision ? { ...v.currentRevision, documents: [] } : null,
-    revisions: v.revisions.map((r) => ({ ...r, documents: [] })),
-    awaitingClientResponse: v.awaitingYourResponse,
-    responses: v.responses,
+    id: view.id,
+    clientId: view.playerId,
+    club: view.club,
+    type: view.type,
+    status: view.status,
+    statusLabel: view.statusLabel,
+    currentRevision: view.currentRevision ? { ...view.currentRevision, documents: [] } : null,
+    revisions: view.revisions.map((r) => ({ ...r, documents: [] })),
+    awaitingClientResponse: view.awaitingYourResponse,
+    responses: view.responses,
     sharedAt: offer.agentShare?.at ?? null,
     honest:
       "Your client shared this Offer with you. Accepting or declining is your client's own act; ScoutBox does not let you answer on their behalf, and nothing here is a negotiation, a fee or a signing.",

@@ -16,6 +16,8 @@ import {
 } from '../lifecycle/lifecycle.mjs';
 import { resolveContactRecipient } from '../lifecycle/contact.mjs';
 import { visibleToOrg } from '../../../domain.mjs';
+import * as v from 'valibot';
+import { flag, id, parseInput, text, wholeNumber } from '../../platform/schemas.mjs';
 import { sendOfferError, notFound, documentNotFound } from './errors.mjs';
 import {
   OFFER_POLICY_VERSION,
@@ -32,6 +34,8 @@ import {
   validateMessages,
   validateExpiry,
   validateDocumentRefs,
+  OFFER_CONTENT_FIELDS,
+  OFFER_INPUT_CODES,
   effectiveRevisionStatus,
   currentRevision,
   liveRevision,
@@ -51,6 +55,22 @@ import {
   offerAgentView,
   offerHistoryView,
 } from './offer.mjs';
+
+// `clientKey` keeps the platform's idempotency-key rule (normaliseOfferClientKey).
+const KEY = { clientKey: v.optional(v.unknown()) };
+const REV = { expectedRev: v.nullish(wholeNumber({ min: 0 })), expectedVersion: v.nullish(wholeNumber({ min: 0 })) };
+const NewOffer = v.strictObject({ ...OFFER_CONTENT_FIELDS, ...KEY, transactionId: v.nullish(v.string()) });
+const DraftEdit = v.strictObject({ ...OFFER_CONTENT_FIELDS, ...REV });
+const IssueRequest = v.strictObject({ ...KEY, ...REV });
+const WithdrawRequest = v.strictObject({ ...KEY, ...REV, reason: v.nullish(text(OFFER_LIMITS.withdrawReason)) });
+const RevisionRequest = v.strictObject({ ...OFFER_CONTENT_FIELDS, ...KEY, ...REV });
+const OfferAnswer = v.strictObject({
+  ...KEY,
+  ...REV,
+  revisionId: id,
+  reason: v.nullish(text(OFFER_LIMITS.declineReason)),
+});
+const AgentShare = v.strictObject({ share: v.nullish(flag), agreementId: v.nullish(id) });
 
 export function registerOffers(rawCtx) {
   // Shared helpers, so an Offer is led, concealed and audited by the same rules as a Room.
@@ -99,6 +119,14 @@ export function registerOffers(rawCtx) {
   };
 
   const err = (res, error, message, extra = {}) => sendOfferError(res, { error, message, ...extra }, 'offer');
+  const fail = (res, refusal) => sendOfferError(res, refusal, 'offer');
+  /** The request body read with its schema, or `undefined` once the refusal is sent. */
+  const offerInput = (res, schema, body) => {
+    const parsed = parseInput(schema, body ?? {}, OFFER_INPUT_CODES);
+    if (parsed.ok) return parsed.value;
+    fail(res, parsed);
+    return undefined;
+  };
   const limited = limitCheck(rateLimit);
   const roleFor = (req, room) => roomRole({ room, user: req.orgUser, isLead: isLead(req.orgUser) });
   const evidenceProvider = () => ctx.recruitmentEvidenceProvider ?? NULL_EVIDENCE_PROVIDER;
@@ -436,25 +464,18 @@ export function registerOffers(rawCtx) {
     if (!got) return;
     const { room: kase, role } = got;
     const at = now(req);
-    const key = normaliseOfferClientKey(req.body?.clientKey);
+    const b = offerInput(res, NewOffer, req.body);
+    if (!b) return;
+    const key = normaliseOfferClientKey(b.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
-    const terms = validateTerms(req.body?.terms);
-    if (!terms.ok)
-      return err(res, terms.error, terms.message, {
-        field: terms.field,
-        ...(terms.allowed ? { allowed: terms.allowed } : {}),
-        ...(terms.expected ? { expected: terms.expected } : {}),
-      });
-    const msgs = validateMessages(req.body ?? {});
-    if (!msgs.ok) return err(res, msgs.error, msgs.message, { field: msgs.field });
-    const expiry = validateExpiry(req.body?.expiresAt, { now: at });
-    if (!expiry.ok)
-      return err(res, expiry.error, expiry.message, {
-        field: 'expiresAt',
-        ...(expiry.expected ? { expected: expiry.expected } : {}),
-      });
-    const docRefs = validateDocumentRefs(req.body?.documents);
-    if (!docRefs.ok) return err(res, docRefs.error, docRefs.message, { field: 'documents' });
+    const terms = validateTerms(b.terms);
+    if (!terms.ok) return fail(res, terms);
+    const msgs = validateMessages(b);
+    if (!msgs.ok) return fail(res, msgs);
+    const expiry = validateExpiry(b.expiresAt, { now: at });
+    if (!expiry.ok) return fail(res, expiry);
+    const docRefs = validateDocumentRefs(b.documents);
+    if (!docRefs.ok) return fail(res, docRefs);
     const fp = payloadFingerprint({
       terms: terms.terms,
       recipientMessage: msgs.recipientMessage,
@@ -506,13 +527,8 @@ export function registerOffers(rawCtx) {
       );
     if (limited('offer_draft_write', req.org.id)) return res.status(429).json(rateLimitedBody('offer_draft_write'));
     let transactionId = null;
-    if (
-      !(req.body?.transactionId === undefined || req.body?.transactionId === null || req.body?.transactionId === '')
-    ) {
-      if (typeof req.body.transactionId !== 'string')
-        return err(res, 'OFFER_INPUT_INVALID', 'transactionId must be text.', { field: 'transactionId' });
-      const r =
-        transactions?.offerReadinessFor?.(req.body.transactionId, { orgId: kase.orgId, caseId: kase.id }) ?? null;
+    if (b.transactionId) {
+      const r = transactions?.offerReadinessFor?.(b.transactionId, { orgId: kase.orgId, caseId: kase.id }) ?? null;
       if (!r)
         return err(
           res,
@@ -633,27 +649,19 @@ export function registerOffers(rawCtx) {
         'OFFER_SUBJECT_REMOVED',
         'This player removed their ScoutBox account. The draft can no longer be changed.',
       );
-    const b = req.body ?? {};
+    const b = offerInput(res, DraftEdit, req.body);
+    if (!b) return;
     const terms = b.terms !== undefined ? validateTerms(b.terms) : null;
-    if (terms && !terms.ok)
-      return err(res, terms.error, terms.message, {
-        field: terms.field,
-        ...(terms.allowed ? { allowed: terms.allowed } : {}),
-        ...(terms.expected ? { expected: terms.expected } : {}),
-      });
+    if (terms && !terms.ok) return fail(res, terms);
     const msgs = validateMessages({
       recipientMessage: b.recipientMessage !== undefined ? b.recipientMessage : rev.recipientMessage,
       internalNote: b.internalNote !== undefined ? b.internalNote : rev.internalNote,
     });
-    if (!msgs.ok) return err(res, msgs.error, msgs.message, { field: msgs.field });
+    if (!msgs.ok) return fail(res, msgs);
     const expiry = b.expiresAt !== undefined ? validateExpiry(b.expiresAt, { now: at }) : null;
-    if (expiry && !expiry.ok)
-      return err(res, expiry.error, expiry.message, {
-        field: 'expiresAt',
-        ...(expiry.expected ? { expected: expiry.expected } : {}),
-      });
+    if (expiry && !expiry.ok) return fail(res, expiry);
     const docRefs = validateDocumentRefs(b.documents);
-    if (!docRefs.ok) return err(res, docRefs.error, docRefs.message, { field: 'documents' });
+    if (!docRefs.ok) return fail(res, docRefs);
     if (!revGate(req, res, offer)) return;
     if (limited('offer_draft_write', req.org.id)) return res.status(429).json(rateLimitedBody('offer_draft_write'));
     let docs = null;
@@ -711,7 +719,9 @@ export function registerOffers(rawCtx) {
     if (!got) return;
     const { offer, room: kase, role } = got;
     const at = now(req);
-    const key = normaliseOfferClientKey(req.body?.clientKey);
+    const body = offerInput(res, IssueRequest, req.body);
+    if (!body) return;
+    const key = normaliseOfferClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const rev = currentRevision(offer);
     const usedIssue = key.key ? keyRow(offer, 'issue', key.key) : null;
@@ -926,7 +936,9 @@ export function registerOffers(rawCtx) {
     if (!got) return;
     const { offer, room: kase } = got;
     const at = now(req);
-    const key = normaliseOfferClientKey(req.body?.clientKey);
+    const body = offerInput(res, WithdrawRequest, req.body);
+    if (!body) return;
+    const key = normaliseOfferClientKey(body.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const rev = currentRevision(offer);
     const usedWithdraw = key.key ? keyRow(offer, 'withdraw', key.key) : null;
@@ -941,16 +953,7 @@ export function registerOffers(rawCtx) {
     }
     const w = canWithdrawRevision(offer, at);
     if (!w.ok) return err(res, w.error, w.message, w.current ? { current: w.current } : {});
-    const reasonRaw = req.body?.reason;
-    if (
-      reasonRaw !== undefined &&
-      reasonRaw !== null &&
-      (typeof reasonRaw !== 'string' || reasonRaw.length > OFFER_LIMITS.withdrawReason)
-    )
-      return err(res, 'OFFER_INPUT_INVALID', `A reason is text under ${OFFER_LIMITS.withdrawReason} characters.`, {
-        field: 'reason',
-      });
-    const reason = typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
+    const reason = body.reason?.trim() || null;
     if (!revGate(req, res, offer)) return;
     // A block does not stop a withdrawal: it closes the Offer and does not approach the recipient.
     if (limited('offer_withdraw', req.org.id)) return res.status(429).json(rateLimitedBody('offer_withdraw'));
@@ -1013,7 +1016,9 @@ export function registerOffers(rawCtx) {
     if (!got) return;
     const { offer, room: kase } = got;
     const at = now(req);
-    const key = normaliseOfferClientKey(req.body?.clientKey);
+    const b = offerInput(res, RevisionRequest, req.body);
+    if (!b) return;
+    const key = normaliseOfferClientKey(b.clientKey);
     if (!key.ok) return err(res, key.error, key.message);
     const usedRevise = key.key ? keyRow(offer, 'revise', key.key) : null;
     if (usedRevise && (offer.revisions ?? []).some((r) => r.id === usedRevise.revisionId))
@@ -1041,18 +1046,17 @@ export function registerOffers(rawCtx) {
       );
     const prev = currentRevision(offer);
     if (!revGate(req, res, offer)) return;
-    const b = req.body ?? {};
     const terms = validateTerms(b.terms !== undefined ? b.terms : prev.terms);
-    if (!terms.ok) return err(res, terms.error, terms.message, { field: terms.field });
+    if (!terms.ok) return fail(res, terms);
     const msgs = validateMessages({
       recipientMessage: b.recipientMessage !== undefined ? b.recipientMessage : prev.recipientMessage,
       internalNote: b.internalNote !== undefined ? b.internalNote : prev.internalNote,
     });
-    if (!msgs.ok) return err(res, msgs.error, msgs.message, { field: msgs.field });
+    if (!msgs.ok) return fail(res, msgs);
     const expiry = validateExpiry(b.expiresAt !== undefined ? b.expiresAt : null, { now: at });
-    if (!expiry.ok) return err(res, expiry.error, expiry.message, { field: 'expiresAt' });
+    if (!expiry.ok) return fail(res, expiry);
     const docRefs = validateDocumentRefs(b.documents);
-    if (!docRefs.ok) return err(res, docRefs.error, docRefs.message, { field: 'documents' });
+    if (!docRefs.ok) return fail(res, docRefs);
     if (limited('offer_draft_write', req.org.id)) return res.status(429).json(rateLimitedBody('offer_draft_write'));
     let docs = { ok: true, documents: (prev.documents ?? []).map((d) => ({ ...d, id: nextId('rofd') })) };
     if (docRefs.documents !== undefined) {
@@ -1268,13 +1272,11 @@ export function registerOffers(rawCtx) {
       const o = recipientOffer(req, res, { by, actorId, playerIds });
       if (!o) return;
       const at = now(req);
-      const key = normaliseOfferClientKey(req.body?.clientKey);
+      const body = offerInput(res, OfferAnswer, req.body);
+      if (!body) return;
+      const key = normaliseOfferClientKey(body.clientKey);
       if (!key.ok) return err(res, key.error, key.message);
-      const revisionId = req.body?.revisionId;
-      if (typeof revisionId !== 'string' || !revisionId)
-        return err(res, 'OFFER_INPUT_INVALID', 'Name the exact revision you are answering (revisionId).', {
-          field: 'revisionId',
-        });
+      const { revisionId } = body;
       const priorResp = key.key ? (o.responses ?? []).find((x) => x && x.clientKey === key.key) : null;
       if (priorResp) {
         if (
@@ -1334,13 +1336,7 @@ export function registerOffers(rawCtx) {
       const rev = gate.revision;
       if (!responderMatches(rev, { kind: by, actorId, playerId: o.playerId }))
         return err(res, 'OFFER_RECIPIENT_INVALID', 'This revision was not addressed to you.');
-      if (expectedRevOf(req.body) !== null) {
-        const rawRev = req.body?.expectedRev ?? req.body?.expectedVersion;
-        if (!Number.isInteger(rawRev) || rawRev < 0)
-          return err(res, 'OFFER_REV_REQUIRED', 'expectedRev must be a non-negative integer.', {
-            field: 'expectedRev',
-            expected: 'integer',
-          });
+      if (expectedRevOf(body) !== null) {
         if (
           !guardRev(req, res, o, {
             errorCode: 'OFFER_REV_CONFLICT',
@@ -1349,17 +1345,7 @@ export function registerOffers(rawCtx) {
         )
           return;
       }
-      const reasonRaw = req.body?.reason;
-      if (
-        reasonRaw !== undefined &&
-        reasonRaw !== null &&
-        (typeof reasonRaw !== 'string' || reasonRaw.length > OFFER_LIMITS.declineReason)
-      )
-        return err(res, 'OFFER_INPUT_INVALID', `A reason is text under ${OFFER_LIMITS.declineReason} characters.`, {
-          field: 'reason',
-        });
-      const reason =
-        responseType === 'declined' && typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
+      const reason = responseType === 'declined' ? body.reason?.trim() || null : null;
       if (reason && !moderateOrRefuse(res, reason, { kind: 'offer_decline', playerId: o.playerId })) return;
       if (limited('offer_response', `${by}:${actorId}`)) return res.status(429).json(rateLimitedBody('offer_response'));
 
@@ -1481,7 +1467,9 @@ export function registerOffers(rawCtx) {
     if (!isAdult(req.player))
       return err(res, 'OFFER_NOT_PERMITTED', "Sharing an Offer with an agent is an adult client's own act.");
     // Un-sharing needs no agent, so a client whose mandate ended can still clear the share.
-    if (req.body?.share === false) {
+    const body = offerInput(res, AgentShare, req.body);
+    if (!body) return;
+    if (body.share === false) {
       const history = o.agentShare
         ? [entry('offer_agent_share_withdrawn', { kind: 'player', id: req.player.id, name: req.player.name }, null, at)]
         : [];
@@ -1489,7 +1477,7 @@ export function registerOffers(rawCtx) {
       return res.json({ offer: recipientView(cleared, at) });
     }
     const sole = integration?.soleActiveAgentFor?.(req.player.id, at) ?? { agreement: null, ambiguous: false };
-    const agreementId = typeof req.body?.agreementId === 'string' ? req.body.agreementId : null;
+    const agreementId = body.agreementId ?? null;
     let agreement = sole.agreement;
     if (agreementId) {
       const named = ctx.agentReads.agreements.byId(agreementId);
