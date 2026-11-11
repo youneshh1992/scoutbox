@@ -156,6 +156,19 @@ test('a domain can rename the codes for its own contract; codes it does not rena
   );
 });
 
+test('a field code covers that field and everything inside it, wins over codes, and does not catch other fields', () => {
+  const fieldCodes = { title: 'TITLE_REQUIRED', documents: 'DOCUMENT_INPUT_INVALID', startsOn: 'TRIAL_DATE_INVALID' };
+  const codes = { FIELD_INVALID: 'TRIAL_INPUT_INVALID' };
+  assert.equal(refusal({}, Body, { fieldCodes }).error, 'TITLE_REQUIRED');
+  assert.equal(
+    refusal({ title: 'x', documents: [{ evidenceId: 1 }] }, Body, { fieldCodes }).error,
+    'DOCUMENT_INPUT_INVALID',
+  );
+  assert.equal(refusal({ title: 'x', startsOn: 'soon' }, Body, { fieldCodes, codes }).error, 'TRIAL_DATE_INVALID');
+  assert.equal(refusal({ title: 'x', count: 'many' }, Body, { fieldCodes, codes }).error, 'TRIAL_INPUT_INVALID');
+  assert.equal(refusal({ title: 'x', constructor: 1 }, Body, { fieldCodes: {} }).error, 'FIELD_INVALID');
+});
+
 test('an over-long unknown key is named, but cut short', () => {
   const r = refusal({ title: 'x', ['k'.repeat(1000)]: 1 });
   assert.equal(r.field.length, 201);

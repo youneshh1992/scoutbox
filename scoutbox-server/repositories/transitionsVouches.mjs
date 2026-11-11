@@ -48,7 +48,7 @@ export const TRANSITION_ACTIONS = Object.freeze([
 /** The pack's lists and the item kind each is stored as. */
 export const PACK_KINDS = Object.freeze({ mediaIds: 'media', evidenceIds: 'evidence', feedbackIds: 'feedback' });
 export const VOUCH_STATUSES = Object.freeze(['pending', 'published', 'revoked']);
-/** Text limits: the routes shorten free text to these; ids, names, emails and lists over them are refused. */
+/** Text limits. Ids, names, emails and lists over them are refused; the vouch routes shorten free text to them. */
 export const TRANSITION_LIMITS = Object.freeze({
   id: 80,
   name: 200,

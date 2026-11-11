@@ -1,10 +1,26 @@
 // Consent-based academy transitions. Nothing is visible to a club without an explicit, revocable, expiring grant;
 // nothing about a player is labelled "released"; agencies never receive transition packs.
-import { isPlainObject } from '../../repositories/recruitment.mjs';
+import * as v from 'valibot';
+import { PLAYER_LEVELS } from '../../repositories/identity.mjs';
 import { TRANSITION_LIMITS as L, PACK_KINDS } from '../../repositories/transitionsVouches.mjs';
+import { id, idList, inputOrRefuse, oneOf, requiredText, text, wholeNumber } from '../platform/schemas.mjs';
 
 const DAY = 86_400_000;
 const FOLLOW_UP_DAYS = 60;
+
+const daysIn = ({ min, max }) => v.nullish(wholeNumber({ min, max }));
+const NewTransition = v.strictObject({
+  pack: v.nullish(
+    v.strictObject(Object.fromEntries(Object.keys(PACK_KINDS).map((k) => [k, v.nullish(idList(L.packItems))]))),
+  ),
+  note: v.nullish(text(L.note)),
+  periodDays: daysIn(L.periodDays),
+});
+const NewRecipient = v.strictObject({ orgId: id, days: daysIn(L.grantDays) });
+const NamedOrg = v.strictObject({ orgId: id });
+const Placement = v.strictObject({ orgId: id, note: v.nullish(text(L.placementNote)) });
+const LevelReview = v.strictObject({ level: oneOf(PLAYER_LEVELS), reason: requiredText(300) });
+const LEVEL_REVIEW_CODES = { fieldCodes: { level: 'BAD_LEVEL', reason: 'REASON_REQUIRED' } };
 
 export function registerTransitions(ctx) {
   const {
@@ -32,28 +48,6 @@ export function registerTransitions(ctx) {
     throw new TypeError('registerTransitions needs the transitions repository and unit from the data layer');
   const { transitionCases } = transitionsVouches;
 
-  // ------------------------------------------------------------ input
-  const fieldInvalid = (res, field, message) => {
-    res.status(400).json({ error: 'FIELD_INVALID', field, message });
-    return undefined;
-  };
-  /** Undefined after refusing junk. */
-  const optText = (res, v, field, max) => {
-    if (v === undefined || v === null || v === '') return null;
-    if (typeof v !== 'string') return fieldInvalid(res, field, `${field} is text.`);
-    return v.slice(0, max);
-  };
-  /** Undefined after refusing junk (refused, not clamped). */
-  const days = (res, v, field, { min, max, default: def }) => {
-    if (v === undefined || v === null) return def;
-    if (!Number.isInteger(v) || v < min || v > max)
-      return fieldInvalid(res, field, `A whole number of days from ${min} to ${max}.`);
-    return v;
-  };
-  const orgIdOf = (res, v) =>
-    typeof v === 'string' && v.length > 0 && v.length <= L.id
-      ? v
-      : fieldInvalid(res, 'orgId', 'Name the club by its id.');
   /** Names come from other domains (no length limit at signup), so they are shortened rather than refused. */
   const clip = (name) => (typeof name === 'string' ? name.slice(0, L.name) : null);
   const entry = (actor, action, detail = null) => ({
@@ -128,27 +122,6 @@ export function registerTransitions(ctx) {
       }),
     };
   }
-  /** Undefined after refusing junk. */
-  function readSelection(res, sel) {
-    if (sel === undefined || sel === null) return {};
-    if (!isPlainObject(sel))
-      return fieldInvalid(res, 'pack', 'Send an object with mediaIds, evidenceIds and feedbackIds.');
-    const unknown = Object.keys(sel).filter((k) => !Object.hasOwn(PACK_KINDS, k));
-    if (unknown.length)
-      return fieldInvalid(res, `pack.${unknown[0]}`, 'A pack holds mediaIds, evidenceIds and feedbackIds only.');
-    for (const k of Object.keys(PACK_KINDS)) {
-      const list = sel[k];
-      if (list === undefined || list === null) continue;
-      if (
-        !Array.isArray(list) ||
-        list.length > L.packItems ||
-        list.some((x) => typeof x !== 'string' || !x.length || x.length > L.id)
-      )
-        return fieldInvalid(res, `pack.${k}`, `A list of up to ${L.packItems} ids.`);
-    }
-    return sel;
-  }
-
   function packView(player, pack) {
     return {
       media: player.media
@@ -171,14 +144,11 @@ export function registerTransitions(ctx) {
   }
 
   function createTransition(req, res, player, actor) {
-    const b = req.body ?? {};
-    const sel = readSelection(res, b.pack);
-    if (sel === undefined) return;
-    const note = optText(res, b.note, 'note', L.note);
-    if (note === undefined) return;
-    const period = days(res, b.periodDays, 'periodDays', L.periodDays);
-    if (period === undefined) return;
-    const pack = buildPack(player, sel);
+    const body = inputOrRefuse(res, NewTransition, req.body);
+    if (!body) return;
+    const note = body.note || null;
+    const period = body.periodDays ?? L.periodDays.default;
+    const pack = buildPack(player, body.pack);
     if (!pack.mediaIds.length && !pack.evidenceIds.length && !pack.feedbackIds.length) {
       return res.status(400).json({
         error: 'PACK_EMPTY',
@@ -253,11 +223,10 @@ export function registerTransitions(ctx) {
     if (t.status !== 'open') return res.status(409).json({ error: 'CASE_CLOSED', status: t.status });
     // The sweep may not have marked the case expired yet.
     if (t.periodEndsAt <= Date.now()) return res.status(409).json({ error: 'CASE_CLOSED', status: 'expired' });
-    const orgId = orgIdOf(res, req.body?.orgId);
-    if (orgId === undefined) return;
-    const grant = days(res, req.body?.days, 'days', L.grantDays);
-    if (grant === undefined) return;
-    const org = byId.org(orgId);
+    const body = inputOrRefuse(res, NewRecipient, req.body);
+    if (!body) return;
+    const grant = body.days ?? L.grantDays.default;
+    const org = byId.org(body.orgId);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     const player = findPlayer(t.playerId);
     if (org.type === 'agency')
@@ -296,9 +265,9 @@ export function registerTransitions(ctx) {
   }
 
   function revokeRecipient(req, res, t, actor) {
-    const orgId = orgIdOf(res, req.body?.orgId);
-    if (orgId === undefined) return;
-    const i = t.recipients.findIndex((x) => x.orgId === orgId && !x.revokedAt);
+    const body = inputOrRefuse(res, NamedOrg, req.body);
+    if (!body) return;
+    const i = t.recipients.findIndex((x) => x.orgId === body.orgId && !x.revokedAt);
     if (i < 0) return res.status(404).json({ error: 'RECIPIENT_NOT_FOUND' });
     const r = t.recipients[i];
     const staff = firstStaff(r.orgId);
@@ -337,11 +306,10 @@ export function registerTransitions(ctx) {
 
   function placeCase(req, res, t, actor) {
     if (t.status !== 'open') return res.status(409).json({ error: 'CASE_CLOSED', status: t.status });
-    const orgId = orgIdOf(res, req.body?.orgId);
-    if (orgId === undefined) return;
-    const note = optText(res, req.body?.note, 'note', L.placementNote);
-    if (note === undefined) return;
-    const org = byId.org(orgId);
+    const body = inputOrRefuse(res, Placement, req.body);
+    if (!body) return;
+    const note = body.note || null;
+    const org = byId.org(body.orgId);
     if (!org) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     const now = Date.now();
     const stored = unit(() =>
@@ -432,12 +400,9 @@ export function registerTransitions(ctx) {
   adminRouter.post('/players/:id/level-review', (req, res) => {
     const p = findPlayer(req.params.id);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    const level = req.body?.level;
-    if (!['amateur', 'semi_pro', 'pro'].includes(level)) return res.status(400).json({ error: 'BAD_LEVEL' });
-    if (!req.body?.reason?.trim())
-      return res
-        .status(400)
-        .json({ error: 'REASON_REQUIRED', message: 'Level reviews are audited — record the basis for the change.' });
+    const body = inputOrRefuse(res, LevelReview, req.body, LEVEL_REVIEW_CODES);
+    if (!body) return;
+    const { level, reason } = body;
     const from = p.level;
     unit(() => {
       players.setLevel(p.id, level);
@@ -448,7 +413,7 @@ export function registerTransitions(ctx) {
         orgName: 'Trust & Safety',
         userId: null,
         scoutName: 'T&S level review',
-        detail: { from, to: level, reason: String(req.body.reason).slice(0, 300) },
+        detail: { from, to: level, reason },
       });
     });
     res.json({

@@ -1107,6 +1107,13 @@ section('consent-based transitions');
   );
   r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, note: { text: 'x' } }, adeyemi.token);
   ok(r.status === 400 && r.body.field === 'note', 'a note that is not text is refused');
+  r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, note: 'n'.repeat(501) }, adeyemi.token);
+  ok(r.status === 400 && r.body.field === 'note', 'an over-long note is refused, not cut off');
+  r = await j('POST', '/player/transitions', { pack: { mediaIds: [mediaId] }, periodDay: 60 }, adeyemi.token);
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'periodDay',
+    'a field the case does not take is refused by name',
+  );
   ok(
     (await j('GET', '/player/transitions', undefined, adeyemi.token)).body.items.length === 0,
     'and none of the refused requests opened a case',
@@ -1187,6 +1194,19 @@ section('consent-based transitions');
     body: JSON.stringify({ level: 'semi_pro' }),
   });
   ok(lr.status === 400, 'level review without a reason is refused (audited)');
+  for (const [body, error, what] of [
+    [{ level: 'semi_pro', reason: { why: 'x' } }, 'REASON_REQUIRED', 'a reason that is not text'],
+    [{ level: 'semi_pro', reason: '   ' }, 'REASON_REQUIRED', 'a blank reason'],
+    [{ level: 'elite', reason: 'Promoted' }, 'BAD_LEVEL', 'a level outside the vocabulary'],
+  ]) {
+    lr = await fetch(`${BASE}/admin/players/pl-adeyemi/level-review`, {
+      method: 'POST',
+      headers: { ...A(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const lrBody = await lr.json();
+    ok(lr.status === 400 && lrBody.error === error, `${what} is refused with ${error} (a non-text reason crashed)`);
+  }
   lr = await fetch(`${BASE}/admin/players/pl-adeyemi/level-review`, {
     method: 'POST',
     headers: { ...A(), 'Content-Type': 'application/json' },

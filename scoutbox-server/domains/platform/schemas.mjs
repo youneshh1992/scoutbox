@@ -114,9 +114,11 @@ function phraseFor(issue) {
 /**
  * `{ ok: true, value }`, or `{ ok: false, error, field, message, expected? }` for the first problem found. `root`
  * names the input as a whole when it is the input itself that is wrong. `codes` renames this module's codes for a
- * domain whose contract has its own, e.g. `{ FIELD_INVALID: 'TRANSACTION_INPUT_INVALID' }`.
+ * domain whose contract has its own, e.g. `{ FIELD_INVALID: 'TRANSACTION_INPUT_INVALID' }`. `fieldCodes` gives a
+ * top-level field (and everything inside it) a code of its own, e.g. `{ terms: 'TERMS_INPUT_INVALID' }`; it wins over
+ * `codes`.
  */
-export function parseInput(schema, input, { root = 'body', codes = {} } = {}) {
+export function parseInput(schema, input, { root = 'body', codes = {}, fieldCodes = {} } = {}) {
   // Valibot's object schemas take an array as an object, so `[]` would pass as a body with no fields.
   if (Array.isArray(input) && isKeyIssue(schema)) {
     const error = codes.FIELD_INVALID ?? 'FIELD_INVALID';
@@ -127,7 +129,12 @@ export function parseInput(schema, input, { root = 'body', codes = {} } = {}) {
   const issue = result.issues[0];
   const field = fieldOf(issue, root);
   const known = CODED.get(issue.requirement);
-  const error = codes[known?.error ?? 'FIELD_INVALID'] ?? known?.error ?? 'FIELD_INVALID';
+  const top = issue.path?.[0]?.key;
+  const error =
+    (Object.hasOwn(fieldCodes, top) ? fieldCodes[top] : null) ??
+    codes[known?.error ?? 'FIELD_INVALID'] ??
+    known?.error ??
+    'FIELD_INVALID';
   return {
     ok: false,
     error,
