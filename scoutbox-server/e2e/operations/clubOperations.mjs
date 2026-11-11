@@ -1058,8 +1058,30 @@ let oppId = null;
     amara.token,
   );
   ok(
-    r.status === 200 && r.body.preferences.relocation === null,
-    "guardian sets a minor's prefs; relocation NEVER collected for minors",
+    r.status === 400 && r.body.field === 'relocation' && r.body.problem === 'unknown_field',
+    "relocation is NEVER collected for minors: a guardian's answer to it is refused",
+  );
+  r = await j('PUT', `/guardian/children/${kid16Id}/preferences`, { travelLimitKm: 10 }, amara.token);
+  ok(
+    r.status === 200 && r.body.preferences.relocation === null && r.body.preferences.travelLimitKm === 10,
+    "guardian sets a minor's prefs, with no relocation stored",
+  );
+  r = await j('PUT', '/player/preferences', { travelLimitKm: 900 }, adeyemi.token);
+  ok(
+    r.status === 400 && r.body.field === 'travelLimitKm' && r.body.max === 500,
+    'a travel limit beyond 500 km is refused with its limit, not clamped',
+  );
+  r = await j('PUT', '/player/preferences', { ambitions: 'x'.repeat(301) }, adeyemi.token);
+  ok(r.status === 400 && r.body.problem === 'too_long', 'over-long ambitions are refused, not cut off');
+  r = await j(
+    'PUT',
+    `/org/opportunities/${oppId}/structured-requirements`,
+    { environment: ['x'.repeat(41)] },
+    maria.token,
+  );
+  ok(
+    r.status === 400 && r.body.field === 'environment[0]' && r.body.problem === 'too_long',
+    'an over-long structured requirement tag is refused, not cut off',
   );
 
   // Privacy: the club sees nothing until an approved summary exists.
@@ -1068,6 +1090,15 @@ let oppId = null;
   ok(apply.status === 201, 'player applies to the opportunity');
   r = await j('GET', `/org/applications/${applicationId}/suitability`, undefined, maria.token);
   ok(r.body.summary === null, 'club sees NO suitability before approval');
+  r = await j('POST', '/player/suitability/share', { applicationId }, adeyemi.token);
+  ok(
+    r.status === 400 && r.body.field === 'share' && r.body.problem === 'required',
+    'sharing needs an explicit answer: a missing one is not consent',
+  );
+  r = await j('POST', '/player/suitability/share', { applicationId, share: 'yes' }, adeyemi.token);
+  ok(r.status === 400 && r.body.problem === 'not_boolean', 'and "yes" is not true');
+  r = await j('GET', `/org/applications/${applicationId}/suitability`, undefined, maria.token);
+  ok(r.body.summary === null, 'neither refused request shared anything');
   r = await j('POST', '/player/suitability/share', { applicationId, share: true }, adeyemi.token);
   ok(r.status === 200, 'player approves a summary');
   r = await j('GET', `/org/applications/${applicationId}/suitability`, undefined, maria.token);

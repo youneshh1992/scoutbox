@@ -70,16 +70,15 @@ its own, and only the functions a route uses are loaded) and because its schemas
   shared rules.
 
 Move routes over one domain at a time, fixing the input defects in `known-issues.md` as each domain moves. Groups,
-recruitment and the verification transition routes have moved. The rest, in this order:
+recruitment, scouting and the verification transition routes have moved. The rest, in this order:
 
-1. **Scouting**: the rest of `scouting.mjs`, then `passport.mjs`, `journeys.mjs` and `suitability.mjs`.
-2. **Verification claims and passport**: the largest remaining surface with trust-sensitive input (club claims and
+1. **Verification claims and passport**: the largest remaining surface with trust-sensitive input (club claims and
    evidence uploads), and the evidence upload path that signings shares.
-3. **Agents**: compliance, transactions and core. Moving them also draws the lines along which their very large files
+2. **Agents**: compliance, transactions and core. Moving them also draws the lines along which their very large files
    split in step 4.
-4. **Discovery and identity**, then the small domains (enterprise, messaging, insight, safety, operations,
+3. **Discovery and identity**, then the small domains (enterprise, messaging, insight, safety, operations,
    integrations, media), one commit each.
-5. **Development** last: the largest, and its Box Cam batteries are run only with permission, so it is moved and
+4. **Development** last: the largest, and its Box Cam batteries are run only with permission, so it is moved and
    tested in one go. It carries the "text cut instead of refused" defect.
 
 ### 2. Enforced write and side-effect rules
