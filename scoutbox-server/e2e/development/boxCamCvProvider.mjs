@@ -368,6 +368,49 @@ const FRAMES_URL = `/player/box-cam/sessions/${live.session.id}/cv/frames`;
     kola.token,
   );
   neg(ready.status === 422 && ready.body.fields?.includes('score'), '15b. and so does the Ready Check');
+  // Each field as sent, or refused under the provider's codes.
+  const textWidth = await j(
+    'POST',
+    FRAMES_URL,
+    { nonce: live.nonce, providerSessionId: PSID, frames: [{ ...goodFrames[0], seq: 4001, w: '160' }] },
+    kola.token,
+  );
+  neg(
+    textWidth.status === 422 &&
+      textWidth.body.error === PROVIDER_ERRORS.INVALID_FRAME_DIMENSIONS &&
+      textWidth.body.field === 'frames[0].w',
+    'IN1 a frame width written as text is refused, not read as a number',
+  );
+  const extra = await j(
+    'POST',
+    FRAMES_URL,
+    { nonce: live.nonce, providerSessionId: PSID, frames: [{ ...goodFrames[0], seq: 4002, label: 'x' }] },
+    kola.token,
+  );
+  neg(
+    extra.status === 415 && extra.body.field === 'frames[0].label' && extra.body.problem === 'unknown_field',
+    'IN2 a frame envelope carries only the frame',
+  );
+  const textWindow = await j(
+    'POST',
+    `/player/box-cam/sessions/${live.session.id}/cv/finalize`,
+    { nonce: live.nonce, providerSessionId: PSID, protocolWindowMs: '60000' },
+    kola.token,
+  );
+  neg(
+    textWindow.status === 400 && textWindow.body.field === 'protocolWindowMs',
+    'IN3 a protocol window written as text is refused, not read as a number',
+  );
+  const textFps = await j(
+    'POST',
+    '/player/box-cam/cv/ready-check',
+    { cameraPermission: 'granted', fps: '30' },
+    kola.token,
+  );
+  neg(
+    textFps.status === 400 && textFps.body.field === 'fps',
+    'IN4 a Ready Check frame rate written as text is refused',
+  );
 }
 // 16. finalized session ingest
 {

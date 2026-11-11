@@ -106,6 +106,9 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
   cannot see distance. The field should be shown to Grassroots clubs only, which is a UI change.
 - **A watchlist alert can go to a removed staff member.** The watchlist notification goes to `w.createdBy` without the
   `removedAt` check that Second Look makes (`domains/discovery/matching/index.mjs`).
+- **The Player app's live Box Cam CV frames are always refused.** `captureFrame` (`scoutbox-player/src/data/m22client.ts`)
+  builds a frame envelope without `atMs`, which `decodeFrame` (`domains/development/boxcam/cv/frames.mjs`) requires, so
+  every real batch to `/cv/frames` is refused as `unsupported_frame_format`. The batteries send their own envelopes.
 - **The Box Cam source freeze misses some code lines.** `strippedSource` (`domains/development/boxcam/cv/freeze.mjs`)
   drops every line starting with `*` as a comment, including code continuation lines such as
   `* CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;` in `track.mjs`, so a change there doesn't change the freeze hash.

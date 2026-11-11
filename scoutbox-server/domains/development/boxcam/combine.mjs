@@ -6,7 +6,7 @@
 // supports active_duration only, so only Box Control 60 is Combine Verified today; count/interval protocols run under
 // the test provider, labelled simulated. Athletic protocols need capabilities no provider has.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
-import { ageOrNull, endOfDayExclusive, parseStrictDateOnly, isAbsent } from '../../../temporal.mjs';
+import { ageOrNull, endOfDayExclusive } from '../../../temporal.mjs';
 import { latestDrill, PROVIDERS, providerFor } from './drills.mjs';
 import {
   COMBINE_PROTOCOLS,
@@ -29,6 +29,8 @@ import { CV_PROVIDER_ID } from './cv/policy.mjs';
 import { nonceMatches } from '../../../repositories/boxCam.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 import { pageNewestFirst } from './shared.mjs';
+import { boxCamInput } from './schemas.mjs';
+import { listedIds } from '../../platform/schemas.mjs';
 
 const PROD_PROVIDER_ID = 'web_client'; // the best honest production provider here
 
@@ -325,24 +327,16 @@ export function registerCombine(ctx) {
 
   // ------------------------------------------------------ create attempt
   playerRouter.post('/combine/attempts', (req, res) => {
+    const body = boxCamInput(res, 'attempt', req.body);
+    if (!body) return;
     if (limited('combine_attempt', req.player.id)) return res.status(429).json(rateLimitedBody('combine_attempt'));
-    const {
-      protocolId,
-      mode = 'verified',
-      provider: providerId,
-      captureContext = 'at_home',
-      requestId,
-    } = req.body ?? {};
-    const proto = latestCombineProtocol(String(protocolId ?? ''));
+    const { protocolId, mode = 'verified', provider: providerId, captureContext = 'at_home', requestId } = body;
+    const proto = latestCombineProtocol(protocolId ?? '');
     if (!proto || proto.status !== 'active') return res.status(404).json({ error: 'PROTOCOL_UNKNOWN' });
-    if (!['verified', 'practice'].includes(mode))
-      return res.status(400).json({ error: 'MODE_INVALID', allowed: ['verified', 'practice'] });
     if (mode === 'practice' && !proto.practiceAllowed) return res.status(400).json({ error: 'PRACTICE_NOT_ALLOWED' });
-    if (!['at_home', 'club', 'event'].includes(captureContext))
-      return res.status(400).json({ error: 'CAPTURE_CONTEXT_INVALID' });
     if (proto.ageRestrictions === 'adult' && !isAdult(req.player)) return res.status(403).json({ error: 'ADULT_ONLY' });
 
-    const provider = providerFor(String(providerId ?? PROD_PROVIDER_ID), { testProviderEnabled });
+    const provider = providerFor(providerId ?? PROD_PROVIDER_ID, { testProviderEnabled });
     if (!provider) return res.status(403).json({ error: 'PROVIDER_UNAVAILABLE' });
     if (provider.status === 'not_configured')
       return res.status(503).json({
@@ -468,21 +462,9 @@ export function registerCombine(ctx) {
     if (COMBINE_TERMINAL.has(a.combineState)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
     const proto = combineProtocol(a.protocolId, a.protocolVersion);
     const required = proto?.calibrationRequirements ?? [];
-    // A list of check names as sent: anything else is refused, not turned into strings.
-    const rawChecks = req.body?.checks;
-    if (
-      rawChecks !== undefined &&
-      (!Array.isArray(rawChecks) ||
-        rawChecks.length > 10 ||
-        rawChecks.some((c) => typeof c !== 'string' || !c.length || c.length > 60))
-    ) {
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'checks',
-        message: 'Calibration checks are a list of at most 10 check names.',
-      });
-    }
-    const checks = rawChecks ?? [];
+    const body = boxCamInput(res, 'calibrate', req.body);
+    if (!body) return;
+    const checks = body.checks ?? [];
     // Current protocols need standardised geometry only. Physical-scale calibration (Box Marker) is for future
     // protocols, which are unsupported anyway.
     const passed = required.length === 0 ? true : required.every((r) => checks.includes(r));
@@ -497,9 +479,11 @@ export function registerCombine(ctx) {
       return res
         .status(409)
         .json({ error: 'ALREADY_FINALIZED', message: 'A completed Combine Attempt cannot be submitted again.' });
+    const body = boxCamInput(res, 'withNonce', req.body);
+    if (!body) return;
     const s = boundSession(a);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    if (!nonceMatches(s, (req.body ?? {}).nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
+    if (!nonceMatches(s, body.nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
     if (s.status !== 'recording') return res.status(409).json({ error: 'SESSION_NOT_RECORDING', status: s.status });
     const done = unit(() => {
       boxCam.attempts.markStarted(a.id, { startedAt: s.startedAt });
@@ -512,6 +496,7 @@ export function registerCombine(ctx) {
   });
 
   playerRouter.post('/combine/attempts/:id/cancel', (req, res) => {
+    if (!boxCamInput(res, 'none', req.body)) return;
     const a = ownAttempt(req.player.id, req.params.id);
     if (!a) return res.status(404).json({ error: 'ATTEMPT_NOT_FOUND' });
     if (COMBINE_TERMINAL.has(a.combineState)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
@@ -728,6 +713,8 @@ export function registerCombine(ctx) {
   // A verified, non-agency, non-suspended org selects standardised protocols (it cannot alter their rules) for
   // players it can already see.
   orgRouter.post('/combine/requests', (req, res) => {
+    const body = boxCamInput(res, 'combineRequest', req.body);
+    if (!body) return;
     if (limited('room_combine_request', req.org.id))
       return res.status(429).json(rateLimitedBody('room_combine_request'));
     if (req.org.type === 'agency')
@@ -739,49 +726,19 @@ export function registerCombine(ctx) {
       return res
         .status(403)
         .json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can create a Club Combine.' });
-    const { title, protocolIds, deadline, instructions } = req.body ?? {};
-    // Protocol and player ids are text as sent: anything else is refused, not turned into strings.
-    if (protocolIds !== undefined && (!Array.isArray(protocolIds) || protocolIds.some((x) => typeof x !== 'string')))
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'protocolIds', message: 'protocolIds is a list of protocol ids.' });
-    if (
-      req.body?.playerIds !== undefined &&
-      (!Array.isArray(req.body.playerIds) || req.body.playerIds.some((x) => typeof x !== 'string'))
-    )
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'playerIds', message: 'playerIds is a list of player ids.' });
-    if (title !== undefined && title !== null && typeof title !== 'string')
-      return res.status(400).json({ error: 'FIELD_INVALID', field: 'title', message: 'A title is text.' });
-    const ids = Array.isArray(protocolIds) ? [...new Set(protocolIds)] : [];
-    if (ids.length === 0) return res.status(400).json({ error: 'PROTOCOLS_REQUIRED' });
-    if (ids.length > 20)
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'protocolIds',
-        message: 'A Club Combine asks for at most 20 protocols.',
-      });
-    if (!isAbsent(deadline) && !parseStrictDateOnly(deadline).ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'deadline',
-        message: 'A deadline is a calendar day written YYYY-MM-DD.',
-        expected: 'YYYY-MM-DD',
-      });
+    const { title, protocolIds, deadline, instructions } = body;
+    const ids = [...new Set(protocolIds ?? [])];
+    if (ids.length === 0)
+      return res.status(400).json({ error: 'PROTOCOLS_REQUIRED', field: 'protocolIds', problem: 'required' });
     for (const pid of ids) {
       const proto = latestCombineProtocol(pid);
       if (!proto || proto.status !== 'active')
         return res.status(404).json({ error: 'PROTOCOL_UNKNOWN', protocolId: pid });
     }
-    const playerIds = Array.isArray(req.body?.playerIds)
-      ? req.body.playerIds
-      : req.body?.playerId
-        ? [String(req.body.playerId)]
-        : [];
-    if (playerIds.length === 0) return res.status(400).json({ error: 'PLAYERS_REQUIRED' });
-    if (instructions && !moderateOrRefuse(res, String(instructions), { kind: 'combine_request', orgId: req.org.id }))
-      return;
+    const playerIds = body.playerIds ?? (body.playerId ? [body.playerId] : []);
+    if (playerIds.length === 0)
+      return res.status(400).json({ error: 'PLAYERS_REQUIRED', field: 'playerIds', problem: 'required' });
+    if (instructions && !moderateOrRefuse(res, instructions, { kind: 'combine_request', orgId: req.org.id })) return;
 
     const { created, skipped } = createRequests({
       org: req.org,
@@ -789,7 +746,7 @@ export function registerCombine(ctx) {
       playerIds,
       protocolIds: ids,
       title,
-      deadline,
+      deadline: deadline || null,
       instructions,
     });
     if (created.length > 1 || playerIds.length > 1) vmetric('club_combine_created');
@@ -797,18 +754,19 @@ export function registerCombine(ctx) {
   });
 
   orgRouter.get('/combine/requests', (req, res) => {
-    const mine = reads.requests
-      .forOrg(req.org.id, { playerId: req.query.playerId ? String(req.query.playerId) : null })
-      .filter((r) => {
-        const p = findPlayer(r.playerId);
-        return p && orgCanSee(req.org, p);
-      });
-    const page = pageNewestFirst(req, res, mine, { readPage, pageOf, sendPageError });
+    const query = boxCamInput(res, 'orgList', req.query, 'query');
+    if (!query) return;
+    const mine = reads.requests.forOrg(req.org.id, { playerId: query.playerId || null }).filter((r) => {
+      const p = findPlayer(r.playerId);
+      return p && orgCanSee(req.org, p);
+    });
+    const page = pageNewestFirst(query, res, mine, { readPage, pageOf, sendPageError });
     if (!page) return;
     res.json({ items: page.items.map(requestView), nextCursor: page.nextCursor });
   });
 
   orgRouter.post('/combine/requests/:id/cancel', (req, res) => {
+    if (!boxCamInput(res, 'none', req.body)) return;
     const r = reads.requests.byId(req.params.id);
     if (!r || r.orgId !== req.org.id) return res.status(404).json({ error: 'REQUEST_NOT_FOUND' });
     if (r.state === 'completed') return res.status(409).json({ error: 'ALREADY_COMPLETED' });
@@ -842,15 +800,10 @@ export function registerCombine(ctx) {
   });
 
   orgRouter.get('/combine/compare', (req, res) => {
-    const playerIds = String(req.query.playerIds ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .slice(0, 30);
-    const protoIds = String(req.query.protocols ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const query = boxCamInput(res, 'compare', req.query, 'query');
+    if (!query) return;
+    const playerIds = listedIds(query.playerIds);
+    const protoIds = listedIds(query.protocols);
     const protocols = protoIds.length
       ? protoIds.map((pid) => latestCombineProtocol(pid)).filter(Boolean)
       : COMBINE_PROTOCOLS.filter((p) => measurementCapability(p, PROVIDERS.local_test.capabilities) === 'configured');

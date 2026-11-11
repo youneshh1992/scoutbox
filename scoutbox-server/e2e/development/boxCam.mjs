@@ -412,8 +412,12 @@ async function runSession(
     );
     if (ev.status !== 200) break;
   }
-  const done = await j('POST', `/player/box-cam/sessions/${session.id}/complete`, { nonce, ...completeBody }, token);
-  return { created, started, ev, done, session, nonce, livenessChallenge };
+  // A complete naming a result is refused; the plain complete that follows derives it from the observations.
+  const forged = Object.keys(completeBody).length
+    ? await j('POST', `/player/box-cam/sessions/${session.id}/complete`, { nonce, ...completeBody }, token)
+    : null;
+  const done = await j('POST', `/player/box-cam/sessions/${session.id}/complete`, { nonce }, token);
+  return { created, started, ev, forged, done, session, nonce, livenessChallenge };
 }
 
 section('B1 — duration drill: observed active time, partial credit');
@@ -496,8 +500,12 @@ section('B4 — an uploaded video can never become Box Cam Verified');
     { completeBody: { verifiedActiveMs: 9_999_999, verificationState: 'verified', provenance: 'box_cam_observed' } },
   );
   neg(
+    empty.forged.status === 400 && empty.forged.body.problem === 'unknown_field',
+    'B4/B9: a complete that names verified fields is refused',
+  );
+  neg(
     empty.done.body.session.verificationState === 'unable_to_verify' && empty.done.body.session.verifiedActiveMs === 0,
-    'B4/B9: forged verified fields ignored — no observation, no verification',
+    'B4/B9: no observation, no verification',
   );
 }
 
@@ -1147,6 +1155,62 @@ section('junk refused naming the field, never coerced; lists that grow page by c
   );
   const q = await j('GET', '/admin/box-cam/disputes?all=1&limit=1', undefined, null, A);
   ok(q.status === 200 && Array.isArray(q.body.items) && 'nextCursor' in q.body, 'the dispute queue pages');
+
+  // Each field as sent, or refused: nothing is cut, converted or ignored.
+  let r = await j(
+    'POST',
+    '/player/box-cam/sessions',
+    { drillId: 'box-mobility', target: { type: 'duration', value: '300000' } },
+    kola.token,
+  );
+  neg(r.status === 400 && r.body.error === 'TARGET_VALUE_INVALID', 'IN1 a session target written as text is refused');
+  r = await j('POST', `/player/box-cam/sessions/${b1SessionId}/note`, { note: 'n'.repeat(301) }, kola.token);
+  neg(
+    r.status === 400 && r.body.field === 'note' && r.body.problem === 'too_long',
+    'IN2 a note over 300 characters is refused, not cut',
+  );
+  r = await j('POST', `/player/box-cam/sessions/${b1SessionId}/dispute`, { reason: { text: 'wrong' } }, kola.token);
+  neg(
+    r.status === 400 && r.body.field === 'reason' && r.body.problem === 'not_text',
+    'IN3 a dispute reason that is not text is refused',
+  );
+  r = await j(
+    'POST',
+    '/org/box-cam/challenges',
+    { drillId: 'box-touches', metric: 'reps', targetTotal: 500, title: 't'.repeat(121) },
+    maria.token,
+  );
+  neg(
+    r.status === 400 && r.body.field === 'title' && r.body.problem === 'too_long',
+    'IN4 a challenge title over 120 characters is refused, not cut',
+  );
+  r = await j(
+    'POST',
+    '/org/box-cam/assignments',
+    {
+      playerId: 'pl-adeyemi',
+      drillId: 'box-mobility',
+      target: { type: 'duration', value: 600000 },
+      instructions: 'i'.repeat(301),
+    },
+    maria.token,
+  );
+  neg(
+    r.status === 400 && r.body.field === 'instructions' && r.body.problem === 'too_long',
+    'IN5 assignment instructions over 300 characters are refused, not cut',
+  );
+  r = await j('PATCH', '/player/box-cam/prefs', { retainClips: true, playerId: 'pl-guni' }, kola.token);
+  neg(r.status === 400 && r.body.field === 'playerId', 'IN6 the privacy settings name no other player');
+  r = await j('POST', '/admin/box-cam/sessions/boxs-none/restore', { reason: 'r'.repeat(301) }, null, A);
+  neg(
+    r.status === 400 && r.body.field === 'reason' && r.body.problem === 'too_long',
+    'IN7 a restore reason over 300 characters is refused, not cut',
+  );
+  r = await j('GET', '/admin/box-cam/disputes?all=yes', undefined, null, A);
+  neg(
+    r.status === 400 && r.body.field === 'all' && r.body.allowed?.includes('1'),
+    'IN8 the dispute queue filter is 0 or 1',
+  );
 }
 
 section('metrics — privacy-safe counters, no PII');

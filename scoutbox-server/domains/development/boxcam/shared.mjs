@@ -374,11 +374,14 @@ export function boxCamDetail(session) {
 }
 
 // ------------------------------------------------------------------- paging
-/** Pages a list the route has already filtered by visibility. Returns null once it has answered a page error. */
-export function pageNewestFirst(req, res, list, { readPage, pageOf, sendPageError }) {
+/**
+ * Pages a list the route has already filtered by visibility, from the query its schema read. Returns null once it has
+ * answered a page error.
+ */
+export function pageNewestFirst(query, res, list, { readPage, pageOf, sendPageError }) {
   let page;
   try {
-    page = readPage(req.query, ['number', 'string']);
+    page = readPage(query, ['number', 'string']);
   } catch (e) {
     sendPageError(res, e);
     return null;

@@ -9,6 +9,7 @@ import { productionCvProvider, PROVIDER_ERRORS } from './provider.mjs';
 import { combineEligibility, boxCamObservedEligible, COMBINE_DISABLED_REASON } from './eligibility.mjs';
 import { nonceMatches } from '../../../../repositories/boxCam.mjs';
 import { limitCheck } from '../../../platform/rateLimit.mjs';
+import { cvInput } from '../schemas.mjs';
 
 const HTTP_FOR = {
   [PROVIDER_ERRORS.FRAME_TOO_LARGE]: 413,
@@ -45,6 +46,15 @@ function fail(res, code, extra = {}) {
   return res.status(status).json({ error: code, ...extra });
 }
 
+/** The input read with CV_INPUT[name], or `undefined` once the refusal has been sent. */
+function input(res, name, body) {
+  const parsed = cvInput(name, body);
+  if (parsed.ok) return parsed.value;
+  const { ok: _ok, error, ...detail } = parsed;
+  fail(res, error, detail);
+  return undefined;
+}
+
 /** A body or frame envelope naming a server-derived field is refused with a 422. Returns true once refused. */
 function refuseClientFields(res, ...objects) {
   const fields = [...new Set(objects.flatMap((o) => refusedClientFields(o)))];
@@ -77,9 +87,11 @@ export function registerProductionCvRoutes(ctx) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 30 });
     }
     if (refuseClientFields(res, req.body)) return;
+    const body = input(res, 'begin', req.body);
+    if (!body) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
-    if (!nonceMatches(s, (req.body ?? {}).nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
+    if (!nonceMatches(s, body.nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
     if (s.status !== 'recording') {
       return fail(res, PROVIDER_ERRORS.INVALID_STATE, { status: s.status });
     }
@@ -94,12 +106,11 @@ export function registerProductionCvRoutes(ctx) {
       });
     }
 
-    const protocolId = String((req.body ?? {}).protocolId ?? '');
     const begun = provider.beginSession({
       boxCamSessionId: s.id,
       playerId: req.player.id,
-      protocolId,
-      nonce: req.body.nonce,
+      protocolId: body.protocolId ?? '',
+      nonce: body.nonce,
     });
     if (!begun.ok)
       return fail(res, begun.error, { protocolId: begun.protocolId, activeSessions: begun.activeSessions });
@@ -129,18 +140,20 @@ export function registerProductionCvRoutes(ctx) {
         detail: 'frames are submitted as JSON envelopes; this endpoint is not a file upload',
       });
     }
-    const body = req.body ?? {};
-    if (refuseClientFields(res, body, ...(Array.isArray(body.frames) ? body.frames : []))) return;
+    const raw = req.body ?? {};
+    if (refuseClientFields(res, raw, ...(Array.isArray(raw.frames) ? raw.frames : []))) return;
+    const body = input(res, 'frames', raw);
+    if (!body) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
     if (!nonceMatches(s, body.nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
 
-    const providerSessionId = String(body.providerSessionId ?? '');
+    const providerSessionId = body.providerSessionId ?? '';
     const ps = provider.get(providerSessionId);
     if (!ps || ps.boxCamSessionId !== s.id) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
 
-    const frames = body.frames;
-    if (!Array.isArray(frames) || frames.length === 0) {
+    const { frames } = body;
+    if (!frames?.length) {
       return fail(res, PROVIDER_ERRORS.UNSUPPORTED_FRAME_FORMAT, { detail: 'frames must be a non-empty array' });
     }
     if (frames.length > FRAME_LIMITS.maxFramesPerBatch) {
@@ -151,9 +164,9 @@ export function registerProductionCvRoutes(ctx) {
     }
 
     const accepted = [];
-    for (const raw of frames) {
+    for (const f of frames) {
       // The decoded buffer never leaves this loop.
-      const d = decodeFrame(raw);
+      const d = decodeFrame(f);
       if (!d.ok) {
         return fail(res, FRAME_ERROR_TO_PROVIDER[d.error] ?? PROVIDER_ERRORS.UNSUPPORTED_FRAME_FORMAT, {
           detail: d.detail ?? null,
@@ -163,11 +176,11 @@ export function registerProductionCvRoutes(ctx) {
         providerSessionId,
         boxCamSessionId: s.id,
         nonce: body.nonce,
-        seq: raw.seq,
+        seq: f.seq,
         frame: d.frame,
-        clientCapturedAtMs: raw.capturedAtMs ?? null,
+        clientCapturedAtMs: f.capturedAtMs ?? null,
       });
-      if (!r.ok) return fail(res, r.error, { seq: raw.seq ?? null, lastSeq: r.lastSeq ?? null, state: r.state });
+      if (!r.ok) return fail(res, r.error, { seq: f.seq ?? null, lastSeq: r.lastSeq ?? null, state: r.state });
       accepted.push(r.seq);
     }
 
@@ -189,12 +202,13 @@ export function registerProductionCvRoutes(ctx) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 5 });
     }
     if (refuseClientFields(res, req.body)) return;
+    const body = input(res, 'finalize', req.body);
+    if (!body) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
-    const body = req.body ?? {};
     if (!nonceMatches(s, body.nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
 
-    const providerSessionId = String(body.providerSessionId ?? s.cvProviderSessionId ?? '');
+    const providerSessionId = body.providerSessionId ?? s.cvProviderSessionId ?? '';
 
     const existing = reads.cvResults.byProviderSession(providerSessionId);
     if (existing) {
@@ -205,7 +219,7 @@ export function registerProductionCvRoutes(ctx) {
       providerSessionId,
       boxCamSessionId: s.id,
       nonce: body.nonce,
-      protocolWindowMs: Number(body.protocolWindowMs) || null,
+      protocolWindowMs: body.protocolWindowMs ?? null,
     });
     if (!fin.ok) return fail(res, fin.error, { state: fin.state });
 
@@ -225,10 +239,12 @@ export function registerProductionCvRoutes(ctx) {
 
   playerRouter.post('/box-cam/sessions/:id/cv/cancel', (req, res) => {
     if (refuseClientFields(res, req.body)) return;
+    const body = input(res, 'cancel', req.body);
+    if (!body) return;
     const s = ownSession(req.player.id, req.params.id);
     if (!s) return fail(res, PROVIDER_ERRORS.SESSION_NOT_FOUND);
-    if (!nonceMatches(s, (req.body ?? {}).nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
-    const providerSessionId = String((req.body ?? {}).providerSessionId ?? s.cvProviderSessionId ?? '');
+    if (!nonceMatches(s, body.nonce)) return fail(res, PROVIDER_ERRORS.NONCE_INVALID);
+    const providerSessionId = body.providerSessionId ?? s.cvProviderSessionId ?? '';
     const r = provider.cancel({ providerSessionId, boxCamSessionId: s.id });
     if (!r.ok) return fail(res, r.error);
     // Stated in the response so a client can't read silence as success.
@@ -266,12 +282,13 @@ export function registerProductionCvRoutes(ctx) {
       return fail(res, PROVIDER_ERRORS.RATE_LIMITED, { retryAfterSeconds: 10 });
     }
     if (refuseClientFields(res, req.body)) return;
-    const b = req.body ?? {};
+    const b = input(res, 'readyCheck', req.body);
+    if (!b) return;
     const checks = [];
     const add = (id, state, reasonCode = null, detail = null) => checks.push({ id, state, reasonCode, detail });
 
     // Client-reported facts only advise during setup; lying about them gains nothing but bad advice.
-    const cam = String(b.cameraPermission ?? 'unknown');
+    const cam = b.cameraPermission ?? 'unknown';
     add(
       'camera_permission',
       cam === 'granted' ? 'pass' : 'fail',
@@ -291,8 +308,8 @@ export function registerProductionCvRoutes(ctx) {
       b.secureContext === true ? null : 'INSECURE_CONTEXT',
     );
 
-    const w = Number(b.frameWidth),
-      h = Number(b.frameHeight);
+    const w = b.frameWidth,
+      h = b.frameHeight;
     const dimsOk =
       Number.isInteger(w) &&
       Number.isInteger(h) &&
@@ -305,7 +322,7 @@ export function registerProductionCvRoutes(ctx) {
       max: [FRAME_LIMITS.maxWidth, FRAME_LIMITS.maxHeight],
     });
 
-    const fps = Number(b.fps);
+    const fps = b.fps ?? Number.NaN;
     const fpsOk = Number.isFinite(fps) && fps >= 12;
     add('capture_cadence', fpsOk ? 'pass' : 'fail', fpsOk ? null : 'FRAME_RATE_TOO_LOW', { minSustainedFps: 12 });
 
@@ -334,7 +351,7 @@ export function registerProductionCvRoutes(ctx) {
       b.lightingOk === false ? 'INSUFFICIENT_LIGHT' : null,
     );
 
-    const protocolId = String(b.protocolId ?? '');
+    const protocolId = b.protocolId ?? '';
     const supported = !!CANDIDATE_PROTOCOLS[protocolId];
     add('protocol_observation_support', supported ? 'pass' : 'fail', supported ? null : 'UNSUPPORTED_PROTOCOL');
 

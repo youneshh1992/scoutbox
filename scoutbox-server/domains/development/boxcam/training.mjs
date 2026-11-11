@@ -2,12 +2,10 @@
 // agency/minor wall and grassroots radius, blocks, verified, not suspended). Agencies cannot assign Box Training.
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
+import { CHALLENGE_METRICS, DISPUTE_OUTCOMES, boxCamInput } from './schemas.mjs';
 import { challengeProgress, developmentActivity, fmtMs, TERMINAL_STATES, pageNewestFirst } from './shared.mjs';
 import { latestDrill, DRILLS } from './drills.mjs';
 import { readPage, pageOf, sendPageError, encodeCursor } from '../../platform/paging.mjs';
-
-const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
-const isInt = (v, min, max) => Number.isSafeInteger(v) && v >= min && v <= max;
 
 export function registerBoxTraining(ctx) {
   const {
@@ -75,6 +73,8 @@ export function registerBoxTraining(ctx) {
   orgRouter.get('/box-cam/drills', (_req, res) => res.json({ drills: ctx.drillList() }));
 
   orgRouter.post('/box-cam/assignments', (req, res) => {
+    const body = boxCamInput(res, 'assignment', req.body);
+    if (!body) return;
     if (req.org.type === 'agency')
       return res.status(403).json({ error: 'AGENCY_NOT_ELIGIBLE', message: 'Agencies cannot assign Box Training.' });
     if (req.org.suspended) return res.status(403).json({ error: 'ORG_SUSPENDED' });
@@ -82,19 +82,18 @@ export function registerBoxTraining(ctx) {
       return res
         .status(403)
         .json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can assign Box Training.' });
-    const p = findPlayer(req.body?.playerId);
+    const p = body.playerId ? findPlayer(body.playerId) : null;
     if (!p || !orgCanSee(req.org, p)) {
       return res.status(p ? 403 : 404).json({
         error: p ? (req.org.type === 'agency' && !isAdult(p) ? 'UNDER_18_WALL' : 'NOT_VISIBLE') : 'PLAYER_NOT_FOUND',
       });
     }
-    const drill = latestDrill(String(req.body?.drillId ?? ''));
+    const drill = latestDrill(body.drillId ?? '');
     if (!drill)
       return res
         .status(404)
         .json({ error: 'DRILL_UNKNOWN', message: 'Only supported Box Cam drills can be assigned as Box Training.' });
-    const t = req.body?.target ?? {};
-    // The value is a positive number as sent: a numeric string is refused.
+    const t = body.target ?? {};
     if (
       !drill.targetTypes.includes(t.type) ||
       typeof t.value !== 'number' ||
@@ -103,30 +102,15 @@ export function registerBoxTraining(ctx) {
     ) {
       return res.status(400).json({ error: 'TARGET_INVALID', allowed: drill.targetTypes });
     }
-    // Refused, not coerced: a frequency is a whole number of sessions a week, a due date a real day.
-    const freq = req.body?.frequencyPerWeek;
-    if (!isAbsent(freq) && !isInt(freq, 1, 14))
-      return fieldInvalid(res, 'frequencyPerWeek', 'A frequency is a whole number of sessions a week, from 1 to 14.');
-    const due = req.body?.dueDate;
-    if (!isAbsent(due) && !parseStrictDateOnly(due).ok)
-      return res.status(400).json({
-        error: 'DATE_INVALID',
-        field: 'dueDate',
-        message: 'A due date is a calendar day written YYYY-MM-DD.',
-        expected: 'YYYY-MM-DD',
-      });
-    const instructions = req.body?.instructions;
-    if (!isAbsent(instructions) && typeof instructions !== 'string')
-      return fieldInvalid(res, 'instructions', 'Instructions are text.');
+    const { frequencyPerWeek: freq, dueDate: due, instructions } = body;
     if (
       instructions &&
       !moderateOrRefuse(res, instructions, { kind: 'box_assignment', orgId: req.org.id, playerId: p.id })
     )
       return;
     let objectiveId = null;
-    if (req.body?.objectiveId) {
-      const found =
-        typeof req.body.objectiveId === 'string' ? ctx.developmentReads.objectives.byId(req.body.objectiveId) : null;
+    if (body.objectiveId) {
+      const found = ctx.developmentReads.objectives.byId(body.objectiveId);
       const obj = found && found.playerId === p.id && found.orgId === req.org.id ? found : null;
       if (!obj) return res.status(404).json({ error: 'OBJECTIVE_NOT_FOUND' });
       objectiveId = obj.id;
@@ -149,7 +133,7 @@ export function registerBoxTraining(ctx) {
       target: { type: t.type, value: t.value },
       frequencyPerWeek: isAbsent(freq) ? null : freq,
       dueDate: isAbsent(due) ? null : parseStrictDateOnly(due).value,
-      instructions: instructions ? instructions.slice(0, 300) : null,
+      instructions: instructions || null,
       objectiveId,
       state: 'assigned',
       createdAt: at,
@@ -187,14 +171,14 @@ export function registerBoxTraining(ctx) {
   });
 
   orgRouter.get('/box-cam/assignments', (req, res) => {
+    const query = boxCamInput(res, 'orgList', req.query, 'query');
+    if (!query) return;
     // A block or visibility change after assignment hides the player again.
-    const mine = reads.assignments
-      .forOrg(req.org.id, { playerId: req.query.playerId ? String(req.query.playerId) : null })
-      .filter((a) => {
-        const p = findPlayer(a.playerId);
-        return p && orgCanSee(req.org, p);
-      });
-    const page = pageNewestFirst(req, res, mine, { readPage, pageOf, sendPageError });
+    const mine = reads.assignments.forOrg(req.org.id, { playerId: query.playerId || null }).filter((a) => {
+      const p = findPlayer(a.playerId);
+      return p && orgCanSee(req.org, p);
+    });
+    const page = pageNewestFirst(query, res, mine, { readPage, pageOf, sendPageError });
     if (!page) return;
     res.json({
       items: page.items.map(assignmentView),
@@ -210,6 +194,7 @@ export function registerBoxTraining(ctx) {
   });
 
   orgRouter.post('/box-cam/assignments/:id/cancel', (req, res) => {
+    if (!boxCamInput(res, 'none', req.body)) return;
     const a = reads.assignments.byId(req.params.id);
     if (!a || a.orgId !== req.org.id) return res.status(404).json({ error: 'ASSIGNMENT_NOT_FOUND' });
     if (a.state === 'cancelled') return res.status(409).json({ error: 'ALREADY_CANCELLED' });
@@ -234,6 +219,7 @@ export function registerBoxTraining(ctx) {
     res.json({ items: reads.assignments.forPlayer(req.player.id).map(assignmentView) });
   });
   playerRouter.post('/box-cam/assignments/:id/accept', (req, res) => {
+    if (!boxCamInput(res, 'none', req.body)) return;
     const a = reads.assignments.byId(req.params.id);
     if (!a || a.playerId !== req.player.id) return res.status(404).json({ error: 'ASSIGNMENT_NOT_FOUND' });
     if (!isAdult(req.player))
@@ -248,6 +234,7 @@ export function registerBoxTraining(ctx) {
     res.json({ items: reads.assignments.forPlayer(req.params.id).map(assignmentView) });
   });
   guardianRouter.post('/children/:id/box-cam/assignments/:aid/accept', (req, res) => {
+    if (!boxCamInput(res, 'none', req.body)) return;
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
     const a = reads.assignments.byId(req.params.aid);
     if (!a || a.playerId !== req.params.id) return res.status(404).json({ error: 'ASSIGNMENT_NOT_FOUND' });
@@ -327,37 +314,34 @@ export function registerBoxTraining(ctx) {
   }
 
   orgRouter.post('/box-cam/challenges', (req, res) => {
+    const body = boxCamInput(res, 'challenge', req.body);
+    if (!body) return;
     if (req.org.type === 'agency') return res.status(403).json({ error: 'AGENCY_NOT_ELIGIBLE' });
     if (req.org.suspended) return res.status(403).json({ error: 'ORG_SUSPENDED' });
     if (!req.org.verified)
       return res
         .status(403)
         .json({ error: 'ORG_NOT_ELIGIBLE', message: 'Only a verified organisation can publish a Box Challenge.' });
-    const { title, drillId, metric, targetTotal, days, adultOnly, cap } = req.body ?? {};
-    const drill = latestDrill(String(drillId ?? ''));
+    const { title, drillId, metric, targetTotal, days, adultOnly, cap } = body;
+    const drill = latestDrill(drillId ?? '');
     if (!drill) return res.status(404).json({ error: 'DRILL_UNKNOWN' });
-    if (!['reps', 'active_minutes'].includes(metric))
-      return res.status(400).json({ error: 'METRIC_INVALID', allowed: ['reps', 'active_minutes'] });
+    if (!metric)
+      return res
+        .status(400)
+        .json({ error: 'METRIC_INVALID', field: 'metric', problem: 'required', allowed: CHALLENGE_METRICS });
     if (metric === 'reps' && !drill.verificationCapabilities.includes('rep_count')) {
       return res.status(400).json({
         error: 'METRIC_NOT_SUPPORTED',
         message: `${drill.title} cannot verify repetition counts — use active_minutes.`,
       });
     }
-    // A total is a whole number of reps or minutes: a numeric string is refused.
-    if (!isInt(targetTotal, 1, 100_000)) return res.status(400).json({ error: 'TARGET_INVALID' });
-    if (!isAbsent(days) && !isInt(days, 1, 60))
-      return fieldInvalid(res, 'days', 'A challenge runs for a whole number of days, from 1 to 60.');
-    if (!isAbsent(cap) && !isInt(cap, 1, 1_000_000))
-      return fieldInvalid(res, 'cap', 'A cap is a whole number of participants, at least 1.');
-    if (!isAbsent(adultOnly) && typeof adultOnly !== 'boolean')
-      return fieldInvalid(res, 'adultOnly', 'adultOnly is true or false.');
-    if (!isAbsent(title) && typeof title !== 'string') return fieldInvalid(res, 'title', 'A title is text.');
-    if (!moderateOrRefuse(res, String(title ?? ''), { kind: 'box_challenge', orgId: req.org.id })) return;
+    if (targetTotal === undefined)
+      return res.status(400).json({ error: 'TARGET_INVALID', field: 'targetTotal', problem: 'required' });
+    if (!moderateOrRefuse(res, title ?? '', { kind: 'box_challenge', orgId: req.org.id })) return;
     const at = Date.now();
     const c = {
       id: nextId('boxc'),
-      title: (title ?? '').trim().slice(0, 120) || `${drill.title} Box Challenge`,
+      title: (title ?? '').trim() || `${drill.title} Box Challenge`,
       publisher: { kind: 'org', orgId: req.org.id, orgName: req.org.name, byName: req.orgUser.name },
       drillId: drill.id,
       metric,
@@ -386,7 +370,9 @@ export function registerBoxTraining(ctx) {
   });
 
   orgRouter.get('/box-cam/challenges', (req, res) => {
-    const page = pageNewestFirst(req, res, reads.challenges.forOrg(req.org.id), { readPage, pageOf, sendPageError });
+    const query = boxCamInput(res, 'page', req.query, 'query');
+    if (!query) return;
+    const page = pageNewestFirst(query, res, reads.challenges.forOrg(req.org.id), { readPage, pageOf, sendPageError });
     if (!page) return;
     const counts = reads.challenges.participants(page.items.map((c) => c.id));
     res.json({ items: page.items.map((c) => challengeView(c, null, counts.get(c.id))), nextCursor: page.nextCursor });
@@ -424,6 +410,7 @@ export function registerBoxTraining(ctx) {
     res.status(201).json({ challenge: challengeView(c, entry) });
   }
   playerRouter.post('/box-cam/challenges/:id/join', (req, res) => {
+    if (!boxCamInput(res, 'none', req.body)) return;
     if (!isAdult(req.player))
       return res
         .status(403)
@@ -431,6 +418,7 @@ export function registerBoxTraining(ctx) {
     joinChallenge(res, req.player, req.params.id, { kind: 'player', id: req.player.id });
   });
   guardianRouter.post('/children/:id/box-cam/challenges/:cid/join', (req, res) => {
+    if (!boxCamInput(res, 'none', req.body)) return;
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
     const child = findPlayer(req.params.id);
     if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
@@ -502,16 +490,10 @@ export function registerBoxTraining(ctx) {
     updatedAt: p.updatedAt,
     updatedBy: p.updatedBy,
   });
-  function applyPrefs(res, player, body, by) {
+  function applyPrefs(res, player, input, by) {
+    const body = boxCamInput(res, 'prefs', input);
+    if (!body) return;
     const current = prefsFor(player.id);
-    if (
-      body.shareDevelopmentActivity !== undefined &&
-      !['private', 'recruitment'].includes(body.shareDevelopmentActivity)
-    )
-      return res.status(400).json({ error: 'SHARE_INVALID', allowed: ['private', 'recruitment'] });
-    // A boolean as sent: anything else is refused, not read as truthy.
-    if (body.retainClips !== undefined && typeof body.retainClips !== 'boolean')
-      return fieldInvalid(res, 'retainClips', 'retainClips is true or false.');
     const next = {
       playerId: player.id,
       shareDevelopmentActivity: body.shareDevelopmentActivity ?? current.shareDevelopmentActivity,
@@ -537,13 +519,13 @@ export function registerBoxTraining(ctx) {
       return res
         .status(403)
         .json({ error: 'GUARDIAN_MANAGED', message: 'Your parent/guardian manages Box Cam privacy settings.' });
-    applyPrefs(res, req.player, req.body ?? {}, { kind: 'player', id: req.player.id });
+    applyPrefs(res, req.player, req.body, { kind: 'player', id: req.player.id });
   });
   guardianRouter.patch('/children/:id/box-cam/prefs', (req, res) => {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
     const child = findPlayer(req.params.id);
     if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    applyPrefs(res, child, req.body ?? {}, { kind: 'guardian', id: req.guardian.id });
+    applyPrefs(res, child, req.body, { kind: 'guardian', id: req.guardian.id });
   });
 
   // -------------------------------------------------------------- disputes
@@ -558,7 +540,9 @@ export function registerBoxTraining(ctx) {
     createdAt: d.createdAt,
   });
   const disputeWindows = new Map();
-  function fileDispute(res, player, sessionId, reason, by) {
+  function fileDispute(res, player, sessionId, input, by) {
+    const body = boxCamInput(res, 'dispute', input);
+    if (!body) return;
     const now = Date.now();
     const w = disputeWindows.get(player.id);
     if (w && w.resetAt > now && w.count >= 5) return res.status(429).json({ error: 'RATE_LIMITED' });
@@ -569,15 +553,15 @@ export function registerBoxTraining(ctx) {
     const s = reads.sessions.byId(sessionId);
     if (!s || s.playerId !== player.id || !TERMINAL_STATES.has(s.status))
       return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    const text = String(reason ?? '').trim();
-    if (!text) return res.status(400).json({ error: 'REASON_REQUIRED' });
+    const text = (body.reason ?? '').trim();
+    if (!text) return res.status(400).json({ error: 'REASON_REQUIRED', field: 'reason', problem: 'required' });
     if (!moderateOrRefuse(res, text, { kind: 'box_dispute', playerId: player.id })) return;
     const d = boxCam.disputes.create({
       id: nextId('boxd'),
       sessionId: s.id,
       playerId: player.id,
       by,
-      reason: text.slice(0, 500),
+      reason: text,
       status: 'open',
       resolution: null,
       createdAt: now,
@@ -588,7 +572,7 @@ export function registerBoxTraining(ctx) {
     });
   }
   playerRouter.post('/box-cam/sessions/:id/dispute', (req, res) =>
-    fileDispute(res, req.player, req.params.id, req.body?.reason, {
+    fileDispute(res, req.player, req.params.id, req.body, {
       kind: 'player',
       id: req.player.id,
       name: req.player.name,
@@ -598,7 +582,7 @@ export function registerBoxTraining(ctx) {
     if (!guardianOwnsChild(req.guardian, req.params.id)) return res.status(404).json({ error: 'CHILD_NOT_FOUND' });
     const child = findPlayer(req.params.id);
     if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    fileDispute(res, child, req.params.sid, req.body?.reason, {
+    fileDispute(res, child, req.params.sid, req.body, {
       kind: 'guardian',
       id: req.guardian.id,
       name: req.guardian.name,
@@ -608,13 +592,15 @@ export function registerBoxTraining(ctx) {
   // ------------------------------------------------------------------ T&S
   // The queue grows with the platform: one page, oldest first.
   adminRouter.get('/box-cam/disputes', (req, res) => {
+    const query = boxCamInput(res, 'disputeQueue', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'string']);
+      page = readPage(query, ['number', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
-    const rows = reads.disputes.queue({ all: req.query.all === '1', after: page.after, limit: page.limit + 1 });
+    const rows = reads.disputes.queue({ all: query.all === '1', after: page.after, limit: page.limit + 1 });
     const items = rows.slice(0, page.limit);
     const sessions = new Map(reads.sessions.byIds(items.map((d) => d.sessionId)).map((s) => [s.id, s]));
     res.json({
@@ -630,10 +616,15 @@ export function registerBoxTraining(ctx) {
     const d = reads.disputes.byId(req.params.id);
     if (!d) return res.status(404).json({ error: 'DISPUTE_NOT_FOUND' });
     if (d.status !== 'open') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const { outcome, reason } = req.body ?? {};
-    if (!['stands', 'invalidated', 'provider_bug'].includes(outcome))
-      return res.status(400).json({ error: 'OUTCOME_REQUIRED', allowed: ['stands', 'invalidated', 'provider_bug'] });
-    if (!String(reason ?? '').trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
+    const body = boxCamInput(res, 'resolve', req.body);
+    if (!body) return;
+    const { outcome } = body;
+    const reason = (body.reason ?? '').trim();
+    if (!outcome)
+      return res
+        .status(400)
+        .json({ error: 'OUTCOME_REQUIRED', field: 'outcome', problem: 'required', allowed: DISPUTE_OUTCOMES });
+    if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED', field: 'reason', problem: 'required' });
     const s = reads.sessions.byId(d.sessionId);
     const resolved = unit(() => {
       // A session with no result (it expired before it started) or one already invalidated has nothing to invalidate:
@@ -656,7 +647,7 @@ export function registerBoxTraining(ctx) {
       }
       const row = boxCam.disputes.resolve(d.id, {
         outcome,
-        reason: String(reason).trim().slice(0, 400),
+        reason,
         at: Date.now(),
       });
       const target = d.by.kind === 'guardian' ? { kind: 'guardian', id: d.by.id } : { kind: 'player', id: d.playerId };
@@ -671,18 +662,21 @@ export function registerBoxTraining(ctx) {
     res.json({ dispute: disputeView(resolved) });
   });
   adminRouter.post('/box-cam/sessions/:id/restore', (req, res) => {
+    const body = boxCamInput(res, 'restore', req.body);
+    if (!body) return;
     const s = reads.sessions.byId(req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (s.verificationState !== 'invalidated' || !s.previousVerificationState)
       return res.status(409).json({ error: 'NOT_INVALIDATED' });
-    if (!String(req.body?.reason ?? '').trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
+    const reason = (body.reason ?? '').trim();
+    if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED', field: 'reason', problem: 'required' });
     const restored = unit(() => {
       const row = boxCam.sessions.restore(s.id, { at: Date.now() });
       ledgerAppend({
         type: 'box_result_restored',
         playerId: s.playerId,
         orgId: null,
-        detail: { sessionId: s.id, reason: String(req.body.reason).slice(0, 300) },
+        detail: { sessionId: s.id, reason },
       });
       return row;
     });

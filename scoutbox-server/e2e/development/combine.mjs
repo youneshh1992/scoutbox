@@ -295,8 +295,12 @@ async function runCombine(
     );
     if (ev.status !== 200) break;
   }
-  const done = await j('POST', `/player/combine/attempts/${attempt.id}/complete`, { nonce, ...completeBody }, token);
-  return { created, attempt, boxSession, nonce, ev, done };
+  // A complete naming a result is refused; the plain complete that follows derives it from the observations.
+  const forged = Object.keys(completeBody).length
+    ? await j('POST', `/player/combine/attempts/${attempt.id}/complete`, { nonce, ...completeBody }, token)
+    : null;
+  const done = await j('POST', `/player/combine/attempts/${attempt.id}/complete`, { nonce }, token);
+  return { created, attempt, boxSession, nonce, ev, forged, done };
 }
 // event builders
 const countEvents = (n, windowMs = WINDOW) => {
@@ -388,7 +392,11 @@ section('C2 — client cannot forge the number or the state');
       verifiedReps: 250,
     },
   });
-  neg(r.done.body.attempt.measuredValue === 150, 'C2: forged measuredValue ignored — server-derived 150 stands');
+  neg(
+    r.forged.status === 400 && r.forged.body.problem === 'unknown_field',
+    'C2: a complete that names the number or the state is refused',
+  );
+  neg(r.done.body.attempt.measuredValue === 150, 'C2: the server-derived 150 stands');
   neg(r.done.body.attempt.measuredValue !== 250, 'C2: 250 never appears');
 }
 
@@ -615,22 +623,22 @@ section('abuse / edge / security catalogue');
   const forge = await runCombine(kola.token, { protocolId: 'combine-box-juggle' }, () => countEvents(120), {
     completeBody: { combineState: 'combine_verified', measuredValue: 999 },
   });
-  neg(forge.done.body.attempt.measuredValue === 120, '1-3: forged value/state ignored (server-derived 120)');
+  neg(forge.forged.status === 400, '1-3: a forged value/state is refused');
+  neg(forge.done.body.attempt.measuredValue === 120, '1-3: the server-derived 120 stands');
   // 4 protocol spoof — unknown
   neg(
     (await j('POST', '/player/combine/attempts', { protocolId: 'combine-make-believe' }, kola.token)).status === 404,
     '4: unknown protocol rejected',
   );
   // 5/6 replay / prerecorded upload — no upload path to Combine Verified at all
+  const bound = await j(
+    'POST',
+    '/player/combine/attempts',
+    { protocolId: 'combine-box-touch-60', boxSessionId: 'boxs-forged' },
+    kola.token,
+  );
   neg(
-    (
-      await j(
-        'POST',
-        '/player/combine/attempts',
-        { protocolId: 'combine-box-touch-60', boxSessionId: 'boxs-forged' },
-        kola.token,
-      )
-    ).body.attempt?.boxSessionId !== 'boxs-forged',
+    bound.status === 400 && bound.body.field === 'boxSessionId' && bound.body.attempt === undefined,
     '6: client cannot bind an arbitrary/forged Box Session',
   );
   // 8 cross-player attempt access
@@ -755,9 +763,9 @@ section('abuse / edge / security catalogue');
     neg(susp.status === 403, '25: suspended org cannot create a Club Combine');
     await j('POST', '/admin/clubs/org-eastport/verification', { suspended: false }, undefined, A);
   }
-  // 27 club cannot modify a standardized protocol (only protocolIds accepted; extra fields ignored)
+  // 27 club cannot modify a standardized protocol (it names protocols; a body carrying protocol rules is refused)
   {
-    const r = await j(
+    const altered = await j(
       'POST',
       '/org/combine/requests',
       {
@@ -767,6 +775,16 @@ section('abuse / edge / security catalogue');
         metricType: 'time',
         requiredCapabilities: [],
       },
+      maria.token,
+    );
+    neg(
+      altered.status === 400 && altered.body.problem === 'unknown_field',
+      '27: a request that carries protocol rules is refused',
+    );
+    const r = await j(
+      'POST',
+      '/org/combine/requests',
+      { protocolIds: ['combine-box-touch-60'], playerId: 'pl-adeyemi' },
       maria.token,
     );
     ok(r.status === 201, '27: club selects a standardized protocol');
@@ -839,7 +857,7 @@ section('typed rows: the nonce stored only as its hash, junk refused, the reques
     kola.token,
   );
   neg(
-    cal.status === 400 && cal.body.field === 'checks',
+    cal.status === 400 && cal.body.field === 'checks[1]',
     'a calibration check that is not a name is refused (it was turned into a string before)',
   );
   const many = await j(
@@ -856,7 +874,7 @@ section('typed rows: the nonce stored only as its hash, junk refused, the reques
     maria.token,
   );
   neg(
-    badIds.status === 400 && badIds.body.field === 'protocolIds',
+    badIds.status === 400 && badIds.body.field === 'protocolIds[0]',
     'a protocol id that is not text is refused (it was turned into a string before)',
   );
   const badTitle = await j(

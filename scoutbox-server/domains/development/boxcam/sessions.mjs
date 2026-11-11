@@ -25,6 +25,7 @@ import {
 import { drillByIdVersion, latestDrill, providerFor, LIVENESS_CHALLENGES, PROVIDERS } from './drills.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { hashNonce, nonceMatches, BOX_CAM_LIMITS } from '../../../repositories/boxCam.mjs';
+import { boxCamInput } from './schemas.mjs';
 
 const DRIFT_MS = 7_000; // allowed client/server clock drift
 const SESSION_TTL_MS = 2 * 3_600_000;
@@ -238,12 +239,14 @@ export function registerBoxCamSessions(ctx) {
 
   // --------------------------------------------------------------- create
   playerRouter.post('/box-cam/sessions', (req, res) => {
+    const body = boxCamInput(res, 'session', req.body);
+    if (!body) return;
     if (limited('box_session_create', req.player.id))
       return res.status(429).json(rateLimitedBody('box_session_create'));
-    const { drillId, target, provider: providerId, assignmentId, challengeEntryId } = req.body ?? {};
-    const drill = latestDrill(String(drillId ?? ''));
+    const { drillId, target, provider: providerId, assignmentId, challengeEntryId } = body;
+    const drill = latestDrill(drillId ?? '');
     if (!drill) return res.status(404).json({ error: 'DRILL_UNKNOWN' });
-    const provider = providerFor(String(providerId ?? 'web_client'), { testProviderEnabled });
+    const provider = providerFor(providerId ?? 'web_client', { testProviderEnabled });
     if (!provider)
       return res.status(403).json({
         error: 'PROVIDER_UNAVAILABLE',
@@ -260,7 +263,6 @@ export function registerBoxCamSessions(ctx) {
       return res.status(400).json({ error: 'TARGET_TYPE_UNSUPPORTED', allowed: drill.targetTypes });
     const bounds = { duration: [60_000, 2 * 3_600_000], repetitions: [1, 2_000], sets: [1, 20] };
     const [min, max] = bounds[t.type];
-    // The value is a number as sent: a numeric string is refused.
     if (typeof t.value !== 'number' || !Number.isFinite(t.value) || t.value < min || t.value > max)
       return res.status(400).json({ error: 'TARGET_VALUE_INVALID', min, max });
 
@@ -315,7 +317,9 @@ export function registerBoxCamSessions(ctx) {
       boxCam.sessions.expire(s.id);
       return res.status(410).json({ error: 'SESSION_EXPIRED' });
     }
-    const { nonce, liveness } = req.body ?? {};
+    const body = boxCamInput(res, 'start', req.body);
+    if (!body) return;
+    const { nonce, liveness } = body;
     if (!nonceMatches(s, nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
     if (!liveness) return res.status(403).json({ error: 'LIVENESS_REQUIRED', challenge: s.livenessChallenge });
     if (liveness !== s.livenessChallenge)
@@ -331,10 +335,12 @@ export function registerBoxCamSessions(ctx) {
   playerRouter.post('/box-cam/sessions/:id/events', (req, res) => {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    if (!nonceMatches(s, (req.body ?? {}).nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
+    const body = boxCamInput(res, 'events', req.body);
+    if (!body) return;
+    if (!nonceMatches(s, body.nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
     if (s.status !== 'recording') return res.status(409).json({ error: 'SESSION_NOT_RECORDING', status: s.status });
     if (Date.now() > s.expiresAt) return res.status(410).json({ error: 'SESSION_EXPIRED' });
-    const batch = (req.body ?? {}).batch;
+    const { batch } = body;
     if (!Array.isArray(batch) || batch.length === 0 || batch.length > MAX_EVENTS_PER_BATCH) {
       return res.status(400).json({ error: 'BATCH_INVALID', maxEvents: MAX_EVENTS_PER_BATCH });
     }
@@ -354,14 +360,13 @@ export function registerBoxCamSessions(ctx) {
     let seq = s.lastSeq;
     const observations = [];
     for (const e of batch) {
-      const n = Number(e?.seq);
+      const n = e.seq;
       if (!Number.isSafeInteger(n) || n <= seq)
         return res.status(409).json({ error: 'SEQUENCE_INVALID', lastSeq: s.lastSeq });
       seq = n;
-      if (!EVENT_TYPES.has(e.type))
-        return res.status(400).json({ error: 'EVENT_TYPE_UNKNOWN', type: String(e.type ?? '') });
+      if (!EVENT_TYPES.has(e.type)) return res.status(400).json({ error: 'EVENT_TYPE_UNKNOWN', type: e.type });
       for (const k of ['atMs', 'fromMs', 'toMs']) {
-        if (e[k] != null && (!Number.isFinite(Number(e[k])) || Number(e[k]) < 0 || Number(e[k]) > maxMs)) {
+        if (e[k] != null && (!Number.isFinite(e[k]) || e[k] < 0 || e[k] > maxMs)) {
           return res.status(422).json({ error: 'TIMESTAMP_OUT_OF_RANGE', field: k, maxMs });
         }
       }
@@ -536,7 +541,9 @@ export function registerBoxCamSessions(ctx) {
   playerRouter.post('/box-cam/sessions/:id/complete', (req, res) => {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    if (!nonceMatches(s, (req.body ?? {}).nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
+    const body = boxCamInput(res, 'withNonce', req.body);
+    if (!body) return;
+    if (!nonceMatches(s, body.nonce)) return res.status(403).json({ error: 'NONCE_INVALID' });
     if (TERMINAL_STATES.has(s.status))
       return res
         .status(409)
@@ -546,6 +553,7 @@ export function registerBoxCamSessions(ctx) {
   });
 
   playerRouter.post('/box-cam/sessions/:id/cancel', (req, res) => {
+    if (!boxCamInput(res, 'withNonce', req.body)) return;
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     if (TERMINAL_STATES.has(s.status)) return res.status(409).json({ error: 'ALREADY_FINALIZED' });
@@ -560,8 +568,10 @@ export function registerBoxCamSessions(ctx) {
   playerRouter.post('/box-cam/sessions/:id/note', (req, res) => {
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s || !TERMINAL_STATES.has(s.status)) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
-    const note = String(req.body?.note ?? '').slice(0, 300);
-    if (!note.trim()) return res.status(400).json({ error: 'NOTE_REQUIRED' });
+    const body = boxCamInput(res, 'note', req.body);
+    if (!body) return;
+    const note = body.note ?? '';
+    if (!note.trim()) return res.status(400).json({ error: 'NOTE_REQUIRED', field: 'note', problem: 'required' });
     if (!moderateOrRefuse(res, note, { kind: 'box_cam_note', playerId: req.player.id })) return;
     // A note is the player's words: provenance stays player_submitted_note, apart from Box Cam observations.
     const next = boxCam.sessions.setNote(s.id, { note });
@@ -609,6 +619,8 @@ export function registerBoxCamSessions(ctx) {
   // A Box Clip is uploaded through /player/media as usual, then tagged as Box Cam captured. Box Cam itself never
   // receives raw session video.
   playerRouter.post('/box-cam/sessions/:id/clip', (req, res) => {
+    const body = boxCamInput(res, 'clip', req.body);
+    if (!body) return;
     const s = findOwnSession(req.player.id, req.params.id);
     if (!s || !TERMINAL_STATES.has(s.status)) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     const prefs = ctx.boxPrefsFor(req.player.id);
@@ -618,7 +630,7 @@ export function registerBoxCamSessions(ctx) {
         message: 'Your parent/guardian controls whether Box Clips from home training are kept.',
       });
     }
-    const media = (req.player.media ?? []).find((m) => m.id === req.body?.mediaId);
+    const media = (req.player.media ?? []).find((m) => m.id === body.mediaId);
     if (!media) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
     const next = unit(() => {
       ctx.players.patchItem(req.player.id, 'media', { id: media.id }, { capturedBy: 'box_cam', boxSessionId: s.id });
