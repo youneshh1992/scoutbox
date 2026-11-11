@@ -1675,6 +1675,25 @@ ok(
 );
 r = await post('/player/uploads', { size: 512, mime: 'video/webm', title: 42 }, bearer(KOLA));
 ok(r.status === 400 && r.body.field === 'title', 'a title that is not text is refused (it was stringified)');
+r = await post('/player/uploads', { size: 512, mime: 'video/webm', title: 't'.repeat(121) }, bearer(KOLA));
+ok(
+  r.status === 400 && r.body.field === 'title' && r.body.problem === 'too_long',
+  'IN1 a title over 120 characters is refused, not cut',
+);
+r = await post('/player/uploads', { size: 512, mime: 'video/webm', title: 'Owner', playerId: 'pl-osei' }, bearer(KOLA));
+ok(r.status === 400 && r.body.field === 'playerId', 'IN2 an upload cannot name the player it belongs to');
+r = await post('/player/uploads', { size: 512, mime: 'application/x-msdownload', title: 'nope' }, bearer(KOLA));
+ok(
+  r.body.error === 'TYPE_NOT_ALLOWED' && r.body.allowed?.includes('video/mp4'),
+  'IN3 a disallowed type lists the allowed ones',
+);
+r = await put(`/player/uploads/${badUp.id}/chunks/0`, { data: ['AAAA'] }, bearer(KOLA));
+ok(
+  r.status === 400 && r.body.field === 'data' && r.body.problem === 'not_text',
+  'IN4 chunk data that is not text is refused',
+);
+r = await fetch(`${API}/media/${upMedia}?e=soon&s=x&v=y`, { headers: bearer(MARIA) });
+ok(r.status === 400, 'IN5 a media link with an expiry that is not a number is refused');
 r = await post(`/player/uploads/${badUp.id}/abort`, {}, bearer(KOLA));
 ok(
   r.status === 200 && r.body.upload.status === 'aborted' && !fs.existsSync(path.join(DATA, 'upload-tmp', badUp.id)),

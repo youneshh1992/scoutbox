@@ -3,6 +3,7 @@
 // fetch: possessing a URL is not authority.
 import crypto from 'node:crypto';
 import { visibleToOrg } from '../../domain.mjs';
+import { mediaInput } from './schemas.mjs';
 
 // Short on purpose: clients refetch constantly (live-sync ticks), so links are re-minted long before they expire.
 const MEDIA_URL_TTL_MS = 15 * 60 * 1000;
@@ -87,10 +88,12 @@ export function installSignedMedia({ app, byId, sessions, mediaDeletions, storag
     if (!/^[a-z0-9-]+$/i.test(id)) return res.status(400).json({ error: 'BAD_MEDIA_ID' });
     // The queue entry is the decision: a deleted owner's file is never served, whether or not it is gone yet.
     if (mediaDeletions.isQueued(id)) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
-    const exp = Number(req.query.e ?? 0);
-    const sid = String(req.query.v ?? '');
+    const link = mediaInput(res, 'mediaLink', req.query, 'query');
+    if (!link) return;
+    const exp = Number(link.e ?? 0);
+    const sid = link.v ?? '';
     let session = null;
-    if (sid && exp > Date.now() && String(req.query.s ?? '') === mediaSig(id, exp, sid)) session = sessions.bySid(sid);
+    if (sid && exp > Date.now() && (link.s ?? '') === mediaSig(id, exp, sid)) session = sessions.bySid(sid);
     session ??= sessionFor(req);
     if (!sessionMayAccessMedia(session, id)) {
       return res.status(401).json({

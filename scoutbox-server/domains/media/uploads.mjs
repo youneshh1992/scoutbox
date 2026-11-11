@@ -4,7 +4,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { OPERATIONS_LIMITS, UPLOAD_MIMES, isSha256 } from '../../repositories/operations.mjs';
+import { OPERATIONS_LIMITS, UPLOAD_MIMES } from '../../repositories/operations.mjs';
+import { filled } from '../platform/schemas.mjs';
+import { mediaInput } from './schemas.mjs';
 
 const MAX_UPLOAD = OPERATIONS_LIMITS.maxUploadBytes;
 const CHUNK = 512 * 1024; // base64 chunks stay well under the JSON body cap
@@ -35,7 +37,6 @@ export function registerUploads(ctx) {
     throw new TypeError('registerUploads needs the operations repository');
   const uploads = operations.uploads;
   const chunkDir = (id) => chunkDirOf(DATA_DIR, id);
-  const invalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
   /** A write that refuses when another request ended the session first (a race) answers 409, as the check before it would. */
   const unlessEnded = (res, id, write) => {
     try {
@@ -48,28 +49,30 @@ export function registerUploads(ctx) {
   };
 
   playerRouter.post('/uploads', (req, res) => {
-    const { size, mime, title, sha256 } = req.body ?? {};
-    if (size === undefined || size === null) return res.status(400).json({ error: 'SIZE_REQUIRED' });
-    if (!Number.isSafeInteger(size) || size <= 0) return invalid(res, 'size', 'size is a whole number of bytes.');
+    const body = mediaInput(res, 'upload', req.body);
+    if (!body) return;
+    const { size, mime, sha256 } = body;
+    if (size === undefined || size === null)
+      return res.status(400).json({ error: 'SIZE_REQUIRED', field: 'size', problem: 'required' });
     if (size > MAX_UPLOAD)
       return res.status(413).json({
         error: 'FILE_TOO_LARGE',
         maxBytes: MAX_UPLOAD,
         message: 'Uploads are capped at 40MB on this platform — trim the clip before uploading.',
       });
-    if (!UPLOAD_MIMES.includes(mime))
-      return res.status(400).json({ error: 'TYPE_NOT_ALLOWED', allowed: 'webm/mp4/mov video or jpeg/png/webp image' });
-    if (title === undefined || title === null || title === '') return res.status(400).json({ error: 'TITLE_REQUIRED' });
-    if (typeof title !== 'string' || !title.trim()) return invalid(res, 'title', 'title must be text.');
-    if (sha256 !== undefined && sha256 !== null && sha256 !== '' && !isSha256(sha256))
-      return invalid(res, 'sha256', "sha256 is the file's SHA-256 digest: 64 hexadecimal characters.");
+    if (!mime)
+      return res
+        .status(400)
+        .json({ error: 'TYPE_NOT_ALLOWED', field: 'mime', problem: 'required', allowed: UPLOAD_MIMES });
+    const title = filled(body.title);
+    if (!title) return res.status(400).json({ error: 'TITLE_REQUIRED', field: 'title', problem: 'required' });
     if (!moderateOrRefuse(res, title, { kind: 'media_title', playerId: req.player.id })) return;
     const up = uploads.open({
       id: nextId('upl'),
       playerId: req.player.id,
       size,
       mime,
-      title: title.slice(0, OPERATIONS_LIMITS.uploadTitle),
+      title,
       sha256: sha256 || null,
       chunkSize: CHUNK,
       totalChunks: Math.ceil(size / CHUNK),
@@ -96,8 +99,10 @@ export function registerUploads(ctx) {
     const idx = Number(req.params.index);
     if (!Number.isInteger(idx) || idx < 0 || idx >= up.totalChunks)
       return res.status(400).json({ error: 'CHUNK_INDEX_INVALID' });
-    const data = req.body?.data;
-    if (typeof data !== 'string' || !data) return res.status(400).json({ error: 'CHUNK_DATA_REQUIRED' });
+    const body = mediaInput(res, 'chunk', req.body);
+    if (!body) return;
+    const { data } = body;
+    if (!data) return res.status(400).json({ error: 'CHUNK_DATA_REQUIRED', field: 'data', problem: 'required' });
     const buf = Buffer.from(data, 'base64');
     const expected = idx === up.totalChunks - 1 ? up.size - idx * up.chunkSize : up.chunkSize;
     if (buf.length !== expected)
@@ -121,6 +126,7 @@ export function registerUploads(ctx) {
   playerRouter.post('/uploads/:id/finalise', (req, res) => {
     const up = ownUpload(req, res);
     if (!up) return;
+    if (!mediaInput(res, 'none', req.body)) return;
     if (up.status === 'finalised')
       return res.json({ upload: uploadView(up), media: req.player.media.find((m) => m.id === up.finalisedMediaId) }); // idempotent retry
     if (up.status !== 'open') return res.status(409).json({ error: 'UPLOAD_NOT_OPEN', status: up.status });
@@ -177,6 +183,7 @@ export function registerUploads(ctx) {
   playerRouter.post('/uploads/:id/abort', (req, res) => {
     const up = ownUpload(req, res);
     if (!up) return;
+    if (!mediaInput(res, 'none', req.body)) return;
     if (up.status === 'finalised') return res.status(409).json({ error: 'ALREADY_FINALISED' });
     // Aborting twice changes nothing.
     const fresh = up.status === 'open' ? unlessEnded(res, up.id, () => uploads.abort(up.id)) : up;
