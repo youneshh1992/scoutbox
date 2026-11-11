@@ -16,7 +16,6 @@ import {
   GROUPS_COLLECTIONS as COLLECTIONS,
   typeGroup,
   typeGrant,
-  typeExpiresDays,
   grantExpiry,
 } from '../repositories/groups.mjs';
 
@@ -151,17 +150,6 @@ test('[typing] junk is refused naming the record and field', () => {
   assert.match(
     typeGrant(grant({ resourceKind: 'player' })).reason,
     /resourceKind must be one of shortlist\|case\|assessment/,
-  );
-  assert.deepEqual(
-    [
-      typeExpiresDays(undefined).value,
-      typeExpiresDays(7).value,
-      typeExpiresDays(0).ok,
-      typeExpiresDays(181).ok,
-      typeExpiresDays(2.5).ok,
-      typeExpiresDays('30').ok,
-    ],
-    [30, 7, false, false, false, false],
   );
 });
 

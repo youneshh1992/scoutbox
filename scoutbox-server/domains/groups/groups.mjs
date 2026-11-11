@@ -2,8 +2,33 @@
 // resource still exists under the same owner, and every player involved is currently visible to the receiving org.
 // Membership alone shares nothing, and no group administrator can hand out access the receiving club could not hold
 // on its own.
+import * as v from 'valibot';
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { GRANT_RESOURCE_KINDS, GROUP_LIMITS as L, typeExpiresDays, grantExpiry } from '../../repositories/groups.mjs';
+import { id, idList, inputOrRefuse, oneOf, requiredText, text, wholeNumber } from '../platform/schemas.mjs';
+import {
+  GRANT_DEFAULT_DAYS,
+  GRANT_RESOURCE_KINDS,
+  GROUP_LIMITS as L,
+  grantExpiry,
+} from '../../repositories/groups.mjs';
+
+const NewGroup = v.strictObject({ name: requiredText(L.name), adminOrgId: id });
+const Invite = v.strictObject({ orgId: id });
+const ShareTemplate = v.strictObject({ templateId: id });
+const NewProgramme = v.strictObject({
+  name: v.nullish(requiredText(L.programmeName)),
+  region: v.nullish(text(L.region)),
+});
+const grantFields = {
+  resourceKind: oneOf(GRANT_RESOURCE_KINDS),
+  resourceId: id,
+  toOrgIds: v.nullish(idList(L.members)),
+};
+const GrantPreview = v.strictObject(grantFields);
+const NewGrant = v.strictObject({
+  ...grantFields,
+  expiresDays: v.nullish(wholeNumber({ min: L.expiresDays[0], max: L.expiresDays[1] })),
+});
 
 export const groupView = (g) => ({
   id: g.id,
@@ -52,19 +77,15 @@ export function registerGroups(ctx) {
   if (typeof reads?.signings?.forPlayer !== 'function')
     throw new TypeError('registerGroups needs recruitmentReads (signings) from the data layer');
   const G = groupReads.groups;
-  const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
   const leadOf = (orgId) => users.firstActive(orgId);
 
   // ------------------------------------------------------- administration
   adminRouter.post('/groups', (req, res) => {
-    const { name, adminOrgId } = req.body ?? {};
-    if (name !== undefined && name !== null && typeof name !== 'string')
-      return fieldInvalid(res, 'name', 'A group name is text.');
-    if (typeof name === 'string' && name.length > L.name)
-      return fieldInvalid(res, 'name', `A group name is at most ${L.name} characters.`);
-    const admin = typeof adminOrgId === 'string' ? byId.org(adminOrgId) : null;
-    if (!name?.trim() || !admin)
-      return res.status(400).json({ error: 'GROUP_FIELDS', message: 'name and a valid adminOrgId are required.' });
+    const body = inputOrRefuse(res, NewGroup, req.body);
+    if (!body) return;
+    const { name } = body;
+    const admin = byId.org(body.adminOrgId);
+    if (!admin) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     if (admin.type === 'agency')
       return res
         .status(403)
@@ -117,7 +138,9 @@ export function registerGroups(ctx) {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);
     if (!g || !g.adminOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
-    const target = typeof req.body?.orgId === 'string' ? byId.org(req.body.orgId) : null;
+    const body = inputOrRefuse(res, Invite, req.body);
+    if (!body) return;
+    const target = byId.org(body.orgId);
     if (!target) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     if (target.type === 'agency')
       return res
@@ -176,8 +199,9 @@ export function registerGroups(ctx) {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);
     if (!g || !g.adminOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
-    const t =
-      typeof req.body?.templateId === 'string' ? ctx.scoutingReads.templates.currentById(req.body.templateId) : null;
+    const body = inputOrRefuse(res, ShareTemplate, req.body);
+    if (!body) return;
+    const t = ctx.scoutingReads.templates.currentById(body.templateId);
     if (!t) return res.status(404).json({ error: 'TEMPLATE_NOT_FOUND' });
     if (!g.sharedTemplateIds.includes(t.id) && g.sharedTemplateIds.length >= L.templates)
       return res
@@ -190,11 +214,9 @@ export function registerGroups(ctx) {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);
     if (!g || !g.adminOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'GROUP_ADMIN_ONLY' });
-    const { name = null, region = null } = req.body ?? {};
-    if (name !== null && (typeof name !== 'string' || !name.trim() || name.length > L.programmeName))
-      return fieldInvalid(res, 'name', `A programme name is text of 1 to ${L.programmeName} characters.`);
-    if (region !== null && (typeof region !== 'string' || region.length > L.region))
-      return fieldInvalid(res, 'region', `A region is text of at most ${L.region} characters.`);
+    const body = inputOrRefuse(res, NewProgramme, req.body);
+    if (!body) return;
+    const { name, region } = body;
     if (g.programmes.length >= L.programmes)
       return res
         .status(409)
@@ -211,25 +233,18 @@ export function registerGroups(ctx) {
   });
 
   // --------------------------------------------------------------- grants
-  function resourceOwnerOk(kind, id, orgId) {
-    if (typeof id !== 'string') return false;
-    if (kind === 'shortlist') return id === '*'; // "my shortlist" as a whole
-    if (kind === 'case') return ctx.recruitmentReads.cases.byId(id)?.orgId === orgId;
+  function resourceOwnerOk(kind, resourceId, orgId) {
+    if (kind === 'shortlist') return resourceId === '*'; // "my shortlist" as a whole
+    if (kind === 'case') return ctx.recruitmentReads.cases.byId(resourceId)?.orgId === orgId;
     if (kind === 'assessment') {
-      const a = ctx.scoutingReads.assessments.byId(id);
+      const a = ctx.scoutingReads.assessments.byId(resourceId);
       return !!a && a.orgId === orgId && a.state !== 'draft';
     }
     return false;
   }
-  /** `toOrgIds` absent is none. Returns the members other than the sharer, once each. */
-  function recipientsOf(res, g, toOrgIds, orgId) {
-    if (toOrgIds === undefined || toOrgIds === null) return [];
-    if (!Array.isArray(toOrgIds) || toOrgIds.length > L.members || !toOrgIds.every((id) => typeof id === 'string')) {
-      fieldInvalid(res, 'toOrgIds', `toOrgIds is a list of at most ${L.members} organisation ids.`);
-      return null;
-    }
-    return [...new Set(toOrgIds)].filter((id) => g.memberOrgIds.includes(id) && id !== orgId);
-  }
+  /** The named members other than the sharer, once each. */
+  const recipientsOf = (g, toOrgIds, orgId) =>
+    [...new Set(toOrgIds ?? [])].filter((to) => g.memberOrgIds.includes(to) && to !== orgId);
 
   // The same code path as the real read, so the preview can never promise more than the grant delivers.
   function resourceViewFor(grant, receivingOrg) {
@@ -296,14 +311,15 @@ export function registerGroups(ctx) {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);
     if (!g || !g.memberOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'NOT_A_MEMBER' });
-    const { resourceKind, resourceId, toOrgIds } = req.body ?? {};
-    if (!GRANT_RESOURCE_KINDS.includes(resourceKind) || !resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
+    const body = inputOrRefuse(res, GrantPreview, req.body);
+    if (!body) return;
+    const { resourceKind, resourceId } = body;
+    if (!resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
       return res
         .status(400)
         .json({ error: 'RESOURCE_INVALID', message: 'You can only share resources your organisation owns.' });
     }
-    const recipients = recipientsOf(res, g, toOrgIds, req.org.id);
-    if (!recipients) return;
+    const recipients = recipientsOf(g, body.toOrgIds, req.org.id);
     res.json({
       recipients: recipients.map((id) => {
         const org = byId.org(id);
@@ -321,22 +337,15 @@ export function registerGroups(ctx) {
     if (!requireLead(req, res)) return;
     const g = G.byId(req.params.id);
     if (!g || !g.memberOrgIds.includes(req.org.id)) return res.status(403).json({ error: 'NOT_A_MEMBER' });
-    const { resourceKind, resourceId, toOrgIds, expiresDays } = req.body ?? {};
-    if (!GRANT_RESOURCE_KINDS.includes(resourceKind) || !resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
+    const body = inputOrRefuse(res, NewGrant, req.body);
+    if (!body) return;
+    const { resourceKind, resourceId } = body;
+    if (!resourceOwnerOk(resourceKind, resourceId, req.org.id)) {
       return res
         .status(400)
         .json({ error: 'RESOURCE_INVALID', message: 'You can only share resources your organisation owns.' });
     }
-    const days = typeExpiresDays(expiresDays);
-    if (!days.ok)
-      return fieldInvalid(
-        res,
-        'expiresDays',
-        `expiresDays is a whole number from ${L.expiresDays[0]} to ${L.expiresDays[1]}.`,
-      );
-    const listed = recipientsOf(res, g, toOrgIds, req.org.id);
-    if (!listed) return;
-    const recipients = listed.filter((id) => byId.org(id)?.type !== 'agency');
+    const recipients = recipientsOf(g, body.toOrgIds, req.org.id).filter((to) => byId.org(to)?.type !== 'agency');
     if (!recipients.length)
       return res
         .status(400)
@@ -351,7 +360,7 @@ export function registerGroups(ctx) {
         toOrgIds: recipients,
         resourceKind,
         resourceId,
-        expiresAt: grantExpiry(at, days.value),
+        expiresAt: grantExpiry(at, body.expiresDays ?? GRANT_DEFAULT_DAYS),
         revokedAt: null,
         revokeReason: null,
         createdBy: req.orgUser.name ?? null,

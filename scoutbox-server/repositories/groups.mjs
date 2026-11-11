@@ -232,11 +232,8 @@ export function typeGrant(raw, at = 'groupGrants') {
   return { ok: true, record: { ...g, toOrgIds: to.value } };
 }
 
-/** The days a new grant runs for: absent is 30; otherwise a whole number from 1 to 180. `{ ok, value }` or `{ ok: false }`. */
-export function typeExpiresDays(v) {
-  if (v === undefined || v === null) return { ok: true, value: 30 };
-  return Number.isInteger(v) && v >= L.expiresDays[0] && v <= L.expiresDays[1] ? { ok: true, value: v } : { ok: false };
-}
+/** The days a new grant runs for when its owner names none. */
+export const GRANT_DEFAULT_DAYS = 30;
 export const grantExpiry = (createdAt, days) => createdAt + days * DAY;
 
 // ------------------------------------------------------------------ rows

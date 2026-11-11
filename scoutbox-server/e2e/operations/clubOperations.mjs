@@ -1405,6 +1405,26 @@ section('group workspaces as tables');
   ok(r.status === 400 && r.body.field === 'expiresDays', 'expiresDays out of range is refused (it was clamped)');
   r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays: '30' });
   ok(r.status === 400 && r.body.field === 'expiresDays', 'expiresDays that is not a number is refused');
+  for (const expiresDays of [181, 2.5]) {
+    r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays });
+    ok(r.status === 400 && r.body.field === 'expiresDays', `expiresDays ${expiresDays} is refused`);
+  }
+  r = await shareTo({ toOrgIds: ['org-hackneymarsh'], expiresDays: 30, expiresDay: 7 });
+  ok(
+    r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'expiresDay',
+    'a field the grant does not take is refused by name, not silently dropped',
+  );
+  r = await j(
+    'POST',
+    `/org/groups/${coast.id}/grants/preview`,
+    { resourceKind: 'player', resourceId: '*', toOrgIds: ['org-hackneymarsh'] },
+    maria.token,
+  );
+  ok(r.status === 400 && r.body.field === 'resourceKind', 'a resource kind outside the vocabulary is refused by name');
+  r = await j('POST', `/org/groups/${coast.id}/invite`, {}, maria.token);
+  ok(r.status === 400 && r.body.field === 'orgId', 'an invite naming no organisation is refused naming orgId');
+  r = await post('/admin/groups', { name: 'Ghost group', adminOrgId: 'org-nowhere' });
+  ok(r.status === 404 && r.body.error === 'ORG_NOT_FOUND', 'a group cannot be administered by an unknown organisation');
   r = await shareTo({ toOrgIds: 'org-hackneymarsh' });
   ok(
     r.status === 400 && r.body.field === 'toOrgIds',
