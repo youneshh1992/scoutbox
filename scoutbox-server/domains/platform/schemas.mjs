@@ -35,6 +35,7 @@ export const PROBLEMS = Object.freeze([
   'not_allowed',
   'not_a_date',
   'not_a_timestamp',
+  'not_a_time',
   'invalid',
 ]);
 
@@ -58,6 +59,10 @@ const isInstant = coded((x) => parseInstant(x).ok, {
   error: 'TIMESTAMP_INVALID',
   expected: 'ISO 8601 with offset or Z, or integer milliseconds',
 });
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+const TIME = { problem: 'not_a_time', error: 'TIME_INVALID', expected: 'HH:MM' };
+const isTimeOfDay = coded((x) => typeof x === 'string' && HHMM.test(x), TIME);
+const isTimeOrBlank = coded((x) => x === '' || (typeof x === 'string' && HHMM.test(x)), TIME);
 const hasText = coded((s) => s.trim().length > 0, { problem: 'blank' });
 
 /** Text of at most `max` characters; may be empty. */
@@ -201,6 +206,12 @@ export const dayOrBlank = v.pipe(
     (issue) => `must be a calendar day written YYYY-MM-DD (${parseStrictDateOnly(issue.input).why})`,
   ),
 );
+
+/** A wall-clock time, HH:MM on the 24-hour clock. Anything else, including a non-string, is TIME_INVALID. */
+export const timeOfDay = v.pipe(v.unknown(), v.guard(isTimeOfDay, 'must be a time written HH:MM (24-hour)'));
+
+/** A time the form may leave empty: `''` is accepted here, and the route reads it as no time. */
+export const timeOrBlank = v.pipe(v.unknown(), v.guard(isTimeOrBlank, 'must be a time written HH:MM (24-hour)'));
 
 /**
  * A due date: a calendar day (the deadline is the end of it) or an instant, or absent (undefined, null or `''`). The

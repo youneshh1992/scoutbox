@@ -442,12 +442,20 @@ await test("POST /push/register: a string token is stored at once (201 { registe
     assert.equal(r.status, 400, `${JSON.stringify(token).slice(0, 40)}: ${r.text}`);
     assert.equal(r.body.error, 'TOKEN_INVALID');
   }
-  for (const b of ['{"token":1e400}', '{"token":-1e400}', '{"token":{"n":1e400}}', '{"token":[1e400]}']) {
+  // A token that is not text is invalid, whatever it is; only a missing or empty one is required.
+  for (const b of [
+    '{"token":1e400}',
+    '{"token":-1e400}',
+    '{"token":{"n":1e400}}',
+    '{"token":[1e400]}',
+    '{"token":0}',
+    '{"token":false}',
+  ]) {
     const r = await S.raw('POST', '/push/register', b, kola);
     assert.equal(r.status, 400, b);
     assert.equal(r.body.error, 'TOKEN_INVALID');
   }
-  for (const b of ['{"token":0}', '{"token":null}', '{"token":""}', '{"token":false}', '{}']) {
+  for (const b of ['{"token":null}', '{"token":""}', '{}']) {
     const r = await S.raw('POST', '/push/register', b, kola);
     assert.equal(r.status, 400, b);
     assert.equal(r.body.error, 'TOKEN_REQUIRED');

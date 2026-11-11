@@ -215,11 +215,40 @@ section('C — junk refused at the route');
     longId.status === 400 && longId.body.field === 'clientMsgId',
     'a retry id over 64 characters: 400 (it used to be cut to 64)',
   );
+  const numberText = await j('POST', `/player/channels/${adult.id}/messages`, { text: 7 }, kola);
   neg(
-    (await j('POST', `/player/channels/${adult.id}/messages`, { text: 7 }, kola)).body?.error === 'TEXT_REQUIRED',
-    'a non-text message: 400 TEXT_REQUIRED',
+    numberText.status === 400 && numberText.body?.field === 'text' && numberText.body?.problem === 'not_text',
+    'a non-text message: 400 naming text',
+  );
+  // Messaging input is valid as sent or refused.
+  const forged = await j(
+    'POST',
+    `/player/channels/${adult.id}/messages`,
+    { text: 'Synthetic.', sender: { kind: 'org_user', id: 'u-maria' } },
+    kola,
+  );
+  neg(
+    forged.status === 400 && forged.body.field === 'sender' && forged.body.problem === 'unknown_field',
+    'IN1 a message naming its own sender is refused: the sender is the signed-in person',
+  );
+  const objectClip = await j(
+    'POST',
+    `/player/channels/${adult.id}/messages`,
+    { text: 'Synthetic.', attachMediaId: { id: 'm-1' } },
+    kola,
+  );
+  neg(
+    objectClip.status === 400 && objectClip.body.field === 'attachMediaId' && objectClip.body.problem === 'not_text',
+    'IN2 a clip named with an object is refused, not looked up',
   );
   ok((await count()) === before + 1, 'nothing refused was stored');
+  const twice = await j('GET', '/org/channels?playerId=pl-a&playerId=pl-b', undefined, maria);
+  neg(twice.status === 400 && twice.body.field === 'playerId', 'IN3 a thread filter given twice is refused');
+  const typingBody = await j('POST', `/player/channels/${adult.id}/typing`, { side: 'org' }, kola);
+  neg(
+    typingBody.status === 400 && typingBody.body.field === 'side',
+    'IN4 a typing ping cannot say which side is typing: the route decides',
+  );
 }
 
 section('D — a retried send');

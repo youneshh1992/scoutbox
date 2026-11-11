@@ -3,6 +3,7 @@ import { NOTIFICATION_LIMITS, feedItem } from '../../repositories/notifications.
 import { validateIanaZone, localParts } from '../../temporal.mjs';
 import { isAdult } from '../../domain.mjs';
 import { minimizePayload } from '../platform/eventRegistry.mjs';
+import { messagingInput } from './schemas.mjs';
 
 // Quiet hours are wall-clock rules for the person: their own zone when their preferences carry one, otherwise the
 // platform's home zone, never the server process's.
@@ -118,21 +119,19 @@ export function registerNotificationFeed({
   if (typeof notificationTargetFor !== 'function')
     throw new TypeError("registerNotificationFeed needs the journeys' notificationTargetFor");
   const feed = (kind, id) => notifier.feedFor(kind, id, notificationTargetFor);
-  const read = (kind, id, res) => {
+  const read = (kind, id, req, res) => {
+    if (!messagingInput(res, 'none', req.body)) return;
     notifications.markRead(kind, id);
     res.json({ ok: true });
   };
   orgRouter.get('/notifications', (req, res) => res.json(feed('org_user', req.orgUser.id)));
-  orgRouter.post('/notifications/read', (req, res) => read('org_user', req.orgUser.id, res));
+  orgRouter.post('/notifications/read', (req, res) => read('org_user', req.orgUser.id, req, res));
   playerRouter.get('/notifications', (req, res) => res.json(feed('player', req.player.id)));
-  playerRouter.post('/notifications/read', (req, res) => read('player', req.player.id, res));
+  playerRouter.post('/notifications/read', (req, res) => read('player', req.player.id, req, res));
   guardianRouter.get('/notifications', (req, res) => res.json(feed('guardian', req.guardian.id)));
-  guardianRouter.post('/notifications/read', (req, res) => read('guardian', req.guardian.id, res));
+  guardianRouter.post('/notifications/read', (req, res) => read('guardian', req.guardian.id, req, res));
   return { feed };
 }
-
-const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-const quietBound = (v) => (v == null || v === '' ? null : typeof v === 'string' && HHMM.test(v) ? v : undefined);
 
 /** A device token another account registered moves to this one, so a shared phone gets only the latest sign-in's notices. */
 export function registerDeliverySettings({
@@ -149,26 +148,18 @@ export function registerDeliverySettings({
   const note = 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.';
   const show = (res, person) => res.json({ prefs: person.notificationPrefs ?? null, note });
   const save = (repo, person, req, res) => {
-    const { quietStart, quietEnd, schoolHoursMute, timezone } = req.body || {};
-    const qs = quietBound(quietStart);
-    const qe = quietBound(quietEnd);
-    if (qs === undefined || qe === undefined)
-      return res
-        .status(400)
-        .json({ error: 'TIME_INVALID', message: 'Quiet hours are written HH:MM (24-hour).', expected: 'HH:MM' });
+    const body = messagingInput(res, 'personPrefs', req.body);
+    if (!body) return;
+    const { quietStart, quietEnd, schoolHoursMute, timezone } = body;
     if (timezone != null && timezone !== '' && !validateIanaZone(timezone).ok)
       return res.status(400).json({
         error: 'TIMEZONE_INVALID',
         message: 'timezone must be an IANA time zone name, for example Europe/London.',
       });
-    if (schoolHoursMute != null && typeof schoolHoursMute !== 'boolean')
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'schoolHoursMute', message: 'schoolHoursMute must be true or false.' });
     const was = person.notificationPrefs ?? {};
     const prefs = {
-      quietStart: quietStart === undefined ? (was.quietStart ?? null) : qs,
-      quietEnd: quietEnd === undefined ? (was.quietEnd ?? null) : qe,
+      quietStart: quietStart === undefined ? (was.quietStart ?? null) : quietStart || null,
+      quietEnd: quietEnd === undefined ? (was.quietEnd ?? null) : quietEnd || null,
       schoolHoursMute: schoolHoursMute ?? was.schoolHoursMute ?? null,
       timezone: timezone === undefined ? (was.timezone ?? null) : timezone || null,
     };
@@ -184,12 +175,10 @@ export function registerDeliverySettings({
   app.post('/push/register', (req, res) => {
     const session = sessionFor(req);
     if (!session) return res.status(401).json({ error: 'AUTH_REQUIRED' });
-    const { token } = req.body || {};
-    if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED' });
-    if (typeof token !== 'string' || token.length > 200)
-      return res
-        .status(400)
-        .json({ error: 'TOKEN_INVALID', message: 'A device token is text of at most 200 characters.' });
+    const body = messagingInput(res, 'pushToken', req.body);
+    if (!body) return;
+    const { token } = body;
+    if (!token) return res.status(400).json({ error: 'TOKEN_REQUIRED', field: 'token', problem: 'required' });
     if (session.kind !== 'player' && session.kind !== 'guardian')
       return res.status(403).json({
         error: 'PUSH_NOT_AVAILABLE',

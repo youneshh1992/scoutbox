@@ -400,7 +400,7 @@ await test("[compat] both acceptance paths, all three sender kinds, both attachm
     for (const text of [5, ['x'], { t: 'x' }, true]) {
       const r = await S.j('POST', route, { text }, who);
       assert.equal(r.status, 400, `${route} ${JSON.stringify(text)}: ${r.text}`);
-      assert.equal(r.body.error, 'TEXT_REQUIRED');
+      assert.deepEqual([r.body.error, r.body.field, r.body.problem], ['FIELD_INVALID', 'text', 'not_text']);
     }
   }
   // The duplicate: the same clientMsgId from the same sender answers the SAME message, stored once.

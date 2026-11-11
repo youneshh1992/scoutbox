@@ -3,8 +3,9 @@
 import { MESSAGE_LIMITS } from '../../repositories/channels.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { visibleToOrg } from '../../domain.mjs';
+import { filled, presentOrRefuse } from '../platform/schemas.mjs';
+import { messagingInput } from './schemas.mjs';
 
-const fieldInvalid = (res, field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
 // Names have no limit at sign-up: a thread keeps them shortened, never refused.
 const threadName = (v) => (typeof v === 'string' ? v.slice(0, MESSAGE_LIMITS.name) : v);
 
@@ -112,24 +113,11 @@ export function registerMessaging({
 
   /** Null once a 400 has been sent. Junk is refused, never cut. */
   function messageInput(req, res) {
-    const { text, clientMsgId = null } = req.body || {};
-    if (typeof text !== 'string' || !text.trim()) {
-      res.status(400).json({ error: 'TEXT_REQUIRED' });
-      return null;
-    }
-    if (text.trim().length > MESSAGE_LIMITS.text) {
-      fieldInvalid(res, 'text', `A message is at most ${MESSAGE_LIMITS.text} characters.`);
-      return null;
-    }
-    if (
-      clientMsgId !== null &&
-      clientMsgId !== '' &&
-      (typeof clientMsgId !== 'string' || clientMsgId.length > MESSAGE_LIMITS.clientMsgId)
-    ) {
-      fieldInvalid(res, 'clientMsgId', `clientMsgId is text of at most ${MESSAGE_LIMITS.clientMsgId} characters.`);
-      return null;
-    }
-    return { text: text.trim(), clientMsgId: clientMsgId || null };
+    const body = messagingInput(res, 'message', req.body);
+    if (!body) return null;
+    const text = filled(body.text);
+    if (!presentOrRefuse(res, text, 'text')) return null;
+    return { ...body, text, clientMsgId: body.clientMsgId || null };
   }
 
   function postMessage(channel, rawSender, text, attachment = null, clientMsgId = null) {
@@ -230,16 +218,18 @@ export function registerMessaging({
     const input = messageInput(req, res);
     if (!input) return;
     if (!moderateOrRefuse(res, input.text, { kind, channelId: channel.id })) return;
-    const att = buildAttachment(channel, req.body, side);
+    const att = buildAttachment(channel, input, side);
     if (!att.ok) return res.status(400).json({ error: att.error });
     res.status(201).json(postMessage(channel, sender, input.text, att.attachment, input.clientMsgId));
   };
-  const markRead = (res, channel, side) => {
+  const markRead = (req, res, channel, side) => {
+    if (!messagingInput(res, 'none', req.body)) return;
     const readBy = channels.markRead(channel.id, side, Date.now());
     broadcast('messages', { channelId: channel.id });
     res.json({ readBy: { org: readBy.org, counterparty: readBy.counterparty } });
   };
-  const typing = (res, channel, side) => {
+  const typing = (req, res, channel, side) => {
+    if (!messagingInput(res, 'none', req.body)) return;
     broadcast('typing', { channelId: channel.id, side });
     res.json({ ok: true });
   };
@@ -248,15 +238,15 @@ export function registerMessaging({
   // ------------------------------------------------------------ club staff
   // `playerId` limits the page to one player's threads (a Room's inbox panel).
   orgRouter.get('/channels', (req, res) => {
+    const query = messagingInput(res, 'channelsQuery', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'number']);
+      page = readPage(query, ['number', 'number']);
     } catch (e) {
       return sendPageError(res, e);
     }
-    const { playerId } = req.query;
-    if (playerId !== undefined && (typeof playerId !== 'string' || !playerId || playerId.length > MESSAGE_LIMITS.id))
-      return fieldInvalid(res, 'playerId', 'playerId is the id of a player, as text.');
+    const { playerId } = query;
     const out = channels.pageForOrg(req.org.id, { playerId: playerId ?? null }, page);
     res.json({
       items: out.items.map((c) => ({ ...channelViewFor(c, 'org'), closed: !!channelClosedForOrg(c, req.org) })),
@@ -281,13 +271,13 @@ export function registerMessaging({
   orgRouter.post('/channels/:id/read', (req, res) => {
     const channel = orgThread(req);
     if (!channel) return notFound(res);
-    markRead(res, channel, 'org');
+    markRead(req, res, channel, 'org');
   });
   orgRouter.post('/channels/:id/typing', (req, res) => {
     const channel = orgThread(req);
     if (!channel) return notFound(res);
     if (channelClosedForOrg(channel, req.org)) return res.status(403).json({ error: 'CHANNEL_CLOSED' });
-    typing(res, channel, 'org');
+    typing(req, res, channel, 'org');
   });
 
   // -------------------------------------------------------- adult players
@@ -309,13 +299,13 @@ export function registerMessaging({
     if (guardianManagedOnly(req, res)) return;
     const channel = playerThread(req);
     if (!channel) return notFound(res);
-    markRead(res, channel, 'counterparty');
+    markRead(req, res, channel, 'counterparty');
   });
   playerRouter.post('/channels/:id/typing', (req, res) => {
     if (guardianManagedOnly(req, res)) return;
     const channel = playerThread(req);
     if (!channel) return notFound(res);
-    typing(res, channel, 'counterparty');
+    typing(req, res, channel, 'counterparty');
   });
 
   // ------------------------------------------------------------- guardians
@@ -334,12 +324,12 @@ export function registerMessaging({
   guardianRouter.post('/channels/:id/read', (req, res) => {
     const channel = guardianThread(req);
     if (!channel) return notFound(res);
-    markRead(res, channel, 'counterparty');
+    markRead(req, res, channel, 'counterparty');
   });
   guardianRouter.post('/channels/:id/typing', (req, res) => {
     const channel = guardianThread(req);
     if (!channel) return notFound(res);
-    typing(res, channel, 'counterparty');
+    typing(req, res, channel, 'counterparty');
   });
 
   return { openChannel };

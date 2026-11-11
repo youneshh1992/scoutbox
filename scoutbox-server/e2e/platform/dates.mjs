@@ -1842,6 +1842,21 @@ section('R/live — every hardened route answers with the taxonomy');
     prefs.status === 200 && prefs.body?.prefs?.timezone === NY && prefs.body?.prefs?.quietStart === '22:00',
     'R14c quiet hours in a named zone are stored',
   );
+  const mute = await j('POST', '/player/prefs', { schoolHoursMute: 'false' }, kola.token);
+  neg(
+    mute.status === 400 && mute.body.field === 'schoolHoursMute' && mute.body.problem === 'not_boolean',
+    'R14d the school-hours mute written as text is refused, not read as on',
+  );
+  const listed = await j('POST', '/player/prefs', { quietStart: ['22:00'] }, kola.token);
+  neg(
+    listed.status === 400 && listed.body.error === 'TIME_INVALID' && listed.body.expected === 'HH:MM',
+    'R14e quiet hours written as a list are TIME_INVALID, saying the form expected',
+  );
+  const cleared = await j('POST', '/player/prefs', { quietStart: '', quietEnd: '' }, kola.token);
+  ok(
+    cleared.status === 200 && cleared.body.prefs.quietStart === null && cleared.body.prefs.timezone === NY,
+    'R14f empty quiet hours clear them and keep the zone',
+  );
 
   // Policy publishing
   const pol = (from, to = null) =>

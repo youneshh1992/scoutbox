@@ -24,6 +24,8 @@ import {
   parseInput,
   requiredText,
   text,
+  timeOfDay,
+  timeOrBlank,
   REV_FIELDS,
   REV_FIELD_CODES,
   wholeNumber,
@@ -217,6 +219,26 @@ test('a field code names one field (list positions left out) or, with .*, a fiel
   assert.equal(refusal({ title: 'x', startsOn: 'soon' }, Body, { fieldCodes, codes }).error, 'TRIAL_DATE_INVALID');
   assert.equal(refusal({ title: 'x', count: 'many' }, Body, { fieldCodes, codes }).error, 'TRIAL_INPUT_INVALID');
   assert.equal(refusal({ title: 'x', constructor: 1 }, Body, { fieldCodes: {} }).error, 'FIELD_INVALID');
+});
+
+test('timeOfDay takes HH:MM on the 24-hour clock and timeOrBlank also an empty string, else TIME_INVALID', () => {
+  const S = v.strictObject({ at: v.optional(timeOfDay), quiet: v.nullish(timeOrBlank) });
+  for (const ok of [{}, { at: '00:00' }, { at: '23:59' }, { quiet: '' }, { quiet: null }, { quiet: '07:30' }])
+    assert.equal(parseInput(S, ok).ok, true, JSON.stringify(ok));
+  for (const [bad, field] of [
+    [{ at: '' }, 'at'],
+    [{ at: '24:00' }, 'at'],
+    [{ at: '7:30' }, 'at'],
+    [{ at: 730 }, 'at'],
+    [{ quiet: '25:99' }, 'quiet'],
+    [{ quiet: ['07:30'] }, 'quiet'],
+  ]) {
+    const r = refusal(bad, S);
+    assert.equal(r.error, 'TIME_INVALID', JSON.stringify(bad));
+    assert.equal(r.field, field);
+    assert.equal(r.problem, 'not_a_time');
+    assert.equal(r.expected, 'HH:MM');
+  }
 });
 
 test('dayOrBlank takes a day or an empty string; dueDate takes a day, an instant or nothing, else DATE_INVALID', () => {

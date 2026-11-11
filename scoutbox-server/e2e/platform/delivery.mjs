@@ -270,6 +270,14 @@ for (const [bad, field, what] of [
     `${what} is refused naming ${field}`,
   );
 }
+c = await callback([
+  { callbackId: 'e2e-cb-ok', providerMessageId: pm, status: 'delivered' },
+  { callbackId: 'e2e-cb-extra', providerMessageId: pm, status: 'delivered', dispatchId: email.id },
+]);
+neg(
+  c.status === 400 && c.body.field === 'events[1].dispatchId' && c.body.problem === 'unknown_field',
+  'IN1 an event naming a field the contract lacks is refused, and the batch with it',
+);
 c = await callback([{ callbackId: 'e2e-cb-ok', providerMessageId: pm, status: 'delivered' }]);
 neg(
   c.body.applied === 1 && c.body.duplicates === 0,

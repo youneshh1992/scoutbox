@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { timingSafeEqStr as timingSafeEq } from '../identity/totp.mjs';
 import { signBody } from '../integrations/webhooks.mjs';
+import { messagingInput } from './schemas.mjs';
 
 const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened: 3, actioned: 4 };
 
@@ -45,7 +46,6 @@ export function registerDelivery(ctx) {
 
   // Real email/SMS/push transport is not configured in this environment.
   const PROVIDER = 'local-fake';
-  const CALLBACK_STATUSES = ['delivered', 'opened', 'bounced', 'failed'];
   const CALLBACK_SECRET = process.env.DELIVERY_CALLBACK_SECRET || 'local-fake-callback-secret';
   function fakeSend(channel, to, text) {
     if (bookkeeping.consumeInjectedFailure(channel)) return { ok: false, error: 'injected provider failure' };
@@ -275,28 +275,9 @@ export function registerDelivery(ctx) {
       return res.status(401).json({ error: 'SIGNATURE_INVALID' });
     // The whole batch is checked before anything is applied; junk is refused naming the field, never skipped or read
     // as "now". `at` omitted or null means now.
-    const events = req.body?.events ?? [];
-    const invalid = (field, message) => res.status(400).json({ error: 'FIELD_INVALID', field, message });
-    if (!Array.isArray(events)) return invalid('events', 'events is a list of delivery events.');
-    if (events.length > 100) return invalid('events', 'A callback carries at most 100 events.');
-    for (let i = 0; i < events.length; i++) {
-      const ev = events[i];
-      const f = (k) => `events[${i}]${k ? `.${k}` : ''}`;
-      if (ev === null || typeof ev !== 'object' || Array.isArray(ev)) return invalid(f(), 'An event is an object.');
-      if (typeof ev.callbackId !== 'string' || ev.callbackId.length < 1 || ev.callbackId.length > 200)
-        return invalid(f('callbackId'), 'A callback id is 1 to 200 characters.');
-      if (
-        typeof ev.providerMessageId !== 'string' ||
-        ev.providerMessageId.length < 1 ||
-        ev.providerMessageId.length > 200
-      )
-        return invalid(f('providerMessageId'), 'A provider message id is 1 to 200 characters.');
-      if (!CALLBACK_STATUSES.includes(ev.status))
-        return invalid(f('status'), `status is one of ${CALLBACK_STATUSES.join(', ')}.`);
-      if (ev.at != null && !(Number.isSafeInteger(ev.at) && ev.at > 0))
-        return invalid(f('at'), 'at is a whole-number timestamp in milliseconds.');
-      if (ev.reason != null && typeof ev.reason !== 'string') return invalid(f('reason'), 'reason is text.');
-    }
+    const input = messagingInput(res, 'callback', req.body);
+    if (!input) return;
+    const events = input.events ?? [];
     let applied = 0,
       duplicates = 0;
     // Each event commits with its seen marker (the newest 5,000 are kept), so a crash can never leave an id remembered
@@ -358,9 +339,11 @@ export function registerDelivery(ctx) {
     failReason: d.failReason,
   });
   orgRouter.get('/delivery', (req, res) => {
+    const query = messagingInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -369,16 +352,9 @@ export function registerDelivery(ctx) {
   });
 
   orgRouter.put('/delivery/prefs', (req, res) => {
-    const { quietStart, quietEnd, email } = req.body ?? {};
-    if (!(email === undefined || email === null || typeof email === 'boolean'))
-      return res.status(400).json({ error: 'FIELD_INVALID', field: 'email', message: 'email is true or false.' });
-    const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
-    for (const [f, v] of [
-      ['quietStart', quietStart],
-      ['quietEnd', quietEnd],
-    ])
-      if (v != null && !(typeof v === 'string' && HHMM.test(v)))
-        return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is a time written HH:MM.` });
+    const body = messagingInput(res, 'staffPrefs', req.body);
+    if (!body) return;
+    const { quietStart, quietEnd, email } = body;
     const saved = users.update(req.orgUser.id, (d) => {
       d.deliveryPrefs = {
         quietStart: quietStart ?? null,
@@ -403,18 +379,10 @@ export function registerDelivery(ctx) {
   adminRouter.post('/delivery/inject-failure', (req, res) => {
     // `contact`, `trial` and `decision` make the next send of that kind fail at the transport, so the honest failure
     // states can be exercised end to end; `trial` and `decision` refuse with nothing written.
-    const channel = req.body?.channel ?? 'email';
-    const count = req.body?.count ?? 1;
-    if (!['email', 'push', 'contact', 'trial', 'decision'].includes(channel))
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'channel',
-        message: 'channel is email, push, contact, trial or decision.',
-      });
-    if (!Number.isSafeInteger(count) || count < 1 || count > 20)
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'count', message: 'count is a whole number from 1 to 20.' });
+    const body = messagingInput(res, 'injectFailure', req.body);
+    if (!body) return;
+    const channel = body.channel ?? 'email';
+    const count = body.count ?? 1;
     bookkeeping.inject(channel, count);
     res.json({
       injected: { channel, count },
@@ -422,7 +390,8 @@ export function registerDelivery(ctx) {
     });
   });
 
-  adminRouter.post('/delivery/sweep', (_req, res) => {
+  adminRouter.post('/delivery/sweep', (req, res) => {
+    if (!messagingInput(res, 'none', req.body)) return;
     res.json({ processed: dispatchSweep() });
   });
 
