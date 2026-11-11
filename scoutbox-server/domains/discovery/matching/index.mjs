@@ -19,7 +19,6 @@ import { createMatchReads } from './query.mjs';
 import {
   WATCHLIST_MODES,
   WATCHLIST_STATUSES,
-  WATCHLIST_SOURCES,
   reconcileMembership,
   transitionFingerprint,
   explainTransition,
@@ -31,10 +30,10 @@ import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 import { now } from '../../platform/clock.mjs';
 import { limitCheck } from '../../platform/rateLimit.mjs';
+import { filled, presentOrRefuse } from '../../platform/schemas.mjs';
+import { discoveryInput, MATCH_SORTS, DEFAULT_MATCH_SORT } from '../schemas.mjs';
 
-/** None of these is a match quality rank; the default is the least suggestive one that is still useful. */
-export const MATCH_SORTS = ['recent_evidence', 'name', 'age', 'evidence_confidence', 'distance'];
-export const DEFAULT_MATCH_SORT = 'recent_evidence';
+export { MATCH_SORTS, DEFAULT_MATCH_SORT };
 
 export function registerMatching(ctx) {
   const {
@@ -67,13 +66,13 @@ export function registerMatching(ctx) {
     createMatchReads({ players, matchFacts });
 
   function resolveCriteria(req, body) {
-    if (body?.briefId) {
-      const brief = dreads.briefs.forOrgById(String(body.briefId), req.org.id);
+    if (body.briefId) {
+      const brief = dreads.briefs.forOrgById(body.briefId, req.org.id);
       // Another organisation's brief does not exist, rather than being forbidden: anything else is a membership oracle.
       if (!brief) return { ok: false, status: 404, body: { error: 'BRIEF_NOT_FOUND' } };
       return { ok: true, criteria: briefCriteriaToCanonical(brief.criteria), brief };
     }
-    const v = validateCriteria(body?.criteria ?? {}, {
+    const v = validateCriteria(body.criteria ?? {}, {
       orgLevel: req.org.level ?? 'pro',
       protocols: combineProtocolIds(),
     });
@@ -103,8 +102,12 @@ export function registerMatching(ctx) {
   // ------------------------------------------------------------- vocabulary
 
   orgRouter.get('/matching/vocabulary', (req, res) => {
+    // The types this club may write: only a Grassroots club can see distance.
+    const writable = Object.entries(CRITERION_TYPES).filter(
+      ([type]) => type !== 'geography' || req.org.level === 'grassroots',
+    );
     res.json({
-      criterionTypes: Object.entries(CRITERION_TYPES).map(([type, d]) => ({
+      criterionTypes: writable.map(([type, d]) => ({
         type,
         label: d.label,
         operators: d.operators,
@@ -127,10 +130,12 @@ export function registerMatching(ctx) {
   orgRouter.post('/matching', (req, res) => {
     if (limited('matching_query', req.org.id))
       return res.status(429).json({ error: 'RATE_LIMITED', action: 'matching_query' });
-    const resolved = resolveCriteria(req, req.body);
+    const body = discoveryInput(res, 'match', req.body);
+    if (!body) return;
+    const resolved = resolveCriteria(req, body);
     if (!resolved.ok) return res.status(resolved.status).json(resolved.body);
 
-    const sort = MATCH_SORTS.includes(req.body?.sort) ? req.body.sort : DEFAULT_MATCH_SORT;
+    const sort = body.sort ?? DEFAULT_MATCH_SORT;
     if (sort === 'distance' && (req.org.level ?? 'pro') !== 'grassroots') {
       return res.status(400).json({
         error: 'SORT_NOT_AVAILABLE',
@@ -141,7 +146,7 @@ export function registerMatching(ctx) {
     const { order, shape } = matchOrder(sort, req.org, at);
     let page;
     try {
-      page = readMatchPage(req.body, shape);
+      page = readMatchPage(body, shape);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -206,13 +211,13 @@ export function registerMatching(ctx) {
   }
 
   orgRouter.get('/watchlists', (req, res) => {
-    const status = req.query.status ? String(req.query.status) : null;
-    if (status !== null && !WATCHLIST_STATUSES.includes(status))
-      return res.status(400).json({ error: 'WATCHLIST_STATUS_UNKNOWN', statuses: WATCHLIST_STATUSES });
+    const query = discoveryInput(res, 'watchlistsQuery', req.query, 'query');
+    if (!query) return;
+    const status = query.status ?? null;
     // Archived watchlists accumulate, so the list pages.
     let page;
     try {
-      page = readPage(req.query, ['number', 'string']);
+      page = readPage(query, ['number', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -231,16 +236,10 @@ export function registerMatching(ctx) {
   orgRouter.post('/watchlists', (req, res) => {
     if (limited('watchlist_write', req.org.id))
       return res.status(429).json({ error: 'RATE_LIMITED', action: 'watchlist_write' });
-    if (req.body?.name != null && typeof req.body.name !== 'string')
-      return res.status(400).json({ error: 'FIELD_INVALID', field: 'name', message: 'The name must be text.' });
-    const name = String(req.body?.name ?? '')
-      .trim()
-      .slice(0, MATCHING_LIMITS.maxNameLength);
-    if (!name)
-      return res.status(400).json({
-        error: 'WATCHLIST_NAME_REQUIRED',
-        message: 'Give this watchlist a name your colleagues will recognise.',
-      });
+    const body = discoveryInput(res, 'newWatchlist', req.body);
+    if (!body) return;
+    const name = filled(body.name);
+    if (!presentOrRefuse(res, name, 'name', { error: 'WATCHLIST_NAME_REQUIRED' })) return;
     if (dreads.watchlists.openCount(req.org.id) >= MATCHING_LIMITS.watchlistsPerOrg) {
       return res.status(409).json({
         error: 'WATCHLIST_LIMIT_REACHED',
@@ -248,26 +247,15 @@ export function registerMatching(ctx) {
         message: 'Archive a watchlist before creating another.',
       });
     }
-    const mode = WATCHLIST_MODES.includes(req.body?.mode) ? req.body.mode : null;
-    if (!mode)
-      return res.status(400).json({
-        error: 'WATCHLIST_MODE_REQUIRED',
-        modes: WATCHLIST_MODES,
-        message: 'Choose whether this watchlist follows the Recruitment Brief or keeps its own saved criteria.',
-      });
-    if (req.body?.sourceType != null && !WATCHLIST_SOURCES.includes(req.body.sourceType))
-      return res.status(400).json({ error: 'WATCHLIST_SOURCE_UNKNOWN', sources: WATCHLIST_SOURCES });
-    if (req.body?.notify != null && typeof req.body.notify !== 'boolean')
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'notify', message: 'notify must be true or false.' });
+    const mode = body.mode ?? null;
+    if (!presentOrRefuse(res, mode, 'mode', { error: 'WATCHLIST_MODE_REQUIRED' })) return;
 
-    const sourceType = req.body?.sourceType ?? (req.body?.briefId ? 'brief' : 'criteria');
+    const sourceType = body.sourceType ?? (body.briefId ? 'brief' : 'criteria');
     let sourceId = null;
     let criteria = null;
 
     if (sourceType === 'brief') {
-      const brief = dreads.briefs.forOrgById(String(req.body?.briefId ?? ''), req.org.id);
+      const brief = body.briefId ? dreads.briefs.forOrgById(body.briefId, req.org.id) : null;
       if (!brief) return res.status(404).json({ error: 'BRIEF_NOT_FOUND' });
       sourceId = brief.id;
       // Stored even when live-linked, so the history stays readable if the brief is later archived.
@@ -278,7 +266,7 @@ export function registerMatching(ctx) {
           error: 'WATCHLIST_MODE_INVALID',
           message: 'Only a watchlist linked to a Recruitment Brief can follow it live.',
         });
-      const v = validateCriteria(req.body?.criteria ?? {}, {
+      const v = validateCriteria(body.criteria ?? {}, {
         orgLevel: req.org.level ?? 'pro',
         protocols: combineProtocolIds(),
       });
@@ -289,14 +277,7 @@ export function registerMatching(ctx) {
           message: 'A watchlist needs at least one required criterion, or it would match everyone your club can see.',
         });
       criteria = v.criteria;
-      const ref = req.body?.sourceId;
-      if (ref != null && ref !== '' && (typeof ref !== 'string' || ref.length > 64))
-        return res.status(400).json({
-          error: 'FIELD_INVALID',
-          field: 'sourceId',
-          message: 'sourceId must be a reference of at most 64 characters.',
-        });
-      sourceId = ref ? ref : null;
+      sourceId = body.sourceId || null;
     }
 
     const at = now();
@@ -311,7 +292,7 @@ export function registerMatching(ctx) {
       criteria,
       criteriaVersion: criteriaVersion(criteria),
       schemaVersion: CRITERIA_SCHEMA_VERSION,
-      notify: req.body?.notify ?? true,
+      notify: body.notify ?? true,
       createdBy: req.orgUser.id,
       // The organisation owns the list: if the creator leaves, it stays and keeps their name.
       createdByName: req.orgUser.name,
@@ -491,11 +472,13 @@ export function registerMatching(ctx) {
   orgRouter.get('/watchlists/:id', (req, res) => {
     const w = findWatchlist(req, res);
     if (!w) return;
-    const sort = MATCH_SORTS.includes(req.query.sort) ? String(req.query.sort) : DEFAULT_MATCH_SORT;
+    const query = discoveryInput(res, 'watchlistQuery', req.query, 'query');
+    if (!query) return;
+    const sort = query.sort ?? DEFAULT_MATCH_SORT;
     const { order, shape } = matchOrder(sort, req.org, now());
     let page;
     try {
-      page = readMatchPage(req.query, shape);
+      page = readMatchPage(query, shape);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -524,6 +507,8 @@ export function registerMatching(ctx) {
     if (!w) return;
     if (limited('watchlist_write', req.org.id))
       return res.status(429).json({ error: 'RATE_LIMITED', action: 'watchlist_write' });
+    const body = discoveryInput(res, 'watchlistEdit', req.body);
+    if (!body) return;
     if (
       !guardRev(req, res, w, {
         errorCode: 'WATCHLIST_VERSION_CONFLICT',
@@ -534,48 +519,36 @@ export function registerMatching(ctx) {
 
     const before = { name: w.name, mode: w.mode, status: w.status, criteriaVersion: w.criteriaVersion };
     const set = {};
-    if (req.body?.name !== undefined) {
-      if (typeof req.body.name !== 'string')
-        return res.status(400).json({ error: 'FIELD_INVALID', field: 'name', message: 'The name must be text.' });
-      const name = req.body.name.trim().slice(0, MATCHING_LIMITS.maxNameLength);
-      if (!name) return res.status(400).json({ error: 'WATCHLIST_NAME_REQUIRED' });
+    if (body.name !== undefined) {
+      const name = filled(body.name);
+      if (!presentOrRefuse(res, name, 'name', { error: 'WATCHLIST_NAME_REQUIRED' })) return;
       set.name = name;
     }
-    if (req.body?.status !== undefined) {
-      if (!WATCHLIST_STATUSES.includes(req.body.status))
-        return res.status(400).json({ error: 'WATCHLIST_STATUS_UNKNOWN', statuses: WATCHLIST_STATUSES });
-      if (w.status === 'archived' && req.body.status !== 'archived')
+    if (body.status !== undefined) {
+      if (w.status === 'archived' && body.status !== 'archived')
         return res.status(409).json({
           error: 'WATCHLIST_ARCHIVED',
           message: 'An archived watchlist keeps its history and is not reopened.',
         });
-      set.status = req.body.status;
+      set.status = body.status;
     }
-    if (req.body?.mode !== undefined) {
-      if (!WATCHLIST_MODES.includes(req.body.mode))
-        return res.status(400).json({ error: 'WATCHLIST_MODE_UNKNOWN', modes: WATCHLIST_MODES });
-      if (req.body.mode === 'live_linked' && w.sourceType !== 'brief')
+    if (body.mode !== undefined) {
+      if (body.mode === 'live_linked' && w.sourceType !== 'brief')
         return res.status(400).json({
           error: 'WATCHLIST_MODE_INVALID',
           message: 'Only a watchlist linked to a Recruitment Brief can follow it live.',
         });
-      set.mode = req.body.mode;
+      set.mode = body.mode;
     }
-    if (req.body?.notify !== undefined) {
-      if (typeof req.body.notify !== 'boolean')
-        return res
-          .status(400)
-          .json({ error: 'FIELD_INVALID', field: 'notify', message: 'notify must be true or false.' });
-      set.notify = req.body.notify;
-    }
-    if (req.body?.criteria !== undefined) {
+    if (body.notify !== undefined) set.notify = body.notify;
+    if (body.criteria !== undefined) {
       if ((set.mode ?? w.mode) === 'live_linked')
         return res.status(409).json({
           error: 'WATCHLIST_LIVE_LINKED',
           message:
             'This watchlist follows its Recruitment Brief. Change the brief, or switch the watchlist to its own saved criteria.',
         });
-      const v = validateCriteria(req.body.criteria, {
+      const v = validateCriteria(body.criteria, {
         orgLevel: req.org.level ?? 'pro',
         protocols: combineProtocolIds(),
       });
@@ -611,9 +584,11 @@ export function registerMatching(ctx) {
   orgRouter.get('/watchlists/:id/history', (req, res) => {
     const w = findWatchlist(req, res);
     if (!w) return;
+    const query = discoveryInput(res, 'historyQuery', req.query, 'query');
+    if (!query) return;
     let req2;
     try {
-      req2 = readPage(req.query, ['number', 'string']);
+      req2 = readPage(query, ['number', 'string']);
     } catch (e) {
       if (e?.code === 'PAGE_CURSOR_INVALID')
         return res.status(400).json({
@@ -651,7 +626,9 @@ export function registerMatching(ctx) {
   orgRouter.post('/watchlists/:id/room', (req, res) => {
     const w = findWatchlist(req, res);
     if (!w) return;
-    const player = findPlayer(String(req.body?.playerId ?? ''));
+    const body = discoveryInput(res, 'watchlistRoom', req.body);
+    if (!body) return;
+    const player = body.playerId ? findPlayer(body.playerId) : null;
     if (!player) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, player))
       return res.status(403).json({

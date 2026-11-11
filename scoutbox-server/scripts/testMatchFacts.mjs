@@ -317,6 +317,8 @@ function randomCriterion(r, orgLevel) {
       value: Math.floor(r() * 100),
     }),
   ])();
+  // Only a Grassroots club can save a distance criterion.
+  if (raw.type === 'geography' && orgLevel !== 'grassroots') return randomCriterion(r, orgLevel);
   const v = validateCriteria({ required: [raw] }, { orgLevel, protocols: PROTOCOLS });
   assert.ok(v.ok, JSON.stringify(v));
   return v.criteria.required[0];

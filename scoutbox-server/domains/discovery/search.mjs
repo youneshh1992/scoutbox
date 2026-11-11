@@ -2,8 +2,8 @@
 // shortlists. A player who blocked the organisation reads as absent on every one of these routes.
 import { visibleToOrg, similarityScore } from '../../domain.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { badField } from '../platform/input.mjs';
-import { AUDIT_LIMITS } from '../../repositories/safetyAudit.mjs';
+import { filled, presentOrRefuse } from '../platform/schemas.mjs';
+import { discoveryInput } from './schemas.mjs';
 import { ARCHETYPES } from '../../catalogue.mjs';
 
 const AGE_GROUPS = {
@@ -49,25 +49,13 @@ export function registerPlayerSearch({
   }
 
   orgRouter.get('/players', (req, res) => {
-    const { q, position, academyPlus, availability, country, ageGroup, newDays } = req.query;
-    // A filter sent twice arrives as a list.
-    for (const f of ['q', 'position', 'academyPlus', 'availability', 'country', 'ageGroup', 'newDays']) {
-      if (req.query[f] !== undefined && typeof req.query[f] !== 'string')
-        return res.status(400).json({ error: 'FIELD_INVALID', field: f, message: `${f} is given once, as text.` });
-    }
-    if (ageGroup && !Object.hasOwn(AGE_GROUPS, ageGroup))
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'ageGroup',
-        message: `ageGroup is one of ${Object.keys(AGE_GROUPS).join(', ')}.`,
-      });
-    if (newDays && !(/^\d{1,5}$/.test(newDays) && Number(newDays) > 0))
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'newDays', message: 'newDays is a whole number of days, from 1.' });
+    // A filter sent twice arrives as a list, and is refused.
+    const query = discoveryInput(res, 'directoryQuery', req.query, 'query');
+    if (!query) return;
+    const { q, position, academyPlus, availability, country, ageGroup, newDays } = query;
     let page;
     try {
-      page = readPage(req.query, players.directoryCursorShape(req.org));
+      page = readPage(query, players.directoryCursorShape(req.org));
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -146,16 +134,17 @@ export function registerPlayerSearch({
     const p = findPlayer(req.params.id);
     if (!p || !visibleToOrg(p, req.org) || isBlocked(p.id, req.org.id))
       return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
-    const { text } = req.body || {};
-    if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'TEXT_REQUIRED' });
-    if (text.trim().length > AUDIT_LIMITS.note) return badField(res, 'text');
+    const body = discoveryInput(res, 'note', req.body);
+    if (!body) return;
+    const text = filled(body.text);
+    if (!presentOrRefuse(res, text, 'text')) return;
     const note = {
       id: nextId('note'),
       orgId: req.org.id,
       playerId: p.id,
       userId: req.orgUser.id,
       scoutName: req.orgUser.name,
-      text: text.trim(),
+      text,
       ts: Date.now(),
     };
     const stored = safetyAudit.orgNotes.add(note);
@@ -183,6 +172,7 @@ export function registerPlayerSearch({
       const p = findPlayer(req.params.id);
       if (!p || isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
       if (!visibleToOrg(p, req.org)) return res.status(403).json({ error: 'UNDER_18_WALL' });
+      if (!discoveryInput(res, 'none', req.body)) return;
       const row = ledgerAppend({
         type: action,
         playerId: p.id,

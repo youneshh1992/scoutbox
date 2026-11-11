@@ -587,11 +587,24 @@ export const PROHIBITED_BRIEF_FIELDS = [
   'national_origin',
 ];
 
+/** A brief naming a protected characteristic is refused under its own code, whatever else is wrong with it. */
+export function briefProhibited(input = {}) {
+  const offered = Object.keys(input ?? {}).map((k) => k.toLowerCase().replace(/[^a-z]+/g, '_'));
+  const prohibited = offered.filter((k) => PROHIBITED_BRIEF_FIELDS.some((p) => k === p || k.includes(p)));
+  if (!prohibited.length) return null;
+  return {
+    ok: false,
+    error: 'BRIEF_CRITERION_PROHIBITED',
+    prohibited,
+    message: 'A recruitment brief can never filter players by a protected characteristic.',
+  };
+}
+
+/** The routes' schema has checked the fields' types and lengths; this judges the vocabularies and ranges. */
 export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protocols = null } = {}) {
   const errs = [];
-  // A field of the wrong type is refused rather than coerced; over-long free text is shortened.
   if (input.title != null && typeof input.title !== 'string') errs.push({ field: 'title', error: 'FIELD_INVALID' });
-  const title = typeof input.title === 'string' ? input.title.trim().slice(0, 120) : '';
+  const title = typeof input.title === 'string' ? input.title.trim() : '';
   if (!title && !errs.length) errs.push({ field: 'title', error: 'BRIEF_TITLE_REQUIRED' });
   const listOf = (k) => {
     if (input[k] == null) return [];
@@ -602,16 +615,8 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protoco
     return [...new Set(input[k].map(String))];
   };
 
-  const offered = Object.keys(input).map((k) => k.toLowerCase().replace(/[^a-z]+/g, '_'));
-  const prohibited = offered.filter((k) => PROHIBITED_BRIEF_FIELDS.some((p) => k === p || k.includes(p)));
-  if (prohibited.length) {
-    return {
-      ok: false,
-      error: 'BRIEF_CRITERION_PROHIBITED',
-      prohibited,
-      message: 'A recruitment brief can never filter players by a protected characteristic.',
-    };
-  }
+  const prohibited = briefProhibited(input);
+  if (prohibited) return prohibited;
 
   const positions = listOf('positions');
   const unknownPos = positions.filter((p) => !POSITIONS.includes(p));
@@ -631,6 +636,9 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protoco
   const radiusKm = input.radiusKm == null ? null : Number(input.radiusKm);
   if (radiusKm != null && (!Number.isFinite(radiusKm) || radiusKm <= 0 || radiusKm > 20000)) {
     errs.push({ field: 'radiusKm', error: 'BRIEF_RADIUS_INVALID' });
+  } else if (radiusKm != null && orgLevel !== 'grassroots') {
+    // Only a Grassroots club may see distance, so for anyone else the radius would match nobody.
+    errs.push({ field: 'radiusKm', error: 'BRIEF_RADIUS_NOT_AVAILABLE' });
   }
 
   const maxLevel = input.maxLevel ?? null;
@@ -685,7 +693,7 @@ export function validateRecruitmentBrief(input = {}, { orgLevel = 'pro', protoco
     radiusKm: orgLevel === 'grassroots' ? Math.min(radiusKm ?? 50, 50) : radiusKm,
     maxLevel: orgLevel === 'grassroots' ? 'semi_pro' : maxLevel,
     foot,
-    availability: availability ? availability.slice(0, 40) : null,
+    availability: availability || null,
     evidenceRequirements: evidence,
     minTrustBand,
     combineProtocols,

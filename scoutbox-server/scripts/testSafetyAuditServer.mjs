@@ -377,7 +377,10 @@ await test("[compat] every writer through its route and every reader: a guardian
   }
   const badNote = await S.j('POST', `/org/players/${pid}/notes`, { text: ['Synthetic note as an array.'] }, maria);
   assert.equal(badNote.status, 400, badNote.text);
-  assert.equal(badNote.body.error, 'TEXT_REQUIRED');
+  assert.deepEqual(
+    [badNote.body.error, badNote.body.field, badNote.body.problem],
+    ['FIELD_INVALID', 'text', 'not_text'],
+  );
   const pRep2 = await S.j(
     'POST',
     '/player/report',

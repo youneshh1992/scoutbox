@@ -4,6 +4,8 @@
 // An empty or blank string, `false` or null means "no filter", as the apps send it.
 import { SAVED_SEARCH_FILTERS, SEARCH_AGE_GROUPS, OPERATIONS_LIMITS } from '../../repositories/operations.mjs';
 import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from '../../repositories/identity.mjs';
+import { filled, presentOrRefuse } from '../platform/schemas.mjs';
+import { discoveryInput } from './schemas.mjs';
 
 const L = OPERATIONS_LIMITS;
 const unset = (v) => v === undefined || v === null || v === false || (typeof v === 'string' && !v.trim());
@@ -64,7 +66,7 @@ const searchView = (s) => ({
   createdAt: s.createdAt,
 });
 
-export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerViewForOrg, reqText, savedSearches }) {
+export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerViewForOrg, savedSearches }) {
   if (typeof savedSearches?.create !== 'function')
     throw new TypeError('registerSavedSearches needs the saved-searches repository');
 
@@ -95,9 +97,11 @@ export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerV
   });
 
   orgRouter.post('/searches', (req, res) => {
-    const { name, filters } = req.body || {};
-    if (!reqText(name, L.searchName)) return res.status(400).json({ error: 'NAME_REQUIRED' });
-    const read = readSearchFilters(filters);
+    const body = discoveryInput(res, 'savedSearch', req.body);
+    if (!body) return;
+    const name = filled(body.name);
+    if (!presentOrRefuse(res, name, 'name', { error: 'NAME_REQUIRED' })) return;
+    const read = readSearchFilters(body.filters);
     if (read.field)
       return res.status(400).json({
         error: 'FIELD_INVALID',
@@ -108,7 +112,7 @@ export function registerSavedSearches({ byId, orgRouter, notify, nextId, playerV
       id: nextId('ss'),
       orgId: req.org.id,
       userId: req.orgUser.id,
-      name: name.trim(),
+      name,
       filters: read.filters,
       createdAt: Date.now(),
     });

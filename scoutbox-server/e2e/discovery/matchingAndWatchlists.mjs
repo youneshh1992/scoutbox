@@ -160,13 +160,16 @@ const EMPTY_FACTS = {
   lastEvidenceAt: null,
   lastFootageAt: null,
 };
-const crit = (list) => {
-  const v = validateCriteria(list, { orgLevel: 'pro', protocols: null });
+const crit = (list, orgLevel = 'pro') => {
+  const v = validateCriteria(list, { orgLevel, protocols: null });
   if (!v.ok) throw new Error(`fixture criteria rejected: ${JSON.stringify(v)}`);
   return v.criteria;
 };
+// Only a Grassroots club may write a distance criterion.
 const one = (c, facts = FACTS) =>
-  matchPlayerToCriteria(facts, crit({ required: [c], preferred: [] }), { now: NOW }).required[0];
+  matchPlayerToCriteria(facts, crit({ required: [c], preferred: [] }, c.type === 'geography' ? 'grassroots' : 'pro'), {
+    now: NOW,
+  }).required[0];
 
 // ==================================================== §1 the vocabulary
 section('§1 — the criterion vocabulary is complete, closed and self-consistent');
@@ -1138,10 +1141,17 @@ const ANY_AGE = q(ANY_AGE_C);
 section('§11 — the vocabulary a club writes criteria against');
 {
   const v = await j('GET', '/org/matching/vocabulary', undefined, maria.token);
+  const grass = await j('GET', '/org/matching/vocabulary', undefined, dee.token);
   expect(
     1,
-    v.status === 200 && v.body.criterionTypes.length === 11 && v.body.operators.length === 8,
-    'a club can read every criterion type and operator ScoutBox can evaluate',
+    grass.status === 200 && grass.body.criterionTypes.length === 11 && grass.body.operators.length === 8,
+    'a Grassroots club can read every criterion type and operator ScoutBox can evaluate',
+  );
+  neg(
+    v.status === 200 &&
+      v.body.criterionTypes.length === 10 &&
+      !v.body.criterionTypes.some((c) => c.type === 'geography'),
+    'a Pro club is not offered a distance criterion, which it cannot see',
   );
   ok(
     v.body.policyVersion === MATCH_POLICY_VERSION && v.body.schemaVersion === CRITERIA_SCHEMA_VERSION,
@@ -1322,6 +1332,35 @@ section('§13 — the candidate universe is authorization, not a filter over eve
 // ================================================= §14 refusals over HTTP
 section('§14 — a criteria refusal is an answer the editor can act on');
 {
+  const proRadius = await j(
+    'POST',
+    '/org/matching',
+    { criteria: { required: [{ type: 'geography', operator: 'within_radius', value: 30 }] } },
+    maria.token,
+  );
+  neg(
+    proRadius.status === 400 && proRadius.body.details?.[0]?.error === 'CRITERION_NOT_AVAILABLE',
+    'IN5 a Pro club asking for players within a distance is refused: it cannot see distance, so it would match nobody',
+  );
+  const grassRadius = await j(
+    'POST',
+    '/org/matching',
+    { criteria: { required: [{ type: 'geography', operator: 'within_radius', value: 30 }] } },
+    dee.token,
+  );
+  ok(grassRadius.status === 200, 'IN6 a Grassroots club may ask for players within a distance');
+  const stray = await j(
+    'POST',
+    '/org/matching',
+    { criteria: { required: [{ type: 'age', operator: 'gte', value: 16, weight: 5 }] } },
+    maria.token,
+  );
+  neg(
+    stray.status === 400 &&
+      stray.body.field === 'criteria.required[0].weight' &&
+      stray.body.problem === 'unknown_field',
+    'IN7 a criterion carrying a weight is refused, naming it: there are no weights',
+  );
   const prohibited = await j(
     'POST',
     '/org/matching',
@@ -1397,8 +1436,11 @@ section('§15 — ordering and paging are deterministic');
   const bogus = await j('POST', '/org/matching', q(ANY_AGE_C, { sort: 'best_match' }), maria.token);
   abuse(
     50,
-    bogus.status === 200 && bogus.body.sort === DEFAULT_MATCH_SORT,
-    'asking for an ordering called "best_match" quietly gets the declared default, because no such ordering exists',
+    bogus.status === 400 &&
+      bogus.body.field === 'sort' &&
+      bogus.body.problem === 'not_allowed' &&
+      JSON.stringify(bogus.body.allowed) === JSON.stringify(MATCH_SORTS),
+    'asking for an ordering called "best_match" is refused with the orderings that exist, because no such ordering exists',
   );
   // Matching pages by cursor, so a page is one query and only its players are decoded.
   const p1 = await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 3 }), maria.token);
@@ -1488,6 +1530,26 @@ let BRIEF = null;
       'WATCHLIST_STATUS_UNKNOWN',
     'an unknown status filter is refused, not answered with an empty list',
   );
+  {
+    const before = (await j('GET', '/org/watchlists?status=active', undefined, maria.token)).body.total;
+    const long = await junk({ name: 'W'.repeat(81) });
+    const forged = await junk({ orgId: 'org-harbour' });
+    const ageAsText = await junk({ criteria: { required: [{ type: 'age', operator: 'gte', value: '16' }] } });
+    const after = (await j('GET', '/org/watchlists?status=active', undefined, maria.token)).body.total;
+    neg(
+      long.error === 'FIELD_INVALID' && long.field === 'name' && long.problem === 'too_long' && long.max === 80,
+      'IN1 a watchlist name over 80 characters is refused, not cut down',
+    );
+    neg(
+      forged.field === 'orgId' && forged.problem === 'unknown_field',
+      'IN2 a watchlist naming its own organisation is refused: the organisation is the session’s',
+    );
+    neg(
+      ageAsText.error === 'CRITERIA_INVALID' && ageAsText.details?.[0]?.error === 'CRITERION_VALUE_OUT_OF_RANGE',
+      'IN3 an age written as text is refused, not read as the number it spells',
+    );
+    neg(before === after, 'IN4 and none of those refusals made a watchlist');
+  }
 
   const created = await j(
     'POST',

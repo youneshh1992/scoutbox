@@ -51,30 +51,28 @@ export const CRITERION_TYPES = {
     operators: ['between', 'gte', 'lte'],
     label: 'Age',
     validate: (c) => {
-      const nums = c.operator === 'between' ? c.values : [c.value];
-      if (nums.some((n) => !Number.isInteger(Number(n)) || Number(n) < 5 || Number(n) > 60))
-        return 'CRITERION_VALUE_OUT_OF_RANGE';
+      const nums = c.operator === 'between' ? (Array.isArray(c.values) ? c.values : []) : [c.value];
+      if (nums.some((n) => !Number.isInteger(n) || n < 5 || n > 60)) return 'CRITERION_VALUE_OUT_OF_RANGE';
       if (c.operator === 'between') {
-        if (!Array.isArray(c.values) || c.values.length !== 2) return 'CRITERION_RANGE_INVALID';
-        if (Number(c.values[0]) > Number(c.values[1])) return 'CRITERION_RANGE_INVALID';
+        if (c.values.length !== 2) return 'CRITERION_RANGE_INVALID';
+        if (c.values[0] > c.values[1]) return 'CRITERION_RANGE_INVALID';
       }
       return null;
     },
-    normalise: (c) =>
-      c.operator === 'between' ? { values: [Number(c.values[0]), Number(c.values[1])] } : { value: Number(c.value) },
+    normalise: (c) => (c.operator === 'between' ? { values: [c.values[0], c.values[1]] } : { value: c.value }),
   },
   geography: {
     operators: ['within_radius'],
     label: 'Recruitment area',
-    validate: (c) => {
-      const km = Number(c.value);
+    validate: (c, { orgLevel }) => {
+      const km = c.value;
       // Refused rather than clamped to something the club did not ask for.
       if (!Number.isFinite(km) || km <= 0 || km > LIMITS.maxRadiusKm) return 'CRITERION_VALUE_OUT_OF_RANGE';
+      // Only a Grassroots club may see distance, so for anyone else the criterion would match nobody.
+      if (orgLevel !== 'grassroots') return 'CRITERION_NOT_AVAILABLE';
       return null;
     },
-    normalise: (c, { orgLevel }) => ({
-      value: orgLevel === 'grassroots' ? Math.min(Number(c.value), 50) : Number(c.value),
-    }),
+    normalise: (c) => ({ value: Math.min(c.value, 50) }),
   },
   level: {
     operators: ['lte', 'in'],
@@ -105,8 +103,13 @@ export const CRITERION_TYPES = {
   availability: {
     operators: ['equals'],
     label: 'Availability',
-    validate: (c) => (String(c.value ?? '').trim() ? null : 'CRITERION_VALUES_REQUIRED'),
-    normalise: (c) => ({ value: String(c.value).trim().slice(0, 40) }),
+    validate: (c) => {
+      if (typeof c.value !== 'string' || !c.value.trim()) return 'CRITERION_VALUES_REQUIRED';
+      // Refused rather than cut to a value the club did not write.
+      if (c.value.trim().length > LIMITS.maxAvailabilityLength) return 'CRITERION_VALUE_OUT_OF_RANGE';
+      return null;
+    },
+    normalise: (c) => ({ value: c.value.trim() }),
   },
   evidence: {
     operators: ['exists'],
@@ -118,12 +121,12 @@ export const CRITERION_TYPES = {
     operators: ['within_days'],
     label: 'Evidence recency',
     validate: (c) => {
-      const d = Number(c.value);
+      const d = c.value;
       if (!Number.isInteger(d) || d < 1 || d > LIMITS.maxRecencyDays) return 'CRITERION_VALUE_OUT_OF_RANGE';
-      if (c.evidenceKind && !['any', 'footage'].includes(String(c.evidenceKind))) return 'CRITERION_VALUE_UNKNOWN';
+      if (c.evidenceKind && !['any', 'footage'].includes(c.evidenceKind)) return 'CRITERION_VALUE_UNKNOWN';
       return null;
     },
-    normalise: (c) => ({ value: Number(c.value), evidenceKind: c.evidenceKind ? String(c.evidenceKind) : 'footage' }),
+    normalise: (c) => ({ value: c.value, evidenceKind: c.evidenceKind || 'footage' }),
   },
   trust_band: {
     operators: ['gte'],
@@ -147,10 +150,10 @@ export const CRITERION_TYPES = {
     validate: (c, { protocols }) => {
       if (!String(c.protocol ?? '').trim()) return 'CRITERION_VALUES_REQUIRED';
       if (protocols && !protocols.includes(String(c.protocol))) return 'CRITERION_VALUE_UNKNOWN';
-      if (!Number.isFinite(Number(c.value))) return 'CRITERION_VALUE_OUT_OF_RANGE';
+      if (!Number.isFinite(c.value)) return 'CRITERION_VALUE_OUT_OF_RANGE';
       return null;
     },
-    normalise: (c) => ({ protocol: String(c.protocol), value: Number(c.value) }),
+    normalise: (c) => ({ protocol: String(c.protocol), value: c.value }),
   },
 };
 export const CRITERION_TYPE_NAMES = Object.freeze(Object.keys(CRITERION_TYPES));
@@ -165,6 +168,7 @@ export const LIMITS = {
   maxRadiusKm: 20000,
   maxRecencyDays: 3650,
   maxNameLength: 80,
+  maxAvailabilityLength: 40,
   watchlistsPerOrg: 60,
 };
 

@@ -105,7 +105,8 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
 ### Matching and watchlists
 - No score, rank or "recommended player". Required criteria decide membership. Preferred criteria are only counted ("2 of 3"), never sorted on, never change membership. Brief criteria are all required.
 - There are 11 criterion types and 8 operators; others are refused by name. Protected traits are refused first. Missing facts fail closed. There is one engine, `matchPlayerToCriteria`.
-- Authorization (visibility, blocks, minor rules, radius) runs before matching. There is no "considered" count. Only grassroots sees or sorts by distance. Orderings are deterministic and declared.
+- Authorization (visibility, blocks, minor rules, radius) runs before matching. There is no "considered" count. Only grassroots sees or sorts by distance: a Pro club's vocabulary leaves the distance criterion out, and a distance criterion or brief radius from a Pro club is refused (`CRITERION_NOT_AVAILABLE`, `BRIEF_RADIUS_NOT_AVAILABLE`) rather than saved to match nobody. Orderings are deterministic and declared; an ordering that does not exist is refused, not replaced by the default.
+- Input is valid as sent or refused, naming the field: a field the request does not take (a criterion `weight`, an `orgId`), a number written as text (an age of `"16"`), and a name, title or availability over its limit (80, 120 and 40 characters) are refused rather than read, converted or cut.
 - Watchlists:
   - A watchlist stores criteria; membership is derived on read.
   - The mode (`live_linked` or `snapshot`) must be chosen, and at least one required criterion is needed.
@@ -123,6 +124,7 @@ One copy of each rule, in `domains/recruitment/lifecycle/journeyModel.mjs`, used
   - Opening Second Look records new, resurfaced and expired items with the owner's notification together; opening it when nothing has changed saves nothing.
   - "Add to Room" from Nobody Missed, and "Reopen Room" from Second Look, save the Room and the review or item together.
   - Nobody Missed and the evaluation coverage cover every visible player too, and the Nobody Missed list pages by cursor like matching (50 by default, `nextCursor`, `total` the candidates).
+  - The brief list and the Second Look queue page by position (25 by default, at most 100); a page size out of range is refused (`PAGE_LIMIT_INVALID`), not clamped, and a Second Look tab that does not exist is refused.
   - The facts these read (a player's Passport position and availability, evidence confidence, newest evidence and footage, coach reference, confirmed club, Combine results) are kept per player and brought up to date in the same save as the change that affects them. A change that happens through time alone (evidence expiring, an agent agreement ending, an 18th birthday) shows within a minute.
 
 ## Open questions and deferred work

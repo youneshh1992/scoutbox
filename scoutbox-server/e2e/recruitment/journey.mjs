@@ -903,7 +903,7 @@ section('B — the canonical adult journey: 25 steps, one projection, every stag
 const J = {};
 {
   // 1. the player exists  2. discovery  3. watch
-  const found = (await j('GET', '/org/players?query=Kola', undefined, maria.token)).body.items;
+  const found = (await j('GET', '/org/players?q=Kola', undefined, maria.token)).body.items;
   ok(
     Array.isArray(found) && found.some((p) => p.id === 'pl-adeyemi'),
     'B1 Kola exists and the club discovers him in search',

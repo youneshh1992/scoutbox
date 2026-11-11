@@ -167,8 +167,9 @@ const ALL_KINDS = {
     { type: 'age', operator: 'lte', value: 30 },
   ],
 };
+// Grassroots, the level that may write every kind (a Pro club cannot see distance).
 const criteria = (input = ALL_KINDS) => {
-  const v = validateCriteria(input, { orgLevel: 'pro' });
+  const v = validateCriteria(input, { orgLevel: 'grassroots' });
   assert.ok(v.ok, JSON.stringify(v));
   return v.criteria;
 };

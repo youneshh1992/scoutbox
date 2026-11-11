@@ -3,6 +3,7 @@
 import { ageOn, isAdult, visibleToOrg } from '../../domain.mjs';
 import { utcDayOf } from '../../temporal.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
+import { discoveryInput } from './schemas.mjs';
 
 /** Structured tags, no free text. */
 export const SCOUT_TAGS = Object.freeze([
@@ -34,9 +35,11 @@ export function registerFilmRoom({
   playerViewForOrg,
 }) {
   orgRouter.get('/filmroom', (req, res) => {
+    const query = discoveryInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'number', 'string', 'number']);
+      page = readPage(query, ['number', 'number', 'string', 'number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -88,6 +91,7 @@ export function registerFilmRoom({
   orgRouter.post('/players/:pid/media/:mid/view', (req, res) => {
     const found = visibleClip(req, res);
     if (!found) return;
+    if (!discoveryInput(res, 'none', req.body)) return;
     const { p, m } = found;
     const views = (m.views ?? 0) + 1;
     players.patchItem(p.id, 'media', { id: m.id }, { views });
@@ -100,9 +104,10 @@ export function registerFilmRoom({
     const found = visibleClip(req, res);
     if (!found) return;
     const { p, m } = found;
-    const { tags } = req.body || {};
-    if (!Array.isArray(tags) || tags.length === 0)
-      return res.status(400).json({ error: 'TAGS_REQUIRED', allowed: SCOUT_TAGS });
+    const body = discoveryInput(res, 'tags', req.body);
+    if (!body) return;
+    const { tags } = body;
+    if (!tags?.length) return res.status(400).json({ error: 'TAGS_REQUIRED', allowed: SCOUT_TAGS });
     const invalid = tags.filter((t) => !SCOUT_TAGS.includes(t));
     if (invalid.length) return res.status(400).json({ error: 'UNKNOWN_TAGS', invalid, allowed: SCOUT_TAGS });
     const next = { ...(m.tags ?? {}) };
@@ -182,9 +187,11 @@ export function registerFilmRoom({
   });
 
   orgRouter.get('/fixtures', (req, res) => {
+    const query = discoveryInput(res, 'page', req.query, 'query');
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['string', 'string']);
+      page = readPage(query, ['string', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }

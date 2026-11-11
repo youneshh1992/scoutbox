@@ -1068,7 +1068,7 @@ section('N — Recruitment Briefs and Nobody Missed');
     '[47] an unsupported evidence criterion is refused',
   );
   // A field of the wrong type is refused, naming it, rather than dropped or coerced into the record.
-  const field = (r) => r.body?.details?.map((d) => `${d.field}:${d.error}`) ?? [r.body?.error, r.body?.field];
+  const field = (r) => r.body?.details?.map((d) => `${d.field}:${d.error}`) ?? [`${r.body?.field}:${r.body?.error}`];
   neg(
     field(await j('POST', '/org/recruitment-briefs', { title: 'x', foot: 'left' }, maria.token)).includes(
       'foot:BRIEF_FOOT_UNKNOWN',
@@ -1104,6 +1104,49 @@ section('N — Recruitment Briefs and Nobody Missed');
     neg(
       r.status === 400 && r.body.error === 'FIELD_INVALID' && r.body.field === 'roleId',
       'a role reference that is not a short id is refused, not stored as it came',
+    );
+  }
+  {
+    const count = async () => (await j('GET', '/org/recruitment-briefs', undefined, maria.token)).body.total;
+    const before = await count();
+    const post = (body) => j('POST', '/org/recruitment-briefs', { title: 'IN', ...body }, maria.token);
+    const proRadius = await post({ radiusKm: 30 });
+    neg(
+      field(proRadius).includes('radiusKm:BRIEF_RADIUS_NOT_AVAILABLE'),
+      'IN1 a Pro brief with a radius is refused: a Pro club cannot see distance, so it would match nobody',
+    );
+    const longTitle = await post({ title: 'T'.repeat(121) });
+    neg(
+      longTitle.status === 400 && longTitle.body.field === 'title' && longTitle.body.problem === 'too_long',
+      'IN2 a title over 120 characters is refused, not cut down',
+    );
+    const ageAsText = await post({ minAge: '16' });
+    neg(
+      ageAsText.status === 400 && ageAsText.body.field === 'minAge' && ageAsText.body.problem === 'not_number',
+      'IN3 an age written as text is refused, not read as the number it spells',
+    );
+    const stray = await post({ weights: { pace: 2 } });
+    neg(
+      stray.status === 400 && stray.body.field === 'weights' && stray.body.problem === 'unknown_field',
+      'IN4 a field a brief does not have is refused, naming it',
+    );
+    neg((await count()) === before, 'IN5 and none of those refusals made a brief');
+    const grass = await j('POST', '/org/recruitment-briefs', { title: 'IN local', radiusKm: 20 }, dee.token);
+    ok(grass.status === 201 && grass.body.brief.criteria.radiusKm === 20, 'IN6 a Grassroots brief may have a radius');
+    const page = await j('GET', '/org/recruitment-briefs?limit=0', undefined, maria.token);
+    neg(
+      page.status === 400 && page.body.error === 'PAGE_LIMIT_INVALID' && page.body.field === 'limit',
+      'IN7 a page of no briefs is refused, not read as the default page',
+    );
+    const sort = await j('GET', '/org/nobody-missed?briefId=x&sort=best', undefined, maria.token);
+    neg(
+      sort.status === 400 && sort.body.field === 'sort' && sort.body.problem === 'not_allowed',
+      'IN8 an ordering Nobody Missed does not have is refused, not replaced by the default',
+    );
+    const slStatus = await j('GET', '/org/second-look?status=pending', undefined, maria.token);
+    neg(
+      slStatus.status === 400 && slStatus.body.field === 'status' && slStatus.body.allowed?.includes('all'),
+      'IN9 a Second Look tab that does not exist is refused, not answered with an empty list',
     );
   }
   // permissions
@@ -1409,7 +1452,10 @@ section('Trust & Safety, metrics and pagination');
   const page = await j('GET', '/org/second-look?status=all&limit=1', undefined, maria.token);
   ok(page.body.items.length <= 1 && page.body.limit === 1, 'the Second Look queue is bounded');
   const huge = await j('GET', '/org/second-look?limit=99999', undefined, maria.token);
-  neg(huge.body.limit <= LIMITS.maxPageSize, 'an absurd page size is clamped');
+  neg(
+    huge.status === 400 && huge.body.error === 'PAGE_LIMIT_INVALID' && huge.body.max === LIMITS.maxPageSize,
+    'an absurd page size is refused, not clamped',
+  );
   const nmPage = await j('GET', `/org/nobody-missed?briefId=${global.__brief}&limit=1`, undefined, maria.token);
   ok(nmPage.body.limit === 1, 'the Nobody Missed queue is bounded');
   const cov = await j('GET', '/org/evaluation-coverage', undefined, maria.token);

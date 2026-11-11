@@ -1722,10 +1722,8 @@ section('R/live — every hardened route answers with the taxonomy');
     maria.token,
   );
   neg(
-    brief.status === 400 &&
-      brief.body?.error === 'BRIEF_INVALID' &&
-      (brief.body?.details ?? []).some((d) => d.field === 'activeUntil' && d.error === 'DATE_INVALID'),
-    'R8 a brief ending "whenever" → 400 BRIEF_INVALID naming activeUntil DATE_INVALID',
+    brief.status === 400 && brief.body?.error === 'DATE_INVALID' && brief.body?.field === 'activeUntil',
+    'R8 a brief ending "whenever" → 400 DATE_INVALID naming activeUntil',
   );
 
   // Grassroots dates

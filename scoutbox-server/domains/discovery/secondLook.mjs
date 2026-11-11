@@ -5,7 +5,6 @@ import {
   SECOND_LOOK_POLICY_VERSION,
   SECOND_LOOK_STATUSES,
   canSecondLookTransition,
-  DISMISSAL_REASONS,
   SECOND_LOOK_DISCLAIMER,
   SECOND_LOOK_KIND_COPY,
   normalizeMaterialChange,
@@ -18,13 +17,13 @@ import {
   trustLevelChanges,
   POLICY,
   LIMITS,
-  clampPage,
   safeM18Projection,
   CLUB_SIDE_REASONS,
   REASON_CHANGE_MAP,
 } from './shared.mjs';
 import { rateLimitedBody, limitCheck } from '../platform/rateLimit.mjs';
 import { now } from '../platform/clock.mjs';
+import { discoveryInput } from './schemas.mjs';
 
 export function registerSecondLook(ctx) {
   const { orgRouter, nextId, notify, broadcast, findPlayer, orgCanSee, isLead, vmetric, discovery, unit } = ctx;
@@ -394,8 +393,10 @@ export function registerSecondLook(ctx) {
   // ================================================================= ROUTES
 
   orgRouter.get('/second-look', (req, res) => {
+    const query = discoveryInput(res, 'secondLookQuery', req.query, 'query');
+    if (!query) return;
     const live = reconcile(req);
-    const status = String(req.query.status ?? 'open');
+    const status = query.status ?? 'open';
     const byId = new Map(live.map((l) => [l.item.id, l]));
     let items = live;
     if (status !== 'all') items = items.filter((l) => l.item.status === status);
@@ -410,8 +411,8 @@ export function registerSecondLook(ctx) {
       .map(({ item }) => named.find((n) => n.item.id === item.id))
       .filter(Boolean);
 
-    const limit = clampPage(req.query.limit);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = query.limit === undefined ? LIMITS.pageSize : Number(query.limit);
+    const offset = query.offset === undefined ? 0 : Number(query.offset);
     res.json({
       items: ordered.slice(offset, offset + limit).map(itemView),
       total: ordered.length,
@@ -512,6 +513,7 @@ export function registerSecondLook(ctx) {
     const item = findItem(req, res);
     if (!item) return;
     if (limited('second_look_action', req.org.id)) return res.status(429).json(rateLimitedBody('second_look_action'));
+    if (!discoveryInput(res, 'none', req.body)) return;
     if (!transition(req, res, item, 'reviewed')) return;
     const at = now();
     const by = { userId: req.orgUser.id, name: req.orgUser.name };
@@ -530,10 +532,9 @@ export function registerSecondLook(ctx) {
     const item = findItem(req, res);
     if (!item) return;
     if (limited('second_look_action', req.org.id)) return res.status(429).json(rateLimitedBody('second_look_action'));
-    const reason = req.body?.reason ?? null;
-    if (reason != null && !DISMISSAL_REASONS.includes(reason)) {
-      return res.status(400).json({ error: 'SECOND_LOOK_REASON_UNKNOWN', allowed: DISMISSAL_REASONS });
-    }
+    const body = discoveryInput(res, 'secondLookDismiss', req.body);
+    if (!body) return;
+    const reason = body.reason ?? null;
     if (!transition(req, res, item, 'dismissed')) return;
     const at = now();
     const by = { userId: req.orgUser.id, name: req.orgUser.name };
@@ -557,6 +558,8 @@ export function registerSecondLook(ctx) {
     const item = findItem(req, res);
     if (!item) return;
     if (limited('second_look_action', req.org.id)) return res.status(429).json(rateLimitedBody('second_look_action'));
+    const body = discoveryInput(res, 'secondLookReopen', req.body);
+    if (!body) return;
     const found = reads.cases.byId(item.roomId);
     const room = found && found.orgId === req.org.id && found.room ? found : null;
     if (!room) return res.status(404).json({ error: 'ROOM_NOT_FOUND' });
@@ -569,7 +572,7 @@ export function registerSecondLook(ctx) {
         req,
         room,
         to: 'under_review',
-        reasonCodes: req.body?.reasonCodes ?? ['continue_monitoring'],
+        reasonCodes: body.reasonCodes ?? ['continue_monitoring'],
         sourceContext: 'second_look',
         sourceRef: { id: item.id },
       });

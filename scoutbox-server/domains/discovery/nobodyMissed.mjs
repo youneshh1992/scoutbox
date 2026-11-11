@@ -4,6 +4,7 @@
 // matching is how side channels are born.
 import {
   validateRecruitmentBrief,
+  briefProhibited,
   explainBriefCriteria,
   playerMatchesBrief,
   buildNobodyMissedCandidate,
@@ -15,15 +16,14 @@ import {
   EVALUATION_SIGNALS,
   NON_EVALUATION_SIGNALS,
   NOBODY_MISSED_STATES,
-  NM_DISMISSAL_REASONS,
   NM_SORTS,
   EVIDENCE_REQUIREMENTS,
   POSITIONS,
   TRUST_BANDS,
   LIMITS,
-  clampPage,
   briefIsLiveOn,
 } from './shared.mjs';
+import { discoveryInput, BRIEF_CRITERIA_KEYS } from './schemas.mjs';
 import { briefCriteriaToCanonical } from './matching/match.mjs';
 import { createMatchReads } from './matching/query.mjs';
 import { pageOf, sendPageError } from '../platform/paging.mjs';
@@ -113,10 +113,12 @@ export function registerNobodyMissed(ctx) {
   });
 
   orgRouter.get('/recruitment-briefs', (req, res) => {
+    const query = discoveryInput(res, 'briefsQuery', req.query, 'query');
+    if (!query) return;
     // At most LIMITS.briefsPerOrg per organisation, so offset paging is enough.
     const list = briefsFor(req.org.id);
-    const limit = clampPage(req.query.limit);
-    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = query.limit === undefined ? LIMITS.pageSize : Number(query.limit);
+    const offset = query.offset === undefined ? 0 : Number(query.offset);
     res.json({
       items: list.slice(offset, offset + limit).map(briefView),
       total: list.length,
@@ -133,24 +135,16 @@ export function registerNobodyMissed(ctx) {
     if (limited('brief_write', req.org.id)) return res.status(429).json(rateLimitedBody('brief_write'));
     if (dreads.briefs.countForOrg(req.org.id) >= LIMITS.briefsPerOrg)
       return res.status(409).json({ error: 'BRIEFS_FULL' });
-    const v = validateRecruitmentBrief(req.body ?? {}, {
+    const prohibited = briefProhibited(req.body);
+    if (prohibited) return res.status(400).json(prohibited);
+    const body = discoveryInput(res, 'newBrief', req.body);
+    if (!body) return;
+    const v = validateRecruitmentBrief(body, {
       orgLevel: req.org.level,
       protocols: ctx.combineProtocolIds?.() ?? null,
     });
     if (!v.ok) return res.status(400).json(v);
-    const refs = {};
-    for (const k of ['roleId', 'vacancyId']) {
-      const raw = req.body?.[k];
-      if (raw === undefined || raw === null || raw === '') {
-        refs[k] = null;
-        continue;
-      }
-      if (typeof raw !== 'string' || raw.length > 64)
-        return res
-          .status(400)
-          .json({ error: 'FIELD_INVALID', field: k, message: `${k} must be an id of at most 64 characters.` });
-      refs[k] = raw;
-    }
+    const refs = { roleId: body.roleId || null, vacancyId: body.vacancyId || null };
 
     const at = now();
     const b = {
@@ -190,6 +184,10 @@ export function registerNobodyMissed(ctx) {
     if (!requireLead(req, res)) return;
     if (limited('brief_write', req.org.id)) return res.status(429).json(rateLimitedBody('brief_write'));
     if (b.status === 'archived') return res.status(409).json({ error: 'BRIEF_ARCHIVED' });
+    const prohibited = briefProhibited(req.body);
+    if (prohibited) return res.status(400).json(prohibited);
+    const body = discoveryInput(res, 'briefEdit', req.body);
+    if (!body) return;
     if (
       !guardRev(req, res, b, {
         errorCode: 'BRIEF_VERSION_CONFLICT',
@@ -204,39 +202,18 @@ export function registerNobodyMissed(ctx) {
       return;
 
     let statusTo = null;
-    if (req.body?.status !== undefined) {
-      const to = String(req.body.status);
+    if (body.status !== undefined) {
+      const to = body.status;
       if (!BRIEF_STATUSES.includes(to)) return res.status(400).json({ error: 'BRIEF_STATUS_UNKNOWN' });
       if (!canBriefTransition(b.status, to))
         return res.status(409).json({ error: 'BRIEF_TRANSITION_INVALID', from: b.status, to });
       statusTo = to;
     }
-    const wantsCriteria = [
-      'title',
-      'positions',
-      'minAge',
-      'maxAge',
-      'radiusKm',
-      'maxLevel',
-      'foot',
-      'availability',
-      'evidenceRequirements',
-      'minTrustBand',
-      'combineProtocols',
-      'activeFrom',
-      'activeUntil',
-    ].some((k) => req.body?.[k] !== undefined);
+    const given = Object.fromEntries(BRIEF_CRITERIA_KEYS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]]));
     let v = null;
-    if (wantsCriteria) {
-      const merged = {
-        title: b.title,
-        ...b.criteria,
-        activeFrom: b.activeFrom,
-        activeUntil: b.activeUntil,
-        ...req.body,
-      };
-      delete merged.status;
-      delete merged.positionGroups; // worked out from the positions, never an input
+    if (Object.keys(given).length) {
+      const { positionGroups: _derived, ...criteria } = b.criteria;
+      const merged = { title: b.title, ...criteria, activeFrom: b.activeFrom, activeUntil: b.activeUntil, ...given };
       v = validateRecruitmentBrief(merged, { orgLevel: req.org.level, protocols: ctx.combineProtocolIds?.() ?? null });
       if (!v.ok) return res.status(400).json(v);
     }
@@ -321,8 +298,9 @@ export function registerNobodyMissed(ctx) {
     });
 
   orgRouter.get('/nobody-missed', (req, res) => {
-    const briefId = String(req.query.briefId ?? '');
-    const brief = dreads.briefs.forOrgById(briefId, req.org.id);
+    const query = discoveryInput(res, 'nobodyMissedQuery', req.query, 'query');
+    if (!query) return;
+    const brief = query.briefId ? dreads.briefs.forOrgById(query.briefId, req.org.id) : null;
     if (!brief) return res.status(404).json({ error: 'BRIEF_NOT_FOUND' });
     if (!briefIsLive(brief)) {
       return res.json({
@@ -334,12 +312,12 @@ export function registerNobodyMissed(ctx) {
         note: 'Only an active brief inside its date window produces candidates.',
       });
     }
-    const sort = NM_SORTS.includes(String(req.query.sort)) ? String(req.query.sort) : 'newest_evidence';
+    const sort = query.sort ?? 'newest_evidence';
     const at = now();
     const { order, shape } = nmOrder(sort, req, brief, at);
     let page;
     try {
-      page = readMatchPage(req.query, shape);
+      page = readMatchPage(query, shape);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -429,22 +407,24 @@ export function registerNobodyMissed(ctx) {
     history: r.history.map((h) => ({ at: h.at, state: h.state, by: h.by })),
   });
 
-  function briefAndPlayer(req, res) {
-    const brief = dreads.briefs.forOrgById(String(req.body?.briefId ?? req.params.briefId), req.org.id);
+  function briefAndPlayer(req, res, schema) {
+    const body = discoveryInput(res, schema, req.body);
+    if (!body) return null;
+    const brief = body.briefId ? dreads.briefs.forOrgById(body.briefId, req.org.id) : null;
     if (!brief) {
       res.status(404).json({ error: 'BRIEF_NOT_FOUND' });
       return null;
     }
-    const player = findPlayer(String(req.body?.playerId ?? req.params.playerId));
+    const player = body.playerId ? findPlayer(body.playerId) : null;
     if (!player || !orgCanSee(req.org, player)) {
       res.status(403).json({ error: 'NOT_VISIBLE' });
       return null;
     }
-    return { brief, player };
+    return { brief, player, body };
   }
 
   orgRouter.post('/nobody-missed/review', (req, res) => {
-    const ctxp = briefAndPlayer(req, res);
+    const ctxp = briefAndPlayer(req, res, 'nmReview');
     if (!ctxp) return;
     if (limited('nobody_missed_action', req.org.id))
       return res.status(429).json(rateLimitedBody('nobody_missed_action'));
@@ -458,14 +438,11 @@ export function registerNobodyMissed(ctx) {
   });
 
   orgRouter.post('/nobody-missed/dismiss', (req, res) => {
-    const ctxp = briefAndPlayer(req, res);
+    const ctxp = briefAndPlayer(req, res, 'nmDismiss');
     if (!ctxp) return;
     if (limited('nobody_missed_action', req.org.id))
       return res.status(429).json(rateLimitedBody('nobody_missed_action'));
-    const reason = req.body?.reason ?? null;
-    if (reason != null && !NM_DISMISSAL_REASONS.includes(reason)) {
-      return res.status(400).json({ error: 'NM_REASON_UNKNOWN', allowed: NM_DISMISSAL_REASONS });
-    }
+    const reason = ctxp.body.reason ?? null;
     const r = setReview(req, ctxp.brief, ctxp.player.id, {
       state: 'dismissed',
       dismissReason: reason,
@@ -480,7 +457,7 @@ export function registerNobodyMissed(ctx) {
   });
 
   orgRouter.post('/nobody-missed/add-to-room', (req, res) => {
-    const ctxp = briefAndPlayer(req, res);
+    const ctxp = briefAndPlayer(req, res, 'nmReview');
     if (!ctxp) return;
     if (limited('nobody_missed_action', req.org.id))
       return res.status(429).json(rateLimitedBody('nobody_missed_action'));

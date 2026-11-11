@@ -471,8 +471,7 @@ await test("media upload: the clip row (player_media) and the activity row it re
   );
   // The club tags the clip: tag rows + ledger row in one unit.
   const pro = await orgLogin(S, 'org-eastport', 'Maria Keane', 'Head of Recruitment');
-  const tagAct = () =>
-    S.j('POST', `/org/players/${pid}/media/${mediaId.id}/tags`, { tags: ['pace', 'vision', 'pace'] }, pro);
+  const tagAct = () => S.j('POST', `/org/players/${pid}/media/${mediaId.id}/tags`, { tags: ['pace', 'vision'] }, pro);
   const tagState = () => ({
     tags: qAll(dir, 'SELECT tag, count FROM player_media_tags WHERE media_id = ? ORDER BY position', mediaId.id),
     ledger: auditRows(dir, 'ledger').filter((l) => l.type === 'clip_tagged' && l.playerId === pid).length,
@@ -490,25 +489,25 @@ await test("media upload: the clip row (player_media) and the activity row it re
   );
   const tagged = await tagAct();
   assert.equal(tagged.status, 200, JSON.stringify(tagged.body));
-  assert.deepEqual(tagged.body.tags, { pace: 2, vision: 1 });
+  assert.deepEqual(tagged.body.tags, { pace: 1, vision: 1 });
   assert.deepEqual(
     tagState(),
     {
       tags: [
-        { tag: 'pace', count: 2 },
+        { tag: 'pace', count: 1 },
         { tag: 'vision', count: 1 },
       ],
       ledger: 1,
     },
     'tag rows and the ledger row are committed when the response is sent',
   );
-  assert.deepEqual(await tagView(S), { pace: 2, vision: 1 });
+  assert.deepEqual(await tagView(S), { pace: 1, vision: 1 });
   await S.kill();
   assert.deepEqual(
     tagState(),
     {
       tags: [
-        { tag: 'pace', count: 2 },
+        { tag: 'pace', count: 1 },
         { tag: 'vision', count: 1 },
       ],
       ledger: 1,
@@ -516,7 +515,7 @@ await test("media upload: the clip row (player_media) and the activity row it re
     'a SIGKILL right after the response loses nothing',
   );
   S = await boot(dir);
-  assert.deepEqual(await tagView(S), { pace: 2, vision: 1 }, 'a restart serves the tags from their rows');
+  assert.deepEqual(await tagView(S), { pace: 1, vision: 1 }, 'a restart serves the tags from their rows');
   assert.equal((await S.j('GET', `/media/${mediaId.id}`, undefined, token)).status, 200);
   await S.stop();
   rm(dir);

@@ -101,9 +101,9 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
 - **The claims verification sweep ignores refusals.** `verificationSweep` (`domains/verification/claims/review.mjs`)
   notifies and counts a claim whose `transition()` was refused, one thrown unit stops the rest of the sweep (unlike
   `transitionSweep`), and its warning date uses the server's time zone.
-- **A Pro brief with a radius matches nobody.** Only Grassroots clubs may use distance, so the geography criterion is
-  false for a Pro club (`domains/discovery/matching/match.mjs`), but a Pro brief with `radiusKm` is accepted rather
-  than refused.
+- **The Pro brief form offers a radius.** The brief form (`scoutbox-club/src/m18Screens.tsx`) shows the radius field
+  to a Pro club, but the server refuses a Pro brief with a radius (`BRIEF_RADIUS_NOT_AVAILABLE`), because a Pro club
+  cannot see distance. The field should be shown to Grassroots clubs only, which is a UI change.
 - **A watchlist alert can go to a removed staff member.** The watchlist notification goes to `w.createdBy` without the
   `removedAt` check that Second Look makes (`domains/discovery/matching/index.mjs`).
 - **The Box Cam source freeze misses some code lines.** `strippedSource` (`domains/development/boxcam/cv/freeze.mjs`)

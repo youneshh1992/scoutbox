@@ -70,9 +70,9 @@ its own, and only the functions a route uses are loaded) and because its schemas
   shared rules.
 
 Move routes over one domain at a time, fixing the input defects in `known-issues.md` as each domain moves. Groups,
-recruitment, scouting, verification and agents have moved. The rest, in this order:
+recruitment, scouting, verification, agents and discovery have moved. The rest, in this order:
 
-1. **Discovery and identity**, then the small domains (enterprise, messaging, insight, safety, operations,
+1. **Identity**, then the small domains (enterprise, messaging, insight, safety, operations,
    integrations, media), one commit each.
 2. **Development** last: the largest, and its Box Cam batteries are run only with permission, so it is moved and
    tested in one go. It carries the "text cut instead of refused" defect.
