@@ -2206,7 +2206,7 @@ section('F — honest transport failure: the write refuses before anything is re
   await draft(RID, { outcome: 'hold', note: 'Will refuse once.' });
   const inj = await j('POST', '/admin/delivery/inject-failure', { channel: 'decision', count: 1 }, undefined, ADMIN);
   ok(inj.status === 200 || inj.status === 201, 'F1 one decision transport failure is injected');
-  const audits0 = (await j('GET', '/org/audit?limit=200', undefined, maria.token)).body;
+  const audits0 = (await j('GET', '/org/audit?limit=50', undefined, maria.token)).body;
   const st0 = await stage(RID);
   const r = await supersede(RID, {
     expectedRev: 1,
@@ -2228,7 +2228,7 @@ section('F — honest transport failure: the write refuses before anything is re
       (await stage(RID)) === st0,
     'F3 nothing was written: no row, the head untouched, the draft intact, the case unmoved',
   );
-  const audits1 = (await j('GET', '/org/audit?limit=200', undefined, maria.token)).body;
+  const audits1 = (await j('GET', '/org/audit?limit=50', undefined, maria.token)).body;
   const count = (a) =>
     (a.items ?? a.entries ?? a).filter(
       (x) => x.action === 'room_decision_superseded' && (x.targetId === RID || x.roomId === RID),
@@ -2272,7 +2272,7 @@ section(
     'guardian export': (await j('GET', '/guardian/export', undefined, amara.token)).body,
     'org notifications': await notifs('/org/notifications', maria.token),
     'org notifications (tom)': await notifs('/org/notifications', tom.token),
-    audit: (await j('GET', '/org/audit?limit=200', undefined, maria.token)).body,
+    audit: (await j('GET', '/org/audit?limit=50', undefined, maria.token)).body,
     'audit export': (await j('GET', '/org/audit/export', undefined, maria.token)).body,
     outbox: (await j('GET', '/admin/outbox', undefined, undefined, ADMIN)).body,
     'push log': (await j('GET', '/admin/push-log', undefined, undefined, ADMIN)).body,

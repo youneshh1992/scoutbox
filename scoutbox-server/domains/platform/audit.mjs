@@ -6,11 +6,18 @@
  */
 
 import { agentAuditRows } from '../agents/core/audit.mjs';
+import * as v from 'valibot';
 import { encodeCursor } from './paging.mjs';
+import { inputOrRefuse, text, wholeNumberText } from './schemas.mjs';
 import { complianceAuditRows } from '../agents/compliance/audit.mjs';
 
 const PAGE_MAX = 50;
 const PAGE_DEFAULT = 25;
+const CURSOR_MAX = 512;
+const AUDIT_QUERY = v.strictObject({
+  limit: v.optional(wholeNumberText({ min: 1, max: PAGE_MAX })),
+  cursor: v.optional(text(CURSOR_MAX)),
+});
 
 /** Room activity types worth an administrator's attention. Chatter is not. */
 const ROOM_ACTIONS = new Set([
@@ -258,15 +265,20 @@ export function registerAudit(ctx) {
 
   orgRouter.get('/audit', (req, res) => {
     if (!requireLead(req, res)) return;
-    const limit = Math.min(PAGE_MAX, Math.max(1, Number(req.query.limit) || PAGE_DEFAULT));
+    const query = inputOrRefuse(res, AUDIT_QUERY, req.query, {
+      root: 'query',
+      fieldCodes: { limit: 'PAGE_LIMIT_INVALID' },
+    });
+    if (!query) return;
+    const limit = query.limit ? Number(query.limit) : PAGE_DEFAULT;
     const invalid = () =>
       res.status(400).json({
         error: 'AUDIT_CURSOR_INVALID',
         message: 'That page no longer exists — start again from the first page.',
       });
     let after = null;
-    if (req.query.cursor) {
-      after = readCursor(req.query.cursor);
+    if (query.cursor) {
+      after = readCursor(query.cursor);
       if (!after) return invalid();
     }
     const memory = memoryEntries(req.org);

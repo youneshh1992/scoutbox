@@ -368,4 +368,29 @@ test('declaredCodes keeps a shared field code only on a schema that declares the
   assert.equal(unknown.problem, 'unknown_field');
 });
 
+test('a list sent where an object is expected is refused at any depth, not read as an object with no fields', () => {
+  const Nested = v.strictObject({
+    target: v.optional(v.strictObject({ value: v.optional(wholeNumber()) })),
+    rows: v.optional(v.array(v.strictObject({ id }))),
+  });
+  for (const [input, field] of [
+    [{ target: [] }, 'target'],
+    [{ target: ['x'] }, 'target'],
+    [{ rows: [{ id: 'a' }, []] }, 'rows[1]'],
+  ]) {
+    const r = refusal(input, Nested, {
+      codes: { FIELD_INVALID: 'NESTED_INVALID' },
+      fieldCodes: { 'target.*': 'TARGET_INVALID' },
+    });
+    assert.equal(r.field, field);
+    assert.equal(r.problem, 'not_object');
+    assert.equal(r.error, field === 'target' ? 'TARGET_INVALID' : 'NESTED_INVALID');
+  }
+  assert.equal(
+    parseInput(Nested, { target: { value: 1 }, rows: [] }).ok,
+    true,
+    'a list where a list is expected is fine',
+  );
+});
+
 console.log(`${passed} input-schema checks passed`);

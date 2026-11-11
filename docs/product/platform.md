@@ -110,7 +110,9 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md); the
   operation. Text over 2,000 characters is shortened.
 - Categories `compliance` and `security_account` are mandatory and cannot be set to
   `false`. A preference value must be `true` or `false` (anything else is `400
-  PREFS_INVALID`). Preferences survive account deletion.
+  PREFS_INVALID`), as is a field the preferences do not have; a name that is not a
+  category, inherited names such as `constructor` included, is `PREF_CATEGORY_UNKNOWN`.
+  Preferences survive account deletion.
 - Delivery callbacks match the first dispatch in insertion order whose
   `providerMessageId` equals the event's. Dispatch rows survive a person's deletion
   (orphans are kept; retention is undecided).
@@ -141,7 +143,10 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md); the
   off every list (its registrants are not told; a scout another club assigned to it keeps
   the assignment). A player listed twice on a match day is credited once. An open day's
   positions are free text (at most 20, each up to 40 characters, repeats dropped). Club
-  names on open days and friendlies are the club's current name.
+  names on open days and friendlies are the club's current name. An open-day outcome
+  note, a release reference and a friendly response over their limits are refused, not
+  cut, as are more than six badges and a drill result or timeline entry that is not
+  written as a number or text.
 - Uploads, saved searches, invoices and delivery bookkeeping:
   - A resumable upload refuses a size that is not a whole number of bytes, a title that is
     not text and a checksum that is not 64 hexadecimal characters. A

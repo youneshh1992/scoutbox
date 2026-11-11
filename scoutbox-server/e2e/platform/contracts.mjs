@@ -1328,7 +1328,10 @@ section('§25 — the audit log: leads only, no content, bounded, stable');
     'a stale cursor is a 400, not an empty page',
   );
   const big = await j('GET', '/org/audit?limit=5000', undefined, maria.token);
-  neg(big.body.items.length <= 50, 'limit is clamped to 50');
+  neg(
+    big.status === 400 && big.body.error === 'PAGE_LIMIT_INVALID' && big.body.max === 50,
+    'a limit over 50 is refused',
+  );
   if (hack?.token) {
     const empty = await j('GET', '/org/audit', undefined, hack.token);
     neg(
@@ -1338,12 +1341,26 @@ section('§25 — the audit log: leads only, no content, bounded, stable');
   }
   const foreignCursor = await j('GET', `/org/audit?cursor=${page1.body.items[0].id}`, undefined, rita.token);
   neg(foreignCursor.status === 400, "a cursor from another organisation's page is invalid here");
+  const textLimit = await j('GET', '/org/audit?limit=ten', undefined, maria.token);
+  neg(
+    textLimit.status === 400 && textLimit.body.error === 'PAGE_LIMIT_INVALID',
+    'IN1 a limit that is not a whole number is refused (it read as the default)',
+  );
+  const extraQuery = await j('GET', '/org/audit?orgId=org-harbour', undefined, maria.token);
+  neg(
+    extraQuery.status === 400 && extraQuery.body.field === 'orgId',
+    'IN2 the audit feed takes no organisation from the query',
+  );
+  const twoTickets = await fetch(`${BASE}/events?ticket=a&ticket=b`);
+  neg(twoTickets.status === 400, 'IN3 a live-sync ticket given twice is refused (it was joined into one text)');
 }
 
 // ================================================================ §26 faults
 section('§26 — simulated latency and failure: isolated, retryable, idempotent');
 {
   const setFaults = (rules) => j('POST', '/__faults', { rules }, undefined);
+  const listed = await j('POST', '/__faults', { rules: ['delay:/org/players:300'] }, undefined);
+  neg(listed.status === 400 && listed.body.field === 'rules', 'IN4 fault rules are one text, not a list');
   ok((await setFaults('delay:/org/players:300')).status === 200, 'a delay rule is installed at runtime');
   const t0 = Date.now();
   const slow = await j('GET', '/org/players', undefined, maria.token);

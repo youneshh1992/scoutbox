@@ -257,6 +257,40 @@ function fieldCodeFor(issue, fieldCodes) {
 const isKeyIssue = (issue) =>
   issue.type === 'strict_object' || issue.type === 'object' || issue.type === 'loose_object';
 
+const WRAPPERS = new Set(['optional', 'nullish', 'nullable', 'exact_optional', 'non_optional', 'non_nullish']);
+
+/**
+ * The path to the first list sent where `schema` expects an object, or null. Valibot's object schemas take an array
+ * as an object, so `[]` would pass as one with no fields at any depth, and `['x']` would be refused as a field named
+ * `0`.
+ */
+function listForObject(schema, input, path = []) {
+  let s = schema;
+  while (s && WRAPPERS.has(s.type)) s = s.wrapped;
+  if (!s || input === null || typeof input !== 'object') return null;
+  if (isKeyIssue(s)) {
+    if (Array.isArray(input)) return path;
+    for (const [key, entry] of Object.entries(s.entries)) {
+      if (!Object.hasOwn(input, key)) continue;
+      const found = listForObject(entry, input[key], [...path, key]);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (s.type === 'array' && Array.isArray(input)) {
+    for (const [i, item] of input.entries()) {
+      const found = listForObject(s.item, item, [...path, i]);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (s.type === 'variant' && !Array.isArray(input)) {
+    const option = s.options.find((o) => o.entries[s.key]?.literal === input[s.key]);
+    return option ? listForObject(option, input, path) : null;
+  }
+  return null;
+}
+
 /** The problem, the values it needs, and an English phrase for it, none of which quote the value that was sent. */
 function describe(issue) {
   const known = CODED.get(issue.requirement);
@@ -309,10 +343,12 @@ const phraseFor = (issue) => describe(issue).phrase;
  * (`{ 'terms.*': 'TERMS_INPUT_INVALID' }`); it wins over `codes`.
  */
 export function parseInput(schema, input, { root = 'body', codes = {}, fieldCodes = {} } = {}) {
-  // Valibot's object schemas take an array as an object, so `[]` would pass as a body with no fields.
-  if (Array.isArray(input) && isKeyIssue(schema)) {
-    const error = codes.FIELD_INVALID ?? 'FIELD_INVALID';
-    return { ok: false, error, field: root, problem: 'not_object', message: `${root} must be an object.` };
+  const list = listForObject(schema, input);
+  if (list) {
+    const issue = { path: list.map((key) => ({ key })) };
+    const field = fieldOf(issue, root);
+    const error = fieldCodeFor(issue, fieldCodes) ?? codes.FIELD_INVALID ?? 'FIELD_INVALID';
+    return { ok: false, error, field, problem: 'not_object', message: `${field} must be an object.` };
   }
   const result = v.safeParse(schema, input, { abortEarly: true, message: phraseFor });
   if (result.success) return { ok: true, value: result.output };

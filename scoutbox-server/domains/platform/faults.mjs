@@ -18,6 +18,11 @@
  * The suites also set rules at runtime through POST /__faults (same guard),
  * so a single server can be walked through slow → failed → recovered.
  */
+import * as v from 'valibot';
+import { inputOrRefuse, text } from './schemas.mjs';
+
+const RULES_MAX = 2_000;
+const FAULTS_INPUT = v.strictObject({ rules: v.optional(text(RULES_MAX)) });
 
 export const FAULT_KINDS = ['delay', 'unavailable', 'timeout', 'retryable', 'fatal', 'internal'];
 // `internal:STEP[:N]` is not a route fault: a unit of work asks `shouldFail(STEP)` at a named seam and throws for the
@@ -104,8 +109,10 @@ export function createFaultLayer({ env = process.env } = {}) {
     app.use(middleware);
     if (!enabled) return;
     app.post('/__faults', (req, res) => {
+      const body = inputOrRefuse(res, FAULTS_INPUT, req.body ?? {});
+      if (!body) return;
       try {
-        rules = parseFaultRules(req.body?.rules ?? '');
+        rules = parseFaultRules(body.rules ?? '');
         res.json({ ok: true, rules: rules.map(({ kind, pattern, arg }) => ({ kind, pattern, arg })) });
       } catch (e) {
         res.status(400).json({ error: 'FAULT_RULE_INVALID', message: e.message });

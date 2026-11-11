@@ -9,6 +9,9 @@
  * spare one); a preference write naming an unknown category is refused.
  */
 
+import * as v from 'valibot';
+import { flag, parseInput } from './schemas.mjs';
+
 export const CATEGORIES = Object.freeze({
   mentions: { label: 'Mentions', default: true, mandatory: false },
   assignments: { label: 'Assignments and tasks', default: true, mandatory: false },
@@ -37,6 +40,12 @@ export const CATEGORIES = Object.freeze({
   // Not mandatory, for the same reason as Offers.
   signing_updates: { label: 'Signing workflow', default: true, mandatory: false },
   security_account: { label: 'Security and account', default: true, mandatory: true },
+});
+
+// Each category is named once and set to true or false; a name that is not a category is PREF_CATEGORY_UNKNOWN.
+const PREFS_INPUT = v.strictObject({
+  categories: v.optional(v.strictObject(Object.fromEntries(Object.keys(CATEGORIES).map((k) => [k, v.optional(flag)])))),
+  emailIntent: v.optional(flag),
 });
 export const CATEGORY_NAMES = Object.freeze(Object.keys(CATEGORIES));
 
@@ -191,23 +200,22 @@ export function createNotificationPrefs({ notifications }) {
     };
   }
 
-  function update(kind, id, body, res) {
-    const incoming = body?.categories;
-    if (incoming !== undefined && (typeof incoming !== 'object' || incoming === null || Array.isArray(incoming))) {
-      return res
-        .status(400)
-        .json({ error: 'PREFS_INVALID', message: 'categories must be an object of category → boolean.' });
+  function update(kind, id, raw, res) {
+    const parsed = parseInput(PREFS_INPUT, raw ?? {}, { codes: { FIELD_INVALID: 'PREFS_INVALID' } });
+    if (!parsed.ok) {
+      const { ok: _ok, ...refusal } = parsed;
+      const category = refusal.field.startsWith('categories.') ? refusal.field.slice('categories.'.length) : null;
+      const unknown = category && refusal.problem === 'unknown_field';
+      return res.status(400).json({
+        ...refusal,
+        ...(unknown ? { error: 'PREF_CATEGORY_UNKNOWN' } : {}),
+        ...(category ? { category } : {}),
+      });
     }
-    for (const [k, v] of Object.entries(incoming ?? {})) {
-      // Own keys only: `__proto__`, `constructor` and `toString` are not categories.
-      if (!Object.hasOwn(CATEGORIES, k))
-        return res
-          .status(400)
-          .json({ error: 'PREF_CATEGORY_UNKNOWN', category: k, message: 'That is not a notification category.' });
-      // Never coerced: a numeric 0 would read as "off".
-      if (typeof v !== 'boolean')
-        return res.status(400).json({ error: 'PREFS_INVALID', category: k, message: `${k} must be true or false.` });
-      if (CATEGORIES[k].mandatory && v === false) {
+    const body = parsed.value;
+    const incoming = body.categories;
+    for (const [k, on] of Object.entries(incoming ?? {})) {
+      if (CATEGORIES[k].mandatory && on === false) {
         return res.status(400).json({
           error: 'PREF_CATEGORY_MANDATORY',
           category: k,
@@ -215,12 +223,8 @@ export function createNotificationPrefs({ notifications }) {
         });
       }
     }
-    if (body?.emailIntent !== undefined && typeof body.emailIntent !== 'boolean')
-      return res
-        .status(400)
-        .json({ error: 'PREFS_INVALID', field: 'emailIntent', message: 'emailIntent must be true or false.' });
     const patch = { categories: { ...(incoming ?? {}) } };
-    if (body?.emailIntent !== undefined) patch.emailIntent = body.emailIntent;
+    if (body.emailIntent !== undefined) patch.emailIntent = body.emailIntent;
     notifications.updatePrefs(kind, id, patch, { at: Date.now() });
     res.json({ preferences: view(kind, id) });
   }

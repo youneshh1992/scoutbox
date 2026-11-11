@@ -230,6 +230,8 @@ for (const [body, code, label] of [
   [{ categories: { security_account: false } }, 'PREF_CATEGORY_MANDATORY', 'turning off the mandatory category'],
   [{ categories: { gossip: true } }, 'PREF_CATEGORY_UNKNOWN', 'an unknown category'],
   [{ categories: ['messages'] }, 'PREFS_INVALID', 'a list'],
+  [{ categories: JSON.parse('{"constructor": true}') }, 'PREF_CATEGORY_UNKNOWN', 'IN1 an inherited name'],
+  [{ categories: { messages: false }, push: true }, 'PREFS_INVALID', 'IN2 a field the preferences do not have'],
 ]) {
   const r = await put(body);
   neg(r.status === 400 && r.body?.error === code, `${label} is refused (400 ${code})`);

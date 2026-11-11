@@ -4,6 +4,15 @@
 import { visibleToOrg } from '../../domain.mjs';
 import { audienceFor } from './eventAudience.mjs';
 import { minimizePayload } from './eventRegistry.mjs';
+import * as v from 'valibot';
+import { inputOrRefuse, text, wholeNumberText } from './schemas.mjs';
+
+const TICKET_MAX = 128;
+// Clients reconnect with `?ticket=&lastEventId=`; the Last-Event-ID header, when a browser sends it, wins.
+const EVENTS_QUERY = v.strictObject({
+  ticket: v.optional(text(TICKET_MAX)),
+  lastEventId: v.optional(wholeNumberText()),
+});
 
 const SSE_TICKET_TTL_MS = 10 * 60 * 1000;
 const EVENT_LOG_CAP = 500;
@@ -174,6 +183,7 @@ export function createLiveSync({
   }
 
   app.post('/events/ticket', (req, res) => {
+    if (!inputOrRefuse(res, v.strictObject({}), req.body ?? {})) return;
     const session = sessionFor(req);
     if (!sseIdentityFor(session))
       return res
@@ -187,7 +197,9 @@ export function createLiveSync({
   });
 
   app.get('/events', (req, res) => {
-    const t = sseTickets.get(String(req.query.ticket ?? ''));
+    const query = inputOrRefuse(res, EVENTS_QUERY, req.query, { root: 'query' });
+    if (!query) return;
+    const t = sseTickets.get(query.ticket ?? '');
     if (!t || t.expiresAt < Date.now()) {
       return res
         .status(401)
@@ -202,7 +214,7 @@ export function createLiveSync({
     res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
     res.flushHeaders();
     res.write(`data: ${JSON.stringify({ event: 'connected', ts: Date.now() })}\n\n`);
-    const lastId = Number(req.headers['last-event-id'] ?? req.query.lastEventId ?? 0);
+    const lastId = Number(req.headers['last-event-id'] ?? query.lastEventId ?? 0);
     if (lastId > 0) {
       const bufferStart = eventLog.length > 0 ? eventLog[0].id : eventSeq + 1;
       if (lastId > eventSeq || lastId < bufferStart - 1) {

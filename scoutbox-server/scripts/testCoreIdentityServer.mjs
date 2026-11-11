@@ -1184,8 +1184,8 @@ await test("sub-records through the real routes: clips (a file and a null url), 
     { title: 'Second, no file', url: null, views: 0 },
   ]);
   // Timeline, badges (a legal duplicate and the order kept), a season, a medical record, a drill, a programme completion.
-  assert.equal((await S.j('POST', '/player/timeline', { year: 2024, event: 'Joined Test Town' }, token)).status, 201);
-  assert.equal((await S.j('POST', '/player/timeline', { year: 2023, event: 'First season' }, token)).status, 201);
+  assert.equal((await S.j('POST', '/player/timeline', { year: '2024', event: 'Joined Test Town' }, token)).status, 201);
+  assert.equal((await S.j('POST', '/player/timeline', { year: '2023', event: 'First season' }, token)).status, 201);
   assert.deepEqual(qAll(dir, 'SELECT year, event FROM player_timeline WHERE player_id = ? ORDER BY position', pid), [
     { year: '2024', event: 'Joined Test Town' },
     { year: '2023', event: 'First season' },

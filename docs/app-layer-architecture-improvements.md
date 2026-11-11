@@ -50,7 +50,7 @@ on their own.
 
 ## The plan, in order
 
-### 1. A shared input-schema layer
+### 1. A shared input-schema layer [**done**]
 
 Each route declares the shape of its body, query and params once; a shared layer in `domains/platform/` checks it and
 refuses bad input with the existing codes (`400 FIELD_INVALID` naming the field, or the domain's own code), never
@@ -69,10 +69,9 @@ its own, and only the functions a route uses are loaded) and because its schemas
 - Shared schemas (dates, ids, money, free text with its length limit) are defined once and imported, like the other
   shared rules.
 
-Move routes over one domain at a time, fixing the input defects in `known-issues.md` as each domain moves. Every
-domain but development has moved. **Development** is last: the largest, and its Box Cam batteries are run only with
-permission, so it is moved and tested in one go. It carries the "text cut instead of refused" defect. The platform
-layer's own few routes (`notificationPrefs`, `liveSync`, `audit`, `faults`) move with it.
+Every domain has moved, the platform layer's own routes with them, and the hand-written helpers
+(`domains/platform/input.mjs`) are gone. A list sent where any schema expects an object, at any depth, is refused in
+the shared layer (valibot reads `[]` as an object with no fields). New routes declare their input the same way.
 
 ### 2. Enforced write and side-effect rules
 

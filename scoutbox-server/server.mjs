@@ -6,7 +6,6 @@ import { installAsyncErrorForwarding } from './domains/platform/asyncErrors.mjs'
 // A rejected async handler answers 500 instead of ending the process.
 installAsyncErrorForwarding();
 
-import { reqText } from './domains/platform/input.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
@@ -506,7 +505,6 @@ const { checkSavedSearches } = registerSavedSearches({
   notify,
   nextId,
   playerViewForOrg,
-  reqText,
   savedSearches: operations.savedSearches,
 });
 registerClubTrials({

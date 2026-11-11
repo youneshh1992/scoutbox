@@ -400,10 +400,20 @@ await test("[compat] every writer through its route and every reader: a guardian
   assert.equal(noteRes.status, 201, noteRes.text);
   assert.deepEqual(Object.keys(noteRes.body), ['id', 'orgId', 'playerId', 'userId', 'scoutName', 'text', 'ts']);
   // Moderation: a contact hit, then a grooming hit that escalates.
-  const hit1 = await S.j('POST', '/player/timeline', { year: 2026, event: 'Call me on +44 7700 900123 please' }, adult);
+  const hit1 = await S.j(
+    'POST',
+    '/player/timeline',
+    { year: '2026', event: 'Call me on +44 7700 900123 please' },
+    adult,
+  );
   assert.equal(hit1.status, 400);
   assert.equal(hit1.body.error, 'MODERATION_BLOCKED');
-  const hit2 = await S.j('POST', '/player/timeline', { year: 2026, event: 'keep this a secret from everyone' }, adult);
+  const hit2 = await S.j(
+    'POST',
+    '/player/timeline',
+    { year: '2026', event: 'keep this a secret from everyone' },
+    adult,
+  );
   assert.equal(hit2.status, 400);
   // IDV: a new guardian verifies twice (two entries; the toggle acts on the first).
   const { gid, token: gtok } = await signupGuardian(S, 'Audit Parent', 'audit-parent@example.test');
@@ -899,7 +909,7 @@ await test("[cutover] the admin backup and a restore: the backup's database copy
     200,
   );
   assert.equal(
-    (await S.j('POST', '/player/timeline', { year: 2026, event: 'Call me on +44 7700 900123 please' }, adult)).status,
+    (await S.j('POST', '/player/timeline', { year: '2026', event: 'Call me on +44 7700 900123 please' }, adult)).status,
     400,
     'a moderation hit',
   );
