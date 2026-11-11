@@ -1002,25 +1002,42 @@ section('H7 — conflict engine over HTTP: confirmed club vs player claim');
   );
 }
 
-section('H8 — achievements: forged provenance inert, confirmation upgrades');
+section('H8 — achievements: forged provenance refused, confirmation upgrades');
 let confirmedAchEvId;
 {
   let r = await j('POST', '/player/football-passport/achievements', {}, kola.token);
   neg(r.status === 400 && r.body.error === 'TITLE_REQUIRED', 'empty achievement refused');
+  for (const forged of [
+    { provenance: 'verified_club_confirmed' },
+    { confirmation: { provenance: 'authoritative_registry', orgName: 'FA' } },
+  ]) {
+    const [field] = Object.keys(forged);
+    r = await j(
+      'POST',
+      '/player/football-passport/achievements',
+      { title: 'County Cup Winner 2024', when: '2024', ...forged },
+      kola.token,
+    );
+    neg(
+      r.status === 400 && r.body.field === field && r.body.problem === 'unknown_field',
+      `a client cannot assert an achievement's ${field}: the body is refused, naming it`,
+    );
+  }
+  neg(
+    !JSON.stringify((await j('GET', '/player/football-passport', undefined, kola.token)).body).includes(
+      'County Cup Winner 2024',
+    ),
+    'and nothing of the refused achievements is stored',
+  );
   r = await j(
     'POST',
     '/player/football-passport/achievements',
-    {
-      title: 'County Cup Winner 2024',
-      when: '2024',
-      provenance: 'verified_club_confirmed',
-      confirmation: { provenance: 'authoritative_registry', orgName: 'FA' },
-    },
+    { title: 'County Cup Winner 2024', when: '2024' },
     kola.token,
   );
-  neg(
+  ok(
     r.status === 201 && r.body.provenance === 'player_submitted' && r.body.achievement.confirmation === null,
-    'client-asserted provenance/confirmation is IGNORED — new achievements are player-submitted',
+    'a new achievement is player-submitted, with no confirmation',
   );
   const achId = r.body.achievement.id;
   confirmedAchEvId = evId('achievement', achId, 'achievement');
@@ -1393,6 +1410,62 @@ section('H15 — batch summaries: light, gated, measured');
     !r.body.items.some((i) => ['pl-guni', 'pl-tomasz'].includes(i.playerId)),
     'agency batch NEVER contains minors — same wall, no error leak',
   );
+}
+
+section('H15b — Passport input is read strictly: no unknown fields, nothing cut, dates as written');
+{
+  const stored = async () => JSON.stringify((await j('GET', '/player/football-passport', undefined, kola.token)).body);
+  let r = await j('PATCH', '/player/football-passport/prefs', { bio: 'Quick.', verified: true }, kola.token);
+  neg(
+    r.status === 400 && r.body.field === 'verified' && r.body.problem === 'unknown_field',
+    'a preference the Passport does not have is refused, naming it',
+  );
+  r = await j(
+    'PATCH',
+    '/player/football-passport/prefs',
+    { positionHistoryAdd: { from: '2020-01-01T10:00:00Z', primary: 'ST' } },
+    kola.token,
+  );
+  neg(
+    r.status === 400 && r.body.error === 'DATE_INVALID' && r.body.field === 'positionHistoryAdd.from',
+    'a football date is a year, a month or a day — a date-time is refused, not read as its day',
+  );
+  r = await j('PATCH', '/player/football-passport/prefs', { positionHistoryAdd: { primary: 'ST' } }, kola.token);
+  neg(r.status === 400 && r.body.error === 'DATE_REQUIRED', 'position history still needs at least a year');
+  r = await j('POST', '/player/football-passport/career', { orgName: 'Object FC', from: { year: 2019 } }, kola.token);
+  neg(r.status === 400 && r.body.error === 'DATE_INVALID' && r.body.field === 'from', 'a date sent as an object');
+  r = await j(
+    'POST',
+    '/player/football-passport/career',
+    { orgName: 'Long Note FC', from: '2019', note: 'n'.repeat(201) },
+    kola.token,
+  );
+  neg(
+    r.status === 400 && r.body.field === 'note' && r.body.problem === 'too_long' && r.body.max === 200,
+    'an over-long career note is refused with its limit, not cut',
+  );
+  neg(!(await stored()).includes('Long Note FC'), 'and the refused entry is not stored');
+  r = await j(
+    'POST',
+    '/player/football-passport/corrections',
+    { targetType: 'club_history', reason: 'r'.repeat(501) },
+    kola.token,
+  );
+  neg(r.status === 400 && r.body.field === 'reason' && r.body.max === 500, 'an over-long correction reason');
+  r = await j('POST', '/player/football-passport/shares', { mode: 'everyone' }, kola.token);
+  neg(
+    r.status === 400 && r.body.error === 'MODE_INVALID' && r.body.allowed.includes('recruitment'),
+    'an unknown share mode is refused with the modes allowed',
+  );
+  r = await j('POST', '/player/football-passport/shares', { mode: 'public', expiresDays: '30' }, kola.token);
+  neg(r.status === 400 && r.body.field === 'expiresDays', 'a share lifetime written as text is refused, not read');
+  const many = Array.from({ length: 101 }, (_, i) => `pl-${i}`).join(',');
+  r = await j('GET', `/org/football-passports?ids=${many}`, undefined, maria.token);
+  neg(r.status === 400 && r.body.field === 'ids' && r.body.max === 100, 'more than 100 Passports in one batch');
+  r = await j('GET', `/org/trust-summaries?playerIds=${many}`, undefined, maria.token);
+  neg(r.status === 400 && r.body.field === 'playerIds', 'more than 100 trust summaries in one batch');
+  r = await j('GET', '/admin/passport/corrections?all=yes', undefined, null, A);
+  neg(r.status === 400 && r.body.field === 'all', 'the corrections list takes all=0 or all=1');
 }
 
 section('H16 — deletion: shares die with the subject');

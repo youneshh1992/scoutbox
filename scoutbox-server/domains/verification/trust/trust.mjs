@@ -1,7 +1,9 @@
 // Trust Score source gathering and routes. Sources are read through the systems that own them (effective claims,
 // the Passport assembly, which already folds duplicate self-entries into authoritative rows, Box Cam), so the same
 // fact is counted once and a UI projection is never what gets scored.
+import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
+import { idsText, inputOrRefuse, listedIds } from '../../platform/schemas.mjs';
 import { effectiveStatus, assuranceForClaim } from '../claims/shared.mjs';
 import { agreementInForce } from '../../agents/core/shared.mjs';
 import { PROVIDERS } from '../../development/boxcam/drills.mjs';
@@ -14,6 +16,8 @@ import {
   trustSnapshot,
   TRUST_DISCLAIMER,
 } from './shared.mjs';
+
+const SummariesQuery = v.strictObject({ playerIds: v.optional(idsText(100)) });
 
 export function registerTrust(ctx) {
   const { byId, playerRouter, guardianRouter, orgRouter, adminRouter, findPlayer, isBlocked, vmetric } = ctx;
@@ -214,13 +218,10 @@ export function registerTrust(ctx) {
 
   /** Returned in the order requested, never ranked. */
   orgRouter.get('/trust-summaries', (req, res) => {
-    const ids = String(req.query.playerIds ?? '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .slice(0, 100);
+    const query = inputOrRefuse(res, SummariesQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     const items = [];
-    for (const id of ids) {
+    for (const id of listedIds(query.playerIds)) {
       const p = findPlayer(id);
       if (!p || !orgCanSee(req.org, p)) continue; // omitted silently, so absence leaks nothing
       items.push({ playerId: p.id, ...trustSummary(buildFor(p)) });

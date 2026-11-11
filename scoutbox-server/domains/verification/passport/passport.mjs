@@ -1,8 +1,20 @@
 // Football Passport assembly and routes. One projection per (player, viewer); clients never rebuild the Passport
 // from raw endpoints. Authorisation is the standing gates; the Passport adds no access of its own.
+import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { ageOrNull } from '../../../temporal.mjs';
 import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
+import {
+  CURSOR_PAGE,
+  dateWrittenAs,
+  filled,
+  idsText,
+  inputOrRefuse,
+  listedIds,
+  oneOf,
+  presentOrRefuse,
+  text,
+} from '../../platform/schemas.mjs';
 import {
   buildTimeline,
   clubHistory,
@@ -35,6 +47,56 @@ import {
 import { PLAYER_POSITIONS } from '../../../repositories/identity.mjs';
 
 const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
+
+// ------------------------------------------------------------- input
+const optText = (max) => v.nullish(text(max));
+// A football date keeps the precision the player gave: a year, a month or a day, or the milliseconds of a day.
+const FOOTBALL_DATE = 'YYYY, YYYY-MM or YYYY-MM-DD';
+const isFootballDate = (x) =>
+  (typeof x === 'string' ? /^\d{4}(-\d{2}){0,2}$/.test(x) : Number.isSafeInteger(x)) && normWhen(x) !== null;
+const footballDate = v.nullish(dateWrittenAs(isFootballDate, FOOTBALL_DATE));
+// '' is a form's "no date".
+const footballDateOrBlank = v.nullish(dateWrittenAs((x) => x === '' || isFootballDate(x), FOOTBALL_DATE));
+const secondary = v.pipe(v.array(oneOf(PLAYER_POSITIONS)), v.maxLength(L.secondary));
+const Positions = v.strictObject({ primary: v.nullish(oneOf(PLAYER_POSITIONS)), secondary: v.nullish(secondary) });
+const Prefs = v.strictObject({
+  bio: optText(L.bio),
+  positions: v.nullish(Positions),
+  // `from` is the football date the player started in this position; the row's recordedAt is when it was written.
+  positionHistoryAdd: v.nullish(
+    v.strictObject({ from: footballDate, primary: oneOf(PLAYER_POSITIONS), secondary: v.nullish(secondary) }),
+  ),
+  availability: v.nullish(oneOf(AVAILABILITY)),
+  availableFrom: footballDateOrBlank,
+  // Narrowing only: an unknown id is stored harmlessly, as projection never surfaces what the source keeps
+  // non-public.
+  publicSelections: v.nullish(
+    v.pipe(v.array(v.pipe(v.string(), v.minLength(1), v.maxLength(L.selection))), v.maxLength(L.selections)),
+  ),
+});
+const PREFS_CODES = { fieldCodes: { availability: 'AVAILABILITY_INVALID' } };
+const CareerEntry = v.strictObject({
+  orgName: optText(L.orgName),
+  role: optText(L.role),
+  note: optText(L.note),
+  from: footballDate,
+  to: footballDate,
+});
+const Achievement = v.strictObject({ title: optText(L.title), orgName: optText(L.orgName), when: footballDateOrBlank });
+const Correction = v.strictObject({
+  targetType: oneOf(CORRECTION_TARGETS),
+  // '' is a form's "the section as a whole".
+  targetId: optText(L.targetId),
+  reason: optText(L.reason),
+});
+const CORRECTION_CODES = { fieldCodes: { targetType: 'TARGET_INVALID' } };
+const CorrectionsQuery = v.strictObject({ ...CURSOR_PAGE, all: v.optional(oneOf(['0', '1'])) });
+const CorrectionResolution = v.strictObject({
+  resolution: oneOf(CORRECTION_OUTCOMES),
+  reason: optText(L.resolutionReason),
+});
+const RESOLUTION_CODES = { fieldCodes: { resolution: 'RESOLUTION_REQUIRED' } };
+const PassportsQuery = v.strictObject({ ids: v.optional(idsText(100)) });
 
 export function registerPassportCore(ctx) {
   const {
@@ -417,39 +479,9 @@ export function registerPassportCore(ctx) {
   });
 
   // ------------------------------------------------------- input and views
-  const fieldInvalid = (res, field, message) => {
-    res.status(400).json({ error: 'FIELD_INVALID', field, message });
-    return null;
-  };
-  const dateInvalid = (res, field) => {
-    res
-      .status(400)
-      .json({ error: 'DATE_INVALID', field, message: 'Use a year (YYYY), a month (YYYY-MM) or a day (YYYY-MM-DD).' });
-    return null;
-  };
-  const NOT_TEXT = Symbol('not text');
-  const optText = (v, max) =>
-    v === undefined || v === null || v === '' ? null : typeof v === 'string' ? v.slice(0, max) : NOT_TEXT;
-  /** Keeps the precision the player gave; never invents a day. */
-  const footballDate = (input) => {
-    const w = normWhen(input);
-    return w ? whenDisplay(w) : null;
-  };
-  const POSITION_HELP = `Use position codes: ${PLAYER_POSITIONS.join(', ')}.`;
-  /** Null after sending the refusal. */
-  function readPositions(res, input, field, { primaryRequired = false } = {}) {
-    if (input === null || typeof input !== 'object' || Array.isArray(input))
-      return fieldInvalid(res, field, 'Send an object with primary and secondary.');
-    const primary = input.primary === '' || input.primary === undefined ? null : input.primary;
-    if (primary === null ? primaryRequired : !PLAYER_POSITIONS.includes(primary))
-      return fieldInvalid(res, `${field}.primary`, POSITION_HELP);
-    const secondary = input.secondary ?? [];
-    if (!Array.isArray(secondary) || secondary.length > L.secondary)
-      return fieldInvalid(res, `${field}.secondary`, `Up to ${L.secondary} position codes.`);
-    const wrong = secondary.findIndex((x) => !PLAYER_POSITIONS.includes(x));
-    if (wrong >= 0) return fieldInvalid(res, `${field}.secondary[${wrong}]`, POSITION_HELP);
-    return { primary, secondary: [...new Set(secondary)] };
-  }
+  /** A schema-read football date as stored: the precision the player gave, never an invented day. */
+  const storedDate = (input) =>
+    input === null || input === undefined || input === '' ? null : whenDisplay(normWhen(input));
   const prefsView = (p) => ({
     playerId: p.playerId,
     bio: p.bio,
@@ -514,71 +546,38 @@ export function registerPassportCore(ctx) {
   });
 
   // ----------------------------------------------------------- preferences
-  function applyPrefs(res, player, body, submittedBy) {
+  function applyPrefs(res, player, input, submittedBy) {
+    const body = inputOrRefuse(res, Prefs, input, PREFS_CODES);
+    if (!body) return null;
     const set = {};
     if (body.bio !== undefined) {
-      const bio = optText(body.bio, L.bio);
-      if (bio === NOT_TEXT) return fieldInvalid(res, 'bio', 'The bio is text.');
+      const bio = filled(body.bio);
       if (bio && !moderateOrRefuse(res, bio, { kind: 'passport_bio', playerId: player.id })) return null;
       set.bio = bio;
     }
     if (body.positions !== undefined) {
-      if (body.positions === null) set.positions = null;
-      else {
-        const p = readPositions(res, body.positions, 'positions');
-        if (!p) return null;
-        set.positions = p.primary || p.secondary.length ? p : null;
-      }
+      const primary = body.positions?.primary ?? null;
+      const others = [...new Set(body.positions?.secondary ?? [])];
+      set.positions = primary || others.length ? { primary, secondary: others } : null;
     }
     let historyRow = null;
     if (body.positionHistoryAdd) {
       const h = body.positionHistoryAdd;
-      // `from` is the football date the player started in this position; `recordedAt` is when the row was written.
-      const from = footballDate(h?.from);
-      if (!from) {
-        res.status(400).json({ error: 'DATE_REQUIRED', message: 'Position history needs at least a year.' });
-        return null;
-      }
-      const p = readPositions(res, h, 'positionHistoryAdd', { primaryRequired: true });
-      if (!p) return null;
+      const from = storedDate(h.from);
+      const message = 'Position history needs at least a year.';
+      if (!presentOrRefuse(res, from, 'positionHistoryAdd.from', { error: 'DATE_REQUIRED', message })) return null;
       historyRow = {
         id: nextId('ppos'),
         from,
-        primary: p.primary,
-        secondary: p.secondary,
+        primary: h.primary,
+        secondary: [...new Set(h.secondary ?? [])],
         submittedBy,
         recordedAt: Date.now(),
       };
     }
-    if (body.availability !== undefined) {
-      if (body.availability !== null && !AVAILABILITY.includes(body.availability)) {
-        res.status(400).json({ error: 'AVAILABILITY_INVALID', allowed: [...AVAILABILITY, null] });
-        return null;
-      }
-      set.availability = body.availability;
-    }
-    if (body.availableFrom !== undefined) {
-      if (body.availableFrom === null || body.availableFrom === '') set.availableFrom = null;
-      else {
-        set.availableFrom = footballDate(body.availableFrom);
-        if (!set.availableFrom) return dateInvalid(res, 'availableFrom');
-      }
-    }
-    if (body.publicSelections !== undefined) {
-      // Narrowing only: an unknown id is stored harmlessly, as projection never surfaces what the source keeps
-      // non-public.
-      const list = body.publicSelections ?? [];
-      if (!Array.isArray(list) || list.length > L.selections)
-        return fieldInvalid(res, 'publicSelections', `A list of up to ${L.selections} ids.`);
-      const wrong = list.findIndex((x) => typeof x !== 'string' || !x || x.length > L.selection);
-      if (wrong >= 0)
-        return fieldInvalid(
-          res,
-          `publicSelections[${wrong}]`,
-          `Each selection is an id of at most ${L.selection} characters.`,
-        );
-      set.publicSelections = [...new Set(list)];
-    }
+    if (body.availability !== undefined) set.availability = body.availability;
+    if (body.availableFrom !== undefined) set.availableFrom = storedDate(body.availableFrom);
+    if (body.publicSelections !== undefined) set.publicSelections = [...new Set(body.publicSelections ?? [])];
     const wasPrimary = prefsFor(player.id).positions?.primary ?? null;
     const saved = unit(() => {
       const p = passport.passportPrefs.save(player.id, (d) => {
@@ -626,20 +625,13 @@ export function registerPassportCore(ctx) {
   });
 
   // --------------------------------------------------- self career entries
-  function addCareerEntry(res, player, body, submittedBy) {
-    if (body.orgName !== undefined && body.orgName !== null && typeof body.orgName !== 'string')
-      return fieldInvalid(res, 'orgName', 'The club name is text.');
-    const orgName = String(body.orgName ?? '')
-      .trim()
-      .slice(0, L.orgName);
-    if (!orgName) {
-      res.status(400).json({ error: 'ORG_NAME_REQUIRED' });
-      return null;
-    }
-    const role = optText(body.role, L.role);
-    if (role === NOT_TEXT) return fieldInvalid(res, 'role', 'The role is text.');
-    const note = optText(body.note, L.note);
-    if (note === NOT_TEXT) return fieldInvalid(res, 'note', 'The note is text.');
+  function addCareerEntry(res, player, input, submittedBy) {
+    const body = inputOrRefuse(res, CareerEntry, input);
+    if (!body) return null;
+    const orgName = filled(body.orgName);
+    if (!presentOrRefuse(res, orgName, 'orgName')) return null;
+    const role = filled(body.role);
+    const note = filled(body.note);
     if (
       !moderateOrRefuse(res, orgName + ' ' + (role ?? '') + ' ' + (note ?? ''), {
         kind: 'passport_career',
@@ -647,13 +639,10 @@ export function registerPassportCore(ctx) {
       })
     )
       return null;
-    const from = footballDate(body.from);
-    if (!from) {
-      res.status(400).json({ error: 'DATE_REQUIRED', message: 'A year is enough — exact dates are never invented.' });
-      return null;
-    }
-    const to = body.to != null ? footballDate(body.to) : null;
-    if (body.to != null && !to) return dateInvalid(res, 'to');
+    const from = storedDate(body.from);
+    const message = 'A year is enough — exact dates are never invented.';
+    if (!presentOrRefuse(res, from, 'from', { error: 'DATE_REQUIRED', message })) return null;
+    const to = storedDate(body.to);
     const e = passport.careerEntries.create({
       id: nextId('pcar'),
       playerId: player.id,
@@ -704,19 +693,16 @@ export function registerPassportCore(ctx) {
     if (!child) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     addAchievement(res, child, req.body ?? {}, 'guardian');
   });
-  function addAchievement(res, player, body, submittedBy) {
-    if (body.title !== undefined && body.title !== null && typeof body.title !== 'string')
-      return fieldInvalid(res, 'title', 'The title is text.');
-    const title = String(body.title ?? '')
-      .trim()
-      .slice(0, L.title);
-    if (!title) return res.status(400).json({ error: 'TITLE_REQUIRED' });
-    const orgName = optText(body.orgName, L.orgName);
-    if (orgName === NOT_TEXT) return fieldInvalid(res, 'orgName', 'The organisation name is text.');
-    const when = body.when == null || body.when === '' ? null : footballDate(body.when);
-    if (body.when != null && body.when !== '' && !when) return dateInvalid(res, 'when');
+  function addAchievement(res, player, input, submittedBy) {
+    // A client cannot assert provenance for itself: a body naming a confirmation is refused, and a new achievement is
+    // self-submitted.
+    const body = inputOrRefuse(res, Achievement, input);
+    if (!body) return;
+    const title = filled(body.title);
+    if (!presentOrRefuse(res, title, 'title')) return;
+    const orgName = filled(body.orgName);
+    const when = storedDate(body.when);
     if (!moderateOrRefuse(res, title, { kind: 'passport_achievement', playerId: player.id })) return;
-    // A client cannot assert provenance for itself: whatever the body claims, a new achievement is self-submitted.
     const a = passport.achievements.create({
       id: nextId('pach'),
       playerId: player.id,
@@ -790,25 +776,20 @@ export function registerPassportCore(ctx) {
   });
 
   // ------------------------------------------------------------ corrections
-  function fileCorrection(res, player, body, by) {
-    const targetType = String(body.targetType ?? '');
-    if (!CORRECTION_TARGETS.includes(targetType))
-      return res.status(400).json({ error: 'TARGET_INVALID', allowed: CORRECTION_TARGETS });
-    const targetId =
-      body.targetId === undefined || body.targetId === null || body.targetId === '' ? null : body.targetId;
-    if (targetId !== null && (typeof targetId !== 'string' || targetId.length > L.targetId))
-      return fieldInvalid(res, 'targetId', `An id of at most ${L.targetId} characters.`);
-    if (body.reason !== undefined && body.reason !== null && typeof body.reason !== 'string')
-      return fieldInvalid(res, 'reason', 'The reason is text.');
-    const reason = String(body.reason ?? '').trim();
-    if (!reason) return res.status(400).json({ error: 'REASON_REQUIRED' });
+  function fileCorrection(res, player, input, by) {
+    const body = inputOrRefuse(res, Correction, input, CORRECTION_CODES);
+    if (!body) return;
+    const { targetType } = body;
+    const targetId = body.targetId || null;
+    const reason = filled(body.reason);
+    if (!presentOrRefuse(res, reason, 'reason')) return;
     if (!moderateOrRefuse(res, reason, { kind: 'passport_correction', playerId: player.id })) return;
     const c = passport.corrections.create({
       id: nextId('pcor'),
       playerId: player.id,
       targetType,
       targetId,
-      reason: reason.slice(0, L.reason),
+      reason,
       by: { ...by, name: by.name ? String(by.name).slice(0, L.name) : null },
       status: 'open',
       resolution: null,
@@ -832,14 +813,16 @@ export function registerPassportCore(ctx) {
 
   // Oldest first; `?all=1` lists resolved ones too.
   adminRouter.get('/passport/corrections', (req, res) => {
+    const query = inputOrRefuse(res, CorrectionsQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
     const { items, nextCursor } = pageOf(
-      vreads.corrections.page({ all: req.query.all === '1', ...page }).rows,
+      vreads.corrections.page({ all: query.all === '1', ...page }).rows,
       page.limit,
       (r) => r.key,
     );
@@ -849,14 +832,15 @@ export function registerPassportCore(ctx) {
     const c = vreads.corrections.byId(req.params.id);
     if (!c) return res.status(404).json({ error: 'CORRECTION_NOT_FOUND' });
     if (c.status !== 'open') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const { resolution, reason } = req.body ?? {};
-    if (!CORRECTION_OUTCOMES.includes(resolution))
-      return res.status(400).json({ error: 'RESOLUTION_REQUIRED', allowed: CORRECTION_OUTCOMES });
-    if (typeof reason !== 'string' || !reason.trim()) return res.status(400).json({ error: 'REASON_REQUIRED' });
+    const body = inputOrRefuse(res, CorrectionResolution, req.body ?? {}, RESOLUTION_CODES);
+    if (!body) return;
+    const { resolution } = body;
+    const reason = filled(body.reason);
+    if (!presentOrRefuse(res, reason, 'reason')) return;
     const done = unit(() => {
       const r = passport.corrections.update(c.id, (d) => {
         d.status = 'resolved';
-        d.resolution = { outcome: resolution, reason: reason.slice(0, L.resolutionReason), at: Date.now() };
+        d.resolution = { outcome: resolution, reason, at: Date.now() };
         d.resolvedAt = d.resolution.at;
       });
       const target = c.by.kind === 'guardian' ? { kind: 'guardian', id: c.by.id } : { kind: 'player', id: c.playerId };
@@ -889,12 +873,10 @@ export function registerPassportCore(ctx) {
   });
 
   orgRouter.get('/football-passports', (req, res) => {
-    const ids = String(req.query.ids ?? '')
-      .split(',')
-      .filter(Boolean)
-      .slice(0, 100);
+    const query = inputOrRefuse(res, PassportsQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     const items = [];
-    for (const id of ids) {
+    for (const id of listedIds(query.ids)) {
       const p = findPlayer(id);
       if (!p || !orgCanSee(req.org, p)) continue; // absent, not an error, so nothing is revealed
       const full = assemble(p, { light: true });

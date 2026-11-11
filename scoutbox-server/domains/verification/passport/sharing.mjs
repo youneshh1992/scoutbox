@@ -1,12 +1,21 @@
 // Passport sharing. Tokens are stored only as SHA-256 hashes. A share can only narrow what a viewer would see: a
 // public share resolves to the public projection, a recruitment share only inside an authenticated organisation
 // session that re-runs the standing gates.
+import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { mintShareSecret, sha256, shareProblem, SHARE_MODES } from './shared.mjs';
 import { PASSPORT_LIMITS } from '../../../repositories/passport.mjs';
 import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
+import { CURSOR_PAGE, inputOrRefuse, oneOf, wholeNumber } from '../../platform/schemas.mjs';
 
 const DAYS = PASSPORT_LIMITS.shareDays;
+// A lifetime outside the range is refused, not clamped.
+const NewShare = v.strictObject({
+  mode: v.optional(oneOf(SHARE_MODES)),
+  expiresDays: v.nullish(wholeNumber({ min: DAYS.min, max: DAYS.max })),
+});
+const SHARE_CODES = { fieldCodes: { mode: 'MODE_INVALID' } };
+const SharesQuery = v.strictObject(CURSOR_PAGE);
 
 export function registerPassportSharing(ctx) {
   const {
@@ -39,17 +48,11 @@ export function registerPassportSharing(ctx) {
     createdBy: s.createdBy.kind,
   });
 
-  function createShare(res, player, body, createdBy) {
-    const mode = String(body.mode ?? 'public');
-    if (!SHARE_MODES.includes(mode)) return res.status(400).json({ error: 'MODE_INVALID', allowed: SHARE_MODES });
-    // Refused, not clamped.
-    const days = body.expiresDays === undefined || body.expiresDays === null ? DAYS.default : body.expiresDays;
-    if (!Number.isInteger(days) || days < DAYS.min || days > DAYS.max)
-      return res.status(400).json({
-        error: 'FIELD_INVALID',
-        field: 'expiresDays',
-        message: `A whole number of days from ${DAYS.min} to ${DAYS.max}.`,
-      });
+  function createShare(res, player, input, createdBy) {
+    const body = inputOrRefuse(res, NewShare, input, SHARE_CODES);
+    if (!body) return;
+    const mode = body.mode ?? 'public';
+    const days = body.expiresDays ?? DAYS.default;
     const secret = mintShareSecret();
     const now = Date.now();
     const share = unit(() => {
@@ -147,9 +150,11 @@ export function registerPassportSharing(ctx) {
     revoke(res, shares.byId(req.params.id), { kind: 'trust_safety', id: 'admin' });
   });
   adminRouter.get('/passport/shares', (req, res) => {
+    const query = inputOrRefuse(res, SharesQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
