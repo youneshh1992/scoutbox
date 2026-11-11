@@ -1948,9 +1948,8 @@ section('I — analytics: every journey stage derives from the canonical record,
     ),
     'I10 a scout cannot read the dashboard',
   );
-  const fp = (
-    await j('GET', '/org/recruitment-analytics?window=last_90_days&sourceContext=search', undefined, maria.token)
-  ).body?.data?.pipeline?.metrics?.funnel_progression;
+  const fp = (await j('GET', '/org/recruitment-analytics?window=last_90_days&source=search', undefined, maria.token))
+    .body?.data?.pipeline?.metrics?.funnel_progression;
   ok(
     fp && Array.isArray(fp.rows),
     'I11 the lifecycle-based funnel (funnel_progression) still reads beside it: two views, one cohort rule',

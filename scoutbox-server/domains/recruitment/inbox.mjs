@@ -4,6 +4,12 @@
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { chooseTrialSlot } from '../../domain.mjs';
+import * as v from 'valibot';
+import { flag, inputOrRefuse } from '../platform/schemas.mjs';
+
+// `accept` is true or false, never "false" read as truthy. The slot and the reply keep their own rules and codes
+// (chooseTrialSlot, validateContactReply).
+const Answer = v.strictObject({ accept: flag, chosenSlot: v.optional(v.unknown()), message: v.optional(v.unknown()) });
 
 const childInboxNote = (r) =>
   r.status === 'pending'
@@ -82,8 +88,10 @@ export function registerRequestInbox({
    */
   function respond(req, res, found, player, responder) {
     if (found.status !== 'pending') return res.status(409).json({ error: 'ALREADY_RESPONDED' });
-    const { accept, chosenSlot } = req.body || {};
-    const replyCheck = contactReplyFrom(req, res, found);
+    const body = inputOrRefuse(res, Answer, req.body ?? {});
+    if (!body) return;
+    const { accept, chosenSlot } = body;
+    const replyCheck = contactReplyFrom(req, res, found, body.message);
     if (!replyCheck.ok) return;
     if (accept && isBlocked(found.playerId, found.orgId)) {
       return res

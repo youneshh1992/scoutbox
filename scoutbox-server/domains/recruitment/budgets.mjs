@@ -1,13 +1,42 @@
 // Recruitment budget and deal scenarios.
 // Money is integer minor units end to end; market values are never invented.
-import {
-  convertMinor,
-  validAmountMinor,
-  CURRENCIES,
-  BUDGET_LINE_KINDS as LINE_KINDS,
-  BUDGET_SCHEDULES as SCHEDULES,
-} from './money.mjs';
-import { readDateOnly } from '../../temporal.mjs';
+import { convertMinor, CURRENCIES, BUDGET_LINE_KINDS as LINE_KINDS, BUDGET_SCHEDULES as SCHEDULES } from './money.mjs';
+import * as v from 'valibot';
+import { dateOnly, flag, id, inputOrRefuse, oneOf, requiredText, text, wholeNumber } from '../platform/schemas.mjs';
+
+const BUDGET_LIMITS = Object.freeze({ label: 80, assumption: 200, source: 80, lines: 30, fx: 6, termMonths: 72 });
+// A stated rate is a decimal string (convertMinor), never a float that has already lost digits.
+const isRate = (s) => /^\d+(\.\d{1,6})?$/.test(s);
+// An absent currency is GBP; an unknown one is refused, never read as GBP.
+const currency = v.nullish(oneOf(CURRENCIES));
+const BudgetLine = v.strictObject({
+  id: v.nullish(id),
+  kind: oneOf(LINE_KINDS),
+  label: v.nullish(text(BUDGET_LIMITS.label)),
+  amountMinor: wholeNumber({ min: 0 }),
+  currency,
+  schedule: oneOf(SCHEDULES),
+  confirmed: v.nullish(flag),
+  conditional: v.nullish(v.strictObject({ assumption: requiredText(BUDGET_LIMITS.assumption) })),
+});
+const FxAssumption = v.strictObject({
+  from: oneOf(CURRENCIES),
+  to: oneOf(CURRENCIES),
+  rate: v.pipe(v.string(), v.check(isRate, 'must be a decimal with at most six places')),
+  source: v.nullish(text(BUDGET_LIMITS.source)),
+  date: v.nullish(dateOnly),
+});
+const SCENARIO_FIELDS = {
+  label: v.nullish(text(BUDGET_LIMITS.label)),
+  termMonths: v.nullish(wholeNumber({ min: 1, max: BUDGET_LIMITS.termMonths })),
+  lines: v.nullish(v.pipe(v.array(BudgetLine), v.maxLength(BUDGET_LIMITS.lines))),
+  fxAssumptions: v.nullish(v.pipe(v.array(FxAssumption), v.maxLength(BUDGET_LIMITS.fx))),
+};
+const NewScenario = v.strictObject({ ...SCENARIO_FIELDS, currency });
+const ScenarioEdit = v.strictObject(SCENARIO_FIELDS);
+const Approval = v.strictObject({});
+const Actual = v.strictObject({ lineId: id, amountMinor: wholeNumber() });
+const BUDGET_CODES = { fieldCodes: { 'lines.*': 'LINES_INVALID', amountMinor: 'AMOUNT_INVALID' } };
 
 // Exported for fixture tests. Integer arithmetic only.
 export function computeScenarioTotals(scenario) {
@@ -145,60 +174,45 @@ export function registerBudgets(ctx) {
     return c;
   }
 
-  function cleanLines(raw) {
-    const out = [];
-    for (const l of (Array.isArray(raw) ? raw : []).slice(0, 30)) {
-      if (!LINE_KINDS.includes(l.kind) || !SCHEDULES.includes(l.schedule)) continue;
-      if (!validAmountMinor(l.amountMinor) || l.amountMinor < 0) continue;
-      out.push({
-        id: typeof l.id === 'string' && l.id ? l.id : null,
-        kind: l.kind,
-        label: String(l.label || l.kind).slice(0, 80),
-        amountMinor: l.amountMinor,
-        currency: CURRENCIES.includes(l.currency) ? l.currency : 'GBP',
-        schedule: l.schedule,
-        confirmed: l.confirmed === true,
-        conditional: l.conditional?.assumption ? { assumption: String(l.conditional.assumption).slice(0, 200) } : null,
-      });
-    }
-    return out;
-  }
+  /** Lines as stored, from lines the schema has accepted. */
+  const storedLines = (lines) =>
+    lines.map((l) => ({
+      id: l.id ?? null,
+      kind: l.kind,
+      label: l.label?.trim() || l.kind,
+      amountMinor: l.amountMinor,
+      currency: l.currency ?? 'GBP',
+      schedule: l.schedule,
+      confirmed: l.confirmed === true,
+      conditional: l.conditional ? { assumption: l.conditional.assumption.trim() } : null,
+    }));
 
-  /** Up to six stated FX rates: known currencies, a decimal rate, a real calendar day (today when none is given). */
-  function cleanFx(raw) {
-    return (Array.isArray(raw) ? raw : [])
-      .slice(0, 6)
-      .filter(
-        (a) => CURRENCIES.includes(a?.from) && CURRENCIES.includes(a?.to) && /^\d+(\.\d{1,6})?$/.test(String(a.rate)),
-      )
-      .map((a) => ({
-        from: a.from,
-        to: a.to,
-        rate: String(a.rate),
-        source: String(a.source ?? 'manual entry').slice(0, 80),
-        date:
-          a.date === undefined || a.date === null
-            ? new Date().toISOString().slice(0, 10)
-            : readDateOnly(String(a.date).slice(0, 10)),
-        manual: true,
-      }))
-      .filter((a) => a.date !== null);
-  }
+  /** Stated FX rates as stored: a manual entry, dated today when no day is given. */
+  const storedFx = (fx) =>
+    fx.map((a) => ({
+      from: a.from,
+      to: a.to,
+      rate: a.rate,
+      source: a.source?.trim() || 'manual entry',
+      date: a.date ?? new Date().toISOString().slice(0, 10),
+      manual: true,
+    }));
 
   orgRouter.post('/cases/:id/budget/scenarios', (req, res) => {
     const c = caseFor(req, res);
     if (!c) return;
-    const b = req.body ?? {};
+    const b = inputOrRefuse(res, NewScenario, req.body ?? {}, BUDGET_CODES);
+    if (!b) return;
     const existing = c.budget?.scenarios ?? [];
     if (existing.length >= 8) return res.status(409).json({ error: 'TOO_MANY_SCENARIOS' });
     const s = {
       id: nextId('scn'),
       version: 1,
-      label: String(b.label ?? `Scenario ${existing.length + 1}`).slice(0, 80),
-      currency: CURRENCIES.includes(b.currency) ? b.currency : 'GBP',
-      termMonths: Math.min(Math.max(Number(b.termMonths) || 12, 1), 72),
-      lines: cleanLines(b.lines).map((l, i) => ({ ...l, id: `ln-${i + 1}` })),
-      fxAssumptions: cleanFx(b.fxAssumptions),
+      label: b.label?.trim() || `Scenario ${existing.length + 1}`,
+      currency: b.currency ?? 'GBP',
+      termMonths: b.termMonths ?? 12,
+      lines: storedLines(b.lines ?? []).map((l, i) => ({ ...l, id: `ln-${i + 1}` })),
+      fxAssumptions: storedFx(b.fxAssumptions ?? []),
       approval: null,
       actuals: [],
       createdBy: req.orgUser.name,
@@ -228,8 +242,9 @@ export function registerBudgets(ctx) {
     if (!c) return;
     if (!c.budget?.scenarios.some((x) => x.id === req.params.sid))
       return res.status(404).json({ error: 'SCENARIO_NOT_FOUND' });
-    const b = req.body ?? {};
-    const lines = b.lines ? cleanLines(b.lines).map((l, i) => ({ ...l, id: l.id ?? `ln-${i + 1}` })) : null;
+    const b = inputOrRefuse(res, ScenarioEdit, req.body ?? {}, BUDGET_CODES);
+    if (!b) return;
+    const lines = b.lines ? storedLines(b.lines).map((l, i) => ({ ...l, id: l.id ?? `ln-${i + 1}` })) : null;
     if (lines && new Set(lines.map((l) => l.id)).size !== lines.length)
       return res.status(400).json({ error: 'LINES_INVALID', message: 'Each budget line needs its own id.' });
     const held = c.budget.scenarios.find((x) => x.id === req.params.sid);
@@ -238,10 +253,10 @@ export function registerBudgets(ctx) {
       c.id,
       {
         scenarioId: held.id,
-        label: b.label ? String(b.label).slice(0, 80) : undefined,
-        termMonths: b.termMonths ? Math.min(Math.max(Number(b.termMonths) || held.termMonths, 1), 72) : undefined,
+        label: b.label?.trim() || undefined,
+        termMonths: b.termMonths ?? undefined,
         lines: lines ?? undefined,
-        fxAssumptions: b.fxAssumptions ? cleanFx(b.fxAssumptions) : undefined,
+        fxAssumptions: b.fxAssumptions ? storedFx(b.fxAssumptions) : undefined,
         at: Date.now(),
       },
       byStaff(req, 'budget_scenario_edited', { scenarioId: held.id, version: held.version + 1 }),
@@ -256,6 +271,7 @@ export function registerBudgets(ctx) {
     if (!requireLead(req, res)) return;
     if (!c.budget?.scenarios.some((x) => x.id === req.params.sid))
       return res.status(404).json({ error: 'SCENARIO_NOT_FOUND' });
+    if (!inputOrRefuse(res, Approval, req.body ?? {})) return;
     const held = c.budget.scenarios.find((x) => x.id === req.params.sid);
     const fresh = cases.approveScenario(
       c.id,
@@ -274,12 +290,10 @@ export function registerBudgets(ctx) {
     if (!c) return;
     const s = c.budget?.scenarios.find((x) => x.id === req.params.sid);
     if (!s) return res.status(404).json({ error: 'SCENARIO_NOT_FOUND' });
-    const { lineId, amountMinor } = req.body ?? {};
+    const body = inputOrRefuse(res, Actual, req.body ?? {}, BUDGET_CODES);
+    if (!body) return;
+    const { lineId, amountMinor } = body;
     if (!s.lines.some((l) => l.id === lineId)) return res.status(404).json({ error: 'LINE_NOT_FOUND' });
-    if (!validAmountMinor(amountMinor))
-      return res
-        .status(400)
-        .json({ error: 'AMOUNT_INVALID', message: 'amountMinor must be an integer in minor units.' });
     const fresh = cases.recordActual(c.id, {
       scenarioId: s.id,
       actual: { id: nextId('act'), lineId, amountMinor, at: Date.now(), recordedBy: req.orgUser.name },

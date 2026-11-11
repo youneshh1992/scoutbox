@@ -25,6 +25,8 @@ import { SOURCE_CONTEXTS } from '../rooms/shared.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { now } from '../../platform/clock.mjs';
+import * as v from 'valibot';
+import { inputOrRefuse, wholeNumberText } from '../../platform/schemas.mjs';
 
 /** The metrics whose rows a director can page through. */
 export const DRILLDOWN_METRICS = [
@@ -35,6 +37,30 @@ export const DRILLDOWN_METRICS = [
 ];
 const PAGE_MAX = 50;
 const PAGE_DEFAULT = 25;
+
+// Each parameter once, as text: a repeated `?window=a&window=b` arrives as a list and is refused. The vocabularies
+// are judged by readQuery, whose codes the dashboard answers as a refusal it can show.
+const param = v.optional(v.string());
+const FILTERS = {
+  groupBy: param,
+  group_by: param,
+  window: param,
+  from: param,
+  to: param,
+  source: param,
+  priority: param,
+  brief: param,
+  families: param,
+  stallDays: param,
+};
+const DashboardQuery = v.strictObject({ ...FILTERS, simulateFailure: param });
+const RowsQuery = v.strictObject({
+  ...FILTERS,
+  metric: param,
+  limit: v.optional(wholeNumberText({ min: 1, max: PAGE_MAX })),
+  cursor: v.optional(wholeNumberText()),
+});
+const QUERY = { root: 'query', fieldCodes: { limit: 'PAGE_LIMIT_INVALID', cursor: 'PAGE_CURSOR_INVALID' } };
 
 export function registerAnalytics(ctx) {
   const { recruitmentReads, scoutingReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
@@ -71,7 +97,7 @@ export function registerAnalytics(ctx) {
   function readQuery(q) {
     const groupBy = q.groupBy ?? q.group_by ?? null;
     if (groupBy) {
-      if (PERSON_DIMENSIONS.includes(String(groupBy))) {
+      if (PERSON_DIMENSIONS.includes(groupBy)) {
         return {
           error: 'GROUPING_BY_PERSON_REFUSED',
           status: 400,
@@ -80,7 +106,7 @@ export function registerAnalytics(ctx) {
           allowed: GROUP_DIMENSIONS,
         };
       }
-      if (!GROUP_DIMENSIONS.includes(String(groupBy))) {
+      if (!GROUP_DIMENSIONS.includes(groupBy)) {
         return {
           error: 'GROUPING_UNKNOWN',
           status: 400,
@@ -95,7 +121,7 @@ export function registerAnalytics(ctx) {
 
     const filters = {};
     if (q.source != null && q.source !== '') {
-      if (!SOURCE_CONTEXTS.includes(String(q.source))) {
+      if (!SOURCE_CONTEXTS.includes(q.source)) {
         return {
           error: 'SOURCE_CONTEXT_UNKNOWN',
           status: 400,
@@ -103,10 +129,10 @@ export function registerAnalytics(ctx) {
           allowed: SOURCE_CONTEXTS,
         };
       }
-      filters.sourceContext = String(q.source);
+      filters.sourceContext = q.source;
     }
     if (q.priority != null && q.priority !== '') {
-      if (!ROOM_PRIORITIES.includes(String(q.priority))) {
+      if (!ROOM_PRIORITIES.includes(q.priority)) {
         return {
           error: 'ROOM_PRIORITY_UNKNOWN',
           status: 400,
@@ -114,13 +140,13 @@ export function registerAnalytics(ctx) {
           allowed: ROOM_PRIORITIES,
         };
       }
-      filters.priority = String(q.priority);
+      filters.priority = q.priority;
     }
-    if (q.brief != null && q.brief !== '') filters.briefId = String(q.brief);
+    if (q.brief != null && q.brief !== '') filters.briefId = q.brief;
 
     let families = FAMILY_IDS;
     if (q.families) {
-      const asked = String(q.families)
+      const asked = q.families
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean);
@@ -210,11 +236,13 @@ export function registerAnalytics(ctx) {
   orgRouter.get('/recruitment-analytics', (req, res) => {
     if (!requireLead(req, res)) return;
     if (limited('analytics_read', req.org.id)) return res.status(429).json(rateLimitedBody('analytics_read'));
-    const parsed = readQuery(req.query ?? {});
+    const query = inputOrRefuse(res, DashboardQuery, req.query ?? {}, QUERY);
+    if (!query) return;
+    const parsed = readQuery(query);
     if (parsed.error) return res.status(parsed.status).json(parsed);
 
     // Fault injection for the partial-failure test; unavailable in production.
-    const fault = devFaults && req.query?.simulateFailure ? String(req.query.simulateFailure) : null;
+    const fault = devFaults && query.simulateFailure ? query.simulateFailure : null;
 
     const context = contextFor(req, parsed);
     const payload = buildDashboard(context, { families: parsed.families, stallDays: parsed.stallDays, fault });
@@ -233,7 +261,9 @@ export function registerAnalytics(ctx) {
   orgRouter.get('/recruitment-analytics/rows', (req, res) => {
     if (!requireLead(req, res)) return;
     if (limited('analytics_read', req.org.id)) return res.status(429).json(rateLimitedBody('analytics_read'));
-    const metric = String(req.query?.metric ?? '');
+    const query = inputOrRefuse(res, RowsQuery, req.query ?? {}, QUERY);
+    if (!query) return;
+    const metric = query.metric ?? '';
     if (!DRILLDOWN_METRICS.includes(metric)) {
       return res.status(400).json({
         error: 'METRIC_HAS_NO_ROWS',
@@ -241,7 +271,7 @@ export function registerAnalytics(ctx) {
         allowed: DRILLDOWN_METRICS,
       });
     }
-    const parsed = readQuery(req.query ?? {});
+    const parsed = readQuery(query);
     if (parsed.error) return res.status(parsed.status).json(parsed);
 
     const family = METRICS[metric].family;
@@ -251,8 +281,8 @@ export function registerAnalytics(ctx) {
     if (slot?.error) return res.status(200).json({ ...slot, rows: [], total: 0 });
 
     const all = slot.metrics[metric]?.rows ?? [];
-    const limit = Math.min(Math.max(Number(req.query?.limit) || PAGE_DEFAULT, 1), PAGE_MAX);
-    const cursor = Math.max(Number(req.query?.cursor) || 0, 0);
+    const limit = query.limit === undefined ? PAGE_DEFAULT : Number(query.limit);
+    const cursor = query.cursor === undefined ? 0 : Number(query.cursor);
     const page = all.slice(cursor, cursor + limit);
     vmetric('recruitment_analytics_rows_read');
     res.set('X-ScoutBox-Ordering', 'stable_oldest_first_then_id');

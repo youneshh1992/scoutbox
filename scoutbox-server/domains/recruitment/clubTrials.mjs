@@ -2,6 +2,18 @@
 import { computeTrustScore, validateTrialReport, TRIAL_REPORT_FIELDS, parseTrialDate } from '../../domain.mjs';
 import { readInstant } from '../../temporal.mjs';
 import { icsLocal, icsText } from './lifecycle/trial.mjs';
+import * as v from 'valibot';
+import { inputOrRefuse, text, TEXT_MAX } from '../platform/schemas.mjs';
+
+const REPORT_NOTES_MAX = 2000;
+// The measured fields keep validateTrialReport's REPORT_INCOMPLETE answer, which lists every missing and invalid one.
+const TrialReport = v.strictObject({
+  ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, v.optional(v.unknown())])),
+  notes: v.nullish(text(REPORT_NOTES_MAX)),
+  // Development feedback the player reads: one strength, one focus area.
+  strengthNote: v.nullish(text(TEXT_MAX)),
+  focusNote: v.nullish(text(TEXT_MAX)),
+});
 
 export function registerClubTrials({
   orgRouter,
@@ -116,7 +128,9 @@ export function registerClubTrials({
       });
     }
 
-    const check = validateTrialReport(req.body);
+    const body = inputOrRefuse(res, TrialReport, req.body ?? {});
+    if (!body) return;
+    const check = validateTrialReport(body);
     if (!check.ok) {
       return res.status(400).json({
         error: 'REPORT_INCOMPLETE',
@@ -129,7 +143,7 @@ export function registerClubTrials({
 
     // Optional development feedback — one strength, one focus area — delivered even when the trial doesn't lead
     // anywhere: the player always gets something back.
-    const { strengthNote, focusNote } = req.body || {};
+    const { strengthNote, focusNote } = body;
     if (strengthNote && !moderateOrRefuse(res, strengthNote, { kind: 'trial_feedback', orgId: req.org.id })) return;
     if (focusNote && !moderateOrRefuse(res, focusNote, { kind: 'trial_feedback', orgId: req.org.id })) return;
 
@@ -142,8 +156,8 @@ export function registerClubTrials({
       userId: req.orgUser.id,
       scoutName: req.orgUser.name,
       filedAt: Date.now(),
-      ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, req.body[f]])),
-      notes: req.body.notes || '',
+      ...Object.fromEntries(TRIAL_REPORT_FIELDS.map((f) => [f, body[f]])),
+      notes: body.notes || '',
       strengthNote: strengthNote || null,
       focusNote: focusNote || null,
     };

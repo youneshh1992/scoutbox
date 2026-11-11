@@ -6,7 +6,25 @@
 import { isAdult, visibleToOrg, validateTrialDetails, trialReportDueAt } from '../../domain.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
-import { validateContactReply } from './lifecycle/contact.mjs';
+import { validateContactReply, CONTACT_LIMITS } from './lifecycle/contact.mjs';
+import * as v from 'valibot';
+import { inputOrRefuse, oneShapeOf, text } from '../platform/schemas.mjs';
+
+// The trial details keep validateTrialDetails' codes (TRIAL_DATE_INVALID, TRIAL_SLOTS_INVALID, ...), so they are
+// `unknown` here. A contact request carries no trial details.
+const message = v.nullish(text(CONTACT_LIMITS.body));
+const DirectRequest = oneShapeOf('type', [
+  v.strictObject({ type: v.literal('contact'), message }),
+  v.strictObject({
+    type: v.literal('trial'),
+    message,
+    proposedDate: v.optional(v.unknown()),
+    altSlots: v.optional(v.unknown()),
+    venue: v.optional(v.unknown()),
+    notes: v.optional(v.unknown()),
+  }),
+]);
+const DIRECT_REQUEST_CODES = { fieldCodes: { type: 'TYPE_MUST_BE_CONTACT_OR_TRIAL' } };
 
 /**
  * No org id, user id or Contact link, and never `caseId`. The trial id does travel: the recipient's own acceptance
@@ -238,8 +256,8 @@ export function createRequestWriters({
    * An optional short reply on a CONTACT-type request, validated before anything is written and refused if it is
    * not text or if moderation refuses it. Returns `{ ok, reply }`, or answers the request and returns `{ ok: false }`.
    */
-  function contactReplyFrom(req, res, request) {
-    const check = validateContactReply(req.body?.message, { isContact: request.type === 'contact' });
+  function contactReplyFrom(req, res, request, message) {
+    const check = validateContactReply(message, { isContact: request.type === 'contact' });
     if (!check.ok) {
       res.status(400).json({ error: check.error, message: check.message });
       return { ok: false };
@@ -282,8 +300,10 @@ export function registerClubRequests({
         .status(403)
         .json({ error: 'BLOCKED', message: 'This player (or their guardian) has blocked your organisation.' });
     }
-    const { type, message } = req.body || {};
-    if (!['contact', 'trial'].includes(type)) return res.status(400).json({ error: 'TYPE_MUST_BE_CONTACT_OR_TRIAL' });
+    const body = inputOrRefuse(res, DirectRequest, req.body ?? {}, DIRECT_REQUEST_CODES);
+    if (!body) return;
+    const { type } = body;
+    const message = body.message ?? '';
     if (!moderateOrRefuse(res, message, { kind: 'org_request_message', orgId: req.org.id, userId: req.orgUser.id }))
       return;
 
@@ -304,7 +324,7 @@ export function registerClubRequests({
     // Every date and text field is checked by the one Trial validator before anything is written.
     let trialDetails = null;
     if (type === 'trial') {
-      const check = validateTrialDetails(req.body);
+      const check = validateTrialDetails(body);
       if (!check.ok) return res.status(400).json(check);
       trialDetails = check.details;
       if (trialDetails.notes && !moderateOrRefuse(res, trialDetails.notes, { kind: 'trial_notes', orgId: req.org.id }))

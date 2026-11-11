@@ -38,10 +38,11 @@ export const PROBLEMS = Object.freeze([
   'invalid',
 ]);
 
-// A check's requirement → the problem it reports, and the code and `expected` that replace FIELD_INVALID.
+// A check's requirement → the problem it reports, the values it needs, and the code and `expected` that replace
+// FIELD_INVALID.
 const CODED = new Map();
-const coded = (requirement, { problem, error, expected }) => {
-  CODED.set(requirement, { problem, error, expected });
+const coded = (requirement, { problem, error, expected, min, max }) => {
+  CODED.set(requirement, { problem, error, expected, min, max });
   return requirement;
 };
 
@@ -69,6 +70,26 @@ export const requiredText = (max = TEXT_MAX) =>
 export const flag = v.boolean();
 
 export const id = v.pipe(v.string(), v.minLength(1), v.maxLength(ID_MAX));
+
+const isDigits = coded((s) => /^\d{1,15}$/.test(s), { problem: 'not_whole_number' });
+
+/**
+ * A whole number written as text, as a query string carries it: digits only, so `1.5`, `-1`, `1e3` and ` 7` are
+ * refused rather than read as some other number. The route converts it with `Number`.
+ */
+export const wholeNumberText = ({ min = 0, max = Number.MAX_SAFE_INTEGER } = {}) =>
+  v.pipe(
+    v.string(),
+    v.check(isDigits, 'must be a whole number'),
+    v.check(
+      coded((s) => Number(s) >= min, { problem: 'too_small', min }),
+      `must be at least ${min}`,
+    ),
+    v.check(
+      coded((s) => Number(s) <= max, { problem: 'too_large', max }),
+      `must be at most ${max}`,
+    ),
+  );
 
 /** A list of at most `max` ids. */
 export const idList = (max) => v.pipe(v.array(id), v.maxLength(max));
@@ -100,6 +121,17 @@ export const oneOf = (values) => {
   const message = `must be one of ${values.join(', ')}`;
   ALLOWED.set(message, Object.freeze([...values]));
   return v.picklist(values, message);
+};
+
+/**
+ * One of several shapes, chosen by the literal value of `key` in each (`v.literal('trial')`). A value outside them
+ * is refused like `oneOf`, with `allowed`.
+ */
+export const oneShapeOf = (key, options) => {
+  const values = options.map((o) => o.entries[key].literal);
+  const message = `must be one of ${values.join(', ')}`;
+  ALLOWED.set(message, Object.freeze(values));
+  return v.variant(key, options, message);
 };
 
 /** A calendar day, YYYY-MM-DD (temporal.mjs). Anything else, including a non-string, is DATE_INVALID. */
@@ -172,7 +204,7 @@ function describe(issue) {
     return { problem: 'unknown_field', phrase: 'is not a field this request takes' };
   if (issue.input === undefined && issue.kind === 'schema') return { problem: 'required', phrase: 'is required' };
   if (known?.problem === 'blank') return { problem: 'blank', phrase: 'must not be blank' };
-  if (known) return { problem: known.problem, phrase: 'is not valid' };
+  if (known) return { problem: known.problem, min: known.min, max: known.max, phrase: 'is not valid' };
   switch (issue.type) {
     case 'string':
       return { problem: 'not_text', phrase: 'must be text' };
@@ -188,6 +220,7 @@ function describe(issue) {
     case 'record':
       return { problem: 'not_object', phrase: 'must be an object' };
     case 'picklist':
+    case 'variant':
       return { problem: 'not_allowed', phrase: 'is not one of the allowed values' };
     case 'max_length':
       return { problem: 'too_long', max: n, phrase: `must be at most ${many} long` };

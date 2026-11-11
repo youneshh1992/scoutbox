@@ -16,10 +16,14 @@ import {
   inputOrRefuse,
   instant,
   oneOf,
+  oneShapeOf,
   parseInput,
   requiredText,
   text,
+  REV_FIELDS,
+  REV_FIELD_CODES,
   wholeNumber,
+  wholeNumberText,
 } from '../domains/platform/schemas.mjs';
 
 let passed = 0;
@@ -260,6 +264,45 @@ test('inputOrRefuse returns the value, or answers 400 with the refusal body and 
   assert.equal(res.code, 400);
   assert.deepEqual(Object.keys(res.sent).sort(), ['error', 'expected', 'field', 'message', 'problem']);
   assert.equal(res.sent.error, 'DATE_INVALID');
+});
+
+test('a whole number written as text takes digits in range only, with the bound it broke', () => {
+  const Q = v.strictObject({ limit: v.optional(wholeNumberText({ min: 1, max: 50 })) });
+  assert.deepEqual(parseInput(Q, { limit: '25' }, { root: 'query' }), { ok: true, value: { limit: '25' } });
+  for (const bad of ['1.5', '-1', '1e3', ' 7', '', 'ten', '0x10'])
+    assert.equal(refusal({ limit: bad }, Q).problem, 'not_whole_number', bad);
+  assert.equal(refusal({ limit: 25 }, Q).problem, 'not_text');
+  assert.equal(refusal({ limit: ['1', '2'] }, Q).problem, 'not_text');
+  const small = refusal({ limit: '0' }, Q);
+  assert.equal(small.problem, 'too_small');
+  assert.equal(small.min, 1);
+  const large = refusal({ limit: '51' }, Q);
+  assert.equal(large.problem, 'too_large');
+  assert.equal(large.max, 50);
+});
+
+test('the rev fields take a whole number or nothing, and REV_FIELD_CODES refuse the rest as guardRev does', () => {
+  const R = v.strictObject(REV_FIELDS);
+  assert.equal(parseInput(R, { expectedRev: 3 }).ok, true);
+  assert.equal(parseInput(R, {}).ok, true);
+  for (const bad of ['3', 3.5, -1, { n: 3 }])
+    assert.equal(refusal({ expectedRev: bad }, R, { fieldCodes: REV_FIELD_CODES }).error, 'EXPECTED_REV_INVALID');
+  assert.equal(refusal({ expectedVersion: '1' }, R, { fieldCodes: REV_FIELD_CODES }).error, 'EXPECTED_REV_INVALID');
+});
+
+test('oneShapeOf picks the shape by its key, refuses another value with allowed, and keeps each shape strict', () => {
+  const S = oneShapeOf('type', [
+    v.strictObject({ type: v.literal('contact'), message: v.optional(text(10)) }),
+    v.strictObject({ type: v.literal('trial'), date: v.optional(dateOnly) }),
+  ]);
+  assert.equal(parseInput(S, { type: 'trial', date: '2026-03-01' }).ok, true);
+  const other = refusal({ type: 'call' }, S);
+  assert.equal(other.field, 'type');
+  assert.equal(other.problem, 'not_allowed');
+  assert.deepEqual(other.allowed, ['contact', 'trial']);
+  assert.equal(refusal({}, S).problem, 'required');
+  assert.equal(refusal({ type: 'contact', date: '2026-03-01' }, S).problem, 'unknown_field');
+  assert.equal(refusal({ type: 'contact', message: { t: 1 } }, S).problem, 'not_text');
 });
 
 console.log(`${passed} input-schema checks passed`);

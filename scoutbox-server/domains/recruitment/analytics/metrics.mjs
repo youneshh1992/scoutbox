@@ -508,13 +508,16 @@ export const days = (from, to) => (Number(to) - Number(from)) / DAY_MS;
 /** Windows are inclusive UTC calendar days, as for brief boundaries; there is no local time. */
 export const utcDay = (ms) => new Date(Number(ms)).toISOString().slice(0, 10);
 
-export const WINDOW_PRESETS = {
-  last_7_days: 7,
-  last_30_days: 30,
-  last_90_days: 90,
-  last_180_days: 180,
-  last_365_days: 365,
-};
+// Indexed by the client's `?window=`: a null prototype, so `constructor` is unknown rather than a function.
+export const WINDOW_PRESETS = Object.freeze(
+  Object.assign(Object.create(null), {
+    last_7_days: 7,
+    last_30_days: 30,
+    last_90_days: 90,
+    last_180_days: 180,
+    last_365_days: 365,
+  }),
+);
 export const DEFAULT_WINDOW = 'last_90_days';
 
 /**

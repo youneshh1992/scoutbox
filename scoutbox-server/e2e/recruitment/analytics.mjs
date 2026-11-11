@@ -452,6 +452,11 @@ section('windows are inclusive UTC calendar days');
     const r = resolveWindow({ preset }, NOW);
     ok(!r.error && r.days === WINDOW_PRESETS[preset], `${preset} resolves to ${WINDOW_PRESETS[preset]} days`);
   }
+  for (const preset of ['constructor', '__proto__', 'toString', 'hasOwnProperty'])
+    neg(
+      resolveWindow({ preset }, NOW).error === 'WINDOW_UNKNOWN',
+      `an inherited key "${preset}" is not a window preset`,
+    );
 }
 
 // ---------------------------------------- period-over-period, and the zero
@@ -990,6 +995,33 @@ section('the dashboard refuses what it cannot answer honestly');
     const r = await j('GET', `/org/recruitment-analytics?${qs}`, undefined, maria.token);
     N(n, r.status === status && r.body?.error === err, `?${qs} → ${status} ${err}`);
   }
+  for (const [qs, err, field, problem] of [
+    ['window=constructor', 'WINDOW_UNKNOWN', undefined, undefined],
+    ['window=__proto__', 'WINDOW_UNKNOWN', undefined, undefined],
+    ['window=last_7_days&window=last_30_days', 'FIELD_INVALID', 'window', 'not_text'],
+    ['source[x]=search', 'FIELD_INVALID', 'source', 'not_text'],
+    ['sort=trustScore', 'FIELD_INVALID', 'sort', 'unknown_field'],
+  ]) {
+    const r = await j('GET', `/org/recruitment-analytics?${qs}`, undefined, maria.token);
+    neg(
+      r.status === 400 &&
+        r.body?.error === err &&
+        (field === undefined || (r.body.field === field && r.body.problem === problem)),
+      `?${qs} → 400 ${err}, never a 500 or a silently different query`,
+    );
+  }
+  for (const [qs, err, problem] of [
+    ['limit=1.5', 'PAGE_LIMIT_INVALID', 'not_whole_number'],
+    ['limit=0', 'PAGE_LIMIT_INVALID', 'too_small'],
+    ['cursor=-1', 'PAGE_CURSOR_INVALID', 'not_whole_number'],
+    ['cursor=abc', 'PAGE_CURSOR_INVALID', 'not_whole_number'],
+  ]) {
+    const r = await j('GET', `/org/recruitment-analytics/rows?metric=stalled_rooms&${qs}`, undefined, maria.token);
+    neg(
+      r.status === 400 && r.body?.error === err && r.body.problem === problem,
+      `drill-down ?${qs} → 400 ${err}, not read as the first page`,
+    );
+  }
   // A refusal must say what IS allowed, or it trains people to guess.
   const refused = await j('GET', '/org/recruitment-analytics?groupBy=scout', undefined, maria.token);
   N(
@@ -1249,11 +1281,16 @@ section('drill-down is bounded and stable');
     maria.token,
   );
   ok(first.status === 200 && first.body.limit === 2, 'a page is the size that was asked for');
+  const whole = await j(
+    'GET',
+    '/org/recruitment-analytics/rows?metric=stalled_rooms&limit=5000',
+    undefined,
+    maria.token,
+  );
   N(
     50,
-    (await j('GET', '/org/recruitment-analytics/rows?metric=stalled_rooms&limit=5000', undefined, maria.token)).body
-      .limit <= 50,
-    'a caller cannot ask for the whole table',
+    whole.status === 400 && whole.body.error === 'PAGE_LIMIT_INVALID' && whole.body.max === 50,
+    'a caller cannot ask for the whole table: a limit over the page size is refused, with the size',
   );
   P(
     11,

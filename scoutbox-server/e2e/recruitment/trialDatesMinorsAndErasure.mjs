@@ -670,14 +670,22 @@ const B = {};
     'B4d it is declined',
   );
 
-  // prototype keys in the request body
-  const proto = await j(
-    'POST',
-    '/org/players/pl-adeyemi/request',
-    `{"type":"trial","message":"Trial with the U23s","proposedDate":"${FUTURE}","altSlots":["${FUTURE2}","${FUTURE3}"],"venue":"Eastport Dome; Gate 2, North stand","notes":"Bring boots.\\nAsk for Priya.","__proto__":{"proposedDate":"bad"},"constructor":{"prototype":{"venue":"x"}},"toString":"bad"}`,
-    maria.token,
-  );
-  ok(proto.status === 201, 'B5 a valid request carrying prototype-named keys is accepted on its real fields');
+  // prototype keys in the request body: refused as undeclared fields, and nothing is written
+  const real = `"type":"trial","message":"Trial with the U23s","proposedDate":"${FUTURE}","altSlots":["${FUTURE2}","${FUTURE3}"],"venue":"Eastport Dome; Gate 2, North stand","notes":"Bring boots.\\nAsk for Priya."`;
+  for (const extra of [
+    '"__proto__":{"proposedDate":"bad"}',
+    '"constructor":{"prototype":{"venue":"x"}}',
+    '"toString":"bad"',
+  ]) {
+    const r = await j('POST', '/org/players/pl-adeyemi/request', `{${real},${extra}}`, maria.token);
+    neg(
+      r.status === 400 && r.body.problem === 'unknown_field',
+      `B5a a request carrying ${extra.split(':')[0]} is refused as an undeclared field`,
+    );
+  }
+  neg(!pendingFor((await j('GET', '/player/inbox', undefined, kola.token)).body.items), 'B5a none of them was written');
+  const proto = await j('POST', '/org/players/pl-adeyemi/request', `{${real}}`, maria.token);
+  ok(proto.status === 201, 'B5 the same request on its real fields is accepted');
   const inbox = (await j('GET', '/player/inbox', undefined, kola.token)).body.items;
   const p = pendingFor(inbox);
   B.reqId = p.id;
@@ -691,6 +699,45 @@ const B = {};
   neg(
     !JSON.stringify(p).includes('"bad"') && !Object.hasOwn(p.trialDetails, 'constructor'),
     'B5c none of the prototype-named values travelled',
+  );
+
+  for (const accept of ['false', 'no', 0, 1, null]) {
+    const r = await j('POST', `/player/requests/${B.reqId}/respond`, { accept }, kola.token);
+    neg(
+      r.status === 400 && r.body.field === 'accept',
+      `B5d an answer of ${JSON.stringify(accept)} is refused, never read as yes or no`,
+    );
+  }
+  neg(
+    pendingFor((await j('GET', '/player/inbox', undefined, kola.token)).body.items)?.id === B.reqId,
+    'B5e the request is still pending after every one of them',
+  );
+  const objectMessage = await j(
+    'POST',
+    '/org/players/pl-adeyemi/request',
+    { type: 'contact', message: { text: 'Hello' } },
+    maria.token,
+  );
+  neg(
+    objectMessage.status === 400 && objectMessage.body.field === 'message' && objectMessage.body.problem === 'not_text',
+    'B5f a request message that is not text is refused, not stored as sent',
+  );
+  const trialOnContact = await j(
+    'POST',
+    '/org/players/pl-adeyemi/request',
+    { type: 'contact', message: 'Hello', proposedDate: FUTURE },
+    maria.token,
+  );
+  neg(
+    trialOnContact.status === 400 && trialOnContact.body.field === 'proposedDate',
+    'B5g a contact request carries no trial details',
+  );
+  const otherType = await j('POST', '/org/players/pl-adeyemi/request', { type: 'call', message: 'Hi' }, maria.token);
+  neg(
+    otherType.status === 400 &&
+      otherType.body.error === 'TYPE_MUST_BE_CONTACT_OR_TRIAL' &&
+      otherType.body.allowed?.join() === 'contact,trial',
+    'B5h another request type is refused with the two there are',
   );
 
   // accept: unknown slot refused BEFORE the answer is recorded
@@ -834,6 +881,18 @@ const B = {};
     expect(gReq, 409, 'REPORTS_OUTSTANDING'),
     'B12 (the report gate, unchanged) an unfiled report blocks a new trial request',
   );
+  for (const [label, extra, field, problem] of [
+    ['feedback that is not text', { strengthNote: { text: 'Composed' } }, 'strengthNote', 'not_text'],
+    ['over-long feedback', { focusNote: 'x'.repeat(501) }, 'focusNote', 'too_long'],
+    ['notes that are a list', { notes: ['a', 'b'] }, 'notes', 'not_text'],
+    ['a rating the report does not have', { attitudeRating: 2 }, 'attitudeRating', 'unknown_field'],
+  ]) {
+    const r = await j('POST', `/org/trials/${B.trialId}/report`, { ...REPORT, ...extra }, maria.token);
+    neg(
+      r.status === 400 && r.body.field === field && r.body.problem === problem,
+      `B12a a report with ${label} is refused before anything is filed`,
+    );
+  }
   ok(
     (
       await j(

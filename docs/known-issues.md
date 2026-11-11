@@ -81,9 +81,6 @@ end of the feature freeze.
 
 Found in the November 2026 comment trim (10 Nov). Not yet fixed.
 
-- **`?window=constructor` crashes recruitment analytics.** `WINDOW_PRESETS` (`domains/recruitment/analytics/metrics.mjs`)
-  is a plain object indexed by the client's `?window=`, so an inherited key such as `constructor` passes the
-  unknown-window check and the route answers 500. It needs a null-prototype table or an own-property check.
 - **An expired agent agreement gives a 500, not a 403.** `representationScopeProblem`
   (`domains/agents/compliance/policy.mjs`) returns `REPRESENTATION_EXPIRED`, which the compliance error table maps but
   `TRANSACTION_ERROR_HTTP` (`domains/agents/transactions/errors.mjs`) does not, so

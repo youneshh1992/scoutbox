@@ -1649,6 +1649,58 @@ section('budget scenarios over the API');
     maria.token,
   );
   ok(r.status === 200 && r.body.actuals.length === 1, 'actual-versus-planned recorded per line');
+
+  // Money is refused, never repaired: a line the old route dropped, or a currency it read as GBP, is a 400.
+  const line = { kind: 'wage', label: 'w', amountMinor: 1000, currency: 'GBP', schedule: 'weekly' };
+  const before = (await j('GET', `/org/cases/${kase.id}/budget`, undefined, maria.token)).body.scenarios.length;
+  for (const [label, body, field, problem] of [
+    ['an unknown currency', { currency: 'XYZ', lines: [line] }, 'currency', 'not_allowed'],
+    ['a line in an unknown currency', { lines: [{ ...line, currency: 'GPB' }] }, 'lines[0].currency', 'not_allowed'],
+    ['a negative amount', { lines: [{ ...line, amountMinor: -5 }] }, 'lines[0].amountMinor', 'too_small'],
+    ['a fractional amount', { lines: [{ ...line, amountMinor: 10.5 }] }, 'lines[0].amountMinor', 'not_whole_number'],
+    ['an amount as text', { lines: [{ ...line, amountMinor: '1000' }] }, 'lines[0].amountMinor', 'not_number'],
+    ['an unknown line kind', { lines: [{ ...line, kind: 'signing_on' }] }, 'lines[0].kind', 'not_allowed'],
+    ['a term over six years', { termMonths: 120 }, 'termMonths', 'too_large'],
+    ['a term as text', { termMonths: '12' }, 'termMonths', 'not_number'],
+    [
+      'a rate as a float',
+      { fxAssumptions: [{ from: 'EUR', to: 'GBP', rate: 0.85 }] },
+      'fxAssumptions[0].rate',
+      'not_text',
+    ],
+    [
+      'a rate with seven places',
+      { fxAssumptions: [{ from: 'EUR', to: 'GBP', rate: '0.8512345' }] },
+      'fxAssumptions[0].rate',
+      'invalid',
+    ],
+    [
+      'a rate on a bad day',
+      { fxAssumptions: [{ from: 'EUR', to: 'GBP', rate: '0.85', date: '2026-02-30' }] },
+      'fxAssumptions[0].date',
+      'not_a_date',
+    ],
+    ['an over-long label', { label: 'x'.repeat(81) }, 'label', 'too_long'],
+    ['an invented field', { sellOnValueMinor: 1_000_000 }, 'sellOnValueMinor', 'unknown_field'],
+  ]) {
+    const refused = await j('POST', `/org/cases/${kase.id}/budget/scenarios`, body, maria.token);
+    ok(
+      refused.status === 400 && refused.body.field === field && refused.body.problem === problem,
+      `a scenario with ${label} is refused, naming ${field}`,
+    );
+  }
+  const after = (await j('GET', `/org/cases/${kase.id}/budget`, undefined, maria.token)).body.scenarios.length;
+  ok(after === before, 'none of those refused scenarios was written');
+  const textActual = await j(
+    'POST',
+    `/org/cases/${kase.id}/budget/scenarios/${scn.id}/actuals`,
+    { lineId: 'ln-1', amountMinor: '118000' },
+    maria.token,
+  );
+  ok(
+    textActual.status === 400 && textActual.body.error === 'AMOUNT_INVALID',
+    'an actual written as text is refused with the amount code',
+  );
 }
 
 // ============================================= backup → isolated restore
