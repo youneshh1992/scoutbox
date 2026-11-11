@@ -1150,33 +1150,49 @@ let TX1;
       JSON.stringify(minorTry.body) === JSON.stringify(ghostTry.body),
     'A9 a minor and a player who does not exist answer with byte-identical bodies (#23, V)',
   );
-  const forgedRes = collect(
-    'A10',
-    await j(
-      'POST',
-      '/org/agent/transactions',
-      {
-        ...body,
-        parties: [
-          {
-            partyRole: 'individual',
-            subjectKind: 'player',
-            subjectId: 'pl-adeyemi',
-            dob: '2012-01-01',
-            guardianConsent: true,
-            complianceOutcome: 'CLEAR',
-            status: 'ACTIVE',
-            rev: 99,
-            policyVersion: 'jp-forged-1',
-          },
-        ],
-      },
-      ANA.token,
-    ),
-  );
+  const adeyemi = { partyRole: 'individual', subjectKind: 'player', subjectId: 'pl-adeyemi' };
+  const listed = async () => (await j('GET', '/org/agent/transactions', undefined, ANA.token)).body.items;
+  const before = (await listed()).length;
+  const forgedFields = {
+    dob: '2012-01-01',
+    guardianConsent: true,
+    complianceOutcome: 'CLEAR',
+    status: 'ACTIVE',
+    rev: 99,
+    policyVersion: 'jp-forged-1',
+  };
+  let refusedEach = true;
+  for (const [field, value] of Object.entries(forgedFields)) {
+    const r = collect(
+      'A10',
+      await j('POST', '/org/agent/transactions', { ...body, parties: [{ ...adeyemi, [field]: value }] }, ANA.token),
+    );
+    refusedEach &&=
+      expect(r, 400, 'TRANSACTION_INPUT_INVALID') &&
+      r.body.field === `parties[0].${field}` &&
+      r.body.problem === 'unknown_field';
+  }
+  for (const field of ['status', 'rev', 'complianceOutcome']) {
+    const r = collect(
+      'A10',
+      await j(
+        'POST',
+        '/org/agent/transactions',
+        { ...body, parties: [adeyemi], [field]: forgedFields[field] },
+        ANA.token,
+      ),
+    );
+    refusedEach &&= expect(r, 400, 'TRANSACTION_INPUT_INVALID') && r.body.field === field;
+  }
+  const afterRefusals = await listed();
   neg(
-    expect(forgedRes, 201, null),
-    'A10 a forged date of birth, guardian consent, compliance outcome, status, rev and policy version in the body are ignored (#19–#22)',
+    refusedEach && afterRefusals.length === before,
+    'A10 a forged date of birth, guardian consent, compliance outcome, status, rev or policy version in the body is refused by name, and nothing is opened (#19–#22)',
+  );
+  neg(!JSON.stringify(afterRefusals).includes('jp-forged-1'), 'A10c the forged policy version reached no record');
+  const forgedRes = collect(
+    'A10b',
+    await j('POST', '/org/agent/transactions', { ...body, parties: [adeyemi] }, ANA.token),
   );
   const forged = forgedRes.body?.transaction;
   neg(
@@ -1184,9 +1200,8 @@ let TX1;
       forged.rev === 1 &&
       forged.compliance.clear === false &&
       forged.compliance.pendingReason === 'PARTIES_NOT_CONFIRMED',
-    `A10b …and the created transaction is a DRAFT at rev 1 whose compliance says parties are not confirmed (${forged?.status}/${forged?.rev}/${forged?.compliance?.pendingReason})`,
+    `A10b the transaction opened without them is a DRAFT at rev 1 whose compliance says parties are not confirmed (${forged?.status}/${forged?.rev}/${forged?.compliance?.pendingReason})`,
   );
-  neg(!JSON.stringify(forged).includes('jp-forged-1'), 'A10c the forged policy version reached no field of the record');
   neg(
     expect(
       collect(
@@ -1630,8 +1645,8 @@ section('D — transitions are server-validated and compliance-driven states are
       type: 'transfer',
       jurisdictions: ['ENG'],
       parties: [{ partyRole: 'individual', subjectKind: 'player', subjectId: 7 }],
-    })) === 'parties',
-    'D16f a party id that is not text is refused',
+    })) === 'parties[0].subjectId',
+    'D16f a party id that is not text is refused, naming the party and the field',
   );
   neg(
     expect(
@@ -1649,6 +1664,84 @@ section('D — transitions are server-validated and compliance-driven states are
     ),
     'D16g a note whose text is not text is refused, not coerced',
   );
+  {
+    const refusedAs = (r, code, field, problem) =>
+      r.status === 400 && r.body?.error === code && r.body.field === field && r.body.problem === problem;
+    const post = async (label, url, body) => collect(label, await j('POST', url, body, ANA.token));
+    const tx0 = (await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).body.transaction;
+    const longNote = await post('D16h', `/org/agent/transactions/${TX1}/notes`, {
+      text: 'n'.repeat(2001),
+      visibility: 'AGENT_PRIVATE',
+    });
+    neg(
+      refusedAs(longNote, 'NOTE_INPUT_INVALID', 'text', 'too_long') && longNote.body.max === 2000,
+      'D16h a note over 2000 characters is refused with its limit, not cut',
+    );
+    const longLabel = await post('D16i', `/org/agent/transactions/${TX1}/documents`, {
+      documentType: 'mandate',
+      visibility: 'AGENT_PRIVATE',
+      label: 'l'.repeat(121),
+    });
+    neg(
+      refusedAs(longLabel, 'DOCUMENT_INPUT_INVALID', 'label', 'too_long') && longLabel.body.max === 120,
+      'D16i a document label over 120 characters is refused with its limit, not cut',
+    );
+    neg(
+      refusedAs(
+        await post('D16j', `/org/agent/transactions/${TX1}/documents`, {
+          documentType: 'mandate',
+          visibility: 'AGENT_PRIVATE',
+          label: 'Mandate',
+          expiresAt: { at: '2030-01-01' },
+        }),
+        'DOCUMENT_INPUT_INVALID',
+        'expiresAt',
+        'not_a_date',
+      ) &&
+        refusedAs(
+          await post('D16k', `/org/agent/transactions/${TX1}/documents`, {
+            documentType: 'mandate',
+            visibility: 'AGENT_PRIVATE',
+            label: 'Mandate',
+            evidenceRef: { kind: 'verification_evidence', id: 'ev-1', bytes: 'AAAA' },
+          }),
+          'DOCUMENT_INPUT_INVALID',
+          'evidenceRef.bytes',
+          'unknown_field',
+        ),
+      'D16j an expiry that is not a date, or an evidence reference carrying more than its kind and id, is refused',
+    );
+    neg(
+      refusedAs(
+        await post('D16l', `/org/agent/transactions/${TX1}/status`, { to: 'CANCELLED', reason: 'r'.repeat(401) }),
+        'TRANSACTION_INPUT_INVALID',
+        'reason',
+        'too_long',
+      ),
+      'D16l a status reason over 400 characters is refused, not cut',
+    );
+    neg(
+      refusedAs(
+        await post('D16m', `/org/agent/transactions/${TX1}/notes`, {
+          text: 'A note',
+          visibility: 'AGENT_PRIVATE',
+          expectedRev: '1',
+        }),
+        'EXPECTED_REV_INVALID',
+        'expectedRev',
+        'not_number',
+      ) &&
+        refusedAs(
+          collect('D16n', await j('GET', '/org/agent/transactions?status=DRAFT&sort=newest', undefined, ANA.token)),
+          'TRANSACTION_INPUT_INVALID',
+          'sort',
+          'unknown_field',
+        ),
+      'D16m a rev written as text and a list parameter the route does not read are refused',
+    );
+    const tx1 = (await j('GET', `/org/agent/transactions/${TX1}`, undefined, ANA.token)).body.transaction;
+    neg(tx1.rev === tx0.rev && tx1.status === tx0.status, 'D16o none of those refusals changed the transaction');
+  }
   const active = collect('D17', await j('POST', `/org/agent/transactions/${TX1}/status`, { to: 'ACTIVE' }, ANA.token));
   neg(
     active.status === 422 &&
@@ -3158,7 +3251,8 @@ section('Z — every refusal in this run: a code, and no private field');
   const noCode = ERROR_BODIES.filter((e) => e.body !== null && !e.body.error);
   neg(noCode.length === 0, 'Z7 every JSON refusal carried an error code');
   const blob = JSON.stringify(ERROR_BODIES);
-  const leak8 = blob.match(/ at .*\(|node_modules|Error:/);
+  // A stack frame is `at fn (file:line:col)`; a message's own "at most" is not one.
+  const leak8 = blob.match(/\bat [\w$.<>]+ \([^)]*:\d+:\d+\)|node_modules|Error:/);
   neg(
     leak8 === null,
     `Z8 no stack and no internal frame reached a refusal${leak8 ? ` — …${blob.slice(Math.max(0, leak8.index - 200), leak8.index + 60)}…` : ''}`,

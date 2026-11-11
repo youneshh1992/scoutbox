@@ -10,6 +10,7 @@ import {
   dateOnly,
   dateWrittenAs,
   dayOrBlank,
+  declaredCodes,
   dueDate,
   flag,
   id,
@@ -328,6 +329,21 @@ test('dateWrittenAs judges a domain date with its own test and refuses it as DAT
   assert.equal(bad.problem, 'not_a_date');
   assert.equal(bad.expected, 'YYYY');
   assert.equal(bad.field, 'from');
+});
+
+test('declaredCodes keeps a shared field code only on a schema that declares the field', () => {
+  const codes = { ...REV_FIELD_CODES, clientKey: 'KEY_INVALID' };
+  const WithRev = v.strictObject({ note: v.optional(text()), ...REV_FIELDS });
+  const Bare = v.strictObject({ note: v.optional(text()) });
+  assert.deepEqual(declaredCodes(WithRev, codes), REV_FIELD_CODES);
+  assert.deepEqual(declaredCodes(Bare, codes), {});
+  const opts = (S) => ({ codes: { FIELD_INVALID: 'NOTE_INPUT_INVALID' }, fieldCodes: declaredCodes(S, codes) });
+  const malformed = refusal({ expectedRev: '1' }, WithRev, opts(WithRev));
+  assert.equal(malformed.error, 'EXPECTED_REV_INVALID');
+  assert.equal(malformed.problem, 'not_number');
+  const unknown = refusal({ expectedRev: 1 }, Bare, opts(Bare));
+  assert.equal(unknown.error, 'NOTE_INPUT_INVALID');
+  assert.equal(unknown.problem, 'unknown_field');
 });
 
 console.log(`${passed} input-schema checks passed`);

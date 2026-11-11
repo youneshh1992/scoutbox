@@ -6,7 +6,9 @@ import * as v from 'valibot';
 import {
   CURSOR_PAGE,
   REV_FIELDS,
+  REV_FIELD_CODES,
   dateOnly,
+  declaredCodes,
   flag,
   id,
   oneOf,
@@ -172,11 +174,10 @@ export const COMPLIANCE_INPUT = Object.freeze({
   reviewClosure: ReviewClosure,
 });
 
-const REV_CODES = { expectedRev: 'EXPECTED_REV_INVALID', expectedVersion: 'EXPECTED_REV_INVALID' };
-
 /**
  * Per schema: the code a refusal carries, and the fields with codes of their own. A malformed rev is refused as
- * guardRev refuses it, and a malformed client key as the idempotency check does.
+ * guardRev refuses it, and a malformed client key as the idempotency check does; a schema that takes neither refuses
+ * one as an unknown field under the route's own code.
  */
 export const COMPLIANCE_INPUT_CODES = Object.freeze({
   reviewerLogin: 'COMPLIANCE_INPUT_INVALID',
@@ -204,6 +205,9 @@ export const complianceParseOptions = (name, root = 'body') => {
   return {
     root,
     codes: { FIELD_INVALID: code, DATE_INVALID: code },
-    fieldCodes: { ...REV_CODES, clientKey: 'COMPLIANCE_CLIENT_KEY_INVALID' },
+    fieldCodes: declaredCodes(COMPLIANCE_INPUT[name], {
+      ...REV_FIELD_CODES,
+      clientKey: 'COMPLIANCE_CLIENT_KEY_INVALID',
+    }),
   };
 };

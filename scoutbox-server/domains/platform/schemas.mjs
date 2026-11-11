@@ -148,6 +148,14 @@ export const REV_FIELD_CODES = Object.freeze({
   expectedVersion: 'EXPECTED_REV_INVALID',
 });
 
+/**
+ * The entries of `fieldCodes` naming a field `schema` declares. A shared field's own code (REV_FIELD_CODES, a client
+ * key's) describes a malformed value; on a schema without that field, the same name is an unknown field and keeps the
+ * route's code.
+ */
+export const declaredCodes = (schema, fieldCodes) =>
+  Object.fromEntries(Object.entries(fieldCodes).filter(([k]) => Object.hasOwn(schema.entries ?? {}, k)));
+
 // A vocabulary's refusal message → its values, so the refusal can list them as `allowed`. An issue does not name the
 // schema it came from, but its message is the one written here.
 const ALLOWED = new Map();

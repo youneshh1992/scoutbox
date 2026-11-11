@@ -10,11 +10,12 @@ import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
 import { isExpiredAt, isAbsent, parseDateOrInstant } from '../../../temporal.mjs';
+import { parseInput, filled } from '../../platform/schemas.mjs';
+import { TRANSACTION_INPUT, transactionParseOptions } from './schemas.mjs';
 import { hasVerLevel } from '../../verification/claims/shared.mjs';
 import { effectiveAgreementStatus, agreementGrantsAccess, can } from '../core/shared.mjs';
 import { sendTransactionError, notFound } from './errors.mjs';
 import { transactionAuditRows } from './audit.mjs';
-import { AGENT_TRANSACTION_LIMITS } from '../../../repositories/agentTransactions.mjs';
 import {
   partiesOf,
   TRANSACTION_TYPES,
@@ -63,8 +64,6 @@ const REASON_CODES_FOR = Object.freeze({
   CANCELLED: CANCEL_REASON_CODES,
   CLOSED: CLOSE_REASON_CODES,
 });
-const JURISDICTIONS_MAX = AGENT_TRANSACTION_LIMITS.jurisdictions;
-const ID_MAX = AGENT_TRANSACTION_LIMITS.id;
 
 export function registerTransactions(rawCtx) {
   const {
@@ -108,22 +107,23 @@ export function registerTransactions(rawCtx) {
   const byPlayer = (req) => ({ kind: 'player', userId: req.player.id, name: req.player.name });
   const bySystem = (name) => ({ kind: 'system', userId: null, name });
   const limitedOr429 = refuseWhenLimited(rateLimit);
-  const clientKeyOr400 = (req, res) => {
-    const k = normaliseClientKey(req.body?.clientKey);
+  /** The request input read with its schema (TRANSACTION_INPUT), or `undefined` once the refusal is sent. */
+  const inputOr400 = (res, name, input, root = 'body') => {
+    const parsed = parseInput(TRANSACTION_INPUT[name], input ?? {}, transactionParseOptions(name, root));
+    if (parsed.ok) return parsed.value;
+    sendTransactionError(res, parsed, name);
+    return undefined;
+  };
+  const clientKeyOr400 = (body, res) => {
+    const k = normaliseClientKey(body.clientKey);
     if (!k.ok) {
       sendTransactionError(res, { error: 'TRANSACTION_CLIENT_KEY_INVALID', message: k.message }, 'clientKey');
       return undefined;
     }
     return k.key;
   };
-  /** Trimmed and cut to `max`; '' when absent; `undefined` (refused by the route) when not text. */
-  const text = (v, max) =>
-    v === undefined || v === null ? '' : typeof v === 'string' ? v.trim().slice(0, max) : undefined;
-  /** '' when absent; `undefined` (refused) when not text or longer than any id. Never cut. */
-  const idText = (v) => {
-    const t = v === undefined || v === null ? '' : typeof v === 'string' ? v.trim() : undefined;
-    return t !== undefined && t.length > ID_MAX ? undefined : t;
-  };
+  /** Text a schema has read, trimmed; '' when blank or absent. */
+  const text = (v) => filled(v) ?? '';
   const refuse = (res, out, where) => {
     sendTransactionError(res, out, where);
     throw ROLLBACK;
@@ -681,31 +681,6 @@ export function registerTransactions(rawCtx) {
    * route is not an age or a block oracle.
    */
   function resolveParty(req, res, raw, { type }) {
-    const shapeOk =
-      raw !== null &&
-      typeof raw === 'object' &&
-      !Array.isArray(raw) &&
-      [raw.partyRole, raw.subjectKind, raw.subjectId].every((v) => typeof v === 'string');
-    if (
-      !shapeOk ||
-      !PARTY_ROLES.includes(raw.partyRole) ||
-      !['player', 'club'].includes(raw.subjectKind) ||
-      !raw.subjectId ||
-      raw.subjectId.length > ID_MAX
-    ) {
-      sendTransactionError(
-        res,
-        {
-          error: 'TRANSACTION_INPUT_INVALID',
-          field: 'parties',
-          allowed: PARTY_ROLES,
-          message:
-            'Each party needs partyRole (individual | engaging_entity | releasing_entity), subjectKind (player | club) and subjectId, as text.',
-        },
-        'party',
-      );
-      return null;
-    }
     const { partyRole, subjectKind, subjectId } = raw;
     if (partyRole === 'releasing_entity' && !RELEASING_PARTY_TYPES.includes(type)) {
       sendTransactionError(
@@ -800,29 +775,18 @@ export function registerTransactions(rawCtx) {
     const p = pageOf(rows, limit, (r) => r.key);
     return { records: p.items.map((r) => r.record), nextCursor: p.nextCursor };
   };
-  const statusFilterOr400 = (req, res) => {
-    if (req.query.status === undefined || req.query.status === '') return null;
-    if (typeof req.query.status !== 'string' || !TRANSACTION_STATUSES.includes(req.query.status)) {
-      sendTransactionError(
-        res,
-        { error: 'TRANSACTION_INPUT_INVALID', field: 'status', allowed: TRANSACTION_STATUSES },
-        'list',
-      );
-      return undefined;
-    }
-    return req.query.status;
-  };
 
   // ============================================================ AGENT lane
 
   orgRouter.get('/agent/transactions', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
     if (!access.requireCap(req, res, 'transactions.read')) return;
-    const status = statusFilterOr400(req, res);
-    if (status === undefined) return;
+    const q = inputOr400(res, 'list', req.query, 'query');
+    if (!q) return;
+    const status = q.status ?? null;
     let pageReq;
     try {
-      pageReq = readPage(req.query, ['number']);
+      pageReq = readPage(q, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -856,64 +820,13 @@ export function registerTransactions(rawCtx) {
   orgRouter.post('/agent/transactions', (req, res) => {
     if (!access.resolveMembership(req, res)) return;
     if (!access.requireCap(req, res, 'transactions.write')) return;
-    const b = req.body ?? {};
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'create', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    if (typeof b.type !== 'string' || !TRANSACTION_TYPES.includes(b.type))
-      return sendTransactionError(
-        res,
-        { error: 'TRANSACTION_INPUT_INVALID', field: 'type', allowed: TRANSACTION_TYPES },
-        'create',
-      );
-    const type = b.type;
-    const jurisdictions =
-      Array.isArray(b.jurisdictions) && b.jurisdictions.every((j) => typeof j === 'string')
-        ? [...new Set(b.jurisdictions.map((j) => j.toUpperCase()))]
-        : [];
-    if (
-      !jurisdictions.length ||
-      jurisdictions.length > JURISDICTIONS_MAX ||
-      jurisdictions.some((j) => !/^[A-Z]{3}$/.test(j))
-    )
-      return sendTransactionError(
-        res,
-        {
-          error: 'TRANSACTION_INPUT_INVALID',
-          field: 'jurisdictions',
-          message: `jurisdictions must be a non-empty list of up to ${JURISDICTIONS_MAX} three-letter member-association codes (INT for FIFA level).`,
-        },
-        'create',
-      );
-    if (
-      b.parties !== undefined &&
-      b.parties !== null &&
-      (!Array.isArray(b.parties) || b.parties.length > TRANSACTION_LIMITS.parties)
-    )
-      return sendTransactionError(
-        res,
-        {
-          error: 'TRANSACTION_INPUT_INVALID',
-          field: 'parties',
-          message: `parties must be a list of up to ${TRANSACTION_LIMITS.parties} parties.`,
-        },
-        'create',
-      );
-    if (
-      b.recruitmentCaseId !== undefined &&
-      b.recruitmentCaseId !== null &&
-      b.recruitmentCaseId !== '' &&
-      (typeof b.recruitmentCaseId !== 'string' || b.recruitmentCaseId.length > ID_MAX)
-    )
-      return sendTransactionError(
-        res,
-        {
-          error: 'TRANSACTION_INPUT_INVALID',
-          field: 'recruitmentCaseId',
-          message: 'recruitmentCaseId must be the id of a recruitment case, as text.',
-        },
-        'create',
-      );
-    const rawParties = Array.isArray(b.parties) ? b.parties : [];
+    const { type } = b;
+    const jurisdictions = [...new Set(b.jurisdictions.map((j) => j.toUpperCase()))];
+    const rawParties = b.parties ?? [];
     const fp = payloadFingerprint({ type, jurisdictions, parties: rawParties });
     if (key) {
       const hit = txs.byCreateKey(req.org.id, req.orgUser.id, key);
@@ -963,7 +876,7 @@ export function registerTransactions(rawCtx) {
     }
 
     // A reference only: nothing about the recruitment case is copied in.
-    const caseRef = typeof b.recruitmentCaseId === 'string' && b.recruitmentCaseId ? b.recruitmentCaseId : null;
+    const caseRef = filled(b.recruitmentCaseId);
     const individualId = parties.find((p) => p.partyRole === 'individual')?.subjectId ?? null;
     if (individualId) {
       const dup = duplicateOf({
@@ -1083,9 +996,11 @@ export function registerTransactions(rawCtx) {
     if (!tx) return;
     if (!writableOr(res, tx, 'parties')) return;
     if (limitedOr429(res, 'transaction_write', req.orgUser.id)) return;
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'party', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    const party = resolveParty(req, res, req.body, { type: tx.type });
+    const party = resolveParty(req, res, b, { type: tx.type });
     if (!party) return;
     const fp = payloadFingerprint({ partyRole: party.partyRole, subjectId: party.subjectId });
     if (key && tx.keys[`party:${key}`]) {
@@ -1138,6 +1053,7 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'parties')) return;
     const party = partiesOf(tx).find((p) => p && p.id === req.params.pid);
     if (!party) return sendTransactionError(res, { error: 'TRANSACTION_PARTY_NOT_FOUND' }, 'parties');
+    if (!inputOr400(res, 'rev', req.body)) return;
     if (party.removed) return res.json({ transaction: projectTransaction(tx, agentViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
@@ -1215,29 +1131,10 @@ export function registerTransactions(rawCtx) {
     const tx = ownTransaction(req, res, req.params.id, { write: true });
     if (!tx) return;
     if (!writableOr(res, tx, 'representations')) return;
-    const b = req.body ?? {};
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'representation', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    if (typeof b.partyRole !== 'string')
-      return sendTransactionError(
-        res,
-        { error: 'TRANSACTION_INPUT_INVALID', field: 'partyRole', allowed: PARTY_ROLES },
-        'representations',
-      );
-    if (
-      b.agreementId !== undefined &&
-      b.agreementId !== null &&
-      (typeof b.agreementId !== 'string' || b.agreementId.length > ID_MAX)
-    )
-      return sendTransactionError(
-        res,
-        {
-          error: 'TRANSACTION_INPUT_INVALID',
-          field: 'agreementId',
-          message: 'agreementId must be the id of your agreement with this party, as text.',
-        },
-        'representations',
-      );
     const partyRole = b.partyRole;
     const party = partiesOf(tx).find((p) => !p.removed && p.partyRole === partyRole);
     if (!party) return sendTransactionError(res, { error: 'TRANSACTION_PARTY_NOT_FOUND' }, 'representations');
@@ -1271,7 +1168,7 @@ export function registerTransactions(rawCtx) {
       const pl = findPlayer(party.subjectId);
       if (!pl || !isAdult(pl) || !orgCanSee(req.org, pl) || isBlocked(pl.id, req.org.id))
         return sendTransactionError(res, { error: 'TRANSACTION_PARTY_NOT_FOUND' }, 'representations');
-      const named = typeof b.agreementId === 'string' ? rawCtx.agentReads.agreements.byId(b.agreementId) : null;
+      const named = b.agreementId ? rawCtx.agentReads.agreements.byId(b.agreementId) : null;
       agreement =
         named &&
         named.agentUserId === req.orgUser.id &&
@@ -1506,6 +1403,7 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'representations')) return;
     const rep = repsOf(tx.id).find((r) => r.id === req.params.rid && r.agentUserId === req.orgUser.id);
     if (!rep) return notFound(res, 'representations');
+    if (!inputOr400(res, 'rev', req.body)) return;
     if (rep.status === 'withdrawn')
       return res.json({ transaction: projectTransaction(tx, agentViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
@@ -1534,6 +1432,7 @@ export function registerTransactions(rawCtx) {
     const tx = ownTransaction(req, res, req.params.id, { write: true });
     if (!tx) return;
     if (!writableOr(res, tx, 'evaluate')) return;
+    if (!inputOr400(res, 'evaluation', req.body)) return;
     if (limitedOr429(res, 'transaction_write', req.orgUser.id)) return;
     inUnit(() => {
       recheckCompliance(tx.id, byAgent(req));
@@ -1547,14 +1446,9 @@ export function registerTransactions(rawCtx) {
   orgRouter.post('/agent/transactions/:id/status', (req, res) => {
     const tx = ownTransaction(req, res, req.params.id, { write: true });
     if (!tx) return;
-    const b = req.body ?? {};
-    if (typeof b.to !== 'string' || !TRANSACTION_STATUSES.includes(b.to))
-      return sendTransactionError(
-        res,
-        { error: 'TRANSACTION_INPUT_INVALID', field: 'to', allowed: TRANSACTION_STATUSES },
-        'status',
-      );
-    const to = b.to;
+    const b = inputOr400(res, 'status', req.body);
+    if (!b) return;
+    const { to } = b;
     if (tx.status === 'ARCHIVED')
       return sendTransactionError(
         res,
@@ -1573,22 +1467,10 @@ export function registerTransactions(rawCtx) {
         },
         'status',
       );
-    const key = clientKeyOr400(req, res);
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    const reasonCode = text(b.reasonCode, 60);
-    const reason = text(b.reason, TRANSACTION_LIMITS.reason);
-    if (reasonCode === undefined)
-      return sendTransactionError(
-        res,
-        { error: 'TRANSACTION_INPUT_INVALID', field: 'reasonCode', message: 'reasonCode must be text.' },
-        'status',
-      );
-    if (reason === undefined)
-      return sendTransactionError(
-        res,
-        { error: 'TRANSACTION_INPUT_INVALID', field: 'reason', message: 'reason must be text.' },
-        'status',
-      );
+    const reasonCode = text(b.reasonCode);
+    const reason = text(b.reason);
     const fp = payloadFingerprint({ to, reasonCode, reason });
     // Before the transition check: a replay must answer "already done", not "not allowed from here".
     if (key && tx.keys[`status:${key}`]) {
@@ -1773,26 +1655,22 @@ export function registerTransactions(rawCtx) {
     if (!tx) return;
     if (!writableOr(res, tx, 'terms')) return;
     if (limitedOr429(res, 'transaction_write', req.orgUser.id)) return;
-    const b = req.body ?? {};
-    const summary = text(b.summary, TRANSACTION_LIMITS.note);
+    const b = inputOr400(res, 'terms', req.body);
+    if (!b) return;
+    const summary = text(b.summary);
     if (!summary)
       return sendTransactionError(
         res,
         {
           error: 'TERMS_INPUT_INVALID',
           field: 'summary',
+          problem: 'required',
           message: 'A terms version needs a written summary of what the parties recorded.',
         },
         'terms',
       );
-    if (typeof b.recordedFor !== 'string' || !PARTY_ROLES.includes(b.recordedFor))
-      return sendTransactionError(
-        res,
-        { error: 'TERMS_INPUT_INVALID', field: 'recordedFor', allowed: PARTY_ROLES },
-        'terms',
-      );
     const roles = roomRolesFor(tx, agentViewer(req));
-    const visibility = typeof b.visibility === 'string' ? b.visibility : '';
+    const visibility = b.visibility ?? '';
     if (!uploadableVisibilities(roles).includes(visibility))
       return sendTransactionError(
         res,
@@ -1844,10 +1722,9 @@ export function registerTransactions(rawCtx) {
     const tx = ownTransaction(req, res, req.params.id, { write: true });
     if (!tx) return;
     if (!writableOr(res, tx, 'links')) return;
-    const opportunityId = idText(req.body?.opportunityId);
-    if (!opportunityId)
-      return sendTransactionError(res, { error: 'TRANSACTION_INPUT_INVALID', field: 'opportunityId' }, 'links');
-    const opp = scoutingReads.opportunities.byId(opportunityId);
+    const b = inputOr400(res, 'opportunityLink', req.body);
+    if (!b) return;
+    const opp = scoutingReads.opportunities.byId(b.opportunityId.trim());
     // An unknown and an invisible opportunity answer alike.
     const engaging = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'engaging_entity');
     if (!opp || !engaging || opp.orgId !== engaging.subjectId)
@@ -1881,19 +1758,14 @@ export function registerTransactions(rawCtx) {
   function addDocument(req, res, tx, { roles, partyRole, owner, by, rateKey }) {
     if (!writableOr(res, tx, 'documents')) return;
     if (limitedOr429(res, 'transaction_document_write', rateKey)) return;
-    const b = req.body ?? {};
-    const key = clientKeyOr400(req, res);
+    const b = inputOr400(res, 'document', req.body);
+    if (!b) return;
+    const key = clientKeyOr400(b, res);
     if (key === undefined) return;
-    const label = text(b.label, TRANSACTION_LIMITS.label);
-    if (typeof b.documentType !== 'string' || !DOCUMENT_TYPES.includes(b.documentType))
-      return sendTransactionError(
-        res,
-        { error: 'DOCUMENT_INPUT_INVALID', field: 'documentType', allowed: DOCUMENT_TYPES },
-        'documents',
-      );
-    const documentType = b.documentType;
+    const label = text(b.label);
+    const { documentType } = b;
     const allowed = uploadableVisibilities(roles, partyRole);
-    const visibility = typeof b.visibility === 'string' ? b.visibility : '';
+    const visibility = b.visibility ?? '';
     if (!allowed.includes(visibility))
       return sendTransactionError(
         res,
@@ -1912,32 +1784,14 @@ export function registerTransactions(rawCtx) {
         {
           error: 'DOCUMENT_INPUT_INVALID',
           field: 'label',
+          problem: 'required',
           message: 'A document needs a label the other parties can read.',
         },
         'documents',
       );
     let evidenceRef = null;
-    if (b.evidenceRef != null) {
+    if (b.evidenceRef) {
       const ref = b.evidenceRef;
-      const shapeOk =
-        typeof ref === 'object' &&
-        !Array.isArray(ref) &&
-        ref.kind === 'verification_evidence' &&
-        typeof ref.id === 'string' &&
-        ref.id.trim() &&
-        ref.id.trim().length <= ID_MAX;
-      if (!shapeOk)
-        return sendTransactionError(
-          res,
-          {
-            error: 'DOCUMENT_INPUT_INVALID',
-            field: 'evidenceRef',
-            allowed: ['verification_evidence'],
-            message:
-              'A document reference is { kind: "verification_evidence", id } naming a record in the canonical evidence vault.',
-          },
-          'documents',
-        );
       const ev = rawCtx.verificationReads.evidence.byId(ref.id.trim());
       // The uploader must own the evidence; an unknown id and a foreign id answer alike.
       const mine =
@@ -1958,18 +1812,7 @@ export function registerTransactions(rawCtx) {
       evidenceRef = { kind: 'verification_evidence', id: ev.id };
     }
     // A calendar day is valid through that day.
-    const expP = isAbsent(b.expiresAt) ? null : parseDateOrInstant(b.expiresAt, { dayEdge: 'end' });
-    if (expP && !expP.ok)
-      return sendTransactionError(
-        res,
-        {
-          error: 'DOCUMENT_INPUT_INVALID',
-          field: 'expiresAt',
-          message: `An expiry must be a timestamp, an ISO 8601 date-time with an offset, or a calendar day (${expP.why}).`,
-        },
-        'documents',
-      );
-    const expiresAt = expP ? expP.ms : null;
+    const expiresAt = isAbsent(b.expiresAt) ? null : parseDateOrInstant(b.expiresAt, { dayEdge: 'end' }).ms;
     if (expiresAt !== null && expiresAt <= now())
       return sendTransactionError(
         res,
@@ -2121,14 +1964,9 @@ export function registerTransactions(rawCtx) {
         { error: 'DOCUMENT_SUPERSEDED', message: 'That version has already been superseded.' },
         'documents',
       );
-    const given = text(req.body?.label, TRANSACTION_LIMITS.label);
-    if (given === undefined)
-      return sendTransactionError(
-        res,
-        { error: 'DOCUMENT_INPUT_INVALID', field: 'label', message: 'label must be text.' },
-        'documents',
-      );
-    const label = given || old.label;
+    const b = inputOr400(res, 'supersession', req.body);
+    if (!b) return;
+    const label = text(b.label) || old.label;
     if (!guardRev(req, res, old, { errorCode: 'DOCUMENT_VERSION_CONFLICT', current: { version: old.version } })) return;
     inUnit(() => {
       const d = {
@@ -2188,9 +2026,16 @@ export function registerTransactions(rawCtx) {
   function addNote(req, res, tx, { roles, partyRole, by, rateKey }) {
     if (!writableOr(res, tx, 'notes')) return;
     if (limitedOr429(res, 'transaction_note_write', rateKey)) return;
-    const noteText = text(req.body?.text, TRANSACTION_LIMITS.note);
-    if (!noteText) return sendTransactionError(res, { error: 'NOTE_INPUT_INVALID', field: 'text' }, 'notes');
-    const visibility = typeof req.body?.visibility === 'string' ? req.body.visibility : '';
+    const b = inputOr400(res, 'note', req.body);
+    if (!b) return;
+    const noteText = text(b.text);
+    if (!noteText)
+      return sendTransactionError(
+        res,
+        { error: 'NOTE_INPUT_INVALID', field: 'text', problem: 'required', message: 'A note needs text.' },
+        'notes',
+      );
+    const visibility = b.visibility ?? '';
     const allowed = uploadableVisibilities(roles, partyRole).filter((v) => NOTE_VISIBILITY.includes(v));
     if (!allowed.includes(visibility))
       return sendTransactionError(
@@ -2268,9 +2113,11 @@ export function registerTransactions(rawCtx) {
   orgRouter.get('/transactions', (req, res) => {
     if (req.org.type !== 'club')
       return res.json({ items: [], nextCursor: null, note: 'Transaction party lanes are for club organisations.' });
+    const q = inputOr400(res, 'clubList', req.query, 'query');
+    if (!q) return;
     let pageReq;
     try {
-      pageReq = readPage(req.query, ['number']);
+      pageReq = readPage(q, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -2303,6 +2150,7 @@ export function registerTransactions(rawCtx) {
     if (limitedOr429(res, 'transaction_status_write', req.orgUser.id)) return;
     const party = partiesOf(tx).find((p) => !p.removed && p.subjectKind === 'club' && p.subjectId === req.org.id);
     if (!party) return notFound(res, 'confirm');
+    if (!inputOr400(res, 'rev', req.body)) return;
     if (party.confirmedAt) return res.json({ transaction: projectTransaction(tx, clubViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
     inUnit(() => {
@@ -2379,18 +2227,9 @@ export function registerTransactions(rawCtx) {
     const tx = clubTransaction(req, res, req.params.id, { signatory: true });
     if (!tx) return;
     if (!writableOr(res, tx, 'messages')) return;
-    const channelId = idText(req.body?.channelId);
-    if (channelId === undefined)
-      return sendTransactionError(
-        res,
-        {
-          error: 'TRANSACTION_INPUT_INVALID',
-          field: 'channelId',
-          message: 'channelId must be the id of a conversation, as text.',
-        },
-        'messages',
-      );
-    const found = channelId ? channels.byId(channelId) : null;
+    const b = inputOr400(res, 'threadLink', req.body);
+    if (!b) return;
+    const found = channels.byId(b.channelId.trim());
     const ch = found && found.orgId === req.org.id ? found : null;
     const individual = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'individual');
     if (!ch || !individual || ch.playerId !== individual.subjectId)
@@ -2437,19 +2276,10 @@ export function registerTransactions(rawCtx) {
     const tx = clubTransaction(req, res, req.params.id, { signatory: true });
     if (!tx) return;
     if (!writableOr(res, tx, 'links')) return;
-    const trialId = idText(req.body?.trialId);
-    if (trialId === undefined)
-      return sendTransactionError(
-        res,
-        {
-          error: 'TRANSACTION_INPUT_INVALID',
-          field: 'trialId',
-          message: 'trialId must be the id of a trial, as text.',
-        },
-        'links',
-      );
+    const b = inputOr400(res, 'trialLink', req.body);
+    if (!b) return;
     const individual = partiesOf(tx).find((p) => !p.removed && p.partyRole === 'individual');
-    const foundTrial = trialId ? recruitmentReads.trials.byId(trialId) : null;
+    const foundTrial = recruitmentReads.trials.byId(b.trialId.trim());
     const trial =
       foundTrial && foundTrial.orgId === req.org.id && individual && foundTrial.playerId === individual.subjectId
         ? foundTrial
@@ -2513,6 +2343,7 @@ export function registerTransactions(rawCtx) {
     if (limitedOr429(res, 'transaction_status_write', req.player.id)) return;
     const party = partiesOf(tx).find((p) => !p.removed && p.subjectKind === 'player' && p.subjectId === req.player.id);
     if (!party) return notFound(res, 'confirm');
+    if (!inputOr400(res, 'rev', req.body)) return;
     if (party.confirmedAt)
       return res.json({ transaction: projectTransaction(tx, playerViewer(req)), idempotent: true });
     if (!guardRev(req, res, tx, TX_CONFLICT(tx))) return;
@@ -2621,11 +2452,12 @@ export function registerTransactions(rawCtx) {
     };
   };
   tsRouter.get('/transactions', (req, res) => {
-    const status = statusFilterOr400(req, res);
-    if (status === undefined) return;
+    const q = inputOr400(res, 'list', req.query, 'query');
+    if (!q) return;
+    const status = q.status ?? null;
     let pageReq;
     try {
-      pageReq = readPage(req.query, ['number']);
+      pageReq = readPage(q, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }

@@ -11,6 +11,8 @@ export const TRANSACTION_ERROR_HTTP = table({
   // ---- 400: fix the request.
   TRANSACTION_INPUT_INVALID: 400,
   TRANSACTION_CLIENT_KEY_INVALID: 400,
+  // A malformed expectedRev, as platform/concurrency.mjs guardRev refuses it.
+  EXPECTED_REV_INVALID: 400,
   DOCUMENT_INPUT_INVALID: 400,
   NOTE_INPUT_INVALID: 400,
   TERMS_INPUT_INVALID: 400,
@@ -82,6 +84,10 @@ export const PUBLIC_ERROR_FIELDS = [
   'error',
   'message',
   'field',
+  'problem',
+  'min',
+  'max',
+  'expected',
   'allowed',
   'status',
   'from',
