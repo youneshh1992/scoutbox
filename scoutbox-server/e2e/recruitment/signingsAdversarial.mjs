@@ -987,26 +987,45 @@ section('F — player identity: the session is the actor; the body names nobody'
       ),
     "F1 another player's session gets NOT FOUND on read and on act",
   );
+  for (const [field, value] of [
+    ['playerId', 'pl-kim'],
+    ['actorId', 'pl-kim'],
+    ['actor', { kind: 'org', id: 'usr-x' }],
+    ['completedAt', T0 - 5 * DAY],
+  ]) {
+    const forged = await pSign(
+      F.SID,
+      {
+        revisionId: F.SREV,
+        documentSha256: SHA_A,
+        clientKey: key(),
+        method: 'PLATFORM_ACKNOWLEDGMENT',
+        [field]: value,
+      },
+      P['pl-alvarez'].token,
+    );
+    neg(
+      expect(forged, 400, 'SIGNING_INPUT_INVALID') &&
+        forged.body.field === field &&
+        forged.body.problem === 'unknown_field',
+      `F2 a body naming ${field} is refused by name`,
+    );
+  }
+  neg(
+    revOf(await sGet(F.SID, maria.token)).requiredParties.find((p) => p.partyType === 'PLAYER').status === 'PENDING',
+    'F2 the refused bodies recorded no signature',
+  );
   neg(
     expect(
       await pSign(
         F.SID,
-        {
-          revisionId: F.SREV,
-          documentSha256: SHA_A,
-          clientKey: key(),
-          playerId: 'pl-kim',
-          actorId: 'pl-kim',
-          actor: { kind: 'org', id: 'usr-x' },
-          completedAt: T0 - 5 * DAY,
-          method: 'PLATFORM_ACKNOWLEDGMENT',
-        },
+        { revisionId: F.SREV, documentSha256: SHA_A, clientKey: key(), method: 'PLATFORM_ACKNOWLEDGMENT' },
         P['pl-alvarez'].token,
       ),
       200,
       null,
     ),
-    "F2 body-supplied playerId / actor / completedAt are ignored: Alvarez's own act succeeds",
+    "F2 Alvarez's own act succeeds",
   );
   const party = revOf(await sGet(F.SID, maria.token)).requiredParties.find((p) => p.partyType === 'PLAYER');
   ok(

@@ -58,7 +58,7 @@ All others terminal. No SIGNED state.
   - employment or transfer scope;
   - a current licence.
 - **Same-agency colleagues** get 404. Un-share works after the representation has ended.
-- **Events** are org-private (ids only); notifications are one factual line. A hidden id and an invented id return identical 404s. Actor, adulthood, status or time in a request body is ignored.
+- **Events** are org-private (ids only); notifications are one factual line. A hidden id and an invented id return identical 404s. A request body that names an actor, adulthood, a status or a time is refused (`problem: 'unknown_field'`): each write takes only the fields it declares.
 - **Player deletion** nulls names and blocks further acts; the record stays.
 
 **Signing model** (`domains/recruitment/signings/`)

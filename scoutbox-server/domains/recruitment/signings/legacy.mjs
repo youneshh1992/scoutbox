@@ -5,8 +5,11 @@ import { isLeadRole } from '../../../roles.mjs';
 import { readPage, sendPageError } from '../../platform/paging.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { sideEffectRunner } from '../../platform/sideEffects.mjs';
+import * as v from 'valibot';
+import { inputOrRefuse, text } from '../../platform/schemas.mjs';
 
 const runSideEffect = sideEffectRunner('SIGNING');
+const LegacySigning = v.strictObject({ note: v.nullish(text(400)) });
 
 export function registerLegacySigning({
   orgRouter,
@@ -47,18 +50,10 @@ export function registerLegacySigning({
         message: 'A signing of this player by your club is already on record.',
         signingId: standing.id,
       });
+    const body = inputOrRefuse(res, LegacySigning, req.body ?? {});
+    if (!body) return;
     if (rateLimit.limited('signing_closure', req.org.id))
       return res.status(429).json(rateLimitedBody('signing_closure'));
-    const legacyNote = req.body?.note;
-    if (
-      legacyNote !== undefined &&
-      legacyNote !== null &&
-      legacyNote !== '' &&
-      (typeof legacyNote !== 'string' || legacyNote.length > 400)
-    )
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'note', message: 'The note is text of at most 400 characters.' });
     let written;
     try {
       written = unit(() =>
@@ -67,7 +62,7 @@ export function registerLegacySigning({
           org: req.org,
           actor: req.orgUser,
           at: Date.now(),
-          legacy: { note: typeof legacyNote === 'string' && legacyNote ? legacyNote : null },
+          legacy: { note: body.note || null },
         }),
       );
     } catch (e) {

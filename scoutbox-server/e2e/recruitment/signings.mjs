@@ -50,6 +50,7 @@ import {
   signingAgentView,
   signingClubView,
   cleanText,
+  SIGNING_INPUT_CODES,
 } from '../../domains/recruitment/signings/signing.mjs';
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -150,6 +151,12 @@ section('A — model and store: vocabulary, validators, gates, integrity, error 
       codesList.every((c) => /^SIGNING_/.test(c)) &&
       [400, 403, 404, 409, 422, 500].every((s) => Object.values(SIGNING_ERROR_HTTP).includes(s)),
     `A8 ${codesList.length} SIGNING_* codes across six status bands, in one table`,
+  );
+  neg(
+    [...Object.values(SIGNING_INPUT_CODES.codes), ...Object.values(SIGNING_INPUT_CODES.fieldCodes)].every(
+      (c) => SIGNING_ERROR_HTTP[c] === 400,
+    ) && ['problem', 'min', 'max'].every((f) => PUBLIC_ERROR_FIELDS.includes(f)),
+    'A8b every input refusal code is a 400 in the table, and a refusal carries its problem and bounds',
   );
   neg(
     SIGNING_ERROR_HTTP.__proto__ === undefined && SIGNING_ERROR_HTTP.constructor === undefined,
@@ -603,6 +610,7 @@ for (const id of [
   'pl-mensah',
   'pl-imani',
   'pl-guni',
+  'pl-osei',
 ])
   P[id] = await playerLogin(id);
 const amara = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-amara' })).body;
@@ -939,6 +947,122 @@ section('C — club authority: scout, foreign club, room lead vs recruitment lea
 section('G — documents: the exact bytes, their digest, who may read them and when');
 {
   const K = globalThis.__K;
+  // Input is valid as sent or refused by name, before anything is stored.
+  const refusedAs = (r, code, field, problem) =>
+    expect(r, 400, code) && r.body.field === field && r.body.problem === problem;
+  const docBody = (extra) => ({ dataUrl: dataUrl(DOC_A), filename: 'contract.pdf', expectedRev: K.rev, ...extra });
+  const patch = (body) => j('PATCH', `/org/signings/${K.SID}`, body, maria.token, at(T0));
+  neg(
+    refusedAs(
+      await j('POST', `/org/signings/${K.SID}/document`, docBody({ filename: { name: 'a.pdf' } }), maria.token, at(T0)),
+      'SIGNING_INPUT_INVALID',
+      'filename',
+      'not_text',
+    ),
+    'G0 a file name that is not text is refused, not stored as "[object Object]"',
+  );
+  const longLabel = await j(
+    'POST',
+    `/org/signings/${K.SID}/document`,
+    docBody({ label: 'x'.repeat(121) }),
+    maria.token,
+    at(T0),
+  );
+  neg(
+    refusedAs(longLabel, 'SIGNING_INPUT_INVALID', 'label', 'too_long') && longLabel.body.max === 120,
+    'G0 an over-long label is refused with its limit',
+  );
+  neg(
+    refusedAs(
+      await j('POST', `/org/signings/${K.SID}/document`, docBody({ sha256: 'f'.repeat(64) }), maria.token, at(T0)),
+      'SIGNING_INPUT_INVALID',
+      'sha256',
+      'unknown_field',
+    ),
+    'G0 a document body cannot name its own digest',
+  );
+  neg(
+    refusedAs(
+      await patch({ contract: 'soon', expectedRev: K.rev }),
+      'SIGNING_CONTRACT_DATES_INVALID',
+      'contract',
+      'not_object',
+    ) &&
+      refusedAs(
+        await patch({ contract: { startDate: '2027-07-01', months: 24 }, expectedRev: K.rev }),
+        'SIGNING_CONTRACT_DATES_INVALID',
+        'contract.months',
+        'unknown_field',
+      ) &&
+      refusedAs(
+        await patch({ contract: { startDate: '1 July 2027' }, expectedRev: K.rev }),
+        'SIGNING_CONTRACT_DATES_INVALID',
+        'contract.startDate',
+        'not_a_date',
+      ),
+    'G0 contract days: an object of calendar days and nothing else',
+  );
+  neg(
+    refusedAs(
+      await patch({ internalNote: { text: 'x' }, expectedRev: K.rev }),
+      'SIGNING_INPUT_INVALID',
+      'internalNote',
+      'not_text',
+    ) &&
+      refusedAs(
+        await patch({ internalNote: 'x', expectedRev: String(K.rev) }),
+        'SIGNING_REV_REQUIRED',
+        'expectedRev',
+        'not_number',
+      ),
+    'G0 a note that is not text, or a rev written as text, is refused',
+  );
+  neg(
+    refusedAs(
+      await ready(K.SID, { expectedRev: K.rev, clientKey: key(), expiresAt: { at: 1 } }),
+      'SIGNING_EXPIRY_INVALID',
+      'expiresAt',
+      'not_a_timestamp',
+    ),
+    'G0 an expiry that is not an instant is refused before the state is judged',
+  );
+  const badKind = await sDoc(K.SID, maria.token, '?kind=signed');
+  neg(
+    refusedAs(badKind, 'SIGNING_INPUT_INVALID', 'kind', 'not_allowed') &&
+      badKind.body.allowed?.join() === 'document,executed' &&
+      refusedAs(
+        await sDoc(K.SID, maria.token, '?revisionId=a&revisionId=b'),
+        'SIGNING_INPUT_INVALID',
+        'revisionId',
+        'not_text',
+      ),
+    'G0 the document query: a known kind, and each parameter once',
+  );
+  neg(
+    refusedAs(
+      await cancel(K.SID, { reason: ['changed our minds'], expectedRev: K.rev, clientKey: key() }),
+      'SIGNING_INPUT_INVALID',
+      'reason',
+      'not_text',
+    ) &&
+      refusedAs(
+        await clubSign(K.SID, {
+          revisionId: 'spr-x',
+          documentSha256: `0x${'a'.repeat(62)}`,
+          expectedRev: K.rev,
+          clientKey: key(),
+        }),
+        'SIGNING_INPUT_INVALID',
+        'documentSha256',
+        'invalid',
+      ),
+    'G0 a reason that is not text, and a digest that is not 64 hex digits, are refused',
+  );
+  const still = await sGet(K.SID);
+  neg(
+    sv(still).status === 'DRAFT' && sv(still).rev === K.rev && revOf(still).document === null,
+    'G0 none of the refused requests changed the package',
+  );
   neg(
     expect(
       await attach(K.SID, Buffer.from('<html>hi</html>'), K.rev, maria.token, at(T0), 'x.pdf'),
@@ -1093,26 +1217,35 @@ section('D — player authority: the addressed adult, their own act, against the
     expect(await pSign(K.SID, { revisionId: K.SREV, documentSha256: SHA_A, clientKey: key() }, ana.token), 401, null),
     "#10 D7 an agent's session on the player route is not a player",
   );
-  const spoof = await pSign(
-    K.SID,
-    {
-      revisionId: K.SREV,
-      documentSha256: SHA_A,
-      clientKey: key(),
-      actorType: 'guardian',
-      actorId: 'gd-amara',
-      signedBy: 'Maria Keane',
-      isPlayer: true,
-      clubSignatory: true,
-      signedAt: 1,
-      occurredAt: 1,
-    },
-    kola,
+  // Nobody signs as someone else: a body that names an actor, a role or a time is refused, and records nothing.
+  for (const [field, value] of [
+    ['actorType', 'guardian'],
+    ['actorId', 'gd-amara'],
+    ['signedBy', 'Maria Keane'],
+    ['isPlayer', true],
+    ['clubSignatory', true],
+    ['signedAt', 1],
+    ['occurredAt', 1],
+  ]) {
+    const forged = await pSign(
+      K.SID,
+      { revisionId: K.SREV, documentSha256: SHA_A, clientKey: key(), [field]: value },
+      kola,
+    );
+    neg(
+      expect(forged, 400, 'SIGNING_INPUT_INVALID') &&
+        forged.body.field === field &&
+        forged.body.problem === 'unknown_field',
+      `D8 a body naming ${field} is refused by name`,
+    );
+  }
+  neg(
+    (await sGet(K.SID)).body.signing.currentRevision.requiredParties.find((p) => p.partyType === 'PLAYER').status ===
+      'PENDING',
+    'D8 the refused bodies recorded no signature',
   );
-  ok(
-    spoof.status === 200 && spoof.body.signing.status === 'IN_PROGRESS',
-    'D8 Kola confirms the exact document (body claims of identity and time are ignored)',
-  );
+  const spoof = await pSign(K.SID, { revisionId: K.SREV, documentSha256: SHA_A, clientKey: key() }, kola);
+  ok(spoof.status === 200 && spoof.body.signing.status === 'IN_PROGRESS', 'D8 Kola confirms the exact document');
   const party = spoof.body.signing.currentRevision.requiredParties.find((p) => p.partyType === 'PLAYER');
   neg(
     party.status === 'COMPLETED' &&
@@ -1968,6 +2101,17 @@ section('V — events: exactly one per act, org-private, ids only');
 section('X — legacy: a signing recorded without an Offer; a signed case with no package; no fabrication');
 {
   const before = (await signings(rita.token)).length;
+  const badNote = await j('POST', '/org/players/pl-svensson/signing', { note: { text: 'x' } }, rita.token);
+  const extra = await j('POST', '/org/players/pl-svensson/signing', { note: 'x', signedAt: 1 }, rita.token);
+  neg(
+    badNote.status === 400 &&
+      badNote.body.field === 'note' &&
+      badNote.body.problem === 'not_text' &&
+      extra.status === 400 &&
+      extra.body.problem === 'unknown_field' &&
+      (await signings(rita.token)).length === before,
+    'X0b the legacy route refuses a note that is not text, and fields it does not take, recording nothing',
+  );
   const lg = await j('POST', '/org/players/pl-svensson/signing', { note: 'Signed after a trial run.' }, rita.token);
   ok(
     lg.status === 201 &&
@@ -2024,44 +2168,42 @@ section('Y — temporal integrity: server clock, DATE_ONLY contract days, imposs
     ),
     "Y1 a presented package's contract days are frozen (DRAFT only)",
   );
-  const N2 = await accepted(maria.token, 'pl-carvalho').catch(() => null);
-  if (N2) {
-    const s = await start(N2.OID, { contract: { startDate: '2027-02-30' }, clientKey: key() });
-    neg(expect(s, 400, 'SIGNING_CONTRACT_DATES_INVALID'), '#44 Y2 an impossible start day is refused at start');
-    neg(
-      expect(
-        await start(N2.OID, { contract: { startDate: '2027-07-01', endDate: '2027-06-30' }, clientKey: key() }),
-        400,
-        'SIGNING_CONTRACT_DATES_INVALID',
+  // A player with no other case here: a declined Offer cannot be offered again.
+  const N2 = await accepted(maria.token, 'pl-osei');
+  const s = await start(N2.OID, { contract: { startDate: '2027-02-30' }, clientKey: key() });
+  neg(expect(s, 400, 'SIGNING_CONTRACT_DATES_INVALID'), '#44 Y2 an impossible start day is refused at start');
+  neg(
+    expect(
+      await start(N2.OID, { contract: { startDate: '2027-07-01', endDate: '2027-06-30' }, clientKey: key() }),
+      400,
+      'SIGNING_CONTRACT_DATES_INVALID',
+    ),
+    '#44 Y3 an end before the start is refused',
+  );
+  const s2 = await start(N2.OID, { contract: { startDate: '2030-07-01', endDate: '2032-06-30' }, clientKey: key() });
+  ok(
+    s2.status === 201 && revOf(s2).contract.startDate === '2030-07-01',
+    'Y4 a future start is recorded as a calendar day, distinct from the signing instant',
+  );
+  neg(
+    expect(
+      await j(
+        'PATCH',
+        `/org/signings/${sv(s2).id}`,
+        { contract: { startDate: 1720000000000 }, expectedRev: sv(s2).rev },
+        maria.token,
+        at(T0),
       ),
-      '#44 Y3 an end before the start is refused',
-    );
-    const s2 = await start(N2.OID, { contract: { startDate: '2030-07-01', endDate: '2032-06-30' }, clientKey: key() });
-    ok(
-      s2.status === 201 && revOf(s2).contract.startDate === '2030-07-01',
-      'Y4 a future start is recorded as a calendar day, distinct from the signing instant',
-    );
-    neg(
-      expect(
-        await j(
-          'PATCH',
-          `/org/signings/${sv(s2).id}`,
-          { contract: { startDate: 1720000000000 }, expectedRev: sv(s2).rev },
-          maria.token,
-          at(T0),
-        ),
-        400,
-        'SIGNING_CONTRACT_DATES_INVALID',
-      ),
-      '#44 Y5 an instant where a day is required is refused',
-    );
-    const spoof = await start(N2.OID, { clientKey: key(), createdAt: 1, signedAt: 1, completedAt: 1 });
-    neg(
-      spoof.status === 409 || (spoof.status === 201 && sv(spoof).createdAt === T0),
-      '#43 Y6 body timestamps are ignored: the server instant is the only clock',
-    );
-  } else
-    ok(true, "Y2–Y6 (Mateus's case could not be re-offered here; the date rules are proven at the pure level A13)");
+      400,
+      'SIGNING_CONTRACT_DATES_INVALID',
+    ),
+    '#44 Y5 an instant where a day is required is refused',
+  );
+  const spoof = await start(N2.OID, { clientKey: key(), createdAt: 1 });
+  neg(
+    expect(spoof, 400, 'SIGNING_INPUT_INVALID') && spoof.body.field === 'createdAt',
+    '#43 Y6 a body timestamp is refused: the server instant is the only clock',
+  );
 }
 
 // ================================================================ AD — adversarial closure (#5 #6 #7 #28 #48)

@@ -9,6 +9,7 @@
  */
 
 import {
+  isAbsent,
   parseStrictDateOnly,
   parseInstant,
   readInstant,
@@ -21,6 +22,8 @@ import {
   payloadFingerprint,
   CLIENT_KEY_MAX,
 } from '../../platform/idempotency.mjs';
+import * as v from 'valibot';
+import { REV_FIELDS, dayOrBlank, id, instant, oneOf, text } from '../../platform/schemas.mjs';
 
 export const SIGNING_POLICY_VERSION = 1;
 
@@ -85,6 +88,8 @@ export const minorSigningPathwayOpen = (jurisdiction, policy = MINOR_SIGNING_PAT
 
 export const SIGNING_LIMITS = Object.freeze({
   label: 120,
+  // No file system names a file longer than this; the vault keeps the first part of it as metadata.
+  filename: 255,
   internalNote: 2000,
   reason: 500,
   clientKey: CLIENT_KEY_MAX,
@@ -110,63 +115,114 @@ export function cleanText(raw, max) {
 export const normaliseSigningClientKey = (raw) => platformClientKey(raw, 'SIGNING_CLIENT_KEY_INVALID');
 
 export function validateContractDates({ startDate, endDate } = {}) {
+  const refuse = (field, problem, message) => ({
+    ok: false,
+    error: 'SIGNING_CONTRACT_DATES_INVALID',
+    field: `contract.${field}`,
+    problem,
+    message,
+  });
   const s = parseStrictDateOnly(startDate);
   if (!s.ok)
-    return {
-      ok: false,
-      error: 'SIGNING_CONTRACT_DATES_INVALID',
-      field: 'startDate',
-      message: 'The contract start must be a real calendar day (YYYY-MM-DD).',
-    };
+    return isAbsent(startDate)
+      ? refuse('startDate', 'required', 'The contract start is required.')
+      : refuse('startDate', 'not_a_date', 'The contract start must be a real calendar day (YYYY-MM-DD).');
   let end = null;
   let endT = null;
-  if (endDate !== undefined && endDate !== null && endDate !== '') {
+  if (!isAbsent(endDate)) {
     const e = parseStrictDateOnly(endDate);
-    if (!e.ok)
-      return {
-        ok: false,
-        error: 'SIGNING_CONTRACT_DATES_INVALID',
-        field: 'endDate',
-        message: 'The contract end must be a real calendar day (YYYY-MM-DD).',
-      };
+    if (!e.ok) return refuse('endDate', 'not_a_date', 'The contract end must be a real calendar day (YYYY-MM-DD).');
     if (!isOrderedInterval(s.t, e.t, { allowEqual: true }))
-      return {
-        ok: false,
-        error: 'SIGNING_CONTRACT_DATES_INVALID',
-        field: 'endDate',
-        message: 'The contract cannot end before it starts.',
-      };
+      return refuse('endDate', 'invalid', 'The contract cannot end before it starts.');
     if (e.t - s.t > SIGNING_LIMITS.maxContractYears * 366 * DAY_MS)
-      return {
-        ok: false,
-        error: 'SIGNING_CONTRACT_DATES_INVALID',
-        field: 'endDate',
-        message: `A contract longer than ${SIGNING_LIMITS.maxContractYears} years cannot be recorded here.`,
-      };
+      return refuse(
+        'endDate',
+        'invalid',
+        `A contract longer than ${SIGNING_LIMITS.maxContractYears} years cannot be recorded here.`,
+      );
     end = e.value;
     endT = e.t;
   }
   return { ok: true, contract: { startDate: s.value, endDate: end }, startT: s.t, endT };
 }
 
-/** Absent means the default expiry. */
+/** Absent means the default expiry. The shape was checked by the schema; this checks the window. */
 export function validateExpiry(raw, { now }) {
-  if (raw === undefined || raw === null || raw === '')
-    return { ok: true, ms: now + SIGNING_LIMITS.defaultExpiryMs, defaulted: true };
+  if (isAbsent(raw)) return { ok: true, ms: now + SIGNING_LIMITS.defaultExpiryMs, defaulted: true };
+  const refuse = (problem, message, extra = {}) => ({
+    ok: false,
+    error: 'SIGNING_EXPIRY_INVALID',
+    field: 'expiresAt',
+    problem,
+    message,
+    ...extra,
+  });
   const p = parseInstant(raw);
   if (!p.ok)
-    return {
-      ok: false,
-      error: 'SIGNING_EXPIRY_INVALID',
-      message: 'The expiry must be an ISO 8601 instant with an offset or a millisecond timestamp.',
-      expected: 'instant',
-    };
+    return refuse(
+      'not_a_timestamp',
+      'The expiry must be an ISO 8601 instant with an offset or a millisecond timestamp.',
+      { expected: 'instant' },
+    );
   if (p.ms < now + SIGNING_LIMITS.minExpiryMs)
-    return { ok: false, error: 'SIGNING_EXPIRY_INVALID', message: 'A signing must stay open for at least one hour.' };
+    return refuse('too_small', 'A signing must stay open for at least one hour.');
   if (p.ms > now + SIGNING_LIMITS.maxExpiryMs)
-    return { ok: false, error: 'SIGNING_EXPIRY_INVALID', message: 'A signing cannot stay open for more than 90 days.' };
+    return refuse('too_large', 'A signing cannot stay open for more than 90 days.');
   return { ok: true, ms: p.ms, defaulted: false };
 }
+
+// ------------------------------------------------------------- input
+
+// Signing text is measured after cleanText strips control characters, so the schemas check only that it is text.
+const signingText = v.nullish(v.string());
+// `clientKey` keeps the platform's idempotency-key rule (normaliseSigningClientKey).
+const KEY = { clientKey: v.optional(v.unknown()) };
+const SigningContract = v.strictObject({ startDate: v.nullish(dayOrBlank), endDate: v.nullish(dayOrBlank) });
+const SigningDocumentFields = {
+  ...REV_FIELDS,
+  dataUrl: v.pipe(v.string(), v.minLength(1)),
+  filename: v.nullish(text(SIGNING_LIMITS.filename)),
+  label: signingText,
+};
+const PartyCompletionFields = {
+  ...KEY,
+  method: v.optional(oneOf(['PLATFORM_ACKNOWLEDGMENT'])),
+  revisionId: id,
+  documentSha256: v.pipe(v.string(), v.regex(/^[0-9a-f]{64}$/i)),
+};
+
+/** The body each signing write takes; anything else in it is refused. */
+export const SIGNING_INPUT = Object.freeze({
+  start: v.strictObject({
+    ...KEY,
+    contract: v.nullish(SigningContract),
+    internalNote: signingText,
+    expiresAt: v.nullish(instant),
+  }),
+  draftEdit: v.strictObject({ ...REV_FIELDS, contract: v.nullish(SigningContract), internalNote: signingText }),
+  document: v.strictObject(SigningDocumentFields),
+  ready: v.strictObject({ ...KEY, ...REV_FIELDS, expiresAt: v.nullish(instant) }),
+  clubParty: v.strictObject({ ...PartyCompletionFields, ...REV_FIELDS }),
+  recipientParty: v.strictObject(PartyCompletionFields),
+  complete: v.strictObject({ ...KEY, ...REV_FIELDS }),
+  close: v.strictObject({ ...KEY, ...REV_FIELDS, reason: signingText }),
+  adminVoid: v.strictObject({ reason: signingText }),
+  documentQuery: v.strictObject({ kind: v.optional(oneOf(['document', 'executed'])), revisionId: v.optional(id) }),
+  recipientDocumentQuery: v.strictObject({ revisionId: v.optional(id) }),
+});
+
+/** Shape refusals carry the Signing contract's codes. */
+export const SIGNING_INPUT_CODES = Object.freeze({
+  codes: { FIELD_INVALID: 'SIGNING_INPUT_INVALID' },
+  fieldCodes: {
+    'contract.*': 'SIGNING_CONTRACT_DATES_INVALID',
+    expiresAt: 'SIGNING_EXPIRY_INVALID',
+    dataUrl: 'SIGNING_DOCUMENT_INVALID',
+    method: 'SIGNING_METHOD_UNKNOWN',
+    expectedRev: 'SIGNING_REV_REQUIRED',
+    expectedVersion: 'SIGNING_REV_REQUIRED',
+  },
+});
 
 /** Snapshotted per revision. A guardian recipient is refused upstream while the pathway is closed. */
 export function requiredPartiesFor({ recipientType, playerId, guardianId = null, orgId }) {

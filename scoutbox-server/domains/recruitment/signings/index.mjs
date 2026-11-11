@@ -14,6 +14,7 @@ import { requestClock } from '../../platform/clock.mjs';
 import { sideEffectRunner } from '../../platform/sideEffects.mjs';
 import { roomRole, roomCan } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
+import { parseInput } from '../../platform/schemas.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import {
   canTransitionRecruitmentCase,
@@ -62,6 +63,8 @@ import {
   signingAgentView,
   signingHistoryView,
   completedSigningRecord,
+  SIGNING_INPUT,
+  SIGNING_INPUT_CODES,
 } from './signing.mjs';
 
 export function registerSigning(rawCtx) {
@@ -286,17 +289,37 @@ export function registerSigning(rawCtx) {
     return { pkg, kase, offer, role, consistency };
   }
 
-  function revGate(req, res, record) {
-    const exp = expectedRevOf(req.body);
-    if (exp === null) {
-      err(res, 'SIGNING_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.');
-      return false;
+  /** The request input read with its schema, or `undefined` once the refusal is sent. */
+  function signingInput(res, schema, input, { root = 'body' } = {}) {
+    const parsed = parseInput(schema, input ?? {}, { ...SIGNING_INPUT_CODES, root });
+    if (parsed.ok) return parsed.value;
+    sendSigningError(res, parsed, 'signing');
+    return undefined;
+  }
+  /** Cleaned text, or `undefined` once the refusal is sent. Measured after cleaning, as the stored value is. */
+  function textOrRefuse(res, field, raw, max, { required = false } = {}) {
+    const c = cleanText(raw, max);
+    if (!c.ok) {
+      err(res, 'SIGNING_INPUT_INVALID', `${field} must be at most ${max} characters.`, {
+        field,
+        problem: 'too_long',
+        max,
+      });
+      return undefined;
     }
-    const raw = req.body?.expectedRev ?? req.body?.expectedVersion;
-    if (!Number.isInteger(raw) || raw < 0) {
-      err(res, 'SIGNING_REV_REQUIRED', 'expectedRev must be a non-negative integer.', {
+    if (required && !c.value) {
+      err(res, 'SIGNING_INPUT_INVALID', `${field} is required.`, { field, problem: 'required' });
+      return undefined;
+    }
+    return c.value;
+  }
+
+  /** The schema has checked any rev's shape; this requires one and compares it. */
+  function revGate(req, res, record, body) {
+    if (expectedRevOf(body) === null) {
+      err(res, 'SIGNING_REV_REQUIRED', 'expectedRev is required: send the rev you were looking at.', {
         field: 'expectedRev',
-        expected: 'integer',
+        problem: 'required',
       });
       return false;
     }
@@ -306,8 +329,8 @@ export function registerSigning(rawCtx) {
     });
   }
 
-  function clientKey(req, res) {
-    const k = normaliseSigningClientKey(req.body?.clientKey);
+  function clientKey(res, body) {
+    const k = normaliseSigningClientKey(body.clientKey);
     if (!k.ok) {
       err(res, k.error, k.message);
       return undefined;
@@ -329,21 +352,14 @@ export function registerSigning(rawCtx) {
   // ------------------------------------------------------------- documents
 
   /** Through the evidence upload path: digest, sniffed type, size limit; organisation-internal. */
-  function storeDocument(req, res, { pkg, kind }) {
-    const { dataUrl, filename, label } = req.body ?? {};
+  function storeDocument(req, res, { pkg, kind, body }) {
+    const { dataUrl, filename } = body;
     if (!evidence?.storeFile || !evidence?.add) {
       err(res, 'SIGNING_STORE_MISSING', 'Documents cannot be stored right now.');
       return null;
     }
-    if (typeof dataUrl !== 'string' || !dataUrl) {
-      err(res, 'SIGNING_DOCUMENT_INVALID', 'Attach the document as a data URL.', { field: 'dataUrl' });
-      return null;
-    }
-    const lab = cleanText(label, SIGNING_LIMITS.label);
-    if (!lab.ok) {
-      err(res, 'SIGNING_INPUT_INVALID', 'The label must be short text.', { field: 'label' });
-      return null;
-    }
+    const label = textOrRefuse(res, 'label', body.label, SIGNING_LIMITS.label);
+    if (label === undefined) return null;
     const stored = evidence.storeFile(dataUrl, filename, req);
     if (stored?.error) {
       err(res, 'SIGNING_DOCUMENT_INVALID', `The file was refused: ${stored.error}.`, {
@@ -376,7 +392,7 @@ export function registerSigning(rawCtx) {
         ...stored,
         visibility: 'organisation_internal',
         retention: 'until_signing_resolution',
-        meta: { signingPackageId: pkg.id, signingDocumentKind: kind, label: lab.value },
+        meta: { signingPackageId: pkg.id, signingDocumentKind: kind, label },
       },
       req,
     );
@@ -387,7 +403,7 @@ export function registerSigning(rawCtx) {
       filename: ev.filename ?? null,
       mime: ev.mime ?? null,
       bytes: ev.bytes ?? null,
-      label: lab.value,
+      label,
       uploadedAt: now(req),
       uploadedBy: byOrg(req),
     };
@@ -733,26 +749,21 @@ export function registerSigning(rawCtx) {
     if (!roomCan(role, 'offer_issue'))
       return err(res, 'SIGNING_NOT_PERMITTED', 'Only a room lead or recruitment lead can open a signing.');
     const at = now(req);
-    const key = clientKey(req, res);
+    const b = signingInput(res, SIGNING_INPUT.start, req.body);
+    if (!b) return;
+    const key = clientKey(res, b);
     if (key === undefined) return;
-    const b = req.body ?? {};
     const acceptedRev = (offer.revisions ?? []).find((r) => r && effectiveRevisionStatus(r, at) === 'ACCEPTED') ?? null;
     const contractIn = {
       startDate: b.contract?.startDate ?? acceptedRev?.terms?.startDate ?? null,
       endDate: b.contract?.endDate ?? acceptedRev?.terms?.endDate ?? null,
     };
-    const note = cleanText(b.internalNote, SIGNING_LIMITS.internalNote);
-    if (!note.ok)
-      return err(
-        res,
-        'SIGNING_INPUT_INVALID',
-        note.tooLong ? `Keep the note under ${SIGNING_LIMITS.internalNote} characters.` : 'The note must be text.',
-        { field: 'internalNote' },
-      );
+    const internalNote = textOrRefuse(res, 'internalNote', b.internalNote, SIGNING_LIMITS.internalNote);
+    if (internalNote === undefined) return;
     const fp = payloadFingerprint({
       offerId: offer.id,
       contract: contractIn,
-      internalNote: note.value,
+      internalNote,
       expiresAt: b.expiresAt ?? null,
     });
     if (key) {
@@ -791,13 +802,9 @@ export function registerSigning(rawCtx) {
       return err(res, 'SIGNING_STATE_UNKNOWN', 'This Offer cannot be read.');
     }
     const contract = validateContractDates(contractIn);
-    if (!contract.ok) return err(res, contract.error, contract.message, { field: contract.field });
+    if (!contract.ok) return sendSigningError(res, contract, 'club');
     const expiry = validateExpiry(b.expiresAt, { now: at });
-    if (!expiry.ok)
-      return err(res, expiry.error, expiry.message, {
-        field: 'expiresAt',
-        ...(expiry.expected ? { expected: expiry.expected } : {}),
-      });
+    if (!expiry.ok) return sendSigningError(res, expiry, 'club');
     if (limited('signing_start', req.org.id)) return res.status(429).json(rateLimitedBody('signing_start'));
     const by = byOrg(req);
     const rev = {
@@ -838,7 +845,7 @@ export function registerSigning(rawCtx) {
       currentRevisionId: rev.id,
       revisions: [rev],
       expiresAt: expiry.ms,
-      internalNote: note.value,
+      internalNote,
       keys: {
         start: key ? { key, fp } : null,
         ready: [],
@@ -909,8 +916,10 @@ export function registerSigning(rawCtx) {
   orgRouter.get('/signings/:id/document', (req, res) => {
     const got = packageFor(req, res, 'view');
     if (!got) return;
-    const which = req.query.kind === 'executed' ? 'executedDocument' : 'document';
-    const revId = typeof req.query.revisionId === 'string' ? req.query.revisionId : got.pkg.currentRevisionId;
+    const q = signingInput(res, SIGNING_INPUT.documentQuery, req.query, { root: 'query' });
+    if (!q) return;
+    const which = q.kind === 'executed' ? 'executedDocument' : 'document';
+    const revId = q.revisionId ?? got.pkg.currentRevisionId;
     const rev = (got.pkg.revisions ?? []).find((r) => r && r.id === revId);
     if (rev?.[which]) {
       const dp = documentBytesProblem(got.pkg, rev[which]);
@@ -931,8 +940,9 @@ export function registerSigning(rawCtx) {
     const at = now(req);
     const s = canAttachDocument(pkg, at);
     if (!s.ok) return err(res, s.error, s.message, s.current ? { current: s.current } : {});
-    if (!revGate(req, res, pkg)) return;
-    const b = req.body ?? {};
+    const b = signingInput(res, SIGNING_INPUT.draftEdit, req.body);
+    if (!b) return;
+    if (!revGate(req, res, pkg, b)) return;
     const rev = currentRevision(pkg);
     let contract = null;
     let internalNote;
@@ -941,21 +951,12 @@ export function registerSigning(rawCtx) {
         startDate: b.contract?.startDate ?? rev.contract?.startDate,
         endDate: b.contract?.endDate === undefined ? rev.contract?.endDate : b.contract?.endDate,
       });
-      if (!c.ok) return err(res, c.error, c.message, { field: c.field });
+      if (!c.ok) return sendSigningError(res, c, 'club');
       contract = c.contract;
     }
     if (b.internalNote !== undefined) {
-      const note = cleanText(b.internalNote, SIGNING_LIMITS.internalNote);
-      if (!note.ok)
-        return err(
-          res,
-          'SIGNING_INPUT_INVALID',
-          note.tooLong
-            ? `Keep the note under ${SIGNING_LIMITS.internalNote} characters.`
-            : 'The note must be short text.',
-          { field: 'internalNote' },
-        );
-      internalNote = note.value;
+      internalNote = textOrRefuse(res, 'internalNote', b.internalNote, SIGNING_LIMITS.internalNote);
+      if (internalNote === undefined) return;
     }
     if (limited('signing_document_write', req.org.id))
       return res.status(429).json(rateLimitedBody('signing_document_write'));
@@ -982,10 +983,12 @@ export function registerSigning(rawCtx) {
     const at = now(req);
     const s = canAttachDocument(pkg, at);
     if (!s.ok) return err(res, s.error, s.message, s.current ? { current: s.current } : {});
-    if (!revGate(req, res, pkg)) return;
+    const body = signingInput(res, SIGNING_INPUT.document, req.body);
+    if (!body) return;
+    if (!revGate(req, res, pkg, body)) return;
     if (limited('signing_document_write', req.org.id))
       return res.status(429).json(rateLimitedBody('signing_document_write'));
-    const doc = storeDocument(req, res, { pkg, kind: 'signing' });
+    const doc = storeDocument(req, res, { pkg, kind: 'signing', body });
     if (!doc) return;
     const rev = currentRevision(pkg);
     let fresh;
@@ -1007,9 +1010,11 @@ export function registerSigning(rawCtx) {
     if (!got) return;
     const { pkg, kase } = got;
     const at = now(req);
-    const key = clientKey(req, res);
+    const body = signingInput(res, SIGNING_INPUT.ready, req.body);
+    if (!body) return;
+    const key = clientKey(res, body);
     if (key === undefined) return;
-    const fp = payloadFingerprint({ expiresAt: req.body?.expiresAt ?? null });
+    const fp = payloadFingerprint({ expiresAt: body.expiresAt ?? null });
     if (replayOr(pkg, 'ready', key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) })))
       return;
     const s = canMarkReady(pkg, at);
@@ -1018,7 +1023,7 @@ export function registerSigning(rawCtx) {
         ...(s.current ? { current: s.current } : {}),
         ...(s.field ? { field: s.field } : {}),
       });
-    if (!revGate(req, res, pkg)) return;
+    if (!revGate(req, res, pkg, body)) return;
     if (isBlocked(pkg.playerId, pkg.orgId))
       return err(
         res,
@@ -1027,9 +1032,9 @@ export function registerSigning(rawCtx) {
       );
     if (subjectRemoved(kase)) return err(res, 'SIGNING_SUBJECT_REMOVED', 'This player removed their ScoutBox account.');
     let expiresAt = pkg.expiresAt;
-    if (req.body?.expiresAt !== undefined && req.body?.expiresAt !== null) {
-      const e = validateExpiry(req.body.expiresAt, { now: at });
-      if (!e.ok) return err(res, e.error, e.message, { field: 'expiresAt' });
+    if (body.expiresAt !== undefined && body.expiresAt !== null) {
+      const e = validateExpiry(body.expiresAt, { now: at });
+      if (!e.ok) return sendSigningError(res, e, 'club');
       expiresAt = e.ms;
     }
     const rev = currentRevision(pkg);
@@ -1086,9 +1091,10 @@ export function registerSigning(rawCtx) {
 
   function completeParty(req, res, { pkg, kase, partyType, actorKind, actorId, actorName, rateKey, orgName }) {
     const at = now(req);
-    const key = clientKey(req, res);
+    const b = signingInput(res, actorKind === 'org' ? SIGNING_INPUT.clubParty : SIGNING_INPUT.recipientParty, req.body);
+    if (!b) return;
+    const key = clientKey(res, b);
     if (key === undefined) return;
-    const b = req.body ?? {};
     const fp = payloadFingerprint({
       partyType,
       revisionId: b.revisionId ?? null,
@@ -1114,20 +1120,7 @@ export function registerSigning(rawCtx) {
         );
       }
     }
-    const method = b.method === undefined ? 'PLATFORM_ACKNOWLEDGMENT' : b.method;
-    if (method !== 'PLATFORM_ACKNOWLEDGMENT')
-      return err(res, 'SIGNING_METHOD_UNKNOWN', 'That signing method is not available here.', {
-        allowed: ['PLATFORM_ACKNOWLEDGMENT'],
-      });
-    if (typeof b.revisionId !== 'string' || !b.revisionId)
-      return err(res, 'SIGNING_INPUT_INVALID', 'Name the signing revision you are completing.', {
-        field: 'revisionId',
-      });
-    if (typeof b.documentSha256 !== 'string' || !/^[0-9a-f]{64}$/i.test(b.documentSha256))
-      return err(res, 'SIGNING_INPUT_INVALID', 'Confirm the document by its SHA-256 digest as shown.', {
-        field: 'documentSha256',
-      });
-    if (actorKind === 'org' && !revGate(req, res, pkg)) return;
+    if (actorKind === 'org' && !revGate(req, res, pkg, b)) return;
     if (isBlocked(pkg.playerId, pkg.orgId))
       return err(
         res,
@@ -1263,10 +1256,12 @@ export function registerSigning(rawCtx) {
         s.current ? { current: s.current } : {},
       );
     }
-    if (!revGate(req, res, pkg)) return;
+    const body = signingInput(res, SIGNING_INPUT.document, req.body);
+    if (!body) return;
+    if (!revGate(req, res, pkg, body)) return;
     if (limited('signing_document_write', req.org.id))
       return res.status(429).json(rateLimitedBody('signing_document_write'));
-    const doc = storeDocument(req, res, { pkg, kind: 'executed' });
+    const doc = storeDocument(req, res, { pkg, kind: 'executed', body });
     if (!doc) return;
     const rev = currentRevision(pkg);
     let fresh;
@@ -1289,7 +1284,9 @@ export function registerSigning(rawCtx) {
     if (!got) return;
     const { pkg, kase, offer } = got;
     const at = now(req);
-    const key = clientKey(req, res);
+    const body = signingInput(res, SIGNING_INPUT.complete, req.body);
+    if (!body) return;
+    const key = clientKey(res, body);
     if (key === undefined) return;
     const fp = payloadFingerprint({ complete: true });
     if (
@@ -1300,7 +1297,7 @@ export function registerSigning(rawCtx) {
     )
       return;
     if (pkg.status === 'COMPLETED') return err(res, 'SIGNING_ALREADY_COMPLETED', 'This signing is already completed.');
-    if (!revGate(req, res, pkg)) return;
+    if (!revGate(req, res, pkg, body)) return;
     const rev = currentRevision(pkg);
     const offerRev = offerRevisionOf(offer, pkg.offerRevisionId);
     const otherCompleted =
@@ -1475,16 +1472,18 @@ export function registerSigning(rawCtx) {
       if (!got) return;
       const { pkg, kase } = got;
       const at = now(req);
-      const key = clientKey(req, res);
+      const body = signingInput(res, SIGNING_INPUT.close, req.body);
+      if (!body) return;
+      const key = clientKey(res, body);
       if (key === undefined) return;
-      const reason = cleanText(req.body?.reason, SIGNING_LIMITS.reason);
-      if (!reason.ok) return err(res, 'SIGNING_INPUT_INVALID', 'The reason must be short text.', { field: 'reason' });
-      const fp = payloadFingerprint({ action, reason: reason.value });
+      const reason = textOrRefuse(res, 'reason', body.reason, SIGNING_LIMITS.reason);
+      if (reason === undefined) return;
+      const fp = payloadFingerprint({ action, reason });
       if (replayOr(pkg, action, key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) })))
         return;
       const g = (action === 'cancel' ? canCancel : canVoid)(pkg, at);
       if (!g.ok) return err(res, g.error, g.message, g.current ? { current: g.current } : {});
-      if (!revGate(req, res, pkg)) return;
+      if (!revGate(req, res, pkg, body)) return;
       if (limited('signing_safety_closure', req.org.id))
         return res.status(429).json(rateLimitedBody('signing_safety_closure'));
       const by = byOrg(req);
@@ -1497,11 +1496,11 @@ export function registerSigning(rawCtx) {
           p = sp.patch(
             p.id,
             action === 'cancel'
-              ? { status, cancelledAt: at, cancelledBy: by, cancelReason: reason.value }
-              : { status, voidedAt: at, voidedBy: by, voidReason: reason.value },
+              ? { status, cancelledAt: at, cancelledBy: by, cancelReason: reason }
+              : { status, voidedAt: at, voidedBy: by, voidReason: reason },
           );
           if (key) p = addKey(p, action, { key, fp, at });
-          p = hist(p, `signing_${status.toLowerCase()}`, by, { revisionId: rev.id, hadReason: !!reason.value }, at);
+          p = hist(p, `signing_${status.toLowerCase()}`, by, { revisionId: rev.id, hadReason: !!reason }, at);
           caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, `signing_${status.toLowerCase()}`, {
             signingPackageId: p.id,
           });
@@ -1539,18 +1538,20 @@ export function registerSigning(rawCtx) {
     if (!got) return;
     const { pkg, kase } = got;
     const at = now(req);
-    const key = clientKey(req, res);
+    const body = signingInput(res, SIGNING_INPUT.close, req.body);
+    if (!body) return;
+    const key = clientKey(res, body);
     if (key === undefined) return;
-    const reason = cleanText(req.body?.reason, SIGNING_LIMITS.reason);
-    if (!reason.ok) return err(res, 'SIGNING_INPUT_INVALID', 'The reason must be short text.', { field: 'reason' });
-    const fp = payloadFingerprint({ supersede: true, reason: reason.value });
+    const reason = textOrRefuse(res, 'reason', body.reason, SIGNING_LIMITS.reason);
+    if (reason === undefined) return;
+    const fp = payloadFingerprint({ supersede: true, reason });
     if (
       replayOr(pkg, 'supersede', key, fp, res, () => ({ signing: signingClubView(pkg, at, { orgName: req.org.name }) }))
     )
       return;
     const g = canSupersede(pkg, at);
     if (!g.ok) return err(res, g.error, g.message, g.current ? { current: g.current } : {});
-    if (!revGate(req, res, pkg)) return;
+    if (!revGate(req, res, pkg, body)) return;
     if (limited('signing_document_write', req.org.id))
       return res.status(429).json(rateLimitedBody('signing_document_write'));
     const by = byOrg(req);
@@ -1589,13 +1590,7 @@ export function registerSigning(rawCtx) {
         p = sp.addRevision(p.id, rev);
         p = sp.patch(p.id, { currentRevisionId: rev.id, status: 'DRAFT' });
         if (key) p = addKey(p, 'supersede', { key, fp, revisionId: rev.id, at });
-        p = hist(
-          p,
-          'signing_superseded',
-          by,
-          { revisionId: rev.id, supersedes: prev.id, hadReason: !!reason.value },
-          at,
-        );
+        p = hist(p, 'signing_superseded', by, { revisionId: rev.id, supersedes: prev.id, hadReason: !!reason }, at);
         caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_superseded', {
           signingPackageId: p.id,
           revisionId: rev.id,
@@ -1679,7 +1674,9 @@ export function registerSigning(rawCtx) {
   playerRouter.get('/signings/:id/document', (req, res) => {
     const p = recipientPackage(req, res, { by: 'player', actorId: req.player.id, playerIds: [req.player.id] });
     if (!p) return;
-    const revId = typeof req.query.revisionId === 'string' ? req.query.revisionId : p.currentRevisionId;
+    const q = signingInput(res, SIGNING_INPUT.recipientDocumentQuery, req.query, { root: 'query' });
+    if (!q) return;
+    const revId = q.revisionId ?? p.currentRevisionId;
     const rev = (p.revisions ?? []).find((r) => r && r.id === revId && r.readyAt);
     if (rev?.document) {
       const dp = documentBytesProblem(p, rev.document);
@@ -1797,9 +1794,10 @@ export function registerSigning(rawCtx) {
     const pkg = sp.byId(req.params.id);
     if (!pkg) return notFound(res, 'admin');
     const at = now(req);
-    const reason = cleanText(req.body?.reason, SIGNING_LIMITS.reason);
-    if (!reason.ok || !reason.value)
-      return err(res, 'SIGNING_INPUT_INVALID', 'A recorded reason is required.', { field: 'reason' });
+    const body = signingInput(res, SIGNING_INPUT.adminVoid, req.body);
+    if (!body) return;
+    const reason = textOrRefuse(res, 'reason', body.reason, SIGNING_LIMITS.reason, { required: true });
+    if (reason === undefined) return;
     const g = canVoid(pkg, at);
     if (!g.ok) {
       const g2 = canCancel(pkg, at);
@@ -1811,7 +1809,7 @@ export function registerSigning(rawCtx) {
     try {
       fresh = unit(() => {
         let p = sp.patchRevision(pkg.id, rev.id, { status: 'VOIDED' });
-        p = sp.patch(p.id, { status: 'VOIDED', voidedAt: at, voidedBy: by, voidReason: reason.value });
+        p = sp.patch(p.id, { status: 'VOIDED', voidedAt: at, voidedBy: by, voidReason: reason });
         p = hist(p, 'signing_voided', by, { revisionId: rev.id, hadReason: true, byTrustAndSafety: true }, at);
         const kase = caseOf(p);
         if (kase)
