@@ -62,6 +62,7 @@ import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { metrics } from '../../enterprise/enterprise.mjs';
 import { readPage, sendPageError, pageSorted } from '../../platform/paging.mjs';
 import { now } from '../../platform/clock.mjs';
+import { hubInput } from './schemas.mjs';
 
 /** How close together two identical creates must be to count as one retry. */
 const IDEMPOTENCY_WINDOW_MS = 60_000;
@@ -434,15 +435,17 @@ export function registerDevelopment(ctx) {
   // ------------------------------------------------------------- the routes
 
   /** One surface on the player, guardian and org routers, so all three share one authorisation path. */
-  function mount(router, { viewerOf, ownerKindFor, subjectFor, rateKeyFor }) {
+  function mount(router, { viewerOf, ownerKindFor, subjectFor, rateKeyFor, createInput }) {
     const V = (req) => viewerOf(req);
 
     router.get('/development/catalogue', (_req, res) => res.json(catalogue()));
 
     /** Built with the links' own resolver, so nothing offered resolves as unavailable. */
     router.get('/development/linkable-evidence', (req, res) => {
+      const q = hubInput(res, 'linkableQuery', req.query, 'query');
+      if (!q) return undefined;
       const viewer = V(req);
-      const player = findPlayer(String(req.query.playerId ?? (viewer.kind === 'player_self' ? viewer.playerId : '')));
+      const player = findPlayer(q.playerId ?? (viewer.kind === 'player_self' ? viewer.playerId : ''));
       if (!player) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
       const subject = { ...player, isMinor: !isAdult(player) };
 
@@ -500,18 +503,17 @@ export function registerDevelopment(ctx) {
     // The access rule is applied in code, so the page is cut from the filtered list and the total counts only
     // plans this viewer may read.
     router.get('/development/plans', (req, res) => {
+      const q = hubInput(res, 'plansQuery', req.query, 'query');
+      if (!q) return undefined;
       const viewer = V(req);
       let page;
       try {
-        page = readPage(req.query, ['number', 'string']);
+        page = readPage(q, ['number', 'string']);
       } catch (e) {
         return sendPageError(res, e);
       }
-      const status = req.query.status ? String(req.query.status) : null;
-      if (status && !PLAN_STATUSES.includes(status)) {
-        return res.status(400).json({ error: 'PLAN_STATUS_UNKNOWN', allowed: PLAN_STATUSES });
-      }
-      const playerFilter = req.query.playerId ? String(req.query.playerId) : null;
+      const status = q.status ?? null;
+      const playerFilter = q.playerId || null;
       const dev = developmentReads.plans;
       let candidates;
       if (viewer.kind === 'player_self')
@@ -556,24 +558,23 @@ export function registerDevelopment(ctx) {
     // ---- create
     router.post('/development/plans', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, createInput, req.body);
+      if (!body) return;
       const viewer = V(req);
       if (limited('development_plan_write', rateKeyFor(req)))
         return res.status(429).json(rateLimitedBody('development_plan_write'));
 
-      const subject = subjectFor(req, res);
+      const subject = subjectFor(req, res, body);
       if (!subject) return undefined;
       const { player, minorRefusal } = subject;
       if (minorRefusal) return res.status(403).json(minorRefusal);
 
       const ownerKind = ownerKindFor(req);
-      const parsed = validatePlanBody(req.body, { ownerKind });
+      const parsed = validatePlanBody(body, { ownerKind });
       if (parsed.error) return res.status(400).json(parsed);
 
-      const goalBodies = Array.isArray(req.body?.goals) ? req.body.goals : [];
-      const wantsActive = String(req.body?.status ?? 'draft') === 'active';
-      if (!PLAN_STATUSES.includes(String(req.body?.status ?? 'draft'))) {
-        return res.status(400).json({ error: 'PLAN_STATUS_UNKNOWN', allowed: ['draft', 'active'] });
-      }
+      const goalBodies = body.goals ?? [];
+      const wantsActive = body.status === 'active';
       if (wantsActive && !goalBodies.length) {
         return res.status(400).json({
           error: 'ACTIVE_PLAN_NEEDS_A_GOAL',
@@ -632,7 +633,7 @@ export function registerDevelopment(ctx) {
         endDate: parsed.value.endDate,
         templateId: parsed.value.templateId,
         // Records where the idea came from; the objective itself is untouched.
-        originObjectiveId: originObjectiveFor(req.body?.originObjectiveId, player, res),
+        originObjectiveId: originObjectiveFor(body.originObjectiveId, player, res),
         createdAt: at,
         updatedAt: at,
         rev: 1,
@@ -672,6 +673,8 @@ export function registerDevelopment(ctx) {
     // ---- edit
     router.patch('/development/plans/:id', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'planEdit', req.body);
+      if (!body) return;
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
@@ -693,7 +696,7 @@ export function registerDevelopment(ctx) {
       )
         return undefined;
 
-      const parsed = validatePlanBody(req.body, { ownerKind: plan.owner.kind, existing: plan });
+      const parsed = validatePlanBody(body, { ownerKind: plan.owner.kind, existing: plan });
       if (parsed.error) return res.status(400).json(parsed);
 
       const actor = actorOf(viewer, req);
@@ -725,6 +728,8 @@ export function registerDevelopment(ctx) {
     // ---- status
     router.post('/development/plans/:id/status', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'planStatus', req.body);
+      if (!body) return;
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
@@ -734,9 +739,7 @@ export function registerDevelopment(ctx) {
       if (limited('development_plan_write', rateKeyFor(req)))
         return res.status(429).json(rateLimitedBody('development_plan_write'));
 
-      const to = String(req.body?.status ?? '');
-      if (!PLAN_STATUSES.includes(to))
-        return res.status(400).json({ error: 'PLAN_STATUS_UNKNOWN', allowed: PLAN_STATUSES });
+      const to = body.status;
       if (!transitionAllowed(PLAN_TRANSITIONS, plan.status, to)) {
         return res.status(409).json({
           error: 'PLAN_TRANSITION_INVALID',
@@ -782,6 +785,8 @@ export function registerDevelopment(ctx) {
     // ---- share with a named organisation (player-owned plans only)
     router.post('/development/plans/:id/share', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'planShare', req.body);
+      if (!body) return;
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
@@ -798,13 +803,7 @@ export function registerDevelopment(ctx) {
       if (limited('development_plan_write', rateKeyFor(req)))
         return res.status(429).json(rateLimitedBody('development_plan_write'));
 
-      const orgId = req.body?.orgId;
-      if (typeof orgId !== 'string')
-        return res
-          .status(400)
-          .json({ error: 'FIELD_INVALID', field: 'orgId', message: 'orgId names the organisation, as text.' });
-      if (req.body?.revoke !== undefined && typeof req.body.revoke !== 'boolean')
-        return res.status(400).json({ error: 'FIELD_INVALID', field: 'revoke', message: 'revoke is true or false.' });
+      const { orgId } = body;
       const org = byId.org(orgId);
       // Sharing with a club that cannot see the player would grant access the visibility rules deny.
       if (!org || !orgCanSee(org, player)) {
@@ -812,7 +811,7 @@ export function registerDevelopment(ctx) {
           .status(404)
           .json({ error: 'ORG_NOT_FOUND', detail: 'No such organisation is available to share with.' });
       }
-      const revoke = req.body?.revoke === true;
+      const revoke = body.revoke === true;
       const actor = actorOf(viewer, req);
       // Run inside the unit; events wait for the commit.
       const effects = [];
@@ -850,6 +849,8 @@ export function registerDevelopment(ctx) {
     // ---- goals
     router.post('/development/plans/:id/goals', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'goalCreate', req.body);
+      if (!body) return;
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
@@ -872,7 +873,7 @@ export function registerDevelopment(ctx) {
         });
       }
 
-      const parsed = validateGoalBody(req.body, {});
+      const parsed = validateGoalBody(body, {});
       if (parsed.error) return res.status(400).json(parsed);
 
       const actor = actorOf(viewer, req);
@@ -885,7 +886,7 @@ export function registerDevelopment(ctx) {
           .json({ ...project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer), idempotent: true });
       }
 
-      const origin = originObjectiveFor(req.body?.originObjectiveId, bundle.player, res);
+      const origin = originObjectiveFor(body.originObjectiveId, bundle.player, res);
       if (origin === false) return undefined;
       unit(() => {
         const g = development.goals.create(newGoal(plan, { ...parsed.value, originObjectiveId: origin }, actor, at));
@@ -901,6 +902,8 @@ export function registerDevelopment(ctx) {
 
     router.patch('/development/goals/:goalId', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'goalEdit', req.body);
+      if (!body) return;
       const viewer = V(req);
       const stored = developmentReads.goals.byId(req.params.goalId);
       if (!stored) return res.status(404).json({ error: 'DEVELOPMENT_GOAL_NOT_FOUND' });
@@ -928,10 +931,8 @@ export function registerDevelopment(ctx) {
       const at = now();
 
       let statusChanged = null;
-      if (req.body?.status != null && req.body.status !== goal.status) {
-        const to = String(req.body.status);
-        if (!GOAL_STATUSES.includes(to))
-          return res.status(400).json({ error: 'GOAL_STATUS_UNKNOWN', allowed: GOAL_STATUSES });
+      if (body.status != null && body.status !== goal.status) {
+        const to = body.status;
         if (!transitionAllowed(GOAL_TRANSITIONS, goal.status, to)) {
           return res.status(409).json({
             error: 'GOAL_TRANSITION_INVALID',
@@ -945,8 +946,8 @@ export function registerDevelopment(ctx) {
           });
         }
         if (to === 'blocked') {
-          const reason = String(req.body?.blockReason ?? '');
-          if (!BLOCK_REASONS.includes(reason)) {
+          const reason = body.blockReason;
+          if (!reason) {
             return res.status(400).json({
               error: 'BLOCK_REASON_UNKNOWN',
               allowed: BLOCK_REASONS,
@@ -954,7 +955,7 @@ export function registerDevelopment(ctx) {
                 'A blocked goal needs a reason from the list. ScoutBox does not offer a health reason and does not record one.',
             });
           }
-          const note = boundedText(req.body?.blockNote, DEVELOPMENT_HUB_LIMITS.blockNoteMax, { field: 'blockNote' });
+          const note = boundedText(body.blockNote, DEVELOPMENT_HUB_LIMITS.blockNoteMax, { field: 'blockNote' });
           if (note.error) return res.status(400).json(note);
           goal.blockReason = reason;
           goal.blockNote = note.value;
@@ -967,7 +968,7 @@ export function registerDevelopment(ctx) {
         goal.completedAt = to === 'achieved' ? at : null;
       }
 
-      const parsed = validateGoalBody(req.body, { existing: goal });
+      const parsed = validateGoalBody(body, { existing: goal });
       if (parsed.error) return res.status(400).json(parsed);
       const targetChanged = JSON.stringify(parsed.value.target ?? null) !== JSON.stringify(goal.target ?? null);
       Object.assign(goal, parsed.value);
@@ -993,6 +994,8 @@ export function registerDevelopment(ctx) {
     // ---- actions
     router.post('/development/goals/:goalId/actions', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'actionCreate', req.body);
+      if (!body) return;
       const viewer = V(req);
       const goal = developmentReads.goals.byId(req.params.goalId);
       if (!goal) return res.status(404).json({ error: 'DEVELOPMENT_GOAL_NOT_FOUND' });
@@ -1009,7 +1012,7 @@ export function registerDevelopment(ctx) {
         return res.status(400).json({ error: 'TOO_MANY_ACTIONS', max: DEVELOPMENT_HUB_LIMITS.actionsPerGoal });
       }
 
-      const parsed = validateActionBody(req.body, { plan, player });
+      const parsed = validateActionBody(body, { plan, player });
       if (parsed.error) return res.status(400).json(parsed);
 
       const actor = actorOf(viewer, req);
@@ -1048,6 +1051,8 @@ export function registerDevelopment(ctx) {
 
     router.patch('/development/actions/:actionId', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'actionEdit', req.body);
+      if (!body) return;
       const viewer = V(req);
       const stored = developmentReads.actions.byId(req.params.actionId);
       if (!stored) return res.status(404).json({ error: 'DEVELOPMENT_ACTION_NOT_FOUND' });
@@ -1076,10 +1081,8 @@ export function registerDevelopment(ctx) {
       const actor = actorOf(viewer, req);
       const at = now();
       let statusChanged = null;
-      if (req.body?.status != null && req.body.status !== action.status) {
-        const to = String(req.body.status);
-        if (!ACTION_STATUSES.includes(to))
-          return res.status(400).json({ error: 'ACTION_STATUS_UNKNOWN', allowed: ACTION_STATUSES });
+      if (body.status != null && body.status !== action.status) {
+        const to = body.status;
         if (!transitionAllowed(ACTION_TRANSITIONS, action.status, to)) {
           return res.status(409).json({
             error: 'ACTION_TRANSITION_INVALID',
@@ -1094,9 +1097,7 @@ export function registerDevelopment(ctx) {
       }
 
       if (!access.writeGoals) {
-        const editing = ['title', 'type', 'dueAt', 'assignee'].some((k) =>
-          Object.prototype.hasOwnProperty.call(req.body ?? {}, k),
-        );
+        const editing = ['title', 'type', 'dueAt', 'assignee'].some((k) => Object.hasOwn(body, k));
         if (editing)
           return res.status(403).json({
             error: 'DEVELOPMENT_NOT_PERMITTED',
@@ -1104,7 +1105,7 @@ export function registerDevelopment(ctx) {
             message: 'You can mark this action done, but not change it.',
           });
       } else {
-        const parsed = validateActionBody(req.body, { plan, player, existing: action });
+        const parsed = validateActionBody(body, { plan, player, existing: action });
         if (parsed.error) return res.status(400).json(parsed);
         Object.assign(action, parsed.value);
       }
@@ -1134,6 +1135,8 @@ export function registerDevelopment(ctx) {
     // ---- evidence links
     const linkEvidence = (targetKind) => (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'evidenceLink', req.body);
+      if (!body) return;
       const viewer = V(req);
       const stored =
         targetKind === 'goal'
@@ -1162,8 +1165,8 @@ export function registerDevelopment(ctx) {
       }
 
       const parsed = validateEvidenceLink({
-        sourceType: req.body?.sourceType,
-        sourceId: req.body?.sourceId,
+        sourceType: body.sourceType,
+        sourceId: body.sourceId,
         reads,
         player,
         viewer,
@@ -1236,11 +1239,13 @@ export function registerDevelopment(ctx) {
 
     // ---- reviews
     router.get('/development/plans/:id/reviews', (req, res) => {
+      const q = hubInput(res, 'reviewsQuery', req.query, 'query');
+      if (!q) return undefined;
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
       const full = project(bundle, viewer);
-      const page = pageReviews(full.reviews, { limit: req.query.limit, cursor: req.query.cursor });
+      const page = pageReviews(full.reviews, { limit: q.limit, cursor: q.cursor });
       if (page.error) return res.status(400).json(page);
       return res.json({
         ...page.value,
@@ -1250,6 +1255,8 @@ export function registerDevelopment(ctx) {
 
     router.post('/development/plans/:id/reviews', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'review', req.body);
+      if (!body) return;
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
@@ -1259,12 +1266,12 @@ export function registerDevelopment(ctx) {
       if (limited('development_review_write', rateKeyFor(req)))
         return res.status(429).json(rateLimitedBody('development_review_write'));
 
-      const parsed = validateReview({ body: req.body, access, viewer, now: now() });
+      const parsed = validateReview({ body, access, viewer, now: now() });
       if (parsed.error) return res.status(parsed.error === 'REVIEW_NOT_PERMITTED' ? 403 : 400).json(parsed);
 
       let superseded = null;
-      if (req.body?.supersedes) {
-        const target = reviews.find((r) => r.id === String(req.body.supersedes));
+      if (body.supersedes) {
+        const target = reviews.find((r) => r.id === body.supersedes);
         const check = validateSupersession({ target, plan, reviews, viewer, access });
         if (check.error) return res.status(check.error === 'REVIEW_NOT_FOUND' ? 404 : 409).json(check);
         superseded = check.value;
@@ -1336,6 +1343,8 @@ export function registerDevelopment(ctx) {
     /** Shares the summary only; the internal note is never shared. */
     router.post('/development/reviews/:reviewId/share', (req, res) => {
       if (refuseDerived(req, res)) return;
+      const body = hubInput(res, 'reviewShare', req.body);
+      if (!body) return;
       const viewer = V(req);
       const review = developmentReads.reviews.byId(req.params.reviewId);
       if (!review) return res.status(404).json({ error: 'REVIEW_NOT_FOUND' });
@@ -1356,10 +1365,7 @@ export function registerDevelopment(ctx) {
         vmetric('development_idempotent_retries');
         return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
       }
-      const asked =
-        Array.isArray(req.body?.scopes) && req.body.scopes.length ? req.body.scopes.map(String) : ['summary'];
-      const unknown = asked.filter((s) => !SHARE_SCOPES.includes(s));
-      if (unknown.length) return res.status(400).json({ error: 'SHARE_SCOPE_UNKNOWN', allowed: SHARE_SCOPES });
+      const asked = body.scopes?.length ? body.scopes : ['summary'];
 
       const actor = actorOf(viewer, req);
       unit(() => {
@@ -1376,14 +1382,16 @@ export function registerDevelopment(ctx) {
 
     // ---- history
     router.get('/development/plans/:id/history', (req, res) => {
+      const q = hubInput(res, 'historyQuery', req.query, 'query');
+      if (!q) return undefined;
       const viewer = V(req);
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
       const all = buildTimeline({ ...bundle, access: bundle.access });
-      const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), DEVELOPMENT_HUB_LIMITS.historyPageMax);
+      const limit = q.limit ? Number(q.limit) : 50;
       let start = 0;
-      if (req.query.cursor) {
-        const idx = all.findIndex((r) => r.id === String(req.query.cursor));
+      if (q.cursor) {
+        const idx = all.findIndex((r) => r.id === q.cursor);
         if (idx < 0)
           return res.status(400).json({
             error: 'HISTORY_CURSOR_INVALID',
@@ -1453,6 +1461,7 @@ export function registerDevelopment(ctx) {
     viewerOf: (req) => ({ kind: 'player_self', playerId: req.player.id, isMinor: !!req.playerIsMinor }),
     ownerKindFor: () => 'player',
     rateKeyFor: (req) => `player:${req.player.id}`,
+    createInput: 'planCreateSelf',
     subjectFor: (req, _res) => {
       const player = { ...req.player, isMinor: !!req.playerIsMinor };
       if (req.playerIsMinor) {
@@ -1474,9 +1483,9 @@ export function registerDevelopment(ctx) {
     viewerOf: (req) => ({ kind: 'guardian', guardianId: req.guardian.id, childIds: req.guardian.childIds ?? [] }),
     ownerKindFor: () => 'player',
     rateKeyFor: (req) => `guardian:${req.guardian.id}`,
-    subjectFor: (req, res) => {
-      const id = String(req.body?.playerId ?? '');
-      const p = findPlayer(id);
+    createInput: 'planCreateFor',
+    subjectFor: (req, res, body) => {
+      const p = findPlayer(body.playerId ?? '');
       if (!p || !(req.guardian.childIds ?? []).includes(p.id)) {
         res.status(404).json({ error: 'PLAYER_NOT_FOUND', message: 'No such player is in your care.' });
         return null;
@@ -1498,8 +1507,9 @@ export function registerDevelopment(ctx) {
     }),
     ownerKindFor: () => 'org',
     rateKeyFor: (req) => `org:${req.org.id}`,
-    subjectFor: (req, res) => {
-      const p = findPlayer(String(req.body?.playerId ?? ''));
+    createInput: 'planCreateFor',
+    subjectFor: (req, res, body) => {
+      const p = findPlayer(body.playerId ?? '');
       // Not visible is not found, so plan creation cannot probe for players.
       if (!p || !orgCanSee(req.org, p)) {
         res

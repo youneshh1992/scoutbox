@@ -2354,7 +2354,78 @@ section('§16b — a longer adversarial pass over the whole surface');
     'an emptied start date keeps the stored start (a plan always has one)',
   );
   const hBig = await j('GET', `/org/development/plans/${clubPlan}/history?limit=9999`, undefined, maria.token);
-  N(67, hBig.body.items.length <= DEVELOPMENT_HUB_LIMITS.historyPageMax, 'and so is a history page');
+  N(
+    67,
+    hBig.status === 400 &&
+      hBig.body.error === 'PAGE_LIMIT_INVALID' &&
+      hBig.body.max === DEVELOPMENT_HUB_LIMITS.historyPageMax,
+    'and so is a history page',
+  );
+
+  // ---- input shape: each field as sent, or refused
+  const inPlan = await j('GET', `/org/development/plans/${clubPlan}`, undefined, maria.token);
+  const inGoal = inPlan.body.goals[0];
+  let r = await j('POST', '/player/development/plans', { title: 'Mine', playerId: 'pl-guni' }, kola.token);
+  N(
+    67,
+    r.status === 400 && r.body.field === 'playerId' && r.body.problem === 'unknown_field',
+    'IN1 a player cannot name another player as the plan’s subject',
+  );
+  r = await j('PATCH', `/org/development/plans/${clubPlan}`, { status: 'archived' }, maria.token);
+  N(
+    67,
+    r.status === 400 && r.body.field === 'status' && r.body.problem === 'unknown_field',
+    'IN2 an edit cannot change the status (that is the status route)',
+  );
+  r = await j('PATCH', `/org/development/goals/${inGoal.id}`, { target: '160+' }, maria.token);
+  N(
+    67,
+    r.body.error === 'TARGET_MALFORMED' && r.body.field === 'target',
+    'IN3 a target that is not an object is refused as TARGET_MALFORMED',
+  );
+  r = await j(
+    'PATCH',
+    `/org/development/goals/${inGoal.id}`,
+    { target: { sourceType: 'combine_attempt', protocolId: 'combine-box-control-60', operator: 'gte', value: '30' } },
+    maria.token,
+  );
+  N(
+    67,
+    r.body.error === 'TARGET_MALFORMED' && r.body.field === 'target.value',
+    'IN4 a target value written as text is refused, not read as a number',
+  );
+  r = await j('PATCH', `/org/development/goals/${inGoal.id}`, { status: 'finished' }, maria.token);
+  N(
+    67,
+    r.body.error === 'GOAL_STATUS_UNKNOWN' && r.body.allowed?.includes('achieved'),
+    'IN5 an unknown goal status lists the statuses',
+  );
+  r = await j(
+    'POST',
+    `/org/development/goals/${inGoal.id}/actions`,
+    { title: 'Drill', type: 'training', assignee: { kind: 'player', id: 'pl-adeyemi', name: 'Someone else' } },
+    maria.token,
+  );
+  N(
+    67,
+    r.body.error === 'ASSIGNEE_INVALID' && r.body.field === 'assignee.name',
+    'IN6 an assignee carries a kind and an id, not a name',
+  );
+  r = await j(
+    'POST',
+    `/org/development/plans/${clubPlan}/reviews`,
+    { summary: 'Good week', shareWithPlayer: 'yes' },
+    maria.token,
+  );
+  N(
+    67,
+    r.status === 400 && r.body.field === 'shareWithPlayer' && r.body.problem === 'not_boolean',
+    'IN7 sharing a review with the player is true or false',
+  );
+  r = await j('POST', `/org/development/plans/${clubPlan}/share`, { orgId: ['org-a'] }, maria.token);
+  N(67, r.status === 400 && r.body.field === 'orgId', 'IN8 a share names one organisation as text');
+  r = await j('GET', `/org/development/plans/${clubPlan}/reviews?limit=2&limit=3`, undefined, maria.token);
+  N(67, r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID', 'IN9 a review page limit given twice is refused');
 
   // ---- cross-surface probes
   N(
