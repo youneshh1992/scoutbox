@@ -10,6 +10,9 @@ const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision',
 import * as v from 'valibot';
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
 import {
+  CURSOR_PAGE,
+  OFFSET_PAGE,
+  OFFSET_PAGE_CODES,
   dayOrBlank,
   dueDate,
   flag,
@@ -173,6 +176,13 @@ const stageChange = (stages) => v.strictObject({ stage: oneOf(stages), reason: v
 const PRO_STAGE_CHANGE = stageChange(PRO_STAGES);
 const GRASSROOTS_STAGE_CHANGE = stageChange(GRASSROOTS_STAGES);
 const STAGE_CODES = { fieldCodes: { stage: 'STAGE_INVALID' } };
+const caseListQuery = (stages) => v.strictObject({ ...CURSOR_PAGE, stage: v.optional(oneOf(stages)) });
+const PageQuery = v.strictObject(CURSOR_PAGE);
+const PRO_CASE_QUERY = caseListQuery(PRO_STAGES);
+const GRASSROOTS_CASE_QUERY = caseListQuery(GRASSROOTS_STAGES);
+const AssessmentQuery = v.strictObject({ playerId: v.optional(id), trialId: v.optional(id), ...OFFSET_PAGE });
+const SegmentQuery = v.strictObject({ playerId: v.optional(id), mediaId: v.optional(id), ...OFFSET_PAGE });
+const QUERY = { root: 'query', fieldCodes: OFFSET_PAGE_CODES };
 const Decision = v.strictObject({
   outcome: oneOf(CASE_DECISION_OUTCOMES),
   reasons: requiredText(CASE_TEXT.reasons),
@@ -377,26 +387,26 @@ export function registerScouting(ctx) {
   }
 
   orgRouter.get('/assessments', (req, res) => {
+    const query = inputOrRefuse(res, AssessmentQuery, req.query ?? {}, QUERY);
+    if (!query) return;
     let list;
-    if (req.query.playerId) {
-      list = assessmentAccessList(req, String(req.query.playerId));
+    if (query.playerId) {
+      list = assessmentAccessList(req, query.playerId);
     } else if (isLead(req.orgUser)) {
       list = assessmentReads.forOrg(req.org.id);
     } else {
       list = assessmentReads.forOrgScout(req.org.id, req.orgUser.id);
     }
     // Narrowing by trial goes through the same access list, so the blind rule holds.
-    if (req.query.trialId != null) {
-      const tid = String(req.query.trialId);
+    if (query.trialId !== undefined) {
+      const tid = query.trialId;
       const t = orgTrial(tid, req.org.id);
       if (!t) return res.status(404).json({ error: 'TRIAL_NOT_FOUND' });
-      list = (req.query.playerId ? list : assessmentAccessList(req, t.playerId)).filter(
-        (a) => a.context?.trialId === tid,
-      );
+      list = (query.playerId ? list : assessmentAccessList(req, t.playerId)).filter((a) => a.context?.trialId === tid);
     }
     res.json(
       paginate(
-        req,
+        query,
         list
           .slice()
           .sort((a, b) => b.createdAt - a.createdAt)
@@ -795,13 +805,15 @@ export function registerScouting(ctx) {
   });
 
   orgRouter.get('/segments', (req, res) => {
-    const playerId = req.query.playerId ? String(req.query.playerId) : null;
-    const mediaId = req.query.mediaId ? String(req.query.mediaId) : null;
+    const query = inputOrRefuse(res, SegmentQuery, req.query ?? {}, QUERY);
+    if (!query) return;
+    const playerId = query.playerId ?? null;
+    const mediaId = query.mediaId ?? null;
     // Live entitlement: segments on players no longer visible do not travel.
     const list = segmentReads
       .forOrg(req.org.id, { playerId, mediaId })
       .filter((s) => orgCanSee(req.org, findPlayer(s.playerId)));
-    res.json(paginate(req, list.map(segmentView)));
+    res.json(paginate(query, list.map(segmentView)));
   });
 
   orgRouter.get('/segments/:id', (req, res) => {
@@ -883,15 +895,20 @@ export function registerScouting(ctx) {
   orgRouter.get('/cases', (req, res) => {
     // The access rule and the stage filter run in SQL. The apps read only the first page; "load more" awaits a
     // product decision.
+    const query = inputOrRefuse(
+      res,
+      req.org.level === 'grassroots' ? GRASSROOTS_CASE_QUERY : PRO_CASE_QUERY,
+      req.query ?? {},
+      { root: 'query', ...STAGE_CODES },
+    );
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'string']);
+      page = readPage(query, ['number', 'string']);
     } catch (e) {
       return sendPageError(res, e);
     }
-    const stage = req.query.stage === undefined || req.query.stage === '' ? null : req.query.stage;
-    if (stage !== null && typeof stage !== 'string')
-      return res.status(400).json({ error: 'STAGE_INVALID', message: 'stage is one stage name.' });
+    const stage = query.stage ?? null;
     const { items, nextCursor } = reads.cases.pageForViewer(
       req.org.id,
       { userId: req.orgUser.id, isLead: isLead(req.orgUser) },
@@ -1344,9 +1361,11 @@ export function registerScouting(ctx) {
 
   // The club's vacancies grow without limit (they are closed, never deleted), so the list pages, newest first.
   orgRouter.get('/vacancies', (req, res) => {
+    const query = inputOrRefuse(res, PageQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number']);
+      page = readPage(query, ['number']);
     } catch (e) {
       return sendPageError(res, e);
     }
@@ -1446,9 +1465,11 @@ export function registerScouting(ctx) {
     // `onSquad` is the squad only; a player the club already shadows is `shadowed`.
     const onSquad = new Set(scoutingReads.squad.playerIds(req.org.id));
     const shadowed = new Set(scoutingReads.shadow.forOrg(req.org.id).map((s) => s.playerId));
+    const query = inputOrRefuse(res, PageQuery, req.query ?? {}, { root: 'query' });
+    if (!query) return;
     let page;
     try {
-      page = readPage(req.query, ['number', 'number', 'number']);
+      page = readPage(query, ['number', 'number', 'number']);
     } catch (e) {
       return sendPageError(res, e);
     }

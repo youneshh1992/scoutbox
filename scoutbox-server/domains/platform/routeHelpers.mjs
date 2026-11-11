@@ -2,6 +2,7 @@
 import { isAdult, visibleToOrg, haversineKm } from '../../domain.mjs';
 import { ageOrNull, parseDateOrInstant, isAbsent } from '../../temporal.mjs';
 import { isLeadUser, isFinanceUser } from '../../roles.mjs';
+import { offsetPage } from './paging.mjs';
 
 // Small groups are never shown: a count under this is suppressed.
 const SUPPRESS_MIN = 3;
@@ -22,9 +23,9 @@ export function buildRouteHelpers(ctx) {
   // The same live gate search and profiles use.
   const orgCanSee = (org, player) => !!player && visibleToOrg(player, org) && !ctx.isBlocked(player.id, org.id);
 
-  const paginate = (req, list) => {
-    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
-    const offset = Math.max(Number(req.query.offset) || 0, 0);
+  /** `query` is checked with OFFSET_PAGE (schemas.mjs). */
+  const paginate = (query, list) => {
+    const { limit, offset } = offsetPage(query);
     return { total: list.length, limit, offset, items: list.slice(offset, offset + limit) };
   };
 

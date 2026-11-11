@@ -185,6 +185,20 @@ const disp = r.body.items[0];
 ok(r.body.items.length === 1 && disp.evidenceId === ev2, 'T&S sees the dispute queue');
 r = await post(
   `/admin/evidence/disputes/${disp.id}/resolve`,
+  { resolution: 'upheld', note: 'club evidence stronger', downgrade: 'no' },
+  admin,
+);
+ok(
+  r.status === 400 && r.body.field === 'downgrade' && r.body.problem === 'not_boolean',
+  'downgrade must be true or false ("no" was read as a downgrade)',
+);
+r = await j('/admin/evidence/disputes?limit=0', {}, admin);
+ok(
+  r.status === 400 && r.body.error === 'PAGE_LIMIT_INVALID',
+  'a dispute page limit out of range is refused, not clamped',
+);
+r = await post(
+  `/admin/evidence/disputes/${disp.id}/resolve`,
   { resolution: 'upheld', note: 'club evidence stronger', downgrade: true },
   admin,
 );
@@ -214,17 +228,49 @@ ok(
   );
   const longLabel = await post(
     '/player/evidence',
-    { claimType: 'statistic', label: 'x'.repeat(500), value: '12 goals' },
+    { claimType: 'statistic', label: 'x'.repeat(121), value: '12 goals' },
     bearer(KOLA),
   );
   ok(
-    longLabel.status === 201 &&
-      longLabel.body.evidence.label.length === 120 &&
-      longLabel.body.evidence.value === '12 goals',
-    'over-long text is still shortened, and a text value is kept as text',
+    longLabel.status === 400 &&
+      longLabel.body.field === 'label' &&
+      longLabel.body.problem === 'too_long' &&
+      longLabel.body.max === 120,
+    'over-long text is refused with its limit, not cut off',
+  );
+  for (const [field, value] of [
+    ['tier', 'club_assessed'],
+    ['source', { kind: 'org', id: 'org-eastport' }],
+    ['recordedAt', 1],
+  ]) {
+    const forged = await post(
+      '/player/evidence',
+      { claimType: 'statistic', label: 'Goals', [field]: value },
+      bearer(KOLA),
+    );
+    ok(
+      forged.status === 400 && forged.body.field === field && forged.body.problem === 'unknown_field',
+      `a claim that names its own ${field} is refused`,
+    );
+  }
+  ok((await j('/player/passport', {}, bearer(KOLA))).body.records.length === before, 'and none of those was recorded');
+  const textValue = await post(
+    '/player/evidence',
+    { claimType: 'statistic', label: 'Goals', value: '12 goals' },
+    bearer(KOLA),
+  );
+  ok(textValue.status === 201 && textValue.body.evidence.value === '12 goals', 'a text value is kept as text');
+  const clubMethod = await post(
+    '/org/players/pl-adeyemi/evidence',
+    { claimType: 'statistic', label: 'Goals', method: { how: 'video' } },
+    bearer(MARIA),
+  );
+  ok(
+    clubMethod.status === 400 && clubMethod.body.field === 'method' && clubMethod.body.problem === 'not_text',
+    'a club method that is not text is refused, not stored as "[object Object]"',
   );
   const badReason = await post(
-    `/player/evidence/${longLabel.body.evidence.id}/correct`,
+    `/player/evidence/${textValue.body.evidence.id}/correct`,
     { reason: { why: 'x' } },
     bearer(KOLA),
   );
@@ -390,8 +436,32 @@ ok(r.status === 201 && r.body.invite.status === 'pending_guardian', 'minor squad
 const invG = r.body.invite.id;
 r = await post(`/player/squad-invites/${invG}/respond`, { accept: true }, bearer(GUNI));
 ok(r.status === 403 || r.status === 404, 'the child cannot approve their own squad invite');
+r = await post(`/guardian/squad-invites/${invG}/respond`, { accept: 'false' }, bearer(AMARA));
+ok(
+  r.status === 400 && r.body.field === 'accept' && r.body.problem === 'not_boolean',
+  'a squad answer must be true or false ("false" was read as approval)',
+);
+r = await post(`/guardian/squad-invites/${invG}/respond`, {}, bearer(AMARA));
+ok(r.status === 400 && r.body.problem === 'required', 'a squad answer cannot be left out (it was read as a decline)');
 r = await post(`/guardian/squad-invites/${invG}/respond`, { accept: true }, bearer(AMARA));
 ok(r.status === 200 && r.body.invite.status === 'approved', 'guardian approves; player lands on the squad list');
+
+// List queries take only their own parameters, each once, as sent
+{
+  const stage = await j('/org/cases?stage=signed', {}, bearer(MARIA));
+  ok(
+    stage.status === 400 && stage.body.error === 'STAGE_INVALID' && stage.body.allowed?.includes('review'),
+    'a case list stage outside the vocabulary is refused with the allowed stages',
+  );
+  const limit = await j('/org/assessments?limit=lots', {}, bearer(MARIA));
+  ok(limit.status === 400 && limit.body.error === 'PAGE_LIMIT_INVALID', 'a junk limit is refused, not read as 50');
+  const offset = await j('/org/segments?offset=-5', {}, bearer(MARIA));
+  ok(offset.status === 400 && offset.body.field === 'offset', 'a negative offset is refused, not read as 0');
+  const twice = await j('/org/segments?playerId=pl-adeyemi&playerId=pl-carvalho', {}, bearer(MARIA));
+  ok(twice.status === 400 && twice.body.problem === 'not_text', 'a repeated parameter is refused');
+  const extra = await j('/org/vacancies?sort=oldest', {}, bearer(MARIA));
+  ok(extra.status === 400 && extra.body.problem === 'unknown_field', 'a parameter a list does not take is refused');
+}
 
 // ========================================================= assessments
 r = await j('/org/assessment-templates', {}, bearer(MARIA));

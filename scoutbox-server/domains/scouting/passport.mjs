@@ -2,24 +2,74 @@
 // are earned by the verifying actor's authority, corrections supersede without erasing, and "insufficient evidence"
 // is a first-class display state.
 
-import { parseDateOrInstant, parseStrictDateOnly, isAbsent, readInstant } from '../../temporal.mjs';
+import * as v from 'valibot';
+import { parseDateOrInstant, isAbsent, readInstant } from '../../temporal.mjs';
 import { offsetPage } from '../platform/paging.mjs';
+import {
+  OFFSET_PAGE,
+  OFFSET_PAGE_CODES,
+  dayOrBlank,
+  dueDate,
+  flag,
+  id,
+  idList,
+  inputOrRefuse,
+  oneOf,
+  text,
+} from '../platform/schemas.mjs';
 import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scoutingEvidence.mjs';
 
-/** undefined/null → null; text → shortened to `max`; anything else → a 400 sent, returns undefined. */
-export function textOrRefuse(res, raw, field, max, { required = false } = {}) {
-  if (raw === undefined || raw === null || (typeof raw === 'string' && !raw.trim())) {
-    if (required) {
-      res.status(400).json({ error: `${field.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}_REQUIRED`, field });
-      return undefined;
-    }
-    return null;
-  }
-  if (typeof raw !== 'string') {
-    res.status(400).json({ error: 'FIELD_INVALID', field, message: `${field} must be text.` });
-    return undefined;
-  }
-  return raw.slice(0, max);
+const MEDIA_PER_CLAIM = 50;
+const optText = (max) => v.nullish(text(max));
+const claimValue = v.nullish(v.union([v.pipe(v.number(), v.finite()), text(LIMITS.valueText)]));
+const CLAIM_FIELDS = {
+  claimType: oneOf(CLAIM_TYPES),
+  label: optText(LIMITS.label),
+  value: claimValue,
+  units: optText(LIMITS.units),
+  season: optText(LIMITS.season),
+  note: optText(LIMITS.note),
+  mediaIds: v.nullish(idList(MEDIA_PER_CLAIM)),
+  observedAt: v.optional(dueDate),
+};
+const NewClaim = v.strictObject(CLAIM_FIELDS);
+const NewClubClaim = v.strictObject({ ...CLAIM_FIELDS, method: optText(LIMITS.method) });
+const CLAIM_CODES = { fieldCodes: { claimType: 'CLAIM_TYPE_INVALID' } };
+const Correction = v.strictObject({ value: claimValue, reason: optText(LIMITS.reason), note: optText(LIMITS.note) });
+const Dispute = v.strictObject({ reason: optText(LIMITS.reason) });
+const DisputeResolution = v.strictObject({
+  resolution: oneOf(['upheld', 'rejected']),
+  downgrade: v.optional(flag),
+  note: optText(LIMITS.resolutionNote),
+});
+const RESOLUTION_CODES = { fieldCodes: { resolution: 'RESOLUTION_REQUIRED' } };
+const NewAffiliation = v.strictObject({
+  coachName: optText(LIMITS.coachName),
+  role: optText(LIMITS.role),
+  coachEmail: optText(LIMITS.coachEmail),
+  conflictOfInterest: optText(LIMITS.conflict),
+  from: v.nullish(dayOrBlank),
+});
+const AffiliationClose = v.strictObject({ reason: optText(LIMITS.closeReason) });
+const VouchWithdrawal = v.strictObject({ reason: optText(200) });
+const SquadInvite = v.strictObject({ playerId: id, note: optText(LIMITS.inviteNote) });
+const InviteAnswer = v.strictObject({ accept: flag });
+const DisputeQuery = v.strictObject({ all: v.optional(oneOf(['0', '1'])), ...OFFSET_PAGE });
+const PageQuery = v.strictObject(OFFSET_PAGE);
+const QUERY = { root: 'query', fieldCodes: OFFSET_PAGE_CODES };
+
+/** Text with something in it, trimmed; blank or absent is null. The schema has checked it is text. */
+const filled = (s) => (typeof s === 'string' && s.trim() ? s.trim() : null);
+/** Sends `<FIELD>_REQUIRED` (coachName → COACH_NAME_REQUIRED) and returns false when `value` is null. */
+function presentOrRefuse(res, value, field, message) {
+  if (value !== null) return true;
+  res.status(400).json({
+    error: `${field.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}_REQUIRED`,
+    field,
+    problem: 'required',
+    ...(message ? { message } : {}),
+  });
+  return false;
 }
 
 /**
@@ -190,42 +240,21 @@ export function registerPassport(ctx) {
   }
 
   function submitClaim(req, res, player, sourceKind, sourceId, sourceName, tier, method, reviewer) {
-    const { claimType, value, mediaIds, observedAt } = req.body ?? {};
-    if (!CLAIM_TYPES.includes(claimType))
-      return res.status(400).json({ error: 'CLAIM_TYPE_INVALID', allowed: CLAIM_TYPES });
-    const label = textOrRefuse(res, req.body?.label, 'label', LIMITS.label, { required: true });
-    if (label === undefined) return;
-    const units = textOrRefuse(res, req.body?.units, 'units', LIMITS.units);
-    if (units === undefined) return;
-    const season = textOrRefuse(res, req.body?.season, 'season', LIMITS.season);
-    if (season === undefined) return;
-    const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.note);
-    if (note === undefined) return;
-    if (!(value === undefined || value === null || Number.isFinite(value) || typeof value === 'string'))
-      return res.status(400).json({ error: 'FIELD_INVALID', field: 'value', message: 'value is a number or text.' });
-    if (
-      !(
-        mediaIds === undefined ||
-        mediaIds === null ||
-        (Array.isArray(mediaIds) && mediaIds.every((m) => typeof m === 'string'))
-      )
-    )
-      return res
-        .status(400)
-        .json({ error: 'FIELD_INVALID', field: 'mediaIds', message: 'mediaIds is a list of media ids.' });
+    const body = inputOrRefuse(res, sourceKind === 'org' ? NewClubClaim : NewClaim, req.body ?? {}, CLAIM_CODES);
+    if (!body) return;
+    const { claimType, value, mediaIds, observedAt } = body;
+    const label = filled(body.label);
+    if (!presentOrRefuse(res, label, 'label')) return;
+    const units = filled(body.units);
+    const season = filled(body.season);
+    const note = filled(body.note);
+    if (sourceKind === 'org') method = filled(body.method) ?? method;
     if (note && !moderateOrRefuse(res, note, { kind: 'evidence_note', playerId: player.id })) return;
     if (!moderateOrRefuse(res, label, { kind: 'evidence_label', playerId: player.id })) return;
     // Evidence of something that has not happened is not evidence.
     let observed = null;
     if (!isAbsent(observedAt)) {
       const p = parseDateOrInstant(observedAt, { dayEdge: 'start' });
-      if (!p.ok)
-        return res.status(400).json({
-          error: 'DATE_INVALID',
-          field: 'observedAt',
-          message: `observedAt is a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset (${p.why}).`,
-          expected: p.expected,
-        });
       if (p.ms > Date.now() + 5 * 60_000)
         return res.status(400).json({
           error: 'DATE_INVALID',
@@ -241,7 +270,7 @@ export function registerPassport(ctx) {
       value,
       units,
       season,
-      mediaIds: Array.isArray(mediaIds) ? [...new Set(mediaIds)] : [],
+      mediaIds: [...new Set(mediaIds ?? [])],
       observedAt: observed,
       note,
       source: { kind: sourceKind, id: sourceId, name: sourceName },
@@ -283,21 +312,12 @@ export function registerPassport(ctx) {
   });
 
   function correctEvidence(req, res, orig, actor) {
-    const { value } = req.body ?? {};
-    if (
-      req.body?.reason === undefined ||
-      req.body?.reason === null ||
-      (typeof req.body.reason === 'string' && !req.body.reason.trim())
-    )
-      return res
-        .status(400)
-        .json({ error: 'REASON_REQUIRED', message: 'Corrections carry a reason — the history stays traceable.' });
-    const reason = textOrRefuse(res, req.body.reason, 'reason', LIMITS.reason);
-    if (reason === undefined) return;
-    const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.note);
-    if (note === undefined) return;
-    if (!(value === undefined || value === null || Number.isFinite(value) || typeof value === 'string'))
-      return res.status(400).json({ error: 'FIELD_INVALID', field: 'value', message: 'value is a number or text.' });
+    const body = inputOrRefuse(res, Correction, req.body ?? {});
+    if (!body) return;
+    const { value } = body;
+    const reason = filled(body.reason);
+    if (!presentOrRefuse(res, reason, 'reason', 'Corrections carry a reason — the history stays traceable.')) return;
+    const note = filled(body.note);
     if (!moderateOrRefuse(res, reason, { kind: 'evidence_correction', playerId: orig.playerId })) return;
     const player = findPlayer(orig.playerId);
     const draft = newEvidence({
@@ -329,8 +349,10 @@ export function registerPassport(ctx) {
   }
 
   function fileDispute(req, res, rec, actor) {
-    const reason = textOrRefuse(res, req.body?.reason, 'reason', LIMITS.reason, { required: true });
-    if (reason === undefined) return;
+    const body = inputOrRefuse(res, Dispute, req.body ?? {});
+    if (!body) return;
+    const reason = filled(body.reason);
+    if (!presentOrRefuse(res, reason, 'reason')) return;
     if (!moderateOrRefuse(res, reason, { kind: 'evidence_dispute', playerId: rec.playerId })) return;
     const d = {
       id: nextId('dsp'),
@@ -395,17 +417,10 @@ export function registerPassport(ctx) {
     const p = findPlayer(req.params.id);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    submitClaim(
-      req,
-      res,
-      p,
-      'org',
-      req.org.id,
-      req.org.name,
-      'club_assessed',
-      req.body?.method ? String(req.body.method).slice(0, 80) : 'club_assessment',
-      { id: req.orgUser.id, name: req.orgUser.name },
-    );
+    submitClaim(req, res, p, 'org', req.org.id, req.org.name, 'club_assessed', 'club_assessment', {
+      id: req.orgUser.id,
+      name: req.orgUser.name,
+    });
   });
 
   // An authorised club (or a club-confirmed coach there) upgrades a self-reported claim; the original stays.
@@ -466,7 +481,9 @@ export function registerPassport(ctx) {
 
   // ------------------------------------------------------------ admin routes
   adminRouter.get('/evidence/disputes', (req, res) => {
-    res.json(scoutingReads.evidence.disputePage({ all: req.query.all === '1', ...offsetPage(req) }));
+    const query = inputOrRefuse(res, DisputeQuery, req.query ?? {}, QUERY);
+    if (!query) return;
+    res.json(scoutingReads.evidence.disputePage({ all: query.all === '1', ...offsetPage(query) }));
   });
 
   adminRouter.post('/evidence/disputes/:id/resolve', (req, res) => {
@@ -474,11 +491,10 @@ export function registerPassport(ctx) {
     const d = rec?.disputes.find((x) => x.id === req.params.id);
     if (!d) return res.status(404).json({ error: 'DISPUTE_NOT_FOUND' });
     if (d.status !== 'open') return res.status(409).json({ error: 'ALREADY_RESOLVED' });
-    const { resolution, downgrade } = req.body ?? {};
-    if (!['upheld', 'rejected'].includes(resolution))
-      return res.status(400).json({ error: 'RESOLUTION_REQUIRED', allowed: ['upheld', 'rejected'] });
-    const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.resolutionNote);
-    if (note === undefined) return;
+    const body = inputOrRefuse(res, DisputeResolution, req.body ?? {}, RESOLUTION_CODES);
+    if (!body) return;
+    const { resolution, downgrade = false } = body;
+    const note = filled(body.note);
     const at = Date.now();
     const fresh = unit(() => {
       const next = scoutingEvidence.evidence.update(rec.id, (e) => {
@@ -520,43 +536,15 @@ export function registerPassport(ctx) {
   });
 
   orgRouter.post('/coaches', (req, res) => {
-    const coachName = textOrRefuse(
-      res,
-      typeof req.body?.coachName === 'string' ? req.body.coachName.trim() : req.body?.coachName,
-      'coachName',
-      LIMITS.coachName,
-      { required: true },
-    );
-    if (coachName === undefined) return;
-    const role = textOrRefuse(
-      res,
-      typeof req.body?.role === 'string' ? req.body.role.trim() : req.body?.role,
-      'role',
-      LIMITS.role,
-      { required: true },
-    );
-    if (role === undefined) return;
-    const coachEmail = textOrRefuse(
-      res,
-      typeof req.body?.coachEmail === 'string' ? req.body.coachEmail.trim() : req.body?.coachEmail,
-      'coachEmail',
-      LIMITS.coachEmail,
-    );
-    if (coachEmail === undefined) return;
-    const conflictOfInterest = textOrRefuse(res, req.body?.conflictOfInterest, 'conflictOfInterest', LIMITS.conflict);
-    if (conflictOfInterest === undefined) return;
-    let from = new Date().toISOString().slice(0, 10);
-    if (!isAbsent(req.body?.from)) {
-      const d = parseStrictDateOnly(req.body.from);
-      if (!d.ok)
-        return res.status(400).json({
-          error: 'DATE_INVALID',
-          field: 'from',
-          message: `from is a calendar day (YYYY-MM-DD) (${d.why}).`,
-          expected: d.expected,
-        });
-      from = req.body.from;
-    }
+    const body = inputOrRefuse(res, NewAffiliation, req.body ?? {});
+    if (!body) return;
+    const coachName = filled(body.coachName);
+    if (!presentOrRefuse(res, coachName, 'coachName')) return;
+    const role = filled(body.role);
+    if (!presentOrRefuse(res, role, 'role')) return;
+    const coachEmail = filled(body.coachEmail);
+    const conflictOfInterest = filled(body.conflictOfInterest);
+    const from = body.from || new Date().toISOString().slice(0, 10);
     const draft = {
       id: nextId('aff'),
       orgId: req.org.id,
@@ -589,8 +577,9 @@ export function registerPassport(ctx) {
     const a = found && found.orgId === req.org.id ? found : null;
     if (!a) return res.status(404).json({ error: 'AFFILIATION_NOT_FOUND' });
     if (a.status !== 'confirmed') return res.status(409).json({ error: 'NOT_CURRENT', status: a.status });
-    const reason = textOrRefuse(res, req.body?.reason, 'reason', LIMITS.closeReason);
-    if (reason === undefined) return;
+    const body = inputOrRefuse(res, AffiliationClose, req.body ?? {});
+    if (!body) return;
+    const reason = filled(body.reason);
     const fresh = scoutingEvidence.coachAffiliations.update(a.id, (x) => {
       x.status = status; // 'ended' keeps a clean history; 'revoked' flags cause
       x.to = new Date().toISOString().slice(0, 10);
@@ -605,7 +594,9 @@ export function registerPassport(ctx) {
   orgRouter.post('/coaches/:id/revoke', (req, res) => closeAffiliation(req, res, 'revoked'));
 
   adminRouter.get('/coaches', (req, res) => {
-    const page = scoutingReads.coachAffiliations.page(offsetPage(req));
+    const query = inputOrRefuse(res, PageQuery, req.query ?? {}, QUERY);
+    if (!query) return;
+    const page = scoutingReads.coachAffiliations.page(offsetPage(query));
     res.json({ ...page, items: page.items.map(affiliationView) });
   });
 
@@ -613,13 +604,13 @@ export function registerPassport(ctx) {
     const v = verificationReads.vouches.byId(req.params.id);
     if (!v) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
     if (v.withdrawn) return res.status(409).json({ error: 'ALREADY_WITHDRAWN' });
-    const reason = textOrRefuse(res, req.body?.reason, 'reason', 200);
-    if (reason === undefined) return;
+    const body = inputOrRefuse(res, VouchWithdrawal, req.body ?? {});
+    if (!body) return;
     const stored = unit(() =>
       transitionsVouches.vouches.withdraw(v.id, {
         at: Date.now(),
         by: 'admin',
-        reason: reason?.trim() || 'withdrawn by Trust & Safety',
+        reason: filled(body.reason) ?? 'withdrawn by Trust & Safety',
       }),
     );
     broadcast('players', { playerId: v.playerId });
@@ -632,11 +623,12 @@ export function registerPassport(ctx) {
   // A minor's invitation goes to the guardian, an adult's to the player; nobody joins a squad (or gets an account)
   // without an approval.
   orgRouter.post('/squad/invite', (req, res) => {
-    const p = findPlayer(req.body?.playerId);
+    const body = inputOrRefuse(res, SquadInvite, req.body ?? {});
+    if (!body) return;
+    const p = findPlayer(body.playerId);
     if (!p) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
     if (!orgCanSee(req.org, p)) return res.status(403).json({ error: 'NOT_VISIBLE' });
-    const note = textOrRefuse(res, req.body?.note, 'note', LIMITS.inviteNote);
-    if (note === undefined) return;
+    const note = filled(body.note);
     if (note && !moderateOrRefuse(res, note, { kind: 'squad_invite', playerId: p.id, orgId: req.org.id })) return;
     if (scoutingReads.squadInvites.pendingFor(req.org.id, p.id)) {
       return res.status(409).json({ error: 'INVITE_PENDING' });
@@ -676,7 +668,9 @@ export function registerPassport(ctx) {
     res.status(201).json({ invite });
   });
   function respondSquadInvite(req, res, invite, approverLabel) {
-    const { accept } = req.body ?? {};
+    const body = inputOrRefuse(res, InviteAnswer, req.body ?? {});
+    if (!body) return;
+    const { accept } = body;
     const at = Date.now();
     const fresh = unit(() => {
       const next = scoutingEvidence.squadInvites.update(invite.id, (i) => {

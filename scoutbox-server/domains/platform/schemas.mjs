@@ -91,6 +91,22 @@ export const wholeNumberText = ({ min = 0, max = Number.MAX_SAFE_INTEGER } = {})
     ),
   );
 
+/**
+ * `?limit=&offset=` for a list read by position (platform/paging.mjs `offsetPage`): a limit from 1 to 200 and an
+ * offset from 0, each written once as digits. Spread into a strict query schema, with OFFSET_PAGE_CODES.
+ */
+export const OFFSET_PAGE = Object.freeze({
+  limit: v.optional(wholeNumberText({ min: 1, max: 200 })),
+  offset: v.optional(wholeNumberText()),
+});
+export const OFFSET_PAGE_CODES = Object.freeze({ limit: 'PAGE_LIMIT_INVALID' });
+
+/**
+ * `?limit=&cursor=` for a cursor-paged list: each once, as text. platform/paging.mjs `readPage` judges them, with
+ * its own codes. Spread into a strict query schema so a list refuses parameters it does not take.
+ */
+export const CURSOR_PAGE = Object.freeze({ limit: v.optional(v.string()), cursor: v.optional(v.string()) });
+
 /** A list of at most `max` ids. */
 export const idList = (max) => v.pipe(v.array(id), v.maxLength(max));
 

@@ -2,12 +2,11 @@
  * Cursor paging: `?limit=<1..100>&cursor=<opaque>` → `{ items, nextCursor }`. The cursor is the last row's sort key,
  * so a row inserted mid-paging never shifts what the client has not seen. Junk is refused (400), never clamped.
  */
-/** The older offset convention, unlike cursors, clamps junk to the defaults. */
-export const offsetPage = (req) => {
-  const limit = Math.min(Math.max(Math.floor(Number(req.query?.limit)) || 50, 1), 200);
-  const offset = Math.max(Math.floor(Number(req.query?.offset)) || 0, 0);
-  return { limit, offset: Number.isSafeInteger(offset) ? offset : 0 };
-};
+/** The older offset convention, read from a query checked with OFFSET_PAGE (schemas.mjs). */
+export const offsetPage = (query) => ({
+  limit: query.limit === undefined ? 50 : Number(query.limit),
+  offset: query.offset === undefined ? 0 : Number(query.offset),
+});
 
 export const PAGE_LIMITS = Object.freeze({ default: 50, max: 100 });
 

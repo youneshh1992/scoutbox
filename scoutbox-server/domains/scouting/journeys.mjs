@@ -13,6 +13,8 @@ import {
   typeEligibility,
 } from '../../repositories/opportunitiesCampaigns.mjs';
 import { storedName } from './passport.mjs';
+import * as v from 'valibot';
+import { OFFSET_PAGE, OFFSET_PAGE_CODES, inputOrRefuse } from '../platform/schemas.mjs';
 
 const eligibilityView = (e) => ({
   minAge: e.minAge,
@@ -490,7 +492,12 @@ export function registerJourneys(ctx) {
   orgRouter.get('/opportunities/:id/applications', (req, res) => {
     const o = scoutingReads.opportunities.ofOrg(req.params.id, req.org.id);
     if (!o) return res.status(404).json({ error: 'OPPORTUNITY_NOT_FOUND' });
-    const { limit, offset } = offsetPage(req);
+    const query = inputOrRefuse(res, v.strictObject(OFFSET_PAGE), req.query ?? {}, {
+      root: 'query',
+      fieldCodes: OFFSET_PAGE_CODES,
+    });
+    if (!query) return;
+    const { limit, offset } = offsetPage(query);
     const { total, items } = scoutingReads.applications.pageForOpportunity(o.id, { limit, offset });
     res.json({ total, limit, offset, items: items.map(applicationView) });
   });
