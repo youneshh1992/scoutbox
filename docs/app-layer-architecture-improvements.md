@@ -34,8 +34,8 @@ the transaction handoff, offer sharing, the Film Room feed).
 
 ### Two write styles
 
-About 12 of the 42 repositories still use whole-record `update(id, (draft) => …)`; the rest use named acts. The
-"Writes" section of `architecture.md` has become largely a list of exceptions as a result.
+Ten of the 42 repositories still used whole-record `update(id, (draft) => …)` before step 5; the rest used named
+acts. The "Writes" section of `architecture.md` had become largely a list of exceptions as a result.
 
 ### No static types
 
@@ -126,15 +126,37 @@ no shared context; each domain's sweep is returned and scheduled there. The very
 compliance and transactions, signings, organisation verification) are split into a module per lane or group of
 routes, composed in their old route order through one strict context, with what the parts share in a `shared.mjs`.
 
-### 5. Named acts everywhere
+### 5. Named acts everywhere [**done**]
 
-Move the remaining whole-record repositories to named acts, remove `update(id, draft)`, and rewrite the "Writes"
-section of `architecture.md` as one rule rather than a rule and its exceptions.
+Every repository writes through named acts, and `update(id, draft)` is gone, along with the other edits of a copy
+written back (`passportPrefs.save(playerId, change)`, the Development Hub's `update(id, () => record)`). A record is
+created whole, then changes only through acts named after what happened, each refused unless the record is in a state
+it moves from; the "Writes" section of [`architecture.md`](architecture.md#writes) is now one rule. The acts of the
+repositories that still type records in JavaScript (discovery, development, passport, the scouting and opportunity
+repositories) type the record with the fields they set before writing it; moving those to "reads back as written", as
+the other repositories do, is a pass of its own.
 
-Stop handing one domain's repository to another. Case work still receives the identity, club-setup and operations
-repositories, and the agents domain the recruitment cases repository, so they can write another domain's tables
-without going through it. A domain should get another domain's reads (`*Reads`, as it already does) and that domain's
-named write seams, never its repository.
+Case work no longer receives the identity, club-setup and operations repositories: it gets the identity domain's
+`playerRecord.recordSigning`, scouting's `joinSquad`, the delivery centre's `injectedFailures`, and the staff and
+guardian reads. The agents domain writes a case's handoff through the recruitment domain's `caseHandoffs`.
+
+**Still to do.** An audit of every call to another domain's repository writes (12 November) found more domains handed
+a repository they write through, beyond the two the plan named. Each should get the owning domain's named seam, as
+case work now does:
+
+- **Development → identity's `players`** (about 23 calls: the programme, stats, timeline and pathway items, medical
+  sharing, location, availability), and → scouting's `clubSetup` (the grassroots squad and looking-for routes).
+- **Enterprise → identity's `users` and `sessions`** (invitations, MFA, SSO, ending one's own sessions), and
+  `orgs.setMfaRequiredForLeads`.
+- **Verification → identity's `orgs` and `users`** (an organisation's verification standing, the applicant's staff
+  account), and `players.setLevel`.
+- **Safety → identity's `orgs`** (suspension, the password reset) and `recruitment.suspend`.
+- **Agents → identity's `users` and `sessions`** (agency staff and their sessions); **scouting → `users.remove`**
+  (ending a membership).
+- **Smaller:** discovery, media, integrations and operations add or patch a player's items; messaging sets a staff
+  member's delivery preferences; discovery marks a trial report reminder sent.
+
+The safety audit log (`safetyAudit.record`) is written by every domain and is the platform's, not a domain's.
 
 ### 6. TypeScript
 
@@ -165,5 +187,5 @@ Write it so it can move to a shared package, and move the screens over to it one
 
 ## Until then
 
-Steps 1–4 are made without a type checker, so the end-to-end batteries are the safety net: run `npm run e2e` on every
+Steps 1–5 are made without a type checker, so the end-to-end batteries are the safety net: run `npm run e2e` on every
 step, and move one domain at a time so that a failure points at a small change.

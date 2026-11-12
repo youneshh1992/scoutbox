@@ -53,35 +53,34 @@ transaction documents are evidence records.
 
 ## Writes
 
-- **Named acts** (recruitment cases and their Room rows, contacts and offers, requests and trials:
-  `repositories/recruitmentCases.mjs`, `repositories/recruitmentContactsOffers.mjs`, `repositories/recruitment.mjs`;
-  agent transactions, compliance records and the agent core: `repositories/agentTransactions.mjs`,
-  `repositories/complianceRecords.mjs`, `repositories/agentCore.mjs`; verification claims and the records around them,
-  transition cases and coach references: `repositories/verification.mjs`, `repositories/transitionsVouches.mjs`; Box
-  Cam sessions, the At-Home Combine and its CV results: `repositories/boxCam.mjs`; the direction for the other
-  domains). A record is created whole, then
-  changes only through operations named after what happened (`moveRoom`, `recordDelivery`, `issueRevision`), each an
-  `UPDATE` of named columns or an `INSERT` of new rows, called as `act(id, input, bookkeeping)`; the bookkeeping is the
-  history entries, rev bump and change instant the act leaves, and `recordAct(id, bookkeeping)` is it alone. History is
-  only inserted. Pointers inside an aggregate are composite keys `(owner_id, id)`, so a record can't point into another
-  one, and a state change is guarded in SQL by the domain's transition table. The columns and keys are the only check
-  on stored values; there is no JavaScript copy of them. A whole-record `create`, and an act that inserts a sub-record
-  (a task, a draft), must read back exactly as written, so a field with no column, or a value a column would coerce,
-  is refused rather than lost. Where a history entry's detail is worked out on read (a compliance evaluation entry, a
-  review's resolution), the inserted entry must read back as the writer gave it. A fact that another row already
-  records is worked out on read, not stored twice (a document's or a review's `supersededBy` is the row naming it). The
-  agent core still types a `create` from its field specs; its acts have no JavaScript copy of the columns. A
-  verification claim's status moves only along `CLAIM_TRANSITIONS` and from the status its caller judged the move
-  from, so a stale decision is refused. A Box Cam act is guarded by the state it moves from (a session's result is
-  worked out once, while it is recording; an attempt is measured once, while it is ready). A player's columns change
-  only through acts named for the change (`setAvailability`, `recordStats`, `startProgramme`), which the table's
-  checks judge; the players' `create` still types the whole record. The shared checks, the guarded update and the mapping of a field spec to
-  columns are `repositories/writes.mjs`.
-- **Whole-record updates** (every other domain, for now): `create(record)` and `update(id, (draft) => …)`. The update
-  hands the callback a plain copy, types the whole record, writes it at once, refuses unknown fields and returns the
-  stored record. Updating a record from inside its own update is refused.
-- Either way, a write returns the stored record. A route that writes and then answers must use it: the one it held is
-  the old version.
+- **A record is created whole, then changes only through named acts.** `create(record)` writes a whole record. After
+  that it changes only through operations named after what happened (`moveRoom`, `recordDelivery`, `issueRevision`,
+  `revoke`, `withdraw`, `resolveDispute`), called as `act(id, input, bookkeeping)`: the input carries only what the
+  act sets, and the bookkeeping is the history entries, the revision bump and the change instant it leaves
+  (`recordAct(id, bookkeeping)` is the bookkeeping alone). An act changes only its own fields and rows: an `UPDATE` of
+  named columns or an `INSERT` of new rows (or, where a repository still writes a record's row from its typed form,
+  that row with only the act's fields changed), and history is only inserted. There is no generic update and no edit of
+  a copy written back. An act is refused unless the record is in a state it moves from: a Room's, a claim's or a
+  transaction's status moves only along its domain's transition table (`ROOM_TRANSITIONS`, `CLAIM_TRANSITIONS`, the
+  agent transitions), guarded in SQL, and a one-way act is guarded by the state it leaves (a share is revoked once, an
+  application answered only while outstanding, a Box Cam result worked out only while recording). A claim's move is
+  also refused unless it is from the status its caller judged, so a stale decision is refused.
+- **The tables judge the values.** The columns and keys are the check on stored values. Pointers inside an aggregate
+  are composite keys `(owner_id, id)`, so a record can't point into another one, and a fact another row already
+  records is worked out on read, not stored twice (a document's or a review's `supersededBy` is the row naming it). A
+  whole-record `create`, and an act that inserts a sub-record (a task, a draft), must read back exactly as written, so
+  a field with no column, or a value a column would coerce, is refused rather than lost. Where a history entry's
+  detail is worked out on read, the inserted entry must read back as the writer gave it. Some repositories still type
+  a record in JavaScript before writing it (from its field specs, or a typer of its own); there an act types the record
+  with the fields it sets, so a value is judged the same way whichever write it came through. The shared checks, the
+  guarded update, the act runner (`actsOn`) and the mapping of a field spec to columns are `repositories/writes.mjs`.
+- **A domain writes another domain's tables only through that domain.** It receives the other domain's reads
+  (`*Reads`) and the named write seams it offers (the identity domain's `playerRecord.recordSigning`, the recruitment
+  domain's `caseHandoffs`), never its repository. Case work and the agents' handoffs follow this; the domains still
+  handed another domain's repository are listed in
+  [`app-layer-architecture-improvements.md`](app-layer-architecture-improvements.md#5-named-acts-everywhere-done).
+- A write returns the stored record. A route that writes and then answers must use it: the one it held is the old
+  version.
 - **Units of work.** A route that writes more than one row runs inside `store.unitOfWork(() => …)` (the server's
   `unit(work, announce)`): one `BEGIN IMMEDIATE` transaction, all or nothing. An act's notifications, ledger rows and
   audit events are part of the act and are written in its unit, so the act and the record of it commit together
