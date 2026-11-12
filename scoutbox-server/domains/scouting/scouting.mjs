@@ -573,10 +573,10 @@ export function registerScouting(ctx) {
         reasons: blankToNull(recommendation.reasons ?? null) ?? '',
       };
     }
-    const next = assessments.update(a.id, (d) => {
-      if (nextRatings) d.ratings = nextRatings;
-      if (nextContext) d.context = nextContext;
-      if (nextRecommendation) d.recommendation = nextRecommendation;
+    const next = assessments.revise(a.id, {
+      ratings: nextRatings,
+      context: nextContext,
+      recommendation: nextRecommendation,
     });
     res.json({ assessment: assessmentView(next) });
   });
@@ -593,11 +593,11 @@ export function registerScouting(ctx) {
         message: 'Every submitted assessment carries a final recommendation with reasons.',
       });
     const next = unit(() => {
-      const done = assessments.update(a.id, (d) => {
-        d.state = 'submitted';
-        d.submittedAt = Date.now();
-        audit(d, 'org', req.orgUser.id, storedName(req.orgUser.name), 'submitted');
-      });
+      const done = assessments.submit(
+        a.id,
+        { at: Date.now() },
+        { history: [auditEntry('org', req.orgUser.id, storedName(req.orgUser.name), 'submitted')] },
+      );
       ledgerAppend({
         type: 'assessment_submitted',
         playerId: a.playerId,
@@ -622,12 +622,11 @@ export function registerScouting(ctx) {
     const body = inputOrRefuse(res, Review, req.body);
     if (!body) return;
     const note = blankToNull(body.note ?? null);
-    const next = assessments.update(a.id, (d) => {
-      d.state = 'reviewed';
-      d.reviewedAt = Date.now();
-      d.reviewNote = note;
-      audit(d, 'org', req.orgUser.id, storedName(req.orgUser.name), 'reviewed');
-    });
+    const next = assessments.review(
+      a.id,
+      { at: Date.now(), note },
+      { history: [auditEntry('org', req.orgUser.id, storedName(req.orgUser.name), 'reviewed')] },
+    );
     res.json({ assessment: assessmentView(next) });
   });
 
@@ -705,15 +704,11 @@ export function registerScouting(ctx) {
     if (!moderateOrRefuse(res, text, { kind: 'published_feedback', playerId: a.playerId, orgId: req.org.id })) return;
     const p = findPlayer(a.playerId);
     const next = unit(() => {
-      const done = assessments.update(a.id, (d) => {
-        d.publishedFeedback = {
-          text,
-          byUserId: req.orgUser.id,
-          byName: storedName(req.orgUser.name),
-          at: Date.now(),
-        };
-        audit(d, 'org', req.orgUser.id, storedName(req.orgUser.name), 'published_feedback');
-      });
+      const done = assessments.publishFeedback(
+        a.id,
+        { text, byUserId: req.orgUser.id, byName: storedName(req.orgUser.name), at: Date.now() },
+        { history: [auditEntry('org', req.orgUser.id, storedName(req.orgUser.name), 'published_feedback')] },
+      );
       if (p && !isAdult(p) && p.guardianId) {
         notify(
           { kind: 'guardian', id: p.guardianId },
@@ -862,11 +857,7 @@ export function registerScouting(ctx) {
     const segFound = segmentReads.byId(body.segmentId);
     const seg = segFound && segFound.orgId === req.org.id ? segFound : null;
     if (!seg) return res.status(404).json({ error: 'SEGMENT_NOT_FOUND' });
-    const next = pl.segmentIds.includes(seg.id)
-      ? pl
-      : playlists.update(pl.id, (d) => {
-          d.segmentIds.push(seg.id);
-        });
+    const next = pl.segmentIds.includes(seg.id) ? pl : playlists.addSegment(pl.id, { segmentId: seg.id });
     res.json({ playlist: next });
   });
 

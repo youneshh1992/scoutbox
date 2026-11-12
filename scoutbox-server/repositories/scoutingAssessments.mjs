@@ -8,9 +8,11 @@
  * cannot hold is refused with its id at the repository (the routes check first and answer 400).
  *
  * WRITES are explicit. Templates are append-only (`templates.create`); a new version never changes an old one.
- * Assessments and playlists have `create(record)` and `update(id, (draft) => …)`, typed whole and written at once;
- * segments are never edited (`segments.create`). Writes join the open unit of work, the caller's transaction, or a
- * transaction of their own. An unknown field is refused, and so is an update of a record from inside its own update.
+ * Assessments and playlists have `create(record)`, typed whole and written at once (an unknown field is refused), then
+ * change only through named acts: an assessment is revised while a draft, submitted, reviewed and has its feedback
+ * published, each guarded in SQL by the state it moves from, with its history entries; a playlist gains segments.
+ * Segments are never edited (`segments.create`). Writes join the open unit of work, the caller's transaction, or a
+ * transaction of their own.
  *
  * Queries decode fresh, deep-frozen records in insertion (rowid) order unless they say otherwise; a read inside a unit
  * of work sees the unit's writes. Modules receive the queries as `scoutingReads` (`templates`, `assessments`,
@@ -27,6 +29,7 @@
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { writeKit } from './writes.mjs';
 import {
   txt,
   historyTable,
@@ -880,6 +883,34 @@ function writeTemplate(st, t) {
     }),
   );
 }
+/** An assessment's ratings and their evidence references, replacing the stored ones. */
+function writeRatings(st, id, ratings) {
+  st.refsOf.run(id);
+  st.ratingsOf.run(id);
+  ratings.forEach((r, i) => {
+    st.rating.run({
+      assessment_id: id,
+      position: i,
+      attr_id: r.attrId,
+      rating: r.rating,
+      not_observed: r.notObserved ? 1 : 0,
+      confidence: r.confidence,
+      note: r.note,
+    });
+    r.evidenceRefs.forEach((ref, j) =>
+      st.ref.run({
+        assessment_id: id,
+        rating_position: i,
+        position: j,
+        segment_id: ref.segmentId ?? null,
+        trial_session_id: ref.trialSessionId ?? null,
+        box_session_id: ref.boxSessionId ?? null,
+        t_s: ref.t ?? null,
+        label: ref.label ?? null,
+      }),
+    );
+  });
+}
 function writeAssessment(st, a) {
   const c = a.context;
   st.assessment.run({
@@ -911,32 +942,8 @@ function writeAssessment(st, a) {
     published_feedback_by_name: a.publishedFeedback?.byName ?? null,
     published_feedback_at: a.publishedFeedback?.at ?? null,
   });
-  st.refsOf.run(a.id);
-  st.ratingsOf.run(a.id);
   st.asHistOf.run(a.id);
-  a.ratings.forEach((r, i) => {
-    st.rating.run({
-      assessment_id: a.id,
-      position: i,
-      attr_id: r.attrId,
-      rating: r.rating,
-      not_observed: r.notObserved ? 1 : 0,
-      confidence: r.confidence,
-      note: r.note,
-    });
-    r.evidenceRefs.forEach((ref, j) =>
-      st.ref.run({
-        assessment_id: a.id,
-        rating_position: i,
-        position: j,
-        segment_id: ref.segmentId ?? null,
-        trial_session_id: ref.trialSessionId ?? null,
-        box_session_id: ref.boxSessionId ?? null,
-        t_s: ref.t ?? null,
-        label: ref.label ?? null,
-      }),
-    );
-  });
+  writeRatings(st, a.id, a.ratings);
   a.history.forEach((h, i) => st.asHist.run(histRow(a.id, h, i)));
 }
 function writeSegment(st, s) {
@@ -1135,7 +1142,7 @@ export function insertSeedTemplates(sqlite, now) {
 }
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'redactPlayer']);
+const WRITES = new Set(['create', 'revise', 'submit', 'review', 'publishFeedback', 'addSegment', 'redactPlayer']);
 /**
  * `createScoutingAssessmentsRepository({ sqlite, unit, now, log })`: `templates`, `assessments`, `segments` and
  * `playlists`, each with its writes and queries, plus `reads` (the queries alone, for `scoutingReads`).
@@ -1170,20 +1177,6 @@ export function createScoutingAssessmentsRepository({ sqlite, unit = null, now =
     const stmt = sqlite.prepare(sql);
     return (...args) => decodeAll(name, stmt.all(...args));
   };
-  const IMMUTABLE = {
-    assessments: [
-      'id',
-      'orgId',
-      'playerId',
-      'scoutUserId',
-      'templateId',
-      'templateVersion',
-      'secondOpinionOf',
-      'createdAt',
-    ],
-    playlists: ['id', 'orgId', 'createdBy', 'createdAt'],
-  };
-  const updating = new Set();
   /** The rules a single write keeps that a column cannot: an assessment's cited segments belong to its club and player. */
   const checkOne = (name, r) => {
     if (name === 'assessments') {
@@ -1221,37 +1214,105 @@ export function createScoutingAssessmentsRepository({ sqlite, unit = null, now =
       WRITERS[name](st, r);
       return must(name, r.id);
     });
+  const { guarded, actsOn } = writeKit(sqlite, 'SCOUTING');
+  const historyOf = (table, owner) => ({
+    table,
+    owner,
+    type: (h, at) => typeHistory(h, at),
+    insert: `INSERT INTO ${table} (id, ${owner}, position, at, by_kind, by_id, by_name, action, detail) VALUES (@id, @owner, @position, @at, @by_kind, @by_id, @by_name, @action, @detail)`,
+    row: histRow,
+  });
   /**
-   * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a replacement);
-   * the result is typed whole and written at once. Identifiers and creation facts cannot change.
+   * The assessment's acts. A draft is revised (ratings, context, recommendation) until it is submitted; a submitted
+   * one is reviewed once; feedback is published once from a submitted one. Each is guarded in SQL by that state.
    */
-  const update = (name) => (id, change) => {
-    if (typeof change !== 'function')
-      throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
-    const key = `${name}/${id}`;
-    if (updating.has(key))
-      throw refusal(
-        'SCOUTING_NESTED_UPDATE',
-        `${TABLE_OF[name]} ${id} is already being updated; make the second change after the first returns`,
-      );
-    updating.add(key);
-    try {
-      return operation(() => {
-        const stored = must(name, id);
-        const draft = clone(stored);
-        const returned = change(draft);
-        const next = typedOr(name, returned === undefined ? draft : returned);
-        for (const k of IMMUTABLE[name])
-          if (JSON.stringify(next[k]) !== JSON.stringify(stored[k]))
-            throw refusal('SCOUTING_INPUT_INVALID', `${TABLE_OF[name]} ${id}: ${k} cannot change`);
-        checkOne(name, next);
-        WRITERS[name](st, next);
-        return must(name, id);
-      });
-    } finally {
-      updating.delete(key);
-    }
-  };
+  const assessmentActs = actsOn(
+    {
+      operation,
+      label: 'assessments',
+      must: (id) => must('assessments', id),
+      history: historyOf('assessment_history', 'assessment_id'),
+    },
+    {
+      revise: (id, { ratings, context, recommendation }, stored) => {
+        const next = typedOr('assessments', {
+          ...clone(stored),
+          ...(ratings !== undefined ? { ratings } : {}),
+          ...(context !== undefined ? { context } : {}),
+          ...(recommendation !== undefined ? { recommendation } : {}),
+        });
+        checkOne('assessments', next);
+        const c = next.context;
+        guarded(
+          'assessments',
+          { id },
+          "state = 'draft'",
+          {
+            ...(context !== undefined
+              ? {
+                  context_fixture: c.fixture,
+                  context_date: c.date,
+                  context_minutes_watched: c.minutesWatched,
+                  context_viewing: c.viewing,
+                  context_opponent_level: c.opponentLevel,
+                  context_trial_id: c.trialId,
+                  context_trial_session_id: c.trialSessionId,
+                }
+              : {}),
+            ...(recommendation !== undefined
+              ? {
+                  recommendation_verdict: next.recommendation?.verdict ?? null,
+                  recommendation_reasons: next.recommendation?.reasons ?? null,
+                }
+              : {}),
+          },
+          `assessments ${id} is no longer a draft`,
+        );
+        if (ratings !== undefined) writeRatings(st, id, next.ratings);
+      },
+      submit: (id, { at }) =>
+        guarded(
+          'assessments',
+          { id },
+          "state = 'draft'",
+          { state: 'submitted', submitted_at: at },
+          `assessments ${id} is already submitted`,
+        ),
+      review: (id, { at, note = null }) =>
+        guarded(
+          'assessments',
+          { id },
+          "state = 'submitted'",
+          { state: 'reviewed', reviewed_at: at, review_note: note },
+          `assessments ${id} is not awaiting review`,
+        ),
+      publishFeedback: (id, { text, byUserId, byName, at }) =>
+        guarded(
+          'assessments',
+          { id },
+          "state <> 'draft' AND published_feedback_text IS NULL",
+          {
+            published_feedback_text: text,
+            published_feedback_by_user_id: byUserId,
+            published_feedback_by_name: byName,
+            published_feedback_at: at,
+          },
+          `assessments ${id}: feedback is published once, from a submitted assessment`,
+        ),
+    },
+  );
+  const playlistActs = actsOn(
+    { operation, label: 'playlists', must: (id) => must('playlists', id) },
+    {
+      /** Add a segment of the playlist's club at the end; a segment already on it is refused. */
+      addSegment: (id, { segmentId }, stored) => {
+        checkOne('playlists', { ...stored, segmentIds: [...stored.segmentIds, segmentId] });
+        if (stored.segmentIds.includes(segmentId))
+          throw refusal('SCOUTING_STATE_CONFLICT', `playlists ${id} already holds ${segmentId}`);
+        st.plSeg.run(id, stored.segmentIds.length, segmentId);
+      },
+    },
+  );
 
   const templateRows = sqlite.prepare('SELECT * FROM assessment_templates ORDER BY rowid');
   const latestOfGroup = sqlite.prepare(
@@ -1288,7 +1349,7 @@ export function createScoutingAssessmentsRepository({ sqlite, unit = null, now =
   const redact = sqlite.prepare('UPDATE assessments SET player_name = NULL WHERE player_id = ?');
   const assessments = {
     create: create('assessments'),
-    update: update('assessments'),
+    ...assessmentActs,
     /** Account deletion: the assessments stay (the club's own records) and the player's name goes from them. */
     redactPlayer: (playerId) => operation(() => redact.run(playerId).changes),
     byId: (id) => read('assessments', id),
@@ -1321,7 +1382,7 @@ export function createScoutingAssessmentsRepository({ sqlite, unit = null, now =
   };
   const playlists = {
     create: create('playlists'),
-    update: update('playlists'),
+    ...playlistActs,
     byId: (id) => read('playlists', id),
     forOrg: list('playlists', 'SELECT * FROM playlists WHERE org_id = ? ORDER BY rowid'),
   };

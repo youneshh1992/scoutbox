@@ -282,7 +282,7 @@ test("[typing] the routes' literals type unchanged; junk is refused naming the r
 });
 
 // ------------------------------------------------------------- the repository
-test("[repository] create/update write rows at once and return fresh, deep-frozen records with the template's attributes; the guards hold; there is no db.* view", () => {
+test("[repository] create and the named acts write rows at once and return fresh, deep-frozen records with the template's attributes; the guards hold; there is no db.* view", () => {
   const dir = saveFixture(tempDir('s9b-repo'));
   const o = serverOpen(dir);
   const { repo } = o;
@@ -301,70 +301,82 @@ test("[repository] create/update write rows at once and return fresh, deep-froze
     () => repo.assessments.create(assessment({ id: 'ass-2', templateVersion: 7 })),
     /SCOUTING_REFERENCE_MISSING: assessments ass-2 → assessment_templates tpl-gk@7/,
   );
-  const next = repo.assessments.update('ass-1', (d) => {
-    d.state = 'submitted';
-    d.submittedAt = NOW;
-    d.recommendation = { verdict: 'monitor', reasons: 'SECRET' };
+  const entry = (id, action) => ({
+    id,
+    at: NOW,
+    byKind: 'org',
+    byId: SCOUT.userId,
+    byName: SCOUT.name,
+    action,
+    detail: null,
   });
+  const revised = repo.assessments.revise('ass-1', { recommendation: { verdict: 'monitor', reasons: 'SECRET' } });
+  assert.deepEqual(plain(revised.recommendation), { verdict: 'monitor', reasons: 'SECRET' });
+  assert.deepEqual(plain(revised.ratings), plain(a.ratings), 'a revision keeps what it does not name');
+  refused(
+    () => repo.assessments.revise('ass-1', { recommendation: { verdict: 'maybe', reasons: 'r' } }),
+    /SCOUTING_INPUT_INVALID/,
+  );
+  refused(() => repo.assessments.revise('ass-1', { context: { ...a.context, extra: 1 } }), /SCOUTING_INPUT_INVALID/);
+  refused(
+    () => repo.assessments.review('ass-1', { at: NOW }),
+    /SCOUTING_STATE_CONFLICT: assessments ass-1 is not awaiting review/,
+  );
+  refused(
+    () =>
+      repo.assessments.submit(
+        'ass-1',
+        { at: NOW },
+        { history: [{ ...entry('aud-s1', 'submitted'), byKind: 'robot' }] },
+      ),
+    /SCOUTING_INPUT_INVALID/,
+  );
+  assert.equal(repo.assessments.byId('ass-1').state, 'draft', 'a refused act wrote nothing');
+  const next = repo.assessments.submit('ass-1', { at: NOW }, { history: [entry('aud-s1', 'submitted')] });
   assert.equal(next.state, 'submitted');
+  assert.equal(next.submittedAt, NOW);
+  assert.deepEqual(plain(next.history.slice(0, -1)), plain(a.history), 'the history keeps its stored entries');
+  assert.equal(next.history.at(-1).id, 'aud-s1');
   assert.equal(a.state, 'draft', 'the record held before is the old version');
   refused(
-    () =>
-      repo.assessments.update('ass-1', (d) => {
-        d.playerId = 'pl-other';
-      }),
-    /playerId cannot change/,
+    () => repo.assessments.submit('ass-1', { at: NOW }),
+    /SCOUTING_STATE_CONFLICT: assessments ass-1 is already submitted/,
   );
   refused(
-    () =>
-      repo.assessments.update('ass-1', (d) => {
-        d.templateVersion = 2;
-      }),
-    /SCOUTING_INPUT_INVALID|templateVersion cannot change/,
+    () => repo.assessments.revise('ass-1', { recommendation: { verdict: 'pass', reasons: 'r' } }),
+    /SCOUTING_STATE_CONFLICT: assessments ass-1 is no longer a draft/,
   );
   refused(
-    () =>
-      repo.assessments.update('ass-1', (d) => {
-        d.extra = 1;
-      }),
-    /does not store: extra/,
+    () => repo.assessments.review('ass-1', { at: NOW }, { history: [entry('aud-s1', 'reviewed')] }),
+    /SCOUTING_DUPLICATE: history entry aud-s1 already exists/,
   );
-  refused(
-    () =>
-      repo.assessments.update('ass-1', () => {
-        repo.assessments.update('ass-1', (x) => {
-          x.reviewNote = 'n';
-        });
-      }),
-    /SCOUTING_NESTED_UPDATE/,
-  );
+  const feedback = { text: 'Well done', byUserId: SCOUT.userId, byName: SCOUT.name, at: NOW };
+  assert.deepEqual(plain(repo.assessments.publishFeedback('ass-1', feedback).publishedFeedback), feedback);
+  refused(() => repo.assessments.publishFeedback('ass-1', feedback), /feedback is published once/);
+  assert.equal(repo.assessments.review('ass-1', { at: NOW + 1, note: 'ok' }).reviewNote, 'ok');
+  refused(() => repo.assessments.review('ass-1', { at: NOW + 2 }), /SCOUTING_STATE_CONFLICT/, 'reviewed once');
+  refused(() => repo.assessments.submit('ass-none', { at: NOW }), /SCOUTING_NOT_FOUND/);
   // segments: a rating may cite one of this club's segments of this player only
   repo.segments.create(segment());
   repo.segments.create(segment({ id: 'seg-other', playerId: 'pl-other' }));
-  repo.assessments.create(assessment({ id: 'ass-2', history: [] }));
-  const cite = (segmentId) => (d) => {
-    d.ratings[0].evidenceRefs = [{ segmentId, t: 14 }];
-  };
-  assert.deepEqual(plain(repo.assessments.update('ass-2', cite('seg-1')).ratings[0].evidenceRefs), [
+  const a2 = repo.assessments.create(assessment({ id: 'ass-2', history: [] }));
+  const cite = (segmentId) => ({
+    ratings: [{ ...a2.ratings[0], evidenceRefs: [{ segmentId, t: 14 }] }, ...a2.ratings.slice(1)],
+  });
+  assert.deepEqual(plain(repo.assessments.revise('ass-2', cite('seg-1')).ratings[0].evidenceRefs), [
     { segmentId: 'seg-1', t: 14 },
   ]);
   refused(
-    () => repo.assessments.update('ass-2', cite('seg-other')),
+    () => repo.assessments.revise('ass-2', cite('seg-other')),
     /cites seg-other, which is not a segment of this club and player/,
   );
   // playlists keep their segments in order, once each
   repo.playlists.create(playlist());
-  assert.deepEqual(
-    repo.playlists.update('pls-1', (p) => {
-      p.segmentIds.push('seg-other', 'seg-1');
-    }).segmentIds,
-    ['seg-other', 'seg-1'],
-  );
+  repo.playlists.addSegment('pls-1', { segmentId: 'seg-other' });
+  assert.deepEqual(repo.playlists.addSegment('pls-1', { segmentId: 'seg-1' }).segmentIds, ['seg-other', 'seg-1']);
+  refused(() => repo.playlists.addSegment('pls-1', { segmentId: 'seg-1' }), /playlists pls-1 already holds seg-1/);
   refused(
-    () =>
-      repo.playlists.update('pls-1', (p) => {
-        p.segmentIds.push('seg-nope');
-      }),
+    () => repo.playlists.addSegment('pls-1', { segmentId: 'seg-nope' }),
     /names seg-nope, which is not a segment of this club/,
   );
   // templates: append-only, the next version of the group only

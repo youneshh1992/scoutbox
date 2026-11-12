@@ -149,5 +149,38 @@ export function writeKit(sqlite, prefix) {
     }).p;
   };
 
-  return { ...checks, q, assign, sqlIn, guarded, nextPosition };
+  /**
+   * Named acts on one record kind, each `act(id, input, bookkeeping)`: the act's own writes (`fn(id, input, stored)`),
+   * then the bookkeeping's history entries, inserted after the stored ones, in one operation that returns the stored
+   * record. A value a column refuses names the record and the act. `history`, when the kind has one, is its table,
+   * owner column, the typer of one entry (`(entry, at) => { ok, record } | { ok: false, reason }`) and the row it writes.
+   */
+  const actsOn = ({ operation, label, must, history = null }, defs) =>
+    Object.fromEntries(
+      Object.entries(defs).map(([name, fn]) => [
+        name,
+        (id, input = {}, { history: entries = [] } = {}) =>
+          operation(() => {
+            const stored = must(id);
+            if (entries.length && !history) throw checks.invalid(`${label} ${id}: ${name} keeps no history`);
+            const typed = checks.listOf(label, id, 'history', entries, { objects: true }).map((h, i) => {
+              const t = history.type(h, `${label} ${id} history[${i}]`);
+              if (!t.ok) throw checks.invalid(t.reason);
+              return t.record;
+            });
+            checks.rowStep(label, id, name, () => {
+              fn(id, input, stored);
+              let position = typed.length ? nextPosition(history.table, history.owner, id) : 0;
+              for (const h of typed) {
+                if (q(`SELECT 1 FROM ${history.table} WHERE id = ?`).get(h.id))
+                  throw refusal('DUPLICATE', `history entry ${h.id} already exists`);
+                q(history.insert).run(history.row(id, h, position++));
+              }
+            });
+            return must(id);
+          }),
+      ]),
+    );
+
+  return { ...checks, q, assign, sqlIn, guarded, nextPosition, actsOn };
 }
