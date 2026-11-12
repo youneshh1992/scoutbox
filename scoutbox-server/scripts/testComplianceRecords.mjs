@@ -139,7 +139,7 @@ const evaluated = (id, r = result()) =>
     reasonCodes: [...new Set(r.reasons.map((x) => x.code))],
     policyVersions: r.policyVersions,
   });
-/** createReview (domains/agents/compliance/index.mjs). */
+/** createReview (domains/agents/compliance/shared.mjs). */
 const review = (over = {}) => {
   const r = {
     id: 'rrv-1',

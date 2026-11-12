@@ -47,7 +47,7 @@ const refused = (fn, pattern, label = '') => {
 // ------------------------------------------------------------- fixtures: the literals the routes write
 const SYSTEM = { kind: 'system', userId: null, name: 'dev seed' };
 const byReviewer = (id, role = 'trust_safety_admin') => ({ kind: 'ts_reviewer', userId: id, name: `Name ${id}`, role });
-/** createReviewer (domains/agents/compliance/index.mjs): the dev seed, the bootstrap and POST /ts/reviewers. */
+/** createReviewer (domains/agents/compliance/reviewers.mjs): the dev seed, the bootstrap and POST /ts/reviewers. */
 const reviewer = (over = {}) => ({
   id: 'tsr-a',
   name: 'Priya Shah',
