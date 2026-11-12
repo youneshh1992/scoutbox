@@ -4,6 +4,7 @@ import { ageOn, isAdult, visibleToOrg } from '../../domain.mjs';
 import { utcDayOf } from '../../temporal.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { discoveryInput } from './schemas.mjs';
+import { asReconciling } from '../../writeRules.mjs';
 
 /** Structured tags, no free text. */
 export const SCOUT_TAGS = Object.freeze([
@@ -170,17 +171,21 @@ export function registerFilmRoom({
         trialId: t.id,
         dueAt,
       });
-      if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000) {
-        recruitment.trials.markReportReminderSent(t.id);
-        const request = recruitment.requests.byId(t.requestId);
-        if (request?.userId)
-          notify(
-            { kind: 'org_user', id: request.userId },
-            'report_due',
-            `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`,
-            t.id,
-          ); // the UTC day, not the server locale
-      }
+      // The reminder and its marker commit together, so it is sent once. A known exception: it belongs in a sweep.
+      if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000)
+        asReconciling(() =>
+          unit(() => {
+            recruitment.trials.markReportReminderSent(t.id);
+            const request = recruitment.requests.byId(t.requestId);
+            if (request?.userId)
+              notify(
+                { kind: 'org_user', id: request.userId },
+                'report_due',
+                `Mandatory trial report for ${t.playerName} is due ${utcDayOf(dueAt)}.`,
+                t.id,
+              ); // the UTC day, not the server locale
+          }),
+        );
     }
     items.sort((a, b) => b.ts - a.ts);
     res.json(items.slice(0, 40));

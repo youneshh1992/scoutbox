@@ -82,14 +82,29 @@ transaction documents are evidence records.
   stored record. Updating a record from inside its own update is refused.
 - Either way, a write returns the stored record. A route that writes and then answers must use it: the one it held is
   the old version.
-- **Units of work.** A route that writes more than one row (including its notifications and ledger rows) runs inside
-  `store.unitOfWork(() => …)`: one `BEGIN IMMEDIATE` transaction, all or nothing. The callback must be synchronous
-  (an `async` one is refused). Nested units join the outer one, and an inner failure fails the whole unit even if
-  the caller catches it. Check every field before writing anything; throwing inside the unit replaces hand-written
-  undo code. Expected negative results (nothing to delete) are return values, not throws.
-- **Side effects** (mail, push, live events) go through `store.afterCommit(fn)`, which runs only after `COMMIT`; a
-  failure there is logged and never undoes the data. Provider calls happen before the unit.
-- A repository's `operation(fn)` joins the open unit or opens its own transaction.
+- **Units of work.** A route that writes more than one row runs inside `store.unitOfWork(() => …)` (the server's
+  `unit(work, announce)`): one `BEGIN IMMEDIATE` transaction, all or nothing. An act's notifications, ledger rows and
+  audit events are part of the act and are written in its unit, so the act and the record of it commit together
+  (`announce`, when given, runs inside the unit after `work`). The callback must be synchronous (an `async` one is
+  refused). Nested units join the outer one, and an inner failure fails the whole unit even if the caller catches
+  it. Check every field before writing anything; throwing inside the unit replaces hand-written undo code. Expected
+  negative results (nothing to delete) are return values, not throws. A route answers after its unit commits, never
+  from inside it.
+- **Side effects** (mail, push, live events, provider calls) leave the process only when no transaction is open:
+  through `store.afterCommit(fn)`, which runs after `COMMIT`, or after the unit has returned. A failure there is
+  logged and never undoes the data. Provider calls whose answer the act needs happen before the unit. `notify`
+  writes its row in the caller's unit and sends the push and live event after the commit; `broadcast` inside a unit
+  waits for the commit the same way.
+- A repository's `operation(fn)` (`repositories/database.mjs` `operationOn`) joins the open unit or opens its own
+  transaction; every transaction opens and closes through `beginOn` / `commitOn` there.
+- **The rules are checked** (`writeRules.mjs`), per request, from SQLite's own change count: a request that commits a
+  second transaction that changed rows, a GET that writes, and a write made with no transaction open are refused
+  outside production and counted in it (`store.unitOfWorkState().writeRules`); sending mail, a push or a live event
+  while a transaction is open is refused everywhere, before anything is sent. What is not the request's act is
+  declared where it happens: after-commit effects and their delivery rows (`sideEffect`), sweeps run from a route
+  (`asSweep`), first-use setup and a credential's bookkeeping (`apartFromTheAct`), the id counter's mint
+  (`standaloneWrite`), workflow state a read reconciles (`asReconciling`, each a known issue), and a read that must
+  record itself (`declareAuditedRead`: a Discovery Ledger view, a share-link view, evidence access).
 - **Reads never write.** A notice that a read used to create comes from a sweep, its marker committed with its
   notification. A row a read would create on first use is an explicit upsert, or the read returns defaults.
 - Background work (webhook deliveries, dispatches, follow-ups, expiries, reminders, media removal) is persisted state

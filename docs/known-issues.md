@@ -85,17 +85,15 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
   (`domains/agents/compliance/policy.mjs`) returns `REPRESENTATION_EXPIRED`, which the compliance error table maps but
   `TRANSACTION_ERROR_HTTP` (`domains/agents/transactions/errors.mjs`) does not, so
   `POST /org/agent/transactions/:id/representations` answers `TRANSACTION_STATE_UNKNOWN`.
-- **Writes outside a unit, or side effects before commit.**
-  - Decision drafts: `cases.startDraft`, `editDraft` and `discardDraft` run outside `unit()`
-    (`domains/recruitment/lifecycle/decisionRoutes.mjs`), and `editDraft` writes no history entry.
-  - Transaction handoff: invite and withdraw (`domains/agents/integration/index.mjs`) write and notify with no unit and
-    no `afterCommit`.
-  - Signed documents: `evidence.add` writes the vault row before the unit (`domains/recruitment/signings/index.mjs`
-    `storeDocument`), so a failed unit leaves an orphan row.
-  - Offer sharing: the share-agent route (`domains/recruitment/offers/index.mjs`) calls `notify` inside the unit rather
-    than through `afterCommit`.
-  - Film Room: `GET /feed` (`domains/discovery/filmRoom.mjs`) writes the reminder-sent flag and notifies outside a unit.
-    Its view and tag counters are read-modify-write, so concurrent requests lose counts.
+- **A decision draft's edit writes no history entry.** `cases.editDraft`
+  (`domains/recruitment/lifecycle/decisionRoutes.mjs`) changes the draft without recording who changed it.
+- **The Film Room's view and tag counters are read-modify-write** (`domains/discovery/filmRoom.mjs`), so concurrent
+  requests lose counts.
+- **Some reads bring workflow state up to date, because nothing runs on a schedule for them.** Opening a watchlist
+  reconciles its membership, opening Second Look reconciles its queue, building a Room or a player's evidence gaps
+  reconciles the gap suggestions, and the Film Room feed sends the trial-report reminder. Each runs as one unit marked
+  `asReconciling` (`writeRules.mjs`), so the write rules allow it, but each belongs in a sweep, as
+  [`architecture.md`](architecture.md#writes) says.
 - **The offer issue route returns a stale `rev`.** It answers `kase.room.rev` from the case as read before the move
   (`domains/recruitment/offers/index.mjs`).
 - **The claims verification sweep ignores refusals.** `verificationSweep` (`domains/verification/claims/review.mjs`)
@@ -254,7 +252,7 @@ acting on a figure). None touches every player on a write.
   portal ™ label, the Grassroots and Player Home single primary action, and the Player Card/ListRow check. Triage
   them against [`design.md`](design.md).
 - **About 20 of the 56 end-to-end batteries check source text, not behaviour.** They read server and app source
-  files and match regular expressions against them ("every side effect is wrapped in `safe()`", "*Try again* only
+  files and match regular expressions against them ("a case refusal is thrown inside the unit", "*Try again* only
   when retryable", "the request log line has these fields"). Such a check passes while the text matches, even if
   the behaviour is broken, and fails on harmless rewrites (the Biome reformat broke nine). Replace the ones that
   guard real behaviour with tests that exercise it, and ask Tom before dropping the ones that only describe code

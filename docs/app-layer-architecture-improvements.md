@@ -73,14 +73,18 @@ Every domain has moved, the platform layer's own routes with them, and the hand-
 (`domains/platform/input.mjs`) are gone. A list sent where any schema expects an object, at any depth, is refused in
 the shared layer (valibot reads `[]` as an object with no fields). New routes declare their input the same way.
 
-### 2. Enforced write and side-effect rules
+### 2. Enforced write and side-effect rules [**done**]
 
-Turn the conventions into checks:
+The conventions are checks now (`writeRules.mjs`, described in [`architecture.md`](architecture.md#writes)):
 
-- `notify`, `broadcast`, mail and push refuse to run while a transaction is open, except through `afterCommit`.
-- A test (or a guard in the store) flags a request that makes more than one repository write outside a unit.
+- Mail, push and live events refuse to leave the process while a transaction is open. `notify` is not one of them:
+  its row is part of the act, written in the act's unit, and only its push and live event wait for the commit.
+- A request that commits a second transaction that changed rows, a GET that writes, and a write with no transaction
+  open are refused outside production (so a battery fails at the call site) and counted in production.
 
-Fix the defects these checks turn up.
+Every route the batteries reach was moved onto one unit, with its notifications, ledger rows and audit events written
+inside it; `sideEffectRunner` / `safe()` is gone, and `afterCommit` is the one place a failure never undoes the act.
+The reads that still reconcile workflow state are declared and listed in [`known-issues.md`](known-issues.md).
 
 ### 3. Behavioural tests instead of source scans
 
@@ -97,8 +101,9 @@ the behaviour it stands for:
 - **"Goes through the one writer" and "rolls back together"**: make the writer fail with the fault seam
   (`SCOUTBOX_FAULTS` / `POST /__faults`, `internal:STEP`, e.g. `lifecycle.after_status`), then check that every row
   the act touches is unchanged.
-- **"A failing side effect is never a 500"**: add an `internal:` seam to the domain's side-effect runner (signings
-  has `signing.complete.effects`), fail it, and check the route still answers with the data committed.
+- **"A failing side effect is never a 500"**: fail the act's first after-commit effect with
+  `internal:unit.after_commit`, and check the route still answers with the data and its notices committed
+  (offersAdversarial O2 does this).
 - **"Which rate budget a route draws on"**: spend a budget through one route and check the routes that share it are
   refused, and those that don't are not.
 - **"No app renders a field as raw HTML"** (a grep of app files for `dangerouslySetInnerHTML`): this is not a server
