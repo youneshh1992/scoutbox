@@ -210,8 +210,8 @@ didn't declare, fails the boot, so a wide context can't be handed on. The contex
 `strictContext` (or `routeContext`, with the route helpers): outside production, reading a name it doesn't hold
 throws. A domain has more than one factory when its parts need things created at different points (the identity
 domain's sessions come before everything, its account services after the domains whose records they read). Sweeps
-are returned, not started, and `server.mjs` schedules them. Not every domain has moved yet: the rest are still
-registered with a shared context.
+are returned, not started, and `server.mjs` schedules them. `server.mjs` passes each dependency by name; there is
+no shared context.
 
 `npm run check:boundaries` (`scripts/checkBoundaries.mjs`) checks these rules in CI. The layer order is listed in
 that script as `DOMAIN_LAYERS`, so a new domain gets a layer when it is added. `server.mjs`, `e2e/` and `scripts/` may

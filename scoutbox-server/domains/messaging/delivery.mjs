@@ -400,13 +400,9 @@ export function registerDelivery(ctx) {
 
   // Restart-safe: every dispatch row is persisted.
   dispatchSweep();
-  const timer = setInterval(
-    () => {
-      dispatchSweep();
-      webhookSweep();
-    },
-    process.env.SCOUTBOX_FAST_SWEEPS === '1' ? 400 : 60_000,
-  );
-  timer.unref();
-  return { notifyAction };
+  const deliverySweep = () => {
+    dispatchSweep();
+    webhookSweep();
+  };
+  return { notifyAction, deliverySweep };
 }

@@ -120,8 +120,11 @@ their domains. Split the very large route modules along these lines.
 The import rules are in place and checked in CI ([`architecture.md`](architecture.md#domain-boundaries)): the domains
 sit in layers, a domain imports a lower one only through its `public.mjs`, the platform layer imports no domain, and
 there are no import cycles. The Football Passport and the Trust Score are their own domain (`domains/passport/`) at
-the top, since they are projections over every other domain's records. Still to do: the factories, first for the
-smaller domains and then for the large ones, with the large route modules split along the way.
+the top, since they are projections over every other domain's records. Every domain is created by factories in its
+`index.mjs` that name their dependencies (`domains/platform/deps.mjs`), and `server.mjs` passes each one by name with
+no shared context; each domain's sweep is returned and scheduled there. Still to do: split the very large route
+modules (agent compliance and transactions, signings, organisation verification), which are each one long
+registration function.
 
 ### 5. Named acts everywhere
 

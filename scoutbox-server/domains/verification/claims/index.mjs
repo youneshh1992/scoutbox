@@ -332,9 +332,6 @@ export function registerVerificationClaims(ctx) {
   registerOrganisationVerification(shared);
   registerVerificationReview(shared);
 
-  const tick = () => shared.verificationSweep?.();
-  tick();
-  const timer = setInterval(tick, process.env.SCOUTBOX_FAST_SWEEPS === '1' ? 500 : 60_000);
-  timer.unref();
+  shared.verificationSweep?.();
   return shared;
 }

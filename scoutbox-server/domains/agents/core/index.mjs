@@ -1537,7 +1537,6 @@ export function registerAgent(rawCtx) {
     }
   }
   agentSweep();
-  setInterval(agentSweep, process.env.SCOUTBOX_FAST_SWEEPS === '1' ? 500 : 60_000).unref();
 
   return {
     onPlayerDeleted,

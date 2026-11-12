@@ -14,7 +14,8 @@ export function createVouches(deps) {
 }
 
 /**
- * The club checks, transition cases and verification claims. Returns the minute `transitionSweep`, the console's
+ * The club checks, transition cases and verification claims. Returns the minute `transitionSweep` and
+ * `verificationSweep`, the console's
  * `syncLegacyOrgVerification`, and `storeEvidenceFile` / `addEvidence`, through which a signing attaches its documents
  * as claim evidence.
  */
@@ -66,6 +67,7 @@ export function createVerification(deps) {
   const claims = registerVerificationClaims(ctx);
   return {
     transitionSweep,
+    verificationSweep: () => claims.verificationSweep?.(),
     syncLegacyOrgVerification: claims.syncLegacyOrgVerification,
     storeEvidenceFile: claims.storeEvidenceFile,
     addEvidence: claims.addEvidence,

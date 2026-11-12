@@ -97,7 +97,7 @@ export function createNotificationFeed(deps) {
 
 /**
  * The delivery centre: dispatches, their retries and the deadline reminders. Returns `notifyAction`, the reminder that
- * names a deadline. The webhooks it retries are the integrations domain's.
+ * names a deadline, and the minute `deliverySweep`, which retries dispatches and the integrations domain's webhooks.
  */
 export function createDelivery(deps) {
   needs('createDelivery', deps, [
@@ -121,6 +121,6 @@ export function createDelivery(deps) {
     'emitWebhook',
     'webhookSweep',
   ]);
-  const { notifyAction } = registerDelivery(routeContext('createDelivery', deps));
-  return { notifyAction };
+  const { notifyAction, deliverySweep } = registerDelivery(routeContext('createDelivery', deps));
+  return { notifyAction, deliverySweep };
 }

@@ -477,6 +477,5 @@ export function registerOperations(ctx) {
   });
 
   sweep(); // boot pass
-  const timer = setInterval(sweep, 60_000);
-  timer.unref?.(); // never keeps a test process alive
+  return { followUpSweep: sweep };
 }

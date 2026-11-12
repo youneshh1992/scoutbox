@@ -12,8 +12,8 @@ import { registerTransactions } from './transactions/index.mjs';
 
 /**
  * Returns `access` (agency membership, role capabilities and the concealing agreement lookup), the integration `seam`
- * (may this agent see or do this, on this surface, for this client, now?), the transactions' `offerReadinessFor`, and
- * each part's `onPlayerDeleted` for a player's erasure.
+ * (may this agent see or do this, on this surface, for this client, now?), the transactions' `offerReadinessFor`, the
+ * minute `agentSweep`, and each part's `onPlayerDeleted` for a player's erasure.
  */
 export function createAgents(deps) {
   needs('createAgents', deps, [
@@ -102,6 +102,7 @@ export function createAgents(deps) {
     access,
     integration: integration.seam,
     offerReadinessFor: transactions.offerReadinessFor,
+    agentSweep: core.agentSweep,
     onPlayerDeleted: [core.onPlayerDeleted, compliance.onPlayerDeleted, transactions.onPlayerDeleted],
   };
 }

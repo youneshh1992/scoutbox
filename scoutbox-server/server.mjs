@@ -549,7 +549,7 @@ setInterval(() => {
     console.error(`media deletions sweep failed: ${err?.message ?? err}`);
   }
 }, 60_000).unref();
-createOperations({
+const { followUpSweep } = createOperations({
   app,
   orgRouter,
   playerRouter,
@@ -594,7 +594,7 @@ const { emitWebhook, webhookSweep } = createIntegrations({
   nextId,
 });
 // The delivery centre retries the webhooks on its own timer.
-const { notifyAction } = createDelivery({
+const { notifyAction, deliverySweep } = createDelivery({
   app,
   orgRouter,
   playerRouter,
@@ -1079,6 +1079,14 @@ createAccountServices({
     (id) => notifications.deleteForAudience('player', id), // the preferences are kept, by decision
   ],
 });
+
+// ---------------------------------------------------------------- sweeps
+// Each domain's minute sweep, which it returned rather than started. A domain's boot pass ran when it was created.
+const FAST_SWEEPS = process.env.SCOUTBOX_FAST_SWEEPS === '1';
+setInterval(deliverySweep, FAST_SWEEPS ? 400 : 60_000).unref();
+setInterval(verificationDomain.verificationSweep, SWEEP_MS).unref();
+setInterval(agentsDomain.agentSweep, SWEEP_MS).unref();
+setInterval(followUpSweep, 60_000).unref();
 
 // -------------------------------------------------------- operator surface
 registerCapabilities({

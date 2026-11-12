@@ -3,6 +3,7 @@ import { needs } from '../platform/deps.mjs';
 import { routeContext } from '../platform/routeHelpers.mjs';
 import { registerOperations } from './followUps.mjs';
 
+/** Returns the minute `followUpSweep`. */
 export function createOperations(deps) {
   needs('createOperations', deps, [
     'app',
@@ -31,5 +32,6 @@ export function createOperations(deps) {
     'ledgerAppend',
     'DATA_DIR',
   ]);
-  registerOperations(routeContext('createOperations', deps));
+  const { followUpSweep } = registerOperations(routeContext('createOperations', deps));
+  return { followUpSweep };
 }
