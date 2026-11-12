@@ -203,6 +203,16 @@ The domains sit in layers, bottom to top:
   them, while the Passport's code imports recruitment's trial rules.
 - **No import cycles**, between domains or between the modules of one folder.
 
+**Domain factories.** A domain's `index.mjs` exports its factories, `create<Part>(deps)`, which `server.mjs` calls in
+dependency order. Each factory registers its routes and returns what other domains use (a read, a seam, a sweep).
+It names its dependencies with `needs(name, deps, [...])` (`domains/platform/deps.mjs`): a missing name, or one it
+didn't declare, fails the boot, so a wide context can't be handed on. The context it gives its own route modules is
+`strictContext` (or `routeContext`, with the route helpers): outside production, reading a name it doesn't hold
+throws. A domain has more than one factory when its parts need things created at different points (the identity
+domain's sessions come before everything, its account services after the domains whose records they read). Sweeps
+are returned, not started, and `server.mjs` schedules them. Not every domain has moved yet: the rest are still
+registered with a shared context.
+
 `npm run check:boundaries` (`scripts/checkBoundaries.mjs`) checks these rules in CI. The layer order is listed in
 that script as `DOMAIN_LAYERS`, so a new domain gets a layer when it is added. `server.mjs`, `e2e/` and `scripts/` may
 import any module.

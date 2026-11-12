@@ -16,15 +16,8 @@ import { buildRouteHelpers } from './domains/platform/routeHelpers.mjs';
 import { installHttpBaseline, registerAppHosting, installErrorContract } from './domains/platform/http.mjs';
 import { createLiveSync } from './domains/platform/liveSync.mjs';
 import { registerMeta, registerCapabilities, assertProductionConfig } from './domains/platform/operator.mjs';
-import { installSignedMedia } from './domains/media/signedMedia.mjs';
-import { installSampleClips } from './domains/media/sampleClips.mjs';
-import {
-  createSessionAccess,
-  registerSessionRoutes,
-  createLoginBudget,
-  devLoginRefused,
-} from './domains/identity/sessions.mjs';
-import { createModeration } from './domains/safety/moderation.mjs';
+import { createMedia, createMediaSigning } from './domains/media/index.mjs';
+import { createAccountServices, createAccounts, createSessions } from './domains/identity/index.mjs';
 import { createActivity } from './domains/development/activity.mjs';
 import { vouchView, createVouchReads } from './domains/verification/vouches.mjs';
 import { createInsights } from './domains/discovery/insights.mjs';
@@ -34,16 +27,15 @@ import { registerScouting } from './domains/scouting/scouting.mjs';
 import { registerJourneys } from './domains/scouting/journeys.mjs';
 import { registerSuitability } from './domains/scouting/suitability.mjs';
 import { registerObjectives } from './domains/development/objectives.mjs';
-import { registerUploads, removeUploadChunks } from './domains/media/uploads.mjs';
-import { registerOperations } from './domains/operations/followUps.mjs';
+import { createOperations } from './domains/operations/index.mjs';
 import { createIntegrations } from './domains/integrations/index.mjs';
-import { createDelivery } from './domains/messaging/index.mjs';
+import { createDelivery, createMessaging, createNotificationFeed } from './domains/messaging/index.mjs';
 import { registerTransitions } from './domains/verification/transitions.mjs';
 import { createInsight } from './domains/insight/index.mjs';
 import { registerBudgets } from './domains/recruitment/budgets.mjs';
 import { createGroups } from './domains/groups/index.mjs';
 import { registerVerificationClaims } from './domains/verification/claims/index.mjs';
-import { createAdminRouter, registerReporting, registerSafetyConsole } from './domains/safety/safety.mjs';
+import { createSafety, createSafetyConsole } from './domains/safety/index.mjs';
 import { registerFootballPassport } from './domains/passport/index.mjs';
 import { registerBoxCam } from './domains/development/boxcam/index.mjs';
 import { registerTrustScore } from './domains/passport/trust/index.mjs';
@@ -75,26 +67,15 @@ import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { assertEventRegistry } from './domains/platform/eventRegistry.mjs';
 import { createNotificationPrefs, registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';
-import { createNotifier, registerNotificationFeed, registerDeliverySettings } from './domains/messaging/notify.mjs';
-import { registerMessaging, channelViewFor } from './domains/messaging/channels.mjs';
+import { channelViewFor } from './domains/messaging/channels.mjs';
 import { registerAudit } from './domains/platform/audit.mjs';
 import { inRequest } from './writeRules.mjs';
 import { createFaultLayer } from './domains/platform/faults.mjs';
 import { integrityReport } from './domains/platform/integrity.mjs';
 import { orgPlayerView } from './views/playerViews.mjs';
-import { registerGuardianAccount, registerGuardianIdReview } from './domains/identity/guardians.mjs';
-import { createPlayerSession, registerPlayerAccount } from './domains/identity/players.mjs';
-import { registerChildren } from './domains/identity/children.mjs';
-import { createPlayerErasure, registerDataRights } from './domains/identity/dataRights.mjs';
 import { DRILLS, registerPlayerRecord } from './domains/development/record.mjs';
 import { registerGrassrootsJourney } from './domains/development/grassroots.mjs';
 import { registerRequestInbox } from './domains/recruitment/inbox.mjs';
-import {
-  createOrgViews,
-  createOrgSession,
-  registerOrgAccount,
-  registerClubDirectory,
-} from './domains/identity/orgs.mjs';
 import { registerPlayerSearch } from './domains/discovery/search.mjs';
 import { registerFilmRoom } from './domains/discovery/filmRoom.mjs';
 import { createRequestWriters, registerClubRequests, requestForRecipient } from './domains/recruitment/requests.mjs';
@@ -105,7 +86,6 @@ import { registerGrassrootsClub } from './domains/development/grassrootsClub.mjs
 import { grassrootsOrgOnly } from './domains/development/guards.mjs';
 import { registerClubChecks } from './domains/verification/clubChecks.mjs';
 import { createEnterprise } from './domains/enterprise/index.mjs';
-import { createMfaGuards } from './domains/identity/mfaGuards.mjs';
 import { requestInstrumentation } from './domains/platform/metrics.mjs';
 import {
   hashPassword,
@@ -292,22 +272,8 @@ const idv = createIdvProvider();
 const billing = createBilling({ invoices: operations.invoices, nextId: (p) => nextId(p) });
 const storage = createStorage(DATA_DIR);
 
-// Media bytes live on object storage (local disk in dev); the database keeps only ids and /media/:id streams them.
-// Files whose removal was committed but not completed (a crash between COMMIT and the unlink, a storage error) are
-// retried at boot and every minute.
-mediaDeletions.process(storage);
-setInterval(() => {
-  try {
-    mediaDeletions.process(storage);
-  } catch (err) {
-    console.error(`media deletions sweep failed: ${err?.message ?? err}`);
-  }
-}, 60_000).unref();
-
 const findPlayer = (id) => byId.player(id);
 const isBlocked = (playerId, orgId) => safetyAudit.blocks.has(playerId, orgId);
-if (dataLayer.firstInstallation)
-  installSampleClips({ assetsDir: path.join(HERE, 'assets'), findPlayer, players, storage });
 
 // ------------------------------------------------------------- the HTTP envelope
 const app = express();
@@ -333,8 +299,15 @@ seams.shouldFail = (step) => faultLayer.shouldFail(step);
 // Correlation ids, structured request logs (redacted), request metrics and the exposure-capture hook, before every route.
 app.use(requestInstrumentation());
 
-const { createSession, sessionFor } = createSessionAccess({ sessions });
-installSignedMedia({ app, byId, sessions, mediaDeletions, storage, sessionFor, isBlocked });
+// One rate limiter for the whole server. Every limited action is named in RATE_LIMIT_POLICY with its window and
+// scope, and the capability report says plainly that the memory provider counts per process.
+const rateLimit = createRateLimiter();
+const { createSession, sessionFor, loginKey, loginLockedOut, noteLoginFailure } = createSessions({
+  sessions,
+  rateLimit,
+});
+// Media bytes live on object storage (local disk in dev); the database keeps only ids and /media/:id streams them.
+createMediaSigning({ app, byId, sessions, mediaDeletions, storage, sessionFor, isBlocked });
 
 // ---------------------------------------------------------------- live sync
 const liveSync = createLiveSync({
@@ -352,9 +325,6 @@ const liveSync = createLiveSync({
 const { broadcast, publishEvent, eventPayloadDrops } = liveSync;
 
 // ------------------------------------------------------------------ helpers
-// The organisation as the apps see it, and whether its safeguarding certification stands.
-const { orgSafe, safeguardingCertified } = createOrgViews({ clubSetup, safetyAudit });
-
 function ledgerAppend(entry) {
   // The Discovery Ledger is append-only: a row of the ledger table, written at once (in the caller's unit of work when
   // one is open); userId and scoutName are stored exactly as the caller passes them.
@@ -365,35 +335,95 @@ function ledgerAppend(entry) {
 
 const canonicalContractFor = createContractLookup({ signingsFollowUps });
 
-// -------------------------------------------------------------- sessions
-registerSessionRoutes({ app, sessions, sessionFor });
 // Development shortcuts (seeded passwordless identities, credential-less org logins) exist for local work and tests
 // only, and are refused in production.
 const DEV_LOGINS = devLoginsEnabled();
-// One rate limiter for the whole server. Every limited action is named in RATE_LIMIT_POLICY with its window and
-// scope, and the capability report says plainly that the memory provider counts per process.
-const rateLimit = createRateLimiter();
 installRateLimitInspection(app, rateLimit, { enabled: faultLayer.enabled });
-const { loginKey, loginLockedOut, noteLoginFailure } = createLoginBudget({ rateLimit });
 
-// ------------------------------------------------------------ notifications
 // The preference gate exists before anything that notifies; its routes register with the other preference routes.
 const notificationPrefs = createNotificationPrefs({ notifications });
-const notifier = createNotifier({
-  notifications,
-  prefs: notificationPrefs,
-  store,
-  pushSender,
+
+registerMeta({ app, engine: store.engine, players, orgs, devLogins: DEV_LOGINS });
+
+// ------------------------------------------------------------- accounts
+// The session routes, the organisation, player and guardian routers, and the guardian and organisation accounts.
+const { orgRouter, playerRouter, guardianRouter, guardianManagedOnly, orgSafe, safeguardingCertified, mfaGuards } =
+  createAccounts({
+    app,
+    sessions,
+    users,
+    orgs,
+    guardians,
+    clubSetup,
+    safetyAudit,
+    byId,
+    findPlayer,
+    createSession,
+    sessionFor,
+    loginKey,
+    loginLockedOut,
+    noteLoginFailure,
+    devLogins: DEV_LOGINS,
+    mailer,
+    idv,
+    seam,
+    unit,
+    nextId,
+    broadcast,
+  });
+
+// ------------------------------------------------------------- safety
+// Moderation, reports and blocks, and the admin router: ScoutBox staff only, behind x-admin-key (ADMIN_KEY env).
+const ADMIN_KEY = process.env.ADMIN_KEY || 'scoutbox-admin';
+const { moderateOrRefuse, adminRouter } = createSafety({
+  app,
+  orgRouter,
+  playerRouter,
+  guardianRouter,
+  adminKey: ADMIN_KEY,
+  sessionFor,
+  compliancePolicies,
+  safetyAudit,
+  recruitment,
   byId,
+  unit,
+  nextId,
+  broadcast,
+  ledgerAppend,
+});
+
+// ------------------------------------------------------------- messaging
+// The notifier exists before anything that notifies.
+const { notifier, notify, openChannel } = createMessaging({
+  app,
+  orgRouter,
+  playerRouter,
+  guardianRouter,
+  guardianManagedOnly,
+  sessionFor,
+  store,
+  notifications,
+  notificationPrefs,
+  pushSender,
   publishEvent,
   eventPayloadDrops,
+  channels,
+  recruitment,
+  players,
+  guardians,
+  pushTokens,
+  byId,
+  isBlocked,
+  moderateOrRefuse,
+  unit,
+  nextId,
+  broadcast,
+  ledgerAppend,
 });
-const { notify } = notifier;
 
 const { recordActivity, refreshJourneyBadges } = createActivity({ players, notify });
 const { publishedVouchesFor, vouchesFor } = createVouchReads({ vouches: verificationReads.vouches });
 const insightsFor = createInsights({ ledger: safetyAudit.ledger });
-const moderateOrRefuse = createModeration({ safetyAudit, unit, nextId });
 
 // Public view of a player for a given org: a positive allowlist (views/playerViews.mjs), never a spread of the
 // record. It applies the minor-visibility rules, guardian-managed contact, player- and guardian-controlled medical
@@ -413,75 +443,6 @@ const VIEW_HELPERS = {
 function playerViewForOrg(player, org) {
   return orgPlayerView(player, org, VIEW_HELPERS);
 }
-
-registerMeta({ app, engine: store.engine, players, orgs, devLogins: DEV_LOGINS });
-
-// The authenticated routers. The guardian's is created with the guardian account, below; the player account's
-// routes are domains/identity/players.mjs.
-const { orgRouter } = createOrgSession({ app, findOrg: byId.org, users, sessionFor });
-const { playerRouter, guardianManagedOnly } = createPlayerSession({ app, findPlayer, sessionFor });
-
-// -------------------------------------------------------------- guardians
-// Parents own every under-18 account. The account and its safeguarding gates (e-mail, ID, disclaimer) are
-// domains/identity/guardians.mjs; managing the children is domains/identity/children.mjs.
-const { guardianRouter } = registerGuardianAccount({
-  app,
-  guardians,
-  safetyAudit,
-  unit,
-  nextId,
-  mailer,
-  idv,
-  faultSeam: seam,
-  createSession,
-  sessionFor,
-  loginKey,
-  loginLockedOut,
-  noteLoginFailure,
-  devLogins: DEV_LOGINS,
-  devLoginRefused,
-});
-
-// ------------------------------------------------------------- message threads
-const { openChannel } = registerMessaging({
-  orgRouter,
-  playerRouter,
-  guardianRouter,
-  channels,
-  recruitment,
-  byId,
-  isBlocked,
-  unit,
-  nextId,
-  notify,
-  broadcast,
-  ledgerAppend,
-  moderateOrRefuse,
-  guardianManagedOnly,
-});
-
-// ------------------------------------------------------------- organisations
-// The sign-in pickers, Grassroots registration and staff log-in (domains/identity/orgs.mjs). The MFA guards are
-// shared with the MFA set-up routes (domains/enterprise/enterprise.mjs).
-const mfaGuards = createMfaGuards();
-registerOrgAccount({
-  app,
-  orgs,
-  users,
-  safetyAudit,
-  findOrg: byId.org,
-  unit,
-  nextId,
-  broadcast,
-  createSession,
-  loginLockedOut,
-  noteLoginFailure,
-  devLogins: DEV_LOGINS,
-  devLoginRefused,
-  mfaGuards,
-  orgSafe,
-  safeguardingCertified,
-});
 
 // ------------------------------------------------------------- club routes
 // The one writer of a request row and of an accepted trial: the Contact, Trial and open-day flows and the Inbox's
@@ -581,18 +542,6 @@ registerLedger({
   findPlayer,
   isBlocked,
 });
-registerClubDirectory({
-  app,
-  orgs,
-  trialsForOrg: (orgId) => recruitment.trials.forOrg(orgId),
-  safeguardingCertified,
-  pathwayRecord,
-});
-
-// ------------------------------------------------------ admin (T&S) console
-// ScoutBox staff only. Prototype auth: x-admin-key (ADMIN_KEY env).
-const ADMIN_KEY = process.env.ADMIN_KEY || 'scoutbox-admin';
-const adminRouter = createAdminRouter({ app, adminKey: ADMIN_KEY, sessionFor, compliancePolicies });
 
 // The attributed Trust & Safety lane. Every route here resolves a specific authenticated reviewer (never the shared
 // key) before it runs; the middleware comes from registerCompliance() below.
@@ -606,8 +555,6 @@ app.use(
       : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' }),
   tsRouter,
 );
-
-registerGuardianIdReview({ adminRouter, guardians, safetyAudit, unit });
 
 // Sessions die at once (API, and media on the next byte) and the user's open streams close. The user ROW is kept
 // (removedAt) so history stays attributed. Inside a unit (the staff removal) the sessions go with its commit and the
@@ -684,9 +631,60 @@ const clubWorkspaceCtx = {
   registerScouting(ctx);
   registerJourneys(ctx);
   registerObjectives(ctx);
-  const { sweepUploads } = registerUploads(ctx);
-  registerOperations({ ...ctx, sweepUploads });
 }
+const media = createMedia({
+  playerRouter,
+  players,
+  operations,
+  mediaDeletions,
+  storage,
+  findPlayer,
+  firstInstallation: dataLayer.firstInstallation,
+  assetsDir: path.join(HERE, 'assets'),
+  moderateOrRefuse,
+  recordActivity,
+  unit,
+  nextId,
+  broadcast,
+  DATA_DIR,
+});
+// Files whose removal was committed but not completed (a crash between COMMIT and the unlink, a storage error) are
+// retried at boot and every minute.
+media.sweepDeletions();
+setInterval(() => {
+  try {
+    media.sweepDeletions();
+  } catch (err) {
+    console.error(`media deletions sweep failed: ${err?.message ?? err}`);
+  }
+}, 60_000).unref();
+createOperations({
+  app,
+  orgRouter,
+  playerRouter,
+  guardianRouter,
+  adminRouter,
+  users,
+  orgs,
+  players,
+  recruitment,
+  signingsFollowUps,
+  opportunitiesCampaigns,
+  scoutingReads,
+  byId,
+  findPlayer,
+  isBlocked,
+  sessionFor,
+  moderateOrRefuse,
+  storage,
+  sweepUploads: media.sweepUploads,
+  unit,
+  nextId,
+  notify,
+  broadcast,
+  ledgerAppend,
+  DATA_DIR,
+});
 
 // --------------------------------------- integrations, delivery and enterprise
 // Imports, API keys and webhooks; the delivery centre; onboarding, MFA, SSO, audit and backup; private suitability
@@ -931,20 +929,8 @@ const verificationClaims = registerVerificationClaims({
   DATA_DIR,
 });
 
-// ------------------------------------------------- reports, blocks, console
-registerReporting({
-  playerRouter,
-  guardianRouter,
-  orgRouter,
-  safetyAudit,
-  recruitment,
-  byId,
-  unit,
-  nextId,
-  ledgerAppend,
-  broadcast,
-});
-registerSafetyConsole({
+// ------------------------------------------------- the Trust & Safety console
+createSafetyConsole({
   adminRouter,
   dataLayerReport: (opts) => dataLayer.report(opts),
   storeEngine: store.engine,
@@ -1522,7 +1508,7 @@ const journeyCtx = registerJourneyRoutes({
   access: agentAccess,
   integration: integrationDomain.seam,
 });
-const notificationFeed = registerNotificationFeed({
+const notificationFeed = createNotificationFeed({
   orgRouter,
   playerRouter,
   guardianRouter,
@@ -1532,47 +1518,68 @@ const notificationFeed = registerNotificationFeed({
 });
 
 // ------------------------------------------------------ players and children
-// Registered last: the inbox answers through the lifecycle and opens threads, the export reads the feed, and the
-// erasure reaches every domain that holds a player.
-registerPlayerAccount({
+// Registered last: the export reads the feed, the erasure reaches every domain that holds a player, and the inbox
+// answers through the lifecycle and opens threads.
+createAccountServices({
   app,
   playerRouter,
+  guardianRouter,
+  adminRouter,
   players,
   guardians,
-  findPlayer,
+  orgs,
+  sessions,
   codes,
-  unit,
-  seam,
-  nextId,
-  rateLimit,
-  broadcast,
-  notify,
-  ledgerAppend,
+  safetyAudit,
+  mediaDeletions,
+  uploads: operations.uploads,
+  findPlayer,
   createSession,
   loginLockedOut,
   noteLoginFailure,
   devLogins: DEV_LOGINS,
-  devLoginRefused,
+  rateLimit,
+  unit,
+  afterCommit: store.afterCommit,
+  seam,
+  nextId,
+  broadcast,
+  notify,
+  ledgerAppend,
+  storage,
+  removeUploadChunks: media.removeUploadChunks,
+  DATA_DIR,
   checkSavedSearches,
   publishedVouchesFor,
   vouchesFor,
-});
-registerChildren({
-  guardianRouter,
-  players,
-  guardians,
-  findPlayer,
-  codes,
-  unit,
-  nextId,
-  rateLimit,
-  broadcast,
-  checkSavedSearches,
   insightsFor,
-  requestsFor: (playerId) => recruitment.requests.forPlayer(playerId),
-  ledgerPageForPlayers: (ids, page) => safetyAudit.ledger.pageForPlayers(ids, page),
-  ledgerView,
   viewHelpers: VIEW_HELPERS,
+  ledgerView,
+  requestsFor: (playerId) => recruitment.requests.forPlayer(playerId),
+  requestForRecipient,
+  ledgerPageForPlayers: (ids, page) => safetyAudit.ledger.pageForPlayers(ids, page),
+  ledgerFor: (playerId) => safetyAudit.ledger.forPlayer(playerId),
+  threadsFor: (playerId) => channels.forPlayer(playerId).map((c) => channelViewFor(c, 'player')),
+  notificationFeed,
+  trialsForOrg: (orgId) => recruitment.trials.forOrg(orgId),
+  pathwayRecord,
+  safeguardingCertified,
+  // Each domain's part of a deletion, in this order, inside the deletion's unit.
+  redactors: [
+    (id, at) => recruitment.redactPlayer(id, at), // requests and trials become id-only tombstones
+    (id, at) => recruitmentCases.redactPlayer(id, at), // a case keeps its status and the club's numbers; the name goes
+    (id) => scoutingAssessments.assessments.redactPlayer(id),
+    (id) => recruitmentContactsOffers.contacts.redactPlayer(id), // the reply's words go; the contact stays
+    (id) => grassroots.openTrials.redactPlayer(id),
+    agentCoreDomain.onPlayerDeleted,
+    complianceDomain.onPlayerDeleted,
+    transactionsDomain.onPlayerDeleted,
+    offersDomain.onPlayerDeleted,
+    signingsDomain.onPlayerDeleted,
+    // Every thread of the player, guardian–club threads included (D-B, docs/decisions.md).
+    (id) => channels.deleteForPlayer(id),
+    (id) => notifications.deleteForAudience('player', id), // the preferences are kept, by decision
+  ],
 });
 registerPlayerRecord({
   playerRouter,
@@ -1633,51 +1640,6 @@ registerRequestInbox({
   notify,
   broadcast,
   guardianManagedOnly,
-});
-registerDeliverySettings({ app, playerRouter, guardianRouter, players, guardians, pushTokens, sessionFor });
-const erasePlayer = createPlayerErasure({
-  unit,
-  afterCommit: store.afterCommit,
-  seam,
-  findPlayer,
-  players,
-  sessions,
-  codes,
-  mediaDeletions,
-  uploads: operations.uploads,
-  storage,
-  removeUploadChunks,
-  dataDir: DATA_DIR,
-  broadcast,
-  // Each domain's part of a deletion, in this order, inside the deletion's unit.
-  redactors: [
-    (id, at) => recruitment.redactPlayer(id, at), // requests and trials become id-only tombstones
-    (id, at) => recruitmentCases.redactPlayer(id, at), // a case keeps its status and the club's numbers; the name goes
-    (id) => scoutingAssessments.assessments.redactPlayer(id),
-    (id) => recruitmentContactsOffers.contacts.redactPlayer(id), // the reply's words go; the contact stays
-    (id) => grassroots.openTrials.redactPlayer(id),
-    agentCoreDomain.onPlayerDeleted,
-    complianceDomain.onPlayerDeleted,
-    transactionsDomain.onPlayerDeleted,
-    offersDomain.onPlayerDeleted,
-    signingsDomain.onPlayerDeleted,
-    // Every thread of the player, guardian–club threads included (D-B, docs/decisions.md).
-    (id) => channels.deleteForPlayer(id),
-    (id) => notifications.deleteForAudience('player', id), // the preferences are kept, by decision
-  ],
-});
-registerDataRights({
-  playerRouter,
-  guardianRouter,
-  findPlayer,
-  erasePlayer,
-  requestForRecipient,
-  notificationFeed,
-  insightsFor,
-  ledgerView,
-  requestsFor: (playerId) => recruitment.requests.forPlayer(playerId),
-  threadsFor: (playerId) => channels.forPlayer(playerId).map((c) => channelViewFor(c, 'player')),
-  ledgerFor: (playerId) => safetyAudit.ledger.forPlayer(playerId),
 });
 
 // -------------------------------------------------------- operator surface
