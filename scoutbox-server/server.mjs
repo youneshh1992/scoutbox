@@ -12,28 +12,23 @@ import { buildSeed } from './seed.mjs';
 import { openStore } from './store.mjs';
 import { attachDataLayer } from './repositories/index.mjs';
 import { createIdCounter } from './repositories/counters.mjs';
-import { buildRouteHelpers } from './domains/platform/routeHelpers.mjs';
 import { installHttpBaseline, registerAppHosting, installErrorContract } from './domains/platform/http.mjs';
 import { createLiveSync } from './domains/platform/liveSync.mjs';
 import { registerMeta, registerCapabilities, assertProductionConfig } from './domains/platform/operator.mjs';
 import { createMedia, createMediaSigning } from './domains/media/index.mjs';
 import { createAccountServices, createAccounts, createSessions } from './domains/identity/index.mjs';
 import { createActivity, createDevelopment } from './domains/development/index.mjs';
-import { vouchView, createVouchReads } from './domains/verification/vouches.mjs';
+import { vouchView } from './domains/verification/vouches.mjs';
 import { createInsights } from './domains/discovery/insights.mjs';
-import { createContractLookup } from './domains/recruitment/signings/contract.mjs';
 import { createScouting } from './domains/scouting/index.mjs';
 import { createOperations } from './domains/operations/index.mjs';
 import { createIntegrations } from './domains/integrations/index.mjs';
 import { createDelivery, createMessaging, createNotificationFeed } from './domains/messaging/index.mjs';
-import { registerTransitions } from './domains/verification/transitions.mjs';
 import { createInsight } from './domains/insight/index.mjs';
-import { registerBudgets } from './domains/recruitment/budgets.mjs';
 import { createGroups } from './domains/groups/index.mjs';
-import { registerVerificationClaims } from './domains/verification/claims/index.mjs';
+import { createVerification, createVouches } from './domains/verification/index.mjs';
 import { createSafety, createSafetyConsole } from './domains/safety/index.mjs';
-import { registerFootballPassport } from './domains/passport/index.mjs';
-import { registerTrustScore } from './domains/passport/trust/index.mjs';
+import { createPassport } from './domains/passport/index.mjs';
 import { registerRecruitmentRooms } from './domains/recruitment/rooms/index.mjs';
 import { registerDiscovery } from './domains/discovery/index.mjs';
 import { registerMatching } from './domains/discovery/matching/index.mjs';
@@ -71,12 +66,11 @@ import { DRILLS } from './domains/development/record.mjs';
 import { registerRequestInbox } from './domains/recruitment/inbox.mjs';
 import { registerPlayerSearch } from './domains/discovery/search.mjs';
 import { registerFilmRoom } from './domains/discovery/filmRoom.mjs';
-import { createRequestWriters, registerClubRequests, requestForRecipient } from './domains/recruitment/requests.mjs';
-import { registerClubTrials } from './domains/recruitment/clubTrials.mjs';
+import { requestForRecipient } from './domains/recruitment/requests.mjs';
+import { createRecruitment } from './domains/recruitment/index.mjs';
 import { registerLegacySigning } from './domains/recruitment/signings/legacy.mjs';
-import { registerLedger, ledgerView } from './domains/recruitment/ledger.mjs';
+import { ledgerView } from './domains/recruitment/ledger.mjs';
 import { grassrootsOrgOnly } from './domains/development/guards.mjs';
-import { registerClubChecks } from './domains/verification/clubChecks.mjs';
 import { createEnterprise } from './domains/enterprise/index.mjs';
 import { requestInstrumentation } from './domains/platform/metrics.mjs';
 import {
@@ -325,8 +319,6 @@ function ledgerAppend(entry) {
   return row;
 }
 
-const canonicalContractFor = createContractLookup({ signingsFollowUps });
-
 // Development shortcuts (seeded passwordless identities, credential-less org logins) exist for local work and tests
 // only, and are refused in production.
 const DEV_LOGINS = devLoginsEnabled();
@@ -414,7 +406,7 @@ const { notifier, notify, openChannel } = createMessaging({
 });
 
 const { recordActivity, refreshJourneyBadges } = createActivity({ players, notify });
-const { publishedVouchesFor, vouchesFor } = createVouchReads({ vouches: verificationReads.vouches });
+const { publishedVouchesFor, vouchesFor } = createVouches({ verificationReads });
 const insightsFor = createInsights({ ledger: safetyAudit.ledger });
 
 // Public view of a player for a given org: a positive allowlist (views/playerViews.mjs), never a spread of the
@@ -437,16 +429,27 @@ function playerViewForOrg(player, org) {
 }
 
 // ------------------------------------------------------------- club routes
-// The one writer of a request row and of an accepted trial: the Contact, Trial and open-day flows and the Inbox's
-// answers all go through them.
-const { issueRecruitmentRequest, issueAcceptedTrial, contactReplyFrom } = createRequestWriters({
+// Requests and trials, the ledger and budgets: the writers of a request row and an accepted trial that the Contact,
+// Trial and open-day flows and the Inbox's answers all go through.
+const { issueRecruitmentRequest, issueAcceptedTrial, contactReplyFrom, canonicalContractFor } = createRecruitment({
+  orgRouter,
   recruitment,
-  nextId,
-  ledgerAppend,
-  notify,
-  broadcast,
+  recruitmentCases,
+  recruitmentReads,
+  signingsFollowUps,
+  safetyAudit,
+  operations,
+  byId,
+  findPlayer,
+  isBlocked,
+  rateLimit,
   safeguardingCertified,
   moderateOrRefuse,
+  unit,
+  nextId,
+  notify,
+  broadcast,
+  ledgerAppend,
 });
 registerPlayerSearch({
   orgRouter,
@@ -458,16 +461,6 @@ registerPlayerSearch({
   broadcast,
   nextId,
   playerViewForOrg,
-});
-registerClubRequests({
-  orgRouter,
-  recruitment,
-  findPlayer,
-  isBlocked,
-  moderateOrRefuse,
-  rateLimit,
-  unit,
-  issueRecruitmentRequest,
 });
 registerFilmRoom({
   orgRouter,
@@ -489,18 +482,6 @@ const { checkSavedSearches } = registerSavedSearches({
   nextId,
   playerViewForOrg,
   savedSearches: operations.savedSearches,
-});
-registerClubTrials({
-  orgRouter,
-  recruitment,
-  findPlayer,
-  isBlocked,
-  moderateOrRefuse,
-  unit,
-  nextId,
-  ledgerAppend,
-  notify,
-  broadcast,
 });
 // Development: the grassroots club and journey, the player's record, objectives, Box Cam and the Combine, the Hub.
 const developmentDomain = createDevelopment({
@@ -547,17 +528,6 @@ const developmentDomain = createDevelopment({
   ledgerAppend,
 });
 const { pathwayRecord } = developmentDomain;
-registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, rateLimit, unit, seam, broadcast });
-registerLedger({
-  orgRouter,
-  safetyAudit,
-  recruitment,
-  signings: signingsFollowUps.signings,
-  invoices: operations.invoices,
-  reputationSeed: operations.reputationSeed,
-  findPlayer,
-  isBlocked,
-});
 
 // The attributed Trust & Safety lane. Every route here resolves a specific authenticated reviewer (never the shared
 // key) before it runs; the middleware comes from registerCompliance() below.
@@ -583,64 +553,8 @@ function revokeOrgUserAccess(userId) {
 }
 
 // --------------------------------------------- scouting, operations and media
-// Evidence and coach identity, assessments and video, opportunities and campaigns, development objectives, resumable
+// Evidence and coach identity, assessments and video, opportunities and campaigns, suitability preferences, resumable
 // uploads, and the post-signing follow-ups with their persistent sweep.
-const clubWorkspaceCtx = {
-  byId,
-  safetyReads,
-  scoutingReads,
-  verificationReads,
-  agentReads,
-  complianceReads,
-  developmentReads,
-  development,
-  boxCamReads,
-  discoveryReads,
-  insightReads,
-  grassrootsReads,
-  recruitmentReads,
-  users,
-  orgs,
-  players,
-  guardians,
-  unit,
-  app,
-  orgRouter,
-  playerRouter,
-  guardianRouter,
-  adminRouter,
-  nextId,
-  notify,
-  ledgerAppend,
-  broadcast,
-  safetyAudit,
-  recruitment,
-  recruitmentCases,
-  signingsFollowUps,
-  scoutingEvidence,
-  scoutingAssessments,
-  clubSetup,
-  opportunitiesCampaigns,
-  transitionsVouches,
-  findPlayer,
-  isBlocked,
-  moderateOrRefuse,
-  playerViewForOrg,
-  sessionFor,
-  storage,
-  mailer,
-  orgSafe,
-  recordActivity,
-  revokeOrgUserAccess,
-  grassrootsOrgOnly,
-  guardianManagedOnly,
-  safeguardingCertified,
-  publishedVouchesFor,
-  pathwayRecord,
-  DRILLS,
-  DATA_DIR,
-  operations,
-};
 createScouting({
   byId,
   scoutingReads,
@@ -730,78 +644,8 @@ createOperations({
 });
 
 // --------------------------------------- integrations, delivery and enterprise
-// Imports, API keys and webhooks; the delivery centre; onboarding, MFA, SSO, audit and backup; private suitability
-// preferences; transition cases; exposure and evidence-gap insight; fixture coverage; deal scenarios; federation
-// groups.
-const enterpriseCtx = {
-  mfaGuards,
-  byId,
-  safetyReads,
-  scoutingReads,
-  verificationReads,
-  agentReads,
-  complianceReads,
-  developmentReads,
-  development,
-  boxCamReads,
-  discoveryReads,
-  insightReads,
-  grassrootsReads,
-  recruitmentReads,
-  users,
-  sessions,
-  orgs,
-  players,
-  guardians,
-  mediaDeletions,
-  codes,
-  notifications,
-  dispatches,
-  outbox,
-  pushLog,
-  pushTokens,
-  channels,
-  unit,
-  app,
-  orgRouter,
-  playerRouter,
-  guardianRouter,
-  adminRouter,
-  nextId,
-  notify,
-  ledgerAppend,
-  broadcast,
-  safetyAudit,
-  recruitment,
-  recruitmentCases,
-  opportunitiesCampaigns,
-  transitionsVouches,
-  insightCoverage,
-  enterprise,
-  enterpriseReads,
-  groups,
-  groupReads,
-  integrations,
-  integrationReads,
-  operations,
-  schemaVersion: () => dataLayer.schemaVersion(),
-  findPlayer,
-  isBlocked,
-  moderateOrRefuse,
-  playerViewForOrg,
-  sessionFor,
-  storage,
-  mailer,
-  orgSafe,
-  recordActivity,
-  revokeOrgUserAccess,
-  grassrootsOrgOnly,
-  guardianManagedOnly,
-  safeguardingCertified,
-  createSession,
-  DATA_DIR,
-  backupDatabase: (file) => store.copyTo(file),
-};
+// Imports, API keys and webhooks; the delivery centre; onboarding, MFA, SSO, audit and backup; verification and
+// transition cases; exposure and evidence-gap insight; fixture coverage; federation groups.
 const { emitWebhook, webhookSweep } = createIntegrations({
   app,
   orgRouter,
@@ -876,100 +720,76 @@ createEnterprise({
   backupDatabase: (file) => store.copyTo(file),
   DATA_DIR,
 });
-const insightDomain = (() => {
-  const ctx = { ...enterpriseCtx, ...buildRouteHelpers(enterpriseCtx) };
-  const { transitionSweep } = registerTransitions({ ...ctx, notifyAction, emitWebhook });
-  const insight = createInsight({
-    orgRouter,
-    playerRouter,
-    insightCoverage,
-    recruitmentReads,
-    scoutingReads,
-    safetyReads,
-    players,
-    byId,
-    findPlayer,
-    isBlocked,
-    playerViewForOrg,
-    unit,
-    nextId,
-    notify,
-  });
-  registerBudgets(ctx);
-  createGroups({
-    orgRouter,
-    adminRouter,
-    groups,
-    groupReads,
-    recruitmentReads,
-    scoutingReads,
-    safetyReads,
-    byId,
-    users,
-    findPlayer,
-    isBlocked,
-    unit,
-    nextId,
-    notify,
-  });
-  const tick = () => {
-    transitionSweep();
-    insight.insightSweep();
-  };
-  tick();
-  setInterval(tick, SWEEP_MS).unref();
-  return insight;
-})();
-
-// ---------------------------------------------------- verification claims
-// Verification & Trust: independent claims, org-administered attestation,
-// Trust & Safety review, licences, disputes, references (domains/verification/claims/).
-// Returns its context so the console's verification switch can keep claim provenance in sync.
-const verificationClaims = registerVerificationClaims({
-  verification,
-  unit,
-  byId,
-  players,
-  guardians,
-  safetyReads,
-  scoutingReads,
-  verificationReads,
-  agentReads,
-  complianceReads,
-  developmentReads,
-  development,
-  boxCamReads,
-  discoveryReads,
-  insightReads,
-  grassrootsReads,
-  users,
-  orgs,
+// Verification: the club checks, transition cases and claims (independent claims, org-administered attestation,
+// Trust & Safety review, licences, disputes, references).
+const verificationDomain = createVerification({
   app,
   orgRouter,
   playerRouter,
   guardianRouter,
   adminRouter,
-  nextId,
-  notify,
-  ledgerAppend,
-  broadcast,
-  safetyAudit,
+  users,
+  orgs,
+  players,
+  codes,
+  clubSetup,
+  verification,
+  transitionsVouches,
+  development,
+  scoutingReads,
+  byId,
   findPlayer,
   isBlocked,
-  moderateOrRefuse,
-  playerViewForOrg,
-  sessionFor,
+  rateLimit,
   storage,
   mailer,
-  orgSafe,
-  recordActivity,
-  revokeOrgUserAccess,
-  grassrootsOrgOnly,
-  guardianManagedOnly,
-  safeguardingCertified,
-  createSession,
-  DATA_DIR,
+  unit,
+  seam,
+  nextId,
+  notify,
+  broadcast,
+  ledgerAppend,
+  notifyAction,
+  emitWebhook,
 });
+const insightDomain = createInsight({
+  orgRouter,
+  playerRouter,
+  insightCoverage,
+  recruitmentReads,
+  scoutingReads,
+  safetyReads,
+  players,
+  byId,
+  findPlayer,
+  isBlocked,
+  playerViewForOrg,
+  unit,
+  nextId,
+  notify,
+});
+createGroups({
+  orgRouter,
+  adminRouter,
+  groups,
+  groupReads,
+  recruitmentReads,
+  scoutingReads,
+  safetyReads,
+  byId,
+  users,
+  findPlayer,
+  isBlocked,
+  unit,
+  nextId,
+  notify,
+});
+const tick = () => {
+  verificationDomain.transitionSweep();
+  insightDomain.insightSweep();
+};
+tick();
+setInterval(tick, SWEEP_MS).unref();
 
 // ------------------------------------------------- the Trust & Safety console
 createSafetyConsole({
@@ -997,7 +817,7 @@ createSafetyConsole({
   safeguardingCertified,
   channelViewFor,
   vouchView,
-  syncLegacyOrgVerification: verificationClaims.syncLegacyOrgVerification,
+  syncLegacyOrgVerification: verificationDomain.syncLegacyOrgVerification,
 });
 
 // Canonical source-change events. Registered before the systems that write to
@@ -1027,80 +847,34 @@ registerAudit({
   },
 });
 
-// Football Passport: a provenance-aware projection over existing records.
-// Registered after the verification claims so it can read them; it
-// receives the same context and adds no new authorization surface.
-const passportDomain = registerFootballPassport({
-  byId,
-  players,
-  guardians,
-  safetyReads,
-  scoutingReads,
-  verificationReads,
-  agentReads,
-  complianceReads,
-  developmentReads,
-  development,
-  boxCamReads,
-  discoveryReads,
-  insightReads,
-  grassrootsReads,
-  recruitmentReads,
+// The Football Passport and the Trust Score: projections over the records of the domains above, each read through its
+// own gate. They add no authorization surface: a Passport or a Trust Score grants nothing.
+const passportDomain = createPassport({
   app,
   orgRouter,
   playerRouter,
   guardianRouter,
   adminRouter,
-  nextId,
-  notify,
-  ledgerAppend,
-  broadcast,
-  safetyAudit,
+  players,
+  passport,
+  development,
+  scoutingReads,
+  verificationReads,
+  agentReads,
+  developmentReads,
+  boxCamReads,
+  recruitmentReads,
+  byId,
   findPlayer,
   isBlocked,
   moderateOrRefuse,
   playerViewForOrg,
-  storage,
   recordSourceChange: sourceChanges.recordSourceChange,
-  passport,
+  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
   unit,
-});
-
-// ScoutBox Trust Score: a DERIVED evidence-confidence summary over the
-// verification claims, the Passport assembly, Box Cam and the Combine.
-// Registered last because it consumes all of them; it adds no storage and no
-// authorization surface (a Trust Score grants nothing).
-const trustDomain = registerTrustScore({
-  byId,
-  players,
-  guardians,
-  safetyReads,
-  scoutingReads,
-  verificationReads,
-  agentReads,
-  complianceReads,
-  developmentReads,
-  development,
-  boxCamReads,
-  discoveryReads,
-  insightReads,
-  grassrootsReads,
-  app,
-  orgRouter,
-  playerRouter,
-  guardianRouter,
-  adminRouter,
   nextId,
   notify,
   ledgerAppend,
-  broadcast,
-  safetyAudit,
-  findPlayer,
-  isBlocked,
-  moderateOrRefuse,
-  assemblePassport: passportDomain.assemblePassport,
-  passportHistoryFor: passportDomain.passportHistoryFor, // the trust band's history source reads the history alone
-  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
 });
 
 // Recruitment Rooms: the CLUB's private decision layer over one player.
@@ -1165,9 +939,9 @@ const roomsDomain = registerRecruitmentRooms({
   buildFootballPassport: passportDomain.buildFootballPassport,
   // The Passport CONTENT revision, recorded in decision snapshots.
   passportRevisionOf: passportDomain.passportRevisionOf,
-  buildTrustProfile: trustDomain.buildTrustProfile,
-  safeTrustProjection: trustDomain.safeTrustProjection,
-  trustSnapshotOf: trustDomain.trustSnapshotOf,
+  buildTrustProfile: passportDomain.buildTrustProfile,
+  safeTrustProjection: passportDomain.safeTrustProjection,
+  trustSnapshotOf: passportDomain.trustSnapshotOf,
   combineProjection: developmentDomain.combineProjection,
   combineRequestView: developmentDomain.combineRequestView,
   combineProtocolActive: developmentDomain.combineProtocolActive,
@@ -1237,9 +1011,9 @@ const discoveryDomain = registerDiscovery({
   // the pipeline itself.
   assemblePassport: passportDomain.assemblePassport,
   buildFootballPassport: passportDomain.buildFootballPassport,
-  buildTrustProfile: trustDomain.buildTrustProfile,
-  safeTrustProjection: trustDomain.safeTrustProjection,
-  trustSummaryFor: trustDomain.trustSummaryFor,
+  buildTrustProfile: passportDomain.buildTrustProfile,
+  safeTrustProjection: passportDomain.safeTrustProjection,
+  trustSummaryFor: passportDomain.trustSummaryFor,
   combineProjection: developmentDomain.combineProjection,
   reopenRoom: roomsDomain.reopenRoom,
   createRoomForPlayer: roomsDomain.createRoomForPlayer,
@@ -1277,7 +1051,7 @@ const matchFactsKeeper = createMatchFactsKeeper({
   ...domainCtx,
   matchFacts,
   sqlite: store.sqlite,
-  trustSummaryFor: trustDomain.trustSummaryFor,
+  trustSummaryFor: passportDomain.trustSummaryFor,
   trustPolicyVersion: TRUST_SCORE_POLICY_VERSION,
   testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
 });
@@ -1449,7 +1223,7 @@ const signingsDomain = registerSigning({
   recruitmentEvidenceProvider: recruitmentEvidence,
   access: agentAccess,
   integration: integrationDomain.seam,
-  evidence: { storeFile: verificationClaims.storeEvidenceFile, add: verificationClaims.addEvidence },
+  evidence: { storeFile: verificationDomain.storeEvidenceFile, add: verificationDomain.addEvidence },
   faults: faultLayer,
 });
 registerLegacySigning({
@@ -1609,7 +1383,7 @@ registerCapabilities({
   notificationPrefs,
   faultLayer,
 });
-assertProductionConfig({ trustWeightsTotal: trustDomain.trustWeightsTotal });
+assertProductionConfig({ trustWeightsTotal: passportDomain.trustWeightsTotal });
 
 // The event registry must be internally consistent. Development and test throw here; in production the problems are
 // logged. Every broadcast is checked against it when it is sent (liveSync.mjs), and an unregistered one fails closed.
