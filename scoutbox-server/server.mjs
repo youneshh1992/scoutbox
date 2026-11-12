@@ -507,6 +507,7 @@ registerClubRequests({
   isBlocked,
   moderateOrRefuse,
   rateLimit,
+  unit,
   issueRecruitmentRequest,
 });
 registerFilmRoom({

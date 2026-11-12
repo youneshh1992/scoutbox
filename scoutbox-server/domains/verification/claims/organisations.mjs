@@ -509,19 +509,22 @@ export function registerOrganisationVerification(ctx) {
         message:
           'A free-provider address does not evidence organisation email control. If your organisation has no domain, ask the organisation to confirm you directly — or Trust & Safety reviews the case.',
       });
-    const secret = mintToken({
-      purpose: 'work_email',
-      email,
-      subjectKind: 'org_user',
-      subjectId: req.orgUser.id,
-      orgId: req.org.id,
+    const secret = unit(() => {
+      const minted = mintToken({
+        purpose: 'work_email',
+        email,
+        subjectKind: 'org_user',
+        subjectId: req.orgUser.id,
+        orgId: req.org.id,
+      });
+      verEvent('email.challenge_sent', { subjectId: req.orgUser.id, orgId: req.org.id, after: { domain: dom } }, req);
+      return minted;
     });
     await mailer.send({
       to: email,
       subject: 'Confirm your work email for ScoutBox verification',
       text: `Hi ${req.orgUser.name},\n\nYour ScoutBox work-email confirmation code is ${secret}\n\nEntering it proves control of this mailbox. It expires in 30 minutes and works once.\n\nIf you did not request this, ignore the email.`,
     });
-    verEvent('email.challenge_sent', { subjectId: req.orgUser.id, orgId: req.org.id, after: { domain: dom } }, req);
     res
       .status(201)
       .json({ sent: true, note: 'Enter the code from the mailbox. Codes are single-use and expire in 30 minutes.' });
@@ -775,7 +778,18 @@ export function registerOrganisationVerification(ctx) {
       : [];
     const targets = pair.length ? pair : [claim];
     /** Every target moves or none does; a refusal is answered 409. */
-    const decide = (to, extra = {}, before = null) => {
+    // The decision, its notice to the person and its ledger row commit together.
+    const announce = (text) => {
+      notify({ kind: 'org_user', id: claim.subjectId }, 'verification', text, claim.id);
+      ctx.ledgerAppend?.({
+        type: 'verification_decision',
+        orgId: req.org.id,
+        scoutName: req.orgUser.name,
+        playerId: null,
+        detail: { claimId: claim.id, action },
+      });
+    };
+    const decide = (to, text, extra = {}, before = null) => {
       try {
         unit(() => {
           before?.();
@@ -798,6 +812,7 @@ export function registerOrganisationVerification(ctx) {
             );
             if (err) throw Object.assign(new Error(err), { decideError: err });
           }
+          announce(text);
         });
       } catch (e) {
         if (e.decideError) return e.decideError;
@@ -840,16 +855,11 @@ export function registerOrganisationVerification(ctx) {
           .json({ error: 'INTERVAL_INVALID', field: 'validUntil', message: 'The period must end after it starts.' });
       const err = decide(
         'verified',
+        `${req.org.name} confirmed your ${action === 'mark_former' ? 'historical ' : ''}affiliation${roleClaim ? ` as ${roleNow}` : ''}. ✓`,
         { validFrom: from, validUntil: until, current: action !== 'mark_former' },
         correct,
       );
       if (err) return res.status(409).json({ error: err });
-      notify(
-        { kind: 'org_user', id: claim.subjectId },
-        'verification',
-        `${req.org.name} confirmed your ${action === 'mark_former' ? 'historical ' : ''}affiliation${roleClaim ? ` as ${roleNow}` : ''}. ✓`,
-        claim.id,
-      );
     } else if (action === 'reject') {
       if (
         !presentOrRefuse(res, reason, 'reason', {
@@ -857,32 +867,16 @@ export function registerOrganisationVerification(ctx) {
         })
       )
         return;
-      const err = decide('rejected');
+      const err = decide('rejected', `${req.org.name} declined the verification request: ${reason.slice(0, 140)}`);
       if (err) return res.status(409).json({ error: err });
-      notify(
-        { kind: 'org_user', id: claim.subjectId },
-        'verification',
-        `${req.org.name} declined the verification request: ${reason.slice(0, 140)}`,
-        claim.id,
-      );
     } else {
       unit(() => {
         for (const c of targets) applyStatus(c, 'collecting_evidence', req, { reason });
+        announce(
+          `${req.org.name} asks for more information on your verification request${reason ? `: ${reason.slice(0, 140)}` : ''}.`,
+        );
       });
-      notify(
-        { kind: 'org_user', id: claim.subjectId },
-        'verification',
-        `${req.org.name} asks for more information on your verification request${reason ? `: ${reason.slice(0, 140)}` : ''}.`,
-        claim.id,
-      );
     }
-    ctx.ledgerAppend?.({
-      type: 'verification_decision',
-      orgId: req.org.id,
-      scoutName: req.orgUser.name,
-      playerId: null,
-      detail: { claimId: claim.id, action },
-    });
     res.json({ decided: action, claims: targets.map((c) => subjectClaimView(reads.claims.byId(c.id))) });
   });
 
@@ -955,13 +949,13 @@ export function registerOrganisationVerification(ctx) {
         verification.admins.revoke(a.id, { at: Date.now(), by: req.orgUser.id });
         verEvent('admin.revoked', { orgId: req.org.id, subjectId: a.userId, reason: 'departed' }, req);
       }
+      notify(
+        { kind: 'org_user', id: req.params.userId },
+        'verification',
+        `${req.org.name} recorded you as departed. Your verified history stays on your profile; if this is wrong you can dispute it from Verification.`,
+        claims[0].id,
+      );
     });
-    notify(
-      { kind: 'org_user', id: req.params.userId },
-      'verification',
-      `${req.org.name} recorded you as departed. Your verified history stays on your profile; if this is wrong you can dispute it from Verification.`,
-      claims[0].id,
-    );
     res.json({
       closed: claims.length,
       note: 'Current badges end now; the historical verified period remains. The person can dispute this.',
@@ -1177,14 +1171,14 @@ export function registerOrganisationVerification(ctx) {
         revokedBy: null,
       });
       verEvent('admin.accepted', { orgId: req.org.id, subjectId: userId, after: { level } }, req);
+      notify(
+        { kind: 'org_user', id: userId },
+        'verification',
+        `You now hold ${level.replace(/_/g, ' ')} authority for ${req.org.name}.`,
+        created.id,
+      );
       return created;
     });
-    notify(
-      { kind: 'org_user', id: userId },
-      'verification',
-      `You now hold ${level.replace(/_/g, ' ')} authority for ${req.org.name}.`,
-      a.id,
-    );
     res.status(201).json({ admin: a });
   });
 
@@ -1744,6 +1738,7 @@ export function registerOrganisationVerification(ctx) {
         identityLink: null,
       });
       secret = mintToken({ purpose: 'root_email', email: created.workEmail, refId: created.id });
+      verEvent('review.requested', { orgId: null, subjectId: null, after: { rootRequest: created.id, checks } });
       return created;
     });
     await mailer.send({
@@ -1751,7 +1746,6 @@ export function registerOrganisationVerification(ctx) {
       subject: `Verify your email for the ${r.orgName} ScoutBox application`,
       text: `Your ScoutBox organisation-application code is ${secret}\n\nSingle use, expires in 30 minutes.`,
     });
-    verEvent('review.requested', { orgId: null, subjectId: null, after: { rootRequest: r.id, checks } });
     res.status(201).json({
       requestId: r.id,
       applicantSecret,

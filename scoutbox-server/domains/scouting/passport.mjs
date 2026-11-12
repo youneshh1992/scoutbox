@@ -554,13 +554,16 @@ export function registerPassport(ctx) {
       history: [],
     };
     auditDraft(draft, 'org', req.org.id, req.orgUser.name, 'confirmed', draft.role);
-    const a = scoutingEvidence.coachAffiliations.create(draft);
-    ledgerAppend({
-      type: 'coach_affiliation_confirmed',
-      orgId: req.org.id,
-      orgName: req.org.name,
-      userId: req.orgUser.id,
-      scoutName: req.orgUser.name,
+    const a = unit(() => {
+      const created = scoutingEvidence.coachAffiliations.create(draft);
+      ledgerAppend({
+        type: 'coach_affiliation_confirmed',
+        orgId: req.org.id,
+        orgName: req.org.name,
+        userId: req.orgUser.id,
+        scoutName: req.orgUser.name,
+      });
+      return created;
     });
     res.status(201).json({ affiliation: affiliationView(a) });
   });

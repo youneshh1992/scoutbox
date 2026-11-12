@@ -1030,18 +1030,21 @@ export function registerJourneys(ctx) {
     const { time, address, notes, collection } = body;
     if (notes && !moderateOrRefuse(res, notes, { kind: 'trial_arrival', playerId: t.playerId, orgId: req.org.id }))
       return;
-    const fresh = trials.setArrival(t.id, {
-      arrival: {
-        time: time || null,
-        address: address || null,
-        notes: notes || null,
-      },
-      collection: collection ? { policy: collection } : null,
+    const fresh = unit(() => {
+      const set = trials.setArrival(t.id, {
+        arrival: {
+          time: time || null,
+          address: address || null,
+          notes: notes || null,
+        },
+        collection: collection ? { policy: collection } : null,
+      });
+      notifyTrialParties(
+        set,
+        `📍 ${set.orgName} published arrival details for the trial on ${set.proposedDate ?? 'TBC'}.`,
+      );
+      return set;
     });
-    notifyTrialParties(
-      fresh,
-      `📍 ${fresh.orgName} published arrival details for the trial on ${fresh.proposedDate ?? 'TBC'}.`,
-    );
     res.json({ trial: trialDayView(fresh, 'org') });
   });
 
@@ -1074,18 +1077,21 @@ export function registerJourneys(ctx) {
       reason,
       newDate: moved.value,
     };
-    const fresh = trials.recordDayStatus(
-      t.id,
-      kind === 'postponed' && moved.value
-        ? { event, proposedDate: moved.value, reportDueAt: trialReportDueAt(moved.value, t.acceptedAt) }
-        : { event },
-    );
-    notifyTrialParties(
-      fresh,
-      kind === 'cancelled'
-        ? `❌ ${fresh.orgName} cancelled the trial: ${reason}`
-        : `📅 ${fresh.orgName} moved the trial to ${newDate ?? 'a new date TBC'}: ${reason}`,
-    );
+    const fresh = unit(() => {
+      const recorded = trials.recordDayStatus(
+        t.id,
+        kind === 'postponed' && moved.value
+          ? { event, proposedDate: moved.value, reportDueAt: trialReportDueAt(moved.value, t.acceptedAt) }
+          : { event },
+      );
+      notifyTrialParties(
+        recorded,
+        kind === 'cancelled'
+          ? `❌ ${recorded.orgName} cancelled the trial: ${reason}`
+          : `📅 ${recorded.orgName} moved the trial to ${newDate ?? 'a new date TBC'}: ${reason}`,
+      );
+      return recorded;
+    });
     res.json({ trial: trialDayView(fresh, 'org') });
   }
   orgRouter.post('/trials/:id/cancel', (req, res) => cancelOrPostpone(req, res, 'cancelled'));

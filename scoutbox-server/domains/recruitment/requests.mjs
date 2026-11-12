@@ -278,10 +278,15 @@ export function registerClubRequests({
   isBlocked,
   moderateOrRefuse,
   rateLimit,
+  unit,
   issueRecruitmentRequest,
 }) {
-  if (typeof issueRecruitmentRequest !== 'function' || typeof rateLimit?.limited !== 'function')
-    throw new TypeError('registerClubRequests needs the request writer and the rate limiter');
+  if (
+    typeof issueRecruitmentRequest !== 'function' ||
+    typeof rateLimit?.limited !== 'function' ||
+    typeof unit !== 'function'
+  )
+    throw new TypeError('registerClubRequests needs the request writer, the rate limiter and unit');
 
   orgRouter.post('/players/:id/request', (req, res) => {
     const p = findPlayer(req.params.id);
@@ -342,14 +347,17 @@ export function registerClubRequests({
       });
     if (rateLimit.limited(type === 'trial' ? 'trial_invite' : 'contact_send', req.org.id))
       return res.status(429).json(rateLimitedBody(type === 'trial' ? 'trial_invite' : 'contact_send'));
-    const request = issueRecruitmentRequest({
-      org: req.org,
-      orgUser: req.orgUser,
-      player: p,
-      type,
-      message,
-      trialDetails,
-    });
+    // The request, its ledger row and its notices commit together.
+    const request = unit(() =>
+      issueRecruitmentRequest({
+        org: req.org,
+        orgUser: req.orgUser,
+        player: p,
+        type,
+        message,
+        trialDetails,
+      }),
+    );
     res.status(201).json({ ok: true, requestId: request.id, status: 'pending', routedTo: request.routedTo });
   });
 

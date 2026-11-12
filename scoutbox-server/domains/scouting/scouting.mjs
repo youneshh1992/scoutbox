@@ -995,13 +995,15 @@ export function registerScouting(ctx) {
       status: 'open',
       createdAt: Date.now(),
     };
-    cases.addAssignment(c.id, { assignment: asg }, byStaff(req, 'assigned', `${u.name}: ${asg.task}`));
-    notify(
-      { kind: 'org_user', id: u.id },
-      'case',
-      `📌 ${req.orgUser.name} assigned you: ${asg.task} (${c.playerName}).`,
-      c.id,
-    );
+    unit(() => {
+      cases.addAssignment(c.id, { assignment: asg }, byStaff(req, 'assigned', `${u.name}: ${asg.task}`));
+      notify(
+        { kind: 'org_user', id: u.id },
+        'case',
+        `📌 ${req.orgUser.name} assigned you: ${asg.task} (${c.playerName}).`,
+        c.id,
+      );
+    });
     res.status(201).json({ assignment: asg });
   });
 
@@ -1147,14 +1149,14 @@ export function registerScouting(ctx) {
         });
         if (!c.room) after = cases.setStage(c.id, { stage: 'decision' }); // derived on a Room — see the decision route
       }
+      notify(
+        { kind: 'org_user', id: appr.requestedBy.userId },
+        'case',
+        `${approve ? '✅ approved' : '❌ rejected'}: your ${appr.decision.outcome} decision on ${c.playerName}.`,
+        c.id,
+      );
       return after;
     });
-    notify(
-      { kind: 'org_user', id: appr.requestedBy.userId },
-      'case',
-      `${approve ? '✅ approved' : '❌ rejected'}: your ${appr.decision.outcome} decision on ${c.playerName}.`,
-      c.id,
-    );
     res.json({ case: caseView(fresh) });
   });
 

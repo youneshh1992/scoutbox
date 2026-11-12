@@ -173,24 +173,24 @@ export function registerClubTrials({
         userId: req.orgUser.id,
         scoutName: req.orgUser.name,
       });
-    });
-    // The report closes the club's obligation even while the family has blocked the club, but the block stands: no
-    // notification reaches the player or guardian. The report is still on the profile when they look.
-    if (!isBlocked(p.id, req.org.id)) {
-      notify(
-        { kind: 'player', id: p.id },
-        'trial_report',
-        `${req.org.name} filed your trial report${report.strengthNote ? ' — with development feedback' : ''}. It's on your profile.`,
-        report.id,
-      );
-      if (p.guardianId)
+      // The report closes the club's obligation even while the family has blocked the club, but the block stands: no
+      // notification reaches the player or guardian. The report is still on the profile when they look.
+      if (!isBlocked(p.id, req.org.id)) {
         notify(
-          { kind: 'guardian', id: p.guardianId },
+          { kind: 'player', id: p.id },
           'trial_report',
-          `${req.org.name} filed the trial report for ${p.name}.`,
+          `${req.org.name} filed your trial report${report.strengthNote ? ' — with development feedback' : ''}. It's on your profile.`,
           report.id,
         );
-    }
+        if (p.guardianId)
+          notify(
+            { kind: 'guardian', id: p.guardianId },
+            'trial_report',
+            `${req.org.name} filed the trial report for ${p.name}.`,
+            report.id,
+          );
+      }
+    });
     broadcast('players', { playerId: p.id });
     res.status(201).json({ ok: true, report, playerTrustScore: computeTrustScore(p) });
   });
