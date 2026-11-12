@@ -10,6 +10,7 @@ import { ownChild } from './children.mjs';
  */
 export function createPlayerErasure({
   unit,
+  afterCommit,
   seam,
   findPlayer,
   players,
@@ -25,11 +26,11 @@ export function createPlayerErasure({
 }) {
   if (!Array.isArray(redactors) || !redactors.every((r) => typeof r === 'function'))
     throw new TypeError("createPlayerErasure needs each domain's redactor as a function");
+  if (typeof afterCommit !== 'function') throw new TypeError('createPlayerErasure needs afterCommit from the store');
   return function erasePlayer(playerId) {
     const p = findPlayer(playerId);
     if (!p) return false;
     const at = Date.now();
-    let uploadIds = [];
     unit(() => {
       mediaDeletions.enqueue(
         p.media.map((m) => m.id),
@@ -39,13 +40,15 @@ export function createPlayerErasure({
       codes.revokePairingCodesFor(playerId); // before the player row
       players.erase(playerId, { at });
       seam('player.delete.after_erase');
-      uploadIds = uploads.removeForPlayer(playerId); // the chunk files after COMMIT
+      const uploadIds = uploads.removeForPlayer(playerId);
       for (const redact of redactors) redact(playerId, at);
       broadcast('players');
+      // The filesystem boundary, after COMMIT: a failure keeps the queue entry, and the next boot or sweep retries.
+      afterCommit(() => {
+        mediaDeletions.process(storage);
+        removeUploadChunks(dataDir, uploadIds);
+      });
     });
-    // The filesystem boundary: a failure here keeps the queue entry, and the next boot or sweep retries.
-    mediaDeletions.process(storage);
-    removeUploadChunks(dataDir, uploadIds);
     return true;
   };
 }

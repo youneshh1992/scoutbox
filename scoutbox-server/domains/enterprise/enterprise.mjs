@@ -1,7 +1,7 @@
 // SSO runs against a local test identity provider (HMAC-signed, enabled only where dev logins are); no corporate IdP
 // is configured and the API says so. A production rollout swaps the token verification for a maintained OIDC library
 // against the real issuer; the state/nonce/code flow is the same. Restores go into a separate empty directory.
-import { sideEffect, declareAuditedRead } from '../../writeRules.mjs';
+import { sideEffect, declareAuditedRead, apartFromTheAct } from '../../writeRules.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -562,7 +562,14 @@ export function registerEnterprise(ctx) {
     const { code, state } = body;
     const st = state ? enterpriseReads.ssoStates.byStateHash(sha256(state)) : null;
     // Single use even on failure: the database decides, so two callbacks racing on one state cannot both pass.
-    if (!st || st.usedAt || st.expiresAt < Date.now() || !enterprise.ssoStates.markUsed(st.id, Date.now())) {
+    if (
+      !st ||
+      st.usedAt ||
+      st.expiresAt < Date.now() ||
+      !apartFromTheAct('a single-use SSO state is spent even when the sign-in then fails', () =>
+        enterprise.ssoStates.markUsed(st.id, Date.now()),
+      )
+    ) {
       return res
         .status(401)
         .json({ error: 'SSO_STATE_INVALID', message: 'Unknown, expired or already-used state — restart the sign-in.' });
@@ -589,27 +596,31 @@ export function registerEnterprise(ctx) {
           'No staff account with this email exists in the organisation. Ask a lead for an invitation — SSO never creates accounts by itself.',
       });
     }
-    if (user.ssoSubject !== tok.sub) {
-      // A subject still held by a removed account of the organisation is not moved.
-      try {
-        users.update(user.id, (d) => {
-          d.ssoSubject = tok.sub;
-        });
-      } catch (e) {
-        if (e?.code === 'STAFF_SSO_TAKEN')
-          return res.status(409).json({
-            error: 'SSO_LINK_CONFLICT',
-            message: 'This identity-provider account is linked to another staff account of the organisation.',
+    // The link and the session commit together.
+    let token;
+    try {
+      token = unit(() => {
+        // A subject still held by a removed account of the organisation is not moved.
+        if (user.ssoSubject !== tok.sub)
+          users.update(user.id, (d) => {
+            d.ssoSubject = tok.sub;
           });
-        throw e;
-      }
+        return ctx.createSession('org', org.id, { userId: user.id, via: 'sso' });
+      });
+    } catch (e) {
+      if (e?.code === 'STAFF_SSO_TAKEN')
+        return res.status(409).json({
+          error: 'SSO_LINK_CONFLICT',
+          message: 'This identity-provider account is linked to another staff account of the organisation.',
+        });
+      throw e;
     }
     // SSO group claims never grant ScoutBox privileges; role, verification and safeguarding approval have their own flows.
     res.json({
       userId: user.id,
       role: user.role,
       org: ctx.orgSafe(org),
-      token: ctx.createSession('org', org.id, { userId: user.id, via: 'sso' }),
+      token,
       ignoredClaims: tok.groups?.length
         ? { groups: tok.groups, note: 'Identity-provider groups are ignored for permissions.' }
         : null,

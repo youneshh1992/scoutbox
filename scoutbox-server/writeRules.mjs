@@ -2,16 +2,16 @@
 //
 //  1. A request commits at most one transaction that changes rows: an act and everything it records (its
 //     notifications, ledger and audit rows) commit or roll back together, in one unit of work.
-//  2. A GET or HEAD request commits nothing, unless it declares the write (`declareAuditedRead`).
+//  2. A GET or HEAD request commits nothing, unless it records itself (`declareAuditedRead`).
 //  3. Nothing leaves the process (mail, push, a live event, a provider call) while a transaction is open.
 //  4. Every write runs inside a transaction: a statement that writes outside one is reported.
 //
 // What a request commits is counted from SQLite's own change counter (`total_changes()`), so a transaction that
-// changed nothing is not counted, and a write that bypassed the transaction helpers is still seen. Not counted:
-// the id counter's mints (a lost mint leaves a gap, never a wrong row); after-commit side effects and the delivery
-// records they write (`sideEffect`); sweeps, which commit one transaction per item by design (`asSweep`); a row
-// created on first use and a credential's bookkeeping (`apartFromTheAct`); state a read reconciles (`asReconciling`); and work
-// outside any request (boot, timers).
+// changed nothing is not counted, and a write that bypassed the transaction helpers is still seen. Not counted, and
+// allowed in a read: the id counter's mints (`standaloneWrite`; a lost mint leaves a gap, never a wrong row);
+// after-commit side effects and the delivery records they write (`sideEffect`); sweeps, which commit one
+// transaction per item by design (`asSweep`); first-use setup and a credential's bookkeeping (`apartFromTheAct`);
+// workflow state a read brings up to date (`asReconciling`); and work outside any request (boot, timers).
 //
 // A broken rule throws outside production, so a battery fails at the call site; in production it is counted and
 // logged (`state()`), because the commit it would refuse is the second one, and the first is already durable.
@@ -19,21 +19,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 const scope = new AsyncLocalStorage();
 const RULES = new WeakMap();
-
-// While routes are being moved onto one unit each, the ones that still commit more than once are listed here and
-// counted instead of refused. The list only shrinks.
-export const TRANSITIONAL_ROUTES = new Set([
-  'DELETE /guardian/children/:id',
-  'DELETE /player/account',
-  'POST /auth/guardian/signup',
-  'POST /auth/org/login',
-  'POST /auth/sso/callback',
-  'POST /callbacks/delivery',
-  'POST /org/agent/agency/team',
-  'POST /org/agent/clients/request',
-  'POST /org/agent/transactions/:id/consents/request',
-  'POST /org/rooms/:id/transaction-handoff',
-]);
 
 /** Run `fn` as one HTTP request. `routeKey()` names the matched route (`POST /org/rooms/:id`) once Express knows it. */
 export function inRequest({ method, routeKey }, fn) {
@@ -96,25 +81,19 @@ function callSite() {
     .replace(/\)$/, '');
 }
 
-/**
- * The rules for one connection. `enforce`: throw on a broken rule (everywhere but production). `transitional`:
- * route keys that are counted instead of refused.
- */
-export function attachWriteRules(sqlite, { enforce = true, transitional = TRANSITIONAL_ROUTES } = {}) {
+/** The rules for one connection. `enforce`: throw on a broken rule (everywhere but production). */
+export function attachWriteRules(sqlite, { enforce = true } = {}) {
   const total = sqlite.prepare('SELECT total_changes() AS n');
   const changes = () => total.get().n;
   let settled = changes();
   let atBegin = null;
-  const counts = { violations: 0, transitional: 0, outward: 0, writesOutsideTransaction: 0 };
+  const counts = { violations: 0, outward: 0, writesOutsideTransaction: 0 };
   let lastViolation = null;
 
   function violation(rule, message, request) {
     const route = request?.routeKey?.() ?? null;
-    const listed = route && transitional.has(route) && rule !== 'outward';
-    if (listed) counts.transitional += 1;
-    else counts.violations += 1;
+    counts.violations += 1;
     lastViolation = { at: Date.now(), rule, route, message: message.slice(0, 300) };
-    if (listed) return;
     const err = Object.assign(new Error(`WRITE_RULE ${rule}: ${message}`), { code: 'WRITE_RULE_BROKEN', rule });
     if (enforce || rule === 'outward') throw err;
     console.error(err.message);

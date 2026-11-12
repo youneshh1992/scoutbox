@@ -616,18 +616,21 @@ export function registerCompliance(rawCtx) {
           : []),
       ],
     };
-    const out = reviews.create(r);
-    broadcast('regulatory_review_requested', { orgId: agencyOrgId, reviewId: out.id, kind });
-    if (agentUserId)
-      notify(
-        { kind: 'org_user', id: agentUserId },
-        'regulatory_review_required',
-        kind === 'verification_facet'
-          ? 'A verification submission needs attributed Trust & Safety review. Nothing is verified until a named reviewer decides.'
-          : 'A compliance question needs attributed Trust & Safety review. The workflow does not proceed until a named reviewer decides.',
-        out.id,
-      );
-    return out;
+    // The review and its notice commit together (inside the caller's unit when there is one).
+    return unit(() => {
+      const out = reviews.create(r);
+      broadcast('regulatory_review_requested', { orgId: agencyOrgId, reviewId: out.id, kind });
+      if (agentUserId)
+        notify(
+          { kind: 'org_user', id: agentUserId },
+          'regulatory_review_required',
+          kind === 'verification_facet'
+            ? 'A verification submission needs attributed Trust & Safety review. Nothing is verified until a named reviewer decides.'
+            : 'A compliance question needs attributed Trust & Safety review. The workflow does not proceed until a named reviewer decides.',
+          out.id,
+        );
+      return out;
+    });
   }
 
   /** For the agent core. Idempotent per facet. */

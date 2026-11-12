@@ -1,3 +1,4 @@
+import { apartFromTheAct } from '../../writeRules.mjs';
 import crypto from 'node:crypto';
 import express from 'express';
 import { filled } from '../platform/schemas.mjs';
@@ -234,7 +235,10 @@ export function registerOrgAccount({
         noteLoginFailure(`org:${orgId}`);
         return res.status(401).json({ error: 'BAD_PASSWORD', message: 'This organisation is password-protected.' });
       }
-      if (check === 'upgrade') orgs.setPasswordHash(org.id, hashPassword(body.password));
+      if (check === 'upgrade')
+        apartFromTheAct('a password hash upgraded on use', () =>
+          orgs.setPasswordHash(org.id, hashPassword(body.password)),
+        );
     } else if (!devLogins) {
       return devLoginRefused(res);
     }
@@ -244,85 +248,89 @@ export function registerOrgAccount({
         .status(403)
         .json({ error: 'USER_REMOVED', message: "This staff member's access was removed by the organisation." });
     }
-    // With MFA enabled the password alone never gets a session; recovery codes are one-time.
-    if (user?.mfa?.enabledAt) {
-      if (mfaGuards.mfaLocked(user.id)) {
-        return res
-          .status(429)
-          .json({ error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
-      }
-      const { mfaCode, recoveryCode } = body;
-      let second = false;
-      if (mfaCode) second = totpValid(users.mfaSecretOf(user.id), mfaCode);
-      else if (recoveryCode) {
-        // Only the call that deleted the code's row passes.
-        second = users.useRecoveryCode(user.id, crypto.createHash('sha256').update(recoveryCode).digest('hex'));
-      }
-      if (!second) {
-        if (mfaCode || recoveryCode) mfaGuards.mfaFail(user.id);
-        return res.status(401).json({
-          error: mfaCode || recoveryCode ? 'MFA_CODE_WRONG' : 'MFA_REQUIRED',
-          message:
-            mfaCode || recoveryCode
-              ? 'That code is not valid.'
-              : 'This account uses two-factor authentication — send mfaCode (authenticator) or recoveryCode.',
-        });
-      }
-      mfaGuards.clear(user.id);
-    }
-    // An organisation with real credentials gets staff accounts only through server-controlled flows: the registering
-    // administrator, a lead's invitation, or once, the first login with the organisation password, which bootstraps
-    // an administrator. The role sent with that login is ignored, so nobody with the shared password can make
-    // themselves staff or rewrite another's role. Seeded demo organisations let a login name its own role, refused
-    // outside development above.
-    const credentialed = !!passwordHash;
-    let roleNote;
-    if (!user) {
-      if (credentialed) {
-        if (users.firstActive(orgId)) {
-          return res.status(403).json({
-            error: 'STAFF_NOT_PROVISIONED',
+    // Everything the login writes (a used recovery code, a bootstrapped administrator, a role, the session) commits
+    // together, and the answer is sent only after it has.
+    const answer = (status, body) => ({ status, body });
+    const out = unit(() => {
+      // With MFA enabled the password alone never gets a session; recovery codes are one-time.
+      if (user?.mfa?.enabledAt) {
+        if (mfaGuards.mfaLocked(user.id)) {
+          return answer(429, { error: 'MFA_LOCKED', message: 'Too many wrong codes — try again in a few minutes.' });
+        }
+        const { mfaCode, recoveryCode } = body;
+        let second = false;
+        if (mfaCode) second = totpValid(users.mfaSecretOf(user.id), mfaCode);
+        else if (recoveryCode) {
+          // Only the call that deleted the code's row passes.
+          second = users.useRecoveryCode(user.id, crypto.createHash('sha256').update(recoveryCode).digest('hex'));
+        }
+        if (!second) {
+          if (mfaCode || recoveryCode) mfaGuards.mfaFail(user.id);
+          return answer(401, {
+            error: mfaCode || recoveryCode ? 'MFA_CODE_WRONG' : 'MFA_REQUIRED',
             message:
-              'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
+              mfaCode || recoveryCode
+                ? 'That code is not valid.'
+                : 'This account uses two-factor authentication — send mfaCode (authenticator) or recoveryCode.',
           });
         }
-        // A lead-tier role, so the organisation can invite its staff.
-        const requested = (role || '').trim();
-        user = unit(() => {
-          const created = users.create({
-            orgId,
-            name: scoutName.trim(),
-            role: isLeadRole(requested) ? requested : 'Manager',
-            provenance: 'org_password_bootstrap',
-          });
-          safetyAudit.opsEvents.record({
-            id: nextId('ops'),
-            at: Date.now(),
-            kind: 'staff_bootstrapped',
-            detail: { orgId: org.id, userId: created.id, by: created.name },
-          });
-          return created;
-        });
-      } else {
-        user = users.create({ orgId, name: scoutName.trim(), role: role?.trim() || 'Scout' });
+        mfaGuards.clear(user.id);
       }
-    } else if (role && role.trim() && role.trim() !== user.role) {
-      if (credentialed) {
-        roleNote = 'Roles are assigned by your organisation; the role entered at sign-in was not applied.';
-      } else {
-        user = users.setRole(user.id, role.trim()); // the development shortcut above
+      // An organisation with real credentials gets staff accounts only through server-controlled flows: the registering
+      // administrator, a lead's invitation, or once, the first login with the organisation password, which bootstraps
+      // an administrator. The role sent with that login is ignored, so nobody with the shared password can make
+      // themselves staff or rewrite another's role. Seeded demo organisations let a login name its own role, refused
+      // outside development above.
+      const credentialed = !!passwordHash;
+      let roleNote;
+      if (!user) {
+        if (credentialed) {
+          if (users.firstActive(orgId)) {
+            return answer(403, {
+              error: 'STAFF_NOT_PROVISIONED',
+              message:
+                'No staff account with this name exists in the organisation. Ask a lead for an invitation — the organisation password does not create accounts.',
+            });
+          }
+          // A lead-tier role, so the organisation can invite its staff.
+          const requested = (role || '').trim();
+          user = unit(() => {
+            const created = users.create({
+              orgId,
+              name: scoutName.trim(),
+              role: isLeadRole(requested) ? requested : 'Manager',
+              provenance: 'org_password_bootstrap',
+            });
+            safetyAudit.opsEvents.record({
+              id: nextId('ops'),
+              at: Date.now(),
+              kind: 'staff_bootstrapped',
+              detail: { orgId: org.id, userId: created.id, by: created.name },
+            });
+            return created;
+          });
+        } else {
+          user = users.create({ orgId, name: scoutName.trim(), role: role?.trim() || 'Scout' });
+        }
+      } else if (role && role.trim() && role.trim() !== user.role) {
+        if (credentialed) {
+          roleNote = 'Roles are assigned by your organisation; the role entered at sign-in was not applied.';
+        } else {
+          user = users.setRole(user.id, role.trim()); // the development shortcut above
+        }
       }
-    }
-    res.json({
-      userId: user.id,
-      role: user.role,
-      org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
-      token: createSession('org', org.id, { userId: user.id }),
-      ...(roleNote ? { roleNote } : {}),
-      // A nudge, not a lockout.
-      mfaSetupRequired:
-        !!(org.mfaRequiredForLeads && user && isLeadRole(user.role) && !user.mfa?.enabledAt) || undefined,
+      return answer(200, {
+        userId: user.id,
+        role: user.role,
+        org: { ...orgSafe(org), safeguardingCertified: safeguardingCertified(org) },
+        token: createSession('org', org.id, { userId: user.id }),
+        ...(roleNote ? { roleNote } : {}),
+        // A nudge, not a lockout.
+        mfaSetupRequired:
+          !!(org.mfaRequiredForLeads && user && isLeadRole(user.role) && !user.mfa?.enabledAt) || undefined,
+      });
     });
+    res.status(out.status).json(out.body);
   });
 }
 

@@ -734,30 +734,32 @@ export function registerIntegration(ctx) {
       rev: 1,
       revAt: at,
     };
-    cases.inviteHandoff(
-      kase.id,
-      { handoff: h },
-      handoffHistory(at, 'transaction_handoff_invited', h.invitedBy, {
-        handoffId: h.id,
-        represented: h.representedAtInvitation,
-      }),
-    );
-    broadcast('transaction_handoff_invited', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
-    // The player hears too: they should never learn a club is acting on them from their agent alone.
-    if (agreement?.agentUserId) {
+    unit(() => {
+      cases.inviteHandoff(
+        kase.id,
+        { handoff: h },
+        handoffHistory(at, 'transaction_handoff_invited', h.invitedBy, {
+          handoffId: h.id,
+          represented: h.representedAtInvitation,
+        }),
+      );
+      broadcast('transaction_handoff_invited', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
+      // The player hears too: they should never learn a club is acting on them from their agent alone.
+      if (agreement?.agentUserId) {
+        notify(
+          { kind: 'org_user', id: agreement.agentUserId },
+          'representation_transaction',
+          `${req.org.name} has invited a transaction workspace for one of your clients. Opening it is your action, and it commits nobody to anything.`,
+          h.id,
+        );
+      }
       notify(
-        { kind: 'org_user', id: agreement.agentUserId },
+        { kind: 'player', id: kase.playerId },
         'representation_transaction',
-        `${req.org.name} has invited a transaction workspace for one of your clients. Opening it is your action, and it commits nobody to anything.`,
+        `${req.org.name} has asked to open a transaction workspace about you. Nothing has been agreed and this is not an offer; you confirm your own participation if a workspace is opened.`,
         h.id,
       );
-    }
-    notify(
-      { kind: 'player', id: kase.playerId },
-      'representation_transaction',
-      `${req.org.name} has asked to open a transaction workspace about you. Nothing has been agreed and this is not an offer; you confirm your own participation if a workspace is opened.`,
-      h.id,
-    );
+    });
     res.status(201).json({
       handoff: handoffView(h, kase),
       note: 'Invited. A licensed agent opens the workspace, and every party confirms for themselves.',
@@ -784,25 +786,28 @@ export function registerIntegration(ctx) {
     // The other half of the invite/withdraw loop, on the same club budget.
     if (limitedOr429(res, 'transaction_handoff', kase.orgId)) return;
     const at = now();
-    const fresh = cases.withdrawHandoff(
-      kase.id,
-      { at },
-      handoffHistory(
-        at,
-        'transaction_handoff_withdrawn',
-        { userId: req.orgUser.id, name: req.orgUser.name },
-        { handoffId: h.id },
-      ),
-    );
-    broadcast('transaction_handoff_withdrawn', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
-    if (h.invitedAgentUserId) {
-      notify(
-        { kind: 'org_user', id: h.invitedAgentUserId },
-        'representation_transaction',
-        'A club has withdrawn its invitation to open a transaction workspace. Nothing was opened and nothing was agreed.',
-        h.id,
+    const fresh = unit(() => {
+      const withdrawn = cases.withdrawHandoff(
+        kase.id,
+        { at },
+        handoffHistory(
+          at,
+          'transaction_handoff_withdrawn',
+          { userId: req.orgUser.id, name: req.orgUser.name },
+          { handoffId: h.id },
+        ),
       );
-    }
+      broadcast('transaction_handoff_withdrawn', { orgId: kase.orgId, roomId: kase.id, handoffId: h.id });
+      if (h.invitedAgentUserId) {
+        notify(
+          { kind: 'org_user', id: h.invitedAgentUserId },
+          'representation_transaction',
+          'A club has withdrawn its invitation to open a transaction workspace. Nothing was opened and nothing was agreed.',
+          h.id,
+        );
+      }
+      return withdrawn;
+    });
     res.json({ handoff: handoffView(fresh.transactionHandoff, fresh) });
   });
 

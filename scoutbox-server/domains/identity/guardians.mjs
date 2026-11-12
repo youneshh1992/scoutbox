@@ -69,10 +69,14 @@ export function registerGuardianAccount({
       disclaimerAccepted: false,
       createdAt: Date.now(),
     };
-    // The e-mail goes out after the row commits, never inside a transaction.
+    // The account and its first session commit together; the e-mail goes out after, never inside a transaction.
     let g;
+    let token;
     try {
-      g = guardians.create(record);
+      ({ g, token } = unit(() => {
+        const created = guardians.create(record);
+        return { g: created, token: createSession('guardian', created.id) };
+      }));
     } catch (e) {
       if (e?.code === 'EMAIL_IN_USE') return emailInUse();
       if (e?.code === 'GUARDIAN_RECORD_INVALID')
@@ -87,7 +91,7 @@ export function registerGuardianAccount({
     res.status(201).json({
       guardianId: g.id,
       guardian: guardianSelfView(g),
-      token: createSession('guardian', g.id),
+      token,
       emailVerificationSent: true,
       // The dev transport has no real inbox, so the code is returned to let the flow complete.
       ...(mailer.transport === 'dev-outbox' ? { devEmailCode: emailCode } : {}),

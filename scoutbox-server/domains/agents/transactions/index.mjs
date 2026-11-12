@@ -5,6 +5,7 @@
  * refusal that records a compliance answer commits it.
  */
 
+import { apartFromTheAct } from '../../../writeRules.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
@@ -1641,8 +1642,11 @@ export function registerTransactions(rawCtx) {
     if (!writableOr(res, tx, 'consents')) return;
     const ctx = compliance.contextById(tx.contextId);
     if (!ctx) return notFound(res, 'consents');
-    // The projection is its own write, outside the consent route's unit.
-    compliance.project(ctx, { parties: partiesOf(tx), representations: liveRepsOf(tx.id) });
+    // The projection is rebuilt from the transaction's own rows, so it is its own write, outside the consent route's
+    // unit, and costs nothing if committed alone.
+    apartFromTheAct("the compliance engine's input is re-projected from the transaction", () =>
+      compliance.project(ctx, { parties: partiesOf(tx), representations: liveRepsOf(tx.id) }),
+    );
     compliance.requestConsent(req, res, ctx);
   });
 

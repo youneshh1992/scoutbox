@@ -282,32 +282,34 @@ export function registerDelivery(ctx) {
     let applied = 0,
       duplicates = 0;
     // Each event commits with its seen marker (the newest 5,000 are kept), so a crash can never leave an id remembered
-    // and its change lost.
+    // and its change lost: a batch is applied like a sweep, one transaction per event.
     for (const ev of events) {
-      const outcome = unit(() => {
-        if (!bookkeeping.markSeen(ev.callbackId, Date.now())) return 'duplicate'; // idempotent
-        const d = dispatches.byProviderMessageId(ev.providerMessageId);
-        if (!d) return 'unknown'; // the id is still remembered
-        const clock = ev.at ?? Date.now();
-        const patch = {};
-        if (ev.status === 'delivered') {
-          if (d.deliveredAt == null) patch.deliveredAt = clock; // an existing clock is kept
-          if (RANK[d.status] < RANK.delivered) patch.status = 'delivered'; // forward-only: never regresses opened/actioned
-        } else if (ev.status === 'opened') {
-          if (d.openedAt == null) patch.openedAt = clock;
-          if (d.deliveredAt == null) patch.deliveredAt = patch.openedAt ?? d.openedAt; // out-of-order: opened implies delivered
-          if (RANK[d.status] < RANK.opened) patch.status = 'opened';
-        } else {
-          // A failure report never un-delivers: status moves to failed only if nothing better was confirmed.
-          patch.failReason = (ev.reason || ev.status).slice(0, 120);
-          if (RANK[d.status] <= RANK.accepted) {
-            patch.status = 'failed';
-            patch.failedAt = Date.now();
+      const outcome = asSweep(() =>
+        unit(() => {
+          if (!bookkeeping.markSeen(ev.callbackId, Date.now())) return 'duplicate'; // idempotent
+          const d = dispatches.byProviderMessageId(ev.providerMessageId);
+          if (!d) return 'unknown'; // the id is still remembered
+          const clock = ev.at ?? Date.now();
+          const patch = {};
+          if (ev.status === 'delivered') {
+            if (d.deliveredAt == null) patch.deliveredAt = clock; // an existing clock is kept
+            if (RANK[d.status] < RANK.delivered) patch.status = 'delivered'; // forward-only: never regresses opened/actioned
+          } else if (ev.status === 'opened') {
+            if (d.openedAt == null) patch.openedAt = clock;
+            if (d.deliveredAt == null) patch.deliveredAt = patch.openedAt ?? d.openedAt; // out-of-order: opened implies delivered
+            if (RANK[d.status] < RANK.opened) patch.status = 'opened';
+          } else {
+            // A failure report never un-delivers: status moves to failed only if nothing better was confirmed.
+            patch.failReason = (ev.reason || ev.status).slice(0, 120);
+            if (RANK[d.status] <= RANK.accepted) {
+              patch.status = 'failed';
+              patch.failedAt = Date.now();
+            }
           }
-        }
-        dispatches.patch(d.id, patch);
-        return 'applied';
-      });
+          dispatches.patch(d.id, patch);
+          return 'applied';
+        }),
+      );
       if (outcome === 'duplicate') duplicates++;
       else if (outcome === 'applied') applied++;
     }

@@ -6,14 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openStore } from '../store.mjs';
 import { operationOn } from '../repositories/database.mjs';
-import {
-  inRequest,
-  asSweep,
-  apartFromTheAct,
-  declareAuditedRead,
-  standaloneWrite,
-  TRANSITIONAL_ROUTES,
-} from '../writeRules.mjs';
+import { inRequest, asSweep, apartFromTheAct, declareAuditedRead, standaloneWrite } from '../writeRules.mjs';
 
 let passed = 0;
 async function test(name, fn) {
@@ -214,25 +207,6 @@ await test('in production a broken rule is counted and logged, not thrown', () =
   assert.equal(state.violations, 1);
   assert.equal(state.lastViolation.rule, 'second_commit');
   assert.ok(logged.some((m) => m.startsWith('WRITE_RULE second_commit')));
-});
-
-await test('a route on the transitional list is counted, not refused', () => {
-  const { store, write, ids, request } = fixture();
-  TRANSITIONAL_ROUTES.add('POST /listed');
-  try {
-    request(
-      'POST',
-      () => {
-        write('a');
-        write('b');
-      },
-      'POST /listed',
-    );
-  } finally {
-    TRANSITIONAL_ROUTES.delete('POST /listed');
-  }
-  assert.deepEqual(ids(), ['a', 'b']);
-  assert.equal(store.unitOfWorkState().writeRules.transitional, 1);
 });
 
 console.log(`write rules: ${passed} checks passed`);

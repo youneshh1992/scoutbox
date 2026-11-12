@@ -1529,6 +1529,7 @@ registerRequestInbox({
 registerDeliverySettings({ app, playerRouter, guardianRouter, players, guardians, pushTokens, sessionFor });
 const erasePlayer = createPlayerErasure({
   unit,
+  afterCommit: store.afterCommit,
   seam,
   findPlayer,
   players,
