@@ -49,6 +49,7 @@ import {
   typeHistory,
   typeList,
   histRow,
+  historyOf,
   histOut,
 } from './scoutingEvidence.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
@@ -1215,13 +1216,6 @@ export function createScoutingAssessmentsRepository({ sqlite, unit = null, now =
       return must(name, r.id);
     });
   const { guarded, actsOn } = writeKit(sqlite, 'SCOUTING');
-  const historyOf = (table, owner) => ({
-    table,
-    owner,
-    type: (h, at) => typeHistory(h, at),
-    insert: `INSERT INTO ${table} (id, ${owner}, position, at, by_kind, by_id, by_name, action, detail) VALUES (@id, @owner, @position, @at, @by_kind, @by_id, @by_name, @action, @detail)`,
-    row: histRow,
-  });
   /**
    * The assessment's acts. A draft is revised (ratings, context, recommendation) until it is submitted; a submitted
    * one is reviewed once; feedback is published once from a submitted one. Each is guarded in SQL by that state.

@@ -213,7 +213,7 @@ test("[typing] the routes' literals type unchanged; junk is refused naming the r
 });
 
 // ------------------------------------------------------------- the repository
-test('[repository] create/update write rows at once and return fresh, deep-frozen records; the guards hold; there is no db.* view', () => {
+test('[repository] create and the named acts write rows at once and return fresh, deep-frozen records; the guards hold; there is no db.* view', () => {
   const dir = saveFixture(tempDir('s9a-repo'));
   const o = serverOpen(dir);
   const { repo } = o;
@@ -228,42 +228,65 @@ test('[repository] create/update write rows at once and return fresh, deep-froze
     () => repo.evidence.create(evidence({ id: 'evd-bad', value: [] })),
     /SCOUTING_INPUT_INVALID: evidence evd-bad\.value/,
   );
-  const next = repo.evidence.update('evd-1', (d) => {
-    d.disputes.push(dispute());
-  });
-  assert.equal(next.disputes.length, 1);
+  const { status: _open, resolution: _none, ...filed } = dispute();
+  const next = repo.evidence.fileDispute('evd-1', { dispute: filed }, { history: [hist('aud-d1', 'disputed', 'x')] });
+  assert.deepEqual(plain(next.disputes), [plain(dispute())], 'a dispute is filed open');
+  assert.equal(next.history.at(-1).id, 'aud-d1');
   assert.equal(e.disputes.length, 0, 'the record held before is the old version');
   refused(
     () =>
-      repo.evidence.update('evd-1', (d) => {
-        d.playerId = 'pl-other';
+      repo.evidence.fileDispute('evd-1', {
+        dispute: { ...filed, id: 'dsp-2', by: { kind: 'admin', id: 'a', name: 'A' } },
       }),
-    /playerId cannot change/,
+    /SCOUTING_INPUT_INVALID: evidence evd-1 fileDispute/,
   );
   refused(
-    () =>
-      repo.evidence.update('evd-1', (d) => {
-        d.extra = 1;
-      }),
-    /does not store: extra/,
+    () => repo.evidence.fileDispute('evd-1', { dispute: { ...filed, id: 'dsp-2' } }, { history: [{ id: 'aud-x' }] }),
+    /SCOUTING_INPUT_INVALID/,
+    'a history entry the columns cannot hold',
   );
+  const resolve = (over = {}) => ({ disputeId: 'dsp-1', outcome: 'upheld', at: NOW, ...over });
   refused(
-    () =>
-      repo.evidence.update('evd-1', () => {
-        repo.evidence.update('evd-1', (x) => {
-          x.note = 'n';
-        });
-      }),
-    /SCOUTING_NESTED_UPDATE/,
+    () => repo.evidence.resolveDispute('evd-1', resolve({ disputeId: 'dsp-none' })),
+    /not an open dispute of evidence evd-1/,
   );
-  assert.equal(repo.evidence.byId('evd-1').note, null, 'the refused updates wrote nothing');
+  const downgraded = repo.evidence.resolveDispute(
+    'evd-1',
+    resolve({
+      downgrade: {
+        status: 'self_reported',
+        method: 'downgraded after dispute',
+        reviewerId: 'admin',
+        reviewerName: 'T&S',
+        reviewedAt: NOW,
+      },
+    }),
+  );
+  assert.deepEqual(plain(downgraded.disputes[0].resolution), { outcome: 'upheld', note: null, at: NOW });
+  assert.equal(downgraded.verification.method, 'downgraded after dispute');
+  refused(() => repo.evidence.resolveDispute('evd-1', resolve()), /SCOUTING_STATE_CONFLICT/, 'resolved once');
+  const corroborated = {
+    status: 'club_assessed',
+    method: 'corroborated by Eastport',
+    reviewerId: SCOUT.userId,
+    reviewerName: SCOUT.name,
+    reviewedAt: NOW,
+  };
+  assert.equal(repo.evidence.corroborate('evd-1', { verification: corroborated }).verification.status, 'club_assessed');
+  refused(
+    () => repo.evidence.corroborate('evd-1', { verification: corroborated }),
+    /SCOUTING_STATE_CONFLICT: evidence evd-1 is already verified or superseded/,
+  );
+  refused(() => repo.evidence.corroborate('evd-none', { verification: corroborated }), /SCOUTING_NOT_FOUND/);
+  assert.equal(repo.evidence.byId('evd-1').note, null, 'the refused acts wrote nothing');
   // invitations: one pending per organisation and player
   repo.squadInvites.create(invite());
   refused(() => repo.squadInvites.create(invite({ id: 'sqi-2' })), /SCOUTING_UNIQUENESS: .*org-pro.*pl-adult/);
-  repo.squadInvites.update('sqi-1', (i) => {
-    i.status = 'declined';
-    i.respondedAt = NOW;
-  });
+  assert.equal(repo.squadInvites.respond('sqi-1', { accept: false, at: NOW }).status, 'declined');
+  refused(
+    () => repo.squadInvites.respond('sqi-1', { accept: true, at: NOW }),
+    /squad_invites sqi-1 is already answered/,
+  );
   repo.squadInvites.create(invite({ id: 'sqi-2' }));
   assert.deepEqual(
     repo.squadInvites.forPlayers(['pl-adult'], 'pending_player').map((i) => i.id),
@@ -295,12 +318,13 @@ test('[repository] a correction commits with its superseded original; a failure 
         history: [hist('aud-3', 'created_as_correction', 'double counted')],
       }),
     );
-    repo.evidence.update('evd-1', (x) => {
-      x.supersededBy = 'evd-2';
-      x.history.push(hist('aud-4', 'superseded', 'double counted'));
-    });
+    repo.evidence.supersede('evd-1', { by: 'evd-2' }, { history: [hist('aud-4', 'superseded', 'double counted')] });
   });
   assert.equal(repo.evidence.byId('evd-1').supersededBy, 'evd-2');
+  assert.equal(repo.evidence.byId('evd-1').history.at(-1).id, 'aud-4');
+  refused(() => repo.evidence.supersede('evd-1', { by: 'evd-2' }), /evidence evd-1 is already superseded/);
+  repo.evidence.create(evidence({ id: 'evd-9', playerId: 'pl-other', recordedAt: NOW, history: [] }));
+  refused(() => repo.evidence.supersede('evd-9', { by: 'evd-2' }), /evd-2 is not a correction of it/);
   assert.deepEqual(
     repo.evidence.currentForPlayer('pl-adult').map((x) => x.id),
     ['evd-2'],
@@ -373,10 +397,14 @@ test('[queries] the dispute queue pages by offset in filing order; the coach loo
   repo.coachAffiliations.create(affiliation());
   repo.coachAffiliations.create(affiliation({ id: 'aff-2', coachName: 'Sam', createdAt: NOW - 100, history: [] }));
   assert.equal(repo.coachAffiliations.activeFor(ORG.id, 'MARIA').id, 'aff-1');
-  repo.coachAffiliations.update('aff-1', (a) => {
-    a.status = 'ended';
-    a.to = '2026-11-04';
-  });
+  refused(() => repo.coachAffiliations.close('aff-1', { status: 'confirmed', to: '2026-11-04' }), /ended or revoked/);
+  refused(() => repo.coachAffiliations.close('aff-1', { status: 'ended', to: 'today' }), /must be a day/);
+  repo.coachAffiliations.close(
+    'aff-1',
+    { status: 'ended', to: '2026-11-04' },
+    { history: [hist('aud-e1', 'ended', 'moved')] },
+  );
+  refused(() => repo.coachAffiliations.close('aff-1', { status: 'revoked', to: '2026-11-05' }), /aff-1 is not current/);
   assert.equal(repo.coachAffiliations.activeFor(ORG.id, 'Maria'), undefined);
   assert.deepEqual(
     repo.coachAffiliations.page({ limit: 10, offset: 0 }).items.map((a) => a.id),
@@ -432,7 +460,11 @@ test('[fixtures] a fixture writes the three collections through the repository a
   );
   refusedFixture('org', { coachAffiliations: [affiliation({ orgId: 'org-gone' })] }, /FOREIGN KEY constraint failed/);
   refusedFixture('user', { squadInvites: [invite({ byUserId: 'usr-gone' })] }, /FOREIGN KEY constraint failed/);
-  refusedFixture('superseded', { evidence: [evidence({ supersededBy: 'evd-9' })] }, /FOREIGN KEY constraint failed/);
+  refusedFixture(
+    'superseded',
+    { evidence: [evidence({ supersededBy: 'evd-9' })] },
+    /SCOUTING_STATE_CONFLICT: evidence evd-1 is already superseded, or evd-9 is not a correction of it/,
+  );
   refusedFixture(
     'pending',
     { squadInvites: [invite(), invite({ id: 'sqi-2' })] },

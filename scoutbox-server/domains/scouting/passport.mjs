@@ -83,7 +83,7 @@ export function registerPassport(ctx) {
     adminRouter,
     orgCanSee,
     paginate,
-    audit,
+    auditEntry,
     guardianOwnsChild,
     freshness,
     activeAffiliation,
@@ -152,15 +152,22 @@ export function registerPassport(ctx) {
     };
     return rec;
   }
-  const auditDraft = (rec, byKind, byId, byName, action, detail = null) =>
-    audit(
-      rec,
-      byKind,
-      byId,
-      storedName(byName),
-      action,
-      detail === null ? null : String(detail).slice(0, LIMITS.detail),
-    );
+  /** One history entry, as an act's bookkeeping (`{ history: [entry] }`). */
+  const logged = (byKind, byId, byName, action, detail = null) => ({
+    history: [
+      auditEntry(
+        byKind,
+        byId,
+        storedName(byName),
+        action,
+        detail === null ? null : String(detail).slice(0, LIMITS.detail),
+      ),
+    ],
+  });
+  const auditDraft = (rec, ...entry) => {
+    rec.history ??= [];
+    rec.history.push(...logged(...entry).history);
+  };
 
   function evidenceView(rec) {
     const { disputes, history, ...rest } = rec;
@@ -330,10 +337,11 @@ export function registerPassport(ctx) {
     auditDraft(draft, actor.kind, actor.id, actor.name, 'created_as_correction', reason);
     const rec = unit(() => {
       const created = scoutingEvidence.evidence.create(draft);
-      scoutingEvidence.evidence.update(orig.id, (o) => {
-        o.supersededBy = created.id;
-        auditDraft(o, actor.kind, actor.id, actor.name, 'superseded', reason);
-      });
+      scoutingEvidence.evidence.supersede(
+        orig.id,
+        { by: created.id },
+        logged(actor.kind, actor.id, actor.name, 'superseded', reason),
+      );
       return created;
     });
     broadcast('evidence', { playerId: orig.playerId });
@@ -354,10 +362,11 @@ export function registerPassport(ctx) {
       status: 'open',
       resolution: null,
     };
-    scoutingEvidence.evidence.update(rec.id, (e) => {
-      e.disputes.push(d);
-      auditDraft(e, actor.kind, actor.id, actor.name, 'disputed', d.reason);
-    });
+    scoutingEvidence.evidence.fileDispute(
+      rec.id,
+      { dispute: d },
+      logged(actor.kind, actor.id, actor.name, 'disputed', d.reason),
+    );
     res.status(201).json({ dispute: d });
   }
 
@@ -441,10 +450,11 @@ export function registerPassport(ctx) {
       reviewedAt: Date.now(),
     };
     const fresh = unit(() => {
-      const next = scoutingEvidence.evidence.update(rec.id, (e) => {
-        e.verification = verification;
-        auditDraft(e, 'org', req.org.id, req.org.name, 'corroborated', verification.status);
-      });
+      const next = scoutingEvidence.evidence.corroborate(
+        rec.id,
+        { verification },
+        logged('org', req.org.id, req.org.name, 'corroborated', verification.status),
+      );
       notify(
         { kind: 'player', id: p.id },
         'evidence',
@@ -490,20 +500,26 @@ export function registerPassport(ctx) {
     const note = filled(body.note);
     const at = Date.now();
     const fresh = unit(() => {
-      const next = scoutingEvidence.evidence.update(rec.id, (e) => {
-        const target = e.disputes.find((x) => x.id === d.id);
-        target.status = 'resolved';
-        target.resolution = { outcome: resolution, note, at };
-        if (resolution === 'upheld' && downgrade)
-          e.verification = {
-            status: 'self_reported',
-            method: 'downgraded after dispute',
-            reviewerId: 'admin',
-            reviewerName: 'Trust & Safety',
-            reviewedAt: at,
-          };
-        auditDraft(e, 'admin', 'admin', 'Trust & Safety', 'dispute_resolved', resolution);
-      });
+      const next = scoutingEvidence.evidence.resolveDispute(
+        rec.id,
+        {
+          disputeId: d.id,
+          outcome: resolution,
+          note,
+          at,
+          downgrade:
+            resolution === 'upheld' && downgrade
+              ? {
+                  status: 'self_reported',
+                  method: 'downgraded after dispute',
+                  reviewerId: 'admin',
+                  reviewerName: 'Trust & Safety',
+                  reviewedAt: at,
+                }
+              : null,
+        },
+        logged('admin', 'admin', 'Trust & Safety', 'dispute_resolved', resolution),
+      );
       notify(
         { kind: 'player', id: rec.playerId },
         'evidence',
@@ -576,11 +592,12 @@ export function registerPassport(ctx) {
     const body = inputOrRefuse(res, AffiliationClose, req.body ?? {});
     if (!body) return;
     const reason = filled(body.reason);
-    const fresh = scoutingEvidence.coachAffiliations.update(a.id, (x) => {
-      x.status = status; // 'ended' keeps a clean history; 'revoked' flags cause
-      x.to = new Date().toISOString().slice(0, 10);
-      auditDraft(x, 'org', req.org.id, req.orgUser.name, status, reason);
-    });
+    // 'ended' keeps a clean history; 'revoked' flags cause.
+    const fresh = scoutingEvidence.coachAffiliations.close(
+      a.id,
+      { status, to: new Date().toISOString().slice(0, 10) },
+      logged('org', req.org.id, req.orgUser.name, status, reason),
+    );
     res.json({
       affiliation: affiliationView(fresh),
       note: 'Historical references stay attributed; current coach privileges are removed immediately.',
@@ -669,10 +686,7 @@ export function registerPassport(ctx) {
     const { accept } = body;
     const at = Date.now();
     const fresh = unit(() => {
-      const next = scoutingEvidence.squadInvites.update(invite.id, (i) => {
-        i.status = accept ? 'approved' : 'declined';
-        i.respondedAt = at;
-      });
+      const next = scoutingEvidence.squadInvites.respond(invite.id, { accept, at });
       if (accept) {
         // A player the club shadowed joins the squad all the same: the shadow list is not the squad.
         if (!clubSetup.squad.has(invite.orgId, invite.playerId)) {

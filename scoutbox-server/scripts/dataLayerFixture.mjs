@@ -204,11 +204,7 @@ const WRITERS = {
   // A correction names the record it corrects and back: both are created, then the original is marked superseded.
   evidence: (L, records) => {
     for (const r of records) L.scoutingEvidence.evidence.create({ ...r, supersededBy: null });
-    for (const r of records)
-      if (r.supersededBy)
-        L.scoutingEvidence.evidence.update(r.id, (x) => {
-          x.supersededBy = r.supersededBy;
-        });
+    for (const r of records) if (r.supersededBy) L.scoutingEvidence.evidence.supersede(r.id, { by: r.supersededBy });
   },
   coachAffiliations: each((L, r) => L.scoutingEvidence.coachAffiliations.create(r)),
   squadInvites: each((L, r) => L.scoutingEvidence.squadInvites.create(r)),

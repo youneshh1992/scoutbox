@@ -5,9 +5,10 @@
  * squad_invites. Every field is a typed column with its vocabulary and length CHECKs; there are no side columns, and a
  * record the columns cannot hold is refused with its id — at the repository (the routes check first and answer 400).
  *
- * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` type the whole record and write its rows at once,
- * joined into the open unit of work (a failure poisons it), the caller's open transaction, or a transaction of their
- * own. An unknown field is refused, and so is an update of a record from inside its own update.
+ * WRITES are explicit, each joined into the open unit of work (a failure poisons it), the caller's open transaction,
+ * or a transaction of its own. `create(record)` types the whole record and writes its rows at once (an unknown field is
+ * refused); then a record changes only through named acts guarded in SQL by the state they move from (evidence is
+ * corroborated, superseded and disputed; an affiliation closed; an invitation answered), with their history entries.
  *
  * Every query decodes fresh, deep-frozen records in insertion (rowid) order unless it says otherwise; a read inside a
  * unit of work sees the unit's own writes. Modules receive the queries as `scoutingReads`.
@@ -21,6 +22,7 @@
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { writeKit } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const SCOUTING_EVIDENCE_MIGRATION = '0019_scouting_evidence';
@@ -649,6 +651,14 @@ export const histRow = (owner, h, position) => ({
   action: h.action,
   detail: h.detail,
 });
+/** A history table made by `historyTable`, as the write kit's `actsOn` keeps it. */
+export const historyOf = (table, owner) => ({
+  table,
+  owner,
+  type: (h, at) => typeHistory(h, at),
+  insert: `INSERT INTO ${table} (id, ${owner}, position, at, by_kind, by_id, by_name, action, detail) VALUES (@id, @owner, @position, @at, @by_kind, @by_id, @by_name, @action, @detail)`,
+  row: histRow,
+});
 export const histOut = (h) => ({
   id: h.id,
   at: h.at,
@@ -855,11 +865,10 @@ export const SCOUTING_EVIDENCE_RECORDS = {
 };
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update']);
+const WRITES = new Set(['create', 'corroborate', 'supersede', 'fileDispute', 'resolveDispute', 'close', 'respond']);
 /**
  * `createScoutingEvidenceRepository({ sqlite, unit, now, log })`: `evidence`, `coachAffiliations` and `squadInvites`,
- * each with `create(record)` / `update(id, (draft) => …)` and its queries, plus `reads` (the queries alone, for
- * `scoutingReads`).
+ * each with `create(record)`, its named acts and its queries, plus `reads` (the queries alone, for `scoutingReads`).
  */
 export function createScoutingEvidenceRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the scouting evidence repository needs a SQLite connection (node:sqlite)');
@@ -891,13 +900,6 @@ export function createScoutingEvidenceRepository({ sqlite, unit = null, now = Da
     const stmt = sqlite.prepare(sql);
     return (...args) => decodeAll(name, stmt.all(...args));
   };
-  const IMMUTABLE = {
-    evidence: ['id', 'playerId', 'recordedAt', 'source'],
-    coachAffiliations: ['id', 'orgId', 'createdAt'],
-    squadInvites: ['id', 'orgId', 'playerId', 'createdAt'],
-  };
-  const updating = new Set();
-
   const create = (name) => (raw) =>
     operation(() => {
       const r = typedOr(name, raw);
@@ -918,36 +920,107 @@ export function createScoutingEvidenceRepository({ sqlite, unit = null, now = Da
       WRITERS[name](st, r);
       return must(name, r.id);
     });
+  const { guarded, nextPosition, actsOn } = writeKit(sqlite, 'SCOUTING');
+  const verificationCols = (v) => ({
+    verification_status: v.status,
+    verification_method: v.method ?? null,
+    reviewer_id: v.reviewerId ?? null,
+    reviewer_name: v.reviewerName ?? null,
+    reviewed_at: v.reviewedAt ?? null,
+  });
   /**
-   * `update(id, change)`: `change` receives a plain copy of the stored record and edits it (or returns a
-   * replacement); the result is typed whole and written at once. Identifiers and creation facts cannot change.
+   * A record's acts. A current self-reported record is corroborated once; a record is superseded once, by a correction
+   * of it; a dispute is filed open and resolved once, an upheld one optionally downgrading the record.
    */
-  const update = (name) => (id, change) => {
-    if (typeof change !== 'function')
-      throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
-    const key = `${name}/${id}`;
-    if (updating.has(key))
-      throw refusal(
-        'SCOUTING_NESTED_UPDATE',
-        `${TABLE_OF[name]} ${id} is already being updated; make the second change after the first returns`,
-      );
-    updating.add(key);
-    try {
-      return operation(() => {
-        const stored = must(name, id);
-        const draft = clone(stored);
-        const returned = change(draft);
-        const next = typedOr(name, returned === undefined ? draft : returned);
-        for (const k of IMMUTABLE[name])
-          if (JSON.stringify(next[k]) !== JSON.stringify(stored[k]))
-            throw refusal('SCOUTING_INPUT_INVALID', `${TABLE_OF[name]} ${id}: ${k} cannot change`);
-        WRITERS[name](st, next);
-        return must(name, id);
-      });
-    } finally {
-      updating.delete(key);
-    }
-  };
+  const evidenceActs = actsOn(
+    {
+      operation,
+      label: 'evidence',
+      must: (id) => must('evidence', id),
+      history: historyOf('evidence_history', 'evidence_id'),
+    },
+    {
+      corroborate: (id, { verification }) =>
+        guarded(
+          'evidence',
+          { id },
+          "verification_status = 'self_reported' AND superseded_by_id IS NULL",
+          verificationCols(verification),
+          `evidence ${id} is already verified or superseded`,
+        ),
+      supersede: (id, { by }) =>
+        guarded(
+          'evidence',
+          { id },
+          'superseded_by_id IS NULL AND EXISTS (SELECT 1 FROM evidence c WHERE c.id = @superseded_by_id AND c.correction_of_id = @key_id)',
+          { superseded_by_id: by },
+          `evidence ${id} is already superseded, or ${by} is not a correction of it`,
+        ),
+      fileDispute: (id, { dispute: d }) =>
+        st.dispute.run({
+          id: d.id,
+          evidence_id: id,
+          position: nextPosition('evidence_disputes', 'evidence_id', id),
+          filed_at: d.at,
+          by_kind: d.by?.kind ?? null,
+          by_id: d.by?.id ?? null,
+          by_name: d.by?.name ?? null,
+          reason: d.reason,
+          status: 'open',
+          resolution_outcome: null,
+          resolution_note: null,
+          resolved_at: null,
+        }),
+      resolveDispute: (id, { disputeId, outcome, note = null, at, downgrade = null }) => {
+        guarded(
+          'evidence_disputes',
+          { id: disputeId, evidence_id: id },
+          "status = 'open'",
+          { status: 'resolved', resolution_outcome: outcome, resolution_note: note, resolved_at: at },
+          `evidence_disputes ${disputeId} is not an open dispute of evidence ${id}`,
+        );
+        if (downgrade) guarded('evidence', { id }, '', verificationCols(downgrade), `evidence ${id} is not stored`);
+      },
+    },
+  );
+  const affiliationActs = actsOn(
+    {
+      operation,
+      label: 'coach_affiliations',
+      must: (id) => must('coachAffiliations', id),
+      history: historyOf('coach_affiliation_history', 'affiliation_id'),
+    },
+    {
+      /** End or revoke a confirmed affiliation on `to` (a day); either is final. */
+      close: (id, { status, to }) => {
+        if (!['ended', 'revoked'].includes(status))
+          throw refusal('SCOUTING_INPUT_INVALID', `coach_affiliations ${id}: a closed affiliation is ended or revoked`);
+        if (!dayOnly(to))
+          throw refusal('SCOUTING_INPUT_INVALID', `coach_affiliations ${id}.to must be a day (YYYY-MM-DD)`);
+        guarded(
+          'coach_affiliations',
+          { id },
+          "status = 'confirmed'",
+          { status, to_date: to },
+          `coach_affiliations ${id} is not current`,
+        );
+      },
+    },
+  );
+  const inviteActs = actsOn(
+    { operation, label: 'squad_invites', must: (id) => must('squadInvites', id) },
+    {
+      /** A pending invitation is approved or declined at `at`, once. */
+      respond: (id, { accept, at }) =>
+        guarded(
+          'squad_invites',
+          { id },
+          "status IN ('pending_guardian','pending_player')",
+          { status: accept === true ? 'approved' : 'declined', responded_at: at },
+          `squad_invites ${id} is already answered`,
+        ),
+    },
+  );
 
   const disputeCount = {
     open: sqlite.prepare("SELECT COUNT(*) AS n FROM evidence_disputes WHERE status = 'open'"),
@@ -964,7 +1037,7 @@ export function createScoutingEvidenceRepository({ sqlite, unit = null, now = Da
   const disputeOwner = sqlite.prepare('SELECT evidence_id FROM evidence_disputes WHERE id = ?');
   const evidence = {
     create: create('evidence'),
-    update: update('evidence'),
+    ...evidenceActs,
     byId: (id) => read('evidence', id),
     /** A player's records, oldest first (the passport, the export, the provider lists). */
     forPlayer: list('evidence', 'SELECT * FROM evidence WHERE player_id = ? ORDER BY rowid'),
@@ -1012,7 +1085,7 @@ export function createScoutingEvidenceRepository({ sqlite, unit = null, now = Da
   );
   const coachAffiliations = {
     create: create('coachAffiliations'),
-    update: update('coachAffiliations'),
+    ...affiliationActs,
     byId: (id) => read('coachAffiliations', id),
     forOrg: list('coachAffiliations', 'SELECT * FROM coach_affiliations WHERE org_id = ? ORDER BY rowid'),
     /** The confirmed affiliation at `orgId` whose coach name matches `userName` (case-insensitive), or undefined. */
@@ -1030,7 +1103,7 @@ export function createScoutingEvidenceRepository({ sqlite, unit = null, now = Da
   };
   const squadInvites = {
     create: create('squadInvites'),
-    update: update('squadInvites'),
+    ...inviteActs,
     byId: (id) => read('squadInvites', id),
     /** The pending invitation from `orgId` to `playerId`, or null (at most one). */
     pendingFor: (orgId, playerId) => {
