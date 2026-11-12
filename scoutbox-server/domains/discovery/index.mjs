@@ -26,7 +26,9 @@ export function createDiscovery(deps) {
   needs('createDiscovery', deps, [
     'orgRouter',
     'players',
+    'playerRecord',
     'recruitment',
+    'recruitmentActs',
     'discovery',
     'discoveryReads',
     'matchFacts',
@@ -79,7 +81,9 @@ export function createDiscovery(deps) {
   registerFilmRoom({
     orgRouter,
     players,
+    playerRecord: d.playerRecord,
     recruitment: d.recruitment,
+    recruitmentActs: d.recruitmentActs,
     safetyAudit,
     findPlayer,
     isBlocked,

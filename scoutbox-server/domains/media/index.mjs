@@ -31,7 +31,7 @@ export function createMedia(deps) {
     'createMedia',
     needs('createMedia', deps, [
       'playerRouter',
-      'players',
+      'playerRecord',
       'operations',
       'mediaDeletions',
       'storage',
@@ -46,8 +46,9 @@ export function createMedia(deps) {
       'DATA_DIR',
     ]),
   );
-  const { players, storage } = d;
-  if (d.firstInstallation) installSampleClips({ assetsDir: d.assetsDir, findPlayer: d.findPlayer, players, storage });
+  const { playerRecord, storage } = d;
+  if (d.firstInstallation)
+    installSampleClips({ assetsDir: d.assetsDir, findPlayer: d.findPlayer, playerRecord, storage });
   const { sweepUploads } = registerUploads(
     strictContext('createMedia', {
       DATA_DIR: d.DATA_DIR,
@@ -56,7 +57,7 @@ export function createMedia(deps) {
       nextId: d.nextId,
       operations: d.operations,
       playerRouter: d.playerRouter,
-      players,
+      playerRecord,
       recordActivity: d.recordActivity,
       storage,
       unit: d.unit,

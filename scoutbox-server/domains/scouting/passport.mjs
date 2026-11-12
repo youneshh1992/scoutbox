@@ -94,6 +94,7 @@ export function registerPassport(ctx) {
     unit,
     joinSquad,
     transitionsVouches,
+    coachReferences,
     verificationReads, // coach references are rows of vouches
   } = ctx;
   if (typeof scoutingEvidence?.evidence?.create !== 'function' || typeof unit !== 'function')
@@ -620,7 +621,7 @@ export function registerPassport(ctx) {
     const body = inputOrRefuse(res, VouchWithdrawal, req.body ?? {});
     if (!body) return;
     const stored = unit(() =>
-      transitionsVouches.vouches.withdraw(v.id, {
+      coachReferences.withdraw(v.id, {
         at: Date.now(),
         by: 'admin',
         reason: filled(body.reason) ?? 'withdrawn by Trust & Safety',

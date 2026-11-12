@@ -37,7 +37,7 @@ export function createLiveSync({
     typeof channels?.parties !== 'function' ||
     typeof users?.byId !== 'function'
   )
-    throw new TypeError('createLiveSync needs the sessions, channels and staff repositories');
+    throw new TypeError("createLiveSync needs the sessions' and staff's reads and the channels repository");
 
   const sseClients = new Set(); // { res, identity }
   const sseTickets = new Map(); // ticket -> { sid, expiresAt }

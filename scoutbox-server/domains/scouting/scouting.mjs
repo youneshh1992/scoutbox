@@ -221,6 +221,7 @@ export function registerScouting(ctx) {
   const {
     byId,
     players,
+    staffRecord,
     scoutingReads,
     users,
     nextId,
@@ -1190,7 +1191,7 @@ export function registerScouting(ctx) {
     if (!u) return res.status(404).json({ error: 'STAFF_NOT_FOUND' });
     if (u.removedAt) return res.status(409).json({ error: 'ALREADY_REMOVED' });
     const removed = unit(() => {
-      const out = users.remove(u.id, { at: Date.now(), by: req.orgUser.id });
+      const out = staffRecord.remove(u.id, { at: Date.now(), by: req.orgUser.id });
       revokeOrgUserAccess(u.id);
       ledgerAppend({
         type: 'staff_removed',

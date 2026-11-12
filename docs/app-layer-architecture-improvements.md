@@ -136,25 +136,30 @@ repositories that still type records in JavaScript (discovery, development, pass
 repositories) type the record with the fields they set before writing it; moving those to "reads back as written", as
 the other repositories do, is a pass of its own.
 
-Case work no longer receives the identity, club-setup and operations repositories: it gets the identity domain's
-`playerRecord.recordSigning`, scouting's `joinSquad`, the delivery centre's `injectedFailures`, and the staff and
-guardian reads. The agents domain writes a case's handoff through the recruitment domain's `caseHandoffs`.
+No domain is handed another domain's repository to write through. Each owner offers named seams, created first in
+`server.mjs`, and every other domain gets the owner's reads (`players.reads`, `users.reads`, `sessions.reads`,
+`clubSetup.reads`, `recruitment.reads`, …) plus the seams it uses:
 
-**Still to do.** An audit of every call to another domain's repository writes (12 November) found more domains handed
-a repository they write through, beyond the two the plan named. Each should get the owning domain's named seam, as
-case work now does:
+- **Identity**: `playerRecord` (a signing, the player's level and availability, the programme, stats, badges,
+  attendance, media, medical sharing, location, timeline, external ids and notification preferences),
+  `guardianRecord` (notification preferences), `orgRecord` (standing, suspension, the verification route's
+  registration and revocation, the provisioned password, the lead MFA policy), `staffRecord` (joining, coming back,
+  e-mail, SSO, delivery preferences, the second factor, removal) and `sessionEnds`. No other domain creates, erases or
+  signs in a player, or changes a staff member's role.
+- **Scouting**: `scoutingActs` (joining a squad, a grassroots club's squad entries and looking-for list, the
+  federation request, an application's reminder).
+- **Recruitment**: `recruitmentActs` (a safeguarding suspension of pending requests, a trial's report reminder, the
+  follow-up sweep's escalation and reminders) and `caseHandoffs`.
+- **Verification**: `coachReferences` (adding, publishing, revoking and withdrawing a coach reference).
 
-- **Development → identity's `players`** (about 23 calls: the programme, stats, timeline and pathway items, medical
-  sharing, location, availability), and → scouting's `clubSetup` (the grassroots squad and looking-for routes).
-- **Enterprise → identity's `users` and `sessions`** (invitations, MFA, SSO, ending one's own sessions), and
-  `orgs.setMfaRequiredForLeads`.
-- **Verification → identity's `orgs` and `users`** (an organisation's verification standing, the applicant's staff
-  account), and `players.setLevel`.
-- **Safety → identity's `orgs`** (suspension, the password reset) and `recruitment.suspend`.
-- **Agents → identity's `users` and `sessions`** (agency staff and their sessions); **scouting → `users.remove`**
-  (ending a membership).
-- **Smaller:** discovery, media, integrations and operations add or patch a player's items; messaging sets a staff
-  member's delivery preferences; discovery marks a trial report reminder sent.
+**Still to do.**
+
+- **Trial days.** Scouting's trial-day routes (check-in, arrival, consent, emergency contact, day status, staff
+  checks) write the recruitment repository's trials directly. This is a question of who owns the trial day, not a
+  missing seam: either the day's acts become recruitment's, or the trial-day records move to scouting.
+- **The operations repository** holds tables other domains own (media's upload sessions, the delivery centre's
+  bookkeeping, discovery's saved searches, the signing invoices). Each is written only by its owner, but the
+  repository should be split along those lines.
 
 The safety audit log (`safetyAudit.record`) is written by every domain and is the platform's, not a domain's.
 

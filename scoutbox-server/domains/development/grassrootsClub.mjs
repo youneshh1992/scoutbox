@@ -31,9 +31,11 @@ const registrationView = (r) => ({
 export function registerGrassrootsClub({
   orgRouter,
   players,
+  playerRecord,
   grassroots,
   clubSetup,
-  transitionsVouches,
+  scoutingActs,
+  coachReferences,
   signings,
   findPlayer,
   findOrg,
@@ -162,7 +164,7 @@ export function registerGrassrootsClub({
     const body = developmentInput(res, 'lookingFor', req.body);
     if (!body) return;
     const { positions } = body;
-    const lookingFor = clubSetup.lookingFor.set(req.org.id, [...new Set(positions)]);
+    const lookingFor = scoutingActs.setLookingFor(req.org.id, [...new Set(positions)]);
     broadcast('orgs');
     res.json({ lookingFor });
   });
@@ -275,7 +277,7 @@ export function registerGrassrootsClub({
       if (!p || !visibleToOrg(p, req.org)) return res.status(403).json({ error: 'PLAYER_NOT_VISIBLE' });
       if (clubSetup.squad.has(req.org.id, playerId)) return res.status(409).json({ error: 'ALREADY_ON_SQUAD' });
     }
-    clubSetup.squad.create({
+    scoutingActs.addToSquad({
       id: nextId('sq'),
       orgId: req.org.id,
       name: name.trim(),
@@ -297,15 +299,15 @@ export function registerGrassrootsClub({
     if (referenceText && !moderateOrRefuse(res, referenceText, { kind: 'release_reference', orgId: req.org.id }))
       return;
     unit(() => {
-      clubSetup.squad.remove(entry.id);
+      scoutingActs.removeFromSquad(entry.id);
       const p = entry.playerId ? findPlayer(entry.playerId) : null;
       if (p) {
         // A contract another club completed in ScoutBox still stands after this release.
         const other = canonicalContractFor(p.id, Date.now(), { exceptOrgId: req.org.id });
-        if (!other) players.setAvailability(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
+        if (!other) playerRecord.setAvailability(p.id, { availability: 'available_now', contractStatus: 'free_agent' });
         seam('squad.release.after_row');
         if (referenceText) {
-          transitionsVouches.vouches.create({
+          coachReferences.add({
             id: nextId('vch'),
             playerId: p.id,
             playerName: p.name?.slice(0, TRANSITION_LIMITS.name) ?? null,
@@ -364,7 +366,7 @@ export function registerGrassrootsClub({
         if (!onSquad.has(pid)) continue;
         const p = findPlayer(pid);
         if (!p || !visibleToOrg(p, req.org)) continue;
-        players.addItem(p.id, 'attendance', {
+        playerRecord.recordAttendance(p.id, {
           id: nextId('att'),
           fixture: fixtureText,
           venue: venue?.trim() || req.org.location?.city || '',

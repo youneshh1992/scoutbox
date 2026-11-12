@@ -18,6 +18,24 @@ import { registerSigning } from './signings/index.mjs';
 import { registerLegacySigning } from './signings/legacy.mjs';
 
 /**
+ * The writes another domain makes on requests and trials: a club reported for safeguarding has its player's pending
+ * requests suspended, a trial's report reminder is marked sent with the reminder (the Film Room), and the follow-up
+ * sweep escalates an overdue report and marks the reminders it sent (operations).
+ */
+export function createRecruitmentActs(deps) {
+  const { recruitment } = strictContext('createRecruitmentActs', needs('createRecruitmentActs', deps, ['recruitment']));
+  return Object.freeze({
+    suspendPendingRequests(orgId, playerId) {
+      for (const r of recruitment.requests.forOrgPlayer(orgId, playerId))
+        if (r.status === 'pending') recruitment.requests.suspend(r.id);
+    },
+    markReportReminderSent: (trialId) => recruitment.trials.markReportReminderSent(trialId),
+    escalateTrialFeedback: (trialId, escalation) => recruitment.trials.escalateFeedback(trialId, escalation),
+    markTrialReminders: (trialId, reminders) => recruitment.trials.markReminders(trialId, reminders),
+  });
+}
+
+/**
  * Requests, the club's trials, the ledger and budgets. Returns the one writer of a request row
  * (`issueRecruitmentRequest`) and of an accepted trial (`issueAcceptedTrial`), `contactReplyFrom`, and
  * `canonicalContractFor`, a player's current contract as the signings record it.

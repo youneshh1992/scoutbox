@@ -14,7 +14,7 @@ const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened
 export function registerDelivery(ctx) {
   const {
     byId,
-    users,
+    staffRecord,
     notifications,
     dispatches,
     outbox,
@@ -358,7 +358,7 @@ export function registerDelivery(ctx) {
     const body = messagingInput(res, 'staffPrefs', req.body);
     if (!body) return;
     const { quietStart, quietEnd, email } = body;
-    const saved = users.setDeliveryPrefs(req.orgUser.id, {
+    const saved = staffRecord.setDeliveryPrefs(req.orgUser.id, {
       quietStart: quietStart ?? null,
       quietEnd: quietEnd ?? null,
       channels: { email: email !== false },

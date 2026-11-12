@@ -177,5 +177,16 @@ export function createSessionsRepository({
     /** Delete every expired session. Returns how many went. */
     prune: (at = now()) => operation(() => stmt.delExpired.run(at - sessionTtlMs).changes),
   };
+  // Other domains read sessions; they end one only through the identity domain's `sessionEnds`.
+  repo.reads = Object.freeze({
+    ttlMs: sessionTtlMs,
+    isLive: live,
+    byToken: repo.byToken,
+    bySid: repo.bySid,
+    isCurrent: repo.isCurrent,
+    listFor: repo.listFor,
+    listOrgUser: repo.listOrgUser,
+    count: repo.count,
+  });
   return repo;
 }

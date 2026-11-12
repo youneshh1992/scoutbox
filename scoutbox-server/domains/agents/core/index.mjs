@@ -65,6 +65,7 @@ export function registerAgent(rawCtx) {
     byId,
     players,
     users,
+    staffRecord,
     notifications,
     orgRouter,
     playerRouter,
@@ -600,7 +601,8 @@ export function registerAgent(rawCtx) {
     if (user && activeAffiliationOf(user.id, req.org.id))
       return sendAgentError(res, { error: 'MEMBER_ALREADY_AFFILIATED' }, 'team');
     const aff = unit(() => {
-      const member = user ?? users.create({ orgId: req.org.id, name, role: role ?? 'Agency staff', createdAt: now() });
+      const member =
+        user ?? staffRecord.add({ orgId: req.org.id, name, role: role ?? 'Agency staff', createdAt: now() });
       const draft = {
         id: nextId('aff'),
         agencyOrgId: req.org.id,
@@ -709,7 +711,7 @@ export function registerAgent(rawCtx) {
       broadcast('agency_affiliation_ended', { orgId: req.org.id, userId: aff.userId });
       // The person's agent profile and historical attributions stay as they are.
       const user = byId.user(aff.userId);
-      if (user && !user.removedAt) users.remove(user.id, { at: now(), by: req.orgUser.id });
+      if (user && !user.removedAt) staffRecord.remove(user.id, { at: now(), by: req.orgUser.id });
       revokeOrgUserAccess?.(aff.userId);
     });
     res.json({ member: memberRows(req.org).find((m) => m.affiliationId === aff.id) });

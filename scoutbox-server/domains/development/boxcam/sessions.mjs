@@ -633,7 +633,7 @@ export function registerBoxCamSessions(ctx) {
     const media = (req.player.media ?? []).find((m) => m.id === body.mediaId);
     if (!media) return res.status(404).json({ error: 'MEDIA_NOT_FOUND' });
     const next = unit(() => {
-      ctx.players.patchItem(req.player.id, 'media', { id: media.id }, { capturedBy: 'box_cam', boxSessionId: s.id });
+      ctx.playerRecord.annotateMedia(req.player.id, media.id, { capturedBy: 'box_cam', boxSessionId: s.id });
       const row = boxCam.sessions.attachClip(s.id, { mediaId: media.id });
       ctx.ledgerAppend?.({
         type: 'box_clip_saved',

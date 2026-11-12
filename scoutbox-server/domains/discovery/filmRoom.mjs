@@ -25,7 +25,9 @@ export const SCOUT_TAGS = Object.freeze([
 export function registerFilmRoom({
   orgRouter,
   players,
+  playerRecord,
   recruitment,
+  recruitmentActs,
   safetyAudit,
   findPlayer,
   isBlocked,
@@ -95,7 +97,7 @@ export function registerFilmRoom({
     if (!discoveryInput(res, 'none', req.body)) return;
     const { p, m } = found;
     const views = (m.views ?? 0) + 1;
-    players.patchItem(p.id, 'media', { id: m.id }, { views });
+    playerRecord.annotateMedia(p.id, m.id, { views });
     broadcast('players', { playerId: p.id });
     res.json({ views });
   });
@@ -114,7 +116,7 @@ export function registerFilmRoom({
     const next = { ...(m.tags ?? {}) };
     for (const t of tags) next[t] = (next[t] ?? 0) + 1;
     const stored = unit(() => {
-      const row = players.patchItem(p.id, 'media', { id: m.id }, { tags: next });
+      const row = playerRecord.annotateMedia(p.id, m.id, { tags: next });
       ledgerAppend({
         type: 'clip_tagged',
         playerId: p.id,
@@ -175,7 +177,7 @@ export function registerFilmRoom({
       if (!t.reminderSent && dueAt !== null && dueAt - Date.now() < 48 * 3600 * 1000)
         asReconciling(() =>
           unit(() => {
-            recruitment.trials.markReportReminderSent(t.id);
+            recruitmentActs.markReportReminderSent(t.id);
             const request = recruitment.requests.byId(t.requestId);
             if (request?.userId)
               notify(

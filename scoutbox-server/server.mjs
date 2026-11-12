@@ -19,18 +19,22 @@ import { createMedia, createMediaSigning } from './domains/media/index.mjs';
 import {
   createAccountServices,
   createAccounts,
+  createGuardianRecord,
+  createOrgRecord,
   createPlayerRecord,
+  createSessionEnds,
   createSessions,
+  createStaffRecord,
 } from './domains/identity/index.mjs';
 import { createActivity, createDevelopment } from './domains/development/index.mjs';
 import { vouchView } from './domains/verification/vouches.mjs';
-import { createScouting } from './domains/scouting/index.mjs';
+import { createScoutingActs, createScouting } from './domains/scouting/index.mjs';
 import { createOperations } from './domains/operations/index.mjs';
 import { createIntegrations } from './domains/integrations/index.mjs';
 import { createDelivery, createMessaging, createNotificationFeed } from './domains/messaging/index.mjs';
 import { createInsight } from './domains/insight/index.mjs';
 import { createGroups } from './domains/groups/index.mjs';
-import { createVerification, createVouches } from './domains/verification/index.mjs';
+import { createCoachReferences, createVerification, createVouches } from './domains/verification/index.mjs';
 import { createSafety, createSafetyConsole } from './domains/safety/index.mjs';
 import { createPassport } from './domains/passport/index.mjs';
 import { COMBINE_PROTOCOLS, combineVerifiedProtocols } from './domains/development/public.mjs';
@@ -53,7 +57,12 @@ import { orgPlayerView } from './views/playerViews.mjs';
 import { DRILLS } from './domains/development/record.mjs';
 import { createDiscovery, createPlayerInsights } from './domains/discovery/index.mjs';
 import { requestForRecipient } from './domains/recruitment/requests.mjs';
-import { createCaseWorkflow, createRecruitment, createRooms } from './domains/recruitment/index.mjs';
+import {
+  createCaseWorkflow,
+  createRecruitment,
+  createRecruitmentActs,
+  createRooms,
+} from './domains/recruitment/index.mjs';
 import { createAgents } from './domains/agents/index.mjs';
 import { ledgerView } from './domains/recruitment/ledger.mjs';
 import { createEnterprise } from './domains/enterprise/index.mjs';
@@ -245,6 +254,17 @@ const storage = createStorage(DATA_DIR);
 const findPlayer = (id) => byId.player(id);
 const isBlocked = (playerId, orgId) => safetyAudit.blocks.has(playerId, orgId);
 
+// A domain writes another domain's records only through the owner's named acts, created here; every other domain gets
+// the repositories' reads.
+const playerRecord = createPlayerRecord({ players });
+const guardianRecord = createGuardianRecord({ guardians });
+const orgRecord = createOrgRecord({ orgs });
+const staffRecord = createStaffRecord({ users });
+const sessionEnds = createSessionEnds({ sessions });
+const scoutingActs = createScoutingActs({ clubSetup, opportunitiesCampaigns, nextId });
+const coachReferences = createCoachReferences({ transitionsVouches });
+const recruitmentActs = createRecruitmentActs({ recruitment });
+
 // ------------------------------------------------------------- the HTTP envelope
 const app = express();
 // Every request is one scope for the write rules (writeRules.mjs): what it commits is counted from here on.
@@ -277,15 +297,15 @@ const { createSession, sessionFor, loginKey, loginLockedOut, noteLoginFailure } 
   rateLimit,
 });
 // Media bytes live on object storage (local disk in dev); the database keeps only ids and /media/:id streams them.
-createMediaSigning({ app, byId, sessions, mediaDeletions, storage, sessionFor, isBlocked });
+createMediaSigning({ app, byId, sessions: sessions.reads, mediaDeletions, storage, sessionFor, isBlocked });
 
 // ---------------------------------------------------------------- live sync
 const liveSync = createLiveSync({
   app,
   store,
-  sessions,
+  sessions: sessions.reads,
   byId,
-  users,
+  users: users.reads,
   channels,
   findPlayer,
   isBlocked,
@@ -311,7 +331,7 @@ installRateLimitInspection(app, rateLimit, { enabled: faultLayer.enabled });
 // The preference gate exists before anything that notifies; its routes register with the other preference routes.
 const notificationPrefs = createNotificationPrefs({ notifications });
 
-registerMeta({ app, engine: store.engine, players, orgs, devLogins: DEV_LOGINS });
+registerMeta({ app, engine: store.engine, players: players.reads, orgs: orgs.reads, devLogins: DEV_LOGINS });
 
 // ------------------------------------------------------------- accounts
 // The session routes, the organisation, player and guardian routers, and the guardian and organisation accounts.
@@ -322,7 +342,7 @@ const { orgRouter, playerRouter, guardianRouter, guardianManagedOnly, orgSafe, s
     users,
     orgs,
     guardians,
-    clubSetup,
+    clubSetup: clubSetup.reads,
     safetyAudit,
     byId,
     findPlayer,
@@ -352,7 +372,7 @@ const { moderateOrRefuse, adminRouter } = createSafety({
   sessionFor,
   compliancePolicies,
   safetyAudit,
-  recruitment,
+  recruitmentActs, // a safeguarding report suspends the player's pending requests
   byId,
   unit,
   nextId,
@@ -376,9 +396,9 @@ const { notifier, notify, openChannel } = createMessaging({
   publishEvent,
   eventPayloadDrops,
   channels,
-  recruitment,
-  players,
-  guardians,
+  recruitment: recruitment.reads,
+  playerRecord, // the player's and guardian's notification preferences
+  guardianRecord,
   pushTokens,
   byId,
   isBlocked,
@@ -389,8 +409,7 @@ const { notifier, notify, openChannel } = createMessaging({
   ledgerAppend,
 });
 
-const { recordActivity, refreshJourneyBadges } = createActivity({ players, notify });
-const playerRecord = createPlayerRecord({ players });
+const { recordActivity, refreshJourneyBadges } = createActivity({ players: players.reads, playerRecord, notify });
 const { publishedVouchesFor, vouchesFor } = createVouches({ verificationReads });
 const insightsFor = createPlayerInsights({ safetyAudit });
 
@@ -443,12 +462,15 @@ const developmentDomain = createDevelopment({
   playerRouter,
   guardianRouter,
   adminRouter,
-  users,
-  orgs,
-  players,
+  users: users.reads,
+  orgs: orgs.reads,
+  players: players.reads,
+  playerRecord, // the player's record (programme, stats, media, medical, timeline) is written through the identity domain
   grassroots,
-  clubSetup,
-  transitionsVouches,
+  clubSetup: clubSetup.reads,
+  scoutingActs, // the grassroots squad and what the club is looking for are written through the scouting domain
+  transitionsVouches: transitionsVouches.reads,
+  coachReferences, // a coach reference is written through the verification domain
   signingsFollowUps,
   development,
   developmentReads,
@@ -495,11 +517,12 @@ function revokeOrgUserAccess(userId) {
 // --------------------------------------------- scouting, operations and media
 // Evidence and coach identity, assessments and video, opportunities and campaigns, suitability preferences, resumable
 // uploads, and the post-signing follow-ups with their persistent sweep.
-const { joinSquad } = createScouting({
+createScouting({
   byId,
   scoutingReads,
   verificationReads,
-  players,
+  players: players.reads,
+  playerRecord,
   unit,
   app,
   orgRouter,
@@ -512,12 +535,15 @@ const { joinSquad } = createScouting({
   broadcast,
   scoutingEvidence,
   clubSetup,
-  transitionsVouches,
+  transitionsVouches: transitionsVouches.reads,
+  coachReferences,
   findPlayer,
   moderateOrRefuse,
   development,
   recruitmentReads,
-  users,
+  users: users.reads,
+  staffRecord, // removing a staff member
+  joinSquad: scoutingActs.joinSquad,
   recruitment,
   recruitmentCases,
   scoutingAssessments,
@@ -531,7 +557,7 @@ const { joinSquad } = createScouting({
 });
 const media = createMedia({
   playerRouter,
-  players,
+  playerRecord, // an upload adds the clip to the player's media
   operations,
   mediaDeletions,
   storage,
@@ -561,12 +587,15 @@ const { followUpSweep } = createOperations({
   playerRouter,
   guardianRouter,
   adminRouter,
-  users,
-  orgs,
-  players,
-  recruitment,
+  users: users.reads,
+  orgs: orgs.reads,
+  players: players.reads,
+  playerRecord,
+  recruitment: recruitment.reads,
+  recruitmentActs, // the follow-up sweep escalates and marks a trial's reminders through the recruitment domain
   signingsFollowUps,
-  opportunitiesCampaigns,
+  opportunitiesCampaigns: opportunitiesCampaigns.reads,
+  scoutingActs, // an unanswered application's reminder is marked through the scouting domain
   scoutingReads,
   byId,
   findPlayer,
@@ -591,7 +620,8 @@ const { emitWebhook, webhookSweep } = createIntegrations({
   orgRouter,
   adminRouter,
   integrations,
-  players,
+  players: players.reads,
+  playerRecord, // a claimed import adds the player's external id
   safetyAudit,
   byId,
   findPlayer,
@@ -611,7 +641,7 @@ const { notifyAction, deliverySweep, injectedFailures } = createDelivery({
   outbox,
   operations,
   safetyAudit,
-  users,
+  staffRecord, // a staff member's delivery preferences
   byId,
   findPlayer,
   isBlocked,
@@ -631,10 +661,13 @@ createEnterprise({
   insightReads,
   integrationReads,
   recruitmentReads,
-  users,
-  orgs,
-  players,
-  sessions,
+  users: users.reads,
+  staffRecord, // invitations, MFA and the SSO link
+  orgs: orgs.reads,
+  orgRecord, // the lead MFA policy
+  players: players.reads,
+  sessions: sessions.reads,
+  sessionEnds, // ending one's own session
   codes,
   channels,
   notifications,
@@ -643,7 +676,7 @@ createEnterprise({
   pushLog,
   pushTokens,
   mediaDeletions,
-  recruitment,
+  recruitment: recruitment.reads,
   recruitmentCases,
   safetyAudit,
   byId,
@@ -668,11 +701,14 @@ const verificationDomain = createVerification({
   playerRouter,
   guardianRouter,
   adminRouter,
-  users,
-  orgs,
-  players,
+  users: users.reads,
+  staffRecord, // a verified applicant's staff account
+  orgs: orgs.reads,
+  orgRecord, // an organisation's verification standing
+  players: players.reads,
+  playerRecord, // a transition case sets the player's level
   codes,
-  clubSetup,
+  scoutingActs, // the federation-route request
   verification,
   transitionsVouches,
   development,
@@ -699,7 +735,7 @@ const insightDomain = createInsight({
   recruitmentReads,
   scoutingReads,
   safetyReads,
-  players,
+  players: players.reads,
   byId,
   findPlayer,
   isBlocked,
@@ -717,7 +753,7 @@ createGroups({
   scoutingReads,
   safetyReads,
   byId,
-  users,
+  users: users.reads,
   findPlayer,
   isBlocked,
   unit,
@@ -740,17 +776,19 @@ createSafetyConsole({
   notify,
   broadcast,
   mailer,
-  players,
-  guardians,
-  orgs,
-  sessions,
+  players: players.reads,
+  guardians: guardians.reads,
+  orgs: orgs.reads,
+  orgRecord, // suspension, standing and the provisioned password
+  sessions: sessions.reads,
   channels,
   safetyAudit,
   signingsFollowUps,
   operations,
   outbox,
   pushLog,
-  transitionsVouches,
+  transitionsVouches: transitionsVouches.reads,
+  coachReferences, // revoking a coach reference
   verificationReads,
   byId,
   orgSafe,
@@ -795,7 +833,7 @@ const passportDomain = createPassport({
   playerRouter,
   guardianRouter,
   adminRouter,
-  players,
+  players: players.reads,
   passport,
   development,
   scoutingReads,
@@ -822,8 +860,8 @@ const passportDomain = createPassport({
 const roomsDomain = createRooms({
   orgRouter,
   adminRouter,
-  users,
-  players,
+  users: users.reads,
+  players: players.reads,
   recruitmentCases,
   recruitmentReads,
   scoutingReads,
@@ -863,8 +901,10 @@ const { recruitmentEvidence } = roomsDomain;
 // mutates the pipeline itself: a Room is created or reopened through the Rooms' own seams.
 const { checkSavedSearches, matchFactsKeeper } = createDiscovery({
   orgRouter,
-  players,
-  recruitment,
+  players: players.reads,
+  playerRecord, // the Film Room's views and tags on a clip
+  recruitment: recruitment.reads,
+  recruitmentActs, // a trial report reminder is marked sent through the recruitment domain
   discovery,
   discoveryReads,
   matchFacts,
@@ -918,9 +958,10 @@ const agentsDomain = createAgents({
   orgRouter,
   playerRouter,
   adminRouter,
-  users,
-  players,
-  sessions,
+  users: users.reads,
+  staffRecord, // an agency's team members
+  players: players.reads,
+  sessionEnds, // a revoked reviewer's sessions
   channels, // a linked thread's own authorisation
   notifications, // the agent inbox and its unread count
   agentCore,
@@ -966,7 +1007,7 @@ const caseWorkflow = createCaseWorkflow({
   users: users.reads,
   guardians: guardians.reads,
   playerRecord, // a completion writes the player's level, contract status and timeline through the identity domain
-  joinSquad, // a grassroots signing adds the squad row through the scouting domain
+  joinSquad: scoutingActs.joinSquad, // a grassroots signing adds the squad row through the scouting domain
   injectedFailures, // an injected transport failure is used up through the delivery centre
   recruitment,
   recruitmentCases,

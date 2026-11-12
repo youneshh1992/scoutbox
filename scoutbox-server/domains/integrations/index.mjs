@@ -11,6 +11,7 @@ export function createIntegrations(deps) {
     'adminRouter',
     'integrations',
     'players',
+    'playerRecord',
     'safetyAudit',
     'byId',
     'findPlayer',

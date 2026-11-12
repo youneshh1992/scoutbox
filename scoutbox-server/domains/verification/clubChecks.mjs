@@ -21,9 +21,19 @@ const Federation = v.strictObject({
   contactEmail: optText(CLUB_SETUP_LIMITS.contactEmail),
 });
 
-export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, rateLimit, unit, seam, broadcast }) {
-  if (typeof orgs?.verifyEmailDomain !== 'function' || typeof rateLimit?.peek !== 'function')
-    throw new TypeError('registerClubChecks needs the organisations repository and the rate limiter');
+export function registerClubChecks({
+  orgRouter,
+  orgRecord,
+  codes,
+  scoutingActs,
+  mailer,
+  rateLimit,
+  unit,
+  seam,
+  broadcast,
+}) {
+  if (typeof orgRecord?.verifyEmailDomain !== 'function' || typeof rateLimit?.peek !== 'function')
+    throw new TypeError("registerClubChecks needs the identity domain's orgRecord and the rate limiter");
 
   orgRouter.post('/verification/email', async (req, res) => {
     const body = inputOrRefuse(res, ClubEmail, req.body ?? {}, { fieldCodes: { email: 'EMAIL_REQUIRED' } });
@@ -83,7 +93,7 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
       const consumed = codes.consumeEmailChallenge(req.org.id, code);
       if (!consumed) throw new Error('email challenge: the challenge changed between the check and the confirmation');
       seam('email_challenge.confirm.after_consume');
-      return orgs.verifyEmailDomain(req.org.id, consumed.email.split('@')[1]);
+      return orgRecord.verifyEmailDomain(req.org.id, consumed.email.split('@')[1]);
     });
     broadcast('orgs');
     res.json({ emailDomainVerified: true, emailDomain: updated.emailDomain });
@@ -110,7 +120,7 @@ export function registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, 
         problem: 'invalid',
         message: 'contactEmail is an e-mail address.',
       });
-    clubSetup.federation.submit({
+    scoutingActs.submitFederationCheck({
       orgId: req.org.id,
       federation,
       registrationId,

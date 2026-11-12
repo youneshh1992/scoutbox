@@ -38,7 +38,7 @@ export function registerTransitions(ctx) {
     isAdult,
     orgCanSee,
     emitWebhook,
-    players,
+    playerRecord,
     unit,
     users,
     transitionsVouches,
@@ -407,7 +407,7 @@ export function registerTransitions(ctx) {
     const { level, reason } = body;
     const from = p.level;
     unit(() => {
-      players.setLevel(p.id, level);
+      playerRecord.setLevel(p.id, level);
       ledgerAppend({
         type: 'level_review',
         playerId: p.id,

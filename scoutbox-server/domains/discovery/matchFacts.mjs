@@ -34,7 +34,7 @@ export function adulthoodAt(player) {
 export function createMatchFactsKeeper(ctx) {
   const { matchFacts, players, unit } = ctx;
   if (typeof matchFacts?.write !== 'function' || typeof players?.byIds !== 'function')
-    throw new TypeError('the match facts keeper needs the matchFacts and players repositories');
+    throw new TypeError("the match facts keeper needs the matchFacts repository and the players' reads");
   // The Trust Score policy the stored bands were derived under: a new version re-derives every row.
   if (!Number.isInteger(ctx.trustPolicyVersion))
     throw new TypeError('the match facts keeper needs the Trust Score policy version');

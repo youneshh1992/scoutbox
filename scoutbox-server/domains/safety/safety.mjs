@@ -55,7 +55,7 @@ export function registerReporting({
   guardianRouter,
   orgRouter,
   safetyAudit,
-  recruitment,
+  recruitmentActs,
   byId,
   unit,
   nextId,
@@ -109,9 +109,7 @@ export function registerReporting({
           reason: 'suspended_pending_review',
           ts: Date.now(),
         });
-        for (const r of recruitment.requests.forOrgPlayer(targetOrgId, pid).filter((x) => x.status === 'pending')) {
-          recruitment.requests.suspend(r.id);
-        }
+        recruitmentActs.suspendPendingRequests(targetOrgId, pid);
       }
     });
     if (suspend) broadcast('players');
@@ -188,6 +186,7 @@ export function registerSafetyConsole({
   players,
   guardians,
   orgs,
+  orgRecord,
   sessions,
   channels,
   safetyAudit,
@@ -196,6 +195,7 @@ export function registerSafetyConsole({
   outbox,
   pushLog,
   transitionsVouches,
+  coachReferences,
   verificationReads,
   byId,
   orgSafe,
@@ -204,7 +204,6 @@ export function registerSafetyConsole({
   vouchView,
   syncLegacyOrgVerification,
 }) {
-  if (typeof orgs?.setStanding !== 'function') throw new TypeError('registerSafetyConsole needs the orgs repository');
   if (typeof syncLegacyOrgVerification !== 'function')
     throw new TypeError("registerSafetyConsole needs the verification claims' syncLegacyOrgVerification");
   const paged = (req, res, cursor, read) => {
@@ -282,7 +281,7 @@ export function registerSafetyConsole({
     const vouch = verificationReads.vouches.byId(req.params.id);
     if (!vouch) return res.status(404).json({ error: 'VOUCH_NOT_FOUND' });
     if (!safetyInput(res, 'none', req.body)) return;
-    unit(() => transitionsVouches.vouches.revoke(vouch.id));
+    unit(() => coachReferences.revoke(vouch.id));
     broadcast('players', { playerId: vouch.playerId });
     res.json({ revoked: true });
   });
@@ -298,7 +297,7 @@ export function registerSafetyConsole({
     if (!presentOrRefuse(res, outcome, 'outcome')) return;
     const resolved = unit(() => {
       const r = safetyAudit.reports.resolve(report.id, { outcome, at: Date.now() });
-      if (action === 'suspend_org' && r.targetOrgId) orgs.setStanding(r.targetOrgId, { suspended: true });
+      if (action === 'suspend_org' && r.targetOrgId) orgRecord.suspend(r.targetOrgId);
       if (r.by !== 'system')
         notify({ kind: r.by, id: r.byId }, 'report_resolved', `Your report was reviewed: ${r.outcome}`, r.id); // a system escalation has no reporter to tell
       return r;
@@ -333,7 +332,7 @@ export function registerSafetyConsole({
         .status(400)
         .json({ error: 'PASSWORD_TOO_SHORT', message: 'Club passwords need at least 8 characters.' });
     }
-    orgs.setPasswordHash(org.id, hashPassword(password));
+    orgRecord.provisionPassword(org.id, hashPassword(password));
     res.json({ ok: true, note: 'Credentials provisioned — the organisation signs in with this password from now on.' });
   });
 
@@ -345,7 +344,7 @@ export function registerSafetyConsole({
     const { verified, safeguardingContractSigned, verifiedDomain, suspended } = body;
     // Mirrored on the organisation's identity claim in the same unit.
     const updated = unit(() => {
-      orgs.setStanding(org.id, {
+      orgRecord.setStanding(org.id, {
         verified,
         safeguardingContractSigned,
         suspended,

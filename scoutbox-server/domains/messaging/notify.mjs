@@ -142,16 +142,19 @@ export function registerDeliverySettings({
   app,
   playerRouter,
   guardianRouter,
-  players,
-  guardians,
+  playerRecord,
+  guardianRecord,
   pushTokens,
   sessionFor,
 }) {
-  if (typeof players?.setNotificationPrefs !== 'function' || typeof guardians?.setNotificationPrefs !== 'function')
-    throw new TypeError('registerDeliverySettings needs the players and guardians repositories');
+  if (
+    typeof playerRecord?.setNotificationPrefs !== 'function' ||
+    typeof guardianRecord?.setNotificationPrefs !== 'function'
+  )
+    throw new TypeError("registerDeliverySettings needs the identity domain's playerRecord and guardianRecord");
   const note = 'Quiet hours and the school-hours mute apply to push delivery; the in-app feed always keeps the record.';
   const show = (res, person) => res.json({ prefs: person.notificationPrefs ?? null, note });
-  const save = (repo, person, req, res) => {
+  const save = (record, person, req, res) => {
     const body = messagingInput(res, 'personPrefs', req.body);
     if (!body) return;
     const { quietStart, quietEnd, schoolHoursMute, timezone } = body;
@@ -168,12 +171,12 @@ export function registerDeliverySettings({
       timezone: timezone === undefined ? (was.timezone ?? null) : timezone || null,
     };
     const empty = Object.values(prefs).every((v) => v === null);
-    show(res, repo.setNotificationPrefs(person.id, empty ? null : prefs));
+    show(res, record.setNotificationPrefs(person.id, empty ? null : prefs));
   };
   playerRouter.get('/prefs', (req, res) => show(res, req.player));
-  playerRouter.post('/prefs', (req, res) => save(players, req.player, req, res));
+  playerRouter.post('/prefs', (req, res) => save(playerRecord, req.player, req, res));
   guardianRouter.get('/prefs', (req, res) => show(res, req.guardian));
-  guardianRouter.post('/prefs', (req, res) => save(guardians, req.guardian, req, res));
+  guardianRouter.post('/prefs', (req, res) => save(guardianRecord, req.guardian, req, res));
 
   // Players and guardians only: club staff are notified in their portal and by e-mail.
   app.post('/push/register', (req, res) => {

@@ -32,7 +32,7 @@ const uploadView = (u) => ({
 });
 
 export function registerUploads(ctx) {
-  const { nextId, broadcast, playerRouter, moderateOrRefuse, storage, DATA_DIR, players, unit, operations } = ctx;
+  const { nextId, broadcast, playerRouter, moderateOrRefuse, storage, DATA_DIR, playerRecord, unit, operations } = ctx;
   if (typeof operations?.uploads?.open !== 'function')
     throw new TypeError('registerUploads needs the operations repository');
   const uploads = operations.uploads;
@@ -168,7 +168,7 @@ export function registerUploads(ctx) {
     // The chunks are removed after the commit.
     const done = unlessEnded(res, up.id, () =>
       unit(() => {
-        players.addItem(req.player.id, 'media', item);
+        playerRecord.addMedia(req.player.id, item);
         const fresh = uploads.finalise(up.id, item.id);
         ctx.recordActivity(req.player);
         broadcast('players', { playerId: req.player.id });

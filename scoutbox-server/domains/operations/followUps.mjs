@@ -28,16 +28,17 @@ export function registerOperations(ctx) {
     sessionFor,
     isBlocked,
     DATA_DIR,
-    players,
+    playerRecord,
     users,
     unit,
     signingsFollowUps,
     recruitment,
+    recruitmentActs,
+    scoutingActs,
     scoutingReads,
     opportunitiesCampaigns,
   } = ctx;
-  if (!recruitment?.trials)
-    throw new TypeError('registerOperations needs the recruitment repository from the data layer');
+  if (!recruitment?.trials) throw new TypeError("registerOperations needs the recruitment domain's reads");
   const trials = recruitment.trials;
   if (
     typeof signingsFollowUps?.followUps?.schedule !== 'function' ||
@@ -264,7 +265,7 @@ export function registerOperations(ctx) {
         .status(400)
         .json({ error: 'VTT_REQUIRED', message: 'Captions are a WebVTT track (starts with "WEBVTT").' });
     if (vtt.length > 200_000) return res.status(413).json({ error: 'CAPTIONS_TOO_LARGE' });
-    players.patchItem(req.player.id, 'media', { id: m.id }, { captions: vtt });
+    playerRecord.annotateMedia(req.player.id, m.id, { captions: vtt });
     broadcast('players', { playerId: req.player.id });
     res.json({ media: { id: m.id, captions: true } });
   });
@@ -294,7 +295,7 @@ export function registerOperations(ctx) {
     const body = operationsInput(res, 'footballCategory', req.body);
     if (!body) return;
     const c = body.category;
-    players.setFootballCategory(req.player.id, c);
+    playerRecord.setFootballCategory(req.player.id, c);
     res.json({ footballCategory: c });
   });
 
@@ -345,7 +346,7 @@ export function registerOperations(ctx) {
     // Outstanding application outcomes nag once after 7 days; the marker commits with the notification.
     for (const a of scoutingReads.applications.remindersDue(now - 7 * 86_400_000)) {
       unit(() => {
-        opportunitiesCampaigns.applications.markReminded(a.id, { at: now });
+        scoutingActs.markApplicationReminded(a.id, { at: now });
         const lead = usersOf(a.orgId)[0];
         if (lead)
           notify(
@@ -369,7 +370,7 @@ export function registerOperations(ctx) {
         !t.feedbackEscalatedAt &&
         !t.subjectRemovedAt
       ) {
-        trials.escalateFeedback(t.id, { at: now });
+        recruitmentActs.escalateTrialFeedback(t.id, { at: now });
         const lead = usersOf(t.orgId)[0];
         if (lead)
           notify(
@@ -431,13 +432,13 @@ export function registerOperations(ctx) {
           );
         changed = true;
       }
-      if (Object.keys(marks).length) trials.markReminders(t.id, { markers: marks });
+      if (Object.keys(marks).length) recruitmentActs.markTrialReminders(t.id, { markers: marks });
     }
     for (const t of trials.completedUnreminded(now - 7 * 86_400_000)) {
       if (t.subjectRemovedAt || t.completion?.state !== 'completed' || t.reminders?.assessmentPending) continue;
       if (!Number.isFinite(t.completion.at) || now - t.completion.at < 7 * 86_400_000) continue;
       if (ctx.scoutingReads.assessments.anyForTrial(t.id)) continue;
-      trials.markReminders(t.id, { markers: { assessmentPending: now } });
+      recruitmentActs.markTrialReminders(t.id, { markers: { assessmentPending: now } });
       const lead = usersOf(t.orgId)[0];
       if (lead)
         notify(

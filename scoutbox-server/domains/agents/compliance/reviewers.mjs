@@ -29,7 +29,7 @@ export function registerReviewers(ctx) {
     inputOr400,
     rateLimit,
     sessionFor,
-    sessions,
+    sessionEnds,
     tsRouter,
     unit,
     verifyPassword,
@@ -147,7 +147,7 @@ export function registerReviewers(ctx) {
       );
     const r = reviewers.activeById(session.refId);
     if (!r) {
-      sessions.revokeSid(session.sid);
+      sessionEnds.end(session.sid);
       return sendComplianceError(
         res,
         { error: 'REVIEWER_REVOKED', message: "This reviewer's access has been revoked." },
@@ -168,7 +168,7 @@ export function registerReviewers(ctx) {
     return false;
   };
   const revokeReviewerSessions = (id) => {
-    sessions.revokeFor('ts_reviewer', id);
+    sessionEnds.endAllFor('ts_reviewer', id);
   };
 
   tsRouter.get('/me', (req, res) =>

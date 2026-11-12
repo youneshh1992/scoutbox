@@ -9,7 +9,7 @@ const SAMPLE_CLIPS = [
   { file: 'clip-wingplay.webm', playerId: 'pl-guni', title: 'U15 highlights — wing play' },
 ];
 
-export function installSampleClips({ assetsDir, findPlayer, players, storage }) {
+export function installSampleClips({ assetsDir, findPlayer, playerRecord, storage }) {
   for (const sample of SAMPLE_CLIPS) {
     try {
       const data = fs.readFileSync(path.join(assetsDir, sample.file));
@@ -18,12 +18,10 @@ export function installSampleClips({ assetsDir, findPlayer, players, storage }) 
       if (!media) continue;
       storage.saveDataUrl(media.id, `data:video/webm;base64,${data.toString('base64')}`);
       // Each sample is a verified clip of the player's first attended fixture.
-      players.patchItem(
-        player.id,
-        'media',
-        { id: media.id },
-        { url: `/media/${media.id}`, ...(player.attendance[0] ? { verifiedClip: player.attendance[0].id } : {}) },
-      );
+      playerRecord.annotateMedia(player.id, media.id, {
+        url: `/media/${media.id}`,
+        ...(player.attendance[0] ? { verifiedClip: player.attendance[0].id } : {}),
+      });
     } catch {
       // the asset is optional
     }

@@ -12,8 +12,8 @@ import { DRILLS, registerPlayerRecord } from './record.mjs';
 
 /** `recordActivity` (a player's streak and badges) and `refreshJourneyBadges`. No routes. */
 export function createActivity(deps) {
-  const { players, notify } = needs('createActivity', deps, ['players', 'notify']);
-  return createActivityRecorder({ players, notify });
+  const { players, playerRecord, notify } = needs('createActivity', deps, ['players', 'playerRecord', 'notify']);
+  return createActivityRecorder({ players, playerRecord, notify });
 }
 
 /**
@@ -31,9 +31,12 @@ export function createDevelopment(deps) {
     'users',
     'orgs',
     'players',
+    'playerRecord',
     'grassroots',
     'clubSetup',
+    'scoutingActs',
     'transitionsVouches',
+    'coachReferences',
     'signingsFollowUps',
     'development',
     'developmentReads',
@@ -66,16 +69,18 @@ export function createDevelopment(deps) {
     'ledgerAppend',
   ]);
   const d = strictContext('createDevelopment', deps);
-  const { orgRouter, playerRouter, players, unit, seam, nextId, notify, broadcast, ledgerAppend } = d;
+  const { orgRouter, playerRouter, players, playerRecord, unit, seam, nextId, notify, broadcast, ledgerAppend } = d;
   const { moderateOrRefuse, recordActivity, canonicalContractFor, findPlayer } = d;
   const findOrg = d.byId.org;
 
   const { pathwayRecord, openTrialView } = registerGrassrootsClub({
     orgRouter,
     players,
+    playerRecord,
     grassroots: d.grassroots,
     clubSetup: d.clubSetup,
-    transitionsVouches: d.transitionsVouches,
+    scoutingActs: d.scoutingActs,
+    coachReferences: d.coachReferences,
     signings: d.signingsFollowUps.signings,
     findPlayer,
     findOrg,
@@ -100,6 +105,7 @@ export function createDevelopment(deps) {
     adminRouter: d.adminRouter,
     users: d.users,
     players,
+    playerRecord,
     development: d.development,
     developmentReads: d.developmentReads,
     boxCam: d.boxCam,
@@ -127,6 +133,7 @@ export function createDevelopment(deps) {
   registerPlayerRecord({
     playerRouter,
     players,
+    playerRecord,
     unit,
     seam,
     nextId,
@@ -144,10 +151,12 @@ export function createDevelopment(deps) {
     playerRouter,
     guardianRouter: d.guardianRouter,
     players,
+    playerRecord,
     orgs: d.orgs,
     grassroots: d.grassroots,
     clubSetup: d.clubSetup,
     transitionsVouches: d.transitionsVouches,
+    coachReferences: d.coachReferences,
     findPlayer,
     findOrg,
     unit,

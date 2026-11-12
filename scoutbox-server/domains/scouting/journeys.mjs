@@ -186,7 +186,7 @@ export function registerJourneys(ctx) {
     guardianOwnsChild,
     recordActivity,
     DRILLS,
-    players,
+    playerRecord,
     users,
     unit,
     recruitment,
@@ -1077,7 +1077,7 @@ export function registerJourneys(ctx) {
       );
       // Feed the existing attendance record once.
       if (p && !(p.attendance ?? []).some((a) => a.trialId === t.id)) {
-        players.addItem(p.id, 'attendance', {
+        playerRecord.recordAttendance(p.id, {
           id: nextId('att'),
           trialId: t.id,
           fixture: `Trial day · ${t.orgName}`,

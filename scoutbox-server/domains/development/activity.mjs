@@ -3,9 +3,13 @@
 import { computeStreak } from '../../domain.mjs';
 import { earnedGrassrootsBadges } from '../../grassrootsJourney.mjs';
 
-export function createActivity({ players, notify }) {
-  if (typeof players?.addItem !== 'function' || typeof notify !== 'function')
-    throw new TypeError('createActivity needs the players repository and notify');
+export function createActivity({ players, playerRecord, notify }) {
+  if (
+    typeof players?.byId !== 'function' ||
+    typeof playerRecord?.awardBadge !== 'function' ||
+    typeof notify !== 'function'
+  )
+    throw new TypeError("createActivity needs the players' reads, the identity domain's playerRecord and notify");
 
   function refreshJourneyBadges(given) {
     const player = players.byId(given.id); // the stored record, with the caller's writes
@@ -13,7 +17,7 @@ export function createActivity({ players, notify }) {
     const earned = earnedGrassrootsBadges(player, { streak: computeStreak(player.activityLog) });
     for (const badge of earned) {
       if (!(player.badges ?? []).includes(badge)) {
-        players.addItem(player.id, 'badges', badge);
+        playerRecord.awardBadge(player.id, badge);
         notify(
           { kind: 'player', id: player.id },
           'badge',
@@ -25,7 +29,7 @@ export function createActivity({ players, notify }) {
   }
 
   function recordActivity(player) {
-    players.addItem(player.id, 'activityLog', Date.now());
+    playerRecord.logActivity(player.id, Date.now());
     refreshJourneyBadges(players.byId(player.id));
   }
 

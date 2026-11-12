@@ -14,6 +14,25 @@ export function createVouches(deps) {
 }
 
 /**
+ * The writes another domain makes on coach references: the grassroots journey adds a pending one when a player asks a
+ * coach and publishes it when the coach answers, a club's release of a player adds the one it wrote, and Trust &
+ * Safety revokes or withdraws one.
+ */
+export function createCoachReferences(deps) {
+  const { transitionsVouches } = strictContext(
+    'createCoachReferences',
+    needs('createCoachReferences', deps, ['transitionsVouches']),
+  );
+  const { vouches } = transitionsVouches;
+  return Object.freeze({
+    add: (vouch) => vouches.create(vouch),
+    publish: (vouchId, answer) => vouches.publish(vouchId, answer),
+    revoke: (vouchId) => vouches.revoke(vouchId),
+    withdraw: (vouchId, withdrawal) => vouches.withdraw(vouchId, withdrawal),
+  });
+}
+
+/**
  * The club checks, transition cases and verification claims. Returns the minute `transitionSweep` and
  * `verificationSweep`, the console's
  * `syncLegacyOrgVerification`, and `storeEvidenceFile` / `addEvidence`, through which a signing attaches its documents
@@ -27,10 +46,13 @@ export function createVerification(deps) {
     'guardianRouter',
     'adminRouter',
     'users',
+    'staffRecord',
     'orgs',
+    'orgRecord',
     'players',
+    'playerRecord',
     'codes',
-    'clubSetup',
+    'scoutingActs',
     'verification',
     'transitionsVouches',
     'development',
@@ -53,9 +75,9 @@ export function createVerification(deps) {
   const d = strictContext('createVerification', deps);
   registerClubChecks({
     orgRouter: d.orgRouter,
-    orgs: d.orgs,
+    orgRecord: d.orgRecord,
     codes: d.codes,
-    clubSetup: d.clubSetup,
+    scoutingActs: d.scoutingActs,
     mailer: d.mailer,
     rateLimit: d.rateLimit,
     unit: d.unit,

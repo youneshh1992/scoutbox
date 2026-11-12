@@ -14,7 +14,7 @@ import { identityInput, PASSWORD_MIN } from './schemas.mjs';
  */
 export function createOrgViews({ clubSetup, safetyAudit }) {
   function orgSafe(o) {
-    const fed = clubSetup.federation.forOrg(o.id);
+    const fed = clubSetup.federationChecks.forOrg(o.id);
     return {
       id: o.id,
       name: o.name,

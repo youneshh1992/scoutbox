@@ -94,9 +94,10 @@ export function createAccounts(deps) {
 }
 
 /**
- * The writes another domain makes on a player's record, each named for what happened. `recordSigning`: a completed
- * signing sets the level the player reached and the contract status and availability it implies, and adds its
- * timeline lines in order.
+ * The writes another domain makes on a player's record, each named for what happened; other domains get the players'
+ * reads and these, never the repository, so none of them creates, erases or signs in a player or writes a list it
+ * has no act for. Each returns what the repository's act returns. `recordSigning`: a completed signing sets the level
+ * the player reached and the contract status and availability it implies, and adds its timeline lines in order.
  */
 export function createPlayerRecord(deps) {
   const { players } = strictContext('createPlayerRecord', needs('createPlayerRecord', deps, ['players']));
@@ -106,6 +107,91 @@ export function createPlayerRecord(deps) {
       players.setAvailability(playerId, { contractStatus, availability });
       for (const entry of timeline) players.addItem(playerId, 'timeline', entry);
     },
+    setLevel: (playerId, level) => players.setLevel(playerId, level),
+    setAvailability: (playerId, { availability, contractStatus }) =>
+      players.setAvailability(playerId, { availability, contractStatus }),
+    setFootballCategory: (playerId, category) => players.setFootballCategory(playerId, category),
+    setAcademyPlus: (playerId, on) => players.setAcademyPlus(playerId, on),
+    setFirstTeamSeeker: (playerId, on) => players.setFirstTeamSeeker(playerId, on),
+    setLocation: (playerId, location) => players.setLocation(playerId, location),
+    setMedicalSharing: (playerId, shared) => players.setMedicalSharing(playerId, shared),
+    setConditionStatus: (playerId, status) => players.setConditionStatus(playerId, status),
+    addMedicalRecord: (playerId, record) => players.addItem(playerId, 'medical.records', record),
+    awardBadge: (playerId, badge) => players.addItem(playerId, 'badges', badge),
+    setBadges: (playerId, badges) => players.setItems(playerId, 'badges', badges),
+    logActivity: (playerId, at) => players.addItem(playerId, 'activityLog', at),
+    addTimelineEntry: (playerId, entry) => players.addItem(playerId, 'timeline', entry),
+    recordAttendance: (playerId, entry) => players.addItem(playerId, 'attendance', entry),
+    addMedia: (playerId, item) => players.addItem(playerId, 'media', item),
+    annotateMedia: (playerId, mediaId, patch) => players.patchItem(playerId, 'media', { id: mediaId }, patch),
+    recordStats: (playerId, stats) => players.recordStats(playerId, stats),
+    setSeasonHistory: (playerId, history) => players.setItems(playerId, 'seasonHistory', history),
+    recordDrill: (playerId, drillId) => players.addItem(playerId, 'drills', drillId),
+    recordDrillResult: (playerId, result) => players.addItem(playerId, 'drillResults', result),
+    startProgramme: (playerId, track, at) => players.startProgramme(playerId, track, at),
+    completeProgrammeSession: (playerId, entry) => players.addItem(playerId, 'programme.completed', entry),
+    addExternalId: (playerId, entry) => players.addItem(playerId, 'externalIds', entry),
+    setNotificationPrefs: (playerId, prefs) => players.setNotificationPrefs(playerId, prefs),
+  });
+}
+
+/** The write another domain makes on a guardian's account: their notification preferences. */
+export function createGuardianRecord(deps) {
+  const { guardians } = strictContext('createGuardianRecord', needs('createGuardianRecord', deps, ['guardians']));
+  return Object.freeze({
+    setNotificationPrefs: (guardianId, prefs) => guardians.setNotificationPrefs(guardianId, prefs),
+  });
+}
+
+/**
+ * The writes another domain makes on an organisation: its standing (verified, suspended, the safeguarding contract,
+ * the verified domain), the verification route's registration and revocation, the T&S-provisioned password, and the
+ * lead MFA policy.
+ */
+export function createOrgRecord(deps) {
+  const { orgs } = strictContext('createOrgRecord', needs('createOrgRecord', deps, ['orgs']));
+  return Object.freeze({
+    register: (org) => orgs.create(org),
+    setStanding: (orgId, standing) => orgs.setStanding(orgId, standing),
+    suspend: (orgId) => orgs.setStanding(orgId, { suspended: true }),
+    verifyEmailDomain: (orgId, domain) => orgs.verifyEmailDomain(orgId, domain),
+    revokeVerification: (orgId, at) => orgs.revokeVerification(orgId, at),
+    clearVerificationRevocation: (orgId) => orgs.clearVerificationRevocation(orgId),
+    provisionPassword: (orgId, hash) => orgs.setPasswordHash(orgId, hash),
+    requireMfaForLeads: (orgId, on) => orgs.setMfaRequiredForLeads(orgId, on),
+  });
+}
+
+/**
+ * The writes another domain makes on a staff account: joining (an invitation, an agency's team, a verified
+ * applicant), coming back, the e-mail and SSO link, delivery preferences, the second factor, and removal. A staff
+ * account's role and recovery codes stay the identity domain's own.
+ */
+export function createStaffRecord(deps) {
+  const { users } = strictContext('createStaffRecord', needs('createStaffRecord', deps, ['users']));
+  return Object.freeze({
+    add: (user) => users.create(user),
+    restore: (userId, change) => users.restore(userId, change),
+    setEmail: (userId, email) => users.setEmail(userId, email),
+    linkSso: (userId, subject) => users.linkSso(userId, subject),
+    setDeliveryPrefs: (userId, prefs) => users.setDeliveryPrefs(userId, prefs),
+    startMfa: (userId, secret) => users.startMfa(userId, secret),
+    enableMfa: (userId, enrolment) => users.enableMfa(userId, enrolment),
+    disableMfa: (userId) => users.disableMfa(userId),
+    remove: (userId, removal) => users.remove(userId, removal),
+  });
+}
+
+/**
+ * How another domain ends sessions: one session, every session of an account (a revoked reviewer), and a staff
+ * member's own session by id. Minting a session is the identity domain's alone.
+ */
+export function createSessionEnds(deps) {
+  const { sessions } = strictContext('createSessionEnds', needs('createSessionEnds', deps, ['sessions']));
+  return Object.freeze({
+    end: (sid) => sessions.revokeSid(sid),
+    endAllFor: (kind, refId) => sessions.revokeFor(kind, refId),
+    endOwn: (userId, sid) => sessions.revokeOwn(userId, sid),
   });
 }
 

@@ -18,8 +18,11 @@ export function registerEnterprise(ctx) {
   const {
     byId,
     users,
+    staffRecord,
     sessions,
+    sessionEnds,
     orgs,
+    orgRecord,
     mediaDeletions,
     codes,
     notifications,
@@ -181,13 +184,13 @@ export function registerEnterprise(ctx) {
         let user;
         if (existing) {
           // A restored account starts without its old authenticator (the person may no longer have it); they set MFA up again.
-          if (existing.removedAt && existing.mfa) users.disableMfa(existing.id);
+          if (existing.removedAt && existing.mfa) staffRecord.disableMfa(existing.id);
           // The invite's e-mail is bound to the account: the basis for SSO linking.
           user = existing.removedAt
-            ? users.restore(existing.id, { role: inv.role, email: inv.email })
-            : users.setEmail(existing.id, inv.email);
+            ? staffRecord.restore(existing.id, { role: inv.role, email: inv.email })
+            : staffRecord.setEmail(existing.id, inv.email);
         } else {
-          user = users.create({ orgId: org.id, name, role: inv.role, email: inv.email, createdAt: at });
+          user = staffRecord.add({ orgId: org.id, name, role: inv.role, email: inv.email, createdAt: at });
         }
         enterprise.invites.accept(inv.id, { userId: user.id, at });
         return { user, restored: !!existing?.removedAt, token: ctx.createSession('org', org.id, { userId: user.id }) };
@@ -274,7 +277,7 @@ export function registerEnterprise(ctx) {
     if (!enterpriseInput(res, 'none', req.body)) return;
     if (req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_ALREADY_ENABLED' });
     const secretB32 = b32encode(crypto.randomBytes(20));
-    users.startMfa(req.orgUser.id, secretB32);
+    staffRecord.startMfa(req.orgUser.id, secretB32);
     res.json({
       secret: secretB32,
       otpauth: `otpauth://totp/ScoutBox:${encodeURIComponent(req.orgUser.name)}?secret=${secretB32}&issuer=ScoutBox`,
@@ -296,7 +299,7 @@ export function registerEnterprise(ctx) {
       return res.status(401).json({ error: 'MFA_CODE_WRONG' });
     }
     const plain = Array.from({ length: 10 }, () => crypto.randomBytes(5).toString('hex'));
-    users.enableMfa(req.orgUser.id, {
+    staffRecord.enableMfa(req.orgUser.id, {
       at: Date.now(),
       recoveryHashes: plain.map((c) => crypto.createHash('sha256').update(c).digest('hex')),
     });
@@ -314,7 +317,7 @@ export function registerEnterprise(ctx) {
     if (!req.orgUser.mfa?.enabledAt) return res.status(409).json({ error: 'MFA_NOT_ENABLED' });
     if (!totpValid(users.mfaSecretOf(req.orgUser.id), body.code))
       return res.status(401).json({ error: 'MFA_CODE_WRONG' });
-    users.disableMfa(req.orgUser.id);
+    staffRecord.disableMfa(req.orgUser.id);
     res.json({ enabled: false });
   });
 
@@ -322,7 +325,7 @@ export function registerEnterprise(ctx) {
     if (!requireLead(req, res)) return;
     const body = enterpriseInput(res, 'security', req.body);
     if (!body) return;
-    const updated = orgs.setMfaRequiredForLeads(req.org.id, body.mfaRequiredForLeads);
+    const updated = orgRecord.requireMfaForLeads(req.org.id, body.mfaRequiredForLeads);
     res.json({
       mfaRequiredForLeads: updated.mfaRequiredForLeads,
       note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.',
@@ -347,7 +350,7 @@ export function registerEnterprise(ctx) {
     const body = enterpriseInput(res, 'revokeSession', req.body);
     if (!body) return;
     const sid = body.sid ?? '';
-    const revoked = sid ? sessions.revokeOwn(req.orgUser.id, sid) : 0;
+    const revoked = sid ? sessionEnds.endOwn(req.orgUser.id, sid) : 0;
     res.json({ revoked });
   });
 
@@ -509,7 +512,7 @@ export function registerEnterprise(ctx) {
     try {
       token = unit(() => {
         // A subject still held by a removed account of the organisation is not moved.
-        if (user.ssoSubject !== tok.sub) users.linkSso(user.id, tok.sub);
+        if (user.ssoSubject !== tok.sub) staffRecord.linkSso(user.id, tok.sub);
         return ctx.createSession('org', org.id, { userId: user.id, via: 'sso' });
       });
     } catch (e) {

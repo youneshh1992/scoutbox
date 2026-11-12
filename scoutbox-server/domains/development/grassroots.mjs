@@ -23,10 +23,12 @@ export function registerGrassrootsJourney({
   playerRouter,
   guardianRouter,
   players,
+  playerRecord,
   orgs,
   grassroots,
   clubSetup,
   transitionsVouches,
+  coachReferences,
   findPlayer,
   findOrg,
   unit,
@@ -46,12 +48,12 @@ export function registerGrassrootsJourney({
   moderateOrRefuse,
 }) {
   if (
-    typeof players?.startProgramme !== 'function' ||
+    typeof playerRecord?.startProgramme !== 'function' ||
     typeof pathwayRecord !== 'function' ||
     typeof moderateOrRefuse !== 'function'
   )
     throw new TypeError(
-      "registerGrassrootsJourney needs the players repository, the clubs' pathway record and moderation",
+      "registerGrassrootsJourney needs the identity domain's playerRecord, the clubs' pathway record and moderation",
     );
 
   function grassrootsOnly(req, res) {
@@ -95,7 +97,7 @@ export function registerGrassrootsJourney({
     const track = Object.hasOwn(PROGRAMME_TRACKS, body.track ?? '') ? PROGRAMME_TRACKS[body.track] : null;
     if (!track) return res.status(400).json({ error: 'TRACK_NOT_FOUND' });
     unit(() => {
-      players.startProgramme(req.player.id, track.key, Date.now());
+      playerRecord.startProgramme(req.player.id, track.key, Date.now());
       seam('programme.select.after_row');
       broadcast('players', { playerId: req.player.id });
     });
@@ -110,7 +112,7 @@ export function registerGrassrootsJourney({
     const session = PROGRAMME_TRACKS[req.player.programme.track]?.sessions.find((x) => x.id === req.params.id);
     if (!session) return res.status(404).json({ error: 'SESSION_NOT_FOUND' });
     unit(() => {
-      players.addItem(req.player.id, 'programme.completed', { sessionId: session.id, ts: Date.now() });
+      playerRecord.completeProgrammeSession(req.player.id, { sessionId: session.id, ts: Date.now() });
       recordActivity(req.player);
       broadcast('players', { playerId: req.player.id });
     });
@@ -343,7 +345,7 @@ export function registerGrassrootsJourney({
   const setSeeker = (player, req, res) => {
     const body = developmentInput(res, 'enabled', req.body);
     if (!body) return;
-    const stored = players.setFirstTeamSeeker(player.id, body.enabled);
+    const stored = playerRecord.setFirstTeamSeeker(player.id, body.enabled);
     broadcast('players', { playerId: player.id });
     res.json({ firstTeamSeeker: stored.firstTeamSeeker });
   };
@@ -375,7 +377,7 @@ export function registerGrassrootsJourney({
     const code = randomCode(8);
     // In a unit, so the id counter commits with the row. The player's name has no limit at sign-up, so it is shortened.
     const vouch = unit(() =>
-      transitionsVouches.vouches.create({
+      coachReferences.add({
         id: nextId('vch'),
         playerId: player.id,
         playerName: player.name?.slice(0, VL.name) ?? null,
@@ -435,7 +437,7 @@ References are screened by moderation and reviewed by Trust & Safety.`,
     const player = findPlayer(vouch.playerId);
     // Publishing clears the code (single use); the reference and both notifications commit together.
     unit(() => {
-      transitionsVouches.vouches.publish(vouch.id, {
+      coachReferences.publish(vouch.id, {
         text: text.trim(),
         seasons: seasons?.trim() || null,
         // A declared relationship to the player ("my son", "I run their agency") must be visible, not discoverable.

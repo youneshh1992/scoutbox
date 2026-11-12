@@ -179,6 +179,28 @@ test('repository: a non-default lifetime is honoured, and changing it between bo
   s.close();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+test('repository: the reads other domains get look sessions up but can neither mint nor end one', () => {
+  const { s, repo } = liveRepo();
+  const { token, session } = repo.create('player', 'pl-1');
+  assert.ok(Object.isFrozen(repo.reads));
+  assert.deepEqual(repo.reads.byToken(token), session);
+  assert.deepEqual(repo.reads.bySid(session.sid), session);
+  assert.equal(repo.reads.isCurrent(session, token), true);
+  assert.equal(repo.reads.listFor('player', 'pl-1').length, 1);
+  for (const write of [
+    'create',
+    'revokeSid',
+    'revokeToken',
+    'revokeFor',
+    'revokeOrgUser',
+    'revokeOwn',
+    'prune',
+    'attach',
+  ])
+    assert.equal(write in repo.reads, false, `${write} is not a read`);
+  assert.equal('exportRows' in repo.reads, false, 'the stored hashes stay with the identity domain');
+  s.close();
+});
 test('repository: every revocation path removes exactly its own sessions; users and organisations are isolated from each other', () => {
   const { s, repo } = liveRepo();
   const p1 = repo.create('player', 'pl-1'),

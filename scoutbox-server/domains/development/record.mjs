@@ -53,6 +53,7 @@ const FRESH_START = 'Fresh Start';
 export function registerPlayerRecord({
   playerRouter,
   players,
+  playerRecord,
   unit,
   seam,
   nextId,
@@ -65,8 +66,8 @@ export function registerPlayerRecord({
   insightsFor,
   canonicalContractFor,
 }) {
-  if (typeof players?.recordStats !== 'function' || typeof recordActivity !== 'function')
-    throw new TypeError('registerPlayerRecord needs the players repository and the activity recorder');
+  if (typeof playerRecord?.recordStats !== 'function' || typeof recordActivity !== 'function')
+    throw new TypeError("registerPlayerRecord needs the identity domain's playerRecord and the activity recorder");
   // The repository refusing a value its table cannot hold is the client's 400.
   const invalidPlayer = (res, e) => {
     if (e?.code !== 'PLAYER_RECORD_INVALID' && e?.code !== 'PLAYER_SUBRECORD_INVALID') throw e;
@@ -146,13 +147,12 @@ export function registerPlayerRecord({
     const on = body.enabled;
     let stored;
     unit(() => {
-      stored = players.setAcademyPlus(req.player.id, on);
+      stored = playerRecord.setAcademyPlus(req.player.id, on);
       seam('academyplus.after_row');
-      if (on && !stored.badges.includes(FRESH_START)) players.addItem(req.player.id, 'badges', FRESH_START);
+      if (on && !stored.badges.includes(FRESH_START)) playerRecord.awardBadge(req.player.id, FRESH_START);
       if (!on && stored.badges.includes(FRESH_START))
-        players.setItems(
+        playerRecord.setBadges(
           req.player.id,
-          'badges',
           stored.badges.filter((b) => b !== FRESH_START),
         );
       stored = players.byId(req.player.id);
@@ -164,7 +164,7 @@ export function registerPlayerRecord({
   playerRouter.post('/badges', (req, res) => {
     const body = developmentInput(res, 'badges', req.body);
     if (!body) return;
-    const stored = players.setItems(req.player.id, 'badges', body.badges);
+    const stored = playerRecord.setBadges(req.player.id, body.badges);
     broadcast('players', { playerId: req.player.id });
     res.json({ badges: stored });
   });
@@ -212,7 +212,7 @@ export function registerPlayerRecord({
     }
     try {
       unit(() => {
-        players.addItem(req.player.id, 'media', item);
+        playerRecord.addMedia(req.player.id, item);
         seam('media.after_row');
         recordActivity(req.player);
         broadcast('players', { playerId: req.player.id });
@@ -228,7 +228,7 @@ export function registerPlayerRecord({
     if (guardianManagedOnly(req, res)) return;
     const body = developmentInput(res, 'shared', req.body);
     if (!body) return;
-    const stored = players.setMedicalSharing(req.player.id, body.shared);
+    const stored = playerRecord.setMedicalSharing(req.player.id, body.shared);
     broadcast('players', { playerId: req.player.id });
     res.json({ shared: stored.medical.shared });
   });
@@ -239,10 +239,10 @@ export function registerPlayerRecord({
     const { type, title, date, layoffWeeks, cleared, conditionStatus } = body;
     try {
       unit(() => {
-        if (conditionStatus) players.setConditionStatus(req.player.id, conditionStatus);
+        if (conditionStatus) playerRecord.setConditionStatus(req.player.id, conditionStatus);
         seam('medical.records.after_row');
         if (title) {
-          players.addItem(req.player.id, 'medical.records', {
+          playerRecord.addMedicalRecord(req.player.id, {
             id: nextId('md'),
             type: type || 'note',
             title,
@@ -264,7 +264,7 @@ export function registerPlayerRecord({
     const body = developmentInput(res, 'location', req.body);
     if (!body) return;
     const { lat, lng } = body;
-    players.setLocation(req.player.id, { lat, lng });
+    playerRecord.setLocation(req.player.id, { lat, lng });
     broadcast('players', { playerId: req.player.id });
     res.json({ ok: true });
   });
@@ -295,7 +295,7 @@ export function registerPlayerRecord({
     }
     const stored =
       availability || contractStatus
-        ? players.setAvailability(req.player.id, {
+        ? playerRecord.setAvailability(req.player.id, {
             ...(availability ? { availability } : {}),
             ...(contractStatus ? { contractStatus } : {}),
           })
@@ -330,7 +330,7 @@ export function registerPlayerRecord({
     };
     try {
       unit(() => {
-        players.addItem(req.player.id, 'attendance', item);
+        playerRecord.recordAttendance(req.player.id, item);
         seam('attendance.after_row');
         recordActivity(req.player);
         ledgerAppend({
@@ -356,7 +356,7 @@ export function registerPlayerRecord({
     const event = filled(body.event);
     if (!year || !event) return res.status(400).json({ error: 'YEAR_AND_EVENT_REQUIRED' });
     if (!moderateOrRefuse(res, event, { kind: 'timeline_event', playerId: req.player.id })) return;
-    players.addItem(req.player.id, 'timeline', { year, event });
+    playerRecord.addTimelineEntry(req.player.id, { year, event });
     broadcast('players', { playerId: req.player.id });
     res.status(201).json({ timeline: players.byId(req.player.id).timeline });
   });
@@ -387,9 +387,9 @@ export function registerPlayerRecord({
         if (existing) Object.assign(existing, updates);
         else history.push({ season, appearances: 0, goals: 0, assists: 0, ...updates });
         history.sort((a, b) => (a.season < b.season ? 1 : -1));
-        players.setItems(req.player.id, 'seasonHistory', history);
+        playerRecord.setSeasonHistory(req.player.id, history);
       } else {
-        players.recordStats(req.player.id, updates);
+        playerRecord.recordStats(req.player.id, updates);
       }
       seam('stats.after_row');
       recordActivity(req.player);
@@ -420,9 +420,9 @@ export function registerPlayerRecord({
     const { videoDataUrl } = body;
     const numeric = body.value ?? null;
     unit(() => {
-      if (!(req.player.drills ?? []).includes(drill.id)) players.addItem(req.player.id, 'drills', drill.id);
+      if (!(req.player.drills ?? []).includes(drill.id)) playerRecord.recordDrill(req.player.id, drill.id);
       if (numeric !== null) {
-        players.addItem(req.player.id, 'drillResults', {
+        playerRecord.recordDrillResult(req.player.id, {
           id: nextId('combine'),
           drillId: drill.id,
           drillName: drill.name,

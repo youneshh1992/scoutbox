@@ -62,6 +62,7 @@ export function registerImports(ctx) {
     orgCanSee,
     findPlayer,
     players,
+    playerRecord,
     unit,
     safetyAudit,
     integrations,
@@ -377,7 +378,7 @@ export function registerImports(ctx) {
         if (
           !(p.externalIds ?? []).some((e) => e.provider === r.record.provider && e.externalId === r.record.externalId)
         ) {
-          players.addItem(p.id, 'externalIds', {
+          playerRecord.addExternalId(p.id, {
             provider: r.record.provider,
             externalId: r.record.externalId,
             source: `import:${r.batchId}`,

@@ -131,7 +131,8 @@ export function registerVerificationReview(ctx) {
   const {
     byId,
     users,
-    orgs,
+    staffRecord,
+    orgRecord,
     orgRouter,
     adminRouter,
     nextId,
@@ -738,7 +739,7 @@ export function registerVerificationReview(ctx) {
     const { approved } = unit(() => {
       if (!org) {
         // The placeholder ground and registration of a grassroots club are a known issue (docs/known-issues.md).
-        org = orgs.create({
+        org = orgRecord.register({
           name: r.orgName.trim(),
           type: r.orgType === 'agency' ? 'agency' : 'club',
           level: r.orgType === 'grassroots club' ? 'grassroots' : null,
@@ -755,13 +756,13 @@ export function registerVerificationReview(ctx) {
         });
       }
       if (!user)
-        user = users.create({
+        user = staffRecord.add({
           orgId: org.id,
           name: r.applicantName.trim(),
           role: r.applicantRole.trim() || 'Manager',
           email: r.workEmail,
         });
-      else if (!user.email) user = users.setEmail(user.id, r.workEmail);
+      else if (!user.email) user = staffRecord.setEmail(user.id, r.workEmail);
       createClaim({
         subjectType: 'org',
         subjectId: org.id,
@@ -775,7 +776,7 @@ export function registerVerificationReview(ctx) {
         metadata: { rootRequest: r.id, orgType: r.orgType, website: r.website },
       });
       // Minors still also need the safeguarding contract.
-      orgs.setStanding(org.id, { verified: true });
+      orgRecord.setStanding(org.id, { verified: true });
       // Domain claim only where the mailbox proof aligns with the stated domain.
       if (r.emailProved && r.domain && domainCovered(domainOfEmail(r.workEmail), r.domain)) {
         if (!reads.domains.has(org.id, r.domain))
@@ -1130,7 +1131,7 @@ export function registerVerificationReview(ctx) {
     const body = decisionBody(req, res, Decision);
     if (!body) return;
     unit(() => {
-      orgs.revokeVerification(org.id, Date.now()); // the effective flag follows immediately
+      orgRecord.revokeVerification(org.id, Date.now()); // the effective flag follows immediately
       for (const c of reads.claims.forSubject('org', org.id)) {
         if (c.status === 'verified') adminTransition(c, 'revoked', req, { reason: body.reason });
       }
@@ -1175,7 +1176,7 @@ export function registerVerificationReview(ctx) {
           metadata: { via: 'legacy admin route' },
         });
       }
-      if (orgOf(org.id)?.verificationRevokedAt) orgs.clearVerificationRevocation(org.id);
+      if (orgOf(org.id)?.verificationRevokedAt) orgRecord.clearVerificationRevocation(org.id);
     } else if (body.verified === false && existing && existing.status === 'verified') {
       transition(existing, 'revoked', {
         actorKind: 'trust_safety',

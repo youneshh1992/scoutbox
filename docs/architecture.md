@@ -75,9 +75,10 @@ transaction documents are evidence records.
   with the fields it sets, so a value is judged the same way whichever write it came through. The shared checks, the
   guarded update, the act runner (`actsOn`) and the mapping of a field spec to columns are `repositories/writes.mjs`.
 - **A domain writes another domain's tables only through that domain.** It receives the other domain's reads
-  (`*Reads`) and the named write seams it offers (the identity domain's `playerRecord.recordSigning`, the recruitment
-  domain's `caseHandoffs`), never its repository. Case work and the agents' handoffs follow this; the domains still
-  handed another domain's repository are listed in
+  (`*Reads`, or a repository's `reads`) and the named write seams the owner offers (the identity domain's
+  `playerRecord`, `orgRecord`, `staffRecord`, `guardianRecord` and `sessionEnds`, scouting's `scoutingActs`,
+  recruitment's `recruitmentActs` and `caseHandoffs`, verification's `coachReferences`), never its repository. The
+  exceptions still open are listed in
   [`app-layer-architecture-improvements.md`](app-layer-architecture-improvements.md#5-named-acts-everywhere-done).
 - A write returns the stored record. A route that writes and then answers must use it: the one it held is the old
   version.
