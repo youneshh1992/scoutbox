@@ -3,6 +3,7 @@
  * organisation may see (identity's `visibleWhere`), so no criterion is ever evaluated against a player the club may
  * not know exists, including through a count.
  */
+import { asReconciling } from '../../../writeRules.mjs';
 import {
   validateCriteria,
   criteriaVersion,
@@ -393,49 +394,51 @@ export function registerMatching(ctx) {
         playerId,
         required: criteria.required.map((c) => ({ criterionId: c.id, met: true })),
       }));
-      unit(() => {
-        const appended = discovery.watchlists.reconcile(w.id, {
-          at,
-          criteriaVersion: cv,
-          briefVersion,
-          members,
-          events: events.map((e) => ({
-            id: nextId('wlh'),
-            watchlistId: w.id,
-            orgId: w.orgId,
-            playerId: e.playerId,
-            transition: e.transition,
-            reason: e.reason,
-            criterionId: e.criterionId,
-            text: e.text,
+      asReconciling(() =>
+        unit(() => {
+          const appended = discovery.watchlists.reconcile(w.id, {
+            at,
             criteriaVersion: cv,
             briefVersion,
-            policyVersion: MATCH_POLICY_VERSION,
-            at,
-            fingerprint: transitionFingerprint({
+            members,
+            events: events.map((e) => ({
+              id: nextId('wlh'),
               watchlistId: w.id,
+              orgId: w.orgId,
               playerId: e.playerId,
-              criteriaVersion: cv,
               transition: e.transition,
               reason: e.reason,
-            }),
-          })),
-        });
-        for (const e of appended)
-          vmetric?.(e.transition === 'entered' ? 'watchlist_player_entered' : 'watchlist_player_left');
-        if (events.length && !first) {
-          broadcast?.('watchlist_membership_changed', { orgId: w.orgId, watchlistId: w.id });
-          if (w.notify !== false && w.status === 'active') {
-            const n = membershipNotification({
-              watchlistName: w.name,
-              entered: diff.entered,
-              left: diff.left,
-              reason: briefChanged ? 'brief_changed' : criteriaChanged ? 'criteria_changed' : 'facts_changed',
-            });
-            if (n) notify?.({ kind: 'org_user', id: w.createdBy }, 'watchlist', n.text, w.id);
+              criterionId: e.criterionId,
+              text: e.text,
+              criteriaVersion: cv,
+              briefVersion,
+              policyVersion: MATCH_POLICY_VERSION,
+              at,
+              fingerprint: transitionFingerprint({
+                watchlistId: w.id,
+                playerId: e.playerId,
+                criteriaVersion: cv,
+                transition: e.transition,
+                reason: e.reason,
+              }),
+            })),
+          });
+          for (const e of appended)
+            vmetric?.(e.transition === 'entered' ? 'watchlist_player_entered' : 'watchlist_player_left');
+          if (events.length && !first) {
+            broadcast?.('watchlist_membership_changed', { orgId: w.orgId, watchlistId: w.id });
+            if (w.notify !== false && w.status === 'active') {
+              const n = membershipNotification({
+                watchlistName: w.name,
+                entered: diff.entered,
+                left: diff.left,
+                reason: briefChanged ? 'brief_changed' : criteriaChanged ? 'criteria_changed' : 'facts_changed',
+              });
+              if (n) notify?.({ kind: 'org_user', id: w.createdBy }, 'watchlist', n.text, w.id);
+            }
           }
-        }
-      });
+        }),
+      );
       vmetric?.('watchlist_reconciled');
     }
 

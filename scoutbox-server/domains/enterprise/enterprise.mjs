@@ -1,6 +1,7 @@
 // SSO runs against a local test identity provider (HMAC-signed, enabled only where dev logins are); no corporate IdP
 // is configured and the API says so. A production rollout swaps the token verification for a maintained OIDC library
 // against the real issuer; the state/nonce/code flow is the same. Restores go into a separate empty directory.
+import { sideEffect, declareAuditedRead } from '../../writeRules.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -50,7 +51,8 @@ export function requestInstrumentation() {
       if (fullPath.startsWith('/player/uploads') && res.statusCode >= 400) metrics.failedUploads++;
       if (fullPath === '/events') metrics.sseConnects++;
       try {
-        exposureHook.fn?.(req, res);
+        // Passive measurement after the response: not the request's act.
+        sideEffect(() => exposureHook.fn?.(req, res));
       } catch {
         /* exposure capture must never break a request */
       }
@@ -632,6 +634,7 @@ export function registerEnterprise(ctx) {
       grantsReceived: ctx.groupReads.grants.allReceivedBy(orgId).map(grantExport),
       supportAccess: enterpriseReads.grants.forOrg(orgId),
     };
+    declareAuditedRead('an audit export is itself recorded');
     opsEvent({ id: nextId('ops'), at: Date.now(), kind: 'audit_export', detail: { orgId, by: req.orgUser.name } });
     res.json(scoped);
   });
@@ -758,6 +761,7 @@ export function registerEnterprise(ctx) {
         error: 'SUPPORT_ACCESS_NOT_GRANTED',
         message: 'A lead of the organisation must approve time-limited access first. There is no silent access path.',
       });
+    declareAuditedRead("support access to an organisation's records is logged");
     enterprise.grants.logAccess(g.id, { at: Date.now(), what: 'org-records' });
     const orgId = t.orgId;
     res.json({

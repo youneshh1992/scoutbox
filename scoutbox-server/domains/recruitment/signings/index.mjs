@@ -155,13 +155,6 @@ export function registerSigning(rawCtx) {
     Array.isArray(pkg.keys?.[act]) ? pkg.keys[act] : pkg.keys?.[act] ? [pkg.keys[act]] : [];
   const keyRow = (pkg, act, k) => keyList(pkg, act).find((x) => x && x.key === k) ?? null;
   const addKey = (pkg, act, entry) => sp.addKey(pkg.id, act, entry);
-  /** One unit: `write()` returns the stored package, and `announce(stored)` writes its notices in the same unit. */
-  const unitWith = (write, announce) =>
-    unit(() => {
-      const stored = write();
-      announce(stored);
-      return stored;
-    });
   /** bumpRev's rule (domains/platform/concurrency.mjs), written through the repository. */
   const touch = (pkg, req, at, by = req?.orgUser ?? null) =>
     sp.patch(pkg.id, {
@@ -874,7 +867,7 @@ export function registerSigning(rawCtx) {
     };
     let stored;
     try {
-      stored = unitWith(
+      stored = unit(
         () => {
           sp.insert(pkg);
           const fresh = hist(
@@ -1052,7 +1045,7 @@ export function registerSigning(rawCtx) {
     const by = byOrg(req);
     let fresh;
     try {
-      fresh = unitWith(
+      fresh = unit(
         () => {
           let p = sp.patchRevision(pkg.id, rev.id, { status: 'READY', readyAt: at, readyBy: by });
           p = sp.patch(p.id, { status: 'READY', expiresAt });
@@ -1483,7 +1476,7 @@ export function registerSigning(rawCtx) {
       const status = action === 'cancel' ? 'CANCELLED' : 'VOIDED';
       let fresh;
       try {
-        fresh = unitWith(
+        fresh = unit(
           () => {
             let p = sp.patchRevision(pkg.id, rev.id, { status });
             p = sp.patch(
@@ -1570,7 +1563,7 @@ export function registerSigning(rawCtx) {
     };
     let fresh;
     try {
-      fresh = unitWith(
+      fresh = unit(
         () => {
           let p = sp.patchRevision(pkg.id, prev.id, {
             status: 'SUPERSEDED',
@@ -1796,7 +1789,7 @@ export function registerSigning(rawCtx) {
     const rev = currentRevision(pkg);
     let fresh;
     try {
-      fresh = unitWith(
+      fresh = unit(
         () => {
           let p = sp.patchRevision(pkg.id, rev.id, { status: 'VOIDED' });
           p = sp.patch(p.id, { status: 'VOIDED', voidedAt: at, voidedBy: by, voidReason: reason });

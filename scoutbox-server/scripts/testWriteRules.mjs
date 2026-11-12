@@ -9,7 +9,7 @@ import { operationOn } from '../repositories/database.mjs';
 import {
   inRequest,
   asSweep,
-  asFirstUse,
+  apartFromTheAct,
   declareAuditedRead,
   standaloneWrite,
   TRANSITIONAL_ROUTES,
@@ -128,11 +128,11 @@ await test('a sweep run from a request commits one transaction per item', () => 
   assert.deepEqual(ids(), ['a', 'b', 'c']);
 });
 
-await test('a row created on first use is not the act, so a read may trigger it and an act may follow it', () => {
+await test('a write apart from the act (first-use setup) is not counted, so a read may make it and an act may follow it', () => {
   const { write, ids, request } = fixture();
-  request('GET', () => asFirstUse(() => write('first-member')));
+  request('GET', () => apartFromTheAct('first member', () => write('first-member')));
   request('POST', () => {
-    asFirstUse(() => write('bootstrap'));
+    apartFromTheAct('bootstrap', () => write('bootstrap'));
     write('act');
   });
   assert.deepEqual(ids(), ['act', 'bootstrap', 'first-member']);

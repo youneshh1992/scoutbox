@@ -1,6 +1,7 @@
 // Bulk import creates org-private prospect records, never platform player accounts, so a CSV can never mint a
 // discoverable minor. Identity is provider + externalId: name similarity alone never merges; it queues a review for a
 // human with the right permissions.
+import { apartFromTheAct } from '../../writeRules.mjs';
 import crypto from 'node:crypto';
 import { parseDobStrict } from '../../temporal.mjs';
 import { signBody, webhookUrlProblem } from './webhooks.mjs';
@@ -462,7 +463,7 @@ export function registerImports(ctx) {
       if (!k) return res.status(401).json({ error: 'API_KEY_INVALID' });
       if (!k.scopes.includes(requiredScope))
         return res.status(403).json({ error: 'SCOPE_MISSING', required: requiredScope, held: k.scopes });
-      apiKeys.touch(k.id, Date.now());
+      apartFromTheAct("the API key's last use", () => apiKeys.touch(k.id, Date.now()));
       req.apiOrg = byId.org(k.orgId);
       if (!req.apiOrg || req.apiOrg.suspended) return res.status(403).json({ error: 'ORG_UNAVAILABLE' });
       next();

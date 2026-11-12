@@ -239,7 +239,11 @@ const nextId = (prefix) => `${prefix}-${idCounter.next()}`;
 // Development-only failure seams inside units of work (the fault layer's `internal:<step>` rules). The layer is created
 // further down and cannot exist in production, so until then, and in production, no seam ever fires.
 const seams = { shouldFail: () => false };
-function unit(work) {
+/**
+ * `announce(result)`, when given, runs inside the same unit after `work`: the act's notifications, ledger rows and
+ * live events, written (or registered for after the commit) with the act they describe.
+ */
+function unit(work, announce) {
   return store.unitOfWork(() => {
     // `internal:unit.after_commit`: this unit's first after-commit side effect fails, after its data committed.
     store.afterCommit(() => {
@@ -247,6 +251,7 @@ function unit(work) {
         throw new Error('simulated after-commit failure (development fault layer)');
     });
     const result = work();
+    announce?.(result);
     // `internal:unit.sqlite_commit`: the REAL COMMIT of this unit fails (store.failCommitOfOpenTransaction).
     if (seams.shouldFail('unit.sqlite_commit')) store.failCommitOfOpenTransaction();
     return result;

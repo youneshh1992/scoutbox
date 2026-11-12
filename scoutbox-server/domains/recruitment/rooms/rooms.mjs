@@ -870,8 +870,8 @@ export function registerRooms(ctx) {
       });
     }
 
-    const { room, adopted } = unit(() =>
-      openRoom({
+    const { room, adopted } = unit(() => {
+      const opened = openRoom({
         req,
         player: p,
         sourceContext: sourceContext ?? 'direct',
@@ -880,17 +880,18 @@ export function registerRooms(ctx) {
         restricted: restricted ?? false,
         vacancyId: vacancyId ?? null,
         withSourceRef: false,
-      }),
-    );
-    vmetric('recruitment_room_created');
-    ledgerAppend?.({
-      type: 'recruitment_room_created',
-      playerId: p.id,
-      orgId: req.org.id,
-      orgName: req.org.name,
-      userId: req.orgUser.id,
-      scoutName: req.orgUser.name,
+      });
+      ledgerAppend?.({
+        type: 'recruitment_room_created',
+        playerId: p.id,
+        orgId: req.org.id,
+        orgName: req.org.name,
+        userId: req.orgUser.id,
+        scoutName: req.orgUser.name,
+      });
+      return opened;
     });
+    vmetric('recruitment_room_created');
     res.status(201).json({ room: buildRecruitmentRoom(room, req), adoptedExistingCase: adopted });
   });
 
@@ -1068,7 +1069,19 @@ export function registerRooms(ctx) {
           snapshot,
           trigger: `status:${to}`,
         });
-      return cases.byId(room.id);
+      const moved = cases.byId(room.id);
+      for (const u of orgUsers(req.org.id)) {
+        if (u.id === req.orgUser.id) continue;
+        if (u.id === moved.ownerUserId || u.id === moved.room.leadScoutUserId) {
+          notify(
+            { kind: 'org_user', id: u.id },
+            'recruitment_room',
+            `Recruitment Room — ${moved.playerName ?? 'a removed player'}: ${ROOM_STATUS_LABELS[to]}.`,
+            moved.id,
+          );
+        }
+      }
+      return moved;
     });
     if (check.reopen) vmetric('recruitment_room_reopened');
     vmetric('recruitment_room_status_changed');
@@ -1076,17 +1089,6 @@ export function registerRooms(ctx) {
     if (ends) vmetric('recruitment_room_archived');
     if (to === 'signed') vmetric('recruitment_room_signed');
 
-    for (const u of orgUsers(req.org.id)) {
-      if (u.id === req.orgUser.id) continue;
-      if (u.id === fresh.ownerUserId || u.id === fresh.room.leadScoutUserId) {
-        notify(
-          { kind: 'org_user', id: u.id },
-          'recruitment_room',
-          `Recruitment Room — ${fresh.playerName ?? 'a removed player'}: ${ROOM_STATUS_LABELS[to]}.`,
-          fresh.id,
-        );
-      }
-    }
     res.json({ room: buildRecruitmentRoom(fresh, req), snapshot });
   });
 
@@ -1219,18 +1221,19 @@ export function registerRooms(ctx) {
       .find((c) => isRoom(c) && OPEN_ROOM_STATUSES.includes(c.room.status));
     if (existing) return { ok: true, roomId: existing.id, existed: true, room: buildRecruitmentRoom(existing, req) };
 
-    const { room } = unit(() =>
-      openRoom({ req, player, sourceContext: normaliseSourceContext(sourceContext), sourceRef }),
-    );
-    vmetric('recruitment_room_created');
-    ledgerAppend?.({
-      type: 'recruitment_room_created',
-      playerId: player.id,
-      orgId: req.org.id,
-      orgName: req.org.name,
-      userId: req.orgUser.id,
-      scoutName: req.orgUser.name,
+    const { room } = unit(() => {
+      const opened = openRoom({ req, player, sourceContext: normaliseSourceContext(sourceContext), sourceRef });
+      ledgerAppend?.({
+        type: 'recruitment_room_created',
+        playerId: player.id,
+        orgId: req.org.id,
+        orgName: req.org.name,
+        userId: req.orgUser.id,
+        scoutName: req.orgUser.name,
+      });
+      return opened;
     });
+    vmetric('recruitment_room_created');
     return { ok: true, roomId: room.id, existed: false, room: buildRecruitmentRoom(room, req) };
   };
 
@@ -1345,19 +1348,19 @@ export function registerRooms(ctx) {
     const saved = unit(() => {
       const row = comments.create(c);
       cases.recordAct(room.id, touched(activity(req, 'room_comment_added', { commentId: c.id, replyToId })));
+      // Mentions notify colleagues in this organisation only.
+      for (const uid of mentions) {
+        if (uid === req.orgUser.id) continue;
+        notify(
+          { kind: 'org_user', id: uid },
+          'recruitment_room',
+          `${req.orgUser.name} mentioned you in the Recruitment Room for ${room.playerName ?? 'a removed player'}.`,
+          room.id,
+        );
+      }
       return row;
     });
     vmetric('room_comment_added');
-    // Mentions notify colleagues in this organisation only.
-    for (const uid of mentions) {
-      if (uid === req.orgUser.id) continue;
-      notify(
-        { kind: 'org_user', id: uid },
-        'recruitment_room',
-        `${req.orgUser.name} mentioned you in the Recruitment Room for ${room.playerName ?? 'a removed player'}.`,
-        room.id,
-      );
-    }
     res.status(201).json({ comment: commentView(saved, { orgId: req.org.id }) });
   });
 
@@ -1434,21 +1437,23 @@ export function registerRooms(ctx) {
       createdAt: now(),
       completedAt: null,
     };
-    cases.addTask(
-      room.id,
-      { task: t },
-      touched(activity(req, 'room_task_created', { taskId: t.id, assigneeUserId: t.assigneeUserId })),
-    );
-    vmetric('room_task_created');
-    // Staff work only: a player-facing ask goes through the evidence-request or Combine-request workflow.
-    if (assignee && assignee.id !== req.orgUser.id) {
-      notify(
-        { kind: 'org_user', id: assignee.id },
-        'recruitment_room',
-        `${req.orgUser.name} assigned you a task in the Recruitment Room for ${room.playerName ?? 'a removed player'}: ${title}`,
+    unit(() => {
+      cases.addTask(
         room.id,
+        { task: t },
+        touched(activity(req, 'room_task_created', { taskId: t.id, assigneeUserId: t.assigneeUserId })),
       );
-    }
+      // Staff work only: a player-facing ask goes through the evidence-request or Combine-request workflow.
+      if (assignee && assignee.id !== req.orgUser.id) {
+        notify(
+          { kind: 'org_user', id: assignee.id },
+          'recruitment_room',
+          `${req.orgUser.name} assigned you a task in the Recruitment Room for ${room.playerName ?? 'a removed player'}: ${title}`,
+          room.id,
+        );
+      }
+    });
+    vmetric('room_task_created');
     res.status(201).json({ task: taskView(t) });
   });
 
@@ -1672,19 +1677,21 @@ export function registerRooms(ctx) {
       status: 'open',
       createdAt: now(),
     };
-    cases.addAssignment(
-      room.id,
-      { assignment: a },
-      touched(activity(req, 'room_assessment_assigned', { assignmentId: a.id, userId: u.id, kind })),
-    );
-    vmetric('room_assessment_assigned');
-    if (u.id !== req.orgUser.id)
-      notify(
-        { kind: 'org_user', id: u.id },
-        'recruitment_room',
-        `${req.orgUser.name} assigned you a ${kind.toLowerCase()} assessment for ${room.playerName ?? 'a removed player'}.`,
+    unit(() => {
+      cases.addAssignment(
         room.id,
+        { assignment: a },
+        touched(activity(req, 'room_assessment_assigned', { assignmentId: a.id, userId: u.id, kind })),
       );
+      if (u.id !== req.orgUser.id)
+        notify(
+          { kind: 'org_user', id: u.id },
+          'recruitment_room',
+          `${req.orgUser.name} assigned you a ${kind.toLowerCase()} assessment for ${room.playerName ?? 'a removed player'}.`,
+          room.id,
+        );
+    });
+    vmetric('room_assessment_assigned');
     res.status(201).json({ assignment: a });
   });
 

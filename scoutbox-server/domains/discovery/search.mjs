@@ -1,5 +1,6 @@
 // Club search: the Discover directory, a player's profile with "more like this", internal scouting notes, saves and
 // shortlists. A player who blocked the organisation reads as absent on every one of these routes.
+import { declareAuditedRead } from '../../writeRules.mjs';
 import { visibleToOrg, similarityScore } from '../../domain.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { filled, presentOrRefuse } from '../platform/schemas.mjs';
@@ -103,6 +104,7 @@ export function registerPlayerSearch({
       });
     }
     if (isBlocked(p.id, req.org.id)) return res.status(404).json({ error: 'PLAYER_NOT_FOUND' });
+    declareAuditedRead('the Discovery Ledger records who viewed a player');
     ledgerAppend({
       type: 'view',
       playerId: p.id,

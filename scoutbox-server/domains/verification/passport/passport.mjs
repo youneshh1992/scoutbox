@@ -1,5 +1,6 @@
 // Football Passport assembly and routes. One projection per (player, viewer); clients never rebuild the Passport
 // from raw endpoints. Authorisation is the standing gates; the Passport adds no access of its own.
+import { declareAuditedRead } from '../../../writeRules.mjs';
 import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { ageOrNull } from '../../../temporal.mjs';
@@ -860,6 +861,7 @@ export function registerPassportCore(ctx) {
         .json({ error: req.org.type === 'agency' && !isAdult(p) ? 'UNDER_18_WALL' : 'NOT_VISIBLE' });
     }
     const viewer = viewerKindForOrg(req.org);
+    declareAuditedRead("the Discovery Ledger records who viewed a player's Football Passport");
     ledgerAppend({
       type: 'passport_recruitment_view',
       playerId: p.id,

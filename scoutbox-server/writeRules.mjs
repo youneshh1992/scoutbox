@@ -10,7 +10,7 @@
 // changed nothing is not counted, and a write that bypassed the transaction helpers is still seen. Not counted:
 // the id counter's mints (a lost mint leaves a gap, never a wrong row); after-commit side effects and the delivery
 // records they write (`sideEffect`); sweeps, which commit one transaction per item by design (`asSweep`); a row
-// created on first use (`asFirstUse`); and work
+// created on first use and a credential's bookkeeping (`apartFromTheAct`); state a read reconciles (`asReconciling`); and work
 // outside any request (boot, timers).
 //
 // A broken rule throws outside production, so a battery fails at the call site; in production it is counted and
@@ -25,25 +25,6 @@ const RULES = new WeakMap();
 export const TRANSITIONAL_ROUTES = new Set([
   'DELETE /guardian/children/:id',
   'DELETE /player/account',
-  'GET /admin/support/:id/org-records',
-  'GET /admin/verification/evidence/:id',
-  'GET /api/v1/export/prospects',
-  'GET /api/v1/export/shortlist',
-  'GET /org/agent/clients/:id',
-  'GET /org/agent/me',
-  'GET /org/agent/transactions',
-  'GET /org/audit/export',
-  'GET /org/passport/shared/:token',
-  'GET /org/players/:id',
-  'GET /org/players/:id/evidence-gaps',
-  'GET /org/players/:id/football-passport',
-  'GET /org/players/:id/passport',
-  'GET /org/rooms/:id',
-  'GET /org/second-look',
-  'GET /org/transitions/:id/pack',
-  'GET /org/watchlists/:id',
-  'GET /passport/shared/:token',
-  'PATCH /org/rooms/:id',
   'POST /admin/verification/claims/:id/approve',
   'POST /admin/verification/claims/:id/suspend',
   'POST /admin/verification/disputes/:id/resolve',
@@ -53,7 +34,6 @@ export const TRANSITIONAL_ROUTES = new Set([
   'POST /auth/org/verification/apply',
   'POST /auth/sso/callback',
   'POST /callbacks/delivery',
-  'POST /guardian/trials/:id/confirm-schedule',
   'POST /org/agent/agency/team',
   'POST /org/agent/clients/request',
   'POST /org/agent/transactions/:id/consents/request',
@@ -61,15 +41,7 @@ export const TRANSITIONAL_ROUTES = new Set([
   'POST /org/cases/:id/assign',
   'POST /org/coaches',
   'POST /org/players/:id/request',
-  'POST /org/rooms',
-  'POST /org/rooms/:id/assessment-assignments',
-  'POST /org/rooms/:id/comments',
-  'POST /org/rooms/:id/tasks',
   'POST /org/rooms/:id/transaction-handoff',
-  'POST /org/rooms/:id/trials/:tid/cancel',
-  'POST /org/rooms/:id/trials/:tid/complete',
-  'POST /org/rooms/:id/trials/:tid/reschedule',
-  'POST /org/rooms/:id/trials/:tid/schedule',
   'POST /org/trials/:id/arrival',
   'POST /org/trials/:id/cancel',
   'POST /org/trials/:id/postpone',
@@ -79,9 +51,6 @@ export const TRANSITIONAL_ROUTES = new Set([
   'POST /org/verification/requests/:claimId/decide',
   'POST /org/verification/staff/:userId/departed',
   'POST /org/verification/work-email',
-  'POST /org/watchlists/:id/room',
-  'POST /player/trials/:id/confirm-schedule',
-  'POST /player/trials/:id/decline-schedule',
 ]);
 
 /** Run `fn` as one HTTP request. `routeKey()` names the matched route (`POST /org/rooms/:id`) once Express knows it. */
@@ -98,16 +67,25 @@ export const sideEffect = (fn) => exempt('side_effect', fn);
 export const asSweep = (fn) => exempt('sweep', fn);
 
 /**
- * Create a row on first use (the first member of an agency becomes its administrator): self-contained setup that
- * any route may trigger, a read included, and that is not the request's act.
+ * A write that is not the request's act and costs nothing if lost or committed on its own: a row created on first
+ * use (the first member of an agency becomes its administrator), or bookkeeping about the caller's credential (an
+ * API key's last use). Any route may do it, a read included. `why` names it for the reader.
  */
-export const asFirstUse = (fn) => exempt('first_use', fn);
+export const apartFromTheAct = (why, fn) => exempt(`apart: ${why}`, fn);
 
 /** A read that must leave a record of itself (a shared passport opened). It lifts rule 2 only. */
 export function declareAuditedRead(reason) {
   const request = scope.getStore()?.request;
   if (request) request.auditedRead = reason;
 }
+
+/**
+ * Bring stored workflow state up to date with current facts when it is read, because nothing else does (a
+ * watchlist's membership, the Second Look queue, a player's evidence-gap suggestions). Idempotent and independent
+ * of the request's act, so it is not counted as the act, and a read may do it. Each is a known exception
+ * (docs/known-issues.md): it belongs in a sweep.
+ */
+export const asReconciling = (fn) => exempt('reconcile', fn);
 
 /** A write outside any transaction that is allowed, because losing it costs nothing (the id counter's mint). */
 export function standaloneWrite(sqlite, fn) {

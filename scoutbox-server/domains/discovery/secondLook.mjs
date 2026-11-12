@@ -1,5 +1,6 @@
 // Second Look owns no player truth: it reads the source stores and stores only workflow (which item a recruiter
 // reviewed, dismissed or acted on). Reopening a room goes through the rooms' own reopen path.
+import { asReconciling } from '../../writeRules.mjs';
 import { PROVIDERS } from '../development/boxcam/drills.mjs';
 import {
   SECOND_LOOK_POLICY_VERSION,
@@ -249,83 +250,85 @@ export function registerSecondLook(ctx) {
   function reconcile(req, { playerId = null } = {}) {
     const org = req.org;
     const projected = projectCandidates(req, { playerId });
-    return unit(() => {
-      const live = [];
-      for (const { candidate, room } of projected) {
-        const existing = itemFor(org.id, room.id, candidate.decisionId);
-        const verdict = secondLookStatus({ existing, candidate });
-        // Suppression means "do not resurface as open", not "forget": the item stays in the Reviewed/Dismissed tabs.
-        if (verdict.action === 'suppress') {
-          if (existing) live.push({ item: existing, candidate });
-          continue;
-        }
-        const at = now();
-        if (verdict.action === 'create') {
-          const item = discovery.secondLook.create({
-            id: nextId('slk'),
-            orgId: org.id,
-            playerId: candidate.playerId,
-            roomId: candidate.roomId,
-            decisionId: candidate.decisionId,
-            policyVersion: SECOND_LOOK_POLICY_VERSION,
-            triggerType: candidate.kind,
-            changeFingerprints: candidate.changeFingerprints,
-            directReasonCodes: candidate.directReasonCodes,
-            status: 'open',
-            createdAt: at,
-            updatedAt: at,
-            latestChangeAt: candidate.latestChangeAt,
-            history: [{ at, action: 'surfaced', by: null }],
-          });
-          vmetric('second_look_created');
-          // Names the player: it goes only to the scout who owned the Room, visibility is established above, and
-          // "a player you archived" is useless to someone who has archived dozens.
-          const owner = room.ownerUserId ? ctx.byId.user(room.ownerUserId) : null;
-          if (owner && owner.orgId === org.id && !owner.removedAt) {
-            notify(
-              { kind: 'org_user', id: owner.id },
-              'second_look',
-              `Second Look — ${room.playerName}: new evidence since your organisation archived this Room.`,
-              item.id,
-            );
+    return asReconciling(() =>
+      unit(() => {
+        const live = [];
+        for (const { candidate, room } of projected) {
+          const existing = itemFor(org.id, room.id, candidate.decisionId);
+          const verdict = secondLookStatus({ existing, candidate });
+          // Suppression means "do not resurface as open", not "forget": the item stays in the Reviewed/Dismissed tabs.
+          if (verdict.action === 'suppress') {
+            if (existing) live.push({ item: existing, candidate });
+            continue;
+          }
+          const at = now();
+          if (verdict.action === 'create') {
+            const item = discovery.secondLook.create({
+              id: nextId('slk'),
+              orgId: org.id,
+              playerId: candidate.playerId,
+              roomId: candidate.roomId,
+              decisionId: candidate.decisionId,
+              policyVersion: SECOND_LOOK_POLICY_VERSION,
+              triggerType: candidate.kind,
+              changeFingerprints: candidate.changeFingerprints,
+              directReasonCodes: candidate.directReasonCodes,
+              status: 'open',
+              createdAt: at,
+              updatedAt: at,
+              latestChangeAt: candidate.latestChangeAt,
+              history: [{ at, action: 'surfaced', by: null }],
+            });
+            vmetric('second_look_created');
+            // Names the player: it goes only to the scout who owned the Room, visibility is established above, and
+            // "a player you archived" is useless to someone who has archived dozens.
+            const owner = room.ownerUserId ? ctx.byId.user(room.ownerUserId) : null;
+            if (owner && owner.orgId === org.id && !owner.removedAt) {
+              notify(
+                { kind: 'org_user', id: owner.id },
+                'second_look',
+                `Second Look — ${room.playerName}: new evidence since your organisation archived this Room.`,
+                item.id,
+              );
+            }
+            live.push({ item, candidate });
+            continue;
+          }
+          const refresh = (d) => {
+            d.changeFingerprints = candidate.changeFingerprints;
+            d.directReasonCodes = candidate.directReasonCodes;
+            d.triggerType = candidate.kind;
+            d.latestChangeAt = candidate.latestChangeAt;
+            d.updatedAt = at;
+          };
+          const expire = (d) => {
+            if (secondLookExpired(d, at)) {
+              d.status = 'expired';
+              d.updatedAt = at;
+            }
+          };
+          let item = existing;
+          if (verdict.action === 'reopen') {
+            item = discovery.secondLook.update(existing.id, (d) => {
+              d.status = 'open';
+              refresh(d);
+              d.history.push({ at, action: 'resurfaced', by: null, reason: verdict.reason });
+              expire(d);
+            });
+            vmetric('second_look_created');
+          } else if (verdict.action === 'update') {
+            item = discovery.secondLook.update(existing.id, (d) => {
+              refresh(d);
+              expire(d);
+            });
+          } else if (secondLookExpired(existing, at)) {
+            item = discovery.secondLook.update(existing.id, expire);
           }
           live.push({ item, candidate });
-          continue;
         }
-        const refresh = (d) => {
-          d.changeFingerprints = candidate.changeFingerprints;
-          d.directReasonCodes = candidate.directReasonCodes;
-          d.triggerType = candidate.kind;
-          d.latestChangeAt = candidate.latestChangeAt;
-          d.updatedAt = at;
-        };
-        const expire = (d) => {
-          if (secondLookExpired(d, at)) {
-            d.status = 'expired';
-            d.updatedAt = at;
-          }
-        };
-        let item = existing;
-        if (verdict.action === 'reopen') {
-          item = discovery.secondLook.update(existing.id, (d) => {
-            d.status = 'open';
-            refresh(d);
-            d.history.push({ at, action: 'resurfaced', by: null, reason: verdict.reason });
-            expire(d);
-          });
-          vmetric('second_look_created');
-        } else if (verdict.action === 'update') {
-          item = discovery.secondLook.update(existing.id, (d) => {
-            refresh(d);
-            expire(d);
-          });
-        } else if (secondLookExpired(existing, at)) {
-          item = discovery.secondLook.update(existing.id, expire);
-        }
-        live.push({ item, candidate });
-      }
-      return live;
-    });
+        return live;
+      }),
+    );
   }
 
   const storedView = (i) => ({

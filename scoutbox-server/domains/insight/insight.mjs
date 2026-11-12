@@ -1,6 +1,7 @@
 // No inference of protected characteristics, no public rankings, no pay-for-priority, small aggregates suppressed,
 // absent evidence never recorded as poor ability, and exposure metrics carry their denominators and windows instead of
 // claims about discrimination.
+import { asReconciling } from '../../writeRules.mjs';
 import crypto from 'node:crypto';
 import { exposureHook } from '../enterprise/enterprise.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
@@ -706,15 +707,17 @@ export function registerInsight(ctx) {
       const hit = rule.evaluate(player, org);
       if (hit) found.push({ ruleId: rule.id, ruleVersion: rule.version, ...boundGap(hit) });
     }
-    const list = unit(() =>
-      suggestions.reconcile({
-        orgId: org.id,
-        playerId: player.id,
-        playerName: player.name ?? null,
-        found,
-        at: Date.now(),
-        mintId: () => nextId('gap'),
-      }),
+    const list = asReconciling(() =>
+      unit(() =>
+        suggestions.reconcile({
+          orgId: org.id,
+          playerId: player.id,
+          playerName: player.name ?? null,
+          found,
+          at: Date.now(),
+          mintId: () => nextId('gap'),
+        }),
+      ),
     );
     return list.map(suggestionView);
   }

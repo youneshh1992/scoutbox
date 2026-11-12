@@ -2,6 +2,7 @@
 // are earned by the verifying actor's authority, corrections supersede without erasing, and "insufficient evidence"
 // is a first-class display state.
 
+import { declareAuditedRead } from '../../writeRules.mjs';
 import * as v from 'valibot';
 import { parseDateOrInstant, isAbsent, readInstant } from '../../temporal.mjs';
 import { offsetPage } from '../platform/paging.mjs';
@@ -393,6 +394,7 @@ export function registerPassport(ctx) {
       return res
         .status(403)
         .json({ error: req.org.type === 'agency' && !isAdult(p) ? 'UNDER_18_WALL' : 'NOT_VISIBLE' });
+    declareAuditedRead("the Discovery Ledger records who viewed a player's passport");
     ledgerAppend({
       type: 'passport_view',
       playerId: p.id,

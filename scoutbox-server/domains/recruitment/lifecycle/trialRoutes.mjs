@@ -631,54 +631,58 @@ export function registerTrial(ctx) {
     }
 
     let moved = null;
-    const request = unit(() => {
-      const request = issueRecruitmentRequest({
-        org: req.org,
-        orgUser: req.orgUser,
-        player,
-        type: 'trial',
-        message: inv.message,
-        trialDetails: {
-          proposedDate: inv.slots[0].day,
-          altSlots: inv.slots.slice(1).map((s) => s.day),
-          venue: inv.venue.town ? `${inv.venue.name}, ${inv.venue.town}` : inv.venue.name,
-          notes: '',
-          slots: inv.slots,
-          // Shared with the recipient after acceptance only; stripped from every recipient-facing view.
-          private:
-            (inv.venue.address ?? null) !== null || (inv.instructions ?? null) !== null
-              ? { venueAddress: inv.venue.address ?? null, instructions: inv.instructions ?? null }
-              : null,
-        },
-        guardianId: recipient.guardianId,
-        at,
-        workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
-      });
-      cases.link(
-        room.id,
-        { requestId: request.id },
-        {
-          history: [
-            auditEntry('org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', {
-              requestId: request.id,
-              recipientType: recipient.type,
-              slotCount: inv.slots.length,
-            }),
-          ],
-        },
-      );
+    const request = unit(
+      () => {
+        const request = issueRecruitmentRequest({
+          org: req.org,
+          orgUser: req.orgUser,
+          player,
+          type: 'trial',
+          message: inv.message,
+          trialDetails: {
+            proposedDate: inv.slots[0].day,
+            altSlots: inv.slots.slice(1).map((s) => s.day),
+            venue: inv.venue.town ? `${inv.venue.name}, ${inv.venue.town}` : inv.venue.name,
+            notes: '',
+            slots: inv.slots,
+            // Shared with the recipient after acceptance only; stripped from every recipient-facing view.
+            private:
+              (inv.venue.address ?? null) !== null || (inv.instructions ?? null) !== null
+                ? { venueAddress: inv.venue.address ?? null, instructions: inv.instructions ?? null }
+                : null,
+          },
+          guardianId: recipient.guardianId,
+          at,
+          workflow: { caseId: room.id, recipient, keys: { invite: key.key ? { key: key.key, fp } : null } },
+        });
+        cases.link(
+          room.id,
+          { requestId: request.id },
+          {
+            history: [
+              auditEntry('org', req.orgUser.id, req.orgUser.name, 'room_trial_invited', {
+                requestId: request.id,
+                recipientType: recipient.type,
+                slotCount: inv.slots.length,
+              }),
+            ],
+          },
+        );
 
-      moved = advanceCase({
-        req,
-        room,
-        action: 'planTrial',
-        at,
-        trigger: `trial:invite:${request.id}`,
-        keyDetail: { requestId: request.id },
-      });
-      return request;
-    });
-    broadcast('trial_invited', { orgId: room.orgId, roomId: room.id, requestId: request.id });
+        moved = advanceCase({
+          req,
+          room,
+          action: 'planTrial',
+          at,
+          trigger: `trial:invite:${request.id}`,
+          keyDetail: { requestId: request.id },
+        });
+        return request;
+      },
+      (request) => {
+        broadcast('trial_invited', { orgId: room.orgId, roomId: room.id, requestId: request.id });
+      },
+    );
     res.status(201).json({
       invitation: invitationView(request),
       routing: routingView({ ok: true, recipient }),
@@ -815,39 +819,42 @@ export function registerTrial(ctx) {
       ...t,
       schedule: { confirmedAt: keepsConfirmation ? t.schedule.confirmedAt : null, sessions },
     });
-    const fresh = unit(() =>
-      trials.proposeSchedule(
-        t.id,
-        {
-          revision,
-          timezone: check.schedule.timezone,
-          sessions,
-          proposedAt: at,
-          proposedBy: by,
-          keepsConfirmation,
-          reason,
-          material,
-          workflowState,
-        },
-        acted(
-          at,
-          req.orgUser,
-          isRevision ? 'trial_rescheduled' : 'trial_schedule_proposed',
-          by,
-          { revision, sessionCount: sessions.length, material, requiresConfirmation: !keepsConfirmation },
-          { act: 'schedule', key: key.key, fp },
+    const fresh = unit(
+      () =>
+        trials.proposeSchedule(
+          t.id,
+          {
+            revision,
+            timezone: check.schedule.timezone,
+            sessions,
+            proposedAt: at,
+            proposedBy: by,
+            keepsConfirmation,
+            reason,
+            material,
+            workflowState,
+          },
+          acted(
+            at,
+            req.orgUser,
+            isRevision ? 'trial_rescheduled' : 'trial_schedule_proposed',
+            by,
+            { revision, sessionCount: sessions.length, material, requiresConfirmation: !keepsConfirmation },
+            { act: 'schedule', key: key.key, fp },
+          ),
         ),
-      ),
-    );
-    if (isRevision) broadcast('trial_rescheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-    else broadcast('trial_scheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-    notifyRecipient(
-      fresh,
-      keepsConfirmation
-        ? `${fresh.orgName} updated the details of your trial (times unchanged).`
-        : isRevision
-          ? `${fresh.orgName} proposed new times for your trial — please confirm the updated schedule.`
-          : `${fresh.orgName} proposed a schedule for your trial — please confirm it.`,
+      (fresh) => {
+        if (isRevision) broadcast('trial_rescheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
+        else broadcast('trial_scheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
+        notifyRecipient(
+          fresh,
+          keepsConfirmation
+            ? `${fresh.orgName} updated the details of your trial (times unchanged).`
+            : isRevision
+              ? `${fresh.orgName} proposed new times for your trial — please confirm the updated schedule.`
+              : `${fresh.orgName} proposed a schedule for your trial — please confirm it.`,
+        );
+      },
     );
     res.json({ trial: trialClubView(fresh), requiresConfirmation: !keepsConfirmation, material });
   }
@@ -891,22 +898,25 @@ export function registerTrial(ctx) {
       return;
     const by = orgActor(req);
     const phase = deriveWorkflowState(t);
-    const fresh = unit(() =>
-      trials.cancel(
-        t.id,
-        { at, by, reason, phase, cancelledBy: 'club' },
-        acted(
-          at,
-          req.orgUser,
-          'trial_cancelled',
-          by,
-          { phase, cancelledBy: 'club', attendedSessions: attendedCount(t) },
-          { act: 'cancel', key: key.key, fp },
+    const fresh = unit(
+      () =>
+        trials.cancel(
+          t.id,
+          { at, by, reason, phase, cancelledBy: 'club' },
+          acted(
+            at,
+            req.orgUser,
+            'trial_cancelled',
+            by,
+            { phase, cancelledBy: 'club', attendedSessions: attendedCount(t) },
+            { act: 'cancel', key: key.key, fp },
+          ),
         ),
-      ),
+      (fresh) => {
+        broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
+        notifyRecipient(fresh, `${fresh.orgName} cancelled the trial: ${reason}`);
+      },
     );
-    broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-    notifyRecipient(fresh, `${fresh.orgName} cancelled the trial: ${reason}`);
     res.json({ trial: trialClubView(fresh) });
   });
 
@@ -964,21 +974,24 @@ export function registerTrial(ctx) {
     )
       return;
     const by = orgActor(req);
-    const fresh = unit(() =>
-      trials.recordAttendance(
-        t.id,
-        { attendance: { sessionId: s.id, state, source: 'manual', recordedBy: by, recordedAt: at, note } },
-        acted(
-          at,
-          req.orgUser,
-          'trial_attendance_recorded',
-          by,
-          { sessionId: s.id, state, source: 'manual' },
-          { act: 'attendance', key: key.key, fp },
+    const fresh = unit(
+      () =>
+        trials.recordAttendance(
+          t.id,
+          { attendance: { sessionId: s.id, state, source: 'manual', recordedBy: by, recordedAt: at, note } },
+          acted(
+            at,
+            req.orgUser,
+            'trial_attendance_recorded',
+            by,
+            { sessionId: s.id, state, source: 'manual' },
+            { act: 'attendance', key: key.key, fp },
+          ),
         ),
-      ),
+      (fresh) => {
+        broadcast('trial_attendance_recorded', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
+      },
     );
-    broadcast('trial_attendance_recorded', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
     res.json({ trial: trialClubView(fresh) });
   });
 
@@ -1014,34 +1027,38 @@ export function registerTrial(ctx) {
     }
     const by = orgActor(req);
     let moved = null;
-    const fresh = unit(() => {
-      trials.complete(
-        t.id,
-        { at, by },
-        acted(
-          at,
-          req.orgUser,
-          'trial_completed',
-          by,
-          { sessionCount: t.schedule.sessions.length, attendedSessions: attendedCount(t) },
-          { act: 'complete', key: key.key, fp },
-        ),
-      );
-      // The evidence provider reads the completed trial.
-      moved = t.caseId
-        ? advanceCase({
-            req,
-            room,
-            action: 'completeTrial',
+    const fresh = unit(
+      () => {
+        trials.complete(
+          t.id,
+          { at, by },
+          acted(
             at,
-            trigger: `trial:complete:${t.id}`,
-            keyDetail: { trialId: t.id },
-          })
-        : { applied: false, reason: 'legacy_no_case', at };
-      return trials.recordLifecycle(t.id, { lifecycle: moved });
-    });
-    broadcast('trial_completed', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-    notifyRecipient(fresh, `${fresh.orgName} recorded the trial as completed. Thank you for taking part.`);
+            req.orgUser,
+            'trial_completed',
+            by,
+            { sessionCount: t.schedule.sessions.length, attendedSessions: attendedCount(t) },
+            { act: 'complete', key: key.key, fp },
+          ),
+        );
+        // The evidence provider reads the completed trial.
+        moved = t.caseId
+          ? advanceCase({
+              req,
+              room,
+              action: 'completeTrial',
+              at,
+              trigger: `trial:complete:${t.id}`,
+              keyDetail: { trialId: t.id },
+            })
+          : { applied: false, reason: 'legacy_no_case', at };
+        return trials.recordLifecycle(t.id, { lifecycle: moved });
+      },
+      (fresh) => {
+        broadcast('trial_completed', { orgId: room.orgId, roomId: room.id, trialId: t.id });
+        notifyRecipient(fresh, `${fresh.orgName} recorded the trial as completed. Thank you for taking part.`);
+      },
+    );
     res.json({
       trial: trialClubView(fresh),
       case: moved.applied
@@ -1148,32 +1165,35 @@ export function registerTrial(ctx) {
     if (limited('trial_evidence_link', req.org.id)) return res.status(429).json(rateLimitedBody('trial_evidence_link'));
     const by = orgActor(req);
     // Reference only; provenance is read live at projection time.
-    const fresh = unit(() =>
-      trials.linkEvidence(
-        t.id,
-        {
-          sessionId: s.id,
-          evidence: {
-            id: nextId('tev'),
-            kind: 'box_cam_session',
-            sessionId: la.session.id,
-            linkedAt: at,
-            linkedBy: by,
-            removedAt: null,
-            removedBy: null,
+    const fresh = unit(
+      () =>
+        trials.linkEvidence(
+          t.id,
+          {
+            sessionId: s.id,
+            evidence: {
+              id: nextId('tev'),
+              kind: 'box_cam_session',
+              sessionId: la.session.id,
+              linkedAt: at,
+              linkedBy: by,
+              removedAt: null,
+              removedBy: null,
+            },
           },
-        },
-        acted(
-          at,
-          req.orgUser,
-          'trial_evidence_linked',
-          by,
-          { trialSessionId: s.id, kind: 'box_cam_session', sessionId: la.session.id },
-          { act: 'link', key: key.key, fp },
+          acted(
+            at,
+            req.orgUser,
+            'trial_evidence_linked',
+            by,
+            { trialSessionId: s.id, kind: 'box_cam_session', sessionId: la.session.id },
+            { act: 'link', key: key.key, fp },
+          ),
         ),
-      ),
+      (fresh) => {
+        broadcast('trial_evidence_linked', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
+      },
     );
-    broadcast('trial_evidence_linked', { orgId: room.orgId, roomId: room.id, trialId: t.id, sessionId: s.id });
     res.status(201).json({ trial: trialClubView(fresh), evidence: evidenceViews(fresh) });
   });
 
@@ -1561,43 +1581,47 @@ export function registerTrial(ctx) {
       }
       const who = { kind: by, id: actorId, name: actorName };
       const room = t.caseId ? recruitmentReads.cases.byId(t.caseId) : null;
-      const fresh = unit(() => {
-        trials.confirmSchedule(
-          t.id,
-          {
-            at,
-            by: who,
-            recipient: {
-              type: by,
-              playerId: t.playerId,
-              guardianId: by === 'guardian' ? actorId : null,
-              minor: by === 'guardian',
+      const fresh = unit(
+        () => {
+          trials.confirmSchedule(
+            t.id,
+            {
               at,
+              by: who,
+              recipient: {
+                type: by,
+                playerId: t.playerId,
+                guardianId: by === 'guardian' ? actorId : null,
+                minor: by === 'guardian',
+                at,
+              },
+              workflowState: deriveWorkflowState({ ...t, schedule: { ...t.schedule, confirmedAt: at } }),
             },
-            workflowState: deriveWorkflowState({ ...t, schedule: { ...t.schedule, confirmedAt: at } }),
-          },
-          acted(at, null, 'trial_schedule_confirmed', who, {
-            revision: t.schedule.revision,
-            sessionCount: t.schedule.sessions.length,
-          }),
-        );
-        // The evidence provider reads the confirmed trial.
-        const moved = room
-          ? advanceCase({
-              room,
-              action: 'confirmTrial',
-              at,
-              trigger: `trial:confirm:${t.id}`,
-              actor: who,
-              keyDetail: { trialId: t.id },
-            })
-          : { applied: false, reason: 'legacy_no_case', at };
-        return trials.recordLifecycle(t.id, { lifecycle: moved });
-      });
-      if (room) broadcast('trial_scheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-      notifyClub(
-        fresh,
-        `${actorName} confirmed the trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision}).`,
+            acted(at, null, 'trial_schedule_confirmed', who, {
+              revision: t.schedule.revision,
+              sessionCount: t.schedule.sessions.length,
+            }),
+          );
+          // The evidence provider reads the confirmed trial.
+          const moved = room
+            ? advanceCase({
+                room,
+                action: 'confirmTrial',
+                at,
+                trigger: `trial:confirm:${t.id}`,
+                actor: who,
+                keyDetail: { trialId: t.id },
+              })
+            : { applied: false, reason: 'legacy_no_case', at };
+          return trials.recordLifecycle(t.id, { lifecycle: moved });
+        },
+        (fresh) => {
+          if (room) broadcast('trial_scheduled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
+          notifyClub(
+            fresh,
+            `${actorName} confirmed the trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision}).`,
+          );
+        },
       );
       res.json({ trial: trialFamilyView(fresh) });
     };
@@ -1633,16 +1657,19 @@ export function registerTrial(ctx) {
       const reason = typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
       if (reason && !moderateOrRefuse(res, reason, { kind: 'trial_schedule_decline', trialId: t.id })) return;
       const who = { kind: by, id: actorId, name: actorName };
-      const fresh = unit(() =>
-        trials.declineSchedule(
-          t.id,
-          { at, by: who },
-          acted(at, null, 'trial_schedule_declined', who, { revision: t.schedule.revision, hadReason: !!reason }),
-        ),
-      );
-      notifyClub(
-        fresh,
-        `${actorName} declined the proposed trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision})${reason ? `: ${reason}` : '.'}`,
+      const fresh = unit(
+        () =>
+          trials.declineSchedule(
+            t.id,
+            { at, by: who },
+            acted(at, null, 'trial_schedule_declined', who, { revision: t.schedule.revision, hadReason: !!reason }),
+          ),
+        (fresh) => {
+          notifyClub(
+            fresh,
+            `${actorName} declined the proposed trial schedule for ${fresh.playerName ?? 'the player'} (revision ${fresh.schedule.revision})${reason ? `: ${reason}` : '.'}`,
+          );
+        },
       );
       res.json({ trial: trialFamilyView(fresh) });
     };
@@ -1676,22 +1703,25 @@ export function registerTrial(ctx) {
       const reason = typeof reasonRaw === 'string' && reasonRaw.trim() ? reasonRaw.trim() : null;
       if (reason && !moderateOrRefuse(res, reason, { kind: 'trial_cancellation', trialId: t.id })) return;
       const who = { kind: by, id: actorId, name: actorName };
-      const fresh = unit(() =>
-        trials.cancel(
-          t.id,
-          { at, by: who, reason, phase: state, cancelledBy: by },
-          acted(at, null, 'trial_cancelled', who, {
-            phase: state,
-            cancelledBy: by,
-            attendedSessions: attendedCount(t),
-          }),
-        ),
-      );
-      const room = fresh.caseId ? recruitmentReads.cases.byId(fresh.caseId) : null;
-      if (room) broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
-      notifyClub(
-        fresh,
-        `${actorName} cancelled the trial for ${fresh.playerName ?? 'the player'}${reason ? `: ${reason}` : '.'}`,
+      const fresh = unit(
+        () =>
+          trials.cancel(
+            t.id,
+            { at, by: who, reason, phase: state, cancelledBy: by },
+            acted(at, null, 'trial_cancelled', who, {
+              phase: state,
+              cancelledBy: by,
+              attendedSessions: attendedCount(t),
+            }),
+          ),
+        (fresh) => {
+          const room = fresh.caseId ? recruitmentReads.cases.byId(fresh.caseId) : null;
+          if (room) broadcast('trial_cancelled', { orgId: room.orgId, roomId: room.id, trialId: t.id });
+          notifyClub(
+            fresh,
+            `${actorName} cancelled the trial for ${fresh.playerName ?? 'the player'}${reason ? `: ${reason}` : '.'}`,
+          );
+        },
       );
       res.json({ trial: trialFamilyView(fresh) });
     };

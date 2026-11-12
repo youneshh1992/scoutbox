@@ -3,6 +3,7 @@
 //
 // A licence is called verified only when an authoritative source confirmed it. No governing-body registry is
 // connected: providers ship `not_configured`, and only a local test fixture (env-gated) exercises the adapter.
+import { declareAuditedRead } from '../../../writeRules.mjs';
 import * as v from 'valibot';
 import { decideReview, normalizeDomain, domainOfEmail, domainCovered, sha256 } from './shared.mjs';
 import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
@@ -429,6 +430,7 @@ export function registerVerificationReview(ctx) {
   adminRouter.get('/verification/evidence/:id', (req, res) => {
     const ev = reads.evidence.byId(req.params.id);
     if (!ev) return res.status(404).json({ error: 'EVIDENCE_NOT_FOUND' });
+    declareAuditedRead('every read of verification evidence is logged');
     verEvent('evidence.accessed', {
       claimId: ev.claimIds[0] ?? null,
       subjectId: ev.suppliedById,

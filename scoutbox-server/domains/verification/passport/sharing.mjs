@@ -1,6 +1,7 @@
 // Passport sharing. Tokens are stored only as SHA-256 hashes. A share can only narrow what a viewer would see: a
 // public share resolves to the public projection, a recruitment share only inside an authenticated organisation
 // session that re-runs the standing gates.
+import { declareAuditedRead } from '../../../writeRules.mjs';
 import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { mintShareSecret, sha256, shareProblem, SHARE_MODES } from './shared.mjs';
@@ -190,6 +191,7 @@ export function registerPassportSharing(ctx) {
     const { share, player, problem } = resolveShare(req.params.token);
     // Unknown, revoked, expired, removed-subject and wrong-mode all look identical from outside.
     if (problem || share.mode !== 'public') return res.status(404).json({ error: 'PASSPORT_NOT_FOUND' });
+    declareAuditedRead('a share link counts its views');
     passport.shares.recordView(share.id);
     vmetric('share_opened_public');
     res.json(buildFootballPassport(player, 'public', { shareMode: 'public' }));
@@ -204,17 +206,20 @@ export function registerPassportSharing(ctx) {
         .status(403)
         .json({ error: req.org.type === 'agency' && !isAdult(player) ? 'UNDER_18_WALL' : 'NOT_VISIBLE' });
     }
-    passport.shares.recordView(share.id);
-    vmetric('share_opened_recruitment');
-    ledgerAppend({
-      type: 'passport_recruitment_view',
-      playerId: player.id,
-      orgId: req.org.id,
-      orgName: req.org.name,
-      userId: req.orgUser.id,
-      scoutName: req.orgUser.name,
-      detail: { via: 'share' },
+    declareAuditedRead('a share link counts its views, and the Discovery Ledger records who opened it');
+    unit(() => {
+      passport.shares.recordView(share.id);
+      ledgerAppend({
+        type: 'passport_recruitment_view',
+        playerId: player.id,
+        orgId: req.org.id,
+        orgName: req.org.name,
+        userId: req.orgUser.id,
+        scoutName: req.orgUser.name,
+        detail: { via: 'share' },
+      });
     });
+    vmetric('share_opened_recruitment');
     const viewer =
       req.org.type === 'agency' ? 'agency' : req.org.level === 'grassroots' ? 'grassroots_club' : 'pro_club';
     res.json(buildFootballPassport(player, viewer, { orgId: req.org.id, shareMode: 'recruitment' }));

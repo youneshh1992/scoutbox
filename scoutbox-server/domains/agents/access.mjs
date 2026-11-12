@@ -4,7 +4,7 @@
  */
 import { sendAgentError } from './core/errors.mjs';
 import { tiersOf, can } from './core/shared.mjs';
-import { asFirstUse } from '../../writeRules.mjs';
+import { apartFromTheAct } from '../../writeRules.mjs';
 
 export function createAgentAccess({ agentCore, unit, nextId, broadcast, now = () => Date.now() }) {
   if (typeof agentCore?.affiliations?.activeFor !== 'function' || typeof unit !== 'function')
@@ -39,7 +39,7 @@ export function createAgentAccess({ agentCore, unit, nextId, broadcast, now = ()
         );
         return null;
       }
-      aff = asFirstUse(() =>
+      aff = apartFromTheAct('the first member of an agency becomes its administrator', () =>
         unit(() => {
           const at = now();
           const by = { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name };
