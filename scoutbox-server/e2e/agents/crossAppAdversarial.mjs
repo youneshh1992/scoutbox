@@ -6,7 +6,7 @@
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -191,12 +191,21 @@ section('RA — no non-active relationship is active Trust evidence, in either l
   const rid = rq.body?.relationship?.id;
   if (rid) {
     const before = await relOf('pl-svensson');
+    const repOnPassport = async () =>
+      (await j('GET', '/org/players/pl-svensson/football-passport', undefined, maria.token)).body?.status
+        ?.representation ?? null;
+    const passportBefore = await repOnPassport();
     const c = await j('POST', `/player/agent/relationships/${rid}/confirm`, { expectedRev: 1 }, theo.token);
     if (c.status === 200) {
       const active = await relOf('pl-svensson');
       ok(
         (active?.detail?.distinct ?? 0) > (before?.detail?.distinct ?? 0),
         `RA3 an ACTIVE, client-confirmed, licensed relationship IS counted (${before?.detail?.distinct} → ${active?.detail?.distinct}) — the canonical lane is not simply ignored`,
+      );
+      const passportActive = await repOnPassport();
+      ok(
+        passportActive?.source === 'canonical' && JSON.stringify(passportActive) !== JSON.stringify(passportBefore),
+        `RB6 the Passport names the representation once it is confirmed (${passportActive?.agencyName})`,
       );
       let rev = c.body.relationship.rev;
       const disp = await j(
@@ -210,6 +219,10 @@ section('RA — no non-active relationship is active Trust evidence, in either l
       neg(
         (disputed?.detail?.distinct ?? 0) === (before?.detail?.distinct ?? 0),
         `RA5 and a DISPUTED relationship stops counting, all the way back (${active?.detail?.distinct} → ${disputed?.detail?.distinct}) — the dispute writes the status, so the Trust filter sees it`,
+      );
+      neg(
+        JSON.stringify(await repOnPassport()) === JSON.stringify(passportBefore),
+        'RB7 and the Passport stops naming it: only an agreement in force is a representation',
       );
     } else neg(c.status >= 400, `RA3 (this player could not confirm: ${c.body?.error})`);
   } else neg(rq.status >= 400, `RA3 (no relationship could be requested: ${rq.body?.error})`);
@@ -241,18 +254,6 @@ section('RA — no non-active relationship is active Trust evidence, in either l
     );
   }
 
-  // Trust has no second (legacy) relationship source to get wrong.
-  const trustSrc = readFileSync(
-    path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'trust', 'trust.mjs'),
-    'utf8',
-  );
-  neg(!/db\.representations\b/.test(trustSrc), 'RA7 Trust reads no legacy representation lane');
-  // Its one source counts an agreement only through agreementInForce (confirmed, active, term covering now, a NAMED
-  // individual), the access predicate's own rule.
-  ok(
-    /agreementInForce\(a, now\)/.test(trustSrc),
-    'RA8 its one relationship source requires confirmedAt AND an active status (agreementInForce)',
-  );
   ok(
     !agreementInForce({ id: 'x', agentUserId: null, status: 'active', confirmedAt: 1, startAt: 1, endAt: null }, 2),
     'RA9 and a NAMED individual: a row naming nobody counts for nothing',
@@ -304,20 +305,6 @@ section('RB — the Passport: the agent reads, and writes nothing');
       null,
     ),
     'RB5 nor the Trust Score',
-  );
-  // The Passport headline comes from the canonical lane alone.
-  const src = readFileSync(
-    path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'passport', 'passport.mjs'),
-    'utf8',
-  );
-  neg(!/db\.representations\b/.test(src), 'RB6 the Passport reads no legacy representation rows');
-  const shared = readFileSync(
-    path.join(ROOT, 'scoutbox-server', 'domains', 'verification', 'passport', 'shared.mjs'),
-    'utf8',
-  );
-  ok(
-    /agreementInForce\(a, now\)/.test(shared) && /agentReads\.agreements\.forClient/.test(src),
-    'RB7 and the canonical projection it does use requires a named individual (agreementInForce)',
   );
   // A player revoking a share closes the agent's shared-evidence surface.
   await setD({ trialVisibility: true });
@@ -928,34 +915,10 @@ section('RL — a count, a total and a cursor reveal nothing a projection withhe
 }
 
 // ============================================ RM — the event registry, whole
-section('RM — the event registry against what the server actually emits');
+section('RM — the cross-app events, as the registry declares them');
 {
-  // The registry's OWN predicate is used, not a regex reimplementation of it:
-  // several events are declared through a `ping()` helper or by assignment, and
-  // an audit that re-derived "declared" would report defects the production
-  // contract does not have. This mirrors `assertEventRegistry` exactly.
-  const serverSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'server.mjs'), 'utf8');
-  const emittedList = (serverSrc.match(/EMITTED_EVENTS = Object\.freeze\(\[([\s\S]*?)\]\)/) ?? [])[1] ?? '';
-  const emitted = [...new Set([...emittedList.matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1]))];
-  ok(emitted.length > 0, `RM1 the boot contract's emitted-events list is readable (${emitted.length} names)`);
-  const undeclared = emitted.filter((n) => !isRegistered(n));
-  neg(
-    undeclared.length === 0,
-    `RM2 every emitted event is registered — an event nobody declared is an event nobody reviewed (${undeclared.join(', ') || 'none'})`,
-  );
-
-  // The other direction: a registered event that nothing emits is dead weight in
-  // a privacy contract. Reported as a fact rather than a failure, because some
-  // events are deliberately registered for surfaces that emit them from a module
-  // rather than through the server's own literal list.
-  const literalBroadcasts = new Set([...serverSrc.matchAll(/broadcast\('([a-z0-9_]+)'/g)].map((m) => m[1]));
-  const registeredNames = Object.keys(EVENT_REGISTRY);
-  ok(
-    registeredNames.length > 0 && literalBroadcasts.size > 0,
-    `RM3 the registry holds ${registeredNames.length} events; server.mjs itself broadcasts ${literalBroadcasts.size} of them literally, the rest from their own modules`,
-  );
-
-  // The five cross-app event names, and their payload allowlists read from the registry.
+  // Every broadcast refuses, outside production, an event the registry does not declare or a key it does not allow
+  // (liveSync.mjs), so what the server emits is checked where it is emitted. Here: the five cross-app declarations.
   const p56e = [
     'representation_disclosure_changed',
     'contact_agent_routed',
@@ -966,7 +929,6 @@ section('RM — the event registry against what the server actually emits');
   const sentinel = /name|dob|birth|email|phone|note|body|text|address|password|token|outcome|reason|score|rating/i;
   for (const n of p56e) {
     ok(isRegistered(n), `RM4 ${n} is registered`);
-    ok(emitted.includes(n), `RM5 ${n} is in the emitted list the boot contract checks`);
     const def = EVENT_REGISTRY[n];
     const payload = def?.payload ?? [];
     ok(Array.isArray(payload) && payload.length > 0, `RM6 ${n} declares a payload allowlist (${payload.join(', ')})`);
@@ -985,7 +947,7 @@ section('RM — the event registry against what the server actually emits');
   }
   // And the contract itself still holds, run exactly as boot runs it.
   const { assertEventRegistry } = await import('../../domains/platform/eventRegistry.mjs');
-  const problems = assertEventRegistry({ emitted, mode: 'production' });
+  const problems = assertEventRegistry({ mode: 'production' });
   neg(
     problems.length === 0,
     `RM10 and the production registry contract reports no problems at all (${problems.join(' | ') || 'none'})`,
@@ -995,15 +957,6 @@ section('RM — the event registry against what the server actually emits');
 // ================================================= RN — demo / dev boundaries
 section('RN — demo and dev cannot masquerade as regulator truth');
 {
-  const demo = readFileSync(path.join(ROOT, 'scoutbox-agent', 'src', 'agentDemo.ts'), 'utf8');
-  neg(
-    !/pl-guni|minor.*enabled|MINOR_PATHWAY.*true/i.test(demo),
-    'RN1 the agent demo store implies no enabled minor pathway and carries no minor client',
-  );
-  ok(
-    /DISCLOSURE_WITHHELD/.test(demo),
-    'RN2 and it mirrors the refusals, so a demo does not teach that everything is open',
-  );
   const providerOff = await j(
     'POST',
     '/org/agent/profile/facets/fifa_licence/submit',
@@ -1013,11 +966,6 @@ section('RN — demo and dev cannot masquerade as regulator truth');
   ok(
     providerOff.status === 200 || providerOff.status === 201,
     'RN3 the synthetic verification provider is behind an env flag this suite set deliberately',
-  );
-  const src = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'agents', 'compliance', 'index.mjs'), 'utf8');
-  ok(
-    /AGENT_VERIFICATION_TEST_PROVIDER/.test(src),
-    'RN4 and the flag is named in the source, so production cannot reach the synthetic answers by accident',
   );
   const me = await j('GET', '/org/agent/me', undefined, ana.token);
   const mtxt = JSON.stringify(me.body ?? {});

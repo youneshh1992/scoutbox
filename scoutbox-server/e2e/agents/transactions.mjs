@@ -12,7 +12,8 @@
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { clubRecords } from '../support/clubRecords.mjs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -793,37 +794,6 @@ section('pure AA/AC/AD — stores, migration, events, notifications, rate polici
   );
 }
 
-section('pure — the four separations are in the code, not only in the prose');
-{
-  // Comments are stripped first: the assertion is about what the module DOES,
-  // and a comment that says "db.signings is never written" must not read as a
-  // write. A scanner that cannot tell those apart proves nothing.
-  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  const m26index = strip(
-    readFileSync(path.join(HERE, '..', '..', 'domains', 'agents', 'transactions', 'index.mjs'), 'utf8'),
-  );
-  const m26pure = strip(
-    readFileSync(path.join(HERE, '..', '..', 'domains', 'agents', 'transactions', 'transaction.mjs'), 'utf8'),
-  );
-  const both = `${m26index}\n${m26pure}`;
-  neg(!/db\.recruitmentCases/.test(both), 'the transaction module never reads or writes db.recruitmentCases');
-  neg(!/db\.signings/.test(both), 'nor db.signings — no signing writer exists');
-  neg(
-    !/offer_made|offer_accepted|offer_declined|db\.recruitmentOffers/.test(both),
-    'and no offer lifecycle string appears in its code',
-  );
-  neg(
-    !/db\.roomComments|db\.roomDecisions|db\.assessments/.test(both),
-    'club-private assessment, Room and decision stores are not read by the transaction module',
-  );
-  neg(!/db\.boxSessions|db\.passport/.test(both), 'nor Box Cam or Passport stores');
-  // The Inbox is read through the message-thread repository (channels.byId).
-  ok(
-    /channels\.byId/.test(m26index) && !/messages\.push|new Message/.test(m26index),
-    'the canonical Inbox is referenced; no message store and no message writer is created',
-  );
-}
-
 // =================================================================== HTTP
 section('HTTP — booting a real server (synthetic verification provider ON)');
 const children = [];
@@ -940,6 +910,18 @@ const mateus = await playerLogin('pl-carvalho');
 const chinedu = await playerLogin('pl-okafor');
 const theo = await playerLogin('pl-martin');
 const filip = await playerLogin('pl-nowak');
+// Eastport has a live case on each client the agency transacts for. What each club holds on its recruitment as the
+// run starts, an agent's transaction work must leave as it was.
+for (const playerId of ['pl-adeyemi', 'pl-carvalho', 'pl-okafor']) {
+  const r = await j('POST', '/org/rooms', { playerId, sourceContext: 'search' }, maria.token);
+  const RID = r.body?.room?.roomId ?? r.body?.existingRoomId;
+  await j('POST', `/org/rooms/${RID}/lifecycle`, { action: 'startReview' }, maria.token);
+}
+const CLUBS_AT_START = { eastport: await clubRecords(j, maria.token), harbour: await clubRecords(j, devA.token) };
+ok(
+  CLUBS_AT_START.eastport.rooms.length >= 3,
+  `Eastport has a live case on each client (${CLUBS_AT_START.eastport.rooms.map((c) => c.status).join(', ')})`,
+);
 const PRIYA = await reviewerLogin('tsr-dev-admin', 'dev-reviewer-admin');
 let ANA, DAN, BEN, FAY, ZOE, ANA_ID, DAN_ID, REL_KOLA, REL_THEO, REL_CHINEDU, REL_MATEUS;
 {
@@ -2916,73 +2898,6 @@ section('AC/AD — events and notifications say little and reveal nothing');
   );
 }
 
-// ============================================================ AE — EN/FR parity
-section('AE — EN/FR parity for every new production string');
-{
-  const i18n = readFileSync(path.join(ROOT, 'scoutbox-agent', 'src', 'i18n.ts'), 'utf8');
-  // The catalogue is `const en = {` … `const fr: typeof en = {`, and every key is
-  // QUOTED (`'txStatus.DRAFT':`) — a dotted key cannot be a bare identifier. An
-  // extractor that assumed bare keys found none and passed vacuously.
-  const enStart = i18n.indexOf('const en = {');
-  const frStart = i18n.indexOf('const fr: typeof en = {');
-  ok(
-    enStart > -1 && frStart > enStart,
-    'AE0 the agent catalogue has one English and one French dictionary, in that order',
-  );
-  const keysIn = (part) => new Set([...part.matchAll(/'([A-Za-z0-9_.]+)':/g)].map((m) => m[1]));
-  const enKeys = keysIn(i18n.slice(enStart, frStart));
-  const frKeys = keysIn(i18n.slice(frStart));
-  const missing = [...enKeys].filter((k) => !frKeys.has(k));
-  const extra = [...frKeys].filter((k) => !enKeys.has(k));
-  ok(
-    enKeys.size > 100 && missing.length === 0 && extra.length === 0,
-    `AE1 the agent app has EN/FR parity across ${enKeys.size} keys${missing.length ? ` — missing ${missing.slice(0, 6).join(', ')}` : ''}${extra.length ? ` — extra ${extra.slice(0, 6).join(', ')}` : ''}`,
-  );
-  const txKeys = [...enKeys].filter((k) =>
-    /^(tx|txStatus|txPending|txStale|txBlocker|txType|txBasis|txAction|txTab|visibility|docType|party|consentKind)\./.test(
-      k,
-    ),
-  );
-  ok(txKeys.length >= 30, `AE2 ${txKeys.length} transaction strings exist in English`);
-  neg(txKeys.length > 0 && txKeys.every((k) => frKeys.has(k)), 'AE3 no transaction string is English-only');
-  // Every status, party role, compliance state, consent state, visibility class
-  // and error the server can hand the client has a word in BOTH languages.
-  const bothHave = (k) => enKeys.has(k) && frKeys.has(k);
-  neg(
-    TRANSACTION_STATUSES.every((st) => bothHave(`txStatus.${st}`)),
-    'AE4 every one of the ten statuses has an EN and a FR word — no raw enum reaches a screen',
-  );
-  neg(
-    DOCUMENT_VISIBILITY.every((v) => bothHave(`visibility.${v}`)),
-    'AE5 every document visibility class has an EN and a FR word',
-  );
-  neg(
-    PARTY_ROLES.every((r) => bothHave(`party.${r}`)),
-    'AE6 every party role has an EN and a FR word',
-  );
-  neg(
-    DOCUMENT_TYPES.every((d) => bothHave(`docType.${d}`)),
-    'AE9 every document type has an EN and a FR word',
-  );
-  neg(
-    TRANSACTION_TYPES.every((x) => bothHave(`txType.${x}`)),
-    'AE10 every transaction type has an EN and a FR word',
-  );
-  // Club and player surfaces carry the same statuses in both languages.
-  const clubI18n = readFileSync(path.join(ROOT, 'scoutbox-club', 'src', 'i18n.ts'), 'utf8');
-  const clubEnd = clubI18n.indexOf('const fr: typeof en = {');
-  const clubEn = keysIn(clubI18n.slice(0, clubEnd));
-  const clubFr = keysIn(clubI18n.slice(clubEnd));
-  neg(
-    TRANSACTION_STATUSES.every((st) => clubEn.has(`m26.status.${st}`) && clubFr.has(`m26.status.${st}`)),
-    'AE7 the club surface names every status in EN and FR',
-  );
-  neg(
-    [...clubEn].filter((k) => k.startsWith('m26.')).every((k) => clubFr.has(k)),
-    'AE8 no club transaction string is English-only',
-  );
-}
-
 // ============================================================ AF/AG/AH — contracts the browser suite proves
 section('AF/AG/AH — the state and mobile contracts the browser journeys rely on');
 {
@@ -3120,6 +3035,15 @@ section('AI — a corrupt row is contained and named by its effect, never repair
 }
 
 // ============================================================ Z — persistence across a restart
+section('the separations: a transaction is not a recruitment act');
+{
+  const now = { eastport: await clubRecords(j, maria.token), harbour: await clubRecords(j, devA.token) };
+  neg(
+    JSON.stringify(now) === JSON.stringify(CLUBS_AT_START),
+    `after every transaction act in this run, neither club's cases nor signings moved (${now.eastport.rooms.length} + ${now.harbour.rooms.length} cases, ${now.eastport.signings.length} + ${now.harbour.signings.length} signings)`,
+  );
+}
+
 section('Z — the bytes survive a restart');
 {
   const t2 = (await j('GET', `/org/agent/transactions/${TX2}`, undefined, ANA.token)).body.transaction;

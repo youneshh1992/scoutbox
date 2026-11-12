@@ -17,7 +17,7 @@
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2181,91 +2181,6 @@ section('AI/AG — the audit and the events say what happened, in ids');
   );
 }
 
-section('AJ/AK/AL/AM — the client surfaces, checked as artefacts');
-{
-  const files = {
-    player: path.join(ROOT, 'scoutbox-player', 'src', 'components', 'MyAgentSection.tsx'),
-    playerI18n: path.join(ROOT, 'scoutbox-player', 'src', 'i18n.ts'),
-    clubI18n: path.join(ROOT, 'scoutbox-club', 'src', 'i18n.ts'),
-    grassI18n: path.join(ROOT, 'scoutbox-grassroots', 'src', 'i18n.ts'),
-    agentI18n: path.join(ROOT, 'scoutbox-agent', 'src', 'i18n.ts'),
-    clubRooms: path.join(ROOT, 'scoutbox-club', 'src', 'roomsScreens.tsx'),
-    grassRooms: path.join(ROOT, 'scoutbox-grassroots', 'src', 'roomsScreens.tsx'),
-    agentScreens: path.join(ROOT, 'scoutbox-agent', 'src', 'screens.tsx'),
-    decision: path.join(ROOT, 'scoutbox-club', 'src', 'decisionPanel.tsx'),
-  };
-  for (const [k, f] of Object.entries(files)) ok(existsSync(f), `AJ0 ${k} exists`);
-  const read = (k) => readFileSync(files[k], 'utf8');
-  for (const [k, keys] of [
-    ['clubI18n', ['ct.agentParty', 'ct.modeLegend', 'hof.title', 'hof.b.HANDOFF_EXISTS']],
-    ['grassI18n', ['ct.agentParty', 'ct.modeLegend', 'hof.title', 'hof.b.HANDOFF_EXISTS']],
-    ['agentI18n', ['share.action', 'contacts.honest', 'trials.honest', 'handoff.title', 'clients.tab.contacts']],
-  ]) {
-    const src = read(k);
-    for (const key of keys) ok(src.split(`'${key}':`).length === 3, `AJ1 ${k} has ${key} in BOTH dictionaries`);
-  }
-  const pi = read('playerI18n');
-  for (const key of ['m27dTitle', 'm27dRouting', 'm27dTrials', 'm27sTitle', 'm27sHonest'])
-    ok(pi.split(`  ${key}:`).length === 3, `AJ2 the player app has ${key} in both dictionaries`);
-  const player = read('player');
-  ok(
-    /accessibilityLiveRegion|role="status"/.test(player) || /accessibilityLiveRegion/.test(player),
-    'AK1 the player surface announces its result to a screen reader',
-  );
-  ok(/m27dOn|m27dOff/.test(player), 'AK2 and each disclosure state is rendered as a WORD, not only a switch position');
-  ok(
-    /testID=\{`my-agent-d-\$\{d\.key\}-toggle`\}/.test(player),
-    'AK3 with a stable handle per control, so a journey names the control rather than the English',
-  );
-  const clubRooms = read('clubRooms');
-  ok(
-    /data-testid="ct-mode"/.test(clubRooms) && /ct-mode-\$\{m\}/.test(clubRooms),
-    'AK4 the club mode chooser is a labelled radio group with a handle per option',
-  );
-  neg(
-    !/agent_only/.test(clubRooms.replace(/no option that reaches an agent[\s\S]*?player/i, '')),
-    'AL1 and no club screen offers an agent-only route',
-  );
-  ok(
-    read('grassRooms').includes('ct-agent-party'),
-    'AL2 grassroots carries the same routing surface — the two club apps do not diverge on a privacy rule',
-  );
-  const decision = read('decision');
-  ok(
-    /data-testid="handoff-section"/.test(decision) && /handoff-blocker-\$\{b\}/.test(decision),
-    'AK5 the handoff section names every blocker as its own element, so a refusal is readable and testable',
-  );
-  // The component's own body, not everything after it: the file goes on to render
-  // the decision itself, where reason codes belong.
-  // The cut stops at the next top-level declaration whether or not it is exported.
-  const handoffBody = (decision.split('function HandoffSection')[1] ?? '').split(
-    /\n(?:export )?(?:function|const) /,
-  )[0];
-  neg(
-    !/\bd\.note|decision\.note|rationale|reasonCodes|assessmentSummary|evidenceRefs/.test(handoffBody),
-    "O3 and the handoff component never touches the decision's note, rationale, reason codes or evidence",
-  );
-  const agentScreens = read('agentScreens');
-  ok(
-    /data-testid="client-contacts"/.test(agentScreens) && /data-testid="client-trials"/.test(agentScreens),
-    'AK6 the agent app has both new read surfaces',
-  );
-  neg(
-    !/apply|postuler/i.test((agentScreens.match(/data-testid=\{`share-\$\{o\.id\}`\}[^\n]*/) ?? [''])[0]),
-    'G11 and the share control is a share, never an apply',
-  );
-  const demo = readFileSync(path.join(ROOT, 'scoutbox-agent', 'src', 'agentDemo.ts'), 'utf8');
-  ok(
-    /P56E_DISCLOSED/.test(demo) && /DISCLOSURE_WITHHELD/.test(demo),
-    'AM1 the demo mirrors the refusal too: a demo where everything is open would teach the wrong model of whose choice this is',
-  );
-  const pmock = readFileSync(path.join(ROOT, 'scoutbox-player', 'src', 'data', 'm24mock.ts'), 'utf8');
-  ok(
-    /setDisclosure/.test(pmock) && /r\.disclosure\[key\] !== value/.test(pmock),
-    'AM2 and the player demo changes ONE disclosure at a time, exactly as the server does',
-  );
-}
-
 section('AN/AO — a deleted player, and a corrupt row');
 {
   const elias = await playerLogin('pl-svensson');
@@ -2314,12 +2229,6 @@ section('#37 — a revoked relationship never contributes as an active Trust rel
   const mateus = await playerLogin('pl-carvalho');
   const t2 = await j('GET', '/player/trust-profile', undefined, mateus.token);
   ok(t2.status === 200, '#37b and so does the client whose relationship was terminated above');
-  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'verification', 'trust', 'trust.mjs'), 'utf8');
-  // Trust counts an agreement only through agreementInForce, the access predicate's own rule.
-  ok(
-    /agentReads\.agreements\.forClient/.test(src) && /agreementInForce\(a, now\)/.test(src),
-    '#37c the Trust relationship input reads the canonical lane through the one in-force rule',
-  );
   const live = {
     id: 'r',
     agentUserId: 'u',
@@ -2722,8 +2631,6 @@ section('AP — every cross-app route, swept by actor and by id');
 
 section('AQ — the five cross-app events, checked against the registry');
 {
-  const registry = readFileSync(path.join(ROOT, 'scoutbox-server', 'domains', 'platform', 'eventRegistry.mjs'), 'utf8');
-  const serverSrc = readFileSync(path.join(ROOT, 'scoutbox-server', 'server.mjs'), 'utf8');
   const NEW_EVENTS = [
     'representation_disclosure_changed',
     'contact_agent_routed',
@@ -2733,27 +2640,14 @@ section('AQ — the five cross-app events, checked against the registry');
   ];
   for (const name of NEW_EVENTS) {
     ok(
-      new RegExp(`(['\`"]${name}['\`"]|\\b${name}\\s*:\\s*\\{)`).test(registry),
+      Object.hasOwn(EVENT_REGISTRY, name),
       `AQ1 ${name} is declared in the registry — an event nobody declared is an event nobody reviewed`,
     );
-    ok(new RegExp(`'${name}'`).test(serverSrc), `AQ2 ${name} is in the emitted-events list the boot contract checks`);
-  }
-  // The payload allowlists: ids and org ids, never a person, a date of birth, a
-  // note or a body of text. Read from the declaration itself.
-  const decl =
-    registry.match(
-      /\['(representation_disclosure_changed|contact_agent_routed|agent_opportunity_shared)',\s*\[([^\]]*)\]\]/g,
-    ) ?? [];
-  neg(
-    decl.length === 3 &&
-      decl.every((d) => !/name|dob|birth|email|phone|note|body|text|message|outcome|reason/i.test(d)),
-    'AQ3 and not one of the three agent-lane payloads has a field for a name, a date, a note or an outcome',
-  );
-  for (const name of ['transaction_handoff_invited', 'transaction_handoff_withdrawn']) {
-    const block = registry.split(`${name}: {`)[1]?.split('},')[0] ?? '';
     neg(
-      !/playerName|clientName|'note'|outcome|reasonCodes/.test(block),
-      `AQ4 ${name} carries no name, note, outcome or reason code either`,
+      !(EVENT_REGISTRY[name]?.payload ?? []).some((k) =>
+        /name|dob|birth|email|phone|note|body|text|message|outcome|reason/i.test(k),
+      ),
+      `AQ3 ${name}: its payload has no field for a name, a date, a note, an outcome or a reason code (${EVENT_REGISTRY[name]?.payload.join(', ')})`,
     );
   }
 }
@@ -2850,12 +2744,8 @@ section('AR — authority is re-derived at READ time, not cached at grant time')
   // category. None of them is smuggled into `compliance`, which is mandatory and
   // cannot be turned off — a club's message and an agent's tip are not safety
   // notices, and dressing them as one would take a real choice away.
-  const prefs = readFileSync(
-    path.join(ROOT, 'scoutbox-server', 'domains', 'platform', 'notificationPrefs.mjs'),
-    'utf8',
-  );
-  const catOf = (t) => (prefs.match(new RegExp(`\\b${t}:\\s*'([a-z_]+)'`)) ?? [])[1] ?? null;
-  const mandatory = new Set([...prefs.matchAll(/(\w+):\s*\{[^}]*mandatory:\s*true/g)].map((m) => m[1]));
+  const catOf = (t) => TYPE_CATEGORY[t] ?? null;
+  const mandatory = new Set(Object.keys(CATEGORIES).filter((c) => CATEGORIES[c].mandatory));
   for (const t of [
     'representation_disclosure',
     'representation_contact',

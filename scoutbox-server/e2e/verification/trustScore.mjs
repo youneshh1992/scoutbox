@@ -967,6 +967,44 @@ section('an agency relationship counts only while it is active');
     'that client confirms it',
   );
   ok((await distinctMateus()) === m0 + 1, 'and it counts as one distinct relationship for THAT client');
+  // A second agent of the same agency representing the same client is the same relationship: the key is the agency.
+  await j('POST', '/org/agent/agency/team', { name: 'Bea Agent', tiers: ['licensed_agent'] }, alex.token);
+  const bea = await login('org-northstar', 'Bea Agent', 'Agent', 'agent');
+  await j('POST', '/org/agent/profile', { displayName: 'Bea Agent', jurisdictions: ['ENG'] }, bea.token);
+  await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'TEST-VERIFIED-BEA' }, bea.token);
+  const second = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-carvalho', scope: ['commercial'], jurisdiction: 'INT' },
+    bea.token,
+  );
+  const confirmed2 =
+    second.status === 201 &&
+    (
+      await j(
+        'POST',
+        `/player/agent/relationships/${second.body.relationship.id}/confirm`,
+        { expectedRev: 1 },
+        mateus.token,
+      )
+    ).status === 200;
+  ok(
+    confirmed2,
+    `a colleague at the same agency is confirmed for the same client (${second.status} ${second.body?.error ?? ''})`,
+  );
+  neg(
+    (await distinctMateus()) === m0 + 1,
+    `two agents of one agency are still one relationship: moving between agents inside an agency is not a new one (${await distinctMateus()})`,
+  );
+  const beaRel = (await j('GET', '/player/agent/relationships', undefined, mateus.token)).body.items.find(
+    (x) => x.id === second.body.relationship.id,
+  );
+  ok(
+    (await j('POST', `/player/agent/relationships/${beaRel.id}/terminate`, { expectedRev: beaRel.rev }, mateus.token))
+      .status === 200,
+    "the client ends the colleague's mandate, leaving the first agent's in force",
+  );
+  ok((await distinctMateus()) === m0 + 1, 'and the agency still counts, through the agreement still in force');
   neg((await distinctOf()) === d0, 'while the first client, whose relationship ended, still counts none');
   const active2 = (await j('GET', '/player/agent/relationships', undefined, mateus.token)).body.items.find(
     (x) => x.id === id2,
@@ -983,21 +1021,6 @@ section('an agency relationship counts only while it is active');
     'the client disputes it',
   );
   neg((await distinctMateus()) === m0, 'a DISPUTED relationship stops counting');
-  // Source guards. The relationship key is the agency (`agencyOrgId`, the field
-  // the record carries), and the canonical source must apply the same state
-  // filter rather than counting any agreement it finds.
-  const { readFileSync } = await import('node:fs');
-  const trustSrc = readFileSync(new URL('../../domains/verification/trust/trust.mjs', import.meta.url), 'utf8');
-  neg(
-    !/rel:agency:\$\{\w+\.orgId\}/.test(trustSrc) &&
-      /rel:agency:\$\{a\.agencyOrgId\}/.test(trustSrc) &&
-      !/db\.representations\b/.test(trustSrc),
-    'the relationship key reads `agencyOrgId`, the field the agreement actually carries, and no legacy lane is read',
-  );
-  neg(
-    /agentReads\.agreements\.forClient/.test(trustSrc) && /agreementInForce\(a, now\)/.test(trustSrc),
-    'the canonical source requires confirmedAt AND an active status (agreementInForce)',
-  );
   neg(
     !agreementInForce({ id: 'x', agentUserId: null, status: 'active', confirmedAt: 1, startAt: 1, endAt: null }, 2),
     'and it refuses a row that names no licensed individual',
