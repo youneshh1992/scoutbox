@@ -7,6 +7,7 @@ import { readPage, sendPageError } from '../platform/paging.mjs';
 import { timingSafeEqStr as timingSafeEq } from '../identity/totp.mjs';
 import { signBody } from '../integrations/webhooks.mjs';
 import { messagingInput } from './schemas.mjs';
+import { asSweep } from '../../writeRules.mjs';
 
 const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened: 3, actioned: 4 };
 
@@ -392,7 +393,7 @@ export function registerDelivery(ctx) {
 
   adminRouter.post('/delivery/sweep', (req, res) => {
     if (!messagingInput(res, 'none', req.body)) return;
-    res.json({ processed: dispatchSweep() });
+    res.json({ processed: asSweep(dispatchSweep) });
   });
 
   // Restart-safe: every dispatch row is persisted.

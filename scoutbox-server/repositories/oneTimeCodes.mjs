@@ -25,7 +25,7 @@
  * already ran poisons the enclosing unit even when the caller catches it.
  */
 import crypto from 'node:crypto';
-import { migrationApplied, transaction } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 
 export const ONE_TIME_CODES_MIGRATION = '0008_one_time_codes';
 export const EMAIL_CHALLENGE_TTL_MS = 30 * 60 * 1000;
@@ -198,13 +198,8 @@ export function createOneTimeCodesRepository({
     pairCount: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes'),
     pairLive: sqlite.prepare('SELECT COUNT(*) AS n FROM pairing_codes WHERE expires_at > ?'),
   };
-  const inUnit = () => !!unit?.active?.();
   /** The one transactional boundary of every mutation (see the header): joined inside a unit; the caller's own transaction when a tool opened one; a transaction of its own otherwise. */
-  const operation = (fn) => {
-    if (inUnit()) return unit.join(fn);
-    if (sqlite.isTransaction) return fn();
-    return transaction(sqlite, fn);
-  };
+  const operation = operationOn(sqlite, unit);
   /** Redeemable: present, unexpired, and below the attempt limit (an exhausted row that somehow exists is never redeemed). */
   const liveChallenge = (r, at) => !!r && r.expires_at > at && r.attempts < EMAIL_CHALLENGE_MAX_ATTEMPTS;
 

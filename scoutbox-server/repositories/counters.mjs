@@ -9,6 +9,8 @@
  * only after COMMIT).
  */
 
+import { standaloneWrite } from '../writeRules.mjs';
+
 export const ID_COUNTER_FLOOR = 1000;
 
 export const COUNTERS_DDL = `
@@ -32,7 +34,8 @@ export function createIdCounter({ sqlite }) {
     /** The next number, written through before it is returned. */
     next() {
       value += 1;
-      write.run(value);
+      // Outside a unit the mint commits on its own, and is not the request's act (writeRules.mjs).
+      standaloneWrite(sqlite, () => write.run(value));
       return value;
     },
     /** The last number handed out (or the floor). */

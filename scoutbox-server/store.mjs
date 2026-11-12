@@ -17,7 +17,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { requireRuntime, CONTRACT } from './runtime.mjs';
-import { runBeforeCommit } from './repositories/database.mjs';
+import { beginOn, commitOn, endedOn } from './repositories/database.mjs';
+import { attachWriteRules, sideEffect } from './writeRules.mjs';
 
 let DatabaseSync = null;
 try {
@@ -60,6 +61,8 @@ export function openStore(dataDir) {
   // command's read-only open, a persistence suite) waits for a writer to
   // finish instead of failing with SQLITE_BUSY.
   sqlite.exec('PRAGMA busy_timeout = 5000;');
+  // Refused outside production, counted in it (writeRules.mjs). Opened before any repository writes.
+  const writeRules = attachWriteRules(sqlite, { enforce: (process.env.NODE_ENV ?? 'development') !== 'production' });
 
   // The unit of work (see `unitOfWork` below). While one is
   // open, repository row writes run inside the store's transaction, and side
@@ -100,7 +103,7 @@ export function openStore(dataDir) {
     };
     let result;
     try {
-      result = fn();
+      result = sideEffect(fn);
     } catch (err) {
       failed(err);
       return;
@@ -194,6 +197,7 @@ export function openStore(dataDir) {
       cleanup = `ROLLBACK: ${String(e?.message ?? e).slice(0, 200)}`;
     } finally {
       unit = null;
+      endedOn(sqlite);
     }
     if (cleanup) {
       cleanupFailures += 1;
@@ -215,7 +219,7 @@ export function openStore(dataDir) {
     // BEGIN first: if it fails, no unit was ever open, the work does not run and
     // the error propagates as it is (nothing to roll back or restore). IMMEDIATE,
     // because a unit of work is a write transaction: a deferred BEGIN whose first statements read holds a read snapshot, and if another connection commits in between, the later upgrade to a write fails at once with SQLITE_BUSY_SNAPSHOT, which the busy handler never retries.
-    sqlite.exec('BEGIN IMMEDIATE');
+    beginOn(sqlite, 'IMMEDIATE');
     unit = { afterCommit: [], failure: null };
     let result;
     try {
@@ -229,8 +233,7 @@ export function openStore(dataDir) {
           `the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String(unit.failure?.message ?? unit.failure).slice(0, 200)}`,
           { cause: unit.failure },
         );
-      runBeforeCommit(sqlite);
-      sqlite.exec('COMMIT');
+      commitOn(sqlite);
     } catch (err) {
       abort(err);
       throw err;
@@ -306,6 +309,16 @@ export function openStore(dataDir) {
       if (unit) unit.afterCommit.push(fn);
       else runSideEffect(fn);
     },
+    /**
+     * Send something out of the process (a mail, a push, a live event, a provider call): refused while a
+     * transaction is open, in every environment, before anything is sent. What `fn` writes about its own delivery
+     * (an outbox row) is not counted as the request's act.
+     */
+    outward(what, fn) {
+      writeRules.checkOutward(what);
+      return sideEffect(fn);
+    },
+    writeRules,
     unitOfWorkState: () => ({
       active: unit !== null,
       afterCommitFailures,
@@ -314,6 +327,7 @@ export function openStore(dataDir) {
       cleanupFailures,
       lastCleanupError,
       strayAsyncWork: { ...strayAsyncWork },
+      writeRules: writeRules.state(),
     }),
   };
   return store;

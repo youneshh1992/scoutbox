@@ -23,7 +23,7 @@
  *
  * Refusals name tables, fields and ids, never a name, a note, a body or a message.
  */
-import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
+import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { isPlainObject } from './recruitment.mjs';
 import { writeChecks, writeKit } from './writes.mjs';
@@ -1481,7 +1481,7 @@ const leadingTo = (to) => Object.keys(ROOM_TRANSITIONS).filter((x) => ROOM_TRANS
 export function createRecruitmentCasesRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment-cases repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const decode = (name, row) => deepFreeze(DECODERS[name](st, row));
   const find = (name, id) => {
     if (typeof id !== 'string') return null;

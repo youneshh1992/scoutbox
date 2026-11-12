@@ -19,7 +19,7 @@
  * ticket). Child rows cascade with their owner, except the access log, which is audit and RESTRICT.
  */
 import { isPlainObject, describe } from './recruitment.mjs';
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
@@ -396,7 +396,7 @@ const WRITES = new Set([
  */
 export function createEnterpriseRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the enterprise repository needs a SQLite connection (node:sqlite)');
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

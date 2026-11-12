@@ -27,7 +27,7 @@
  * Refusals name tables, ids and fields, never a reason, note, excerpt, name or document value.
  */
 import { isPlainObject, describe, ids } from './recruitment.mjs';
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {
   text,
@@ -704,7 +704,7 @@ const REPORT_SORT = "CASE WHEN status = 'pending_review' THEN created_at ELSE -c
  */
 export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the safety-audit repository needs a SQLite connection (node:sqlite)');
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

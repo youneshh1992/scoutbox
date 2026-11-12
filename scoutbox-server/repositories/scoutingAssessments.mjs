@@ -26,7 +26,7 @@
  * its first opinion, a rating's cited segment and a playlist's segments; the child rows cascade with their owner.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import {
   txt,
   historyTable,
@@ -1143,7 +1143,7 @@ const WRITES = new Set(['create', 'update', 'redactPlayer']);
 export function createScoutingAssessmentsRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the scouting assessments repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const rowById = { assessments: st.assessmentById, videoSegments: st.segmentById, playlists: st.playlistById };
   const decode = (name, row) => deepFreeze(DECODERS[name](st, row));
   const decodeAll = (name, rows) => {

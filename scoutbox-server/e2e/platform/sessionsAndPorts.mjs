@@ -241,9 +241,9 @@ await stop(S);
 {
   const sessions = storedSessions();
   neg(
-    !sessions.some((x) => x.tokenHash === sessionHash(tExpired)) &&
+    sessions.some((x) => x.tokenHash === sessionHash(tExpired)) &&
       !sessions.some((x) => x.tokenHash === sessionHash('tok-garbage-birth')),
-    'S7 the expired session was removed from the store when it was presented; the malformed row was never stored',
+    'S7 presenting the expired session was refused without writing (a read never writes; the next login prunes it); the malformed row was never stored',
   );
   ok(
     sessions.some((x) => x.tokenHash === sessionHash(tNoBirth)),

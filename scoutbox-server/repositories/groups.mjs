@@ -16,7 +16,7 @@
  * programme rows cascade with it (groups are never deleted); a grant's recipients cascade with the grant.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
@@ -325,7 +325,7 @@ const WRITES = new Set([
  */
 export function createGroupsRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the groups repository needs a SQLite connection (node:sqlite)');
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

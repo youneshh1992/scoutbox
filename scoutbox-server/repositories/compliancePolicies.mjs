@@ -26,7 +26,7 @@
  * same jurisdiction (RESTRICT). Child rows cascade.
  */
 import { isPlainObject, describe, ids } from './recruitment.mjs';
-import { transaction, migrationApplied } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
 import { JURISDICTIONS } from '../domains/agents/core/shared.mjs';
@@ -862,7 +862,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  */
 export function createCompliancePoliciesRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the compliance policies repository needs a SQLite connection (node:sqlite)');
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

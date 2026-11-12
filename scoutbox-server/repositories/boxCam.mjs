@@ -36,7 +36,7 @@
  */
 import crypto from 'node:crypto';
 import { isPlainObject, describe } from './recruitment.mjs';
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {
@@ -762,7 +762,7 @@ const FINISHED_SQL = (c = 'status') => `${c} IN (${enumIn(VERIFICATION_STATES)})
  */
 export function createBoxCamRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the Box Cam repository needs a SQLite connection (node:sqlite)');
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const {
     refusal: refuse,
     invalid,

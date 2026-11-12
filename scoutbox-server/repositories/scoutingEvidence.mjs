@@ -20,7 +20,7 @@
  * then the original is pointed at it, in one unit.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const SCOUTING_EVIDENCE_MIGRATION = '0019_scouting_evidence';
@@ -864,7 +864,7 @@ const WRITES = new Set(['create', 'update']);
 export function createScoutingEvidenceRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the scouting evidence repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const rowById = { evidence: st.evidenceById, coachAffiliations: st.affiliationById, squadInvites: st.inviteById };
   const decode = (name, row) => deepFreeze(DECODERS[name](st, row));
   const decodeAll = (name, rows) => {

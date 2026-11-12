@@ -82,7 +82,11 @@ const needOutbox = (outbox) => {
   return outbox;
 };
 
-export function createMailer(nextId, { outbox: outboxRepo } = {}) {
+// `outward` is the store's guard (store.outward): nothing is sent while a transaction is open, and the delivery
+// record the send writes is not counted as the request's act.
+const unguarded = (what, fn) => fn();
+
+export function createMailer(nextId, { outbox: outboxRepo, outward = unguarded } = {}) {
   const live = liveMailConfigured();
   // `secrets` are one-time codes embedded in the mail. The outbox record is
   // persisted and copied into every backup, so the record keeps the mail with each secret replaced by
@@ -94,52 +98,54 @@ export function createMailer(nextId, { outbox: outboxRepo } = {}) {
   const outbox = needOutbox(outboxRepo);
   return {
     transport: live ? 'sendgrid' : 'dev-outbox',
-    async send({ to, subject, text, secrets = [] }) {
-      const withheld = secrets.filter((s) => typeof s === 'string' && s.length > 0);
-      const stored = withheld.reduce((t, s) => t.split(s).join(OUTBOX_SECRET_PLACEHOLDER), String(text));
-      // The stored record keeps at most what its columns hold (OUTBOX_LIMITS: subject 300, text 10,000); a name the
-      // routes do not bound can make a subject longer, so it is shortened here, never refused (the mail still goes).
-      const record = {
-        id: nextId('mail'),
-        ts: Date.now(),
-        to,
-        subject: String(subject ?? '').slice(0, 300),
-        text: stored.slice(0, 10_000),
-        transport: live ? 'sendgrid' : 'dev-outbox',
-        delivered: !live,
-      };
-      if (!live && withheld.length) {
-        devDeliveries.set(record.id, String(text));
-        if (devDeliveries.size > DEV_DELIVERY_LIMIT) devDeliveries.delete(devDeliveries.keys().next().value);
-      }
-      // The record is written at once, BEFORE the provider call (in the caller's unit of work when one is open).
-      outbox.append(record);
-      if (live) {
-        let ok = false;
-        try {
-          const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
-            method: 'POST',
-            headers: { authorization: `Bearer ${process.env.SENDGRID_API_KEY}`, 'content-type': 'application/json' },
-            body: JSON.stringify({
-              personalizations: [{ to: [{ email: to }] }],
-              from: { email: process.env.MAIL_FROM || 'noreply@scoutbox.app' },
-              subject,
-              content: [{ type: 'text/plain', value: text }],
-            }),
-          });
-          ok = res.ok;
-        } catch {
-          ok = false; // recorded in the outbox either way
-        }
-        // The provider's answer: on the record the caller holds (the contact routes read `rec.delivered`) and on the stored row.
-        record.delivered = ok;
-        outbox.markDelivered(record.id, ok);
-      }
-      return record;
-    },
+    send: (mail) => outward('mail', () => sendMail(mail)),
     /** Dev transport only: the full text of a mail whose secrets the persisted record withholds (this process's memory; null otherwise). */
     devDeliveredText: (id) => (live ? null : (devDeliveries.get(id) ?? null)),
   };
+
+  async function sendMail({ to, subject, text, secrets = [] }) {
+    const withheld = secrets.filter((s) => typeof s === 'string' && s.length > 0);
+    const stored = withheld.reduce((t, s) => t.split(s).join(OUTBOX_SECRET_PLACEHOLDER), String(text));
+    // The stored record keeps at most what its columns hold (OUTBOX_LIMITS: subject 300, text 10,000); a name the
+    // routes do not bound can make a subject longer, so it is shortened here, never refused (the mail still goes).
+    const record = {
+      id: nextId('mail'),
+      ts: Date.now(),
+      to,
+      subject: String(subject ?? '').slice(0, 300),
+      text: stored.slice(0, 10_000),
+      transport: live ? 'sendgrid' : 'dev-outbox',
+      delivered: !live,
+    };
+    if (!live && withheld.length) {
+      devDeliveries.set(record.id, String(text));
+      if (devDeliveries.size > DEV_DELIVERY_LIMIT) devDeliveries.delete(devDeliveries.keys().next().value);
+    }
+    // The record is written before the provider call.
+    outbox.append(record);
+    if (live) {
+      let ok = false;
+      try {
+        const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${process.env.SENDGRID_API_KEY}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            personalizations: [{ to: [{ email: to }] }],
+            from: { email: process.env.MAIL_FROM || 'noreply@scoutbox.app' },
+            subject,
+            content: [{ type: 'text/plain', value: text }],
+          }),
+        });
+        ok = res.ok;
+      } catch {
+        ok = false; // recorded in the outbox either way
+      }
+      // The provider's answer: on the record the caller holds (the contact routes read `rec.delivered`) and on the stored row.
+      record.delivered = ok;
+      outbox.markDelivered(record.id, ok);
+    }
+    return record;
+  }
 }
 
 // ---------------------------------------------------------------------- push
@@ -148,41 +154,43 @@ export function createMailer(nextId, { outbox: outboxRepo } = {}) {
  * The sender runs as an after-commit effect of the notification, so its record is
  * written in its own transaction once the notification is durable.
  */
-export function createPushSender(nextId, { pushLog, pushTokens } = {}) {
+export function createPushSender(nextId, { pushLog, pushTokens, outward = unguarded } = {}) {
   if (typeof pushLog?.append !== 'function' || typeof pushTokens?.forAudience !== 'function')
     throw new TypeError('createPushSender needs the push log and device token repositories');
   const live = livePushConfigured();
   return {
     transport: live ? 'expo' : 'dev-log',
-    async send(audience, title, body) {
-      // The body is the notice's text, shortened to what the log keeps (OUTBOX_LIMITS.body).
-      const record = {
-        id: nextId('push'),
-        ts: Date.now(),
-        audience: { kind: audience.kind, id: audience.id },
-        title,
-        body: String(body).slice(0, 4000),
-        transport: live ? 'expo' : 'dev-log',
-      };
-      pushLog.append(record);
-      if (live) {
-        // Expo push needs a device token registered by the person (POST /push/register).
-        const tokens = pushTokens.forAudience(audience.kind, audience.id);
-        for (const t of tokens) {
-          try {
-            await fetch('https://exp.host/--/api/v2/push/send', {
-              method: 'POST',
-              headers: { authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}`, 'content-type': 'application/json' },
-              body: JSON.stringify({ to: t.token, title, body }),
-            });
-          } catch {
-            /* recorded in the push log regardless */
-          }
+    send: (audience, title, body) => outward('push', () => sendPush(audience, title, body)),
+  };
+
+  async function sendPush(audience, title, body) {
+    // The body is the notice's text, shortened to what the log keeps (OUTBOX_LIMITS.body).
+    const record = {
+      id: nextId('push'),
+      ts: Date.now(),
+      audience: { kind: audience.kind, id: audience.id },
+      title,
+      body: String(body).slice(0, 4000),
+      transport: live ? 'expo' : 'dev-log',
+    };
+    pushLog.append(record);
+    if (live) {
+      // Expo push needs a device token registered by the person (POST /push/register).
+      const tokens = pushTokens.forAudience(audience.kind, audience.id);
+      for (const t of tokens) {
+        try {
+          await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ to: t.token, title, body }),
+          });
+        } catch {
+          /* recorded in the push log regardless */
         }
       }
-      return record;
-    },
-  };
+    }
+    return record;
+  }
 }
 
 // ----------------------------------------------------------------------- IDV

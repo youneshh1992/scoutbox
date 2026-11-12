@@ -22,7 +22,7 @@
  * Refusals name tables, fields and ids, never a name, a message, a note, an address or a phone number.
  */
 import { pageOf } from '../domains/platform/paging.mjs';
-import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
+import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.mjs';
 import { ORG_TYPES } from './orgs.mjs';
 import {
   TRIAL_WORKFLOW_STATES,
@@ -1154,7 +1154,7 @@ const redactedDetail = (json) =>
 export function createRecruitmentRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the recruitment repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const decode = {
     requests: (row) => deepFreeze(decodeRequest(st, row)),
     trials: (row) => deepFreeze(decodeTrial(st, row)),

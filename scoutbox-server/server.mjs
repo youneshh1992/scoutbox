@@ -76,6 +76,7 @@ import { createNotificationPrefs, registerNotificationPrefs } from './domains/pl
 import { createNotifier, registerNotificationFeed, registerDeliverySettings } from './domains/messaging/notify.mjs';
 import { registerMessaging, channelViewFor } from './domains/messaging/channels.mjs';
 import { registerAudit } from './domains/platform/audit.mjs';
+import { inRequest } from './writeRules.mjs';
 import { createFaultLayer } from './domains/platform/faults.mjs';
 import { integrityReport } from './domains/platform/integrity.mjs';
 import { orgPlayerView } from './views/playerViews.mjs';
@@ -270,8 +271,8 @@ if (integrity.violations.length)
 
 // ---------------------------------------------------- production adapters
 // The mail, push and invoice records go through their repositories; the provider calls happen here.
-const mailer = createMailer((p) => nextId(p), { outbox });
-const pushSender = createPushSender((p) => nextId(p), { pushLog, pushTokens });
+const mailer = createMailer((p) => nextId(p), { outbox, outward: store.outward });
+const pushSender = createPushSender((p) => nextId(p), { pushLog, pushTokens, outward: store.outward });
 const idv = createIdvProvider();
 const billing = createBilling({ invoices: operations.invoices, nextId: (p) => nextId(p) });
 const storage = createStorage(DATA_DIR);
@@ -295,6 +296,18 @@ if (dataLayer.firstInstallation)
 
 // ------------------------------------------------------------- the HTTP envelope
 const app = express();
+// Every request is one scope for the write rules (writeRules.mjs): what it commits is counted from here on.
+app.use((req, res, next) => {
+  store.writeRules.checkDrift(); // a write outside a transaction before this request is not this request's
+  res.on('finish', () => store.writeRules.requestEnded());
+  inRequest(
+    {
+      method: req.method,
+      routeKey: () => `${req.method} ${req.route ? `${req.baseUrl}${req.route.path}` : req.originalUrl.split('?')[0]}`,
+    },
+    next,
+  );
+});
 // The parsed proxy setting is reported in /capabilities, and an invalid value refuses to boot in production.
 const TRUST_PROXY = parseTrustProxy(process.env.SCOUTBOX_TRUST_PROXY);
 installHttpBaseline({ app, trustProxy: TRUST_PROXY, schemaVersion: () => dataLayer.schemaVersion() });

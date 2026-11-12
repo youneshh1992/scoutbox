@@ -25,7 +25,7 @@
  * child rows cascade from their facts row. The dirty markers carry no key (a trigger may mark an id that is not a
  * player, e.g. a claim's organisation subject; the drain finds no player and removes nothing).
  */
-import { transaction } from './database.mjs';
+import { operationOn } from './database.mjs';
 import { PLAYER_POSITIONS } from './identity.mjs';
 import { POLICY as TRUST_POLICY } from '../domains/verification/trust/shared.mjs';
 import { BOX_CAM_LIMITS } from './boxCam.mjs';
@@ -259,7 +259,7 @@ export function createMatchFactsRepository({ sqlite, now = Date.now }) {
     }
     return s;
   };
-  const operation = (fn) => (sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, null);
 
   /** Write one player's facts (`null`: the player is gone or retained, so the row goes). The caller clears the marker. */
   const write = (playerId, facts) =>

@@ -37,7 +37,7 @@
  * A first installation's players and guardians (the seed) are imported once by `initialize`, while
  * `meta.coreIdentityInit` is `pending` (set by the migration).
  */
-import { transaction, migrationApplied } from './database.mjs';
+import { transaction, migrationApplied, operationOn } from './database.mjs';
 import { isConstraintError } from './writes.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
 import {
@@ -1284,7 +1284,7 @@ export function createIdentityRepositories({
     throw new TypeError(
       "the identity repositories need the store's participant API `unit` ({ active(), join(work) }) or null",
     );
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

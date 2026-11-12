@@ -20,7 +20,7 @@
  * `pending` (set by the migration).
  */
 import { PLANS } from '../catalogue.mjs';
-import { transaction, migrationApplied } from './database.mjs';
+import { transaction, migrationApplied, operationOn } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 
@@ -312,7 +312,7 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
     throw new Error(
       `orgs: the cutover record ${ORGS_TABLE_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`,
     );
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

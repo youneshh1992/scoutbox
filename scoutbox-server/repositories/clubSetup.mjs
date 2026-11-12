@@ -25,7 +25,7 @@
  * checked here.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
-import { transaction, migrationApplied } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 import {
   refusal,
   isInt,
@@ -797,7 +797,7 @@ export const CLUB_SETUP_RECORDS = {
 export function createClubSetupRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the club setup repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const typedOr = (name, raw) => {
     const t = TYPERS[name](raw, name);
     if (!t.ok) throw refusal('CLUB_SETUP_INPUT_INVALID', t.reason);

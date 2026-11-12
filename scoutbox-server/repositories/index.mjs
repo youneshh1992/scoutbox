@@ -422,7 +422,7 @@ export function attachDataLayer({
   const users = createUsersRepository({ sqlite, nextId, log, now, unit: store.unit });
   const usersBoot = users.attach();
 
-  const sessions = createSessionsRepository({ sqlite, sessionTtlMs, log });
+  const sessions = createSessionsRepository({ sqlite, sessionTtlMs, log, unit: store.unit });
   const sessionsBoot = sessions.attach();
 
   const mediaDeletions = createMediaDeletionsQueue({ sqlite, log, warn, now });

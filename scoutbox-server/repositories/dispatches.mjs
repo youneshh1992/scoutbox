@@ -13,7 +13,7 @@
  *
  * Refusals name tables, ids and fields, never an address or a provider text.
  */
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 
@@ -343,7 +343,7 @@ export function createDispatchesRepository({ sqlite, unit = null, now = Date.now
     throw new TypeError(
       'the dispatches repository needs a SQLite connection (node:sqlite); dispatch records have no in-memory fallback',
     );
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

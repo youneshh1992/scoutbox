@@ -135,6 +135,8 @@ export function createLiveSync({
    * refers to a row the database does not hold.
    */
   function publishEvent(event, payload) {
+    // A frame about a row the database might still roll back is never sent.
+    store.writeRules?.checkOutward(`the live event '${event}'`);
     const row = { id: ++eventSeq, event, payload, ts: Date.now() };
     if (event !== 'typing') {
       // typing is never replayed

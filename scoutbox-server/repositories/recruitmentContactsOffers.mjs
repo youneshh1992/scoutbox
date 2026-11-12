@@ -21,7 +21,7 @@
  *
  * Refusals name tables, fields and ids, never a subject, a body, a note, a message or a name.
  */
-import { transaction, migrationApplied, newestHistory, childRowsOf } from './database.mjs';
+import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.mjs';
 import { writeChecks, writeKit } from './writes.mjs';
 import {
   CONTACT_STATUSES,
@@ -1062,7 +1062,7 @@ export function createRecruitmentContactsOffersRepository({
   if (!sqlite)
     throw new TypeError('the recruitment contacts/offers repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const decode = {
     recruitmentContacts: (row) => deepFreeze(decodeContact(st, row)),
     recruitmentOffers: (row) => deepFreeze(decodeOffer(st, row)),

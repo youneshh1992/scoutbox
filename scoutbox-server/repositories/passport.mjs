@@ -20,7 +20,7 @@
  * key; the preferences' child rows cascade with their preferences.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { PLAYER_POSITIONS } from './identity.mjs';
 import {
@@ -503,7 +503,7 @@ const clone = (v) => JSON.parse(JSON.stringify(v));
  */
 export function createPassportRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the passport repository needs a SQLite connection (node:sqlite)');
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

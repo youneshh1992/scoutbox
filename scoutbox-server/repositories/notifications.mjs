@@ -26,7 +26,7 @@
  *
  * Refusals name the table, the id and the field, never a text or a preference.
  */
-import { transaction, migrationApplied } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
 
@@ -261,7 +261,7 @@ export function createNotificationsRepository({
     throw new TypeError(
       'the notifications repository needs a SQLite connection (node:sqlite); notifications have no in-memory fallback',
     );
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

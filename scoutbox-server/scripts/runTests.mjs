@@ -62,6 +62,7 @@ export const SUITES = [
   'testDataLayer',
   'testCoreSchema',
   'testUnitOfWork',
+  'testWriteRules',
   'testIdentityRepositories',
   'testMediaDeletions',
   'testOneTimeCodes',

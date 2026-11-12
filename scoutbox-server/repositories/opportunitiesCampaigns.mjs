@@ -20,7 +20,7 @@
  * thing that leaves them is the verdict summary the player or guardian approves onto one application.
  */
 import { isPlainObject, ids, describe } from './recruitment.mjs';
-import { transaction, migrationApplied } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 import {
   refusal,
   isInt,
@@ -1607,7 +1607,7 @@ export function createOpportunitiesCampaignsRepository({ sqlite, unit = null, no
   if (!sqlite)
     throw new TypeError('the opportunities and campaigns repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const typedOr = (name, raw) => {
     const t = TYPERS[name](raw, name);
     if (!t.ok) throw refusal('OPPORTUNITIES_CAMPAIGNS_INPUT_INVALID', t.reason);

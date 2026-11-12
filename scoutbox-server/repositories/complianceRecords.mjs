@@ -37,7 +37,7 @@
  * cascade.
  */
 import { isPlainObject, describe } from './recruitment.mjs';
-import { transaction, migrationApplied } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { quote } from './fieldSpecs.mjs';
@@ -1658,7 +1658,7 @@ const SQLITE_CONSTRAINT = 19;
  */
 export function createComplianceRecordsRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
   if (!sqlite) throw new TypeError('the compliance records repository needs a SQLite connection (node:sqlite)');
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const {
     q,
     assign,

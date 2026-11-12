@@ -13,7 +13,7 @@
  * node:sqlite is required; there is no in-memory or JSON fallback (one would have to keep plain tokens somewhere).
  */
 import crypto from 'node:crypto';
-import { migrationApplied } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 
 export const SESSION_KINDS = Object.freeze(['player', 'guardian', 'org', 'ts_reviewer']);
 export const SESSION_VIAS = Object.freeze(['sso']);
@@ -53,6 +53,7 @@ export function createSessionsRepository({
   newToken = () => crypto.randomBytes(24).toString('hex'),
   newSid = () => crypto.randomBytes(6).toString('hex'),
   log = () => {},
+  unit = null,
 }) {
   if (!sqlite)
     throw new TypeError(
@@ -60,6 +61,7 @@ export function createSessionsRepository({
     );
   if (!Number.isFinite(sessionTtlMs) || sessionTtlMs <= 0)
     throw new TypeError('sessionTtlMs must be a positive number of milliseconds');
+  const operation = operationOn(sqlite, unit);
   const stmt = {
     byHash: sqlite.prepare(`${SELECT} WHERE token_hash = ?`),
     bySid: sqlite.prepare(`${SELECT} WHERE sid = ?`),
@@ -118,37 +120,35 @@ export function createSessionsRepository({
       if (kind === 'org' && (typeof userId !== 'string' || !userId))
         throw new TypeError('an org session needs a staff member');
       if (via !== null && !SESSION_VIAS.includes(via)) throw new TypeError(`via "${via}" is not supported`);
-      repo.prune();
       const token = newToken();
       const createdAt = now();
       const row = { sid: newSid(), kind, refId, createdAt, expiresAt: createdAt + sessionTtlMs };
       if (kind === 'org') row.userId = userId;
       if (via) row.via = via;
-      stmt.insert.run(
-        sha256(token),
-        row.sid,
-        kind,
-        refId,
-        kind === 'org' ? userId : null,
-        via,
-        createdAt,
-        createdAt + sessionTtlMs,
-      );
+      operation(() => {
+        stmt.delExpired.run(createdAt - sessionTtlMs);
+        stmt.insert.run(
+          sha256(token),
+          row.sid,
+          kind,
+          refId,
+          kind === 'org' ? userId : null,
+          via,
+          createdAt,
+          createdAt + sessionTtlMs,
+        );
+      });
       return { token, session: row };
     },
 
-    /** The live session for a presented bearer token, or null; an expired one is removed on sight. */
+    /** The live session for a presented bearer token, or null. An expired row stays until the next mint prunes it: a read never writes. */
     byToken(token) {
       if (typeof token !== 'string' || !token) return null;
       const hash = sha256(token);
       const r = stmt.byHash.get(hash);
       if (!r) return null;
       const row = toRow(r);
-      if (!live(row)) {
-        stmt.delHash.run(hash);
-        return null;
-      }
-      return row;
+      return live(row) ? row : null;
     },
     /** The live session with this id (media links are bound to it), or null. */
     bySid(sid) {
@@ -168,13 +168,14 @@ export function createSessionsRepository({
     /** Every stored row with its `tokenHash` (never a token). */
     exportRows: () => SESSIONS_TABLE.read(sqlite) ?? [],
 
-    revokeSid: (sid) => stmt.delSid.run(sid).changes,
-    revokeToken: (token) => (typeof token === 'string' && token ? stmt.delHash.run(sha256(token)).changes : 0),
-    revokeFor: (kind, refId) => stmt.delFor.run(kind, refId).changes,
-    revokeOrgUser: (userId) => stmt.delOrgUser.run(userId).changes,
-    revokeOwn: (userId, sid) => stmt.delOwn.run(userId, sid).changes,
+    revokeSid: (sid) => operation(() => stmt.delSid.run(sid).changes),
+    revokeToken: (token) =>
+      typeof token === 'string' && token ? operation(() => stmt.delHash.run(sha256(token)).changes) : 0,
+    revokeFor: (kind, refId) => operation(() => stmt.delFor.run(kind, refId).changes),
+    revokeOrgUser: (userId) => operation(() => stmt.delOrgUser.run(userId).changes),
+    revokeOwn: (userId, sid) => operation(() => stmt.delOwn.run(userId, sid).changes),
     /** Delete every expired session. Returns how many went. */
-    prune: (at = now()) => stmt.delExpired.run(at - sessionTtlMs).changes,
+    prune: (at = now()) => operation(() => stmt.delExpired.run(at - sessionTtlMs).changes),
   };
   return repo;
 }

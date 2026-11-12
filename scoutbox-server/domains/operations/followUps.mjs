@@ -5,6 +5,7 @@ import { isAdult, visibleToOrg } from '../../domain.mjs';
 import { deriveWorkflowState } from '../recruitment/lifecycle/trial.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { operationsInput } from './schemas.mjs';
+import { asSweep } from '../../writeRules.mjs';
 
 const MILESTONES = { '3m': 91, '6m': 182, '12m': 365 };
 
@@ -457,7 +458,7 @@ export function registerOperations(ctx) {
   // Ordinary admin actions: they change when, never what.
   adminRouter.post('/sweep', (req, res) => {
     if (!operationsInput(res, 'none', req.body)) return;
-    sweep();
+    asSweep(sweep);
     res.json({ ok: true });
   });
   adminRouter.post('/followups/:id', (req, res) => {

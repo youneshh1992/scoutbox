@@ -13,7 +13,7 @@
  * Nothing here carries a key: the outbox and push rows outlive the accounts they were addressed to (retention is open,
  * Q6 in docs/decisions.md). Refusals name tables, ids and fields, never an address, a mail text or a token.
  */
-import { transaction, migrationApplied } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const OUTBOX_PUSH_MIGRATION = '0011_outbox_push';
@@ -275,7 +275,7 @@ export function createOutboxPushRepository({ sqlite, unit = null, now = Date.now
     throw new TypeError(
       'the outbox/push repository needs a SQLite connection (node:sqlite); these records have no in-memory fallback',
     );
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

@@ -14,7 +14,7 @@
  *
  * Refusals carry a code and name the id and the field, never a value.
  */
-import { transaction, migrationApplied } from './database.mjs';
+import { migrationApplied, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const USERS_MIGRATION = '0001_org_users';
@@ -262,7 +262,7 @@ export function createUsersRepository({ sqlite, nextId, unit = null, now = Date.
       'the staff repository needs a SQLite connection (node:sqlite); staff have no in-memory fallback',
     );
   if (typeof nextId !== 'function') throw new TypeError('the staff repository needs nextId');
-  const operation = (fn) => (unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const cache = new Map();
   const q = (sql) => {
     let s = cache.get(sql);

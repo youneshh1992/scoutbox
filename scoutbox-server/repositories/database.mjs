@@ -9,6 +9,8 @@
 // node:sqlite is required by the store, which refuses to open without it with
 // a compatibility error (store.mjs, runtime.mjs); this module must stay
 // importable without it so that refusal is what the operator sees.
+import { rulesOf } from '../writeRules.mjs';
+
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = await import('node:sqlite'));
@@ -87,19 +89,46 @@ export function runBeforeCommit(sqlite) {
   for (const fn of BEFORE_COMMIT.get(sqlite) ?? []) fn();
 }
 
+/**
+ * The one way a transaction opens and closes on a connection, for the store's units of work and for `transaction`
+ * below: the write rules (writeRules.mjs) see every BEGIN and COMMIT.
+ */
+export function beginOn(sqlite, mode = '') {
+  const rules = rulesOf(sqlite);
+  rules?.checkDrift();
+  sqlite.exec(mode ? `BEGIN ${mode}` : 'BEGIN');
+  rules?.began();
+}
+export function commitOn(sqlite) {
+  runBeforeCommit(sqlite);
+  rulesOf(sqlite)?.beforeCommit();
+  sqlite.exec('COMMIT');
+  rulesOf(sqlite)?.ended();
+}
+export function endedOn(sqlite) {
+  rulesOf(sqlite)?.ended();
+}
+
 /** Run `fn` inside one transaction; rethrow after rolling back. */
 export function transaction(sqlite, fn) {
-  sqlite.exec('BEGIN');
+  beginOn(sqlite);
   try {
     const out = fn();
-    runBeforeCommit(sqlite);
-    sqlite.exec('COMMIT');
+    commitOn(sqlite);
     return out;
   } catch (err) {
     sqlite.exec('ROLLBACK');
+    endedOn(sqlite);
     throw err;
   }
 }
+
+/**
+ * A repository's transactional boundary for one mutation: it joins the open unit of work; inside a transaction a
+ * tool opened, it runs in that; otherwise it runs a transaction of its own.
+ */
+export const operationOn = (sqlite, unit) => (fn) =>
+  unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn);
 
 /**
  * A newest-first history feed, one page's worth: the rows of `from` matching `where` with `h.at` at or

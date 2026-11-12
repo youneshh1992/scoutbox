@@ -19,7 +19,7 @@
  */
 import { isPlainObject, ids } from './recruitment.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
-import { transaction, migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';
@@ -1839,8 +1839,7 @@ const SIGNINGS_FOLLOWUPS_TABLES_OF = [
 export function createSigningsFollowUpsRepository({ sqlite, unit = null, now = Date.now, log = () => {} }) {
   if (!sqlite) throw new TypeError('the signings/follow-ups repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
-  const inUnit = () => !!unit?.active?.();
-  const operation = (fn) => (inUnit() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn));
+  const operation = operationOn(sqlite, unit);
   const decode = {
     signingPackages: (row) => deepFreeze(decodePackage(st, row)),
     signings: (row) => deepFreeze(decodeSigning(st, row)),

@@ -131,13 +131,18 @@ test('repository: expiry is decided from the creation time and the configured li
   clock += TTL - 1;
   assert.ok(repo.byToken(token), 'one millisecond before the lifetime: live');
   clock += 1;
-  assert.equal(repo.byToken(token), null, 'at exactly the lifetime: expired and removed');
+  assert.equal(repo.byToken(token), null, 'at exactly the lifetime: expired, refused');
   assert.equal(
     s.prepare('SELECT COUNT(*) AS n FROM sessions').get().n,
-    0,
-    'an expired session presented is removed on sight',
+    1,
+    'presenting an expired session writes nothing: a read never writes',
   );
   const { session: a } = repo.create('guardian', 'gd-1');
+  assert.equal(
+    s.prepare('SELECT COUNT(*) AS n FROM sessions WHERE sid != ?').get(a.sid).n,
+    0,
+    'the next mint prunes the expired session',
+  );
   clock += 10;
   repo.create('guardian', 'gd-2');
   clock += TTL - 10; // the first is exactly at the lifetime, the second not yet
