@@ -17,6 +17,7 @@
 // class lives in the gap between "the seed made it" and "the database
 // guarantees it".
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -119,7 +120,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = 5600 + Math.floor(Math.random() * 200);
+const PORT = pickPort(5600, 200, [0, 1, 2, 3, 4, 5, 6]);
 
 // ------------------------------------------------------------- fixtures
 

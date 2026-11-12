@@ -8,6 +8,7 @@
 // No assertion is `status !== 200`, and none is a tautology: every refusal names
 // its status and its code.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -63,7 +64,7 @@ const SCHEMA_VERSION = Number(
     .slice(0, 4),
 );
 
-const PORT = 7400 + Math.floor(Math.random() * 150);
+const PORT = pickPort(7400, 150, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-p56f-'));
 const HERE = path.dirname(fileURLToPath(import.meta.url));

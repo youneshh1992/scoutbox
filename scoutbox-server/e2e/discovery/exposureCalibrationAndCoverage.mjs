@@ -5,6 +5,7 @@
 // coerced, the growing lists page, and reading a player's evidence gaps rewrites nothing that
 // did not change.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,7 +16,7 @@ process.env.ALLOW_LOCAL_WEBHOOKS = '1'; // the SSRF guard reads this at call tim
 
 // Random per-run ports: a previously crashed run's orphan server can never
 // answer this run's requests with stale state.
-const PORT = 7600 + Math.floor(Math.random() * 300);
+const PORT = pickPort(7600, 300, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-discovery-ops-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');

@@ -6,6 +6,7 @@
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -391,7 +392,7 @@ section('3 — a real boot over that database');
 section('4 — a real workspace survives a restart byte for byte');
 {
   const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m26p-live-'));
-  const port = 6860 + Math.floor(Math.random() * 40);
+  const port = pickPort(6860, 40, [0, 1]);
   let s = await bootOn(dir, port);
   ok(s.up, 'a clean boot');
   let TX;

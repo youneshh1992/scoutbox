@@ -22,7 +22,11 @@
     }
   },
   "linter": {
-    "enabled": false
+    "enabled": true,
+    "rules": {
+      "preset": "none",
+      "security": { "noDangerouslySetInnerHtml": "error" }
+    }
   },
   "assist": {
     "enabled": false

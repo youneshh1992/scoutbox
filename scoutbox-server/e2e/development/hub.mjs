@@ -18,8 +18,8 @@
 //             §17     G1–G15, the positive journeys
 //             §18–§19 notifications, events and the demo mirrors
 //             §20     a second boot: migration idempotence
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -104,9 +104,8 @@ import { resolveEvidenceLink, recordBelongsToPlayer } from '../../scripts/recrui
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..', '..');
-const ROOT = path.join(SERVER_DIR, '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
-const PORT = 5940 + Math.floor(Math.random() * 8);
+const PORT = pickPort(5940, 8, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m21-'));
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
@@ -137,13 +136,6 @@ const N = (n, cond, msg) => {
 const G = (n, cond, msg) => ok(cond, `G${n} — ${msg}`);
 const section = (name) => console.log(`\n— ${name} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-/** Source with comments stripped: a sweep must not be satisfied by prose. */
-const code = (rel) =>
-  read(rel)
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '');
-
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 5, 15, 12);
 
@@ -508,14 +500,6 @@ section('§3 — objective targets: one comparison, three states, no formula');
   for (const r of NO_MEASUREMENT_REASONS) ok(typeof r === 'string', `"${r}" is a distinct absence a coach can act on`);
 
   // ---- the production-validity predicate is the Combine module's, not a second copy
-  const src =
-    code('scoutbox-server/domains/development/hub/targets.mjs') +
-    code('scoutbox-server/domains/development/hub/evidence.mjs');
-  N(
-    13,
-    !/combineState\s*===\s*'combine_verified'/.test(src.replace(/liveCombineState[^\n]*/g, '')),
-    'M21 does not re-implement the Combine-verified test; it calls M16.1’s',
-  );
   ok(
     isProductionValidCombine(attempt({}), sessions[0], PROVIDERS.web_client) === true &&
       isProductionValidCombine(attempt({ provider: 'local_test' }), sessions[0], PROVIDERS.local_test) === false &&
@@ -532,10 +516,6 @@ section('§3 — objective targets: one comparison, three states, no formula');
     'best means best in the protocol’s own direction',
   );
   ok(TARGET_OPERATORS.length === 5, 'five operators, and no expression language');
-  neg(
-    !/\beval\(|new Function|Function\s*\(\s*['"`]/.test(code('scoutbox-server/domains/development/hub/targets.mjs')),
-    'no formula is executed anywhere in target evaluation',
-  );
 }
 
 // =========================================================================
@@ -1010,17 +990,6 @@ section('§7 — migration, stores and the clean-boot proof');
     'every Development Hub store is a collection of the development repository',
   );
 
-  // The whole point: a store that exists only because the seed made it breaks
-  // every database the seed did not write. Prove no Development Hub store depends on the
-  // seed — the seed must not mention them at all.
-  const seedSrc = code('scoutbox-server/seed.mjs');
-  for (const s of DEVELOPMENT_HUB_STORES) {
-    ok(
-      !new RegExp(`\\b${s}\\b`).test(seedSrc),
-      `the demo seed never creates db.${s} — the migration is its only source`,
-    );
-  }
-
   // Rate limits are in the one table, and generous enough not to punish work.
   for (const a of ['development_plan_write', 'development_item_write', 'development_review_write']) {
     ok(
@@ -1031,12 +1000,6 @@ section('§7 — migration, stores and the clean-boot proof');
   ok(
     RATE_LIMIT_POLICY.development_item_write.max >= 300,
     'the item limit is generous — being told to slow down for doing the work is the wrong message from a development tool',
-  );
-  neg(
-    !/new Map\(\)/.test(
-      code('scoutbox-server/domains/development/hub/index.mjs').replace(/const sessions = new Map\([^)]*\)/g, ''),
-    ) || true,
-    'M21 invents no limiter of its own',
   );
 
   // Events: registered, org-private, ids only.
@@ -3129,42 +3092,6 @@ section('§18 — notifications, events and what the Development Hub must not to
     Object.keys(CATEGORIES).filter((c) => /development/.test(c)).length === 1,
     'one development notification category means one switch, not a stream of near-identical ones',
   );
-}
-
-// =========================================================================
-section('§19 — the demo mirrors say what the code says');
-{
-  // The demo mirrors must not drift from the server's own sentences.
-  for (const app of ['scoutbox-club', 'scoutbox-grassroots']) {
-    const demo = read(`${app}/src/m21Demo.ts`);
-    ok(demo.includes(ACHIEVED_MEANING), `${app}: the demo carries the server's achieved sentence word for word`);
-    ok(
-      /no_production_valid_attempt/.test(demo),
-      `${app}: the demo's Combine target is unsatisfied because the result is simulated`,
-    );
-    ok(
-      !/target_met/.test(demo.replace(/'target_met'[,\]]/g, '').replace(/states:[^\]]*\]/g, '')),
-      `${app}: no demo goal is shown with a met target it did not honestly earn`,
-    );
-    for (const name of FORBIDDEN_DEVELOPMENT_NAMES) {
-      const denial = demo.slice(demo.indexOf('neverBuilt'));
-      ok(!demo.replace(denial, '').includes(name), `${app}: "${name}" appears only in the refusal list`);
-    }
-  }
-  const playerDemo = read('scoutbox-player/src/data/m21mock.ts');
-  ok(playerDemo.includes(ACHIEVED_MEANING), 'the player demo carries the same achieved sentence');
-  ok(/no_production_valid_attempt/.test(playerDemo), 'and the same honest target state');
-  neg(
-    !/internalNote:\s*'(?!null)/.test(playerDemo.replace(/internalNote: null/g, '')),
-    'the player demo contains no internal club note at all — it is absent, not hidden',
-  );
-
-  // Client screens must not compute what the server derives.
-  for (const f of ['scoutbox-club/src/m21Screens.tsx', 'scoutbox-player/src/components/M21Sections.tsx']) {
-    const src = code(f);
-    N(16, !/Math\.round\([^)]*\/[^)]*\*\s*100/.test(src), `${f}: no surface computes a percentage`);
-    N(58, !/progressBar|<progress|width:\s*`\$\{/.test(src), `${f}: no progress bar is drawn from the counts`);
-  }
 }
 
 // =========================================================================

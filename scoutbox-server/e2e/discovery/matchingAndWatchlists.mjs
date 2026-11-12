@@ -15,8 +15,8 @@
 // Structure:  §1–§9   in-process — the pure engines, the vocabulary, source sweeps
 //             §10–§22 HTTP against a fresh server
 //             §23     a second boot: restart idempotence
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -76,7 +76,6 @@ import { ageOn } from '../../domain.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..', '..');
-const ROOT = path.join(SERVER_DIR, '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
 const SCHEMA_VERSION = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -84,7 +83,7 @@ const SCHEMA_VERSION = Number(
     .at(-1)
     .slice(0, 4),
 );
-const PORT = 5940 + Math.floor(Math.random() * 8);
+const PORT = pickPort(5940, 8, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m19-'));
 
@@ -105,16 +104,16 @@ const neg = (cond, msg) => {
   negatives++;
   ok(cond, `[neg] ${msg}`);
 };
-/** A numbered abuse case (A1–A60); the summary checks every number was exercised. */
+/** A numbered abuse case (A1–A60), or one check that proves several; the summary checks every number was exercised. */
 const abuse = (n, cond, msg) => {
-  seenAbuse.add(n);
-  neg(cond, `A${n} — ${msg}`);
+  const ns = [n].flat();
+  for (const x of ns) seenAbuse.add(x);
+  neg(cond, `${ns.map((x) => `A${x}`).join(' ')} — ${msg}`);
 };
 /** A numbered positive case: the feature works, with everything above true. */
 const expect = (n, cond, msg) => ok(cond, `E${n} — ${msg}`);
 const section = (name) => console.log(`\n— ${name} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const DAY = 86_400_000;
 const NOW = Date.UTC(2026, 5, 1);
 
@@ -658,12 +657,6 @@ section('§5 — there is ONE matching engine, and Nobody Missed uses it');
     canonical.preferred.length === 0 && canonical.required.length > 0,
     'a Recruitment Brief becomes ALL-required criteria — matching cannot silently soften what a club wrote as a requirement',
   );
-  const src = read('scoutbox-server/domains/discovery/shared.mjs');
-  abuse(
-    44,
-    /from '\.\/matching\/match\.mjs'/.test(src) && !/function evaluateCriterion|switch \(c\.type\)/.test(src),
-    'domains/discovery/shared.mjs delegates and holds no second evaluator of its own',
-  );
 }
 
 // ================================== §6 the watchlist reconciliation core
@@ -797,111 +790,6 @@ section('§7 — ordering is declared, deterministic, and never a ranking');
     DEFAULT_MATCH_SORT === 'recent_evidence',
     'the default ordering is the least suggestive useful one, not a quality order',
   );
-  // The orders are SQL keyset orders (matching/query.mjs); each ends on the player id.
-  const src = read('scoutbox-server/domains/discovery/matching/query.mjs');
-  neg(
-    /order: \[lead, \['f\.player_id', 'ASC'\]\]/.test(src),
-    'every comparator ends on the player id, so two reads of the same data return the same order',
-  );
-  // The count is reported by the routes (matchView); the orders, in query.mjs, never mention it.
-  const routesSrc = read('scoutbox-server/domains/discovery/matching/index.mjs');
-  neg(
-    /preferredMet/.test(routesSrc) &&
-      !/sort[^\n]*preferredMet|preferredMet[^\n]*-\s*[ab]\./.test(routesSrc) &&
-      !/preferred/i.test(src),
-    'the preferred count is reported but is NEVER used as a sort key',
-  );
-}
-
-// ======================================= §8 source sweeps over the tree
-section('§8 — the source itself carries no score, no ranking and no player surface');
-{
-  const files = [
-    'domains/discovery/matching/criteria.mjs',
-    'domains/discovery/matching/match.mjs',
-    'domains/discovery/matching/watchlists.mjs',
-    'domains/discovery/matching/index.mjs',
-  ].map((f) => ['scoutbox-server/' + f, read('scoutbox-server/' + f)]);
-  const clients = [
-    'scoutbox-club/src/m19Api.ts',
-    'scoutbox-club/src/m19Screens.tsx',
-    'scoutbox-club/src/m19Demo.ts',
-    'scoutbox-grassroots/src/m19Api.ts',
-    'scoutbox-grassroots/src/m19Screens.tsx',
-    'scoutbox-grassroots/src/m19Demo.ts',
-  ].map((f) => [f, read(f)]);
-  const FORBIDDEN = [
-    /AI Match Score/i,
-    /Talent Score/i,
-    /Potential Score/i,
-    /Recruitability/i,
-    /ScoutBox Rating/i,
-    /\bBest Match\b/i,
-    /Recommended Player/i,
-  ];
-  for (const [name, src] of [...files, ...clients]) {
-    // The forbidden terms are allowed to appear only inside a sentence that
-    // says ScoutBox does NOT do it; strip those first.
-    const stripped = src
-      .replace(/^.*(?:never|no |not |cannot|does not|nothing|forbidden|refus)[^\n]*$/gim, '')
-      .replace(/^\s*(\/\/|\*).*$/gm, '');
-    for (const re of FORBIDDEN) {
-      abuse(
-        52,
-        !re.test(stripped),
-        `${name}: no "${re.source.replace(/\\b|\\/g, '')}" outside a sentence that denies it`,
-      );
-    }
-  }
-  const routes = [
-    ...read('scoutbox-server/domains/discovery/matching/index.mjs').matchAll(
-      /orgRouter\.(get|post|patch|put|delete)\('([^']+)'/g,
-    ),
-  ].map((m) => `${m[1].toUpperCase()} ${m[2]}`);
-  ok(routes.length === 8, `${routes.length} matching routes, all on the ORGANISATION router`);
-  abuse(
-    53,
-    !/playerRouter|guardianRouter|publicRouter|tsRouter|adminRouter/.test(
-      read('scoutbox-server/domains/discovery/matching/index.mjs'),
-    ),
-    'matching registers nothing on a player, guardian, public, T&S or admin router — there is no player-facing surface to leak from',
-  );
-  {
-    // Exactly one read of the players, inside the guarded query. Anything else would be a path around the visibility
-    // rule. The routes read no player record for matching at all; the one read is the shared match query's
-    // visibility condition (matching/query.mjs), and a club that may see nobody gets an empty query.
-    const strip = (f) =>
-      read(f)
-        .split('\n')
-        .filter((l) => !/^\s*(\*|\/\/)/.test(l))
-        .join('\n');
-    const routes = strip('scoutbox-server/domains/discovery/matching/index.mjs');
-    const query = strip('scoutbox-server/domains/discovery/matching/query.mjs');
-    const routeReads = [
-      ...routes.matchAll(/\bplayers\.(list|scan|visibleCandidates|visibleWhere|byId|byIds)\(|db\.players\b/g),
-    ].length;
-    const queryReads = [
-      ...query.matchAll(/\bplayers\.(list|scan|visibleCandidates|visibleWhere|byId|byIds)\(|db\.players\b/g),
-    ].length;
-    abuse(
-      54,
-      routeReads === 0 &&
-        queryReads === 1 &&
-        /const visible = players\.visibleWhere\(org, at\);\s*if \(!visible\) return EMPTY_QUERY;/.test(query),
-      `the only read of the players is the single guarded query (${routeReads + queryReads} occurrence)`,
-    );
-  }
-  {
-    // The visibility conditions are the query's first, and every criterion is a condition after them.
-    const query = read('scoutbox-server/domains/discovery/matching/query.mjs');
-    const repo = read('scoutbox-server/repositories/matchFacts.mjs');
-    abuse(
-      55,
-      /matchFacts\.query\(visible, \[\.\.\.required\.map/.test(query) &&
-        /const conds = \[visible\.sql, \.\.\.where/.test(repo),
-      'authorization and the visibility projection both run BEFORE any criterion is evaluated',
-    );
-  }
 }
 
 // ========================== §9 registry, preferences, limits, migration
@@ -1001,59 +889,6 @@ section('§9b — age boundaries, time-driven change, and the things matching mu
       !CRITERION_TYPE_NAMES.includes(t) && !validateCriteria({ required: [{ type: t, operator: 'gte', value: 1 }] }).ok,
       `"${t}" is not a criterion — training volume is not a proxy for ability`,
     );
-  }
-
-  // Matching, Nobody Missed and Second Look answer different questions and
-  // must not quietly filter one another.
-  const idxSrc = read('scoutbox-server/domains/discovery/matching/index.mjs');
-  const idxCode = idxSrc.replace(/^\s*(\/\/|\*).*$/gm, '');
-  abuse(
-    41,
-    !/db\.secondLookItems|db\.nobodyMissed|nmDismissals|slDismissals|\bdismissed\b/i.test(idxCode),
-    'matching reads no Second Look or Nobody Missed store — nobody is excluded for having been evaluated, dismissed or surfaced elsewhere',
-  );
-  abuse(
-    42,
-    !/assessments|db\.assessments|hasEvaluation/i.test(idxCode),
-    'and none for having been assessed: matching, Second Look and Nobody Missed answer different questions over the same players',
-  );
-
-  // Analytics: counters only, never a player label and never a quality metric.
-  const metrics = [...idxSrc.matchAll(/vmetric\?\.\(([^)]*)\)/g)].map((m) => m[1]);
-  ok(metrics.length >= 5, `${metrics.length} metric counters in the matching routes`);
-  abuse(
-    47,
-    metrics.every((m) => /^'[a-z_]+'$/.test(m.trim()) || /transition === 'entered'/.test(m)),
-    'every metric is a constant counter name — no player id, no criteria, no score is ever counted',
-  );
-
-  // The org audit log carries watchlist LIFECYCLE only. Membership churn
-  // belongs in the watchlist history, or the audit log becomes unreadable.
-  const auditSrc = read('scoutbox-server/domains/platform/audit.mjs');
-  abuse(
-    45,
-    /WATCHLIST_ACTIONS = new Set\(\['watchlist_created', 'watchlist_updated', 'watchlist_archived'\]\)/.test(auditSrc),
-    'the audit log projects watchlist lifecycle only — membership changes never flood it',
-  );
-  abuse(
-    45,
-    !/watchlist_membership_changed/.test(auditSrc),
-    'and the membership event is deliberately absent from the audit projection',
-  );
-
-  // Trust & Safety has no routine watchlist access.
-  const tsFiles = [
-    'scoutbox-server/domains/verification/claims/index.mjs',
-    'scoutbox-server/domains/development/boxcam/index.mjs',
-  ];
-  for (const f of tsFiles) {
-    let src = '';
-    try {
-      src = read(f);
-    } catch {
-      continue;
-    }
-    abuse(34, !/dynamicWatchlists|watchlistHistory/.test(src), `${f}: the T&S surface holds no watchlist access`);
   }
 }
 
@@ -1271,10 +1106,14 @@ section('§13 — the candidate universe is authorization, not a filter over eve
   );
   const eastNames = new Set(east.body.items.map((i) => i.name));
   const harbourNames = new Set(harbour.body.items.map((i) => i.name));
+  // Authorisation decides the candidates before any criterion is read: a player hidden from a club is not a
+  // candidate there, so no criterion can surface them and no total counts them.
   abuse(
-    60,
-    [...harbourNames].every((n) => eastNames.has(n)) && [...eastNames].some((n) => !harbourNames.has(n)),
-    'a player one club may see and another may not is simply absent from the second club’s answer',
+    [60, 54, 55],
+    [...harbourNames].every((n) => eastNames.has(n)) &&
+      [...eastNames].some((n) => !harbourNames.has(n)) &&
+      harbour.body.total === harbour.body.items.length,
+    'a player one club may see and another may not is simply absent from the second club’s answer, and from its total',
   );
   abuse(
     24,
@@ -1900,6 +1739,77 @@ section('§22 — no player, guardian or public surface learns any of this');
 }
 
 // ============================== §23 restart: derived state, not stored truth
+section('§22b — matching answers its own question, and nothing in it is a score');
+{
+  const ids = async (body) =>
+    ((await j('POST', '/org/matching', body, maria.token)).body.items ?? []).map((i) => i.playerId ?? i.id);
+  const all = await ids(q(ANY_AGE_C, { limit: 100 }));
+  ok(all.length >= 3, `fixture: the club matches several players (${all.length})`);
+  // Dismissed in Nobody Missed for a brief: still a match, because matching answers a different question.
+  const brief = await j(
+    'POST',
+    '/org/recruitment-briefs',
+    { title: 'Z anyone', positions: ['CDM', 'CM', 'ST'] },
+    maria.token,
+  );
+  const dismissed = await j(
+    'POST',
+    '/org/nobody-missed/dismiss',
+    { briefId: brief.body?.brief?.id, playerId: all[0] },
+    maria.token,
+  );
+  abuse(
+    41,
+    dismissed.status === 200 && (await ids(q(ANY_AGE_C, { limit: 100 }))).join() === all.join(),
+    `a player dismissed in Nobody Missed is still matched, in the same place (${dismissed.status} ${dismissed.body?.error ?? ''})`,
+  );
+  // Preferred criteria are counted and explained, never used to reorder.
+  const withPreferred = await ids({
+    criteria: { ...ANY_AGE_C, preferred: [{ type: 'position', operator: 'in', values: ['CDM'] }] },
+    limit: 100,
+  });
+  neg(withPreferred.join() === all.join(), 'adding preferred criteria leaves the order exactly as it was');
+  // No score, ranking or verdict is served, under any name.
+  const served = JSON.stringify((await j('POST', '/org/matching', q(ANY_AGE_C, { limit: 100 }), maria.token)).body);
+  const named = [
+    /AI Match Score/i,
+    /Talent Score/i,
+    /Potential Score/i,
+    /Recruitability/i,
+    /ScoutBox Rating/i,
+    /\bBest Match\b/i,
+    /Recommended Player/i,
+  ].filter((re) => re.test(served));
+  abuse(
+    52,
+    named.length === 0,
+    `the matching response names no score, rating or recommendation (${named.map(String).join(', ') || 'none'})`,
+  );
+  // The audit log keeps watchlist lifecycle only; membership churn stays in the watchlist's own history.
+  const actions = new Set();
+  for (let cursor = null, page = 0; page < 40; page += 1) {
+    const r = await j(
+      'GET',
+      `/org/audit?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      undefined,
+      maria.token,
+    );
+    for (const e of r.body.items) actions.add(e.action);
+    cursor = r.body.nextCursor;
+    if (!cursor) break;
+  }
+  abuse(
+    45,
+    actions.has('watchlist_created') && !actions.has('watchlist_membership_changed'),
+    'the audit log records watchlists being made, never players entering or leaving them',
+  );
+  // Trust & Safety has no routine watchlist access.
+  const admin = await j('GET', '/admin/watchlists', undefined, undefined, {
+    'x-admin-key': process.env.ADMIN_KEY ?? 'scoutbox-admin',
+  });
+  abuse(34, admin.status === 404, `there is no admin route to a club's watchlists (${admin.status})`);
+}
+
 section('§23 — a restart changes nothing about what a watchlist means');
 {
   const before = (await j('GET', '/org/watchlists', undefined, maria.token)).body;

@@ -3,6 +3,7 @@
 // dev data), runs unit fixtures against the pure helpers, then drives everything over HTTP, ending with a
 // backup→isolated-restore cycle and a SIGKILL restart. Transitions stay in this suite because the restart check
 // reads one.
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +22,7 @@ process.env.ALLOW_LOCAL_WEBHOOKS = '1'; // the SSRF guard reads this at call tim
 
 // Random per-run ports: a previously crashed run's orphan server can never
 // answer this run's requests with stale state.
-const PORT = 4200 + Math.floor(Math.random() * 300);
+const PORT = pickPort(4200, 300, [0, 300, 301]);
 const RCV_PORT = PORT + 300;
 const RESTORE_PORT = PORT + 301;
 const BASE = `http://localhost:${PORT}`;

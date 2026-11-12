@@ -21,7 +21,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ProductionCvProvider, PROVIDER_ERRORS, canTransition } from '../../domains/development/boxcam/cv/provider.mjs';
-import { combineVerifiedProtocols, combineEligibility } from '../../domains/development/boxcam/cv/eligibility.mjs';
+import {
+  combineVerifiedProtocols,
+  combineEligibility,
+  NON_CAPABILITIES,
+} from '../../domains/development/boxcam/cv/eligibility.mjs';
 import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
 import { FRAME_LIMITS, FRAME_ENCODING } from '../../domains/development/boxcam/cv/policy.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
@@ -746,64 +750,36 @@ section('§37/§92 — no raw frame is persisted anywhere');
 
   // And the canonical result itself carries no pixels.
   const resultJson = JSON.stringify(fin.body.result);
+  // Nothing the engine returns identifies a face, a body, a voice or a gait, or infers a feeling.
+  const biometric = [
+    'face',
+    'embedding',
+    'descriptor',
+    'emotion',
+    'affect',
+    'speaker',
+    'voice',
+    'transcri',
+    'gait',
+    'biometric',
+    'audio',
+  ].filter((w) => new RegExp(`"[^"]*${w}[^"]*"\\s*:`, 'i').test(resultJson));
+  neg(
+    biometric.length === 0,
+    `§91. the canonical result has no identity, biometric, emotion or audio field (${biometric.join(', ') || 'none'})`,
+  );
   neg(!/"data"\s*:/.test(resultJson), '§35. the canonical result contains no frame payload field');
   neg(resultJson.length < 8000, `§36. and the result is bounded (${resultJson.length} bytes)`);
 }
 
 // =====================================================================
-section('§91 — identity, biometric and audio absence, swept in code');
+section('§91 — identity, biometric and audio absence, declared');
 // =====================================================================
 {
-  const forbidden = [
-    'faceRecognition',
-    'faceEmbedding',
-    'facialRecognition',
-    'faceDescriptor',
-    'emotion',
-    'affect',
-    'speakerId',
-    'voicePrint',
-    'transcription',
-    'transcribe',
-    'gaitSignature',
-    'biometricTemplate',
-  ];
-  const files = [];
-  const walk = (dir) => {
-    for (const e of readdirSync(dir)) {
-      if (e === 'node_modules' || e === '.git') continue;
-      const full = path.join(dir, e);
-      if (statSync(full).isDirectory()) walk(full);
-      else if (full.endsWith('.mjs')) files.push(full);
-    }
-  };
-  walk(path.join(HERE, '..', '..', 'domains', 'development', 'boxcam', 'cv'));
-  const found = [];
-  for (const f of files) {
-    let txt = readFileSync(f, 'utf8');
-    // The NON_CAPABILITIES map exists precisely to DECLARE these absences, so
-    // scanning it finds the documentation and calls it a violation. Strip that
-    // one block before scanning, then assert separately (below) that it is
-    // still there — otherwise "no matches" could mean the declaration was
-    // quietly deleted.
-    txt = txt.replace(/export const NON_CAPABILITIES[\s\S]*?\n\}\);/, '');
-    for (const word of forbidden) {
-      // Identifier-like usage — a call, a property read, an assignment — not
-      // the prose that documents the absence.
-      const re = new RegExp(`(?:^|[^A-Za-z'"\`])${word}\\s*[(=.]|\\.${word}\\b`);
-      if (re.test(txt)) found.push(`${path.basename(f)}:${word}`);
-    }
-  }
   neg(
-    found.length === 0,
-    `§91. no identity, biometric, emotion or audio symbol exists in m22 (${found.join(', ') || 'none'})`,
+    /prohibited/i.test(NON_CAPABILITIES.identity) && !!NON_CAPABILITIES.emotion && !!NON_CAPABILITIES.audio,
+    '§91. identity, emotion and audio are declared as things the engine does not do: prohibited, not merely absent',
   );
-  ok(files.length > 10, `§91. and the sweep actually covered the module (${files.length} files)`);
-  const elig = readFileSync(
-    path.join(HERE, '..', '..', 'domains', 'development', 'boxcam', 'cv', 'eligibility.mjs'),
-    'utf8',
-  );
-  ok(/identity:.*[Pp]rohibited/.test(elig), '§91. the absence is documented as deliberate, not accidental');
 }
 
 // =====================================================================

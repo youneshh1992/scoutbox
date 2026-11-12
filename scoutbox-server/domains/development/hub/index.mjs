@@ -124,10 +124,7 @@ export function registerDevelopment(ctx) {
 
   // ------------------------------------------------------------- primitives
 
-  /**
-   * Literal `broadcast('…')` call sites, not a variable: a test greps for them
-   * and checks them against `EMITTED_EVENTS`. Payloads carry ids only.
-   */
+  /** One emitter per development event. Payloads carry ids only. */
   const EMITTERS = Object.freeze({
     development_plan_created: (p) => broadcast('development_plan_created', p),
     development_plan_updated: (p) => broadcast('development_plan_updated', p),

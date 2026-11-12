@@ -12,6 +12,7 @@
 // G notification targets · H lifecycle authority and contract truth ·
 // Q partial failure · Z boundary invariants (source scans).
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -54,7 +55,7 @@ const LATEST_SCHEMA = Number(
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const ROOT = path.join(HERE, '..', '..');
-const PORT = 7400 + Math.floor(Math.random() * 200);
+const PORT = pickPort(7400, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23jn-'));
 const S_NOTE = 'PRIVATE_JOURNEY_NOTE_7701';

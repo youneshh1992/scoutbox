@@ -16,6 +16,7 @@
 // U rate limits · V idempotency · W terminal states · X Second Look · Y
 // privacy · Z boundary invariants.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -62,7 +63,7 @@ const LATEST_SCHEMA = Number(
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const ROOT = path.join(HERE, '..', '..');
-const PORT = 7800 + Math.floor(Math.random() * 200);
+const PORT = pickPort(7800, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23jh-'));
 const S_NOTE = 'PRIVATE_HARDENING_NOTE_8801';

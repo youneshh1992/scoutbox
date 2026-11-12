@@ -15,6 +15,7 @@
 // Structure:  in-process first — the registry, the pure statistics, source sweeps;
 //             then HTTP against a fresh server;
 //             then a second boot: migration idempotence and the upgrade path
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
@@ -90,7 +91,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..', '..');
 const ROOT = path.join(SERVER_DIR, '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
-const PORT = 5960 + Math.floor(Math.random() * 8);
+const PORT = pickPort(5960, 8, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m20-'));
 const SCHEMA_VERSION = Number(

@@ -11,7 +11,7 @@
 //      real production boot is refused without its own admin key.
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -513,30 +513,7 @@ section('H — no suite can draw a port that fetch() refuses');
     clean,
     'H2 pickPort never lands a server on a fetch-refused port (2,800 draws over the seven ranges the suites use)',
   );
-  // H3 every server suite: the ports it can reach (random base + every literal offset) avoid the refused list.
-  const bad = [];
-  const SERVER_ROOT = path.join(HERE, '..', '..');
-  const suites = [
-    ...readdirSync(path.join(SERVER_ROOT, 'scripts')).map((n) => `scripts/${n}`),
-    ...readdirSync(path.join(SERVER_ROOT, 'e2e'), { recursive: true }).map((n) => `e2e/${n}`),
-  ].filter((n) => n.endsWith('.mjs'));
-  for (const f of suites) {
-    const src = readFileSync(path.join(SERVER_ROOT, f), 'utf8');
-    for (const m of src.matchAll(
-      /const\s+(\w+)\s*=\s*(\d{3,5})\s*\+\s*Math\.floor\(Math\.random\(\)\s*\*\s*(\d+)\)/g,
-    )) {
-      const [, v, b, r] = m;
-      const offs = new Set([0]);
-      for (const o of src.matchAll(new RegExp(`\\b${v}\\s*\\+\\s*(\\d+)`, 'g'))) offs.add(Number(o[1]));
-      for (const o of offs)
-        for (let x = 0; x < Number(r); x++)
-          if (isFetchBlockedPort(Number(b) + x + o)) bad.push(`${f}:${Number(b) + x + o}`);
-    }
-  }
-  neg(
-    bad.length === 0,
-    `H3 no server suite's random port range reaches a fetch-refused port${bad.length ? `: ${[...new Set(bad)].slice(0, 6).join(', ')}` : ''}`,
-  );
+  // Every suite draws its port through pickPort with the offsets it boots on, so H2 covers them all.
 }
 
 console.log(`\nplatform/sessionsAndPorts: ${passed} checks passed, ${negatives} negative, ${failures} failed`);

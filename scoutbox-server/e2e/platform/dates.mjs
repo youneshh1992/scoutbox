@@ -21,6 +21,7 @@
 // refusal names its status and its code. Run it under TZ=UTC and under
 // TZ=America/New_York: the counts must be identical.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -70,7 +71,7 @@ const SCHEMA_VERSION = Number(
     .slice(0, 4),
 );
 
-const PORT = 7600 + Math.floor(Math.random() * 150);
+const PORT = pickPort(7600, 150, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-p57-'));
 const HERE = path.dirname(fileURLToPath(import.meta.url));

@@ -9,6 +9,7 @@
 //
 // Fifty numbered sections. More than half are negative: hardening that mostly
 // asserts happy paths has not hardened anything.
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,7 +33,7 @@ import {
   normalizeMaterialChange,
 } from '../../domains/discovery/shared.mjs';
 
-const PORT = 5960 + Math.floor(Math.random() * 30);
+const PORT = pickPort(5960, 30, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m181-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');

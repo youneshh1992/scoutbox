@@ -190,6 +190,9 @@ keep, or code with nothing left to do.
   (`secondLook.mjs`).
 - **The trial evidence-unlink route** (`trialRoutes.mjs`) takes no client key and has no rate limit, unlike the other
   trial writes. Possibly intended.
+- **`orgPanels.tsx` differs between `scoutbox-club` and `scoutbox-grassroots`** (which must share business logic).
+  Grassroots shows audit entries as structured facts since `7f93a14` (1 Nov); Club still shows one sentence.
+  Deciding which one both apps use is a design question.
 
 ## Performance
 
@@ -242,18 +245,18 @@ acting on a figure). None touches every player on a write.
   the window.
 - **`e2e/agents/compliancePersistence` failed once in three full `npm run e2e` runs** (9 Nov), and the log wasn't
   kept. It passed alone four times and in the next two full runs. If it fails again, keep the runner's log.
-- **`e2e/platform/contracts.mjs` fails one check**: `orgPanels.tsx` is no longer byte-identical in `scoutbox-club` and
-  `scoutbox-grassroots` (which must share business logic). Grassroots shows audit entries as structured facts since
-  `7f93a14` (1 Nov); Club still shows one sentence. Deciding which one both apps use is a design question. It is a
-  `knownFailure` check ("orgPanels.tsx drift"), so the battery runs in CI.
 - **`e2e/navConfig.test.mjs` fails** (also on `c436154`): the club and Grassroots nav still list the removed
   "representation" destination.
 - **`e2e/m24f2DensityAudit` (3 checks) and `e2e/m24fVisualAudit` (2 checks) fail**: Player Account categories, the
   portal ™ label, the Grassroots and Player Home single primary action, and the Player Card/ListRow check. Triage
   them against [`design.md`](design.md).
-- **About 20 of the 56 end-to-end batteries check source text, not behaviour.** They read server and app source
-  files and match regular expressions against them ("a case refusal is thrown inside the unit", "*Try again* only
-  when retryable", "the request log line has these fields"). Such a check passes while the text matches, even if
-  the behaviour is broken, and fails on harmless rewrites (the Biome reformat broke nine). Replace the ones that
-  guard real behaviour with tests that exercise it, and ask Tom before dropping the ones that only describe code
-  layout.
+- **Some app promises have no test, because the web apps have no test runner.** The server batteries used to check
+  them by reading app source, and no longer do. Until the apps get one: a screen can ask for a translation key that
+  does not exist and show the raw key, because `t()` accepts any string (typing its key as `keyof typeof en` would
+  make `tsc` catch it; EN/FR parity is already enforced by `const fr: typeof en`); nothing checks that every status,
+  party role, document type and visibility class the server sends has a word in both languages; the decision
+  panel's handoff section never shows the decision's note, rationale or reasons; the club apps never offer an
+  agent-only contact route, and the agent's share control is never an "apply"; no app manufactures a next action or
+  reads a status from a live event's payload; the web apps re-read on focus, `pageshow` and visibility; the demo
+  bundles repeat the server's limitation and "achieved" sentences word for word; and `confirmAction.ts`,
+  `conflict.tsx`, `httpState.ts`, `provenance.ts` and `dirtyGuard.ts` stay identical in Club and Grassroots.

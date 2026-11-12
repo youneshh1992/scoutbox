@@ -32,6 +32,7 @@
 // No assertion here is `status !== 200`. Every refusal names the status and
 // the code it expects.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -80,7 +81,7 @@ const LATEST_SCHEMA = Number(
     .slice(0, 4),
 ); // the latest table migration's number
 
-const PORT = 6100 + Math.floor(Math.random() * 200);
+const PORT = pickPort(6100, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');

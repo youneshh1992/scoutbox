@@ -7,8 +7,9 @@
 //           state projecting as itself;
 //   part 2  the server — composition order (every module registers before the socket opens), the first requests on
 //           a bare database, and a restart that changes nothing.
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -269,62 +270,6 @@ section('§4 — every lifecycle state projects as itself');
 
 // ===================================================================== part 2
 
-section('§5 — every module registers before the socket opens');
-{
-  // `server.mjs` is one synchronous module body: every `register*()` call runs during evaluation and `app.listen` is
-  // the last statement, so no request can arrive before every module has registered. Asserted against the source,
-  // because it is a claim about evaluation order that a runtime probe cannot disprove by itself.
-  const lines = readFileSync(SERVER, 'utf8').split('\n');
-  const registerLines = [];
-  lines.forEach((l, i) => {
-    if (/^\s*(const \w+ = )?register[A-Z]\w*\(/.test(l)) registerLines.push(i + 1);
-  });
-  const listenLine = lines.findIndex((l) => /^app\.listen\(/.test(l)) + 1;
-  ok(registerLines.length >= 10, `${registerLines.length} module registrations found in the composition root`);
-  ok(listenLine > 0, 'and app.listen is a top-level statement');
-  neg(
-    registerLines.every((n) => n < listenLine),
-    `every registration (lines ${Math.min(...registerLines)}–${Math.max(...registerLines)}) precedes app.listen (line ${listenLine})`,
-  );
-  const between = lines.slice(Math.min(...registerLines) - 1, listenLine);
-  const awaits = between.filter(
-    (l) => /^\s*(const|let|var)?\s*[\w{}[\], ]*=?\s*await\s/.test(l) && !/^\s*\/\//.test(l),
-  );
-  for (const a of awaits) console.error(`   top-level await between registration and listen: ${a.trim().slice(0, 80)}`);
-  neg(
-    awaits.length === 0,
-    'and nothing between them awaits, so composition cannot yield to the event loop half-finished',
-  );
-}
-
-section('§6 — no production code creates or repairs a collection in memory');
-{
-  // `db.x ??= []` at registration or inside a handler hides a missing store from every boot-time check. Every domain
-  // is a table created by its migration; the pattern must not appear.
-  const SKIP = new Set(['node_modules', 'scripts', 'e2e', 'data', 'public', 'assets', 'dist']);
-  const offenders = [];
-  (function walk(d) {
-    for (const e of readdirSync(d, { withFileTypes: true })) {
-      if (SKIP.has(e.name)) continue;
-      const f = path.join(d, e.name);
-      if (e.isDirectory()) {
-        walk(f);
-        continue;
-      }
-      if (!e.name.endsWith('.mjs')) continue;
-      readFileSync(f, 'utf8')
-        .split('\n')
-        .forEach((line, i) => {
-          const code = line.replace(/(^|[^:])\/\/.*$/, '$1');
-          if (/\bdb\.[A-Za-z0-9_]+\s*\?\?=/.test(code) || /\bdb\[[^\]]+\]\s*\?\?=/.test(code))
-            offenders.push(`${path.relative(ROOT, f)}:${i + 1}`);
-        });
-    }
-  })(ROOT);
-  for (const o of offenders) console.error(`   in-memory collection default: ${o}`);
-  neg(offenders.length === 0, 'no `db.x ??=` line anywhere in production code');
-}
-
 /** Boot the real server on a directory, optionally probe it, then stop it with SIGTERM. */
 async function bootOnce(dataDir, { port, probe = null } = {}) {
   const base = `http://localhost:${port}`;
@@ -365,8 +310,8 @@ async function bootOnce(dataDir, { port, probe = null } = {}) {
 
 /**
  * The FIRST requests to a freshly booted server, issued the instant /healthz answers: /healthz answering means
- * `app.listen` fired, so every `register*()` returned. It asks a late-registered module (the recruitment lifecycle, `registerLifecycle`) for its vocabulary
- * and asks routes over tables owned by three different repositories to answer.
+ * `app.listen` fired, so every `register*()` returned. It asks a late-registered module (the recruitment lifecycle, `registerLifecycle`) for its vocabulary,
+ * asks routes over tables owned by three different repositories to answer, and asks the last module registered.
  */
 const firstRequestProbe = async (base) => {
   const login = await (
@@ -383,7 +328,10 @@ const firstRequestProbe = async (base) => {
   const lifecycle = await fetch(`${base}/org/recruitment/lifecycle`, { headers: H });
   const reviewQueue = await fetch(`${base}/org/review-queue`, { headers: H });
   const notes = await fetch(`${base}/org/players/pl-none/notes`, { headers: H });
+  // The data-rights routes are the last module the composition root registers.
+  const exportRoute = await fetch(`${base}/player/export`);
   return {
+    exportRoute: exportRoute.status,
     login: true,
     lifecycle: lifecycle.status,
     lifecycleBody: await lifecycle.json().catch(() => null),
@@ -413,7 +361,7 @@ const tableContent = (dir) => {
   }
 };
 
-const PORT_BASE = 5200 + Math.floor(Math.random() * 300);
+const PORT_BASE = pickPort(5200, 300, [0, 1]);
 const BARE_DIR = tempDir('bare');
 writeFixture(BARE_DIR, { orgs: [LEGACY_ORG], players: [LEGACY_PLAYER], guardians: [] }, { idCounter: 400 });
 
@@ -432,6 +380,10 @@ const first = await bootOnce(BARE_DIR, { port: PORT_BASE, probe: firstRequestPro
     'answering with all 19 lifecycle actions, so the module is composed and not half-registered',
   );
   neg(p?.reviewQueue === 200, 'and a route over the review-later deferrals answers on the first request');
+  neg(
+    p?.exportRoute === 401,
+    `and the last module registered (data rights) answers too: an anonymous export is a 401, not a missing route (${p?.exportRoute})`,
+  );
   neg(
     p?.notes !== undefined && p.notes < 500,
     'and a route over the club notes answers on its own terms, not with a 500',

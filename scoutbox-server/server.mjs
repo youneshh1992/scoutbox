@@ -71,7 +71,7 @@ import { createRateLimiter, installRateLimitInspection } from './domains/platfor
 import { demoSeedEnabled, devLoginsEnabled } from './domains/platform/capabilities.mjs';
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
-import { assertEventRegistry, EVENT_NAMES } from './domains/platform/eventRegistry.mjs';
+import { assertEventRegistry } from './domains/platform/eventRegistry.mjs';
 import { createNotificationPrefs, registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';
 import { createNotifier, registerNotificationFeed, registerDeliverySettings } from './domains/messaging/notify.mjs';
 import { registerMessaging, channelViewFor } from './domains/messaging/channels.mjs';
@@ -1588,142 +1588,9 @@ registerCapabilities({
 });
 assertProductionConfig({ trustWeightsTotal: trustDomain.trustWeightsTotal });
 
-// The event registry must be internally consistent, and every event this process emits must be in it. Development and
-// test throw here; in production the problems are logged and the fail-closed audience default keeps an unregistered
-// event from reaching anyone. EMITTED_EVENTS is the list of names broadcast() is called with anywhere in the server;
-// e2e/platform/contracts.mjs greps the source and fails if this list and the call sites disagree.
-export const EMITTED_EVENTS = Object.freeze([
-  'players',
-  'orgs',
-  'opportunities',
-  'openTrials',
-  'campaigns',
-  'friendlies',
-  'ledger',
-  'messages',
-  'typing',
-  'inbox',
-  'notify',
-  'requests',
-  'applications',
-  'feedback',
-  'evidence',
-  'recruitment_case_moved',
-  'assessment_submitted',
-  'recruitment_room_archived',
-  'recruitment_room_reopened_from_second_look',
-  'player_development_evidence_changed',
-  'watchlist_created',
-  'watchlist_updated',
-  'watchlist_membership_changed',
-  'watchlist_archived',
-  'matching_room_created',
-  'development_plan_created',
-  'development_plan_updated',
-  'development_plan_completed',
-  'development_goal_created',
-  'development_goal_updated',
-  'development_action_completed',
-  'development_evidence_linked',
-  'development_review_submitted',
-  // Box Cam CV. All player_private, none analytics-eligible, and
-  // deliberately no per-frame event — adding one would have to pass
-  // through here and through the registry, which is the point.
-  'box_cam_cv_session_started',
-  'box_cam_cv_refused',
-  'box_cam_observed',
-  // Contact. All org_private, ids only. The recipient side reuses
-  // `inbox` and `notify`; a draft reaches no player-facing stream at all.
-  'contact_created',
-  'contact_sent',
-  'contact_failed',
-  'contact_external_recorded',
-  'contact_responded',
-  // Trial. All org_private, ids only; the recipient side reuses
-  // `inbox` and `notify`. No schedule, venue, attendance note, assessment or
-  // guardian id ever rides on one of these.
-  'trial_invited',
-  'trial_accepted',
-  'trial_declined',
-  'trial_scheduled',
-  'trial_rescheduled',
-  'trial_cancelled',
-  'trial_attendance_recorded',
-  'trial_completed',
-  'trial_evidence_linked',
-  // ScoutBox Agent core. All org_private to the agency, ids only;
-  // the client side reuses `notify`.
-  'agent_profile_created',
-  'agent_verification_state_changed',
-  'agency_affiliation_created',
-  'agency_affiliation_ended',
-  'representation_requested',
-  'representation_confirmed',
-  'representation_rejected',
-  'representation_terminated',
-  'representation_disputed',
-  // Conflict & Compliance Engine. org_private to the agency, ids
-  // and state words only; the policy publication is a content-free ping.
-  'regulatory_review_requested',
-  'regulatory_review_started',
-  'regulatory_review_resolved',
-  'conflict_evaluated',
-  'regulatory_consent_requested',
-  'regulatory_consent_granted',
-  'regulatory_consent_declined',
-  'regulatory_consent_revoked',
-  'agent_authorisation_state_changed',
-  'policy_version_published',
-  // Agent Transaction Workspace. org_private to the agency that holds
-  // the workspace, ids and state words only; the club and the individual hear
-  // through `notify`, where their own preferences apply.
-  'agent_transaction_created',
-  'agent_transaction_party_changed',
-  'agent_transaction_compliance_updated',
-  'agent_transaction_status_changed',
-  'agent_transaction_document_added',
-  'agent_transaction_message_linked',
-  'agent_transaction_held',
-  'agent_transaction_cancelled',
-  'agent_transaction_closed',
-  // Cross-app integration. Two names, both org_private to the agency
-  // and both ids only: the client changed a disclosure choice (not WHICH one),
-  // and a club routed a contact to the agent as well as to the client.
-  'representation_disclosure_changed',
-  'contact_agent_routed',
-  'agent_opportunity_shared',
-  // and the decision → transaction handoff, which is recruitment-domain because the
-  // club's case is where it lives.
-  'transaction_handoff_invited',
-  'transaction_handoff_withdrawn',
-  // Canonical Offer. All org_private to the club that owns the case,
-  // ids only (plus the status WORD on a response). The recipient and a shared
-  // agent hear through `notify`; a term, a note or a reason is never on the wire.
-  'offer_draft_created',
-  'offer_draft_updated',
-  'offer_issued',
-  'offer_superseded',
-  'offer_withdrawn',
-  'offer_responded',
-  // Signing workflow. Org_private, ids plus a party type word; never a
-  // document, a digest, a term or a signatory's name.
-  'signing_created',
-  'signing_ready',
-  'signing_party_completed',
-  'signing_completed',
-  'signing_cancelled',
-  'signing_voided',
-  'signing_superseded',
-  // Formal Room decisions.
-  'room_decision_finalized',
-  'room_decision_superseded',
-]);
-{
-  const problems = assertEventRegistry({ emitted: EMITTED_EVENTS });
-  for (const p of problems) console.error(`EVENT REGISTRY ${p}`);
-  const unemitted = EVENT_NAMES.filter((n) => !EMITTED_EVENTS.includes(n));
-  if (unemitted.length) console.warn(`event registry lists names the server never emits: ${unemitted.join(', ')}`);
-}
+// The event registry must be internally consistent. Development and test throw here; in production the problems are
+// logged. Every broadcast is checked against it when it is sent (liveSync.mjs), and an unregistered one fails closed.
+for (const p of assertEventRegistry()) console.error(`EVENT REGISTRY ${p}`);
 
 registerAppHosting({ app, publicDir: path.join(HERE, 'public') });
 installErrorContract(app);

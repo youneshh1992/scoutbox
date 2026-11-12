@@ -19,6 +19,7 @@
 // No fixture here calls buildSeed(): the defect class lives in the gap
 // between "the seed made it" and "the database guarantees it".
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -123,7 +124,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = 5700 + Math.floor(Math.random() * 200);
+const PORT = pickPort(5700, 200, [0, 1, 2, 3]);
 const H = 3_600_000;
 const T0 = 1_800_000_000_000; // 2027-01-15T08:00:00Z — inside the 2000–2100 window, in the future
 

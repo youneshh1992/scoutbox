@@ -13,6 +13,7 @@
 // X legacy · Y temporal · Z signing boundary. The adversarial cases are
 // marked `#n`. Every refusal asserts its exact status AND code.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
@@ -62,7 +63,7 @@ const LATEST_SCHEMA = Number(
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
-const PORT = 7100 + Math.floor(Math.random() * 200);
+const PORT = pickPort(7100, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23sg-'));
 const S_NOTE = 'PRIVATE_SIGNING_NOTE_8811';

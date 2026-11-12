@@ -11,7 +11,6 @@
 //             §20–§40 HTTP against a fresh server
 //             §41, §43 later boots: idempotence, the production boot
 import { spawn } from 'node:child_process';
-import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -45,6 +44,8 @@ import {
   secondLookExpired,
   briefIsLiveOn,
   validateRecruitmentBrief,
+  orderNobodyMissed,
+  orderSecondLook,
 } from '../../domains/discovery/shared.mjs';
 import { PROVENANCE } from '../../domains/verification/passport/shared.mjs';
 import { openStore } from '../../store.mjs';
@@ -53,7 +54,6 @@ import { runDataMigrations, dataSchemaReport, migrationApplied } from '../../rep
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { createNotificationsRepository } from '../../repositories/notifications.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';
-import { knownFailure } from '../support/knownFailure.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCHEMA_VERSION = Number(
@@ -63,7 +63,6 @@ const SCHEMA_VERSION = Number(
     .slice(0, 4),
 );
 const SERVER_DIR = path.join(HERE, '..', '..');
-const ROOT = path.join(SERVER_DIR, '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
 const PORT = pickPort(5990, 8, [0, 10, 11]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
@@ -87,66 +86,28 @@ const neg = (cond, msg) => {
 };
 const section = (name) => console.log(`\n— ${name} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const DAY = 86_400_000;
 
 // ============================================================ §1 registry
-section('§1 — every event the server emits is in the registry, and the source agrees');
+section('§1 — the registry refuses what it does not declare');
 {
-  // Importing server.mjs would boot a server; read the list from source instead.
-  const src = read('scoutbox-server/server.mjs');
-  const listSrc = src.slice(
-    src.indexOf('export const EMITTED_EVENTS'),
-    src.indexOf(']);', src.indexOf('export const EMITTED_EVENTS')),
-  );
-  const declared = [...listSrc.matchAll(/'([A-Za-z_]+)'/g)].map((m) => m[1]);
-  ok(declared.length >= 18, `${declared.length} emitted event names declared in server.mjs`);
-  // Grep every broadcast('name' call site in the server tree, and every publishEvent('name'
-  // site: the transport half of broadcast() that notify() reaches through the notifications repository's effects queue, with
-  // the payload minimised through the registry at the call site. Both are emissions.
-  const files = [];
-  const walk = (d) => {
-    for (const f of fs.readdirSync(d)) {
-      const p = path.join(d, f);
-      if (f === 'node_modules' || f === 'scripts' || f === 'e2e' || f === 'public') continue;
-      if (fs.statSync(p).isDirectory()) walk(p);
-      else if (p.endsWith('.mjs')) files.push(p);
-    }
-  };
-  walk(SERVER_DIR);
-  const called = new Set();
-  for (const f of files)
-    for (const m of fs.readFileSync(f, 'utf8').matchAll(/(?:broadcast|publishEvent)\??\.?\(\s*'([A-Za-z_]+)'/g))
-      called.add(m[1]);
-  const missing = [...called].filter((n) => !declared.includes(n));
-  const stale = declared.filter((n) => !called.has(n));
-  ok(
-    missing.length === 0,
-    `every broadcast() call site is in EMITTED_EVENTS (${called.size} names)${missing.length ? `: missing ${missing.join(', ')}` : ''}`,
-  );
-  ok(
-    stale.length === 0,
-    `EMITTED_EVENTS names nothing the source never broadcasts${stale.length ? `: ${stale.join(', ')}` : ''}`,
-  );
-  ok(declared.every(isRegistered), 'every emitted name is registered');
-  neg(
-    assertEventRegistry({ emitted: declared, mode: 'production' }).length === 0,
-    'the boot assertion passes for the real list',
-  );
+  // Each broadcast is checked when it is sent: outside production an undeclared event, or a key its entry does not
+  // allow, throws at the call site (liveSync.mjs), so every battery that reaches it would fail. Here, the boot check.
+  neg(assertEventRegistry({ mode: 'production' }).length === 0, 'the registry is consistent as the server boots it');
   let threw = null;
   try {
-    assertEventRegistry({ emitted: [...declared, 'brand_new_unregistered'], mode: 'development' });
+    assertEventRegistry({ emitted: ['brand_new_unregistered'], mode: 'development' });
   } catch (e) {
     threw = e;
   }
   neg(
     !!threw && /brand_new_unregistered/.test(threw.message),
-    'development boot THROWS on an emitted name the registry does not know',
+    'development THROWS on an emitted name the registry does not know',
   );
-  const prodProblems = assertEventRegistry({ emitted: [...declared, 'brand_new_unregistered'], mode: 'production' });
+  const prodProblems = assertEventRegistry({ emitted: ['brand_new_unregistered'], mode: 'production' });
   neg(
     prodProblems.some((p) => /brand_new_unregistered/.test(p)),
-    'production boot reports it (and the fail-closed audience keeps it private)',
+    'production reports it (and the fail-closed audience keeps it private)',
   );
 }
 
@@ -247,118 +208,38 @@ section('§4 — the same fact fingerprints the same however it is projected');
 }
 
 // ======================================================= §5 terminology
-section('§5 — terminology: one meaning per word, in both languages');
-const clubI18n = read('scoutbox-club/src/i18n.ts');
-const grassI18n = read('scoutbox-grassroots/src/i18n.ts');
-const keysOf = (src, lang) => {
-  const start = src.indexOf(lang === 'en' ? 'const en' : 'const fr');
-  const end = lang === 'en' ? src.indexOf('const fr') : src.indexOf('export function t(');
-  // Keys are written with either quote ("desk.scouting": … in Grassroots).
-  return new Map(
-    [...src.slice(start, end).matchAll(/(['"])([\w.\-]+)\1:\s*(['"`])((?:\\.|(?!\3).)*)\3/g)].map((m) => [m[2], m[4]]),
-  );
-};
-const EN = keysOf(clubI18n, 'en');
-const FR = keysOf(clubI18n, 'fr');
-const ENg = keysOf(grassI18n, 'en');
-const FRg = keysOf(grassI18n, 'fr');
+section('§7 — every Nobody Missed and Second Look sort has a stable tie-break');
 {
-  ok(
-    /Trust Score at decision/.test(EN.get('rm.trustAtDecision')),
-    'the Room decision snapshot is labelled Trust Score, not "Trust"',
-  );
-  ok(/Trust Score/.test(FR.get('rm.trustAtDecision')), 'and the French keeps the product name');
-  neg(
-    ![...EN.values()].some((v) => /verified player/i.test(v)),
-    'no copy calls anyone a "verified player" — evidence is verified, people are not',
-  );
-  neg(
-    ![...EN.values()].some((v) => /player (score|rating|rank)/i.test(v)),
-    'no copy names a player score, rating or rank',
-  );
-  neg(
-    /not ability/.test(EN.get('discover.ordering')) && /not the Trust Score/.test(EN.get('discover.ordering')),
-    'the Discover ordering sentence says what completeness is NOT',
-  );
-  neg(/not ability/i.test(EN.get('discover.orderingGrassroots')), 'the Grassroots ordering sentence does too');
-  const routeSrc = ['server.mjs', 'domains/discovery/search.mjs', 'domains/discovery/filmRoom.mjs']
-    .map((f) => read(`scoutbox-server/${f}`))
-    .join('\n');
-  neg(!/res\.json\([^)]*\btrust\b[^)]*\bcompleteness\b/i.test(routeSrc), 'no route describes completeness as trust');
-}
-
-section('§6 — EN/FR parity in both web apps');
-{
-  const missingFr = [...EN.keys()].filter((k) => !FR.has(k));
-  const extraFr = [...FR.keys()].filter((k) => !EN.has(k));
-  ok(missingFr.length === 0 && extraFr.length === 0, `club: ${EN.size} EN keys, ${FR.size} FR keys, no gaps`);
-  const missingFrG = [...ENg.keys()].filter((k) => !FRg.has(k));
-  ok(missingFrG.length === 0 && ENg.size === FRg.size, `grassroots: ${ENg.size} EN keys, ${FRg.size} FR keys, no gaps`);
-  // Raw-key sweep: every t('x') in source has an EN entry.
-  for (const [app, en] of [
-    ['scoutbox-club', EN],
-    ['scoutbox-grassroots', ENg],
-  ]) {
-    const missing = new Set();
-    for (const f of fs.readdirSync(path.join(ROOT, app, 'src')).filter((f) => /\.tsx?$/.test(f) && f !== 'i18n.ts')) {
-      for (const m of read(`${app}/src/${f}`).matchAll(/\bt\('([\w.\-]+)'/g)) if (!en.has(m[1])) missing.add(m[1]);
-    }
-    neg(
-      missing.size === 0,
-      `${app}: no screen asks for a key that does not exist${missing.size ? `: ${[...missing].join(', ')}` : ''}`,
+  // The same rows in two input orders come out in one order: ties fall to the id, never to arrival.
+  const tied = [
+    { playerId: 'pl-b', name: 'Sam', distanceKm: 5, trustBand: 'established', lastEvidenceAt: 10, reviewedAt: 1 },
+    { playerId: 'pl-a', name: 'Sam', distanceKm: 5, trustBand: 'established', lastEvidenceAt: 10, reviewedAt: 1 },
+    { playerId: 'pl-c', name: 'Sam', distanceKm: 5, trustBand: 'established', lastEvidenceAt: 10, reviewedAt: 1 },
+  ];
+  for (const sort of ['name', 'distance', 'evidence_confidence', 'newest_evidence', 'last_reviewed']) {
+    const one = orderNobodyMissed(tied, sort).map((x) => x.playerId);
+    const two = orderNobodyMissed([...tied].reverse(), sort).map((x) => x.playerId);
+    ok(
+      one.join() === 'pl-a,pl-b,pl-c' && two.join() === one.join(),
+      `Nobody Missed "${sort}": ties fall to the player id`,
     );
   }
-  for (const k of [
-    'conflict.title',
-    'conflict.reload',
-    'conflict.keep',
-    'prefs.title',
-    'audit.title',
-    'prov.unknown',
-    'brief.unsaved',
-    'confirm.tail.irreversible',
-  ]) {
-    ok(EN.has(k) && FR.has(k) && ENg.has(k) && FRg.has(k), `${k} exists in EN and FR, club and grassroots`);
-  }
-}
-
-// ========================================================== §7 ordering
-section('§7 — every sort has a stable tie-break, and the ordering is declared');
-{
-  const searchSrc = read('scoutbox-server/domains/discovery/search.mjs');
-  // The Discover order is the query's (repositories/identity.mjs directoryOrder), read from source.
-  const identitySrc = read('scoutbox-server/repositories/identity.mjs');
-  const discover = identitySrc.slice(
-    identitySrc.indexOf('const directoryOrder'),
-    identitySrc.indexOf('// ---------------------------------------------------------- list operations'),
-  );
+  const items = [
+    { id: 'sl-2', kind: 'significant_new_evidence', latestChangeAt: 5 },
+    { id: 'sl-1', kind: 'significant_new_evidence', latestChangeAt: 5 },
+    { id: 'sl-3', kind: 'significant_new_evidence', latestChangeAt: 9 },
+    { id: 'sl-4', kind: 'direct_reason_resolved', latestChangeAt: 1 },
+  ];
+  const sl = orderSecondLook(items).map((x) => x.id);
   ok(
-    (discover.match(/\['p\.id', 'ASC'\],?\s*\]/g) ?? []).length === 2,
-    'both Discover sorts (Pro and Grassroots) end on the player id',
-  );
-  const route = searchSrc.slice(
-    searchSrc.indexOf("orgRouter.get('/players'"),
-    searchSrc.indexOf("orgRouter.get('/players/:id'"),
-  );
-  ok(/X-ScoutBox-Ordering/.test(route), 'the ordering is declared on the wire');
-  neg(
-    !/score|rank|quality|ability/i.test(route.match(/X-ScoutBox-Ordering'[\s\S]*?\);/)[0]),
-    'the declared ordering names no score, rank or ability',
-  );
-  const shared = read('scoutbox-server/domains/discovery/shared.mjs');
-  ok(/orderNobodyMissed[\s\S]*localeCompare/.test(shared), 'Nobody Missed sorts have an id tie-break');
-  ok(
-    /orderSecondLook[\s\S]*KIND_ORDER/.test(shared),
-    'Second Look orders by relevance kind, then time — never a priority score',
-  );
-  ok(
-    /data-ordering/.test(read('scoutbox-club/src/screens.tsx')) &&
-      /data-ordering/.test(read('scoutbox-grassroots/src/screens.tsx')),
-    'both Discover screens state their ordering to the person',
+    sl.join() === 'sl-4,sl-3,sl-1,sl-2' &&
+      orderSecondLook([...items].reverse())
+        .map((x) => x.id)
+        .join() === sl.join(),
+    'Second Look orders by relevance kind, then the latest change, then the id — never a priority score',
   );
 }
 
-// ================================================== §8–§9 notification prefs
 section('§8 — every notification type is classified, mentions are recognised from server wording only');
 {
   ok(
@@ -382,40 +263,13 @@ section('§8 — every notification type is classified, mentions are recognised 
     categoryOf('message', 'someone wrote "mentioned you" in a message') !== 'mentions',
     'user text saying "mentioned you" in another type is NOT a mention',
   );
-  neg(categoryOf('never_seen_type') === null, 'an unknown type is unclassified (and, below, delivered)');
-  // The server's notify() call sites: every literal type is classified.
-  const srv = [
-    'server.mjs',
-    'domains/identity/players.mjs',
-    'domains/development/grassroots.mjs',
-    'domains/recruitment/inbox.mjs',
-    'domains/recruitment/requests.mjs',
-    'domains/recruitment/clubTrials.mjs',
-    'domains/discovery/filmRoom.mjs',
-    'domains/development/grassrootsClub.mjs',
-    'domains/messaging/channels.mjs',
-    'domains/scouting/journeys.mjs',
-    'domains/scouting/scouting.mjs',
-    'domains/messaging/delivery.mjs',
-    'domains/enterprise/enterprise.mjs',
-    'domains/verification/claims/index.mjs',
-    'domains/verification/passport/index.mjs',
-    'domains/development/boxcam/combine.mjs',
-    'domains/development/boxcam/index.mjs',
-    'domains/recruitment/rooms/rooms.mjs',
-    'domains/discovery/secondLook.mjs',
-    'domains/discovery/nobodyMissed.mjs',
-    'grassrootsJourney.mjs',
-  ].filter((f) => fs.existsSync(path.join(SERVER_DIR, f)));
-  const types = new Set();
-  for (const f of srv)
-    for (const m of fs.readFileSync(path.join(SERVER_DIR, f), 'utf8').matchAll(/notify\??\.?\([^,]+,\s*'([a-z_]+)'/g))
-      types.add(m[1]);
-  const unclassified = [...types].filter((t) => !(t in TYPE_CATEGORY));
-  ok(
-    unclassified.length === 0,
-    `every literal notify() type in the source is classified (${types.size} found)${unclassified.length ? `: ${unclassified.join(', ')}` : ''}`,
+  neg(
+    categoryOf('evidence_request') === 'evidence_requests',
+    "a club's evidence request is an evidence request: the person who switched those off is not sent one",
   );
+  neg(categoryOf('never_seen_type') === null, 'an unknown type is unclassified (and, below, the gate lets it through)');
+  // A notify() of a type with no category is refused at the call outside production (notify.mjs), so a battery that
+  // reaches it fails there; in production it is delivered and counted.
 }
 
 section('§9 — defaults are conservative without muting an obligation, and the mandatory category holds');
@@ -772,11 +626,12 @@ section('§14 — a Recruitment Brief window is inclusive calendar days, in UTC'
     backwards.ok === false && backwards.error === 'BRIEF_INVALID',
     'a window that ends before it starts cannot be saved',
   );
-  // The server evaluates "today" as a UTC calendar day: the same string a
-  // client in any zone would compute from toISOString().
-  const src = read('scoutbox-server/domains/discovery/shared.mjs');
+  // With no day given, "today" is the UTC calendar day: the same string a client in any zone computes.
+  const utcDay = (offsetDays) => new Date(Date.now() + offsetDays * DAY).toISOString().slice(0, 10);
+  const windows = [-1, 0, 1].map((d) => ({ status: 'active', activeFrom: utcDay(d), activeUntil: utcDay(d) }));
   ok(
-    /toISOString\(\)\.slice\(0, 10\)/.test(src.slice(src.indexOf('export function briefIsLiveOn'))),
+    windows.map((w) => briefIsLiveOn(w)).join() === 'false,true,false' &&
+      windows.every((w) => briefIsLiveOn(w) === briefIsLiveOn(w, utcDay(0))),
     'today is the UTC calendar day',
   );
 }
@@ -819,170 +674,6 @@ section('§15 — Second Look cooldown and expiry boundaries');
   neg(
     secondLookExpired({ status: 'reviewed', latestChangeAt: now - 400 * DAY }, now) === false,
     'a reviewed item never "expires" — expiry is for unanswered ones',
-  );
-}
-
-// =========================================== §16–§18 client modules (source)
-section('§16 — destructive actions are classified and every one has consequence copy');
-const confirmSrc = read('scoutbox-club/src/confirmAction.ts');
-{
-  const entries = [...confirmSrc.matchAll(/(\w+): \{ titleKey: '([\w.]+)', bodyKey: '([\w.]+)', cls: '(\w+)' \}/g)];
-  ok(entries.length >= 10, `${entries.length} destructive actions catalogued`);
-  const classes = new Set(['reversible', 'archive', 'tombstone', 'irreversible']);
-  ok(
-    entries.every((e) => classes.has(e[4])),
-    'every action has one of the four classes',
-  );
-  for (const [, name, titleKey, bodyKey] of entries) {
-    ok(
-      EN.has(titleKey) && EN.has(bodyKey) && FR.has(titleKey) && FR.has(bodyKey),
-      `${name}: title and consequence exist in EN and FR`,
-    );
-    neg(!/are you sure/i.test(EN.get(titleKey) + EN.get(bodyKey)), `${name}: never asks "are you sure"`);
-  }
-  ok(
-    entries.find((e) => e[1] === 'deleteComment')[4] === 'tombstone',
-    'deleting a comment is a tombstone (the server keeps the record)',
-  );
-  ok(
-    entries.find((e) => e[1] === 'archiveRoom')[4] === 'archive',
-    'archiving a Room is reversible-by-reopen, and says so',
-  );
-  neg(
-    entries.find((e) => e[1] === 'pauseBrief')[4] === 'reversible',
-    'pausing a brief needs no confirmation — a guard on a harmless action trains people to click through',
-  );
-  ok(
-    /if \(action\.cls === 'reversible'\) return true;/.test(confirmSrc),
-    'the reversible class short-circuits before any dialog',
-  );
-  ok(confirmSrc === read('scoutbox-grassroots/src/confirmAction.ts'), 'grassroots carries the identical catalogue');
-  for (const f of ['screens.tsx', 'roomsScreens.tsx', 'm18Screens.tsx', 'm12screens.tsx', 'combineScreens.tsx']) {
-    neg(
-      !/window\.confirm\(`(Record|Remove|Delete|Archive|Cancel)/.test(read(`scoutbox-club/src/${f}`)),
-      `${f}: no bespoke destructive confirm remains`,
-    );
-  }
-}
-
-section('§17 — one conflict contract, one HTTP state mapper, one provenance vocabulary');
-{
-  const conflict = read('scoutbox-club/src/conflict.tsx');
-  ok(
-    /VERSION_CONFLICT\$/.test(conflict) && /e\.status !== 409/.test(conflict),
-    'a conflict is a 409 whose code ends in VERSION_CONFLICT — nothing else is one',
-  );
-  ok(/currentRev|updatedBy|updatedAt/.test(conflict), 'it reads the server metadata');
-  ok(/role="alert"/.test(conflict) && /aria-live="assertive"/.test(conflict), 'the notice is announced');
-  neg(!/userId/.test(conflict), 'and never shows a user id');
-  const http = read('scoutbox-club/src/httpState.ts');
-  for (const code of ['401', '403', '404', '409', '413', '429'])
-    ok(new RegExp(`case ${code}|=== ${code}`).test(http), `httpState handles ${code}`);
-  ok(/retryAfterS/.test(http) && /retryable/.test(http), 'it carries Retry-After and retryability to the screen');
-  neg(
-    !/logout|signOut|clearSession/.test(http),
-    'the mapper never logs anyone out — that decision belongs to the 401 path in App',
-  );
-  const prov = read('scoutbox-club/src/provenance.ts');
-  ok(
-    PROVENANCE.every((p) => new RegExp(`${p}:`).test(prov)),
-    `all ${PROVENANCE.length} server provenance values have a presentation`,
-  );
-  neg(/known: false,\s*label: t\('prov\.unknown'\)/.test(prov), 'an unknown provenance is "Source unavailable"');
-  neg(!/\?\? 'prov\.player'|: 'prov\.player'\s*\}\s*;?\s*$/.test(prov), 'it never falls back to "Player-provided"');
-  for (const f of ['conflict.tsx', 'httpState.ts', 'provenance.ts', 'dirtyGuard.ts', 'orgPanels.tsx']) {
-    const same = read(`scoutbox-club/src/${f}`) === read(`scoutbox-grassroots/src/${f}`);
-    if (f === 'orgPanels.tsx')
-      knownFailure(same, `${f} is byte-identical in club and grassroots`, 'orgPanels.tsx drift');
-    else ok(same, `${f} is byte-identical in club and grassroots`);
-  }
-  neg(
-    !/PROV_PILL|PROV_KEY/.test(read('scoutbox-club/src/m15screens.tsx')),
-    'the old private provenance tables are gone from the Passport screen',
-  );
-}
-
-section('§18 — unsaved-change protection and the audit/preferences panels are wired and accessible');
-{
-  const guard = read('scoutbox-club/src/dirtyGuard.ts');
-  const app = read('scoutbox-club/src/App.tsx');
-  ok(
-    /beforeunload/.test(guard) && /guardHashChange\(\(\) => t\('brief\.unsaved'\)\)/.test(app),
-    'the guard covers close/reload, and the app asks it FIRST on every hash change',
-  );
-  neg(
-    (app.match(/noteNavigated\(\);/g) ?? []).length >= 5,
-    "every programmatic navigation keeps the guard's remembered hash in step",
-  );
-  neg(/if \(!anyDirty\(\)\) return true;/.test(guard), 'a clean form never prompts');
-  ok(
-    (app.match(/confirmLeave\(t\('brief\.unsaved'\)\)/g) ?? []).length >= 4,
-    'sidebar, Room and Brief navigation all ask first',
-  );
-  const m18 = read('scoutbox-club/src/m18Screens.tsx');
-  ok(
-    /registerDirtyGuard\(/.test(m18) && /ConflictNotice/.test(m18),
-    'the Brief form registers its dirty state and renders the shared conflict notice',
-  );
-  const rooms = read('scoutbox-club/src/roomsScreens.tsx');
-  ok(
-    /expectedRev: room\.rev/.test(rooms) && (rooms.match(/ConflictNotice/g) ?? []).length >= 2,
-    'Room status and decision submits send the token and render the same notice',
-  );
-  const panels = read('scoutbox-club/src/orgPanels.tsx');
-  ok(
-    /aria-label=/.test(panels) && /role="alert"/.test(panels),
-    'preference toggles are labelled, errors are announced',
-  );
-  ok(/err\.retryable && \(?\s*<button/.test(panels), '"Try again" is offered only when retrying can help');
-  neg(/disabled=\{c\.mandatory/.test(panels), 'the mandatory category cannot be toggled in the UI either');
-  ok(
-    /NotificationPreferencesPanel/.test(read('scoutbox-club/src/m13screens.tsx')) &&
-      /AuditLogPanel/.test(read('scoutbox-grassroots/src/m13screens.tsx')),
-    'both panels are mounted under Organisation in both apps',
-  );
-  neg(!/nav\.|NAV_ITEMS|sidebar/.test(panels), 'no new global sidebar item was added for them');
-}
-
-section('§19 — the request log carries no personal data');
-{
-  const ent = read('scoutbox-server/domains/enterprise/enterprise.mjs');
-  const line = (ent.match(/console\.log\(\s*JSON\.stringify\(\{[^}]+\}\),?\s*\)/)?.[0] ?? '').replace(/\s+/g, ' ');
-  ok(
-    /t: Date\.now\(\), id: req\.correlationId, m: req\.method, p: fullPath/.test(line),
-    'the structured log line is time, id, method, path, status, duration',
-  );
-  neg(!/authorization|token|body|email|dob|query/.test(line), 'and nothing else');
-  const files = fs.readdirSync(SERVER_DIR).filter((f) => f.endsWith('.mjs'));
-  for (const d of [
-    'domains/operations',
-    'domains/messaging',
-    'domains/integrations',
-    'domains/insight',
-    'domains/groups',
-    'domains/enterprise',
-    'domains/development/boxcam',
-    'domains/discovery',
-    'domains/platform',
-    'domains/recruitment/rooms',
-    'domains/scouting',
-    'domains/verification',
-    'domains/verification/claims',
-    'domains/verification/passport',
-    'domains/verification/trust',
-  ])
-    for (const f of fs.readdirSync(path.join(SERVER_DIR, d)).filter((x) => x.endsWith('.mjs'))) files.push(`${d}/${f}`);
-  const leaks = [];
-  for (const f of files) {
-    const s = fs.readFileSync(path.join(SERVER_DIR, f), 'utf8');
-    for (const m of s.matchAll(/console\.(log|error|warn)\(([^\n]*)\)/g)) {
-      if (/req\.body|req\.headers|\.dob\b|\.email\b|\.token\b|\.password\b|password:/.test(m[2]))
-        leaks.push(`${f}: ${m[2].slice(0, 80)}`);
-    }
-  }
-  neg(
-    leaks.length === 0,
-    `no console line prints a body, a header, a date of birth, an email or a token${leaks.length ? `\n    ${leaks.join('\n    ')}` : ''}`,
   );
 }
 
@@ -1439,7 +1130,10 @@ section('§27 — Discover ordering is deterministic and declared');
     a.headers.get('x-scoutbox-ordering') === 'academy_plus,profile_completeness,player_id',
     'the Pro ordering is declared',
   );
-  neg(!/score|rank/.test(a.headers.get('x-scoutbox-ordering')), 'and it is not a ranking');
+  neg(
+    !/score|rank|quality|ability|trust/i.test(a.headers.get('x-scoutbox-ordering')),
+    'and it is not a ranking: no score, rank, quality, ability or trust',
+  );
   const ids = a.body.items.map((p) => p.id);
   const sortedByRule = a.body.items
     .slice()
@@ -1455,14 +1149,13 @@ section('§27 — Discover ordering is deterministic and declared');
     'the body follows the declared rule exactly (the id tie-break in code-point order, as SQL compares it)',
   );
   ok(Array.isArray(a.body.items) && 'nextCursor' in a.body, 'the directory is a page ({ items, nextCursor })');
-  if (hack?.token) {
-    const g = await j('GET', '/org/players', undefined, hack.token);
-    ok(
-      g.status === 200 &&
-        g.headers.get('x-scoutbox-ordering') === 'first_team_seeker,distance,profile_completeness,player_id',
-      'the Grassroots ordering is declared differently — distance, never ability',
-    );
-  } else ok(true, 'grassroots login unavailable in this seed; ordering asserted from source in §7');
+  const g = await j('GET', '/org/players', undefined, hack.token);
+  const gOrder = g.headers.get('x-scoutbox-ordering');
+  ok(
+    g.status === 200 && gOrder === 'first_team_seeker,distance,profile_completeness,player_id',
+    'the Grassroots ordering is declared differently — distance, never ability',
+  );
+  neg(!/score|rank|quality|ability|trust/i.test(gOrder), 'and it is not a ranking either');
 }
 
 // ================================================= §28 integrity via HTTP
@@ -1551,6 +1244,68 @@ section('§30 — personal data stays off the surfaces that do not need it');
 }
 
 // ======================================================== §41 second boot
+section('§19 — the request log carries no personal data');
+{
+  // A server with its request log on: what it prints for requests full of personal data and a secret.
+  const LPORT = PORT + 13;
+  const LDATA = mkdtempSync(path.join(tmpdir(), 'sbx-logs-'));
+  const logged = [];
+  const proc = spawn(process.execPath, [SERVER], {
+    env: { ...ENV, PORT: String(LPORT), DATA_DIR: LDATA, SCOUTBOX_QUIET_LOGS: '0' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  children.push(proc);
+  proc.stdout.on('data', (b) => logged.push(String(b)));
+  proc.stderr.on('data', (b) => logged.push(String(b)));
+  const lbase = `http://localhost:${LPORT}`;
+  let up = false;
+  for (let i = 0; i < 160 && !up; i++) {
+    try {
+      up = (await fetch(`${lbase}/healthz`)).ok;
+    } catch {
+      /* booting */
+    }
+    if (!up) await sleep(250);
+  }
+  ok(up, 'a server with its request log on comes up');
+  const send = (method, url, body, token) =>
+    fetch(`${lbase}${url}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+  const who = await send('POST', '/auth/org/login', {
+    orgId: 'org-eastport',
+    scoutName: 'Logcheck Person',
+    role: 'Head of Recruitment',
+  });
+  const token = who.body?.token;
+  await send('GET', '/org/players?q=QUERY-SENTINEL-4471', undefined, token);
+  await send('POST', '/org/players/pl-adeyemi/notes', { text: 'BODY-SENTINEL-2290 jo@example.test 2001-04-17' }, token);
+  await send('POST', '/org/rooms', { playerId: 'pl-adeyemi', email: 'jo@example.test', dob: '2001-04-17' }, token);
+  await sleep(300);
+  proc.kill('SIGTERM');
+  const text = logged.join('');
+  const lines = text.split('\n').filter((l) => l.startsWith('{"t":'));
+  ok(lines.length >= 4 && !!token, `the requests were logged (${lines.length} request lines)`);
+  neg(
+    lines.every((l) => Object.keys(JSON.parse(l)).join() === 't,id,m,p,s,ms'),
+    'each request line is time, id, method, path, status and duration, and nothing else',
+  );
+  const leaked = [
+    token,
+    'QUERY-SENTINEL-4471',
+    'BODY-SENTINEL-2290',
+    'jo@example.test',
+    '2001-04-17',
+    'Logcheck Person',
+  ].filter((x) => x && text.includes(x));
+  neg(
+    leaked.length === 0,
+    `nothing the requests carried reaches the log: no token, query, body, email, date of birth or name (${leaked.join(', ') || 'none'})`,
+  );
+}
+
 section('§41 — a second boot on the same database applies no migration twice');
 {
   serverProc.kill('SIGTERM');

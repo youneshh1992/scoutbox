@@ -16,6 +16,7 @@
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -145,7 +146,7 @@ const ledger = (dir) => {
   }
 };
 
-const PORT = 5700 + Math.floor(Math.random() * 200);
+const PORT = pickPort(5700, 200, [0]);
 const T0 = Date.now();
 const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 const TERMS = {

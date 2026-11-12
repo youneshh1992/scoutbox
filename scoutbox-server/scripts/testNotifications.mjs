@@ -839,4 +839,33 @@ test('boot: no mirror — db.notifications and db.notificationPrefs throw, namin
   rm(dir, bad);
 });
 
+test('notify refuses a type with no notification category outside production, in the act; production delivers it and the gate counts it', () => {
+  const written = [];
+  const notifier = createNotifier({
+    notifications: { findCoalescible: () => null, create: (n) => (written.push(n), { ...n, deferredPush: true }) },
+    prefs: { allows: () => true, categoryOf: (type) => (type === 'message' ? 'messages' : null) },
+    store: { afterCommit() {} },
+    pushSender: { send() {} },
+    byId: { player: () => null, guardian: () => null },
+    publishEvent() {},
+    eventPayloadDrops: { count: 0 },
+  });
+  const STAFF = { kind: 'org', id: 'usr-1' };
+  assert.throws(() => notifier.notify(STAFF, 'never_seen_type', 'x'), /never_seen_type.*no notification category/);
+  assert.equal(written.length, 0, 'nothing was written for the refused type');
+  notifier.notify(STAFF, 'message', 'x');
+  const was = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    notifier.notify(STAFF, 'never_seen_type', 'y');
+  } finally {
+    if (was === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = was;
+  }
+  assert.deepEqual(
+    written.map((n) => n.type),
+    ['message', 'never_seen_type'],
+  );
+});
+
 console.log(`\n${passed} notification checks passed`);

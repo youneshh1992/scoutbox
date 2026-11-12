@@ -11,6 +11,7 @@
 // testing — the things that must NOT happen: no stage is claimed that a record
 // cannot prove.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,7 +57,7 @@ import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../../domains/recruitment/analytics/funnels.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 
-const PORT = 5700 + Math.floor(Math.random() * 200);
+const PORT = pickPort(5700, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');

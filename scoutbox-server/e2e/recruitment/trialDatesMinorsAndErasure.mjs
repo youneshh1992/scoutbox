@@ -24,6 +24,7 @@
 //
 // No assertion is `status !== 200`: every refusal names its status and code.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -52,7 +53,7 @@ const SCHEMA_VERSION = Number(
 ); // the latest table migration's number
 import { openLayer, readRecords, plantCase } from '../../scripts/dataLayerFixture.mjs';
 
-const PORT = 6200 + Math.floor(Math.random() * 200);
+const PORT = pickPort(6200, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-p4a-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');

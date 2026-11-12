@@ -46,6 +46,10 @@ export function createNotifier({ notifications, prefs, store, pushSender, byId, 
   }
 
   function notify(audience, type, text, refId = null, { actionRequired = null } = {}) {
+    // A type with no category cannot be switched off by anyone. Outside production that is refused here, in the act, so
+    // a battery fails at the call site; in production it is delivered and counted (notificationPrefs.mjs).
+    if (prefs.categoryOf(type, text) === null && (process.env.NODE_ENV ?? 'development') !== 'production')
+      throw new Error(`notify('${type}') has no notification category: add it to TYPE_CATEGORY`);
     // The mandatory security category cannot be turned off.
     if (!prefs.allows(audience, type, text)) {
       suppressed += 1;

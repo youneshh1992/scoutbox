@@ -740,8 +740,6 @@ export function registerDecision(ctx) {
           { lifecycle: refused.error, allowed: refused.allowed ?? [], current: { status: from } },
         );
 
-      // Literal event names: the EMITTED_EVENTS source scan only sees literal
-      // names, and would warn on every boot otherwise.
       const decisionEvent = { orgId: kase.orgId, roomId: kase.id, decisionId: row.id };
       if (headFormal) broadcast?.('room_decision_superseded', decisionEvent);
       else broadcast?.('room_decision_finalized', decisionEvent);

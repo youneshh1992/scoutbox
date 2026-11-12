@@ -6,6 +6,7 @@
 // The test-only observation provider (local_test) is enabled via
 // BOX_CAM_TEST_PROVIDER=1 — simulated observations are always labelled
 // simulated and can never exist in production.
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,7 +29,7 @@ import {
 import { DRILLS, drillByIdVersion, providerFor, PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
 import { combineVerifiedProtocols, combineCapabilities } from '../../domains/development/boxcam/cv/eligibility.mjs';
 
-const PORT = 4700 + Math.floor(Math.random() * 200);
+const PORT = pickPort(4700, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m16-'));
 const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');

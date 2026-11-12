@@ -86,29 +86,28 @@ Every route the batteries reach was moved onto one unit, with its notifications,
 inside it; `sideEffectRunner` / `safe()` is gone, and `afterCommit` is the one place a failure never undoes the act.
 The reads that still reconcile workflow state are declared and listed in [`known-issues.md`](known-issues.md).
 
-### 3. Behavioural tests instead of source scans
+### 3. Behavioural tests instead of source scans [**done**]
 
-Several batteries read the server's source and check it with regular expressions (offers, offersAdversarial,
-signings, signingsAdversarial, decisions, journey, journeyAdversarial, agents, crossApp, trustScore). A scan pins how
-the code is spelled rather than what it does: a correct refactor fails it, and an incorrect one written differently
-passes. Steps 2–4 rewrite exactly the code these scans read, so do this before them. Replace each scan with a test of
-the behaviour it stands for:
+No battery reads server or app source any more. Each scan was replaced by a test of the behaviour it stood for, or
+removed when it described only how the code was laid out (a store name the SQLite migration retired, a word that
+must not appear, a file that must exist):
 
-- **"Never reads a trusted fact from the body"** (`req.body.playerId`, `req.body.status`, …): once a route reads a
-  strict schema, send each such field and expect `400` with `problem: 'unknown_field'`.
-- **"Never writes another domain's state"** (an Offer never names a signing): do the act, then read the other domain
-  and check nothing changed there.
-- **"Goes through the one writer" and "rolls back together"**: make the writer fail with the fault seam
-  (`SCOUTBOX_FAULTS` / `POST /__faults`, `internal:STEP`, e.g. `lifecycle.after_status`), then check that every row
-  the act touches is unchanged.
-- **"A failing side effect is never a 500"**: fail the act's first after-commit effect with
-  `internal:unit.after_commit`, and check the route still answers with the data and its notices committed
-  (offersAdversarial O2 does this).
-- **"Which rate budget a route draws on"**: spend a budget through one route and check the routes that share it are
-  refused, and those that don't are not.
-- **"No app renders a field as raw HTML"** (a grep of app files for `dangerouslySetInnerHTML`): this is not a server
-  test. Turn on Biome's `noDangerouslySetInnerHtml` rule (linting is off in `biome.json` today) and run it in CI,
-  which also covers every app file rather than two.
+- **Trusted facts in the body**: sent alongside a valid body to every Offer route, each is refused by name.
+- **One writer**: the writer's own fault seam fails the act and every row it touches is checked unchanged. A seam can
+  also count without failing (`internal:STEP:0`, read back with `GET /__faults`), which shows that every status move of
+  a full journey went through the one lifecycle writer.
+- **Another domain's state**: what the other domain holds is read before and after (a club's cases and signings,
+  every player's contract status and Trust Profile) and compared. This found that a completed signing does move the
+  Trust Score, through the club history and squad row the Passport and Trust read; the test now says so.
+- **Rate budgets**: `GET /__rate-limits` shows which budget a request drew on and under whose key.
+- **Registries**: an undeclared live event was already refused where it is broadcast; a notification type with no
+  category is now refused where it is sent. The hand-kept `EMITTED_EVENTS` list is gone.
+- **Raw HTML in the apps**: Biome's `noDangerouslySetInnerHtml` runs in CI over every app file.
+- **Ports**: every suite draws its port through `pickPort` with the offsets it boots on.
+
+The development-only reads are refused in production with `/__faults`. Shared battery helpers are in `e2e/support/`.
+The app promises the scans used to check, which need a test runner in the web apps, are listed in
+[`known-issues.md`](known-issues.md).
 
 ### 4. Narrow, declared dependencies per domain
 

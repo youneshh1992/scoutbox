@@ -11,9 +11,10 @@
 //
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { clubRecords } from '../support/clubRecords.mjs';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,11 +76,10 @@ import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { AGENT_TRANSACTIONS_MIGRATION, AGENT_TRANSACTIONS_TABLES } from '../../repositories/agentTransactions.mjs';
 import { openLayer, readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 
-const PORT = 6900 + Math.floor(Math.random() * 200);
+const PORT = pickPort(6900, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m26-'));
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(HERE, '..', '..', '..');
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 
@@ -2909,14 +2909,6 @@ section('AF/AG/AH — the state and mobile contracts the browser journeys rely o
   ok(
     Array.isArray(t.viewerRoles) && Array.isArray(t.allowedTransitions),
     'AF2 the projection tells the client which actions exist, so a disabled control is never a guess',
-  );
-  ok(
-    existsSync(path.join(ROOT, 'e2e', 'agentTransactionLive.test.mjs')),
-    'AH1 a real browser journey exists for the transaction workspace',
-  );
-  ok(
-    existsSync(path.join(ROOT, 'scoutbox-agent', 'src', 'transactions.tsx')),
-    'AG1 the agent app has a transactions screen, exercised at 1440/1280/390/360 by the live suite',
   );
 }
 

@@ -16,6 +16,7 @@
 //
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -80,7 +81,7 @@ const SCHEMA_VERSION = Number(
     .slice(0, 4),
 );
 
-const PORT = 7100 + Math.floor(Math.random() * 200);
+const PORT = pickPort(7100, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m27-'));
 const HERE = path.dirname(fileURLToPath(import.meta.url));

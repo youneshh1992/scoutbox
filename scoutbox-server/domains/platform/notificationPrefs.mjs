@@ -63,6 +63,8 @@ export const TYPE_CATEGORY = Object.freeze({
   development: 'development_updates',
   // evidence and combine
   evidence: 'evidence_requests',
+  // A club asking a player (or their guardian) for more evidence.
+  evidence_request: 'evidence_requests',
   passport: 'evidence_requests',
   combine: 'combine',
   box_cam: 'combine',
@@ -170,7 +172,7 @@ export function createNotificationPrefs({ notifications }) {
     return out;
   }
 
-  /** An unknown type is delivered and counted, so the registry gap is visible. */
+  /** In production an unknown type is delivered and counted, so the registry gap is visible; elsewhere notify refuses it. */
   const unknownTypes = new Map();
   function allows(audience, type, text) {
     const cat = categoryOf(type, text);

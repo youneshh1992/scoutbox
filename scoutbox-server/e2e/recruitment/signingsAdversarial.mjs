@@ -19,6 +19,7 @@
 // Every refusal asserts its exact status AND code. Nothing here weakens a
 // gate.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
@@ -44,7 +45,7 @@ import {
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER = path.join(HERE, '..', '..', 'server.mjs');
-const PORT = 4300 + Math.floor(Math.random() * 300);
+const PORT = pickPort(4300, 300, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23-signing-hardening-'));
 const H = 3_600_000;

@@ -195,6 +195,7 @@ export function Icon({
       role={label ? 'img' : undefined}
       aria-label={label}
       style={{ flexShrink: 0, ...style }}
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: the markup is this file's own constant icon paths, never a record's field
       dangerouslySetInnerHTML={{ __html: inner }}
     />
   );

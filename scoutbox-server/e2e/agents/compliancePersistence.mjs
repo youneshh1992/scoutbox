@@ -7,6 +7,7 @@
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
 
+import { pickPort } from '../../scripts/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -117,7 +118,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = 6800 + Math.floor(Math.random() * 150);
+const PORT = pickPort(6800, 150, [0, 1, 2, 3, 4]);
 const T0 = 1_700_000_000_000;
 // Reviewers and policy versions come from migration 0027 (which inserts the seeded versions); contexts, reviews
 // and consents from 0028.
