@@ -6,7 +6,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { openStore } from '../store.mjs';
 import { operationOn } from '../repositories/database.mjs';
-import { inRequest, asSweep, declareAuditedRead, standaloneWrite, TRANSITIONAL_ROUTES } from '../writeRules.mjs';
+import {
+  inRequest,
+  asSweep,
+  asFirstUse,
+  declareAuditedRead,
+  standaloneWrite,
+  TRANSITIONAL_ROUTES,
+} from '../writeRules.mjs';
 
 let passed = 0;
 async function test(name, fn) {
@@ -119,6 +126,16 @@ await test('a sweep run from a request commits one transaction per item', () => 
     }),
   );
   assert.deepEqual(ids(), ['a', 'b', 'c']);
+});
+
+await test('a row created on first use is not the act, so a read may trigger it and an act may follow it', () => {
+  const { write, ids, request } = fixture();
+  request('GET', () => asFirstUse(() => write('first-member')));
+  request('POST', () => {
+    asFirstUse(() => write('bootstrap'));
+    write('act');
+  });
+  assert.deepEqual(ids(), ['act', 'bootstrap', 'first-member']);
 });
 
 await test('a GET or HEAD that writes is refused, unless it declares an audited read', () => {

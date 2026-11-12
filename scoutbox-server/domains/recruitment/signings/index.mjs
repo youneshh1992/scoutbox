@@ -11,7 +11,6 @@ import { createHash } from 'node:crypto';
 import { CLUB_SETUP_LIMITS } from '../../../repositories/clubSetup.mjs';
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { requestClock } from '../../platform/clock.mjs';
-import { sideEffectRunner } from '../../platform/sideEffects.mjs';
 import { roomRole, roomCan } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { parseInput } from '../../platform/schemas.mjs';
@@ -156,7 +155,13 @@ export function registerSigning(rawCtx) {
     Array.isArray(pkg.keys?.[act]) ? pkg.keys[act] : pkg.keys?.[act] ? [pkg.keys[act]] : [];
   const keyRow = (pkg, act, k) => keyList(pkg, act).find((x) => x && x.key === k) ?? null;
   const addKey = (pkg, act, entry) => sp.addKey(pkg.id, act, entry);
-  const safe = sideEffectRunner('SIGNING');
+  /** One unit: `write()` returns the stored package, and `announce(stored)` writes its notices in the same unit. */
+  const unitWith = (write, announce) =>
+    unit(() => {
+      const stored = write();
+      announce(stored);
+      return stored;
+    });
   /** bumpRev's rule (domains/platform/concurrency.mjs), written through the repository. */
   const touch = (pkg, req, at, by = req?.orgUser ?? null) =>
     sp.patch(pkg.id, {
@@ -381,32 +386,37 @@ export function registerSigning(rawCtx) {
       );
       return null;
     }
-    const ev = evidence.add(
-      {
-        type: 'document',
-        source: 'club_upload',
-        suppliedByKind: 'org_user',
-        suppliedById: req.orgUser.id,
-        orgId: req.org.id,
-        claimIds: [],
-        ...stored,
-        visibility: 'organisation_internal',
-        retention: 'until_signing_resolution',
-        meta: { signingPackageId: pkg.id, signingDocumentKind: kind, label },
-      },
-      req,
-    );
-    return {
-      id: nextId(kind === 'executed' ? 'sgx' : 'sgd'),
-      evidenceId: ev.id,
-      sha256: ev.sha256,
-      filename: ev.filename ?? null,
-      mime: ev.mime ?? null,
-      bytes: ev.bytes ?? null,
-      label,
-      uploadedAt: now(req),
-      uploadedBy: byOrg(req),
+    // The vault row is written by the caller's unit, with the package change that names it; only the file is
+    // stored before it.
+    const record = () => {
+      const ev = evidence.add(
+        {
+          type: 'document',
+          source: 'club_upload',
+          suppliedByKind: 'org_user',
+          suppliedById: req.orgUser.id,
+          orgId: req.org.id,
+          claimIds: [],
+          ...stored,
+          visibility: 'organisation_internal',
+          retention: 'until_signing_resolution',
+          meta: { signingPackageId: pkg.id, signingDocumentKind: kind, label },
+        },
+        req,
+      );
+      return {
+        id: nextId(kind === 'executed' ? 'sgx' : 'sgd'),
+        evidenceId: ev.id,
+        sha256: ev.sha256,
+        filename: ev.filename ?? null,
+        mime: ev.mime ?? null,
+        bytes: ev.bytes ?? null,
+        label,
+        uploadedAt: now(req),
+        uploadedBy: byOrg(req),
+      };
     };
+    return { record };
   }
   /**
    * Checked before presenting, before a party confirms, at completion and before serving: the vault row must be
@@ -508,8 +518,8 @@ export function registerSigning(rawCtx) {
    * level, timeline, squad row, availability and success-fee invoice. Called by the completion and, for
    * non-Offer recruitments, the legacy route.
    *
-   * Idempotent per package. The authoritative writes run inside the caller's unit; the invoice is issued after
-   * commit, and notifications after that under `safe()`.
+   * Idempotent per package. Every write, the notices included, runs inside the caller's unit; the invoice is issued
+   * after commit.
    */
   function recordCompletedSigning({ player, org, actor, at, pkg = null, rev = null, legacy = null }) {
     if (pkg) {
@@ -611,37 +621,28 @@ export function registerSigning(rawCtx) {
         ? `Signed with ${org.name} — signing completed in ScoutBox`
         : `Signed by ${org.name} — discovered on ScoutBox`,
     });
-    const effects = () => {
-      safe('refreshJourneyBadges', () => refreshJourneyBadges?.(player));
-      for (const [pText, gText] of levelLines) {
-        safe('notify_level_player', () => notify({ kind: 'player', id: player.id }, 'level_up', pText, player.id));
-        if (player.guardianId)
-          safe('notify_level_guardian', () =>
-            notify({ kind: 'guardian', id: player.guardianId }, 'level_up', gText, player.id),
-          );
-      }
-      safe('notify_signing_player', () =>
-        notify(
-          { kind: 'player', id: player.id },
-          'signing',
-          pkg
-            ? `🎉 ${org.name}: your signing is completed. It's on your timeline.`
-            : `🎉 ${org.name} recorded your signing. Congratulations — it's on your timeline.`,
-          signing.id,
-        ),
+    refreshJourneyBadges?.(player);
+    for (const [pText, gText] of levelLines) {
+      notify({ kind: 'player', id: player.id }, 'level_up', pText, player.id);
+      if (player.guardianId) notify({ kind: 'guardian', id: player.guardianId }, 'level_up', gText, player.id);
+    }
+    notify(
+      { kind: 'player', id: player.id },
+      'signing',
+      pkg
+        ? `🎉 ${org.name}: your signing is completed. It's on your timeline.`
+        : `🎉 ${org.name} recorded your signing. Congratulations — it's on your timeline.`,
+      signing.id,
+    );
+    if (player.guardianId)
+      notify(
+        { kind: 'guardian', id: player.guardianId },
+        'signing',
+        `${org.name} ${pkg ? 'completed' : 'recorded'} ${player.name}'s signing.`,
+        signing.id,
       );
-      if (player.guardianId)
-        safe('notify_signing_guardian', () =>
-          notify(
-            { kind: 'guardian', id: player.guardianId },
-            'signing',
-            `${org.name} ${pkg ? 'completed' : 'recorded'} ${player.name}'s signing.`,
-            signing.id,
-          ),
-        );
-      safe('broadcast_players', () => broadcast?.('players', { playerId: player.id }));
-    };
-    return { signing, duplicate: false, effects };
+    broadcast?.('players', { playerId: player.id });
+    return { signing, duplicate: false };
   }
 
   /** An accepted Offer or any package between this club and player means the workflow owns the signing. */
@@ -873,33 +874,35 @@ export function registerSigning(rawCtx) {
     };
     let stored;
     try {
-      stored = unit(() => {
-        sp.insert(pkg);
-        const fresh = hist(
-          pkg,
-          'signing_created',
-          by,
-          { revisionId: rev.id, offerId: offer.id, offerRevisionId: acceptedRev.id },
-          at,
-        );
-        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_created', {
-          signingPackageId: pkg.id,
-          offerId: offer.id,
-        });
-        return fresh;
-      });
+      stored = unitWith(
+        () => {
+          sp.insert(pkg);
+          const fresh = hist(
+            pkg,
+            'signing_created',
+            by,
+            { revisionId: rev.id, offerId: offer.id, offerRevisionId: acceptedRev.id },
+            at,
+          );
+          caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_created', {
+            signingPackageId: pkg.id,
+            offerId: offer.id,
+          });
+          return fresh;
+        },
+        (stored) => {
+          broadcast?.('signing_created', {
+            orgId: stored.orgId,
+            roomId: kase.id,
+            signingPackageId: stored.id,
+            offerId: offer.id,
+          });
+        },
+      );
     } catch (e) {
       console.error(`SIGNING start_rolled_back ${pkg.id}: ${e?.message ?? e}`);
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be opened; nothing was recorded.');
     }
-    safe('broadcast', () =>
-      broadcast?.('signing_created', {
-        orgId: stored.orgId,
-        roomId: kase.id,
-        signingPackageId: stored.id,
-        offerId: offer.id,
-      }),
-    );
     res.status(201).json({ signing: signingClubView(stored, at, { orgName: req.org.name }) });
   });
 
@@ -988,12 +991,13 @@ export function registerSigning(rawCtx) {
     if (!revGate(req, res, pkg, body)) return;
     if (limited('signing_document_write', req.org.id))
       return res.status(429).json(rateLimitedBody('signing_document_write'));
-    const doc = storeDocument(req, res, { pkg, kind: 'signing', body });
-    if (!doc) return;
+    const file = storeDocument(req, res, { pkg, kind: 'signing', body });
+    if (!file) return;
     const rev = currentRevision(pkg);
     let fresh;
     try {
       fresh = unit(() => {
+        const doc = file.record();
         let p = sp.setDocument(pkg.id, rev.id, 'signing', doc);
         p = hist(p, 'signing_document_attached', byOrg(req), { revisionId: rev.id, sha256: doc.sha256 }, at);
         return touch(p, req, at);
@@ -1048,44 +1052,42 @@ export function registerSigning(rawCtx) {
     const by = byOrg(req);
     let fresh;
     try {
-      fresh = unit(() => {
-        let p = sp.patchRevision(pkg.id, rev.id, { status: 'READY', readyAt: at, readyBy: by });
-        p = sp.patch(p.id, { status: 'READY', expiresAt });
-        if (key) p = addKey(p, 'ready', { key, fp, revisionId: rev.id, at });
-        p = hist(p, 'signing_ready', by, { revisionId: rev.id, sha256: rev.document.sha256 }, at);
-        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_ready', {
-          signingPackageId: p.id,
-          revisionId: rev.id,
-        });
-        return touch(p, req, at);
-      });
+      fresh = unitWith(
+        () => {
+          let p = sp.patchRevision(pkg.id, rev.id, { status: 'READY', readyAt: at, readyBy: by });
+          p = sp.patch(p.id, { status: 'READY', expiresAt });
+          if (key) p = addKey(p, 'ready', { key, fp, revisionId: rev.id, at });
+          p = hist(p, 'signing_ready', by, { revisionId: rev.id, sha256: rev.document.sha256 }, at);
+          caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_ready', {
+            signingPackageId: p.id,
+            revisionId: rev.id,
+          });
+          return touch(p, req, at);
+        },
+        (fresh) => {
+          broadcast?.('signing_ready', {
+            orgId: fresh.orgId,
+            roomId: kase.id,
+            signingPackageId: fresh.id,
+            revisionId: rev.id,
+          });
+          notifyPlayer(
+            fresh,
+            `${req.org.name} has presented your contract for signing. Read the exact document in ScoutBox and confirm it when you are ready; nothing is signed until you do.`,
+          );
+          notifyAgent(
+            fresh,
+            `Your client ${findPlayer(fresh.playerId)?.name ?? ''} was presented a document to sign by ${req.org.name}. Their signature is their own act.`.replace(
+              /\s+/g,
+              ' ',
+            ),
+          );
+        },
+      );
     } catch (e) {
       console.error(`SIGNING ready_rolled_back ${pkg.id}: ${e?.message ?? e}`);
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be presented; nothing was recorded.');
     }
-    safe('broadcast', () =>
-      broadcast?.('signing_ready', {
-        orgId: fresh.orgId,
-        roomId: kase.id,
-        signingPackageId: fresh.id,
-        revisionId: rev.id,
-      }),
-    );
-    safe('notify_player', () =>
-      notifyPlayer(
-        fresh,
-        `${req.org.name} has presented your contract for signing. Read the exact document in ScoutBox and confirm it when you are ready; nothing is signed until you do.`,
-      ),
-    );
-    safe('notify_agent', () =>
-      notifyAgent(
-        fresh,
-        `Your client ${findPlayer(fresh.playerId)?.name ?? ''} was presented a document to sign by ${req.org.name}. Their signature is their own act.`.replace(
-          /\s+/g,
-          ' ',
-        ),
-      ),
-    );
     res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
@@ -1187,6 +1189,24 @@ export function registerSigning(rawCtx) {
           partyType,
         });
         p = touch(p, req, at, actorKind === 'org' ? req.orgUser : { id: actorId, name: actorName });
+        const doneRev = currentRevision(p);
+        broadcast?.('signing_party_completed', {
+          orgId: p.orgId,
+          roomId: kase.id,
+          signingPackageId: p.id,
+          revisionId: rev.id,
+          partyType,
+        });
+        if (actorKind !== 'org')
+          notifyClubLeads(
+            p,
+            `${actorName ?? 'The player'} confirmed the signing document for ${findPlayer(p.playerId)?.name ?? 'the player'}. ${partiesComplete(doneRev) ? 'Every required party has signed: a recruitment lead can now complete the signing.' : 'Waiting on the remaining party.'}`,
+          );
+        else
+          notifyPlayer(
+            p,
+            `${orgName} has signed for the club. ${partiesComplete(doneRev) ? 'Every required party has now signed; the club completes the signing next.' : 'Your signature is still needed.'}`,
+          );
         if (faults?.shouldFail?.('signing.party.after_write'))
           throw new Error('simulated failure after the party evidence write (development fault layer)');
         return p;
@@ -1195,35 +1215,11 @@ export function registerSigning(rawCtx) {
       console.error(`SIGNING party_completion_rolled_back ${pkg.id}: ${e?.message ?? e}`);
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signature could not be recorded; nothing was recorded.');
     }
-    const freshRev = currentRevision(fresh);
-    const view2 = () =>
+    res.json(
       actorKind === 'org'
         ? { signing: signingClubView(fresh, at, { orgName }) }
-        : { signing: signingRecipientView(fresh, at, { orgName, partyType, forEntityId: actorId }) };
-    safe('broadcast', () =>
-      broadcast?.('signing_party_completed', {
-        orgId: fresh.orgId,
-        roomId: kase.id,
-        signingPackageId: fresh.id,
-        revisionId: rev.id,
-        partyType,
-      }),
+        : { signing: signingRecipientView(fresh, at, { orgName, partyType, forEntityId: actorId }) },
     );
-    if (actorKind !== 'org')
-      safe('notify_club', () =>
-        notifyClubLeads(
-          fresh,
-          `${actorName ?? 'The player'} confirmed the signing document for ${findPlayer(fresh.playerId)?.name ?? 'the player'}. ${partiesComplete(freshRev) ? 'Every required party has signed: a recruitment lead can now complete the signing.' : 'Waiting on the remaining party.'}`,
-        ),
-      );
-    else
-      safe('notify_player', () =>
-        notifyPlayer(
-          fresh,
-          `${orgName} has signed for the club. ${partiesComplete(freshRev) ? 'Every required party has now signed; the club completes the signing next.' : 'Your signature is still needed.'}`,
-        ),
-      );
-    res.json(view2());
   }
 
   orgRouter.post('/signings/:id/parties/club/complete', (req, res) => {
@@ -1261,12 +1257,13 @@ export function registerSigning(rawCtx) {
     if (!revGate(req, res, pkg, body)) return;
     if (limited('signing_document_write', req.org.id))
       return res.status(429).json(rateLimitedBody('signing_document_write'));
-    const doc = storeDocument(req, res, { pkg, kind: 'executed', body });
-    if (!doc) return;
+    const file = storeDocument(req, res, { pkg, kind: 'executed', body });
+    if (!file) return;
     const rev = currentRevision(pkg);
     let fresh;
     try {
       fresh = unit(() => {
+        const doc = file.record();
         let p = sp.setDocument(pkg.id, rev.id, 'executed', doc);
         p = hist(p, 'signing_executed_document_attached', byOrg(req), { revisionId: rev.id, sha256: doc.sha256 }, at);
         return touch(p, req, at);
@@ -1278,7 +1275,7 @@ export function registerSigning(rawCtx) {
     res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
-  /** Completion gate, signing writer and lifecycle move as one unit; notifications only after it commits. */
+  /** Completion gate, signing writer, lifecycle move and notices as one unit; the invoice only after it commits. */
   orgRouter.post('/signings/:id/complete', (req, res) => {
     const got = packageFor(req, res, 'lead');
     if (!got) return;
@@ -1356,7 +1353,6 @@ export function registerSigning(rawCtx) {
     if (limited('signing_closure', req.org.id)) return res.status(429).json(rateLimitedBody('signing_closure'));
     // A SigningAbort or a throw anywhere, COMMIT included, rolls everything back and no invoice is issued.
     const by = byOrg(req);
-    let effects = null;
     let moved = null;
     let signing = null;
     let fresh = null;
@@ -1372,7 +1368,6 @@ export function registerSigning(rawCtx) {
             { why: 'duplicate_row' },
           );
         signing = written.signing;
-        effects = written.effects;
         if (faults?.shouldFail?.('signing.complete.after_row'))
           throw new Error('simulated failure after the signings row (development fault layer)');
         let p = sp.patchRevision(pkg.id, rev.id, { status: 'COMPLETED', completedAt: at, completedBy: by });
@@ -1427,6 +1422,18 @@ export function registerSigning(rawCtx) {
           },
         );
         p = touch(p, req, at);
+        broadcast?.('signing_completed', {
+          orgId: p.orgId,
+          roomId: kase.id,
+          signingPackageId: p.id,
+          signingId: signing.id,
+        });
+        notifyAgent(p, `${org.name} completed the signing for your client ${player.name}.`);
+        notifyClubLeads(p, `Signing completed for ${player.name}. The case reads Signed.`);
+        afterCommit(() => {
+          if (faults?.shouldFail?.('signing.complete.effects'))
+            throw new Error('simulated failure in an after-commit effect (development fault layer)');
+        });
         if (faults?.shouldFail?.('signing.complete.at_commit'))
           throw new Error('simulated failure at the commit of the completion unit (development fault layer)');
         return p;
@@ -1444,21 +1451,6 @@ export function registerSigning(rawCtx) {
         );
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be completed; nothing was recorded.');
     }
-    safe('effects', () => {
-      if (faults?.shouldFail?.('signing.complete.effects'))
-        throw new Error('simulated failure in the after-effects (development fault layer)');
-      effects?.();
-    });
-    safe('broadcast', () =>
-      broadcast?.('signing_completed', {
-        orgId: fresh.orgId,
-        roomId: kase.id,
-        signingPackageId: fresh.id,
-        signingId: signing.id,
-      }),
-    );
-    safe('notify_agent', () => notifyAgent(fresh, `${org.name} completed the signing for your client ${player.name}.`));
-    safe('notify_club', () => notifyClubLeads(fresh, `Signing completed for ${player.name}. The case reads Signed.`));
     res.json({
       signing: signingClubView(fresh, at, { orgName: req.org.name }),
       lifecycle: moved,
@@ -1491,41 +1483,38 @@ export function registerSigning(rawCtx) {
       const status = action === 'cancel' ? 'CANCELLED' : 'VOIDED';
       let fresh;
       try {
-        fresh = unit(() => {
-          let p = sp.patchRevision(pkg.id, rev.id, { status });
-          p = sp.patch(
-            p.id,
-            action === 'cancel'
-              ? { status, cancelledAt: at, cancelledBy: by, cancelReason: reason }
-              : { status, voidedAt: at, voidedBy: by, voidReason: reason },
-          );
-          if (key) p = addKey(p, action, { key, fp, at });
-          p = hist(p, `signing_${status.toLowerCase()}`, by, { revisionId: rev.id, hadReason: !!reason }, at);
-          caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, `signing_${status.toLowerCase()}`, {
-            signingPackageId: p.id,
-          });
-          return touch(p, req, at);
-        });
+        fresh = unitWith(
+          () => {
+            let p = sp.patchRevision(pkg.id, rev.id, { status });
+            p = sp.patch(
+              p.id,
+              action === 'cancel'
+                ? { status, cancelledAt: at, cancelledBy: by, cancelReason: reason }
+                : { status, voidedAt: at, voidedBy: by, voidReason: reason },
+            );
+            if (key) p = addKey(p, action, { key, fp, at });
+            p = hist(p, `signing_${status.toLowerCase()}`, by, { revisionId: rev.id, hadReason: !!reason }, at);
+            caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, `signing_${status.toLowerCase()}`, {
+              signingPackageId: p.id,
+            });
+            return touch(p, req, at);
+          },
+          (fresh) => {
+            // Literal event names: the boot-time registry scanner reads the source and cannot see a computed name.
+            if (action === 'cancel')
+              broadcast?.('signing_cancelled', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id });
+            else broadcast?.('signing_voided', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id });
+            if (rev.readyAt)
+              notifyPlayer(
+                fresh,
+                `${req.org.name} ${action === 'cancel' ? 'cancelled' : 'voided'} the signing presented to you. Nothing was signed. Your accepted Offer is unchanged.`,
+              );
+          },
+        );
       } catch (e) {
         console.error(`SIGNING ${action}_rolled_back ${pkg.id}: ${e?.message ?? e}`);
         return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be closed; nothing was recorded.');
       }
-      // Literal event names: the boot-time registry scanner reads the source and cannot see a computed name.
-      if (action === 'cancel')
-        safe('broadcast', () =>
-          broadcast?.('signing_cancelled', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id }),
-        );
-      else
-        safe('broadcast', () =>
-          broadcast?.('signing_voided', { orgId: fresh.orgId, roomId: kase.id, signingPackageId: fresh.id }),
-        );
-      if (rev.readyAt)
-        safe('notify_player', () =>
-          notifyPlayer(
-            fresh,
-            `${req.org.name} ${action === 'cancel' ? 'cancelled' : 'voided'} the signing presented to you. Nothing was signed. Your accepted Offer is unchanged.`,
-          ),
-        );
       res.json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
     };
   }
@@ -1581,42 +1570,42 @@ export function registerSigning(rawCtx) {
     };
     let fresh;
     try {
-      fresh = unit(() => {
-        let p = sp.patchRevision(pkg.id, prev.id, {
-          status: 'SUPERSEDED',
-          supersededByRevisionId: rev.id,
-          supersededAt: at,
-        });
-        p = sp.addRevision(p.id, rev);
-        p = sp.patch(p.id, { currentRevisionId: rev.id, status: 'DRAFT' });
-        if (key) p = addKey(p, 'supersede', { key, fp, revisionId: rev.id, at });
-        p = hist(p, 'signing_superseded', by, { revisionId: rev.id, supersedes: prev.id, hadReason: !!reason }, at);
-        caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_superseded', {
-          signingPackageId: p.id,
-          revisionId: rev.id,
-          supersedes: prev.id,
-        });
-        return touch(p, req, at);
-      });
+      fresh = unitWith(
+        () => {
+          let p = sp.patchRevision(pkg.id, prev.id, {
+            status: 'SUPERSEDED',
+            supersededByRevisionId: rev.id,
+            supersededAt: at,
+          });
+          p = sp.addRevision(p.id, rev);
+          p = sp.patch(p.id, { currentRevisionId: rev.id, status: 'DRAFT' });
+          if (key) p = addKey(p, 'supersede', { key, fp, revisionId: rev.id, at });
+          p = hist(p, 'signing_superseded', by, { revisionId: rev.id, supersedes: prev.id, hadReason: !!reason }, at);
+          caseAudit(kase, 'org', req.orgUser.id, req.orgUser.name, 'signing_superseded', {
+            signingPackageId: p.id,
+            revisionId: rev.id,
+            supersedes: prev.id,
+          });
+          return touch(p, req, at);
+        },
+        (fresh) => {
+          broadcast?.('signing_superseded', {
+            orgId: fresh.orgId,
+            roomId: kase.id,
+            signingPackageId: fresh.id,
+            revisionId: rev.id,
+            supersedes: prev.id,
+          });
+          notifyPlayer(
+            fresh,
+            `${req.org.name} withdrew the document presented to you; any confirmation you gave no longer applies. A new document will be presented before anything is signed.`,
+          );
+        },
+      );
     } catch (e) {
       console.error(`SIGNING supersede_rolled_back ${pkg.id}: ${e?.message ?? e}`);
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be superseded; nothing was recorded.');
     }
-    safe('broadcast', () =>
-      broadcast?.('signing_superseded', {
-        orgId: fresh.orgId,
-        roomId: kase.id,
-        signingPackageId: fresh.id,
-        revisionId: rev.id,
-        supersedes: prev.id,
-      }),
-    );
-    safe('notify_player', () =>
-      notifyPlayer(
-        fresh,
-        `${req.org.name} withdrew the document presented to you; any confirmation you gave no longer applies. A new document will be presented before anything is signed.`,
-      ),
-    );
     res.status(201).json({ signing: signingClubView(fresh, at, { orgName: req.org.name }) });
   });
 
@@ -1807,32 +1796,30 @@ export function registerSigning(rawCtx) {
     const rev = currentRevision(pkg);
     let fresh;
     try {
-      fresh = unit(() => {
-        let p = sp.patchRevision(pkg.id, rev.id, { status: 'VOIDED' });
-        p = sp.patch(p.id, { status: 'VOIDED', voidedAt: at, voidedBy: by, voidReason: reason });
-        p = hist(p, 'signing_voided', by, { revisionId: rev.id, hadReason: true, byTrustAndSafety: true }, at);
-        const kase = caseOf(p);
-        if (kase)
-          caseAudit(kase, 'admin', by.id, by.name, 'signing_voided', {
-            signingPackageId: p.id,
-            byTrustAndSafety: true,
-          });
-        return touch(p, null, at, { id: by.id, name: by.name });
-      });
+      fresh = unitWith(
+        () => {
+          let p = sp.patchRevision(pkg.id, rev.id, { status: 'VOIDED' });
+          p = sp.patch(p.id, { status: 'VOIDED', voidedAt: at, voidedBy: by, voidReason: reason });
+          p = hist(p, 'signing_voided', by, { revisionId: rev.id, hadReason: true, byTrustAndSafety: true }, at);
+          const kase = caseOf(p);
+          if (kase)
+            caseAudit(kase, 'admin', by.id, by.name, 'signing_voided', {
+              signingPackageId: p.id,
+              byTrustAndSafety: true,
+            });
+          return touch(p, null, at, { id: by.id, name: by.name });
+        },
+        (fresh) => {
+          broadcast?.('signing_voided', { orgId: fresh.orgId, roomId: fresh.caseId, signingPackageId: fresh.id });
+          notifyClubLeads(fresh, 'Trust & Safety voided a signing on one of your cases. Nothing was signed.');
+          if (rev.readyAt)
+            notifyPlayer(fresh, 'The signing presented to you was voided by Trust & Safety. Nothing was signed.');
+        },
+      );
     } catch (e) {
       console.error(`SIGNING admin_void_rolled_back ${pkg.id}: ${e?.message ?? e}`);
       return err(res, 'SIGNING_STATE_UNKNOWN', 'The signing could not be voided; nothing was recorded.');
     }
-    safe('broadcast', () =>
-      broadcast?.('signing_voided', { orgId: fresh.orgId, roomId: fresh.caseId, signingPackageId: fresh.id }),
-    );
-    safe('notify_club', () =>
-      notifyClubLeads(fresh, 'Trust & Safety voided a signing on one of your cases. Nothing was signed.'),
-    );
-    if (rev.readyAt)
-      safe('notify_player', () =>
-        notifyPlayer(fresh, 'The signing presented to you was voided by Trust & Safety. Nothing was signed.'),
-      );
     res.json({ ok: true, signingPackageId: fresh.id, status: 'VOIDED' });
   });
 

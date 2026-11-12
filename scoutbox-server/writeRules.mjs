@@ -9,7 +9,8 @@
 // What a request commits is counted from SQLite's own change counter (`total_changes()`), so a transaction that
 // changed nothing is not counted, and a write that bypassed the transaction helpers is still seen. Not counted:
 // the id counter's mints (a lost mint leaves a gap, never a wrong row); after-commit side effects and the delivery
-// records they write (`sideEffect`); sweeps, which commit one transaction per item by design (`asSweep`); and work
+// records they write (`sideEffect`); sweeps, which commit one transaction per item by design (`asSweep`); a row
+// created on first use (`asFirstUse`); and work
 // outside any request (boot, timers).
 //
 // A broken rule throws outside production, so a battery fails at the call site; in production it is counted and
@@ -29,7 +30,6 @@ export const TRANSITIONAL_ROUTES = new Set([
   'GET /api/v1/export/prospects',
   'GET /api/v1/export/shortlist',
   'GET /org/agent/clients/:id',
-  'GET /org/agent/clients/:id/offers',
   'GET /org/agent/me',
   'GET /org/agent/transactions',
   'GET /org/audit/export',
@@ -43,8 +43,6 @@ export const TRANSITIONAL_ROUTES = new Set([
   'GET /org/transitions/:id/pack',
   'GET /org/watchlists/:id',
   'GET /passport/shared/:token',
-  'GET /player/offers',
-  'GET /player/offers/:id',
   'PATCH /org/rooms/:id',
   'POST /admin/verification/claims/:id/approve',
   'POST /admin/verification/claims/:id/suspend',
@@ -62,10 +60,7 @@ export const TRANSITIONAL_ROUTES = new Set([
   'POST /org/cases/:id/approvals/:aid',
   'POST /org/cases/:id/assign',
   'POST /org/coaches',
-  'POST /org/offers/:id/issue',
-  'POST /org/offers/:id/withdraw',
   'POST /org/players/:id/request',
-  'POST /org/players/:id/signing',
   'POST /org/rooms',
   'POST /org/rooms/:id/assessment-assignments',
   'POST /org/rooms/:id/comments',
@@ -75,14 +70,6 @@ export const TRANSITIONAL_ROUTES = new Set([
   'POST /org/rooms/:id/trials/:tid/complete',
   'POST /org/rooms/:id/trials/:tid/reschedule',
   'POST /org/rooms/:id/trials/:tid/schedule',
-  'POST /org/signings/:id/cancel',
-  'POST /org/signings/:id/complete',
-  'POST /org/signings/:id/document',
-  'POST /org/signings/:id/executed-document',
-  'POST /org/signings/:id/parties/club/complete',
-  'POST /org/signings/:id/ready',
-  'POST /org/signings/:id/supersede',
-  'POST /org/signings/:id/void',
   'POST /org/trials/:id/arrival',
   'POST /org/trials/:id/cancel',
   'POST /org/trials/:id/postpone',
@@ -93,9 +80,6 @@ export const TRANSITIONAL_ROUTES = new Set([
   'POST /org/verification/staff/:userId/departed',
   'POST /org/verification/work-email',
   'POST /org/watchlists/:id/room',
-  'POST /player/offers/:id/accept',
-  'POST /player/offers/:id/decline',
-  'POST /player/signings/:id/complete',
   'POST /player/trials/:id/confirm-schedule',
   'POST /player/trials/:id/decline-schedule',
 ]);
@@ -112,6 +96,12 @@ export const sideEffect = (fn) => exempt('side_effect', fn);
 
 /** Run a sweep from inside a request: each item is its own transaction, by design. */
 export const asSweep = (fn) => exempt('sweep', fn);
+
+/**
+ * Create a row on first use (the first member of an agency becomes its administrator): self-contained setup that
+ * any route may trigger, a read included, and that is not the request's act.
+ */
+export const asFirstUse = (fn) => exempt('first_use', fn);
 
 /** A read that must leave a record of itself (a shared passport opened). It lifts rule 2 only. */
 export function declareAuditedRead(reason) {

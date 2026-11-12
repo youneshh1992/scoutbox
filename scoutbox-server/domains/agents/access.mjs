@@ -4,6 +4,7 @@
  */
 import { sendAgentError } from './core/errors.mjs';
 import { tiersOf, can } from './core/shared.mjs';
+import { asFirstUse } from '../../writeRules.mjs';
 
 export function createAgentAccess({ agentCore, unit, nextId, broadcast, now = () => Date.now() }) {
   if (typeof agentCore?.affiliations?.activeFor !== 'function' || typeof unit !== 'function')
@@ -38,30 +39,32 @@ export function createAgentAccess({ agentCore, unit, nextId, broadcast, now = ()
         );
         return null;
       }
-      aff = unit(() => {
-        const at = now();
-        const by = { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name };
-        const tiers = ['agency_admin'];
-        const created = affiliations.create({
-          id: nextId('aff'),
-          agencyOrgId: req.org.id,
-          userId: req.orgUser.id,
-          tiers,
-          startedAt: at,
-          endedAt: null,
-          endedReason: null,
-          createdAt: at,
-          rev: 1,
-          revAt: at,
-          revBy: null,
-          keys: {},
-          history: [
-            { id: nextId('aud'), at, action: 'agency_affiliation_created', by, detail: { tiers, bootstrap: true } },
-          ],
-        });
-        broadcast('agency_affiliation_created', { orgId: req.org.id, userId: req.orgUser.id });
-        return created;
-      });
+      aff = asFirstUse(() =>
+        unit(() => {
+          const at = now();
+          const by = { kind: 'org', userId: req.orgUser.id, name: req.orgUser.name };
+          const tiers = ['agency_admin'];
+          const created = affiliations.create({
+            id: nextId('aff'),
+            agencyOrgId: req.org.id,
+            userId: req.orgUser.id,
+            tiers,
+            startedAt: at,
+            endedAt: null,
+            endedReason: null,
+            createdAt: at,
+            rev: 1,
+            revAt: at,
+            revBy: null,
+            keys: {},
+            history: [
+              { id: nextId('aud'), at, action: 'agency_affiliation_created', by, detail: { tiers, bootstrap: true } },
+            ],
+          });
+          broadcast('agency_affiliation_created', { orgId: req.org.id, userId: req.orgUser.id });
+          return created;
+        }),
+      );
     }
     req.affiliation = aff;
     req.tiers = tiersOf(aff);

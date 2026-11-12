@@ -3,9 +3,9 @@
  * through `ctx.applyLifecycleTransition`, after the lifecycle validator agreed with the real evidence provider.
  */
 
+import { declareAuditedRead } from '../../../writeRules.mjs';
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { requestClock } from '../../platform/clock.mjs';
-import { sideEffectRunner } from '../../platform/sideEffects.mjs';
 import { roomRole, roomCan, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
@@ -163,10 +163,6 @@ export function registerOffers(rawCtx) {
       return undefined;
     }
   };
-
-  // A side effect that throws after the state was persisted is logged, not turned into a 500 the client
-  // would retry.
-  const safe = sideEffectRunner('OFFER');
 
   // An accepted Offer with no signing package reads `signing: null`: nothing is inferred.
   const withSigning = (o, at, view) => ({ ...view, signing: signingSummary(o.id, o.orgId, at) });
@@ -609,11 +605,9 @@ export function registerOffers(rawCtx) {
         offerId: offer.id,
         revisionId: rev.id,
       });
+      broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
       return fresh;
     });
-    safe('offer_draft_created', () =>
-      broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }),
-    );
     res.status(201).json({ offer: clubView(stored, at) });
   });
 
@@ -679,8 +673,9 @@ export function registerOffers(rawCtx) {
     )
       return;
     const by = byOrg(req);
-    const stored = unit(() =>
-      offers.editDraft(
+    const stored = unit(() => {
+      broadcast?.('offer_draft_updated', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
+      return offers.editDraft(
         offer.id,
         {
           revisionId: rev.id,
@@ -700,11 +695,8 @@ export function registerOffers(rawCtx) {
           bumpRevisionId: rev.id,
           history: [entry('offer_draft_updated', by, { revisionId: rev.id }, at)],
         },
-      ),
-    );
-    safe('offer_draft_updated', () =>
-      broadcast?.('offer_draft_updated', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }),
-    );
+      );
+    });
     res.json({ offer: clubView(stored, at) });
   });
 
@@ -885,43 +877,33 @@ export function registerOffers(rawCtx) {
         supersedes: prevIssued?.id ?? null,
         to: moved.applied ? moved.to : undefined,
       });
-      return fresh;
-    });
-    if (!done) return;
-    const issued = done.value;
-    const issuedRev = currentRevision(issued);
-    if (prevIssued)
-      safe('offer_superseded', () =>
-        broadcast?.('offer_superseded', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }),
-      );
-    safe('offer_issued', () => broadcast?.('offer_issued', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }));
-    safe('notify', () =>
+      if (prevIssued) broadcast?.('offer_superseded', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
+      broadcast?.('offer_issued', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
       notifyRecipient(
-        issuedRev,
+        currentRevision(fresh),
         `${org.name ?? 'A club'} has issued you an Offer${prevIssued ? ' (a revised one)' : ''}. Read the exact terms in ScoutBox and answer before it expires. Accepting is not a signing.`,
         offer.id,
-      ),
-    );
-    safe('notifyAgent', () =>
+      );
       notifyAgent(
-        issued,
+        fresh,
         `Your client ${kase.playerName ?? ''} received a${prevIssued ? ' revised' : 'n'} Offer from ${org.name ?? 'a club'}. Their answer is their own act.`.replace(
           /\s+/g,
           ' ',
         ),
-      ),
-    );
-    for (const uid of new Set([kase.ownerUserId, kase.room?.leadScoutUserId])) {
-      if (!uid || uid === req.orgUser.id) continue;
-      safe('notifyClub', () =>
+      );
+      for (const uid of new Set([kase.ownerUserId, kase.room?.leadScoutUserId])) {
+        if (!uid || uid === req.orgUser.id) continue;
         notify(
           { kind: 'org_user', id: uid },
           'recruitment_offer',
           `Recruitment Room — ${kase.playerName ?? 'a removed player'}: Offer revision ${rev.revisionNumber} issued.`,
           offer.id,
-        ),
-      );
-    }
+        );
+      }
+      return fresh;
+    });
+    if (!done) return;
+    const issued = done.value;
     res.json({
       offer: clubView(issued, at),
       lifecycle: moved,
@@ -987,26 +969,20 @@ export function registerOffers(rawCtx) {
         wasIssued,
         to: moved.applied ? moved.to : undefined,
       });
-      return fresh;
-    });
-    safe('offer_withdrawn', () =>
-      broadcast?.('offer_withdrawn', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }),
-    );
-    if (wasIssued) {
-      safe('notify', () =>
+      broadcast?.('offer_withdrawn', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
+      if (wasIssued) {
         notifyRecipient(
-          currentRevision(withdrawn),
+          currentRevision(fresh),
           `${orgOf(kase.orgId)?.name ?? 'The club'} has withdrawn its Offer. Nothing further is needed from you.`,
           offer.id,
-        ),
-      );
-      safe('notifyAgent', () =>
+        );
         notifyAgent(
-          withdrawn,
+          fresh,
           `The Offer to your client ${kase.playerName ?? ''} was withdrawn by the club.`.replace(/\s+/g, ' '),
-        ),
-      );
-    }
+        );
+      }
+      return fresh;
+    });
     res.json({ offer: clubView(withdrawn, at), lifecycle: moved });
   });
 
@@ -1127,11 +1103,9 @@ export function registerOffers(rawCtx) {
         revisionId: rev.id,
         revises: prev.id,
       });
+      broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id });
       return fresh;
     });
-    safe('offer_draft_created', () =>
-      broadcast?.('offer_draft_created', { orgId: kase.orgId, roomId: kase.id, offerId: offer.id }),
-    );
     res.status(201).json({ offer: clubView(revised, at) });
   });
 
@@ -1234,6 +1208,7 @@ export function registerOffers(rawCtx) {
       const viewer = { kind: by, id: actorId };
       const listed = recipientOffers({ by, actorId, playerIds, at });
       const unseen = listed.filter((o) => receiptDue(o, viewer));
+      if (unseen.length) declareAuditedRead("the recipient's first sight of an issued revision");
       const marked = unseen.length
         ? new Map(unit(() => unseen.map((o) => [o.id, markViewed(o, viewer, at)])))
         : new Map();
@@ -1254,6 +1229,7 @@ export function registerOffers(rawCtx) {
       if (!o) return;
       const at = now(req);
       const viewer = { kind: by, id: actorId };
+      if (receiptDue(o, viewer)) declareAuditedRead("the recipient's first sight of an issued revision");
       const seen = receiptDue(o, viewer) ? unit(() => markViewed(o, viewer, at)) : o;
       res.json({ offer: recipientView(seen, at), history: offerHistoryView(seen, { forRecipient: true }) });
     };
@@ -1415,38 +1391,32 @@ export function registerOffers(rawCtx) {
             revisionId: rev.id,
             to: moved.applied ? moved.to : undefined,
           });
-        return fresh;
-      });
-      if (!done) return;
-      const answered = done.value;
-      // Development-only fault seam after persisting: a retry with the same clientKey replays without a second
-      // move or notification.
-      if (faults?.shouldFail?.('offer.respond.after_persist'))
-        throw new Error('simulated failure after the answer was persisted (development fault layer)');
-      if (room)
-        safe('offer_responded', () =>
+        if (room)
           broadcast?.('offer_responded', {
             orgId: o.orgId,
             roomId: room.id,
             offerId: o.id,
-            status: currentRevision(answered)?.status ?? null,
-          }),
-        );
-      safe('notifyClub', () =>
+            status: currentRevision(fresh)?.status ?? null,
+          });
         notifyClub(
           o,
           `${actorName} ${responseType} Offer revision ${rev.revisionNumber} for ${room?.playerName ?? player?.name ?? 'the player'}${responseType === 'accepted' ? ' — accepted in ScoutBox; signing pending' : ''}.`,
-        ),
-      );
-      safe('notifyAgent', () =>
+        );
         notifyAgent(
-          answered,
+          fresh,
           `Your client ${player?.name ?? ''} ${responseType} the Offer from ${org.name ?? 'the club'}.`.replace(
             /\s+/g,
             ' ',
           ),
-        ),
-      );
+        );
+        return fresh;
+      });
+      if (!done) return;
+      const answered = done.value;
+      // Development-only fault seam after the commit: a retry with the same clientKey replays without a second
+      // move or notification.
+      if (faults?.shouldFail?.('offer.respond.after_persist'))
+        throw new Error('simulated failure after the answer was persisted (development fault layer)');
       res.json({
         offer: recipientView(answered, at),
         lifecycle: moved,

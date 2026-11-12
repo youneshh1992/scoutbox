@@ -4,11 +4,9 @@ import { visibleToOrg } from '../../../domain.mjs';
 import { isLeadRole } from '../../../roles.mjs';
 import { readPage, sendPageError } from '../../platform/paging.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
-import { sideEffectRunner } from '../../platform/sideEffects.mjs';
 import * as v from 'valibot';
 import { inputOrRefuse, text } from '../../platform/schemas.mjs';
 
-const runSideEffect = sideEffectRunner('SIGNING');
 const LegacySigning = v.strictObject({ note: v.nullish(text(400)) });
 
 export function registerLegacySigning({
@@ -73,8 +71,7 @@ export function registerLegacySigning({
         message: 'The signing could not be recorded; nothing was recorded.',
       });
     }
-    const { signing, effects } = written;
-    if (effects) runSideEffect('legacy', effects);
+    const { signing } = written;
     res.status(201).json({ ok: true, signing });
   });
 

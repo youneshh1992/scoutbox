@@ -1559,18 +1559,20 @@ section('O — partial failure: authoritative state first, side effects never tu
   const c = await create(RID, { terms: TERMS, expiresAt: T0 + 7 * DAY, clientKey: key() });
   if (c.status !== 201) throw new Error(`O create ${c.status} ${JSON.stringify(c.body).slice(0, 200)}`);
   const KI = key();
+  // The issue's first after-commit side effect fails.
+  await j('POST', '/__faults', { rules: 'internal:unit.after_commit:1' });
   const i = await issue(c.body.offer.id, { expectedRev: 1, clientKey: KI });
+  await j('POST', '/__faults', { rules: '' });
   ok(i.status === 200, 'O1 an issue succeeds');
-  // Every post-persist side effect is wrapped: the m28 source proves it, and the route order is persist → effects.
-  // An Offer write is a repository operation inside a unit of work (`unit(…)`, or `inUnit(res, …)` where
-  // the case may refuse the move); the side effects follow the unit's COMMIT.
-  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', 'index.mjs'), 'utf8');
-  const unitIdx = [...src.matchAll(/\b(unit|inUnit)\((res, )?\(\) =>/g)].map((m) => m.index);
-  const bareBroadcast = [...src.matchAll(/(?<!=>)\n\s*broadcast\?\.\(/g)].length;
-  neg(
-    bareBroadcast === 0 && /const safe = sideEffectRunner\(/.test(src) && unitIdx.length >= 6,
-    'O2 every broadcast/notification after a persisted write is wrapped in safe() — a throwing side effect is logged, not surfaced as a 500',
+  // The notices are part of the act; what follows the commit (the push, the live event) never undoes it.
+  const told = (await notifs('/player/notifications', imani.token)).filter(
+    (n) => n.type === 'recruitment_offer' && n.refId === c.body.offer.id,
   );
+  neg(
+    i.status === 200 && i.body.offer.status === 'ISSUED' && told.length === 1,
+    `O2 a side effect that fails after the commit is not a 500 and undoes nothing: the Offer is issued and the player has its notice (${i.status}, ${told.length})`,
+  );
+  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', 'index.mjs'), 'utf8');
   // The case refusing the move is thrown INSIDE the unit, which rolls the Offer rows and the case back together.
   neg(
     /catch \(e\) \{\s*console\.error\(`OFFER lifecycle_writer_threw/.test(src) &&

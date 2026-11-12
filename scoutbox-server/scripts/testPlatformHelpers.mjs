@@ -6,7 +6,6 @@ import { requestClock, TEST_CLOCK_HEADER } from '../domains/platform/clock.mjs';
 import { testClockEnabled, productionConfigProblems } from '../domains/platform/capabilities.mjs';
 import { normaliseClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../domains/platform/idempotency.mjs';
 import { deepFreeze, canonicalJson } from '../domains/platform/values.mjs';
-import { sideEffectRunner } from '../domains/platform/sideEffects.mjs';
 import { limitCheck, refuseWhenLimited } from '../domains/platform/rateLimit.mjs';
 import { normaliseClientKey as contactKey } from '../domains/recruitment/lifecycle/contact.mjs';
 import { normaliseSigningClientKey } from '../domains/recruitment/signings/signing.mjs';
@@ -63,28 +62,6 @@ test('canonicalJson sorts keys at every level and keeps array order; deepFreeze 
   assert.equal(canonicalJson({ b: [2, 1], a: { y: null, x: undefined } }), '{"a":{"x":null,"y":null},"b":[2,1]}');
   const v = deepFreeze({ a: { b: [{ c: 1 }] } });
   assert.ok(Object.isFrozen(v) && Object.isFrozen(v.a) && Object.isFrozen(v.a.b) && Object.isFrozen(v.a.b[0]));
-});
-
-test('side-effect runner: returns the value, and logs a failure instead of throwing it', () => {
-  const run = sideEffectRunner('TEST');
-  assert.equal(
-    run('ok', () => 5),
-    5,
-  );
-  const logged = [];
-  const orig = console.error;
-  console.error = (m) => logged.push(m);
-  try {
-    assert.equal(
-      run('boom', () => {
-        throw new Error('nope');
-      }),
-      undefined,
-    );
-  } finally {
-    console.error = orig;
-  }
-  assert.deepEqual(logged, ['TEST side_effect_failed boom: nope']);
 });
 
 test('rate-limit checks: no limiter limits nothing; a limited action answers 429 with the shared body', () => {

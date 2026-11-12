@@ -241,6 +241,11 @@ const nextId = (prefix) => `${prefix}-${idCounter.next()}`;
 const seams = { shouldFail: () => false };
 function unit(work) {
   return store.unitOfWork(() => {
+    // `internal:unit.after_commit`: this unit's first after-commit side effect fails, after its data committed.
+    store.afterCommit(() => {
+      if (seams.shouldFail('unit.after_commit'))
+        throw new Error('simulated after-commit failure (development fault layer)');
+    });
     const result = work();
     // `internal:unit.sqlite_commit`: the REAL COMMIT of this unit fails (store.failCommitOfOpenTransaction).
     if (seams.shouldFail('unit.sqlite_commit')) store.failCommitOfOpenTransaction();
