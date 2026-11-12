@@ -27,7 +27,7 @@
  * and the staff named are RESTRICT keys; so are the keys inside the domain (a prospect's batch, a review's batch row,
  * a delivery's endpoint). Child rows cascade with their owner.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {

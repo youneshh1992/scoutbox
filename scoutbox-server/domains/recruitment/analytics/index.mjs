@@ -23,7 +23,7 @@ import { buildReportingContext, buildDashboard, ROOM_PRIORITIES } from './dashbo
 import { STALL_THRESHOLDS, DEFAULT_STALL_DAYS } from './timeSeries.mjs';
 import { SOURCE_CONTEXTS } from '../rooms/shared.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
-import { metrics } from '../../enterprise/enterprise.mjs';
+import { metrics } from '../../platform/metrics.mjs';
 import { now } from '../../platform/clock.mjs';
 import * as v from 'valibot';
 import { inputOrRefuse, wholeNumberText } from '../../platform/schemas.mjs';

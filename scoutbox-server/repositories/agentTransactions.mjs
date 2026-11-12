@@ -40,14 +40,14 @@
  * a channel goes with a deleted player, a trial or an opportunity can be deleted; the record keeps the fact). Child
  * rows cascade.
  */
-import { isPlainObject, describe } from './recruitment.mjs';
+import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { quote } from './fieldSpecs.mjs';
 import { REPRESENTATION_STATUSES } from './complianceRecords.mjs';
-import { VERIFICATION_STATES, SCOPES } from '../domains/agents/core/shared.mjs';
-import { CONFLICT_OUTCOMES, CONTEXT_TYPES, PARTY_ROLES } from '../domains/agents/compliance/conflict.mjs';
+import { VERIFICATION_STATES, SCOPES } from '../domains/agents/public.mjs';
+import { CONFLICT_OUTCOMES, CONTEXT_TYPES, PARTY_ROLES } from '../domains/agents/public.mjs';
 import {
   TRANSACTION_STATUSES,
   LIVE_STATUSES,
@@ -67,7 +67,7 @@ import {
   CANCEL_REASON_CODES,
   CLOSE_REASON_CODES,
   TRANSACTION_LIMITS,
-} from '../domains/agents/transactions/transaction.mjs';
+} from '../domains/agents/public.mjs';
 
 export const AGENT_TRANSACTIONS_MIGRATION = '0029_agent_transactions';
 export const AGENT_TRANSACTIONS_COLLECTIONS = Object.freeze([

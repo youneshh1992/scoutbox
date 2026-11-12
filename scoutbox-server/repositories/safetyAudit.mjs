@@ -26,7 +26,7 @@
  *
  * Refusals name tables, ids and fields, never a reason, note, excerpt, name or document value.
  */
-import { isPlainObject, describe, ids } from './recruitment.mjs';
+import { isPlainObject, describe, ids } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {

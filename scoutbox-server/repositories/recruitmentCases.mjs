@@ -25,7 +25,7 @@
  */
 import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
-import { isPlainObject } from './recruitment.mjs';
+import { isPlainObject } from './fieldSpecs.mjs';
 import { writeChecks, writeKit } from './writes.mjs';
 import {
   ROOM_STATUSES,
@@ -36,21 +36,21 @@ import {
   LINKED_RESOURCE_TYPES,
   EVIDENCE_REVIEW_STATES,
   RECOMMENDATIONS,
-  LIMITS,
+  ROOM_LIMITS as LIMITS,
   CASE_STAGES,
   CASE_PRIORITIES,
   CASE_DECISION_OUTCOMES,
   CASE_APPROVAL_STATES,
-} from '../domains/recruitment/rooms/shared.mjs';
+} from '../domains/recruitment/public.mjs';
 import {
   DECISION_OUTCOMES,
   DECISION_KINDS,
   DECISION_STATES,
   EVIDENCE_REF_KINDS,
   DECISION_LIMITS,
-} from '../domains/recruitment/lifecycle/decision.mjs';
-import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../domains/recruitment/money.mjs';
-import { HANDOFF_STATUSES } from '../domains/agents/integration/integration.mjs';
+} from '../domains/recruitment/public.mjs';
+import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../domains/recruitment/public.mjs';
+import { HANDOFF_STATUSES } from '../domains/agents/public.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const RECRUITMENT_CASES_MIGRATION = '0016_recruitment_cases';

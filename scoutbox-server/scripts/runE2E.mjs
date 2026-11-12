@@ -70,8 +70,8 @@ export const BATTERIES = [
   'scouting/clubWorkflows',
   'development/boxCam',
   'agents/crossAppAdversarial',
-  'verification/passport',
-  'verification/trustScore',
+  'passport/passport',
+  'passport/trustScore',
   'development/combineProductionGate',
 ];
 // Folders under e2e/ that hold helpers, not batteries.

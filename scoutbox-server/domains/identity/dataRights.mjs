@@ -1,7 +1,7 @@
 // A deletion keeps the append-only ledger (the audit and attribution basis, ids only) but removes the person's content
 // everywhere it is held.
 import { guardianSelfView, playerSelfView } from '../../views/playerViews.mjs';
-import { ownChild } from './children.mjs';
+import { ownChild } from './guards.mjs';
 
 /**
  * Each `redactors` entry (`(playerId, at) => …`, run in order) tombstones or redacts what its domain holds of the

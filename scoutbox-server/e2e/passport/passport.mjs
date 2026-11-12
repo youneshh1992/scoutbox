@@ -31,7 +31,7 @@ import {
   mintShareSecret,
   shareProblem,
   SHARE_MODES,
-} from '../../domains/verification/passport/shared.mjs';
+} from '../../domains/passport/shared.mjs';
 
 const PORT = pickPort(4900, 300, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
@@ -1553,7 +1553,7 @@ section('H18 — share token enumeration hits the rate limit');
 
 const ratio = Math.round((negatives / passed) * 100);
 console.log(
-  `\nverification/passport: ${passed} checks passed, ${negatives} negative/abuse checks (${ratio}% of all checks)${process.exitCode ? ' (WITH FAILURES)' : ''}`,
+  `\npassport/passport: ${passed} checks passed, ${negatives} negative/abuse checks (${ratio}% of all checks)${process.exitCode ? ' (WITH FAILURES)' : ''}`,
 );
 if (negatives * 3 < passed) {
   console.error('✗ negative-test ratio below one third');

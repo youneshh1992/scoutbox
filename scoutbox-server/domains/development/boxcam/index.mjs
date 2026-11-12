@@ -1,7 +1,7 @@
 // Modules register on the authenticated routers, so every standing gate runs before any Box Cam handler. Sessions
 // store aggregated observations, never raw frames or video; the Football Passport projects Box Cam data, never
 // copies it.
-import { metrics } from '../../enterprise/enterprise.mjs';
+import { metrics } from '../../platform/metrics.mjs';
 import { DRILLS, PROVIDERS } from './drills.mjs';
 import { registerBoxCamSessions } from './sessions.mjs';
 import { registerBoxTraining } from './training.mjs';

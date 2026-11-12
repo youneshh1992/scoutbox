@@ -63,7 +63,7 @@ its own, and only the functions a route uses are loaded) and because its schemas
 - No coercing or transforming actions (`v.transform`, `v.toNumber` and similar): input is valid as sent or refused.
 - Valibot's issues, with their field paths, are mapped to the existing error codes in one place in
   `domains/platform/`. A refusal carries a machine-readable `problem` and the values it needs (`max`, `allowed`, …);
-  its English `message` is for developers. Wording for people belongs to the clients (step 6).
+  its English `message` is for developers. Wording for people belongs to the clients (step 7).
 - Shape and type checks live in the schema; checks that span fields or need stored data (an expiry after now, a
   document belonging to this case) stay in the route or the repository.
 - Shared schemas (dates, ids, money, free text with its length limit) are defined once and imported, like the other
@@ -109,13 +109,19 @@ The development-only reads are refused in production with `/__faults`. Shared ba
 The app promises the scans used to check, which need a test runner in the web apps, are listed in
 [`known-issues.md`](known-issues.md).
 
-### 4. Narrow, declared dependencies per domain
+### 4. Narrow, declared dependencies per domain [**in progress**]
 
 Each domain exports a factory that names the small set of things it needs (its own repository, other domains' read
 interfaces, `unit`, `afterCommit`, `notify`, …) and returns what it offers to others. `server.mjs` becomes a short list
 of those calls in dependency order. Remove the cycles in the import graph, and make `domains/platform/` depend on
 nothing above it: the audit rows, room statuses and Box Cam eligibility it imports today should be handed to it by
 their domains. Split the very large route modules along these lines.
+
+The import rules are in place and checked in CI ([`architecture.md`](architecture.md#domain-boundaries)): the domains
+sit in layers, a domain imports a lower one only through its `public.mjs`, the platform layer imports no domain, and
+there are no import cycles. The Football Passport and the Trust Score are their own domain (`domains/passport/`) at
+the top, since they are projections over every other domain's records. Still to do: the factories, first for the
+smaller domains and then for the large ones, with the large route modules split along the way.
 
 ### 5. Named acts everywhere
 
@@ -124,8 +130,8 @@ section of `architecture.md` as one rule rather than a rule and its exceptions.
 
 ### 6. TypeScript
 
-Convert the server to TypeScript once steps 1–4 have settled the shapes that are worth typing: request input (from the
-step 1 schemas), each domain's declared dependencies and interface (step 2), and the repositories' named acts (step 4).
+Convert the server to TypeScript once steps 1–5 have settled the shapes that are worth typing: request input (from the
+step 1 schemas), each domain's declared dependencies and interface (step 4), and the repositories' named acts (step 5).
 Typing the code before those refactors would mean writing the types twice. Start with `repositories/` and
 `domains/platform/`, then convert domain by domain, with `strict` on and `tsc --noEmit` in CI. Decide at the start
 between a build step and running `.ts` directly with Node's type stripping, which affects the minimum Node version in
@@ -133,7 +139,7 @@ between a build step and running `.ts` directly with Node's type stripping, whic
 
 ### 7. Error wording in the clients
 
-Independent of steps 1–5, and frontend work. About a hundred places in the apps show the server's `message` directly
+Independent of steps 1–6, and frontend work. About a hundred places in the apps show the server's `message` directly
 (`notify(e.message)`), so people read developer English, untranslated. Add one shared client helper that turns a
 refusal's `error`, `field`, `problem` and values into a sentence from the app's translations, with screens giving
 their own field labels and wording for the codes that need it (as the offer panel already does with `of.err.<code>`).

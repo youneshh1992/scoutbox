@@ -6,11 +6,10 @@
  * `drain()` re-derives the players the input triggers marked, before every COMMIT on the connection; `sweep()` marks
  * the rows whose time-only change is due; `start()` rebuilds every row when the policy key changed.
  */
-import { PROVIDERS } from '../development/boxcam/drills.mjs';
+import { PROVIDERS } from '../development/public.mjs';
 import { isAdult } from '../../domain.mjs';
 import { onBeforeCommit } from '../../repositories/database.mjs';
 import { matchFactsPolicyKey } from '../../repositories/matchFacts.mjs';
-import { TRUST_SCORE_POLICY_VERSION } from '../verification/trust/shared.mjs';
 
 const DAY = 86_400_000;
 
@@ -36,6 +35,9 @@ export function createMatchFactsKeeper(ctx) {
   const { matchFacts, players, unit } = ctx;
   if (typeof matchFacts?.write !== 'function' || typeof players?.byIds !== 'function')
     throw new TypeError('the match facts keeper needs the matchFacts and players repositories');
+  // The Trust Score policy the stored bands were derived under: a new version re-derives every row.
+  if (!Number.isInteger(ctx.trustPolicyVersion))
+    throw new TypeError('the match facts keeper needs the Trust Score policy version');
   const vreads = ctx.verificationReads;
   const sreads = ctx.scoutingReads;
   const breads = ctx.boxCamReads;
@@ -68,7 +70,7 @@ export function createMatchFactsKeeper(ctx) {
       combine[a.protocolId] = Number.isFinite(v) ? (best === null ? v : Math.max(best, v)) : best;
     }
 
-    // Time-only changes: the next instant one of the band's inputs flips (verification/trust: an evidence item counts
+    // Time-only changes: the next instant one of the band's inputs flips (passport/trust: an evidence item counts
     // until its expiry has passed, a claim until its valid_until, an agreement inside its term, and adulthood decides
     // which components are eligible).
     const due = [];
@@ -124,7 +126,7 @@ export function createMatchFactsKeeper(ctx) {
   const sweep = (at = Date.now()) => unit(() => matchFacts.markDue(at));
 
   const policyKey = matchFactsPolicyKey({
-    trustPolicyVersion: TRUST_SCORE_POLICY_VERSION,
+    trustPolicyVersion: ctx.trustPolicyVersion,
     simulatedEvidence: !!ctx.testProviderEnabled,
   });
   let stop = null;

@@ -10,6 +10,7 @@
 // Unit sections drive the pure engine; HTTP sections drive the real routes,
 // including S1–S8, N1–N8 and all 60 enumerated abuse cases.
 import { pickPort } from '../../scripts/testPort.mjs';
+import { playerMatchesBrief } from '../../domains/discovery/matching/match.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -49,7 +50,6 @@ import {
   canBriefTransition,
   validateRecruitmentBrief,
   explainBriefCriteria,
-  playerMatchesBrief,
   buildNobodyMissedCandidate,
   evaluationCoverageState,
   orderNobodyMissed,

@@ -1,10 +1,10 @@
 // Football Passport assembly and routes. One projection per (player, viewer); clients never rebuild the Passport
 // from raw endpoints. Authorisation is the standing gates; the Passport adds no access of its own.
-import { declareAuditedRead } from '../../../writeRules.mjs';
+import { declareAuditedRead } from '../../writeRules.mjs';
 import * as v from 'valibot';
-import { isAdult, visibleToOrg } from '../../../domain.mjs';
-import { ageOrNull } from '../../../temporal.mjs';
-import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';
+import { isAdult, visibleToOrg } from '../../domain.mjs';
+import { ageOrNull } from '../../temporal.mjs';
+import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
 import {
   CURSOR_PAGE,
   dateWrittenAs,
@@ -15,7 +15,7 @@ import {
   oneOf,
   presentOrRefuse,
   text,
-} from '../../platform/schemas.mjs';
+} from '../platform/schemas.mjs';
 import {
   buildTimeline,
   clubHistory,
@@ -29,23 +29,23 @@ import {
   evId,
   PROVENANCE_COPY,
 } from './shared.mjs';
-import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../../development/boxcam/shared.mjs';
-import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../../development/boxcam/drills.mjs';
+import { developmentActivity as boxDevelopmentActivity, fmtMs as boxFmtMs } from '../development/public.mjs';
+import { DRILLS as BOX_DRILLS, latestDrill as boxLatestDrill } from '../development/public.mjs';
 // The pure Combine engine, so this does not depend on module registration order.
 import {
   combineProtocol as combineProtocolDef,
   personalBest as combinePersonalBest,
   formatCombineValue,
-} from '../../development/boxcam/combineShared.mjs';
-import { applicationView } from '../../scouting/journeys.mjs';
+} from '../development/public.mjs';
+import { applicationView } from '../scouting/public.mjs';
 import {
   blankPrefs,
   PASSPORT_LIMITS as L,
   AVAILABILITY,
   CORRECTION_TARGETS,
   CORRECTION_OUTCOMES,
-} from '../../../repositories/passport.mjs';
-import { PLAYER_POSITIONS } from '../../../repositories/identity.mjs';
+} from '../../repositories/passport.mjs';
+import { PLAYER_POSITIONS } from '../../repositories/identity.mjs';
 
 const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
 

@@ -14,9 +14,9 @@ import { roomRole, ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../rooms/shared.
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { requestClock } from '../../platform/clock.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
-import { PROVIDERS } from '../../development/boxcam/drills.mjs';
-import { STATE_COPY as CV_STATE_COPY } from '../../development/boxcam/cv/policy.mjs';
-import { COMBINE_DISABLED_REASON } from '../../development/boxcam/cv/eligibility.mjs';
+import { PROVIDERS } from '../../development/public.mjs';
+import { STATE_COPY as CV_STATE_COPY } from '../../development/public.mjs';
+import { COMBINE_DISABLED_REASON } from '../../development/public.mjs';
 import { canTransitionRecruitmentCase, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from './lifecycle.mjs';
 import { sendDomainError, httpStatusFor } from './errors.mjs';
 import { resolveContactRecipient, CONTACT_LIMITS } from './contact.mjs';

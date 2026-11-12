@@ -25,7 +25,7 @@
  * keys; a case's pack items, grants and history cascade with the case (a case is never deleted).
  */
 import crypto from 'node:crypto';
-import { isPlainObject, describe } from './recruitment.mjs';
+import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';

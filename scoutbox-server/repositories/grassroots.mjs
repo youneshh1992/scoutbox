@@ -16,7 +16,7 @@
  * match-day credit outlive the account; the registration's copy of the name goes with it). Child rows cascade with
  * their owner (owners are never hard-deleted).
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {

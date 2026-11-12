@@ -59,7 +59,7 @@ import {
 import { buildGoalSnapshots, validateReview, validateSupersession, pageReviews } from './reviews.mjs';
 import { guardRev, bumpRev } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
-import { metrics } from '../../enterprise/enterprise.mjs';
+import { metrics } from '../../platform/metrics.mjs';
 import { readPage, sendPageError, pageSorted } from '../../platform/paging.mjs';
 import { now } from '../../platform/clock.mjs';
 import { hubInput } from './schemas.mjs';

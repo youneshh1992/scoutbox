@@ -1,7 +1,7 @@
 // Registered last: a Room consumes cases, assessments, evidence, trials, the Passport, Box Cam, the Combine
 // and the Trust Score. Routes sit on the authenticated `orgRouter`, so a Room grants no access of its own.
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
-import { metrics } from '../../enterprise/enterprise.mjs';
+import { metrics } from '../../platform/metrics.mjs';
 import { registerRooms } from './rooms.mjs';
 import {
   ROOM_STATUSES,

@@ -5,15 +5,9 @@ import { readPage, sendPageError } from '../platform/paging.mjs';
 import { isAdult, visibleToOrg, computeTrustScore, haversineKm, GRASSROOTS_RADIUS_KM } from '../../domain.mjs';
 import { GRASSROOTS_LIMITS as GL, boxAround } from '../../repositories/grassroots.mjs';
 import { TRANSITION_LIMITS } from '../../repositories/transitionsVouches.mjs';
+import { grassrootsOrgOnly } from './guards.mjs';
 
 /** Answers 403 and returns true for a club not on ScoutBox Grassroots. */
-export function grassrootsOrgOnly(req, res) {
-  if (req.org.level !== 'grassroots') {
-    res.status(403).json({ error: 'GRASSROOTS_ORGS_ONLY', message: 'Open days are a ScoutBox Grassroots feature.' });
-    return true;
-  }
-  return false;
-}
 
 const POSITION_GROUPS = {
   GK: ['GK'],

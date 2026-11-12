@@ -3,7 +3,6 @@
  * hand-edited row. It reports and never repairs: choosing which of two
  * conflicting records wins needs a person with the context.
  */
-import { OPEN_ROOM_STATUSES } from '../recruitment/rooms/shared.mjs';
 
 const dupes = (items, keyOf) => {
   const seen = new Map();
@@ -17,8 +16,13 @@ const dupes = (items, keyOf) => {
   return out;
 };
 
-/** Reports keys and ids only, never a name, note or date of birth. */
-export function integrityReport(records, { cases: allCases = [] } = {}) {
+/**
+ * Reports keys and ids only, never a name, note or date of birth. `openRoomStatuses` is the recruitment domain's: the
+ * statuses in which a Room is still active, so two of them for one organisation and player are a violation.
+ */
+export function integrityReport(records, { cases: allCases = [], openRoomStatuses } = {}) {
+  if (!Array.isArray(openRoomStatuses) || !openRoomStatuses.length)
+    throw new TypeError('integrityReport needs the open Room statuses');
   const violations = [];
   const push = (code, list) => {
     for (const d of list) violations.push({ code, key: String(d.key), ids: d.ids.map(String) });
@@ -29,7 +33,7 @@ export function integrityReport(records, { cases: allCases = [] } = {}) {
   push(
     'ROOM_OPEN_DUPLICATE',
     dupes(
-      cases.filter((c) => OPEN_ROOM_STATUSES.includes(c.room.status)),
+      cases.filter((c) => openRoomStatuses.includes(c.room.status)),
       (c) => `${c.orgId}:${c.playerId}`,
     ),
   );

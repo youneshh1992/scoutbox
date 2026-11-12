@@ -59,12 +59,12 @@ import {
 } from '../../domains/discovery/matching/watchlists.mjs';
 import { MATCH_SORTS, DEFAULT_MATCH_SORT } from '../../domains/discovery/matching/index.mjs';
 import {
-  playerMatchesBrief,
   POSITIONS,
   TRUST_BANDS,
   EVIDENCE_REQUIREMENTS,
   PROHIBITED_BRIEF_FIELDS,
 } from '../../domains/discovery/shared.mjs';
+import { playerMatchesBrief } from '../../domains/discovery/matching/match.mjs';
 import { EVENT_REGISTRY, isRegistered, minimizePayload } from '../../domains/platform/eventRegistry.mjs';
 import { audienceFor } from '../../domains/platform/eventAudience.mjs';
 import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';

@@ -27,7 +27,7 @@
  * Organisations, the staff named and the calibration template version are RESTRICT keys; so are the keys inside the
  * domain (an assignment's own fixture, a submission's participant). Child rows cascade with their owner.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {
@@ -45,7 +45,7 @@ import {
   upsertSql,
 } from './fieldSpecs.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
-import { CURRENCIES } from '../domains/recruitment/money.mjs';
+import { CURRENCIES } from '../domains/recruitment/public.mjs';
 
 export const INSIGHT_COVERAGE_MIGRATION = '0033_insight_coverage';
 export const INSIGHT_COVERAGE_COLLECTIONS = Object.freeze([

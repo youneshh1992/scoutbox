@@ -45,9 +45,9 @@ import { registerBudgets } from './domains/recruitment/budgets.mjs';
 import { registerGroups } from './domains/groups/groups.mjs';
 import { registerVerificationClaims } from './domains/verification/claims/index.mjs';
 import { createAdminRouter, registerReporting, registerSafetyConsole } from './domains/safety/safety.mjs';
-import { registerFootballPassport } from './domains/verification/passport/index.mjs';
+import { registerFootballPassport } from './domains/passport/index.mjs';
 import { registerBoxCam } from './domains/development/boxcam/index.mjs';
-import { registerTrustScore } from './domains/verification/trust/index.mjs';
+import { registerTrustScore } from './domains/passport/trust/index.mjs';
 import { registerRecruitmentRooms } from './domains/recruitment/rooms/index.mjs';
 import { registerDiscovery } from './domains/discovery/index.mjs';
 import { registerMatching } from './domains/discovery/matching/index.mjs';
@@ -65,7 +65,10 @@ import { registerSigning } from './domains/recruitment/signings/index.mjs';
 import { registerJourneyRoutes } from './domains/recruitment/lifecycle/journeyRoutes.mjs';
 import { createVerificationProvider } from './domains/agents/compliance/provider.mjs';
 import { createEvidenceProvider } from './domains/recruitment/lifecycle/evidence.mjs';
-import { COMBINE_PROTOCOLS } from './domains/development/boxcam/combineShared.mjs';
+import { COMBINE_PROTOCOLS, combineVerifiedProtocols } from './domains/development/public.mjs';
+import { agentAuditRows, complianceAuditRows } from './domains/agents/public.mjs';
+import { OPEN_ROOM_STATUSES } from './domains/recruitment/public.mjs';
+import { TRUST_SCORE_POLICY_VERSION } from './domains/passport/public.mjs';
 import { createSourceChanges } from './domains/platform/sourceChanges.mjs';
 import { createRateLimiter, installRateLimitInspection } from './domains/platform/rateLimit.mjs';
 import { demoSeedEnabled, devLoginsEnabled } from './domains/platform/capabilities.mjs';
@@ -99,9 +102,11 @@ import { createRequestWriters, registerClubRequests, requestForRecipient } from 
 import { registerClubTrials } from './domains/recruitment/clubTrials.mjs';
 import { registerLegacySigning } from './domains/recruitment/signings/legacy.mjs';
 import { registerLedger, ledgerView } from './domains/recruitment/ledger.mjs';
-import { registerGrassrootsClub, grassrootsOrgOnly } from './domains/development/grassrootsClub.mjs';
+import { registerGrassrootsClub } from './domains/development/grassrootsClub.mjs';
+import { grassrootsOrgOnly } from './domains/development/guards.mjs';
 import { registerClubChecks } from './domains/verification/clubChecks.mjs';
-import { createMfaGuards, registerEnterprise, requestInstrumentation } from './domains/enterprise/enterprise.mjs';
+import { createMfaGuards, registerEnterprise } from './domains/enterprise/enterprise.mjs';
+import { requestInstrumentation } from './domains/platform/metrics.mjs';
 import {
   hashPassword,
   verifyPassword,
@@ -273,7 +278,7 @@ const integrity = integrityReport(
       .map((id) => ({ id })),
     orgs: orgs.list(),
   },
-  { cases: integrityCases },
+  { cases: integrityCases, openRoomStatuses: OPEN_ROOM_STATUSES },
 );
 for (const v of integrity.violations) console.error(`INTEGRITY ${v.code} key=${v.key} ids=${v.ids.join(',')}`);
 if (integrity.violations.length)
@@ -880,9 +885,11 @@ registerAudit({
   recruitmentReads,
   discoveryReads,
   developmentReads,
-  agentReads,
-  complianceReads,
   safetyReads,
+  agencySources: [
+    (org, view) => agentAuditRows(agentReads, org, view),
+    (org) => complianceAuditRows(complianceReads, org),
+  ],
   orgRouter,
   findPlayer,
   orgCanSee: (org, p) => !!p && visibleToOrg(p, org) && !isBlocked(p.id, org.id),
@@ -1178,6 +1185,7 @@ const matchFactsKeeper = createMatchFactsKeeper({
   matchFacts,
   sqlite: store.sqlite,
   trustSummaryFor: trustDomain.trustSummaryFor,
+  trustPolicyVersion: TRUST_SCORE_POLICY_VERSION,
   testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
 });
 matchFactsKeeper.start();
@@ -1578,6 +1586,7 @@ registerCapabilities({
   app,
   rateLimit,
   providerStatus: () => boxCamDomain.providerStatus?.() ?? [],
+  combineVerifiedProtocols,
   trustProxy: TRUST_PROXY,
   dataLayer,
   integrity,

@@ -59,7 +59,7 @@ import {
 } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { resolveWindow, previousWindow } from '../../domains/recruitment/analytics/metrics.mjs';
 import { briefIsLiveOn, validateRecruitmentBrief } from '../../domains/discovery/shared.mjs';
-import { normWhen } from '../../domains/verification/passport/shared.mjs';
+import { normWhen } from '../../domains/passport/shared.mjs';
 import { parseDate as devParseDate } from '../../domains/development/hub/shared.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { writeFixture } from '../../scripts/dataLayerFixture.mjs';

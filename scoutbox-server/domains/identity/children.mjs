@@ -5,13 +5,7 @@ import { adultAgeFor, ageOn, computeStreak, weeklyGoal } from '../../domain.mjs'
 import { guardianChildView } from '../../views/playerViews.mjs';
 import { profileOrRefuse, newPlayerRecord } from './players.mjs';
 import { identityInput } from './schemas.mjs';
-
-export function ownChild(req, res, findPlayer, id = req.params.id) {
-  const child = findPlayer(id);
-  if (child && req.guardian.childIds.includes(child.id)) return child;
-  res.status(404).json({ error: 'CHILD_NOT_FOUND' });
-  return null;
-}
+import { ownChild } from './guards.mjs';
 
 export function registerChildren({
   guardianRouter,

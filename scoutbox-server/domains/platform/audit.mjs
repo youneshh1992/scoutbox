@@ -5,11 +5,9 @@
  * shown; the free text beside them is not.
  */
 
-import { agentAuditRows } from '../agents/core/audit.mjs';
 import * as v from 'valibot';
 import { encodeCursor } from './paging.mjs';
 import { inputOrRefuse, text, wholeNumberText } from './schemas.mjs';
-import { complianceAuditRows } from '../agents/compliance/audit.mjs';
 
 const PAGE_MAX = 50;
 const PAGE_DEFAULT = 25;
@@ -110,8 +108,14 @@ function safeDetail(action, detail) {
   return Object.keys(out).length ? out : null;
 }
 
+/**
+ * `agencySources` are the agent domains' own audit rows, each `(org, { findPlayer, orgCanSee }) => rows`, read for an
+ * agency only. They are handed in so this feed knows their rows' shape and not the agent domains.
+ */
 export function registerAudit(ctx) {
-  const { recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee } = ctx;
+  const { recruitmentReads, orgRouter, requireLead, findPlayer, orgCanSee, agencySources } = ctx;
+  if (!Array.isArray(agencySources) || agencySources.some((f) => typeof f !== 'function'))
+    throw new TypeError('registerAudit needs the agency audit sources');
   if (typeof recruitmentReads?.contacts?.forOrg !== 'function')
     throw new TypeError('registerAudit needs recruitmentReads (contacts) from the data layer');
   if (typeof ctx.discoveryReads?.briefs?.historyFeed !== 'function')
@@ -233,8 +237,7 @@ export function registerAudit(ctx) {
         detail: safeDetail(h.action, h.detail),
       });
     }
-    if (org.type === 'agency') rows.push(...agentAuditRows(ctx.agentReads, org, { findPlayer, orgCanSee }));
-    if (org.type === 'agency') rows.push(...complianceAuditRows(ctx.complianceReads, org));
+    if (org.type === 'agency') for (const source of agencySources) rows.push(...source(org, { findPlayer, orgCanSee }));
     for (const l of ctx.safetyReads.ledger.forOrg(org.id, [...LEDGER_ACTIONS])) {
       rows.push({
         id: l.id,

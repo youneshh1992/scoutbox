@@ -11,7 +11,8 @@
     "start": "node server.mjs",
     "test": "node scripts/runTests.mjs",
     "perf:recruitment": "node scripts/recruitmentPerf.mjs",
-    "e2e": "node scripts/runE2E.mjs"
+    "e2e": "node scripts/runE2E.mjs",
+    "check:boundaries": "node scripts/checkBoundaries.mjs"
   },
   "dependencies": {
     "cors": "^2.8.5",

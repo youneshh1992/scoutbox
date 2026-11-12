@@ -110,7 +110,7 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
 - **The Box Cam source freeze misses some code lines.** `strippedSource` (`domains/development/boxcam/cv/freeze.mjs`)
   drops every line starting with `*` as a comment, including code continuation lines such as
   `* CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;` in `track.mjs`, so a change there doesn't change the freeze hash.
-- **The public passport-share limiter is its own unpruned Map** (`domains/verification/passport/sharing.mjs`) rather
+- **The public passport-share limiter is its own unpruned Map** (`domains/passport/sharing.mjs`) rather
   than the shared `rateLimit`.
 
 ## Code clean-up
@@ -170,12 +170,12 @@ keep, or code with nothing left to do.
   ids that the development, assessment and trial payloads don't carry, so each of those events has one fingerprint.
   `org_member` is documented as "may currently see the subject" (`eventAudience.mjs`) but `liveSync` delivers it to
   any org. Only `e2e/platform/contracts.mjs` uses the first, and no event uses the second.
-- **Trust and Passport calculations that do nothing.** `calculateTrustScore` (`domains/verification/trust/shared.mjs`)
+- **Trust and Passport calculations that do nothing.** `calculateTrustScore` (`domains/passport/trust/shared.mjs`)
   sets `excludedComponents` to `[]` on both branches, never applies `POLICY.evidence.recencyDays`, and
   `scoreEvidenceConfidence` ignores `now`. In `passport/shared.mjs`, `a.confirmation || true` and
   `provRank(...) >= 0` are always true. In `compliance/policy.mjs` `evaluateMinorGate`,
   `r.code !== 'FACET_VERIFIED' || true` filters nothing.
-- **Trust profile inconsistencies.** The org trust-profile route (`domains/verification/trust/trust.mjs`) tests
+- **Trust profile inconsistencies.** The org trust-profile route (`domains/passport/trust/trust.mjs`) tests
   `req.org.type === 'grassroots'` where the rest of the code uses `org.level`, and a blocked player gets 403
   `NOT_VISIBLE` where search conceals with 404.
 - **Draft-style updates left in compliance.** The reviewer revoke and policy approve routes

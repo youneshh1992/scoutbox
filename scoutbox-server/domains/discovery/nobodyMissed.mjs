@@ -6,7 +6,6 @@ import {
   validateRecruitmentBrief,
   briefProhibited,
   explainBriefCriteria,
-  playerMatchesBrief,
   buildNobodyMissedCandidate,
   evaluationCoverageState,
   BRIEF_STATUSES,
@@ -23,6 +22,7 @@ import {
   LIMITS,
   briefIsLiveOn,
 } from './shared.mjs';
+import { playerMatchesBrief } from './matching/match.mjs';
 import { discoveryInput, BRIEF_CRITERIA_KEYS } from './schemas.mjs';
 import { briefCriteriaToCanonical } from './matching/match.mjs';
 import { createMatchReads } from './matching/query.mjs';

@@ -37,10 +37,11 @@ import {
   TRIAL_CONSENT_SCOPES,
   TRIAL_KEY_ACTS,
   TRIAL_LIMITS,
-} from '../domains/recruitment/lifecycle/trial.mjs';
+} from '../domains/recruitment/public.mjs';
 import { TRIAL_REPORT_FIELDS } from '../domain.mjs';
 import { refreshProfileSignals } from './identity.mjs';
 import { writeKit } from './writes.mjs';
+import { ids } from './fieldSpecs.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const RECRUITMENT_MIGRATION = '0015_recruitment';
@@ -65,22 +66,10 @@ export const TRIAL_TABLES = Object.freeze([
 export const RECRUITMENT_TABLES = Object.freeze([...REQUEST_TABLES, ...TRIAL_TABLES]);
 export const recruitmentLive = (sqlite) => migrationApplied(sqlite, RECRUITMENT_MIGRATION);
 
-// ------------------------------------------------------------------ small shared helpers (the other recruitment repositories import these)
-export const describe = (v) =>
-  v === null
-    ? 'null'
-    : v === undefined
-      ? 'nothing'
-      : Array.isArray(v)
-        ? 'an array'
-        : typeof v === 'object'
-          ? 'an object'
-          : `a ${typeof v}`;
-export const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+// ------------------------------------------------------------------ small shared helpers
 export const nonEmpty = (v) => typeof v === 'string' && v.length > 0;
 export const tableExists = (sqlite, name) =>
   !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name);
-export const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
 
 export const JSON_CHECK = (col) => `CHECK (${col} IS NULL OR json_valid(${col}))`;
 /** The shared idempotency_keys table (the signing packages' keys; other domains keep their keys as columns). Its owner CHECK names the owner tables. */

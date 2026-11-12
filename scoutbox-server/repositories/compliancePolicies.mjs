@@ -25,11 +25,11 @@
  * References. A revoker, proposer and approver are reviewers (RESTRICT); `supersedes` names an earlier version of the
  * same jurisdiction (RESTRICT). Child rows cascade.
  */
-import { isPlainObject, describe, ids } from './recruitment.mjs';
+import { isPlainObject, describe, ids } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
-import { JURISDICTIONS } from '../domains/agents/core/shared.mjs';
+import { JURISDICTIONS } from '../domains/agents/public.mjs';
 import {
   RULE_STATUSES,
   TEXT_STATUSES,
@@ -38,7 +38,7 @@ import {
   typeRuleParams,
   isCalendarDay,
   SEEDED_POLICY_VERSIONS,
-} from '../domains/agents/compliance/policyVersions.mjs';
+} from '../domains/agents/public.mjs';
 
 export const COMPLIANCE_POLICIES_MIGRATION = '0027_compliance_policies';
 export const COMPLIANCE_POLICIES_COLLECTIONS = Object.freeze(['tsReviewers', 'jurisdictionPolicies']);

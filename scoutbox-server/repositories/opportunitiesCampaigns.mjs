@@ -19,7 +19,7 @@
  * Preferences are PRIVATE to the player (the guardian for a minor). No organisation-facing read exists here: the only
  * thing that leaves them is the verdict summary the player or guardian approves onto one application.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
 import {
   refusal,

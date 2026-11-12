@@ -3,7 +3,6 @@
  * states only, never keys, hostnames or connection strings.
  */
 
-import { combineVerifiedProtocols } from '../development/boxcam/cv/eligibility.mjs';
 import { parseTrustProxy } from '../../httpTrust.mjs';
 export const CAPABILITY_STATES = ['configured', 'not_configured', 'test_only'];
 
@@ -32,6 +31,7 @@ export function buildCapabilityReport({
   rateLimit = null,
   providers = [],
   trustProxy = null,
+  combineVerifiedProtocols = [],
   extra = {},
 } = {}) {
   const flag = (v) => !!v && String(v).trim() !== '';
@@ -59,8 +59,8 @@ export function buildCapabilityReport({
         serverSideObservation: productionCv.length > 0,
         syntheticEvaluation: productionCv.length ? 'passed' : 'not_run',
         realWorldValidation: 'not_completed',
-        combineVerifiedProtocols: combineVerifiedProtocols(),
-        combineVerificationAvailable: combineVerifiedProtocols().length > 0,
+        combineVerifiedProtocols: [...combineVerifiedProtocols],
+        combineVerificationAvailable: combineVerifiedProtocols.length > 0,
         // No REAL_WORLD_VALIDATION_NOT_COMPLETED code here: its shape trips the secret-scan heuristic on this
         // unauthenticated endpoint, and `realWorldValidation` already carries the reason.
       },

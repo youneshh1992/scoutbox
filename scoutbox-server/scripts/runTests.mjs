@@ -81,6 +81,7 @@ export const SUITES = [
   'testInputSchemas',
   'testPlatformHelpers',
   'testWiring',
+  'testBoundaries',
   'testSuiteRunner',
 ];
 // Files named test*.mjs that are helpers, not suites. Any other test*.mjs must

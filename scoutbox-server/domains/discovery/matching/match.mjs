@@ -310,6 +310,9 @@ export function briefCriteriaToCanonical(criteria = {}) {
   return { required, preferred: [], schemaVersion: 1 };
 }
 
+/** Every criterion a brief carries is required. `facts` is the match projection, not a Passport. */
+export const playerMatchesBrief = (facts, criteria = {}, opts = {}) => matchBrief(facts, criteria, opts);
+
 export function matchBrief(facts, briefCriteria = {}, opts = {}) {
   const canonical = briefCriteriaToCanonical(briefCriteria);
   const result = matchPlayerToCriteria(facts, canonical, opts);

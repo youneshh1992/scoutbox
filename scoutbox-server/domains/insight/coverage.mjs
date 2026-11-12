@@ -1,5 +1,5 @@
 // Travel times are never invented; candidate suggestions contain only players the org can see.
-import { validAmountMinor } from '../recruitment/money.mjs';
+import { validAmountMinor } from '../recruitment/public.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
 import { INSIGHT_LIMITS as L } from '../../repositories/insightCoverage.mjs';
 import { filled } from '../platform/schemas.mjs';

@@ -24,7 +24,7 @@
  * are ON DELETE SET NULL (the documented "role deleted" state); that a role belongs to the same organisation is
  * checked here.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
 import {
   refusal,

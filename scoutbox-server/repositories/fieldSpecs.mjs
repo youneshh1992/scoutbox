@@ -7,7 +7,19 @@
  * 'YYYY-MM-DD', a day that exists). `req` makes it required, `def` gives a default. A `group` is a nested object stored
  * as columns: `nullable` groups are null when their first column is; `sparse` objects keep only non-null keys.
  */
-import { isPlainObject, describe } from './recruitment.mjs';
+/** How a refused value is named in an error: its kind, never its content. */
+export const describe = (v) =>
+  v === null
+    ? 'null'
+    : v === undefined
+      ? 'nothing'
+      : Array.isArray(v)
+        ? 'an array'
+        : typeof v === 'object'
+          ? 'an object'
+          : `a ${typeof v}`;
+export const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+export const ids = (list) => list.slice(0, 20).join(', ') + (list.length > 20 ? ', …' : '');
 
 export const text = (k, c, max, o = {}) => ({ k, c, t: 'text', max, ...o });
 export const int = (k, c, o = {}) => ({ k, c, t: 'int', ...o });

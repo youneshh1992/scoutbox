@@ -35,7 +35,7 @@
  * with their owner, which is never deleted.
  */
 import crypto from 'node:crypto';
-import { isPlainObject, describe } from './recruitment.mjs';
+import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
@@ -53,10 +53,10 @@ import {
   insertSql,
   flat,
 } from './fieldSpecs.mjs';
-import { QUALITY, OBSERVATION_KINDS } from '../domains/development/boxcam/shared.mjs';
-import { DRILLS, PROVIDERS, LIVENESS_CHALLENGES } from '../domains/development/boxcam/drills.mjs';
-import { combineProtocol, METRIC_TYPES } from '../domains/development/boxcam/combineShared.mjs';
-import { CANDIDATE_PROTOCOLS, CV_PROVIDER_ID } from '../domains/development/boxcam/cv/policy.mjs';
+import { QUALITY, OBSERVATION_KINDS } from '../domains/development/public.mjs';
+import { DRILLS, PROVIDERS, LIVENESS_CHALLENGES } from '../domains/development/public.mjs';
+import { combineProtocol, METRIC_TYPES } from '../domains/development/public.mjs';
+import { CANDIDATE_PROTOCOLS, CV_PROVIDER_ID } from '../domains/development/public.mjs';
 
 export const BOX_CAM_MIGRATION = '0031_box_cam';
 export const BOX_CAM_COLLECTIONS = Object.freeze([

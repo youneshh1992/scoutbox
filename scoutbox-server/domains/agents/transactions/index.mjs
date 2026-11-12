@@ -13,7 +13,7 @@ import { normaliseClientKey, payloadFingerprint } from '../../platform/idempoten
 import { isExpiredAt, isAbsent, parseDateOrInstant } from '../../../temporal.mjs';
 import { parseInput, filled } from '../../platform/schemas.mjs';
 import { TRANSACTION_INPUT, transactionParseOptions } from './schemas.mjs';
-import { hasVerLevel } from '../../verification/claims/shared.mjs';
+import { hasVerLevel } from '../../verification/public.mjs';
 import { effectiveAgreementStatus, agreementGrantsAccess, can } from '../core/shared.mjs';
 import { sendTransactionError, notFound } from './errors.mjs';
 import { transactionAuditRows } from './audit.mjs';

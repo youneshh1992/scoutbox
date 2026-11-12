@@ -1,9 +1,9 @@
 // Football Passport engine: a projection over records other systems own, plus a few narrowly scoped Passport
 // records (self-submitted career entries, achievements, preferences, shares, corrections). It scores nobody.
-import { agreementInForce } from '../../agents/core/shared.mjs';
+import { agreementInForce } from '../agents/public.mjs';
 import crypto from 'node:crypto';
-import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../../recruitment/lifecycle/trial.mjs';
-import { parseStrictDateOnly } from '../../../temporal.mjs';
+import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../recruitment/public.mjs';
+import { parseStrictDateOnly } from '../../temporal.mjs';
 
 // ------------------------------------------------------------- provenance
 // Ordered least to most authoritative; the rank is used only for conflict precedence, never shown as a score.
@@ -690,7 +690,7 @@ export function completeness(facts) {
 // -------------------------------------------------------- share tokens
 export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 export const mintShareSecret = () => crypto.randomBytes(24).toString('base64url');
-export { SHARE_MODES } from '../../../repositories/passport.mjs';
+export { SHARE_MODES } from '../../repositories/passport.mjs';
 
 /** Shares are multi-use until revoked or expired. The route shows every failure as the same 404. */
 export function shareProblem(share, { now = Date.now(), playerRemoved = false } = {}) {

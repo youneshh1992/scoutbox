@@ -13,22 +13,22 @@ import {
   MAX_OPPORTUNITY_SHARES,
 } from '../core/shared.mjs';
 import { MINOR_PATHWAY_PRODUCTION_ENABLED } from '../compliance/policy.mjs';
-import { opportunityBoardFor } from '../../scouting/journeys.mjs';
+import { opportunityBoardFor } from '../../scouting/public.mjs';
 import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
-import { plainShared } from '../../recruitment/lifecycle/contact.mjs';
+import { plainShared } from '../../recruitment/public.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
 import { inputOrRefuse } from '../../platform/schemas.mjs';
 import { AGENT_INPUT, agentParseOptions } from '../core/schemas.mjs';
 import { AGENT_CORE_LIMITS } from '../../../repositories/agentCore.mjs';
-import { chainHead, isFormal } from '../../recruitment/lifecycle/decision.mjs';
-import { roomRole, roomCan } from '../../recruitment/rooms/shared.mjs';
+import { chainHead, isFormal } from '../../recruitment/public.mjs';
+import { roomRole, roomCan } from '../../recruitment/public.mjs';
 import { TERMINAL_STATUSES } from '../transactions/transaction.mjs';
 import {
   scheduleView as trialScheduleView,
   deriveWorkflowState,
   TRIAL_WORKFLOW_LABELS,
   isLegacyTrial,
-} from '../../recruitment/lifecycle/trial.mjs';
+} from '../../recruitment/public.mjs';
 import {
   SURFACES,
   SURFACE_NAMES,

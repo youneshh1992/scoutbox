@@ -5,7 +5,7 @@ import * as v from 'valibot';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { filled, inputOrRefuse, text } from '../platform/schemas.mjs';
 import { CLUB_SETUP_LIMITS } from '../../repositories/clubSetup.mjs';
-import { grassrootsOrgOnly } from '../development/grassrootsClub.mjs';
+import { grassrootsOrgOnly } from '../development/public.mjs';
 
 // Free-mail domains don't prove domain control. Narrower than the claims' list (claims/shared.mjs), which also
 // refuses `mail.` subdomains: a club's own mail.club.example host is a company mailbox here.

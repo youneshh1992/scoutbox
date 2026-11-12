@@ -32,6 +32,7 @@ export function registerCapabilities({
   app,
   rateLimit,
   providerStatus,
+  combineVerifiedProtocols,
   trustProxy,
   dataLayer,
   integrity,
@@ -40,13 +41,20 @@ export function registerCapabilities({
   notificationPrefs,
   faultLayer,
 }) {
-  if (typeof providerStatus !== 'function' || typeof notifier?.suppressedCount !== 'function')
-    throw new TypeError('registerCapabilities needs the Box Cam provider status and the notifier');
+  if (
+    typeof providerStatus !== 'function' ||
+    typeof combineVerifiedProtocols !== 'function' ||
+    typeof notifier?.suppressedCount !== 'function'
+  )
+    throw new TypeError(
+      'registerCapabilities needs the Box Cam provider status, the Combine protocols and the notifier',
+    );
   app.get('/capabilities', (_req, res) => {
     res.json(
       buildCapabilityReport({
         rateLimit,
         providers: providerStatus(),
+        combineVerifiedProtocols: combineVerifiedProtocols(),
         trustProxy,
         extra: {
           schema: dataLayer.schemaReport(),

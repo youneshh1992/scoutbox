@@ -8,7 +8,7 @@
 import { roomRole, roomCan, ROOM_TRANSITIONS, TERMINAL_ROOM_STATUSES, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
-import { PROVIDERS } from '../../development/boxcam/drills.mjs';
+import { PROVIDERS } from '../../development/public.mjs';
 import {
   canTransitionRecruitmentCase,
   LIFECYCLE_ACTIONS,

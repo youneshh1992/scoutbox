@@ -31,7 +31,7 @@
  * so are the keys between this domain's tables. Child rows (items, progress, shares, history, snapshots) cascade with
  * their owner, which is never deleted (only an evidence link is, by its route).
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {
@@ -67,13 +67,13 @@ import {
   PLAN_TEMPLATES,
   DEVELOPMENT_HUB_LIMITS,
   completionPhrase,
-} from '../domains/development/hub/shared.mjs';
+} from '../domains/development/public.mjs';
 import {
   TARGET_SOURCES,
   TARGET_OPERATORS,
   TARGET_STATES,
   NO_MEASUREMENT_REASONS,
-} from '../domains/development/hub/targets.mjs';
+} from '../domains/development/public.mjs';
 
 export const DEVELOPMENT_MIGRATION = '0030_development';
 export const DEVELOPMENT_COLLECTIONS = Object.freeze([

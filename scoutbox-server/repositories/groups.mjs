@@ -15,7 +15,7 @@
  * References. Organisations are RESTRICT keys; so is a grant's group. A group's member, invite, template and
  * programme rows cascade with it (groups are never deleted); a grant's recipients cascade with the grant.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.mjs';

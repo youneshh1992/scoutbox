@@ -10,7 +10,7 @@ import { visibleToOrg } from '../../../domain.mjs';
 import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { normaliseClientKey, payloadFingerprint } from '../../platform/idempotency.mjs';
-import { hasVerLevel } from '../../verification/claims/shared.mjs';
+import { hasVerLevel } from '../../verification/public.mjs';
 import {
   effectiveFacetState,
   RECHECK_MS,

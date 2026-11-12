@@ -25,7 +25,7 @@ import {
 } from '../../domains/platform/rateLimit.mjs';
 import { AUDIENCES, EVENT_AUDIENCE, audienceFor, unclassifiedEvents } from '../../domains/platform/eventAudience.mjs';
 import { buildCapabilityReport, productionConfigProblems } from '../../domains/platform/capabilities.mjs';
-import { passportRevision, PROVENANCE, PROVENANCE_COPY } from '../../domains/verification/passport/shared.mjs';
+import { passportRevision, PROVENANCE, PROVENANCE_COPY } from '../../domains/passport/shared.mjs';
 import {
   CHANGE_TYPES,
   CHANGE_COPY,

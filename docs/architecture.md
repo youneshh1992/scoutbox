@@ -174,3 +174,35 @@ operation can write, in temporary directories only, never `scoutbox-server/data/
 Server code is in `scoutbox-server/domains/<domain>/`; `server.mjs` holds no route handlers, only the wiring that creates each
 domain and hands it what it needs, in dependency order. End-to-end batteries live in `scoutbox-server/e2e/<domain>/`,
 named after what they check.
+
+### Domain boundaries
+
+The domains sit in layers, bottom to top:
+
+| Layer | Domains |
+| --- | --- |
+| 0 | `platform` |
+| 1 | `identity`, `groups`, `integrations`, `media`, `safety` |
+| 2 | `enterprise`, `messaging` |
+| 3 | `development` |
+| 4 | `verification` |
+| 5 | `discovery` |
+| 6 | `recruitment` |
+| 7 | `scouting`, `insight`, `operations` |
+| 8 | `agents` |
+| 9 | `passport` (the Football Passport and the Trust Score) |
+
+- **Imports go down through a public module.** A domain imports another domain only through its
+  `domains/<domain>/public.mjs`, and only one in a lower layer. A public module holds the domain's vocabulary, pure
+  rules and views. It only re-exports its own domain's modules, never one that registers routes, and holds no state.
+  The repositories and the shared rule modules also import a domain's vocabulary through its public module.
+- **The platform layer imports no domain.** What it reports about a domain (the audit feed's agency rows, the open Room
+  statuses the integrity check uses, the verified Combine protocols) is handed to it by `server.mjs`.
+- **What a domain does at run time comes through `server.mjs`.** The layers say what code a domain may know, not the
+  order domains are created in: the Rooms are created after the Passport and use its projections, which are handed to
+  them, while the Passport's code imports recruitment's trial rules.
+- **No import cycles**, between domains or between the modules of one folder.
+
+`npm run check:boundaries` (`scripts/checkBoundaries.mjs`) checks these rules in CI. The layer order is listed in
+that script as `DOMAIN_LAYERS`, so a new domain gets a layer when it is added. `server.mjs`, `e2e/` and `scripts/` may
+import any module.

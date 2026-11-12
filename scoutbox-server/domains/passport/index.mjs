@@ -1,6 +1,6 @@
 // Football Passport: a projection over existing records. It owns only preferences, self-submitted career entries,
 // achievements, shares (hashed tokens) and correction requests.
-import { metrics } from '../../enterprise/enterprise.mjs';
+import { metrics } from '../platform/metrics.mjs';
 import { registerPassportCore } from './passport.mjs';
 import { registerPassportSharing } from './sharing.mjs';
 

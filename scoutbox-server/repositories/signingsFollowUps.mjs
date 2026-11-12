@@ -17,7 +17,7 @@
  * offer_revisions.id). Player ids: no key, tolerant and counted (Q7a/Q8a/Q8c-a in docs/decisions.md). Guardian and
  * party ids: polymorphic, no key.
  */
-import { isPlainObject, ids } from './recruitment.mjs';
+import { isPlainObject, ids } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';

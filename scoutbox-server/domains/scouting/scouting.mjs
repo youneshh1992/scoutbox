@@ -1,7 +1,7 @@
 // Assessments are private recruitment records; only the publish-feedback route makes anything player- or
 // guardian-visible.
 
-import { roomRole, roomCan, CASE_PRIORITIES, CASE_DECISION_OUTCOMES } from '../recruitment/rooms/shared.mjs';
+import { roomRole, roomCan, CASE_PRIORITIES, CASE_DECISION_OUTCOMES } from '../recruitment/public.mjs';
 
 const CONFIDENCE = ['low', 'medium', 'high'];
 const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];

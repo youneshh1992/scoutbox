@@ -1,7 +1,7 @@
 // Second Look owns no player truth: it reads the source stores and stores only workflow (which item a recruiter
 // reviewed, dismissed or acted on). Reopening a room goes through the rooms' own reopen path.
 import { asReconciling } from '../../writeRules.mjs';
-import { PROVIDERS } from '../development/boxcam/drills.mjs';
+import { PROVIDERS } from '../development/public.mjs';
 import {
   SECOND_LOOK_POLICY_VERSION,
   SECOND_LOOK_STATUSES,

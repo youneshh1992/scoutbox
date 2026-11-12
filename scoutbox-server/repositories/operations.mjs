@@ -23,7 +23,7 @@
  * References. Organisations, staff and signings are RESTRICT keys. Player ids carry no key (an upload session goes
  * with the player explicitly; an invoice keeps its copy of the player's name: a billing record).
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {

@@ -34,6 +34,8 @@ jobs:
           cache: npm
           cache-dependency-path: scoutbox-server/package-lock.json
       - run: npm ci
+      - name: Domain boundaries (imports through public modules, downward only, no cycles)
+        run: npm run check:boundaries
       - name: Domain unit tests
         run: npm test
       - name: End-to-end batteries (scripts/runE2E.mjs; each boots its own servers on temporary data dirs)

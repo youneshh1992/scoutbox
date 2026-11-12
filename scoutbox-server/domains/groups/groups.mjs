@@ -11,6 +11,7 @@ import {
   GROUP_LIMITS as L,
   grantExpiry,
 } from '../../repositories/groups.mjs';
+import { grantView } from './views.mjs';
 
 const NewGroup = v.strictObject({ name: requiredText(L.name), adminOrgId: id });
 const Invite = v.strictObject({ orgId: id });
@@ -39,20 +40,6 @@ export const groupView = (g) => ({
   sharedTemplateIds: [...g.sharedTemplateIds],
   programmes: g.programmes.map((p) => ({ id: p.id, name: p.name, region: p.region, createdAt: p.createdAt })),
   createdAt: g.createdAt,
-});
-export const grantView = (gr) => ({
-  id: gr.id,
-  groupId: gr.groupId,
-  fromOrgId: gr.fromOrgId,
-  fromOrgName: gr.fromOrgName,
-  toOrgIds: [...gr.toOrgIds],
-  resourceKind: gr.resourceKind,
-  resourceId: gr.resourceId,
-  expiresAt: gr.expiresAt,
-  revokedAt: gr.revokedAt,
-  revokeReason: gr.revokeReason,
-  createdBy: gr.createdBy,
-  createdAt: gr.createdAt,
 });
 
 export function registerGroups(ctx) {

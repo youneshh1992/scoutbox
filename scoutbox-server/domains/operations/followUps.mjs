@@ -2,7 +2,7 @@
 // a reminder went out lives in the database, not in a timer, so restarts lose and re-send nothing.
 
 import { isAdult, visibleToOrg } from '../../domain.mjs';
-import { deriveWorkflowState } from '../recruitment/lifecycle/trial.mjs';
+import { deriveWorkflowState } from '../recruitment/public.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { operationsInput } from './schemas.mjs';
 import { asSweep } from '../../writeRules.mjs';

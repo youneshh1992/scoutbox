@@ -1,0 +1,70 @@
+// What the recruitment domain offers the rest of the server to import: its vocabulary, pure rules and views. Nothing here
+// holds state or registers a route; the domain's services reach other domains through server.mjs, not through here.
+export {
+  CONTACT_ACTIONS,
+  CONTACT_CHANNELS,
+  CONTACT_LIMITS,
+  CONTACT_MODES,
+  CONTACT_STATUSES,
+  CONTACT_TRANSITIONS,
+  RESPONSE_KINDS,
+  plainShared,
+} from './lifecycle/contact.mjs';
+export {
+  DECISION_KINDS,
+  DECISION_LIMITS,
+  DECISION_OUTCOMES,
+  DECISION_STATES,
+  EVIDENCE_REF_KINDS,
+  chainHead,
+  isFormal,
+} from './lifecycle/decision.mjs';
+export {
+  TRIAL_ATTENDANCE_SOURCES,
+  TRIAL_ATTENDANCE_STATES,
+  TRIAL_ATTENDED_STATES,
+  TRIAL_CANCEL_ACTORS,
+  TRIAL_COMPLETION_STATES,
+  TRIAL_CONSENT_SCOPES,
+  TRIAL_DAY_EVENT_KINDS,
+  TRIAL_KEY_ACTS,
+  TRIAL_LIMITS,
+  TRIAL_SESSION_KINDS,
+  TRIAL_STAFF_CHECK_STATES,
+  TRIAL_STATUSES,
+  TRIAL_WORKFLOW_LABELS,
+  TRIAL_WORKFLOW_STATES,
+  currentAttendance,
+  deriveWorkflowState,
+  isLegacyTrial,
+  scheduleView,
+  trialFamilyView,
+  trialOutcomeLine,
+} from './lifecycle/trial.mjs';
+export { BUDGET_LINE_KINDS, BUDGET_SCHEDULES, CURRENCIES, validAmountMinor } from './money.mjs';
+export {
+  OFFER_LIMITS,
+  OFFER_RESPONSE_ACTORS,
+  OFFER_RESPONSE_TYPES,
+  OFFER_REVISION_TRANSITIONS,
+  OFFER_STATUSES,
+  OFFER_TYPES,
+} from './offers/offer.mjs';
+export {
+  CASE_APPROVAL_STATES,
+  CASE_DECISION_OUTCOMES,
+  CASE_PRIORITIES,
+  CASE_STAGES,
+  EVIDENCE_REVIEW_STATES,
+  LIMITS as ROOM_LIMITS,
+  LINKED_RESOURCE_TYPES,
+  OPEN_ROOM_STATUSES,
+  RECOMMENDATIONS,
+  ROOM_PRIORITIES,
+  ROOM_STATUSES,
+  ROOM_TRANSITIONS,
+  SOURCE_CONTEXTS,
+  TASK_STATES,
+  roomCan,
+  roomRole,
+} from './rooms/shared.mjs';

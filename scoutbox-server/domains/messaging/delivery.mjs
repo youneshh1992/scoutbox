@@ -4,8 +4,8 @@
 // opened come only from confirmed provider callbacks: email acceptance is never reported as read.
 import crypto from 'node:crypto';
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { timingSafeEqStr as timingSafeEq } from '../identity/totp.mjs';
-import { signBody } from '../integrations/webhooks.mjs';
+import { timingSafeEqStr as timingSafeEq } from '../identity/public.mjs';
+import { signBody } from '../integrations/public.mjs';
 import { messagingInput } from './schemas.mjs';
 import { asSweep } from '../../writeRules.mjs';
 

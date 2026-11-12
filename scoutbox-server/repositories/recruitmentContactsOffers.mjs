@@ -31,7 +31,7 @@ import {
   CONTACT_MODES,
   CONTACT_LIMITS,
   RESPONSE_KINDS,
-} from '../domains/recruitment/lifecycle/contact.mjs';
+} from '../domains/recruitment/public.mjs';
 import {
   OFFER_STATUSES,
   OFFER_REVISION_TRANSITIONS,
@@ -39,7 +39,7 @@ import {
   OFFER_LIMITS,
   OFFER_RESPONSE_TYPES,
   OFFER_RESPONSE_ACTORS,
-} from '../domains/recruitment/offers/offer.mjs';
+} from '../domains/recruitment/public.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';

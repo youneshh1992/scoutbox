@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { integrityReport } from '../../domains/platform/integrity.mjs';
+import { OPEN_ROOM_STATUSES } from '../../domains/recruitment/public.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { contactIntegrity, CONTACT_STATUSES } from '../../domains/recruitment/lifecycle/contact.mjs';
@@ -828,7 +829,7 @@ const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-cp-corrupt-'));
     'shutdown wrote the corrupt rows back UNCHANGED in every key and value — reported, never repaired (the missing recipient and the impossible state carried as written)',
   );
   // Boot-time integrity: contacts are not part of the boot integrity report's subject, and must not make it lie.
-  const rep = integrityReport(after, { cases: after.recruitmentCases ?? [] });
+  const rep = integrityReport(after, { cases: after.recruitmentCases ?? [], openRoomStatuses: OPEN_ROOM_STATUSES });
   ok(rep.ok === true && rep.violations.length === 0, 'the boot integrity report is clean');
 }
 

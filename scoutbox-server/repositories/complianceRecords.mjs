@@ -36,15 +36,15 @@
  * player or a club) and a review's player carry no key (tolerant: they outlive an account deletion as ids). Child rows
  * cascade.
  */
-import { isPlainObject, describe } from './recruitment.mjs';
+import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { quote } from './fieldSpecs.mjs';
 import { REVIEWER_ROLES } from './compliancePolicies.mjs';
-import { FACETS, VERIFICATION_STATES, AGREEMENT_STATUSES } from '../domains/agents/core/shared.mjs';
-import { RULE_STATUSES, PARTY_ROLES, CONSENT_KINDS } from '../domains/agents/compliance/policyVersions.mjs';
-import { CONFLICT_OUTCOMES, CONTEXT_TYPES, derivedOfEvaluation } from '../domains/agents/compliance/conflict.mjs';
+import { FACETS, VERIFICATION_STATES, AGREEMENT_STATUSES } from '../domains/agents/public.mjs';
+import { RULE_STATUSES, PARTY_ROLES, CONSENT_KINDS } from '../domains/agents/public.mjs';
+import { CONFLICT_OUTCOMES, CONTEXT_TYPES, derivedOfEvaluation } from '../domains/agents/public.mjs';
 
 export const COMPLIANCE_RECORDS_MIGRATION = '0028_compliance_records';
 export const COMPLIANCE_RECORDS_COLLECTIONS = Object.freeze([

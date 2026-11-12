@@ -3,7 +3,7 @@
 // claims about discrimination.
 import { asReconciling } from '../../writeRules.mjs';
 import crypto from 'node:crypto';
-import { exposureHook } from '../enterprise/enterprise.mjs';
+import { exposureHook } from '../platform/metrics.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';
 import { EVIDENCE_RULE_IDS, INSIGHT_LIMITS, typeSubmission } from '../../repositories/insightCoverage.mjs';
 import { filled, presentOrRefuse } from '../platform/schemas.mjs';

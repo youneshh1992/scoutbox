@@ -4,7 +4,6 @@
 //
 // The import of the match engine is circular (it reads this file's vocabulary), which is safe because the engine
 // touches that vocabulary only inside function bodies — see the lazy band rank in matching/match.mjs.
-import { matchBrief } from './matching/match.mjs';
 import { parseStrictDateOnly, isDayWithin, isAbsent } from '../../temporal.mjs';
 
 // =====================================================================
@@ -724,13 +723,6 @@ export function explainBriefCriteria(criteria = {}) {
   for (const p of criteria.combineProtocols ?? [])
     out.push({ key: `combine:${p}`, label: 'Combine', value: `${p} result available` });
   return out;
-}
-
-// --------------------------------------------------------------- matching
-
-/** Every criterion a brief carries is required. `facts` is the match projection, not a Passport. */
-export function playerMatchesBrief(facts, criteria = {}, opts = {}) {
-  return matchBrief(facts, criteria, opts);
 }
 
 export function buildNobodyMissedCandidate({ facts, brief, match, evaluation, roomOpen }) {

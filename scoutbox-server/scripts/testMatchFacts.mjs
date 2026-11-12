@@ -23,6 +23,7 @@ import { validateCriteria, AVAILABILITY_VALUES } from '../domains/discovery/matc
 import { createMatchReads } from '../domains/discovery/matching/query.mjs';
 import { EVIDENCE_REQUIREMENTS } from '../domains/discovery/shared.mjs';
 import { isAdult, ADULT_AGE } from '../domain.mjs';
+import { TRUST_SCORE_POLICY_VERSION } from '../domains/passport/trust/shared.mjs';
 import { tempDir, clone, NOW, DAY, TTL, FIXTURE } from './coreIdentityTestFixtures.mjs';
 
 let passed = 0;
@@ -159,6 +160,7 @@ function keeperOf(t, bands = new Map(), opts = {}) {
     matchFacts: L.matchFacts,
     players: L.players,
     unit: t.unit,
+    trustPolicyVersion: TRUST_SCORE_POLICY_VERSION,
     sqlite: t.sqlite,
     verificationReads: { ...L.verification.reads, ...L.passport.reads, ...L.transitionsVouches.reads },
     scoutingReads: {

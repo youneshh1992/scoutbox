@@ -34,6 +34,7 @@ import {
   createNotificationPrefs,
 } from '../../domains/platform/notificationPrefs.mjs';
 import { integrityReport, integritySummary } from '../../domains/platform/integrity.mjs';
+import { OPEN_ROOM_STATUSES } from '../../domains/recruitment/public.mjs';
 import { parseFaultRules, createFaultLayer } from '../../domains/platform/faults.mjs';
 import { productionConfigProblems } from '../../domains/platform/capabilities.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
@@ -47,7 +48,7 @@ import {
   orderNobodyMissed,
   orderSecondLook,
 } from '../../domains/discovery/shared.mjs';
-import { PROVENANCE } from '../../domains/verification/passport/shared.mjs';
+import { PROVENANCE } from '../../domains/passport/shared.mjs';
 import { openStore } from '../../store.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, dataSchemaReport, migrationApplied } from '../../repositories/database.mjs';
@@ -425,14 +426,14 @@ section('§11 — boot-time integrity reports and never repairs');
       { id: 'c2', orgId: 'o1', playerId: 'p1', room: { status: 'watching', rev: 1 } },
     ],
   };
-  const r = integrityReport(sane, { cases: sane.recruitmentCases ?? [] });
+  const r = integrityReport(sane, { cases: sane.recruitmentCases ?? [], openRoomStatuses: OPEN_ROOM_STATUSES });
   ok(
     r.ok && r.violations.length === 0,
     'an archived Room plus an open one for the same player is fine — history repeats, activity does not',
   );
   const dup = JSON.parse(JSON.stringify(sane));
   dup.recruitmentCases.push({ id: 'c3', orgId: 'o1', playerId: 'p1', room: { status: 'shortlisted', rev: 1 } });
-  const r2 = integrityReport(dup, { cases: dup.recruitmentCases ?? [] });
+  const r2 = integrityReport(dup, { cases: dup.recruitmentCases ?? [], openRoomStatuses: OPEN_ROOM_STATUSES });
   neg(
     r2.violations.some((v) => v.code === 'ROOM_OPEN_DUPLICATE' && v.ids.includes('c2') && v.ids.includes('c3')),
     'two open Rooms for one organisation and player is reported with both ids',
@@ -443,9 +444,10 @@ section('§11 — boot-time integrity reports and never repairs');
     recruitmentCases: [{ id: 'c9', orgId: 'nope', playerId: 'p1', room: { status: 'watching', rev: 1 } }],
   };
   neg(
-    integrityReport(orphan, { cases: orphan.recruitmentCases ?? [] }).violations.some(
-      (v) => v.code === 'ROOM_ORPHAN_ORG',
-    ),
+    integrityReport(orphan, {
+      cases: orphan.recruitmentCases ?? [],
+      openRoomStatuses: OPEN_ROOM_STATUSES,
+    }).violations.some((v) => v.code === 'ROOM_ORPHAN_ORG'),
     'a Room whose organisation does not exist is reported',
   );
   // The discovery tables refuse a duplicated brief id, a fingerprint counted twice in one item and a brief without rev,
@@ -509,12 +511,19 @@ section('§11 — boot-time integrity reports and never repairs');
       'SECOND_LOOK_ITEM_DUPLICATE',
       'SECOND_LOOK_FINGERPRINT_DUPLICATE',
       'BRIEF_REV_INVALID',
-    ].some((code) => integrityReport(sane, { cases: sane.recruitmentCases }).violations.some((v) => v.code === code)),
+    ].some((code) =>
+      integrityReport(sane, { cases: sane.recruitmentCases, openRoomStatuses: OPEN_ROOM_STATUSES }).violations.some(
+        (v) => v.code === code,
+      ),
+    ),
     'and the boot report no longer reads the discovery collections at all',
   );
   const summary = integritySummary(r2);
   neg(!JSON.stringify(summary).includes('c2'), 'the operator summary carries counts by code, never ids');
-  ok(integrityReport({}, { cases: [] }).ok, 'an empty database is not a violation');
+  ok(
+    integrityReport({}, { cases: [], openRoomStatuses: OPEN_ROOM_STATUSES }).ok,
+    'an empty database is not a violation',
+  );
 }
 
 // ================================================== §12 faults (unit)

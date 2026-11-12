@@ -26,7 +26,7 @@
  * staff named, a review's or a watchlist's brief, and the room and decision a record names are immediate RESTRICT keys.
  * Child rows cascade with their owner, which is never deleted.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {
@@ -57,20 +57,15 @@ import {
   NOBODY_MISSED_STATES,
   NM_DISMISSAL_REASONS,
   REASON_CHANGE_MAP,
-} from '../domains/discovery/shared.mjs';
-import {
-  CRITERION_TYPES,
-  CRITERION_CLASSES,
-  criterionId,
-  LIMITS as MATCH_LIMITS,
-} from '../domains/discovery/matching/criteria.mjs';
+} from '../domains/discovery/public.mjs';
+import { CRITERION_TYPES, CRITERION_CLASSES, criterionId, MATCH_LIMITS } from '../domains/discovery/public.mjs';
 import {
   WATCHLIST_MODES,
   WATCHLIST_STATUSES,
   WATCHLIST_SOURCES,
   ENTRY_REASONS,
   EXIT_REASONS,
-} from '../domains/discovery/matching/watchlists.mjs';
+} from '../domains/discovery/public.mjs';
 
 export const DISCOVERY_MIGRATION = '0032_discovery';
 export const DISCOVERY_COLLECTIONS = Object.freeze([

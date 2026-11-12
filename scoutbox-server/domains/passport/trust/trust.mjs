@@ -4,9 +4,9 @@
 import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../../domain.mjs';
 import { idsText, inputOrRefuse, listedIds } from '../../platform/schemas.mjs';
-import { effectiveStatus, assuranceForClaim } from '../claims/shared.mjs';
-import { agreementInForce } from '../../agents/core/shared.mjs';
-import { PROVIDERS } from '../../development/boxcam/drills.mjs';
+import { effectiveStatus, assuranceForClaim } from '../../verification/public.mjs';
+import { agreementInForce } from '../../agents/public.mjs';
+import { PROVIDERS } from '../../development/public.mjs';
 import {
   POLICY,
   TRUST_SCORE_POLICY_VERSION,

@@ -4,7 +4,7 @@
  */
 import { METRICS, wire, ratio, count, distribution, days, inWindow } from './metrics.mjs';
 import { REASON_CODES } from '../rooms/shared.mjs';
-import { briefIsLiveOn } from '../../discovery/shared.mjs';
+import { briefIsLiveOn } from '../../discovery/public.mjs';
 import { firstTerminalAt } from './funnels.mjs';
 
 export const EVIDENCE_REASON_CODES = REASON_CODES.evidence;

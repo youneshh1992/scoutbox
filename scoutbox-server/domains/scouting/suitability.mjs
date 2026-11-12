@@ -12,7 +12,7 @@ import {
   typeStructured,
 } from '../../repositories/opportunitiesCampaigns.mjs';
 import { flag, id, inputOrRefuse, oneOf, requiredText, text, wholeNumber } from '../platform/schemas.mjs';
-import { opportunityView } from './journeys.mjs';
+import { opportunityView } from './views.mjs';
 import { slotsOverlap } from './slots.mjs';
 
 // The schemas check shape, vocabulary and length; the repository typers still judge the times, the time zone and

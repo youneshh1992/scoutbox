@@ -25,7 +25,7 @@
  * org_users are RESTRICT (organisations are never deleted, O2 in docs/decisions.md). Inside the domain every key is immediate RESTRICT: an assessment's template,
  * its first opinion, a rating's cited segment and a playlist's segments; the child rows cascade with their owner.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import {
   txt,

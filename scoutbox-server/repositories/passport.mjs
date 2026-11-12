@@ -19,7 +19,7 @@
  * deletion leaves these rows under the old id). A confirmation's organisation → orgs is an immediate RESTRICT
  * key; the preferences' child rows cascade with their preferences.
  */
-import { isPlainObject, ids, describe } from './recruitment.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { PLAYER_POSITIONS } from './identity.mjs';

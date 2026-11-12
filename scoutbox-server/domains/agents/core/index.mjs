@@ -8,7 +8,7 @@
 import { visibleToOrg } from '../../../domain.mjs';
 import { AGENT_CORE_LIMITS as LIM, PROFILE_FIELDS } from '../../../repositories/agentCore.mjs';
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
-import { opportunityBoardFor } from '../../scouting/journeys.mjs';
+import { opportunityBoardFor } from '../../scouting/public.mjs';
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { refuseWhenLimited } from '../../platform/rateLimit.mjs';
 import { readPage, sendPageError, pageOf } from '../../platform/paging.mjs';

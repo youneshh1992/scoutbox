@@ -27,7 +27,7 @@
  */
 import { operationOn } from './database.mjs';
 import { PLAYER_POSITIONS } from './identity.mjs';
-import { POLICY as TRUST_POLICY } from '../domains/verification/trust/shared.mjs';
+import { POLICY as TRUST_POLICY } from '../domains/passport/public.mjs';
 import { BOX_CAM_LIMITS } from './boxCam.mjs';
 
 export const MATCH_FACTS_MIGRATION = '0040_match_facts';

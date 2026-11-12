@@ -13,7 +13,7 @@ import {
   percentileAmong,
   inCohort,
 } from '../../grassrootsJourney.mjs';
-import { ownChild } from '../identity/children.mjs';
+import { ownChild } from '../identity/public.mjs';
 import { DRILLS } from './record.mjs';
 
 const DAY_MS = 24 * 3600 * 1000;

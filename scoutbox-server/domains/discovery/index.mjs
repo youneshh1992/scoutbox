@@ -1,7 +1,7 @@
 // Registered last because both systems read the whole stack. Every route is on the authenticated `orgRouter`; there
 // is no player, guardian or public route here.
 import { buildRouteHelpers } from '../platform/routeHelpers.mjs';
-import { metrics } from '../enterprise/enterprise.mjs';
+import { metrics } from '../platform/metrics.mjs';
 import { registerSecondLook } from './secondLook.mjs';
 import { registerNobodyMissed } from './nobodyMissed.mjs';
 import {

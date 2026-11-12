@@ -7,7 +7,7 @@
 import * as v from 'valibot';
 import { CURSOR_PAGE, dateOnly, flag, id, inputOrRefuse, oneOf, text, wholeNumber } from '../platform/schemas.mjs';
 import { CALIBRATION_CONFIDENCE, INSIGHT_LIMITS as L } from '../../repositories/insightCoverage.mjs';
-import { CURRENCIES } from '../recruitment/money.mjs';
+import { CURRENCIES } from '../recruitment/public.mjs';
 
 export const REVIEW_LATER_DAYS = Object.freeze({ min: 1, max: 60, default: 7 });
 export const IMPRESSIONS_MAX = 50;

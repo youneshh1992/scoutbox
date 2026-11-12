@@ -1,5 +1,5 @@
 // Trust Score: an evidence-confidence summary recomputed on every read; nothing is persisted.
-import { metrics } from '../../enterprise/enterprise.mjs';
+import { metrics } from '../../platform/metrics.mjs';
 import { POLICY, TRUST_SCORE_POLICY_VERSION, policyWeightsTotal } from './shared.mjs';
 import { registerTrust } from './trust.mjs';
 

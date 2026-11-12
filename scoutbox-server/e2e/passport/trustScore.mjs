@@ -34,7 +34,7 @@ import {
   scoreRelationshipConfidence,
   scoreReferencesConfidence,
   TRUST_DISCLAIMER,
-} from '../../domains/verification/trust/shared.mjs';
+} from '../../domains/passport/trust/shared.mjs';
 import { agreementInForce } from '../../domains/agents/core/shared.mjs';
 
 const PORT = pickPort(5100, 200, [0]);
@@ -1047,9 +1047,9 @@ section('metrics — privacy-safe aggregate counters');
 await sleep(50);
 const total = passed;
 console.log(
-  `\nverification/trustScore: ${total} checks passed, ${negatives} negative/abuse checks (${Math.round((negatives / total) * 100)}% of all checks)`,
+  `\npassport/trustScore: ${total} checks passed, ${negatives} negative/abuse checks (${Math.round((negatives / total) * 100)}% of all checks)`,
 );
 if (negatives * 10 < total * 4) fail(`negative coverage ${negatives}/${total} below the 40% floor`);
 if (process.exitCode) console.error('\nSOME CHECKS FAILED');
-else console.log('all verification/trustScore checks passed');
+else console.log('all passport/trustScore checks passed');
 process.exit(process.exitCode || 0);

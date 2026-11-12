@@ -1,78 +1,18 @@
 // SSO runs against a local test identity provider (HMAC-signed, enabled only where dev logins are); no corporate IdP
 // is configured and the API says so. A production rollout swaps the token verification for a maintained OIDC library
 // against the real issuer; the state/nonce/code flow is the same. Restores go into a separate empty directory.
-import { sideEffect, declareAuditedRead, apartFromTheAct } from '../../writeRules.mjs';
+import { declareAuditedRead, apartFromTheAct } from '../../writeRules.mjs';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { totpValid, b32encode, timingSafeEqStr } from '../identity/totp.mjs';
-import { signBody } from '../integrations/webhooks.mjs';
+import { totpValid, b32encode, timingSafeEqStr } from '../identity/public.mjs';
+import { signBody } from '../integrations/public.mjs';
 import { devLoginsEnabled } from '../platform/capabilities.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { filled, presentOrRefuse } from '../platform/schemas.mjs';
 import { enterpriseInput } from './schemas.mjs';
-import { grantView as grantExport } from '../groups/groups.mjs';
-
-// ---------------------------------------------------- request instrumentation
-// Exported separately so server.mjs can install it before all routes.
-export const metrics = {
-  startedAt: Date.now(),
-  requests: 0,
-  status2xx: 0,
-  status4xx: 0,
-  status5xx: 0,
-  slowRequests: 0, // > 500ms
-  byRoute: {}, // top-level path segment → count
-  failedUploads: 0,
-  deliveryFailures: 0,
-  jobRuns: 0,
-  sseConnects: 0,
-};
-// insight.mjs plugs exposure capture in here so profile and passport reads become funnel events.
-export const exposureHook = { fn: null };
-export function requestInstrumentation() {
-  return (req, res, next) => {
-    const t0 = process.hrtime.bigint();
-    req.correlationId = /^[a-zA-Z0-9_-]{6,64}$/.test(String(req.headers['x-request-id'] ?? ''))
-      ? String(req.headers['x-request-id'])
-      : `req_${crypto.randomBytes(8).toString('hex')}`;
-    res.set('X-Request-Id', req.correlationId);
-    res.on('finish', () => {
-      const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-      // originalUrl, not req.path: inside a mounted router that ended the response, req.path is prefix-stripped.
-      const fullPath = String(req.originalUrl ?? req.url ?? '').split('?')[0];
-      metrics.requests++;
-      if (res.statusCode >= 500) metrics.status5xx++;
-      else if (res.statusCode >= 400) metrics.status4xx++;
-      else metrics.status2xx++;
-      if (ms > 500) metrics.slowRequests++;
-      const seg = `/${fullPath.split('/')[1] ?? ''}`;
-      metrics.byRoute[seg] = (metrics.byRoute[seg] ?? 0) + 1;
-      if (fullPath.startsWith('/player/uploads') && res.statusCode >= 400) metrics.failedUploads++;
-      if (fullPath === '/events') metrics.sseConnects++;
-      try {
-        // Passive measurement after the response: not the request's act.
-        sideEffect(() => exposureHook.fn?.(req, res));
-      } catch {
-        /* exposure capture must never break a request */
-      }
-      // Redacted: no auth headers, tokens, bodies or emails.
-      if (process.env.SCOUTBOX_QUIET_LOGS !== '1') {
-        console.log(
-          JSON.stringify({
-            t: Date.now(),
-            id: req.correlationId,
-            m: req.method,
-            p: fullPath.slice(0, 120),
-            s: res.statusCode,
-            ms: Math.round(ms),
-          }),
-        );
-      }
-    });
-    next();
-  };
-}
+import { grantView as grantExport } from '../groups/public.mjs';
+import { metrics } from '../platform/metrics.mjs';
 
 /**
  * Wrong-code counting for staff second factors (org log-in and MFA set-up): five wrong codes lock the account's code

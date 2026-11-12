@@ -34,7 +34,7 @@
  * (tolerant, as recruitment: an agreement outlives an account deletion as an id-only tombstone). Child rows cascade.
  * Policy versions are checked in code through `policyVersionKnown` (the compliance policies repository).
  */
-import { isPlainObject, describe, ids } from './recruitment.mjs';
+import { isPlainObject, describe, ids } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import {
@@ -64,7 +64,7 @@ import {
   AGENT_TRANSITIONS,
   CLIENT_TRANSITIONS,
   termEndAt,
-} from '../domains/agents/core/shared.mjs';
+} from '../domains/agents/public.mjs';
 
 export const AGENT_CORE_MIGRATION = '0026_agent_core';
 export const AGENT_CORE_COLLECTIONS = Object.freeze([
