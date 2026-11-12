@@ -342,7 +342,7 @@ test('[typing] junk is refused naming the record and field', () => {
 });
 
 // ------------------------------------------------------------- briefs
-test('[briefs] create and read back whole; an update keeps the fixed fields, only grows the trail, bumps the version', () => {
+test('[briefs] create and read back whole; a revision sets only what it names, only grows the trail, and new criteria are a new version', () => {
   const { dir, s } = seeded('s12c-briefs');
   const made = s.repo.briefs.create(brief());
   assert.deepEqual(plain(made), plain(brief()), 'read back exactly as written (the position groups worked out)');
@@ -350,57 +350,49 @@ test('[briefs] create and read back whole; an update keeps the fixed fields, onl
   assert.ok(Object.isFrozen(made.criteria.positions), 'reads are deep-frozen');
   refused(() => s.repo.briefs.create(brief()), /DISCOVERY_DUPLICATE/);
   refused(() => s.repo.briefs.create(brief({ id: 'brf-x', orgId: 'org-nowhere' })), /orgId names no organisation/);
-  const next = s.repo.briefs.update('brf-1', (d) => {
-    d.criteria = validateRecruitmentBrief({ title: d.title, positions: ['ST'] }).criteria;
-    d.version += 1;
-    d.status = 'active';
-    d.updatedAt = NOW + 1;
-    d.rev += 1;
-    d.history.push(audit('aud-b2', NOW + 1, 'recruitment_brief_updated', { version: 2, criteriaChanged: true }));
-    d.history.push(audit('aud-b3', NOW + 1, 'recruitment_brief_activated', { from: 'draft', to: 'active' }));
-  });
-  assert.equal(next.version, 2);
+  const criteria = validateRecruitmentBrief({ title: 'Left-footed CB', positions: ['ST'] }).criteria;
+  const next = s.repo.briefs.revise(
+    'brf-1',
+    { criteria, status: 'active', at: NOW + 1 },
+    {
+      history: [
+        audit('aud-b2', NOW + 1, 'recruitment_brief_updated', { version: 2, criteriaChanged: true }),
+        audit('aud-b3', NOW + 1, 'recruitment_brief_activated', { from: 'draft', to: 'active' }),
+      ],
+      bump: { at: NOW + 1, by: { id: SCOUT.userId, name: SCOUT.name } },
+    },
+  );
+  assert.equal(next.version, 2, 'new criteria are a new version');
+  assert.equal(next.rev, made.rev + 1);
+  assert.equal(next.updatedAt, NOW + 1);
+  assert.equal(next.title, made.title, 'a field the revision does not name is kept');
   assert.deepEqual(next.criteria.positions, ['ST']);
   assert.deepEqual(next.criteria.positionGroups, ['ATT']);
   assert.deepEqual(
     next.history.map((h) => h.detail),
     [{ version: 1 }, { version: 2, criteriaChanged: true }, { from: 'draft', to: 'active' }],
   );
+  assert.equal(
+    s.repo.briefs.revise('brf-1', { title: 'Renamed', at: NOW + 2 }).version,
+    2,
+    'no criteria, no new version',
+  );
+  refused(() => s.repo.briefs.revise('brf-1', { status: 'sleeping', at: NOW + 3 }), /DISCOVERY_INPUT_INVALID/);
   refused(
     () =>
-      s.repo.briefs.update('brf-1', (d) => {
-        d.orgId = 'org-grass';
-      }),
-    /orgId cannot change/,
+      s.repo.briefs.revise(
+        'brf-1',
+        { at: NOW + 3 },
+        { history: [audit('aud-b3', NOW + 3, 'recruitment_brief_updated')] },
+      ),
+    /aud-b3 already exists/,
   );
-  refused(
-    () =>
-      s.repo.briefs.update('brf-1', (d) => {
-        d.history.pop();
-      }),
-    /history only grows/,
-  );
-  refused(
-    () =>
-      s.repo.briefs.update('brf-1', (d) => {
-        d.version = 1;
-      }),
-    /criteria version only grows/,
-  );
-  refused(
-    () =>
-      s.repo.briefs.update('brf-1', () => {
-        s.repo.briefs.update('brf-1', (d2) => {
-          d2.title = 'x';
-        });
-      }),
-    /DISCOVERY_NESTED_UPDATE/,
-  );
+  refused(() => s.repo.briefs.revise('brf-none', { at: NOW }), /DISCOVERY_NOT_FOUND/);
   assert.equal(s.repo.reads.briefs.forOrgById('brf-1', 'org-grass'), null, 'another organisation does not see it');
   assert.equal(s.repo.reads.briefs.countForOrg(ORG.id), 1);
   assert.deepEqual(
     s.repo.reads.briefs.historyFeed(ORG.id, ['recruitment_brief_activated']).map((r) => [r.entry.id, r.brief.title]),
-    [['aud-b3', 'Left-footed CB']],
+    [['aud-b3', 'Renamed']],
   );
   assert.equal(s.repo.reads.briefs.create, undefined, 'the reads cannot write');
   s.close();
@@ -408,7 +400,7 @@ test('[briefs] create and read back whole; an update keeps the fixed fields, onl
 });
 
 // ------------------------------------------------------------- Nobody Missed reviews
-test("[reviews] one per organisation, brief and player; an update appends to the trail; the brief must be the organisation's", () => {
+test("[reviews] one per organisation, brief and player; each act appends to the trail; the brief must be the organisation's", () => {
   const { dir, s } = seeded('s12c-reviews');
   s.repo.briefs.create(brief());
   const r = s.repo.reviews.create(review());
@@ -418,40 +410,16 @@ test("[reviews] one per organisation, brief and player; an update appends to the
   );
   refused(() => s.repo.reviews.create(review({ id: 'nmr-2' })), /already has a review/);
   refused(() => s.repo.reviews.create(review({ id: 'nmr-3', briefId: 'brf-none' })), /briefId names no brief/);
-  const d = s.repo.reviews.update('nmr-1', (x) => {
-    Object.assign(x, {
-      state: 'dismissed',
-      dismissReason: 'timing',
-      dismissedBy: by,
-      dismissedAt: NOW + 5,
-      updatedAt: NOW + 5,
-    });
-    x.history.push({ at: NOW + 5, state: 'dismissed', by });
-  });
+  const d = s.repo.reviews.dismiss('nmr-1', { by, at: NOW + 5, reason: 'timing' });
   assert.deepEqual(
     d.history.map((h) => h.state),
     ['reviewed', 'dismissed'],
   );
-  refused(
-    () =>
-      s.repo.reviews.update('nmr-1', (x) => {
-        x.playerId = 'pl-other';
-      }),
-    /playerId cannot change/,
-  );
-  refused(
-    () =>
-      s.repo.reviews.update('nmr-1', (x) => {
-        x.state = 'added_to_room';
-        x.history.push({ at: NOW + 6, state: 'added_to_room', by });
-      }),
-    /roomId/,
-  );
-  const added = s.repo.reviews.update('nmr-1', (x) => {
-    x.state = 'added_to_room';
-    x.roomId = 'case-1';
-    x.history.push({ at: NOW + 7, state: 'added_to_room', by });
-  });
+  assert.deepEqual([d.dismissReason, d.dismissedAt, d.updatedAt], ['timing', NOW + 5, NOW + 5]);
+  refused(() => s.repo.reviews.addToRoom('nmr-1', { by, at: NOW + 6 }), /roomId/, 'a Room review names its Room');
+  refused(() => s.repo.reviews.dismiss('nmr-1', { by, at: NOW + 6, reason: 'whim' }), /DISCOVERY_INPUT_INVALID/);
+  const added = s.repo.reviews.addToRoom('nmr-1', { by, at: NOW + 7, roomId: 'case-1' });
+  assert.equal(added.dismissReason, 'timing', 'what earlier acts recorded is kept');
   assert.equal(added.roomId, 'case-1');
   assert.equal(s.repo.reads.reviews.byKey(ORG.id, 'brf-1', 'pl-adult').id, 'nmr-1');
   assert.deepEqual(
@@ -492,22 +460,22 @@ test("[second look] an item names its organisation's room and decision, one per 
     s.repo.secondLook.create(item({ id: 'slk-5', decisionId: 'rdec-1' })),
     'an earlier decision cycle is its own item',
   );
-  const handled = s.repo.secondLook.update('slk-1', (d) => {
-    Object.assign(d, {
-      status: 'dismissed',
-      dismissedAt: NOW + 1,
-      dismissedBy: by,
-      dismissReason: null,
-      updatedAt: NOW + 1,
-    });
-    d.history.push({ at: NOW + 1, action: 'dismissed', by, reason: null });
-  });
-  const back = s.repo.secondLook.update('slk-1', (d) => {
-    d.status = 'open';
-    d.changeFingerprints = ['combine_verified_added:combine:sprint-30m@2'];
-    d.updatedAt = NOW + 2;
-    d.history.push({ at: NOW + 2, action: 'resurfaced', by: null, reason: 'materially_new_evidence' });
-  });
+  const handled = s.repo.secondLook.dismiss('slk-1', { by, at: NOW + 1, reason: null });
+  refused(() => s.repo.secondLook.review('slk-1', { by, at: NOW + 1 }), /review moves from open, not dismissed/);
+  const refresh = {
+    changeFingerprints: ['combine_verified_added:combine:sprint-30m@2'],
+    directReasonCodes: [],
+    triggerType: made.triggerType,
+    latestChangeAt: NOW + 2,
+  };
+  refused(() => s.repo.secondLook.refresh('slk-1', { refresh, at: NOW + 2 }), /refresh moves from open/);
+  const back = s.repo.secondLook.resurface('slk-1', { refresh, at: NOW + 2, reason: 'materially_new_evidence' });
+  assert.equal(back.status, 'open');
+  refused(
+    () => s.repo.secondLook.resurface('slk-1', { refresh, at: NOW + 3, reason: 'materially_new_evidence' }),
+    /DISCOVERY_STATE_CONFLICT/,
+    'an open item does not resurface',
+  );
   assert.deepEqual(plain(back.history), [
     { at: NOW, action: 'surfaced', by: null },
     { at: NOW + 1, action: 'dismissed', by, reason: null },
@@ -519,13 +487,9 @@ test("[second look] an item names its organisation's room and decision, one per 
     'the fingerprints are replaced whole',
   );
   assert.equal(handled.status, 'dismissed');
-  refused(
-    () =>
-      s.repo.secondLook.update('slk-1', (d) => {
-        d.decisionId = 'rdec-1';
-      }),
-    /decisionId cannot change/,
-  );
+  assert.equal(s.repo.secondLook.expire('slk-1', { at: NOW + 4 }).status, 'expired');
+  refused(() => s.repo.secondLook.markRoomReopened('slk-1', { by, at: NOW + 5 }), /DISCOVERY_STATE_CONFLICT/);
+  assert.equal(s.repo.secondLook.markRoomReopened('slk-5', { by, at: NOW + 5 }).reopenedBy.name, by.name);
   assert.equal(s.repo.reads.secondLook.byKey(ORG.id, 'case-1', 'rdec-2').id, 'slk-1');
   assert.equal(s.repo.reads.secondLook.forOrgById('slk-1', 'org-grass'), null);
   assert.deepEqual(
@@ -586,38 +550,26 @@ test('[watchlists] every criterion kind reads back as written; a brief-sourced l
     ['wl-a2', 'wl-a1', 'wl-a0'],
   );
   assert.equal(s.repo.reads.watchlists.openCount(ORG.id), 3);
-  const upd = s.repo.watchlists.update('wl-1', (d) => {
-    d.name = 'Renamed';
-    d.status = 'archived';
-    d.rev = 2;
-    d.revAt = NOW + 9;
-    d.revBy = by;
-    d.updatedAt = NOW + 9;
-    d.history.push(
-      audit('aud-w9', NOW + 9, 'watchlist_archived', {
-        changed: ['name', 'status'],
-        mode: 'snapshot',
-        status: 'archived',
-      }),
-    );
-  });
+  const upd = s.repo.watchlists.revise(
+    'wl-1',
+    { name: 'Renamed', status: 'archived', at: NOW + 9 },
+    {
+      history: [
+        audit('aud-w9', NOW + 9, 'watchlist_archived', {
+          changed: ['name', 'status'],
+          mode: 'snapshot',
+          status: 'archived',
+        }),
+      ],
+      bump: { at: NOW + 9, by },
+    },
+  );
+  assert.deepEqual([upd.name, upd.status, upd.rev, upd.updatedAt], ['Renamed', 'archived', 2, NOW + 9]);
+  assert.deepEqual(upd.revBy, by);
   assert.deepEqual(upd.history[1].detail, { changed: ['name', 'status'], mode: 'snapshot', status: 'archived' });
-  refused(
-    () =>
-      s.repo.watchlists.update('wl-1', (d) => {
-        d.lastReconciledAt = NOW;
-        d.lastCriteriaVersion = 'cv1:x';
-      }),
-    /cannot change/,
-    'only a reconciliation records its clock',
-  );
-  refused(
-    () =>
-      s.repo.watchlists.update('wl-1', (d) => {
-        d.sourceId = 'other';
-      }),
-    /sourceId cannot change/,
-  );
+  const reconciled = s.repo.watchlists.revise('wl-1', { lastReconciledAt: NOW, sourceId: 'other', at: NOW + 10 });
+  assert.equal(reconciled.lastReconciledAt, null, 'only a reconciliation records its clock');
+  assert.equal(reconciled.sourceId, upd.sourceId, 'the source never changes');
   s.close();
   rm(dir);
 });

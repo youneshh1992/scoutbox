@@ -294,35 +294,27 @@ export function registerSecondLook(ctx) {
             live.push({ item, candidate });
             continue;
           }
-          const refresh = (d) => {
-            d.changeFingerprints = candidate.changeFingerprints;
-            d.directReasonCodes = candidate.directReasonCodes;
-            d.triggerType = candidate.kind;
-            d.latestChangeAt = candidate.latestChangeAt;
-            d.updatedAt = at;
+          const refresh = {
+            changeFingerprints: candidate.changeFingerprints,
+            directReasonCodes: candidate.directReasonCodes,
+            triggerType: candidate.kind,
+            latestChangeAt: candidate.latestChangeAt,
           };
-          const expire = (d) => {
-            if (secondLookExpired(d, at)) {
-              d.status = 'expired';
-              d.updatedAt = at;
-            }
-          };
+          // Whether the item, as the act leaves it, has lapsed by now.
+          const lapsed = (status) => secondLookExpired({ ...existing, ...refresh, status, updatedAt: at }, at);
           let item = existing;
           if (verdict.action === 'reopen') {
-            item = discovery.secondLook.update(existing.id, (d) => {
-              d.status = 'open';
-              refresh(d);
-              d.history.push({ at, action: 'resurfaced', by: null, reason: verdict.reason });
-              expire(d);
+            item = discovery.secondLook.resurface(existing.id, {
+              refresh,
+              at,
+              reason: verdict.reason,
+              expired: lapsed('open'),
             });
             vmetric('second_look_created');
           } else if (verdict.action === 'update') {
-            item = discovery.secondLook.update(existing.id, (d) => {
-              refresh(d);
-              expire(d);
-            });
+            item = discovery.secondLook.refresh(existing.id, { refresh, at, expired: lapsed(existing.status) });
           } else if (secondLookExpired(existing, at)) {
-            item = discovery.secondLook.update(existing.id, expire);
+            item = discovery.secondLook.expire(existing.id, { at });
           }
           live.push({ item, candidate });
         }
@@ -520,13 +512,7 @@ export function registerSecondLook(ctx) {
     if (!transition(req, res, item, 'reviewed')) return;
     const at = now();
     const by = { userId: req.orgUser.id, name: req.orgUser.name };
-    const stored = discovery.secondLook.update(item.id, (d) => {
-      d.status = 'reviewed';
-      d.reviewedAt = at;
-      d.reviewedBy = by;
-      d.updatedAt = at;
-      d.history.push({ at, action: 'reviewed', by });
-    });
+    const stored = discovery.secondLook.review(item.id, { by, at });
     vmetric('second_look_reviewed');
     res.json({ item: storedView(stored) });
   });
@@ -541,14 +527,7 @@ export function registerSecondLook(ctx) {
     if (!transition(req, res, item, 'dismissed')) return;
     const at = now();
     const by = { userId: req.orgUser.id, name: req.orgUser.name };
-    const stored = discovery.secondLook.update(item.id, (d) => {
-      d.status = 'dismissed';
-      d.dismissedAt = at;
-      d.dismissedBy = by;
-      d.dismissReason = reason;
-      d.updatedAt = at;
-      d.history.push({ at, action: 'dismissed', by, reason });
-    });
+    const stored = discovery.secondLook.dismiss(item.id, { by, at, reason });
     vmetric('second_look_dismissed');
     res.json({
       item: storedView(stored),
@@ -584,13 +563,7 @@ export function registerSecondLook(ctx) {
       const by = { userId: req.orgUser.id, name: req.orgUser.name };
       return {
         out: reopened,
-        stored: discovery.secondLook.update(item.id, (d) => {
-          d.status = 'reopened_room';
-          d.reopenedAt = at;
-          d.reopenedBy = by;
-          d.updatedAt = at;
-          d.history.push({ at, action: 'reopened_room', by });
-        }),
+        stored: discovery.secondLook.markRoomReopened(item.id, { by, at }),
       };
     });
     if (!out.ok) return res.status(out.status).json(out);

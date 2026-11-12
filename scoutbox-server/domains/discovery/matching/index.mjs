@@ -27,7 +27,7 @@ import {
   membershipNotification,
   watchlistBlockedState,
 } from './watchlists.mjs';
-import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
+import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { readPage, pageOf, sendPageError } from '../../platform/paging.mjs';
 import { now } from '../../platform/clock.mjs';
 import { limitCheck } from '../../platform/rateLimit.mjs';
@@ -46,6 +46,7 @@ export function registerMatching(ctx) {
     isLead,
     requireLead,
     audit,
+    auditEntry,
     vmetric,
     notify,
     broadcast,
@@ -563,22 +564,27 @@ export function registerMatching(ctx) {
       set.criteria = v.criteria;
       set.criteriaVersion = criteriaVersion(v.criteria);
     }
-    const stored = discovery.watchlists.update(w.id, (d) => {
-      Object.assign(d, set);
-      d.updatedAt = now();
-      bumpRev(d, { by: { id: req.orgUser.id, name: req.orgUser.name }, at: d.updatedAt });
-      const changed = Object.entries(before)
-        .filter(([k, v]) => d[k] !== v)
-        .map(([k]) => k);
-      audit?.(
-        d,
-        'org',
-        req.orgUser.id,
-        req.orgUser.name,
-        d.status === 'archived' && before.status !== 'archived' ? 'watchlist_archived' : 'watchlist_updated',
-        { changed, mode: d.mode, status: d.status },
-      );
-    });
+    const at = now();
+    const after = { ...w, ...set };
+    const changed = Object.entries(before)
+      .filter(([k, v]) => after[k] !== v)
+      .map(([k]) => k);
+    const stored = discovery.watchlists.revise(
+      w.id,
+      { ...set, at },
+      {
+        history: [
+          auditEntry(
+            'org',
+            req.orgUser.id,
+            req.orgUser.name,
+            after.status === 'archived' && before.status !== 'archived' ? 'watchlist_archived' : 'watchlist_updated',
+            { changed, mode: after.mode, status: after.status },
+          ),
+        ],
+        bump: { at, by: { id: req.orgUser.id, name: req.orgUser.name } },
+      },
+    );
     broadcast?.('watchlist_updated', { orgId: req.org.id, watchlistId: stored.id });
     if (stored.status === 'archived') broadcast?.('watchlist_archived', { orgId: req.org.id, watchlistId: stored.id });
     res.json({ watchlist: wlView(stored) });

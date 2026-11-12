@@ -15,10 +15,11 @@
  *     only by `reconcile`. The lifecycle trail is rows; the membership transitions (`watchlistHistory`) are
  *     `watchlist_membership_events`, one per fingerprint.
  *
- * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` per record kind (the update hands a plain copy,
- * types it whole, refuses an unknown field, a change to a field that never changes, a trail entry that changes or goes,
- * and an update from inside its own update); `watchlists.reconcile(id, …)` replaces the membership and appends the new
- * transitions. Every write joins the open unit of work, the caller's open transaction, or a transaction of its own.
+ * WRITES are explicit: `create(record)` per record kind, then named acts (a brief or a watchlist is revised; a review
+ * records a player reviewed, dismissed or added to a Room; a Second Look item resurfaces, is refreshed, expires, is
+ * reviewed, dismissed or has its Room reopened). An act works out the fields it sets from its input, appends its trail
+ * entries after the stored ones and types the record whole before writing it; `watchlists.reconcile(id, …)` replaces
+ * the membership and appends the new transitions. Every write joins the open unit of work, the caller's open transaction, or a transaction of its own.
  *
  * Deep-frozen records; a list's child rows decode in one batch. Modules receive them as `discoveryReads`.
  *
@@ -626,10 +627,6 @@ function typeWatchlistHistoryEntry(raw, at) {
   if (!Object.keys(out).length) return bad(at, 'detail', 'is null or names at least one field');
   return { ok: true, record: { ...t.record, detail: out } };
 }
-function noTrailRewrite(stored, next, label) {
-  if (stored.history.some((h, i) => !same(h, next.history[i])))
-    throw refusal('DISCOVERY_INPUT_INVALID', `${label}: the history only grows (a stored entry cannot change or go)`);
-}
 
 /** A brief's criteria: the listed criteria as value rows, the scalars as columns, the position groups worked out. */
 export function typeBriefCriteria(raw, label) {
@@ -1221,7 +1218,18 @@ export const unresolvedPlayerReferences = (sqlite) =>
     : null;
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'reconcile']);
+const WRITES = new Set([
+  'create',
+  'revise',
+  'review',
+  'dismiss',
+  'addToRoom',
+  'resurface',
+  'refresh',
+  'expire',
+  'markRoomReopened',
+  'reconcile',
+]);
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const canonical = (v) =>
   Array.isArray(v)
@@ -1250,20 +1258,6 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
     return s;
   };
   const st = statements(sqlite);
-  const updating = new Set();
-  const guard = (key, fn) => {
-    if (updating.has(key))
-      throw refusal(
-        'DISCOVERY_NESTED_UPDATE',
-        `${key} is already being updated; make the second change after the first returns`,
-      );
-    updating.add(key);
-    try {
-      return fn();
-    } finally {
-      updating.delete(key);
-    }
-  };
   const typedOr = (type, raw, name) => {
     const t = type(raw, name);
     if (!t.ok) throw refusal('DISCOVERY_INPUT_INVALID', t.reason);
@@ -1283,28 +1277,48 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
     (sql) =>
     (...args) =>
       decoder(q(sql).all(...args)).map(deepFreeze);
-  /** The common shape of an update: a plain copy edited by `change`, typed whole, fixed fields and the trail kept. */
-  const updater =
-    ({ table, type, byId: find, immutable, write, check = () => {} }) =>
-    (id, change) =>
-      guard(`${table} ${id}`, () =>
-        operation(() => {
-          if (typeof change !== 'function')
-            throw new TypeError(`${table}.update(id, change) needs a function that edits the copy it is given`);
-          const stored = find(id);
-          if (!stored) throw refusal('DISCOVERY_NOT_FOUND', `${table} ${id} is not a record of the repository`);
-          const draft = clone(stored);
-          const returned = change(draft);
-          const next = typedOr(type, returned === undefined ? draft : returned, table);
-          for (const k of immutable)
-            if (!same(next[k], stored[k]))
-              throw refusal('DISCOVERY_INPUT_INVALID', `${table} ${id}: ${k} cannot change`);
-          noTrailRewrite(stored, next, `${table} ${id}`);
-          check(next, stored);
-          write(next, stored);
-          return find(id);
-        }),
-      );
+  /**
+   * Named acts on one record kind, each `act(id, input, bookkeeping)`. A definition says which state the act moves from
+   * (`from`, refused with DISCOVERY_STATE_CONFLICT otherwise) and works out the fields it sets from its input, with
+   * any trail entries of its own (`history`); those and the bookkeeping's trail entries are appended after the stored ones and `bump` (`{ at, by: { id | userId, name } }`)
+   * moves the revision. The record is typed whole and written once.
+   */
+  const actsOn = ({ table, type, byId: find, write }, defs) =>
+    Object.fromEntries(
+      Object.entries(defs).map(([name, { from = null, fields }]) => [
+        name,
+        (id, input = {}, { history = [], bump = null } = {}) =>
+          operation(() => {
+            const stored = find(id);
+            if (!stored) throw refusal('DISCOVERY_NOT_FOUND', `${table} ${id} is not a record of the repository`);
+            if (from && !from.includes(stored.status ?? stored.state))
+              throw refusal(
+                'DISCOVERY_STATE_CONFLICT',
+                `${table} ${id}: ${name} moves from ${from.join(' or ')}, not ${stored.status ?? stored.state}`,
+              );
+            if (!Array.isArray(history))
+              throw refusal('DISCOVERY_INPUT_INVALID', `${table} ${id}: history must be a list`);
+            const { history: own = [], ...set } = fields(input, stored);
+            const revision = bump
+              ? {
+                  rev: stored.rev + 1,
+                  revAt: bump.at,
+                  revBy: { userId: bump.by?.id ?? bump.by?.userId ?? null, name: bump.by?.name ?? null },
+                }
+              : {};
+            const next = typedOr(
+              type,
+              { ...clone(stored), ...set, ...revision, history: [...stored.history, ...own, ...history] },
+              table,
+            );
+            write(next, stored);
+            return find(id);
+          }),
+      ]),
+    );
+  /** The fields of `input` named in `keys` that it gives. */
+  const given = (input, keys) =>
+    Object.fromEntries(keys.filter((k) => input[k] !== undefined).map((k) => [k, input[k]]));
   const orgExists = (orgId) => !!q('SELECT 1 FROM orgs WHERE id = ?').get(orgId);
   const needOrg = (table, rec) => {
     if (!orgExists(rec.orgId))
@@ -1324,18 +1338,27 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
         writeBrief(st, r);
         return briefById(r.id);
       }),
-    /** `update(id, change)`: the organisation, author and creation never change; the history only grows. */
-    update: updater({
-      table: 'recruitment_briefs',
-      type: typeBrief,
-      byId: briefById,
-      immutable: ['id', 'orgId', 'createdBy', 'createdAt'],
-      check: (next, stored) => {
-        if (next.version < stored.version)
-          throw refusal('DISCOVERY_INPUT_INVALID', `recruitment_briefs ${stored.id}: the criteria version only grows`);
+    ...actsOn(
+      {
+        table: 'recruitment_briefs',
+        type: typeBrief,
+        byId: briefById,
+        write: (next, stored) => writeBrief(st, next, { known: stored.history.length }),
       },
-      write: (next, stored) => writeBrief(st, next, { known: stored.history.length }),
-    }),
+      {
+        /**
+         * Revise the brief at `at`: any of its status, title and active dates; `criteria`, when given, is a new criteria
+         * version (the version Nobody Missed points at moves on, and historical coverage keeps the old one).
+         */
+        revise: {
+          fields: (input, b) => ({
+            ...given(input, ['status', 'title', 'activeFrom', 'activeUntil']),
+            ...(input.criteria !== undefined ? { criteria: input.criteria, version: b.version + 1 } : {}),
+            updatedAt: input.at,
+          }),
+        },
+      },
+    ),
     byId: briefById,
     /** This organisation's brief, or null (another organisation's id is no brief). */
     forOrgById: one(decB)('SELECT * FROM recruitment_briefs WHERE id = ? AND org_id = ?'),
@@ -1386,14 +1409,38 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
         writeReview(st, r);
         return reviewById(r.id);
       }),
-    /** `update(id, change)`: the organisation, brief, player and creation never change; the trail only grows. */
-    update: updater({
-      table: 'nobody_missed_reviews',
-      type: typeReview,
-      byId: reviewById,
-      immutable: ['id', 'orgId', 'briefId', 'playerId', 'createdAt'],
-      write: (next, stored) => writeReview(st, next, { known: stored.history.length }),
-    }),
+    /**
+     * What the organisation did next with the player, at `at` by `by`, against the brief's current version: reviewed,
+     * dismissed (with a reason) or added to a Room. Each appends its trail entry; what earlier acts recorded is kept.
+     */
+    ...actsOn(
+      {
+        table: 'nobody_missed_reviews',
+        type: typeReview,
+        byId: reviewById,
+        write: (next, stored) => writeReview(st, next, { known: stored.history.length }),
+      },
+      Object.fromEntries(
+        Object.entries({
+          review: ({ by, at }) => ({ state: 'reviewed', reviewedBy: by, reviewedAt: at }),
+          dismiss: ({ by, at, reason = null }) => ({
+            state: 'dismissed',
+            dismissReason: reason,
+            dismissedBy: by,
+            dismissedAt: at,
+          }),
+          addToRoom: ({ by, at, roomId }) => ({ state: 'added_to_room', roomId, reviewedBy: by, reviewedAt: at }),
+        }).map(([name, set]) => [
+          name,
+          {
+            fields: (input, r) => {
+              const fields = { ...set(input), briefVersion: input.briefVersion ?? r.briefVersion, updatedAt: input.at };
+              return { ...fields, history: [{ at: input.at, state: fields.state, by: input.by }] };
+            },
+          },
+        ]),
+      ),
+    ),
     byId: reviewById,
     /** This organisation's review of this player for this brief, or null. */
     byKey: one(decR)('SELECT * FROM nobody_missed_reviews WHERE org_id = ? AND brief_id = ? AND player_id = ?'),
@@ -1441,14 +1488,55 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
         writeItem(st, r);
         return itemById(r.id);
       }),
-    /** `update(id, change)`: the organisation, player, room, decision cycle and creation never change; the trail only grows. */
-    update: updater({
-      table: 'second_look_items',
-      type: typeSecondLookItem,
-      byId: itemById,
-      immutable: ['id', 'orgId', 'playerId', 'roomId', 'decisionId', 'createdAt'],
-      write: (next, stored) => writeItem(st, next, { known: stored.history.length }),
-    }),
+    ...actsOn(
+      {
+        table: 'second_look_items',
+        type: typeSecondLookItem,
+        byId: itemById,
+        write: (next, stored) => writeItem(st, next, { known: stored.history.length }),
+      },
+      (() => {
+        /** The changes the item now stands for (`refresh`), and whether it has lapsed by `at` (`expired`). */
+        const refreshed = ({ refresh, at, expired = false }) => ({
+          changeFingerprints: refresh.changeFingerprints,
+          directReasonCodes: refresh.directReasonCodes,
+          triggerType: refresh.triggerType,
+          latestChangeAt: refresh.latestChangeAt,
+          updatedAt: at,
+          ...(expired ? { status: 'expired' } : {}),
+        });
+        const by = (status, stamp, from) => ({
+          from,
+          fields: ({ by: who, at, reason }) => ({
+            status,
+            [`${stamp}At`]: at,
+            [`${stamp}By`]: who,
+            ...(status === 'dismissed' ? { dismissReason: reason ?? null } : {}),
+            updatedAt: at,
+            history: [{ at, action: status, by: who, ...(status === 'dismissed' ? { reason: reason ?? null } : {}) }],
+          }),
+        });
+        return {
+          /** New changes on a closed item open it again, with the reason. */
+          resurface: {
+            from: ['reviewed', 'dismissed', 'expired'],
+            fields: (input) => ({
+              status: 'open',
+              ...refreshed(input),
+              history: [{ at: input.at, action: 'resurfaced', by: null, reason: input.reason }],
+            }),
+          },
+          /** The changes an item stands for moved on. */
+          refresh: { from: ['open'], fields: (input) => refreshed(input) },
+          /** The item lapsed at `at`. */
+          expire: { from: ['open'], fields: ({ at }) => ({ status: 'expired', updatedAt: at }) },
+          review: by('reviewed', 'reviewed', ['open']),
+          dismiss: by('dismissed', 'dismissed', ['open', 'reviewed']),
+          /** The organisation reopened the Room from the item. */
+          markRoomReopened: by('reopened_room', 'reopened', ['open', 'reviewed']),
+        };
+      })(),
+    ),
     byId: itemById,
     /** This organisation's item, or null (another organisation's id is no item). */
     forOrgById: one(decI)('SELECT * FROM second_look_items WHERE id = ? AND org_id = ?'),
@@ -1490,27 +1578,27 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
         writeWatchlist(st, r);
         return watchlistById(r.id);
       }),
-    /**
-     * `update(id, change)`: the organisation, source, author and creation never change, nor what the last reconciliation
-     * recorded (only `reconcile` writes that); the history only grows.
-     */
-    update: updater({
-      table: 'dynamic_watchlists',
-      type: typeWatchlist,
-      byId: watchlistById,
-      immutable: [
-        'id',
-        'orgId',
-        'sourceType',
-        'sourceId',
-        'createdBy',
-        'createdByName',
-        'createdAt',
-        ...RECONCILE_FIELDS,
-      ],
-      write: (next, stored) =>
-        writeWatchlist(st, next, { known: stored.history.length, criteria: !same(next.criteria, stored.criteria) }),
-    }),
+    ...actsOn(
+      {
+        table: 'dynamic_watchlists',
+        type: typeWatchlist,
+        byId: watchlistById,
+        write: (next, stored) =>
+          writeWatchlist(st, next, { known: stored.history.length, criteria: !same(next.criteria, stored.criteria) }),
+      },
+      {
+        /**
+         * Revise the watchlist at `at`: any of its name, status, mode, notification and criteria (with their version).
+         * What the last reconciliation recorded is written only by `reconcile`.
+         */
+        revise: {
+          fields: (input) => ({
+            ...given(input, ['name', 'status', 'mode', 'notify', 'criteria', 'criteriaVersion']),
+            updatedAt: input.at,
+          }),
+        },
+      },
+    ),
     /**
      * Record a reconciliation: the membership derived now (`members`, `[{ playerId, required: [{ criterionId, met }] }]`)
      * replaces the last one, the transitions not seen before are appended (a fingerprint already recorded is one
@@ -1518,42 +1606,39 @@ export function createDiscoveryRepository({ sqlite, unit = null, now = Date.now,
      * Returns the events it appended.
      */
     reconcile: (id, { at, criteriaVersion, briefVersion = null, members, events = [] }) =>
-      guard(`dynamic_watchlists ${id}`, () =>
-        operation(() => {
-          const stored = watchlistById(id);
-          if (!stored)
-            throw refusal('DISCOVERY_NOT_FOUND', `dynamic_watchlists ${id} is not a record of the repository`);
-          const next = typedOr(
-            typeWatchlist,
-            {
-              ...clone(stored),
-              lastCriteriaVersion: criteriaVersion,
-              lastBriefVersion: briefVersion,
-              lastReconciledAt: at,
-            },
-            'dynamic_watchlists',
-          );
-          const m = typeMembers(members, `dynamic_watchlists ${id}`);
-          if (!m.ok) throw refusal('DISCOVERY_INPUT_INVALID', m.reason);
-          const fresh = [];
-          const seen = new Set(); // membership is uncapped, so the batch's own duplicates are found by key
-          for (const [i, raw] of events.entries()) {
-            const e = typedOr(typeMembershipEvent, raw, `dynamic_watchlists ${id} events[${i}]`);
-            if (e.watchlistId !== id || e.orgId !== stored.orgId)
-              throw refusal(
-                'DISCOVERY_INPUT_INVALID',
-                `dynamic_watchlists ${id}: event ${e.id} names another watchlist or organisation`,
-              );
-            if (seen.has(e.fingerprint) || st.eventByFingerprint.get(e.fingerprint)) continue;
-            seen.add(e.fingerprint);
-            fresh.push(e);
-          }
-          writeWatchlist(st, next, { known: stored.history.length, criteria: false });
-          writeMembers(st, id, m.value);
-          for (const e of fresh) st.event.run(encode(EVENT_SPEC, e));
-          return deepFreeze(fresh.map((e) => ({ ...e })));
-        }),
-      ),
+      operation(() => {
+        const stored = watchlistById(id);
+        if (!stored) throw refusal('DISCOVERY_NOT_FOUND', `dynamic_watchlists ${id} is not a record of the repository`);
+        const next = typedOr(
+          typeWatchlist,
+          {
+            ...clone(stored),
+            lastCriteriaVersion: criteriaVersion,
+            lastBriefVersion: briefVersion,
+            lastReconciledAt: at,
+          },
+          'dynamic_watchlists',
+        );
+        const m = typeMembers(members, `dynamic_watchlists ${id}`);
+        if (!m.ok) throw refusal('DISCOVERY_INPUT_INVALID', m.reason);
+        const fresh = [];
+        const seen = new Set(); // membership is uncapped, so the batch's own duplicates are found by key
+        for (const [i, raw] of events.entries()) {
+          const e = typedOr(typeMembershipEvent, raw, `dynamic_watchlists ${id} events[${i}]`);
+          if (e.watchlistId !== id || e.orgId !== stored.orgId)
+            throw refusal(
+              'DISCOVERY_INPUT_INVALID',
+              `dynamic_watchlists ${id}: event ${e.id} names another watchlist or organisation`,
+            );
+          if (seen.has(e.fingerprint) || st.eventByFingerprint.get(e.fingerprint)) continue;
+          seen.add(e.fingerprint);
+          fresh.push(e);
+        }
+        writeWatchlist(st, next, { known: stored.history.length, criteria: false });
+        writeMembers(st, id, m.value);
+        for (const e of fresh) st.event.run(encode(EVENT_SPEC, e));
+        return deepFreeze(fresh.map((e) => ({ ...e })));
+      }),
     byId: watchlistById,
     /** This organisation's watchlist, or null (another organisation's id is no watchlist). */
     forOrgById: one(decW)('SELECT * FROM dynamic_watchlists WHERE id = ? AND org_id = ?'),

@@ -28,7 +28,7 @@ import { briefCriteriaToCanonical } from './matching/match.mjs';
 import { createMatchReads } from './matching/query.mjs';
 import { pageOf, sendPageError } from '../platform/paging.mjs';
 import { rateLimitedBody, limitCheck } from '../platform/rateLimit.mjs';
-import { guardRev, bumpRev, revMeta } from '../platform/concurrency.mjs';
+import { guardRev, revMeta } from '../platform/concurrency.mjs';
 import { now } from '../platform/clock.mjs';
 
 export function registerNobodyMissed(ctx) {
@@ -41,6 +41,7 @@ export function registerNobodyMissed(ctx) {
     isLead,
     requireLead,
     audit,
+    auditEntry,
     vmetric,
     suppress,
     discovery,
@@ -218,37 +219,30 @@ export function registerNobodyMissed(ctx) {
       if (!v.ok) return res.status(400).json(v);
     }
 
-    const stored = discovery.briefs.update(b.id, (d) => {
-      if (statusTo !== null) {
-        const from = d.status;
-        d.status = statusTo;
-        audit(
-          d,
-          'org',
-          req.orgUser.id,
-          req.orgUser.name,
-          statusTo === 'active' ? 'recruitment_brief_activated' : 'recruitment_brief_updated',
-          { from, to: statusTo },
-        );
-      }
-      if (v) {
-        const changed = JSON.stringify(v.criteria) !== JSON.stringify(d.criteria);
-        d.title = v.title;
-        d.activeFrom = v.activeFrom;
-        d.activeUntil = v.activeUntil;
-        if (changed) {
-          // Historical coverage keeps pointing at the version it was computed against.
-          d.criteria = v.criteria;
-          d.version += 1;
-          audit(d, 'org', req.orgUser.id, req.orgUser.name, 'recruitment_brief_updated', {
-            version: d.version,
-            criteriaChanged: true,
-          });
-        }
-      }
-      d.updatedAt = now();
-      bumpRev(d, { by: req.orgUser, at: d.updatedAt });
-    });
+    const by = ['org', req.orgUser.id, req.orgUser.name];
+    const history = [];
+    if (statusTo !== null)
+      history.push(
+        auditEntry(...by, statusTo === 'active' ? 'recruitment_brief_activated' : 'recruitment_brief_updated', {
+          from: b.status,
+          to: statusTo,
+        }),
+      );
+    // Historical coverage keeps pointing at the version it was computed against.
+    const criteriaChanged = !!v && JSON.stringify(v.criteria) !== JSON.stringify(b.criteria);
+    if (criteriaChanged)
+      history.push(auditEntry(...by, 'recruitment_brief_updated', { version: b.version + 1, criteriaChanged: true }));
+    const at = now();
+    const stored = discovery.briefs.revise(
+      b.id,
+      {
+        ...(statusTo !== null ? { status: statusTo } : {}),
+        ...(v ? { title: v.title, activeFrom: v.activeFrom, activeUntil: v.activeUntil } : {}),
+        ...(criteriaChanged ? { criteria: v.criteria } : {}),
+        at,
+      },
+      { history, bump: { at, by: req.orgUser } },
+    );
     if (statusTo === 'active') vmetric('recruitment_brief_activated');
     res.json({ brief: briefView(stored) });
   });
@@ -384,10 +378,10 @@ export function registerNobodyMissed(ctx) {
         history: [{ at, state: patch.state, by }],
       });
     }
-    return discovery.reviews.update(existing.id, (d) => {
-      Object.assign(d, patch, { updatedAt: at, briefVersion: brief.version });
-      d.history.push({ at, state: d.state, by });
-    });
+    const { state, reviewedBy: _r, reviewedAt: _ra, dismissedBy: _d, dismissedAt: _da, dismissReason, roomId } = patch;
+    const input = { by, at, briefVersion: brief.version, reason: dismissReason, roomId };
+    const act = { reviewed: 'review', dismissed: 'dismiss', added_to_room: 'addToRoom' }[state];
+    return discovery.reviews[act](existing.id, input);
   };
   const reviewView = (r) => ({
     id: r.id,
