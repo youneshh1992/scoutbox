@@ -94,6 +94,22 @@ export function createAccounts(deps) {
 }
 
 /**
+ * The writes another domain makes on a player's record, each named for what happened. `recordSigning`: a completed
+ * signing sets the level the player reached and the contract status and availability it implies, and adds its
+ * timeline lines in order.
+ */
+export function createPlayerRecord(deps) {
+  const { players } = strictContext('createPlayerRecord', needs('createPlayerRecord', deps, ['players']));
+  return Object.freeze({
+    recordSigning(playerId, { level, contractStatus, availability, timeline = [] }) {
+      players.setLevel(playerId, level);
+      players.setAvailability(playerId, { contractStatus, availability });
+      for (const entry of timeline) players.addItem(playerId, 'timeline', entry);
+    },
+  });
+}
+
+/**
  * The account routes that read other domains' records, so they are created after them: the player's account, a
  * guardian's children, the guardian ID review, the club directory, and a player's export and erasure. Erasure runs
  * each domain's `redactors` in order inside its unit. Returns `erasePlayer`.

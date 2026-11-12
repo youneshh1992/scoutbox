@@ -5,7 +5,6 @@
 
 import { PLANS } from '../../../catalogue.mjs';
 import { createHash } from 'node:crypto';
-import { CLUB_SETUP_LIMITS } from '../../../repositories/clubSetup.mjs';
 import { roomCan } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { parseInput } from '../../platform/schemas.mjs';
@@ -35,7 +34,7 @@ export function createSigningShared(ctx) {
     broadcast,
     byOrg,
     caseOfOrg,
-    clubSetup,
+    joinSquad,
     err,
     evidence,
     evidenceProvider,
@@ -51,7 +50,7 @@ export function createSigningShared(ctx) {
     now,
     offerReads,
     orgOf,
-    players,
+    playerRecord,
     recruitmentReads,
     refreshJourneyBadges,
     roleFor,
@@ -470,45 +469,43 @@ export function createSigningShared(ctx) {
     // Grassroots signings make semi-pros; academy/pro signings make pros.
     const levelBefore = player.level ?? 'amateur';
     const levelAfter = playerLevelAfterSigning(org.level);
-    players.setLevel(player.id, levelAfter);
     const year = String(new Date(ts).getFullYear());
+    const timeline = [];
     const levelLines = [];
     if (levelBefore === 'amateur' && levelAfter === 'semi_pro') {
-      players.addItem(player.id, 'timeline', { year, event: `Levelled up: amateur → semi-pro with ${org.name}` });
+      timeline.push({ year, event: `Levelled up: amateur → semi-pro with ${org.name}` });
       levelLines.push([
         `⬆️ You're semi-pro. ${org.name} signed you — one step up the ladder, recorded forever on your pathway.`,
         `${player.name} levelled up: amateur → semi-pro with ${org.name}.`,
       ]);
     } else if (levelBefore !== 'pro' && levelAfter === 'pro') {
-      players.addItem(player.id, 'timeline', {
-        year,
-        event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}`,
-      });
+      timeline.push({ year, event: `Levelled up: ${levelBefore.replace('_', '-')} → pro with ${org.name}` });
       levelLines.push([
         `⬆️ Academy/pro level reached with ${org.name}. Your grassroots journey got you here.`,
         `${player.name} reached academy/pro level with ${org.name}.`,
       ]);
     }
-    if (org.level === 'grassroots') {
-      // A player the club shadowed joins the squad all the same.
-      if (!clubSetup.squad.has(org.id, player.id))
-        clubSetup.squad.create({
-          id: nextId('sq'),
-          orgId: org.id,
-          playerId: player.id,
-          name: String(player.name ?? 'Player').slice(0, CLUB_SETUP_LIMITS.name),
-          position: player.position ?? null,
-          source: 'signing',
-          addedAt: ts,
-        });
-    }
-    // Written here and nowhere else for a recruitment signing.
-    players.setAvailability(player.id, { contractStatus: 'under_contract', availability: 'not_seeking' });
-    players.addItem(player.id, 'timeline', {
+    if (org.level === 'grassroots')
+      joinSquad({
+        orgId: org.id,
+        playerId: player.id,
+        name: player.name,
+        position: player.position ?? null,
+        source: 'signing',
+        at: ts,
+      });
+    timeline.push({
       year,
       event: pkg
         ? `Signed with ${org.name} — signing completed in ScoutBox`
         : `Signed by ${org.name} — discovered on ScoutBox`,
+    });
+    // Written here and nowhere else for a recruitment signing.
+    playerRecord.recordSigning(player.id, {
+      level: levelAfter,
+      contractStatus: 'under_contract',
+      availability: 'not_seeking',
+      timeline,
     });
     refreshJourneyBadges?.(player);
     for (const [pText, gText] of levelLines) {

@@ -16,7 +16,12 @@ import { installHttpBaseline, registerAppHosting, installErrorContract } from '.
 import { createLiveSync } from './domains/platform/liveSync.mjs';
 import { registerMeta, registerCapabilities, assertProductionConfig } from './domains/platform/operator.mjs';
 import { createMedia, createMediaSigning } from './domains/media/index.mjs';
-import { createAccountServices, createAccounts, createSessions } from './domains/identity/index.mjs';
+import {
+  createAccountServices,
+  createAccounts,
+  createPlayerRecord,
+  createSessions,
+} from './domains/identity/index.mjs';
 import { createActivity, createDevelopment } from './domains/development/index.mjs';
 import { vouchView } from './domains/verification/vouches.mjs';
 import { createScouting } from './domains/scouting/index.mjs';
@@ -385,6 +390,7 @@ const { notifier, notify, openChannel } = createMessaging({
 });
 
 const { recordActivity, refreshJourneyBadges } = createActivity({ players, notify });
+const playerRecord = createPlayerRecord({ players });
 const { publishedVouchesFor, vouchesFor } = createVouches({ verificationReads });
 const insightsFor = createPlayerInsights({ safetyAudit });
 
@@ -417,7 +423,7 @@ const { issueRecruitmentRequest, issueAcceptedTrial, contactReplyFrom, canonical
   recruitmentReads,
   signingsFollowUps,
   safetyAudit,
-  operations,
+  operationsReads: operations.reads,
   byId,
   findPlayer,
   isBlocked,
@@ -489,7 +495,7 @@ function revokeOrgUserAccess(userId) {
 // --------------------------------------------- scouting, operations and media
 // Evidence and coach identity, assessments and video, opportunities and campaigns, suitability preferences, resumable
 // uploads, and the post-signing follow-ups with their persistent sweep.
-createScouting({
+const { joinSquad } = createScouting({
   byId,
   scoutingReads,
   verificationReads,
@@ -594,7 +600,7 @@ const { emitWebhook, webhookSweep } = createIntegrations({
   nextId,
 });
 // The delivery centre retries the webhooks on its own timer.
-const { notifyAction, deliverySweep } = createDelivery({
+const { notifyAction, deliverySweep, injectedFailures } = createDelivery({
   app,
   orgRouter,
   playerRouter,
@@ -921,7 +927,7 @@ const agentsDomain = createAgents({
   agentTransactions,
   compliancePolicies,
   complianceRecords,
-  recruitmentCases, // the transaction handoff is an explicit write of its case
+  caseHandoffs: roomsDomain.caseHandoffs, // the transaction handoff is an act of its case
   agentReads,
   verificationReads,
   scoutingReads,
@@ -957,15 +963,15 @@ const caseWorkflow = createCaseWorkflow({
   playerRouter,
   guardianRouter,
   adminRouter,
-  users,
-  players, // a completion writes the player's level, contract status and availability through the identity repository
-  guardians,
+  users: users.reads,
+  guardians: guardians.reads,
+  playerRecord, // a completion writes the player's level, contract status and timeline through the identity domain
+  joinSquad, // a grassroots signing adds the squad row through the scouting domain
+  injectedFailures, // an injected transport failure is used up through the delivery centre
   recruitment,
   recruitmentCases,
   recruitmentContactsOffers,
   signingsFollowUps,
-  clubSetup, // a grassroots signing adds the squad row through the club setup repository
-  operations, // an injected transport failure is used up through the delivery bookkeeping
   notifications,
   safetyReads,
   scoutingReads,

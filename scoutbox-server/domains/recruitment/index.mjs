@@ -30,7 +30,7 @@ export function createRecruitment(deps) {
     'recruitmentReads',
     'signingsFollowUps',
     'safetyAudit',
-    'operations',
+    'operationsReads',
     'byId',
     'findPlayer',
     'isBlocked',
@@ -84,8 +84,8 @@ export function createRecruitment(deps) {
     safetyAudit: d.safetyAudit,
     recruitment,
     signings: d.signingsFollowUps.signings,
-    invoices: d.operations.invoices,
-    reputationSeed: d.operations.reputationSeed,
+    invoices: d.operationsReads.invoices,
+    reputationSeed: d.operationsReads.reputationSeed,
     findPlayer,
     isBlocked,
   });
@@ -107,7 +107,7 @@ export function createRecruitment(deps) {
  * fetched through their own gates on every read) and the recruitment analytics, which measure the process and never a
  * player or a colleague. Returns the one recruitment evidence provider every status path uses, and the Rooms' seams:
  * the 404-concealing `findRoomForRequest`, the single status writer `applyLifecycleTransition`, `roomIsRoom`, the
- * decision-time `captureRoomSnapshot`, and `createRoomForPlayer` / `reopenRoom`.
+ * decision-time `captureRoomSnapshot`, `createRoomForPlayer` / `reopenRoom`, and the case's agent `caseHandoffs`.
  */
 export function createRooms(deps) {
   needs('createRooms', deps, [
@@ -175,6 +175,12 @@ export function createRooms(deps) {
     captureRoomSnapshot: rooms.captureRoomSnapshot,
     createRoomForPlayer: rooms.createRoomForPlayer,
     reopenRoom: rooms.reopenRoom,
+    // An agent's handoff is part of its case: the agents domain writes one only through these acts.
+    caseHandoffs: Object.freeze({
+      invite: (...a) => deps.recruitmentCases.cases.inviteHandoff(...a),
+      withdraw: (...a) => deps.recruitmentCases.cases.withdrawHandoff(...a),
+      accept: (...a) => deps.recruitmentCases.cases.acceptHandoff(...a),
+    }),
   };
 }
 
@@ -194,14 +200,14 @@ export function createCaseWorkflow(deps) {
     'guardianRouter',
     'adminRouter',
     'users',
-    'players',
     'guardians',
+    'playerRecord',
+    'joinSquad',
+    'injectedFailures',
     'recruitment',
     'recruitmentCases',
     'recruitmentContactsOffers',
     'signingsFollowUps',
-    'clubSetup',
-    'operations',
     'notifications',
     'safetyReads',
     'scoutingReads',

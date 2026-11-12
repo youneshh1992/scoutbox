@@ -97,7 +97,8 @@ export function createNotificationFeed(deps) {
 
 /**
  * The delivery centre: dispatches, their retries and the deadline reminders. Returns `notifyAction`, the reminder that
- * names a deadline, and the minute `deliverySweep`, which retries dispatches and the integrations domain's webhooks.
+ * names a deadline, the minute `deliverySweep`, which retries dispatches and the integrations domain's webhooks, and
+ * `injectedFailures`, the transport failures an administrator injected, which a sender uses up in its own unit.
  */
 export function createDelivery(deps) {
   needs('createDelivery', deps, [
@@ -122,5 +123,12 @@ export function createDelivery(deps) {
     'webhookSweep',
   ]);
   const { notifyAction, deliverySweep } = registerDelivery(routeContext('createDelivery', deps));
-  return { notifyAction, deliverySweep };
+  const { delivery } = deps.operations;
+  const injectedFailures = Object.freeze({
+    /** How many injected failures are waiting on `channel`. */
+    waiting: (channel) => delivery.injected(channel),
+    /** Use one up: true when one was waiting, so this send must fail. */
+    consume: (channel) => delivery.consumeInjectedFailure(channel),
+  });
+  return { notifyAction, deliverySweep, injectedFailures };
 }

@@ -1,6 +1,7 @@
 // Scouting: the club's evidence and assessments, opportunities and campaigns, and trial days.
 import { needs } from '../platform/deps.mjs';
 import { routeContext } from '../platform/routeHelpers.mjs';
+import { CLUB_SETUP_LIMITS } from '../../repositories/clubSetup.mjs';
 import { registerJourneys } from './journeys.mjs';
 import { registerPassport } from './passport.mjs';
 import { registerScouting } from './scouting.mjs';
@@ -42,9 +43,27 @@ export function createScouting(deps) {
     'recordActivity',
     'DRILLS',
   ]);
-  const ctx = routeContext('createScouting', deps);
+  /**
+   * A player joins a club's squad (from an approved invitation or a completed signing); a player already on it stays
+   * as they are. A player the club shadowed joins all the same: the shadow list is not the squad.
+   */
+  const joinSquad = ({ orgId, playerId, name, position = null, source, approvedBy, at }) => {
+    if (deps.clubSetup.squad.has(orgId, playerId)) return;
+    deps.clubSetup.squad.create({
+      id: deps.nextId('sq'),
+      orgId,
+      playerId,
+      name: String(name ?? 'Player').slice(0, CLUB_SETUP_LIMITS.name),
+      position,
+      source,
+      ...(approvedBy === undefined ? {} : { approvedBy }),
+      addedAt: at,
+    });
+  };
+  const ctx = routeContext('createScouting', { ...deps, joinSquad });
   registerPassport(ctx);
   registerScouting(ctx);
   registerJourneys(ctx);
   registerSuitability(ctx);
+  return { joinSquad };
 }

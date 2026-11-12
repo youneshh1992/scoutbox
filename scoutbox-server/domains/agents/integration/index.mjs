@@ -74,19 +74,18 @@ export function registerIntegration(ctx) {
     rateLimit,
     agentCore,
     unit, // an opportunity share is a row of its agreement, written by agreements.addShare in a unit
-    recruitmentCases, // the handoff is part of its case, written by the case's handoff acts
+    caseHandoffs, // the handoff is part of its case, written only through the case's handoff acts
     recruitmentReads,
     transactionReads,
   } = ctx;
   if (typeof transactionReads?.transactions?.liveForIndividual !== 'function')
     throw new TypeError('registerIntegration needs transactionReads from the data layer');
-  if (!recruitmentCases?.cases)
-    throw new TypeError('registerIntegration needs the recruitment-cases repository from the data layer');
+  if (typeof caseHandoffs?.invite !== 'function')
+    throw new TypeError("registerIntegration needs the recruitment domain's case handoff acts");
   if (typeof agentCore?.agreements?.recordAct !== 'function' || typeof unit !== 'function')
     throw new TypeError('registerIntegration needs the agent core repository and unit from the data layer');
   if (typeof recruitmentReads?.contacts?.forAgent !== 'function')
     throw new TypeError('registerIntegration needs recruitmentReads (contacts) from the data layer');
-  const { cases } = recruitmentCases;
   const handoffHistory = (at, action, by, detail) => ({
     history: [
       { id: nextId('aud'), at, byKind: 'org', byId: by.userId ?? null, byName: by.name ?? null, action, detail },
@@ -735,7 +734,7 @@ export function registerIntegration(ctx) {
       revAt: at,
     };
     unit(() => {
-      cases.inviteHandoff(
+      caseHandoffs.invite(
         kase.id,
         { handoff: h },
         handoffHistory(at, 'transaction_handoff_invited', h.invitedBy, {
@@ -787,7 +786,7 @@ export function registerIntegration(ctx) {
     if (limitedOr429(res, 'transaction_handoff', kase.orgId)) return;
     const at = now();
     const fresh = unit(() => {
-      const withdrawn = cases.withdrawHandoff(
+      const withdrawn = caseHandoffs.withdraw(
         kase.id,
         { at },
         handoffHistory(
@@ -855,7 +854,7 @@ export function registerIntegration(ctx) {
     // Otherwise an invitation would become a general licence to open a workspace citing this club.
     if (h.invitedAgencyOrgId && h.invitedAgencyOrgId !== agencyOrgId) return 'HANDOFF_NOT_ADDRESSED';
     if (h.invitedAgentUserId && h.invitedAgentUserId !== agentUserId) return 'HANDOFF_NOT_ADDRESSED';
-    cases.acceptHandoff(
+    caseHandoffs.accept(
       kase.id,
       { at, transactionId },
       handoffHistory(at, 'transaction_handoff_accepted', { userId: agentUserId, name: null }, { handoffId: h.id }),

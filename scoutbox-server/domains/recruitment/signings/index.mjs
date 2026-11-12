@@ -48,13 +48,13 @@ export function registerSigning(rawCtx) {
     integration = null,
     evidence = null,
     faults = null,
-    players,
+    playerRecord,
     unit,
     afterCommit,
     signingsFollowUps,
     recruitmentReads,
     // A grassroots signing's squad row lives in org_squad_members.
-    clubSetup,
+    joinSquad,
     // The document vault.
     verificationReads,
     applyLifecycleTransition,
@@ -74,10 +74,12 @@ export function registerSigning(rawCtx) {
     return k && k.orgId === orgId ? k : null;
   };
   const caseAudit = (kase, ...entry) => recruitmentCases.cases.recordAct(kase.id, { history: [auditEntry(...entry)] });
-  if (typeof players?.setAvailability !== 'function' || typeof unit !== 'function' || typeof afterCommit !== 'function')
-    throw new TypeError(
-      'registerSigning needs the identity repository (players), unit and afterCommit from the data layer',
-    );
+  if (
+    typeof playerRecord?.recordSigning !== 'function' ||
+    typeof unit !== 'function' ||
+    typeof afterCommit !== 'function'
+  )
+    throw new TypeError("registerSigning needs the identity domain's player record seam, unit and afterCommit");
   if (
     typeof signingsFollowUps?.signingPackages?.insert !== 'function' ||
     typeof signingsFollowUps?.signings?.record !== 'function'
@@ -149,12 +151,12 @@ export function registerSigning(rawCtx) {
     integration,
     evidence,
     faults,
-    players,
+    playerRecord,
     unit,
     afterCommit,
     signingsFollowUps,
     recruitmentReads,
-    clubSetup,
+    joinSquad,
     verificationReads,
     applyLifecycleTransition,
     findRoomForRequest,

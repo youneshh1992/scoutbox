@@ -602,9 +602,9 @@ export function registerContact(ctx) {
 
     // The in-app Inbox is the transport of record. A refusal leaves an honest
     // `failed` attempt and no recipient object.
-    if (ctx.operations.delivery.injected('contact') > 0) {
+    if (ctx.injectedFailures.waiting('contact') > 0) {
       const failed = unit(() => {
-        ctx.operations.delivery.consumeInjectedFailure('contact'); // used up in the unit that records the failed attempt
+        ctx.injectedFailures.consume('contact'); // used up in the unit that records the failed attempt
         const fresh = contacts.recordSendFailure(
           c.id,
           { at, sendKey, code: 'TRANSPORT_REFUSED' },

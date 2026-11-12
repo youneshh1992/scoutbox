@@ -624,7 +624,7 @@ export function registerTrial(ctx) {
       return;
 
     // The transport refuses: nothing is written, no case move, no notification.
-    if (ctx.operations.delivery.consumeInjectedFailure('trial')) {
+    if (ctx.injectedFailures.consume('trial')) {
       // used up through the delivery bookkeeping (a row)
       console.error(`TRIAL transport_failed invitation case=${room.id}`);
       return err(res, 'TRIAL_TRANSPORT_REFUSED', 'The invitation could not be delivered. Nothing was sent; try again.');
@@ -1018,7 +1018,7 @@ export function registerTrial(ctx) {
     if (!gate.ok) return err(res, gate.error, gate.message, gate.reasons ? { reasons: gate.reasons } : {});
     if (!revGate(req, res, t)) return;
     if (limited('trial_attendance', req.org.id)) return res.status(429).json(rateLimitedBody('trial_attendance'));
-    if (ctx.operations.delivery.consumeInjectedFailure('trial')) {
+    if (ctx.injectedFailures.consume('trial')) {
       return err(
         res,
         'TRIAL_TRANSPORT_REFUSED',
@@ -1419,7 +1419,7 @@ export function registerTrial(ctx) {
       return fail('TRIAL_GUARDIAN_REQUIRED', 'You are no longer the verified guardian route for this player.');
     if (by === 'player' && r.recipient.playerId !== actorId)
       return fail('TRIAL_RECIPIENT_UNAVAILABLE', 'This invitation is not yours to accept.');
-    if (ctx.operations.delivery.consumeInjectedFailure('trial')) {
+    if (ctx.injectedFailures.consume('trial')) {
       return fail('TRIAL_TRANSPORT_REFUSED', 'The acceptance could not be recorded. Nothing was changed; try again.');
     }
     return { ok: true };

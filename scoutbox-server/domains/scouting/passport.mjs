@@ -92,7 +92,7 @@ export function registerPassport(ctx) {
     scoutingReads,
     scoutingEvidence,
     unit,
-    clubSetup,
+    joinSquad,
     transitionsVouches,
     verificationReads, // coach references are rows of vouches
   } = ctx;
@@ -688,20 +688,14 @@ export function registerPassport(ctx) {
     const fresh = unit(() => {
       const next = scoutingEvidence.squadInvites.respond(invite.id, { accept, at });
       if (accept) {
-        // A player the club shadowed joins the squad all the same: the shadow list is not the squad.
-        if (!clubSetup.squad.has(invite.orgId, invite.playerId)) {
-          const name = invite.playerName ?? findPlayer(invite.playerId)?.name ?? 'Player';
-          clubSetup.squad.create({
-            id: nextId('sq'),
-            orgId: invite.orgId,
-            playerId: invite.playerId,
-            name: storedName(name),
-            position: null,
-            source: 'invite_approved',
-            approvedBy: storedName(approverLabel),
-            addedAt: at,
-          });
-        }
+        joinSquad({
+          orgId: invite.orgId,
+          playerId: invite.playerId,
+          name: invite.playerName ?? findPlayer(invite.playerId)?.name,
+          source: 'invite_approved',
+          approvedBy: storedName(approverLabel),
+          at,
+        });
         notify(
           { kind: 'org_user', id: invite.byUserId },
           'squad_invite',

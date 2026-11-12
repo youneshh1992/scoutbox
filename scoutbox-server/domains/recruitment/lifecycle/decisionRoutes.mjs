@@ -626,7 +626,7 @@ export function registerDecision(ctx) {
         return;
 
       // The write refuses before anything is recorded.
-      if (ctx.operations.delivery.consumeInjectedFailure('decision')) {
+      if (ctx.injectedFailures.consume('decision')) {
         // used up through the delivery bookkeeping (a row)
         console.error(`DECISION transport_failed finalize case=${kase.id}`);
         return err(

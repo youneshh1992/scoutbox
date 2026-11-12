@@ -30,7 +30,7 @@ export function createAgents(deps) {
     'agentTransactions',
     'compliancePolicies',
     'complianceRecords',
-    'recruitmentCases',
+    'caseHandoffs',
     'agentReads',
     'verificationReads',
     'scoutingReads',
