@@ -65,7 +65,7 @@ const SCHEMA_VERSION = Number(
 );
 const SERVER_DIR = path.join(HERE, '..', '..');
 const SERVER = path.join(SERVER_DIR, 'server.mjs');
-const PORT = pickPort(5990, 8, [0, 10, 11]); // never a fetch-blocked port
+const PORT = pickPort(5990, 8, [0, 10, 11, 13]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m182-'));
 

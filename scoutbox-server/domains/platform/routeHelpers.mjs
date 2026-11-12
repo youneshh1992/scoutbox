@@ -3,6 +3,7 @@ import { isAdult, visibleToOrg, haversineKm } from '../../domain.mjs';
 import { ageOrNull, parseDateOrInstant, isAbsent } from '../../temporal.mjs';
 import { isLeadUser, isFinanceUser } from '../../roles.mjs';
 import { offsetPage } from './paging.mjs';
+import { strictContext } from './deps.mjs';
 
 // Small groups are never shown: a count under this is suppressed.
 const SUPPRESS_MIN = 3;
@@ -145,4 +146,12 @@ export function buildRouteHelpers(ctx) {
     coarseArea,
     canViewFinance: isFinanceUser,
   };
+}
+
+/**
+ * A factory's context for its route modules: its declared dependencies with the route helpers built over them, read
+ * strictly (deps.mjs). The helpers read `nextId` and `isBlocked`, and `activeAffiliation` reads `scoutingReads`.
+ */
+export function routeContext(factory, deps) {
+  return strictContext(factory, { ...deps, ...buildRouteHelpers(strictContext(factory, deps)) });
 }

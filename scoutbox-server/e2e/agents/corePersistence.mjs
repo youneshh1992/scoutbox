@@ -113,7 +113,7 @@ async function bootOn(dataDir, port) {
   return { up, j, stop, log: () => log };
 }
 
-const PORT = pickPort(6500, 200, [0, 1, 3]); // never a fetch-blocked port
+const PORT = pickPort(6500, 200, [0, 1, 2, 3, 4]); // never a fetch-blocked port
 const SCHEMA_VERSION = Number(
   DATA_MIGRATIONS.map((m) => m.id)
     .sort()

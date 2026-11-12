@@ -36,13 +36,12 @@ import { registerSuitability } from './domains/scouting/suitability.mjs';
 import { registerObjectives } from './domains/development/objectives.mjs';
 import { registerUploads, removeUploadChunks } from './domains/media/uploads.mjs';
 import { registerOperations } from './domains/operations/followUps.mjs';
-import { registerImports } from './domains/integrations/imports.mjs';
-import { registerDelivery } from './domains/messaging/delivery.mjs';
+import { createIntegrations } from './domains/integrations/index.mjs';
+import { createDelivery } from './domains/messaging/index.mjs';
 import { registerTransitions } from './domains/verification/transitions.mjs';
-import { registerInsight } from './domains/insight/insight.mjs';
-import { registerCoverage } from './domains/insight/coverage.mjs';
+import { createInsight } from './domains/insight/index.mjs';
 import { registerBudgets } from './domains/recruitment/budgets.mjs';
-import { registerGroups } from './domains/groups/groups.mjs';
+import { createGroups } from './domains/groups/index.mjs';
 import { registerVerificationClaims } from './domains/verification/claims/index.mjs';
 import { createAdminRouter, registerReporting, registerSafetyConsole } from './domains/safety/safety.mjs';
 import { registerFootballPassport } from './domains/passport/index.mjs';
@@ -105,7 +104,8 @@ import { registerLedger, ledgerView } from './domains/recruitment/ledger.mjs';
 import { registerGrassrootsClub } from './domains/development/grassrootsClub.mjs';
 import { grassrootsOrgOnly } from './domains/development/guards.mjs';
 import { registerClubChecks } from './domains/verification/clubChecks.mjs';
-import { createMfaGuards, registerEnterprise } from './domains/enterprise/enterprise.mjs';
+import { createEnterprise } from './domains/enterprise/index.mjs';
+import { createMfaGuards } from './domains/identity/mfaGuards.mjs';
 import { requestInstrumentation } from './domains/platform/metrics.mjs';
 import {
   hashPassword,
@@ -761,18 +761,117 @@ const enterpriseCtx = {
   DATA_DIR,
   backupDatabase: (file) => store.copyTo(file),
 };
+const { emitWebhook, webhookSweep } = createIntegrations({
+  app,
+  orgRouter,
+  adminRouter,
+  integrations,
+  players,
+  safetyAudit,
+  byId,
+  findPlayer,
+  isBlocked,
+  unit,
+  nextId,
+});
+// The delivery centre retries the webhooks on its own timer.
+const { notifyAction } = createDelivery({
+  app,
+  orgRouter,
+  playerRouter,
+  guardianRouter,
+  adminRouter,
+  notifications,
+  dispatches,
+  outbox,
+  operations,
+  safetyAudit,
+  users,
+  byId,
+  findPlayer,
+  isBlocked,
+  unit,
+  nextId,
+  notify,
+  emitWebhook,
+  webhookSweep,
+});
+createEnterprise({
+  app,
+  orgRouter,
+  adminRouter,
+  enterprise,
+  enterpriseReads,
+  groupReads,
+  insightReads,
+  integrationReads,
+  recruitmentReads,
+  users,
+  orgs,
+  players,
+  sessions,
+  codes,
+  channels,
+  notifications,
+  dispatches,
+  outbox,
+  pushLog,
+  pushTokens,
+  mediaDeletions,
+  recruitment,
+  recruitmentCases,
+  safetyAudit,
+  byId,
+  isBlocked,
+  mfaGuards,
+  createSession,
+  orgSafe,
+  mailer,
+  storage,
+  unit,
+  nextId,
+  notify,
+  schemaVersion: () => dataLayer.schemaVersion(),
+  backupDatabase: (file) => store.copyTo(file),
+  DATA_DIR,
+});
 const insightDomain = (() => {
   const ctx = { ...enterpriseCtx, ...buildRouteHelpers(enterpriseCtx) };
-  const { emitWebhook, webhookSweep } = registerImports(ctx);
-  // The delivery centre retries the webhooks on its own timer.
-  const { notifyAction } = registerDelivery({ ...ctx, emitWebhook, webhookSweep });
-  registerEnterprise(ctx);
   registerSuitability(ctx);
   const { transitionSweep } = registerTransitions({ ...ctx, notifyAction, emitWebhook });
-  const insight = registerInsight(ctx);
-  registerCoverage(ctx);
+  const insight = createInsight({
+    orgRouter,
+    playerRouter,
+    insightCoverage,
+    recruitmentReads,
+    scoutingReads,
+    safetyReads,
+    players,
+    byId,
+    findPlayer,
+    isBlocked,
+    playerViewForOrg,
+    unit,
+    nextId,
+    notify,
+  });
   registerBudgets(ctx);
-  registerGroups(ctx);
+  createGroups({
+    orgRouter,
+    adminRouter,
+    groups,
+    groupReads,
+    recruitmentReads,
+    scoutingReads,
+    safetyReads,
+    byId,
+    users,
+    findPlayer,
+    isBlocked,
+    unit,
+    nextId,
+    notify,
+  });
   const tick = () => {
     transitionSweep();
     insight.insightSweep();
