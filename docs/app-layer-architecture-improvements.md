@@ -109,7 +109,7 @@ The development-only reads are refused in production with `/__faults`. Shared ba
 The app promises the scans used to check, which need a test runner in the web apps, are listed in
 [`known-issues.md`](known-issues.md).
 
-### 4. Narrow, declared dependencies per domain [**in progress**]
+### 4. Narrow, declared dependencies per domain [**done**]
 
 Each domain exports a factory that names the small set of things it needs (its own repository, other domains' read
 interfaces, `unit`, `afterCommit`, `notify`, …) and returns what it offers to others. `server.mjs` becomes a short list
@@ -122,9 +122,9 @@ sit in layers, a domain imports a lower one only through its `public.mjs`, the p
 there are no import cycles. The Football Passport and the Trust Score are their own domain (`domains/passport/`) at
 the top, since they are projections over every other domain's records. Every domain is created by factories in its
 `index.mjs` that name their dependencies (`domains/platform/deps.mjs`), and `server.mjs` passes each one by name with
-no shared context; each domain's sweep is returned and scheduled there. Still to do: split the very large route
-modules (agent compliance and transactions, signings, organisation verification), which are each one long
-registration function.
+no shared context; each domain's sweep is returned and scheduled there. The very large route modules (agent
+compliance and transactions, signings, organisation verification) are split into a module per lane or group of
+routes, composed in their old route order through one strict context, with what the parts share in a `shared.mjs`.
 
 ### 5. Named acts everywhere
 
