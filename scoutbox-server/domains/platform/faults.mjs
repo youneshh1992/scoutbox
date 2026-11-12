@@ -16,7 +16,8 @@
  *   fatal:PATH            500 INTERNAL, NOT retryable
  *
  * The suites also set rules at runtime through POST /__faults (same guard),
- * so a single server can be walked through slow → failed → recovered.
+ * so a single server can be walked through slow → failed → recovered, and
+ * read them back with GET /__faults, each with how often it was reached.
  */
 import * as v from 'valibot';
 import { inputOrRefuse, text } from './schemas.mjs';
@@ -26,7 +27,8 @@ const FAULTS_INPUT = v.strictObject({ rules: v.optional(text(RULES_MAX)) });
 
 export const FAULT_KINDS = ['delay', 'unavailable', 'timeout', 'retryable', 'fatal', 'internal'];
 // `internal:STEP[:N]` is not a route fault: a unit of work asks `shouldFail(STEP)` at a named seam and throws for the
-// first N hits (default 1), to exercise its rollback path.
+// first N hits (default 1), to exercise its rollback path. With N = 0 it never throws and only counts the hits, so a
+// battery can see how often a seam's code ran.
 
 export function parseFaultRules(spec = '') {
   return String(spec)
@@ -108,6 +110,9 @@ export function createFaultLayer({ env = process.env } = {}) {
   function install(app) {
     app.use(middleware);
     if (!enabled) return;
+    app.get('/__faults', (_req, res) =>
+      res.json({ rules: rules.map(({ kind, pattern, arg, hits }) => ({ kind, pattern, arg, hits })) }),
+    );
     app.post('/__faults', (req, res) => {
       const body = inputOrRefuse(res, FAULTS_INPUT, req.body ?? {});
       if (!body) return;

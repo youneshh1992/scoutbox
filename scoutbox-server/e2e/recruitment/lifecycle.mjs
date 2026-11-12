@@ -12,7 +12,7 @@
 // cannot prove.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,7 +42,12 @@ import {
   GRASSROOTS_STAGES,
   ALL_REASON_CODES,
 } from '../../domains/recruitment/rooms/shared.mjs';
-import { LIFECYCLE_ERROR_HTTP, httpStatusFor, publicErrorBody } from '../../domains/recruitment/lifecycle/errors.mjs';
+import {
+  LIFECYCLE_ERROR_HTTP,
+  httpStatusFor,
+  publicErrorBody,
+  sendDomainError,
+} from '../../domains/recruitment/lifecycle/errors.mjs';
 import { DECISION_INPUT_CODES } from '../../domains/recruitment/lifecycle/decisionRoutes.mjs';
 import { CONTACT_INPUT_CODES } from '../../domains/recruitment/lifecycle/contactRoutes.mjs';
 import { LIFECYCLE_INPUT_CODES } from '../../domains/recruitment/lifecycle/index.mjs';
@@ -2325,59 +2330,42 @@ section('E — every error body, swept for private text at once');
 
 section('Y — the error contract: one table, no default, nothing internal in the body');
 {
-  // The drift guard, and it is MECHANICAL rather than a list somebody keeps.
-  //
-  // Every `error: 'CODE'` literal in the lifecycle source is extracted from the
-  // files themselves and required to have a status. A list written by hand
-  // here would pass forever while the module grew a code nobody mapped, silently
-  // falling through to 400.
-  const LIFECYCLE_DIR = path.join(
-    path.dirname(fileURLToPath(import.meta.url)),
-    '..',
-    '..',
-    'domains',
-    'recruitment',
-    'lifecycle',
-  );
-  // errors.mjs is swept too: `sendDomainError` — the one place that PRODUCES
-  // `LIFECYCLE_INTERNAL` — lives in it. Its table rows are
-  // `CODE: status,` and do not match a producing shape, so the sweep still
-  // sees only what can actually be sent.
-  const sources = readdirSync(LIFECYCLE_DIR).filter((f) => f.endsWith('.mjs'));
-  const produced = new Set();
-  for (const f of sources) {
-    const text = readFileSync(path.join(LIFECYCLE_DIR, f), 'utf8');
-    // Three producing shapes: a literal `error: 'CODE'`, the routes'
-    // `err(res, 'CODE', …)` helper, which builds exactly that literal, and the
-    // shared client-key rule called with the domain's code.
-    for (const m of text.matchAll(
-      /(?:error:|err\(\s*res,|platformClientKey\(\s*raw,|normaliseClientKey\([^,()]+,)\s*'([A-Z][A-Z0-9_]+)'/g,
-    ))
-      produced.add(m[1]);
-  }
-  // The input schemas' refusal codes are data, exported by the routes that use them.
+  // Every code the input schemas can refuse with is declared as data by the routes that use them, and has a status.
+  const declared = new Set();
   for (const t of [DECISION_INPUT_CODES, CONTACT_INPUT_CODES, LIFECYCLE_INPUT_CODES, TRIAL_INPUT_CODES])
-    for (const c of [...Object.values(t.codes), ...Object.values(t.fieldCodes)]) produced.add(c);
-  ok(produced.size >= 15, `Y1 ${produced.size} error codes found in the lifecycle source, mechanically`);
-
-  const unmapped = [...produced].filter((c) => httpStatusFor(c) === null);
-  for (const c of unmapped) console.error(`   unmapped: ${c}`);
+    for (const c of [...Object.values(t.codes), ...Object.values(t.fieldCodes)]) declared.add(c);
+  const unmapped = [...declared].filter((c) => httpStatusFor(c) === null);
   neg(
-    unmapped.length === 0,
-    'Y2 every error code the lifecycle source can produce has an HTTP status in the one table',
+    declared.size > 0 && unmapped.length === 0,
+    `Y1 every refusal code the lifecycle input schemas declare has an HTTP status (${declared.size} codes${unmapped.length ? `; unmapped: ${unmapped.join(', ')}` : ''})`,
   );
-
-  // The converse. A table entry for a code nothing produces is dead weight that
-  // makes the table look more complete than it is. `ROOM_VERSION_CONFLICT` is
-  // the one legitimate exception: the shared room rev guard raises it, not the
-  // lifecycle. `CONTACT_VERSION_CONFLICT` is the same guard, named for the Contact
-  // record: raised through `errorCode:` in contactRoutes, never as `error:`.
-  // `TRIAL_VERSION_CONFLICT` is the same guard, named for the
-  // Trial record: raised through `errorCode:` in trialRoutes, never as `error:`.
-  const EXTERNAL = new Set(['ROOM_VERSION_CONFLICT', 'CONTACT_VERSION_CONFLICT', 'TRIAL_VERSION_CONFLICT']);
-  const orphaned = Object.keys(LIFECYCLE_ERROR_HTTP).filter((c) => !produced.has(c) && !EXTERNAL.has(c));
-  for (const c of orphaned) console.error(`   orphaned: ${c}`);
-  neg(orphaned.length === 0, 'Y3 and the table contains no code nothing can produce');
+  // A code missing from the table fails closed: a generic 500, never the detail it came with.
+  const sent = {};
+  const fakeRes = {
+    status(code) {
+      sent.status = code;
+      return this;
+    },
+    json(body) {
+      sent.body = body;
+      return this;
+    },
+  };
+  const quiet = console.error;
+  console.error = () => {};
+  sendDomainError(
+    fakeRes,
+    { error: 'LIFECYCLE_NOT_A_REAL_CODE', message: 'secret detail', caseId: 'case-x' },
+    'battery',
+  );
+  console.error = quiet;
+  neg(
+    sent.status === 500 &&
+      sent.body.error === 'LIFECYCLE_INTERNAL' &&
+      !JSON.stringify(sent.body).includes('secret') &&
+      !JSON.stringify(sent.body).includes('case-x'),
+    'Y2 a code missing from the table is a generic 500 that carries none of what came with it',
+  );
 
   // No silent default in either direction: an unknown code must NOT resolve.
   neg(

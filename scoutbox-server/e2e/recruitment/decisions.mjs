@@ -74,7 +74,6 @@ import {
 } from '../../domains/recruitment/rooms/shared.mjs';
 import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
-import { readFileSync } from 'node:fs';
 import { pickPort } from '../../scripts/testPort.mjs';
 import { createEvidenceProvider, resolveEvidenceRefs } from '../../scripts/recruitmentReadsFixture.mjs'; // the recruitment queries over plain arrays
 
@@ -664,16 +663,6 @@ section('P — policy: error bands, rate policies, events, permissions, the ONE 
     Object.keys(ROOM_TRANSITIONS).length === ROOM_STATUSES.length,
     'P13b the transition table covers exactly the existing statuses',
   );
-  const auditSrc = readFileSync(path.join(path.dirname(SERVER), 'domains', 'platform', 'audit.mjs'), 'utf8');
-  ok(
-    [
-      'room_decision_finalized',
-      'room_decision_superseded',
-      'room_decision_drafted',
-      'room_decision_draft_discarded',
-    ].every((a) => auditSrc.includes(`'${a}'`)),
-    "P14 the four audit actions are registered in the audit log's room-action set",
-  );
   // The provider, against a fake database: a draft, an advisory row, a superseded formal row and a hold prove nothing for offer_consideration.
   const kase = {
     id: 'c',
@@ -1114,6 +1103,11 @@ const J = {};
   );
   J.DEC = fin.body.decision.id;
   ok((await stage(J.RID)) === 'offer_consideration', 'J18b the case is at offer_consideration');
+  const offersAfter = await j('GET', `/org/rooms/${J.RID}/offers`, undefined, maria.token);
+  neg(
+    offersAfter.status === 200 && offersAfter.body.offers.length === 0,
+    `#9 J18c a decision to make an Offer is not an Offer: the case has none (${offersAfter.body?.offers?.length})`,
+  );
   ok(
     fin.body.decision.evidenceRefs.length === 3 &&
       fin.body.decision.evidenceRefs.find((r) => r.kind === 'trial').meta.workflowState === 'completed' &&
@@ -2308,10 +2302,16 @@ section(
   );
   const aud = surfaces.audit.items ?? surfaces.audit.entries ?? surfaces.audit;
   const decAud = aud.filter((x) => /room_decision_/.test(x.action));
+  const DECISION_ACTIONS = [
+    'room_decision_drafted',
+    'room_decision_draft_discarded',
+    'room_decision_finalized',
+    'room_decision_superseded',
+  ];
   ok(
-    decAud.length >= 4 &&
+    DECISION_ACTIONS.every((a) => decAud.some((x) => x.action === a)) &&
       decAud.some((x) => x.action === 'room_decision_finalized' && x.detail?.outcome && x.detail?.decisionId),
-    'I4 the audit log holds the decision actions with outcome and decision id',
+    `I4 the audit log holds each of the four decision acts, the finalized one with its outcome and decision id (${[...new Set(decAud.map((x) => x.action))].join(', ')})`,
   );
   neg(
     decAud.every((x) => x.detail?.note === undefined || typeof x.detail.note === 'boolean'),

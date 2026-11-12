@@ -74,7 +74,7 @@ are refused in production.
 | **`AGENT_VERIFICATION_TEST_PROVIDER`** | `1` enables the synthetic licence register (`TEST-VERIFIED-*` references verify) | off. Fatal in production |
 | **`TEST_LICENCE_REGISTRY`** | `1` = local licence-register fixture, `down` = simulate its outage | off |
 | **`TEST_IDP_SECRET`** | Signing secret for the local test SSO provider | random per boot. Setting it in production is fatal |
-| **`SCOUTBOX_FAULTS`** | Dev fault injection, e.g. `delay:/org/players/*/trust:1500;unavailable:/org/rooms/*` (also `POST /__faults`) | off. Ignored and fatal in production |
+| **`SCOUTBOX_FAULTS`** | Dev fault injection, e.g. `delay:/org/players/*/trust:1500;unavailable:/org/rooms/*` (also `POST /__faults`; `GET /__faults` reads the rules with how often each was reached, and `GET /__rate-limits` the limiter's live buckets) | off. Ignored and fatal in production, where none of the three routes exists |
 | **`SCOUTBOX_TEST_CLOCK`** | `1` lets a request pin its time with the `x-scoutbox-test-clock` header (`domains/platform/clock.mjs`) | off. Ignored and fatal in production |
 | **`ALLOW_LOCAL_WEBHOOKS`** | `1` permits loopback webhook targets (tests) | off (SSRF guard) |
 | **`SCOUTBOX_FAST_SWEEPS`** | `1` compresses retry ladders and sweep intervals (tests) | off |

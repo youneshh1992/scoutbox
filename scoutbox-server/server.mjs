@@ -67,7 +67,7 @@ import { createVerificationProvider } from './domains/agents/compliance/provider
 import { createEvidenceProvider } from './domains/recruitment/lifecycle/evidence.mjs';
 import { COMBINE_PROTOCOLS } from './domains/development/boxcam/combineShared.mjs';
 import { createSourceChanges } from './domains/platform/sourceChanges.mjs';
-import { createRateLimiter } from './domains/platform/rateLimit.mjs';
+import { createRateLimiter, installRateLimitInspection } from './domains/platform/rateLimit.mjs';
 import { demoSeedEnabled, devLoginsEnabled } from './domains/platform/capabilities.mjs';
 import { isLeadRole } from './roles.mjs';
 import { parseTrustProxy } from './httpTrust.mjs';
@@ -368,6 +368,7 @@ const DEV_LOGINS = devLoginsEnabled();
 // One rate limiter for the whole server. Every limited action is named in RATE_LIMIT_POLICY with its window and
 // scope, and the capability report says plainly that the memory provider counts per process.
 const rateLimit = createRateLimiter();
+installRateLimitInspection(app, rateLimit, { enabled: faultLayer.enabled });
 const { loginKey, loginLockedOut, noteLoginFailure } = createLoginBudget({ rateLimit });
 
 // ------------------------------------------------------------ notifications

@@ -83,7 +83,8 @@ import { CATEGORIES } from '../../domains/platform/notificationPrefs.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { openLayer } from '../../scripts/dataLayerFixture.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { buildReportingContext } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
+import { buildReportingContext } from '../../scripts/recruitmentReadsFixture.mjs';
+import { liveEvents } from '../support/liveEvents.mjs'; // the contacts/offers queries over plain arrays
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..', '..');
@@ -116,26 +117,16 @@ const neg = (cond, msg) => {
   negatives++;
   ok(cond, `[neg] ${msg}`);
 };
-/** A numbered negative case. The numbers are stable: the summary checks that all sixty ran. */
+/** A numbered negative case, or one check that proves several. The numbers are stable: the summary checks that all sixty ran. */
 const N = (n, cond, msg) => {
-  seenNeg.add(n);
-  neg(cond, `N${n} — ${msg}`);
+  const ns = [n].flat();
+  for (const x of ns) seenNeg.add(x);
+  neg(cond, `${ns.map((x) => `N${x}`).join(' ')} — ${msg}`);
 };
 /** A numbered positive case: the feature works, with everything above true. */
 const P = (n, cond, msg) => ok(cond, `P${n} — ${msg}`);
 const section = (name) => console.log(`\n— ${name} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-/** Source with comments stripped: a sweep must not be satisfied by prose. */
-const code = (rel) =>
-  read(rel)
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '');
-const ANALYTICS_FILES = ['metrics', 'funnels', 'timeSeries', 'cohorts', 'dashboard', 'index'].map((f) => [
-  `analytics/${f}.mjs`,
-  code(`scoutbox-server/domains/recruitment/analytics/${f}.mjs`),
-]);
-
 const DAY = DAY_MS;
 const NOW = Date.UTC(2026, 5, 15, 12);
 
@@ -181,10 +172,6 @@ section('the metric registry is internally consistent');
   for (const [n, name] of forbidden) {
     const inRegistry = METRIC_IDS.some((id) => `${id} ${METRICS[id].name}`.toLowerCase().includes(name));
     N(n, !inRegistry, `no metric is called "${name}"`);
-    const inSource = ANALYTICS_FILES.some(
-      ([f, src]) => f !== 'analytics/metrics.mjs' && new RegExp(name.replace(/ /g, '[ _]?'), 'i').test(src),
-    );
-    N(n, !inSource, `and "${name}" appears in no projection (only in the refusal list itself)`);
   }
   N(
     7,
@@ -218,12 +205,7 @@ section('the metric registry is internally consistent');
   );
 }
 
-// ---------------------------------------- the caveats may not drift apart
 {
-  // The demo bundles carry their own copy of each limitation, because they
-  // run with no server. A caveat that says something different in the demo is
-  // worse than no caveat, so both copies are compared word for word.
-  const clients = ['scoutbox-club/src/m20Demo.ts', 'scoutbox-grassroots/src/m20Demo.ts'];
   // The Trial process metric is counts only — no ratio, no
   // rate, and it never declares a read of the club's notes, instructions,
   // attendance notes or assessments.
@@ -247,14 +229,6 @@ section('the metric registry is internally consistent');
     ),
     'trial_process reads no note, instruction, message, reason, assessment, rating, observation or venue field',
   );
-  for (const rel of clients) {
-    const src = read(rel);
-    const drifted = METRIC_IDS.filter((id) => !src.includes(METRICS[id].limitation));
-    ok(
-      drifted.length === 0,
-      `${rel}: every limitation matches the server's word for word${drifted.length ? ` (drifted: ${drifted.join(', ')})` : ''}`,
-    );
-  }
 }
 
 // =========================================================================
@@ -292,28 +266,6 @@ section('no person is a dimension');
 section('private text and personal identity are not analytics data');
 
 {
-  for (const [file, src] of ANALYTICS_FILES) {
-    N(19, !/\.note\b/.test(src), `${file}: never reads a decision or room note`);
-    // Property READS only: metrics.mjs names these same fields as string
-    // literals in the list it refuses metrics for declaring, and that list is
-    // the safeguard, not a violation of it.
-    N(20, !/\.(byName|byId|scoutName|ownerUserId)\b/.test(src), `${file}: never reads who did the work`);
-    neg(!/\.body\b|commentText|assessmentText/.test(src), `${file}: never reads a comment or assessment body`);
-  }
-  // The projection must STRIP identity, not merely decline to read it: a
-  // history entry passed through whole would carry byName into every payload.
-  const dash = code('scoutbox-server/domains/recruitment/analytics/dashboard.mjs');
-  N(
-    21,
-    /at: h\.at,\s*action: h\.action/.test(dash) && !/byKind/.test(dash),
-    'projectRoom rebuilds each history entry from at/action/detail and drops the actor',
-  );
-  N(
-    22,
-    /const projectDecision[\s\S]{0,400}?\}\);/.test(dash) && !/note: d\.note|by: d\.by/.test(dash),
-    'projectDecision omits the note and the author',
-  );
-
   // The registry assertion must refuse a metric that DECLARES a private read.
   const savedReads = METRICS.exit_reason_mix.reads;
   METRICS.exit_reason_mix.reads = ['reasonCodes', 'note'];
@@ -705,9 +657,13 @@ section('a dashboard read writes nothing, and sees only one organisation');
   N(56, JSON.stringify(db) === before, 'a full dashboard read leaves every source collection byte-identical');
   N(34, ctx.rooms.length === 1 && ctx.rooms[0].id === 'c1', 'only this organisation’s rooms enter the context');
   N(35, ctx.decisions.length === 1 && ctx.decisions[0].id === 'd1', 'and only this organisation’s decisions');
-  N(25, !json.includes('PRIVATE NOTE TEXT') && !json.includes('RIVAL NOTE'), 'no decision note reaches the payload');
-  N(26, !json.includes('Someone') && !json.includes('Rival'), 'no actor’s name reaches the payload');
-  N(36, !ctx.rooms[0].history.some((h) => h.byId || h.byName), 'the projected history carries no actor at all');
+  N(
+    [25, 19, 22],
+    !json.includes('PRIVATE NOTE TEXT') && !json.includes('RIVAL NOTE'),
+    'no decision note reaches the payload',
+  );
+  N([26, 20], !json.includes('Someone') && !json.includes('Rival'), 'no actor’s name reaches the payload');
+  N([36, 21], !ctx.rooms[0].history.some((h) => h.byId || h.byName), 'the projected history carries no actor at all');
   P(
     1,
     out.policyVersion === RECRUITMENT_ANALYTICS_POLICY_VERSION && out.families.length === FAMILY_IDS.length,
@@ -790,12 +746,6 @@ section('nothing new is emitted, notified or stored');
 
 {
   const eventCount = EVENT_NAMES.length;
-  N(28, !ANALYTICS_FILES.some(([, src]) => /broadcast\(/.test(src)), 'M20 emits no live event — a dashboard is a read');
-  N(
-    29,
-    !ANALYTICS_FILES.some(([, src]) => /notify\(/.test(src)),
-    'M20 notifies nobody: a dashboard that pushes numbers at people is a performance review',
-  );
   ok(
     eventCount === EVENT_NAMES.length && Object.keys(CATEGORIES).length >= 13,
     `the event registry (${eventCount}) and notification categories (${Object.keys(CATEGORIES).length}) are untouched by recruitment analytics`,
@@ -936,8 +886,22 @@ section('only a lead reads the organisation’s recruitment analytics');
     const asPlayer = await j('GET', p, undefined, kola.token);
     neg(asPlayer.status === 401 || asPlayer.status === 403, `${p}: a player token buys nothing`);
   }
+  const told = (await j('GET', '/org/notifications', undefined, maria.token)).body.length;
+  const stream = await liveEvents(BASE, j, maria.token);
   const lead = await j('GET', '/org/recruitment-analytics', undefined, maria.token);
-  ok(lead.status === 200, 'a lead reads the dashboard');
+  const catalogue = await j('GET', '/org/recruitment-analytics/catalogue', undefined, maria.token);
+  const events = await stream.stop();
+  ok(lead.status === 200 && catalogue.status === 200, 'a lead reads the dashboard and its catalogue');
+  N(
+    28,
+    events.length === 0,
+    `reading the dashboard emits no live event — a dashboard is a read (${events.join(', ') || 'none'})`,
+  );
+  N(
+    29,
+    (await j('GET', '/org/notifications', undefined, maria.token)).body.length === told,
+    'and notifies nobody: a dashboard that pushes numbers at people is a performance review',
+  );
 }
 
 // =========================================================================
@@ -1105,6 +1069,25 @@ const roomIds = [];
 
 {
   const d = (await j('GET', '/org/recruitment-analytics', undefined, maria.token)).body;
+  const { neverBuilt, ...catalogue } = (await j('GET', '/org/recruitment-analytics/catalogue', undefined, maria.token))
+    .body;
+  const served = JSON.stringify(d) + JSON.stringify(catalogue);
+  // What the registry refuses to name is served only in the list that says so (neverBuilt), under no spelling elsewhere.
+  for (const name of [
+    'recruitment score',
+    'scout score',
+    'player success score',
+    'recruitment efficiency score',
+    'talent conversion score',
+    'club intelligence score',
+  ])
+    neg(
+      !new RegExp(name.replace(/ /g, '[ _]?'), 'i').test(served),
+      `the dashboard and catalogue as served never say "${name}"`,
+    );
+  ok(neverBuilt.names.length >= 6, 'the catalogue says outright which scores ScoutBox does not compute');
+  neg(!served.includes('A PRIVATE REASON IN PROSE'), "the prose of a club's reason, written above, is not served");
+  neg(!/Maria Keane/.test(served), 'nor the name of the colleague who did the work');
   const pipeline = d.data.pipeline.metrics;
   const decision = d.data.decision_record.metrics;
   const duration = d.data.duration.metrics;

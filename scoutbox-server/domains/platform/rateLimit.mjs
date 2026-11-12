@@ -308,6 +308,12 @@ export function memoryRateLimitProvider() {
       buckets.delete(key);
     },
     size: () => buckets.size,
+    /** The live buckets and what each has spent in its window. */
+    snapshot(now = Date.now()) {
+      return [...buckets.entries()]
+        .filter(([, b]) => now - b.start <= b.windowMs)
+        .map(([key, b]) => ({ key, spent: b.n }));
+    },
   };
 }
 
@@ -360,6 +366,22 @@ export function createRateLimiter({ provider = process.env.SCOUTBOX_RATE_LIMIT_P
       actions: Object.keys(RATE_LIMIT_POLICY).length,
     }),
   };
+}
+
+/**
+ * Development only, beside POST /__faults and on the same guard: `GET /__rate-limits` lists the live buckets as
+ * `{ action, key, spent }`, so a battery can see which budget a request drew on, and under which key, without
+ * spending the whole budget to find out.
+ */
+export function installRateLimitInspection(app, rateLimit, { enabled }) {
+  if (!enabled) return;
+  app.get('/__rate-limits', (_req, res) => {
+    const buckets = rateLimit.provider.snapshot().map(({ key, spent }) => {
+      const at = key.indexOf(':');
+      return { action: key.slice(0, at), key: key.slice(at + 1), spent };
+    });
+    res.json({ buckets });
+  });
 }
 
 /** Says nothing about the request's subject, so it cannot reveal whether a player exists. */

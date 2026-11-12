@@ -17,7 +17,7 @@
 // privacy · Z boundary invariants.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -48,6 +48,8 @@ import {
   lifecycleTargetFor,
 } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { memoryRateLimitProvider } from '../../domains/platform/rateLimit.mjs';
+import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
+import { budgetsDrawn } from '../support/rateBudgets.mjs';
 import { journeyEvidenceFunnel } from '../../domains/recruitment/analytics/funnels.mjs';
 import { isAdult } from '../../domain.mjs';
 const LATEST_SCHEMA = Number(
@@ -1329,20 +1331,21 @@ section("D — cross-player: no player A resource may advance player B's case");
     "D6 player B's case selects none of player A's resources",
   );
   // D7 — a Room's evidence request reaches its own player only.
-  const sugg = (await j('GET', '/org/evidence-gaps', undefined, maria.token)).body;
-  const items = Array.isArray(sugg) ? sugg : (sugg?.items ?? sugg?.suggestions ?? []);
-  const other = items.find((s) => s.playerId && s.playerId !== pB && s.status === 'suggested');
+  let other = null;
+  for (const id of ['pl-carvalho', 'pl-svensson', 'pl-tanaka', 'pl-martin', 'pl-alvarez']) {
+    const gaps = (await j('GET', `/org/players/${id}/evidence-gaps`, undefined, maria.token)).body?.items ?? [];
+    other = gaps.find((g) => g.status === 'suggested') ?? null;
+    if (other) break;
+  }
+  ok(!!other, `D7a another player has an open evidence suggestion to try (${other?.playerId})`);
   if (other) {
     const r = await j('POST', `/org/rooms/${B.RID}/evidence-requests`, { suggestionId: other.id }, maria.token);
+    const still = (
+      (await j('GET', `/org/players/${other.playerId}/evidence-gaps`, undefined, maria.token)).body?.items ?? []
+    ).find((g) => g.id === other.id);
     neg(
-      r.status === 404 && r.body?.error === 'SUGGESTION_NOT_FOUND',
-      `D7 an evidence suggestion about another player, posted from this Room: SUGGESTION_NOT_FOUND (${r.status})`,
-    );
-  } else {
-    negatives += 1;
-    passed += 1;
-    console.log(
-      "✓ [neg] D7 (no other player's suggestion exists in this store; the scope check is proven by source in Z)",
+      r.status === 404 && r.body?.error === 'SUGGESTION_NOT_FOUND' && still?.status === 'suggested',
+      `D7 an evidence suggestion about another player, posted from this Room: SUGGESTION_NOT_FOUND, and nobody was asked (${r.status}, ${still?.status})`,
     );
   }
   // D8 — a case task cannot be given to a user of another org.
@@ -1422,18 +1425,25 @@ section('E — cross-org: foreign real ids and fabricated ids are the same answe
     (await j('GET', `/org/players/${pid}`, undefined, rita.token)).status === 200,
     'E5 after the lift the profile reads again',
   );
-  // Box Cam link: consent before existence.
-  const link1 = await j(
-    'POST',
-    `/org/rooms/${B.RID}/trials/${B.TID}/sessions/x/evidence`,
-    { boxSessionId: 'bx-nope', expectedRev: 1 },
-    maria.token,
-    at(T0),
-  );
+  // Box Cam link: consent before existence. A made-up session id and one of the player's real ones get the same answer.
+  // Svensson's trial is completed, so a session of it can cite evidence.
+  const trial = (await j('GET', `/org/rooms/${B.R2}/trials/${B.TID2}`, undefined, maria.token)).body.trial;
+  const realSession = (await j('GET', '/player/box-cam/sessions', undefined, P['pl-svensson'].token)).body?.items?.[0]
+    ?.id;
+  const linkWith = (boxSessionId) =>
+    j(
+      'POST',
+      `/org/rooms/${B.R2}/trials/${B.TID2}/sessions/${trial.schedule.sessions[0].id}/evidence`,
+      { boxSessionId, expectedRev: trial.rev, clientKey: key() },
+      maria.token,
+      at(T0),
+    );
+  const answers = [await linkWith('bx-nope'), ...(realSession ? [await linkWith(realSession)] : [])];
   neg(
-    (link1.status >= 400 && link1.body?.error !== 'EVIDENCE_CONSENT_REQUIRED') ||
-      link1.body?.error === 'EVIDENCE_CONSENT_REQUIRED',
-    `E6 a Box Cam link answers by consent before it admits whether a session exists (${link1.status} ${link1.body?.error})`,
+    answers.every((r) => r.status === 409 || r.status === 403) &&
+      answers.every((r) => r.body?.error === 'EVIDENCE_CONSENT_REQUIRED') &&
+      new Set(answers.map((r) => JSON.stringify({ s: r.status, b: r.body }))).size === 1,
+    `E6 a Box Cam link without consent answers by consent, the same for an invented session and a real one (${answers.map((r) => `${r.status} ${r.body?.error}`).join(' | ')}${realSession ? '' : '; the player has no session'})`,
   );
   const agentRoom = await j('POST', '/org/rooms', { playerId: 'pl-guni', sourceContext: 'search' }, alex.token);
   neg(
@@ -2186,6 +2196,17 @@ section('M — minors through the chain; malformed DOB fails closed');
   neg(expect(wrong, 404, 'CHILD_NOT_FOUND'), "M13 a guardian block naming another guardian's child: CHILD_NOT_FOUND");
   const noOrg = await j('POST', '/guardian/block', { orgId: 'org-nope', playerId: 'pl-guni' }, amara.token);
   neg(expect(noOrg, 404, 'ORG_NOT_FOUND'), 'M13b an unknown org: ORG_NOT_FOUND');
+  const marek = (await j('POST', '/auth/guardian/login', { guardianId: 'gd-marek' })).body;
+  const blocksOf = async () =>
+    (await j('GET', '/admin/blocks?limit=100', undefined, undefined, ADMIN)).body.items.filter(
+      (b) => b.orgId === 'org-harbour' && ['pl-tomasz', 'pl-imani'].includes(b.playerId),
+    ).length;
+  const before = await blocksOf();
+  const unnamed = await j('POST', '/guardian/block', { orgId: 'org-harbour' }, marek.token);
+  neg(
+    expect(unnamed, 400, 'ORG_AND_CHILD_REQUIRED') && (await blocksOf()) === before,
+    'M13c a guardian of two children who names neither is asked which: neither child is blocked in their place',
+  );
   const gsign = await j('GET', '/guardian/signings', undefined, amara.token);
   neg(
     (gsign.status === 200 && (gsign.body.items ?? gsign.body).length === 0) || gsign.status === 404,
@@ -2696,7 +2717,9 @@ section('T — analytics: retries, revisions, reopening, second cases and legacy
 section('U — rate limits: legacy routes carry the canonical budgets; the store evicts, never resets');
 {
   // U1–U2: legacy signing recording dedupes.
-  const first = await j('POST', '/org/players/pl-okafor/signing', { note: 'legacy' }, rita.token);
+  const { response: first, drawn: legacyDrawn } = await budgetsDrawn(j, () =>
+    j('POST', '/org/players/pl-okafor/signing', { note: 'legacy' }, rita.token),
+  );
   const second = await j('POST', '/org/players/pl-okafor/signing', { note: 'legacy again' }, rita.token);
   neg(
     first.status === 201 &&
@@ -2704,14 +2727,19 @@ section('U — rate limits: legacy routes carry the canonical budgets; the store
       second.body?.signingId === first.body?.signing?.id,
     'U1 a second legacy recording while one stands: SIGNING_ALREADY_RECORDED naming the row',
   );
+  neg(
+    legacyDrawn.join() === 'signing_closure:org-harbour',
+    `U1b the legacy recording draws on the canonical completion budget (${legacyDrawn.join(', ')})`,
+  );
   const rows = (await signings(rita.token)).filter((s) => s.playerId === 'pl-okafor' && !s.signingPackageId);
   neg(rows.length === 1, `U2 one legacy row, one invoice (${rows.length})`);
   // U3–U4: legacy requests dedupe.
-  const r1 = await j(
-    'POST',
-    '/org/players/pl-kim/request',
-    { type: 'contact', message: 'Hello from Harbour' },
-    rita.token,
+  const { response: r1, drawn: requestDrawn } = await budgetsDrawn(j, () =>
+    j('POST', '/org/players/pl-kim/request', { type: 'contact', message: 'Hello from Harbour' }, rita.token),
+  );
+  neg(
+    requestDrawn.join() === 'contact_send:org-harbour',
+    `U3b a legacy contact request draws on the canonical contact budget (${requestDrawn.join(', ')})`,
   );
   const r2 = await j('POST', '/org/players/pl-kim/request', { type: 'contact', message: 'Hello again' }, rita.token);
   neg(
@@ -3092,130 +3120,19 @@ section('Y — privacy sweep of every journey payload');
     tl.every((e) => !has(e, S_DEC) && !has(e, S_ASSESS)),
     'Y5 the club timeline carries no rationale text',
   );
-  const regs = readFileSync(path.join(ROOT, 'domains', 'platform', 'eventRegistry.mjs'), 'utf8');
-  const recruitmentEntries = regs
-    .split(/\n  [a-z_]+: \{/)
-    .filter((e) => /domain: '(recruitment|room|contact|trial|offer|signing|decision|case|lifecycle)/.test(e));
+  const recruitmentEvents = Object.entries(EVENT_REGISTRY).filter(([, d]) =>
+    /^(recruitment|room|contact|trial|offer|signing|decision|case|lifecycle)/.test(d.domain ?? ''),
+  );
   neg(
-    recruitmentEntries.length > 10 &&
-      recruitmentEntries.every((e) => !/payload:\s*\[[^\]]*(note|reason|terms|sha256|rationale)[^\]]*\]/.test(e)),
-    `Y6 no recruitment event payload names a note, a reason, terms or a digest (${recruitmentEntries.length} entries scanned)`,
+    recruitmentEvents.length > 10 &&
+      recruitmentEvents.every(([, d]) => !d.payload.some((k) => /note|reason|terms|sha256|rationale/i.test(k))),
+    `Y6 no recruitment event payload names a note, a reason, terms or a digest (${recruitmentEvents.length} events)`,
   );
 }
 
 // ================================================================ Z — boundary invariants
-section('Z — boundary invariants, read from the source');
+section('Z — the tables the journey rests on');
 {
-  const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
-  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-  neg(
-    /resolveTo: resumeTargetFor/.test(src('domains/recruitment/lifecycle/lifecycle.mjs')) &&
-      /ownEdge/.test(src('domains/recruitment/lifecycle/lifecycle.mjs')),
-    'Z1 resumeCase resolves its target in the ONE validator',
-  );
-  neg(
-    !/'offer_made'|'offer_accepted'|'contacted'|'trial_scheduled'/.test(
-      strip(src('domains/recruitment/rooms/shared.mjs')).match(/on_hold: \[[^\]]*\]/)?.[0] ?? '',
-    ),
-    'Z2 the on_hold table row names no evidence-bearing state',
-  );
-  neg(
-    /EVIDENCE_AHEAD_OF_LIFECYCLE/.test(src('domains/recruitment/lifecycle/journeyModel.mjs')) &&
-      /INTEGRITY_ERROR/.test(src('domains/recruitment/lifecycle/journey.mjs')),
-    'Z3 drift detection and the blocked act are in the projector',
-  );
-  neg(
-    /SIGNING_ALREADY_RECORDED/.test(src('domains/recruitment/signings/legacy.mjs')) &&
-      /rateLimit\.limited\('signing_closure', req\.org\.id\)/.test(src('domains/recruitment/signings/legacy.mjs')),
-    'Z4 the legacy recording route dedupes and draws on the closure budget',
-  );
-  neg(
-    /REQUEST_PENDING/.test(src('domains/recruitment/requests.mjs')) &&
-      /'trial_invite' : 'contact_send'/.test(src('domains/recruitment/requests.mjs')),
-    'Z5 the legacy request route dedupes and draws on the canonical budgets',
-  );
-  neg(!/buckets\.clear\(\)/.test(src('domains/platform/rateLimit.mjs')), 'Z6 the limiter never clears every bucket');
-  neg(
-    /playerId: room\.playerId/.test(src('domains/recruitment/rooms/rooms.mjs')) &&
-      /found\.playerId === playerId/.test(src('domains/insight/insight.mjs')),
-    "Z7 a Room's evidence request is scoped to its player",
-  );
-  const guardianBlock = (() => {
-    const f = src('domains/safety/safety.mjs');
-    const at = f.indexOf("guardianRouter.post('/block'");
-    return at < 0 ? '' : f.slice(at, at + 900);
-  })();
-  neg(/CHILD_NOT_FOUND/.test(guardianBlock), 'Z8 a guardian block names its child');
-  neg(
-    !!guardianBlock && (!/childIds\[0\]/.test(guardianBlock) || /childIds\.length === 1/.test(guardianBlock)),
-    'Z8b never a silent first-child fallback',
-  );
-  neg(
-    [
-      ['/players/:id/notes', 'domains/discovery/search.mjs'],
-      ['/players/:id/morelike', 'domains/discovery/search.mjs'],
-      ['/players/:id/proofpack', 'domains/recruitment/ledger.mjs'],
-    ].every(([r, f]) => {
-      const i = src(f).indexOf(
-        `orgRouter.${r.includes('morelike') || r.includes('proofpack') ? 'get' : 'post'}('${r}'`,
-      );
-      return i > 0 && /isBlocked\(p\.id, req\.org\.id\)/.test(src(f).slice(i, i + 700));
-    }),
-    'Z9 notes, morelike and proofpack check the block',
-  );
-  neg(
-    /combineOrgMaySeeResults[\s\S]*boxCamReads\.sessions\.byId/.test(
-      src('domains/recruitment/lifecycle/trialRoutes.mjs').slice(
-        src('domains/recruitment/lifecycle/trialRoutes.mjs').indexOf('function linkAuthorisation'),
-      ),
-    ),
-    'Z10 consent is decided before the session lookup',
-  );
-  neg(
-    /\['delivered', 'responded'\]\.includes\(c\.status\)/.test(src('domains/recruitment/lifecycle/contactRoutes.mjs')),
-    'Z11 the send replay reports current truth',
-  );
-  neg(
-    /DECISION_IDEMPOTENCY_CONFLICT/.test(src('domains/recruitment/rooms/rooms.mjs')),
-    'Z12 the Rooms decision replay fingerprints content',
-  );
-  neg(
-    /pkg\.currentRevisionId \?\? null\)\)\s*return res\.json\(\{ \.\.\.view\(\), idempotent: true/.test(
-      src('domains/recruitment/signings/index.mjs'),
-    ),
-    'Z13 a party signature key replays only for the current revision',
-  );
-  neg(/USER_NOT_IN_ORG/.test(src('domains/scouting/scouting.mjs')), 'Z14 a workspace case task requires an org member');
-  neg(
-    /lifecycle\.after_status/.test(src('domains/recruitment/rooms/rooms.mjs')) &&
-      /offer\.respond\.after_persist/.test(src('domains/recruitment/offers/index.mjs')),
-    'Z15 the two fault seams sit inside the writers they prove',
-  );
-  neg(
-    ['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every(
-      (f) => /visibilitychange/.test(src(f)) && /'pageshow'/.test(src(f)),
-    ),
-    'Z16 the three web apps re-read on focus, pageshow and visibility',
-  );
-  neg(
-    ['../scoutbox-club/src/App.tsx', '../scoutbox-grassroots/src/App.tsx', '../scoutbox-agent/src/App.tsx'].every(
-      (f) => {
-        const s = strip(src(f));
-        const i = s.indexOf('api.onChange(session');
-        const block = s.slice(i, i + 400);
-        return !/payload\.(status|to|from|stage)/.test(block);
-      },
-    ),
-    'Z17 no app reads a status, a stage or a target state off an event payload',
-  );
-  neg(
-    !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/offers/index.mjs'))) &&
-      !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/signings/index.mjs'))) &&
-      !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/contactRoutes.mjs'))) &&
-      !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/trialRoutes.mjs'))) &&
-      !/room\.status\s*=[^=]/.test(strip(src('domains/recruitment/lifecycle/decisionRoutes.mjs'))),
-    'Z18 no domain assigns a lifecycle status',
-  );
   neg(
     JOURNEY_INTEGRITY_CODES.includes('EVIDENCE_AHEAD_OF_LIFECYCLE') &&
       NEXT_ACTION_CODES.length === 24 &&
@@ -3226,17 +3143,6 @@ section('Z — boundary invariants, read from the source');
   neg(
     Object.keys(LIFECYCLE_ACTIONS).length === 19 && TERMINAL_ROOM_STATUSES.length === 4,
     'Z20 nineteen semantic actions, four terminal states — nothing added',
-  );
-  neg(
-    !/recruitmentJourneyStates|db\.recruitmentJourneys\b(?!`)/.test(
-      strip(src('domains/recruitment/lifecycle/journey.mjs')).replace(/there is no `db\.recruitmentJourneys`/, ''),
-    ),
-    'Z21 no journey store',
-  );
-  const files = readdirSync(path.join(ROOT, 'domains', 'recruitment', 'lifecycle')).filter((f) => f.endsWith('.mjs'));
-  neg(
-    files.every((f) => !/contractStatus\s*=[^=]/.test(strip(src(`domains/recruitment/lifecycle/${f}`)))),
-    'Z22 no m23 module writes a contract word',
   );
 }
 

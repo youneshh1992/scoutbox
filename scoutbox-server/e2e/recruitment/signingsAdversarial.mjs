@@ -26,6 +26,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openLayer, readRecords, plantCase } from '../../scripts/dataLayerFixture.mjs';
+import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
+import { budgetsDrawn } from '../support/rateBudgets.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { isAdult } from '../../domain.mjs';
 import {
@@ -203,6 +205,8 @@ let maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
 let tom = await login('org-eastport', 'Tom Field', 'First-Team Scout');
 let rita = await login('org-harbour', 'Rita Vale', 'Head of Recruitment');
 const alex = await login('org-northstar', 'Alex Agent', 'Director');
+// Every player as the battery starts: the boundary section checks what moved.
+const FACTS_AT_START = await playerFacts(j, [maria.token, rita.token]);
 const P = {};
 const ADULTS = [
   'pl-adeyemi',
@@ -749,14 +753,17 @@ section('C — digest mismatch: a stored digest that does not name the stored by
     expect(await pDoc(C.SID, P['pl-kim'].token), 500, 'SIGNING_STATE_UNKNOWN'),
     'C5 the bytes are not served under a digest that does not name them',
   );
-  const c = await cancel(
-    C.SID,
-    { expectedRev: await rev(C.SID, maria.token), reason: 'digest corrupted', clientKey: key() },
-    maria.token,
+  const cRev = await rev(C.SID, maria.token);
+  const { response: c, drawn: cDrawn } = await budgetsDrawn(j, () =>
+    cancel(C.SID, { expectedRev: cRev, reason: 'digest corrupted', clientKey: key() }, maria.token),
   );
   ok(
     c.status === 200 && sv(c).status === 'CANCELLED',
     'C6 the club can still cancel the package (a safety closure needs no document)',
+  );
+  neg(
+    cDrawn.join() === 'signing_safety_closure:org-eastport',
+    `X3b a cancel draws on the safety-closure budget, never on completion's, so completion traffic cannot exhaust it (${cDrawn.join(', ')})`,
   );
 }
 
@@ -1130,16 +1137,29 @@ section(
     `G12 the block closes the agent\'s read (${(await aList(REP, ana.token)).body?.error})`,
   );
   // Complete Kola's signing so P can test the contract-status divergence.
-  const ps = await pSign(G.SID, { revisionId: G.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-adeyemi'].token);
-  const cs = await clubSign(
-    G.SID,
-    { expectedRev: await rev(G.SID, maria.token), revisionId: G.SREV, documentSha256: SHA_A, clientKey: key() },
-    maria.token,
+  const { response: ps, drawn: psDrawn } = await budgetsDrawn(j, () =>
+    pSign(G.SID, { revisionId: G.SREV, documentSha256: SHA_A, clientKey: key() }, P['pl-adeyemi'].token),
   );
-  const done = await complete(G.SID, { expectedRev: sv(cs).rev, clientKey: key() }, maria.token);
+  const csRev = await rev(G.SID, maria.token);
+  const { response: cs, drawn: csDrawn } = await budgetsDrawn(j, () =>
+    clubSign(G.SID, { expectedRev: csRev, revisionId: G.SREV, documentSha256: SHA_A, clientKey: key() }, maria.token),
+  );
+  const { response: done, drawn: doneDrawn } = await budgetsDrawn(j, () =>
+    complete(G.SID, { expectedRev: sv(cs).rev, clientKey: key() }, maria.token),
+  );
   ok(
     ps.status === 200 && cs.status === 200 && done.status === 200 && (await stage(G.RID, maria.token)) === 'signed',
     "G13 Kola's signing completes (the agency block does not touch the club's signing)",
+  );
+  neg(
+    psDrawn.join() === 'signing_party_completion:player:pl-adeyemi' &&
+      csDrawn.length === 1 &&
+      /^signing_party_completion:org:/.test(csDrawn[0]),
+    `X4 each party's confirmation draws on its own person's budget, the player's and the club user's, never one shared between the two kinds (${[...psDrawn, ...csDrawn].join(', ')})`,
+  );
+  neg(
+    doneDrawn.join() === 'signing_closure:org-eastport',
+    `X3 completing draws on the organisation's completion budget only (${doneDrawn.join(', ')})`,
   );
   globalThis.__G = G;
 }
@@ -2495,20 +2515,6 @@ section('X — rate limits: one budget per logical actor and action; safety clos
     pol.signing_safety_closure.max >= pol.signing_closure.max,
     'X2 cancel/void (safety) have at least the completion budget, on their own key — completion traffic cannot exhaust a safety closure',
   );
-  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'signings', 'index.mjs'), 'utf8');
-  neg(
-    /limited\('signing_safety_closure'/.test(
-      src.slice(src.indexOf('function closeRoute'), src.indexOf("orgRouter.post('/signings/:id/cancel'")),
-    ) &&
-      /limited\('signing_closure'/.test(
-        src.slice(src.indexOf("orgRouter.post('/signings/:id/complete'"), src.indexOf('function closeRoute')),
-      ),
-    'X3 (source) cancel/void consume signing_safety_closure; complete consumes signing_closure',
-  );
-  neg(
-    /rateKey: `org:\$\{req\.orgUser\.id\}`/.test(src) && /rateKey: `player:\$\{req\.player\.id\}`/.test(src),
-    'X4 (source) party completion is keyed per user for the club and per player — no alias between the two kinds',
-  );
   ok(
     Object.values(pol).every(
       (p) =>
@@ -2595,47 +2601,16 @@ section('Z — the P7 invariants, re-proven at this tip');
     ).error === 'SIGNING_NOT_PERMITTED',
     'ZF an agent cannot sign as the player',
   );
-  const src =
-    readFileSync(path.join(HERE, '..', '..', 'server.mjs'), 'utf8') +
-    readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'signings', 'index.mjs'), 'utf8');
-  const files = [
-    'domains/recruitment/signings/index.mjs',
-    'domains/recruitment/signings/signing.mjs',
-    'domains/recruitment/offers/index.mjs',
-    'domains/recruitment/lifecycle/journey.mjs',
-    'domains/recruitment/lifecycle/lifecycle.mjs',
-    'server.mjs',
-    'domains/development/record.mjs',
-    'domains/verification/claims/index.mjs',
-    'domains/recruitment/rooms/index.mjs',
-  ].map((f) => [f, readFileSync(path.join(HERE, '..', '..', f), 'utf8')]);
+  const signed = new Set([...(await signings(maria.token)), ...(await signings(rita.token))].map((r) => r.playerId));
+  const moved = factsMoved(FACTS_AT_START, await playerFacts(j, [maria.token, rita.token]), signed);
   neg(
-    files
-      .filter(([f, s]) => !f.startsWith('repositories/') && /db\.signings\.push\(|signings\.record\(/.test(s))
-      .map(([f]) => f)
-      .join() === 'domains/recruitment/signings/index.mjs' &&
-      files
-        .filter(([, s]) =>
-          /contractStatus\s*=\s*'under_contract'|players\.setAvailability\([^\n]*contractStatus: 'under_contract'/.test(
-            s,
-          ),
-        )
-        .map(([f]) => f)
-        .join() === 'domains/recruitment/signings/index.mjs',
-    'ZK/ZM the ONE writer of db.signings (through signings.record) and of under_contract (drift guard; written through players.setAvailability)',
+    moved.contract.every((id) => signed.has(id)) && [...signed].every(moved.underContract),
+    `ZK/ZM a contract status moved only for a player with a signing row, and every signed player is under contract (moved: ${moved.contract.join(', ') || 'none'})`,
   );
   neg(
-    !/status\s*=\s*'signed'/.test(files.find(([f]) => f === 'domains/recruitment/signings/index.mjs')[1]),
-    'ZL m29 never assigns signed',
+    moved.trust.length === 0,
+    `ZP a signing moves a Trust Profile only through the club the player joins (its history and its squad); nobody else's moved (${moved.trust.join(', ') || 'none'})`,
   );
-  neg(
-    !/trustScore|computeTrustScore/.test(
-      files.find(([f]) => f === 'domains/recruitment/signings/index.mjs')[1] +
-        files.find(([f]) => f === 'domains/recruitment/signings/signing.mjs')[1],
-    ),
-    'ZP the signing module never touches the Trust Score',
-  );
-  void src;
 }
 
 console.log(

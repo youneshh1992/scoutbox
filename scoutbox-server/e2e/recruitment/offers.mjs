@@ -23,7 +23,7 @@
 // the code it expects.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -309,22 +309,6 @@ section('A — model and store: seven statuses, terminal at revision level, one 
   neg(
     sent.status === 500 && sent.body.error === 'OFFER_STATE_UNKNOWN' && !has(sent.body, 'secret'),
     'A22b a code missing from the table fails closed: a generic 500, never the detail',
-  );
-  const rawSrc = readdirSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers'))
-    .filter((f) => f.endsWith('.mjs'))
-    .map((f) => readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', f), 'utf8'))
-    .join('\n');
-  const src = rawSrc
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '')
-    .replace(/[^'"\n]\/\/ .*$/gm, ''); // code only: comments explain what is NOT done
-  neg(
-    !/db\.signings|under_contract|'signed'/.test(src),
-    'A23 the m28 source never names db.signings, under_contract or the signed state',
-  );
-  neg(
-    !/case\.status\s*=|room\.status\s*=|\.status = verdict\.to/.test(src) && /applyLifecycleTransition/.test(src),
-    'A24 m28 never assigns a case status; it calls the ONE writer',
   );
   // Evidence kinds are answerable from the same provider.
   ok(
@@ -2061,6 +2045,17 @@ section(
       'OFFER_REV_REQUIRED',
     ),
     'N5 and must be an integer',
+  );
+  // The case refuses the move from inside the one lifecycle writer: the answer is not recorded either.
+  const unanswered = { offer: (await getOffer(K.OID)).body.offer, stage: await stage(K.RID) };
+  await j('POST', '/__faults', { rules: 'internal:lifecycle.after_status:1' });
+  const refused = await pAccept(K.OID, { revisionId: K.R2, clientKey: key() }, kola.token, at(T0 + DAY));
+  await j('POST', '/__faults', { rules: '' });
+  neg(
+    refused.status >= 400 &&
+      JSON.stringify((await getOffer(K.OID)).body.offer) === JSON.stringify(unanswered.offer) &&
+      (await stage(K.RID)) === unanswered.stage,
+    `A24 an accept whose case move fails records nothing: no response row, the Offer and case as they were (${refused.status} ${refused.body?.error})`,
   );
   const me0 = (await j('GET', '/player/me', undefined, kola.token)).body;
   const clubNotifs = (await notifs('/org/notifications', maria.token)).length;

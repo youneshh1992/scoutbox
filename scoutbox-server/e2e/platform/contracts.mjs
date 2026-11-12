@@ -1649,6 +1649,7 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
       body: JSON.stringify({ rules: 'fatal:/healthz' }),
     });
     neg(ctl.status === 404, 'and POST /__faults does not exist');
+    neg((await fetch(`${PBASE2}/__rate-limits`)).status === 404, 'nor GET /__rate-limits');
     neg(!/secret-value-not-real/.test(JSON.stringify(caps)), 'the configured secret value never appears');
     ok(caps.schema?.upToDate === true, 'a production boot on an empty database migrates to the current schema');
   } else {
@@ -1656,6 +1657,7 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
     for (const what of [
       'the fault layer reports not_configured',
       'POST /__faults does not exist',
+      'GET /__rate-limits does not exist',
       'the configured secret value never appears',
       'an empty database migrates to the current schema',
     ]) {

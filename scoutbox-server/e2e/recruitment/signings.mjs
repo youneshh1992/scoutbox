@@ -14,7 +14,8 @@
 // marked `#n`. Every refusal asserts its exact status AND code.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
+import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -596,6 +597,8 @@ const tom = await login('org-eastport', 'Tom Field', 'First-Team Scout');
 const rita = await login('org-harbour', 'Rita Vale', 'Head of Recruitment');
 const pat = await login('org-mossside', 'Pat Doyle', 'Head Coach', 'grassroots');
 const alex = await login('org-northstar', 'Alex Agent', 'Director');
+// Every player as the battery starts, read by both clubs that sign anyone here: the boundary section compares.
+const FACTS_AT_START = await playerFacts(j, [maria.token, rita.token]);
 const P = {};
 for (const id of [
   'pl-adeyemi',
@@ -2409,68 +2412,21 @@ section('AD — reference mismatches, a voided package, and a completion that fa
   }
 }
 
-// ================================================================ Z — the signing boundary (source sweep) and restart
+// ================================================================ Z — the signing boundary and restart
 section('Z — the boundary: ONE writer of db.signings, signed and under_contract; keys and state survive a restart');
 {
-  const root = path.join(HERE, '..', '..');
-  const files = [];
-  const walk = (d) => {
-    for (const f of readdirSync(d)) {
-      const p = path.join(d, f);
-      if (f === 'node_modules' || f === 'scripts' || f === 'e2e' || f.startsWith('.')) continue;
-      if (statSync(p).isDirectory()) walk(p);
-      else if (f.endsWith('.mjs')) files.push(p);
-    }
-  };
-  walk(root);
-  const src = Object.fromEntries(files.map((f) => [path.relative(root, f), readFileSync(f, 'utf8')]));
-  // The signing row is written through the domain repository (`signings.record(...)`); the ONE writer is domains/recruitment/signings/index.mjs.
-  const pushes = Object.entries(src)
-    .filter(([, s]) => /db\.signings\.push\(|signings\.record\(/.test(s))
-    .map(([f]) => f)
-    .filter((f) => !f.startsWith('repositories/'));
+  // Only a completed signing puts a player under contract, and nothing a signing does moves a Trust Score: every other
+  // player is exactly as the battery found them.
+  const signed = new Set([...(await signings()), ...(await signings(rita.token))].map((r) => r.playerId));
+  const moved = factsMoved(FACTS_AT_START, await playerFacts(j, [maria.token, rita.token]), signed);
+  ok(signed.size >= 2, `Z0 this battery signed players at two clubs (${[...signed].join(', ')})`);
   neg(
-    pushes.length === 1 && pushes[0] === 'domains/recruitment/signings/index.mjs',
-    `#23 Z1 the signing row is written (signings.record / db.signings.push) in exactly one file outside the repositories: ${pushes.join(', ')}`,
-  );
-  // The column is written through the identity repository (`players.setAvailability(id, { contractStatus: 'under_contract', … })`), never assigned on the record.
-  const uc = Object.entries(src)
-    .filter(([, s]) =>
-      /contractStatus\s*=\s*'under_contract'|players\.setAvailability\([^\n]*contractStatus: 'under_contract'/.test(s),
-    )
-    .map(([f]) => f);
-  neg(
-    uc.length === 1 && uc[0] === 'domains/recruitment/signings/index.mjs',
-    `#25 Z2 contractStatus 'under_contract' is written in exactly one file: ${uc.join(', ')}`,
+    moved.contract.every((id) => signed.has(id)) && [...signed].every(moved.underContract),
+    `#23 #25 Z1 a contract status moved only for a player with a signing row, and every signed player is under contract (moved: ${moved.contract.join(', ') || 'none'})`,
   );
   neg(
-    !/db\.signings\.push|contractStatus = 'under_contract'|playerLevelAfterSigning\(/.test(
-      readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'signings', 'legacy.mjs'), 'utf8').slice(
-        0,
-        readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'signings', 'legacy.mjs'), 'utf8').indexOf(
-          "orgRouter.get('/signings'",
-        ),
-      ),
-    ),
-    'Z3 the legacy route itself writes nothing: it delegates to the ONE writer',
-  );
-  neg(
-    !/status\s*=\s*'signed'|room\.status\s*=\s*['"]signed/.test(src['domains/recruitment/signings/index.mjs']) &&
-      /confirmSignedOutcome/.test(src['domains/recruitment/signings/index.mjs']) &&
-      /applyLifecycleTransition/.test(src['domains/recruitment/signings/index.mjs']),
-    '#24 Z4 m29 never assigns the status word: signed is reached through the ONE validator and the ONE lifecycle writer',
-  );
-  neg(
-    !/docusign|adobe\s*sign|hellosign|pandadoc|qualified electronic signature/i.test(
-      src['domains/recruitment/signings/index.mjs'] + src['domains/recruitment/signings/signing.mjs'],
-    ),
-    'Z5 no external provider is named or faked',
-  );
-  neg(
-    !/trustScore|computeTrustScore|trustProfile/.test(
-      src['domains/recruitment/signings/index.mjs'] + src['domains/recruitment/signings/signing.mjs'],
-    ),
-    '#50 Z6 the signing module never touches the Trust Score',
+    moved.trust.length === 0,
+    `#50 Z2 a signing moves a Trust Profile only through the club the player joins (its history and its squad); nobody else's moved (${moved.trust.join(', ') || 'none'})`,
   );
   // restart
   const D = globalThis.__DONE;

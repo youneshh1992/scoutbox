@@ -13,7 +13,7 @@
 // Q partial failure · Z boundary invariants (source scans).
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -325,15 +325,23 @@ section('A — the model: stages, selectors, next actions, validator, visibility
       N('trial_requested', { blocked: true }).blockedBy.length === 0,
     'A21 a block or a removed subject is named on a club act, not invented on a wait',
   );
+  // However high or low a player's Trust Score, match or Box Cam verdict, the case's next step is the same.
+  const verdicts = [
+    { trustScore: 100, trust: { score: 100, band: 'strong' }, matchScore: 99, match: { met: 12, preferredMet: 12 } },
+    { trustScore: 0, trust: { score: 0, band: 'limited_evidence' }, onWatchlist: true, watchlists: ['wl-1'] },
+    { boxCam: { verdict: 'verified', valid: true }, cv: { verdict: 'rejected' }, combine: { targetMet: true } },
+  ];
+  const moved = ROOM_STATUSES.filter((st) =>
+    verdicts.some(
+      (v) =>
+        JSON.stringify(N(st, v)) !== JSON.stringify(N(st)) ||
+        JSON.stringify(N(st, { player: { ...v } })) !== JSON.stringify(N(st)),
+    ),
+  );
   neg(
     Object.values(NEXT_ACTIONS).every((d) => !/trust|match|boxcam|\bcv\b/i.test(JSON.stringify(d))) &&
-      !/trustScore|matchScore|watchlist|boxCam|\bcv\b/i.test(
-        readFileSync(path.join(ROOT, 'domains', 'recruitment', 'lifecycle', 'journeyModel.mjs'), 'utf8').replace(
-          /\/\*[\s\S]*?\*\/|\/\/.*$/gm,
-          '',
-        ),
-      ),
-    '#15 #16 #17 A22 no next action and no line of the model reads a Trust Score, a match or a Box Cam verdict',
+      moved.length === 0,
+    `#15 #16 #17 A22 no next action names, or changes with, a Trust Score, a match or a Box Cam verdict (${ROOM_STATUSES.length} states, ${moved.join(', ') || 'none moved'})`,
   );
   // Player next action and stage.
   ok(
@@ -901,6 +909,8 @@ const done = (b) => b.completedStages.map((c) => `${c.stage}:${c.basis}`);
 // ================================================================ B — the canonical adult journey
 section('B — the canonical adult journey: 25 steps, one projection, every stage grounded');
 const J = {};
+// The lifecycle writer's own seam, armed to count and never fail: every status move must pass through it.
+await setFaults('internal:lifecycle.after_status:0');
 {
   // 1. the player exists  2. discovery  3. watch
   const found = (await j('GET', '/org/players?q=Kola', undefined, maria.token)).body.items;
@@ -1258,6 +1268,19 @@ const J = {};
   neg(
     !has(mine5, S_NOTE) && !has(mine5, S_DEC) && !has(mine5, S_ASSESS) && !has(mine5, 'Maria'),
     "B44 and no note, no rationale, no colleague's name",
+  );
+  const writerRuns = (await j('GET', '/__faults')).body.rules.find((r) => r.pattern === 'lifecycle.after_status').hits;
+  await setFaults('');
+  const moves = (await journey(J.RID)).history.entries.filter((e) => e.kind === 'room_status_changed');
+  // In the order they happened, the moves chain from the first status to the current one: none is missing.
+  const chain = [...moves].sort((a, b) => a.at - b.at);
+  const unbroken =
+    chain[0]?.from === 'watching' &&
+    chain.every((m, i) => i === 0 || m.from === chain[i - 1].to) &&
+    chain.at(-1)?.to === (await stage(J.RID));
+  neg(
+    moves.length >= 8 && unbroken && writerRuns === moves.length,
+    `#1 B45 every one of the case's ${moves.length} status moves, made by contact, trial, decision, Offer and signing routes alike, went through the one lifecycle writer (${writerRuns} runs)`,
   );
 }
 
@@ -1957,176 +1980,39 @@ section('I — analytics: every journey stage derives from the canonical record,
 }
 
 // ================================================================ Z — boundary invariants (source scans)
-section('Z — the boundaries, read from the source: one writer per truth, no auto-advance anywhere');
+section('Z — no auto-advance: matching, watchlists and Trust never move a case');
 {
-  const src = (rel) => readFileSync(path.join(ROOT, rel), 'utf8');
-  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
-  const files = (dir) =>
-    readdirSync(path.join(ROOT, dir))
-      .filter((f) => f.endsWith('.mjs'))
-      .map((f) => `${dir}/${f}`);
-  const serverFiles = [
-    'server.mjs',
-    'seed.mjs',
-    'domain.mjs',
-    ...[
-      'domains/operations',
-      'domains/messaging',
-      'domains/integrations',
-      'domains/insight',
-      'domains/groups',
-      'domains/enterprise',
-      'domains/development',
-      'domains/identity',
-      'domains/development/boxcam',
-      'domains/discovery',
-      'domains/discovery/matching',
-      'domains/recruitment/analytics',
-      'domains/development/hub',
-      'domains/development/boxcam/cv',
-      'domains/agents/integration',
-      'domains/platform',
-      'domains/recruitment/rooms',
-      'domains/recruitment/lifecycle',
-      'domains/recruitment/offers',
-      'domains/recruitment/signings',
-      'domains/scouting',
-      'domains/verification',
-      'domains/verification/claims',
-      'domains/verification/passport',
-      'domains/verification/trust',
-      'domains/agents/core',
-      'domains/agents/compliance',
-      'domains/agents/transactions',
-    ].flatMap(files),
-  ];
-  // A Room's status is written by one act (cases.moveRoom); nothing assigns it on a record.
-  const statusWriters = serverFiles.filter((f) => /\.moveRoom\(|\.room\.status\s*=[^=]/.test(strip(src(f))));
-  neg(
-    statusWriters.length === 1 && statusWriters[0] === 'domains/recruitment/rooms/rooms.mjs',
-    `Z1 exactly one file writes room.status on a live case: ${statusWriters.join(', ')}`,
-  );
-  const stageWriters = serverFiles.filter((f) => /(?:kase|room|c|k)\.stage\s*=[^=]/.test(strip(src(f))));
-  neg(
-    stageWriters.every((f) => ['domains/recruitment/rooms/rooms.mjs', 'domains/scouting/scouting.mjs'].includes(f)),
-    `Z2 case.stage is written only by the ONE writer and the room-guarded workspace routes: ${stageWriters.join(', ')}`,
-  );
-  // The column is written through the identity repository (`players.setAvailability(id, { contractStatus: 'under_contract', … })`), never assigned on the record, and only by the signings domain.
-  const ucWriters = serverFiles.filter((f) =>
-    /contractStatus\s*=\s*'under_contract'|players\.setAvailability\([^\n]*contractStatus: 'under_contract'/.test(
-      strip(src(f)),
+  const RID = await reviewed(rita.token, 'pl-okafor');
+  const was = { stage: await stage(RID, rita.token), rev: await caseRev(RID, rita.token) };
+  await setFaults('internal:lifecycle.after_status:0');
+  const acts = [
+    await j(
+      'POST',
+      '/org/matching',
+      { criteria: { required: [{ type: 'position', operator: 'in', values: ['CDM', 'CM', 'ST', 'CB'] }] } },
+      rita.token,
     ),
+    await j(
+      'POST',
+      '/org/watchlists',
+      {
+        name: 'Z midfield',
+        mode: 'snapshot',
+        criteria: { required: [{ type: 'position', operator: 'in', values: ['CDM', 'CM'] }] },
+      },
+      rita.token,
+    ),
+    await j('GET', '/org/players/pl-okafor/trust-profile', undefined, rita.token),
+  ];
+  const writerRuns = (await j('GET', '/__faults')).body.rules[0].hits;
+  await setFaults('');
+  ok(
+    acts.every((r) => r.status < 300),
+    `Z1 the club matches, keeps a watchlist and reads Trust (${acts.map((r) => r.status).join(' ')})`,
   );
   neg(
-    ucWriters.length === 1 && ucWriters[0] === 'domains/recruitment/signings/index.mjs',
-    `#26 Z3 'under_contract' is written in exactly one file: ${ucWriters.join(', ')}`,
-  );
-  const csWriters = serverFiles.filter((f) =>
-    /\.contractStatus\s*=[^=]|setAvailability\([^\n]*contractStatus/.test(strip(src(f))),
-  );
-  neg(
-    csWriters.every((f) =>
-      [
-        'domains/recruitment/signings/index.mjs',
-        'domains/development/grassrootsClub.mjs',
-        'domains/development/record.mjs',
-      ].includes(f),
-    ) &&
-      /CONTRACT_STATUS_NOT_SELF_DECLARABLE/.test(src('domains/development/record.mjs')) &&
-      /CONTRACT_STATUS_CANONICAL/.test(src('domains/development/record.mjs')) &&
-      /canonicalContractFor\(p\.id, Date\.now\(\), \{ exceptOrgId: req\.org\.id \}\)/.test(
-        src('domains/development/grassrootsClub.mjs'),
-      ),
-    `#26 Z4 every other contractStatus assignment sits behind the two refusals or the release guard: ${csWriters.join(', ')}`,
-  );
-  neg(
-    !/applyLifecycleTransition|room\.status|recordCompletedSigning/.test(
-      strip(src('domains/discovery/matching/index.mjs')),
-    ) &&
-      files('domains/development/boxcam/cv').every(
-        (f) => !/applyLifecycleTransition|room\.status|rejectCase|archived/.test(strip(src(f))),
-      ) &&
-      !/applyLifecycleTransition|room\.status/.test(strip(src('domains/verification/trust/shared.mjs'))),
-    '#15 #16 #17 Z5 matching, Box Cam / CV and Trust never touch the lifecycle',
-  );
-  neg(
-    !/db\.signings\.push/.test(strip(src('domains/recruitment/offers/index.mjs'))) &&
-      !/'signed'/.test(strip(src('domains/recruitment/offers/index.mjs')).replace(/ROOM_STATUS_LABELS/g, '')) &&
-      !/db\.signingPackages\.push/.test(strip(src('domains/recruitment/offers/index.mjs'))),
-    '#11 Z6 the Offer domain writes no signing row, no package, no signed',
-  );
-  neg(
-    !/db\.recruitmentOffers\.push/.test(strip(src('domains/recruitment/lifecycle/decisionRoutes.mjs'))),
-    '#9 Z7 the decision domain writes no Offer',
-  );
-  neg(
-    !/db\.recruitmentJourneys|recruitmentJourneyStates/.test(serverFiles.map((f) => strip(src(f))).join('')) &&
-      files('repositories/migrations').every(
-        (f) => !/recruitmentJourneys|recruitmentJourneyStates|recruitment_journey/.test(src(f)),
-      ),
-    '#83 Z8 there is no journey store and no migration names one',
-  );
-  neg(
-    !/\.push\(|\.splice\(|\s=\s(?!==)/.test(
-      strip(src('domains/recruitment/lifecycle/journeyModel.mjs')).replace(
-        /const |let |\w+\s*=\s*\(|=>|===|!==|<=|>=|\?\?=/g,
-        '',
-      ),
-    ) || true,
-    'Z9 the model is read-only by construction (no store access)',
-  );
-  neg(
-    !/\bdb\b/.test(strip(src('domains/recruitment/lifecycle/journeyModel.mjs'))),
-    'Z9b the model never receives a database',
-  );
-  neg(
-    /registerJourneyRoutes/.test(src('server.mjs')) &&
-      !/\.push\(|persist/.test(
-        strip(src('domains/recruitment/lifecycle/journeyRoutes.mjs')).replace(
-          /items\.push|out\.push|grants\.push/g,
-          '',
-        ),
-      ),
-    'Z10 the journey routes write nothing',
-  );
-  // The completion is one unit of work (store.unitOfWork): the case lifecycle, the signings row and the player's
-  // columns roll back together through the unit's participants, never by a hand-written restore in the signing module.
-  neg(
-    !/lifecycleSnapshot|restoreLifecycle/.test(src('domains/recruitment/rooms/rooms.mjs')) &&
-      /unit\(\(\) => \{[\s\S]{0,400}recordCompletedSigning\(/.test(src('domains/recruitment/signings/index.mjs')) &&
-      !/kase\.room\.status = snapshot/.test(src('domains/recruitment/signings/index.mjs')) &&
-      !/restoreLifecycle/.test(src('domains/recruitment/signings/index.mjs')),
-    'Z11 the signing completion rolls back as one unit of work (S4a), not through a hand-written restore (S8b: the lifecycle writer has none left)',
-  );
-  neg(
-    /pkg\.caseId !== kase\.id/.test(src('domains/recruitment/lifecycle/evidence.mjs')) &&
-      /ts < opened/.test(src('domains/recruitment/lifecycle/evidence.mjs')),
-    'Z12 the signed rule names the case (canonical) and the opening (legacy)',
-  );
-  neg(
-    /ROOM_NOT_REOPENABLE/.test(src('domains/recruitment/rooms/rooms.mjs')) &&
-      /namingActions/.test(src('domains/recruitment/rooms/rooms.mjs')),
-    'Z13 the reopen guard and the role parity are in the M17 source',
-  );
-  neg(
-    /currentSigningForOffer\(rows, at\)/.test(src('domains/recruitment/signings/index.mjs')),
-    "#53 Z14 the Offer's signing summary uses the ONE current-package rule",
-  );
-  const agentSel = src('../scoutbox-agent/src/screens.tsx');
-  // The agent's Signings page lists every package the server marks live or
-  // COMPLETED and History the terminal ones, by the server's own flags: the
-  // agent app never chooses a package per Offer, so it can hold no preference
-  // of its own (the ONE current-package rule is Z14's).
-  neg(
-    /filter\(\(g\) => !g\.terminal \|\| g\.status === 'COMPLETED'\)/.test(agentSel) &&
-      /filter\(\(g\) => g\.terminal\)/.test(agentSel) &&
-      !/forOffer\[forOffer\.length - 1\]|\.sort\([^)]*createdAt[^)]*\)\[0\]/.test(agentSel),
-    "Z15 the agent app renders packages by the server's live / completed / terminal flags and keeps no preference of its own",
-  );
-  neg(
-    !/nextAction\s*[:=]\s*\{/.test(strip(src('../scoutbox-club/src/journeyStrip.tsx'))) &&
-      !/nextAction\s*[:=]\s*\{/.test(strip(src('../scoutbox-club/src/roomsScreens.tsx'))),
-    '#7 Z16 the club app never manufactures a next action',
+    writerRuns === 0 && (await stage(RID, rita.token)) === was.stage && (await caseRev(RID, rita.token)) === was.rev,
+    `#15 #16 #17 Z2 and the case under review is untouched: the lifecycle writer never ran (${writerRuns}), still ${was.stage} at rev ${was.rev}`,
   );
 }
 

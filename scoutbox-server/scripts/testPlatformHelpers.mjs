@@ -6,7 +6,13 @@ import { requestClock, TEST_CLOCK_HEADER } from '../domains/platform/clock.mjs';
 import { testClockEnabled, productionConfigProblems } from '../domains/platform/capabilities.mjs';
 import { normaliseClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../domains/platform/idempotency.mjs';
 import { deepFreeze, canonicalJson } from '../domains/platform/values.mjs';
-import { limitCheck, refuseWhenLimited } from '../domains/platform/rateLimit.mjs';
+import {
+  createRateLimiter,
+  installRateLimitInspection,
+  limitCheck,
+  refuseWhenLimited,
+} from '../domains/platform/rateLimit.mjs';
+import { createFaultLayer } from '../domains/platform/faults.mjs';
 import { normaliseClientKey as contactKey } from '../domains/recruitment/lifecycle/contact.mjs';
 import { normaliseSigningClientKey } from '../domains/recruitment/signings/signing.mjs';
 
@@ -84,6 +90,38 @@ test('rate-limit checks: no limiter limits nothing; a limited action answers 429
   assert.equal(sent.status, 429);
   assert.equal(sent.body.error, 'RATE_LIMITED');
   assert.equal(sent.body.action, 'busy');
+});
+
+test('rate-limit inspection: each live bucket by action and key with what it spent; no route when not enabled', () => {
+  const rl = createRateLimiter();
+  rl.limited('offer_issue', 'org-a');
+  rl.limited('offer_issue', 'org-a');
+  rl.limited('offer_response', 'player:p1');
+  const routes = {};
+  const app = { get: (p, h) => (routes[p] = h) };
+  installRateLimitInspection(app, rl, { enabled: false });
+  assert.equal(routes['/__rate-limits'], undefined);
+  installRateLimitInspection(app, rl, { enabled: true });
+  let body;
+  routes['/__rate-limits']({}, { json: (b) => (body = b) });
+  const byKey = Object.fromEntries(body.buckets.map((b) => [`${b.action}|${b.key}`, b.spent]));
+  assert.deepEqual(byKey, { 'offer_issue|org-a': 2, 'offer_response|player:p1': 1 });
+});
+
+test('fault layer: an internal rule with N = 0 never fails and counts its hits; GET /__faults reports them', () => {
+  const layer = createFaultLayer({ env: { NODE_ENV: 'development', SCOUTBOX_FAULTS: 'internal:step.a:0' } });
+  assert.equal(layer.shouldFail('step.a'), false);
+  assert.equal(layer.shouldFail('step.a'), false);
+  assert.equal(layer.shouldFail('step.b'), false);
+  const routes = {};
+  layer.install({ use() {}, get: (p, h) => (routes[`GET ${p}`] = h), post: (p, h) => (routes[`POST ${p}`] = h) });
+  let body;
+  routes['GET /__faults']({}, { json: (b) => (body = b) });
+  assert.deepEqual(body.rules, [{ kind: 'internal', pattern: 'step.a', arg: 0, hits: 2 }]);
+  const prod = createFaultLayer({ env: { NODE_ENV: 'production' } });
+  const none = {};
+  prod.install({ use() {}, get: (p) => (none[p] = true), post: (p) => (none[p] = true) });
+  assert.deepEqual(none, {});
 });
 
 console.log(`\n${passed} passed`);

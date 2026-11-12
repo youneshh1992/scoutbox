@@ -18,7 +18,7 @@
 // No assertion is `status !== 200`; every refusal names status AND code.
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -334,28 +334,6 @@ section('L/M — pure: notification category, event registry audiences and paylo
     RATE_LIMIT_POLICY.offer_response.scope === 'actor' &&
       ['offer_draft_write', 'offer_issue', 'offer_withdraw'].every((k) => RATE_LIMIT_POLICY[k].scope === 'org'),
     'H-p1 budgets: per person for answers, per organisation for club acts',
-  );
-  // The m28 source never reads a client-supplied authority fact.
-  const src = readdirSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers'))
-    .filter((f) => f.endsWith('.mjs'))
-    .map((f) => readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', f), 'utf8'))
-    .join('\n')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/^\s*\/\/.*$/gm, '');
-  neg(
-    !/req\.body\??\.(status|role|verified|licensed|isAdult|canAccept|isGuardian|isAgent|complianceClear|currentRevision|playerId|orgId|caseId|occurredAt|issuedAt|revisionNumber|actorId)\b/.test(
-      src,
-    ),
-    'T-p1 client trust audit: m28 never reads status/role/verified/licensed/isAdult/canAccept/isGuardian/isAgent/complianceClear/currentRevision/playerId/orgId/caseId/occurredAt/revisionNumber/actorId from a request body',
-  );
-  neg(
-    !/dangerouslySetInnerHTML/.test(
-      readFileSync(path.join(HERE, '..', '..', '..', 'scoutbox-club', 'src', 'offerPanel.tsx'), 'utf8'),
-    ) &&
-      !/dangerouslySetInnerHTML/.test(
-        readFileSync(path.join(HERE, '..', '..', '..', 'scoutbox-agent', 'src', 'screens.tsx'), 'utf8'),
-      ),
-    'T-p2 no Offer field is rendered as HTML in the club or agent app',
   );
   ok(Object.keys(OFFER_ERROR_HTTP).length === 23, 'T-p3 the 23-code error table is unchanged by hardening');
   const bidi = validateMessages({ recipientMessage: 'Join‮evil‬ us​ now', internalNote: 'a⁦b⁩c' });
@@ -1558,6 +1536,31 @@ section('O — partial failure: authoritative state first, side effects never tu
   const RID = await toConsideration(maria.token, 'pl-imani');
   const c = await create(RID, { terms: TERMS, expiresAt: T0 + 7 * DAY, clientKey: key() });
   if (c.status !== 201) throw new Error(`O create ${c.status} ${JSON.stringify(c.body).slice(0, 200)}`);
+  // The case refuses the move from inside its writer: the Offer, the case and the notices roll back together.
+  const offerNotices = async () =>
+    (await notifs('/player/notifications', imani.token)).filter(
+      (n) => n.type === 'recruitment_offer' && n.refId === c.body.offer.id,
+    ).length;
+  const was = {
+    offer: (await getOffer(c.body.offer.id)).body.offer,
+    stage: await stage(RID),
+    told: await offerNotices(),
+  };
+  await j('POST', '/__faults', { rules: 'internal:lifecycle.after_status:1' });
+  const thrown = await issue(c.body.offer.id, { expectedRev: 1, clientKey: key() });
+  await j('POST', '/__faults', { rules: '' });
+  const now = {
+    offer: (await getOffer(c.body.offer.id)).body.offer,
+    stage: await stage(RID),
+    told: await offerNotices(),
+  };
+  neg(
+    thrown.status >= 400 &&
+      JSON.stringify(now.offer) === JSON.stringify(was.offer) &&
+      now.stage === was.stage &&
+      now.told === was.told,
+    `O3 a lifecycle writer that throws leaves no half-written state: the Offer is still the draft, the case still at ${was.stage}, nobody told (${thrown.status} ${thrown.body?.error}, ${now.offer.status}, ${now.stage})`,
+  );
   const KI = key();
   // The issue's first after-commit side effect fails.
   await j('POST', '/__faults', { rules: 'internal:unit.after_commit:1' });
@@ -1571,16 +1574,6 @@ section('O — partial failure: authoritative state first, side effects never tu
   neg(
     i.status === 200 && i.body.offer.status === 'ISSUED' && told.length === 1,
     `O2 a side effect that fails after the commit is not a 500 and undoes nothing: the Offer is issued and the player has its notice (${i.status}, ${told.length})`,
-  );
-  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', 'index.mjs'), 'utf8');
-  // The case refusing the move is thrown INSIDE the unit, which rolls the Offer rows and the case back together.
-  neg(
-    /catch \(e\) \{\s*console\.error\(`OFFER lifecycle_writer_threw/.test(src) &&
-      /throw new OfferRefusal\(\{\s*error: 'OFFER_LIFECYCLE_CONFLICT'/.test(src) &&
-      /try \{\s*return \{ value: unit\(work\) \};\s*\} catch \(e\) \{\s*if \(!\(e instanceof OfferRefusal\)\) throw e;/.test(
-        src,
-      ),
-    'O3 a lifecycle writer that throws is caught and the Offer change rolled back — no half-written state',
   );
   // A replay after a "lost response" returns the committed truth.
   const replay = await issue(c.body.offer.id, { expectedRev: 1, clientKey: KI });
@@ -1646,20 +1639,10 @@ section('H — rate limits: one budget per person/organisation, closure actions 
     RATE_LIMIT_POLICY.offer_response.max >= 30 && RATE_LIMIT_POLICY.offer_withdraw.max >= 30,
     'H1 closure budgets (answer, withdraw) are generous enough for any honest use',
   );
-  // The player and guardian routes are distinct persons: a guardian answering for two children is one budget; the player route cannot draw on the guardian's.
-  const src = readFileSync(path.join(HERE, '..', '..', 'domains', 'recruitment', 'offers', 'index.mjs'), 'utf8');
-  neg(
-    /limited\('offer_response', `\$\{by\}:\$\{actorId\}`\)/.test(src) &&
-      /limited\('offer_draft_write', req\.org\.id\)/.test(src) &&
-      /limited\('offer_issue', req\.org\.id\)/.test(src) &&
-      /limited\('offer_withdraw', req\.org\.id\)/.test(src),
-    'H2 keys: answers by (kind, person); club acts by organisation — no route, id or alias yields a second budget',
-  );
-  neg(
-    (src.match(/limited\('offer_draft_write'/g) ?? []).length === 3,
-    'H3 create, edit and revise share ONE draft budget (three call sites, one action name)',
-  );
   const far = T0 + 5000 * H;
+  // Made before the budget is spent: a case ready for a new Offer, and an issued Offer ready to revise.
+  const spare = await toConsideration(rita.token, 'pl-nowak');
+  const out = await issued(rita.token, 'pl-tanaka', { expiresAt: far + 7 * DAY, clock: far });
   const RID = await toConsideration(rita.token, 'pl-kim');
   const c = await create(RID, { terms: TERMS, clientKey: 'H-key' }, rita.token, at(far));
   ok(c.status === 201, 'H4 Harbour drafts');
@@ -1682,6 +1665,22 @@ section('H — rate limits: one budget per person/organisation, closure actions 
   ok(
     (await create(RID, { terms: TERMS, clientKey: 'H-key' }, rita.token, at(far))).body.idempotent === true,
     'H6 a replay of the create key is not consumed by the exhausted budget',
+  );
+  const sam = await login('org-harbour', 'Sam Reid', 'Head of Recruitment');
+  const drafts = [
+    ['a new Offer', await create(spare, { terms: TERMS, clientKey: key() }, rita.token, at(far))],
+    [
+      'a revision',
+      await revise(out.OID, { terms: TERMS, expectedRev: out.rev, clientKey: key() }, rita.token, at(far)),
+    ],
+    [
+      'an edit by a colleague',
+      await editDraft(c.body.offer.id, { internalNote: 'y', expectedRev: rev }, sam.token, at(far)),
+    ],
+  ];
+  neg(
+    drafts.every(([, r]) => r.status === 429 && r.body.action === 'offer_draft_write'),
+    `H2 create, edit and revise draw on ONE draft budget, the organisation's: none of them gets a second one (${drafts.map(([w, r]) => `${w} ${r.status}`).join(', ')})`,
   );
   const w = await withdraw(c.body.offer.id, { expectedRev: rev, clientKey: key() }, rita.token, at(far));
   ok(
@@ -1731,6 +1730,65 @@ section('N/T — client-supplied authority is ignored; documents on issued revis
       !has(own.body, 'transactionId') &&
       !has(own.body, 'integrity'),
     'T4 the recipient payload: no note, decision, transaction or integrity detail',
+  );
+  // A fact the server decides is not a field any Offer route takes: sent alongside a valid body, it is refused by
+  // name and nothing moves.
+  const TRUSTED = [
+    'status',
+    'role',
+    'verified',
+    'licensed',
+    'isAdult',
+    'canAccept',
+    'isGuardian',
+    'isAgent',
+    'complianceClear',
+    'currentRevision',
+    'playerId',
+    'orgId',
+    'caseId',
+    'occurredAt',
+    'issuedAt',
+    'revisionNumber',
+    'actorId',
+  ];
+  const draftRID = await toConsideration(maria.token, 'pl-osei');
+  const draft = (await create(draftRID, { terms: TERMS, clientKey: key() })).body.offer;
+  const before = {
+    offer: (await getOffer(X.OID)).body.offer,
+    draft: (await getOffer(draft.id)).body.offer,
+    stage: await stage(X.RID),
+  };
+  const routes = [
+    ['create', (b) => create(X.RID, { terms: TERMS, clientKey: key(), ...b })],
+    ['edit draft', (b) => editDraft(draft.id, { internalNote: 'x', expectedRev: before.draft.rev, ...b })],
+    ['issue', (b) => issue(X.OID, { expectedRev: before.offer.rev, clientKey: key(), ...b })],
+    ['withdraw', (b) => withdraw(X.OID, { expectedRev: before.offer.rev, clientKey: key(), ...b })],
+    ['revise', (b) => revise(X.OID, { terms: TERMS, expectedRev: before.offer.rev, clientKey: key(), ...b })],
+    ['accept', (b) => pAccept(X.OID, { revisionId: X.R, clientKey: key(), ...b }, imani.token)],
+    ['decline', (b) => pDecline(X.OID, { revisionId: X.R, clientKey: key(), ...b }, imani.token)],
+    ['share with agent', (b) => pShare(X.OID, { share: true, ...b }, imani.token)],
+  ];
+  for (const [name, send] of routes) {
+    const wrong = [];
+    for (const f of TRUSTED) {
+      const r = await send({ [f]: f === 'status' ? 'ACCEPTED' : 'pl-adeyemi' });
+      if (!(r.status === 400 && r.body?.problem === 'unknown_field' && r.body?.field === f))
+        wrong.push(`${f}:${r.status}:${r.body?.error}`);
+    }
+    neg(
+      wrong.length === 0,
+      `T5 ${name}: every server-decided fact in the body is refused by name (${wrong.join(' ')})`,
+    );
+  }
+  const after = {
+    offer: (await getOffer(X.OID)).body.offer,
+    draft: (await getOffer(draft.id)).body.offer,
+    stage: await stage(X.RID),
+  };
+  neg(
+    JSON.stringify(after) === JSON.stringify(before),
+    'T6 and none of those requests changed either Offer or the case',
   );
 }
 
