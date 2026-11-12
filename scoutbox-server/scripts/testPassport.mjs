@@ -186,75 +186,61 @@ test('[typing] the typers refuse junk with the record and field named; football 
 });
 
 // ------------------------------------------------------------- writes and reads
-test('[prefs] a read never creates a row; save writes the whole record with its children; the position history only grows', () => {
+test('[prefs] a read never creates a row; save writes the fields it names with the children; the position history only grows', () => {
   const dir = tempDir('s10b-prefs');
   saveFixture(dir);
   const s = serverOpen(dir);
   try {
     assert.equal(s.repo.passportPrefs.forPlayer(PID), null, 'nobody saved: no row');
     assert.equal(s.store.sqlite.prepare('SELECT count(*) AS n FROM passport_prefs').get().n, 0);
-    const p = s.repo.passportPrefs.save(PID, (d) => {
-      d.positions = { primary: 'ST', secondary: ['RW', 'CF'] };
-      d.availability = 'open_to_trials';
-      d.availableFrom = '2026-08';
-      d.positionHistory.push({
-        id: 'ppos-1',
-        from: '2020',
-        primary: 'RW',
-        secondary: ['LW'],
-        submittedBy: 'player',
-        recordedAt: NOW,
-      });
-      d.publicSelections = ['pev:a', 'hist:Sunday Kings FC'];
-      d.updatedAt = NOW;
+    const hist = {
+      id: 'ppos-1',
+      from: '2020',
+      primary: 'RW',
+      secondary: ['LW'],
+      submittedBy: 'player',
+      recordedAt: NOW,
+    };
+    const p = s.repo.passportPrefs.save(PID, {
+      set: {
+        positions: { primary: 'ST', secondary: ['RW', 'CF'] },
+        availability: 'open_to_trials',
+        availableFrom: '2026-08',
+        publicSelections: ['pev:a', 'hist:Sunday Kings FC'],
+      },
+      history: [hist],
+      at: NOW,
     });
     assert.ok(Object.isFrozen(p) && Object.isFrozen(p.positionHistory[0].secondary), 'deep-frozen');
     assert.deepEqual(p.positions, { primary: 'ST', secondary: ['RW', 'CF'] });
-    assert.deepEqual(p.positionHistory, [
-      { id: 'ppos-1', from: '2020', primary: 'RW', secondary: ['LW'], submittedBy: 'player', recordedAt: NOW },
-    ]);
+    assert.deepEqual(p.positionHistory, [hist]);
     assert.deepEqual(p.publicSelections, ['pev:a', 'hist:Sunday Kings FC']);
-    const q = s.repo.passportPrefs.save(PID, (d) => {
-      d.publicSelections = ['hist:Sunday Kings FC'];
-      d.positions = null;
-      d.updatedAt = NOW + 1;
+    const q = s.repo.passportPrefs.save(PID, {
+      set: { publicSelections: ['hist:Sunday Kings FC'], positions: null },
+      at: NOW + 1,
     });
     assert.deepEqual(q.publicSelections, ['hist:Sunday Kings FC']);
     assert.equal(q.positions, null);
+    assert.equal(q.availability, 'open_to_trials', 'a field the save does not name is kept');
     assert.equal(q.positionHistory.length, 1);
+    assert.equal(q.updatedAt, NOW + 1);
     refused(
-      () =>
-        s.repo.passportPrefs.save(PID, (d) => {
-          d.positionHistory = [];
-        }),
-      /only grows/,
-      'history dropped',
+      () => s.repo.passportPrefs.save(PID, { set: { positionHistory: [] }, at: NOW }),
+      /not the player, the history or the time/,
+      'history replaced',
     );
     refused(
-      () =>
-        s.repo.passportPrefs.save(PID, (d) => {
-          d.positionHistory[0].primary = 'GK';
-        }),
-      /only grows/,
-      'history edited',
+      () => s.repo.passportPrefs.save(PID, { history: [hist], at: NOW }),
+      /positionHistory names an id twice/,
+      'a history entry added twice',
     );
+    refused(() => s.repo.passportPrefs.save(PID, { set: { bio: 7 }, at: NOW }), /bio must be text/, 'wrong type');
     refused(
-      () =>
-        s.repo.passportPrefs.save(PID, (d) => {
-          d.bio = 7;
-        }),
-      /bio must be text/,
-      'wrong type',
+      () => s.repo.passportPrefs.save(PID, { set: { colour: 'red' }, at: NOW }),
+      /PASSPORT_INPUT_INVALID/,
+      'unknown field',
     );
-    refused(
-      () =>
-        s.repo.passportPrefs.save(PID, () => {
-          s.repo.passportPrefs.save(PID, () => {});
-        }),
-      /already being updated/,
-      'nested save',
-    );
-    refused(() => s.repo.passportPrefs.save('pl-2', () => {}), /updatedAt is required/, 'a save without a time');
+    refused(() => s.repo.passportPrefs.save('pl-2', {}), /updatedAt/, 'a save without a time');
     assert.equal(typeof s.repo.reads.passportPrefs.save, 'undefined', 'the reads carry no writes');
   } finally {
     s.close();
@@ -262,7 +248,7 @@ test('[prefs] a read never creates a row; save writes the whole record with its 
   }
 });
 
-test('[writes] create/update return fresh frozen records and refuse identity changes, duplicates and nested updates; shares count views and keep one token per hash', () => {
+test('[writes] create and the named acts return fresh frozen records; each act happens once, from the state it moves from; duplicates are refused; shares count views and keep one token per hash', () => {
   const dir = tempDir('s10b-writes');
   saveFixture(dir);
   const s = serverOpen(dir);
@@ -273,38 +259,33 @@ test('[writes] create/update return fresh frozen records and refuse identity cha
       e.orgName = 'x';
     }, TypeError);
     refused(() => s.repo.careerEntries.create(entry()), /already exists/, 'duplicate id');
+    assert.equal(s.repo.careerEntries.withdraw('pcar-1', { at: NOW }).withdrawnAt, NOW);
     refused(
-      () =>
-        s.repo.careerEntries.update('pcar-1', (d) => {
-          d.playerId = 'pl-2';
-        }),
-      /playerId cannot change/,
-      'identity change',
+      () => s.repo.careerEntries.withdraw('pcar-1', { at: NOW + 1 }),
+      /pcar-1 is already withdrawn/,
+      'withdrawn once',
     );
-    refused(
-      () =>
-        s.repo.careerEntries.update('pcar-1', () => {
-          s.repo.careerEntries.update('pcar-1', () => {});
-        }),
-      /already being updated/,
-      'nested update',
-    );
-    assert.equal(
-      s.repo.careerEntries.update('pcar-1', (d) => {
-        d.withdrawnAt = NOW;
-      }).withdrawnAt,
-      NOW,
-    );
+    refused(() => s.repo.careerEntries.withdraw('pcar-none', { at: NOW }), /PASSPORT_NOT_FOUND/, 'an unknown entry');
     s.repo.achievements.create(achievement());
-    const a = s.repo.achievements.update('pach-1', (d) => {
-      d.confirmation = {
-        provenance: 'verified_club_confirmed',
-        orgId: ORG.id,
-        orgName: ORG.name,
-        byName: 'Maria',
-        at: NOW,
-      };
-    });
+    const confirmation = {
+      provenance: 'verified_club_confirmed',
+      orgId: ORG.id,
+      orgName: ORG.name,
+      byName: 'Maria',
+      at: NOW,
+    };
+    refused(
+      () => s.repo.achievements.confirm('pach-1', { confirmation: { ...confirmation, provenance: 'self' } }),
+      /PASSPORT_INPUT_INVALID/,
+      'a confirmation the record cannot hold',
+    );
+    const a = s.repo.achievements.confirm('pach-1', { confirmation });
+    refused(() => s.repo.achievements.confirm('pach-1', { confirmation }), /already confirmed/, 'confirmed once');
+    refused(
+      () => s.repo.achievements.withdraw('pach-1', { at: NOW }),
+      /withdrawn or confirmed/,
+      'a confirmed record stays',
+    );
     assert.equal(a.confirmation.orgId, ORG.id);
     refused(
       () =>
@@ -329,26 +310,27 @@ test('[writes] create/update return fresh frozen records and refuse identity cha
     s.repo.shares.recordView('pshr-1');
     assert.equal(s.repo.reads.shares.byHash('a'.repeat(64)).views, 2);
     assert.equal(s.repo.reads.shares.activeCount(PID, NOW), 1);
-    s.repo.shares.update('pshr-1', (d) => {
-      d.revokedAt = NOW;
-      d.revokedBy = { kind: 'trust_safety', id: 'admin' };
-    });
-    assert.equal(s.repo.reads.shares.activeCount(PID, NOW), 0);
     refused(
-      () =>
-        s.repo.shares.update('pshr-1', (d) => {
-          d.tokenHash = 'b'.repeat(64);
-        }),
-      /tokenHash cannot change/,
-      'hash change',
+      () => s.repo.shares.revoke('pshr-1', { at: NOW, by: { kind: 'stranger', id: 'x' } }),
+      /PASSPORT_INPUT_INVALID/,
+      'a revoker the record cannot hold',
+    );
+    s.repo.shares.revoke('pshr-1', { at: NOW, by: { kind: 'trust_safety', id: 'admin' } });
+    assert.equal(s.repo.reads.shares.activeCount(PID, NOW), 0);
+    assert.equal(s.repo.reads.shares.byId('pshr-1').tokenHash, 'a'.repeat(64), 'the hash is kept');
+    refused(
+      () => s.repo.shares.revoke('pshr-1', { at: NOW + 1, by: { kind: 'trust_safety', id: 'admin' } }),
+      /already revoked/,
+      'revoked once',
     );
     s.repo.corrections.create(correction());
-    const r = s.repo.corrections.update('pcor-1', (d) => {
-      d.status = 'resolved';
-      d.resolution = { outcome: 'corrected', reason: 'Fixed.', at: NOW };
-      d.resolvedAt = NOW;
-    });
+    const r = s.repo.corrections.resolve('pcor-1', { outcome: 'corrected', reason: 'Fixed.', at: NOW });
     assert.equal(r.resolvedAt, NOW);
+    refused(
+      () => s.repo.corrections.resolve('pcor-1', { outcome: 'rejected', reason: 'No.', at: NOW }),
+      /already resolved/,
+      'resolved once',
+    );
     refused(
       () => s.repo.corrections.create(correction({ id: 'pcor-2', status: 'resolved' })),
       /resolution is set exactly when/,
@@ -367,11 +349,7 @@ test('[paging] the T&S lists page by cursor: shares newest first, the correction
   try {
     for (let i = 1; i <= 5; i++) s.repo.shares.create(share({ id: `pshr-${i}`, tokenHash: String(i).repeat(64) }));
     for (let i = 1; i <= 4; i++) s.repo.corrections.create(correction({ id: `pcor-${i}` }));
-    s.repo.corrections.update('pcor-2', (d) => {
-      d.status = 'resolved';
-      d.resolution = { outcome: 'rejected', reason: 'Stands.', at: NOW };
-      d.resolvedAt = NOW;
-    });
+    s.repo.corrections.resolve('pcor-2', { outcome: 'rejected', reason: 'Stands.', at: NOW });
     const first = s.repo.reads.shares.page({ limit: 2 }).rows;
     assert.deepEqual(
       first.map((r) => r.record.id),
@@ -405,10 +383,7 @@ test('[units] a rolled-back unit leaves nothing; db.passport* names throw naming
       () =>
         s.unit(() => {
           s.repo.careerEntries.create(entry());
-          s.repo.passportPrefs.save(PID, (d) => {
-            d.bio = 'x';
-            d.updatedAt = NOW;
-          });
+          s.repo.passportPrefs.save(PID, { set: { bio: 'x' }, at: NOW });
           throw new Error('boom');
         }),
       /boom/,

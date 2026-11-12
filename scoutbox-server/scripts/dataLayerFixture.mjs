@@ -237,7 +237,9 @@ const WRITERS = {
   verConflicts: each((L, r) => L.verification.conflicts.create(r)),
   verDomainRequests: each((L, r) => L.verification.domainRequests.create(r)),
   orgVerifiedDomains: each((L, { orgId, ...entry }) => L.verification.domains.add(orgId, entry)),
-  passportPrefs: each((L, r) => L.passport.passportPrefs.save(r.playerId, () => structuredClone(r))),
+  passportPrefs: each((L, { playerId, positionHistory, updatedAt, ...set }) =>
+    L.passport.passportPrefs.save(playerId, { set, history: positionHistory, at: updatedAt }),
+  ),
   passportCareerEntries: each((L, r) => L.passport.careerEntries.create(r)),
   passportAchievements: each((L, r) => L.passport.achievements.create(r)),
   passportShares: each((L, r) => L.passport.shares.create(r)),

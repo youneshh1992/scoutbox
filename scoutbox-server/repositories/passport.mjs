@@ -6,11 +6,12 @@
  * 'YYYY-MM-DD' (the routes write any accepted form, an epoch or `{ year, month }`, in that shape). Positions are
  * PLAYER_POSITIONS codes; secondary positions and public selections are ordered child rows.
  *
- * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` type the whole record and write it at once,
- * joined into the open unit of work, the caller's open transaction, or a transaction of their own; an unknown field and
- * an update from inside its own update are refused. Preferences are saved whole (`passportPrefs.save(playerId, change)`):
- * a row exists only once a player or guardian saved, and the position history only grows. A share's view count is
- * `shares.recordView(id)`.
+ * WRITES are explicit, joined into the open unit of work, the caller's open transaction, or a transaction of their own.
+ * `create(record)` types the whole record and writes it at once (an unknown field is refused); then a record changes
+ * only through named acts guarded in SQL by the state they move from (an entry or achievement is withdrawn, an
+ * achievement confirmed, a share revoked, a correction resolved, each once). Preferences are saved by naming the fields
+ * that change (`passportPrefs.save(playerId, { set, history, at })`): a row exists only once a player or guardian saved,
+ * and the position history only grows. A share's view count is `shares.recordView(id)`.
  *
  * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them in
  * `verificationReads`.
@@ -21,6 +22,7 @@
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { writeKit } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { PLAYER_POSITIONS } from './identity.mjs';
 import {
@@ -370,25 +372,21 @@ const ENTITIES = {
     table: 'passport_career_entries',
     spec: CAREER_SPEC,
     type: typeCareerEntry,
-    immutable: ['id', 'playerId', 'submittedBy', 'createdAt'],
   },
   passportAchievements: {
     table: 'passport_achievements',
     spec: ACHIEVEMENT_SPEC,
     type: typeAchievement,
-    immutable: ['id', 'playerId', 'submittedBy', 'createdAt'],
   },
   passportShares: {
     table: 'passport_shares',
     spec: SHARE_SPEC,
     type: typeShare,
-    immutable: ['id', 'playerId', 'mode', 'tokenHash', 'createdBy', 'createdAt'],
   },
   passportCorrections: {
     table: 'passport_corrections',
     spec: CORRECTION_SPEC,
     type: typeCorrection,
-    immutable: ['id', 'playerId', 'targetType', 'targetId', 'reason', 'by', 'createdAt'],
   },
 };
 const decodeFlat = (name, row) => {
@@ -495,7 +493,7 @@ export const retainedPlayerReferences = (sqlite) =>
     : null;
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'save', 'recordView']);
+const WRITES = new Set(['create', 'withdraw', 'confirm', 'revoke', 'resolve', 'save', 'recordView']);
 const clone = (v) => JSON.parse(JSON.stringify(v));
 /**
  * `createPassportRepository({ sqlite, unit, now, log })`: `passportPrefs`, `careerEntries`, `achievements`, `shares` and
@@ -511,21 +509,6 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
     return s;
   };
   const ps = prefsStatements(sqlite);
-  const updating = new Set();
-  const guard = (key, fn) => {
-    if (updating.has(key))
-      throw refusal(
-        'PASSPORT_NESTED_UPDATE',
-        `${key} is already being updated; make the second change after the first returns`,
-      );
-    updating.add(key);
-    try {
-      return fn();
-    } finally {
-      updating.delete(key);
-    }
-  };
-
   // ---- preferences
   const prefsOf = (playerId) => {
     const row = typeof playerId === 'string' ? ps.byPlayer.get(playerId) : null;
@@ -535,40 +518,28 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
     /** The player's saved preferences, or null when nobody saved any (use `blankPrefs`). */
     forPlayer: prefsOf,
     /**
-     * `save(playerId, change)`: `change` edits a plain copy of the stored preferences (or the blank ones) and the result
-     * is typed whole and written at once. The position history only grows: a stored entry cannot change or go.
+     * Save the player's preferences at `at`: `set` names the fields that change (bio, positions, availability,
+     * availableFrom, publicSelections), `history` the position-history entries added after the stored ones. The
+     * result is typed whole and written at once; a stored history entry never changes or goes.
      */
-    save: (playerId, change) =>
-      guard(`passport_prefs ${playerId}`, () =>
-        operation(() => {
-          if (typeof change !== 'function')
-            throw new TypeError(
-              'passportPrefs.save(playerId, change) needs a function that edits the copy it is given',
-            );
-          const stored = prefsOf(playerId);
-          const draft = clone(stored ?? blankPrefs(playerId));
-          const returned = change(draft);
-          const t = typePrefs(returned === undefined ? draft : returned);
-          if (!t.ok) throw refusal('PASSPORT_INPUT_INVALID', t.reason);
-          const next = t.record;
-          if (next.playerId !== playerId)
-            throw refusal('PASSPORT_INPUT_INVALID', `passport_prefs ${playerId}: playerId cannot change`);
-          if (next.updatedAt === null)
-            throw refusal('PASSPORT_INPUT_INVALID', `passport_prefs ${playerId}: updatedAt is required`);
-          const before = stored?.positionHistory ?? [];
-          if (before.some((h, i) => JSON.stringify(h) !== JSON.stringify(next.positionHistory[i])))
-            throw refusal(
-              'PASSPORT_INPUT_INVALID',
-              `passport_prefs ${playerId}: the position history only grows (a stored entry cannot change or go)`,
-            );
-          const taken = next.positionHistory
-            .slice(before.length)
-            .find((h) => q('SELECT 1 FROM passport_position_history WHERE id = ?').get(h.id));
-          if (taken) throw refusal('PASSPORT_DUPLICATE', `passport_position_history ${taken.id} already exists`);
-          writePrefs(ps, next, new Set(before.map((h) => h.id)));
-          return prefsOf(playerId);
-        }),
-      ),
+    save: (playerId, { set = {}, history = [], at }) =>
+      operation(() => {
+        if (!isPlainObject(set) || 'playerId' in set || 'positionHistory' in set || 'updatedAt' in set)
+          throw refusal(
+            'PASSPORT_INPUT_INVALID',
+            `passport_prefs ${playerId}: set names the preferences a save changes (not the player, the history or the time)`,
+          );
+        if (!Array.isArray(history))
+          throw refusal('PASSPORT_INPUT_INVALID', `passport_prefs ${playerId}: history must be a list`);
+        const stored = prefsOf(playerId);
+        const base = clone(stored ?? blankPrefs(playerId));
+        const t = typePrefs({ ...base, ...set, positionHistory: [...base.positionHistory, ...history], updatedAt: at });
+        if (!t.ok) throw refusal('PASSPORT_INPUT_INVALID', t.reason);
+        const taken = history.find((h) => q('SELECT 1 FROM passport_position_history WHERE id = ?').get(h?.id));
+        if (taken) throw refusal('PASSPORT_DUPLICATE', `passport_position_history ${taken.id} already exists`);
+        writePrefs(ps, t.record, new Set(base.positionHistory.map((h) => h.id)));
+        return prefsOf(playerId);
+      }),
   };
 
   // ---- the flat records
@@ -596,25 +567,21 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
       write(name, r);
       return read(name, r.id);
     });
-  /** `update(id, change)`: `change` edits a plain copy of the stored record; the result is typed whole and written at once. */
-  const update = (name) => (id, change) =>
-    guard(`${ENTITIES[name].table} ${id}`, () =>
-      operation(() => {
-        if (typeof change !== 'function')
-          throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
-        const stored = read(name, id);
-        if (!stored)
-          throw refusal('PASSPORT_NOT_FOUND', `${ENTITIES[name].table} ${id} is not a record of the repository`);
-        const draft = clone(stored);
-        const returned = change(draft);
-        const next = typedOr(name, returned === undefined ? draft : returned);
-        for (const k of ENTITIES[name].immutable)
-          if (JSON.stringify(next[k]) !== JSON.stringify(stored[k]))
-            throw refusal('PASSPORT_INPUT_INVALID', `${ENTITIES[name].table} ${id}: ${k} cannot change`);
-        write(name, next);
-        return read(name, id);
-      }),
-    );
+  const { guarded, columnsOf } = writeKit(sqlite, 'PASSPORT');
+  /**
+   * An act that sets `fields` of record `id` while `where` holds: the record is typed with them (and the `derived`
+   * fields a read works out from them), then only their columns are written. A record the guard no longer matches is refused with `what` (PASSPORT_STATE_CONFLICT).
+   */
+  const setFields = (name, id, fields, where, what, derived = {}) =>
+    operation(() => {
+      const { table, spec } = ENTITIES[name];
+      const stored = read(name, id);
+      if (!stored) throw refusal('PASSPORT_NOT_FOUND', `${table} ${id} is not a record of the repository`);
+      typedOr(name, { ...clone(stored), ...fields, ...derived });
+      guarded(table, { id }, where, columnsOf(table, id, spec, fields, { only: new Set(Object.keys(fields)) }), what);
+      return read(name, id);
+    });
+
   const paged =
     (name, where, desc) =>
     (args, { limit, after = null }) => {
@@ -626,20 +593,53 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
 
   const careerEntries = {
     create: create('passportCareerEntries'),
-    update: update('passportCareerEntries'),
+    /** The player withdraws a self-submitted entry at `at`, once. */
+    withdraw: (id, { at }) =>
+      setFields(
+        'passportCareerEntries',
+        id,
+        { withdrawnAt: at },
+        'withdrawn_at IS NULL',
+        `passport_career_entries ${id} is already withdrawn`,
+      ),
     byId: (id) => read('passportCareerEntries', id),
     forPlayer: list('passportCareerEntries', 'player_id = ?'),
   };
   const achievements = {
     create: create('passportAchievements'),
-    update: update('passportAchievements'),
+    /** The player withdraws an unconfirmed achievement at `at`, once; a confirmed one is part of the record. */
+    withdraw: (id, { at }) =>
+      setFields(
+        'passportAchievements',
+        id,
+        { withdrawnAt: at },
+        'withdrawn_at IS NULL AND confirmation_at IS NULL',
+        `passport_achievements ${id} is withdrawn or confirmed`,
+      ),
+    /** A verified club confirms a standing achievement, once. */
+    confirm: (id, { confirmation }) =>
+      setFields(
+        'passportAchievements',
+        id,
+        { confirmation },
+        'withdrawn_at IS NULL AND confirmation_at IS NULL',
+        `passport_achievements ${id} is withdrawn or already confirmed`,
+      ),
     byId: (id) => read('passportAchievements', id),
     forPlayer: list('passportAchievements', 'player_id = ?'),
   };
   const sharesPage = paged('passportShares', '1 = 1', true);
   const shares = {
     create: create('passportShares'),
-    update: update('passportShares'),
+    /** Revoke a share link at `at`, by `by` (`{ kind, id }`), once. */
+    revoke: (id, { at, by }) =>
+      setFields(
+        'passportShares',
+        id,
+        { revokedAt: at, revokedBy: by },
+        'revoked_at IS NULL',
+        `passport_shares ${id} is already revoked`,
+      ),
     byId: (id) => read('passportShares', id),
     byHash: (hash) => {
       const row = q('SELECT * FROM passport_shares WHERE token_hash = ?').get(hash);
@@ -664,7 +664,16 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
   const allPage = paged('passportCorrections', '1 = 1', false);
   const corrections = {
     create: create('passportCorrections'),
-    update: update('passportCorrections'),
+    /** Trust & Safety resolves an open correction request (`{ outcome, reason, at }`), once. */
+    resolve: (id, { outcome, reason, at }) =>
+      setFields(
+        'passportCorrections',
+        id,
+        { status: 'resolved', resolution: { outcome, reason, at } },
+        "status = 'open'",
+        `passport_corrections ${id} is already resolved`,
+        { resolvedAt: at },
+      ),
     byId: (id) => read('passportCorrections', id),
     /** The T&S queue, oldest first, by cursor: open corrections, or every correction with `all`. */
     page: ({ all = false, ...opts }) => (all ? allPage : openPage)([], opts),

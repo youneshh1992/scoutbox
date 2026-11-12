@@ -122,10 +122,7 @@ export function registerPassportSharing(ctx) {
     if (!share) return res.status(404).json({ error: 'SHARE_NOT_FOUND' });
     if (share.revokedAt) return res.status(409).json({ error: 'ALREADY_REVOKED' });
     const revoked = unit(() => {
-      const r = passport.shares.update(share.id, (d) => {
-        d.revokedAt = Date.now();
-        d.revokedBy = by;
-      });
+      const r = passport.shares.revoke(share.id, { at: Date.now(), by });
       ledgerAppend({
         type: 'passport_share_revoked',
         playerId: share.playerId,

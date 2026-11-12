@@ -1050,8 +1050,8 @@ const OFFER_READS = {
  * runs inside a unit, whose COMMIT checks the deferred request key.
  *
  * Every query runs on the one connection, so a read inside a unit of work sees the unit's own uncommitted writes. Each
- * record handed out is a fresh, deep-frozen decode of its rows: an in-place edit throws, and a change is
- * `update(id, (draft) => …)`. Lists come back in insertion (rowid) order.
+ * record handed out is a fresh, deep-frozen decode of its rows: an in-place edit throws, and a change is one of the
+ * named acts. Lists come back in insertion (rowid) order.
  */
 export function createRecruitmentContactsOffersRepository({
   sqlite,

@@ -581,10 +581,10 @@ export function registerPassportCore(ctx) {
     if (body.publicSelections !== undefined) set.publicSelections = [...new Set(body.publicSelections ?? [])];
     const wasPrimary = prefsFor(player.id).positions?.primary ?? null;
     const saved = unit(() => {
-      const p = passport.passportPrefs.save(player.id, (d) => {
-        Object.assign(d, set);
-        if (historyRow) d.positionHistory.push(historyRow);
-        d.updatedAt = Date.now();
+      const p = passport.passportPrefs.save(player.id, {
+        set,
+        history: historyRow ? [historyRow] : [],
+        at: Date.now(),
       });
       // A source change with its own clock: neither positionHistory.from (a football date) nor prefs.updatedAt (any
       // edit) means "the position changed". Re-saving the same preferences emits nothing.
@@ -675,9 +675,8 @@ export function registerPassportCore(ctx) {
   playerRouter.post('/football-passport/career/:id/withdraw', (req, res) => {
     const found = vreads.careerEntries.byId(req.params.id);
     if (!found || found.playerId !== req.player.id) return res.status(404).json({ error: 'ENTRY_NOT_FOUND' });
-    const e = passport.careerEntries.update(found.id, (d) => {
-      d.withdrawnAt = Date.now();
-    });
+    // Withdrawing twice keeps the first withdrawal.
+    const e = found.withdrawnAt ? found : passport.careerEntries.withdraw(found.id, { at: Date.now() });
     res.json({
       entry: entryView(e),
       note: 'Self-submitted entries can be withdrawn; confirmed records cannot (request a correction instead).',
@@ -728,9 +727,7 @@ export function registerPassportCore(ctx) {
         error: 'CONFIRMED_RECORD',
         message: 'A confirmed achievement is part of the record — request a correction instead of deleting it.',
       });
-    const done = passport.achievements.update(a.id, (d) => {
-      d.withdrawnAt = Date.now();
-    });
+    const done = a.withdrawnAt ? a : passport.achievements.withdraw(a.id, { at: Date.now() });
     res.json({ achievement: achievementRecordView(done) });
   });
   // Confirmation upgrades provenance without rewriting the original.
@@ -748,14 +745,14 @@ export function registerPassportCore(ctx) {
     if (!a || a.playerId !== p.id || a.withdrawnAt) return res.status(404).json({ error: 'ACHIEVEMENT_NOT_FOUND' });
     if (a.confirmation) return res.status(409).json({ error: 'ALREADY_CONFIRMED' });
     const done = unit(() => {
-      const c = passport.achievements.update(a.id, (d) => {
-        d.confirmation = {
+      const c = passport.achievements.confirm(a.id, {
+        confirmation: {
           provenance: 'verified_club_confirmed',
           orgId: req.org.id,
           orgName: String(req.org.name).slice(0, L.name),
           byName: String(req.orgUser.name ?? '').slice(0, L.name) || null,
           at: Date.now(),
-        };
+        },
       });
       notify(
         { kind: 'player', id: p.id },
@@ -839,11 +836,7 @@ export function registerPassportCore(ctx) {
     const reason = filled(body.reason);
     if (!presentOrRefuse(res, reason, 'reason')) return;
     const done = unit(() => {
-      const r = passport.corrections.update(c.id, (d) => {
-        d.status = 'resolved';
-        d.resolution = { outcome: resolution, reason, at: Date.now() };
-        d.resolvedAt = d.resolution.at;
-      });
+      const r = passport.corrections.resolve(c.id, { outcome: resolution, reason, at: Date.now() });
       const target = c.by.kind === 'guardian' ? { kind: 'guardian', id: c.by.id } : { kind: 'player', id: c.playerId };
       notify(target, 'passport', `Trust & Safety resolved your Passport correction request: ${resolution}.`, c.id);
       return r;

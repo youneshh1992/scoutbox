@@ -193,10 +193,9 @@ test('keeper: start derives every player; a write is re-derived before its COMMI
   assert.equal(t.layer.matchFacts.counts().players, FIXTURE().players.length, 'one row per live player');
 
   t.unit(() =>
-    t.layer.passport.passportPrefs.save('pl-adult', (d) => {
-      d.positions = { primary: 'CM', secondary: ['CDM', 'CAM'] };
-      d.availability = 'open_to_trials';
-      d.updatedAt = NOW;
+    t.layer.passport.passportPrefs.save('pl-adult', {
+      set: { positions: { primary: 'CM', secondary: ['CDM', 'CAM'] }, availability: 'open_to_trials' },
+      at: NOW,
     }),
   );
   const after = t.layer.matchFacts.row('pl-adult');
