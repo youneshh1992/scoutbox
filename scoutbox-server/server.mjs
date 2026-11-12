@@ -18,15 +18,11 @@ import { createLiveSync } from './domains/platform/liveSync.mjs';
 import { registerMeta, registerCapabilities, assertProductionConfig } from './domains/platform/operator.mjs';
 import { createMedia, createMediaSigning } from './domains/media/index.mjs';
 import { createAccountServices, createAccounts, createSessions } from './domains/identity/index.mjs';
-import { createActivity } from './domains/development/activity.mjs';
+import { createActivity, createDevelopment } from './domains/development/index.mjs';
 import { vouchView, createVouchReads } from './domains/verification/vouches.mjs';
 import { createInsights } from './domains/discovery/insights.mjs';
 import { createContractLookup } from './domains/recruitment/signings/contract.mjs';
-import { registerPassport } from './domains/scouting/passport.mjs';
-import { registerScouting } from './domains/scouting/scouting.mjs';
-import { registerJourneys } from './domains/scouting/journeys.mjs';
-import { registerSuitability } from './domains/scouting/suitability.mjs';
-import { registerObjectives } from './domains/development/objectives.mjs';
+import { createScouting } from './domains/scouting/index.mjs';
 import { createOperations } from './domains/operations/index.mjs';
 import { createIntegrations } from './domains/integrations/index.mjs';
 import { createDelivery, createMessaging, createNotificationFeed } from './domains/messaging/index.mjs';
@@ -37,14 +33,12 @@ import { createGroups } from './domains/groups/index.mjs';
 import { registerVerificationClaims } from './domains/verification/claims/index.mjs';
 import { createSafety, createSafetyConsole } from './domains/safety/index.mjs';
 import { registerFootballPassport } from './domains/passport/index.mjs';
-import { registerBoxCam } from './domains/development/boxcam/index.mjs';
 import { registerTrustScore } from './domains/passport/trust/index.mjs';
 import { registerRecruitmentRooms } from './domains/recruitment/rooms/index.mjs';
 import { registerDiscovery } from './domains/discovery/index.mjs';
 import { registerMatching } from './domains/discovery/matching/index.mjs';
 import { registerSavedSearches } from './domains/discovery/savedSearches.mjs';
 import { registerAnalytics } from './domains/recruitment/analytics/index.mjs';
-import { registerDevelopment } from './domains/development/hub/index.mjs';
 import { registerLifecycle } from './domains/recruitment/lifecycle/index.mjs';
 import { createAgentAccess } from './domains/agents/access.mjs';
 import { registerAgent } from './domains/agents/core/index.mjs';
@@ -73,8 +67,7 @@ import { inRequest } from './writeRules.mjs';
 import { createFaultLayer } from './domains/platform/faults.mjs';
 import { integrityReport } from './domains/platform/integrity.mjs';
 import { orgPlayerView } from './views/playerViews.mjs';
-import { DRILLS, registerPlayerRecord } from './domains/development/record.mjs';
-import { registerGrassrootsJourney } from './domains/development/grassroots.mjs';
+import { DRILLS } from './domains/development/record.mjs';
 import { registerRequestInbox } from './domains/recruitment/inbox.mjs';
 import { registerPlayerSearch } from './domains/discovery/search.mjs';
 import { registerFilmRoom } from './domains/discovery/filmRoom.mjs';
@@ -82,7 +75,6 @@ import { createRequestWriters, registerClubRequests, requestForRecipient } from 
 import { registerClubTrials } from './domains/recruitment/clubTrials.mjs';
 import { registerLegacySigning } from './domains/recruitment/signings/legacy.mjs';
 import { registerLedger, ledgerView } from './domains/recruitment/ledger.mjs';
-import { registerGrassrootsClub } from './domains/development/grassrootsClub.mjs';
 import { grassrootsOrgOnly } from './domains/development/guards.mjs';
 import { registerClubChecks } from './domains/verification/clubChecks.mjs';
 import { createEnterprise } from './domains/enterprise/index.mjs';
@@ -510,27 +502,51 @@ registerClubTrials({
   notify,
   broadcast,
 });
-const { pathwayRecord, openTrialView } = registerGrassrootsClub({
+// Development: the grassroots club and journey, the player's record, objectives, Box Cam and the Combine, the Hub.
+const developmentDomain = createDevelopment({
+  app,
   orgRouter,
+  playerRouter,
+  guardianRouter,
+  adminRouter,
+  users,
+  orgs,
   players,
   grassroots,
   clubSetup,
   transitionsVouches,
-  signings: signingsFollowUps.signings,
+  signingsFollowUps,
+  development,
+  developmentReads,
+  boxCam,
+  boxCamReads,
+  scoutingReads,
+  recruitmentReads,
+  notifications,
+  byId,
   findPlayer,
-  findOrg: byId.org,
-  unit,
-  seam,
-  nextId,
-  ledgerAppend,
-  notify,
-  broadcast,
+  isBlocked,
+  rateLimit,
+  storage,
+  mailer,
+  guardianManagedOnly,
+  safeguardingCertified,
   moderateOrRefuse,
   playerViewForOrg,
   recordActivity,
+  publishedVouchesFor,
+  insightsFor,
   canonicalContractFor,
   issueRecruitmentRequest,
+  scoutViewsOf: (playerId) => safetyAudit.ledger.countForPlayer(playerId, 'view'),
+  unit,
+  seam,
+  nextId,
+  notify,
+  broadcast,
+  ledgerAppend,
 });
+const { pathwayRecord } = developmentDomain;
 registerClubChecks({ orgRouter, orgs, codes, clubSetup, mailer, rateLimit, unit, seam, broadcast });
 registerLedger({
   orgRouter,
@@ -625,13 +641,40 @@ const clubWorkspaceCtx = {
   DATA_DIR,
   operations,
 };
-{
-  const ctx = { ...clubWorkspaceCtx, ...buildRouteHelpers(clubWorkspaceCtx) };
-  registerPassport(ctx);
-  registerScouting(ctx);
-  registerJourneys(ctx);
-  registerObjectives(ctx);
-}
+createScouting({
+  byId,
+  scoutingReads,
+  verificationReads,
+  players,
+  unit,
+  app,
+  orgRouter,
+  playerRouter,
+  guardianRouter,
+  adminRouter,
+  nextId,
+  notify,
+  ledgerAppend,
+  broadcast,
+  scoutingEvidence,
+  clubSetup,
+  transitionsVouches,
+  findPlayer,
+  moderateOrRefuse,
+  development,
+  recruitmentReads,
+  users,
+  recruitment,
+  recruitmentCases,
+  scoutingAssessments,
+  playerViewForOrg,
+  revokeOrgUserAccess,
+  grassrootsReads,
+  opportunitiesCampaigns,
+  isBlocked,
+  recordActivity,
+  DRILLS,
+});
 const media = createMedia({
   playerRouter,
   players,
@@ -835,7 +878,6 @@ createEnterprise({
 });
 const insightDomain = (() => {
   const ctx = { ...enterpriseCtx, ...buildRouteHelpers(enterpriseCtx) };
-  registerSuitability(ctx);
   const { transitionSweep } = registerTransitions({ ...ctx, notifyAction, emitWebhook });
   const insight = createInsight({
     orgRouter,
@@ -1023,39 +1065,6 @@ const passportDomain = registerFootballPassport({
   passport,
   unit,
 });
-const boxCamDomain = registerBoxCam({
-  rateLimit,
-  byId,
-  players,
-  guardians,
-  safetyReads,
-  scoutingReads,
-  verificationReads,
-  agentReads,
-  complianceReads,
-  developmentReads,
-  development,
-  boxCamReads,
-  discoveryReads,
-  insightReads,
-  grassrootsReads,
-  app,
-  orgRouter,
-  playerRouter,
-  guardianRouter,
-  adminRouter,
-  nextId,
-  notify,
-  ledgerAppend,
-  broadcast,
-  safetyAudit,
-  findPlayer,
-  isBlocked,
-  moderateOrRefuse,
-  players,
-  unit, // a Box Clip marks a media row through the repository, inside a unit with the session and the ledger
-  boxCam,
-});
 
 // ScoutBox Trust Score: a DERIVED evidence-confidence summary over the
 // verification claims, the Passport assembly, Box Cam and the Combine.
@@ -1159,13 +1168,12 @@ const roomsDomain = registerRecruitmentRooms({
   buildTrustProfile: trustDomain.buildTrustProfile,
   safeTrustProjection: trustDomain.safeTrustProjection,
   trustSnapshotOf: trustDomain.trustSnapshotOf,
-  combineProjection: boxCamDomain.combineProjection,
-  combineFacts: boxCamDomain.combineFacts,
-  combineRequestView: boxCamDomain.combineRequestView,
-  combineProtocolActive: boxCamDomain.combineProtocolActive,
-  combineOrgMaySeeResults: boxCamDomain.combineOrgMaySeeResults,
-  createCombineRequests: boxCamDomain.createCombineRequests,
-  boxPrefsFor: boxCamDomain.boxPrefsFor,
+  combineProjection: developmentDomain.combineProjection,
+  combineRequestView: developmentDomain.combineRequestView,
+  combineProtocolActive: developmentDomain.combineProtocolActive,
+  combineOrgMaySeeResults: developmentDomain.combineOrgMaySeeResults,
+  createCombineRequests: developmentDomain.createCombineRequests,
+  boxPrefsFor: developmentDomain.boxPrefsFor,
   requestEvidenceGap: insightDomain.requestEvidenceGap,
   computeEvidenceGaps: insightDomain.computeEvidenceGaps,
 });
@@ -1232,7 +1240,7 @@ const discoveryDomain = registerDiscovery({
   buildTrustProfile: trustDomain.buildTrustProfile,
   safeTrustProjection: trustDomain.safeTrustProjection,
   trustSummaryFor: trustDomain.trustSummaryFor,
-  combineProjection: boxCamDomain.combineProjection,
+  combineProjection: developmentDomain.combineProjection,
   reopenRoom: roomsDomain.reopenRoom,
   createRoomForPlayer: roomsDomain.createRoomForPlayer,
   // Canonical source-change clocks (position, current club).
@@ -1290,19 +1298,6 @@ setInterval(() => {
 // from. It measures the recruitment PROCESS -- never a player, never a
 // colleague.
 registerAnalytics(domainCtx);
-
-// ------------------------------------------------------- Development Hub
-// Workflow, not truth. Plans, goals, actions, reviews and REFERENCES to
-// evidence the modules above already own — resolved live, never copied, so an
-// invalidated Combine result or a withdrawn assessment reads as unavailable
-// here the moment it changes there. Nothing in the Hub writes into the Passport,
-// Trust, Matching or the Director Dashboard, and no figure anywhere in it
-// combines counts into a score.
-registerDevelopment({
-  ...domainCtx,
-  isAdult,
-  unit, // every Hub write is one unit of work
-});
 
 // ------------------------------------------------------ Agent workspace
 // Agency membership, role capabilities, the agent's profile and the concealing agreement lookup: every agent
@@ -1392,8 +1387,8 @@ const lifecycleDomain = registerLifecycle({
   // Cam evidence links (a trial is not consent to a player's home footage);
   // the test-provider gate is the same flag Box Cam reads; minors never act on
   // their own trials.
-  combineOrgMaySeeResults: boxCamDomain.combineOrgMaySeeResults,
-  boxPrefsFor: boxCamDomain.boxPrefsFor,
+  combineOrgMaySeeResults: developmentDomain.combineOrgMaySeeResults,
+  boxPrefsFor: developmentDomain.boxPrefsFor,
   testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
   guardianManagedOnly,
 });
@@ -1581,48 +1576,6 @@ createAccountServices({
     (id) => notifications.deleteForAudience('player', id), // the preferences are kept, by decision
   ],
 });
-registerPlayerRecord({
-  playerRouter,
-  players,
-  unit,
-  seam,
-  nextId,
-  broadcast,
-  storage,
-  guardianManagedOnly,
-  moderateOrRefuse,
-  recordActivity,
-  ledgerAppend,
-  insightsFor,
-  canonicalContractFor,
-});
-registerGrassrootsJourney({
-  app,
-  playerRouter,
-  guardianRouter,
-  players,
-  orgs,
-  grassroots,
-  clubSetup,
-  transitionsVouches,
-  findPlayer,
-  findOrg: byId.org,
-  unit,
-  seam,
-  nextId,
-  broadcast,
-  notify,
-  ledgerAppend,
-  mailer,
-  guardianManagedOnly,
-  recordActivity,
-  publishedVouchesFor,
-  scoutViewsOf: (playerId) => safetyAudit.ledger.countForPlayer(playerId, 'view'),
-  pathwayRecord,
-  openTrialView,
-  safeguardingCertified,
-  moderateOrRefuse,
-});
 registerRequestInbox({
   playerRouter,
   guardianRouter,
@@ -1646,7 +1599,7 @@ registerRequestInbox({
 registerCapabilities({
   app,
   rateLimit,
-  providerStatus: () => boxCamDomain.providerStatus?.() ?? [],
+  providerStatus: () => developmentDomain.providerStatus(),
   combineVerifiedProtocols,
   trustProxy: TRUST_PROXY,
   dataLayer,

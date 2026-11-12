@@ -1,13 +1,11 @@
-// The import rules (scripts/checkBoundaries.mjs): the server keeps them, and each rule refuses a tree that breaks it.
-// Run with: npm test
+// The import checker (scripts/checkBoundaries.mjs) refuses a tree that breaks each rule. The server's own tree is
+// checked by `npm run check:boundaries` in CI, not here. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { checkBoundaries } from './checkBoundaries.mjs';
 
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const LAYERS = [['platform'], ['low'], ['high']];
 
 let passed = 0;
@@ -46,10 +44,6 @@ function problemsOf(changes) {
     fs.rmSync(root, { recursive: true, force: true });
   }
 }
-
-test('the server keeps the rules', () => {
-  assert.deepEqual(checkBoundaries(SERVER), []);
-});
 
 test('a tree that keeps the rules has no problems; the composition root and the tests may import anything', () => {
   assert.deepEqual(problemsOf({}), []);
