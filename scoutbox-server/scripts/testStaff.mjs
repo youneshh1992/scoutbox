@@ -118,32 +118,23 @@ test('uniqueness: a name belongs to one account of its organisation (case-insens
   );
   refused(() => users.create({ orgId: 'org-a', name: 'Other', role: 'Scout', ssoSubject: 'idp|1' }), 'STAFF_SSO_TAKEN');
   const lead = users.create({ orgId: 'org-a', name: 'Lead', role: 'Manager' });
-  users.update(a.id, (d) => {
-    d.removedAt = NOW + 1;
-    d.removedById = lead.id;
-  });
+  users.remove(a.id, { at: NOW + 1, by: lead.id });
   refused(() => users.create({ orgId: 'org-a', name: 'ÖMER KAYA', role: 'Scout' }), 'STAFF_NAME_TAKEN');
   assert.ok(
     users.create({ orgId: 'org-a', name: 'New Person', role: 'Scout', email: 'omer@a.example' }),
     'a removed account frees its e-mail',
   );
   // A restore takes the account back; its e-mail must not belong to a current colleague meanwhile.
-  refused(
-    () =>
-      users.update(a.id, (d) => {
-        d.removedAt = null;
-        d.removedById = null;
-      }),
-    'STAFF_EMAIL_TAKEN',
+  refused(() => users.restore(a.id, { role: 'Scout', email: 'omer@a.example' }), 'STAFF_EMAIL_TAKEN');
+  const back = users.restore(a.id, { role: 'Lead Scout', email: 'omer2@a.example' });
+  assert.deepEqual(
+    [back.removedAt, back.removedById, back.role, back.email],
+    [null, null, 'Lead Scout', 'omer2@a.example'],
   );
-  assert.equal(
-    users.update(a.id, (d) => {
-      d.removedAt = null;
-      d.removedById = null;
-      d.email = 'omer2@a.example';
-    }).removedAt,
-    null,
-  );
+  refused(() => users.restore(a.id, { role: 'Scout' }), 'STAFF_NOT_REMOVED', 'is not removed');
+  refused(() => users.setEmail(lead.id, 'OMER2@a.example'), 'STAFF_EMAIL_TAKEN');
+  refused(() => users.linkSso(lead.id, 'idp|1'), 'STAFF_SSO_TAKEN');
+  assert.equal(users.linkSso(lead.id, 'idp|2').ssoSubject, 'idp|2');
   // The engine holds the same rules (raw SQL cannot bypass them).
   assert.throws(
     () =>
@@ -156,98 +147,40 @@ test('uniqueness: a name belongs to one account of its organisation (case-insens
   );
 });
 
-test('update(id, draft => …): the change is typed whole and written at once; fixed fields, unknown fields, a remover of another organisation and a nested update are refused', () => {
+test('the named acts write only their own fields, checked with the record; junk, an unknown account and a remover of another organisation are refused', () => {
   const s = fresh();
   const users = repoOn(s);
   const lead = users.create({ orgId: 'org-a', name: 'Lead', role: 'Manager' });
-  const u = users.create({ orgId: 'org-a', name: 'Sam', role: 'Scout' });
+  const u = users.create({ orgId: 'org-a', name: 'Sam', role: 'Scout', email: 'sam@a.example' });
   const other = users.create({ orgId: 'org-b', name: 'Elsewhere', role: 'Manager' });
-  const after = users.update(u.id, (d) => {
-    d.role = 'Senior Scout';
-    d.deliveryPrefs = { quietStart: '22:00', quietEnd: '07:00', channels: { email: false } };
-  });
+  users.setRole(u.id, 'Senior Scout');
+  const after = users.setDeliveryPrefs(u.id, { quietStart: '22:00', quietEnd: '07:00', channels: { email: false } });
   assert.equal(after.role, 'Senior Scout');
+  assert.equal(after.email, 'sam@a.example', 'a field the act does not set is kept');
   assert.equal(u.role, 'Scout', 'a record already handed out does not change');
   assert.deepEqual(JSON.parse(JSON.stringify(users.byId(u.id).deliveryPrefs)), {
     quietStart: '22:00',
     quietEnd: '07:00',
     channels: { email: false },
   });
-  for (const [field, edit] of [
+  for (const [what, act] of [
     [
-      'orgId',
-      (d) => {
-        d.orgId = 'org-b';
-      },
+      'quietStart',
+      () => users.setDeliveryPrefs(u.id, { quietStart: '25:00', quietEnd: null, channels: { email: true } }),
     ],
-    [
-      'createdAt',
-      (d) => {
-        d.createdAt = 1;
-      },
-    ],
-    [
-      'id',
-      (d) => {
-        d.id = 'usr-x';
-      },
-    ],
-    [
-      'mfa',
-      (d) => {
-        d.mfa = { enabledAt: 1 };
-      },
-    ],
-    [
-      'provenance',
-      (d) => {
-        d.provenance = 'org_password_bootstrap';
-      },
-    ],
-  ]) {
-    refused(() => users.update(u.id, edit), 'STAFF_RECORD_INVALID', field);
-  }
-  refused(
-    () =>
-      users.update(u.id, (d) => {
-        d.colour = 'red';
-      }),
-    'STAFF_RECORD_INVALID',
-    'unknown field',
-  );
-  refused(
-    () =>
-      users.update(u.id, (d) => {
-        d.removedById = lead.id;
-      }),
-    'STAFF_RECORD_INVALID',
-    'removedById',
-  );
-  refused(
-    () =>
-      users.update(u.id, (d) => {
-        d.removedAt = NOW;
-        d.removedById = other.id;
-      }),
-    'STAFF_RECORD_INVALID',
-    'same organisation',
-  );
-  refused(
-    () =>
-      users.update(u.id, () => {
-        users.update(u.id, (d) => {
-          d.role = 'x';
-        });
-      }),
-    'STAFF_UPDATE_REENTRANT',
-  );
-  refused(() => users.update('usr-none', () => {}), 'STAFF_NOT_FOUND');
-  assert.equal(users.byId(u.id).role, 'Senior Scout', 'every refused update left the row as it was');
-  const removed = users.update(u.id, (d) => {
-    d.removedAt = NOW + 5;
-    d.removedById = lead.id;
-  });
+    ['unknown field', () => users.setDeliveryPrefs(u.id, { colour: 'red' })],
+    ['email', () => users.setEmail(u.id, 'x')],
+    ['email', () => users.setEmail(u.id, 7)],
+    ['ssoSubject', () => users.linkSso(u.id, '')],
+  ])
+    refused(act, 'STAFF_RECORD_INVALID', what);
+  refused(() => users.setEmail('usr-none', 'a@b.example'), 'STAFF_NOT_FOUND');
+  assert.equal(users.byId(u.id).role, 'Senior Scout', 'every refused act left the row as it was');
+  assert.equal(users.byId(u.id).deliveryPrefs.quietStart, '22:00');
+  refused(() => users.remove(u.id, { at: NOW, by: other.id }), 'STAFF_RECORD_INVALID', 'same organisation');
+  const removed = users.remove(u.id, { at: NOW + 5, by: lead.id });
   assert.equal(removed.removedById, lead.id);
+  assert.equal(users.setEmail(u.id, null).email, null, 'a removed account can lose its e-mail');
 });
 
 test('remove: ends a membership once, by a staff member of the same organisation; the row stays', () => {
@@ -299,10 +232,7 @@ test('reads: forOrg (creation order, active filter), firstActive, activeByEmail,
   const a = users.create({ orgId: 'org-a', name: 'A', role: 'Manager', email: 'a@x.example', ssoSubject: 'sub-a' });
   const b = users.create({ orgId: 'org-a', name: 'B', role: 'Scout' });
   users.create({ orgId: 'org-b', name: 'C', role: 'Scout' });
-  users.update(a.id, (d) => {
-    d.removedAt = NOW;
-    d.removedById = b.id;
-  });
+  users.remove(a.id, { at: NOW, by: b.id });
   assert.deepEqual(
     users.forOrg('org-a').map((u) => u.name),
     ['A', 'B'],
@@ -362,10 +292,7 @@ test('[records] a staff record reads back whole (the MFA secret and codes includ
   assert.deepEqual(USERS_TABLE.read(s)[0].mfa, { secretB32: SECRET, enabledAt: NOW, recoveryHashes: [HASH('d')] });
   const later = users.create({ id: 'usr-later', orgId: 'org-a', name: 'Later', role: 'Manager', createdAt: 3 });
   users.create({ id: 'usr-gone', orgId: 'org-a', name: 'Gone', role: 'Scout', createdAt: 1 });
-  users.update('usr-gone', (d) => {
-    d.removedAt = 2;
-    d.removedById = later.id;
-  });
+  users.remove('usr-gone', { at: 2, by: later.id });
   assert.equal(users.byId('usr-gone').removedById, 'usr-later');
   assert.equal(users.byId('usr-later').deliveryPrefs.channels.email, true, 'an absent preference takes its default');
   const before = JSON.stringify(USERS_TABLE.read(s));
@@ -403,9 +330,7 @@ test('cost: a staff write runs the same number of SQL statements with 20 and wit
     for (let i = 0; i < n; i++) users.create({ orgId: 'org-a', name: `Staff ${i}`, role: 'Scout' });
     const target = users.firstActive('org-a');
     runs = 0;
-    users.update(target.id, (d) => {
-      d.role = 'Lead Scout';
-    });
+    users.setRole(target.id, 'Lead Scout');
     users.create({ orgId: 'org-a', name: 'One more', role: 'Scout' });
     users.byOrgAndName('org-a', 'staff 7');
     return runs;

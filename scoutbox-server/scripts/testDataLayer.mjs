@@ -968,9 +968,7 @@ test('store: the tables read back as the records the server sees, a staff change
       L.layer.users.create({ id: 'usr-2', orgId: 'o', name: 'B', role: 'Manager', createdAt: 2 });
       L.layer.users.startMfa('usr-2', 'SECRETSECRETSECRET');
       L.layer.users.enableMfa('usr-2', { at: 3, recoveryHashes: ['a'.repeat(64)] });
-      L.layer.users.update(usr1.id, (d) => {
-        d.role = 'Director';
-      });
+      L.layer.users.setRole(usr1.id, 'Director');
     });
     assert.equal(hasBlobTable(L.sqlite), false, 'every collection is a table; there is no blob');
     assert.deepEqual(

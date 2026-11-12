@@ -115,15 +115,11 @@ test('triggers: every input table carries its triggers; a relevant change marks 
     )
     .run();
   t.clearDirty();
-  t.layer.orgs.update('org-pro', (d) => {
-    d.verified = false;
-  });
+  t.layer.orgs.setStanding('org-pro', { verified: false });
   assert.deepEqual(t.dirty(), ['pl-seeded'], "an organisation's standing marks the players linked to it");
   t.clearDirty();
-  t.layer.orgs.update('org-pro', (d) => {
-    d.name = 'Eastport Town';
-  });
-  assert.deepEqual(t.dirty(), [], "an organisation's name is not a fact");
+  t.layer.orgs.setMfaRequiredForLeads('org-pro', true);
+  assert.deepEqual(t.dirty(), [], "an organisation's MFA rule is not a fact");
   t.done();
 });
 

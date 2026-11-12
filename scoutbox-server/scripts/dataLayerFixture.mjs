@@ -148,11 +148,7 @@ const WRITERS = {
   users: (L, records) => {
     for (const { removedAt = null, removedById = null, ...u } of records) {
       L.users.create(u);
-      if (removedAt !== null)
-        L.users.update(u.id, (d) => {
-          d.removedAt = removedAt;
-          d.removedById = removedById;
-        });
+      if (removedAt !== null) L.users.remove(u.id, { at: removedAt, by: removedById });
     }
   },
   sessions: (L, records, ctx) => {

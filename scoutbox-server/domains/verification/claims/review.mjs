@@ -761,10 +761,7 @@ export function registerVerificationReview(ctx) {
           role: r.applicantRole.trim() || 'Manager',
           email: r.workEmail,
         });
-      else if (!user.email)
-        user = users.update(user.id, (d) => {
-          d.email = r.workEmail;
-        });
+      else if (!user.email) user = users.setEmail(user.id, r.workEmail);
       createClaim({
         subjectType: 'org',
         subjectId: org.id,
@@ -778,9 +775,7 @@ export function registerVerificationReview(ctx) {
         metadata: { rootRequest: r.id, orgType: r.orgType, website: r.website },
       });
       // Minors still also need the safeguarding contract.
-      orgs.update(org.id, (d) => {
-        d.verified = true;
-      });
+      orgs.setStanding(org.id, { verified: true });
       // Domain claim only where the mailbox proof aligns with the stated domain.
       if (r.emailProved && r.domain && domainCovered(domainOfEmail(r.workEmail), r.domain)) {
         if (!reads.domains.has(org.id, r.domain))
@@ -1135,10 +1130,7 @@ export function registerVerificationReview(ctx) {
     const body = decisionBody(req, res, Decision);
     if (!body) return;
     unit(() => {
-      orgs.update(org.id, (d) => {
-        d.verificationRevokedAt = Date.now();
-        d.verified = false;
-      }); // the effective flag follows immediately
+      orgs.revokeVerification(org.id, Date.now()); // the effective flag follows immediately
       for (const c of reads.claims.forSubject('org', org.id)) {
         if (c.status === 'verified') adminTransition(c, 'revoked', req, { reason: body.reason });
       }
@@ -1183,10 +1175,7 @@ export function registerVerificationReview(ctx) {
           metadata: { via: 'legacy admin route' },
         });
       }
-      if (orgOf(org.id)?.verificationRevokedAt)
-        orgs.update(org.id, (d) => {
-          d.verificationRevokedAt = null;
-        });
+      if (orgOf(org.id)?.verificationRevokedAt) orgs.clearVerificationRevocation(org.id);
     } else if (body.verified === false && existing && existing.status === 'verified') {
       transition(existing, 'revoked', {
         actorKind: 'trust_safety',

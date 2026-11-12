@@ -72,22 +72,15 @@ export const staffNameKey = (name) =>
     .toLowerCase();
 
 const DEFAULT_PREFS = Object.freeze({ quietStart: null, quietEnd: null, channels: Object.freeze({ email: true }) });
-const RECORD_KEYS = Object.freeze([
-  'id',
-  'orgId',
-  'name',
-  'role',
-  'email',
-  'ssoSubject',
-  'createdAt',
-  'removedAt',
-  'removedById',
-  'provenance',
-  'mfa',
-  'deliveryPrefs',
-]);
-/** The fields an update's draft may change (the rest never change, or change through their own operation). */
-const EDITABLE = Object.freeze(['name', 'role', 'email', 'ssoSubject', 'removedAt', 'removedById', 'deliveryPrefs']);
+/** The columns of the fields the acts set. */
+const FIELD_COLUMNS = Object.freeze({
+  role: ['role'],
+  email: ['email'],
+  ssoSubject: ['sso_subject'],
+  removedAt: ['removed_at'],
+  removedById: ['removed_by_id'],
+  deliveryPrefs: ['quiet_start', 'quiet_end', 'email_enabled'],
+});
 
 /** Why a delivery-preference value cannot be stored, or null. */
 function prefsProblem(p) {
@@ -113,7 +106,7 @@ const prefsOf = (p) =>
         channels: { email: p.channels?.email ?? true },
       };
 
-/** The problems with a record's scalar fields (a staff record, or a draft after an update), by field name. */
+/** The problems with a record's scalar fields (a new staff record, or one with an act's fields set), by field name. */
 function recordProblems(r) {
   const out = [];
   if (!textOk(r.id, L.id)) out.push(`id must be text of 1 to ${L.id} characters`);
@@ -246,7 +239,10 @@ export const USERS_TABLE = {
 // ------------------------------------------------------------------ the repository
 const WRITES = new Set([
   'create',
-  'update',
+  'restore',
+  'setEmail',
+  'linkSso',
+  'setDeliveryPrefs',
   'setRole',
   'remove',
   'startMfa',
@@ -284,7 +280,28 @@ export function createUsersRepository({ sqlite, nextId, unit = null, now = Date.
     if (!by || by.orgId !== r.orgId)
       throw invalid(r.id, ['removedById must name a staff member of the same organisation']);
   };
-  let updating = null;
+  /**
+   * One act on a staff record: `fields(stored)` names the fields it sets, which are checked with the rest of the
+   * record (and its uniqueness rules) before only their columns are written.
+   */
+  const change = (id, fields) =>
+    operation(() => {
+      const before = byId(id);
+      if (!before) throw refusal('STAFF_NOT_FOUND', `org_users ${id} does not exist`);
+      const set = fields(before);
+      const next = { ...before, ...set };
+      const problems = recordProblems(next);
+      if (problems.length) throw invalid(id, problems);
+      checkRemover(next);
+      const clash = clashOf(q, next);
+      if (clash) throw clash;
+      const all = params({ ...next, deliveryPrefs: prefsOf(next.deliveryPrefs) });
+      const cols = Object.keys(set).flatMap((k) => FIELD_COLUMNS[k]);
+      q(`UPDATE org_users SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`).run(
+        Object.fromEntries([['id', id], ...cols.map((c) => [c, all[c]])]),
+      );
+      return byId(id);
+    });
 
   const repo = {
     // ---------------------------------------------------------- writes
@@ -324,49 +341,21 @@ export function createUsersRepository({ sqlite, nextId, unit = null, now = Date.
         return byId(r.id);
       }),
     /**
-     * `update(id, (draft) => …)`: the draft is a plain copy of the record; the change is typed whole and written at
-     * once. Only name, role, email, ssoSubject, removedAt, removedById and deliveryPrefs change here (MFA has its
-     * own operations); any other change, or an unknown field, is refused. Returns the stored record.
+     * Restore a removed staff member with `role`, bound to `email` (the invitation's, or null): the membership is
+     * current again. Refused with STAFF_NOT_REMOVED when it is current, and STAFF_EMAIL_TAKEN when another current
+     * staff member has the e-mail. Returns the stored record.
      */
-    update: (id, edit) =>
-      operation(() => {
-        if (typeof edit !== 'function') throw new TypeError('users.update(id, (draft) => …) takes a function');
-        if (updating === id) throw refusal('STAFF_UPDATE_REENTRANT', `org_users ${id} is already being updated`);
-        const before = byId(id);
-        if (!before) throw refusal('STAFF_NOT_FOUND', `org_users ${id} does not exist`);
-        const draft = JSON.parse(JSON.stringify(before));
-        updating = id;
-        try {
-          edit(draft);
-        } finally {
-          updating = null;
-        }
-        const unknown = Object.keys(draft).filter((k) => !RECORD_KEYS.includes(k));
-        if (unknown.length) throw invalid(id, [`unknown field(s) ${unknown.join(', ')}`]);
-        for (const k of RECORD_KEYS) {
-          if (EDITABLE.includes(k)) continue;
-          if (JSON.stringify(draft[k]) !== JSON.stringify(before[k]))
-            throw invalid(id, [`${k} does not change through update`]);
-        }
-        const problems = recordProblems(draft);
-        if (problems.length) throw invalid(id, problems);
-        checkRemover(draft);
-        const clash = clashOf(q, draft);
-        if (clash) throw clash;
-        const m = mustExist(id);
-        q(
-          `UPDATE org_users SET ${COLS.split(', ')
-            .filter((c) => c !== 'id')
-            .map((c) => `${c} = @${c}`)
-            .join(', ')} WHERE id = @id`,
-        ).run(
-          params(
-            { ...draft, deliveryPrefs: prefsOf(draft.deliveryPrefs) },
-            { secret: m.mfa_secret, enabledAt: m.mfa_enabled_at },
-          ),
-        );
-        return byId(id);
+    restore: (id, { role, email = null }) =>
+      change(id, (r) => {
+        if (r.removedAt === null) throw refusal('STAFF_NOT_REMOVED', `org_users ${id} is not removed`);
+        return { removedAt: null, removedById: null, role, email };
       }),
+    /** Set the staff member's e-mail (or null). Refused when another current staff member has it. Returns the stored record. */
+    setEmail: (id, email) => change(id, () => ({ email })),
+    /** Link the account to an SSO subject. Refused when another account of the organisation holds it. Returns the stored record. */
+    linkSso: (id, subject) => change(id, () => ({ ssoSubject: subject })),
+    /** Replace the delivery preferences (`{ quietStart, quietEnd, channels: { email } }`). Returns the stored record. */
+    setDeliveryPrefs: (id, prefs) => change(id, () => ({ deliveryPrefs: prefs })),
     /** Give a staff member another role (text of 1 to 60 characters, trimmed). Returns the stored record. */
     setRole: (id, role) =>
       operation(() => {

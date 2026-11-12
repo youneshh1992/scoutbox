@@ -29,9 +29,7 @@ try {
   // A unit of work that fails after its write rolls the write back; the retry commits it.
   try {
     store.unitOfWork(() => {
-      layer.orgs.update('org-1', (d) => {
-        d.suspended = true;
-      });
+      layer.orgs.setStanding('org-1', { suspended: true });
       throw new Error('injected failure after the write');
     });
     out.steps.push('failed-save-did-not-throw');
@@ -39,11 +37,7 @@ try {
     out.steps.push(`failed-save-threw: ${String(err.message).slice(0, 60)}`);
   }
   out.rolledBack = store.sqlite.prepare("SELECT suspended FROM orgs WHERE id = 'org-1'").get().suspended === 0;
-  store.unitOfWork(() =>
-    layer.orgs.update('org-1', (d) => {
-      d.suspended = true;
-    }),
-  );
+  store.unitOfWork(() => layer.orgs.setStanding('org-1', { suspended: true }));
   out.steps.push('retried');
   out.squadRows = store.sqlite.prepare("SELECT COUNT(*) AS n FROM orgs WHERE id = 'org-1' AND suspended = 1").get().n;
   store.sqlite.close();

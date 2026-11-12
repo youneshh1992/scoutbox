@@ -109,9 +109,7 @@ function operation(t, { failLate = false, afterCommit = null } = {}) {
   let token = null;
   const result = t.unit(() => {
     t.layer.orgs.create({ id: 'org-new', name: 'New FC', type: 'club', plan: 'Pro' });
-    t.layer.orgs.update('org-pro', (d) => {
-      d.suspended = true;
-    });
+    t.layer.orgs.setStanding('org-pro', { suspended: true });
     t.layer.players.setFootballCategory('pl-1', 'In the unit');
     token = t.layer.sessions.create('player', 'pl-1').token;
     if (afterCommit) t.store.afterCommit(afterCommit);
@@ -160,9 +158,7 @@ function assertOperationPersisted(t, token) {
   assert.equal(t.raw("SELECT verified FROM orgs WHERE id = 'org-grass'").verified, 1);
 }
 const prepare = (t) => {
-  t.layer.orgs.update('org-grass', (d) => {
-    d.verified = true;
-  }); // an unrelated write before the operation (explicit: it commits at once)
+  t.layer.orgs.setStanding('org-grass', { verified: true }); // an unrelated write before the operation (explicit: it commits at once)
   return { p1: t.layer.players.byId('pl-1') };
 };
 
@@ -454,9 +450,7 @@ await test('a failure at BEGIN leaves no unit open — the work never runs, no t
   let err = null;
   try {
     t.unit(() => {
-      t.layer.orgs.update('org-grass', (d) => {
-        d.suspended = true;
-      });
+      t.layer.orgs.setStanding('org-grass', { suspended: true });
       throw new Error('operation failed');
     });
   } catch (e) {
@@ -487,9 +481,7 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
   let continued = false;
   try {
     t.unit(() => {
-      t.layer.orgs.update('org-pro', (d) => {
-        d.suspended = true;
-      });
+      t.layer.orgs.setStanding('org-pro', { suspended: true });
       try {
         t.unit(() => {
           t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' });
@@ -532,9 +524,7 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 0);
   // The same operation, retried without the failure, commits whole.
   t.unit(() => {
-    t.layer.orgs.update('org-pro', (d) => {
-      d.suspended = true;
-    });
+    t.layer.orgs.setStanding('org-pro', { suspended: true });
     t.unit(() => {
       t.layer.orgs.create({ id: 'org-inner', name: 'Inner', type: 'club', plan: 'Pro' });
     });
@@ -549,49 +539,33 @@ await test('a nested (joined) unit that fails poisons the whole unit even when i
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-await test('an organisation updated twice inside a unit: the second update sees the first, the commit writes the last; a rollback leaves the committed row; a restart reads the table', () => {
+await test('an organisation written twice inside a unit: the second act sees the first, the commit writes both; a rollback leaves the committed row; a restart reads the table', () => {
   const dir = tempDir('uow-revert');
   const t = boot(dir);
   t.unit(() => {
-    t.layer.orgs.update('org-pro', (d) => {
-      d.name = 'Eastport FC (renamed)';
-    });
-    assert.equal(t.layer.orgs.byId('org-pro').name, 'Eastport FC (renamed)', 'a read inside the unit sees its write');
-    t.layer.orgs.update('org-pro', (d) => {
-      assert.equal(d.name, 'Eastport FC (renamed)', 'the draft is the current row');
-      d.suspended = true;
-    });
+    t.layer.orgs.verifyEmailDomain('org-pro', 'eastport.example');
+    assert.equal(t.layer.orgs.byId('org-pro').emailDomain, 'eastport.example', 'a read inside the unit sees its write');
+    const next = t.layer.orgs.setStanding('org-pro', { suspended: true });
+    assert.equal(next.emailDomain, 'eastport.example', 'the second act returns the current row');
   });
-  assert.equal(t.raw("SELECT name FROM orgs WHERE id = 'org-pro'").name, 'Eastport FC (renamed)');
+  assert.equal(t.raw("SELECT email_domain FROM orgs WHERE id = 'org-pro'").email_domain, 'eastport.example');
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
   assert.throws(
     () =>
       t.unit(() => {
-        t.layer.orgs.update('org-pro', (d) => {
-          d.suspended = false;
-          d.name = 'Nope';
-        });
+        t.layer.orgs.setStanding('org-pro', { suspended: false });
+        t.layer.orgs.verifyEmailDomain('org-pro', 'nope.example');
         throw new Error('late failure');
       }),
     /late failure/,
   );
   assert.equal(t.layer.orgs.byId('org-pro').suspended, true);
-  assert.equal(t.layer.orgs.byId('org-pro').name, 'Eastport FC (renamed)');
-  // An update from inside the same organisation's update is refused.
-  assert.throws(
-    () =>
-      t.layer.orgs.update('org-pro', () => {
-        t.layer.orgs.update('org-pro', (d) => {
-          d.suspended = false;
-        });
-      }),
-    /already being updated/,
-  );
+  assert.equal(t.layer.orgs.byId('org-pro').emailDomain, 'eastport.example');
   t.store.sqlite.close();
   const again = openStore(dir);
   const layer2 = attachDataLayer({ store: again, nextId, sessionTtlMs: TTL });
   const pro2 = layer2.orgs.byId('org-pro');
-  assert.equal(pro2.name, 'Eastport FC (renamed)');
+  assert.equal(pro2.emailDomain, 'eastport.example');
   assert.equal(pro2.suspended, true);
   again.sqlite.close();
   fs.rmSync(dir, { recursive: true, force: true });
@@ -609,9 +583,7 @@ await test('an async function is refused BEFORE it is invoked (top-level and nes
       t.unit(async () => {
         invoked += 1;
         await tick();
-        t.layer.orgs.update('org-pro', (d) => {
-          d.suspended = true;
-        });
+        t.layer.orgs.setStanding('org-pro', { suspended: true });
       });
     } catch (e) {
       err = e;
@@ -697,9 +669,7 @@ await test('after-commit side effects that return a promise are observed — an 
   const order = [];
   const unhandled = await withUnhandled(async () => {
     t.unit(() => {
-      t.layer.orgs.update('org-pro', (d) => {
-        d.suspended = true;
-      });
+      t.layer.orgs.setStanding('org-pro', { suspended: true });
       t.store.afterCommit(async () => {
         await tick();
         order.push('async-fail');
@@ -775,9 +745,7 @@ await test('participant API: store.unit.join runs an operation inside the open u
   try {
     t.unit(() => {
       result = t.store.unit.join(() => {
-        t.layer.orgs.update('org-pro', (d) => {
-          d.suspended = true;
-        });
+        t.layer.orgs.setStanding('org-pro', { suspended: true });
         return 'joined';
       });
       try {
@@ -833,11 +801,7 @@ await test('participant API: store.unit.join runs an operation inside the open u
   assert.ok(outer && /cannot commit/.test(outer.message));
   // A clean join commits with the unit.
   t.unit(() => {
-    t.store.unit.join(() =>
-      t.layer.orgs.update('org-pro', (d) => {
-        d.suspended = true;
-      }),
-    );
+    t.store.unit.join(() => t.layer.orgs.setStanding('org-pro', { suspended: true }));
   });
   assert.equal(t.raw("SELECT suspended FROM orgs WHERE id = 'org-pro'").suspended, 1);
   t.store.sqlite.close();
@@ -883,9 +847,7 @@ test('cost: a player write — standalone and inside a unit of work with an orga
       players.setFootballCategory('pl-7', 'Standalone');
       t.unit(() => {
         players.setFootballCategory('pl-7', 'In a unit');
-        t.layer.orgs.update('org-pro', (d) => {
-          d.suspended = true;
-        });
+        t.layer.orgs.setStanding('org-pro', { suspended: true });
       });
       counted.on = false;
       const statements = counted.n;

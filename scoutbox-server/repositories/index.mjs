@@ -613,7 +613,7 @@ export function attachDataLayer({
           rows: orgs.count(),
           mode: 'live',
           writeMode:
-            "explicit: create, update(id, draft => …), setStanding and setPasswordHash write at once, inside the route's unit of work when one is open",
+            "explicit: create, the named acts (setStanding, verifyEmailDomain, setMfaRequiredForLeads, revokeVerification, clearVerificationRevocation) and setPasswordHash write at once, inside the route's unit of work when one is open",
           readMode:
             'SQL: byId, list, page, locatedInBox, byName, passwordHashOf, count; no mirror and no db.* view; fresh deep-frozen records without the password hash',
           typing:
@@ -647,7 +647,7 @@ export function attachDataLayer({
           rows: users.count(),
           mode: 'live',
           writeMode:
-            "explicit: create, update(id, draft => …), startMfa / enableMfa / disableMfa and useRecoveryCode (a code is spent by deleting its row) write at once, inside the route's unit of work when one is open",
+            "explicit: create, the named acts (setRole, remove, restore, setEmail, linkSso, setDeliveryPrefs), startMfa / enableMfa / disableMfa and useRecoveryCode (a code is spent by deleting its row) write at once, inside the route's unit of work when one is open",
           readMode:
             'SQL: byId, byOrgAndName, forOrg, firstActive, activeByEmail, bySsoSubject, mfaSecretOf; no mirror and no db.* view; fresh deep-frozen records without the MFA secret or recovery codes',
           typing:

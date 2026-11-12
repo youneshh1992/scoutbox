@@ -401,14 +401,9 @@ test('repository: create and update(id, draft => …) write at once and return t
   assert.ok(!('password' in pro) && !JSON.stringify(repo.list()).includes('scrypt'), 'no hash on any record');
   assert.equal(repo.passwordHashOf('org-pro'), 'scrypt$00$11');
   assert.equal(repo.passwordHashOf('org-grass'), null);
-  // update
-  const updated = repo.update('org-pro', (d) => {
-    d.suspended = true;
-    d.verifiedDomain = null;
-    d.location = { ...d.location, lat: 9 };
-  });
+  // the named acts write only their columns
+  const updated = repo.setStanding('org-pro', { suspended: true, verifiedDomain: null });
   assert.equal(updated.suspended, true);
-  assert.equal(updated.location.lat, 9);
   assert.equal(pro.suspended, false, 'a record read before is a snapshot');
   assert.deepEqual(
     {
@@ -416,71 +411,31 @@ test('repository: create and update(id, draft => …) write at once and return t
         .prepare("SELECT suspended, verified_domain, lat, password_hash, created_at FROM orgs WHERE id = 'org-pro'")
         .get(),
     },
-    { suspended: 1, verified_domain: null, lat: 9, password_hash: 'scrypt$00$11', created_at: AT },
-    'written at once; the hash and the creation time are kept',
+    { suspended: 1, verified_domain: null, lat: pro.location.lat, password_hash: 'scrypt$00$11', created_at: AT },
+    'written at once; the other columns, the hash and the creation time are kept',
   );
+  assert.equal(repo.setMfaRequiredForLeads('org-pro', true).mfaRequiredForLeads, true);
+  const revoked = repo.revokeVerification('org-pro', AT + 1);
+  assert.deepEqual([revoked.verified, revoked.verificationRevokedAt], [false, AT + 1]);
+  assert.equal(repo.clearVerificationRevocation('org-pro').verificationRevokedAt, null);
   const quiet = dump(s);
   const refused = (fn, pattern) => {
     assert.throws(fn, pattern);
     assert.deepEqual(dump(s), quiet, 'nothing was written');
   };
-  refused(
-    () =>
-      repo.update('org-pro', (d) => {
-        d.level = 'agent';
-      }),
-    /ORG_RECORD_INVALID: organisation org-pro: level must be one of/,
-  );
-  refused(
-    () =>
-      repo.update('org-pro', (d) => {
-        d.memos = [];
-      }),
-    /unknown field memos/,
-  );
-  refused(
-    () =>
-      repo.update('org-pro', (d) => {
-        d.verified = 'yes';
-      }),
-    /verified must be a boolean/,
-  );
-  refused(
-    () =>
-      repo.update('org-pro', (d) => {
-        d.id = 'org-other';
-      }),
-    /id does not change through update/,
-  );
-  refused(
-    () =>
-      repo.update('org-pro', (d) => {
-        d.createdAt = 1;
-      }),
-    /createdAt does not change through update/,
-  );
-  refused(
-    () =>
-      repo.update('org-none', (d) => {
-        d.suspended = true;
-      }),
-    /ORG_NOT_FOUND/,
-  );
-  refused(() => repo.update('org-pro', { suspended: true }), /takes a function/);
-  refused(
-    () =>
-      repo.update('org-pro', () => {
-        repo.update('org-pro', (d) => {
-          d.suspended = false;
-        });
-      }),
-    /ORG_UPDATE_REENTRANT/,
-  );
+  refused(() => repo.setMfaRequiredForLeads('org-pro', 'yes'), /mfaRequiredForLeads must be a boolean/);
+  refused(() => repo.revokeVerification('org-pro', -1), /verificationRevokedAt must be an integer timestamp/);
+  for (const act of [
+    () => repo.setMfaRequiredForLeads('org-none', true),
+    () => repo.revokeVerification('org-none', AT),
+    () => repo.clearVerificationRevocation('org-none'),
+  ])
+    refused(act, /ORG_NOT_FOUND/);
   // the standing switches: only the fields given change; junk is refused, changing nothing
   const stood = repo.setStanding('org-pro', { suspended: false, verified: true, verifiedDomain: 'pro.example' });
   assert.deepEqual(
     [stood.suspended, stood.verified, stood.verifiedDomain, stood.safeguardingContractSigned, stood.location.lat],
-    [false, true, 'pro.example', pro.safeguardingContractSigned, 9],
+    [false, true, 'pro.example', pro.safeguardingContractSigned, pro.location.lat],
   );
   assert.equal(
     repo.setStanding('org-pro', { verifiedDomain: null, suspended: undefined }).verifiedDomain,
@@ -545,9 +500,7 @@ test('repository: create and update(id, draft => …) write at once and return t
   assert.throws(
     () =>
       transaction(s, () => {
-        repo.update('org-agency', (d) => {
-          d.suspended = true;
-        });
+        repo.setStanding('org-agency', { suspended: true });
         throw new Error('caller failed');
       }),
     /caller failed/,
@@ -639,9 +592,7 @@ test('units of work: an organisation write joins the open unit — a failure lat
       store.unitOfWork(() => {
         const o = layer.orgs.create({ name: 'Unit FC', type: 'club', plan: 'Pro' });
         layer.users.create({ orgId: o.id, name: 'Pat', role: 'Manager' });
-        layer.orgs.update('org-pro', (d) => {
-          d.suspended = true;
-        });
+        layer.orgs.setStanding('org-pro', { suspended: true });
         assert.equal(layer.orgs.byId('org-pro').suspended, true, 'a read inside the unit sees its write');
         throw new Error('late failure');
       }),

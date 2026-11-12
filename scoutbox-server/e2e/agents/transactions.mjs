@@ -880,10 +880,7 @@ await stop(server);
   const L = openLayer(DATA_DIR);
   try {
     L.unit(() =>
-      L.layer.orgs.update('org-harbour', (d) => {
-        d.verified = true;
-        d.verifiedDomain = 'harbourtownacademy.example';
-      }),
+      L.layer.orgs.setStanding('org-harbour', { verified: true, verifiedDomain: 'harbourtownacademy.example' }),
     );
   } finally {
     L.close();

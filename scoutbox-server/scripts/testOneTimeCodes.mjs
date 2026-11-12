@@ -260,10 +260,7 @@ test('e-mail confirmation as one unit of work: a failure after the consumption a
       const consumed = L.codes.consumeEmailChallenge('org-pro', code);
       assert.ok(consumed);
       if (fault === 'after_consume') throw new Error('injected failure after the consumption');
-      L.layer.orgs.update('org-pro', (d) => {
-        d.emailDomain = consumed.email.split('@')[1];
-        d.emailDomainVerified = true;
-      });
+      L.layer.orgs.verifyEmailDomain('org-pro', consumed.email.split('@')[1]);
       if (fault === 'commit') L.store.failCommitOfOpenTransaction();
     });
   const state = () => ({
@@ -337,9 +334,7 @@ const swallowing = (L, work) => {
   let outer = null;
   try {
     L.store.unitOfWork(() => {
-      L.layer.orgs.update('org-pro', (d) => {
-        d.suspended = true;
-      });
+      L.layer.orgs.setStanding('org-pro', { suspended: true });
       try {
         work();
       } catch (e) {
@@ -441,9 +436,7 @@ test('the boundary itself: joined successes commit with the unit (issue, consume
   };
   const issued = L.store.unitOfWork(() => {
     const p = L.codes.issuePairingCode('pl-child1');
-    L.layer.orgs.update('org-pro', (d) => {
-      d.suspended = true;
-    });
+    L.layer.orgs.setStanding('org-pro', { suspended: true });
     assert.deepEqual(L.codes.consumePairingCode(p.code), { playerId: 'pl-child1' });
     return p;
   });
@@ -457,9 +450,7 @@ test('the boundary itself: joined successes commit with the unit (issue, consume
     () =>
       L.store.unitOfWork(() => {
         L.codes.issuePairingCode('pl-child1');
-        L.layer.orgs.update('org-pro', (d) => {
-          d.suspended = false;
-        });
+        L.layer.orgs.setStanding('org-pro', { suspended: false });
         throw new Error('ordinary failure');
       }),
     /ordinary failure/,
@@ -475,9 +466,7 @@ test('the boundary itself: joined successes commit with the unit (issue, consume
     assert.equal(L.codes.revokePairingCodesFor('pl-nobody'), 0);
     assert.equal(L.codes.revokeEmailChallenge('org-pro'), 0);
     assert.deepEqual(L.codes.sweepExpired(), { emailChallenges: 0, pairingCodes: 0 });
-    L.layer.orgs.update('org-pro', (d) => {
-      d.suspended = false;
-    });
+    L.layer.orgs.setStanding('org-pro', { suspended: false });
   });
   assert.equal(suspendedOf(dir), 0, 'the edit after the negatives committed');
   // Validation is inside the boundary.

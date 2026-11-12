@@ -111,8 +111,6 @@ const BOOLEANS = Object.freeze([
   'emailDomainVerified',
   'mfaRequiredForLeads',
 ]);
-/** The fields an update's draft may change (the id and the creation time never change; the password has its own operation). */
-const EDITABLE = Object.freeze(ORG_RECORD_KEYS.filter((k) => k !== 'id' && k !== 'createdAt'));
 /** Fields another repository owns, named in the refusal so a misdirected writer learns where they live. */
 const RETIRED_FACET_OWNER = Object.freeze({
   tactical: 'clubSetup',
@@ -208,9 +206,6 @@ const COLS =
 const COL_LIST = COLS.split(', ');
 const SELECT = `SELECT ${COLS} FROM orgs`;
 const INSERT = `INSERT INTO orgs (${COLS}) VALUES (${COL_LIST.map((c) => `@${c}`).join(', ')})`;
-const UPDATE = `UPDATE orgs SET ${COL_LIST.filter((c) => c !== 'id' && c !== 'password_hash' && c !== 'created_at')
-  .map((c) => `${c} = @${c}`)
-  .join(', ')} WHERE id = @id`;
 const b = (v) => (v ? 1 : 0);
 const params = (r, passwordHash = null) => ({
   id: r.id,
@@ -300,7 +295,16 @@ export const ORGS_TABLE = {
 };
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'setStanding', 'verifyEmailDomain', 'setPasswordHash', 'initialize']);
+const WRITES = new Set([
+  'create',
+  'setStanding',
+  'verifyEmailDomain',
+  'setMfaRequiredForLeads',
+  'revokeVerification',
+  'clearVerificationRevocation',
+  'setPasswordHash',
+  'initialize',
+]);
 
 /** `createOrgsRepository({ sqlite, nextId, unit, now, log })`: the organisation writes and queries, plus `reads` (the queries alone). */
 export function createOrgsRepository({ sqlite, nextId = null, unit = null, now = Date.now, log = () => {} }) {
@@ -351,8 +355,6 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
     }
     return { sql: sql.length ? ` WHERE ${sql.join(' AND ')}` : '', args };
   };
-  let updating = null;
-
   const repo = {
     // ---------------------------------------------------------- writes
     /**
@@ -373,38 +375,6 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
           throw refusal('ORG_EXISTS', `organisation ${r.id} already exists`);
         q(INSERT).run(params(r, passwordHash));
         return byId(r.id);
-      }),
-    /**
-     * `update(id, (draft) => …)`: the draft is a plain copy of the record; the change is typed whole and written at
-     * once. The id and creation time never change; an unknown field is refused. Returns the stored record.
-     */
-    update: (id, edit) =>
-      operation(() => {
-        if (typeof edit !== 'function') throw new TypeError('orgs.update(id, (draft) => …) takes a function');
-        if (updating === id) throw refusal('ORG_UPDATE_REENTRANT', `organisation ${id} is already being updated`);
-        const before = byId(id);
-        if (!before) throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
-        const draft = JSON.parse(JSON.stringify(before));
-        updating = id;
-        try {
-          edit(draft);
-        } finally {
-          updating = null;
-        }
-        for (const k of ORG_RECORD_KEYS) {
-          if (EDITABLE.includes(k)) continue;
-          if (JSON.stringify(draft[k]) !== JSON.stringify(before[k]))
-            throw invalid(id, [`${k} does not change through update`]);
-        }
-        const next =
-          isPlainObject(draft.location) && draft.location.city === ''
-            ? { ...draft, location: { ...draft.location, city: null } }
-            : draft;
-        const problems = orgRecordProblems(next);
-        if (problems.length) throw invalid(id, problems);
-        const { password_hash: _keep, created_at: _never, ...cols } = params(next);
-        q(UPDATE).run(cols);
-        return byId(id);
       }),
     /**
      * Trust & Safety's standing switches: any of `verified`, `safeguardingContractSigned` and `suspended` (booleans) and
@@ -446,6 +416,31 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
       operation(() => {
         if (!textOk(domain, L.domain)) throw invalid(id, [`emailDomain must be text of 1 to ${L.domain} characters`]);
         if (q('UPDATE orgs SET email_domain = ?, email_domain_verified = 1 WHERE id = ?').run(domain, id).changes !== 1)
+          throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
+        return byId(id);
+      }),
+    /** Require (or stop requiring) MFA of the organisation's leads. Returns the stored record. */
+    setMfaRequiredForLeads: (id, required) =>
+      operation(() => {
+        if (typeof required !== 'boolean')
+          throw invalid(id, [`mfaRequiredForLeads must be a boolean (got ${describe(required)})`]);
+        if (q('UPDATE orgs SET mfa_required_for_leads = ? WHERE id = ?').run(required ? 1 : 0, id).changes !== 1)
+          throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
+        return byId(id);
+      }),
+    /** Trust & Safety revoked the organisation's verification at `at`: it is no longer verified. Returns the stored record. */
+    revokeVerification: (id, at) =>
+      operation(() => {
+        if (!Number.isSafeInteger(at) || at < 0)
+          throw invalid(id, ['verificationRevokedAt must be an integer timestamp']);
+        if (q('UPDATE orgs SET verified = 0, verification_revoked_at = ? WHERE id = ?').run(at, id).changes !== 1)
+          throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
+        return byId(id);
+      }),
+    /** The organisation was verified again: the revocation no longer stands. Returns the stored record. */
+    clearVerificationRevocation: (id) =>
+      operation(() => {
+        if (q('UPDATE orgs SET verification_revoked_at = NULL WHERE id = ?').run(id).changes !== 1)
           throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
         return byId(id);
       }),

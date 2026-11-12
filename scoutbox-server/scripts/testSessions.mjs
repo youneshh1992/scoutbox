@@ -325,11 +325,7 @@ await atest(
       raw.close();
       const t0 = Date.now();
       // An explicit write in a unit of work (BEGIN IMMEDIATE, which waits through the busy handler, as a route's unit does).
-      store.unitOfWork(() =>
-        layer.orgs.update('org-a', (d) => {
-          d.suspended = true;
-        }),
-      );
+      store.unitOfWork(() => layer.orgs.setStanding('org-a', { suspended: true }));
       const waited = Date.now() - t0;
       assert.ok(waited >= holdMs - 300, `the store waited for the lock (${waited} ms)`);
       assert.equal(store.sqlite.prepare("SELECT suspended FROM orgs WHERE id = 'org-a'").get().suspended, 1);

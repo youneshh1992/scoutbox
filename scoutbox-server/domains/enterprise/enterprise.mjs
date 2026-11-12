@@ -182,14 +182,10 @@ export function registerEnterprise(ctx) {
         if (existing) {
           // A restored account starts without its old authenticator (the person may no longer have it); they set MFA up again.
           if (existing.removedAt && existing.mfa) users.disableMfa(existing.id);
-          user = users.update(existing.id, (d) => {
-            if (d.removedAt) {
-              d.removedAt = null;
-              d.removedById = null;
-              d.role = inv.role;
-            }
-            d.email = inv.email; // bound by the invite: the basis for SSO linking
-          });
+          // The invite's e-mail is bound to the account: the basis for SSO linking.
+          user = existing.removedAt
+            ? users.restore(existing.id, { role: inv.role, email: inv.email })
+            : users.setEmail(existing.id, inv.email);
         } else {
           user = users.create({ orgId: org.id, name, role: inv.role, email: inv.email, createdAt: at });
         }
@@ -326,9 +322,7 @@ export function registerEnterprise(ctx) {
     if (!requireLead(req, res)) return;
     const body = enterpriseInput(res, 'security', req.body);
     if (!body) return;
-    const updated = orgs.update(req.org.id, (d) => {
-      d.mfaRequiredForLeads = body.mfaRequiredForLeads;
-    });
+    const updated = orgs.setMfaRequiredForLeads(req.org.id, body.mfaRequiredForLeads);
     res.json({
       mfaRequiredForLeads: updated.mfaRequiredForLeads,
       note: 'Enforced at login: leads without MFA are asked to set it up before privileged actions.',
@@ -515,10 +509,7 @@ export function registerEnterprise(ctx) {
     try {
       token = unit(() => {
         // A subject still held by a removed account of the organisation is not moved.
-        if (user.ssoSubject !== tok.sub)
-          users.update(user.id, (d) => {
-            d.ssoSubject = tok.sub;
-          });
+        if (user.ssoSubject !== tok.sub) users.linkSso(user.id, tok.sub);
         return ctx.createSession('org', org.id, { userId: user.id, via: 'sso' });
       });
     } catch (e) {

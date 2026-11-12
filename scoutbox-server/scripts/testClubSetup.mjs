@@ -245,10 +245,7 @@ test('[orgs] an organisation carries no retired facet, a record carrying one is 
     for (const k of ['squad', 'tactical', 'lookingFor', 'federationCheck']) {
       assert.ok(!(k in org), `an organisation has no ${k}`);
       refused(
-        () =>
-          o.layer.orgs.update(ORG.id, (d) => {
-            d[k] = [];
-          }),
+        () => o.layer.orgs.create({ ...OTHER, [k]: [] }),
         /no longer an organisation field: write it through the clubSetup repository/,
         `writing org.${k}`,
       );

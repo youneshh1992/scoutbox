@@ -358,12 +358,10 @@ export function registerDelivery(ctx) {
     const body = messagingInput(res, 'staffPrefs', req.body);
     if (!body) return;
     const { quietStart, quietEnd, email } = body;
-    const saved = users.update(req.orgUser.id, (d) => {
-      d.deliveryPrefs = {
-        quietStart: quietStart ?? null,
-        quietEnd: quietEnd ?? null,
-        channels: { email: email !== false },
-      };
+    const saved = users.setDeliveryPrefs(req.orgUser.id, {
+      quietStart: quietStart ?? null,
+      quietEnd: quietEnd ?? null,
+      channels: { email: email !== false },
     });
     res.json({ prefs: saved.deliveryPrefs });
   });
