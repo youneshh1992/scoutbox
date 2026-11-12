@@ -131,6 +131,11 @@ routes, composed in their old route order through one strict context, with what 
 Move the remaining whole-record repositories to named acts, remove `update(id, draft)`, and rewrite the "Writes"
 section of `architecture.md` as one rule rather than a rule and its exceptions.
 
+Stop handing one domain's repository to another. Case work still receives the identity, club-setup and operations
+repositories, and the agents domain the recruitment cases repository, so they can write another domain's tables
+without going through it. A domain should get another domain's reads (`*Reads`, as it already does) and that domain's
+named write seams, never its repository.
+
 ### 6. TypeScript
 
 Convert the server to TypeScript once steps 1–5 have settled the shapes that are worth typing: request input (from the
@@ -139,6 +144,16 @@ Typing the code before those refactors would mean writing the types twice. Start
 `domains/platform/`, then convert domain by domain, with `strict` on and `tsc --noEmit` in CI. Decide at the start
 between a build step and running `.ts` directly with Node's type stripping, which affects the minimum Node version in
 `runtime.mjs`.
+
+Group the domain factories' dependencies as the types are written, so each signature changes once:
+
+- **One platform object.** `unit`, `nextId`, `notify`, `broadcast`, `byId`, `findPlayer`, `isBlocked`, `rateLimit`
+  and `ledgerAppend` are passed to nearly every factory, about a hundred lines of `server.mjs`. They are the platform
+  layer's services and should be one typed dependency (`platform.unit`, `platform.notify`, …).
+- **One interface object per domain.** A factory should receive what another domain offers as one object (`passport`,
+  `rooms`, `development`) instead of its functions one by one (`assemblePassport: passportDomain.assemblePassport`,
+  …). The largest factories take 35–55 names today; most of those are pieces of a few domains' interfaces, and the
+  grouped objects are what the types describe.
 
 ### 7. Error wording in the clients
 
