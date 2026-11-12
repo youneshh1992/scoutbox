@@ -387,10 +387,11 @@ test('[round trip] every record reads back as written; the counts and the club l
     const opp = repo.opportunities.create(opportunity());
     assert.deepEqual(plain(opp), opportunity());
     assert.ok(Object.isFrozen(opp) && Object.isFrozen(opp.eligibility), 'reads are deep-frozen');
-    const withStructured = repo.opportunities.update(opp.id, (d) => {
-      d.structured = { ...STRUCTURED };
-    });
+    const withStructured = repo.opportunities.setStructured(opp.id, { structured: { ...STRUCTURED } });
     assert.deepEqual(plain(withStructured.structured), STRUCTURED);
+    assert.deepEqual(plain(withStructured.requirements), opportunity().requirements, 'the requirements are kept');
+    assert.equal(repo.opportunities.setStructured(opp.id, { structured: null }).structured, null);
+    repo.opportunities.setStructured(opp.id, { structured: { ...STRUCTURED } });
     const apl = repo.applications.create(application());
     assert.deepEqual(plain(apl), application());
     const summary = {
@@ -401,21 +402,32 @@ test('[round trip] every record reads back as written; the counts and the club l
         { dimension: 'travel', verdict: 'unknown' },
       ],
     };
-    const shared = repo.applications.update(apl.id, (d) => {
-      d.suitabilitySummary = summary;
-    });
+    const shared = repo.applications.shareSuitability(apl.id, { summary });
     assert.deepEqual(plain(shared.suitabilitySummary), summary);
-    const cleared = repo.applications.update(apl.id, (d) => {
-      d.suitabilitySummary = null;
-    });
+    refused(
+      () =>
+        repo.applications.shareSuitability(apl.id, {
+          summary: { ...summary, verdicts: [{ dimension: 'x', verdict: 'y' }] },
+        }),
+      /OPPORTUNITIES_CAMPAIGNS_INPUT_INVALID/,
+    );
+    const cleared = repo.applications.unshareSuitability(apl.id);
     assert.equal(cleared.suitabilitySummary, null);
-    const accepted = repo.applications.update(apl.id, (d) => {
-      d.status = 'accepted';
-      d.outcome = { decision: 'accepted', note: 'See you Saturday.', byUserId: SCOUT.userId, byName: 'Maria', at: NOW };
-      d.history.push(
-        hist({ id: 'aud-2', byKind: 'org', byId: SCOUT.userId, byName: 'Maria', action: 'accepted', at: NOW }),
-      );
+    const outcome = {
+      decision: 'accepted',
+      note: 'See you Saturday.',
+      byUserId: SCOUT.userId,
+      byName: 'Maria',
+      at: NOW,
+    };
+    const accepted = repo.applications.decide(apl.id, outcome, {
+      history: [hist({ id: 'aud-2', byKind: 'org', byId: SCOUT.userId, byName: 'Maria', action: 'accepted', at: NOW })],
     });
+    refused(
+      () => repo.applications.decide(apl.id, { ...outcome, decision: 'declined' }),
+      /applications apl-1 is not outstanding/,
+    );
+    refused(() => repo.applications.withdraw(apl.id), /applications apl-1 is not outstanding/);
     assert.equal(accepted.outcome.note, 'See you Saturday.');
     assert.deepEqual(
       accepted.history.map((h) => h.action),
@@ -426,19 +438,39 @@ test('[round trip] every record reads back as written; the counts and the club l
     const sub = repo.submissions.create(submission());
     assert.deepEqual(plain(sub), submission());
     assert.deepEqual(plain(repo.submissions.byAttempt('att-1')), submission());
-    const reviewed = repo.submissions.update(sub.id, (d) => {
-      const a = d.attempts.find((x) => x.id === 'att-1');
-      a.status = 'returned';
-      a.review = {
-        byUserId: SCOUT.userId,
-        byName: 'Maria',
-        at: NOW,
-        kind: 'human_review',
-        reasons: 'Camera moved',
-        rubricNotes: null,
-      };
-    });
+    const review = {
+      byUserId: SCOUT.userId,
+      byName: 'Maria',
+      at: NOW,
+      kind: 'human_review',
+      reasons: 'Camera moved',
+      rubricNotes: null,
+    };
+    refused(
+      () =>
+        repo.submissions.reviewAttempt(sub.id, {
+          attemptId: 'att-1',
+          decision: 'returned',
+          review: { ...review, reasons: null },
+        }),
+      /OPPORTUNITIES_CAMPAIGNS_INPUT_INVALID/,
+      'a returned attempt names its reasons',
+    );
+    const reviewed = repo.submissions.reviewAttempt(sub.id, { attemptId: 'att-1', decision: 'returned', review });
     assert.equal(reviewed.attempts[1].review.reasons, 'Camera moved');
+    refused(
+      () => repo.submissions.reviewAttempt(sub.id, { attemptId: 'att-1', decision: 'accepted', review }),
+      /att-1 of csb-1 is not waiting for review/,
+      'reviewed once',
+    );
+    const more = repo.submissions.addAttempt(sub.id, { attempt: attempt({ id: 'att-9' }) });
+    assert.deepEqual(
+      more.attempts.map((a) => a.id),
+      [...sub.attempts.map((a) => a.id), 'att-9'],
+      'an attempt goes after the stored ones',
+    );
+    refused(() => repo.submissions.addAttempt(sub.id, { attempt: attempt({ id: 'att-9' }) }), /att-9/, 'one id each');
+    repo.submissions.reviewAttempt(sub.id, { attemptId: 'att-9', decision: 'accepted', review });
     assert.deepEqual(
       reviewed.attempts[0].fileChecks.issues,
       [FILE_CHECK_ISSUES.media_missing],
@@ -468,7 +500,7 @@ test('[round trip] every record reads back as written; the counts and the club l
   }
 });
 
-test('[rules] one live application per opportunity and player; one submission per campaign and player; fixed fields and nested updates are refused; a rolled-back unit leaves nothing', () => {
+test('[rules] one live application per opportunity and player; one submission per campaign and player; each act happens once, from the state it moves from; a rolled-back unit leaves nothing', () => {
   const dir = saveFixture(tempDir('s9d-rules'));
   const o = serverOpen(dir);
   const { repo } = o;
@@ -480,9 +512,7 @@ test('[rules] one live application per opportunity and player; one submission pe
       () => repo.applications.create(application({ id: 'apl-2' })),
       /OPPORTUNITIES_CAMPAIGNS_UNIQUENESS: .*already has a live application/,
     );
-    repo.applications.update('apl-1', (d) => {
-      d.status = 'withdrawn';
-    });
+    repo.applications.withdraw('apl-1');
     assert.equal(
       repo.applications.create(application({ id: 'apl-2' })).id,
       'apl-2',
@@ -492,29 +522,10 @@ test('[rules] one live application per opportunity and player; one submission pe
       () => repo.applications.create(application({ id: 'apl-3', opportunityId: 'opp-x' })),
       /not an opportunity of organisation/,
     );
-    refused(
-      () =>
-        repo.applications.update('apl-2', (d) => {
-          d.playerId = 'pl-other';
-        }),
-      /playerId cannot change/,
-    );
-    refused(
-      () =>
-        repo.applications.update('apl-2', () => {
-          repo.applications.update('apl-2', (d) => {
-            d.note = 'x';
-          });
-        }),
-      /NESTED_UPDATE/,
-    );
-    refused(
-      () =>
-        repo.opportunities.update('opp-1', (d) => {
-          d.orgId = 'org-two';
-        }),
-      /orgId cannot change/,
-    );
+    refused(() => repo.applications.withdraw('apl-none'), /OPPORTUNITIES_CAMPAIGNS_NOT_FOUND/);
+    repo.opportunities.close('opp-1', { at: NOW });
+    refused(() => repo.opportunities.close('opp-1', { at: NOW + 1 }), /opportunities opp-1 is already closed/);
+    assert.equal(repo.opportunities.byId('opp-1').closedAt, NOW, 'closing twice keeps the first close');
     repo.submissions.create(submission());
     refused(() => repo.submissions.create(submission({ id: 'csb-2', attempts: [] })), /already has a submission/);
     refused(
@@ -525,9 +536,7 @@ test('[rules] one live application per opportunity and player; one submission pe
     refused(
       () =>
         o.unit(() => {
-          repo.applications.update('apl-2', (d) => {
-            d.status = 'withdrawn';
-          });
+          repo.applications.withdraw('apl-2');
           repo.opportunities.create(opportunity({ id: 'opp-rb' }));
           throw new Error('later step failed');
         }),
@@ -555,9 +564,8 @@ test('[sweep and preferences] the reminder query finds week-old unanswered appli
       repo.applications.remindersDue(cutoff).map((a) => a.id),
       ['apl-1'],
     );
-    repo.applications.update('apl-1', (d) => {
-      d.remindedAt = NOW;
-    });
+    repo.applications.markReminded('apl-1', { at: NOW });
+    refused(() => repo.applications.markReminded('apl-1', { at: NOW + 1 }), /was already reminded/);
     assert.deepEqual(repo.applications.remindersDue(cutoff), [], 'a reminded application is not due again');
     assert.equal(repo.preferences.forPlayer('pl-adult'), null, 'nothing stored before a save');
     assert.equal(repo.counts().player_prefs, 0);

@@ -1,13 +1,15 @@
 /**
  * The opportunity board, applications, assessment campaigns and players' private suitability preferences.
  *
- * Writes are typed whole; a record the columns cannot hold is refused with its id (the routes check first and answer
- * 400). Each joins the open unit of work, the caller's transaction, or a transaction of its own.
- *   opportunities.create / update(id, fn)   — fn edits a plain copy (close; the structured requirements)
- *   applications.create / update(id, fn)    — withdraw, outcome, the reminder marker, the approved suitability summary
+ * A record is created typed whole, then changes only through named acts: each is typed with the record, writes only
+ * its own columns and rows, and is guarded in SQL by the state it moves from. A record the columns cannot hold is
+ * refused with its id (the routes check first and answer 400). Each joins the open unit of work, the caller's
+ * transaction, or a transaction of its own.
+ *   opportunities.create, close, setStructured
+ *   applications.create, withdraw, decide, markReminded, shareSuitability, unshareSuitability
  *   campaigns.create
- *   submissions.create / update(id, fn)     — one submission per campaign and player; its attempts are child rows
- *   preferences.save(record)                — one row per player, written only when the player or guardian saves
+ *   submissions.create, addAttempt, reviewAttempt — one submission per campaign and player; attempts are child rows
+ *   preferences.save(record) — one row per player, written only when the player or guardian saves
  *
  * Reads return deep-frozen records. Modules receive them through `scoutingReads` (opportunities, applications,
  * campaigns, campaignSubmissions, playerPrefs).
@@ -21,6 +23,7 @@
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
+import { writeKit } from './writes.mjs';
 import {
   refusal,
   isInt,
@@ -40,6 +43,7 @@ import {
   typeList,
   historyTable,
   histRow,
+  historyOf,
   histOut,
 } from './scoutingEvidence.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
@@ -1250,10 +1254,14 @@ function writeOpportunity(st, o) {
   });
   st.oppSlotsDel.run(o.id);
   st.oppTextsDel.run(o.id);
-  (s?.trainingSlots ?? []).forEach((x, i) => st.oppSlot.run(o.id, i, x.day, x.start, x.end, x.tz));
   o.requirements.forEach((t, i) => st.oppText.run(o.id, 'requirement', i, t));
-  (s?.environment ?? []).forEach((t, i) => st.oppText.run(o.id, 'environment', i, t));
-  (s?.accommodations ?? []).forEach((t, i) => st.oppText.run(o.id, 'accommodation', i, t));
+  writeStructuredRows(st, o.id, s);
+}
+/** The structured requirements' child rows: the training slots, the environment and the accommodations. */
+function writeStructuredRows(st, id, s) {
+  (s?.trainingSlots ?? []).forEach((x, i) => st.oppSlot.run(id, i, x.day, x.start, x.end, x.tz));
+  (s?.environment ?? []).forEach((t, i) => st.oppText.run(id, 'environment', i, t));
+  (s?.accommodations ?? []).forEach((t, i) => st.oppText.run(id, 'accommodation', i, t));
 }
 function writeApplication(st, a) {
   st.app.run({
@@ -1278,8 +1286,11 @@ function writeApplication(st, a) {
   });
   st.appVerdictsDel.run(a.id);
   st.appHistDel.run(a.id);
-  (a.suitabilitySummary?.verdicts ?? []).forEach((v, i) => st.appVerdict.run(a.id, i, v.dimension, v.verdict));
+  writeVerdicts(st, a.id, a.suitabilitySummary);
   a.history.forEach((h, i) => st.appHist.run(histRow(a.id, h, i)));
+}
+function writeVerdicts(st, id, summary) {
+  (summary?.verdicts ?? []).forEach((v, i) => st.appVerdict.run(id, i, v.dimension, v.verdict));
 }
 function writeCampaign(st, c) {
   st.camp.run({
@@ -1323,26 +1334,27 @@ function writeSubmission(st, s) {
     created_at: s.createdAt,
   });
   st.attemptsDel.run(s.id); // the issues cascade with their attempts
-  s.attempts.forEach((a, i) => {
-    st.attempt.run({
-      id: a.id,
-      submission_id: s.id,
-      ordinal: i,
-      media_id: a.mediaId,
-      drill_name: a.drillName,
-      note: a.note,
-      file_checks_passed: b(a.fileChecks.passed),
-      file_checked_at: a.fileChecks.checkedAt,
-      status: a.status,
-      review_by_user_id: a.review?.byUserId ?? null,
-      review_by_name: a.review?.byName ?? null,
-      reviewed_at: a.review?.at ?? null,
-      review_reasons: a.review?.reasons ?? null,
-      review_rubric_notes: a.review?.rubricNotes ?? null,
-      submitted_at: a.submittedAt,
-    });
-    a.fileChecks.issues.forEach((text, j) => st.issue.run(a.id, j, ISSUE_CODE.get(text)));
+  s.attempts.forEach((a, i) => writeAttempt(st, s.id, a, i));
+}
+function writeAttempt(st, submissionId, a, ordinal) {
+  st.attempt.run({
+    id: a.id,
+    submission_id: submissionId,
+    ordinal,
+    media_id: a.mediaId,
+    drill_name: a.drillName,
+    note: a.note,
+    file_checks_passed: b(a.fileChecks.passed),
+    file_checked_at: a.fileChecks.checkedAt,
+    status: a.status,
+    review_by_user_id: a.review?.byUserId ?? null,
+    review_by_name: a.review?.byName ?? null,
+    reviewed_at: a.review?.at ?? null,
+    review_reasons: a.review?.reasons ?? null,
+    review_rubric_notes: a.review?.rubricNotes ?? null,
+    submitted_at: a.submittedAt,
   });
+  a.fileChecks.issues.forEach((text, j) => st.issue.run(a.id, j, ISSUE_CODE.get(text)));
 }
 function writePreferences(st, p) {
   st.prefs.run({
@@ -1617,40 +1629,147 @@ export function createOpportunitiesCampaignsRepository({ sqlite, unit = null, no
   const frozen = (list) => list.map(deepFreeze);
   const one = (decode, row) => (row ? deepFreeze(decode(st, [row])[0]) : null);
 
-  /** `update(id, (draft) => …)` for one kind: typed whole; the listed fields cannot change; nested updates refused. */
-  const updater = (name, byIdStmt, decode, write, fixed) => {
-    const updating = new Set();
-    const read = (id) => {
-      const r = typeof id === 'string' ? byIdStmt.get(id) : null;
-      if (!r) throw refusal('OPPORTUNITIES_CAMPAIGNS_NOT_FOUND', `${name} ${id} is not a record of the repository`);
-      return deepFreeze(decode(st, [r])[0]);
-    };
-    return (id, change) => {
-      if (typeof change !== 'function')
-        throw new TypeError(`${name}.update(id, change) needs a function that edits the copy it is given`);
-      if (updating.has(id))
-        throw refusal(
-          'OPPORTUNITIES_CAMPAIGNS_NESTED_UPDATE',
-          `${name} ${id} is already being updated; make the second change after the first returns`,
-        );
-      updating.add(id);
-      try {
-        return operation(() => {
-          const stored = read(id);
-          const draft = clone(stored);
-          const returned = change(draft);
-          const next = typedOr(name, returned === undefined ? draft : returned);
-          for (const k of fixed)
-            if (JSON.stringify(next[k]) !== JSON.stringify(stored[k]))
-              throw refusal('OPPORTUNITIES_CAMPAIGNS_INPUT_INVALID', `${name} ${id}: ${k} cannot change`);
-          write(st, next);
-          return read(id);
-        });
-      } finally {
-        updating.delete(id);
-      }
-    };
+  const { guarded, actsOn } = writeKit(sqlite, 'OPPORTUNITIES_CAMPAIGNS');
+  const mustOf = (name, byIdStmt, decode) => (id) => {
+    const r = typeof id === 'string' ? byIdStmt.get(id) : null;
+    if (!r) throw refusal('OPPORTUNITIES_CAMPAIGNS_NOT_FOUND', `${name} ${id} is not a record of the repository`);
+    return deepFreeze(decode(st, [r])[0]);
   };
+  /** The record as an act leaves it, typed whole: the act's fields are judged with the rest. */
+  const typedWith = (name, stored, fields) => typedOr(name, { ...clone(stored), ...fields });
+
+  const opportunityActs = actsOn(
+    { operation, label: 'opportunities', must: mustOf('opportunities', st.oppById, decodeOpportunities) },
+    {
+      /** Close a published opportunity at `at`, once. */
+      close: (id, { at }) =>
+        guarded(
+          'opportunities',
+          { id },
+          "status = 'published'",
+          { status: 'closed', closed_at: at },
+          `opportunities ${id} is already closed`,
+        ),
+      /** Replace the structured requirements (or remove them with null). */
+      setStructured: (id, { structured }, stored) => {
+        const s = typedWith('opportunities', stored, { structured }).structured;
+        guarded(
+          'opportunities',
+          { id },
+          '',
+          {
+            structured_declared: s ? 1 : 0,
+            relocation_required: s?.relocationRequired ? 1 : 0,
+            fee_minor: s ? s.feeMinor : null,
+            currency: s ? s.currency : null,
+            expenses_covered: s?.expensesCovered ? 1 : 0,
+          },
+          `opportunities ${id} is not stored`,
+        );
+        st.oppSlotsDel.run(id);
+        q("DELETE FROM opportunity_texts WHERE opportunity_id = ? AND kind <> 'requirement'").run(id);
+        writeStructuredRows(st, id, s);
+      },
+    },
+  );
+
+  const OUTSTANDING = "status = 'submitted'";
+  const applicationActs = actsOn(
+    {
+      operation,
+      label: 'applications',
+      must: mustOf('applications', st.appById, decodeApplications),
+      history: historyOf('application_history', 'application_id'),
+    },
+    {
+      /** The applicant withdraws an unanswered application. */
+      withdraw: (id) =>
+        guarded('applications', { id }, OUTSTANDING, { status: 'withdrawn' }, `applications ${id} is not outstanding`),
+      /** The club answers an outstanding application, once (`decision` is accepted or declined). */
+      decide: (id, { decision, note = null, byUserId, byName, at }, stored) => {
+        typedWith('applications', stored, { status: decision, outcome: { decision, note, byUserId, byName, at } });
+        guarded(
+          'applications',
+          { id },
+          OUTSTANDING,
+          {
+            status: decision,
+            outcome_note: note,
+            outcome_by_user_id: byUserId,
+            outcome_by_name: byName,
+            outcome_at: at,
+          },
+          `applications ${id} is not outstanding`,
+        );
+      },
+      /** The week-old reminder went out at `at`; it goes once. */
+      markReminded: (id, { at }) =>
+        guarded(
+          'applications',
+          { id },
+          'reminded_at IS NULL',
+          { reminded_at: at },
+          `applications ${id} was already reminded`,
+        ),
+      /** The player or guardian approves this suitability summary onto the application, replacing any earlier one. */
+      shareSuitability: (id, { summary }, stored) => {
+        typedWith('applications', stored, { suitabilitySummary: summary });
+        guarded(
+          'applications',
+          { id },
+          '',
+          { suitability_approved_at: summary.approvedAt, suitability_approved_by: summary.approvedBy },
+          `applications ${id} is not stored`,
+        );
+        st.appVerdictsDel.run(id);
+        writeVerdicts(st, id, summary);
+      },
+      /** The player or guardian takes the summary back. */
+      unshareSuitability: (id) => {
+        guarded(
+          'applications',
+          { id },
+          '',
+          { suitability_approved_at: null, suitability_approved_by: null },
+          `applications ${id} is not stored`,
+        );
+        st.appVerdictsDel.run(id);
+      },
+    },
+  );
+
+  const submissionActs = actsOn(
+    { operation, label: 'campaignSubmissions', must: mustOf('campaignSubmissions', st.subById, decodeSubmissions) },
+    {
+      /** A new attempt, after the stored ones. */
+      addAttempt: (id, { attempt }, stored) => {
+        const next = typedWith('campaignSubmissions', stored, { attempts: [...stored.attempts, attempt] });
+        if (st.attemptOwner.get(attempt?.id))
+          throw refusal('OPPORTUNITIES_CAMPAIGNS_DUPLICATE', `campaign attempt ${attempt.id} already exists`);
+        writeAttempt(st, id, next.attempts.at(-1), stored.attempts.length);
+      },
+      /** A person reviews an attempt waiting for review, once (`decision` is accepted or returned). */
+      reviewAttempt: (id, { attemptId, decision, review }, stored) => {
+        typedWith('campaignSubmissions', stored, {
+          attempts: stored.attempts.map((a) => (a.id === attemptId ? { ...a, status: decision, review } : a)),
+        });
+        guarded(
+          'campaign_attempts',
+          { id: attemptId, submission_id: id },
+          "status = 'submitted'",
+          {
+            status: decision,
+            review_by_user_id: review.byUserId,
+            review_by_name: review.byName,
+            reviewed_at: review.at,
+            review_reasons: review.reasons ?? null,
+            review_rubric_notes: review.rubricNotes ?? null,
+          },
+          `campaign attempt ${attemptId} of ${id} is not waiting for review`,
+        );
+      },
+    },
+  );
 
   // ---- opportunities
   const oppPage = q(
@@ -1671,14 +1790,7 @@ export function createOpportunitiesCampaignsRepository({ sqlite, unit = null, no
         writeOpportunity(st, o);
         return opportunities.byId(o.id);
       }),
-    update: updater('opportunities', st.oppById, decodeOpportunities, writeOpportunity, [
-      'id',
-      'orgId',
-      'orgName',
-      'orgLevel',
-      'createdBy',
-      'createdAt',
-    ]),
+    ...opportunityActs,
     byId: (id) => one(decodeOpportunities, typeof id === 'string' ? st.oppById.get(id) : null),
     /** The opportunity `id` if it belongs to `orgId`, else null. */
     ofOrg: (id, orgId) => {
@@ -1733,14 +1845,7 @@ export function createOpportunitiesCampaignsRepository({ sqlite, unit = null, no
         writeApplication(st, a);
         return applications.byId(a.id);
       }),
-    update: updater('applications', st.appById, decodeApplications, writeApplication, [
-      'id',
-      'opportunityId',
-      'orgId',
-      'playerId',
-      'submittedBy',
-      'createdAt',
-    ]),
+    ...applicationActs,
     byId: (id) => one(decodeApplications, typeof id === 'string' ? st.appById.get(id) : null),
     ofOrg: (id, orgId) => {
       const a = applications.byId(id);
@@ -1827,23 +1932,7 @@ export function createOpportunitiesCampaignsRepository({ sqlite, unit = null, no
         writeSubmission(st, s);
         return submissions.byId(s.id);
       }),
-    update: updater(
-      'campaignSubmissions',
-      st.subById,
-      decodeSubmissions,
-      (s2, next) => {
-        for (const a of next.attempts) {
-          const owner = s2.attemptOwner.get(a.id);
-          if (owner && owner.submission_id !== next.id)
-            throw refusal(
-              'OPPORTUNITIES_CAMPAIGNS_DUPLICATE',
-              `campaign attempt ${a.id} belongs to another submission`,
-            );
-        }
-        writeSubmission(s2, next);
-      },
-      ['id', 'campaignId', 'orgId', 'playerId', 'submittedBy', 'createdAt'],
-    ),
+    ...submissionActs,
     byId: (id) => one(decodeSubmissions, typeof id === 'string' ? st.subById.get(id) : null),
     forCampaign: (campaignId) => frozen(decodeSubmissions(st, subsOfCamp.all(campaignId))),
     /** The player's submission to the campaign, or null. */
@@ -1870,7 +1959,13 @@ export function createOpportunitiesCampaignsRepository({ sqlite, unit = null, no
       typeof playerId === 'string' ? deepFreeze(decodePreferences(st, st.prefsOf.get(playerId))) : null,
   };
 
-  const WRITE_OPS = new Set(['create', 'update', 'save']);
+  const WRITE_OPS = new Set([
+    'create',
+    'save',
+    ...Object.keys(opportunityActs),
+    ...Object.keys(applicationActs),
+    ...Object.keys(submissionActs),
+  ]);
   const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITE_OPS.has(k))));
   const counters = Object.fromEntries(
     OPPORTUNITIES_CAMPAIGNS_TABLES.map((t) => [t, q(`SELECT COUNT(*) AS n FROM ${t}`)]),

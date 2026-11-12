@@ -463,10 +463,11 @@ export function registerJourneys(ctx) {
     const a = scoutingReads.applications.ofPlayers(req.params.id, allowedPlayerIds);
     if (!a) return res.status(404).json({ error: 'APPLICATION_NOT_FOUND' });
     if (a.status !== 'submitted') return res.status(409).json({ error: 'NOT_WITHDRAWABLE', status: a.status });
-    const withdrawn = opportunitiesCampaigns.applications.update(a.id, (d) => {
-      d.status = 'withdrawn';
-      d.history.push(historyEntry(actor.kind, actor.id, actor.name, 'withdrawn'));
-    });
+    const withdrawn = opportunitiesCampaigns.applications.withdraw(
+      a.id,
+      {},
+      { history: [historyEntry(actor.kind, actor.id, actor.name, 'withdrawn')] },
+    );
     res.json({ application: applicationView(withdrawn) });
   }
   playerRouter.post('/applications/:id/withdraw', (req, res) => {
@@ -509,17 +510,11 @@ export function registerJourneys(ctx) {
     const p = findPlayer(a.playerId);
     const title = scoutingReads.opportunities.byId(a.opportunityId)?.title;
     const resolved = unit(() => {
-      const fresh = opportunitiesCampaigns.applications.update(a.id, (d) => {
-        d.status = decision;
-        d.outcome = {
-          decision,
-          note,
-          byUserId: req.orgUser.id,
-          byName: storedName(req.orgUser.name),
-          at,
-        };
-        d.history.push(historyEntry('org', req.orgUser.id, req.orgUser.name, decision, at));
-      });
+      const fresh = opportunitiesCampaigns.applications.decide(
+        a.id,
+        { decision, note, byUserId: req.orgUser.id, byName: storedName(req.orgUser.name), at },
+        { history: [historyEntry('org', req.orgUser.id, req.orgUser.name, decision, at)] },
+      );
       const text =
         decision === 'accepted'
           ? `✅ ${req.org.name} accepted the application to "${title}". They'll follow up through ScoutBox.`
@@ -544,10 +539,7 @@ export function registerJourneys(ctx) {
         message: 'Every applicant gets an answer before the door closes.',
       });
     if (o.status === 'closed') return res.json({ opportunity: opportunityView(o) }); // closing twice keeps the first close
-    const closed = opportunitiesCampaigns.opportunities.update(o.id, (d) => {
-      d.status = 'closed';
-      d.closedAt = Date.now();
-    });
+    const closed = opportunitiesCampaigns.opportunities.close(o.id, { at: Date.now() });
     res.json({ opportunity: opportunityView(closed) });
   });
 
@@ -705,9 +697,7 @@ export function registerJourneys(ctx) {
     };
     const sub = unit(() => {
       const s = existing
-        ? opportunitiesCampaigns.submissions.update(existing.id, (d) => {
-            d.attempts.push(attempt);
-          })
+        ? opportunitiesCampaigns.submissions.addAttempt(existing.id, { attempt })
         : opportunitiesCampaigns.submissions.create({
             id: nextId('csb'),
             campaignId: camp.id,
@@ -790,17 +780,17 @@ export function registerJourneys(ctx) {
     const camp = scoutingReads.campaigns.byId(sub.campaignId);
     const reviewed = unit(() => {
       const fresh = opportunitiesCampaigns.submissions
-        .update(sub.id, (d) => {
-          const a = d.attempts.find((x) => x.id === attempt.id);
-          a.status = decision;
-          a.review = {
+        .reviewAttempt(sub.id, {
+          attemptId: attempt.id,
+          decision,
+          review: {
             byUserId: req.orgUser.id,
             byName: storedName(req.orgUser.name),
             at: Date.now(),
             kind: 'human_review',
             reasons: reasons || null,
             rubricNotes: rubricNotes || null,
-          };
+          },
         })
         .attempts.find((x) => x.id === attempt.id);
       const text =

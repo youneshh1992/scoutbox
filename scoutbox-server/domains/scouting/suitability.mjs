@@ -185,9 +185,7 @@ export function registerSuitability(ctx) {
       const n = named(t.reason, 'structured');
       return fieldInvalid(res, n.field, `Structured requirements: ${n.message}.`);
     }
-    const saved = opportunitiesCampaigns.opportunities.update(o.id, (d) => {
-      d.structured = t.record;
-    });
+    const saved = opportunitiesCampaigns.opportunities.setStructured(o.id, { structured: t.record });
     res.json({ opportunity: { id: saved.id, structured: opportunityView(saved).structured } });
   });
 
@@ -386,19 +384,17 @@ export function registerSuitability(ctx) {
       const o = scoutingReads.opportunities.byId(a.opportunityId);
       const org = byId.org(a.orgId);
       if (!body.share) {
-        opportunitiesCampaigns.applications.update(a.id, (d) => {
-          d.suitabilitySummary = null;
-        });
+        opportunitiesCampaigns.applications.unshareSuitability(a.id);
         return res.json({ shared: false });
       }
       const verdicts = verdictsFor(player, prefsFor(playerId), o, org);
       // Dimension and verdict only: reasons can contain commitments, needs and limits.
-      const saved = opportunitiesCampaigns.applications.update(a.id, (d) => {
-        d.suitabilitySummary = {
+      const saved = opportunitiesCampaigns.applications.shareSuitability(a.id, {
+        summary: {
           approvedAt: Date.now(),
           approvedBy: actorKind,
           verdicts: verdicts.map(({ dimension, verdict }) => ({ dimension, verdict })),
-        };
+        },
       });
       res.json({ shared: true, summary: summaryView(saved.suitabilitySummary) });
     };

@@ -345,9 +345,7 @@ export function registerOperations(ctx) {
     // Outstanding application outcomes nag once after 7 days; the marker commits with the notification.
     for (const a of scoutingReads.applications.remindersDue(now - 7 * 86_400_000)) {
       unit(() => {
-        opportunitiesCampaigns.applications.update(a.id, (d) => {
-          d.remindedAt = now;
-        });
+        opportunitiesCampaigns.applications.markReminded(a.id, { at: now });
         const lead = usersOf(a.orgId)[0];
         if (lead)
           notify(
