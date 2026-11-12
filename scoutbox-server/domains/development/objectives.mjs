@@ -229,14 +229,8 @@ export function registerObjectives(ctx) {
     if (objectiveId !== null && !o.objectives.some((x) => x.id === objectiveId))
       return fieldInvalid(res, 'objectiveId', "objectiveId names one of this objective's items.");
     const fresh = unit(() => {
-      const next = development.objectives.update(o.id, (d) => {
-        d.progress.push({
-          id: nextId('prg'),
-          at: Date.now(),
-          objectiveId,
-          note: filled(note) ? note : null,
-          evidenceId,
-        });
+      const next = development.objectives.logProgress(o.id, {
+        entry: { id: nextId('prg'), at: Date.now(), objectiveId, note: filled(note) ? note : null, evidenceId },
       });
       recordActivity(req.player);
       return next;
@@ -252,10 +246,7 @@ export function registerObjectives(ctx) {
     const { orgId, enabled } = body;
     if (!orgId || !byId.org(orgId)) return res.status(404).json({ error: 'ORG_NOT_FOUND' });
     const fresh = unit(() =>
-      development.objectives.update(o.id, (d) => {
-        if (enabled && !d.sharing.orgIds.includes(orgId)) d.sharing.orgIds.push(orgId);
-        if (!enabled) d.sharing.orgIds = d.sharing.orgIds.filter((x) => x !== orgId);
-      }),
+      enabled ? development.objectives.share(o.id, { orgId }) : development.objectives.unshare(o.id, { orgId }),
     );
     res.json({ objective: objectiveView(fresh) });
   }
@@ -282,9 +273,7 @@ export function registerObjectives(ctx) {
     const r = { id: nextId('ras'), requestedBy: actor, requestedAt: Date.now(), status: 'requested', outcome: null };
     const p = findPlayer(o.playerId);
     unit(() => {
-      development.objectives.update(o.id, (d) => {
-        d.reassessments.push(r);
-      });
+      development.objectives.requestReassessment(o.id, { reassessment: r });
       notify(
         { kind: 'org_user', id: o.reviewer.userId },
         'reassessment',
@@ -343,11 +332,7 @@ export function registerObjectives(ctx) {
     const p = findPlayer(o.playerId);
     const text = `📝 ${req.org.name} completed the reassessment: ${outcome.note.slice(0, 120)}`;
     const fresh = unit(() => {
-      const next = development.objectives.update(o.id, (d) => {
-        const x = d.reassessments.find((y) => y.id === r.id);
-        x.status = 'completed';
-        x.outcome = outcome;
-      });
+      const next = development.objectives.completeReassessment(o.id, { reassessmentId: r.id, outcome });
       if (p && !isAdult(p) && p.guardianId) notify({ kind: 'guardian', id: p.guardianId }, 'reassessment', text, o.id);
       else if (p) notify({ kind: 'player', id: p.id }, 'reassessment', text, o.id);
       return next;

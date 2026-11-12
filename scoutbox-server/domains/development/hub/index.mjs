@@ -57,7 +57,7 @@ import {
   PLAN_LIMITATION,
 } from './plan.mjs';
 import { buildGoalSnapshots, validateReview, validateSupersession, pageReviews } from './reviews.mjs';
-import { guardRev, bumpRev } from '../../platform/concurrency.mjs';
+import { guardRev } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';
 import { metrics } from '../../platform/metrics.mjs';
 import { readPage, sendPageError, pageSorted } from '../../platform/paging.mjs';
@@ -89,6 +89,7 @@ export function registerDevelopment(ctx) {
     playerRouter,
     guardianRouter,
     audit,
+    auditEntry,
     isAdult,
     unit,
     recruitmentReads,
@@ -102,9 +103,6 @@ export function registerDevelopment(ctx) {
     throw new TypeError('registerDevelopment needs recruitmentReads (trials) from the data layer');
   if (typeof development?.plans?.create !== 'function' || !developmentReads)
     throw new TypeError('registerDevelopment needs the development repository from the data layer');
-  /** Stored records are read-only; a route edits a copy and writes it whole. */
-  const copy = (r) => structuredClone(r);
-
   const vocabulary = assertDevelopmentVocabulary();
 
   metrics.development = {
@@ -231,15 +229,15 @@ export function registerDevelopment(ctx) {
       collected: bundle,
     });
 
-  const touch = (plan, actor) => {
-    plan.updatedAt = now();
-    bumpRev(plan, { by: { id: actor.id, name: actor.name } });
+  /** One history entry for an act's bookkeeping. */
+  const entry = (actor, action, detail = null) => auditEntry(actor.kind, actor.id, actor.name, action, detail);
+  /** The revision bump an actor's change makes. */
+  const bumpBy = (actor, at) => ({ at, by: { id: actor.id, name: actor.name } });
+  /** Something in the plan changed: its change instant and revision move. Called inside the route's unit. */
+  const touchPlan = (planId, actor) => {
+    const at = now();
+    return development.plans.recordAct(planId, { at }, { bump: bumpBy(actor, at) });
   };
-  /** Called inside the route's unit. */
-  const touchPlan = (planId, actor) =>
-    development.plans.update(planId, (d) => {
-      touch(d, actor);
-    });
 
   // ------------------------------------------------------------- catalogue
 
@@ -676,7 +674,7 @@ export function registerDevelopment(ctx) {
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
       const { access } = bundle;
-      const plan = copy(bundle.plan);
+      const { plan } = bundle;
       if (!requireCap(res, access, 'manage', 'You cannot change this plan.')) return undefined;
       if (plan.status === 'archived')
         return res.status(409).json({
@@ -697,27 +695,31 @@ export function registerDevelopment(ctx) {
       if (parsed.error) return res.status(400).json(parsed);
 
       const actor = actorOf(viewer, req);
-      const visibilityChanged = parsed.value.visibility !== plan.visibility;
-      const withdrawn = [];
-      Object.assign(plan, parsed.value);
-      if (visibilityChanged) {
-        writeHistory(plan, actor, 'plan_visibility_changed', { to: plan.visibility });
-        // Narrowing a player-owned plan's visibility withdraws every share.
-        if (
-          plan.owner.kind === 'player' &&
-          plan.visibility !== 'shared_with_org' &&
-          (plan.sharedWithOrgIds ?? []).length
-        ) {
-          withdrawn.push(...plan.sharedWithOrgIds);
-          plan.sharedWithOrgIds = [];
-          writeHistory(plan, actor, 'plan_unshared');
-        }
-      }
-      touch(plan, actor);
+      const at = now();
+      const visibility = parsed.value.visibility;
+      const visibilityChanged = visibility !== plan.visibility;
+      // Narrowing a player-owned plan's visibility withdraws every share.
+      const withdrawn =
+        visibilityChanged && plan.owner.kind === 'player' && visibility !== 'shared_with_org'
+          ? [...(plan.sharedWithOrgIds ?? [])]
+          : [];
       unit(() => {
-        development.plans.update(plan.id, () => plan);
+        let stored = development.plans.revise(
+          plan.id,
+          { ...parsed.value, at },
+          {
+            history: visibilityChanged ? [entry(actor, 'plan_visibility_changed', { to: visibility })] : [],
+            ...(withdrawn.length ? {} : { bump: bumpBy(actor, at) }),
+          },
+        );
+        if (withdrawn.length)
+          stored = development.plans.unshare(
+            plan.id,
+            { at },
+            { history: [entry(actor, 'plan_unshared')], bump: bumpBy(actor, at) },
+          );
         for (const orgId of withdrawn) emit('development_plan_updated', orgId, { planId: plan.id });
-        emitAll('development_plan_updated', plan, {});
+        emitAll('development_plan_updated', stored, {});
       });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
@@ -731,7 +733,7 @@ export function registerDevelopment(ctx) {
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
       const { goals, access } = bundle;
-      const plan = copy(bundle.plan);
+      const { plan } = bundle;
       if (!requireCap(res, access, 'manage', 'You cannot change this plan’s status.')) return undefined;
       if (limited('development_plan_write', rateKeyFor(req)))
         return res.status(429).json(rateLimitedBody('development_plan_write'));
@@ -760,21 +762,23 @@ export function registerDevelopment(ctx) {
         return undefined;
 
       const actor = actorOf(viewer, req);
-      const from = plan.status;
-      plan.status = to;
-      if (to === 'completed') plan.completedAt = now();
-      if (to === 'archived') plan.archivedAt = now();
+      const at = now();
       const ACTION_BY_STATUS = {
         active: 'plan_activated',
         paused: 'plan_paused',
         completed: 'plan_completed',
         archived: 'plan_archived',
       };
-      writeHistory(plan, actor, ACTION_BY_STATUS[to] ?? 'plan_updated', { from, to });
-      touch(plan, actor);
       unit(() => {
-        development.plans.update(plan.id, () => plan);
-        emitAll(to === 'completed' ? 'development_plan_completed' : 'development_plan_updated', plan, {});
+        const stored = development.plans.move(
+          plan.id,
+          { status: to, at },
+          {
+            history: [entry(actor, ACTION_BY_STATUS[to] ?? 'plan_updated', { from: plan.status, to })],
+            bump: bumpBy(actor, at),
+          },
+        );
+        emitAll(to === 'completed' ? 'development_plan_completed' : 'development_plan_updated', stored, {});
       });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
     });
@@ -788,7 +792,7 @@ export function registerDevelopment(ctx) {
       const bundle = resolvePlan(req, res, req.params.id, viewer);
       if (!bundle) return undefined;
       const { player, access } = bundle;
-      const plan = copy(bundle.plan);
+      const { plan } = bundle;
       if (!requireCap(res, access, 'manage', 'You cannot change who this plan is shared with.')) return undefined;
       if (plan.owner.kind !== 'player') {
         return res.status(400).json({
@@ -813,11 +817,17 @@ export function registerDevelopment(ctx) {
       // Run inside the unit; events wait for the commit.
       const effects = [];
 
+      const at = now();
+      let act;
       if (revoke) {
         if (!plan.sharedWithOrgIds.includes(orgId))
           return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
-        plan.sharedWithOrgIds = plan.sharedWithOrgIds.filter((x) => x !== orgId);
-        writeHistory(plan, actor, 'plan_unshared', { kind: 'org' });
+        act = () =>
+          development.plans.unshare(
+            plan.id,
+            { orgId, at },
+            { history: [entry(actor, 'plan_unshared', { kind: 'org' })], bump: bumpBy(actor, at) },
+          );
         effects.push(() => emit('development_plan_updated', orgId, { planId: plan.id }));
       } else {
         if (plan.visibility !== 'shared_with_org') {
@@ -830,14 +840,17 @@ export function registerDevelopment(ctx) {
           vmetric('development_idempotent_retries');
           return res.status(200).json({ ...project(bundle, viewer), idempotent: true });
         }
-        plan.sharedWithOrgIds.push(orgId);
-        writeHistory(plan, actor, 'plan_shared', { kind: 'org' });
+        act = () =>
+          development.plans.share(
+            plan.id,
+            { orgId, at },
+            { history: [entry(actor, 'plan_shared', { kind: 'org' })], bump: bumpBy(actor, at) },
+          );
         effects.push(() => emit('development_plan_created', orgId, { planId: plan.id }));
         effects.push(() => tellOrg(orgId, `${player.name} shared a development plan with your club.`));
       }
-      touch(plan, actor);
       unit(() => {
-        development.plans.update(plan.id, () => plan);
+        act();
         for (const fx of effects) fx();
       });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
@@ -904,7 +917,7 @@ export function registerDevelopment(ctx) {
       const viewer = V(req);
       const stored = developmentReads.goals.byId(req.params.goalId);
       if (!stored) return res.status(404).json({ error: 'DEVELOPMENT_GOAL_NOT_FOUND' });
-      const goal = copy(stored);
+      const goal = stored;
       const bundle = resolvePlan(req, res, goal.planId, viewer);
       if (!bundle) return undefined;
       const { plan, access } = bundle;
@@ -927,6 +940,7 @@ export function registerDevelopment(ctx) {
       const actor = actorOf(viewer, req);
       const at = now();
 
+      const change = {};
       let statusChanged = null;
       if (body.status != null && body.status !== goal.status) {
         const to = body.status;
@@ -954,35 +968,34 @@ export function registerDevelopment(ctx) {
           }
           const note = boundedText(body.blockNote, DEVELOPMENT_HUB_LIMITS.blockNoteMax, { field: 'blockNote' });
           if (note.error) return res.status(400).json(note);
-          goal.blockReason = reason;
-          goal.blockNote = note.value;
+          change.blockReason = reason;
+          change.blockNote = note.value;
         } else {
-          goal.blockReason = null;
-          goal.blockNote = null;
+          change.blockReason = null;
+          change.blockNote = null;
         }
         statusChanged = { from: goal.status, to };
-        goal.status = to;
-        goal.completedAt = to === 'achieved' ? at : null;
+        change.status = to;
+        change.completedAt = to === 'achieved' ? at : null;
       }
 
-      const parsed = validateGoalBody(body, { existing: goal });
+      const parsed = validateGoalBody(body, { existing: { ...goal, ...change } });
       if (parsed.error) return res.status(400).json(parsed);
       const targetChanged = JSON.stringify(parsed.value.target ?? null) !== JSON.stringify(goal.target ?? null);
-      Object.assign(goal, parsed.value);
-      goal.updatedAt = at;
-      bumpRev(goal, { by: { id: actor.id, name: actor.name }, at });
+      Object.assign(change, parsed.value);
 
-      if (statusChanged) writeHistory(goal, actor, 'goal_status_changed', statusChanged);
-      if (targetChanged && goal.target)
-        writeHistory(goal, actor, 'goal_target_set', { protocolId: goal.target.protocolId });
-      if (!statusChanged && !targetChanged) writeHistory(goal, actor, 'goal_updated');
+      const history = [];
+      if (statusChanged) history.push(entry(actor, 'goal_status_changed', statusChanged));
+      if (targetChanged && change.target)
+        history.push(entry(actor, 'goal_target_set', { protocolId: change.target.protocolId }));
+      if (!statusChanged && !targetChanged) history.push(entry(actor, 'goal_updated'));
 
       unit(() => {
-        development.goals.update(goal.id, () => goal);
+        const saved = development.goals.revise(goal.id, { ...change, at }, { history, bump: bumpBy(actor, at) });
         touchPlan(plan.id, actor);
         emitAll('development_goal_updated', plan, { goalId: goal.id });
         if (statusChanged?.to === 'achieved' && plan.owner.kind === 'org' && plan.visibility === 'player_guardian') {
-          tellPlayer(plan, `A development goal was marked achieved: ${goal.title}`);
+          tellPlayer(plan, `A development goal was marked achieved: ${saved.title}`);
         }
       });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
@@ -1053,7 +1066,7 @@ export function registerDevelopment(ctx) {
       const viewer = V(req);
       const stored = developmentReads.actions.byId(req.params.actionId);
       if (!stored) return res.status(404).json({ error: 'DEVELOPMENT_ACTION_NOT_FOUND' });
-      const action = copy(stored);
+      const action = stored;
       const bundle = resolvePlan(req, res, action.planId, viewer);
       if (!bundle) return undefined;
       const { plan, access, player } = bundle;
@@ -1077,6 +1090,7 @@ export function registerDevelopment(ctx) {
 
       const actor = actorOf(viewer, req);
       const at = now();
+      const change = {};
       let statusChanged = null;
       if (body.status != null && body.status !== action.status) {
         const to = body.status;
@@ -1089,8 +1103,8 @@ export function registerDevelopment(ctx) {
           });
         }
         statusChanged = { from: action.status, to };
-        action.status = to;
-        action.completedAt = to === 'done' ? at : null;
+        change.status = to;
+        change.completedAt = to === 'done' ? at : null;
       }
 
       if (!access.writeGoals) {
@@ -1102,26 +1116,21 @@ export function registerDevelopment(ctx) {
             message: 'You can mark this action done, but not change it.',
           });
       } else {
-        const parsed = validateActionBody(body, { plan, player, existing: action });
+        const parsed = validateActionBody(body, { plan, player, existing: { ...action, ...change } });
         if (parsed.error) return res.status(400).json(parsed);
-        Object.assign(action, parsed.value);
+        Object.assign(change, parsed.value);
       }
-      action.updatedAt = at;
 
-      if (statusChanged)
-        writeHistory(
-          action,
-          actor,
-          statusChanged.to === 'done' ? 'action_completed' : 'action_status_changed',
-          statusChanged,
-        );
+      const history = statusChanged
+        ? [entry(actor, statusChanged.to === 'done' ? 'action_completed' : 'action_status_changed', statusChanged)]
+        : [];
       unit(() => {
-        development.actions.update(action.id, () => action);
+        const saved = development.actions.revise(action.id, { ...change, at }, { history });
         if (statusChanged?.to === 'done') {
           // Completing an action never moves its goal's status.
           emitAll('development_action_completed', plan, { actionId: action.id });
           if (plan.owner.kind === 'org' && actor.kind !== 'org')
-            tellOrg(plan.owner.orgId, `${player.name} completed a development action: ${action.title}`);
+            tellOrg(plan.owner.orgId, `${player.name} completed a development action: ${saved.title}`);
         }
         touchPlan(plan.id, actor);
       });
@@ -1139,7 +1148,7 @@ export function registerDevelopment(ctx) {
         targetKind === 'goal'
           ? developmentReads.goals.byId(req.params.goalId)
           : developmentReads.actions.byId(req.params.actionId);
-      const holder = stored ? copy(stored) : null;
+      const holder = stored;
       if (!holder)
         return res
           .status(404)
@@ -1197,10 +1206,13 @@ export function registerDevelopment(ctx) {
         linkedByName: actor.name,
         linkedAt: at,
       };
-      writeHistory(holder, actor, 'evidence_linked', { kind: link.sourceType });
       unit(() => {
         development.links.create(link);
-        (targetKind === 'goal' ? development.goals : development.actions).update(holder.id, () => holder);
+        (targetKind === 'goal' ? development.goals : development.actions).recordAct(
+          holder.id,
+          {},
+          { history: [entry(actor, 'evidence_linked', { kind: link.sourceType })] },
+        );
         touchPlan(plan.id, actor);
         emitAll('development_evidence_linked', plan, { goalId: link.goalId, actionId: link.actionId });
       });
@@ -1224,11 +1236,14 @@ export function registerDevelopment(ctx) {
 
       const actor = actorOf(viewer, req);
       const found = link.goalId ? goals.find((g) => g.id === link.goalId) : actions.find((a) => a.id === link.actionId);
-      const holder = found ? copy(found) : null;
-      if (holder) writeHistory(holder, actor, 'evidence_unlinked', { kind: link.sourceType });
       unit(() => {
         development.links.remove(link.id);
-        if (holder) (link.goalId ? development.goals : development.actions).update(holder.id, () => holder);
+        if (found)
+          (link.goalId ? development.goals : development.actions).recordAct(
+            found.id,
+            {},
+            { history: [entry(actor, 'evidence_unlinked', { kind: link.sourceType })] },
+          );
         touchPlan(plan.id, actor);
       });
       return res.json(project(resolvePlan(req, res, plan.id, viewer) ?? bundle, viewer));
@@ -1318,13 +1333,15 @@ export function registerDevelopment(ctx) {
       unit(() => {
         development.reviews.create(review);
         if (superseded)
-          development.reviews.update(superseded.id, (d) => {
-            writeHistory(d, actor, 'review_superseded');
-          });
-        development.plans.update(plan.id, (d) => {
-          if (parsed.value.nextReviewAt != null) d.nextReviewAt = parsed.value.nextReviewAt;
-          touch(d, actor);
-        });
+          development.reviews.recordAct(superseded.id, {}, { history: [entry(actor, 'review_superseded')] });
+        const at = now();
+        if (parsed.value.nextReviewAt != null)
+          development.plans.scheduleReview(
+            plan.id,
+            { nextReviewAt: parsed.value.nextReviewAt, at },
+            { bump: bumpBy(actor, at) },
+          );
+        else touchPlan(plan.id, actor);
         emitAll('development_review_submitted', plan, { reviewId: review.id });
         if (review.reviewerKind === 'coach_review' && review.sharedWithPlayerAt) {
           tellPlayer(plan, 'A development review was shared with you.');
@@ -1366,11 +1383,11 @@ export function registerDevelopment(ctx) {
 
       const actor = actorOf(viewer, req);
       unit(() => {
-        development.reviews.update(review.id, (d) => {
-          d.sharedWithPlayerAt = now();
-          d.shareScopes = [...new Set(asked)];
-          writeHistory(d, actor, 'review_shared');
-        });
+        development.reviews.share(
+          review.id,
+          { at: now(), scopes: [...new Set(asked)] },
+          { history: [entry(actor, 'review_shared')] },
+        );
         touchPlan(plan.id, actor);
         tellPlayer(plan, 'A development review was shared with you.');
       });

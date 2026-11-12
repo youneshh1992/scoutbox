@@ -326,7 +326,7 @@ test('[typing] the typers refuse junk with the record and field named', () => {
 });
 
 // ------------------------------------------------------------- objectives
-test('[objectives] created whole and read back; an update keeps the items and source, only grows progress, completes a reassessment once; club and reassessment lookups', () => {
+test('[objectives] created whole and read back; the acts keep the items and source, only grow progress, complete a reassessment once; club and reassessment lookups', () => {
   const dir = tempDir('s12a-obj');
   saveFixture(dir);
   const s = serverOpen(dir);
@@ -334,75 +334,53 @@ test('[objectives] created whole and read back; an update keeps the items and so
     const created = s.unit(() => s.repo.objectives.create(objective()));
     assert.deepEqual(plain(created), objective());
     assert.ok(Object.isFrozen(created) && Object.isFrozen(created.objectives[0]), 'records are read-only');
-    s.unit(() =>
-      s.repo.objectives.update('obj-1', (d) => {
-        d.progress.push({ id: 'prg-1', at: NOW + 1, objectiveId: 'objx-1', note: 'Did 50', evidenceId: null });
-        d.sharing.orgIds.push(ORG.id);
-        d.reassessments.push({
-          id: 'ras-1',
-          requestedBy: { ...PLAYER },
-          requestedAt: NOW + 2,
-          status: 'requested',
-          outcome: null,
-        });
-      }),
-    );
+    const reassessment = (id) => ({
+      id,
+      requestedBy: { ...PLAYER },
+      requestedAt: NOW + 2,
+      status: 'requested',
+      outcome: null,
+    });
+    s.unit(() => {
+      s.repo.objectives.logProgress('obj-1', {
+        entry: { id: 'prg-1', at: NOW + 1, objectiveId: 'objx-1', note: 'Did 50', evidenceId: null },
+      });
+      s.repo.objectives.share('obj-1', { orgId: ORG.id });
+      s.repo.objectives.share('obj-1', { orgId: ORG.id });
+      s.repo.objectives.requestReassessment('obj-1', { reassessment: reassessment('ras-1') });
+    });
+    const o = s.repo.reads.objectives.byId('obj-1');
+    assert.deepEqual(plain(o.objectives), objective().objectives, 'the items are kept');
+    assert.deepEqual(o.sharing.orgIds, [ORG.id], 'sharing twice keeps one share');
     assert.equal(s.repo.reads.objectives.sharedWith(PID, ORG.id).length, 1);
     assert.equal(s.repo.reads.objectives.sharedWith(PID, 'org-other').length, 0);
     assert.equal(s.repo.reads.objectives.byReassessment('ras-1').id, 'obj-1');
     refused(
-      () =>
-        s.unit(() =>
-          s.repo.objectives.update('obj-1', (d) => {
-            d.objectives[0].text = 'Something else';
-          }),
-        ),
-      /objectives cannot change/,
-      'items are fixed',
-    );
-    refused(
-      () =>
-        s.unit(() =>
-          s.repo.objectives.update('obj-1', (d) => {
-            d.progress = [];
-          }),
-        ),
-      /progress only grows/,
-      'progress only grows',
-    );
-    refused(
-      () =>
-        s.unit(() =>
-          s.repo.objectives.update('obj-1', (d) => {
-            d.reassessments.push({
-              id: 'ras-2',
-              requestedBy: { ...PLAYER },
-              requestedAt: NOW,
-              status: 'requested',
-              outcome: null,
-            });
-          }),
-        ),
-      /more than one open request/,
+      () => s.unit(() => s.repo.objectives.requestReassessment('obj-1', { reassessment: reassessment('ras-2') })),
+      /DEVELOPMENT_STATE_CONFLICT: dev_objectives obj-1: a reassessment is already requested/,
       'one open request',
     );
-    const outcome = { note: 'Better.', evidenceIds: ['ev-2'], byUserId: SCOUT.userId, byName: SCOUT.name, at: NOW + 3 };
-    s.unit(() =>
-      s.repo.objectives.update('obj-1', (d) => {
-        Object.assign(d.reassessments[0], { status: 'completed', outcome });
-      }),
+    refused(
+      () => s.unit(() => s.repo.objectives.logProgress('obj-1', { entry: { id: 'prg-2', at: 'soon' } })),
+      /DEVELOPMENT_INPUT_INVALID/,
+      'a progress entry the record cannot hold',
     );
+    const outcome = { note: 'Better.', evidenceIds: ['ev-2'], byUserId: SCOUT.userId, byName: SCOUT.name, at: NOW + 3 };
+    s.unit(() => s.repo.objectives.completeReassessment('obj-1', { reassessmentId: 'ras-1', outcome }));
     assert.deepEqual(plain(s.repo.reads.objectives.byId('obj-1').reassessments[0].outcome), outcome);
     refused(
       () =>
         s.unit(() =>
-          s.repo.objectives.update('obj-1', (d) => {
-            d.reassessments[0].outcome.note = 'Changed';
+          s.repo.objectives.completeReassessment('obj-1', {
+            reassessmentId: 'ras-1',
+            outcome: { ...outcome, note: 'x' },
           }),
         ),
-      /only completes, once/,
+      /reassessment ras-1 is not awaiting an answer/,
       'an outcome is final',
     );
+    s.unit(() => s.repo.objectives.unshare('obj-1', { orgId: ORG.id }));
+    assert.equal(s.repo.reads.objectives.sharedWith(PID, ORG.id).length, 0);
     refused(
       () =>
         s.unit(() =>
@@ -436,77 +414,53 @@ test('[hub] a plan, goal, action, link and review are created whole and read bac
   }
 });
 
-test('[hub] updates keep the fixed fields and only grow the history; a review is append-only and shared once; a correction derives supersededBy', () => {
+test('[hub] a revision sets only the fields it may and only grows the history; a review is append-only and shared once; a correction derives supersededBy', () => {
   const { s, dir } = seeded('s12a-upd');
   try {
+    const by = { id: COACH.id, name: COACH.name };
     s.unit(() =>
-      s.repo.goals.update('devgoal-1', (d) => {
-        d.status = 'blocked';
-        d.blockReason = 'schedule';
-        d.history.push(hist('aud-7', 'goal_status_changed', { from: 'not_started', to: 'blocked' }, COACH));
-      }),
+      s.repo.goals.revise(
+        'devgoal-1',
+        { status: 'blocked', blockReason: 'schedule', at: NOW + 1 },
+        {
+          history: [hist('aud-7', 'goal_status_changed', { from: 'not_started', to: 'blocked' }, COACH)],
+          bump: { at: NOW + 1, by },
+        },
+      ),
     );
-    assert.deepEqual(plain(s.repo.reads.goals.byId('devgoal-1').history.at(-1).detail), {
-      from: 'not_started',
-      to: 'blocked',
-    });
+    const g = s.repo.reads.goals.byId('devgoal-1');
+    assert.deepEqual(plain(g.history.at(-1).detail), { from: 'not_started', to: 'blocked' });
+    assert.deepEqual([g.updatedAt, g.rev, g.title], [NOW + 1, goal().rev + 1, goal().title]);
     refused(
-      () =>
-        s.unit(() =>
-          s.repo.goals.update('devgoal-1', (d) => {
-            d.planId = 'devplan-2';
-          }),
-        ),
-      /planId cannot change/,
+      () => s.unit(() => s.repo.goals.revise('devgoal-1', { planId: 'devplan-2', at: NOW })),
+      /a revision does not set planId/,
     );
     refused(
-      () =>
-        s.unit(() =>
-          s.repo.goals.update('devgoal-1', (d) => {
-            d.history.shift();
-          }),
-        ),
-      /history only grows/,
+      () => s.unit(() => s.repo.goals.revise('devgoal-1', { status: 'sleeping', at: NOW })),
+      /DEVELOPMENT_INPUT_INVALID/,
     );
     refused(
-      () =>
-        s.unit(() =>
-          s.repo.plans.update('devplan-1', (d) => {
-            d.owner.orgId = 'org-other';
-          }),
-        ),
-      /owner cannot change/,
+      () => s.unit(() => s.repo.plans.revise('devplan-1', { owner: { kind: 'org', orgId: 'org-other' }, at: NOW })),
+      /a revision does not set owner/,
     );
+    const moved = s.unit(() => s.repo.plans.move('devplan-1', { status: 'completed', at: NOW + 2 }));
+    assert.deepEqual([moved.status, moved.completedAt, moved.updatedAt], ['completed', NOW + 2, NOW + 2]);
     refused(
-      () =>
-        s.unit(() =>
-          s.repo.reviews.update('devrev-1', (d) => {
-            d.internalNote = 'rewritten';
-          }),
-        ),
-      /internalNote cannot change/,
-      'append-only',
+      () => s.unit(() => s.repo.actions.revise('devact-1', { goalId: 'devgoal-2', at: NOW })),
+      /a revision does not set goalId/,
     );
-    s.unit(() =>
-      s.repo.reviews.update('devrev-1', (d) => {
-        d.sharedWithPlayerAt = NOW + 1;
-        d.shareScopes = ['goals', 'summary'];
-      }),
+    assert.equal(
+      s.unit(() => s.repo.actions.revise('devact-1', { status: 'done', completedAt: NOW, at: NOW })).status,
+      'done',
     );
+    s.unit(() => s.repo.reviews.share('devrev-1', { at: NOW + 1, scopes: ['goals', 'summary'] }));
     assert.deepEqual(
       s.repo.reads.reviews.byId('devrev-1').shareScopes,
       ['summary', 'goals'],
       'scopes read back in their fixed order',
     );
-    refused(
-      () =>
-        s.unit(() =>
-          s.repo.reviews.update('devrev-1', (d) => {
-            d.shareScopes = ['summary'];
-          }),
-        ),
-      /shared once/,
-    );
+    assert.equal(s.repo.reads.reviews.byId('devrev-1').internalNote, review().internalNote, 'append-only');
+    refused(() => s.unit(() => s.repo.reviews.share('devrev-1', { at: NOW + 2, scopes: ['summary'] })), /shared once/);
     s.unit(() => s.repo.reviews.create(review({ id: 'devrev-2', supersedes: 'devrev-1', history: [] })));
     assert.equal(s.repo.reads.reviews.byId('devrev-1').supersededBy, 'devrev-2');
     refused(

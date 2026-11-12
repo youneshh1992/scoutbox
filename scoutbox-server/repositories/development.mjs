@@ -17,10 +17,12 @@
  *     whose rows name their plan (and their goal, action or review), so a plan's timeline is one indexed query. A
  *     detail is typed columns (`from`, `to`, `visibility`, `owner`, `kind`, `protocolId`, `note`), present keys only.
  *
- * WRITES are explicit: each record kind has `create(record)` and (except links, which are created and removed)
- * `update(id, (draft) => …)`; the result is typed whole and written at once, joined into the open unit of work, the
- * caller's open transaction, or a transaction of its own. An unknown field, a change to a field that never changes, a
- * history entry that changes or goes, and an update from inside its own update are refused.
+ * WRITES are explicit: each record kind has `create(record)`, then (except links, which are created and removed)
+ * named acts: an objective logs progress, is shared and asks for and receives reassessments; a plan is revised, moved,
+ * shared and has its reviews scheduled; goals and actions are revised; a review is shared once; `recordAct` is the
+ * history and revision alone. An act works out the fields it sets, appends its history entries and types the record
+ * whole before writing it, joined into the open unit of work, the caller's open transaction, or a transaction of its
+ * own.
  *
  * Queries decode deep-frozen records (in insertion order unless they say otherwise), a list's child rows in one batch.
  * Modules receive them as `developmentReads`.
@@ -1033,20 +1035,21 @@ export const unresolvedPlayerReferences = (sqlite) =>
     : null;
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update', 'remove', 'record']);
+const WRITES = new Set([
+  'create',
+  'remove',
+  'record',
+  'revise',
+  'move',
+  'share',
+  'unshare',
+  'scheduleReview',
+  'recordAct',
+  'logProgress',
+  'requestReassessment',
+  'completeReassessment',
+]);
 const clone = (v) => JSON.parse(JSON.stringify(v));
-/** Equal values, whatever the order of their keys (a typed record and a decoded one list their keys differently). */
-const canonical = (v) =>
-  Array.isArray(v)
-    ? v.map(canonical)
-    : v !== null && typeof v === 'object'
-      ? Object.fromEntries(
-          Object.keys(v)
-            .sort()
-            .map((k) => [k, canonical(v[k])]),
-        )
-      : v;
-const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 /**
  * `createDevelopmentRepository({ sqlite, unit, now, log })`: `objectives`, `drillReviews`, `plans`, `goals`, `actions`,
  * `links` and `reviews`, each with its writes and queries, plus `reads` (the queries alone: `developmentReads`).
@@ -1061,52 +1064,62 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
     return s;
   };
   const st = statements(sqlite);
-  const updating = new Set();
-  const guard = (key, fn) => {
-    if (updating.has(key))
-      throw refusal(
-        'DEVELOPMENT_NESTED_UPDATE',
-        `${key} is already being updated; make the second change after the first returns`,
-      );
-    updating.add(key);
-    try {
-      return fn();
-    } finally {
-      updating.delete(key);
-    }
-  };
   const typedOr = (type, raw, name) => {
     const t = type(raw, name);
     if (!t.ok) throw refusal('DEVELOPMENT_INPUT_INVALID', t.reason);
     return t.record;
   };
   const json = (list) => JSON.stringify([...list]);
-  /** The common shape of an update: a plain copy edited by `change`, typed whole, fixed fields and the history kept. */
-  const updater =
-    ({ table, type, byId: find, immutable, write, check = () => {} }) =>
-    (id, change) =>
-      guard(`${table} ${id}`, () =>
-        operation(() => {
-          if (typeof change !== 'function')
-            throw new TypeError(`${table}.update(id, change) needs a function that edits the copy it is given`);
-          const stored = find(id);
-          if (!stored) throw refusal('DEVELOPMENT_NOT_FOUND', `${table} ${id} is not a record of the repository`);
-          const draft = clone(stored);
-          const returned = change(draft);
-          const next = typedOr(type, returned === undefined ? draft : returned, table);
-          for (const k of immutable)
-            if (!same(next[k], stored[k]))
-              throw refusal('DEVELOPMENT_INPUT_INVALID', `${table} ${id}: ${k} cannot change`);
-          if (stored.history && stored.history.some((h, i) => !same(h, next.history[i])))
-            throw refusal(
-              'DEVELOPMENT_INPUT_INVALID',
-              `${table} ${id}: the history only grows (a stored entry cannot change or go)`,
+  /**
+   * Named acts on one record kind, each `act(id, input, bookkeeping)`. A definition works out the fields the act sets
+   * from its input (`fields(input, stored)`) and may refuse the state it finds (`refuse(stored, input)` gives the
+   * reason, DEVELOPMENT_STATE_CONFLICT). The bookkeeping's history entries are appended after the stored ones and
+   * `bump` (`{ at, by: { id, name } }`) moves the revision. The record is typed whole and written once.
+   */
+  const actsOn = ({ table, type, byId: find, write }, defs) =>
+    Object.fromEntries(
+      Object.entries(defs).map(([name, { fields, refuse = () => null }]) => [
+        name,
+        (id, input = {}, { history = [], bump = null } = {}) =>
+          operation(() => {
+            const stored = find(id);
+            if (!stored) throw refusal('DEVELOPMENT_NOT_FOUND', `${table} ${id} is not a record of the repository`);
+            const why = refuse(stored, input);
+            if (why) throw refusal('DEVELOPMENT_STATE_CONFLICT', `${table} ${id}: ${why}`);
+            if (!Array.isArray(history))
+              throw refusal('DEVELOPMENT_INPUT_INVALID', `${table} ${id}: history must be a list`);
+            const revision = bump
+              ? {
+                  rev: stored.rev + 1,
+                  revAt: bump.at,
+                  revBy: { userId: bump.by?.id ?? null, name: bump.by?.name ?? null },
+                }
+              : {};
+            const next = typedOr(
+              type,
+              {
+                ...clone(stored),
+                ...fields(input, stored),
+                ...revision,
+                ...(stored.history ? { history: [...stored.history, ...history] } : {}),
+              },
+              table,
             );
-          check(next, stored);
-          write(next, stored);
-          return find(id);
-        }),
-      );
+            write(next, stored);
+            return find(id);
+          }),
+      ]),
+    );
+  /** The fields of `input` named in `keys` (each optional), refusing any other. */
+  const editOf = (table, keys) => (input) => {
+    const { at, ...edit } = input;
+    const stray = Object.keys(edit).filter((k) => !keys.includes(k));
+    if (stray.length)
+      throw refusal('DEVELOPMENT_INPUT_INVALID', `${table}: a revision does not set ${stray.join(', ')}`);
+    return { ...Object.fromEntries(Object.entries(edit).filter(([, v]) => v !== undefined)), updatedAt: at };
+  };
+  /** The bookkeeping alone: history entries, a revision bump and, with `at`, the change instant. */
+  const recordAct = { fields: ({ at } = {}) => (at === undefined ? {} : { updatedAt: at }) };
   const one = (decoder) => (sql) => (id) => {
     if (typeof id !== 'string') return null;
     const row = q(sql).get(id);
@@ -1123,18 +1136,6 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
   const objectiveById = one(decO)('SELECT * FROM dev_objectives WHERE id = ?');
   const objectivesWhere = (where) => many(decO)(`SELECT * FROM dev_objectives WHERE ${where} ORDER BY rowid`);
   const forPlayersO = objectivesWhere('player_id IN (SELECT value FROM json_each(?))');
-  const OBJECTIVE_IMMUTABLE = [
-    'id',
-    'playerId',
-    'sourceFeedbackId',
-    'orgId',
-    'reviewer',
-    'objectives',
-    'reviewAt',
-    'status',
-    'createdBy',
-    'createdAt',
-  ];
   const objectives = {
     create: (raw) =>
       operation(() => {
@@ -1143,32 +1144,44 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
         writeObjective(st, r, { isNew: true });
         return objectiveById(r.id);
       }),
-    /** `update(id, change)`: the items, owner, source and dates never change; progress only grows; a reassessment, once requested, only completes. */
-    update: updater({
-      table: 'dev_objectives',
-      type: typeObjective,
-      byId: objectiveById,
-      immutable: OBJECTIVE_IMMUTABLE,
-      check: (next, stored) => {
-        if (stored.progress.some((g, i) => !same(g, next.progress[i])))
-          throw refusal('DEVELOPMENT_INPUT_INVALID', `dev_objectives ${stored.id}: progress only grows`);
-        stored.reassessments.forEach((r, i) => {
-          const n = next.reassessments[i];
-          if (
-            !n ||
-            n.id !== r.id ||
-            !same(n.requestedBy, r.requestedBy) ||
-            n.requestedAt !== r.requestedAt ||
-            (r.status === 'completed' && !same(n, r))
-          )
-            throw refusal(
-              'DEVELOPMENT_INPUT_INVALID',
-              `dev_objectives ${stored.id}: reassessment ${r.id} only completes, once`,
-            );
-        });
+    ...actsOn(
+      {
+        table: 'dev_objectives',
+        type: typeObjective,
+        byId: objectiveById,
+        write: (next) => writeObjective(st, next, { isNew: false }),
       },
-      write: (next) => writeObjective(st, next, { isNew: false }),
-    }),
+      {
+        /** The player logged progress (`entry`); progress only grows. */
+        logProgress: { fields: ({ entry }, o) => ({ progress: [...o.progress, entry] }) },
+        /** Share the objective's progress with an organisation (sharing twice keeps one share). */
+        share: {
+          fields: ({ orgId }, o) => ({
+            sharing: { orgIds: o.sharing.orgIds.includes(orgId) ? o.sharing.orgIds : [...o.sharing.orgIds, orgId] },
+          }),
+        },
+        /** Stop sharing it with an organisation. */
+        unshare: { fields: ({ orgId }, o) => ({ sharing: { orgIds: o.sharing.orgIds.filter((x) => x !== orgId) } }) },
+        /** Ask the club to look again; one request is open at a time. */
+        requestReassessment: {
+          refuse: (o) =>
+            o.reassessments.some((r) => r.status === 'requested') ? 'a reassessment is already requested' : null,
+          fields: ({ reassessment }, o) => ({ reassessments: [...o.reassessments, reassessment] }),
+        },
+        /** The club answers the open request, once. */
+        completeReassessment: {
+          refuse: (o, { reassessmentId }) =>
+            o.reassessments.some((r) => r.id === reassessmentId && r.status === 'requested')
+              ? null
+              : `reassessment ${reassessmentId} is not awaiting an answer`,
+          fields: ({ reassessmentId, outcome }, o) => ({
+            reassessments: o.reassessments.map((r) =>
+              r.id === reassessmentId ? { ...r, status: 'completed', outcome } : r,
+            ),
+          }),
+        },
+      },
+    ),
     byId: objectiveById,
     /** The player's objectives, oldest first. */
     forPlayer: objectivesWhere('player_id = ?'),
@@ -1241,14 +1254,54 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
         writePlan(st, r);
         return planById(r.id);
       }),
-    /** `update(id, change)`: the player, owner, author, origin and creation never change; the history only grows. */
-    update: updater({
-      table: 'development_plans',
-      type: typePlan,
-      byId: planById,
-      immutable: ['id', 'playerId', 'owner', 'createdBy', 'originObjectiveId', 'createdAt'],
-      write: (next, stored) => writePlan(st, next, { known: stored.history.length }),
-    }),
+    ...actsOn(
+      {
+        table: 'development_plans',
+        type: typePlan,
+        byId: planById,
+        write: (next, stored) => writePlan(st, next, { known: stored.history.length }),
+      },
+      {
+        /** Edit the plan's title, visibility, dates or template at `at`. */
+        revise: {
+          fields: editOf('development_plans', [
+            'title',
+            'visibility',
+            'startDate',
+            'nextReviewAt',
+            'endDate',
+            'templateId',
+          ]),
+        },
+        /** Move the plan to `status` at `at`; completing or archiving it records when. */
+        move: {
+          fields: ({ status, at }) => ({
+            status,
+            updatedAt: at,
+            ...(status === 'completed' ? { completedAt: at } : {}),
+            ...(status === 'archived' ? { archivedAt: at } : {}),
+          }),
+        },
+        /** The player shares the plan with an organisation (sharing twice keeps one share). */
+        share: {
+          fields: ({ orgId, at }, p) => ({
+            sharedWithOrgIds: p.sharedWithOrgIds.includes(orgId) ? p.sharedWithOrgIds : [...p.sharedWithOrgIds, orgId],
+            updatedAt: at,
+          }),
+        },
+        /** The player stops sharing it with an organisation, or with every organisation (no `orgId`). */
+        unshare: {
+          fields: ({ orgId = null, at }, p) => ({
+            sharedWithOrgIds: orgId === null ? [] : p.sharedWithOrgIds.filter((x) => x !== orgId),
+            updatedAt: at,
+          }),
+        },
+        /** A review set the next review date. */
+        scheduleReview: { fields: ({ nextReviewAt, at }) => ({ nextReviewAt, updatedAt: at }) },
+        /** Something in the plan changed (a goal, an action, its evidence or a review). */
+        recordAct,
+      },
+    ),
     byId: planById,
     /**
      * The list candidates (without their history), most recently updated first then id: a player's or a guardian's
@@ -1350,13 +1403,31 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
         writeGoal(st, r);
         return goalById(r.id);
       }),
-    update: updater({
-      table: 'development_goals',
-      type: typeGoal,
-      byId: goalById,
-      immutable: ['id', 'planId', 'playerId', 'originObjectiveId', 'createdBy', 'createdAt'],
-      write: (next, stored) => writeGoal(st, next, { known: stored.history.length }),
-    }),
+    ...actsOn(
+      {
+        table: 'development_goals',
+        type: typeGoal,
+        byId: goalById,
+        write: (next, stored) => writeGoal(st, next, { known: stored.history.length }),
+      },
+      {
+        /** Edit the goal at `at`: its description, target and dates, and its status with its block reason. */
+        revise: {
+          fields: editOf('development_goals', [
+            'title',
+            'description',
+            'category',
+            'targetDate',
+            'target',
+            'status',
+            'blockReason',
+            'blockNote',
+            'completedAt',
+          ]),
+        },
+        recordAct,
+      },
+    ),
     byId: goalById,
   };
   const decA = (rows) => decodeWithHistory(sqlite, ACTION_SPEC, 'action_id', rows);
@@ -1376,13 +1447,21 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
         writeAction(st, r);
         return actionById(r.id);
       }),
-    update: updater({
-      table: 'development_actions',
-      type: typeAction,
-      byId: actionById,
-      immutable: ['id', 'planId', 'goalId', 'playerId', 'createdBy', 'createdAt'],
-      write: (next, stored) => writeAction(st, next, { known: stored.history.length }),
-    }),
+    ...actsOn(
+      {
+        table: 'development_actions',
+        type: typeAction,
+        byId: actionById,
+        write: (next, stored) => writeAction(st, next, { known: stored.history.length }),
+      },
+      {
+        /** Edit the action at `at`: what it is, when it is due, who does it, and its status. */
+        revise: {
+          fields: editOf('development_actions', ['title', 'type', 'dueAt', 'assignee', 'status', 'completedAt']),
+        },
+        recordAct,
+      },
+    ),
     byId: actionById,
   };
   const decL = (rows) => rows.map((r) => decode(LINK_SPEC, r));
@@ -1423,21 +1502,6 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
   const decR = (rows) => decodeReviews(sqlite, rows);
   const reviewById = one(decR)('SELECT * FROM development_reviews WHERE id = ?');
   const reviewsWhere = (where) => many(decR)(`SELECT * FROM development_reviews WHERE ${where} ORDER BY rowid`);
-  const REVIEW_IMMUTABLE = [
-    'id',
-    'planId',
-    'playerId',
-    'reviewerKind',
-    'reviewedBy',
-    'orgId',
-    'reviewedAt',
-    'sharedSummary',
-    'internalNote',
-    'goalSnapshots',
-    'nextReviewAt',
-    'supersedes',
-    'createdAt',
-  ];
   const reviews = {
     create: (raw) =>
       operation(() => {
@@ -1466,21 +1530,23 @@ export function createDevelopmentRepository({ sqlite, unit = null, now = Date.no
         writeReview(st, r, { isNew: true });
         return reviewById(r.id);
       }),
-    /** `update(id, change)`: a review is append-only; only its sharing with the player and its history change. */
-    update: updater({
-      table: 'development_reviews',
-      type: typeReview,
-      byId: reviewById,
-      immutable: REVIEW_IMMUTABLE,
-      check: (next, stored) => {
-        if (
-          stored.sharedWithPlayerAt !== null &&
-          (next.sharedWithPlayerAt !== stored.sharedWithPlayerAt || !same(next.shareScopes, stored.shareScopes))
-        )
-          throw refusal('DEVELOPMENT_INPUT_INVALID', `development_reviews ${stored.id}: a review is shared once`);
+    ...actsOn(
+      {
+        table: 'development_reviews',
+        type: typeReview,
+        byId: reviewById,
+        write: (next, stored) => writeReview(st, next, { isNew: false, known: stored.history.length }),
       },
-      write: (next, stored) => writeReview(st, next, { isNew: false, known: stored.history.length }),
-    }),
+      {
+        /** Share the review's summary with the player at `at`, with these scopes; a review is shared once. */
+        share: {
+          refuse: (r) => (r.sharedWithPlayerAt !== null ? 'a review is shared once' : null),
+          fields: ({ at, scopes }) => ({ sharedWithPlayerAt: at, shareScopes: scopes }),
+        },
+        /** The history alone (a later review superseded this one). */
+        recordAct,
+      },
+    ),
     byId: reviewById,
   };
 
