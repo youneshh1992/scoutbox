@@ -1,5 +1,5 @@
 // Test fixtures: signing packages, completed signings, follow-ups and outcome reports in the EXACT shapes the
-// writers produce (domains/recruitment/signings/index.mjs and signing.mjs; domains/operations/followUps.mjs the follow-ups, reports
+// writers produce (the modules in domains/recruitment/signings/; domains/operations/followUps.mjs the follow-ups, reports
 // and confirmations). Synthetic ids and names only. The ids agree with the other recruitment fixtures: case-1 is the
 // room of pl-adult with the draft offer rof-1 (revision rofr-1); org-pro, staff usr-1 (Maria).
 import { NOW } from './coreIdentityTestFixtures.mjs';
@@ -29,7 +29,7 @@ export const shist = (id, at, action, detail = null, by = BY) => ({
   by: { kind: by.kind, id: by.id ?? null, name: by.name ?? null },
   detail,
 });
-/** domains/recruitment/signings/index.mjs storeDocument() — the document object on a revision. */
+/** domains/recruitment/signings/shared.mjs storeDocument() — the document object on a revision. */
 export const sdoc = (id, over = {}) => ({
   id,
   evidenceId: 'ver-sgn-1',
@@ -67,7 +67,7 @@ export const parties = (over = {}) => [
     ...(over.CLUB_SIGNATORY ?? {}),
   },
 ];
-/** domains/recruitment/signings/index.mjs — revision 1 as the start route builds it. */
+/** domains/recruitment/signings/clubRoutes.mjs — revision 1 as the start route builds it. */
 export const srevision = (over = {}) => ({
   id: 'spr-1',
   revisionNumber: 1,
@@ -86,7 +86,7 @@ export const srevision = (over = {}) => ({
   supersededByRevisionId: null,
   ...over,
 });
-/** domains/recruitment/signings/index.mjs — the package literal of the start route (history pushed right after). */
+/** domains/recruitment/signings/clubRoutes.mjs — the package literal of the start route (history pushed right after). */
 export const draftPackage = (over = {}) => ({
   id: 'spk-1',
   orgId: ORG.id,
@@ -262,7 +262,7 @@ export const canonicalSigning = (over = {}) => ({
   policyVersion: 1,
   ...over,
 });
-/** domains/recruitment/signings/index.mjs — the legacy literal (a recruitment that never went through an Offer): no method, no contract. */
+/** domains/recruitment/signings/shared.mjs — the legacy literal (a recruitment that never went through an Offer): no method, no contract. */
 export const legacySigning = (over = {}) => ({
   id: 'sign-legacy',
   playerId: 'pl-child1',
