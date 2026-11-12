@@ -19,7 +19,6 @@ import { createMedia, createMediaSigning } from './domains/media/index.mjs';
 import { createAccountServices, createAccounts, createSessions } from './domains/identity/index.mjs';
 import { createActivity, createDevelopment } from './domains/development/index.mjs';
 import { vouchView } from './domains/verification/vouches.mjs';
-import { createInsights } from './domains/discovery/insights.mjs';
 import { createScouting } from './domains/scouting/index.mjs';
 import { createOperations } from './domains/operations/index.mjs';
 import { createIntegrations } from './domains/integrations/index.mjs';
@@ -29,22 +28,6 @@ import { createGroups } from './domains/groups/index.mjs';
 import { createVerification, createVouches } from './domains/verification/index.mjs';
 import { createSafety, createSafetyConsole } from './domains/safety/index.mjs';
 import { createPassport } from './domains/passport/index.mjs';
-import { registerRecruitmentRooms } from './domains/recruitment/rooms/index.mjs';
-import { registerDiscovery } from './domains/discovery/index.mjs';
-import { registerMatching } from './domains/discovery/matching/index.mjs';
-import { registerSavedSearches } from './domains/discovery/savedSearches.mjs';
-import { registerAnalytics } from './domains/recruitment/analytics/index.mjs';
-import { registerLifecycle } from './domains/recruitment/lifecycle/index.mjs';
-import { createAgentAccess } from './domains/agents/access.mjs';
-import { registerAgent } from './domains/agents/core/index.mjs';
-import { registerCompliance } from './domains/agents/compliance/index.mjs';
-import { registerTransactions } from './domains/agents/transactions/index.mjs';
-import { registerIntegration } from './domains/agents/integration/index.mjs';
-import { registerOffers } from './domains/recruitment/offers/index.mjs';
-import { registerSigning } from './domains/recruitment/signings/index.mjs';
-import { registerJourneyRoutes } from './domains/recruitment/lifecycle/journeyRoutes.mjs';
-import { createVerificationProvider } from './domains/agents/compliance/provider.mjs';
-import { createEvidenceProvider } from './domains/recruitment/lifecycle/evidence.mjs';
 import { COMBINE_PROTOCOLS, combineVerifiedProtocols } from './domains/development/public.mjs';
 import { agentAuditRows, complianceAuditRows } from './domains/agents/public.mjs';
 import { OPEN_ROOM_STATUSES } from './domains/recruitment/public.mjs';
@@ -63,14 +46,11 @@ import { createFaultLayer } from './domains/platform/faults.mjs';
 import { integrityReport } from './domains/platform/integrity.mjs';
 import { orgPlayerView } from './views/playerViews.mjs';
 import { DRILLS } from './domains/development/record.mjs';
-import { registerRequestInbox } from './domains/recruitment/inbox.mjs';
-import { registerPlayerSearch } from './domains/discovery/search.mjs';
-import { registerFilmRoom } from './domains/discovery/filmRoom.mjs';
+import { createDiscovery, createPlayerInsights } from './domains/discovery/index.mjs';
 import { requestForRecipient } from './domains/recruitment/requests.mjs';
-import { createRecruitment } from './domains/recruitment/index.mjs';
-import { registerLegacySigning } from './domains/recruitment/signings/legacy.mjs';
+import { createCaseWorkflow, createRecruitment, createRooms } from './domains/recruitment/index.mjs';
+import { createAgents } from './domains/agents/index.mjs';
 import { ledgerView } from './domains/recruitment/ledger.mjs';
-import { grassrootsOrgOnly } from './domains/development/guards.mjs';
 import { createEnterprise } from './domains/enterprise/index.mjs';
 import { requestInstrumentation } from './domains/platform/metrics.mjs';
 import {
@@ -86,7 +66,6 @@ import {
 import { ageOn, isAdult, visibleToOrg, computeTrustScore, trustBreakdown, haversineKm } from './domain.mjs';
 
 import { createLookups } from './domains/platform/lookups.mjs';
-import { createMatchFactsKeeper } from './domains/discovery/matchFacts.mjs';
 
 const PORT = process.env.PORT || 4000;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -407,7 +386,7 @@ const { notifier, notify, openChannel } = createMessaging({
 
 const { recordActivity, refreshJourneyBadges } = createActivity({ players, notify });
 const { publishedVouchesFor, vouchesFor } = createVouches({ verificationReads });
-const insightsFor = createInsights({ ledger: safetyAudit.ledger });
+const insightsFor = createPlayerInsights({ safetyAudit });
 
 // Public view of a player for a given org: a positive allowlist (views/playerViews.mjs), never a spread of the
 // record. It applies the minor-visibility rules, guardian-managed contact, player- and guardian-controlled medical
@@ -450,38 +429,6 @@ const { issueRecruitmentRequest, issueAcceptedTrial, contactReplyFrom, canonical
   notify,
   broadcast,
   ledgerAppend,
-});
-registerPlayerSearch({
-  orgRouter,
-  players,
-  safetyAudit,
-  findPlayer,
-  isBlocked,
-  ledgerAppend,
-  broadcast,
-  nextId,
-  playerViewForOrg,
-});
-registerFilmRoom({
-  orgRouter,
-  players,
-  recruitment,
-  safetyAudit,
-  findPlayer,
-  isBlocked,
-  unit,
-  ledgerAppend,
-  notify,
-  broadcast,
-  playerViewForOrg,
-});
-const { checkSavedSearches } = registerSavedSearches({
-  byId,
-  orgRouter,
-  notify,
-  nextId,
-  playerViewForOrg,
-  savedSearches: operations.savedSearches,
 });
 // Development: the grassroots club and journey, the player's record, objectives, Box Cam and the Combine, the Hub.
 const developmentDomain = createDevelopment({
@@ -528,19 +475,6 @@ const developmentDomain = createDevelopment({
   ledgerAppend,
 });
 const { pathwayRecord } = developmentDomain;
-
-// The attributed Trust & Safety lane. Every route here resolves a specific authenticated reviewer (never the shared
-// key) before it runs; the middleware comes from registerCompliance() below.
-let complianceDomain = null;
-const tsRouter = express.Router();
-app.use(
-  '/ts',
-  (req, res, next) =>
-    complianceDomain
-      ? complianceDomain.reviewerAuth(req, res, next)
-      : res.status(503).json({ error: 'REVIEWER_LANE_NOT_READY' }),
-  tsRouter,
-);
 
 // Sessions die at once (API, and media on the next byte) and the user's open streams close. The user ROW is kept
 // (removedAt) so history stays attributed. Inside a unit (the staff removal) the sessions go with its commit and the
@@ -877,68 +811,29 @@ const passportDomain = createPassport({
   ledgerAppend,
 });
 
-// Recruitment Rooms: the CLUB's private decision layer over one player.
-// Registered last of all because it composes every layer beneath it. It owns
-// no player truth: the Passport, Trust Score, Combine, Box Cam and evidence it
-// shows are the canonical projections, fetched through their own gates on
-// every read. A Room grants no access to anything.
-// The recruitment evidence provider: one, shared by the Rooms' own status route (which can name an evidence-bearing
-// status), the lifecycle, signings, offers and journeys, so every status path carries the same burden.
-const recruitmentEvidence = createEvidenceProvider(recruitmentReads);
-const roomsDomain = registerRecruitmentRooms({
-  recruitmentEvidence,
-  rateLimit,
-  faults: faultLayer, // the development fault seam inside the ONE lifecycle writer
-  byId,
-  players,
-  guardians,
-  users,
-  safetyReads,
-  scoutingReads,
-  verificationReads,
-  agentReads,
-  complianceReads,
-  developmentReads,
-  development,
-  boxCamReads,
-  discoveryReads,
-  insightReads,
-  grassrootsReads,
-  recruitmentReads,
-  app,
+// Recruitment Rooms: the club's private decision layer over one player, composed from every layer beneath it, and the
+// recruitment analytics over them.
+const roomsDomain = createRooms({
   orgRouter,
-  playerRouter,
-  guardianRouter,
   adminRouter,
-  nextId,
-  notify,
-  ledgerAppend,
-  broadcast,
-  safetyAudit,
+  users,
+  players,
   recruitmentCases,
-  unit,
+  recruitmentReads,
+  scoutingReads,
+  boxCamReads,
+  insightReads,
+  discoveryReads,
+  byId,
   findPlayer,
   isBlocked,
+  rateLimit,
+  faults: faultLayer, // the development fault seam inside the one lifecycle writer
   moderateOrRefuse,
   playerViewForOrg,
-  storage,
-  publishedVouchesFor,
-  pathwayRecord,
-  DRILLS,
-  DATA_DIR,
-  grassrootsOrgOnly,
-  guardianManagedOnly,
-  safeguardingCertified,
-  sessionFor,
-  mailer,
-  orgSafe,
-  recordActivity,
-  revokeOrgUserAccess,
-  // Canonical source projections, each keeping its own gate.
   assemblePassport: passportDomain.assemblePassport,
   buildFootballPassport: passportDomain.buildFootballPassport,
-  // The Passport CONTENT revision, recorded in decision snapshots.
-  passportRevisionOf: passportDomain.passportRevisionOf,
+  passportRevisionOf: passportDomain.passportRevisionOf, // the Passport content revision decision snapshots record
   buildTrustProfile: passportDomain.buildTrustProfile,
   safeTrustProjection: passportDomain.safeTrustProjection,
   trustSnapshotOf: passportDomain.trustSnapshotOf,
@@ -950,110 +845,54 @@ const roomsDomain = registerRecruitmentRooms({
   boxPrefsFor: developmentDomain.boxPrefsFor,
   requestEvidenceGap: insightDomain.requestEvidenceGap,
   computeEvidenceGaps: insightDomain.computeEvidenceGaps,
+  unit,
+  nextId,
+  notify,
+  broadcast,
+  ledgerAppend,
 });
+const { recruitmentEvidence } = roomsDomain;
 
-// Second Look + Nobody Missed: two deterministic workflow systems over
-// everything beneath them. Second Look asks whether something materially
-// changed since THIS club last decided; Nobody Missed asks whether eligible
-// players match the club's own stated criteria without ever entering its
-// workflow. Neither judges talent, neither ranks, and neither is player-facing:
-// the module registers no player, guardian or public route at all.
-const discoveryDomain = registerDiscovery({
-  rateLimit,
-  byId,
+// Discovery: search, the Film Room, saved searches, Second Look, Nobody Missed and Explainable Matching. It never
+// mutates the pipeline itself: a Room is created or reopened through the Rooms' own seams.
+const { checkSavedSearches, matchFactsKeeper } = createDiscovery({
+  orgRouter,
   players,
-  guardians,
-  users,
-  safetyReads,
+  recruitment,
+  discovery,
+  discoveryReads,
+  matchFacts,
+  savedSearches: operations.savedSearches,
+  notifications,
+  safetyAudit,
   scoutingReads,
   verificationReads,
   agentReads,
-  complianceReads,
-  developmentReads,
-  development,
   boxCamReads,
-  discoveryReads,
   insightReads,
-  grassrootsReads,
   recruitmentReads,
-  app,
-  orgRouter,
-  playerRouter,
-  guardianRouter,
-  adminRouter,
-  discovery,
-  unit,
-  matchFacts, // matching and Nobody Missed are queries over the stored facts
-  combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known
-  nextId,
-  notify,
-  ledgerAppend,
-  broadcast,
-  safetyAudit,
+  sqlite: store.sqlite,
+  byId,
   findPlayer,
   isBlocked,
-  moderateOrRefuse,
+  rateLimit,
   playerViewForOrg,
-  storage,
-  sessionFor,
-  mailer,
-  orgSafe,
-  recordActivity,
-  revokeOrgUserAccess,
-  grassrootsOrgOnly,
-  guardianManagedOnly,
-  safeguardingCertified,
-  publishedVouchesFor,
-  pathwayRecord,
-  DRILLS,
-  DATA_DIR,
-  // Canonical projections and the Room bridges — this module never mutates
-  // the pipeline itself.
+  combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id), // a brief's Combine protocols are refused unless known
   assemblePassport: passportDomain.assemblePassport,
-  buildFootballPassport: passportDomain.buildFootballPassport,
   buildTrustProfile: passportDomain.buildTrustProfile,
   safeTrustProjection: passportDomain.safeTrustProjection,
   trustSummaryFor: passportDomain.trustSummaryFor,
+  trustPolicyVersion: TRUST_SCORE_POLICY_VERSION,
+  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
   combineProjection: developmentDomain.combineProjection,
   reopenRoom: roomsDomain.reopenRoom,
   createRoomForPlayer: roomsDomain.createRoomForPlayer,
-  // Canonical source-change clocks (position, current club).
-  sourceChangesFor: sourceChanges.sourceChangesFor,
-});
-
-// ------------------------------------------------- Explainable Matching
-// Registered AFTER Second Look so it reuses the very same match reads (the
-// stored facts, domains/discovery/matching/query.mjs) and the canonical Room
-// bridge. There is deliberately no second matching engine and no second
-// Room-creation path. `domainCtx` (the discovery context plus the reads) is the context the later domains spread.
-const domainCtx = {
-  ...discoveryDomain,
-  recruitmentReads,
-  scoutingReads,
-  verificationReads,
-  agentReads,
-  developmentReads,
-  development,
-  boxCamReads,
-  discoveryReads,
-  insightReads,
-  grassrootsReads,
-  users,
-  notifications, // the Agent module's inbox and unread count read the repository
-  combineProtocolIds: () => COMBINE_PROTOCOLS.map((p) => p.id),
-};
-registerMatching(domainCtx);
-
-// The match facts. Triggers on their inputs mark a player; the keeper re-derives the marked players before every
-// COMMIT, so matching and Nobody Missed read current facts in SQL. Time-only changes (an expiry, an agreement's term,
-// adulthood) are the minute sweep's.
-const matchFactsKeeper = createMatchFactsKeeper({
-  ...domainCtx,
-  matchFacts,
-  sqlite: store.sqlite,
-  trustSummaryFor: passportDomain.trustSummaryFor,
-  trustPolicyVersion: TRUST_SCORE_POLICY_VERSION,
-  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
+  sourceChangesFor: sourceChanges.sourceChangesFor, // the canonical source-change clocks (position, current club)
+  unit,
+  nextId,
+  notify,
+  broadcast,
+  ledgerAppend,
 });
 matchFactsKeeper.start();
 setInterval(() => {
@@ -1064,218 +903,112 @@ setInterval(() => {
   }
 }, 60_000).unref();
 
-// ------------------------------------------------ Recruitment Analytics
-// Registered LAST, because it reads everything and owns nothing. There is no
-// analytics store: every figure is a projection over the Rooms, decisions,
-// briefs, reviews, watchlists and trials the modules above already hold, so a
-// number on the Director Dashboard cannot disagree with the record it came
-// from. It measures the recruitment PROCESS -- never a player, never a
-// colleague.
-registerAnalytics(domainCtx);
-
 // ------------------------------------------------------ Agent workspace
-// Agency membership, role capabilities, the agent's profile and the concealing agreement lookup: every agent
-// domain below checks through these.
-const agentAccess = createAgentAccess({ agentCore, unit, nextId, broadcast });
-// One verification provider for the agent core (facet submissions) and compliance (rechecks), so there is one
-// path to a VERIFIED facet.
-const verificationProvider = createVerificationProvider({
-  synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1',
-});
-
-// --------------------------------------------- Conflict & Compliance Engine
-// Per-reviewer Trust & Safety identity, the versioned jurisdiction policies, the Conflict Engine, the consent
-// ledger, attributed manual review and the minors gate. It re-authorises every regulated mutation when it happens.
-complianceDomain = registerCompliance({
-  ...domainCtx,
-  isAdult,
-  tsRouter,
-  verificationProvider,
-  hashPassword,
-  verifyPassword,
-  createSession,
-  sessionFor,
+// Agency access, the Conflict & Compliance Engine (per-reviewer Trust & Safety identity, the versioned jurisdiction
+// policies, the consent ledger, manual review and the minors gate, re-authorising every regulated act when it
+// happens), the cross-app integration seam, the transaction workspace and the agent core.
+const agentsDomain = createAgents({
+  app,
+  orgRouter,
+  playerRouter,
+  adminRouter,
+  users,
+  players,
   sessions,
-  devLogins: DEV_LOGINS,
-  access: agentAccess,
+  channels, // a linked thread's own authorisation
+  notifications, // the agent inbox and its unread count
   agentCore,
-  unit,
+  agentTransactions,
   compliancePolicies,
   complianceRecords,
-});
-
-// ------------------------------------------------ Agent cross-app integration
-// The ONE layer that answers "may this agent see or do this, on this surface,
-// for this client, right now?" — for Contact routing, Trial projection, the club
-// Agent-presence badge, an opportunity share and a transaction handoff. It owns
-// no store, declares no migration and duplicates no rule: the basis is the Agent
-// core's access predicate, the licence is its facets, the policy verdict is the
-// compliance engine's through one narrow seam, and the client's disclosure choices are a field of the
-// agreement they are choices about. It reads the cases, agreements and transactions through their
-// repositories, so it registers before the lifecycle and the transactions, which take its seam.
-const integrationDomain = registerIntegration({
-  ...domainCtx,
-  isAdult,
-  // The Rooms' own concealing case lookup and their own role ranking, passed rather
-  // than re-derived — the handoff must be as invisible to a foreign club as the
-  // case itself is.
-  findRoomForRequest: roomsDomain.findRoomForRequest,
-  access: agentAccess,
-  compliance: complianceDomain.integrationSeam,
   recruitmentCases, // the transaction handoff is an explicit write of its case
-  agentCore,
-  unit, // an opportunity share is an explicit write of its agreement
-  transactionReads: agentTransactions.reads, // the live transaction covering a case
-});
-
-// ------------------------------------------------- recruitment lifecycle
-// The recruitment case is canonical and the Room is a facet of it. This is the
-// OPERATING layer over them — named semantic actions with server-validated
-// transitions, and one viewer-aware projection over the records that already
-// exist. It writes status only through the Rooms' single writer
-// (ctx.applyLifecycleTransition), so `case.stage` and `room.status` cannot
-// disagree.
-const lifecycleDomain = registerLifecycle({
-  integration: integrationDomain.seam,
-  recruitmentEvidenceProvider: recruitmentEvidence,
-  recruitmentCases, // the formal decision row enters through the repository (and leaves it on a transport failure)
-  recruitmentContactsOffers,
-  recruitment,
-  unit,
-  afterCommit: (fn) => store.afterCommit(fn),
-  ...domainCtx,
-  operations, // an injected transport failure is used up through the delivery bookkeeping
-  isAdult,
-  // The Rooms' seams are not part of domainCtx, so they are passed explicitly: findRoom is the 404-concealing lookup
-  // and applyLifecycleTransition the single status writer, and the lifecycle must use exactly those two.
-  findRoomForRequest: roomsDomain.findRoomForRequest,
-  applyLifecycleTransition: roomsDomain.applyLifecycleTransition,
-  roomIsRoom: roomsDomain.roomIsRoom,
-  // The decision-time evidence-confidence snapshot, captured through exactly
-  // the code the Rooms' advisory recommendation uses.
-  captureRoomSnapshot: roomsDomain.captureRoomSnapshot,
-  // The ONE writer of a recipient-visible request row, so a Contact send
-  // reaches the Inbox through exactly the path the direct request route uses.
-  issueRecruitmentRequest,
-  // Trial. The Combine consent rule is reused unchanged for Box
-  // Cam evidence links (a trial is not consent to a player's home footage);
-  // the test-provider gate is the same flag Box Cam reads; minors never act on
-  // their own trials.
-  combineOrgMaySeeResults: developmentDomain.combineOrgMaySeeResults,
-  boxPrefsFor: developmentDomain.boxPrefsFor,
-  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
-  guardianManagedOnly,
-});
-
-// ------------------------------------------------ Agent Transaction Workspace
-// The multi-party workspace (player, agent, engaging and releasing club): the transaction, its parties, its state
-// machine, its documents and its timeline. The compliance verdict comes from the compliance engine's
-// transaction seam and is re-derived at every material change.
-const transactionsDomain = registerTransactions({
-  ...domainCtx,
-  isAdult,
-  tsRouter,
-  access: agentAccess,
-  compliance: complianceDomain.transactionSeam,
-  integration: integrationDomain.seam, // the handoff binding and the duplicate rule
-  agentTransactions,
-  unit,
-  channels, // a linked thread's own authorisation
-});
-
-// ------------------------------------------------------ Agent core
-// Agent profiles, agency affiliations and client-confirmed representation relationships. It asks compliance for
-// review items and the verdict on an Approach, and an agency's audit feed carries the compliance and transaction
-// rows beside its own.
-const agentCoreDomain = registerAgent({
-  ...domainCtx,
-  isAdult,
-  verificationProvider,
-  agentCore,
-  unit,
-  access: agentAccess,
-  compliance: complianceDomain.coreReviews,
-  auditSources: [complianceDomain.complianceAuditRows, transactionsDomain.agencyAuditRows],
-});
-
-// ----------------------------------------------- Signing & Contract Completion
-// The ONE writer of the signings, of the lifecycle move to
-// `signed` and of a player's `contractStatus` for a recruitment signing.
-// A package is opened over an ACCEPTED Offer revision, read from the offers
-// repository, so it registers before the Offer module, whose views carry its
-// read-only signing summary.
-const signingsDomain = registerSigning({
-  ...domainCtx,
-  isAdult,
-  storage,
-  ledgerAppend,
-  // The player's level, contract status and availability are columns written through the identity repository; a completion is one unit of work.
-  players,
-  unit,
-  afterCommit: (fn) => store.afterCommit(fn),
-  signingsFollowUps,
-  clubSetup, // a grassroots signing adds the squad row through the club setup repository
-  billing,
-  refreshJourneyBadges,
-  findRoomForRequest: roomsDomain.findRoomForRequest,
-  applyLifecycleTransition: roomsDomain.applyLifecycleTransition,
-  recruitmentCases, // the case's signing link and history are written in the completion unit
-  recruitmentEvidenceProvider: recruitmentEvidence,
-  access: agentAccess,
-  integration: integrationDomain.seam,
-  evidence: { storeFile: verificationDomain.storeEvidenceFile, add: verificationDomain.addEvidence },
-  faults: faultLayer,
-});
-registerLegacySigning({
-  orgRouter,
-  signings: signingsFollowUps.signings,
+  agentReads,
+  verificationReads,
+  scoutingReads,
+  grassrootsReads,
+  recruitmentReads,
+  byId,
   findPlayer,
   isBlocked,
   rateLimit,
+  sessionFor,
+  createSession,
+  hashPassword,
+  verifyPassword,
+  devLogins: DEV_LOGINS,
+  moderateOrRefuse,
+  playerViewForOrg,
+  orgSafe,
+  revokeOrgUserAccess,
+  findRoomForRequest: roomsDomain.findRoomForRequest,
+  verificationSynthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1',
   unit,
-  recordCompletedSigning: signingsDomain.recordCompletedSigning,
-  legacyRecordingBlocker: signingsDomain.legacyRecordingBlocker,
+  nextId,
+  notify,
+  broadcast,
 });
 
-// ------------------------------------------------- canonical Offer workflow
-// The authoritative Offer domain. A formal decision to progress AUTHORISES
-// considering an Offer and creates none; an explicit club act drafts one;
-// issuing freezes an exact immutable revision and moves the case to
-// `offer_made`; the recipient's own acceptance or decline — and nothing else
-// — moves it to `offer_accepted` / `offer_declined`. It moves the case only
-// through the ONE validator (with the real evidence provider) and the ONE
-// status writer; it never writes `signed`, never touches the signings, never
-// negotiates and never lets an agent act for a player. It reads the integration
-// seam (an agent's basis and scope), the transactions' readiness seam and the
-// signing summary.
-const offersDomain = registerOffers({
-  ...domainCtx,
-  recruitmentCases, // the case's history entries are written in the offer's unit
+// ------------------------------------------------------ case work
+// The lifecycle, signings, Offers, the journeys and the Inbox: every status move goes through the one evidence
+// provider and the Rooms' one status writer.
+const caseWorkflow = createCaseWorkflow({
+  app,
+  orgRouter,
+  playerRouter,
+  guardianRouter,
+  adminRouter,
+  users,
+  players, // a completion writes the player's level, contract status and availability through the identity repository
+  guardians,
+  recruitment,
+  recruitmentCases,
   recruitmentContactsOffers,
-  unit,
-  afterCommit: (fn) => store.afterCommit(fn),
-  faults: faultLayer, // the development fault seam after an answer moved the case
-  isAdult,
+  signingsFollowUps,
+  clubSetup, // a grassroots signing adds the squad row through the club setup repository
+  operations, // an injected transport failure is used up through the delivery bookkeeping
+  notifications,
+  safetyReads,
+  scoutingReads,
+  verificationReads,
+  agentReads,
+  boxCamReads,
+  recruitmentReads,
+  byId,
+  findPlayer,
+  isBlocked,
+  rateLimit,
+  faults: faultLayer,
   storage,
+  mailer,
+  billing,
+  guardianManagedOnly,
+  moderateOrRefuse,
+  safeTrustProjection: passportDomain.safeTrustProjection,
+  // A trial is not consent to a player's home footage: the Combine consent rule and the Box Cam test-provider gate are
+  // reused unchanged for evidence links.
+  combineOrgMaySeeResults: developmentDomain.combineOrgMaySeeResults,
+  boxPrefsFor: developmentDomain.boxPrefsFor,
+  testProviderEnabled: process.env.BOX_CAM_TEST_PROVIDER === '1',
+  refreshJourneyBadges,
+  recruitmentEvidenceProvider: recruitmentEvidence,
   findRoomForRequest: roomsDomain.findRoomForRequest,
   applyLifecycleTransition: roomsDomain.applyLifecycleTransition,
-  recruitmentEvidenceProvider: recruitmentEvidence,
-  access: agentAccess,
-  integration: integrationDomain.seam,
-  transactions: transactionsDomain,
-  signingSummary: signingsDomain.summaryForOffer,
-});
-
-// ------------------------------------------------------ journey audiences
-// The player's, the guardian's and an authorized agent's journeys, and the
-// notification target resolver. Registered after the Agent, Offer and signing modules because the agent
-// route proves its basis through the same seams the Offer and signing agent
-// routes use. Reads only.
-const journeyCtx = registerJourneyRoutes({
-  ...domainCtx,
-  recruitmentEvidenceProvider: recruitmentEvidence,
-  access: agentAccess,
-  integration: integrationDomain.seam,
+  roomIsRoom: roomsDomain.roomIsRoom,
+  captureRoomSnapshot: roomsDomain.captureRoomSnapshot,
+  issueRecruitmentRequest,
+  issueAcceptedTrial,
+  contactReplyFrom,
+  openChannel,
+  access: agentsDomain.access,
+  integration: agentsDomain.integration,
+  offerReadinessFor: agentsDomain.offerReadinessFor,
+  evidence: { storeFile: verificationDomain.storeEvidenceFile, add: verificationDomain.addEvidence },
+  unit,
+  afterCommit: (fn) => store.afterCommit(fn),
+  nextId,
+  notify,
+  broadcast,
+  ledgerAppend,
 });
 const notificationFeed = createNotificationFeed({
   orgRouter,
@@ -1283,12 +1016,11 @@ const notificationFeed = createNotificationFeed({
   guardianRouter,
   notifications,
   notifier,
-  notificationTargetFor: journeyCtx.notificationTargetFor,
+  notificationTargetFor: caseWorkflow.notificationTargetFor,
 });
 
 // ------------------------------------------------------ players and children
-// Registered last: the export reads the feed, the erasure reaches every domain that holds a player, and the inbox
-// answers through the lifecycle and opens threads.
+// Registered last: the export reads the notification feed, and the erasure reaches every domain that holds a player.
 createAccountServices({
   app,
   playerRouter,
@@ -1340,33 +1072,12 @@ createAccountServices({
     (id) => scoutingAssessments.assessments.redactPlayer(id),
     (id) => recruitmentContactsOffers.contacts.redactPlayer(id), // the reply's words go; the contact stays
     (id) => grassroots.openTrials.redactPlayer(id),
-    agentCoreDomain.onPlayerDeleted,
-    complianceDomain.onPlayerDeleted,
-    transactionsDomain.onPlayerDeleted,
-    offersDomain.onPlayerDeleted,
-    signingsDomain.onPlayerDeleted,
+    ...agentsDomain.onPlayerDeleted,
+    ...caseWorkflow.onPlayerDeleted,
     // Every thread of the player, guardian–club threads included (D-B, docs/decisions.md).
     (id) => channels.deleteForPlayer(id),
     (id) => notifications.deleteForAudience('player', id), // the preferences are kept, by decision
   ],
-});
-registerRequestInbox({
-  playerRouter,
-  guardianRouter,
-  requests: recruitment.requests,
-  findPlayer,
-  unit,
-  rateLimit,
-  isBlocked,
-  contactReplyFrom,
-  requestForRecipient,
-  lifecycle: lifecycleDomain,
-  openChannel,
-  issueAcceptedTrial,
-  ledgerAppend,
-  notify,
-  broadcast,
-  guardianManagedOnly,
 });
 
 // -------------------------------------------------------- operator surface

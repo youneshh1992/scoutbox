@@ -1,81 +1,153 @@
-// Registered last because both systems read the whole stack. Every route is on the authenticated `orgRouter`; there
-// is no player, guardian or public route here.
-import { buildRouteHelpers } from '../platform/routeHelpers.mjs';
-import { metrics } from '../platform/metrics.mjs';
-import { registerSecondLook } from './secondLook.mjs';
-import { registerNobodyMissed } from './nobodyMissed.mjs';
-import {
-  SECOND_LOOK_POLICY_VERSION,
-  EVALUATION_COVERAGE_POLICY_VERSION,
-  CHANGE_TYPES,
-  REASON_CHANGE_MAP,
-  PROHIBITED_BRIEF_FIELDS,
-  EVIDENCE_REQUIREMENTS,
-  POSITIONS,
-  POSITION_GROUP_OF,
-  SECOND_LOOK_STATUSES,
-  SECOND_LOOK_TRANSITIONS,
-  BRIEF_STATUSES,
-  BRIEF_TRANSITIONS,
-} from './shared.mjs';
+// Discovery: player search and the Film Room, saved searches, recruitment briefs with Second Look and Nobody Missed,
+// Explainable Matching and its watchlists, and the stored match facts they all query.
+import { needs, strictContext } from '../platform/deps.mjs';
+import { registerFilmRoom } from './filmRoom.mjs';
+import { createInsights } from './insights.mjs';
+import { createMatchFactsKeeper } from './matchFacts.mjs';
+import { registerMatching } from './matching/index.mjs';
+import { registerSavedSearches } from './savedSearches.mjs';
+import { registerPlayerSearch } from './search.mjs';
+import { registerDiscovery } from './workflows.mjs';
 
-// Discovery stores only workflow: eligibility and material changes are derived on every read so a block, removal or
-// visibility change takes effect immediately.
+/** `insightsFor(playerId)`: what the Discovery Ledger says about who has looked at a player. No routes. */
+export function createPlayerInsights(deps) {
+  const { safetyAudit } = needs('createPlayerInsights', deps, ['safetyAudit']);
+  return createInsights({ ledger: safetyAudit.ledger });
+}
 
-export function registerDiscovery(ctx) {
-  // Boot assertions on the vocabulary tables.
-  for (const [reason, types] of Object.entries(REASON_CHANGE_MAP)) {
-    for (const t of types) {
-      if (!CHANGE_TYPES.includes(t))
-        throw new Error(`Second Look: reason "${reason}" maps to unknown change type "${t}".`);
-    }
-  }
-  for (const p of POSITIONS) {
-    if (!POSITION_GROUP_OF[p]) throw new Error(`Second Look: position "${p}" has no group.`);
-  }
-  const allowed = [
-    'positions',
-    'minAge',
-    'maxAge',
-    'radiusKm',
-    'maxLevel',
-    'foot',
-    'availability',
-    'evidenceRequirements',
-    'minTrustBand',
-    'combineProtocols',
-  ];
-  for (const a of allowed) {
-    if (PROHIBITED_BRIEF_FIELDS.some((p) => a.toLowerCase() === p))
-      throw new Error(`Second Look: "${a}" is both allowed and prohibited.`);
-  }
-  for (const r of EVIDENCE_REQUIREMENTS)
-    if (!r.key || !r.label) throw new Error('Second Look: evidence requirement missing key or label.');
-  for (const s of SECOND_LOOK_STATUSES)
-    if (!SECOND_LOOK_TRANSITIONS[s]) throw new Error(`Second Look: status "${s}" has no transition list.`);
-  for (const s of BRIEF_STATUSES)
-    if (!BRIEF_TRANSITIONS[s]) throw new Error(`Second Look: brief status "${s}" has no transition list.`);
+/**
+ * Search, the Film Room and saved searches; Second Look (has something material changed since this club last
+ * decided?) and Nobody Missed (do eligible players match the club's own criteria without ever entering its workflow?);
+ * and Explainable Matching, which reuses the same stored facts and the Rooms' one Room-creation path. None of them
+ * judges talent or ranks, and none registers a player, guardian or public route. Returns `checkSavedSearches` and the
+ * match facts keeper, which `server.mjs` starts and sweeps.
+ */
+export function createDiscovery(deps) {
+  needs('createDiscovery', deps, [
+    'orgRouter',
+    'players',
+    'recruitment',
+    'discovery',
+    'discoveryReads',
+    'matchFacts',
+    'savedSearches',
+    'notifications',
+    'safetyAudit',
+    'scoutingReads',
+    'verificationReads',
+    'agentReads',
+    'boxCamReads',
+    'insightReads',
+    'recruitmentReads',
+    'sqlite',
+    'byId',
+    'findPlayer',
+    'isBlocked',
+    'rateLimit',
+    'playerViewForOrg',
+    'combineProtocolIds',
+    'assemblePassport',
+    'buildTrustProfile',
+    'safeTrustProjection',
+    'trustSummaryFor',
+    'trustPolicyVersion',
+    'testProviderEnabled',
+    'combineProjection',
+    'reopenRoom',
+    'createRoomForPlayer',
+    'sourceChangesFor',
+    'unit',
+    'nextId',
+    'notify',
+    'broadcast',
+    'ledgerAppend',
+  ]);
+  const d = strictContext('createDiscovery', deps);
+  const { orgRouter, players, safetyAudit, findPlayer, isBlocked, ledgerAppend, broadcast, nextId } = d;
+  const { playerViewForOrg, notify, unit, byId } = d;
+  registerPlayerSearch({
+    orgRouter,
+    players,
+    safetyAudit,
+    findPlayer,
+    isBlocked,
+    ledgerAppend,
+    broadcast,
+    nextId,
+    playerViewForOrg,
+  });
+  registerFilmRoom({
+    orgRouter,
+    players,
+    recruitment: d.recruitment,
+    safetyAudit,
+    findPlayer,
+    isBlocked,
+    unit,
+    ledgerAppend,
+    notify,
+    broadcast,
+    playerViewForOrg,
+  });
+  const { checkSavedSearches } = registerSavedSearches({
+    byId,
+    orgRouter,
+    notify,
+    nextId,
+    playerViewForOrg,
+    savedSearches: d.savedSearches,
+  });
 
-  metrics.secondLook = {
-    second_look_created: 0,
-    second_look_reviewed: 0,
-    second_look_dismissed: 0,
-    second_look_room_reopened: 0,
-    recruitment_brief_created: 0,
-    recruitment_brief_activated: 0,
-    nobody_missed_player_reviewed: 0,
-    nobody_missed_player_dismissed: 0,
-    nobody_missed_player_added_to_room: 0,
-    policyVersion: SECOND_LOOK_POLICY_VERSION,
-    coveragePolicyVersion: EVALUATION_COVERAGE_POLICY_VERSION,
+  const workflowDeps = {
+    orgRouter,
+    players,
+    discovery: d.discovery,
+    discoveryReads: d.discoveryReads,
+    matchFacts: d.matchFacts,
+    scoutingReads: d.scoutingReads,
+    verificationReads: d.verificationReads,
+    boxCamReads: d.boxCamReads,
+    insightReads: d.insightReads,
+    recruitmentReads: d.recruitmentReads,
+    byId,
+    findPlayer,
+    isBlocked,
+    rateLimit: d.rateLimit,
+    combineProtocolIds: d.combineProtocolIds,
+    assemblePassport: d.assemblePassport,
+    buildTrustProfile: d.buildTrustProfile,
+    safeTrustProjection: d.safeTrustProjection,
+    combineProjection: d.combineProjection,
+    reopenRoom: d.reopenRoom,
+    createRoomForPlayer: d.createRoomForPlayer,
+    sourceChangesFor: d.sourceChangesFor,
+    unit,
+    nextId,
+    notify,
+    broadcast,
   };
-  // Counters only: nothing that could identify who was missed or reconsidered.
-  const vmetric = (k, n = 1) => {
-    metrics.secondLook[k] = (metrics.secondLook[k] ?? 0) + n;
-  };
+  const workflows = registerDiscovery(strictContext('createDiscovery', workflowDeps));
+  // Matching shares Second Look's context (its counters included) and adds the notifications it reads.
+  registerMatching(strictContext('createDiscovery', { ...workflows, notifications: d.notifications }));
 
-  const shared = { ...ctx, ...buildRouteHelpers(ctx), vmetric };
-  registerSecondLook(shared);
-  registerNobodyMissed(shared);
-  return shared;
+  // Triggers on their inputs mark a player; the keeper re-derives the marked players before every COMMIT, so matching
+  // and Nobody Missed read current facts in SQL. Time-only changes (an expiry, a term, adulthood) are the sweep's.
+  const matchFactsKeeper = createMatchFactsKeeper(
+    strictContext('createDiscovery', {
+      matchFacts: d.matchFacts,
+      players,
+      unit,
+      sqlite: d.sqlite,
+      byId,
+      scoutingReads: d.scoutingReads,
+      verificationReads: d.verificationReads,
+      agentReads: d.agentReads,
+      boxCamReads: d.boxCamReads,
+      recruitmentReads: d.recruitmentReads,
+      trustSummaryFor: d.trustSummaryFor,
+      trustPolicyVersion: d.trustPolicyVersion,
+      testProviderEnabled: d.testProviderEnabled,
+    }),
+  );
+  return { checkSavedSearches, matchFactsKeeper };
 }
