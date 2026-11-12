@@ -1379,10 +1379,7 @@ export function registerScouting(ctx) {
     const v = scoutingReads.vacancies.ofOrg(req.params.id, req.org.id);
     if (!v) return res.status(404).json({ error: 'VACANCY_NOT_FOUND' });
     if (v.status === 'closed') return res.json({ vacancy: vacancyView(v) }); // closing twice keeps the first close
-    const closed = clubSetup.vacancies.update(v.id, (d) => {
-      d.status = 'closed';
-      d.closedAt = Date.now();
-    });
+    const closed = clubSetup.vacancies.close(v.id, Date.now());
     res.json({ vacancy: vacancyView(closed) });
   });
 

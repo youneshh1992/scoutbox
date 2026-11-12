@@ -1,6 +1,5 @@
 /** Policy versions: proposed by one Trust & Safety administrator and published by a different one (dual control). */
 
-import { bumpRev } from '../../platform/concurrency.mjs';
 import { sendComplianceError } from './errors.mjs';
 import { filled } from '../../platform/schemas.mjs';
 import { RULE_STATUSES } from './policyVersions.mjs';
@@ -14,10 +13,12 @@ export function registerPolicies(ctx) {
     adminRouter,
     agencyJurisdictions,
     broadcast,
+    bumped,
     byReviewer,
     bySystem,
     compliancePolicies,
     complianceRecords,
+    entry,
     hist,
     inputOr400,
     limitedOr429,
@@ -140,17 +141,14 @@ export function registerPolicies(ctx) {
         'policies',
       );
     const out = unit(() => {
-      const next = policies.update(p.id, (d) => {
-        d.status = 'published';
-        d.approvedBy = { id: req.reviewer.id, name: req.reviewer.name, at: now() };
-        d.publishedAt = now();
-        d.publishedBy = [
-          { kind: 'ts_reviewer', id: d.proposedBy.id, name: d.proposedBy.name },
-          { kind: 'ts_reviewer', id: req.reviewer.id, name: req.reviewer.name },
-        ];
-        hist(d, 'policy_version_published', byReviewer(req), { policyVersion: d.id });
-        bumpRev(d, { by: req.reviewer, at: now() });
-      });
+      const next = policies.publish(
+        p.id,
+        { at: now(), approvedBy: { id: req.reviewer.id, name: req.reviewer.name } },
+        {
+          history: [entry('policy_version_published', byReviewer(req), { policyVersion: p.id })],
+          ...bumped(req.reviewer),
+        },
+      );
       // Open contexts under an older version are flagged, never silently re-verdicted.
       complianceRecords.contexts.flagPolicyChange(next.jurisdiction, next.id, () => ({
         id: nextId('aud'),

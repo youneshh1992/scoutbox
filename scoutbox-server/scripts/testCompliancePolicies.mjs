@@ -293,63 +293,44 @@ test('[reviewers] a reviewer is created active and read back; identity and secre
       /created active/,
       'created revoked',
     );
-    refused(
-      () =>
-        R.update('tsr-b', (d) => {
-          d.secretHash = 'other';
-        }),
-      /secretHash cannot change/,
-    );
-    refused(
-      () =>
-        R.update('tsr-b', (d) => {
-          d.role = 'trust_safety_admin';
-        }),
-      /role cannot change/,
-    );
-    refused(
-      () =>
-        R.update('tsr-b', (d) => {
-          d.status = 'revoked';
-          d.revokedAt = NOW;
-          d.revokedBy = { id: 'tsr-zz', name: 'Ghost' };
-        }),
-      /revoker tsr-zz is not a reviewer/,
-    );
-    const rv = R.update('tsr-b', (d) => {
-      d.status = 'revoked';
-      d.revokedAt = NOW;
-      d.revokedBy = { id: 'tsr-a', name: 'Priya Shah' };
-      d.rev = 2;
-      d.revAt = NOW;
-      d.revBy = { userId: 'tsr-a', name: 'Priya Shah' };
-      d.history.push({
-        id: 'aud-rv',
-        at: NOW,
-        action: 'reviewer_revoked',
-        by: byReviewer('tsr-a'),
-        detail: { reason: null },
-      });
+    const revokedBy = { id: 'tsr-a', name: 'Priya Shah' };
+    const revocation = (id) => ({
+      history: [{ id, at: NOW, action: 'reviewer_revoked', by: byReviewer('tsr-a'), detail: { reason: null } }],
+      bump: { at: NOW, by: revokedBy },
     });
+    refused(
+      () => R.revoke('tsr-b', { at: NOW, by: { id: 'tsr-zz', name: 'Ghost' } }, revocation('aud-rz')),
+      /COMPLIANCE_POLICIES_INPUT_INVALID: ts_reviewers tsr-b/,
+      'a revoker who is not a reviewer',
+    );
+    assert.equal(R.byId('tsr-b').status, 'active', 'a refused revocation wrote nothing');
+    refused(
+      () =>
+        R.revoke(
+          'tsr-b',
+          { at: NOW, by: revokedBy },
+          { history: [{ ...revocation('aud-rx').history[0], action: 'reviewer_promoted' }] },
+        ),
+      /COMPLIANCE_POLICIES_INPUT_INVALID/,
+      'an unknown history action',
+    );
+    const rv = R.revoke('tsr-b', { at: NOW, by: revokedBy }, revocation('aud-rv'));
     assert.equal(rv.status, 'revoked');
+    assert.equal(rv.rev, 2);
+    assert.deepEqual(rv.revokedBy, revokedBy);
+    assert.deepEqual(rv.revBy, { userId: 'tsr-a', name: 'Priya Shah' });
+    assert.deepEqual(rv.history.slice(0, -1), R.byId('tsr-b').history.slice(0, -1), 'the stored history is kept');
+    assert.equal(rv.history.at(-1).id, 'aud-rv', 'the history grows by the act');
     assert.equal(R.activeById('tsr-b'), null, 'a revoked reviewer is not active');
     refused(
-      () =>
-        R.update('tsr-b', (d) => {
-          d.status = 'active';
-          d.revokedAt = null;
-          d.revokedBy = null;
-        }),
-      /a revocation is final/,
+      () => R.revoke('tsr-b', { at: NOW + 1, by: revokedBy }, revocation('aud-rv2')),
+      /COMPLIANCE_POLICIES_STATE_CONFLICT: ts_reviewers tsr-b: a revocation is final/,
     );
     refused(
-      () =>
-        R.update('tsr-a', (d) => {
-          d.history = [];
-        }),
-      /history only grows/,
+      () => R.revoke('tsr-a', { at: NOW, by: revokedBy }, revocation('aud-rv')),
+      /COMPLIANCE_POLICIES_DUPLICATE: history entry aud-rv already exists/,
     );
-    refused(() => R.update('tsr-a', () => R.update('tsr-a', (d) => d)), /already being updated/, 'nested update');
+    refused(() => R.revoke('tsr-none', { at: NOW, by: revokedBy }), /COMPLIANCE_POLICIES_NOT_FOUND/);
   } finally {
     s.close();
     rm(dir);
@@ -411,33 +392,43 @@ test('[policies] a version is proposed, published once by a different reviewer, 
       /proposed first/,
       'created published',
     );
+    const publication = (id, at) => ({
+      history: [
+        { id, at, action: 'policy_version_published', by: byReviewer('tsr-b'), detail: { policyVersion: p.id } },
+      ],
+      bump: { at, by: { id: 'tsr-b', name: 'Léa' } },
+    });
     refused(
       () =>
-        P.update(p.id, (d) => {
-          d.rules['ENG-6.3'].note = 'edited';
-        }),
-      /rules cannot change/,
-      'a rule edit',
+        P.publish(
+          p.id,
+          { at: NOW + 1, approvedBy: { id: 'tsr-a', name: 'Priya Shah' } },
+          publication('aud-ppx', NOW + 1),
+        ),
+      /COMPLIANCE_POLICIES_STATE_CONFLICT: .*by a reviewer other than its proposer/,
+      'the proposer cannot approve their own version',
     );
-    const pub = P.update(p.id, (d) => {
-      d.status = 'published';
-      d.approvedBy = { id: 'tsr-b', name: 'Léa', at: NOW + 1 };
-      d.publishedAt = NOW + 1;
-      d.publishedBy = [
-        { kind: 'ts_reviewer', id: 'tsr-a', name: 'Priya Shah' },
-        { kind: 'ts_reviewer', id: 'tsr-b', name: 'Léa' },
-      ];
-      d.history.push({
-        id: 'aud-pp2',
-        at: NOW + 1,
-        action: 'policy_version_published',
-        by: byReviewer('tsr-b'),
-        detail: { policyVersion: d.id },
-      });
-      d.rev = 2;
-      d.revAt = NOW + 1;
-      d.revBy = { userId: 'tsr-b', name: 'Léa' };
-    });
+    refused(
+      () =>
+        P.publish(p.id, { at: NOW + 1, approvedBy: { id: 'tsr-zz', name: 'Ghost' } }, publication('aud-ppx', NOW + 1)),
+      /COMPLIANCE_POLICIES_INPUT_INVALID: jurisdiction_policies jp-eng-2027-1/,
+      'an approver who is not a reviewer',
+    );
+    assert.equal(P.byId(p.id).status, 'proposed', 'a refused publication wrote nothing');
+    const pub = P.publish(
+      p.id,
+      { at: NOW + 1, approvedBy: { id: 'tsr-b', name: 'Léa' } },
+      publication('aud-pp2', NOW + 1),
+    );
+    assert.deepEqual(pub.approvedBy, { id: 'tsr-b', name: 'Léa', at: NOW + 1 });
+    assert.equal(pub.publishedAt, NOW + 1);
+    assert.deepEqual(pub.publishedBy, [
+      { kind: 'ts_reviewer', id: 'tsr-a', name: 'Priya Shah' },
+      { kind: 'ts_reviewer', id: 'tsr-b', name: 'Léa' },
+    ]);
+    assert.equal(pub.rev, 2);
+    assert.equal(pub.history.at(-1).id, 'aud-pp2');
+    assert.deepEqual(pub.rules, p.rules, 'publication leaves the content as proposed');
     assert.equal(pub.status, 'published');
     assert.equal(pub.publishedBy.length, 2);
     const after = P.published();
@@ -448,12 +439,11 @@ test('[policies] a version is proposed, published once by a different reviewer, 
       'the published set is re-read when a version is published',
     );
     refused(
-      () =>
-        P.update(p.id, (d) => {
-          d.publishedAt = NOW + 5;
-        }),
-      /a published version never changes/,
+      () => P.publish(p.id, { at: NOW + 5, approvedBy: { id: 'tsr-b', name: 'Léa' } }, publication('aud-pp3', NOW + 5)),
+      /COMPLIANCE_POLICIES_STATE_CONFLICT/,
+      'a published version never changes',
     );
+    assert.equal(P.byId(p.id).publishedAt, NOW + 1);
     assert.equal(P.exists(p.id), true);
     assert.equal(P.exists('jp-none-1'), false);
     assert.equal(P.exists(null), false);
@@ -476,16 +466,7 @@ test('[units] a rolled-back unit leaves nothing (and the published set follows t
     refused(
       () =>
         s.unit(() => {
-          P.update('jp-eng-2027-1', (d) => {
-            d.status = 'published';
-            d.approvedBy = { id: 'tsr-b', name: 'Léa', at: NOW };
-            d.publishedAt = NOW;
-            d.publishedBy = [
-              { kind: 'ts_reviewer', id: 'tsr-a', name: 'P' },
-              { kind: 'ts_reviewer', id: 'tsr-b', name: 'L' },
-            ];
-            d.rev = 2;
-          });
+          P.publish('jp-eng-2027-1', { at: NOW, approvedBy: { id: 'tsr-b', name: 'Léa' } });
           assert.equal(P.published().length, before.length + 1, 'inside the unit the publication is visible');
           R.create(reviewer({ id: 'tsr-c', name: 'C', history: [] }));
           throw new Error('boom');
@@ -514,21 +495,16 @@ test('[fixtures] a record written through the repository is typed, refuses a rev
     const s = serverOpen(dir); // a reviewer is created active; the revocation is the route's update
     try {
       s.unit(() =>
-        s.repo.reviewers.update('tsr-b', (d) => {
-          d.status = 'revoked';
-          d.revokedAt = NOW;
-          d.revokedBy = { id: 'tsr-a', name: 'Priya' };
-          d.rev = 2;
-          d.revAt = NOW;
-          d.revBy = { userId: 'tsr-a', name: 'Priya Shah' };
-          d.history.push({
-            id: 'aud-rv',
-            at: NOW,
-            action: 'reviewer_revoked',
-            by: byReviewer('tsr-a'),
-            detail: { reason: null },
-          });
-        }),
+        s.repo.reviewers.revoke(
+          'tsr-b',
+          { at: NOW, by: { id: 'tsr-a', name: 'Priya' } },
+          {
+            history: [
+              { id: 'aud-rv', at: NOW, action: 'reviewer_revoked', by: byReviewer('tsr-a'), detail: { reason: null } },
+            ],
+            bump: { at: NOW, by: { id: 'tsr-a', name: 'Priya Shah' } },
+          },
+        ),
       );
     } finally {
       s.close();

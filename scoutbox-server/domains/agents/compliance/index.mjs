@@ -65,7 +65,7 @@ export function registerCompliance(rawCtx) {
   const provider =
     verificationProvider ??
     createVerificationProvider({ synthetic: process.env.AGENT_VERIFICATION_TEST_PROVIDER === '1' });
-  if (typeof compliancePolicies?.reviewers?.update !== 'function')
+  if (typeof compliancePolicies?.reviewers?.revoke !== 'function')
     throw new TypeError('registerCompliance needs the compliance policies repository from the data layer');
   if (typeof complianceRecords?.contexts?.recordAct !== 'function')
     throw new TypeError('registerCompliance needs the compliance records repository from the data layer');

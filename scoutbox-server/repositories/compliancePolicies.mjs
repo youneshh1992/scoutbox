@@ -15,9 +15,10 @@
  * its reason; a policy entry's `policyVersion` is the policy's own id (not stored), and the seeded publication is
  * marked `seeded`.
  *
- * WRITES are explicit: `create(record)` and `update(id, (draft) => …)` type the whole record and write it at once,
- * joined into the open unit of work, the caller's open transaction, or a transaction of their own; an unknown field and
- * an update from inside its own update are refused. History only grows.
+ * WRITES are explicit, each joined into the open unit of work, the caller's open transaction, or a transaction of its
+ * own: `create(record)` types the whole record and writes it at once (an unknown field is refused); then the named acts
+ * `reviewers.revoke` and `policies.publish`, each guarded in SQL by the state it moves from, with their history entries
+ * and rev bump. History is only inserted.
  *
  * Records are deep-frozen. The published set is decoded once per change (its
  * signature is the published rows' count and revisions), because every evaluation reads it.
@@ -27,6 +28,7 @@
  */
 import { isPlainObject, describe, ids } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
+import { isConstraintError } from './writes.mjs';
 import { deepFreeze } from '../domains/platform/values.mjs';
 import { text, int, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
 import { JURISDICTIONS } from '../domains/agents/public.mjs';
@@ -575,7 +577,6 @@ function statements(sqlite) {
       'INSERT INTO ts_reviewer_history (id, reviewer_id, ord, at, by_kind, by_id, by_name, by_role, action, detail_role, detail_reason) VALUES (@id, @owner, @ord, @at, @by_kind, @by_id, @by_name, @by_role, @action, @detail_role, @detail_reason)',
     ),
     policy: p(upsertSql('jurisdiction_policies', POLICY_SPEC)),
-    publisherDel: p('DELETE FROM jurisdiction_policy_publishers WHERE policy_id = ?'),
     publisherIns: p(
       'INSERT INTO jurisdiction_policy_publishers (policy_id, ord, by_kind, by_id, by_name) VALUES (?, ?, ?, ?, ?)',
     ),
@@ -607,20 +608,20 @@ const byOf = (h) => ({
   ...(h.by_kind === 'ts_reviewer' ? { role: h.by_role } : {}),
 });
 
-function writeReviewer(st, r, knownHistory = 0) {
+const writeReviewerEntry = (st, owner, h, ord) =>
+  st.reviewerHist.run({
+    id: h.id,
+    owner,
+    ord,
+    at: h.at,
+    ...byColumns(h.by),
+    action: h.action,
+    detail_role: h.action === 'reviewer_created' ? h.detail.role : null,
+    detail_reason: h.action === 'reviewer_revoked' ? h.detail.reason : null,
+  });
+function writeReviewer(st, r) {
   st.reviewer.run(encode(REVIEWER_SPEC, r));
-  r.history.slice(knownHistory).forEach((h, i) =>
-    st.reviewerHist.run({
-      id: h.id,
-      owner: r.id,
-      ord: knownHistory + i,
-      at: h.at,
-      ...byColumns(h.by),
-      action: h.action,
-      detail_role: h.action === 'reviewer_created' ? h.detail.role : null,
-      detail_reason: h.action === 'reviewer_revoked' ? h.detail.reason : null,
-    }),
-  );
+  r.history.forEach((h, i) => writeReviewerEntry(st, r.id, h, i));
 }
 function writeRules(st, policyId, rules) {
   Object.entries(rules).forEach(([ruleId, rule], ord) => {
@@ -655,22 +656,21 @@ function writeRules(st, policyId, rules) {
     });
   });
 }
-function writePolicy(st, p, { isNew, knownHistory = 0 }) {
+const writePolicyEntry = (st, owner, h, ord) =>
+  st.policyHist.run({
+    id: h.id,
+    owner,
+    ord,
+    at: h.at,
+    ...byColumns(h.by),
+    action: h.action,
+    detail_seeded: h.detail?.seeded ? 1 : 0,
+  });
+function writePolicy(st, p) {
   st.policy.run(encode(POLICY_SPEC, p));
-  if (isNew) writeRules(st, p.id, p.rules);
-  st.publisherDel.run(p.id);
+  writeRules(st, p.id, p.rules);
   (p.publishedBy ?? []).forEach((x, i) => st.publisherIns.run(p.id, i, x.kind, x.id, x.name));
-  p.history.slice(knownHistory).forEach((h, i) =>
-    st.policyHist.run({
-      id: h.id,
-      owner: p.id,
-      ord: knownHistory + i,
-      at: h.at,
-      ...byColumns(h.by),
-      action: h.action,
-      detail_seeded: h.detail?.seeded ? 1 : 0,
-    }),
-  );
+  p.history.forEach((h, i) => writePolicyEntry(st, p.id, h, i));
 }
 
 const inIds = (sqlite, sql, idList) => (idList.length ? sqlite.prepare(sql).all(JSON.stringify(idList)) : []);
@@ -829,7 +829,7 @@ export function insertSeededPolicies(sqlite, now) {
   for (const raw of seededPolicyRecords(now)) {
     const t = typePolicy(raw, 'seeded policy');
     if (!t.ok) throw new Error(`${COMPLIANCE_POLICIES_MIGRATION}: a seeded policy version does not type: ${t.reason}`);
-    writePolicy(st, t.record, { isNew: true });
+    writePolicy(st, t.record);
   }
 }
 
@@ -853,9 +853,7 @@ export const COMPLIANCE_POLICIES_RECORDS = {
 };
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'update']);
-const clone = (v) => JSON.parse(JSON.stringify(v));
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const WRITES = new Set(['create', 'revoke', 'publish']);
 /**
  * `createCompliancePoliciesRepository({ sqlite, unit, now, log })`: `reviewers` and `policies`, each with its writes and
  * queries, plus `reads` (the queries alone).
@@ -870,20 +868,6 @@ export function createCompliancePoliciesRepository({ sqlite, unit = null, now = 
     return s;
   };
   const st = statements(sqlite);
-  const updating = new Set();
-  const guard = (key, fn) => {
-    if (updating.has(key))
-      throw refusal(
-        'COMPLIANCE_POLICIES_NESTED_UPDATE',
-        `${key} is already being updated; make the second change after the first returns`,
-      );
-    updating.add(key);
-    try {
-      return fn();
-    } finally {
-      updating.delete(key);
-    }
-  };
   const typedOr = (type, raw, name) => {
     const t = type(raw, name);
     if (!t.ok) throw refusal('COMPLIANCE_POLICIES_INPUT_INVALID', t.reason, { field: t.field ?? null });
@@ -893,37 +877,36 @@ export function createCompliancePoliciesRepository({ sqlite, unit = null, now = 
     q(
       'SELECT 1 FROM ts_reviewer_history WHERE id = ? UNION ALL SELECT 1 FROM jurisdiction_policy_history WHERE id = ?',
     ).get(h.id, h.id);
-  const checkUpdate = (table, id, stored, next, immutable) => {
-    for (const k of immutable)
-      if (!same(next[k], stored[k]))
-        throw refusal('COMPLIANCE_POLICIES_INPUT_INVALID', `${table} ${id}: ${k} cannot change`);
-    if (next.history.length < stored.history.length || stored.history.some((h, i) => !same(h, next.history[i])))
-      throw refusal(
-        'COMPLIANCE_POLICIES_INPUT_INVALID',
-        `${table} ${id}: the history only grows (a stored entry cannot change or go)`,
-      );
-    const taken = next.history.slice(stored.history.length).find(historyTaken);
-    if (taken) throw refusal('COMPLIANCE_POLICIES_DUPLICATE', `history entry ${taken.id} already exists`);
-  };
-  const updater =
-    (table, byId, type, immutable, write, extra = () => {}) =>
-    (id, change) =>
-      guard(`${table} ${id}`, () =>
-        operation(() => {
-          if (typeof change !== 'function')
-            throw new TypeError(`${table}: update(id, change) needs a function that edits the copy it is given`);
-          const stored = byId(id);
-          if (!stored)
-            throw refusal('COMPLIANCE_POLICIES_NOT_FOUND', `${table} ${id} is not a record of the repository`);
-          const draft = clone(stored);
-          const returned = change(draft);
-          const next = typedOr(type, returned === undefined ? draft : returned, table);
-          checkUpdate(table, id, stored, next, immutable);
-          extra(stored, next);
-          write(next, stored);
-          return byId(id);
-        }),
-      );
+  /**
+   * A named act on one record, `act(id, input, bookkeeping)`: the act's own guarded UPDATE, then its bookkeeping — the
+   * history entries (typed, only inserted after the stored ones) and the rev bump (`bump: { at, by: { id, name } }`) —
+   * in one operation, returning the stored record. A value a column refuses names the record.
+   */
+  const actOn =
+    ({ table, label, byId, actions, typeDetail, histTable, owner, writeEntry }, fn) =>
+    (id, input = {}, { history = [], bump = null } = {}) =>
+      operation(() => {
+        if (!byId(id))
+          throw refusal('COMPLIANCE_POLICIES_NOT_FOUND', `${table} ${id} is not a record of the repository`);
+        const h = typeHistory(history, `${label} ${id}`, actions, typeDetail);
+        if (!h.ok) throw refusal('COMPLIANCE_POLICIES_INPUT_INVALID', h.reason);
+        const taken = h.list.find(historyTaken);
+        if (taken) throw refusal('COMPLIANCE_POLICIES_DUPLICATE', `history entry ${taken.id} already exists`);
+        try {
+          fn(id, input);
+          if (bump)
+            q(
+              `UPDATE ${table} SET rev = rev + 1, rev_at = @at, rev_by_id = @uid, rev_by_name = @name WHERE id = @id`,
+            ).run({ id, at: bump.at, uid: bump.by?.id ?? bump.by?.userId ?? null, name: bump.by?.name ?? null });
+          const ord = q(`SELECT COUNT(*) AS n FROM ${histTable} WHERE ${owner} = ?`).get(id).n;
+          h.list.forEach((e, i) => writeEntry(id, e, ord + i));
+        } catch (e) {
+          if (!isConstraintError(e)) throw e;
+          throw refusal('COMPLIANCE_POLICIES_INPUT_INVALID', `${table} ${id}: ${e.message}`);
+        }
+        return byId(id);
+      });
+  const stateConflict = (what) => refusal('COMPLIANCE_POLICIES_STATE_CONFLICT', what);
   const one =
     (decoder, sql) =>
     (...args) => {
@@ -937,6 +920,16 @@ export function createCompliancePoliciesRepository({ sqlite, unit = null, now = 
 
   // ---- reviewers
   const reviewerById = one(decodeReviewers, 'SELECT * FROM ts_reviewers WHERE id = ?');
+  const reviewerActs = {
+    table: 'ts_reviewers',
+    label: 'tsReviewers',
+    byId: reviewerById,
+    actions: REVIEWER_ACTIONS,
+    typeDetail: typeReviewerDetail,
+    histTable: 'ts_reviewer_history',
+    owner: 'reviewer_id',
+    writeEntry: (id, h, ord) => writeReviewerEntry(st, id, h, ord),
+  };
   const reviewers = {
     create: (raw) =>
       operation(() => {
@@ -950,29 +943,13 @@ export function createCompliancePoliciesRepository({ sqlite, unit = null, now = 
         writeReviewer(st, r);
         return reviewerById(r.id);
       }),
-    /** `update(id, change)`: the identity, secret, role and creation never change; a revocation is final; the history only grows. */
-    update: updater(
-      'ts_reviewers',
-      reviewerById,
-      typeReviewer,
-      ['id', 'name', 'role', 'secretHash', 'createdAt', 'createdBy'],
-      (next, stored) => writeReviewer(st, next, stored.history.length),
-      (stored, next) => {
-        if (
-          stored.status === 'revoked' &&
-          !same(
-            { s: next.status, a: next.revokedAt, b: next.revokedBy },
-            { s: stored.status, a: stored.revokedAt, b: stored.revokedBy },
-          )
-        )
-          throw refusal('COMPLIANCE_POLICIES_INPUT_INVALID', `ts_reviewers ${stored.id}: a revocation is final`);
-        if (next.revokedBy && !q('SELECT 1 FROM ts_reviewers WHERE id = ?').get(next.revokedBy.id))
-          throw refusal(
-            'COMPLIANCE_POLICIES_INPUT_INVALID',
-            `ts_reviewers ${stored.id}: the revoker ${next.revokedBy.id} is not a reviewer`,
-          );
-      },
-    ),
+    /** Revoke an active reviewer (`{ at, by: { id, name } }`); a revocation is final, and the revoker is a reviewer. */
+    revoke: actOn(reviewerActs, (id, { at, by }) => {
+      const r = q(
+        "UPDATE ts_reviewers SET status = 'revoked', revoked_at = @at, revoked_by_id = @by_id, revoked_by_name = @by_name WHERE id = @id AND status = 'active'",
+      ).run({ id, at, by_id: by?.id ?? null, by_name: by?.name ?? null });
+      if (!r.changes) throw stateConflict(`ts_reviewers ${id}: a revocation is final`);
+    }),
     byId: reviewerById,
     /** The reviewer if active, else null (every reviewer request). */
     activeById: one(decodeReviewers, "SELECT * FROM ts_reviewers WHERE id = ? AND status = 'active'"),
@@ -986,6 +963,16 @@ export function createCompliancePoliciesRepository({ sqlite, unit = null, now = 
   // ---- policies
   const policyById = one(decodePolicies, 'SELECT * FROM jurisdiction_policies WHERE id = ?');
   let publishedCache = { sig: null, list: Object.freeze([]) };
+  const policyActs = {
+    table: 'jurisdiction_policies',
+    label: 'jurisdictionPolicies',
+    byId: policyById,
+    actions: POLICY_ACTIONS,
+    typeDetail: typePolicyDetail,
+    histTable: 'jurisdiction_policy_history',
+    owner: 'policy_id',
+    writeEntry: (id, h, ord) => writePolicyEntry(st, id, h, ord),
+  };
   const policies = {
     create: (raw) =>
       operation(() => {
@@ -1017,46 +1004,25 @@ export function createCompliancePoliciesRepository({ sqlite, unit = null, now = 
           );
         const taken = p.history.find(historyTaken);
         if (taken) throw refusal('COMPLIANCE_POLICIES_DUPLICATE', `history entry ${taken.id} already exists`);
-        writePolicy(st, p, { isNew: true });
+        writePolicy(st, p);
         return policyById(p.id);
       }),
-    /** `update(id, change)`: a version's content never changes; publication (once) sets the approver, publishers and instant; the history only grows. */
-    update: updater(
-      'jurisdiction_policies',
-      policyById,
-      typePolicy,
-      [
-        'id',
-        'regulator',
-        'jurisdiction',
-        'policyVersion',
-        'supersedes',
-        'effectiveFrom',
-        'effectiveTo',
-        'rules',
-        'proposedBy',
-        'createdAt',
-      ],
-      (next, stored) => writePolicy(st, next, { isNew: false, knownHistory: stored.history.length }),
-      (stored, next) => {
-        if (
-          stored.status === 'published' &&
-          !same(
-            { a: next.status, b: next.approvedBy, c: next.publishedAt, d: next.publishedBy },
-            { a: stored.status, b: stored.approvedBy, c: stored.publishedAt, d: stored.publishedBy },
-          )
-        )
-          throw refusal(
-            'COMPLIANCE_POLICIES_INPUT_INVALID',
-            `jurisdiction_policies ${stored.id}: a published version never changes`,
-          );
-        if (next.approvedBy && !q('SELECT 1 FROM ts_reviewers WHERE id = ?').get(next.approvedBy.id))
-          throw refusal(
-            'COMPLIANCE_POLICIES_INPUT_INVALID',
-            `jurisdiction_policies ${stored.id}: the approver ${next.approvedBy.id} is not a reviewer`,
-          );
-      },
-    ),
+    /**
+     * Publish a proposed version (`{ at, approvedBy: { id, name } }`): the approver is a reviewer other than the
+     * proposer (dual control), the publishers are the proposer then the approver, and a published version never changes.
+     */
+    publish: actOn(policyActs, (id, { at, approvedBy }) => {
+      const r = q(
+        "UPDATE jurisdiction_policies SET status = 'published', approved_by_id = @by_id, approved_by_name = @by_name, approved_at = @at, published_at = @at WHERE id = @id AND status = 'proposed' AND proposed_by_id IS NOT NULL AND proposed_by_id <> @by_id",
+      ).run({ id, at, by_id: approvedBy?.id ?? null, by_name: approvedBy?.name ?? null });
+      if (!r.changes)
+        throw stateConflict(
+          `jurisdiction_policies ${id}: only a proposed version is published, by a reviewer other than its proposer`,
+        );
+      const p = q('SELECT proposed_by_id, proposed_by_name FROM jurisdiction_policies WHERE id = ?').get(id);
+      st.publisherIns.run(id, 0, 'ts_reviewer', p.proposed_by_id, p.proposed_by_name);
+      st.publisherIns.run(id, 1, 'ts_reviewer', approvedBy.id, approvedBy.name ?? null);
+    }),
     byId: policyById,
     exists: (id) => typeof id === 'string' && !!q('SELECT 1 FROM jurisdiction_policies WHERE id = ?').get(id),
     /** Every version, oldest first (the T&S and admin lists: a short list). */

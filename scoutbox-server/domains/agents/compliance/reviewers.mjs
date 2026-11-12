@@ -3,7 +3,7 @@
  * never from a body field, a header or the shared admin key.
  */
 
-import { guardRev, bumpRev, revMeta } from '../../platform/concurrency.mjs';
+import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { rateLimitedBody } from '../../platform/rateLimit.mjs';
 import { sendComplianceError } from './errors.mjs';
 import { filled } from '../../platform/schemas.mjs';
@@ -22,6 +22,8 @@ export function registerReviewers(ctx) {
     compliancePolicies,
     createSession,
     devLogins,
+    bumped,
+    entry,
     hashPassword,
     hist,
     inputOr400,
@@ -206,13 +208,14 @@ export function registerReviewers(ctx) {
       );
     if (!guardRev(req, res, r, { errorCode: 'REVIEWER_VERSION_CONFLICT', current: {} })) return;
     const out = unit(() => {
-      const next = reviewers.update(r.id, (d) => {
-        d.status = 'revoked';
-        d.revokedAt = now();
-        d.revokedBy = { id: req.reviewer.id, name: req.reviewer.name };
-        hist(d, 'reviewer_revoked', byReviewer(req), { reason: filled(b.reason) });
-        bumpRev(d, { by: req.reviewer, at: now() });
-      });
+      const next = reviewers.revoke(
+        r.id,
+        { at: now(), by: { id: req.reviewer.id, name: req.reviewer.name } },
+        {
+          history: [entry('reviewer_revoked', byReviewer(req), { reason: filled(b.reason) })],
+          ...bumped(req.reviewer),
+        },
+      );
       revokeReviewerSessions(r.id);
       return next;
     });

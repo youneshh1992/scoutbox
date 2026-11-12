@@ -327,25 +327,13 @@ test('[tactical] a re-save diffs roles by id: a kept role keeps its vacancy, a d
       () => repo.vacancies.create(vacancy({ id: 'vac-9', orgId: OTHER.id, roleId: 'role-1' })),
       /not a role of organisation org-two/,
     );
+    const closed = repo.vacancies.close('vac-1', NOW);
+    assert.equal(closed.closedAt, NOW);
     refused(
-      () =>
-        repo.vacancies.update('vac-1', (d) => {
-          d.roleId = 'role-3';
-        }),
-      /roleId cannot change/,
+      () => repo.vacancies.close('vac-1', NOW + 1),
+      /CLUB_SETUP_STATE_CONFLICT: vacancies vac-1 is already closed/,
     );
-    refused(
-      () =>
-        repo.vacancies.update('vac-1', (d) => {
-          repo.vacancies.update('vac-1', () => {});
-          d.notes = 'x';
-        }),
-      /already being updated/,
-    );
-    const closed = repo.vacancies.update('vac-1', (d) => {
-      d.status = 'closed';
-      d.closedAt = NOW;
-    });
+    assert.equal(repo.vacancies.byId('vac-1').closedAt, NOW, 'a second close keeps the first');
     assert.equal(closed.status, 'closed');
     assert.deepEqual(
       repo.vacancies.openForOrg(ORG.id).map((v) => v.id),

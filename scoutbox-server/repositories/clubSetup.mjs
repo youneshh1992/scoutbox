@@ -13,7 +13,7 @@
  *                                 vacancies and shadow entries keep their role), a new role is inserted, a dropped
  *                                 role is deleted (their role_id becomes null; the candidates route answers
  *                                 409 ROLE_DELETED).
- *   squad.create / squad.remove, shadow.create, lookingFor.set, federation.submit, vacancies.create / update.
+ *   squad.create / squad.remove, shadow.create, lookingFor.set, federation.submit, vacancies.create / close.
  *
  * Reads return deep-frozen records. Modules receive the queries through `scoutingReads` (tacticalSetups, squad,
  * shadow, lookingFor, federationChecks, vacancies).
@@ -32,7 +32,6 @@ import {
   isStr,
   nonEmpty,
   orNull,
-  clone,
   bad,
   optText,
   reqText,
@@ -573,6 +572,9 @@ function statements(sqlite) {
       ON CONFLICT(id) DO UPDATE SET org_id = excluded.org_id, role_id = excluded.role_id, role_name = excluded.role_name, window_name = excluded.window_name, notes = excluded.notes, status = excluded.status, created_by_name = excluded.created_by_name, created_at = excluded.created_at, closed_at = excluded.closed_at`),
     vacancyById: p('SELECT * FROM vacancies WHERE id = ?'),
     vacancyDel: p('DELETE FROM vacancies WHERE id = ?'),
+    vacancyClose: p(
+      "UPDATE vacancies SET status = 'closed', closed_at = @closed_at WHERE id = @id AND status = 'open'",
+    ),
     keys: (table, key) =>
       sqlite
         .prepare(`SELECT ${key} AS k FROM ${table} ORDER BY rowid`)
@@ -918,7 +920,6 @@ export function createClubSetupRepository({ sqlite, unit = null, now = Date.now,
   const vacancyPage = q(
     'SELECT rowid AS rid, * FROM vacancies WHERE org_id = ? AND (? IS NULL OR rowid < ?) ORDER BY rowid DESC LIMIT ?',
   );
-  const updating = new Set();
   const vacancyOr = (id) => {
     const r = typeof id === 'string' ? st.vacancyById.get(id) : null;
     if (!r) throw refusal('CLUB_SETUP_NOT_FOUND', `vacancies ${id} is not a record of the repository`);
@@ -933,31 +934,14 @@ export function createClubSetupRepository({ sqlite, unit = null, now = Date.now,
         writeVacancy(st, v);
         return vacancyOr(v.id);
       }),
-    /** `update(id, (draft) => …)`: typed whole; the id, organisation, role and creation facts cannot change. */
-    update(id, change) {
-      if (typeof change !== 'function')
-        throw new TypeError('vacancies.update(id, change) needs a function that edits the copy it is given');
-      if (updating.has(id))
-        throw refusal(
-          'CLUB_SETUP_NESTED_UPDATE',
-          `vacancies ${id} is already being updated; make the second change after the first returns`,
-        );
-      updating.add(id);
-      try {
-        return operation(() => {
-          const stored = vacancyOr(id);
-          const draft = clone(stored);
-          const returned = change(draft);
-          const next = typedOr('vacancies', returned === undefined ? draft : returned);
-          for (const k of ['id', 'orgId', 'roleId', 'roleName', 'createdBy', 'createdAt'])
-            if (next[k] !== stored[k]) throw refusal('CLUB_SETUP_INPUT_INVALID', `vacancies ${id}: ${k} cannot change`);
-          writeVacancy(st, next);
-          return vacancyOr(id);
-        });
-      } finally {
-        updating.delete(id);
-      }
-    },
+    /** Close an open vacancy at `at`; a closed one is refused (`CLUB_SETUP_STATE_CONFLICT`). */
+    close: (id, at) =>
+      operation(() => {
+        vacancyOr(id);
+        if (!st.vacancyClose.run({ id, closed_at: at }).changes)
+          throw refusal('CLUB_SETUP_STATE_CONFLICT', `vacancies ${id} is already closed`);
+        return vacancyOr(id);
+      }),
     byId: (id) => {
       const r = typeof id === 'string' ? st.vacancyById.get(id) : null;
       return r ? deepFreeze(decodeVacancy(r)) : null;
@@ -979,7 +963,7 @@ export function createClubSetupRepository({ sqlite, unit = null, now = Date.now,
     },
   };
 
-  const WRITE_OPS = new Set(['save', 'create', 'update', 'remove', 'set', 'submit']);
+  const WRITE_OPS = new Set(['save', 'create', 'close', 'remove', 'set', 'submit']);
   const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITE_OPS.has(k))));
   const counters = Object.fromEntries(CLUB_SETUP_TABLES.map((t) => [t, q(`SELECT COUNT(*) AS n FROM ${t}`)]));
   return {
