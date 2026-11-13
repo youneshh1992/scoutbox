@@ -6,7 +6,7 @@
 import * as v from 'valibot';
 import { CURSOR_PAGE, flag, id, inputOrRefuse, oneOf, requiredText, text, wholeNumber } from '../platform/schemas.mjs';
 import { ENTERPRISE_LIMITS as L, SUPPORT_REF_KINDS } from '../../repositories/enterprise.mjs';
-import { STAFF_LIMITS } from '../../repositories/users.mjs';
+import { STAFF_LIMITS } from '../../repositories/users.ts';
 
 // An emailed invite code, an SSO state and a session id are short hex; a signed test-IdP code is a little longer.
 const CODE_MAX = 128;

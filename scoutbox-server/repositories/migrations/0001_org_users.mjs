@@ -1,8 +1,8 @@
 /**
- * Organisation staff accounts (DDL in repositories/users.mjs). `org_id` is a RESTRICT key to `orgs`, which 0002
+ * Organisation staff accounts (DDL in repositories/users.ts). `org_id` is a RESTRICT key to `orgs`, which 0002
  * creates later: SQLite resolves a foreign key when a row is written, not when the table is created.
  */
-import { ORG_USERS_DDL } from '../users.mjs';
+import { ORG_USERS_DDL } from '../users.ts';
 
 export const id = '0001_org_users';
 export const note = 'organisation staff accounts: org_users and org_user_recovery_codes';

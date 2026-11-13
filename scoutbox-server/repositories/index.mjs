@@ -10,7 +10,7 @@
  * tests delete between runs.
  */
 import { runDataMigrations, dataSchemaReport } from './database.ts';
-import { createUsersRepository, USERS_TABLE } from './users.mjs';
+import { createUsersRepository, USERS_TABLE } from './users.ts';
 import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
 import { createOrgsRepository, ORGS_TABLE } from './orgs.ts';
 import { createIdentityRepositories, IDENTITY_RECORDS, IDENTITY_COLLECTIONS } from './identity.ts';

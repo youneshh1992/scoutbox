@@ -7,7 +7,7 @@ import * as v from 'valibot';
 import { CURSOR_PAGE, flag, inputOrRefuse, oneOf, text, wholeNumber } from '../platform/schemas.mjs';
 import { IDENTITY_LIMITS as L } from '../../repositories/identityRules.ts';
 import { PLAYER_POSITIONS, PLAYER_FEET } from '../../repositories/playerRecord.ts';
-import { STAFF_LIMITS } from '../../repositories/users.mjs';
+import { STAFF_LIMITS } from '../../repositories/users.ts';
 
 export const PASSWORD_MIN = 8;
 // Long enough for any pass phrase, short enough that hashing it costs nothing.

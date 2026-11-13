@@ -2,7 +2,7 @@
  * What the players and guardians repositories (players.ts, guardians.ts) share: the text and number limits, the
  * notification preferences both carry, the stored password hash, and the refusals. Refusals carry a code and name the
  * id and the field, never a value. The organisations repository (orgs.ts) is built on the same refusals, statement
- * cache, reads and paging.
+ * cache, reads and paging, and the staff repository (users.ts) on its refusals, statement cache and reads.
  */
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { operationOn, type Operation, type UnitParticipant } from './database.ts';
@@ -31,10 +31,16 @@ export const IDENTITY_LIMITS = Object.freeze({
 });
 const L = IDENTITY_LIMITS;
 
-/** A refusal: an Error with a `code` (`PLAYER_NOT_FOUND`, …) and, for a refused record, its `problems`. */
-export type IdentityRefusal = Error & { code: string; problems?: string[] };
-export const refusal = (code: string, message: string, extra: { problems?: string[] } = {}): IdentityRefusal =>
-  Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+/**
+ * A refusal: an Error with a `code` (`PLAYER_NOT_FOUND`, …) and, for a refused record, its `problems`, or the `field`
+ * a uniqueness rule refused.
+ */
+export type IdentityRefusal = Error & { code: string; problems?: string[]; field?: string };
+export const refusal = (
+  code: string,
+  message: string,
+  extra: { problems?: string[]; field?: string } = {},
+): IdentityRefusal => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 
 export { isPlainObject };
 /** A stored instant: a non-negative whole number of milliseconds. */

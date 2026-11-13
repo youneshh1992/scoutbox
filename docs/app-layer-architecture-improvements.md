@@ -194,7 +194,8 @@ The order, from the bottom of the import graph up, so each file is typed against
    along its owners: `players.ts` (the `Player` record in `playerRecord.ts`, its lists in `playerSubrecords.ts`),
    `guardians.ts`, what the two share in `identityRules.ts`, and `identity.ts`, which builds both on one connection
    and adds the link acts and the first installation's import. `orgs.ts` types the `Org` record and its acts, and
-   takes its refusals, statement cache and reads from `identityRules.ts`. `fieldSpecs.ts` derives a spec's record type from the
+   takes its refusals, statement cache and reads from `identityRules.ts`; `users.ts` does the same for the `Staff`
+   record (staff accounts, their second factor and delivery preferences). `fieldSpecs.ts` derives a spec's record type from the
    spec (`RecordOf<typeof SPEC>`), so a repository described by field specs gets its record types from them rather
    than writing them out a second time. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
