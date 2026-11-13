@@ -36,11 +36,11 @@
  * player or a club) and a review's player carry no key (tolerant: they outlive an account deletion as ids). Child rows
  * cascade.
  */
-import { isPlainObject, describe } from './fieldSpecs.mjs';
+import { isPlainObject, describe } from './fieldSpecs.ts';
 import { migrationApplied, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
-import { quote } from './fieldSpecs.mjs';
+import { quote } from './fieldSpecs.ts';
 import { REVIEWER_ROLES } from './compliancePolicies.mjs';
 import { FACETS, VERIFICATION_STATES, AGREEMENT_STATUSES } from '../domains/agents/public.mjs';
 import { RULE_STATUSES, PARTY_ROLES, CONSENT_KINDS } from '../domains/agents/public.mjs';

@@ -27,7 +27,7 @@
  * Organisations, the staff named and the calibration template version are RESTRICT keys; so are the keys inside the
  * domain (an assignment's own fixture, a submission's participant). Child rows cascade with their owner.
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
@@ -43,7 +43,7 @@ import {
   decode,
   insertSql,
   upsertSql,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 import { parseStrictDateOnly } from '../temporal.ts';
 import { CURRENCIES } from '../domains/recruitment/public.mjs';
 

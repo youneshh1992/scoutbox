@@ -20,7 +20,7 @@
  * `correction_of_id` / `superseded_by_id` → evidence are immediate RESTRICT keys: the correction is inserted first,
  * then the original is pointed at it, in one unit.
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';

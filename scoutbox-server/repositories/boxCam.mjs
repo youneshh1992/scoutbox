@@ -35,7 +35,7 @@
  * with their owner, which is never deleted.
  */
 import crypto from 'node:crypto';
-import { isPlainObject, describe } from './fieldSpecs.mjs';
+import { isPlainObject, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
@@ -52,7 +52,7 @@ import {
   upsertSql,
   insertSql,
   flat,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 import { QUALITY, OBSERVATION_KINDS } from '../domains/development/public.mjs';
 import { DRILLS, PROVIDERS, LIVENESS_CHALLENGES } from '../domains/development/public.mjs';
 import { combineProtocol, METRIC_TYPES } from '../domains/development/public.mjs';

@@ -27,22 +27,10 @@
  * and the staff named are RESTRICT keys; so are the keys inside the domain (a prospect's batch, a review's batch row,
  * a delivery's endpoint). Child rows cascade with their owner.
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
-import {
-  text,
-  int,
-  bool,
-  oneOf,
-  tableDdl,
-  bad,
-  typeSpec,
-  encode,
-  decode,
-  insertSql,
-  upsertSql,
-} from './fieldSpecs.mjs';
+import { text, int, bool, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql } from './fieldSpecs.ts';
 import { parseStrictDateOnly } from '../temporal.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 

@@ -6,7 +6,7 @@
  *
  * Every write joins the open unit of work, the caller's transaction or its own.
  */
-import { describe } from './fieldSpecs.mjs';
+import { describe } from './fieldSpecs.ts';
 import { migrationApplied, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 

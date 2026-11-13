@@ -81,6 +81,7 @@ export const SUITES = [
   'testRecruitmentContactsOffers',
   'testSigningsFollowUps',
   'testSchema',
+  'testFieldSpecs',
   'testPaging',
   'testInputSchemas',
   'testPlatformHelpers',

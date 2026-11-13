@@ -15,10 +15,10 @@
  * References. Organisations are RESTRICT keys; so is a grant's group. A group's member, invite, template and
  * programme rows cascade with it (groups are never deleted); a grant's recipients cascade with the grant.
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
-import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.mjs';
+import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const GROUPS_MIGRATION = '0036_groups';

@@ -33,7 +33,7 @@
  * so are the keys between this domain's tables. Child rows (items, progress, shares, history, snapshots) cascade with
  * their owner, which is never deleted (only an evidence link is, by its route).
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
@@ -51,7 +51,7 @@ import {
   upsertSql,
   insertSql,
   flat,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 import {
   PLAN_OWNER_KINDS,
   PLAN_VISIBILITY,

@@ -16,7 +16,7 @@
  * match-day credit outlive the account; the registration's copy of the name goes with it). Child rows cascade with
  * their owner (owners are never hard-deleted).
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
@@ -31,7 +31,7 @@ import {
   decode,
   insertSql,
   isFootballDate,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const GRASSROOTS_MIGRATION = '0037_grassroots';

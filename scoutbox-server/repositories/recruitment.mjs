@@ -41,7 +41,7 @@ import {
 import { TRIAL_REPORT_FIELDS } from '../domain.ts';
 import { refreshProfileSignals } from './players.ts';
 import { writeKit } from './writes.ts';
-import { ids } from './fieldSpecs.mjs';
+import { ids } from './fieldSpecs.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 
 export const RECRUITMENT_MIGRATION = '0015_recruitment';

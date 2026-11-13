@@ -18,7 +18,7 @@ import {
   typeCareerEntry,
   typeAchievement,
 } from '../repositories/passport.mjs';
-import { isFootballDate } from '../repositories/fieldSpecs.mjs';
+import { isFootballDate } from '../repositories/fieldSpecs.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

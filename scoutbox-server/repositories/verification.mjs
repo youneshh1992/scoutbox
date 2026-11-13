@@ -30,8 +30,8 @@
  * and organisation. Polymorphic ids (a claim's subject and authority, an event's subject, a token's subject and ref, an
  * invitation's inviter of record 'trust_safety') carry none.
  */
-import { isPlainObject, describe } from './fieldSpecs.mjs';
-import { text, int, bool, oneOf, group, quote, tableDdl, decode, insertSql } from './fieldSpecs.mjs';
+import { isPlainObject, describe } from './fieldSpecs.ts';
+import { text, int, bool, oneOf, group, quote, tableDdl, decode, insertSql } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';

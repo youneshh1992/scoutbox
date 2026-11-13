@@ -5,7 +5,7 @@
  * Every write joins the open unit of work, the caller's transaction or its own. Records are deep-frozen.
  * Organisations and signings are RESTRICT keys.
  */
-import { isPlainObject, text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.mjs';
+import { isPlainObject, text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.ts';
 import { migrationApplied, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';

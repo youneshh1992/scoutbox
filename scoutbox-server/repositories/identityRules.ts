@@ -6,6 +6,7 @@
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { operationOn, type Operation, type UnitParticipant } from './database.ts';
 import { pageOf as pageOfRows } from '../domains/platform/paging.mjs';
+import { isPlainObject } from './fieldSpecs.ts';
 
 /** Text lengths and number ranges, one definition for the typing, the DDL and the routes. */
 export const IDENTITY_LIMITS = Object.freeze({
@@ -34,8 +35,7 @@ export type IdentityRefusal = Error & { code: string; problems?: string[] };
 export const refusal = (code: string, message: string, extra: { problems?: string[] } = {}): IdentityRefusal =>
   Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
 
-export const isPlainObject = (v: unknown): v is Record<string, unknown> =>
-  v !== null && typeof v === 'object' && !Array.isArray(v);
+export { isPlainObject };
 /** A stored instant: a non-negative whole number of milliseconds. */
 export const isClock = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 export const describe = (v: unknown) =>

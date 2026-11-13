@@ -40,11 +40,11 @@
  * a channel goes with a deleted player, a trial or an opportunity can be deleted; the record keeps the fact). Child
  * rows cascade.
  */
-import { isPlainObject, describe } from './fieldSpecs.mjs';
+import { isPlainObject, describe } from './fieldSpecs.ts';
 import { migrationApplied, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
-import { quote } from './fieldSpecs.mjs';
+import { quote } from './fieldSpecs.ts';
 import { REPRESENTATION_STATUSES } from './complianceRecords.mjs';
 import { VERIFICATION_STATES, SCOPES } from '../domains/agents/public.mjs';
 import { CONFLICT_OUTCOMES, CONTEXT_TYPES, PARTY_ROLES } from '../domains/agents/public.mjs';

@@ -25,7 +25,7 @@
  */
 import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
-import { isPlainObject } from './fieldSpecs.mjs';
+import { isPlainObject } from './fieldSpecs.ts';
 import { writeChecks, writeKit } from './writes.ts';
 import {
   ROOM_STATUSES,

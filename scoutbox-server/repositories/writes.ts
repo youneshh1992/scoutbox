@@ -11,7 +11,7 @@ import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
 import type { Operation } from './database.ts';
 
 /**
- * One field of a record (repositories/fieldSpecs.mjs): its key `k`, column `c` and type `t`, or a `group` of fields
+ * One field of a record (repositories/fieldSpecs.ts): its key `k`, column `c` and type `t`, or a `group` of fields
  * stored as columns. The other options (`max`, `req`, `vals`, …) are the field spec's own.
  */
 export type FieldSpec = {
@@ -102,7 +102,7 @@ export function writeChecks(prefix: string) {
     if (exists(r.id)) throw refusal('DUPLICATE', `${table} ${r.id} already exists`);
   };
   /**
-   * A record's columns from its field spec (repositories/fieldSpecs.mjs): a group fills all its columns (absent ones
+   * A record's columns from its field spec (repositories/fieldSpecs.ts): a group fills all its columns (absent ones
    * NULL, or the field's `def` with `defaults`), a boolean is 0 or 1, and any other value is bound as given for the
    * column to judge. An object where a single value goes is refused (the binding cannot take it). With `only`, just the
    * fields given are mapped, and each must be one of those named.

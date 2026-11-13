@@ -34,7 +34,7 @@
  * (tolerant, as recruitment: an agreement outlives an account deletion as an id-only tombstone). Child rows cascade.
  * Policy versions are checked in code through `policyVersionKnown` (the compliance policies repository).
  */
-import { isPlainObject, describe, ids } from './fieldSpecs.mjs';
+import { isPlainObject, describe, ids } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
@@ -50,7 +50,7 @@ import {
   decode,
   upsertSql,
   quote,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 import {
   VERIFICATION_STATES,
   FACETS,

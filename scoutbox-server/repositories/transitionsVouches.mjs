@@ -25,11 +25,11 @@
  * keys; a case's pack items, grants and history cascade with the case (a case is never deleted).
  */
 import crypto from 'node:crypto';
-import { isPlainObject, describe } from './fieldSpecs.mjs';
+import { isPlainObject, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
-import { text, int, oneOf, group, tableDdl, decode } from './fieldSpecs.mjs';
+import { text, int, oneOf, group, tableDdl, decode } from './fieldSpecs.ts';
 
 export const TRANSITIONS_MIGRATION = '0025_transitions_vouches';
 export const TRANSITIONS_COLLECTIONS = Object.freeze(['transitionCases', 'vouches']);

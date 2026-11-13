@@ -19,7 +19,7 @@ import {
   encode,
   decode,
   insertSql,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 import { migrationApplied, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';

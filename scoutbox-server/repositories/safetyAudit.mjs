@@ -26,7 +26,7 @@
  *
  * Refusals name tables, ids and fields, never a reason, note, excerpt, name or document value.
  */
-import { isPlainObject, describe, ids } from './fieldSpecs.mjs';
+import { isPlainObject, describe, ids } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
@@ -42,7 +42,7 @@ import {
   decode,
   flat,
   quote,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { MODERATION_FLAGS, MODERATION_SEVERITIES } from '../domain.ts';
 

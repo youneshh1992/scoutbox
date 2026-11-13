@@ -18,10 +18,10 @@
  * References. Organisations and the staff named are RESTRICT keys; so are the keys inside the domain (a grant's
  * ticket). Child rows cascade with their owner, except the access log, which is audit and RESTRICT.
  */
-import { isPlainObject, describe } from './fieldSpecs.mjs';
+import { isPlainObject, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
-import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql } from './fieldSpecs.mjs';
+import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql } from './fieldSpecs.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const ENTERPRISE_MIGRATION = '0035_enterprise';

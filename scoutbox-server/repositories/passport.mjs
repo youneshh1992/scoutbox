@@ -20,7 +20,7 @@
  * deletion leaves these rows under the old id). A confirmation's organisation → orgs is an immediate RESTRICT
  * key; the preferences' child rows cascade with their preferences.
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
@@ -38,7 +38,7 @@ import {
   encode,
   decode,
   upsertSql,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 
 export const PASSPORT_MIGRATION = '0024_passport';
 export const PASSPORT_COLLECTIONS = Object.freeze([

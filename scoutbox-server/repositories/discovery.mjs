@@ -27,7 +27,7 @@
  * staff named, a review's or a watchlist's brief, and the room and decision a record names are immediate RESTRICT keys.
  * Child rows cascade with their owner, which is never deleted.
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
+import { isPlainObject, ids, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
@@ -44,7 +44,7 @@ import {
   decode,
   upsertSql,
   insertSql,
-} from './fieldSpecs.mjs';
+} from './fieldSpecs.ts';
 import { parseStrictDateOnly } from '../temporal.ts';
 import {
   BRIEF_STATUSES,
