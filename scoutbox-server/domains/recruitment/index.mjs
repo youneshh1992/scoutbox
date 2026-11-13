@@ -1,4 +1,4 @@
-// Recruitment: requests and trials, the Discovery Ledger, budgets, the Recruitment Rooms and their analytics, the case
+// Recruitment: requests and trials (with the trial day), the Discovery Ledger, budgets, the Recruitment Rooms and their analytics, the case
 // lifecycle (contacts, decisions, trials), Offers, signings, the journey views and the player's Inbox.
 import { needs, strictContext } from '../platform/deps.mjs';
 import { routeContext } from '../platform/routeHelpers.mjs';
@@ -13,6 +13,7 @@ import { registerJourneyRoutes } from './lifecycle/journeyRoutes.mjs';
 import { registerOffers } from './offers/index.mjs';
 import { createRequestWriters, registerClubRequests, requestForRecipient } from './requests.mjs';
 import { registerRecruitmentRooms } from './rooms/index.mjs';
+import { registerTrialDay } from './trialDay.mjs';
 import { createContractLookup } from './signings/contract.mjs';
 import { registerSigning } from './signings/index.mjs';
 import { registerLegacySigning } from './signings/legacy.mjs';
@@ -36,13 +37,18 @@ export function createRecruitmentActs(deps) {
 }
 
 /**
- * Requests, the club's trials, the ledger and budgets. Returns the one writer of a request row
+ * Requests, the club's trials and their trial day, the ledger and budgets. Returns the one writer of a request row
  * (`issueRecruitmentRequest`) and of an accepted trial (`issueAcceptedTrial`), `contactReplyFrom`, and
  * `canonicalContractFor`, a player's current contract as the signings record it.
  */
 export function createRecruitment(deps) {
   needs('createRecruitment', deps, [
     'orgRouter',
+    'playerRouter',
+    'guardianRouter',
+    'adminRouter',
+    'playerRecord',
+    'recordActivity',
     'recruitment',
     'recruitmentCases',
     'recruitmentReads',
@@ -96,6 +102,22 @@ export function createRecruitment(deps) {
     ledgerAppend,
     notify,
     broadcast,
+  });
+  registerTrialDay({
+    orgRouter,
+    playerRouter: d.playerRouter,
+    guardianRouter: d.guardianRouter,
+    adminRouter: d.adminRouter,
+    trials: recruitment.trials,
+    findPlayer,
+    isBlocked,
+    moderateOrRefuse,
+    playerRecord: d.playerRecord,
+    recordActivity: d.recordActivity,
+    unit,
+    nextId,
+    notify,
+    ledgerAppend,
   });
   registerLedger({
     orgRouter,

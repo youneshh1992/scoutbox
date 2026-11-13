@@ -152,11 +152,12 @@ No domain is handed another domain's repository to write through. Each owner off
   follow-up sweep's escalation and reminders) and `caseHandoffs`.
 - **Verification**: `coachReferences` (adding, publishing, revoking and withdrawing a coach reference).
 
+The trial day (its staff and their checks, arrival, check-in, consent, the emergency contact and the day's status) is
+part of the trial record, so its routes are recruitment's (`domains/recruitment/trialDay.mjs`): a postponement moves
+the trial's date and report deadline, and a check-in records the session's attendance.
+
 **Still to do.**
 
-- **Trial days.** Scouting's trial-day routes (check-in, arrival, consent, emergency contact, day status, staff
-  checks) write the recruitment repository's trials directly. This is a question of who owns the trial day, not a
-  missing seam: either the day's acts become recruitment's, or the trial-day records move to scouting.
 - **The operations repository** holds tables other domains own (media's upload sessions, the delivery centre's
   bookkeeping, discovery's saved searches, the signing invoices). Each is written only by its owner, but the
   repository should be split along those lines.

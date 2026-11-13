@@ -433,10 +433,15 @@ function playerViewForOrg(player, org) {
 }
 
 // ------------------------------------------------------------- club routes
-// Requests and trials, the ledger and budgets: the writers of a request row and an accepted trial that the Contact,
-// Trial and open-day flows and the Inbox's answers all go through.
+// Requests and trials with their trial day, the ledger and budgets: the writers of a request row and an accepted trial
+// that the Contact, Trial and open-day flows and the Inbox's answers all go through.
 const { issueRecruitmentRequest, issueAcceptedTrial, contactReplyFrom, canonicalContractFor } = createRecruitment({
   orgRouter,
+  playerRouter,
+  guardianRouter,
+  adminRouter,
+  playerRecord, // a trial-day check-in feeds the player's attendance record
+  recordActivity,
   recruitment,
   recruitmentCases,
   recruitmentReads,
@@ -544,7 +549,6 @@ createScouting({
   users: users.reads,
   staffRecord, // removing a staff member
   joinSquad: scoutingActs.joinSquad,
-  recruitment,
   recruitmentCases,
   scoutingAssessments,
   playerViewForOrg,

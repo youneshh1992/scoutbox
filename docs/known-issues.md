@@ -110,6 +110,12 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
 - **The Box Cam source freeze misses some code lines.** `strippedSource` (`domains/development/boxcam/cv/freeze.mjs`)
   drops every line starting with `*` as a comment, including code continuation lines such as
   `* CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;` in `track.mjs`, so a change there doesn't change the freeze hash.
+- **The trial day has its own cancellation, separate from the trial's.** `POST /org/trials/:id/cancel`
+  (`domains/recruitment/trialDay.mjs`) records a day status event and tells the family "X cancelled the trial", but
+  the trial stays open: it can still be completed, and because a case has one open trial, no new invitation can be
+  sent for that case. The day's cancel and postpone also skip what the trial's own cancel
+  (`lifecycle/trialRoutes.mjs`) does: the Room's permission check, re-authentication, the revision gate, the rate
+  limit and moderation of the reason. The day's cancel should go through the trial's cancel.
 - **The public passport-share limiter is its own unpruned Map** (`domains/passport/sharing.mjs`) rather
   than the shared `rateLimit`.
 

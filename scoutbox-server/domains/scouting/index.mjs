@@ -1,4 +1,4 @@
-// Scouting: the club's evidence and assessments, opportunities and campaigns, and trial days.
+// Scouting: the club's evidence and assessments, opportunities and campaigns.
 import { needs, strictContext } from '../platform/deps.mjs';
 import { routeContext } from '../platform/routeHelpers.mjs';
 import { CLUB_SETUP_LIMITS } from '../../repositories/clubSetup.mjs';
@@ -42,7 +42,7 @@ export function createScoutingActs(deps) {
   });
 }
 
-/** Evidence and coach identity, assessments and video, opportunities and applications, campaigns, trial days, and the player's private suitability preferences. */
+/** Evidence and coach identity, assessments and video, opportunities and applications, campaigns, and the player's private suitability preferences. */
 export function createScouting(deps) {
   needs('createScouting', deps, [
     'byId',
@@ -71,7 +71,6 @@ export function createScouting(deps) {
     'recruitmentReads',
     'users',
     'staffRecord',
-    'recruitment',
     'recruitmentCases',
     'scoutingAssessments',
     'playerViewForOrg',
