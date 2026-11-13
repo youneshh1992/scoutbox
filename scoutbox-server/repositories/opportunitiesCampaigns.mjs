@@ -48,7 +48,7 @@ import {
 } from './scoutingEvidence.mjs';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_LEVELS } from './playerRecord.ts';
-import { ORG_LEVELS } from './orgs.mjs';
+import { ORG_LEVELS } from './orgs.ts';
 import { parseStrictDateOnly } from '../temporal.ts';
 
 export const OPPORTUNITIES_CAMPAIGNS_MIGRATION = '0022_opportunities_campaigns';

@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PLANS, ARCHETYPES } from '../../catalogue.mjs';
-import { ORG_PLANS } from '../../repositories/orgs.mjs';
+import { ORG_PLANS } from '../../repositories/orgs.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { openLayer, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';

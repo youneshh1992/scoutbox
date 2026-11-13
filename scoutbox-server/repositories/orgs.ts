@@ -1,7 +1,7 @@
 /**
  * Organisations: the `orgs` table.
  *
- * Record (the keys every reader sees, all always present):
+ * Record (`Org`; the keys every reader sees, all always present):
  *   { id, name, type, level, plan, country,
  *     location: null | { lat, lng, city },              city null when the club gave none
  *     federationRef: null | { federation, registrationId },
@@ -19,18 +19,24 @@
  * A first installation's organisations (the seed) are imported once by `initialize`, while `meta.orgsInit` is
  * `pending` (set by the migration).
  */
+import type { DatabaseSync, SQLInputValue } from 'node:sqlite';
 import { PLANS } from '../catalogue.mjs';
-import { transaction, migrationApplied, operationOn } from './database.ts';
-import { pageOf } from '../domains/platform/paging.mjs';
+import { transaction, migrationApplied, type UnitParticipant } from './database.ts';
+import type { DeepReadonly } from '../domains/platform/values.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
+import { isPlainObject } from './fieldSpecs.ts';
+import { refusal, identityKit, readsOf, pageOf, type IdentityRefusal } from './identityRules.ts';
 
 export const ORGS_TABLE_MIGRATION = '0004_orgs_live';
 /** `meta` key holding the initialisation state (`pending` | `done`). */
 export const ORGS_INIT_META = 'orgsInit';
-export const ORG_TYPES = Object.freeze(['club', 'agency']);
-export const ORG_LEVELS = Object.freeze(['pro', 'academy', 'agency', 'grassroots']);
+export const ORG_TYPES = Object.freeze(['club', 'agency'] as const);
+export const ORG_LEVELS = Object.freeze(['pro', 'academy', 'agency', 'grassroots'] as const);
+export type OrgType = (typeof ORG_TYPES)[number];
+export type OrgLevel = (typeof ORG_LEVELS)[number];
+export type OrgPlan = keyof typeof PLANS;
 /** The plans an organisation can be on: the catalogue's (one definition; the orgs table's CHECK lists the same four). */
-export const ORG_PLANS = Object.freeze(Object.keys(PLANS));
+export const ORG_PLANS = Object.freeze(Object.keys(PLANS) as OrgPlan[]);
 export const ORG_LIMITS = Object.freeze({
   id: 80,
   name: 120,
@@ -42,7 +48,7 @@ export const ORG_LIMITS = Object.freeze({
   passwordHash: 512,
 });
 const L = ORG_LIMITS;
-const list = (xs) => xs.map((x) => `'${x}'`).join(', ');
+const list = (xs: readonly string[]) => xs.map((x) => `'${x}'`).join(', ');
 
 export const ORGS_DDL = `
 CREATE TABLE orgs (
@@ -75,15 +81,60 @@ CREATE TABLE orgs (
 CREATE INDEX orgs_type_level ON orgs (type, level);
 `;
 
-// Local (not scoutingEvidence's): recruitment.mjs imports this module, and scoutingEvidence.mjs imports recruitment.mjs.
-const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const isClock = (v) => Number.isSafeInteger(v) && v >= 0;
-const describe = (v) =>
-  v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`;
-const textOk = (v, max) => typeof v === 'string' && v.length >= 1 && v.length <= max && v === v.trim();
+type OrgFields = {
+  id: string;
+  name: string;
+  type: OrgType;
+  level: OrgLevel | null;
+  plan: OrgPlan;
+  country: string | null;
+  /** The club's ground; `city` is null when the club gave none. */
+  location: { lat: number; lng: number; city: string | null } | null;
+  federationRef: { federation: string; registrationId: string } | null;
+  trustedPartner: boolean;
+  verified: boolean;
+  verifiedDomain: string | null;
+  safeguardingContractSigned: boolean;
+  suspended: boolean;
+  emailDomain: string | null;
+  emailDomainVerified: boolean;
+  mfaRequiredForLeads: boolean;
+  verificationRevokedAt: number | null;
+  createdAt: number;
+};
+/** An organisation as the repository reads it back, frozen at every level. */
+export type Org = DeepReadonly<OrgFields>;
+/**
+ * A new organisation: its name, type and plan, and any other fields (absent ones take their defaults; the id is minted
+ * when not given). Typed when written, so a caller still in JavaScript can pass anything and be refused by field.
+ */
+export type OrgInput = Pick<OrgFields, 'name' | 'type' | 'plan'> &
+  Partial<Omit<OrgFields, 'name' | 'type' | 'plan' | 'location'>> & {
+    location?: { lat: number; lng: number; city?: string | null } | null;
+    passwordHash?: string | null;
+  };
+/** Trust & Safety's standing switches; a field left out keeps its value. */
+export type OrgStanding = {
+  verified?: boolean;
+  safeguardingContractSigned?: boolean;
+  suspended?: boolean;
+  verifiedDomain?: string | null;
+};
+/** `level: null` is the organisations without a level. */
+export type OrgFilter = { type?: OrgType; level?: OrgLevel | null; notLevel?: OrgLevel };
+export type LatLngBox = { minLat: number; maxLat: number; minLng: number; maxLng: number };
+/** An organisation as the whole-domain read and the seed carry it: the record plus its password hash. */
+export type OrgSnapshotRow = OrgFields & { password: string | null };
 
-export const ORG_RECORD_KEYS = Object.freeze([
+// Its own wording, not identityRules': an absent value reads "a undefined", and text must not carry surrounding spaces.
+const isClock = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+const describe = (v: unknown) =>
+  v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`;
+const textOk = (v: unknown, max: number): v is string =>
+  typeof v === 'string' && v.length >= 1 && v.length <= max && v === v.trim();
+const isOneOf = <T extends string>(vals: readonly T[], v: unknown): v is T => (vals as readonly unknown[]).includes(v);
+
+export const ORG_RECORD_KEYS: readonly (keyof OrgFields)[] = Object.freeze([
   'id',
   'name',
   'type',
@@ -102,7 +153,8 @@ export const ORG_RECORD_KEYS = Object.freeze([
   'mfaRequiredForLeads',
   'verificationRevokedAt',
   'createdAt',
-]);
+] as const);
+const isRecordKey = (k: string): k is keyof OrgFields => (ORG_RECORD_KEYS as readonly string[]).includes(k);
 const BOOLEANS = Object.freeze([
   'trustedPartner',
   'verified',
@@ -110,9 +162,9 @@ const BOOLEANS = Object.freeze([
   'suspended',
   'emailDomainVerified',
   'mfaRequiredForLeads',
-]);
+] as const);
 /** Fields another repository owns, named in the refusal so a misdirected writer learns where they live. */
-const RETIRED_FACET_OWNER = Object.freeze({
+const RETIRED_FACET_OWNER: Readonly<Record<string, string>> = Object.freeze({
   tactical: 'clubSetup',
   squad: 'clubSetup',
   lookingFor: 'clubSetup',
@@ -121,10 +173,10 @@ const RETIRED_FACET_OWNER = Object.freeze({
   agencySettings: 'agentCore',
 });
 
-/** Fill the optional fields of an incoming record with their defaults (null, or false for a flag). */
-const withDefaults = (raw, createdAt) => {
+/** Fill the optional fields of an incoming record with their defaults (null, or false for a flag). Not yet checked. */
+const withDefaults = (raw: Record<string, unknown>, createdAt: unknown): Record<string, unknown> => {
   const given = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== undefined)); // an undefined field is an absent one
-  const r = {
+  const r: Record<string, unknown> = {
     level: null,
     country: null,
     location: null,
@@ -146,14 +198,14 @@ const withDefaults = (raw, createdAt) => {
   // The record's fields in their one order; anything else after them (and refused by the typing).
   return Object.fromEntries([
     ...ORG_RECORD_KEYS.map((k) => [k, r[k]]),
-    ...Object.entries(r).filter(([k]) => !ORG_RECORD_KEYS.includes(k)),
+    ...Object.entries(r).filter(([k]) => !isRecordKey(k)),
   ]);
 };
 
-/** The problems with a record (an incoming one after its defaults, or a draft after an update), by field. */
-export function orgRecordProblems(r) {
-  const out = [];
-  const unknown = Object.keys(r).filter((k) => !ORG_RECORD_KEYS.includes(k));
+/** The problems with a record (an incoming one after its defaults), by field. None means it is an `OrgFields`. */
+export function orgRecordProblems(r: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const unknown = Object.keys(r).filter((k) => !isRecordKey(k));
   for (const k of unknown)
     out.push(
       RETIRED_FACET_OWNER[k]
@@ -162,10 +214,10 @@ export function orgRecordProblems(r) {
     );
   if (!textOk(r.id, L.id)) out.push(`id must be text of 1 to ${L.id} characters`);
   if (!textOk(r.name, L.name)) out.push(`name must be text of 1 to ${L.name} characters without surrounding spaces`);
-  if (!ORG_TYPES.includes(r.type)) out.push(`type must be one of ${ORG_TYPES.join(', ')}`);
-  if (r.level !== null && !ORG_LEVELS.includes(r.level))
+  if (!isOneOf(ORG_TYPES, r.type)) out.push(`type must be one of ${ORG_TYPES.join(', ')}`);
+  if (r.level !== null && !isOneOf(ORG_LEVELS, r.level))
     out.push(`level must be one of ${ORG_LEVELS.join(', ')} or null`);
-  if (!ORG_PLANS.includes(r.plan)) out.push(`plan must be one of ${ORG_PLANS.join(', ')}`);
+  if (!isOneOf(ORG_PLANS, r.plan)) out.push(`plan must be one of ${ORG_PLANS.join(', ')}`);
   if (r.country !== null && !textOk(r.country, L.country))
     out.push(`country must be text of 1 to ${L.country} characters or null`);
   for (const k of ['verifiedDomain', 'emailDomain'])
@@ -179,8 +231,16 @@ export function orgRecordProblems(r) {
     if (!isPlainObject(loc) || Object.keys(loc).some((k) => !['lat', 'lng', 'city'].includes(k)))
       out.push(`location must be { lat, lng, city } or null (got ${describe(loc)})`);
     else {
+      const { lat, lng } = loc;
       if (
-        !(Number.isFinite(loc.lat) && Math.abs(loc.lat) <= 90 && Number.isFinite(loc.lng) && Math.abs(loc.lng) <= 180)
+        !(
+          typeof lat === 'number' &&
+          typeof lng === 'number' &&
+          Number.isFinite(lat) &&
+          Math.abs(lat) <= 90 &&
+          Number.isFinite(lng) &&
+          Math.abs(lng) <= 180
+        )
       )
         out.push('location.lat and location.lng must be a latitude (-90 to 90) and a longitude (-180 to 180)');
       if (loc.city !== null && !textOk(loc.city, L.city))
@@ -201,13 +261,37 @@ export function orgRecordProblems(r) {
   return out;
 }
 
+type OrgRow = {
+  id: string;
+  name: string;
+  type: OrgType;
+  level: OrgLevel | null;
+  plan: OrgPlan;
+  country: string | null;
+  city: string | null;
+  lat: number | null;
+  lng: number | null;
+  federation: string | null;
+  federation_registration_id: string | null;
+  trusted_partner: 0 | 1;
+  verified: 0 | 1;
+  verified_domain: string | null;
+  safeguarding_contract_signed: 0 | 1;
+  suspended: 0 | 1;
+  password_hash: string | null;
+  email_domain: string | null;
+  email_domain_verified: 0 | 1;
+  mfa_required_for_leads: 0 | 1;
+  verification_revoked_at: number | null;
+  created_at: number;
+};
 const COLS =
   'id, name, type, level, plan, country, city, lat, lng, federation, federation_registration_id, trusted_partner, verified, verified_domain, safeguarding_contract_signed, suspended, password_hash, email_domain, email_domain_verified, mfa_required_for_leads, verification_revoked_at, created_at';
 const COL_LIST = COLS.split(', ');
 const SELECT = `SELECT ${COLS} FROM orgs`;
 const INSERT = `INSERT INTO orgs (${COLS}) VALUES (${COL_LIST.map((c) => `@${c}`).join(', ')})`;
-const b = (v) => (v ? 1 : 0);
-const params = (r, passwordHash = null) => ({
+const b = (v: boolean): 0 | 1 => (v ? 1 : 0);
+const params = (r: OrgFields, passwordHash: string | null = null): OrgRow => ({
   id: r.id,
   name: r.name,
   type: r.type,
@@ -232,7 +316,7 @@ const params = (r, passwordHash = null) => ({
   created_at: r.createdAt,
 });
 /** The record for a table row (plain; the repository freezes what it hands out). */
-function fromDb(d) {
+function fromDb(d: OrgRow): OrgFields {
   return {
     id: d.id,
     name: d.name,
@@ -240,9 +324,11 @@ function fromDb(d) {
     level: d.level,
     plan: d.plan,
     country: d.country,
-    location: d.lat === null ? null : { lat: d.lat, lng: d.lng, city: d.city },
+    location: d.lat === null ? null : { lat: d.lat, lng: d.lng as number, city: d.city },
     federationRef:
-      d.federation === null ? null : { federation: d.federation, registrationId: d.federation_registration_id },
+      d.federation === null
+        ? null
+        : { federation: d.federation, registrationId: d.federation_registration_id as string },
     trustedPartner: d.trusted_partner === 1,
     verified: d.verified === 1,
     verifiedDomain: d.verified_domain,
@@ -255,12 +341,12 @@ function fromDb(d) {
     createdAt: d.created_at,
   };
 }
-const passwordProblem = (h) =>
+const passwordProblem = (h: unknown): string | null =>
   h === null || textOk(h, L.passwordHash)
     ? null
     : `the password hash must be text of 1 to ${L.passwordHash} characters or null`;
 
-const cutOver = (sqlite) => migrationApplied(sqlite, ORGS_TABLE_MIGRATION);
+const cutOver = (sqlite: DatabaseSync) => migrationApplied(sqlite, ORGS_TABLE_MIGRATION);
 
 // ------------------------------------------------------------------ the whole-domain read
 /**
@@ -268,7 +354,10 @@ const cutOver = (sqlite) => migrationApplied(sqlite, ORGS_TABLE_MIGRATION);
  * a record plus `password` (the hash, or null); absent optional fields take their defaults (`createdAt` the import's
  * time); an unknown field is refused.
  */
-export function typeOrgSnapshotRow(raw, { now = Date.now() } = {}) {
+export function typeOrgSnapshotRow(
+  raw: unknown,
+  { now = Date.now() }: { now?: number } = {},
+): { ok: true; row: OrgFields; passwordHash: string | null } | { ok: false; reason: string } {
   if (!isPlainObject(raw)) return { ok: false, reason: `not an object (${describe(raw)})` };
   const at = `organisation ${typeof raw.id === 'string' ? raw.id : '(no id)'}`;
   const { password = null, ...rest } = raw;
@@ -277,25 +366,25 @@ export function typeOrgSnapshotRow(raw, { now = Date.now() } = {}) {
   const pw = passwordProblem(password);
   if (pw) problems.push(pw);
   if (problems.length) return { ok: false, reason: `${at}: ${problems.join('; ')}` };
-  return { ok: true, row: r, passwordHash: password };
+  return { ok: true, row: r as OrgFields, passwordHash: password as string | null };
 }
 
-const readSnapshot = (sqlite) =>
-  sqlite
-    .prepare(`${SELECT} ORDER BY rowid`)
-    .all()
-    .map((d) => ({ ...fromDb(d), password: d.password_hash }));
+const readSnapshot = (sqlite: DatabaseSync): OrgSnapshotRow[] =>
+  (sqlite.prepare(`${SELECT} ORDER BY rowid`).all() as OrgRow[]).map((d) => ({
+    ...fromDb(d),
+    password: d.password_hash,
+  }));
 
 /** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const ORGS_TABLE = {
   name: 'orgs',
-  read(sqlite) {
+  read(sqlite: DatabaseSync): OrgSnapshotRow[] | null {
     return cutOver(sqlite) ? readSnapshot(sqlite) : null;
   },
 };
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set([
+const WRITES = [
   'create',
   'setStanding',
   'verifyEmailDomain',
@@ -304,10 +393,22 @@ const WRITES = new Set([
   'clearVerificationRevocation',
   'setPasswordHash',
   'initialize',
-]);
+] as const;
 
 /** `createOrgsRepository({ sqlite, nextId, unit, now, log })`: the organisation writes and queries, plus `reads` (the queries alone). */
-export function createOrgsRepository({ sqlite, nextId = null, unit = null, now = Date.now, log = () => {} }) {
+export function createOrgsRepository({
+  sqlite,
+  nextId = null,
+  unit = null,
+  now = Date.now,
+  log = () => {},
+}: {
+  sqlite: DatabaseSync;
+  nextId?: ((prefix: string) => string) | null;
+  unit?: UnitParticipant | null;
+  now?: () => number;
+  log?: (message: string) => void;
+}) {
   if (!sqlite)
     throw new TypeError(
       'the organisations repository needs a SQLite connection (node:sqlite); organisations have no in-memory fallback',
@@ -316,19 +417,15 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
     throw new Error(
       `orgs: the cutover record ${ORGS_TABLE_MIGRATION} is missing from data_migrations; the table cannot be trusted as the source of truth`,
     );
-  const operation = operationOn(sqlite, unit);
-  const cache = new Map();
-  const q = (sql) => {
-    let s = cache.get(sql);
-    if (!s) cache.set(sql, (s = sqlite.prepare(sql)));
-    return s;
-  };
-  const dec = (rows) => rows.map((d) => deepFreeze(fromDb(d)));
-  const byId = (id) => (typeof id === 'string' && id ? (dec(q(`${SELECT} WHERE id = ?`).all(id))[0] ?? null) : null);
-  const invalid = (id, problems) =>
+  const { q, operation } = identityKit(sqlite, unit, now);
+  const dec = (rows: unknown[]): Org[] => (rows as OrgRow[]).map((d) => deepFreeze(fromDb(d)));
+  const byId = (id: unknown): Org | null =>
+    typeof id === 'string' && id ? (dec(q(`${SELECT} WHERE id = ?`).all(id))[0] ?? null) : null;
+  const invalid = (id: unknown, problems: string[]): IdentityRefusal =>
     refusal('ORG_RECORD_INVALID', `organisation ${id}: ${problems.join('; ')}`, { problems });
-  const readInitState = () => {
-    const row = q('SELECT value FROM meta WHERE key = ?').get(ORGS_INIT_META);
+  const noOrg = (id: unknown) => refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
+  const readInitState = (): 'pending' | 'done' => {
+    const row = q('SELECT value FROM meta WHERE key = ?').get(ORGS_INIT_META) as { value: unknown } | undefined;
     if (!row) return 'done';
     if (row.value !== 'pending' && row.value !== 'done')
       throw new Error(
@@ -336,10 +433,9 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
       );
     return row.value;
   };
-  /** `type`, `level` and `notLevel` narrow a list (`level: null` is the organisations without a level). */
-  const where = ({ type, level, notLevel } = {}) => {
-    const sql = [];
-    const args = [];
+  const where = ({ type, level, notLevel }: OrgFilter = {}) => {
+    const sql: string[] = [];
+    const args: SQLInputValue[] = [];
     if (type !== undefined) {
       sql.push('type = ?');
       args.push(type);
@@ -355,13 +451,17 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
     }
     return { sql: sql.length ? ` WHERE ${sql.join(' AND ')}` : '', args };
   };
+  const count = (filter: OrgFilter = {}): number => {
+    const w = where(filter);
+    return (q(`SELECT COUNT(*) AS n FROM orgs${w.sql}`).get(...w.args) as { n: number }).n;
+  };
   const repo = {
     // ---------------------------------------------------------- writes
     /**
      * Create an organisation (the id is minted here unless the caller gives one). Absent optional fields take their
      * defaults; junk is refused by field; `passwordHash` is stored, never put on the record. Returns the stored record.
      */
-    create: ({ passwordHash = null, ...fields } = {}) =>
+    create: ({ passwordHash = null, ...fields }: OrgInput = {} as OrgInput): Org =>
       operation(() => {
         const r = withDefaults(
           { ...fields, id: fields.id ?? (nextId ? nextId('org') : undefined) },
@@ -371,29 +471,30 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
         const pw = passwordProblem(passwordHash);
         if (pw) problems.push(pw);
         if (problems.length) throw invalid(r.id, problems);
-        if (q('SELECT 1 FROM orgs WHERE id = ?').get(r.id))
-          throw refusal('ORG_EXISTS', `organisation ${r.id} already exists`);
-        q(INSERT).run(params(r, passwordHash));
-        return byId(r.id);
+        const org = r as OrgFields;
+        if (q('SELECT 1 FROM orgs WHERE id = ?').get(org.id))
+          throw refusal('ORG_EXISTS', `organisation ${org.id} already exists`);
+        q(INSERT).run(params(org, passwordHash));
+        return byId(org.id) as Org;
       }),
     /**
      * Trust & Safety's standing switches: any of `verified`, `safeguardingContractSigned` and `suspended` (booleans) and
      * `verifiedDomain` (text, or null to clear it). Fields left out keep their value. Returns the stored record.
      */
-    setStanding: (id, fields) =>
+    setStanding: (id: string, fields: OrgStanding): Org =>
       operation(() => {
         if (!isPlainObject(fields))
           throw new TypeError(
             'orgs.setStanding(id, { verified, safeguardingContractSigned, verifiedDomain, suspended }) takes an object',
           );
-        const columns = {
+        const columns: Readonly<Record<string, string>> = {
           verified: 'verified',
           safeguardingContractSigned: 'safeguarding_contract_signed',
           suspended: 'suspended',
           verifiedDomain: 'verified_domain',
         };
-        const problems = [];
-        const set = {};
+        const problems: string[] = [];
+        const set: Record<string, SQLInputValue> = {};
         for (const [k, v] of Object.entries(fields)) {
           if (v === undefined) continue;
           if (!columns[k]) problems.push(`${k} is not a standing switch`);
@@ -405,64 +506,62 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
           else set[columns[k]] = v ? 1 : 0;
         }
         if (problems.length) throw invalid(id, problems);
-        if (!byId(id)) throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
+        if (!byId(id)) throw noOrg(id);
         const cols = Object.keys(set);
         if (cols.length)
           q(`UPDATE orgs SET ${cols.map((c) => `${c} = @${c}`).join(', ')} WHERE id = @id`).run({ ...set, id });
-        return byId(id);
+        return byId(id) as Org;
       }),
     /** The club proved control of a mailbox at `domain`: the domain is stored and marked verified. Returns the stored record. */
-    verifyEmailDomain: (id, domain) =>
+    verifyEmailDomain: (id: string, domain: string): Org =>
       operation(() => {
         if (!textOk(domain, L.domain)) throw invalid(id, [`emailDomain must be text of 1 to ${L.domain} characters`]);
         if (q('UPDATE orgs SET email_domain = ?, email_domain_verified = 1 WHERE id = ?').run(domain, id).changes !== 1)
-          throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
-        return byId(id);
+          throw noOrg(id);
+        return byId(id) as Org;
       }),
     /** Require (or stop requiring) MFA of the organisation's leads. Returns the stored record. */
-    setMfaRequiredForLeads: (id, required) =>
+    setMfaRequiredForLeads: (id: string, required: boolean): Org =>
       operation(() => {
         if (typeof required !== 'boolean')
           throw invalid(id, [`mfaRequiredForLeads must be a boolean (got ${describe(required)})`]);
         if (q('UPDATE orgs SET mfa_required_for_leads = ? WHERE id = ?').run(required ? 1 : 0, id).changes !== 1)
-          throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
-        return byId(id);
+          throw noOrg(id);
+        return byId(id) as Org;
       }),
     /** Trust & Safety revoked the organisation's verification at `at`: it is no longer verified. Returns the stored record. */
-    revokeVerification: (id, at) =>
+    revokeVerification: (id: string, at: number): Org =>
       operation(() => {
         if (!Number.isSafeInteger(at) || at < 0)
           throw invalid(id, ['verificationRevokedAt must be an integer timestamp']);
         if (q('UPDATE orgs SET verified = 0, verification_revoked_at = ? WHERE id = ?').run(at, id).changes !== 1)
-          throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
-        return byId(id);
+          throw noOrg(id);
+        return byId(id) as Org;
       }),
     /** The organisation was verified again: the revocation no longer stands. Returns the stored record. */
-    clearVerificationRevocation: (id) =>
+    clearVerificationRevocation: (id: string): Org =>
       operation(() => {
-        if (q('UPDATE orgs SET verification_revoked_at = NULL WHERE id = ?').run(id).changes !== 1)
-          throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
-        return byId(id);
+        if (q('UPDATE orgs SET verification_revoked_at = NULL WHERE id = ?').run(id).changes !== 1) throw noOrg(id);
+        return byId(id) as Org;
       }),
     /** Store a new password hash (or null to remove the password). Returns the stored record. */
-    setPasswordHash: (id, hash) =>
+    setPasswordHash: (id: string, hash: string | null): Org =>
       operation(() => {
         const pw = passwordProblem(hash);
         if (pw) throw invalid(id, [pw]);
-        if (q('UPDATE orgs SET password_hash = ? WHERE id = ?').run(hash, id).changes !== 1)
-          throw refusal('ORG_NOT_FOUND', `organisation ${id} does not exist`);
-        return byId(id);
+        if (q('UPDATE orgs SET password_hash = ? WHERE id = ?').run(hash, id).changes !== 1) throw noOrg(id);
+        return byId(id) as Org;
       }),
     /**
      * First-installation initialisation: import the given records (the seed) and record `done`, in one transaction.
      * Allowed only while the state is `pending` and the table is empty; every record is typed first.
      */
-    initialize(given) {
+    initialize(given: unknown): { engine: 'sqlite'; rows: number; imported: number } {
       if (readInitState() !== 'pending')
         throw new Error(
           `orgs: the organisations were already initialised (meta.${ORGS_INIT_META} is "done"); the table is authoritative and nothing is imported`,
         );
-      const stored = repo.count();
+      const stored = count();
       if (stored)
         throw new Error(
           `orgs: initialisation is pending but the table already holds ${stored} row(s) written outside the repository; refusing to initialise over them`,
@@ -491,49 +590,48 @@ export function createOrgsRepository({ sqlite, nextId = null, unit = null, now =
     // ---------------------------------------------------------- reads
     byId,
     /** Every organisation (or those of a `type` / `level`, or not of `notLevel`), in creation order. Bounded by the clubs, not the player base. */
-    list: (filter = {}) => {
+    list: (filter: OrgFilter = {}): Org[] => {
       const w = where(filter);
       return dec(q(`${SELECT}${w.sql} ORDER BY rowid`).all(...w.args));
     },
     /** One page of `list(filter)`, oldest first; `page` is the route's `readPage(query, ['number'])`: `{ items, nextCursor }`. */
-    page: (filter = {}, { limit, after = null }) => {
+    page: (
+      filter: OrgFilter = {},
+      { limit, after = null }: { limit: number; after?: readonly [number] | null },
+    ): { items: Org[]; nextCursor: string | null } => {
       const w = where(filter);
       const rows = q(
         `SELECT rowid AS rid, ${COLS} FROM orgs${w.sql}${w.sql ? ' AND' : ' WHERE'} rowid > ? ORDER BY rowid LIMIT ?`,
-      ).all(...w.args, after ? after[0] : 0, limit + 1);
+      ).all(...w.args, after ? after[0] : 0, limit + 1) as (OrgRow & { rid: number })[];
       const page = pageOf(rows, limit, (r) => [r.rid]);
       return { items: dec(page.items), nextCursor: page.nextCursor };
     },
     /** The organisations of a `level` whose ground lies inside the latitude/longitude `box` (a prefilter; the exact distance is the caller's). */
-    locatedInBox: (box, { level } = {}) =>
+    locatedInBox: (box: LatLngBox, { level }: { level?: OrgLevel } = {}): Org[] =>
       dec(
         q(
           `${SELECT} WHERE lat IS NOT NULL AND lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?${level ? ' AND level = ?' : ''} ORDER BY rowid`,
         ).all(box.minLat, box.maxLat, box.minLng, box.maxLng, ...(level ? [level] : [])),
       ),
     /** An organisation with this name (case-insensitive, surrounding spaces ignored), or null. */
-    byName: (name) =>
+    byName: (name: unknown): Org | null =>
       typeof name === 'string' && name.trim()
         ? (dec(q(`${SELECT} WHERE lower(name) = lower(?) ORDER BY rowid LIMIT 1`).all(name.trim()))[0] ?? null)
         : null,
     /** The stored password hash for the sign-in check (never on a record), or null. */
-    passwordHashOf: (id) => q('SELECT password_hash FROM orgs WHERE id = ?').get(id)?.password_hash ?? null,
-    count: (filter = {}) => {
-      const w = where(filter);
-      return q(`SELECT COUNT(*) AS n FROM orgs${w.sql}`).get(...w.args).n;
-    },
+    passwordHashOf: (id: string): string | null =>
+      (q('SELECT password_hash FROM orgs WHERE id = ?').get(id) as Pick<OrgRow, 'password_hash'> | undefined)
+        ?.password_hash ?? null,
+    count,
     /** `pending` (a first installation that has not been initialised yet) or `done`. */
     initState: () => readInitState(),
-    attach() {
-      const rows = repo.count();
+    attach(): { engine: 'sqlite'; rows: number; imported: 0 } {
+      const rows = count();
       log(`orgs: ${rows} organisation(s) in the table`);
       return { engine: 'sqlite', rows, imported: 0 };
     },
   };
-  repo.reads = Object.freeze(
-    Object.fromEntries(
-      Object.entries(repo).filter(([k, v]) => typeof v === 'function' && !WRITES.has(k) && k !== 'attach'),
-    ),
-  );
-  return repo;
+  return Object.assign(repo, { reads: readsOf(repo, [...WRITES, 'attach']) });
 }
+export type OrgsRepository = ReturnType<typeof createOrgsRepository>;
+export type OrgReads = OrgsRepository['reads'];

@@ -3,7 +3,7 @@
  *
  * The billing plans and the positional archetypes are product configuration: no route writes them, and they are read
  * from here and nowhere else. Changing one is a release. `orgs.plan` is one of the PLANS keys (its
- * CHECK; repositories/orgs.mjs ORG_PLANS is derived from this object), so a plan lookup never falls back.
+ * CHECK; repositories/orgs.ts ORG_PLANS is derived from this object), so a plan lookup never falls back.
  */
 
 import { deepFreeze } from './domains/platform/values.ts';

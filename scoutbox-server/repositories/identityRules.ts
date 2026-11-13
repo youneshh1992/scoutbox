@@ -1,7 +1,8 @@
 /**
  * What the players and guardians repositories (players.ts, guardians.ts) share: the text and number limits, the
  * notification preferences both carry, the stored password hash, and the refusals. Refusals carry a code and name the
- * id and the field, never a value.
+ * id and the field, never a value. The organisations repository (orgs.ts) is built on the same refusals, statement
+ * cache, reads and paging.
  */
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import { operationOn, type Operation, type UnitParticipant } from './database.ts';

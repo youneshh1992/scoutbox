@@ -23,7 +23,7 @@
  */
 import { pageOf } from '../domains/platform/paging.mjs';
 import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.ts';
-import { ORG_TYPES } from './orgs.mjs';
+import { ORG_TYPES } from './orgs.ts';
 import {
   TRIAL_WORKFLOW_STATES,
   TRIAL_SESSION_KINDS,

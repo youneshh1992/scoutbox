@@ -1,7 +1,7 @@
 /**
  * A club's own setup: the tactical setup (roles with their criteria, transfer windows), the squad, the shadow list,
  * what a grassroots club is looking for, the federation-route verification request, and role vacancies. Writing any of
- * the first four on an organisation record is refused, naming this repository (repositories/orgs.mjs).
+ * the first four on an organisation record is refused, naming this repository (repositories/orgs.ts).
  *
  * The shadow list is its own table (org_shadow_players), not a kind of squad row: a club considering a player for a
  * role is not that player's club. Nothing that reads "on this club's squad" (the grassroots squad, match-day

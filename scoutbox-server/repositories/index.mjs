@@ -12,7 +12,7 @@
 import { runDataMigrations, dataSchemaReport } from './database.ts';
 import { createUsersRepository, USERS_TABLE } from './users.mjs';
 import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
-import { createOrgsRepository, ORGS_TABLE } from './orgs.mjs';
+import { createOrgsRepository, ORGS_TABLE } from './orgs.ts';
 import { createIdentityRepositories, IDENTITY_RECORDS, IDENTITY_COLLECTIONS } from './identity.ts';
 import { PLAYERS_RETAINED } from './playerRecord.ts';
 import { createMediaDeletionsQueue, MEDIA_DELETIONS_TABLE } from './mediaDeletions.mjs';

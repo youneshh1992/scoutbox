@@ -6,7 +6,7 @@
 import * as v from 'valibot';
 import { CURSOR_PAGE, flag, inputOrRefuse, oneOf, text } from '../platform/schemas.mjs';
 import { AUDIT_LIMITS as L } from '../../repositories/safetyAudit.mjs';
-import { ORG_LIMITS } from '../../repositories/orgs.mjs';
+import { ORG_LIMITS } from '../../repositories/orgs.ts';
 
 export const REPORT_TARGETS = ['club', 'scout', 'player'];
 /** What the console sends with an outcome; only suspend_org changes anything beyond the report. */

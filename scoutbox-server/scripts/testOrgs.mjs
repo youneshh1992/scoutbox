@@ -19,7 +19,7 @@ import {
   ORGS_TABLE_MIGRATION,
   ORG_RECORD_KEYS,
   ORG_PLANS,
-} from '../repositories/orgs.mjs';
+} from '../repositories/orgs.ts';
 import { PLANS } from '../catalogue.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
