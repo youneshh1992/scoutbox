@@ -1547,6 +1547,11 @@ section('F — calendar export fuzz and deletion races');
     (await j('POST', `/org/trials/${tt.id}/cancel`, { reason: 'Pitch closed' }, maria.token)).status === 200,
     'F2 the trial is cancelled',
   );
+  const dayNotice = (await notifs('/player/notifications', theo.token)).find((n) => /Pitch closed/.test(n.text ?? ''));
+  ok(
+    dayNotice?.type === 'trial_day' && /cancelled this trial day: Pitch closed/.test(dayNotice.text),
+    'F2c the family is told the trial day was cancelled, with the reason',
+  );
   const ics2 = await j('GET', `/org/trials/${tt.id}/ics`, undefined, maria.token);
   ok(
     ics2.status === 200 && ics2.text.includes(`UID:${tt.id}@scoutbox`),

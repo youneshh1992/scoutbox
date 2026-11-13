@@ -110,12 +110,16 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
 - **The Box Cam source freeze misses some code lines.** `strippedSource` (`domains/development/boxcam/cv/freeze.mjs`)
   drops every line starting with `*` as a comment, including code continuation lines such as
   `* CAPTURE_REQUIREMENTS.lowFpsIntervalTolerance;` in `track.mjs`, so a change there doesn't change the freeze hash.
-- **The trial day has its own cancellation, separate from the trial's.** `POST /org/trials/:id/cancel`
-  (`domains/recruitment/trialDay.mjs`) records a day status event and tells the family "X cancelled the trial", but
-  the trial stays open: it can still be completed, and because a case has one open trial, no new invitation can be
-  sent for that case. The day's cancel and postpone also skip what the trial's own cancel
-  (`lifecycle/trialRoutes.mjs`) does: the Room's permission check, re-authentication, the revision gate, the rate
-  limit and moderation of the reason. The day's cancel should go through the trial's cancel.
+- **What cancelling a trial day means is undecided.** A trial has one trial day today: its staff, arrival, consent,
+  emergency contact and check-in, shared by all its sessions. `POST /org/trials/:id/cancel`
+  (`domains/recruitment/trialDay.mjs`) records a day status event, blocks check-in and tells the family "X cancelled
+  this trial day", but the trial stays open: it can still be completed, and because a case has one open trial, no new
+  invitation can be sent for that case. If a cancelled day means the trial is off, the day's cancel should go through
+  the trial's own cancel (`lifecycle/trialRoutes.mjs`). If trials are to have several trial days, a day's
+  cancellation is its own thing and the day records need a day of their own. A question for the Founder. Either way,
+  the day's cancel and postpone skip what the trial's own cancel checks: the Room's permission (any club staff member
+  can use them, not only a Room lead or recruitment lead), the revision gate, the rate limit and moderation of the
+  reason.
 - **The public passport-share limiter is its own unpruned Map** (`domains/passport/sharing.mjs`) rather
   than the shared `rateLimit`.
 

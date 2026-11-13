@@ -238,7 +238,7 @@ export function registerTrialDay({
       notifyTrialParties(
         recorded,
         kind === 'cancelled'
-          ? `❌ ${recorded.orgName} cancelled the trial: ${reason}`
+          ? `❌ ${recorded.orgName} cancelled this trial day: ${reason}`
           : `📅 ${recorded.orgName} moved the trial to ${newDate ?? 'a new date TBC'}: ${reason}`,
       );
       return recorded;
