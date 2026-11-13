@@ -31,10 +31,12 @@ end of the feature freeze.
 
 ## Data model and product
 
-- **The demo's Reputation screen shows figures the product cannot produce.** The demo installs scout track records
-  (discoveries, success rate, average resale multiple) in `reputation_seed`; production's are empty, and the live
-  rows `/org/reputation` computes from the ledger only count views, contacts, trials and signings. A Founder
-  question: drop the seeded figures from the demo, or define how the live product would compute them.
+- **Scout track records are not computed yet.** `reputation_seed` holds the figures a scout's track record is meant to
+  show (discoveries, success rate, average resale multiple), but only the demo fills it; nothing in the product writes
+  it, and production's is empty. The live rows `/org/reputation` computes from the ledger count views, contacts,
+  trials and signings only. Building the track record needs the Founder to define each figure (what counts as a
+  discovery and a success, where a resale value comes from); the live rows should then carry them, and the table
+  can go. Until then the demo shows figures the product cannot produce.
 - **Two analytics figures ignore the Room filters**: `trial_process` and `overdue_trial_reports`
   (`product/journey-analytics.md`).
 
