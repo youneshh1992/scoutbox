@@ -4,11 +4,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { OPERATIONS_LIMITS, UPLOAD_MIMES } from '../../repositories/operations.mjs';
+import { UPLOAD_LIMITS, UPLOAD_MIMES } from '../../repositories/uploadSessions.mjs';
 import { filled } from '../platform/schemas.mjs';
 import { mediaInput } from './schemas.mjs';
 
-const MAX_UPLOAD = OPERATIONS_LIMITS.maxUploadBytes;
+const MAX_UPLOAD = UPLOAD_LIMITS.maxBytes;
 const CHUNK = 512 * 1024; // base64 chunks stay well under the JSON body cap
 
 const chunkDirOf = (dataDir, id) => path.join(dataDir, 'upload-tmp', id);
@@ -32,10 +32,18 @@ const uploadView = (u) => ({
 });
 
 export function registerUploads(ctx) {
-  const { nextId, broadcast, playerRouter, moderateOrRefuse, storage, DATA_DIR, playerRecord, unit, operations } = ctx;
-  if (typeof operations?.uploads?.open !== 'function')
-    throw new TypeError('registerUploads needs the operations repository');
-  const uploads = operations.uploads;
+  const {
+    nextId,
+    broadcast,
+    playerRouter,
+    moderateOrRefuse,
+    storage,
+    DATA_DIR,
+    playerRecord,
+    unit,
+    uploadSessions: uploads,
+  } = ctx;
+  if (typeof uploads?.open !== 'function') throw new TypeError('registerUploads needs the upload sessions repository');
   const chunkDir = (id) => chunkDirOf(DATA_DIR, id);
   /** A write that refuses when another request ended the session first (a race) answers 409, as the check before it would. */
   const unlessEnded = (res, id, write) => {

@@ -4,7 +4,7 @@
  */
 import * as v from 'valibot';
 import { inputOrRefuse, oneOf, text, wholeNumber, wholeNumberText } from '../platform/schemas.mjs';
-import { OPERATIONS_LIMITS as L, UPLOAD_MIMES, isSha256 } from '../../repositories/operations.mjs';
+import { UPLOAD_LIMITS as L, UPLOAD_MIMES, isSha256 } from '../../repositories/uploadSessions.mjs';
 
 const SIGNATURE_MAX = 128;
 const SESSION_ID_MAX = 128;
@@ -14,7 +14,7 @@ export const MEDIA_INPUT = Object.freeze({
   upload: v.strictObject({
     size: v.nullish(wholeNumber({ min: 1 })),
     mime: v.nullish(oneOf(UPLOAD_MIMES)),
-    title: v.nullish(text(L.uploadTitle)),
+    title: v.nullish(text(L.title)),
     sha256: v.nullish(
       v.pipe(
         v.string(),

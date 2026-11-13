@@ -191,7 +191,7 @@ export function registerSafetyConsole({
   channels,
   safetyAudit,
   signingsFollowUps,
-  operations,
+  invoices,
   outbox,
   pushLog,
   transitionsVouches,
@@ -231,7 +231,7 @@ export function registerSafetyConsole({
       moderationHits: safetyAudit.moderationLog.count(),
       channels: channels.count(),
       signings: signingsFollowUps.signings.count(),
-      invoices: operations.invoices.count(),
+      invoices: invoices.count(),
       emailsSent: outbox.count(),
       pushesSent: pushLog.count(),
       sessions: sessions.count(),
@@ -266,7 +266,7 @@ export function registerSafetyConsole({
   adminRouter.get('/push-log', (req, res) => paged(req, res, ['number'], (page) => pushLog.page(page)));
   adminRouter.get('/invoices', (req, res) =>
     paged(req, res, ['number'], (page) => {
-      const { items, nextCursor } = operations.invoices.page(page);
+      const { items, nextCursor } = invoices.page(page);
       return { items: items.map(invoiceView), nextCursor };
     }),
   );

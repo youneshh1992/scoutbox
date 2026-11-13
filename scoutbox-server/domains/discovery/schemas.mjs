@@ -30,7 +30,7 @@ import {
   SECOND_LOOK_STATUSES,
   EVIDENCE_REQUIREMENTS,
 } from './shared.mjs';
-import { SAVED_SEARCH_FILTERS, OPERATIONS_LIMITS } from '../../repositories/operations.mjs';
+import { SAVED_SEARCH_FILTERS, SAVED_SEARCH_LIMITS } from '../../repositories/savedSearches.mjs';
 import { AUDIT_LIMITS } from '../../repositories/safetyAudit.mjs';
 
 /** None of these is a match quality rank; the default is the least suggestive one that is still useful. */
@@ -101,7 +101,7 @@ export const BRIEF_CRITERIA_KEYS = Object.freeze(Object.keys(BRIEF_FIELDS));
 
 const BriefAndPlayer = { briefId: v.nullish(text(REF_MAX)), playerId: v.nullish(text(REF_MAX)) };
 
-const S = OPERATIONS_LIMITS;
+const S = SAVED_SEARCH_LIMITS;
 
 export const DISCOVERY_INPUT = Object.freeze({
   // matching
@@ -151,7 +151,7 @@ export const DISCOVERY_INPUT = Object.freeze({
   secondLookReopen: v.strictObject({ reasonCodes: list(REASON_CODES_MAX) }),
   // club search
   directoryQuery: v.strictObject({
-    q: v.optional(text(S.searchQ)),
+    q: v.optional(text(S.q)),
     position: v.optional(text(REF_MAX)),
     availability: v.optional(text(REF_MAX)),
     country: v.optional(text(S.country)),
@@ -162,7 +162,7 @@ export const DISCOVERY_INPUT = Object.freeze({
   }),
   note: v.strictObject({ text: optText(AUDIT_LIMITS.note) }),
   savedSearch: v.strictObject({
-    name: optText(S.searchName),
+    name: optText(S.name),
     // Each filter's value is judged by readSearchFilters, which reads false, null and blank as "no filter".
     filters: v.nullish(
       v.strictObject(Object.fromEntries(SAVED_SEARCH_FILTERS.map((k) => [k, v.optional(v.unknown())]))),

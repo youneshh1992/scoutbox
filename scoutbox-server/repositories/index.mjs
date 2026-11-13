@@ -183,7 +183,23 @@ import { createEnterpriseRepository, ENTERPRISE_RECORDS, ENTERPRISE_COLLECTIONS 
 import { createGroupsRepository, GROUPS_RECORDS, GROUPS_COLLECTIONS } from './groups.mjs';
 import { createGrassrootsRepository, GRASSROOTS_RECORDS, GRASSROOTS_COLLECTIONS } from './grassroots.mjs';
 import { createMatchFactsRepository } from './matchFacts.mjs';
-import { createOperationsRepository, OPERATIONS_RECORDS, OPERATIONS_COLLECTIONS } from './operations.mjs';
+import {
+  createUploadSessionsRepository,
+  UPLOAD_SESSIONS_RECORDS,
+  UPLOAD_SESSIONS_COLLECTIONS,
+} from './uploadSessions.mjs';
+import { createSavedSearchesRepository, SAVED_SEARCHES_RECORDS, SAVED_SEARCHES_COLLECTIONS } from './savedSearches.mjs';
+import { createInvoicesRepository, INVOICES_RECORDS, INVOICES_COLLECTIONS } from './invoices.mjs';
+import {
+  createReputationSeedRepository,
+  REPUTATION_SEED_RECORDS,
+  REPUTATION_SEED_COLLECTIONS,
+} from './reputationSeed.mjs';
+import {
+  createDeliveryBookkeepingRepository,
+  DELIVERY_BOOKKEEPING_RECORDS,
+  DELIVERY_BOOKKEEPING_COLLECTIONS,
+} from './deliveryBookkeeping.mjs';
 import {
   createTransitionsVouchesRepository,
   TRANSITIONS_RECORDS,
@@ -289,7 +305,11 @@ export const TABLE_BACKED = Object.freeze([
   ...ENTERPRISE_COLLECTIONS,
   ...GROUPS_COLLECTIONS,
   ...GRASSROOTS_COLLECTIONS,
-  ...OPERATIONS_COLLECTIONS,
+  ...UPLOAD_SESSIONS_COLLECTIONS,
+  ...SAVED_SEARCHES_COLLECTIONS,
+  ...INVOICES_COLLECTIONS,
+  ...REPUTATION_SEED_COLLECTIONS,
+  ...DELIVERY_BOOKKEEPING_COLLECTIONS,
 ]);
 /** The one-time-code tables. */
 const CODE_TABLES = Object.freeze([EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE]);
@@ -369,8 +389,16 @@ export function readAllRecords(sqlite) {
   if (groups) Object.assign(out, groups);
   const grassroots = GRASSROOTS_RECORDS.read(sqlite);
   if (grassroots) Object.assign(out, grassroots);
-  const operations = OPERATIONS_RECORDS.read(sqlite);
-  if (operations) Object.assign(out, operations);
+  for (const records of [
+    UPLOAD_SESSIONS_RECORDS,
+    SAVED_SEARCHES_RECORDS,
+    INVOICES_RECORDS,
+    REPUTATION_SEED_RECORDS,
+    DELIVERY_BOOKKEEPING_RECORDS,
+  ]) {
+    const read = records.read(sqlite);
+    if (read) Object.assign(out, read);
+  }
   return out;
 }
 const schemaVersionOf = (sqlite) =>
@@ -491,8 +519,16 @@ export function attachDataLayer({
   const groupsBoot = groups.attach();
   const grassroots = createGrassrootsRepository({ sqlite, log, now, unit: store.unit });
   const grassrootsBoot = grassroots.attach();
-  const operations = createOperationsRepository({ sqlite, log, now, unit: store.unit });
-  const operationsBoot = operations.attach({ seedReputation: identityWasPending ? handedIn('reputationSeed') : [] });
+  const uploadSessions = createUploadSessionsRepository({ sqlite, log, now, unit: store.unit });
+  const uploadSessionsBoot = uploadSessions.attach();
+  const savedSearches = createSavedSearchesRepository({ sqlite, log, now, unit: store.unit });
+  const savedSearchesBoot = savedSearches.attach();
+  const invoices = createInvoicesRepository({ sqlite, log, now, unit: store.unit });
+  const invoicesBoot = invoices.attach();
+  const reputationSeed = createReputationSeedRepository({ sqlite, log, now, unit: store.unit });
+  const reputationSeedBoot = reputationSeed.attach({ seed: identityWasPending ? handedIn('reputationSeed') : [] });
+  const deliveryBookkeeping = createDeliveryBookkeepingRepository({ sqlite, log, now, unit: store.unit });
+  const deliveryBookkeepingBoot = deliveryBookkeeping.attach();
 
   // The match facts are derived (kept by triggers on their inputs, re-derived before COMMIT by the builder the
   // discovery domain registers); they have no collection and are never read back as records.
@@ -545,7 +581,11 @@ export function attachDataLayer({
     enterprise,
     groups,
     grassroots,
-    operations,
+    uploadSessions,
+    savedSearches,
+    invoices,
+    reputationSeed,
+    deliveryBookkeeping,
     migrations,
     /** True when this boot imported the seed: a first installation. */
     firstInstallation: identityWasPending,
@@ -603,7 +643,11 @@ export function attachDataLayer({
       enterprise: enterpriseBoot,
       groups: groupsBoot,
       grassroots: grassrootsBoot,
-      operations: operationsBoot,
+      uploadSessions: uploadSessionsBoot,
+      savedSearches: savedSearchesBoot,
+      invoices: invoicesBoot,
+      reputationSeed: reputationSeedBoot,
+      deliveryBookkeeping: deliveryBookkeepingBoot,
     },
     /** `details: true` is accepted for the admin report; the report carries counts and states, never rows. */
     report: () => ({
@@ -1010,18 +1054,55 @@ export function attachDataLayer({
           references:
             'player and guardian ids no foreign key (tolerant); organisations and staff RESTRICT; child rows cascade with their owner',
         },
-        operations: {
+        uploadSessions: {
           mode: 'live',
-          rows: operations.counts(),
+          rows: uploadSessions.counts(),
           pendingWrites: 0,
           writeMode:
-            "explicit: upload sessions opened, chunks recorded, finalised (with the media row), aborted, abandoned by the sweep and deleted with the player; saved searches created and deleted; one invoice issued per signing after it commits; provider callback ids remembered at once (the newest 5,000); injected failures added and used up (inside the route's unit of work when one is open)",
-          readMode:
-            "SQL: a player's upload by id, an organisation's saved searches, the saved searches a new player could match (prefiltered by position, foot, country and availability), invoices by organisation and in all (paged), the demo reputation rows, the delivery centre's start; no mirror and no db.* view",
-          typing:
-            'typed columns only: chunks received as rows, search filters as columns, invoice amounts in minor units; no JSON columns; plans and archetypes are constants (catalogue.mjs)',
+            "explicit: upload sessions opened, chunks recorded, finalised (with the media row), aborted, abandoned by the sweep and deleted with the player (inside the route's unit of work when one is open)",
+          readMode: "SQL: a player's upload by id; no mirror and no db.* view",
+          typing: 'typed columns only: chunks received as rows; no JSON columns',
           references:
-            'player ids no foreign key (sessions deleted with the player explicitly); organisations, staff and signings RESTRICT',
+            'player ids no foreign key (sessions deleted with the player explicitly); chunks cascade with their session',
+        },
+        savedSearches: {
+          mode: 'live',
+          rows: savedSearches.counts(),
+          pendingWrites: 0,
+          writeMode: "explicit: saved searches created and deleted (inside the route's unit of work when one is open)",
+          readMode:
+            "SQL: an organisation's saved searches, the saved searches a new player could match (prefiltered by position, foot, country and availability); no mirror and no db.* view",
+          typing: 'typed columns only: search filters as columns; no JSON columns',
+          references: 'organisations and staff RESTRICT',
+        },
+        invoices: {
+          mode: 'live',
+          rows: invoices.counts(),
+          pendingWrites: 0,
+          writeMode: 'explicit: one invoice issued per signing after it commits',
+          readMode: 'SQL: invoices by signing, by organisation and in all (paged); no mirror and no db.* view',
+          typing: 'typed columns only: amounts in minor units; no JSON columns',
+          references: 'organisations and signings RESTRICT',
+        },
+        reputationSeed: {
+          mode: 'live',
+          rows: reputationSeed.counts(),
+          pendingWrites: 0,
+          writeMode: "read only: a first installation's demo rows are imported once; empty in production",
+          readMode: 'SQL: every row; no mirror and no db.* view',
+          typing: 'typed columns only; no JSON columns',
+          references: 'none',
+        },
+        deliveryBookkeeping: {
+          mode: 'live',
+          rows: deliveryBookkeeping.counts(),
+          pendingWrites: 0,
+          writeMode:
+            "explicit: provider callback ids remembered at once (the newest 5,000); injected failures added and used up (inside the route's unit of work when one is open)",
+          readMode:
+            "SQL: whether a callback id was seen, the delivery centre's start, the failures waiting by channel; no mirror and no db.* view",
+          typing: 'typed columns only; no JSON columns',
+          references: 'none',
         },
         matchFacts: {
           mode: 'derived',

@@ -71,7 +71,7 @@ export function createSafetyConsole(deps) {
         'channels',
         'safetyAudit',
         'signingsFollowUps',
-        'operations',
+        'invoices',
         'outbox',
         'pushLog',
         'transitionsVouches',

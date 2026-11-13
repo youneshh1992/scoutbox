@@ -110,7 +110,7 @@ export function createDelivery(deps) {
     'notifications',
     'dispatches',
     'outbox',
-    'operations',
+    'deliveryBookkeeping',
     'safetyAudit',
     'staffRecord',
     'byId',
@@ -123,7 +123,7 @@ export function createDelivery(deps) {
     'webhookSweep',
   ]);
   const { notifyAction, deliverySweep } = registerDelivery(routeContext('createDelivery', deps));
-  const { delivery } = deps.operations;
+  const delivery = deps.deliveryBookkeeping;
   const injectedFailures = Object.freeze({
     /** How many injected failures are waiting on `channel`. */
     waiting: (channel) => delivery.injected(channel),

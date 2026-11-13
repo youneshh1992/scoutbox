@@ -132,7 +132,7 @@ const qAll = (dir, sql, ...p) => {
   }
 };
 // opsEvents (the ops_events table), read in the writer's literal through the repository's own reader. The delivery
-// centre's bookkeeping is rows of repositories/operations.mjs.
+// centre's bookkeeping is rows of repositories/deliveryBookkeeping.mjs.
 const seenIds = (dir) =>
   qAll(dir, 'SELECT callback_id FROM delivery_callbacks_seen ORDER BY rowid').map((r) => r.callback_id);
 const injected = (dir) =>

@@ -32,7 +32,7 @@ export function createMedia(deps) {
     needs('createMedia', deps, [
       'playerRouter',
       'playerRecord',
-      'operations',
+      'uploadSessions',
       'mediaDeletions',
       'storage',
       'findPlayer',
@@ -55,7 +55,7 @@ export function createMedia(deps) {
       broadcast: d.broadcast,
       moderateOrRefuse: d.moderateOrRefuse,
       nextId: d.nextId,
-      operations: d.operations,
+      uploadSessions: d.uploadSessions,
       playerRouter: d.playerRouter,
       playerRecord,
       recordActivity: d.recordActivity,

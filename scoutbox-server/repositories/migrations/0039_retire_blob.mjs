@@ -1,7 +1,7 @@
 /**
  * Drops the `collections` table and moves the id counter from `meta` into `counters`.
  */
-import { OPERATIONS_MIGRATION } from '../operations.mjs';
+import { id as OPERATIONS_MIGRATION } from './0038_operations.mjs';
 import { migrationApplied } from '../database.mjs';
 import { COUNTERS_DDL, ID_COUNTER_FLOOR } from '../counters.mjs';
 

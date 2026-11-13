@@ -29,7 +29,7 @@ export function registerDelivery(ctx) {
     notify,
     findPlayer,
     isAdult,
-    operations,
+    deliveryBookkeeping: bookkeeping,
     emitWebhook,
     webhookSweep,
   } = ctx;
@@ -37,11 +37,10 @@ export function registerDelivery(ctx) {
   if (!dispatches) throw new TypeError('registerDelivery needs the dispatches repository (ctx.dispatches)');
   if (typeof outbox?.append !== 'function')
     throw new TypeError('registerDelivery needs the outbox repository (ctx.outbox)');
-  if (typeof operations?.delivery?.markSeen !== 'function')
-    throw new TypeError('registerDelivery needs the operations repository (ctx.operations)');
+  if (typeof bookkeeping?.markSeen !== 'function')
+    throw new TypeError('registerDelivery needs the delivery bookkeeping repository (ctx.deliveryBookkeeping)');
   if (typeof emitWebhook !== 'function' || typeof webhookSweep !== 'function')
     throw new TypeError('registerDelivery needs the webhook emitter and sweep (registerImports)');
-  const bookkeeping = operations.delivery;
   const opsEvent = (row) => safetyAudit.opsEvents.record(row);
   // Notifications older than the delivery centre's start get an in-app record only: no retroactive email blast.
 

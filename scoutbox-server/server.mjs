@@ -155,7 +155,11 @@ const {
   enterprise,
   groups,
   grassroots,
-  operations,
+  uploadSessions,
+  savedSearches,
+  invoices,
+  reputationSeed,
+  deliveryBookkeeping,
   matchFacts,
 } = dataLayer;
 // Each domain's read-only query objects (`<domain>Reads`), handed to every module context.
@@ -248,7 +252,7 @@ if (integrity.violations.length)
 const mailer = createMailer((p) => nextId(p), { outbox, outward: store.outward });
 const pushSender = createPushSender((p) => nextId(p), { pushLog, pushTokens, outward: store.outward });
 const idv = createIdvProvider();
-const billing = createBilling({ invoices: operations.invoices, nextId: (p) => nextId(p) });
+const billing = createBilling({ invoices, nextId: (p) => nextId(p) });
 const storage = createStorage(DATA_DIR);
 
 const findPlayer = (id) => byId.player(id);
@@ -447,7 +451,8 @@ const { issueRecruitmentRequest, issueAcceptedTrial, contactReplyFrom, canonical
   recruitmentReads,
   signingsFollowUps,
   safetyAudit,
-  operationsReads: operations.reads,
+  invoices: invoices.reads,
+  reputationSeed: reputationSeed.reads,
   byId,
   findPlayer,
   isBlocked,
@@ -562,7 +567,7 @@ createScouting({
 const media = createMedia({
   playerRouter,
   playerRecord, // an upload adds the clip to the player's media
-  operations,
+  uploadSessions,
   mediaDeletions,
   storage,
   findPlayer,
@@ -643,7 +648,7 @@ const { notifyAction, deliverySweep, injectedFailures } = createDelivery({
   notifications,
   dispatches,
   outbox,
-  operations,
+  deliveryBookkeeping,
   safetyAudit,
   staffRecord, // a staff member's delivery preferences
   byId,
@@ -788,7 +793,7 @@ createSafetyConsole({
   channels,
   safetyAudit,
   signingsFollowUps,
-  operations,
+  invoices: invoices.reads,
   outbox,
   pushLog,
   transitionsVouches: transitionsVouches.reads,
@@ -912,7 +917,7 @@ const { checkSavedSearches, matchFactsKeeper } = createDiscovery({
   discovery,
   discoveryReads,
   matchFacts,
-  savedSearches: operations.savedSearches,
+  savedSearches,
   notifications,
   safetyAudit,
   scoutingReads,
@@ -1084,7 +1089,7 @@ createAccountServices({
   codes,
   safetyAudit,
   mediaDeletions,
-  uploads: operations.uploads,
+  uploads: uploadSessions,
   findPlayer,
   createSession,
   loginLockedOut,

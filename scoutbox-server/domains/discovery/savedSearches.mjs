@@ -2,15 +2,18 @@
 // match, and the whole filter is then applied to the player as the club sees them.
 //
 // An empty or blank string, `false` or null means "no filter", as the apps send it.
-import { SAVED_SEARCH_FILTERS, SEARCH_AGE_GROUPS, OPERATIONS_LIMITS } from '../../repositories/operations.mjs';
+import {
+  SAVED_SEARCH_FILTERS,
+  SEARCH_AGE_GROUPS,
+  SAVED_SEARCH_LIMITS as L,
+} from '../../repositories/savedSearches.mjs';
 import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from '../../repositories/identity.mjs';
 import { filled, presentOrRefuse } from '../platform/schemas.mjs';
 import { discoveryInput } from './schemas.mjs';
 
-const L = OPERATIONS_LIMITS;
 const unset = (v) => v === undefined || v === null || v === false || (typeof v === 'string' && !v.trim());
 const RULES = {
-  q: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= L.searchQ,
+  q: (v) => typeof v === 'string' && v.trim().length > 0 && v.length <= L.q,
   position: (v) => PLAYER_POSITIONS.includes(v),
   foot: (v) => PLAYER_FEET.includes(v),
   availability: (v) => PLAYER_AVAILABILITY.includes(v),

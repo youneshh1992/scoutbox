@@ -5,7 +5,7 @@
 //   Mailer   → SENDGRID_API_KEY switches to SendGrid (dev: the outbox table)
 //   Push     → EXPO_ACCESS_TOKEN switches to Expo   (dev: the push log table)
 //   IDV      → dev attestation only: instant approval with an audit reference
-//   Billing  → dev ledger only: invoices recorded in the invoices table (repositories/operations.mjs)
+//   Billing  → dev ledger only: invoices recorded in the invoices table (repositories/invoices.mjs)
 //   Storage  → local disk only: files under DATA_DIR/media/
 //
 // No real IDV, billing or object-storage provider is integrated yet. Each seam
@@ -216,7 +216,7 @@ export function createIdvProvider() {
 // The deck's model: club subscription plans + a success fee when a signing is
 // recorded inside the attribution window. Dev provider issues the invoice
 // records; Stripe slots in behind the same call.
-// The invoice is a row of `invoices` (repositories/operations.mjs), stored exactly in minor units (cents), one per
+// The invoice is a row of `invoices` (repositories/invoices.mjs), stored exactly in minor units (cents), one per
 // signing; the API still answers `amount` in whole euros.
 const SUCCESS_FEE_MINOR_BY_PLAN = { Pro: 150_000, Academy: 50_000, Agency: 200_000 };
 const DEFAULT_SUCCESS_FEE_MINOR = 100_000;

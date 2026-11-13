@@ -285,7 +285,7 @@ const WRITERS = {
   fixtures: each((L, r) => L.insightCoverage.fixtures.create(r)),
   coveragePlans: each((L, r) => L.insightCoverage.plans.create(r)),
   coverageAssignments: each((L, r) => L.insightCoverage.assignments.create(r)),
-  // integrations, enterprise, groups, grassroots, operations
+  // integrations, enterprise, groups, grassroots, saved searches, invoices
   importBatches: each((L, r) => L.integrations.batches.create(r)),
   apiKeys: each((L, r) => L.integrations.apiKeys.create(r)),
   webhookEndpoints: each((L, r) => L.integrations.endpoints.create(r)),
@@ -298,8 +298,8 @@ const WRITERS = {
   openTrials: each((L, r) => L.grassroots.openTrials.create(r)),
   matchdays: each((L, r) => L.grassroots.matchdays.create(r)),
   friendlies: each((L, r) => L.grassroots.friendlies.create(r)),
-  savedSearches: each((L, r) => L.operations.savedSearches.create(r)),
-  invoices: each((L, r) => L.operations.invoices.issue(r)),
+  savedSearches: each((L, r) => L.savedSearches.create(r)),
+  invoices: each((L, r) => L.invoices.issue(r)),
   // threads and delivery
   channels: each((L, r) => L.channels.open(r)),
   notifications: each((L, r) => L.notifications.create(r)),

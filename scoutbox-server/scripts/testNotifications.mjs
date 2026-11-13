@@ -24,7 +24,7 @@ import {
   CATEGORY_NAMES,
 } from '../domains/platform/notificationPrefs.mjs';
 import { createNotifier, registerNotificationFeed } from '../domains/messaging/notify.mjs';
-import { createOperationsRepository } from '../repositories/operations.mjs';
+import { createDeliveryBookkeepingRepository } from '../repositories/deliveryBookkeeping.mjs';
 import { registerDelivery } from '../domains/messaging/delivery.mjs';
 import { openStore } from '../store.mjs';
 import {
@@ -796,7 +796,7 @@ test('notifyAction: a muted notification (the gate returned null) yields null in
     emitWebhook: () => {},
     webhookSweep: () => 0,
     unit: (w) => w(),
-    operations: createOperationsRepository({ sqlite: s, now: () => NOW }),
+    deliveryBookkeeping: createDeliveryBookkeepingRepository({ sqlite: s, now: () => NOW }),
   };
   const saveInterval = globalThis.setInterval;
   globalThis.setInterval = () => ({ unref() {} });

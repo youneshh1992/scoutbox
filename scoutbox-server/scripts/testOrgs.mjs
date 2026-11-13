@@ -18,7 +18,9 @@ import {
   ORGS_TABLE,
   ORGS_TABLE_MIGRATION,
   ORG_RECORD_KEYS,
+  ORG_PLANS,
 } from '../repositories/orgs.mjs';
+import { PLANS } from '../catalogue.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
@@ -26,7 +28,7 @@ import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs
 import * as m0003 from '../repositories/migrations/0003_sessions_live.mjs';
 import * as m0004 from '../repositories/migrations/0004_orgs_live.mjs';
 import { openStore } from '../store.mjs';
-import { writeFixture, readRecords } from './dataLayerFixture.mjs';
+import { writeFixture, readRecords, openLayer } from './dataLayerFixture.mjs';
 // The checks below that drive the runner on a raw connection run exactly migrations
 // 0001–0004; the later ones have their own suites (e.g. testCoreSchema). The full
 // registered list is what attachDataLayer and the real-server checks below run.
@@ -793,6 +795,26 @@ test('[fixtures] a fixture written into a new directory puts its organisations i
 });
 
 // ------------------------------------------------------------- through the real server
+test("[schema] the plans an organisation can be on are exactly the catalogue's, and the orgs table's CHECK says the same; plans are not a table", () => {
+  assert.deepEqual([...ORG_PLANS].sort(), Object.keys(PLANS).sort());
+  const dir = tempDir('orgs-plans');
+  const s = openLayer(dir).sqlite;
+  const sql = s.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'orgs'").get().sql;
+  const listed = /plan\s+TEXT NOT NULL CHECK \(plan IN \(([^)]*)\)\)/
+    .exec(sql)[1]
+    .split(',')
+    .map((v) => v.trim().replace(/'/g, ''));
+  assert.deepEqual(listed.sort(), Object.keys(PLANS).sort());
+  assert.ok(
+    Object.isFrozen(PLANS.Grassroots) && PLANS.Grassroots.attributionWindowMonths === 12,
+    'the catalogue is frozen',
+  );
+  for (const t of ['plans', 'archetypes', 'ops_settings'])
+    assert.equal(s.prepare('SELECT 1 FROM sqlite_master WHERE name = ?').get(t), undefined, `${t} is not a table`);
+  s.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 await atest(
   'server: a fixture database boots; registration, settings, suspension, verification, credentials and staff sessions work; junk is refused; changes survive a restart; backup and restore keep every organisation',
   async () => {

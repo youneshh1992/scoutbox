@@ -156,11 +156,9 @@ The trial day (its staff and their checks, arrival, check-in, consent, the emerg
 part of the trial record, so its routes are recruitment's (`domains/recruitment/trialDay.mjs`): a postponement moves
 the trial's date and report deadline, and a check-in records the session's attendance.
 
-**Still to do.**
-
-- **The operations repository** holds tables other domains own (media's upload sessions, the delivery centre's
-  bookkeeping, discovery's saved searches, the signing invoices). Each is written only by its owner, but the
-  repository should be split along those lines.
+The tables that were left over from the move to SQLite each have their owner's repository: `uploadSessions` (media),
+`savedSearches` (discovery), `invoices` and `reputationSeed` (recruitment) and `deliveryBookkeeping` (messaging). One
+migration (`0038`) still creates them all.
 
 The safety audit log (`safetyAudit.record`) is written by every domain and is the platform's, not a domain's.
 
