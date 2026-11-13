@@ -3,7 +3,7 @@
  */
 import { migrationApplied } from '../database.ts';
 import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.ts';
-import { ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_DDL, ONE_TIME_CODE_TABLES } from '../oneTimeCodes.mjs';
+import { ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_DDL, ONE_TIME_CODE_TABLES } from '../oneTimeCodes.ts';
 
 export const id = ONE_TIME_CODES_MIGRATION;
 export const note =

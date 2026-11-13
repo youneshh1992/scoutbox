@@ -4,7 +4,7 @@ import express from 'express';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { filled } from '../platform/schemas.mjs';
 import { identityInput, PASSWORD_MIN } from './schemas.mjs';
-import { hashCode } from '../../repositories/oneTimeCodes.mjs';
+import { hashCode } from '../../repositories/oneTimeCodes.ts';
 import { hashPassword, verifyPassword, randomCode } from '../../adapters.mjs';
 import { timingSafeEqStr } from './totp.mjs';
 import { guardianSelfView, adminGuardianView } from '../../views/playerViews.mjs';

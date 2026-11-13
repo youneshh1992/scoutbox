@@ -1,5 +1,5 @@
-// One-time codes (repositories/oneTimeCodes.mjs, migration 0008): the
-// fixture's refusals (the entry typing the repository exports); the repository (hashing, expiry,
+// One-time codes (repositories/oneTimeCodes.ts, migration 0008): the
+// fixture's refusals; the repository (hashing, expiry,
 // attempts, reissue, sweep, hash-free views); the two consumption operations
 // inside units of work under injected failures and real COMMIT faults, read
 // back through an independent connection; concurrent redemption; codes read
@@ -20,7 +20,7 @@ import {
   PAIRING_CODE_TTL_MS,
   CODE_ALPHABET,
   randomCode,
-} from '../repositories/oneTimeCodes.mjs';
+} from '../repositories/oneTimeCodes.ts';
 import { openStore } from '../store.ts';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
 import {

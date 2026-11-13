@@ -25,7 +25,8 @@
  * already ran poisons the enclosing unit even when the caller catches it.
  */
 import crypto from 'node:crypto';
-import { migrationApplied, operationOn } from './database.ts';
+import type { DatabaseSync } from 'node:sqlite';
+import { migrationApplied, operationOn, type UnitParticipant } from './database.ts';
 
 export const ONE_TIME_CODES_MIGRATION = '0008_one_time_codes';
 export const EMAIL_CHALLENGE_TTL_MS = 30 * 60 * 1000;
@@ -35,7 +36,7 @@ export const EMAIL_CHALLENGE_MAX_ATTEMPTS = 10;
 /** The alphabet every ScoutBox one-time code is drawn from (no I, L, O, 0, 1): the same as adapters.mjs `randomCode`. */
 export const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const CODE_LENGTH = 6;
-export const ONE_TIME_CODE_TABLES = Object.freeze(['email_challenges', 'pairing_codes']);
+export const ONE_TIME_CODE_TABLES = Object.freeze(['email_challenges', 'pairing_codes'] as const);
 
 export const ONE_TIME_CODES_DDL = `
 CREATE TABLE email_challenges (
@@ -54,93 +55,75 @@ CREATE TABLE pairing_codes (
 CREATE UNIQUE INDEX pairing_codes_player_id ON pairing_codes (player_id);
 CREATE INDEX pairing_codes_expires_at ON pairing_codes (expires_at);`;
 
-export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+export const sha256 = (s: unknown) => crypto.createHash('sha256').update(String(s)).digest('hex');
 /** The comparison form: trimmed, upper-cased. */
-export const normaliseCode = (code) =>
+export const normaliseCode = (code: unknown) =>
   String(code ?? '')
     .trim()
     .toUpperCase();
 /** The stored form of a code: sha256 hex of its normalised value. */
-export const hashCode = (code) => sha256(normaliseCode(code));
-const isHash = (s) => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s);
+export const hashCode = (code: unknown) => sha256(normaliseCode(code));
 /** A random code from the alphabet (CSPRNG), as adapters.mjs mints them. */
-export function randomCode(length = CODE_LENGTH) {
+export function randomCode(length = CODE_LENGTH): string {
   return Array.from(
     crypto.getRandomValues(new Uint8Array(length)),
     (b) => CODE_ALPHABET[b % CODE_ALPHABET.length],
   ).join('');
 }
-export const codesLive = (sqlite) => migrationApplied(sqlite, ONE_TIME_CODES_MIGRATION);
-const describe = (v) =>
-  v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : `a ${typeof v}`;
-
-// ------------------------------------------------------------------ validation (no coercion; every refusal names the reason)
-/**
- * Decide which format an entry is in and extract its hash. Returns `{ codeHash, format }` or `{ reason }`. The two
- * shapes are told apart by the presence of exactly one of `code` (plain, hashed on the way in) and `codeHash`.
- */
-function codeOf(raw) {
-  const hasCode = Object.hasOwn(raw, 'code');
-  const hasHash = Object.hasOwn(raw, 'codeHash');
-  if (hasCode && hasHash)
-    return { reason: 'carries both code and codeHash (a legacy entry has code, a stored one codeHash)' };
-  if (!hasCode && !hasHash) return { reason: 'has neither code (legacy) nor codeHash (stored)' };
-  if (hasCode) {
-    if (typeof raw.code !== 'string' || !raw.code.trim())
-      return { reason: 'code must be a non-empty string (legacy format)' };
-    if (raw.code.length > 64) return { reason: 'code is longer than any code this server issues' };
-    return { codeHash: hashCode(raw.code), format: 'legacy' };
-  }
-  if (!isHash(raw.codeHash)) return { reason: 'codeHash must be 64 lower-case hex characters (stored format)' };
-  return { codeHash: raw.codeHash, format: 'stored' };
-}
-const expiryOf = (raw) =>
-  Number.isSafeInteger(raw.expiresAt) && raw.expiresAt > 0
-    ? { expiresAt: raw.expiresAt }
-    : { reason: 'expiresAt must be a positive integer timestamp' };
-
-const PAIRING_LEGACY_KEYS = ['code', 'playerId', 'expiresAt'];
-const PAIRING_STORED_KEYS = ['codeHash', 'playerId', 'expiresAt'];
-/** Validate one exported pairing code: `{ ok: true, row, format }` or `{ ok: false, reason }`. */
-export function validatePairingCodeRow(raw) {
-  if (raw === null || typeof raw !== 'object' || Array.isArray(raw))
-    return { ok: false, reason: `not an object (${describe(raw)})` };
-  const c = codeOf(raw);
-  if (c.reason) return { ok: false, reason: c.reason };
-  const allowed = c.format === 'legacy' ? PAIRING_LEGACY_KEYS : PAIRING_STORED_KEYS;
-  const unknown = Object.keys(raw).filter((k) => !allowed.includes(k));
-  if (unknown.length) return { ok: false, reason: `unknown field(s) ${unknown.join(', ')} for the ${c.format} format` };
-  if (typeof raw.playerId !== 'string' || !raw.playerId)
-    return { ok: false, reason: 'playerId must be a non-empty string' };
-  const e = expiryOf(raw);
-  if (e.reason) return { ok: false, reason: e.reason };
-  return { ok: true, format: c.format, row: { codeHash: c.codeHash, playerId: raw.playerId, expiresAt: e.expiresAt } };
-}
+export const codesLive = (sqlite: DatabaseSync) => migrationApplied(sqlite, ONE_TIME_CODES_MIGRATION);
 
 const EMAIL_SELECT = 'SELECT org_id, email, code_hash, expires_at, attempts FROM email_challenges';
 const PAIRING_SELECT = 'SELECT code_hash, player_id, expires_at FROM pairing_codes';
-const emailStored = (r) => ({
+/** An organisation's e-mail challenge in its stored form: the code's hash, never the code. */
+export type EmailChallengeRow = {
+  orgId: string;
+  email: string;
+  codeHash: string;
+  expiresAt: number;
+  /** Wrong confirmations so far. */
+  attempts: number;
+};
+/** A child's pairing code in its stored form: the code's hash, never the code. */
+export type PairingCodeRow = { codeHash: string; playerId: string; expiresAt: number };
+type EmailDbRow = { org_id: string; email: string; code_hash: string; expires_at: number; attempts: number };
+type PairingDbRow = { code_hash: string; player_id: string; expires_at: number };
+/** How many rows of each table. */
+export type CodeCounts = { emailChallenges: number; pairingCodes: number };
+/** A freshly issued code, returned once; only its hash is stored. */
+export type IssuedCode = { code: string; expiresAt: number };
+/** A presented e-mail challenge code, judged without consuming or counting it. */
+export type EmailChallengeCheck =
+  | { status: 'none' }
+  | { status: 'invalid'; attemptsRemaining: number }
+  | { status: 'ok'; email: string };
+type At = { at?: number };
+
+const emailStored = (r: EmailDbRow): EmailChallengeRow => ({
   orgId: r.org_id,
   email: r.email,
   codeHash: r.code_hash,
   expiresAt: r.expires_at,
   attempts: r.attempts,
 });
-const pairingStored = (r) => ({ codeHash: r.code_hash, playerId: r.player_id, expiresAt: r.expires_at });
+const pairingStored = (r: PairingDbRow): PairingCodeRow => ({
+  codeHash: r.code_hash,
+  playerId: r.player_id,
+  expiresAt: r.expires_at,
+});
 
 /** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const EMAIL_CHALLENGES_TABLE = {
   name: 'emailChallenges',
-  read(sqlite) {
+  read(sqlite: DatabaseSync): EmailChallengeRow[] | null {
     if (!codesLive(sqlite)) return null;
-    return sqlite.prepare(`${EMAIL_SELECT} ORDER BY org_id`).all().map(emailStored);
+    return (sqlite.prepare(`${EMAIL_SELECT} ORDER BY org_id`).all() as EmailDbRow[]).map(emailStored);
   },
 };
 export const PAIRING_CODES_TABLE = {
   name: 'pairingCodes',
-  read(sqlite) {
+  read(sqlite: DatabaseSync): PairingCodeRow[] | null {
     if (!codesLive(sqlite)) return null;
-    return sqlite.prepare(`${PAIRING_SELECT} ORDER BY player_id`).all().map(pairingStored);
+    return (sqlite.prepare(`${PAIRING_SELECT} ORDER BY player_id`).all() as PairingDbRow[]).map(pairingStored);
   },
 };
 
@@ -164,6 +147,12 @@ export function createOneTimeCodesRepository({
   newCode = randomCode,
   log = () => {},
   unit = null,
+}: {
+  sqlite: DatabaseSync;
+  now?: () => number;
+  newCode?: () => string;
+  log?: (message: string) => void;
+  unit?: UnitParticipant | null;
 }) {
   if (!sqlite)
     throw new TypeError(
@@ -201,7 +190,13 @@ export function createOneTimeCodesRepository({
   /** The one transactional boundary of every mutation (see the header): joined inside a unit; the caller's own transaction when a tool opened one; a transaction of its own otherwise. */
   const operation = operationOn(sqlite, unit);
   /** Redeemable: present, unexpired, and below the attempt limit (an exhausted row that somehow exists is never redeemed). */
-  const liveChallenge = (r, at) => !!r && r.expires_at > at && r.attempts < EMAIL_CHALLENGE_MAX_ATTEMPTS;
+  const liveChallenge = (r: EmailDbRow | undefined, at: number): r is EmailDbRow =>
+    !!r && r.expires_at > at && r.attempts < EMAIL_CHALLENGE_MAX_ATTEMPTS;
+
+  const changes = (n: number | bigint) => Number(n);
+  const n = (row: unknown) => (row as { n: number }).n;
+  const emailOf = (orgId: string) => stmt.emailByOrg.get(orgId) as EmailDbRow | undefined;
+  const pairingOf = (hash: string) => stmt.pairByHash.get(hash) as PairingDbRow | undefined;
 
   const repo = {
     emailChallengeTtlMs: EMAIL_CHALLENGE_TTL_MS,
@@ -209,7 +204,7 @@ export function createOneTimeCodesRepository({
     maxEmailAttempts: EMAIL_CHALLENGE_MAX_ATTEMPTS,
 
     /** Boot: refuse to run without the migration record; sweep expired rows; report counts (never a code or a hash). */
-    attach({ at = now() } = {}) {
+    attach({ at = now() }: At = {}): { engine: 'sqlite'; rows: CodeCounts; swept: CodeCounts } {
       if (!stmt.cutover.get(ONE_TIME_CODES_MIGRATION))
         throw new Error(
           `one-time codes: the cutover record ${ONE_TIME_CODES_MIGRATION} is missing from data_migrations; the tables cannot be trusted as the source of truth`,
@@ -222,22 +217,22 @@ export function createOneTimeCodesRepository({
       return { engine: 'sqlite', rows: repo.counts(), swept };
     },
     /** Delete every expired row of both tables. Returns how many went. */
-    sweepExpired(at = now()) {
+    sweepExpired(at = now()): CodeCounts {
       return operation(() => ({
-        emailChallenges: stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).changes,
-        pairingCodes: stmt.pairSweep.run(at).changes,
+        emailChallenges: changes(stmt.emailSweep.run(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).changes),
+        pairingCodes: changes(stmt.pairSweep.run(at).changes),
       }));
     },
-    counts: () => ({ emailChallenges: stmt.emailCount.get().n, pairingCodes: stmt.pairCount.get().n }),
+    counts: (): CodeCounts => ({ emailChallenges: n(stmt.emailCount.get()), pairingCodes: n(stmt.pairCount.get()) }),
     /** Rows that are still live at `at`. */
-    outstanding: (at = now()) => ({
-      emailChallenges: stmt.emailLive.get(at, EMAIL_CHALLENGE_MAX_ATTEMPTS).n,
-      pairingCodes: stmt.pairLive.get(at).n,
+    outstanding: (at = now()): CodeCounts => ({
+      emailChallenges: n(stmt.emailLive.get(at, EMAIL_CHALLENGE_MAX_ATTEMPTS)),
+      pairingCodes: n(stmt.pairLive.get(at)),
     }),
 
     // ---------------------------------------------------------- e-mail challenges
     /** Issue (or replace) the organisation's challenge. Returns the plain code ONCE, with the expiry. Durable before it returns. */
-    issueEmailChallenge(orgId, email, { at = now() } = {}) {
+    issueEmailChallenge(orgId: string, email: string, { at = now() }: At = {}): IssuedCode {
       return operation(() => {
         if (typeof orgId !== 'string' || !orgId) throw new TypeError('an e-mail challenge needs an organisation id');
         if (typeof email !== 'string' || !email)
@@ -254,8 +249,8 @@ export function createOneTimeCodesRepository({
      * `{ status: 'none' }` (no live challenge — missing or expired),
      * `{ status: 'invalid', attemptsRemaining }`, or `{ status: 'ok', email }`.
      */
-    checkEmailChallenge(orgId, code, { at = now() } = {}) {
-      const r = stmt.emailByOrg.get(orgId);
+    checkEmailChallenge(orgId: string, code: unknown, { at = now() }: At = {}): EmailChallengeCheck {
+      const r = emailOf(orgId);
       if (!liveChallenge(r, at)) return { status: 'none' };
       if (r.code_hash !== hashCode(code))
         return { status: 'invalid', attemptsRemaining: Math.max(0, EMAIL_CHALLENGE_MAX_ATTEMPTS - r.attempts - 1) };
@@ -267,11 +262,14 @@ export function createOneTimeCodesRepository({
      * Reaching EMAIL_CHALLENGE_MAX_ATTEMPTS invalidates the challenge. Returns
      * `{ attemptsRemaining, invalidated }`; a missing or expired challenge counts nothing.
      */
-    noteFailedEmailAttempt(orgId, { at = now() } = {}) {
+    noteFailedEmailAttempt(
+      orgId: string,
+      { at = now() }: At = {},
+    ): { attemptsRemaining: number; invalidated: boolean } {
       return operation(() => {
-        const r = stmt.emailByOrg.get(orgId);
+        const r = emailOf(orgId);
         if (!liveChallenge(r, at)) return { attemptsRemaining: 0, invalidated: false };
-        const attempts = stmt.emailFail.get(orgId).attempts;
+        const { attempts } = stmt.emailFail.get(orgId) as { attempts: number };
         if (attempts >= EMAIL_CHALLENGE_MAX_ATTEMPTS) {
           stmt.emailDelete.run(orgId);
           return { attemptsRemaining: 0, invalidated: true };
@@ -285,9 +283,9 @@ export function createOneTimeCodesRepository({
      * the confirmation unit of work, so the deletion commits with the
      * organisation's verification or not at all.
      */
-    consumeEmailChallenge(orgId, code, { at = now() } = {}) {
+    consumeEmailChallenge(orgId: string, code: unknown, { at = now() }: At = {}): { email: string } | null {
       return operation(() => {
-        const r = stmt.emailByOrg.get(orgId);
+        const r = emailOf(orgId);
         if (!liveChallenge(r, at) || r.code_hash !== hashCode(code)) return null;
         const { changes } = stmt.emailConsume.run(orgId, r.code_hash, at, EMAIL_CHALLENGE_MAX_ATTEMPTS);
         if (changes !== 1)
@@ -298,11 +296,11 @@ export function createOneTimeCodesRepository({
       });
     },
     /** Remove the organisation's challenge, live or not (an explicit act). Returns how many rows went. */
-    revokeEmailChallenge: (orgId) => operation(() => stmt.emailDelete.run(orgId).changes),
+    revokeEmailChallenge: (orgId: string): number => operation(() => changes(stmt.emailDelete.run(orgId).changes)),
 
     // ---------------------------------------------------------- pairing codes
     /** Mint (or replace) the child's pairing code. Returns the plain code ONCE, with the expiry. Durable before it returns. */
-    issuePairingCode(playerId, { at = now() } = {}) {
+    issuePairingCode(playerId: string, { at = now() }: At = {}): IssuedCode {
       // The code is the lookup key: a fresh draw that equals another child's live code (≈ live codes / 31^6) is redrawn, never shared.
       return operation(() => {
         if (typeof playerId !== 'string' || !playerId) throw new TypeError('a pairing code needs a player id');
@@ -311,7 +309,7 @@ export function createOneTimeCodesRepository({
         stmt.pairDeleteFor.run(playerId);
         for (let draw = 0; draw < 8; draw++) {
           const code = newCode();
-          if (stmt.pairByHash.get(hashCode(code))) continue;
+          if (pairingOf(hashCode(code))) continue;
           stmt.pairInsert.run(hashCode(code), playerId, expiresAt);
           return { code, expiresAt };
         }
@@ -319,8 +317,8 @@ export function createOneTimeCodesRepository({
       });
     },
     /** The live code's owner, without consuming it: `{ playerId }` or null. */
-    peekPairingCode(code, { at = now() } = {}) {
-      const r = stmt.pairByHash.get(hashCode(code));
+    peekPairingCode(code: unknown, { at = now() }: At = {}): { playerId: string } | null {
+      const r = pairingOf(hashCode(code));
       return r && r.expires_at > at ? { playerId: r.player_id } : null;
     },
     /**
@@ -328,10 +326,10 @@ export function createOneTimeCodesRepository({
      * or returns null (nothing changed). Meant for the pairing unit of work, so
      * the code goes exactly when the session it buys is committed.
      */
-    consumePairingCode(code, { at = now() } = {}) {
+    consumePairingCode(code: unknown, { at = now() }: At = {}): { playerId: string } | null {
       return operation(() => {
         const hash = hashCode(code);
-        const r = stmt.pairByHash.get(hash);
+        const r = pairingOf(hash);
         if (!r || r.expires_at <= at) return null;
         const { changes } = stmt.pairConsume.run(hash, at);
         if (changes !== 1)
@@ -342,11 +340,13 @@ export function createOneTimeCodesRepository({
       });
     },
     /** Remove the child's codes, live or not (the deletion unit calls this before the player row goes). Returns how many rows went. */
-    revokePairingCodesFor: (playerId) => operation(() => stmt.pairDeleteFor.run(playerId).changes),
+    revokePairingCodesFor: (playerId: string): number =>
+      operation(() => changes(stmt.pairDeleteFor.run(playerId).changes)),
 
     /** Every stored row in its stored form (`codeHash`, never a code). */
-    exportEmailChallenges: () => EMAIL_CHALLENGES_TABLE.read(sqlite) ?? [],
-    exportPairingCodes: () => PAIRING_CODES_TABLE.read(sqlite) ?? [],
+    exportEmailChallenges: (): EmailChallengeRow[] => EMAIL_CHALLENGES_TABLE.read(sqlite) ?? [],
+    exportPairingCodes: (): PairingCodeRow[] => PAIRING_CODES_TABLE.read(sqlite) ?? [],
   };
   return repo;
 }
+export type OneTimeCodesRepository = ReturnType<typeof createOneTimeCodesRepository>;

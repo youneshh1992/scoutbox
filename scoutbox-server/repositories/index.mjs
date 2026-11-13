@@ -208,7 +208,7 @@ import {
   unresolvedPlayerReferences as unresolvedTransitionPlayers,
   retainedPlayerReferences as retainedTransitionPlayers,
 } from './transitionsVouches.mjs';
-import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE } from './oneTimeCodes.mjs';
+import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE } from './oneTimeCodes.ts';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE } from './notifications.mjs';
 import { createDispatchesRepository, DISPATCHES_TABLE } from './dispatches.mjs';
 import { createOutboxPushRepository, OUTBOX_PUSH_RECORD_TABLES } from './outboxPush.mjs';
