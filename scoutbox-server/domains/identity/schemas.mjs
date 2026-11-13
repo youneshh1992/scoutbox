@@ -5,7 +5,8 @@
  */
 import * as v from 'valibot';
 import { CURSOR_PAGE, flag, inputOrRefuse, oneOf, text, wholeNumber } from '../platform/schemas.mjs';
-import { IDENTITY_LIMITS as L, PLAYER_POSITIONS, PLAYER_FEET } from '../../repositories/identity.mjs';
+import { IDENTITY_LIMITS as L } from '../../repositories/identityRules.ts';
+import { PLAYER_POSITIONS, PLAYER_FEET } from '../../repositories/playerRecord.ts';
 import { STAFF_LIMITS } from '../../repositories/users.mjs';
 
 export const PASSWORD_MIN = 8;

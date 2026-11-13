@@ -2,7 +2,7 @@
 // nothing about a player is labelled "released"; agencies never receive transition packs.
 import { declareAuditedRead } from '../../writeRules.ts';
 import * as v from 'valibot';
-import { PLAYER_LEVELS } from '../../repositories/identity.mjs';
+import { PLAYER_LEVELS } from '../../repositories/playerRecord.ts';
 import { TRANSITION_LIMITS as L, PACK_KINDS } from '../../repositories/transitionsVouches.mjs';
 import { id, idList, inputOrRefuse, oneOf, requiredText, text, wholeNumber } from '../platform/schemas.mjs';
 

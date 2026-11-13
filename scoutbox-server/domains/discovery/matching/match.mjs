@@ -7,7 +7,7 @@
 import { EVIDENCE_REQUIREMENTS, TRUST_BANDS } from '../shared.mjs';
 import { MATCH_POLICY_VERSION, criteriaVersion } from './criteria.mjs';
 import { ageOn, haversineKm } from '../../../domain.ts';
-import { bornByForAge } from '../../../repositories/identity.mjs';
+import { bornByForAge } from '../../../repositories/players.ts';
 import { bandRankExpr } from '../../../repositories/matchFacts.mjs';
 
 // Built on first use: shared.mjs imports this module, so TRUST_BANDS may still be initialising when it evaluates.

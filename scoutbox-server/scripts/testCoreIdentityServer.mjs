@@ -30,7 +30,7 @@ import {
   openRaw,
   hasBlobTable,
 } from './coreIdentityTestFixtures.mjs';
-import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
+import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

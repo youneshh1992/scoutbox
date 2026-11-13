@@ -2,7 +2,7 @@
  * Player sub-records: the eleven lists a player record carries — `media`, `attendance`, `timeline`, `badges`,
  * `drills`, `drillResults`, `activityLog`, `externalIds`, `seasonHistory`, `medical.records`,
  * `programme.completed` — are rows of the twelve `player_*` tables created by migration `0007_player_subrecords`
- * (`media[].tags{}` is the twelfth, `player_media_tags`). The identity repository (identity.mjs) is the one writer.
+ * (`media[].tags{}` is the twelfth, `player_media_tags`). The players repository (players.ts) is the one writer.
  * `trialReports` is not stored here: it is the trials' reports, read from the recruitment tables.
  *
  *   - no identifier is minted: a row without a client-visible id is keyed by `(player_id, position)`; every table
@@ -16,7 +16,8 @@
  *
  * An external id's `reviewId` names the identity review it was linked from (the review keeps the imported row).
  */
-import { migrationApplied, childRowsOf } from './database.ts';
+import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
+import { migrationApplied, childRowsOf, type Row } from './database.ts';
 
 export const PLAYER_SUBRECORDS_MIGRATION = '0007_player_subrecords';
 /** The top-level lists stored as rows. */
@@ -30,20 +31,19 @@ export const PLAYER_SUBRECORD_KEYS = Object.freeze([
   'activityLog',
   'externalIds',
   'seasonHistory',
-]);
-/** Composites whose list sub-key is stored as rows (`medical.records` → `player_medical_records`, …). */
-export const PLAYER_COMPOSITE_SUBRECORDS = Object.freeze({
-  medical: Object.freeze(['records']),
-  programme: Object.freeze(['completed']),
-});
+] as const);
 /** Are the sub-record tables in use on this connection? Decided by the migration record, never by the tables existing. */
-export const subrecordsLive = (sqlite) => migrationApplied(sqlite, PLAYER_SUBRECORDS_MIGRATION);
+export const subrecordsLive = (sqlite: DatabaseSync): boolean => migrationApplied(sqlite, PLAYER_SUBRECORDS_MIGRATION);
 
-/** The array keys the repository writes, as the writers name them (`medical.records` and `programme.completed` are sub-keys of split composites). */
+/** The array keys the repository writes, as the writers name them: `medical.records` and `programme.completed` are the lists inside the `medical` and `programme` blocks. */
 export const SUBRECORD_KEYS = Object.freeze([
   ...PLAYER_SUBRECORD_KEYS,
-  ...Object.entries(PLAYER_COMPOSITE_SUBRECORDS).flatMap(([k, subs]) => subs.map((s) => `${k}.${s}`)),
-]);
+  'medical.records',
+  'programme.completed',
+] as const);
+export type PlayerListKey = (typeof PLAYER_SUBRECORD_KEYS)[number];
+export type SubrecordKey = (typeof SUBRECORD_KEYS)[number];
+
 export const SUBRECORD_TABLES = Object.freeze([
   'player_season_history',
   'player_badges',
@@ -57,14 +57,124 @@ export const SUBRECORD_TABLES = Object.freeze([
   'player_activity_log',
   'player_external_ids',
   'player_programme_completions',
-]);
+] as const);
 
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const setOwn = (o, k, v) => {
+// ------------------------------------------------------------------ the items, as they read back
+/** A clip. `tags` is tag → count, in the order they were written. */
+export type MediaItem = {
+  id: string;
+  title: string;
+  kind?: string;
+  /** A UTC instant as toISOString writes it. */
+  uploadedAt?: string;
+  url: string | null;
+  views: number;
+  /** The attendance that verified the clip. */
+  verifiedClip: string | null;
+  captions: string | null;
+  sizeBytes?: number;
+  capturedBy?: 'box_cam';
+  boxSessionId?: string;
+  tags: Record<string, number>;
+};
+export type AttendanceItem = {
+  id: string;
+  fixture: string;
+  venue?: string;
+  date: string;
+  gps: { lat: number; lng: number } | null;
+  deviceConfirmed?: boolean;
+  verified: boolean;
+  corroboratedBy?: string;
+  trialId?: string;
+};
+export type TimelineItem = { year: string; event: string };
+export type SeasonItem = {
+  season: string;
+  appearances?: number;
+  goals?: number;
+  assists?: number;
+  paceKmh?: number;
+  passCompletionPct?: number;
+  duelSuccessPct?: number;
+  cleanSheets?: number;
+};
+export type MedicalRecordItem = {
+  id: string;
+  type: string;
+  title: string;
+  date?: string;
+  layoffWeeks: number | null;
+  cleared: boolean | null;
+};
+export type DrillResultItem = {
+  id: string;
+  drillId: string;
+  drillName?: string;
+  metric: string;
+  unit?: string;
+  value: number;
+  verified: boolean;
+  ts: number;
+};
+export type ExternalIdItem = {
+  provider: string;
+  externalId: string;
+  source: string;
+  by?: string;
+  at: number;
+  reviewId?: string;
+};
+export type ProgrammeCompletionItem = { sessionId: string; ts: number };
+
+/** The item each list holds, by the writers' key. */
+export type SubrecordItems = {
+  media: MediaItem;
+  attendance: AttendanceItem;
+  timeline: TimelineItem;
+  badges: string;
+  drills: string;
+  drillResults: DrillResultItem;
+  activityLog: number;
+  externalIds: ExternalIdItem;
+  seasonHistory: SeasonItem;
+  'medical.records': MedicalRecordItem;
+  'programme.completed': ProgrammeCompletionItem;
+};
+/**
+ * An item as a writer hands it in: the required fields, and the others optional or null. Fields the list does not
+ * store may ride along and are not stored.
+ */
+type Given<T, Req extends keyof T> = { [K in Req]: T[K] } & { [K in Exclude<keyof T, Req>]?: T[K] | null };
+export type SubrecordInputs = {
+  media: Given<MediaItem, 'id' | 'title'>;
+  attendance: Given<AttendanceItem, 'id' | 'fixture' | 'date'>;
+  timeline: TimelineItem;
+  badges: string;
+  drills: string;
+  drillResults: Given<DrillResultItem, 'id' | 'drillId' | 'metric' | 'value' | 'ts'>;
+  activityLog: number;
+  externalIds: Given<ExternalIdItem, 'provider' | 'externalId' | 'source' | 'at'>;
+  seasonHistory: Given<SeasonItem, 'season'>;
+  'medical.records': Given<MedicalRecordItem, 'id' | 'type' | 'title'>;
+  'programme.completed': ProgrammeCompletionItem;
+};
+/** The keys whose items are objects (the ones `patchItem` can change). */
+export type ObjectListKey = { [K in SubrecordKey]: SubrecordItems[K] extends object ? K : never }[SubrecordKey];
+
+/** One player's lists, as a record carries them. */
+export type PlayerLists = { [K in PlayerListKey]: SubrecordItems[K][] } & {
+  medical: { records: MedicalRecordItem[] };
+  programme: { completed: ProgrammeCompletionItem[] };
+};
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === 'object' && !Array.isArray(v);
+const setOwn = <T extends object>(o: T, k: string, v: unknown): T => {
   Object.defineProperty(o, k, { value: v, writable: true, enumerable: true, configurable: true });
   return o;
 };
-const describe = (v) =>
+const describe = (v: unknown) =>
   v === null
     ? 'null'
     : v === undefined
@@ -76,9 +186,9 @@ const describe = (v) =>
           : typeof v === 'bigint'
             ? 'a bigint'
             : `a ${typeof v}`;
-const absentOrNull = (v) => v === null || v === undefined;
-const isSafeInt = (v) => typeof v === 'number' && Number.isSafeInteger(v);
-const isFinite_ = (v) => typeof v === 'number' && Number.isFinite(v);
+const absentOrNull = (v: unknown): v is null | undefined => v === null || v === undefined;
+const isSafeInt = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v);
+const isFinite_ = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 // ------------------------------------------------------------------ the DDL (what migration 0007 creates)
 export const SUBRECORDS_DDL = `
@@ -228,7 +338,49 @@ CREATE TABLE player_programme_completions (
 // keys the table requires, which optional keys read back as `null` when their
 // column is NULL (`nullable`; the others are omitted), and the natural key the
 // code enforces (refused when an array violates it).
-const itemSpec = ({ scalars, booleans = [], json = [], composites = {}, defaults = {}, columns }) =>
+type ItemType = 'text' | 'date' | 'instant' | 'int' | 'real' | 'bool' | 'json';
+type ItemSpec = {
+  scalars: Readonly<Record<string, string>>;
+  booleans: ReadonlySet<string>;
+  json: ReadonlySet<string>;
+  composites: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  defaults: Readonly<Record<string, SQLInputValue>>;
+  columns: readonly string[];
+};
+/** A list of objects, one row each. */
+type ObjectListSpec = {
+  table: string;
+  primitive?: undefined;
+  idKey?: string;
+  children?: 'tags';
+  spec: ItemSpec;
+  /** Record key → the type its column holds. */
+  types: Readonly<Record<string, ItemType>>;
+  /** Keys that must be present and non-null. */
+  required: readonly string[];
+  enums?: Readonly<Record<string, readonly string[]>>;
+  unique?: readonly (readonly string[])[];
+  nullable?: readonly string[];
+};
+/** A list of plain values: the value IS the item. */
+type PrimitiveListSpec = { table: string; primitive: 'text' | 'int'; column: string; unique?: boolean };
+type ListSpec = ObjectListSpec | PrimitiveListSpec;
+
+const itemSpec = ({
+  scalars,
+  booleans = [],
+  json = [],
+  composites = {},
+  defaults = {},
+  columns,
+}: {
+  scalars: Record<string, string>;
+  booleans?: string[];
+  json?: string[];
+  composites?: Record<string, Record<string, string>>;
+  defaults?: Record<string, SQLInputValue>;
+  columns: string[];
+}): ItemSpec =>
   Object.freeze({
     scalars: Object.freeze(scalars),
     booleans: new Set(booleans),
@@ -239,9 +391,9 @@ const itemSpec = ({ scalars, booleans = [], json = [], composites = {}, defaults
   });
 /** A clip's upload instant, as every writer stores it (toISOString), so the feed compares it as text in SQL. */
 const INSTANT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-/** `types`: record key → 'text' | 'date' | 'instant' | 'int' | 'real' | 'bool' | 'json'; `required`: keys that must be present and non-null; `enums`: allowed values. */
-export const SUBRECORD_SPECS = Object.freeze({
-  media: Object.freeze({
+const listSpec = (s: ListSpec): ListSpec => Object.freeze(s);
+export const SUBRECORD_SPECS: Readonly<Record<SubrecordKey, ListSpec>> = Object.freeze({
+  media: listSpec({
     table: 'player_media',
     idKey: 'id',
     children: 'tags',
@@ -292,7 +444,7 @@ export const SUBRECORD_SPECS = Object.freeze({
     unique: [['id']],
     nullable: ['url', 'verifiedClip', 'captions'],
   }),
-  attendance: Object.freeze({
+  attendance: listSpec({
     table: 'player_attendance',
     idKey: 'id',
     spec: itemSpec({
@@ -336,13 +488,13 @@ export const SUBRECORD_SPECS = Object.freeze({
     unique: [['id']],
     nullable: ['gps'],
   }),
-  timeline: Object.freeze({
+  timeline: listSpec({
     table: 'player_timeline',
     spec: itemSpec({ scalars: { year: 'year', event: 'event' }, columns: ['year', 'event'] }),
     types: { year: 'text', event: 'text' },
     required: ['year', 'event'],
   }),
-  seasonHistory: Object.freeze({
+  seasonHistory: listSpec({
     table: 'player_season_history',
     spec: itemSpec({
       scalars: {
@@ -380,7 +532,7 @@ export const SUBRECORD_SPECS = Object.freeze({
     required: ['season'],
     unique: [['season']],
   }),
-  'medical.records': Object.freeze({
+  'medical.records': listSpec({
     table: 'player_medical_records',
     idKey: 'id',
     spec: itemSpec({
@@ -400,7 +552,7 @@ export const SUBRECORD_SPECS = Object.freeze({
     unique: [['id']],
     nullable: ['layoffWeeks', 'cleared'],
   }),
-  drillResults: Object.freeze({
+  drillResults: listSpec({
     table: 'player_drill_results',
     idKey: 'id',
     spec: itemSpec({
@@ -431,7 +583,7 @@ export const SUBRECORD_SPECS = Object.freeze({
     required: ['id', 'drillId', 'metric', 'value', 'ts'],
     unique: [['id']],
   }),
-  externalIds: Object.freeze({
+  externalIds: listSpec({
     table: 'player_external_ids',
     spec: itemSpec({
       scalars: {
@@ -448,7 +600,7 @@ export const SUBRECORD_SPECS = Object.freeze({
     required: ['provider', 'externalId', 'source', 'at'],
     unique: [['provider', 'externalId']],
   }),
-  'programme.completed': Object.freeze({
+  'programme.completed': listSpec({
     table: 'player_programme_completions',
     spec: itemSpec({
       scalars: { sessionId: 'session_id', ts: 'completed_at' },
@@ -458,21 +610,28 @@ export const SUBRECORD_SPECS = Object.freeze({
     required: ['sessionId', 'ts'],
   }),
   // Primitive arrays: the value IS the item.
-  badges: Object.freeze({ table: 'player_badges', primitive: 'text', column: 'badge' }),
-  drills: Object.freeze({ table: 'player_drills', primitive: 'text', column: 'drill_id', unique: true }),
-  activityLog: Object.freeze({ table: 'player_activity_log', primitive: 'int', column: 'occurred_at' }),
+  badges: listSpec({ table: 'player_badges', primitive: 'text', column: 'badge' }),
+  drills: listSpec({ table: 'player_drills', primitive: 'text', column: 'drill_id', unique: true }),
+  activityLog: listSpec({ table: 'player_activity_log', primitive: 'int', column: 'occurred_at' }),
 });
 
 /** Read an array off a record by its writer name (`medical.records` → `rec.medical?.records`). */
-export function getSubrecords(rec, key) {
-  if (!key.includes('.')) return rec?.[key];
+export function getSubrecords(rec: unknown, key: string): unknown {
+  if (!isPlainObject(rec)) return undefined;
+  if (!key.includes('.')) return rec[key];
   const [k, sub] = key.split('.');
-  const composite = rec?.[k];
+  const composite = rec[k];
   return isPlainObject(composite) ? composite[sub] : undefined;
 }
 
 // ------------------------------------------------------------------ validation (field, index and reason; nothing coerced)
-const checkValue = (problems, label, v, type, { required = false, enums = null } = {}) => {
+const checkValue = (
+  problems: string[],
+  label: string,
+  v: unknown,
+  type: ItemType,
+  { required = false, enums = null }: { required?: boolean; enums?: readonly string[] | null } = {},
+) => {
   if (v === undefined) {
     if (required) problems.push(`${label} is absent`);
     return;
@@ -509,7 +668,7 @@ const checkValue = (problems, label, v, type, { required = false, enums = null }
       try {
         JSON.stringify(v);
       } catch (err) {
-        problems.push(`${label} cannot be stored as JSON (${String(err?.message ?? err).slice(0, 80)})`);
+        problems.push(`${label} cannot be stored as JSON (${String((err as Error)?.message ?? err).slice(0, 80)})`);
       }
       break;
     default:
@@ -518,12 +677,15 @@ const checkValue = (problems, label, v, type, { required = false, enums = null }
   if (enums && typeof v === 'string' && !enums.includes(v)) problems.push(`${label} is not one of ${enums.join('/')}`);
 };
 
+const specOf = (key: string): ListSpec | undefined =>
+  Object.hasOwn(SUBRECORD_SPECS, key) ? SUBRECORD_SPECS[key as SubrecordKey] : undefined;
+
 /** Validate one item of `key` (an index for the label); returns the problems. Unknown fields are not problems: they are not stored. */
-export function validateSubrecordItem(key, item, index = null) {
-  const def = SUBRECORD_SPECS[key];
+export function validateSubrecordItem(key: string, item: unknown, index: number | null = null): string[] {
+  const def = specOf(key);
   if (!def) return [`"${key}" is not a player sub-record`];
   const at = index === null ? key : `${key}[${index}]`;
-  const problems = [];
+  const problems: string[] = [];
   if (def.primitive) {
     if (def.primitive === 'text' && typeof item !== 'string') problems.push(`${at} is ${describe(item)}, not text`);
     if (def.primitive === 'int' && !isSafeInt(item))
@@ -567,16 +729,17 @@ export function validateSubrecordItem(key, item, index = null) {
 }
 
 /** Validate a whole array of `key` (items and the natural keys the code enforces); `null`/absent is valid. */
-export function validateSubrecordArray(key, items) {
+export function validateSubrecordArray(key: string, items: unknown): string[] {
   if (absentOrNull(items)) return [];
   if (!Array.isArray(items)) return [`${key} is ${describe(items)}, not an array`];
-  const def = SUBRECORD_SPECS[key];
-  const problems = [];
+  const problems: string[] = [];
   items.forEach((item, i) => problems.push(...validateSubrecordItem(key, item, i)));
   if (problems.length) return problems;
+  // Every item passed validateSubrecordItem, so the key names a list.
+  const def = specOf(key) as ListSpec;
   if (def.primitive) {
     if (def.unique) {
-      const seen = new Map();
+      const seen = new Map<unknown, number>();
       items.forEach((v, i) => {
         if (seen.has(v))
           problems.push(
@@ -588,8 +751,8 @@ export function validateSubrecordArray(key, items) {
     return problems;
   }
   for (const cols of def.unique ?? []) {
-    const seen = new Map();
-    items.forEach((item, i) => {
+    const seen = new Map<string, number>();
+    items.forEach((item: Record<string, unknown>, i) => {
       const k = JSON.stringify(cols.map((c) => item[c]));
       if (seen.has(k))
         problems.push(
@@ -602,38 +765,45 @@ export function validateSubrecordArray(key, items) {
 }
 
 // ------------------------------------------------------------------ item ⇄ row
-const insertSql = (table, columns) =>
+type Params = Record<string, SQLInputValue>;
+type TagRow = { media_id: string; position: number; tag: string; count: number };
+const insertSql = (table: string, columns: readonly string[]) =>
   `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map((c) => `@${c}`).join(', ')})`;
 
 /** The row of a valid item: its known fields in their columns (unknown fields are not stored), the table defaults where it leaves a required column out. */
-function itemToRow(def, item) {
+function itemToRow(def: ObjectListSpec, item: Record<string, unknown>): Params {
   const s = def.spec;
-  const row = {};
+  const row: Params = {};
   for (const c of s.columns) row[c] = null;
   for (const [k, col] of Object.entries(s.scalars)) {
     const v = item[k];
     if (absentOrNull(v)) continue;
-    row[col] = s.booleans.has(k) ? (v ? 1 : 0) : s.json.has(k) ? JSON.stringify(v) : v;
+    row[col] = s.booleans.has(k) ? (v ? 1 : 0) : s.json.has(k) ? JSON.stringify(v) : (v as SQLInputValue);
   }
   for (const [ck, subs] of Object.entries(s.composites)) {
     const v = item[ck];
-    if (isPlainObject(v)) for (const [sub, col] of Object.entries(subs)) if (!absentOrNull(v[sub])) row[col] = v[sub];
+    if (isPlainObject(v))
+      for (const [sub, col] of Object.entries(subs)) if (!absentOrNull(v[sub])) row[col] = v[sub] as SQLInputValue;
   }
   for (const [col, dflt] of Object.entries(s.defaults)) if (row[col] === null) row[col] = dflt;
   return row;
 }
 /** The item a row holds: its fields in the spec's order; a NULL column is `null` for a `nullable` field and omitted otherwise. */
-function itemFromRow(def, row, tagRows) {
+function itemFromRow(
+  def: ObjectListSpec,
+  row: Readonly<Record<string, unknown>>,
+  tagRows: readonly { tag: unknown; count: unknown }[] | undefined | null,
+): Record<string, unknown> {
   const s = def.spec;
   const nullable = def.nullable ?? [];
-  const item = {};
+  const item: Record<string, unknown> = {};
   for (const [k, col] of Object.entries(s.scalars)) {
     const v = row[col];
     if (v === null || v === undefined) {
       if (nullable.includes(k)) item[k] = null;
       continue;
     }
-    item[k] = s.booleans.has(k) ? v === 1 : s.json.has(k) ? JSON.parse(v) : v;
+    item[k] = s.booleans.has(k) ? v === 1 : s.json.has(k) ? JSON.parse(v as string) : v;
   }
   for (const [ck, subs] of Object.entries(s.composites)) {
     const cols = Object.entries(subs);
@@ -643,42 +813,66 @@ function itemFromRow(def, row, tagRows) {
   }
   if (def.children === 'tags') {
     const tags = {};
-    for (const t of tagRows ?? []) setOwn(tags, t.tag, t.count);
+    for (const t of tagRows ?? []) setOwn(tags, t.tag as string, t.count);
     item.tags = tags;
   }
   return item;
 }
 
 /** The rows an item becomes: `{ row, tags }` (tags only for media). */
-export function itemRows(key, item, position, playerId) {
+export function itemRows(
+  key: SubrecordKey,
+  item: unknown,
+  position: number,
+  playerId: string | null,
+): { row: Params; tags: TagRow[] | null } {
   const def = SUBRECORD_SPECS[key];
-  if (def.primitive) return { row: { player_id: playerId, position, [def.column]: item }, tags: null };
-  const row = itemToRow(def, item);
+  if (def.primitive) return { row: { player_id: playerId, position, [def.column]: item as SQLInputValue }, tags: null };
+  const it = item as Record<string, unknown>;
+  const row = itemToRow(def, it);
   row.player_id = playerId;
   row.position = position;
-  let tags = null;
-  if (def.children === 'tags' && isPlainObject(item.tags))
-    tags = Object.entries(item.tags).map(([tag, count], i) => ({ media_id: item.id, position: i, tag, count }));
+  let tags: TagRow[] | null = null;
+  if (def.children === 'tags' && isPlainObject(it.tags))
+    tags = Object.entries(it.tags).map(([tag, count], i) => ({
+      media_id: it.id as string,
+      position: i,
+      tag,
+      count: count as number,
+    }));
   return { row, tags };
 }
 /** A valid item exactly as the tables will read it back. */
-export function storedItem(key, item) {
+export function storedItem<K extends SubrecordKey>(key: K, item: unknown): SubrecordItems[K] {
   const def = SUBRECORD_SPECS[key];
-  if (def.primitive) return item;
+  if (def.primitive) return item as SubrecordItems[K];
   const { row, tags } = itemRows(key, item, 0, null);
-  return itemFromRow(def, row, tags);
+  return itemFromRow(def, row, tags) as SubrecordItems[K];
 }
-const columnsOf = (key) => {
+const columnsOf = (key: SubrecordKey): string[] => {
   const def = SUBRECORD_SPECS[key];
   return def.primitive ? ['player_id', 'position', def.column] : ['player_id', 'position', ...def.spec.columns];
 };
 
+type ListStatements = {
+  insert: StatementSync;
+  deleteAll: StatementSync;
+  selectPlayer: StatementSync;
+  count: StatementSync;
+  /** By the item's id, or by its position for a list without ids; a list of plain values has none. */
+  update?: StatementSync;
+};
+/** The prepared statements of every list table, and of the clips' tags. */
+export type SubrecordStatements = Record<SubrecordKey, ListStatements> & {
+  tags: { insert: StatementSync; deleteMedia: StatementSync; selectPlayer: StatementSync; count: StatementSync };
+};
+
 /** Prepared statements for every table (built once per connection by the callers below). */
-export function prepareSubrecordStatements(sqlite) {
-  const st = {};
+export function prepareSubrecordStatements(sqlite: DatabaseSync): SubrecordStatements {
+  const lists = {} as Record<SubrecordKey, ListStatements>;
   for (const key of SUBRECORD_KEYS) {
     const def = SUBRECORD_SPECS[key];
-    st[key] = {
+    const s: ListStatements = {
       insert: sqlite.prepare(insertSql(def.table, columnsOf(key))),
       deleteAll: sqlite.prepare(`DELETE FROM ${def.table} WHERE player_id = ?`),
       selectPlayer: sqlite.prepare(
@@ -686,36 +880,38 @@ export function prepareSubrecordStatements(sqlite) {
       ),
       count: sqlite.prepare(`SELECT COUNT(*) AS n FROM ${def.table}`),
     };
-    if (def.idKey)
-      st[key].update = sqlite.prepare(
+    if (!def.primitive && def.idKey)
+      s.update = sqlite.prepare(
         `UPDATE ${def.table} SET ${columnsOf(key)
           .filter((c) => c !== 'id' && c !== 'player_id')
           .map((c) => `${c} = @${c}`)
           .join(', ')} WHERE id = @id AND player_id = @player_id`,
       );
     else if (!def.primitive)
-      st[key].update = sqlite.prepare(
+      s.update = sqlite.prepare(
         `UPDATE ${def.table} SET ${columnsOf(key)
           .filter((c) => c !== 'player_id' && c !== 'position')
           .map((c) => `${c} = @${c}`)
           .join(', ')} WHERE player_id = @player_id AND position = @position`,
       );
+    lists[key] = s;
   }
-  st.tags = {
-    insert: sqlite.prepare(
-      'INSERT INTO player_media_tags (media_id, position, tag, count) VALUES (@media_id, @position, @tag, @count)',
-    ),
-    deleteMedia: sqlite.prepare('DELETE FROM player_media_tags WHERE media_id = ?'),
-    selectPlayer: sqlite.prepare(
-      'SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id = ? ORDER BY t.media_id, t.position',
-    ),
-    count: sqlite.prepare('SELECT COUNT(*) AS n FROM player_media_tags'),
-  };
-  return st;
+  return Object.assign(lists, {
+    tags: {
+      insert: sqlite.prepare(
+        'INSERT INTO player_media_tags (media_id, position, tag, count) VALUES (@media_id, @position, @tag, @count)',
+      ),
+      deleteMedia: sqlite.prepare('DELETE FROM player_media_tags WHERE media_id = ?'),
+      selectPlayer: sqlite.prepare(
+        'SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id = ? ORDER BY t.media_id, t.position',
+      ),
+      count: sqlite.prepare('SELECT COUNT(*) AS n FROM player_media_tags'),
+    },
+  });
 }
 
 /** Write every row of one array of one player (positions 0..n−1), inside the caller's transaction. */
-export function writeArrayRows(st, key, playerId, items) {
+export function writeArrayRows(st: SubrecordStatements, key: SubrecordKey, playerId: string, items: unknown): number {
   if (!Array.isArray(items)) return 0;
   items.forEach((item, i) => {
     const { row, tags } = itemRows(key, item, i, playerId);
@@ -725,8 +921,8 @@ export function writeArrayRows(st, key, playerId, items) {
   return items.length;
 }
 /** Write every array of a record (`players.insert`). Returns rows per table. */
-export function writeChildRows(st, rec) {
-  const counts = {};
+export function writeChildRows(st: SubrecordStatements, rec: { id: string }): Record<string, number> {
+  const counts: Record<string, number> = {};
   for (const key of SUBRECORD_KEYS) {
     const items = getSubrecords(rec, key);
     const n = writeArrayRows(st, key, rec.id, items);
@@ -735,85 +931,74 @@ export function writeChildRows(st, rec) {
   return counts;
 }
 /** Delete every child row of a player (the media tags cascade with their clips). */
-export function deleteChildRows(st, playerId) {
+export function deleteChildRows(st: SubrecordStatements, playerId: string): void {
   for (const key of SUBRECORD_KEYS) st[key].deleteAll.run(playerId);
 }
 
-const itemFromRows = (key, row, tagRows) => {
+const itemFromRows = (key: SubrecordKey, row: Row, tagRows: Row[] | undefined): unknown => {
   const def = SUBRECORD_SPECS[key];
-  return def.primitive ? row[def.column] : itemFromRow(def, row, tagRows);
+  return def.primitive ? row[def.column] : itemFromRow(def, row, tagRows as { tag: unknown; count: unknown }[]);
 };
-const emptyChildren = () => {
-  const c = {};
-  for (const key of PLAYER_SUBRECORD_KEYS) c[key] = [];
-  for (const [k, subs] of Object.entries(PLAYER_COMPOSITE_SUBRECORDS)) {
-    c[k] = {};
-    for (const s of subs) c[k][s] = [];
-  }
-  return c;
+const emptyChildren = (): PlayerLists => ({
+  media: [],
+  attendance: [],
+  timeline: [],
+  badges: [],
+  drills: [],
+  drillResults: [],
+  activityLog: [],
+  externalIds: [],
+  seasonHistory: [],
+  medical: { records: [] },
+  programme: { completed: [] },
+});
+const placeChild = (children: PlayerLists, key: SubrecordKey, item: unknown) => {
+  if (key === 'medical.records') children.medical.records.push(item as MedicalRecordItem);
+  else if (key === 'programme.completed') children.programme.completed.push(item as ProgrammeCompletionItem);
+  else (children[key] as unknown[]).push(item);
 };
-const placeChild = (children, key, item) => {
-  if (!key.includes('.')) {
-    children[key].push(item);
-    return;
+const tagsByMedia = (rows: Row[]) => {
+  const tags = new Map<unknown, Row[]>();
+  for (const t of rows) {
+    let list = tags.get(t.media_id);
+    if (!list) tags.set(t.media_id, (list = []));
+    list.push(t);
   }
-  const [k, sub] = key.split('.');
-  children[k][sub].push(item);
+  return tags;
 };
 
 /** One player's lists (`{ media: [...], …, medical: { records }, programme: { completed } }`). */
-export function readChildren(st, playerId) {
+export function readChildren(st: SubrecordStatements, playerId: string): PlayerLists {
   const children = emptyChildren();
-  const tags = new Map();
-  for (const t of st.tags.selectPlayer.all(playerId)) {
-    if (!tags.has(t.media_id)) tags.set(t.media_id, []);
-    tags.get(t.media_id).push(t);
-  }
+  const tags = tagsByMedia(st.tags.selectPlayer.all(playerId));
   for (const key of SUBRECORD_KEYS)
     for (const row of st[key].selectPlayer.all(playerId))
       placeChild(children, key, itemFromRows(key, row, tags.get(row.id)));
   return children;
 }
 /** The lists of many players in one query per table (never a query per player): Map player id → lists. */
-export function readChildrenFor(sqlite, ids) {
+export function readChildrenFor(sqlite: DatabaseSync, ids: readonly string[]): Map<string, PlayerLists> {
   const out = new Map(ids.map((id) => [id, emptyChildren()]));
   if (!ids.length) return out;
-  const tagRows = sqlite
-    .prepare(
-      'SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id IN (SELECT value FROM json_each(?)) ORDER BY t.media_id, t.position',
-    )
-    .all(JSON.stringify(ids));
-  const tags = new Map();
-  for (const t of tagRows) {
-    if (!tags.has(t.media_id)) tags.set(t.media_id, []);
-    tags.get(t.media_id).push(t);
-  }
+  const tags = tagsByMedia(
+    sqlite
+      .prepare(
+        'SELECT t.media_id, t.position, t.tag, t.count FROM player_media_tags t JOIN player_media m ON m.id = t.media_id WHERE m.player_id IN (SELECT value FROM json_each(?)) ORDER BY t.media_id, t.position',
+      )
+      .all(JSON.stringify(ids)),
+  );
   for (const key of SUBRECORD_KEYS) {
     const rows = childRowsOf(sqlite, SUBRECORD_SPECS[key].table, 'player_id', ids, { order: 'position' });
     for (const id of ids)
-      for (const row of rows.all(id)) placeChild(out.get(id), key, itemFromRows(key, row, tags.get(row.id)));
+      for (const row of rows.all(id))
+        placeChild(out.get(id) as PlayerLists, key, itemFromRows(key, row, tags.get(row.id)));
   }
   return out;
 }
 /** Rows per table, for reports (counts only). */
-export function countChildRows(st) {
-  const out = {};
-  for (const key of SUBRECORD_KEYS) out[SUBRECORD_SPECS[key].table] = st[key].count.get().n;
-  out.player_media_tags = st.tags.count.get().n;
+export function countChildRows(st: SubrecordStatements): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const key of SUBRECORD_KEYS) out[SUBRECORD_SPECS[key].table] = (st[key].count.get() as { n: number }).n;
+  out.player_media_tags = (st.tags.count.get() as { n: number }).n;
   return out;
 }
-
-// ------------------------------------------------------------------ the derived trial reports
-/**
- * The trial reports of a player from a list of trials: every `trials[].report` whose trial names the player, in
- * filing order (ascending `filedAt`, the trials' order for a tie). The same objects the trials hold, never copies.
- */
-export function trialReportsFor(trials, playerId) {
-  if (!Array.isArray(trials)) return [];
-  const out = [];
-  for (const t of trials)
-    if (isPlainObject(t) && t.playerId === playerId && isPlainObject(t.report)) out.push(t.report);
-  const at = (r) => (typeof r.filedAt === 'number' && Number.isFinite(r.filedAt) ? r.filedAt : 0);
-  return out.sort((a, b) => at(a) - at(b));
-}
-export { emptyChildren };

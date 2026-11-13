@@ -22,7 +22,7 @@ import {
   requiredText,
   text,
 } from '../platform/schemas.mjs';
-import { IDENTITY_LIMITS as IL } from '../../repositories/identity.mjs';
+import { IDENTITY_LIMITS as IL } from '../../repositories/identityRules.ts';
 import { GRASSROOTS_LIMITS as GL } from '../../repositories/grassroots.mjs';
 import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from '../../repositories/clubSetup.mjs';
 import { TRANSITION_LIMITS as VL } from '../../repositories/transitionsVouches.mjs';

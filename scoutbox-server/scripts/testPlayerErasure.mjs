@@ -13,7 +13,7 @@ import { openStore } from '../store.ts';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 import { runDataMigrations } from '../repositories/database.ts';
-import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
+import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.ts';
 import {
   NOW,
   TTL,
@@ -45,12 +45,6 @@ function test(name, fn) {
 let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const MIGRATION = '0014_player_erasure';
-let erasureMod = null;
-try {
-  erasureMod = await import('../repositories/identity.mjs');
-} catch {
-  erasureMod = null;
-}
 
 /** The retained row, column by column: the identifier, the deletion instant, the two retained facts, fixed placeholders, NULL everywhere else. */
 const RETAINED_ROW = (id, deletedAt, birthDate, country) => ({

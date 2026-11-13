@@ -190,11 +190,15 @@ The order, from the bottom of the import graph up, so each file is typed against
    import as `.ts`; the hand-written `roles.d.mts` is gone. The domain rules type the records they read by the
    fields each reads (`Dated`, `VisiblePlayer`, `ProfileFacts`), until step 3 gives the repositories' records types.
 3. **The repositories, one per change.** Each gets a record type for what it reads back (deep-frozen, so
-   `Readonly`) and a signature for each named act. Start with `identity.mjs`, which nearly every domain reads, and
-   split it along its owners as it is typed. The repositories that still type records in JavaScript (discovery,
-   development, passport, scouting, opportunities) move to "reads back as written" as they are converted, so their
-   types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that write through the
-   repositories are typed checks of the repositories' signatures; convert them alongside.
+   `Readonly`) and a signature for each named act. Identity, which nearly every domain reads, is done and split
+   along its owners: `players.ts` (the `Player` record in `playerRecord.ts`, its lists in `playerSubrecords.ts`),
+   `guardians.ts`, what the two share in `identityRules.ts`, and `identity.ts`, which builds both on one connection
+   and adds the link acts and the first installation's import. The repositories that still type records in
+   JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
+   converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
+   write through the repositories are typed checks of the repositories' signatures; convert them alongside, except
+   `dataLayerFixture.mjs`, which writes every repository from untyped records and is converted once they are all
+   typed.
 4. **The platform layer, and the platform object.** Type `domains/platform/` and group its services into one
    `Platform` dependency (below). `schemas.mjs` and the route helpers hand a handler its input typed from its
    valibot schema (`v.InferOutput`), so a route reads `body.expiresAt` as a string instead of as anything. `needs()`

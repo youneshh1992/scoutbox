@@ -16,7 +16,7 @@ import { openStore } from '../store.ts';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
 import { transaction, onBeforeCommit } from '../repositories/database.ts';
 import { MATCH_FACT_INPUTS, TRUST_BAND_IDS, foldName } from '../repositories/matchFacts.mjs';
-import { PLAYER_POSITIONS, PLAYER_FEET } from '../repositories/identity.mjs';
+import { PLAYER_POSITIONS, PLAYER_FEET } from '../repositories/playerRecord.ts';
 import { createMatchFactsKeeper, adulthoodAt } from '../domains/discovery/matchFacts.mjs';
 import { criterionSql, matchPlayerToCriteria } from '../domains/discovery/matching/match.mjs';
 import { validateCriteria, AVAILABILITY_VALUES } from '../domains/discovery/matching/criteria.mjs';

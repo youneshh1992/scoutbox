@@ -39,7 +39,7 @@ import {
   TRIAL_LIMITS,
 } from '../domains/recruitment/public.mjs';
 import { TRIAL_REPORT_FIELDS } from '../domain.ts';
-import { refreshProfileSignals } from './identity.mjs';
+import { refreshProfileSignals } from './players.ts';
 import { writeKit } from './writes.ts';
 import { ids } from './fieldSpecs.mjs';
 import { deepFreeze } from '../domains/platform/values.ts';

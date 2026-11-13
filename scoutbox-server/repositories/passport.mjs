@@ -24,7 +24,7 @@ import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
-import { PLAYER_POSITIONS } from './identity.mjs';
+import { PLAYER_POSITIONS } from './playerRecord.ts';
 import {
   text,
   int,

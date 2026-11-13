@@ -1,4 +1,4 @@
-// The player and guardian repositories (repositories/identity.mjs), exercised on temporary
+// The player and guardian repositories (repositories/identity.ts, players.ts, guardians.ts), exercised on temporary
 // databases through the real data layer (attachDataLayer runs the registered migrations and attaches every
 // repository). Nothing here touches DATA_DIR. Synthetic records only; the clock is fixed where age matters.
 // Run with: npm test
@@ -9,14 +9,11 @@ import { openStore } from '../store.ts';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { runDataMigrations } from '../repositories/database.ts';
-import {
-  createIdentityRepositories,
-  CORE_IDENTITY_INIT_META,
-  PLAYER_RECORD_KEYS,
-  GUARDIAN_RECORD_KEYS,
-  bornByForAge,
-} from '../repositories/identity.mjs';
-import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
+import { createIdentityRepositories, CORE_IDENTITY_INIT_META } from '../repositories/identity.ts';
+import { PLAYER_RECORD_KEYS } from '../repositories/playerRecord.ts';
+import { GUARDIAN_RECORD_KEYS } from '../repositories/guardians.ts';
+import { bornByForAge } from '../repositories/players.ts';
+import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.ts';
 import { adult, child, gSignup, FIXTURE, T0, NOW, TTL, tempDir, clone } from './coreIdentityTestFixtures.mjs';
 import { computeTrustScore, visibleToOrg, haversineKm } from '../domain.ts';
 

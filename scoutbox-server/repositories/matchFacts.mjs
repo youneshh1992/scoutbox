@@ -26,7 +26,7 @@
  * player, e.g. a claim's organisation subject; the drain finds no player and removes nothing).
  */
 import { operationOn } from './database.ts';
-import { PLAYER_POSITIONS } from './identity.mjs';
+import { PLAYER_POSITIONS } from './playerRecord.ts';
 import { POLICY as TRUST_POLICY } from '../domains/passport/public.mjs';
 import { BOX_CAM_LIMITS } from './boxCam.mjs';
 

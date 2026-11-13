@@ -1,10 +1,10 @@
 /**
  * Player sub-records (`SUBRECORDS_DDL`): media, attendance, timeline, badges, drills, drill results, activity,
  * external ids, season history, medical records, programme completions and the rest. The seed's rows are written
- * when the data layer initialises the players (repositories/identity.mjs).
+ * when the data layer initialises the players (repositories/identity.ts).
  */
-import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.mjs';
-import { PLAYER_SUBRECORDS_MIGRATION, SUBRECORDS_DDL, SUBRECORD_TABLES } from '../playerSubrecords.mjs';
+import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.ts';
+import { PLAYER_SUBRECORDS_MIGRATION, SUBRECORDS_DDL, SUBRECORD_TABLES } from '../playerSubrecords.ts';
 import { migrationApplied } from '../database.ts';
 
 export const id = PLAYER_SUBRECORDS_MIGRATION;

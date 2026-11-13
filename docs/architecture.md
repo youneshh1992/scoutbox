@@ -119,7 +119,7 @@ transaction documents are evidence records.
   take `reads` as an argument.
 - A list decodes its records' child rows in one batch (`childRowsOf` in `repositories/database.ts`), never a query
   per record. Admin figures are `GROUP BY`s, sweeps indexed predicates.
-- **The visibility rule is SQL** (`players.visibleCandidates`, `visiblePage` and friends in `repositories/identity.mjs`):
+- **The visibility rule is SQL** (`players.visibleCandidates`, `visiblePage` and friends in `repositories/players.ts`):
   the under-18 wall, the Grassroots 50 km radius and blocks. The SQL functions registered on the connection
   (`haversine_km`, `distance_tenths`, `lower_js`) are the JavaScript rules, so the two can't disagree.
 - **Derived projections** are kept by the repositories, never written by hand:

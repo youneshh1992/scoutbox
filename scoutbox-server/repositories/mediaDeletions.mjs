@@ -15,7 +15,7 @@
  * A media id is `[a-z0-9-]+`, so an entry can never name a path outside the media directory.
  */
 import { migrationApplied } from './database.ts';
-import { subrecordsLive } from './playerSubrecords.mjs';
+import { subrecordsLive } from './playerSubrecords.ts';
 
 export const MEDIA_DELETIONS_MIGRATION = '0006_media_deletions';
 

@@ -42,7 +42,7 @@ import {
   txt,
 } from './scoutingEvidence.mjs';
 import { deepFreeze } from '../domains/platform/values.ts';
-import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY, PLAYER_LEVELS } from './identity.mjs';
+import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY, PLAYER_LEVELS } from './playerRecord.ts';
 import { parseStrictDateOnly } from '../temporal.ts';
 
 export const CLUB_SETUP_MIGRATION = '0021_club_setup';

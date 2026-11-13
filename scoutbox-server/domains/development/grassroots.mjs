@@ -2,7 +2,7 @@
 // reference request are the guardian's, from the guardian's account.
 import { developmentInput } from './schemas.mjs';
 import { GRASSROOTS_RADIUS_KM, haversineKm, visibleToOrg } from '../../domain.ts';
-import { PLAYER_POSITIONS } from '../../repositories/identity.mjs';
+import { PLAYER_POSITIONS } from '../../repositories/playerRecord.ts';
 import { GRASSROOTS_LIMITS as GL, boxAround } from '../../repositories/grassroots.mjs';
 import { TRANSITION_LIMITS as VL, vouchCodeHash } from '../../repositories/transitionsVouches.mjs';
 import { randomCode } from '../../adapters.mjs';

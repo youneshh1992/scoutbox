@@ -3,7 +3,7 @@
  * (repositories/recruitment.mjs). The `case_id` keys name recruitment_cases, which 0016 creates in the same boot.
  */
 import { migrationApplied } from '../database.ts';
-import { PLAYER_ERASURE_MIGRATION } from '../identity.mjs';
+import { PLAYER_ERASURE_MIGRATION } from '../playerRecord.ts';
 import { RECRUITMENT_MIGRATION, RECRUITMENT_DDL, RECRUITMENT_TABLES } from '../recruitment.mjs';
 
 export const id = RECRUITMENT_MIGRATION;

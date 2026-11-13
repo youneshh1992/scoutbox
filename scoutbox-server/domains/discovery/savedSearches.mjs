@@ -7,7 +7,7 @@ import {
   SEARCH_AGE_GROUPS,
   SAVED_SEARCH_LIMITS as L,
 } from '../../repositories/savedSearches.mjs';
-import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from '../../repositories/identity.mjs';
+import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from '../../repositories/playerRecord.ts';
 import { filled, presentOrRefuse } from '../platform/schemas.mjs';
 import { discoveryInput } from './schemas.mjs';
 

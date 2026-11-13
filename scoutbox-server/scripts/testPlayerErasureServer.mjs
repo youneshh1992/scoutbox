@@ -15,7 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
+import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

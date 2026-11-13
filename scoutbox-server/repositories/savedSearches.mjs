@@ -23,7 +23,7 @@ import {
 import { migrationApplied, operationOn } from './database.ts';
 import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
-import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from './identity.mjs';
+import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from './playerRecord.ts';
 
 export const SAVED_SEARCHES_MIGRATION = '0038_operations';
 export const SAVED_SEARCHES_COLLECTIONS = Object.freeze(['savedSearches']);

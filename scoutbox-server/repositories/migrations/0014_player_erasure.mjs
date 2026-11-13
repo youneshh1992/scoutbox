@@ -1,11 +1,11 @@
 /**
  * The retained player record. No table or column changes: once this migration is recorded, an account deletion
- * keeps the player row as the retained record (identity.mjs `retainedRowFor`, via players.erase) instead of
+ * keeps the player row as the retained record (playerRecord.ts `retainedRowFor`, via players.erase) instead of
  * deleting it. The full birth date and the country code are kept: Founder's decisions (docs/decisions.md).
  */
 import { migrationApplied } from '../database.ts';
 import { SAFETY_AUDIT_MIGRATION } from '../safetyAudit.mjs';
-import { PLAYER_ERASURE_MIGRATION } from '../identity.mjs';
+import { PLAYER_ERASURE_MIGRATION } from '../playerRecord.ts';
 
 export const id = PLAYER_ERASURE_MIGRATION;
 export const note =
