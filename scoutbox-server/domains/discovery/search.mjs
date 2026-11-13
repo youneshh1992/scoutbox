@@ -1,7 +1,7 @@
 // Club search: the Discover directory, a player's profile with "more like this", internal scouting notes, saves and
 // shortlists. A player who blocked the organisation reads as absent on every one of these routes.
-import { declareAuditedRead } from '../../writeRules.mjs';
-import { visibleToOrg, similarityScore } from '../../domain.mjs';
+import { declareAuditedRead } from '../../writeRules.ts';
+import { visibleToOrg, similarityScore } from '../../domain.ts';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { filled, presentOrRefuse } from '../platform/schemas.mjs';
 import { discoveryInput } from './schemas.mjs';

@@ -27,8 +27,8 @@
  * same jurisdiction (RESTRICT). Child rows cascade.
  */
 import { isPlainObject, describe, ids } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
-import { isConstraintError } from './writes.mjs';
+import { migrationApplied, operationOn } from './database.ts';
+import { isConstraintError } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { text, int, oneOf, group, tableDdl, bad, typeSpec, encode, decode, upsertSql, quote } from './fieldSpecs.mjs';
 import { JURISDICTIONS } from '../domains/agents/public.mjs';

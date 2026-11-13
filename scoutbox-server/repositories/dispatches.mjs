@@ -13,7 +13,7 @@
  *
  * Refusals name tables, ids and fields, never an address or a provider text.
  */
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 

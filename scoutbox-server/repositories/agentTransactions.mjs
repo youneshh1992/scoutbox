@@ -19,7 +19,7 @@
  * status, outcome, pending reason, document type, visibility, staleness, reason code, version, count) with its reason
  * codes and policy versions as item rows. A document's entries repeat the document's own fields (worked out on read).
  *
- * Writes (repositories/writes.mjs). A record is created whole and must read back as written, then changes only through
+ * Writes (repositories/writes.ts). A record is created whole and must read back as written, then changes only through
  * named acts (`addParty`, `confirmParty`, `recordCompliance`, `moveByActor`, `withdraw`, `supersede`, …), each an UPDATE
  * of named columns or an INSERT of new rows, joined into the open unit of work, the caller's open transaction, or a
  * transaction of their own. History, notes, terms, linked threads and keys are only inserted; a status moves only along
@@ -41,8 +41,8 @@
  * rows cascade.
  */
 import { isPlainObject, describe } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { quote } from './fieldSpecs.mjs';
 import { REPRESENTATION_STATUSES } from './complianceRecords.mjs';

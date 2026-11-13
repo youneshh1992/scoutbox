@@ -13,7 +13,7 @@ import {
 } from '../boxcam/combineShared.mjs';
 import { PROVIDERS } from '../boxcam/drills.mjs';
 import { EVIDENCE_SOURCES, EVIDENCE_SOURCE_LABELS, UNAVAILABLE_REASONS } from './shared.mjs';
-import { parseTrialDate } from '../../../domain.mjs';
+import { parseTrialDate } from '../../../domain.ts';
 
 /** Tests assert a stored link has exactly these keys, so no content creeps in. */
 export const EVIDENCE_LINK_FIELDS = Object.freeze([

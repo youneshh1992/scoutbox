@@ -2,7 +2,7 @@
 // whom and on what evidence; there is no account-level `verified: true`. An uploaded document is evidence, never the
 // method of a verified claim, and nobody can be the authoritative confirmer of their own claim.
 import crypto from 'node:crypto';
-import { isExpiredAt, readInstant } from '../../../temporal.mjs';
+import { isExpiredAt, readInstant } from '../../../temporal.ts';
 
 // ------------------------------------------------------------- vocabularies
 import {

@@ -73,7 +73,7 @@ transaction documents are evidence records.
   detail is worked out on read, the inserted entry must read back as the writer gave it. Some repositories still type
   a record in JavaScript before writing it (from its field specs, or a typer of its own); there an act types the record
   with the fields it sets, so a value is judged the same way whichever write it came through. The shared checks, the
-  guarded update, the act runner (`actsOn`) and the mapping of a field spec to columns are `repositories/writes.mjs`.
+  guarded update, the act runner (`actsOn`) and the mapping of a field spec to columns are `repositories/writes.ts`.
 - **A domain writes another domain's tables only through that domain.** It receives the other domain's reads
   (`*Reads`, or a repository's `reads`) and the named write seams the owner offers (the identity domain's
   `playerRecord`, `orgRecord`, `staffRecord`, `guardianRecord` and `sessionEnds`, scouting's `scoutingActs`,
@@ -95,9 +95,9 @@ transaction documents are evidence records.
   logged and never undoes the data. Provider calls whose answer the act needs happen before the unit. `notify`
   writes its row in the caller's unit and sends the push and live event after the commit; `broadcast` inside a unit
   waits for the commit the same way.
-- A repository's `operation(fn)` (`repositories/database.mjs` `operationOn`) joins the open unit or opens its own
+- A repository's `operation(fn)` (`repositories/database.ts` `operationOn`) joins the open unit or opens its own
   transaction; every transaction opens and closes through `beginOn` / `commitOn` there.
-- **The rules are checked** (`writeRules.mjs`), per request, from SQLite's own change count: a request that commits a
+- **The rules are checked** (`writeRules.ts`), per request, from SQLite's own change count: a request that commits a
   second transaction that changed rows, a GET that writes, and a write made with no transaction open are refused
   outside production and counted in it (`store.unitOfWorkState().writeRules`); sending mail, a push or a live event
   while a transaction is open is refused everywhere, before anything is sent. What is not the request's act is
@@ -117,7 +117,7 @@ transaction documents are evidence records.
 - Every module context carries `byId` (`domains/platform/lookups.mjs`: `byId.player`, `.guardian`, `.user`, `.org`,
   `.mediaOwner`) and a read-only reads object per domain (`recruitmentReads`, `scoutingReads`, …). Pure projectors
   take `reads` as an argument.
-- A list decodes its records' child rows in one batch (`childRowsOf` in `repositories/database.mjs`), never a query
+- A list decodes its records' child rows in one batch (`childRowsOf` in `repositories/database.ts`), never a query
   per record. Admin figures are `GROUP BY`s, sweeps indexed predicates.
 - **The visibility rule is SQL** (`players.visibleCandidates`, `visiblePage` and friends in `repositories/identity.mjs`):
   the under-18 wall, the Grassroots 50 km radius and blocks. The SQL functions registered on the connection

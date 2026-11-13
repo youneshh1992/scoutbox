@@ -5,7 +5,7 @@
  */
 import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.mjs';
 import { PLAYER_SUBRECORDS_MIGRATION, SUBRECORDS_DDL, SUBRECORD_TABLES } from '../playerSubrecords.mjs';
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 
 export const id = PLAYER_SUBRECORDS_MIGRATION;
 export const note =

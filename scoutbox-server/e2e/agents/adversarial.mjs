@@ -49,7 +49,7 @@ import {
   DOCUMENT_VISIBILITY,
   TIMELINE_AUDIENCES,
 } from '../../domains/agents/transactions/transaction.mjs';
-import { isAdult, ageOn, parseDob } from '../../domain.mjs';
+import { isAdult, ageOn, parseDob } from '../../domain.ts';
 import { agentClientBasis } from '../../domains/agents/integration/integration.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';

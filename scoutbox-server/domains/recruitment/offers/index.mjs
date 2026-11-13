@@ -3,7 +3,7 @@
  * through `ctx.applyLifecycleTransition`, after the lifecycle validator agreed with the real evidence provider.
  */
 
-import { declareAuditedRead } from '../../../writeRules.mjs';
+import { declareAuditedRead } from '../../../writeRules.ts';
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { requestClock } from '../../platform/clock.mjs';
 import { roomRole, roomCan, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
@@ -15,7 +15,7 @@ import {
   RECRUITMENT_LIFECYCLE_POLICY_VERSION,
 } from '../lifecycle/lifecycle.mjs';
 import { resolveContactRecipient } from '../lifecycle/contact.mjs';
-import { visibleToOrg } from '../../../domain.mjs';
+import { visibleToOrg } from '../../../domain.ts';
 import * as v from 'valibot';
 import { flag, id, parseInput, REV_FIELDS, text } from '../../platform/schemas.mjs';
 import { sendOfferError, notFound, documentNotFound } from './errors.mjs';

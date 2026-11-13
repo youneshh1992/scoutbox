@@ -19,7 +19,7 @@
  */
 import { isPlainObject, ids } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 
 export const SIGNINGS_FOLLOWUPS_MIGRATION = '0018_signings_follow_ups';

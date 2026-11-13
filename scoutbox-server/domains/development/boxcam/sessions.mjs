@@ -3,7 +3,7 @@
 // only from accepted observations and the server's clock; client-supplied result or provenance fields are ignored.
 // An uploaded video cannot become `box_cam_observed`. The nonce is stored only as its hash.
 import crypto from 'node:crypto';
-import { isAdult } from '../../../domain.mjs';
+import { isAdult } from '../../../domain.ts';
 import {
   verifiedActiveMs,
   dedupeReps,

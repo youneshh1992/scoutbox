@@ -9,7 +9,7 @@ import { roomCan } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { parseInput } from '../../platform/schemas.mjs';
 import { canTransitionRecruitmentCase, RECRUITMENT_LIFECYCLE_POLICY_VERSION } from '../lifecycle/lifecycle.mjs';
-import { playerLevelAfterSigning } from '../../../domain.mjs';
+import { playerLevelAfterSigning } from '../../../domain.ts';
 import { offerStatus as canonicalOfferStatus } from '../offers/offer.mjs';
 import { sendSigningError, notFound } from './errors.mjs';
 import {

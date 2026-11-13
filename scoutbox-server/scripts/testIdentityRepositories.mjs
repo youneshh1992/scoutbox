@@ -5,10 +5,10 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
-import { runDataMigrations } from '../repositories/database.mjs';
+import { runDataMigrations } from '../repositories/database.ts';
 import {
   createIdentityRepositories,
   CORE_IDENTITY_INIT_META,
@@ -18,7 +18,7 @@ import {
 } from '../repositories/identity.mjs';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import { adult, child, gSignup, FIXTURE, T0, NOW, TTL, tempDir, clone } from './coreIdentityTestFixtures.mjs';
-import { computeTrustScore, visibleToOrg, haversineKm } from '../domain.mjs';
+import { computeTrustScore, visibleToOrg, haversineKm } from '../domain.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

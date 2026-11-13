@@ -19,7 +19,7 @@
  * ticket). Child rows cascade with their owner, except the access log, which is audit and RESTRICT.
  */
 import { isPlainObject, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql, upsertSql } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';

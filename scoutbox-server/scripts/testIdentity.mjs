@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.mjs';
+import { isLeadRole, isLeadUser, LEAD_ROLE_PATTERN, isFinanceRole, isFinanceUser } from '../roles.ts';
 import { parseTrustProxy } from '../httpTrust.mjs';
 import {
   buildCapabilityReport,
@@ -33,7 +33,7 @@ async function test(name, fn) {
   console.log(`  ✓ ${name}`);
 }
 
-// ------------------------------------------------------------- roles.mjs
+// ------------------------------------------------------------- roles.ts
 await test('lead tier: Head / Director / Lead / Manager / Owner / Chief, case-insensitive', () => {
   for (const role of [
     'Head of Recruitment',
@@ -88,7 +88,7 @@ await test('finance tier: every lead plus finance and treasurer roles see deal a
   assert.equal(isFinanceUser({ role: 'Treasurer' }), true);
   assert.equal(isFinanceUser(null), false);
 });
-await test("finance tier: the route helpers' canViewFinance is the roles.mjs rule, not a copy", async () => {
+await test("finance tier: the route helpers' canViewFinance is the roles.ts rule, not a copy", async () => {
   const { buildRouteHelpers } = await import('../domains/platform/routeHelpers.mjs');
   assert.equal(buildRouteHelpers({ nextId: () => 'x', isBlocked: () => false }).canViewFinance, isFinanceUser);
 });

@@ -17,7 +17,7 @@
  * their owner (owners are never hard-deleted).
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
   text,

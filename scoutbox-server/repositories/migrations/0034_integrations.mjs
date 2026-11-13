@@ -3,7 +3,7 @@
  * identity reviews (the record is the batch row they name), API keys (hash only, scopes as rows), webhook endpoints
  * (events as rows) and webhook deliveries (a typed payload, attempts as rows).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { INSIGHT_COVERAGE_MIGRATION } from '../insightCoverage.mjs';
 import { INTEGRATIONS_MIGRATION, INTEGRATIONS_DDL, INTEGRATIONS_TABLES } from '../integrations.mjs';
 

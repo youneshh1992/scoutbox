@@ -4,7 +4,7 @@
  * failures by channel), with the delivery centre's rows. Each set of tables belongs to its own repository. Plans and
  * archetypes are constants (catalogue.mjs), not tables.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { GRASSROOTS_MIGRATION } from '../grassroots.mjs';
 import { UPLOAD_SESSIONS_DDL, UPLOAD_SESSIONS_TABLES } from '../uploadSessions.mjs';
 import { SAVED_SEARCHES_DDL, SAVED_SEARCHES_TABLES } from '../savedSearches.mjs';

@@ -6,7 +6,7 @@
  * (domains/recruitment/lifecycle/contact.mjs, domains/recruitment/offers/offer.mjs). The idempotency keys are columns
  * of their owner (`create_key`, `send_key`, …) and the offer's per-act key lists are the rows of `offer_keys`.
  *
- * Writes (repositories/writes.mjs). A contact or an offer is created whole and must read back as written, then changes
+ * Writes (repositories/writes.ts). A contact or an offer is created whole and must read back as written, then changes
  * only through named acts (`recordDelivery`, `issueRevision`, `recordResponse`, …), each an UPDATE or INSERT of the rows
  * it concerns. The columns and keys are the only judge of the values; a contact moves only along `CONTACT_TRANSITIONS`
  * and a revision along `OFFER_REVISION_TRANSITIONS`. A refusal names the record and the unit rolls back.
@@ -21,8 +21,8 @@
  *
  * Refusals name tables, fields and ids, never a subject, a body, a note, a message or a name.
  */
-import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.mjs';
-import { writeChecks, writeKit } from './writes.mjs';
+import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.ts';
+import { writeChecks, writeKit } from './writes.ts';
 import {
   CONTACT_STATUSES,
   CONTACT_TRANSITIONS,
@@ -1313,7 +1313,7 @@ export function createRecruitmentContactsOffersRepository({
     forCases: inList('recruitmentContacts', 'recruitment_contacts', 'case_id'),
     /**
      * The history of the organisation's contacts with one of `actions`, newest first, for a merged feed (the audit
-     * feed): `{ contactId, caseId, playerId, entry }`. See `newestHistory` (database.mjs) for `atMost` and `n`.
+     * feed): `{ contactId, caseId, playerId, entry }`. See `newestHistory` (database.ts) for `atMost` and `n`.
      */
     historyFeed(orgId, actions, atMost, n) {
       return newestHistory(

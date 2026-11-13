@@ -33,7 +33,7 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md); the
 - The built-in `production_cv` provider reports `configured`, plus `serverSideObservation`, `syntheticEvaluation: passed`, `realWorldValidation: not_completed`, `combineVerifiedProtocols: []`, `combineVerificationAvailable: false`. **Combine Verified is unavailable for every protocol**; no config or env var can enable it. Only a versioned real-world validation record per protocol can.
 - Prohibited, not merely absent: face or body/gait identity, emotion inference, audio capture (`audio:false`), medical inference, and player scores, rankings or comparisons. Supported only on Chromium; no native support.
 
-### Temporal types (`scoutbox-server/temporal.mjs`)
+### Temporal types (`scoutbox-server/temporal.ts`)
 - Every decision-bearing date is exactly one of five types:
   - DATE_ONLY: `YYYY-MM-DD`, stored as the string, years 1900–2100 (Trial 2000–2100), rendered with `timeZone:'UTC'`.
   - UTC_INSTANT: ISO with `Z` or an explicit offset, or integer ms; stored as an integer and re-read via `readInstant`.

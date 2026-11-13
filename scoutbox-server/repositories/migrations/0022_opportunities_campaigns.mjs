@@ -2,7 +2,7 @@
  * The opportunity board, applications, assessment campaigns (drills, rubric, submissions and attempts) and players'
  * private suitability preferences.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { CLUB_SETUP_MIGRATION } from '../clubSetup.mjs';
 import {
   OPPORTUNITIES_CAMPAIGNS_MIGRATION,

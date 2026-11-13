@@ -9,7 +9,7 @@
  * This directory is `repositories/`, not `data/`: `data/` is the server's runtime data directory (DATA_DIR), which
  * tests delete between runs.
  */
-import { runDataMigrations, dataSchemaReport } from './database.mjs';
+import { runDataMigrations, dataSchemaReport } from './database.ts';
 import { createUsersRepository, USERS_TABLE } from './users.mjs';
 import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
 import { createOrgsRepository, ORGS_TABLE } from './orgs.mjs';

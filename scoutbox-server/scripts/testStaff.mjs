@@ -4,7 +4,7 @@
 // recovery codes; a write's cost does not grow with the staff. In-memory databases only. Run with: npm test
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations, transaction } from '../repositories/database.mjs';
+import { runDataMigrations, transaction } from '../repositories/database.ts';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { createUsersRepository, USERS_TABLE, STAFF_LIMITS, staffNameKey } from '../repositories/users.mjs';
 

@@ -1,7 +1,7 @@
 /**
  * Recruitment contacts and offers (ten tables). Runs with foreign keys off.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { RECRUITMENT_CASES_MIGRATION } from '../recruitmentCases.mjs';
 import {
   RECRUITMENT_CONTACTS_OFFERS_MIGRATION,

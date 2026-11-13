@@ -9,7 +9,8 @@
  * only after COMMIT).
  */
 
-import { standaloneWrite } from '../writeRules.mjs';
+import type { DatabaseSync } from 'node:sqlite';
+import { standaloneWrite } from '../writeRules.ts';
 
 export const ID_COUNTER_FLOOR = 1000;
 
@@ -20,10 +21,12 @@ CREATE TABLE counters (
 ) STRICT;
 `;
 
-export function createIdCounter({ sqlite }) {
+export type IdCounter = { next(): number; current(): number };
+
+export function createIdCounter({ sqlite }: { sqlite: DatabaseSync }): IdCounter {
   const read = sqlite.prepare("SELECT value FROM counters WHERE name = 'id'");
   const write = sqlite.prepare("UPDATE counters SET value = MAX(value, ?) WHERE name = 'id'");
-  const stored = read.get();
+  const stored = read.get() as { value: number } | undefined;
   // Migration 0039 always inserts the row; without it every mint would be lost and ids reused after a restart.
   if (!stored)
     throw new Error(
@@ -34,7 +37,7 @@ export function createIdCounter({ sqlite }) {
     /** The next number, written through before it is returned. */
     next() {
       value += 1;
-      // Outside a unit the mint commits on its own, and is not the request's act (writeRules.mjs).
+      // Outside a unit the mint commits on its own, and is not the request's act (writeRules.ts).
       standaloneWrite(sqlite, () => write.run(value));
       return value;
     },

@@ -16,32 +16,63 @@
 // A broken rule throws outside production, so a battery fails at the call site; in production it is counted and
 // logged (`state()`), because the commit it would refuse is the second one, and the first is already durable.
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { DatabaseSync } from 'node:sqlite';
 
-const scope = new AsyncLocalStorage();
-const RULES = new WeakMap();
+/** What the rules know about the request in progress. */
+type RequestScope = {
+  method: string;
+  routeKey: () => string;
+  /** Where the request's one changing commit happened, once it has. */
+  first: string | null;
+  auditedRead: string | null;
+};
+type Scope = { request: RequestScope | null; exempt: string | null };
+
+export type WriteRuleName = 'write_outside_transaction' | 'read_wrote' | 'second_commit' | 'outward';
+export type WriteRulesState = {
+  violations: number;
+  outward: number;
+  writesOutsideTransaction: number;
+  lastViolation: { at: number; rule: WriteRuleName; route: string | null; message: string } | null;
+};
+/** The rules on one connection, as the transaction helpers (repositories/database.ts) and the store call them. */
+export type WriteRules = {
+  checkDrift(): void;
+  settle(): void;
+  began(): void;
+  beforeCommit(): void;
+  ended(): void;
+  checkOutward(what: string): void;
+  requestEnded(): void;
+  state(): WriteRulesState;
+};
+
+const scope = new AsyncLocalStorage<Scope>();
+const RULES = new WeakMap<DatabaseSync, WriteRules>();
 
 /** Run `fn` as one HTTP request. `routeKey()` names the matched route (`POST /org/rooms/:id`) once Express knows it. */
-export function inRequest({ method, routeKey }, fn) {
+export function inRequest<T>({ method, routeKey }: { method: string; routeKey: () => string }, fn: () => T): T {
   return scope.run({ request: { method, routeKey, first: null, auditedRead: null }, exempt: null }, fn);
 }
 
-const exempt = (kind, fn) => scope.run({ request: scope.getStore()?.request ?? null, exempt: kind }, fn);
+const exempt = <T>(kind: string, fn: () => T): T =>
+  scope.run({ request: scope.getStore()?.request ?? null, exempt: kind }, fn);
 
 /** Run an after-commit side effect: what it writes (a push log row, a mail outbox row) is not the request's act. */
-export const sideEffect = (fn) => exempt('side_effect', fn);
+export const sideEffect = <T>(fn: () => T): T => exempt('side_effect', fn);
 
 /** Run a sweep from inside a request: each item is its own transaction, by design. */
-export const asSweep = (fn) => exempt('sweep', fn);
+export const asSweep = <T>(fn: () => T): T => exempt('sweep', fn);
 
 /**
  * A write that is not the request's act and costs nothing if lost or committed on its own: a row created on first
  * use (the first member of an agency becomes its administrator), or bookkeeping about the caller's credential (an
  * API key's last use). Any route may do it, a read included. `why` names it for the reader.
  */
-export const apartFromTheAct = (why, fn) => exempt(`apart: ${why}`, fn);
+export const apartFromTheAct = <T>(why: string, fn: () => T): T => exempt(`apart: ${why}`, fn);
 
 /** A read that must leave a record of itself (a shared passport opened). It lifts rule 2 only. */
-export function declareAuditedRead(reason) {
+export function declareAuditedRead(reason: string): void {
   const request = scope.getStore()?.request;
   if (request) request.auditedRead = reason;
 }
@@ -52,10 +83,10 @@ export function declareAuditedRead(reason) {
  * of the request's act, so it is not counted as the act, and a read may do it. Each is a known exception
  * (docs/known-issues.md): it belongs in a sweep.
  */
-export const asReconciling = (fn) => exempt('reconcile', fn);
+export const asReconciling = <T>(fn: () => T): T => exempt('reconcile', fn);
 
 /** A write outside any transaction that is allowed, because losing it costs nothing (the id counter's mint). */
-export function standaloneWrite(sqlite, fn) {
+export function standaloneWrite<T>(sqlite: DatabaseSync, fn: () => T): T {
   const rules = RULES.get(sqlite);
   if (!rules || sqlite.isTransaction) return fn();
   rules.checkDrift();
@@ -66,15 +97,15 @@ export function standaloneWrite(sqlite, fn) {
   }
 }
 
-export const rulesOf = (sqlite) => RULES.get(sqlite) ?? null;
+export const rulesOf = (sqlite: DatabaseSync): WriteRules | null => RULES.get(sqlite) ?? null;
 
-const isRead = (method) => method === 'GET' || method === 'HEAD';
+const isRead = (method: string) => method === 'GET' || method === 'HEAD';
 
-function callSite() {
+function callSite(): string {
   const lines = String(new Error().stack).split('\n').slice(1);
-  // The first frame of the code that asked for the write, past the server's `unit` wrapper.
-  const own = lines.find((l) => /\/(domains|server\.mjs|adapters\.mjs)/.test(l) && !/^\s*at unit \(/.test(l));
-  return (own ?? lines.find((l) => !/(writeRules|store|database)\.mjs/.test(l)) ?? '')
+  // The first frame of the code that asked for the write, past the wiring's `unit` wrapper.
+  const own = lines.find((l) => /\/(domains\/|(wiring|adapters)\.(mjs|ts))/.test(l) && !/^\s*at unit \(/.test(l));
+  return (own ?? lines.find((l) => !/(writeRules|store|database)\.(mjs|ts)/.test(l)) ?? '')
     .trim()
     .replace(/^at /, '')
     .replace(/\(?file:\/\/\S*?scoutbox-server\//, '')
@@ -82,15 +113,15 @@ function callSite() {
 }
 
 /** The rules for one connection. `enforce`: throw on a broken rule (everywhere but production). */
-export function attachWriteRules(sqlite, { enforce = true } = {}) {
+export function attachWriteRules(sqlite: DatabaseSync, { enforce = true } = {}): WriteRules {
   const total = sqlite.prepare('SELECT total_changes() AS n');
-  const changes = () => total.get().n;
+  const changes = () => (total.get() as { n: number }).n;
   let settled = changes();
-  let atBegin = null;
+  let atBegin: number | null = null;
   const counts = { violations: 0, outward: 0, writesOutsideTransaction: 0 };
-  let lastViolation = null;
+  let lastViolation: WriteRulesState['lastViolation'] = null;
 
-  function violation(rule, message, request) {
+  function violation(rule: WriteRuleName, message: string, request: RequestScope | null) {
     const route = request?.routeKey?.() ?? null;
     counts.violations += 1;
     lastViolation = { at: Date.now(), rule, route, message: message.slice(0, 300) };
@@ -104,7 +135,7 @@ export function attachWriteRules(sqlite, { enforce = true } = {}) {
     return s?.request && !s.exempt ? s.request : null;
   };
 
-  const rules = {
+  const rules: WriteRules = {
     /** A write ran outside any transaction since the last settle: report it (rule 4). */
     checkDrift() {
       if (sqlite.isTransaction) return;
@@ -166,7 +197,7 @@ export function attachWriteRules(sqlite, { enforce = true } = {}) {
       try {
         rules.checkDrift();
       } catch (err) {
-        console.error(err.message); // the response has gone; only the report is left
+        console.error((err as Error).message); // the response has gone; only the report is left
       }
     },
     state: () => ({ ...counts, lastViolation }),

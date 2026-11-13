@@ -16,7 +16,7 @@ import {
   isExpiredAt,
   isOrderedInterval,
   DAY_MS,
-} from '../../../temporal.mjs';
+} from '../../../temporal.ts';
 import {
   normaliseClientKey as platformClientKey,
   payloadFingerprint,

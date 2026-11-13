@@ -19,12 +19,12 @@
  * cancellation is a completion state and never `trial_completed`.
  */
 
-import { parseTrialDate, isTrialDate } from '../../../domain.mjs';
+import { parseTrialDate, isTrialDate } from '../../../domain.ts';
 import {
   validateIanaZone,
   parseInstant as parseCanonicalInstant,
   localParts as canonicalLocalParts,
-} from '../../../temporal.mjs';
+} from '../../../temporal.ts';
 import {
   normaliseClientKey as platformClientKey,
   payloadFingerprint,
@@ -103,7 +103,7 @@ export const TRIAL_LIMITS = Object.freeze({
   historyPage: 100,
 });
 
-/** A trial date (a whole-day slot) is domain.mjs's; instants are this module's. */
+/** A trial date (a whole-day slot) is domain.ts's; instants are this module's. */
 export const TRIAL_INSTANT_YEAR_MIN = 2000;
 export const TRIAL_INSTANT_YEAR_MAX = 2100;
 

@@ -11,7 +11,7 @@
  * an evidence record's `meta` are fixed sets of optional typed columns, and an event's before/after payload is one line
  * of text (`detail`). A record the columns cannot hold is refused with its id.
  *
- * Writes (repositories/writes.mjs). A record is created whole and must read back as written, then changes only through
+ * Writes (repositories/writes.ts). A record is created whole and must read back as written, then changes only through
  * named acts (`claims.move`, `tokens.use`, `admins.revoke`, `rootRequests.approve`, …), each an UPDATE of named columns
  * or an INSERT of code rows, joined into the open unit of work, the caller's open transaction, or a transaction of their
  * own. A claim's status moves only along CLAIM_TRANSITIONS, from the status its caller decided on, guarded in SQL; every
@@ -32,8 +32,8 @@
  */
 import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { text, int, bool, oneOf, group, quote, tableDdl, decode, insertSql } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 
 export const VERIFICATION_MIGRATION = '0023_verification';

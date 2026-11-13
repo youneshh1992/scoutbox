@@ -42,7 +42,7 @@ import type {
 import { adultAgeFor, ageOn, isAdult } from '../domain/safeguarding';
 import { computeTrustScore, trustBreakdown, TRUST } from '../domain/trustScore';
 
-// Mirrors the server's habit-loop + tier logic (domain.mjs is authoritative).
+// Mirrors the server's habit-loop + tier logic (domain.ts is authoritative).
 const DAY = 24 * 3600 * 1000;
 function trustTier(score: number): string {
   if (score >= 80) return 'Elite';

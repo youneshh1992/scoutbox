@@ -1,7 +1,7 @@
 // Under-18 profiles are owned by a verified guardian and created from the guardian's account (children.mjs); the
 // sign-up refuses a minor.
 import express from 'express';
-import { parseDobStrict } from '../../temporal.mjs';
+import { parseDobStrict } from '../../temporal.ts';
 import {
   adultAgeFor,
   ageOn,
@@ -12,7 +12,7 @@ import {
   computeStreak,
   weeklyGoal,
   nextActions,
-} from '../../domain.mjs';
+} from '../../domain.ts';
 import { hashPassword, verifyPassword } from '../../adapters.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { pathwayFor, programmeProgress } from '../../grassrootsJourney.mjs';

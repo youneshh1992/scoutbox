@@ -1,7 +1,7 @@
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { filled } from '../platform/schemas.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
-import { adultAgeFor, ageOn, computeStreak, weeklyGoal } from '../../domain.mjs';
+import { adultAgeFor, ageOn, computeStreak, weeklyGoal } from '../../domain.ts';
 import { guardianChildView } from '../../views/playerViews.mjs';
 import { profileOrRefuse, newPlayerRecord } from './players.mjs';
 import { identityInput } from './schemas.mjs';

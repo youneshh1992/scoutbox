@@ -1,4 +1,4 @@
-// Safeguarding logic — MIRRORS scoutbox-server/domain.mjs. The server is the
+// Safeguarding logic — MIRRORS scoutbox-server/domain.ts. The server is the
 // enforcement point (it rejects under-age sign-ups with 403 ADULTS_ONLY);
 // this copy exists so the app can explain the rule before a request is made.
 

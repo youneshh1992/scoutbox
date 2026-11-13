@@ -3,8 +3,8 @@
 // safety pack, and the family's list of their trials. The day is part of the trial record: a postponement moves the
 // trial's date and report deadline, and a check-in records the session's attendance.
 
-import { isAdult, parseTrialDate, trialReportDueAt } from '../../domain.mjs';
-import { parseDateOrInstant, isExpiredAt, isAbsent } from '../../temporal.mjs';
+import { isAdult, parseTrialDate, trialReportDueAt } from '../../domain.ts';
+import { parseDateOrInstant, isExpiredAt, isAbsent } from '../../temporal.ts';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { CURSOR_PAGE, dueDate, filled, inputOrRefuse, oneOf, text } from '../platform/schemas.mjs';
 import * as v from 'valibot';

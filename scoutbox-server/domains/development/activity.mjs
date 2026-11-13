@@ -1,6 +1,6 @@
 // Football activity feeds the streak and weekly-goal habit loop, and Grassroots journey badges are awarded as the
 // record grows. Level-up moments are handled at the signing itself.
-import { computeStreak } from '../../domain.mjs';
+import { computeStreak } from '../../domain.ts';
 import { earnedGrassrootsBadges } from '../../grassrootsJourney.mjs';
 
 export function createActivity({ players, playerRecord, notify }) {

@@ -2,7 +2,7 @@
  * Signing packages, completed signings, post-signing follow-ups and outcome reports, and `idempotency_keys` for the
  * signing packages' keys. Runs with foreign keys off.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { idempotencyKeysDdl } from '../recruitment.mjs';
 import { RECRUITMENT_CONTACTS_OFFERS_MIGRATION } from '../recruitmentContactsOffers.mjs';
 import {

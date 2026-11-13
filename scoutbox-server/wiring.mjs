@@ -10,9 +10,9 @@ installAsyncErrorForwarding();
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildSeed } from './seed.mjs';
-import { openStore } from './store.mjs';
+import { openStore } from './store.ts';
 import { attachDataLayer } from './repositories/index.mjs';
-import { createIdCounter } from './repositories/counters.mjs';
+import { createIdCounter } from './repositories/counters.ts';
 import { installHttpBaseline, registerAppHosting, installErrorContract } from './domains/platform/http.mjs';
 import { createLiveSync } from './domains/platform/liveSync.mjs';
 import { registerMeta, registerCapabilities, assertProductionConfig } from './domains/platform/operator.mjs';
@@ -45,13 +45,13 @@ import { TRUST_SCORE_POLICY_VERSION } from './domains/passport/public.mjs';
 import { createSourceChanges } from './domains/platform/sourceChanges.mjs';
 import { createRateLimiter, installRateLimitInspection } from './domains/platform/rateLimit.mjs';
 import { demoSeedEnabled, devLoginsEnabled } from './domains/platform/capabilities.mjs';
-import { isLeadRole } from './roles.mjs';
+import { isLeadRole } from './roles.ts';
 import { parseTrustProxy } from './httpTrust.mjs';
 import { assertEventRegistry } from './domains/platform/eventRegistry.mjs';
 import { createNotificationPrefs, registerNotificationPrefs } from './domains/platform/notificationPrefs.mjs';
 import { channelViewFor } from './domains/messaging/channels.mjs';
 import { registerAudit } from './domains/platform/audit.mjs';
-import { inRequest } from './writeRules.mjs';
+import { inRequest } from './writeRules.ts';
 import { createFaultLayer } from './domains/platform/faults.mjs';
 import { integrityReport } from './domains/platform/integrity.mjs';
 import { orgPlayerView } from './views/playerViews.mjs';
@@ -78,7 +78,7 @@ import {
   createBilling,
   createStorage,
 } from './adapters.mjs';
-import { ageOn, isAdult, visibleToOrg, computeTrustScore, trustBreakdown, haversineKm } from './domain.mjs';
+import { ageOn, isAdult, visibleToOrg, computeTrustScore, trustBreakdown, haversineKm } from './domain.ts';
 
 import { createLookups } from './domains/platform/lookups.mjs';
 
@@ -88,7 +88,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SWEEP_MS = process.env.SCOUTBOX_FAST_SWEEPS === '1' ? 500 : 60_000;
 
 // ------------------------------------------------------------- persistence
-// One SQLite file, data/scoutbox.db (store.mjs). DATA_DIR override keeps destructive tests on isolated throwaway
+// One SQLite file, data/scoutbox.db (store.ts). DATA_DIR override keeps destructive tests on isolated throwaway
 // databases. Every write is a repository operation that commits at once (or with its unit of work).
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(HERE, 'data');
 const store = openStore(DATA_DIR);
@@ -196,7 +196,7 @@ if (dataLayer.boot.identity.imported)
     `data layer: ${dataLayer.boot.identity.players} player(s) and ${dataLayer.boot.identity.guardians} guardian(s) initialised from the first installation's records`,
   );
 
-// The id counter is a row of `counters` (repositories/counters.mjs), written through at every mint.
+// The id counter is a row of `counters` (repositories/counters.ts), written through at every mint.
 const idCounter = createIdCounter({ sqlite: store.sqlite });
 const nextId = (prefix) => `${prefix}-${idCounter.next()}`;
 
@@ -272,7 +272,7 @@ const recruitmentActs = createRecruitmentActs({ recruitment });
 
 // ------------------------------------------------------------- the HTTP envelope
 const app = express();
-// Every request is one scope for the write rules (writeRules.mjs): what it commits is counted from here on.
+// Every request is one scope for the write rules (writeRules.ts): what it commits is counted from here on.
 app.use((req, res, next) => {
   store.writeRules.checkDrift(); // a write outside a transaction before this request is not this request's
   res.on('finish', () => store.writeRules.requestEnded());

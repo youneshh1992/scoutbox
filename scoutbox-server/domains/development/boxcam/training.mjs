@@ -1,7 +1,7 @@
 // Assignments and challenges don't widen access: every org action passes the standing gates (visibleToOrg with the
 // agency/minor wall and grassroots radius, blocks, verified, not suspended). Agencies cannot assign Box Training.
-import { isAdult, visibleToOrg } from '../../../domain.mjs';
-import { isAbsent, parseStrictDateOnly } from '../../../temporal.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.ts';
+import { isAbsent, parseStrictDateOnly } from '../../../temporal.ts';
 import { CHALLENGE_METRICS, DISPUTE_OUTCOMES, boxCamInput } from './schemas.mjs';
 import { challengeProgress, developmentActivity, fmtMs, TERMINAL_STATES, pageNewestFirst } from './shared.mjs';
 import { latestDrill, DRILLS } from './drills.mjs';

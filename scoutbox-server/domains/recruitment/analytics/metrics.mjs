@@ -497,7 +497,7 @@ export function distribution(values, { min = SMALL_N_MIN, excluded = 0 } = {}) {
 /** Never suppressed: a director may always see their own work. */
 export const count = (n) => ({ n: Number(n) || 0, value: Number(n) || 0, empty: false, suppressed: false });
 
-import { parseStrictDateOnly } from '../../../temporal.mjs';
+import { parseStrictDateOnly } from '../../../temporal.ts';
 
 export const DAY_MS = 86_400_000;
 /** As a float: durations are never rounded to zero. */

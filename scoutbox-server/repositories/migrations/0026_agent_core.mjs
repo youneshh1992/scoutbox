@@ -2,7 +2,7 @@
  * The agent core: agent profiles (declared jurisdictions, verification facets, history), agency affiliations (roles,
  * history), representation agreements (scope, policy versions, opportunity shares, history) and an agency's settings.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { TRANSITIONS_MIGRATION } from '../transitionsVouches.mjs';
 import { AGENT_CORE_MIGRATION, AGENT_CORE_DDL, AGENT_CORE_TABLES } from '../agentCore.mjs';
 

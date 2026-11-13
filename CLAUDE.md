@@ -32,7 +32,7 @@ consequences in plain terms, and don't ask him storage questions.
 - Store typed columns, and validate and reject junk input at the route. Don't preserve malformed data.
 - Responses are built from explicit allowlists, never by spreading a stored record. Never log or return a plain
   token. Secrets have no defaults. Every environment setting is registered in `domains/platform/capabilities.mjs`.
-- One definition per rule: import shared rules (`roles.mjs`, `domain.mjs`, `temporal.mjs`), don't copy them.
+- One definition per rule: import shared rules (`roles.ts`, `domain.ts`, `temporal.ts`), don't copy them.
 - Don't add another copy of an API type or client to an app; write client code so it can move to a shared package.
   `scoutbox-club` and `scoutbox-grassroots` share business logic: a fix in one is a fix in both.
 

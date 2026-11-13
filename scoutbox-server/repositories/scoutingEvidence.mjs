@@ -21,8 +21,8 @@
  * then the original is pointed at it, in one unit.
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 
 export const SCOUTING_EVIDENCE_MIGRATION = '0019_scouting_evidence';

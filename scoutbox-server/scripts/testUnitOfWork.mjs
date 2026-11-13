@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 

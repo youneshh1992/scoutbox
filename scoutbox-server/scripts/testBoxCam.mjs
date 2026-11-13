@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {

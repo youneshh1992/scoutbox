@@ -5,7 +5,7 @@
  * authorises no regulated action. A self-entered licence number is never a verified licence.
  */
 
-import { isExpiredAt, readInstant } from '../../../temporal.mjs';
+import { isExpiredAt, readInstant } from '../../../temporal.ts';
 
 export const AGENT_POLICY_VERSION = 1;
 

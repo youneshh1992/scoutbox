@@ -1,12 +1,12 @@
-// The write rules (writeRules.mjs): one changing commit per request, a read that writes nothing, nothing sent while a
+// The write rules (writeRules.ts): one changing commit per request, a read that writes nothing, nothing sent while a
 // transaction is open, and every write inside a transaction. Throwaway databases, synthetic rows. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { openStore } from '../store.mjs';
-import { operationOn } from '../repositories/database.mjs';
-import { inRequest, asSweep, apartFromTheAct, declareAuditedRead, standaloneWrite } from '../writeRules.mjs';
+import { openStore } from '../store.ts';
+import { operationOn } from '../repositories/database.ts';
+import { inRequest, asSweep, apartFromTheAct, declareAuditedRead, standaloneWrite } from '../writeRules.ts';
 
 let passed = 0;
 async function test(name, fn) {
@@ -68,7 +68,11 @@ await test('a second changing commit in a request is refused before it commits, 
         write('a');
         write('b');
       }),
-    (err) => refused('second_commit')(err) && /POST \/test committed a second transaction/.test(err.message),
+    (err) =>
+      refused('second_commit')(err) &&
+      /POST \/test committed a second transaction/.test(err.message) &&
+      // The caller's frames, not the store's or the rules' own modules, whatever their extension.
+      /at [^;]*testWriteRules\.mjs:\d+:\d+; the first was at [^;(]*testWriteRules\.mjs:\d+:\d+/.test(err.message),
   );
   assert.deepEqual(ids(), ['a'], 'the first commit stands; the refused one rolled back');
 });

@@ -28,7 +28,7 @@
  * Child rows cascade with their owner, which is never deleted.
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
   text,
@@ -45,7 +45,7 @@ import {
   upsertSql,
   insertSql,
 } from './fieldSpecs.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
+import { parseStrictDateOnly } from '../temporal.ts';
 import {
   BRIEF_STATUSES,
   POSITIONS,

@@ -1,7 +1,7 @@
 /**
  * One-time codes: club e-mail challenges and child pairing codes, stored as hashes with expiry and attempt counts.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { CORE_IDENTITY_LIVE_MIGRATION } from '../identity.mjs';
 import { ONE_TIME_CODES_MIGRATION, ONE_TIME_CODES_DDL, ONE_TIME_CODE_TABLES } from '../oneTimeCodes.mjs';
 

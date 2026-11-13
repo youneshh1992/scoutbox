@@ -3,7 +3,7 @@
  * sessions (observations, reasons and integrity history as rows), disputes, Combine requests and attempts, and CV
  * results. Also inserts the two ScoutBox challenges (a seeded catalogue).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { DEVELOPMENT_MIGRATION } from '../development.mjs';
 import { BOX_CAM_MIGRATION, BOX_CAM_DDL, BOX_CAM_TABLES, seedScoutboxChallenges } from '../boxCam.mjs';
 

@@ -3,7 +3,7 @@
  * key (the table 0015 creates); the sender is typed columns by kind (staff a key to org_users); the retry id is
  * unique per thread and sender.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { OUTBOX_PUSH_MIGRATION } from '../outboxPush.mjs';
 import { CHANNELS_MIGRATION, CHANNELS_DDL, CHANNELS_TABLES } from '../channels.mjs';
 

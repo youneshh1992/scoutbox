@@ -16,7 +16,7 @@ import {
   TRUST,
   haversineKm,
   playerLevelAfterSigning,
-} from '../domain.mjs';
+} from '../domain.ts';
 import { buildSeed } from '../seed.mjs';
 import {
   PROGRAMME_TRACKS,

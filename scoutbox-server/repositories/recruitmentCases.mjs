@@ -8,7 +8,7 @@
  * it names (it is that row, never a second copy). The idempotency keys are columns of their owner (a draft's create key,
  * a decision's finalize and draft keys, a handoff's invite key).
  *
- * Writes (repositories/writes.mjs). A record is created whole and must read back as written (an unknown field, or a
+ * Writes (repositories/writes.ts). A record is created whole and must read back as written (an unknown field, or a
  * value a column would coerce, is refused). It then changes only through named acts, each an UPDATE or INSERT of the
  * rows it concerns: a case through `moveRoom`, `addTask`, `startDraft`, `inviteHandoff`, `addScenario` and the rest, a
  * comment through `edit` and `remove`, a decision through `markSuperseded`, `recordLifecycle` and `bump`, an evidence
@@ -23,10 +23,10 @@
  *
  * Refusals name tables, fields and ids, never a name, a note, a body or a message.
  */
-import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { isPlainObject } from './fieldSpecs.mjs';
-import { writeChecks, writeKit } from './writes.mjs';
+import { writeChecks, writeKit } from './writes.ts';
 import {
   ROOM_STATUSES,
   ROOM_PRIORITIES,

@@ -1,4 +1,4 @@
-import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
+import { parseDateOrInstant, isAbsent } from '../../../temporal.ts';
 import { filled, inputOrRefuse, presentOrRefuse } from '../../platform/schemas.mjs';
 import { Decision, DECISION_CODES, Departure, STAFF_QUERY_CODES, StaffQuery } from './organisationInput.mjs';
 

@@ -20,7 +20,7 @@
  * History. Ordered rows; a detail is typed columns, or worked out from the record it belongs to (a review's request,
  * resolution and cancellation; a consent's answers; an evaluation entry names its evaluation row).
  *
- * Writes (repositories/writes.mjs). A record is created whole and must read back as written, then changes only through
+ * Writes (repositories/writes.ts). A record is created whole and must read back as written, then changes only through
  * named acts (`addParty`, `declareRepresentation`, `close`, `start`, `resolve`, `grant`, `revoke`, …), each an UPDATE of
  * named columns or an INSERT of new rows, joined into the open unit of work, the caller's open transaction, or a
  * transaction of their own. History is only inserted, and an entry whose detail is worked out on read must read back as
@@ -37,8 +37,8 @@
  * cascade.
  */
 import { isPlainObject, describe } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { quote } from './fieldSpecs.mjs';
 import { REVIEWER_ROLES } from './compliancePolicies.mjs';

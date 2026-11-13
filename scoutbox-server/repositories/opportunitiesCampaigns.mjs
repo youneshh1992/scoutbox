@@ -22,8 +22,8 @@
  * thing that leaves them is the verdict summary the player or guardian approves onto one application.
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import {
   refusal,
   isInt,
@@ -49,7 +49,7 @@ import {
 import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_LEVELS } from './identity.mjs';
 import { ORG_LEVELS } from './orgs.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
+import { parseStrictDateOnly } from '../temporal.ts';
 
 export const OPPORTUNITIES_CAMPAIGNS_MIGRATION = '0022_opportunities_campaigns';
 export const OPPORTUNITIES_CAMPAIGNS_COLLECTIONS = Object.freeze([
@@ -351,7 +351,7 @@ CREATE TABLE player_pref_texts (
 `;
 
 // ------------------------------------------------------------------ typing (the one place a value is judged)
-const dayOnly = (v) => isStr(v) && parseStrictDateOnly(v).ok; // one definition of a calendar day (temporal.mjs)
+const dayOnly = (v) => isStr(v) && parseStrictDateOnly(v).ok; // one definition of a calendar day (temporal.ts)
 const reqDay = (rec, at, field) =>
   dayOnly(rec[field]) ? null : bad(at, field, `must be a YYYY-MM-DD day (got ${describe(rec[field])})`);
 const isBool = (v) => v === true || v === false;

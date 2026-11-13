@@ -37,9 +37,9 @@
  * A first installation's players and guardians (the seed) are imported once by `initialize`, while
  * `meta.coreIdentityInit` is `pending` (set by the migration).
  */
-import { transaction, migrationApplied, operationOn } from './database.mjs';
-import { isConstraintError } from './writes.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
+import { transaction, migrationApplied, operationOn } from './database.ts';
+import { isConstraintError } from './writes.ts';
+import { parseStrictDateOnly } from '../temporal.ts';
 import {
   isAdult,
   ADULT_AGE,
@@ -48,7 +48,7 @@ import {
   computeTrustScore,
   trustScoreFromFacts,
   haversineKm,
-} from '../domain.mjs';
+} from '../domain.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { boxAround } from './grassroots.mjs';
 import {
@@ -862,7 +862,7 @@ function guardianFromDb(d, childIds, coGuardians) {
   };
 }
 
-// ------------------------------------------------------------------ visibility in SQL (a prefilter; the exact rule is domain.mjs visibleToOrg)
+// ------------------------------------------------------------------ visibility in SQL (a prefilter; the exact rule is domain.ts visibleToOrg)
 /** The latest birth date of someone at least `years` old on `nowMs` (YYYY-MM-DD; compared as text, exactly ageOn's rule). */
 export function bornByForAge(years, nowMs = Date.now()) {
   const d = new Date(nowMs);
@@ -878,11 +878,11 @@ function adultsSql(nowMs) {
   ];
   return { sql, args };
 }
-/** Can this organisation ever see a minor (domain.mjs visibleToOrg: a verified club only)? */
+/** Can this organisation ever see a minor (domain.ts visibleToOrg: a verified club only)? */
 const seesMinors = (org) => org?.type === 'club' && org.verified === true;
 /**
  * The SQL functions the player reads use, registered on the connection from the JS rules themselves (one
- * definition each): `haversine_km` (domain.mjs haversineKm, the Grassroots radius), `distance_tenths` (the distance a
+ * definition each): `haversine_km` (domain.ts haversineKm, the Grassroots radius), `distance_tenths` (the distance a
  * Grassroots club is shown, in tenths of a km, as views/playerViews.mjs rounds it) and `lower_js` (JavaScript's
  * toLowerCase, which also lowers accented letters; SQLite's lower() is ASCII only).
  */
@@ -918,7 +918,7 @@ function lngRanges(box) {
 
 // ------------------------------------------------------------------ profile completeness
 /**
- * `players.profile_signal`: the directory's sort figure, domain.mjs `trustScoreFromFacts` over the row's facts and its
+ * `players.profile_signal`: the directory's sort figure, domain.ts `trustScoreFromFacts` over the row's facts and its
  * list counts (attendance, clips, the trials' filed reports). Every write that can change a fact refreshes it in its own
  * transaction or unit: the player writes here, a trial write in the recruitment repository.
  * `ids` null refreshes every live player.
@@ -1378,7 +1378,7 @@ export function createIdentityRepositories({
       if (!seesMinors(org)) adults();
       if ((org.level ?? null) === 'grassroots') {
         if (!org.location) return null;
-        // The box narrows by index; the exact radius is domain.mjs haversineKm, as visibleToOrg applies it.
+        // The box narrows by index; the exact radius is domain.ts haversineKm, as visibleToOrg applies it.
         const box = boxAround(org.location, GRASSROOTS_RADIUS_KM);
         const lngs = lngRanges(box);
         sql.push(

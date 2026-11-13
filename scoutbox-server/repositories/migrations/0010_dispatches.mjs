@@ -2,7 +2,7 @@
  * Delivery dispatch records and their attempts. The notification reference is indexed without a foreign key; the
  * staff audience's organisation is a deferred RESTRICT key.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { NOTIFICATIONS_MIGRATION } from '../notifications.mjs';
 import { DISPATCHES_MIGRATION, DISPATCHES_DDL, DISPATCH_TABLES } from '../dispatches.mjs';
 

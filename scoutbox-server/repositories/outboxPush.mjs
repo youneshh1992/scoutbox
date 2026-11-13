@@ -13,7 +13,7 @@
  * Nothing here carries a key: the outbox and push rows outlive the accounts they were addressed to (retention is open,
  * Q6 in docs/decisions.md). Refusals name tables, ids and fields, never an address, a mail text or a token.
  */
-import { migrationApplied, operationOn } from './database.mjs';
+import { migrationApplied, operationOn } from './database.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const OUTBOX_PUSH_MIGRATION = '0011_outbox_push';

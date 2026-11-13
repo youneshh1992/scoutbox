@@ -10,7 +10,7 @@ import {
   computeStreak,
   weeklyGoal,
   nextActions,
-} from '../../domain.mjs';
+} from '../../domain.ts';
 
 /** A result recorded on video is marked verified on the video's presence alone; analysis would sit behind the same call. */
 export const DRILLS = [

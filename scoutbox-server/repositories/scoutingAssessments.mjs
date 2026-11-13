@@ -28,8 +28,8 @@
  * its first opinion, a rating's cited segment and a playlist's segments; the child rows cascade with their owner.
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import {
   txt,
   historyTable,

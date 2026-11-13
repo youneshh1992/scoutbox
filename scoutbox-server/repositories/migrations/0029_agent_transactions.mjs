@@ -3,7 +3,7 @@
  * evaluation row, notes, linked threads, terms versions, replay keys, history), representation bindings (scopes,
  * history) and documents (version chain, history).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { COMPLIANCE_RECORDS_MIGRATION } from '../complianceRecords.mjs';
 import {
   AGENT_TRANSACTIONS_MIGRATION,

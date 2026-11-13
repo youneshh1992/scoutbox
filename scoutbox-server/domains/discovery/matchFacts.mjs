@@ -7,13 +7,13 @@
  * the rows whose time-only change is due; `start()` rebuilds every row when the policy key changed.
  */
 import { PROVIDERS } from '../development/public.mjs';
-import { isAdult } from '../../domain.mjs';
-import { onBeforeCommit } from '../../repositories/database.mjs';
+import { isAdult } from '../../domain.ts';
+import { onBeforeCommit } from '../../repositories/database.ts';
 import { matchFactsPolicyKey } from '../../repositories/matchFacts.mjs';
 
 const DAY = 86_400_000;
 
-/** The first instant at which the player is an adult (domain.mjs isAdult), or null when unknown. */
+/** The first instant at which the player is an adult (domain.ts isAdult), or null when unknown. */
 export function adulthoodAt(player) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(player?.dob ?? ''));
   if (!m) return null;

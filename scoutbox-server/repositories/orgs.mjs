@@ -20,7 +20,7 @@
  * `pending` (set by the migration).
  */
 import { PLANS } from '../catalogue.mjs';
-import { transaction, migrationApplied, operationOn } from './database.mjs';
+import { transaction, migrationApplied, operationOn } from './database.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 import { deepFreeze } from '../domains/platform/values.ts';
 

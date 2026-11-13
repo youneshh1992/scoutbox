@@ -2,7 +2,7 @@
  * Group workspaces and group grants: groups with their members (an admin flag on the member row), pending invites,
  * shared templates and programmes; grants with their recipients as ordered rows.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { ENTERPRISE_MIGRATION } from '../enterprise.mjs';
 import { GROUPS_MIGRATION, GROUPS_DDL, GROUPS_TABLES } from '../groups.mjs';
 

@@ -40,7 +40,7 @@ import {
   TRIAL_DATE_SYNTAX,
   TRIAL_DETAIL_LIMITS,
   TRIAL_REPORT_FIELDS,
-} from '../../domain.mjs';
+} from '../../domain.ts';
 import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';

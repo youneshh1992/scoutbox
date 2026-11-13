@@ -10,10 +10,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations } from '../repositories/database.mjs';
+import { runDataMigrations } from '../repositories/database.ts';
 import { createSessionsRepository, SESSIONS_TABLE_MIGRATION } from '../repositories/sessions.mjs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 import { createStorage } from '../adapters.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
@@ -773,7 +773,7 @@ test('without node:sqlite the store refuses to open with a compatibility error a
       '--input-type=module',
       '-e',
       `
-    try { const { openStore } = await import(${JSON.stringify(path.join(HERE, '..', 'store.mjs'))}); openStore(process.argv[1]); console.log('OPENED'); }
+    try { const { openStore } = await import(${JSON.stringify(path.join(HERE, '..', 'store.ts'))}); openStore(process.argv[1]); console.log('OPENED'); }
     catch (err) { console.log('REFUSED ' + err.code + ' ' + err.message); }
   `,
       dir,

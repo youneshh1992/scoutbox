@@ -1,4 +1,4 @@
-// Trust Score — MIRRORS scoutbox-server/domain.mjs. The server computes the
+// Trust Score — MIRRORS scoutbox-server/domain.ts. The server computes the
 // authoritative score; this copy renders the breakdown offline / in demo mode.
 
 import type { PlayerProfile } from './types';

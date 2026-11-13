@@ -1,6 +1,6 @@
 /** An agent's compliance contexts: the parties, the representations declared in them and their conflict evaluation. */
 
-import { visibleToOrg } from '../../../domain.mjs';
+import { visibleToOrg } from '../../../domain.ts';
 import { guardRev } from '../../platform/concurrency.mjs';
 import { payloadFingerprint } from '../../platform/idempotency.mjs';
 import { effectiveAgreementStatus, agreementGrantsAccess } from '../core/shared.mjs';

@@ -28,8 +28,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import * as T from '../../temporal.mjs';
-import { parseDob, ageOn, isAdult, adultAgeFor, parseTrialDate, trialReportDueAt, isTrialDate } from '../../domain.mjs';
+import * as T from '../../temporal.ts';
+import { parseDob, ageOn, isAdult, adultAgeFor, parseTrialDate, trialReportDueAt, isTrialDate } from '../../domain.ts';
 import {
   effectiveFacetState,
   affiliationActive,
@@ -146,7 +146,7 @@ section('A/pure — the temporal contract, stated as a contract');
     'endOfDayExclusive',
     'utcDayOf',
   ]) {
-    ok(typeof T[fn] === 'function', `A1 temporal.mjs exports ${fn}`);
+    ok(typeof T[fn] === 'function', `A1 temporal.ts exports ${fn}`);
   }
   ok(
     [
@@ -1223,8 +1223,8 @@ section('O/pure — the 22 adversarial cases — every one EXPECT NO');
 section('P/pure — zone independence: identical answers under TZ=UTC and TZ=America/New_York');
 {
   const probe = `
-    const T = await import(${JSON.stringify(path.join(HERE, '..', '..', 'temporal.mjs'))});
-    const D = await import(${JSON.stringify(path.join(HERE, '..', '..', 'domain.mjs'))});
+    const T = await import(${JSON.stringify(path.join(HERE, '..', '..', 'temporal.ts'))});
+    const D = await import(${JSON.stringify(path.join(HERE, '..', '..', 'domain.ts'))});
     const M = await import(${JSON.stringify(path.join(HERE, '..', '..', 'domains', 'recruitment', 'analytics', 'metrics.mjs'))});
     const t0 = ${T0};
     const out = {

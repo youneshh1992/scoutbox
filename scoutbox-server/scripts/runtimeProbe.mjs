@@ -19,7 +19,7 @@ const nextId = (p) => `${p}-${++counter}`;
 const out = { node: process.version, steps: [], ok: false };
 try {
   requireRuntime();
-  const { openStore } = await import('../store.mjs');
+  const { openStore } = await import('../store.ts');
   const { attachDataLayer } = await import('../repositories/index.mjs');
   const store = openStore(dir);
   out.steps.push('opened');

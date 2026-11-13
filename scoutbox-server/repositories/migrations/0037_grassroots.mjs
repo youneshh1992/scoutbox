@@ -3,7 +3,7 @@
  * (credited players as rows) and the friendlies board (responses as rows). A coverage assignment's key to a friendly
  * or an open day (declared by 0033) resolves from here on.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { GROUPS_MIGRATION } from '../groups.mjs';
 import { GRASSROOTS_MIGRATION, GRASSROOTS_DDL, GRASSROOTS_TABLES } from '../grassroots.mjs';
 

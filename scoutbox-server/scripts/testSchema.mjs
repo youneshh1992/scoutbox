@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
-import { runDataMigrations } from '../repositories/database.mjs';
+import { runDataMigrations } from '../repositories/database.ts';
 
 let passed = 0;
 function test(name, fn) {

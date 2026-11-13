@@ -3,7 +3,7 @@
  * playlists (segments) (repositories/scoutingAssessments.mjs). Also inserts the catalogue: the four v1 position
  * templates, which every database has from its first boot.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { SCOUTING_EVIDENCE_MIGRATION } from '../scoutingEvidence.mjs';
 import {
   SCOUTING_ASSESSMENTS_MIGRATION,

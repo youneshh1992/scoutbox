@@ -9,13 +9,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations, transaction, dataSchemaReport } from '../repositories/database.mjs';
+import { runDataMigrations, transaction, dataSchemaReport } from '../repositories/database.ts';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
 import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
 import { RECRUITMENT_CONTACTS_OFFERS_TABLES } from '../repositories/recruitmentContactsOffers.mjs';
 import { SIGNINGS_FOLLOWUPS_TABLES } from '../repositories/signingsFollowUps.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { writeFixture, readRecords, openLayer } from './dataLayerFixture.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 

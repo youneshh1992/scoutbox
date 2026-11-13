@@ -1,6 +1,6 @@
 // A club's own trials: the calendar export and the mandatory performance report.
-import { computeTrustScore, validateTrialReport, TRIAL_REPORT_FIELDS, parseTrialDate } from '../../domain.mjs';
-import { readInstant } from '../../temporal.mjs';
+import { computeTrustScore, validateTrialReport, TRIAL_REPORT_FIELDS, parseTrialDate } from '../../domain.ts';
+import { readInstant } from '../../temporal.ts';
 import { icsLocal, icsText } from './lifecycle/trial.mjs';
 import * as v from 'valibot';
 import { inputOrRefuse, text, TEXT_MAX } from '../platform/schemas.mjs';

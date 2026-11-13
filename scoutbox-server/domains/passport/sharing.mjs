@@ -1,9 +1,9 @@
 // Passport sharing. Tokens are stored only as SHA-256 hashes. A share can only narrow what a viewer would see: a
 // public share resolves to the public projection, a recruitment share only inside an authenticated organisation
 // session that re-runs the standing gates.
-import { declareAuditedRead } from '../../writeRules.mjs';
+import { declareAuditedRead } from '../../writeRules.ts';
 import * as v from 'valibot';
-import { isAdult, visibleToOrg } from '../../domain.mjs';
+import { isAdult, visibleToOrg } from '../../domain.ts';
 import { mintShareSecret, sha256, shareProblem, SHARE_MODES } from './shared.mjs';
 import { PASSPORT_LIMITS } from '../../repositories/passport.mjs';
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';

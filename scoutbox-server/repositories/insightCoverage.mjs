@@ -28,7 +28,7 @@
  * domain (an assignment's own fixture, a submission's participant). Child rows cascade with their owner.
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
   text,
@@ -44,7 +44,7 @@ import {
   insertSql,
   upsertSql,
 } from './fieldSpecs.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
+import { parseStrictDateOnly } from '../temporal.ts';
 import { CURRENCIES } from '../domains/recruitment/public.mjs';
 
 export const INSIGHT_COVERAGE_MIGRATION = '0033_insight_coverage';

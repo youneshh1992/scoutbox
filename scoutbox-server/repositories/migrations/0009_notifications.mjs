@@ -2,7 +2,7 @@
  * Notifications and category notification preferences; insertion order is the feed order. A staff audience is a
  * RESTRICT key to org_users; the group key and the acknowledger are worked out, not stored.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { ONE_TIME_CODES_MIGRATION } from '../oneTimeCodes.mjs';
 import { NOTIFICATIONS_MIGRATION, NOTIFICATIONS_DDL, NOTIFICATION_TABLES } from '../notifications.mjs';
 

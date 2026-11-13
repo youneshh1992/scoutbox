@@ -14,20 +14,52 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import type { DatabaseSync as Database } from 'node:sqlite';
 import { requireRuntime, CONTRACT } from './runtime.mjs';
-import { beginOn, commitOn, endedOn } from './repositories/database.mjs';
-import { attachWriteRules, sideEffect } from './writeRules.mjs';
+import { beginOn, commitOn, endedOn, type UnitParticipant } from './repositories/database.ts';
+import { attachWriteRules, sideEffect, type WriteRules, type WriteRulesState } from './writeRules.ts';
 
-let DatabaseSync = null;
+type Failure = { at: number; message: string };
+type OpenUnit = { afterCommit: (() => unknown)[]; failure: unknown };
+export type UnitOfWorkState = {
+  active: boolean;
+  afterCommitFailures: number;
+  afterCommitDelivered: number;
+  lastAfterCommitError: Failure | null;
+  cleanupFailures: number;
+  lastCleanupError: Failure | null;
+  strayAsyncWork: { escaped: number; rejected: number; lastError: Failure | null };
+  writeRules: WriteRulesState;
+};
+
+/** The store every repository and domain is given (see `unitOfWork` below for the contract). */
+export type Store = {
+  engine: 'sqlite';
+  sqlite: Database;
+  copyTo(file: string): void;
+  failCommitOfOpenTransaction(): void;
+  unitOfWork<T>(work: () => T): T;
+  unit: UnitParticipant;
+  inUnitOfWork(): boolean;
+  afterCommit(fn: () => unknown): void;
+  outward<T>(what: string, fn: () => T): T;
+  writeRules: WriteRules;
+  unitOfWorkState(): UnitOfWorkState;
+};
+
+/** The error a failed unit of work throws, marked as rolled back. */
+export type RolledBack = Error & { unitOfWork?: 'rolled_back'; unitOfWorkCleanup?: string[] };
+
+let DatabaseSync: typeof Database | null = null;
 try {
   ({ DatabaseSync } = await import('node:sqlite'));
 } catch {
   // Reported by openStore, which refuses to run without it.
 }
 
-export function openStore(dataDir) {
+export function openStore(dataDir: string): Store {
   if (!DatabaseSync) {
-    const err = new Error(
+    const err: Error & { code?: string } = new Error(
       `SQLITE_REQUIRED: ScoutBox needs the node:sqlite module (${CONTRACT}, enabled by default; this is ${process.version}${process.execArgv.some((a) => /no-experimental-sqlite/.test(a)) ? ', started with --no-experimental-sqlite' : ''}). There is no JSON fallback. The data directory was not touched.`,
     );
     err.code = 'SQLITE_REQUIRED';
@@ -46,7 +78,7 @@ export function openStore(dataDir) {
   // file is a first installation; an empty one is refused. (Switching to WAL
   // writes the header at once, so a real database is never 0 bytes.)
   if (fs.existsSync(databaseFile) && fs.statSync(databaseFile).size === 0) {
-    const err = new Error(
+    const err: Error & { code?: string } = new Error(
       `DATABASE_EMPTY: ${databaseFile} exists but is empty (0 bytes). It is not opened as a new installation. Restore a verified backup, or delete the file to start from the seed. Nothing was changed.`,
     );
     err.code = 'DATABASE_EMPTY';
@@ -59,28 +91,33 @@ export function openStore(dataDir) {
   // command's read-only open, a persistence suite) waits for a writer to
   // finish instead of failing with SQLITE_BUSY.
   sqlite.exec('PRAGMA busy_timeout = 5000;');
-  // Refused outside production, counted in it (writeRules.mjs). Opened before any repository writes.
+  // Refused outside production, counted in it (writeRules.ts). Opened before any repository writes.
   const writeRules = attachWriteRules(sqlite, { enforce: (process.env.NODE_ENV ?? 'development') !== 'production' });
 
   // The unit of work (see `unitOfWork` below). While one is
   // open, repository row writes run inside the store's transaction, and side
   // effects registered with `afterCommit` wait until COMMIT returned.
-  let unit = null; // { afterCommit: [], failure: null } while a unit of work is open
+  let unit: OpenUnit | null = null; // while a unit of work is open
   let afterCommitFailures = 0;
   let afterCommitDelivered = 0;
-  let lastAfterCommitError = null;
+  let lastAfterCommitError: Failure | null = null;
   let cleanupFailures = 0;
-  let lastCleanupError = null;
+  let lastCleanupError: Failure | null = null;
   // Thenables a unit's work returned although it must be synchronous: their
   // continuations run later, OUTSIDE any unit, and nothing here can cancel them.
-  const strayAsyncWork = { escaped: 0, rejected: 0, lastError: null };
-  const brief = (err) => ({ at: Date.now(), message: String(err?.message ?? err).slice(0, 200) });
-  const isThenable = (v) =>
-    v !== null && (typeof v === 'object' || typeof v === 'function') && typeof v.then === 'function';
+  const strayAsyncWork: UnitOfWorkState['strayAsyncWork'] = { escaped: 0, rejected: 0, lastError: null };
+  const brief = (err: unknown): Failure => ({
+    at: Date.now(),
+    message: String((err as Error)?.message ?? err).slice(0, 200),
+  });
+  const isThenable = (v: unknown): v is PromiseLike<unknown> =>
+    v !== null &&
+    (typeof v === 'object' || typeof v === 'function') &&
+    typeof (v as { then?: unknown }).then === 'function';
   // An `async function` (or async generator) is identifiable BEFORE it runs:
   // refusing it then means none of its body executes. A plain function that
   // returns a promise can only be recognised afterwards (see `unitOfWork`).
-  const asyncKind = (fn) => {
+  const asyncKind = (fn: unknown): string | null => {
     const k = Object.prototype.toString.call(fn);
     return k === '[object AsyncFunction]' || k === '[object AsyncGeneratorFunction]' ? k.slice(8, -1) : null;
   };
@@ -91,15 +128,14 @@ export function openStore(dataDir) {
    * is observed so an asynchronous failure is counted and logged the same way
    * instead of becoming an unhandled rejection. The data stays committed.
    */
-  function runSideEffect(fn) {
-    const failed = (err) => {
+  function runSideEffect(fn: () => unknown): void {
+    const failed = (err: unknown) => {
       afterCommitFailures += 1;
-      lastAfterCommitError = brief(err);
-      console.error(
-        `unit of work: an after-commit side effect failed (the data is committed): ${lastAfterCommitError.message}`,
-      );
+      const failure = brief(err);
+      lastAfterCommitError = failure;
+      console.error(`unit of work: an after-commit side effect failed (the data is committed): ${failure.message}`);
     };
-    let result;
+    let result: unknown;
     try {
       result = sideEffect(fn);
     } catch (err) {
@@ -114,13 +150,14 @@ export function openStore(dataDir) {
   }
 
   /** The work of a unit returned a thenable: observe it (its rejection must never be unhandled) and count the escape. */
-  function observeStrayAsync(thenable) {
+  function observeStrayAsync(thenable: PromiseLike<unknown>): void {
     strayAsyncWork.escaped += 1;
     Promise.resolve(thenable).then(undefined, (err) => {
+      const failure = brief(err);
       strayAsyncWork.rejected += 1;
-      strayAsyncWork.lastError = brief(err);
+      strayAsyncWork.lastError = failure;
       console.error(
-        `unit of work: asynchronous work that escaped a rolled-back unit rejected later (whatever it did ran outside any unit): ${strayAsyncWork.lastError.message}`,
+        `unit of work: asynchronous work that escaped a rolled-back unit rejected later (whatever it did ran outside any unit): ${failure.message}`,
       );
     });
   }
@@ -160,7 +197,7 @@ export function openStore(dataDir) {
    *    runs no work; a failing ROLLBACK is recorded (`cleanupFailures`,
    *    attached to the error as `unitOfWorkCleanup`) and still closes the unit.
    */
-  const asyncRefusal = (kind, nested) =>
+  const asyncRefusal = (kind: string, nested: boolean) =>
     new TypeError(
       `a unit of work must be synchronous: the ${nested ? 'nested ' : ''}work is an ${kind} and was not invoked (a SQLite transaction never spans an await; nothing of it ran)`,
     );
@@ -170,7 +207,7 @@ export function openStore(dataDir) {
     );
 
   /** Run `work` inside the already-open unit. Any failure — thrown, or a refused asynchronous shape — poisons the unit. */
-  function runJoined(work) {
+  function runJoined<T>(work: () => T): T {
     try {
       const kind = asyncKind(work);
       if (kind) throw asyncRefusal(kind, true);
@@ -181,18 +218,18 @@ export function openStore(dataDir) {
       }
       return result;
     } catch (err) {
-      if (!unit.failure) unit.failure = err;
+      if (unit && !unit.failure) unit.failure = err;
       throw err;
     }
   }
 
   /** Close a failed unit: ROLLBACK, and the unit is closed whatever happens. */
-  function abort(err) {
-    let cleanup = null;
+  function abort(err: unknown): void {
+    let cleanup: string | null = null;
     try {
       if (sqlite.isTransaction) sqlite.exec('ROLLBACK');
     } catch (e) {
-      cleanup = `ROLLBACK: ${String(e?.message ?? e).slice(0, 200)}`;
+      cleanup = `ROLLBACK: ${String((e as Error)?.message ?? e).slice(0, 200)}`;
     } finally {
       unit = null;
       endedOn(sqlite);
@@ -203,12 +240,13 @@ export function openStore(dataDir) {
       console.error(`unit of work: the rollback failed (the unit is closed): ${cleanup}`);
     }
     if (err && typeof err === 'object') {
-      err.unitOfWork = 'rolled_back';
-      if (cleanup) err.unitOfWorkCleanup = [cleanup];
+      const rolledBack = err as RolledBack;
+      rolledBack.unitOfWork = 'rolled_back';
+      if (cleanup) rolledBack.unitOfWorkCleanup = [cleanup];
     }
   }
 
-  function unitOfWork(work) {
+  function unitOfWork<T>(work: () => T): T {
     if (typeof work !== 'function') throw new TypeError('unitOfWork(work) needs a synchronous work function');
     if (unit) return runJoined(work); // nested: join the enclosing unit
     if (sqlite.isTransaction) throw new Error('a unit of work cannot start inside an open transaction');
@@ -218,31 +256,33 @@ export function openStore(dataDir) {
     // the error propagates as it is (nothing to roll back or restore). IMMEDIATE,
     // because a unit of work is a write transaction: a deferred BEGIN whose first statements read holds a read snapshot, and if another connection commits in between, the later upgrade to a write fails at once with SQLITE_BUSY_SNAPSHOT, which the busy handler never retries.
     beginOn(sqlite, 'IMMEDIATE');
-    unit = { afterCommit: [], failure: null };
-    let result;
+    // A nested unit joins this one rather than replacing it, so `open` is the unit until it closes.
+    const open: OpenUnit = { afterCommit: [], failure: null };
+    unit = open;
+    let result: T;
     try {
       result = work();
       if (isThenable(result)) {
         observeStrayAsync(result);
         throw thenableRefusal();
       }
-      if (unit.failure)
+      if (open.failure)
         throw new Error(
-          `the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String(unit.failure?.message ?? unit.failure).slice(0, 200)}`,
-          { cause: unit.failure },
+          `the unit of work cannot commit: a nested (joined) unit failed inside it and its caller swallowed the error — ${String((open.failure as Error)?.message ?? open.failure).slice(0, 200)}`,
+          { cause: open.failure },
         );
       commitOn(sqlite);
     } catch (err) {
       abort(err);
       throw err;
     }
-    const deferred = unit.afterCommit;
+    const deferred = open.afterCommit;
     unit = null;
     for (const fn of deferred) runSideEffect(fn);
     return result;
   }
 
-  const store = {
+  const store: Store = {
     engine: 'sqlite',
     sqlite,
     /**

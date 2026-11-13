@@ -38,7 +38,7 @@ import { OPEN_ROOM_STATUSES } from '../../domains/recruitment/public.mjs';
 import { parseFaultRules, createFaultLayer } from '../../domains/platform/faults.mjs';
 import { productionConfigProblems } from '../../domains/platform/capabilities.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { ageOn, isAdult, adultAgeFor } from '../../domain.mjs';
+import { ageOn, isAdult, adultAgeFor } from '../../domain.ts';
 import {
   POLICY,
   secondLookStatus,
@@ -49,9 +49,9 @@ import {
   orderSecondLook,
 } from '../../domains/discovery/shared.mjs';
 import { PROVENANCE } from '../../domains/passport/shared.mjs';
-import { openStore } from '../../store.mjs';
+import { openStore } from '../../store.ts';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations, dataSchemaReport, migrationApplied } from '../../repositories/database.mjs';
+import { runDataMigrations, dataSchemaReport, migrationApplied } from '../../repositories/database.ts';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { createNotificationsRepository } from '../../repositories/notifications.mjs';
 import { pickPort } from '../../scripts/testPort.mjs';

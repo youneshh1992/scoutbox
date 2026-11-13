@@ -1,10 +1,10 @@
 // The Film Room (a swipe deck of playable clips from players the organisation may see, Verified Clips first), clip
 // views and scout tags, the club's home feed and the fixture graph built from verified attendances.
-import { ageOn, isAdult, visibleToOrg } from '../../domain.mjs';
-import { utcDayOf } from '../../temporal.mjs';
+import { ageOn, isAdult, visibleToOrg } from '../../domain.ts';
+import { utcDayOf } from '../../temporal.ts';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { discoveryInput } from './schemas.mjs';
-import { asReconciling } from '../../writeRules.mjs';
+import { asReconciling } from '../../writeRules.ts';
 
 /** Structured tags, no free text. */
 export const SCOUT_TAGS = Object.freeze([

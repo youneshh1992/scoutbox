@@ -1,6 +1,6 @@
 // Text moderation at the route. Children cannot share personal contact details, and club messages to guardians are
 // screened the same way. Every hit is logged, and grooming-pattern language also escalates to a human at once.
-import { moderateText } from '../../domain.mjs';
+import { moderateText } from '../../domain.ts';
 
 export function createModeration({ safetyAudit, unit, nextId }) {
   if (typeof safetyAudit?.moderationLog?.record !== 'function' || typeof unit !== 'function')

@@ -3,7 +3,7 @@
  * keeps the player row as the retained record (identity.mjs `retainedRowFor`, via players.erase) instead of
  * deleting it. The full birth date and the country code are kept: Founder's decisions (docs/decisions.md).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { SAFETY_AUDIT_MIGRATION } from '../safetyAudit.mjs';
 import { PLAYER_ERASURE_MIGRATION } from '../identity.mjs';
 

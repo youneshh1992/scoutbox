@@ -9,8 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
-import { computeTrustScore, TRUST } from '../domain.mjs';
-import { openStore } from '../store.mjs';
+import { computeTrustScore, TRUST } from '../domain.ts';
+import { openStore } from '../store.ts';
 import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import {

@@ -11,7 +11,7 @@
  * taken from valibot, whose default messages quote the value that was sent.
  */
 import * as v from 'valibot';
-import { isAbsent, parseDateOrInstant, parseInstant, parseStrictDateOnly } from '../../temporal.mjs';
+import { isAbsent, parseDateOrInstant, parseInstant, parseStrictDateOnly } from '../../temporal.ts';
 
 export const TEXT_MAX = 500;
 export const ID_MAX = 80;
@@ -183,13 +183,13 @@ export const oneShapeOf = (key, options) => {
   return v.variant(key, options, message);
 };
 
-/** A calendar day, YYYY-MM-DD (temporal.mjs). Anything else, including a non-string, is DATE_INVALID. */
+/** A calendar day, YYYY-MM-DD (temporal.ts). Anything else, including a non-string, is DATE_INVALID. */
 export const dateOnly = v.pipe(
   v.unknown(),
   v.guard(isDateOnly, (issue) => `must be a calendar day written YYYY-MM-DD (${parseStrictDateOnly(issue.input).why})`),
 );
 
-/** An instant: ISO 8601 with an offset or Z, or integer milliseconds (temporal.mjs). Refused as TIMESTAMP_INVALID. */
+/** An instant: ISO 8601 with an offset or Z, or integer milliseconds (temporal.ts). Refused as TIMESTAMP_INVALID. */
 export const instant = v.pipe(
   v.unknown(),
   v.guard(

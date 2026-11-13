@@ -3,7 +3,7 @@
  * items (fingerprints, resolved reasons and trail as rows), and Dynamic Watchlists (criteria by kind, the last derived
  * membership, the lifecycle trail and the membership transitions).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { BOX_CAM_MIGRATION } from '../boxCam.mjs';
 import { DISCOVERY_MIGRATION, DISCOVERY_DDL, DISCOVERY_TABLES } from '../discovery.mjs';
 

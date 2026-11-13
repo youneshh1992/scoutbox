@@ -3,7 +3,7 @@
  * organisation may see (identity's `visibleWhere`), so no criterion is ever evaluated against a player the club may
  * not know exists, including through a count.
  */
-import { asReconciling } from '../../../writeRules.mjs';
+import { asReconciling } from '../../../writeRules.ts';
 import {
   validateCriteria,
   criteriaVersion,

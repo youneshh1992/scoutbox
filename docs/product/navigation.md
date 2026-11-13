@@ -18,7 +18,7 @@ Founder decisions for this area are in [`../decisions.md`](../decisions.md).
 - Ordinary scout: Home, Recruitment, Squad & Planning, Network, Inbox. Organisation is hidden entirely, never shown empty.
 - Lead-pattern role (`/head|director|lead|manager|owner|chief/i`, the same pattern as the server's `isLead`): all of Organisation.
 - Verification authority without a lead role (`/org/verification/me`): Staff & Security, Verification, Reputation. Integrations and Plan stay lead-only.
-- Finance (deal amounts) is shown to leads and finance roles (e.g. "Finance Officer", "Treasurer"). A finance role that isn't a lead sees Organisation → Finance and nothing else there. The sidebar and the server use the same rule, `isFinanceRole` in `scoutbox-server/roles.mjs`.
+- Finance (deal amounts) is shown to leads and finance roles (e.g. "Finance Officer", "Treasurer"). A finance role that isn't a lead sees Organisation → Finance and nothing else there. The sidebar and the server use the same rule, `isFinanceRole` in `scoutbox-server/roles.ts`.
 - Grassroots Clubs & Groups is visible to everyone, so a coach sees a Club section holding only that page.
 
 ### Per-app structure

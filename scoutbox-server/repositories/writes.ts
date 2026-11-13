@@ -7,22 +7,57 @@
  * refusals are `${prefix}_INPUT_INVALID`, `_DUPLICATE` and `_STATE_CONFLICT`, and name tables, fields and ids, never a
  * value.
  */
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const describe = (v) =>
+import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
+import type { Operation } from './database.ts';
+
+/**
+ * One field of a record (repositories/fieldSpecs.mjs): its key `k`, column `c` and type `t`, or a `group` of fields
+ * stored as columns. The other options (`max`, `req`, `vals`, …) are the field spec's own.
+ */
+export type FieldSpec = {
+  k: string;
+  c?: string;
+  t?: 'text' | 'int' | 'num' | 'bool' | 'enum' | 'date';
+  def?: unknown;
+  group?: FieldSpec[];
+  [option: string]: unknown;
+};
+/** A refusal: its `code` is `${prefix}_INPUT_INVALID`, `_DUPLICATE` or `_STATE_CONFLICT`. */
+export type Refusal = Error & { code: string };
+/** A record kind's history (`actsOn`): its table, owner column, the typer of one entry, and the row it writes. */
+export type History<E extends { id: string }> = {
+  table: string;
+  owner: string;
+  type(entry: unknown, at: string): { ok: true; record: E } | { ok: false; reason: string };
+  insert: string;
+  row(owner: string, entry: E, position: number): Record<string, SQLInputValue>;
+};
+/** One named act's own writes. */
+type ActDef<R> = (id: string, input: never, stored: R) => void;
+/** The acts `actsOn` returns: each takes the record's id, the act's input and its history entries, and returns the stored record. */
+export type Acts<R, D extends Record<string, ActDef<R>>> = {
+  [K in keyof D]: (id: string, input?: Parameters<D[K]>[1], bookkeeping?: { history?: unknown[] }) => R;
+};
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === 'object' && !Array.isArray(v);
+const describe = (v: unknown) =>
   v === null ? 'null' : Array.isArray(v) ? 'an array' : typeof v === 'object' ? 'an object' : typeof v;
 const SQLITE_CONSTRAINT = 19;
 /** A constraint failure: CHECK, NOT NULL, UNIQUE, a foreign key, or a STRICT column refusing a value's type. */
-export const isConstraintError = (e) => e?.code === 'ERR_SQLITE_ERROR' && (e.errcode & 0xff) === SQLITE_CONSTRAINT;
+export const isConstraintError = (e: unknown): e is Error & { code: string; errcode: number } =>
+  (e as { code?: unknown })?.code === 'ERR_SQLITE_ERROR' &&
+  ((e as { errcode: number }).errcode & 0xff) === SQLITE_CONSTRAINT;
 
-export function writeChecks(prefix) {
-  const refusal = (what, message) => {
+export function writeChecks(prefix: string) {
+  const refusal = (what: 'INPUT_INVALID' | 'DUPLICATE' | 'STATE_CONFLICT', message: string): Refusal => {
     const code = `${prefix}_${what}`;
     return Object.assign(new Error(`${code}: ${message}`), { code });
   };
-  const invalid = (message) => refusal('INPUT_INVALID', message);
+  const invalid = (message: string) => refusal('INPUT_INVALID', message);
 
   /** Run one write of a record's rows; a constraint failure becomes a refusal naming the record and the part. */
-  const rowStep = (table, id, part, fn) => {
+  const rowStep = <T>(table: string, id: string, part: string, fn: () => T): T => {
     try {
       return fn();
     } catch (e) {
@@ -31,7 +66,7 @@ export function writeChecks(prefix) {
     }
   };
   /** A record's child list: absent is empty, anything but a list is refused; with `objects`, so is an item that is not an object. */
-  const listOf = (table, id, field, v, { objects = false } = {}) => {
+  const listOf = (table: string, id: string, field: string, v: unknown, { objects = false } = {}): unknown[] => {
     if (v === undefined || v === null) return [];
     if (!Array.isArray(v)) throw invalid(`${table} ${id} ${field}: must be a list (got ${describe(v)})`);
     if (objects)
@@ -44,7 +79,7 @@ export function writeChecks(prefix) {
    * A created record must read back as it was written. A field the tables have no column for, at any depth, or a value
    * a column coerced, is refused rather than silently lost. Absent and null written values say nothing and are skipped.
    */
-  const readsBackAsWritten = (table, id, written, stored, path = '') => {
+  const readsBackAsWritten = (table: string, id: string, written: unknown, stored: unknown, path = ''): void => {
     if (written === undefined || written === null) return;
     const lost = () => invalid(`${table} ${id} ${path || 'record'}: is not stored as written`);
     if (Array.isArray(written)) {
@@ -57,7 +92,11 @@ export function writeChecks(prefix) {
     } else if (written !== stored) throw lost();
   };
   /** A whole record handed to `create`: an object with an id that `exists` does not know. */
-  const newRecord = (table, exists, r) => {
+  const newRecord: (
+    table: string,
+    exists: (id: string) => unknown,
+    r: unknown,
+  ) => asserts r is { id: string; [field: string]: unknown } = (table, exists, r) => {
     if (!isPlainObject(r)) throw invalid(`${table}: a record must be an object (got ${describe(r)})`);
     if (typeof r.id !== 'string' || !r.id) throw invalid(`${table}: a record needs an id`);
     if (exists(r.id)) throw refusal('DUPLICATE', `${table} ${r.id} already exists`);
@@ -68,18 +107,25 @@ export function writeChecks(prefix) {
    * column to judge. An object where a single value goes is refused (the binding cannot take it). With `only`, just the
    * fields given are mapped, and each must be one of those named.
    */
-  const columnsOf = (table, id, spec, fields, { only = null, defaults = false } = {}) => {
-    const cols = {};
-    const put = (f, v, at) => {
+  const columnsOf = (
+    table: string,
+    id: string,
+    spec: readonly FieldSpec[],
+    fields: Record<string, unknown> | null | undefined,
+    { only = null, defaults = false }: { only?: ReadonlySet<string> | null; defaults?: boolean } = {},
+  ): Record<string, unknown> => {
+    const cols: Record<string, unknown> = {};
+    const put = (f: FieldSpec, v: unknown, at: string) => {
       if (f.group) {
         if (v !== undefined && v !== null && !isPlainObject(v))
           throw invalid(`${table} ${id} ${at}: must be an object (got ${describe(v)})`);
-        for (const g of f.group) put(g, v?.[g.k], `${at}.${g.k}`);
+        for (const g of f.group) put(g, (v as Record<string, unknown> | null | undefined)?.[g.k], `${at}.${g.k}`);
         return;
       }
       if (v !== null && typeof v === 'object')
         throw invalid(`${table} ${id} ${at}: must be a single value (got ${describe(v)})`);
-      cols[f.c] =
+      // A field outside a group always names its column.
+      cols[f.c as string] =
         v === undefined || v === null
           ? defaults && f.def !== undefined
             ? f.def
@@ -91,7 +137,7 @@ export function writeChecks(prefix) {
             : v;
     };
     if (only) {
-      for (const [k, v] of Object.entries(fields)) {
+      for (const [k, v] of Object.entries(fields as Record<string, unknown>)) {
         const f = spec.find((x) => x.k === k);
         if (!f || !only.has(k)) throw invalid(`${table} ${id}: ${k} is not a field this act sets`);
         put(f, v, k);
@@ -102,32 +148,44 @@ export function writeChecks(prefix) {
   return { refusal, invalid, rowStep, listOf, readsBackAsWritten, newRecord, columnsOf };
 }
 
-export function writeKit(sqlite, prefix) {
+export function writeKit(sqlite: DatabaseSync, prefix: string) {
   const checks = writeChecks(prefix);
   const { refusal } = checks;
 
-  const cache = new Map();
+  const cache = new Map<string, StatementSync>();
   /** A prepared statement, prepared once per connection. */
-  const q = (sql) => {
+  const q = (sql: string): StatementSync => {
     let s = cache.get(sql);
     if (!s) cache.set(sql, (s = sqlite.prepare(sql)));
     return s;
   };
   /** An absent (`undefined`) column value is bound as NULL. */
-  const absentAsNull = (cols) =>
-    Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v]));
-  const assign = (cols) =>
+  // The values are bound as given: the column, not this kit, judges them.
+  const absentAsNull = (cols: Record<string, unknown>) =>
+    Object.fromEntries(Object.entries(cols).map(([c, v]) => [c, v === undefined ? null : v])) as Record<
+      string,
+      SQLInputValue
+    >;
+  const assign = (cols: Record<string, unknown>) =>
     Object.keys(cols)
       .map((c) => `${c} = @${c}`)
       .join(', ');
   /** `col IN ('a','b')` over a domain vocabulary (its values are code constants, never input); an empty one holds for no row. */
-  const sqlIn = (col, values) => (values.length ? `${col} IN (${values.map((v) => `'${v}'`).join(', ')})` : '0');
+  const sqlIn = (col: string, values: readonly string[]) =>
+    values.length ? `${col} IN (${values.map((v) => `'${v}'`).join(', ')})` : '0';
   /**
    * Update one row, matched by `keys`, only while `where` holds; `set` adds assignments computed in SQL (a rev bump).
    * No row means a route's gate let through a change it should have refused: `what` names the conflict and the unit
    * rolls back. With nothing to assign, the row is only required to be there.
    */
-  const guarded = (table, keys, where, cols, what, { set = '' } = {}) => {
+  const guarded = (
+    table: string,
+    keys: Record<string, SQLInputValue>,
+    where: string,
+    cols: Record<string, unknown>,
+    what: string,
+    { set = '' } = {},
+  ): void => {
     const match = `${Object.keys(keys)
       .map((c) => `${c} = @key_${c}`)
       .join(' AND ')}${where ? ` AND (${where})` : ''}`;
@@ -139,14 +197,21 @@ export function writeKit(sqlite, prefix) {
     if (!found) throw refusal('STATE_CONFLICT', what);
   };
   /** The next free `position` of an owner's ordered child rows (within `scope`, extra key columns, when given). */
-  const nextPosition = (table, owner, id, scope = {}) => {
+  const nextPosition = (
+    table: string,
+    owner: string,
+    id: string,
+    scope: Record<string, SQLInputValue> = {},
+  ): number => {
     const extra = Object.keys(scope)
       .map((c) => ` AND ${c} = @${c}`)
       .join('');
-    return q(`SELECT COALESCE(MAX(position) + 1, 0) AS p FROM ${table} WHERE ${owner} = @owner${extra}`).get({
-      owner: id,
-      ...scope,
-    }).p;
+    return (
+      q(`SELECT COALESCE(MAX(position) + 1, 0) AS p FROM ${table} WHERE ${owner} = @owner${extra}`).get({
+        owner: id,
+        ...scope,
+      }) as { p: number }
+    ).p;
   };
 
   /**
@@ -155,32 +220,41 @@ export function writeKit(sqlite, prefix) {
    * record. A value a column refuses names the record and the act. `history`, when the kind has one, is its table,
    * owner column, the typer of one entry (`(entry, at) => { ok, record } | { ok: false, reason }`) and the row it writes.
    */
-  const actsOn = ({ operation, label, must, history = null }, defs) =>
+  const actsOn = <R, D extends Record<string, ActDef<R>>, E extends { id: string } = { id: string }>(
+    {
+      operation,
+      label,
+      must,
+      history = null,
+    }: { operation: Operation; label: string; must: (id: string) => R; history?: History<E> | null },
+    defs: D,
+  ): Acts<R, D> =>
     Object.fromEntries(
       Object.entries(defs).map(([name, fn]) => [
         name,
-        (id, input = {}, { history: entries = [] } = {}) =>
+        (id: string, input: unknown = {}, { history: entries = [] }: { history?: unknown[] } = {}) =>
           operation(() => {
             const stored = must(id);
             if (entries.length && !history) throw checks.invalid(`${label} ${id}: ${name} keeps no history`);
+            // From here on, entries are only typed and written when the kind keeps a history (checked above).
             const typed = checks.listOf(label, id, 'history', entries, { objects: true }).map((h, i) => {
-              const t = history.type(h, `${label} ${id} history[${i}]`);
+              const t = history!.type(h, `${label} ${id} history[${i}]`);
               if (!t.ok) throw checks.invalid(t.reason);
               return t.record;
             });
             checks.rowStep(label, id, name, () => {
-              fn(id, input, stored);
-              let position = typed.length ? nextPosition(history.table, history.owner, id) : 0;
+              fn(id, input as never, stored);
+              let position = typed.length ? nextPosition(history!.table, history!.owner, id) : 0;
               for (const h of typed) {
-                if (q(`SELECT 1 FROM ${history.table} WHERE id = ?`).get(h.id))
+                if (q(`SELECT 1 FROM ${history!.table} WHERE id = ?`).get(h.id))
                   throw refusal('DUPLICATE', `history entry ${h.id} already exists`);
-                q(history.insert).run(history.row(id, h, position++));
+                q(history!.insert).run(history!.row(id, h, position++));
               }
             });
             return must(id);
           }),
       ]),
-    );
+    ) as Acts<R, D>;
 
   return { ...checks, q, assign, sqlIn, guarded, nextPosition, actsOn };
 }

@@ -18,7 +18,7 @@ import { ORG_PLANS } from '../../repositories/orgs.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { openLayer, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { createIdCounter } from '../../repositories/counters.mjs';
+import { createIdCounter } from '../../repositories/counters.ts';
 import {
   ROOM_STATUSES,
   ROOM_STATUS_LABELS,

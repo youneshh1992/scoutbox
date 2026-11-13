@@ -7,7 +7,7 @@ import { readPage, sendPageError } from '../platform/paging.mjs';
 import { timingSafeEqStr as timingSafeEq } from '../identity/public.mjs';
 import { signBody } from '../integrations/public.mjs';
 import { messagingInput } from './schemas.mjs';
-import { asSweep } from '../../writeRules.mjs';
+import { asSweep } from '../../writeRules.ts';
 
 const RANK = { queued: 0, held_quiet_hours: 0, accepted: 1, delivered: 2, opened: 3, actioned: 4 };
 

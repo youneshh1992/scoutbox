@@ -12,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { createOutboxPushRepository, OUTBOX_PUSH_MIGRATION } from '../repositories/outboxPush.mjs';
 import { DISPATCHES_MIGRATION } from '../repositories/dispatches.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { NOW, TTL, tempDir, openRaw, FIXTURE, ORGS, USERS, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
 

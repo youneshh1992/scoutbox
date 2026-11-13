@@ -1,6 +1,6 @@
 /** The agent's moves on a transaction: its status, the consents it needs, its terms and its links. */
 
-import { apartFromTheAct } from '../../../writeRules.mjs';
+import { apartFromTheAct } from '../../../writeRules.ts';
 import { guardRev } from '../../platform/concurrency.mjs';
 import { payloadFingerprint } from '../../platform/idempotency.mjs';
 import { sendTransactionError, notFound } from './errors.mjs';

@@ -6,7 +6,7 @@
  */
 import { EVIDENCE_REQUIREMENTS, TRUST_BANDS } from '../shared.mjs';
 import { MATCH_POLICY_VERSION, criteriaVersion } from './criteria.mjs';
-import { ageOn, haversineKm } from '../../../domain.mjs';
+import { ageOn, haversineKm } from '../../../domain.ts';
 import { bornByForAge } from '../../../repositories/identity.mjs';
 import { bandRankExpr } from '../../../repositories/matchFacts.mjs';
 

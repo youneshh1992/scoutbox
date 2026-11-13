@@ -20,8 +20,8 @@ import {
   decode,
   insertSql,
 } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY } from './identity.mjs';
 

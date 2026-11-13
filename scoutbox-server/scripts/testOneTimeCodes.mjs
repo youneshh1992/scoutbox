@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { transaction } from '../repositories/database.mjs';
+import { transaction } from '../repositories/database.ts';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
 import {
   createOneTimeCodesRepository,
@@ -21,7 +21,7 @@ import {
   CODE_ALPHABET,
   randomCode,
 } from '../repositories/oneTimeCodes.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { createMailer, OUTBOX_SECRET_PLACEHOLDER } from '../adapters.mjs';
 import {
   NOW,

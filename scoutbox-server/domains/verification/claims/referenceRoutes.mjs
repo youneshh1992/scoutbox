@@ -1,4 +1,4 @@
-import { isAdult, visibleToOrg } from '../../../domain.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.ts';
 import { filled, inputOrRefuse, presentOrRefuse } from '../../platform/schemas.mjs';
 import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.mjs';
 import { NewReference, ReferenceCorrection, ReferenceWithdrawal } from './organisationInput.mjs';

@@ -47,8 +47,8 @@ import {
 import { OFFER_ERROR_HTTP } from '../../domains/recruitment/offers/errors.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { isAdult, adultAgeFor } from '../../domain.mjs';
-import { isExpiredAt } from '../../temporal.mjs';
+import { isAdult, adultAgeFor } from '../../domain.ts';
+import { isExpiredAt } from '../../temporal.ts';
 import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';

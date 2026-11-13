@@ -6,8 +6,8 @@
  * Organisations and signings are RESTRICT keys.
  */
 import { isPlainObject, text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 

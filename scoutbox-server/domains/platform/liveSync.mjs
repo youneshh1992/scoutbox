@@ -1,7 +1,7 @@
 // Live sync over server-sent events. EventSource cannot send headers and bearer tokens must not go in URLs, so a client
 // mints a short-lived ticket (POST /events/ticket) and opens GET /events?ticket=…. Missed events replay from a ring
 // buffer on reconnect.
-import { visibleToOrg } from '../../domain.mjs';
+import { visibleToOrg } from '../../domain.ts';
 import { audienceFor } from './eventAudience.mjs';
 import { minimizePayload } from './eventRegistry.mjs';
 import * as v from 'valibot';

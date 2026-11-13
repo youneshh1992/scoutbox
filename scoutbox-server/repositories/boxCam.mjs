@@ -19,7 +19,7 @@
  *   - Production CV results: the provider's canonical result, decomposed into columns, its quality reasons and
  *     secondary diagnostics as coded rows and its bounded trace as rows. Immutable once recorded.
  *
- * Writes (repositories/writes.mjs). A record is created whole and must read back as written (`prefs.save` and
+ * Writes (repositories/writes.ts). A record is created whole and must read back as written (`prefs.save` and
  * `cvResults.record` too), then changes only through named acts (`sessions.start`, `finish`, `invalidate`, `restore`,
  * `attempts.measure`, `disputes.resolve`, …), each an UPDATE of named columns guarded by the state it moves from, or an
  * INSERT of new rows; `sessions.recordBatch` appends the accepted observations. Each joins the open unit of work, the
@@ -36,8 +36,8 @@
  */
 import crypto from 'node:crypto';
 import { isPlainObject, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
   text,

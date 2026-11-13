@@ -1,6 +1,6 @@
 // Consent-based academy transitions. Nothing is visible to a club without an explicit, revocable, expiring grant;
 // nothing about a player is labelled "released"; agencies never receive transition packs.
-import { declareAuditedRead } from '../../writeRules.mjs';
+import { declareAuditedRead } from '../../writeRules.ts';
 import * as v from 'valibot';
 import { PLAYER_LEVELS } from '../../repositories/identity.mjs';
 import { TRANSITION_LIMITS as L, PACK_KINDS } from '../../repositories/transitionsVouches.mjs';

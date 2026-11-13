@@ -8,7 +8,7 @@
  */
 
 import { ROOM_TRANSITIONS } from '../rooms/shared.mjs';
-import { parseInstant, readInstant } from '../../../temporal.mjs';
+import { parseInstant, readInstant } from '../../../temporal.ts';
 import {
   normaliseClientKey as platformClientKey,
   payloadFingerprint,

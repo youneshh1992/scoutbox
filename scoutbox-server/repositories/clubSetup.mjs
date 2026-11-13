@@ -25,7 +25,7 @@
  * checked here.
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
+import { migrationApplied, operationOn } from './database.ts';
 import {
   refusal,
   isInt,
@@ -43,7 +43,7 @@ import {
 } from './scoutingEvidence.mjs';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY, PLAYER_LEVELS } from './identity.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
+import { parseStrictDateOnly } from '../temporal.ts';
 
 export const CLUB_SETUP_MIGRATION = '0021_club_setup';
 export const CLUB_SETUP_COLLECTIONS = Object.freeze([
@@ -214,7 +214,7 @@ CREATE INDEX org_shadow_players_role ON org_shadow_players (role_id);
 `;
 
 // ------------------------------------------------------------------ typing (the one place a value is judged)
-const dayOnly = (v) => isStr(v) && parseStrictDateOnly(v).ok; // one definition of a calendar day (temporal.mjs)
+const dayOnly = (v) => isStr(v) && parseStrictDateOnly(v).ok; // one definition of a calendar day (temporal.ts)
 const optDay = (rec, at, field) =>
   rec[field] === undefined || rec[field] === null || dayOnly(rec[field])
     ? null

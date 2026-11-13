@@ -2,7 +2,7 @@
 // counterparty is the guardian; the child is never in the thread. Every message is moderated and logged.
 import { MESSAGE_LIMITS } from '../../repositories/channels.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { visibleToOrg } from '../../domain.mjs';
+import { visibleToOrg } from '../../domain.ts';
 import { filled, presentOrRefuse } from '../platform/schemas.mjs';
 import { messagingInput } from './schemas.mjs';
 

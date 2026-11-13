@@ -1,7 +1,7 @@
 // Opportunity board and assessment campaigns. Minors are guardian-routed throughout, and eligibility fails
 // closed on a missing location.
 
-import { GRASSROOTS_RADIUS_KM } from '../../domain.mjs';
+import { GRASSROOTS_RADIUS_KM } from '../../domain.ts';
 import { readPage, sendPageError, pageOf, offsetPage, pageSorted } from '../platform/paging.mjs';
 import {
   OPPORTUNITY_TYPES,

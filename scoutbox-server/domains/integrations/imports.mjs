@@ -1,9 +1,9 @@
 // Bulk import creates org-private prospect records, never platform player accounts, so a CSV can never mint a
 // discoverable minor. Identity is provider + externalId: name similarity alone never merges; it queues a review for a
 // human with the right permissions.
-import { apartFromTheAct } from '../../writeRules.mjs';
+import { apartFromTheAct } from '../../writeRules.ts';
 import crypto from 'node:crypto';
-import { parseDobStrict } from '../../temporal.mjs';
+import { parseDobStrict } from '../../temporal.ts';
 import { signBody, webhookUrlProblem } from './webhooks.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { filled } from '../platform/schemas.mjs';

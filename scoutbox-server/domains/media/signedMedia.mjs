@@ -2,7 +2,7 @@
 // serve route re-checks that session's current entitlement (blocks, suspension, radius, level, guardianship) on every
 // fetch: possessing a URL is not authority.
 import crypto from 'node:crypto';
-import { visibleToOrg } from '../../domain.mjs';
+import { visibleToOrg } from '../../domain.ts';
 import { mediaInput } from './schemas.mjs';
 
 // Short on purpose: clients refetch constantly (live-sync ticks), so links are re-minted long before they expire.

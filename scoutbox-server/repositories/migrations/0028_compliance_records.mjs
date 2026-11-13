@@ -4,7 +4,7 @@
  * inputs); regulatory reviews (subject by kind, reasons, versions, evidence, decision, history); consents (regarding,
  * versions, rule ids, history) and their revocations.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { COMPLIANCE_POLICIES_MIGRATION } from '../compliancePolicies.mjs';
 import {
   COMPLIANCE_RECORDS_MIGRATION,

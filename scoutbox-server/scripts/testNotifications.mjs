@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations } from '../repositories/database.mjs';
+import { runDataMigrations } from '../repositories/database.ts';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import {
   createNotificationsRepository,
@@ -26,7 +26,7 @@ import {
 import { createNotifier, registerNotificationFeed } from '../domains/messaging/notify.mjs';
 import { createDeliveryBookkeepingRepository } from '../repositories/deliveryBookkeeping.mjs';
 import { registerDelivery } from '../domains/messaging/delivery.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import {
   NOW,
   TTL,

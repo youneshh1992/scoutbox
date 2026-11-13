@@ -1,7 +1,7 @@
 // No inference of protected characteristics, no public rankings, no pay-for-priority, small aggregates suppressed,
 // absent evidence never recorded as poor ability, and exposure metrics carry their denominators and windows instead of
 // claims about discrimination.
-import { asReconciling } from '../../writeRules.mjs';
+import { asReconciling } from '../../writeRules.ts';
 import crypto from 'node:crypto';
 import { exposureHook } from '../platform/metrics.mjs';
 import { readPage, pageOf, sendPageError } from '../platform/paging.mjs';

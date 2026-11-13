@@ -3,7 +3,7 @@
  * and typed parameters, history). Also inserts the catalogue: the three seeded policy versions (FIFA, the FA, U.S.
  * Soccer), published and attributed to this migration, which every database has from its first boot.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { AGENT_CORE_MIGRATION } from '../agentCore.mjs';
 import {
   COMPLIANCE_POLICIES_MIGRATION,

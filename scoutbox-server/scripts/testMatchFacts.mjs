@@ -12,9 +12,9 @@
 //   - adulthood: adulthoodAt is the first instant isAdult holds.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
-import { transaction, onBeforeCommit } from '../repositories/database.mjs';
+import { transaction, onBeforeCommit } from '../repositories/database.ts';
 import { MATCH_FACT_INPUTS, TRUST_BAND_IDS, foldName } from '../repositories/matchFacts.mjs';
 import { PLAYER_POSITIONS, PLAYER_FEET } from '../repositories/identity.mjs';
 import { createMatchFactsKeeper, adulthoodAt } from '../domains/discovery/matchFacts.mjs';
@@ -22,7 +22,7 @@ import { criterionSql, matchPlayerToCriteria } from '../domains/discovery/matchi
 import { validateCriteria, AVAILABILITY_VALUES } from '../domains/discovery/matching/criteria.mjs';
 import { createMatchReads } from '../domains/discovery/matching/query.mjs';
 import { EVIDENCE_REQUIREMENTS } from '../domains/discovery/shared.mjs';
-import { isAdult, ADULT_AGE } from '../domain.mjs';
+import { isAdult, ADULT_AGE } from '../domain.ts';
 import { TRUST_SCORE_POLICY_VERSION } from '../domains/passport/trust/shared.mjs';
 import { tempDir, clone, NOW, DAY, TTL, FIXTURE } from './coreIdentityTestFixtures.mjs';
 

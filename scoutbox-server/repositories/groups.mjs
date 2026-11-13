@@ -16,7 +16,7 @@
  * programme rows cascade with it (groups are never deleted); a grant's recipients cascade with the grant.
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';

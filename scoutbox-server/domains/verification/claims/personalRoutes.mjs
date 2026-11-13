@@ -1,4 +1,4 @@
-import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
+import { parseDateOrInstant, isAbsent } from '../../../temporal.ts';
 import { filled, inputOrRefuse, listedIds, presentOrRefuse } from '../../platform/schemas.mjs';
 import {
   emailProblem,

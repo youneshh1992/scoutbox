@@ -28,7 +28,7 @@
  * a delivery's endpoint). Child rows cascade with their owner.
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
   text,
@@ -43,7 +43,7 @@ import {
   insertSql,
   upsertSql,
 } from './fieldSpecs.mjs';
-import { parseStrictDateOnly } from '../temporal.mjs';
+import { parseStrictDateOnly } from '../temporal.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const INTEGRATIONS_MIGRATION = '0034_integrations';

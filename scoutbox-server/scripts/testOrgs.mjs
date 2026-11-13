@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations, transaction } from '../repositories/database.mjs';
+import { runDataMigrations, transaction } from '../repositories/database.ts';
 import {
   createOrgsRepository,
   orgRecordProblems,
@@ -27,7 +27,7 @@ import * as m0001 from '../repositories/migrations/0001_org_users.mjs';
 import * as m0002 from '../repositories/migrations/0002_core_identity_shadow.mjs';
 import * as m0003 from '../repositories/migrations/0003_sessions_live.mjs';
 import * as m0004 from '../repositories/migrations/0004_orgs_live.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { writeFixture, readRecords, openLayer } from './dataLayerFixture.mjs';
 // The checks below that drive the runner on a raw connection run exactly migrations
 // 0001–0004; the later ones have their own suites (e.g. testCoreSchema). The full

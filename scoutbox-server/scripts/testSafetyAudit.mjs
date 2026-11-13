@@ -14,7 +14,7 @@
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { runDataMigrations } from '../repositories/database.mjs';
+import { runDataMigrations } from '../repositories/database.ts';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import {
   createSafetyAuditRepository,
@@ -22,7 +22,7 @@ import {
   LEDGER_TYPES,
   LEDGER_DETAIL,
 } from '../repositories/safetyAudit.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import {
   NOW,
   TTL,

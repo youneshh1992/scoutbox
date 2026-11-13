@@ -181,10 +181,14 @@ The order, from the bottom of the import graph up, so each file is typed against
    `verbatimModuleSyntax` (a type-only import says so, or Node would look for it at run time). `npm run typecheck`
    (TypeScript 7) runs in CI. `checkBoundaries.mjs` holds `.ts` modules and type-only imports to the same rules.
    `domains/platform/values.ts` is the first module converted.
-2. **The store and the write rules.** `store.mjs`, `writeRules.mjs`, `repositories/database.mjs`, `writes.mjs` and
-   `counters.mjs`: the unit of work, `afterCommit` and the shapes every repository is built on. Then the shared rule
-   modules (`domain.mjs`, `temporal.mjs`, `roles.mjs`, whose hand-written `roles.d.mts` goes, as the portals import
-   the `.ts` itself).
+2. **The store and the write rules** [**done**]. `store.ts` declares the `Store` every repository and domain is
+   given (`unitOfWork`, `afterCommit`, `unit`, `outward`); `repositories/database.ts` the `Migration`,
+   `UnitParticipant` and `Operation` a repository is built on, and the transaction helpers; `writeRules.ts`,
+   `repositories/writes.ts` (whose `actsOn` types each act from its definition, `Acts<R, D>`, ready for step 3) and
+   `repositories/counters.ts`. The shared rule modules are `domain.ts`, `temporal.ts` (whose parsers return
+   discriminated results, `DateOnly | TemporalRefusal`, …) and `roles.ts`, which the Pro and Grassroots portals
+   import as `.ts`; the hand-written `roles.d.mts` is gone. The domain rules type the records they read by the
+   fields each reads (`Dated`, `VisiblePlayer`, `ProfileFacts`), until step 3 gives the repositories' records types.
 3. **The repositories, one per change.** Each gets a record type for what it reads back (deep-frozen, so
    `Readonly`) and a signature for each named act. Start with `identity.mjs`, which nearly every domain reads, and
    split it along its owners as it is typed. The repositories that still type records in JavaScript (discovery,

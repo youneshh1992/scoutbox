@@ -1,7 +1,7 @@
 /**
  * Transition cases and coach references (vouches).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { PASSPORT_MIGRATION } from '../passport.mjs';
 import { TRANSITIONS_MIGRATION, TRANSITIONS_DDL, TRANSITIONS_TABLES } from '../transitionsVouches.mjs';
 

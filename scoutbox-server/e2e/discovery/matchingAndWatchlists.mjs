@@ -72,7 +72,7 @@ import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { DISCOVERY_MIGRATION, DISCOVERY_COLLECTIONS } from '../../repositories/discovery.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { SOURCE_CONTEXTS } from '../../domains/recruitment/rooms/shared.mjs';
-import { ageOn } from '../../domain.mjs';
+import { ageOn } from '../../domain.ts';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_DIR = path.join(HERE, '..', '..');

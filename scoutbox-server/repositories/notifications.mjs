@@ -26,7 +26,7 @@
  *
  * Refusals name the table, the id and the field, never a text or a preference.
  */
-import { migrationApplied, operationOn } from './database.mjs';
+import { migrationApplied, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { CATEGORY_NAMES } from '../domains/platform/notificationPrefs.mjs';
 

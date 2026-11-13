@@ -2,7 +2,7 @@
  * The Football Passport's own records: preferences (secondary positions, position history and public selections as
  * child rows), career entries, achievements, share links and correction requests.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { VERIFICATION_MIGRATION } from '../verification.mjs';
 import { PASSPORT_MIGRATION, PASSPORT_DDL, PASSPORT_TABLES } from '../passport.mjs';
 

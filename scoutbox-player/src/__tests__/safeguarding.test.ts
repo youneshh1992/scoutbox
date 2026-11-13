@@ -1,5 +1,5 @@
 /// <reference types="jest" />
-// The app's mirror of the server's age rule (scoutbox-server/domain.mjs). The
+// The app's mirror of the server's age rule (scoutbox-server/domain.ts). The
 // server enforces it; the app explains it before a request is made, so the two
 // must agree on the boundary day.
 import { ADULT_AGE, adultAgeFor, ageOn, isAdult, SAFEGUARDING_PROMISES, U18_PROMISES } from '../domain/safeguarding';

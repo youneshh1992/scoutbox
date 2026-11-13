@@ -35,7 +35,7 @@
  * Policy versions are checked in code through `policyVersionKnown` (the compliance policies repository).
  */
 import { isPlainObject, describe, ids } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import {
   text,

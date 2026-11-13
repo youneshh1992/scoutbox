@@ -13,7 +13,7 @@
  * node:sqlite is required; there is no in-memory or JSON fallback (one would have to keep plain tokens somewhere).
  */
 import crypto from 'node:crypto';
-import { migrationApplied, operationOn } from './database.mjs';
+import { migrationApplied, operationOn } from './database.ts';
 
 export const SESSION_KINDS = Object.freeze(['player', 'guardian', 'org', 'ts_reviewer']);
 export const SESSION_VIAS = Object.freeze(['sso']);

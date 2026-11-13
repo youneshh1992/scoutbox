@@ -1,7 +1,7 @@
 /**
  * The mail outbox, the push log and the device push tokens (one row per device token).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { DISPATCHES_MIGRATION } from '../dispatches.mjs';
 import { OUTBOX_PUSH_MIGRATION, OUTBOX_PUSH_DDL, OUTBOX_PUSH_TABLES } from '../outboxPush.mjs';
 

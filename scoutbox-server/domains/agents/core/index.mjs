@@ -5,7 +5,7 @@
  * that needs an attributed reviewer in the compliance domain.
  */
 
-import { visibleToOrg } from '../../../domain.mjs';
+import { visibleToOrg } from '../../../domain.ts';
 import { AGENT_CORE_LIMITS as LIM, PROFILE_FIELDS } from '../../../repositories/agentCore.mjs';
 import { buildRouteHelpers } from '../../platform/routeHelpers.mjs';
 import { opportunityBoardFor } from '../../scouting/public.mjs';

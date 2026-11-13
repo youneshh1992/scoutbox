@@ -614,7 +614,7 @@ console.log('\n— S11: an unreadable timestamp in a history row —');
 {
   serverProc.kill('SIGTERM');
   await new Promise((r) => serverProc.once('exit', r));
-  const { openStore } = await import(path.join(ROOT, 'scoutbox-server/store.mjs'));
+  const { openStore } = await import(path.join(ROOT, 'scoutbox-server/store.ts'));
   const store = openStore(DATA);
   const snap = store.load();
   const room = snap.db.recruitmentCases.find((k) => k.id === RS);

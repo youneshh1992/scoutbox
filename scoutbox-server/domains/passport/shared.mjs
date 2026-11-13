@@ -3,7 +3,7 @@
 import { agreementInForce } from '../agents/public.mjs';
 import crypto from 'node:crypto';
 import { isLegacyTrial, currentAttendance, TRIAL_ATTENDED_STATES } from '../recruitment/public.mjs';
-import { parseStrictDateOnly } from '../../temporal.mjs';
+import { parseStrictDateOnly } from '../../temporal.ts';
 
 // ------------------------------------------------------------- provenance
 // Ordered least to most authoritative; the rank is used only for conflict precedence, never shown as a score.

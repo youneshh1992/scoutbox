@@ -1,7 +1,7 @@
 // The Discovery Ledger as the club reads it: its own page of the append-only ledger, the Proof Pack (attribution
 // evidence on one player), the plan and its attribution terms, invoices, the recruitment funnel and scout
 // reputation. Every figure is counted from recorded events.
-import { visibleToOrg } from '../../domain.mjs';
+import { visibleToOrg } from '../../domain.ts';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { invoiceView } from '../../adapters.mjs';
 import { PLANS } from '../../catalogue.mjs';

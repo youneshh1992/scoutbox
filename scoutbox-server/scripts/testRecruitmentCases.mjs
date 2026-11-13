@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { openLayer, readRecords } from './dataLayerFixture.mjs';
 import { NOW, TTL, tempDir, USERS, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import {

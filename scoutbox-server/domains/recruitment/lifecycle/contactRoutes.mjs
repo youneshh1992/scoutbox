@@ -10,7 +10,7 @@
  * was lost.
  */
 
-import { visibleToOrg } from '../../../domain.mjs';
+import { visibleToOrg } from '../../../domain.ts';
 import { roomRole, ROOM_STATUS_LABELS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { rateLimitedBody, limitCheck } from '../../platform/rateLimit.mjs';

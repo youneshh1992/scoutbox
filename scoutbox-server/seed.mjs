@@ -1,7 +1,7 @@
 // Seed dataset: what a first installation boots with.
 // Under-18 players exist, each owned by a verified guardian.
 // Agencies never see them; unverified clubs never see them; verified clubs
-// contact the guardian, never the child (domain.mjs / visibleToOrg).
+// contact the guardian, never the child (domain.ts / visibleToOrg).
 //
 // The billing plans and positional archetypes are product constants
 // (catalogue.mjs), not data: the seed carries neither.

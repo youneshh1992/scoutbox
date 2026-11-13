@@ -9,10 +9,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { attachDataLayer, TABLE_BACKED, DATA_MIGRATIONS } from '../repositories/index.mjs';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
-import { runDataMigrations } from '../repositories/database.mjs';
+import { runDataMigrations } from '../repositories/database.ts';
 import { SUBRECORD_TABLES } from '../repositories/playerSubrecords.mjs';
 import {
   NOW,

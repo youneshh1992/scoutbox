@@ -3,7 +3,7 @@
 // then kills itself with SIGKILL BEFORE the commit. The parent reopens the
 // database and expects the pre-operation state everywhere. Synthetic data only.
 //   node scripts/unitOfWorkCrashChild.mjs <data-dir>
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
 
 const dir = process.argv[2];

@@ -1,7 +1,7 @@
 // The Grassroots journey, for amateur and semi-pro players. For a child, registration, the seeker flag and a
 // reference request are the guardian's, from the guardian's account.
 import { developmentInput } from './schemas.mjs';
-import { GRASSROOTS_RADIUS_KM, haversineKm, visibleToOrg } from '../../domain.mjs';
+import { GRASSROOTS_RADIUS_KM, haversineKm, visibleToOrg } from '../../domain.ts';
 import { PLAYER_POSITIONS } from '../../repositories/identity.mjs';
 import { GRASSROOTS_LIMITS as GL, boxAround } from '../../repositories/grassroots.mjs';
 import { TRANSITION_LIMITS as VL, vouchCodeHash } from '../../repositories/transitionsVouches.mjs';

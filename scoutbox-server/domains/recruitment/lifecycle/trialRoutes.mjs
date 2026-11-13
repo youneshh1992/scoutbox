@@ -9,7 +9,7 @@
  * player, organisation, guardian records and clock, never trusted from a client.
  */
 
-import { visibleToOrg, chooseTrialSlot } from '../../../domain.mjs';
+import { visibleToOrg, chooseTrialSlot } from '../../../domain.ts';
 import { roomRole, ROOM_STATUS_LABELS, ROOM_TRANSITIONS } from '../rooms/shared.mjs';
 import { guardRev, expectedRevOf } from '../../platform/concurrency.mjs';
 import { requestClock } from '../../platform/clock.mjs';

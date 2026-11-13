@@ -1,9 +1,9 @@
 // Football Passport assembly and routes. One projection per (player, viewer); clients never rebuild the Passport
 // from raw endpoints. Authorisation is the standing gates; the Passport adds no access of its own.
-import { declareAuditedRead } from '../../writeRules.mjs';
+import { declareAuditedRead } from '../../writeRules.ts';
 import * as v from 'valibot';
-import { isAdult, visibleToOrg } from '../../domain.mjs';
-import { ageOrNull } from '../../temporal.mjs';
+import { isAdult, visibleToOrg } from '../../domain.ts';
+import { ageOrNull } from '../../temporal.ts';
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
 import {
   CURSOR_PAGE,

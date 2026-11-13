@@ -1,33 +1,56 @@
 /**
  * The data layer's foundation: versioned table migrations and a transaction helper over the node:sqlite handle that
- * store.mjs opens.
+ * store.ts opens.
  *
  * Every migration is a module in repositories/migrations/ exporting `{ id,
  * note, up(sqlite) }`. Ids sort lexically (`0001_…`); a migration runs once,
  * inside a transaction, and a failure rolls it back and aborts the boot with
  * the database untouched. */
 // node:sqlite is required by the store, which refuses to open without it with
-// a compatibility error (store.mjs, runtime.mjs); this module must stay
-// importable without it so that refusal is what the operator sees.
-import { rulesOf } from '../writeRules.mjs';
+// a compatibility error (store.ts, runtime.mjs); this module must stay
+// importable without it so that refusal is what the operator sees, so it imports only its types.
+import type { DatabaseSync, SQLInputValue, SQLOutputValue, StatementSync } from 'node:sqlite';
+import { rulesOf } from '../writeRules.ts';
 
-let DatabaseSync = null;
-try {
-  ({ DatabaseSync } = await import('node:sqlite'));
-} catch {
-  DatabaseSync = null;
-}
+/** A row as node:sqlite reads it. */
+export type Row = Record<string, SQLOutputValue>;
 
-export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = () => {}, context = {} } = {}) {
+/** One table migration (repositories/migrations/). `context` is the runtime configuration it may need, never env. */
+export type Migration = {
+  id: string;
+  note: string;
+  /** Rebuilds a table others reference: runs with foreign keys off, and must leave none broken. */
+  foreignKeysOff?: boolean;
+  up(sqlite: DatabaseSync, context: { now: number; [setting: string]: unknown }): void;
+};
+
+/** How a repository takes part in the store's unit of work (store.ts `unit`). */
+export type UnitParticipant = {
+  active(): boolean;
+  join<T>(work: () => T): T;
+};
+
+/** A repository's transactional boundary for one mutation (`operationOn`). */
+export type Operation = <T>(fn: () => T) => T;
+
+export function runDataMigrations(
+  sqlite: DatabaseSync,
+  migrations: readonly Migration[],
+  {
+    now = Date.now(),
+    log = () => {},
+    context = {},
+  }: { now?: number; log?: (line: string) => void; context?: Record<string, unknown> } = {},
+): { ran: string[]; applied: number; known: number } {
   sqlite.exec('CREATE TABLE IF NOT EXISTS data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);');
   sqlite.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
   const applied = new Set(
     sqlite
       .prepare('SELECT id FROM data_migrations')
       .all()
-      .map((r) => r.id),
+      .map((r) => r.id as string),
   );
-  const ran = [];
+  const ran: string[] = [];
   const sorted = [...migrations].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   for (const step of sorted) {
     if (applied.has(step.id)) continue;
@@ -56,7 +79,7 @@ export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = 
       } catch (err) {
         sqlite.exec('ROLLBACK');
         throw new Error(
-          `data migration ${step.id} failed: ${err?.message ?? err}. Boot aborted; the database was not modified.`,
+          `data migration ${step.id} failed: ${(err as Error)?.message ?? err}. Boot aborted; the database was not modified.`,
         );
       }
     } finally {
@@ -74,8 +97,8 @@ export function runDataMigrations(sqlite, migrations, { now = Date.now(), log = 
  * marked). Runs in `transaction()` below and in the store's units of work; a failure rolls the transaction back like
  * any other. It never decides what the domains write.
  */
-const BEFORE_COMMIT = new WeakMap();
-export function onBeforeCommit(sqlite, fn) {
+const BEFORE_COMMIT = new WeakMap<DatabaseSync, (() => void)[]>();
+export function onBeforeCommit(sqlite: DatabaseSync, fn: () => void): () => void {
   if (typeof fn !== 'function') throw new TypeError('onBeforeCommit needs a function');
   const list = BEFORE_COMMIT.get(sqlite) ?? [];
   list.push(fn);
@@ -85,32 +108,32 @@ export function onBeforeCommit(sqlite, fn) {
     if (i >= 0) list.splice(i, 1);
   };
 }
-export function runBeforeCommit(sqlite) {
+export function runBeforeCommit(sqlite: DatabaseSync): void {
   for (const fn of BEFORE_COMMIT.get(sqlite) ?? []) fn();
 }
 
 /**
  * The one way a transaction opens and closes on a connection, for the store's units of work and for `transaction`
- * below: the write rules (writeRules.mjs) see every BEGIN and COMMIT.
+ * below: the write rules (writeRules.ts) see every BEGIN and COMMIT.
  */
-export function beginOn(sqlite, mode = '') {
+export function beginOn(sqlite: DatabaseSync, mode: '' | 'IMMEDIATE' = ''): void {
   const rules = rulesOf(sqlite);
   rules?.checkDrift();
   sqlite.exec(mode ? `BEGIN ${mode}` : 'BEGIN');
   rules?.began();
 }
-export function commitOn(sqlite) {
+export function commitOn(sqlite: DatabaseSync): void {
   runBeforeCommit(sqlite);
   rulesOf(sqlite)?.beforeCommit();
   sqlite.exec('COMMIT');
   rulesOf(sqlite)?.ended();
 }
-export function endedOn(sqlite) {
+export function endedOn(sqlite: DatabaseSync): void {
   rulesOf(sqlite)?.ended();
 }
 
 /** Run `fn` inside one transaction; rethrow after rolling back. */
-export function transaction(sqlite, fn) {
+export function transaction<T>(sqlite: DatabaseSync, fn: () => T): T {
   beginOn(sqlite);
   try {
     const out = fn();
@@ -127,8 +150,10 @@ export function transaction(sqlite, fn) {
  * A repository's transactional boundary for one mutation: it joins the open unit of work; inside a transaction a
  * tool opened, it runs in that; otherwise it runs a transaction of its own.
  */
-export const operationOn = (sqlite, unit) => (fn) =>
-  unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn);
+export const operationOn =
+  (sqlite: DatabaseSync, unit?: UnitParticipant | null): Operation =>
+  (fn) =>
+    unit?.active?.() ? unit.join(fn) : sqlite.isTransaction ? fn() : transaction(sqlite, fn);
 
 /**
  * A newest-first history feed, one page's worth: the rows of `from` matching `where` with `h.at` at or
@@ -137,16 +162,25 @@ export const operationOn = (sqlite, unit) => (fn) =>
  * (the audit feed orders them by id) can therefore never miss a row that belongs before one it was given.
  * `from` names the history table as `h`; `select` is the column list.
  */
-export function newestHistory(sqlite, { select, from, where, params = [] }, atMost, n) {
+export function newestHistory(
+  sqlite: DatabaseSync,
+  { select, from, where, params = [] }: { select: string; from: string; where: string; params?: SQLInputValue[] },
+  atMost: number | null,
+  n: number,
+): Row[] {
   const upTo = atMost === null ? '' : ' AND h.at <= ?';
   const p = atMost === null ? params : [...params, atMost];
   const tied =
     atMost === null
       ? 0
-      : sqlite.prepare(`SELECT COUNT(*) AS n FROM ${from} WHERE ${where} AND h.at = ?`).get(...params, atMost).n;
+      : (
+          sqlite.prepare(`SELECT COUNT(*) AS n FROM ${from} WHERE ${where} AND h.at = ?`).get(...params, atMost) as {
+            n: number;
+          }
+        ).n;
   const edge = sqlite
     .prepare(`SELECT h.at FROM ${from} WHERE ${where}${upTo} ORDER BY h.at DESC LIMIT 1 OFFSET ?`)
-    .get(...p, n - 1 + tied);
+    .get(...p, n - 1 + tied) as { at: number } | undefined;
   return sqlite
     .prepare(`SELECT ${select} FROM ${from} WHERE ${where}${upTo}${edge ? ' AND h.at >= ?' : ''} ORDER BY h.at DESC`)
     .all(...p, ...(edge ? [edge.at] : []));
@@ -159,14 +193,21 @@ export function newestHistory(sqlite, { select, from, where, params = [] }, atMo
  * statement's ORDER BY, and `subKey` names the further columns that statement filters on (a revision, a session).
  * The ids travel as one JSON parameter, so each child table has one prepared statement, whatever the list's length.
  */
-const childStatements = new WeakMap();
-export function childRowsOf(sqlite, table, parentCol, parentIds, { order = 'rowid', subKey = [], where = '' } = {}) {
-  const groups = new Map();
+type StatementCache = Map<string, StatementSync> & { preparedBy?: DatabaseSync['prepare'] };
+const childStatements = new WeakMap<DatabaseSync, StatementCache>();
+export function childRowsOf(
+  sqlite: DatabaseSync,
+  table: string,
+  parentCol: string,
+  parentIds: Iterable<string>,
+  { order = 'rowid', subKey = [], where = '' }: { order?: string; subKey?: string[]; where?: string } = {},
+): { all(parentId: string, ...subKey: SQLOutputValue[]): Row[] } {
+  const groups = new Map<string, Row[]>();
   const ids = [...new Set(parentIds)];
   if (ids.length) {
     let cache = childStatements.get(sqlite);
     if (!cache || cache.preparedBy !== sqlite.prepare) {
-      cache = new Map();
+      cache = new Map() as StatementCache;
       cache.preparedBy = sqlite.prepare;
       childStatements.set(sqlite, cache);
     }
@@ -187,27 +228,28 @@ export function childRowsOf(sqlite, table, parentCol, parentIds, { order = 'rowi
  * Has this migration been recorded as applied? False when the bookkeeping table does not exist yet. A table's
  * existence or occupancy says nothing about which migrations have run.
  */
-export function migrationApplied(sqlite, id) {
+export function migrationApplied(sqlite: DatabaseSync, id: string): boolean {
   if (!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'data_migrations'").get())
     return false;
   return !!sqlite.prepare('SELECT 1 FROM data_migrations WHERE id = ?').get(id);
 }
 
 /** Operator-facing view of the table schema: ids and counts only. */
-export function dataSchemaReport(sqlite, migrations) {
+export function dataSchemaReport(sqlite: DatabaseSync, migrations: readonly Migration[]) {
   if (!sqlite)
     throw new TypeError('dataSchemaReport needs a SQLite connection; the data layer has no in-memory engine');
-  const applied = sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations').get()?.n ?? 0;
+  const applied =
+    (sqlite.prepare('SELECT COUNT(*) AS n FROM data_migrations').get() as { n: number } | undefined)?.n ?? 0;
   const tables = sqlite
     .prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('meta', 'data_migrations', 'counters') AND name NOT LIKE 'sqlite_%' ORDER BY name",
     )
     .all()
-    .map((r) => r.name);
+    .map((r) => r.name as string);
   const appliedIds = sqlite
     .prepare('SELECT id FROM data_migrations ORDER BY id')
     .all()
-    .map((r) => r.id);
+    .map((r) => r.id as string);
   return {
     engine: 'sqlite',
     migrationsApplied: applied,

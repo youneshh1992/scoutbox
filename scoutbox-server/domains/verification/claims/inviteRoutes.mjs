@@ -1,4 +1,4 @@
-import { isAdult, visibleToOrg } from '../../../domain.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.ts';
 import { filled, inputOrRefuse, presentOrRefuse } from '../../platform/schemas.mjs';
 import { emailProblem } from './shared.mjs';
 import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.mjs';

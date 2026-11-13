@@ -3,10 +3,10 @@
 //
 // A licence is called verified only when an authoritative source confirmed it. No governing-body registry is
 // connected: providers ship `not_configured`, and only a local test fixture (env-gated) exercises the adapter.
-import { declareAuditedRead } from '../../../writeRules.mjs';
+import { declareAuditedRead } from '../../../writeRules.ts';
 import * as v from 'valibot';
 import { decideReview, normalizeDomain, domainOfEmail, domainCovered, sha256 } from './shared.mjs';
-import { parseDateOrInstant, isAbsent } from '../../../temporal.mjs';
+import { parseDateOrInstant, isAbsent } from '../../../temporal.ts';
 import { VERIFICATION_LIMITS as L, CLAIM_TYPES } from '../../../repositories/verification.mjs';
 import {
   dueDate,

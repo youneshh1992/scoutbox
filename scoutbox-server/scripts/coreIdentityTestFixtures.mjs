@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations } from '../repositories/database.mjs';
+import { runDataMigrations } from '../repositories/database.ts';
 import { DATA_MIGRATIONS } from '../repositories/index.mjs';
 
 /** The registered migrations 0001–0004: what an old-format file (s3File) has applied before migration 0005 runs. */

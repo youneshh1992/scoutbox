@@ -5,7 +5,7 @@
 
 import { guardRev, revMeta } from '../../platform/concurrency.mjs';
 import { pageOf } from '../../platform/paging.mjs';
-import { isExpiredAt } from '../../../temporal.mjs';
+import { isExpiredAt } from '../../../temporal.ts';
 import { hasVerLevel } from '../../verification/public.mjs';
 import { can } from '../core/shared.mjs';
 import { sendTransactionError, notFound } from './errors.mjs';

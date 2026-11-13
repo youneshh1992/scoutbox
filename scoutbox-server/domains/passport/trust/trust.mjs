@@ -2,7 +2,7 @@
 // the Passport assembly, which already folds duplicate self-entries into authoritative rows, Box Cam), so the same
 // fact is counted once and a UI projection is never what gets scored.
 import * as v from 'valibot';
-import { isAdult, visibleToOrg } from '../../../domain.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.ts';
 import { idsText, inputOrRefuse, listedIds } from '../../platform/schemas.mjs';
 import { effectiveStatus, assuranceForClaim } from '../../verification/public.mjs';
 import { agreementInForce } from '../../agents/public.mjs';

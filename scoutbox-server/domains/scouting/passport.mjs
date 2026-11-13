@@ -2,9 +2,9 @@
 // are earned by the verifying actor's authority, corrections supersede without erasing, and "insufficient evidence"
 // is a first-class display state.
 
-import { declareAuditedRead } from '../../writeRules.mjs';
+import { declareAuditedRead } from '../../writeRules.ts';
 import * as v from 'valibot';
-import { parseDateOrInstant, isAbsent, readInstant } from '../../temporal.mjs';
+import { parseDateOrInstant, isAbsent, readInstant } from '../../temporal.ts';
 import { offsetPage } from '../platform/paging.mjs';
 import {
   OFFSET_PAGE,

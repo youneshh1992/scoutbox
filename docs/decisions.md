@@ -78,7 +78,7 @@ None of these is explicitly attributed to the Founder. They are treated as settl
 
   ([`product/journey-analytics.md`](product/journey-analytics.md), [`product/safeguarding.md`](product/safeguarding.md))
 - **Staff (Founder, 6 Nov).** A re-invite restores a removed staff account. A staff name already in the organisation is refused (`STAFF_NAME_TAKEN`). ([`product/platform.md`](product/platform.md))
-- **Finance (3 Nov, Tom).** Deal amounts (Pro's Finance page) are visible to every lead role and to finance roles (role names containing "finance" or "treasurer"). One definition, `isFinanceRole` in `scoutbox-server/roles.mjs`, used by both the server and the sidebar. ([`product/navigation.md`](product/navigation.md))
+- **Finance (3 Nov, Tom).** Deal amounts (Pro's Finance page) are visible to every lead role and to finance roles (role names containing "finance" or "treasurer"). One definition, `isFinanceRole` in `scoutbox-server/roles.ts`, used by both the server and the sidebar. ([`product/navigation.md`](product/navigation.md))
 - **Platform.** Unreadable legacy dates are not migrated. ([`product/platform.md`](product/platform.md))
 
 ## 5. Open questions

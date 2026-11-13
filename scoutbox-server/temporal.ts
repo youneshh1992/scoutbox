@@ -57,12 +57,27 @@ export const TEMPORAL_ERRORS = Object.freeze({
 export const YEAR_MIN = 1900;
 export const YEAR_MAX = 2100;
 
+export type YearBounds = { yearMin?: number; yearMax?: number };
+/** A value that could not be read: which error, why, and what was expected. */
+export type TemporalRefusal<E extends string = string> = { ok: false; error: E; why: string; expected: string };
+export type DateOnly = { ok: true; value: string; t: number };
+export type Instant = { ok: true; ms: number };
+export type DateOrInstant =
+  | { ok: true; ms: number; precision: 'day'; value: string }
+  | { ok: true; ms: number; precision: 'instant'; value: number };
+export type ZoneRefusal = { ok: false; error: 'TIMEZONE_INVALID'; message: string };
+export type LocalInstant = { ok: true; ms: number; offsetMinutes: number; ambiguous: boolean };
+export type LocalTimeRefusal =
+  | { ok: false; error: 'LOCAL_TIME_NONEXISTENT'; why: string; zone: string }
+  | { ok: false; error: 'LOCAL_TIME_AMBIGUOUS'; why: string; zone: string; candidates: number[] };
+export type LocalParts = { year: string; month: string; day: string; hour: string; minute: string; second: string };
+
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const ISO_INSTANT_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})$/;
 const LOCAL_WALL_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
 
 /** True for a value that reads as "no value given" on an OPTIONAL field. Never true for 0, false, NaN. */
-export const isAbsent = (v) => v === undefined || v === null || v === '';
+export const isAbsent = (v: unknown): v is undefined | null | '' => v === undefined || v === null || v === '';
 
 /**
  * A finite millisecond instant, or null. The reader for STORED instants — the
@@ -71,12 +86,12 @@ export const isAbsent = (v) => v === undefined || v === null || v === '';
  * parsing is stricter (`parseInstant` refuses fractions); a stored fraction
  * is odd but unambiguous.
  */
-export function readInstant(v) {
+export function readInstant(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
 /** The UTC calendar day of an instant, as DATE_ONLY. */
-export const utcDayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+export const utcDayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
 // --------------------------------------------------------------- DATE_ONLY
 
@@ -86,8 +101,16 @@ export const utcDayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
  * day, or a refusal that says why. `''`, `null`, `undefined` are refused here:
  * optional fields decide absence BEFORE they call this.
  */
-export function parseStrictDateOnly(input, { yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {}) {
-  const bad = (why) => ({ ok: false, error: TEMPORAL_ERRORS.DATE_INVALID, why, expected: 'YYYY-MM-DD' });
+export function parseStrictDateOnly(
+  input: unknown,
+  { yearMin = YEAR_MIN, yearMax = YEAR_MAX }: YearBounds = {},
+): DateOnly | TemporalRefusal<'DATE_INVALID'> {
+  const bad = (why: string) => ({
+    ok: false as const,
+    error: TEMPORAL_ERRORS.DATE_INVALID,
+    why,
+    expected: 'YYYY-MM-DD',
+  });
   if (typeof input !== 'string') return bad('not text');
   const m = DATE_ONLY_RE.exec(input);
   if (!m) return bad('wrong shape');
@@ -107,13 +130,13 @@ export function parseStrictDateOnly(input, { yearMin = YEAR_MIN, yearMax = YEAR_
 }
 
 /** A stored DATE_ONLY, or null when it cannot be read. */
-export const readDateOnly = (v) => {
+export const readDateOnly = (v: unknown): string | null => {
   const p = parseStrictDateOnly(v);
   return p.ok ? p.value : null;
 };
 
 /** The first instant AFTER a DATE_ONLY day (principle D: a day-precision end covers the whole day). */
-export function endOfDayExclusive(dateOnly) {
+export function endOfDayExclusive(dateOnly: unknown): number | null {
   const p = parseStrictDateOnly(dateOnly);
   return p.ok ? p.t + DAY_MS : null;
 }
@@ -128,14 +151,17 @@ export function endOfDayExclusive(dateOnly) {
  * A numeric string is refused: "1700000000000" is text until someone says
  * what it is. Calendar day and time of day are both round-tripped.
  */
-export function parseInstant(v, { yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {}) {
-  const bad = (why) => ({
-    ok: false,
+export function parseInstant(
+  v: unknown,
+  { yearMin = YEAR_MIN, yearMax = YEAR_MAX }: YearBounds = {},
+): Instant | TemporalRefusal<'TIMESTAMP_INVALID'> {
+  const bad = (why: string) => ({
+    ok: false as const,
     error: TEMPORAL_ERRORS.TIMESTAMP_INVALID,
     why,
     expected: 'ISO 8601 with offset or Z, or integer milliseconds',
   });
-  let ms;
+  let ms: number;
   if (typeof v === 'number') {
     if (!Number.isFinite(v) || !Number.isInteger(v)) return bad('not a whole number');
     ms = v;
@@ -170,7 +196,10 @@ export function parseInstant(v, { yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {})
  * Returns the instant AND which type it was, so storage can keep the
  * precision the person gave.
  */
-export function parseDateOrInstant(v, { dayEdge = 'start', yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {}) {
+export function parseDateOrInstant(
+  v: unknown,
+  { dayEdge = 'start', yearMin = YEAR_MIN, yearMax = YEAR_MAX }: YearBounds & { dayEdge?: 'start' | 'end' } = {},
+): DateOrInstant | TemporalRefusal<'DATE_INVALID'> {
   if (typeof v === 'string' && DATE_ONLY_RE.test(v)) {
     const d = parseStrictDateOnly(v, { yearMin, yearMax });
     if (!d.ok) return d;
@@ -189,10 +218,10 @@ export function parseDateOrInstant(v, { dayEdge = 'start', yearMin = YEAR_MIN, y
 
 // ------------------------------------------------------------------- zones
 
-let supportedZones = null;
-function zoneSet() {
+let supportedZones: Set<string> | null = null;
+function zoneSet(): Set<string> {
   if (supportedZones) return supportedZones;
-  let list = [];
+  let list: string[] = [];
   try {
     list = Intl.supportedValuesOf('timeZone');
   } catch {
@@ -208,7 +237,7 @@ function zoneSet() {
  * (Asia/Kolkata → Asia/Calcutta), which would fail an exact-name check and
  * refuse a real city. Exact case on both sides.
  */
-export const MODERN_ZONE_ALIASES = Object.freeze({
+export const MODERN_ZONE_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   'Asia/Kolkata': 'Asia/Calcutta',
   'Europe/Kyiv': 'Europe/Kiev',
   'Asia/Ho_Chi_Minh': 'Asia/Saigon',
@@ -239,9 +268,9 @@ export const MODERN_ZONE_ALIASES = Object.freeze({
  * fallback to the server's zone. The Trial engine's `validateTimezone` is a
  * thin rename of this.
  */
-export function validateIanaZone(tz) {
+export function validateIanaZone(tz: unknown): { ok: true; timezone: string } | ZoneRefusal {
   const bad = {
-    ok: false,
+    ok: false as const,
     error: TEMPORAL_ERRORS.TIMEZONE_INVALID,
     message: 'timezone must be an IANA time zone name, for example Europe/London.',
   };
@@ -258,8 +287,8 @@ export function validateIanaZone(tz) {
   return { ok: true, timezone: tz };
 }
 
-const partsFormatter = new Map();
-function formatterFor(zone) {
+const partsFormatter = new Map<string, Intl.DateTimeFormat>();
+function formatterFor(zone: string): Intl.DateTimeFormat {
   let f = partsFormatter.get(zone);
   if (!f) {
     f = new Intl.DateTimeFormat('en-GB', {
@@ -278,7 +307,7 @@ function formatterFor(zone) {
 }
 
 /** Wall-clock parts of an instant in a zone. Deterministic; Intl-backed; throws for an unknown zone. */
-export function localParts(ms, zone) {
+export function localParts(ms: number, zone: string): LocalParts {
   const p = Object.fromEntries(
     formatterFor(zone)
       .formatToParts(new Date(ms))
@@ -296,7 +325,7 @@ export function localParts(ms, zone) {
 }
 
 /** The zone's UTC offset at an instant, in minutes (east positive). */
-export function zoneOffsetMinutes(ms, zone) {
+export function zoneOffsetMinutes(ms: number, zone: string): number {
   const p = localParts(ms, zone);
   const asUtc = Date.UTC(
     Number(p.year),
@@ -319,14 +348,19 @@ export function zoneOffsetMinutes(ms, zone) {
  * 'earlier' | 'later'` — nothing picks silently.
  */
 export function parseLocalDateTimeWithZone(
-  local,
-  zone,
-  { resolve = null, yearMin = YEAR_MIN, yearMax = YEAR_MAX } = {},
-) {
+  local: unknown,
+  zone: unknown,
+  {
+    resolve = null,
+    yearMin = YEAR_MIN,
+    yearMax = YEAR_MAX,
+  }: YearBounds & { resolve?: 'earlier' | 'later' | null } = {},
+): LocalInstant | ZoneRefusal | TemporalRefusal<'TIMESTAMP_INVALID'> | LocalTimeRefusal {
   const tz = validateIanaZone(zone);
   if (!tz.ok) return tz;
-  const bad = (why) => ({
-    ok: false,
+  const iana = tz.timezone;
+  const bad = (why: string) => ({
+    ok: false as const,
     error: TEMPORAL_ERRORS.TIMESTAMP_INVALID,
     why,
     expected: 'YYYY-MM-DDTHH:MM[:SS] with an IANA zone',
@@ -344,15 +378,15 @@ export function parseLocalDateTimeWithZone(
   // Every offset the zone uses within a day either side of the wall time is a
   // candidate; a candidate is real only if it prints back as the same wall time.
   const offsets = new Set([
-    zoneOffsetMinutes(wallAsUtc - DAY_MS, zone),
-    zoneOffsetMinutes(wallAsUtc, zone),
-    zoneOffsetMinutes(wallAsUtc + DAY_MS, zone),
+    zoneOffsetMinutes(wallAsUtc - DAY_MS, iana),
+    zoneOffsetMinutes(wallAsUtc, iana),
+    zoneOffsetMinutes(wallAsUtc + DAY_MS, iana),
   ]);
   const wanted = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${String(ss).padStart(2, '0')}`;
-  const candidates = [];
+  const candidates: { ms: number; offsetMinutes: number }[] = [];
   for (const off of offsets) {
     const ms = wallAsUtc - off * 60_000;
-    const p = localParts(ms, zone);
+    const p = localParts(ms, iana);
     if (`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}` === wanted)
       candidates.push({ ms, offsetMinutes: off });
   }
@@ -362,7 +396,7 @@ export function parseLocalDateTimeWithZone(
       ok: false,
       error: TEMPORAL_ERRORS.LOCAL_TIME_NONEXISTENT,
       why: 'this wall-clock time does not occur in this zone (clocks go forward)',
-      zone,
+      zone: iana,
     };
   if (candidates.length > 1) {
     if (resolve === 'earlier') return { ok: true, ...candidates[0], ambiguous: true };
@@ -371,7 +405,7 @@ export function parseLocalDateTimeWithZone(
       ok: false,
       error: TEMPORAL_ERRORS.LOCAL_TIME_AMBIGUOUS,
       why: 'this wall-clock time occurs twice in this zone (clocks go back)',
-      zone,
+      zone: iana,
       candidates: candidates.map((c) => c.ms),
     };
   }
@@ -381,7 +415,7 @@ export function parseLocalDateTimeWithZone(
 // -------------------------------------------------------------- predicates
 
 /** Both ends readable and start strictly before end (principle E). */
-export function isOrderedInterval(startMs, endMs, { allowEqual = false } = {}) {
+export function isOrderedInterval(startMs: unknown, endMs: unknown, { allowEqual = false } = {}): boolean {
   const s = readInstant(startMs);
   const e = readInstant(endMs);
   if (s === null || e === null) return false;
@@ -393,7 +427,7 @@ export function isOrderedInterval(startMs, endMs, { allowEqual = false } = {}) {
  * an UNREADABLE expiry is treated as passed (true) — principle C. The
  * boundary is exclusive: expired at exactly `until`.
  */
-export function isExpiredAt(until, now) {
+export function isExpiredAt(until: unknown, now: number): boolean {
   if (until === null || until === undefined) return false;
   const u = readInstant(until);
   if (u === null) return true;
@@ -406,7 +440,7 @@ export function isExpiredAt(until, now) {
  * An unreadable start is "not yet started"; an unreadable end is "already
  * ended". Both are the closed answer.
  */
-export function isEffectiveAt(from, to, now) {
+export function isEffectiveAt(from: unknown, to: unknown, now: number): boolean {
   const f = readInstant(from);
   if (f === null || f > now) return false;
   if (to === null || to === undefined) return true;
@@ -415,10 +449,11 @@ export function isEffectiveAt(from, to, now) {
 }
 
 /** `isEffectiveAt` for a record shaped `{ startsAt, endsAt }`. */
-export const isActiveAt = (rec, now) => !!rec && isEffectiveAt(rec.startsAt, rec.endsAt, now);
+export const isActiveAt = (rec: { startsAt?: unknown; endsAt?: unknown } | null | undefined, now: number): boolean =>
+  !!rec && isEffectiveAt(rec.startsAt, rec.endsAt, now);
 
 /** DATE_ONLY window (inclusive both ends, UTC days): is `dayOnly` inside it? Unreadable bounds close the window. */
-export function isDayWithin(dayOnly, from, to) {
+export function isDayWithin(dayOnly: unknown, from: unknown, to: unknown): boolean {
   const d = readDateOnly(dayOnly);
   if (d === null) return false;
   if (!isAbsent(from)) {
@@ -436,11 +471,11 @@ export function isDayWithin(dayOnly, from, to) {
 
 /**
  * Age in completed UTC years on an instant, or NaN when the birth day cannot
- * be read. THE age rule; `domain.mjs` re-exports it. Turning N happens at
+ * be read. THE age rule; `domain.ts` re-exports it. Turning N happens at
  * 00:00 UTC on the birthday; a 29 February birthday counts on 1 March in a
  * non-leap year.
  */
-export function ageOnMs(dob, nowMs) {
+export function ageOnMs(dob: unknown, nowMs: number): number {
   const day = parseStrictDateOnly(dob);
   if (!day.ok || !Number.isFinite(nowMs)) return NaN;
   const on = new Date(nowMs);
@@ -452,7 +487,7 @@ export function ageOnMs(dob, nowMs) {
 }
 
 /** A finite age or null — the reader for a JSON projection. */
-export const ageOrNull = (dob, nowMs) => {
+export const ageOrNull = (dob: unknown, nowMs: number): number | null => {
   const a = ageOnMs(dob, nowMs);
   return Number.isFinite(a) ? a : null;
 };
@@ -464,7 +499,7 @@ export const DOB_MAX_AGE_YEARS = 120;
  * A date of birth that is a real day, not in the future and not implausibly
  * old. Returns the canonical string or a DOB_INVALID refusal.
  */
-export function parseDobStrict(dob, nowMs) {
+export function parseDobStrict(dob: unknown, nowMs: number): DateOnly | TemporalRefusal<'DOB_INVALID'> {
   const p = parseStrictDateOnly(dob);
   if (!p.ok) return { ok: false, error: TEMPORAL_ERRORS.DOB_INVALID, why: p.why, expected: 'YYYY-MM-DD' };
   if (Number.isFinite(nowMs)) {

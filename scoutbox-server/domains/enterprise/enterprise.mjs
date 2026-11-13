@@ -1,7 +1,7 @@
 // SSO runs against a local test identity provider (HMAC-signed, enabled only where dev logins are); no corporate IdP
 // is configured and the API says so. A production rollout swaps the token verification for a maintained OIDC library
 // against the real issuer; the state/nonce/code flow is the same. Restores go into a separate empty directory.
-import { declareAuditedRead, apartFromTheAct } from '../../writeRules.mjs';
+import { declareAuditedRead, apartFromTheAct } from '../../writeRules.ts';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';

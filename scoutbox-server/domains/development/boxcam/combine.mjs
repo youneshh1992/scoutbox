@@ -5,8 +5,8 @@
 // A protocol can only be Combine Verified if the active provider supports every capability it requires. Web capture
 // supports active_duration only, so only Box Control 60 is Combine Verified today; count/interval protocols run under
 // the test provider, labelled simulated. Athletic protocols need capabilities no provider has.
-import { isAdult, visibleToOrg } from '../../../domain.mjs';
-import { ageOrNull, endOfDayExclusive } from '../../../temporal.mjs';
+import { isAdult, visibleToOrg } from '../../../domain.ts';
+import { ageOrNull, endOfDayExclusive } from '../../../temporal.ts';
 import { latestDrill, PROVIDERS, providerFor } from './drills.mjs';
 import {
   COMBINE_PROTOCOLS,

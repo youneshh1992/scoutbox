@@ -14,7 +14,7 @@
 //
 // Synthetic data only; temporary directories only.
 import { createHash } from 'node:crypto';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { attachDataLayer, readAllRecords } from '../repositories/index.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';

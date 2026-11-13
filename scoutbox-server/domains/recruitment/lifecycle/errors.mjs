@@ -98,7 +98,7 @@ export const LIFECYCLE_ERROR_HTTP = table({
 
   // ================================================================ Trial
   // `TRIAL_DATE_INVALID`, `TRIAL_SLOT_INVALID` and `TRIAL_NOTES_INVALID` come
-  // from the trial date validator (domain.mjs) and are answered by the request
+  // from the trial date validator (domain.ts) and are answered by the request
   // routes directly, not through this table.
   TRIAL_SCHEDULE_INVALID: 400,
   TRIAL_TIMEZONE_INVALID: 400,

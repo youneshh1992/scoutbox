@@ -3,7 +3,7 @@
  * before every route. The counters are per process and reset at boot; the enterprise health route reports them.
  */
 import crypto from 'node:crypto';
-import { sideEffect } from '../../writeRules.mjs';
+import { sideEffect } from '../../writeRules.ts';
 
 export const metrics = {
   startedAt: Date.now(),

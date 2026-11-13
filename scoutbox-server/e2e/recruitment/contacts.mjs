@@ -31,7 +31,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { visibleToOrg, isAdult } from '../../domain.mjs';
+import { visibleToOrg, isAdult } from '../../domain.ts';
 import {
   CONTACT_STATUSES,
   CONTACT_TRANSITIONS,

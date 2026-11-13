@@ -16,7 +16,7 @@
  *
  * An external id's `reviewId` names the identity review it was linked from (the review keeps the imported row).
  */
-import { migrationApplied, childRowsOf } from './database.mjs';
+import { migrationApplied, childRowsOf } from './database.ts';
 
 export const PLAYER_SUBRECORDS_MIGRATION = '0007_player_subrecords';
 /** The top-level lists stored as rows. */

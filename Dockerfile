@@ -6,7 +6,7 @@
 #
 # Build from the repository root (docker build .). Each portal imports the
 # shared design system (../../design-system) and Pro and Grassroots import the
-# role rules (../../scoutbox-server/roles.mjs), so every build stage keeps the
+# role rules (../../scoutbox-server/roles.ts), so every build stage keeps the
 # repository layout: the app in /build/<app>, its shared sources beside it.
 
 FROM node:22-slim AS build-club
@@ -14,7 +14,7 @@ WORKDIR /build/scoutbox-club
 COPY scoutbox-club/package*.json ./
 RUN npm ci
 COPY design-system/ /build/design-system/
-COPY scoutbox-server/roles.mjs /build/scoutbox-server/roles.mjs
+COPY scoutbox-server/roles.ts /build/scoutbox-server/roles.ts
 COPY scoutbox-club/ ./
 # Same-origin deploy: the club app calls the API it is served from.
 RUN VITE_API_URL="" npx vite build --base=/app/
@@ -24,7 +24,7 @@ WORKDIR /build/scoutbox-grassroots
 COPY scoutbox-grassroots/package*.json ./
 RUN npm ci
 COPY design-system/ /build/design-system/
-COPY scoutbox-server/roles.mjs /build/scoutbox-server/roles.mjs
+COPY scoutbox-server/roles.ts /build/scoutbox-server/roles.ts
 COPY scoutbox-grassroots/ ./
 RUN VITE_API_URL="" npx vite build --base=/grassroots/
 

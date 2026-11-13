@@ -1,11 +1,11 @@
 // Scheduled behaviour is a persisted record examined by an idempotent sweep (at boot and every 60 s). The marker that
 // a reminder went out lives in the database, not in a timer, so restarts lose and re-send nothing.
 
-import { isAdult, visibleToOrg } from '../../domain.mjs';
+import { isAdult, visibleToOrg } from '../../domain.ts';
 import { deriveWorkflowState } from '../recruitment/public.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { operationsInput } from './schemas.mjs';
-import { asSweep } from '../../writeRules.mjs';
+import { asSweep } from '../../writeRules.ts';
 
 const MILESTONES = { '3m': 91, '6m': 182, '12m': 365 };
 

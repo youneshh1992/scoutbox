@@ -535,7 +535,7 @@ for (const [app, IDS, expectSections] of [
     const finIds = (ctx) => nav.filterSections(ctx).flatMap((s) => s.children.map((c) => c.id));
     ok(
       finIds(TREASURER).includes('budgets') && finIds(LEAD).includes('budgets') && !finIds(SCOUT).includes('budgets'),
-      "Finance shows to leads and finance roles (the server's rule, roles.mjs) and not to scouts",
+      "Finance shows to leads and finance roles (the server's rule, roles.ts) and not to scouts",
     );
     const treasurerOrg = nav.filterSections(TREASURER).find((s) => s.id === 'organisation');
     ok(

@@ -2,7 +2,7 @@
  * Recruitment requests, request trial slots, trials and the trials' owned child tables
  * (repositories/recruitment.mjs). The `case_id` keys name recruitment_cases, which 0016 creates in the same boot.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { PLAYER_ERASURE_MIGRATION } from '../identity.mjs';
 import { RECRUITMENT_MIGRATION, RECRUITMENT_DDL, RECRUITMENT_TABLES } from '../recruitment.mjs';
 

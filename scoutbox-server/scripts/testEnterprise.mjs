@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { NOW, TTL, tempDir, USERS } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, fixtureDb, ORG, SCOUT } from './recruitmentTestFixtures.mjs';
 import {

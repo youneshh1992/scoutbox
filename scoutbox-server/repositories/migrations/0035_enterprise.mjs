@@ -3,7 +3,7 @@
  * and nonce stored only as hashes), support tickets (references and replies as rows) and support access grants (the
  * access log as rows).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { INTEGRATIONS_MIGRATION } from '../integrations.mjs';
 import { ENTERPRISE_MIGRATION, ENTERPRISE_DDL, ENTERPRISE_TABLES } from '../enterprise.mjs';
 

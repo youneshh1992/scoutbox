@@ -1,10 +1,44 @@
 // Shared domain logic: safeguarding + trust score.
 // The player app mirrors this in src/domain/ — keep the two in sync.
 
-import { parseStrictDateOnly, ageOnMs } from './temporal.mjs';
+import { parseStrictDateOnly, ageOnMs } from './temporal.ts';
+
+// The records these rules read are typed by the fields each one reads, so any record that has them can be passed.
+export type LatLng = { lat: number; lng: number };
+/** What the age rules read off a person. */
+export type Dated = { dob?: unknown; country?: string | null };
+/** What the visibility rule reads off a player and an organisation. */
+export type VisiblePlayer = Dated & { level?: string | null; location?: LatLng | null };
+export type ViewingOrg = {
+  type?: string | null;
+  verified?: boolean | null;
+  level?: string | null;
+  location?: LatLng | null;
+};
+/** What the profile-completeness figure reads off a player. */
+export type ProfileFacts = {
+  identityVerified?: unknown;
+  attendance?: readonly unknown[] | null;
+  trialReports?: readonly unknown[] | null;
+  media?: readonly { verifiedClip?: unknown }[] | null;
+  position?: unknown;
+  foot?: unknown;
+  heightCm?: unknown;
+  weightKg?: unknown;
+  stats?: unknown;
+};
+type PlayingStats = { appearances?: number | null; goals?: number | null; assists?: number | null };
+/** What the similarity engine compares. */
+export type PlayingProfile = Dated & {
+  position?: string | null;
+  foot?: string | null;
+  heightCm?: number | null;
+  weightKg?: number | null;
+  stats?: PlayingStats | null;
+};
 
 // Age of majority per country (ISO alpha-2). Anything not listed: 18.
-export const ADULT_AGE = {
+export const ADULT_AGE: { readonly DEFAULT: number; readonly [country: string]: number } = {
   DEFAULT: 18,
   KR: 19,
   TH: 20,
@@ -13,8 +47,8 @@ export const ADULT_AGE = {
   NZ: 18,
 };
 
-export function adultAgeFor(country) {
-  return ADULT_AGE[country] ?? ADULT_AGE.DEFAULT;
+export function adultAgeFor(country: string | null | undefined): number {
+  return ADULT_AGE[country ?? ''] ?? ADULT_AGE.DEFAULT;
 }
 
 /**
@@ -54,20 +88,20 @@ export function adultAgeFor(country) {
  * round-trip (`parse`, then print, then compare) is what catches a day that
  * only exists because the engine was polite about it.
  */
-export function parseDob(dob) {
+export function parseDob(dob: unknown): string | null {
   // The shape, calendar and year-bound checks live in ONE place
-  // (temporal.mjs). This is the DOB name for that rule.
+  // (temporal.ts). This is the DOB name for that rule.
   const p = parseStrictDateOnly(dob);
   return p.ok ? p.value : null;
 }
 
-export function ageOn(dob, onDate = new Date()) {
+export function ageOn(dob: unknown, onDate: Date | number = new Date()): number {
   const nowMs = onDate instanceof Date ? onDate.getTime() : Number(onDate);
   return ageOnMs(dob, nowMs);
 }
 
 /** Adult only when the age is KNOWN and reaches the threshold. Unknown is not adult. */
-export function isAdult(player, onDate = new Date()) {
+export function isAdult(player: Dated | null | undefined, onDate: Date | number = new Date()): boolean {
   const age = ageOn(player?.dob, onDate);
   return Number.isFinite(age) && age >= adultAgeFor(player?.country);
 }
@@ -79,9 +113,9 @@ export function isAdult(player, onDate = new Date()) {
 export const GRASSROOTS_RADIUS_KM = 50;
 
 /** Great-circle distance between two {lat, lng} points, in km. */
-export function haversineKm(a, b) {
+export function haversineKm(a: LatLng, b: LatLng): number {
   const R = 6371;
-  const rad = (d) => (d * Math.PI) / 180;
+  const rad = (d: number) => (d * Math.PI) / 180;
   const dLat = rad(b.lat - a.lat);
   const dLng = rad(b.lng - a.lng);
   const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
@@ -89,7 +123,7 @@ export function haversineKm(a, b) {
 }
 
 /** A signing sets the player's level from the signing club's level. */
-export function playerLevelAfterSigning(orgLevel) {
+export function playerLevelAfterSigning(orgLevel: string | null | undefined): 'semi_pro' | 'pro' {
   return orgLevel === 'grassroots' ? 'semi_pro' : 'pro';
 }
 
@@ -99,7 +133,7 @@ export function playerLevelAfterSigning(orgLevel) {
 // - Adults are visible to every org type on the main platform.
 // - Grassroots clubs additionally see ONLY semi-pro-and-below players within
 //   50km of their registered ground. Missing location data fails closed.
-export function visibleToOrg(player, org) {
+export function visibleToOrg(player: VisiblePlayer, org: ViewingOrg): boolean {
   if (!isAdult(player)) {
     if (org.type === 'agency') return false;
     if (!(org.type === 'club' && org.verified === true)) return false;
@@ -119,7 +153,8 @@ export function visibleToOrg(player, org) {
 // Severity: 'contact' = trying to move off-platform or share contact details;
 // 'grooming' = steering language that must land in front of a human reviewer
 // immediately, not just be blocked.
-const MODERATION_PATTERNS = [
+type ModerationSeverity = 'contact' | 'grooming';
+const MODERATION_PATTERNS: { flag: string; severity: ModerationSeverity; re: RegExp }[] = [
   { flag: 'email', severity: 'contact', re: /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i },
   {
     flag: 'email_obfuscated',
@@ -159,9 +194,9 @@ const MODERATION_PATTERNS = [
 ];
 /** Every flag a moderation hit can carry, and the two severities (one definition: the moderation log's CHECKs). */
 export const MODERATION_FLAGS = Object.freeze(MODERATION_PATTERNS.map((p) => p.flag));
-export const MODERATION_SEVERITIES = Object.freeze(['contact', 'grooming']);
+export const MODERATION_SEVERITIES: readonly ModerationSeverity[] = Object.freeze(['contact', 'grooming']);
 
-export function moderateText(text) {
+export function moderateText(text: unknown): { ok: boolean; flags: string[]; severity: ModerationSeverity | null } {
   const hits = MODERATION_PATTERNS.filter((p) => p.re.test(String(text ?? '')));
   return {
     ok: hits.length === 0,
@@ -197,7 +232,13 @@ export function trustScoreFromFacts({
   trialReportCount,
   mediaCount,
   profileComplete,
-}) {
+}: {
+  identityVerified: boolean;
+  attendanceCount: number;
+  trialReportCount: number;
+  mediaCount: number;
+  profileComplete: boolean;
+}): number {
   const t = TRUST;
   let score = t.BASE;
   if (identityVerified) score += t.IDENTITY_VERIFIED;
@@ -208,10 +249,10 @@ export function trustScoreFromFacts({
   return Math.min(score, t.MAX);
 }
 /** Is the profile complete for the figure: position, foot, height, weight and some statistics. */
-export const profileIsComplete = (player) =>
+export const profileIsComplete = (player: ProfileFacts): boolean =>
   !!(player.position && player.foot && player.heightCm && player.weightKg && player.stats);
 
-export function computeTrustScore(player) {
+export function computeTrustScore(player: ProfileFacts): number {
   return trustScoreFromFacts({
     identityVerified: !!player.identityVerified,
     attendanceCount: player.attendance?.length ?? 0,
@@ -221,7 +262,7 @@ export function computeTrustScore(player) {
   });
 }
 
-export function trustBreakdown(player) {
+export function trustBreakdown(player: ProfileFacts) {
   const t = TRUST;
   return {
     base: t.BASE,
@@ -244,7 +285,8 @@ export const TRIAL_REPORT_FIELDS = [
   'coachRating', // 1-10
 ];
 
-export function validateTrialReport(report) {
+export function validateTrialReport(input: unknown): { ok: boolean; missing: string[]; invalid: string[] } {
+  const report = input as Record<string, unknown> | null | undefined;
   const missing = TRIAL_REPORT_FIELDS.filter(
     (f) => report?.[f] === undefined || report[f] === null || report[f] === '',
   );
@@ -253,7 +295,7 @@ export function validateTrialReport(report) {
       report?.[f] !== undefined &&
       report[f] !== null &&
       report[f] !== '' &&
-      (typeof report[f] !== 'number' || Number.isNaN(report[f])),
+      (typeof report[f] !== 'number' || Number.isNaN(report[f] as number)),
   );
   return { ok: missing.length === 0 && invalid.length === 0, missing, invalid };
 }
@@ -280,20 +322,21 @@ export const TRIAL_DATE_YEAR_MAX = 2100;
 export const TRIAL_REPORT_WINDOW_MS = 7 * 24 * 3600 * 1000;
 export const TRIAL_DETAIL_LIMITS = Object.freeze({ venue: 200, notes: 500, altSlots: 2 });
 
+export type TrialDate = { ok: true; value: string; t: number } | { ok: true; value: null; t: null };
+export type TrialDateRefusal = { ok: false; error: 'TRIAL_DATE_INVALID'; message: string; expected: string };
+
 /**
- * @returns {{ok:true, value:string|null, t:number|null} | {ok:false, error:'TRIAL_DATE_INVALID', message:string, expected:string}}
- *   `value` is the canonical string (or null for "no date"); `t` is the UTC
- *   midnight instant of that day (or null).
+ * `value` is the canonical string (or null for "no date"); `t` is the UTC midnight instant of that day (or null).
  */
-export function parseTrialDate(input) {
+export function parseTrialDate(input: unknown): TrialDate | TrialDateRefusal {
   if (input === undefined || input === null || input === '') return { ok: true, value: null, t: null };
-  const invalid = (why) => ({
-    ok: false,
-    error: 'TRIAL_DATE_INVALID',
+  const invalid = (why: string) => ({
+    ok: false as const,
+    error: 'TRIAL_DATE_INVALID' as const,
     message: `A trial date must be a calendar day written ${TRIAL_DATE_SYNTAX} (${why}).`,
     expected: TRIAL_DATE_SYNTAX,
   });
-  // One DATE_ONLY parser for the platform (temporal.mjs); this keeps the Trial
+  // One DATE_ONLY parser for the platform (temporal.ts); this keeps the Trial
   // vocabulary (its error code and its 2000–2100 bound) at the edge.
   const p = parseStrictDateOnly(input, { yearMin: TRIAL_DATE_YEAR_MIN, yearMax: TRIAL_DATE_YEAR_MAX });
   if (!p.ok) return invalid(p.why);
@@ -301,7 +344,7 @@ export function parseTrialDate(input) {
 }
 
 /** True only for a stored value that is a valid trial date (never for "no date"). */
-export const isTrialDate = (v) => {
+export const isTrialDate = (v: unknown): boolean => {
   const p = parseTrialDate(v);
   return p.ok && p.value !== null;
 };
@@ -313,10 +356,10 @@ export const isTrialDate = (v) => {
  * Returns null (never NaN) when neither a valid date nor a finite acceptance
  * instant is available; readers treat null as "no deadline known".
  */
-export function trialReportDueAt(trialDate, acceptedAt) {
+export function trialReportDueAt(trialDate: unknown, acceptedAt: number | null | undefined): number | null {
   const p = parseTrialDate(trialDate);
   const base = p.ok && p.t !== null ? p.t : acceptedAt;
-  return Number.isFinite(base) ? base + TRIAL_REPORT_WINDOW_MS : null;
+  return typeof base === 'number' && Number.isFinite(base) ? base + TRIAL_REPORT_WINDOW_MS : null;
 }
 
 /**
@@ -326,15 +369,20 @@ export function trialReportDueAt(trialDate, acceptedAt) {
  * silently changed), and the venue may not carry line breaks or control
  * characters — it is written into a calendar file verbatim.
  */
-export function validateTrialDetails(input) {
-  const src = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-  const bad = (error, field, message) => ({ ok: false, error, field, message });
+export type TrialDetails = { proposedDate: string | null; altSlots: string[]; venue: string | null; notes: string };
+export type TrialDetailsRefusal =
+  | (TrialDateRefusal & { field: 'proposedDate' | 'altSlots' })
+  | { ok: false; error: string; field: string; message: string };
+
+export function validateTrialDetails(input: unknown): { ok: true; details: TrialDetails } | TrialDetailsRefusal {
+  const src = (input && typeof input === 'object' && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
+  const bad = (error: string, field: string, message: string) => ({ ok: false as const, error, field, message });
 
   const proposed = parseTrialDate(src.proposedDate);
-  if (!proposed.ok) return { ...proposed, field: 'proposedDate' };
+  if (!proposed.ok) return { ...proposed, field: 'proposedDate' as const };
 
   const rawSlots = src.altSlots;
-  let altSlots = [];
+  const altSlots: string[] = [];
   if (rawSlots !== undefined && rawSlots !== null) {
     if (!Array.isArray(rawSlots))
       return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'Alternative slots must be a list of dates.');
@@ -342,7 +390,7 @@ export function validateTrialDetails(input) {
       return bad('TRIAL_SLOTS_INVALID', 'altSlots', `Offer at most ${TRIAL_DETAIL_LIMITS.altSlots} alternative slots.`);
     for (const s of rawSlots) {
       const p = parseTrialDate(s);
-      if (!p.ok) return { ...p, field: 'altSlots' };
+      if (!p.ok) return { ...p, field: 'altSlots' as const };
       if (p.value === null) return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'An alternative slot cannot be empty.');
       if (p.value === proposed.value || altSlots.includes(p.value))
         return bad('TRIAL_SLOTS_INVALID', 'altSlots', 'Each offered slot must be a different day.');
@@ -350,7 +398,7 @@ export function validateTrialDetails(input) {
     }
   }
 
-  let venue = null;
+  let venue: string | null = null;
   if (src.venue !== undefined && src.venue !== null && src.venue !== '') {
     if (typeof src.venue !== 'string') return bad('TRIAL_VENUE_INVALID', 'venue', 'The venue must be text.');
     if (src.venue.length > TRIAL_DETAIL_LIMITS.venue)
@@ -378,19 +426,22 @@ export function validateTrialDetails(input) {
  * slot is refused, never silently swapped for the proposal). A stored date
  * that does not parse yields no date rather than a fabricated one.
  */
-export function chooseTrialSlot(details, chosenSlot) {
-  const d = details && typeof details === 'object' ? details : {};
+export function chooseTrialSlot(
+  details: unknown,
+  chosenSlot: unknown,
+): { ok: true; date: string | null } | { ok: false; error: 'TRIAL_SLOT_INVALID'; message: string; offered: string[] } {
+  const d: { proposedDate?: unknown; altSlots?: unknown } = details && typeof details === 'object' ? details : {};
   const offered = [d.proposedDate, ...(Array.isArray(d.altSlots) ? d.altSlots : [])].filter(
-    (s) => typeof s === 'string' && s !== '',
+    (s): s is string => typeof s === 'string' && s !== '',
   );
   const refuse = {
-    ok: false,
-    error: 'TRIAL_SLOT_INVALID',
+    ok: false as const,
+    error: 'TRIAL_SLOT_INVALID' as const,
     message: 'Pick one of the dates the club offered.',
     offered: offered.filter(isTrialDate),
   };
   if (chosenSlot === undefined || chosenSlot === null || chosenSlot === '') {
-    return { ok: true, date: isTrialDate(d.proposedDate) ? d.proposedDate : null };
+    return { ok: true, date: isTrialDate(d.proposedDate) ? (d.proposedDate as string) : null };
   }
   if (typeof chosenSlot !== 'string' || !offered.includes(chosenSlot)) return refuse;
   return { ok: true, date: isTrialDate(chosenSlot) ? chosenSlot : null };
@@ -398,7 +449,7 @@ export function chooseTrialSlot(details, chosenSlot) {
 
 // AI Similar Players Engine — statistical similarity to reference playing
 // profiles. Position, foot, age, output, physique. A lead, not a verdict.
-export function similarityScore(a, b) {
+export function similarityScore(a: PlayingProfile, b: PlayingProfile): number {
   let score = 0;
   if (a.position === b.position) score += 35;
   else if (samePositionGroup(a.position, b.position)) score += 18;
@@ -416,11 +467,11 @@ export function similarityScore(a, b) {
 
 const POSITION_GROUPS = [['GK'], ['CB', 'RB', 'LB', 'RWB', 'LWB'], ['CDM', 'CM', 'CAM'], ['RW', 'LW', 'ST', 'CF']];
 
-function samePositionGroup(p1, p2) {
-  return POSITION_GROUPS.some((g) => g.includes(p1) && g.includes(p2));
+function samePositionGroup(p1: string | null | undefined, p2: string | null | undefined): boolean {
+  return POSITION_GROUPS.some((g) => g.includes(p1 ?? '') && g.includes(p2 ?? ''));
 }
 
-export function outputPer90(p) {
+export function outputPer90(p: { stats?: PlayingStats | null }): number {
   const apps = p.stats?.appearances || 1;
   return ((p.stats?.goals ?? 0) + (p.stats?.assists ?? 0)) / apps;
 }
@@ -436,16 +487,17 @@ export const TRUST_TIERS = [
   { min: 0, name: 'Prospect' },
 ];
 
-export function trustTier(score) {
-  return TRUST_TIERS.find((t) => score >= t.min).name;
+export function trustTier(score: number): string {
+  // Unmatched only for a negative or NaN score, which the figure never is; it throws, as it always has.
+  return TRUST_TIERS.find((t) => score >= t.min)!.name;
 }
 
 const DAY_MS = 24 * 3600 * 1000;
-const dayKey = (ts) => Math.floor(ts / DAY_MS);
+const dayKey = (ts: number) => Math.floor(ts / DAY_MS);
 
 // Streak = consecutive days (ending today or yesterday) with any football
 // activity: upload, drill, attendance, stats edit.
-export function computeStreak(activityLog, now = Date.now()) {
+export function computeStreak(activityLog: readonly number[] | null | undefined, now = Date.now()): number {
   const days = new Set((activityLog ?? []).map(dayKey));
   let start = dayKey(now);
   if (!days.has(start)) start -= 1; // yesterday keeps the streak alive
@@ -456,16 +508,16 @@ export function computeStreak(activityLog, now = Date.now()) {
 
 export const WEEKLY_GOAL_TARGET = 3; // activities per week
 
-export function weeklyGoal(activityLog, now = Date.now()) {
+export function weeklyGoal(activityLog: readonly number[] | null | undefined, now = Date.now()) {
   const weekStart = now - 7 * DAY_MS;
   const done = (activityLog ?? []).filter((ts) => ts >= weekStart).length;
   return { done: Math.min(done, WEEKLY_GOAL_TARGET * 5), target: WEEKLY_GOAL_TARGET, met: done >= WEEKLY_GOAL_TARGET };
 }
 
 // Profile strength: the next best actions, derived from the trust breakdown.
-export function nextActions(player) {
+export function nextActions(player: ProfileFacts): { id: string; label: string; gain: number }[] {
   const t = TRUST;
-  const actions = [];
+  const actions: { id: string; label: string; gain: number }[] = [];
   const complete = player.position && player.foot && player.heightCm && player.weightKg && player.stats;
   if (!complete)
     actions.push({

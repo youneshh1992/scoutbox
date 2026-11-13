@@ -3,7 +3,7 @@
  * reassessments), drill-guidance reviews, and the Development Hub's plans, goals, actions, evidence links and reviews
  * with one history table.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { AGENT_TRANSACTIONS_MIGRATION } from '../agentTransactions.mjs';
 import { DEVELOPMENT_MIGRATION, DEVELOPMENT_DDL, DEVELOPMENT_TABLES } from '../development.mjs';
 

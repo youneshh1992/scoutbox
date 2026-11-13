@@ -30,7 +30,7 @@ import { openLayer, readRecords, plantCase } from '../../scripts/dataLayerFixtur
 import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
 import { budgetsDrawn } from '../support/rateBudgets.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { isAdult } from '../../domain.mjs';
+import { isAdult } from '../../domain.ts';
 import {
   signingIntegrity,
   signingConsistency,

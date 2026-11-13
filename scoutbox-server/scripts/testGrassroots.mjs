@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
-import { openStore } from '../store.mjs';
+import { openStore } from '../store.ts';
 import { NOW, TTL, tempDir, USERS, ORGS } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, fixtureDb } from './recruitmentTestFixtures.mjs';
 import {
@@ -21,7 +21,7 @@ import {
   typeFriendly,
   boxAround,
 } from '../repositories/grassroots.mjs';
-import { haversineKm } from '../domain.mjs';
+import { haversineKm } from '../domain.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

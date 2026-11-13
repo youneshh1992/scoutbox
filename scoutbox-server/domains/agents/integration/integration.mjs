@@ -10,7 +10,7 @@ import {
   DISCLOSURE_DEFAULT,
   normaliseDisclosure,
 } from '../core/shared.mjs';
-import { readInstant } from '../../../temporal.mjs';
+import { readInstant } from '../../../temporal.ts';
 
 const nullProto = (o) => Object.freeze(Object.assign(Object.create(null), o));
 

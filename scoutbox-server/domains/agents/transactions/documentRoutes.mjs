@@ -1,6 +1,6 @@
 import { guardRev } from '../../platform/concurrency.mjs';
 import { payloadFingerprint } from '../../platform/idempotency.mjs';
-import { isExpiredAt, isAbsent, parseDateOrInstant } from '../../../temporal.mjs';
+import { isExpiredAt, isAbsent, parseDateOrInstant } from '../../../temporal.ts';
 import { sendTransactionError } from './errors.mjs';
 import {
   partiesOf,

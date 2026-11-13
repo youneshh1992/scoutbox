@@ -16,8 +16,8 @@ import {
   decode,
   insertSql,
 } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 
 export const REPUTATION_SEED_MIGRATION = '0038_operations';

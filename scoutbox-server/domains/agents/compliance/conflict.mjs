@@ -8,7 +8,7 @@
 import { createHash } from 'node:crypto';
 import { resolveScope, ruleAt } from './policy.mjs';
 import { PARTY_ROLES } from './policyVersions.mjs';
-import { readInstant } from '../../../temporal.mjs';
+import { readInstant } from '../../../temporal.ts';
 import { canonicalJson } from '../../platform/values.ts';
 
 export const CONFLICT_OUTCOMES = Object.freeze([

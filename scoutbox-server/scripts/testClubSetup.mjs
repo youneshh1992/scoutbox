@@ -9,8 +9,8 @@ import fs from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { readRecords, writeFixture } from './dataLayerFixture.mjs';
-import { runDataMigrations } from '../repositories/database.mjs';
-import { openStore } from '../store.mjs';
+import { runDataMigrations } from '../repositories/database.ts';
+import { openStore } from '../store.ts';
 import { NOW, TTL, tempDir } from './coreIdentityTestFixtures.mjs';
 import { saveFixture, ORG } from './recruitmentTestFixtures.mjs';
 import {

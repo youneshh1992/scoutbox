@@ -10,7 +10,7 @@
  */
 
 import * as v from 'valibot';
-import { parseInstant, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../../../temporal.mjs';
+import { parseInstant, isExpiredAt, readInstant, isAbsent, DAY_MS } from '../../../temporal.ts';
 import { ID_MAX, dayOrBlank, oneOf, parseInput, requiredText } from '../../platform/schemas.mjs';
 import {
   normaliseClientKey as platformClientKey,

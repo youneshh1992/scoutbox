@@ -4,7 +4,7 @@
 //
 // The import of the match engine is circular (it reads this file's vocabulary), which is safe because the engine
 // touches that vocabulary only inside function bodies — see the lazy band rank in matching/match.mjs.
-import { parseStrictDateOnly, isDayWithin, isAbsent } from '../../temporal.mjs';
+import { parseStrictDateOnly, isDayWithin, isAbsent } from '../../temporal.ts';
 
 // =====================================================================
 // SECOND LOOK POLICY

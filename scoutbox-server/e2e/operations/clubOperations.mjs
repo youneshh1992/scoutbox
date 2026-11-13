@@ -16,7 +16,7 @@ import { convertMinor } from '../../domains/recruitment/money.mjs';
 import { slotsOverlap } from '../../domains/scouting/slots.mjs';
 import { webhookUrlProblem } from '../../domains/integrations/webhooks.mjs';
 import { computeScenarioTotals } from '../../domains/recruitment/budgets.mjs';
-import { ageOn, isAdult } from '../../domain.mjs';
+import { ageOn, isAdult } from '../../domain.ts';
 
 process.env.ALLOW_LOCAL_WEBHOOKS = '1'; // the SSRF guard reads this at call time — needed for the in-process fixtures too
 

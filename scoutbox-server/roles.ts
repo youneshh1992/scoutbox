@@ -15,10 +15,10 @@
 export const LEAD_ROLE_PATTERN = /head|director|lead|manager|owner|chief/i;
 
 /** True when a role string belongs to the lead tier. Null/undefined → false. */
-export const isLeadRole = (role) => LEAD_ROLE_PATTERN.test(role ?? '');
+export const isLeadRole = (role: string | null | undefined): boolean => LEAD_ROLE_PATTERN.test(role ?? '');
 
 /** The same test on a staff user record (`{ role }`). */
-export const isLeadUser = (user) => isLeadRole(user?.role);
+export const isLeadUser = (user: { role?: string | null } | null | undefined): boolean => isLeadRole(user?.role);
 
 /**
  * The finance tier: who may see deal amounts (Pro's Finance page, the budgets on a
@@ -27,12 +27,13 @@ export const isLeadUser = (user) => isLeadRole(user?.role);
  *
  * The web portals import this file too (`scoutbox-club/src/nav.ts`), so the sidebar
  * shows Finance to exactly the roles the server lets in. Keep this file free of
- * imports and Node APIs.
+ * imports and Node APIs, and its TypeScript to what both compilers accept.
  */
 export const FINANCE_ROLE_PATTERN = /finance|treasurer/i;
 
 /** True when a role string may see deal amounts. Null/undefined → false. */
-export const isFinanceRole = (role) => isLeadRole(role) || FINANCE_ROLE_PATTERN.test(role ?? '');
+export const isFinanceRole = (role: string | null | undefined): boolean =>
+  isLeadRole(role) || FINANCE_ROLE_PATTERN.test(role ?? '');
 
 /** The same test on a staff user record (`{ role }`). */
-export const isFinanceUser = (user) => isFinanceRole(user?.role);
+export const isFinanceUser = (user: { role?: string | null } | null | undefined): boolean => isFinanceRole(user?.role);

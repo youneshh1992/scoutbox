@@ -3,7 +3,7 @@
 //
 // There is no direct message channel: an org files a request and contact unlocks on acceptance. A minor's request
 // goes to the guardian, never the child, and any conversation that opens is between adults.
-import { isAdult, visibleToOrg, validateTrialDetails, trialReportDueAt } from '../../domain.mjs';
+import { isAdult, visibleToOrg, validateTrialDetails, trialReportDueAt } from '../../domain.ts';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
 import { validateContactReply, CONTACT_LIMITS } from './lifecycle/contact.mjs';

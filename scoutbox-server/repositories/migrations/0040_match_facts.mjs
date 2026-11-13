@@ -3,7 +3,7 @@
  * table. Marks every live player so the first boot after it derives their facts. Nothing is imported: the facts are
  * derived, never a source.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { MATCH_FACTS_DDL, matchFactsTriggersDdl } from '../matchFacts.mjs';
 
 export const id = '0040_match_facts';

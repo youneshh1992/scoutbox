@@ -5,7 +5,7 @@
  * towards a rating.
  */
 
-import { parseDateOrInstant } from '../../../temporal.mjs';
+import { parseDateOrInstant } from '../../../temporal.ts';
 
 export const DEVELOPMENT_POLICY_VERSION = 1;
 

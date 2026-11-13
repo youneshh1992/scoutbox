@@ -3,7 +3,7 @@
  * calibration sessions (participants, blind submissions, ratings and notes as rows; the rubric is the pinned template
  * version), fixtures, coverage plans and coverage assignments (targets and warnings as rows).
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { DISCOVERY_MIGRATION } from '../discovery.mjs';
 import { INSIGHT_COVERAGE_MIGRATION, INSIGHT_COVERAGE_DDL, INSIGHT_COVERAGE_TABLES } from '../insightCoverage.mjs';
 

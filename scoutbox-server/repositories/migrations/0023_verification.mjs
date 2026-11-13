@@ -4,7 +4,7 @@
  * domain requests (codes), an organisation's verified domains and the verification boot marker. An organisation's
  * revocation is the orgs.verification_revoked_at column.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { OPPORTUNITIES_CAMPAIGNS_MIGRATION } from '../opportunitiesCampaigns.mjs';
 import { VERIFICATION_MIGRATION, VERIFICATION_DDL, VERIFICATION_TABLES } from '../verification.mjs';
 

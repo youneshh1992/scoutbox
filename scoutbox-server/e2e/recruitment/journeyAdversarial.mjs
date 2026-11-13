@@ -52,7 +52,7 @@ import { memoryRateLimitProvider } from '../../domains/platform/rateLimit.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
 import { budgetsDrawn } from '../support/rateBudgets.mjs';
 import { journeyEvidenceFunnel } from '../../domains/recruitment/analytics/funnels.mjs';
-import { isAdult } from '../../domain.mjs';
+import { isAdult } from '../../domain.ts';
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
     .sort()

@@ -7,8 +7,8 @@
  * Every write joins the open unit of work, the caller's transaction or its own.
  */
 import { describe } from './fieldSpecs.mjs';
-import { migrationApplied, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 
 export const DELIVERY_BOOKKEEPING_MIGRATION = '0038_operations';
 export const DELIVERY_BOOKKEEPING_COLLECTIONS = Object.freeze(['deliveryCallbacksSeen']);

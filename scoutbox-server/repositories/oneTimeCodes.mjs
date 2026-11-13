@@ -25,7 +25,7 @@
  * already ran poisons the enclosing unit even when the caller catches it.
  */
 import crypto from 'node:crypto';
-import { migrationApplied, operationOn } from './database.mjs';
+import { migrationApplied, operationOn } from './database.ts';
 
 export const ONE_TIME_CODES_MIGRATION = '0008_one_time_codes';
 export const EMAIL_CHALLENGE_TTL_MS = 30 * 60 * 1000;

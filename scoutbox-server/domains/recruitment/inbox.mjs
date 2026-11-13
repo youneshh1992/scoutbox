@@ -3,7 +3,7 @@
 // message thread exists until a request is accepted, and the thread that opens for a child is between adults.
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { rateLimitedBody } from '../platform/rateLimit.mjs';
-import { chooseTrialSlot } from '../../domain.mjs';
+import { chooseTrialSlot } from '../../domain.ts';
 import * as v from 'valibot';
 import { flag, inputOrRefuse } from '../platform/schemas.mjs';
 

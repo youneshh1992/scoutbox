@@ -10,7 +10,7 @@
  *     the player. `verificationMethod` and `identityVerified` are not stored: an email code proves mailbox control,
  *     never identity, so every view says 'email_code' and false.
  *
- * Writes (repositories/writes.mjs). A record is created whole and must read back as written, then changes only through
+ * Writes (repositories/writes.ts). A record is created whole and must read back as written, then changes only through
  * named acts (`grant`, `revokeGrant`, `place`, `publish`, `withdraw`, …), each an UPDATE of named columns or an INSERT
  * of new rows, joined into the open unit of work, the caller's open transaction, or a transaction of their own. No act
  * touches a case's pack, owner, note or period; grants are only inserted (a grant's revocation, once, and its last view
@@ -26,8 +26,8 @@
  */
 import crypto from 'node:crypto';
 import { isPlainObject, describe } from './fieldSpecs.mjs';
-import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
-import { writeKit } from './writes.mjs';
+import { migrationApplied, childRowsOf, operationOn } from './database.ts';
+import { writeKit } from './writes.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { text, int, oneOf, group, tableDdl, decode } from './fieldSpecs.mjs';
 

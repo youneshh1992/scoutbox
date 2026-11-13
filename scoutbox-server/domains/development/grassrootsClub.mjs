@@ -2,7 +2,7 @@
 import { filled } from '../platform/schemas.mjs';
 import { OPEN_DAY_OUTCOMES, developmentInput } from './schemas.mjs';
 import { readPage, sendPageError } from '../platform/paging.mjs';
-import { isAdult, visibleToOrg, computeTrustScore, haversineKm, GRASSROOTS_RADIUS_KM } from '../../domain.mjs';
+import { isAdult, visibleToOrg, computeTrustScore, haversineKm, GRASSROOTS_RADIUS_KM } from '../../domain.ts';
 import { GRASSROOTS_LIMITS as GL, boxAround } from '../../repositories/grassroots.mjs';
 import { TRANSITION_LIMITS } from '../../repositories/transitionsVouches.mjs';
 import { grassrootsOrgOnly } from './guards.mjs';

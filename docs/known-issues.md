@@ -98,7 +98,7 @@ Found in the November 2026 comment trim (10 Nov). Not yet fixed.
 - **Some reads bring workflow state up to date, because nothing runs on a schedule for them.** Opening a watchlist
   reconciles its membership, opening Second Look reconciles its queue, building a Room or a player's evidence gaps
   reconciles the gap suggestions, and the Film Room feed sends the trial-report reminder. Each runs as one unit marked
-  `asReconciling` (`writeRules.mjs`), so the write rules allow it, but each belongs in a sweep, as
+  `asReconciling` (`writeRules.ts`), so the write rules allow it, but each belongs in a sweep, as
   [`architecture.md`](architecture.md#writes) says.
 - **The offer issue route returns a stale `rev`.** It answers `kase.room.rev` from the case as read before the move
   (`domains/recruitment/offers/index.mjs`).

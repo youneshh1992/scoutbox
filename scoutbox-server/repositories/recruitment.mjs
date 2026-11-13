@@ -22,7 +22,7 @@
  * Refusals name tables, fields and ids, never a name, a message, a note, an address or a phone number.
  */
 import { pageOf } from '../domains/platform/paging.mjs';
-import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.mjs';
+import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.ts';
 import { ORG_TYPES } from './orgs.mjs';
 import {
   TRIAL_WORKFLOW_STATES,
@@ -38,9 +38,9 @@ import {
   TRIAL_KEY_ACTS,
   TRIAL_LIMITS,
 } from '../domains/recruitment/public.mjs';
-import { TRIAL_REPORT_FIELDS } from '../domain.mjs';
+import { TRIAL_REPORT_FIELDS } from '../domain.ts';
 import { refreshProfileSignals } from './identity.mjs';
-import { writeKit } from './writes.mjs';
+import { writeKit } from './writes.ts';
 import { ids } from './fieldSpecs.mjs';
 import { deepFreeze } from '../domains/platform/values.ts';
 
@@ -1689,7 +1689,7 @@ export function createRecruitmentRepository({ sqlite, unit = null, now = Date.no
     countForOrgStatus: count('SELECT COUNT(*) AS n FROM trials WHERE org_id = ? AND status = ?'),
     /**
      * The history of the organisation's trials with one of `actions`, newest first, for a merged feed (the audit feed):
-     * `{ trialId, caseId, playerId, entry }`. See `newestHistory` (database.mjs) for `atMost` and `n`.
+     * `{ trialId, caseId, playerId, entry }`. See `newestHistory` (database.ts) for `atMost` and `n`.
      */
     historyFeed(orgId, actions, atMost, n) {
       return newestHistory(

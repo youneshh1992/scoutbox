@@ -80,8 +80,8 @@ import {
   NULL_EVIDENCE_PROVIDER,
 } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
-import { isAdult } from '../../domain.mjs';
-import { isExpiredAt, parseInstant } from '../../temporal.mjs';
+import { isAdult } from '../../domain.ts';
+import { isExpiredAt, parseInstant } from '../../temporal.ts';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)

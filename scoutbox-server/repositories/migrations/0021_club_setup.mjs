@@ -2,7 +2,7 @@
  * A club's own setup: the tactical setup (roles, criteria, windows), the squad, the shadow list, looking-for, the
  * federation-route request and vacancies.
  */
-import { migrationApplied } from '../database.mjs';
+import { migrationApplied } from '../database.ts';
 import { SCOUTING_ASSESSMENTS_MIGRATION } from '../scoutingAssessments.mjs';
 import { CLUB_SETUP_MIGRATION, CLUB_SETUP_DDL, CLUB_SETUP_TABLES } from '../clubSetup.mjs';
 

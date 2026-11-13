@@ -1,7 +1,7 @@
 // Route helpers shared by the club, player and guardian modules.
-import { isAdult, visibleToOrg, haversineKm } from '../../domain.mjs';
-import { ageOrNull, parseDateOrInstant, isAbsent } from '../../temporal.mjs';
-import { isLeadUser, isFinanceUser } from '../../roles.mjs';
+import { isAdult, visibleToOrg, haversineKm } from '../../domain.ts';
+import { ageOrNull, parseDateOrInstant, isAbsent } from '../../temporal.ts';
+import { isLeadUser, isFinanceUser } from '../../roles.ts';
 import { offsetPage } from './paging.mjs';
 import { strictContext } from './deps.mjs';
 

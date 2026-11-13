@@ -16,7 +16,7 @@
  *
  * WHO KEEPS IT: nobody by hand. Every input table carries triggers (MATCH_FACT_INPUTS) that put the player's id in
  * `player_match_facts_dirty`; the store re-derives the dirty players just before every COMMIT (onBeforeCommit in
- * database.mjs, the builder registered by the discovery domain), so a committed write never leaves a stale row. A
+ * database.ts, the builder registered by the discovery domain), so a committed write never leaves a stale row. A
  * change to an organisation's standing (verified, suspended, revoked) marks the players linked to it. Time-only
  * changes are the sweep's (`markDue`, run at boot and every minute). The facts are derived: they are never a source,
  * and a policy change rebuilds them all (`policyKey` in meta).
@@ -25,7 +25,7 @@
  * child rows cascade from their facts row. The dirty markers carry no key (a trigger may mark an id that is not a
  * player, e.g. a claim's organisation subject; the drain finds no player and removes nothing).
  */
-import { operationOn } from './database.mjs';
+import { operationOn } from './database.ts';
 import { PLAYER_POSITIONS } from './identity.mjs';
 import { POLICY as TRUST_POLICY } from '../domains/passport/public.mjs';
 import { BOX_CAM_LIMITS } from './boxCam.mjs';
