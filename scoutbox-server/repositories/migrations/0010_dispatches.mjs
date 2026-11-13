@@ -3,7 +3,7 @@
  * staff audience's organisation is a deferred RESTRICT key.
  */
 import { migrationApplied } from '../database.ts';
-import { NOTIFICATIONS_MIGRATION } from '../notifications.mjs';
+import { NOTIFICATIONS_MIGRATION } from '../notifications.ts';
 import { DISPATCHES_MIGRATION, DISPATCHES_DDL, DISPATCH_TABLES } from '../dispatches.mjs';
 
 export const id = DISPATCHES_MIGRATION;

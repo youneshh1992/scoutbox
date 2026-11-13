@@ -17,7 +17,7 @@ import { sendAgentError } from './errors.mjs';
 import { parseInput, filled } from '../../platform/schemas.mjs';
 import { AGENT_INPUT, agentParseOptions } from './schemas.mjs';
 import { agentAuditRows } from './audit.mjs';
-import { feedItem } from '../../../repositories/notifications.mjs';
+import { feedItem } from '../../../repositories/notifications.ts';
 import { facetFromProviderAnswer, FACET_METHOD } from '../compliance/provider.mjs';
 import {
   AGENT_POLICY_VERSION,

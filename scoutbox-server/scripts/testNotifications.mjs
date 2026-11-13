@@ -1,4 +1,4 @@
-// Notifications and category notification preferences (repositories/notifications.mjs, migration 0009): fixtures, typed
+// Notifications and category notification preferences (repositories/notifications.ts, migration 0009): fixtures, typed
 // writes that join the open unit or run in their own transaction, SQL reads (the feed in reverse insertion order,
 // coalescing, the counts, the undispatched notices, preferences), units of work, the preference module and m13
 // notifyAction over the repository, and the boot (the db.* names throw). Temporary databases only; nothing touches
@@ -15,7 +15,7 @@ import {
   NOTIFICATION_TABLES,
   NOTIFY_COALESCE_MS,
   NOTIFICATION_LIMITS,
-} from '../repositories/notifications.mjs';
+} from '../repositories/notifications.ts';
 import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
 import { createDispatchesRepository } from '../repositories/dispatches.mjs';
 import {

@@ -4,7 +4,7 @@
  */
 import { migrationApplied } from '../database.ts';
 import { ONE_TIME_CODES_MIGRATION } from '../oneTimeCodes.ts';
-import { NOTIFICATIONS_MIGRATION, NOTIFICATIONS_DDL, NOTIFICATION_TABLES } from '../notifications.mjs';
+import { NOTIFICATIONS_MIGRATION, NOTIFICATIONS_DDL, NOTIFICATION_TABLES } from '../notifications.ts';
 
 export const id = NOTIFICATIONS_MIGRATION;
 export const note =

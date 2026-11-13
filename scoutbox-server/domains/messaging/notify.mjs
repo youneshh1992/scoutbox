@@ -1,5 +1,5 @@
 // The feed always keeps the record; quiet hours and the minors' school-hours mute only hold back the push.
-import { NOTIFICATION_LIMITS, feedItem } from '../../repositories/notifications.mjs';
+import { NOTIFICATION_LIMITS, feedItem } from '../../repositories/notifications.ts';
 import { validateIanaZone, localParts } from '../../temporal.ts';
 import { isAdult } from '../../domain.ts';
 import { minimizePayload } from '../platform/eventRegistry.mjs';

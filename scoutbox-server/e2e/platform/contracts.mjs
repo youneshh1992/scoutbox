@@ -53,7 +53,7 @@ import { openStore } from '../../store.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, dataSchemaReport, migrationApplied } from '../../repositories/database.ts';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-import { createNotificationsRepository } from '../../repositories/notifications.mjs';
+import { createNotificationsRepository } from '../../repositories/notifications.ts';
 import { pickPort } from '../../scripts/testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
