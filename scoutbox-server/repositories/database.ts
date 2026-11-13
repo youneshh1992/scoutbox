@@ -199,9 +199,9 @@ export function childRowsOf(
   sqlite: DatabaseSync,
   table: string,
   parentCol: string,
-  parentIds: Iterable<string>,
+  parentIds: Iterable<string | number>,
   { order = 'rowid', subKey = [], where = '' }: { order?: string; subKey?: string[]; where?: string } = {},
-): { all(parentId: string, ...subKey: SQLOutputValue[]): Row[] } {
+): { all(parentId: string | number, ...subKey: SQLOutputValue[]): Row[] } {
   const groups = new Map<string, Row[]>();
   const ids = [...new Set(parentIds)];
   if (ids.length) {

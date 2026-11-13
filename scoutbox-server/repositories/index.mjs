@@ -210,7 +210,7 @@ import {
 } from './transitionsVouches.mjs';
 import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TABLE } from './oneTimeCodes.ts';
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE } from './notifications.ts';
-import { createDispatchesRepository, DISPATCHES_TABLE } from './dispatches.mjs';
+import { createDispatchesRepository, DISPATCHES_TABLE } from './dispatches.ts';
 import { createOutboxPushRepository, OUTBOX_PUSH_RECORD_TABLES } from './outboxPush.mjs';
 import { createChannelsRepository, CHANNELS_TABLE } from './channels.mjs';
 import {
