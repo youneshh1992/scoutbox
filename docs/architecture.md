@@ -156,7 +156,7 @@ are listed in [`known-issues.md`](known-issues.md#performance).
    empty before commit). The runner applies migrations in order, one transaction each, records them in
    `data_migrations`, and stops the boot on failure. The schema version is the latest migration's number.
 2. **Repository.** `create<Domain>Repository({ sqlite, unit, now, log })` prepares its statements; each write types
-   its input, writes rows and returns the stored record. `server.mjs` builds it and hands it, or its reads, to the
+   its input, writes rows and returns the stored record. `wiring.mjs` builds it and hands it, or its reads, to the
    modules. `repositories/signingsFollowUps.mjs` is the simplest complete example.
 3. **Read-back for tests.** Export a `*_RECORDS` (`names`, `read`) and add the collections to `TABLE_BACKED` in
    `repositories/index.mjs`; give each new collection a writer in `scripts/dataLayerFixture.mjs`.
@@ -171,8 +171,11 @@ operation can write, in temporary directories only, never `scoutbox-server/data/
 
 ## Code layout
 
-Server code is in `scoutbox-server/domains/<domain>/`; `server.mjs` holds no route handlers, only the wiring that creates each
-domain and hands it what it needs, in dependency order. End-to-end batteries live in `scoutbox-server/e2e/<domain>/`,
+Server code is in `scoutbox-server/domains/<domain>/`. `server.mjs` checks the runtime (`runtime.mjs`) and then loads
+`wiring.mjs`, which holds no route handlers, only the wiring that creates each domain and hands it what it needs, in
+dependency order. Modules are `.mjs` or `.ts`: Node runs TypeScript by stripping its types, and `npm run typecheck`
+(`tsc`, in CI) checks it. `server.mjs` and `runtime.mjs` stay JavaScript, so an unsupported runtime is refused by the
+check rather than failing to load a `.ts` module. End-to-end batteries live in `scoutbox-server/e2e/<domain>/`,
 named after what they check.
 
 ### Domain boundaries
@@ -197,22 +200,22 @@ The domains sit in layers, bottom to top:
   rules and views. It only re-exports its own domain's modules, never one that registers routes, and holds no state.
   The repositories and the shared rule modules also import a domain's vocabulary through its public module.
 - **The platform layer imports no domain.** What it reports about a domain (the audit feed's agency rows, the open Room
-  statuses the integrity check uses, the verified Combine protocols) is handed to it by `server.mjs`.
-- **What a domain does at run time comes through `server.mjs`.** The layers say what code a domain may know, not the
+  statuses the integrity check uses, the verified Combine protocols) is handed to it by `wiring.mjs`.
+- **What a domain does at run time comes through `wiring.mjs`.** The layers say what code a domain may know, not the
   order domains are created in: the Rooms are created after the Passport and use its projections, which are handed to
   them, while the Passport's code imports recruitment's trial rules.
 - **No import cycles**, between domains or between the modules of one folder.
 
-**Domain factories.** A domain's `index.mjs` exports its factories, `create<Part>(deps)`, which `server.mjs` calls in
+**Domain factories.** A domain's `index.mjs` exports its factories, `create<Part>(deps)`, which `wiring.mjs` calls in
 dependency order. Each factory registers its routes and returns what other domains use (a read, a seam, a sweep).
 It names its dependencies with `needs(name, deps, [...])` (`domains/platform/deps.mjs`): a missing name, or one it
 didn't declare, fails the boot, so a wide context can't be handed on. The context it gives its own route modules is
 `strictContext` (or `routeContext`, with the route helpers): outside production, reading a name it doesn't hold
 throws. A domain has more than one factory when its parts need things created at different points (the identity
 domain's sessions come before everything, its account services after the domains whose records they read). Sweeps
-are returned, not started, and `server.mjs` schedules them. `server.mjs` passes each dependency by name; there is
+are returned, not started, and `wiring.mjs` schedules them. `wiring.mjs` passes each dependency by name; there is
 no shared context.
 
 `npm run check:boundaries` (`scripts/checkBoundaries.mjs`) checks these rules in CI. The layer order is listed in
-that script as `DOMAIN_LAYERS`, so a new domain gets a layer when it is added. `server.mjs`, `e2e/` and `scripts/` may
+that script as `DOMAIN_LAYERS`, so a new domain gets a layer when it is added. `wiring.mjs`, `e2e/` and `scripts/` may
 import any module.

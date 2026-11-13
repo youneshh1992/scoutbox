@@ -83,7 +83,7 @@ const grant = (over = {}) => ({
   viewedAt: null,
   ...over,
 });
-/** createVouchRequest (server.mjs). */
+/** createVouchRequest (wiring.mjs). */
 const vouch = (over = {}) => ({
   id: 'vch-1',
   playerId: PID,

@@ -1,11 +1,9 @@
 // The SQLite store (node:sqlite, no native deps): one database file, data/scoutbox.db, holding every domain's tables.
 // The id counter is a row of `counters`.
 //
-// node:sqlite is REQUIRED, with its transaction state (`isTransaction`):
-// Node.js 22.16 or later on the 22 line, or 24.0 or later (runtime.mjs is the
-// one definition of that contract). There is no JSON fallback: `openStore`
-// throws a compatibility error (SQLITE_REQUIRED / NODE_UNSUPPORTED) before
-// touching the data directory, and server.mjs lets that error end the process.
+// node:sqlite is REQUIRED, with its transaction state (`isTransaction`); runtime.mjs is the one definition of the
+// supported runtimes. There is no JSON fallback: `openStore` throws a compatibility error (SQLITE_REQUIRED /
+// NODE_UNSUPPORTED) before touching the data directory. server.mjs runs the same check before loading anything.
 //
 // `openStore(dir)` opens the file; the data layer (repositories/index.mjs `attachDataLayer`) runs the table
 // migrations and attaches the repositories, which own their tables and write their rows at once. The store gives them
@@ -260,7 +258,7 @@ export function openStore(dataDir) {
     },
     /**
      * TEST SEAM (reached only through the development fault layer, see
-     * server.mjs `unit`): make the REAL COMMIT of the open transaction fail. A
+     * wiring.mjs `unit`): make the REAL COMMIT of the open transaction fail. A
      * foreign key whose check SQLite defers to COMMIT is violated inside the
      * transaction, so the COMMIT statement itself is refused with "FOREIGN KEY
      * constraint failed" — the engine's genuine failure path, not a throw placed

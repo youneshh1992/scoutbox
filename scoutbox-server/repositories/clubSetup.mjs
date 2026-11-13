@@ -41,7 +41,7 @@ import {
   first,
   txt,
 } from './scoutingEvidence.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY, PLAYER_LEVELS } from './identity.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';
 

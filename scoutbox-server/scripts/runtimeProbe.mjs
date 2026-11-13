@@ -5,8 +5,9 @@
 // extra Node.js binaries. Exit 0 when every step worked, 3 when the runtime was
 // refused as unsupported before the directory was touched, 1 otherwise.
 //   node scripts/runtimeProbe.mjs <data-dir>
-import { openStore } from '../store.mjs';
-import { attachDataLayer, TABLE_BACKED } from '../repositories/index.mjs';
+//
+// Like server.mjs, it checks the runtime before importing the store, which an unsupported runtime couldn't load.
+import { requireRuntime } from '../runtime.mjs';
 
 const dir = process.argv[2];
 if (!dir) {
@@ -17,6 +18,9 @@ let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const out = { node: process.version, steps: [], ok: false };
 try {
+  requireRuntime();
+  const { openStore } = await import('../store.mjs');
+  const { attachDataLayer } = await import('../repositories/index.mjs');
   const store = openStore(dir);
   out.steps.push('opened');
   const db = {};

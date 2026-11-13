@@ -101,7 +101,7 @@ const ORGS = () => [
     safeguardingContractSigned: true,
     password: 'scrypt$00$11',
   },
-  // Registration's shape (server.mjs): a grassroots club with a federation reference.
+  // Registration's shape (wiring.mjs): a grassroots club with a federation reference.
   {
     id: 'org-grass',
     name: 'Riverside Juniors',

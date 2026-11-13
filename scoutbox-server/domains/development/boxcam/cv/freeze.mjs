@@ -20,7 +20,7 @@ import {
   CONFIDENCE,
 } from './policy.mjs';
 import { QUALITY_THRESHOLDS } from './quality.mjs';
-import { canonicalJson } from '../../../platform/values.mjs';
+import { canonicalJson } from '../../../platform/values.ts';
 
 /**
  * Geometry constants in the layer code, mirrored so the freeze covers them. `geometryMirrorCheck()` fails if a

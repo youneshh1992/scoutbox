@@ -1,4 +1,4 @@
-// The factories server.mjs wires together, tested on their own: each refuses to be built without what it needs (so a
+// The factories wiring.mjs wires together, tested on their own: each refuses to be built without what it needs (so a
 // wiring mistake fails at boot, not on a request), and each does its one job. Covers the failed-login budget, live
 // sync's delivery and staff-stream closing, moderation, the source-change clock, the player insights, the contract
 // lookup, coach-reference views, the route helpers, and the write seams a domain offers the others.

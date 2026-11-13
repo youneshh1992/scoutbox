@@ -18,7 +18,7 @@ import {
 } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const REPUTATION_SEED_MIGRATION = '0038_operations';
 export const REPUTATION_SEED_COLLECTIONS = Object.freeze(['reputationSeed']);

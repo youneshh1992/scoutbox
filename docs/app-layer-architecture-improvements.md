@@ -166,15 +166,57 @@ The safety audit log (`safetyAudit.record`) is written by every domain and is th
 
 Convert the server to TypeScript once steps 1–5 have settled the shapes that are worth typing: request input (from the
 step 1 schemas), each domain's declared dependencies and interface (step 4), and the repositories' named acts (step 5).
-Typing the code before those refactors would mean writing the types twice. Start with `repositories/` and
-`domains/platform/`, then convert domain by domain, with `strict` on and `tsc --noEmit` in CI. Decide at the start
-between a build step and running `.ts` directly with Node's type stripping, which affects the minimum Node version in
-`runtime.mjs`.
+Typing the code before those refactors would mean writing the types twice.
+
+The order, from the bottom of the import graph up, so each file is typed against modules that already are:
+
+1. **The toolchain** [**done**]. `.ts` runs directly with Node's type stripping, with no build step: tests, stack
+   traces and `npm start` are as they were. Type stripping is on by default from Node 22.18.0, which is the floor
+   now (`runtime.mjs`, `engines`), and the runtime check also refuses a Node started with it switched off. An
+   unsupported Node can't load a `.ts` module at all, so `server.mjs` is now a small JavaScript entry that checks
+   the runtime and only then loads the wiring, which moved to `wiring.mjs` (the composition root, which can itself
+   become `.ts` without anything that starts the server changing). `tsconfig.json` has `strict`, `noEmit`, `allowJs`
+   (so `.ts` and `.mjs` import each other while the move is under way), `allowImportingTsExtensions`,
+   `erasableSyntaxOnly` (no enums, namespaces or parameter properties, which type stripping can't remove) and
+   `verbatimModuleSyntax` (a type-only import says so, or Node would look for it at run time). `npm run typecheck`
+   (TypeScript 7) runs in CI. `checkBoundaries.mjs` holds `.ts` modules and type-only imports to the same rules.
+   `domains/platform/values.ts` is the first module converted.
+2. **The store and the write rules.** `store.mjs`, `writeRules.mjs`, `repositories/database.mjs`, `writes.mjs` and
+   `counters.mjs`: the unit of work, `afterCommit` and the shapes every repository is built on. Then the shared rule
+   modules (`domain.mjs`, `temporal.mjs`, `roles.mjs`, whose hand-written `roles.d.mts` goes, as the portals import
+   the `.ts` itself).
+3. **The repositories, one per change.** Each gets a record type for what it reads back (deep-frozen, so
+   `Readonly`) and a signature for each named act. Start with `identity.mjs`, which nearly every domain reads, and
+   split it along its owners as it is typed. The repositories that still type records in JavaScript (discovery,
+   development, passport, scouting, opportunities) move to "reads back as written" as they are converted, so their
+   types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that write through the
+   repositories are typed checks of the repositories' signatures; convert them alongside.
+4. **The platform layer, and the platform object.** Type `domains/platform/` and group its services into one
+   `Platform` dependency (below). `schemas.mjs` and the route helpers hand a handler its input typed from its
+   valibot schema (`v.InferOutput`), so a route reads `body.expiresAt` as a string instead of as anything. `needs()`
+   takes the factory's dependency type, so the names it checks at boot and the names the type declares are one list.
+5. **The domains, layer by layer.** In the layer order of
+   [`architecture.md`](architecture.md#domain-boundaries) (identity, groups, integrations, media and safety first,
+   the Passport last), one domain per change: its `public.mjs`, its factories' dependency types, the interface it
+   offers others as one named type, then its routes. As a domain is converted it takes the lower domains it uses as
+   whole interface objects (below); the domains it uses are already typed, so its signature changes once. The split
+   route modules and their `shared.mjs` contexts are typed with their domain, and `strictContext` keeps its
+   development-time check while JavaScript callers remain.
+6. **`wiring.mjs`.** Last, once every factory it calls is typed: the compiler then checks the whole wiring, that
+   each factory gets every dependency it declares and nothing it doesn't. At that point decide whether the boot-time
+   `needs()` check still earns its place.
+7. **Tidy-up.** Turn `allowJs` off for the server's own code and remove what typing made unnecessary (defensive
+   `typeof` checks on values the types now guarantee, the JSDoc shapes the types replace). The end-to-end batteries
+   and the remaining `scripts/` stay `.mjs`: they test the server over HTTP and from outside, so typing them buys
+   little.
+
+Every change runs `npm test` and `npm run e2e` as before. A conversion changes no behaviour. When the types find a
+real defect, fix it in its own commit with a test of its own, so the conversion stays a pure change.
 
 Group the domain factories' dependencies as the types are written, so each signature changes once:
 
 - **One platform object.** `unit`, `nextId`, `notify`, `broadcast`, `byId`, `findPlayer`, `isBlocked`, `rateLimit`
-  and `ledgerAppend` are passed to nearly every factory, about a hundred lines of `server.mjs`. They are the platform
+  and `ledgerAppend` are passed to nearly every factory, about a hundred lines of `wiring.mjs`. They are the platform
   layer's services and should be one typed dependency (`platform.unit`, `platform.notify`, …).
 - **One interface object per domain.** A factory should receive what another domain offers as one object (`passport`,
   `rooms`, `development`) instead of its functions one by one (`assemblePassport: passportDomain.assemblePassport`,

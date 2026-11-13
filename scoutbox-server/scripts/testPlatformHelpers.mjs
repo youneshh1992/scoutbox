@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { requestClock, TEST_CLOCK_HEADER } from '../domains/platform/clock.mjs';
 import { testClockEnabled, productionConfigProblems } from '../domains/platform/capabilities.mjs';
 import { normaliseClientKey, payloadFingerprint, CLIENT_KEY_MAX } from '../domains/platform/idempotency.mjs';
-import { deepFreeze, canonicalJson } from '../domains/platform/values.mjs';
+import { deepFreeze, canonicalJson } from '../domains/platform/values.ts';
 import {
   createRateLimiter,
   installRateLimitInspection,

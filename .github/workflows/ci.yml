@@ -21,7 +21,7 @@ jobs:
         run: npm run format:check
 
   server:
-    name: Server — unit tests + API end-to-end
+    name: Server — types, unit tests + API end-to-end
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,6 +36,8 @@ jobs:
       - run: npm ci
       - name: Domain boundaries (imports through public modules, downward only, no cycles)
         run: npm run check:boundaries
+      - name: Types (tsc over the TypeScript modules)
+        run: npm run typecheck
       - name: Domain unit tests
         run: npm test
       - name: End-to-end batteries (scripts/runE2E.mjs; each boots its own servers on temporary data dirs)

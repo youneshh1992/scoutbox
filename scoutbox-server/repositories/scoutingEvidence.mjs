@@ -23,7 +23,7 @@
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const SCOUTING_EVIDENCE_MIGRATION = '0019_scouting_evidence';
 export const SCOUTING_EVIDENCE_COLLECTIONS = Object.freeze(['evidence', 'coachAffiliations', 'squadInvites']);

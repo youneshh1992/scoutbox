@@ -15,7 +15,7 @@
  * Refusals carry a code and name the id and the field, never a value.
  */
 import { migrationApplied, operationOn } from './database.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const USERS_MIGRATION = '0001_org_users';
 export const STAFF_LIMITS = Object.freeze({ id: 80, name: 120, role: 60, email: 254, ssoSubject: 255, secret: 128 });

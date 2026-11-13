@@ -23,7 +23,7 @@
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_POSITIONS } from './identity.mjs';
 import {
   text,

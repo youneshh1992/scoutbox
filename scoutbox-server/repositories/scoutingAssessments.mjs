@@ -52,7 +52,7 @@ import {
   historyOf,
   histOut,
 } from './scoutingEvidence.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const SCOUTING_ASSESSMENTS_MIGRATION = '0020_scouting_assessments';
 export const SCOUTING_ASSESSMENTS_COLLECTIONS = Object.freeze([

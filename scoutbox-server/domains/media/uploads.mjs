@@ -1,4 +1,4 @@
-// Nothing reports success before finalisation. server.mjs registers this before the operations module, whose sweep
+// Nothing reports success before finalisation. wiring.mjs registers this before the operations module, whose sweep
 // calls `sweepUploads`. Chunk bytes live under DATA_DIR/upload-tmp/<id>/ and are removed only after the write that
 // ends the session commits.
 import fs from 'node:fs';

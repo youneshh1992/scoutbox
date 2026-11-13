@@ -15,24 +15,25 @@ function test(name, fn) {
   console.log(`  ✓ ${name}`);
 }
 
-/** A throwaway server tree: `{ 'domains/low/a.mjs': "…" }`. */
+/** A throwaway server tree: `{ 'domains/low/a.mjs': "…" }`; a null body leaves the file out. */
 function tree(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-boundaries-'));
   for (const [rel, body] of Object.entries(files)) {
+    if (body === null) continue;
     fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
     fs.writeFileSync(path.join(root, rel), body);
   }
   return root;
 }
 const BASE = {
-  'domains/platform/values.mjs': 'export const x = 1;\n',
-  'domains/low/rules.mjs': "import { x } from '../platform/values.mjs';\nexport const LOW = x;\n",
+  'domains/platform/values.ts': 'export const x = 1;\n',
+  'domains/low/rules.mjs': "import { x } from '../platform/values.ts';\nexport const LOW = x;\n",
   'domains/low/routes.mjs': "import { LOW } from './rules.mjs';\nexport function registerLow() { return LOW; }\n",
   'domains/low/public.mjs': "// The low domain's vocabulary.\nexport { LOW } from './rules.mjs';\n",
   'domains/high/routes.mjs':
     "import { LOW } from '../low/public.mjs';\nexport function registerHigh() { return LOW; }\n",
   'repositories/low.mjs': "import { LOW } from '../domains/low/public.mjs';\nexport const repo = LOW;\n",
-  'server.mjs':
+  'wiring.mjs':
     "import { registerLow } from './domains/low/routes.mjs';\nimport { registerHigh } from './domains/high/routes.mjs';\n",
   'e2e/low/battery.mjs': "import { LOW } from '../../domains/low/rules.mjs';\n",
 };
@@ -87,18 +88,56 @@ test('an import cycle is refused, inside one folder too', () => {
 test('a public module re-exports only its own domain, never from a module that registers routes, and holds nothing else', () => {
   const p = problemsOf({
     'domains/low/public.mjs':
-      "export { LOW } from './rules.mjs';\nexport { registerLow } from './routes.mjs';\nexport { x } from '../platform/values.mjs';\nexport const extra = 1;\n",
+      "export { LOW } from './rules.mjs';\nexport { registerLow } from './routes.mjs';\nexport { x } from '../platform/values.ts';\nexport const extra = 1;\n",
   });
   assert.ok(
     p.some((l) => l.includes('re-exports domains/low/routes.mjs, which registers routes')),
     p.join('\n'),
   );
   assert.ok(
-    p.some((l) => l.includes('re-exports domains/platform/values.mjs, outside its domain')),
+    p.some((l) => l.includes('re-exports domains/platform/values.ts, outside its domain')),
     p.join('\n'),
   );
   assert.ok(
     p.some((l) => l.includes('holds something other than re-exports')),
+    p.join('\n'),
+  );
+});
+
+test('TypeScript modules keep the same rules, type-only imports included', () => {
+  const ok = problemsOf({
+    'domains/low/public.mjs': null,
+    'domains/low/record.ts': 'export type LowRecord = { id: string };\n',
+    'domains/low/public.ts':
+      "// The low domain's vocabulary.\nexport { LOW } from './rules.mjs';\nexport type { LowRecord } from './record.ts';\n",
+    'domains/high/routes.mjs':
+      "import { LOW } from '../low/public.ts';\nexport function registerHigh() { return LOW; }\n",
+    'domains/high/view.ts':
+      "import type { LowRecord } from '../low/public.ts';\nexport const v = (r: LowRecord) => r.id;\n",
+    'repositories/low.mjs': "import { LOW } from '../domains/low/public.ts';\nexport const repo = LOW;\n",
+    'roles.d.mts': "import type { Gone } from './gone.mjs';\nexport declare const r: Gone;\n",
+  });
+  assert.deepEqual(
+    ok,
+    [],
+    'a .ts public module, type re-exports and imports through it; a declaration file is no module',
+  );
+  const p = problemsOf({
+    'domains/low/record.ts': 'export type LowRecord = { id: string };\n',
+    'domains/high/view.ts':
+      "import type { LowRecord } from '../low/record.ts';\nexport const v = (r: LowRecord) => r.id;\n",
+    'domains/low/up.ts': "import type { V } from '../high/view.ts';\n",
+  });
+  assert.ok(
+    p.some((l) =>
+      l.includes(
+        'domains/high/view.ts imports domains/low/record.ts: another domain is imported through domains/low/public.mjs',
+      ),
+    ),
+    p.join('\n'),
+  );
+  assert.ok(
+    p.some((l) => l.includes('domains/low/up.ts imports the high domain, which is not in a lower layer than low')),
     p.join('\n'),
   );
 });

@@ -17,7 +17,7 @@
  */
 import { isPlainObject, ids, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 import { text, int, oneOf, tableDdl, bad, typeSpec, encode, decode, insertSql } from './fieldSpecs.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
 

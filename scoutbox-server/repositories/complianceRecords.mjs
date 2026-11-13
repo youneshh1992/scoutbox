@@ -39,7 +39,7 @@
 import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 import { quote } from './fieldSpecs.mjs';
 import { REVIEWER_ROLES } from './compliancePolicies.mjs';
 import { FACETS, VERIFICATION_STATES, AGREEMENT_STATUSES } from '../domains/agents/public.mjs';

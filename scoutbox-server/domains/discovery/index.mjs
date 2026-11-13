@@ -20,7 +20,7 @@ export function createPlayerInsights(deps) {
  * decided?) and Nobody Missed (do eligible players match the club's own criteria without ever entering its workflow?);
  * and Explainable Matching, which reuses the same stored facts and the Rooms' one Room-creation path. None of them
  * judges talent or ranks, and none registers a player, guardian or public route. Returns `checkSavedSearches` and the
- * match facts keeper, which `server.mjs` starts and sweeps.
+ * match facts keeper, which `wiring.mjs` starts and sweeps.
  */
 export function createDiscovery(deps) {
   needs('createDiscovery', deps, [

@@ -42,7 +42,7 @@ import { TRIAL_REPORT_FIELDS } from '../domain.mjs';
 import { refreshProfileSignals } from './identity.mjs';
 import { writeKit } from './writes.mjs';
 import { ids } from './fieldSpecs.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const RECRUITMENT_MIGRATION = '0015_recruitment';
 export const RECRUITMENT_COLLECTIONS = Object.freeze(['requests', 'trials']);
@@ -82,7 +82,7 @@ export function idempotencyKeysDdl(owners) {
 
 // ------------------------------------------------------------------ vocabulary
 const REQUEST_TYPES = ['contact', 'trial'];
-/** `suspended`: an urgent safety report froze the pending request (server.mjs, the report route). */
+/** `suspended`: an urgent safety report froze the pending request (wiring.mjs, the report route). */
 const REQUEST_STATUSES = ['pending', 'accepted', 'declined', 'suspended'];
 const PARTIES = ['player', 'guardian'];
 const ACTOR_KINDS = ['org', 'player', 'guardian', 'system'];

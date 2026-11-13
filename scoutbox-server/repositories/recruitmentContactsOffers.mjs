@@ -40,7 +40,7 @@ import {
   OFFER_RESPONSE_TYPES,
   OFFER_RESPONSE_ACTORS,
 } from '../domains/recruitment/public.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';
 export const RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS = Object.freeze(['recruitmentContacts', 'recruitmentOffers']);

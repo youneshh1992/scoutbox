@@ -1,5 +1,5 @@
 // What the discovery domain offers the rest of the server to import: its vocabulary, pure rules and views. Nothing here
-// holds state or registers a route; the domain's services reach other domains through server.mjs, not through here.
+// holds state or registers a route; the domain's services reach other domains through wiring.mjs, not through here.
 export { CRITERION_CLASSES, CRITERION_TYPES, LIMITS as MATCH_LIMITS, criterionId } from './matching/criteria.mjs';
 export {
   ENTRY_REASONS,

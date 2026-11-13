@@ -46,7 +46,7 @@ import {
   historyOf,
   histOut,
 } from './scoutingEvidence.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_LEVELS } from './identity.mjs';
 import { ORG_LEVELS } from './orgs.mjs';
 import { parseStrictDateOnly } from '../temporal.mjs';

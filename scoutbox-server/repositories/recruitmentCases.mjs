@@ -51,7 +51,7 @@ import {
 } from '../domains/recruitment/public.mjs';
 import { CURRENCIES, BUDGET_LINE_KINDS, BUDGET_SCHEDULES } from '../domains/recruitment/public.mjs';
 import { HANDOFF_STATUSES } from '../domains/agents/public.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const RECRUITMENT_CASES_MIGRATION = '0016_recruitment_cases';
 export const RECRUITMENT_CASES_COLLECTIONS = Object.freeze([

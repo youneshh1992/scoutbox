@@ -69,7 +69,7 @@ import {
   storedItem,
   PLAYER_SUBRECORDS_MIGRATION,
 } from './playerSubrecords.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const CORE_IDENTITY_LIVE_MIGRATION = '0005_core_identity_live';
 export const PLAYER_ERASURE_MIGRATION = '0014_player_erasure';
@@ -1475,7 +1475,7 @@ export function createIdentityRepositories({
     return q(sql).all(...keyArgs, ...w.args, ...afterArgs, limit + 1);
   };
   const keyOfRow = (n) => (r) => Array.from({ length: n }, (_, i) => r[`k${i}`]);
-  /** The order of the org directory (server.mjs /org/players): declared in its X-ScoutBox-Ordering header. */
+  /** The order of the org directory (wiring.mjs /org/players): declared in its X-ScoutBox-Ordering header. */
   const directoryOrder = (org) =>
     (org.level ?? null) === 'grassroots'
       ? [

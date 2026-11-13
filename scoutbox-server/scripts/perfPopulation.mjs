@@ -100,7 +100,7 @@ export function syntheticPopulation({ players: PLAYERS, now = Date.now() }) {
       location: { lat: 51.5, lng: -0.1 },
       notificationPrefs: null,
       firstTeamSeeker: false,
-      programme: null, // the defaults the boot writes (server.mjs) where a record lacks them
+      programme: null, // the defaults the boot writes (wiring.mjs) where a record lacks them
     };
   });
   return { orgs, users, guardians, players, counts: { orgs: ORGS, guardians: GUARDIANS, players: PLAYERS } };

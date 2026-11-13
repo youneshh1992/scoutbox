@@ -1,11 +1,14 @@
 // `npm run check:boundaries`: the server's import rules (docs/architecture.md, "Domain boundaries").
 //
 //   1. No import cycles between server modules.
-//   2. A domain imports another domain only through that domain's `public.mjs`, and only a domain in a lower layer of
-//      DOMAIN_LAYERS. `domains/platform/` is the lowest layer: any module may import it, and it imports no domain.
-//   3. Code outside `domains/` (the repositories, the shared rule modules) imports a domain only through its
-//      `public.mjs`. `server.mjs` wires the domains together and may import any module.
-//   4. A `public.mjs` only re-exports from its own domain's modules, and never from one that registers routes.
+//   2. A domain imports another domain only through that domain's public module (`public.mjs`, or `public.ts`), and
+//      only a domain in a lower layer of DOMAIN_LAYERS. `domains/platform/` is the lowest layer: any module may import
+//      it, and it imports no domain.
+//   3. Code outside `domains/` (the repositories, the shared rule modules) imports a domain only through its public
+//      module. `wiring.mjs` wires the domains together and may import any module.
+//   4. A public module only re-exports from its own domain's modules, and never from one that registers routes.
+//
+// Server modules are `.mjs` and `.ts`; a type-only import is held to the same rules as any other.
 //   5. Every relative import names a file that exists, and every domain folder has a layer.
 //
 // The tests (`e2e/`, `scripts/`) may import any module.
@@ -28,7 +31,9 @@ export const DOMAIN_LAYERS = [
 ];
 
 const SKIPPED_DIRS = new Set(['node_modules', 'e2e', 'scripts', 'data', 'public', 'assets']);
-const COMPOSITION_ROOT = 'server.mjs';
+const COMPOSITION_ROOT = /^wiring\.(mjs|ts)$/;
+const MODULE = /^(?!.*\.d\.m?ts$).*\.(mjs|ts)$/;
+const PUBLIC = /^domains\/[^/]+\/public\.(mjs|ts)$/;
 
 const STATIC_IMPORT = /^[ \t]*(?:import|export)\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/gms;
 const BARE_IMPORT = /^[ \t]*import\s*['"]([^'"]+)['"]/gm;
@@ -43,7 +48,7 @@ function serverModules(root) {
       const rel = dir ? `${dir}/${e.name}` : e.name;
       if (e.isDirectory()) {
         if (!SKIPPED_DIRS.has(e.name)) walk(rel);
-      } else if (e.name.endsWith('.mjs')) out.push(rel);
+      } else if (MODULE.test(e.name)) out.push(rel);
     }
   })('');
   return out.sort();
@@ -103,6 +108,8 @@ export function checkBoundaries(root, { layers = DOMAIN_LAYERS } = {}) {
   const known = new Set(files);
   const sources = new Map(files.map((f) => [f, fs.readFileSync(path.join(root, f), 'utf8')]));
   const graph = new Map();
+  const publicOf = (domain) =>
+    known.has(`domains/${domain}/public.ts`) ? `domains/${domain}/public.ts` : `domains/${domain}/public.mjs`;
 
   const domainsDir = path.join(root, 'domains');
   if (fs.existsSync(domainsDir))
@@ -122,20 +129,20 @@ export function checkBoundaries(root, { layers = DOMAIN_LAYERS } = {}) {
       }
       edges.push(target);
       const to = domainOf(target);
-      if (!to || to === from || file === COMPOSITION_ROOT) continue;
+      if (!to || to === from || COMPOSITION_ROOT.test(file)) continue;
       if (from === 'platform') {
         problems.push(`${file} imports ${target}: the platform layer imports no domain`);
         continue;
       }
       if (to === 'platform') continue;
-      if (target !== `domains/${to}/public.mjs`)
-        problems.push(`${file} imports ${target}: another domain is imported through domains/${to}/public.mjs`);
+      if (!PUBLIC.test(target))
+        problems.push(`${file} imports ${target}: another domain is imported through ${publicOf(to)}`);
       if (from && layerOf.has(from) && layerOf.has(to) && layerOf.get(to) >= layerOf.get(from))
         problems.push(`${file} imports the ${to} domain, which is not in a lower layer than ${from}`);
     }
   }
 
-  for (const file of files.filter((f) => /^domains\/[^/]+\/public\.mjs$/.test(f))) {
+  for (const file of files.filter((f) => PUBLIC.test(f))) {
     const domain = domainOf(file);
     const body = sources
       .get(file)
@@ -146,7 +153,7 @@ export function checkBoundaries(root, { layers = DOMAIN_LAYERS } = {}) {
       .map((s) => s.trim())
       .filter(Boolean);
     for (const st of statements) {
-      const m = /^export\s*\{[^}]*\}\s*from\s*['"](\.[^'"]+)['"]$/s.exec(st);
+      const m = /^export\s*(?:type\s*)?\{[^}]*\}\s*from\s*['"](\.[^'"]+)['"]$/s.exec(st);
       if (!m) {
         problems.push(`${file} holds something other than re-exports: ${st.split('\n')[0].slice(0, 80)}`);
         continue;

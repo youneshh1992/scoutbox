@@ -43,7 +43,7 @@
 import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { migrationApplied, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 import { quote } from './fieldSpecs.mjs';
 import { REPRESENTATION_STATUSES } from './complianceRecords.mjs';
 import { VERIFICATION_STATES, SCOPES } from '../domains/agents/public.mjs';

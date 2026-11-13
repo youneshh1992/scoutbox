@@ -1,12 +1,14 @@
 // Runtime compatibility contract: the data layer needs
-// `DatabaseSync.prototype.isTransaction` (Node.js 22.16 / 24.0), so an
+// `DatabaseSync.prototype.isTransaction`, and the TypeScript modules need
+// type stripping on (Node.js 22.18 / 24.0 for both), so an
 // unsupported runtime must be refused clearly BEFORE the data directory is
 // created or modified, and a supported one must write, roll a failed unit back
 // and retry. Three kinds of check, labelled in the output:
 //   [current runtime]  the Node.js running this suite — a real runtime test;
 //   [simulation]       the current runtime with isTransaction masked by
-//                      scripts/runtime/maskIsTransaction.cjs — NOT a real
-//                      older runtime, only the shape of its API;
+//                      scripts/runtime/maskIsTransaction.cjs, or with type
+//                      stripping switched off — NOT a real older runtime,
+//                      only the shape of its API;
 //   [real runtime vX]  every extra Node.js binary named in
 //                      SCOUTBOX_TEST_NODE_BINS (colon-separated paths) — the
 //                      same probe on the actual binary; skipped when unset.
@@ -40,8 +42,9 @@ const digestDir = (dir) => {
   }
   return h.digest('hex');
 };
-const runProbe = (bin, dir, { mask = false } = {}) => {
-  const r = spawnSync(bin, [...(mask ? ['--require', MASK] : []), PROBE, dir], {
+const NO_STRIP = '--no-experimental-strip-types';
+const runProbe = (bin, dir, { mask = false, noStrip = false } = {}) => {
+  const r = spawnSync(bin, [...(mask ? ['--require', MASK] : []), ...(noStrip ? [NO_STRIP] : []), PROBE, dir], {
     encoding: 'utf8',
     env: { ...process.env, SCOUTBOX_QUIET_LOGS: '1' },
   });
@@ -64,7 +67,7 @@ const atLeast = (v, min) => {
 };
 const supportedByContract = (v) => {
   const [major] = parseVersion(v);
-  return major >= 24 || (major === 22 && atLeast(v, '22.16.0'));
+  return major >= 24 || (major === 22 && atLeast(v, '22.18.0'));
 };
 
 const runtime = await import('../runtime.mjs').catch((err) => ({ missing: err.message }));
@@ -75,15 +78,16 @@ test('[current runtime] the support check describes this Node.js and finds the t
   assert.equal(s.version, process.version);
   assert.equal(s.ok, true, s.reason);
   assert.equal(s.hasTransactionState, true);
+  assert.equal(s.stripsTypes, true);
   assert.equal(typeof runtime.MIN_NODE, 'object');
-  assert.equal(runtime.MIN_NODE[22], '22.16.0');
+  assert.equal(runtime.MIN_NODE[22], '22.18.0');
   assert.equal(runtime.MIN_NODE[24], '24.0.0');
   assert.doesNotThrow(() => runtime.requireRuntime());
   // The contract is what package.json advertises.
   const pkg = JSON.parse(fs.readFileSync(path.join(SERVER, 'package.json'), 'utf8'));
-  assert.equal(pkg.engines.node, '>=22.16.0', 'engines.node matches the minimum the code needs');
+  assert.equal(pkg.engines.node, '>=22.18.0', 'engines.node matches the minimum the code needs');
   const lock = JSON.parse(fs.readFileSync(path.join(SERVER, 'package-lock.json'), 'utf8'));
-  assert.equal(lock.packages['']?.engines?.node, '>=22.16.0', 'package-lock mirrors engines.node');
+  assert.equal(lock.packages['']?.engines?.node, '>=22.18.0', 'package-lock mirrors engines.node');
 });
 
 test(`[current runtime] ${process.version} (real): a normal save, a failed save rolled back, and the retry persisting the change`, () => {
@@ -107,7 +111,7 @@ test('[simulation] with isTransaction masked, the store refuses the runtime as u
     `expected the unsupported-runtime exit (3), got ${r.status}: ${JSON.stringify(r.out)} ${r.stderr.slice(-400)}`,
   );
   assert.equal(r.out.error?.code, 'NODE_UNSUPPORTED');
-  assert.match(r.out.error.message, /22\.16/, 'the message names the minimum release');
+  assert.match(r.out.error.message, /22\.18/, 'the message names the minimum release');
   assert.match(r.out.error.message, /not touched/i);
   assert.deepEqual(r.out.steps, [], 'nothing was opened');
   assert.equal(fs.existsSync(absent), false, 'the data directory was not created');
@@ -134,6 +138,38 @@ test('[simulation] the server refuses to boot on the masked runtime: non-zero ex
   const log = `${r.stdout}\n${r.stderr}`;
   assert.notEqual(r.status, 0, `the server must not start: exit ${r.status}`);
   assert.match(log, /NODE_UNSUPPORTED/);
+  assert.ok(!/listening on/.test(log), 'never listened');
+  assert.equal(fs.existsSync(dir), false, 'the data directory was not created');
+  fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+});
+
+test('[simulation] with type stripping off, the probe is refused as unsupported before the store is loaded or the data directory touched', () => {
+  const absent = path.join(tempDir('rt-nostrip'), 'data');
+  const r = runProbe(process.execPath, absent, { noStrip: true });
+  assert.equal(
+    r.status,
+    3,
+    `expected the unsupported-runtime exit (3), got ${r.status}: ${JSON.stringify(r.out)} ${r.stderr.slice(-400)}`,
+  );
+  assert.equal(r.out.error?.code, 'NODE_UNSUPPORTED');
+  assert.match(r.out.error.message, /type stripping/);
+  assert.match(r.out.error.message, new RegExp(NO_STRIP), 'the message names the flag that switched it off');
+  assert.deepEqual(r.out.steps, [], 'nothing was opened');
+  assert.equal(fs.existsSync(absent), false, 'the data directory was not created');
+  fs.rmSync(path.dirname(absent), { recursive: true, force: true });
+});
+
+test('[simulation] the server refuses to boot with type stripping off: NODE_UNSUPPORTED rather than a failure to load a .ts module, data directory never created', () => {
+  const dir = path.join(tempDir('rt-nostrip-server'), 'data');
+  const r = spawnSync(process.execPath, [NO_STRIP, path.join(SERVER, 'server.mjs')], {
+    encoding: 'utf8',
+    env: { ...process.env, DATA_DIR: dir, PORT: '0', SCOUTBOX_QUIET_LOGS: '1' },
+    timeout: 30_000,
+  });
+  const log = `${r.stdout}\n${r.stderr}`;
+  assert.notEqual(r.status, 0, `the server must not start: exit ${r.status}`);
+  assert.match(log, /NODE_UNSUPPORTED/);
+  assert.ok(!/ERR_UNKNOWN_FILE_EXTENSION/.test(log), 'refused by the check, not by the module loader');
   assert.ok(!/listening on/.test(log), 'never listened');
   assert.equal(fs.existsSync(dir), false, 'the data directory was not created');
   fs.rmSync(path.dirname(dir), { recursive: true, force: true });

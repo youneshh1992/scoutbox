@@ -28,7 +28,7 @@ import crypto from 'node:crypto';
 import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 import { text, int, oneOf, group, tableDdl, decode } from './fieldSpecs.mjs';
 
 export const TRANSITIONS_MIGRATION = '0025_transitions_vouches';

@@ -21,7 +21,7 @@ import {
 } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const UPLOAD_SESSIONS_MIGRATION = '0038_operations';
 export const UPLOAD_SESSIONS_COLLECTIONS = Object.freeze(['uploadSessions']);

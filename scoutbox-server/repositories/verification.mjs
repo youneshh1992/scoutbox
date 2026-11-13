@@ -34,7 +34,7 @@ import { isPlainObject, describe } from './fieldSpecs.mjs';
 import { text, int, bool, oneOf, group, quote, tableDdl, decode, insertSql } from './fieldSpecs.mjs';
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
 import { writeKit } from './writes.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const VERIFICATION_MIGRATION = '0023_verification';
 export const VERIFICATION_COLLECTIONS = Object.freeze([

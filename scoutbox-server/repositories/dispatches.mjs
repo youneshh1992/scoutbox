@@ -14,7 +14,7 @@
  * Refusals name tables, ids and fields, never an address or a provider text.
  */
 import { migrationApplied, childRowsOf, operationOn } from './database.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 import { pageOf } from '../domains/platform/paging.mjs';
 
 export const DISPATCHES_MIGRATION = '0010_dispatches';

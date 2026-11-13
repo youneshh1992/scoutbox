@@ -22,7 +22,7 @@
 import { PLANS } from '../catalogue.mjs';
 import { transaction, migrationApplied, operationOn } from './database.mjs';
 import { pageOf } from '../domains/platform/paging.mjs';
-import { deepFreeze } from '../domains/platform/values.mjs';
+import { deepFreeze } from '../domains/platform/values.ts';
 
 export const ORGS_TABLE_MIGRATION = '0004_orgs_live';
 /** `meta` key holding the initialisation state (`pending` | `done`). */

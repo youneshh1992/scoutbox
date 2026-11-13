@@ -14,7 +14,7 @@ end of the feature freeze.
 
 ## Security
 
-- **The admin console key has a default.** With no `ADMIN_KEY` set, `server.mjs` accepts `scoutbox-admin` as the
+- **The admin console key has a default.** With no `ADMIN_KEY` set, `wiring.mjs` accepts `scoutbox-admin` as the
   `x-admin-key` for every `/admin` route, including the guardian ID review, in every mode. Secrets should have no
   default: the server should refuse to serve `/admin` without a key (and the setting should be registered in
   `domains/platform/capabilities.mjs`). The tests and the seed scripts send the default key and would need to set it.
@@ -144,20 +144,20 @@ keep, or code with nothing left to do.
 - **The signing typers repair input instead of refusing it.** `repositories/signingsFollowUps.mjs` turns a missing
   `method` into `LEGACY_RECORDED`, a missing `rev` or `policyVersion` into 1, drops unknown fields, and reports each in
   `notes`, against the valid-input-only rule.
-- **The `/admin` key has a default** (`ADMIN_KEY || 'scoutbox-admin'` in `server.mjs`). Production refuses to boot
+- **The `/admin` key has a default** (`ADMIN_KEY || 'scoutbox-admin'` in `wiring.mjs`). Production refuses to boot
   with it (`ADMIN_KEY_UNSAFE`), but the rule is that secrets have no defaults.
 - **An agent dispute notice is out of date.** It says attributed T&S review "is not yet available in this build"
   (`domains/agents/core/index.mjs`), but attributed reviewers exist and resolve disputes. `e2e/agents/core.mjs`
   asserts the wording, so the copy and the check change together.
 - **Rate-limit policy and the auth limiter disagree.** `RATE_LIMIT_POLICY` (`domains/platform/rateLimit.mjs`) lists
-  `auth_attempt` at 30 a minute, but the `/auth` limiter in `server.mjs` allows 40 and nothing seems to read the row.
+  `auth_attempt` at 30 a minute, but the `/auth` limiter in `wiring.mjs` allows 40 and nothing seems to read the row.
 - **Keys that may now be possible.** `dispatches.org_id` is deferred for a reason that no longer holds (organisations
   are written explicitly). Guardian ids on recruitment requests and trials and on the safety and audit tables carry no
   key for reasons that no longer hold either; a real key may now be possible.
 - **Probably dead code:** `sessions.exportRows` (no callers); `oneTimeCodes.validatePairingCodeRow`, which still
   accepts the old plain-code format, and `exportEmailChallenges` / `exportPairingCodes` (used only by
   `scripts/testOneTimeCodes.mjs`); the old fingerprint without a mode accepted in
-  `domains/recruitment/lifecycle/contactRoutes.mjs`; `ctx.combineFacts` (only passed through in `server.mjs`); the
+  `domains/recruitment/lifecycle/contactRoutes.mjs`; `ctx.combineFacts` (only passed through in `wiring.mjs`); the
   media queue's `liveRecords` option.
 - **Tests that test nothing or test old data.** The "a save writes no row" checks in `scripts/testSigningsFollowUps.mjs`
   and `scripts/testRecruitmentContactsOffers.mjs` compare two dumps with no save between them. `s3File` in

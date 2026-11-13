@@ -17,7 +17,7 @@ grassroots clubs and agents discover and recruit them, with safeguarding for und
 
 ## Running it locally
 
-Node ≥22.16 on the 22 line, or ≥24. The server uses `node:sqlite`.
+Node ≥22.18 on the 22 line, or ≥24. The server uses `node:sqlite`, and runs its TypeScript with Node's type stripping.
 
 ```bash
 npm run setup      # once: installs every app from its lockfile

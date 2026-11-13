@@ -3,7 +3,7 @@
  * request". Each domain keeps its own error code.
  */
 
-import { canonicalJson } from './values.mjs';
+import { canonicalJson } from './values.ts';
 
 export const CLIENT_KEY_MAX = 64;
 

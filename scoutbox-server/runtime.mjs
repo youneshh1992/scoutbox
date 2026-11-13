@@ -11,9 +11,15 @@
  * checked BEFORE the data directory is created or opened, and an unsupported
  * one is refused with `NODE_UNSUPPORTED` and nothing written.
  *
+ * The server is partly TypeScript, which Node.js runs by stripping the types:
+ * on by default from 22.18.0 on the 22 line (and in every 24 release), and
+ * off when started with --no-experimental-strip-types. Without it the
+ * TypeScript modules can't be loaded, so server.mjs checks the runtime before
+ * loading anything else.
+ *
  * The decision combines the release floor (what `package.json` advertises)
- * with feature detection on an in-memory connection, so a build that lacks
- * the property is refused whatever its version string says.
+ * with feature detection (an in-memory connection, `process.features`), so a
+ * build that lacks either is refused whatever its version string says.
  */
 let DatabaseSync = null;
 try {
@@ -23,7 +29,7 @@ try {
 }
 
 /** Minimum release per supported line (what `engines.node` and the docs say). */
-export const MIN_NODE = Object.freeze({ 22: '22.16.0', 24: '24.0.0' });
+export const MIN_NODE = Object.freeze({ 22: '22.18.0', 24: '24.0.0' });
 export const CONTRACT = `Node.js ${MIN_NODE[22]} or later on the 22 line, or ${MIN_NODE[24]} or later`;
 
 const parse = (v) =>
@@ -65,27 +71,31 @@ export function runtimeSupport() {
   } catch {
     hasTransactionState = false;
   }
-  // Release floor: the two supported lines; any other line (23, 25+) is accepted only on the feature check.
-  const versionOk = major >= 24 || (major === 22 ? atLeast(version, MIN_NODE[22]) : hasTransactionState);
-  if (!versionOk) {
-    return {
-      ok: false,
-      code: 'NODE_UNSUPPORTED',
-      version,
-      hasTransactionState,
-      reason: `Node.js ${version} is not supported: ScoutBox needs ${CONTRACT} (node:sqlite transaction state, DatabaseSync.isTransaction, arrived in those releases).`,
-    };
-  }
-  if (!hasTransactionState) {
-    return {
-      ok: false,
-      code: 'NODE_UNSUPPORTED',
-      version,
-      hasTransactionState,
-      reason: `Node.js ${version} is not supported: its node:sqlite has no DatabaseSync.isTransaction, which ScoutBox needs (${CONTRACT}).`,
-    };
-  }
-  return { ok: true, code: null, version, hasTransactionState, reason: null };
+  // 'strip' or 'transform' when Node.js runs TypeScript; false when it can't or was told not to.
+  const stripsTypes = typeof process.features?.typescript === 'string';
+  const refuse = (reason) => ({
+    ok: false,
+    code: 'NODE_UNSUPPORTED',
+    version,
+    hasTransactionState,
+    stripsTypes,
+    reason,
+  });
+  // Release floor: the two supported lines; any other line (23, 25+) is accepted only on the feature checks.
+  const versionOk = major >= 24 || (major === 22 ? atLeast(version, MIN_NODE[22]) : hasTransactionState && stripsTypes);
+  if (!versionOk)
+    return refuse(
+      `Node.js ${version} is not supported: ScoutBox needs ${CONTRACT} (node:sqlite transaction state, and TypeScript type stripping on by default, arrived in those releases).`,
+    );
+  if (!hasTransactionState)
+    return refuse(
+      `Node.js ${version} is not supported: its node:sqlite has no DatabaseSync.isTransaction, which ScoutBox needs (${CONTRACT}).`,
+    );
+  if (!stripsTypes)
+    return refuse(
+      `Node.js ${version} is not running TypeScript${process.execArgv.some((a) => /no-experimental-strip-types/.test(a)) ? ' (it was started with --no-experimental-strip-types)' : ''}: ScoutBox needs type stripping, on by default in ${CONTRACT}.`,
+    );
+  return { ok: true, code: null, version, hasTransactionState, stripsTypes, reason: null };
 }
 
 /** Throw `NODE_UNSUPPORTED` / `SQLITE_REQUIRED` with a clear message, or return the support description. */

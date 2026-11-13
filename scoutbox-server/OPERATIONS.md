@@ -7,11 +7,13 @@ server code: [`../docs/architecture.md`](../docs/architecture.md).
 
 ## Running locally
 
-- **Node.js 22.16+ on the 22 line, or 24.0+.** The server uses the built-in `node:sqlite`
-  module and relies on `DatabaseSync.isTransaction`. `runtime.mjs` defines this check.
+- **Node.js 22.18+ on the 22 line, or 24.0+.** The server uses the built-in `node:sqlite`
+  module and relies on `DatabaseSync.isTransaction`, and runs its TypeScript modules with
+  Node's type stripping (on by default from those releases; don't start it with
+  `--no-experimental-strip-types`). `runtime.mjs` defines this check.
   On an unsupported runtime the process stops at startup, before touching `DATA_DIR`:
   `SQLITE_REQUIRED` means the module is missing, and `NODE_UNSUPPORTED` means Node is
-  too old. There is no JSON or in-memory fallback.
+  too old or isn't running TypeScript. There is no JSON or in-memory fallback.
 - **Install and start:** `cd scoutbox-server && npm install && npm start`. The server
   listens on `PORT`, which defaults to `4000`.
 - **Data directory:** `DATA_DIR` defaults to `scoutbox-server/data/`. It holds
@@ -91,7 +93,7 @@ counter, written at every mint). The schema version is the latest migration's nu
 `/capabilities` → `schema` and on every response as `X-ScoutBox-Schema`. `GET /capabilities` → `dataLayer` lists
 the tables, the applied migrations and each domain's counts.
 
-**Boot order** (`server.mjs`): open the store → `attachDataLayer` (the table migrations, then the repositories; a
+**Boot order**: `server.mjs` checks the runtime, then `wiring.mjs` opens the store → `attachDataLayer` (the table migrations, then the repositories; a
 first installation imports `buildSeed()`'s organisations, players and guardians once) → integrity report → module
 registration → listen. A failed migration rolls back and stops the boot with the file unchanged.
 
