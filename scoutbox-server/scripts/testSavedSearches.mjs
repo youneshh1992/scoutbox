@@ -108,6 +108,15 @@ test('[typing] junk is refused naming the record and field', () => {
   }
 });
 
+test('[typing] a search with no filters is typed with none, as one with empty filters is', () => {
+  const { filters: _f, ...unfiltered } = search();
+  for (const raw of [unfiltered, { ...unfiltered, filters: {} }]) {
+    const t = typeSavedSearch(raw);
+    assert.ok(t.ok, t.reason);
+    assert.deepEqual(t.record.filters, {});
+  }
+});
+
 test("[typing] the route's filter reading: empty, false and null mean no filter; junk names the field", () => {
   assert.deepEqual(
     readSearchFilters({ q: '  ', country: '', foot: null }),

@@ -93,6 +93,8 @@ export function typeScalar(f, v, at) {
   } else if (!f.vals.includes(v)) return bad(at, f.k, `must be one of ${f.vals.join('|')} (got ${describe(v)})`);
   return { ok: true, value: v };
 }
+/** A sparse group's object: only its non-null keys. */
+const setOnly = (o) => Object.fromEntries(Object.entries(o).filter(([, x]) => x !== null));
 /** Type `raw` against `spec`; `extra` lists keys the caller types itself. `{ ok, record }` or `{ ok: false, reason }` naming the field, never its content. */
 export function typeSpec(spec, raw, at, extra = []) {
   if (!isPlainObject(raw)) return { ok: false, reason: `${at} is not an object (${describe(raw)})` };
@@ -112,14 +114,14 @@ export function typeSpec(spec, raw, at, extra = []) {
         if (f.sparse) {
           const t = typeSpec(f.group, {}, `${at}.${f.k}`);
           if (!t.ok) return t;
-          out[f.k] = t.record;
+          out[f.k] = setOnly(t.record);
           continue;
         }
         return bad(at, f.k, `is required (got ${describe(v)})`);
       }
       const t = typeSpec(f.group, v, `${at}.${f.k}`);
       if (!t.ok) return t;
-      out[f.k] = f.sparse ? Object.fromEntries(Object.entries(t.record).filter(([, x]) => x !== null)) : t.record;
+      out[f.k] = f.sparse ? setOnly(t.record) : t.record;
       continue;
     }
     const t = typeScalar(f, v, at);
@@ -150,7 +152,7 @@ export const decode = (spec, row) => {
         if (!f.sparse) out[f.k] = null;
         continue;
       }
-      out[f.k] = f.sparse ? Object.fromEntries(Object.entries(inner).filter(([, x]) => x !== null)) : inner;
+      out[f.k] = f.sparse ? setOnly(inner) : inner;
       continue;
     }
     const v = row[f.c];
