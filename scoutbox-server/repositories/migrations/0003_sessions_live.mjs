@@ -2,7 +2,7 @@
  * Records the session lifetime that session expiries are computed with. Session rows carry token hashes, never
  * tokens.
  */
-import { SESSIONS_TABLE_MIGRATION, DEFAULT_SESSION_TTL_MS } from '../sessions.mjs';
+import { SESSIONS_TABLE_MIGRATION, DEFAULT_SESSION_TTL_MS } from '../sessions.ts';
 
 export const id = SESSIONS_TABLE_MIGRATION;
 export const note = 'sessions become table-backed (token hashes only)';

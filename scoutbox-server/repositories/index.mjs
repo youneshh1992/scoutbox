@@ -11,7 +11,7 @@
  */
 import { runDataMigrations, dataSchemaReport } from './database.ts';
 import { createUsersRepository, USERS_TABLE } from './users.ts';
-import { createSessionsRepository, SESSIONS_TABLE } from './sessions.mjs';
+import { createSessionsRepository, SESSIONS_TABLE } from './sessions.ts';
 import { createOrgsRepository, ORGS_TABLE } from './orgs.ts';
 import { createIdentityRepositories, IDENTITY_RECORDS, IDENTITY_COLLECTIONS } from './identity.ts';
 import { PLAYERS_RETAINED } from './playerRecord.ts';

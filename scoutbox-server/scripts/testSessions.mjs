@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations } from '../repositories/database.ts';
-import { createSessionsRepository, SESSIONS_TABLE_MIGRATION } from '../repositories/sessions.mjs';
+import { createSessionsRepository, SESSIONS_TABLE_MIGRATION } from '../repositories/sessions.ts';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { openStore } from '../store.ts';
 import { writeFixture, readRecords } from './dataLayerFixture.mjs';
@@ -119,6 +119,9 @@ test('repository: create returns the token once; the table and the list queries 
   assert.ok(!dump.includes(token), 'the plain token appears nowhere');
   assert.ok(listed.includes(session.sid) && !listed.includes(sha256(token)), 'a list carries neither token nor hash');
   assert.equal('view' in repo, false, 'no mirror and no view');
+  const org = repo.create('org', 'org-a', { userId: 'usr-1', via: 'sso' }).session;
+  for (const row of [session, org, repo.byToken(token), repo.bySid(org.sid), ...repo.listOrgUser('usr-1')])
+    assert.ok(Object.isFrozen(row), 'a session handed out is frozen, so a reader cannot change it');
   assert.throws(() => repo.create('org', 'org-a', {}), /needs a staff member/);
   assert.throws(() => repo.create('wizard', 'x'), /not a session kind/);
   assert.throws(() => repo.create('player', 'pl-1', { via: 'carrier-pigeon' }), /not supported/);
