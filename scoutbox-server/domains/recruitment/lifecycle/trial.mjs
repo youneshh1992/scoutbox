@@ -40,13 +40,9 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 // ------------------------------------------------------------------ vocabulary
 
 /** `legacy_accepted` is a read-only interpretation of a row with no operational fields. */
-export const TRIAL_WORKFLOW_STATES = Object.freeze([
-  'legacy_accepted',
-  'accepted',
-  'scheduled',
-  'completed',
-  'cancelled',
-]);
+export const TRIAL_WORKFLOW_STATES = Object.freeze(
+  /** @type {const} */ (['legacy_accepted', 'accepted', 'scheduled', 'completed', 'cancelled']),
+);
 export const TRIAL_FINAL_STATES = Object.freeze(['completed', 'cancelled']);
 
 export const TRIAL_WORKFLOW_LABELS = table({
@@ -58,30 +54,34 @@ export const TRIAL_WORKFLOW_LABELS = table({
 });
 
 /** Contextual session kinds. */
-export const TRIAL_SESSION_KINDS = Object.freeze(['onboarding', 'training', 'drill', 'small_sided', 'match', 'other']);
+export const TRIAL_SESSION_KINDS = Object.freeze(
+  /** @type {const} */ (['onboarding', 'training', 'drill', 'small_sided', 'match', 'other']),
+);
 
 /** `not_recorded` is derived, never stored. */
-export const TRIAL_ATTENDANCE_STATES = Object.freeze([
-  'attended',
-  'partial',
-  'no_show',
-  'club_cancelled',
-  'player_withdrew',
-]);
-export const TRIAL_ATTENDANCE_SOURCES = Object.freeze(['checkin', 'manual']);
+export const TRIAL_ATTENDANCE_STATES = Object.freeze(
+  /** @type {const} */ (['attended', 'partial', 'no_show', 'club_cancelled', 'player_withdrew']),
+);
+export const TRIAL_ATTENDANCE_SOURCES = Object.freeze(/** @type {const} */ (['checkin', 'manual']));
 /** The player took part. */
 export const TRIAL_ATTENDED_STATES = Object.freeze(['attended', 'partial']);
 
-export const TRIAL_COMPLETION_STATES = Object.freeze(['completed', 'cancelled']);
-export const TRIAL_CANCEL_ACTORS = Object.freeze(['club', 'player', 'guardian', 'system']);
+export const TRIAL_COMPLETION_STATES = Object.freeze(/** @type {const} */ (['completed', 'cancelled']));
+export const TRIAL_CANCEL_ACTORS = Object.freeze(/** @type {const} */ (['club', 'player', 'guardian', 'system']));
 /** A mandatory report is owed until it is filed. */
-export const TRIAL_STATUSES = Object.freeze(['awaiting_report', 'reported']);
+export const TRIAL_STATUSES = Object.freeze(/** @type {const} */ (['awaiting_report', 'reported']));
 /** Trial-day vocabulary (domains/scouting/journeys.mjs): staff background-check states, day status events, event-consent scopes. */
-export const TRIAL_STAFF_CHECK_STATES = Object.freeze(['pending', 'reviewed', 'expired', 'rejected']);
-export const TRIAL_DAY_EVENT_KINDS = Object.freeze(['cancelled', 'postponed']);
-export const TRIAL_CONSENT_SCOPES = Object.freeze(['player_event_consent', 'guardian_event_consent']);
+export const TRIAL_STAFF_CHECK_STATES = Object.freeze(
+  /** @type {const} */ (['pending', 'reviewed', 'expired', 'rejected']),
+);
+export const TRIAL_DAY_EVENT_KINDS = Object.freeze(/** @type {const} */ (['cancelled', 'postponed']));
+export const TRIAL_CONSENT_SCOPES = Object.freeze(
+  /** @type {const} */ (['player_event_consent', 'guardian_event_consent']),
+);
 /** The acts whose client keys a trial remembers (trialRoutes.mjs keyRecord). */
-export const TRIAL_KEY_ACTS = Object.freeze(['schedule', 'cancel', 'attendance', 'complete', 'link']);
+export const TRIAL_KEY_ACTS = Object.freeze(
+  /** @type {const} */ (['schedule', 'cancel', 'attendance', 'complete', 'link']),
+);
 
 export const TRIAL_LIMITS = Object.freeze({
   sessions: 20,

@@ -283,7 +283,7 @@ export const TRIAL_REPORT_FIELDS = [
   'passCompletionPct', // 0-100
   'duelSuccessPct', // 0-100
   'coachRating', // 1-10
-];
+] as const;
 
 export function validateTrialReport(input: unknown): { ok: boolean; missing: string[]; invalid: string[] } {
   const report = input as Record<string, unknown> | null | undefined;

@@ -3,7 +3,7 @@
  * snapshots, decisions and evidence states (repositories/recruitmentCases.mjs).
  */
 import { migrationApplied } from '../database.ts';
-import { RECRUITMENT_MIGRATION } from '../recruitment.mjs';
+import { RECRUITMENT_MIGRATION } from '../recruitment.ts';
 import { RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_DDL, RECRUITMENT_CASES_TABLES } from '../recruitmentCases.mjs';
 
 export const id = RECRUITMENT_CASES_MIGRATION;

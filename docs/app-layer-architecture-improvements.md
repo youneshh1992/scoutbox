@@ -208,7 +208,12 @@ The order, from the bottom of the import graph up, so each file is typed against
    defaulted fields optional), so a repository described by field specs gets its record types from them rather
    than writing them out a second time. `safetyAudit.ts` is the first built that way: each of its eight collections'
    records and inputs comes from its spec, and the ledger's, ops events' and source changes' details from their
-   detail fields, with the keys each type carries checked against them. The repositories that still type records in
+   detail fields, with the keys each type carries checked against them. `recruitment.ts` is the first of the large
+   repositories: the `RecruitmentRequest` and `Trial` records and their parts, what `create` accepts
+   (`RecruitmentRequestInput`, `TrialInput`, which leave out what may be null and any list), each act's input, and a
+   trial act's bookkeeping (`TrialBookkeeping`). Its row types come from its encoders, so a column and the field it
+   holds are described once, and the trial vocabularies are literal types read from `trial.mjs` through JSDoc
+   `const` assertions until the domain is converted. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
    converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
    write through the repositories are typed checks of the repositories' signatures; convert them alongside, except

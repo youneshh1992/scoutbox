@@ -62,7 +62,7 @@ import {
   RECRUITMENT_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedRecruitmentPlayers,
   retainedPlayerReferences as retainedRecruitmentPlayers,
-} from './recruitment.mjs';
+} from './recruitment.ts';
 import {
   createRecruitmentCasesRepository,
   RECRUITMENT_CASES_RECORDS,

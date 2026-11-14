@@ -1,4 +1,4 @@
-// Recruitment requests and accepted trials (repositories/recruitment.mjs, migration 0015): the typed tables, typed
+// Recruitment requests and accepted trials (repositories/recruitment.ts, migration 0015): the typed tables, typed
 // writes and refusals, SQL reads that match a table scan, units of work, the deletion unit's tombstones and the derived
 // trial reports. The trial key is deferred to COMMIT so a request or trial may name a case written later in the same
 // unit. Player references are counted, never refused (Q7a); a missing guardian is refused (Q7c; docs/decisions.md).
@@ -48,7 +48,7 @@ const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const MIGRATION = '0015_recruitment';
-const rec = await import('../repositories/recruitment.mjs');
+const rec = await import('../repositories/recruitment.ts');
 const TABLES = rec.RECRUITMENT_TABLES;
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const withRo = (dir, fn) => {

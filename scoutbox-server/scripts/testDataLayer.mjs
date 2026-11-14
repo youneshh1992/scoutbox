@@ -11,7 +11,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, transaction, dataSchemaReport } from '../repositories/database.ts';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
-import { RECRUITMENT_TABLES } from '../repositories/recruitment.mjs';
+import { RECRUITMENT_TABLES } from '../repositories/recruitment.ts';
 import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.mjs';
 import { RECRUITMENT_CONTACTS_OFFERS_TABLES } from '../repositories/recruitmentContactsOffers.mjs';
 import { SIGNINGS_FOLLOWUPS_TABLES } from '../repositories/signingsFollowUps.mjs';

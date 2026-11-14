@@ -24,7 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { openLayer, writeFixture } from './dataLayerFixture.mjs';
-import { createRecruitmentRepository } from '../repositories/recruitment.mjs';
+import { createRecruitmentRepository } from '../repositories/recruitment.ts';
 import { createSigningsFollowUpsRepository } from '../repositories/signingsFollowUps.mjs';
 import { syntheticPopulation } from './perfPopulation.mjs';
 import { tempDir, NOW } from './coreIdentityTestFixtures.mjs';
