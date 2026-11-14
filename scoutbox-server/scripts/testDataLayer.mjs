@@ -14,7 +14,7 @@ import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/
 import { RECRUITMENT_TABLES } from '../repositories/recruitment.ts';
 import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.ts';
 import { RECRUITMENT_CONTACTS_OFFERS_TABLES } from '../repositories/recruitmentContactsOffers.ts';
-import { SIGNINGS_FOLLOWUPS_TABLES } from '../repositories/signingsFollowUps.mjs';
+import { SIGNINGS_FOLLOWUPS_TABLES } from '../repositories/signingsFollowUps.ts';
 import { openStore } from '../store.ts';
 import { writeFixture, readRecords, openLayer } from './dataLayerFixture.mjs';
 import { hasBlobTable } from './coreIdentityTestFixtures.mjs';

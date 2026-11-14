@@ -218,7 +218,11 @@ The order, from the bottom of the import graph up, so each file is typed against
    `RoomEvidenceState`, `RecruitmentContact` and `RecruitmentOffer` records, an input for each create and act, and
    the bookkeeping each kind's acts take (`CaseBookkeeping`, `ContactBookkeeping`, `OfferBookkeeping`, which alone
    keeps a client key). `InputFor` and `RowOf`, which the three share, are in `writes.ts`, and the rooms, decision,
-   money, contact, offer and handoff vocabularies are literal types the same way. The repositories that still type records in
+   money, contact, offer and handoff vocabularies are literal types the same way. `signingsFollowUps.ts` types the
+   `SigningPackage` (its revisions, documents, parties, keys and history), `Signing`, `FollowUp` and `OutcomeReport`
+   records, what each create accepts, and what each `patch` may change (the fields it refuses are left out of the
+   type). Its typers still judge every write, as `unknown` input, and its column lists are checked against the
+   encoders' rows; the signing vocabularies come from `signing.mjs`, the repository's copies gone. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
    converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
    write through the repositories are typed checks of the repositories' signatures; convert them alongside, except

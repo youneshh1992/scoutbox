@@ -141,7 +141,7 @@ keep, or code with nothing left to do.
 - **Two guardian views spread the stored record.** `guardianChildView` and `guardianSelfView` (`views/playerViews.mjs`)
   copy the record minus its secrets instead of building an allowlist, so a new column would reach the response
   unasked.
-- **The signing typers repair input instead of refusing it.** `repositories/signingsFollowUps.mjs` turns a missing
+- **The signing typers repair input instead of refusing it.** `repositories/signingsFollowUps.ts` turns a missing
   `method` into `LEGACY_RECORDED`, a missing `rev` or `policyVersion` into 1, drops unknown fields, and reports each in
   `notes`, against the valid-input-only rule.
 - **The `/admin` key has a default** (`ADMIN_KEY || 'scoutbox-admin'` in `wiring.mjs`). Production refuses to boot

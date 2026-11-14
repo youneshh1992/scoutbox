@@ -39,23 +39,12 @@ export const SIGNING_STATUSES = Object.freeze([
 ]);
 export const SIGNING_TERMINAL = Object.freeze(['COMPLETED', 'CANCELLED', 'VOIDED', 'EXPIRED']);
 /** EXPIRED is derived at read time and never stored; SUPERSEDED belongs to revisions only. */
-export const SIGNING_STORED_STATUSES = Object.freeze([
-  'DRAFT',
-  'READY',
-  'IN_PROGRESS',
-  'COMPLETED',
-  'CANCELLED',
-  'VOIDED',
-]);
-export const SIGNING_REVISION_STATUSES = Object.freeze([
-  'DRAFT',
-  'READY',
-  'IN_PROGRESS',
-  'COMPLETED',
-  'CANCELLED',
-  'VOIDED',
-  'SUPERSEDED',
-]);
+export const SIGNING_STORED_STATUSES = Object.freeze(
+  /** @type {const} */ (['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED']),
+);
+export const SIGNING_REVISION_STATUSES = Object.freeze(
+  /** @type {const} */ (['DRAFT', 'READY', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'VOIDED', 'SUPERSEDED']),
+);
 export const SIGNING_STATUS_LABELS = Object.freeze({
   DRAFT: 'Draft — not presented for signing',
   READY: 'Presented — awaiting signatures',
@@ -67,10 +56,12 @@ export const SIGNING_STATUS_LABELS = Object.freeze({
   SUPERSEDED: 'Superseded by a newer signing revision',
 });
 
-export const PARTY_TYPES = Object.freeze(['PLAYER', 'GUARDIAN', 'CLUB_SIGNATORY']);
-export const PARTY_STATUSES = Object.freeze(['PENDING', 'COMPLETED']);
+export const PARTY_TYPES = Object.freeze(/** @type {const} */ (['PLAYER', 'GUARDIAN', 'CLUB_SIGNATORY']));
+export const PARTY_STATUSES = Object.freeze(/** @type {const} */ (['PENDING', 'COMPLETED']));
 /** Only methods this build implements; an unknown method fails closed. */
-export const SIGNING_METHODS = Object.freeze(['PLATFORM_ACKNOWLEDGMENT', 'UPLOAD_EXECUTED_DOCUMENT']);
+export const SIGNING_METHODS = Object.freeze(
+  /** @type {const} */ (['PLATFORM_ACKNOWLEDGMENT', 'UPLOAD_EXECUTED_DOCUMENT']),
+);
 /** Never an agent, never a club user for a player. */
 export const PARTY_ACTOR_KINDS = Object.freeze({ PLAYER: ['player'], GUARDIAN: ['guardian'], CLUB_SIGNATORY: ['org'] });
 

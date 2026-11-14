@@ -1,4 +1,4 @@
-// Signing packages, completed signings, follow-ups and outcome reports (repositories/signingsFollowUps.mjs, migration
+// Signing packages, completed signings, follow-ups and outcome reports (repositories/signingsFollowUps.ts, migration
 // 0018): the typed tables, typed writes, normalisations and refusals, SQL reads that match a table scan, units of work
 // (including the deferred completion key) and the completion cycle in one unit.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
@@ -81,14 +81,14 @@ const EARLIER = [
 ];
 let mod = null;
 try {
-  mod = await import('../repositories/signingsFollowUps.mjs');
+  mod = await import('../repositories/signingsFollowUps.ts');
 } catch {
   mod = null;
 }
 const need = () => {
   assert.ok(
     mod?.createSigningsFollowUpsRepository,
-    'repositories/signingsFollowUps.mjs exports createSigningsFollowUpsRepository',
+    'repositories/signingsFollowUps.ts exports createSigningsFollowUpsRepository',
   );
   return mod;
 };

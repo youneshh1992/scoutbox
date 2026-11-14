@@ -3,7 +3,7 @@
  * invitations (repositories/scoutingEvidence.mjs).
  */
 import { migrationApplied } from '../database.ts';
-import { SIGNINGS_FOLLOWUPS_MIGRATION } from '../signingsFollowUps.mjs';
+import { SIGNINGS_FOLLOWUPS_MIGRATION } from '../signingsFollowUps.ts';
 import { SCOUTING_EVIDENCE_MIGRATION, SCOUTING_EVIDENCE_DDL, SCOUTING_EVIDENCE_TABLES } from '../scoutingEvidence.mjs';
 
 export const id = SCOUTING_EVIDENCE_MIGRATION;

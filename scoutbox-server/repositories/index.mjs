@@ -83,7 +83,7 @@ import {
   SIGNINGS_FOLLOWUPS_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedSigningPlayers,
   retainedPlayerReferences as retainedSigningPlayers,
-} from './signingsFollowUps.mjs';
+} from './signingsFollowUps.ts';
 import {
   createScoutingEvidenceRepository,
   SCOUTING_EVIDENCE_RECORDS,

@@ -10,7 +10,7 @@ import {
   SIGNINGS_FOLLOWUPS_DDL,
   SIGNINGS_FOLLOWUPS_TABLES,
   SIGNINGS_KEY_OWNERS,
-} from '../signingsFollowUps.mjs';
+} from '../signingsFollowUps.ts';
 
 export const id = SIGNINGS_FOLLOWUPS_MIGRATION;
 export const note =

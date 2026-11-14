@@ -157,7 +157,7 @@ are listed in [`known-issues.md`](known-issues.md#performance).
    `data_migrations`, and stops the boot on failure. The schema version is the latest migration's number.
 2. **Repository.** `create<Domain>Repository({ sqlite, unit, now, log })` prepares its statements; each write types
    its input, writes rows and returns the stored record. `wiring.mjs` builds it and hands it, or its reads, to the
-   modules. `repositories/signingsFollowUps.mjs` is the simplest complete example.
+   modules. `repositories/signingsFollowUps.ts` is the simplest complete example.
 3. **Read-back for tests.** Export a `*_RECORDS` (`names`, `read`) and add the collections to `TABLE_BACKED` in
    `repositories/index.mjs`; give each new collection a writer in `scripts/dataLayerFixture.mjs`.
 4. **Reporting.** Add a `/capabilities` → `dataLayer.domains` entry (`repositories/index.mjs`).
