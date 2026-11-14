@@ -36,7 +36,9 @@ const has = (t, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.c
  * No `queued`, `sent`, `bounced` or `read`: the only transport is the durable
  * Inbox, which either holds the row or does not.
  */
-export const CONTACT_STATUSES = Object.freeze(['draft', 'delivered', 'failed', 'responded', 'recorded', 'cancelled']);
+export const CONTACT_STATUSES = Object.freeze(
+  /** @type {const} */ (['draft', 'delivered', 'failed', 'responded', 'recorded', 'cancelled']),
+);
 
 export const CONTACT_STATUS_LABELS = table({
   draft: 'Draft',
@@ -77,13 +79,13 @@ export const EXTERNAL_CHANNELS = Object.freeze(
   Object.keys(CONTACT_CHANNELS).filter((c) => CONTACT_CHANNELS[c].external),
 );
 
-export const RESPONSE_KINDS = Object.freeze(['accepted', 'declined']);
+export const RESPONSE_KINDS = Object.freeze(/** @type {const} */ (['accepted', 'declined']));
 
 /**
  * `both` adds the player's agent beside them. No mode reaches an agent instead
  * of the player (see `contactRouting` in domains/agents/integration/integration.mjs).
  */
-export const CONTACT_MODES = Object.freeze(['player_only', 'both']);
+export const CONTACT_MODES = Object.freeze(/** @type {const} */ (['player_only', 'both']));
 
 // ------------------------------------------------------------------ limits
 

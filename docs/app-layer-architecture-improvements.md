@@ -213,7 +213,12 @@ The order, from the bottom of the import graph up, so each file is typed against
    (`RecruitmentRequestInput`, `TrialInput`, which leave out what may be null and any list), each act's input, and a
    trial act's bookkeeping (`TrialBookkeeping`). Its row types come from its encoders, so a column and the field it
    holds are described once, and the trial vocabularies are literal types read from `trial.mjs` through JSDoc
-   `const` assertions until the domain is converted. The repositories that still type records in
+   `const` assertions until the domain is converted. `recruitmentCases.ts` and `recruitmentContactsOffers.ts` follow
+   it: the `RecruitmentCase` (its Room, draft, handoff and budget), `RoomComment`, `RoomSnapshot`, `RoomDecision`,
+   `RoomEvidenceState`, `RecruitmentContact` and `RecruitmentOffer` records, an input for each create and act, and
+   the bookkeeping each kind's acts take (`CaseBookkeeping`, `ContactBookkeeping`, `OfferBookkeeping`, which alone
+   keeps a client key). `InputFor` and `RowOf`, which the three share, are in `writes.ts`, and the rooms, decision,
+   money, contact, offer and handoff vocabularies are literal types the same way. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
    converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
    write through the repositories are typed checks of the repositories' signatures; convert them alongside, except

@@ -1,10 +1,10 @@
 /**
  * Recruitment cases (with the Room facet, decision draft, transaction handoff and budget) and the room comments,
- * snapshots, decisions and evidence states (repositories/recruitmentCases.mjs).
+ * snapshots, decisions and evidence states (repositories/recruitmentCases.ts).
  */
 import { migrationApplied } from '../database.ts';
 import { RECRUITMENT_MIGRATION } from '../recruitment.ts';
-import { RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_DDL, RECRUITMENT_CASES_TABLES } from '../recruitmentCases.mjs';
+import { RECRUITMENT_CASES_MIGRATION, RECRUITMENT_CASES_DDL, RECRUITMENT_CASES_TABLES } from '../recruitmentCases.ts';
 
 export const id = RECRUITMENT_CASES_MIGRATION;
 export const note =

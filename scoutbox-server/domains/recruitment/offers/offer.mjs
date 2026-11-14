@@ -26,15 +26,9 @@ const has = (t, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.c
 // ------------------------------------------------------------------ vocabulary
 
 /** `viewed` is a read receipt, not a status. */
-export const OFFER_STATUSES = Object.freeze([
-  'DRAFT',
-  'ISSUED',
-  'ACCEPTED',
-  'DECLINED',
-  'WITHDRAWN',
-  'EXPIRED',
-  'SUPERSEDED',
-]);
+export const OFFER_STATUSES = Object.freeze(
+  /** @type {const} */ (['DRAFT', 'ISSUED', 'ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']),
+);
 export const OFFER_TERMINAL_STATUSES = Object.freeze(['ACCEPTED', 'DECLINED', 'WITHDRAWN', 'EXPIRED', 'SUPERSEDED']);
 
 export const OFFER_STATUS_LABELS = table({
@@ -62,10 +56,10 @@ export const OFFER_REVISION_TRANSITIONS = table({
  * A transfer or loan needs a releasing club and club-to-club terms this build cannot model, so only direct
  * recruitment is supported.
  */
-export const OFFER_TYPES = Object.freeze(['direct_recruitment']);
+export const OFFER_TYPES = Object.freeze(/** @type {const} */ (['direct_recruitment']));
 
-export const OFFER_RESPONSE_TYPES = Object.freeze(['accepted', 'declined']);
-export const OFFER_RESPONSE_ACTORS = Object.freeze(['player', 'guardian']);
+export const OFFER_RESPONSE_TYPES = Object.freeze(/** @type {const} */ (['accepted', 'declined']));
+export const OFFER_RESPONSE_ACTORS = Object.freeze(/** @type {const} */ (['player', 'guardian']));
 
 export const OFFER_LIMITS = Object.freeze({
   role: 80,

@@ -51,7 +51,7 @@ import {
 } from '../domains/recruitment/public.mjs';
 import { TRIAL_REPORT_FIELDS } from '../domain.ts';
 import { refreshProfileSignals } from './players.ts';
-import { writeKit } from './writes.ts';
+import { writeKit, nulls, type Flatten, type InputFor, type RowOf } from './writes.ts';
 import { ids } from './fieldSpecs.ts';
 import { pageOf, readsOf } from './identityRules.ts';
 import { deepFreeze, type DeepReadonly } from '../domains/platform/values.ts';
@@ -357,18 +357,6 @@ export type TrialDay = DeepReadonly<TrialDayFields>;
 export type TrialLifecycle = DeepReadonly<LifecycleFields>;
 
 // ------------------------------------------------------------------ inputs
-type Flatten<T> = { [K in keyof T]: T[K] } & {};
-type Omissible<V> = null extends V ? true : V extends readonly unknown[] ? true : false;
-/** What a writer passes for a record: a field that may be null, and a list, may be left out, at any depth. */
-type InputFor<T> = T extends readonly (infer E)[]
-  ? InputFor<E>[]
-  : T extends object
-    ? Flatten<
-        { [K in keyof T as Omissible<T[K]> extends true ? never : K]: InputFor<T[K]> } & {
-          [K in keyof T as Omissible<T[K]> extends true ? K : never]?: InputFor<T[K]>;
-        }
-      >
-    : T;
 export type ActorInput = InputFor<Actor>;
 export type VenueInput = InputFor<Venue>;
 export type TrialSessionInput = InputFor<SessionFields>;
@@ -711,20 +699,8 @@ ${ownedBy('trials')},
 `;
 
 // ------------------------------------------------------------------ rows (tolerant encoders: an absent field is null, an absent list empty)
-/** A row as read back: each column an encoder writes, an absent value NULL. */
-type RowOf<F extends (...args: never[]) => object> = {
-  [K in keyof ReturnType<F>]-?:
-    | Exclude<ReturnType<F>[K], undefined>
-    | (undefined extends ReturnType<F>[K] ? null : never);
-};
 const b = (v: boolean | null | undefined): 0 | 1 | null => (v === null || v === undefined ? null : v ? 1 : 0);
 const flagOut = (v: 0 | 1 | null): boolean | null => (v === null ? null : v === 1);
-/** Bind an absent field as NULL. */
-const nulls = (row: object): Record<string, SQLInputValue> => {
-  const r = row as Record<string, SQLInputValue | undefined>;
-  for (const k of Object.keys(r)) if (r[k] === undefined) r[k] = null;
-  return r as Record<string, SQLInputValue>;
-};
 type ActorCols<P extends string> = Record<`${P}_kind`, ActorKind | null> &
   Record<`${P}_user_id` | `${P}_actor_id` | `${P}_name`, string | null>;
 const actorRow = <P extends string>(p: P, a: ActorInput | null | undefined): ActorCols<P> =>

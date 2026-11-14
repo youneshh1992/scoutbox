@@ -4,7 +4,7 @@
  */
 import { migrationApplied } from '../database.ts';
 import { idempotencyKeysDdl } from '../recruitment.ts';
-import { RECRUITMENT_CONTACTS_OFFERS_MIGRATION } from '../recruitmentContactsOffers.mjs';
+import { RECRUITMENT_CONTACTS_OFFERS_MIGRATION } from '../recruitmentContactsOffers.ts';
 import {
   SIGNINGS_FOLLOWUPS_MIGRATION,
   SIGNINGS_FOLLOWUPS_DDL,

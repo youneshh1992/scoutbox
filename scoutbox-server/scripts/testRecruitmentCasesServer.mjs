@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { readCases, readRoomComments, readRoomDecisions } from '../repositories/recruitmentCases.mjs';
+import { readCases, readRoomComments, readRoomDecisions } from '../repositories/recruitmentCases.ts';
 import { openLayer } from './dataLayerFixture.mjs';
 
 let passed = 0;

@@ -35,7 +35,7 @@ const isPlain = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 // ------------------------------------------------------------------ vocabulary
 
-export const DECISION_OUTCOMES = Object.freeze(['progress', 'hold', 'reject']);
+export const DECISION_OUTCOMES = Object.freeze(/** @type {const} */ (['progress', 'hold', 'reject']));
 
 /** Lifecycle reasons here are from the lifecycle taxonomy, not the decision taxonomy. */
 export const OUTCOME_MAP = table({
@@ -49,11 +49,13 @@ export const OUTCOME_MAP = table({
   reject: { recommendation: 'archive', action: 'rejectCase', lifecycleReasons: ['rejected'], label: 'Reject' },
 });
 
-export const DECISION_KINDS = Object.freeze(['recommendation', 'formal']);
-export const DECISION_STATES = Object.freeze(['draft', 'final']);
+export const DECISION_KINDS = Object.freeze(/** @type {const} */ (['recommendation', 'formal']));
+export const DECISION_STATES = Object.freeze(/** @type {const} */ (['draft', 'final']));
 
 /** Each kind is validated against the case's own records. */
-export const EVIDENCE_REF_KINDS = Object.freeze(['assessment', 'trial', 'box_cam_session', 'passport_evidence']);
+export const EVIDENCE_REF_KINDS = Object.freeze(
+  /** @type {const} */ (['assessment', 'trial', 'box_cam_session', 'passport_evidence']),
+);
 
 export const DECISION_LIMITS = Object.freeze({
   note: 2000,

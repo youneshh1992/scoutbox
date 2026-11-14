@@ -39,6 +39,31 @@ export type Acts<R, D extends Record<string, ActDef<R>>> = {
   [K in keyof D]: (id: string, input?: Parameters<D[K]>[1], bookkeeping?: { history?: unknown[] }) => R;
 };
 
+export type Flatten<T> = { [K in keyof T]: T[K] } & {};
+type Omissible<V> = null extends V ? true : V extends readonly unknown[] ? true : false;
+/** What a writer passes for a record: a field that may be null, and a list, may be left out, at any depth. */
+export type InputFor<T> = T extends readonly (infer E)[]
+  ? InputFor<E>[]
+  : T extends object
+    ? Flatten<
+        { [K in keyof T as Omissible<T[K]> extends true ? never : K]: InputFor<T[K]> } & {
+          [K in keyof T as Omissible<T[K]> extends true ? K : never]?: InputFor<T[K]>;
+        }
+      >
+    : T;
+/** A row as read back: each column an encoder writes, an absent value NULL. */
+export type RowOf<F extends (...args: never[]) => object> = {
+  [K in keyof ReturnType<F>]-?:
+    | Exclude<ReturnType<F>[K], undefined>
+    | (undefined extends ReturnType<F>[K] ? null : never);
+};
+/** Bind an absent field as NULL. */
+export const nulls = (row: object): Record<string, SQLInputValue> => {
+  const r = row as Record<string, SQLInputValue | undefined>;
+  for (const k of Object.keys(r)) if (r[k] === undefined) r[k] = null;
+  return r as Record<string, SQLInputValue>;
+};
+
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   v !== null && typeof v === 'object' && !Array.isArray(v);
 const describe = (v: unknown) =>

@@ -8,7 +8,7 @@
 const table = (o) => Object.freeze(Object.assign(Object.create(null), o));
 
 // Every status maps onto exactly one case stage.
-export const ROOM_STATUSES = [
+export const ROOM_STATUSES = /** @type {const} */ ([
   'watching',
   'under_review',
   'contact_planned', // agreed to approach; nobody has yet
@@ -27,7 +27,7 @@ export const ROOM_STATUSES = [
   'withdrawn',
   'archived',
   'closed',
-];
+]);
 
 export const ROOM_STATUS_LABELS = table({
   watching: 'Watching',
@@ -60,13 +60,19 @@ export const INITIAL_ROOM_STATUS = 'watching';
 export const OPEN_ROOM_STATUSES = ROOM_STATUSES.filter((s) => !TERMINAL_ROOM_STATUSES.includes(s));
 
 // Must equal PRO_STAGES / GRASSROOTS_STAGES in domains/scouting/scouting.mjs.
-export const PRO_STAGES = ['identified', 'review', 'observation', 'trial', 'decision', 'closed'];
-export const GRASSROOTS_STAGES = ['review', 'invited', 'awaiting_response', 'decision', 'closed'];
+export const PRO_STAGES = /** @type {const} */ (['identified', 'review', 'observation', 'trial', 'decision', 'closed']);
+export const GRASSROOTS_STAGES = /** @type {const} */ ([
+  'review',
+  'invited',
+  'awaiting_response',
+  'decision',
+  'closed',
+]);
 export const CASE_STAGES = [...new Set([...PRO_STAGES, ...GRASSROOTS_STAGES])];
 /** The case's own priority (the Room keeps ROOM_PRIORITIES), sign-off outcomes and approval states. */
-export const CASE_PRIORITIES = ['high', 'medium', 'low'];
-export const CASE_DECISION_OUTCOMES = ['sign', 'pass', 'monitor'];
-export const CASE_APPROVAL_STATES = ['pending', 'approved', 'rejected'];
+export const CASE_PRIORITIES = /** @type {const} */ (['high', 'medium', 'low']);
+export const CASE_DECISION_OUTCOMES = /** @type {const} */ (['sign', 'pass', 'monitor']);
+export const CASE_APPROVAL_STATES = /** @type {const} */ (['pending', 'approved', 'rejected']);
 
 const STAGE_MAP = table({
   pro: table({
@@ -384,7 +390,7 @@ export function validateReasonCodes(codes) {
 
 // ---------------------------------------------------------- recommendations
 
-export const RECOMMENDATIONS = [
+export const RECOMMENDATIONS = /** @type {const} */ ([
   'no_decision',
   'continue_watching',
   'shortlist',
@@ -392,7 +398,7 @@ export const RECOMMENDATIONS = [
   'trial',
   'offer',
   'archive',
-];
+]);
 
 export function validateDecision({ recommendation, reasonCodes = [], note = null } = {}) {
   if (!RECOMMENDATIONS.includes(recommendation)) {
@@ -592,7 +598,7 @@ export const roomCan = (role, action) => {
 // ----------------------------------------------------------- source context
 
 /** Where a room came from: workflow provenance only. */
-export const SOURCE_CONTEXTS = [
+export const SOURCE_CONTEXTS = /** @type {const} */ ([
   'search',
   'watchlist',
   'shortlist',
@@ -607,13 +613,13 @@ export const SOURCE_CONTEXTS = [
   'matching',
   'dynamic_watchlist',
   'direct',
-];
+]);
 
 export const normaliseSourceContext = (v) => (SOURCE_CONTEXTS.includes(v) ? v : 'direct');
 
 // ------------------------------------------------------------------- tasks
 
-export const TASK_STATES = ['open', 'in_progress', 'done', 'cancelled'];
+export const TASK_STATES = /** @type {const} */ (['open', 'in_progress', 'done', 'cancelled']);
 export const TASK_TRANSITIONS = {
   open: ['in_progress', 'done', 'cancelled'],
   in_progress: ['done', 'cancelled', 'open'],
@@ -622,7 +628,7 @@ export const TASK_TRANSITIONS = {
 };
 export const canTaskTransition = (from, to) => (TASK_TRANSITIONS[from] ?? []).includes(to);
 
-export const LINKED_RESOURCE_TYPES = [
+export const LINKED_RESOURCE_TYPES = /** @type {const} */ ([
   'evidence',
   'assessment',
   'combine_request',
@@ -630,15 +636,20 @@ export const LINKED_RESOURCE_TYPES = [
   'box_cam_assignment',
   'evidence_request',
   'comment',
-];
+]);
 
 // ------------------------------------------------------------ evidence state
 
-export const EVIDENCE_REVIEW_STATES = ['not_reviewed', 'reviewing', 'reviewed', 'needs_follow_up'];
+export const EVIDENCE_REVIEW_STATES = /** @type {const} */ ([
+  'not_reviewed',
+  'reviewing',
+  'reviewed',
+  'needs_follow_up',
+]);
 
 // --------------------------------------------------------------- priorities
 
-export const ROOM_PRIORITIES = ['low', 'normal', 'high', 'urgent'];
+export const ROOM_PRIORITIES = /** @type {const} */ (['low', 'normal', 'high', 'urgent']);
 
 export const ROOM_PRIORITY_NOTE =
   'Internal workflow urgency for your organisation. It is not a judgement of the player and is never shown to them.';

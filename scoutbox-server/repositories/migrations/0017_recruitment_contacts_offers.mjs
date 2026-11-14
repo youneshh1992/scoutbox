@@ -2,12 +2,12 @@
  * Recruitment contacts and offers (ten tables). Runs with foreign keys off.
  */
 import { migrationApplied } from '../database.ts';
-import { RECRUITMENT_CASES_MIGRATION } from '../recruitmentCases.mjs';
+import { RECRUITMENT_CASES_MIGRATION } from '../recruitmentCases.ts';
 import {
   RECRUITMENT_CONTACTS_OFFERS_MIGRATION,
   RECRUITMENT_CONTACTS_OFFERS_DDL,
   RECRUITMENT_CONTACTS_OFFERS_TABLES,
-} from '../recruitmentContactsOffers.mjs';
+} from '../recruitmentContactsOffers.ts';
 
 export const id = RECRUITMENT_CONTACTS_OFFERS_MIGRATION;
 export const note = 'recruitment contacts and offers become typed tables (ten tables)';

@@ -260,7 +260,7 @@ export function clubAgentPresence({ decision = null, agent = null, agency = null
  * A handoff is an invitation, not a transaction: an internal decision must not become an external commitment by
  * itself, and only a licensed agent opens a transaction. So the club invites and the agent opens.
  */
-export const HANDOFF_STATUSES = Object.freeze(['invited', 'accepted', 'withdrawn', 'expired']);
+export const HANDOFF_STATUSES = Object.freeze(/** @type {const} */ (['invited', 'accepted', 'withdrawn', 'expired']));
 
 export const HANDOFF_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 

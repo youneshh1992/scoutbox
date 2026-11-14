@@ -2,6 +2,8 @@
  * Recruitment contacts (attempts, history) and offers (revisions and their documents, responses, read receipts,
  * history, keys).
  *
+ * Records (the keys every reader sees): `RecruitmentContact` and `RecruitmentOffer` below, deep-frozen as read back.
+ *
  * Every field is a typed column with the vocabulary and length CHECKs of the domain rules
  * (domains/recruitment/lifecycle/contact.mjs, domains/recruitment/offers/offer.mjs). The idempotency keys are columns
  * of their owner (`create_key`, `send_key`, …) and the offer's per-act key lists are the rows of `offer_keys`.
@@ -9,7 +11,9 @@
  * Writes (repositories/writes.ts). A contact or an offer is created whole and must read back as written, then changes
  * only through named acts (`recordDelivery`, `issueRevision`, `recordResponse`, …), each an UPDATE or INSERT of the rows
  * it concerns. The columns and keys are the only judge of the values; a contact moves only along `CONTACT_TRANSITIONS`
- * and a revision along `OFFER_REVISION_TRANSITIONS`. A refusal names the record and the unit rolls back.
+ * and a revision along `OFFER_REVISION_TRANSITIONS`. A refusal names the record and the unit rolls back. An absent
+ * field reads back as null and an absent list as empty, so the input types let either be left out. A caller still in
+ * JavaScript can pass anything: the columns judge it.
  *
  * References. `org_id` → orgs and `case_id` → recruitment_cases (RESTRICT). A contact's `request_id` →
  * recruitment_requests is DEFERRABLE INITIALLY DEFERRED (checked at COMMIT): a send writes its contact before the
@@ -21,8 +25,17 @@
  *
  * Refusals name tables, fields and ids, never a subject, a body, a note, a message or a name.
  */
-import { migrationApplied, newestHistory, childRowsOf, operationOn } from './database.ts';
-import { writeChecks, writeKit } from './writes.ts';
+import type { DatabaseSync, SQLInputValue, SQLOutputValue, StatementSync } from 'node:sqlite';
+import {
+  migrationApplied,
+  newestHistory,
+  childRowsOf,
+  operationOn,
+  type Row,
+  type UnitParticipant,
+} from './database.ts';
+import { readsOf } from './identityRules.ts';
+import { writeChecks, writeKit, type Flatten, type InputFor, type RowOf } from './writes.ts';
 import {
   CONTACT_STATUSES,
   CONTACT_TRANSITIONS,
@@ -40,10 +53,14 @@ import {
   OFFER_RESPONSE_TYPES,
   OFFER_RESPONSE_ACTORS,
 } from '../domains/recruitment/public.mjs';
-import { deepFreeze } from '../domains/platform/values.ts';
+import { deepFreeze, type DeepReadonly } from '../domains/platform/values.ts';
 
 export const RECRUITMENT_CONTACTS_OFFERS_MIGRATION = '0017_recruitment_contacts_offers';
-export const RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS = Object.freeze(['recruitmentContacts', 'recruitmentOffers']);
+export const RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS = Object.freeze([
+  'recruitmentContacts',
+  'recruitmentOffers',
+] as const);
+export type ContactsOffersCollection = (typeof RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS)[number];
 export const RECRUITMENT_CONTACTS_OFFERS_TABLES = Object.freeze([
   'recruitment_contacts',
   'contact_attempts',
@@ -55,24 +72,299 @@ export const RECRUITMENT_CONTACTS_OFFERS_TABLES = Object.freeze([
   'offer_read_receipts',
   'offer_history',
   'offer_keys',
-]);
-export const recruitmentContactsOffersLive = (sqlite) =>
+] as const);
+type ContactsOffersTable = (typeof RECRUITMENT_CONTACTS_OFFERS_TABLES)[number];
+export const recruitmentContactsOffersLive = (sqlite: DatabaseSync) =>
   migrationApplied(sqlite, RECRUITMENT_CONTACTS_OFFERS_MIGRATION);
 
+// ------------------------------------------------------------------ vocabulary
 const CHANNELS = Object.keys(CONTACT_CHANNELS);
-const RECIPIENT_TYPES = ['player', 'guardian'];
-const EMAIL_COPY_STATES = ['queued', 'not_available', 'local_outbox', 'accepted_by_provider', 'failed'];
-const CONTACT_ACTOR_KINDS = ['org', 'player', 'guardian'];
-const OFFER_ACTOR_KINDS = ['org', 'player', 'guardian', 'admin', 'system'];
-const OFFER_KEY_LISTS = ['issue', 'withdraw', 'revise'];
+const RECIPIENT_TYPES = ['player', 'guardian'] as const;
+const EMAIL_COPY_STATES = ['queued', 'not_available', 'local_outbox', 'accepted_by_provider', 'failed'] as const;
+const CONTACT_ACTOR_KINDS = ['org', 'player', 'guardian'] as const;
+const OFFER_ACTOR_KINDS = ['org', 'player', 'guardian', 'admin', 'system'] as const;
+const OFFER_KEY_LISTS = ['issue', 'withdraw', 'revise'] as const;
+export type ContactStatus = (typeof CONTACT_STATUSES)[number];
+/** A key of `CONTACT_CHANNELS` (domains/recruitment/lifecycle/contact.mjs). */
+export type ContactChannel = string;
+export type ContactMode = (typeof CONTACT_MODES)[number];
+export type ContactResponseKind = (typeof RESPONSE_KINDS)[number];
+export type RecipientType = (typeof RECIPIENT_TYPES)[number];
+export type EmailCopyState = (typeof EMAIL_COPY_STATES)[number];
+export type ContactActorKind = (typeof CONTACT_ACTOR_KINDS)[number];
+export type OfferActorKind = (typeof OFFER_ACTOR_KINDS)[number];
+export type OfferKeyList = (typeof OFFER_KEY_LISTS)[number];
+export type OfferStatus = (typeof OFFER_STATUSES)[number];
+export type OfferType = (typeof OFFER_TYPES)[number];
+export type OfferResponseType = (typeof OFFER_RESPONSE_TYPES)[number];
+export type OfferResponseActor = (typeof OFFER_RESPONSE_ACTORS)[number];
+
+// ------------------------------------------------------------------ records
+type KeyFp = { key: string; fp: string };
+type RevByFields = { userId: string | null; name: string | null };
+/** A club member who did something to a contact. */
+type StaffActorFields = { kind: 'org'; userId: string | null; name: string | null };
+type ContactRecipientFields = {
+  type: RecipientType;
+  playerId: string | null;
+  guardianId: string | null;
+  minor: boolean;
+};
+/** Who a send was routed to, as it stood when it went. */
+type RoutingFields = {
+  at: number;
+  mode: ContactMode;
+  player: boolean;
+  guardian: boolean;
+  agent: { agentUserId: string; agreementId: string | null } | null;
+  honest: string | null;
+};
+type AttemptFields = { at: number; ok: boolean; code: string | null };
+type EmailCopyFields = { state: EmailCopyState; to: 'guardian'; outboxId: string | null; at: number | null };
+/** What the case's lifecycle did with the contact's step. */
+type ContactLifecycleFields =
+  | { applied: true; from: string | null; to: string | null; at: number | null }
+  | { applied: false; reason: string | null; at: number | null };
+type ContactResponseFields = {
+  kind: ContactResponseKind;
+  message: string | null;
+  by: RecipientType;
+  at: number | null;
+};
+type ContactHistoryFields = {
+  id: string;
+  at: number;
+  action: string;
+  by:
+    | { kind: 'org'; userId: string | null; name: string | null }
+    | { kind: Exclude<ContactActorKind, 'org'>; name: string | null }
+    | null;
+  detail: Record<string, unknown> | null;
+};
+type ContactFields = {
+  id: string;
+  orgId: string;
+  caseId: string;
+  playerId: string;
+  status: ContactStatus;
+  channel: ContactChannel;
+  recipient: ContactRecipientFields | null;
+  contactMode: ContactMode;
+  routingSnapshot: RoutingFields | null;
+  subject: string | null;
+  body: string | null;
+  summary: string | null;
+  createdBy: StaffActorFields;
+  createdAt: number;
+  updatedAt: number;
+  sentBy: StaffActorFields | null;
+  sentAt: number | null;
+  deliveredAt: number | null;
+  failedAt: number | null;
+  failureCode: string | null;
+  attempts: AttemptFields[];
+  requestId: string | null;
+  emailCopy: EmailCopyFields | null;
+  lifecycle: ContactLifecycleFields | null;
+  occurredAt: number | null;
+  recordedBy: StaffActorFields | null;
+  recordedAt: number | null;
+  respondedAt: number | null;
+  response: ContactResponseFields | null;
+  cancelledAt: number | null;
+  cancelledBy: StaffActorFields | null;
+  /** A send key may have only its fingerprint. */
+  keys: { create: KeyFp | null; send: { key: string | null; fp: string } | null; record: KeyFp | null };
+  history: ContactHistoryFields[];
+  rev: number;
+  revAt: number | null;
+  revBy: RevByFields | null;
+  policyVersion: number;
+};
+/** A club member who did something to an offer, with their role. */
+type OrgActorFields = { kind: 'org'; id: string | null; name: string | null; role: string | null };
+type TermsFields = {
+  offerType: OfferType;
+  role: string | null;
+  squad: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  conditions: string | null;
+};
+type DocumentFields = {
+  id: string;
+  evidenceId: string;
+  label: string | null;
+  mime: string | null;
+  bytes: number | null;
+};
+type RecipientSnapshotFields = {
+  type: RecipientType;
+  playerId: string | null;
+  guardianId: string | null;
+  minor: boolean;
+  at: number;
+};
+type ReadinessFields = {
+  transactionId: string | null;
+  evaluatedAt: number | null;
+  status: string | null;
+  blockers: unknown[];
+};
+type RevisionFields = {
+  id: string;
+  revisionNumber: number;
+  status: OfferStatus;
+  terms: TermsFields;
+  recipientMessage: string | null;
+  internalNote: string | null;
+  documents: DocumentFields[];
+  expiresAt: number | null;
+  createdAt: number;
+  createdBy: OrgActorFields | null;
+  updatedAt: number;
+  updatedBy: OrgActorFields | null;
+  issuedAt: number | null;
+  issuedBy: OrgActorFields | null;
+  withdrawnAt: number | null;
+  withdrawnBy: OrgActorFields | null;
+  withdrawReason: string | null;
+  respondedAt: number | null;
+  response: { id: string } | null;
+  supersedesRevisionId: string | null;
+  supersededByRevisionId: string | null;
+  supersededAt: number | null;
+  recipientSnapshot: RecipientSnapshotFields | null;
+  readinessSnapshot: ReadinessFields | null;
+  rev: number;
+  revAt: number | null;
+  revBy: RevByFields | null;
+  /** Present only on a draft a response discarded. */
+  discardedByResponseId?: string;
+};
+type ResponseFields = {
+  id: string;
+  revisionId: string;
+  responseType: OfferResponseType;
+  actorType: OfferResponseActor;
+  actorId: string;
+  actorName: string | null;
+  forPlayerId: string;
+  occurredAt: number;
+  reason: string | null;
+  clientKey: string | null;
+};
+type ReadReceiptFields = {
+  revisionId: string;
+  viewerKind: RecipientType;
+  viewerId: string;
+  firstViewedAt: number;
+};
+type AgentShareFields = {
+  agentUserId: string;
+  agreementId: string | null;
+  at: number;
+  by: { kind: 'player' | null; id: string | null };
+};
+type OfferKeyFields = { key: string; revisionId: string };
+/** What the case's lifecycle did with the offer's step; `reason`, `message` and `allowed` only when there are some. */
+type OfferLifecycleFields = {
+  applied: boolean;
+  action: string | null;
+  from: string | null;
+  to: string | null;
+  at: number | null;
+  reason?: string;
+  message?: string;
+  allowed?: unknown[];
+};
+type OfferHistoryFields = {
+  id: string;
+  at: number;
+  action: string;
+  by: { kind: OfferActorKind; id: string | null; name: string | null } | null;
+  detail: Record<string, unknown> | null;
+};
+type OfferFields = {
+  id: string;
+  orgId: string;
+  caseId: string;
+  playerId: string;
+  type: OfferType;
+  decisionId: string | null;
+  transactionId: string | null;
+  status: OfferStatus;
+  currentRevisionId: string;
+  revisions: RevisionFields[];
+  responses: ResponseFields[];
+  readReceipts: ReadReceiptFields[];
+  agentShare: AgentShareFields | null;
+  keys: { create: KeyFp | null } & Record<OfferKeyList, OfferKeyFields[]>;
+  lifecycle: OfferLifecycleFields | null;
+  history: OfferHistoryFields[];
+  createdAt: number;
+  createdBy: OrgActorFields;
+  updatedAt: number;
+  rev: number;
+  revAt: number | null;
+  revBy: RevByFields | null;
+  policyVersion: number;
+  subjectRemovedAt: number | null;
+};
+
+export type RecruitmentContact = DeepReadonly<ContactFields>;
+export type ContactHistoryEntry = DeepReadonly<ContactHistoryFields>;
+export type RecruitmentOffer = DeepReadonly<OfferFields>;
+export type OfferRevision = DeepReadonly<RevisionFields>;
+export type OfferResponse = DeepReadonly<ResponseFields>;
+export type OfferHistoryEntry = DeepReadonly<OfferHistoryFields>;
+type FieldsOf = { recruitmentContacts: ContactFields; recruitmentOffers: OfferFields };
+type RecordOf = { [N in ContactsOffersCollection]: DeepReadonly<FieldsOf[N]> };
+export type ContactsOffersRecords = { [N in ContactsOffersCollection]: RecordOf[N][] };
+
+// ------------------------------------------------------------------ inputs
+export type StaffActorInput = InputFor<StaffActorFields>;
+export type ContactRecipientInput = InputFor<ContactRecipientFields>;
+export type RoutingInput = InputFor<RoutingFields>;
+export type AttemptInput = InputFor<AttemptFields>;
+export type EmailCopyInput = InputFor<EmailCopyFields>;
+export type ContactLifecycleInput = InputFor<ContactLifecycleFields>;
+export type ContactResponseInput = InputFor<ContactResponseFields>;
+export type ContactHistoryInput = InputFor<ContactHistoryFields>;
+type KeyInput = { key?: string | null; fp?: string | null };
+/** A new contact, whole; its keys may be left out. */
+export type RecruitmentContactInput = Flatten<
+  Omit<InputFor<ContactFields>, 'keys'> & {
+    keys?: { create?: KeyFp | null; send?: KeyInput | null; record?: KeyFp | null };
+  }
+>;
+export type OrgActorInput = InputFor<OrgActorFields>;
+export type TermsInput = InputFor<TermsFields>;
+export type DocumentInput = InputFor<DocumentFields>;
+export type RecipientSnapshotInput = InputFor<RecipientSnapshotFields>;
+export type ReadinessInput = InputFor<ReadinessFields>;
+export type OfferRevisionInput = InputFor<RevisionFields>;
+export type OfferResponseInput = InputFor<ResponseFields>;
+export type ReadReceiptInput = InputFor<ReadReceiptFields>;
+export type AgentShareInput = InputFor<AgentShareFields>;
+export type OfferLifecycleInput = InputFor<OfferLifecycleFields>;
+export type OfferHistoryInput = InputFor<OfferHistoryFields>;
+/** A new offer, whole; its keys may be left out. */
+export type RecruitmentOfferInput = Flatten<
+  Omit<InputFor<OfferFields>, 'keys'> & {
+    keys?: { create?: KeyFp | null } & Partial<Record<OfferKeyList, OfferKeyFields[]>>;
+  }
+>;
 
 // ------------------------------------------------------------------ DDL
-const inList = (col, list) => `CHECK (${col} IS NULL OR ${col} IN (${list.map((v) => `'${v}'`).join(',')}))`;
-const maxLen = (col, n) => `CHECK (${col} IS NULL OR length(${col}) <= ${n})`;
-const bool = (col) => `CHECK (${col} IS NULL OR ${col} IN (0,1))`;
-const calendarDay = (col) => `CHECK (${col} IS NULL OR ${col} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')`;
-const staff = (p) => `  ${p}_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,\n  ${p}_name TEXT`;
-const orgActor = (p) => `${staff(p)},\n  ${p}_role TEXT`;
+const inList = (col: string, list: readonly string[]) =>
+  `CHECK (${col} IS NULL OR ${col} IN (${list.map((v) => `'${v}'`).join(',')}))`;
+const maxLen = (col: string, n: number) => `CHECK (${col} IS NULL OR length(${col}) <= ${n})`;
+const bool = (col: string) => `CHECK (${col} IS NULL OR ${col} IN (0,1))`;
+const calendarDay = (col: string) =>
+  `CHECK (${col} IS NULL OR ${col} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')`;
+const staff = (p: string) => `  ${p}_user_id TEXT REFERENCES org_users(id) ON DELETE RESTRICT,\n  ${p}_name TEXT`;
+const orgActor = (p: string) => `${staff(p)},\n  ${p}_role TEXT`;
 
 export const RECRUITMENT_CONTACTS_OFFERS_DDL = `
 CREATE TABLE recruitment_contacts (
@@ -338,23 +630,32 @@ CREATE INDEX offer_keys_key ON offer_keys (offer_id, act, key);
 `;
 
 // ------------------------------------------------------------------ refusals
-const refusal = (code, message, extra = {}) => Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const { rowStep, listOf, readsBackAsWritten, newRecord } = writeChecks('CONTACTS_OFFERS');
+const refusal = (code: string, message: string, extra: Record<string, unknown> = {}) =>
+  Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
+const checks = writeChecks('CONTACTS_OFFERS');
+const { rowStep, listOf, readsBackAsWritten } = checks;
+// An assertion function is only callable through a name declared with its type.
+const newRecord: typeof checks.newRecord = checks.newRecord;
 
 // ------------------------------------------------------------------ rows
 // The encoders take a record as the routes build it (or a fixture writes it); an absent field is NULL, and the
 // columns' CHECKs and keys judge the values.
-const b = (v) => (v === null || v === undefined ? null : v ? 1 : 0);
-const json = (v) => (v === null || v === undefined ? null : JSON.stringify(v));
-const n = (v) => (v === undefined ? null : v);
-const staffCols = (p, a) => ({ [`${p}_user_id`]: a?.userId ?? null, [`${p}_name`]: a?.name ?? null });
-const contactRecipientCols = (r) => ({
+type Present<T> = Exclude<T, undefined> | (undefined extends T ? null : never);
+const b = (v: boolean | null | undefined): 0 | 1 | null => (v === null || v === undefined ? null : v ? 1 : 0);
+const json = (v: unknown): string | null => (v === null || v === undefined ? null : JSON.stringify(v));
+const n = <T>(v: T): Present<T> => (v === undefined ? null : v) as Present<T>;
+type StaffCols<P extends string> = Record<`${P}_user_id` | `${P}_name`, string | null>;
+const staffCols = <P extends string>(
+  p: P,
+  a: { userId?: string | null; name?: string | null } | null | undefined,
+): StaffCols<P> => ({ [`${p}_user_id`]: a?.userId ?? null, [`${p}_name`]: a?.name ?? null }) as StaffCols<P>;
+const contactRecipientCols = (r: ContactRecipientInput | null | undefined) => ({
   recipient_type: r?.type ?? null,
   recipient_player_id: r?.playerId ?? null,
   recipient_guardian_id: r?.guardianId ?? null,
   recipient_minor: b(r?.minor),
 });
-const routingCols = (r) => ({
+const routingCols = (r: RoutingInput | null | undefined) => ({
   routing_at: r?.at ?? null,
   routing_mode: r?.mode ?? null,
   routing_player: b(r?.player),
@@ -363,27 +664,35 @@ const routingCols = (r) => ({
   routing_agent_agreement_id: r?.agent?.agreementId ?? null,
   routing_honest: r?.honest ?? null,
 });
-const emailCopyCols = (e) => ({
+const emailCopyCols = (e: EmailCopyInput | null | undefined) => ({
   email_copy_state: e?.state ?? null,
   email_copy_to: e?.to ?? null,
   email_copy_outbox_id: e?.outboxId ?? null,
   email_copy_at: e?.at ?? null,
 });
-const contactLifecycleCols = (l) => ({
-  lifecycle_applied: b(l?.applied),
-  lifecycle_from: l?.from ?? null,
-  lifecycle_to: l?.to ?? null,
-  lifecycle_reason: l?.reason ?? null,
-  lifecycle_at: l?.at ?? null,
-});
-const contactResponseCols = (r) => ({
+const contactLifecycleCols = (lc: ContactLifecycleInput | null | undefined) => {
+  const l = lc as
+    | { applied?: boolean; from?: string | null; to?: string | null; reason?: string | null; at?: number | null }
+    | null
+    | undefined;
+  return {
+    lifecycle_applied: b(l?.applied),
+    lifecycle_from: l?.from ?? null,
+    lifecycle_to: l?.to ?? null,
+    lifecycle_reason: l?.reason ?? null,
+    lifecycle_at: l?.at ?? null,
+  };
+};
+const contactResponseCols = (r: ContactResponseInput | null | undefined) => ({
   response_kind: r?.kind ?? null,
   response_message: r?.message ?? null,
   response_by: r?.by ?? null,
   response_at: r?.at ?? null,
 });
-const keyCols = (act, k) => ({ [`${act}_key`]: k?.key ?? null, [`${act}_fp`]: k?.fp ?? null });
-const contactRow = (c) => ({
+type KeyCols<A extends string> = Record<`${A}_key` | `${A}_fp`, string | null>;
+const keyCols = <A extends string>(act: A, k: KeyInput | null | undefined): KeyCols<A> =>
+  ({ [`${act}_key`]: k?.key ?? null, [`${act}_fp`]: k?.fp ?? null }) as KeyCols<A>;
+const contactRow = (c: RecruitmentContactInput) => ({
   id: n(c.id),
   org_id: n(c.orgId),
   case_id: n(c.caseId),
@@ -423,25 +732,53 @@ const contactRow = (c) => ({
   rev_by_name: c.revBy?.name ?? null,
   policy_version: n(c.policyVersion),
 });
-const attemptRow = (contactId, a, position) => ({
+type ContactRow = RowOf<typeof contactRow>;
+const attemptRow = (contactId: string, a: AttemptInput, position: number) => ({
   contact_id: contactId,
   position,
   at: n(a.at),
   ok: b(a.ok),
   code: n(a.code),
 });
-const contactHistoryRow = (contactId, h, position) => ({
+type AttemptRow = RowOf<typeof attemptRow>;
+const contactHistoryRow = (contactId: string, h: ContactHistoryInput, position: number) => ({
   id: n(h.id),
   contact_id: contactId,
   position,
   at: n(h.at),
   action: n(h.action),
   by_kind: h.by?.kind ?? null,
-  by_user_id: h.by?.userId ?? null,
+  by_user_id: (h.by as { userId?: string | null } | null | undefined)?.userId ?? null,
   by_name: h.by?.name ?? null,
   detail_json: json(h.detail),
 });
-const offerRow = (o) => ({
+type ContactHistoryRow = RowOf<typeof contactHistoryRow>;
+const agentShareCols = (s: AgentShareInput | null | undefined) => ({
+  agent_share_user_id: s?.agentUserId ?? null,
+  agent_share_agreement_id: s?.agreementId ?? null,
+  agent_share_at: s?.at ?? null,
+  agent_share_by_kind: s?.by?.kind ?? null,
+  agent_share_by_id: s?.by?.id ?? null,
+});
+const lifecycleCols = (l: OfferLifecycleInput | null | undefined) => ({
+  lifecycle_applied: b(l?.applied),
+  lifecycle_action: l?.action ?? null,
+  lifecycle_reason: l?.reason ?? null,
+  lifecycle_message: l?.message ?? null,
+  lifecycle_allowed_json: json(l?.allowed),
+  lifecycle_from: l?.from ?? null,
+  lifecycle_to: l?.to ?? null,
+  lifecycle_at: l?.at ?? null,
+});
+const revByCols = (
+  at: number | null | undefined,
+  by: { userId?: string | null; name?: string | null } | null | undefined,
+) => ({
+  rev_at: n(at),
+  rev_by_user_id: by?.userId ?? null,
+  rev_by_name: by?.name ?? null,
+});
+const offerRow = (o: RecruitmentOfferInput) => ({
   id: n(o.id),
   org_id: n(o.orgId),
   case_id: n(o.caseId),
@@ -465,30 +802,18 @@ const offerRow = (o) => ({
   policy_version: n(o.policyVersion),
   subject_removed_at: n(o.subjectRemovedAt),
 });
-const agentShareCols = (s) => ({
-  agent_share_user_id: s?.agentUserId ?? null,
-  agent_share_agreement_id: s?.agreementId ?? null,
-  agent_share_at: s?.at ?? null,
-  agent_share_by_kind: s?.by?.kind ?? null,
-  agent_share_by_id: s?.by?.id ?? null,
-});
-const lifecycleCols = (l) => ({
-  lifecycle_applied: b(l?.applied),
-  lifecycle_action: l?.action ?? null,
-  lifecycle_reason: l?.reason ?? null,
-  lifecycle_message: l?.message ?? null,
-  lifecycle_allowed_json: json(l?.allowed),
-  lifecycle_from: l?.from ?? null,
-  lifecycle_to: l?.to ?? null,
-  lifecycle_at: l?.at ?? null,
-});
-const revByCols = (at, by) => ({ rev_at: n(at), rev_by_user_id: by?.userId ?? null, rev_by_name: by?.name ?? null });
-const actorCols = (p, a) => ({
-  [`${p}_user_id`]: a?.id ?? null,
-  [`${p}_name`]: a?.name ?? null,
-  [`${p}_role`]: a?.role ?? null,
-});
-const termCols = (t) => ({
+type OfferRow = RowOf<typeof offerRow>;
+type ActorCols<P extends string> = Record<`${P}_user_id` | `${P}_name` | `${P}_role`, string | null>;
+const actorCols = <P extends string>(
+  p: P,
+  a: { id?: string | null; name?: string | null; role?: string | null } | null | undefined,
+): ActorCols<P> =>
+  ({
+    [`${p}_user_id`]: a?.id ?? null,
+    [`${p}_name`]: a?.name ?? null,
+    [`${p}_role`]: a?.role ?? null,
+  }) as ActorCols<P>;
+const termCols = (t: TermsInput | null | undefined) => ({
   term_offer_type: t?.offerType ?? null,
   term_role: t?.role ?? null,
   term_squad: t?.squad ?? null,
@@ -496,27 +821,27 @@ const termCols = (t) => ({
   term_end_date: t?.endDate ?? null,
   term_conditions: t?.conditions ?? null,
 });
-const recipientCols = (s) => ({
+const recipientCols = (s: RecipientSnapshotInput | null | undefined) => ({
   recipient_type: s?.type ?? null,
   recipient_player_id: s?.playerId ?? null,
   recipient_guardian_id: s?.guardianId ?? null,
   recipient_minor: b(s?.minor),
   recipient_at: s?.at ?? null,
 });
-const readinessCols = (s) => ({
+const readinessCols = (s: ReadinessInput | null | undefined) => ({
   readiness_transaction_id: s?.transactionId ?? null,
   readiness_evaluated_at: s?.evaluatedAt ?? null,
   readiness_status: s?.status ?? null,
   readiness_blockers_json: json(s?.blockers),
 });
 /** A revision's pointers to other rows of its offer: written once those rows exist. */
-const revisionPointers = (r) => ({
+const revisionPointers = (r: Partial<OfferRevisionInput>) => ({
   supersedes_revision_id: r.supersedesRevisionId ?? null,
   superseded_by_revision_id: r.supersededByRevisionId ?? null,
   response_id: r.response?.id ?? null,
   discarded_by_response_id: r.discardedByResponseId ?? null,
 });
-const revisionRow = (offerId, r, position) => ({
+const revisionRow = (offerId: string, r: OfferRevisionInput, position: number) => ({
   id: n(r.id),
   offer_id: offerId,
   position,
@@ -543,7 +868,8 @@ const revisionRow = (offerId, r, position) => ({
   ...revByCols(r.revAt, r.revBy),
   ...revisionPointers({}),
 });
-const documentRow = (revisionId, d, position) => ({
+type RevisionRow = RowOf<typeof revisionRow>;
+const documentRow = (revisionId: string, d: DocumentInput, position: number) => ({
   id: n(d.id),
   revision_id: revisionId,
   position,
@@ -552,7 +878,8 @@ const documentRow = (revisionId, d, position) => ({
   mime: n(d.mime),
   bytes: n(d.bytes),
 });
-const responseRow = (offerId, x, position) => ({
+type DocumentRow = RowOf<typeof documentRow>;
+const responseRow = (offerId: string, x: OfferResponseInput, position: number) => ({
   id: n(x.id),
   offer_id: offerId,
   position,
@@ -566,7 +893,8 @@ const responseRow = (offerId, x, position) => ({
   reason: n(x.reason),
   client_key: n(x.clientKey),
 });
-const receiptRow = (offerId, x, position) => ({
+type ResponseRow = RowOf<typeof responseRow>;
+const receiptRow = (offerId: string, x: ReadReceiptInput, position: number) => ({
   offer_id: offerId,
   position,
   revision_id: n(x.revisionId),
@@ -574,7 +902,8 @@ const receiptRow = (offerId, x, position) => ({
   viewer_id: n(x.viewerId),
   first_viewed_at: n(x.firstViewedAt),
 });
-const offerHistoryRow = (offerId, h, position) => ({
+type ReceiptRow = RowOf<typeof receiptRow>;
+const offerHistoryRow = (offerId: string, h: OfferHistoryInput, position: number) => ({
   id: n(h.id),
   offer_id: offerId,
   position,
@@ -585,26 +914,61 @@ const offerHistoryRow = (offerId, h, position) => ({
   by_name: h.by?.name ?? null,
   detail_json: json(h.detail),
 });
+type OfferHistoryRow = RowOf<typeof offerHistoryRow>;
+type OfferKeyRow = { offer_id: string; act: OfferKeyList; position: number; key: string; revision_id: string };
 
 // ------------------------------------------------------------------ statements and the record readers
-const COLS = {
-  recruitment_contacts: Object.keys(contactRow({})),
-  recruitment_offers: Object.keys(offerRow({})),
-  offer_revisions: Object.keys(revisionRow('o', {}, 0)),
-  contact_attempts: Object.keys(attemptRow('c', {}, 0)),
-  contact_history: Object.keys(contactHistoryRow('c', {}, 0)),
-  offer_revision_documents: Object.keys(documentRow('r', {}, 0)),
-  offer_responses: Object.keys(responseRow('o', {}, 0)),
-  offer_read_receipts: Object.keys(receiptRow('o', {}, 0)),
-  offer_history: Object.keys(offerHistoryRow('o', {}, 0)),
+// The encoders read every field of an empty record as absent, so their keys are the tables' columns.
+const none = <T>() => ({}) as T;
+const COLS: Record<ContactsOffersTable, string[]> = {
+  recruitment_contacts: Object.keys(contactRow(none())),
+  recruitment_offers: Object.keys(offerRow(none())),
+  offer_revisions: Object.keys(revisionRow('o', none(), 0)),
+  contact_attempts: Object.keys(attemptRow('c', none(), 0)),
+  contact_history: Object.keys(contactHistoryRow('c', none(), 0)),
+  offer_revision_documents: Object.keys(documentRow('r', none(), 0)),
+  offer_responses: Object.keys(responseRow('o', none(), 0)),
+  offer_read_receipts: Object.keys(receiptRow('o', none(), 0)),
+  offer_history: Object.keys(offerHistoryRow('o', none(), 0)),
   offer_keys: ['offer_id', 'act', 'position', 'key', 'revision_id'],
 };
 
-const stmtCache = new WeakMap();
-function statements(sqlite) {
+/** Reads a record's child rows: a prepared statement, or the same rows for many records at once (`childRowsOf`). */
+type ChildReader = { all(parentId: string, ...subKey: SQLOutputValue[]): Row[] };
+/** What `decodeContact` and `decodeOffer` read children through. */
+type Readers = {
+  attemptsOf: ChildReader;
+  chistOf: ChildReader;
+  revisionsOf: ChildReader;
+  docsOf: ChildReader;
+  responsesOf: ChildReader;
+  receiptsOf: ChildReader;
+  ohistOf: ChildReader;
+  okeysOf: ChildReader;
+};
+type Statements = Readers & {
+  contact: StatementSync;
+  attempt: StatementSync;
+  chist: StatementSync;
+  offer: StatementSync;
+  revision: StatementSync;
+  doc: StatementSync;
+  response: StatementSync;
+  receipt: StatementSync;
+  ohist: StatementSync;
+  okey: StatementSync;
+  contactById: StatementSync;
+  contactAll: StatementSync;
+  offerById: StatementSync;
+  offerAll: StatementSync;
+  caseExists: StatementSync;
+  preparedBy: DatabaseSync['prepare'];
+};
+const stmtCache = new WeakMap<DatabaseSync, Statements>();
+function statements(sqlite: DatabaseSync): Statements {
   let s = stmtCache.get(sqlite);
   if (s && s.preparedBy === sqlite.prepare) return s;
-  const insert = (table) => {
+  const insert = (table: ContactsOffersTable) => {
     const cols = COLS[table];
     return sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`);
   };
@@ -639,19 +1003,26 @@ function statements(sqlite) {
 }
 
 /** The case a contact or an offer names is written first (an immediate key): a miss is named with the ids. */
-function caseMustExist(st, table, r) {
+function caseMustExist(st: Statements, table: string, r: { id: string; caseId: string }) {
   if (!st.caseExists.get(r.caseId))
     throw refusal(
       'CONTACTS_OFFERS_REFERENCE_MISSING',
       `${table} holds 1 row(s) naming a recruitment_cases row that is not there (${r.id} → recruitment_cases ${r.caseId}); the write was rolled back`,
     );
 }
+type Step = (part: string, fn: () => unknown) => unknown;
+/** A record's child list: absent is empty, anything but a list is refused. */
+type ListOf = <T>(field: string, v: readonly T[] | null | undefined) => T[];
+const writesOf = (table: string, id: string): [Step, ListOf] => [
+  (part, fn) => rowStep(table, id, part, fn),
+  (field, v) => listOf(table, id, field, v) as never,
+];
 /** A whole contact, inserted with its attempts and history. */
-function insertContact(st, c) {
+function insertContact(st: Statements, c: RecruitmentContactInput) {
   caseMustExist(st, 'recruitment_contacts', c);
-  const step = (part, fn) => rowStep('recruitment_contacts', c.id, part, fn);
-  const attempts = listOf('recruitment_contacts', c.id, 'attempts', c.attempts);
-  const history = listOf('recruitment_contacts', c.id, 'history', c.history);
+  const [step, list] = writesOf('recruitment_contacts', c.id);
+  const attempts = list('attempts', c.attempts);
+  const history = list('history', c.history);
   step('row', () => st.contact.run(contactRow(c)));
   attempts.forEach((a, i) => step(`attempt ${i}`, () => st.attempt.run(attemptRow(c.id, a, i))));
   history.forEach((h, i) => step(`history ${h.id}`, () => st.chist.run(contactHistoryRow(c.id, h, i))));
@@ -663,11 +1034,10 @@ const revisionPointerSql =
  * to the responses) are set last, so every key inside the offer is checked as it is written. The current-revision
  * pointer is checked here too: its key is deferred (the offer row is written before its revisions).
  */
-function insertOffer(sqlite, st, o) {
+function insertOffer(sqlite: DatabaseSync, st: Statements, o: RecruitmentOfferInput) {
   caseMustExist(st, 'recruitment_offers', o);
   const id = o.id;
-  const step = (part, fn) => rowStep('recruitment_offers', id, part, fn);
-  const list = (field, v) => listOf('recruitment_offers', id, field, v);
+  const [step, list] = writesOf('recruitment_offers', id);
   const revisions = list('revisions', o.revisions);
   step('row', () => st.offer.run(offerRow(o)));
   revisions.forEach((r, i) => {
@@ -705,10 +1075,15 @@ function insertOffer(sqlite, st, o) {
  * child table read once for the whole list (an offer's documents through its revisions) instead of two
  * queries a contact and five an offer plus one a revision. Same rows, same order.
  */
-function batchStatements(sqlite, st, { contactIds = [], offerIds = [] }) {
-  const rows = (table, col, ids, order = 'position') => childRowsOf(sqlite, table, col, ids, { order });
+function batchStatements(
+  sqlite: DatabaseSync,
+  st: Readers,
+  { contactIds = [], offerIds = [] }: { contactIds?: string[]; offerIds?: string[] },
+): Readers {
+  const rows = (table: string, col: string, ids: string[], order = 'position') =>
+    childRowsOf(sqlite, table, col, ids, { order });
   const revisionsOf = rows('offer_revisions', 'offer_id', offerIds);
-  const revisionIds = offerIds.flatMap((id) => revisionsOf.all(id).map((r) => r.id));
+  const revisionIds = offerIds.flatMap((id) => revisionsOf.all(id).map((r) => r.id as string));
   return {
     ...st,
     attemptsOf: rows('contact_attempts', 'contact_id', contactIds),
@@ -722,8 +1097,9 @@ function batchStatements(sqlite, st, { contactIds = [], offerIds = [] }) {
   };
 }
 
-const pick = (row, p, keys) => keys.every((k) => row[`${p}_${k}`] === null);
-const contactHistoryOut = (h) => ({
+const allNull = (row: object, p: string, keys: readonly string[]) =>
+  keys.every((k) => (row as Record<string, unknown>)[`${p}_${k}`] === null);
+const contactHistoryOut = (h: ContactHistoryRow): ContactHistoryFields => ({
   id: h.id,
   at: h.at,
   action: h.action,
@@ -735,12 +1111,14 @@ const contactHistoryOut = (h) => ({
         : { kind: h.by_kind, name: h.by_name },
   detail: h.detail_json === null ? null : JSON.parse(h.detail_json),
 });
-function decodeContact(st, row) {
-  const staffOut = (p) =>
+function decodeContact(st: Readers, row: ContactRow): ContactFields {
+  const staffOut = (p: 'created_by' | 'sent_by' | 'recorded_by' | 'cancelled_by'): StaffActorFields | null =>
     row[`${p}_user_id`] === null && row[`${p}_name`] === null
       ? null
       : { kind: 'org', userId: row[`${p}_user_id`], name: row[`${p}_name`] };
-  const key = (act) => (row[`${act}_fp`] === null ? null : { key: row[`${act}_key`], fp: row[`${act}_fp`] });
+  // The fingerprint is set with the key (CHECKs); a send key may be only its fingerprint.
+  const key = (act: 'create' | 'send' | 'record') =>
+    row[`${act}_fp`] === null ? null : { key: row[`${act}_key`], fp: row[`${act}_fp`] as string };
   return {
     id: row.id,
     orgId: row.org_id,
@@ -762,7 +1140,8 @@ function decodeContact(st, row) {
       row.routing_mode === null
         ? null
         : {
-            at: row.routing_at,
+            // Set with the mode (a CHECK).
+            at: row.routing_at as number,
             mode: row.routing_mode,
             player: row.routing_player === 1,
             guardian: row.routing_guardian === 1,
@@ -775,7 +1154,8 @@ function decodeContact(st, row) {
     subject: row.subject,
     body: row.body,
     summary: row.summary,
-    createdBy: staffOut('created_by'),
+    // The creator's id is NOT NULL.
+    createdBy: staffOut('created_by') as StaffActorFields,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     sentBy: staffOut('sent_by'),
@@ -783,14 +1163,15 @@ function decodeContact(st, row) {
     deliveredAt: row.delivered_at,
     failedAt: row.failed_at,
     failureCode: row.failure_code,
-    attempts: st.attemptsOf.all(row.id).map((a) => ({ at: a.at, ok: a.ok === 1, code: a.code })),
+    attempts: (st.attemptsOf.all(row.id) as AttemptRow[]).map((a) => ({ at: a.at, ok: a.ok === 1, code: a.code })),
     requestId: row.request_id,
     emailCopy:
       row.email_copy_state === null
         ? null
         : {
             state: row.email_copy_state,
-            to: row.email_copy_to,
+            // Set with the state (a CHECK).
+            to: row.email_copy_to as 'guardian',
             outboxId: row.email_copy_outbox_id,
             at: row.email_copy_at,
           },
@@ -807,11 +1188,21 @@ function decodeContact(st, row) {
     response:
       row.response_kind === null
         ? null
-        : { kind: row.response_kind, message: row.response_message, by: row.response_by, at: row.response_at },
+        : {
+            kind: row.response_kind,
+            message: row.response_message,
+            // Set with the kind (a CHECK).
+            by: row.response_by as RecipientType,
+            at: row.response_at,
+          },
     cancelledAt: row.cancelled_at,
     cancelledBy: staffOut('cancelled_by'),
-    keys: { create: key('create'), send: key('send'), record: key('record') },
-    history: st.chistOf.all(row.id).map(contactHistoryOut),
+    keys: {
+      create: key('create') as KeyFp | null,
+      send: key('send'),
+      record: key('record') as KeyFp | null,
+    },
+    history: (st.chistOf.all(row.id) as ContactHistoryRow[]).map(contactHistoryOut),
     rev: row.rev,
     revAt: row.rev_at,
     revBy:
@@ -821,18 +1212,22 @@ function decodeContact(st, row) {
     policyVersion: row.policy_version,
   };
 }
-function decodeOffer(st, row) {
-  const actorOut = (r, p) =>
-    pick(r, p, ['user_id', 'name', 'role'])
+function decodeOffer(st: Readers, row: OfferRow): OfferFields {
+  const actorOut = (
+    r: RevisionRow,
+    p: 'created_by' | 'updated_by' | 'issued_by' | 'withdrawn_by',
+  ): OrgActorFields | null =>
+    allNull(r, p, ['user_id', 'name', 'role'])
       ? null
       : { kind: 'org', id: r[`${p}_user_id`], name: r[`${p}_name`], role: r[`${p}_role`] };
-  const revisions = st.revisionsOf.all(row.id).map((r) => {
-    const out = {
+  const revisions = (st.revisionsOf.all(row.id) as RevisionRow[]).map((r) => {
+    const out: RevisionFields = {
       id: r.id,
       revisionNumber: r.revision_number,
       status: r.status,
       terms: {
-        offerType: r.term_offer_type,
+        // The column is NOT NULL.
+        offerType: r.term_offer_type as OfferType,
         role: r.term_role,
         squad: r.term_squad,
         startDate: r.term_start_date,
@@ -841,9 +1236,13 @@ function decodeOffer(st, row) {
       },
       recipientMessage: r.recipient_message,
       internalNote: r.internal_note,
-      documents: st.docsOf
-        .all(r.id)
-        .map((d) => ({ id: d.id, evidenceId: d.evidence_id, label: d.label, mime: d.mime, bytes: d.bytes })),
+      documents: (st.docsOf.all(r.id) as DocumentRow[]).map((d) => ({
+        id: d.id,
+        evidenceId: d.evidence_id,
+        label: d.label,
+        mime: d.mime,
+        bytes: d.bytes,
+      })),
       expiresAt: r.expires_at,
       createdAt: r.created_at,
       createdBy: actorOut(r, 'created_by'),
@@ -867,9 +1266,10 @@ function decodeOffer(st, row) {
               playerId: r.recipient_player_id,
               guardianId: r.recipient_guardian_id,
               minor: r.recipient_minor === 1,
-              at: r.recipient_at,
+              // Set with the type (a CHECK).
+              at: r.recipient_at as number,
             },
-      readinessSnapshot: pick(r, 'readiness', ['transaction_id', 'evaluated_at', 'status', 'blockers_json'])
+      readinessSnapshot: allNull(r, 'readiness', ['transaction_id', 'evaluated_at', 'status', 'blockers_json'])
         ? null
         : {
             transactionId: r.readiness_transaction_id,
@@ -885,12 +1285,12 @@ function decodeOffer(st, row) {
     if (r.discarded_by_response_id !== null) out.discardedByResponseId = r.discarded_by_response_id;
     return out;
   });
-  const keyRows = st.okeysOf.all(row.id);
-  const lifecycle =
+  const keyRows = st.okeysOf.all(row.id) as OfferKeyRow[];
+  const lifecycle: OfferLifecycleFields | null =
     row.lifecycle_applied === null
       ? null
       : (() => {
-          const l = {
+          const l: OfferLifecycleFields = {
             applied: row.lifecycle_applied === 1,
             action: row.lifecycle_action,
             from: row.lifecycle_from,
@@ -913,7 +1313,7 @@ function decodeOffer(st, row) {
     status: row.status,
     currentRevisionId: row.current_revision_id,
     revisions,
-    responses: st.responsesOf.all(row.id).map((x) => ({
+    responses: (st.responsesOf.all(row.id) as ResponseRow[]).map((x) => ({
       id: x.id,
       revisionId: x.revision_id,
       responseType: x.response_type,
@@ -925,7 +1325,7 @@ function decodeOffer(st, row) {
       reason: x.reason,
       clientKey: x.client_key,
     })),
-    readReceipts: st.receiptsOf.all(row.id).map((x) => ({
+    readReceipts: (st.receiptsOf.all(row.id) as ReceiptRow[]).map((x) => ({
       revisionId: x.revision_id,
       viewerKind: x.viewer_kind,
       viewerId: x.viewer_id,
@@ -937,20 +1337,22 @@ function decodeOffer(st, row) {
         : {
             agentUserId: row.agent_share_user_id,
             agreementId: row.agent_share_agreement_id,
-            at: row.agent_share_at,
+            // Set with the agent (a CHECK).
+            at: row.agent_share_at as number,
             by: { kind: row.agent_share_by_kind, id: row.agent_share_by_id },
           },
     keys: {
-      create: row.create_key === null ? null : { key: row.create_key, fp: row.create_fp },
-      ...Object.fromEntries(
+      // The fingerprint is set with the key (a CHECK).
+      create: row.create_key === null ? null : { key: row.create_key, fp: row.create_fp as string },
+      ...(Object.fromEntries(
         OFFER_KEY_LISTS.map((act) => [
           act,
           keyRows.filter((k) => k.act === act).map((k) => ({ key: k.key, revisionId: k.revision_id })),
         ]),
-      ),
+      ) as Record<OfferKeyList, OfferKeyFields[]>),
     },
     lifecycle,
-    history: st.ohistOf.all(row.id).map((h) => ({
+    history: (st.ohistOf.all(row.id) as OfferHistoryRow[]).map((h) => ({
       id: h.id,
       at: h.at,
       action: h.action,
@@ -970,77 +1372,119 @@ function decodeOffer(st, row) {
     subjectRemovedAt: row.subject_removed_at,
   };
 }
-export const readContacts = (sqlite) => {
+export const readContacts = (sqlite: DatabaseSync): RecruitmentContact[] => {
   const st = statements(sqlite);
-  const rows = st.contactAll.all();
+  const rows = st.contactAll.all() as ContactRow[];
   const bst = batchStatements(sqlite, st, { contactIds: rows.map((r) => r.id) });
   return rows.map((r) => decodeContact(bst, r));
 };
-export const readOffers = (sqlite) => {
+export const readOffers = (sqlite: DatabaseSync): RecruitmentOffer[] => {
   const st = statements(sqlite);
-  const rows = st.offerAll.all();
+  const rows = st.offerAll.all() as OfferRow[];
   const bst = batchStatements(sqlite, st, { offerIds: rows.map((r) => r.id) });
   return rows.map((r) => decodeOffer(bst, r));
 };
 
 // ------------------------------------------------------------------ references (Q8c-a counted)
-const PLAYER_REFS_SQL = {
+const PLAYER_REFS_SQL: Record<ContactsOffersCollection, string> = {
   recruitmentContacts:
     'SELECT player_id AS pid FROM recruitment_contacts UNION ALL SELECT recipient_player_id FROM recruitment_contacts WHERE recipient_player_id IS NOT NULL',
   recruitmentOffers:
     "SELECT player_id AS pid FROM recruitment_offers UNION ALL SELECT recipient_player_id FROM offer_revisions WHERE recipient_player_id IS NOT NULL UNION ALL SELECT for_player_id FROM offer_responses UNION ALL SELECT actor_id FROM offer_responses WHERE actor_type = 'player' UNION ALL SELECT viewer_id FROM offer_read_receipts WHERE viewer_kind = 'player'",
 };
-export function unresolvedPlayerReferences(sqlite) {
-  if (!recruitmentContactsOffersLive(sqlite)) return null;
-  return Object.fromEntries(
+type PerCollection = Record<ContactsOffersCollection, number>;
+const countRefs = (sqlite: DatabaseSync, test: string): PerCollection =>
+  Object.fromEntries(
     RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((c) => [
       c,
-      sqlite
-        .prepare(
-          `SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c]}) x WHERE NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)`,
-        )
-        .get().n,
+      (sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c]}) x WHERE ${test}`).get() as { n: number }).n,
     ]),
-  );
+  ) as PerCollection;
+export function unresolvedPlayerReferences(sqlite: DatabaseSync): PerCollection | null {
+  if (!recruitmentContactsOffersLive(sqlite)) return null;
+  return countRefs(sqlite, 'NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)');
 }
-export function retainedPlayerReferences(sqlite) {
+export function retainedPlayerReferences(sqlite: DatabaseSync): PerCollection | null {
   if (!recruitmentContactsOffersLive(sqlite)) return null;
-  return Object.fromEntries(
-    RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((c) => [
-      c,
-      sqlite
-        .prepare(
-          `SELECT count(*) AS n FROM (${PLAYER_REFS_SQL[c]}) x WHERE EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid AND p.deleted_at IS NOT NULL)`,
-        )
-        .get().n,
-    ]),
-  );
+  return countRefs(sqlite, 'EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid AND p.deleted_at IS NOT NULL)');
 }
 
 // ------------------------------------------------------------------ the whole-domain read
 export const CONTACTS_OFFERS_RECORDS = {
   names: RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS,
-  read(sqlite) {
+  read(sqlite: DatabaseSync): ContactsOffersRecords | null {
     if (!recruitmentContactsOffersLive(sqlite)) return null;
     return { recruitmentContacts: readContacts(sqlite), recruitmentOffers: readOffers(sqlite) };
   },
 };
 
-// ------------------------------------------------------------------ the repository
-const CONTACT_READS = {
-  forCase: 'SELECT * FROM recruitment_contacts WHERE case_id = ? ORDER BY rowid',
-  forOrgPlayer: 'SELECT * FROM recruitment_contacts WHERE org_id = ? AND player_id = ? ORDER BY rowid',
-  forPlayer: 'SELECT * FROM recruitment_contacts WHERE player_id = ? ORDER BY rowid',
-  forRequest: 'SELECT * FROM recruitment_contacts WHERE request_id = ? ORDER BY rowid',
-  forAgent: 'SELECT * FROM recruitment_contacts WHERE routing_agent_user_id = ? ORDER BY rowid',
-  forOrg: 'SELECT * FROM recruitment_contacts WHERE org_id = ? ORDER BY rowid',
+// ------------------------------------------------------------------ act inputs
+/** Who an act's bookkeeping names: `{ id, name }`. */
+export type ContactsOffersActor = { id?: string | null; name?: string | null };
+/**
+ * The bookkeeping an act leaves on its record: the outcome of the case move it asked for, the rev bump (`bump`, by
+ * `revBy` at `at`), the last-changed instant (`touch`) and its history entries (only ever appended).
+ */
+type Bookkeeping<L, H> = {
+  at?: number | null;
+  revBy?: ContactsOffersActor | null;
+  touch?: boolean;
+  bump?: boolean;
+  /** Left out leaves the lifecycle as it is; null clears it. */
+  lifecycle?: L | null;
+  history?: H[];
 };
-const OFFER_READS = {
-  forCase: 'SELECT * FROM recruitment_offers WHERE case_id = ? ORDER BY rowid',
-  forOrgPlayer: 'SELECT * FROM recruitment_offers WHERE org_id = ? AND player_id = ? ORDER BY rowid',
-  forPlayer: 'SELECT * FROM recruitment_offers WHERE player_id = ? ORDER BY rowid',
-  forAgentShare: 'SELECT * FROM recruitment_offers WHERE agent_share_user_id = ? ORDER BY rowid',
-  forOrg: 'SELECT * FROM recruitment_offers WHERE org_id = ? ORDER BY rowid',
+export type ContactBookkeeping = Bookkeeping<ContactLifecycleInput, ContactHistoryInput>;
+/** An offer act may also bump one revision's rev (`bumpRevisionId`) and keep its client key. */
+export type OfferBookkeeping = Bookkeeping<OfferLifecycleInput, OfferHistoryInput> & {
+  bumpRevisionId?: string | null;
+  key?: { act: OfferKeyList; key: string; revisionId: string } | null;
+};
+export type RecordDeliveryInput = {
+  at: number;
+  by: StaffActorInput | null;
+  sendKey: KeyInput | null;
+  recipient: ContactRecipientInput | null;
+  requestId: string | null;
+  routingSnapshot: RoutingInput | null;
+  emailCopy?: EmailCopyInput | null;
+};
+export type EditOfferDraftInput = {
+  revisionId: string;
+  at: number;
+  by: OrgActorInput | null;
+  terms: TermsInput;
+  recipientMessage?: string | null;
+  internalNote?: string | null;
+  expiresAt?: number | null;
+  /** Left out keeps them. */
+  documents?: DocumentInput[];
+};
+export type IssueRevisionInput = {
+  revisionId: string;
+  at: number;
+  by: OrgActorInput | null;
+  terms: TermsInput;
+  recipientSnapshot?: RecipientSnapshotInput | null;
+  readinessSnapshot?: ReadinessInput | null;
+  supersedesRevisionId?: string | null;
+};
+
+// ------------------------------------------------------------------ the repository
+type ActDef = ((id: string) => void) | ((id: string, input: never) => void);
+type Act<F, R, B> = F extends (id: string) => void
+  ? (id: string, input?: Record<string, never>, bookkeeping?: B) => R
+  : F extends (id: string, input: infer I) => void
+    ? (id: string, input: I, bookkeeping?: B) => R
+    : never;
+/** One kind of record's acts: its table, history and lifecycle columns. */
+type Kind<N extends ContactsOffersCollection> = {
+  table: 'recruitment_contacts' | 'recruitment_offers';
+  name: N;
+  owner: string;
+  history: (id: string, h: never, position: number) => void;
+  historyTable: string;
+  lifecycleCols: (l: never) => Record<string, unknown>;
 };
 
 /**
@@ -1053,58 +1497,65 @@ const OFFER_READS = {
  * record handed out is a fresh, deep-frozen decode of its rows: an in-place edit throws, and a change is one of the
  * named acts. Lists come back in insertion (rowid) order.
  */
-export function createRecruitmentContactsOffersRepository({
-  sqlite,
-  unit = null,
-  now = Date.now,
-  log = () => {},
-} = {}) {
+export function createRecruitmentContactsOffersRepository(
+  {
+    sqlite,
+    unit = null,
+    now = Date.now,
+    log = () => {},
+  }: {
+    sqlite: DatabaseSync;
+    unit?: UnitParticipant | null;
+    now?: () => number;
+    log?: (message: string) => void;
+  } = {} as { sqlite: DatabaseSync },
+) {
   if (!sqlite)
     throw new TypeError('the recruitment contacts/offers repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
   const operation = operationOn(sqlite, unit);
-  const decode = {
-    recruitmentContacts: (row) => deepFreeze(decodeContact(st, row)),
-    recruitmentOffers: (row) => deepFreeze(decodeOffer(st, row)),
+  const DECODE: { [N in ContactsOffersCollection]: (st: Readers, row: Row) => FieldsOf[N] } = {
+    recruitmentContacts: (s, row) => decodeContact(s, row as ContactRow),
+    recruitmentOffers: (s, row) => decodeOffer(s, row as OfferRow),
   };
+  const decode = <N extends ContactsOffersCollection>(name: N, row: Row): RecordOf[N] =>
+    deepFreeze(DECODE[name](st, row)) as RecordOf[N];
   const rowById = { recruitmentContacts: st.contactById, recruitmentOffers: st.offerById };
-  const read = (name, id) => {
+  const read = <N extends ContactsOffersCollection>(name: N, id: unknown): RecordOf[N] | null => {
     if (typeof id !== 'string') return null;
     const row = rowById[name].get(id);
-    return row ? decode[name](row) : null;
+    return row ? decode(name, row) : null;
   };
-  const must = (name, id) => {
+  const must = <N extends ContactsOffersCollection>(name: N, id: string): RecordOf[N] => {
     const r = read(name, id);
     if (!r) throw refusal('CONTACTS_OFFERS_NOT_FOUND', `${name} ${id} is not a record of the repository`);
     return r;
   };
   /** Decode many rows; a list reads its records' children in one batch (batchStatements). */
-  const BATCHED = { recruitmentContacts: [decodeContact, 'contactIds'], recruitmentOffers: [decodeOffer, 'offerIds'] };
-  const decodeAll = (name, rows) => {
-    if (rows.length < 2) return rows.map(decode[name]);
-    const [decodeOne, key] = BATCHED[name];
-    const bst = batchStatements(sqlite, st, { [key]: rows.map((r) => r.id) });
-    return rows.map((r) => deepFreeze(decodeOne(bst, r)));
+  const BATCH_KEY = { recruitmentContacts: 'contactIds', recruitmentOffers: 'offerIds' } as const;
+  const decodeAll = <N extends ContactsOffersCollection>(name: N, rows: Row[]): RecordOf[N][] => {
+    if (rows.length < 2) return rows.map((r) => decode(name, r));
+    const bst = batchStatements(sqlite, st, { [BATCH_KEY[name]]: rows.map((r) => r.id as string) });
+    return rows.map((r) => deepFreeze(DECODE[name](bst, r)) as RecordOf[N]);
   };
-  const queries = (name, sql) =>
-    Object.fromEntries(
-      Object.entries(sql).map(([k, q]) => {
-        const stmt = sqlite.prepare(q);
-        return [k, (...args) => decodeAll(name, stmt.all(...args))];
-      }),
-    );
+  const list = <N extends ContactsOffersCollection, A extends SQLInputValue[]>(name: N, sql: string) => {
+    const stmt = sqlite.prepare(sql);
+    return (...args: A): RecordOf[N][] => decodeAll(name, stmt.all(...args));
+  };
   /** The records naming any of `values` in `col`, in insertion order. */
-  const inList = (name, table, col) => (values) => {
-    const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))];
-    if (!want.length) return [];
-    return decodeAll(
-      name,
-      sqlite
-        .prepare(`SELECT * FROM ${table} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`)
-        .all(...want),
-    );
-  };
-  const countOf = (table) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`);
+  const inList =
+    <N extends ContactsOffersCollection>(name: N, table: string, col: string) =>
+    (values: readonly unknown[] | null | undefined): RecordOf[N][] => {
+      const want = [...new Set((values ?? []).filter((v) => typeof v === 'string'))];
+      if (!want.length) return [];
+      return decodeAll(
+        name,
+        sqlite
+          .prepare(`SELECT * FROM ${table} WHERE ${col} IN (${want.map(() => '?').join(',')}) ORDER BY rowid`)
+          .all(...want),
+      );
+    };
+  const countOf = (table: string) => sqlite.prepare(`SELECT COUNT(*) AS n FROM ${table}`);
   const counters = {
     recruitmentContacts: countOf('recruitment_contacts'),
     recruitmentOffers: countOf('recruitment_offers'),
@@ -1112,37 +1563,41 @@ export function createRecruitmentContactsOffersRepository({
 
   // ---- writes: a record is created whole, then changes only through named acts on its own rows.
   const { q, assign, sqlIn, guarded: guardedWhere, nextPosition: positionIn } = writeKit(sqlite, 'CONTACTS_OFFERS');
-  const CONTACT = {
+  const CONTACT: Kind<'recruitmentContacts'> = {
     table: 'recruitment_contacts',
     name: 'recruitmentContacts',
     owner: 'contact_id',
-    history: (id, h, i) => st.chist.run(contactHistoryRow(id, h, i)),
+    history: (id, h: ContactHistoryInput, i) => st.chist.run(contactHistoryRow(id, h, i)),
     historyTable: 'contact_history',
     lifecycleCols: contactLifecycleCols,
   };
-  const OFFER = {
+  const OFFER: Kind<'recruitmentOffers'> = {
     table: 'recruitment_offers',
     name: 'recruitmentOffers',
     owner: 'offer_id',
-    history: (id, h, i) => st.ohist.run(offerHistoryRow(id, h, i)),
+    history: (id, h: OfferHistoryInput, i) => st.ohist.run(offerHistoryRow(id, h, i)),
     historyTable: 'offer_history',
     lifecycleCols,
   };
-  const nextPosition = (table, owner, id, act = null) => positionIn(table, owner, id, act === null ? {} : { act });
-  const setRow = (k, id, cols) => q(`UPDATE ${k.table} SET ${assign(cols)} WHERE id = @id`).run({ ...cols, id });
-  const stamp = (prefix, a) => ({
-    [`${prefix}_user_id`]: a?.id ?? null,
-    [`${prefix}_name`]: a?.name ?? null,
-    [`${prefix}_role`]: a?.role ?? null,
-  });
+  const nextPosition = (table: string, owner: string, id: string, act: string | null = null) =>
+    positionIn(table, owner, id, act === null ? {} : { act });
+  const setRow = (k: { table: string }, id: string, cols: Record<string, SQLInputValue>) =>
+    q(`UPDATE ${k.table} SET ${assign(cols)} WHERE id = @id`).run({ ...cols, id });
   /**
    * Update one row only while its status is one of `from`. A row anywhere else means a route's gate let through a move
    * it should have refused: the unit rolls back.
    */
-  const guarded = (table, keys, from, cols, what) => guardedWhere(table, keys, sqlIn('status', from), cols, what);
-  const leadingTo = (transitions, to) => Object.keys(transitions).filter((x) => transitions[x].includes(to));
+  const guarded = (
+    table: string,
+    keys: Record<string, SQLInputValue>,
+    from: readonly string[],
+    cols: Record<string, unknown>,
+    what: string,
+  ) => guardedWhere(table, keys, sqlIn('status', from), cols, what);
+  const leadingTo = (transitions: Record<string, readonly string[]>, to: string) =>
+    Object.keys(transitions).filter((x) => transitions[x].includes(to));
   /** A contact moves into `to` only from a status `CONTACT_TRANSITIONS` leads from. */
-  const moveContact = (id, to, cols = {}) =>
+  const moveContact = (id: string, to: ContactStatus, cols: Record<string, unknown> = {}) =>
     guarded(
       'recruitment_contacts',
       { id },
@@ -1151,7 +1606,7 @@ export function createRecruitmentContactsOffersRepository({
       `recruitment_contacts ${id} cannot move to ${to} from where it is`,
     );
   /** An offer's revision moves into `to` only from a status `OFFER_REVISION_TRANSITIONS` leads from. */
-  const moveRevision = (offerId, revisionId, to, cols = {}) =>
+  const moveRevision = (offerId: string, revisionId: string, to: OfferStatus, cols: Record<string, unknown> = {}) =>
     guarded(
       'offer_revisions',
       { id: revisionId, offer_id: offerId },
@@ -1159,13 +1614,10 @@ export function createRecruitmentContactsOffersRepository({
       { status: to, ...cols },
       `offer_revisions ${revisionId} of recruitment_offers ${offerId} cannot move to ${to} from where it is`,
     );
-  /**
-   * The bookkeeping an act leaves on its record: the outcome of the case move it asked for, an offer act's client key,
-   * the rev bumps, the last-changed instant and its history entries (history is only ever appended).
-   */
+  /** The bookkeeping an act leaves on its record (ContactBookkeeping, OfferBookkeeping). */
   const applyAct = (
-    k,
-    id,
+    k: Kind<ContactsOffersCollection>,
+    id: string,
     {
       at = null,
       revBy = null,
@@ -1175,7 +1627,7 @@ export function createRecruitmentContactsOffersRepository({
       lifecycle,
       key = null,
       history = [],
-    } = {},
+    }: OfferBookkeeping = {},
   ) => {
     const rev = { rev_at: at, rev_by_user_id: revBy?.id ?? null, rev_by_name: revBy?.name ?? null };
     if (bumpRevisionId)
@@ -1187,8 +1639,8 @@ export function createRecruitmentContactsOffersRepository({
     if (bump) q(`UPDATE ${k.table} SET rev = rev + 1, ${assign(rev)} WHERE id = @id`).run({ ...rev, id });
     const cols = {
       ...(touch ? { updated_at: at } : {}),
-      ...(lifecycle !== undefined ? k.lifecycleCols(lifecycle) : {}),
-    };
+      ...(lifecycle !== undefined ? k.lifecycleCols(lifecycle as never) : {}),
+    } as Record<string, SQLInputValue>;
     if (Object.keys(cols).length) rowStep(k.table, id, 'row', () => setRow(k, id, cols));
     if (key)
       rowStep(k.table, id, `${key.act} key`, () =>
@@ -1200,34 +1652,47 @@ export function createRecruitmentContactsOffersRepository({
           revision_id: key.revisionId,
         }),
       );
-    for (const h of history)
-      rowStep(k.table, id, `history ${h.id}`, () => k.history(id, h, nextPosition(k.historyTable, k.owner, id)));
+    for (const h of history as { id: string }[])
+      rowStep(k.table, id, `history ${h.id}`, () =>
+        k.history(id, h as never, nextPosition(k.historyTable, k.owner, id)),
+      );
   };
   /**
    * Named acts on one kind of record, each `act(id, input, bookkeeping)`: the act's own writes, then its bookkeeping, in
    * one operation; it returns the stored record. `recordAct(id, bookkeeping)` is the bookkeeping alone, for the second
    * half of an act whose case move came in between.
    */
-  const actsOn = (k, defs) => {
-    const run = (name, id, fn, bookkeeping) =>
-      operation(() => {
-        if (!q(`SELECT 1 FROM ${k.table} WHERE id = ?`).get(id))
-          throw refusal('CONTACTS_OFFERS_NOT_FOUND', `${k.table} ${id} is not a record of the repository`);
-        rowStep(k.table, id, name, fn);
-        applyAct(k, id, bookkeeping);
-        return must(k.name, id);
-      });
-    return {
-      ...Object.fromEntries(
-        Object.entries(defs).map(([name, fn]) => [
-          name,
-          (id, input = {}, bookkeeping = {}) => run(name, id, () => fn(id, input), bookkeeping),
-        ]),
-      ),
-      recordAct: (id, bookkeeping = {}) => run('recordAct', id, () => {}, bookkeeping),
+  const actsOn =
+    <B>() =>
+    <N extends ContactsOffersCollection, D extends Record<string, ActDef>>(k: Kind<N>, defs: D) => {
+      const run = (name: string, id: string, fn: () => void, bookkeeping?: B): RecordOf[N] =>
+        operation(() => {
+          if (!q(`SELECT 1 FROM ${k.table} WHERE id = ?`).get(id))
+            throw refusal('CONTACTS_OFFERS_NOT_FOUND', `${k.table} ${id} is not a record of the repository`);
+          rowStep(k.table, id, name, fn);
+          applyAct(k, id, bookkeeping as OfferBookkeeping | undefined);
+          return must(k.name, id);
+        });
+      return {
+        ...(Object.fromEntries(
+          Object.entries(defs).map(([name, fn]) => [
+            name,
+            (id: string, input: unknown = {}, bookkeeping: B = {} as B) =>
+              run(name, id, () => (fn as (id: string, input: unknown) => void)(id, input), bookkeeping),
+          ]),
+        ) as { [K in keyof D]: Act<D[K], RecordOf[N], B> }),
+        recordAct: (id: string, bookkeeping: B = {} as B): RecordOf[N] => run('recordAct', id, () => {}, bookkeeping),
+      };
     };
+  const replaceDocuments = (offerId: string, revisionId: string, documents: readonly DocumentInput[]) => {
+    q('DELETE FROM offer_revision_documents WHERE revision_id = ?').run(revisionId);
+    documents.forEach((d, j) =>
+      rowStep('recruitment_offers', offerId, `revision ${revisionId} document ${d.id}`, () =>
+        st.doc.run(documentRow(revisionId, d, j)),
+      ),
+    );
   };
-  const insertRevision = (offerId, r) => {
+  const insertRevision = (offerId: string, r: OfferRevisionInput) => {
     rowStep('recruitment_offers', offerId, `revision ${r.id}`, () =>
       st.revision.run(revisionRow(offerId, r, nextPosition('offer_revisions', 'offer_id', offerId))),
     );
@@ -1236,40 +1701,35 @@ export function createRecruitmentContactsOffersRepository({
     );
     replaceDocuments(offerId, r.id, r.documents ?? []);
   };
-  const replaceDocuments = (offerId, revisionId, documents) => {
-    q('DELETE FROM offer_revision_documents WHERE revision_id = ?').run(revisionId);
-    documents.forEach((d, j) =>
-      rowStep('recruitment_offers', offerId, `revision ${revisionId} document ${d.id}`, () =>
-        st.doc.run(documentRow(revisionId, d, j)),
-      ),
-    );
-  };
-  const created = (table, name, written) => {
+  const created = <N extends ContactsOffersCollection>(table: string, name: N, written: { id: string }) => {
     const stored = must(name, written.id);
     readsBackAsWritten(table, written.id, written, stored);
     return stored;
   };
-  const addAttempt = (id, a) =>
+  const addAttempt = (id: string, a: AttemptInput) =>
     rowStep('recruitment_contacts', id, 'attempt', () =>
       st.attempt.run(attemptRow(id, a, nextPosition('contact_attempts', 'contact_id', id))),
     );
 
-  const contactHistoryFrom = (orgId, actions) => ({
+  const contactHistoryFrom = (orgId: string, actions: readonly string[]) => ({
     from: 'contact_history h JOIN recruitment_contacts c ON c.id = h.contact_id',
     where: `c.org_id = ? AND h.action IN (${actions.map(() => '?').join(', ') || 'NULL'})`,
     params: [orgId, ...actions],
   });
-  const contacts = {
+  const contactWrites = {
     /** A new contact, whole: a club's draft or external record, or a fixture's record. An existing id is refused. */
-    create: (c) =>
+    create: (c: RecruitmentContactInput): RecruitmentContact =>
       operation(() => {
         newRecord('recruitment_contacts', (id) => !!st.contactById.get(id), c);
         insertContact(st, c);
         return created('recruitment_contacts', 'recruitmentContacts', c);
       }),
-    ...actsOn(CONTACT, {
+    ...actsOn<ContactBookkeeping>()(CONTACT, {
       /** Change the words or the mode of a contact that has not been delivered. */
-      editDraft: (id, { subject, body, contactMode }) =>
+      editDraft: (
+        id: string,
+        { subject, body, contactMode }: { subject?: string | null; body?: string | null; contactMode: ContactMode },
+      ) =>
         guarded(
           'recruitment_contacts',
           { id },
@@ -1277,14 +1737,21 @@ export function createRecruitmentContactsOffersRepository({
           { subject: subject ?? null, body: body ?? null, contact_mode: contactMode },
           `recruitment_contacts ${id} is not an editable draft`,
         ),
-      cancel: (id, { at, by }) => moveContact(id, 'cancelled', { cancelled_at: at, ...staffCols('cancelled_by', by) }),
+      cancel: (id: string, { at, by }: { at: number; by: StaffActorInput | null }) =>
+        moveContact(id, 'cancelled', { cancelled_at: at, ...staffCols('cancelled_by', by) }),
       /** A send the transport refused: the contact is `failed`, with the attempt. */
-      recordSendFailure: (id, { at, sendKey, code }) => {
+      recordSendFailure: (
+        id: string,
+        { at, sendKey, code }: { at: number; sendKey: KeyInput | null; code: string },
+      ) => {
         moveContact(id, 'failed', { failed_at: at, failure_code: code, ...keyCols('send', sendKey) });
         addAttempt(id, { at, ok: false, code });
       },
       /** A delivered send: the recipient it reached, the request row that carries it, who was routed and the email copy's first state. */
-      recordDelivery: (id, { at, by, sendKey, recipient, requestId, routingSnapshot, emailCopy = null }) => {
+      recordDelivery: (
+        id: string,
+        { at, by, sendKey, recipient, requestId, routingSnapshot, emailCopy = null }: RecordDeliveryInput,
+      ) => {
         moveContact(id, 'delivered', {
           ...keyCols('send', sendKey),
           ...contactRecipientCols(recipient),
@@ -1300,22 +1767,54 @@ export function createRecruitmentContactsOffersRepository({
         addAttempt(id, { at, ok: true, code: null });
       },
       /** The recipient's answer, through the request row the send created. */
-      recordResponse: (id, { response }) =>
+      recordResponse: (id: string, { response }: { response: ContactResponseInput & { at: number } }) =>
         moveContact(id, 'responded', { responded_at: response.at, ...contactResponseCols(response) }),
       /** The email provider's answer about the guardian copy, after the send committed. */
-      setEmailCopy: (id, { copy }) => setRow(CONTACT, id, emailCopyCols(copy)),
+      setEmailCopy: (id: string, { copy }: { copy: EmailCopyInput | null }) => {
+        setRow(CONTACT, id, emailCopyCols(copy));
+      },
     }),
+  };
+  const contacts = {
+    ...contactWrites,
     /** One contact by id, or null. Callers check the organisation and case they expect. */
-    byId: (id) => read('recruitmentContacts', id),
-    /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forRequest(requestId), forAgent(agentUserId), forOrg(orgId). */
-    ...queries('recruitmentContacts', CONTACT_READS),
+    byId: (id: unknown) => read('recruitmentContacts', id),
+    forCase: list<'recruitmentContacts', [caseId: string]>(
+      'recruitmentContacts',
+      'SELECT * FROM recruitment_contacts WHERE case_id = ? ORDER BY rowid',
+    ),
+    forOrgPlayer: list<'recruitmentContacts', [orgId: string, playerId: string]>(
+      'recruitmentContacts',
+      'SELECT * FROM recruitment_contacts WHERE org_id = ? AND player_id = ? ORDER BY rowid',
+    ),
+    forPlayer: list<'recruitmentContacts', [playerId: string]>(
+      'recruitmentContacts',
+      'SELECT * FROM recruitment_contacts WHERE player_id = ? ORDER BY rowid',
+    ),
+    forRequest: list<'recruitmentContacts', [requestId: string]>(
+      'recruitmentContacts',
+      'SELECT * FROM recruitment_contacts WHERE request_id = ? ORDER BY rowid',
+    ),
+    forAgent: list<'recruitmentContacts', [agentUserId: string]>(
+      'recruitmentContacts',
+      'SELECT * FROM recruitment_contacts WHERE routing_agent_user_id = ? ORDER BY rowid',
+    ),
+    forOrg: list<'recruitmentContacts', [orgId: string]>(
+      'recruitmentContacts',
+      'SELECT * FROM recruitment_contacts WHERE org_id = ? ORDER BY rowid',
+    ),
     /** The contacts of several cases (a player's journeys), in insertion order. */
     forCases: inList('recruitmentContacts', 'recruitment_contacts', 'case_id'),
     /**
      * The history of the organisation's contacts with one of `actions`, newest first, for a merged feed (the audit
      * feed): `{ contactId, caseId, playerId, entry }`. See `newestHistory` (database.ts) for `atMost` and `n`.
      */
-    historyFeed(orgId, actions, atMost, n) {
+    historyFeed(
+      orgId: string,
+      actions: readonly string[],
+      atMost: number | null,
+      n: number,
+    ): { contactId: string; caseId: string; playerId: string; entry: ContactHistoryEntry }[] {
       return newestHistory(
         sqlite,
         {
@@ -1324,26 +1823,31 @@ export function createRecruitmentContactsOffersRepository({
         },
         atMost,
         n,
-      ).map((h) => ({
-        contactId: h.contact_id,
-        caseId: h.owner_case_id,
-        playerId: h.owner_player_id,
-        entry: contactHistoryOut(h),
-      }));
+      ).map((row) => {
+        const h = row as ContactHistoryRow & { owner_case_id: string; owner_player_id: string };
+        return {
+          contactId: h.contact_id,
+          caseId: h.owner_case_id,
+          playerId: h.owner_player_id,
+          entry: contactHistoryOut(h),
+        };
+      });
     },
-    historyCount(orgId, actions) {
+    historyCount(orgId: string, actions: readonly string[]): number {
       const f = contactHistoryFrom(orgId, actions);
-      return sqlite.prepare(`SELECT COUNT(*) AS n FROM ${f.from} WHERE ${f.where}`).get(...f.params).n;
+      return (sqlite.prepare(`SELECT COUNT(*) AS n FROM ${f.from} WHERE ${f.where}`).get(...f.params) as { n: number })
+        .n;
     },
     /** The deletion unit: the player's own words leave the contacts about them (the reply message); the records stay. */
-    redactPlayer(playerId) {
+    redactPlayer(playerId: string): RecruitmentContact[] {
       return operation(() => {
-        const ids = sqlite
-          .prepare(
-            'SELECT id FROM recruitment_contacts WHERE player_id = ? AND response_message IS NOT NULL ORDER BY rowid',
-          )
-          .all(playerId)
-          .map((r) => r.id);
+        const ids = (
+          sqlite
+            .prepare(
+              'SELECT id FROM recruitment_contacts WHERE player_id = ? AND response_message IS NOT NULL ORDER BY rowid',
+            )
+            .all(playerId) as { id: string }[]
+        ).map((r) => r.id);
         sqlite
           .prepare(
             'UPDATE recruitment_contacts SET response_message = NULL WHERE player_id = ? AND response_message IS NOT NULL',
@@ -1353,20 +1857,23 @@ export function createRecruitmentContactsOffersRepository({
       });
     },
   };
-  const offers = {
+  const offerWrites = {
     /** A new offer, whole: the club's first draft, or a fixture's record. An existing id is refused. */
-    create: (o) =>
+    create: (o: RecruitmentOfferInput): RecruitmentOffer =>
       operation(() => {
         newRecord('recruitment_offers', (id) => !!st.offerById.get(id), o);
         insertOffer(sqlite, st, o);
         return created('recruitment_offers', 'recruitmentOffers', o);
       }),
-    ...actsOn(OFFER, {
+    ...actsOn<OfferBookkeeping>()(OFFER, {
       /**
        * Change a DRAFT revision's content (`documents` undefined keeps them). There is no other write of a revision's
        * terms, so an issued revision is frozen by construction.
        */
-      editDraft: (id, { revisionId, at, by, terms, recipientMessage, internalNote, expiresAt, documents }) => {
+      editDraft: (
+        id: string,
+        { revisionId, at, by, terms, recipientMessage, internalNote, expiresAt, documents }: EditOfferDraftInput,
+      ) => {
         guarded(
           'offer_revisions',
           { id: revisionId, offer_id: id },
@@ -1377,7 +1884,7 @@ export function createRecruitmentContactsOffersRepository({
             internal_note: internalNote ?? null,
             expires_at: expiresAt ?? null,
             updated_at: at,
-            ...stamp('updated_by', by),
+            ...actorCols('updated_by', by),
           },
           `offer_revisions ${revisionId} of recruitment_offers ${id} is not a draft`,
         );
@@ -1386,13 +1893,21 @@ export function createRecruitmentContactsOffersRepository({
       },
       /** Issue a DRAFT revision with its final terms and the recipient and readiness it was issued against; it supersedes the revision it names. */
       issueRevision: (
-        id,
-        { revisionId, at, by, terms, recipientSnapshot = null, readinessSnapshot = null, supersedesRevisionId = null },
+        id: string,
+        {
+          revisionId,
+          at,
+          by,
+          terms,
+          recipientSnapshot = null,
+          readinessSnapshot = null,
+          supersedesRevisionId = null,
+        }: IssueRevisionInput,
       ) => {
         moveRevision(id, revisionId, 'ISSUED', {
           ...termCols(terms),
           issued_at: at,
-          ...stamp('issued_by', by),
+          ...actorCols('issued_by', by),
           ...recipientCols(recipientSnapshot),
           ...readinessCols(readinessSnapshot),
         });
@@ -1403,16 +1918,24 @@ export function createRecruitmentContactsOffersRepository({
           });
         setRow(OFFER, id, { status: 'ISSUED' });
       },
-      withdrawRevision: (id, { revisionId, at, by, reason = null }) => {
+      withdrawRevision: (
+        id: string,
+        {
+          revisionId,
+          at,
+          by,
+          reason = null,
+        }: { revisionId: string; at: number; by: OrgActorInput | null; reason?: string | null },
+      ) => {
         moveRevision(id, revisionId, 'WITHDRAWN', {
           withdrawn_at: at,
-          ...stamp('withdrawn_by', by),
+          ...actorCols('withdrawn_by', by),
           withdraw_reason: reason,
         });
         setRow(OFFER, id, { status: 'WITHDRAWN' });
       },
       /** A new DRAFT revision, which becomes the current one. */
-      addRevision: (id, { revision }) => {
+      addRevision: (id: string, { revision }: { revision: OfferRevisionInput }) => {
         insertRevision(id, revision);
         setRow(OFFER, id, { current_revision_id: revision.id, status: 'DRAFT' });
       },
@@ -1420,7 +1943,10 @@ export function createRecruitmentContactsOffersRepository({
        * The recipient's answer to an ISSUED revision. A draft open beside it is discarded (recorded WITHDRAWN, naming the
        * answer), and the answered revision becomes the current one.
        */
-      recordResponse: (id, { response, discardRevisionId = null }) => {
+      recordResponse: (
+        id: string,
+        { response, discardRevisionId = null }: { response: OfferResponseInput; discardRevisionId?: string | null },
+      ) => {
         rowStep('recruitment_offers', id, `response ${response.id}`, () =>
           st.response.run(responseRow(id, response, nextPosition('offer_responses', 'offer_id', id))),
         );
@@ -1429,7 +1955,7 @@ export function createRecruitmentContactsOffersRepository({
         if (discardRevisionId) {
           moveRevision(id, discardRevisionId, 'WITHDRAWN', {
             withdrawn_at: response.occurredAt,
-            ...stamp('withdrawn_by', null),
+            ...actorCols('withdrawn_by', null),
             withdraw_reason: null,
             discarded_by_response_id: response.id,
           });
@@ -1437,29 +1963,53 @@ export function createRecruitmentContactsOffersRepository({
         }
         setRow(OFFER, id, { status: to });
       },
-      addReadReceipt: (id, { receipt }) =>
+      addReadReceipt: (id: string, { receipt }: { receipt: ReadReceiptInput }) => {
         rowStep('recruitment_offers', id, 'read receipt', () =>
           st.receipt.run(receiptRow(id, receipt, nextPosition('offer_read_receipts', 'offer_id', id))),
-        ),
+        );
+      },
       /** The recipient's share with their agent; `share: null` clears it. */
-      setAgentShare: (id, { share }) =>
-        rowStep('recruitment_offers', id, 'agent share', () => setRow(OFFER, id, agentShareCols(share))),
+      setAgentShare: (id: string, { share }: { share: AgentShareInput | null }) => {
+        rowStep('recruitment_offers', id, 'agent share', () => setRow(OFFER, id, agentShareCols(share)));
+      },
     }),
+  };
+  const offers = {
+    ...offerWrites,
     /** One offer by id, or null. Callers check the organisation they expect. */
-    byId: (id) => read('recruitmentOffers', id),
-    /** forCase(caseId), forOrgPlayer(orgId, playerId), forPlayer(playerId), forAgentShare(agentUserId), forOrg(orgId). */
-    ...queries('recruitmentOffers', OFFER_READS),
+    byId: (id: unknown) => read('recruitmentOffers', id),
+    forCase: list<'recruitmentOffers', [caseId: string]>(
+      'recruitmentOffers',
+      'SELECT * FROM recruitment_offers WHERE case_id = ? ORDER BY rowid',
+    ),
+    forOrgPlayer: list<'recruitmentOffers', [orgId: string, playerId: string]>(
+      'recruitmentOffers',
+      'SELECT * FROM recruitment_offers WHERE org_id = ? AND player_id = ? ORDER BY rowid',
+    ),
+    forPlayer: list<'recruitmentOffers', [playerId: string]>(
+      'recruitmentOffers',
+      'SELECT * FROM recruitment_offers WHERE player_id = ? ORDER BY rowid',
+    ),
+    forAgentShare: list<'recruitmentOffers', [agentUserId: string]>(
+      'recruitmentOffers',
+      'SELECT * FROM recruitment_offers WHERE agent_share_user_id = ? ORDER BY rowid',
+    ),
+    forOrg: list<'recruitmentOffers', [orgId: string]>(
+      'recruitmentOffers',
+      'SELECT * FROM recruitment_offers WHERE org_id = ? ORDER BY rowid',
+    ),
     /** The offers of several players (a guardian's children), in insertion order. */
     forPlayers: inList('recruitmentOffers', 'recruitment_offers', 'player_id'),
     /** The offers of several cases (a player's journeys), in insertion order. */
     forCases: inList('recruitmentOffers', 'recruitment_offers', 'case_id'),
     /** The deletion unit: ids, states and times stay; the player's name and words go; subject_removed_at set. */
-    redactPlayer(playerId, at) {
+    redactPlayer(playerId: string, at: number): RecruitmentOffer[] {
       return operation(() => {
-        const ids = sqlite
-          .prepare('SELECT id FROM recruitment_offers WHERE player_id = ? ORDER BY rowid')
-          .all(playerId)
-          .map((r) => r.id);
+        const ids = (
+          sqlite.prepare('SELECT id FROM recruitment_offers WHERE player_id = ? ORDER BY rowid').all(playerId) as {
+            id: string;
+          }[]
+        ).map((r) => r.id);
         for (const id of ids) {
           sqlite
             .prepare(
@@ -1473,45 +2023,36 @@ export function createRecruitmentContactsOffersRepository({
       });
     },
   };
+  const counts = () =>
+    Object.fromEntries(
+      RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((c) => [c, (counters[c].get() as { n: number }).n]),
+    ) as Record<ContactsOffersCollection, number>;
+  const writeKeys = <W extends object>(w: W) => [...(Object.keys(w) as (keyof W)[]), 'redactPlayer' as const];
 
-  const WRITES = [
-    'create',
-    'redactPlayer',
-    'recordAct',
-    'editDraft',
-    'cancel',
-    'recordSendFailure',
-    'recordDelivery',
-    'recordResponse',
-    'setEmailCopy',
-    'issueRevision',
-    'withdrawRevision',
-    'addRevision',
-    'addReadReceipt',
-    'setAgentShare',
-  ];
-  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.includes(k))));
   return {
     contacts,
     offers,
     /** The queries alone, for the pure projectors and providers that must not write (the evidence provider, the journey). */
-    reads: Object.freeze({ contacts: readOnly(contacts), offers: readOnly(offers) }),
+    reads: Object.freeze({
+      contacts: readsOf(contacts, writeKeys(contactWrites)),
+      offers: readsOf(offers, writeKeys(offerWrites)),
+    }),
     /** Check migration 0017 is recorded; there is nothing to load. */
     attach() {
       if (!recruitmentContactsOffersLive(sqlite))
         throw new Error(
           `the recruitment contacts/offers repository needs ${RECRUITMENT_CONTACTS_OFFERS_MIGRATION} recorded; it never imports an in-memory array`,
         );
-      return { counts: this.counts() };
+      return { counts: counts() };
     },
-    counts() {
-      return Object.fromEntries(RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS.map((n) => [n, counters[n].get().n]));
-    },
+    counts,
     pending: () => 0,
-    exportAll() {
+    exportAll(): ContactsOffersRecords | null {
       return CONTACTS_OFFERS_RECORDS.read(sqlite);
     },
     log,
     now,
   };
 }
+export type RecruitmentContactsOffersRepository = ReturnType<typeof createRecruitmentContactsOffersRepository>;
+export type RecruitmentContactsOffersReads = RecruitmentContactsOffersRepository['reads'];

@@ -1,4 +1,4 @@
-// Recruitment contacts and offers (repositories/recruitmentContactsOffers.mjs, migration 0017): the typed tables,
+// Recruitment contacts and offers (repositories/recruitmentContactsOffers.ts, migration 0017): the typed tables,
 // typed writes and refusals, SQL reads that match a table scan, units of work and the deletion unit's redactions. The
 // request key is deferred so a contact may name a request written later in the same unit. Player references are
 // counted, never refused (Q8c-a, docs/decisions.md). Temporary databases only; nothing touches DATA_DIR. Run with: npm test
@@ -68,7 +68,7 @@ const TABLES = [
   'offer_history',
   'offer_keys',
 ];
-const mod = await import('../repositories/recruitmentContactsOffers.mjs');
+const mod = await import('../repositories/recruitmentContactsOffers.ts');
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });
 const withRo = (dir, fn) => {
   const s = second(dir);

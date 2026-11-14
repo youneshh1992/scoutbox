@@ -1,5 +1,5 @@
 // Recruitment cases, room comments, room snapshots, room decisions and room evidence states
-// (repositories/recruitmentCases.mjs, migration 0016): the typed tables, whole creates and named acts and their refusals,
+// (repositories/recruitmentCases.ts, migration 0016): the typed tables, whole creates and named acts and their refusals,
 // SQL reads that match a table scan, read-only records, units of work, and the deletion unit's redaction. Player references are counted, never
 // refused (Q8a, docs/decisions.md). Temporary databases only; nothing touches DATA_DIR. Run with: npm test
 import assert from 'node:assert/strict';
@@ -58,7 +58,7 @@ const dbFile = (dir) => path.join(dir, 'scoutbox.db');
 let counter = 9000;
 const nextId = (p) => `${p}-${++counter}`;
 const MIGRATION = '0016_recruitment_cases';
-const rc = await import('../repositories/recruitmentCases.mjs');
+const rc = await import('../repositories/recruitmentCases.ts');
 const COLLECTIONS = rc.RECRUITMENT_CASES_COLLECTIONS;
 const TABLES = rc.RECRUITMENT_CASES_TABLES;
 const second = (dir) => new DatabaseSync(dbFile(dir), { readOnly: true });

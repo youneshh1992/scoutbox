@@ -69,14 +69,14 @@ import {
   RECRUITMENT_CASES_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedCasePlayers,
   retainedPlayerReferences as retainedCasePlayers,
-} from './recruitmentCases.mjs';
+} from './recruitmentCases.ts';
 import {
   createRecruitmentContactsOffersRepository,
   CONTACTS_OFFERS_RECORDS,
   RECRUITMENT_CONTACTS_OFFERS_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedContactOfferPlayers,
   retainedPlayerReferences as retainedContactOfferPlayers,
-} from './recruitmentContactsOffers.mjs';
+} from './recruitmentContactsOffers.ts';
 import {
   createSigningsFollowUpsRepository,
   SIGNINGS_FOLLOWUPS_RECORDS,
