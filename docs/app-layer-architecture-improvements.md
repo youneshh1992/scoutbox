@@ -204,8 +204,11 @@ The order, from the bottom of the import graph up, so each file is typed against
    `notifications.ts`. `channels.ts` types the message threads: the `Channel` and `Message` records, the two
    attachment kinds, what `open` and `appendMessage` accept (`ChannelInput`, `MessageInput`) and the activity
    pages. `fieldSpecs.ts` derives a spec's record type from the
-   spec (`RecordOf<typeof SPEC>`), so a repository described by field specs gets its record types from them rather
-   than writing them out a second time. The repositories that still type records in
+   spec (`RecordOf<typeof SPEC>`), and what a writer passes for it (`InputOf<typeof SPEC>`, with the nullable and
+   defaulted fields optional), so a repository described by field specs gets its record types from them rather
+   than writing them out a second time. `safetyAudit.ts` is the first built that way: each of its eight collections'
+   records and inputs comes from its spec, and the ledger's, ops events' and source changes' details from their
+   detail fields, with the keys each type carries checked against them. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
    converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
    write through the repositories are typed checks of the repositories' signatures; convert them alongside, except

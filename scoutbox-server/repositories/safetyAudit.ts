@@ -26,14 +26,18 @@
  *
  * Refusals name tables, ids and fields, never a reason, note, excerpt, name or document value.
  */
-import { isPlainObject, describe, ids } from './fieldSpecs.ts';
-import { migrationApplied, childRowsOf, operationOn } from './database.ts';
-import { deepFreeze } from '../domains/platform/values.ts';
+import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
+import { migrationApplied, childRowsOf, operationOn, type Row, type UnitParticipant } from './database.ts';
+import { deepFreeze, type DeepReadonly } from '../domains/platform/values.ts';
 import {
+  isPlainObject,
+  describe,
   text,
   int,
+  num,
   bool,
   oneOf,
+  group,
   columnDdl,
   bad,
   typeSpec,
@@ -42,8 +46,14 @@ import {
   decode,
   flat,
   quote,
+  type FieldOptions,
+  type InputOf,
+  type RecordOf,
+  type Refusal,
+  type ScalarField,
+  type Spec,
 } from './fieldSpecs.ts';
-import { pageOf } from '../domains/platform/paging.mjs';
+import { pageOf, readsOf } from './identityRules.ts';
 import { MODERATION_FLAGS, MODERATION_SEVERITIES } from '../domain.ts';
 
 export const SAFETY_AUDIT_MIGRATION = '0013_safety_audit';
@@ -56,16 +66,24 @@ export const AUDIT_COLLECTIONS = Object.freeze([
   'opsEvents',
   'sourceChanges',
   'idvQueue',
-]);
+] as const);
+export type AuditCollection = (typeof AUDIT_COLLECTIONS)[number];
 
 // ------------------------------------------------------------------ vocabularies and limits (one definition)
-export const BLOCK_BY = Object.freeze(['player', 'guardian']);
-export const REPORT_BY = Object.freeze(['player', 'guardian', 'org_user', 'system']);
-export const REPORT_TARGETS = Object.freeze(['club', 'scout', 'player']);
-export const REPORT_STATUSES = Object.freeze(['pending_review', 'resolved']);
-export const IDV_STATUSES = Object.freeze(['approved', 'revoked']);
-export const SOURCE_SYSTEMS = Object.freeze(['passport_prefs', 'position_history']);
+export const BLOCK_BY = Object.freeze(['player', 'guardian'] as const);
+export const REPORT_BY = Object.freeze(['player', 'guardian', 'org_user', 'system'] as const);
+export const REPORT_TARGETS = Object.freeze(['club', 'scout', 'player'] as const);
+export const REPORT_STATUSES = Object.freeze(['pending_review', 'resolved'] as const);
+export const IDV_STATUSES = Object.freeze(['approved', 'revoked'] as const);
+export const SOURCE_SYSTEMS = Object.freeze(['passport_prefs', 'position_history'] as const);
 export const SOURCE_CHANGE_CAP = 20_000;
+type RequestLedgerType = `${'contact' | 'trial'}_${
+  | 'request'
+  | 'request_to_guardian'
+  | 'accepted'
+  | 'accepted_by_guardian'
+  | 'declined'
+  | 'declined_by_guardian'}`;
 const REQUEST_LEDGER = ['contact', 'trial'].flatMap((t) => [
   `${t}_request`,
   `${t}_request_to_guardian`,
@@ -73,7 +91,7 @@ const REQUEST_LEDGER = ['contact', 'trial'].flatMap((t) => [
   `${t}_accepted_by_guardian`,
   `${t}_declined`,
   `${t}_declined_by_guardian`,
-]);
+]) as RequestLedgerType[];
 export const LEDGER_TYPES = Object.freeze([
   'view',
   'save',
@@ -116,7 +134,7 @@ export const LEDGER_TYPES = Object.freeze([
   'combine_request_completed',
   'verification_decision',
   'verification_root_approved',
-]);
+] as const);
 export const OPS_KINDS = Object.freeze([
   'staff_bootstrapped',
   'audit_export',
@@ -125,7 +143,16 @@ export const OPS_KINDS = Object.freeze([
   'backup_failed',
   'delivery_failed',
   'webhook_failed',
-]);
+] as const);
+export type BlockBy = (typeof BLOCK_BY)[number];
+export type ReportBy = (typeof REPORT_BY)[number];
+export type ReportTarget = (typeof REPORT_TARGETS)[number];
+export type ReportStatus = (typeof REPORT_STATUSES)[number];
+export type IdvStatus = (typeof IDV_STATUSES)[number];
+export type SourceSystem = (typeof SOURCE_SYSTEMS)[number];
+export type LedgerType = (typeof LEDGER_TYPES)[number];
+export type OpsKind = (typeof OPS_KINDS)[number];
+export type ModerationSeverity = (typeof MODERATION_SEVERITIES)[number];
 export const AUDIT_LIMITS = Object.freeze({
   id: 80,
   name: 200,
@@ -145,9 +172,11 @@ export const AUDIT_LIMITS = Object.freeze({
 const L = AUDIT_LIMITS;
 
 // ------------------------------------------------------------------ field specs
-const req = { req: true };
-const idf = (k, c, o = {}) => text(k, c, L.id, { nonEmpty: true, ...o });
-const name = (k, c, o = {}) => text(k, c, L.name, o);
+const req = { req: true } as const;
+const idf = <const K extends string, const O extends FieldOptions = {}>(k: K, c: string, o: O = {} as O) =>
+  text(k, c, L.id, { nonEmpty: true, ...o });
+const name = <const K extends string, const O extends FieldOptions = {}>(k: K, c: string, o: O = {} as O) =>
+  text(k, c, L.name, o);
 
 const BLOCK_SPEC = [
   idf('id', 'id', req),
@@ -185,7 +214,7 @@ const CONTEXT_SPEC = [
 const MODERATION_SPEC = [
   idf('id', 'id', req),
   int('ts', 'created_at', req),
-  { k: 'context', group: CONTEXT_SPEC, sparse: true },
+  group('context', CONTEXT_SPEC, { sparse: true }),
   oneOf('severity', 'severity', MODERATION_SEVERITIES, req),
   text('excerpt', 'excerpt', L.excerpt, req),
 ];
@@ -235,20 +264,19 @@ const IDV_SPEC = [
  * carry. A detail key the type does not carry is refused; a column holds a value only for the types that carry its
  * key (a CHECK each). Decoded, a detail keeps its non-null keys, and is null when it has none.
  */
-const D = (k, c, t, o = {}) => ({ k, c: `detail_${c}`, t, ...o });
-const did = (k, c) => D(k, c, 'text', { max: L.id, nonEmpty: true });
-const dtext = (k, c, max = L.detailText) => D(k, c, 'text', { max });
+const did = <const K extends string>(k: K, c: string) => text(k, `detail_${c}`, L.id, { nonEmpty: true });
+const dtext = <const K extends string>(k: K, c: string, max: number = L.detailText) => text(k, `detail_${c}`, max);
 const LEDGER_DETAIL_FIELDS = [
   did('assignmentId', 'assignment_id'),
   did('drillId', 'drill_id'),
   dtext('targetType', 'target_type', 40),
-  D('targetValue', 'target_value', 'num'),
+  num('targetValue', 'detail_target_value'),
   did('challengeId', 'challenge_id'),
   did('sessionId', 'session_id'),
   did('mediaId', 'media_id'),
   dtext('by', 'by', 40),
   dtext('share', 'share', 40),
-  D('retainClips', 'retain_clips', 'bool'),
+  bool('retainClips', 'detail_retain_clips'),
   did('disputeId', 'dispute_id'),
   dtext('outcome', 'outcome', 40),
   dtext('reason', 'reason'),
@@ -266,7 +294,15 @@ const LEDGER_DETAIL_FIELDS = [
   dtext('action', 'action', 40),
   did('request', 'root_request_id'),
 ];
-/** Ledger detail keys by type. `target` is `{ type, value }` (the targetType/targetValue columns); `protocols` a list. */
+/** A detail's keys, each optional (a type carries only its own, LEDGER_DETAIL / OPS_DETAIL). */
+type DetailOf<F extends Spec> = { [K in keyof RecordOf<F>]?: NonNullable<RecordOf<F>[K]> };
+/** A ledger detail: `target` is `{ type, value }` (the targetType/targetValue columns); `protocols` a list. */
+export type LedgerDetail = Omit<DetailOf<typeof LEDGER_DETAIL_FIELDS>, 'targetType' | 'targetValue'> & {
+  target?: { type: string; value: number };
+  protocols?: string[];
+};
+type DetailKeys<T extends string, D> = { readonly [K in T]?: readonly (keyof D & string)[] };
+/** Ledger detail keys by type. */
 export const LEDGER_DETAIL = Object.freeze({
   box_assignment_cancelled: ['assignmentId'],
   box_assignment_created: ['drillId', 'target'],
@@ -285,21 +321,22 @@ export const LEDGER_DETAIL = Object.freeze({
   passport_share_revoked: ['shareId', 'by'],
   verification_decision: ['claimId', 'action'],
   verification_root_approved: ['request'],
-});
+} satisfies DetailKeys<LedgerType, LedgerDetail>);
 const OPS_DETAIL_FIELDS = [
   did('orgId', 'org_id'),
   did('userId', 'user_id'),
   dtext('by', 'by', L.name),
   dtext('dir', 'dir', 200),
-  D('files', 'files', 'int'),
-  D('queuedForRemoval', 'queued_for_removal', 'int'),
+  int('files', 'detail_files'),
+  int('queuedForRemoval', 'detail_queued_for_removal'),
   dtext('error', 'error'),
-  D('conflictCount', 'conflict_count', 'int'),
+  int('conflictCount', 'detail_conflict_count'),
   did('dispatchId', 'dispatch_id'),
   dtext('channel', 'channel', 40),
   did('deliveryId', 'delivery_id'),
   did('endpointId', 'endpoint_id'),
 ];
+export type OpsDetail = DetailOf<typeof OPS_DETAIL_FIELDS>;
 export const OPS_DETAIL = Object.freeze({
   staff_bootstrapped: ['orgId', 'userId', 'by'],
   audit_export: ['orgId', 'by'],
@@ -308,21 +345,38 @@ export const OPS_DETAIL = Object.freeze({
   backup_failed: ['dir', 'error'],
   delivery_failed: ['dispatchId', 'channel'],
   webhook_failed: ['deliveryId', 'endpointId'],
-});
+} satisfies DetailKeys<OpsKind, OpsDetail>);
 const SOURCE_DETAIL_FIELDS = [
   dtext('from', 'position_from', L.position),
   dtext('to', 'position_to', L.position),
   dtext('submittedBy', 'submitted_by', 40),
 ];
-const SOURCE_DETAIL = Object.freeze({ position_changed: ['from', 'to', 'submittedBy'] });
+export type SourceChangeDetail = DetailOf<typeof SOURCE_DETAIL_FIELDS>;
+const SOURCE_DETAIL = Object.freeze({ position_changed: ['from', 'to', 'submittedBy'] } satisfies DetailKeys<
+  'position_changed',
+  SourceChangeDetail
+>);
 
-function detailCodec(fields, byType, typeColumn) {
+type Cols = Record<string, SQLInputValue>;
+type Codec<D> = {
+  /** Type `detail` for type `t` into its columns and protocols. */
+  type: (t: string, detail: unknown, at: string) => { ok: true; cols: Cols; protocols: string[] } | Refusal;
+  decode: (t: string, row: Row, protocols?: string[]) => D | null;
+  /** The column definitions, each with its CHECK limiting it to the types that carry its key. */
+  ddl: () => string[];
+  columns: string[];
+};
+function detailCodec<D>(
+  fields: readonly ScalarField[],
+  byType: { readonly [t: string]: readonly string[] | undefined },
+  typeColumn: string,
+): Codec<D> {
   const byKey = new Map(fields.map((f) => [f.k, f]));
-  const keysOf = (type) => byType[type] ?? [];
-  /** Type `detail` for `type` into `{ ok, cols, protocols }`. */
-  const type = (t, detail, at) => {
-    const cols = Object.fromEntries(fields.map((f) => [f.c, null]));
-    let protocols = [];
+  const field = (k: string) => byKey.get(k) as ScalarField;
+  const keysOf = (type: string) => byType[type] ?? [];
+  const type: Codec<D>['type'] = (t, detail, at) => {
+    const cols: Cols = Object.fromEntries(fields.map((f) => [f.c, null]));
+    let protocols: string[] = [];
     if (detail === undefined || detail === null) return { ok: true, cols, protocols };
     if (!isPlainObject(detail)) return bad(at, 'detail', `must be an object or null (got ${describe(detail)})`);
     const allowed = keysOf(t);
@@ -334,12 +388,12 @@ function detailCodec(fields, byType, typeColumn) {
         if (!isPlainObject(v) || Object.keys(v).some((x) => x !== 'type' && x !== 'value'))
           return bad(at, 'detail.target', 'must be { type, value }');
         for (const [kk, f] of [
-          ['type', byKey.get('targetType')],
-          ['value', byKey.get('targetValue')],
-        ]) {
+          ['type', field('targetType')],
+          ['value', field('targetValue')],
+        ] as const) {
           const r = typeScalar({ ...f, req: true }, v[kk], `${at}.detail.target`);
           if (!r.ok) return r;
-          cols[f.c] = r.value;
+          cols[f.c] = r.value as SQLInputValue;
         }
         continue;
       }
@@ -354,15 +408,15 @@ function detailCodec(fields, byType, typeColumn) {
         protocols = [...v];
         continue;
       }
-      const f = byKey.get(k);
+      const f = field(k);
       const r = typeScalar(f, v, `${at}.detail`);
       if (!r.ok) return r;
-      cols[f.c] = f.t === 'bool' && r.value !== null ? (r.value ? 1 : 0) : r.value;
+      cols[f.c] = (f.t === 'bool' && r.value !== null ? (r.value ? 1 : 0) : r.value) as SQLInputValue;
     }
     return { ok: true, cols, protocols };
   };
-  const decodeDetail = (t, row, protocols = []) => {
-    const out = {};
+  const decodeDetail = (t: string, row: Row, protocols: string[] = []): D | null => {
+    const out: Record<string, unknown> = {};
     for (const k of keysOf(t)) {
       if (k === 'target') {
         if (row.detail_target_type !== null && row.detail_target_type !== undefined)
@@ -373,35 +427,79 @@ function detailCodec(fields, byType, typeColumn) {
         if (protocols.length) out.protocols = protocols;
         continue;
       }
-      const f = byKey.get(k);
+      const f = field(k);
       const v = row[f.c];
       if (v !== null && v !== undefined) out[k] = f.t === 'bool' ? v === 1 : v;
     }
-    return Object.keys(out).length ? out : null;
+    return Object.keys(out).length ? (out as D) : null;
   };
-  /** The column definitions, each with its CHECK limiting it to the types that carry its key. */
   const ddl = () =>
     fields.map((f) => {
       const key = f.k === 'targetType' || f.k === 'targetValue' ? 'target' : f.k;
-      const types = Object.keys(byType).filter((t) => byType[t].includes(key));
+      const types = Object.keys(byType).filter((t) => byType[t]?.includes(key));
       return `${f.c.padEnd(32)} ${columnDdl(f)} CHECK (${f.c} IS NULL OR ${typeColumn} IN (${types.map(quote).join(', ')}))`;
     });
   return { type, decode: decodeDetail, ddl, columns: fields.map((f) => f.c) };
 }
-const LEDGER_CODEC = detailCodec(LEDGER_DETAIL_FIELDS, LEDGER_DETAIL, 'type');
-const OPS_CODEC = detailCodec(OPS_DETAIL_FIELDS, OPS_DETAIL, 'kind');
-const SOURCE_CODEC = detailCodec(SOURCE_DETAIL_FIELDS, SOURCE_DETAIL, 'type');
+const LEDGER_CODEC = detailCodec<LedgerDetail>(LEDGER_DETAIL_FIELDS, LEDGER_DETAIL, 'type');
+const OPS_CODEC = detailCodec<OpsDetail>(OPS_DETAIL_FIELDS, OPS_DETAIL, 'kind');
+const SOURCE_CODEC = detailCodec<SourceChangeDetail>(SOURCE_DETAIL_FIELDS, SOURCE_DETAIL, 'type');
+
+// ------------------------------------------------------------------ the records
+export type BlockRecord = RecordOf<typeof BLOCK_SPEC>;
+export type ReportRecord = RecordOf<typeof REPORT_SPEC>;
+export type ModerationRecord = RecordOf<typeof MODERATION_SPEC> & { flags: string[] };
+export type OrgNoteRecord = RecordOf<typeof NOTE_SPEC>;
+export type LedgerRecord = RecordOf<typeof LEDGER_BASE> & { detail: LedgerDetail | null };
+export type OpsEventRecord = RecordOf<typeof OPS_BASE> & { detail: OpsDetail | null };
+export type SourceChangeRecord = RecordOf<typeof SOURCE_BASE> & { detail: SourceChangeDetail | null };
+export type IdvRecord = RecordOf<typeof IDV_SPEC>;
+type AuditRecords = {
+  blocks: BlockRecord;
+  reports: ReportRecord;
+  moderationLog: ModerationRecord;
+  orgNotes: OrgNoteRecord;
+  ledger: LedgerRecord;
+  opsEvents: OpsEventRecord;
+  sourceChanges: SourceChangeRecord;
+  idvQueue: IdvRecord;
+};
+/** One collection's record as the repository reads it back, frozen at every level. */
+export type AuditRecord<N extends AuditCollection> = DeepReadonly<AuditRecords[N]>;
+export type Block = AuditRecord<'blocks'>;
+export type Report = AuditRecord<'reports'>;
+export type ModerationEntry = AuditRecord<'moderationLog'>;
+export type OrgNote = AuditRecord<'orgNotes'>;
+export type LedgerEntry = AuditRecord<'ledger'>;
+export type OpsEvent = AuditRecord<'opsEvents'>;
+export type SourceChange = AuditRecord<'sourceChanges'>;
+export type IdvEntry = AuditRecord<'idvQueue'>;
+/** Every collection's records (the whole-domain read). */
+export type AuditRecordSet = { [N in AuditCollection]: AuditRecords[N][] };
+
+/**
+ * What each write accepts: a field that may be null may be left out. Typed when written, so a caller still in
+ * JavaScript can pass anything and be refused by field.
+ */
+export type BlockInput = InputOf<typeof BLOCK_SPEC>;
+export type ReportInput = InputOf<typeof REPORT_SPEC>;
+export type ModerationInput = InputOf<typeof MODERATION_SPEC> & { flags: readonly string[] };
+export type OrgNoteInput = InputOf<typeof NOTE_SPEC>;
+export type LedgerInput = InputOf<typeof LEDGER_BASE> & { detail?: LedgerDetail | null };
+export type OpsEventInput = InputOf<typeof OPS_BASE> & { detail?: OpsDetail | null };
+export type SourceChangeInput = InputOf<typeof SOURCE_BASE> & { detail?: SourceChangeDetail | null };
+export type IdvInput = InputOf<typeof IDV_SPEC>;
 
 // ------------------------------------------------------------------ DDL
-const rowOf = (tbl, c) => `FOREIGN KEY (${c}) REFERENCES ${tbl}(id) ON DELETE RESTRICT`;
-const ownedBy = (tbl, c) => `FOREIGN KEY (${c}) REFERENCES ${tbl}(id) ON DELETE CASCADE`;
-const specCols = (spec) =>
+const rowOf = (tbl: string, c: string) => `FOREIGN KEY (${c}) REFERENCES ${tbl}(id) ON DELETE RESTRICT`;
+const ownedBy = (tbl: string, c: string) => `FOREIGN KEY (${c}) REFERENCES ${tbl}(id) ON DELETE CASCADE`;
+const specCols = (spec: Spec) =>
   flat(spec)
     .filter((f) => f.c !== 'id')
     .map((f) => `${f.c.padEnd(32)} ${columnDdl(f)}`);
-const table = (tbl, cols, extra = []) =>
+const table = (tbl: string, cols: string[], extra: string[] = []) =>
   `CREATE TABLE ${tbl} (\n  ${['seq                              INTEGER PRIMARY KEY', `id                               TEXT NOT NULL UNIQUE CHECK (length(id) > 0 AND length(id) <= ${L.id})`, ...cols, ...extra].join(',\n  ')}\n) STRICT;`;
-const childTable = (tbl, parent, parentCol, valueCol, check) =>
+const childTable = (tbl: string, parent: string, parentCol: string, valueCol: string, check: string) =>
   `CREATE TABLE ${tbl} (\n  ${parentCol} TEXT NOT NULL,\n  ord INTEGER NOT NULL CHECK (ord >= 0),\n  ${valueCol} TEXT NOT NULL CHECK (${check}),\n  PRIMARY KEY (${parentCol}, ord),\n  ${ownedBy(parent, parentCol)}\n) STRICT;`;
 
 export const SAFETY_AUDIT_DDL = [
@@ -465,8 +563,8 @@ export const AUDIT_TABLE_NAMES = Object.freeze([
   'ops_events',
   'source_changes',
   'idv_queue',
-]);
-const TABLE_OF = Object.freeze({
+] as const);
+const TABLE_OF: { readonly [N in AuditCollection]: string } = Object.freeze({
   blocks: 'blocks',
   reports: 'reports',
   moderationLog: 'moderation_log',
@@ -483,31 +581,43 @@ export const PLAYER_REFERENCE_TABLES = Object.freeze([
   { name: 'orgNotes', table: 'org_notes', column: 'player_id' },
   { name: 'ledger', table: 'ledger', column: 'player_id' },
   { name: 'sourceChanges', table: 'source_changes', column: 'player_id' },
-]);
+] as const);
 
 // ------------------------------------------------------------------ typing (the one place a value is judged)
-export const refusal = (code, message, extra = {}) =>
+export const refusal = (code: string, message: string, extra: Record<string, unknown> = {}) =>
   Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const labelOf = (at, raw) => `${at} ${isPlainObject(raw) && typeof raw.id === 'string' ? raw.id : ''}`.trim();
-const plainSpec = (spec) => (raw, at) => typeSpec(spec, raw, labelOf(at, raw));
-function typeWithDetail(base, codec, typeKey) {
+/** A typed record, with the detail's columns and protocols for the collections that carry one. */
+type TypedRow<R> = { ok: true; record: R; cols?: Cols; protocols?: string[] } | Refusal;
+type Typer<R> = (raw: unknown, at: string) => TypedRow<R>;
+const labelOf = (at: string, raw: unknown) =>
+  `${at} ${isPlainObject(raw) && typeof raw.id === 'string' ? raw.id : ''}`.trim();
+const plainSpec =
+  <S extends Spec>(spec: S): Typer<RecordOf<S>> =>
+  (raw, at) =>
+    typeSpec(spec, raw, labelOf(at, raw));
+function typeWithDetail<S extends Spec, D>(
+  base: S,
+  codec: Codec<D>,
+  typeKey: string,
+): Typer<RecordOf<S> & { detail: D | null }> {
   return (raw, at) => {
     const label = labelOf(at, raw);
     if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
     const { detail, ...rest } = raw;
     const t = typeSpec(base, rest, label);
     if (!t.ok) return t;
-    const d = codec.type(t.record[typeKey], detail, label);
+    const type = (t.record as Record<string, unknown>)[typeKey] as string;
+    const d = codec.type(type, detail, label);
     if (!d.ok) return d;
     return {
       ok: true,
-      record: { ...t.record, detail: codec.decode(t.record[typeKey], d.cols, d.protocols) },
+      record: { ...t.record, detail: codec.decode(type, d.cols as Row, d.protocols) },
       cols: d.cols,
       protocols: d.protocols,
     };
   };
 }
-function typeModeration(raw, at) {
+const typeModeration: Typer<ModerationRecord> = (raw, at) => {
   const label = labelOf(at, raw);
   if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
   const { flags, ...rest } = raw;
@@ -521,8 +631,8 @@ function typeModeration(raw, at) {
   )
     return bad(label, 'flags', `must be a list of distinct moderation flags (${MODERATION_FLAGS.join('|')})`);
   return { ok: true, record: { ...t.record, flags: [...flags] } };
-}
-function typeReport(raw, at) {
+};
+const typeReport: Typer<ReportRecord> = (raw, at) => {
   const t = plainSpec(REPORT_SPEC)(raw, at);
   if (!t.ok) return t;
   const r = t.record;
@@ -533,8 +643,8 @@ function typeReport(raw, at) {
   if ((r.by === 'org_user') !== (r.byOrgId !== null))
     return bad(label, 'byOrgId', 'is set exactly when a club user filed the report');
   return t;
-}
-export const AUDIT_TYPERS = Object.freeze({
+};
+export const AUDIT_TYPERS: { readonly [N in AuditCollection]: Typer<AuditRecords[N]> } = Object.freeze({
   blocks: plainSpec(BLOCK_SPEC),
   reports: typeReport,
   moderationLog: typeModeration,
@@ -544,7 +654,7 @@ export const AUDIT_TYPERS = Object.freeze({
   sourceChanges: typeWithDetail(SOURCE_BASE, SOURCE_CODEC, 'type'),
   idvQueue: plainSpec(IDV_SPEC),
 });
-const BASE_OF = Object.freeze({
+const BASE_OF: { readonly [N in AuditCollection]: Spec } = Object.freeze({
   blocks: BLOCK_SPEC,
   reports: REPORT_SPEC,
   moderationLog: MODERATION_SPEC,
@@ -554,199 +664,244 @@ const BASE_OF = Object.freeze({
   sourceChanges: SOURCE_BASE,
   idvQueue: IDV_SPEC,
 });
-const CODEC_OF = Object.freeze({
+const CODEC_OF: { readonly [N in AuditCollection]?: readonly [Codec<unknown>, string] } = Object.freeze({
   ledger: [LEDGER_CODEC, 'type'],
   opsEvents: [OPS_CODEC, 'kind'],
   sourceChanges: [SOURCE_CODEC, 'type'],
 });
 
 // ------------------------------------------------------------------ rows
-const columnsOf = (n) => [...flat(BASE_OF[n]).map((f) => f.c), ...(CODEC_OF[n] ? CODEC_OF[n][0].columns : [])];
+const columnsOf = (n: AuditCollection) => [
+  ...flat(BASE_OF[n]).map((f) => f.c),
+  ...(CODEC_OF[n] ? CODEC_OF[n][0].columns : []),
+];
 const INSERT = Object.fromEntries(
   AUDIT_COLLECTIONS.map((n) => {
     const cols = columnsOf(n);
     return [n, `INSERT INTO ${TABLE_OF[n]} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`];
   }),
-);
-function writeRecord(sqlite, n, t) {
-  sqlite.prepare(INSERT[n]).run({ ...encode(BASE_OF[n], t.record), ...(t.cols ?? {}) });
+) as { readonly [N in AuditCollection]: string };
+function writeRecord(
+  sqlite: DatabaseSync,
+  n: AuditCollection,
+  t: { record: object; cols?: Cols; protocols?: string[] },
+) {
+  const record = t.record as Record<string, unknown> & { id: string };
+  sqlite.prepare(INSERT[n]).run({ ...encode(BASE_OF[n], record), ...(t.cols ?? {}) });
   if (n === 'moderationLog')
-    t.record.flags.forEach((f, i) =>
-      sqlite.prepare('INSERT INTO moderation_flags (moderation_id, ord, flag) VALUES (?, ?, ?)').run(t.record.id, i, f),
+    (t.record as ModerationRecord).flags.forEach((f, i) =>
+      sqlite.prepare('INSERT INTO moderation_flags (moderation_id, ord, flag) VALUES (?, ?, ?)').run(record.id, i, f),
     );
   if (n === 'ledger')
     (t.protocols ?? []).forEach((p, i) =>
-      sqlite.prepare('INSERT INTO ledger_protocols (ledger_id, ord, protocol) VALUES (?, ?, ?)').run(t.record.id, i, p),
+      sqlite.prepare('INSERT INTO ledger_protocols (ledger_id, ord, protocol) VALUES (?, ?, ?)').run(record.id, i, p),
     );
 }
 /** Decode rows of one collection (child rows in one batch per list). */
-function decodeRows(sqlite, n, rows) {
+function decodeRows<N extends AuditCollection>(sqlite: DatabaseSync, n: N, rows: Row[]): AuditRecords[N][] {
+  const idOf = (r: Row) => r.id as string;
   if (n === 'moderationLog') {
-    const flags = childRowsOf(
-      sqlite,
-      'moderation_flags',
-      'moderation_id',
-      rows.map((r) => r.id),
-      { order: 'ord' },
-    );
-    return rows.map((r) => ({ ...decode(MODERATION_SPEC, r), flags: flags.all(r.id).map((f) => f.flag) }));
+    const flags = childRowsOf(sqlite, 'moderation_flags', 'moderation_id', rows.map(idOf), { order: 'ord' });
+    return rows.map((r) => ({
+      ...decode(MODERATION_SPEC, r),
+      flags: flags.all(idOf(r)).map((f) => f.flag as string),
+    })) as AuditRecords[N][];
   }
-  if (CODEC_OF[n]) {
-    const [codec, key] = CODEC_OF[n];
+  const codecOf = CODEC_OF[n];
+  if (codecOf) {
+    const [codec, key] = codecOf;
     const protocols =
       n === 'ledger'
         ? childRowsOf(
             sqlite,
             'ledger_protocols',
             'ledger_id',
-            rows.filter((r) => r.type === 'combine_request_created').map((r) => r.id),
+            rows.filter((r) => r.type === 'combine_request_created').map(idOf),
             { order: 'ord' },
           )
         : null;
     return rows.map((r) => ({
       ...decode(BASE_OF[n], r),
-      detail: codec.decode(r[key], r, protocols ? protocols.all(r.id).map((p) => p.protocol) : []),
-    }));
+      detail: codec.decode(
+        r[key] as string,
+        r,
+        protocols ? protocols.all(idOf(r)).map((p) => p.protocol as string) : [],
+      ),
+    })) as AuditRecords[N][];
   }
-  return rows.map((r) => decode(BASE_OF[n], r));
+  return rows.map((r) => decode(BASE_OF[n], r)) as AuditRecords[N][];
 }
 
 // ------------------------------------------------------------------ references
-const tableExists = (sqlite, t) =>
+const tableExists = (sqlite: DatabaseSync, t: string) =>
   !!sqlite.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
-export const safetyAuditLive = (sqlite) => migrationApplied(sqlite, SAFETY_AUDIT_MIGRATION);
+const countOf = (row: unknown) => (row as { n: number }).n;
+export const safetyAuditLive = (sqlite: DatabaseSync) => migrationApplied(sqlite, SAFETY_AUDIT_MIGRATION);
 /** The organisation and staff references of a typed record: [[what, table, id]]. */
-function referencesOf(n, r) {
-  const out = [];
-  const ref = (tbl) => (k, v) => {
+function referencesOf(n: AuditCollection, r: object & { id: string }): [string, string, string][] {
+  const out: [string, string, string][] = [];
+  const ref = (tbl: string) => (k: string, v: string | null | undefined) => {
     if (v !== null && v !== undefined) out.push([`${TABLE_OF[n]} ${r.id} ${k}`, tbl, v]);
   };
   const org = ref('orgs');
   const staff = ref('org_users');
-  if (n === 'blocks') org('orgId', r.orgId);
+  if (n === 'blocks') org('orgId', (r as BlockRecord).orgId);
   if (n === 'reports') {
-    org('byOrgId', r.byOrgId);
-    org('targetOrgId', r.targetOrgId);
+    org('byOrgId', (r as ReportRecord).byOrgId);
+    org('targetOrgId', (r as ReportRecord).targetOrgId);
   }
   if (n === 'moderationLog') {
-    org('context.orgId', r.context.orgId);
-    staff('context.userId', r.context.userId);
+    org('context.orgId', (r as ModerationRecord).context.orgId);
+    staff('context.userId', (r as ModerationRecord).context.userId);
   }
   if (n === 'orgNotes' || n === 'ledger') {
-    org('orgId', r.orgId);
-    staff('userId', r.userId);
+    org('orgId', (r as OrgNoteRecord | LedgerRecord).orgId);
+    staff('userId', (r as OrgNoteRecord | LedgerRecord).userId);
   }
   if (n === 'opsEvents') {
-    org('detail.orgId', r.detail?.orgId);
-    staff('detail.userId', r.detail?.userId);
+    org('detail.orgId', (r as OpsEventRecord).detail?.orgId);
+    staff('detail.userId', (r as OpsEventRecord).detail?.userId);
   }
   return out;
 }
+type PlayerReferenceCounts = { [N in (typeof PLAYER_REFERENCE_TABLES)[number]['name']]: number };
 /** Q4, the diagnostic (never a refusal): per collection, rows naming a player id that is not in the players table. */
-export function unresolvedPlayerReferences(sqlite) {
+export function unresolvedPlayerReferences(sqlite: DatabaseSync): PlayerReferenceCounts {
   const players = tableExists(sqlite, 'players');
   return Object.fromEntries(
     PLAYER_REFERENCE_TABLES.map(({ name: n, table: t, column }) => [
       n,
       !tableExists(sqlite, t)
         ? 0
-        : sqlite
-            .prepare(
-              `SELECT COUNT(*) AS n FROM ${t} WHERE ${column} IS NOT NULL${players ? ` AND ${column} NOT IN (SELECT id FROM players)` : ''}`,
-            )
-            .get().n,
+        : countOf(
+            sqlite
+              .prepare(
+                `SELECT COUNT(*) AS n FROM ${t} WHERE ${column} IS NOT NULL${players ? ` AND ${column} NOT IN (SELECT id FROM players)` : ''}`,
+              )
+              .get(),
+          ),
     ]),
-  );
+  ) as PlayerReferenceCounts;
 }
 /** The companion diagnostic: per collection, rows naming a player whose record is retained (an account deleted). */
-export function retainedPlayerReferences(sqlite) {
+export function retainedPlayerReferences(sqlite: DatabaseSync): PlayerReferenceCounts {
   const players = tableExists(sqlite, 'players');
   return Object.fromEntries(
     PLAYER_REFERENCE_TABLES.map(({ name: n, table: t, column }) => [
       n,
       !tableExists(sqlite, t) || !players
         ? 0
-        : sqlite
-            .prepare(
-              `SELECT COUNT(*) AS n FROM ${t} WHERE ${column} IS NOT NULL AND ${column} IN (SELECT id FROM players WHERE deleted_at IS NOT NULL)`,
-            )
-            .get().n,
+        : countOf(
+            sqlite
+              .prepare(
+                `SELECT COUNT(*) AS n FROM ${t} WHERE ${column} IS NOT NULL AND ${column} IN (SELECT id FROM players WHERE deleted_at IS NOT NULL)`,
+              )
+              .get(),
+          ),
     ]),
-  );
+  ) as PlayerReferenceCounts;
 }
 
 // ------------------------------------------------------------------ whole-domain read (the test suites)
-function readAll(sqlite) {
+function readAll(sqlite: DatabaseSync): AuditRecordSet {
   return Object.fromEntries(
     AUDIT_COLLECTIONS.map((n) => [
       n,
       decodeRows(sqlite, n, sqlite.prepare(`SELECT * FROM ${TABLE_OF[n]} ORDER BY seq`).all()),
     ]),
-  );
+  ) as AuditRecordSet;
 }
 /** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const SAFETY_AUDIT_RECORDS = {
   names: AUDIT_COLLECTIONS,
-  read(sqlite) {
+  read(sqlite: DatabaseSync): AuditRecordSet | null {
     return safetyAuditLive(sqlite) ? readAll(sqlite) : null;
   },
 };
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['add', 'lift', 'file', 'resolve', 'record', 'append', 'setStatus']);
 const REPORT_RANK =
   "CASE WHEN status = 'pending_review' AND urgent = 1 THEN 0 WHEN status = 'pending_review' THEN 1 ELSE 2 END";
 const REPORT_SORT = "CASE WHEN status = 'pending_review' THEN created_at ELSE -created_at END";
+/** A page newest first: `after` is the previous page's last key `[seq]`. */
+export type AuditPageRequest = { after?: readonly [number] | null; limit: number };
+/** A page in triage order: `after` is the previous page's last key `[rank, sortKey, seq]`. */
+export type TriagePageRequest = { after?: readonly [number, number, number] | null; limit: number };
+export type AuditPage<T> = { items: T[]; nextCursor: string | null };
 
 /**
  * `createSafetyAuditRepository({ sqlite, unit, now, log })`: one object per collection with its writes and queries,
  * plus `reads` (the queries alone, for modules that must not write).
  */
-export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
+export function createSafetyAuditRepository(
+  {
+    sqlite,
+    unit = null,
+    now = Date.now,
+    log = () => {},
+  }: {
+    sqlite: DatabaseSync;
+    unit?: UnitParticipant | null;
+    now?: () => number;
+    log?: (message: string) => void;
+  } = {} as { sqlite: DatabaseSync },
+) {
   if (!sqlite) throw new TypeError('the safety-audit repository needs a SQLite connection (node:sqlite)');
   const operation = operationOn(sqlite, unit);
-  const cache = new Map();
-  const q = (sql) => {
+  const cache = new Map<string, StatementSync>();
+  const q = (sql: string) => {
     let s = cache.get(sql);
     if (!s) cache.set(sql, (s = sqlite.prepare(sql)));
     return s;
   };
-  const str = (v) => typeof v === 'string';
-  const dec = (n, rows) => decodeRows(sqlite, n, rows).map(deepFreeze);
-  const byIdOf = (n) => (id) =>
-    str(id) ? (dec(n, q(`SELECT * FROM ${TABLE_OF[n]} WHERE id = ?`).all(id))[0] ?? null) : null;
+  const str = (v: unknown): v is string => typeof v === 'string';
+  const dec = <N extends AuditCollection>(n: N, rows: unknown[]): AuditRecord<N>[] =>
+    decodeRows(sqlite, n, rows as Row[]).map((r) => deepFreeze(r));
+  const byIdOf =
+    <N extends AuditCollection>(n: N) =>
+    (id: unknown): AuditRecord<N> | null =>
+      str(id) ? (dec(n, q(`SELECT * FROM ${TABLE_OF[n]} WHERE id = ?`).all(id))[0] ?? null) : null;
   /** Rows after `after` ([seq]), newest first: `{ items, nextCursor }`. */
-  const newestPage = (n, where, args, { after = null, limit }) => {
+  const newestPage = <N extends AuditCollection>(
+    n: N,
+    where: string,
+    args: SQLInputValue[],
+    { after = null, limit }: AuditPageRequest,
+  ): AuditPage<AuditRecord<N>> => {
     const rows = q(
       `SELECT * FROM ${TABLE_OF[n]} WHERE ${where} AND (? IS NULL OR seq < ?) ORDER BY seq DESC LIMIT ?`,
-    ).all(...args, after?.[0] ?? null, after?.[0] ?? null, limit + 1);
+    ).all(...args, after?.[0] ?? null, after?.[0] ?? null, limit + 1) as Row[];
     const page = pageOf(rows, limit, (r) => [r.seq]);
     return { items: dec(n, page.items), nextCursor: page.nextCursor };
   };
   /** Type, check the references, insert; returns the stored record. */
-  const insert = (n, raw) => {
+  const insert = <N extends AuditCollection>(n: N, raw: unknown): AuditRecord<N> => {
     const t = AUDIT_TYPERS[n](raw, n);
     if (!t.ok) throw refusal('AUDIT_RECORD_INVALID', t.reason);
-    if (q(`SELECT 1 FROM ${TABLE_OF[n]} WHERE id = ?`).get(t.record.id))
-      throw refusal('AUDIT_DUPLICATE', `${TABLE_OF[n]} ${t.record.id} already exists`);
-    for (const [what, tbl, id] of referencesOf(n, t.record))
+    const record = t.record as AuditRecords[N] & { id: string };
+    if (q(`SELECT 1 FROM ${TABLE_OF[n]} WHERE id = ?`).get(record.id))
+      throw refusal('AUDIT_DUPLICATE', `${TABLE_OF[n]} ${record.id} already exists`);
+    for (const [what, tbl, id] of referencesOf(n, record))
       if (!q(`SELECT 1 FROM ${tbl} WHERE id = ?`).get(id))
         throw refusal('AUDIT_REFERENCE_MISSING', `${what} names no ${tbl} row (${id})`);
-    if (n === 'idvQueue' && !q('SELECT 1 FROM guardians WHERE id = ?').get(t.record.guardianId))
-      throw refusal(
-        'IDV_GUARDIAN_MISSING',
-        `idv_queue ${t.record.id}: guardian ${t.record.guardianId} does not exist; an IDV entry names an existing guardian`,
-      );
+    if (n === 'idvQueue') {
+      const { guardianId } = record as IdvRecord;
+      if (!q('SELECT 1 FROM guardians WHERE id = ?').get(guardianId))
+        throw refusal(
+          'IDV_GUARDIAN_MISSING',
+          `idv_queue ${record.id}: guardian ${guardianId} does not exist; an IDV entry names an existing guardian`,
+        );
+    }
     writeRecord(sqlite, n, t);
-    return byIdOf(n)(t.record.id);
+    return byIdOf(n)(record.id) as AuditRecord<N>;
   };
-  const typesArg = (types) => (types ? JSON.stringify(types) : null);
+  const typesArg = (types: readonly string[] | null) => (types ? JSON.stringify(types) : null);
 
   const blocks = {
     /** A block (a player's or guardian's, or an urgent report's suspension). */
-    add: (raw) => operation(() => insert('blocks', raw)),
+    add: (raw: BlockInput): Block => operation(() => insert('blocks', raw)),
     /** Q5: lifting a block deletes its row. Returns the lifted record, or null. */
-    lift: (id) =>
+    lift: (id: string): Block | null =>
       operation(() => {
         const b = byIdOf('blocks')(id);
         if (!b) return null;
@@ -755,19 +910,19 @@ export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.no
       }),
     byId: byIdOf('blocks'),
     /** Has `playerId` (or their guardian, or a suspension) blocked `orgId`? */
-    has: (playerId, orgId) =>
+    has: (playerId: unknown, orgId: unknown): boolean =>
       str(playerId) &&
       str(orgId) &&
       !!q('SELECT 1 FROM blocks WHERE player_id = ? AND org_id = ? LIMIT 1').get(playerId, orgId),
     /** A page of every block, newest first (Trust & Safety). */
-    page: (page) => newestPage('blocks', '1 = 1', [], page),
-    count: () => q('SELECT COUNT(*) AS n FROM blocks').get().n,
+    page: (page: AuditPageRequest): AuditPage<Block> => newestPage('blocks', '1 = 1', [], page),
+    count: (): number => countOf(q('SELECT COUNT(*) AS n FROM blocks').get()),
   };
 
   const reports = {
-    file: (raw) => operation(() => insert('reports', raw)),
+    file: (raw: ReportInput): Report => operation(() => insert('reports', raw)),
     /** Resolve a pending report once with its `outcome` at `at`. Refuses a report already resolved. */
-    resolve: (id, { outcome, at }) =>
+    resolve: (id: string, { outcome, at }: { outcome: string | null; at: number }): Report =>
       operation(() => {
         const r = byIdOf('reports')(id);
         if (!r) throw refusal('REPORT_NOT_FOUND', `reports ${id} is not a record of the repository`);
@@ -779,20 +934,20 @@ export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.no
           t.record.resolvedAt,
           id,
         );
-        return byIdOf('reports')(id);
+        return byIdOf('reports')(id) as Report;
       }),
     byId: byIdOf('reports'),
     /** The reports one reporter filed, newest first. */
-    forReporter: (by, byId) =>
+    forReporter: (by: ReportBy, byId: string): Report[] =>
       dec('reports', q('SELECT * FROM reports WHERE by_kind = ? AND by_id = ? ORDER BY seq DESC').all(by, byId)),
     /** Is an urgent report against `orgId` still waiting for review (safeguarding certification)? */
-    openUrgentAgainst: (orgId) =>
+    openUrgentAgainst: (orgId: string): boolean =>
       !!q("SELECT 1 FROM reports WHERE target_org_id = ? AND urgent = 1 AND status = 'pending_review' LIMIT 1").get(
         orgId,
       ),
-    countOpen: () => q("SELECT COUNT(*) AS n FROM reports WHERE status = 'pending_review'").get().n,
+    countOpen: (): number => countOf(q("SELECT COUNT(*) AS n FROM reports WHERE status = 'pending_review'").get()),
     /** A page in triage order: urgent pending first, then pending, both oldest first; then resolved, newest first. `after` is [rank, sortKey, seq]. */
-    triagePage: ({ after = null, limit }) => {
+    triagePage: ({ after = null, limit }: TriagePageRequest): AuditPage<Report> => {
       const rows = q(`SELECT *, ${REPORT_RANK} AS rank_, ${REPORT_SORT} AS sort_ FROM reports
         WHERE (? IS NULL OR (${REPORT_RANK}, ${REPORT_SORT}, seq) > (?, ?, ?)) ORDER BY rank_, sort_, seq LIMIT ?`).all(
         after ? 1 : null,
@@ -800,25 +955,25 @@ export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.no
         after?.[1] ?? null,
         after?.[2] ?? null,
         limit + 1,
-      );
+      ) as Row[];
       const page = pageOf(rows, limit, (r) => [r.rank_, r.sort_, r.seq]);
       return { items: dec('reports', page.items), nextCursor: page.nextCursor };
     },
   };
 
   const moderationLog = {
-    record: (raw) => operation(() => insert('moderationLog', raw)),
+    record: (raw: ModerationInput): ModerationEntry => operation(() => insert('moderationLog', raw)),
     byId: byIdOf('moderationLog'),
-    page: (page) => newestPage('moderationLog', '1 = 1', [], page),
-    count: (severity = null) =>
-      q('SELECT COUNT(*) AS n FROM moderation_log WHERE (? IS NULL OR severity = ?)').get(severity, severity).n,
+    page: (page: AuditPageRequest): AuditPage<ModerationEntry> => newestPage('moderationLog', '1 = 1', [], page),
+    count: (severity: ModerationSeverity | null = null): number =>
+      countOf(q('SELECT COUNT(*) AS n FROM moderation_log WHERE (? IS NULL OR severity = ?)').get(severity, severity)),
   };
 
   const orgNotes = {
-    add: (raw) => operation(() => insert('orgNotes', raw)),
+    add: (raw: OrgNoteInput): OrgNote => operation(() => insert('orgNotes', raw)),
     byId: byIdOf('orgNotes'),
     /** One club's notes on one player, newest first. */
-    forOrgPlayer: (orgId, playerId) =>
+    forOrgPlayer: (orgId: string, playerId: string): OrgNote[] =>
       dec(
         'orgNotes',
         q('SELECT * FROM org_notes WHERE org_id = ? AND player_id = ? ORDER BY seq DESC').all(orgId, playerId),
@@ -826,10 +981,10 @@ export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.no
   };
 
   const ledger = {
-    append: (raw) => operation(() => insert('ledger', raw)),
+    append: (raw: LedgerInput): LedgerEntry => operation(() => insert('ledger', raw)),
     byId: byIdOf('ledger'),
     /** One player's ledger, oldest first; `types` limits it (null: every type). */
-    forPlayer: (playerId, types = null) =>
+    forPlayer: (playerId: string, types: readonly LedgerType[] | null = null): LedgerEntry[] =>
       dec(
         'ledger',
         q(
@@ -837,10 +992,10 @@ export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.no
         ).all(playerId, typesArg(types), typesArg(types)),
       ),
     /** One club's events about one player, oldest first (the Proof Pack, the signing's attribution). */
-    forPlayerOrg: (playerId, orgId) =>
+    forPlayerOrg: (playerId: string, orgId: string): LedgerEntry[] =>
       dec('ledger', q('SELECT * FROM ledger WHERE player_id = ? AND org_id = ? ORDER BY seq').all(playerId, orgId)),
     /** One club's events, oldest first; `types` limits it (null: every type: the enterprise export). */
-    forOrg: (orgId, types = null) =>
+    forOrg: (orgId: string, types: readonly LedgerType[] | null = null): LedgerEntry[] =>
       dec(
         'ledger',
         q(
@@ -848,58 +1003,63 @@ export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.no
         ).all(orgId, typesArg(types), typesArg(types)),
       ),
     /** A page of one club's ledger, newest first. */
-    pageForOrg: (orgId, page) => newestPage('ledger', 'org_id = ?', [orgId], page),
+    pageForOrg: (orgId: string, page: AuditPageRequest): AuditPage<LedgerEntry> =>
+      newestPage('ledger', 'org_id = ?', [orgId], page),
     /** A page of these players' ledger, newest first (a guardian's log of their children). */
-    pageForPlayers: (playerIds, page) =>
+    pageForPlayers: (playerIds: readonly string[], page: AuditPageRequest): AuditPage<LedgerEntry> =>
       newestPage('ledger', 'player_id IN (SELECT value FROM json_each(?))', [JSON.stringify(playerIds)], page),
     /** The players a club put on these lists (default: its shortlist), in the order it first did. */
-    playersListedBy: (orgId, types = ['shortlist']) =>
-      q(
-        'SELECT player_id AS id, MIN(seq) AS first FROM ledger WHERE org_id = ? AND type IN (SELECT value FROM json_each(?)) AND player_id IS NOT NULL GROUP BY player_id ORDER BY first',
-      )
-        .all(orgId, JSON.stringify(types))
-        .map((r) => r.id),
+    playersListedBy: (orgId: string, types: readonly LedgerType[] = ['shortlist']): string[] =>
+      (
+        q(
+          'SELECT player_id AS id, MIN(seq) AS first FROM ledger WHERE org_id = ? AND type IN (SELECT value FROM json_each(?)) AND player_id IS NOT NULL GROUP BY player_id ORDER BY first',
+        ).all(orgId, JSON.stringify(types)) as { id: string }[]
+      ).map((r) => r.id),
     /** Has the club put this player on these lists (default: its shortlist)? */
-    isListedBy: (orgId, playerId, types = ['shortlist']) =>
+    isListedBy: (orgId: string, playerId: string, types: readonly LedgerType[] = ['shortlist']): boolean =>
       !!q(
         'SELECT 1 FROM ledger WHERE org_id = ? AND player_id = ? AND type IN (SELECT value FROM json_each(?)) LIMIT 1',
       ).get(orgId, playerId, JSON.stringify(types)),
-    countForPlayer: (playerId, type) =>
-      q('SELECT COUNT(*) AS n FROM ledger WHERE player_id = ? AND type = ?').get(playerId, type).n,
+    countForPlayer: (playerId: string, type: LedgerType): number =>
+      countOf(q('SELECT COUNT(*) AS n FROM ledger WHERE player_id = ? AND type = ?').get(playerId, type)),
     /** One club's event counts by type: `{ [type]: n }`. */
-    countsForOrg: (orgId) =>
+    countsForOrg: (orgId: string): Partial<Record<LedgerType, number>> =>
       Object.fromEntries(
-        q('SELECT type, COUNT(*) AS n FROM ledger WHERE org_id = ? GROUP BY type')
-          .all(orgId)
-          .map((r) => [r.type, r.n]),
+        (
+          q('SELECT type, COUNT(*) AS n FROM ledger WHERE org_id = ? GROUP BY type').all(orgId) as {
+            type: LedgerType;
+            n: number;
+          }[]
+        ).map((r) => [r.type, r.n]),
       ),
     /** One club's busiest actors: `[{ scoutName, events }]`, most events first (ties: who acted first), at most `n`. */
-    topActorsForOrg: (orgId, n) =>
-      q(
-        "SELECT actor_name AS scoutName, COUNT(*) AS events FROM ledger WHERE org_id = ? AND actor_name IS NOT NULL AND actor_name <> '' GROUP BY actor_name ORDER BY events DESC, MIN(seq) LIMIT ?",
-      )
-        .all(orgId, n)
-        .map((r) => ({ scoutName: r.scoutName, events: r.events })),
+    topActorsForOrg: (orgId: string, n: number): { scoutName: string; events: number }[] =>
+      (
+        q(
+          "SELECT actor_name AS scoutName, COUNT(*) AS events FROM ledger WHERE org_id = ? AND actor_name IS NOT NULL AND actor_name <> '' GROUP BY actor_name ORDER BY events DESC, MIN(seq) LIMIT ?",
+        ).all(orgId, n) as { scoutName: string; events: number }[]
+      ).map((r) => ({ scoutName: r.scoutName, events: r.events })),
     /** Every (actor, organisation, type) with its count, in first-seen order (the reputation board). */
-    countsByActor: () =>
-      q(
-        'SELECT actor_name AS scoutName, org_name AS orgName, type, COUNT(*) AS n, MIN(seq) AS first FROM ledger GROUP BY actor_name, org_name, type ORDER BY first',
-      )
-        .all()
-        .map((r) => ({ scoutName: r.scoutName, orgName: r.orgName, type: r.type, n: r.n })),
+    countsByActor: (): { scoutName: string | null; orgName: string | null; type: LedgerType; n: number }[] =>
+      (
+        q(
+          'SELECT actor_name AS scoutName, org_name AS orgName, type, COUNT(*) AS n, MIN(seq) AS first FROM ledger GROUP BY actor_name, org_name, type ORDER BY first',
+        ).all() as { scoutName: string | null; orgName: string | null; type: LedgerType; n: number }[]
+      ).map((r) => ({ scoutName: r.scoutName, orgName: r.orgName, type: r.type, n: r.n })),
   };
 
   const opsEvents = {
-    record: (raw) => operation(() => insert('opsEvents', raw)),
+    record: (raw: OpsEventInput): OpsEvent => operation(() => insert('opsEvents', raw)),
     byId: byIdOf('opsEvents'),
-    count: (kind = null) => q('SELECT COUNT(*) AS n FROM ops_events WHERE (? IS NULL OR kind = ?)').get(kind, kind).n,
+    count: (kind: OpsKind | null = null): number =>
+      countOf(q('SELECT COUNT(*) AS n FROM ops_events WHERE (? IS NULL OR kind = ?)').get(kind, kind)),
     /** The newest `n`, newest first. */
-    newest: (n) => dec('opsEvents', q('SELECT * FROM ops_events ORDER BY seq DESC LIMIT ?').all(n)),
+    newest: (n: number): OpsEvent[] => dec('opsEvents', q('SELECT * FROM ops_events ORDER BY seq DESC LIMIT ?').all(n)),
   };
 
   const sourceChanges = {
     /** Append a change; the log keeps the newest `cap` rows (a change log, not the history of record). */
-    record: (raw, { cap = SOURCE_CHANGE_CAP } = {}) =>
+    record: (raw: SourceChangeInput, { cap = SOURCE_CHANGE_CAP }: { cap?: number } = {}): SourceChange =>
       operation(() => {
         const c = insert('sourceChanges', raw);
         q(
@@ -909,54 +1069,73 @@ export function createSafetyAuditRepository({ sqlite, unit = null, now = Date.no
       }),
     byId: byIdOf('sourceChanges'),
     /** One player's changes, oldest first by when they happened. */
-    forPlayer: (playerId) =>
+    forPlayer: (playerId: string): SourceChange[] =>
       dec(
         'sourceChanges',
         q('SELECT * FROM source_changes WHERE player_id = ? ORDER BY occurred_at, seq').all(playerId),
       ),
-    count: () => q('SELECT COUNT(*) AS n FROM source_changes').get().n,
+    count: (): number => countOf(q('SELECT COUNT(*) AS n FROM source_changes').get()),
   };
 
   const idvQueue = {
-    add: (raw) => operation(() => insert('idvQueue', raw)),
+    add: (raw: IdvInput): IdvEntry => operation(() => insert('idvQueue', raw)),
     /** The admin toggle: the status of one entry. */
-    setStatus: (id, status) =>
+    setStatus: (id: string, status: IdvStatus): IdvEntry =>
       operation(() => {
         if (!IDV_STATUSES.includes(status))
           throw refusal('AUDIT_RECORD_INVALID', `idv_queue ${id}: status must be one of ${IDV_STATUSES.join('|')}`);
         if (q('UPDATE idv_queue SET status = ? WHERE id = ?').run(status, id).changes !== 1)
           throw refusal('IDV_ENTRY_NOT_FOUND', `idv_queue ${id} is not a record of the repository`);
-        return byIdOf('idvQueue')(id);
+        return byIdOf('idvQueue')(id) as IdvEntry;
       }),
     byId: byIdOf('idvQueue'),
     /** The guardian's first entry (the admin toggle's rule), or null. */
-    firstForGuardian: (guardianId) =>
+    firstForGuardian: (guardianId: string): IdvEntry | null =>
       dec('idvQueue', q('SELECT * FROM idv_queue WHERE guardian_id = ? ORDER BY seq LIMIT 1').all(guardianId))[0] ??
       null,
     /** Every entry, in the order the checks happened (about one per guardian). */
-    all: () => dec('idvQueue', q('SELECT * FROM idv_queue ORDER BY seq').all()),
+    all: (): IdvEntry[] => dec('idvQueue', q('SELECT * FROM idv_queue ORDER BY seq').all()),
   };
 
-  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
-  const parts = { blocks, reports, moderationLog, orgNotes, ledger, opsEvents, sourceChanges, idvQueue };
+  const counts = (): Record<AuditCollection, number> =>
+    Object.fromEntries(
+      AUDIT_COLLECTIONS.map((n) => [n, countOf(q(`SELECT COUNT(*) AS n FROM ${TABLE_OF[n]}`).get())]),
+    ) as Record<AuditCollection, number>;
   const repo = {
-    ...parts,
+    blocks,
+    reports,
+    moderationLog,
+    orgNotes,
+    ledger,
+    opsEvents,
+    sourceChanges,
+    idvQueue,
     /** The queries alone, for modules that must not write. */
-    reads: Object.freeze(Object.fromEntries(Object.entries(parts).map(([k, v]) => [k, readOnly(v)]))),
-    attach() {
+    reads: Object.freeze({
+      blocks: readsOf(blocks, ['add', 'lift']),
+      reports: readsOf(reports, ['file', 'resolve']),
+      moderationLog: readsOf(moderationLog, ['record']),
+      orgNotes: readsOf(orgNotes, ['add']),
+      ledger: readsOf(ledger, ['append']),
+      opsEvents: readsOf(opsEvents, ['record']),
+      sourceChanges: readsOf(sourceChanges, ['record']),
+      idvQueue: readsOf(idvQueue, ['add', 'setStatus']),
+    }),
+    attach(): { engine: 'sqlite' } & Record<AuditCollection, number> {
       if (!safetyAuditLive(sqlite))
         throw new Error(`the safety-audit repository needs ${SAFETY_AUDIT_MIGRATION} recorded`);
-      const c = repo.counts();
+      const c = counts();
       log(`safety audit: ${AUDIT_COLLECTIONS.map((n) => `${c[n]} ${n}`).join(', ')} in the tables`);
       return { engine: 'sqlite', ...c };
     },
-    counts: () =>
-      Object.fromEntries(AUDIT_COLLECTIONS.map((n) => [n, q(`SELECT COUNT(*) AS n FROM ${TABLE_OF[n]}`).get().n])),
+    counts,
     pending: () => 0,
     unresolvedPlayerReferences: () => unresolvedPlayerReferences(sqlite),
     /** Every collection's records, detached. */
-    exportAll: () => JSON.parse(JSON.stringify(readAll(sqlite))),
+    exportAll: (): AuditRecordSet => JSON.parse(JSON.stringify(readAll(sqlite))),
     now,
   };
   return repo;
 }
+export type SafetyAuditRepository = ReturnType<typeof createSafetyAuditRepository>;
+export type SafetyAuditReads = SafetyAuditRepository['reads'];

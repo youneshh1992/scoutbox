@@ -4,7 +4,7 @@
  * deleting it. The full birth date and the country code are kept: Founder's decisions (docs/decisions.md).
  */
 import { migrationApplied } from '../database.ts';
-import { SAFETY_AUDIT_MIGRATION } from '../safetyAudit.mjs';
+import { SAFETY_AUDIT_MIGRATION } from '../safetyAudit.ts';
 import { PLAYER_ERASURE_MIGRATION } from '../playerRecord.ts';
 
 export const id = PLAYER_ERASURE_MIGRATION;

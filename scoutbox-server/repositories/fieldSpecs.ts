@@ -13,7 +13,7 @@
 import type { SQLInputValue } from 'node:sqlite';
 import type { Row } from './database.ts';
 
-type FieldOptions = { req?: boolean; def?: string | number | boolean; nonEmpty?: boolean };
+export type FieldOptions = { req?: boolean; def?: string | number | boolean; nonEmpty?: boolean };
 type GroupOptions = { nullable?: boolean; sparse?: boolean };
 export type TextField = { k: string; c: string; t: 'text'; max: number } & FieldOptions;
 export type IntField = { k: string; c: string; t: 'int' } & FieldOptions;
@@ -58,6 +58,15 @@ type Flatten<T> = { [K in keyof T]: T[K] } & {};
 export type RecordOf<S extends Spec> = Flatten<
   { [F in S[number] as F extends Omissible ? never : F['k']]: ValueOf<F> } & {
     [F in S[number] as F extends Omissible ? F['k'] : never]?: ValueOf<F>;
+  }
+>;
+type Defaulted<S extends Spec> = Extract<S[number], { def: string | number | boolean }>['k'];
+type Optional<S extends Spec, K> =
+  K extends Defaulted<S> ? true : null extends RecordOf<S>[K & keyof RecordOf<S>] ? true : false;
+/** What a writer passes for a spec's record: a field that may be null, or has a default, may be left out. */
+export type InputOf<S extends Spec> = Flatten<
+  { [K in keyof RecordOf<S> as Optional<S, K> extends true ? never : K]: RecordOf<S>[K] } & {
+    [K in keyof RecordOf<S> as Optional<S, K> extends true ? K : never]?: RecordOf<S>[K];
   }
 >;
 

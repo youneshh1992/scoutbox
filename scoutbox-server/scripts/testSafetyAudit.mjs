@@ -1,4 +1,4 @@
-// The eight audit collections as typed tables (repositories/safetyAudit.mjs, migration 0013_safety_audit). Q4 (see
+// The eight audit collections as typed tables (repositories/safetyAudit.ts, migration 0013_safety_audit). Q4 (see
 // docs/decisions.md): the five player references (blocks, reports, org notes, ledger, source
 // changes) carry no key and an unresolved id is counted, never refused. Q4b: the ID-check queue names an existing
 // guardian, checked on every write. Q5: lifting a block deletes its row.
@@ -21,7 +21,7 @@ import {
   AUDIT_COLLECTIONS,
   LEDGER_TYPES,
   LEDGER_DETAIL,
-} from '../repositories/safetyAudit.mjs';
+} from '../repositories/safetyAudit.ts';
 import { openStore } from '../store.ts';
 import {
   NOW,

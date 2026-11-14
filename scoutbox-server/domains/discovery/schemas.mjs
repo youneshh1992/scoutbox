@@ -31,7 +31,7 @@ import {
   EVIDENCE_REQUIREMENTS,
 } from './shared.mjs';
 import { SAVED_SEARCH_FILTERS, SAVED_SEARCH_LIMITS } from '../../repositories/savedSearches.mjs';
-import { AUDIT_LIMITS } from '../../repositories/safetyAudit.mjs';
+import { AUDIT_LIMITS } from '../../repositories/safetyAudit.ts';
 
 /** None of these is a match quality rank; the default is the least suggestive one that is still useful. */
 export const MATCH_SORTS = ['recent_evidence', 'name', 'age', 'evidence_confidence', 'distance'];

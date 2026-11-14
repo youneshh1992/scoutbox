@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { tempDir } from './coreIdentityTestFixtures.mjs';
-import { createSafetyAuditRepository } from '../repositories/safetyAudit.mjs';
+import { createSafetyAuditRepository } from '../repositories/safetyAudit.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';
@@ -60,7 +60,7 @@ const TABLES = {
   sourceChanges: 'source_changes',
   idvQueue: 'idv_queue',
 };
-/** The keys of each record, in the writers' order (repositories/safetyAudit.mjs). */
+/** The keys of each record, in the writers' order (repositories/safetyAudit.ts). */
 const KEYS = {
   blocks: ['id', 'playerId', 'orgId', 'by', 'reason', 'ts'],
   reports: [

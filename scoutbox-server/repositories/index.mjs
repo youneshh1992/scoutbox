@@ -219,7 +219,7 @@ import {
   SAFETY_AUDIT_RECORDS,
   unresolvedPlayerReferences,
   retainedPlayerReferences,
-} from './safetyAudit.mjs';
+} from './safetyAudit.ts';
 
 export const DATA_MIGRATIONS = Object.freeze([
   m0001,
