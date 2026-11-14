@@ -35,7 +35,7 @@ import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
 import { isPlainObject, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn, type Row, type UnitParticipant } from './database.ts';
 import { readsOf } from './identityRules.ts';
-import { writeKit, type Flatten, type InputFor, type RowOf } from './writes.ts';
+import { writeKit, columnsOf, insertFor, type Flatten, type InputFor, type RowOf } from './writes.ts';
 import {
   txt,
   historyTable,
@@ -1049,13 +1049,6 @@ const plSegRow = (playlistId: string, segmentId: string, position: number) => ({
 });
 type PlSegRow = RowOf<typeof plSegRow>;
 
-/** A table's columns, which the compiler holds to its encoder's row: none missing, none extra. */
-const columnsOf =
-  <R>() =>
-  <const C extends readonly (keyof R & string)[]>(
-    cols: C & ([Exclude<keyof R, C[number]>] extends [never] ? unknown : never),
-  ): readonly string[] =>
-    cols;
 const TEMPLATE_COLS = columnsOf<TemplateRow>()(['id', 'version', 'position_group', 'created_at', 'created_by_name']);
 const ATTRIBUTE_COLS = columnsOf<AttributeRow>()([
   'template_id',
@@ -1141,22 +1134,6 @@ const PLAYLIST_COLS = columnsOf<PlaylistRow>()([
   'created_at',
 ]);
 const PL_SEG_COLS = columnsOf<PlSegRow>()(['playlist_id', 'position', 'segment_id']);
-const insertFor = (
-  sqlite: DatabaseSync,
-  table: string,
-  cols: readonly string[],
-  { upsert = null }: { upsert?: readonly string[] | null } = {},
-) =>
-  sqlite.prepare(
-    `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})${
-      upsert
-        ? ` ON CONFLICT(${upsert.join(', ')}) DO UPDATE SET ${cols
-            .filter((c) => !upsert.includes(c))
-            .map((c) => `${c} = excluded.${c}`)
-            .join(', ')}`
-        : ''
-    }`,
-  );
 
 /** Prepared statements over one connection. */
 function statements(sqlite: DatabaseSync) {

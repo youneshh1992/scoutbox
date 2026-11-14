@@ -229,7 +229,10 @@ The order, from the bottom of the import graph up, so each file is typed against
    them to build on. `scoutingAssessments.ts` builds on them: the `AssessmentTemplate`, `Assessment` (its ratings
    and their references, context, recommendation, published feedback and history), `VideoSegment` and `Playlist`
    records, the v1 catalogue, and what each create and act accepts; an assessment is typed without the template
-   attributes it reads back with. The repositories that still type records in
+   attributes it reads back with. `clubSetup.ts` types the `TacticalSetup` (its roles, their criteria, each a key
+   with the value its vocabulary or range allows, and the windows), `SquadMember`, `ShadowPlayer`, `FederationCheck`
+   and `Vacancy` records and what each write accepts; `columnsOf` and `insertFor`, which the typed repositories had
+   each copied, are in `writes.ts`. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
    converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
    write through the repositories are typed checks of the repositories' signatures; convert them alongside, except

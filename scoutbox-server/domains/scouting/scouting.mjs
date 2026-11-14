@@ -23,7 +23,7 @@ import {
   text,
   wholeNumber,
 } from '../platform/schemas.mjs';
-import { CRITERIA_KEYS, CLUB_SETUP_LIMITS, typeTacticalSetup } from '../../repositories/clubSetup.mjs';
+import { CRITERIA_KEYS, CLUB_SETUP_LIMITS, typeTacticalSetup } from '../../repositories/clubSetup.ts';
 import { CASE_TEXT_LIMITS as CASE_TEXT } from '../../repositories/recruitmentCases.ts';
 import { bornByForAge } from '../../repositories/players.ts';
 import {

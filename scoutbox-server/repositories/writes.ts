@@ -57,6 +57,30 @@ export type RowOf<F extends (...args: never[]) => object> = {
     | Exclude<ReturnType<F>[K], undefined>
     | (undefined extends ReturnType<F>[K] ? null : never);
 };
+/** A table's columns, which the compiler holds to its encoder's row: none missing, none extra. */
+export const columnsOf =
+  <R>() =>
+  <const C extends readonly (keyof R & string)[]>(
+    cols: C & ([Exclude<keyof R, C[number]>] extends [never] ? unknown : never),
+  ): readonly string[] =>
+    cols;
+/** An INSERT of `cols` bound by name; with `upsert`, a row with that key has its other columns replaced. */
+export const insertFor = (
+  sqlite: DatabaseSync,
+  table: string,
+  cols: readonly string[],
+  { upsert = null }: { upsert?: readonly string[] | null } = {},
+): StatementSync =>
+  sqlite.prepare(
+    `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})${
+      upsert
+        ? ` ON CONFLICT(${upsert.join(', ')}) DO UPDATE SET ${cols
+            .filter((c) => !upsert.includes(c))
+            .map((c) => `${c} = excluded.${c}`)
+            .join(', ')}`
+        : ''
+    }`,
+  );
 /** Bind an absent field as NULL. */
 export const nulls = (row: object): Record<string, SQLInputValue> => {
   const r = row as Record<string, SQLInputValue | undefined>;

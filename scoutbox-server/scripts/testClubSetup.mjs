@@ -1,4 +1,4 @@
-// A club's setup (repositories/clubSetup.mjs, migration 0021): the tactical setup (roles, criteria, windows), the
+// A club's setup (repositories/clubSetup.ts, migration 0021): the tactical setup (roles, criteria, windows), the
 // squad, the shadow list, looking-for, the federation-route request and vacancies. The organisation record refuses
 // these as fields. A tactical re-save diffs roles by id (a kept role keeps its vacancies and shadow entries, a dropped
 // one leaves them with no role); a role of another club is refused. Also: the typers, uniqueness rules, units of work,
@@ -23,7 +23,7 @@ import {
   typeLookingFor,
   typeFederationCheck,
   typeVacancy,
-} from '../repositories/clubSetup.mjs';
+} from '../repositories/clubSetup.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

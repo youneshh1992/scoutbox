@@ -4,7 +4,7 @@
  */
 import { migrationApplied } from '../database.ts';
 import { SCOUTING_ASSESSMENTS_MIGRATION } from '../scoutingAssessments.ts';
-import { CLUB_SETUP_MIGRATION, CLUB_SETUP_DDL, CLUB_SETUP_TABLES } from '../clubSetup.mjs';
+import { CLUB_SETUP_MIGRATION, CLUB_SETUP_DDL, CLUB_SETUP_TABLES } from '../clubSetup.ts';
 
 export const id = CLUB_SETUP_MIGRATION;
 export const note =

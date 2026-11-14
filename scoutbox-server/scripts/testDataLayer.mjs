@@ -2,7 +2,7 @@
 // migration runner, the read-only views and the store's tables. Everything runs on
 // an in-memory or throwaway SQLite database. Run with: npm test
 import { SCOUTING_ASSESSMENTS_TABLES } from '../repositories/scoutingAssessments.ts';
-import { CLUB_SETUP_TABLES } from '../repositories/clubSetup.mjs';
+import { CLUB_SETUP_TABLES } from '../repositories/clubSetup.ts';
 import { OPPORTUNITIES_CAMPAIGNS_TABLES } from '../repositories/opportunitiesCampaigns.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';

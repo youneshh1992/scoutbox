@@ -104,7 +104,7 @@ import {
   CLUB_SETUP_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedClubSetupPlayers,
   retainedPlayerReferences as retainedClubSetupPlayers,
-} from './clubSetup.mjs';
+} from './clubSetup.ts';
 import {
   createOpportunitiesCampaignsRepository,
   OPPORTUNITIES_CAMPAIGNS_RECORDS,

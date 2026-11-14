@@ -24,7 +24,7 @@ import {
 } from '../platform/schemas.mjs';
 import { IDENTITY_LIMITS as IL } from '../../repositories/identityRules.ts';
 import { GRASSROOTS_LIMITS as GL } from '../../repositories/grassroots.mjs';
-import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from '../../repositories/clubSetup.mjs';
+import { CLUB_SETUP_LIMITS, LOOKING_FOR_POSITIONS } from '../../repositories/clubSetup.ts';
 import { TRANSITION_LIMITS as VL } from '../../repositories/transitionsVouches.mjs';
 import { DEVELOPMENT_LIMITS as DL } from '../../repositories/development.mjs';
 

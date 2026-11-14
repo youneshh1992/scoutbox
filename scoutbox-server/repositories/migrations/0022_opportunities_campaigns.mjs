@@ -3,7 +3,7 @@
  * private suitability preferences.
  */
 import { migrationApplied } from '../database.ts';
-import { CLUB_SETUP_MIGRATION } from '../clubSetup.mjs';
+import { CLUB_SETUP_MIGRATION } from '../clubSetup.ts';
 import {
   OPPORTUNITIES_CAMPAIGNS_MIGRATION,
   OPPORTUNITIES_CAMPAIGNS_DDL,

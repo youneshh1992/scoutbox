@@ -28,7 +28,7 @@ import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
 import { isPlainObject, describe } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn, type Row, type UnitParticipant } from './database.ts';
 import { readsOf } from './identityRules.ts';
-import { writeKit, type Flatten, type History, type InputFor, type RowOf } from './writes.ts';
+import { writeKit, columnsOf, insertFor, type Flatten, type History, type InputFor, type RowOf } from './writes.ts';
 import { deepFreeze, type DeepReadonly } from '../domains/platform/values.ts';
 
 export const SCOUTING_EVIDENCE_MIGRATION = '0019_scouting_evidence';
@@ -850,13 +850,6 @@ const inviteRow = (i: InviteFields) => ({
 });
 type InviteRow = RowOf<typeof inviteRow>;
 
-/** A table's columns, which the compiler holds to its encoder's row: none missing, none extra. */
-const columnsOf =
-  <R>() =>
-  <const C extends readonly (keyof R & string)[]>(
-    cols: C & ([Exclude<keyof R, C[number]>] extends [never] ? unknown : never),
-  ): readonly string[] =>
-    cols;
 const EVIDENCE_COLS = columnsOf<EvidenceRow>()([
   'id',
   'player_id',
@@ -924,8 +917,6 @@ const INVITE_COLS = columnsOf<InviteRow>()([
   'created_at',
   'responded_at',
 ]);
-const insertFor = (sqlite: DatabaseSync, table: string, cols: readonly string[]) =>
-  sqlite.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})`);
 
 /** Prepared statements over one connection. */
 function statements(sqlite: DatabaseSync) {

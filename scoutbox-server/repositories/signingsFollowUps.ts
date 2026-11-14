@@ -25,7 +25,7 @@ import type { DatabaseSync, SQLInputValue, SQLOutputValue } from 'node:sqlite';
 import { isPlainObject } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn, type Row, type UnitParticipant } from './database.ts';
 import { pageOf, readsOf } from './identityRules.ts';
-import type { Flatten, InputFor, RowOf } from './writes.ts';
+import { columnsOf, insertFor, type Flatten, type InputFor, type RowOf } from './writes.ts';
 import {
   PARTY_STATUSES,
   PARTY_TYPES,
@@ -55,7 +55,6 @@ export const SIGNINGS_FOLLOWUPS_TABLES = Object.freeze([
   'outcome_reports',
   'outcome_report_confirmations',
 ] as const);
-type SigningsTable = (typeof SIGNINGS_FOLLOWUPS_TABLES)[number];
 /** The owner tables of the shared idempotency_keys table (created by 0018; other domains keep their keys as columns). */
 export const SIGNINGS_KEY_OWNERS = Object.freeze(['signing_packages'] as const);
 
@@ -1610,13 +1609,6 @@ const confRow = (rid: string, c: ConfirmationFields, position: number) => ({
 });
 type ConfirmationRow = RowOf<typeof confRow>;
 
-/** A table's columns, which the compiler holds to its encoder's row: none missing, none extra. */
-const columnsOf =
-  <R>() =>
-  <const C extends readonly (keyof R & string)[]>(
-    cols: C & ([Exclude<keyof R, C[number]>] extends [never] ? unknown : never),
-  ): readonly string[] =>
-    cols;
 const PKG_COLS = columnsOf<PackageRow>()([
   'id',
   'org_id',
@@ -1832,36 +1824,20 @@ const CONF_COLS = columnsOf<ConfirmationRow>()([
   'experience_rating',
   'at',
 ]);
-const insertFor = (
-  sqlite: DatabaseSync,
-  table: SigningsTable | 'idempotency_keys',
-  cols: readonly string[],
-  { upsert = null }: { upsert?: string | null } = {},
-) =>
-  sqlite.prepare(
-    `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map((c) => `@${c}`).join(', ')})${
-      upsert
-        ? ` ON CONFLICT(${upsert}) DO UPDATE SET ${cols
-            .filter((c) => c !== upsert)
-            .map((c) => `${c} = excluded.${c}`)
-            .join(', ')}`
-        : ''
-    }`,
-  );
 
 /** Prepared statements over one connection. */
 function statements(sqlite: DatabaseSync) {
   return {
-    pkg: insertFor(sqlite, 'signing_packages', PKG_COLS, { upsert: 'id' }),
-    rev: insertFor(sqlite, 'signing_revisions', REV_COLS, { upsert: 'id' }),
+    pkg: insertFor(sqlite, 'signing_packages', PKG_COLS, { upsert: ['id'] }),
+    rev: insertFor(sqlite, 'signing_revisions', REV_COLS, { upsert: ['id'] }),
     doc: insertFor(sqlite, 'signing_documents', DOC_COLS),
     party: insertFor(sqlite, 'signing_revision_parties', PARTY_COLS),
     hist: insertFor(sqlite, 'signing_history', HIST_COLS),
     key: insertFor(sqlite, 'idempotency_keys', KEY_COLS),
-    signing: insertFor(sqlite, 'signings', SIGNING_COLS, { upsert: 'id' }),
+    signing: insertFor(sqlite, 'signings', SIGNING_COLS, { upsert: ['id'] }),
     sparty: insertFor(sqlite, 'signing_parties', SPARTY_COLS),
-    fup: insertFor(sqlite, 'follow_ups', FUP_COLS, { upsert: 'id' }),
-    out: insertFor(sqlite, 'outcome_reports', OUT_COLS, { upsert: 'id' }),
+    fup: insertFor(sqlite, 'follow_ups', FUP_COLS, { upsert: ['id'] }),
+    out: insertFor(sqlite, 'outcome_reports', OUT_COLS, { upsert: ['id'] }),
     conf: insertFor(sqlite, 'outcome_report_confirmations', CONF_COLS),
     docsOf: sqlite.prepare(
       'DELETE FROM signing_documents WHERE revision_id IN (SELECT id FROM signing_revisions WHERE package_id = ?)',

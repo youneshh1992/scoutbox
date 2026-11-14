@@ -1,7 +1,7 @@
 // Scouting: the club's evidence and assessments, opportunities and campaigns.
 import { needs, strictContext } from '../platform/deps.mjs';
 import { routeContext } from '../platform/routeHelpers.mjs';
-import { CLUB_SETUP_LIMITS } from '../../repositories/clubSetup.mjs';
+import { CLUB_SETUP_LIMITS } from '../../repositories/clubSetup.ts';
 import { registerJourneys } from './journeys.mjs';
 import { registerPassport } from './passport.mjs';
 import { registerScouting } from './scouting.mjs';
