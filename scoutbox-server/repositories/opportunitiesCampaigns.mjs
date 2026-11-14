@@ -45,7 +45,7 @@ import {
   histRow,
   historyOf,
   histOut,
-} from './scoutingEvidence.mjs';
+} from './scoutingEvidence.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_LEVELS } from './playerRecord.ts';
 import { ORG_LEVELS } from './orgs.ts';

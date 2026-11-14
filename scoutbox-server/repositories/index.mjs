@@ -90,7 +90,7 @@ import {
   SCOUTING_EVIDENCE_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedEvidencePlayers,
   retainedPlayerReferences as retainedEvidencePlayers,
-} from './scoutingEvidence.mjs';
+} from './scoutingEvidence.ts';
 import {
   createScoutingAssessmentsRepository,
   SCOUTING_ASSESSMENTS_RECORDS,

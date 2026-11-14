@@ -1,4 +1,4 @@
-// The evidence passport, coach affiliations and squad invitations (repositories/scoutingEvidence.mjs, migration 0019):
+// The evidence passport, coach affiliations and squad invitations (repositories/scoutingEvidence.ts, migration 0019):
 // the tables, the typers' refusals (naming the field, never the content), typed writes and their guards (one pending
 // invitation), a correction committed with its superseded original, the queries, units of work and fixtures.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
@@ -17,7 +17,7 @@ import {
   typeEvidence,
   typeCoachAffiliation,
   typeSquadInvite,
-} from '../repositories/scoutingEvidence.mjs';
+} from '../repositories/scoutingEvidence.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

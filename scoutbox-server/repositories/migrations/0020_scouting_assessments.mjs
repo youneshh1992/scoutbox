@@ -4,7 +4,7 @@
  * templates, which every database has from its first boot.
  */
 import { migrationApplied } from '../database.ts';
-import { SCOUTING_EVIDENCE_MIGRATION } from '../scoutingEvidence.mjs';
+import { SCOUTING_EVIDENCE_MIGRATION } from '../scoutingEvidence.ts';
 import {
   SCOUTING_ASSESSMENTS_MIGRATION,
   SCOUTING_ASSESSMENTS_DDL,

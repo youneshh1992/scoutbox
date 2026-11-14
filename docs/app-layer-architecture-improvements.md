@@ -222,7 +222,11 @@ The order, from the bottom of the import graph up, so each file is typed against
    `SigningPackage` (its revisions, documents, parties, keys and history), `Signing`, `FollowUp` and `OutcomeReport`
    records, what each create accepts, and what each `patch` may change (the fields it refuses are left out of the
    type). Its typers still judge every write, as `unknown` input, and its column lists are checked against the
-   encoders' rows; the signing vocabularies come from `signing.mjs`, the repository's copies gone. The repositories that still type records in
+   encoders' rows; the signing vocabularies come from `signing.mjs`, the repository's copies gone.
+   `scoutingEvidence.ts` types the `Evidence` (its source, verification, disputes and history), `CoachAffiliation`
+   and `SquadInvite` records, what each create and act accepts, and the admin dispute queue; its typing helpers and
+   history table, shared with the scouting assessments, club setup and opportunities repositories, are typed for
+   them to build on. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
    converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
    write through the repositories are typed checks of the repositories' signatures; convert them alongside, except

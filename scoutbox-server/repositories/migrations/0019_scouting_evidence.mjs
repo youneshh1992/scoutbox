@@ -1,10 +1,10 @@
 /**
  * The evidence passport (records, media links, disputes, history), coach affiliations (history) and squad
- * invitations (repositories/scoutingEvidence.mjs).
+ * invitations (repositories/scoutingEvidence.ts).
  */
 import { migrationApplied } from '../database.ts';
 import { SIGNINGS_FOLLOWUPS_MIGRATION } from '../signingsFollowUps.ts';
-import { SCOUTING_EVIDENCE_MIGRATION, SCOUTING_EVIDENCE_DDL, SCOUTING_EVIDENCE_TABLES } from '../scoutingEvidence.mjs';
+import { SCOUTING_EVIDENCE_MIGRATION, SCOUTING_EVIDENCE_DDL, SCOUTING_EVIDENCE_TABLES } from '../scoutingEvidence.ts';
 
 export const id = SCOUTING_EVIDENCE_MIGRATION;
 export const note =

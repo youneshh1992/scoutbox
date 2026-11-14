@@ -20,7 +20,7 @@ import {
   presentOrRefuse,
   text,
 } from '../platform/schemas.mjs';
-import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scoutingEvidence.mjs';
+import { CLAIM_TYPES, EVIDENCE_LIMITS as LIMITS } from '../../repositories/scoutingEvidence.ts';
 
 const MEDIA_PER_CLAIM = 50;
 const optText = (max) => v.nullish(text(max));

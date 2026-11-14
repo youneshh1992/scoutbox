@@ -40,7 +40,7 @@ import {
   unknownFields,
   first,
   txt,
-} from './scoutingEvidence.mjs';
+} from './scoutingEvidence.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 import { PLAYER_POSITIONS, PLAYER_FEET, PLAYER_AVAILABILITY, PLAYER_LEVELS } from './playerRecord.ts';
 import { parseStrictDateOnly } from '../temporal.ts';

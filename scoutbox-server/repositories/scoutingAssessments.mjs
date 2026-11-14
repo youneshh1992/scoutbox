@@ -51,7 +51,7 @@ import {
   histRow,
   historyOf,
   histOut,
-} from './scoutingEvidence.mjs';
+} from './scoutingEvidence.ts';
 import { deepFreeze } from '../domains/platform/values.ts';
 
 export const SCOUTING_ASSESSMENTS_MIGRATION = '0020_scouting_assessments';
