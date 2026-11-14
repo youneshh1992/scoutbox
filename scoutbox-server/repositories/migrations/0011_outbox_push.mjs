@@ -3,7 +3,7 @@
  */
 import { migrationApplied } from '../database.ts';
 import { DISPATCHES_MIGRATION } from '../dispatches.ts';
-import { OUTBOX_PUSH_MIGRATION, OUTBOX_PUSH_DDL, OUTBOX_PUSH_TABLES } from '../outboxPush.mjs';
+import { OUTBOX_PUSH_MIGRATION, OUTBOX_PUSH_DDL, OUTBOX_PUSH_TABLES } from '../outboxPush.ts';
 
 export const id = OUTBOX_PUSH_MIGRATION;
 export const note =

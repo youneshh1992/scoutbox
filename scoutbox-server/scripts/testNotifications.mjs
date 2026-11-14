@@ -16,7 +16,7 @@ import {
   NOTIFY_COALESCE_MS,
   NOTIFICATION_LIMITS,
 } from '../repositories/notifications.ts';
-import { createOutboxPushRepository } from '../repositories/outboxPush.mjs';
+import { createOutboxPushRepository } from '../repositories/outboxPush.ts';
 import { createDispatchesRepository } from '../repositories/dispatches.ts';
 import {
   createNotificationPrefs,

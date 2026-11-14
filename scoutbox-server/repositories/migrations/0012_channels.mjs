@@ -4,7 +4,7 @@
  * unique per thread and sender.
  */
 import { migrationApplied } from '../database.ts';
-import { OUTBOX_PUSH_MIGRATION } from '../outboxPush.mjs';
+import { OUTBOX_PUSH_MIGRATION } from '../outboxPush.ts';
 import { CHANNELS_MIGRATION, CHANNELS_DDL, CHANNELS_TABLES } from '../channels.mjs';
 
 export const id = CHANNELS_MIGRATION;

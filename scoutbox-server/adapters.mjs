@@ -75,7 +75,7 @@ export function makeRateLimiter({ windowMs = 60_000, max = 30, bucket = 'default
 export const OUTBOX_SECRET_PLACEHOLDER = '[code withheld — delivered to the recipient only]';
 const DEV_DELIVERY_LIMIT = 500;
 
-/** The mail outbox (repositories/outboxPush.mjs `outbox`): every mail is recorded there. */
+/** The mail outbox (repositories/outboxPush.ts `outbox`): every mail is recorded there. */
 const needOutbox = (outbox) => {
   if (typeof outbox?.append !== 'function' || typeof outbox?.markDelivered !== 'function')
     throw new TypeError('createMailer needs the outbox repository ({ append, markDelivered })');
@@ -150,7 +150,7 @@ export function createMailer(nextId, { outbox: outboxRepo, outward = unguarded }
 
 // ---------------------------------------------------------------------- push
 /**
- * The push record is a row of `push_log` and the device tokens rows of `push_tokens` (repositories/outboxPush.mjs).
+ * The push record is a row of `push_log` and the device tokens rows of `push_tokens` (repositories/outboxPush.ts).
  * The sender runs as an after-commit effect of the notification, so its record is
  * written in its own transaction once the notification is durable.
  */
