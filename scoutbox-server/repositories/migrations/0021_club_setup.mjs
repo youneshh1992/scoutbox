@@ -3,7 +3,7 @@
  * federation-route request and vacancies.
  */
 import { migrationApplied } from '../database.ts';
-import { SCOUTING_ASSESSMENTS_MIGRATION } from '../scoutingAssessments.mjs';
+import { SCOUTING_ASSESSMENTS_MIGRATION } from '../scoutingAssessments.ts';
 import { CLUB_SETUP_MIGRATION, CLUB_SETUP_DDL, CLUB_SETUP_TABLES } from '../clubSetup.mjs';
 
 export const id = CLUB_SETUP_MIGRATION;

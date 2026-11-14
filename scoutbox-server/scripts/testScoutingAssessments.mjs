@@ -1,4 +1,4 @@
-// Assessment templates, assessments, video segments and playlists (repositories/scoutingAssessments.mjs, migration
+// Assessment templates, assessments, video segments and playlists (repositories/scoutingAssessments.ts, migration
 // 0020): the tables with the four v1 templates, the typers' refusals (naming the field, never the content), typed
 // writes and their guards, the queries, the account-deletion redaction (only the name goes), units of work and
 // fixtures. Temporary databases only; nothing touches DATA_DIR. Run with: npm test
@@ -19,7 +19,7 @@ import {
   typeAssessment,
   typeSegment,
   typePlaylist,
-} from '../repositories/scoutingAssessments.mjs';
+} from '../repositories/scoutingAssessments.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

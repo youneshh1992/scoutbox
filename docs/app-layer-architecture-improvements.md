@@ -226,7 +226,10 @@ The order, from the bottom of the import graph up, so each file is typed against
    `scoutingEvidence.ts` types the `Evidence` (its source, verification, disputes and history), `CoachAffiliation`
    and `SquadInvite` records, what each create and act accepts, and the admin dispute queue; its typing helpers and
    history table, shared with the scouting assessments, club setup and opportunities repositories, are typed for
-   them to build on. The repositories that still type records in
+   them to build on. `scoutingAssessments.ts` builds on them: the `AssessmentTemplate`, `Assessment` (its ratings
+   and their references, context, recommendation, published feedback and history), `VideoSegment` and `Playlist`
+   records, the v1 catalogue, and what each create and act accepts; an assessment is typed without the template
+   attributes it reads back with. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
    converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
    write through the repositories are typed checks of the repositories' signatures; convert them alongside, except

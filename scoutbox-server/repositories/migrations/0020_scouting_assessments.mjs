@@ -1,6 +1,6 @@
 /**
  * Assessment templates (attributes), assessments (ratings, cited evidence, history), video segments (labels) and
- * playlists (segments) (repositories/scoutingAssessments.mjs). Also inserts the catalogue: the four v1 position
+ * playlists (segments) (repositories/scoutingAssessments.ts). Also inserts the catalogue: the four v1 position
  * templates, which every database has from its first boot.
  */
 import { migrationApplied } from '../database.ts';
@@ -10,7 +10,7 @@ import {
   SCOUTING_ASSESSMENTS_DDL,
   SCOUTING_ASSESSMENTS_TABLES,
   insertSeedTemplates,
-} from '../scoutingAssessments.mjs';
+} from '../scoutingAssessments.ts';
 
 export const id = SCOUTING_ASSESSMENTS_MIGRATION;
 export const note =

@@ -97,7 +97,7 @@ import {
   SCOUTING_ASSESSMENTS_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedAssessmentPlayers,
   retainedPlayerReferences as retainedAssessmentPlayers,
-} from './scoutingAssessments.mjs';
+} from './scoutingAssessments.ts';
 import {
   createClubSetupRepository,
   CLUB_SETUP_RECORDS,

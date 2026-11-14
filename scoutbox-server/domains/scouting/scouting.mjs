@@ -32,7 +32,7 @@ import {
   VERDICTS,
   VIEWINGS,
   ASSESSMENT_LIMITS as A_LIMITS,
-} from '../../repositories/scoutingAssessments.mjs';
+} from '../../repositories/scoutingAssessments.ts';
 import { storedName } from './passport.mjs';
 
 const SL = CLUB_SETUP_LIMITS;
