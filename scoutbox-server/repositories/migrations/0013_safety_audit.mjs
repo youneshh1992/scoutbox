@@ -2,7 +2,7 @@
  * The audit tables: blocks, reports, moderation_log, org_notes, ledger, ops_events, source_changes and idv_queue.
  */
 import { migrationApplied } from '../database.ts';
-import { CHANNELS_MIGRATION } from '../channels.mjs';
+import { CHANNELS_MIGRATION } from '../channels.ts';
 import { SAFETY_AUDIT_MIGRATION, SAFETY_AUDIT_DDL, AUDIT_TABLE_NAMES } from '../safetyAudit.mjs';
 
 export const id = SAFETY_AUDIT_MIGRATION;

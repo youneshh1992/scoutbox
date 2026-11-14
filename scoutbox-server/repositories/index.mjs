@@ -212,7 +212,7 @@ import { createOneTimeCodesRepository, EMAIL_CHALLENGES_TABLE, PAIRING_CODES_TAB
 import { createNotificationsRepository, NOTIFICATIONS_TABLE, NOTIFICATION_PREFS_TABLE } from './notifications.ts';
 import { createDispatchesRepository, DISPATCHES_TABLE } from './dispatches.ts';
 import { createOutboxPushRepository, OUTBOX_PUSH_RECORD_TABLES } from './outboxPush.ts';
-import { createChannelsRepository, CHANNELS_TABLE } from './channels.mjs';
+import { createChannelsRepository, CHANNELS_TABLE } from './channels.ts';
 import {
   createSafetyAuditRepository,
   AUDIT_COLLECTIONS,

@@ -5,7 +5,7 @@
  */
 import { migrationApplied } from '../database.ts';
 import { OUTBOX_PUSH_MIGRATION } from '../outboxPush.ts';
-import { CHANNELS_MIGRATION, CHANNELS_DDL, CHANNELS_TABLES } from '../channels.mjs';
+import { CHANNELS_MIGRATION, CHANNELS_DDL, CHANNELS_TABLES } from '../channels.ts';
 
 export const id = CHANNELS_MIGRATION;
 export const note =

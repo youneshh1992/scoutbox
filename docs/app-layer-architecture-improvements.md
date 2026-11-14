@@ -201,7 +201,9 @@ The order, from the bottom of the import graph up, so each file is typed against
    records, the feed item and the categories (from `CATEGORIES`' keys); `dispatches.ts` builds on it with the
    `Dispatch` record, its attempts and the fields a patch may move; `outboxPush.ts` types the outbox's two sources
    (`MailerRecord`, `DeliveryRecord`), the push log and the device tokens, with push audiences from
-   `notifications.ts`. `fieldSpecs.ts` derives a spec's record type from the
+   `notifications.ts`. `channels.ts` types the message threads: the `Channel` and `Message` records, the two
+   attachment kinds, what `open` and `appendMessage` accept (`ChannelInput`, `MessageInput`) and the activity
+   pages. `fieldSpecs.ts` derives a spec's record type from the
    spec (`RecordOf<typeof SPEC>`), so a repository described by field specs gets its record types from them rather
    than writing them out a second time. The repositories that still type records in
    JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are

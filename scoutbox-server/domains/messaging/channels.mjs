@@ -1,6 +1,6 @@
 // A channel is the only conversation surface, and it exists only because a request was accepted. For a minor the
 // counterparty is the guardian; the child is never in the thread. Every message is moderated and logged.
-import { MESSAGE_LIMITS } from '../../repositories/channels.mjs';
+import { MESSAGE_LIMITS } from '../../repositories/channels.ts';
 import { readPage, sendPageError } from '../platform/paging.mjs';
 import { visibleToOrg } from '../../domain.ts';
 import { filled, presentOrRefuse } from '../platform/schemas.mjs';

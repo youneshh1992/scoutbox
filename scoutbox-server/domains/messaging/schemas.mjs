@@ -14,7 +14,7 @@ import {
   timeOrBlank,
   wholeNumber,
 } from '../platform/schemas.mjs';
-import { MESSAGE_LIMITS as L } from '../../repositories/channels.mjs';
+import { MESSAGE_LIMITS as L } from '../../repositories/channels.ts';
 
 const INJECTABLE_CHANNELS = ['email', 'push', 'contact', 'trial', 'decision'];
 const CALLBACK_STATUSES = ['delivered', 'opened', 'bounced', 'failed'];

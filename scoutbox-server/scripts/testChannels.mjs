@@ -1,4 +1,4 @@
-// Message threads as typed tables with explicit writes (repositories/channels.mjs, migration 0012): the schema (the request, organisation and staff-sender keys, the sender typed by kind, the length CHECKs,
+// Message threads as typed tables with explicit writes (repositories/channels.ts, migration 0012): the schema (the request, organisation and staff-sender keys, the sender typed by kind, the length CHECKs,
 // the retry id unique per thread and sender, the cascades); the repository's writes (open, appendMessage, markRead,
 // deleteForPlayer: typed input, unknown fields and wrong types refused by field and id, references checked) and its
 // SQL reads (fresh frozen records, the organisation's and the admin pages most recently active first, the filters,
@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
-import { createChannelsRepository, MESSAGE_LIMITS } from '../repositories/channels.mjs';
+import { createChannelsRepository, MESSAGE_LIMITS } from '../repositories/channels.ts';
 import { openStore } from '../store.ts';
 import {
   NOW,
