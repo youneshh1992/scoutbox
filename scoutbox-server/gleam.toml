@@ -1,0 +1,22 @@
+name = "scoutbox"
+version = "1.0.0"
+
+description = "ScoutBox server: a Gleam port of a slice of the TypeScript server, checked by its e2e batteries"
+
+[dependencies]
+gleam_stdlib = ">= 1.0.0 and < 2.0.0"
+wisp = ">= 2.2.2 and < 3.0.0"
+ewe = ">= 9.0.0 and < 10.0.0"
+exception = ">= 2.1.1 and < 3.0.0"
+gleam_http = ">= 4.5.0 and < 5.0.0"
+gleam_json = ">= 3.1.0 and < 4.0.0"
+sqlight = ">= 1.2.0 and < 2.0.0"
+gleam_crypto = ">= 1.6.0 and < 2.0.0"
+gleam_erlang = ">= 1.3.0 and < 2.0.0"
+gleam_otp = ">= 1.3.0 and < 2.0.0"
+gleam_time = ">= 1.11.0 and < 2.0.0"
+envoy = ">= 1.2.0 and < 2.0.0"
+simplifile = ">= 2.7.0 and < 3.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

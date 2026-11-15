@@ -1,0 +1,49 @@
+# ScoutBox in Gleam
+
+A pilot port of the ScoutBox server (`../scoutbox/scoutbox-server`, Node/TypeScript) to Gleam on the BEAM, with
+SQLite through `sqlight`. The TypeScript server is the reference: its e2e batteries are the behavioural
+specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
+`../scoutbox/docs/architecture.md` for the product rules; they apply here too.
+
+- `scoutbox-server/`: the Gleam server. How to run it and what is ported: its `README.md`.
+- `.claude/docs/gleam/html/everything.html`: the whole Gleam language tour on one page. Read it when unsure of
+  syntax or semantics rather than guessing from other languages.
+
+## Writing Gleam here
+
+- **Pure Gleam is always preferable.** Use Erlang FFI (`@external`) only when something is impossible in Gleam
+  and no maintained Gleam package covers it. Today `src/` has none. If you must add one: keep it in one small
+  module, document why Gleam can't do it, and test it directly, because the type checker can't see across FFI.
+- **`gleam check` is the fast feedback loop.** It type-checks the whole project in well under a second, so run
+  it after every change instead of `gleam build` or `gleam test`. Then `gleam format` and `gleam test`.
+- **Library APIs:** read the source in `scoutbox-server/build/packages/<package>/src/` instead of recalling it.
+  The ecosystem moves quickly and remembered APIs are often stale.
+- Known traps, all hit during the pilot:
+  - `list.range` no longer exists. Use `list.repeat`, or recurse.
+  - A function bound with `let` is not generic. If it's used at two types, make it a top-level `fn`.
+  - `bit_array.slice` fails on bit strings that aren't whole bytes. Match with `<<b:bytes-size(n), _:bits>>`.
+  - JavaScript's `length` counts UTF-16 units. Text limits use `input.utf16_length` so they agree with the
+    TypeScript server and the apps.
+  - `wisp_ewe` is not on Hex. It is vendored and adapted in `platform/wisp_ewe.gleam`.
+
+## Server rules (as in the TypeScript server, enforced by types where possible)
+
+- Writes need a `store.Tx`, and only `store.unit` makes one. Pass the `Tx` to join a unit. Never call `unit`
+  inside a unit.
+- Side effects are returned from the unit as `app.Effect` values and dispatched after COMMIT. Never send
+  anything from inside a unit.
+- Expected failures are values: `store.refuse(e)` rolls the unit back. Map one act's refusals into another's
+  with `store.map_refusal`. `panic` and `let assert` are for broken invariants only.
+- Request input is read with `platform/input` shapes. It is valid as sent or refused in the shared refusal
+  format; never coerce.
+- Responses are explicit `json.object` allowlists in the TypeScript server's key order. Batteries compare key
+  order.
+- Tables come from numbered migrations in `scoutbox-server/priv/migrations/`, copied from the TypeScript
+  server's schema.
+- Behaviour that depends on a domain not yet ported is marked `Not ported yet:` in a comment. Grep for it.
+
+## Batteries
+
+`scoutbox-server/e2e/` holds copies made by `e2e/sync.mjs`. Never edit a copy: edit the source battery in the
+TypeScript tree and re-sync. To port a battery, port its routes, add it to `e2e/batteries.mjs`, run
+`npm run e2e:sync`, then `npm run e2e`. `npm run e2e:check` fails when a copy has drifted from its source.

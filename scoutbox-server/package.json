@@ -1,0 +1,12 @@
+{
+  "name": "scoutbox-gleam-server-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Runs the TypeScript server's end-to-end batteries against the Gleam server. No dependencies.",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "e2e": "node e2e/run.mjs",
+    "e2e:sync": "node e2e/sync.mjs",
+    "e2e:check": "node e2e/sync.mjs --check"
+  }
+}

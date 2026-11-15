@@ -1,0 +1,15 @@
+//// What every route is given, and the effects an act can ask for.
+
+import scoutbox/platform/config.{type Config}
+import scoutbox/platform/limits.{type Limits}
+import scoutbox/platform/store.{type Store}
+
+/// Something that leaves the act: dispatched after COMMIT, never sent by a refused unit.
+pub type Effect {
+  /// A mail, recorded in the outbox (the dev transport: the outbox is the delivery).
+  SendMail(to: String, subject: String, text: String)
+}
+
+pub type Ctx {
+  Ctx(store: Store(Effect), config: Config, limits: Limits, booted_at: Int)
+}
