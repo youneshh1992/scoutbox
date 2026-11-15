@@ -364,6 +364,10 @@ fn render_table(table: String, columns: List(Column)) -> String {
     "pub const columns = ",
     quote(string.join(names, ", ")),
     "\n\n",
+    "/// How many columns `columns` names: an extra column selected after them is read at this index.\n",
+    "pub const width = ",
+    int.to_string(list.length(names)),
+    "\n\n",
     "/// `columns`, each prefixed with `alias.`, for a join.\n",
     "pub fn qualified(alias: String) -> String {\n  columns\n  |> string.split(\", \")\n  |> list.map(fn(c) { alias <> \".\" <> c })\n  |> string.join(\", \")\n}\n\n",
     lines(locals, fn(l) {

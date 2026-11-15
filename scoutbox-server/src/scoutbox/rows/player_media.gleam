@@ -13,6 +13,9 @@ pub const table = "player_media"
 pub const columns =
   "id, player_id, position, title, kind, uploaded_at, url, views, verified_clip_attendance_id, captions, size_bytes, captured_by, box_session_id"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 13
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

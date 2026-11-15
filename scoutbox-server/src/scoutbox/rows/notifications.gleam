@@ -14,6 +14,9 @@ pub const table = "notifications"
 pub const columns =
   "seq, id, occurred_at, audience_kind, audience_id, staff_id, type, text, ref_id, read, repeat_count, category, deferred_push, dispatched_at, action_required, action_deadline_at, action_acked_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 17
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

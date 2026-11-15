@@ -11,6 +11,9 @@ pub const table = "org_user_recovery_codes"
 /// Every column, in `Row` order.
 pub const columns = "org_user_id, code_hash"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 2
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

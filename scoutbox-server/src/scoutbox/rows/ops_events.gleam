@@ -13,6 +13,9 @@ pub const table = "ops_events"
 pub const columns =
   "seq, id, occurred_at, kind, detail_org_id, detail_user_id, detail_by, detail_dir, detail_files, detail_queued_for_removal, detail_error, detail_conflict_count, detail_dispatch_id, detail_channel, detail_delivery_id, detail_endpoint_id"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 16
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

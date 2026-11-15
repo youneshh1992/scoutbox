@@ -13,6 +13,9 @@ pub const table = "sessions"
 pub const columns =
   "token_hash, sid, kind, ref_id, org_user_id, via, created_at, expires_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 8
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

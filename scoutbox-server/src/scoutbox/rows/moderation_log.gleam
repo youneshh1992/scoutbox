@@ -13,6 +13,9 @@ pub const table = "moderation_log"
 pub const columns =
   "seq, id, created_at, context_kind, context_player_id, context_org_id, context_user_id, context_channel_id, context_request_id, context_trial_id, severity, excerpt"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 12
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

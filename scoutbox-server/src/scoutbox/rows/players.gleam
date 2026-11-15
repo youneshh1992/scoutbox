@@ -15,6 +15,9 @@ pub const table = "players"
 pub const columns =
   "id, name, birth_date, country, city, position, foot, height_cm, weight_kg, squad_number, contract_until_date, market_value_range, agent_name, academy_plus, first_team_seeker, availability, contract_status, level, football_category, identity_verified, guardian_id, lat, lng, stats_appearances, stats_goals, stats_assists, stats_pace_kmh, stats_pass_completion_pct, stats_duel_success_pct, stats_clean_sheets, medical_shared, medical_condition_status, prefs_quiet_start, prefs_quiet_end, prefs_school_hours_mute, prefs_timezone, programme_track, programme_started_at, password_hash, profile_signal, created_at, deleted_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 42
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

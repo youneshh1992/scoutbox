@@ -12,6 +12,9 @@ pub const table = "blocks"
 /// Every column, in `Row` order.
 pub const columns = "seq, id, player_id, org_id, by_kind, reason, created_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 7
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

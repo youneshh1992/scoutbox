@@ -13,6 +13,9 @@ pub const table = "player_season_history"
 pub const columns =
   "player_id, position, season, appearances, goals, assists, pace_kmh, pass_completion_pct, duel_success_pct, clean_sheets"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 10
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

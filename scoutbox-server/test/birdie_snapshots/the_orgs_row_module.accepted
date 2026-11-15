@@ -19,6 +19,9 @@ pub const table = "orgs"
 /// Every column, in `Row` order.
 pub const columns = "id, name, type, level, plan, country, city, lat, lng, federation, federation_registration_id, trusted_partner, verified, verified_domain, safeguarding_contract_signed, suspended, password_hash, email_domain, email_domain_verified, mfa_required_for_leads, verification_revoked_at, created_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 22
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

@@ -13,6 +13,9 @@ pub const table = "reports"
 pub const columns =
   "seq, id, created_at, by_kind, by_id, by_org_id, target_kind, target_org_id, target_scout_name, target_player_id, reason, urgent, status, outcome, resolved_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 15
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

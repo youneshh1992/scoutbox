@@ -4,28 +4,11 @@
 //// the only definition: every read that measures a distance uses them, and `test/scoutbox/distance_test.gleam`
 //// proves them against cases generated from domain.ts itself.
 
-import gleam/list
 import gleam/string
+import scoutbox/platform/sql.{type Fragment, concat, text}
 import sqlight
 
 pub const grassroots_radius_km = 50.0
-
-/// An SQL expression and the values its `?`s bind, in order. Fragments only ever join with `concat`, which
-/// keeps each one's arguments with its text, so a point used several times is bound as often as it appears.
-pub type Fragment {
-  Fragment(sql: String, args: List(sqlight.Value))
-}
-
-pub fn concat(parts: List(Fragment)) -> Fragment {
-  Fragment(
-    sql: list.map(parts, fn(p) { p.sql }) |> string.concat,
-    args: list.flat_map(parts, fn(p) { p.args }),
-  )
-}
-
-pub fn text(sql: String) -> Fragment {
-  Fragment(sql, [])
-}
 
 /// A point: fixed (bound as arguments) or a pair of column expressions.
 pub type Point {
@@ -35,14 +18,14 @@ pub type Point {
 
 fn lat(p: Point) -> Fragment {
   case p {
-    At(lat, _) -> Fragment("?", [sqlight.float(lat)])
+    At(lat, _) -> sql.arg(sqlight.float(lat))
     Columns(lat, _) -> text(lat)
   }
 }
 
 fn lng(p: Point) -> Fragment {
   case p {
-    At(_, lng) -> Fragment("?", [sqlight.float(lng)])
+    At(_, lng) -> sql.arg(sqlight.float(lng))
     Columns(_, lng) -> text(lng)
   }
 }

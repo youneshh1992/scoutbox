@@ -11,6 +11,9 @@ pub const table = "player_programme_completions"
 /// Every column, in `Row` order.
 pub const columns = "player_id, position, session_id, completed_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 4
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

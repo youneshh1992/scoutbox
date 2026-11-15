@@ -13,6 +13,9 @@ pub const table = "ledger"
 pub const columns =
   "seq, id, occurred_at, type, player_id, org_id, org_name, user_id, actor_name"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 9
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

@@ -13,6 +13,9 @@ pub const table = "player_external_ids"
 pub const columns =
   "player_id, position, provider, external_id, source, linked_by_name, linked_at, review_id"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 8
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

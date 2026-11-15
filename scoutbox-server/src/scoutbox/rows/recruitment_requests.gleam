@@ -15,6 +15,9 @@ pub const table = "recruitment_requests"
 pub const columns =
   "id, player_id, player_name, org_id, org_name, org_type, org_verified, org_safeguarding_certified, org_trusted_partner, user_id, scout_name, scout_role, type, message, subject, contact_id, trial_proposed_date, trial_alt_days_json, trial_venue, trial_notes, trial_private_venue_address, trial_private_instructions, status, created_at, responded_at, responded_by, routed_to, guardian_id, contact_channel_id, case_id, trial_id, recipient_type, recipient_player_id, recipient_guardian_id, recipient_minor, invite_key, invite_fp, subject_removed_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 38
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

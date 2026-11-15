@@ -13,6 +13,9 @@ pub const table = "guardians"
 pub const columns =
   "id, name, email, password_hash, email_verified, email_code_hash, id_verified, idv_reference, disclaimer_accepted, disclaimer_accepted_at, co_guardian_of, prefs_quiet_start, prefs_quiet_end, prefs_school_hours_mute, prefs_timezone, created_at"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 16
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

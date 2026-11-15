@@ -13,6 +13,9 @@ pub const table = "org_users"
 pub const columns =
   "id, org_id, name, name_key, role, email, sso_subject, created_at, removed_at, removed_by_id, provenance, mfa_secret, mfa_enabled_at, quiet_start, quiet_end, email_enabled"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 16
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns

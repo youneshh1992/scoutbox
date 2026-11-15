@@ -13,6 +13,9 @@ pub const table = "outbox"
 pub const columns =
   "seq, id, source, created_at, to_address, subject, text, transport, delivered, channel, provider_message_id"
 
+/// How many columns `columns` names: an extra column selected after them is read at this index.
+pub const width = 11
+
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
   columns
