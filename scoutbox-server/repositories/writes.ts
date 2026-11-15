@@ -51,6 +51,12 @@ export type InputFor<T> = T extends readonly (infer E)[]
         }
       >
     : T;
+/**
+ * `InputFor`, with the fields `O` optional too: a sparse group (absent is no columns set) or a column with a default.
+ */
+export type InputWith<T, O extends keyof T = never> = Flatten<
+  Omit<InputFor<T>, O> & { [K in O]?: K extends keyof InputFor<T> ? InputFor<T>[K] : never }
+>;
 /** A row as read back: each column an encoder writes, an absent value NULL. */
 export type RowOf<F extends (...args: never[]) => object> = {
   [K in keyof ReturnType<F>]-?:

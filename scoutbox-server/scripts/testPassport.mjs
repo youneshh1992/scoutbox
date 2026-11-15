@@ -1,4 +1,4 @@
-// The Football Passport's own records (repositories/passport.mjs, migration 0024): the STRICT tables, the typers'
+// The Football Passport's own records (repositories/passport.ts, migration 0024): the STRICT tables, the typers'
 // refusals, preferences saved whole and never created by a read, a position history that only grows, typed writes and
 // their guards, share view counts and a unique token hash, T&S paging, units of work and fixtures.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
@@ -17,7 +17,7 @@ import {
   typePrefs,
   typeCareerEntry,
   typeAchievement,
-} from '../repositories/passport.mjs';
+} from '../repositories/passport.ts';
 import { isFootballDate } from '../repositories/fieldSpecs.ts';
 
 let passed = 0;

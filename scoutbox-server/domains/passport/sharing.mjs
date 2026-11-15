@@ -5,7 +5,7 @@ import { declareAuditedRead } from '../../writeRules.ts';
 import * as v from 'valibot';
 import { isAdult, visibleToOrg } from '../../domain.ts';
 import { mintShareSecret, sha256, shareProblem, SHARE_MODES } from './shared.mjs';
-import { PASSPORT_LIMITS } from '../../repositories/passport.mjs';
+import { PASSPORT_LIMITS } from '../../repositories/passport.ts';
 import { readPage, sendPageError, pageOf } from '../platform/paging.mjs';
 import { CURSOR_PAGE, inputOrRefuse, oneOf, wholeNumber } from '../platform/schemas.mjs';
 

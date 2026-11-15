@@ -239,9 +239,13 @@ The order, from the bottom of the import graph up, so each file is typed against
    described by field specs, so each of its thirteen records (the claim with its codes and evidence links, the event,
    evidence, token, administrator, transfer, root application, dispute, coach reference, invitation, conflict, domain
    request and verified domain) and what each create accepts come from its spec; each named act's input is typed
-   (`ClaimMove`, `RootRequestApproval`, the `Reviewer` who decided), and each query names its parameters. The
-   repositories that still type records in JavaScript (discovery, development, passport, scouting, opportunities) move
-   to "reads back as written" as they are converted, so their types describe the stored row and not a JavaScript copy.
+   (`ClaimMove`, `RootRequestApproval`, the `Reviewer` who decided), and each query names its parameters.
+   `passport.ts` types the `PassportPrefs` (positions, position history, public selections; `BlankPrefs` before a
+   first save), `CareerEntry`, `Achievement`, `PassportShare` and `CorrectionRequest` records from their specs, what a
+   preferences save may change (`PassportPrefsSave`), each act's input and the cursor pages; its typers take unknown
+   input and return those records. `InputWith`, which the two share, is in `writes.ts`. The repositories that still
+   type records in JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as
+   written" as they are converted, so their types describe the stored row and not a JavaScript copy.
    The test fixtures in `scripts/` that write through the repositories are typed checks of the repositories'
    signatures; convert them alongside, except `dataLayerFixture.mjs`, which writes every repository from untyped
    records and is converted once they are all typed.

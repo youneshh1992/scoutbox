@@ -125,7 +125,7 @@ import {
   PASSPORT_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedPassportPlayers,
   retainedPlayerReferences as retainedPassportPlayers,
-} from './passport.mjs';
+} from './passport.ts';
 import {
   createAgentCoreRepository,
   AGENT_CORE_RECORDS,

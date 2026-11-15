@@ -16,16 +16,17 @@
  * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them in
  * `verificationReads`.
  *
+ * Records and inputs are typed from the field specs (`RecordOf`, repositories/fieldSpecs.ts); the typers take unknown
+ * input and return those records.
+ *
  * References. Player and guardian ids carry no key (tolerant, as recruitment, scouting and verification: an account
  * deletion leaves these rows under the old id). A confirmation's organisation → orgs is an immediate RESTRICT
  * key; the preferences' child rows cascade with their preferences.
  */
-import { isPlainObject, ids, describe } from './fieldSpecs.ts';
-import { migrationApplied, childRowsOf, operationOn } from './database.ts';
-import { writeKit } from './writes.ts';
-import { deepFreeze } from '../domains/platform/values.ts';
-import { PLAYER_POSITIONS } from './playerRecord.ts';
+import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
 import {
+  isPlainObject,
+  describe,
   text,
   int,
   oneOf,
@@ -37,8 +38,19 @@ import {
   typeSpec,
   encode,
   decode,
+  insertSql,
   upsertSql,
+  type FieldOptions,
+  type RecordOf,
+  type Refusal,
+  type Spec,
+  type Typed,
 } from './fieldSpecs.ts';
+import { migrationApplied, childRowsOf, operationOn, type Row, type UnitParticipant } from './database.ts';
+import { readsOf, refusal } from './identityRules.ts';
+import { writeKit, type Flatten, type InputWith } from './writes.ts';
+import { deepFreeze, type DeepReadonly } from '../domains/platform/values.ts';
+import { PLAYER_POSITIONS, type PlayerPosition } from './playerRecord.ts';
 
 export const PASSPORT_MIGRATION = '0024_passport';
 export const PASSPORT_COLLECTIONS = Object.freeze([
@@ -47,12 +59,13 @@ export const PASSPORT_COLLECTIONS = Object.freeze([
   'passportAchievements',
   'passportShares',
   'passportCorrections',
-]);
+] as const);
+export type PassportCollection = (typeof PASSPORT_COLLECTIONS)[number];
 
 // ------------------------------------------------------------------ vocabularies and limits (one definition; the routes import them)
-export const AVAILABILITY = Object.freeze(['open_to_trials', 'open_to_contact', 'not_looking']);
-export const SUBMITTERS = Object.freeze(['player', 'guardian']);
-export const SHARE_MODES = Object.freeze(['public', 'recruitment']);
+export const AVAILABILITY = Object.freeze(['open_to_trials', 'open_to_contact', 'not_looking'] as const);
+export const SUBMITTERS = Object.freeze(['player', 'guardian'] as const);
+export const SHARE_MODES = Object.freeze(['public', 'recruitment'] as const);
 export const CORRECTION_TARGETS = Object.freeze([
   'timeline_event',
   'career_entry',
@@ -62,8 +75,13 @@ export const CORRECTION_TARGETS = Object.freeze([
   'assessment',
   'achievement',
   'signing',
-]);
-export const CORRECTION_OUTCOMES = Object.freeze(['corrected', 'rejected', 'referred']);
+] as const);
+export const CORRECTION_OUTCOMES = Object.freeze(['corrected', 'rejected', 'referred'] as const);
+export type Availability = (typeof AVAILABILITY)[number];
+export type Submitter = (typeof SUBMITTERS)[number];
+export type ShareMode = (typeof SHARE_MODES)[number];
+export type CorrectionTarget = (typeof CORRECTION_TARGETS)[number];
+export type CorrectionOutcome = (typeof CORRECTION_OUTCOMES)[number];
 /** Text limits: the routes shorten free text to these; ids, codes and lists over them are refused. */
 export const PASSPORT_LIMITS = Object.freeze({
   id: 80,
@@ -84,8 +102,10 @@ export const PASSPORT_LIMITS = Object.freeze({
 const L = PASSPORT_LIMITS;
 
 // ------------------------------------------------------------------ field specs
-const idf = (k, c, o = {}) => text(k, c, L.id, o);
-const position = (k, c, o = {}) => oneOf(k, c, PLAYER_POSITIONS, o);
+const idf = <const K extends string, const O extends FieldOptions = {}>(k: K, c: string, o: O = {} as O) =>
+  text(k, c, L.id, o);
+const position = <const K extends string, const O extends FieldOptions = {}>(k: K, c: string, o: O = {} as O) =>
+  oneOf(k, c, PLAYER_POSITIONS, o);
 const PREFS_SPEC = [
   idf('playerId', 'player_id', { req: true, nonEmpty: true }),
   text('bio', 'bio', L.bio),
@@ -93,14 +113,14 @@ const PREFS_SPEC = [
   oneOf('availability', 'availability', AVAILABILITY),
   date('availableFrom', 'available_from'),
   int('updatedAt', 'updated_at', { req: true }),
-];
+] as const;
 const HISTORY_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   date('from', 'from_date', { req: true }),
   position('primary', 'position_primary', { req: true }),
   oneOf('submittedBy', 'submitted_by', SUBMITTERS, { req: true }),
   int('recordedAt', 'recorded_at', { req: true }),
-];
+] as const;
 const CAREER_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('playerId', 'player_id', { req: true, nonEmpty: true }),
@@ -112,7 +132,7 @@ const CAREER_SPEC = [
   oneOf('submittedBy', 'submitted_by', SUBMITTERS, { req: true }),
   int('createdAt', 'created_at', { req: true }),
   int('withdrawnAt', 'withdrawn_at'),
-];
+] as const;
 const ACHIEVEMENT_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('playerId', 'player_id', { req: true, nonEmpty: true }),
@@ -133,7 +153,7 @@ const ACHIEVEMENT_SPEC = [
   ),
   int('createdAt', 'created_at', { req: true }),
   int('withdrawnAt', 'withdrawn_at'),
-];
+] as const;
 const SHARE_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('playerId', 'player_id', { req: true, nonEmpty: true }),
@@ -155,7 +175,7 @@ const SHARE_SPEC = [
     { nullable: true },
   ),
   int('views', 'views', { req: true, def: 0 }),
-];
+] as const;
 const CORRECTION_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('playerId', 'player_id', { req: true, nonEmpty: true }),
@@ -178,17 +198,79 @@ const CORRECTION_SPEC = [
     { nullable: true },
   ),
   int('createdAt', 'created_at', { req: true }),
-];
+] as const;
+
+// ------------------------------------------------------------------ the records
+/** A player's positions: a primary and up to L.secondary others, or null when neither is set. */
+export type Positions = { primary: PlayerPosition | null; secondary: PlayerPosition[] };
+type HistoryRecord = Flatten<RecordOf<typeof HISTORY_SPEC> & { secondary: PlayerPosition[] }>;
+type PrefsRecord = Flatten<
+  Omit<RecordOf<typeof PREFS_SPEC>, 'primaryPosition'> & {
+    positions: Positions | null;
+    positionHistory: HistoryRecord[];
+    publicSelections: string[];
+  }
+>;
+type CorrectionRecord = Flatten<RecordOf<typeof CORRECTION_SPEC> & { resolvedAt: number | null }>;
+/** Each collection's record as read back (before it is frozen). */
+type Records = {
+  passportPrefs: PrefsRecord;
+  passportCareerEntries: RecordOf<typeof CAREER_SPEC>;
+  passportAchievements: RecordOf<typeof ACHIEVEMENT_SPEC>;
+  passportShares: RecordOf<typeof SHARE_SPEC>;
+  passportCorrections: CorrectionRecord;
+};
+export type PassportRecord<N extends PassportCollection> = DeepReadonly<Records[N]>;
+export type PassportPrefs = PassportRecord<'passportPrefs'>;
+export type PositionHistoryEntry = DeepReadonly<HistoryRecord>;
+export type CareerEntry = PassportRecord<'passportCareerEntries'>;
+export type Achievement = PassportRecord<'passportAchievements'>;
+export type PassportShare = PassportRecord<'passportShares'>;
+export type CorrectionRequest = PassportRecord<'passportCorrections'>;
+/** The preferences of a player who never saved any (`blankPrefs`): nothing set, never saved. */
+export type BlankPrefs = Flatten<Omit<PrefsRecord, 'updatedAt'> & { updatedAt: null }>;
+/** The whole domain as plain records (`PASSPORT_RECORDS.read`). */
+export type PassportRecords = { [N in PassportCollection]: Records[N][] };
+
+export type PositionHistoryInput = InputWith<HistoryRecord>;
+export type PassportPrefsInput = InputWith<PrefsRecord>;
+export type CareerEntryInput = InputWith<Records['passportCareerEntries']>;
+export type AchievementInput = InputWith<Records['passportAchievements']>;
+export type AchievementConfirmation = NonNullable<AchievementInput['confirmation']>;
+export type PassportShareInput = InputWith<Records['passportShares'], 'views'>;
+export type ShareRevoker = NonNullable<Records['passportShares']['revokedBy']>;
+/** A correction: `resolvedAt`, when given, must be the resolution's instant. */
+export type CorrectionRequestInput = InputWith<RecordOf<typeof CORRECTION_SPEC>> & { resolvedAt?: number | null };
+/** What a preferences save may change (`passportPrefs.save`): not the player, the history or the time. */
+export type PassportPrefsChange = Partial<
+  Pick<PassportPrefsInput, 'bio' | 'positions' | 'availability' | 'availableFrom' | 'publicSelections'>
+>;
+export type PassportPrefsSave = {
+  set?: PassportPrefsChange;
+  /** Position-history entries added after the stored ones. */
+  history?: readonly PositionHistoryInput[];
+  at: number;
+};
+/** A page of records by cursor: `after` is the previous page's last key (`[rowid]`). */
+export type PassportPageRequest = { limit: number; after?: readonly [number] | null };
+export type PassportPage<T> = { rows: { key: [number]; record: T }[] };
 
 // ------------------------------------------------------------------ DDL (generated from the specs)
-const codeList = (name, owner, ownerTable, ownerCol, col, check) => `CREATE TABLE ${name} (
+const codeList = (
+  name: string,
+  owner: string,
+  ownerTable: string,
+  ownerCol: string,
+  col: string,
+  check: string,
+) => `CREATE TABLE ${name} (
   ${owner}  TEXT NOT NULL REFERENCES ${ownerTable}(${ownerCol}) ON DELETE CASCADE,
   ord       INTEGER NOT NULL CHECK (ord >= 0),
   ${col}    TEXT NOT NULL CHECK (${check}),
   PRIMARY KEY (${owner}, ord),
   UNIQUE (${owner}, ${col})
 ) STRICT;`;
-const POSITION_CHECK = (c) => `${c} IN (${PLAYER_POSITIONS.map(quote).join(',')})`;
+const POSITION_CHECK = (c: string) => `${c} IN (${PLAYER_POSITIONS.map(quote).join(',')})`;
 export const PASSPORT_DDL = [
   tableDdl('passport_prefs', PREFS_SPEC, ['PRIMARY KEY (player_id)']),
   codeList(
@@ -254,14 +336,20 @@ export const PASSPORT_TABLES = Object.freeze([
   'passport_achievements',
   'passport_shares',
   'passport_corrections',
-]);
+] as const);
 
 // ------------------------------------------------------------------ typing
-export const refusal = (code, message, extra = {}) =>
-  Object.assign(new Error(`${code}: ${message}`), { code, ...extra });
-const labelOf = (at, raw, key = 'id') =>
+export { refusal };
+const labelOf = (at: string, raw: unknown, key = 'id') =>
   `${at} ${isPlainObject(raw) && typeof raw[key] === 'string' ? raw[key] : ''}`.trim();
-function typeList(list, at, field, max, ok, what) {
+function typeList<T>(
+  list: unknown,
+  at: string,
+  field: string,
+  max: number,
+  ok: (x: unknown) => x is T,
+  what: string,
+): { ok: true; list: T[] } | Refusal {
   if (list === undefined || list === null) return { ok: true, list: [] };
   if (!Array.isArray(list)) return bad(at, field, `must be a list (got ${describe(list)})`);
   if (list.length > max) return bad(at, field, `holds more than ${max} entries`);
@@ -270,12 +358,13 @@ function typeList(list, at, field, max, ok, what) {
   if (new Set(list).size !== list.length) return bad(at, field, 'names an entry twice');
   return { ok: true, list: [...list] };
 }
-const isPosition = (x) => PLAYER_POSITIONS.includes(x);
-const typePositions = (list, at, field) =>
+const isPosition = (x: unknown): x is PlayerPosition => (PLAYER_POSITIONS as readonly unknown[]).includes(x);
+const typePositions = (list: unknown, at: string, field: string) =>
   typeList(list, at, field, L.secondary, isPosition, `a position code (${PLAYER_POSITIONS.join('|')})`);
+const isSelection = (x: unknown): x is string => typeof x === 'string' && x.length > 0 && x.length <= L.selection;
 
 /** The preferences of a player who never saved any. */
-export const blankPrefs = (playerId) => ({
+export const blankPrefs = (playerId: string): BlankPrefs => ({
   playerId,
   bio: null,
   positions: null,
@@ -286,13 +375,13 @@ export const blankPrefs = (playerId) => ({
   updatedAt: null,
 });
 
-export function typePrefs(raw, at = 'passportPrefs') {
+export function typePrefs(raw: unknown, at = 'passportPrefs'): Typed<PrefsRecord> {
   const label = labelOf(at, raw, 'playerId');
   if (!isPlainObject(raw)) return { ok: false, reason: `${label} is not an object (${describe(raw)})` };
   const { positions, positionHistory, publicSelections, ...flatPart } = raw;
   // positions: null, or { primary, secondary[] }; an object with neither is stored (and read back) as null.
-  let primary = null;
-  let secondary = [];
+  let primary: PlayerPosition | null = null;
+  let secondary: PlayerPosition[] = [];
   if (positions !== undefined && positions !== null) {
     if (!isPlainObject(positions))
       return bad(label, 'positions', `must be an object or null (got ${describe(positions)})`);
@@ -305,7 +394,7 @@ export function typePrefs(raw, at = 'passportPrefs') {
         'positions.primary',
         `must be a position code (${PLAYER_POSITIONS.join('|')}) (got ${describe(positions.primary)})`,
       );
-    primary = positions.primary ?? null;
+    primary = (positions.primary as PlayerPosition | null | undefined) ?? null;
     const s = typePositions(positions.secondary, label, 'positions.secondary');
     if (!s.ok) return s;
     secondary = s.list;
@@ -314,8 +403,8 @@ export function typePrefs(raw, at = 'passportPrefs') {
   if (!t.ok) return t;
   if (!Array.isArray(positionHistory ?? []))
     return bad(label, 'positionHistory', `must be a list (got ${describe(positionHistory)})`);
-  const history = [];
-  for (const [i, h] of (positionHistory ?? []).entries()) {
+  const history: HistoryRecord[] = [];
+  for (const [i, h] of ((positionHistory ?? []) as unknown[]).entries()) {
     const { secondary: hs, ...hFlat } = isPlainObject(h) ? h : {};
     if (!isPlainObject(h)) return bad(label, `positionHistory[${i}]`, `must be an object (got ${describe(h)})`);
     const ht = typeSpec(HISTORY_SPEC, hFlat, `${label}.positionHistory[${i}]`);
@@ -331,7 +420,7 @@ export function typePrefs(raw, at = 'passportPrefs') {
     label,
     'publicSelections',
     L.selections,
-    (x) => typeof x === 'string' && x.length > 0 && x.length <= L.selection,
+    isSelection,
     `an id of at most ${L.selection} characters`,
   );
   if (!sel.ok) return sel;
@@ -347,27 +436,34 @@ export function typePrefs(raw, at = 'passportPrefs') {
   };
 }
 const simpleTyper =
-  (spec, fallback) =>
-  (raw, at = fallback) =>
+  <S extends Spec>(spec: S, fallback: string) =>
+  (raw: unknown, at = fallback): Typed<RecordOf<S>> =>
     typeSpec(spec, raw, labelOf(at, raw));
 export const typeCareerEntry = simpleTyper(CAREER_SPEC, 'passportCareerEntries');
 export const typeAchievement = simpleTyper(ACHIEVEMENT_SPEC, 'passportAchievements');
 export const typeShare = simpleTyper(SHARE_SPEC, 'passportShares');
 /** A correction: `resolvedAt` is the resolution's instant (one column), accepted when it agrees. */
-export function typeCorrection(raw, at = 'passportCorrections') {
+export function typeCorrection(raw: unknown, at = 'passportCorrections'): Typed<CorrectionRecord> {
   const label = labelOf(at, raw);
   const t = typeSpec(CORRECTION_SPEC, raw, label, ['resolvedAt']);
   if (!t.ok) return t;
   const resolvedAt = t.record.resolution?.at ?? null;
-  if (raw.resolvedAt !== undefined && raw.resolvedAt !== resolvedAt)
-    return bad(label, 'resolvedAt', "must be the resolution's instant");
+  // typeSpec refused anything but an object.
+  const given = (raw as { resolvedAt?: unknown }).resolvedAt;
+  if (given !== undefined && given !== resolvedAt) return bad(label, 'resolvedAt', "must be the resolution's instant");
   if ((t.record.status === 'resolved') !== (t.record.resolution !== null))
     return bad(label, 'resolution', 'is set exactly when the correction is resolved');
   return { ok: true, record: { ...t.record, resolvedAt } };
 }
 
 // ------------------------------------------------------------------ rows
-const ENTITIES = {
+type FlatCollection = Exclude<PassportCollection, 'passportPrefs'>;
+type FlatEntity<N extends FlatCollection> = {
+  table: string;
+  spec: Spec;
+  type: (raw: unknown, at?: string) => Typed<Records[N]>;
+};
+const ENTITIES: { readonly [N in FlatCollection]: FlatEntity<N> } = {
   passportCareerEntries: {
     table: 'passport_career_entries',
     spec: CAREER_SPEC,
@@ -389,17 +485,22 @@ const ENTITIES = {
     type: typeCorrection,
   },
 };
-const decodeFlat = (name, row) => {
-  const rec = decode(ENTITIES[name].spec, row);
-  if (name === 'passportCorrections') rec.resolvedAt = rec.resolution?.at ?? null;
-  return rec;
+const FLAT_COLLECTIONS = Object.keys(ENTITIES) as FlatCollection[];
+const decodeFlat = <N extends FlatCollection>(name: N, row: Row): Records[N] => {
+  const rec = decode(ENTITIES[name].spec, row) as Record<string, unknown>;
+  if (name === 'passportCorrections') rec.resolvedAt = (rec as RecordOf<typeof CORRECTION_SPEC>).resolution?.at ?? null;
+  return rec as Records[N];
 };
-const encodeFlat = (name, rec) => {
-  const { resolvedAt: _r, ...r } = rec;
+const encodeFlat = <N extends FlatCollection>(name: N, rec: Records[N]) => {
+  const { resolvedAt: _r, ...r } = rec as Records[N] & { resolvedAt?: unknown };
   return encode(ENTITIES[name].spec, r);
 };
 
-function prefsStatements(sqlite) {
+type PrefsStatements = Record<
+  'upsert' | 'byPlayer' | 'all' | 'posDel' | 'posIns' | 'histIns' | 'histPosIns' | 'selDel' | 'selIns',
+  StatementSync
+>;
+function prefsStatements(sqlite: DatabaseSync): PrefsStatements {
   return {
     upsert: sqlite.prepare(upsertSql('passport_prefs', PREFS_SPEC, ['player_id'])),
     byPlayer: sqlite.prepare('SELECT * FROM passport_prefs WHERE player_id = ?'),
@@ -416,33 +517,35 @@ function prefsStatements(sqlite) {
     selIns: sqlite.prepare('INSERT INTO passport_public_selections (player_id, ord, selection) VALUES (?, ?, ?)'),
   };
 }
-function decodePrefs(sqlite, rows) {
-  const pids = rows.map((r) => r.player_id);
+function decodePrefs(sqlite: DatabaseSync, rows: Row[]): PrefsRecord[] {
+  const pids = rows.map((r) => r.player_id as string);
   const pos = childRowsOf(sqlite, 'passport_pref_positions', 'player_id', pids, { order: 'ord' });
   const hist = childRowsOf(sqlite, 'passport_position_history', 'player_id', pids, { order: 'rowid' });
   const histPos = childRowsOf(
     sqlite,
     'passport_position_history_positions',
     'history_id',
-    pids.flatMap((p) => hist.all(p).map((h) => h.id)),
+    pids.flatMap((p) => hist.all(p).map((h) => h.id as string)),
     { order: 'ord' },
   );
   const sel = childRowsOf(sqlite, 'passport_public_selections', 'player_id', pids, { order: 'ord' });
   return rows.map((row) => {
+    const pid = row.player_id as string;
     const { primaryPosition, ...rec } = decode(PREFS_SPEC, row);
-    const secondary = pos.all(row.player_id).map((r) => r.code);
+    const secondary = pos.all(pid).map((r) => r.code as PlayerPosition);
     return {
       ...rec,
       positions: primaryPosition || secondary.length ? { primary: primaryPosition, secondary } : null,
-      positionHistory: hist
-        .all(row.player_id)
-        .map((h) => ({ ...decode(HISTORY_SPEC, h), secondary: histPos.all(h.id).map((r) => r.code) })),
-      publicSelections: sel.all(row.player_id).map((r) => r.selection),
+      positionHistory: hist.all(pid).map((h) => ({
+        ...decode(HISTORY_SPEC, h),
+        secondary: histPos.all(h.id as string).map((r) => r.code as PlayerPosition),
+      })),
+      publicSelections: sel.all(pid).map((r) => r.selection as string),
     };
   });
 }
 /** Write a typed preferences record; `knownHistory` is the ids already stored (the history only grows). */
-function writePrefs(st, rec, knownHistory = new Set()) {
+function writePrefs(st: PrefsStatements, rec: PrefsRecord, knownHistory: ReadonlySet<string> = new Set()) {
   st.upsert.run(encode(PREFS_SPEC, { ...rec, primaryPosition: rec.positions?.primary ?? null }));
   st.posDel.run(rec.playerId);
   (rec.positions?.secondary ?? []).forEach((c, i) => st.posIns.run(rec.playerId, i, c));
@@ -456,33 +559,35 @@ function writePrefs(st, rec, knownHistory = new Set()) {
 }
 
 // ------------------------------------------------------------------ whole-domain read (the test suites)
-export const passportLive = (sqlite) => migrationApplied(sqlite, PASSPORT_MIGRATION);
-function readAll(sqlite) {
-  const out = { passportPrefs: decodePrefs(sqlite, prefsStatements(sqlite).all.all()) };
-  for (const [name, e] of Object.entries(ENTITIES))
+export const passportLive = (sqlite: DatabaseSync): boolean => migrationApplied(sqlite, PASSPORT_MIGRATION);
+function readAll(sqlite: DatabaseSync): PassportRecords {
+  const out: Partial<Record<PassportCollection, unknown[]>> = {
+    passportPrefs: decodePrefs(sqlite, prefsStatements(sqlite).all.all()),
+  };
+  for (const name of FLAT_COLLECTIONS)
     out[name] = sqlite
-      .prepare(`SELECT * FROM ${e.table} ORDER BY rowid`)
+      .prepare(`SELECT * FROM ${ENTITIES[name].table} ORDER BY rowid`)
       .all()
       .map((r) => decodeFlat(name, r));
-  return out;
+  return out as PassportRecords;
 }
 /** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const PASSPORT_RECORDS = {
   names: PASSPORT_COLLECTIONS,
-  read(sqlite) {
+  read(sqlite: DatabaseSync): PassportRecords | null {
     return passportLive(sqlite) ? readAll(sqlite) : null;
   },
 };
 const PLAYER_REFS_SQL = PASSPORT_COLLECTIONS.map((n) =>
   n === 'passportPrefs' ? 'SELECT player_id AS pid FROM passport_prefs' : `SELECT player_id FROM ${ENTITIES[n].table}`,
 ).join(' UNION ALL ');
-const playerRefCount = (sqlite, cond) =>
-  sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE ${cond}`).get().n;
-export const unresolvedPlayerReferences = (sqlite) =>
+const playerRefCount = (sqlite: DatabaseSync, cond: string): number =>
+  (sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE ${cond}`).get() as { n: number }).n;
+export const unresolvedPlayerReferences = (sqlite: DatabaseSync): { passport: number } | null =>
   passportLive(sqlite)
     ? { passport: playerRefCount(sqlite, 'NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)') }
     : null;
-export const retainedPlayerReferences = (sqlite) =>
+export const retainedPlayerReferences = (sqlite: DatabaseSync): { passport: number } | null =>
   passportLive(sqlite)
     ? {
         passport: playerRefCount(
@@ -493,24 +598,35 @@ export const retainedPlayerReferences = (sqlite) =>
     : null;
 
 // ------------------------------------------------------------------ the repository
-const WRITES = new Set(['create', 'withdraw', 'confirm', 'revoke', 'resolve', 'save', 'recordView']);
-const clone = (v) => JSON.parse(JSON.stringify(v));
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 /**
  * `createPassportRepository({ sqlite, unit, now, log })`: `passportPrefs`, `careerEntries`, `achievements`, `shares` and
  * `corrections`, each with its writes and queries, plus `reads` (the queries alone, merged into `verificationReads`).
  */
-export function createPassportRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
+export function createPassportRepository(
+  {
+    sqlite,
+    unit = null,
+    now = Date.now,
+    log = () => {},
+  }: {
+    sqlite: DatabaseSync;
+    unit?: UnitParticipant | null;
+    now?: () => number;
+    log?: (message: string) => void;
+  } = {} as { sqlite: DatabaseSync },
+) {
   if (!sqlite) throw new TypeError('the passport repository needs a SQLite connection (node:sqlite)');
   const operation = operationOn(sqlite, unit);
-  const cache = new Map();
-  const q = (sql) => {
+  const cache = new Map<string, StatementSync>();
+  const q = (sql: string): StatementSync => {
     let s = cache.get(sql);
     if (!s) cache.set(sql, (s = sqlite.prepare(sql)));
     return s;
   };
   const ps = prefsStatements(sqlite);
   // ---- preferences
-  const prefsOf = (playerId) => {
+  const prefsOf = (playerId: unknown): PassportPrefs | null => {
     const row = typeof playerId === 'string' ? ps.byPlayer.get(playerId) : null;
     return row ? deepFreeze(decodePrefs(sqlite, [row])[0]) : null;
   };
@@ -522,9 +638,10 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
      * availableFrom, publicSelections), `history` the position-history entries added after the stored ones. The
      * result is typed whole and written at once; a stored history entry never changes or goes.
      */
-    save: (playerId, { set = {}, history = [], at }) =>
+    save: (playerId: string, { set = {}, history = [], at }: PassportPrefsSave): PassportPrefs =>
       operation(() => {
-        if (!isPlainObject(set) || 'playerId' in set || 'positionHistory' in set || 'updatedAt' in set)
+        const change: unknown = set;
+        if (!isPlainObject(change) || 'playerId' in change || 'positionHistory' in change || 'updatedAt' in change)
           throw refusal(
             'PASSPORT_INPUT_INVALID',
             `passport_prefs ${playerId}: set names the preferences a save changes (not the player, the history or the time)`,
@@ -532,69 +649,85 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
         if (!Array.isArray(history))
           throw refusal('PASSPORT_INPUT_INVALID', `passport_prefs ${playerId}: history must be a list`);
         const stored = prefsOf(playerId);
-        const base = clone(stored ?? blankPrefs(playerId));
-        const t = typePrefs({ ...base, ...set, positionHistory: [...base.positionHistory, ...history], updatedAt: at });
+        const base = clone((stored ?? blankPrefs(playerId)) as BlankPrefs | PrefsRecord);
+        const t = typePrefs({
+          ...base,
+          ...change,
+          positionHistory: [...base.positionHistory, ...history],
+          updatedAt: at,
+        });
         if (!t.ok) throw refusal('PASSPORT_INPUT_INVALID', t.reason);
-        const taken = history.find((h) => q('SELECT 1 FROM passport_position_history WHERE id = ?').get(h?.id));
+        // The history was typed with the record, so each entry is an object with an id.
+        const taken = (history as readonly { id: string }[]).find((h) =>
+          q('SELECT 1 FROM passport_position_history WHERE id = ?').get(h?.id),
+        );
         if (taken) throw refusal('PASSPORT_DUPLICATE', `passport_position_history ${taken.id} already exists`);
         writePrefs(ps, t.record, new Set(base.positionHistory.map((h) => h.id)));
-        return prefsOf(playerId);
+        return prefsOf(playerId) as PassportPrefs;
       }),
   };
 
   // ---- the flat records
-  const read = (name, id) => {
+  const read = <N extends FlatCollection>(name: N, id: unknown): PassportRecord<N> | null => {
     if (typeof id !== 'string') return null;
     const row = q(`SELECT * FROM ${ENTITIES[name].table} WHERE id = ?`).get(id);
     return row ? deepFreeze(decodeFlat(name, row)) : null;
   };
-  const list =
-    (name, where, order = 'rowid') =>
-    (...args) =>
-      q(`SELECT * FROM ${ENTITIES[name].table} WHERE ${where} ORDER BY ${order}`)
-        .all(...args)
-        .map((r) => deepFreeze(decodeFlat(name, r)));
-  const typedOr = (name, raw) => {
+  const all = <N extends FlatCollection>(name: N, where: string, ...args: SQLInputValue[]): PassportRecord<N>[] =>
+    q(`SELECT * FROM ${ENTITIES[name].table} WHERE ${where} ORDER BY rowid`)
+      .all(...args)
+      .map((r) => deepFreeze(decodeFlat(name, r)));
+  const typedOr = <N extends FlatCollection>(name: N, raw: unknown): Records[N] => {
     const t = ENTITIES[name].type(raw, name);
     if (!t.ok) throw refusal('PASSPORT_INPUT_INVALID', t.reason);
     return t.record;
   };
-  const write = (name, rec) => q(upsertSql(ENTITIES[name].table, ENTITIES[name].spec)).run(encodeFlat(name, rec));
-  const create = (name) => (raw) =>
-    operation(() => {
-      const r = typedOr(name, raw);
-      if (read(name, r.id)) throw refusal('PASSPORT_DUPLICATE', `${ENTITIES[name].table} ${r.id} already exists`);
-      write(name, r);
-      return read(name, r.id);
-    });
+  const insertOf = <N extends FlatCollection>(name: N) => q(insertSql(ENTITIES[name].table, ENTITIES[name].spec));
+  /** `create(record)`: typed whole; an existing id is refused before the insert. */
+  const create =
+    <N extends FlatCollection, I>(name: N) =>
+    (raw: I): PassportRecord<N> =>
+      operation(() => {
+        const r = typedOr(name, raw);
+        if (read(name, r.id)) throw refusal('PASSPORT_DUPLICATE', `${ENTITIES[name].table} ${r.id} already exists`);
+        insertOf(name).run(encodeFlat(name, r));
+        return read(name, r.id) as PassportRecord<N>;
+      });
   const { guarded, columnsOf } = writeKit(sqlite, 'PASSPORT');
   /**
    * An act that sets `fields` of record `id` while `where` holds: the record is typed with them (and the `derived`
    * fields a read works out from them), then only their columns are written. A record the guard no longer matches is refused with `what` (PASSPORT_STATE_CONFLICT).
    */
-  const setFields = (name, id, fields, where, what, derived = {}) =>
+  const setFields = <N extends FlatCollection>(
+    name: N,
+    id: string,
+    fields: Record<string, unknown>,
+    where: string,
+    what: string,
+    derived: Record<string, unknown> = {},
+  ): PassportRecord<N> =>
     operation(() => {
       const { table, spec } = ENTITIES[name];
       const stored = read(name, id);
       if (!stored) throw refusal('PASSPORT_NOT_FOUND', `${table} ${id} is not a record of the repository`);
       typedOr(name, { ...clone(stored), ...fields, ...derived });
       guarded(table, { id }, where, columnsOf(table, id, spec, fields, { only: new Set(Object.keys(fields)) }), what);
-      return read(name, id);
+      return read(name, id) as PassportRecord<N>;
     });
 
   const paged =
-    (name, where, desc) =>
-    (args, { limit, after = null }) => {
+    <N extends FlatCollection>(name: N, where: string, desc: boolean) =>
+    (args: SQLInputValue[], { limit, after = null }: PassportPageRequest): PassportPage<PassportRecord<N>> => {
       const rows = q(
         `SELECT rowid AS rid, * FROM ${ENTITIES[name].table} WHERE ${where} AND (? IS NULL OR rowid ${desc ? '<' : '>'} ?) ORDER BY rowid ${desc ? 'DESC' : 'ASC'} LIMIT ?`,
       ).all(...args, after?.[0] ?? null, after?.[0] ?? null, limit + 1);
-      return { rows: rows.map((r) => ({ key: [r.rid], record: deepFreeze(decodeFlat(name, r)) })) };
+      return { rows: rows.map((r) => ({ key: [r.rid as number], record: deepFreeze(decodeFlat(name, r)) })) };
     };
 
   const careerEntries = {
-    create: create('passportCareerEntries'),
+    create: create<'passportCareerEntries', CareerEntryInput>('passportCareerEntries'),
     /** The player withdraws a self-submitted entry at `at`, once. */
-    withdraw: (id, { at }) =>
+    withdraw: (id: string, { at }: { at: number }): CareerEntry =>
       setFields(
         'passportCareerEntries',
         id,
@@ -602,13 +735,13 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
         'withdrawn_at IS NULL',
         `passport_career_entries ${id} is already withdrawn`,
       ),
-    byId: (id) => read('passportCareerEntries', id),
-    forPlayer: list('passportCareerEntries', 'player_id = ?'),
+    byId: (id: unknown): CareerEntry | null => read('passportCareerEntries', id),
+    forPlayer: (playerId: string): CareerEntry[] => all('passportCareerEntries', 'player_id = ?', playerId),
   };
   const achievements = {
-    create: create('passportAchievements'),
+    create: create<'passportAchievements', AchievementInput>('passportAchievements'),
     /** The player withdraws an unconfirmed achievement at `at`, once; a confirmed one is part of the record. */
-    withdraw: (id, { at }) =>
+    withdraw: (id: string, { at }: { at: number }): Achievement =>
       setFields(
         'passportAchievements',
         id,
@@ -617,7 +750,7 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
         `passport_achievements ${id} is withdrawn or confirmed`,
       ),
     /** A verified club confirms a standing achievement, once. */
-    confirm: (id, { confirmation }) =>
+    confirm: (id: string, { confirmation }: { confirmation: AchievementConfirmation }): Achievement =>
       setFields(
         'passportAchievements',
         id,
@@ -625,14 +758,14 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
         'withdrawn_at IS NULL AND confirmation_at IS NULL',
         `passport_achievements ${id} is withdrawn or already confirmed`,
       ),
-    byId: (id) => read('passportAchievements', id),
-    forPlayer: list('passportAchievements', 'player_id = ?'),
+    byId: (id: unknown): Achievement | null => read('passportAchievements', id),
+    forPlayer: (playerId: string): Achievement[] => all('passportAchievements', 'player_id = ?', playerId),
   };
   const sharesPage = paged('passportShares', '1 = 1', true);
   const shares = {
-    create: create('passportShares'),
+    create: create<'passportShares', PassportShareInput>('passportShares'),
     /** Revoke a share link at `at`, by `by` (`{ kind, id }`), once. */
-    revoke: (id, { at, by }) =>
+    revoke: (id: string, { at, by }: { at: number; by: ShareRevoker }): PassportShare =>
       setFields(
         'passportShares',
         id,
@@ -640,22 +773,23 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
         'revoked_at IS NULL',
         `passport_shares ${id} is already revoked`,
       ),
-    byId: (id) => read('passportShares', id),
-    byHash: (hash) => {
+    byId: (id: unknown): PassportShare | null => read('passportShares', id),
+    byHash: (hash: string): PassportShare | null => {
       const row = q('SELECT * FROM passport_shares WHERE token_hash = ?').get(hash);
       return row ? deepFreeze(decodeFlat('passportShares', row)) : null;
     },
-    forPlayer: list('passportShares', 'player_id = ?'),
+    forPlayer: (playerId: string): PassportShare[] => all('passportShares', 'player_id = ?', playerId),
     /** The player's shares neither revoked nor expired at `at`. */
-    activeCount: (playerId, at) =>
-      q('SELECT COUNT(*) AS n FROM passport_shares WHERE player_id = ? AND revoked_at IS NULL AND expires_at > ?').get(
-        playerId,
-        at,
+    activeCount: (playerId: string, at: number): number =>
+      (
+        q(
+          'SELECT COUNT(*) AS n FROM passport_shares WHERE player_id = ? AND revoked_at IS NULL AND expires_at > ?',
+        ).get(playerId, at) as { n: number }
       ).n,
     /** Every share, newest first, by cursor (`after` is the previous page's last `[rowid]`): the T&S list. */
-    page: (opts) => sharesPage([], opts),
+    page: (opts: PassportPageRequest): PassportPage<PassportShare> => sharesPage([], opts),
     /** Count one successful opening of share `id`. */
-    recordView: (id) =>
+    recordView: (id: string): void =>
       operation(() => {
         q('UPDATE passport_shares SET views = views + 1 WHERE id = ?').run(id);
       }),
@@ -663,9 +797,12 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
   const openPage = paged('passportCorrections', "status = 'open'", false);
   const allPage = paged('passportCorrections', '1 = 1', false);
   const corrections = {
-    create: create('passportCorrections'),
+    create: create<'passportCorrections', CorrectionRequestInput>('passportCorrections'),
     /** Trust & Safety resolves an open correction request (`{ outcome, reason, at }`), once. */
-    resolve: (id, { outcome, reason, at }) =>
+    resolve: (
+      id: string,
+      { outcome, reason, at }: { outcome: CorrectionOutcome; reason: string; at: number },
+    ): CorrectionRequest =>
       setFields(
         'passportCorrections',
         id,
@@ -674,36 +811,50 @@ export function createPassportRepository({ sqlite, unit = null, now = Date.now, 
         `passport_corrections ${id} is already resolved`,
         { resolvedAt: at },
       ),
-    byId: (id) => read('passportCorrections', id),
+    byId: (id: unknown): CorrectionRequest | null => read('passportCorrections', id),
     /** The T&S queue, oldest first, by cursor: open corrections, or every correction with `all`. */
-    page: ({ all = false, ...opts }) => (all ? allPage : openPage)([], opts),
+    page: ({ all = false, ...opts }: PassportPageRequest & { all?: boolean }): PassportPage<CorrectionRequest> =>
+      (all ? allPage : openPage)([], opts),
   };
 
-  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
-  const repo = { passportPrefs, careerEntries, achievements, shares, corrections };
   const counters = {
     passportPrefs: q('SELECT COUNT(*) AS n FROM passport_prefs'),
-    ...Object.fromEntries(Object.entries(ENTITIES).map(([n, e]) => [n, q(`SELECT COUNT(*) AS n FROM ${e.table}`)])),
-  };
+    ...Object.fromEntries(FLAT_COLLECTIONS.map((n) => [n, q(`SELECT COUNT(*) AS n FROM ${ENTITIES[n].table}`)])),
+  } as Record<PassportCollection, StatementSync>;
+  const counts = () =>
+    Object.fromEntries(PASSPORT_COLLECTIONS.map((n) => [n, (counters[n].get() as { n: number }).n])) as Record<
+      PassportCollection,
+      number
+    >;
   return {
-    ...repo,
+    passportPrefs,
+    careerEntries,
+    achievements,
+    shares,
+    corrections,
     /** The queries alone, for modules and projectors that must not write (merged into `verificationReads`). */
-    reads: Object.freeze(Object.fromEntries(Object.entries(repo).map(([k, v]) => [k, readOnly(v)]))),
-    attach() {
+    reads: Object.freeze({
+      passportPrefs: readsOf(passportPrefs, ['save']),
+      careerEntries: readsOf(careerEntries, ['create', 'withdraw']),
+      achievements: readsOf(achievements, ['create', 'withdraw', 'confirm']),
+      shares: readsOf(shares, ['create', 'revoke', 'recordView']),
+      corrections: readsOf(corrections, ['create', 'resolve']),
+    }),
+    attach(): { counts: Record<PassportCollection, number> } {
       if (!passportLive(sqlite))
         throw new Error(
           `the passport repository needs ${PASSPORT_MIGRATION} recorded; it never imports an in-memory array`,
         );
-      return { counts: this.counts() };
+      return { counts: counts() };
     },
-    counts() {
-      return Object.fromEntries(PASSPORT_COLLECTIONS.map((n) => [n, counters[n].get().n]));
-    },
+    counts,
     pending: () => 0,
-    exportAll() {
+    exportAll(): PassportRecords | null {
       return PASSPORT_RECORDS.read(sqlite);
     },
     log,
     now,
   };
 }
+export type PassportRepository = ReturnType<typeof createPassportRepository>;
+export type PassportReads = PassportRepository['reads'];

@@ -690,7 +690,7 @@ export function completeness(facts) {
 // -------------------------------------------------------- share tokens
 export const sha256 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 export const mintShareSecret = () => crypto.randomBytes(24).toString('base64url');
-export { SHARE_MODES } from '../../repositories/passport.mjs';
+export { SHARE_MODES } from '../../repositories/passport.ts';
 
 /** Shares are multi-use until revoked or expired. The route shows every failure as the same 404. */
 export function shareProblem(share, { now = Date.now(), playerRemoved = false } = {}) {

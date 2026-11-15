@@ -4,7 +4,7 @@
  */
 import { migrationApplied } from '../database.ts';
 import { VERIFICATION_MIGRATION } from '../verification.ts';
-import { PASSPORT_MIGRATION, PASSPORT_DDL, PASSPORT_TABLES } from '../passport.mjs';
+import { PASSPORT_MIGRATION, PASSPORT_DDL, PASSPORT_TABLES } from '../passport.ts';
 
 export const id = PASSPORT_MIGRATION;
 export const note =

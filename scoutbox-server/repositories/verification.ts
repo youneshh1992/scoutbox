@@ -52,7 +52,7 @@ import {
 } from './fieldSpecs.ts';
 import { migrationApplied, childRowsOf, operationOn, type Row, type UnitParticipant } from './database.ts';
 import { refusal } from './identityRules.ts';
-import { writeKit, type Flatten, type InputFor } from './writes.ts';
+import { writeKit, type InputWith } from './writes.ts';
 import { deepFreeze, type DeepReadonly } from '../domains/platform/values.ts';
 
 export const VERIFICATION_MIGRATION = '0023_verification';
@@ -650,13 +650,6 @@ export type ClaimSubjectKind = ClaimFields['subjectType'];
 /** The whole domain as plain records (`VERIFICATION_RECORDS.read`). */
 export type VerificationRecords = { [N in VerificationCollection]: Records[N][] };
 
-/**
- * What a writer passes for a record (`InputFor`: a field that may be null, or a list, may be left out, at any depth),
- * with the fields `O` optional too: a sparse group (absent is no columns set) or a column with a default.
- */
-type InputWith<T, O extends keyof T = never> = Flatten<
-  Omit<InputFor<T>, O> & { [K in O]?: K extends keyof InputFor<T> ? InputFor<T>[K] : never }
->;
 type Codes = { reviewReasons?: readonly ReviewCode[]; riskFlags?: readonly RiskFlag[] };
 export type ClaimInput = InputWith<ClaimFields, 'metadata'> & Codes & { evidenceIds?: readonly string[] };
 export type VerificationEventInput = InputWith<Records['verEvents']>;

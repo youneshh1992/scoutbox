@@ -44,7 +44,7 @@ import {
   AVAILABILITY,
   CORRECTION_TARGETS,
   CORRECTION_OUTCOMES,
-} from '../../repositories/passport.mjs';
+} from '../../repositories/passport.ts';
 import { PLAYER_POSITIONS } from '../../repositories/playerRecord.ts';
 
 const BOX_DRILLS_BY_ID = new Map(BOX_DRILLS.map((d) => [d.id, d]));
