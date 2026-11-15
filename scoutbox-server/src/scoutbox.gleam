@@ -37,10 +37,13 @@ fn boot() -> Result(Nil, String) {
     simplifile.create_directory_all(config.data_dir)
     |> result.map_error(string.inspect),
   )
+  // Each read connection is one process that runs one read at a time, so the pool bounds how many requests read
+  // at once. With 4, 32 concurrent clients of the org player view queued on the readers (dev/perf.mjs: 534
+  // requests a second, slower than one client); with 16, 1411.
   use store <- result.try(
     store.open(
       path: config.data_dir <> "/scoutbox.db",
-      readers: 4,
+      readers: 16,
       dispatch: fn(_) { Nil },
     ),
   )
