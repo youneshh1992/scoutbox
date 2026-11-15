@@ -1,0 +1,26 @@
+-- In-app notifications, by audience.
+CREATE TABLE notifications (
+  seq                INTEGER PRIMARY KEY,
+  id                 TEXT NOT NULL UNIQUE CHECK (id IS NULL OR length(id) BETWEEN 1 AND 80),
+  occurred_at        INTEGER NOT NULL,
+  audience_kind      TEXT NOT NULL CHECK (audience_kind IN ('player', 'guardian', 'org_user')),
+  audience_id        TEXT NOT NULL CHECK (audience_id IS NULL OR length(audience_id) BETWEEN 1 AND 80),
+  staff_id           TEXT GENERATED ALWAYS AS (CASE WHEN audience_kind = 'org_user' THEN audience_id END) STORED REFERENCES org_users(id) ON DELETE RESTRICT,
+  type               TEXT NOT NULL CHECK (type IS NULL OR length(type) BETWEEN 1 AND 80),
+  text               TEXT NOT NULL CHECK (text IS NULL OR length(text) BETWEEN 1 AND 2000),
+  ref_id             TEXT CHECK (ref_id IS NULL OR length(ref_id) BETWEEN 1 AND 200),
+  read               INTEGER NOT NULL DEFAULT 0 CHECK (read IN (0, 1)),
+  repeat_count       INTEGER NOT NULL DEFAULT 1 CHECK (repeat_count >= 1),
+  category           TEXT CHECK (category IS NULL OR category IN ('mentions', 'assignments', 'room_changes', 'evidence_requests', 'combine', 'trial_updates', 'second_look', 'brief_updates', 'messages', 'activity', 'discovery_nudges', 'watchlist_changes', 'development_updates', 'representation', 'compliance', 'transaction_updates', 'offer_updates', 'signing_updates', 'security_account')),
+  deferred_push      INTEGER NOT NULL DEFAULT 0 CHECK (deferred_push IN (0, 1)),
+  dispatched_at      INTEGER,
+  action_required    INTEGER NOT NULL DEFAULT 0 CHECK (action_required IN (0, 1)),
+  action_deadline_at INTEGER,
+  action_acked_at    INTEGER,
+  CHECK (action_required = 1 OR (action_deadline_at IS NULL AND action_acked_at IS NULL))
+) STRICT;
+CREATE INDEX notifications_audience_seq ON notifications (audience_kind, audience_id, seq);
+CREATE INDEX notifications_awaiting_ack ON notifications (seq) WHERE action_required = 1 AND action_acked_at IS NULL;
+CREATE INDEX notifications_staff ON notifications (staff_id) WHERE staff_id IS NOT NULL;
+CREATE INDEX notifications_undispatched ON notifications (seq) WHERE dispatched_at IS NULL;
+CREATE INDEX notifications_unread ON notifications (audience_kind, audience_id, type, occurred_at) WHERE read = 0;

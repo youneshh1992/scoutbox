@@ -10,7 +10,19 @@ import scoutbox/codegen.{Shared}
 import simplifile
 
 /// The vocabularies several tables share, declared once. Each must be exactly some column's CHECK list.
-pub const shared = [Shared("OrgType", ["club", "agency"])]
+pub const shared = [
+  Shared("Party", ["player", "guardian"]),
+  Shared("Audience", ["player", "guardian", "org_user"]),
+  Shared("OrgType", ["club", "agency"]),
+  Shared(
+    "Position",
+    [
+      "GK", "CB", "RB", "LB", "RWB", "LWB", "CDM", "CM", "CAM", "RW", "LW", "ST",
+      "CF",
+    ],
+  ),
+  Shared("PlayingLevel", ["amateur", "semi_pro", "pro"]),
+]
 
 pub fn main() -> Nil {
   let out = case argv.load().arguments {
