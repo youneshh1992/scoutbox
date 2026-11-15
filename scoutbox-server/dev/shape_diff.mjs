@@ -2,6 +2,7 @@
 // requests of both, and prints where the responses' shapes differ: key paths, their order, and each value's JSON
 // type. The batteries check what they assert; this catches drift in everything else a response carries.
 //   gleam export erlang-shipment && node dev/shape_diff.mjs
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
