@@ -5,6 +5,8 @@ import gleam/http.{Get, Post, Put}
 import gleam/json
 import gleam/result
 import scoutbox/app.{type Ctx}
+import scoutbox/development/record_routes as record
+import scoutbox/discovery/directory
 import scoutbox/discovery/player_routes as discovery
 import scoutbox/identity/access
 import scoutbox/identity/guardian_routes
@@ -79,6 +81,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["players", id, "request"] ->
           only(req, Post, fn() { request_routes.request(ctx, req, org, id) })
         ["shortlist"] -> only(req, Get, fn() { discovery.shortlist(ctx, org) })
+        ["players"] ->
+          only(req, Get, fn() { directory.directory(ctx, req, org) })
+        ["filmroom"] ->
+          only(req, Get, fn() { directory.film_room(ctx, req, org) })
+        ["fixtures"] ->
+          only(req, Get, fn() { directory.fixtures(ctx, req, org) })
         ["ledger"] ->
           only(req, Get, fn() { request_routes.org_ledger(ctx, req, org) })
         ["funnel"] -> only(req, Get, fn() { request_routes.funnel(ctx, org) })
@@ -105,6 +113,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["timeline"] ->
           only(req, Post, fn() { player_routes.add_timeline(ctx, req, player) })
         ["export"] -> only(req, Get, fn() { player_routes.export(ctx, player) })
+        ["me"] -> only(req, Get, fn() { record.me(player) })
+        ["availability"] ->
+          only(req, Post, fn() { record.availability(ctx, req, player) })
+        ["first-team-seeker"] ->
+          only(req, Post, fn() { record.first_team_seeker(ctx, req, player) })
+        ["academyplus"] ->
+          only(req, Post, fn() { record.academy_plus(ctx, req, player) })
+        ["medical", "share"] ->
+          only(req, Post, fn() { record.medical_share(ctx, req, player) })
+        ["stats"] -> only(req, Post, fn() { record.stats(ctx, req, player) })
+        ["badges"] -> only(req, Post, fn() { record.badges(ctx, req, player) })
+        ["prefs"] -> only(req, Post, fn() { record.prefs(ctx, req, player) })
         ["notifications"] ->
           only(req, Get, fn() {
             feed_routes.feed(ctx, audience.Player, player.player.row.id)
@@ -118,6 +138,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["me"] -> only(req, Get, fn() { guardian_routes.me(guardian) })
         ["children"] ->
           only(req, Get, fn() { guardian_routes.children(ctx, guardian) })
+        ["children", id, "availability"] ->
+          only(req, Post, fn() {
+            record.child_availability(ctx, req, guardian, id)
+          })
+        ["children", id, "medical", "share"] ->
+          only(req, Post, fn() {
+            record.child_medical_share(ctx, req, guardian, id)
+          })
+        ["coguardian"] ->
+          only(req, Post, fn() {
+            guardian_routes.add_co_guardian(ctx, req, guardian)
+          })
         ["log"] ->
           only(req, Get, fn() { guardian_routes.log(ctx, req, guardian) })
         ["report"] ->
@@ -155,6 +187,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { console.lift(ctx, req, id) })
         ["moderation"] -> only(req, Get, fn() { console.moderation(ctx, req) })
         ["clubs"] -> only(req, Get, fn() { console.clubs(ctx, req) })
+        ["guardians"] ->
+          only(req, Get, fn() { guardian_routes.admin_list(ctx, req) })
+        ["guardians", id, "idv"] ->
+          only(req, Post, fn() { guardian_routes.review_id(ctx, req, id) })
         ["clubs", id, "credentials"] ->
           only(req, Post, fn() { console.credentials(ctx, req, id) })
         ["clubs", id, "verification"] ->

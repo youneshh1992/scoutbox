@@ -12,6 +12,7 @@ import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/guardian_children as link_row
 import scoutbox/rows/guardians as row
+import scoutbox/rows/idv_queue as idv_row
 import sqlight
 
 pub type CoGuardian {
@@ -214,4 +215,58 @@ fn co_guardians_json(g: Guardian) -> Json {
       #("email", json.string(c.email)),
     ])
   })
+}
+
+/// Trust & Safety's decision on a guardian's ID check, recorded on their first queue entry.
+pub fn review_id_check(
+  tx: Tx,
+  id: String,
+  approved: Bool,
+) -> Result(Guardian, Fail(e)) {
+  use _ <- result.try(
+    store.run(tx, "UPDATE guardians SET id_verified = ? WHERE id = ?", [
+      sqlight.bool(approved),
+      sqlight.text(id),
+    ]),
+  )
+  use _ <- result.try(
+    store.run(
+      tx,
+      "UPDATE idv_queue SET status = ? WHERE seq = (SELECT MIN(seq) FROM idv_queue WHERE guardian_id = ?)",
+      [
+        sqlight.text(case approved {
+          True -> "approved"
+          False -> "revoked"
+        }),
+        sqlight.text(id),
+      ],
+    ),
+  )
+  use found <- result.map(by_id(store.reading(tx), id))
+  let assert Some(g) = found as "a reviewed guardian exists"
+  g
+}
+
+/// Every ID check, in the order they happened.
+pub fn idv_queue(read: Read) -> Result(List(idv_row.Row), Fail(e)) {
+  store.query(
+    read,
+    "SELECT " <> idv_row.columns <> " FROM idv_queue ORDER BY seq",
+    [],
+    idv_row.decoder(),
+  )
+}
+
+pub fn idv_view(q: idv_row.Row) -> Json {
+  json.object([
+    #("id", json.string(q.id)),
+    #("guardianId", json.string(q.guardian_id)),
+    #("guardianName", json.nullable(q.guardian_name, json.string)),
+    #("documentType", json.string(q.document_type)),
+    #("documentRef", json.string(q.document_ref_last4)),
+    #("provider", json.string(q.provider)),
+    #("reference", json.string(q.reference)),
+    #("ts", json.int(q.created_at)),
+    #("status", json.string(idv_row.status_to_string(q.status))),
+  ])
 }

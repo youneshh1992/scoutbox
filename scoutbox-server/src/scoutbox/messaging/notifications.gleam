@@ -31,6 +31,7 @@ fn category_of(type_: String) -> Option(row.Category) {
   case type_ {
     "request" -> Some(row.Messages)
     "report_resolved" -> Some(row.SecurityAccount)
+    "badge" -> Some(row.DiscoveryNudges)
     _ -> None
   }
 }

@@ -301,6 +301,29 @@ pub fn boolean() -> Check(Bool) {
   }
 }
 
+/// A list of at most `max` items, each passing `item`. A bad item is refused under the list's name.
+pub fn list_of(item: Check(a), max: Int) -> Check(List(a)) {
+  fn(v) {
+    case decode.run(v, decode.list(decode.dynamic)) {
+      Error(_) -> Error(issue(Invalid, "must be a list"))
+      Ok(items) ->
+        case list.length(items) > max {
+          True ->
+            Error(
+              Issue(
+                ..issue(
+                  TooLong,
+                  "must have at most " <> int.to_string(max) <> " items",
+                ),
+                max: Some(max),
+              ),
+            )
+          False -> list.try_map(items, item)
+        }
+    }
+  }
+}
+
 /// A JSON number. Erlang decodes `178` as an integer and `178.5` as a float; both are numbers here.
 fn number_value(v: Dynamic) -> Result(Float, Issue) {
   case decode.run(v, decode.int), decode.run(v, decode.float) {
@@ -349,6 +372,27 @@ pub fn whole_number(min: Int, max: Int) -> Check(Int) {
         case float.floor(n) == n {
           False -> Error(issue(NotWholeNumber, "must be a whole number"))
           True -> in_range(n, min, max) |> result_replace(float.truncate(n))
+        }
+    }
+  }
+}
+
+/// A whole number written as text, as a query string carries it: digits only, so `1.5`, `-1` and ` 7` are
+/// refused rather than read as some other number (schemas.mjs `wholeNumberText`).
+pub fn whole_number_text(min: Int, max: Int) -> Check(Int) {
+  fn(v) {
+    case string_check(v) {
+      Error(e) -> Error(e)
+      Ok(s) ->
+        case
+          s != ""
+          && string.length(s) <= 15
+          && all_digits(string.to_graphemes(s)),
+          int.parse(s)
+        {
+          True, Ok(n) ->
+            in_range(int.to_float(n), min, max) |> result_replace(n)
+          _, _ -> Error(issue(NotWholeNumber, "must be a whole number"))
         }
     }
   }

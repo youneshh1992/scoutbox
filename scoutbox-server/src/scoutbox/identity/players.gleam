@@ -14,6 +14,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/platform/ids
 import scoutbox/platform/sql
@@ -360,7 +361,7 @@ pub fn profile_signal(p: Player) -> Int {
 }
 
 /// The trust breakdown a guardian and the player see (domain.ts `trustBreakdown`).
-fn trust_breakdown(p: Player) -> Json {
+pub fn trust_breakdown(p: Player) -> Json {
   let bonus = fn(on, n) {
     case on {
       True -> n
@@ -513,7 +514,7 @@ fn present(
   }
 }
 
-fn stats_json(s: Option(Stats)) -> Json {
+pub fn stats_json(s: Option(Stats)) -> Json {
   json.nullable(s, fn(s) {
     json.object([
       #("appearances", opt_int(s.appearances)),
@@ -784,6 +785,14 @@ pub fn self_view(p: Player) -> Json {
   json.object(self_fields(p))
 }
 
+pub fn age_now(p: Player, now: Int) -> Option(Int) {
+  age.age_on(p.row.birth_date, now)
+}
+
+pub fn season_history_json(p: Player) -> Json {
+  json.array(p.season_history, season_json)
+}
+
 fn age_json(p: Player, now: Int) -> Json {
   json.nullable(age.age_on(p.row.birth_date, now), json.int)
 }
@@ -910,4 +919,183 @@ pub fn org_fields(
       False -> [#("vouches", json.preprocessed_array([]))]
     },
   ])
+}
+
+// ---------------------------------------------------------------------------------- the record's acts
+
+/// Sets columns of a live player, then keeps `profile_signal` in step with the facts it is worked out from.
+fn update(
+  tx: Tx,
+  id: String,
+  sets: List(#(String, sqlight.Value)),
+) -> Result(Player, Fail(e)) {
+  use _ <- result.try(case sets {
+    [] -> Ok(Nil)
+    _ ->
+      store.run(
+        tx,
+        "UPDATE players SET "
+          <> list.map(sets, fn(s) { s.0 <> " = ?" }) |> string.join(", ")
+          <> " WHERE id = ? AND deleted_at IS NULL",
+        list.append(list.map(sets, fn(s) { s.1 }), [sqlight.text(id)]),
+      )
+  })
+  refreshed(tx, id)
+}
+
+fn refreshed(tx: Tx, id: String) -> Result(Player, Fail(e)) {
+  use found <- result.try(by_id(store.reading(tx), id))
+  let assert Some(p) = found as "an act names a live player"
+  case profile_signal(p) == p.row.profile_signal {
+    True -> Ok(p)
+    False -> {
+      let signal = profile_signal(p)
+      use _ <- result.map(
+        store.run(tx, "UPDATE players SET profile_signal = ? WHERE id = ?", [
+          sqlight.int(signal),
+          sqlight.text(id),
+        ]),
+      )
+      Player(..p, row: row.Row(..p.row, profile_signal: signal))
+    }
+  }
+}
+
+pub fn set_availability(
+  tx: Tx,
+  id: String,
+  availability: Option(row.Availability),
+  contract_status: Option(row.ContractStatus),
+) -> Result(Player, Fail(e)) {
+  update(
+    tx,
+    id,
+    option.values([
+      option.map(availability, fn(a) {
+        #("availability", sqlight.text(row.availability_to_string(a)))
+      }),
+      option.map(contract_status, fn(c) {
+        #("contract_status", sqlight.text(row.contract_status_to_string(c)))
+      }),
+    ]),
+  )
+}
+
+pub type Switch {
+  FirstTeamSeeker
+  AcademyPlus
+  MedicalShared
+}
+
+pub fn set_switch(
+  tx: Tx,
+  id: String,
+  switch: Switch,
+  on: Bool,
+) -> Result(Player, Fail(e)) {
+  let column = case switch {
+    FirstTeamSeeker -> "first_team_seeker"
+    AcademyPlus -> "academy_plus"
+    MedicalShared -> "medical_shared"
+  }
+  update(tx, id, [#(column, sqlight.bool(on))])
+}
+
+/// Figures for the current season: the given ones set, and appearances, goals and assists that were never
+/// recorded start at 0.
+pub fn record_stats(tx: Tx, id: String, s: Stats) -> Result(Player, Fail(e)) {
+  let int = fn(column, v) { option.map(v, fn(n) { #(column, sqlight.int(n)) }) }
+  let real = fn(column, v) {
+    option.map(v, fn(f) { #(column, sqlight.float(f)) })
+  }
+  let given =
+    option.values([
+      int("stats_appearances", s.appearances),
+      int("stats_goals", s.goals),
+      int("stats_assists", s.assists),
+      real("stats_pace_kmh", s.pace_kmh),
+      real("stats_pass_completion_pct", s.pass_completion_pct),
+      real("stats_duel_success_pct", s.duel_success_pct),
+      int("stats_clean_sheets", s.clean_sheets),
+    ])
+  let zeroed =
+    [
+      #("stats_appearances", s.appearances),
+      #("stats_goals", s.goals),
+      #("stats_assists", s.assists),
+    ]
+    |> list.filter(fn(c) { c.1 == None })
+    |> list.map(fn(c) { c.0 <> " = COALESCE(" <> c.0 <> ", 0)" })
+  use _ <- result.try(case zeroed {
+    [] -> Ok(Nil)
+    _ ->
+      store.run(
+        tx,
+        "UPDATE players SET " <> string.join(zeroed, ", ") <> " WHERE id = ?",
+        [sqlight.text(id)],
+      )
+  })
+  update(tx, id, given)
+}
+
+/// Replaces the badges, in order; a legal duplicate is kept.
+pub fn set_badges(
+  tx: Tx,
+  id: String,
+  badges: List(String),
+) -> Result(Player, Fail(e)) {
+  use _ <- result.try(
+    store.run(tx, "DELETE FROM player_badges WHERE player_id = ?", [
+      sqlight.text(id),
+    ]),
+  )
+  use _ <- result.try(
+    list.index_map(badges, fn(b, i) { #(b, i) })
+    |> list.try_each(fn(p) {
+      badge_row.insert(
+        tx,
+        badge_row.Row(player_id: id, position: p.1, badge: p.0),
+      )
+    }),
+  )
+  refreshed(tx, id)
+}
+
+pub type Prefs {
+  Prefs(
+    quiet_start: Option(String),
+    quiet_end: Option(String),
+    school_hours_mute: Option(Bool),
+    timezone: Option(String),
+  )
+}
+
+pub fn set_prefs(tx: Tx, id: String, p: Prefs) -> Result(Player, Fail(e)) {
+  update(tx, id, [
+    #("prefs_quiet_start", sqlight.nullable(sqlight.text, p.quiet_start)),
+    #("prefs_quiet_end", sqlight.nullable(sqlight.text, p.quiet_end)),
+    #(
+      "prefs_school_hours_mute",
+      sqlight.nullable(sqlight.bool, p.school_hours_mute),
+    ),
+    #("prefs_timezone", sqlight.nullable(sqlight.text, p.timezone)),
+  ])
+}
+
+pub fn prefs(p: Player) -> Prefs {
+  Prefs(
+    p.row.prefs_quiet_start,
+    p.row.prefs_quiet_end,
+    p.row.prefs_school_hours_mute,
+    p.row.prefs_timezone,
+  )
+}
+
+/// Records football activity at `at`: it feeds the streak and the weekly goal.
+pub fn log_activity(tx: Tx, id: String, at: Int) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "INSERT INTO player_activity_log (player_id, position, occurred_at) SELECT ?, COALESCE(MAX(position) + 1, 0), ? FROM player_activity_log WHERE player_id = ?",
+    [sqlight.text(id), sqlight.int(at), sqlight.text(id)],
+  )
 }

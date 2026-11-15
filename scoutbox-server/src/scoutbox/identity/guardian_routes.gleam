@@ -3,6 +3,7 @@
 import gleam/json
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/players
@@ -10,6 +11,7 @@ import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
 import scoutbox/platform/clock
 import scoutbox/platform/http
+import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/pages
@@ -137,5 +139,117 @@ pub fn log(ctx: Ctx, req: Request, g: Guardian) -> Response {
   case store.read(ctx.store, ledger.page_for_players(_, g.child_ids, page)) {
     Ok(#(items, next)) -> pages.respond(items, next, ledger.view)
     Error(failure) -> http.internal(failure)
+  }
+}
+
+type CoGuardian {
+  CoGuardian(name: Option(String), email: Option(String))
+}
+
+/// `POST /guardian/coguardian`: created with its links to the children in one unit. The co-guardian passes the
+/// gates (ID check, disclaimer) themselves before they can act.
+pub fn add_co_guardian(ctx: Ctx, req: Request, g: Guardian) -> Response {
+  let shape = {
+    use name <- input.field("name", input.nullish(input.text(120)))
+    use email <- input.field("email", input.nullish(input.text(254)))
+    input.done(CoGuardian(name:, email:))
+  }
+  use body <- http.body(req, shape, [])
+  case input.filled(body.name), input.filled(body.email) {
+    Some(name), Some(email) ->
+      case string.contains(email, "@") {
+        False ->
+          http.json(
+            400,
+            json.object([
+              #("error", json.string("FIELD_INVALID")),
+              #("field", json.string("email")),
+              #("problem", json.string("invalid")),
+              #("message", json.string("email must be an e-mail address.")),
+            ]),
+          )
+        True -> {
+          let now = clock.now_ms()
+          let created =
+            store.unit(ctx.store, fn(tx) {
+              use id <- result.try(ids.next(tx, "gd"))
+              guardians.create_co_guardian(
+                tx,
+                id:,
+                primary: g,
+                name:,
+                email:,
+                at: now,
+              )
+              |> result.map(fn(co) { #(co, []) })
+            })
+          case created {
+            Ok(co) ->
+              http.json(
+                201,
+                json.object([
+                  #("guardianId", json.string(co.row.id)),
+                  #(
+                    "note",
+                    json.string(
+                      "The co-guardian must verify their ID and accept the disclaimer before they can act.",
+                    ),
+                  ),
+                ]),
+              )
+            Error(store.Refused(guardians.EmailInUse)) ->
+              http.error_message(
+                409,
+                "EMAIL_IN_USE",
+                "A guardian account with this email already exists.",
+              )
+            Error(failure) -> http.internal(failure)
+          }
+        }
+      }
+    _, _ -> http.error(400, "NAME_AND_EMAIL_REQUIRED")
+  }
+}
+
+/// `GET /admin/guardians`, oldest first, with the ID-check queue. An allowlist: never a hash.
+pub fn admin_list(ctx: Ctx, req: Request) -> Response {
+  use page <- pages.strict(req, [IntKind])
+  let found =
+    store.read(ctx.store, fn(read) {
+      use #(items, next) <- result.try(guardians.page(read, page))
+      use queue <- result.map(guardians.idv_queue(read))
+      json.object([
+        #("guardians", json.array(items, guardians.admin_view)),
+        #("nextCursor", json.nullable(next, json.string)),
+        #("idvQueue", json.array(queue, guardians.idv_view)),
+      ])
+    })
+  case found {
+    Ok(body) -> http.json(200, body)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `POST /admin/guardians/:id/idv`.
+pub fn review_id(ctx: Ctx, req: Request, id: String) -> Response {
+  case store.read(ctx.store, guardians.by_id(_, id)) {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> http.error(404, "GUARDIAN_NOT_FOUND")
+    Ok(Some(_)) -> {
+      let shape = {
+        use approved <- input.field("approved", input.required(input.boolean()))
+        input.done(approved)
+      }
+      use approved <- http.body(req, shape, [])
+      let reviewed =
+        store.unit(ctx.store, fn(tx) {
+          guardians.review_id_check(tx, id, approved)
+          |> result.map(fn(g) { #(g, []) })
+        })
+      case reviewed {
+        Ok(g) -> http.json(200, guardians.admin_view(g))
+        Error(failure) -> http.internal(failure)
+      }
+    }
   }
 }
