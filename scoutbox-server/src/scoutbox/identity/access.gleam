@@ -1,9 +1,11 @@
 //// Who is asking: the organisation session behind `/org`, and the admin key behind `/admin`.
 
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
+import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs.{type Org}
+import scoutbox/identity/players.{type Player}
 import scoutbox/identity/roles
 import scoutbox/identity/sessions.{OrgStaff}
 import scoutbox/identity/staff.{type Staff}
@@ -100,5 +102,75 @@ pub fn admin(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
   case http.header(req, "x-admin-key") {
     Ok(key) if key == ctx.config.admin_key -> next()
     _ -> http.error(401, "ADMIN_KEY_REQUIRED")
+  }
+}
+
+/// A player signed in. `minor` is worked out once per request.
+pub type PlayerAccess {
+  PlayerAccess(player: Player, minor: Bool)
+}
+
+fn session_holder(
+  req: Request,
+  read: store.Read,
+  now: Int,
+) -> Result(Option(sessions.Holder), store.Fail(e)) {
+  case http.bearer(req) {
+    Ok(token) ->
+      sessions.by_token(read, token, now)
+      |> result.map(option.map(_, fn(s) { s.holder }))
+    Error(Nil) -> Ok(None)
+  }
+}
+
+pub fn player_session(
+  ctx: Ctx,
+  req: Request,
+  next: fn(PlayerAccess) -> Response,
+) -> Response {
+  let now = clock.now_ms()
+  let found =
+    store.read(ctx.store, fn(read) {
+      use holder <- result.try(session_holder(req, read, now))
+      case holder {
+        Some(sessions.Player(id)) -> players.by_id(read, id)
+        _ -> Ok(None)
+      }
+    })
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(Some(p)) -> next(PlayerAccess(p, !players.is_adult(p, now)))
+    Ok(None) ->
+      http.error_message(
+        401,
+        "PLAYER_AUTH_REQUIRED",
+        "Log in again — this session is no longer valid.",
+      )
+  }
+}
+
+pub fn guardian_session(
+  ctx: Ctx,
+  req: Request,
+  next: fn(Guardian) -> Response,
+) -> Response {
+  let now = clock.now_ms()
+  let found =
+    store.read(ctx.store, fn(read) {
+      use holder <- result.try(session_holder(req, read, now))
+      case holder {
+        Some(sessions.Guardian(id)) -> guardians.by_id(read, id)
+        _ -> Ok(None)
+      }
+    })
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(Some(g)) -> next(g)
+    Ok(None) ->
+      http.error_message(
+        401,
+        "GUARDIAN_AUTH_REQUIRED",
+        "Log in again — this session is no longer valid.",
+      )
   }
 }

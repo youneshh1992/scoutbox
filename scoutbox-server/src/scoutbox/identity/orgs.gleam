@@ -1,11 +1,16 @@
 //// Organisations (`orgs`): what sign-in and the org session need, and the organisation as responses show it.
 
+import gleam/bool
 import gleam/dynamic/decode
 import gleam/json.{type Json}
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import scoutbox/platform/store.{type Fail, type Read}
+import gleam/string
+import scoutbox/platform/paging
+import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/orgs as row
+import scoutbox/safety/audit
 import scoutbox/vocab/org_type
 import sqlight
 
@@ -60,11 +65,11 @@ pub fn is_grassroots(org: Org) -> Bool {
 }
 
 /// Earned and losable: verification, a signed contract and no unresolved urgent report against the club.
-///
-/// Not ported yet: safety reports live in the safety domain, which this server does not run, so no report can
-/// be open and the last condition always holds.
-pub fn safeguarding_certified(org: Org) -> Bool {
-  org.verified && org.safeguarding_contract_signed
+pub fn safeguarding_certified(read: Read, org: Org) -> Result(Bool, Fail(e)) {
+  case org.verified && org.safeguarding_contract_signed {
+    False -> Ok(False)
+    True -> audit.open_urgent_against(read, org.id) |> result.map(bool.negate)
+  }
 }
 
 /// The organisation as responses show it: an allowlist, never the row (the password hash is not on it).
@@ -118,4 +123,73 @@ pub fn view(org: Org) -> List(#(String, Json)) {
     #("lookingFor", json.preprocessed_array([])),
     #("federationCheck", json.null()),
   ]
+}
+
+/// Oldest first, keyed by rowid.
+pub fn page(
+  read: Read,
+  page: paging.Page,
+) -> Result(#(List(Org), Option(String)), Fail(e)) {
+  let after = case page.after {
+    Some([paging.IntKey(rid)]) -> rid
+    _ -> 0
+  }
+  use rows <- result.map(
+    store.query(
+      read,
+      "SELECT "
+        <> row.columns
+        <> ", rowid FROM orgs WHERE rowid > ? ORDER BY rowid LIMIT ?",
+      [sqlight.int(after), sqlight.int(page.limit + 1)],
+      {
+        use o <- decode.then(row.decoder())
+        use rid <- decode.field(row.width, decode.int)
+        decode.success(#(o, rid))
+      },
+    ),
+  )
+  let #(items, next) =
+    paging.page_of(rows, page.limit, fn(p) { [paging.IntKey(p.1)] })
+  #(list.map(items, fn(p) { p.0 }), next)
+}
+
+pub fn suspend(tx: Tx, id: String) -> Result(Nil, Fail(e)) {
+  store.run(tx, "UPDATE orgs SET suspended = 1 WHERE id = ?", [sqlight.text(id)])
+}
+
+/// The standing switches Trust & Safety sets. `None` leaves a field as it is; a verified domain of
+/// `Some(None)` clears it.
+pub type Standing {
+  Standing(
+    verified: Option(Bool),
+    safeguarding_contract_signed: Option(Bool),
+    suspended: Option(Bool),
+    verified_domain: Option(Option(String)),
+  )
+}
+
+pub fn set_standing(tx: Tx, id: String, s: Standing) -> Result(Nil, Fail(e)) {
+  let bool = fn(column, v) {
+    option.map(v, fn(b) { #(column <> " = ?", sqlight.bool(b)) })
+  }
+  let sets =
+    option.values([
+      bool("verified", s.verified),
+      bool("safeguarding_contract_signed", s.safeguarding_contract_signed),
+      bool("suspended", s.suspended),
+      option.map(s.verified_domain, fn(d) {
+        #("verified_domain = ?", sqlight.nullable(sqlight.text, d))
+      }),
+    ])
+  case sets {
+    [] -> Ok(Nil)
+    _ ->
+      store.run(
+        tx,
+        "UPDATE orgs SET "
+          <> list.map(sets, fn(s) { s.0 }) |> string.join(", ")
+          <> " WHERE id = ?",
+        list.append(list.map(sets, fn(s) { s.1 }), [sqlight.text(id)]),
+      )
+  }
 }

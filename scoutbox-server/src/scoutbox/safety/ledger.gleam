@@ -26,9 +26,10 @@ pub type Entry {
   )
 }
 
-pub fn append(tx: Tx, entry: Entry, at: Int) -> Result(Nil, Fail(e)) {
+/// Appends an entry and returns its id.
+pub fn append(tx: Tx, entry: Entry, at: Int) -> Result(String, Fail(e)) {
   use id <- result.try(ids.next(tx, "led"))
-  row.insert(
+  use _ <- result.map(row.insert(
     tx,
     row.New(
       ..row.new(id:, occurred_at: at, type_: entry.entry_type),
@@ -38,7 +39,8 @@ pub fn append(tx: Tx, entry: Entry, at: Int) -> Result(Nil, Fail(e)) {
       user_id: entry.user_id,
       actor_name: entry.actor_name,
     ),
-  )
+  ))
+  id
 }
 
 // ----------------------------------------------------------------------------------------------- reads

@@ -21,6 +21,7 @@
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/float
 import gleam/int
 import gleam/json.{type Json}
 import gleam/list
@@ -104,7 +105,7 @@ pub type Refusal {
   )
 }
 
-fn optional(
+fn when_some(
   value: Option(a),
   name: String,
   to_json: fn(a) -> Json,
@@ -124,10 +125,10 @@ pub fn refusal_json(r: Refusal) -> Json {
         #("problem", json.string(problem_name(r.problem))),
         #("message", json.string(r.message)),
       ],
-      optional(r.min, "min", json.int),
-      optional(r.max, "max", json.int),
-      optional(r.expected, "expected", json.string),
-      optional(r.allowed, "allowed", json.array(_, json.string)),
+      when_some(r.min, "min", json.int),
+      when_some(r.max, "max", json.int),
+      when_some(r.expected, "expected", json.string),
+      when_some(r.allowed, "allowed", json.array(_, json.string)),
     ]),
   )
 }
@@ -161,6 +162,35 @@ pub fn nullish(check: Check(a)) -> Rule(Option(a)) {
         case dynamic.classify(v) {
           "Nil" | "Null" -> Ok(None)
           _ -> check(v) |> option_ok
+        }
+    }
+  }
+}
+
+/// Absent is `None`; a value that was sent, null included, must pass `check` (valibot's `optional`).
+pub fn optional(check: Check(a)) -> Rule(Option(a)) {
+  fn(value) {
+    case value {
+      None -> Ok(None)
+      Some(v) -> check(v) |> option_ok
+    }
+  }
+}
+
+/// Absent is `None` (leave the value as it is), null is `Some(None)` (clear it), and anything else must pass
+/// `check`.
+pub fn clearable(check: Check(a)) -> Rule(Option(Option(a))) {
+  fn(value) {
+    case value {
+      None -> Ok(None)
+      Some(v) ->
+        case dynamic.classify(v) {
+          "Nil" | "Null" -> Ok(Some(None))
+          _ ->
+            case check(v) {
+              Ok(a) -> Ok(Some(Some(a)))
+              Error(e) -> Error(e)
+            }
         }
     }
   }
@@ -268,6 +298,66 @@ pub fn boolean() -> Check(Bool) {
       Ok(b) -> Ok(b)
       Error(_) -> Error(issue(NotBoolean, "must be true or false"))
     }
+  }
+}
+
+/// A JSON number. Erlang decodes `178` as an integer and `178.5` as a float; both are numbers here.
+fn number_value(v: Dynamic) -> Result(Float, Issue) {
+  case decode.run(v, decode.int), decode.run(v, decode.float) {
+    Ok(n), _ -> Ok(int.to_float(n))
+    _, Ok(f) -> Ok(f)
+    _, _ -> Error(issue(NotNumber, "must be a number"))
+  }
+}
+
+fn in_range(n: Float, min: Int, max: Int) -> Result(Nil, Issue) {
+  case n <. int.to_float(min), n >. int.to_float(max) {
+    True, _ ->
+      Error(
+        Issue(
+          ..issue(TooSmall, "must be at least " <> int.to_string(min)),
+          min: Some(min),
+        ),
+      )
+    _, True ->
+      Error(
+        Issue(
+          ..issue(TooLarge, "must be at most " <> int.to_string(max)),
+          max: Some(max),
+        ),
+      )
+    False, False -> Ok(Nil)
+  }
+}
+
+/// A number from `min` to `max`.
+pub fn number(min: Int, max: Int) -> Check(Float) {
+  fn(v) {
+    case number_value(v) {
+      Error(e) -> Error(e)
+      Ok(n) -> in_range(n, min, max) |> result_replace(n)
+    }
+  }
+}
+
+/// A whole number from `min` to `max` (JavaScript's safe integers: `4.0` is the whole number 4).
+pub fn whole_number(min: Int, max: Int) -> Check(Int) {
+  fn(v) {
+    case number_value(v) {
+      Error(e) -> Error(e)
+      Ok(n) ->
+        case float.floor(n) == n {
+          False -> Error(issue(NotWholeNumber, "must be a whole number"))
+          True -> in_range(n, min, max) |> result_replace(float.truncate(n))
+        }
+    }
+  }
+}
+
+fn result_replace(r: Result(Nil, Issue), value: a) -> Result(a, Issue) {
+  case r {
+    Ok(Nil) -> Ok(value)
+    Error(e) -> Error(e)
   }
 }
 

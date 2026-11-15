@@ -88,21 +88,7 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
   let now = clock.now_ms()
   // As the TypeScript server keys it: an absent orgId is budgeted as "org:undefined".
   let budget_key = "org:" <> option.unwrap(body.org_id, "undefined")
-  use <- guard(limits.login_locked(ctx.limits, budget_key, now), fn() {
-    http.json(
-      429,
-      json.object([
-        #("error", json.string("RATE_LIMITED")),
-        #("action", json.string("login_failure")),
-        #(
-          "message",
-          json.string(
-            "Too many requests in a short window — wait a moment and try again.",
-          ),
-        ),
-      ]),
-    )
-  })
+  use <- guard(limits.login_locked(ctx.limits, budget_key, now), locked_out)
   let org = case body.org_id {
     Some(id) -> store.read(ctx.store, orgs.by_id(_, id))
     None -> Ok(None)
@@ -115,6 +101,23 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
     }
     Ok(Some(org)) -> signing_in(ctx, body, org, now)
   }
+}
+
+/// The failed-login budget for an identifier is spent.
+pub fn locked_out() -> Response {
+  http.json(
+    429,
+    json.object([
+      #("error", json.string("RATE_LIMITED")),
+      #("action", json.string("login_failure")),
+      #(
+        "message",
+        json.string(
+          "Too many requests in a short window — wait a moment and try again.",
+        ),
+      ),
+    ]),
+  )
 }
 
 fn guard(
@@ -194,7 +197,8 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
                 sessions.OrgStaff(org.id, user.id),
                 now,
               ))
-              Ok(#(SignedIn(user, token), []))
+              use certified <- result.try(orgs.safeguarding_certified(read, org))
+              Ok(#(SignedIn(user, token, certified), []))
             }
           }
         })
@@ -205,7 +209,8 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
             "USER_REMOVED",
             "This staff member's access was removed by the organisation.",
           )
-        Ok(SignedIn(user, token)) -> signed_in(org, user, token)
+        Ok(SignedIn(user, token, certified)) ->
+          signed_in(org, user, token, certified)
         Error(store.Refused(MfaLocked)) ->
           http.error_message(
             429,
@@ -228,7 +233,7 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
 
 type Outcome {
   Removed
-  SignedIn(Staff, String)
+  SignedIn(Staff, String, Bool)
 }
 
 /// With MFA enabled the name alone never gets a session. A recovery code works once: only the call that deleted
@@ -317,7 +322,12 @@ fn provision(
   }
 }
 
-fn signed_in(org: Org, user: Staff, token: String) -> Response {
+fn signed_in(
+  org: Org,
+  user: Staff,
+  token: String,
+  certified: Bool,
+) -> Response {
   let mfa_setup_required =
     org.mfa_required_for_leads
     && roles.is_lead_role(user.role)
@@ -339,10 +349,7 @@ fn signed_in(org: Org, user: Staff, token: String) -> Response {
         "org",
         json.object(
           list.append(orgs.view(org), [
-            #(
-              "safeguardingCertified",
-              json.bool(orgs.safeguarding_certified(org)),
-            ),
+            #("safeguardingCertified", json.bool(certified)),
           ]),
         ),
       ),

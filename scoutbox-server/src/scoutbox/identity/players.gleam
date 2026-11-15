@@ -255,14 +255,26 @@ pub fn for_org(
   org: Org,
   now: Int,
 ) -> Result(Option(#(Player, Access)), Fail(e)) {
-  let access = visibility.access_sql(org, now)
+  for_org_many(read, [id], org, now)
+  |> result.map(fn(found) { list.first(found) |> option.from_result })
+}
+
+/// Live players by id, in the order given, each with what the visibility rule and the blocks say for `org`.
+pub fn for_org_many(
+  read: Read,
+  ids: List(String),
+  org: Org,
+  now: Int,
+) -> Result(List(#(Player, Access)), Fail(e)) {
   let query =
     sql.concat([
       sql.text("SELECT " <> row.qualified("p") <> ", "),
-      access,
-      sql.text(" FROM players p WHERE p.id = "),
-      sql.arg(sqlight.text(id)),
-      sql.text(" AND p.deleted_at IS NULL"),
+      visibility.access_sql(org, now),
+      sql.text(" FROM players p JOIN json_each("),
+      sql.arg(ids_json(ids)),
+      sql.text(
+        ") j ON j.value = p.id WHERE p.deleted_at IS NULL ORDER BY j.key",
+      ),
     ])
   use found <- result.try(store.query(
     read,
@@ -270,14 +282,8 @@ pub fn for_org(
     query.args,
     with_access(row.decoder(), row.width),
   ))
-  case found {
-    [] -> Ok(None)
-    [#(r, a), ..] -> {
-      use players <- result.map(with_lists(read, [r]))
-      let assert [p] = players
-      Some(#(p, a))
-    }
-  }
+  use records <- result.map(with_lists(read, list.map(found, fn(f) { f.0 })))
+  list.zip(records, list.map(found, fn(f) { f.1 }))
 }
 
 /// A row decoder followed by the three access columns `visibility.access_sql` adds.
@@ -551,8 +557,8 @@ fn media_json(m: Media) -> Json {
   )
 }
 
-/// `with_gps`: the player's own view has the fix; an organisation never learns where a player was.
-fn attendance_json(a: attendance_row.Row, with_gps: Bool) -> Json {
+/// An attendance item as the player holds it, with the GPS fix.
+fn attendance_json(a: attendance_row.Row) -> Json {
   json.object(
     list.flatten([
       [#("id", json.string(a.id)), #("fixture", json.string(a.fixture))],
@@ -562,16 +568,33 @@ fn attendance_json(a: attendance_row.Row, with_gps: Bool) -> Json {
       [#("verified", json.bool(a.verified))],
       present("corroboratedBy", a.corroborated_by, json.string),
       present("trialId", a.trial_id, json.string),
-      case with_gps, a.lat, a.lng {
-        False, _, _ -> []
-        True, Some(lat), Some(lng) -> [
+      case a.lat, a.lng {
+        Some(lat), Some(lng) -> [
           #(
             "gps",
             json.object([#("lat", json.float(lat)), #("lng", json.float(lng))]),
           ),
         ]
-        True, _, _ -> [#("gps", json.null())]
+        _, _ -> [#("gps", json.null())]
       },
+    ]),
+  )
+}
+
+/// An attendance item as an organisation receives it (ORG_ATTENDANCE_FIELDS, in that order): a club never
+/// learns where a player was.
+fn org_attendance_json(a: attendance_row.Row) -> Json {
+  json.object(
+    list.flatten([
+      [#("id", json.string(a.id)), #("fixture", json.string(a.fixture))],
+      present("venue", a.venue, json.string),
+      [
+        #("date", json.string(a.match_date)),
+        #("verified", json.bool(a.verified)),
+      ],
+      present("corroboratedBy", a.corroborated_by, json.string),
+      present("deviceConfirmed", a.device_confirmed, json.bool),
+      present("trialId", a.trial_id, json.string),
     ]),
   )
 }
@@ -744,7 +767,7 @@ pub fn self_fields(p: Player) -> List(#(String, Json)) {
     ),
     #("programme", programme_json(p)),
     #("media", json.array(p.media, media_json)),
-    #("attendance", json.array(p.attendance, attendance_json(_, True))),
+    #("attendance", json.array(p.attendance, attendance_json)),
     #("timeline", json.array(p.timeline, timeline_json)),
     #("badges", json.array(p.badges, json.string)),
     #("drills", json.array(p.drills, json.string)),
@@ -861,7 +884,7 @@ pub fn org_fields(
             ),
           ])
       }),
-      #("attendance", json.array(p.attendance, attendance_json(_, False))),
+      #("attendance", json.array(p.attendance, org_attendance_json)),
       // Not ported yet: this organisation's own trial reports, from the trials.
       #("trialReports", json.preprocessed_array([])),
     ],
