@@ -232,8 +232,11 @@ The order, from the bottom of the import graph up, so each file is typed against
    attributes it reads back with. `clubSetup.ts` types the `TacticalSetup` (its roles, their criteria, each a key
    with the value its vocabulary or range allows, and the windows), `SquadMember`, `ShadowPlayer`, `FederationCheck`
    and `Vacancy` records and what each write accepts; `columnsOf` and `insertFor`, which the typed repositories had
-   each copied, are in `writes.ts`. The repositories that still type records in
-   JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
+   each copied, are in `writes.ts`. `opportunitiesCampaigns.ts` types the `Opportunity` (its eligibility and
+   structured requirements), `Application` (its outcome and the approved suitability summary), `Campaign`,
+   `CampaignSubmission` with its `CampaignAttempt`s, and `PlayerPreferences` records, what each create and act
+   accepts, and a file-check issue as its stored code and as the message a record carries. The repositories that
+   still type records in JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
    converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
    write through the repositories are typed checks of the repositories' signatures; convert them alongside, except
    `dataLayerFixture.mjs`, which writes every repository from untyped records and is converted once they are all

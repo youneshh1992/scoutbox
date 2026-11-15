@@ -8,7 +8,7 @@ import {
   OPPORTUNITIES_CAMPAIGNS_MIGRATION,
   OPPORTUNITIES_CAMPAIGNS_DDL,
   OPPORTUNITIES_CAMPAIGNS_TABLES,
-} from '../opportunitiesCampaigns.mjs';
+} from '../opportunitiesCampaigns.ts';
 
 export const id = OPPORTUNITIES_CAMPAIGNS_MIGRATION;
 export const note =

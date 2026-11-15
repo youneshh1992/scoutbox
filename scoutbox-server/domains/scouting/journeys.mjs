@@ -9,7 +9,7 @@ import {
   OPPORTUNITIES_CAMPAIGNS_LIMITS as OL,
   FILE_CHECK_ISSUES,
   typeEligibility,
-} from '../../repositories/opportunitiesCampaigns.mjs';
+} from '../../repositories/opportunitiesCampaigns.ts';
 import { storedName } from './passport.mjs';
 import { eligibilityView, opportunityView, applicationView, opportunityBoardFor } from './views.mjs';
 import * as v from 'valibot';

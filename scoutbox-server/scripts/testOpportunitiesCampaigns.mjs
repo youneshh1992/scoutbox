@@ -1,5 +1,5 @@
 // The opportunity board, applications, assessment campaigns and players' private suitability preferences
-// (repositories/opportunitiesCampaigns.mjs, migration 0022): the typed tables, the typers' refusals, records read back
+// (repositories/opportunitiesCampaigns.ts, migration 0022): the typed tables, the typers' refusals, records read back
 // exactly, one live application per opportunity and player and one submission per campaign and player, preferences not
 // stored until saved, SQL counts and cursor lists, units of work and fixtures.
 // Temporary databases only; nothing touches DATA_DIR. Run with: npm test
@@ -24,7 +24,7 @@ import {
   typeSubmission,
   typePreferences,
   blankPreferences,
-} from '../repositories/opportunitiesCampaigns.mjs';
+} from '../repositories/opportunitiesCampaigns.ts';
 
 let passed = 0;
 const only = process.env.TEST_ONLY || '';

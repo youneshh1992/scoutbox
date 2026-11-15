@@ -10,7 +10,7 @@ import {
   blankPreferences,
   typePreferences,
   typeStructured,
-} from '../../repositories/opportunitiesCampaigns.mjs';
+} from '../../repositories/opportunitiesCampaigns.ts';
 import { flag, id, inputOrRefuse, oneOf, requiredText, text, wholeNumber } from '../platform/schemas.mjs';
 import { opportunityView } from './views.mjs';
 import { slotsOverlap } from './slots.mjs';

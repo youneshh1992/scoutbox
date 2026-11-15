@@ -5,7 +5,7 @@
  * revocation is the orgs.verification_revoked_at column.
  */
 import { migrationApplied } from '../database.ts';
-import { OPPORTUNITIES_CAMPAIGNS_MIGRATION } from '../opportunitiesCampaigns.mjs';
+import { OPPORTUNITIES_CAMPAIGNS_MIGRATION } from '../opportunitiesCampaigns.ts';
 import { VERIFICATION_MIGRATION, VERIFICATION_DDL, VERIFICATION_TABLES } from '../verification.mjs';
 
 export const id = VERIFICATION_MIGRATION;

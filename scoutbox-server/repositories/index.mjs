@@ -111,7 +111,7 @@ import {
   OPPORTUNITIES_CAMPAIGNS_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedOpportunityPlayers,
   retainedPlayerReferences as retainedOpportunityPlayers,
-} from './opportunitiesCampaigns.mjs';
+} from './opportunitiesCampaigns.ts';
 import {
   createVerificationRepository,
   VERIFICATION_RECORDS,
