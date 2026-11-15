@@ -1,15 +1,20 @@
 # scoutbox-server (Gleam)
 
-A Gleam port of a slice of the ScoutBox server: organisation staff sign-in, sessions, staff removal, invitations,
-MFA and delivery preferences. It answers the TypeScript server's `platform/staff` e2e battery unchanged.
+A Gleam port of three slices of the ScoutBox server: organisation staff (sign-in, sessions, invitations, MFA), the
+safeguarding core (reports, blocks, moderation, the Trust & Safety console, the Discovery Ledger) and players and
+guardians (sign-up, the player record, the directory, guardians and their children). It answers three of the
+TypeScript server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding` and
+`platform/playersAndGuardians`.
 
 ```sh
-gleam check          # type-check (fast)
-gleam test           # unit tests: the store, input refusals, TOTP vectors, paging, staff and invite rules
-gleam run            # the server on PORT (default 4000), data in DATA_DIR (default ./data)
-npm run e2e          # build the Erlang release, then run the batteries against it
-npm run e2e:sync     # re-copy the batteries from ../../scoutbox/scoutbox-server/e2e
-npm run e2e:check    # fail if a copied battery differs from its source
+gleam check            # type-check (fast)
+gleam test             # unit tests, the generator's snapshots, and the rules proved against domain.ts
+gleam run              # the server on PORT (default 4000), data in DATA_DIR (default ./data)
+npm run e2e            # build the Erlang release, then run the batteries against it
+npm run e2e:sync       # re-copy the batteries from ../../scoutbox/scoutbox-server/e2e
+npm run e2e:check      # fail if a copied battery differs from its source
+npm run codegen        # regenerate src/scoutbox/rows and src/scoutbox/vocab from priv/migrations
+npm run codegen:check  # fail if the committed row modules differ from what the migrations generate
 ```
 
 Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY` (development default
@@ -18,36 +23,45 @@ Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY`
 
 ## Layout
 
-- `src/scoutbox/platform/`: shared by every domain.
-  - `store`: the unit of work. One writer process, read-only pooled connections, effects as data, and a crash
-    inside a unit rolls back.
-  - `input`: request validation in the TypeScript server's refusal format.
-  - `http`, `paging`, `ids`, `migrations`, `limits`/`table` (in-memory rate limits), `vocabulary` (column
-    enums), `config`, `wisp_ewe` (vendored Wisp-on-Ewe adapter).
-- `src/scoutbox/identity/`: organisations, staff, sessions, invitations, TOTP and their routes.
-- `src/scoutbox/messaging/`: the mail outbox and staff delivery preferences.
-- `src/scoutbox/safety/`: the ledger and the admin outbox view.
-- `priv/migrations/`: the tables this slice owns, copied from the TypeScript server's migrated schema.
+- `src/scoutbox/rows/`, `src/scoutbox/vocab/`: **generated**, one module per table and per shared vocabulary
+  (`dev/scoutbox/codegen.gleam`). A row module has the `Row` type, its decoder, `columns`, `width`, `qualified`,
+  `insert` and `new(…)`; a CHECK vocabulary is an enum. A domain record is usually the generated `Row`, with what
+  is derived from it as functions. Don't edit them: change the migration and run `npm run codegen`.
+- `src/scoutbox/platform/`: the store (unit of work, readers, effects), `input` (refusals in the TypeScript
+  format), `sql` (fragments that carry their arguments), `distance`, `keyset` and `paging`/`pages`, `http`, `ids`,
+  migrations, limits, config.
+- `src/scoutbox/rules/`: the pure rules, each proved against the TypeScript one: `age`, `visibility` (one SQL
+  expression for every read), `moderation`, `journey`; `time_zones` is generated.
+- `src/scoutbox/identity/`, `safety/`, `discovery/`, `recruitment/`, `development/`, `messaging/`: the domains.
+- `priv/migrations/`: the tables, copied from the TypeScript server's migrated schema. `priv/seed.sql`: its demo
+  seed, dumped by `dev/seed_sql.mjs`.
+- `dev/`: the generator, and the Node scripts that take data from the TypeScript server: `seed_sql.mjs`,
+  `distance_cases.mjs` and `rule_cases.mjs` (test cases from domain.ts), `time_zones.mjs`, `shape_diff.mjs` (the
+  same requests of both servers, compared shape by shape) and `perf.mjs`.
 - `e2e/`: batteries copied by `e2e/sync.mjs` (do not edit them), and the helpers they import.
 
 ## Routes
 
-| Route | Battery-checked |
-|---|---|
-| `GET /health` | boot only |
-| `POST /auth/org/login` | yes |
-| `POST /auth/org/accept-invite` | yes |
-| `GET /org/staff`, `POST /org/staff/:id/remove` | yes |
-| `POST /org/invites` | yes |
-| `POST /org/mfa/setup`, `/verify` | yes |
-| `POST /org/mfa/disable` | no (unit-tested parts only) |
-| `PUT /org/delivery/prefs` | yes |
-| `GET /admin/outbox` | yes |
+Every route below is exercised by a battery, except where marked.
 
-Where behaviour depends on a domain not ported yet, the code says `Not ported yet:` (`grep -rn "Not ported" src`):
-club setup's `lookingFor` and `federationCheck` (always empty), open safety reports in `safeguardingCertified`,
-imports and coverage plans in onboarding, closing live event streams on removal, the player count in `/health`,
-and password-protected organisations (scrypt).
+| Area | Routes |
+|---|---|
+| Health | `GET /health` |
+| Sign-in | `POST /auth/org/login`, `/auth/org/accept-invite`, `/auth/player/signup`, `/auth/guardian/login` |
+| Staff | `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
+| Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist` |
+| Recruitment | `POST /org/players/:id/request` (contact), `GET /org/ledger`, `/org/funnel`, `/guardian/inbox` |
+| Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
+| Player | `GET /player/me`, `/player/export`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/stats`, `/badges`, `/prefs` |
+| Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
+| Feeds | `GET /guardian/notifications`; `/player/notifications`, `/org/notifications` (no battery) |
+| Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
+
+Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
+The largest: trials and trial requests, signings, the similarity engine ("more like this"), message threads,
+insights, coach vouches, club setup, live event streams, push delivery and its quiet hours, process metrics, and
+password hashing (scrypt), which also means a password-protected account can't sign in yet and a new player
+account stores a hash no password matches. `dev/shape_diff.mjs` lists where responses differ because of them.
 
 ## Known differences from the TypeScript server
 
@@ -56,3 +70,9 @@ and password-protected organisations (scrypt).
   in the order sent.
 - Ids are minted inside the unit, so a refused act does not use one up.
 - The outbox view lists mailer records only. Delivery records arrive with the messaging domain.
+- Distances agree with domain.ts to the last bit except within about 1e-12 km of the 50 km radius or a rounding
+  edge, where macOS's `cos` and V8's `x ** 2` differ in the last place (`test/scoutbox/distance_test.gleam`).
+- The directory's text search lowers ASCII only (SQLite's `lower()`); the TypeScript server lowers as JavaScript
+  does, accented letters included.
+- An empty `country` at sign-up is refused as `blank`; the TypeScript server says `too_short`.
+- A refused `badges` that is not a list says `invalid`; the TypeScript server says `not_list`.

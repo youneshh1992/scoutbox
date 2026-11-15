@@ -25,6 +25,23 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   - JavaScript's `length` counts UTF-16 units. Text limits use `input.utf16_length` so they agree with the
     TypeScript server and the apps.
   - `wisp_ewe` is not on Hex. It is vendored and adapted in `platform/wisp_ewe.gleam`.
+  - `gleam dev` (the generator) compiles `src/` first, so code that uses a name the generator has not written yet
+    blocks the run that would write it. Regenerate before using a new column or table.
+  - A domain record that is a generated `Row` is a type alias: its constructor can't be matched through the alias.
+    Match with a guard (`Some(u) if u.removed_at != None`) or the row module's constructor.
+  - Function calls are not allowed in case guards.
+  - Two vocabularies of one table that share a value get prefixed constructors (`reports.TargetKindPlayer`).
+  - Imports go at the top of a module; when a need turns up mid-file, add the import there, don't wrap the
+    function. The stdlib already has `list.try_map`, `string.join` and friends: look before writing one.
+
+## Writing the data layer here
+
+- Tables come from `priv/migrations`; their Gleam is generated (`npm run codegen`). Shared vocabularies are declared
+  once in `dev/scoutbox_dev.gleam`.
+- SQL that takes arguments is built from `platform/sql` fragments, which carry their own arguments. To read extra
+  columns after a row, select them after `row.columns` and decode them at `row.width`, `row.width + 1`, ….
+- A rule the TypeScript server has (in `domain.ts` and similar) is proved against it with cases generated from the
+  TypeScript rule itself (`dev/*_cases.mjs` writes `test/fixtures/`). `dev/shape_diff.mjs` compares whole responses.
 
 ## Server rules (as in the TypeScript server, enforced by types where possible)
 
