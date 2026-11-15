@@ -89,6 +89,7 @@ export const SUITES = [
   'testBoundaries',
   'testDeps',
   'testSuiteRunner',
+  'testSqlFixtureSchema',
 ];
 // Files named test*.mjs that are helpers, not suites. Any other test*.mjs must
 // be in SUITES: a new suite that nobody listed would otherwise never run.

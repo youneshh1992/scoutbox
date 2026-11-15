@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { writeFixture } from '../../scripts/dataLayerFixture.mjs';
+import { writeFixture } from '../support/sqlFixture.mjs';
 import { isFetchBlockedPort, pickPort } from '../../scripts/testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
