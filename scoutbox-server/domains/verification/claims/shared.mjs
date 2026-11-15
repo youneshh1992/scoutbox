@@ -15,7 +15,7 @@ import {
   EVIDENCE_VISIBILITY,
   VER_LEVELS,
   VERIFICATION_LIMITS,
-} from '../../../repositories/verification.mjs';
+} from '../../../repositories/verification.ts';
 export { CLAIM_TYPES, CLAIM_STATES, METHODS, REVIEW_REASONS, EVIDENCE_TYPES, EVIDENCE_VISIBILITY, VER_LEVELS };
 
 // Methods that may accompany a transition into `verified`. document_submitted is evidence collection, not one.

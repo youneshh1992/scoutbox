@@ -11,7 +11,7 @@ import {
   evidenceCompleteness,
   sha256,
 } from './shared.mjs';
-import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.mjs';
+import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.ts';
 import {
   Affiliation,
   AFFILIATION_TYPE,

@@ -43,7 +43,7 @@ a write is durable when its transaction commits. How to run and configure the se
 - Seeded catalogues (assessment templates, policy versions, Box Cam challenges) are inserted by their migration.
   Product configuration that only a release should change (billing plans, archetypes) is a constant in
   `catalogue.mjs`, not a table.
-- For domains with many flat tables, describe them with `repositories/fieldSpecs.ts` (as `verification.mjs` does),
+- For domains with many flat tables, describe them with `repositories/fieldSpecs.ts` (as `verification.ts` does),
   which generates the typing, the rows and the DDL from one spec so they can't drift.
 
 Shared shapes other domains rely on: a case-history entry is `{ id, at, byKind, byId, byName, action, detail }`; a

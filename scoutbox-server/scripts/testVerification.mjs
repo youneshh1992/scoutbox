@@ -1,4 +1,4 @@
-// Verification claims (repositories/verification.mjs, migration 0023): the STRICT tables, a create that must read back
+// Verification claims (repositories/verification.ts, migration 0023): the STRICT tables, a create that must read back
 // as written, the named acts and the states that guard them (a claim moves only along CLAIM_TRANSITIONS from the status
 // its caller decided on), evidence linking to its claim, the database's uniqueness rules (one open identity claim per
 // user, one open dispute per claim), the reference keys, units of work, the boot bootstrap that turns verified
@@ -16,7 +16,7 @@ import {
   VERIFICATION_TABLES as TABLES,
   VERIFICATION_COLLECTIONS as COLLECTIONS,
   eventDetail,
-} from '../repositories/verification.mjs';
+} from '../repositories/verification.ts';
 import { bootstrapVerification, mintToken, consumeToken, peekToken } from '../domains/verification/claims/shared.mjs';
 
 let passed = 0;

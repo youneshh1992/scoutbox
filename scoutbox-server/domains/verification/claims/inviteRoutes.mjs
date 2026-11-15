@@ -1,7 +1,7 @@
 import { isAdult, visibleToOrg } from '../../../domain.ts';
 import { filled, inputOrRefuse, presentOrRefuse } from '../../platform/schemas.mjs';
 import { emailProblem } from './shared.mjs';
-import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.mjs';
+import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.ts';
 import { EMAIL_CODES, GuardianInviteAnswer, InviteAnswer, PlayerInvite } from './organisationInput.mjs';
 
 export function registerInviteRoutes(ctx) {

@@ -7,7 +7,7 @@ import { declareAuditedRead } from '../../../writeRules.ts';
 import * as v from 'valibot';
 import { decideReview, normalizeDomain, domainOfEmail, domainCovered, sha256 } from './shared.mjs';
 import { parseDateOrInstant, isAbsent } from '../../../temporal.ts';
-import { VERIFICATION_LIMITS as L, CLAIM_TYPES } from '../../../repositories/verification.mjs';
+import { VERIFICATION_LIMITS as L, CLAIM_TYPES } from '../../../repositories/verification.ts';
 import {
   dueDate,
   filled,

@@ -235,12 +235,16 @@ The order, from the bottom of the import graph up, so each file is typed against
    each copied, are in `writes.ts`. `opportunitiesCampaigns.ts` types the `Opportunity` (its eligibility and
    structured requirements), `Application` (its outcome and the approved suitability summary), `Campaign`,
    `CampaignSubmission` with its `CampaignAttempt`s, and `PlayerPreferences` records, what each create and act
-   accepts, and a file-check issue as its stored code and as the message a record carries. The repositories that
-   still type records in JavaScript (discovery, development, passport, scouting, opportunities) move to "reads back as written" as they are
-   converted, so their types describe the stored row and not a JavaScript copy. The test fixtures in `scripts/` that
-   write through the repositories are typed checks of the repositories' signatures; convert them alongside, except
-   `dataLayerFixture.mjs`, which writes every repository from untyped records and is converted once they are all
-   typed.
+   accepts, and a file-check issue as its stored code and as the message a record carries. `verification.ts` is
+   described by field specs, so each of its thirteen records (the claim with its codes and evidence links, the event,
+   evidence, token, administrator, transfer, root application, dispute, coach reference, invitation, conflict, domain
+   request and verified domain) and what each create accepts come from its spec; each named act's input is typed
+   (`ClaimMove`, `RootRequestApproval`, the `Reviewer` who decided), and each query names its parameters. The
+   repositories that still type records in JavaScript (discovery, development, passport, scouting, opportunities) move
+   to "reads back as written" as they are converted, so their types describe the stored row and not a JavaScript copy.
+   The test fixtures in `scripts/` that write through the repositories are typed checks of the repositories'
+   signatures; convert them alongside, except `dataLayerFixture.mjs`, which writes every repository from untyped
+   records and is converted once they are all typed.
 4. **The platform layer, and the platform object.** Type `domains/platform/` and group its services into one
    `Platform` dependency (below). `schemas.mjs` and the route helpers hand a handler its input typed from its
    valibot schema (`v.InferOutput`), so a route reads `body.expiresAt` as a string instead of as anything. `needs()`

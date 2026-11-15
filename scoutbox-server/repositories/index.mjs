@@ -118,7 +118,7 @@ import {
   VERIFICATION_COLLECTIONS,
   unresolvedPlayerReferences as unresolvedVerificationPlayers,
   retainedPlayerReferences as retainedVerificationPlayers,
-} from './verification.mjs';
+} from './verification.ts';
 import {
   createPassportRepository,
   PASSPORT_RECORDS,

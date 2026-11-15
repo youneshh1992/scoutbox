@@ -17,7 +17,7 @@ import {
   evidenceFileProblem,
   claimProvenanceLabel,
 } from './shared.mjs';
-import { eventDetail, VERIFICATION_LIMITS } from '../../../repositories/verification.mjs';
+import { eventDetail, VERIFICATION_LIMITS } from '../../../repositories/verification.ts';
 import { metrics } from '../../platform/metrics.mjs';
 import { registerOrganisationVerification } from './organisations.mjs';
 import { registerVerificationReview } from './review.mjs';

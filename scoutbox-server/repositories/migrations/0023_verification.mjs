@@ -6,7 +6,7 @@
  */
 import { migrationApplied } from '../database.ts';
 import { OPPORTUNITIES_CAMPAIGNS_MIGRATION } from '../opportunitiesCampaigns.ts';
-import { VERIFICATION_MIGRATION, VERIFICATION_DDL, VERIFICATION_TABLES } from '../verification.mjs';
+import { VERIFICATION_MIGRATION, VERIFICATION_DDL, VERIFICATION_TABLES } from '../verification.ts';
 
 export const id = VERIFICATION_MIGRATION;
 export const note =

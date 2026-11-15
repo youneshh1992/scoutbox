@@ -3,7 +3,7 @@
  * child rows), career entries, achievements, share links and correction requests.
  */
 import { migrationApplied } from '../database.ts';
-import { VERIFICATION_MIGRATION } from '../verification.mjs';
+import { VERIFICATION_MIGRATION } from '../verification.ts';
 import { PASSPORT_MIGRATION, PASSPORT_DDL, PASSPORT_TABLES } from '../passport.mjs';
 
 export const id = PASSPORT_MIGRATION;

@@ -1,6 +1,6 @@
 import { filled, inputOrRefuse } from '../../platform/schemas.mjs';
 import { emailProblem, domainOfEmail, isFreeMail, isDisposable, normalizeDomain, domainCovered } from './shared.mjs';
-import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.mjs';
+import { VERIFICATION_LIMITS as L } from '../../../repositories/verification.ts';
 import {
   ADMIN_GRANT_CODES,
   AdminGrant,

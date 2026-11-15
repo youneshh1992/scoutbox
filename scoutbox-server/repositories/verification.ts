@@ -23,6 +23,9 @@
  * Queries decode deep-frozen records in insertion (rowid) order unless they say otherwise. Modules receive them as
  * `verificationReads`.
  *
+ * Records and inputs are typed from the field specs (`RecordOf`, repositories/fieldSpecs.ts), so a column and the field
+ * it holds are described once.
+ *
  * References. Player ids (references, invitations, tokens) carry no key: tolerant, as recruitment and scouting. Org ids
  * → orgs and staff ids → org_users are immediate RESTRICT keys; claim, evidence, root-request and reference keys inside
  * the domain are immediate RESTRICT keys. Composite keys hold two rules between rows: a reference's provenance is a
@@ -30,11 +33,27 @@
  * and organisation. Polymorphic ids (a claim's subject and authority, an event's subject, a token's subject and ref, an
  * invitation's inviter of record 'trust_safety') carry none.
  */
-import { isPlainObject, describe } from './fieldSpecs.ts';
-import { text, int, bool, oneOf, group, quote, tableDdl, decode, insertSql } from './fieldSpecs.ts';
-import { migrationApplied, childRowsOf, operationOn } from './database.ts';
-import { writeKit } from './writes.ts';
-import { deepFreeze } from '../domains/platform/values.ts';
+import type { DatabaseSync, SQLInputValue, StatementSync } from 'node:sqlite';
+import {
+  isPlainObject,
+  describe,
+  text,
+  int,
+  bool,
+  oneOf,
+  group,
+  quote,
+  tableDdl,
+  decode,
+  insertSql,
+  type FieldOptions,
+  type RecordOf,
+  type Spec,
+} from './fieldSpecs.ts';
+import { migrationApplied, childRowsOf, operationOn, type Row, type UnitParticipant } from './database.ts';
+import { refusal } from './identityRules.ts';
+import { writeKit, type Flatten, type InputFor } from './writes.ts';
+import { deepFreeze, type DeepReadonly } from '../domains/platform/values.ts';
 
 export const VERIFICATION_MIGRATION = '0023_verification';
 export const VERIFICATION_COLLECTIONS = Object.freeze([
@@ -51,7 +70,8 @@ export const VERIFICATION_COLLECTIONS = Object.freeze([
   'verConflicts',
   'verDomainRequests',
   'orgVerifiedDomains',
-]);
+] as const);
+export type VerificationCollection = (typeof VERIFICATION_COLLECTIONS)[number];
 
 // ------------------------------------------------------------------ vocabularies (one definition; the domain module imports them)
 export const CLAIM_TYPES = Object.freeze([
@@ -66,7 +86,7 @@ export const CLAIM_TYPES = Object.freeze([
   'AGENCY_ROLE',
   'GRASSROOTS_AFFILIATION',
   'FEDERATION_AFFILIATION',
-]);
+] as const);
 export const CLAIM_STATES = Object.freeze([
   'unverified',
   'collecting_evidence',
@@ -80,9 +100,11 @@ export const CLAIM_STATES = Object.freeze([
   'revoked',
   'disputed',
   'superseded',
-]);
+] as const);
+export type ClaimType = (typeof CLAIM_TYPES)[number];
+export type ClaimState = (typeof CLAIM_STATES)[number];
 /** The claim state machine: the statuses each status may move to (domains/verification/claims/shared.mjs judges a move). */
-export const CLAIM_TRANSITIONS = Object.freeze({
+export const CLAIM_TRANSITIONS: Readonly<Record<ClaimState, readonly ClaimState[]>> = Object.freeze({
   unverified: ['collecting_evidence', 'pending'],
   collecting_evidence: ['pending', 'unverified'],
   pending: ['automated_checks_passed', 'requires_human_review', 'rejected', 'collecting_evidence'],
@@ -106,7 +128,7 @@ export const METHODS = Object.freeze([
   'document_submitted',
   'reference_confirmation',
   'migration',
-]);
+] as const);
 export const REVIEW_REASONS = Object.freeze([
   'ROOT_ORGANISATION_BOOTSTRAP',
   'NO_AUTHORITATIVE_SOURCE',
@@ -120,9 +142,9 @@ export const REVIEW_REASONS = Object.freeze([
   'DISPUTED_CLAIM',
   'SUSPECTED_FRAUD_SIGNALS',
   'MANUAL_EXCEPTION_REQUESTED',
-]);
+] as const);
 /** The codes a review-reason list can hold: the engine's reasons plus the registry's unreadable-record reason. */
-export const REVIEW_CODES = Object.freeze([...REVIEW_REASONS, 'REGISTRY_RECORD_UNREADABLE']);
+export const REVIEW_CODES = Object.freeze([...REVIEW_REASONS, 'REGISTRY_RECORD_UNREADABLE'] as const);
 export const RISK_FLAGS = Object.freeze([
   'DISPOSABLE_EMAIL',
   'FREE_EMAIL_PROVIDER',
@@ -136,13 +158,13 @@ export const RISK_FLAGS = Object.freeze([
   'CONFLICTING_ACTIVE_ROLES',
   'UNUSUAL_MASS_ACTIVITY',
   'SELF_VERIFICATION_ATTEMPT',
-]);
+] as const);
 export const VER_LEVELS = Object.freeze([
   'verification_viewer',
   'verification_reviewer',
   'verification_admin',
   'verification_root_admin',
-]);
+] as const);
 export const EVIDENCE_TYPES = Object.freeze([
   'official_email',
   'document',
@@ -151,9 +173,13 @@ export const EVIDENCE_TYPES = Object.freeze([
   'federation_confirmation',
   'reference',
   'existing_claim',
-]);
-export const EVIDENCE_VISIBILITY = Object.freeze(['trust_and_safety', 'organisation_internal', 'subject_only']);
-export const EVIDENCE_MIMES = Object.freeze(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
+] as const);
+export const EVIDENCE_VISIBILITY = Object.freeze([
+  'trust_and_safety',
+  'organisation_internal',
+  'subject_only',
+] as const);
+export const EVIDENCE_MIMES = Object.freeze(['application/pdf', 'image/png', 'image/jpeg', 'image/webp'] as const);
 export const ROOT_ORG_TYPES = Object.freeze([
   'professional club',
   'academy',
@@ -161,20 +187,27 @@ export const ROOT_ORG_TYPES = Object.freeze([
   'federation/association',
   'agency',
   'other approved football organisation',
-]);
+] as const);
 export const CONFLICT_KINDS = Object.freeze([
   'family_relationship',
   'agent_relationship',
   'financial_interest',
   'coaching_relationship',
   'other',
-]);
-export const TOKEN_PURPOSES = Object.freeze(['work_email', 'domain_email', 'player_invite', 'root_email']);
-export const ATTRIBUTIONS = Object.freeze(['authenticated_reviewer', 'declared_reviewer', 'shared_admin_key']);
-export const IDENTITY_LINKS = Object.freeze(['trust_safety_selection', 'provisioned_new_user', 'verified_work_email']);
+] as const);
+export const TOKEN_PURPOSES = Object.freeze(['work_email', 'domain_email', 'player_invite', 'root_email'] as const);
+export const ATTRIBUTIONS = Object.freeze(['authenticated_reviewer', 'declared_reviewer', 'shared_admin_key'] as const);
+export const IDENTITY_LINKS = Object.freeze([
+  'trust_safety_selection',
+  'provisioned_new_user',
+  'verified_work_email',
+] as const);
 export const EVENT_TYPES = Object.freeze([
   'claim.created',
-  ...CLAIM_STATES.filter((s) => s !== 'unverified').map((s) => `claim.${s}`),
+  ...(CLAIM_STATES.filter((s) => s !== 'unverified').map((s) => `claim.${s}`) as `claim.${Exclude<
+    ClaimState,
+    'unverified'
+  >}`[]),
   'claim.unverified',
   'claim.reinstated',
   'claim.corrected',
@@ -195,7 +228,21 @@ export const EVENT_TYPES = Object.freeze([
   'admin.invited',
   'admin.accepted',
   'admin.revoked',
-]);
+] as const);
+export type VerificationMethod = (typeof METHODS)[number];
+export type ReviewReason = (typeof REVIEW_REASONS)[number];
+export type ReviewCode = (typeof REVIEW_CODES)[number];
+export type RiskFlag = (typeof RISK_FLAGS)[number];
+export type VerificationLevel = (typeof VER_LEVELS)[number];
+export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
+export type EvidenceVisibility = (typeof EVIDENCE_VISIBILITY)[number];
+export type EvidenceMime = (typeof EVIDENCE_MIMES)[number];
+export type RootOrgType = (typeof ROOT_ORG_TYPES)[number];
+export type ConflictKind = (typeof CONFLICT_KINDS)[number];
+export type TokenPurpose = (typeof TOKEN_PURPOSES)[number];
+export type Attribution = (typeof ATTRIBUTIONS)[number];
+export type IdentityLink = (typeof IDENTITY_LINKS)[number];
+export type VerificationEventType = (typeof EVENT_TYPES)[number];
 /** Text limits: the routes check or shorten to these; the columns refuse anything longer. */
 export const VERIFICATION_LIMITS = Object.freeze({
   id: 80,
@@ -245,7 +292,9 @@ export const VERIFICATION_LIMITS = Object.freeze({
 const L = VERIFICATION_LIMITS;
 
 // ------------------------------------------------------------------ field specs (one description drives typing, rows and decoding)
-const idf = (k, c, o = {}) => text(k, c, L.id, o);
+const idf = <const K extends string, const O extends FieldOptions = {}>(k: K, c: string, o: O = {} as O) =>
+  text(k, c, L.id, o);
+const BY_KINDS = ['system', 'org_user', 'org_admin', 'trust_safety'] as const;
 
 const CLAIM_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
@@ -264,23 +313,13 @@ const CLAIM_SPEC = [
   int('createdAt', 'created_at', { req: true }),
   int('updatedAt', 'updated_at', { req: true }),
   int('verifiedAt', 'verified_at'),
-  group(
-    'verifiedBy',
-    [
-      oneOf('kind', 'verified_by_kind', ['system', 'org_user', 'org_admin', 'trust_safety'], { req: true }),
-      idf('id', 'verified_by_id'),
-    ],
-    { nullable: true },
-  ),
+  group('verifiedBy', [oneOf('kind', 'verified_by_kind', BY_KINDS, { req: true }), idf('id', 'verified_by_id')], {
+    nullable: true,
+  }),
   int('revokedAt', 'revoked_at'),
-  group(
-    'revokedBy',
-    [
-      oneOf('kind', 'revoked_by_kind', ['system', 'org_user', 'org_admin', 'trust_safety'], { req: true }),
-      idf('id', 'revoked_by_id'),
-    ],
-    { nullable: true },
-  ),
+  group('revokedBy', [oneOf('kind', 'revoked_by_kind', BY_KINDS, { req: true }), idf('id', 'revoked_by_id')], {
+    nullable: true,
+  }),
   text('revocationReason', 'revocation_reason', L.reason),
   int('suspendedAt', 'suspended_at'),
   text('suspendReason', 'suspend_reason', L.reason),
@@ -333,7 +372,7 @@ const CLAIM_SPEC = [
     ],
     { sparse: true },
   ),
-];
+] as const;
 const EVENT_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   int('ts', 'occurred_at', { req: true }),
@@ -349,7 +388,7 @@ const EVENT_SPEC = [
   idf('orgId', 'org_id'),
   text('detail', 'detail', L.detail),
   text('reason', 'reason', L.reason),
-];
+] as const;
 const EVIDENCE_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   oneOf('type', 'type', EVIDENCE_TYPES, { req: true }),
@@ -391,7 +430,7 @@ const EVIDENCE_SPEC = [
   oneOf('retention', 'retention', ['until_claim_resolution', 'until_signing_resolution'], { req: true }),
   oneOf('visibility', 'visibility', EVIDENCE_VISIBILITY, { req: true }),
   int('expiresAt', 'expires_at'),
-];
+] as const;
 const TOKEN_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   text('hash', 'token_hash', 64, { req: true, nonEmpty: true }),
@@ -405,7 +444,7 @@ const TOKEN_SPEC = [
   int('expiresAt', 'expires_at', { req: true }),
   int('usedAt', 'used_at'),
   int('attemptsFailed', 'attempts_failed', { req: true, def: 0 }),
-];
+] as const;
 const ADMIN_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('orgId', 'org_id', { req: true, nonEmpty: true }),
@@ -417,7 +456,7 @@ const ADMIN_SPEC = [
   int('acceptedAt', 'accepted_at'),
   int('revokedAt', 'revoked_at'),
   idf('revokedBy', 'revoked_by'),
-];
+] as const;
 const TRANSFER_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('orgId', 'org_id', { req: true, nonEmpty: true }),
@@ -427,8 +466,8 @@ const TRANSFER_SPEC = [
   int('createdAt', 'created_at', { req: true }),
   idf('approvedBy', 'approved_by'),
   int('approvedAt', 'approved_at'),
-];
-const PF = ['passed', 'flagged'];
+] as const;
+const PF = ['passed', 'flagged'] as const;
 const ROOT_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   oneOf('status', 'status', ['collecting_evidence', 'requires_human_review', 'approved', 'rejected'], { req: true }),
@@ -469,7 +508,7 @@ const ROOT_SPEC = [
   idf('resultOrgId', 'result_org_id'),
   idf('resultUserId', 'result_user_id'),
   oneOf('identityLink', 'identity_link', IDENTITY_LINKS),
-];
+] as const;
 const DISPUTE_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('claimId', 'claim_id', { req: true, nonEmpty: true }),
@@ -484,7 +523,7 @@ const DISPUTE_SPEC = [
   text('resolvedBy', 'resolved_by_name', L.name),
   idf('resolvedById', 'resolved_by_id'),
   oneOf('resolutionAttribution', 'resolution_attribution', ATTRIBUTIONS),
-];
+] as const;
 const REFERENCE_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   int('version', 'version', { req: true }),
@@ -517,7 +556,7 @@ const REFERENCE_SPEC = [
   int('withdrawnAt', 'withdrawn_at'),
   text('withdrawReason', 'withdraw_reason', L.withdrawReason),
   int('createdAt', 'created_at', { req: true }),
-];
+] as const;
 const INVITE_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('orgId', 'org_id', { req: true, nonEmpty: true }),
@@ -539,7 +578,7 @@ const INVITE_SPEC = [
   int('createdAt', 'created_at', { req: true }),
   int('expiresAt', 'expires_at', { req: true }),
   int('acceptedAt', 'accepted_at'),
-];
+] as const;
 const CONFLICT_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('userId', 'user_id', { req: true, nonEmpty: true }),
@@ -549,30 +588,114 @@ const CONFLICT_SPEC = [
   text('note', 'note', L.note, { req: true }),
   int('createdAt', 'created_at', { req: true }),
   int('withdrawnAt', 'withdrawn_at'),
-];
+] as const;
+const DOMAIN_METHODS = ['official_domain_email', 'scoutbox_manual_review'] as const;
 const DOMAIN_REQUEST_SPEC = [
   idf('id', 'id', { req: true, nonEmpty: true }),
   idf('orgId', 'org_id', { req: true, nonEmpty: true }),
   text('domain', 'domain', L.domain, { req: true, nonEmpty: true }),
   idf('requestedBy', 'requested_by', { req: true, nonEmpty: true }),
   oneOf('status', 'status', ['email_challenge', 'requires_human_review', 'verified', 'rejected'], { req: true }),
-  oneOf('method', 'method', ['official_domain_email', 'scoutbox_manual_review']),
+  oneOf('method', 'method', DOMAIN_METHODS),
   int('createdAt', 'created_at', { req: true }),
   int('decidedAt', 'decided_at'),
   text('decidedBy', 'decided_by_name', L.name),
   idf('decidedById', 'decided_by_id'),
-];
+] as const;
 const DOMAIN_SPEC = [
   idf('orgId', 'org_id', { req: true, nonEmpty: true }),
   text('domain', 'domain', L.domain, { req: true, nonEmpty: true }),
   oneOf('status', 'status', ['verified'], { req: true }),
-  oneOf('method', 'method', ['official_domain_email', 'scoutbox_manual_review'], { req: true }),
+  oneOf('method', 'method', DOMAIN_METHODS, { req: true }),
   int('verifiedAt', 'verified_at', { req: true }),
   idf('addedBy', 'added_by', { req: true, nonEmpty: true }),
-];
+] as const;
+
+// ------------------------------------------------------------------ the records
+type ClaimFields = RecordOf<typeof CLAIM_SPEC>;
+type RootRequestFields = RecordOf<typeof ROOT_SPEC>;
+type DomainFields = RecordOf<typeof DOMAIN_SPEC>;
+/** Each collection's record as read back (before it is frozen). */
+type Records = {
+  verClaims: ClaimFields & { reviewReasons: ReviewCode[]; riskFlags: RiskFlag[]; evidenceIds: string[] };
+  verEvents: RecordOf<typeof EVENT_SPEC>;
+  verEvidence: RecordOf<typeof EVIDENCE_SPEC> & { claimIds: string[] };
+  verTokens: RecordOf<typeof TOKEN_SPEC>;
+  verAdmins: RecordOf<typeof ADMIN_SPEC>;
+  verRootTransfers: RecordOf<typeof TRANSFER_SPEC>;
+  verRootRequests: RootRequestFields & { reviewReasons: ReviewCode[]; riskFlags: RiskFlag[]; evidenceIds: string[] };
+  verDisputes: RecordOf<typeof DISPUTE_SPEC>;
+  verReferences: RecordOf<typeof REFERENCE_SPEC>;
+  verPlayerInvites: RecordOf<typeof INVITE_SPEC>;
+  verConflicts: RecordOf<typeof CONFLICT_SPEC>;
+  verDomainRequests: RecordOf<typeof DOMAIN_REQUEST_SPEC> & { reviewReasons: ReviewCode[] };
+  orgVerifiedDomains: DomainFields;
+};
+export type VerificationRecord<N extends VerificationCollection> = DeepReadonly<Records[N]>;
+export type Claim = VerificationRecord<'verClaims'>;
+export type VerificationEvent = VerificationRecord<'verEvents'>;
+export type Evidence = VerificationRecord<'verEvidence'>;
+export type VerificationToken = VerificationRecord<'verTokens'>;
+export type VerificationAdmin = VerificationRecord<'verAdmins'>;
+export type RootTransfer = VerificationRecord<'verRootTransfers'>;
+export type RootRequest = VerificationRecord<'verRootRequests'>;
+export type ClaimDispute = VerificationRecord<'verDisputes'>;
+export type CoachReference = VerificationRecord<'verReferences'>;
+export type PlayerInvite = VerificationRecord<'verPlayerInvites'>;
+export type ConflictDeclaration = VerificationRecord<'verConflicts'>;
+export type DomainRequest = VerificationRecord<'verDomainRequests'>;
+/** An organisation's verified domain as `domains` returns it: the organisation is the one asked about. */
+export type VerifiedDomain = DeepReadonly<Omit<DomainFields, 'orgId'>>;
+export type ClaimSubjectKind = ClaimFields['subjectType'];
+/** The whole domain as plain records (`VERIFICATION_RECORDS.read`). */
+export type VerificationRecords = { [N in VerificationCollection]: Records[N][] };
+
+/**
+ * What a writer passes for a record (`InputFor`: a field that may be null, or a list, may be left out, at any depth),
+ * with the fields `O` optional too: a sparse group (absent is no columns set) or a column with a default.
+ */
+type InputWith<T, O extends keyof T = never> = Flatten<
+  Omit<InputFor<T>, O> & { [K in O]?: K extends keyof InputFor<T> ? InputFor<T>[K] : never }
+>;
+type Codes = { reviewReasons?: readonly ReviewCode[]; riskFlags?: readonly RiskFlag[] };
+export type ClaimInput = InputWith<ClaimFields, 'metadata'> & Codes & { evidenceIds?: readonly string[] };
+export type VerificationEventInput = InputWith<Records['verEvents']>;
+export type EvidenceInput = InputWith<RecordOf<typeof EVIDENCE_SPEC>, 'meta'> & { claimIds?: readonly string[] };
+export type VerificationTokenInput = InputWith<Records['verTokens'], 'attemptsFailed'>;
+export type VerificationAdminInput = InputWith<Records['verAdmins']>;
+export type RootTransferInput = InputWith<Records['verRootTransfers']>;
+export type RootRequestInput = InputWith<RootRequestFields> & Codes;
+export type ClaimDisputeInput = InputWith<Records['verDisputes']>;
+export type CoachReferenceInput = InputWith<Records['verReferences']>;
+export type PlayerInviteInput = InputWith<Records['verPlayerInvites']>;
+export type ConflictDeclarationInput = InputWith<Records['verConflicts']>;
+export type DomainRequestInput = InputWith<RecordOf<typeof DOMAIN_REQUEST_SPEC>> & {
+  reviewReasons?: readonly ReviewCode[];
+};
+export type VerifiedDomainInput = InputWith<Omit<DomainFields, 'orgId'>>;
+type Inputs = {
+  verClaims: ClaimInput;
+  verEvents: VerificationEventInput;
+  verEvidence: EvidenceInput;
+  verTokens: VerificationTokenInput;
+  verAdmins: VerificationAdminInput;
+  verRootTransfers: RootTransferInput;
+  verRootRequests: RootRequestInput;
+  verDisputes: ClaimDisputeInput;
+  verReferences: CoachReferenceInput;
+  verPlayerInvites: PlayerInviteInput;
+  verConflicts: ConflictDeclarationInput;
+  verDomainRequests: DomainRequestInput;
+  orgVerifiedDomains: VerifiedDomainInput;
+};
 
 // ------------------------------------------------------------------ DDL (generated from the specs, so the columns cannot drift from the typing)
-const codeTableDdl = (name, owner, ownerTable, lists) => `CREATE TABLE ${name} (
+const codeTableDdl = (
+  name: string,
+  owner: string,
+  ownerTable: string,
+  lists: Readonly<Record<string, readonly string[]>>,
+) => `CREATE TABLE ${name} (
   ${owner}  TEXT NOT NULL REFERENCES ${ownerTable}(id) ON DELETE CASCADE,
   list      TEXT NOT NULL CHECK (list IN (${Object.keys(lists).map(quote).join(',')})),
   position  INTEGER NOT NULL,
@@ -729,11 +852,21 @@ export const VERIFICATION_TABLES = Object.freeze([
   'ver_domain_request_codes',
   'org_verified_domains',
   'ver_migrations',
-]);
+] as const);
 
 // ------------------------------------------------------------------ rows
+type CodeListKey = 'reviewReasons' | 'riskFlags';
 /** One entity: table, spec, the record's child lists, and the queries over it. */
-const ENTITIES = {
+type Entity = {
+  table: string;
+  spec: Spec;
+  codes?: { table: string; owner: string; lists: Partial<Record<CodeListKey, string>> };
+  evidenceLinks?: true;
+  claimLinks?: true;
+  rootEvidence?: true;
+  key?: readonly string[];
+};
+const ENTITIES: Readonly<Record<VerificationCollection, Entity>> = {
   verClaims: {
     table: 'ver_claims',
     spec: CLAIM_SPEC,
@@ -771,9 +904,25 @@ const ENTITIES = {
   orgVerifiedDomains: { table: 'org_verified_domains', spec: DOMAIN_SPEC, key: ['org_id', 'domain'] },
 };
 
-function statements(sqlite) {
-  const out = {};
-  for (const [name, e] of Object.entries(ENTITIES)) {
+type EntityStatements = {
+  insert: StatementSync;
+  /** Null for a table keyed by more than an id (org_verified_domains). */
+  byId: StatementSync | null;
+  all: StatementSync;
+  codesOf?: StatementSync;
+  codeIns?: StatementSync;
+};
+type Statements = Record<VerificationCollection, EntityStatements> & {
+  linksOfClaim: StatementSync;
+  linksOfEvidence: StatementSync;
+  linkIns: StatementSync;
+  linkNext: StatementSync;
+  rootEvidence: StatementSync;
+};
+function statements(sqlite: DatabaseSync): Statements {
+  const out = {} as Record<VerificationCollection, EntityStatements>;
+  for (const name of VERIFICATION_COLLECTIONS) {
+    const e = ENTITIES[name];
     out[name] = {
       insert: sqlite.prepare(insertSql(e.table, e.spec)),
       byId: e.key ? null : sqlite.prepare(`SELECT * FROM ${e.table} WHERE id = ?`),
@@ -788,26 +937,38 @@ function statements(sqlite) {
       );
     }
   }
-  out.linksOfClaim = sqlite.prepare('SELECT * FROM ver_claim_evidence WHERE claim_id = ? ORDER BY position');
-  out.linksOfEvidence = sqlite.prepare('SELECT * FROM ver_claim_evidence WHERE evidence_id = ? ORDER BY rowid');
-  out.linkIns = sqlite.prepare('INSERT INTO ver_claim_evidence (claim_id, position, evidence_id) VALUES (?, ?, ?)');
-  out.linkNext = sqlite.prepare(
-    'SELECT COALESCE(MAX(position) + 1, 0) AS n FROM ver_claim_evidence WHERE claim_id = ?',
-  );
-  out.rootEvidence = sqlite.prepare(
-    'SELECT id, root_request_id FROM ver_evidence WHERE root_request_id = ? ORDER BY rowid',
-  );
-  return out;
+  return {
+    ...out,
+    linksOfClaim: sqlite.prepare('SELECT * FROM ver_claim_evidence WHERE claim_id = ? ORDER BY position'),
+    linksOfEvidence: sqlite.prepare('SELECT * FROM ver_claim_evidence WHERE evidence_id = ? ORDER BY rowid'),
+    linkIns: sqlite.prepare('INSERT INTO ver_claim_evidence (claim_id, position, evidence_id) VALUES (?, ?, ?)'),
+    linkNext: sqlite.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS n FROM ver_claim_evidence WHERE claim_id = ?'),
+    rootEvidence: sqlite.prepare(
+      'SELECT id, root_request_id FROM ver_evidence WHERE root_request_id = ? ORDER BY rowid',
+    ),
+  };
 }
+type ChildRows = { all(ownerId: string): Row[] };
+type ChildReaders = {
+  codes: ChildRows | null;
+  links: ChildRows | null;
+  claimLinks: ChildRows | null;
+  rootEvidence: ChildRows | null;
+};
 /** The child rows of many records at once (one query per child table for a list). */
-function childReaders(sqlite, st, name, idList) {
+function childReaders(
+  sqlite: DatabaseSync,
+  st: Statements,
+  name: VerificationCollection,
+  idList: string[],
+): ChildReaders {
   const e = ENTITIES[name];
   const many = idList.length > 1;
   return {
     codes: e.codes
       ? many
         ? childRowsOf(sqlite, e.codes.table, e.codes.owner, idList, { order: 'list, position' })
-        : st[name].codesOf
+        : (st[name].codesOf as StatementSync)
       : null,
     links: e.evidenceLinks
       ? many
@@ -826,22 +987,24 @@ function childReaders(sqlite, st, name, idList) {
       : null,
   };
 }
-function decodeRecord(name, row, kids) {
+// A child reader is present whenever the entity has that child list (childReaders above), hence the assertions.
+function decodeRecord<N extends VerificationCollection>(name: N, row: Row, kids: ChildReaders): Records[N] {
   const e = ENTITIES[name];
-  const rec = decode(e.spec, row);
+  const rec = decode(e.spec, row) as Record<string, unknown>;
+  const id = row.id as string;
   if (e.codes) {
-    const rows = kids.codes.all(row.id);
+    const rows = kids.codes!.all(id);
     for (const [key, list] of Object.entries(e.codes.lists))
       rec[key] = rows.filter((r) => r.list === list).map((r) => r.code);
   }
-  if (e.evidenceLinks) rec.evidenceIds = kids.links.all(row.id).map((r) => r.evidence_id);
-  if (e.claimLinks) rec.claimIds = kids.claimLinks.all(row.id).map((r) => r.claim_id);
-  if (e.rootEvidence) rec.evidenceIds = kids.rootEvidence.all(row.id).map((r) => r.id);
-  return rec;
+  if (e.evidenceLinks) rec.evidenceIds = kids.links!.all(id).map((r) => r.evidence_id);
+  if (e.claimLinks) rec.claimIds = kids.claimLinks!.all(id).map((r) => r.claim_id);
+  if (e.rootEvidence) rec.evidenceIds = kids.rootEvidence!.all(id).map((r) => r.id);
+  return rec as Records[N];
 }
 
 // ------------------------------------------------------------------ the event detail line
-const show = (v) =>
+const show = (v: unknown): string =>
   v === null || v === undefined
     ? '—'
     : Array.isArray(v)
@@ -852,7 +1015,7 @@ const show = (v) =>
             .join(' ')
         : String(v);
 /** One line of text from an event's before/after payloads: `key: before → after` for each key either names. */
-export function eventDetail(before, after) {
+export function eventDetail(before: unknown, after: unknown): string | null {
   const b = isPlainObject(before) ? before : {};
   const a = isPlainObject(after) ? after : {};
   const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])];
@@ -867,34 +1030,34 @@ export function eventDetail(before, after) {
   return line ? (line.length > L.detail ? `${line.slice(0, L.detail - 1)}…` : line) : null;
 }
 
-export const verificationLive = (sqlite) => migrationApplied(sqlite, VERIFICATION_MIGRATION);
-function readAll(sqlite) {
+export const verificationLive = (sqlite: DatabaseSync): boolean => migrationApplied(sqlite, VERIFICATION_MIGRATION);
+function readAll(sqlite: DatabaseSync): VerificationRecords {
   const st = statements(sqlite);
-  const out = {};
+  const out: Partial<Record<VerificationCollection, unknown[]>> = {};
   for (const name of VERIFICATION_COLLECTIONS) {
     const rows = st[name].all.all();
-    const kids = childReaders(sqlite, st, name, rows.map((r) => r.id).filter(Boolean));
+    const kids = childReaders(sqlite, st, name, rows.map((r) => r.id as string).filter(Boolean));
     out[name] = rows.map((r) => decodeRecord(name, r, kids));
   }
-  return out;
+  return out as VerificationRecords;
 }
 
 /** The whole domain read back as plain records (`readAllRecords` in index.mjs: the test suites' read-back). */
 export const VERIFICATION_RECORDS = {
   names: VERIFICATION_COLLECTIONS,
-  read(sqlite) {
+  read(sqlite: DatabaseSync): VerificationRecords | null {
     return verificationLive(sqlite) ? readAll(sqlite) : null;
   },
 };
 const PLAYER_REFS_SQL =
   'SELECT player_id AS pid FROM ver_references UNION ALL SELECT player_id FROM ver_player_invites WHERE player_id IS NOT NULL UNION ALL SELECT target_player_id FROM ver_player_invites WHERE target_player_id IS NOT NULL';
-const playerRefCount = (sqlite, cond) =>
-  sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE ${cond}`).get().n;
-export const unresolvedPlayerReferences = (sqlite) =>
+const playerRefCount = (sqlite: DatabaseSync, cond: string): number =>
+  (sqlite.prepare(`SELECT count(*) AS n FROM (${PLAYER_REFS_SQL}) x WHERE ${cond}`).get() as { n: number }).n;
+export const unresolvedPlayerReferences = (sqlite: DatabaseSync): { verification: number } | null =>
   verificationLive(sqlite)
     ? { verification: playerRefCount(sqlite, 'NOT EXISTS (SELECT 1 FROM players p WHERE p.id = x.pid)') }
     : null;
-export const retainedPlayerReferences = (sqlite) =>
+export const retainedPlayerReferences = (sqlite: DatabaseSync): { verification: number } | null =>
   verificationLive(sqlite)
     ? {
         verification: playerRefCount(
@@ -904,9 +1067,9 @@ export const retainedPlayerReferences = (sqlite) =>
       }
     : null;
 
-// ------------------------------------------------------------------ the repository
+// ------------------------------------------------------------------ the acts' inputs
 /** The claim fields a status move may set besides the status: the transition's own effects and the decision's corrections. */
-const MOVE_FIELDS = new Set([
+const MOVE_FIELDS = [
   'updatedAt',
   'verificationMethod',
   'verifiedAt',
@@ -924,154 +1087,201 @@ const MOVE_FIELDS = new Set([
   'validUntil',
   'authorityType',
   'authorityId',
-]);
-const MOVE_METADATA = new Set(['display', 'registry']);
-const METADATA_SPEC = CLAIM_SPEC.find((f) => f.k === 'metadata').group;
+] as const satisfies readonly (keyof ClaimFields)[];
+const MOVE_METADATA = ['display', 'registry'] as const satisfies readonly (keyof ClaimFields['metadata'])[];
+const PERIOD_FIELDS = ['validUntil', 'current'] as const satisfies readonly (keyof ClaimFields)[];
+type ClaimMetadataInput = NonNullable<ClaimInput['metadata']>;
+/** A claim's status move (`claims.move`): from the status the caller decided on, to `to`, with its effects. */
+export type ClaimMove = {
+  from: ClaimState;
+  to: ClaimState;
+  set?: Partial<Pick<ClaimInput, (typeof MOVE_FIELDS)[number]>>;
+  metadata?: Partial<Pick<ClaimMetadataInput, (typeof MOVE_METADATA)[number]>>;
+  /** Replaces the review reasons; `addReviewReasons` only adds the codes not yet held. */
+  reviewReasons?: readonly ReviewCode[] | null;
+  addReviewReasons?: readonly ReviewCode[];
+  addRiskFlags?: readonly RiskFlag[];
+};
+export type ClaimPeriodCorrection = Partial<Pick<ClaimInput, (typeof PERIOD_FIELDS)[number]>>;
+/** Who decided: a Trust & Safety reviewer as the route identified them. */
+export type Reviewer = { id: string | null; name: string | null; attribution: Attribution };
+type At = { at: number };
+type AtBy = { at: number; by: string };
+type Decision = { at: number; by: Reviewer; reason: string | null };
+export type RootRequestApproval = Decision & {
+  identityLink: IdentityLink;
+  resultOrgId: string;
+  resultUserId: string;
+};
+
 /** The statuses a claim may reach `to` from (CLAIM_TRANSITIONS). */
-const sourcesOf = (to) =>
-  Object.entries(CLAIM_TRANSITIONS)
+const sourcesOf = (to: ClaimState): ClaimState[] =>
+  (Object.entries(CLAIM_TRANSITIONS) as [ClaimState, readonly ClaimState[]][])
     .filter(([, tos]) => tos.includes(to))
     .map(([from]) => from);
+const METADATA_SPEC = (
+  CLAIM_SPEC.find((f) => f.k === 'metadata') as Extract<(typeof CLAIM_SPEC)[number], { k: 'metadata' }>
+).group;
 
+// ------------------------------------------------------------------ the repository
 /**
  * `createVerificationRepository({ sqlite, unit, now, log })`: one object per record kind (`claims`, `events`,
  * `evidence`, `tokens`, `admins`, `rootTransfers`, `rootRequests`, `disputes`, `references`, `playerInvites`,
  * `conflicts`, `domainRequests`, `domains`), each with its whole-record `create`, its named acts and its queries, plus
  * `reads` (the queries alone, for `verificationReads`). An act is `act(id, input)` and returns the stored record.
  */
-export function createVerificationRepository({ sqlite, unit = null, now = Date.now, log = () => {} } = {}) {
+export function createVerificationRepository(
+  {
+    sqlite,
+    unit = null,
+    now = Date.now,
+    log = () => {},
+  }: {
+    sqlite: DatabaseSync;
+    unit?: UnitParticipant | null;
+    now?: () => number;
+    log?: (message: string) => void;
+  } = {} as { sqlite: DatabaseSync },
+) {
   if (!sqlite) throw new TypeError('the verification repository needs a SQLite connection (node:sqlite)');
   const st = statements(sqlite);
   const operation = operationOn(sqlite, unit);
-  const {
-    refusal: refuse,
-    invalid,
-    rowStep,
-    listOf,
-    readsBackAsWritten,
-    newRecord,
-    columnsOf,
-    q,
-    sqlIn,
-    guarded,
-    nextPosition,
-  } = writeKit(sqlite, 'VERIFICATION');
-  const decodeRows = (name, rows) => {
+  const kit = writeKit(sqlite, 'VERIFICATION');
+  const { invalid, rowStep, listOf, readsBackAsWritten, columnsOf, q, sqlIn, guarded, nextPosition, actsOn } = kit;
+  const newRecord: typeof kit.newRecord = kit.newRecord;
+  const refuse = (what: 'DUPLICATE' | 'STATE_CONFLICT' | 'NOT_FOUND', message: string) =>
+    refusal(`VERIFICATION_${what}`, message);
+  // The columns judge the values a write binds (writes.ts), so they are bound as given.
+  const bind = (cols: Record<string, unknown>) => cols as Record<string, SQLInputValue>;
+  const decodeRows = <N extends VerificationCollection>(name: N, rows: Row[]): VerificationRecord<N>[] => {
     const kids = childReaders(
       sqlite,
       st,
       name,
-      rows.map((r) => r.id),
+      rows.map((r) => r.id as string),
     );
     return rows.map((r) => deepFreeze(decodeRecord(name, r, kids)));
   };
-  const read = (name, id) => {
+  const read = <N extends VerificationCollection>(name: N, id: unknown): VerificationRecord<N> | null => {
     if (typeof id !== 'string') return null;
-    const row = st[name].byId.get(id);
+    const row = st[name].byId!.get(id);
     return row ? decodeRows(name, [row])[0] : null;
   };
-  const must = (name, id) => {
-    const r = read(name, id);
-    if (!r) throw refuse('NOT_FOUND', `${ENTITIES[name].table} ${id} is not a record of the repository`);
-    return r;
-  };
-  const list =
-    (name, where, order = 'rowid') =>
-    (...args) =>
-      decodeRows(name, q(`SELECT * FROM ${ENTITIES[name].table} WHERE ${where} ORDER BY ${order}`).all(...args));
-  const one =
-    (name, where) =>
-    (...args) => {
-      const row = q(`SELECT * FROM ${ENTITIES[name].table} WHERE ${where} ORDER BY rowid LIMIT 1`).get(...args);
-      return row ? decodeRows(name, [row])[0] : null;
+  const mustOf =
+    <N extends VerificationCollection>(name: N) =>
+    (id: string): VerificationRecord<N> => {
+      const r = read(name, id);
+      if (!r) throw refuse('NOT_FOUND', `${ENTITIES[name].table} ${id} is not a record of the repository`);
+      return r;
     };
-  const count =
-    (table, where) =>
-    (...args) =>
-      q(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get(...args).n;
-  const WRITES = new Set();
-  const writes = (o) => {
-    for (const k of Object.keys(o)) WRITES.add(k);
-    return o;
+  /** The records of `name` matching `where`, in insertion order. */
+  const all = <N extends VerificationCollection>(name: N, where: string, ...args: SQLInputValue[]) =>
+    decodeRows(name, q(`SELECT * FROM ${ENTITIES[name].table} WHERE ${where} ORDER BY rowid`).all(...args));
+  /** The first record of `name` matching `where`, or null. */
+  const first = <N extends VerificationCollection>(
+    name: N,
+    where: string,
+    ...args: SQLInputValue[]
+  ): VerificationRecord<N> | null => {
+    const row = q(`SELECT * FROM ${ENTITIES[name].table} WHERE ${where} ORDER BY rowid LIMIT 1`).get(...args);
+    return row ? decodeRows(name, [row])[0] : null;
   };
+  const exists = (sql: string, ...args: SQLInputValue[]): boolean => !!q(sql).get(...args);
+  const countOf = (sql: string, ...args: SQLInputValue[]): number => (q(sql).get(...args) as { n: number }).n;
+  const countWhere = (table: string, where: string, ...args: SQLInputValue[]) =>
+    countOf(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`, ...args);
 
   /** `create(record)`: a new record, whole. An existing id is refused, and the stored record must read back as written. */
-  const create = (name) => (r) =>
-    operation(() => {
-      const e = ENTITIES[name];
-      newRecord(e.table, (id) => !!st[name].byId.get(id), r);
-      const step = (part, fn) => rowStep(e.table, r.id, part, fn);
-      step('row', () => st[name].insert.run(columnsOf(e.table, r.id, e.spec, r, { defaults: true })));
-      if (e.codes)
-        for (const [key, l] of Object.entries(e.codes.lists))
-          listOf(e.table, r.id, key, r[key]).forEach((code, i) =>
-            step(`${key}[${i}]`, () => st[name].codeIns.run(r.id, l, i, code)),
+  const create =
+    <N extends VerificationCollection>(name: N) =>
+    (raw: Inputs[N]): VerificationRecord<N> =>
+      operation(() => {
+        const e = ENTITIES[name];
+        const r: unknown = raw;
+        newRecord(e.table, (id) => !!st[name].byId!.get(id), r);
+        const step = (part: string, fn: () => unknown) => rowStep(e.table, r.id, part, fn);
+        step('row', () => st[name].insert.run(bind(columnsOf(e.table, r.id, e.spec, r, { defaults: true }))));
+        if (e.codes)
+          for (const [key, l] of Object.entries(e.codes.lists))
+            listOf(e.table, r.id, key, r[key]).forEach((code, i) =>
+              step(`${key}[${i}]`, () => st[name].codeIns!.run(r.id, l, i, code as SQLInputValue)),
+            );
+        if (e.evidenceLinks)
+          listOf(e.table, r.id, 'evidenceIds', r.evidenceIds).forEach((ev, i) =>
+            step(`evidenceIds[${i}]`, () => st.linkIns.run(r.id, i, ev as SQLInputValue)),
           );
-      if (e.evidenceLinks)
-        listOf(e.table, r.id, 'evidenceIds', r.evidenceIds).forEach((ev, i) =>
-          step(`evidenceIds[${i}]`, () => st.linkIns.run(r.id, i, ev)),
-        );
-      if (e.claimLinks)
-        listOf(e.table, r.id, 'claimIds', r.claimIds).forEach((c, i) =>
-          step(`claimIds[${i}]`, () => st.linkIns.run(c, st.linkNext.get(c).n, r.id)),
-        );
-      const stored = must(name, r.id);
-      readsBackAsWritten(e.table, r.id, r, stored);
-      return stored;
-    });
-  /** Named acts on one record kind, each `act(id, input)`; each returns the stored record. */
-  const actsOn = (name, defs) =>
-    writes(
-      Object.fromEntries(
-        Object.entries(defs).map(([act, fn]) => [
-          act,
-          (id, input = {}) =>
-            operation(() => {
-              const table = ENTITIES[name].table;
-              if (!st[name].byId.get(id)) throw refuse('NOT_FOUND', `${table} ${id} is not a record of the repository`);
-              rowStep(table, id, act, () => fn(id, input));
-              return must(name, id);
-            }),
-        ]),
-      ),
-    );
+        if (e.claimLinks)
+          listOf(e.table, r.id, 'claimIds', r.claimIds).forEach((c, i) =>
+            step(`claimIds[${i}]`, () =>
+              st.linkIns.run(c as SQLInputValue, (st.linkNext.get(c as SQLInputValue) as { n: number }).n, r.id),
+            ),
+          );
+        const stored = mustOf(name)(r.id);
+        readsBackAsWritten(e.table, r.id, r, stored);
+        return stored;
+      });
+  const kindActs = <N extends VerificationCollection>(name: N) => ({
+    operation,
+    label: ENTITIES[name].table,
+    must: mustOf(name),
+  });
+  type CodeOwner = 'verClaims' | 'verRootRequests' | 'verDomainRequests';
   /** Code lists: `addCodes` appends the codes not yet held (a list only grows); `setCodes` replaces the list. */
-  const addCodes = (name, id, key, codes) => {
+  const addCodes = (name: CodeOwner, id: string, key: CodeListKey, codes: unknown) => {
     const e = ENTITIES[name];
-    const l = e.codes.lists[key];
+    const c = e.codes!;
+    const l = c.lists[key] as string;
     for (const code of listOf(e.table, id, key, codes)) {
-      if (q(`SELECT 1 FROM ${e.codes.table} WHERE ${e.codes.owner} = ? AND list = ? AND code = ?`).get(id, l, code))
+      if (
+        exists(`SELECT 1 FROM ${c.table} WHERE ${c.owner} = ? AND list = ? AND code = ?`, id, l, code as SQLInputValue)
+      )
         continue;
-      st[name].codeIns.run(id, l, nextPosition(e.codes.table, e.codes.owner, id, { list: l }), code);
+      st[name].codeIns!.run(id, l, nextPosition(c.table, c.owner, id, { list: l }), code as SQLInputValue);
     }
   };
-  const setCodes = (name, id, key, codes) => {
+  const setCodes = (name: CodeOwner, id: string, key: CodeListKey, codes: unknown) => {
     const e = ENTITIES[name];
-    const l = e.codes.lists[key];
-    q(`DELETE FROM ${e.codes.table} WHERE ${e.codes.owner} = ? AND list = ?`).run(id, l);
-    listOf(e.table, id, key, codes).forEach((code, i) => st[name].codeIns.run(id, l, i, code));
+    const c = e.codes!;
+    const l = c.lists[key] as string;
+    q(`DELETE FROM ${c.table} WHERE ${c.owner} = ? AND list = ?`).run(id, l);
+    listOf(e.table, id, key, codes).forEach((code, i) => st[name].codeIns!.run(id, l, i, code as SQLInputValue));
   };
   const C = ENTITIES.verClaims;
   const R = ENTITIES.verRootRequests;
   const OPEN = OPEN_STATES_SQL;
-  const byCols = (prefix, by) => ({ [`${prefix}_name`]: by?.name ?? null, [`${prefix}_id`]: by?.id ?? null });
+  const byCols = (prefix: string, by: { name: string | null; id: string | null } | null | undefined) => ({
+    [`${prefix}_name`]: by?.name ?? null,
+    [`${prefix}_id`]: by?.id ?? null,
+  });
+  const MOVE_FIELD_SET: ReadonlySet<string> = new Set(MOVE_FIELDS);
+  const MOVE_METADATA_SET: ReadonlySet<string> = new Set(MOVE_METADATA);
+  const PERIOD_FIELD_SET: ReadonlySet<string> = new Set(PERIOD_FIELDS);
 
-  const claims = {
-    ...writes({ create: create('verClaims') }),
-    ...actsOn('verClaims', {
+  // ---- claims
+  const claimWrites = {
+    create: create('verClaims'),
+    ...actsOn(kindActs('verClaims'), {
       /**
        * A status move along CLAIM_TRANSITIONS, from the status the caller decided on (`from`), guarded in SQL. `set` holds
        * the move's own effects and corrections (MOVE_FIELDS), `metadata` its display and registry result; the review
        * reasons are replaced (`reviewReasons`) or gain codes (`addReviewReasons`), the risk flags only gain codes.
        */
       move: (
-        id,
-        { from, to, set = {}, metadata = {}, reviewReasons = null, addReviewReasons = [], addRiskFlags = [] },
+        id: string,
+        {
+          from,
+          to,
+          set = {},
+          metadata = {},
+          reviewReasons = null,
+          addReviewReasons = [],
+          addRiskFlags = [],
+        }: ClaimMove,
       ) => {
         const cols = {
           status: to,
-          ...columnsOf(C.table, id, CLAIM_SPEC, set, { only: MOVE_FIELDS }),
-          ...columnsOf(C.table, id, METADATA_SPEC, metadata, { only: MOVE_METADATA }),
+          ...columnsOf(C.table, id, CLAIM_SPEC, set, { only: MOVE_FIELD_SET }),
+          ...columnsOf(C.table, id, METADATA_SPEC, metadata, { only: MOVE_METADATA_SET }),
         };
         guarded(
           C.table,
@@ -1084,10 +1294,15 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
         addCodes('verClaims', id, 'reviewReasons', addReviewReasons);
         addCodes('verClaims', id, 'riskFlags', addRiskFlags);
       },
-      addRiskFlags: (id, { codes }) => addCodes('verClaims', id, 'riskFlags', codes),
-      addReviewReasons: (id, { codes }) => addCodes('verClaims', id, 'reviewReasons', codes),
+      addRiskFlags: (id: string, { codes }: { codes: readonly RiskFlag[] }) =>
+        addCodes('verClaims', id, 'riskFlags', codes),
+      addReviewReasons: (id: string, { codes }: { codes: readonly ReviewCode[] }) =>
+        addCodes('verClaims', id, 'reviewReasons', codes),
       /** The subject proved control of a work mailbox. */
-      recordWorkEmail: (id, { workEmail, domainCoveredByOrg }) =>
+      recordWorkEmail: (
+        id: string,
+        { workEmail, domainCoveredByOrg }: { workEmail: string; domainCoveredByOrg: boolean },
+      ) =>
         guarded(
           C.table,
           { id },
@@ -1095,9 +1310,10 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           { work_email: workEmail, domain_control: 'passed', domain_covered_by_org: domainCoveredByOrg ? 1 : 0 },
           `ver_claims ${id}`,
         ),
-      correctRole: (id, { role }) => guarded(C.table, { id }, '', { role }, `ver_claims ${id}`),
+      correctRole: (id: string, { role }: { role: string | null }) =>
+        guarded(C.table, { id }, '', { role }, `ver_claims ${id}`),
       /** A departure closes a current verified period; a stated end is kept. */
-      closePeriod: (id, { until, at }) => {
+      closePeriod: (id: string, { until, at }: { until: number | null; at: number }) => {
         if (
           q(
             "UPDATE ver_claims SET current = 0, valid_until = COALESCE(valid_until, @until), updated_at = @at WHERE id = @id AND status = 'verified' AND current = 1",
@@ -1106,16 +1322,17 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           throw refuse('STATE_CONFLICT', `ver_claims ${id} is not a current verified claim`);
       },
       /** A reviewer's correction of the period or its currency (only the fields given). */
-      correctPeriod: (id, fields) =>
+      correctPeriod: (id: string, fields: ClaimPeriodCorrection) =>
         guarded(
           C.table,
           { id },
           '',
-          columnsOf(C.table, id, CLAIM_SPEC, fields, { only: new Set(['validUntil', 'current']) }),
+          columnsOf(C.table, id, CLAIM_SPEC, fields, { only: PERIOD_FIELD_SET }),
           `ver_claims ${id}`,
         ),
-      assign: (id, { assignedTo }) => guarded(C.table, { id }, '', { assigned_to: assignedTo }, `ver_claims ${id}`),
-      flagForReview: (id, { at, reason }) =>
+      assign: (id: string, { assignedTo }: { assignedTo: string | null }) =>
+        guarded(C.table, { id }, '', { assigned_to: assignedTo }, `ver_claims ${id}`),
+      flagForReview: (id: string, { at, reason }: { at: number; reason: string }) =>
         guarded(
           C.table,
           { id },
@@ -1123,7 +1340,7 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           { flagged_at: at, flagged_reason: reason },
           `ver_claims ${id} is already flagged for review`,
         ),
-      markExpiryWarned: (id, { at }) =>
+      markExpiryWarned: (id: string, { at }: At) =>
         guarded(
           C.table,
           { id },
@@ -1132,21 +1349,29 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_claims ${id} was already warned of its expiry`,
         ),
     }),
-    byId: (id) => read('verClaims', id),
+  };
+  const claimReads = {
+    byId: (id: unknown): Claim | null => read('verClaims', id),
     /** A subject's claims, oldest first (the public profile, the subject's own view). */
-    forSubject: list('verClaims', 'subject_kind = ? AND subject_id = ?'),
+    forSubject: (kind: ClaimSubjectKind, subjectId: string): Claim[] =>
+      all('verClaims', 'subject_kind = ? AND subject_id = ?', kind, subjectId),
     /** Every claim on subject id `id` whatever its kind (the Trust Score's identity source). */
-    forSubjectId: list('verClaims', 'subject_id = ?'),
+    forSubjectId: (subjectId: string): Claim[] => all('verClaims', 'subject_id = ?', subjectId),
     /** The claims an organisation administrator approved (the authority cascade). */
-    byAuthority: list('verClaims', "authority_kind = 'org_admin' AND authority_id = ?"),
+    byAuthority: (authorityId: string): Claim[] =>
+      all('verClaims', "authority_kind = 'org_admin' AND authority_id = ?", authorityId),
     /** An organisation's staff claims (subject a user), oldest first. */
-    forOrgStaff: list('verClaims', "organisation_id = ? AND subject_kind = 'user'"),
+    forOrgStaff: (orgId: string): Claim[] => all('verClaims', "organisation_id = ? AND subject_kind = 'user'", orgId),
     /** One person's claims at one organisation. */
-    forOrgSubject: list('verClaims', "organisation_id = ? AND subject_kind = 'user' AND subject_id = ?"),
+    forOrgSubject: (orgId: string, subjectId: string): Claim[] =>
+      all('verClaims', "organisation_id = ? AND subject_kind = 'user' AND subject_id = ?", orgId, subjectId),
     /** The claims of one affiliation/role pair. */
-    byPair: list('verClaims', 'pair_id = ?'),
-    /** Claims in any of `statuses` (a JSON list), optionally of one organisation and type: the T&S queue. */
-    inStatuses: (statuses, { orgId = null, claimType = null } = {}) =>
+    byPair: (pairId: string): Claim[] => all('verClaims', 'pair_id = ?', pairId),
+    /** Claims in any of `statuses`, optionally of one organisation and type: the T&S queue. */
+    inStatuses: (
+      statuses: readonly ClaimState[],
+      { orgId = null, claimType = null }: { orgId?: string | null; claimType?: ClaimType | null } = {},
+    ): Claim[] =>
       decodeRows(
         'verClaims',
         q(
@@ -1154,33 +1379,43 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
         ).all(JSON.stringify(statuses), orgId, orgId, claimType, claimType),
       ),
     /** Verified claims whose validUntil falls in (from, until): expiring soon. */
-    expiringBetween: list('verClaims', "status = 'verified' AND valid_until > ? AND valid_until < ?"),
+    expiringBetween: (from: number, until: number): Claim[] =>
+      all('verClaims', "status = 'verified' AND valid_until > ? AND valid_until < ?", from, until),
     /** Claims revoked since `since`. */
-    revokedSince: list('verClaims', "status = 'revoked' AND revoked_at > ?"),
+    revokedSince: (since: number): Claim[] => all('verClaims', "status = 'revoked' AND revoked_at > ?", since),
     /** The sweep: verified current claims past their exclusive expiry. */
-    expiredBy: list('verClaims', "status = 'verified' AND current = 1 AND valid_until IS NOT NULL AND valid_until < ?"),
-    /** The sweep: verified claims expiring in (now, until) not yet warned. */
-    warnDue: list(
-      'verClaims',
-      "status = 'verified' AND valid_until > ? AND valid_until < ? AND expiry_warned_at IS NULL",
-    ),
+    expiredBy: (at: number): Claim[] =>
+      all('verClaims', "status = 'verified' AND current = 1 AND valid_until IS NOT NULL AND valid_until < ?", at),
+    /** The sweep: verified claims expiring in (from, until) not yet warned. */
+    warnDue: (from: number, until: number): Claim[] =>
+      all(
+        'verClaims',
+        "status = 'verified' AND valid_until > ? AND valid_until < ? AND expiry_warned_at IS NULL",
+        from,
+        until,
+      ),
     /** Has user `userId` an open or verified identity claim? */
-    hasOpenIdentity: (userId) =>
-      !!q(
+    hasOpenIdentity: (userId: string): boolean =>
+      exists(
         `SELECT 1 FROM ver_claims WHERE subject_kind = 'user' AND subject_id = ? AND claim_type = 'PERSON_IDENTITY' AND status IN ${OPEN}`,
-      ).get(userId),
-    count: () => q('SELECT COUNT(*) AS n FROM ver_claims').get().n,
+        userId,
+      ),
+    count: (): number => countOf('SELECT COUNT(*) AS n FROM ver_claims'),
   };
-  const events = {
-    /** Append one event (the log is only ever inserted into). */
-    ...writes({ append: create('verEvents') }),
-    forClaim: list('verEvents', 'claim_id = ?'),
+
+  // ---- events
+  /** Append one event (the log is only ever inserted into). */
+  const eventWrites = { append: create('verEvents') };
+  const eventReads = {
+    forClaim: (claimId: string): VerificationEvent[] => all('verEvents', 'claim_id = ?', claimId),
   };
-  const evidence = {
-    ...writes({ create: create('verEvidence') }),
-    byId: (id) => read('verEvidence', id),
+
+  // ---- evidence
+  const evidenceWrites = { create: create('verEvidence') };
+  const evidenceReads = {
+    byId: (id: unknown): Evidence | null => read('verEvidence', id),
     /** A claim's evidence, in the claim's order. */
-    forClaim: (claimId) =>
+    forClaim: (claimId: string): Evidence[] =>
       decodeRows(
         'verEvidence',
         q(
@@ -1188,53 +1423,60 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
         ).all(claimId),
       ),
     /** Evidence records `ids`, in that order (missing ids skipped). */
-    byIds: (idList) => {
+    byIds: (idList: readonly string[] | null | undefined): Evidence[] => {
       const rows = q('SELECT * FROM ver_evidence WHERE id IN (SELECT value FROM json_each(?))').all(
         JSON.stringify(idList ?? []),
       );
       const byKey = new Map(decodeRows('verEvidence', rows).map((e) => [e.id, e]));
-      return (idList ?? []).map((i) => byKey.get(i)).filter(Boolean);
+      return (idList ?? []).map((i) => byKey.get(i)).filter((e): e is Evidence => !!e);
     },
     /** Does any evidence carry digest `sha` (optionally supplied by someone other than `exceptSupplier`)? */
-    digestSeen: (sha, exceptSupplier = null) =>
-      !!q('SELECT 1 FROM ver_evidence WHERE sha256 = ? AND (? IS NULL OR supplied_by_id IS NOT ?) LIMIT 1').get(
+    digestSeen: (sha: string, exceptSupplier: string | null = null): boolean =>
+      exists(
+        'SELECT 1 FROM ver_evidence WHERE sha256 = ? AND (? IS NULL OR supplied_by_id IS NOT ?) LIMIT 1',
         sha,
         exceptSupplier,
         exceptSupplier,
       ),
   };
-  const tokens = {
-    ...writes({
-      create: create('verTokens'),
-      /** A wrong code counts against every open token of the subject for that purpose; the number of tokens counted. */
-      recordFailedAttempts: (subjectId, purpose) =>
-        operation(
-          () =>
-            q(
-              'UPDATE ver_tokens SET attempts_failed = attempts_failed + 1 WHERE subject_id = ? AND purpose = ? AND used_at IS NULL',
-            ).run(subjectId, purpose).changes,
-        ),
-    }),
+
+  // ---- tokens
+  const tokenWrites = {
+    create: create('verTokens'),
+    /** A wrong code counts against every open token of the subject for that purpose; the number of tokens counted. */
+    recordFailedAttempts: (subjectId: string, purpose: TokenPurpose): number =>
+      operation(
+        () =>
+          q(
+            'UPDATE ver_tokens SET attempts_failed = attempts_failed + 1 WHERE subject_id = ? AND purpose = ? AND used_at IS NULL',
+          ).run(subjectId, purpose).changes as number,
+      ),
     /** A token is spent once. */
-    ...actsOn('verTokens', {
-      use: (id, { at }) =>
+    ...actsOn(kindActs('verTokens'), {
+      use: (id: string, { at }: At) =>
         guarded('ver_tokens', { id }, 'used_at IS NULL', { used_at: at }, `ver_tokens ${id} is already used`),
     }),
-    byId: (id) => read('verTokens', id),
-    byHash: one('verTokens', 'token_hash = ?'),
+  };
+  const tokenReads = {
+    byId: (id: unknown): VerificationToken | null => read('verTokens', id),
+    byHash: (hash: string): VerificationToken | null => first('verTokens', 'token_hash = ?', hash),
     /** Open (unused) tokens of `subjectId` for `purpose`. */
-    openFor: list('verTokens', 'subject_id = ? AND purpose = ? AND used_at IS NULL'),
+    openFor: (subjectId: string, purpose: TokenPurpose): VerificationToken[] =>
+      all('verTokens', 'subject_id = ? AND purpose = ? AND used_at IS NULL', subjectId, purpose),
     /** The failed attempts recorded on `subjectId`'s tokens for `purpose`. */
-    failedAttempts: (subjectId, purpose) =>
-      q('SELECT COALESCE(SUM(attempts_failed), 0) AS n FROM ver_tokens WHERE subject_id = ? AND purpose = ?').get(
+    failedAttempts: (subjectId: string, purpose: TokenPurpose): number =>
+      countOf(
+        'SELECT COALESCE(SUM(attempts_failed), 0) AS n FROM ver_tokens WHERE subject_id = ? AND purpose = ?',
         subjectId,
         purpose,
-      ).n,
+      ),
   };
-  const admins = {
-    ...writes({ create: create('verAdmins') }),
-    ...actsOn('verAdmins', {
-      revoke: (id, { at, by }) =>
+
+  // ---- verification administrators
+  const adminWrites = {
+    create: create('verAdmins'),
+    ...actsOn(kindActs('verAdmins'), {
+      revoke: (id: string, { at, by }: AtBy) =>
         guarded(
           'ver_admins',
           { id },
@@ -1243,16 +1485,22 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_admins ${id} is not active`,
         ),
     }),
-    byId: (id) => read('verAdmins', id),
-    forOrg: list('verAdmins', 'org_id = ?'),
-    activeForOrg: list('verAdmins', "org_id = ? AND status = 'active'"),
-    activeFor: list('verAdmins', "org_id = ? AND user_id = ? AND status = 'active'"),
-    activeRootCount: count('ver_admins', "org_id = ? AND level = 'verification_root_admin' AND status = 'active'"),
   };
-  const rootTransfers = {
-    ...writes({ create: create('verRootTransfers') }),
-    ...actsOn('verRootTransfers', {
-      approve: (id, { at, by }) =>
+  const adminReads = {
+    byId: (id: unknown): VerificationAdmin | null => read('verAdmins', id),
+    forOrg: (orgId: string): VerificationAdmin[] => all('verAdmins', 'org_id = ?', orgId),
+    activeForOrg: (orgId: string): VerificationAdmin[] => all('verAdmins', "org_id = ? AND status = 'active'", orgId),
+    activeFor: (orgId: string, userId: string): VerificationAdmin[] =>
+      all('verAdmins', "org_id = ? AND user_id = ? AND status = 'active'", orgId, userId),
+    activeRootCount: (orgId: string): number =>
+      countWhere('ver_admins', "org_id = ? AND level = 'verification_root_admin' AND status = 'active'", orgId),
+  };
+
+  // ---- root-authority transfers
+  const transferWrites = {
+    create: create('verRootTransfers'),
+    ...actsOn(kindActs('verRootTransfers'), {
+      approve: (id: string, { at, by }: AtBy) =>
         guarded(
           'ver_root_transfers',
           { id },
@@ -1261,11 +1509,16 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_root_transfers ${id} is not pending`,
         ),
     }),
-    byId: (id) => read('verRootTransfers', id),
-    forOrg: list('verRootTransfers', 'org_id = ?'),
-    hasPending: (orgId) => !!q("SELECT 1 FROM ver_root_transfers WHERE org_id = ? AND status = 'pending'").get(orgId),
   };
-  const decisionCols = (status, { at, by, reason }) => ({
+  const transferReads = {
+    byId: (id: unknown): RootTransfer | null => read('verRootTransfers', id),
+    forOrg: (orgId: string): RootTransfer[] => all('verRootTransfers', 'org_id = ?', orgId),
+    hasPending: (orgId: string): boolean =>
+      exists("SELECT 1 FROM ver_root_transfers WHERE org_id = ? AND status = 'pending'", orgId),
+  };
+
+  // ---- root organisation applications
+  const decisionCols = (status: 'approved' | 'rejected', { at, by, reason }: Decision) => ({
     status,
     decided_at: at,
     decided_by_name: by.name,
@@ -1273,10 +1526,10 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
     decision_attribution: by.attribution,
     decision_reason: reason,
   });
-  const rootRequests = {
-    ...writes({ create: create('verRootRequests') }),
-    ...actsOn('verRootRequests', {
-      proveEmail: (id) =>
+  const rootRequestWrites = {
+    create: create('verRootRequests'),
+    ...actsOn(kindActs('verRootRequests'), {
+      proveEmail: (id: string) =>
         guarded(
           R.table,
           { id },
@@ -1284,9 +1537,10 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           { email_proved: 1, check_evidence_completeness: 'email_proved' },
           `ver_root_requests ${id}`,
         ),
-      addRiskFlags: (id, { codes }) => addCodes('verRootRequests', id, 'riskFlags', codes),
+      addRiskFlags: (id: string, { codes }: { codes: readonly RiskFlag[] }) =>
+        addCodes('verRootRequests', id, 'riskFlags', codes),
       /** The applicant submits: the application goes to Trust & Safety with its review reasons. */
-      submitForReview: (id, { reviewReasons }) => {
+      submitForReview: (id: string, { reviewReasons }: { reviewReasons: readonly ReviewCode[] }) => {
         guarded(
           R.table,
           { id },
@@ -1296,7 +1550,7 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
         );
         setCodes('verRootRequests', id, 'reviewReasons', reviewReasons);
       },
-      approve: (id, { at, by, reason, identityLink, resultOrgId, resultUserId }) =>
+      approve: (id: string, { at, by, reason, identityLink, resultOrgId, resultUserId }: RootRequestApproval) =>
         guarded(
           R.table,
           { id },
@@ -1309,7 +1563,7 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           },
           `ver_root_requests ${id} is not awaiting review`,
         ),
-      reject: (id, { at, by, reason }) =>
+      reject: (id: string, { at, by, reason }: Decision) =>
         guarded(
           R.table,
           { id },
@@ -1318,14 +1572,19 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_root_requests ${id} is already decided`,
         ),
     }),
-    byId: (id) => read('verRootRequests', id),
-    /** An open application for the same domain or organisation name (case-insensitive). */
-    openDuplicate: one(
-      'verRootRequests',
-      "status IN ('requires_human_review','collecting_evidence') AND (domain = ? OR lower(trim(org_name)) = ?)",
-    ),
+  };
+  const rootRequestReads = {
+    byId: (id: unknown): RootRequest | null => read('verRootRequests', id),
+    /** An open application for the same domain or organisation name (`orgName` lower-cased and trimmed). */
+    openDuplicate: (domain: string, orgName: string): RootRequest | null =>
+      first(
+        'verRootRequests',
+        "status IN ('requires_human_review','collecting_evidence') AND (domain = ? OR lower(trim(org_name)) = ?)",
+        domain,
+        orgName,
+      ),
     /** Applications awaiting T&S (optionally of one country). */
-    awaitingReview: (country = null) =>
+    awaitingReview: (country: string | null = null): RootRequest[] =>
       decodeRows(
         'verRootRequests',
         q(
@@ -1333,15 +1592,19 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
         ).all(country, country),
       ),
     /** Is an application for organisation `orgId` still open? */
-    openForOrg: (orgId) =>
-      !!q(
+    openForOrg: (orgId: string): boolean =>
+      exists(
         "SELECT 1 FROM ver_root_requests WHERE (existing_org_id = ? OR result_org_id = ?) AND status IN ('requires_human_review','collecting_evidence') LIMIT 1",
-      ).get(orgId, orgId),
+        orgId,
+        orgId,
+      ),
   };
-  const disputes = {
-    ...writes({ create: create('verDisputes') }),
-    ...actsOn('verDisputes', {
-      resolve: (id, { at, by, resolution }) =>
+
+  // ---- claim disputes
+  const disputeWrites = {
+    create: create('verDisputes'),
+    ...actsOn(kindActs('verDisputes'), {
+      resolve: (id: string, { at, by, resolution }: { at: number; by: Reviewer; resolution: string }) =>
         guarded(
           'ver_disputes',
           { id },
@@ -1356,21 +1619,27 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_disputes ${id} is already resolved`,
         ),
     }),
-    byId: (id) => read('verDisputes', id),
-    all: list('verDisputes', '1 = 1'),
-    open: list('verDisputes', "status = 'open'"),
-    forClaim: list('verDisputes', 'claim_id = ?'),
-    hasOpen: (claimId) => !!q("SELECT 1 FROM ver_disputes WHERE claim_id = ? AND status = 'open'").get(claimId),
-    /** Open disputes on organisation `orgId`'s staff claims. */
-    openCountForOrg: (orgId) =>
-      q(
-        "SELECT COUNT(*) AS n FROM ver_disputes d JOIN ver_claims c ON c.id = d.claim_id WHERE d.status = 'open' AND c.organisation_id = ? AND c.subject_kind = 'user'",
-      ).get(orgId).n,
   };
-  const references = {
-    ...writes({ create: create('verReferences') }),
-    ...actsOn('verReferences', {
-      withdraw: (id, { at, reason }) =>
+  const disputeReads = {
+    byId: (id: unknown): ClaimDispute | null => read('verDisputes', id),
+    all: (): ClaimDispute[] => all('verDisputes', '1 = 1'),
+    open: (): ClaimDispute[] => all('verDisputes', "status = 'open'"),
+    forClaim: (claimId: string): ClaimDispute[] => all('verDisputes', 'claim_id = ?', claimId),
+    hasOpen: (claimId: string): boolean =>
+      exists("SELECT 1 FROM ver_disputes WHERE claim_id = ? AND status = 'open'", claimId),
+    /** Open disputes on organisation `orgId`'s staff claims. */
+    openCountForOrg: (orgId: string): number =>
+      countOf(
+        "SELECT COUNT(*) AS n FROM ver_disputes d JOIN ver_claims c ON c.id = d.claim_id WHERE d.status = 'open' AND c.organisation_id = ? AND c.subject_kind = 'user'",
+        orgId,
+      ),
+  };
+
+  // ---- coach references
+  const referenceWrites = {
+    create: create('verReferences'),
+    ...actsOn(kindActs('verReferences'), {
+      withdraw: (id: string, { at, reason }: { at: number; reason: string | null }) =>
         guarded(
           'ver_references',
           { id },
@@ -1379,7 +1648,7 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_references ${id} is not active`,
         ),
       /** A correction replaces the reference with its next version (created after this). */
-      supersede: (id) =>
+      supersede: (id: string) =>
         guarded(
           'ver_references',
           { id },
@@ -1388,20 +1657,28 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_references ${id} is not active`,
         ),
     }),
-    byId: (id) => read('verReferences', id),
-    forOrg: list('verReferences', 'org_id = ?'),
-    /** A player's references, every status. */
-    forPlayer: list('verReferences', 'player_id = ?'),
-    /** A player's active references. */
-    activeForPlayer: list('verReferences', "player_id = ? AND status = 'active'"),
-    hasActive: (playerId) =>
-      !!q("SELECT 1 FROM ver_references WHERE player_id = ? AND status = 'active' LIMIT 1").get(playerId),
   };
-  const playerInvites = {
-    ...writes({ create: create('verPlayerInvites') }),
-    ...actsOn('verPlayerInvites', {
+  const referenceReads = {
+    byId: (id: unknown): CoachReference | null => read('verReferences', id),
+    forOrg: (orgId: string): CoachReference[] => all('verReferences', 'org_id = ?', orgId),
+    /** A player's references, every status. */
+    forPlayer: (playerId: string): CoachReference[] => all('verReferences', 'player_id = ?', playerId),
+    /** A player's active references. */
+    activeForPlayer: (playerId: string): CoachReference[] =>
+      all('verReferences', "player_id = ? AND status = 'active'", playerId),
+    hasActive: (playerId: string): boolean =>
+      exists("SELECT 1 FROM ver_references WHERE player_id = ? AND status = 'active' LIMIT 1", playerId),
+  };
+
+  // ---- squad invitations
+  const inviteWrites = {
+    create: create('verPlayerInvites'),
+    ...actsOn(kindActs('verPlayerInvites'), {
       /** Accepted once, by the player (or their guardian, who is recorded). */
-      accept: (id, { playerId, at, guardianId = null }) =>
+      accept: (
+        id: string,
+        { playerId, at, guardianId = null }: { playerId: string; at: number; guardianId?: string | null },
+      ) =>
         guarded(
           'ver_player_invites',
           { id },
@@ -1416,15 +1693,21 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_player_invites ${id} is not pending`,
         ),
     }),
-    byId: (id) => read('verPlayerInvites', id),
-    forOrg: list('verPlayerInvites', 'org_id = ?'),
-    countSince: count('ver_player_invites', 'org_id = ? AND created_at > ?'),
-    acceptedForPlayer: list('verPlayerInvites', "player_id = ? AND status = 'accepted'"),
   };
-  const conflicts = {
-    ...writes({ create: create('verConflicts') }),
-    ...actsOn('verConflicts', {
-      withdraw: (id, { at }) =>
+  const inviteReads = {
+    byId: (id: unknown): PlayerInvite | null => read('verPlayerInvites', id),
+    forOrg: (orgId: string): PlayerInvite[] => all('verPlayerInvites', 'org_id = ?', orgId),
+    countSince: (orgId: string, since: number): number =>
+      countWhere('ver_player_invites', 'org_id = ? AND created_at > ?', orgId, since),
+    acceptedForPlayer: (playerId: string): PlayerInvite[] =>
+      all('verPlayerInvites', "player_id = ? AND status = 'accepted'", playerId),
+  };
+
+  // ---- conflict-of-interest declarations
+  const conflictWrites = {
+    create: create('verConflicts'),
+    ...actsOn(kindActs('verConflicts'), {
+      withdraw: (id: string, { at }: At) =>
         guarded(
           'ver_conflicts',
           { id },
@@ -1433,16 +1716,22 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_conflicts ${id} is already withdrawn`,
         ),
     }),
-    byId: (id) => read('verConflicts', id),
-    forOrg: list('verConflicts', 'org_id = ?'),
-    forOrgUser: list('verConflicts', 'org_id = ? AND user_id = ?'),
-    activeForUser: list('verConflicts', 'user_id = ? AND withdrawn_at IS NULL'),
   };
-  const domainRequests = {
-    ...writes({ create: create('verDomainRequests') }),
-    ...actsOn('verDomainRequests', {
+  const conflictReads = {
+    byId: (id: unknown): ConflictDeclaration | null => read('verConflicts', id),
+    forOrg: (orgId: string): ConflictDeclaration[] => all('verConflicts', 'org_id = ?', orgId),
+    forOrgUser: (orgId: string, userId: string): ConflictDeclaration[] =>
+      all('verConflicts', 'org_id = ? AND user_id = ?', orgId, userId),
+    activeForUser: (userId: string): ConflictDeclaration[] =>
+      all('verConflicts', 'user_id = ? AND withdrawn_at IS NULL', userId),
+  };
+
+  // ---- domain requests
+  const domainRequestWrites = {
+    create: create('verDomainRequests'),
+    ...actsOn(kindActs('verDomainRequests'), {
       /** The organisation proved the domain's mailbox. */
-      confirmByEmail: (id, { at }) =>
+      confirmByEmail: (id: string, { at }: At) =>
         guarded(
           'ver_domain_requests',
           { id },
@@ -1451,7 +1740,7 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_domain_requests ${id} is not in its email challenge`,
         ),
       /** Trust & Safety's decision on an escalated request. */
-      decide: (id, { approve, at, by }) =>
+      decide: (id: string, { approve, at, by }: { approve: boolean; at: number; by: Reviewer }) =>
         guarded(
           'ver_domain_requests',
           { id },
@@ -1465,103 +1754,120 @@ export function createVerificationRepository({ sqlite, unit = null, now = Date.n
           `ver_domain_requests ${id} is not awaiting review`,
         ),
     }),
-    byId: (id) => read('verDomainRequests', id),
-    forOrg: list('verDomainRequests', 'org_id = ?'),
-    awaitingReview: list('verDomainRequests', "status = 'requires_human_review'"),
   };
-  const domainRow = (orgId, domain) =>
-    q('SELECT * FROM org_verified_domains WHERE org_id = ? AND domain = ?').get(orgId, domain);
-  const domainView = (row) => {
+  const domainRequestReads = {
+    byId: (id: unknown): DomainRequest | null => read('verDomainRequests', id),
+    forOrg: (orgId: string): DomainRequest[] => all('verDomainRequests', 'org_id = ?', orgId),
+    awaitingReview: (): DomainRequest[] => all('verDomainRequests', "status = 'requires_human_review'"),
+  };
+
+  // ---- an organisation's verified domains
+  const domainRow = (orgId: string, domain: unknown) =>
+    q('SELECT * FROM org_verified_domains WHERE org_id = ? AND domain = ?').get(orgId, domain as SQLInputValue);
+  const domainView = (row: Row): VerifiedDomain => {
     const { orgId: _o, ...d } = decode(DOMAIN_SPEC, row);
     return deepFreeze(d);
   };
-  const domains = {
+  const domainReads = {
     /** An organisation's verified domains, in the order they were added. */
-    forOrg: (orgId) =>
+    forOrg: (orgId: string): VerifiedDomain[] =>
       q('SELECT * FROM org_verified_domains WHERE org_id = ? ORDER BY rowid').all(orgId).map(domainView),
-    has: (orgId, domain) => !!domainRow(orgId, domain),
+    has: (orgId: string, domain: string): boolean => !!domainRow(orgId, domain),
     /** The organisation other than `exceptOrgId` that verified `domain`, or null. */
-    verifiedElsewhere: (domain, exceptOrgId = null) =>
-      q(
-        'SELECT org_id FROM org_verified_domains WHERE domain = ? AND (? IS NULL OR org_id <> ?) ORDER BY rowid LIMIT 1',
-      ).get(domain, exceptOrgId, exceptOrgId)?.org_id ?? null,
-    ...writes({
-      add: (orgId, entry) =>
-        operation(() => {
-          const label = `${orgId}/${entry?.domain}`;
-          if (!isPlainObject(entry))
-            throw invalid(`org_verified_domains ${label}: an entry must be an object (got ${describe(entry)})`);
-          if (domainRow(orgId, entry.domain)) throw refuse('DUPLICATE', `org_verified_domains ${label} already exists`);
-          rowStep('org_verified_domains', label, 'row', () =>
-            st.orgVerifiedDomains.insert.run(
-              columnsOf('org_verified_domains', label, DOMAIN_SPEC, { ...entry, orgId }),
-            ),
-          );
-          const stored = domainView(domainRow(orgId, entry.domain));
-          readsBackAsWritten('org_verified_domains', label, entry, stored);
-          return stored;
-        }),
-      remove: (orgId, domain) =>
-        operation(
-          () => q('DELETE FROM org_verified_domains WHERE org_id = ? AND domain = ?').run(orgId, domain).changes > 0,
-        ),
-    }),
+    verifiedElsewhere: (domain: string, exceptOrgId: string | null = null): string | null =>
+      (
+        q(
+          'SELECT org_id FROM org_verified_domains WHERE domain = ? AND (? IS NULL OR org_id <> ?) ORDER BY rowid LIMIT 1',
+        ).get(domain, exceptOrgId, exceptOrgId) as { org_id: string } | undefined
+      )?.org_id ?? null,
+  };
+  const domainWrites = {
+    add: (orgId: string, entry: VerifiedDomainInput): VerifiedDomain =>
+      operation(() => {
+        const raw: unknown = entry;
+        const label = `${orgId}/${(raw as { domain?: unknown } | null | undefined)?.domain}`;
+        if (!isPlainObject(raw))
+          throw invalid(`org_verified_domains ${label}: an entry must be an object (got ${describe(raw)})`);
+        if (domainRow(orgId, raw.domain)) throw refuse('DUPLICATE', `org_verified_domains ${label} already exists`);
+        rowStep('org_verified_domains', label, 'row', () =>
+          st.orgVerifiedDomains.insert.run(
+            bind(columnsOf('org_verified_domains', label, DOMAIN_SPEC, { ...raw, orgId })),
+          ),
+        );
+        const stored = domainView(domainRow(orgId, raw.domain) as Row);
+        readsBackAsWritten('org_verified_domains', label, raw, stored);
+        return stored;
+      }),
+    remove: (orgId: string, domain: string): boolean =>
+      operation(
+        () => q('DELETE FROM org_verified_domains WHERE org_id = ? AND domain = ?').run(orgId, domain).changes > 0,
+      ),
   };
   const bootstrapMarker = {
     /** Has the one-time bootstrap (claims for organisations already verified) run on this database? */
-    ran: () => !!q("SELECT 1 FROM ver_migrations WHERE key = 'm14'").get(),
-    recordBootstrap: (at, claimsCreated) =>
+    ran: (): boolean => exists("SELECT 1 FROM ver_migrations WHERE key = 'm14'"),
+    recordBootstrap: (at: number, claimsCreated: number): void =>
       operation(() => {
         q("INSERT INTO ver_migrations (key, ran_at, claims_created) VALUES ('m14', ?, ?)").run(at, claimsCreated);
       }),
   };
-  const readOnly = (o) => Object.freeze(Object.fromEntries(Object.entries(o).filter(([k]) => !WRITES.has(k))));
   const counters = Object.fromEntries(
     VERIFICATION_COLLECTIONS.map((n) => [n, sqlite.prepare(`SELECT COUNT(*) AS n FROM ${ENTITIES[n].table}`)]),
-  );
-  const repo = {
-    claims,
-    events,
-    evidence,
-    tokens,
-    admins,
-    rootTransfers,
-    rootRequests,
-    disputes,
-    references,
-    playerInvites,
-    conflicts,
-    domainRequests,
-    domains,
-    bootstrap: bootstrapMarker,
-  };
+  ) as Record<VerificationCollection, StatementSync>;
+  const counts = () =>
+    Object.fromEntries(VERIFICATION_COLLECTIONS.map((n) => [n, (counters[n].get() as { n: number }).n])) as Record<
+      VerificationCollection,
+      number
+    >;
+  /** The queries alone, for modules and projectors that must not write (`verificationReads`). */
+  const reads = Object.freeze({
+    claims: Object.freeze(claimReads),
+    events: Object.freeze(eventReads),
+    evidence: Object.freeze(evidenceReads),
+    tokens: Object.freeze(tokenReads),
+    admins: Object.freeze(adminReads),
+    rootTransfers: Object.freeze(transferReads),
+    rootRequests: Object.freeze(rootRequestReads),
+    disputes: Object.freeze(disputeReads),
+    references: Object.freeze(referenceReads),
+    playerInvites: Object.freeze(inviteReads),
+    conflicts: Object.freeze(conflictReads),
+    domainRequests: Object.freeze(domainRequestReads),
+    domains: Object.freeze(domainReads),
+  });
   return {
-    ...repo,
-    /** The queries alone, for modules and projectors that must not write (`verificationReads`). */
-    reads: Object.freeze(
-      Object.fromEntries(
-        Object.entries(repo)
-          .filter(([k]) => k !== 'bootstrap')
-          .map(([k, v]) => [k, readOnly(v)]),
-      ),
-    ),
+    claims: { ...claimWrites, ...claimReads },
+    events: { ...eventWrites, ...eventReads },
+    evidence: { ...evidenceWrites, ...evidenceReads },
+    tokens: { ...tokenWrites, ...tokenReads },
+    admins: { ...adminWrites, ...adminReads },
+    rootTransfers: { ...transferWrites, ...transferReads },
+    rootRequests: { ...rootRequestWrites, ...rootRequestReads },
+    disputes: { ...disputeWrites, ...disputeReads },
+    references: { ...referenceWrites, ...referenceReads },
+    playerInvites: { ...inviteWrites, ...inviteReads },
+    conflicts: { ...conflictWrites, ...conflictReads },
+    domainRequests: { ...domainRequestWrites, ...domainRequestReads },
+    domains: { ...domainReads, ...domainWrites },
+    bootstrap: bootstrapMarker,
+    reads,
     /** Run `fn` as one transaction of this repository (joined into an open unit of work). */
-    atomically: (fn) => operation(fn),
-    attach() {
+    atomically: <T>(fn: () => T): T => operation(fn),
+    attach(): { counts: Record<VerificationCollection, number> } {
       if (!verificationLive(sqlite))
         throw new Error(
           `the verification repository needs ${VERIFICATION_MIGRATION} recorded; it never imports an in-memory array`,
         );
-      return { counts: this.counts() };
+      return { counts: counts() };
     },
-    counts() {
-      return Object.fromEntries(VERIFICATION_COLLECTIONS.map((n) => [n, counters[n].get().n]));
-    },
+    counts,
     pending: () => 0,
-    exportAll() {
+    exportAll(): VerificationRecords | null {
       return VERIFICATION_RECORDS.read(sqlite);
     },
     log,
     now,
   };
 }
+export type VerificationRepository = ReturnType<typeof createVerificationRepository>;
+export type VerificationReads = VerificationRepository['reads'];

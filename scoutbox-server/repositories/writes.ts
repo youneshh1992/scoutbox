@@ -19,7 +19,7 @@ export type FieldSpec = {
   c?: string;
   t?: 'text' | 'int' | 'num' | 'bool' | 'enum' | 'date';
   def?: unknown;
-  group?: FieldSpec[];
+  group?: readonly FieldSpec[];
   [option: string]: unknown;
 };
 /** A refusal: its `code` is `${prefix}_INPUT_INVALID`, `_DUPLICATE` or `_STATE_CONFLICT`. */

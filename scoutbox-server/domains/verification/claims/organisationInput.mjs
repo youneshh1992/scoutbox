@@ -8,7 +8,7 @@ import {
   CONFLICT_KINDS,
   METHODS,
   ROOT_ORG_TYPES,
-} from '../../../repositories/verification.mjs';
+} from '../../../repositories/verification.ts';
 
 export const optText = (max) => v.nullish(text(max));
 // A one-time code from an e-mail or an invitation (a 32-character base64url secret); anything longer cannot match.
