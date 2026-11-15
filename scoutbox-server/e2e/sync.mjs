@@ -34,7 +34,8 @@ const banner = (source) =>
 function rewrite(name, text) {
   let out = text;
   for (const [from, { to }] of Object.entries(HELPERS)) out = out.split(`'${from}'`).join(`'../${to}'`);
-  const internal = [...out.matchAll(/from '(\.\.\/\.\.\/[^']+)'/g)].map((m) => m[1]);
+  // Static (`from '../../…'`) and dynamic (`import('../../…')`) imports alike.
+  const internal = [...out.matchAll(/(?:from |import\()'(\.\.\/\.\.\/[^']+)'/g)].map((m) => m[1]);
   if (internal.length)
     throw new Error(`${name} imports TypeScript-server internals: ${[...new Set(internal)].join(', ')}`);
   if (!out.includes(SPAWN)) throw new Error(`${name} does not start its server with ${SPAWN}`);
