@@ -15,6 +15,7 @@ import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/secrets
 import scoutbox/platform/store
+import scoutbox/rows/org_invites
 import wisp.{type Request, type Response}
 
 type NewInvite {
@@ -159,7 +160,7 @@ pub fn accept(ctx: Ctx, req: Request) -> Response {
         None -> Ok(None)
       })
       case invite {
-        Some(invites.Invite(status: invites.Pending, ..) as invite) -> {
+        Some(invite) if invite.status == org_invites.Pending -> {
           use org <- result.map(orgs.by_id(read, invite.org_id))
           case org {
             Some(org) if !org.suspended -> Found(invite, org)
@@ -264,9 +265,9 @@ fn bind_account(
   now: Int,
 ) -> Result(#(Staff, Bool), store.Fail(staff.StaffError)) {
   case existing {
-    Some(staff.Staff(removed_at: Some(_), ..) as removed) -> {
+    Some(removed) if removed.removed_at != None -> {
       // A restored account starts without its old authenticator (the person may no longer have it).
-      use _ <- result.try(case removed.mfa {
+      use _ <- result.try(case staff.mfa(removed) {
         staff.NoMfa -> Ok(removed)
         _ -> staff.disable_mfa(tx, removed.id)
       })
@@ -339,7 +340,7 @@ fn onboarding(
       "mfa_leads",
       "Enable MFA for privileged accounts",
       list.all(leads, fn(u) {
-        case u.mfa {
+        case staff.mfa(u) {
           staff.MfaEnabled(_) -> True
           _ -> False
         }

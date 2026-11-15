@@ -45,9 +45,8 @@ pub fn org_session(
             None, _ -> Error(AuthRequired(False))
             Some(_), None -> Error(UserUnknown)
             Some(org), Some(user) if user.org_id != org.id -> Error(UserUnknown)
-            Some(_), Some(staff.Staff(removed_at: Some(_), ..)) ->
-              Error(UserRemoved)
-            Some(orgs.Org(suspended: True, ..)), Some(_) -> Error(Suspended)
+            Some(_), Some(user) if user.removed_at != None -> Error(UserRemoved)
+            Some(org), Some(_) if org.suspended -> Error(Suspended)
             Some(org), Some(user) -> Ok(OrgAccess(org:, user:))
           }
         }

@@ -17,6 +17,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/secrets
 import scoutbox/platform/store
 import scoutbox/platform/vocabulary
+import scoutbox/vocab/org_type
 import wisp.{type Request, type Response}
 
 pub type Platform {
@@ -146,7 +147,7 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
     )
   })
   use <- guard(
-    body.platform == Some(AgentApp) && org.org_type != orgs.Agency,
+    body.platform == Some(AgentApp) && org.type_ != org_type.Agency,
     fn() {
       http.error_message(
         403,
@@ -162,7 +163,7 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
         "SCOUT_NAME_REQUIRED",
         "Every session is attributed to a named individual.",
       )
-    Some(_) if org.has_password ->
+    Some(_) if org.password_hash != None ->
       // Not ported yet: password-protected organisations need scrypt, which OTP's crypto lacks, and the
       // routes that set a password (grassroots registration) are not in this server. No organisation it
       // can hold has one.
@@ -184,7 +185,7 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
           let read = store.reading(tx)
           use user <- result.try(staff.by_org_and_name(read, org.id, raw_name))
           case user {
-            Some(staff.Staff(removed_at: Some(_), ..)) -> Ok(#(Removed, []))
+            Some(user) if user.removed_at != None -> Ok(#(Removed, []))
             _ -> {
               use user <- result.try(second_factor(ctx, tx, user, body, now))
               use user <- result.try(provision(tx, org, user, name, body, now))
@@ -240,7 +241,7 @@ fn second_factor(
   now: Int,
 ) -> Result(Option(Staff), store.Fail(Refusal)) {
   case user {
-    Some(staff.Staff(mfa: staff.MfaEnabled(_), ..) as user) -> {
+    Some(user) if user.mfa_enabled_at != None -> {
       use <- guard_unit(limits.mfa_locked(ctx.limits, user.id, now), MfaLocked)
       use passed <- result.try(case body.mfa_code, body.recovery_code {
         Some(code), _ -> {
@@ -320,7 +321,7 @@ fn signed_in(org: Org, user: Staff, token: String) -> Response {
   let mfa_setup_required =
     org.mfa_required_for_leads
     && roles.is_lead_role(user.role)
-    && case user.mfa {
+    && case staff.mfa(user) {
       staff.MfaEnabled(_) -> False
       _ -> True
     }

@@ -3,107 +3,118 @@
 
 import gleam/dynamic/decode
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/platform/store.{type Store}
-import sqlight
+import scoutbox/rows/orgs as orgs_row
+import scoutbox/vocab/org_type
 
-type SeedOrg {
-  SeedOrg(
-    id: String,
-    name: String,
-    org_type: String,
-    level: String,
-    plan: String,
-    city: Option(String),
-    lat: Option(Float),
-    lng: Option(Float),
-    federation: Option(#(String, String)),
-    trusted_partner: Bool,
-    verified: Bool,
-    verified_domain: Option(String),
-    safeguarding_contract_signed: Bool,
-  )
+/// The demo organisations.
+fn orgs(now: Int) -> List(orgs_row.Row) {
+  [
+    orgs_row.Row(
+      ..orgs_row.new(
+        id: "org-eastport",
+        name: "Eastport FC",
+        type_: org_type.Club,
+        plan: orgs_row.PlanPro,
+        created_at: now,
+      ),
+      level: Some(orgs_row.LevelPro),
+      country: Some("GB"),
+      city: Some("Eastport"),
+      lat: Some(51.889),
+      lng: Some(1.02),
+      federation: None,
+      federation_registration_id: None,
+      trusted_partner: True,
+      verified: True,
+      verified_domain: Some("eastportfc.com"),
+      safeguarding_contract_signed: True,
+    ),
+    orgs_row.Row(
+      ..orgs_row.new(
+        id: "org-harbour",
+        name: "Harbour City FC",
+        type_: org_type.Club,
+        plan: orgs_row.PlanAcademy,
+        created_at: now,
+      ),
+      level: Some(orgs_row.LevelAcademy),
+      country: Some("GB"),
+      city: Some("Harbour City"),
+      lat: Some(53.408),
+      lng: Some(-2.983),
+      federation: None,
+      federation_registration_id: None,
+      trusted_partner: False,
+      verified: False,
+      verified_domain: None,
+      safeguarding_contract_signed: False,
+    ),
+    orgs_row.Row(
+      ..orgs_row.new(
+        id: "org-northstar",
+        name: "North Star Sports Agency",
+        type_: org_type.Agency,
+        plan: orgs_row.PlanAgency,
+        created_at: now,
+      ),
+      level: Some(orgs_row.LevelAgency),
+      country: Some("GB"),
+      city: None,
+      lat: None,
+      lng: None,
+      federation: None,
+      federation_registration_id: None,
+      trusted_partner: False,
+      verified: False,
+      verified_domain: None,
+      safeguarding_contract_signed: False,
+    ),
+    orgs_row.Row(
+      ..orgs_row.new(
+        id: "org-hackneymarsh",
+        name: "Hackney Marsh Rovers",
+        type_: org_type.Club,
+        plan: orgs_row.PlanGrassroots,
+        created_at: now,
+      ),
+      level: Some(orgs_row.LevelGrassroots),
+      country: Some("GB"),
+      city: Some("London"),
+      lat: Some(51.552),
+      lng: Some(-0.022),
+      federation: Some("The FA (England)"),
+      federation_registration_id: Some("FA-GR-2201"),
+      trusted_partner: False,
+      verified: True,
+      verified_domain: Some("hackneymarshrovers.org.uk"),
+      safeguarding_contract_signed: True,
+    ),
+    orgs_row.Row(
+      ..orgs_row.new(
+        id: "org-mossside",
+        name: "Moss Side Athletic",
+        type_: org_type.Club,
+        plan: orgs_row.PlanGrassroots,
+        created_at: now,
+      ),
+      level: Some(orgs_row.LevelGrassroots),
+      country: Some("GB"),
+      city: Some("Manchester"),
+      lat: Some(53.451),
+      lng: Some(-2.24),
+      federation: Some("The FA (England)"),
+      federation_registration_id: Some("FA-GR-1877"),
+      trusted_partner: False,
+      verified: False,
+      verified_domain: None,
+      safeguarding_contract_signed: False,
+    ),
+  ]
 }
-
-const orgs = [
-  SeedOrg(
-    "org-eastport",
-    "Eastport FC",
-    "club",
-    "pro",
-    "Pro",
-    Some("Eastport"),
-    Some(51.889),
-    Some(1.02),
-    None,
-    True,
-    True,
-    Some("eastportfc.com"),
-    True,
-  ),
-  SeedOrg(
-    "org-harbour",
-    "Harbour City FC",
-    "club",
-    "academy",
-    "Academy",
-    Some("Harbour City"),
-    Some(53.408),
-    Some(-2.983),
-    None,
-    False,
-    False,
-    None,
-    False,
-  ),
-  SeedOrg(
-    "org-northstar",
-    "North Star Sports Agency",
-    "agency",
-    "agency",
-    "Agency",
-    None,
-    None,
-    None,
-    None,
-    False,
-    False,
-    None,
-    False,
-  ),
-  SeedOrg(
-    "org-hackneymarsh",
-    "Hackney Marsh Rovers",
-    "club",
-    "grassroots",
-    "Grassroots",
-    Some("London"),
-    Some(51.552),
-    Some(-0.022),
-    Some(#("The FA (England)", "FA-GR-2201")),
-    False,
-    True,
-    Some("hackneymarshrovers.org.uk"),
-    True,
-  ),
-  SeedOrg(
-    "org-mossside",
-    "Moss Side Athletic",
-    "club",
-    "grassroots",
-    "Grassroots",
-    Some("Manchester"),
-    Some(53.451),
-    Some(-2.24),
-    Some(#("The FA (England)", "FA-GR-1877")),
-    False,
-    False,
-    None,
-    False,
-  ),
-]
 
 /// Loads the demo organisations into an empty database. A database that has any organisation is left alone:
 /// later boots never seed.
@@ -117,35 +128,11 @@ pub fn run(store: Store(effect), now: Int) -> Result(Bool, String) {
     ))
     case existing {
       [0] -> {
-        use _ <- result.try(list.try_each(orgs, insert(tx, _, now)))
+        use _ <- result.try(list.try_each(orgs(now), orgs_row.insert(tx, _)))
         Ok(#(True, []))
       }
       _ -> Ok(#(False, []))
     }
   })
   |> result.map_error(fn(e) { "seed: " <> string.inspect(e) })
-}
-
-fn insert(tx: store.Tx, o: SeedOrg, now: Int) -> Result(Nil, store.Fail(e)) {
-  store.run(
-    tx,
-    "INSERT INTO orgs (id, name, type, level, plan, country, city, lat, lng, federation, federation_registration_id, trusted_partner, verified, verified_domain, safeguarding_contract_signed, created_at) VALUES (?, ?, ?, ?, ?, 'GB', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [
-      sqlight.text(o.id),
-      sqlight.text(o.name),
-      sqlight.text(o.org_type),
-      sqlight.text(o.level),
-      sqlight.text(o.plan),
-      sqlight.nullable(sqlight.text, o.city),
-      sqlight.nullable(sqlight.float, o.lat),
-      sqlight.nullable(sqlight.float, o.lng),
-      sqlight.nullable(sqlight.text, option.map(o.federation, fn(f) { f.0 })),
-      sqlight.nullable(sqlight.text, option.map(o.federation, fn(f) { f.1 })),
-      sqlight.bool(o.trusted_partner),
-      sqlight.bool(o.verified),
-      sqlight.nullable(sqlight.text, o.verified_domain),
-      sqlight.bool(o.safeguarding_contract_signed),
-      sqlight.int(now),
-    ],
-  )
 }

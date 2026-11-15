@@ -1,14 +1,14 @@
 //// Organisation staff (`org_users`, `org_user_recovery_codes`).
 ////
-//// The TOTP secret and the recovery-code hashes are never on a `Staff` record: `mfa_secret_of` gives the secret
-//// to the code checks and `use_recovery_code` spends a code. Responses are allowlists, never the record.
+//// A `Staff` is the row, TOTP secret included; responses are allowlists, never the record, and only the code
+//// checks read the secret. Recovery-code hashes are never read back: `use_recovery_code` spends a code.
 ////
 //// Staff are removed softly (`removed_at`), never deleted. Staff sign in by name, so a name is unique in its
 //// organisation (case-insensitive, removed staff included; this module writes `name_key`); an e-mail is unique
 //// among an organisation's current staff. Each rule is checked before the write so the refusal can name it; the
 //// table's unique indexes are the backstop.
 
-import gleam/dynamic/decode.{type Decoder}
+import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -16,6 +16,7 @@ import gleam/string
 import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/org_users as row
 import sqlight
 
 pub const name_max = 120
@@ -31,6 +32,14 @@ pub type Mfa {
   MfaEnabled(at: Int)
 }
 
+pub fn mfa(staff: Staff) -> Mfa {
+  case staff.mfa_secret, staff.mfa_enabled_at {
+    _, Some(at) -> MfaEnabled(at)
+    Some(_), None -> MfaPending
+    None, None -> NoMfa
+  }
+}
+
 pub type DeliveryPrefs {
   DeliveryPrefs(
     quiet_start: Option(String),
@@ -41,25 +50,16 @@ pub type DeliveryPrefs {
 
 pub const default_prefs = DeliveryPrefs(None, None, True)
 
-pub type Provenance {
-  OrgPasswordBootstrap
+pub fn prefs(staff: Staff) -> DeliveryPrefs {
+  DeliveryPrefs(staff.quiet_start, staff.quiet_end, staff.email_enabled)
 }
 
-pub type Staff {
-  Staff(
-    id: String,
-    org_id: String,
-    name: String,
-    role: String,
-    email: Option(String),
-    created_at: Int,
-    removed_at: Option(Int),
-    removed_by_id: Option(String),
-    provenance: Option(Provenance),
-    mfa: Mfa,
-    prefs: DeliveryPrefs,
-  )
-}
+pub type Provenance =
+  row.Provenance
+
+/// The row, secret included: every response is an allowlist, and the secret only ever goes to the code checks.
+pub type Staff =
+  row.Row
 
 pub type StaffError {
   NotFound
@@ -79,55 +79,8 @@ pub fn name_key(name: String) -> String {
   name |> string.trim |> string.lowercase
 }
 
-const columns =
-  "id, org_id, name, role, email, created_at, removed_at, removed_by_id, provenance, mfa_secret IS NOT NULL, mfa_enabled_at, quiet_start, quiet_end, email_enabled"
-
 fn select(where: String) -> String {
-  "SELECT " <> columns <> " FROM org_users " <> where
-}
-
-fn decoder() -> Decoder(Staff) {
-  use id <- decode.field(0, decode.string)
-  use org_id <- decode.field(1, decode.string)
-  use name <- decode.field(2, decode.string)
-  use role <- decode.field(3, decode.string)
-  use email <- decode.field(4, decode.optional(decode.string))
-  use created_at <- decode.field(5, decode.int)
-  use removed_at <- decode.field(6, decode.optional(decode.int))
-  use removed_by_id <- decode.field(7, decode.optional(decode.string))
-  use provenance <- decode.field(
-    8,
-    decode.optional({
-      use s <- decode.then(decode.string)
-      case s {
-        "org_password_bootstrap" -> decode.success(OrgPasswordBootstrap)
-        _ -> decode.failure(OrgPasswordBootstrap, "a staff provenance")
-      }
-    }),
-  )
-  use has_secret <- decode.field(9, sqlight.decode_bool())
-  use enabled_at <- decode.field(10, decode.optional(decode.int))
-  use quiet_start <- decode.field(11, decode.optional(decode.string))
-  use quiet_end <- decode.field(12, decode.optional(decode.string))
-  use email_enabled <- decode.field(13, sqlight.decode_bool())
-  let mfa = case has_secret, enabled_at {
-    _, Some(at) -> MfaEnabled(at)
-    True, None -> MfaPending
-    False, None -> NoMfa
-  }
-  decode.success(Staff(
-    id:,
-    org_id:,
-    name:,
-    role:,
-    email:,
-    created_at:,
-    removed_at:,
-    removed_by_id:,
-    provenance:,
-    mfa:,
-    prefs: DeliveryPrefs(quiet_start:, quiet_end:, email: email_enabled),
-  ))
+  "SELECT " <> row.columns <> " FROM org_users " <> where
 }
 
 fn first(
@@ -135,7 +88,7 @@ fn first(
   where: String,
   args: List(sqlight.Value),
 ) -> Result(Option(Staff), Fail(e)) {
-  store.one(read, select(where), args, decoder())
+  store.one(read, select(where), args, row.decoder())
   |> result.map(option.from_result)
 }
 
@@ -175,7 +128,7 @@ pub fn for_org(
     read,
     select("WHERE org_id = ?" <> filter <> " ORDER BY rowid"),
     [sqlight.text(org_id)],
-    decoder(),
+    row.decoder(),
   )
 }
 
@@ -207,13 +160,8 @@ pub fn mfa_secret_of(
   read: Read,
   id: String,
 ) -> Result(Option(String), Fail(e)) {
-  store.one(
-    read,
-    "SELECT mfa_secret FROM org_users WHERE id = ?",
-    [sqlight.text(id)],
-    decode.at([0], decode.optional(decode.string)),
-  )
-  |> result.map(fn(found) { found |> option.from_result |> option.flatten })
+  by_id(read, id)
+  |> result.map(option.then(_, fn(staff) { staff.mfa_secret }))
 }
 
 // ---------------------------------------------------------------------------------------------- writes
@@ -334,8 +282,8 @@ pub fn create(tx: Tx, new: NewStaff) -> Result(Staff, Fail(StaffError)) {
         sqlight.nullable(sqlight.text, new.email),
         sqlight.int(new.created_at),
         sqlight.nullable(
-          sqlight.text,
-          option.map(new.provenance, fn(_) { "org_password_bootstrap" }),
+          fn(p) { sqlight.text(row.provenance_to_string(p)) },
+          new.provenance,
         ),
       ],
     ),
@@ -473,7 +421,7 @@ pub fn start_mfa(
 ) -> Result(Staff, Fail(StaffError)) {
   use before <- result.try(stored(tx, id))
   use <- refuse_when(
-    case before.mfa {
+    case mfa(before) {
       MfaEnabled(_) -> True
       _ -> False
     },
@@ -503,7 +451,7 @@ pub fn enable_mfa(
   recovery_hashes hashes: List(String),
 ) -> Result(Staff, Fail(StaffError)) {
   use before <- result.try(stored(tx, id))
-  use <- refuse_when(before.mfa != MfaPending, MfaNotPending)
+  use <- refuse_when(mfa(before) != MfaPending, MfaNotPending)
   use <- refuse_when(
     list.unique(hashes) != hashes || !list.all(hashes, is_hash),
     Invalid("recoveryHashes"),

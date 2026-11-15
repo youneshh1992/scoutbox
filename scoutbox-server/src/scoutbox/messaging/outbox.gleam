@@ -4,7 +4,6 @@
 //// The outbox also holds the messaging domain's delivery records (`source = 'delivery'`); they arrive with that
 //// domain.
 
-import gleam/dynamic/decode.{type Decoder}
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{Some}
@@ -13,44 +12,11 @@ import gleam/string
 import scoutbox/platform/ids
 import scoutbox/platform/paging.{type Page, IntKey}
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
+import scoutbox/rows/outbox as row
 import sqlight
 
-pub type Mail {
-  Mail(
-    seq: Int,
-    id: String,
-    ts: Int,
-    to: String,
-    subject: String,
-    text: String,
-    transport: String,
-    delivered: Bool,
-  )
-}
-
-fn decoder() -> Decoder(Mail) {
-  use seq <- decode.field(0, decode.int)
-  use id <- decode.field(1, decode.string)
-  use ts <- decode.field(2, decode.int)
-  use to <- decode.field(3, decode.string)
-  use subject <- decode.field(4, decode.string)
-  use text <- decode.field(5, decode.string)
-  use transport <- decode.field(6, decode.string)
-  use delivered <- decode.field(7, sqlight.decode_bool())
-  decode.success(Mail(
-    seq:,
-    id:,
-    ts:,
-    to:,
-    subject:,
-    text:,
-    transport:,
-    delivered:,
-  ))
-}
-
-const columns =
-  "seq, id, created_at, to_address, subject, text, transport, delivered"
+pub type Mail =
+  row.Row
 
 /// Records a mail on the dev transport. A subject or text longer than the columns hold is shortened, never
 /// refused: the mail still goes.
@@ -62,16 +28,20 @@ pub fn append(
   at at: Int,
 ) -> Result(Nil, Fail(e)) {
   use id <- result.try(ids.next(tx, "mail"))
-  store.run(
+  row.insert(
     tx,
-    "INSERT INTO outbox (id, source, created_at, to_address, subject, text, transport, delivered) VALUES (?, 'mailer', ?, ?, ?, ?, 'dev-outbox', 1)",
-    [
-      sqlight.text(id),
-      sqlight.int(at),
-      sqlight.text(to),
-      sqlight.text(string.slice(subject, 0, 300)),
-      sqlight.text(string.slice(text, 0, 10_000)),
-    ],
+    row.New(
+      ..row.new(
+        id:,
+        source: row.Mailer,
+        created_at: at,
+        to_address: to,
+        text: string.slice(text, 0, 10_000),
+        transport: row.DevOutbox,
+      ),
+      subject: Some(string.slice(subject, 0, 300)),
+      delivered: Some(True),
+    ),
   )
 }
 
@@ -87,12 +57,12 @@ pub fn page(
   use rows <- result.map(store.query(
     read,
     "SELECT "
-      <> columns
+      <> row.columns
       <> " FROM outbox WHERE source = 'mailer' "
       <> where
       <> " ORDER BY seq DESC LIMIT ?",
     list.append(args, [sqlight.int(page.limit + 1)]),
-    decoder(),
+    row.decoder(),
   ))
   paging.page_of(rows, page.limit, fn(m) { [IntKey(m.seq)] })
 }
@@ -100,11 +70,11 @@ pub fn page(
 pub fn view(m: Mail) -> Json {
   json.object([
     #("id", json.string(m.id)),
-    #("ts", json.int(m.ts)),
-    #("to", json.string(m.to)),
-    #("subject", json.string(m.subject)),
+    #("ts", json.int(m.created_at)),
+    #("to", json.string(m.to_address)),
+    #("subject", json.string(option.unwrap(m.subject, ""))),
     #("text", json.string(m.text)),
-    #("transport", json.string(m.transport)),
-    #("delivered", json.bool(m.delivered)),
+    #("transport", json.string(row.transport_to_string(m.transport))),
+    #("delivered", json.bool(option.unwrap(m.delivered, False))),
   ])
 }

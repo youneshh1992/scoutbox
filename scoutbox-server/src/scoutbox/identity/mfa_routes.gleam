@@ -26,7 +26,7 @@ fn code_shape() -> input.Shape(Option(String)) {
 }
 
 fn enabled(user: staff.Staff) -> Bool {
-  case user.mfa {
+  case staff.mfa(user) {
     staff.MfaEnabled(_) -> True
     _ -> False
   }
@@ -84,7 +84,7 @@ pub fn verify(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
   case store.read(ctx.store, staff.mfa_secret_of(_, user.id)) {
     Error(failure) -> http.internal(failure)
     Ok(None) -> http.error(409, "MFA_NOT_PENDING")
-    Ok(Some(_)) if user.mfa != staff.MfaPending ->
+    Ok(Some(_)) if user.mfa_enabled_at != None ->
       http.error(409, "MFA_NOT_PENDING")
     Ok(Some(secret)) ->
       case limits.mfa_locked(ctx.limits, user.id, now) {

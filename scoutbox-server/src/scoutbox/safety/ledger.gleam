@@ -5,18 +5,10 @@ import gleam/option.{type Option}
 import gleam/result
 import scoutbox/platform/ids
 import scoutbox/platform/store.{type Fail, type Tx}
-import sqlight
+import scoutbox/rows/ledger as row
 
-/// The ledger types this server writes so far. The table's CHECK lists every type the product has.
-pub type Type {
-  StaffRemoved
-}
-
-fn type_name(t: Type) -> String {
-  case t {
-    StaffRemoved -> "staff_removed"
-  }
-}
+pub type Type =
+  row.Type
 
 pub type Entry {
   Entry(
@@ -31,18 +23,15 @@ pub type Entry {
 
 pub fn append(tx: Tx, entry: Entry, at: Int) -> Result(Nil, Fail(e)) {
   use id <- result.try(ids.next(tx, "led"))
-  store.run(
+  row.insert(
     tx,
-    "INSERT INTO ledger (id, occurred_at, type, player_id, org_id, org_name, user_id, actor_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-    [
-      sqlight.text(id),
-      sqlight.int(at),
-      sqlight.text(type_name(entry.entry_type)),
-      sqlight.nullable(sqlight.text, entry.player_id),
-      sqlight.nullable(sqlight.text, entry.org_id),
-      sqlight.nullable(sqlight.text, entry.org_name),
-      sqlight.nullable(sqlight.text, entry.user_id),
-      sqlight.nullable(sqlight.text, entry.actor_name),
-    ],
+    row.New(
+      ..row.new(id:, occurred_at: at, type_: entry.entry_type),
+      player_id: entry.player_id,
+      org_id: entry.org_id,
+      org_name: entry.org_name,
+      user_id: entry.user_id,
+      actor_name: entry.actor_name,
+    ),
   )
 }

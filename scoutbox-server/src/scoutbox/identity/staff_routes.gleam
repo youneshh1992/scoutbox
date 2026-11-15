@@ -10,6 +10,7 @@ import scoutbox/identity/staff
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/store
+import scoutbox/rows/ledger as ledger_row
 import scoutbox/safety/ledger
 import wisp.{type Response}
 
@@ -58,7 +59,7 @@ pub fn remove(ctx: Ctx, access: OrgAccess, user_id: String) -> Response {
               use _ <- result.try(ledger.append(
                 tx,
                 ledger.Entry(
-                  entry_type: ledger.StaffRemoved,
+                  entry_type: ledger_row.StaffRemoved,
                   player_id: None,
                   org_id: Some(access.org.id),
                   org_name: Some(access.org.name),

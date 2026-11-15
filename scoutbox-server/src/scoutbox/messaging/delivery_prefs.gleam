@@ -55,14 +55,11 @@ pub fn put(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
           #(
             "prefs",
             json.object([
-              #(
-                "quietStart",
-                json.nullable(saved.prefs.quiet_start, json.string),
-              ),
-              #("quietEnd", json.nullable(saved.prefs.quiet_end, json.string)),
+              #("quietStart", json.nullable(saved.quiet_start, json.string)),
+              #("quietEnd", json.nullable(saved.quiet_end, json.string)),
               #(
                 "channels",
-                json.object([#("email", json.bool(saved.prefs.email))]),
+                json.object([#("email", json.bool(saved.email_enabled))]),
               ),
             ]),
           ),
