@@ -6,6 +6,7 @@
 //// stops. An act's bookkeeping (`Bookkeeping`) is written with it.
 
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -311,10 +312,54 @@ fn exactly_one(
   args: List(sqlight.Value),
   what: String,
 ) -> Result(Nil, Fail(e)) {
-  use changed <- result.map(store.write(tx, sql, args, decode.success(Nil)))
+  use changed <- result.try(store.write(tx, sql, args, decode.success(Nil)))
   case changed {
-    [_] -> Nil
-    _ -> panic as { "an Offer act's guard held: " <> what }
+    [_] -> Ok(Nil)
+    _ -> store.stale("an Offer act's guard held: " <> what)
+  }
+}
+
+/// Inside a unit: the Offer is still at the rev the route read it at, or the act lost a race. Every act on an
+/// Offer moves its rev, so this is the one check that makes the route's earlier checks still true.
+pub fn unchanged(tx: Tx, o: Offer) -> Result(Nil, Fail(e)) {
+  use found <- result.try(store.one(
+    store.reading(tx),
+    "SELECT rev FROM recruitment_offers WHERE id = ?",
+    [id.offer_sql(o.row.id)],
+    decode.at([0], decode.int),
+  ))
+  case found {
+    Ok(rev) if rev == o.row.rev -> Ok(Nil)
+    _ -> store.stale("the Offer moved from rev " <> int.to_string(o.row.rev))
+  }
+}
+
+/// Inside a unit: the case's Offers are still the ones the route read, each at the same rev, or the act lost a
+/// race (a second draft created beside this one, say).
+pub fn case_unchanged(
+  tx: Tx,
+  case_id: id.RecruitmentCaseId,
+  seen: List(Offer),
+) -> Result(Nil, Fail(e)) {
+  use now <- result.try(
+    store.query(
+      store.reading(tx),
+      "SELECT id, rev FROM recruitment_offers WHERE case_id = ? ORDER BY id",
+      [id.recruitment_case_sql(case_id)],
+      {
+        use oid <- decode.field(0, decode.string)
+        use rev <- decode.field(1, decode.int)
+        decode.success(#(oid, rev))
+      },
+    ),
+  )
+  let then =
+    seen
+    |> list.map(fn(o) { #(id.offer_to_string(o.row.id), o.row.rev) })
+    |> list.sort(fn(a, b) { string.compare(a.0, b.0) })
+  case now == then {
+    True -> Ok(Nil)
+    False -> store.stale("the case's Offers changed")
   }
 }
 

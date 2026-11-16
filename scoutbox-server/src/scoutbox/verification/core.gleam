@@ -999,6 +999,7 @@ pub fn look(
     Ok(response) -> response
     Error(store.Refuse(response)) -> response
     Error(store.Storage(e)) -> http.internal(e)
+    Error(store.Stale(what)) -> http.stale(what)
   }
 }
 

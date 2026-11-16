@@ -176,6 +176,7 @@ fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
     Ok(v) -> Ok(v)
     Error(store.Storage(e)) -> Error(store.Storage(e))
     Error(store.Refuse(_)) -> panic as "a storage read refused"
+    Error(store.Stale(what)) -> Error(store.Stale(what))
   }
 }
 
@@ -1949,6 +1950,7 @@ pub fn add_member(ctx: Ctx, req: Request, a: OrgAccess) -> Response {
                     |> result.map_error(fn(e) {
                       case e {
                         store.Storage(e) -> store.Storage(e)
+                        store.Stale(what) -> store.Stale(what)
                         store.Refuse(_) ->
                           store.Refuse(refuse("MEMBER_ALREADY_AFFILIATED", []))
                       }
@@ -2204,6 +2206,7 @@ pub fn end_member(
         |> result.map_error(fn(e) {
           case e {
             store.Storage(e) -> store.Storage(e)
+            store.Stale(what) -> store.Stale(what)
             store.Refuse(_) ->
               store.Refuse(http.internal("staff removal refused"))
           }

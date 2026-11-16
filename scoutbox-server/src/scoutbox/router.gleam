@@ -145,13 +145,25 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["offers", oid, "history"] ->
           only(req, Get, fn() { offer_routes.history(ctx, req, org, oid) })
         ["offers", oid, "draft"] ->
-          only(req, Patch, fn() { offer_routes.edit_draft(ctx, req, org, oid) })
+          only(req, Patch, fn() {
+            use req <- contract.rerun_on_stale(req)
+            offer_routes.edit_draft(ctx, req, org, oid)
+          })
         ["offers", oid, "issue"] ->
-          only(req, Post, fn() { offer_routes.issue(ctx, req, org, oid) })
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            offer_routes.issue(ctx, req, org, oid)
+          })
         ["offers", oid, "withdraw"] ->
-          only(req, Post, fn() { offer_routes.withdraw(ctx, req, org, oid) })
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            offer_routes.withdraw(ctx, req, org, oid)
+          })
         ["offers", oid, "revise"] ->
-          only(req, Post, fn() { offer_routes.revise(ctx, req, org, oid) })
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            offer_routes.revise(ctx, req, org, oid)
+          })
         ["recruitment", "offer-policy"] -> only(req, Get, offer_routes.policy)
         ["rooms-funnel"] ->
           only(req, Get, fn() { room_routes.funnel(ctx, org) })
@@ -349,6 +361,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["offers", oid, "accept"] ->
           only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
             offer_routes.respond(
               ctx,
               req,
@@ -359,6 +372,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["offers", oid, "decline"] ->
           only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
             offer_routes.respond(
               ctx,
               req,
@@ -369,6 +383,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["offers", oid, "share-agent"] ->
           only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
             offer_routes.share_agent(ctx, req, player, oid)
           })
         ["offers", oid, "documents", doc] ->
@@ -525,6 +540,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["offers", oid, "accept"] ->
           only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
             offer_routes.respond(
               ctx,
               req,
@@ -535,6 +551,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           })
         ["offers", oid, "decline"] ->
           only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
             offer_routes.respond(
               ctx,
               req,
@@ -943,6 +960,7 @@ fn not_found() -> Response {
 fn baseline(ctx: Ctx, handler: fn() -> Response) -> Response {
   let response =
     handler()
+    |> contract.settled
     |> wisp.set_header("x-scoutbox-schema", int.to_string(ctx.schema_version))
     |> wisp.set_header("x-content-type-options", "nosniff")
     |> wisp.set_header("referrer-policy", "no-referrer")
@@ -1158,7 +1176,10 @@ fn rooms(
       room_routes.request_combine(ctx, req, org, room(rid))
     [rid, "link"], Post -> room_routes.link(ctx, req, org, room(rid))
     [rid, "offers"], Get -> offer_routes.surface(ctx, req, org, room(rid))
-    [rid, "offers"], Post -> offer_routes.create(ctx, req, org, room(rid))
+    [rid, "offers"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      offer_routes.create(ctx, req, org, room(rid))
+    }
     [rid, "journey"], Get -> case_routes.journey(ctx, req, org, room(rid))
     [rid, "lifecycle"], Post ->
       case_routes.lifecycle_act(ctx, req, org, room(rid))

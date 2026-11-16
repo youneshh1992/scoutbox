@@ -494,8 +494,21 @@ would mean porting most of the product under the heading "platform". So:
    - **Platform:** `input.distinct_list`, and a value that is not a list now says `not_list`, as the TypeScript
      server does (it said `invalid`).
    - **Left for the offer batteries:** the transaction workspace (creating one from a club's handoff, notes, the
-     Offer readiness at issue, and S13's input refusal); racing Offer acts, which answer 500 where a guarded write
-     loses (F1–F9, G1, G3, P1–P6); and F7, which needs the first unknown field in the order sent.
+     Offer readiness at issue, and S13's input refusal).
+
+   **Racing Offer acts [done].** `offersAdversarial` passes unchanged and is in `BATTERIES` (185 checks; three runs
+   in a row). As built:
+   - **A lost race is a value, not a panic.** `store.stale(what)` (a third `Fail`, `Lost` in `UnitError`) rolls the
+     unit back. Every Offer act's unit first checks the Offer is still at the rev its route read
+     (`offers.unchanged`; a draft checks the case's Offers, `offers.case_unchanged`), and the guarded writes say
+     `stale` instead of panicking.
+   - **The route runs again from the top** (`http.rerun_on_stale`, around the ten Offer write routes in the router),
+     so the loser answers from the winner's state: a 409, or a replay of its client key. The body is read once and
+     replayed; a re-run isn't charged a rate limit twice (`http.rerun`, a header a client can't send). After five
+     losses it gives up with a logged 500, and a stale answer from an unwrapped route is logged by `http.settled`.
+     Mutation-checked: without the rev check, F3, F5 and P1c–P3c fail.
+   - **Battery changes at the source** (`offersAdversarial`): F7 accepts whichever forged field is named, since
+     which comes first isn't the contract; and Y's accepted Offer no longer depends on which racer won P4.
 
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open
    trials, vouches, pairing and exports), `platform/contracts` (Rooms, briefs), `platform/productionHardening`

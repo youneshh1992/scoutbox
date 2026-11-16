@@ -169,6 +169,7 @@ pub fn answer(r: Result(Response, store.UnitError(Response))) -> Response {
   case r {
     Ok(response) -> response
     Error(store.Refused(response)) -> response
+    Error(store.Lost(what)) -> http.stale(what)
     Error(e) -> http.internal(e)
   }
 }
@@ -178,6 +179,7 @@ pub fn read_answer(r: Result(Response, Fail(Response))) -> Response {
     Ok(response) -> response
     Error(store.Refuse(response)) -> response
     Error(store.Storage(e)) -> http.internal(e)
+    Error(store.Stale(what)) -> http.stale(what)
   }
 }
 
@@ -218,6 +220,7 @@ pub fn with_room(
     Ok(room) -> next(room)
     Error(store.Refuse(response)) -> response
     Error(store.Storage(e)) -> http.internal(e)
+    Error(store.Stale(what)) -> http.stale(what)
   }
 }
 
@@ -1758,6 +1761,7 @@ pub fn edit_comment(
   case found {
     Error(store.Refuse(r)) -> r
     Error(store.Storage(e)) -> http.internal(e)
+    Error(store.Stale(what)) -> http.stale(what)
     Ok(c) if c.row.author_user_id != a.user.id ->
       http.error_message(
         403,

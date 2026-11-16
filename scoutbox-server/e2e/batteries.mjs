@@ -15,4 +15,5 @@ export const BATTERIES = [
   'recruitment/rooms',
   'recruitment/decisionsPersistence',
   'recruitment/offersPersistence',
+  'recruitment/offersAdversarial',
 ];

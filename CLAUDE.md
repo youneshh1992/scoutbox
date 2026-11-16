@@ -77,6 +77,9 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   unit sends none. Never send anything from inside a unit. Tests assert what an act asks for with
   `store.unit_effects`, which returns the effects instead of dispatching them. An effect from a branch the unit
   recovers from is kept, as that branch's row writes are.
+- An act whose checks ran before its unit re-checks inside it (a rev, say) and answers `store.stale(what)` when
+  another request moved the state first, never a panic. Its route is wrapped in `http.rerun_on_stale`, which runs
+  it again from the top so it answers from the new state.
 - Expected failures are values: `store.refuse(e)` rolls the unit back. Map one act's refusals into another's
   with `store.map_refusal`. `panic` and `let assert` are for broken invariants only.
 - Request input is read with `platform/input` shapes. It is valid as sent or refused in the shared refusal

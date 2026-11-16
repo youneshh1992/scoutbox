@@ -5,20 +5,123 @@ import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/http/request
+import gleam/http/response
 import gleam/json.{type Json}
 import gleam/list
 import gleam/result
 import gleam/string
 import scoutbox/platform/input.{type Refusal, type Shape}
 import wisp.{type Request, type Response}
+import wisp/internal
 
 pub fn json(status: Int, body: Json) -> Response {
   wisp.json_response(json.to_string(body), status)
 }
 
+// ------------------------------------------------------------------------------------------- lost races
+
+const stale_header = "x-scoutbox-stale"
+
+const rerun_header = "x-scoutbox-rerun"
+
+/// How many times a route that keeps losing its race is run before it gives up with a 500.
+const rerun_attempts = 5
+
+/// The answer to an act that lost a race (`store.stale`). Under `rerun_on_stale` the route runs again; anywhere
+/// else it is the 500 it looks like, logged by `settled`. A lost race that is run again isn't an error, so it
+/// isn't logged here.
+pub fn stale(what: String) -> Response {
+  internal_body()
+  |> response.set_header(stale_header, what)
+}
+
+/// The response as it leaves the server: a lost race that was never run again becomes a logged 500.
+pub fn settled(answer: Response) -> Response {
+  case response.get_header(answer, stale_header) {
+    Error(Nil) -> answer
+    Ok(what) -> {
+      wisp.log_error(
+        "internal error: lost a race and was not run again: " <> what,
+      )
+      response.Response(
+        ..answer,
+        headers: without(answer.headers, stale_header),
+      )
+    }
+  }
+}
+
+/// Runs `handler`, and runs it again from the top while it answers `stale`, so a request that lost a race to
+/// another answers from the state the winner left: a 409, or a replay of a repeated client key. This is what the
+/// TypeScript server gets from checking and writing on one thread.
+///
+/// The body is read once and given to every run. A run after the first is marked (`rerun`), so the work it
+/// already did before its unit, such as charging a rate limit, isn't done twice. A client can't send the mark.
+pub fn rerun_on_stale(
+  req: Request,
+  handler: fn(Request) -> Response,
+) -> Response {
+  let req = request.Request(..req, headers: without(req.headers, rerun_header))
+  case wisp.read_body_bits(req) {
+    // Too large or cut off: the handler meets the same failure reading it.
+    Error(Nil) ->
+      handler(request.set_body(
+        req,
+        internal.Connection(..req.body, reader: fn(_) { Error(Nil) }),
+      ))
+    Ok(bits) -> {
+      let replayed = fn(r: Request) {
+        let canned =
+          wisp.create_canned_connection(bits, wisp.get_secret_key_base(r))
+        request.set_body(
+          r,
+          internal.Connection(..r.body, reader: canned.reader),
+        )
+      }
+      run_until_settled(replayed(req), replayed, handler, 1)
+    }
+  }
+}
+
+fn run_until_settled(
+  req: Request,
+  replayed: fn(Request) -> Request,
+  handler: fn(Request) -> Response,
+  attempt: Int,
+) -> Response {
+  let answer = handler(req)
+  case response.get_header(answer, stale_header) {
+    Error(Nil) -> answer
+    Ok(_) if attempt >= rerun_attempts -> settled(answer)
+    Ok(_) ->
+      run_until_settled(
+        replayed(request.set_header(req, rerun_header, "1")),
+        replayed,
+        handler,
+        attempt + 1,
+      )
+  }
+}
+
+fn without(
+  headers: List(#(String, String)),
+  name: String,
+) -> List(#(String, String)) {
+  list.filter(headers, fn(h) { h.0 != name })
+}
+
+/// True when this run of a route is a re-run after a lost race (`rerun_on_stale`).
+pub fn rerun(req: Request) -> Bool {
+  request.get_header(req, rerun_header) == Ok("1")
+}
+
 /// A 500 with fixed text; the detail goes to the log, never to the client.
 pub fn internal(detail: a) -> Response {
   wisp.log_error("internal error: " <> string.inspect(detail))
+  internal_body()
+}
+
+fn internal_body() -> Response {
   json(
     500,
     json.object([

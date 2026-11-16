@@ -42,6 +42,14 @@ pub opaque type Read {
 pub type Fail(e) {
   Storage(sqlight.Error)
   Refuse(e)
+  /// What the act read before its unit no longer holds: another request changed it first. The unit rolls back,
+  /// and the route runs again from the top (`http.rerun_on_stale`), so it answers from the new state.
+  Stale(String)
+}
+
+/// The act lost a race: what it checked before the unit has changed. `what` names the check, for the log.
+pub fn stale(what: String) -> Result(a, Fail(e)) {
+  Error(Stale(what))
 }
 
 /// Refuses the act with `e`: the unit rolls back.
@@ -55,6 +63,7 @@ pub fn map_refusal(r: Result(a, Fail(e)), f: fn(e) -> f) -> Result(a, Fail(f)) {
     Ok(v) -> Ok(v)
     Error(Storage(e)) -> Error(Storage(e))
     Error(Refuse(e)) -> Error(Refuse(f(e)))
+    Error(Stale(what)) -> Error(Stale(what))
   }
 }
 
@@ -63,6 +72,8 @@ pub type UnitError(e) {
   Refused(e)
   /// SQLite refused something (a CHECK, a key, a decode): rolled back.
   Database(sqlight.Error)
+  /// The act lost a race (`stale`): rolled back, to be run again.
+  Lost(String)
   /// The work's process crashed: rolled back, and the writer carries on.
   Crashed(String)
   /// No answer in time. The unit may still commit: its outcome is unknown, not failed.
@@ -248,6 +259,7 @@ fn run_unit(
   let outcome = case work(Tx(conn, should_fail, effects)) {
     Error(Refuse(e)) -> Error(Refused(e))
     Error(Storage(e)) -> Error(Database(e))
+    Error(Stale(what)) -> Error(Lost(what))
     Ok(value) -> {
       // `internal:unit.sqlite_commit`: the real COMMIT fails, on a deferred foreign key left dangling on purpose.
       case should_fail("unit.sqlite_commit") {

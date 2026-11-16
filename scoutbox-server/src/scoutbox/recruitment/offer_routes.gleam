@@ -96,14 +96,19 @@ fn rate_limited(action: limits.Action) -> Response {
   )
 }
 
+/// A re-run after a lost race was charged on its first run.
 fn limited(
   ctx: Ctx,
+  req: Request,
   action: limits.Action,
   owner: String,
   now: Int,
   next: fn() -> Response,
 ) -> Response {
-  case limits.limited(ctx.limits, action, owner, clock.now_ms()) {
+  case
+    !http.rerun(req)
+    && limits.limited(ctx.limits, action, owner, clock.now_ms())
+  {
     True -> rate_limited(action)
     False -> {
       let _ = now
@@ -1117,6 +1122,7 @@ pub fn create(
                 _, _, _, case_lifecycle.Holds(_, decision_id), None -> {
                   use <- limited(
                     ctx,
+                    req,
                     limits.OfferDraftWrite,
                     id.org_to_string(a.org.id),
                     now,
@@ -1140,6 +1146,9 @@ pub fn create(
                             org_context(a, "recruitment_offer"),
                           )
                           store.unit(ctx.store, fn(tx) {
+                            use _ <- result.try(
+                              offers.case_unchanged(tx, r.id, all) |> storage,
+                            )
                             use offer_id <- result.try(
                               offers.create(
                                 tx,
@@ -1327,6 +1336,7 @@ pub fn edit_draft(
           use <- rev_gate(raw, o)
           use <- limited(
             ctx,
+            req,
             limits.OfferDraftWrite,
             id.org_to_string(a.org.id),
             now,
@@ -1347,6 +1357,7 @@ pub fn edit_draft(
               }
               use <- moderated(ctx, given, org_context(a, "recruitment_offer"))
               store.unit(ctx.store, fn(tx) {
+                use _ <- result.try(offers.unchanged(tx, o) |> storage)
                 use _ <- result.try(
                   offers.edit_draft(
                     tx,
@@ -1495,7 +1506,7 @@ pub fn issue(
           )
         _, _ -> {
           use <- rev_gate(raw, o)
-          issue_checked(ctx, a, o, room, role, rev, key, now)
+          issue_checked(ctx, req, a, o, room, role, rev, key, now)
         }
       }
     }
@@ -1504,6 +1515,7 @@ pub fn issue(
 
 fn issue_checked(
   ctx: Ctx,
+  req: Request,
   a: OrgAccess,
   o: Offer,
   room: Room,
@@ -1635,6 +1647,7 @@ fn issue_checked(
                         False -> {
                           use <- limited(
                             ctx,
+                            req,
                             limits.OfferIssue,
                             id.org_to_string(a.org.id),
                             now,
@@ -1680,6 +1693,7 @@ fn issue_write(
     })
     |> option.from_result
   store.unit(ctx.store, fn(tx) {
+    use _ <- result.try(offers.unchanged(tx, o) |> storage)
     use _ <- result.try(
       offers.issue_revision(
         tx,
@@ -1976,12 +1990,14 @@ pub fn withdraw(
           use <- rev_gate(raw, o)
           use <- limited(
             ctx,
+            req,
             limits.OfferWithdraw,
             id.org_to_string(a.org.id),
             now,
           )
           let was_issued = from == Issued
           store.unit(ctx.store, fn(tx) {
+            use _ <- result.try(offers.unchanged(tx, o) |> storage)
             use _ <- result.try(
               offers.withdraw_revision(
                 tx,
@@ -2222,7 +2238,7 @@ pub fn revise(
                   let assert Some(prev) = offer_rules.current_revision(o)
                     as "a sound Offer has its revision"
                   use <- rev_gate(raw, o)
-                  revise_checked(ctx, a, o, room, prev, from, b, key, now)
+                  revise_checked(ctx, req, a, o, room, prev, from, b, key, now)
                 }
               }
           }
@@ -2232,6 +2248,7 @@ pub fn revise(
 
 fn revise_checked(
   ctx: Ctx,
+  req: Request,
   a: OrgAccess,
   o: Offer,
   room: Room,
@@ -2275,6 +2292,7 @@ fn revise_checked(
     Ok(#(terms, m, expires, doc_refs)) -> {
       use <- limited(
         ctx,
+        req,
         limits.OfferDraftWrite,
         id.org_to_string(a.org.id),
         now,
@@ -2304,6 +2322,7 @@ fn revise_checked(
             _ -> None
           }
           store.unit(ctx.store, fn(tx) {
+            use _ <- result.try(offers.unchanged(tx, o) |> storage)
             use revision_id <- result.try(
               offers.add_revision(
                 tx,
@@ -2909,6 +2928,7 @@ pub fn respond(
                           )
                           use <- limited(
                             ctx,
+                            req,
                             limits.OfferResponse,
                             where(r) <> ":" <> actor_id(r),
                             now,
@@ -2981,6 +3001,7 @@ fn respond_write(
   }
   let who = offers.Recipient(kind_of(r), actor_id(r), Some(actor_name(r)))
   store.unit(ctx.store, fn(tx) {
+    use _ <- result.try(offers.unchanged(tx, o) |> storage)
     let rd = store.reading(tx)
     use response_id <- result.try(
       offers.record_response(
@@ -3274,6 +3295,7 @@ pub fn share_agent(
         // Un-sharing needs no agent, so a client whose mandate ended can still clear the share.
         Some(False) ->
           store.unit(ctx.store, fn(tx) {
+            use _ <- result.try(offers.unchanged(tx, o) |> storage)
             use _ <- result.try(
               offers.set_agent_share(tx, o.row.id, None) |> storage,
             )
@@ -3348,6 +3370,7 @@ pub fn share_agent(
               )
             Ok(#(Some(agreement), _)) ->
               store.unit(ctx.store, fn(tx) {
+                use _ <- result.try(offers.unchanged(tx, o) |> storage)
                 use _ <- result.try(
                   offers.set_agent_share(
                     tx,
