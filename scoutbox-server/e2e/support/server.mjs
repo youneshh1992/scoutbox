@@ -1,18 +1,19 @@
-// How a battery starts the Gleam server: the Erlang release `npm run e2e` builds once
-// (`gleam export erlang-shipment`), so a battery's boot is the BEAM's, not a compile.
+// How a battery starts the Gleam server: `spawn(...serverCommand(), { cwd: serverDir, env })`, against the Erlang
+// release `npm run e2e` builds once (`gleam export erlang-shipment`), so a battery's boot is the BEAM's, not a
+// compile. The entrypoint `exec`s erl, so the child a battery kills is the BEAM itself.
 //
-// The batteries come from the TypeScript server, where they run `spawn('node', ['server.mjs'], …)` with the
-// server directory as cwd; e2e/sync.mjs rewrites that line to `spawn(...gleamServer(), …)`. The entrypoint
-// `exec`s erl, so the child a battery kills is the BEAM itself.
+// This is the one file under e2e/support/ that this repository writes: the TypeScript server's own launcher starts
+// its server.mjs, and e2e/sync.mjs copies everything else verbatim.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const ENTRYPOINT = path.join(SERVER_DIR, 'build', 'erlang-shipment', 'entrypoint.sh');
+/** The server's directory: the working directory a battery starts it in. */
+export const serverDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const ENTRYPOINT = path.join(serverDir, 'build', 'erlang-shipment', 'entrypoint.sh');
 
-/** `[command, args]` for `spawn`. */
-export function gleamServer() {
+/** `[command, args]` that start the server, for `spawn`. */
+export function serverCommand() {
   if (!fs.existsSync(ENTRYPOINT))
     throw new Error(`${ENTRYPOINT} is missing: run the batteries with \`npm run e2e\`, which builds the release first`);
   return [ENTRYPOINT, ['run']];

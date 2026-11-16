@@ -1,0 +1,16 @@
+{
+  "$source": "domains/recruitment/lifecycle/decisionRoutes.mjs",
+  "DECISION_INPUT_CODES": {
+    "codes": {
+      "FIELD_INVALID": "DECISION_CONTENT_INVALID"
+    },
+    "fieldCodes": {
+      "outcome": "DECISION_OUTCOME_INVALID",
+      "reasonCodes.*": "DECISION_REASON_INVALID",
+      "evidenceRefs.*": "DECISION_EVIDENCE_INVALID",
+      "expectedRev": "DECISION_REV_REQUIRED",
+      "expectedVersion": "DECISION_REV_REQUIRED",
+      "supersedesRev": "DECISION_REV_REQUIRED"
+    }
+  }
+}

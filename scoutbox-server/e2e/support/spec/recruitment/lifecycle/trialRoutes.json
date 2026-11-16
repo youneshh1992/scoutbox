@@ -1,0 +1,20 @@
+{
+  "$source": "domains/recruitment/lifecycle/trialRoutes.mjs",
+  "TRIAL_INPUT_CODES": {
+    "codes": {
+      "FIELD_INVALID": "TRIAL_CONTENT_INVALID"
+    },
+    "fieldCodes": {
+      "expectedRev": "TRIAL_REV_REQUIRED",
+      "expectedVersion": "TRIAL_REV_REQUIRED",
+      "timezone": "TRIAL_TIMEZONE_INVALID",
+      "venue.*": "TRIAL_VENUE_INVALID",
+      "slots.*": "TRIAL_SLOTS_INVALID",
+      "sessions.*": "TRIAL_SCHEDULE_INVALID",
+      "sessions.venue.*": "TRIAL_VENUE_INVALID",
+      "state": "TRIAL_ATTENDANCE_INVALID",
+      "note": "TRIAL_ATTENDANCE_INVALID",
+      "boxSessionId": "TRIAL_EVIDENCE_REF_INVALID"
+    }
+  }
+}

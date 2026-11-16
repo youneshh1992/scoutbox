@@ -1,0 +1,50 @@
+{
+  "$source": "domains/agents/transactions/transaction.mjs",
+  "TRANSACTION_STATUSES": [
+    "DRAFT",
+    "PARTIES_CONFIRMED",
+    "COMPLIANCE_PENDING",
+    "COMPLIANCE_BLOCKED",
+    "READY",
+    "ACTIVE",
+    "ON_HOLD",
+    "CANCELLED",
+    "CLOSED",
+    "ARCHIVED"
+  ],
+  "TERMINAL_STATUSES": [
+    "CANCELLED",
+    "CLOSED",
+    "ARCHIVED"
+  ],
+  "DOCUMENT_TYPES": [
+    "representation_agreement_reference",
+    "compliance_consent_reference",
+    "guardian_evidence",
+    "mandate",
+    "term_sheet_draft",
+    "employment_contract_draft",
+    "club_document",
+    "regulatory_evidence",
+    "correspondence_attachment"
+  ],
+  "DOCUMENT_VISIBILITY": [
+    "AGENT_PRIVATE",
+    "PLAYER_PRIVATE",
+    "ENGAGING_CLUB_PRIVATE",
+    "RELEASING_CLUB_PRIVATE",
+    "PLAYER_AGENT_SHARED",
+    "ENGAGING_AGENT_SHARED",
+    "RELEASING_AGENT_SHARED",
+    "ALL_TRANSACTION_PARTIES",
+    "T_AND_S_ONLY"
+  ],
+  "TIMELINE_AUDIENCES": [
+    "all_parties",
+    "agent_only",
+    "player_and_agent",
+    "club_side",
+    "per_document",
+    "audit_only"
+  ]
+}

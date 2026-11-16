@@ -204,16 +204,27 @@ Done on `battery-untangle` in `../scoutbox` (off `typescript-foundation`). `npm 
    Every battery is listed today, the 10 clean ones included, because all of them import `testPort.mjs` and
    start `server.mjs` themselves. Step 2 clears those.
 
-### 2. Mechanical normalisation (all 56 batteries, one codemod)
+### 2. Mechanical normalisation (all 56 batteries, one codemod) [done]
 
-- Change every spawn to `spawn(...serverCommand(), { cwd: serverDir, … })`, and drop each battery's own
-  `SERVER` and `SERVER_DIR` path. Script it and review the diff by eye: there are three spellings today.
-- Move `testPort.mjs` and `totp.mjs` into `e2e/support/`. The battery is their only user besides the server's
-  own `totp` use, which keeps its copy. Add a drift check if both copies stay.
-- In the Gleam repository, `sync.mjs` becomes a verbatim copy of `e2e/**` (the battery list plus `support/`),
-  except `support/server.mjs`, which this repository owns, and the `TYPESCRIPT_ONLY` batteries, which it never
-  copies. The rewrite code goes, and the guard becomes `support/boundary.mjs`, the same check `runE2E.mjs` uses.
-  The three ported batteries must still pass.
+Done on `battery-untangle`. As built:
+
+- **Spawns.** A one-off codemod rewrote every server start in the 53 batteries outside `TYPESCRIPT_ONLY` to
+  `spawn(...serverCommand(), { cwd: serverDir, … })` and dropped their `SERVER`/`SERVER_DIR` paths, along with
+  any `HERE`, `ROOT`, `fileURLToPath` or `path` that was then unused. (`cwd` was already the server directory
+  wherever it was missing, because `runE2E.mjs` runs batteries from there.) `scouting/clubWorkflows`' header
+  comment no longer names `node server.mjs`. The `TYPESCRIPT_ONLY` batteries were left alone, apart from their
+  `testPort.mjs` import path.
+- **`testPort.mjs`** moved to `e2e/support/`. The unit suites in `scripts/` import it from there, so there is one copy.
+- **`totp.mjs`.** `e2e/support/totp.mjs` is a separate authenticator: `totp(secret, nowMs)` only, written for
+  the battery, not copied from the server. `testE2ESupport` proves it agrees with `domains/identity/totp.mjs` on the
+  RFC 6238 vectors and 200 random secrets and times. `operations/clubOperations` still imports the server's
+  `totp`/`totpValid`/`b32encode`: its "unit fixtures" section tests them, and it moves to a rules suite in step 4.
+- **Boundary fix.** The "starts the server itself" rule matched the launcher's own import (`support/server.mjs`);
+  it now excludes it, with a test both ways. With that, the 10 clean batteries came off `NOT_YET_NEUTRAL` (43 left).
+- **Gleam `sync.mjs`** copies `support/**` (except `support/server.mjs`) and the listed batteries byte for byte,
+  without banners. It refuses a `TYPESCRIPT_ONLY` battery and any boundary problem, using the TypeScript tree's
+  `boundary.mjs`. `--check` also reports copies that no longer have a source, and a sync removes them. The Gleam
+  `support/server.mjs` exports `serverCommand`/`serverDir` like the TypeScript one. The three ported batteries pass.
 
 ### 3. Calibrate on three heavy batteries
 

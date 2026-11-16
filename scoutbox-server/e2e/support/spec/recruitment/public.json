@@ -1,0 +1,19 @@
+{
+  "$source": "domains/recruitment/public.mjs",
+  "OPEN_ROOM_STATUSES": [
+    "watching",
+    "under_review",
+    "contact_planned",
+    "contacted",
+    "shortlisted",
+    "priority",
+    "trial_requested",
+    "trial_scheduled",
+    "trial_completed",
+    "offer_consideration",
+    "offer_made",
+    "offer_accepted",
+    "offer_declined",
+    "on_hold"
+  ]
+}

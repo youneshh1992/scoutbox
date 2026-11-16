@@ -1,4 +1,3 @@
-// Copied from the TypeScript server's e2e/platform/safeguarding.mjs by e2e/sync.mjs, with only its mechanical rewrites. Edit the source.
 // Safeguarding and audit routes, against a real server on a temporary data directory with the synthetic seed.
 //
 //   A the Trust & Safety lists page by cursor ({ items, nextCursor }): reports in triage order, blocks and
@@ -14,11 +13,9 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { freePort } from '../support/testPort.mjs';
-import { gleamServer } from '../support/server.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = await freePort();
 const API = `http://localhost:${PORT}`;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-safeguarding-'));
@@ -67,8 +64,8 @@ const login = async (route, body) => {
   return r.body.token;
 };
 
-child = spawn(...gleamServer(), {
-  cwd: SERVER_DIR,
+child = spawn(...serverCommand(), {
+  cwd: serverDir,
   env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA },
   stdio: 'ignore',
 });

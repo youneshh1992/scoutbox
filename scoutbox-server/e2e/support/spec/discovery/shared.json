@@ -1,0 +1,108 @@
+{
+  "$source": "domains/discovery/shared.mjs",
+  "POSITIONS": [
+    "GK",
+    "CB",
+    "RB",
+    "LB",
+    "RWB",
+    "LWB",
+    "CDM",
+    "CM",
+    "CAM",
+    "RW",
+    "LW",
+    "ST",
+    "CF"
+  ],
+  "TRUST_BANDS": [
+    "limited_evidence",
+    "developing_evidence",
+    "established_evidence",
+    "strong_evidence",
+    "very_strong_evidence"
+  ],
+  "PROHIBITED_BRIEF_FIELDS": [
+    "race",
+    "ethnicity",
+    "skin_colour",
+    "skin_color",
+    "religion",
+    "faith",
+    "caste",
+    "disability",
+    "medical_condition",
+    "mental_health",
+    "gender_identity",
+    "sexuality",
+    "sexual_orientation",
+    "socioeconomic",
+    "social_background",
+    "family_income",
+    "school_type",
+    "postcode_deprivation",
+    "deprivation",
+    "maturity",
+    "biological_age",
+    "physical_maturity",
+    "immigration_status",
+    "national_origin"
+  ],
+  "CHANGE_TYPES": [
+    "full_match_added",
+    "evidence_added",
+    "evidence_quality_improved",
+    "evidence_removed",
+    "evidence_disputed",
+    "verified_reference_added",
+    "verified_reference_revoked",
+    "combine_verified_added",
+    "combine_verified_invalidated",
+    "combine_verified_restored",
+    "development_evidence_started",
+    "development_block_completed",
+    "trial_completed",
+    "assessment_submitted",
+    "current_club_confirmed",
+    "position_changed",
+    "evidence_gap_closed"
+  ],
+  "CHANGE_COPY": {
+    "full_match_added": "A new full match has been added.",
+    "evidence_added": "New evidence has been added to the player’s record.",
+    "evidence_quality_improved": "Existing evidence has been independently confirmed.",
+    "evidence_removed": "A source used in the previous review is no longer current.",
+    "evidence_disputed": "A source used in the previous review is under review.",
+    "verified_reference_added": "A verified coach reference has been added.",
+    "verified_reference_revoked": "A coach reference used in the previous review is no longer verified.",
+    "combine_verified_added": "A standardized Combine Verified result is now available.",
+    "combine_verified_invalidated": "A Combine result used in the previous review is no longer valid.",
+    "combine_verified_restored": "A Combine result that had been invalidated has been restored after review.",
+    "development_evidence_started": "Recorded development activity is now available for the first time since your review.",
+    "development_block_completed": "A coach-assigned development block has been completed.",
+    "trial_completed": "A trial has been completed and reported.",
+    "assessment_submitted": "A new assessment has been submitted in your organisation.",
+    "current_club_confirmed": "The player’s current club is now confirmed.",
+    "position_changed": "The player’s declared position has changed.",
+    "evidence_gap_closed": "An evidence gap your organisation raised has been filled."
+  },
+  "POLICY": {
+    "version": 1,
+    "generalThreshold": {
+      "minChanges": 2,
+      "substantialTypes": [
+        "full_match_added",
+        "verified_reference_added",
+        "combine_verified_added",
+        "trial_completed"
+      ]
+    },
+    "boxCam": {
+      "countSessionsAsChange": false,
+      "minSessionsForFirstEvidence": 1
+    },
+    "cooldownDays": 30,
+    "expiryDays": 120,
+    "maxDecisionAgeDays": null
+  }
+}

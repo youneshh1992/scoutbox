@@ -1,27 +1,13 @@
-// Copied from the TypeScript server's domains/identity/totp.mjs by e2e/sync.mjs, with only its mechanical rewrites. Edit the source.
-// TOTP (RFC 6238 over HOTP, RFC 4226: SHA-1, 6 digits, 30 s step) for staff MFA, and a constant-time string compare.
-// Fixture-tested against the RFC test vectors.
+// The code a staff member's authenticator app would show: TOTP (RFC 6238 over HOTP, RFC 4226: SHA-1, 6 digits,
+// 30 s step), for batteries that sign in with MFA. It plays the authenticator, not the server, so it is written
+// here rather than imported: scripts/testE2ESupport.mjs proves it agrees with the server's own TOTP.
 import crypto from 'node:crypto';
 
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-export const b32encode = (buf) => {
-  let bits = 0,
-    value = 0,
-    out = '';
-  for (const byte of buf) {
-    value = (value << 8) | byte;
-    bits += 8;
-    while (bits >= 5) {
-      out += B32[(value >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-  }
-  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
-  return out;
-};
-export const b32decode = (str) => {
-  let bits = 0,
-    value = 0;
+
+function b32decode(str) {
+  let bits = 0;
+  let value = 0;
   const out = [];
   for (const ch of String(str).toUpperCase().replace(/=+$/, '')) {
     const idx = B32.indexOf(ch);
@@ -34,27 +20,14 @@ export const b32decode = (str) => {
     }
   }
   return Buffer.from(out);
-};
-export function hotp(keyBuf, counter) {
+}
+
+/** The 6-digit code for a base32 secret at `nowMs`. */
+export function totp(secretB32, nowMs = Date.now()) {
   const msg = Buffer.alloc(8);
-  msg.writeBigUInt64BE(BigInt(counter));
-  const h = crypto.createHmac('sha1', keyBuf).update(msg).digest();
+  msg.writeBigUInt64BE(BigInt(Math.floor(nowMs / 30_000)));
+  const h = crypto.createHmac('sha1', b32decode(secretB32)).update(msg).digest();
   const off = h[h.length - 1] & 0xf;
   const code = ((h[off] & 0x7f) << 24) | (h[off + 1] << 16) | (h[off + 2] << 8) | h[off + 3];
   return String(code % 1_000_000).padStart(6, '0');
-}
-export function totp(secretB32, nowMs = Date.now(), stepS = 30) {
-  return hotp(b32decode(secretB32), Math.floor(nowMs / 1000 / stepS));
-}
-export const timingSafeEqStr = (a, b) => {
-  const ba = Buffer.from(String(a)),
-    bb = Buffer.from(String(b));
-  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
-};
-export function totpValid(secretB32, code, nowMs = Date.now()) {
-  // accept the current step ± 1 (clock drift), constant-time compare
-  for (const skew of [-1, 0, 1]) {
-    if (timingSafeEqStr(totp(secretB32, nowMs + skew * 30_000), String(code))) return true;
-  }
-  return false;
 }

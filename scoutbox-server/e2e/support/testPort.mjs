@@ -1,4 +1,3 @@
-// Copied from the TypeScript server's scripts/testPort.mjs by e2e/sync.mjs, with only its mechanical rewrites. Edit the source.
 import net from 'node:net';
 
 // A random test port that fetch() will actually connect to.
