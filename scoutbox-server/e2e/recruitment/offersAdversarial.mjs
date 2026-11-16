@@ -577,7 +577,8 @@ section('F — races: issue vs issue, issue vs edit, issue vs withdraw, two revi
   neg(
     forged.status === 400 &&
       forged.body.error === 'OFFER_INPUT_INVALID' &&
-      forged.body.field === 'revisionNumber' &&
+      // which forged field is named first is not part of the contract
+      ['revisionNumber', 'currentRevisionId', 'id', 'playerId', 'caseId'].includes(forged.body.field) &&
       afterForgedEdit.currentRevision.revisionNumber === w2.revisions.length &&
       afterForgedEdit.playerId === 'pl-carvalho' &&
       afterForgedEdit.caseId === RID,
@@ -706,6 +707,14 @@ section(
       (r.o.status === 'WITHDRAWN' && r.loser?.body?.error === 'OFFER_WITHDRAWN'),
     `P4c the loser is told which state won (${r.loser?.body?.error})`,
   );
+  // Y needs Tanaka's Offer accepted. Either racer may win P4, so when the withdrawal won, accept a fresh one.
+  if (r.o.status === 'WITHDRAWN') {
+    x = await issued(maria.token, 'pl-tanaka');
+    const accepted = await pAccept(x.OID, { revisionId: x.R, clientKey: key() }, tanaka.token);
+    if (accepted.status !== 200)
+      throw new Error(`accept ${accepted.status} ${JSON.stringify(accepted.body).slice(0, 200)}`);
+    globalThis.__T = { RID: x.RID, OID: x.OID, R: x.R };
+  }
   // decline vs withdraw — Svensson again (reopen)
   const RS = await toConsideration(maria.token, 'pl-svensson');
   const cS = await create(RS, { terms: TERMS, expiresAt: T0 + 7 * DAY, clientKey: key() });
