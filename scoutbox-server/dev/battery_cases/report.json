@@ -1010,6 +1010,148 @@
     ]
   },
   {
+    "battery": "recruitment/rooms",
+    "functions": [
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#buildRoomSnapshot",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "its result depends on the clock": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#canTaskTransition",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#canTransition",
+        "calls": 677,
+        "cases": 306,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#clampPage",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#decisionReadiness",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#normaliseSourceContext",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomActivity",
+        "calls": 6,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomCan",
+        "calls": 13,
+        "cases": 12,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomFunnel",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomHealth",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomRole",
+        "calls": 7,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomStatusForStage",
+        "calls": 11,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomSummary",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#secondLookEvent",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#stageForRoomStatus",
+        "calls": 47,
+        "cases": 36,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#validateDecision",
+        "calls": 7,
+        "cases": 6,
+        "handPort": {
+          "args[].note.toString is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#validateReasonCodes",
+        "calls": 17,
+        "cases": 16,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#validateTag",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#validateTransition",
+        "calls": 13,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "verification/organisationsAndStaff",
     "functions": [
       {

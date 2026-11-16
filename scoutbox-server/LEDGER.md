@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 0 / 2372 | 0 / 179 | 5 to go |
-| recruitment | 19 | 1 | 0 | 0 / 196 | 0 / 6 | 19 to go |
+| recruitment | 19 | 2 | 0 | 0 / 631 | 0 / 9 | 19 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -80,7 +80,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/offers` | not yet neutral | 12 → 12 | 354 | 354 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/offersAdversarial` | not yet neutral | 10 → 10 | 206 | 206 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/offersPersistence` | not yet neutral | 3 → 3 | 72 | 72 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/rooms` | not yet neutral | 1 → 1 | 371 | 371 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  |  | 0 / 435 | 0 / 3 | not answered; 435 cases pending; 3 hand-port calls |
 | `recruitment/signings` | not yet neutral | 5 → 5 | 245 | 245 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/signingsAdversarial` | not yet neutral | 4 → 4 | 212 | 212 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/signingsPersistence` | not yet neutral | 3 → 3 | 78 | 78 |  |  |  |  |  | not untangled; not answered |
@@ -151,6 +151,8 @@ ported by hand to a gleeunit test.
 | `platform/storeGuarantees` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 19 | args[].reads.contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#buildRoomSnapshot` | 2 | its result depends on the clock | to do |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateDecision` | 1 | args[].note.toString is a function | to do |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#arrayTokenStore` | 1 | result.create is a function | `test/scoutbox/verification/tokens_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#consumeToken` | 7 | args[].create is a function | `test/scoutbox/verification/tokens_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#mintToken` | 2 | args[].create is a function | `test/scoutbox/verification/tokens_test.gleam` |
@@ -276,3 +278,21 @@ mapped, then `npm run cases`.
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#playerStageFor` | 6 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#timelineVisibleTo` | 4 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney` | 8 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#canTaskTransition` | 5 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#canTransition` | 306 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#clampPage` | 3 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#decisionReadiness` | 3 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#normaliseSourceContext` | 2 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomActivity` | 4 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomCan` | 12 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomFunnel` | 1 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomHealth` | 3 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomRole` | 6 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomStatusForStage` | 11 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomSummary` | 2 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#secondLookEvent` | 2 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#stageForRoomStatus` | 36 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateDecision` | 6 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateReasonCodes` | 16 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateTag` | 6 |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateTransition` | 11 |
