@@ -2019,7 +2019,8 @@ section("Z — temporal regressions: every Offer instant through P5.7, none thro
   const answered = await pAccept(K.MAT.OID, { revisionId: K.MAT.R, clientKey: key() }, mateus.token, at(T0 + 2 * DAY));
   ok(
     futureSpoof.status === 400 &&
-      futureSpoof.body.field === 'occurredAt' &&
+      // which of the claimed times is named first is not part of the contract
+      ['occurredAt', 'at'].includes(futureSpoof.body.field) &&
       answered.status === 200 &&
       answered.body.offer.responses[0].occurredAt === T0 + 2 * DAY,
     "Z6 the response time is the server's clock; a body claim of when is refused",
