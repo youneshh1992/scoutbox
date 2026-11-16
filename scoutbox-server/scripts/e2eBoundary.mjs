@@ -41,7 +41,6 @@ export const NOT_YET_NEUTRAL = [
   'platform/contracts',
   'platform/dates',
   'platform/productionHardening',
-  'platform/sessionsAndPorts',
   'recruitment/analytics',
   'recruitment/contacts',
   'recruitment/contactsPersistence',

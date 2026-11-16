@@ -35,6 +35,15 @@ export const BASELINE_REV = '3c843bb2';
  * `added`: `{ checks, why }`, checks the battery or its rules suite has that the baseline didn't.
  */
 export const NOTES = {
+  'platform/sessionsAndPorts': {
+    moved: [
+      {
+        checks: 3,
+        to: 'scripts/testPlatformHelpers.mjs',
+        why: "A1–A3 built their own Express app in the battery's process to prove installAsyncErrorForwarding; that is a unit check of the patch. The battery keeps A4–A5 over HTTP",
+      },
+    ],
+  },
   'platform/storeGuarantees': {
     moved: [
       {

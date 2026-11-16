@@ -7,15 +7,17 @@
 //      session with no valid creation time is expired (fail closed). Sign-out
 //      revokes the token. Expired sessions are pruned at the next login and
 //      stay refused across a restart. A fresh session is unaffected.
+//   A  a malformed body to an unauthenticated route is a 400, not the end of the process. (That a rejected async
+//      handler reaches the error middleware is a check of this implementation's Express patch, in
+//      scripts/testPlatformHelpers.mjs.)
 //   P  production configuration is proved in productionHardening.mjs §48; here a
 //      real production boot is refused without its own admin key.
 import { spawn } from 'node:child_process';
-import crypto from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { writeFixture } from '../support/sqlFixture.mjs';
+import { openFixture, tokenHash, writeFixture } from '../support/sqlFixture.mjs';
+import { rows } from '../support/sqlRows.mjs';
 import { isFetchBlockedPort, pickPort } from '../support/testPort.mjs';
 import { serverCommand, serverDir } from '../support/server.mjs';
 
@@ -40,7 +42,7 @@ const neg = (c, m) => {
 const section = (n) => console.log(`\n— ${n} —`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DAY = 24 * 3600 * 1000;
-const PORT = pickPort(7400, 200, [0, 201, 202, 203, 204, 250]);
+const PORT = pickPort(7400, 200, [0, 201, 202, 203, 204]);
 const BASE = `http://localhost:${PORT}`;
 const DATA = mkdtempSync(path.join(tmpdir(), 'sbx-prem24-'));
 const children = [];
@@ -142,29 +144,18 @@ await stop(S);
 // bearer path answers 401 because the token names nothing, and the untouched
 // sessions stay honoured. No repository operation back-dates a session, so the
 // expired sessions are planted with plain SQL on the stopped server's file.
-const sessionHash = (token) => crypto.createHash('sha256').update(token).digest('hex');
-const DB_FILE = path.join(DATA, 'scoutbox.db');
+const sessionHash = tokenHash;
 const TTL_MS = 30 * DAY;
-/** The stored sessions (read-only, plain SQL): `{ tokenHash, createdAt }`. */
-const storedSessions = () => {
-  const s = new DatabaseSync(DB_FILE, { readOnly: true });
-  try {
-    return s
-      .prepare('SELECT token_hash, created_at FROM sessions ORDER BY sid')
-      .all()
-      .map((r) => ({ tokenHash: r.token_hash, createdAt: r.created_at }));
-  } finally {
-    s.close();
-  }
-};
+/** The stored sessions: `{ tokenHash, createdAt }`. */
+const storedSessions = () =>
+  rows(DATA, 'sessions', {}, { order: 'sid' }).map((r) => ({ tokenHash: r.token_hash, createdAt: r.created_at }));
 /** Run `fn` on a writable connection to the stopped server's file. */
 const onFile = (fn) => {
-  const s = new DatabaseSync(DB_FILE);
-  s.exec('PRAGMA foreign_keys = ON;');
+  const F = openFixture(DATA);
   try {
-    return fn(s);
+    return fn(F.sql);
   } finally {
-    s.close();
+    F.close();
   }
 };
 const backdate = (token, createdAt, ttl = TTL_MS) =>
@@ -294,35 +285,7 @@ S = await boot({ SESSION_TTL_DAYS: '1' });
 await stop(S);
 
 // ================================================================ A — async handler errors
-section('A — a rejected async handler answers 500 and the process keeps serving');
-{
-  const { installAsyncErrorForwarding } = await import('../../domains/platform/asyncErrors.mjs');
-  const { createRequire } = await import('node:module');
-  const express = createRequire(import.meta.url)('express');
-  installAsyncErrorForwarding();
-  const app = express();
-  app.get('/boom', async () => {
-    throw new Error('async boom');
-  });
-  app.get('/sync', () => {
-    throw new Error('sync boom');
-  });
-  app.get('/ok', (_q, r) => r.json({ ok: true }));
-  app.use((err, _q, r, _n) => r.status(500).json({ error: 'INTERNAL', caught: String(err?.message ?? err) }));
-  const port = PORT + 250;
-  const srv = app.listen(port);
-  await sleep(200);
-  const b = await fetch(`http://localhost:${port}/boom`);
-  const bb = await b.json();
-  neg(
-    b.status === 500 && bb.caught === 'async boom',
-    `A1 an async handler that throws reaches the error middleware (${b.status} ${bb.caught})`,
-  );
-  const s2 = await fetch(`http://localhost:${port}/sync`);
-  ok(s2.status === 500, 'A2 a synchronous throw still reaches it too (unchanged Express behaviour)');
-  ok((await fetch(`http://localhost:${port}/ok`)).status === 200, 'A3 the app keeps serving after both');
-  srv.close();
-}
+section('A — a malformed body to an unauthenticated route answers 400 and the process keeps serving');
 S = await boot();
 {
   const anon = await j('POST', '/auth/guardian/signup', { name: { x: 1 }, email: { y: 2 }, password: { z: 3 } });

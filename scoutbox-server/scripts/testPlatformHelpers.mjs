@@ -1,6 +1,6 @@
 // The shared helpers under domains/platform/ that every domain uses instead of its own copy: the request clock and
 // its production refusal, the client-key rule and request fingerprint, deepFreeze and canonicalJson, the side-effect
-// runner and the rate-limit checks. Run with: npm test
+// runner, the rate-limit checks and Express's async error forwarding. Run with: npm test
 import assert from 'node:assert/strict';
 import { requestClock, TEST_CLOCK_HEADER } from '../domains/platform/clock.mjs';
 import { testClockEnabled, productionConfigProblems } from '../domains/platform/capabilities.mjs';
@@ -13,6 +13,8 @@ import {
   refuseWhenLimited,
 } from '../domains/platform/rateLimit.mjs';
 import { createFaultLayer } from '../domains/platform/faults.mjs';
+import { installAsyncErrorForwarding } from '../domains/platform/asyncErrors.mjs';
+import express from 'express';
 import { normaliseClientKey as contactKey } from '../domains/recruitment/lifecycle/contact.mjs';
 import { normaliseSigningClientKey } from '../domains/recruitment/signings/signing.mjs';
 
@@ -123,5 +125,39 @@ test('fault layer: an internal rule with N = 0 never fails and counts its hits; 
   prod.install({ use() {}, get: (p) => (none[p] = true), post: (p) => (none[p] = true) });
   assert.deepEqual(none, {});
 });
+
+// Moved from the platform/sessionsAndPorts battery (A1–A3): it builds its own Express app, so it tests the patch.
+{
+  installAsyncErrorForwarding();
+  const app = express();
+  app.get('/boom', async () => {
+    throw new Error('async boom');
+  });
+  app.get('/sync', () => {
+    throw new Error('sync boom');
+  });
+  app.get('/ok', (_q, r) => r.json({ ok: true }));
+  app.use((err, _q, r, _n) => r.status(500).json({ error: 'INTERNAL', caught: String(err?.message ?? err) }));
+  const srv = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const b = await fetch(`${base}/boom`);
+    const bb = await b.json();
+    assert.equal(b.status, 500, 'an async handler that throws reaches the error middleware');
+    assert.equal(bb.caught, 'async boom');
+    passed++;
+    console.log('  ✓ async errors: a rejected async handler reaches the error middleware (500)');
+    assert.equal((await fetch(`${base}/sync`)).status, 500);
+    passed++;
+    console.log('  ✓ async errors: a synchronous throw still reaches it too (unchanged Express behaviour)');
+    assert.equal((await fetch(`${base}/ok`)).status, 200);
+    passed++;
+    console.log('  ✓ async errors: the app keeps serving after both');
+  } finally {
+    srv.close();
+  }
+}
 
 console.log(`\n${passed} passed`);
