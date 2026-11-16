@@ -8,6 +8,7 @@ import ewe
 import exception
 import gleam/http/request.{type Request}
 import gleam/http/response
+import gleam/list
 import gleam/option
 import gleam/string
 import wisp
@@ -27,9 +28,14 @@ fn peer(connection: ewe.Connection) -> String {
 /// The most a request body can carry at the transport. Wisp enforces its own, smaller limit per request.
 const transport_limit = 32_000_000
 
+/// A route that answers with a server-sent event stream returns an ordinary response carrying `stream_header`,
+/// so the middleware treats it like any other; `stream` is then given that header's value and the response
+/// (without it) and opens the stream. Wisp's body type can't carry an ewe stream.
 pub fn handler(
   handler: fn(wisp.Request) -> wisp.Response,
   secret_key_base: String,
+  stream_header: String,
+  stream: fn(String, response.Response(Nil)) -> response.Response(ewe.Body),
 ) -> fn(Request(ewe.Connection)) -> response.Response(ewe.Body) {
   fn(req: Request(ewe.Connection)) {
     let connection = req.body
@@ -40,7 +46,17 @@ pub fn handler(
     use <- exception.defer(fn() {
       let assert Ok(_) = wisp.delete_temporary_files(req)
     })
-    handler(req) |> to_ewe(connection)
+    let resp = handler(req)
+    case response.get_header(resp, stream_header) {
+      Ok(marker) ->
+        response.Response(
+          ..resp,
+          headers: list.filter(resp.headers, fn(h) { h.0 != stream_header }),
+        )
+        |> response.set_body(Nil)
+        |> stream(marker, _)
+      Error(Nil) -> to_ewe(resp, connection)
+    }
   }
 }
 

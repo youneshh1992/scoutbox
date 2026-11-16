@@ -6,7 +6,9 @@
 //// `notify` asks for its push with `store.emit` (none when the notice is muted, repeated or deferred), so it is
 //// sent only once the unit commits.
 ////
-//// Not ported yet: the live `notify` event, and a staff member's feed `target` (the recruitment Rooms).
+//// A notice written or refreshed publishes the live `notify` event once the unit commits; a muted one doesn't.
+////
+//// Not ported yet: a staff member's feed `target` (the recruitment Rooms).
 
 import gleam/dict
 import gleam/dynamic/decode
@@ -17,8 +19,9 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/calendar
+import scoutbox/messaging/live_routes
 import scoutbox/messaging/notification_prefs
-import scoutbox/platform/effect.{SendPush}
+import scoutbox/platform/effect.{Live, SendPush}
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/zones
@@ -110,6 +113,7 @@ fn deliver(
     ],
     decode.at([0], id.notification_decoder()),
   ))
+  store.emit(tx, Live(live_routes.notify(kind, audience_id)))
   case existing {
     Ok(id) -> {
       use _ <- result.try(

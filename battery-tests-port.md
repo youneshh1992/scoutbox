@@ -321,6 +321,44 @@ would mean porting most of the product under the heading "platform". So:
    lifetime (`SESSION_TTL_DAYS`) and the production boot refusals (`ADMIN_KEY_UNSAFE`,
    `AGENT_TEST_PROVIDER_IN_PRODUCTION`, `FAULTS_IN_PRODUCTION`). SSE was outside the pilot's scope, so give it
    its short check first.
+
+   Both batteries reach further than their names. `connectedMode` also needs signed media links, scrypt password
+   hashing (grassroots registration with a password, provisioned credentials, the first-login administrator),
+   SSO's production refusal and `/org/tactical`'s `LEAD_REQUIRED`. `sessionsAndPorts`' section T posts to six
+   create routes of other domains (`/org/searches`, `/org/squad`, `/org/open-trials`, `/org/friendlies`,
+   `/player/media`, `/player/medical/records`) and expects a 201 for a valid body. Order: the SSE check, a scrypt
+   check, signed media links and the rest of `connectedMode`, then `sessionsAndPorts`.
+
+   **SSE short check [done].** ewe 9 serves server-sent events itself (`ewe.sse`: a selector-driven process per
+   stream, which notices the client leaving), so nothing was vendored or written in FFI. As built:
+   - **One hub actor** (`platform/live`): the event ids, the 500-event replay buffer (typing is never kept), the
+     tickets, and the open streams, each monitored so a stream whose process ends leaves. Joining and reading
+     what was missed are one call, so no event falls between them.
+   - **Events are typed** (`platform/live_event`): one constructor per registry entry, its fields the registry's
+     payload keys. `live_test` proves the keys and the replay policy equal `spec/platform/eventRegistry.json`, so
+     the TypeScript server's payload stripping isn't needed. Ported: `messages` (a send, a read receipt),
+     `typing` and `notify`; the rest of the registry is `Not ported yet:`.
+   - **Published after COMMIT** as an effect (`effect.Live`); typing, which records nothing, publishes at once.
+     Who may receive an event is resolved once when it is published (a thread's parties, a staff member's
+     organisation), then checked by each stream in its own process against live records (suspension, removal).
+   - **Wiring:** Wisp's body can't carry a stream, so `GET /events` passes through the router and its middleware
+     like any route and answers with a marker header; the adapter (`platform/wisp_ewe`) removes it and opens the
+     stream.
+   - **`dev/sse_check.mjs`** runs on both servers: 14 behaviour checks with the battery's own frame reader (all
+     pass on both, apart from the sign-out one, which waits on `/auth/logout`), then fan-out. One message at a
+     time to N streams on one thread, 20 messages, client and server on one laptop:
+
+     | | per stream p50 / p99 | last stream p50 | memory per stream |
+     |---|---|---|---|
+     | TypeScript, 100 streams | 23 / 46 ms | 24 ms | 81 KB |
+     | Gleam, 100 streams | 5 / 11 ms | 6 ms | 131 KB |
+     | TypeScript, 1,000 streams | 187 / 211 ms | 194 ms | 44 KB |
+     | Gleam, 1,000 streams | 22 / 36 ms | 33 ms | 84 KB |
+
+     A single stream gets its message in about 5 ms on either server. The client is one Node process reading
+     every stream, so the Gleam figures at 1,000 are partly the client's. Gleam uses about twice the memory per
+     stream, measured as the BEAM's resident size; it isn't broken down yet (each stream is one process, its
+     connection's).
 3. **The domains, in port order** (recruitment, discovery, passport, development, agents, …). Each domain's
    batteries are untangled just ahead of its port.
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open

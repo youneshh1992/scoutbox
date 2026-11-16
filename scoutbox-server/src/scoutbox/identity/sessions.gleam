@@ -93,6 +93,25 @@ pub fn by_token(
     [sqlight.text(secrets.sha256_hex(token))],
     row.decoder(),
   ))
+  live(found, now)
+}
+
+/// The live session with this sid: an event-stream ticket names its session by sid, never by token.
+pub fn by_sid(
+  read: Read,
+  sid: String,
+  now: Int,
+) -> Result(Option(Session), Fail(e)) {
+  use found <- result.map(store.one(
+    read,
+    "SELECT " <> row.columns <> " FROM sessions WHERE sid = ?",
+    [sqlight.text(sid)],
+    row.decoder(),
+  ))
+  live(found, now)
+}
+
+fn live(found: Result(row.Row, Nil), now: Int) -> Option(Session) {
   case result.try(found, session) {
     Ok(s) if s.created_at > 0 && now - s.created_at < ttl_ms -> Some(s)
     _ -> None

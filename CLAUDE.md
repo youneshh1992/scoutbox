@@ -34,6 +34,9 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   - `|>` binds looser than `<>`: `"a" <> x |> f <> "b"` pipes the whole left side. Call `f(x)` instead.
   - A unit runs in the writer's process: read the request body before it (`http.parse_body`), never inside.
   - Two vocabularies of one table that share a value get prefixed constructors (`reports.TargetKindPlayer`).
+  - `rows/id` imports the store, which imports `platform/effect`, so an effect can't hold a typed id: its ids are
+    text (`effect.SendPush`, `live_event.Event`), built from typed ids by a function outside the cycle
+    (`live_routes.messages(channel_id)`).
   - Imports go at the top of a module; when a need turns up mid-file, add the import there, don't wrap the
     function. The stdlib already has `list.try_map`, `string.join` and friends: look before writing one.
 

@@ -5,7 +5,8 @@ safeguarding core (reports, blocks, moderation, the Trust & Safety console, the 
 guardians (sign-up, the player record, the directory, guardians and their children), verification (claims and
 their review, organisation applications, domains, the administrator hierarchy, squad invitations, coach
 references), message threads (answering a request opens one), and notifications with their preferences, push, the
-delivery centre, webhooks and support tickets. It answers nine of the TypeScript server's e2e batteries unchanged:
+delivery centre, webhooks and support tickets, and live sync over server-sent events (`/events`, for thread messages,
+typing and notices). It answers nine of the TypeScript server's e2e batteries unchanged:
 `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`, `platform/storeGuarantees`,
 `platform/messaging`, `platform/notifications`, `platform/delivery`, `verification/organisationsAndStaff` and
 `verification/organisationsAndStaffAdversarial`.
@@ -22,6 +23,8 @@ npm run cases          # record the TypeScript rules suites' calls; write dev/ba
 npm run ledger         # write LEDGER.md: every TypeScript battery, where its checks went, which domains are ported
 npm run codegen        # regenerate src/scoutbox/rows and src/scoutbox/vocab from priv/migrations
 npm run codegen:check  # fail if the committed row modules differ from what the migrations generate
+node dev/perf.mjs      # latency of the hot paths on both servers (after `gleam export erlang-shipment`)
+node dev/sse_check.mjs # the event stream's behaviour, and its fan-out to 100 and 1000 streams, on both servers
 ```
 
 Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY` (development default

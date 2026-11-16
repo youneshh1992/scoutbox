@@ -142,6 +142,15 @@ pub fn by_id(read: Read, id: id.ChannelId) -> Result(Option(Thread), Fail(e)) {
   list.first(threads) |> option.from_result
 }
 
+/// A thread without its messages: who its parties are (channels.mjs `parties`).
+pub fn parties(
+  read: Read,
+  id: id.ChannelId,
+) -> Result(Option(row.Row), Fail(e)) {
+  store.one(read, select("WHERE id = ?"), [id.channel_sql(id)], row.decoder())
+  |> result.map(option.from_result)
+}
+
 /// An adult player's own threads, oldest first.
 pub fn for_player(
   read: Read,

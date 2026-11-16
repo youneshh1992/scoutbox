@@ -1,11 +1,12 @@
-//// `notify` asks for its push with `store.emit`; `store.unit_effects` hands back what a unit asked for, so what
-//// an act would push is asserted here directly. The unit sends it only once it commits.
+//// `notify` asks for its push and its live `notify` event with `store.emit`; `store.unit_effects` hands back what a
+//// unit asked for, so what an act would send is asserted here directly. The unit sends it only once it commits.
 
 import gleam/erlang/process
 import gleam/option.{Some}
 import gleam/result
 import scoutbox/messaging/notifications
-import scoutbox/platform/effect.{type Effect, SendPush}
+import scoutbox/platform/effect.{type Effect, Live, SendPush}
+import scoutbox/platform/live_event.{Notify}
 import scoutbox/platform/store
 import scoutbox/support
 import scoutbox/vocab/audience
@@ -30,10 +31,14 @@ fn notice(s: store.Store, text: String) -> List(Effect) {
   pushes
 }
 
+/// What a feed's open streams are told.
+const announced = Live(Notify(audience.Player, adult))
+
 pub fn a_new_notice_asks_for_one_push_test() {
   let s = support.fresh_store(fn(_) { Nil })
   assert notice(s, "Synthetic message.")
     == [
+      announced,
       SendPush(
         to: audience.Player,
         id: adult,
@@ -46,7 +51,7 @@ pub fn a_new_notice_asks_for_one_push_test() {
 pub fn a_repeated_unread_notice_is_counted_not_pushed_again_test() {
   let s = support.fresh_store(fn(_) { Nil })
   let _ = notice(s, "Synthetic message.")
-  assert notice(s, "Synthetic message.") == []
+  assert notice(s, "Synthetic message.") == [announced]
 }
 
 pub fn a_muted_category_asks_for_no_push_test() {
@@ -100,5 +105,6 @@ pub fn the_push_is_sent_after_commit_and_never_by_a_refused_unit_test() {
         at: 2_000_000_000_000,
       )
     })
+  assert process.receive(sent, 100) == Ok(announced)
   let assert Ok(SendPush(body: "Kept.", ..)) = process.receive(sent, 100)
 }

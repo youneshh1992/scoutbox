@@ -9,13 +9,15 @@ import scoutbox/app.{type Ctx, Ctx}
 import scoutbox/identity/sessions
 import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
+import scoutbox/messaging/live_routes
 import scoutbox/messaging/outbox
 import scoutbox/messaging/push
 import scoutbox/platform/clock
 import scoutbox/platform/config
-import scoutbox/platform/effect.{type Effect, SendMail, SendPush}
+import scoutbox/platform/effect.{type Effect, Live, SendMail, SendPush}
 import scoutbox/platform/faults
 import scoutbox/platform/limits
+import scoutbox/platform/live.{type Hub}
 import scoutbox/platform/migrations
 import scoutbox/platform/operator
 import scoutbox/platform/secrets
@@ -56,8 +58,9 @@ fn boot() -> Result(Nil, String) {
     ),
   )
   use faults <- result.try(faults.start(config.dev_logins, config.fault_rules))
+  use hub <- result.try(live.start())
   let store =
-    store.with_dispatch(store, dispatch(store, _))
+    store.with_dispatch(store, dispatch(store, hub, _))
     |> store.with_seams(faults.should_fail(faults, _))
   use applied <- result.try(migrations.run(
     store,
@@ -86,13 +89,18 @@ fn boot() -> Result(Nil, String) {
       migrations: known,
       integrity:,
       faults:,
+      live: hub,
     )
   // Restart-safe: every dispatch is a row, so the first sweep picks up where the last process stopped.
   let _ = delivery.sweep(ctx)
   process.spawn(fn() { sweeping(ctx) })
   let builder =
     router.handle(ctx, _)
-    |> wisp_ewe.handler(secrets.random_hex(32))
+    |> wisp_ewe.handler(
+      secrets.random_hex(32),
+      live_routes.stream_header,
+      fn(marker, resp) { live_routes.open(store, hub, marker, resp) },
+    )
     |> ewe.new
     |> ewe.bind(to: "::")
     |> ewe.listening(on: config.port)
@@ -116,8 +124,9 @@ fn sweeping(ctx: Ctx) -> Nil {
 }
 
 /// After COMMIT. A failing effect never undoes the act's data; it is logged.
-fn dispatch(store: Store, effect: Effect) -> Nil {
+fn dispatch(store: Store, hub: Hub, effect: Effect) -> Nil {
   case effect {
+    Live(event:) -> live_routes.publish(store, hub, event)
     SendMail(to:, subject:, text:) -> {
       let recorded =
         store.unit(store, fn(tx) {

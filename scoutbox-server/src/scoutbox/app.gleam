@@ -4,6 +4,7 @@ import gleam/json.{type Json}
 import scoutbox/platform/config.{type Config}
 import scoutbox/platform/faults.{type Faults}
 import scoutbox/platform/limits.{type Limits}
+import scoutbox/platform/live.{type Hub}
 import scoutbox/platform/store.{type Store}
 
 pub type Ctx {
@@ -20,5 +21,7 @@ pub type Ctx {
     integrity: Json,
     /// The development fault layer (inert in production).
     faults: Faults,
+    /// The live-sync hub every event stream subscribes to.
+    live: Hub,
   )
 }

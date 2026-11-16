@@ -28,6 +28,7 @@ import scoutbox/messaging/channel_routes as threads
 import scoutbox/messaging/delivery
 import scoutbox/messaging/delivery_prefs
 import scoutbox/messaging/feed_routes
+import scoutbox/messaging/live_routes
 import scoutbox/messaging/notification_prefs
 import scoutbox/platform/clock
 import scoutbox/platform/fault_routes
@@ -72,6 +73,9 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["capabilities"] -> only(req, Get, fn() { operator.capabilities(ctx) })
     ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
     ["media", id] -> only(req, Get, fn() { media_file(id) })
+    ["events"] -> only(req, Get, fn() { live_routes.connect(ctx, req) })
+    ["events", "ticket"] ->
+      only(req, Post, fn() { live_routes.ticket(ctx, req) })
     ["push", "register"] ->
       only(req, Post, fn() { feed_routes.register_device(ctx, req) })
     ["callbacks", "delivery"] ->

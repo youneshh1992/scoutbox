@@ -4,8 +4,11 @@
 //// Standing is rechecked on every use: a block, a suspension, or the player leaving the club's platform closes
 //// the thread; the history stays for audit. Every message is moderated and logged.
 ////
-//// Not ported yet: the live events (`messages`, `typing`) a send, a receipt and a typing ping broadcast, and
-//// attaching a trial report (the trials are recruitment's; every player has none, so one is never found).
+//// A send and a read receipt publish the live `messages` event once they commit; a typing ping publishes `typing`
+//// at once, since it records nothing.
+////
+//// Not ported yet: attaching a trial report (the trials are recruitment's; every player has none, so one is never
+//// found).
 
 import gleam/json
 import gleam/list
@@ -20,10 +23,13 @@ import scoutbox/messaging/channels.{
   type Clip, type Sender, type Side, type Thread, Clip, CounterpartySide,
   ForAdmin, ForCounterparty, ForOrg, OrgSide, Sender,
 }
+import scoutbox/messaging/live_routes
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
+import scoutbox/platform/effect
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/live_event.{CounterpartyTyping, OrgTyping}
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store.{type Read}
@@ -385,6 +391,7 @@ fn post(
               })
             }
           })
+          store.emit(tx, effect.Live(live_routes.messages(c.id)))
           m
         }
       }
@@ -399,7 +406,10 @@ fn mark_read(ctx: Ctx, req: Request, t: Thread, side: Side) -> Response {
   use _ <- http.body(req, input.nothing(), [])
   let now = clock.now_ms()
   case
-    store.unit(ctx.store, fn(tx) { channels.mark_read(tx, t.row.id, side, now) })
+    store.unit(ctx.store, fn(tx) {
+      store.emit(tx, effect.Live(live_routes.messages(t.row.id)))
+      channels.mark_read(tx, t.row.id, side, now)
+    })
   {
     Ok(#(org, counterparty)) ->
       http.json(
@@ -410,8 +420,14 @@ fn mark_read(ctx: Ctx, req: Request, t: Thread, side: Side) -> Response {
   }
 }
 
-fn typing(req: Request) -> Response {
+fn typing(
+  ctx: Ctx,
+  req: Request,
+  channel_id: id.ChannelId,
+  side: live_event.TypingSide,
+) -> Response {
   use _ <- http.body(req, input.nothing(), [])
+  live_routes.publish(ctx.store, ctx.live, live_routes.typing(channel_id, side))
   http.json(200, json.object([#("ok", json.bool(True))]))
 }
 
@@ -541,7 +557,7 @@ pub fn org_typing(
   case store.read(ctx.store, org_standing(_, t, a.org, clock.now_ms())) {
     Error(failure) -> http.internal(failure)
     Ok(Some(_)) -> http.error(403, "CHANNEL_CLOSED")
-    Ok(None) -> typing(req)
+    Ok(None) -> typing(ctx, req, t.row.id, OrgTyping)
   }
 }
 
@@ -597,8 +613,8 @@ pub fn player_typing(
   id: id.ChannelId,
 ) -> Response {
   use <- access.guardian_managed_only(p)
-  use _ <- player_thread(ctx, p, id)
-  typing(req)
+  use t <- player_thread(ctx, p, id)
+  typing(ctx, req, t.row.id, CounterpartyTyping)
 }
 
 // ------------------------------------------------------------------------------------------------- guardians
@@ -649,8 +665,8 @@ pub fn guardian_typing(
   g: Guardian,
   id: id.ChannelId,
 ) -> Response {
-  use _ <- guardian_thread(ctx, g, id)
-  typing(req)
+  use t <- guardian_thread(ctx, g, id)
+  typing(ctx, req, t.row.id, CounterpartyTyping)
 }
 
 // ------------------------------------------------------------------------------------------------- admin
