@@ -95,12 +95,46 @@ requests.push(
   ['club email (free mail)', (s) => ['POST', '/org/verification/email', { email: 'coach@gmail.com' }, s.maria]],
   ['club email', (s) => ['POST', '/org/verification/email', { email: 'coach@eastport.example' }, s.maria]],
 );
+const roomOf = {};
+for (const [k, srv] of [['ts', ts], ['gl', gl]]) {
+  roomOf[k] = (await call(srv.base, 'POST', '/org/rooms', { playerId: 'pl-adeyemi', sourceContext: 'search', priority: 'high' }, S[k].maria)).body?.room?.roomId;
+  S[k].room = roomOf[k];
+}
+requests.push(
+  ['trust profile (club, adult)', (s) => ['GET', '/org/players/pl-adeyemi/trust-profile', null, s.maria]],
+  ['trust profile (club, minor)', (s) => ['GET', '/org/players/pl-guni/trust-profile', null, s.maria]],
+  ['trust profile (self)', (s) => ['GET', '/player/trust-profile', null, s.adult]],
+  ['evidence gaps', (s) => ['GET', '/org/players/pl-adeyemi/evidence-gaps', null, s.maria]],
+  ['club evidence', (s) => ['POST', '/org/players/pl-adeyemi/evidence', { claimType: 'footage', label: 'Full match', observedAt: Date.now() - 3 * 86_400_000 }, s.maria]],
+  ['combine protocols', (s) => ['GET', '/org/combine/protocols', null, s.maria]],
+  ['combine player', (s) => ['GET', '/org/combine/players/pl-adeyemi', null, s.maria]],
+  ['room', (s) => ['GET', `/org/rooms/${s.room}`, null, s.maria]],
+  ['room edit', (s) => ['PATCH', `/org/rooms/${s.room}`, { tags: ['Left-footed'], priority: 'urgent' }, s.maria]],
+  ['room status', (s) => ['POST', `/org/rooms/${s.room}/status`, { status: 'shortlisted', reasonCodes: ['technical_fit'] }, s.maria]],
+  ['room comment', (s) => ['POST', `/org/rooms/${s.room}/comments`, { body: 'Strong first touch' }, s.maria]],
+  ['room task', (s) => ['POST', `/org/rooms/${s.room}/tasks`, { title: 'Watch again', dueAt: '2099-01-01' }, s.maria]],
+  ['room decision', (s) => ['POST', `/org/rooms/${s.room}/decisions`, { recommendation: 'trial', reasonCodes: ['tactical_fit'], note: 'Worth a look' }, s.maria]],
+  ['room combine request', (s) => ['POST', `/org/rooms/${s.room}/combine-requests`, { protocolIds: ['combine-box-touch-60'], title: 'Room combine' }, s.maria]],
+  ['room after', (s) => ['GET', `/org/rooms/${s.room}`, null, s.maria]],
+  ['room activity', (s) => ['GET', `/org/rooms/${s.room}/activity`, null, s.maria]],
+  ['room comments', (s) => ['GET', `/org/rooms/${s.room}/comments`, null, s.maria]],
+  ['room decisions', (s) => ['GET', `/org/rooms/${s.room}/decisions`, null, s.maria]],
+  ['room snapshots', (s) => ['GET', `/org/rooms/${s.room}/snapshots`, null, s.maria]],
+  ['rooms list', (s) => ['GET', '/org/rooms', null, s.maria]],
+  ['rooms needing attention', (s) => ['GET', '/org/rooms/needs-attention', null, s.maria]],
+  ['rooms summaries', (s) => ['GET', '/org/rooms/summaries?playerIds=pl-adeyemi,pl-guni', null, s.maria]],
+  ['rooms funnel', (s) => ['GET', '/org/rooms-funnel', null, s.maria]],
+  ['rooms overview', (s) => ['GET', '/admin/rooms/overview', null, null, true]],
+  ['admin metrics (rooms)', (s) => ['GET', '/admin/metrics', null, null, true]],
+);
 let differing = 0;
 const keysOf = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.keys(v) : []);
 try {
   for (const [name, make] of requests) {
     const [a, b] = await Promise.all([call(ts.base, ...make(S.ts)), call(gl.base, ...make(S.gl))]);
     if (a.body?.distanceKm !== undefined || b.body?.distanceKm !== undefined) console.log(`      distanceKm ${a.body?.distanceKm} vs ${b.body?.distanceKm}`);
+    const score = (x) => x?.trust?.score ?? x?.room?.trust?.score;
+    if (score(a.body) !== undefined || score(b.body) !== undefined) console.log(`      trust score ${score(a.body)} vs ${score(b.body)}`);
     const sa = shape(a.body), sb = shape(b.body);
     const onlyTs = sa.filter((x) => !sb.includes(x)), onlyGl = sb.filter((x) => !sa.includes(x));
     const order = sa.filter((x) => sb.includes(x)).join() !== sb.filter((x) => sa.includes(x)).join();

@@ -7,11 +7,12 @@ their review, organisation applications, domains, the administrator hierarchy, s
 references), message threads (answering a request opens one), and notifications with their preferences, push, the
 delivery centre, webhooks and support tickets, live sync over server-sent events (`/events`, for thread messages,
 typing and notices), signed media links, password sign-in for organisations, guardian sign-up, the session
-lifetime (`SESSION_TTL_DAYS`) and the production boot refusals. It answers eleven of the TypeScript server's e2e
-batteries unchanged: `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`,
+lifetime (`SESSION_TTL_DAYS`) and the production boot refusals, and Recruitment Rooms (with the Trust Score, club
+evidence, missing-evidence suggestions and Combine requests they read). It answers twelve of the TypeScript server's
+e2e batteries unchanged: `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`,
 `platform/storeGuarantees`, `platform/messaging`, `platform/notifications`, `platform/delivery`,
-`platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff` and
-`verification/organisationsAndStaffAdversarial`.
+`platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff`,
+`verification/organisationsAndStaffAdversarial` and `recruitment/rooms`.
 
 ```sh
 gleam check            # type-check (fast)
@@ -68,7 +69,10 @@ Every route below is exercised by a battery, except where marked.
 | Staff | `POST /org/tactical` (the lead gate only), `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
 | Grassroots club | `POST /org/squad`, `/org/open-trials`, `/org/friendlies` (posting only) |
-| Recruitment | `POST /org/players/:id/request` (contact), `/player/requests/:id/respond`, `/guardian/requests/:id/respond`; `GET /org/ledger`, `/org/funnel`, `/guardian/inbox` |
+| Recruitment | `POST /org/players/:id/request` (contact), `/player/requests/:id/respond`, `/guardian/requests/:id/respond`; `GET /org/ledger`, `/org/funnel`, `/guardian/inbox`; `GET /org/trials`, `/org/signings` (empty pages: no route here creates either) |
+| Rooms | `GET`/`POST /org/rooms`, `GET /org/rooms/needs-attention`, `/summaries`, `GET`/`PATCH /org/rooms/:id`, `POST …/status`, `GET …/snapshots`, `…/activity`, `GET`/`POST …/comments`, `PATCH`/`DELETE …/comments/:cid`, `POST …/tasks`, `PATCH …/tasks/:tid`, `GET`/`POST …/decisions`, `POST …/evidence/:eid/review`, `…/assessment-assignments`, `…/evidence-requests`, `…/combine-requests`, `…/link`; `GET /org/rooms-funnel`, `/admin/rooms/overview` |
+| Passport | `GET /player/trust-profile`, `/org/players/:id/trust-profile` (the Trust Score, from its sources' records); `POST /org/players/:id/evidence` (a club's own claim); `GET /org/players/:id/evidence-gaps` |
+| Combine | `GET /org/combine/protocols` (the registry, recorded from the TypeScript server by `dev/combine_protocols.mjs`), `/org/combine/players/:id` (results: none, until Box Cam's service hands them over) |
 | Threads | `GET /org/channels`, `/org/channels/counts`, `/player/channels`, `/guardian/channels`, `/admin/channels`; `POST /{org,player,guardian}/channels/:id/messages`, `/read`, `/typing` |
 | Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
 | Player | `GET /player/me`, `/player/export`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/medical/records`, `/media` (no upload), `/stats`, `/badges`, `/prefs` |
@@ -78,7 +82,7 @@ Every route below is exercised by a battery, except where marked.
 | Integrations | `POST /org/webhooks` (and their delivery, signed, by the minute sweep) |
 | Media | `GET /media/:id`: every `/media/<id>` value in a response leaves signed for the requesting session (`media/links`), and a fetch checks that session's standing each time |
 | Support | `POST /org/support`, `/admin/support/:id/reply` |
-| Transitions | `POST /player/transitions`, `/player/transitions/:id/recipients`, `/revoke-recipient`; the guardian's `/guardian/children/:id/transitions`, `/guardian/children-transitions/:id/…` |
+| Transitions | `GET /org/transitions`; `POST /player/transitions`, `/player/transitions/:id/recipients`, `/revoke-recipient`; the guardian's `/guardian/children/:id/transitions`, `/guardian/children-transitions/:id/…` |
 | Verification | `/org/verification/email` (requesting a code; not confirming it), `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
@@ -105,5 +109,10 @@ for players and guardians (a new player account stores a hash no password matche
 - A refused `badges` that is not a list says `invalid`; the TypeScript server says `not_list`.
 - Of several junk saved-search filters, the first in the filters' own order is named; the TypeScript server names
   the first in the order sent.
+- A Trust Score never says `simulatedEvidenceIncluded: true`: no provider here produces simulated evidence. The
+  TypeScript server says true whenever `BOX_CAM_TEST_PROVIDER` is set.
+- Inside a Room, the Passport is its version, the player and the club history only, and has no revision; a
+  snapshot records no Passport revision either. A Room's Combine results, development activity and the
+  missing-evidence rules that read assessment ratings are not ported (`Not ported yet:`).
 - A mail's withheld one-time codes (`SendMail`'s `secrets`) read as the placeholder in `/admin/outbox` too. The
   TypeScript server's dev transport keeps the full text in process memory and shows it there.

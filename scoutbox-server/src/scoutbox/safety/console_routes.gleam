@@ -384,6 +384,10 @@ pub fn metrics(ctx: Ctx) -> Response {
       use newest <- result.map(audit.ops_newest(read, 50))
       json.object([
         #("deliveryFailures", json.int(delivery)),
+        // Not ported yet: the process's request counters, job runs, stream connects and the other domains'
+        // groups (Box Cam, development, Passport, Trust, analytics, Second Look), which come between these.
+        #("verification", verification),
+        #("rooms", rooms),
         #("webhookFailures", json.int(webhook)),
         #("dispatchBacklog", json.int(backlog)),
         #("webhookBacklog", json.int(0)),
@@ -398,8 +402,6 @@ pub fn metrics(ctx: Ctx) -> Response {
             ])
           }),
         ),
-        #("verification", verification),
-        #("rooms", rooms),
         #(
           "note",
           json.string(

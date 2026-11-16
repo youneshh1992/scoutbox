@@ -429,6 +429,30 @@ would mean porting most of the product under the heading "platform". So:
      `/admin/outbox` shows.
 3. **The domains, in port order** (recruitment, discovery, passport, development, agents, …). Each domain's
    batteries are untangled just ahead of its port.
+
+   **Recruitment Rooms [done].** Every recruitment battery works through `/org/rooms…`, so Rooms came first.
+   `recruitment/rooms` was untangled (U1–U6 and one stray `validateDecision` check to
+   `scripts/rules/recruitment/rooms.mjs`, the comment limit from the spec snapshot; 371 → 207 + 164) and passes
+   unchanged on the Gleam server (207 checks), mutation-checked twice (blocks ignored, restriction ignored). Its
+   rules suite is answered in full: 430 generated cases, 9 hand ports, none pending. As built:
+   - **Rooms need the Passport's read side,** which comes later in the port order. The Trust Score is ported in
+     full (`passport/trust_rules`, proved on 600 cases from `dev/trust_cases.mjs`), with its eight sources read
+     from their records; the scores agree with the TypeScript server's in `shape_diff`. The Passport inside a Room
+     is only its version, the player and the club history, marked `Not ported yet:`.
+   - **Box Cam stays records only.** The Trust Score reads Box Cam sessions and Combine attempts as stored. The
+     Combine registry is recorded from the TypeScript server (`dev/combine_protocols.mjs`, checked by
+     `e2e:check`), not computed, because what a device can measure is the analysis service's call. Combine
+     results wait on how that service will hand them over, which still needs a design before the Passport's Trust
+     Score is used for real.
+   - **New platform pieces:** `platform/rev` (the `expectedRev` guard), `platform/idempotency` (client keys),
+     `platform/metrics` (verification's temp-table counters, generalised by group, instead of a counter actor),
+     `platform/json_text` (stored JSON read back with its key order), and `tags.*`-style list codes in `input`.
+   - **Also ported, as far as Rooms reach:** club evidence (`POST /org/players/:id/evidence`), the evidence-gap
+     rules and their requests (two rules that read assessment ratings are not ported), Combine requests, the
+     player's and club's trust profiles, `/org/transitions`, and empty `/org/trials` and `/org/signings` pages
+     (no route here creates either).
+   - **Found on the way:** the TypeScript `uncorroborated_claims` rule reads a `tier` field evidence records don't
+     have, so it never fires, and a snapshot's `passportVersion` is always null. Both are ported as they behave.
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open
    trials, vouches, pairing and exports), `platform/contracts` (Rooms, briefs), `platform/productionHardening`
    (Rooms, briefs, second look, "nobody missed", the Passport) and `platform/dates` (trials, open trials,

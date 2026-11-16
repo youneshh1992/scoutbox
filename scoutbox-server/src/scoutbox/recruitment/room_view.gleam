@@ -887,8 +887,9 @@ pub fn capture_snapshot(
             component_levels: t.component_levels,
             hash: t.hash,
           )),
-          // passportVersion is the projection's schema version; the revision tracks its content.
-          passport_version: Some(1),
+          // The TypeScript server reads the version from its light Passport assembly, which has none, so a
+          // snapshot records it as null.
+          passport_version: None,
           // Not ported yet: the Passport revision.
           passport_revision: None,
           evidence_ids: list.map(records, fn(e) {
