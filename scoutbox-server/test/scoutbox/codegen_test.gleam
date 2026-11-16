@@ -35,6 +35,30 @@ pub fn edge_cases_test() {
   birdie.snap(trials, title: "a table with every column shape")
 }
 
+/// A vocabulary named after a prelude type would shadow it in its row module.
+pub fn prelude_named_vocabulary_test() {
+  let schema =
+    "CREATE TABLE codes (list TEXT NOT NULL CHECK (list IN ('a', 'b'))) STRICT;"
+  let assert [Generated(_, source)] = codegen.generate(schema, [])
+  assert string.contains(source, "pub type ListValue {")
+  assert !string.contains(source, "pub type List {")
+}
+
+/// A CHECK allowing a different list in each case has all of them as its vocabulary, and upper-case codes of
+/// several words read as words.
+pub fn several_lists_in_one_check_test() {
+  let schema =
+    "CREATE TABLE codes (
+  kind TEXT NOT NULL CHECK (kind IN ('a', 'b')),
+  code TEXT NOT NULL CHECK ((kind = 'a' AND code IN ('NO_SOURCE', 'GK', 'LICENCE')) OR (kind = 'b' AND code IN ('SELF_CHECK')))
+) STRICT;"
+  let assert [Generated(_, source)] = codegen.generate(schema, [])
+  assert string.contains(source, "#(\"NO_SOURCE\", NoSource)")
+  assert string.contains(source, "#(\"GK\", GK)")
+  assert string.contains(source, "#(\"LICENCE\", Licence)")
+  assert string.contains(source, "#(\"SELF_CHECK\", SelfCheck)")
+}
+
 /// A shared vocabulary that no column matches is a mistake in the declarations, not something to skip.
 pub fn unused_shared_vocabulary_test() {
   let schema = "CREATE TABLE t (id TEXT PRIMARY KEY) STRICT;"

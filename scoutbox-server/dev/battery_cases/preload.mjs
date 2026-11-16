@@ -4,7 +4,7 @@
 // that checks it. The rule modules themselves import each other directly, unwrapped and as one instance.
 //
 // BATTERY_CASES_SERVER  the TypeScript server's directory
-// BATTERY_CASES_SHIFT   milliseconds added to the clock (Date.now() and `new Date()`), for the second run
+// BATTERY_CASES_CLOCK   the instant Date.now() and `new Date()` stand still at
 import fs from 'node:fs';
 import { registerHooks } from 'node:module';
 import path from 'node:path';
@@ -85,15 +85,17 @@ export function rulesSuite(battery) {
   },
 });
 
-const shift = Number(process.env.BATTERY_CASES_SHIFT ?? 0);
-if (shift) {
+// The clock stands still at BATTERY_CASES_CLOCK (milliseconds since the epoch), so every recorded value is
+// reproducible and a rule that reads the clock reads a known instant, which the generated tests pass as `now`.
+const frozen = Number(process.env.BATTERY_CASES_CLOCK);
+if (Number.isFinite(frozen)) {
   const RealDate = Date;
   globalThis.Date = class extends RealDate {
     constructor(...a) {
-      super(...(a.length ? a : [RealDate.now() + shift]));
+      super(...(a.length ? a : [frozen]));
     }
     static now() {
-      return RealDate.now() + shift;
+      return frozen;
     }
   };
 }

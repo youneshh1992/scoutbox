@@ -13,7 +13,6 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option}
 import gleam/result
-import gleam/string
 import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -42,23 +41,7 @@ fn category_of(type_: String) -> Option(row.Category) {
 fn cut(text: String) -> String {
   case input.utf16_length(text) > text_max {
     False -> text
-    True -> take_utf16(text, text_max - 1) <> "…"
-  }
-}
-
-/// The longest prefix of whole characters that fits in `n` UTF-16 units.
-fn take_utf16(s: String, n: Int) -> String {
-  take(string.to_graphemes(s), n, "")
-}
-
-fn take(graphemes: List(String), room: Int, acc: String) -> String {
-  case graphemes {
-    [g, ..rest] ->
-      case input.utf16_length(g) <= room {
-        True -> take(rest, room - input.utf16_length(g), acc <> g)
-        False -> acc
-      }
-    [] -> acc
+    True -> input.utf16_take(text, text_max - 1) <> "…"
   }
 }
 

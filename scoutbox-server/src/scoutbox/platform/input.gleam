@@ -475,6 +475,22 @@ pub fn utf16_length(s: String) -> Int {
   })
 }
 
+/// The longest prefix of whole characters that fits in `n` UTF-16 units.
+pub fn utf16_take(s: String, n: Int) -> String {
+  utf16_take_loop(string.to_graphemes(s), n, "")
+}
+
+fn utf16_take_loop(graphemes: List(String), room: Int, acc: String) -> String {
+  case graphemes {
+    [g, ..rest] ->
+      case utf16_length(g) <= room {
+        True -> utf16_take_loop(rest, room - utf16_length(g), acc <> g)
+        False -> acc
+      }
+    [] -> acc
+  }
+}
+
 // ------------------------------------------------------------------------------------------------- shapes
 
 /// An object's fields, read in order.

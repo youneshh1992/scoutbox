@@ -1,46 +1,61 @@
-// The recorder's runtime, loaded into a TypeScript rules suite's process by preload.mjs. The wrapper modules the hooks
-// put between a suite and the rules it imports call `wrap` for each exported function, and the rules suite's `ok` and
-// `neg` call `assertion`; on exit the calls go to BATTERY_CASES_OUT as JSON.
-//
-// A call is kept as a case when its arguments and its result are plain data (they survive a JSON round trip), or when
-// it throws a refusal with a code. Everything else is kept as a reason only, so the report can list it for porting by
-// hand. Only the calls a suite makes itself are recorded: a rule calling another rule is part of the first call.
+// A call is kept as a case when its arguments and its result are data: plain JSON values, plus byte buffers and Maps,
+// which are written tagged (`{ "$bytes": base64 }`, `{ "$map": [[key, value], …] }`) so a printer can tell them from
+// plain objects. A call that changes its arguments (a rule that updates the record it is given) also keeps the
+// arguments as they were after it. A call that throws a refusal with a code keeps the code. Everything else is kept as
+// a reason only, so the report can list it for porting by hand. Only the calls a suite makes itself are recorded: a
+// rule calling another rule is part of the first call.
 import fs from 'node:fs';
 
 const calls = [];
 let pending = [];
 let depth = 0;
 
-/** Why `v` would not survive a JSON round trip, or null if it would. Object properties holding `undefined` are absent. */
-function notPlain(v, at = '$') {
-  if (v === null || typeof v === 'string' || typeof v === 'boolean') return null;
-  if (typeof v === 'number') return Number.isFinite(v) ? null : `${at} is ${v}`;
-  if (typeof v === 'undefined') return `${at} is undefined`;
-  if (typeof v === 'function') return `${at} is a function`;
-  if (typeof v !== 'object') return `${at} is a ${typeof v}`;
+/** `v` as JSON-ready data (`{ data }`), or why it can't be (`{ why }`). Object properties holding `undefined` are absent. */
+function encode(v, at = '$') {
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return { data: v };
+  if (typeof v === 'number') return Number.isFinite(v) ? { data: v } : { why: `${at} is ${v}` };
+  if (typeof v === 'undefined') return { why: `${at} is undefined` };
+  if (typeof v === 'function') return { why: `${at} is a function` };
+  if (typeof v !== 'object') return { why: `${at} is a ${typeof v}` };
+  if (v instanceof Uint8Array) return { data: { $bytes: Buffer.from(v).toString('base64') } };
   if (Array.isArray(v)) {
+    const out = [];
     for (let i = 0; i < v.length; i++) {
-      const why = notPlain(v[i], `${at}[${i}]`);
-      if (why) return why;
+      const e = encode(v[i], `${at}[${i}]`);
+      if (e.why) return e;
+      out.push(e.data);
     }
-    return null;
+    return { data: out };
+  }
+  if (v instanceof Map) {
+    const out = [];
+    for (const [k, x] of v) {
+      const ek = encode(k, `${at} key`);
+      if (ek.why) return ek;
+      const ex = encode(x, `${at}.get(${JSON.stringify(k)})`);
+      if (ex.why) return ex;
+      out.push([ek.data, ex.data]);
+    }
+    return { data: { $map: out } };
   }
   const proto = Object.getPrototypeOf(v);
-  if (proto !== Object.prototype && proto !== null) return `${at} is a ${v.constructor?.name ?? 'class instance'}`;
+  if (proto !== Object.prototype && proto !== null) return { why: `${at} is a ${v.constructor?.name ?? 'class instance'}` };
+  const out = {};
   for (const [k, x] of Object.entries(v)) {
     if (x === undefined) continue;
-    const why = notPlain(x, `${at}.${k}`);
-    if (why) return why;
+    const e = encode(x, `${at}.${k}`);
+    if (e.why) return e;
+    out[k] = e.data;
   }
-  return null;
+  return { data: out };
 }
 
 /** The arguments as plain data, trailing `undefined`s dropped (a missing argument), or the reason they aren't. */
 function plainArgs(args) {
   const list = [...args];
   while (list.length && list.at(-1) === undefined) list.pop();
-  const why = notPlain(list, 'args');
-  return why ? { why } : { json: JSON.stringify(list) };
+  const e = encode(list, 'args');
+  return e.why ? { why: e.why } : { json: JSON.stringify(e.data) };
 }
 
 /** A thrown refusal's code: `err.code` when it is one, or the `CODE:` a message starts with. */
@@ -63,9 +78,11 @@ export function wrap(module, name, fn) {
       const out = fn.apply(this, args);
       if (out instanceof Promise) call.why ??= 'returns a promise';
       else if (!call.why) {
-        const why = notPlain(out, 'result');
-        if (why) call.why = why;
-        else call.result = JSON.stringify(out ?? null);
+        const e = encode(out ?? null, 'result');
+        if (e.why) call.why = e.why;
+        else call.result = JSON.stringify(e.data);
+        const after = plainArgs(args);
+        if (!call.why && after.json !== call.args) call.argsAfter = after.json;
       }
       return out;
     } catch (err) {

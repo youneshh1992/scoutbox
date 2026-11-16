@@ -301,5 +301,225 @@
         "status": "pending"
       }
     ]
+  },
+  {
+    "battery": "verification/organisationsAndStaff",
+    "functions": [
+      {
+        "function": "domains/verification/claims/shared.mjs#applyTransition",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#arrayTokenStore",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "result.create is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#canTransition",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#consumeToken",
+        "calls": 7,
+        "cases": 0,
+        "handPort": {
+          "args[].create is a function": 7
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#decideReview",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#domainCovered",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#domainOfEmail",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#effectiveStatus",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#emailProblem",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#evidenceCompleteness",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#evidenceFileProblem",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#isDisposable",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#isFreeMail",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#mintToken",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "args[].create is a function": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#normalizeDomain",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#orgVerificationStatus",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#riskFlags",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#toPublicVerificationProfile",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#verLevelFor",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
+    "battery": "verification/organisationsAndStaffAdversarial",
+    "functions": [
+      {
+        "function": "domains/verification/claims/shared.mjs#arrayTokenStore",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "result.create is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#assuranceForClaim",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#claimProvenanceLabel",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#consumeToken",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].create is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#evidenceFileProblem",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#mintToken",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "args[].create is a function": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#peekToken",
+        "calls": 3,
+        "cases": 0,
+        "handPort": {
+          "args[].create is a function": 3
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#sniffFileSignature",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#toPublicVerificationProfile",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
   }
 ]
