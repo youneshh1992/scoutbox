@@ -497,6 +497,38 @@ pub fn next_combine_request(tx: Tx) -> Result(CombineRequestId, Fail(e)) {
   ids.next(tx, "creq") |> result.map(CombineRequestId)
 }
 
+/// An id of `compliance_contexts`.
+pub opaque type ComplianceContextId {
+  ComplianceContextId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn compliance_context(text: String) -> ComplianceContextId {
+  ComplianceContextId(text)
+}
+
+pub fn compliance_context_to_string(id: ComplianceContextId) -> String {
+  let ComplianceContextId(text) = id
+  text
+}
+
+pub fn compliance_context_sql(id: ComplianceContextId) -> sqlight.Value {
+  sqlight.text(compliance_context_to_string(id))
+}
+
+pub fn compliance_context_json(id: ComplianceContextId) -> Json {
+  json.string(compliance_context_to_string(id))
+}
+
+pub fn compliance_context_decoder() -> decode.Decoder(ComplianceContextId) {
+  decode.map(decode.string, ComplianceContextId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_compliance_context(tx: Tx) -> Result(ComplianceContextId, Fail(e)) {
+  ids.next(tx, "ctx") |> result.map(ComplianceContextId)
+}
+
 /// An id of `ver_conflicts`.
 pub opaque type ConflictId {
   ConflictId(String)
@@ -527,6 +559,38 @@ pub fn conflict_decoder() -> decode.Decoder(ConflictId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_conflict(tx: Tx) -> Result(ConflictId, Fail(e)) {
   ids.next(tx, "vcoi") |> result.map(ConflictId)
+}
+
+/// An id of `compliance_context_history`.
+pub opaque type ContextEventId {
+  ContextEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn context_event(text: String) -> ContextEventId {
+  ContextEventId(text)
+}
+
+pub fn context_event_to_string(id: ContextEventId) -> String {
+  let ContextEventId(text) = id
+  text
+}
+
+pub fn context_event_sql(id: ContextEventId) -> sqlight.Value {
+  sqlight.text(context_event_to_string(id))
+}
+
+pub fn context_event_json(id: ContextEventId) -> Json {
+  json.string(context_event_to_string(id))
+}
+
+pub fn context_event_decoder() -> decode.Decoder(ContextEventId) {
+  decode.map(decode.string, ContextEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_context_event(tx: Tx) -> Result(ContextEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(ContextEventId)
 }
 
 /// An id of `case_decision_drafts`.
@@ -682,6 +746,33 @@ pub fn drill_result_json(id: DrillResultId) -> Json {
 
 pub fn drill_result_decoder() -> decode.Decoder(DrillResultId) {
   decode.map(decode.string, DrillResultId)
+}
+
+/// An id of `compliance_evaluations`.
+pub opaque type EvaluationId {
+  EvaluationId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn evaluation(text: String) -> EvaluationId {
+  EvaluationId(text)
+}
+
+pub fn evaluation_to_string(id: EvaluationId) -> String {
+  let EvaluationId(text) = id
+  text
+}
+
+pub fn evaluation_sql(id: EvaluationId) -> sqlight.Value {
+  sqlight.text(evaluation_to_string(id))
+}
+
+pub fn evaluation_json(id: EvaluationId) -> Json {
+  json.string(evaluation_to_string(id))
+}
+
+pub fn evaluation_decoder() -> decode.Decoder(EvaluationId) {
+  decode.map(decode.string, EvaluationId)
 }
 
 /// An id of `ver_evidence`.
@@ -871,6 +962,38 @@ pub fn guardian_decoder() -> decode.Decoder(GuardianId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_guardian(tx: Tx) -> Result(GuardianId, Fail(e)) {
   ids.next(tx, "gd") |> result.map(GuardianId)
+}
+
+/// An id of `case_transaction_handoffs`.
+pub opaque type HandoffId {
+  HandoffId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn handoff(text: String) -> HandoffId {
+  HandoffId(text)
+}
+
+pub fn handoff_to_string(id: HandoffId) -> String {
+  let HandoffId(text) = id
+  text
+}
+
+pub fn handoff_sql(id: HandoffId) -> sqlight.Value {
+  sqlight.text(handoff_to_string(id))
+}
+
+pub fn handoff_json(id: HandoffId) -> Json {
+  json.string(handoff_to_string(id))
+}
+
+pub fn handoff_decoder() -> decode.Decoder(HandoffId) {
+  decode.map(decode.string, HandoffId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_handoff(tx: Tx) -> Result(HandoffId, Fail(e)) {
+  ids.next(tx, "hof") |> result.map(HandoffId)
 }
 
 /// An id of `idv_queue`.
@@ -2261,6 +2384,134 @@ pub fn ticket_decoder() -> decode.Decoder(TicketId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_ticket(tx: Tx) -> Result(TicketId, Fail(e)) {
   ids.next(tx, "tkt") |> result.map(TicketId)
+}
+
+/// An id of `agent_transactions`.
+pub opaque type TransactionId {
+  TransactionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn transaction(text: String) -> TransactionId {
+  TransactionId(text)
+}
+
+pub fn transaction_to_string(id: TransactionId) -> String {
+  let TransactionId(text) = id
+  text
+}
+
+pub fn transaction_sql(id: TransactionId) -> sqlight.Value {
+  sqlight.text(transaction_to_string(id))
+}
+
+pub fn transaction_json(id: TransactionId) -> Json {
+  json.string(transaction_to_string(id))
+}
+
+pub fn transaction_decoder() -> decode.Decoder(TransactionId) {
+  decode.map(decode.string, TransactionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_transaction(tx: Tx) -> Result(TransactionId, Fail(e)) {
+  ids.next(tx, "atx") |> result.map(TransactionId)
+}
+
+/// An id of `transaction_history`.
+pub opaque type TransactionEventId {
+  TransactionEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn transaction_event(text: String) -> TransactionEventId {
+  TransactionEventId(text)
+}
+
+pub fn transaction_event_to_string(id: TransactionEventId) -> String {
+  let TransactionEventId(text) = id
+  text
+}
+
+pub fn transaction_event_sql(id: TransactionEventId) -> sqlight.Value {
+  sqlight.text(transaction_event_to_string(id))
+}
+
+pub fn transaction_event_json(id: TransactionEventId) -> Json {
+  json.string(transaction_event_to_string(id))
+}
+
+pub fn transaction_event_decoder() -> decode.Decoder(TransactionEventId) {
+  decode.map(decode.string, TransactionEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_transaction_event(tx: Tx) -> Result(TransactionEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(TransactionEventId)
+}
+
+/// An id of `transaction_notes`.
+pub opaque type TransactionNoteId {
+  TransactionNoteId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn transaction_note(text: String) -> TransactionNoteId {
+  TransactionNoteId(text)
+}
+
+pub fn transaction_note_to_string(id: TransactionNoteId) -> String {
+  let TransactionNoteId(text) = id
+  text
+}
+
+pub fn transaction_note_sql(id: TransactionNoteId) -> sqlight.Value {
+  sqlight.text(transaction_note_to_string(id))
+}
+
+pub fn transaction_note_json(id: TransactionNoteId) -> Json {
+  json.string(transaction_note_to_string(id))
+}
+
+pub fn transaction_note_decoder() -> decode.Decoder(TransactionNoteId) {
+  decode.map(decode.string, TransactionNoteId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_transaction_note(tx: Tx) -> Result(TransactionNoteId, Fail(e)) {
+  ids.next(tx, "txn") |> result.map(TransactionNoteId)
+}
+
+/// An id of `transaction_parties`.
+pub opaque type TransactionPartyId {
+  TransactionPartyId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn transaction_party(text: String) -> TransactionPartyId {
+  TransactionPartyId(text)
+}
+
+pub fn transaction_party_to_string(id: TransactionPartyId) -> String {
+  let TransactionPartyId(text) = id
+  text
+}
+
+pub fn transaction_party_sql(id: TransactionPartyId) -> sqlight.Value {
+  sqlight.text(transaction_party_to_string(id))
+}
+
+pub fn transaction_party_json(id: TransactionPartyId) -> Json {
+  json.string(transaction_party_to_string(id))
+}
+
+pub fn transaction_party_decoder() -> decode.Decoder(TransactionPartyId) {
+  decode.map(decode.string, TransactionPartyId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_transaction_party(tx: Tx) -> Result(TransactionPartyId, Fail(e)) {
+  ids.next(tx, "txp") |> result.map(TransactionPartyId)
 }
 
 /// An id of `transition_cases`.

@@ -1744,7 +1744,12 @@ fn facet_needs_review(
     True -> Ok(Nil)
     False -> {
       use policies <- result.try(approach_policy.published(r))
-      let set = approach_policy.applicable(policies, option.values([ma]), now)
+      let set =
+        approach_policy.applicable(
+          policies,
+          list.map(option.values([ma]), jurisdiction.to_string),
+          now,
+        )
       reviews.create(
         tx,
         p.row.agency_org_id,
@@ -2734,7 +2739,12 @@ fn propose(
               player_id,
             ))
             use policies <- result.map(approach_policy.published(r))
-            let set = approach_policy.applicable(policies, [j], now)
+            let set =
+              approach_policy.applicable(
+                policies,
+                [jurisdiction.to_string(j)],
+                now,
+              )
             let others =
               theirs
               |> list.filter(fn(x) {
@@ -2754,7 +2764,7 @@ fn propose(
               ),
               approach_policy.approach_adult(
                 set,
-                [j],
+                [jurisdiction.to_string(j)],
                 fn(facet, ma) { state_of(p, facet, ma, now) },
                 others,
                 now,
@@ -3736,7 +3746,12 @@ fn representation_disputed(
     True -> Ok(Nil)
     False -> {
       use policies <- result.try(approach_policy.published(r))
-      let set = approach_policy.applicable(policies, [a.jurisdiction], now)
+      let set =
+        approach_policy.applicable(
+          policies,
+          [jurisdiction.to_string(a.jurisdiction)],
+          now,
+        )
       reviews.create(
         tx,
         a.agency_org_id,

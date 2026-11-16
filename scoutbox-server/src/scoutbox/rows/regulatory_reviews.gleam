@@ -13,6 +13,7 @@ import scoutbox/vocab/compliance_actor_kind
 import scoutbox/vocab/context_outcome
 import scoutbox/vocab/declared_representation_status
 import scoutbox/vocab/facet_state
+import scoutbox/vocab/party_role
 import scoutbox/vocab/review_status
 import scoutbox/vocab/reviewer_role
 import sqlight
@@ -79,52 +80,6 @@ pub fn kind_decoder() -> decode.Decoder(Kind) {
   case kind_from_string(value) {
     Ok(v) -> decode.success(v)
     Error(Nil) -> decode.failure(VerificationFacet, "Kind")
-  }
-}
-
-pub type SubjectPartyRole {
-  Individual
-  EngagingEntity
-  ReleasingEntity
-}
-
-/// Each value with the text the column stores.
-pub const subject_party_role_pairs = [
-  #("individual", Individual),
-  #("engaging_entity", EngagingEntity),
-  #("releasing_entity", ReleasingEntity),
-]
-
-pub fn subject_party_role_to_string(value: SubjectPartyRole) -> String {
-  case value {
-    Individual -> "individual"
-    EngagingEntity -> "engaging_entity"
-    ReleasingEntity -> "releasing_entity"
-  }
-}
-
-pub fn subject_party_role_from_string(
-  value: String,
-) -> Result(SubjectPartyRole, Nil) {
-  case value {
-    "individual" -> Ok(Individual)
-    "engaging_entity" -> Ok(EngagingEntity)
-    "releasing_entity" -> Ok(ReleasingEntity)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn subject_party_role_to_json(value: SubjectPartyRole) -> Json {
-  json.string(subject_party_role_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn subject_party_role_decoder() -> decode.Decoder(SubjectPartyRole) {
-  use value <- decode.then(decode.string)
-  case subject_party_role_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Individual, "SubjectPartyRole")
   }
 }
 
@@ -233,7 +188,7 @@ pub type Row {
     subject_context_id: Option(String),
     subject_transaction_id: Option(String),
     subject_representation_id: Option(String),
-    subject_party_role: Option(SubjectPartyRole),
+    subject_party_role: Option(party_role.PartyRole),
     subject_is_approach: Bool,
     subject_player_id: Option(id.PlayerId),
     subject_jurisdiction: Option(String),
@@ -379,7 +334,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   )
   use subject_party_role <- decode.field(
     13,
-    decode.optional(subject_party_role_decoder()),
+    decode.optional(party_role.decoder()),
   )
   use subject_is_approach <- decode.field(14, sqlight.decode_bool())
   use subject_player_id <- decode.field(
@@ -544,7 +499,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.subject_transaction_id),
     sqlight.nullable(sqlight.text, row.subject_representation_id),
     sqlight.nullable(
-      fn(v) { sqlight.text(subject_party_role_to_string(v)) },
+      fn(v) { sqlight.text(party_role.to_string(v)) },
       row.subject_party_role,
     ),
     sqlight.bool(row.subject_is_approach),

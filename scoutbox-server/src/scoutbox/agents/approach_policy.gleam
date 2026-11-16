@@ -5,8 +5,11 @@
 //// Objective mandatory conditions (licence, registration, authorisation) fail closed; uncertainty goes to
 //// attributed review. Neither branch is permission.
 ////
-//// Not ported yet: the other policy actions (`declare_representation`, `request_consent`, `approach_minor`), the
-//// minors gate and the representation-scope rule, which belong to compliance contexts and the minor pathway.
+//// `declare_representation` is the same evaluation without the exclusivity window. The conflict engine
+//// (`agents/conflict`) reads the same policy set.
+////
+//// Not ported yet: the other policy actions (`request_consent`, `approach_minor`), the minors gate and the
+//// representation-scope rule, which belong to the consent routes and the minor pathway.
 
 import gleam/json
 import gleam/list
@@ -16,6 +19,8 @@ import scoutbox/platform/store.{type Fail, type Read}
 import scoutbox/platform/temporal
 import scoutbox/rows/id
 import scoutbox/rows/jurisdiction_policies as policy_row
+import scoutbox/rows/jurisdiction_policy_rule_overrides as override_row
+import scoutbox/rows/jurisdiction_policy_rule_param_items as item_row
 import scoutbox/rows/jurisdiction_policy_rule_params as param_row
 import scoutbox/rows/jurisdiction_policy_rules as rule_row
 import scoutbox/vocab/agent_facet.{
@@ -23,7 +28,7 @@ import scoutbox/vocab/agent_facet.{
   NationalRegistration,
 }
 import scoutbox/vocab/facet_state.{type FacetState, Inactive, Stale, Verified}
-import scoutbox/vocab/jurisdiction.{type Jurisdiction, INT}
+import scoutbox/vocab/jurisdiction.{type Jurisdiction}
 import scoutbox/vocab/rule_status.{type RuleStatus}
 
 const day_ms = 86_400_000
@@ -37,6 +42,10 @@ pub type Rule {
     flags: List(#(String, Bool)),
     counts: List(#(String, Int)),
     texts: List(#(String, String)),
+    /// List parameters (`permittedSets`), each a list of sets of text.
+    sets: List(#(String, List(List(String)))),
+    /// Where this rule gives way to a national one: the jurisdiction and the overriding rule's id.
+    overrides: List(#(Jurisdiction, String)),
   )
 }
 
@@ -68,13 +77,29 @@ pub fn published(read: Read) -> Result(List(Policy), Fail(e)) {
       [id.policy_sql(p.id)],
       rule_row.decoder(),
     ))
-    use params <- result.map(store.query(
+    use params <- result.try(store.query(
       read,
       "SELECT "
         <> param_row.columns
         <> " FROM jurisdiction_policy_rule_params WHERE policy_id = ? ORDER BY rule_id, ord",
       [id.policy_sql(p.id)],
       param_row.decoder(),
+    ))
+    use items <- result.try(store.query(
+      read,
+      "SELECT "
+        <> item_row.columns
+        <> " FROM jurisdiction_policy_rule_param_items WHERE policy_id = ? ORDER BY rule_id, name, set_no, ord",
+      [id.policy_sql(p.id)],
+      item_row.decoder(),
+    ))
+    use overrides <- result.map(store.query(
+      read,
+      "SELECT "
+        <> override_row.columns
+        <> " FROM jurisdiction_policy_rule_overrides WHERE policy_id = ? ORDER BY rule_id, ord",
+      [id.policy_sql(p.id)],
+      override_row.decoder(),
     ))
     Policy(
       p,
@@ -95,8 +120,33 @@ pub fn published(read: Read) -> Result(List(Policy), Fail(e)) {
           flags: named(fn(x) { x.flag_value }),
           counts: named(fn(x) { x.count_value }),
           texts: named(fn(x) { x.text_value }),
+          sets: sets_of(list.filter(items, fn(x) { x.rule_id == r.rule_id })),
+          overrides: overrides
+            |> list.filter(fn(o) { o.rule_id == r.rule_id })
+            |> list.map(fn(o) { #(o.jurisdiction, o.override_rule_id) }),
         )
       }),
+    )
+  })
+}
+
+/// Text items grouped by parameter, then by set, in order.
+fn sets_of(items: List(item_row.Row)) -> List(#(String, List(List(String)))) {
+  items
+  |> list.filter_map(fn(x) {
+    case x.text_value {
+      Some(t) -> Ok(#(x.name, x.set_no, t))
+      None -> Error(Nil)
+    }
+  })
+  |> list.chunk(fn(x) { x.0 })
+  |> list.map(fn(by_name) {
+    let assert [#(name, _, _), ..] = by_name
+    #(
+      name,
+      by_name
+        |> list.chunk(fn(x) { x.1 })
+        |> list.map(fn(set) { list.map(set, fn(x) { x.2 }) }),
     )
   })
 }
@@ -139,23 +189,30 @@ pub fn select_version(
   })
 }
 
+/// `missing` names, in order, each member association no version in effect covers: a code ScoutBox has no
+/// policy for at all (`FRA`) as well as a known one with none in effect.
 pub type PolicySet {
-  PolicySet(policies: List(Policy), missing: List(Jurisdiction))
+  PolicySet(policies: List(Policy), missing: List(String))
 }
 
 /// FIFA (`INT`) always applies. A missing national entry is reported, never skipped.
 pub fn applicable(
   policies: List(Policy),
-  mas: List(Jurisdiction),
+  mas: List(String),
   now: Int,
 ) -> PolicySet {
   let mas =
-    [INT, ..list.filter(mas, fn(m) { m != INT })]
+    ["INT", ..list.filter(mas, fn(m) { m != "INT" && m != "" })]
     |> list.unique
   list.fold(mas, PolicySet([], []), fn(set, ma) {
-    case select_version(policies, ma, now) {
-      Some(p) -> PolicySet(..set, policies: list.append(set.policies, [p]))
-      None -> PolicySet(..set, missing: list.append(set.missing, [ma]))
+    case
+      jurisdiction.from_string(ma)
+      |> result.try(fn(j) {
+        select_version(policies, j, now) |> option.to_result(Nil)
+      })
+    {
+      Ok(p) -> PolicySet(..set, policies: list.append(set.policies, [p]))
+      Error(Nil) -> PolicySet(..set, missing: list.append(set.missing, [ma]))
     }
   })
 }
@@ -177,7 +234,7 @@ pub type Status {
   Known(RuleStatus)
 }
 
-fn status_at(rule: Rule, now: Int) -> RuleStatus {
+pub fn status_at(rule: Rule, now: Int) -> RuleStatus {
   case rule.status {
     rule_status.PendingImplementation -> {
       let from = case rule.effective_from {
@@ -193,12 +250,19 @@ fn status_at(rule: Rule, now: Int) -> RuleStatus {
   }
 }
 
+/// The first policy in the set that encodes `rule_id`, with the rule.
+pub fn find_rule(
+  policies: List(Policy),
+  rule_id: String,
+) -> Result(#(Rule, Policy), Nil) {
+  list.find_map(policies, fn(p) {
+    list.find(p.rules, fn(r) { r.id == rule_id })
+    |> result.map(fn(r) { #(r, p) })
+  })
+}
+
 fn rule_at(policies: List(Policy), rule_id: String, now: Int) -> Entry {
-  let found =
-    list.find_map(policies, fn(p) {
-      list.find(p.rules, fn(r) { r.id == rule_id })
-      |> result.map(fn(r) { #(r, p) })
-    })
+  let found = find_rule(policies, rule_id)
   case found {
     Ok(#(r, p)) -> Entry(rule_id, Some(r), Some(p), Known(status_at(r, now)))
     Error(Nil) -> Entry(rule_id, None, None, Known(rule_status.Unknown))
@@ -234,13 +298,13 @@ fn reason_of(code: String, e: Entry) -> Reason {
   )
 }
 
-fn unencoded(ma: Jurisdiction) -> Reason {
+fn unencoded(ma: String) -> Reason {
   Reason(
     code: "POLICY_NOT_ENCODED",
     rule_id: None,
     rule_status: rule_status.Unknown,
     regulator: None,
-    jurisdiction: Some(ma),
+    jurisdiction: jurisdiction.from_string(ma) |> option.from_result,
     policy_version: None,
     facet: None,
     member_association: None,
@@ -346,7 +410,7 @@ fn require_facet(
 /// agreements, anonymised to their ends.
 pub fn approach_adult(
   set: PolicySet,
-  mas: List(Jurisdiction),
+  mas: List(String),
   state_of: fn(AgentFacet, Option(Jurisdiction)) -> FacetState,
   other_exclusive_ends: List(Option(Int)),
   now: Int,
@@ -361,7 +425,7 @@ pub fn approach_adult(
       )
     })
   let mas =
-    [INT, ..list.filter(mas, fn(m) { m != INT })]
+    ["INT", ..list.filter(mas, fn(m) { m != "INT" && m != "" })]
     |> list.unique
   // The FIFA licence is personal and required for every regulated act (FIFA-8.1 / 11.1 / 12.2).
   let d =
@@ -393,22 +457,27 @@ pub fn approach_adult(
   // National overlays: registration and domestic authorisation are separate facets (DR-53).
   let d =
     list.fold(mas, d, fn(d, ma) {
-      case ma, list.find(policies, fn(p) { p.row.jurisdiction == ma }) {
-        INT, _ | _, Error(Nil) -> d
-        _, Ok(policy) ->
+      case
+        ma,
+        list.find(policies, fn(p) {
+          jurisdiction.to_string(p.row.jurisdiction) == ma
+        })
+      {
+        "INT", _ | _, Error(Nil) -> d
+        _, Ok(policy) -> {
+          let ma = Some(policy.row.jurisdiction)
           list.fold(policy.rules, d, fn(d, r) {
             let e = Entry(r.id, Some(r), Some(policy), Known(status_at(r, now)))
             let d = case flag(r, "nationalRegistrationRequired") {
-              True ->
-                require_facet(d, e, NationalRegistration, Some(ma), state_of)
+              True -> require_facet(d, e, NationalRegistration, ma, state_of)
               False -> d
             }
             case flag(r, "domesticAuthorisationRequired") {
-              True ->
-                require_facet(d, e, DomesticAuthorisation, Some(ma), state_of)
+              True -> require_facet(d, e, DomesticAuthorisation, ma, state_of)
               False -> d
             }
           })
+        }
       }
     })
   // The exclusive-agreement approach window (FIFA-16.1b / ENG-8.1b): while under legal review, manual review
@@ -420,8 +489,8 @@ pub fn approach_adult(
         "FIFA-16.1b",
         ..list.filter_map(mas, fn(m) {
           case m {
-            INT -> Error(Nil)
-            _ -> Ok(jurisdiction.to_string(m) <> "-8.1b")
+            "INT" -> Error(Nil)
+            _ -> Ok(m <> "-8.1b")
           }
         })
       ]
@@ -488,7 +557,23 @@ pub fn approach_adult(
   }
 }
 
-fn flag(r: Rule, name: String) -> Bool {
+/// Declaring a representation: the agent's own facets and the national overlays, as for an adult approach but
+/// with no exclusive-agreement window.
+pub fn declare_representation(
+  set: PolicySet,
+  mas: List(String),
+  state_of: fn(AgentFacet, Option(Jurisdiction)) -> FacetState,
+  now: Int,
+) -> Decision {
+  approach_adult(set, mas, state_of, [], now)
+}
+
+/// `allowed` in policy.mjs: nothing blocks, no facet is missing and nothing needs review.
+pub fn allowed(d: Decision) -> Bool {
+  !d.blocked && !d.requires_manual_review && d.facet_gaps == []
+}
+
+pub fn flag(r: Rule, name: String) -> Bool {
   list.key_find(r.flags, name) == Ok(True)
 }
 
