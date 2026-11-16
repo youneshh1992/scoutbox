@@ -3,8 +3,7 @@
 //// a player is labelled "released"; agencies never receive transition packs.
 ////
 //// Not ported yet: the case lists, withdrawing and placing a case, the club's side (its list and the pack view),
-//// the expiry and follow-up sweep, the admin's level review, and the `transition.granted` / `transition.revoked`
-//// webhooks.
+//// the expiry and follow-up sweep, and the admin's level review.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}
@@ -16,6 +15,7 @@ import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs
 import scoutbox/identity/players.{type Player}
+import scoutbox/integrations/webhooks
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
@@ -29,6 +29,7 @@ import scoutbox/rows/transition_cases as row
 import scoutbox/vocab/audience
 import scoutbox/vocab/org_type
 import scoutbox/vocab/party.{type Party}
+import scoutbox/vocab/webhook_event
 import sqlight
 import wisp.{type Request, type Response}
 
@@ -602,6 +603,13 @@ fn grant(ctx: Ctx, c: Case, actor: Actor, body: Grant, now: Int) -> Response {
                 Some(org.id),
                 now,
               ))
+              use _ <- result.try(webhooks.emit(
+                tx,
+                Some(org.id),
+                webhook_event.TransitionGranted,
+                c.row.id,
+                now,
+              ))
               use staff <- result.try(first_staff(read, org.id))
               use _ <- result.map(case staff {
                 Some(uid) ->
@@ -675,6 +683,13 @@ pub fn revoke_recipient(
             history_row.RecipientRevoked,
             None,
             Some(r.org_id),
+            now,
+          ))
+          use _ <- result.try(webhooks.emit(
+            tx,
+            Some(r.org_id),
+            webhook_event.TransitionRevoked,
+            c.row.id,
             now,
           ))
           use staff <- result.try(first_staff(store.reading(tx), r.org_id))

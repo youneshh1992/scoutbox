@@ -29,6 +29,8 @@ pub type Config {
     /// DELIVERY_CALLBACK_SECRET: what the delivery provider signs its callbacks with. Its default is the local fake
     /// provider's, as in the TypeScript server: there is no real provider to call back.
     delivery_callback_secret: String,
+    /// ALLOW_LOCAL_WEBHOOKS=1: a webhook may go to a loopback address (the battery's receiver).
+    allow_local_webhooks: Bool,
   )
 }
 
@@ -67,33 +69,32 @@ pub fn load() -> Result(Config, String) {
         "SCOUTBOX_SEED_DEMO must be 1 (load the demo world on first boot) or 0 (start empty).",
       )
   })
-  Ok(
-    Config(
-      port:,
-      data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
-      admin_key:,
-      dev_logins: !production,
-      fault_rules: envoy.get("SCOUTBOX_FAULTS") |> result.unwrap(""),
-      seed_demo:,
-      quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
-      media_secret: case envoy.get("MEDIA_SECRET") |> result.map(string.trim) {
-        Ok("") | Error(Nil) -> None
-        Ok(secret) -> Some(secret)
-      },
-      licence_registry: case envoy.get("TEST_LICENCE_REGISTRY") {
-        Ok("1") -> RegistryUp
-        Ok("down") -> RegistryDown
-        _ -> NoRegistry
-      },
-      sweep_ms: case envoy.get("SCOUTBOX_FAST_SWEEPS") {
-        Ok("1") -> 500
-        _ -> 60_000
-      },
-      fast_sweeps: envoy.get("SCOUTBOX_FAST_SWEEPS") == Ok("1"),
-      delivery_callback_secret: case envoy.get("DELIVERY_CALLBACK_SECRET") {
-        Ok("") | Error(Nil) -> "local-fake-callback-secret"
-        Ok(secret) -> secret
-      },
-    ),
-  )
+  Ok(Config(
+    port:,
+    data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
+    admin_key:,
+    dev_logins: !production,
+    fault_rules: envoy.get("SCOUTBOX_FAULTS") |> result.unwrap(""),
+    seed_demo:,
+    quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
+    media_secret: case envoy.get("MEDIA_SECRET") |> result.map(string.trim) {
+      Ok("") | Error(Nil) -> None
+      Ok(secret) -> Some(secret)
+    },
+    licence_registry: case envoy.get("TEST_LICENCE_REGISTRY") {
+      Ok("1") -> RegistryUp
+      Ok("down") -> RegistryDown
+      _ -> NoRegistry
+    },
+    sweep_ms: case envoy.get("SCOUTBOX_FAST_SWEEPS") {
+      Ok("1") -> 500
+      _ -> 60_000
+    },
+    fast_sweeps: envoy.get("SCOUTBOX_FAST_SWEEPS") == Ok("1"),
+    delivery_callback_secret: case envoy.get("DELIVERY_CALLBACK_SECRET") {
+      Ok("") | Error(Nil) -> "local-fake-callback-secret"
+      Ok(secret) -> secret
+    },
+    allow_local_webhooks: envoy.get("ALLOW_LOCAL_WEBHOOKS") == Ok("1"),
+  ))
 }

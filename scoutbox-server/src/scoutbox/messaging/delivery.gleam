@@ -17,6 +17,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/integrations/webhooks
 import scoutbox/messaging/dispatches.{type Dispatch, QuietRecheck, Sent}
 import scoutbox/messaging/notifications.{type Notification}
 import scoutbox/messaging/outbox
@@ -35,6 +36,7 @@ import scoutbox/rows/org_users as staff_row
 import scoutbox/rows/players as player_row
 import scoutbox/rules/age
 import scoutbox/vocab/audience
+import scoutbox/vocab/webhook_event
 import sqlight
 import wisp.{type Request, type Response}
 
@@ -403,8 +405,13 @@ fn send(ctx: Ctx, tx: Tx, due: Dispatch, now: Int) -> Result(Int, Fail(Nil)) {
                 ]),
               )
               use _ <- result.try(delivery_failed(tx, d, clock.now_ms()))
-              // Not ported yet: the club's `delivery.failed` webhook.
-              Ok(Nil)
+              webhooks.emit(
+                tx,
+                d.org_id,
+                webhook_event.DeliveryFailed,
+                d.id,
+                clock.now_ms(),
+              )
             }
             False -> {
               let wait =

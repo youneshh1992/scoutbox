@@ -14,6 +14,13 @@ pub const shared = [
   Shared("Party", ["player", "guardian"]),
   Shared("Audience", ["player", "guardian", "org_user"]),
   Shared("OrgType", ["club", "agency"]),
+  Shared(
+    "WebhookEvent",
+    [
+      "import.committed", "identity.resolved", "transition.granted",
+      "transition.revoked", "delivery.failed",
+    ],
+  ),
   Shared("NotificationCategory", [
     "mentions",
     "assignments",
@@ -164,6 +171,9 @@ pub const tables = [
   "recruitment_requests",
   "reports",
   "sessions",
+  "support_ticket_refs",
+  "support_ticket_replies",
+  "support_tickets",
   "transition_case_history",
   "transition_case_pack_items",
   "transition_case_recipients",
@@ -185,6 +195,10 @@ pub const tables = [
   "ver_root_requests",
   "ver_root_transfers",
   "ver_tokens",
+  "webhook_deliveries",
+  "webhook_delivery_attempts",
+  "webhook_endpoint_events",
+  "webhook_endpoints",
 ]
 
 /// The migrations' SQL, concatenated after the bookkeeping tables the runner creates, with their clock and

@@ -7,6 +7,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx, type Effect, Ctx, SendMail}
 import scoutbox/identity/sessions
+import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
 import scoutbox/messaging/outbox
 import scoutbox/platform/clock
@@ -102,10 +103,12 @@ fn boot() -> Result(Nil, String) {
   |> result.map_error(fn(e) { "could not listen: " <> string.inspect(e) })
 }
 
-/// The periodic sweeps, one after another, forever: the delivery centre, and verification expiries and warnings.
+/// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, and verification expiries
+/// and warnings.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
   let _ = delivery.sweep(ctx)
+  let _ = webhooks.sweep(ctx)
   let _ = verification_review.sweep(ctx)
   sweeping(ctx)
 }

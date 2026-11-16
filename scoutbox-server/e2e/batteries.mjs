@@ -7,6 +7,7 @@ export const BATTERIES = [
   'platform/storeGuarantees',
   'platform/messaging',
   'platform/notifications',
+  'platform/delivery',
   'verification/organisationsAndStaff',
   'verification/organisationsAndStaffAdversarial',
 ];

@@ -12,6 +12,7 @@ import scoutbox/development/record_routes as record
 import scoutbox/discovery/directory
 import scoutbox/discovery/player_routes as discovery
 import scoutbox/enterprise/audit_export
+import scoutbox/enterprise/support
 import scoutbox/identity/access
 import scoutbox/identity/guardian_routes
 import scoutbox/identity/invite_routes
@@ -22,6 +23,7 @@ import scoutbox/identity/players
 import scoutbox/identity/sign_in
 import scoutbox/identity/staff_routes
 import scoutbox/insight/review_queue
+import scoutbox/integrations/webhooks
 import scoutbox/messaging/channel_routes as threads
 import scoutbox/messaging/delivery
 import scoutbox/messaging/delivery_prefs
@@ -171,6 +173,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           }
         ["delivery"] ->
           only(req, Get, fn() { delivery.org_list(ctx, req, org) })
+        ["webhooks"] -> only(req, Post, fn() { webhooks.create(ctx, req, org) })
+        ["support"] -> only(req, Post, fn() { support.create(ctx, req, org) })
         ["channels"] -> only(req, Get, fn() { threads.org_list(ctx, req, org) })
         ["channels", "counts"] ->
           only(req, Get, fn() { threads.org_counts(ctx, org) })
@@ -391,6 +395,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["outbox"] -> only(req, Get, fn() { admin.outbox(ctx, req) })
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
+        ["support", id, "reply"] ->
+          only(req, Post, fn() { support.reply(ctx, req, id) })
         ["delivery"] -> only(req, Get, fn() { delivery.admin_view(ctx) })
         ["delivery", "sweep"] ->
           only(req, Post, fn() { delivery.admin_sweep(ctx, req) })

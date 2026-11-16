@@ -298,7 +298,24 @@ would mean porting most of the product under the heading "platform". So:
    threads, the feed and its preferences, the delivery centre (in-app and e-mail dispatches, sweeps, provider
    callbacks), the push log, support tickets and webhooks. They also need answering a request
    (`/player|guardian/requests/:id/respond`) and the transition packs (`/player/transitions…`). Each battery
-   adds 10–16 routes.
+   adds 10–16 routes. **[done]** All three pass unchanged on the Gleam server (66, 64 and 48
+   checks), each mutation-checked once. What the port needed beyond the routes:
+   - **`store.after_commit(tx, step)`.** The notifier writes the push record after the act commits, from deep
+     inside call chains (15 `notify` call sites). Rather than thread effects through all of them, a unit collects
+     steps in its own process's mailbox and runs each in a unit of its own after COMMIT; a refused unit runs none.
+     Unit-tested in `store_test`.
+   - **Two vocabularies made shared:** the notification categories (`notifications`, `notification_pref_categories`)
+     and the webhook events (`webhook_deliveries`, `webhook_endpoint_events`).
+   - **`input.items`**, a list whose refusal names the item (`events[1].status`), and `input.id_of(max)`.
+   - **Outbound HTTP** for webhooks: `gleam_httpc`. Each send takes a lease on its delivery (`next_at` moved on in
+     a unit), because two sweeps can overlap here, where the TypeScript server's single thread keeps an in-flight
+     set. The delivery sweep re-reads each dispatch in its own unit for the same reason.
+   - **Where it differs:** a delivery callback's signature is checked over the body as sent, not the parsed body
+     serialised again; reply text is not NFC-normalised (no FFI).
+   - Partly ported on the way, and marked `Not ported yet:` in the code: transition packs (open, grant, withdraw a
+     grant; not the lists, placing, the club's side or the sweep), webhooks (subscribe and deliver; not list, rotate
+     or deactivate), support tickets (file and reply; not the lists or access grants), and the feed `target` (a
+     request's inbox; not a staff member's Room).
 2. **Sessions and live events:** `platform/sessionsAndPorts`, `platform/connectedMode`. These need sign-out,
    grassroots registration, guardian sign-up, staff SSO, the event stream and its tickets (SSE), the session
    lifetime (`SESSION_TTL_DAYS`) and the production boot refusals (`ADMIN_KEY_UNSAFE`,

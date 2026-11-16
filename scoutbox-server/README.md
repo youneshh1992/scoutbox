@@ -4,10 +4,11 @@ A Gleam port of four slices of the ScoutBox server: organisation staff (sign-in,
 safeguarding core (reports, blocks, moderation, the Trust & Safety console, the Discovery Ledger), players and
 guardians (sign-up, the player record, the directory, guardians and their children), verification (claims and
 their review, organisation applications, domains, the administrator hierarchy, squad invitations, coach
-references), message threads (answering a request opens one), and notifications with their preferences, push and
-the delivery centre. It answers eight of the TypeScript server's e2e batteries unchanged: `platform/staff`,
-`platform/safeguarding`, `platform/playersAndGuardians`, `platform/storeGuarantees`, `platform/messaging`,
-`platform/notifications`, `verification/organisationsAndStaff` and `verification/organisationsAndStaffAdversarial`.
+references), message threads (answering a request opens one), and notifications with their preferences, push, the
+delivery centre, webhooks and support tickets. It answers nine of the TypeScript server's e2e batteries unchanged:
+`platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`, `platform/storeGuarantees`,
+`platform/messaging`, `platform/notifications`, `platform/delivery`, `verification/organisationsAndStaff` and
+`verification/organisationsAndStaffAdversarial`.
 
 ```sh
 gleam check            # type-check (fast)
@@ -25,7 +26,9 @@ npm run codegen:check  # fail if the committed row modules differ from what the 
 
 Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY` (development default
 `scoutbox-admin`, refused in production), `NODE_ENV=production` (turns off demo sign-ins and the seed),
-`SCOUTBOX_QUIET_LOGS=1`.
+`SCOUTBOX_QUIET_LOGS=1`, `SCOUTBOX_FAST_SWEEPS=1` (the sweeps every half second, and the delivery and webhook
+retry ladders in milliseconds), `DELIVERY_CALLBACK_SECRET` (default: the local fake provider's), and
+`ALLOW_LOCAL_WEBHOOKS=1` (a webhook may go to a loopback address).
 
 ## Layout
 
@@ -65,12 +68,14 @@ Every route below is exercised by a battery, except where marked.
 | Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
 | Notifications | `GET /{org,player,guardian}/notifications`; `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
 | Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
+| Integrations | `POST /org/webhooks` (and their delivery, signed, by the minute sweep) |
+| Support | `POST /org/support`, `/admin/support/:id/reply` |
 | Transitions | `POST /player/transitions`, `/player/transitions/:id/recipients`, `/revoke-recipient`; the guardian's `/guardian/children/:id/transitions`, `/guardian/children-transitions/:id/…` |
 | Verification | `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
-The largest: trials and trial requests, signings, the similarity engine ("more like this"), webhooks,
+The largest: trials and trial requests, signings, the similarity engine ("more like this"),
 insights, coach vouches, club setup, live event streams, the Expo push transport, process metrics, and
 password hashing (scrypt), which also means a password-protected account can't sign in yet and a new player
 account stores a hash no password matches. `dev/shape_diff.mjs` lists where responses differ because of them.
