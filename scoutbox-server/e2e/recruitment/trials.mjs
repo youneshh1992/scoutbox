@@ -32,9 +32,11 @@
 
 import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { openFixture } from '../support/sqlFixture.mjs';
 import { readRows } from '../support/sqlRows.mjs';
 import trialSpec from '../support/spec/recruitment/lifecycle/trial.json' with { type: 'json' };
 import rateLimitSpec from '../support/spec/platform/rateLimit.json' with { type: 'json' };
@@ -2033,19 +2035,129 @@ section('F — honest transport failure: nothing half-written, nothing sent');
 section('E — Box Cam evidence by reference: consent, finality, refusal copy, withdrawal, unlinking');
 const E = {};
 {
-  // Kola's completed trial (J) may still link evidence.
-  const mk = async (token) => {
-    const c = await j(
-      'POST',
-      '/player/box-cam/sessions',
-      { drillId: 'box-touches', target: { type: 'repetitions', value: 20 }, provider: 'production_cv' },
-      token,
-    );
-    if (c.status !== 201) throw new Error(`box session: ${c.status} ${JSON.stringify(c.body)}`);
-    const { session, nonce, livenessChallenge } = c.body;
-    await j('POST', `/player/box-cam/sessions/${session.id}/start`, { nonce, liveness: livenessChallenge }, token);
-    return { id: session.id, nonce };
-  };
+  // Kola's completed trial (J) may still link evidence. Box Cam's records are its own domain's, so the sessions this
+  // section cites stand as Box Cam's capture and analysis leave them: one still recording, one finalised, another
+  // player's, one the CV pipeline refused (with its CV result) and one cancelled. They are planted as rows while the
+  // server is stopped.
+  const bx = (name) => ({
+    id: `bx-trial-${name}`,
+    nonce: `nonce-trial-${name}-${Math.random().toString(36).slice(2)}`,
+  });
+  E.RECORDING = bx('recording');
+  E.OPEN = bx('open');
+  E.OTHER = bx('other');
+  E.REFUSED = bx('refused');
+  E.CANCELLED = bx('cancelled');
+  const REFUSAL = 'ball_not_detected';
+  server.kill('SIGTERM');
+  for (let i = 0; i < 60 && server.exitCode == null; i += 1) await sleep(100);
+  {
+    const sha = (v) => createHash('sha256').update(String(v)).digest('hex');
+    const at = Date.now() - 60_000;
+    const session = (s, playerId, over = {}) => ({
+      id: s.id,
+      player_id: playerId,
+      drill_id: 'box-touches',
+      drill_version: 1,
+      target_type: 'repetitions',
+      target_value: 20,
+      nonce_hash: sha(s.nonce),
+      liveness_challenge: 'show_ball',
+      provider_id: 'production_cv',
+      provider_version: 1,
+      status: 'unable_to_verify',
+      created_at: at,
+      expires_at: at + 2 * H,
+      started_at: at + 3,
+      ended_at: at + 10,
+      liveness_passed_at: at + 3,
+      last_seq: 0,
+      batches: 0,
+      session_duration_ms: 7,
+      verified_active_ms: 0,
+      verified_reps: 0,
+      target_completed: 0,
+      quality: 'insufficient',
+      interruptions_count: 0,
+      verification_state: 'unable_to_verify',
+      result_hash: sha(`${s.id}:result`),
+      finalized_at: at + 10,
+      ...over,
+    });
+    const unfinished = {
+      status: 'recording',
+      ended_at: null,
+      session_duration_ms: null,
+      verified_active_ms: null,
+      verified_reps: null,
+      target_completed: null,
+      quality: null,
+      interruptions_count: null,
+      verification_state: null,
+      result_hash: null,
+      finalized_at: null,
+    };
+    const F = openFixture(DATA_DIR);
+    try {
+      F.transaction(() => {
+        for (const row of [
+          session(E.RECORDING, 'pl-adeyemi', unfinished),
+          session(E.OPEN, 'pl-adeyemi'),
+          session(E.OTHER, 'pl-carvalho'),
+          session(E.REFUSED, 'pl-adeyemi', { cv_provider_session_id: 'pcv-trial-refused' }),
+          session(E.CANCELLED, 'pl-adeyemi', { status: 'cancelled', verification_state: 'cancelled' }),
+        ])
+          F.insert('box_sessions', row);
+        for (const [s, code] of [
+          [E.OPEN, 'NO_ACTIVITY_OBSERVED'],
+          [E.OTHER, 'NO_ACTIVITY_OBSERVED'],
+          [E.REFUSED, 'NO_ACTIVITY_OBSERVED'],
+          [E.CANCELLED, 'SESSION_CANCELLED'],
+        ])
+          F.insert('box_session_reasons', { session_id: s.id, ord: 0, code });
+        F.insert('box_cam_cv_results', {
+          provider_session_id: 'pcv-trial-refused',
+          session_id: E.REFUSED.id,
+          protocol_id: 'combine-box-touch-60',
+          provider_id: 'production_cv',
+          provider_version: 1,
+          engine_version: 2,
+          cv_policy_version: 1,
+          outcome: 'refused',
+          refusal_reason: REFUSAL,
+          refusal_detail: 'no frames were analysed',
+          oq_sufficient: 0,
+          oq_aggregate_confidence: 0,
+          oq_coverage: 0,
+          person_present: 0,
+          ball_present: 0,
+          active_duration_ms: 0,
+          experimental_status: 'experimental_unvalidated',
+          integrity_ok: 1,
+          frames_accepted: 0,
+          frames_rejected: 0,
+          frames_dropped_by_server: 0,
+          duplicates_rejected: 0,
+          out_of_order_rejected: 0,
+          client_clock_anomalies: 0,
+          duplicate_frames: 0,
+          effective_fps: 0,
+          max_ball_gap_ms: 0,
+          nonce_bound: 1,
+          server_timeline: 1,
+          trace_truncated: 0,
+          server_started_at: at + 4,
+          server_ended_at: at + 7,
+          server_duration_ms: 3,
+          combine_verified: 0,
+          combine_verified_blocked_by: 'REAL_WORLD_VALIDATION_NOT_COMPLETED',
+        });
+      });
+    } finally {
+      F.close();
+    }
+  }
+  server = await boot();
   const link = (boxSessionId, extra = {}) =>
     j(
       'POST',
@@ -2055,20 +2167,18 @@ const E = {};
     );
   const tv0 = await trial(J.RID, J.TID);
   let rev = tv0.trial.rev;
-  E.OPEN = await mk(kola.token);
   await j('PATCH', '/player/box-cam/prefs', { shareDevelopmentActivity: 'private' }, kola.token);
-  const noConsent = collect('no consent', await link(E.OPEN.id, { expectedRev: rev }));
+  const noConsent = collect('no consent', await link(E.RECORDING.id, { expectedRev: rev }));
   neg(
     expect(noConsent, 403, 'EVIDENCE_CONSENT_REQUIRED'),
     "E1 a trial is not consent to the player's home footage: without the Combine consent rule, linking is refused (403 EVIDENCE_CONSENT_REQUIRED)",
   );
   await j('PATCH', '/player/box-cam/prefs', { shareDevelopmentActivity: 'recruitment' }, kola.token);
-  const notFinal = collect('not final', await link(E.OPEN.id, { expectedRev: rev }));
+  const notFinal = collect('not final', await link(E.RECORDING.id, { expectedRev: rev }));
   neg(
     expect(notFinal, 409, 'EVIDENCE_NOT_FINAL'),
     'E2 a session still recording cannot be cited (409 EVIDENCE_NOT_FINAL)',
   );
-  await j('POST', `/player/box-cam/sessions/${E.OPEN.id}/complete`, { nonce: E.OPEN.nonce }, kola.token);
   for (const [label, id] of [
     ['unknown', 'bx-nope'],
     ['numeric', 12],
@@ -2083,8 +2193,7 @@ const E = {};
       `E3 a ${label} boxSessionId is refused (${r.status} ${r.body?.error})`,
     );
   }
-  const other = await mk(mateus.token);
-  await j('POST', `/player/box-cam/sessions/${other.id}/complete`, { nonce: other.nonce }, mateus.token);
+  const other = E.OTHER;
   const foreign = collect('other player session', await link(other.id, { expectedRev: rev }));
   neg(
     expect(foreign, 404, 'TRIAL_BOXCAM_INCOMPATIBLE'),
@@ -2143,27 +2252,13 @@ const E = {};
   );
   const replayKey = await link(E.OPEN.id, { expectedRev: 1, clientKey: 'E-1' });
   ok(replayKey.status === 200 && replayKey.body.idempotent === true, 'E10b and by key too');
-  // A CV refusal.
-  E.REFUSED = await mk(kola.token);
-  const begun = await j(
-    'POST',
-    `/player/box-cam/sessions/${E.REFUSED.id}/cv/begin`,
-    { nonce: E.REFUSED.nonce, protocolId: 'combine-box-touch-60' },
-    kola.token,
-  );
-  const fin = await j(
-    'POST',
-    `/player/box-cam/sessions/${E.REFUSED.id}/cv/finalize`,
-    { nonce: E.REFUSED.nonce, providerSessionId: begun.body?.providerSessionId },
-    kola.token,
-  );
-  await j('POST', `/player/box-cam/sessions/${E.REFUSED.id}/complete`, { nonce: E.REFUSED.nonce }, kola.token);
+  // A CV refusal: the planted session whose recorded CV result refused it.
   const linkedRefused = await link(E.REFUSED.id, { expectedRev: rev });
   rev = linkedRefused.body?.trial?.rev ?? rev;
   const evR = linkedRefused.body?.evidence?.find((e) => e.session?.id === E.REFUSED.id);
   ok(
-    linkedRefused.status === 201 && !!evR && (fin.status !== 200 || fin.body.result?.outcome !== 'accepted'),
-    `E11 a session the CV pipeline refused still links — it happened (${fin.status} ${fin.body?.result?.outcome ?? fin.body?.error ?? ''})`,
+    linkedRefused.status === 201 && !!evR,
+    `E11 a session the CV pipeline refused still links — it happened (${linkedRefused.status})`,
   );
   ok(
     !!evR && /^No reliable observation available/.test(evR.observation.copy) && evR.observation.state !== 'accepted',
@@ -2174,14 +2269,10 @@ const E = {};
     'E12b the observation carries no confidence number, percentage, score or rating',
   );
   ok(
-    fin.status === 200 &&
-      fin.body.result?.outcome === 'refused' &&
-      evR?.observation.state === fin.body.result.refusalReason,
-    `E12c the session's recorded CV result is the one projected, under its own refusal reason (${fin.status} ${evR?.observation?.state})`,
+    evR?.observation.state === REFUSAL,
+    `E12c the session's recorded CV result is the one projected, under its own refusal reason (${evR?.observation?.state})`,
   );
   // Withdrawn.
-  E.CANCELLED = await mk(kola.token);
-  await j('POST', `/player/box-cam/sessions/${E.CANCELLED.id}/cancel`, {}, kola.token);
   const withdrawn = collect('withdrawn', await link(E.CANCELLED.id, { expectedRev: rev }));
   neg(expect(withdrawn, 409, 'EVIDENCE_WITHDRAWN'), 'E13 a cancelled session cannot be cited (409 EVIDENCE_WITHDRAWN)');
   // Views.
