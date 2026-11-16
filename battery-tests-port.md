@@ -477,8 +477,8 @@ would mean porting most of the product under the heading "platform". So:
      confirmation, and later transaction workspaces and the handoff: the core of `agents/*`.
    - **Pending:** `decisionsPersistence`'s 14 recorded rule cases (decision integrity, chain heads) await mapping.
 
-   **Agents core [in progress].** Ported against `agents/core` and the offer batteries together. `agents/core` passes
-   apart from S13; `offersPersistence` passes unchanged and is in `BATTERIES`. As built:
+   **Agents core [done].** Ported against `agents/core` and the offer batteries together. `agents/core` passes
+   unchanged (266 checks) and is in `BATTERIES`, as is `offersPersistence`. As built:
    - **The agent core** (`agents/agent_rules`, `agent_store`, `core_routes`): profiles with their declared
      jurisdictions and facets, the synthetic and `none` verification providers, agency memberships with the
      first-member bootstrap, the permission matrix, representation agreements with their per-act keys, the player's
@@ -493,8 +493,8 @@ would mean porting most of the product under the heading "platform". So:
      board, the agent and Offer live events, and the `lifecycle.after_status` fault seam.
    - **Platform:** `input.distinct_list`, and a value that is not a list now says `not_list`, as the TypeScript
      server does (it said `invalid`).
-   - **Left for the offer batteries:** the transaction workspace (creating one from a club's handoff, notes, the
-     Offer readiness at issue, and S13's input refusal).
+   - **The offer batteries are done:** `offers`, `offersAdversarial` and `offersPersistence` all pass unchanged.
+     The trial and signing batteries are next.
 
    **Racing Offer acts [done].** `offersAdversarial` passes unchanged and is in `BATTERIES` (185 checks; three runs
    in a row). As built:
@@ -509,6 +509,35 @@ would mean porting most of the product under the heading "platform". So:
      Mutation-checked: without the rev check, F3, F5 and P1c–P3c fail.
    - **Battery changes at the source** (`offersAdversarial`): F7 accepts whichever forged field is named, since
      which comes first isn't the contract; and Y's accepted Offer no longer depends on which racer won P4.
+
+   **The transaction workspace [done].** `recruitment/offers` passes unchanged and is in `BATTERIES` (276 checks),
+   and with it `agents/core`'s S13. Section T's stored rows (17 tables) and its responses match the TypeScript
+   server's row for row and key for key, checked with a probe run on both; mutation-checked by making every
+   workspace ready (T6 and #13 fail). As built:
+   - **The conflict engine** (`agents/conflict`), proved on 1,500 cases from `dev/conflict_cases.mjs`, which move
+     the deciding rules through every status. The policy layer reads rule overrides and permitted sets, and gives
+     `declare_representation`; jurisdictions are codes, so an unencoded one (`FRA`) is reported, not unrepresentable.
+   - **The workspace's pure rules** (`agents/transaction_rules`): the compliance state and the status it asks for,
+     the snapshot view, staleness, Offer readiness, room roles, visibility and the party-revision hash, proved on
+     400 cases from `dev/transaction_cases.mjs`.
+   - **Compliance contexts** (`agents/compliance_store`): opened with the workspace, parties projected from it,
+     each evaluation recorded append-only with its reasons, outstanding consents, versions and parties; the facet
+     gate and `clearFor`.
+   - **Workspaces** (`agents/transaction_store`, `transaction_routes`): creation with its idempotency key, party
+     resolution, the duplicate check and the handoff binding in one unit, the compliance re-check, notes, the
+     agent's projection, and the readiness the Offer reads (`offer_readiness_for`). Only the engaging club, from
+     exactly the cited case, can read it.
+   - **The handoff** (`agents/handoffs`): the club's invitation with all its blockers, notices to the agent and the
+     player, and its acceptance by the workspace that cites it. Reading and withdrawing it are `Not ported yet:`.
+   - **Offers:** a draft may cite the case's workspace; the surface's issue blockers and the issue itself re-read
+     its readiness, and an issued revision records it.
+   - **Also:** five live events, three notice categories, three rate-limit actions, `input.items_between` and
+     `input.matching`, and spec tests for the agent-core and transaction error tables (the agent-core one was
+     claimed but missing).
+   - **Battery change at the source** (`offers`): Z6 accepts whichever claimed time is named first, as F7 does.
+   - **`Not ported yet:`** every other workspace route (lists, reads, parties, representations, status moves,
+     terms, documents, links, timelines, the club's and player's confirmations), representations and consents in
+     a context, and the context and consent routes. A workspace here therefore stays at DRAFT.
 
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open
    trials, vouches, pairing and exports), `platform/contracts` (Rooms, briefs), `platform/productionHardening`

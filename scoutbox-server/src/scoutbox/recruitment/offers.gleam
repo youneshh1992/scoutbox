@@ -758,6 +758,11 @@ pub type RecipientSnapshot {
   )
 }
 
+/// The workspace an issued revision cited, ready at the instant of issue.
+pub type Readiness {
+  Readiness(transaction_id: String, status: String, at: Int)
+}
+
 /// Issues a DRAFT revision with its final terms and the recipient it was issued to; it supersedes the issued
 /// revision it names.
 pub fn issue_revision(
@@ -767,6 +772,7 @@ pub fn issue_revision(
   terms: offer_rules.Terms,
   recipient: RecipientSnapshot,
   supersedes: Option(id.OfferRevisionId),
+  readiness: Option(Readiness),
   by: #(id.OrgUserId, String, Option(String)),
   at: Int,
 ) -> Result(Nil, Fail(e)) {
@@ -789,6 +795,15 @@ pub fn issue_revision(
         #("recipient_minor", sqlight.bool(recipient.minor)),
         #("recipient_at", sqlight.int(recipient.at)),
       ],
+      case readiness {
+        Some(r) -> [
+          #("readiness_transaction_id", sqlight.text(r.transaction_id)),
+          #("readiness_evaluated_at", sqlight.int(r.at)),
+          #("readiness_status", sqlight.text(r.status)),
+          #("readiness_blockers_json", sqlight.text("[]")),
+        ]
+        None -> []
+      },
     ]),
   ))
   use _ <- result.try(case supersedes {

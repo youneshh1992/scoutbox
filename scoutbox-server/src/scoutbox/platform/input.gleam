@@ -776,6 +776,59 @@ pub fn items(item: Check(a), max: Int) -> Check(List(a)) {
   }
 }
 
+/// A list whose items each pass `item` (refused naming the item), then holding between `min` and `max` of them, in
+/// the order valibot's `pipe(array(item), minLength, maxLength)` judges it.
+pub fn items_between(item: Check(a), min: Int, max: Int) -> Check(List(a)) {
+  let all = items(item, 1_000_000)
+  fn(v) {
+    case all(v) {
+      Error(e) -> Error(e)
+      Ok(values) -> {
+        let n = list.length(values)
+        case n < min, n > max {
+          True, _ ->
+            Error(
+              Issue(
+                ..issue(TooShort, case min {
+                  1 -> "must not be empty"
+                  _ ->
+                    "must be at least " <> int.to_string(min) <> " items long"
+                }),
+                min: Some(min),
+              ),
+            )
+          _, True ->
+            Error(
+              Issue(
+                ..issue(
+                  TooLong,
+                  "must be at most " <> int.to_string(max) <> " items long",
+                ),
+                max: Some(max),
+              ),
+            )
+          False, False -> Ok(values)
+        }
+      }
+    }
+  }
+}
+
+/// Text that matches `pattern` in full; anything else is not valid (valibot's `regex`).
+pub fn matching(pattern: String) -> Check(String) {
+  let assert Ok(re) = regexp.from_string("^(?:" <> pattern <> ")$")
+  fn(v) {
+    case string_check(v) {
+      Error(e) -> Error(e)
+      Ok(s) ->
+        case regexp.check(re, s) {
+          True -> Ok(s)
+          False -> Error(issue(Invalid, "is not valid"))
+        }
+    }
+  }
+}
+
 /// A list of distinct values, each passing `item` (refused naming the item), with at least `min` of them:
 /// schemas.mjs `distinctList`.
 pub fn distinct_list(item: Check(a), min: Int) -> Check(List(a)) {

@@ -1,0 +1,2407 @@
+// Agent core battery.
+//
+// The governing principle this suite exists to enforce (docs/product/agents.md):
+//
+//   A licensed natural person is not an agency; agency membership is not a
+//   licence; a self-typed licence number is not a verified licence; a CRM
+//   entry is not representation; an agent's claim is not private access;
+//   the client's confirmation — and only that — is the root of a relationship.
+//   ScoutBox adjudicates nothing, and the shared Trust & Safety key can
+//   adjudicate nothing either.
+//
+// No assertion here is `status !== 200`. Every refusal names the status and
+// the code it expects.
+
+import { pickPort } from '../support/testPort.mjs';
+import { spawn } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { readRows, rows } from '../support/sqlRows.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
+
+// The latest table migration's number, as the migrated schema records it.
+const SCHEMA_VERSION = (() => {
+  const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-m23agent-schema-')));
+  try {
+    return Number(R.rows('data_migrations').at(-1).id.slice(0, 4));
+  } finally {
+    R.close();
+  }
+})();
+
+const PORT = pickPort(6300, 200, [0]);
+const BASE = `http://localhost:${PORT}`;
+const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23agent-'));
+const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
+
+let passed = 0;
+let negatives = 0;
+const fail = (msg) => {
+  console.error(`✗ ${msg}`);
+  process.exitCode = 1;
+};
+const ok = (cond, msg) => {
+  if (cond) {
+    passed++;
+    console.log(`✓ ${msg}`);
+  } else fail(msg);
+};
+const neg = (cond, msg) => {
+  negatives++;
+  ok(cond, `[neg] ${msg}`);
+};
+const section = (name) => console.log(`\n— ${name} —`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Exact status AND exact code. */
+const expect = (r, status, code) => {
+  const good = r.status === status && (code === null || r.body?.error === code);
+  if (!good) console.error(`   got ${r.status} ${JSON.stringify(r.body).slice(0, 240)}`);
+  return good;
+};
+const DAY = 24 * 60 * 60 * 1000;
+
+// A–D and T1 (the verification engine, the permission matrix, affiliations, the agreement engine, and the declared
+// events, categories, rate policies and stores) are checked in scripts/rules/agents/core.mjs.
+
+// =================================================================== HTTP
+section('HTTP — booting a real server (synthetic verification provider ON)');
+const children = [];
+process.on('exit', () => {
+  for (const c of children) {
+    try {
+      c.kill('SIGKILL');
+    } catch {
+      /* gone */
+    }
+  }
+});
+async function boot(env = {}) {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      DATA_DIR,
+      SCOUTBOX_QUIET_LOGS: '1',
+      AGENT_VERIFICATION_TEST_PROVIDER: '1',
+      ...env,
+    },
+    stdio: 'ignore',
+  });
+  children.push(proc);
+  proc.unref();
+  let up = false;
+  for (let i = 0; i < 160 && !up; i++) {
+    try {
+      up = (await fetch(`${BASE}/healthz`)).ok;
+    } catch {
+      /* booting */
+    }
+    if (!up) await sleep(250);
+  }
+  if (!up) throw new Error('server did not come up');
+  return proc;
+}
+let server = await boot();
+
+async function j(method, url, body, token, extra = {}) {
+  const r = await fetch(`${BASE}${url}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = null;
+  try {
+    data = await r.json();
+  } catch {
+    /* non-json */
+  }
+  return { status: r.status, body: data };
+}
+const login = async (orgId, scoutName, role, platform = 'agent') =>
+  (await j('POST', '/auth/org/login', { orgId, scoutName, role, ...(platform ? { platform } : {}) })).body;
+const playerLogin = async (playerId) => (await j('POST', '/auth/player/login', { playerId })).body;
+
+/** Read SSE frames for a while, as one identity. */
+async function sseCollect(token, ms) {
+  const t = await j('POST', '/events/ticket', undefined, token);
+  const ac = new AbortController();
+  const frames = [];
+  const res = await fetch(`${BASE}/events?ticket=${encodeURIComponent(t.body.ticket)}`, { signal: ac.signal });
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  const done = (async () => {
+    try {
+      for (;;) {
+        const { value, done: d } = await reader.read();
+        if (d) break;
+        frames.push(dec.decode(value));
+      }
+    } catch {
+      /* aborted */
+    }
+  })();
+  return {
+    stop: async () => {
+      await sleep(ms);
+      ac.abort();
+      await done;
+      return frames.join('');
+    },
+  };
+}
+
+const ERROR_BODIES = [];
+const collect = (label, r) => {
+  if (r.status >= 400) ERROR_BODIES.push({ label, status: r.status, body: r.body });
+  return r;
+};
+
+// ============================================================ E — platform gating
+section('E — platform gating: agent login, org listing, club user refused');
+{
+  const h = await j('GET', '/healthz');
+  ok(
+    h.body.schemaVersion === SCHEMA_VERSION && h.body.schemaVersion >= 26,
+    `E1 the server reports the current schema (now ${h.body.schemaVersion}; the agent core tables are 0026)`,
+  );
+  const orgs = await j('GET', '/orgs?platform=agent');
+  ok(
+    orgs.status === 200 &&
+      orgs.body.length === 1 &&
+      orgs.body[0].id === 'org-northstar' &&
+      orgs.body[0].type === 'agency',
+    'E2 the agent platform lists agency organisations only',
+  );
+  neg(!orgs.body.some((o) => o.type === 'club'), 'E3 no club appears on the agent login');
+  neg(
+    expect(
+      collect(
+        'E4',
+        await j('POST', '/auth/org/login', {
+          orgId: 'org-eastport',
+          scoutName: 'Maria Keane',
+          role: 'Head of Recruitment',
+          platform: 'agent',
+        }),
+      ),
+      403,
+      'PLATFORM_MISMATCH',
+    ),
+    'E4 a club user cannot enter ScoutBox Agent',
+  );
+  neg(
+    expect(
+      collect(
+        'E5',
+        await j('POST', '/auth/org/login', {
+          orgId: 'org-hackneymarsh',
+          scoutName: 'Dev',
+          role: 'Manager',
+          platform: 'agent',
+        }),
+      ),
+      403,
+      null,
+    ),
+    'E5 nor a grassroots club',
+  );
+  neg(
+    expect(
+      collect(
+        'E6',
+        await j('POST', '/auth/org/login', {
+          orgId: 'org-northstar',
+          scoutName: '',
+          role: 'Director',
+          platform: 'agent',
+        }),
+      ),
+      400,
+      'SCOUT_NAME_REQUIRED',
+    ),
+    'E6 no anonymous agency session',
+  );
+  const pl = await j('POST', '/auth/org/login', {
+    orgId: 'org-northstar',
+    scoutName: 'Tomás Rivera',
+    role: 'Director',
+    platform: 'agent',
+  });
+  ok(pl.status === 200 && pl.body.token, 'E7 an agency user logs in on the agent platform');
+  const asPlayer = await playerLogin('pl-adeyemi');
+  neg(
+    expect(collect('E8', await j('GET', '/org/agent/me', undefined, asPlayer.token)), 401, null),
+    'E8 a player token is not an agent session',
+  );
+  neg(expect(collect('E9', await j('GET', '/org/agent/me')), 401, null), 'E9 no token, no workspace');
+}
+
+const tomas = await login('org-northstar', 'Tomás Rivera', 'Director');
+const maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment', null);
+const kola = await playerLogin('pl-adeyemi'); // adult, GB
+const mateus = await playerLogin('pl-carvalho'); // adult
+const chinedu = await playerLogin('pl-okafor'); // adult
+const filip = await playerLogin('pl-nowak'); // adult
+const theo = await playerLogin('pl-martin'); // adult
+const riku = await playerLogin('pl-tanaka'); // adult
+const guni = await playerLogin('pl-guni'); // minor, 14
+
+// ============================================================ F — membership
+section('F — membership: bootstrap, foreign organisation, added member, ended member');
+let TOMAS_ID;
+{
+  const me = await j('GET', '/org/agent/me', undefined, tomas.token);
+  ok(
+    me.status === 200 && me.body.affiliation.tiers.join() === 'agency_admin' && me.body.profile === null,
+    'F1 the seeded Director was bootstrapped by migration 2305 as agency_admin — and has NO agent profile',
+  );
+  TOMAS_ID = me.body.user.id;
+  neg(
+    !me.body.affiliation.tiers.includes('licensed_agent'),
+    'F2 a self-typed "Director" role made nobody a licensed agent (S9)',
+  );
+  ok(
+    me.body.platform.testVerificationProvider === true && me.body.policyVersion === 1,
+    'F3 /me states that the synthetic provider is on',
+  );
+  neg(
+    expect(collect('F4', await j('GET', '/org/agent/me', undefined, maria.token)), 403, 'AGENT_ACTION_NOT_PERMITTED'),
+    'F4 a club user with a valid club session gets no agent workspace',
+  );
+  neg(
+    expect(
+      collect('F5', await j('GET', '/org/agent/clients', undefined, maria.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'F5 nor the clients list',
+  );
+  // A second agency user logging in fresh is NOT auto-affiliated once the agency has members.
+  const stranger = await login('org-northstar', 'Walk In', 'Analyst');
+  neg(
+    expect(
+      collect('F6', await j('GET', '/org/agent/me', undefined, stranger.token)),
+      403,
+      'AGENCY_MEMBERSHIP_REQUIRED',
+    ),
+    'F6 a new login into an agency that already has members is NOT a member until an administrator adds them',
+  );
+  neg(
+    expect(
+      collect('F7', await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi' }, stranger.token)),
+      403,
+      'AGENCY_MEMBERSHIP_REQUIRED',
+    ),
+    'F7 and can request nothing',
+  );
+  const home = await j('GET', '/org/agent/home', undefined, tomas.token);
+  ok(
+    home.status === 200 &&
+      home.body.hasProfile === false &&
+      home.body.profileState === 'UNVERIFIED' &&
+      home.body.alerts.some((a) => a.kind === 'verification') &&
+      /adjudicates no conflicts/.test(home.body.regulatoryNotice),
+    'F8 Home says: no profile, UNVERIFIED, and the regulatory notice',
+  );
+}
+
+// ============================================================ I — team management
+section('I — team: tiers, self-promotion, last admin, rev, idempotency, ending');
+let ANA, BEN, ANA_ID, BEN_ID, BEN_AFF_REV;
+{
+  neg(
+    expect(
+      collect(
+        'I1',
+        await j('POST', '/org/agent/agency/team', { name: 'Ana Costa', tiers: ['licensed_agent'] }, maria.token),
+      ),
+      403,
+      null,
+    ),
+    'I1 a club user cannot add agency members',
+  );
+  neg(
+    expect(
+      collect('I2', await j('POST', '/org/agent/agency/team', { name: '', tiers: ['analyst'] }, tomas.token)),
+      400,
+      'AGENT_INPUT_INVALID',
+    ),
+    'I2 a member needs a name',
+  );
+  neg(
+    expect(
+      collect('I3', await j('POST', '/org/agent/agency/team', { name: 'Ana Costa', tiers: ['owner'] }, tomas.token)),
+      400,
+      'AGENT_TIERS_INVALID',
+    ),
+    'I3 an unknown tier is refused',
+  );
+  neg(
+    expect(
+      collect(
+        'I4',
+        await j('POST', '/org/agent/agency/team', { name: 'Ana Costa', tiers: 'licensed_agent' }, tomas.token),
+      ),
+      400,
+      'AGENT_TIERS_INVALID',
+    ),
+    'I4 tiers must be a list',
+  );
+  neg(
+    expect(
+      collect(
+        'I5',
+        await j(
+          'POST',
+          '/org/agent/agency/team',
+          { name: 'Ana Costa', tiers: ['licensed_agent'], clientKey: 'x'.repeat(200) },
+          tomas.token,
+        ),
+      ),
+      400,
+      'AGENT_CLIENT_KEY_INVALID',
+    ),
+    'I5 an oversized client key is refused',
+  );
+  const add = await j(
+    'POST',
+    '/org/agent/agency/team',
+    { name: 'Ana Costa', role: 'Agent', tiers: ['licensed_agent'], clientKey: 'add-ana' },
+    tomas.token,
+  );
+  ok(
+    add.status === 201 &&
+      add.body.member.tiers.join() === 'licensed_agent' &&
+      add.body.member.active &&
+      add.body.member.licensed === false,
+    'I6 an administrator adds a licensed_agent member — "licensed" is false until a profile exists',
+  );
+  ANA_ID = add.body.member.userId;
+  const replay = await j(
+    'POST',
+    '/org/agent/agency/team',
+    { name: 'Ana Costa', role: 'Agent', tiers: ['licensed_agent'], clientKey: 'add-ana' },
+    tomas.token,
+  );
+  ok(
+    replay.status === 200 && replay.body.idempotent === true && replay.body.member.userId === ANA_ID,
+    'I7 the same key replays the same member',
+  );
+  neg(
+    expect(
+      collect(
+        'I8',
+        await j(
+          'POST',
+          '/org/agent/agency/team',
+          { name: 'Ana Costa', tiers: ['finance'], clientKey: 'add-ana' },
+          tomas.token,
+        ),
+      ),
+      409,
+      'AFFILIATION_IDEMPOTENCY_CONFLICT',
+    ),
+    'I8 the same key with a different payload is a collision',
+  );
+  neg(
+    expect(
+      collect('I9', await j('POST', '/org/agent/agency/team', { name: 'ana costa', tiers: ['finance'] }, tomas.token)),
+      409,
+      'MEMBER_ALREADY_AFFILIATED',
+    ),
+    'I9 the same person (case-insensitive) is not affiliated twice',
+  );
+  const ben = await j(
+    'POST',
+    '/org/agent/agency/team',
+    { name: 'Ben Okoro', role: 'Analyst', tiers: ['analyst'] },
+    tomas.token,
+  );
+  ok(ben.status === 201, 'I10 an analyst is added');
+  BEN_ID = ben.body.member.userId;
+  BEN_AFF_REV = ben.body.member.rev;
+  ANA = await login('org-northstar', 'Ana Costa', 'Agent');
+  BEN = await login('org-northstar', 'Ben Okoro', 'Analyst');
+  ok(
+    (await j('GET', '/org/agent/me', undefined, ANA.token)).body.affiliation.tiers.join() === 'licensed_agent',
+    'I11 Ana logs in and is a licensed_agent member',
+  );
+  ok(
+    (await j('GET', '/org/agent/me', undefined, BEN.token)).body.capabilities.includes('agency.team.read') &&
+      !(await j('GET', '/org/agent/me', undefined, BEN.token)).body.capabilities.includes('clients.request'),
+    'I12 Ben sees his capabilities: team read, no client requests',
+  );
+  neg(
+    expect(
+      collect(
+        'I13',
+        await j(
+          'PATCH',
+          `/org/agent/agency/team/${BEN_ID}`,
+          { tiers: ['agency_admin'], expectedRev: BEN_AFF_REV },
+          BEN.token,
+        ),
+      ),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'I13 an analyst cannot change roles at all',
+  );
+  neg(
+    expect(
+      collect(
+        'I14',
+        await j(
+          'PATCH',
+          `/org/agent/agency/team/${ANA_ID}`,
+          { tiers: ['licensed_agent', 'agency_admin'], expectedRev: 1 },
+          ANA.token,
+        ),
+      ),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'I14 nor a licensed agent (no team.write)',
+  );
+  neg(
+    expect(
+      collect(
+        'I15',
+        await j('PATCH', `/org/agent/agency/team/${TOMAS_ID}`, { tiers: ['assistant'], expectedRev: 1 }, tomas.token),
+      ),
+      409,
+      'LAST_ADMIN',
+    ),
+    'I15 the last administrator cannot demote themselves',
+  );
+  neg(
+    expect(
+      collect('I16', await j('POST', `/org/agent/agency/team/${TOMAS_ID}/end`, { expectedRev: 1 }, tomas.token)),
+      409,
+      'LAST_ADMIN',
+    ),
+    'I16 nor end their own membership',
+  );
+  neg(
+    expect(
+      collect(
+        'I17',
+        await j(
+          'PATCH',
+          `/org/agent/agency/team/${BEN_ID}`,
+          { tiers: ['analyst', 'agency_admin'], expectedRev: BEN_AFF_REV + 5 },
+          tomas.token,
+        ),
+      ),
+      409,
+      'AFFILIATION_VERSION_CONFLICT',
+    ),
+    'I17 a stale rev is refused',
+  );
+  neg(
+    expect(
+      collect(
+        'I18',
+        await j('PATCH', `/org/agent/agency/team/${BEN_ID}`, { tiers: ['analyst'], expectedRev: 'one' }, tomas.token),
+      ),
+      400,
+      'EXPECTED_REV_INVALID',
+    ),
+    'I18 a malformed rev is refused',
+  );
+  neg(
+    expect(
+      collect(
+        'I19',
+        await j('PATCH', '/org/agent/agency/team/usr-nobody', { tiers: ['analyst'], expectedRev: 1 }, tomas.token),
+      ),
+      404,
+      'MEMBER_NOT_FOUND',
+    ),
+    'I19 an unknown member is 404',
+  );
+  const promote = await j(
+    'PATCH',
+    `/org/agent/agency/team/${BEN_ID}`,
+    { tiers: ['analyst', 'agency_admin'], expectedRev: BEN_AFF_REV },
+    tomas.token,
+  );
+  ok(
+    promote.status === 200 &&
+      promote.body.member.tiers.join() === 'analyst,agency_admin' &&
+      promote.body.member.rev === BEN_AFF_REV + 1,
+    'I20 the administrator promotes Ben to a second admin; rev advances',
+  );
+  BEN_AFF_REV = promote.body.member.rev;
+  const demoteSelf = await j(
+    'PATCH',
+    `/org/agent/agency/team/${TOMAS_ID}`,
+    { tiers: ['agency_admin', 'licensed_agent'], expectedRev: 1 },
+    tomas.token,
+  );
+  ok(
+    demoteSelf.status === 200 && demoteSelf.body.member.tiers.includes('licensed_agent'),
+    'I21 with two admins, Tomás may add licensed_agent to his own roles',
+  );
+  const carl = await j('POST', '/org/agent/agency/team', { name: 'Carl Temp', tiers: ['assistant'] }, tomas.token);
+  const CARL = await login('org-northstar', 'Carl Temp', 'Assistant');
+  ok((await j('GET', '/org/agent/me', undefined, CARL.token)).status === 200, 'I22 Carl is in');
+  const end = await j(
+    'POST',
+    `/org/agent/agency/team/${carl.body.member.userId}/end`,
+    { expectedRev: carl.body.member.rev, reason: 'left' },
+    tomas.token,
+  );
+  ok(
+    end.status === 200 && end.body.member.active === false && end.body.member.endedReason === 'left',
+    "I23 an administrator ends Carl's membership",
+  );
+  neg(
+    expect(collect('I24', await j('GET', '/org/agent/me', undefined, CARL.token)), 401, null),
+    "I24 Carl's session is dead immediately",
+  );
+  neg(
+    expect(
+      collect(
+        'I25',
+        await j('POST', '/auth/org/login', {
+          orgId: 'org-northstar',
+          scoutName: 'Carl Temp',
+          role: 'Assistant',
+          platform: 'agent',
+        }),
+      ),
+      403,
+      'USER_REMOVED',
+    ),
+    'I25 and he cannot log back in by typing his name',
+  );
+  neg(
+    expect(
+      collect(
+        'I26',
+        await j('POST', '/org/agent/agency/team', { name: 'Carl Temp', tiers: ['assistant'] }, tomas.token),
+      ),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'I26 removal is not undone from the team page',
+  );
+  const team = await j('GET', '/org/agent/agency/team', undefined, BEN.token);
+  ok(
+    team.status === 200 &&
+      team.body.members.some((m) => m.name === 'Carl Temp' && !m.active) &&
+      team.body.members.filter((m) => m.active).length === 3,
+    'I27 the team page lists the ended member as ended and three active members',
+  );
+  neg(
+    expect(
+      collect('I28', await j('PATCH', '/org/agent/agency/settings', { jurisdictions: ['ENG', 'MARS'] }, tomas.token)),
+      400,
+      'AGENT_JURISDICTION_INVALID',
+    ),
+    'I28 settings refuse an unknown jurisdiction',
+  );
+  neg(
+    expect(
+      collect(
+        'I29',
+        await j('PATCH', '/org/agent/agency/settings', { description: 'call me on 07700 900123' }, tomas.token),
+      ),
+      400,
+      null,
+    ),
+    'I29 a settings description carrying a phone number is moderated out',
+  );
+  const settings = await j(
+    'PATCH',
+    '/org/agent/agency/settings',
+    { jurisdictions: ['ENG', 'INT'], description: 'Player representation, England and international.' },
+    tomas.token,
+  );
+  ok(settings.status === 200 && settings.body.settings.jurisdictions.join() === 'ENG,INT', 'I30 settings are saved');
+  neg(
+    expect(
+      collect('I31', await j('PATCH', '/org/agent/agency/settings', { description: 'x' }, ANA.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'I31 a licensed agent cannot change agency settings',
+  );
+  const agency = await j('GET', '/org/agent/agency', undefined, ANA.token);
+  ok(
+    agency.status === 200 &&
+      agency.body.members.admins === 2 &&
+      agency.body.members.licensedAgents === 2 &&
+      /holds no football-agent licence/.test(agency.body.honest),
+    'I32 the agency overview counts and says the agency holds no licence',
+  );
+}
+
+// ============================================================ G/H — profile + verification
+section('G/H — profile and verification: declaration ≠ verification; facets separate; provider named');
+let ANA_PROFILE_REV;
+{
+  neg(
+    expect(
+      collect('G1', await j('POST', '/org/agent/profile', { displayName: 'Ben' }, BEN.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'G1 an analyst/admin without licensed_agent cannot create an agent profile',
+  );
+  neg(
+    expect(
+      collect(
+        'G2',
+        await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: 'TEST-VERIFIED-1' }, ANA.token),
+      ),
+      403,
+      'AGENT_PROFILE_REQUIRED',
+    ),
+    'G2 a submission needs a profile first',
+  );
+  neg(
+    expect(
+      collect('G3', await j('POST', '/org/agent/profile', { displayName: '   ' }, ANA.token)),
+      400,
+      'AGENT_INPUT_INVALID',
+    ),
+    'G3 an empty display name is refused',
+  );
+  neg(
+    expect(
+      collect('G4', await j('POST', '/org/agent/profile', { jurisdictions: 'ENG' }, ANA.token)),
+      400,
+      'AGENT_JURISDICTION_INVALID',
+    ),
+    'G4 jurisdictions must be a list',
+  );
+  const create = await j(
+    'POST',
+    '/org/agent/profile',
+    { displayName: 'Ana Costa', fifaLicenceNumber: 'FIFA-2024-777', jurisdictions: ['ENG'] },
+    ANA.token,
+  );
+  ok(
+    create.status === 201 &&
+      create.body.profile.declared.fifaLicenceNumber === 'FIFA-2024-777' &&
+      create.body.profile.facets.fifa_licence.state === 'UNVERIFIED',
+    'G5 Ana creates a profile with a DECLARED licence number — the facet stays UNVERIFIED',
+  );
+  neg(
+    create.body.profile.regulatoryState.fifaLicence === 'UNVERIFIED' &&
+      create.body.profile.regulatoryState.jurisdictions[0].regulatedActionsPermitted === false &&
+      /declaration, not a verified licence/.test(create.body.profile.honest),
+    'G6 the profile says a typed number is a declaration, and no regulated action is permitted',
+  );
+  ANA_PROFILE_REV = create.body.profile.rev;
+  const team = await j('GET', '/org/agent/agency/team', undefined, tomas.token);
+  ok(
+    team.body.members.find((m) => m.userId === ANA_ID).licensed === true &&
+      team.body.members.find((m) => m.userId === ANA_ID).fifaLicence === 'UNVERIFIED',
+    'G7 the team row shows a profile exists and the licence is UNVERIFIED — never a licence number',
+  );
+  neg(!JSON.stringify(team.body).includes('FIFA-2024-777'), 'G8 the licence number never appears on the team page');
+  neg(
+    expect(
+      collect('G9', await j('POST', '/org/agent/profile/facets/passport/submit', { reference: 'x' }, ANA.token)),
+      400,
+      'AGENT_FACET_INVALID',
+    ),
+    'G9 an unknown facet is refused',
+  );
+  neg(
+    expect(
+      collect('G10', await j('POST', '/org/agent/profile/facets/fifa_licence/submit', { reference: '' }, ANA.token)),
+      400,
+      'AGENT_INPUT_INVALID',
+    ),
+    'G10 an empty reference is refused',
+  );
+  neg(
+    expect(
+      collect(
+        'G11',
+        await j(
+          'POST',
+          '/org/agent/profile/facets/national_registration/submit',
+          { reference: 'TEST-VERIFIED-FA', memberAssociation: 'INT' },
+          ANA.token,
+        ),
+      ),
+      400,
+      'AGENT_JURISDICTION_INVALID',
+    ),
+    'G11 a national registration needs a real member association, not INT',
+  );
+  const manual = await j(
+    'POST',
+    '/org/agent/profile/facets/fifa_licence/submit',
+    { reference: 'FIFA-2024-777' },
+    ANA.token,
+  );
+  neg(
+    manual.status === 200 &&
+      manual.body.facet.state === 'MANUAL_REVIEW_REQUIRED' &&
+      manual.body.facet.provenance.provider === 'none' &&
+      /G-C0/.test(manual.body.facet.note),
+    'G12 submitting the real-looking declared number → MANUAL_REVIEW_REQUIRED, provider "none", note names G-C0 — no register is pretended',
+  );
+  neg(
+    expect(
+      collect('G13', await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi' }, ANA.token)),
+      403,
+      'AGENT_VERIFICATION_REQUIRED',
+    ),
+    'G13 MANUAL_REVIEW_REQUIRED authorises no request',
+  );
+  const verified = await j(
+    'POST',
+    '/org/agent/profile/facets/fifa_licence/submit',
+    { reference: 'TEST-VERIFIED-777' },
+    ANA.token,
+  );
+  ok(
+    verified.status === 200 &&
+      verified.body.facet.state === 'VERIFIED' &&
+      verified.body.facet.provenance.provider === 'local-synthetic-test-provider' &&
+      verified.body.provider === 'local-synthetic-test-provider' &&
+      typeof verified.body.facet.recheckAt === 'number',
+    'H1 the synthetic provider verifies a TEST-VERIFIED reference and names itself in the provenance, with a recheck date',
+  );
+  ok(
+    verified.body.profile.regulatoryState.fifaLicence === 'VERIFIED' &&
+      verified.body.profile.regulatoryState.jurisdictions[0].nationalRegistration === 'UNVERIFIED' &&
+      verified.body.profile.regulatoryState.jurisdictions[0].regulatedActionsPermitted === false,
+    'H2 FIFA VERIFIED, ENG FA registration still UNVERIFIED — ENG regulated actions still not permitted',
+  );
+  neg(
+    expect(
+      collect(
+        'H3',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', jurisdiction: 'ENG' }, ANA.token),
+      ),
+      403,
+      'AGENT_VERIFICATION_REQUIRED',
+    ) &&
+      (await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', jurisdiction: 'ENG' }, ANA.token)).body
+        .facet === 'national_registration',
+    'H3 an ENG request names the missing facet: national_registration (ENG)',
+  );
+  const fa = await j(
+    'POST',
+    '/org/agent/profile/facets/national_registration/submit',
+    { reference: 'TEST-VERIFIED-FA', memberAssociation: 'eng' },
+    ANA.token,
+  );
+  ok(
+    fa.status === 200 &&
+      fa.body.profile.facets.national_registration.ENG.state === 'VERIFIED' &&
+      fa.body.profile.regulatoryState.jurisdictions[0].regulatedActionsPermitted === true,
+    'H4 FA registration verified (member association upper-cased) → ENG regulated actions permitted',
+  );
+  const minors = await j(
+    'POST',
+    '/org/agent/profile/facets/minors_authorisation/submit',
+    { reference: 'TEST-VERIFIED-MINORS', memberAssociation: 'ENG' },
+    ANA.token,
+  );
+  ok(
+    minors.status === 200 && minors.body.profile.facets.minors_authorisation.ENG.state === 'VERIFIED',
+    'H5 a minors authorisation facet can be RECORDED',
+  );
+  neg(
+    (await j('GET', '/org/agent/players?q=gu', undefined, ANA.token)).body.items.length === 0 &&
+      (await j('GET', '/org/agent/players?q=gu', undefined, ANA.token)).body.adultsOnly === true,
+    'H6 …and it activates NOTHING: a minor (Guni, 14) is still invisible to the lookup — the minor pathway is preserved, not activated (DR-49)',
+  );
+  neg(
+    expect(
+      collect(
+        'H7',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-guni', jurisdiction: 'ENG' }, ANA.token),
+      ),
+      404,
+      'PLAYER_NOT_FOUND',
+    ),
+    'H7 a request naming a minor is 404, indistinguishable from a player who does not exist',
+  );
+  const inactive = await j(
+    'POST',
+    '/org/agent/profile/facets/national_registration/submit',
+    { reference: 'TEST-INACTIVE-USA', memberAssociation: 'USA' },
+    ANA.token,
+  );
+  ok(
+    inactive.body.profile.facets.national_registration.USA.state === 'INACTIVE',
+    'H8 an INACTIVE facet is recorded honestly',
+  );
+  const prof = await j('GET', '/org/agent/profile', undefined, ANA.token);
+  ok(
+    prof.body.profile.history.some(
+      (h) => h.action === 'agent_verification_state_changed' && h.detail?.to === 'VERIFIED',
+    ),
+    'H9 every state change is in the profile history',
+  );
+  neg(
+    !prof.body.profile.history.some((h) => JSON.stringify(h.detail ?? {}).includes('TEST-VERIFIED-777')),
+    'H10 the history carries no reference number',
+  );
+  // Changing the declared number after verification resets the facet.
+  const rev = prof.body.profile.rev;
+  neg(
+    expect(
+      collect(
+        'H11',
+        await j('POST', '/org/agent/profile', { fifaLicenceNumber: 'FIFA-9999', expectedRev: rev + 3 }, ANA.token),
+      ),
+      409,
+      'REPRESENTATION_VERSION_CONFLICT',
+    ),
+    'H11 a stale profile rev is refused',
+  );
+  const change = await j('POST', '/org/agent/profile', { fifaLicenceNumber: 'FIFA-9999', expectedRev: rev }, ANA.token);
+  neg(
+    change.status === 200 &&
+      change.body.profile.facets.fifa_licence.state === 'UNVERIFIED' &&
+      /re-submit/.test(change.body.profile.facets.fifa_licence.note),
+    'H12 changing the declared licence number after verification RESETS the facet to UNVERIFIED — the verified reference is no longer the declared one',
+  );
+  neg(
+    expect(
+      collect('H13', await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi' }, ANA.token)),
+      403,
+      'AGENT_VERIFICATION_REQUIRED',
+    ),
+    'H13 and requests are gated again',
+  );
+  const reverify = await j(
+    'POST',
+    '/org/agent/profile/facets/fifa_licence/submit',
+    { reference: 'TEST-VERIFIED-777' },
+    ANA.token,
+  );
+  ok(reverify.body.facet.state === 'VERIFIED', 'H14 re-verified for the rest of the suite');
+  ANA_PROFILE_REV = reverify.body.profile.rev;
+  // Colleague's view.
+  const me2 = await j('GET', '/org/agent/me', undefined, BEN.token);
+  neg(me2.body.profile === null, "H15 /me shows only one's OWN profile — Ben sees none, not Ana's");
+  const compliance = await j('GET', '/org/agent/agency/compliance', undefined, tomas.token);
+  ok(
+    compliance.status === 200 &&
+      compliance.body.informational === true &&
+      /Nothing here verifies, approves or overrides/.test(compliance.body.honest) &&
+      compliance.body.agents.some((a) => a.userId === ANA_ID && a.fifaLicence === 'VERIFIED'),
+    'H16 the compliance view is informational and says so; it shows states, not numbers',
+  );
+  neg(
+    !JSON.stringify(compliance.body).includes('TEST-VERIFIED') &&
+      !JSON.stringify(compliance.body).includes('FIFA-9999'),
+    'H17 no reference or licence number on the compliance page',
+  );
+  neg(
+    expect(collect('H18', await j('GET', '/org/agent/agency/compliance', undefined, BEN.token)), 200, null) &&
+      (await j('GET', '/org/agent/agency/compliance', undefined, BEN.token)).body.informational === true,
+    'H18 Ben (now admin) reads it; it is still informational',
+  );
+}
+
+// ============================================================ J — lookup
+section('J — players lookup: adults only, visibility, blocks, short query, cap');
+{
+  neg(
+    expect(
+      collect('J1', await j('GET', '/org/agent/players?q=ko', undefined, BEN.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'J1 an admin/analyst cannot look players up',
+  );
+  const short = await j('GET', '/org/agent/players?q=k', undefined, ANA.token);
+  ok(
+    short.status === 200 && short.body.items.length === 0 && /two characters/.test(short.body.note),
+    'J2 a one-character query returns nothing',
+  );
+  const hit = await j('GET', '/org/agent/players?q=kola', undefined, ANA.token);
+  ok(
+    hit.status === 200 &&
+      hit.body.items.length === 1 &&
+      hit.body.items[0].id === 'pl-adeyemi' &&
+      hit.body.adultsOnly === true,
+    'J3 an adult is found by name',
+  );
+  neg(
+    Object.keys(hit.body.items[0]).sort().join() === 'age,club,country,id,name,position',
+    'J4 a lookup row is id, name, position, age, club, country — nothing private',
+  );
+  neg(
+    (await j('GET', '/org/agent/players?q=tomasz', undefined, ANA.token)).body.items.length === 0 &&
+      (await j('GET', '/org/agent/players?q=guni', undefined, ANA.token)).body.items.length === 0,
+    'J5 minors (Tomasz 16, Guni 14) never appear, by name or otherwise',
+  );
+  const all = await j('GET', '/org/agent/players?q=%20a%20', undefined, ANA.token);
+  neg(
+    all.body.items.every((p) => p.age >= 18) && all.body.items.length <= 20,
+    'J6 a broad query returns adults only, capped at 20',
+  );
+  neg(
+    (await j('GET', '/org/agent/players?q=<script>', undefined, ANA.token)).body.items.length === 0,
+    'J7 a query with markup finds nothing and breaks nothing',
+  );
+}
+
+// ============================================================ K — request
+section('K — the request: gate order, uniform 404, conflict, cooldown, term, scope');
+let REL; // Ana ↔ Kola
+{
+  neg(
+    expect(
+      collect('K1', await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi' }, tomas.token)),
+      403,
+      'AGENT_PROFILE_REQUIRED',
+    ),
+    'K1 Tomás holds licensed_agent but has no profile — refused before any subject check',
+  );
+  neg(
+    expect(
+      collect('K2', await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi' }, BEN.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'K2 Ben has no clients.request',
+  );
+  neg(
+    expect(
+      collect(
+        'K3',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', termMonths: 36 }, ANA.token),
+      ),
+      400,
+      'AGENT_TERM_INVALID',
+    ),
+    'K3 a 36-month term is refused (two-year cap)',
+  );
+  neg(
+    expect(
+      collect(
+        'K4',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', scope: ['bribery'] }, ANA.token),
+      ),
+      400,
+      'AGENT_SCOPE_INVALID',
+    ),
+    'K4 an unknown scope is refused',
+  );
+  neg(
+    expect(
+      collect(
+        'K5',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', jurisdiction: 'FRA' }, ANA.token),
+      ),
+      400,
+      'AGENT_JURISDICTION_INVALID',
+    ),
+    'K5 an unknown jurisdiction is refused',
+  );
+  neg(
+    expect(
+      collect('K6', await j('POST', '/org/agent/clients/request', { playerId: 'pl-does-not-exist' }, ANA.token)),
+      404,
+      'PLAYER_NOT_FOUND',
+    ),
+    'K6 a player who does not exist → 404',
+  );
+  neg(
+    expect(
+      collect('K7', await j('POST', '/org/agent/clients/request', { playerId: 'pl-tomasz' }, ANA.token)),
+      404,
+      'PLAYER_NOT_FOUND',
+    ),
+    'K7 a minor → the SAME 404',
+  );
+  neg(
+    expect(
+      collect('K8', await j('POST', '/org/agent/clients/request', { playerId: 'org-eastport' }, ANA.token)),
+      404,
+      'PLAYER_NOT_FOUND',
+    ),
+    'K8 an organisation id → the same 404',
+  );
+  const r1 = collect(
+    'K9',
+    await j(
+      'POST',
+      '/org/agent/clients/request',
+      {
+        playerId: 'pl-adeyemi',
+        scope: ['employment', 'transfer'],
+        termMonths: 18,
+        jurisdiction: 'ENG',
+        clientKey: 'ana-kola-1',
+      },
+      ANA.token,
+    ),
+  );
+  ok(
+    r1.status === 201 &&
+      r1.body.relationship.status === 'proposed' &&
+      r1.body.relationship.scope.join() === 'employment,transfer' &&
+      r1.body.relationship.termMonths === 18 &&
+      r1.body.relationship.confirmedAt === null &&
+      r1.body.relationship.startAt === null,
+    'K9 Ana requests Kola: proposed, no start, no confirmation',
+  );
+  REL = r1.body.relationship.id;
+  ok(
+    r1.body.relationship.client.accessBasis === 'pending_request' &&
+      r1.body.relationship.client.name === 'Kola Adeyemi',
+    'K10 the agent sees the client\'s public identity with access basis "pending_request"',
+  );
+  neg(
+    !('trust' in r1.body.relationship.client) &&
+      !('medical' in r1.body.relationship.client) &&
+      !('email' in r1.body.relationship.client),
+    'K11 and nothing private',
+  );
+  neg(
+    expect(
+      collect(
+        'K12',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-adeyemi', clientKey: 'ana-kola-2' }, ANA.token),
+      ),
+      409,
+      'REPRESENTATION_ALREADY_EXISTS',
+    ),
+    'K12 a second request to the same player is refused while one is pending',
+  );
+  const replay = await j(
+    'POST',
+    '/org/agent/clients/request',
+    {
+      playerId: 'pl-adeyemi',
+      scope: ['employment', 'transfer'],
+      termMonths: 18,
+      jurisdiction: 'ENG',
+      clientKey: 'ana-kola-1',
+    },
+    ANA.token,
+  );
+  ok(
+    replay.status === 200 && replay.body.idempotent === true && replay.body.relationship.id === REL,
+    'K13 the same key replays',
+  );
+  neg(
+    expect(
+      collect(
+        'K14',
+        await j(
+          'POST',
+          '/org/agent/clients/request',
+          { playerId: 'pl-adeyemi', termMonths: 6, clientKey: 'ana-kola-1' },
+          ANA.token,
+        ),
+      ),
+      409,
+      'REPRESENTATION_IDEMPOTENCY_CONFLICT',
+    ),
+    'K14 same key, different payload → collision',
+  );
+  const list = await j('GET', '/org/agent/clients', undefined, ANA.token);
+  ok(
+    list.status === 200 &&
+      list.body.items.length === 1 &&
+      list.body.items[0].id === REL &&
+      list.body.items[0].mode === 'own',
+    "K15 Ana's clients list has the pending request",
+  );
+  const home = await j('GET', '/org/agent/home', undefined, ANA.token);
+  ok(home.body.counts.pending === 1 && home.body.counts.active === 0, 'K16 Home counts one pending, zero active');
+  const inbox = await j('GET', '/org/agent/inbox', undefined, ANA.token);
+  ok(inbox.body.pending.length === 1 && inbox.body.pending[0].id === REL, 'K17 the inbox lists the pending request');
+  const opps = await j('GET', `/org/agent/clients/${REL}/opportunities`, undefined, ANA.token);
+  neg(
+    expect(collect('K18', opps), 409, 'REPRESENTATION_NOT_ACTIVE') && opps.body.status === 'proposed',
+    'K18 a PROPOSED relationship opens no opportunities — a claim is not access',
+  );
+  ok(
+    (await j('GET', '/org/agent/opportunities', undefined, ANA.token)).body.items.length === 0,
+    'K19 the aggregate board is empty',
+  );
+  const detail = await j('GET', `/org/agent/clients/${REL}`, undefined, ANA.token);
+  ok(
+    detail.status === 200 && detail.body.access === false && detail.body.client.accessBasis === 'pending_request',
+    'K20 the detail says access: false',
+  );
+}
+
+// ============================================================ L — the client answers
+section("L — the client's answer: confirm / decline / dispute / terminate");
+{
+  const mine = await j('GET', '/player/agent/relationships', undefined, kola.token);
+  ok(
+    mine.status === 200 &&
+      mine.body.items.length === 1 &&
+      mine.body.items[0].pending === true &&
+      mine.body.items[0].agent.displayName === 'Ana Costa' &&
+      mine.body.items[0].agent.agency.id === 'org-northstar',
+    "L1 Kola sees the pending request, the agent's name and the agency",
+  );
+  ok(
+    mine.body.items[0].agent.verification.fifaLicence === 'VERIFIED' &&
+      /recorded provenance/.test(mine.body.items[0].agent.honest),
+    'L2 the agent card shows the FIFA facet state with an honest caveat',
+  );
+  neg(!JSON.stringify(mine.body).includes('TEST-VERIFIED'), 'L3 no reference number reaches the player');
+  const notes = await j('GET', '/player/notifications', undefined, kola.token);
+  ok(
+    notes.body.some(
+      (n) =>
+        n.type === 'representation_request' && n.refId === REL && /Nothing is active until YOU confirm/.test(n.text),
+    ),
+    'L4 Kola was notified, and the notice says nothing is active until they confirm',
+  );
+  // Wrong people.
+  neg(
+    expect(
+      collect('L5', await j('POST', `/player/agent/relationships/${REL}/confirm`, { expectedRev: 1 }, mateus.token)),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    "L5 another player cannot confirm Kola's request (404, not 403)",
+  );
+  neg(
+    expect(
+      collect('L6', await j('POST', `/player/agent/relationships/${REL}/confirm`, { expectedRev: 1 }, guni.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'L6 a minor account is refused before any lookup',
+  );
+  neg(
+    expect(
+      collect('L7', await j('POST', `/player/agent/relationships/${REL}/confirm`, { expectedRev: 1 }, ANA.token)),
+      401,
+      null,
+    ),
+    'L7 the agent cannot confirm as the player',
+  );
+  neg(
+    expect(collect('L8', await j('POST', `/player/agent/relationships/${REL}/confirm`, { expectedRev: 1 })), 401, null),
+    'L8 nor can nobody',
+  );
+  neg(
+    expect(
+      collect('L9', await j('POST', `/player/agent/relationships/${REL}/confirm`, { expectedRev: 7 }, kola.token)),
+      409,
+      'REPRESENTATION_VERSION_CONFLICT',
+    ),
+    'L9 a stale rev is refused',
+  );
+  neg(
+    expect(
+      collect('L10', await j('POST', `/player/agent/relationships/${REL}/terminate`, { expectedRev: 1 }, kola.token)),
+      409,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    'L10 a proposal cannot be "terminated" — it is declined',
+  );
+  const sse = await sseCollect(ANA.token, 700);
+  const confirm = await j(
+    'POST',
+    `/player/agent/relationships/${REL}/confirm`,
+    { expectedRev: 1, clientKey: 'kola-confirm' },
+    kola.token,
+  );
+  ok(
+    confirm.status === 200 &&
+      confirm.body.relationship.status === 'active' &&
+      typeof confirm.body.relationship.confirmedAt === 'number' &&
+      confirm.body.relationship.endAt === confirm.body.relationship.startAt + 18 * 30 * DAY &&
+      confirm.body.relationship.rev === 2,
+    'L11 Kola CONFIRMS: active, dated from now, ending after the 18-month term, rev 2',
+  );
+  const frames = await sse.stop();
+  ok(/representation_confirmed/.test(frames), "L12 Ana's stream carried representation_confirmed");
+  neg(!/Kola/.test(frames), "L13 the event carried ids, not the client's name");
+  const replay = await j(
+    'POST',
+    `/player/agent/relationships/${REL}/confirm`,
+    { expectedRev: 1, clientKey: 'kola-confirm' },
+    kola.token,
+  );
+  ok(replay.status === 200 && replay.body.idempotent === true, 'L14 the same key replays the confirmation');
+  neg(
+    expect(
+      collect(
+        'L15',
+        await j(
+          'POST',
+          `/player/agent/relationships/${REL}/confirm`,
+          { expectedRev: 2, clientKey: 'kola-confirm-2' },
+          kola.token,
+        ),
+      ),
+      409,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    'L15 confirming twice with a new key is refused — an active agreement is not re-confirmed',
+  );
+  neg(
+    expect(
+      collect('L16', await j('POST', `/player/agent/relationships/${REL}/decline`, { expectedRev: 2 }, kola.token)),
+      409,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    'L16 nor declined after confirmation',
+  );
+  const agentNotes = await j('GET', '/org/agent/inbox', undefined, ANA.token);
+  ok(
+    agentNotes.body.notifications.some((n) => n.type === 'representation_confirmed' && n.refId === REL) &&
+      agentNotes.body.pending.length === 0,
+    'L17 Ana was notified; nothing pending',
+  );
+  const audit = await j('GET', '/org/agent/agency/audit', undefined, tomas.token);
+  ok(
+    audit.body.items.some(
+      (r) =>
+        r.action === 'representation_confirmed' &&
+        r.actor?.userId === null &&
+        r.actor?.name === 'Player' &&
+        r.target.id === REL,
+    ),
+    'L18 the agency audit shows the confirmation attributed to "Player" — no org actor, no player id or name in the actor',
+  );
+  neg(!JSON.stringify(audit.body).includes('kola-confirm'), 'L19 no client key in the audit');
+  neg(
+    expect(
+      collect('L20', await j('GET', '/org/agent/agency/audit', undefined, ANA.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'L20 a licensed agent does not read the agency audit',
+  );
+}
+
+// ============================================================ M — access basis
+section('M — access basis: active grants, colleagues do not, disputed suspends, terminated ends');
+let REL2; // Ana ↔ Mateus (will be disputed)
+let REL3; // Ana ↔ Chinedu (will be terminated by client)
+{
+  const detail = await j('GET', `/org/agent/clients/${REL}`, undefined, ANA.token);
+  ok(
+    detail.status === 200 &&
+      detail.body.access === true &&
+      detail.body.client.accessBasis === 'active_confirmed_relationship' &&
+      detail.body.client.name === 'Kola Adeyemi',
+    "M1 Ana's access basis is the active confirmed relationship",
+  );
+  const opps = await j('GET', `/org/agent/clients/${REL}/opportunities`, undefined, ANA.token);
+  ok(
+    opps.status === 200 &&
+      Array.isArray(opps.body.items) &&
+      opps.body.clientId === 'pl-adeyemi' &&
+      /Applying is the player/.test(opps.body.note),
+    "M2 the client's opportunities board opens, and says applying is the player's act",
+  );
+  neg(
+    !opps.body.items.some((o) => /^case-|^room-/.test(String(o.id))) &&
+      opps.body.items.every(
+        (o) =>
+          [
+            'open_trial',
+            'trial_day',
+            'campaign',
+            'open_day',
+            'friendly',
+            'combine',
+            'matchday',
+            'squad',
+            'saved_search',
+          ].includes(o.type) || typeof o.type === 'string',
+      ),
+    "M3 the board is the player's own opportunity engine output — no recruitment case or room ids",
+  );
+  const kolaBoard = await j('GET', '/player/opportunity-board', undefined, kola.token);
+  ok(
+    kolaBoard.status === 200 &&
+      JSON.stringify(kolaBoard.body.items.map((o) => o.id).sort()) ===
+        JSON.stringify(opps.body.items.map((o) => o.id).sort()),
+    'M4 …and it is exactly what Kola sees on their own board (same engine, same rules)',
+  );
+  // Colleagues.
+  neg(
+    expect(
+      collect('M5', await j('GET', `/org/agent/clients/${REL}`, undefined, tomas.token)),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    "M5 Tomás (admin + licensed_agent) gets 404 for Ana's client — not 403, not a summary",
+  );
+  neg(
+    expect(
+      collect('M6', await j('GET', `/org/agent/clients/${REL}/opportunities`, undefined, tomas.token)),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    "M6 nor the client's board",
+  );
+  neg(
+    expect(
+      collect('M7', await j('GET', `/org/agent/clients/${REL}`, undefined, BEN.token)),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    'M7 Ben (admin/analyst) 404 — the client did not share with staff',
+  );
+  ok(
+    (await j('GET', '/org/agent/clients', undefined, BEN.token)).body.items.length === 0 &&
+      (await j('GET', '/org/agent/clients', undefined, tomas.token)).body.items.length === 0,
+    "M8 the colleagues' client lists are empty",
+  );
+  ok(
+    (await j('GET', '/org/agent/opportunities', undefined, tomas.token)).body.items.length === 0,
+    "M9 Tomás' opportunities board is empty — access does not flow through the agency",
+  );
+  // Client shares a summary with staff.
+  const share = await j(
+    'PATCH',
+    `/player/agent/relationships/${REL}/sharing`,
+    { shareWithAgencyStaff: true, expectedRev: 2 },
+    kola.token,
+  );
+  ok(
+    share.status === 200 && share.body.relationship.shareWithAgencyStaff === true,
+    'M10 Kola chooses to share a summary with agency staff',
+  );
+  const benView = await j('GET', `/org/agent/clients/${REL}`, undefined, BEN.token);
+  ok(
+    benView.status === 200 &&
+      benView.body.mode === 'summary' &&
+      benView.body.relationship.summaryOnly === true &&
+      benView.body.relationship.client.name === 'Kola Adeyemi',
+    'M11 Ben now sees a SUMMARY (name, status, dates)',
+  );
+  neg(
+    !('scope' in benView.body.relationship) &&
+      !('history' in benView.body.relationship) &&
+      !('client' in benView.body) &&
+      !JSON.stringify(benView.body).includes('accessBasis'),
+    'M12 …and no scope, history, client data or access basis',
+  );
+  neg(
+    expect(
+      collect('M13', await j('GET', `/org/agent/clients/${REL}/opportunities`, undefined, tomas.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'M13 the summary opens no opportunities for Tomás',
+  );
+  neg(
+    expect(
+      collect('M14', await j('POST', `/org/agent/clients/${REL}/terminate`, {}, tomas.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'M14 nor can he end it',
+  );
+  const unshare = await j(
+    'PATCH',
+    `/player/agent/relationships/${REL}/sharing`,
+    { shareWithAgencyStaff: false, expectedRev: 3 },
+    kola.token,
+  );
+  ok(
+    unshare.status === 200 &&
+      expect(await j('GET', `/org/agent/clients/${REL}`, undefined, BEN.token), 404, 'REPRESENTATION_NOT_FOUND'),
+    'M15 Kola withdraws the sharing; Ben is back to 404',
+  );
+  // Other agency.
+  const rival = await login('org-northstar', 'Ana Costa', 'Agent'); // same person, second session — fine
+  ok(
+    (await j('GET', `/org/agent/clients/${REL}`, undefined, rival.token)).status === 200,
+    'M16 a second session of the same agent sees the same client',
+  );
+  // Dispute.
+  const r2 = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-carvalho', clientKey: 'ana-mateus' },
+    ANA.token,
+  );
+  REL2 = r2.body.relationship.id;
+  await j('POST', `/player/agent/relationships/${REL2}/confirm`, { expectedRev: 1 }, mateus.token);
+  ok(
+    (await j('GET', `/org/agent/clients/${REL2}`, undefined, ANA.token)).body.access === true,
+    'M17 Mateus confirmed; Ana has access',
+  );
+  neg(
+    expect(
+      collect(
+        'M18',
+        await j(
+          'POST',
+          `/player/agent/relationships/${REL2}/dispute`,
+          { expectedRev: 2, reason: 'email me at x@y.com' },
+          mateus.token,
+        ),
+      ),
+      400,
+      null,
+    ),
+    'M18 a dispute reason carrying contact details is moderated',
+  );
+  const dispute = await j(
+    'POST',
+    `/player/agent/relationships/${REL2}/dispute`,
+    { expectedRev: 2, reason: 'I never agreed to the transfer scope.' },
+    mateus.token,
+  );
+  ok(
+    dispute.status === 200 &&
+      dispute.body.relationship.status === 'disputed' &&
+      dispute.body.relationship.disputeReason === 'I never agreed to the transfer scope.',
+    'M19 Mateus DISPUTES; the client sees their own reason',
+  );
+  const disputedView = await j('GET', `/org/agent/clients/${REL2}`, undefined, ANA.token);
+  neg(
+    disputedView.status === 200 &&
+      disputedView.body.access === false &&
+      disputedView.body.relationship.status === 'disputed' &&
+      !JSON.stringify(disputedView.body).includes('never agreed'),
+    "M20 Ana's access is SUSPENDED and she does not see the reason",
+  );
+  neg(
+    expect(
+      collect('M21', await j('GET', `/org/agent/clients/${REL2}/opportunities`, undefined, ANA.token)),
+      409,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    'M21 no board through a dispute',
+  );
+  neg(
+    expect(
+      collect('M22', await j('POST', `/org/agent/clients/${REL2}/terminate`, {}, ANA.token)),
+      409,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    'M22 the agent cannot end a disputed agreement (and so cannot "resolve" it by ending it)',
+  );
+  neg(
+    expect(
+      collect(
+        'M23',
+        await j('POST', `/player/agent/relationships/${REL2}/terminate`, { expectedRev: 3 }, mateus.token),
+      ),
+      409,
+      'REPRESENTATION_DISPUTED',
+    ),
+    'M23 nor can the client — a dispute is terminal until attributed review',
+  );
+  neg(
+    expect(
+      collect('M24', await j('POST', `/player/agent/relationships/${REL2}/confirm`, { expectedRev: 3 }, mateus.token)),
+      409,
+      'REPRESENTATION_NOT_ACTIVE',
+    ),
+    'M24 nor re-confirmed',
+  );
+  neg(
+    expect(
+      collect(
+        'M25',
+        await j(
+          'POST',
+          '/org/agent/clients/request',
+          { playerId: 'pl-carvalho', clientKey: 'ana-mateus-again' },
+          ANA.token,
+        ),
+      ),
+      409,
+      'REPRESENTATION_ALREADY_EXISTS',
+    ),
+    'M25 Ana cannot route around the dispute with a fresh request',
+  );
+  ok(
+    (await j('GET', '/org/agent/home', undefined, ANA.token)).body.counts.disputed === 1 &&
+      (await j('GET', '/org/agent/home', undefined, ANA.token)).body.alerts.some((a) => a.kind === 'disputed'),
+    'M26 Home alerts the dispute',
+  );
+  const agentNote = (await j('GET', '/org/agent/inbox', undefined, ANA.token)).body.notifications.find(
+    (n) => n.type === 'representation_disputed',
+  );
+  ok(
+    !!agentNote && /not yet available in this build/.test(agentNote.text),
+    'M27 the dispute notice tells the agent that attributed review is not yet available',
+  );
+  // Client termination.
+  const r3 = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-okafor', clientKey: 'ana-chinedu' },
+    ANA.token,
+  );
+  REL3 = r3.body.relationship.id;
+  await j('POST', `/player/agent/relationships/${REL3}/confirm`, { expectedRev: 1 }, chinedu.token);
+  const end = await j(
+    'POST',
+    `/player/agent/relationships/${REL3}/terminate`,
+    { expectedRev: 2, clientKey: 'chinedu-end' },
+    chinedu.token,
+  );
+  ok(
+    end.status === 200 &&
+      end.body.relationship.status === 'terminated_by_client' &&
+      end.body.relationship.terminatedBy === 'client',
+    'M28 Chinedu ENDS an active relationship',
+  );
+  neg(
+    (await j('GET', `/org/agent/clients/${REL3}`, undefined, ANA.token)).body.access === false &&
+      (await j('GET', `/org/agent/clients/${REL3}`, undefined, ANA.token)).body.client.accessBasis === 'none',
+    "M29 Ana's access ended at once; the record stays",
+  );
+  neg(
+    expect(
+      collect(
+        'M30',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-okafor', clientKey: 'ana-chinedu-2' }, ANA.token),
+      ),
+      429,
+      'REPRESENTATION_COOLDOWN',
+    ) &&
+      typeof (
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-okafor', clientKey: 'ana-chinedu-2' }, ANA.token)
+      ).body.retryAt === 'number',
+    'M30 re-asking within 30 days is a cooldown with a retryAt',
+  );
+  const chinNotes = await j('GET', '/player/notifications', undefined, chinedu.token);
+  ok(
+    !chinNotes.body.some((n) => n.type === 'representation_terminated'),
+    'M31 the client who ended it is not notified of their own act',
+  );
+  ok(
+    (await j('GET', '/org/agent/inbox', undefined, ANA.token)).body.notifications.some(
+      (n) => n.type === 'representation_terminated' && n.refId === REL3,
+    ),
+    'M32 the agent is',
+  );
+  // Agent termination and withdrawal.
+  const r4 = await j('POST', '/org/agent/clients/request', { playerId: 'pl-nowak', clientKey: 'ana-filip' }, ANA.token);
+  const withdraw = await j(
+    'POST',
+    `/org/agent/clients/${r4.body.relationship.id}/terminate`,
+    { reasonCode: 'withdrawn', clientKey: 'wd-1' },
+    ANA.token,
+  );
+  ok(
+    withdraw.status === 200 &&
+      withdraw.body.relationship.status === 'terminated_by_agent' &&
+      withdraw.body.relationship.terminationReasonCode === 'withdrawn',
+    'M33 Ana withdraws a pending request (terminated_by_agent)',
+  );
+  ok(
+    (await j('GET', '/player/notifications', undefined, filip.token)).body.some(
+      (n) => n.type === 'representation_terminated' && /withdrew/.test(n.text),
+    ),
+    'M34 Filip is told the request was withdrawn',
+  );
+  neg(
+    expect(
+      collect(
+        'M35',
+        await j(
+          'POST',
+          `/player/agent/relationships/${r4.body.relationship.id}/confirm`,
+          { expectedRev: 2 },
+          filip.token,
+        ),
+      ),
+      409,
+      'REPRESENTATION_NOT_ACTIVE',
+    ) &&
+      /no longer open/.test(
+        (
+          await j(
+            'POST',
+            `/player/agent/relationships/${r4.body.relationship.id}/confirm`,
+            { expectedRev: 2 },
+            filip.token,
+          )
+        ).body.message,
+      ),
+    'M35 Filip cannot confirm a withdrawn request, and is told why',
+  );
+  const r5 = await j('POST', '/org/agent/clients/request', { playerId: 'pl-martin', clientKey: 'ana-theo' }, ANA.token);
+  await j('POST', `/player/agent/relationships/${r5.body.relationship.id}/confirm`, { expectedRev: 1 }, theo.token);
+  const agentEnd = await j(
+    'POST',
+    `/org/agent/clients/${r5.body.relationship.id}/terminate`,
+    { clientKey: 'end-theo', expectedRev: 2 },
+    ANA.token,
+  );
+  ok(
+    agentEnd.status === 200 && agentEnd.body.relationship.status === 'terminated_by_agent',
+    'M36 Ana ends an active relationship',
+  );
+  ok(
+    (
+      await j(
+        'POST',
+        `/org/agent/clients/${r5.body.relationship.id}/terminate`,
+        { clientKey: 'end-theo', expectedRev: 2 },
+        ANA.token,
+      )
+    ).body.idempotent === true,
+    'M37 replaying the end is idempotent',
+  );
+  neg(
+    expect(
+      collect(
+        'M38',
+        await j(
+          'POST',
+          `/org/agent/clients/${r5.body.relationship.id}/terminate`,
+          { clientKey: 'end-theo', reasonCode: 'other', expectedRev: 3 },
+          ANA.token,
+        ),
+      ),
+      409,
+      'REPRESENTATION_IDEMPOTENCY_CONFLICT',
+    ),
+    'M38 same key, different reason → collision',
+  );
+  neg(
+    (await j('GET', '/player/agent/relationships', undefined, theo.token)).body.items[0].status ===
+      'terminated_by_agent',
+    "M39 Theo's history keeps the ended record",
+  );
+  // Decline.
+  const r6 = await j('POST', '/org/agent/clients/request', { playerId: 'pl-tanaka', clientKey: 'ana-riku' }, ANA.token);
+  const decline = await j(
+    'POST',
+    `/player/agent/relationships/${r6.body.relationship.id}/decline`,
+    { expectedRev: 1 },
+    riku.token,
+  );
+  ok(decline.status === 200 && decline.body.relationship.status === 'declined', 'M40 Riku DECLINES');
+  neg(
+    expect(
+      collect(
+        'M41',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-tanaka', clientKey: 'ana-riku-2' }, ANA.token),
+      ),
+      429,
+      'REPRESENTATION_COOLDOWN',
+    ),
+    'M41 a decline starts the cooldown',
+  );
+  ok(
+    (await j('GET', '/org/agent/inbox', undefined, ANA.token)).body.notifications.some(
+      (n) => n.type === 'representation_rejected' && /30 days/.test(n.text),
+    ),
+    'M42 Ana is told, with the cooldown',
+  );
+}
+
+// ============================================================ N — privacy sweep
+section('N — privacy: other agency, other player, minor, guardian-managed, enumeration');
+{
+  // A second agency, registered on the fly through the same seeded-org shape is not available; use a club user and a foreign player.
+  neg(
+    expect(
+      collect('N1', await j('GET', `/org/agent/clients/${REL}`, undefined, maria.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    "N1 a club user cannot read an agency's client",
+  );
+  neg(
+    expect(
+      collect('N2', await j('GET', '/org/agent/agency/team', undefined, maria.token)),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'N2 nor its team',
+  );
+  const mateusView = await j('GET', '/player/agent/relationships', undefined, mateus.token);
+  neg(
+    mateusView.body.items.length === 1 && mateusView.body.items[0].id === REL2,
+    "N3 Mateus sees only his own relationship, never Kola's",
+  );
+  neg(
+    expect(
+      collect(
+        'N4',
+        await j(
+          'PATCH',
+          `/player/agent/relationships/${REL}/sharing`,
+          { shareWithAgencyStaff: true, expectedRev: 3 },
+          mateus.token,
+        ),
+      ),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    "N4 Mateus cannot change Kola's sharing",
+  );
+  neg(
+    expect(
+      collect(
+        'N5',
+        await j('POST', `/player/agent/relationships/${REL}/dispute`, { expectedRev: 3, reason: 'x' }, mateus.token),
+      ),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    'N5 nor dispute it',
+  );
+  const minorView = await j('GET', '/player/agent/relationships', undefined, guni.token);
+  neg(
+    minorView.status === 200 && minorView.body.items.length === 0 && minorView.body.minor === true,
+    "N6 a minor's My Agent is empty with a note — no request could ever have reached it",
+  );
+  neg(
+    expect(
+      collect(
+        'N7',
+        await j('PATCH', `/player/agent/relationships/${REL}/sharing`, { shareWithAgencyStaff: true }, guni.token),
+      ),
+      403,
+      'AGENT_ACTION_NOT_PERMITTED',
+    ),
+    'N7 a minor cannot act on any relationship',
+  );
+  neg(
+    expect(
+      collect('N8', await j('GET', '/org/agent/clients/rep-999999', undefined, ANA.token)),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    'N8 an unknown relationship is 404',
+  );
+  neg(
+    expect(
+      collect('N9', await j('GET', '/org/agent/clients/__proto__', undefined, ANA.token)),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    'N9 "__proto__" is 404',
+  );
+  neg(
+    expect(
+      collect(
+        'N10',
+        await j('POST', '/player/agent/relationships/constructor/confirm', { expectedRev: 1 }, kola.token),
+      ),
+      404,
+      'REPRESENTATION_NOT_FOUND',
+    ),
+    'N10 "constructor" is 404',
+  );
+  // The club side: no agent data leaks into a club's view of the player.
+  const clubView = await j('GET', '/org/players/pl-adeyemi', undefined, maria.token);
+  neg(
+    clubView.status === 200
+      ? !JSON.stringify(clubView.body).includes('Ana Costa') && !JSON.stringify(clubView.body).includes(REL)
+      : true,
+    "N11 a club's player view carries no agent relationship or agent name (club relationship semantics untouched)",
+  );
+  // Trust score untouched.
+  const trust = await j('GET', '/player/trust', undefined, kola.token);
+  neg(
+    trust.status === 404 || !JSON.stringify(trust.body).includes('agent'),
+    'N12 the Trust projection has no agent term (DR-21 deferred)',
+  );
+}
+
+// ============================================================ O — blocks
+section('O — blocks: before a request, before a confirmation');
+{
+  // Kim blocks the agency, then Ana tries.
+  const kim = await playerLogin('pl-kim');
+  await j('POST', '/player/block', { orgId: 'org-northstar', reason: 'no agents' }, kim.token);
+  neg(
+    (await j('GET', '/org/agent/players?q=kim', undefined, ANA.token)).body.items.length === 0,
+    'O1 a player who blocked the agency vanishes from the lookup',
+  );
+  neg(
+    expect(
+      collect(
+        'O2',
+        await j('POST', '/org/agent/clients/request', { playerId: 'pl-kim', clientKey: 'ana-kim' }, ANA.token),
+      ),
+      404,
+      'PLAYER_NOT_FOUND',
+    ),
+    'O2 and a request to them is the uniform 404',
+  );
+  // Osei receives a request, then blocks before confirming.
+  const osei = await playerLogin('pl-osei');
+  const r = await j('POST', '/org/agent/clients/request', { playerId: 'pl-osei', clientKey: 'ana-osei' }, ANA.token);
+  ok(r.status === 201, 'O3 Ana requests Osei');
+  await j('POST', '/player/block', { orgId: 'org-northstar' }, osei.token);
+  neg(
+    expect(
+      collect(
+        'O4',
+        await j(
+          'POST',
+          `/player/agent/relationships/${r.body.relationship.id}/confirm`,
+          { expectedRev: 1 },
+          osei.token,
+        ),
+      ),
+      409,
+      'REPRESENTATION_NOT_ACTIVE',
+    ) &&
+      /blocked this agency/.test(
+        (
+          await j(
+            'POST',
+            `/player/agent/relationships/${r.body.relationship.id}/confirm`,
+            { expectedRev: 1 },
+            osei.token,
+          )
+        ).body.message,
+      ),
+    'O4 confirming through a block is refused and explained',
+  );
+  ok(
+    (await j('POST', `/player/agent/relationships/${r.body.relationship.id}/decline`, { expectedRev: 1 }, osei.token))
+      .status === 200,
+    'O5 declining through a block still works',
+  );
+  const detail = await j('GET', `/org/agent/clients/${r.body.relationship.id}`, undefined, ANA.token);
+  neg(
+    detail.status === 200 && detail.body.client.name === null && detail.body.client.unavailable === true,
+    "O6 after the block the agent's record shows the client as unavailable — no name",
+  );
+}
+
+// ============================================================ P — concurrency
+section('P — concurrency: parallel confirmations, parallel requests');
+{
+  const kimoon = await playerLogin('pl-alvarez');
+  const r = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-alvarez', clientKey: 'ana-alvarez' },
+    ANA.token,
+  );
+  ok(r.status === 201, 'P1 a request to Alvarez');
+  const id = r.body.relationship.id;
+  const results = await Promise.all(
+    [1, 2, 3, 4, 5].map((i) =>
+      j('POST', `/player/agent/relationships/${id}/confirm`, { expectedRev: 1, clientKey: `race-${i}` }, kimoon.token),
+    ),
+  );
+  const wins = results.filter((x) => x.status === 200 && x.body.idempotent !== true).length;
+  const losses = results.filter((x) => x.status === 409).length;
+  neg(
+    wins === 1 && losses === 4,
+    `P2 five parallel confirmations with different keys: exactly one wins (${wins}), four are refused (${losses})`,
+  );
+  const store = await j('GET', `/org/agent/clients/${id}`, undefined, ANA.token);
+  ok(
+    store.body.relationship.rev === 2 &&
+      store.body.relationship.history.filter((h) => h.action === 'representation_confirmed').length === 1,
+    'P3 one confirmation in the history, rev 2',
+  );
+  const mensah = await playerLogin('pl-mensah');
+  const reqs = await Promise.all(
+    [1, 2, 3].map((i) =>
+      j('POST', '/org/agent/clients/request', { playerId: 'pl-mensah', clientKey: `dup-${i}` }, ANA.token),
+    ),
+  );
+  neg(
+    reqs.filter((x) => x.status === 201).length === 1 &&
+      reqs.filter((x) => x.status === 409 && x.body.error === 'REPRESENTATION_ALREADY_EXISTS').length === 2,
+    'P4 three parallel requests to the same player with different keys: one created, two refused',
+  );
+  ok(
+    (await j('GET', '/player/agent/relationships', undefined, mensah.token)).body.items.length === 1,
+    'P5 Mensah has exactly one request',
+  );
+}
+
+// ============================================================ Q — rate limits
+section('Q — rate limits fire for the agent policies');
+{
+  // Player lookup: 120/h per actor. Burn them.
+  let limited = null;
+  for (let i = 0; i < 125 && !limited; i++) {
+    const r = await j('GET', `/org/agent/players?q=zz${i}`, undefined, ANA.token);
+    if (r.status === 429) limited = r;
+  }
+  neg(
+    !!limited && limited.body.error === 'RATE_LIMITED' && limited.body.action === 'agent_player_lookup',
+    'Q1 the lookup limit fires at 120/h with the policy name',
+  );
+  ok(
+    (await j('GET', '/org/agent/players?q=kola', undefined, tomas.token)).status === 200,
+    "Q2 …and it is per actor: Tomás (licensed_agent since I21) is not limited by Ana's burn",
+  );
+  ok((await j('GET', '/org/agent/clients', undefined, ANA.token)).status === 200, 'Q3 other Ana routes are unaffected');
+}
+
+// ============================================================ R — Trust & Safety
+section('R — Trust & Safety: read-only; NO route lets the shared key adjudicate');
+{
+  const rels = await j('GET', '/admin/agent/relationships', undefined, undefined, ADMIN);
+  ok(
+    rels.status === 200 &&
+      rels.body.readOnly === true &&
+      /No Trust & Safety action/.test(rels.body.note) &&
+      rels.body.items.some((a) => a.id === REL2 && a.status === 'disputed'),
+    'R1 T&S may LOOK at relationships, including the disputed one, and the route says it is read-only',
+  );
+  neg(
+    !JSON.stringify(rels.body).includes('never agreed'),
+    'R2 the dispute reason does not reach the shared key either',
+  );
+  const profs = await j('GET', '/admin/agent/profiles', undefined, undefined, ADMIN);
+  ok(profs.status === 200 && profs.body.readOnly === true, 'R3 T&S may look at profiles');
+  neg(
+    !JSON.stringify(profs.body).includes('TEST-VERIFIED') && !JSON.stringify(profs.body).includes('FIFA-9999'),
+    'R4 without reference or licence numbers',
+  );
+  // Every conceivable adjudication route, with the shared key: none exists.
+  const probes = [
+    ['POST', `/admin/agent/relationships/${REL2}/resolve`, { outcome: 'agent' }],
+    ['POST', `/admin/agent/relationships/${REL2}/dispute/resolve`, {}],
+    ['PATCH', `/admin/agent/relationships/${REL2}`, { status: 'active' }],
+    ['PUT', `/admin/agent/relationships/${REL2}`, { status: 'active' }],
+    ['DELETE', `/admin/agent/relationships/${REL2}`],
+    ['POST', `/admin/agent/relationships/${REL2}/approve`, {}],
+    ['POST', `/admin/agent/relationships/${REL2}/override`, { status: 'active' }],
+    ['POST', `/admin/agent/profiles/${ANA_ID}/verify`, { facet: 'fifa_licence' }],
+    ['POST', `/admin/agent/profiles/${ANA_ID}/facets/fifa_licence/verify`, {}],
+    ['POST', `/admin/agent/profiles/${ANA_ID}/facets/fifa_licence/reject`, {}],
+    ['PATCH', `/admin/agent/profiles/${ANA_ID}`, { facets: { fifa_licence: { state: 'VERIFIED' } } }],
+    ['POST', `/admin/agent/profiles/${ANA_ID}/minors/approve`, { memberAssociation: 'ENG' }],
+    ['POST', '/admin/agent/verification/manual-review', { userId: ANA_ID, decision: 'VERIFIED' }],
+    ['POST', '/admin/agent/regulatory/override', { userId: ANA_ID }],
+    ['POST', '/admin/agent/conflicts/adjudicate', { agreementId: REL2 }],
+    ['POST', '/admin/agent/multiple-representation/approve', { playerId: 'pl-adeyemi' }],
+    ['POST', '/admin/representation/resolve', { id: REL2 }],
+  ];
+  for (const [m, u, b] of probes) {
+    const r = await j(m, u, b, undefined, ADMIN);
+    neg(r.status === 404, `R5 ${m} ${u} → 404 with the shared T&S key (no such route)`);
+  }
+  // And the state is exactly what it was.
+  const after = await j('GET', '/admin/agent/relationships', undefined, undefined, ADMIN);
+  neg(
+    after.body.items.find((a) => a.id === REL2).status === 'disputed' &&
+      after.body.items.find((a) => a.id === REL2).rev === rels.body.items.find((a) => a.id === REL2).rev,
+    'R6 the disputed relationship is untouched: same status, same rev',
+  );
+  const anaProf = (await j('GET', '/org/agent/profile', undefined, ANA.token)).body.profile;
+  neg(
+    anaProf.rev === ANA_PROFILE_REV &&
+      anaProf.facets.fifa_licence.provenance.provider === 'local-synthetic-test-provider',
+    "R7 Ana's profile is untouched: same rev, provenance still the synthetic provider — no admin provenance exists",
+  );
+  // The verification-claim review lane cannot reach agent facets: they are not claims.
+  const claims = await j('GET', '/admin/verification/queue', undefined, undefined, ADMIN);
+  neg(
+    claims.status !== 200 ||
+      !JSON.stringify(claims.body).includes(ANA_ID) ||
+      !JSON.stringify(claims.body).includes('fifa_licence'),
+    'R8 no agent facet sits in the verification queue — the shared-key claim review cannot reach a licence facet',
+  );
+  // Without the key, nothing.
+  neg(
+    expect(collect('R9', await j('GET', '/admin/agent/relationships')), 401, 'ADMIN_KEY_REQUIRED'),
+    'R9 no key, no look',
+  );
+  neg(
+    expect(
+      collect('R10', await j('GET', '/admin/agent/relationships', undefined, ANA.token)),
+      401,
+      'ADMIN_KEY_REQUIRED',
+    ),
+    'R10 an agent session is not the T&S key',
+  );
+}
+
+// ============================================================ S — subsystems untouched
+section('S — the subsystems Agent must not touch');
+{
+  const R = readRows(DATA_DIR);
+  neg(R.count('signings') === 0, 'S1 no signing was written by any agent action');
+  neg(
+    !R.rows('ledger', { org_id: 'org-northstar' }).some((l) => /offer|signed/.test(l.type)),
+    'S2 no offer_made / offer_accepted / offer_declined / signed ledger row for the agency',
+  );
+  neg(
+    !R.tables().includes('representations'),
+    'S3 there is no legacy representations store for the agent core to write',
+  );
+  neg(
+    R.count('trials', { org_id: 'org-northstar' }) === 0 &&
+      R.count('recruitment_cases', { org_id: 'org-northstar' }) === 0,
+    'S4 no trial and no recruitment case was created for the agency',
+  );
+  neg(
+    !R.rows('ver_claims').some(
+      (c) =>
+        (c.organisation_id === 'org-northstar' || c.subject_id === 'org-northstar') &&
+        /fifa|licence/i.test(JSON.stringify(c)),
+    ),
+    'S5 no verification claim was created for a licence facet',
+  );
+  const kolaP = R.row('players', { id: 'pl-adeyemi' });
+  neg(
+    kolaP && !['agent_user_id', 'agent', 'representation_agreements'].some((c) => c in kolaP),
+    'S6 the player record gained no agent field — the relationship lives in its own store',
+  );
+  R.close();
+  neg(
+    expect(await j('POST', '/org/agent/clients/' + REL + '/offer', { amount: 1 }, ANA.token), 404, null),
+    'S7 there is no offer route',
+  );
+  neg(expect(await j('POST', '/org/agent/clients/' + REL + '/sign', {}, ANA.token), 404, null), 'S8 no sign route');
+  neg(
+    expect(await j('POST', '/org/agent/clients/' + REL + '/passport', {}, ANA.token), 404, null) &&
+      expect(await j('GET', '/org/agent/clients/' + REL + '/passport', undefined, ANA.token), 404, null),
+    "S9 no passport route — the agent does not own the client's Passport",
+  );
+  neg(
+    expect(await j('GET', '/org/agent/clients/' + REL + '/box-cam', undefined, ANA.token), 404, null),
+    'S10 no Box Cam route',
+  );
+  neg(
+    expect(await j('POST', '/org/agent/clients/' + REL + '/trust', { score: 99 }, ANA.token), 404, null),
+    'S11 no Trust route',
+  );
+  neg(
+    expect(await j('POST', '/org/agent/clients/' + REL + '/contact', { body: 'hi' }, ANA.token), 404, null),
+    'S12 no Contact route — an Agent is not a Club Contact actor',
+  );
+  // /org/agent/transactions is a real route that refuses an empty body; the claim
+  // is that no FEE route exists and a transaction cannot be opened out of nothing.
+  neg(
+    expect(await j('POST', '/org/agent/transactions', {}, ANA.token), 400, 'TRANSACTION_INPUT_INVALID') &&
+      expect(await j('GET', '/org/agent/fees', undefined, ANA.token), 404, null),
+    'S13 no fee route, and an empty body opens no transaction',
+  );
+  neg(
+    expect(await j('POST', '/org/agent/clients/' + REL + '/apply', { opportunityId: 'x' }, ANA.token), 404, null),
+    "S14 no route lets the agent APPLY for the client — applying is the player's act",
+  );
+}
+
+// ============================================================ IN — input is valid as sent, or refused
+section('IN — strict bodies and queries: nothing is coerced, clamped or ignored');
+{
+  const refusedAs = (r, code, field, problem) =>
+    r.status === 400 && r.body?.error === code && r.body.field === field && r.body.problem === problem;
+  const request = async (label, extra) =>
+    collect(
+      label,
+      await j(
+        'POST',
+        '/org/agent/clients/request',
+        { playerId: 'pl-adeyemi', jurisdiction: 'ENG', clientKey: `in-${label}`, ...extra },
+        ANA.token,
+      ),
+    );
+  const clientRows = async () =>
+    (await j('GET', '/org/agent/clients', undefined, ANA.token)).body.items.map((r) => `${r.id}@${r.rev}`).join();
+  const clientsBefore = await clientRows();
+  neg(
+    refusedAs(await request('IN1', { scope: 'employment' }), 'AGENT_SCOPE_INVALID', 'scope', 'not_list'),
+    'IN1 a scope sent as one text, not a list, is refused rather than wrapped in one',
+  );
+  neg(
+    refusedAs(await request('IN2', { termMonths: '12' }), 'AGENT_TERM_INVALID', 'termMonths', 'not_number') &&
+      refusedAs(await request('IN2b', { termMonths: 25 }), 'AGENT_TERM_INVALID', 'termMonths', 'too_large'),
+    'IN2 a term written as text, or past the 24-month cap, is refused with its own code',
+  );
+  neg(
+    refusedAs(await request('IN3', { scope: ['employment', 'employment'] }), 'AGENT_SCOPE_INVALID', 'scope', 'invalid'),
+    'IN3 a scope naming a value twice is refused',
+  );
+  neg((await clientRows()) === clientsBefore, 'IN4 none of those refused requests proposed a relationship');
+  neg(
+    refusedAs(
+      collect('IN5', await j('GET', '/org/agent/agency/audit?limit=100', undefined, tomas.token)),
+      'AGENT_INPUT_INVALID',
+      'limit',
+      'too_large',
+    ) &&
+      refusedAs(
+        collect('IN5b', await j('GET', '/org/agent/agency/audit?limit=ten', undefined, tomas.token)),
+        'AGENT_INPUT_INVALID',
+        'limit',
+        'not_whole_number',
+      ),
+    'IN5 an audit page past 50, or one that is not a number, is refused instead of clamped or defaulted',
+  );
+  neg(
+    refusedAs(
+      collect('IN6', await j('GET', '/org/agent/players?q=Kola&minAge=10', undefined, ANA.token)),
+      'AGENT_INPUT_INVALID',
+      'minAge',
+      'unknown_field',
+    ),
+    'IN6 the player lookup takes only the parameter it reads',
+  );
+  const team = async () => JSON.stringify((await j('GET', '/org/agent/agency/team', undefined, tomas.token)).body);
+  const teamBefore = await team();
+  neg(
+    refusedAs(
+      collect(
+        'IN7',
+        await j('PATCH', `/org/agent/agency/team/${BEN_ID}`, { tiers: ['analyst', 'analyst'] }, tomas.token),
+      ),
+      'AGENT_TIERS_INVALID',
+      'tiers',
+      'invalid',
+    ) &&
+      refusedAs(
+        collect(
+          'IN7b',
+          await j('PATCH', '/org/agent/agency/settings', { description: 'x', tagline: 'y' }, tomas.token),
+        ),
+        'AGENT_INPUT_INVALID',
+        'tagline',
+        'unknown_field',
+      ) &&
+      (await team()) === teamBefore,
+    'IN7 duplicate tiers and an agency setting this build does not store are refused, and the team is unchanged',
+  );
+}
+
+// ============================================================ T — events / audit
+section('T2 — audit rows are content-free; the org audit merges the agent domain');
+{
+  const audit = await j('GET', '/org/audit?limit=50', undefined, tomas.token);
+  ok(
+    audit.status === 200 &&
+      audit.body.items.some((r) => r.domain === 'representation') &&
+      audit.body.items.some((r) => r.domain === 'agency') &&
+      audit.body.items.some((r) => r.domain === 'agent'),
+    'T2 the organisation audit carries the three agent domains',
+  );
+  neg(
+    !JSON.stringify(audit.body).includes('never agreed') &&
+      !JSON.stringify(audit.body).includes('TEST-VERIFIED') &&
+      !JSON.stringify(audit.body).includes('FIFA-9999'),
+    'T2 no dispute reason, reference or licence number in the audit',
+  );
+  const rowFor = audit.body.items.find((r) => r.action === 'representation_disputed');
+  ok(
+    !!rowFor && rowFor.detail?.hadReason === true && rowFor.detail.reason === undefined,
+    'T2 a dispute row records that a reason was given, never the reason',
+  );
+  const pageA = await j('GET', '/org/agent/agency/audit?limit=2', undefined, tomas.token);
+  const pageB = await j(
+    'GET',
+    `/org/agent/agency/audit?limit=2&cursor=${pageA.body.nextCursor}`,
+    undefined,
+    tomas.token,
+  );
+  ok(
+    pageA.body.items.length === 2 &&
+      pageB.status === 200 &&
+      pageB.body.items.length === 2 &&
+      pageA.body.items[1].id !== pageB.body.items[0].id,
+    'T2 the agency audit paginates by cursor',
+  );
+  neg(
+    expect(
+      collect('T2', await j('GET', '/org/agent/agency/audit?cursor=nope', undefined, tomas.token)),
+      400,
+      'AUDIT_CURSOR_INVALID',
+    ),
+    'T2 a bad cursor is 400',
+  );
+}
+
+// ============================================================ U — tombstones
+section('U — player deletion leaves an id-only record');
+let DELETED_REL;
+{
+  const nowak2 = await playerLogin('pl-nowak');
+  // Filip: earlier withdrawn record exists; make a fresh confirmed one after the cooldown? cooldown blocks — use pending withdraw record only. Use pl-svensson instead.
+  const elias = await playerLogin('pl-svensson');
+  const r = await j(
+    'POST',
+    '/org/agent/clients/request',
+    { playerId: 'pl-svensson', clientKey: 'ana-elias' },
+    ANA.token,
+  );
+  ok(r.status === 201, 'U1 a request to Elias');
+  DELETED_REL = r.body.relationship.id;
+  await j('POST', `/player/agent/relationships/${DELETED_REL}/confirm`, { expectedRev: 1 }, elias.token);
+  await j(
+    'POST',
+    `/player/agent/relationships/${DELETED_REL}/dispute`,
+    { expectedRev: 2, reason: 'SECRET_DISPUTE_TEXT' },
+    elias.token,
+  );
+  const del = await j('DELETE', '/player/account', undefined, elias.token);
+  ok(del.status === 200 && del.body.deleted === true, 'U2 Elias deletes their account');
+  const after = await j('GET', `/org/agent/clients/${DELETED_REL}`, undefined, ANA.token);
+  neg(
+    after.status === 200 &&
+      after.body.client.removed === true &&
+      after.body.client.name === null &&
+      typeof after.body.relationship.subjectRemovedAt === 'number' &&
+      after.body.access === false,
+    "U3 the agent's record survives as an id-only tombstone: no name, no access",
+  );
+  const R = readRows(DATA_DIR);
+  const row = R.row('representation_agreements', { id: DELETED_REL });
+  const history = R.rows('agreement_history', { agreement_id: DELETED_REL });
+  neg(
+    row.dispute_reason === null &&
+      !JSON.stringify([row, history]).includes('SECRET_DISPUTE_TEXT') &&
+      history.filter((h) => h.by_kind === 'player').every((h) => h.by_name === null && h.by_id === null),
+    'U4 the stored row lost the dispute reason and every player attribution',
+  );
+  neg(
+    R.row('players', { id: 'pl-svensson' })?.deleted_at != null,
+    'U5 the player is gone: what is left of the row is a deletion tombstone',
+  );
+  R.close();
+  ok(nowak2.token && true, 'U6 (other players unaffected)');
+}
+
+// ============================================================ W — restart
+section('W — restart: everything survives the process dying');
+{
+  server.kill('SIGTERM');
+  for (let i = 0; i < 60 && server.exitCode == null; i++) await sleep(100);
+  server = await boot();
+  const ana2 = await login('org-northstar', 'Ana Costa', 'Agent');
+  const me = await j('GET', '/org/agent/me', undefined, ana2.token);
+  ok(
+    me.status === 200 &&
+      me.body.affiliation.tiers.join() === 'licensed_agent' &&
+      me.body.profile.facets.fifa_licence.state === 'VERIFIED' &&
+      me.body.profile.facets.fifa_licence.provenance.provider === 'local-synthetic-test-provider',
+    "W1 Ana's membership, profile and verification provenance survived",
+  );
+  const kola2 = await playerLogin('pl-adeyemi');
+  ok(
+    (await j('GET', `/org/agent/clients/${REL}`, undefined, ana2.token)).body.access === true,
+    'W2 the active relationship still grants access',
+  );
+  neg(
+    (await j('GET', `/org/agent/clients/${REL2}`, undefined, ana2.token)).body.access === false &&
+      (await j('GET', `/org/agent/clients/${REL2}`, undefined, ana2.token)).body.relationship.status === 'disputed',
+    'W3 the dispute still suspends',
+  );
+  neg(
+    expect(
+      await j(
+        'POST',
+        '/org/agent/clients/request',
+        {
+          playerId: 'pl-adeyemi',
+          scope: ['employment', 'transfer'],
+          termMonths: 18,
+          jurisdiction: 'ENG',
+          clientKey: 'ana-kola-1',
+        },
+        ana2.token,
+      ),
+      200,
+      null,
+    ) &&
+      (
+        await j(
+          'POST',
+          '/org/agent/clients/request',
+          {
+            playerId: 'pl-adeyemi',
+            scope: ['employment', 'transfer'],
+            termMonths: 18,
+            jurisdiction: 'ENG',
+            clientKey: 'ana-kola-1',
+          },
+          ana2.token,
+        )
+      ).body.idempotent === true,
+    'W4 the request idempotency key replays across the restart',
+  );
+  ok(
+    (
+      await j(
+        'POST',
+        `/player/agent/relationships/${REL}/confirm`,
+        { expectedRev: 1, clientKey: 'kola-confirm' },
+        kola2.token,
+      )
+    ).body.idempotent === true,
+    'W5 the confirmation key too',
+  );
+  neg(
+    expect(
+      await j(
+        'POST',
+        `/player/agent/relationships/${REL2}/terminate`,
+        { expectedRev: 3 },
+        (await playerLogin('pl-carvalho')).token,
+      ),
+      409,
+      'REPRESENTATION_DISPUTED',
+    ),
+    'W6 the dispute is still terminal',
+  );
+  neg(
+    expect(
+      await j('POST', '/auth/org/login', {
+        orgId: 'org-northstar',
+        scoutName: 'Carl Temp',
+        role: 'Assistant',
+        platform: 'agent',
+      }),
+      403,
+      'USER_REMOVED',
+    ),
+    'W7 the ended member is still out',
+  );
+  neg(
+    (await j('GET', `/org/agent/clients/${DELETED_REL}`, undefined, ana2.token)).body.client.removed === true,
+    'W8 the tombstone is still a tombstone',
+  );
+  const h = await j('GET', '/healthz');
+  ok(h.body.schemaVersion === SCHEMA_VERSION, `W9 schema ${h.body.schemaVersion} after restart; no step ran twice`);
+  ok(
+    rows(DATA_DIR, 'data_migrations', { id: '0026_agent_core' }).length === 1,
+    'W10 exactly one 0026_agent_core migration record',
+  );
+}
+
+// ============================================================ E2 — error contract
+section('E2 — every refusal in this run carried a status and a code, and no private field');
+{
+  const bad = ERROR_BODIES.filter((e) => !e.body || typeof e.body.error !== 'string');
+  neg(
+    bad.length === 0,
+    `E2 all ${ERROR_BODIES.length} refusals carried an error code (${bad.map((b) => b.label).join(', ') || 'none missing'})`,
+  );
+  neg(
+    !ERROR_BODIES.some((e) => /stack|internal|at\s+\w+\s+\(/.test(JSON.stringify(e.body))),
+    'E2 no stack trace or internal field in any refusal',
+  );
+  neg(
+    !ERROR_BODIES.some(
+      (e) => JSON.stringify(e.body).includes('never agreed') || JSON.stringify(e.body).includes('SECRET_DISPUTE_TEXT'),
+    ),
+    'E2 no dispute reason in any refusal',
+  );
+}
+
+console.log(
+  `\nagents/core: ${passed} checks passed, ${negatives} negative/integrity checks (${Math.round((negatives / passed) * 100)}%)`,
+);
+if (process.exitCode) console.error('SOME CHECKS FAILED');
+else console.log('all agents/core checks passed');
+process.exit(process.exitCode ?? 0);

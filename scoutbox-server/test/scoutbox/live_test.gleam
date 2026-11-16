@@ -89,6 +89,11 @@ const samples = [
   ),
   live_event.OfferChanged(live_event.OfferWithdrawn, "org-1", "case-1", "rof-1"),
   live_event.OfferResponded("org-1", "case-1", "rof-1", None),
+  live_event.TransactionHandoffInvited("org-1", "case-1", "hof-1"),
+  live_event.ConflictEvaluated("org-1", "ctx-1", "CLEAR"),
+  live_event.AgentTransactionCreated("org-1", "atx-1"),
+  live_event.AgentTransactionComplianceUpdated("org-1", "atx-1", "CLEAR"),
+  live_event.AgentTransactionStatusChanged("org-1", "atx-1", "READY"),
 ]
 
 type Entry {

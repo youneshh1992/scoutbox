@@ -51,6 +51,20 @@ pub type Event {
     offer_id: String,
     status: Option(String),
   )
+  /// A club invited a transaction workspace on a Room. Private to the club.
+  TransactionHandoffInvited(org_id: String, room_id: String, handoff_id: String)
+  /// A compliance context was evaluated. Private to the agency.
+  ConflictEvaluated(org_id: String, ctx_id: String, outcome: String)
+  /// A transaction workspace was opened. Private to the agency.
+  AgentTransactionCreated(org_id: String, tx_id: String)
+  /// A transaction's compliance answer changed. Private to the agency.
+  AgentTransactionComplianceUpdated(
+    org_id: String,
+    tx_id: String,
+    outcome: String,
+  )
+  /// A transaction moved status. Private to the agency.
+  AgentTransactionStatusChanged(org_id: String, tx_id: String, status: String)
 }
 
 pub type OfferChange {
@@ -103,6 +117,12 @@ pub fn name(event: Event) -> String {
         OfferWithdrawn -> "offer_withdrawn"
       }
     OfferResponded(..) -> "offer_responded"
+    TransactionHandoffInvited(..) -> "transaction_handoff_invited"
+    ConflictEvaluated(..) -> "conflict_evaluated"
+    AgentTransactionCreated(..) -> "agent_transaction_created"
+    AgentTransactionComplianceUpdated(..) ->
+      "agent_transaction_compliance_updated"
+    AgentTransactionStatusChanged(..) -> "agent_transaction_status_changed"
   }
 }
 
@@ -117,7 +137,12 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | Representation(org_id:, ..)
     | RegulatoryReviewRequested(org_id:, ..)
     | OfferChanged(org_id:, ..)
-    | OfferResponded(org_id:, ..) -> Ok(org_id)
+    | OfferResponded(org_id:, ..)
+    | TransactionHandoffInvited(org_id:, ..)
+    | ConflictEvaluated(org_id:, ..)
+    | AgentTransactionCreated(org_id:, ..)
+    | AgentTransactionComplianceUpdated(org_id:, ..)
+    | AgentTransactionStatusChanged(org_id:, ..) -> Ok(org_id)
     Messages(..) | Typing(..) | Notify(..) -> Error(Nil)
   }
 }
@@ -171,6 +196,30 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("roomId", json.string(room_id)),
       #("offerId", json.string(offer_id)),
       #("status", json.nullable(status, json.string)),
+    ]
+    TransactionHandoffInvited(org_id:, room_id:, handoff_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("handoffId", json.string(handoff_id)),
+    ]
+    ConflictEvaluated(org_id:, ctx_id:, outcome:) -> [
+      #("orgId", json.string(org_id)),
+      #("ctxId", json.string(ctx_id)),
+      #("outcome", json.string(outcome)),
+    ]
+    AgentTransactionCreated(org_id:, tx_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+    ]
+    AgentTransactionComplianceUpdated(org_id:, tx_id:, outcome:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+      #("outcome", json.string(outcome)),
+    ]
+    AgentTransactionStatusChanged(org_id:, tx_id:, status:) -> [
+      #("orgId", json.string(org_id)),
+      #("txId", json.string(tx_id)),
+      #("status", json.string(status)),
     ]
   }
 }

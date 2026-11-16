@@ -532,9 +532,9 @@ pub fn uploadable(
   })
 }
 
-/// A role label, not an identity: no party learns which named person on another side acted.
-pub fn actor_label(kind: String, name: Option(String)) -> Json {
-  let #(k, label) = case kind {
+/// A role, not an identity: no party learns which named person on another side acted. The kind and the label.
+pub fn actor(kind: String, name: Option(String)) -> #(String, String) {
+  case kind {
     "ts_reviewer" -> #("trust_safety", "Trust & Safety (attributed)")
     "org" | "agent" -> #("agent", "Representing agent")
     "club_user" -> #("club", "Club signatory")
@@ -542,5 +542,9 @@ pub fn actor_label(kind: String, name: Option(String)) -> Json {
     "system" -> #("system", option.unwrap(name, "ScoutBox"))
     other -> #("other", other)
   }
+}
+
+pub fn actor_label(kind: String, name: Option(String)) -> Json {
+  let #(k, label) = actor(kind, name)
   json.object([#("kind", json.string(k)), #("label", json.string(label))])
 }

@@ -101,6 +101,9 @@ pub const type_category = [
   #("agency_membership", SecurityAccount),
   #("regulatory_review_required", Compliance),
   #("agent_verification_stale", Compliance),
+  #("representation_transaction", TransactionUpdates),
+  #("agent_transaction_action", TransactionUpdates),
+  #("agent_transaction_compliance", Compliance),
 ]
 
 /// Mentions and assignments share the `recruitment_room` type, so they are told apart by the server's own

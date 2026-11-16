@@ -227,7 +227,8 @@ fn parsed(
   }
 }
 
-fn body(
+/// The body read with `shape`, refused under the agent contract's codes.
+pub fn body(
   req: Request,
   shape: input.Shape(a),
   next: fn(a, Dynamic) -> Response,
@@ -486,7 +487,11 @@ fn bootstrap(tx: Tx, a: OrgAccess, now: Int) -> Result(Affiliation, Fail(e)) {
   Affiliation(row, tiers)
 }
 
-fn require(m: Member, capability: String, next: fn() -> Response) -> Response {
+pub fn require(
+  m: Member,
+  capability: String,
+  next: fn() -> Response,
+) -> Response {
   case agent_rules.can(tiers(m), capability) {
     True -> next()
     False ->

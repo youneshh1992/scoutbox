@@ -6,6 +6,8 @@ import gleam/dict
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
+import scoutbox/agents/core_routes
+import scoutbox/agents/transaction_routes
 import scoutbox/messaging/notification_prefs
 import scoutbox/platform/limits.{Policy}
 import scoutbox/vocab/notification_category
@@ -74,4 +76,31 @@ pub fn notification_categories_test() {
   assert dict.from_list(ported) == categories
   assert list.map(ported, fn(p) { p.0 })
     == list.map(notification_category.pairs, fn(p) { p.0 })
+}
+
+/// An error table declared whole equals its snapshot, entry for entry and no more.
+fn error_table(
+  file: String,
+  name: String,
+  ported: List(#(String, Int)),
+) -> Nil {
+  let table =
+    snapshot(file, decode.at([name], decode.dict(decode.string, decode.int)))
+  assert dict.from_list(ported) == table
+}
+
+pub fn agent_core_error_table_test() {
+  error_table(
+    "agents/core/errors.json",
+    "AGENT_CORE_ERROR_HTTP",
+    core_routes.statuses,
+  )
+}
+
+pub fn transaction_error_table_test() {
+  error_table(
+    "agents/transactions/errors.json",
+    "TRANSACTION_ERROR_HTTP",
+    transaction_routes.statuses,
+  )
 }

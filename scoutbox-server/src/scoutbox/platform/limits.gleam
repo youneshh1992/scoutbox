@@ -56,6 +56,9 @@ pub const policy = [
   #("agent_profile_write", agent_profile_write_policy),
   #("agent_affiliation_write", agent_affiliation_write_policy),
   #("agent_client_response", agent_client_response_policy),
+  #("transaction_handoff", transaction_handoff_policy),
+  #("transaction_write", transaction_write_policy),
+  #("transaction_note_write", transaction_note_write_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -90,6 +93,12 @@ pub type Action {
   AgentAffiliationWrite
   /// Relationship confirmations, declines, terminations and disputes, per player.
   AgentClientResponse
+  /// Transaction-workspace invitations a club issues from a case, and their withdrawals, per organisation.
+  TransactionHandoff
+  /// Transactions opened and changed by a licensed agent, per agent.
+  TransactionWrite
+  /// Transaction notes, per writer.
+  TransactionNoteWrite
 }
 
 const email_challenge_request_policy = Policy(max: 5, window_ms: 3_600_000)
@@ -123,6 +132,12 @@ const agent_affiliation_write_policy = Policy(max: 60, window_ms: 3_600_000)
 
 const agent_client_response_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const transaction_handoff_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const transaction_write_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const transaction_note_write_policy = Policy(max: 120, window_ms: 3_600_000)
+
 fn action_name(action: Action) -> String {
   case action {
     EmailChallengeRequest -> "email_challenge_request"
@@ -140,6 +155,9 @@ fn action_name(action: Action) -> String {
     AgentProfileWrite -> "agent_profile_write"
     AgentAffiliationWrite -> "agent_affiliation_write"
     AgentClientResponse -> "agent_client_response"
+    TransactionHandoff -> "transaction_handoff"
+    TransactionWrite -> "transaction_write"
+    TransactionNoteWrite -> "transaction_note_write"
   }
 }
 
@@ -160,6 +178,9 @@ fn action_policy(action: Action) -> Policy {
     AgentProfileWrite -> agent_profile_write_policy
     AgentAffiliationWrite -> agent_affiliation_write_policy
     AgentClientResponse -> agent_client_response_policy
+    TransactionHandoff -> transaction_handoff_policy
+    TransactionWrite -> transaction_write_policy
+    TransactionNoteWrite -> transaction_note_write_policy
   }
 }
 

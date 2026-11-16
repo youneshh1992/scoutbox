@@ -11,14 +11,13 @@ lifetime (`SESSION_TTL_DAYS`) and the production boot refusals, and Recruitment 
 evidence, missing-evidence suggestions and Combine requests they read), the recruitment case's journey, lifecycle
 actions and formal decision, Offers, the agent core (profiles and verification facets, agency membership,
 representation agreements and the player's My Agent, with the compliance engine's adult approach rule and the review
-items it opens), the organisation audit and a player's erasure. It answers fourteen of the TypeScript server's
-e2e batteries unchanged: `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`,
-`platform/storeGuarantees`, `platform/messaging`, `platform/notifications`, `platform/delivery`,
-`platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff`,
-`verification/organisationsAndStaffAdversarial`, `recruitment/rooms`, `recruitment/decisionsPersistence` and
-`recruitment/offersPersistence`. `agents/core` passes apart from one check (S13: the transaction workspace's input
-refusal); `recruitment/offers` and `recruitment/offersAdversarial` wait on the transaction workspace and on racing
-Offer acts.
+items it opens), the organisation audit and a player's erasure, and the start of an agent's transaction workspace
+(opening one from a club's handoff, its notes and the readiness an Offer reads). It answers seventeen of the
+TypeScript server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding`,
+`platform/playersAndGuardians`, `platform/storeGuarantees`, `platform/messaging`, `platform/notifications`,
+`platform/delivery`, `platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff`,
+`verification/organisationsAndStaffAdversarial`, `recruitment/rooms`, `recruitment/decisionsPersistence`,
+`recruitment/offers`, `recruitment/offersAdversarial`, `recruitment/offersPersistence` and `agents/core`.
 
 ```sh
 gleam check            # type-check (fast)
@@ -79,7 +78,7 @@ Every route below is exercised by a battery, except where marked.
 | Rooms | `GET`/`POST /org/rooms`, `GET /org/rooms/needs-attention`, `/summaries`, `GET`/`PATCH /org/rooms/:id`, `POST …/status`, `GET …/snapshots`, `…/activity`, `GET`/`POST …/comments`, `PATCH`/`DELETE …/comments/:cid`, `POST …/tasks`, `PATCH …/tasks/:tid`, `GET`/`POST …/decisions`, `POST …/evidence/:eid/review`, `…/assessment-assignments`, `…/evidence-requests`, `…/combine-requests`, `…/link`; `GET /org/rooms-funnel`, `/admin/rooms/overview` |
 | Case | `GET /org/rooms/:id/journey` (the club's projection), `POST /org/rooms/:id/lifecycle` (a named action, gated by the evidence provider); `GET /org/rooms/:id/decision`, `POST`/`PATCH`/`DELETE …/decision/draft`, `POST …/decision/finalize`, `…/decision/supersede` |
 | Offers | `GET`/`POST /org/rooms/:id/offers`, `GET /org/offers/:id`, `…/history`, `PATCH …/draft`, `POST …/issue`, `…/withdraw`, `…/revise`, `GET /org/recruitment/offer-policy`; `GET /player/offers`, `/player/offers/:id`, `…/documents/:docId`, `POST …/accept`, `…/decline`, `…/share-agent`; the guardian's `/guardian/offers…` |
-| Agents | `GET /org/agent/me`, `/home`, `GET`/`POST /org/agent/profile`, `POST …/profile/facets/:facet/submit`; `GET /org/agent/agency`, `GET`/`POST …/agency/team`, `PATCH …/agency/team/:userId`, `POST …/team/:userId/end`, `PATCH …/agency/settings`, `GET …/agency/compliance`, `…/agency/audit`; `GET /org/agent/players`, `/clients`, `POST /org/agent/clients/request`, `GET /org/agent/clients/:id`, `POST …/terminate`, `GET …/opportunities`, `…/offers`; `GET /org/agent/opportunities`, `/inbox`; `GET /player/agent/relationships`, `POST …/:id/confirm`, `/decline`, `/terminate`, `/dispute`, `PATCH …/:id/sharing`; `GET /admin/agent/relationships`, `/admin/agent/profiles` (read only) |
+| Agents | `GET /org/agent/me`, `/home`, `GET`/`POST /org/agent/profile`, `POST …/profile/facets/:facet/submit`; `GET /org/agent/agency`, `GET`/`POST …/agency/team`, `PATCH …/agency/team/:userId`, `POST …/team/:userId/end`, `PATCH …/agency/settings`, `GET …/agency/compliance`, `…/agency/audit`; `GET /org/agent/players`, `/clients`, `POST /org/agent/clients/request`, `GET /org/agent/clients/:id`, `POST …/terminate`, `GET …/opportunities`, `…/offers`; `GET /org/agent/opportunities`, `/inbox`; `GET /player/agent/relationships`, `POST …/:id/confirm`, `/decline`, `/terminate`, `/dispute`, `PATCH …/:id/sharing`; `GET /admin/agent/relationships`, `/admin/agent/profiles` (read only); `POST /org/agent/transactions`, `POST /org/agent/transactions/:id/notes`; `POST /org/rooms/:id/transaction-handoff` |
 | Audit and erasure | `GET /org/audit` (Room, agency and ledger rows); `DELETE /player/account` |
 | Opportunity board | `GET /player/opportunity-board` (open days only: club opportunities are not ported) |
 | Passport | `GET /player/trust-profile`, `/org/players/:id/trust-profile` (the Trust Score, from its sources' records); `POST /org/players/:id/evidence` (a club's own claim); `GET /org/players/:id/evidence-gaps` |
@@ -125,6 +124,7 @@ for players and guardians (a new player account stores a hash no password matche
   snapshot records no Passport revision either. A Room's Combine results, development activity and the
   missing-evidence rules that read assessment ratings are not ported (`Not ported yet:`).
 - The journey, the evidence provider and the decision surface see no Contact records, Trials or signing packages
-  (`Not ported yet:`): no route here records one. An Offer cannot cite a transaction workspace yet.
+  (`Not ported yet:`): no route here records one.
+- A transaction workspace stays at DRAFT: only opening one and its notes are ported, so no party can confirm.
 - A mail's withheld one-time codes (`SendMail`'s `secrets`) read as the placeholder in `/admin/outbox` too. The
   TypeScript server's dev transport keeps the full text in process memory and shows it there.

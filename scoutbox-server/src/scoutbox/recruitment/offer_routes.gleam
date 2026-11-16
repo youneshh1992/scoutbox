@@ -4,8 +4,10 @@
 ////
 //// Every route reads "now" from the request clock (`clock.request_ms`), so the batteries can pin an expiry.
 ////
-//// Not ported yet: the transaction workspace an Offer may cite (agents/transactions), so a `transactionId` names
-//// no workspace here; the signing package an accepted Offer opens (`signing` reads null).
+//// An Offer may cite the case's transaction workspace (agents/transactions); its readiness is re-read at issue,
+//// never taken from the draft.
+////
+//// Not ported yet: the signing package an accepted Offer opens (`signing` reads null).
 
 import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
@@ -19,6 +21,7 @@ import gleam/string
 import scoutbox/agents/core_routes as agent_core
 import scoutbox/agents/integration
 import scoutbox/agents/representation
+import scoutbox/agents/transaction_routes
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
@@ -58,6 +61,7 @@ import scoutbox/vocab/audience
 import scoutbox/vocab/offer_status.{Accepted, Draft, Issued}
 import scoutbox/vocab/party
 import scoutbox/vocab/room_status
+import scoutbox/vocab/transaction_status
 import sqlight
 import wisp.{type Request, type Response}
 
@@ -627,6 +631,7 @@ fn blockers_for(
   now: Int,
   for_issue: Bool,
   all: List(Offer),
+  offer: Option(Offer),
 ) -> Result(List(String), Fail(e)) {
   use removed <- result.try(subject_removed(read, room))
   use is_blocked <- result.try(blocked(read, room))
@@ -654,12 +659,32 @@ fn blockers_for(
       ])
     }
     True -> {
-      use rec <- result.map(recipients.resolve(
+      use rec <- result.try(recipients.resolve(
         read,
         room.row.player_id,
         org,
         now,
       ))
+      use workspace <- result.map(
+        case option.then(offer, fn(o) { o.row.transaction_id }) {
+          Some(tid) ->
+            transaction_routes.offer_readiness_for(
+              read,
+              tid,
+              room.row.org_id,
+              room.row.id,
+              now,
+            )
+            |> result.map(fn(found) {
+              case found {
+                None -> ["TRANSACTION_MISSING"]
+                Some(#(_, r)) if !r.can_start -> ["TRANSACTION_NOT_READY"]
+                Some(_) -> []
+              }
+            })
+          None -> Ok([])
+        },
+      )
       list.flatten([
         case
           room.status == room_status.OfferConsideration
@@ -683,6 +708,7 @@ fn blockers_for(
               False -> []
             }
         },
+        workspace,
       ])
     }
   })
@@ -728,11 +754,12 @@ pub fn surface(
         now,
         False,
         all,
+        None,
       ))
       use issue_blockers <- result.try(case live {
         Some(l) ->
           case offer_rules.status(l, now) == Some(Draft) {
-            True -> blockers_for(r, room, role, a.org, now, True, all)
+            True -> blockers_for(r, room, role, a.org, now, True, all, live)
             False -> Ok([])
           }
         None -> Ok([])
@@ -1127,15 +1154,31 @@ pub fn create(
                     id.org_to_string(a.org.id),
                     now,
                   )
-                  case b.transaction_id {
-                    // Not ported yet: transaction workspaces, so no reference names one of yours.
-                    Some(_) ->
+                  let workspace = case input.filled(b.transaction_id) {
+                    Some(tid) ->
+                      read(ctx, transaction_routes.offer_readiness_for(
+                        _,
+                        tid,
+                        r.org_id,
+                        r.id,
+                        now,
+                      ))
+                      |> result.map(option.map(_, fn(found) { found.0.row.id }))
+                      |> result.map(Some)
+                    None -> Ok(None)
+                  }
+                  case workspace {
+                    Error(response) -> response
+                    Ok(Some(None)) ->
                       err(
                         "OFFER_INPUT_INVALID",
                         "No transaction workspace of yours for this case matches that reference.",
                         [#("field", json.string("transactionId"))],
                       )
-                    None ->
+                    Ok(workspace) -> {
+                      let transaction_id =
+                        option.flatten(workspace)
+                        |> option.map(id.transaction_to_string)
                       case read(ctx, resolve_documents(_, doc_refs, r.org_id)) {
                         Error(response) -> response
                         Ok(Error(response)) -> response
@@ -1159,7 +1202,7 @@ pub fn create(
                                   decision_id: Some(id.room_decision(
                                     decision_id,
                                   )),
-                                  transaction_id: None,
+                                  transaction_id:,
                                   content: offers.Content(
                                     terms,
                                     m.recipient_message,
@@ -1215,6 +1258,7 @@ pub fn create(
                           |> room_routes.answer
                         }
                       }
+                    }
                   }
                 }
               }
@@ -1643,8 +1687,9 @@ fn issue_checked(
                               ),
                             ],
                           )
-                        // Not ported yet: an Offer citing a transaction workspace (its readiness at issue).
                         False -> {
+                          // The workspace's readiness is re-evaluated now, not taken from the draft.
+                          use readiness <- workspace_ready(ctx, o, room, now)
                           use <- limited(
                             ctx,
                             req,
@@ -1663,6 +1708,7 @@ fn issue_checked(
                             recipient,
                             org,
                             key,
+                            readiness,
                             now,
                           )
                         }
@@ -1670,6 +1716,51 @@ fn issue_checked(
                   }
               }
           }
+      }
+  }
+}
+
+/// The workspace the Offer cites, ready now, as the revision records it; none when it cites none.
+fn workspace_ready(
+  ctx: Ctx,
+  o: Offer,
+  room: Room,
+  now: Int,
+  next: fn(Option(offers.Readiness)) -> Response,
+) -> Response {
+  case o.row.transaction_id {
+    None -> next(None)
+    Some(tid) ->
+      case
+        read(ctx, transaction_routes.offer_readiness_for(
+          _,
+          tid,
+          room.row.org_id,
+          room.row.id,
+          now,
+        ))
+      {
+        Error(response) -> response
+        Ok(None) ->
+          err(
+            "OFFER_COMPLIANCE_BLOCKED",
+            "The transaction workspace this Offer references is no longer available to you.",
+            [#("blockers", json.array(["TRANSACTION_MISSING"], json.string))],
+          )
+        Ok(Some(#(_, r))) if !r.can_start ->
+          err(
+            "OFFER_COMPLIANCE_BLOCKED",
+            "The transaction workspace does not currently permit an Offer.",
+            [#("blockers", json.array(r.blockers, json.string))],
+          )
+        Ok(Some(#(t, _))) ->
+          next(
+            Some(offers.Readiness(
+              transaction_id: id.transaction_to_string(t.row.id),
+              status: transaction_status.to_string(t.row.status),
+              at: now,
+            )),
+          )
       }
   }
 }
@@ -1685,6 +1776,7 @@ fn issue_write(
   recipient: recipients.Recipient,
   org: orgs.Row,
   key: Option(String),
+  readiness: Option(offers.Readiness),
   now: Int,
 ) -> Response {
   let prev_issued =
@@ -1708,6 +1800,7 @@ fn issue_write(
           at: now,
         ),
         option.map(prev_issued, fn(p) { p.row.id }),
+        readiness,
         by_staff(a),
         now,
       )

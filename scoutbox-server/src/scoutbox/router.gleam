@@ -8,6 +8,8 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import scoutbox/agents/core_routes as agent
+import scoutbox/agents/handoffs
+import scoutbox/agents/transaction_routes
 import scoutbox/app.{type Ctx}
 import scoutbox/development/combine
 import scoutbox/development/grassroots_club
@@ -905,6 +907,13 @@ fn agent_org(
   path: List(String),
 ) -> Response {
   case path {
+    ["transactions"] ->
+      only(req, Post, fn() { transaction_routes.create(ctx, req, org) })
+    ["transactions", tid, "notes"] ->
+      only(req, Post, fn() {
+        use req <- contract.rerun_on_stale(req)
+        transaction_routes.add_note(ctx, req, org, tid)
+      })
     ["me"] -> only(req, Get, fn() { agent.me(ctx, org) })
     ["home"] -> only(req, Get, fn() { agent.home(ctx, org) })
     ["profile"] ->
@@ -1179,6 +1188,10 @@ fn rooms(
     [rid, "offers"], Post -> {
       use req <- contract.rerun_on_stale(req)
       offer_routes.create(ctx, req, org, room(rid))
+    }
+    [rid, "transaction-handoff"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      handoffs.invite(ctx, req, org, room(rid))
     }
     [rid, "journey"], Get -> case_routes.journey(ctx, req, org, room(rid))
     [rid, "lifecycle"], Post ->
