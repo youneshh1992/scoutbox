@@ -7,6 +7,9 @@
 //   const F = openFixture(dir);          F.session({...}); F.insert('table', { column: value }); F.sql.prepare(…)
 //   F.transaction(() => …); F.close();
 //   writeFixture(dir, { sessions: [...], rows: { table: [{ column: value }] } })   one transaction, then closed
+//   plantCase(F, id, { ...legacyMoves(F, id, chain, { prefix }) })                  a case state no act writes
+//
+// Reading back what a server left: sqlRows.mjs.
 //
 // Synthetic data only; temporary directories only.
 import { createHash } from 'node:crypto';
@@ -102,6 +105,81 @@ export function openFixture(dataDir, { now = Date.now() } = {}) {
     close: () => sql.close(),
   };
   return F;
+}
+
+/**
+ * Plant a case state no act writes (a legacy status jump, a dangling link, a pruned history) on an open fixture `F`
+ * (`openFixture`): `status`, `stage`, `rev` and `signingId` set as given, `history` entries appended after the case's
+ * last, and the entries whose id `dropHistory(id)` holds removed. Returns the case's stored row. Test databases only.
+ */
+export function plantCase(F, id, { status, stage, rev, signingId, history = [], dropHistory = null } = {}) {
+  if (!F.sql.prepare('SELECT 1 FROM recruitment_cases WHERE id = ?').get(id))
+    throw new Error(`plantCase: no recruitment case ${id}`);
+  const cols = Object.entries({ room_status: status, stage, room_rev: rev, links_signing_id: signingId }).filter(
+    ([, v]) => v !== undefined,
+  );
+  if (cols.length)
+    F.sql
+      .prepare(`UPDATE recruitment_cases SET ${cols.map(([c]) => `${c} = ?`).join(', ')} WHERE id = ?`)
+      .run(...cols.map(([, v]) => v), id);
+  if (dropHistory)
+    for (const { id: hid } of F.sql.prepare('SELECT id FROM case_history WHERE case_id = ?').all(id))
+      if (dropHistory(hid)) F.sql.prepare('DELETE FROM case_history WHERE case_id = ? AND id = ?').run(id, hid);
+  const insert = F.sql.prepare(
+    'INSERT INTO case_history (case_id, position, id, at, action, by_kind, by_id, by_name, detail_text, detail_json) VALUES (?, (SELECT COALESCE(MAX(position) + 1, 0) FROM case_history WHERE case_id = ?), ?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  for (const h of history)
+    insert.run(
+      id,
+      id,
+      h.id,
+      h.at,
+      h.action,
+      h.byKind ?? null,
+      h.byId ?? null,
+      h.byName ?? null,
+      typeof h.detail === 'string' ? h.detail : null,
+      h.detail && typeof h.detail === 'object' ? JSON.stringify(h.detail) : null,
+    );
+  return F.sql.prepare('SELECT * FROM recruitment_cases WHERE id = ?').get(id);
+}
+
+/**
+ * A legacy status chain for case `id` on an open fixture `F`: the moves through `chain` as `room_status_changed`
+ * entries an hour apart (after the later of now and the case's newest entry), the last one carrying `extraLast`, and
+ * the status and rev they leave. Spread into `plantCase`. `now` defaults to the fixture's clock.
+ */
+export function legacyMoves(
+  F,
+  id,
+  chain,
+  { prefix, byName = 'Legacy', extraLast = {}, withReasons = true, now = Date.now() } = {},
+) {
+  const k = F.sql.prepare('SELECT room_status, room_rev FROM recruitment_cases WHERE id = ?').get(id);
+  if (!k) throw new Error(`legacyMoves: no recruitment case ${id}`);
+  const newest = F.sql.prepare('SELECT MAX(at) AS at FROM case_history WHERE case_id = ?').get(id).at;
+  let prev = k.room_status;
+  let at = Math.max(now, Number(newest) || 0);
+  const history = chain.map((to, i) => {
+    at += 3_600_000;
+    const h = {
+      id: `${prefix}-${Math.random().toString(36).slice(2, 8)}`,
+      at,
+      action: 'room_status_changed',
+      byKind: 'org',
+      byId: 'legacy',
+      byName,
+      detail: {
+        from: prev,
+        to,
+        ...(withReasons ? { reasonCodes: [] } : {}),
+        ...(i === chain.length - 1 ? extraLast : {}),
+      },
+    };
+    prev = to;
+    return h;
+  });
+  return { status: chain[chain.length - 1], rev: (k.room_rev ?? 1) + chain.length, history };
 }
 
 /** The collections `writeFixture` can write. */

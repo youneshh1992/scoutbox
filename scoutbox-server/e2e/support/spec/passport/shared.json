@@ -1,0 +1,25 @@
+{
+  "$source": "domains/passport/shared.mjs",
+  "PROVENANCE": [
+    "player_submitted",
+    "guardian_submitted",
+    "system_recorded",
+    "historical_migration",
+    "box_cam_observed",
+    "scoutbox_reviewed",
+    "verified_coach_confirmed",
+    "verified_club_confirmed",
+    "authoritative_registry"
+  ],
+  "PROVENANCE_COPY": {
+    "player_submitted": "Provided by the player. ScoutBox has not independently confirmed this item.",
+    "guardian_submitted": "Provided by the player’s guardian. ScoutBox has not independently confirmed this item.",
+    "system_recorded": "Recorded automatically by ScoutBox from platform activity.",
+    "historical_migration": "Carried forward from an earlier ScoutBox record.",
+    "scoutbox_reviewed": "Reviewed by ScoutBox Trust & Safety — a document review, not an independent register check.",
+    "verified_coach_confirmed": "Confirmed by a coach whose club affiliation was verified when they confirmed it.",
+    "verified_club_confirmed": "Confirmed by an authorised administrator of the named organisation.",
+    "authoritative_registry": "Confirmed against an authoritative registry.",
+    "box_cam_observed": "Recorded live through ScoutBox Box Cam. ScoutBox observed activity consistent with the selected supported drill — this describes observed training, not football ability."
+  }
+}

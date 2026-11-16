@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/package-lock.json", "!**/*.md"]
+    "includes": ["**", "!**/package-lock.json", "!**/*.md", "!scoutbox-server/e2e/support/spec"]
   },
   "formatter": {
     "enabled": true,

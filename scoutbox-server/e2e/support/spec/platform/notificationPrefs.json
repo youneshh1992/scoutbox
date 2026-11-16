@@ -1,0 +1,170 @@
+{
+  "$source": "domains/platform/notificationPrefs.mjs",
+  "CATEGORIES": {
+    "mentions": {
+      "label": "Mentions",
+      "default": true,
+      "mandatory": false
+    },
+    "assignments": {
+      "label": "Assignments and tasks",
+      "default": true,
+      "mandatory": false
+    },
+    "room_changes": {
+      "label": "Recruitment Room changes",
+      "default": true,
+      "mandatory": false
+    },
+    "evidence_requests": {
+      "label": "Evidence requests and evidence",
+      "default": true,
+      "mandatory": false
+    },
+    "combine": {
+      "label": "Combine requests and results",
+      "default": true,
+      "mandatory": false
+    },
+    "trial_updates": {
+      "label": "Trials and trial days",
+      "default": true,
+      "mandatory": false
+    },
+    "second_look": {
+      "label": "Second Look",
+      "default": true,
+      "mandatory": false
+    },
+    "brief_updates": {
+      "label": "Recruitment Briefs and coverage",
+      "default": true,
+      "mandatory": false
+    },
+    "messages": {
+      "label": "Messages and requests",
+      "default": true,
+      "mandatory": false
+    },
+    "activity": {
+      "label": "Recruitment outcomes and activity",
+      "default": true,
+      "mandatory": false
+    },
+    "discovery_nudges": {
+      "label": "Discovery nudges and badges",
+      "default": false,
+      "mandatory": false
+    },
+    "watchlist_changes": {
+      "label": "Dynamic Watchlist changes",
+      "default": true,
+      "mandatory": false
+    },
+    "development_updates": {
+      "label": "Development plans, goals and reviews",
+      "default": true,
+      "mandatory": false
+    },
+    "representation": {
+      "label": "Agent representation requests and changes",
+      "default": true,
+      "mandatory": false
+    },
+    "compliance": {
+      "label": "Regulatory review, consent and verification",
+      "default": true,
+      "mandatory": true
+    },
+    "transaction_updates": {
+      "label": "Transaction workspace activity",
+      "default": true,
+      "mandatory": false
+    },
+    "offer_updates": {
+      "label": "Offers and Offer answers",
+      "default": true,
+      "mandatory": false
+    },
+    "signing_updates": {
+      "label": "Signing workflow",
+      "default": true,
+      "mandatory": false
+    },
+    "security_account": {
+      "label": "Security and account",
+      "default": true,
+      "mandatory": true
+    }
+  },
+  "TYPE_CATEGORY": {
+    "recruitment_room": "room_changes",
+    "case": "room_changes",
+    "second_look": "second_look",
+    "coverage": "brief_updates",
+    "saved_search": "activity",
+    "watchlist": "watchlist_changes",
+    "development": "development_updates",
+    "evidence": "evidence_requests",
+    "evidence_request": "evidence_requests",
+    "passport": "evidence_requests",
+    "combine": "combine",
+    "box_cam": "combine",
+    "reassessment": "combine",
+    "badge": "discovery_nudges",
+    "level_up": "discovery_nudges",
+    "open_trial": "trial_updates",
+    "trial_day": "trial_updates",
+    "trial_report": "trial_updates",
+    "report_due": "trial_updates",
+    "matchday": "trial_updates",
+    "friendly": "trial_updates",
+    "squad_invite": "trial_updates",
+    "message": "messages",
+    "request": "messages",
+    "accepted": "messages",
+    "declined": "messages",
+    "guardian_decision": "messages",
+    "application": "messages",
+    "campaign": "messages",
+    "review_queue": "messages",
+    "feedback": "messages",
+    "vouch": "messages",
+    "group": "messages",
+    "update": "discovery_nudges",
+    "calibration": "discovery_nudges",
+    "outcome": "activity",
+    "signing": "activity",
+    "released": "activity",
+    "representation": "activity",
+    "representation_request": "representation",
+    "representation_confirmed": "representation",
+    "representation_rejected": "representation",
+    "representation_terminated": "representation",
+    "representation_disputed": "representation",
+    "representation_expiring": "representation",
+    "representation_disclosure": "representation",
+    "representation_contact": "representation",
+    "representation_opportunity": "messages",
+    "representation_transaction": "transaction_updates",
+    "agent_verification": "security_account",
+    "agency_membership": "security_account",
+    "regulatory_review_required": "compliance",
+    "regulatory_review_completed": "compliance",
+    "regulatory_consent_requested": "compliance",
+    "regulatory_consent_granted": "compliance",
+    "regulatory_consent_declined": "compliance",
+    "regulatory_consent_revoked": "compliance",
+    "agent_verification_stale": "compliance",
+    "agent_transaction": "transaction_updates",
+    "recruitment_offer": "offer_updates",
+    "recruitment_signing": "signing_updates",
+    "agent_transaction_action": "transaction_updates",
+    "agent_transaction_compliance": "compliance",
+    "transition": "security_account",
+    "verification": "security_account",
+    "aging_up": "security_account",
+    "support": "security_account",
+    "report_resolved": "security_account"
+  }
+}

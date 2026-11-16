@@ -1,0 +1,26 @@
+{
+  "$source": "domains/recruitment/signings/signing.mjs",
+  "SIGNING_CORRUPTION": [
+    "OFFER_REFERENCE_MISMATCH",
+    "CASE_REFERENCE_MISMATCH",
+    "OFFER_REVISION_MISMATCH",
+    "COMPLETED_BUT_CASE_NOT_SIGNED",
+    "COMPLETED_WITHOUT_ROW",
+    "DUPLICATE_SIGNING_ROWS",
+    "ROW_WITHOUT_COMPLETION",
+    "COMPLETION_ROW_MISMATCH"
+  ],
+  "SIGNING_INPUT_CODES": {
+    "codes": {
+      "FIELD_INVALID": "SIGNING_INPUT_INVALID"
+    },
+    "fieldCodes": {
+      "contract.*": "SIGNING_CONTRACT_DATES_INVALID",
+      "expiresAt": "SIGNING_EXPIRY_INVALID",
+      "dataUrl": "SIGNING_DOCUMENT_INVALID",
+      "method": "SIGNING_METHOD_UNKNOWN",
+      "expectedRev": "SIGNING_REV_REQUIRED",
+      "expectedVersion": "SIGNING_REV_REQUIRED"
+    }
+  }
+}

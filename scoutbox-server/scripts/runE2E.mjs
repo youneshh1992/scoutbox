@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runSuites } from './suiteRunner.mjs';
+import { boundaryReport } from './e2eBoundary.mjs';
 
 const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const E2E_DIR = path.join(SERVER_DIR, 'e2e');
@@ -94,6 +95,13 @@ if (missing.length) {
   console.error(
     `runE2E: BATTERIES lists ${missing.join(', ')}, which ${missing.length === 1 ? 'is' : 'are'} not in e2e/`,
   );
+  process.exit(2);
+}
+
+// The batteries are the specification for any server, so they may not reach into this one (e2e/support/boundary.mjs).
+const crossings = boundaryReport();
+if (crossings.length) {
+  for (const c of crossings) console.error(`runE2E: ${c}`);
   process.exit(2);
 }
 

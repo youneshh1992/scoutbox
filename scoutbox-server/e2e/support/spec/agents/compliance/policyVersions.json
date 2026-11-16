@@ -1,0 +1,982 @@
+{
+  "$source": "domains/agents/compliance/policyVersions.mjs",
+  "SEEDED_POLICY_VERSIONS": [
+    {
+      "id": "jp-fifa-2025-1",
+      "regulator": "FIFA",
+      "jurisdiction": "INT",
+      "policyVersion": 1,
+      "supersedes": null,
+      "effectiveFrom": "2025-01-01",
+      "effectiveTo": null,
+      "status": "published",
+      "publishedBy": [
+        {
+          "kind": "system",
+          "id": "migration-2306",
+          "name": "seeded from the regulatory snapshot (18 Sep 2026)"
+        }
+      ],
+      "rules": {
+        "FIFA-8.1": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "licenceRequired": true,
+            "licenceHolder": "natural_person"
+          },
+          "note": "A licence is issued to a natural person; strictly personal and non-transferable."
+        },
+        "FIFA-11.1": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "onlyLicensedAgentPerforms": true
+          },
+          "note": "Only a Football Agent may perform Football Agent Services. CJEU: the licence requirement \"may be justified\"."
+        },
+        "FIFA-11.3": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "agencyStaffMayNotApproach": true
+          },
+          "note": "Agency employees who are not Football Agents may not perform services or make any Approach."
+        },
+        "FIFA-12.2": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "onlyLicensedAgentApproaches": true
+          },
+          "note": "Only a Football Agent may Approach a potential Client."
+        },
+        "FIFA-12.3": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "maxTermMonthsIndividual": 24
+          },
+          "note": "Two-year maximum for agreements with Individuals; automatic renewal void."
+        },
+        "FIFA-12.4": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "oneAgreementPerPair": true,
+            "legalAdviceNotice": true
+          },
+          "note": null
+        },
+        "FIFA-12.8": {
+          "ruleStatus": "UNDER_LEGAL_REVIEW",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA Circular no. 1873 — update on implementation",
+              "version": "30 Dec 2023",
+              "effectiveDate": "2023-12-30",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA statement welcoming the CJEU decision",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA agents FAQ",
+              "version": "last updated 23 Jan 2025",
+              "effectiveDate": "2025-01-23",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "permittedSets": [
+              [
+                "individual",
+                "engaging_entity"
+              ]
+            ],
+            "consentKind": "dual_representation",
+            "consentInAdvance": true
+          },
+          "note": "Circular 1873 (30 Dec 2023) suspended enforcement \"until the European Court of Justice renders a final decision\"; the CJEU decided C-209/23 on 16 Jul 2026 and referred proportionality to the national court; FIFA has issued no instrument since. The operative status is not conclusively established (L-1, DR-46). The engine returns MANUAL_REGULATORY_REVIEW_REQUIRED wherever this rule would decide an outcome and no national ACTIVE entry applies.",
+          "overrides": [
+            {
+              "jurisdiction": "ENG",
+              "scope": "national",
+              "overrideRuleId": "ENG-6.3"
+            }
+          ]
+        },
+        "FIFA-12.9": {
+          "ruleStatus": "UNDER_LEGAL_REVIEW",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA Circular no. 1873 — update on implementation",
+              "version": "30 Dec 2023",
+              "effectiveDate": "2023-12-30",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA statement welcoming the CJEU decision",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA agents FAQ",
+              "version": "last updated 23 Jan 2025",
+              "effectiveDate": "2025-01-23",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "prohibitedWith": "releasing_entity"
+          },
+          "note": "Circular 1873 (30 Dec 2023) suspended enforcement \"until the European Court of Justice renders a final decision\"; the CJEU decided C-209/23 on 16 Jul 2026 and referred proportionality to the national court; FIFA has issued no instrument since. The operative status is not conclusively established (L-1, DR-46). The engine returns MANUAL_REGULATORY_REVIEW_REQUIRED wherever this rule would decide an outcome and no national ACTIVE entry applies.",
+          "overrides": [
+            {
+              "jurisdiction": "ENG",
+              "scope": "national",
+              "overrideRuleId": "ENG-6.4"
+            }
+          ]
+        },
+        "FIFA-12.10": {
+          "ruleStatus": "UNDER_LEGAL_REVIEW",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA Circular no. 1873 — update on implementation",
+              "version": "30 Dec 2023",
+              "effectiveDate": "2023-12-30",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA statement welcoming the CJEU decision",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "connectedAgentsAreOne": true,
+            "sameAgencyConnected": true
+          },
+          "note": "Circular 1873 (30 Dec 2023) suspended enforcement \"until the European Court of Justice renders a final decision\"; the CJEU decided C-209/23 on 16 Jul 2026 and referred proportionality to the national court; FIFA has issued no instrument since. The operative status is not conclusively established (L-1, DR-46). The engine returns MANUAL_REGULATORY_REVIEW_REQUIRED wherever this rule would decide an outcome and no national ACTIVE entry applies.",
+          "overrides": [
+            {
+              "jurisdiction": "ENG",
+              "scope": "national",
+              "overrideRuleId": "ENG-6.5"
+            }
+          ]
+        },
+        "FIFA-13.1": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "formula": "six_months_before_first_contract_age",
+            "firstContractAge": {},
+            "guardianConsentBeforeApproach": true
+          },
+          "note": "The first-professional-contract age is the employing country's law and is NOT encoded for any country (L-6): the parameter is UNKNOWN → INSUFFICIENT_DATA."
+        },
+        "FIFA-13.2": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA agents FAQ",
+              "version": "last updated 23 Jan 2025",
+              "effectiveDate": "2025-01-23",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "minorsAccreditationRequired": true,
+            "validityYears": 3
+          },
+          "note": null
+        },
+        "FIFA-14.2": {
+          "ruleStatus": "UNDER_LEGAL_REVIEW",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA Circular no. 1873 — update on implementation",
+              "version": "30 Dec 2023",
+              "effectiveDate": "2023-12-30",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true
+          },
+          "note": "Client-pays and the fee framework; no fee rule is enforced by ScoutBox (P-5)."
+        },
+        "FIFA-14.9": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true,
+            "noFeeForMinorWithoutProContract": true
+          },
+          "note": null
+        },
+        "FIFA-15.1": {
+          "ruleStatus": "UNDER_LEGAL_REVIEW",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA Circular no. 1873 — update on implementation",
+              "version": "30 Dec 2023",
+              "effectiveDate": "2023-12-30",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true
+          },
+          "note": "Fee caps. Never validated (DR-31)."
+        },
+        "FIFA-15.3": {
+          "ruleStatus": "UNDER_LEGAL_REVIEW",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA Circular no. 1873 — update on implementation",
+              "version": "30 Dec 2023",
+              "effectiveDate": "2023-12-30",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "otherServicesPresumptionMonths": 24
+          },
+          "note": "Other Services presumption: review, never prohibit (DR-34)."
+        },
+        "FIFA-16.1b": {
+          "ruleStatus": "UNDER_LEGAL_REVIEW",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "exclusivityWindowMonths": 2
+          },
+          "note": "CJEU: the exclusive-agreement approach window \"appears … incompatible with the prohibition on cartels\". Manual review, never a hard block (DR-33)."
+        },
+        "FIFA-16.2c": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true,
+            "discloseConflicts": true
+          },
+          "note": null
+        },
+        "FIFA-19": {
+          "ruleStatus": "SUSPENDED",
+          "textStatus": "CURRENT_BUT_SUSPENDED",
+          "sourceRef": [
+            {
+              "source": "FIFA Football Agent Regulations (FFAR)",
+              "version": "edition approved 10 Dec 2024",
+              "effectiveDate": "2025-01-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "FIFA Circular no. 1873 — update on implementation",
+              "version": "30 Dec 2023",
+              "effectiveDate": "2023-12-30",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true
+          },
+          "note": "Publication suspended by Circular 1873 and constrained by the GDPR per the CJEU; ScoutBox publishes nothing."
+        },
+        "FIFA-RSTP-2027": {
+          "ruleStatus": "PENDING_IMPLEMENTATION",
+          "textStatus": "ANNOUNCED",
+          "sourceRef": [
+            {
+              "source": "FIFA Bureau of the Council — new regulatory framework for the transfer system",
+              "version": "10 Jun 2026",
+              "effectiveDate": "2027-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "effectiveFrom": "2027-01-01"
+          },
+          "note": "Announced regulatory framework in force 1 Jan 2027; no agent-regulation content published. Never applied before its effective date.",
+          "effectiveFrom": "2027-01-01"
+        }
+      }
+    },
+    {
+      "id": "jp-eng-2026-27-1",
+      "regulator": "FA",
+      "jurisdiction": "ENG",
+      "policyVersion": 1,
+      "supersedes": null,
+      "effectiveFrom": "2026-06-01",
+      "effectiveTo": null,
+      "status": "published",
+      "publishedBy": [
+        {
+          "kind": "system",
+          "id": "migration-2306",
+          "name": "seeded from the regulatory snapshot (18 Sep 2026)"
+        }
+      ],
+      "rules": {
+        "ENG-2.1": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "nationalRegistrationRequired": true,
+            "requiresFifaLicence": true
+          },
+          "note": "Before any regulated conduct an agent must be an FA Registered Football Agent; registration requires a FIFA licence."
+        },
+        "ENG-2.10": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "cascadeFromFifaLicence": true
+          },
+          "note": "FIFA licence suspended or withdrawn → FA registration automatically suspended or withdrawn."
+        },
+        "ENG-3.1": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "onlyRegisteredAgentPerforms": true
+          },
+          "note": null
+        },
+        "ENG-3.3": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "agencyStaffMayNotApproach": true
+          },
+          "note": null
+        },
+        "ENG-4.1b": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "agencyPartyColleaguePerformance": true,
+            "consentKind": "agency_performance",
+            "productionEnabled": false,
+            "pendingLegalReview": "L-9"
+          },
+          "note": "A licensed, FA-registered colleague may perform under an agency-party agreement with all parties' written consent. Modelled; DISABLED in production until L-9 (DR-45)."
+        },
+        "ENG-4.3": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "maxTermMonthsIndividual": 24
+          },
+          "note": null
+        },
+        "ENG-4.4": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "oneAgreementPerPair": true
+          },
+          "note": null
+        },
+        "ENG-4.5": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "legalAdviceNotice": true,
+            "pfaLmaNotice": true
+          },
+          "note": null
+        },
+        "ENG-5.1": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "formula": "academic_year_16",
+            "academicYearStart": "09-01",
+            "guardianConsentBeforeApproach": true,
+            "coversIndirectApproach": true
+          },
+          "note": "Not before 1 September in the Academic Year in which the Minor reaches 16; prior written guardian consent before any Approach or agreement. England's formula only; never generalised (DR-48)."
+        },
+        "ENG-5.2": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA — FA Registered Football Agent criminal record check process",
+              "version": "undated, current",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "minorsAuthorisationRequired": true,
+            "validityYears": 3,
+            "enhancedDbsWithinMonths": 3
+          },
+          "note": "Additional authorisation to deal with Minors from The FA; suitability incl. enhanced DBS; valid three years; automatic suspension on lapse."
+        },
+        "ENG-6.3": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "permittedMultiple": true,
+            "excludedRole": "releasing_entity",
+            "consentKind": "dual_representation",
+            "consentInAdvance": true,
+            "fullParticularsRequired": true,
+            "legalAdviceOfferRequired": true,
+            "prescribedForm": "AF1 at completion constitutes written consent"
+          },
+          "note": "Permitted dual OR multiple representation with four safeguards (all parties' prior written consent; full particulars incl. fees; opportunity for independent legal advice; express written consent on the proposed terms)."
+        },
+        "ENG-6.4": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "prohibitedWith": "releasing_entity"
+          },
+          "note": "When acting for a Releasing Club the agent may perform services for no other party in the same National Transaction."
+        },
+        "ENG-6.5": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "connectedAgentsAreOne": true,
+            "sameAgencyConnected": true
+          },
+          "note": "An agent and a Connected Football Agent may not act for different parties in the same National Transaction except under 6.3."
+        },
+        "ENG-7.2": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true
+          },
+          "note": "Client pays (with the USD 200,000 engaging-club exception, 7.3). Recorded, never enforced (DR-31)."
+        },
+        "ENG-7.10": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true,
+            "noFeeForMinorWithoutProContract": true
+          },
+          "note": null
+        },
+        "ENG-7.13": {
+          "ruleStatus": "PARTIALLY_SUSPENDED",
+          "textStatus": "CURRENT_WITH_PARTIAL_SUSPENSION",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true,
+            "activeLimbs": []
+          },
+          "note": "Clearing House: not covered by the 2026-27 Guidance, likely shaded (L-7). No payment channel exists."
+        },
+        "ENG-8.1b": {
+          "ruleStatus": "UNDER_LEGAL_REVIEW",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "CJEU press release 110/26, judgment C-209/23 RRC Sports",
+              "version": "16 Jul 2026",
+              "effectiveDate": "2026-07-16",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "exclusivityWindowMonths": 2
+          },
+          "note": "Exclusive-agreement approach window: in the 2026-27 text; doubtful after the CJEU judgment (L-2). Manual review, never a hard block."
+        },
+        "ENG-8.3g": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "The FA Football Agent Regulations 2026-27 (Handbook, Rules of The Association s.17)",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            },
+            {
+              "source": "The FA Football Agent Regulations Guidance 2026-27",
+              "version": "2026-27",
+              "effectiveDate": "2026-06-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "informational": true,
+            "lodgeWithinDays": 14
+          },
+          "note": "Lodging duties. ScoutBox keeps records; it does not file (L-16)."
+        }
+      }
+    },
+    {
+      "id": "jp-usa-2024-1",
+      "regulator": "USSF",
+      "jurisdiction": "USA",
+      "policyVersion": 1,
+      "supersedes": null,
+      "effectiveFrom": "2024-01-01",
+      "effectiveTo": null,
+      "status": "published",
+      "publishedBy": [
+        {
+          "kind": "system",
+          "id": "migration-2306",
+          "name": "seeded from the regulatory snapshot (18 Sep 2026)"
+        }
+      ],
+      "rules": {
+        "USA-LIC": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "U.S. Soccer — Player Agents",
+              "version": "read 18 Sep 2026",
+              "effectiveDate": "2024-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "licenceRequired": true
+          },
+          "note": "Effective 1 Jan 2024 U.S. Soccer enforces the FFAR; any agent in its jurisdiction must be FIFA-licensed."
+        },
+        "USA-BGC": {
+          "ruleStatus": "ACTIVE",
+          "textStatus": "CURRENT",
+          "sourceRef": [
+            {
+              "source": "U.S. Soccer — Player Agents",
+              "version": "read 18 Sep 2026",
+              "effectiveDate": "2024-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {
+            "domesticAuthorisationRequired": true,
+            "kind": "background_check_safesport"
+          },
+          "note": "Background check and SafeSport training required for all agents operating in the United States; scope is a counsel item (R-U2)."
+        },
+        "USA-MULTI": {
+          "ruleStatus": "UNKNOWN",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "U.S. Soccer — Player Agents",
+              "version": "read 18 Sep 2026",
+              "effectiveDate": "2024-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {},
+          "note": "No U.S. Soccer national regulations text was located; multiple-representation rules are not encoded."
+        },
+        "USA-MINOR": {
+          "ruleStatus": "UNKNOWN",
+          "textStatus": "UNCERTAIN_OPERATIVE_STATUS",
+          "sourceRef": [
+            {
+              "source": "U.S. Soccer — Player Agents",
+              "version": "read 18 Sep 2026",
+              "effectiveDate": "2024-01-01",
+              "retrievedDate": "2026-09-18"
+            }
+          ],
+          "params": {},
+          "note": "No minors approach timing or first-contract age was located (L-8). Any U.S. minors pathway is INSUFFICIENT_DATA → refused."
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "$source": "domains/recruitment/lifecycle/evidence.mjs",
+  "EVIDENCE_KINDS": [
+    "contact_delivered",
+    "trial_invited",
+    "decision_progress",
+    "trial_confirmed",
+    "trial_completed",
+    "offer_sent",
+    "offer_accepted_by_recipient",
+    "offer_declined_by_recipient",
+    "confirmed_join"
+  ]
+}

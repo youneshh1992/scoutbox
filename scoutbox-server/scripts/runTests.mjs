@@ -5,6 +5,7 @@
 //
 //   npm test                          every suite, TEST_JOBS at a time (default: up to 4)
 //   npm test -- testOrgs testSessions only those suites
+//   npm test -- rules/agents          the rules suites of one domain (scripts/rules/, below)
 //   TEST_JOBS=1 npm test              one at a time, in list order
 //   TEST_VERBOSE=1 npm test           print every suite's whole log, not just the failures'
 //
@@ -90,6 +91,7 @@ export const SUITES = [
   'testDeps',
   'testSuiteRunner',
   'testSqlFixtureSchema',
+  'testE2ESupport',
 ];
 // Files named test*.mjs that are helpers, not suites. Any other test*.mjs must
 // be in SUITES: a new suite that nobody listed would otherwise never run.
@@ -108,17 +110,34 @@ if (unlisted.length) {
   process.exit(2);
 }
 
-const requested = process.argv.slice(2).map((a) => path.basename(a, '.mjs'));
-const unknown = requested.filter((n) => !SUITES.includes(n));
+// The rules suites: a battery's checks of the server's own rules, run in this process rather than over HTTP, in
+// scripts/rules/<domain>/<battery>.mjs. Each runs as `rules/<domain>/<battery>`; every file there is a suite.
+const RULES_DIR = path.join(HERE, 'rules');
+const RULES = fs.existsSync(RULES_DIR)
+  ? fs
+      .readdirSync(RULES_DIR, { recursive: true })
+      .filter((f) => f.endsWith('.mjs'))
+      .map((f) => `rules/${f.slice(0, -4).split(path.sep).join('/')}`)
+      .sort()
+  : [];
+const fileOf = (name) => path.join(HERE, `${name}.mjs`);
+
+const requested = process.argv
+  .slice(2)
+  .map((a) => a.replace(/^(\.\/)?(scripts\/)?/, '').replace(/\.mjs$/, ''))
+  .map((a) => (a.startsWith('rules/') ? a : path.basename(a)));
+const matches = (n, r) => n === r || (r.startsWith('rules') && n.startsWith(`${r}/`));
+const all = [...SUITES, ...RULES];
+const unknown = requested.filter((r) => !all.some((n) => matches(n, r)));
 if (unknown.length) {
   console.error(`runTests: not a unit suite: ${unknown.join(', ')}`);
   process.exit(2);
 }
-const queue = requested.length ? SUITES.filter((n) => requested.includes(n)) : [...SUITES];
+const queue = requested.length ? all.filter((n) => requested.some((r) => matches(n, r))) : all;
 
 await runSuites({
   label: 'unit suite',
   tool: 'runTests',
   timeoutMs: SUITE_TIMEOUT_MS,
-  entries: queue.map((name) => ({ name, file: path.join(HERE, `${name}.mjs`) })),
+  entries: queue.map((name) => ({ name, file: fileOf(name) })),
 });
