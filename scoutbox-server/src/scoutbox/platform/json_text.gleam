@@ -169,3 +169,44 @@ pub fn number(f: Float) -> Json {
     False -> json.float(f)
   }
 }
+
+/// A stored JSON object's top-level entries, in the order written: each key, its value, and the value's own text.
+pub fn entries(text: String) -> Result(List(#(String, Json, String)), Nil) {
+  case skip(text) {
+    "{" <> r -> entries_loop(skip(r), [])
+    _ -> Error(Nil)
+  }
+}
+
+fn entries_loop(
+  s: String,
+  acc: List(#(String, Json, String)),
+) -> Result(List(#(String, Json, String)), Nil) {
+  case s, acc {
+    "}" <> r, [] ->
+      case skip(r) {
+        "" -> Ok([])
+        _ -> Error(Nil)
+      }
+    "\"" <> r, _ -> {
+      use #(key, rest) <- result.try(string_body(r, ""))
+      use rest <- result.try(case skip(rest) {
+        ":" <> r -> Ok(skip(r))
+        _ -> Error(Nil)
+      })
+      use #(v, after) <- result.try(value(rest))
+      let raw = string.drop_end(rest, string.length(after))
+      let acc = [#(key, v, raw), ..acc]
+      case skip(after) {
+        "," <> r -> entries_loop(skip(r), acc)
+        "}" <> r ->
+          case skip(r) {
+            "" -> Ok(list.reverse(acc))
+            _ -> Error(Nil)
+          }
+        _ -> Error(Nil)
+      }
+    }
+    _, _ -> Error(Nil)
+  }
+}

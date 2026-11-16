@@ -14,4 +14,5 @@ export const BATTERIES = [
   'platform/sessionsAndPorts',
   'recruitment/rooms',
   'recruitment/decisionsPersistence',
+  'agents/core',
 ];

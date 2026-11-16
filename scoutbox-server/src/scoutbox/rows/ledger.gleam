@@ -299,7 +299,7 @@ pub type Row {
     detail_trial_id: Option(String),
     detail_via: Option(String),
     detail_mode: Option(String),
-    detail_share_id: Option(String),
+    detail_share_id: Option(id.OpportunityShareId),
     detail_claim_id: Option(id.ClaimId),
     detail_action: Option(String),
     detail_root_request_id: Option(id.RootRequestId),
@@ -339,7 +339,7 @@ pub type New {
     detail_trial_id: Option(String),
     detail_via: Option(String),
     detail_mode: Option(String),
-    detail_share_id: Option(String),
+    detail_share_id: Option(id.OpportunityShareId),
     detail_claim_id: Option(id.ClaimId),
     detail_action: Option(String),
     detail_root_request_id: Option(id.RootRequestId),
@@ -426,7 +426,10 @@ pub fn decoder() -> decode.Decoder(Row) {
   use detail_trial_id <- decode.field(28, decode.optional(decode.string))
   use detail_via <- decode.field(29, decode.optional(decode.string))
   use detail_mode <- decode.field(30, decode.optional(decode.string))
-  use detail_share_id <- decode.field(31, decode.optional(decode.string))
+  use detail_share_id <- decode.field(
+    31,
+    decode.optional(id.opportunity_share_decoder()),
+  )
   use detail_claim_id <- decode.field(32, decode.optional(id.claim_decoder()))
   use detail_action <- decode.field(33, decode.optional(decode.string))
   use detail_root_request_id <- decode.field(
@@ -508,7 +511,7 @@ pub fn values(row: New) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.detail_trial_id),
     sqlight.nullable(sqlight.text, row.detail_via),
     sqlight.nullable(sqlight.text, row.detail_mode),
-    sqlight.nullable(sqlight.text, row.detail_share_id),
+    sqlight.nullable(id.opportunity_share_sql, row.detail_share_id),
     sqlight.nullable(id.claim_sql, row.detail_claim_id),
     sqlight.nullable(sqlight.text, row.detail_action),
     sqlight.nullable(id.root_request_sql, row.detail_root_request_id),

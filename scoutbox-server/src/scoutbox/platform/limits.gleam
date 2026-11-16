@@ -51,6 +51,11 @@ pub const policy = [
   #("offer_issue", offer_issue_policy),
   #("offer_withdraw", offer_withdraw_policy),
   #("offer_response", offer_response_policy),
+  #("agent_representation_request", agent_representation_request_policy),
+  #("agent_player_lookup", agent_player_lookup_policy),
+  #("agent_profile_write", agent_profile_write_policy),
+  #("agent_affiliation_write", agent_affiliation_write_policy),
+  #("agent_client_response", agent_client_response_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -75,6 +80,16 @@ pub type Action {
   OfferWithdraw
   /// Offer acceptances and declines, per player or guardian answering.
   OfferResponse
+  /// Representation requests that reach a player lookup, per agent.
+  AgentRepresentationRequest
+  /// Player lookups from the Agent workspace, per agent.
+  AgentPlayerLookup
+  /// Agent profile edits and verification submissions, per agent.
+  AgentProfileWrite
+  /// Agency team and settings changes, per agency.
+  AgentAffiliationWrite
+  /// Relationship confirmations, declines, terminations and disputes, per player.
+  AgentClientResponse
 }
 
 const email_challenge_request_policy = Policy(max: 5, window_ms: 3_600_000)
@@ -97,6 +112,17 @@ const offer_withdraw_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const offer_response_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const agent_representation_request_policy =
+  Policy(max: 40, window_ms: 86_400_000)
+
+const agent_player_lookup_policy = Policy(max: 120, window_ms: 3_600_000)
+
+const agent_profile_write_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const agent_affiliation_write_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const agent_client_response_policy = Policy(max: 30, window_ms: 3_600_000)
+
 fn action_name(action: Action) -> String {
   case action {
     EmailChallengeRequest -> "email_challenge_request"
@@ -109,6 +135,11 @@ fn action_name(action: Action) -> String {
     OfferIssue -> "offer_issue"
     OfferWithdraw -> "offer_withdraw"
     OfferResponse -> "offer_response"
+    AgentRepresentationRequest -> "agent_representation_request"
+    AgentPlayerLookup -> "agent_player_lookup"
+    AgentProfileWrite -> "agent_profile_write"
+    AgentAffiliationWrite -> "agent_affiliation_write"
+    AgentClientResponse -> "agent_client_response"
   }
 }
 
@@ -124,6 +155,11 @@ fn action_policy(action: Action) -> Policy {
     OfferIssue -> offer_issue_policy
     OfferWithdraw -> offer_withdraw_policy
     OfferResponse -> offer_response_policy
+    AgentRepresentationRequest -> agent_representation_request_policy
+    AgentPlayerLookup -> agent_player_lookup_policy
+    AgentProfileWrite -> agent_profile_write_policy
+    AgentAffiliationWrite -> agent_affiliation_write_policy
+    AgentClientResponse -> agent_client_response_policy
   }
 }
 

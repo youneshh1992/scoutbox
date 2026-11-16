@@ -7,6 +7,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
+import scoutbox/agents/core_routes as agent
 import scoutbox/app.{type Ctx}
 import scoutbox/development/combine
 import scoutbox/development/grassroots_club
@@ -15,8 +16,10 @@ import scoutbox/discovery/directory
 import scoutbox/discovery/player_routes as discovery
 import scoutbox/discovery/saved_searches
 import scoutbox/enterprise/audit_export
+import scoutbox/enterprise/org_audit
 import scoutbox/enterprise/support
 import scoutbox/identity/access.{type OrgAccess}
+import scoutbox/identity/erasure
 import scoutbox/identity/guardian_routes
 import scoutbox/identity/invite_routes
 import scoutbox/identity/mfa_routes
@@ -59,6 +62,7 @@ import scoutbox/rows/ver_claims as claim_row
 import scoutbox/safety/admin
 import scoutbox/safety/console_routes as console
 import scoutbox/safety/report_routes
+import scoutbox/scouting/board_routes
 import scoutbox/scouting/evidence
 import scoutbox/verification/applications
 import scoutbox/verification/club_checks
@@ -135,6 +139,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["verification", ..path] -> verification_org(ctx, req, org, path)
         ["rooms", ..path] -> rooms(ctx, req, org, path)
+        ["agent", ..path] -> agent_org(ctx, req, org, path)
         ["offers", oid] ->
           only(req, Get, fn() { offer_routes.get(ctx, req, org, oid) })
         ["offers", oid, "history"] ->
@@ -154,6 +159,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["signings"] -> only(req, Get, fn() { signings.org_page() })
         ["transitions"] ->
           only(req, Get, fn() { transitions.org_list(ctx, org.org.id) })
+        ["audit"] -> only(req, Get, fn() { org_audit.feed(ctx, req, org) })
         ["audit", "export"] ->
           only(req, Get, fn() { audit_export.export(ctx, org) })
         ["staff"] -> only(req, Get, fn() { staff_routes.list(ctx, org) })
@@ -300,6 +306,30 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["player", ..rest] -> {
       use player <- access.player_session(ctx, req)
       case rest {
+        ["agent", "relationships"] ->
+          only(req, Get, fn() { agent.my_agent(ctx, player) })
+        ["agent", "relationships", rid, "confirm"] ->
+          only(req, Post, fn() {
+            agent.answer(ctx, req, player, rid, agent.Confirm)
+          })
+        ["agent", "relationships", rid, "decline"] ->
+          only(req, Post, fn() {
+            agent.answer(ctx, req, player, rid, agent.Decline)
+          })
+        ["agent", "relationships", rid, "terminate"] ->
+          only(req, Post, fn() {
+            agent.answer(ctx, req, player, rid, agent.End)
+          })
+        ["agent", "relationships", rid, "dispute"] ->
+          only(req, Post, fn() {
+            agent.answer(ctx, req, player, rid, agent.Dispute)
+          })
+        ["agent", "relationships", rid, "sharing"] ->
+          only(req, Patch, fn() { agent.sharing(ctx, req, player, rid) })
+        ["account"] ->
+          only(req, Delete, fn() { erasure.delete_account(ctx, player) })
+        ["opportunity-board"] ->
+          only(req, Get, fn() { board_routes.player_board(ctx, req, player) })
         ["offers"] ->
           only(req, Get, fn() {
             offer_routes.list_for(
@@ -647,6 +677,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       use <- access.admin(ctx, req)
       case rest {
         ["verification", ..path] -> verification_admin(ctx, req, path)
+        ["agent", "relationships"] ->
+          only(req, Get, fn() { agent.admin_relationships(ctx, req) })
+        ["agent", "profiles"] ->
+          only(req, Get, fn() { agent.admin_profiles(ctx, req) })
         ["outbox"] -> only(req, Get, fn() { admin.outbox(ctx, req) })
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
@@ -843,6 +877,56 @@ fn only(
   case req.method == method {
     True -> handler()
     False -> not_found()
+  }
+}
+
+/// The Agent workspace (`/org/agent/…`).
+fn agent_org(
+  ctx: Ctx,
+  req: Request,
+  org: OrgAccess,
+  path: List(String),
+) -> Response {
+  case path {
+    ["me"] -> only(req, Get, fn() { agent.me(ctx, org) })
+    ["home"] -> only(req, Get, fn() { agent.home(ctx, org) })
+    ["profile"] ->
+      case req.method {
+        Get -> agent.profile(ctx, org)
+        Post -> agent.save_profile(ctx, req, org)
+        _ -> not_found()
+      }
+    ["profile", "facets", facet, "submit"] ->
+      only(req, Post, fn() { agent.submit_facet(ctx, req, org, facet) })
+    ["agency"] -> only(req, Get, fn() { agent.agency(ctx, org) })
+    ["agency", "team"] ->
+      case req.method {
+        Get -> agent.team(ctx, org)
+        Post -> agent.add_member(ctx, req, org)
+        _ -> not_found()
+      }
+    ["agency", "team", user_id] ->
+      only(req, Patch, fn() { agent.set_member_tiers(ctx, req, org, user_id) })
+    ["agency", "team", user_id, "end"] ->
+      only(req, Post, fn() { agent.end_member(ctx, req, org, user_id) })
+    ["agency", "settings"] ->
+      only(req, Patch, fn() { agent.save_settings(ctx, req, org) })
+    ["agency", "compliance"] ->
+      only(req, Get, fn() { agent.compliance(ctx, org) })
+    ["agency", "audit"] ->
+      only(req, Get, fn() { agent.agency_audit(ctx, req, org) })
+    ["players"] -> only(req, Get, fn() { agent.players_lookup(ctx, req, org) })
+    ["clients"] -> only(req, Get, fn() { agent.clients(ctx, org) })
+    ["clients", "request"] ->
+      only(req, Post, fn() { agent.request(ctx, req, org) })
+    ["clients", rid] -> only(req, Get, fn() { agent.client(ctx, org, rid) })
+    ["clients", rid, "terminate"] ->
+      only(req, Post, fn() { agent.terminate(ctx, req, org, rid) })
+    ["clients", rid, "opportunities"] ->
+      only(req, Get, fn() { agent.client_opportunities(ctx, org, rid) })
+    ["opportunities"] -> only(req, Get, fn() { agent.opportunities(ctx, org) })
+    ["inbox"] -> only(req, Get, fn() { agent.inbox(ctx, org) })
+    _ -> not_found()
   }
 }
 

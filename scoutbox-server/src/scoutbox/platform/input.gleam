@@ -34,6 +34,7 @@ pub type Problem {
   Required
   UnknownField
   NotObject
+  NotList
   NotText
   NotBoolean
   NotNumber
@@ -54,6 +55,7 @@ pub fn problem_name(problem: Problem) -> String {
     Required -> "required"
     UnknownField -> "unknown_field"
     NotObject -> "not_object"
+    NotList -> "not_list"
     NotText -> "not_text"
     NotBoolean -> "not_boolean"
     NotNumber -> "not_number"
@@ -442,7 +444,7 @@ pub fn boolean() -> Check(Bool) {
 pub fn list_of(item: Check(a), max: Int) -> Check(List(a)) {
   fn(v) {
     case decode.run(v, decode.list(decode.dynamic)) {
-      Error(_) -> Error(issue(Invalid, "must be a list"))
+      Error(_) -> Error(issue(NotList, "must be a list"))
       Ok(items) ->
         case list.length(items) > max {
           True ->
@@ -737,7 +739,7 @@ fn path(field: String, inner: String) -> String {
 pub fn items(item: Check(a), max: Int) -> Check(List(a)) {
   fn(v) {
     case decode.run(v, decode.list(decode.dynamic)) {
-      Error(_) -> Error(issue(Invalid, "must be a list"))
+      Error(_) -> Error(issue(NotList, "must be a list"))
       Ok(values) ->
         case list.length(values) > max {
           True ->
@@ -769,6 +771,36 @@ pub fn items(item: Check(a), max: Int) -> Check(List(a)) {
                 }
               }
             })
+        }
+    }
+  }
+}
+
+/// A list of distinct values, each passing `item` (refused naming the item), with at least `min` of them:
+/// schemas.mjs `distinctList`.
+pub fn distinct_list(item: Check(a), min: Int) -> Check(List(a)) {
+  let all = items(item, 1_000_000)
+  fn(v) {
+    case all(v) {
+      Error(e) -> Error(e)
+      Ok(values) ->
+        case
+          list.length(values) < min,
+          list.length(list.unique(values)) != list.length(values)
+        {
+          True, _ ->
+            Error(
+              Issue(
+                ..issue(TooShort, case min {
+                  1 -> "must not be empty"
+                  _ ->
+                    "must be at least " <> int.to_string(min) <> " items long"
+                }),
+                min: Some(min),
+              ),
+            )
+          False, True -> Error(issue(Invalid, "must not name a value twice"))
+          False, False -> Ok(values)
         }
     }
   }

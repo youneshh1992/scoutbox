@@ -14,6 +14,37 @@ pub type Event {
   Typing(channel_id: String, side: TypingSide)
   /// A notice reached an audience's feed.
   Notify(audience_kind: Audience, audience_id: String)
+  /// An agent profile was created. Private to the agency.
+  AgentProfileCreated(org_id: String, user_id: String)
+  /// An agent's verification facet changed state. Private to the agency.
+  AgentVerificationStateChanged(
+    org_id: String,
+    user_id: String,
+    facet: String,
+    state: String,
+  )
+  /// A member joined the agency. Private to the agency.
+  AgencyAffiliationCreated(org_id: String, user_id: String)
+  /// A member's membership ended. Private to the agency.
+  AgencyAffiliationEnded(org_id: String, user_id: String)
+  /// A representation relationship changed (each change is its own registry entry). Private to the agency.
+  Representation(
+    change: RepresentationChange,
+    org_id: String,
+    agreement_id: String,
+    agent_user_id: String,
+  )
+  /// A regulatory review item was opened. Private to the agency.
+  RegulatoryReviewRequested(org_id: String, review_id: String, kind: String)
+}
+
+pub type RepresentationChange {
+  RepresentationRequested
+  RepresentationConfirmed
+  RepresentationRejected
+  RepresentationTerminated
+  RepresentationDisputed
+  RepresentationDisclosureChanged
 }
 
 pub type TypingSide {
@@ -26,10 +57,37 @@ pub fn name(event: Event) -> String {
     Messages(..) -> "messages"
     Typing(..) -> "typing"
     Notify(..) -> "notify"
+    AgentProfileCreated(..) -> "agent_profile_created"
+    AgentVerificationStateChanged(..) -> "agent_verification_state_changed"
+    AgencyAffiliationCreated(..) -> "agency_affiliation_created"
+    AgencyAffiliationEnded(..) -> "agency_affiliation_ended"
+    Representation(change:, ..) ->
+      case change {
+        RepresentationRequested -> "representation_requested"
+        RepresentationConfirmed -> "representation_confirmed"
+        RepresentationRejected -> "representation_rejected"
+        RepresentationTerminated -> "representation_terminated"
+        RepresentationDisputed -> "representation_disputed"
+        RepresentationDisclosureChanged -> "representation_disclosure_changed"
+      }
+    RegulatoryReviewRequested(..) -> "regulatory_review_requested"
   }
 }
 
 /// The registry's payload, in its key order.
+/// The agency an event is private to, when the registry's payload names one (`orgId`).
+pub fn org_of(event: Event) -> Result(String, Nil) {
+  case event {
+    AgentProfileCreated(org_id:, ..)
+    | AgentVerificationStateChanged(org_id:, ..)
+    | AgencyAffiliationCreated(org_id:, ..)
+    | AgencyAffiliationEnded(org_id:, ..)
+    | Representation(org_id:, ..)
+    | RegulatoryReviewRequested(org_id:, ..) -> Ok(org_id)
+    Messages(..) | Typing(..) | Notify(..) -> Error(Nil)
+  }
+}
+
 pub fn payload(event: Event) -> List(#(String, Json)) {
   case event {
     Messages(channel_id:) -> [#("channelId", json.string(channel_id))]
@@ -47,13 +105,35 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("audienceKind", audience.to_json(audience_kind)),
       #("audienceId", json.string(audience_id)),
     ]
+    AgentProfileCreated(org_id:, user_id:)
+    | AgencyAffiliationCreated(org_id:, user_id:)
+    | AgencyAffiliationEnded(org_id:, user_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("userId", json.string(user_id)),
+    ]
+    AgentVerificationStateChanged(org_id:, user_id:, facet:, state:) -> [
+      #("orgId", json.string(org_id)),
+      #("userId", json.string(user_id)),
+      #("facet", json.string(facet)),
+      #("state", json.string(state)),
+    ]
+    Representation(org_id:, agreement_id:, agent_user_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("agreementId", json.string(agreement_id)),
+      #("agentUserId", json.string(agent_user_id)),
+    ]
+    RegulatoryReviewRequested(org_id:, review_id:, kind:) -> [
+      #("orgId", json.string(org_id)),
+      #("reviewId", json.string(review_id)),
+      #("kind", json.string(kind)),
+    ]
   }
 }
 
 /// Whether a reconnect replays it (the registry's `replayPolicy`).
 pub fn replays(event: Event) -> Bool {
   case event {
-    Typing(..) -> False
-    _ -> True
+    Messages(..) | Notify(..) -> True
+    _ -> False
   }
 }

@@ -108,11 +108,24 @@ pub fn guard(
   fields: List(#(String, Json)),
   next: fn() -> Response,
 ) -> Response {
+  case check(expected, current, code, fields) {
+    Ok(Nil) -> next()
+    Error(conflict) -> conflict
+  }
+}
+
+/// `guard` as a value: the 409 when the record has moved on. For a check made inside a unit.
+pub fn check(
+  expected: Expected,
+  current: Rev,
+  code: String,
+  fields: List(#(String, Json)),
+) -> Result(Nil, Response) {
   case expected {
-    Unguarded -> next()
-    Expected(n) if n == current.rev -> next()
+    Unguarded -> Ok(Nil)
+    Expected(n) if n == current.rev -> Ok(Nil)
     Expected(n) ->
-      http.json(
+      Error(http.json(
         409,
         json.object(
           list.flatten([
@@ -135,7 +148,7 @@ pub fn guard(
             ],
           ]),
         ),
-      )
+      ))
   }
 }
 

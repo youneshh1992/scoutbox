@@ -162,6 +162,15 @@ pub fn query(
   codes: List(#(String, String)),
   next: fn(a) -> Response,
 ) -> Response {
+  case input.parse(shape, query_input(req), root: "query", codes:) {
+    Ok(value) -> next(value)
+    Error(refusal) -> refused(refusal)
+  }
+}
+
+/// The query string as an object of text values (a repeated key is a list), for a route that reads it with a
+/// shape of its own.
+pub fn query_input(req: Request) -> Dynamic {
   let grouped =
     wisp.get_query(req)
     |> list.group(fn(pair) { pair.0 })
@@ -175,10 +184,7 @@ pub fn query(
         many -> #(dynamic.string(key), dynamic.list(many))
       }
     })
-  case input.parse(shape, dynamic.properties(grouped), root: "query", codes:) {
-    Ok(value) -> next(value)
-    Error(refusal) -> refused(refusal)
-  }
+  dynamic.properties(grouped)
 }
 
 pub fn header(req: Request, name: String) -> Result(String, Nil) {

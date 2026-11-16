@@ -39,6 +39,8 @@ pub type Route {
   )
   /// A notice's audience; for a staff member, their organisation.
   Audience(kind: Audience, id: String, org_id: Option(id.OrgId))
+  /// Every staff member of one organisation: an event whose payload names its `orgId`.
+  Org(org_id: id.OrgId)
   /// The event names nothing that exists: nobody gets it.
   Nobody
 }

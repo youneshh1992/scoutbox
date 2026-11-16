@@ -27,7 +27,7 @@ import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/live.{
-  type Frame, type Hub, type Route, Audience, Nobody, Thread,
+  type Frame, type Hub, type Route, Audience, Nobody, Org, Thread,
 }
 import scoutbox/platform/live_event.{
   type Event, type TypingSide, Messages, Notify, Typing,
@@ -122,6 +122,11 @@ fn route(read: Read, event: Event) -> Result(Route, Fail(e)) {
     }
     Notify(audience_kind:, audience_id:) ->
       Ok(Audience(audience_kind, audience_id, None))
+    _ ->
+      case live_event.org_of(event) {
+        Ok(org_id) -> Ok(Org(id.org(org_id)))
+        Error(Nil) -> Ok(Nobody)
+      }
   }
 }
 
@@ -131,6 +136,7 @@ fn may_receive(read: Read, viewer: Viewer, route: Route) -> Bool {
     OrgViewer(org_id:, user_id:), Thread(org_id: to, ..)
     | OrgViewer(org_id:, user_id:),
       Audience(kind: audience.OrgUser, org_id: Some(to), ..)
+    | OrgViewer(org_id:, user_id:), Org(org_id: to)
     -> to == org_id && in_good_standing(read, org_id, user_id)
     PlayerViewer(player_id:), Thread(player_id: to, counterparty_is_player:, ..)
     -> to == player_id && counterparty_is_player

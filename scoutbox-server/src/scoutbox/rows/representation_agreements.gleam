@@ -7,6 +7,8 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/jurisdiction
+import scoutbox/vocab/terminator
 import sqlight
 
 pub const table = "representation_agreements"
@@ -57,46 +59,6 @@ pub fn client_kind_decoder() -> decode.Decoder(ClientKind) {
   case client_kind_from_string(value) {
     Ok(v) -> decode.success(v)
     Error(Nil) -> decode.failure(Player, "ClientKind")
-  }
-}
-
-pub type Jurisdiction {
-  INT
-  ENG
-  USA
-}
-
-/// Each value with the text the column stores.
-pub const jurisdiction_pairs = [#("INT", INT), #("ENG", ENG), #("USA", USA)]
-
-pub fn jurisdiction_to_string(value: Jurisdiction) -> String {
-  case value {
-    INT -> "INT"
-    ENG -> "ENG"
-    USA -> "USA"
-  }
-}
-
-pub fn jurisdiction_from_string(value: String) -> Result(Jurisdiction, Nil) {
-  case value {
-    "INT" -> Ok(INT)
-    "ENG" -> Ok(ENG)
-    "USA" -> Ok(USA)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn jurisdiction_to_json(value: Jurisdiction) -> Json {
-  json.string(jurisdiction_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn jurisdiction_decoder() -> decode.Decoder(Jurisdiction) {
-  use value <- decode.then(decode.string)
-  case jurisdiction_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(INT, "Jurisdiction")
   }
 }
 
@@ -156,50 +118,6 @@ pub fn status_decoder() -> decode.Decoder(Status) {
   }
 }
 
-pub type TerminatedBy {
-  Agent
-  Client
-  TrustSafety
-}
-
-/// Each value with the text the column stores.
-pub const terminated_by_pairs = [
-  #("agent", Agent),
-  #("client", Client),
-  #("trust_safety", TrustSafety),
-]
-
-pub fn terminated_by_to_string(value: TerminatedBy) -> String {
-  case value {
-    Agent -> "agent"
-    Client -> "client"
-    TrustSafety -> "trust_safety"
-  }
-}
-
-pub fn terminated_by_from_string(value: String) -> Result(TerminatedBy, Nil) {
-  case value {
-    "agent" -> Ok(Agent)
-    "client" -> Ok(Client)
-    "trust_safety" -> Ok(TrustSafety)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn terminated_by_to_json(value: TerminatedBy) -> Json {
-  json.string(terminated_by_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn terminated_by_decoder() -> decode.Decoder(TerminatedBy) {
-  use value <- decode.then(decode.string)
-  case terminated_by_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Agent, "TerminatedBy")
-  }
-}
-
 pub type DisputeOutcome {
   Reinstated
   Ended
@@ -249,7 +167,7 @@ pub type Row {
     agency_org_id: id.OrgId,
     client_kind: ClientKind,
     client_id: String,
-    jurisdiction: Jurisdiction,
+    jurisdiction: jurisdiction.Jurisdiction,
     exclusive: Bool,
     term_months: Int,
     start_at: Option(Int),
@@ -259,12 +177,12 @@ pub type Row {
     confirmed_at: Option(Int),
     declined_at: Option(Int),
     terminated_at: Option(Int),
-    terminated_by: Option(TerminatedBy),
+    terminated_by: Option(terminator.Terminator),
     termination_reason_code: Option(String),
     disputed_at: Option(Int),
     dispute_reason: Option(String),
     dispute_resolved_at: Option(Int),
-    dispute_review_id: Option(String),
+    dispute_review_id: Option(id.RegulatoryReviewId),
     dispute_outcome: Option(DisputeOutcome),
     share_with_agency_staff: Bool,
     disclosure_club_presence: Bool,
@@ -300,7 +218,7 @@ pub fn new(
   agency_org_id agency_org_id: id.OrgId,
   client_kind client_kind: ClientKind,
   client_id client_id: String,
-  jurisdiction jurisdiction: Jurisdiction,
+  jurisdiction jurisdiction: jurisdiction.Jurisdiction,
   exclusive exclusive: Bool,
   term_months term_months: Int,
   status status: Status,
@@ -369,7 +287,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use agency_org_id <- decode.field(2, id.org_decoder())
   use client_kind <- decode.field(3, client_kind_decoder())
   use client_id <- decode.field(4, decode.string)
-  use jurisdiction <- decode.field(5, jurisdiction_decoder())
+  use jurisdiction <- decode.field(5, jurisdiction.decoder())
   use exclusive <- decode.field(6, sqlight.decode_bool())
   use term_months <- decode.field(7, decode.int)
   use start_at <- decode.field(8, decode.optional(decode.int))
@@ -379,10 +297,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use confirmed_at <- decode.field(12, decode.optional(decode.int))
   use declined_at <- decode.field(13, decode.optional(decode.int))
   use terminated_at <- decode.field(14, decode.optional(decode.int))
-  use terminated_by <- decode.field(
-    15,
-    decode.optional(terminated_by_decoder()),
-  )
+  use terminated_by <- decode.field(15, decode.optional(terminator.decoder()))
   use termination_reason_code <- decode.field(
     16,
     decode.optional(decode.string),
@@ -390,7 +305,10 @@ pub fn decoder() -> decode.Decoder(Row) {
   use disputed_at <- decode.field(17, decode.optional(decode.int))
   use dispute_reason <- decode.field(18, decode.optional(decode.string))
   use dispute_resolved_at <- decode.field(19, decode.optional(decode.int))
-  use dispute_review_id <- decode.field(20, decode.optional(decode.string))
+  use dispute_review_id <- decode.field(
+    20,
+    decode.optional(id.regulatory_review_decoder()),
+  )
   use dispute_outcome <- decode.field(
     21,
     decode.optional(dispute_outcome_decoder()),
@@ -483,7 +401,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     id.org_sql(row.agency_org_id),
     sqlight.text(client_kind_to_string(row.client_kind)),
     sqlight.text(row.client_id),
-    sqlight.text(jurisdiction_to_string(row.jurisdiction)),
+    sqlight.text(jurisdiction.to_string(row.jurisdiction)),
     sqlight.bool(row.exclusive),
     sqlight.int(row.term_months),
     sqlight.nullable(sqlight.int, row.start_at),
@@ -494,14 +412,14 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.int, row.declined_at),
     sqlight.nullable(sqlight.int, row.terminated_at),
     sqlight.nullable(
-      fn(v) { sqlight.text(terminated_by_to_string(v)) },
+      fn(v) { sqlight.text(terminator.to_string(v)) },
       row.terminated_by,
     ),
     sqlight.nullable(sqlight.text, row.termination_reason_code),
     sqlight.nullable(sqlight.int, row.disputed_at),
     sqlight.nullable(sqlight.text, row.dispute_reason),
     sqlight.nullable(sqlight.int, row.dispute_resolved_at),
-    sqlight.nullable(sqlight.text, row.dispute_review_id),
+    sqlight.nullable(id.regulatory_review_sql, row.dispute_review_id),
     sqlight.nullable(
       fn(v) { sqlight.text(dispute_outcome_to_string(v)) },
       row.dispute_outcome,
