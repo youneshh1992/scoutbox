@@ -22,13 +22,19 @@ pub opaque type Limits {
   Limits(auth: Table(Window), login: Table(Window), mfa: Table(Codes))
 }
 
-const auth_max = 40
+/// A budget: at most `max` in any `window_ms`.
+pub type Policy {
+  Policy(max: Int, window_ms: Int)
+}
 
-const auth_window_ms = 60_000
+/// The `/auth` limiter. The TypeScript server sets it in identity/sessions.mjs, not in RATE_LIMIT_POLICY.
+const auth_policy = Policy(max: 40, window_ms: 60_000)
 
-const login_max = 20
+/// The budgets that are entries of RATE_LIMIT_POLICY (domains/platform/rateLimit.mjs), by action.
+/// `test/scoutbox/spec_test.gleam` proves each equals its entry in e2e/support/spec/platform/rateLimit.json.
+pub const policy = [#("login_failure", login_policy)]
 
-const login_window_ms = 900_000
+const login_policy = Policy(max: 20, window_ms: 900_000)
 
 pub fn start() -> Result(Limits, String) {
   use auth <- result.try(table.start())
@@ -51,10 +57,10 @@ pub fn auth_request(
   now: Int,
 ) -> Result(Nil, Int) {
   table.update(limits.auth, address, fn(entry) {
-    let w = current(entry, now, auth_window_ms)
+    let w = current(entry, now, auth_policy.window_ms)
     let w = Window(..w, count: w.count + 1)
-    let answer = case w.count > auth_max {
-      True -> Error(auth_window_ms - { now - w.started })
+    let answer = case w.count > auth_policy.max {
+      True -> Error(auth_policy.window_ms - { now - w.started })
       False -> Ok(Nil)
     }
     #(Some(w), answer)
@@ -72,14 +78,14 @@ pub fn login_key(identifier: String) -> String {
 /// True when the identifier's wrong-guess budget is spent.
 pub fn login_locked(limits: Limits, identifier: String, now: Int) -> Bool {
   table.update(limits.login, login_key(identifier), fn(entry) {
-    let w = current(entry, now, login_window_ms)
-    #(entry, w.count >= login_max)
+    let w = current(entry, now, login_policy.window_ms)
+    #(entry, w.count >= login_policy.max)
   })
 }
 
 pub fn login_failed(limits: Limits, identifier: String, now: Int) -> Nil {
   table.update(limits.login, login_key(identifier), fn(entry) {
-    let w = current(entry, now, login_window_ms)
+    let w = current(entry, now, login_policy.window_ms)
     #(Some(Window(..w, count: w.count + 1)), Nil)
   })
 }

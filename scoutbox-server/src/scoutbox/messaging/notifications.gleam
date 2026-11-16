@@ -11,7 +11,7 @@
 import gleam/dynamic/decode
 import gleam/json.{type Json}
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option}
 import gleam/result
 import gleam/string
 import scoutbox/platform/ids
@@ -25,15 +25,17 @@ const coalesce_ms = 21_600_000
 
 const text_max = 2000
 
-/// The category a notification type belongs to (notificationPrefs.mjs TYPE_CATEGORY), for the types this
-/// server sends.
+/// The category each notification type this server sends belongs to: the part of notificationPrefs.mjs
+/// TYPE_CATEGORY ported so far. `test/scoutbox/spec_test.gleam` proves it agrees with
+/// e2e/support/spec/platform/notificationPrefs.json.
+pub const type_category = [
+  #("request", row.Messages),
+  #("report_resolved", row.SecurityAccount),
+  #("badge", row.DiscoveryNudges),
+]
+
 fn category_of(type_: String) -> Option(row.Category) {
-  case type_ {
-    "request" -> Some(row.Messages)
-    "report_resolved" -> Some(row.SecurityAccount)
-    "badge" -> Some(row.DiscoveryNudges)
-    _ -> None
-  }
+  list.key_find(type_category, type_) |> option.from_result
 }
 
 /// Cut to the column's limit at a character boundary, with an ellipsis.
