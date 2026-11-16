@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { existing, generate } from './battery_cases/generate.mjs';
+import { existing, generate, unprintable } from './battery_cases/generate.mjs';
 import { MAP } from './battery_cases/map.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -93,6 +93,7 @@ function report(battery) {
       // A rule that takes `now` in Gleam is given the instant the recording stood at.
       if (clockDependent && !MAP[id]?.now) why = 'its result depends on the clock';
     }
+    if (!why) why = unprintable(id, c, CLOCK);
     if (why) f.handPort[why] = (f.handPort[why] ?? 0) + 1;
     else {
       f.cases.add(JSON.stringify([c.args, c.result ?? null, c.throws ?? null, c.argsAfter ?? null]));

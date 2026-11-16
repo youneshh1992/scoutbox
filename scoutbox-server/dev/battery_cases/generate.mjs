@@ -30,6 +30,25 @@ function slug(message) {
 const decode = (json) => (json === undefined ? undefined : JSON.parse(json));
 
 /**
+ * Why a mapped call can't be a generated test, or null when it can: a printer refuses arguments Gleam's types can't
+ * hold (a record with a field the Gleam type has no place for, text where the type is a number). Such a call is
+ * ported by hand instead, and the report says why.
+ */
+export function unprintable(fn, call, clock) {
+  const entry = MAP[fn];
+  if (!entry) return null;
+  try {
+    entry.test(
+      { args: decode(call.args), result: decode(call.result), throws: call.throws, argsAfter: decode(call.argsAfter) },
+      { now: clock, use: (module) => alias(module) },
+    );
+    return null;
+  } catch (err) {
+    return `Gleam's types can't hold its arguments: ${String(err.message).replace(/ \(value .*\)$/, '')}`;
+  }
+}
+
+/**
  * The generated files, as `{ file → source }`, from `cases`: every recorded call that is a case, as
  * `{ battery, fn, call, clockDependent }`. Throws when a mapped call can't be printed.
  */

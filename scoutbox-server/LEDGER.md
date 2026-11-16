@@ -22,7 +22,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | discovery | 3 | 1 | 0 | 0 / 0 | 0 / 0 | 3 to go |
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
-| platform | 13 | 9 | 3 | 0 / 18 | 0 / 19 | 10 to go |
+| platform | 13 | 13 | 4 | 0 / 2372 | 0 / 179 | 10 to go |
 | recruitment | 19 | 1 | 0 | 0 / 196 | 0 / 6 | 19 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
@@ -57,17 +57,17 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `passport/trustScore` | not yet neutral | 2 → 2 | 148 | 148 |  |  |  |  |  | not untangled; not answered |
 | `platform/api` | neutral | 0 → 0 | 198 | 198 |  |  |  |  |  | not answered |
 | `platform/connectedMode` | neutral | 0 → 0 | 63 | 63 |  |  |  |  |  | not answered |
-| `platform/contracts` | not yet neutral | 16 → 16 | 173 | 173 |  |  |  |  |  | not untangled; not answered |
-| `platform/dates` | not yet neutral | 15 → 15 | 230 | 230 |  |  |  |  |  | not untangled; not answered |
+| `platform/contracts` | neutral | 16 → 0 | 207 | 113 | 75 | 21 moved, +2 added |  | 0 / 62 | 0 / 13 | not answered; 62 cases pending; 13 hand-port calls; 3 TypeScript-only moves unreviewed |
+| `platform/dates` | neutral | 15 → 0 | 230 | 64 | 166 |  |  | 0 / 2253 | 0 / 135 | not answered; 2253 cases pending; 135 hand-port calls |
 | `platform/delivery` | neutral | 0 → 0 | 39 | 39 |  |  |  |  |  | not answered |
 | `platform/messaging` | neutral | 0 → 0 | 56 | 56 |  |  |  |  |  | not answered |
 | `platform/notifications` | neutral | 0 → 0 | 52 | 52 |  |  |  |  |  | not answered |
 | `platform/playersAndGuardians` | neutral | 0 → 0 | 45 | 45 |  |  | yes |  |  | **done** |
-| `platform/productionHardening` | not yet neutral | 6 → 6 | 204 | 204 |  |  |  |  |  | not untangled; not answered |
+| `platform/productionHardening` | neutral | 6 → 0 | 204 | 123 | 81 |  |  | 0 / 39 | 0 / 12 | not answered; 39 cases pending; 12 hand-port calls |
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
-| `platform/sessionsAndPorts` | not yet neutral | 1 → 1 | 40 | 40 |  |  |  |  |  | not untangled; not answered |
+| `platform/sessionsAndPorts` | neutral | 1 → 0 | 40 | 37 |  | 3 moved |  |  |  | not answered; 1 TypeScript-only move unreviewed |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
-| `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added |  | 0 / 18 | 0 / 19 | not answered; 18 cases pending; 19 hand-port calls |
+| `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added | yes | 0 / 18 | 0 / 19 | 18 cases pending; 19 hand-port calls |
 | `recruitment/analytics` | not yet neutral | 13 → 13 | 104 | 104 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/contacts` | not yet neutral | 10 → 10 | 366 | 366 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/contactsPersistence` | not yet neutral | 6 → 6 | 47 | 47 |  |  |  |  |  | not untangled; not answered |
@@ -98,12 +98,17 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 
 | Battery | Checks | Now in | Why | Here |
 |---|---|---|---|---|
+| `platform/contracts` | 11 | `scripts/testDataLayer.mjs` | §10 ran the migration runner (runDataMigrations, dataSchemaReport, migrationApplied) on in-memory databases in the battery's process; that is a unit check of the runner. The battery keeps the migrations over HTTP (§20, §41) | not yet reviewed |
+| `platform/contracts` | 3 | `scripts/testDiscovery.mjs` | §11's discovery checks read the repository's DDL and called its typeBrief/typeSecondLookItem; those are unit checks of the repository. The battery keeps the two table facts as schema checks (§11b) | not yet reviewed |
+| `platform/contracts` | 7 | `scripts/testPlatformHelpers.mjs` | §12 built fault layers in the battery's process (parseFaultRules, createFaultLayer, productionConfigProblems); that is a unit check of the fault layer. The battery keeps the production boot's refusal over HTTP (§43) | not yet reviewed |
+| `platform/sessionsAndPorts` | 3 | `scripts/testPlatformHelpers.mjs` | A1–A3 built their own Express app in the battery's process to prove installAsyncErrorForwarding; that is a unit check of the patch. The battery keeps A4–A5 over HTTP | not yet reviewed |
 | `platform/storeGuarantees` | 1 | `scripts/testDataLayer.mjs` | COUNTER_MISSING was checked by calling the repository's createIdCounter on a damaged file; that is a unit check of the repository | `test/scoutbox/ids_test.gleam` |
 
 ## Checks added while untangling
 
 | Battery | Checks | Why |
 |---|---|---|
+| `platform/contracts` | 2 | §11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery) |
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |
 | `platform/storeGuarantees` | 1 | the plan count is checked in both: the rules suite over the catalogue, the battery over /meta |
@@ -116,6 +121,33 @@ ported by hand to a gleeunit test.
 | Battery | Function | Calls | Why | Ported in |
 |---|---|---|---|---|
 | `agents/core` | `domains/agents/core/shared.mjs#can` | 1 | args[] is undefined | to do |
+| `platform/contracts` | `domain.ts#ageOn` | 8 | args[] is a ; result is NaN | to do |
+| `platform/contracts` | `domain.ts#isAdult` | 3 | args[] is a  | to do |
+| `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 1 | throws Error without a code | to do |
+| `platform/contracts` | `domains/platform/notificationPrefs.mjs#createNotificationPrefs` | 1 | args[].notifications.create is a function | to do |
+| `platform/dates` | `domain.ts#ageOn` | 20 | args[] is a ; args[] is NaN; args[] is undefined | to do |
+| `platform/dates` | `domain.ts#isAdult` | 21 | args[] is a ; args[].dob is NaN | to do |
+| `platform/dates` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | to do |
+| `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 7 | args[].grantedAt is -Infinity; args[].grantedAt is Infinity; args[].grantedAt is NaN | to do |
+| `platform/dates` | `domains/agents/core/shared.mjs#affiliationActive` | 6 | args[].endedAt is -Infinity; args[].endedAt is Infinity; args[].endedAt is NaN; args[].startedAt is -Infinity; args[].startedAt is Infinity; args[].startedAt is NaN | to do |
+| `platform/dates` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 7 | args[].endAt is -Infinity; args[].endAt is Infinity; args[].endAt is NaN; args[].startAt is -Infinity; args[].startAt is Infinity; args[].startAt is NaN | to do |
+| `platform/dates` | `domains/agents/core/shared.mjs#effectiveAgreementStatus` | 1 | args[].endAt is NaN | to do |
+| `platform/dates` | `domains/agents/core/shared.mjs#effectiveFacetState` | 3 | args[].recheckAt is -Infinity; args[].recheckAt is Infinity; args[].recheckAt is NaN | to do |
+| `platform/dates` | `domains/agents/core/shared.mjs#verificationGap` | 2 | args[].facets.fifa_licence.recheckAt is NaN | to do |
+| `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 4 | args[].invitedAt is -Infinity; args[].invitedAt is Infinity; args[].invitedAt is NaN | to do |
+| `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 4 | args[][].deliveredAt is -Infinity; args[][].deliveredAt is Infinity; args[][].deliveredAt is NaN | to do |
+| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#validateScheduleInput` | 8 | args[].mintId is a function | to do |
+| `platform/dates` | `domains/verification/claims/shared.mjs#effectiveStatus` | 18 | args[].validUntil is -Infinity; args[].validUntil is Infinity; args[].validUntil is NaN; Gleam's types can't hold its arguments: cannot print "" as an Int; Gleam's types can't hold its arguments: cannot print "1790078400000" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01" as an Int; Gleam's types can't hold its arguments: cannot print "2020-01-01T00:00:00.000Z" as an Int; Gleam's types can't hold its arguments: cannot print "garbage" as an Int; Gleam's types can't hold its arguments: cannot print "soon" as an Int; Gleam's types can't hold its arguments: cannot print [] as an Int; Gleam's types can't hold its arguments: cannot print {} as an Int; Gleam's types can't hold its arguments: cannot print false as an Int; Gleam's types can't hold its arguments: cannot print true as an Int; Gleam's types can't hold its arguments: Row has no field for the JavaScript key verification | to do |
+| `platform/dates` | `temporal.ts#isEffectiveAt` | 7 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined | to do |
+| `platform/dates` | `temporal.ts#isExpiredAt` | 4 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined | to do |
+| `platform/dates` | `temporal.ts#isOrderedInterval` | 7 | args[] is -Infinity; args[] is Infinity; args[] is NaN; args[] is undefined | to do |
+| `platform/dates` | `temporal.ts#parseInstant` | 9 | args[] is -Infinity; args[] is Infinity; args[] is NaN | to do |
+| `platform/dates` | `temporal.ts#parseStrictDateOnly` | 3 | args[] is NaN | to do |
+| `platform/dates` | `temporal.ts#readInstant` | 3 | args[] is -Infinity; args[] is Infinity; args[] is NaN | to do |
+| `platform/productionHardening` | `domains/platform/capabilities.mjs#buildCapabilityReport` | 5 | args[].rateLimit.provider.consume is a function; its result depends on the clock | to do |
+| `platform/productionHardening` | `domains/platform/concurrency.mjs#expectedRevOf` | 3 | result is NaN | to do |
+| `platform/productionHardening` | `domains/platform/rateLimit.mjs#createRateLimiter` | 3 | result.provider.consume is a function; throws Error without a code | to do |
+| `platform/productionHardening` | `domains/platform/rateLimit.mjs#memoryRateLimitProvider` | 1 | result.consume is a function | to do |
 | `platform/storeGuarantees` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 19 | args[].reads.contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
@@ -157,6 +189,79 @@ mapped, then `npm run cases`.
 | `agents/core` | `domains/agents/core/shared.mjs#termMonthsOf` | 9 |
 | `agents/core` | `domains/agents/core/shared.mjs#tiersOf` | 2 |
 | `agents/core` | `domains/agents/core/shared.mjs#verificationGap` | 9 |
+| `platform/contracts` | `domain.ts#adultAgeFor` | 3 |
+| `platform/contracts` | `domain.ts#isAdult` | 1 |
+| `platform/contracts` | `domains/discovery/shared.mjs#briefIsLiveOn` | 14 |
+| `platform/contracts` | `domains/discovery/shared.mjs#orderNobodyMissed` | 10 |
+| `platform/contracts` | `domains/discovery/shared.mjs#orderSecondLook` | 2 |
+| `platform/contracts` | `domains/discovery/shared.mjs#secondLookExpired` | 3 |
+| `platform/contracts` | `domains/discovery/shared.mjs#secondLookStatus` | 3 |
+| `platform/contracts` | `domains/discovery/shared.mjs#validateRecruitmentBrief` | 1 |
+| `platform/contracts` | `domains/platform/eventAudience.mjs#audienceFor` | 2 |
+| `platform/contracts` | `domains/platform/eventRegistry.mjs#assertEventRegistry` | 2 |
+| `platform/contracts` | `domains/platform/eventRegistry.mjs#eventFingerprint` | 7 |
+| `platform/contracts` | `domains/platform/eventRegistry.mjs#minimizePayload` | 2 |
+| `platform/contracts` | `domains/platform/integrity.mjs#integrityReport` | 4 |
+| `platform/contracts` | `domains/platform/integrity.mjs#integritySummary` | 1 |
+| `platform/contracts` | `domains/platform/notificationPrefs.mjs#categoryOf` | 6 |
+| `platform/contracts` | `domains/platform/notificationPrefs.mjs#defaultPrefs` | 1 |
+| `platform/dates` | `domain.ts#adultAgeFor` | 1 |
+| `platform/dates` | `domain.ts#isTrialDate` | 2 |
+| `platform/dates` | `domain.ts#parseDob` | 10 |
+| `platform/dates` | `domain.ts#parseTrialDate` | 4 |
+| `platform/dates` | `domain.ts#trialReportDueAt` | 2 |
+| `platform/dates` | `domains/agents/compliance/conflict.mjs#consentSufficiency` | 13 |
+| `platform/dates` | `domains/agents/compliance/policy.mjs#earliestPermittedApproachAt` | 7 |
+| `platform/dates` | `domains/agents/compliance/policy.mjs#evaluateMinorGate` | 1 |
+| `platform/dates` | `domains/agents/compliance/policy.mjs#isRegulatoryMinor` | 2 |
+| `platform/dates` | `domains/agents/compliance/policy.mjs#ruleStatusAt` | 5 |
+| `platform/dates` | `domains/agents/compliance/policy.mjs#selectPolicyVersion` | 12 |
+| `platform/dates` | `domains/agents/core/shared.mjs#affiliationActive` | 21 |
+| `platform/dates` | `domains/agents/core/shared.mjs#agreementGrantsAccess` | 19 |
+| `platform/dates` | `domains/agents/core/shared.mjs#effectiveFacetState` | 13 |
+| `platform/dates` | `domains/agents/integration/integration.mjs#effectiveHandoffStatus` | 14 |
+| `platform/dates` | `domains/development/hub/shared.mjs#parseDate` | 7 |
+| `platform/dates` | `domains/discovery/shared.mjs#briefIsLiveOn` | 5 |
+| `platform/dates` | `domains/discovery/shared.mjs#validateRecruitmentBrief` | 4 |
+| `platform/dates` | `domains/passport/shared.mjs#normWhen` | 7 |
+| `platform/dates` | `domains/recruitment/analytics/metrics.mjs#previousWindow` | 1 |
+| `platform/dates` | `domains/recruitment/analytics/metrics.mjs#resolveWindow` | 6 |
+| `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#cooldownFor` | 14 |
+| `platform/dates` | `domains/recruitment/lifecycle/contact.mjs#validateExternalRecord` | 13 |
+| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#icsLocal` | 4 |
+| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#localDay` | 2 |
+| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#parseInstant` | 2 |
+| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#validateSessionInput` | 15 |
+| `platform/dates` | `domains/recruitment/lifecycle/trial.mjs#validateTimezone` | 2 |
+| `platform/dates` | `temporal.ts#ageOnMs` | 1 |
+| `platform/dates` | `temporal.ts#endOfDayExclusive` | 2 |
+| `platform/dates` | `temporal.ts#isActiveAt` | 3 |
+| `platform/dates` | `temporal.ts#isDayWithin` | 8 |
+| `platform/dates` | `temporal.ts#isEffectiveAt` | 24 |
+| `platform/dates` | `temporal.ts#isExpiredAt` | 13 |
+| `platform/dates` | `temporal.ts#isOrderedInterval` | 25 |
+| `platform/dates` | `temporal.ts#localParts` | 1 |
+| `platform/dates` | `temporal.ts#parseDateOrInstant` | 11 |
+| `platform/dates` | `temporal.ts#parseDobStrict` | 4 |
+| `platform/dates` | `temporal.ts#parseInstant` | 27 |
+| `platform/dates` | `temporal.ts#parseLocalDateTimeWithZone` | 15 |
+| `platform/dates` | `temporal.ts#parseStrictDateOnly` | 1869 |
+| `platform/dates` | `temporal.ts#readDateOnly` | 2 |
+| `platform/dates` | `temporal.ts#readInstant` | 14 |
+| `platform/dates` | `temporal.ts#utcDayOf` | 1 |
+| `platform/dates` | `temporal.ts#validateIanaZone` | 21 |
+| `platform/dates` | `temporal.ts#zoneOffsetMinutes` | 4 |
+| `platform/productionHardening` | `domains/discovery/shared.mjs#changeFingerprint` | 2 |
+| `platform/productionHardening` | `domains/discovery/shared.mjs#normalizeMaterialChange` | 2 |
+| `platform/productionHardening` | `domains/passport/shared.mjs#passportRevision` | 8 |
+| `platform/productionHardening` | `domains/platform/capabilities.mjs#productionConfigProblems` | 11 |
+| `platform/productionHardening` | `domains/platform/concurrency.mjs#bumpRev` | 2 |
+| `platform/productionHardening` | `domains/platform/concurrency.mjs#expectedRevOf` | 4 |
+| `platform/productionHardening` | `domains/platform/concurrency.mjs#revMeta` | 2 |
+| `platform/productionHardening` | `domains/platform/concurrency.mjs#revOf` | 2 |
+| `platform/productionHardening` | `domains/platform/eventAudience.mjs#audienceFor` | 3 |
+| `platform/productionHardening` | `domains/platform/eventAudience.mjs#unclassifiedEvents` | 1 |
+| `platform/productionHardening` | `domains/platform/rateLimit.mjs#rateLimitedBody` | 2 |
 | `platform/storeGuarantees` | `domains/recruitment/rooms/shared.mjs#stageForRoomStatus` | 18 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#canonicalStageFor` | 9 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#completedStagesFor` | 1 |

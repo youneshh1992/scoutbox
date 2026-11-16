@@ -168,6 +168,713 @@
     ]
   },
   {
+    "battery": "platform/contracts",
+    "functions": [
+      {
+        "function": "domain.ts#adultAgeFor",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#ageOn",
+        "calls": 8,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 6,
+          "result is NaN": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#isAdult",
+        "calls": 4,
+        "cases": 1,
+        "handPort": {
+          "args[] is a ": 3
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#briefIsLiveOn",
+        "calls": 17,
+        "cases": 14,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#orderNobodyMissed",
+        "calls": 10,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#orderSecondLook",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#secondLookExpired",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#secondLookStatus",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#validateRecruitmentBrief",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventAudience.mjs#audienceFor",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventRegistry.mjs#assertEventRegistry",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {
+          "throws Error without a code": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventRegistry.mjs#eventFingerprint",
+        "calls": 9,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventRegistry.mjs#minimizePayload",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/integrity.mjs#integrityReport",
+        "calls": 8,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/integrity.mjs#integritySummary",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/notificationPrefs.mjs#categoryOf",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/notificationPrefs.mjs#createNotificationPrefs",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].notifications.create is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/notificationPrefs.mjs#defaultPrefs",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "platform/dates",
+    "functions": [
+      {
+        "function": "domain.ts#adultAgeFor",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#ageOn",
+        "calls": 20,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 18,
+          "args[] is NaN": 1,
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#isAdult",
+        "calls": 21,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 20,
+          "args[].dob is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#isTrialDate",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#parseDob",
+        "calls": 13,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#parseTrialDate",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#trialReportDueAt",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {
+          "args[] is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/conflict.mjs#consentSufficiency",
+        "calls": 31,
+        "cases": 13,
+        "handPort": {
+          "args[].grantedAt is -Infinity": 2,
+          "args[].grantedAt is Infinity": 2,
+          "args[].grantedAt is NaN": 3
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#earliestPermittedApproachAt",
+        "calls": 8,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#evaluateMinorGate",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#isRegulatoryMinor",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#ruleStatusAt",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/compliance/policy.mjs#selectPolicyVersion",
+        "calls": 13,
+        "cases": 12,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#affiliationActive",
+        "calls": 28,
+        "cases": 21,
+        "handPort": {
+          "args[].endedAt is -Infinity": 1,
+          "args[].endedAt is Infinity": 1,
+          "args[].endedAt is NaN": 1,
+          "args[].startedAt is -Infinity": 1,
+          "args[].startedAt is Infinity": 1,
+          "args[].startedAt is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#agreementGrantsAccess",
+        "calls": 26,
+        "cases": 19,
+        "handPort": {
+          "args[].endAt is -Infinity": 1,
+          "args[].endAt is Infinity": 1,
+          "args[].endAt is NaN": 2,
+          "args[].startAt is -Infinity": 1,
+          "args[].startAt is Infinity": 1,
+          "args[].startAt is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#effectiveAgreementStatus",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].endAt is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#effectiveFacetState",
+        "calls": 17,
+        "cases": 13,
+        "handPort": {
+          "args[].recheckAt is -Infinity": 1,
+          "args[].recheckAt is Infinity": 1,
+          "args[].recheckAt is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/core/shared.mjs#verificationGap",
+        "calls": 2,
+        "cases": 0,
+        "handPort": {
+          "args[].facets.fifa_licence.recheckAt is NaN": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/agents/integration/integration.mjs#effectiveHandoffStatus",
+        "calls": 18,
+        "cases": 14,
+        "handPort": {
+          "args[].invitedAt is -Infinity": 1,
+          "args[].invitedAt is Infinity": 1,
+          "args[].invitedAt is NaN": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/development/hub/shared.mjs#parseDate",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#briefIsLiveOn",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#validateRecruitmentBrief",
+        "calls": 5,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/passport/shared.mjs#normWhen",
+        "calls": 8,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#previousWindow",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/analytics/metrics.mjs#resolveWindow",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#cooldownFor",
+        "calls": 18,
+        "cases": 14,
+        "handPort": {
+          "args[][].deliveredAt is -Infinity": 1,
+          "args[][].deliveredAt is Infinity": 2,
+          "args[][].deliveredAt is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/contact.mjs#validateExternalRecord",
+        "calls": 15,
+        "cases": 13,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#icsLocal",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#localDay",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#parseInstant",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#validateScheduleInput",
+        "calls": 8,
+        "cases": 0,
+        "handPort": {
+          "args[].mintId is a function": 8
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#validateSessionInput",
+        "calls": 15,
+        "cases": 15,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#validateTimezone",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/verification/claims/shared.mjs#effectiveStatus",
+        "calls": 18,
+        "cases": 0,
+        "handPort": {
+          "args[].validUntil is -Infinity": 1,
+          "args[].validUntil is Infinity": 1,
+          "args[].validUntil is NaN": 1,
+          "Gleam's types can't hold its arguments: cannot print \"\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"1790078400000\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"2020-01-01T00:00:00.000Z\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"garbage\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print \"soon\" as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print [] as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print {} as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print false as an Int": 1,
+          "Gleam's types can't hold its arguments: cannot print true as an Int": 1,
+          "Gleam's types can't hold its arguments: Row has no field for the JavaScript key verification": 5
+        },
+        "status": "generated"
+      },
+      {
+        "function": "temporal.ts#ageOnMs",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#endOfDayExclusive",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#isActiveAt",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#isDayWithin",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#isEffectiveAt",
+        "calls": 31,
+        "cases": 24,
+        "handPort": {
+          "args[] is -Infinity": 2,
+          "args[] is Infinity": 2,
+          "args[] is NaN": 2,
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#isExpiredAt",
+        "calls": 17,
+        "cases": 13,
+        "handPort": {
+          "args[] is -Infinity": 1,
+          "args[] is Infinity": 1,
+          "args[] is NaN": 1,
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#isOrderedInterval",
+        "calls": 32,
+        "cases": 25,
+        "handPort": {
+          "args[] is -Infinity": 2,
+          "args[] is Infinity": 2,
+          "args[] is NaN": 2,
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#localParts",
+        "calls": 2,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#parseDateOrInstant",
+        "calls": 18,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#parseDobStrict",
+        "calls": 7,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#parseInstant",
+        "calls": 81,
+        "cases": 27,
+        "handPort": {
+          "args[] is -Infinity": 3,
+          "args[] is Infinity": 3,
+          "args[] is NaN": 3
+        },
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#parseLocalDateTimeWithZone",
+        "calls": 22,
+        "cases": 15,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#parseStrictDateOnly",
+        "calls": 1934,
+        "cases": 1869,
+        "handPort": {
+          "args[] is NaN": 3
+        },
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#readDateOnly",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#readInstant",
+        "calls": 17,
+        "cases": 14,
+        "handPort": {
+          "args[] is -Infinity": 1,
+          "args[] is Infinity": 1,
+          "args[] is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#utcDayOf",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#validateIanaZone",
+        "calls": 43,
+        "cases": 21,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#zoneOffsetMinutes",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "platform/productionHardening",
+    "functions": [
+      {
+        "function": "domains/discovery/shared.mjs#changeFingerprint",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/discovery/shared.mjs#normalizeMaterialChange",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/passport/shared.mjs#passportRevision",
+        "calls": 10,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/capabilities.mjs#buildCapabilityReport",
+        "calls": 5,
+        "cases": 0,
+        "handPort": {
+          "args[].rateLimit.provider.consume is a function": 1,
+          "its result depends on the clock": 4
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/capabilities.mjs#productionConfigProblems",
+        "calls": 11,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/concurrency.mjs#bumpRev",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/concurrency.mjs#expectedRevOf",
+        "calls": 7,
+        "cases": 4,
+        "handPort": {
+          "result is NaN": 3
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/concurrency.mjs#revMeta",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/concurrency.mjs#revOf",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventAudience.mjs#audienceFor",
+        "calls": 4,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/eventAudience.mjs#unclassifiedEvents",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/rateLimit.mjs#createRateLimiter",
+        "calls": 3,
+        "cases": 0,
+        "handPort": {
+          "result.provider.consume is a function": 2,
+          "throws Error without a code": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/rateLimit.mjs#memoryRateLimitProvider",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "result.consume is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/rateLimit.mjs#rateLimitedBody",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "platform/storeGuarantees",
     "functions": [
       {
