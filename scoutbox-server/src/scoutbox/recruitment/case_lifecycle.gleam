@@ -471,6 +471,8 @@ pub fn apply(
       source_context: None,
     ),
   ))
+  // Development-only fault seam: the unit is refused whole, so nothing from the status write survives.
+  use _ <- result.try(store.seam(tx, "lifecycle.after_status"))
   let codes = json.array(reason_codes, json.string)
   use _ <- result.try(cases.record(
     tx,

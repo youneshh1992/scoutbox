@@ -474,9 +474,28 @@ would mean porting most of the product under the heading "platform". So:
      so its history lines never name anyone. Ported as it behaves.
    - **Why the offer batteries wait:** their first fixture is an agent representing the player. That needs agent
      sign-in and team membership, profiles with licence facets, the compliance engine's approach rule, the player's
-     confirmation, and later transaction workspaces and the handoff: the core of `agents/*`. Next step: port the
-     agents core against `agents/core` and the offer batteries together, then finish the Offer batteries.
+     confirmation, and later transaction workspaces and the handoff: the core of `agents/*`.
    - **Pending:** `decisionsPersistence`'s 14 recorded rule cases (decision integrity, chain heads) await mapping.
+
+   **Agents core [in progress].** Ported against `agents/core` and the offer batteries together. `agents/core` passes
+   apart from S13; `offersPersistence` passes unchanged and is in `BATTERIES`. As built:
+   - **The agent core** (`agents/agent_rules`, `agent_store`, `core_routes`): profiles with their declared
+     jurisdictions and facets, the synthetic and `none` verification providers, agency memberships with the
+     first-member bootstrap, the permission matrix, representation agreements with their per-act keys, the player's
+     My Agent, the shared key's read-only lists. Every act that races (a confirmation, a request) re-reads and
+     re-checks inside its unit, so P2 and P4 pass on the BEAM's concurrency.
+   - **The compliance engine, as far as the core calls it:** the adult approach rule over the seeded policy versions
+     (`agents/approach_policy`), and the review items a facet submission, a dispute and an uncertain approach open
+     (`agents/reviews`). The reviewer lane (`/ts/…`) is `Not ported yet:`.
+   - **Also needed, from other domains:** the organisation audit (`/org/audit`: Room, agency and ledger rows; the
+     Contact, Trial, brief, watchlist and plan sources are `Not ported yet:`), a player's erasure (`DELETE
+     /player/account`, with every redactor whose records can exist here), the open-day half of the opportunity
+     board, the agent and Offer live events, and the `lifecycle.after_status` fault seam.
+   - **Platform:** `input.distinct_list`, and a value that is not a list now says `not_list`, as the TypeScript
+     server does (it said `invalid`).
+   - **Left for the offer batteries:** the transaction workspace (creating one from a club's handoff, notes, the
+     Offer readiness at issue, and S13's input refusal); racing Offer acts, which answer 500 where a guarded write
+     loses (F1–F9, G1, G3, P1–P6); and F7, which needs the first unknown field in the order sent.
 
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open
    trials, vouches, pairing and exports), `platform/contracts` (Rooms, briefs), `platform/productionHardening`

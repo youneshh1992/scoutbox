@@ -1329,6 +1329,8 @@ fn apply_move(
       )
       |> storage,
     )
+    // Development-only fault seam: the unit is refused whole, so nothing from the status write survives.
+    use _ <- result.try(store.seam(tx, "lifecycle.after_status") |> storage)
     let codes_json = json.array(codes, json.string)
     use _ <- result.try(
       cases.record(

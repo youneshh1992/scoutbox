@@ -3,6 +3,7 @@
 //// from typed ids with `messaging/live_routes` (`live_routes.messages(channel_id)`), never from text.
 
 import gleam/json.{type Json}
+import gleam/option.{type Option}
 import scoutbox/vocab/audience.{type Audience}
 
 /// An event, by its name in the event registry (e2e/support/spec/platform/eventRegistry.json). Its fields are the
@@ -36,6 +37,28 @@ pub type Event {
   )
   /// A regulatory review item was opened. Private to the agency.
   RegulatoryReviewRequested(org_id: String, review_id: String, kind: String)
+  /// An Offer on a Room changed (each change is its own registry entry). Private to the club.
+  OfferChanged(
+    change: OfferChange,
+    org_id: String,
+    room_id: String,
+    offer_id: String,
+  )
+  /// A recipient answered an Offer. Private to the club.
+  OfferResponded(
+    org_id: String,
+    room_id: String,
+    offer_id: String,
+    status: Option(String),
+  )
+}
+
+pub type OfferChange {
+  OfferDraftCreated
+  OfferDraftUpdated
+  OfferIssued
+  OfferSuperseded
+  OfferWithdrawn
 }
 
 pub type RepresentationChange {
@@ -71,6 +94,15 @@ pub fn name(event: Event) -> String {
         RepresentationDisclosureChanged -> "representation_disclosure_changed"
       }
     RegulatoryReviewRequested(..) -> "regulatory_review_requested"
+    OfferChanged(change:, ..) ->
+      case change {
+        OfferDraftCreated -> "offer_draft_created"
+        OfferDraftUpdated -> "offer_draft_updated"
+        OfferIssued -> "offer_issued"
+        OfferSuperseded -> "offer_superseded"
+        OfferWithdrawn -> "offer_withdrawn"
+      }
+    OfferResponded(..) -> "offer_responded"
   }
 }
 
@@ -83,7 +115,9 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | AgencyAffiliationCreated(org_id:, ..)
     | AgencyAffiliationEnded(org_id:, ..)
     | Representation(org_id:, ..)
-    | RegulatoryReviewRequested(org_id:, ..) -> Ok(org_id)
+    | RegulatoryReviewRequested(org_id:, ..)
+    | OfferChanged(org_id:, ..)
+    | OfferResponded(org_id:, ..) -> Ok(org_id)
     Messages(..) | Typing(..) | Notify(..) -> Error(Nil)
   }
 }
@@ -127,13 +161,25 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("reviewId", json.string(review_id)),
       #("kind", json.string(kind)),
     ]
+    OfferChanged(org_id:, room_id:, offer_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("offerId", json.string(offer_id)),
+    ]
+    OfferResponded(org_id:, room_id:, offer_id:, status:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("offerId", json.string(offer_id)),
+      #("status", json.nullable(status, json.string)),
+    ]
   }
 }
 
 /// Whether a reconnect replays it (the registry's `replayPolicy`).
 pub fn replays(event: Event) -> Bool {
   case event {
-    Messages(..) | Notify(..) -> True
+    Messages(..) | Notify(..) | OfferResponded(..) -> True
+    OfferChanged(change:, ..) -> change != OfferDraftUpdated
     _ -> False
   }
 }

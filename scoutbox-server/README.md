@@ -9,12 +9,16 @@ delivery centre, webhooks and support tickets, live sync over server-sent events
 typing and notices), signed media links, password sign-in for organisations, guardian sign-up, the session
 lifetime (`SESSION_TTL_DAYS`) and the production boot refusals, and Recruitment Rooms (with the Trust Score, club
 evidence, missing-evidence suggestions and Combine requests they read), the recruitment case's journey, lifecycle
-actions and formal decision, and Offers (not yet proved by their batteries, which wait on the agents domain). It
-answers thirteen of the TypeScript server's
+actions and formal decision, Offers, the agent core (profiles and verification facets, agency membership,
+representation agreements and the player's My Agent, with the compliance engine's adult approach rule and the review
+items it opens), the organisation audit and a player's erasure. It answers fourteen of the TypeScript server's
 e2e batteries unchanged: `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`,
 `platform/storeGuarantees`, `platform/messaging`, `platform/notifications`, `platform/delivery`,
 `platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff`,
-`verification/organisationsAndStaffAdversarial`, `recruitment/rooms` and `recruitment/decisionsPersistence`.
+`verification/organisationsAndStaffAdversarial`, `recruitment/rooms`, `recruitment/decisionsPersistence` and
+`recruitment/offersPersistence`. `agents/core` passes apart from one check (S13: the transaction workspace's input
+refusal); `recruitment/offers` and `recruitment/offersAdversarial` wait on the transaction workspace and on racing
+Offer acts.
 
 ```sh
 gleam check            # type-check (fast)
@@ -74,7 +78,10 @@ Every route below is exercised by a battery, except where marked.
 | Recruitment | `POST /org/players/:id/request` (contact), `/player/requests/:id/respond`, `/guardian/requests/:id/respond`; `GET /org/ledger`, `/org/funnel`, `/guardian/inbox`; `GET /org/trials`, `/org/signings` (empty pages: no route here creates either) |
 | Rooms | `GET`/`POST /org/rooms`, `GET /org/rooms/needs-attention`, `/summaries`, `GET`/`PATCH /org/rooms/:id`, `POST …/status`, `GET …/snapshots`, `…/activity`, `GET`/`POST …/comments`, `PATCH`/`DELETE …/comments/:cid`, `POST …/tasks`, `PATCH …/tasks/:tid`, `GET`/`POST …/decisions`, `POST …/evidence/:eid/review`, `…/assessment-assignments`, `…/evidence-requests`, `…/combine-requests`, `…/link`; `GET /org/rooms-funnel`, `/admin/rooms/overview` |
 | Case | `GET /org/rooms/:id/journey` (the club's projection), `POST /org/rooms/:id/lifecycle` (a named action, gated by the evidence provider); `GET /org/rooms/:id/decision`, `POST`/`PATCH`/`DELETE …/decision/draft`, `POST …/decision/finalize`, `…/decision/supersede` |
-| Offers (no battery yet) | `GET`/`POST /org/rooms/:id/offers`, `GET /org/offers/:id`, `…/history`, `PATCH …/draft`, `POST …/issue`, `…/withdraw`, `…/revise`, `GET /org/recruitment/offer-policy`; `GET /player/offers`, `/player/offers/:id`, `…/documents/:docId`, `POST …/accept`, `…/decline`, `…/share-agent`; the guardian's `/guardian/offers…` |
+| Offers | `GET`/`POST /org/rooms/:id/offers`, `GET /org/offers/:id`, `…/history`, `PATCH …/draft`, `POST …/issue`, `…/withdraw`, `…/revise`, `GET /org/recruitment/offer-policy`; `GET /player/offers`, `/player/offers/:id`, `…/documents/:docId`, `POST …/accept`, `…/decline`, `…/share-agent`; the guardian's `/guardian/offers…` |
+| Agents | `GET /org/agent/me`, `/home`, `GET`/`POST /org/agent/profile`, `POST …/profile/facets/:facet/submit`; `GET /org/agent/agency`, `GET`/`POST …/agency/team`, `PATCH …/agency/team/:userId`, `POST …/team/:userId/end`, `PATCH …/agency/settings`, `GET …/agency/compliance`, `…/agency/audit`; `GET /org/agent/players`, `/clients`, `POST /org/agent/clients/request`, `GET /org/agent/clients/:id`, `POST …/terminate`, `GET …/opportunities`, `…/offers`; `GET /org/agent/opportunities`, `/inbox`; `GET /player/agent/relationships`, `POST …/:id/confirm`, `/decline`, `/terminate`, `/dispute`, `PATCH …/:id/sharing`; `GET /admin/agent/relationships`, `/admin/agent/profiles` (read only) |
+| Audit and erasure | `GET /org/audit` (Room, agency and ledger rows); `DELETE /player/account` |
+| Opportunity board | `GET /player/opportunity-board` (open days only: club opportunities are not ported) |
 | Passport | `GET /player/trust-profile`, `/org/players/:id/trust-profile` (the Trust Score, from its sources' records); `POST /org/players/:id/evidence` (a club's own claim); `GET /org/players/:id/evidence-gaps` |
 | Combine | `GET /org/combine/protocols` (the registry, recorded from the TypeScript server by `dev/combine_protocols.mjs`), `/org/combine/players/:id` (results: none, until Box Cam's service hands them over) |
 | Threads | `GET /org/channels`, `/org/channels/counts`, `/player/channels`, `/guardian/channels`, `/admin/channels`; `POST /{org,player,guardian}/channels/:id/messages`, `/read`, `/typing` |
@@ -110,7 +117,6 @@ for players and guardians (a new player account stores a hash no password matche
 - The directory's text search lowers ASCII only (SQLite's `lower()`); the TypeScript server lowers as JavaScript
   does, accented letters included.
 - An empty `country` at sign-up is refused as `blank`; the TypeScript server says `too_short`.
-- A refused `badges` that is not a list says `invalid`; the TypeScript server says `not_list`.
 - Of several junk saved-search filters, the first in the filters' own order is named; the TypeScript server names
   the first in the order sent.
 - A Trust Score never says `simulatedEvidenceIncluded: true`: no provider here produces simulated evidence. The

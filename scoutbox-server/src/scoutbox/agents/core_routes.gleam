@@ -496,12 +496,12 @@ fn require(m: Member, capability: String, next: fn() -> Response) -> Response {
 }
 
 /// The agreement of the caller's agency: their own, a summary shared with agency staff, or a concealing 404.
-type Found {
+pub type Found {
   Own(Agreement)
   Summary(Agreement)
 }
 
-fn own_agreement(
+pub fn own_agreement(
   ctx: Ctx,
   m: Member,
   agreement_id: String,

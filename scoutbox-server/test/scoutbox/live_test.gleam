@@ -6,6 +6,7 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/json
 import gleam/list
+import gleam/option.{None}
 import scoutbox/platform/live.{Nobody}
 import scoutbox/platform/live_event.{
   CounterpartyTyping, Messages, Notify, OrgTyping, Typing,
@@ -21,6 +22,73 @@ const samples = [
   Notify(audience.Player, "pl-1"),
   Notify(audience.Guardian, "gd-1"),
   Notify(audience.OrgUser, "u-1"),
+  live_event.AgentProfileCreated("org-1", "u-1"),
+  live_event.AgentVerificationStateChanged(
+    "org-1",
+    "u-1",
+    "fifa_licence",
+    "VERIFIED",
+  ),
+  live_event.AgencyAffiliationCreated("org-1", "u-1"),
+  live_event.AgencyAffiliationEnded("org-1", "u-1"),
+  live_event.Representation(
+    live_event.RepresentationRequested,
+    "org-1",
+    "rep-1",
+    "u-1",
+  ),
+  live_event.Representation(
+    live_event.RepresentationConfirmed,
+    "org-1",
+    "rep-1",
+    "u-1",
+  ),
+  live_event.Representation(
+    live_event.RepresentationRejected,
+    "org-1",
+    "rep-1",
+    "u-1",
+  ),
+  live_event.Representation(
+    live_event.RepresentationTerminated,
+    "org-1",
+    "rep-1",
+    "u-1",
+  ),
+  live_event.Representation(
+    live_event.RepresentationDisputed,
+    "org-1",
+    "rep-1",
+    "u-1",
+  ),
+  live_event.Representation(
+    live_event.RepresentationDisclosureChanged,
+    "org-1",
+    "rep-1",
+    "u-1",
+  ),
+  live_event.RegulatoryReviewRequested("org-1", "rrv-1", "verification_facet"),
+  live_event.OfferChanged(
+    live_event.OfferDraftCreated,
+    "org-1",
+    "case-1",
+    "rof-1",
+  ),
+  live_event.OfferChanged(
+    live_event.OfferDraftUpdated,
+    "org-1",
+    "case-1",
+    "rof-1",
+  ),
+  live_event.OfferChanged(live_event.OfferIssued, "org-1", "case-1", "rof-1"),
+  live_event.OfferChanged(
+    live_event.OfferSuperseded,
+    "org-1",
+    "case-1",
+    "rof-1",
+  ),
+  live_event.OfferChanged(live_event.OfferWithdrawn, "org-1", "case-1", "rof-1"),
+  live_event.OfferResponded("org-1", "case-1", "rof-1", None),
 ]
 
 type Entry {

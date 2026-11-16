@@ -5,7 +5,7 @@
 //// Every route reads "now" from the request clock (`clock.request_ms`), so the batteries can pin an expiry.
 ////
 //// Not ported yet: the transaction workspace an Offer may cite (agents/transactions), so a `transactionId` names
-//// no workspace here; the signing package an accepted Offer opens (`signing` reads null); the Offer live events.
+//// no workspace here; the signing package an accepted Offer opens (`signing` reads null).
 
 import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
@@ -16,6 +16,8 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import scoutbox/agents/core_routes as agent_core
+import scoutbox/agents/integration
 import scoutbox/agents/representation
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
@@ -25,10 +27,12 @@ import scoutbox/identity/players
 import scoutbox/messaging/notifications
 import scoutbox/platform/canonical
 import scoutbox/platform/clock
+import scoutbox/platform/effect
 import scoutbox/platform/http
 import scoutbox/platform/idempotency
 import scoutbox/platform/input
 import scoutbox/platform/limits
+import scoutbox/platform/live_event
 import scoutbox/platform/media
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -41,6 +45,7 @@ import scoutbox/recruitment/recipients
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/room_rules
 import scoutbox/recruitment/room_view
+import scoutbox/rows/agreement_scopes as scope_row
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
 import scoutbox/rows/offer_keys as key_row
@@ -1181,7 +1186,13 @@ pub fn create(
                               )
                               |> storage,
                             )
-                            // Not ported yet: the `offer_draft_created` live event.
+                            store.emit(
+                              tx,
+                              effect.Live(offer_event(
+                                live_event.OfferDraftCreated,
+                                stored,
+                              )),
+                            )
                             http.json(
                               201,
                               json.object([
@@ -1378,8 +1389,11 @@ pub fn edit_draft(
                   )
                   |> storage,
                 )
-                // Not ported yet: the `offer_draft_updated` live event.
                 use stored <- result.map(reread(tx, o.row.id))
+                store.emit(
+                  tx,
+                  effect.Live(offer_event(live_event.OfferDraftUpdated, stored)),
+                )
                 http.json(
                   200,
                   json.object([
@@ -1821,7 +1835,15 @@ fn issue_write(
       |> storage,
     )
     use fresh <- result.try(reread(tx, o.row.id))
-    // Not ported yet: the `offer_superseded` and `offer_issued` live events.
+    case prev_issued {
+      Some(_) ->
+        store.emit(
+          tx,
+          effect.Live(offer_event(live_event.OfferSuperseded, fresh)),
+        )
+      None -> Nil
+    }
+    store.emit(tx, effect.Live(offer_event(live_event.OfferIssued, fresh)))
     let revised = case prev_issued {
       Some(_) -> " (a revised one)"
       None -> ""
@@ -2069,7 +2091,10 @@ pub fn withdraw(
               |> storage,
             )
             use fresh <- result.try(reread(tx, o.row.id))
-            // Not ported yet: the `offer_withdrawn` live event.
+            store.emit(
+              tx,
+              effect.Live(offer_event(live_event.OfferWithdrawn, fresh)),
+            )
             use _ <- result.try(case was_issued {
               True -> {
                 use org <- result.try(
@@ -2349,8 +2374,11 @@ fn revise_checked(
               )
               |> storage,
             )
-            // Not ported yet: the `offer_draft_created` live event.
             use fresh <- result.map(reread(tx, o.row.id))
+            store.emit(
+              tx,
+              effect.Live(offer_event(live_event.OfferDraftCreated, fresh)),
+            )
             http.json(
               201,
               json.object([
@@ -3121,7 +3149,20 @@ fn respond_write(
       None -> Ok(Nil)
     })
     use fresh <- result.try(reread(tx, o.row.id))
-    // Not ported yet: the `offer_responded` live event.
+    case room {
+      Some(k) ->
+        store.emit(
+          tx,
+          effect.Live(live_event.OfferResponded(
+            org_id: id.org_to_string(o.row.org_id),
+            room_id: id.recruitment_case_to_string(k.row.id),
+            offer_id: id.offer_to_string(o.row.id),
+            status: offer_rules.current_revision(fresh)
+              |> option.map(fn(r) { offer_status.to_string(r.row.status) }),
+          )),
+        )
+      None -> Nil
+    }
     use player <- result.try(players.by_id(rd, o.row.player_id) |> storage)
     let player_name = option.map(player, fn(p) { p.row.name })
     let room_name = option.then(room, fn(k) { k.row.player_name })
@@ -3455,4 +3496,165 @@ fn bit_size(b: BitArray) -> Int {
 
 fn base64(b: BitArray) -> String {
   bit_array.base64_encode(b, True)
+}
+
+// ---------------------------------------------------------------------------------------------- live events
+
+fn offer_event(change: live_event.OfferChange, o: Offer) -> live_event.Event {
+  live_event.OfferChanged(
+    change:,
+    org_id: id.org_to_string(o.row.org_id),
+    room_id: id.recruitment_case_to_string(o.row.case_id),
+    offer_id: id.offer_to_string(o.row.id),
+  )
+}
+
+// ---------------------------------------------------------------------------------------------------- agent
+
+/// `GET /org/agent/clients/:id/offers`: only the Offers the client shared with this agent, and only while the
+/// agent's basis, employment or transfer scope and licence hold now. Anyone else sees nothing, including whether
+/// an Offer exists.
+pub fn agent_offers(
+  ctx: Ctx,
+  req: Request,
+  a: OrgAccess,
+  agreement_id: String,
+) -> Response {
+  use m <- agent_core.membership(ctx, a)
+  use found <- agent_core.own_agreement(ctx, m, agreement_id)
+  case found {
+    agent_core.Summary(_) ->
+      http.error_message(
+        403,
+        "AGENT_ACTION_NOT_PERMITTED",
+        "A summary row does not open a client's Offers.",
+      )
+    agent_core.Own(agreement) -> {
+      let now = clock.request_ms(ctx.config, req)
+      let client_id = agreement.row.client_id
+      let closed = fn(code, rule) {
+        http.json(
+          403,
+          json.object([
+            #("error", json.string(code)),
+            #("rule", json.nullable(rule, json.string)),
+            #(
+              "message",
+              json.string("This client's Offers are not open to you right now."),
+            ),
+          ]),
+        )
+      }
+      let checked =
+        read(ctx, fn(rd) {
+          use decision <- result.try(integration.decide(
+            rd,
+            integration.ClientPrivate,
+            client_id,
+            a.user.id,
+            None,
+            now,
+          ))
+          use licence <- result.map(integration.licence_current(
+            rd,
+            a.user.id,
+            agreement.row.jurisdiction,
+            now,
+          ))
+          #(decision, licence)
+        })
+      case checked {
+        Error(response) -> response
+        Ok(#(integration.Denied(code:, rule:), _)) -> closed(code, Some(rule))
+        Ok(#(integration.Allowed(basis), licence)) ->
+          case
+            list.any(basis.scope, fn(s) {
+              s == scope_row.Employment || s == scope_row.Transfer
+            }),
+            licence
+          {
+            False, _ ->
+              http.error_message(
+                403,
+                "SCOPE_INSUFFICIENT",
+                "Your representation scope with this client does not cover employment or transfer.",
+              )
+            True, False -> closed("LICENCE_NOT_CURRENT", Some("LICENCE"))
+            True, True ->
+              case
+                read(ctx, fn(rd) {
+                  use all <- result.try(offers.for_player(
+                    rd,
+                    id.player(client_id),
+                  ))
+                  use kept <- result.try(
+                    list.try_fold(all, [], fn(out, o) {
+                      use ok <- result.map(sound(rd, o, now))
+                      case
+                        ok
+                        && o.row.agent_share_user_id == Some(a.user.id)
+                        && option.is_some(offer_rules.live_revision(o))
+                      {
+                        True -> [o, ..out]
+                        False -> out
+                      }
+                    }),
+                  )
+                  use items <- result.try(
+                    kept
+                    |> list.sort(fn(x, y) {
+                      int.compare(
+                        option.unwrap(y.row.agent_share_at, 0),
+                        option.unwrap(x.row.agent_share_at, 0),
+                      )
+                    })
+                    |> list.try_map(fn(o) {
+                      use org <- result.map(org_of(rd, o.row.org_id))
+                      json.object(offer_rules.agent_view(
+                        o,
+                        now,
+                        option.map(org, fn(x) { x.name }),
+                      ))
+                    }),
+                  )
+                  use seen <- result.map(players.for_org(
+                    rd,
+                    id.player(client_id),
+                    a.org,
+                    now,
+                  ))
+                  #(items, case seen {
+                    Some(#(p, access)) if access.visible && !access.blocked ->
+                      json.string(p.row.name)
+                    _ -> json.null()
+                  })
+                })
+              {
+                Error(response) -> response
+                Ok(#(items, name)) ->
+                  http.json(
+                    200,
+                    json.object([
+                      #("items", json.preprocessed_array(items)),
+                      #("clientId", json.string(client_id)),
+                      #("clientName", name),
+                      #(
+                        "note",
+                        json.string(
+                          "Only the Offers your client chose to share with you, as the club issued them. Accepting or declining is your client's own act; ScoutBox does not let you do it on their behalf.",
+                        ),
+                      ),
+                      #(
+                        "honest",
+                        json.string(
+                          "Nothing here is a negotiation, a fee or a signing. An accepted Offer is not a signed contract.",
+                        ),
+                      ),
+                    ]),
+                  )
+              }
+          }
+      }
+    }
+  }
 }
