@@ -51,3 +51,23 @@ lines, with a comment, so the batteries and `dev/shape_diff.mjs` agree with the 
 **Fix.** Read `h.byName` in `timelineFor` on the TypeScript side, then name the actor in the Gleam projection too.
 Check that no client or battery relies on the null first.
 
+
+## An agent with no profile is told it needs a VERIFIED "undefined"
+
+Found 2026-11-16 while porting the transaction workspace. Ported as the TypeScript server behaves.
+
+**What it is.** `POST /org/agent/transactions` first runs the facet gate (`compliance.facetGateProblem`). For an
+agent with no agent profile, the gate answers `{ error: 'AGENT_VERIFICATION_REQUIRED', message: 'Create your agent
+profile first.' }`, with no facet fields. The route (`domains/agents/transactions/agentRoutes.mjs`) then replaces the
+message with one built from `gate.facet`, `gate.memberAssociation` and `gate.state`. All three are undefined here,
+so the agent reads:
+
+> A regulated action needs a VERIFIED undefined; it is undefined.
+
+The code (`AGENT_VERIFICATION_REQUIRED`, 403) is right; only the message is broken.
+
+**Where it is in the port.** `gate_refusal` in `scoutbox-server/src/scoutbox/agents/transaction_routes.gleam`
+sends the same text for `compliance_store.NoProfile`, with a comment.
+
+**Fix.** In `agentRoutes.mjs`, keep the gate's own message when it names no facet ("Create your agent profile
+first."), then send that text from `gate_refusal` too. No battery checks this message.
