@@ -34,6 +34,8 @@ import scoutbox/rows/player_timeline as timeline_row
 import scoutbox/rows/players as row
 import scoutbox/rules/age
 import scoutbox/rules/visibility.{type Access}
+import scoutbox/vocab/availability
+import scoutbox/vocab/foot
 import scoutbox/vocab/playing_level
 import scoutbox/vocab/position as positions
 import sqlight
@@ -425,7 +427,7 @@ pub type NewPlayer {
     country: String,
     city: Option(String),
     position: Option(positions.Position),
-    foot: Option(row.Foot),
+    foot: Option(foot.Foot),
     height_cm: Option(Int),
     weight_kg: Option(Int),
     location: Option(#(Float, Float)),
@@ -755,7 +757,7 @@ pub fn self_fields(p: Player) -> List(#(String, Json)) {
     #("country", json.string(r.country)),
     #("city", opt_string(r.city)),
     #("position", opt_string(option.map(r.position, positions.to_string))),
-    #("foot", opt_string(option.map(r.foot, row.foot_to_string))),
+    #("foot", opt_string(option.map(r.foot, foot.to_string))),
     #("heightCm", opt_int(r.height_cm)),
     #("weightKg", opt_int(r.weight_kg)),
     #("squadNumber", opt_int(r.squad_number)),
@@ -764,7 +766,7 @@ pub fn self_fields(p: Player) -> List(#(String, Json)) {
     #("agentName", opt_string(r.agent_name)),
     #("academyPlus", json.bool(r.academy_plus)),
     #("firstTeamSeeker", json.bool(r.first_team_seeker)),
-    #("availability", row.availability_to_json(r.availability)),
+    #("availability", availability.to_json(r.availability)),
     #("contractStatus", row.contract_status_to_json(r.contract_status)),
     #("level", playing_level.to_json(r.level)),
     #("footballCategory", opt_string(r.football_category)),
@@ -855,7 +857,7 @@ pub fn org_fields(
       #("id", id.player_json(r.id)),
       #("name", json.string(r.name)),
       #("position", opt_string(option.map(r.position, positions.to_string))),
-      #("foot", opt_string(option.map(r.foot, row.foot_to_string))),
+      #("foot", opt_string(option.map(r.foot, foot.to_string))),
       #("heightCm", opt_int(r.height_cm)),
       #("weightKg", opt_int(r.weight_kg)),
       #("country", json.string(r.country)),
@@ -865,7 +867,7 @@ pub fn org_fields(
         False -> opt_string(r.city)
       }),
       #("level", playing_level.to_json(r.level)),
-      #("availability", row.availability_to_json(r.availability)),
+      #("availability", availability.to_json(r.availability)),
       #("contractStatus", row.contract_status_to_json(r.contract_status)),
       #("identityVerified", json.bool(r.identity_verified)),
       #("footballCategory", opt_string(r.football_category)),
@@ -978,7 +980,7 @@ fn refreshed(tx: Tx, id: id.PlayerId) -> Result(Player, Fail(e)) {
 pub fn set_availability(
   tx: Tx,
   id: id.PlayerId,
-  availability: Option(row.Availability),
+  availability: Option(availability.Availability),
   contract_status: Option(row.ContractStatus),
 ) -> Result(Player, Fail(e)) {
   update(
@@ -986,7 +988,7 @@ pub fn set_availability(
     id,
     option.values([
       option.map(availability, fn(a) {
-        #("availability", sqlight.text(row.availability_to_string(a)))
+        #("availability", sqlight.text(availability.to_string(a)))
       }),
       option.map(contract_status, fn(c) {
         #("contract_status", sqlight.text(row.contract_status_to_string(c)))
@@ -1107,6 +1109,93 @@ pub fn prefs(p: Player) -> Prefs {
     p.row.prefs_school_hours_mute,
     p.row.prefs_timezone,
   )
+}
+
+/// The position after a player's last item in a list table.
+fn next_position(
+  tx: Tx,
+  table: String,
+  player_id: id.PlayerId,
+) -> Result(Int, Fail(e)) {
+  use found <- result.map(store.one(
+    store.reading(tx),
+    "SELECT COALESCE(MAX(position) + 1, 0) FROM "
+      <> table
+      <> " WHERE player_id = ?",
+    [id.player_sql(player_id)],
+    decode.at([0], decode.int),
+  ))
+  result.unwrap(found, 0)
+}
+
+/// Appends a clip with no footage yet (an upload is not ported). Returns the stored clip and record.
+pub fn add_media(
+  tx: Tx,
+  player_id: id.PlayerId,
+  title title: String,
+  kind kind: String,
+  uploaded_at uploaded_at: String,
+) -> Result(#(media_row.Row, Player), Fail(e)) {
+  use media_id <- result.try(id.next_media(tx))
+  use position <- result.try(next_position(tx, media_row.table, player_id))
+  let clip =
+    media_row.Row(
+      ..media_row.new(id: media_id, player_id:, position:, title:),
+      kind: Some(kind),
+      uploaded_at: Some(uploaded_at),
+    )
+  use _ <- result.try(media_row.insert(tx, clip))
+  use p <- result.map(refreshed(tx, player_id))
+  #(clip, p)
+}
+
+pub type NewMedicalRecord {
+  NewMedicalRecord(
+    type_: String,
+    title: String,
+    date: String,
+    layoff_weeks: Option(Float),
+    cleared: Option(Bool),
+  )
+}
+
+/// Appends a medical record. Returns the stored record.
+pub fn add_medical_record(
+  tx: Tx,
+  player_id: id.PlayerId,
+  new: NewMedicalRecord,
+) -> Result(Player, Fail(e)) {
+  use record_id <- result.try(id.next_medical_record(tx))
+  use position <- result.try(next_position(tx, medical_row.table, player_id))
+  use _ <- result.try(medical_row.insert(
+    tx,
+    medical_row.Row(
+      ..medical_row.new(
+        id: record_id,
+        player_id:,
+        position:,
+        type_: new.type_,
+        title: new.title,
+      ),
+      record_date: Some(new.date),
+      layoff_weeks: new.layoff_weeks,
+      cleared: new.cleared,
+    ),
+  ))
+  refreshed(tx, player_id)
+}
+
+pub fn set_condition_status(
+  tx: Tx,
+  id: id.PlayerId,
+  status: String,
+) -> Result(Player, Fail(e)) {
+  update(tx, id, [#("medical_condition_status", sqlight.text(status))])
+}
+
+/// The medical record the player sees: sharing, condition and records.
+pub fn medical_view(p: Player) -> Json {
+  medical_json(p)
 }
 
 /// Records football activity at `at`: it feeds the streak and the weekly goal.

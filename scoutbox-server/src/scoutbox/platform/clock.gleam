@@ -35,6 +35,11 @@ pub fn iso(ms: Int) -> String {
   <> "Z"
 }
 
+/// The UTC day of an instant, `YYYY-MM-DD` (`toISOString().slice(0, 10)`).
+pub fn iso_day(ms: Int) -> String {
+  iso(ms) |> string.slice(0, 10)
+}
+
 /// A day as JavaScript's `toDateString` writes it (`Mon Nov 16 2026`), in UTC: the TypeScript server's own zone
 /// when it runs in UTC, as its batteries do.
 pub fn date_string(ms: Int) -> String {

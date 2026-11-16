@@ -2,6 +2,7 @@ import gleam/dynamic
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import scoutbox/platform/input
 
 type Prefs {
@@ -107,4 +108,37 @@ pub fn hhmm_test() {
   assert !input.is_hhmm("7:00")
   assert !input.is_hhmm("07:60")
   assert !input.is_hhmm("+7:00")
+}
+
+fn day(v: dynamic.Dynamic) -> Result(option.Option(String), input.Refusal) {
+  let shape = {
+    use date <- input.field("date", input.nullish(input.day_or_blank()))
+    input.done(option.flatten(date))
+  }
+  input.parse(shape, body([#("date", v)]), "body", [])
+}
+
+pub fn a_calendar_day_may_be_left_blank_test() {
+  assert day(dynamic.string("2026-02-28")) == Ok(Some("2026-02-28"))
+  assert day(dynamic.string("")) == Ok(None)
+  assert day(dynamic.nil()) == Ok(None)
+}
+
+pub fn a_day_refusal_says_why_as_temporal_ts_does_test() {
+  let why = fn(v) {
+    let text = refusal_text(day(v))
+    assert string.contains(text, "\"error\":\"DATE_INVALID\"")
+    text
+  }
+  assert string.contains(
+    why(dynamic.string("2026-02-30")),
+    "(no such day in that month)",
+  )
+  assert string.contains(why(dynamic.string("2026-13-01")), "(no such month)")
+  assert string.contains(
+    why(dynamic.string("1899-01-01")),
+    "(year outside 1900–2100)",
+  )
+  assert string.contains(why(dynamic.string("1 May")), "(wrong shape)")
+  assert string.contains(why(dynamic.int(20_260_501)), "(not text)")
 }

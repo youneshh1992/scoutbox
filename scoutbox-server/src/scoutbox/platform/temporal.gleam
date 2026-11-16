@@ -56,6 +56,27 @@ pub fn day_start_ms(s: String) -> Result(Int, Nil) {
   }
 }
 
+/// A calendar day `YYYY-MM-DD` (parseStrictDateOnly). Error: why not, in temporal.ts's words.
+pub fn date_only(s: String) -> Result(String, String) {
+  case day(s) {
+    Error(Nil) -> Error("wrong shape")
+    Ok(#(y, _, _)) if y < year_min || y > year_max ->
+      Error(
+        "year outside "
+        <> int.to_string(year_min)
+        <> "–"
+        <> int.to_string(year_max),
+      )
+    Ok(#(_, m, _)) if m < 1 || m > 12 -> Error("no such month")
+    Ok(#(_, _, d)) if d < 1 || d > 31 -> Error("no such day")
+    Ok(_) ->
+      case day_start_ms(s) {
+        Ok(_) -> Ok(s)
+        Error(Nil) -> Error("no such day in that month")
+      }
+  }
+}
+
 fn day(s: String) -> Result(#(Int, Int, Int), Nil) {
   let assert Ok(shape) = regexp.from_string("^(\\d{4})-(\\d{2})-(\\d{2})$")
   case regexp.check(shape, s), string.split(s, "-") {

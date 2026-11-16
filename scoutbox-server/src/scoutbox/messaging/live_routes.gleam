@@ -170,7 +170,8 @@ pub fn ticket(ctx: Ctx, req: Request) -> Response {
   let found =
     store.read(ctx.store, fn(read) {
       use session <- result.try(case http.bearer(req) {
-        Ok(token) -> sessions.by_token(read, token, now)
+        Ok(token) ->
+          sessions.by_token(read, token, now, ctx.config.session_ttl_ms)
         Error(Nil) -> Ok(None)
       })
       case session {
@@ -223,7 +224,11 @@ pub fn connect(ctx: Ctx, req: Request) -> Response {
         "Mint a fresh connect ticket (POST /events/ticket) and reconnect.",
       )
     Ok(sid) ->
-      case store.read(ctx.store, fn(read) { stream_viewer(read, sid, now) }) {
+      case
+        store.read(ctx.store, fn(read) {
+          stream_viewer(read, sid, now, ctx.config.session_ttl_ms)
+        })
+      {
         Error(failure) -> http.internal(failure)
         Ok(None) ->
           http.error_message(
@@ -248,8 +253,9 @@ fn stream_viewer(
   read: Read,
   sid: String,
   now: Int,
+  ttl_ms: Int,
 ) -> Result(Option(Viewer), Fail(e)) {
-  use session <- result.try(sessions.by_sid(read, sid, now))
+  use session <- result.try(sessions.by_sid(read, sid, now, ttl_ms))
   case session {
     Some(s) -> viewer(read, s.holder)
     None -> Ok(None)
@@ -271,8 +277,7 @@ type Stream {
 /// Opens the stream `connect` agreed to, in the connection's process. The session is resolved again here: it may
 /// have ended since.
 pub fn open(
-  store: Store,
-  hub: Hub,
+  ctx: Ctx,
   marker: String,
   resp: response.Response(a),
 ) -> response.Response(ewe.Body) {
@@ -291,13 +296,15 @@ pub fn open(
         |> process.select(signals)
         |> process.select_map(frames, Deliver)
       let viewer =
-        store.read(store, fn(read) { stream_viewer(read, sid, now) })
+        store.read(ctx.store, fn(read) {
+          stream_viewer(read, sid, now, ctx.config.session_ttl_ms)
+        })
         |> result.unwrap(None)
       case viewer {
         None -> process.send(signals, Stop)
         Some(viewer) -> {
           let _ = send(conn, live.signal("connected", now))
-          case live.join(hub, frames, after) {
+          case live.join(ctx.live, frames, after) {
             live.Fresh -> Nil
             live.Resync -> {
               let _ = send(conn, live.signal("resync", clock.now_ms()))
@@ -305,7 +312,7 @@ pub fn open(
             }
             live.Replay(missed) -> {
               let deliverable =
-                store.read(store, fn(read) {
+                store.read(ctx.store, fn(read) {
                   list.filter(missed, fn(f) {
                     may_receive(read, viewer, f.route)
                   })
@@ -325,7 +332,7 @@ pub fn open(
       case signal, stream.viewer {
         Deliver(frame), Some(viewer) -> {
           case
-            store.read(store, fn(read) {
+            store.read(ctx.store, fn(read) {
               may_receive(read, viewer, frame.route)
             })
           {
@@ -348,7 +355,7 @@ pub fn open(
         _, _ -> ewe.stop()
       }
     },
-    on_close: fn(_) { live.leave(hub) },
+    on_close: fn(_) { live.leave(ctx.live) },
   )
 }
 

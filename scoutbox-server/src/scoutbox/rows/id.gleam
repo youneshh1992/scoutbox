@@ -320,6 +320,38 @@ pub fn next_evidence(tx: Tx) -> Result(EvidenceId, Fail(e)) {
   ids.next(tx, "vevd") |> result.map(EvidenceId)
 }
 
+/// An id of `friendlies`.
+pub opaque type FriendlyId {
+  FriendlyId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn friendly(text: String) -> FriendlyId {
+  FriendlyId(text)
+}
+
+pub fn friendly_to_string(id: FriendlyId) -> String {
+  let FriendlyId(text) = id
+  text
+}
+
+pub fn friendly_sql(id: FriendlyId) -> sqlight.Value {
+  sqlight.text(friendly_to_string(id))
+}
+
+pub fn friendly_json(id: FriendlyId) -> Json {
+  json.string(friendly_to_string(id))
+}
+
+pub fn friendly_decoder() -> decode.Decoder(FriendlyId) {
+  decode.map(decode.string, FriendlyId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_friendly(tx: Tx) -> Result(FriendlyId, Fail(e)) {
+  ids.next(tx, "fr") |> result.map(FriendlyId)
+}
+
 /// An id of `guardians`.
 pub opaque type GuardianId {
   GuardianId(String)
@@ -470,6 +502,11 @@ pub fn media_decoder() -> decode.Decoder(MediaId) {
   decode.map(decode.string, MediaId)
 }
 
+/// A new id, minted inside the unit that uses it.
+pub fn next_media(tx: Tx) -> Result(MediaId, Fail(e)) {
+  ids.next(tx, "media") |> result.map(MediaId)
+}
+
 /// An id of `player_medical_records`.
 pub opaque type MedicalRecordId {
   MedicalRecordId(String)
@@ -495,6 +532,11 @@ pub fn medical_record_json(id: MedicalRecordId) -> Json {
 
 pub fn medical_record_decoder() -> decode.Decoder(MedicalRecordId) {
   decode.map(decode.string, MedicalRecordId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_medical_record(tx: Tx) -> Result(MedicalRecordId, Fail(e)) {
+  ids.next(tx, "md") |> result.map(MedicalRecordId)
 }
 
 /// An id of `messages`.
@@ -591,6 +633,38 @@ pub fn notification_decoder() -> decode.Decoder(NotificationId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_notification(tx: Tx) -> Result(NotificationId, Fail(e)) {
   ids.next(tx, "ntf") |> result.map(NotificationId)
+}
+
+/// An id of `open_trials`.
+pub opaque type OpenTrialId {
+  OpenTrialId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn open_trial(text: String) -> OpenTrialId {
+  OpenTrialId(text)
+}
+
+pub fn open_trial_to_string(id: OpenTrialId) -> String {
+  let OpenTrialId(text) = id
+  text
+}
+
+pub fn open_trial_sql(id: OpenTrialId) -> sqlight.Value {
+  sqlight.text(open_trial_to_string(id))
+}
+
+pub fn open_trial_json(id: OpenTrialId) -> Json {
+  json.string(open_trial_to_string(id))
+}
+
+pub fn open_trial_decoder() -> decode.Decoder(OpenTrialId) {
+  decode.map(decode.string, OpenTrialId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_open_trial(tx: Tx) -> Result(OpenTrialId, Fail(e)) {
+  ids.next(tx, "open") |> result.map(OpenTrialId)
 }
 
 /// An id of `ops_events`.
@@ -1007,6 +1081,70 @@ pub fn root_transfer_decoder() -> decode.Decoder(RootTransferId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_root_transfer(tx: Tx) -> Result(RootTransferId, Fail(e)) {
   ids.next(tx, "vrtx") |> result.map(RootTransferId)
+}
+
+/// An id of `saved_searches`.
+pub opaque type SavedSearchId {
+  SavedSearchId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn saved_search(text: String) -> SavedSearchId {
+  SavedSearchId(text)
+}
+
+pub fn saved_search_to_string(id: SavedSearchId) -> String {
+  let SavedSearchId(text) = id
+  text
+}
+
+pub fn saved_search_sql(id: SavedSearchId) -> sqlight.Value {
+  sqlight.text(saved_search_to_string(id))
+}
+
+pub fn saved_search_json(id: SavedSearchId) -> Json {
+  json.string(saved_search_to_string(id))
+}
+
+pub fn saved_search_decoder() -> decode.Decoder(SavedSearchId) {
+  decode.map(decode.string, SavedSearchId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_saved_search(tx: Tx) -> Result(SavedSearchId, Fail(e)) {
+  ids.next(tx, "ss") |> result.map(SavedSearchId)
+}
+
+/// An id of `org_squad_members`.
+pub opaque type SquadEntryId {
+  SquadEntryId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn squad_entry(text: String) -> SquadEntryId {
+  SquadEntryId(text)
+}
+
+pub fn squad_entry_to_string(id: SquadEntryId) -> String {
+  let SquadEntryId(text) = id
+  text
+}
+
+pub fn squad_entry_sql(id: SquadEntryId) -> sqlight.Value {
+  sqlight.text(squad_entry_to_string(id))
+}
+
+pub fn squad_entry_json(id: SquadEntryId) -> Json {
+  json.string(squad_entry_to_string(id))
+}
+
+pub fn squad_entry_decoder() -> decode.Decoder(SquadEntryId) {
+  decode.map(decode.string, SquadEntryId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_squad_entry(tx: Tx) -> Result(SquadEntryId, Fail(e)) {
+  ids.next(tx, "sq") |> result.map(SquadEntryId)
 }
 
 /// An id of `support_tickets`.

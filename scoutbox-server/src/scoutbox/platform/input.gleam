@@ -288,6 +288,33 @@ pub fn due_date() -> Check(Option(temporal.Due)) {
   }
 }
 
+/// A calendar day `YYYY-MM-DD` a form may leave empty (schemas.mjs `dayOrBlank`, under `nullish`): "" is no day.
+pub fn day_or_blank() -> Check(Option(String)) {
+  fn(v) {
+    let refused = fn(why: String) {
+      Error(
+        Issue(
+          ..issue(
+            NotADate,
+            "must be a calendar day written YYYY-MM-DD (" <> why <> ")",
+          ),
+          expected: Some("YYYY-MM-DD"),
+          code: Some("DATE_INVALID"),
+        ),
+      )
+    }
+    case decode.run(v, decode.string) {
+      Ok("") -> Ok(None)
+      Ok(s) ->
+        case temporal.date_only(s) {
+          Ok(s) -> Ok(Some(s))
+          Error(why) -> refused(why)
+        }
+      Error(_) -> refused("not text")
+    }
+  }
+}
+
 /// `?ids=a,b,c` for a batch read (schemas.mjs `idsText`): at most `max` ids of at most 80 characters each. More
 /// are refused rather than dropped. Empty entries are skipped.
 pub fn ids_text(max: Int) -> Check(List(String)) {

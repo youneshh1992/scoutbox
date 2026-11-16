@@ -1,8 +1,9 @@
 //// Bearer sessions (`sessions`). A row holds only the token's sha-256; the token exists once server side, in the
 //// value `create` returns, which the sign-in puts in its response.
 ////
-//// A session is live while `now - created_at < ttl`. Expired rows stay until the next mint prunes them: a read
-//// never writes.
+//// A session is live while `now - created_at < ttl`, the lifetime the server was started with
+//// (`config.session_ttl_ms`), so a shorter lifetime also expires sessions minted under a longer one. Expired rows
+//// stay until the next mint prunes them: a read never writes.
 
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -12,7 +13,8 @@ import scoutbox/rows/id
 import scoutbox/rows/sessions as row
 import sqlight
 
-pub const ttl_ms = 2_592_000_000
+/// The default lifetime: 30 days.
+pub const default_ttl_ms = 2_592_000_000
 
 /// Who a session signs in. Only staff sessions are minted by the routes this server runs so far.
 pub type Holder {
@@ -46,7 +48,12 @@ fn session(r: row.Row) -> Result(Session, Nil) {
 }
 
 /// Mints a session and returns its token.
-pub fn create(tx: Tx, holder: Holder, now: Int) -> Result(String, Fail(e)) {
+pub fn create(
+  tx: Tx,
+  holder: Holder,
+  now: Int,
+  ttl_ms: Int,
+) -> Result(String, Fail(e)) {
   let token = secrets.random_hex(24)
   let #(kind, ref_id, user_id) = case holder {
     Player(p) -> #(row.Player, id.player_to_string(p), None)
@@ -86,6 +93,7 @@ pub fn by_token(
   read: Read,
   token: String,
   now: Int,
+  ttl_ms: Int,
 ) -> Result(Option(Session), Fail(e)) {
   use found <- result.map(store.one(
     read,
@@ -93,7 +101,7 @@ pub fn by_token(
     [sqlight.text(secrets.sha256_hex(token))],
     row.decoder(),
   ))
-  live(found, now)
+  live(found, now, ttl_ms)
 }
 
 /// The live session with this sid: an event-stream ticket names its session by sid, never by token.
@@ -101,6 +109,7 @@ pub fn by_sid(
   read: Read,
   sid: String,
   now: Int,
+  ttl_ms: Int,
 ) -> Result(Option(Session), Fail(e)) {
   use found <- result.map(store.one(
     read,
@@ -108,10 +117,10 @@ pub fn by_sid(
     [sqlight.text(sid)],
     row.decoder(),
   ))
-  live(found, now)
+  live(found, now, ttl_ms)
 }
 
-fn live(found: Result(row.Row, Nil), now: Int) -> Option(Session) {
+fn live(found: Result(row.Row, Nil), now: Int, ttl_ms: Int) -> Option(Session) {
   case result.try(found, session) {
     Ok(s) if s.created_at > 0 && now - s.created_at < ttl_ms -> Some(s)
     _ -> None

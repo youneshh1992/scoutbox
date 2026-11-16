@@ -43,7 +43,12 @@ pub fn register_device(ctx: Ctx, req: Request) -> Response {
   let now = clock.now_ms()
   let holder = case http.bearer(req) {
     Ok(token) ->
-      store.read(ctx.store, sessions.by_token(_, token, now))
+      store.read(ctx.store, sessions.by_token(
+        _,
+        token,
+        now,
+        ctx.config.session_ttl_ms,
+      ))
       |> result.map(option.map(_, fn(s) { s.holder }))
     Error(Nil) -> Ok(None)
   }

@@ -24,12 +24,12 @@ import scoutbox/platform/limits
 import scoutbox/platform/store
 import scoutbox/recruitment/requests
 import scoutbox/rows/id
-import scoutbox/rows/players as row
 import scoutbox/rules/age
 import scoutbox/safety/audit
 import scoutbox/safety/ledger
 import scoutbox/safety/moderate
 import scoutbox/vocab/audience
+import scoutbox/vocab/foot
 import scoutbox/vocab/position
 import wisp.{type Request, type Response}
 
@@ -51,7 +51,7 @@ type Signup {
     country: Option(String),
     city: Option(String),
     position: Option(position.Position),
-    foot: Option(row.Foot),
+    foot: Option(foot.Foot),
     height_cm: Option(Int),
     weight_kg: Option(Int),
     lat: Option(Float),
@@ -81,7 +81,7 @@ fn profile_shape(with_password: Bool) -> input.Shape(Signup) {
   use country <- input.field("country", input.optional(input.required_text(40)))
   use city <- input.field("city", input.nullish(input.text(80)))
   use position <- input.field("position", blank_or(position.pairs))
-  use foot <- input.field("foot", blank_or(row.foot_pairs))
+  use foot <- input.field("foot", blank_or(foot.pairs))
   use height_cm <- input.field(
     "heightCm",
     input.nullish(input.whole_number(50, 250)),
@@ -323,6 +323,7 @@ fn create(
         tx,
         sessions.Player(p.row.id),
         now,
+        ctx.config.session_ttl_ms,
       ))
       #(p, token)
     })
@@ -478,7 +479,12 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
         None, True ->
           case
             store.unit(ctx.store, fn(tx) {
-              sessions.create(tx, sessions.Player(p.row.id), now)
+              sessions.create(
+                tx,
+                sessions.Player(p.row.id),
+                now,
+                ctx.config.session_ttl_ms,
+              )
             })
           {
             Ok(token) ->

@@ -50,12 +50,13 @@ fn has_table(s: store.Store, name: String) -> Bool {
 pub fn ordered_idempotent_and_recorded_once_test() {
   let assert Ok(known) = migrations.known()
   let s = fresh()
-  let assert Ok(first) = migrations.run(s, session_ttl_ms: sessions.ttl_ms)
+  let assert Ok(first) =
+    migrations.run(s, session_ttl_ms: sessions.default_ttl_ms)
   // A fresh database runs every migration, in id order.
   assert first == known
   assert first == list.sort(known, string.compare)
   // A second run applies nothing, and each migration is recorded once.
-  let assert Ok([]) = migrations.run(s, session_ttl_ms: sessions.ttl_ms)
+  let assert Ok([]) = migrations.run(s, session_ttl_ms: sessions.default_ttl_ms)
   assert recorded(s) == known
   assert migrations.up_to_date(recorded(s), known)
 }
@@ -86,9 +87,9 @@ pub fn a_failing_migration_changes_nothing_test() {
       "CREATE TABLE broken_on_purpose (x TEXT);\nSELECT * FROM no_such_table;",
     )
   let s = fresh()
-  let assert Ok(_) = migrations.run(s, session_ttl_ms: sessions.ttl_ms)
+  let assert Ok(_) = migrations.run(s, session_ttl_ms: sessions.default_ttl_ms)
   let assert Error(message) =
-    migrations.run_from(s, dir, session_ttl_ms: sessions.ttl_ms)
+    migrations.run_from(s, dir, session_ttl_ms: sessions.default_ttl_ms)
   assert string.starts_with(message, "9999_broken_on_purpose failed")
   assert string.contains(message, "not modified")
   assert !has_table(s, "broken_on_purpose")

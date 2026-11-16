@@ -36,7 +36,8 @@ pub fn org_session(
   let found =
     store.read(ctx.store, fn(read) {
       use session <- result.try(case http.bearer(req) {
-        Ok(token) -> sessions.by_token(read, token, now)
+        Ok(token) ->
+          sessions.by_token(read, token, now, ctx.config.session_ttl_ms)
         Error(Nil) -> Ok(None)
       })
       case session {
@@ -111,13 +112,14 @@ pub type PlayerAccess {
 }
 
 fn session_holder(
+  ctx: Ctx,
   req: Request,
   read: store.Read,
   now: Int,
 ) -> Result(Option(sessions.Holder), store.Fail(e)) {
   case http.bearer(req) {
     Ok(token) ->
-      sessions.by_token(read, token, now)
+      sessions.by_token(read, token, now, ctx.config.session_ttl_ms)
       |> result.map(option.map(_, fn(s) { s.holder }))
     Error(Nil) -> Ok(None)
   }
@@ -131,7 +133,7 @@ pub fn player_session(
   let now = clock.now_ms()
   let found =
     store.read(ctx.store, fn(read) {
-      use holder <- result.try(session_holder(req, read, now))
+      use holder <- result.try(session_holder(ctx, req, read, now))
       case holder {
         Some(sessions.Player(id)) -> players.by_id(read, id)
         _ -> Ok(None)
@@ -173,7 +175,7 @@ pub fn guardian_session(
   let now = clock.now_ms()
   let found =
     store.read(ctx.store, fn(read) {
-      use holder <- result.try(session_holder(req, read, now))
+      use holder <- result.try(session_holder(ctx, req, read, now))
       case holder {
         Some(sessions.Guardian(id)) -> guardians.by_id(read, id)
         _ -> Ok(None)

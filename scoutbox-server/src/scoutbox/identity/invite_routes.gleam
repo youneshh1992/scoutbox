@@ -213,6 +213,7 @@ fn accepting(
         tx,
         sessions.OrgStaff(org.id, user.id),
         now,
+        ctx.config.session_ttl_ms,
       ))
       use onboarding <- result.try(onboarding(store.reading(tx), org, user))
       Ok(#(user, restored, token, onboarding))

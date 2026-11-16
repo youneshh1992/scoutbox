@@ -6,10 +6,12 @@ guardians (sign-up, the player record, the directory, guardians and their childr
 their review, organisation applications, domains, the administrator hierarchy, squad invitations, coach
 references), message threads (answering a request opens one), and notifications with their preferences, push, the
 delivery centre, webhooks and support tickets, live sync over server-sent events (`/events`, for thread messages,
-typing and notices), signed media links, and password sign-in for organisations. It answers ten of the TypeScript
-server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`,
+typing and notices), signed media links, password sign-in for organisations, guardian sign-up, the session
+lifetime (`SESSION_TTL_DAYS`) and the production boot refusals. It answers eleven of the TypeScript server's e2e
+batteries unchanged: `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`,
 `platform/storeGuarantees`, `platform/messaging`, `platform/notifications`, `platform/delivery`,
-`platform/connectedMode`, `verification/organisationsAndStaff` and `verification/organisationsAndStaffAdversarial`.
+`platform/connectedMode`, `platform/sessionsAndPorts`, `verification/organisationsAndStaff` and
+`verification/organisationsAndStaffAdversarial`.
 
 ```sh
 gleam check            # type-check (fast)
@@ -62,13 +64,14 @@ Every route below is exercised by a battery, except where marked.
 | Area | Routes |
 |---|---|
 | Health | `GET /health` |
-| Sign-in | `POST /auth/org/login` (with an organisation password: scrypt, checked before the unit), `/auth/org/register-grassroots`, `/auth/org/accept-invite`, `/auth/logout`, `/auth/player/signup`, `/auth/guardian/login`; `/auth/sso/start` and `/callback` refuse in production (development: not ported) |
+| Sign-in | `POST /auth/org/login` (with an organisation password: scrypt, checked before the unit), `/auth/org/register-grassroots`, `/auth/org/accept-invite`, `/auth/logout`, `/auth/player/signup`, `/auth/guardian/signup`, `/auth/guardian/login`; `/auth/sso/start` and `/callback` refuse in production (development: not ported) |
 | Staff | `POST /org/tactical` (the lead gate only), `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
-| Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist` |
+| Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist`, `/org/searches` (create only) |
+| Grassroots club | `POST /org/squad`, `/org/open-trials`, `/org/friendlies` (posting only) |
 | Recruitment | `POST /org/players/:id/request` (contact), `/player/requests/:id/respond`, `/guardian/requests/:id/respond`; `GET /org/ledger`, `/org/funnel`, `/guardian/inbox` |
 | Threads | `GET /org/channels`, `/org/channels/counts`, `/player/channels`, `/guardian/channels`, `/admin/channels`; `POST /{org,player,guardian}/channels/:id/messages`, `/read`, `/typing` |
 | Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
-| Player | `GET /player/me`, `/player/export`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/stats`, `/badges`, `/prefs` |
+| Player | `GET /player/me`, `/player/export`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/medical/records`, `/media` (no upload), `/stats`, `/badges`, `/prefs` |
 | Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
 | Notifications | `GET /{org,player,guardian}/notifications`; `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
 | Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
@@ -76,7 +79,7 @@ Every route below is exercised by a battery, except where marked.
 | Media | `GET /media/:id`: every `/media/<id>` value in a response leaves signed for the requesting session (`media/links`), and a fetch checks that session's standing each time |
 | Support | `POST /org/support`, `/admin/support/:id/reply` |
 | Transitions | `POST /player/transitions`, `/player/transitions/:id/recipients`, `/revoke-recipient`; the guardian's `/guardian/children/:id/transitions`, `/guardian/children-transitions/:id/…` |
-| Verification | `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
+| Verification | `/org/verification/email` (requesting a code; not confirming it), `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
@@ -100,3 +103,7 @@ for players and guardians (a new player account stores a hash no password matche
   does, accented letters included.
 - An empty `country` at sign-up is refused as `blank`; the TypeScript server says `too_short`.
 - A refused `badges` that is not a list says `invalid`; the TypeScript server says `not_list`.
+- Of several junk saved-search filters, the first in the filters' own order is named; the TypeScript server names
+  the first in the order sent.
+- A club e-mail challenge's code stays in the persisted outbox record. The TypeScript server's mailer withholds a
+  mail's one-time codes from it (`secrets`); `effect.SendMail` can't mark them yet.

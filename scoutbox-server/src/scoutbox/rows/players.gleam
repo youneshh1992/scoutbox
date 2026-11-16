@@ -7,6 +7,8 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/availability
+import scoutbox/vocab/foot
 import scoutbox/vocab/playing_level
 import scoutbox/vocab/position
 import sqlight
@@ -26,95 +28,6 @@ pub fn qualified(alias: String) -> String {
   |> string.split(", ")
   |> list.map(fn(c) { alias <> "." <> c })
   |> string.join(", ")
-}
-
-pub type Foot {
-  Left
-  Right
-}
-
-/// Each value with the text the column stores.
-pub const foot_pairs = [#("left", Left), #("right", Right)]
-
-pub fn foot_to_string(value: Foot) -> String {
-  case value {
-    Left -> "left"
-    Right -> "right"
-  }
-}
-
-pub fn foot_from_string(value: String) -> Result(Foot, Nil) {
-  case value {
-    "left" -> Ok(Left)
-    "right" -> Ok(Right)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn foot_to_json(value: Foot) -> Json {
-  json.string(foot_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn foot_decoder() -> decode.Decoder(Foot) {
-  use value <- decode.then(decode.string)
-  case foot_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Left, "Foot")
-  }
-}
-
-pub type Availability {
-  AvailableNow
-  EndOfSeason
-  LoanOpen
-  OverseasOpen
-  NotSeeking
-}
-
-/// Each value with the text the column stores.
-pub const availability_pairs = [
-  #("available_now", AvailableNow),
-  #("end_of_season", EndOfSeason),
-  #("loan_open", LoanOpen),
-  #("overseas_open", OverseasOpen),
-  #("not_seeking", NotSeeking),
-]
-
-pub fn availability_to_string(value: Availability) -> String {
-  case value {
-    AvailableNow -> "available_now"
-    EndOfSeason -> "end_of_season"
-    LoanOpen -> "loan_open"
-    OverseasOpen -> "overseas_open"
-    NotSeeking -> "not_seeking"
-  }
-}
-
-pub fn availability_from_string(value: String) -> Result(Availability, Nil) {
-  case value {
-    "available_now" -> Ok(AvailableNow)
-    "end_of_season" -> Ok(EndOfSeason)
-    "loan_open" -> Ok(LoanOpen)
-    "overseas_open" -> Ok(OverseasOpen)
-    "not_seeking" -> Ok(NotSeeking)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn availability_to_json(value: Availability) -> Json {
-  json.string(availability_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn availability_decoder() -> decode.Decoder(Availability) {
-  use value <- decode.then(decode.string)
-  case availability_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(AvailableNow, "Availability")
-  }
 }
 
 pub type ContractStatus {
@@ -183,7 +96,7 @@ pub type Row {
     country: String,
     city: Option(String),
     position: Option(position.Position),
-    foot: Option(Foot),
+    foot: Option(foot.Foot),
     height_cm: Option(Int),
     weight_kg: Option(Int),
     squad_number: Option(Int),
@@ -192,7 +105,7 @@ pub type Row {
     agent_name: Option(String),
     academy_plus: Bool,
     first_team_seeker: Bool,
-    availability: Availability,
+    availability: availability.Availability,
     contract_status: ContractStatus,
     level: playing_level.PlayingLevel,
     football_category: Option(String),
@@ -246,7 +159,7 @@ pub fn new(
     agent_name: None,
     academy_plus: False,
     first_team_seeker: False,
-    availability: NotSeeking,
+    availability: availability.NotSeeking,
     contract_status: Unknown,
     level: playing_level.Amateur,
     football_category: None,
@@ -284,7 +197,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use country <- decode.field(3, decode.string)
   use city <- decode.field(4, decode.optional(decode.string))
   use position <- decode.field(5, decode.optional(position.decoder()))
-  use foot <- decode.field(6, decode.optional(foot_decoder()))
+  use foot <- decode.field(6, decode.optional(foot.decoder()))
   use height_cm <- decode.field(7, decode.optional(decode.int))
   use weight_kg <- decode.field(8, decode.optional(decode.int))
   use squad_number <- decode.field(9, decode.optional(decode.int))
@@ -293,7 +206,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use agent_name <- decode.field(12, decode.optional(decode.string))
   use academy_plus <- decode.field(13, sqlight.decode_bool())
   use first_team_seeker <- decode.field(14, sqlight.decode_bool())
-  use availability <- decode.field(15, availability_decoder())
+  use availability <- decode.field(15, availability.decoder())
   use contract_status <- decode.field(16, contract_status_decoder())
   use level <- decode.field(17, playing_level.decoder())
   use football_category <- decode.field(18, decode.optional(decode.string))
@@ -387,7 +300,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
       fn(v) { sqlight.text(position.to_string(v)) },
       row.position,
     ),
-    sqlight.nullable(fn(v) { sqlight.text(foot_to_string(v)) }, row.foot),
+    sqlight.nullable(fn(v) { sqlight.text(foot.to_string(v)) }, row.foot),
     sqlight.nullable(sqlight.int, row.height_cm),
     sqlight.nullable(sqlight.int, row.weight_kg),
     sqlight.nullable(sqlight.int, row.squad_number),
@@ -396,7 +309,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.agent_name),
     sqlight.bool(row.academy_plus),
     sqlight.bool(row.first_team_seeker),
-    sqlight.text(availability_to_string(row.availability)),
+    sqlight.text(availability.to_string(row.availability)),
     sqlight.text(contract_status_to_string(row.contract_status)),
     sqlight.text(playing_level.to_string(row.level)),
     sqlight.nullable(sqlight.text, row.football_category),

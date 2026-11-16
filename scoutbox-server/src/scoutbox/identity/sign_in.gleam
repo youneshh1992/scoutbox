@@ -200,6 +200,7 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
                 tx,
                 sessions.OrgStaff(org.id, user.id),
                 now,
+                ctx.config.session_ttl_ms,
               ))
               use certified <- result.try(orgs.safeguarding_certified(read, org))
               Ok(SignedIn(user, token, certified, role_note))

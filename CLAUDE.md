@@ -27,6 +27,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
   - `wisp_ewe` is not on Hex. It is vendored and adapted in `platform/wisp_ewe.gleam`.
   - `gleam dev` (the generator) compiles `src/` first, so code that uses a name the generator has not written yet
     blocks the run that would write it. Regenerate before using a new column or table.
+  - A panicking `npm run codegen` (an id column it can't decide, say) has already deleted `src/scoutbox/rows` and
+    `vocab`, so `src/` no longer compiles and the next run can't start. Restore them with
+    `git checkout -- src/scoutbox/rows src/scoutbox/vocab`, fix the declaration, and run it again.
+  - `clock.date_string` is JavaScript's `toDateString` (`Mon Nov 16 2026`). A `YYYY-MM-DD` day is `clock.iso_day`.
   - A domain record that is a generated `Row` is a type alias: its constructor can't be matched through the alias.
     Match with a guard (`Some(u) if u.removed_at != None`) or the row module's constructor.
   - Function calls are not allowed in case guards, nor constructors with a non-constant argument

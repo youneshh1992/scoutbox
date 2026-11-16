@@ -126,6 +126,37 @@ pub fn page(
   #(guardians, next)
 }
 
+/// A guardian who signs themselves up: no children yet, and every safeguarding gate (e-mail, ID, disclaimer) still
+/// to pass. Refuses an e-mail any guardian already has, compared case-insensitively.
+pub fn create(
+  tx: Tx,
+  id id: id.GuardianId,
+  name name: String,
+  email email: String,
+  password_hash password_hash: String,
+  email_code_hash email_code_hash: String,
+  at at: Int,
+) -> Result(Guardian, Fail(GuardianError)) {
+  use taken <- result.try(by_email(store.reading(tx), email))
+  case taken {
+    Some(_) -> store.refuse(EmailInUse)
+    None -> {
+      use _ <- result.try(row.insert(
+        tx,
+        row.Row(
+          ..row.new(id:, name:, email:),
+          password_hash: Some(password_hash),
+          email_code_hash: Some(email_code_hash),
+          created_at: Some(at),
+        ),
+      ))
+      use found <- result.map(by_id(store.reading(tx), id))
+      let assert Some(g) = found as "a guardian reads back once inserted"
+      g
+    }
+  }
+}
+
 /// Creates a co-guardian of `primary`, linked to each of the primary's children in the same unit (`co` links).
 /// Refuses an e-mail any guardian already has, compared case-insensitively.
 pub fn create_co_guardian(

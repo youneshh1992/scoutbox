@@ -10,6 +10,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/development/activity
 import scoutbox/identity/access.{type PlayerAccess}
@@ -23,6 +24,9 @@ import scoutbox/rows/id
 import scoutbox/rows/players as row
 import scoutbox/rules/journey
 import scoutbox/rules/time_zones
+import scoutbox/safety/audit
+import scoutbox/safety/moderate
+import scoutbox/vocab/availability
 import scoutbox/vocab/playing_level
 import wisp.{type Request, type Response}
 
@@ -153,7 +157,7 @@ pub fn medical_share(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
 
 type Availability {
   Availability(
-    availability: Option(row.Availability),
+    availability: Option(availability.Availability),
     contract_status: Option(row.ContractStatus),
   )
 }
@@ -167,7 +171,7 @@ pub fn availability(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
   let shape = {
     use availability <- input.field(
       "availability",
-      input.nullish(input.one_of(row.availability_pairs)),
+      input.nullish(input.one_of(availability.pairs)),
     )
     use contract_status <- input.field(
       "contractStatus",
@@ -212,7 +216,7 @@ pub fn availability(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
         ),
         fn(s) {
           json.object([
-            #("availability", row.availability_to_json(s.row.availability)),
+            #("availability", availability.to_json(s.row.availability)),
             #(
               "contractStatus",
               row.contract_status_to_json(s.row.contract_status),
@@ -503,10 +507,10 @@ pub fn child_availability(
     use availability <- input.field(
       "availability",
       input.required(
-        input.one_of_these(row.availability_pairs, [
-          row.AvailableNow,
-          row.EndOfSeason,
-          row.NotSeeking,
+        input.one_of_these(availability.pairs, [
+          availability.AvailableNow,
+          availability.EndOfSeason,
+          availability.NotSeeking,
         ]),
       ),
     )
@@ -520,7 +524,7 @@ pub fn child_availability(
     players.set_availability(_, child.row.id, Some(availability), None),
     fn(s) {
       json.object([
-        #("availability", row.availability_to_json(s.row.availability)),
+        #("availability", availability.to_json(s.row.availability)),
       ])
     },
   )
@@ -534,4 +538,248 @@ pub fn child_medical_share(
 ) -> Response {
   use child <- own_child(ctx, g, id)
   share(ctx, req, child.row.id)
+}
+
+// ------------------------------------------------------------------------------------------- media and medical
+
+const media_title_max = 160
+
+const media_kind_max = 20
+
+/// A data URL's length the TypeScript server accepts: about 12MB of video.
+const data_url_max = 16_000_000
+
+type NewMedia {
+  NewMedia(
+    title: Option(String),
+    kind: Option(String),
+    data_url: Option(String),
+    attendance_id: Option(String),
+  )
+}
+
+/// `POST /player/media`: a clip, and with an attendance of the player's own, the Verified Clip seal.
+///
+/// Not ported yet: the upload itself (`dataUrl`, which the storage adapter writes to disk), and so the Verified
+/// Clip seal, which needs the footage; the `players` live event.
+pub fn media(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
+  let shape = {
+    use title <- input.field(
+      "title",
+      input.nullish(input.text(media_title_max)),
+    )
+    use kind <- input.field("kind", input.optional(input.text(media_kind_max)))
+    use data_url <- input.field(
+      "dataUrl",
+      input.nullish(input.text(data_url_max * 2)),
+    )
+    use attendance_id <- input.field(
+      "attendanceId",
+      input.nullish(input.text(80)),
+    )
+    input.done(NewMedia(title:, kind:, data_url:, attendance_id:))
+  }
+  use body <- http.body(req, shape, [])
+  let player_id = p.player.row.id
+  case input.filled(body.title) {
+    None -> http.required("TITLE_REQUIRED", "title")
+    Some(_) -> {
+      // The title is moderated and stored as sent; only a blank one is refused.
+      let title = option.unwrap(body.title, "")
+      use <- moderate.or_refuse(
+        ctx,
+        title,
+        audit.Context(
+          kind: "media_title",
+          player_id: Some(player_id),
+          org_id: None,
+          user_id: None,
+          channel_id: None,
+          request_id: None,
+        ),
+      )
+      case
+        option.unwrap(body.data_url, ""),
+        option.unwrap(body.attendance_id, "")
+      {
+        "", "" ->
+          add_media(ctx, player_id, title, option.unwrap(body.kind, "video"))
+        "", attendance_id ->
+          case
+            list.any(p.player.attendance, fn(a) {
+              id.attendance_to_string(a.id) == attendance_id
+            })
+          {
+            False ->
+              http.error_message(
+                400,
+                "ATTENDANCE_NOT_FOUND",
+                "A verified clip must link one of YOUR verified attendances.",
+              )
+            True ->
+              http.error_message(
+                400,
+                "FILE_REQUIRED_FOR_VERIFIED_CLIP",
+                "Attach the actual footage to claim the Verified Clip seal.",
+              )
+          }
+        data_url, _ ->
+          case
+            string.starts_with(data_url, "data:"),
+            string.length(data_url) > data_url_max
+          {
+            False, _ -> http.error(400, "BAD_DATA_URL")
+            True, True ->
+              http.error_message(
+                413,
+                "FILE_TOO_LARGE",
+                "Uploads are capped at ~12MB in this prototype.",
+              )
+            True, False ->
+              http.error_message(
+                501,
+                "NOT_PORTED",
+                "Uploads are not supported by this server yet.",
+              )
+          }
+      }
+    }
+  }
+}
+
+fn add_media(
+  ctx: Ctx,
+  player_id: id.PlayerId,
+  title: String,
+  kind: String,
+) -> Response {
+  let now = clock.now_ms()
+  let added =
+    store.unit(ctx.store, fn(tx) {
+      use #(clip, _) <- result.try(players.add_media(
+        tx,
+        player_id,
+        title:,
+        kind:,
+        uploaded_at: clock.iso(now),
+      ))
+      use _ <- result.try(store.seam(tx, "media.after_row"))
+      use p <- result.map(activity.record(tx, player_id, now))
+      #(clip, p)
+    })
+  case added {
+    Ok(#(clip, p)) ->
+      http.json(
+        201,
+        json.object([
+          // The clip as the TypeScript server builds it in the route, not the stored view's key order.
+          #(
+            "media",
+            json.object([
+              #("id", id.media_json(clip.id)),
+              #("title", json.string(clip.title)),
+              #("kind", json.string(kind)),
+              #("uploadedAt", json.string(clock.iso(now))),
+              #("url", json.null()),
+              #("views", json.int(0)),
+              #("tags", json.object([])),
+              #("verifiedClip", json.null()),
+            ]),
+          ),
+          #("trustScore", json.int(players.profile_signal(p))),
+        ]),
+      )
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+const medical_type_max = 40
+
+const medical_title_max = 160
+
+const max_layoff_weeks = 520
+
+const condition_status_max = 40
+
+type MedicalRecord {
+  MedicalRecord(
+    type_: Option(String),
+    title: Option(String),
+    date: Option(String),
+    layoff_weeks: Option(Float),
+    cleared: Option(Bool),
+    condition_status: Option(String),
+  )
+}
+
+/// `POST /player/medical/records`: a record, the condition status, or both. Answers with the medical record.
+///
+/// Not ported yet: the `players` live event.
+pub fn medical_record(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
+  let shape = {
+    use type_ <- input.field(
+      "type",
+      input.nullish(input.text(medical_type_max)),
+    )
+    use title <- input.field(
+      "title",
+      input.nullish(input.text(medical_title_max)),
+    )
+    use date <- input.field("date", input.nullish(input.day_or_blank()))
+    use layoff_weeks <- input.field(
+      "layoffWeeks",
+      input.nullish(input.number(0, max_layoff_weeks)),
+    )
+    use cleared <- input.field("cleared", input.nullish(input.boolean()))
+    use condition_status <- input.field(
+      "conditionStatus",
+      input.nullish(input.text(condition_status_max)),
+    )
+    input.done(MedicalRecord(
+      type_:,
+      title:,
+      date: option.flatten(date),
+      layoff_weeks:,
+      cleared:,
+      condition_status:,
+    ))
+  }
+  use body <- http.body(req, shape, [])
+  let id = p.player.row.id
+  let now = clock.now_ms()
+  let stored =
+    store.unit(ctx.store, fn(tx) {
+      use _ <- result.try(case body.condition_status {
+        None | Some("") -> Ok(Nil)
+        Some(status) ->
+          players.set_condition_status(tx, id, status) |> result.replace(Nil)
+      })
+      use _ <- result.try(store.seam(tx, "medical.records.after_row"))
+      use _ <- result.try(case body.title {
+        None | Some("") -> Ok(Nil)
+        Some(title) ->
+          players.add_medical_record(
+            tx,
+            id,
+            players.NewMedicalRecord(
+              type_: case body.type_ {
+                None | Some("") -> "note"
+                Some(t) -> t
+              },
+              title:,
+              date: option.unwrap(body.date, clock.iso_day(now)),
+              layoff_weeks: body.layoff_weeks,
+              cleared: body.cleared,
+            ),
+          )
+          |> result.replace(Nil)
+      })
+      use found <- result.map(players.by_id(store.reading(tx), id))
+      let assert Some(p) = found as "the signed-in player is live"
+      p
+    })
+  case stored {
+    Ok(p) -> http.json(201, players.medical_view(p))
+    Error(failure) -> http.internal(failure)
+  }
 }

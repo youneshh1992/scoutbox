@@ -8,9 +8,11 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
+import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
 import scoutbox/discovery/directory
 import scoutbox/discovery/player_routes as discovery
+import scoutbox/discovery/saved_searches
 import scoutbox/enterprise/audit_export
 import scoutbox/enterprise/support
 import scoutbox/identity/access
@@ -50,6 +52,7 @@ import scoutbox/safety/admin
 import scoutbox/safety/console_routes as console
 import scoutbox/safety/report_routes
 import scoutbox/verification/applications
+import scoutbox/verification/club_checks
 import scoutbox/verification/console_routes as verification_console
 import scoutbox/verification/invite_routes as invites
 import scoutbox/verification/org_admin_routes as org_admin
@@ -108,6 +111,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { player_routes.login(ctx, req) })
         ["player", "signup"] ->
           only(req, Post, fn() { player_routes.signup(ctx, req) })
+        ["guardian", "signup"] ->
+          only(req, Post, fn() { guardian_routes.signup(ctx, req) })
         ["guardian", "login"] ->
           only(req, Post, fn() { guardian_routes.login(ctx, req) })
         ["sso", "start"] -> only(req, Post, fn() { sso(ctx) })
@@ -221,6 +226,16 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() { delivery.org_list(ctx, req, org) })
         ["webhooks"] -> only(req, Post, fn() { webhooks.create(ctx, req, org) })
         ["support"] -> only(req, Post, fn() { support.create(ctx, req, org) })
+        ["squad"] ->
+          only(req, Post, fn() { grassroots_club.add_to_squad(ctx, req, org) })
+        ["open-trials"] ->
+          only(req, Post, fn() {
+            grassroots_club.post_open_trial(ctx, req, org)
+          })
+        ["friendlies"] ->
+          only(req, Post, fn() { grassroots_club.post_friendly(ctx, req, org) })
+        ["searches"] ->
+          only(req, Post, fn() { saved_searches.create(ctx, req, org) })
         ["channels"] -> only(req, Get, fn() { threads.org_list(ctx, req, org) })
         ["channels", "counts"] ->
           only(req, Get, fn() { threads.org_counts(ctx, org) })
@@ -266,6 +281,9 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["medical", "share"] ->
           only(req, Post, fn() { record.medical_share(ctx, req, player) })
         ["stats"] -> only(req, Post, fn() { record.stats(ctx, req, player) })
+        ["media"] -> only(req, Post, fn() { record.media(ctx, req, player) })
+        ["medical", "records"] ->
+          only(req, Post, fn() { record.medical_record(ctx, req, player) })
         ["badges"] -> only(req, Post, fn() { record.badges(ctx, req, player) })
         ["prefs"] -> only(req, Post, fn() { record.prefs(ctx, req, player) })
         ["notifications"] ->
@@ -577,6 +595,10 @@ fn verification_org(
   path: List(String),
 ) -> Response {
   case path {
+    ["email"] ->
+      only(req, Post, fn() {
+        club_checks.request_email_challenge(ctx, req, org)
+      })
     ["me"] -> only(req, Get, fn() { personal.me(ctx, org) })
     ["identity"] -> only(req, Post, fn() { personal.identity(ctx, req, org) })
     ["claims", id, "evidence"] ->
@@ -808,6 +830,7 @@ fn logout(ctx: Ctx, req: Request) -> Response {
           store.reading(tx),
           token,
           clock.now_ms(),
+          ctx.config.session_ttl_ms,
         ))
         case session {
           Some(s) -> sessions.revoke_sid(tx, s.sid)

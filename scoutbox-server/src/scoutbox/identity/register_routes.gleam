@@ -196,6 +196,7 @@ fn checked(
             tx,
             sessions.OrgStaff(org_id, admin.id),
             now,
+            ctx.config.session_ttl_ms,
           ))
           use certified <- result.map(orgs.safeguarding_certified(
             store.reading(tx),

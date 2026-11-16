@@ -3,10 +3,10 @@
 
 import ewe
 import gleam/erlang/process
+import gleam/io
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx, Ctx}
-import scoutbox/identity/sessions
 import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
 import scoutbox/messaging/live_routes
@@ -32,7 +32,10 @@ import wisp
 pub fn main() -> Nil {
   case boot() {
     Ok(Nil) -> process.sleep_forever()
-    Error(reason) -> panic as { "scoutbox did not boot: " <> reason }
+    Error(reason) -> {
+      io.println_error(reason)
+      panic as { "scoutbox did not boot: " <> reason }
+    }
   }
 }
 
@@ -64,7 +67,7 @@ fn boot() -> Result(Nil, String) {
     |> store.with_seams(faults.should_fail(faults, _))
   use applied <- result.try(migrations.run(
     store,
-    session_ttl_ms: sessions.ttl_ms,
+    session_ttl_ms: config.session_ttl_ms,
   ))
   use seeded <- result.try(seed.run(
     store,
@@ -100,7 +103,7 @@ fn boot() -> Result(Nil, String) {
     |> wisp_ewe.handler(
       secrets.random_hex(32),
       live_routes.stream_header,
-      fn(marker, resp) { live_routes.open(store, hub, marker, resp) },
+      fn(marker, resp) { live_routes.open(ctx, marker, resp) },
     )
     |> ewe.new
     |> ewe.bind(to: "::")

@@ -6,19 +6,132 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/guardians.{type Guardian}
+import scoutbox/identity/passwords
 import scoutbox/identity/players
 import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
 import scoutbox/platform/clock
+import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/limits
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
+import scoutbox/platform/secrets
 import scoutbox/platform/store
 import scoutbox/rows/id
 import scoutbox/safety/ledger
 import wisp.{type Request, type Response}
+
+const password_min = 8
+
+type Signup {
+  Signup(name: Option(String), email: Option(String), password: Option(String))
+}
+
+/// `POST /auth/guardian/signup`. The account and its first session commit together; the verification code is
+/// mailed after COMMIT.
+pub fn signup(ctx: Ctx, req: Request) -> Response {
+  let shape = {
+    use name <- input.field("name", input.nullish(input.text(120)))
+    use email <- input.field("email", input.nullish(input.text(254)))
+    use password <- input.field("password", input.nullish(input.text(256)))
+    input.done(Signup(name:, email:, password:))
+  }
+  use body <- http.body(req, shape, [])
+  let email_in_use = fn() {
+    http.error_message(
+      409,
+      "EMAIL_IN_USE",
+      "A guardian account with this email already exists — log in instead.",
+    )
+  }
+  let named = case input.filled(body.name), input.filled(body.email) {
+    Some(name), Some(email) ->
+      case string.contains(email, "@") {
+        True -> Ok(#(name, email))
+        False -> Error(Nil)
+      }
+    _, _ -> Error(Nil)
+  }
+  case named, body.password {
+    Error(Nil), _ -> http.error(400, "NAME_AND_EMAIL_REQUIRED")
+    Ok(_), None -> password_required()
+    Ok(#(name, email)), Some(p) ->
+      case input.utf16_length(p) < password_min {
+        True -> password_required()
+        False -> {
+          case store.read(ctx.store, guardians.by_email(_, email)) {
+            Error(failure) -> http.internal(failure)
+            Ok(Some(_)) -> email_in_use()
+            Ok(None) -> {
+              // Before the unit: a hash takes about half a second, and the unit holds the only writer.
+              let password_hash = passwords.hash(p)
+              let code = secrets.random_code(6)
+              let now = clock.now_ms()
+              let created =
+                store.unit(ctx.store, fn(tx) {
+                  use id <- result.try(id.next_guardian(tx))
+                  use g <- result.try(guardians.create(
+                    tx,
+                    id:,
+                    name:,
+                    email:,
+                    password_hash:,
+                    email_code_hash: secrets.code_hash(code),
+                    at: now,
+                  ))
+                  use token <- result.map(sessions.create(
+                    tx,
+                    sessions.Guardian(g.row.id),
+                    now,
+                    ctx.config.session_ttl_ms,
+                  ))
+                  store.emit(
+                    tx,
+                    SendMail(
+                      to: email,
+                      subject: "Verify your ScoutBox guardian account",
+                      text: "Hi "
+                        <> name
+                        <> ",\n\nYour ScoutBox verification code is "
+                        <> code
+                        <> ".\n\nGuardian accounts own every under-18 profile on ScoutBox — verifying your email is the first of the safeguarding gates (email → ID → disclaimer) before any child profile can exist.",
+                    ),
+                  )
+                  #(g, token)
+                })
+              case created {
+                Ok(#(g, token)) ->
+                  http.json(
+                    201,
+                    json.object([
+                      #("guardianId", id.guardian_json(g.row.id)),
+                      #("guardian", guardians.self_view(g)),
+                      #("token", json.string(token)),
+                      #("emailVerificationSent", json.bool(True)),
+                      // Mail only ever reaches the local outbox here, which has no real inbox, so the code is
+                      // returned to let the flow complete (the TypeScript server's dev transport).
+                      #("devEmailCode", json.string(code)),
+                    ]),
+                  )
+                Error(store.Refused(guardians.EmailInUse)) -> email_in_use()
+                Error(failure) -> http.internal(failure)
+              }
+            }
+          }
+        }
+      }
+  }
+}
+
+fn password_required() -> Response {
+  http.error_message(
+    400,
+    "PASSWORD_REQUIRED",
+    "Pick a password of at least 8 characters.",
+  )
+}
 
 type Login {
   Login(
@@ -100,7 +213,12 @@ fn signing_in(ctx: Ctx, g: Guardian, now: Int) -> Response {
     None, True -> {
       let minted =
         store.unit(ctx.store, fn(tx) {
-          sessions.create(tx, sessions.Guardian(g.row.id), now)
+          sessions.create(
+            tx,
+            sessions.Guardian(g.row.id),
+            now,
+            ctx.config.session_ttl_ms,
+          )
         })
       case minted {
         Ok(token) ->

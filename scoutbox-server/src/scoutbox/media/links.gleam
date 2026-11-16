@@ -108,7 +108,12 @@ fn presented(ctx: Ctx, req: Request) -> Option(Session) {
     Error(Nil) -> None
     Ok(token) ->
       store.read(ctx.store, fn(read) {
-        sessions.by_token(read, token, clock.now_ms())
+        sessions.by_token(
+          read,
+          token,
+          clock.now_ms(),
+          ctx.config.session_ttl_ms,
+        )
       })
       |> result.unwrap(None)
   }
@@ -197,12 +202,13 @@ fn session_for(
     _ -> None
   }
   use by_link <- result.try(case signed {
-    Some(sid) -> sessions.by_sid(read, sid, now)
+    Some(sid) -> sessions.by_sid(read, sid, now, ctx.config.session_ttl_ms)
     None -> Ok(None)
   })
   case by_link, http.bearer(req) {
     Some(session), _ -> Ok(Some(session))
-    None, Ok(token) -> sessions.by_token(read, token, now)
+    None, Ok(token) ->
+      sessions.by_token(read, token, now, ctx.config.session_ttl_ms)
     None, Error(Nil) -> Ok(None)
   }
 }

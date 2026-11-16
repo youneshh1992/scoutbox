@@ -401,6 +401,30 @@ would mean porting most of the product under the heading "platform". So:
      tickets.
    - **Ported only as far as the battery reaches, and marked `Not ported yet:`:** `/org/tactical` (the lead gate),
      SSO (the production refusal), and the `orgs` live event on registration.
+
+   **`sessionsAndPorts` [done].** The battery passes unchanged (37 checks), mutation-checked once (the session
+   lifetime ignoring `SESSION_TTL_DAYS`). Its sessions sections passed before any work, from what `connectedMode`
+   had ported. As built:
+   - **The session lifetime is configuration** (`config.session_ttl_ms`), passed to every place a session is
+     minted or resolved: the bearer lookup, sign-out, event-stream tickets and streams, and signed media links.
+   - **Production boot refusals** are the TypeScript server's list, codes and messages: each problem is printed as
+     `CONFIG <code>: …`, then `Refusing to start: <codes>`. All of them are ported except `TRUST_WEIGHTS_INVALID`
+     (the Passport) and `TRUST_PROXY_INVALID` (`SCOUTBOX_TRUST_PROXY` isn't read yet). The admin key must also be at
+     least 16 characters.
+   - **Guardian sign-up** in full: the account and its first session in one unit, the password hashed before it,
+     and the verification code mailed after COMMIT.
+   - **Section T's seven create routes**, ported with full validation, moderation, storage and responses (the
+     shape diff matches the TypeScript server on all of them), and nothing else of their domains:
+     `/org/searches`, `/org/squad`, `/org/open-trials`, `/org/friendlies`, `/player/media`,
+     `/player/medical/records` and `/org/verification/email`. Their lists, deletes, confirms and live events are
+     `Not ported yet:`. So is the media upload (`dataUrl`), which answers 501 after its checks. `/player/media`'s
+     `trustScore` is `domain.ts`'s profile signal, which was already ported, so it needed nothing from the Passport.
+   - **Also needed:** a typed per-action rate limiter (`limits.limited`, with `email_challenge_request` proved
+     against `spec/platform/rateLimit.json`), one-time codes (`secrets.random_code`, `code_hash`), a calendar-day
+     input check (`input.day_or_blank`, with `temporal.ts`'s reasons), and `foot` and `availability` declared
+     once as shared vocabularies, since saved searches use them as well as players.
+   - **One gap:** the club e-mail code stays in the persisted outbox record, where the TypeScript mailer withholds
+     it. Fixing it means giving `effect.SendMail` a list of secret text.
 3. **The domains, in port order** (recruitment, discovery, passport, development, agents, …). Each domain's
    batteries are untangled just ahead of its port.
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open

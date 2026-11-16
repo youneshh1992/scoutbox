@@ -83,6 +83,17 @@ requests.push(
   ['timeline', (s) => ['POST', '/player/timeline', { year: '2025', event: 'Scored a hat-trick' }, s.adult]],
   ['export', (s) => ['GET', '/player/export', null, s.adult]],
   ['player me after', (s) => ['GET', '/player/me', null, s.adult]],
+  ['media', (s) => ['POST', '/player/media', { title: 'Highlights' }, s.adult]],
+  ['medical record', (s) => ['POST', '/player/medical/records', { type: 'injury', title: 'Knock', layoffWeeks: 2, cleared: false, conditionStatus: 'managed' }, s.adult]],
+  ['guardian signup', (s) => ['POST', '/auth/guardian/signup', { name: 'Shape Guardian', email: 'shape.guardian@example.test', password: 'synthetic-pass-1' }]],
+  ['saved search', (s) => ['POST', '/org/searches', { name: 'Wingers', filters: { position: 'RW', foot: 'left', academyPlus: true, q: '', newDays: 30 } }, s.maria]],
+  ['squad (manual)', (s) => ['POST', '/org/squad', { name: 'Sam Keeper', position: 'GK' }, s.hackney]],
+  ['squad (linked)', (s) => ['POST', '/org/squad', { name: 'Osei', position: 'ST', playerId: 'pl-osei' }, s.hackney]],
+  ['squad (pro club)', (s) => ['POST', '/org/squad', { name: 'Nope' }, s.maria]],
+  ['open trial', (s) => ['POST', '/org/open-trials', { title: 'Open day', date: '2099-05-01', venue: 'Rec', positions: ['GK', ' GK', 'ST'], notes: 'Bring boots' }, s.hackney]],
+  ['friendly', (s) => ['POST', '/org/friendlies', { date: '2099-05-01', ageGroup: 'U12' }, s.hackney]],
+  ['club email (free mail)', (s) => ['POST', '/org/verification/email', { email: 'coach@gmail.com' }, s.maria]],
+  ['club email', (s) => ['POST', '/org/verification/email', { email: 'coach@eastport.example' }, s.maria]],
 );
 let differing = 0;
 const keysOf = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.keys(v) : []);
