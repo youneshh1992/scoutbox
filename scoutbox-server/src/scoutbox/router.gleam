@@ -46,7 +46,9 @@ import scoutbox/platform/limits
 import scoutbox/platform/operator
 import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
+import scoutbox/recruitment/case_routes
 import scoutbox/recruitment/lifecycle
+import scoutbox/recruitment/offer_routes
 import scoutbox/recruitment/request_routes
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/signings
@@ -133,6 +135,19 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["verification", ..path] -> verification_org(ctx, req, org, path)
         ["rooms", ..path] -> rooms(ctx, req, org, path)
+        ["offers", oid] ->
+          only(req, Get, fn() { offer_routes.get(ctx, req, org, oid) })
+        ["offers", oid, "history"] ->
+          only(req, Get, fn() { offer_routes.history(ctx, req, org, oid) })
+        ["offers", oid, "draft"] ->
+          only(req, Patch, fn() { offer_routes.edit_draft(ctx, req, org, oid) })
+        ["offers", oid, "issue"] ->
+          only(req, Post, fn() { offer_routes.issue(ctx, req, org, oid) })
+        ["offers", oid, "withdraw"] ->
+          only(req, Post, fn() { offer_routes.withdraw(ctx, req, org, oid) })
+        ["offers", oid, "revise"] ->
+          only(req, Post, fn() { offer_routes.revise(ctx, req, org, oid) })
+        ["recruitment", "offer-policy"] -> only(req, Get, offer_routes.policy)
         ["rooms-funnel"] ->
           only(req, Get, fn() { room_routes.funnel(ctx, org) })
         ["trials"] -> only(req, Get, fn() { trials.org_page() })
@@ -285,6 +300,57 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["player", ..rest] -> {
       use player <- access.player_session(ctx, req)
       case rest {
+        ["offers"] ->
+          only(req, Get, fn() {
+            offer_routes.list_for(
+              ctx,
+              req,
+              offer_routes.PlayerRecipient(player),
+            )
+          })
+        ["offers", oid] ->
+          only(req, Get, fn() {
+            offer_routes.read_one(
+              ctx,
+              req,
+              offer_routes.PlayerRecipient(player),
+              oid,
+            )
+          })
+        ["offers", oid, "accept"] ->
+          only(req, Post, fn() {
+            offer_routes.respond(
+              ctx,
+              req,
+              offer_routes.PlayerRecipient(player),
+              oid,
+              True,
+            )
+          })
+        ["offers", oid, "decline"] ->
+          only(req, Post, fn() {
+            offer_routes.respond(
+              ctx,
+              req,
+              offer_routes.PlayerRecipient(player),
+              oid,
+              False,
+            )
+          })
+        ["offers", oid, "share-agent"] ->
+          only(req, Post, fn() {
+            offer_routes.share_agent(ctx, req, player, oid)
+          })
+        ["offers", oid, "documents", doc] ->
+          only(req, Get, fn() {
+            offer_routes.document(
+              ctx,
+              req,
+              offer_routes.PlayerRecipient(player),
+              oid,
+              doc,
+            )
+          })
         ["block"] ->
           only(req, Post, fn() { report_routes.player_block(ctx, req, player) })
         ["report"] ->
@@ -410,6 +476,53 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["children", id, "references"] ->
           only(req, Get, fn() { references.child(ctx, guardian, id.player(id)) })
         ["me"] -> only(req, Get, fn() { guardian_routes.me(guardian) })
+        ["offers"] ->
+          only(req, Get, fn() {
+            offer_routes.list_for(
+              ctx,
+              req,
+              offer_routes.GuardianRecipient(guardian),
+            )
+          })
+        ["offers", oid] ->
+          only(req, Get, fn() {
+            offer_routes.read_one(
+              ctx,
+              req,
+              offer_routes.GuardianRecipient(guardian),
+              oid,
+            )
+          })
+        ["offers", oid, "accept"] ->
+          only(req, Post, fn() {
+            offer_routes.respond(
+              ctx,
+              req,
+              offer_routes.GuardianRecipient(guardian),
+              oid,
+              True,
+            )
+          })
+        ["offers", oid, "decline"] ->
+          only(req, Post, fn() {
+            offer_routes.respond(
+              ctx,
+              req,
+              offer_routes.GuardianRecipient(guardian),
+              oid,
+              False,
+            )
+          })
+        ["offers", oid, "documents", doc] ->
+          only(req, Get, fn() {
+            offer_routes.document(
+              ctx,
+              req,
+              offer_routes.GuardianRecipient(guardian),
+              oid,
+              doc,
+            )
+          })
         ["children"] ->
           case req.method {
             Get -> guardian_routes.children(ctx, guardian)
@@ -958,6 +1071,22 @@ fn rooms(
     [rid, "combine-requests"], Post ->
       room_routes.request_combine(ctx, req, org, room(rid))
     [rid, "link"], Post -> room_routes.link(ctx, req, org, room(rid))
+    [rid, "offers"], Get -> offer_routes.surface(ctx, req, org, room(rid))
+    [rid, "offers"], Post -> offer_routes.create(ctx, req, org, room(rid))
+    [rid, "journey"], Get -> case_routes.journey(ctx, req, org, room(rid))
+    [rid, "lifecycle"], Post ->
+      case_routes.lifecycle_act(ctx, req, org, room(rid))
+    [rid, "decision"], Get -> case_routes.decision(ctx, org, room(rid))
+    [rid, "decision", "draft"], Post ->
+      case_routes.start_draft(ctx, req, org, room(rid))
+    [rid, "decision", "draft"], Patch ->
+      case_routes.edit_draft(ctx, req, org, room(rid))
+    [rid, "decision", "draft"], Delete ->
+      case_routes.discard_draft(ctx, req, org, room(rid))
+    [rid, "decision", "finalize"], Post ->
+      case_routes.finalize(ctx, req, org, room(rid), False)
+    [rid, "decision", "supersede"], Post ->
+      case_routes.finalize(ctx, req, org, room(rid), True)
     _, _ -> not_found()
   }
 }

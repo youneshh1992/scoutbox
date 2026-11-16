@@ -45,6 +45,12 @@ pub const policy = [
   #("room_create", room_create_policy),
   #("room_comment", room_comment_policy),
   #("room_combine_request", room_combine_request_policy),
+  #("decision_draft", decision_draft_policy),
+  #("decision_finalize", decision_finalize_policy),
+  #("offer_draft_write", offer_draft_write_policy),
+  #("offer_issue", offer_issue_policy),
+  #("offer_withdraw", offer_withdraw_policy),
+  #("offer_response", offer_response_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
@@ -57,6 +63,18 @@ pub type Action {
   RoomComment
   /// Combine requests raised from a Room, per organisation.
   RoomCombineRequest
+  /// Formal decision drafts opened or edited, per organisation.
+  DecisionDraft
+  /// Formal decisions finalized or superseded, per organisation.
+  DecisionFinalize
+  /// Offer drafts created, edited or revised, per organisation.
+  OfferDraftWrite
+  /// Offers issued, per organisation.
+  OfferIssue
+  /// Offers withdrawn, per organisation.
+  OfferWithdraw
+  /// Offer acceptances and declines, per player or guardian answering.
+  OfferResponse
 }
 
 const email_challenge_request_policy = Policy(max: 5, window_ms: 3_600_000)
@@ -67,12 +85,30 @@ const room_comment_policy = Policy(max: 20, window_ms: 60_000)
 
 const room_combine_request_policy = Policy(max: 60, window_ms: 3_600_000)
 
+const decision_draft_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const decision_finalize_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const offer_draft_write_policy = Policy(max: 120, window_ms: 3_600_000)
+
+const offer_issue_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const offer_withdraw_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const offer_response_policy = Policy(max: 30, window_ms: 3_600_000)
+
 fn action_name(action: Action) -> String {
   case action {
     EmailChallengeRequest -> "email_challenge_request"
     RoomCreate -> "room_create"
     RoomComment -> "room_comment"
     RoomCombineRequest -> "room_combine_request"
+    DecisionDraft -> "decision_draft"
+    DecisionFinalize -> "decision_finalize"
+    OfferDraftWrite -> "offer_draft_write"
+    OfferIssue -> "offer_issue"
+    OfferWithdraw -> "offer_withdraw"
+    OfferResponse -> "offer_response"
   }
 }
 
@@ -82,6 +118,12 @@ fn action_policy(action: Action) -> Policy {
     RoomCreate -> room_create_policy
     RoomComment -> room_comment_policy
     RoomCombineRequest -> room_combine_request_policy
+    DecisionDraft -> decision_draft_policy
+    DecisionFinalize -> decision_finalize_policy
+    OfferDraftWrite -> offer_draft_write_policy
+    OfferIssue -> offer_issue_policy
+    OfferWithdraw -> offer_withdraw_policy
+    OfferResponse -> offer_response_policy
   }
 }
 

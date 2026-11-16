@@ -20,6 +20,7 @@ import scoutbox/rows/room_decisions as decision_row
 import scoutbox/rows/room_evidence_states as evidence_row
 import scoutbox/rows/room_snapshot_source_refs as ref_row
 import scoutbox/rows/room_snapshots as snapshot_row
+import scoutbox/vocab/decision_outcome
 import sqlight
 
 // -------------------------------------------------------------------------------------------------------- comments
@@ -484,7 +485,7 @@ pub fn decision_json(d: Decision) -> Json {
       }),
     ),
     #("outcome", case formal {
-      True -> json.nullable(d.row.outcome, decision_row.outcome_to_json)
+      True -> json.nullable(d.row.outcome, decision_outcome.to_json)
       False -> json.null()
     }),
     // Not ported yet: a formal decision's lifecycle record.

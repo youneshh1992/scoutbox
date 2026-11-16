@@ -453,6 +453,31 @@ would mean porting most of the product under the heading "platform". So:
      (no route here creates either).
    - **Found on the way:** the TypeScript `uncorroborated_claims` rule reads a `tier` field evidence records don't
      have, so it never fires, and a snapshot's `passportVersion` is always null. Both are ported as they behave.
+   **Offers and decisions [in progress].** The three trial and six signing batteries were split three ways: offers
+   first (they reach no trials), then trials with `recruitment/decisions` (which runs the trial lifecycle), then
+   signings. `offers`, `offersAdversarial`, `offersPersistence` and `decisionsPersistence` were untangled on
+   `battery-untangle` (`776b0050`, `e580741c`, `5e4611d1`, `49d45ff8`; 354 → 250 + 104, 206 → 165 + 41, 72 → 72,
+   48 → 46 + 3 − 1 added; each mutation-checked). `decisionsPersistence` passes unchanged on the Gleam server (54
+   checks; mutation-checked by disabling `missing_actor`). As built:
+   - **The request clock** (`clock.request_ms`, `SCOUTBOX_TEST_CLOCK`): read once per handler by the journey,
+     lifecycle and Offer routes, as in the TypeScript server; everything else keeps the real clock.
+   - **The lifecycle validator, evidence provider and writer** (`recruitment/case_lifecycle`): every domain moves a
+     case through `apply`. Contacts, Trials and signing packages answer as having no record (`Not ported yet:`).
+   - **The club's journey** (`recruitment/journey`), **formal decisions** with the case's single draft
+     (`recruitment/decisions`, `case_routes`), and **Offers** with their store, rules and routes
+     (`offer_rules`, `offers`, `offer_routes`). `dev/shape_diff.mjs` agrees with the TypeScript server on the journey,
+     lifecycle and decision sequence.
+   - **Contracts:** `domain_errors` holds the lifecycle and Offer refusal tables (allowlisted fields after
+     `ok: false`); `input.parse_coded` takes a schema's renamed generic code, and field codes now follow
+     `fieldCodeFor` (`terms.*` also covers `terms`); `platform/canonical` writes `payloadFingerprint`'s text.
+   - **Found on the way:** the TypeScript journey reads `h.by?.name` from case history entries that carry `byName`,
+     so its history lines never name anyone. Ported as it behaves.
+   - **Why the offer batteries wait:** their first fixture is an agent representing the player. That needs agent
+     sign-in and team membership, profiles with licence facets, the compliance engine's approach rule, the player's
+     confirmation, and later transaction workspaces and the handoff: the core of `agents/*`. Next step: port the
+     agents core against `agents/core` and the offer batteries together, then finish the Offer batteries.
+   - **Pending:** `decisionsPersistence`'s 14 recorded rule cases (decision integrity, chain heads) await mapping.
+
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open
    trials, vouches, pairing and exports), `platform/contracts` (Rooms, briefs), `platform/productionHardening`
    (Rooms, briefs, second look, "nobody missed", the Passport) and `platform/dates` (trials, open trials,

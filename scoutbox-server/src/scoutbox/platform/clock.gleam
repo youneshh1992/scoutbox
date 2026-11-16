@@ -1,13 +1,47 @@
+import gleam/float
+import gleam/http/request
 import gleam/int
+import gleam/result
 import gleam/string
 import gleam/time/calendar
 import gleam/time/timestamp
+import scoutbox/platform/config.{type Config}
+import wisp.{type Request}
 
 /// Milliseconds since the Unix epoch: the unit every stored instant uses.
 pub fn now_ms() -> Int {
   let #(seconds, nanoseconds) =
     timestamp.system_time() |> timestamp.to_unix_seconds_and_nanoseconds
   seconds * 1000 + nanoseconds / 1_000_000
+}
+
+/// The header a request pins its time with when the test clock is on (`domains/platform/clock.mjs`).
+pub const test_clock_header = "x-scoutbox-test-clock"
+
+/// "Now" for this request: with `SCOUTBOX_TEST_CLOCK=1` (never in production), the instant the request names in
+/// `x-scoutbox-test-clock`; otherwise, or when the header is missing or not a positive number, the real time. As
+/// in the TypeScript server, only the trial, offer and signing routes read it, once per request, and pass it down.
+pub fn request_ms(config: Config, req: Request) -> Int {
+  case config.test_clock {
+    False -> now_ms()
+    True ->
+      request.get_header(req, test_clock_header)
+      |> result.try(pinned_ms)
+      |> result.lazy_unwrap(now_ms)
+  }
+}
+
+/// A header value as JavaScript's `Number` reads it, for the values a battery sends: an integer or a decimal,
+/// surrounding space allowed. A fraction of a millisecond is dropped, as `Date` drops it.
+fn pinned_ms(text: String) -> Result(Int, Nil) {
+  let text = string.trim(text)
+  let parsed =
+    int.parse(text)
+    |> result.lazy_or(fn() { float.parse(text) |> result.map(float.truncate) })
+  case parsed {
+    Ok(ms) if ms > 0 -> Ok(ms)
+    _ -> Error(Nil)
+  }
 }
 
 /// An instant as JavaScript's `toISOString` writes it: UTC, milliseconds, `Z`.

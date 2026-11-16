@@ -787,12 +787,24 @@ pub fn parse(
   root root: String,
   codes codes: List(#(String, String)),
 ) -> Result(a, Refusal) {
+  parse_coded(shape, input, root:, codes:, default: "FIELD_INVALID")
+}
+
+/// `parse` for a route whose schema renames the generic refusal (`codes: { FIELD_INVALID: 'OFFER_INPUT_INVALID' }`
+/// in the TypeScript server): `default` is the code of a refusal no field code and no problem code names.
+pub fn parse_coded(
+  shape: Shape(a),
+  input: Dynamic,
+  root root: String,
+  codes codes: List(#(String, String)),
+  default default: String,
+) -> Result(a, Refusal) {
   case decode.run(input, decode.dict(decode.string, decode.dynamic)) {
     Error(_) ->
       Error(Refusal(
         error: list.key_find(codes, root)
           |> option.from_result
-          |> option.unwrap("FIELD_INVALID"),
+          |> option.unwrap(default),
         field: root,
         problem: NotObject,
         message: root <> " must be an object.",
@@ -809,15 +821,11 @@ pub fn parse(
             Some(inner) -> path(field, inner)
             None -> field
           }
-          // A code for every item of a list is written `tags.*`, as the TypeScript schemas write it.
-          let coded = case list.key_find(codes, field) {
-            Ok(code) -> Ok(code)
-            Error(Nil) -> list.key_find(codes, wildcard(field))
-          }
+          let coded = code_for(codes, field)
           let error = case coded, i.code {
             Ok(code), _ -> code
             Error(Nil), Some(code) -> code
-            Error(Nil), None -> "FIELD_INVALID"
+            Error(Nil), None -> default
           }
           Error(Refusal(
             error:,
@@ -847,7 +855,36 @@ pub fn filled(s: Option(String)) -> Option(String) {
 }
 
 /// `tags[3].name` → `tags.*.name`.
-fn wildcard(field: String) -> String {
+/// The code `codes` gives `field`, as the TypeScript schemas' `fieldCodeFor` finds it: list indexes are dropped
+/// (`tags[1]` is `tags`), then the exact path, then each enclosing subtree written `path.*`, innermost first, so
+/// `terms.*` covers `terms` itself and every field inside it.
+fn code_for(
+  codes: List(#(String, String)),
+  field: String,
+) -> Result(String, Nil) {
   let assert Ok(index) = regexp.from_string("\\[[0-9]+\\]")
-  regexp.replace(index, field, ".*")
+  let keys =
+    regexp.replace(index, field, "")
+    |> string.split(".")
+    |> list.filter(fn(k) { k != "" })
+  case list.key_find(codes, string.join(keys, ".")) {
+    Ok(code) -> Ok(code)
+    Error(Nil) -> subtree_code(codes, list.reverse(keys))
+  }
+}
+
+fn subtree_code(
+  codes: List(#(String, String)),
+  reversed: List(String),
+) -> Result(String, Nil) {
+  case reversed {
+    [] -> Error(Nil)
+    [_, ..outer] ->
+      case
+        list.key_find(codes, string.join(list.reverse(reversed), ".") <> ".*")
+      {
+        Ok(code) -> Ok(code)
+        Error(Nil) -> subtree_code(codes, outer)
+      }
+  }
 }

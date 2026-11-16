@@ -7,6 +7,7 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
+import scoutbox/vocab/decision_outcome
 import scoutbox/vocab/room_status
 import sqlight
 
@@ -101,50 +102,6 @@ pub fn state_decoder() -> decode.Decoder(State) {
   }
 }
 
-pub type Outcome {
-  Progress
-  Hold
-  Reject
-}
-
-/// Each value with the text the column stores.
-pub const outcome_pairs = [
-  #("progress", Progress),
-  #("hold", Hold),
-  #("reject", Reject),
-]
-
-pub fn outcome_to_string(value: Outcome) -> String {
-  case value {
-    Progress -> "progress"
-    Hold -> "hold"
-    Reject -> "reject"
-  }
-}
-
-pub fn outcome_from_string(value: String) -> Result(Outcome, Nil) {
-  case value {
-    "progress" -> Ok(Progress)
-    "hold" -> Ok(Hold)
-    "reject" -> Ok(Reject)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn outcome_to_json(value: Outcome) -> Json {
-  json.string(outcome_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn outcome_decoder() -> decode.Decoder(Outcome) {
-  use value <- decode.then(decode.string)
-  case outcome_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Progress, "Outcome")
-  }
-}
-
 pub type Recommendation {
   NoDecision
   ContinueWatching
@@ -215,7 +172,7 @@ pub type Row {
     player_id: id.PlayerId,
     kind: Option(Kind),
     state: Option(State),
-    outcome: Option(Outcome),
+    outcome: Option(decision_outcome.DecisionOutcome),
     recommendation: Recommendation,
     note: Option(String),
     by_user_id: Option(id.OrgUserId),
@@ -309,7 +266,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use player_id <- decode.field(3, id.player_decoder())
   use kind <- decode.field(4, decode.optional(kind_decoder()))
   use state <- decode.field(5, decode.optional(state_decoder()))
-  use outcome <- decode.field(6, decode.optional(outcome_decoder()))
+  use outcome <- decode.field(6, decode.optional(decision_outcome.decoder()))
   use recommendation <- decode.field(7, recommendation_decoder())
   use note <- decode.field(8, decode.optional(decode.string))
   use by_user_id <- decode.field(9, decode.optional(id.org_user_decoder()))
@@ -413,7 +370,10 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     id.player_sql(row.player_id),
     sqlight.nullable(fn(v) { sqlight.text(kind_to_string(v)) }, row.kind),
     sqlight.nullable(fn(v) { sqlight.text(state_to_string(v)) }, row.state),
-    sqlight.nullable(fn(v) { sqlight.text(outcome_to_string(v)) }, row.outcome),
+    sqlight.nullable(
+      fn(v) { sqlight.text(decision_outcome.to_string(v)) },
+      row.outcome,
+    ),
     sqlight.text(recommendation_to_string(row.recommendation)),
     sqlight.nullable(sqlight.text, row.note),
     sqlight.nullable(id.org_user_sql, row.by_user_id),

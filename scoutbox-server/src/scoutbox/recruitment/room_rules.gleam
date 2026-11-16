@@ -468,6 +468,13 @@ pub const reason_codes = [
   ]),
 ]
 
+/// REASON_CODES as JSON: each category with its codes.
+pub fn reason_codes_json() -> Json {
+  json.object(
+    list.map(reason_codes, fn(c) { #(c.0, json.array(c.1, json.string)) }),
+  )
+}
+
 pub fn all_reason_codes() -> List(String) {
   list.flat_map(reason_codes, fn(c) { c.1 })
 }

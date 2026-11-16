@@ -24,5 +24,24 @@
     "OFFER_RECIPIENT_INVALID": 422,
     "OFFER_COMPLIANCE_BLOCKED": 422,
     "OFFER_STATE_UNKNOWN": 500
-  }
+  },
+  "PUBLIC_ERROR_FIELDS": [
+    "error",
+    "message",
+    "field",
+    "problem",
+    "min",
+    "max",
+    "allowed",
+    "expected",
+    "current",
+    "expectedRev",
+    "currentRev",
+    "updatedBy",
+    "updatedAt",
+    "reasons",
+    "blockers",
+    "lifecycle",
+    "status"
+  ]
 }

@@ -896,6 +896,39 @@
     ]
   },
   {
+    "battery": "recruitment/decisionsPersistence",
+    "functions": [
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#chainHead",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#decisionIntegrity",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/decision.mjs#isFormal",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
     "battery": "recruitment/journey",
     "functions": [
       {
@@ -1004,6 +1037,345 @@
         "function": "domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney",
         "calls": 8,
         "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "recruitment/offers",
+    "functions": [
+      {
+        "function": "domain.ts#isAdult",
+        "calls": 11,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 10,
+          "args[].dob is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].contacts.byId is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",
+        "calls": 5,
+        "cases": 0,
+        "handPort": {
+          "args[].evidence.check is a function": 5
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/errors.mjs#publicErrorBody",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/errors.mjs#sendOfferError",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].status is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#canRespondToRevision",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#canRevise",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#canWithdrawRevision",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#effectiveRevisionStatus",
+        "calls": 15,
+        "cases": 13,
+        "handPort": {
+          "args[].expiresAt is Infinity": 1,
+          "args[].expiresAt is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen",
+        "calls": 6,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#normaliseOfferClientKey",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerAgentView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerClubView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerEvidence",
+        "calls": 13,
+        "cases": 11,
+        "handPort": {
+          "args[] is undefined": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerIntegrity",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerRecipientView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#responderMatches",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#validateDocumentRefs",
+        "calls": 14,
+        "cases": 14,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#validateExpiry",
+        "calls": 24,
+        "cases": 20,
+        "handPort": {
+          "args[] is Infinity": 1,
+          "args[] is NaN": 1,
+          "args[] is undefined": 2
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#validateMessages",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#validateTerms",
+        "calls": 46,
+        "cases": 34,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomCan",
+        "calls": 14,
+        "cases": 8,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"__proto__\" as a code of scoutbox/recruitment/room_rules.action_code": 1,
+          "Gleam's types can't hold its arguments: cannot print \"constructor\" as a code of scoutbox/recruitment/room_rules.action_code": 1,
+          "Gleam's types can't hold its arguments: cannot print \"hasOwnProperty\" as a code of scoutbox/recruitment/room_rules.action_code": 1,
+          "Gleam's types can't hold its arguments: cannot print \"prototype\" as a code of scoutbox/recruitment/room_rules.action_code": 1,
+          "Gleam's types can't hold its arguments: cannot print \"toString\" as a code of scoutbox/recruitment/room_rules.action_code": 1,
+          "Gleam's types can't hold its arguments: cannot print \"valueOf\" as a code of scoutbox/recruitment/room_rules.action_code": 1
+        },
+        "status": "generated"
+      },
+      {
+        "function": "temporal.ts#isExpiredAt",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#parseInstant",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "recruitment/offersAdversarial",
+    "functions": [
+      {
+        "function": "domain.ts#adultAgeFor",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#isAdult",
+        "calls": 19,
+        "cases": 0,
+        "handPort": {
+          "args[] is a ": 18,
+          "args[].dob is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].offers.byId is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase",
+        "calls": 1,
+        "cases": 0,
+        "handPort": {
+          "args[].evidence.check is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#canRespondToRevision",
+        "calls": 11,
+        "cases": 11,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#effectiveRevisionStatus",
+        "calls": 22,
+        "cases": 20,
+        "handPort": {
+          "args[].expiresAt is Infinity": 1,
+          "args[].expiresAt is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#liveStatus",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen",
+        "calls": 12,
+        "cases": 12,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerCaseConsistency",
+        "calls": 6,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerCaseCorrupt",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerEvidence",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerIntegrity",
+        "calls": 10,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#offerRecipientView",
+        "calls": 3,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#responderMatches",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#validateExpiry",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#validateMessages",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/offers/offer.mjs#validateTerms",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "temporal.ts#isExpiredAt",
+        "calls": 1,
+        "cases": 1,
         "handPort": {},
         "status": "pending"
       }

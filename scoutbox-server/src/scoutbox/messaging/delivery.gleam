@@ -476,7 +476,7 @@ fn mirror_reads(ctx: Ctx) -> Int {
 
 // ------------------------------------------------------------------------------------------------- injected failures
 
-fn consume_injected(tx: Tx, channel: String) -> Result(Bool, Fail(e)) {
+pub fn consume_injected(tx: Tx, channel: String) -> Result(Bool, Fail(e)) {
   store.write(
     tx,
     "UPDATE delivery_fail_injections SET remaining = remaining - 1 WHERE channel = ? AND remaining > 0 RETURNING remaining",

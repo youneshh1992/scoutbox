@@ -35,6 +35,7 @@ import scoutbox/platform/paging.{IntKey, IntKind, TextKey, TextKind}
 import scoutbox/platform/rev
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/platform/temporal
+import scoutbox/recruitment/case_lifecycle
 import scoutbox/recruitment/cases.{type Room}
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/requests
@@ -129,7 +130,7 @@ fn context(a: OrgAccess, kind: String) -> audit.Context {
   )
 }
 
-fn moderated(
+pub fn moderated(
   ctx: Ctx,
   a: OrgAccess,
   text: Option(String),
@@ -142,7 +143,7 @@ fn moderated(
   }
 }
 
-fn notify_staff(
+pub fn notify_staff(
   tx: Tx,
   user_id: id.OrgUserId,
   text: String,
@@ -160,11 +161,11 @@ fn notify_staff(
   )
 }
 
-fn player_name(room: Room) -> String {
+pub fn player_name(room: Room) -> String {
   option.unwrap(room.row.player_name, "a removed player")
 }
 
-fn answer(r: Result(Response, store.UnitError(Response))) -> Response {
+pub fn answer(r: Result(Response, store.UnitError(Response))) -> Response {
   case r {
     Ok(response) -> response
     Error(store.Refused(response)) -> response
@@ -172,7 +173,7 @@ fn answer(r: Result(Response, store.UnitError(Response))) -> Response {
   }
 }
 
-fn read_answer(r: Result(Response, Fail(Response))) -> Response {
+pub fn read_answer(r: Result(Response, Fail(Response))) -> Response {
   case r {
     Ok(response) -> response
     Error(store.Refuse(response)) -> response
@@ -180,13 +181,13 @@ fn read_answer(r: Result(Response, Fail(Response))) -> Response {
   }
 }
 
-fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
+pub fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
   store.map_refusal(r, fn(_) { http.error(500, "INTERNAL") })
 }
 
 /// A room of another club gets the same 404 as one that does not exist; a restricted room is open only to its
 /// lead, its assignees and recruitment leads.
-fn find(
+pub fn find(
   read: Read,
   a: OrgAccess,
   room_id: id.RecruitmentCaseId,
@@ -207,7 +208,7 @@ fn find(
   }
 }
 
-fn with_room(
+pub fn with_room(
   ctx: Ctx,
   a: OrgAccess,
   room_id: id.RecruitmentCaseId,
@@ -1229,24 +1230,39 @@ fn move_body(ctx: Ctx, a: OrgAccess, room: Room, body: StatusMove) -> Response {
               )
             Ok(check) ->
               case check.requires_evidence {
-                // Not ported yet: the evidence provider. Without one the gate fails closed.
                 Some(kind) ->
-                  http.json(
-                    422,
-                    json.object([
-                      #("error", json.string("ROOM_EVIDENCE_REQUIRED")),
-                      #(
-                        "message",
-                        json.string(
-                          "\""
-                          <> room_status.to_string(to)
-                          <> "\" records something that must actually have happened; no supporting record was found.",
-                        ),
-                      ),
-                      #("requires", json.string(room_rules.evidence_code(kind))),
-                      #("evidenceReason", json.string("unsatisfied")),
-                    ]),
-                  )
+                  case
+                    store.read(ctx.store, case_lifecycle.evidence(
+                      _,
+                      room,
+                      kind,
+                      clock.now_ms(),
+                    ))
+                  {
+                    Error(e) -> http.internal(e)
+                    Ok(case_lifecycle.Holds(..)) ->
+                      apply_move(ctx, a, room, to, codes, note, check)
+                    Ok(case_lifecycle.Lacks(why)) ->
+                      http.json(
+                        422,
+                        json.object([
+                          #("error", json.string("ROOM_EVIDENCE_REQUIRED")),
+                          #(
+                            "message",
+                            json.string(
+                              "\""
+                              <> room_status.to_string(to)
+                              <> "\" records something that must actually have happened; no supporting record was found.",
+                            ),
+                          ),
+                          #(
+                            "requires",
+                            json.string(room_rules.evidence_code(kind)),
+                          ),
+                          #("evidenceReason", json.string(why)),
+                        ]),
+                      )
+                  }
                 None -> apply_move(ctx, a, room, to, codes, note, check)
               }
           }

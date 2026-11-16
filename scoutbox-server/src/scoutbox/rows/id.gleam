@@ -396,6 +396,38 @@ pub fn next_conflict(tx: Tx) -> Result(ConflictId, Fail(e)) {
   ids.next(tx, "vcoi") |> result.map(ConflictId)
 }
 
+/// An id of `case_decision_drafts`.
+pub opaque type DecisionDraftId {
+  DecisionDraftId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn decision_draft(text: String) -> DecisionDraftId {
+  DecisionDraftId(text)
+}
+
+pub fn decision_draft_to_string(id: DecisionDraftId) -> String {
+  let DecisionDraftId(text) = id
+  text
+}
+
+pub fn decision_draft_sql(id: DecisionDraftId) -> sqlight.Value {
+  sqlight.text(decision_draft_to_string(id))
+}
+
+pub fn decision_draft_json(id: DecisionDraftId) -> Json {
+  json.string(decision_draft_to_string(id))
+}
+
+pub fn decision_draft_decoder() -> decode.Decoder(DecisionDraftId) {
+  decode.map(decode.string, DecisionDraftId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_decision_draft(tx: Tx) -> Result(DecisionDraftId, Fail(e)) {
+  ids.next(tx, "rdraft") |> result.map(DecisionDraftId)
+}
+
 /// An id of `dispatches`.
 pub opaque type DispatchId {
   DispatchId(String)
@@ -957,6 +989,166 @@ pub fn notification_decoder() -> decode.Decoder(NotificationId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_notification(tx: Tx) -> Result(NotificationId, Fail(e)) {
   ids.next(tx, "ntf") |> result.map(NotificationId)
+}
+
+/// An id of `recruitment_offers`.
+pub opaque type OfferId {
+  OfferId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn offer(text: String) -> OfferId {
+  OfferId(text)
+}
+
+pub fn offer_to_string(id: OfferId) -> String {
+  let OfferId(text) = id
+  text
+}
+
+pub fn offer_sql(id: OfferId) -> sqlight.Value {
+  sqlight.text(offer_to_string(id))
+}
+
+pub fn offer_json(id: OfferId) -> Json {
+  json.string(offer_to_string(id))
+}
+
+pub fn offer_decoder() -> decode.Decoder(OfferId) {
+  decode.map(decode.string, OfferId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_offer(tx: Tx) -> Result(OfferId, Fail(e)) {
+  ids.next(tx, "rof") |> result.map(OfferId)
+}
+
+/// An id of `offer_revision_documents`.
+pub opaque type OfferDocumentId {
+  OfferDocumentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn offer_document(text: String) -> OfferDocumentId {
+  OfferDocumentId(text)
+}
+
+pub fn offer_document_to_string(id: OfferDocumentId) -> String {
+  let OfferDocumentId(text) = id
+  text
+}
+
+pub fn offer_document_sql(id: OfferDocumentId) -> sqlight.Value {
+  sqlight.text(offer_document_to_string(id))
+}
+
+pub fn offer_document_json(id: OfferDocumentId) -> Json {
+  json.string(offer_document_to_string(id))
+}
+
+pub fn offer_document_decoder() -> decode.Decoder(OfferDocumentId) {
+  decode.map(decode.string, OfferDocumentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_offer_document(tx: Tx) -> Result(OfferDocumentId, Fail(e)) {
+  ids.next(tx, "rofd") |> result.map(OfferDocumentId)
+}
+
+/// An id of `offer_history`.
+pub opaque type OfferEventId {
+  OfferEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn offer_event(text: String) -> OfferEventId {
+  OfferEventId(text)
+}
+
+pub fn offer_event_to_string(id: OfferEventId) -> String {
+  let OfferEventId(text) = id
+  text
+}
+
+pub fn offer_event_sql(id: OfferEventId) -> sqlight.Value {
+  sqlight.text(offer_event_to_string(id))
+}
+
+pub fn offer_event_json(id: OfferEventId) -> Json {
+  json.string(offer_event_to_string(id))
+}
+
+pub fn offer_event_decoder() -> decode.Decoder(OfferEventId) {
+  decode.map(decode.string, OfferEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_offer_event(tx: Tx) -> Result(OfferEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(OfferEventId)
+}
+
+/// An id of `offer_responses`.
+pub opaque type OfferResponseId {
+  OfferResponseId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn offer_response(text: String) -> OfferResponseId {
+  OfferResponseId(text)
+}
+
+pub fn offer_response_to_string(id: OfferResponseId) -> String {
+  let OfferResponseId(text) = id
+  text
+}
+
+pub fn offer_response_sql(id: OfferResponseId) -> sqlight.Value {
+  sqlight.text(offer_response_to_string(id))
+}
+
+pub fn offer_response_json(id: OfferResponseId) -> Json {
+  json.string(offer_response_to_string(id))
+}
+
+pub fn offer_response_decoder() -> decode.Decoder(OfferResponseId) {
+  decode.map(decode.string, OfferResponseId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_offer_response(tx: Tx) -> Result(OfferResponseId, Fail(e)) {
+  ids.next(tx, "rofa") |> result.map(OfferResponseId)
+}
+
+/// An id of `offer_revisions`.
+pub opaque type OfferRevisionId {
+  OfferRevisionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn offer_revision(text: String) -> OfferRevisionId {
+  OfferRevisionId(text)
+}
+
+pub fn offer_revision_to_string(id: OfferRevisionId) -> String {
+  let OfferRevisionId(text) = id
+  text
+}
+
+pub fn offer_revision_sql(id: OfferRevisionId) -> sqlight.Value {
+  sqlight.text(offer_revision_to_string(id))
+}
+
+pub fn offer_revision_json(id: OfferRevisionId) -> Json {
+  json.string(offer_revision_to_string(id))
+}
+
+pub fn offer_revision_decoder() -> decode.Decoder(OfferRevisionId) {
+  decode.map(decode.string, OfferRevisionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_offer_revision(tx: Tx) -> Result(OfferRevisionId, Fail(e)) {
+  ids.next(tx, "rofr") |> result.map(OfferRevisionId)
 }
 
 /// An id of `open_trials`.

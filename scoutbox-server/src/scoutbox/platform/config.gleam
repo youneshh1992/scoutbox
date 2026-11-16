@@ -40,6 +40,12 @@ pub type Config {
     allow_local_webhooks: Bool,
     /// SESSION_TTL_DAYS: a session's absolute lifetime (default 30 days), applied wherever a session is resolved.
     session_ttl_ms: Int,
+    /// SCOUTBOX_TEST_CLOCK=1 (development only): a request may pin its time with `x-scoutbox-test-clock`, read by
+    /// `clock.request_ms` in the routes that honour it.
+    test_clock: Bool,
+    /// AGENT_VERIFICATION_TEST_PROVIDER=1 (development only): the synthetic licence register, which verifies any
+    /// `TEST-VERIFIED…` reference an agent submits.
+    agent_verification_test: Bool,
   )
 }
 
@@ -147,6 +153,9 @@ pub fn load() -> Result(Config, String) {
     },
     allow_local_webhooks: envoy.get("ALLOW_LOCAL_WEBHOOKS") == Ok("1"),
     session_ttl_ms: session_ttl_ms(envoy.get("SESSION_TTL_DAYS")),
+    test_clock: !production && envoy.get("SCOUTBOX_TEST_CLOCK") == Ok("1"),
+    agent_verification_test: !production
+      && envoy.get("AGENT_VERIFICATION_TEST_PROVIDER") == Ok("1"),
   ))
 }
 

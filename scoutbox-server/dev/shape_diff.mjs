@@ -127,6 +127,30 @@ requests.push(
   ['rooms overview', (s) => ['GET', '/admin/rooms/overview', null, null, true]],
   ['admin metrics (rooms)', (s) => ['GET', '/admin/metrics', null, null, true]],
 );
+for (const [k, srv] of [['ts', ts], ['gl', gl]]) {
+  S[k].case = (await call(srv.base, 'POST', '/org/rooms', { playerId: 'pl-tanaka', sourceContext: 'search' }, S[k].maria)).body?.room?.roomId;
+}
+requests.push(
+  ['journey (watching)', (s) => ['GET', `/org/rooms/${s.case}/journey`, null, s.maria]],
+  ['lifecycle unknown action', (s) => ['POST', `/org/rooms/${s.case}/lifecycle`, { action: 'teleport' }, s.maria]],
+  ['lifecycle stage refused', (s) => ['POST', `/org/rooms/${s.case}/lifecycle`, { stage: 'signed' }, s.maria]],
+  ['lifecycle start review', (s) => ['POST', `/org/rooms/${s.case}/lifecycle`, { action: 'startReview', clientKey: 'k-1' }, s.maria]],
+  ['lifecycle replay', (s) => ['POST', `/org/rooms/${s.case}/lifecycle`, { action: 'startReview', clientKey: 'k-1' }, s.maria]],
+  ['lifecycle evidence refused', (s) => ['POST', `/org/rooms/${s.case}/lifecycle`, { action: 'considerOffer' }, s.maria]],
+  ['lifecycle shortlist', (s) => ['POST', `/org/rooms/${s.case}/lifecycle`, { action: 'shortlist' }, s.maria]],
+  ['decision (none)', (s) => ['GET', `/org/rooms/${s.case}/decision`, null, s.maria]],
+  ['decision draft bad outcome', (s) => ['POST', `/org/rooms/${s.case}/decision/draft`, { outcome: 'maybe' }, s.maria]],
+  ['decision draft', (s) => ['POST', `/org/rooms/${s.case}/decision/draft`, { outcome: 'progress', reasonCodes: ['tactical_fit'], note: 'Fits', clientKey: 'd-1' }, s.maria]],
+  ['decision draft replay', (s) => ['POST', `/org/rooms/${s.case}/decision/draft`, { outcome: 'progress', reasonCodes: ['tactical_fit'], note: 'Fits', clientKey: 'd-1' }, s.maria]],
+  ['decision draft edit (no rev)', (s) => ['PATCH', `/org/rooms/${s.case}/decision/draft`, { note: 'x' }, s.maria]],
+  ['decision draft edit', (s) => ['PATCH', `/org/rooms/${s.case}/decision/draft`, { note: 'Fits the plan', expectedRev: 1 }, s.maria]],
+  ['decision (draft)', (s) => ['GET', `/org/rooms/${s.case}/decision`, null, s.maria]],
+  ['decision finalize stale', (s) => ['POST', `/org/rooms/${s.case}/decision/finalize`, { expectedRev: 1 }, s.maria]],
+  ['decision finalize', (s) => ['POST', `/org/rooms/${s.case}/decision/finalize`, { expectedRev: 2, clientKey: 'f-1' }, s.maria]],
+  ['decision finalize replay', (s) => ['POST', `/org/rooms/${s.case}/decision/finalize`, { expectedRev: 2, clientKey: 'f-1' }, s.maria]],
+  ['decision (final)', (s) => ['GET', `/org/rooms/${s.case}/decision`, null, s.maria]],
+  ['journey (consideration)', (s) => ['GET', `/org/rooms/${s.case}/journey`, null, s.maria]],
+);
 let differing = 0;
 const keysOf = (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.keys(v) : []);
 try {

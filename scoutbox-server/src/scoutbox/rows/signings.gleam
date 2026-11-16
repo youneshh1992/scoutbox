@@ -88,7 +88,7 @@ pub type Row {
     signing_revision_id: Option(String),
     signing_revision_number: Option(Int),
     case_id: Option(id.RecruitmentCaseId),
-    offer_id: Option(String),
+    offer_id: Option(id.OfferId),
     offer_revision_id: Option(String),
     transaction_id: Option(String),
     document_sha256: Option(String),
@@ -168,7 +168,7 @@ pub fn decoder() -> decode.Decoder(Row) {
     19,
     decode.optional(id.recruitment_case_decoder()),
   )
-  use offer_id <- decode.field(20, decode.optional(decode.string))
+  use offer_id <- decode.field(20, decode.optional(id.offer_decoder()))
   use offer_revision_id <- decode.field(21, decode.optional(decode.string))
   use transaction_id <- decode.field(22, decode.optional(decode.string))
   use document_sha256 <- decode.field(23, decode.optional(decode.string))
@@ -239,7 +239,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.signing_revision_id),
     sqlight.nullable(sqlight.int, row.signing_revision_number),
     sqlight.nullable(id.recruitment_case_sql, row.case_id),
-    sqlight.nullable(sqlight.text, row.offer_id),
+    sqlight.nullable(id.offer_sql, row.offer_id),
     sqlight.nullable(sqlight.text, row.offer_revision_id),
     sqlight.nullable(sqlight.text, row.transaction_id),
     sqlight.nullable(sqlight.text, row.document_sha256),

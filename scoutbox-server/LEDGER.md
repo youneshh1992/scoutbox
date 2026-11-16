@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 18 / 2354 | 0 / 179 | 5 to go |
-| recruitment | 19 | 2 | 1 | 430 / 196 | 9 / 15 | 18 to go |
+| recruitment | 19 | 6 | 2 | 438 / 443 | 15 / 69 | 18 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -72,14 +72,14 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/contacts` | not yet neutral | 10 → 10 | 366 | 366 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/contactsPersistence` | not yet neutral | 6 → 6 | 47 | 47 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/decisions` | not yet neutral | 9 → 9 | 249 | 249 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/decisionsPersistence` | not yet neutral | 4 → 4 | 48 | 48 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/decisionsPersistence` | neutral | 4 → 0 | 48 | 46 | 3 | +1 added | yes | 0 / 14 |  | 14 cases pending |
 | `recruitment/journey` | neutral | 6 → 0 | 155 | 117 | 38 |  |  | 0 / 196 | 0 / 6 | not answered; 196 cases pending; 6 hand-port calls |
 | `recruitment/journeyAdversarial` | not yet neutral | 9 → 9 | 217 | 217 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/journeyPersistence` | not yet neutral | 2 → 2 | 65 | 65 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/lifecycle` | not yet neutral | 11 → 11 | 307 | 307 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/offers` | not yet neutral | 12 → 12 | 354 | 354 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/offersAdversarial` | not yet neutral | 10 → 10 | 206 | 206 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/offersPersistence` | not yet neutral | 3 → 3 | 72 | 72 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/offers` | neutral | 12 → 0 | 354 | 250 | 104 |  |  | 8 / 151 | 6 / 31 | not answered; 151 cases pending; 25 hand-port calls |
+| `recruitment/offersAdversarial` | neutral | 10 → 0 | 206 | 165 | 41 |  |  | 0 / 82 | 0 / 23 | not answered; 82 cases pending; 23 hand-port calls |
+| `recruitment/offersPersistence` | neutral | 3 → 0 | 72 | 72 |  |  |  |  |  | not answered |
 | `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  | yes | 430 / 0 | 9 / 9 | **done** |
 | `recruitment/signings` | not yet neutral | 5 → 5 | 245 | 245 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/signingsAdversarial` | not yet neutral | 4 → 4 | 212 | 212 |  |  |  |  |  | not untangled; not answered |
@@ -112,6 +112,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/storeGuarantees` | 1 | the battery keeps COUNTER_MISSING over HTTP: the server refuses to start without its counter row |
 | `platform/storeGuarantees` | 1 | a first boot on an empty directory now has its own check, as part 1 boots a server instead of opening the store |
 | `platform/storeGuarantees` | 1 | the plan count is checked in both: the rules suite over the catalogue, the battery over /meta |
+| `recruitment/decisionsPersistence` | 1 | §4's "no legacy row is read as formal" asked isFormal of the fixture rows and the server's hasFinal together; the battery keeps hasFinal over HTTP, and isFormal's verdict on the rows is its own check in the rules suite |
 
 ## Calls to port by hand
 
@@ -151,6 +152,18 @@ ported by hand to a gleeunit test.
 | `platform/storeGuarantees` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 19 | args[].reads.contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
+| `recruitment/offers` | `domain.ts#isAdult` | 11 | args[] is a ; args[].dob is NaN | to do |
+| `recruitment/offers` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].contacts.byId is a function | to do |
+| `recruitment/offers` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 5 | args[].evidence.check is a function | to do |
+| `recruitment/offers` | `domains/recruitment/offers/errors.mjs#sendOfferError` | 1 | args[].status is a function | to do |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 2 | args[].expiresAt is Infinity; args[].expiresAt is NaN | to do |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 1 | args[] is undefined | to do |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 4 | args[] is Infinity; args[] is NaN; args[] is undefined | to do |
+| `recruitment/offers` | `domains/recruitment/rooms/shared.mjs#roomCan` | 6 | Gleam's types can't hold its arguments: cannot print "__proto__" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "constructor" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "hasOwnProperty" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "prototype" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "toString" as a code of scoutbox/recruitment/room_rules.action_code; Gleam's types can't hold its arguments: cannot print "valueOf" as a code of scoutbox/recruitment/room_rules.action_code | `test/scoutbox/recruitment/room_rules_test.gleam` |
+| `recruitment/offersAdversarial` | `domain.ts#isAdult` | 19 | args[] is a ; args[].dob is NaN | to do |
+| `recruitment/offersAdversarial` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 1 | args[].offers.byId is a function | to do |
+| `recruitment/offersAdversarial` | `domains/recruitment/lifecycle/lifecycle.mjs#canTransitionRecruitmentCase` | 1 | args[].evidence.check is a function | to do |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 2 | args[].expiresAt is Infinity; args[].expiresAt is NaN | to do |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#buildRoomSnapshot` | 2 | its result depends on the clock | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomCan` | 1 | Gleam's types can't hold its arguments: cannot print "invent_capability" as a code of scoutbox/recruitment/room_rules.action_code | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomSummary` | 1 | Gleam's types can't hold its arguments: cannot print "s" as a value of scoutbox/rows/recruitment_cases.stage_pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
@@ -268,6 +281,10 @@ mapped, then `npm run cases`.
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#audienceFor` | 3 |
 | `platform/productionHardening` | `domains/platform/eventAudience.mjs#unclassifiedEvents` | 1 |
 | `platform/productionHardening` | `domains/platform/rateLimit.mjs#rateLimitedBody` | 2 |
+| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#chainHead` | 1 |
+| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#decisionIntegrity` | 9 |
+| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#duplicateFinalHeads` | 1 |
+| `recruitment/decisionsPersistence` | `domains/recruitment/lifecycle/decision.mjs#isFormal` | 3 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#canonicalStageFor` | 9 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#completedStagesFor` | 1 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#currentAssessmentForCase` | 1 |
@@ -281,3 +298,37 @@ mapped, then `npm run cases`.
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#playerStageFor` | 6 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#timelineVisibleTo` | 4 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney` | 8 |
+| `recruitment/offers` | `domains/recruitment/offers/errors.mjs#publicErrorBody` | 2 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 9 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canRevise` | 6 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#canWithdrawRevision` | 4 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 13 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen` | 6 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#normaliseOfferClientKey` | 7 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerAgentView` | 1 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerClubView` | 1 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 11 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerIntegrity` | 8 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#offerRecipientView` | 1 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#responderMatches` | 8 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateDocumentRefs` | 14 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 20 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateMessages` | 3 |
+| `recruitment/offers` | `domains/recruitment/offers/offer.mjs#validateTerms` | 34 |
+| `recruitment/offers` | `temporal.ts#isExpiredAt` | 1 |
+| `recruitment/offers` | `temporal.ts#parseInstant` | 2 |
+| `recruitment/offersAdversarial` | `domain.ts#adultAgeFor` | 2 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#canRespondToRevision` | 11 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#effectiveRevisionStatus` | 20 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#liveStatus` | 9 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#minorOfferPathwayOpen` | 12 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerCaseConsistency` | 5 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerCaseCorrupt` | 3 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerEvidence` | 1 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerIntegrity` | 10 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#offerRecipientView` | 2 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#responderMatches` | 1 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateExpiry` | 1 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateMessages` | 2 |
+| `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateTerms` | 2 |
+| `recruitment/offersAdversarial` | `temporal.ts#isExpiredAt` | 1 |

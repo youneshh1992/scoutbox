@@ -13,4 +13,5 @@ export const BATTERIES = [
   'platform/connectedMode',
   'platform/sessionsAndPorts',
   'recruitment/rooms',
+  'recruitment/decisionsPersistence',
 ];
