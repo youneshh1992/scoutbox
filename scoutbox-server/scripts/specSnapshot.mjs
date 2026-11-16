@@ -62,6 +62,7 @@ export const SPEC = {
     'ALL_REASON_CODES',
     'PROHIBITED_REASON_CODES',
     'REVISITABLE_REASON_CODES',
+    'LIMITS',
   ],
   'domains/recruitment/lifecycle/errors.mjs': ['LIFECYCLE_ERROR_HTTP'],
   'domains/recruitment/lifecycle/index.mjs': ['LIFECYCLE_INPUT_CODES'],

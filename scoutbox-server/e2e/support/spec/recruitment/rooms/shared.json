@@ -364,5 +364,18 @@
     "combine_missing",
     "trial_needed",
     "continue_monitoring"
-  ]
+  ],
+  "LIMITS": {
+    "commentBody": 4000,
+    "commentsPerRoomPerMinute": 20,
+    "taskTitle": 160,
+    "taskDescription": 1000,
+    "tasksPerRoom": 200,
+    "tagLength": 40,
+    "tagsPerRoom": 20,
+    "roomsPerOrgPerHour": 60,
+    "mentionsPerComment": 20,
+    "pageSize": 50,
+    "maxPageSize": 100
+  }
 }
