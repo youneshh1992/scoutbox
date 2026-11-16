@@ -335,12 +335,14 @@ reason a reviewer has accepted.
   gains checks for product reasons before it is untangled needs a note too.
 - **Gleam repository: the ledger.** `dev/ledger.mjs` writes `scoutbox-server/LEDGER.md`, not `e2e/support/LEDGER.md`,
   from the TypeScript rows, `BATTERIES`, `report.json`, `HAND_PORTED` (new, in `map.mjs`: the hand-ported function →
-  its test file) and `ACCEPTED`, the reviewer's sign-off on moves to TypeScript unit suites (empty). It has a
+  its test file) and `ACCEPTED`, the reviewer's verdict on each move to a TypeScript unit suite (the Gleam test that
+  covers it, or why none is needed). It has a
   domain summary with a ported verdict, then per battery: modules then → now, checks then → battery + rules suite,
   answered, cases generated/pending, hand-port done/total, and what's left. Sections list the moves, additions,
   hand-port calls and pending functions. `e2e:check` runs `ledger --check`, and stale `HAND_PORTED`/`ACCEPTED`
-  entries are refused. **Verification comes out ported**, the first domain to do so. The one TypeScript-only move,
-  `storeGuarantees`' `createIdCounter` check into `testDataLayer`, awaits review.
+  entries are refused. **Verification comes out ported**, the first domain to do so. The one move to a TypeScript unit suite,
+  `storeGuarantees`' `createIdCounter` check into `testDataLayer`, is covered by `test/scoutbox/ids_test.gleam`
+  (`ids.next` refuses without its counter row; mutation-checked).
 - **Not checked statically:** that the batteries *pass*. The ledger can only say a battery is answered (in
   `BATTERIES`, kept identical by `e2e:check`); `npm run e2e` is the proof.
 

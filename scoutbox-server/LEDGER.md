@@ -10,7 +10,7 @@ suite + moved − added.
 
 **A domain is ported when** every battery in it is untangled and answered here (`e2e:check` keeps the copies
 unchanged; `npm run e2e` shows they pass), its rules suites' recorded calls all have generated tests, every
-hand-port call has its Gleam test, and every check moved to a TypeScript unit suite has a reviewer's acceptance.
+hand-port call has its Gleam test, and every check moved to a TypeScript unit suite has a reviewer's verdict.
 The three Box Cam analysis batteries are TypeScript only for good and don't count.
 
 ## Domains
@@ -67,7 +67,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `platform/safeguarding` | neutral | 0 → 0 | 52 | 52 |  |  | yes |  |  | **done** |
 | `platform/sessionsAndPorts` | not yet neutral | 1 → 1 | 40 | 40 |  |  |  |  |  | not untangled; not answered |
 | `platform/staff` | neutral | 0 → 0 | 23 | 23 |  |  | yes |  |  | **done** |
-| `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added |  | 0 / 18 | 0 / 19 | not answered; 18 cases pending; 19 hand-port calls; 1 TypeScript-only move unreviewed |
+| `platform/storeGuarantees` | neutral | 8 → 0 | 32 | 27 | 7 | 1 moved, +3 added |  | 0 / 18 | 0 / 19 | not answered; 18 cases pending; 19 hand-port calls |
 | `recruitment/analytics` | not yet neutral | 13 → 13 | 104 | 104 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/contacts` | not yet neutral | 10 → 10 | 366 | 366 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/contactsPersistence` | not yet neutral | 6 → 6 | 47 | 47 |  |  |  |  |  | not untangled; not answered |
@@ -93,11 +93,12 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 
 ## Checks moved to TypeScript unit suites
 
-They test the TypeScript implementation, so this server has nothing to port for them, once a reviewer agrees.
+They test the TypeScript implementation rather than its behaviour over HTTP. A reviewer decides where this server
+covers each one: a Gleam unit test of its own counterpart, or nothing, with the reason.
 
-| Battery | Checks | Now in | Why | Accepted |
+| Battery | Checks | Now in | Why | Here |
 |---|---|---|---|---|
-| `platform/storeGuarantees` | 1 | `scripts/testDataLayer.mjs` | COUNTER_MISSING was checked by calling the repository's createIdCounter on a damaged file; that is a unit check of the repository | not yet reviewed |
+| `platform/storeGuarantees` | 1 | `scripts/testDataLayer.mjs` | COUNTER_MISSING was checked by calling the repository's createIdCounter on a damaged file; that is a unit check of the repository | `test/scoutbox/ids_test.gleam` |
 
 ## Checks added while untangling
 

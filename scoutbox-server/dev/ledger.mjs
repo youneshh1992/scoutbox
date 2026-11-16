@@ -7,8 +7,8 @@
 //   - e2e/batteries.mjs: the batteries this server answers;
 //   - dev/battery_cases/report.json: each battery's recorded rule calls, as generated cases, pending cases and calls
 //     to port by hand; and dev/battery_cases/map.mjs's HAND_PORTED, where those were ported;
-//   - ACCEPTED below: the checks moved to a TypeScript unit suite that a reviewer has agreed need no Gleam
-//     counterpart.
+//   - ACCEPTED below: a reviewer's verdict on each check moved to a TypeScript unit suite: where this port covers
+//     it, or why it needs nothing here.
 //
 //   node dev/ledger.mjs           write LEDGER.md
 //   node dev/ledger.mjs --check   exit 1 if LEDGER.md differs from what the sources give, or a source is inconsistent
@@ -29,10 +29,13 @@ const LEDGER = path.join(ROOT, 'LEDGER.md');
 const REPORT = path.join(HERE, 'battery_cases', 'report.json');
 
 /**
- * Checks moved out of a battery into a TypeScript unit suite (the server's NOTES), keyed `<battery> → <file>`, that a
- * reviewer has accepted as testing the TypeScript implementation only, with what they said.
+ * The reviewed checks moved out of a battery into a TypeScript unit suite (the server's NOTES), keyed
+ * `<battery> → <file>`: `{ gleam: '<test file>' }` where a Gleam unit test checks the same thing, or
+ * `{ none: '<why>' }` where it tests something this server doesn't have.
  */
-const ACCEPTED = {};
+const ACCEPTED = {
+  'platform/storeGuarantees → scripts/testDataLayer.mjs': { gleam: 'test/scoutbox/ids_test.gleam' },
+};
 
 const { ledgerRows, BASELINE_REV } = await import(pathToFileURL(path.join(TS_SERVER, 'scripts', 'e2eLedger.mjs')).href);
 const rows = ledgerRows();
@@ -46,9 +49,13 @@ for (const [fn, file] of Object.entries(HAND_PORTED)) {
   const recorded = [...report.values()].flat().filter((f) => f.function === fn);
   if (!recorded.some((f) => handPortCalls(f) > 0)) problems.push(`HAND_PORTED lists ${fn}, which has no calls to port by hand`);
 }
-for (const key of Object.keys(ACCEPTED))
+for (const [key, verdict] of Object.entries(ACCEPTED)) {
+  if (verdict.gleam && !fs.existsSync(path.join(ROOT, verdict.gleam)))
+    problems.push(`ACCEPTED puts ${key} in ${verdict.gleam}, which doesn't exist`);
+  if (!verdict.gleam === !verdict.none) problems.push(`ACCEPTED ${key} needs either a Gleam test or a reason for none`);
   if (!rows.some((r) => r.checks.moved.some((m) => `${r.battery} → ${m.to}` === key)))
     problems.push(`ACCEPTED names ${key}, which no battery's notes move checks to`);
+}
 
 /** What this port has made of one battery. */
 function gleamSide(r) {
@@ -129,7 +136,7 @@ const batteryRows = rowsWith.map((r) => {
 });
 
 const movedRows = rowsWith.flatMap((r) =>
-  r.gleam.moved.map((m) => [`\`${r.battery}\``, m.checks, `\`${m.to}\``, m.why, m.accepted ?? 'not yet reviewed']),
+  r.gleam.moved.map((m) => [`\`${r.battery}\``, m.checks, `\`${m.to}\``, m.why, m.accepted ? (m.accepted.gleam ? `\`${m.accepted.gleam}\`` : `none: ${m.accepted.none}`) : 'not yet reviewed']),
 );
 const addedRows = rowsWith.flatMap((r) => r.checks.added.map((a) => [`\`${r.battery}\``, a.checks, a.why]));
 
@@ -160,7 +167,7 @@ suite + moved − added.
 
 **A domain is ported when** every battery in it is untangled and answered here (\`e2e:check\` keeps the copies
 unchanged; \`npm run e2e\` shows they pass), its rules suites' recorded calls all have generated tests, every
-hand-port call has its Gleam test, and every check moved to a TypeScript unit suite has a reviewer's acceptance.
+hand-port call has its Gleam test, and every check moved to a TypeScript unit suite has a reviewer's verdict.
 The three Box Cam analysis batteries are TypeScript only for good and don't count.
 
 ## Domains
@@ -176,9 +183,10 @@ ${table(['Battery', 'Boundary', 'Modules', 'Checks then', 'Battery', 'Rules suit
 
 ## Checks moved to TypeScript unit suites
 
-They test the TypeScript implementation, so this server has nothing to port for them, once a reviewer agrees.
+They test the TypeScript implementation rather than its behaviour over HTTP. A reviewer decides where this server
+covers each one: a Gleam unit test of its own counterpart, or nothing, with the reason.
 
-${movedRows.length ? table(['Battery', 'Checks', 'Now in', 'Why', 'Accepted'], movedRows) : 'None.'}
+${movedRows.length ? table(['Battery', 'Checks', 'Now in', 'Why', 'Here'], movedRows) : 'None.'}
 
 ## Checks added while untangling
 
