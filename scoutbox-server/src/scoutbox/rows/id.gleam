@@ -10,6 +10,38 @@ import scoutbox/platform/ids
 import scoutbox/platform/store.{type Fail, type Tx}
 import sqlight
 
+/// An id of `case_assignments`.
+pub opaque type AssignmentId {
+  AssignmentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn assignment(text: String) -> AssignmentId {
+  AssignmentId(text)
+}
+
+pub fn assignment_to_string(id: AssignmentId) -> String {
+  let AssignmentId(text) = id
+  text
+}
+
+pub fn assignment_sql(id: AssignmentId) -> sqlight.Value {
+  sqlight.text(assignment_to_string(id))
+}
+
+pub fn assignment_json(id: AssignmentId) -> Json {
+  json.string(assignment_to_string(id))
+}
+
+pub fn assignment_decoder() -> decode.Decoder(AssignmentId) {
+  decode.map(decode.string, AssignmentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_assignment(tx: Tx) -> Result(AssignmentId, Fail(e)) {
+  ids.next(tx, "asg") |> result.map(AssignmentId)
+}
+
 /// An id of `player_attendance`.
 pub opaque type AttendanceId {
   AttendanceId(String)
@@ -67,6 +99,38 @@ pub fn block_decoder() -> decode.Decoder(BlockId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_block(tx: Tx) -> Result(BlockId, Fail(e)) {
   ids.next(tx, "blk") |> result.map(BlockId)
+}
+
+/// An id of `case_history`.
+pub opaque type CaseEventId {
+  CaseEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn case_event(text: String) -> CaseEventId {
+  CaseEventId(text)
+}
+
+pub fn case_event_to_string(id: CaseEventId) -> String {
+  let CaseEventId(text) = id
+  text
+}
+
+pub fn case_event_sql(id: CaseEventId) -> sqlight.Value {
+  sqlight.text(case_event_to_string(id))
+}
+
+pub fn case_event_json(id: CaseEventId) -> Json {
+  json.string(case_event_to_string(id))
+}
+
+pub fn case_event_decoder() -> decode.Decoder(CaseEventId) {
+  decode.map(decode.string, CaseEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_case_event(tx: Tx) -> Result(CaseEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(CaseEventId)
 }
 
 /// An id of `channels`.
@@ -923,6 +987,38 @@ pub fn next_push(tx: Tx) -> Result(PushId, Fail(e)) {
   ids.next(tx, "push") |> result.map(PushId)
 }
 
+/// An id of `recruitment_cases`.
+pub opaque type RecruitmentCaseId {
+  RecruitmentCaseId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn recruitment_case(text: String) -> RecruitmentCaseId {
+  RecruitmentCaseId(text)
+}
+
+pub fn recruitment_case_to_string(id: RecruitmentCaseId) -> String {
+  let RecruitmentCaseId(text) = id
+  text
+}
+
+pub fn recruitment_case_sql(id: RecruitmentCaseId) -> sqlight.Value {
+  sqlight.text(recruitment_case_to_string(id))
+}
+
+pub fn recruitment_case_json(id: RecruitmentCaseId) -> Json {
+  json.string(recruitment_case_to_string(id))
+}
+
+pub fn recruitment_case_decoder() -> decode.Decoder(RecruitmentCaseId) {
+  decode.map(decode.string, RecruitmentCaseId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_recruitment_case(tx: Tx) -> Result(RecruitmentCaseId, Fail(e)) {
+  ids.next(tx, "case") |> result.map(RecruitmentCaseId)
+}
+
 /// An id of `ver_references`.
 pub opaque type ReferenceId {
   ReferenceId(String)
@@ -1017,6 +1113,136 @@ pub fn request_decoder() -> decode.Decoder(RequestId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_request(tx: Tx) -> Result(RequestId, Fail(e)) {
   ids.next(tx, "req") |> result.map(RequestId)
+}
+
+/// An id of `room_comments`.
+pub opaque type RoomCommentId {
+  RoomCommentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn room_comment(text: String) -> RoomCommentId {
+  RoomCommentId(text)
+}
+
+pub fn room_comment_to_string(id: RoomCommentId) -> String {
+  let RoomCommentId(text) = id
+  text
+}
+
+pub fn room_comment_sql(id: RoomCommentId) -> sqlight.Value {
+  sqlight.text(room_comment_to_string(id))
+}
+
+pub fn room_comment_json(id: RoomCommentId) -> Json {
+  json.string(room_comment_to_string(id))
+}
+
+pub fn room_comment_decoder() -> decode.Decoder(RoomCommentId) {
+  decode.map(decode.string, RoomCommentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_room_comment(tx: Tx) -> Result(RoomCommentId, Fail(e)) {
+  ids.next(tx, "rcmt") |> result.map(RoomCommentId)
+}
+
+/// An id of `room_decisions`.
+pub opaque type RoomDecisionId {
+  RoomDecisionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn room_decision(text: String) -> RoomDecisionId {
+  RoomDecisionId(text)
+}
+
+pub fn room_decision_to_string(id: RoomDecisionId) -> String {
+  let RoomDecisionId(text) = id
+  text
+}
+
+pub fn room_decision_sql(id: RoomDecisionId) -> sqlight.Value {
+  sqlight.text(room_decision_to_string(id))
+}
+
+pub fn room_decision_json(id: RoomDecisionId) -> Json {
+  json.string(room_decision_to_string(id))
+}
+
+pub fn room_decision_decoder() -> decode.Decoder(RoomDecisionId) {
+  decode.map(decode.string, RoomDecisionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_room_decision(tx: Tx) -> Result(RoomDecisionId, Fail(e)) {
+  ids.next(tx, "rdec") |> result.map(RoomDecisionId)
+}
+
+/// An id of `room_evidence_states`.
+pub opaque type RoomEvidenceStateId {
+  RoomEvidenceStateId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn room_evidence_state(text: String) -> RoomEvidenceStateId {
+  RoomEvidenceStateId(text)
+}
+
+pub fn room_evidence_state_to_string(id: RoomEvidenceStateId) -> String {
+  let RoomEvidenceStateId(text) = id
+  text
+}
+
+pub fn room_evidence_state_sql(id: RoomEvidenceStateId) -> sqlight.Value {
+  sqlight.text(room_evidence_state_to_string(id))
+}
+
+pub fn room_evidence_state_json(id: RoomEvidenceStateId) -> Json {
+  json.string(room_evidence_state_to_string(id))
+}
+
+pub fn room_evidence_state_decoder() -> decode.Decoder(RoomEvidenceStateId) {
+  decode.map(decode.string, RoomEvidenceStateId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_room_evidence_state(
+  tx: Tx,
+) -> Result(RoomEvidenceStateId, Fail(e)) {
+  ids.next(tx, "rev") |> result.map(RoomEvidenceStateId)
+}
+
+/// An id of `room_snapshots`.
+pub opaque type RoomSnapshotId {
+  RoomSnapshotId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn room_snapshot(text: String) -> RoomSnapshotId {
+  RoomSnapshotId(text)
+}
+
+pub fn room_snapshot_to_string(id: RoomSnapshotId) -> String {
+  let RoomSnapshotId(text) = id
+  text
+}
+
+pub fn room_snapshot_sql(id: RoomSnapshotId) -> sqlight.Value {
+  sqlight.text(room_snapshot_to_string(id))
+}
+
+pub fn room_snapshot_json(id: RoomSnapshotId) -> Json {
+  json.string(room_snapshot_to_string(id))
+}
+
+pub fn room_snapshot_decoder() -> decode.Decoder(RoomSnapshotId) {
+  decode.map(decode.string, RoomSnapshotId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_room_snapshot(tx: Tx) -> Result(RoomSnapshotId, Fail(e)) {
+  ids.next(tx, "rsnap") |> result.map(RoomSnapshotId)
 }
 
 /// An id of `ver_root_requests`.
@@ -1145,6 +1371,38 @@ pub fn squad_entry_decoder() -> decode.Decoder(SquadEntryId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_squad_entry(tx: Tx) -> Result(SquadEntryId, Fail(e)) {
   ids.next(tx, "sq") |> result.map(SquadEntryId)
+}
+
+/// An id of `case_tasks`.
+pub opaque type TaskId {
+  TaskId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn task(text: String) -> TaskId {
+  TaskId(text)
+}
+
+pub fn task_to_string(id: TaskId) -> String {
+  let TaskId(text) = id
+  text
+}
+
+pub fn task_sql(id: TaskId) -> sqlight.Value {
+  sqlight.text(task_to_string(id))
+}
+
+pub fn task_json(id: TaskId) -> Json {
+  json.string(task_to_string(id))
+}
+
+pub fn task_decoder() -> decode.Decoder(TaskId) {
+  decode.map(decode.string, TaskId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_task(tx: Tx) -> Result(TaskId, Fail(e)) {
+  ids.next(tx, "tsk") |> result.map(TaskId)
 }
 
 /// An id of `support_tickets`.

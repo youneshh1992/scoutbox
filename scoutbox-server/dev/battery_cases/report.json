@@ -891,7 +891,7 @@
         "calls": 18,
         "cases": 18,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       }
     ]
   },
@@ -1026,84 +1026,88 @@
         "calls": 5,
         "cases": 5,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#canTransition",
         "calls": 677,
         "cases": 306,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#clampPage",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#decisionReadiness",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#normaliseSourceContext",
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomActivity",
         "calls": 6,
         "cases": 4,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomCan",
         "calls": 13,
-        "cases": 12,
-        "handPort": {},
-        "status": "pending"
+        "cases": 11,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"invent_capability\" as a code of scoutbox/recruitment/room_rules.action_code": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomFunnel",
         "calls": 1,
         "cases": 1,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomHealth",
         "calls": 3,
         "cases": 3,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomRole",
         "calls": 7,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomStatusForStage",
         "calls": 11,
         "cases": 11,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#roomSummary",
         "calls": 2,
-        "cases": 2,
-        "handPort": {},
-        "status": "pending"
+        "cases": 1,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"s\" as a value of scoutbox/rows/recruitment_cases.stage_pairs": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#secondLookEvent",
@@ -1117,37 +1121,42 @@
         "calls": 47,
         "cases": 36,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#validateDecision",
         "calls": 7,
-        "cases": 6,
+        "cases": 5,
         "handPort": {
-          "args[].note.toString is a function": 1
+          "args[].note.toString is a function": 1,
+          "Gleam's types can't hold its arguments: cannot print \"sign_immediately\" as a value of scoutbox/rows/room_decisions.recommendation_pairs": 1
         },
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#validateReasonCodes",
         "calls": 17,
-        "cases": 16,
-        "handPort": {},
-        "status": "pending"
+        "cases": 15,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"budget\" as a List": 1
+        },
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#validateTag",
         "calls": 6,
         "cases": 6,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#validateTransition",
         "calls": 13,
-        "cases": 11,
-        "handPort": {},
-        "status": "pending"
+        "cases": 10,
+        "handPort": {
+          "Gleam's types can't hold its arguments: cannot print \"not_a_status\" as a value of scoutbox/vocab/room_status.pairs": 2
+        },
+        "status": "generated"
       }
     ]
   },

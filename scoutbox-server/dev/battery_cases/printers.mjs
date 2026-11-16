@@ -127,3 +127,23 @@ export const call = (module, name) => (ctx) => `${ctx.use(module)}.${name}()`;
 export const ref = (module, name) => (ctx) => `${ctx.use(module)}.${name}`;
 
 export { alias };
+
+/** Any JSON value, as a `gleam/json` expression (objects keep their key order). */
+export const jsonValue = (v, ctx) => {
+  const j = ctx.use('gleam/json');
+  if (v === null) return `${j}.null()`;
+  if (typeof v === 'string') return `${j}.string(${gleamString(v)})`;
+  if (typeof v === 'boolean') return `${j}.bool(${v ? 'True' : 'False'})`;
+  if (Number.isInteger(v)) return `${j}.int(${v})`;
+  if (typeof v === 'number' && Number.isFinite(v)) return `${j}.float(${v})`;
+  if (Array.isArray(v)) return `${j}.preprocessed_array([${v.map((x) => jsonValue(x, ctx)).join(', ')}])`;
+  if (typeof v === 'object')
+    return `${j}.object([${Object.entries(v)
+      .map(([k, x]) => `#(${gleamString(k)}, ${jsonValue(x, ctx)})`)
+      .join(', ')}])`;
+  return fail('JSON', v);
+};
+
+/** A JavaScript number or numeric text given where JavaScript's `Number()` would read it, as the Gleam text. */
+export const numberText = (v) =>
+  typeof v === 'string' ? gleamString(v) : Number.isFinite(v) ? gleamString(String(v)) : fail('a number or text', v);

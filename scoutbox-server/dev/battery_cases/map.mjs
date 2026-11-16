@@ -17,7 +17,9 @@ import {
   dict,
   ident,
   int,
+  jsonValue,
   list,
+  numberText,
   option,
   record,
   ref,
@@ -198,22 +200,263 @@ const completeness = record({
   fields: { complete: ['complete', bool], missing: ['missing', list(evidenceType)] },
 });
 
+
+// ----------------------------------------------------------------------------------------------- room types
+
+const ROOMS = 'scoutbox/recruitment/room_rules';
+const roomStatus = vocab('scoutbox/vocab/room_status');
+const level = vocab('scoutbox/rows/orgs', 'level_pairs');
+const stage = vocab('scoutbox/rows/recruitment_cases', 'stage_pairs');
+const roomPriority = vocab('scoutbox/rows/recruitment_cases', 'room_priority_pairs');
+const recommendation = vocab('scoutbox/rows/room_decisions', 'recommendation_pairs');
+const taskState = vocab('scoutbox/vocab/task_state');
+const sourceContext = vocab('scoutbox/vocab/source_context');
+const byKind = vocab('scoutbox/rows/case_history', 'by_kind_pairs');
+const role = code(ROOMS, 'role_code');
+const roomAction = code(ROOMS, 'action_code');
+const health = code(ROOMS, 'health_code');
+
+
+const readinessInput = record({
+  module: ROOMS,
+  constructor: 'ReadinessInput',
+  base: ref(ROOMS, 'no_readiness'),
+  fields: {
+    assessmentsAssigned: ['assessments_assigned', int],
+    assessmentsSubmitted: ['assessments_submitted', int],
+    recentFullMatch: ['recent_full_match', bool],
+    coachReference: ['coach_reference', bool],
+    combineVerified: ['combine_verified', int],
+    combineRequested: ['combine_requested', int],
+    trialState: ['trial_state', code(ROOMS, 'trial_state_code')],
+    openTasks: ['open_tasks', int],
+    openEvidenceRequests: ['open_evidence_requests', int],
+  },
+});
+
+const item = record({
+  module: ROOMS,
+  constructor: 'Item',
+  fields: {
+    key: ['key', code(ROOMS, 'item_key_code')],
+    label: ['label', string],
+    value: ['value', string],
+    complete: ['complete', bool],
+    outstanding: ['outstanding', option(string)],
+  },
+});
+
+/** A readiness as decisionReadiness returns it. Its counts and blockers are derived from its items in Gleam, so
+ *  a recorded readiness whose blockers disagree with its items can't be held. */
+const readiness = (v, ctx) => {
+  const blockers = (v.items ?? []).filter((i) => i.outstanding).map((i) => ({ key: i.key, text: i.outstanding }));
+  if (JSON.stringify(v.blockers ?? blockers) !== JSON.stringify(blockers))
+    throw new Error('Readiness has no field for blockers that disagree with its items');
+  return record({
+    module: ROOMS,
+    constructor: 'Readiness',
+    fields: { items: ['items', list(item)], openEvidenceRequests: ['open_evidence_requests', int] },
+    ignore: ['complete', 'total', 'blockers', 'note'],
+  })(v, ctx);
+};
+
+/** The parts of a room its roles are decided from. */
+const membership = (v, ctx) =>
+  `${ctx.use(ROOMS)}.Membership(owner: ${ident('org_user')(v.ownerUserId, ctx)}, lead_scout: ${option(ident('org_user'))(v.room?.leadScoutUserId, ctx)}, assignees: ${list(ident('org_user'))((v.assignments ?? []).map((a) => a.userId), ctx)}, restricted: ${bool(!!v.restricted)}, status: ${roomStatus(v.room?.status, ctx)})`;
+
+const event = record({
+  module: ROOMS,
+  constructor: 'Event',
+  defaults: { by_kind: 'None', by_id: 'None', by_name: 'None', detail: 'None' },
+  fields: {
+    id: ['id', string],
+    at: ['at', int],
+    action: ['action', string],
+    byKind: ['by_kind', option(byKind)],
+    byId: ['by_id', option(string)],
+    byName: ['by_name', option(string)],
+    detail: ['detail', option(jsonValue)],
+  },
+});
+
+const summaryRoom = record({
+  module: ROOMS,
+  constructor: 'SummaryRoom',
+  defaults: { player_name: 'None', owner_name: 'None', lead_scout_user_id: 'None', tags: '[]' },
+  fields: {
+    id: ['room_id', ident('recruitment_case')],
+    playerId: ['player_id', ident('player')],
+    playerName: ['player_name', option(string)],
+    stage: ['stage', stage],
+    ownerUserId: ['owner_user_id', ident('org_user')],
+    ownerName: ['owner_name', option(string)],
+    createdAt: ['created_at', int],
+    room: (v, ctx) => {
+      const known = ['status', 'priority', 'tags', 'leadScoutUserId', 'updatedAt'];
+      for (const k of Object.keys(v ?? {}))
+        if (!known.includes(k)) throw new Error(`SummaryRoom has no field for the JavaScript key room.${k}`);
+      return [
+        ['status', roomStatus(v.status, ctx)],
+        ['priority', roomPriority(v.priority, ctx)],
+        ['tags', list(string)(v.tags ?? [], ctx)],
+        ['lead_scout_user_id', option(ident('org_user'))(v.leadScoutUserId, ctx)],
+        ['updated_at', int(v.updatedAt)],
+      ];
+    },
+  },
+});
+
+const summaryPlayer = record({
+  module: ROOMS,
+  constructor: 'SummaryPlayer',
+  defaults: { position: 'None', age: 'None', current_club: 'None' },
+  fields: {
+    position: ['position', option(string)],
+    age: ['age', option(int)],
+    currentClub: ['current_club', option(string)],
+  },
+});
+
+const summaryTrust = record({
+  module: ROOMS,
+  constructor: 'SummaryTrust',
+  fields: { score: ['score', int], band: ['band', string], bandLabel: ['band_label', string] },
+});
+
 // -------------------------------------------------------------------------------------------------- helpers
 
 const eq = (actual, expected) => `assert ${actual} == ${expected}`;
 
-/** A rule called with positional arguments, compared as a value. */
-const plain = (fnName, args, result) => ({
-  module: CLAIMS,
+/** A rule of `module` called with positional arguments, compared as a value. */
+const plainIn = (module) => (fnName, args, result) => ({
+  module,
   test: (c, ctx) =>
-    eq(`${ctx.use(CLAIMS)}.${fnName}(${args.map((p, i) => p(c.args[i], ctx)).join(', ')})`, result(c.result, ctx)),
+    eq(`${ctx.use(module)}.${fnName}(${args.map((p, i) => p(c.args[i], ctx)).join(', ')})`, result(c.result, ctx)),
 });
+const plain = plainIn(CLAIMS);
+
+/** `expression` encodes to exactly the JSON the TypeScript rule returned. */
+const eqJson = (expression, result, ctx) =>
+  eq(`${ctx.use('gleam/json')}.to_string(${expression})`, string(JSON.stringify(result)));
 
 // -------------------------------------------------------------------------------------------------- the map
 
 const SHARED = 'domains/verification/claims/shared.mjs';
 
+
+const ROOM_RULES = 'domains/recruitment/rooms/shared.mjs';
+const room = plainIn(ROOMS);
+
+const ROOM_MAP = {
+  [`${ROOM_RULES}#stageForRoomStatus`]: room('stage_for_room_status', [roomStatus, level], stage),
+  [`${ROOM_RULES}#roomStatusForStage`]: room('room_status_for_stage', [stage, level], option(roomStatus)),
+  [`${ROOM_RULES}#canTransition`]: room('can_transition', [roomStatus, roomStatus], bool),
+  [`${ROOM_RULES}#validateTransition`]: {
+    module: ROOMS,
+    test: (c, ctx) => {
+      const [from, to, { reasonCodes = [] } = {}] = c.args;
+      return eqJson(
+        `${ctx.use(ROOMS)}.transition_json(${ctx.use(ROOMS)}.validate_transition(${roomStatus(from, ctx)}, ${roomStatus(to, ctx)}, ${list(string)(reasonCodes, ctx)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${ROOM_RULES}#validateReasonCodes`]: {
+    module: ROOMS,
+    test: (c, ctx) =>
+      eqJson(
+        `${ctx.use(ROOMS)}.reasons_json(${ctx.use(ROOMS)}.validate_reason_codes(${list(string)(c.args[0], ctx)}))`,
+        c.result,
+        ctx,
+      ),
+  },
+  [`${ROOM_RULES}#validateDecision`]: {
+    module: ROOMS,
+    test: (c, ctx) => {
+      const { recommendation: r, reasonCodes = [], note = null, ...rest } = c.args[0] ?? {};
+      if (Object.keys(rest).length) throw new Error(`validate_decision has no argument for ${Object.keys(rest)}`);
+      return eqJson(
+        `${ctx.use(ROOMS)}.decision_json(${ctx.use(ROOMS)}.validate_decision(${recommendation(r, ctx)}, ${list(string)(reasonCodes, ctx)}, ${option(string)(note, ctx)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${ROOM_RULES}#decisionReadiness`]: {
+    module: ROOMS,
+    test: (c, ctx) =>
+      eqJson(
+        `${ctx.use(ROOMS)}.readiness_json(${ctx.use(ROOMS)}.decision_readiness(${readinessInput(c.args[0] ?? {}, ctx)}))`,
+        c.result,
+        ctx,
+      ),
+  },
+  [`${ROOM_RULES}#roomHealth`]: {
+    module: ROOMS,
+    test: (c, ctx) => {
+      const { readiness: r = null, hasCurrentDecision = false, status = 'watching' } = c.args[0] ?? {};
+      return eq(
+        `${ctx.use(ROOMS)}.room_health(${option(readiness)(r, ctx)}, ${bool(hasCurrentDecision)}, ${roomStatus(status, ctx)})`,
+        health(c.result, ctx),
+      );
+    },
+  },
+  [`${ROOM_RULES}#roomRole`]: {
+    module: ROOMS,
+    test: (c, ctx) => {
+      const { room: r, user, isLead } = c.args[0];
+      return eq(
+        `${ctx.use(ROOMS)}.room_role(${membership(r, ctx)}, ${ident('org_user')(user.id, ctx)}, ${bool(!!isLead)})`,
+        option(role)(c.result, ctx),
+      );
+    },
+  },
+  [`${ROOM_RULES}#roomCan`]: room('room_can', [option(role), roomAction], bool),
+  [`${ROOM_RULES}#canTaskTransition`]: room('can_task_transition', [taskState, taskState], bool),
+  [`${ROOM_RULES}#roomActivity`]: {
+    module: ROOMS,
+    test: (c, ctx) => {
+      const [history = [], { limit = 50, cursor = null } = {}] = c.args;
+      return eqJson(
+        `${ctx.use(ROOMS)}.activity_json(${ctx.use(ROOMS)}.room_activity(${list(event)(history, ctx)}, ${int(limit)}, ${option(string)(cursor, ctx)}))`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${ROOM_RULES}#roomFunnel`]: {
+    module: ROOMS,
+    test: (c, ctx) =>
+      eqJson(
+        `${ctx.use(ROOMS)}.room_funnel(${list(roomStatus)((c.args[0] ?? []).map((r) => r.room?.status), ctx)})`,
+        c.result,
+        ctx,
+      ),
+  },
+  [`${ROOM_RULES}#roomSummary`]: {
+    module: ROOMS,
+    test: (c, ctx) => {
+      const [r, { player = null, trust = null, openTasks = 0, health: h = null, lastActivityAt = null, visible = true } = {}] =
+        c.args;
+      return eqJson(
+        `${ctx.use(ROOMS)}.room_summary(${summaryRoom(r, ctx)}, player: ${option(summaryPlayer)(player, ctx)}, trust: ${option(summaryTrust)(trust, ctx)}, open_tasks: ${int(openTasks)}, health: ${option(health)(h, ctx)}, last_activity_at: ${option(int)(lastActivityAt, ctx)}, visible: ${bool(visible)})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
+  [`${ROOM_RULES}#validateTag`]: {
+    module: ROOMS,
+    test: (c, ctx) =>
+      eqJson(`${ctx.use(ROOMS)}.tag_json(${ctx.use(ROOMS)}.validate_tag(${string(c.args[0])}))`, c.result, ctx),
+  },
+  [`${ROOM_RULES}#clampPage`]: room('clamp_page', [option(numberText)], int),
+  [`${ROOM_RULES}#normaliseSourceContext`]: room('normalise_source_context', [string], sourceContext),
+};
+
 export const MAP = {
+  ...ROOM_MAP,
   [`${SHARED}#canTransition`]: plain('can_transition', [status, status], bool),
   [`${SHARED}#applyTransition`]: {
     module: CLAIMS,

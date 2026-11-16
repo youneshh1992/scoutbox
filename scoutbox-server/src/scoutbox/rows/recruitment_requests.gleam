@@ -144,7 +144,7 @@ pub type Row {
     routed_to: party.Party,
     guardian_id: Option(id.GuardianId),
     contact_channel_id: Option(id.ChannelId),
-    case_id: Option(String),
+    case_id: Option(id.RecruitmentCaseId),
     trial_id: Option(String),
     recipient_type: Option(party.Party),
     recipient_player_id: Option(id.PlayerId),
@@ -255,7 +255,10 @@ pub fn decoder() -> decode.Decoder(Row) {
     28,
     decode.optional(id.channel_decoder()),
   )
-  use case_id <- decode.field(29, decode.optional(decode.string))
+  use case_id <- decode.field(
+    29,
+    decode.optional(id.recruitment_case_decoder()),
+  )
   use trial_id <- decode.field(30, decode.optional(decode.string))
   use recipient_type <- decode.field(31, decode.optional(party.decoder()))
   use recipient_player_id <- decode.field(
@@ -356,7 +359,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.text(party.to_string(row.routed_to)),
     sqlight.nullable(id.guardian_sql, row.guardian_id),
     sqlight.nullable(id.channel_sql, row.contact_channel_id),
-    sqlight.nullable(sqlight.text, row.case_id),
+    sqlight.nullable(id.recruitment_case_sql, row.case_id),
     sqlight.nullable(sqlight.text, row.trial_id),
     sqlight.nullable(
       fn(v) { sqlight.text(party.to_string(v)) },
