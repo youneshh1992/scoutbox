@@ -60,8 +60,6 @@ export const NOT_YET_NEUTRAL = [
   'recruitment/trialDatesMinorsAndErasure',
   'recruitment/trials',
   'recruitment/trialsPersistence',
-  'verification/organisationsAndStaff',
-  'verification/organisationsAndStaffAdversarial',
 ];
 
 /** Every boundary problem under e2e/, as messages. Empty when the boundary holds. */
