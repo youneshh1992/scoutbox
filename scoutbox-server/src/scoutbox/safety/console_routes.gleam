@@ -22,6 +22,7 @@ import scoutbox/rows/moderation_log
 import scoutbox/rows/ops_events
 import scoutbox/rows/reports
 import scoutbox/safety/audit
+import scoutbox/verification/review_routes as verification_review
 import scoutbox/vocab/audience
 import wisp.{type Request, type Response}
 
@@ -319,6 +320,13 @@ pub fn verification(ctx: Ctx, req: Request, id: String) -> Response {
   let updated =
     store.unit(ctx.store, fn(tx) {
       use _ <- result.try(orgs.set_standing(tx, org.id, standing))
+      // Mirrored on the organisation's identity claim in the same unit.
+      use _ <- result.try(verification_review.sync_legacy_toggle(
+        tx,
+        org.id,
+        standing.verified,
+        clock.now_ms(),
+      ))
       let read = store.reading(tx)
       use found <- result.try(orgs.by_id(read, org.id))
       let assert Some(updated) = found as "the organisation is still there"

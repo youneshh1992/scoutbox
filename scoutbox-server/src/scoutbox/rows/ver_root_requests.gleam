@@ -6,6 +6,7 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/vocab/attribution
+import scoutbox/vocab/check_outcome
 import scoutbox/vocab/identity_link
 import scoutbox/vocab/ver_org_type
 import sqlight
@@ -146,86 +147,6 @@ pub fn check_email_domain_alignment_decoder() -> decode.Decoder(
   }
 }
 
-pub type CheckFreeEmailProvider {
-  CheckFreeEmailProviderPassed
-  CheckFreeEmailProviderFlagged
-}
-
-/// Each value with the text the column stores.
-pub const check_free_email_provider_pairs = [
-  #("passed", CheckFreeEmailProviderPassed),
-  #("flagged", CheckFreeEmailProviderFlagged),
-]
-
-pub fn check_free_email_provider_to_string(
-  value: CheckFreeEmailProvider,
-) -> String {
-  case value {
-    CheckFreeEmailProviderPassed -> "passed"
-    CheckFreeEmailProviderFlagged -> "flagged"
-  }
-}
-
-pub fn check_free_email_provider_from_string(
-  value: String,
-) -> Result(CheckFreeEmailProvider, Nil) {
-  case value {
-    "passed" -> Ok(CheckFreeEmailProviderPassed)
-    "flagged" -> Ok(CheckFreeEmailProviderFlagged)
-    _ -> Error(Nil)
-  }
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn check_free_email_provider_decoder() -> decode.Decoder(
-  CheckFreeEmailProvider,
-) {
-  use value <- decode.then(decode.string)
-  case check_free_email_provider_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(CheckFreeEmailProviderPassed, "CheckFreeEmailProvider")
-  }
-}
-
-pub type CheckDisposableEmail {
-  CheckDisposableEmailPassed
-  CheckDisposableEmailFlagged
-}
-
-/// Each value with the text the column stores.
-pub const check_disposable_email_pairs = [
-  #("passed", CheckDisposableEmailPassed),
-  #("flagged", CheckDisposableEmailFlagged),
-]
-
-pub fn check_disposable_email_to_string(value: CheckDisposableEmail) -> String {
-  case value {
-    CheckDisposableEmailPassed -> "passed"
-    CheckDisposableEmailFlagged -> "flagged"
-  }
-}
-
-pub fn check_disposable_email_from_string(
-  value: String,
-) -> Result(CheckDisposableEmail, Nil) {
-  case value {
-    "passed" -> Ok(CheckDisposableEmailPassed)
-    "flagged" -> Ok(CheckDisposableEmailFlagged)
-    _ -> Error(Nil)
-  }
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn check_disposable_email_decoder() -> decode.Decoder(CheckDisposableEmail) {
-  use value <- decode.then(decode.string)
-  case check_disposable_email_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(CheckDisposableEmailPassed, "CheckDisposableEmail")
-  }
-}
-
 pub type CheckDnsOwnership {
   NotConfigured
 }
@@ -254,138 +175,6 @@ pub fn check_dns_ownership_decoder() -> decode.Decoder(CheckDnsOwnership) {
   case check_dns_ownership_from_string(value) {
     Ok(v) -> decode.success(v)
     Error(Nil) -> decode.failure(NotConfigured, "CheckDnsOwnership")
-  }
-}
-
-pub type CheckDuplicateOrganisation {
-  CheckDuplicateOrganisationPassed
-  CheckDuplicateOrganisationFlagged
-}
-
-/// Each value with the text the column stores.
-pub const check_duplicate_organisation_pairs = [
-  #("passed", CheckDuplicateOrganisationPassed),
-  #("flagged", CheckDuplicateOrganisationFlagged),
-]
-
-pub fn check_duplicate_organisation_to_string(
-  value: CheckDuplicateOrganisation,
-) -> String {
-  case value {
-    CheckDuplicateOrganisationPassed -> "passed"
-    CheckDuplicateOrganisationFlagged -> "flagged"
-  }
-}
-
-pub fn check_duplicate_organisation_from_string(
-  value: String,
-) -> Result(CheckDuplicateOrganisation, Nil) {
-  case value {
-    "passed" -> Ok(CheckDuplicateOrganisationPassed)
-    "flagged" -> Ok(CheckDuplicateOrganisationFlagged)
-    _ -> Error(Nil)
-  }
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn check_duplicate_organisation_decoder() -> decode.Decoder(
-  CheckDuplicateOrganisation,
-) {
-  use value <- decode.then(decode.string)
-  case check_duplicate_organisation_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(
-        CheckDuplicateOrganisationPassed,
-        "CheckDuplicateOrganisation",
-      )
-  }
-}
-
-pub type CheckDuplicateRequest {
-  CheckDuplicateRequestPassed
-  CheckDuplicateRequestFlagged
-}
-
-/// Each value with the text the column stores.
-pub const check_duplicate_request_pairs = [
-  #("passed", CheckDuplicateRequestPassed),
-  #("flagged", CheckDuplicateRequestFlagged),
-]
-
-pub fn check_duplicate_request_to_string(
-  value: CheckDuplicateRequest,
-) -> String {
-  case value {
-    CheckDuplicateRequestPassed -> "passed"
-    CheckDuplicateRequestFlagged -> "flagged"
-  }
-}
-
-pub fn check_duplicate_request_from_string(
-  value: String,
-) -> Result(CheckDuplicateRequest, Nil) {
-  case value {
-    "passed" -> Ok(CheckDuplicateRequestPassed)
-    "flagged" -> Ok(CheckDuplicateRequestFlagged)
-    _ -> Error(Nil)
-  }
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn check_duplicate_request_decoder() -> decode.Decoder(
-  CheckDuplicateRequest,
-) {
-  use value <- decode.then(decode.string)
-  case check_duplicate_request_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(CheckDuplicateRequestPassed, "CheckDuplicateRequest")
-  }
-}
-
-pub type CheckDomainAlreadyVerifiedElsewhere {
-  CheckDomainAlreadyVerifiedElsewherePassed
-  CheckDomainAlreadyVerifiedElsewhereFlagged
-}
-
-/// Each value with the text the column stores.
-pub const check_domain_already_verified_elsewhere_pairs = [
-  #("passed", CheckDomainAlreadyVerifiedElsewherePassed),
-  #("flagged", CheckDomainAlreadyVerifiedElsewhereFlagged),
-]
-
-pub fn check_domain_already_verified_elsewhere_to_string(
-  value: CheckDomainAlreadyVerifiedElsewhere,
-) -> String {
-  case value {
-    CheckDomainAlreadyVerifiedElsewherePassed -> "passed"
-    CheckDomainAlreadyVerifiedElsewhereFlagged -> "flagged"
-  }
-}
-
-pub fn check_domain_already_verified_elsewhere_from_string(
-  value: String,
-) -> Result(CheckDomainAlreadyVerifiedElsewhere, Nil) {
-  case value {
-    "passed" -> Ok(CheckDomainAlreadyVerifiedElsewherePassed)
-    "flagged" -> Ok(CheckDomainAlreadyVerifiedElsewhereFlagged)
-    _ -> Error(Nil)
-  }
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn check_domain_already_verified_elsewhere_decoder() -> decode.Decoder(
-  CheckDomainAlreadyVerifiedElsewhere,
-) {
-  use value <- decode.then(decode.string)
-  case check_domain_already_verified_elsewhere_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(
-        CheckDomainAlreadyVerifiedElsewherePassed,
-        "CheckDomainAlreadyVerifiedElsewhere",
-      )
   }
 }
 
@@ -447,13 +236,13 @@ pub type Row {
     declared_authorised: Option(Bool),
     check_email_syntax: CheckEmailSyntax,
     check_email_domain_alignment: CheckEmailDomainAlignment,
-    check_free_email_provider: CheckFreeEmailProvider,
-    check_disposable_email: CheckDisposableEmail,
+    check_free_email_provider: check_outcome.CheckOutcome,
+    check_disposable_email: check_outcome.CheckOutcome,
     check_domain_normalized: String,
     check_dns_ownership: CheckDnsOwnership,
-    check_duplicate_organisation: CheckDuplicateOrganisation,
-    check_duplicate_request: CheckDuplicateRequest,
-    check_domain_already_verified_elsewhere: CheckDomainAlreadyVerifiedElsewhere,
+    check_duplicate_organisation: check_outcome.CheckOutcome,
+    check_duplicate_request: check_outcome.CheckOutcome,
+    check_domain_already_verified_elsewhere: check_outcome.CheckOutcome,
     check_evidence_completeness: CheckEvidenceCompleteness,
     email_proved: Bool,
     existing_org_id: Option(String),
@@ -484,13 +273,13 @@ pub fn new(
   work_email work_email: String,
   check_email_syntax check_email_syntax: CheckEmailSyntax,
   check_email_domain_alignment check_email_domain_alignment: CheckEmailDomainAlignment,
-  check_free_email_provider check_free_email_provider: CheckFreeEmailProvider,
-  check_disposable_email check_disposable_email: CheckDisposableEmail,
+  check_free_email_provider check_free_email_provider: check_outcome.CheckOutcome,
+  check_disposable_email check_disposable_email: check_outcome.CheckOutcome,
   check_domain_normalized check_domain_normalized: String,
   check_dns_ownership check_dns_ownership: CheckDnsOwnership,
-  check_duplicate_organisation check_duplicate_organisation: CheckDuplicateOrganisation,
-  check_duplicate_request check_duplicate_request: CheckDuplicateRequest,
-  check_domain_already_verified_elsewhere check_domain_already_verified_elsewhere: CheckDomainAlreadyVerifiedElsewhere,
+  check_duplicate_organisation check_duplicate_organisation: check_outcome.CheckOutcome,
+  check_duplicate_request check_duplicate_request: check_outcome.CheckOutcome,
+  check_domain_already_verified_elsewhere check_domain_already_verified_elsewhere: check_outcome.CheckOutcome,
   check_evidence_completeness check_evidence_completeness: CheckEvidenceCompleteness,
   email_proved email_proved: Bool,
   applicant_secret_hash applicant_secret_hash: String,
@@ -558,27 +347,15 @@ pub fn decoder() -> decode.Decoder(Row) {
     14,
     check_email_domain_alignment_decoder(),
   )
-  use check_free_email_provider <- decode.field(
-    15,
-    check_free_email_provider_decoder(),
-  )
-  use check_disposable_email <- decode.field(
-    16,
-    check_disposable_email_decoder(),
-  )
+  use check_free_email_provider <- decode.field(15, check_outcome.decoder())
+  use check_disposable_email <- decode.field(16, check_outcome.decoder())
   use check_domain_normalized <- decode.field(17, decode.string)
   use check_dns_ownership <- decode.field(18, check_dns_ownership_decoder())
-  use check_duplicate_organisation <- decode.field(
-    19,
-    check_duplicate_organisation_decoder(),
-  )
-  use check_duplicate_request <- decode.field(
-    20,
-    check_duplicate_request_decoder(),
-  )
+  use check_duplicate_organisation <- decode.field(19, check_outcome.decoder())
+  use check_duplicate_request <- decode.field(20, check_outcome.decoder())
   use check_domain_already_verified_elsewhere <- decode.field(
     21,
-    check_domain_already_verified_elsewhere_decoder(),
+    check_outcome.decoder(),
   )
   use check_evidence_completeness <- decode.field(
     22,
@@ -664,17 +441,13 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.text(check_email_domain_alignment_to_string(
       row.check_email_domain_alignment,
     )),
-    sqlight.text(check_free_email_provider_to_string(
-      row.check_free_email_provider,
-    )),
-    sqlight.text(check_disposable_email_to_string(row.check_disposable_email)),
+    sqlight.text(check_outcome.to_string(row.check_free_email_provider)),
+    sqlight.text(check_outcome.to_string(row.check_disposable_email)),
     sqlight.text(row.check_domain_normalized),
     sqlight.text(check_dns_ownership_to_string(row.check_dns_ownership)),
-    sqlight.text(check_duplicate_organisation_to_string(
-      row.check_duplicate_organisation,
-    )),
-    sqlight.text(check_duplicate_request_to_string(row.check_duplicate_request)),
-    sqlight.text(check_domain_already_verified_elsewhere_to_string(
+    sqlight.text(check_outcome.to_string(row.check_duplicate_organisation)),
+    sqlight.text(check_outcome.to_string(row.check_duplicate_request)),
+    sqlight.text(check_outcome.to_string(
       row.check_domain_already_verified_elsewhere,
     )),
     sqlight.text(check_evidence_completeness_to_string(

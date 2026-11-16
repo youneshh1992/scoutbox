@@ -26,9 +26,15 @@ import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/request_routes
 import scoutbox/rows/ledger as ledger_row
+import scoutbox/rows/ver_claims as claim_row
 import scoutbox/safety/admin
 import scoutbox/safety/console_routes as console
 import scoutbox/safety/report_routes
+import scoutbox/verification/applications
+import scoutbox/verification/console_routes as verification_console
+import scoutbox/verification/org_admin_routes as org_admin
+import scoutbox/verification/personal_routes as personal
+import scoutbox/verification/review_routes as review
 import scoutbox/vocab/audience
 import wisp.{type Request, type Response}
 
@@ -36,12 +42,26 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
   use <- rescue
   case wisp.path_segments(req) {
     ["health"] -> only(req, Get, fn() { health(ctx) })
+    ["healthz"] -> only(req, Get, fn() { healthz(ctx) })
+    ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
     ["auth", ..rest] -> {
       use <- auth_limit(ctx, req)
       case rest {
         ["org", "login"] -> only(req, Post, fn() { sign_in.login(ctx, req) })
         ["org", "accept-invite"] ->
           only(req, Post, fn() { invite_routes.accept(ctx, req) })
+        ["org", "verification", "apply"] ->
+          only(req, Post, fn() { applications.apply(ctx, req) })
+        ["org", "verification", "apply", id, "confirm-email"] ->
+          only(req, Post, fn() { applications.confirm_email(ctx, req, id) })
+        ["org", "verification", "apply", id, "evidence"] ->
+          only(req, Post, fn() { applications.evidence(ctx, req, id) })
+        ["org", "verification", "apply", id, "submit"] ->
+          only(req, Post, fn() { applications.submit(ctx, req, id) })
+        ["org", "verification", "apply", id, "status"] ->
+          only(req, Get, fn() { applications.status(ctx, req, id) })
+        ["player", "login"] ->
+          only(req, Post, fn() { player_routes.login(ctx, req) })
         ["player", "signup"] ->
           only(req, Post, fn() { player_routes.signup(ctx, req) })
         ["guardian", "login"] ->
@@ -53,6 +73,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["org", ..rest] -> {
       use org <- access.org_session(ctx, req)
       case rest {
+        ["verification", ..path] -> verification_org(ctx, req, org, path)
         ["staff"] -> only(req, Get, fn() { staff_routes.list(ctx, org) })
         ["staff", user_id, "remove"] ->
           only(req, Post, fn() { staff_routes.remove(ctx, org, user_id) })
@@ -113,6 +134,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["timeline"] ->
           only(req, Post, fn() { player_routes.add_timeline(ctx, req, player) })
         ["export"] -> only(req, Get, fn() { player_routes.export(ctx, player) })
+        ["verification", "org", id] ->
+          only(req, Get, fn() { personal.public_org(ctx, id) })
         ["me"] -> only(req, Get, fn() { record.me(player) })
         ["availability"] ->
           only(req, Post, fn() { record.availability(ctx, req, player) })
@@ -135,6 +158,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["guardian", ..rest] -> {
       use guardian <- access.guardian_session(ctx, req)
       case rest {
+        ["verification", "org", id] ->
+          only(req, Get, fn() { personal.public_org(ctx, id) })
         ["me"] -> only(req, Get, fn() { guardian_routes.me(guardian) })
         ["children"] ->
           only(req, Get, fn() { guardian_routes.children(ctx, guardian) })
@@ -176,6 +201,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["admin", ..rest] -> {
       use <- access.admin(ctx, req)
       case rest {
+        ["verification", ..path] -> verification_admin(ctx, req, path)
         ["outbox"] -> only(req, Get, fn() { admin.outbox(ctx, req) })
         ["overview"] -> only(req, Get, fn() { console.overview(ctx) })
         ["metrics"] -> only(req, Get, fn() { console.metrics(ctx) })
@@ -198,6 +224,126 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         _ -> not_found()
       }
     }
+    _ -> not_found()
+  }
+}
+
+/// `/admin/verification/…`: Trust & Safety's verification surface.
+fn verification_admin(ctx: Ctx, req: Request, path: List(String)) -> Response {
+  case path {
+    ["orgs", id, "appoint-root"] ->
+      only(req, Post, fn() { review.appoint_root(ctx, req, id) })
+    ["orgs", id, "revoke"] ->
+      only(req, Post, fn() { review.revoke_org(ctx, req, id) })
+    ["queue"] -> only(req, Get, fn() { review.queue(ctx, req) })
+    ["cases", id] -> only(req, Get, fn() { review.case_view(ctx, id) })
+    ["evidence", id] ->
+      only(req, Get, fn() { review.admin_evidence(ctx, req, id) })
+    ["claims", id, "approve"] ->
+      only(req, Post, fn() { review.approve(ctx, req, id) })
+    ["claims", id, "reject"] ->
+      only(req, Post, fn() { review.reject(ctx, req, id) })
+    ["claims", id, "request-info"] ->
+      only(req, Post, fn() { review.request_info(ctx, req, id) })
+    ["claims", id, "suspend"] ->
+      only(req, Post, fn() {
+        review.suspend_or_revoke(ctx, req, id, claim_row.Suspended)
+      })
+    ["claims", id, "revoke"] ->
+      only(req, Post, fn() {
+        review.suspend_or_revoke(ctx, req, id, claim_row.Revoked)
+      })
+    ["claims", id, "reinstate"] ->
+      only(req, Post, fn() { review.reinstate(ctx, req, id) })
+    ["root-requests", id, "approve"] ->
+      only(req, Post, fn() { applications.approve(ctx, req, id) })
+    ["root-requests", id, "reject"] ->
+      only(req, Post, fn() { applications.reject(ctx, req, id) })
+    ["domain-requests"] -> only(req, Get, fn() { review.domain_requests(ctx) })
+    ["domain-requests", id, "decide"] ->
+      only(req, Post, fn() { review.decide_domain(ctx, req, id) })
+    ["disputes"] -> only(req, Get, fn() { review.disputes(ctx) })
+    ["disputes", id, "resolve"] ->
+      only(req, Post, fn() { review.resolve_dispute(ctx, req, id) })
+    ["authorities", id, "claims"] ->
+      only(req, Get, fn() { review.authority_claims(ctx, id) })
+    ["authorities", id, "flag"] ->
+      only(req, Post, fn() { review.flag_authority(ctx, req, id) })
+    _ -> not_found()
+  }
+}
+
+/// `/org/verification/…`: a staff member's own verification and their organisation's console.
+fn verification_org(
+  ctx: Ctx,
+  req: Request,
+  org: access.OrgAccess,
+  path: List(String),
+) -> Response {
+  case path {
+    ["me"] -> only(req, Get, fn() { personal.me(ctx, org) })
+    ["identity"] -> only(req, Post, fn() { personal.identity(ctx, req, org) })
+    ["claims", id, "evidence"] ->
+      only(req, Post, fn() { personal.evidence(ctx, req, org, id) })
+    ["claims", id, "submit"] ->
+      only(req, Post, fn() { personal.submit(ctx, req, org, id) })
+    ["claims", id, "dispute"] ->
+      only(req, Post, fn() { personal.dispute(ctx, req, org, id) })
+    ["affiliation"] ->
+      only(req, Post, fn() { personal.affiliation(ctx, req, org) })
+    ["work-email"] ->
+      only(req, Post, fn() { personal.work_email(ctx, req, org) })
+    ["work-email", "confirm"] ->
+      only(req, Post, fn() { personal.confirm_work_email(ctx, req, org) })
+    ["public", "user", id] ->
+      only(req, Get, fn() { personal.public_user(ctx, id) })
+    ["public", "org", id] ->
+      only(req, Get, fn() { personal.public_org(ctx, id) })
+    ["public", "users"] ->
+      only(req, Get, fn() { personal.public_users(ctx, req) })
+    ["dashboard"] ->
+      only(req, Get, fn() { verification_console.dashboard(ctx, org) })
+    ["requests"] ->
+      only(req, Get, fn() { verification_console.requests(ctx, org) })
+    ["requests", id, "decide"] ->
+      only(req, Post, fn() { verification_console.decide(ctx, req, org, id) })
+    ["staff"] ->
+      only(req, Get, fn() { verification_console.staff_register(ctx, req, org) })
+    ["staff", id, "departed"] ->
+      only(req, Post, fn() { verification_console.departed(ctx, req, org, id) })
+    ["licence-providers"] ->
+      only(req, Get, fn() { review.licence_providers(ctx) })
+    ["licence"] -> only(req, Post, fn() { review.new_licence(ctx, req, org) })
+    ["licence", id, "submit"] ->
+      only(req, Post, fn() { review.submit_licence(ctx, req, org, id) })
+    ["evidence", id] ->
+      only(req, Get, fn() { review.org_evidence(ctx, req, org, id) })
+    ["domains"] ->
+      case req.method {
+        Get -> org_admin.domains(ctx, org)
+        Post -> org_admin.add_domain(ctx, req, org)
+        _ -> not_found()
+      }
+    ["domains", id, "confirm"] ->
+      only(req, Post, fn() { org_admin.confirm_domain(ctx, req, org, id) })
+    ["admins"] ->
+      case req.method {
+        Get -> org_admin.admins(ctx, org)
+        Post -> org_admin.grant(ctx, req, org)
+        _ -> not_found()
+      }
+    ["admins", id, "revoke"] ->
+      only(req, Post, fn() { org_admin.revoke(ctx, req, org, id) })
+    ["root-transfers", id, "approve"] ->
+      only(req, Post, fn() { org_admin.approve_transfer(ctx, req, org, id) })
+    ["conflicts"] ->
+      case req.method {
+        Get -> org_admin.list_conflicts(ctx, org)
+        Post -> org_admin.declare(ctx, req, org)
+        _ -> not_found()
+      }
+    ["conflicts", id, "withdraw"] ->
+      only(req, Post, fn() { org_admin.withdraw_conflict(ctx, org, id) })
     _ -> not_found()
   }
 }
@@ -244,6 +390,18 @@ fn auth_limit(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
         ]),
       )
   }
+}
+
+/// `GET /healthz`: up, and for how long.
+/// Not ported yet: `schemaVersion`, the TypeScript server's latest migration number (platform/storeGuarantees).
+fn healthz(ctx: Ctx) -> Response {
+  contract.json(
+    200,
+    json.object([
+      #("ok", json.bool(True)),
+      #("uptimeS", json.int({ clock.now_ms() - ctx.booted_at + 500 } / 1000)),
+    ]),
+  )
 }
 
 /// States and counts only.

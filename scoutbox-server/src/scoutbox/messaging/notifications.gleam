@@ -31,6 +31,7 @@ pub const type_category = [
   #("request", row.Messages),
   #("report_resolved", row.SecurityAccount),
   #("badge", row.DiscoveryNudges),
+  #("verification", row.SecurityAccount),
 ]
 
 fn category_of(type_: String) -> Option(row.Category) {

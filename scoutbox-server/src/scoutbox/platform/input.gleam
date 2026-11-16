@@ -27,6 +27,7 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import scoutbox/platform/temporal
 
 pub type Problem {
   Required
@@ -43,6 +44,7 @@ pub type Problem {
   TooLarge
   NotAllowed
   NotATime
+  NotADate
   Invalid
 }
 
@@ -62,6 +64,7 @@ pub fn problem_name(problem: Problem) -> String {
     TooLarge -> "too_large"
     NotAllowed -> "not_allowed"
     NotATime -> "not_a_time"
+    NotADate -> "not_a_date"
     Invalid -> "invalid"
   }
 }
@@ -77,6 +80,8 @@ pub opaque type Issue {
     allowed: Option(List(String)),
     /// The code a problem carries of its own (TIME_INVALID), unless the route names one for the field.
     code: Option(String),
+    /// Inside a nested object: the field within it (`declarations.authorised`).
+    within: Option(String),
   )
 }
 
@@ -89,6 +94,7 @@ fn issue(problem: Problem, phrase: String) -> Issue {
     expected: None,
     allowed: None,
     code: None,
+    within: None,
   )
 }
 
@@ -234,6 +240,96 @@ fn at_most(s: String, max: Int) -> Result(String, Issue) {
         ),
       )
     False -> Ok(s)
+  }
+}
+
+/// A due date (schemas.mjs `dueDate`): a calendar day `YYYY-MM-DD` (the start of that UTC day), an ISO 8601
+/// date-time with an offset or Z, or integer milliseconds. Null and "" are no date.
+pub fn due_date() -> Check(Option(temporal.Due)) {
+  fn(v) {
+    let refused = fn(why: String) {
+      Error(
+        Issue(
+          ..issue(
+            NotADate,
+            "must be a calendar day (YYYY-MM-DD) or an ISO 8601 date-time with an offset ("
+              <> why
+              <> ")",
+          ),
+          expected: Some(
+            "YYYY-MM-DD, ISO 8601 with offset or Z, or integer milliseconds",
+          ),
+          code: Some("DATE_INVALID"),
+        ),
+      )
+    }
+    case decode.run(v, decode.optional(decode.dynamic)) {
+      Ok(None) -> Ok(None)
+      _ ->
+        case decode.run(v, decode.string), decode.run(v, decode.int) {
+          Ok(""), _ -> Ok(None)
+          Ok(s), _ ->
+            case temporal.day_start_ms(s), temporal.instant_ms(s) {
+              Ok(ms), _ -> Ok(Some(temporal.Day(ms)))
+              _, Ok(ms) -> Ok(Some(temporal.Instant(ms)))
+              Error(Nil), Error(why) -> refused(why)
+            }
+          _, Ok(ms) -> Ok(Some(temporal.Instant(ms)))
+          _, _ ->
+            case decode.run(v, decode.float) {
+              Ok(_) -> refused("not a whole number")
+              Error(_) -> refused("not a date-time")
+            }
+        }
+    }
+  }
+}
+
+/// `?ids=a,b,c` for a batch read (schemas.mjs `idsText`): at most `max` ids of at most 80 characters each. More
+/// are refused rather than dropped. Empty entries are skipped.
+pub fn ids_text(max: Int) -> Check(List(String)) {
+  fn(v) {
+    case string_check(v) {
+      Error(e) -> Error(e)
+      Ok(s) -> {
+        let ids = string.split(s, ",") |> list.filter(fn(x) { x != "" })
+        case
+          list.length(ids) > max,
+          list.any(ids, fn(x) { utf16_length(x) > 80 })
+        {
+          True, _ ->
+            Error(
+              Issue(
+                ..issue(
+                  TooLong,
+                  "must name at most " <> int.to_string(max) <> " ids",
+                ),
+                max: Some(max),
+              ),
+            )
+          _, True ->
+            Error(
+              Issue(
+                ..issue(TooLong, "must name ids of at most 80 characters"),
+                max: Some(80),
+              ),
+            )
+          False, False -> Ok(ids)
+        }
+      }
+    }
+  }
+}
+
+/// An id: text of 1 to 80 characters (schemas.mjs `id`). Spaces count, unlike `required_text`.
+pub fn id() -> Check(String) {
+  fn(v) {
+    case string_check(v) {
+      Error(e) -> Error(e)
+      Ok("") ->
+        Error(Issue(..issue(TooShort, "must not be empty"), min: Some(1)))
+      Ok(s) -> at_most(s, 80)
+    }
   }
 }
 
@@ -530,6 +626,29 @@ pub fn done(value: a) -> Shape(a) {
   })
 }
 
+/// A nested object read with its own shape. Its refusals name the field inside it (`declarations.extra`).
+pub fn object(shape: Shape(a)) -> Check(a) {
+  fn(v) {
+    case decode.run(v, decode.dict(decode.string, decode.dynamic)) {
+      Error(_) -> Error(issue(NotObject, "must be an object"))
+      Ok(fields) ->
+        case shape.run(fields, []) {
+          Ok(value) -> Ok(value)
+          Error(#(field, i)) ->
+            Error(
+              Issue(
+                ..i,
+                within: Some(case i.within {
+                  Some(inner) -> field <> "." <> inner
+                  None -> field
+                }),
+              ),
+            )
+        }
+    }
+  }
+}
+
 /// A request that takes no fields.
 pub fn nothing() -> Shape(Nil) {
   done(Nil)
@@ -561,6 +680,10 @@ pub fn parse(
       case shape.run(fields, []) {
         Ok(value) -> Ok(value)
         Error(#(field, i)) -> {
+          let field = case i.within {
+            Some(inner) -> field <> "." <> inner
+            None -> field
+          }
           let error = case list.key_find(codes, field), i.code {
             Ok(code), _ -> code
             Error(Nil), Some(code) -> code

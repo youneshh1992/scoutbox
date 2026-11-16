@@ -6,7 +6,6 @@ import gleam/option.{None}
 import scoutbox/rows/orgs
 import scoutbox/rows/ver_admins
 import scoutbox/rows/ver_claims
-import scoutbox/verification/claims
 import scoutbox/vocab/claim_type
 import scoutbox/vocab/org_type
 import scoutbox/vocab/ver_level
@@ -115,6 +114,3 @@ pub const admin =
     revoked_at: None,
     revoked_by: None,
   )
-
-/// An evidence file whose bytes are not in play.
-pub const file = claims.File(mime: "", bytes: 0, filename: "", buffer: None)

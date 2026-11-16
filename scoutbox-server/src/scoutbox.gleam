@@ -5,7 +5,7 @@ import ewe
 import gleam/erlang/process
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Effect, Ctx, SendMail}
+import scoutbox/app.{type Ctx, type Effect, Ctx, SendMail}
 import scoutbox/messaging/outbox
 import scoutbox/platform/clock
 import scoutbox/platform/config
@@ -16,6 +16,7 @@ import scoutbox/platform/store.{type Store}
 import scoutbox/platform/wisp_ewe
 import scoutbox/router
 import scoutbox/seed
+import scoutbox/verification/review_routes as verification_review
 import simplifile
 import wisp
 
@@ -57,6 +58,7 @@ fn boot() -> Result(Nil, String) {
   log(config, "demo seed loaded: " <> string.inspect(seeded))
   use limits <- result.try(limits.start())
   let ctx = Ctx(store:, config:, limits:, booted_at: clock.now_ms())
+  process.spawn(fn() { sweeping(ctx) })
   let builder =
     router.handle(ctx, _)
     |> wisp_ewe.handler(secrets.random_hex(32))
@@ -70,6 +72,13 @@ fn boot() -> Result(Nil, String) {
   ewe.start(builder)
   |> result.replace(Nil)
   |> result.map_error(fn(e) { "could not listen: " <> string.inspect(e) })
+}
+
+/// The periodic sweeps, one after another, forever: verification expiries and warnings.
+fn sweeping(ctx: Ctx) -> Nil {
+  process.sleep(ctx.config.sweep_ms)
+  let _ = verification_review.sweep(ctx)
+  sweeping(ctx)
 }
 
 /// After COMMIT. A failing effect never undoes the act's data; it is logged.

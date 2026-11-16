@@ -374,3 +374,14 @@ CREATE INDEX ver_conflicts_org_user ON ver_conflicts (org_id, user_id);
 CREATE INDEX ver_conflicts_user ON ver_conflicts (user_id, withdrawn_at);
 CREATE INDEX ver_domain_requests_org ON ver_domain_requests (org_id);
 CREATE INDEX ver_domain_requests_status ON ver_domain_requests (status);
+CREATE TABLE org_verified_domains (
+  org_id                                   TEXT NOT NULL CHECK (length(org_id) <= 80 AND length(org_id) > 0),
+  domain                                   TEXT NOT NULL CHECK (length(domain) <= 253 AND length(domain) > 0),
+  status                                   TEXT NOT NULL CHECK (status IN ('verified')),
+  method                                   TEXT NOT NULL CHECK (method IN ('official_domain_email','scoutbox_manual_review')),
+  verified_at                              INTEGER NOT NULL,
+  added_by                                 TEXT NOT NULL CHECK (length(added_by) <= 80 AND length(added_by) > 0),
+  FOREIGN KEY (org_id) REFERENCES orgs(id) ON DELETE RESTRICT,
+  PRIMARY KEY (org_id, domain)
+) STRICT;
+CREATE INDEX org_verified_domains_domain ON org_verified_domains (domain);

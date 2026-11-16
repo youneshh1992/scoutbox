@@ -1,5 +1,6 @@
 //// `POST /auth/org/login`: a named staff member signs in to their organisation.
 
+import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -17,6 +18,7 @@ import scoutbox/platform/limits
 import scoutbox/platform/secrets
 import scoutbox/platform/store
 import scoutbox/platform/vocabulary
+import scoutbox/rows/orgs as org_row
 import scoutbox/vocab/org_type
 import wisp.{type Request, type Response}
 
@@ -357,4 +359,68 @@ fn signed_in(
       ..nudge
     ]),
   )
+}
+
+/// `GET /orgs?platform=…`: the organisations a sign-in picker lists. The Grassroots app lists only grassroots
+/// clubs, the main app never lists them, and the Agent app lists agencies only. Unpaged, as the TypeScript
+/// server's is.
+pub fn org_list(ctx: Ctx, req: Request) -> Response {
+  let shape = {
+    use platform <- input.field(
+      "platform",
+      input.optional(vocabulary.check(platforms())),
+    )
+    input.done(platform)
+  }
+  use platform <- http.query(req, shape, [])
+  let where = case platform {
+    Some(GrassrootsApp) -> " WHERE level = 'grassroots'"
+    Some(Main) -> " WHERE (level IS NULL OR level <> 'grassroots')"
+    Some(AgentApp) -> " WHERE type = 'agency'"
+    None -> ""
+  }
+  let listed =
+    store.read(ctx.store, fn(read) {
+      use ids <- result.try(store.query(
+        read,
+        "SELECT id FROM orgs" <> where <> " ORDER BY rowid",
+        [],
+        decode.at([0], decode.string),
+      ))
+      use found <- result.try(list.try_map(ids, orgs.by_id(read, _)))
+      list.filter_map(found, option.to_result(_, Nil))
+      |> list.try_map(fn(o) {
+        use certified <- result.map(orgs.safeguarding_certified(read, o))
+        json.object(
+          list.flatten([
+            [
+              #("id", json.string(o.id)),
+              #("name", json.string(o.name)),
+              #("type", json.string(org_type.to_string(o.type_))),
+              #(
+                "level",
+                json.nullable(o.level, fn(l) {
+                  json.string(org_row.level_to_string(l))
+                }),
+              ),
+              #("plan", json.string(org_row.plan_to_string(o.plan))),
+              #("trustedPartner", json.bool(o.trusted_partner)),
+              #("verified", json.bool(o.verified)),
+              #("safeguardingCertified", json.bool(certified)),
+            ],
+            case orgs.is_grassroots(o) {
+              True -> [
+                #("city", json.nullable(o.city, json.string)),
+                #("federation", json.nullable(o.federation, json.string)),
+              ]
+              False -> []
+            },
+          ]),
+        )
+      })
+    })
+  case listed {
+    Ok(items) -> http.json(200, json.preprocessed_array(items))
+    Error(failure) -> http.internal(failure)
+  }
 }

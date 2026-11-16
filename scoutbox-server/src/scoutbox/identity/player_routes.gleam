@@ -3,6 +3,7 @@
 //// Under-18 profiles are owned by a verified guardian and created from the guardian's account; the sign-up
 //// refuses a minor.
 
+import gleam/bool
 import gleam/int
 import gleam/json
 import gleam/list
@@ -13,10 +14,12 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/players
 import scoutbox/identity/sessions
+import scoutbox/identity/sign_in
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
+import scoutbox/platform/limits
 import scoutbox/platform/store
 import scoutbox/recruitment/requests
 import scoutbox/rows/players as row
@@ -298,5 +301,67 @@ pub fn export(ctx: Ctx, p: PlayerAccess) -> Response {
   case found {
     Ok(body) -> http.json(200, body)
     Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `POST /auth/player/login`: a demo sign-in by player id. The wrong-guess budget is checked before the lookup,
+/// so an unknown id and a real one are refused alike once it is spent.
+pub fn login(ctx: Ctx, req: Request) -> Response {
+  let shape = {
+    use player_id <- input.field("playerId", input.nullish(input.text(80)))
+    use _password <- input.field("password", input.nullish(input.text(256)))
+    input.done(player_id)
+  }
+  use player_id <- http.body(req, shape, [])
+  let now = clock.now_ms()
+  let tried = "player:" <> option.unwrap(player_id, "undefined")
+  use <- bool.guard(
+    limits.login_locked(ctx.limits, tried, now),
+    sign_in.locked_out(),
+  )
+  let found = case player_id {
+    Some(id) -> store.read(ctx.store, players.by_id(_, id))
+    None -> Ok(None)
+  }
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(None) -> {
+      limits.login_failed(ctx.limits, tried, now)
+      http.error(404, "PLAYER_NOT_FOUND")
+    }
+    // Not ported yet: password-protected players need scrypt (out of this slice's scope).
+    Ok(Some(p)) ->
+      case p.row.password_hash, ctx.config.dev_logins {
+        Some(_), _ ->
+          http.error_message(
+            501,
+            "NOT_PORTED",
+            "Password-protected player accounts are not supported by this server yet.",
+          )
+        None, False ->
+          http.error_message(
+            403,
+            "DEV_LOGIN_DISABLED",
+            "Passwordless demo logins are disabled outside development. Use a credentialed account.",
+          )
+        None, True ->
+          case
+            store.unit(ctx.store, fn(tx) {
+              sessions.create(tx, sessions.Player(p.row.id), now)
+              |> result.map(fn(token) { #(token, []) })
+            })
+          {
+            Ok(token) ->
+              http.json(
+                200,
+                json.object([
+                  #("playerId", json.string(p.row.id)),
+                  #("name", json.string(p.row.name)),
+                  #("token", json.string(token)),
+                ]),
+              )
+            Error(failure) -> http.internal(failure)
+          }
+      }
   }
 }

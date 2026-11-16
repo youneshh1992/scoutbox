@@ -12,7 +12,20 @@ pub type Config {
     /// Passwordless demo sign-ins and the demo seed: development only.
     dev_logins: Bool,
     quiet_logs: Bool,
+    /// TEST_LICENCE_REGISTRY: the synthetic coaching-licence register (e2e/support/CONTRACT.md).
+    licence_registry: TestRegistry,
+    /// How often the periodic sweeps run: every half second with SCOUTBOX_FAST_SWEEPS=1, else every minute.
+    sweep_ms: Int,
   )
+}
+
+pub type TestRegistry {
+  /// `1`: the synthetic register answers.
+  RegistryUp
+  /// `down`: it is temporarily unavailable.
+  RegistryDown
+  /// Unset: no register is configured.
+  NoRegistry
 }
 
 const dev_admin_key = "scoutbox-admin"
@@ -32,11 +45,22 @@ pub fn load() -> Result(Config, String) {
       )
     False -> Ok(admin_key)
   })
-  Ok(Config(
-    port:,
-    data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
-    admin_key:,
-    dev_logins: !production,
-    quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
-  ))
+  Ok(
+    Config(
+      port:,
+      data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
+      admin_key:,
+      dev_logins: !production,
+      quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
+      licence_registry: case envoy.get("TEST_LICENCE_REGISTRY") {
+        Ok("1") -> RegistryUp
+        Ok("down") -> RegistryDown
+        _ -> NoRegistry
+      },
+      sweep_ms: case envoy.get("SCOUTBOX_FAST_SWEEPS") {
+        Ok("1") -> 500
+        _ -> 60_000
+      },
+    ),
+  )
 }

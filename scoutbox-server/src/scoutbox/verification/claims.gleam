@@ -913,6 +913,25 @@ pub fn public_profile(
   subject_removed subject_removed: Bool,
   now now: Int,
 ) -> Json {
+  json.object(public_profile_fields(
+    subject_kind:,
+    subject_id:,
+    claims:,
+    orgs:,
+    subject_removed:,
+    now:,
+  ))
+}
+
+/// The public profile's fields, for a view that adds its own.
+pub fn public_profile_fields(
+  subject_kind subject_kind: ver_claims.SubjectKind,
+  subject_id subject_id: String,
+  claims claims: List(Claim),
+  orgs orgs: Dict(String, orgs.Row),
+  subject_removed subject_removed: Bool,
+  now now: Int,
+) -> List(#(String, Json)) {
   let #(identity, badges) =
     list.fold(claims, #(None, []), fn(acc, claim) {
       let #(identity, badges) = acc
@@ -999,7 +1018,7 @@ pub fn public_profile(
       }
     })
   // identityVerified is for existing clients; `identity` is the full representation.
-  json.object([
+  [
     #(
       "subjectType",
       json.string(ver_claims.subject_kind_to_string(subject_kind)),
@@ -1008,7 +1027,7 @@ pub fn public_profile(
     #("identityVerified", json.bool(identity != None)),
     #("identity", option.unwrap(identity, json.null())),
     #("badges", json.preprocessed_array(list.reverse(badges))),
-  ])
+  ]
 }
 
 fn assurance_json(a: Assurance) -> Json {

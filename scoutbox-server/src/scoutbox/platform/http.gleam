@@ -75,26 +75,34 @@ fn malformed_json() -> Response {
 /// The JSON body, as sent. No body (or one that is not JSON-typed) reads as `{}`; a body that does not parse, or
 /// is a bare string or number, is MALFORMED_JSON, as the Express server's strict JSON parser has it.
 pub fn json_body(req: Request, next: fn(Dynamic) -> Response) -> Response {
+  case read_json(req) {
+    Ok(value) -> next(value)
+    Error(response) -> response
+  }
+}
+
+/// The JSON body as sent, or the MALFORMED_JSON answer.
+fn read_json(req: Request) -> Result(Dynamic, Response) {
   let is_json = case request.get_header(req, "content-type") {
     Ok(ct) -> string.starts_with(string.lowercase(ct), "application/json")
     Error(Nil) -> False
   }
   case is_json, wisp.read_body_bits(req) {
-    False, _ -> next(empty_object())
-    True, Error(Nil) -> malformed_json()
+    False, _ -> Ok(empty_object())
+    True, Error(Nil) -> Error(malformed_json())
     True, Ok(bits) ->
       case bit_array.to_string(bits) {
-        Error(Nil) -> malformed_json()
+        Error(Nil) -> Error(malformed_json())
         Ok(text) ->
           case string.trim(text) {
-            "" -> next(empty_object())
+            "" -> Ok(empty_object())
             _ ->
               case json.parse(text, decode.dynamic) {
-                Error(_) -> malformed_json()
+                Error(_) -> Error(malformed_json())
                 Ok(value) ->
                   case dynamic.classify(value) {
-                    "Dict" | "List" -> next(value)
-                    _ -> malformed_json()
+                    "Dict" | "List" -> Ok(value)
+                    _ -> Error(malformed_json())
                   }
               }
           }
@@ -118,6 +126,17 @@ pub fn body(
     Ok(value) -> next(value)
     Error(refusal) -> refused(refusal)
   }
+}
+
+/// The JSON body read with `shape`, or the 400 that refuses it, as a value: for a route that must answer other
+/// refusals first. Read it before a unit starts: the unit runs in another process.
+pub fn parse_body(
+  req: Request,
+  shape: Shape(a),
+  codes: List(#(String, String)),
+) -> Result(a, Response) {
+  use raw <- result.try(read_json(req))
+  input.parse(shape, raw, root: "body", codes:) |> result.map_error(refused)
 }
 
 /// The query string read with `shape`. A parameter sent twice arrives as a list, so a text field refuses it.

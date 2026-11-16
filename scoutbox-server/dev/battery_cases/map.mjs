@@ -181,7 +181,7 @@ const effective = record({
 const file = record({
   module: CLAIMS,
   constructor: 'File',
-  base: ref('scoutbox/battery/base', 'file'),
+  defaults: { buffer: 'None' },
   fields: {
     mime: ['mime', string],
     bytes: ['bytes', int],

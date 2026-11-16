@@ -41,6 +41,7 @@ pub const shared = [
     ],
   ),
   Shared("ActorKind", ["system", "org_user", "org_admin", "trust_safety"]),
+  Shared("CheckOutcome", ["passed", "flagged"]),
   Shared(
     "VerLevel",
     [
