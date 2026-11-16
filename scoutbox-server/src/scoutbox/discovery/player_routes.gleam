@@ -9,6 +9,7 @@ import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/players.{type Player}
+import scoutbox/insight/review_queue
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
@@ -91,7 +92,8 @@ pub fn profile(ctx: Ctx, a: OrgAccess, id: String) -> Response {
         Ok(_) ->
           case store.read(ctx.store, audit.notes_for(_, a.org.id, p.row.id)) {
             Error(failure) -> http.internal(failure)
-            Ok(notes) ->
+            Ok(notes) -> {
+              use <- exposed(ctx, a, p.row.id)
               http.json(
                 200,
                 json.object(
@@ -114,9 +116,22 @@ pub fn profile(ctx: Ctx, a: OrgAccess, id: String) -> Response {
                   ]),
                 ),
               )
+            }
           }
       }
   }
+}
+
+/// A profile the club was shown is exposure (the review queue's source), recorded once it has answered.
+fn exposed(ctx: Ctx, a: OrgAccess, player_id: String, view: fn() -> Response) {
+  let response = view()
+  review_queue.record_exposure(
+    ctx,
+    a.org.id,
+    player_id,
+    review_queue.ProfileView,
+  )
+  response
 }
 
 /// `POST /org/players/:id/notes`: shared inside the organisation only.

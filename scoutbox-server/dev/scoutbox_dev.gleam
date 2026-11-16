@@ -96,26 +96,91 @@ pub const shared = [
   ),
 ]
 
-pub fn main() -> Nil {
-  let out = case argv.load().arguments {
-    [out, ..] -> out
-    [] -> "src"
-  }
+/// The tables that get a row module: the ones this server reads or writes. Add a table here when a port needs it.
+pub const tables = [
+  "blocks",
+  "counters",
+  "guardian_children",
+  "guardians",
+  "idv_queue",
+  "ledger",
+  "moderation_flags",
+  "moderation_log",
+  "notifications",
+  "ops_events",
+  "org_invites",
+  "org_notes",
+  "org_user_recovery_codes",
+  "org_users",
+  "org_verified_domains",
+  "orgs",
+  "outbox",
+  "player_activity_log",
+  "player_attendance",
+  "player_badges",
+  "player_drill_results",
+  "player_drills",
+  "player_external_ids",
+  "player_media",
+  "player_media_tags",
+  "player_medical_records",
+  "player_programme_completions",
+  "player_season_history",
+  "player_timeline",
+  "players",
+  "recruitment_requests",
+  "reports",
+  "sessions",
+  "ver_admins",
+  "ver_claim_codes",
+  "ver_claim_evidence",
+  "ver_claims",
+  "ver_conflicts",
+  "ver_disputes",
+  "ver_domain_request_codes",
+  "ver_domain_requests",
+  "ver_events",
+  "ver_evidence",
+  "ver_migrations",
+  "ver_player_invites",
+  "ver_references",
+  "ver_root_request_codes",
+  "ver_root_requests",
+  "ver_root_transfers",
+  "ver_tokens",
+]
+
+/// The migrations' SQL, concatenated after the bookkeeping tables the runner creates, with their clock and
+/// session lifetime filled in.
+pub fn schema() -> String {
   let assert Ok(files) = simplifile.read_directory("priv/migrations")
-  let schema =
-    files
+  [
+    "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+    "CREATE TABLE data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);",
+    ..files
     |> list.filter(string.ends_with(_, ".sql"))
     |> list.sort(string.compare)
     |> list.map(fn(f) {
       let assert Ok(sql) = simplifile.read("priv/migrations/" <> f)
       sql
+      |> string.replace("__NOW__", "0")
+      |> string.replace("__SESSION_TTL_MS__", "0")
     })
-    |> string.join("\n")
+  ]
+  |> string.join("\n")
+}
+
+pub fn main() -> Nil {
+  let out = case argv.load().arguments {
+    [out, ..] -> out
+    [] -> "src"
+  }
+  let schema = schema()
   let _ =
     simplifile.delete_all([out <> "/scoutbox/rows", out <> "/scoutbox/vocab"])
   let assert Ok(_) = simplifile.create_directory_all(out <> "/scoutbox/rows")
   let assert Ok(_) = simplifile.create_directory_all(out <> "/scoutbox/vocab")
-  list.each(codegen.generate(schema, shared), fn(g) {
+  list.each(codegen.generate(schema, shared, tables), fn(g) {
     let path = out <> "/" <> g.module <> ".gleam"
     let assert Ok(_) = simplifile.write(path, g.source)
     io.println("wrote " <> path)

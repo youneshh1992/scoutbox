@@ -6,11 +6,13 @@ import gleam/erlang/process
 import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx, type Effect, Ctx, SendMail}
+import scoutbox/identity/sessions
 import scoutbox/messaging/outbox
 import scoutbox/platform/clock
 import scoutbox/platform/config
 import scoutbox/platform/limits
 import scoutbox/platform/migrations
+import scoutbox/platform/operator
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Store}
 import scoutbox/platform/wisp_ewe
@@ -49,15 +51,33 @@ fn boot() -> Result(Nil, String) {
     ),
   )
   let store = store.with_dispatch(store, dispatch(store, _))
-  use applied <- result.try(migrations.run(store))
-  use seeded <- result.try(case config.dev_logins {
-    True -> seed.run(store, clock.now_ms())
-    False -> Ok(False)
-  })
+  use applied <- result.try(migrations.run(
+    store,
+    session_ttl_ms: sessions.ttl_ms,
+  ))
+  use seeded <- result.try(seed.run(
+    store,
+    clock.now_ms(),
+    demo: config.seed_demo,
+  ))
   log(config, "migrations applied: " <> string.inspect(applied))
   log(config, "demo seed loaded: " <> string.inspect(seeded))
   use limits <- result.try(limits.start())
-  let ctx = Ctx(store:, config:, limits:, booted_at: clock.now_ms())
+  use known <- result.try(migrations.known())
+  use _ <- result.try(migrations.counter_present(store))
+  use integrity <- result.try(
+    store.read(store, operator.integrity) |> result.map_error(string.inspect),
+  )
+  let ctx =
+    Ctx(
+      store:,
+      config:,
+      limits:,
+      booted_at: clock.now_ms(),
+      schema_version: migrations.version(known),
+      migrations: known,
+      integrity:,
+    )
   process.spawn(fn() { sweeping(ctx) })
   let builder =
     router.handle(ctx, _)

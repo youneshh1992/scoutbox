@@ -7,7 +7,6 @@ import gleam/list
 import gleam/string
 import scoutbox/codegen.{Generated, Shared}
 import scoutbox_dev
-import simplifile
 
 const edge_cases =
   "
@@ -30,7 +29,13 @@ CREATE TABLE trials (
 /// vocabulary.
 pub fn edge_cases_test() {
   let assert [Generated("scoutbox/vocab/party", party), Generated(_, trials)] =
-    codegen.generate(edge_cases, [Shared("Party", ["player", "guardian"])])
+    codegen.generate(
+      edge_cases,
+      [Shared("Party", ["player", "guardian"])],
+      tables: [
+        "trials",
+      ],
+    )
   birdie.snap(party, title: "a shared vocabulary")
   birdie.snap(trials, title: "a table with every column shape")
 }
@@ -39,7 +44,8 @@ pub fn edge_cases_test() {
 pub fn prelude_named_vocabulary_test() {
   let schema =
     "CREATE TABLE codes (list TEXT NOT NULL CHECK (list IN ('a', 'b'))) STRICT;"
-  let assert [Generated(_, source)] = codegen.generate(schema, [])
+  let assert [Generated(_, source)] =
+    codegen.generate(schema, [], tables: ["codes"])
   assert string.contains(source, "pub type ListValue {")
   assert !string.contains(source, "pub type List {")
 }
@@ -52,7 +58,8 @@ pub fn several_lists_in_one_check_test() {
   kind TEXT NOT NULL CHECK (kind IN ('a', 'b')),
   code TEXT NOT NULL CHECK ((kind = 'a' AND code IN ('NO_SOURCE', 'GK', 'LICENCE')) OR (kind = 'b' AND code IN ('SELF_CHECK')))
 ) STRICT;"
-  let assert [Generated(_, source)] = codegen.generate(schema, [])
+  let assert [Generated(_, source)] =
+    codegen.generate(schema, [], tables: ["codes"])
   assert string.contains(source, "#(\"NO_SOURCE\", NoSource)")
   assert string.contains(source, "#(\"GK\", GK)")
   assert string.contains(source, "#(\"LICENCE\", Licence)")
@@ -63,22 +70,19 @@ pub fn several_lists_in_one_check_test() {
 pub fn unused_shared_vocabulary_test() {
   let schema = "CREATE TABLE t (id TEXT PRIMARY KEY) STRICT;"
   let assert Error(_) =
-    exception_of(fn() { codegen.generate(schema, [Shared("Party", ["a"])]) })
+    exception_of(fn() {
+      codegen.generate(schema, [Shared("Party", ["a"])], tables: ["t"])
+    })
 }
 
 /// The real `orgs` table, from the migrations.
 pub fn orgs_module_test() {
-  let assert Ok(files) = simplifile.read_directory("priv/migrations")
-  let schema =
-    files
-    |> list.sort(string.compare)
-    |> list.map(fn(f) {
-      let assert Ok(sql) = simplifile.read("priv/migrations/" <> f)
-      sql
-    })
-    |> string.join("\n")
   let assert Ok(Generated(_, source)) =
-    codegen.generate(schema, scoutbox_dev.shared)
+    codegen.generate(
+      scoutbox_dev.schema(),
+      scoutbox_dev.shared,
+      scoutbox_dev.tables,
+    )
     |> list.find(fn(g) { g.module == "scoutbox/rows/orgs" })
   birdie.snap(source, title: "the orgs row module")
 }

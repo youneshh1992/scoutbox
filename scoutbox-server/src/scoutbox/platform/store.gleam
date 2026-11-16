@@ -258,3 +258,22 @@ pub fn run(
 pub fn exec(tx: Tx, sql: String) -> Result(Nil, Fail(e)) {
   sqlight.exec(sql, tx.conn) |> result.map_error(Storage)
 }
+
+/// A connection setting on the writer, between units: SQLite ignores `PRAGMA foreign_keys` inside a
+/// transaction. Only the migration runner needs this, around a step that rebuilds a referenced table.
+pub fn writer_pragma(store: Store(effect), sql: String) -> Result(Nil, String) {
+  let reply = process.new_subject()
+  process.send(
+    store.writer,
+    Job(fn(conn) {
+      process.send(
+        reply,
+        sqlight.exec(sql, conn) |> result.map_error(string.inspect),
+      )
+    }),
+  )
+  case process.receive(reply, store.timeout) {
+    Ok(r) -> r
+    Error(Nil) -> Error("the writer did not answer in time")
+  }
+}

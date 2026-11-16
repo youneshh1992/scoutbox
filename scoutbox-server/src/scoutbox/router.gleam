@@ -2,7 +2,9 @@
 
 import exception
 import gleam/http.{Get, Post, Put}
+import gleam/int
 import gleam/json
+import gleam/list
 import gleam/regexp
 import gleam/result
 import scoutbox/app.{type Ctx}
@@ -19,13 +21,16 @@ import scoutbox/identity/player_routes
 import scoutbox/identity/players
 import scoutbox/identity/sign_in
 import scoutbox/identity/staff_routes
+import scoutbox/insight/review_queue
 import scoutbox/messaging/delivery_prefs
 import scoutbox/messaging/feed_routes
 import scoutbox/platform/clock
 import scoutbox/platform/http as contract
 import scoutbox/platform/limits
+import scoutbox/platform/operator
 import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
+import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/request_routes
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/ver_claims as claim_row
@@ -43,10 +48,13 @@ import scoutbox/vocab/audience
 import wisp.{type Request, type Response}
 
 pub fn handle(ctx: Ctx, req: Request) -> Response {
+  use <- baseline(ctx)
   use <- rescue
   case wisp.path_segments(req) {
     ["health"] -> only(req, Get, fn() { health(ctx) })
     ["healthz"] -> only(req, Get, fn() { healthz(ctx) })
+    ["meta"] -> only(req, Get, operator.meta)
+    ["capabilities"] -> only(req, Get, fn() { operator.capabilities(ctx) })
     ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
     ["media", id] -> only(req, Get, fn() { media_file(id) })
     ["auth", ..rest] -> {
@@ -109,6 +117,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["players", id, "request"] ->
           only(req, Post, fn() { request_routes.request(ctx, req, org, id) })
         ["shortlist"] -> only(req, Get, fn() { discovery.shortlist(ctx, org) })
+        ["review-queue"] ->
+          only(req, Get, fn() { review_queue.review_queue(ctx, org) })
+        ["recruitment", "lifecycle"] ->
+          only(req, Get, fn() { lifecycle.vocabulary(ctx) })
         ["players"] ->
           only(req, Get, fn() { directory.directory(ctx, req, org) })
         ["filmroom"] ->
@@ -398,6 +410,34 @@ fn not_found() -> Response {
   contract.error(404, "NOT_FOUND")
 }
 
+/// The headers on every response, as the TypeScript server's HTTP baseline sets them: the schema version, the
+/// browser hardening headers, and on an error whether a retry could succeed. A response that already says
+/// whether it is retryable (a simulated fault) keeps its own answer.
+fn baseline(ctx: Ctx, handler: fn() -> Response) -> Response {
+  let response =
+    handler()
+    |> wisp.set_header("x-scoutbox-schema", int.to_string(ctx.schema_version))
+    |> wisp.set_header("x-content-type-options", "nosniff")
+    |> wisp.set_header("referrer-policy", "no-referrer")
+    |> wisp.set_header("x-frame-options", "DENY")
+    |> wisp.set_header("cross-origin-resource-policy", "same-site")
+    |> wisp.set_header(
+      "permissions-policy",
+      "geolocation=(), microphone=(), payment=()",
+    )
+  case
+    response.status >= 400,
+    list.key_find(response.headers, "x-scoutbox-retry")
+  {
+    True, Error(Nil) ->
+      wisp.set_header(response, "x-scoutbox-retry", case response.status {
+        429 | 502 | 503 | 504 -> "retryable"
+        _ -> "not-retryable"
+      })
+    _, _ -> response
+  }
+}
+
 /// A crash in a handler is a 500 with fixed text; the detail goes to the log.
 fn rescue(handler: fn() -> Response) -> Response {
   case exception.rescue(handler) {
@@ -450,14 +490,14 @@ fn media_file(id: String) -> Response {
   }
 }
 
-/// `GET /healthz`: up, and for how long.
-/// Not ported yet: `schemaVersion`, the TypeScript server's latest migration number (platform/storeGuarantees).
+/// `GET /healthz`: up, for how long, and on which schema.
 fn healthz(ctx: Ctx) -> Response {
   contract.json(
     200,
     json.object([
       #("ok", json.bool(True)),
       #("uptimeS", json.int({ clock.now_ms() - ctx.booted_at + 500 } / 1000)),
+      #("schemaVersion", json.int(ctx.schema_version)),
     ]),
   )
 }

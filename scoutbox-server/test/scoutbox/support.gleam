@@ -1,6 +1,7 @@
 //// A fresh migrated database per test, under build/ so it never lands in the source tree.
 
 import gleam/result
+import scoutbox/identity/sessions
 import scoutbox/platform/migrations
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Store}
@@ -12,7 +13,8 @@ pub fn fresh_store(dispatch: fn(effect) -> Nil) -> Store(effect) {
   let assert Ok(_) = simplifile.create_directory_all(dir)
   let path = dir <> "/" <> secrets.random_hex(8) <> ".db"
   let assert Ok(s) = store.open(path:, readers: 2, dispatch:)
-  let assert Ok(_) = migrations.run(s)
-  let assert Ok(True) = seed.run(s, 1_000_000) |> result.map_error(fn(e) { e })
+  let assert Ok(_) = migrations.run(s, session_ttl_ms: sessions.ttl_ms)
+  let assert Ok(True) =
+    seed.run(s, 1_000_000, demo: True) |> result.map_error(fn(e) { e })
   s
 }

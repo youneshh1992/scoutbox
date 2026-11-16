@@ -11,9 +11,14 @@ import scoutbox/platform/store.{type Store}
 import simplifile
 import wisp
 
-/// Loads the demo world into an empty database. A database that has any organisation is left alone: later boots
-/// never seed.
-pub fn run(store: Store(effect), now: Int) -> Result(Bool, String) {
+/// The first boot of a database: loads the demo world when `demo` is set, and marks the database installed either
+/// way, as the TypeScript server does (`meta.orgsInit` and `meta.coreIdentityInit` go from `pending`, which the
+/// migrations write, to `done`). An installed database is never seeded again, nor is one a fixture wrote.
+pub fn run(
+  store: Store(effect),
+  now: Int,
+  demo demo: Bool,
+) -> Result(Bool, String) {
   use priv <- result.try(
     wisp.priv_directory("scoutbox") |> result.replace_error("no priv directory"),
   )
@@ -21,22 +26,34 @@ pub fn run(store: Store(effect), now: Int) -> Result(Bool, String) {
     simplifile.read(priv <> "/seed.sql") |> result.map_error(string.inspect),
   )
   store.unit(store, fn(tx) {
-    use existing <- result.try(store.query(
+    use state <- result.try(store.query(
       store.reading(tx),
-      "SELECT COUNT(*) FROM orgs",
+      "SELECT value FROM meta WHERE key = 'orgsInit'",
       [],
-      decode.at([0], decode.int),
+      decode.at([0], decode.string),
     ))
-    case existing {
-      [0] -> {
+    case state, demo {
+      ["pending"], True -> {
         use _ <- result.try(store.exec(
           tx,
           string.replace(sql, "NOW_MS", int.to_string(now)),
         ))
+        use _ <- result.try(installed(tx))
         Ok(#(True, []))
       }
-      _ -> Ok(#(False, []))
+      ["pending"], False -> {
+        use _ <- result.try(installed(tx))
+        Ok(#(False, []))
+      }
+      _, _ -> Ok(#(False, []))
     }
   })
   |> result.map_error(fn(e) { "seed: " <> string.inspect(e) })
+}
+
+fn installed(tx: store.Tx) -> Result(Nil, store.Fail(e)) {
+  store.exec(
+    tx,
+    "UPDATE meta SET value = 'done' WHERE key IN ('orgsInit', 'coreIdentityInit')",
+  )
 }

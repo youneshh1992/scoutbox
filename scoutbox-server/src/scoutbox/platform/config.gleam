@@ -2,7 +2,9 @@
 
 import envoy
 import gleam/int
+import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 
 pub type Config {
   Config(
@@ -11,7 +13,11 @@ pub type Config {
     admin_key: String,
     /// Passwordless demo sign-ins and the demo seed: development only.
     dev_logins: Bool,
+    /// SCOUTBOX_SEED_DEMO: load the demo world on a database's first boot. Unset, except in production.
+    seed_demo: Bool,
     quiet_logs: Bool,
+    /// MEDIA_SECRET: the key signing media links. Not ported yet: signed media links (uploads).
+    media_secret: Option(String),
     /// TEST_LICENCE_REGISTRY: the synthetic coaching-licence register (e2e/support/CONTRACT.md).
     licence_registry: TestRegistry,
     /// How often the periodic sweeps run: every half second with SCOUTBOX_FAST_SWEEPS=1, else every minute.
@@ -45,13 +51,27 @@ pub fn load() -> Result(Config, String) {
       )
     False -> Ok(admin_key)
   })
+  use seed_demo <- result.try(case envoy.get("SCOUTBOX_SEED_DEMO") {
+    Ok("1") -> Ok(True)
+    Ok("0") -> Ok(False)
+    Ok("") | Error(Nil) -> Ok(!production)
+    Ok(_) ->
+      Error(
+        "SCOUTBOX_SEED_DEMO must be 1 (load the demo world on first boot) or 0 (start empty).",
+      )
+  })
   Ok(
     Config(
       port:,
       data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
       admin_key:,
       dev_logins: !production,
+      seed_demo:,
       quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
+      media_secret: case envoy.get("MEDIA_SECRET") |> result.map(string.trim) {
+        Ok("") | Error(Nil) -> None
+        Ok(secret) -> Some(secret)
+      },
       licence_registry: case envoy.get("TEST_LICENCE_REGISTRY") {
         Ok("1") -> RegistryUp
         Ok("down") -> RegistryDown

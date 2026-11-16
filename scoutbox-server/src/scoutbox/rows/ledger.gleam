@@ -11,10 +11,10 @@ pub const table = "ledger"
 
 /// Every column, in `Row` order.
 pub const columns =
-  "seq, id, occurred_at, type, player_id, org_id, org_name, user_id, actor_name"
+  "seq, id, occurred_at, type, player_id, org_id, org_name, user_id, actor_name, detail_assignment_id, detail_drill_id, detail_target_type, detail_target_value, detail_challenge_id, detail_session_id, detail_media_id, detail_by, detail_share, detail_retain_clips, detail_dispute_id, detail_outcome, detail_reason, detail_attempt_id, detail_protocol, detail_state, detail_request_id, detail_from_value, detail_to_value, detail_trial_id, detail_via, detail_mode, detail_share_id, detail_claim_id, detail_action, detail_root_request_id"
 
 /// How many columns `columns` names: an extra column selected after them is read at this index.
-pub const width = 9
+pub const width = 35
 
 /// `columns`, each prefixed with `alias.`, for a join.
 pub fn qualified(alias: String) -> String {
@@ -270,6 +270,32 @@ pub type Row {
     org_name: Option(String),
     user_id: Option(String),
     actor_name: Option(String),
+    detail_assignment_id: Option(String),
+    detail_drill_id: Option(String),
+    detail_target_type: Option(String),
+    detail_target_value: Option(Float),
+    detail_challenge_id: Option(String),
+    detail_session_id: Option(String),
+    detail_media_id: Option(String),
+    detail_by: Option(String),
+    detail_share: Option(String),
+    detail_retain_clips: Option(Bool),
+    detail_dispute_id: Option(String),
+    detail_outcome: Option(String),
+    detail_reason: Option(String),
+    detail_attempt_id: Option(String),
+    detail_protocol: Option(String),
+    detail_state: Option(String),
+    detail_request_id: Option(String),
+    detail_from_value: Option(String),
+    detail_to_value: Option(String),
+    detail_trial_id: Option(String),
+    detail_via: Option(String),
+    detail_mode: Option(String),
+    detail_share_id: Option(String),
+    detail_claim_id: Option(String),
+    detail_action: Option(String),
+    detail_root_request_id: Option(String),
   )
 }
 
@@ -284,6 +310,32 @@ pub type New {
     org_name: Option(String),
     user_id: Option(String),
     actor_name: Option(String),
+    detail_assignment_id: Option(String),
+    detail_drill_id: Option(String),
+    detail_target_type: Option(String),
+    detail_target_value: Option(Float),
+    detail_challenge_id: Option(String),
+    detail_session_id: Option(String),
+    detail_media_id: Option(String),
+    detail_by: Option(String),
+    detail_share: Option(String),
+    detail_retain_clips: Option(Bool),
+    detail_dispute_id: Option(String),
+    detail_outcome: Option(String),
+    detail_reason: Option(String),
+    detail_attempt_id: Option(String),
+    detail_protocol: Option(String),
+    detail_state: Option(String),
+    detail_request_id: Option(String),
+    detail_from_value: Option(String),
+    detail_to_value: Option(String),
+    detail_trial_id: Option(String),
+    detail_via: Option(String),
+    detail_mode: Option(String),
+    detail_share_id: Option(String),
+    detail_claim_id: Option(String),
+    detail_action: Option(String),
+    detail_root_request_id: Option(String),
   )
 }
 
@@ -302,6 +354,32 @@ pub fn new(
     org_name: None,
     user_id: None,
     actor_name: None,
+    detail_assignment_id: None,
+    detail_drill_id: None,
+    detail_target_type: None,
+    detail_target_value: None,
+    detail_challenge_id: None,
+    detail_session_id: None,
+    detail_media_id: None,
+    detail_by: None,
+    detail_share: None,
+    detail_retain_clips: None,
+    detail_dispute_id: None,
+    detail_outcome: None,
+    detail_reason: None,
+    detail_attempt_id: None,
+    detail_protocol: None,
+    detail_state: None,
+    detail_request_id: None,
+    detail_from_value: None,
+    detail_to_value: None,
+    detail_trial_id: None,
+    detail_via: None,
+    detail_mode: None,
+    detail_share_id: None,
+    detail_claim_id: None,
+    detail_action: None,
+    detail_root_request_id: None,
   )
 }
 
@@ -316,6 +394,35 @@ pub fn decoder() -> decode.Decoder(Row) {
   use org_name <- decode.field(6, decode.optional(decode.string))
   use user_id <- decode.field(7, decode.optional(decode.string))
   use actor_name <- decode.field(8, decode.optional(decode.string))
+  use detail_assignment_id <- decode.field(9, decode.optional(decode.string))
+  use detail_drill_id <- decode.field(10, decode.optional(decode.string))
+  use detail_target_type <- decode.field(11, decode.optional(decode.string))
+  use detail_target_value <- decode.field(12, decode.optional(decode.float))
+  use detail_challenge_id <- decode.field(13, decode.optional(decode.string))
+  use detail_session_id <- decode.field(14, decode.optional(decode.string))
+  use detail_media_id <- decode.field(15, decode.optional(decode.string))
+  use detail_by <- decode.field(16, decode.optional(decode.string))
+  use detail_share <- decode.field(17, decode.optional(decode.string))
+  use detail_retain_clips <- decode.field(
+    18,
+    decode.optional(sqlight.decode_bool()),
+  )
+  use detail_dispute_id <- decode.field(19, decode.optional(decode.string))
+  use detail_outcome <- decode.field(20, decode.optional(decode.string))
+  use detail_reason <- decode.field(21, decode.optional(decode.string))
+  use detail_attempt_id <- decode.field(22, decode.optional(decode.string))
+  use detail_protocol <- decode.field(23, decode.optional(decode.string))
+  use detail_state <- decode.field(24, decode.optional(decode.string))
+  use detail_request_id <- decode.field(25, decode.optional(decode.string))
+  use detail_from_value <- decode.field(26, decode.optional(decode.string))
+  use detail_to_value <- decode.field(27, decode.optional(decode.string))
+  use detail_trial_id <- decode.field(28, decode.optional(decode.string))
+  use detail_via <- decode.field(29, decode.optional(decode.string))
+  use detail_mode <- decode.field(30, decode.optional(decode.string))
+  use detail_share_id <- decode.field(31, decode.optional(decode.string))
+  use detail_claim_id <- decode.field(32, decode.optional(decode.string))
+  use detail_action <- decode.field(33, decode.optional(decode.string))
+  use detail_root_request_id <- decode.field(34, decode.optional(decode.string))
   decode.success(Row(
     seq:,
     id:,
@@ -326,11 +433,37 @@ pub fn decoder() -> decode.Decoder(Row) {
     org_name:,
     user_id:,
     actor_name:,
+    detail_assignment_id:,
+    detail_drill_id:,
+    detail_target_type:,
+    detail_target_value:,
+    detail_challenge_id:,
+    detail_session_id:,
+    detail_media_id:,
+    detail_by:,
+    detail_share:,
+    detail_retain_clips:,
+    detail_dispute_id:,
+    detail_outcome:,
+    detail_reason:,
+    detail_attempt_id:,
+    detail_protocol:,
+    detail_state:,
+    detail_request_id:,
+    detail_from_value:,
+    detail_to_value:,
+    detail_trial_id:,
+    detail_via:,
+    detail_mode:,
+    detail_share_id:,
+    detail_claim_id:,
+    detail_action:,
+    detail_root_request_id:,
   ))
 }
 
 pub const insert_sql =
-  "INSERT INTO ledger (id, occurred_at, type, player_id, org_id, org_name, user_id, actor_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  "INSERT INTO ledger (id, occurred_at, type, player_id, org_id, org_name, user_id, actor_name, detail_assignment_id, detail_drill_id, detail_target_type, detail_target_value, detail_challenge_id, detail_session_id, detail_media_id, detail_by, detail_share, detail_retain_clips, detail_dispute_id, detail_outcome, detail_reason, detail_attempt_id, detail_protocol, detail_state, detail_request_id, detail_from_value, detail_to_value, detail_trial_id, detail_via, detail_mode, detail_share_id, detail_claim_id, detail_action, detail_root_request_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 /// The values `insert_sql` binds, in its order.
 pub fn values(row: New) -> List(sqlight.Value) {
@@ -343,6 +476,32 @@ pub fn values(row: New) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.org_name),
     sqlight.nullable(sqlight.text, row.user_id),
     sqlight.nullable(sqlight.text, row.actor_name),
+    sqlight.nullable(sqlight.text, row.detail_assignment_id),
+    sqlight.nullable(sqlight.text, row.detail_drill_id),
+    sqlight.nullable(sqlight.text, row.detail_target_type),
+    sqlight.nullable(sqlight.float, row.detail_target_value),
+    sqlight.nullable(sqlight.text, row.detail_challenge_id),
+    sqlight.nullable(sqlight.text, row.detail_session_id),
+    sqlight.nullable(sqlight.text, row.detail_media_id),
+    sqlight.nullable(sqlight.text, row.detail_by),
+    sqlight.nullable(sqlight.text, row.detail_share),
+    sqlight.nullable(sqlight.bool, row.detail_retain_clips),
+    sqlight.nullable(sqlight.text, row.detail_dispute_id),
+    sqlight.nullable(sqlight.text, row.detail_outcome),
+    sqlight.nullable(sqlight.text, row.detail_reason),
+    sqlight.nullable(sqlight.text, row.detail_attempt_id),
+    sqlight.nullable(sqlight.text, row.detail_protocol),
+    sqlight.nullable(sqlight.text, row.detail_state),
+    sqlight.nullable(sqlight.text, row.detail_request_id),
+    sqlight.nullable(sqlight.text, row.detail_from_value),
+    sqlight.nullable(sqlight.text, row.detail_to_value),
+    sqlight.nullable(sqlight.text, row.detail_trial_id),
+    sqlight.nullable(sqlight.text, row.detail_via),
+    sqlight.nullable(sqlight.text, row.detail_mode),
+    sqlight.nullable(sqlight.text, row.detail_share_id),
+    sqlight.nullable(sqlight.text, row.detail_claim_id),
+    sqlight.nullable(sqlight.text, row.detail_action),
+    sqlight.nullable(sqlight.text, row.detail_root_request_id),
   ]
 }
 
