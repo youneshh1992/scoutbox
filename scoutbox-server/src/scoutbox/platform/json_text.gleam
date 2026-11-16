@@ -37,7 +37,7 @@ fn value(s: String) -> Result(#(Json, String), Nil) {
     }
     "[" <> r -> array(skip(r), [])
     "{" <> r -> object(skip(r), [])
-    _ -> number(s)
+    _ -> number_value(s)
   }
 }
 
@@ -123,7 +123,7 @@ fn hex4(s: String) -> Result(#(Int, String), Nil) {
   }
 }
 
-fn number(s: String) -> Result(#(Json, String), Nil) {
+fn number_value(s: String) -> Result(#(Json, String), Nil) {
   let #(text, rest) = take_number(s, "")
   case text {
     "" -> Error(Nil)
@@ -159,5 +159,13 @@ fn take_number(s: String, acc: String) -> #(String, String) {
         False -> #(acc, s)
       }
     Error(Nil) -> #(acc, s)
+  }
+}
+
+/// A number as JavaScript writes it: an integral one without a fraction.
+pub fn number(f: Float) -> Json {
+  case float.floor(f) == f {
+    True -> json.int(float.truncate(f))
+    False -> json.float(f)
   }
 }

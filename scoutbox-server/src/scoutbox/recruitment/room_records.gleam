@@ -6,7 +6,6 @@
 //// decision routes).
 
 import gleam/dynamic/decode
-import gleam/float
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -276,19 +275,11 @@ pub fn snapshot(
   }
 }
 
-/// A score as JavaScript writes the number: an integral one without a fraction.
-pub fn number_json(f: Float) -> Json {
-  case float.floor(f) == f {
-    True -> json.int(float.truncate(f))
-    False -> json.float(f)
-  }
-}
-
 pub fn snapshot_trust_json(r: snapshot_row.Row) -> Json {
   case r.trust_hash, r.trust_component_levels_json {
     Some(hash), Some(levels) ->
       json.object([
-        #("score", json.nullable(r.trust_score, number_json)),
+        #("score", json.nullable(r.trust_score, json_text.number)),
         #("band", json.nullable(r.trust_band, json.string)),
         #("policyVersion", json.nullable(r.trust_policy_version, json.int)),
         #(
