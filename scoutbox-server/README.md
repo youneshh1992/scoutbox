@@ -2,10 +2,11 @@
 
 A Gleam port of four slices of the ScoutBox server: organisation staff (sign-in, sessions, invitations, MFA), the
 safeguarding core (reports, blocks, moderation, the Trust & Safety console, the Discovery Ledger), players and
-guardians (sign-up, the player record, the directory, guardians and their children), and verification (claims and
+guardians (sign-up, the player record, the directory, guardians and their children), verification (claims and
 their review, organisation applications, domains, the administrator hierarchy, squad invitations, coach
-references). It answers five of the TypeScript server's e2e batteries unchanged: `platform/staff`,
-`platform/safeguarding`, `platform/playersAndGuardians`, `verification/organisationsAndStaff` and
+references), and message threads (answering a request opens one). It answers seven of the TypeScript server's e2e
+batteries unchanged: `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`,
+`platform/storeGuarantees`, `platform/messaging`, `verification/organisationsAndStaff` and
 `verification/organisationsAndStaffAdversarial`.
 
 ```sh
@@ -57,7 +58,8 @@ Every route below is exercised by a battery, except where marked.
 | Sign-in | `POST /auth/org/login`, `/auth/org/accept-invite`, `/auth/player/signup`, `/auth/guardian/login` |
 | Staff | `GET /org/staff`, `POST /org/staff/:id/remove`, `/org/invites`, `/org/mfa/setup`, `/verify`, `/disable` (unit-tested only), `PUT /org/delivery/prefs` |
 | Discovery | `GET /org/players`, `/org/players/:id`, `/org/shortlist`, `/org/filmroom`, `/org/fixtures`; `POST /org/players/:id/notes`, `/save` (no battery), `/shortlist` |
-| Recruitment | `POST /org/players/:id/request` (contact), `GET /org/ledger`, `/org/funnel`, `/guardian/inbox` |
+| Recruitment | `POST /org/players/:id/request` (contact), `/player/requests/:id/respond`, `/guardian/requests/:id/respond`; `GET /org/ledger`, `/org/funnel`, `/guardian/inbox` |
+| Threads | `GET /org/channels`, `/org/channels/counts`, `/player/channels`, `/guardian/channels`, `/admin/channels`; `POST /{org,player,guardian}/channels/:id/messages`, `/read`, `/typing` |
 | Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
 | Player | `GET /player/me`, `/player/export`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/stats`, `/badges`, `/prefs` |
 | Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
@@ -66,7 +68,7 @@ Every route below is exercised by a battery, except where marked.
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
-The largest: trials and trial requests, signings, the similarity engine ("more like this"), message threads,
+The largest: trials and trial requests, signings, the similarity engine ("more like this"),
 insights, coach vouches, club setup, live event streams, push delivery and its quiet hours, process metrics, and
 password hashing (scrypt), which also means a password-protected account can't sign in yet and a new player
 account stores a hash no password matches. `dev/shape_diff.mjs` lists where responses differ because of them.

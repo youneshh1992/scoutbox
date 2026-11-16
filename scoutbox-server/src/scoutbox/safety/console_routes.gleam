@@ -11,6 +11,7 @@ import scoutbox/app.{type Ctx}
 import scoutbox/identity/guardians
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/players
+import scoutbox/messaging/channels
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
@@ -55,6 +56,7 @@ pub fn overview(ctx: Ctx) -> Response {
       use hits <- result.try(audit.moderation_count(read, None))
       use emails <- result.try(count_of(read, "outbox"))
       use sessions <- result.try(count_of(read, "sessions"))
+      use channel_count <- result.try(channels.count(read))
       use grooming <- result.map(audit.moderation_count(
         read,
         Some(moderation_log.Grooming),
@@ -66,9 +68,9 @@ pub fn overview(ctx: Ctx) -> Response {
         #("openReports", json.int(open)),
         #("blocks", json.int(blocks)),
         #("moderationHits", json.int(hits)),
-        // Not ported yet: channels (messaging), signings (recruitment), invoices (billing) and the push log
-        // (outbound providers) are domains this server does not run; it holds none of each.
-        #("channels", json.int(0)),
+        // Not ported yet: signings (recruitment), invoices (billing) and the push log (outbound providers) are
+        // domains this server does not run; it holds none of each.
+        #("channels", json.int(channel_count)),
         #("signings", json.int(0)),
         #("invoices", json.int(0)),
         #("emailsSent", json.int(emails)),

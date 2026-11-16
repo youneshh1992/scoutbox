@@ -1,8 +1,8 @@
 //// Scout Inbox requests (`recruitment_requests`): an organisation asks to talk to a player, and contact unlocks
 //// only on acceptance. A minor's request goes to the guardian, never the child.
 ////
-//// Not ported yet: trial requests (their details, slots and the trials), answering a request, and the Contact
-//// and its channel. This slice writes contact requests and suspends them.
+//// Not ported yet: trial requests (their details, slots and the trials) and the Contact a recruitment Room
+//// links to a request. This slice writes contact requests, answers them and suspends them.
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}
@@ -226,4 +226,51 @@ pub fn recipient_view(r: Request) -> Json {
     #("subjectRemovedAt", json.nullable(r.subject_removed_at, json.int)),
     #("trialId", opt(r.trial_id)),
   ])
+}
+
+pub fn by_id(read: Read, id: String) -> Result(Option(Request), Fail(e)) {
+  store.one(
+    read,
+    "SELECT " <> row.columns <> " FROM recruitment_requests WHERE id = ?",
+    [sqlight.text(id)],
+    row.decoder(),
+  )
+  |> result.map(option.from_result)
+}
+
+/// Records the recipient's answer to a pending request.
+pub fn record_response(
+  tx: Tx,
+  id: String,
+  accept: Bool,
+  by: party.Party,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  let status = case accept {
+    True -> row.Accepted
+    False -> row.Declined
+  }
+  store.run(
+    tx,
+    "UPDATE recruitment_requests SET status = ?, responded_at = ?, responded_by = ? WHERE id = ?",
+    [
+      sqlight.text(row.status_to_string(status)),
+      sqlight.int(at),
+      sqlight.text(party.to_string(by)),
+      sqlight.text(id),
+    ],
+  )
+}
+
+/// Links the thread an accepted request opened.
+pub fn attach_channel(
+  tx: Tx,
+  id: String,
+  channel_id: String,
+) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "UPDATE recruitment_requests SET contact_channel_id = ? WHERE id = ?",
+    [sqlight.text(channel_id), sqlight.text(id)],
+  )
 }

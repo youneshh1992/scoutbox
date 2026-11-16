@@ -321,6 +321,11 @@ pub fn ids_text(max: Int) -> Check(List(String)) {
   }
 }
 
+/// Any value at all (valibot's `unknown`): for a field a route judges itself, or ignores.
+pub fn anything() -> Check(Dynamic) {
+  fn(v) { Ok(v) }
+}
+
 /// An id: text of 1 to 80 characters (schemas.mjs `id`). Spaces count, unlike `required_text`.
 pub fn id() -> Check(String) {
   fn(v) {

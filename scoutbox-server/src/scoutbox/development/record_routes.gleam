@@ -45,18 +45,6 @@ fn act(
   }
 }
 
-fn guardian_managed(p: PlayerAccess, next: fn() -> Response) -> Response {
-  case p.minor {
-    True ->
-      http.error_message(
-        403,
-        "GUARDIAN_MANAGED",
-        "This setting is managed by your parent or guardian.",
-      )
-    False -> next()
-  }
-}
-
 /// `GET /player/me`.
 ///
 /// Not ported yet: the published coach vouches (verification).
@@ -102,7 +90,7 @@ pub fn first_team_seeker(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
         "This is part of the Grassroots journey — pro-level players have moved past it.",
       )
     _ -> {
-      use <- guardian_managed(p)
+      use <- access.guardian_managed_only(p)
       use on <- http.body(req, enabled_shape("enabled"), [])
       act(
         ctx,
@@ -117,7 +105,7 @@ pub fn first_team_seeker(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
 
 /// `POST /player/academyplus`: the Fresh Start badge comes and goes with it.
 pub fn academy_plus(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
-  use <- guardian_managed(p)
+  use <- access.guardian_managed_only(p)
   use on <- http.body(req, enabled_shape("enabled"), [])
   let id = p.player.row.id
   act(
@@ -160,7 +148,7 @@ fn share(ctx: Ctx, req: Request, id: String) -> Response {
 
 /// `POST /player/medical/share`: the player's call by data-protection law; for a child, the guardian's.
 pub fn medical_share(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
-  use <- guardian_managed(p)
+  use <- access.guardian_managed_only(p)
   share(ctx, req, p.player.row.id)
 }
 
@@ -176,7 +164,7 @@ type Availability {
 /// Not ported yet: a contract a completed signing records (recruitment's signings) makes the status canonical
 /// and refuses a change here; this server has no signings, so none is.
 pub fn availability(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
-  use <- guardian_managed(p)
+  use <- access.guardian_managed_only(p)
   let shape = {
     use availability <- input.field(
       "availability",

@@ -361,6 +361,8 @@ pub fn add_timeline(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
           player_id: Some(p.player.row.id),
           org_id: None,
           user_id: None,
+          channel_id: None,
+          request_id: None,
         ),
       )
       let written =

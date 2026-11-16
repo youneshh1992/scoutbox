@@ -22,6 +22,7 @@ import scoutbox/identity/players
 import scoutbox/identity/sign_in
 import scoutbox/identity/staff_routes
 import scoutbox/insight/review_queue
+import scoutbox/messaging/channel_routes as threads
 import scoutbox/messaging/delivery_prefs
 import scoutbox/messaging/feed_routes
 import scoutbox/platform/clock
@@ -146,6 +147,15 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             feed_routes.feed(ctx, audience.OrgUser, org.user.id)
           })
+        ["channels"] -> only(req, Get, fn() { threads.org_list(ctx, req, org) })
+        ["channels", "counts"] ->
+          only(req, Get, fn() { threads.org_counts(ctx, org) })
+        ["channels", id, "messages"] ->
+          only(req, Post, fn() { threads.org_send(ctx, req, org, id) })
+        ["channels", id, "read"] ->
+          only(req, Post, fn() { threads.org_read(ctx, req, org, id) })
+        ["channels", id, "typing"] ->
+          only(req, Post, fn() { threads.org_typing(ctx, req, org, id) })
         _ -> not_found()
       }
     }
@@ -181,6 +191,18 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["notifications"] ->
           only(req, Get, fn() {
             feed_routes.feed(ctx, audience.Player, player.player.row.id)
+          })
+        ["channels"] ->
+          only(req, Get, fn() { threads.player_list(ctx, player) })
+        ["channels", id, "messages"] ->
+          only(req, Post, fn() { threads.player_send(ctx, req, player, id) })
+        ["channels", id, "read"] ->
+          only(req, Post, fn() { threads.player_read(ctx, req, player, id) })
+        ["channels", id, "typing"] ->
+          only(req, Post, fn() { threads.player_typing(ctx, req, player, id) })
+        ["requests", id, "respond"] ->
+          only(req, Post, fn() {
+            request_routes.player_respond(ctx, req, player, id)
           })
         _ -> not_found()
       }
@@ -233,6 +255,20 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             feed_routes.feed(ctx, audience.Guardian, guardian.row.id)
           })
+        ["channels"] ->
+          only(req, Get, fn() { threads.guardian_list(ctx, guardian) })
+        ["channels", id, "messages"] ->
+          only(req, Post, fn() { threads.guardian_send(ctx, req, guardian, id) })
+        ["channels", id, "read"] ->
+          only(req, Post, fn() { threads.guardian_read(ctx, req, guardian, id) })
+        ["channels", id, "typing"] ->
+          only(req, Post, fn() {
+            threads.guardian_typing(ctx, req, guardian, id)
+          })
+        ["requests", id, "respond"] ->
+          only(req, Post, fn() {
+            request_routes.guardian_respond(ctx, req, guardian, id)
+          })
         _ -> not_found()
       }
     }
@@ -241,6 +277,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["verification", ..path] -> verification_admin(ctx, req, path)
         ["outbox"] -> only(req, Get, fn() { admin.outbox(ctx, req) })
+        ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
         ["overview"] -> only(req, Get, fn() { console.overview(ctx) })
         ["metrics"] -> only(req, Get, fn() { console.metrics(ctx) })
         ["reports"] -> only(req, Get, fn() { console.reports(ctx, req) })

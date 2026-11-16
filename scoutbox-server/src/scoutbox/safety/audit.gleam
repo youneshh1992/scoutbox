@@ -126,6 +126,19 @@ pub fn block_page(
   )
 }
 
+/// True when the player (or their guardian) blocked the organisation.
+pub fn is_blocked(
+  read: Read,
+  player_id: String,
+  org_id: String,
+) -> Result(Bool, Fail(e)) {
+  count(read, "SELECT COUNT(*) FROM blocks WHERE player_id = ? AND org_id = ?", [
+    sqlight.text(player_id),
+    sqlight.text(org_id),
+  ])
+  |> result.map(fn(n) { n > 0 })
+}
+
 pub fn block_count(read: Read) -> Result(Int, Fail(e)) {
   count(read, "SELECT COUNT(*) FROM blocks", [])
 }
@@ -343,6 +356,8 @@ pub type Context {
     player_id: Option(String),
     org_id: Option(String),
     user_id: Option(String),
+    channel_id: Option(String),
+    request_id: Option(String),
   )
 }
 
@@ -371,6 +386,8 @@ pub fn record_moderation(
       context_player_id: context.player_id,
       context_org_id: context.org_id,
       context_user_id: context.user_id,
+      context_channel_id: context.channel_id,
+      context_request_id: context.request_id,
     ),
   ))
   use _ <- result.map(

@@ -29,6 +29,10 @@ const text_max = 2000
 /// e2e/support/spec/platform/notificationPrefs.json.
 pub const type_category = [
   #("request", row.Messages),
+  #("message", row.Messages),
+  #("accepted", row.Messages),
+  #("declined", row.Messages),
+  #("guardian_decision", row.Messages),
   #("report_resolved", row.SecurityAccount),
   #("badge", row.DiscoveryNudges),
   #("verification", row.SecurityAccount),

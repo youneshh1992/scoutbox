@@ -99,11 +99,14 @@ pub const shared = [
 /// The tables that get a row module: the ones this server reads or writes. Add a table here when a port needs it.
 pub const tables = [
   "blocks",
+  "channels",
   "counters",
   "guardian_children",
   "guardians",
   "idv_queue",
   "ledger",
+  "message_attachments",
+  "messages",
   "moderation_flags",
   "moderation_log",
   "notifications",

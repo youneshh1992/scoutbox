@@ -4,14 +4,21 @@
 //// There is no direct message channel: a club files a request and contact unlocks on acceptance. A minor's
 //// request goes to the guardian, never the child.
 
+import gleam/bool
+import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/regexp
 import gleam/result
+import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs
 import scoutbox/identity/players
+import scoutbox/messaging/channels
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
 import scoutbox/platform/http
@@ -90,6 +97,8 @@ pub fn request(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
           player_id: None,
           org_id: Some(a.org.id),
           user_id: Some(a.user.id),
+          channel_id: None,
+          request_id: None,
         ),
       )
       case body.type_ {
@@ -316,6 +325,294 @@ pub fn guardian_inbox(ctx: Ctx, req: Request, g: Guardian) -> Response {
     store.read(ctx.store, requests.page_for_guardian_of(_, g.child_ids, page))
   {
     Ok(#(items, next)) -> pages.respond(items, next, requests.recipient_view)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+// ------------------------------------------------------------------------------------------------- answering
+
+type Answer {
+  Answer(accept: Bool, message: Option(Dynamic))
+}
+
+/// `accept` is true or false, never "false" read as truthy. The slot and the reply keep their own rules.
+fn answer_shape() -> input.Shape(Answer) {
+  use accept <- input.field("accept", input.required(input.boolean()))
+  use _ <- input.field("chosenSlot", input.optional(input.anything()))
+  use message <- input.field("message", input.optional(input.anything()))
+  input.done(Answer(accept:, message:))
+}
+
+const reply_max = 500
+
+/// contact.mjs `plainShared`: tags, angle brackets and control characters removed, trimmed and cut.
+///
+/// Not ported yet: NFC normalisation (OTP's `unicode:characters_to_nfc_binary` is an FFI this server avoids).
+fn plain(text: String) -> String {
+  let assert Ok(tags) = regexp.from_string("<[^>]*>|[<>]")
+  let assert Ok(controls) =
+    regexp.from_string("[\\x{0}-\\x{8}\\x{B}\\x{C}\\x{E}-\\x{1F}\\x{7F}]")
+  regexp.replace(tags, text, "")
+  |> regexp.replace(controls, _, "")
+  |> string.trim
+  |> input.utf16_take(reply_max)
+}
+
+/// The optional short reply a contact may carry: `Ok(None)` for no reply, or the 400 that refuses it.
+fn contact_reply(
+  r: requests.Request,
+  raw: Option(Dynamic),
+) -> Result(Option(String), Response) {
+  let as_text = option.map(raw, decode.run(_, decode.string))
+  let is_nothing = case raw {
+    None -> True
+    Some(v) -> dynamic.classify(v) == "Nil" || as_text == Some(Ok(""))
+  }
+  case is_nothing, as_text, r.type_ {
+    True, _, _ -> Ok(None)
+    False, Some(Ok(text)), request_row.Contact ->
+      case plain(text) {
+        "" -> Ok(None)
+        reply -> Ok(Some(reply))
+      }
+    False, _, _ ->
+      Error(http.error_message(
+        400,
+        "CONTACT_RESPONSE_INVALID",
+        "A reply must be text, and only a contact can carry one.",
+      ))
+  }
+}
+
+type Responder {
+  Responder(kind: party.Party, id: String, name: String)
+}
+
+type AnswerRefusal {
+  AlreadyResponded
+}
+
+/// `POST /player/requests/:id/respond`: an adult answers their own.
+pub fn player_respond(
+  ctx: Ctx,
+  req: Request,
+  p: access.PlayerAccess,
+  id: String,
+) -> Response {
+  use <- access.guardian_managed_only(p)
+  let me = p.player
+  case store.read(ctx.store, requests.by_id(_, id)) {
+    Error(failure) -> http.internal(failure)
+    Ok(Some(r)) if r.player_id == me.row.id && r.routed_to == party.Player ->
+      respond(ctx, req, r, me, Responder(party.Player, me.row.id, me.row.name))
+    Ok(_) -> http.error(404, "REQUEST_NOT_FOUND")
+  }
+}
+
+/// `POST /guardian/requests/:id/respond`: a child's requests are the guardian's to answer.
+pub fn guardian_respond(
+  ctx: Ctx,
+  req: Request,
+  g: Guardian,
+  id: String,
+) -> Response {
+  let found =
+    store.read(ctx.store, fn(read) {
+      use r <- result.try(requests.by_id(read, id))
+      case r {
+        Some(r) if r.routed_to == party.Guardian ->
+          case list.contains(g.child_ids, r.player_id) {
+            True ->
+              players.by_id(read, r.player_id)
+              |> result.map(option.map(_, fn(p) { #(r, p) }))
+            False -> Ok(None)
+          }
+        _ -> Ok(None)
+      }
+    })
+  case found {
+    Error(failure) -> http.internal(failure)
+    Ok(Some(#(r, p))) ->
+      respond(ctx, req, r, p, Responder(party.Guardian, g.row.id, g.row.name))
+    Ok(None) -> http.error(404, "REQUEST_NOT_FOUND")
+  }
+}
+
+/// One answer to a pending request. A block placed after the request arrived still lets it be declined, never
+/// accepted. The answer, its ledger row, the thread and the notices are one unit.
+///
+/// Not ported yet: answering a trial request (its slot, the trial and the Room's gate), the Contact a Room
+/// links to a request (and its budget of 30 answers an hour), and the live `requests` event.
+fn respond(
+  ctx: Ctx,
+  req: Request,
+  r: requests.Request,
+  player: players.Player,
+  by: Responder,
+) -> Response {
+  use <- bool.lazy_guard(r.status != request_row.Pending, fn() {
+    http.error(409, "ALREADY_RESPONDED")
+  })
+  use body <- http.body(req, answer_shape(), [])
+  case contact_reply(r, body.message) {
+    Error(refused) -> refused
+    Ok(reply) -> {
+      use <- moderate_reply(ctx, r, reply)
+      case store.read(ctx.store, audit.is_blocked(_, r.player_id, r.org_id)) {
+        Error(failure) -> http.internal(failure)
+        Ok(True) if body.accept ->
+          http.error_message(
+            403,
+            "BLOCKED",
+            "You have blocked this organisation. Lift the block before accepting.",
+          )
+        Ok(_) ->
+          case r.type_ {
+            request_row.Trial ->
+              http.error_message(
+                501,
+                "NOT_PORTED",
+                "Trial requests are not supported by this server yet.",
+              )
+            request_row.Contact -> answer(ctx, r, player, by, body.accept)
+          }
+      }
+    }
+  }
+}
+
+fn moderate_reply(
+  ctx: Ctx,
+  r: requests.Request,
+  reply: Option(String),
+  next: fn() -> Response,
+) -> Response {
+  case reply {
+    None -> next()
+    Some(text) ->
+      moderate.or_refuse(
+        ctx,
+        text,
+        audit.Context(
+          kind: "contact_reply",
+          player_id: None,
+          org_id: None,
+          user_id: None,
+          channel_id: None,
+          request_id: Some(r.id),
+        ),
+        next,
+      )
+  }
+}
+
+fn answer(
+  ctx: Ctx,
+  r: requests.Request,
+  player: players.Player,
+  by: Responder,
+  accept: Bool,
+) -> Response {
+  let now = clock.now_ms()
+  let by_guardian = by.kind == party.Guardian
+  let who = case by_guardian {
+    True -> "The guardian of " <> player.row.name
+    False -> player.row.name
+  }
+  let kind = request_row.type_to_string(r.type_)
+  let answered =
+    store.unit(ctx.store, fn(tx) {
+      let read = store.reading(tx)
+      // Answered meanwhile: the first answer stands.
+      use current <- result.try(requests.by_id(read, r.id))
+      use <- bool.lazy_guard(
+        option.map(current, fn(c) { c.status }) != Some(request_row.Pending),
+        fn() { store.refuse(AlreadyResponded) },
+      )
+      use _ <- result.try(requests.record_response(
+        tx,
+        r.id,
+        accept,
+        by.kind,
+        now,
+      ))
+      let notice = fn(to, id, type_, text, ref_id) {
+        notifications.notify(
+          tx,
+          to:,
+          id:,
+          type_:,
+          text:,
+          ref_id: Some(ref_id),
+          at: now,
+        )
+      }
+      let ledger_type = case accept, by_guardian {
+        True, False -> ledger_row.ContactAccepted
+        True, True -> ledger_row.ContactAcceptedByGuardian
+        False, False -> ledger_row.ContactDeclined
+        False, True -> ledger_row.ContactDeclinedByGuardian
+      }
+      let outcome = case accept {
+        True -> "accepted"
+        False -> "declined"
+      }
+      use org_ref <- result.try(case accept {
+        True -> {
+          use thread <- result.try(channels.open(tx, r, now))
+          use _ <- result.map(requests.attach_channel(tx, r.id, thread.id))
+          thread.id
+        }
+        False -> Ok(r.id)
+      })
+      use _ <- result.try(ledger.append(
+        tx,
+        ledger.Entry(
+          entry_type: ledger_type,
+          player_id: Some(player.row.id),
+          org_id: Some(r.org_id),
+          org_name: Some(r.org_name),
+          user_id: Some(r.user_id),
+          actor_name: r.scout_name,
+        ),
+        now,
+      ))
+      use _ <- result.try(notice(
+        audience.OrgUser,
+        r.user_id,
+        outcome,
+        case accept {
+          True -> who <> " accepted your " <> kind <> " request — thread open."
+          False -> who <> " declined your " <> kind <> " request."
+        },
+        org_ref,
+      ))
+      // The child hears the outcome as a request outcome, the category the club's own rows use.
+      use _ <- result.try(case by_guardian {
+        True ->
+          notice(
+            audience.Player,
+            player.row.id,
+            "guardian_decision",
+            "Your parent/guardian "
+              <> outcome
+              <> " the "
+              <> kind
+              <> " with "
+              <> r.org_name
+              <> ".",
+            r.id,
+          )
+        False -> Ok(Nil)
+      })
+      use after <- result.map(requests.by_id(read, r.id))
+      let assert Some(after) = after as "the answered request reads back"
+      #(after, [])
+    })
+  case answered {
+    Ok(after) -> http.json(200, requests.recipient_view(after))
+    Error(store.Refused(AlreadyResponded)) ->
+      http.error(409, "ALREADY_RESPONDED")
     Error(failure) -> http.internal(failure)
   }
 }

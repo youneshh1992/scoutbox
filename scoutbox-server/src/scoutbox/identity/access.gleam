@@ -149,6 +149,22 @@ pub fn player_session(
   }
 }
 
+/// A child's settings and conversations are the guardian's: a minor is refused with GUARDIAN_MANAGED.
+pub fn guardian_managed_only(
+  p: PlayerAccess,
+  next: fn() -> Response,
+) -> Response {
+  case p.minor {
+    True ->
+      http.error_message(
+        403,
+        "GUARDIAN_MANAGED",
+        "This setting is managed by your parent or guardian.",
+      )
+    False -> next()
+  }
+}
+
 pub fn guardian_session(
   ctx: Ctx,
   req: Request,
