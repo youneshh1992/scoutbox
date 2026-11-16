@@ -2,6 +2,7 @@
 
 import gleam/json.{type Json}
 import scoutbox/platform/config.{type Config}
+import scoutbox/platform/faults.{type Faults}
 import scoutbox/platform/limits.{type Limits}
 import scoutbox/platform/store.{type Store}
 
@@ -23,5 +24,7 @@ pub type Ctx {
     migrations: List(String),
     /// The boot's integrity check, as `/capabilities` reports it.
     integrity: Json,
+    /// The development fault layer (inert in production).
+    faults: Faults,
   )
 }

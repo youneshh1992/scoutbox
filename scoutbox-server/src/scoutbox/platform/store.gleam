@@ -18,7 +18,7 @@ import gleam/string
 import sqlight
 
 pub opaque type Tx {
-  Tx(conn: sqlight.Connection)
+  Tx(conn: sqlight.Connection, should_fail: fn(String) -> Bool)
 }
 
 pub opaque type Read {
@@ -63,6 +63,8 @@ pub opaque type Store(effect) {
     readers: List(Subject(Job)),
     dispatch: fn(effect) -> Nil,
     timeout: Int,
+    /// The development fault layer's `internal:<step>` rules: whether a named step fails now.
+    should_fail: fn(String) -> Bool,
   )
 }
 
@@ -85,7 +87,16 @@ pub fn open(
       |> result.map(fn(started) { started.1 })
     }),
   )
-  Ok(Store(writer:, writer_pid:, readers:, dispatch:, timeout: 5000))
+  Ok(
+    Store(
+      writer:,
+      writer_pid:,
+      readers:,
+      dispatch:,
+      timeout: 5000,
+      should_fail: fn(_) { False },
+    ),
+  )
 }
 
 /// The same store with effects sent somewhere else: the dispatcher usually needs the store itself.
@@ -119,6 +130,31 @@ fn start_connection(uri: String) -> Result(#(Pid, Subject(Job)), String) {
   |> result.map_error(string.inspect)
 }
 
+/// The same store with the fault layer's seams: `should_fail(step)` says whether a named step inside a unit
+/// fails now (always false in production).
+pub fn with_seams(
+  store: Store(effect),
+  should_fail: fn(String) -> Bool,
+) -> Store(effect) {
+  Store(..store, should_fail:)
+}
+
+/// A named step inside a unit that the fault layer can fail, to prove the unit's rollback with a real failure
+/// after a real write. It fails as storage does, so the act answers 500.
+pub fn seam(tx: Tx, step: String) -> Result(Nil, Fail(e)) {
+  case tx.should_fail(step) {
+    False -> Ok(Nil)
+    True ->
+      Error(
+        Storage(sqlight.SqlightError(
+          sqlight.GenericError,
+          "simulated failure at " <> step <> " (development fault layer)",
+          -1,
+        )),
+      )
+  }
+}
+
 /// Runs `work` as one write transaction: everything it writes commits together or not at all. On success the
 /// effects it returned are dispatched, in order, after COMMIT.
 pub fn unit(
@@ -133,12 +169,17 @@ pub fn unit(
   let reply = process.new_subject()
   process.send(
     store.writer,
-    Job(fn(conn) { process.send(reply, supervise_unit(conn, work)) }),
+    Job(fn(conn) {
+      process.send(reply, supervise_unit(conn, store.should_fail, work))
+    }),
   )
   case process.receive(reply, store.timeout) {
     Error(Nil) -> Error(TimedOut)
     Ok(Error(e)) -> Error(e)
     Ok(Ok(#(value, effects))) -> {
+      // `internal:unit.after_commit`: the unit's first after-commit step fails after its data committed; the
+      // act's own effects still go out, as each after-commit step is isolated.
+      let _ = store.should_fail("unit.after_commit")
       list.each(effects, store.dispatch)
       Ok(value)
     }
@@ -149,11 +190,14 @@ pub fn unit(
 /// one has committed or rolled back.
 fn supervise_unit(
   conn: sqlight.Connection,
+  should_fail: fn(String) -> Bool,
   work: fn(Tx) -> Result(#(a, List(effect)), Fail(e)),
 ) -> Result(#(a, List(effect)), UnitError(e)) {
   let done = process.new_subject()
   let pid =
-    process.spawn_unlinked(fn() { process.send(done, run_unit(conn, work)) })
+    process.spawn_unlinked(fn() {
+      process.send(done, run_unit(conn, should_fail, work))
+    })
   let monitor = process.monitor(pid)
   let outcome =
     process.new_selector()
@@ -174,18 +218,35 @@ fn supervise_unit(
 
 fn run_unit(
   conn: sqlight.Connection,
+  should_fail: fn(String) -> Bool,
   work: fn(Tx) -> Result(#(a, List(effect)), Fail(e)),
 ) -> Result(#(a, List(effect)), UnitError(e)) {
   use _ <- result.try(
     sqlight.exec("BEGIN IMMEDIATE", conn) |> result.map_error(Database),
   )
-  let outcome = case work(Tx(conn)) {
+  let outcome = case work(Tx(conn, should_fail)) {
     Error(Refuse(e)) -> Error(Refused(e))
     Error(Storage(e)) -> Error(Database(e))
-    Ok(done) ->
+    Ok(done) -> {
+      // `internal:unit.sqlite_commit`: the real COMMIT fails, on a deferred foreign key left dangling on purpose.
+      case should_fail("unit.sqlite_commit") {
+        True -> {
+          let _ =
+            sqlight.exec(
+              "PRAGMA defer_foreign_keys = ON;
+               CREATE TABLE fault_commit_parent (id TEXT PRIMARY KEY);
+               CREATE TABLE fault_commit_child (parent_id TEXT NOT NULL REFERENCES fault_commit_parent(id));
+               INSERT INTO fault_commit_child (parent_id) VALUES ('missing-on-purpose');",
+              conn,
+            )
+          Nil
+        }
+        False -> Nil
+      }
       sqlight.exec("COMMIT", conn)
       |> result.map_error(Database)
       |> result.replace(done)
+    }
   }
   case outcome {
     Ok(_) -> Nil

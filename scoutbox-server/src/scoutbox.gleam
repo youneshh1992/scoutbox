@@ -10,6 +10,7 @@ import scoutbox/identity/sessions
 import scoutbox/messaging/outbox
 import scoutbox/platform/clock
 import scoutbox/platform/config
+import scoutbox/platform/faults
 import scoutbox/platform/limits
 import scoutbox/platform/migrations
 import scoutbox/platform/operator
@@ -50,7 +51,10 @@ fn boot() -> Result(Nil, String) {
       dispatch: fn(_) { Nil },
     ),
   )
-  let store = store.with_dispatch(store, dispatch(store, _))
+  use faults <- result.try(faults.start(config.dev_logins, config.fault_rules))
+  let store =
+    store.with_dispatch(store, dispatch(store, _))
+    |> store.with_seams(faults.should_fail(faults, _))
   use applied <- result.try(migrations.run(
     store,
     session_ttl_ms: sessions.ttl_ms,
@@ -77,6 +81,7 @@ fn boot() -> Result(Nil, String) {
       schema_version: migrations.version(known),
       migrations: known,
       integrity:,
+      faults:,
     )
   process.spawn(fn() { sweeping(ctx) })
   let builder =

@@ -13,6 +13,8 @@ pub type Config {
     admin_key: String,
     /// Passwordless demo sign-ins and the demo seed: development only.
     dev_logins: Bool,
+    /// SCOUTBOX_FAULTS: the fault rules at boot (development only).
+    fault_rules: String,
     /// SCOUTBOX_SEED_DEMO: load the demo world on a database's first boot. Unset, except in production.
     seed_demo: Bool,
     quiet_logs: Bool,
@@ -66,6 +68,7 @@ pub fn load() -> Result(Config, String) {
       data_dir: envoy.get("DATA_DIR") |> result.unwrap("data"),
       admin_key:,
       dev_logins: !production,
+      fault_rules: envoy.get("SCOUTBOX_FAULTS") |> result.unwrap(""),
       seed_demo:,
       quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
       media_secret: case envoy.get("MEDIA_SECRET") |> result.map(string.trim) {

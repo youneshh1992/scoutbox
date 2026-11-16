@@ -25,6 +25,8 @@ import scoutbox/insight/review_queue
 import scoutbox/messaging/delivery_prefs
 import scoutbox/messaging/feed_routes
 import scoutbox/platform/clock
+import scoutbox/platform/fault_routes
+import scoutbox/platform/faults
 import scoutbox/platform/http as contract
 import scoutbox/platform/limits
 import scoutbox/platform/operator
@@ -50,7 +52,13 @@ import wisp.{type Request, type Response}
 pub fn handle(ctx: Ctx, req: Request) -> Response {
   use <- baseline(ctx)
   use <- rescue
+  use <- fault(ctx, req)
   case wisp.path_segments(req) {
+    ["__faults"] ->
+      case faults.enabled(ctx.faults) {
+        True -> fault_routes.handle(ctx, req)
+        False -> not_found()
+      }
     ["health"] -> only(req, Get, fn() { health(ctx) })
     ["healthz"] -> only(req, Get, fn() { healthz(ctx) })
     ["meta"] -> only(req, Get, operator.meta)
@@ -435,6 +443,34 @@ fn baseline(ctx: Ctx, handler: fn() -> Response) -> Response {
         _ -> "not-retryable"
       })
     _, _ -> response
+  }
+}
+
+/// The development fault layer, in front of every route but its own.
+fn fault(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
+  case faults.for_path(ctx.faults, req.path) {
+    faults.Pass -> next()
+    faults.Pause(ms) -> {
+      faults.pause(ms)
+      next()
+    }
+    faults.Fail(after_ms:, status:, error:, retryable:, message:) -> {
+      faults.pause(after_ms)
+      contract.json(
+        status,
+        json.object([
+          #("error", json.string(error)),
+          #("message", json.string(message)),
+          #("retryable", json.bool(retryable)),
+          #("simulated", json.bool(True)),
+          #("requestId", json.null()),
+        ]),
+      )
+      |> wisp.set_header("x-scoutbox-retry", case retryable {
+        True -> "retryable"
+        False -> "not-retryable"
+      })
+    }
   }
 }
 

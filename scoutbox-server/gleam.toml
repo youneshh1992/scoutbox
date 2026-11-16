@@ -18,6 +18,7 @@ gleam_time = ">= 1.11.0 and < 2.0.0"
 envoy = ">= 1.2.0 and < 2.0.0"
 simplifile = ">= 2.7.0 and < 3.0.0"
 gleam_regexp = ">= 1.1.1 and < 2.0.0"
+global_value = ">= 1.0.0 and < 2.0.0"
 
 [dev_dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"
