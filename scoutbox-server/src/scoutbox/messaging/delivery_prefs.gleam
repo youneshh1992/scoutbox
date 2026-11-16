@@ -3,7 +3,6 @@
 
 import gleam/json
 import gleam/option.{type Option}
-import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/staff
@@ -44,7 +43,6 @@ pub fn put(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
   case
     store.unit(ctx.store, fn(tx) {
       staff.set_delivery_prefs(tx, access.user.id, prefs)
-      |> result.map(fn(u) { #(u, []) })
     })
   {
     Error(failure) -> http.internal(failure)

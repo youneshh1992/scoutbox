@@ -80,9 +80,7 @@ pub fn sweep(ctx: Ctx) -> Int {
 }
 
 fn item(ctx: Ctx, what: String, work: fn(Tx) -> Result(Int, Fail(Nil))) -> Int {
-  case
-    store.unit(ctx.store, fn(tx) { work(tx) |> result.map(fn(n) { #(n, []) }) })
-  {
+  case store.unit(ctx.store, fn(tx) { work(tx) }) {
     Ok(n) -> n
     Error(e) -> {
       wisp.log_error(
@@ -505,7 +503,7 @@ pub fn inject_failure(ctx: Ctx, req: Request) -> Response {
         "UPDATE delivery_fail_injections SET remaining = remaining + ? WHERE channel = ?",
         [sqlight.int(count), sqlight.text(channel)],
       )
-      |> result.map(fn(_) { #(Nil, []) })
+      |> result.replace(Nil)
     })
   {
     Ok(Nil) ->
@@ -555,7 +553,7 @@ pub fn ack(
         Some(n) if n.audience_kind == kind && n.audience_id == audience_id ->
           case n.action_required, n.action_acked_at {
             False, _ -> store.refuse(NoActionRequired)
-            True, Some(at) -> Ok(#(at, []))
+            True, Some(at) -> Ok(at)
             True, None -> {
               use _ <- result.try(notifications.ack(tx, n.id, now))
               use ds <- result.try(dispatches.for_notification(read, n.id))
@@ -574,7 +572,7 @@ pub fn ack(
                   )
                 }),
               )
-              #(now, [])
+              now
             }
           }
         _ -> store.refuse(AckNotFound)
@@ -706,7 +704,7 @@ fn apply_event(ctx: Ctx, ev: Event) -> Outcome {
       let now = clock.now_ms()
       use seen <- result.try(mark_seen(tx, ev.callback_id, now))
       case seen {
-        False -> Ok(#(Duplicate, []))
+        False -> Ok(Duplicate)
         True -> {
           use found <- result.try(dispatches.by_provider_message_id(
             store.reading(tx),
@@ -714,7 +712,7 @@ fn apply_event(ctx: Ctx, ev: Event) -> Outcome {
           ))
           case found {
             // The id is still remembered.
-            None -> Ok(#(Unknown, []))
+            None -> Ok(Unknown)
             Some(d) -> {
               let d = d.row
               let clock = option.unwrap(ev.at, now)
@@ -771,7 +769,7 @@ fn apply_event(ctx: Ctx, ev: Event) -> Outcome {
                   ])
               }
               use _ <- result.map(dispatches.patch(tx, d.id, changes))
-              #(Applied, [])
+              Applied
             }
           }
         }

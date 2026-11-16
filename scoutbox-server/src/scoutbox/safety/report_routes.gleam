@@ -146,7 +146,7 @@ fn handle_report(ctx: Ctx, req: Request, reporter: Reporter) -> Response {
               })
           })
           // Not ported yet: the live 'players' event the TypeScript server broadcasts after a suspension.
-          #(report, [])
+          report
         })
       case outcome {
         Ok(report) ->
@@ -223,7 +223,7 @@ fn add_block(
             ),
             now,
           ))
-          #(Nil, [])
+          Nil
         }
       }
     })

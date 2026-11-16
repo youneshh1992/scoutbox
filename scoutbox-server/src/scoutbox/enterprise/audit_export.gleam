@@ -36,21 +36,18 @@ pub fn export(ctx: Ctx, org: OrgAccess) -> Response {
           detail_by: Some(org.user.name),
         ),
       ))
-      #(
-        json.object([
-          #("contract", json.string("audit-export.2026-09.v1")),
-          #("orgId", json.string(org.org.id)),
-          #("exportedAt", json.int(now)),
-          #("exportedBy", json.string(org.user.name)),
-          #("ledger", json.array(entries, ledger.view)),
-          #("caseHistories", json.array([], json.string)),
-          #("importHistories", json.array([], json.string)),
-          #("grantsGiven", json.array([], json.string)),
-          #("grantsReceived", json.array([], json.string)),
-          #("supportAccess", json.array([], json.string)),
-        ]),
-        [],
-      )
+      json.object([
+        #("contract", json.string("audit-export.2026-09.v1")),
+        #("orgId", json.string(org.org.id)),
+        #("exportedAt", json.int(now)),
+        #("exportedBy", json.string(org.user.name)),
+        #("ledger", json.array(entries, ledger.view)),
+        #("caseHistories", json.array([], json.string)),
+        #("importHistories", json.array([], json.string)),
+        #("grantsGiven", json.array([], json.string)),
+        #("grantsReceived", json.array([], json.string)),
+        #("supportAccess", json.array([], json.string)),
+      ])
     })
   case exported {
     Ok(body) -> http.json(200, body)

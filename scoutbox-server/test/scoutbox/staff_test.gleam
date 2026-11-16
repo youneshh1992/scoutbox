@@ -20,10 +20,10 @@ fn new(name: String, email: option.Option(String)) -> staff.NewStaff {
 }
 
 fn act(
-  s: store.Store(e),
+  s: store.Store,
   work: fn(store.Tx) -> Result(a, store.Fail(f)),
 ) -> Result(a, store.UnitError(f)) {
-  store.unit(s, fn(tx) { work(tx) |> result.map(fn(v) { #(v, []) }) })
+  store.unit(s, fn(tx) { work(tx) })
 }
 
 pub fn a_name_is_unique_whatever_its_case_and_after_removal_test() {

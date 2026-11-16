@@ -173,7 +173,7 @@ fn subscribe(
           )
         }),
       )
-      #(e, [])
+      e
     })
   case made {
     Ok(e) ->
@@ -310,7 +310,7 @@ fn deliver_one(ctx: Ctx, d: delivery_row.Row) -> Nil {
         decode.at([0], decode.string),
       ))
       case rows {
-        [] -> Ok(#(None, []))
+        [] -> Ok(None)
         _ -> {
           let read = store.reading(tx)
           use endpoint <- result.try(store.one(
@@ -330,7 +330,7 @@ fn deliver_one(ctx: Ctx, d: delivery_row.Row) -> Nil {
             )
             |> result.map(result.unwrap(_, 0)),
           )
-          #(Some(Claim(option.from_result(endpoint), sent)), [])
+          Some(Claim(option.from_result(endpoint), sent))
         }
       }
     })
@@ -513,7 +513,7 @@ fn record(
           )
         }
       })
-      #(Nil, [])
+      Nil
     })
   case outcome {
     Ok(Nil) -> Nil
@@ -539,7 +539,7 @@ fn record_retry(
         "UPDATE webhook_deliveries SET status = 'retrying', next_at = ? WHERE id = ?",
         [sqlight.int(next_at), sqlight.text(d.id)],
       )
-      |> result.map(fn(_) { #(Nil, []) })
+      |> result.replace(Nil)
     })
   case outcome {
     Ok(Nil) -> Nil
@@ -557,7 +557,7 @@ fn abandon(ctx: Ctx, d: delivery_row.Row) -> Nil {
           sqlight.text(d.id),
         ],
       )
-      |> result.map(fn(_) { #(Nil, []) })
+      |> result.replace(Nil)
     })
   {
     Ok(Nil) -> Nil

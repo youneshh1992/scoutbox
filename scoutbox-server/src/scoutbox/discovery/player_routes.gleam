@@ -62,7 +62,7 @@ fn append(
       ),
       now,
     ))
-    #(id, [])
+    id
   })
 }
 
@@ -160,7 +160,6 @@ pub fn add_note(ctx: Ctx, req: Request, a: OrgAccess, id: String) -> Response {
                 text:,
                 at: now,
               )
-              |> result.map(fn(n) { #(n, []) })
             })
           case added {
             Ok(note) -> http.json(201, audit.note_view(note))

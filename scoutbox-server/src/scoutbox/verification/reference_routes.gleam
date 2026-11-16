@@ -24,7 +24,7 @@ import scoutbox/rows/ver_claims as claim_row
 import scoutbox/rows/ver_events as event_row
 import scoutbox/rows/ver_references as row
 import scoutbox/verification/claims
-import scoutbox/verification/core.{act, reply, reply_with, stop}
+import scoutbox/verification/core.{act, reply, stop}
 import scoutbox/verification/invite_routes
 import scoutbox/verification/records
 import scoutbox/vocab/audience
@@ -251,7 +251,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 ),
                 now,
               ))
-              use pushes <- result.try(
+              use _ <- result.try(
                 case players.is_adult(p, now), p.row.guardian_id {
                   True, _ ->
                     notifications.notify(
@@ -281,13 +281,10 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                       ref_id: Some(id),
                       at: now,
                     )
-                  False, None -> Ok([])
+                  False, None -> Ok(Nil)
                 },
               )
-              reply_with(
-                http.json(201, json.object([#("reference", record(r))])),
-                pushes,
-              )
+              reply(http.json(201, json.object([#("reference", record(r))])))
             }
             _, _ -> {
               let missing =

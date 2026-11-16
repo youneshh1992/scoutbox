@@ -100,7 +100,6 @@ fn signing_in(ctx: Ctx, g: Guardian, now: Int) -> Response {
       let minted =
         store.unit(ctx.store, fn(tx) {
           sessions.create(tx, sessions.Guardian(g.row.id), now)
-          |> result.map(fn(token) { #(token, []) })
         })
       case minted {
         Ok(token) ->
@@ -181,7 +180,6 @@ pub fn add_co_guardian(ctx: Ctx, req: Request, g: Guardian) -> Response {
                 email:,
                 at: now,
               )
-              |> result.map(fn(co) { #(co, []) })
             })
           case created {
             Ok(co) ->
@@ -244,7 +242,6 @@ pub fn review_id(ctx: Ctx, req: Request, id: String) -> Response {
       let reviewed =
         store.unit(ctx.store, fn(tx) {
           guardians.review_id_check(tx, id, approved)
-          |> result.map(fn(g) { #(g, []) })
         })
       case reviewed {
         Ok(g) -> http.json(200, guardians.admin_view(g))

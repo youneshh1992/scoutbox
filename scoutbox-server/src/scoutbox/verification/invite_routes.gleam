@@ -8,13 +8,14 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Ctx, SendMail}
+import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess, type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
 import scoutbox/identity/orgs
 import scoutbox/identity/players.{type Player}
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
+import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
 import scoutbox/platform/ids
 import scoutbox/platform/input
@@ -231,9 +232,10 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
               ),
             ]
           }
-          Ok(
-            #(http.json(201, json.object(body_fields)), case email {
-              Some(to) -> [
+          case email {
+            Some(to) ->
+              store.emit(
+                tx,
                 SendMail(
                   to:,
                   subject: access.org.name <> " invited you to ScoutBox",
@@ -252,10 +254,10 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                     <> secret
                     <> "\n\nJoining is your choice — an invitation gives the club no control over your profile. Under-18s join through a parent or guardian.",
                 ),
-              ]
-              None -> []
-            }),
-          )
+              )
+            None -> Nil
+          }
+          Ok(http.json(201, json.object(body_fields)))
         }
       }
   }
@@ -466,7 +468,7 @@ fn address_check(
         ),
         now,
       ))
-      use pushes <- result.try(notifications.notify(
+      use _ <- result.try(notifications.notify(
         tx,
         to: audience.OrgUser,
         id: inv.by_user_id,
@@ -493,7 +495,6 @@ fn address_check(
           ),
         ]),
       ))
-      |> core.also(pushes)
     }
   }
 }

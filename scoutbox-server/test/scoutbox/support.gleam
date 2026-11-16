@@ -2,13 +2,14 @@
 
 import gleam/result
 import scoutbox/identity/sessions
+import scoutbox/platform/effect.{type Effect}
 import scoutbox/platform/migrations
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Store}
 import scoutbox/seed
 import simplifile
 
-pub fn fresh_store(dispatch: fn(effect) -> Nil) -> Store(effect) {
+pub fn fresh_store(dispatch: fn(Effect) -> Nil) -> Store {
   let dir = "build/test-dbs"
   let assert Ok(_) = simplifile.create_directory_all(dir)
   let path = dir <> "/" <> secrets.random_hex(8) <> ".db"

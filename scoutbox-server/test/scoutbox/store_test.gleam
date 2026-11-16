@@ -2,14 +2,19 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/list
 import gleam/result
+import scoutbox/platform/effect.{type Effect, SendMail}
 import scoutbox/platform/store
 import scoutbox/support
 import sqlight
 
-fn count(s: store.Store(e), sql: String) -> Int {
+fn count(s: store.Store, sql: String) -> Int {
   let assert Ok([n]) =
     store.read(s, store.query(_, sql, [], decode.at([0], decode.int)))
   n
+}
+
+fn mail(subject: String) -> Effect {
+  SendMail(to: "someone@example.com", subject:, text: "")
 }
 
 fn insert_counter(tx: store.Tx, name: String) -> Result(Nil, store.Fail(e)) {
@@ -24,6 +29,7 @@ pub fn a_refused_unit_writes_nothing_and_sends_nothing_test() {
   let outcome =
     store.unit(s, fn(tx) {
       use _ <- result.try(insert_counter(tx, "refused"))
+      store.emit(tx, mail("never"))
       store.refuse("no")
     })
   assert outcome == Error(store.Refused("no"))
@@ -36,27 +42,54 @@ pub fn effects_are_sent_after_commit_in_order_test() {
   let s = support.fresh_store(process.send(sent, _))
   let assert Ok(Nil) =
     store.unit(s, fn(tx) {
+      store.emit(tx, mail("first"))
       use _ <- result.try(insert_counter(tx, "kept"))
-      Ok(#(Nil, ["first", "second"]))
+      store.emit(tx, mail("second"))
+      Ok(Nil)
     })
-  assert process.receive(sent, 100) == Ok("first")
-  assert process.receive(sent, 100) == Ok("second")
+  assert process.receive(sent, 100) == Ok(mail("first"))
+  assert process.receive(sent, 100) == Ok(mail("second"))
+  assert process.receive(sent, 50) == Error(Nil)
   assert count(s, "SELECT COUNT(*) FROM counters WHERE name = 'kept'") == 1
 }
 
-pub fn a_crashing_unit_rolls_back_and_the_writer_carries_on_test() {
+pub fn unit_effects_returns_the_effects_instead_of_sending_them_test() {
+  let sent = process.new_subject()
+  let s = support.fresh_store(process.send(sent, _))
+  let assert Ok(#(7, effects)) =
+    store.unit_effects(s, fn(tx) {
+      store.emit(tx, mail("first"))
+      store.emit(tx, mail("second"))
+      Ok(7)
+    })
+  assert effects == [mail("first"), mail("second")]
+  assert process.receive(sent, 50) == Error(Nil)
+}
+
+pub fn a_unit_starts_with_no_effects_of_an_earlier_one_test() {
   let s = support.fresh_store(fn(_) { Nil })
+  let assert Error(store.Refused(Nil)) =
+    store.unit(s, fn(tx) {
+      store.emit(tx, mail("refused"))
+      store.refuse(Nil)
+    })
+  let assert Ok(#(Nil, [])) = store.unit_effects(s, fn(_) { Ok(Nil) })
+}
+
+pub fn a_crashing_unit_rolls_back_sends_nothing_and_the_writer_carries_on_test() {
+  let sent = process.new_subject()
+  let s = support.fresh_store(process.send(sent, _))
   let crashed =
     store.unit(s, fn(tx) {
       let assert Ok(_) = insert_counter(tx, "crashed")
+      store.emit(tx, mail("never"))
       panic as "boom"
     })
   let assert Error(store.Crashed(_)) = crashed
+  assert process.receive(sent, 50) == Error(Nil)
   assert count(s, "SELECT COUNT(*) FROM counters WHERE name = 'crashed'") == 0
   let assert Ok(Nil) =
-    store.unit(s, fn(tx) {
-      insert_counter(tx, "after") |> result.map(fn(_) { #(Nil, []) })
-    })
+    store.unit(s, fn(tx) { insert_counter(tx, "after") |> result.replace(Nil) })
   assert count(s, "SELECT COUNT(*) FROM counters WHERE name = 'after'") == 1
 }
 
@@ -73,7 +106,7 @@ pub fn a_storage_refusal_rolls_back_the_whole_unit_test() {
           [],
         ),
       )
-      Ok(#(Nil, []))
+      Ok(Nil)
     })
   let assert Error(store.Database(sqlight.SqlightError(
     sqlight.ConstraintCheck,
@@ -103,7 +136,7 @@ pub fn units_are_serialised_test() {
           store.run(tx, "UPDATE counters SET value = ? WHERE name = 'id'", [
             sqlight.int(n + 1),
           ])
-          |> result.map(fn(_) { #(Nil, []) })
+          |> result.replace(Nil)
         })
       process.send(done, Nil)
     })

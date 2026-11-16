@@ -8,11 +8,12 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Ctx, SendMail}
+import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/staff
 import scoutbox/messaging/notifications
 import scoutbox/platform/clock
+import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
 import scoutbox/platform/ids
 import scoutbox/platform/input
@@ -378,8 +379,8 @@ pub fn add_domain(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
         ),
         now,
       ))
-      use effects <- result.try(case challenge_ok {
-        False -> Ok([])
+      use _ <- result.try(case challenge_ok {
+        False -> Ok(Nil)
         True -> {
           use secret <- result.map(core.mint_token(
             tx,
@@ -392,7 +393,8 @@ pub fn add_domain(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             core.work_email_ttl_ms,
             now,
           ))
-          [
+          store.emit(
+            tx,
             SendMail(
               to: email,
               subject: "Confirm "
@@ -408,26 +410,23 @@ pub fn add_domain(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 <> secret
                 <> "\n\nSingle use, expires in 30 minutes.",
             ),
-          ]
+          )
         }
       })
       use record <- result.try(request_record(read, r))
-      Ok(#(
-        http.json(
-          201,
-          json.object([
-            #("request", record),
-            #(
-              "note",
-              json.string(case status {
-                request_row.RequiresHumanReview ->
-                  "Root or contested domain changes are reviewed by Trust & Safety before they take effect."
-                _ -> "A confirmation code went to the mailbox on that domain."
-              }),
-            ),
-          ]),
-        ),
-        effects,
+      Ok(http.json(
+        201,
+        json.object([
+          #("request", record),
+          #(
+            "note",
+            json.string(case status {
+              request_row.RequiresHumanReview ->
+                "Root or contested domain changes are reviewed by Trust & Safety before they take effect."
+              _ -> "A confirmation code went to the mailbox on that domain."
+            }),
+          ),
+        ]),
       ))
     }
   }
@@ -740,7 +739,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 ),
                 now,
               ))
-              use pushes <- result.try(notifications.notify(
+              use _ <- result.try(notifications.notify(
                 tx,
                 to: audience.OrgUser,
                 id: user_id,
@@ -757,7 +756,6 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 201,
                 json.object([#("admin", json.object(admin_record(a)))]),
               ))
-              |> core.also(pushes)
             }
           }
         _ -> stop(http.error(404, "USER_NOT_FOUND"))

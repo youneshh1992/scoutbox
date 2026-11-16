@@ -10,11 +10,11 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Ctx, type Effect, SendMail}
+import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs
-import scoutbox/messaging/notifications
 import scoutbox/platform/clock
+import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
 import scoutbox/platform/ids
 import scoutbox/platform/input
@@ -26,9 +26,7 @@ import scoutbox/rows/ver_events as event_row
 import scoutbox/rows/ver_evidence as evidence_row
 import scoutbox/rows/ver_tokens as token_row
 import scoutbox/verification/claims.{type Claim}
-import scoutbox/verification/core.{
-  type Actor, type Done, act, reply, reply_with, stop,
-}
+import scoutbox/verification/core.{type Actor, type Done, act, reply, stop}
 import scoutbox/verification/records
 import scoutbox/vocab/attribution
 import scoutbox/vocab/claim_type
@@ -435,9 +433,9 @@ pub fn submit(
                 ]),
               ))
             True -> {
-              use pushes <- result.try(to_pending(tx, claim, actor, access, now))
+              use _ <- result.try(to_pending(tx, claim, actor, access, now))
               use v <- result.try(view(tx, claim.id, now))
-              reply_with(http.json(200, json.object([#("claim", v)])), pushes)
+              reply(http.json(200, json.object([#("claim", v)])))
             }
           }
         }
@@ -452,7 +450,7 @@ fn to_pending(
   actor: Actor,
   access: OrgAccess,
   now: Int,
-) -> Result(List(Effect), Fail(e)) {
+) -> Result(Nil, Fail(e)) {
   use _ <- result.try(case claim.status {
     claim_row.Unverified ->
       apply_status(
@@ -487,7 +485,7 @@ pub fn route_claim(
   actor: Actor,
   asker: Option(String),
   now: Int,
-) -> Result(List(Effect), Fail(e)) {
+) -> Result(Nil, Fail(e)) {
   let read = store.reading(tx)
   use found <- result.try(records.claim(read, claim_id))
   let assert Some(claim) = found as "a routed claim exists"
@@ -581,7 +579,7 @@ pub fn route_claim(
         record,
         now,
       ))
-      core.count(tx, "routedToHumanReview") |> result.replace([])
+      core.count(tx, "routedToHumanReview") |> result.replace(Nil)
     }
     claims.CanAutoComplete -> {
       use _ <- result.try(core.count(tx, "autoPrechecksPassed"))
@@ -629,7 +627,7 @@ pub fn route_claim(
             now,
           )
         }
-        _, _ -> Ok([])
+        _, _ -> Ok(Nil)
       }
     }
   }
@@ -778,33 +776,30 @@ pub fn work_email(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             ),
             now,
           ))
-          Ok(
-            #(
-              http.json(
-                201,
-                json.object([
-                  #("sent", json.bool(True)),
-                  #(
-                    "note",
-                    json.string(
-                      "Enter the code from the mailbox. Codes are single-use and expire in 30 minutes.",
-                    ),
-                  ),
-                ]),
-              ),
-              [
-                SendMail(
-                  to: email,
-                  subject: "Confirm your work email for ScoutBox verification",
-                  text: "Hi "
-                    <> access.user.name
-                    <> ",\n\nYour ScoutBox work-email confirmation code is "
-                    <> secret
-                    <> "\n\nEntering it proves control of this mailbox. It expires in 30 minutes and works once.\n\nIf you did not request this, ignore the email.",
-                ),
-              ],
+          store.emit(
+            tx,
+            SendMail(
+              to: email,
+              subject: "Confirm your work email for ScoutBox verification",
+              text: "Hi "
+                <> access.user.name
+                <> ",\n\nYour ScoutBox work-email confirmation code is "
+                <> secret
+                <> "\n\nEntering it proves control of this mailbox. It expires in 30 minutes and works once.\n\nIf you did not request this, ignore the email.",
             ),
           )
+          Ok(http.json(
+            201,
+            json.object([
+              #("sent", json.bool(True)),
+              #(
+                "note",
+                json.string(
+                  "Enter the code from the mailbox. Codes are single-use and expire in 30 minutes.",
+                ),
+              ),
+            ]),
+          ))
         }
       }
   }
@@ -906,8 +901,8 @@ pub fn confirm_work_email(
             actor,
             now,
           ))
-          use pushes <- result.try(
-            notifications.each(open, fn(c) {
+          use _ <- result.try(
+            list.try_each(open, fn(c) {
               // Internal to the subject and the organisation, never public.
               use _ <- result.try(records.update_claim(
                 tx,
@@ -939,30 +934,27 @@ pub fn confirm_work_email(
               case c.status {
                 claim_row.CollectingEvidence | claim_row.Unverified ->
                   to_pending(tx, c, actor, access, now)
-                _ -> Ok([])
+                _ -> Ok(Nil)
               }
             }),
           )
           use views <- result.try(
             list.try_map(open, fn(c) { view(tx, c.id, now) }),
           )
-          reply_with(
-            http.json(
-              200,
-              json.object([
-                #("domainControl", json.string("passed")),
-                #("domainCoveredByOrg", json.bool(covered)),
-                #("claims", json.preprocessed_array(views)),
-                #(
-                  "note",
-                  json.string(
-                    "Email control recorded as evidence. It does NOT by itself verify employment — an authorised organisation administrator confirms the relationship next.",
-                  ),
+          reply(http.json(
+            200,
+            json.object([
+              #("domainControl", json.string("passed")),
+              #("domainCoveredByOrg", json.bool(covered)),
+              #("claims", json.preprocessed_array(views)),
+              #(
+                "note",
+                json.string(
+                  "Email control recorded as evidence. It does NOT by itself verify employment — an authorised organisation administrator confirms the relationship next.",
                 ),
-              ]),
-            ),
-            pushes,
-          )
+              ),
+            ]),
+          ))
         }
       }
     }

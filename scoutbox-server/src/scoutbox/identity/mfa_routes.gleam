@@ -6,7 +6,6 @@ import gleam/crypto
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
@@ -42,7 +41,6 @@ pub fn setup(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
       let outcome =
         store.unit(ctx.store, fn(tx) {
           staff.start_mfa(tx, access.user.id, secret)
-          |> result.map(fn(u) { #(u, []) })
         })
       case outcome {
         Ok(_) ->
@@ -112,7 +110,6 @@ pub fn verify(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                     at: now,
                     recovery_hashes: list.map(plain, secrets.sha256_hex),
                   )
-                  |> result.map(fn(u) { #(u, []) })
                 })
               case outcome {
                 Ok(_) ->
@@ -157,10 +154,7 @@ pub fn disable(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
             False -> http.error(401, "MFA_CODE_WRONG")
             True ->
               case
-                store.unit(ctx.store, fn(tx) {
-                  staff.disable_mfa(tx, user.id)
-                  |> result.map(fn(u) { #(u, []) })
-                })
+                store.unit(ctx.store, fn(tx) { staff.disable_mfa(tx, user.id) })
               {
                 Ok(_) ->
                   http.json(200, json.object([#("enabled", json.bool(False))]))

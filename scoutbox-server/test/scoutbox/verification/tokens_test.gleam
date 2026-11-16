@@ -35,7 +35,6 @@ fn mint(s, purpose, email, subject_id, ttl_ms) -> String {
         ttl_ms,
         now,
       )
-      |> result.map(fn(secret) { #(secret, []) })
     })
   secret
 }
@@ -66,9 +65,8 @@ fn consume(s, purpose, secret, email, subject_id) {
         now,
       ))
       case out {
-        Ok(t) ->
-          records.use_token(tx, t.id, now) |> result.map(fn(_) { #(Ok(t), []) })
-        Error(code) -> Ok(#(Error(code), []))
+        Ok(t) -> records.use_token(tx, t.id, now) |> result.replace(Ok(t))
+        Error(code) -> Ok(Error(code))
       }
     })
   out

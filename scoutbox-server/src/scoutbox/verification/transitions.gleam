@@ -379,7 +379,7 @@ fn open(ctx: Ctx, req: Request, player: Player, actor: Actor) -> Response {
           use found <- result.map(by_id(store.reading(tx), id))
           let assert Some(c) = found
             as "a transition case reads back in its unit"
-          #(c, [])
+          c
         })
       case opened {
         Ok(c) ->
@@ -611,7 +611,7 @@ fn grant(ctx: Ctx, c: Case, actor: Actor, body: Grant, now: Int) -> Response {
                 now,
               ))
               use staff <- result.try(first_staff(read, org.id))
-              use pushes <- result.map(case staff {
+              use _ <- result.map(case staff {
                 Some(uid) ->
                   notifications.notify(
                     tx,
@@ -624,9 +624,9 @@ fn grant(ctx: Ctx, c: Case, actor: Actor, body: Grant, now: Int) -> Response {
                     ref_id: Some(c.row.id),
                     at: now,
                   )
-                None -> Ok([])
+                None -> Ok(Nil)
               })
-              #(r, pushes)
+              r
             }
           }
         })
@@ -693,7 +693,7 @@ pub fn revoke_recipient(
             now,
           ))
           use staff <- result.try(first_staff(store.reading(tx), r.org_id))
-          use pushes <- result.map(case staff {
+          use _ <- result.map(case staff {
             Some(uid) ->
               notifications.notify_action(
                 tx,
@@ -707,9 +707,9 @@ pub fn revoke_recipient(
                 deadline: Some(now + 7 * day),
                 at: now,
               )
-            None -> Ok([])
+            None -> Ok(Nil)
           })
-          #(recipient_row.Row(..r, revoked_at: Some(now)), pushes)
+          recipient_row.Row(..r, revoked_at: Some(now))
         })
       case revoked {
         Ok(r) ->

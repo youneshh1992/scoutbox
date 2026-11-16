@@ -8,7 +8,7 @@ import scoutbox/platform/ids
 import scoutbox/platform/store
 import scoutbox/support
 
-fn counter(s: store.Store(e)) -> List(Int) {
+fn counter(s: store.Store) -> List(Int) {
   let assert Ok(values) =
     store.read(s, store.query(
       _,
@@ -22,10 +22,7 @@ fn counter(s: store.Store(e)) -> List(Int) {
 pub fn ids_are_numbered_from_the_counter_row_test() {
   let s = support.fresh_store(fn(_) { Nil })
   let assert [before] = counter(s)
-  let assert Ok(id) =
-    store.unit(s, fn(tx) {
-      ids.next(tx, "p") |> result.map(fn(id) { #(id, []) })
-    })
+  let assert Ok(id) = store.unit(s, fn(tx) { ids.next(tx, "p") })
   assert id == "p-" <> string.inspect(before + 1)
   assert counter(s) == [before + 1]
 }
@@ -35,12 +32,10 @@ pub fn without_its_counter_row_no_id_is_minted_test() {
   let assert Ok(Nil) =
     store.unit(s, fn(tx) {
       store.run(tx, "DELETE FROM counters WHERE name = 'id'", [])
-      |> result.map(fn(_) { #(Nil, []) })
+      |> result.replace(Nil)
     })
   let assert Error(store.Database(e)) =
-    store.unit(s, fn(tx) {
-      ids.next(tx, "p") |> result.map(fn(id) { #(id, []) })
-    })
+    store.unit(s, fn(tx) { ids.next(tx, "p") })
   assert string.contains(e.message, "COUNTER_MISSING")
   assert counter(s) == []
 }

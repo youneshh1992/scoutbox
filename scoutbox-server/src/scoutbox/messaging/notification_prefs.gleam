@@ -324,7 +324,7 @@ pub fn update(ctx: Ctx, req: Request, kind: Audience, id: String) -> Response {
           let now = clock.now_ms()
           case
             store.unit(ctx.store, fn(tx) {
-              save(tx, kind, id, body, now) |> result.map(fn(_) { #(Nil, []) })
+              save(tx, kind, id, body, now) |> result.replace(Nil)
             })
           {
             Ok(Nil) -> respond(ctx, kind, id)

@@ -28,7 +28,7 @@ pub fn read(ctx: Ctx, req: Request, kind: Audience, id: String) -> Response {
   use _ <- http.body(req, input.nothing(), [])
   case
     store.unit(ctx.store, fn(tx) {
-      notifications.mark_read(tx, kind, id) |> result.map(fn(_) { #(Nil, []) })
+      notifications.mark_read(tx, kind, id) |> result.replace(Nil)
     })
   {
     Ok(Nil) -> http.json(200, json.object([#("ok", json.bool(True))]))
@@ -80,9 +80,7 @@ fn register(
   now: Int,
 ) -> Response {
   case
-    store.unit(ctx.store, fn(tx) {
-      push.register(tx, kind, id, token, now) |> result.map(fn(m) { #(m, []) })
-    })
+    store.unit(ctx.store, fn(tx) { push.register(tx, kind, id, token, now) })
   {
     Ok(moved) ->
       http.json(

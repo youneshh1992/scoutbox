@@ -63,7 +63,7 @@ pub fn or_refuse(
               )
               |> result.replace(Nil)
           })
-          #(Nil, [])
+          Nil
         })
       case logged {
         Error(failure) -> http.internal(failure)

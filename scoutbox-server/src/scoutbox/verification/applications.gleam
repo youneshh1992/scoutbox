@@ -15,10 +15,11 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Ctx, SendMail}
+import scoutbox/app.{type Ctx}
 import scoutbox/identity/orgs
 import scoutbox/identity/staff
 import scoutbox/platform/clock
+import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
 import scoutbox/platform/ids
 import scoutbox/platform/input
@@ -502,35 +503,32 @@ fn applying(
     ),
     now,
   ))
-  Ok(
-    #(
-      http.json(
-        201,
-        json.object([
-          #("requestId", json.string(id)),
-          #("applicantSecret", json.string(secret)),
-          #("checks", checks_json(application)),
-          #(
-            "note",
-            json.string(
-              "Confirm the emailed code, add supporting evidence, then submit. Domain/email control is evidence of mailbox control — it does not by itself verify the organisation.",
-            ),
-          ),
-        ]),
-      ),
-      [
-        SendMail(
-          to: application.work_email,
-          subject: "Verify your email for the "
-            <> application.org_name
-            <> " ScoutBox application",
-          text: "Your ScoutBox organisation-application code is "
-            <> code
-            <> "\n\nSingle use, expires in 30 minutes.",
-        ),
-      ],
+  store.emit(
+    tx,
+    SendMail(
+      to: application.work_email,
+      subject: "Verify your email for the "
+        <> application.org_name
+        <> " ScoutBox application",
+      text: "Your ScoutBox organisation-application code is "
+        <> code
+        <> "\n\nSingle use, expires in 30 minutes.",
     ),
   )
+  Ok(http.json(
+    201,
+    json.object([
+      #("requestId", json.string(id)),
+      #("applicantSecret", json.string(secret)),
+      #("checks", checks_json(application)),
+      #(
+        "note",
+        json.string(
+          "Confirm the emailed code, add supporting evidence, then submit. Domain/email control is evidence of mailbox control — it does not by itself verify the organisation.",
+        ),
+      ),
+    ]),
+  ))
 }
 
 /// The checks as an event's detail shows an object: `key=value` pairs.

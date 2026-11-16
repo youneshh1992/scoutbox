@@ -61,7 +61,7 @@ pub fn record_exposure(
         decode.success(Nil),
       ))
       case seen {
-        [_] -> Ok(#(Nil, []))
+        [_] -> Ok(Nil)
         _ -> {
           use id <- result.try(ids.next(tx, "exp"))
           use _ <- result.map(
@@ -78,7 +78,7 @@ pub fn record_exposure(
               ],
             ),
           )
-          #(Nil, [])
+          Nil
         }
       }
     })

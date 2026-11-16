@@ -187,9 +187,9 @@ fn contact(
           at: now,
         )
       }
-      use pushes <- result.map(case guardian_id {
+      use _ <- result.map(case guardian_id {
         Some(g) -> {
-          use to_guardian <- result.try(notice(
+          use _ <- result.try(notice(
             audience.Guardian,
             g,
             a.org.name
@@ -197,13 +197,12 @@ fn contact(
               <> p.row.name
               <> ".",
           ))
-          use to_child <- result.map(notice(
+          notice(
             audience.Player,
             p.row.id,
             a.org.name
               <> " contacted your parent/guardian about a conversation.",
-          ))
-          list.append(to_guardian, to_child)
+          )
         }
         None ->
           notice(
@@ -213,7 +212,7 @@ fn contact(
           )
       })
       // Not ported yet: the live 'inbox' event.
-      #(r, pushes)
+      r
     })
   case filed {
     Ok(r) ->
@@ -578,7 +577,7 @@ fn answer(
         ),
         now,
       ))
-      use to_club <- result.try(notice(
+      use _ <- result.try(notice(
         audience.OrgUser,
         r.user_id,
         outcome,
@@ -589,7 +588,7 @@ fn answer(
         org_ref,
       ))
       // The child hears the outcome as a request outcome, the category the club's own rows use.
-      use to_child <- result.try(case by_guardian {
+      use _ <- result.try(case by_guardian {
         True ->
           notice(
             audience.Player,
@@ -604,11 +603,11 @@ fn answer(
               <> ".",
             r.id,
           )
-        False -> Ok([])
+        False -> Ok(Nil)
       })
       use after <- result.map(requests.by_id(read, r.id))
       let assert Some(after) = after as "the answered request reads back"
-      #(after, list.append(to_club, to_child))
+      after
     })
   case answered {
     Ok(after) -> http.json(200, requests.recipient_view(after))

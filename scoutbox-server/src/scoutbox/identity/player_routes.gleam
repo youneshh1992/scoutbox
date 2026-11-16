@@ -205,7 +205,7 @@ pub fn create_child(ctx: Ctx, req: Request, g: guardians.Guardian) -> Response {
                         ),
                       ))
                       // Not ported yet: the saved-search check (discovery) and the live 'players' event.
-                      #(p, [])
+                      p
                     })
                   case created {
                     Ok(p) ->
@@ -323,7 +323,7 @@ fn create(
         sessions.Player(p.row.id),
         now,
       ))
-      #(#(p, token), [])
+      #(p, token)
     })
   case created {
     Ok(#(p, token)) ->
@@ -377,7 +377,7 @@ pub fn add_timeline(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
             store.reading(tx),
             p.player.row.id,
           ))
-          #(found, [])
+          found
         })
       case written {
         Ok(Some(player)) ->
@@ -472,7 +472,6 @@ pub fn login(ctx: Ctx, req: Request) -> Response {
           case
             store.unit(ctx.store, fn(tx) {
               sessions.create(tx, sessions.Player(p.row.id), now)
-              |> result.map(fn(token) { #(token, []) })
             })
           {
             Ok(token) ->

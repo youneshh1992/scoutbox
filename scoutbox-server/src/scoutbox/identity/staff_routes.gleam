@@ -70,7 +70,7 @@ pub fn remove(ctx: Ctx, access: OrgAccess, user_id: String) -> Response {
               ))
               // Not ported yet: the TypeScript server also closes the removed member's live event streams
               // after the commit. This server has no live streams.
-              Ok(#(removed, []))
+              Ok(removed)
             }
             _ -> store.refuse(staff.NotFound)
           }

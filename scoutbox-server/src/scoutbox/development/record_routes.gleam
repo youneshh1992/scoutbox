@@ -10,7 +10,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import scoutbox/app.{type Ctx, type Effect}
+import scoutbox/app.{type Ctx}
 import scoutbox/development/activity
 import scoutbox/identity/access.{type PlayerAccess}
 import scoutbox/identity/guardians.{type Guardian}
@@ -35,15 +35,6 @@ const badge_max = 60
 fn act(
   ctx: Ctx,
   work: fn(Tx) -> Result(Player, store.Fail(Nil)),
-  view: fn(Player) -> json.Json,
-) -> Response {
-  act_with(ctx, fn(tx) { work(tx) |> result.map(fn(p) { #(p, []) }) }, view)
-}
-
-/// `act` for work that also asks for effects (a badge's notice pushes).
-fn act_with(
-  ctx: Ctx,
-  work: fn(Tx) -> Result(#(Player, List(Effect)), store.Fail(Nil)),
   view: fn(Player) -> json.Json,
 ) -> Response {
   case store.unit(ctx.store, work) {
@@ -349,7 +340,7 @@ pub fn stats(ctx: Ctx, req: Request, p: PlayerAccess) -> Response {
         "Filing figures into a past season is not supported by this server yet.",
       )
     Ok(figures), None ->
-      act_with(
+      act(
         ctx,
         fn(tx) {
           use _ <- result.try(players.record_stats(tx, p.player.row.id, figures))

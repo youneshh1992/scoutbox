@@ -393,7 +393,7 @@ fn deciding(
   }
   // The decision, its notice to the person and its ledger row commit together.
   let announce = fn(text) {
-    use pushes <- result.try(notifications.notify(
+    use _ <- result.try(notifications.notify(
       tx,
       to: audience.OrgUser,
       id: claim.subject_id,
@@ -416,7 +416,7 @@ fn deciding(
       ),
       now,
     )
-    |> result.replace(pushes)
+    |> result.replace(Nil)
   }
   let decide = fn(to, text, set: fn(Claim) -> Claim) {
     use _ <- result.try(
@@ -457,7 +457,7 @@ fn deciding(
     )
     announce(text)
   }
-  use pushes <- result.try(case body.action {
+  use _ <- result.try(case body.action {
     Confirm | CorrectRole | MarkFormer -> {
       let role_claim =
         list.find(targets, fn(c) {
@@ -608,7 +608,6 @@ fn deciding(
       #("claims", json.preprocessed_array(views)),
     ]),
   ))
-  |> core.also(pushes)
 }
 
 // ------------------------------------------------------------------------------------------- the register
@@ -823,7 +822,7 @@ pub fn departed(
               )
             }),
           )
-          use pushes <- result.try(notifications.notify(
+          use _ <- result.try(notifications.notify(
             tx,
             to: audience.OrgUser,
             id: user_id,
@@ -845,7 +844,6 @@ pub fn departed(
               ),
             ]),
           ))
-          |> core.also(pushes)
         }
       }
     }

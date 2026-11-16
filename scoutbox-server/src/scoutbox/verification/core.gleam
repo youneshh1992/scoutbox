@@ -12,7 +12,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/regexp
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Ctx, type Effect}
+import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/staff
@@ -724,13 +724,13 @@ pub fn notify_reviewers(
   text: String,
   ref_id: String,
   now: Int,
-) -> Result(List(Effect), Fail(e)) {
+) -> Result(Nil, Fail(e)) {
   use reviewers <- result.try(reviewers_of(
     store.reading(tx),
     org_id,
     ver_level.VerificationReviewer,
   ))
-  notifications.each(reviewers, fn(u) {
+  list.try_each(reviewers, fn(u) {
     notifications.notify(
       tx,
       to: audience.OrgUser,
@@ -969,9 +969,9 @@ pub fn subject_claim_view(
 
 // ------------------------------------------------------------------------------------------------ acting
 
-/// What a route's unit ends in: the response, and the effects to dispatch after COMMIT.
+/// What a route's unit ends in: the response, or a refusal that rolls the unit back.
 pub type Done =
-  Result(#(Response, List(Effect)), Fail(Response))
+  Result(Response, Fail(Response))
 
 /// Runs a route's work in one unit. A refusal (`stop`) is the response, and rolls back everything the work wrote;
 /// a response the work returns commits, even an error that follows a write the act keeps (a failed attempt counted).
@@ -989,17 +989,7 @@ pub fn stop(response: Response) -> Result(a, Fail(Response)) {
 }
 
 pub fn reply(response: Response) -> Done {
-  Ok(#(response, []))
-}
-
-/// A route's outcome with effects the act asked for before it (its notices' pushes), those first.
-pub fn also(done: Done, effects: List(Effect)) -> Done {
-  result.map(done, fn(d) { #(d.0, list.append(effects, d.1)) })
-}
-
-/// The response, and effects the act asked for along the way (its notices' pushes).
-pub fn reply_with(response: Response, effects: List(Effect)) -> Done {
-  Ok(#(response, effects))
+  Ok(response)
 }
 
 /// A read-only route.

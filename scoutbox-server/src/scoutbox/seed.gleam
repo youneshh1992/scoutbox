@@ -14,11 +14,7 @@ import wisp
 /// The first boot of a database: loads the demo world when `demo` is set, and marks the database installed either
 /// way, as the TypeScript server does (`meta.orgsInit` and `meta.coreIdentityInit` go from `pending`, which the
 /// migrations write, to `done`). An installed database is never seeded again, nor is one a fixture wrote.
-pub fn run(
-  store: Store(effect),
-  now: Int,
-  demo demo: Bool,
-) -> Result(Bool, String) {
+pub fn run(store: Store, now: Int, demo demo: Bool) -> Result(Bool, String) {
   use priv <- result.try(
     wisp.priv_directory("scoutbox") |> result.replace_error("no priv directory"),
   )
@@ -39,13 +35,13 @@ pub fn run(
           string.replace(sql, "NOW_MS", int.to_string(now)),
         ))
         use _ <- result.try(installed(tx))
-        Ok(#(True, []))
+        Ok(True)
       }
       ["pending"], False -> {
         use _ <- result.try(installed(tx))
-        Ok(#(False, []))
+        Ok(False)
       }
-      _, _ -> Ok(#(False, []))
+      _, _ -> Ok(False)
     }
   })
   |> result.map_error(fn(e) { "seed: " <> string.inspect(e) })

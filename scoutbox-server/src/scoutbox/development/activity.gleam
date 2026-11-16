@@ -4,7 +4,6 @@
 import gleam/list
 import gleam/option.{Some}
 import gleam/result
-import scoutbox/app.{type Effect}
 import scoutbox/identity/players.{type Player}
 import scoutbox/messaging/notifications
 import scoutbox/platform/store.{type Fail, type Tx}
@@ -12,27 +11,22 @@ import scoutbox/rules/journey
 import scoutbox/vocab/audience
 import scoutbox/vocab/playing_level
 
-/// Logs the activity, then awards each journey badge newly earned, with a notice. Returns the stored record and
-/// the notices' pushes.
-pub fn record(
-  tx: Tx,
-  id: String,
-  now: Int,
-) -> Result(#(Player, List(Effect)), Fail(e)) {
+/// Logs the activity, then awards each journey badge newly earned, with a notice. Returns the stored record.
+pub fn record(tx: Tx, id: String, now: Int) -> Result(Player, Fail(e)) {
   use _ <- result.try(players.log_activity(tx, id, now))
   use found <- result.try(players.by_id(store.reading(tx), id))
   let assert Some(p) = found as "activity is recorded for a live player"
   case p.row.level {
-    playing_level.Pro -> Ok(#(p, []))
+    playing_level.Pro -> Ok(p)
     _ -> {
       let new =
         journey.earned_badges(p, journey.streak(p.activity_log, now))
         |> list.filter(fn(b) { !list.contains(p.badges, b) })
       case new {
-        [] -> Ok(#(p, []))
+        [] -> Ok(p)
         _ -> {
-          use pushes <- result.try(
-            notifications.each(new, fn(badge) {
+          use _ <- result.try(
+            list.try_each(new, fn(badge) {
               notifications.notify(
                 tx,
                 to: audience.Player,
@@ -47,7 +41,6 @@ pub fn record(
             }),
           )
           players.set_badges(tx, id, list.append(p.badges, new))
-          |> result.map(fn(p) { #(p, pushes) })
         }
       }
     }

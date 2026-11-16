@@ -44,7 +44,7 @@ pub fn version(known: List(String)) -> Int {
 
 /// Ids are minted from one counter row. Without it the server refuses to start rather than run until the first
 /// act that needs an id.
-pub fn counter_present(store: Store(effect)) -> Result(Nil, String) {
+pub fn counter_present(store: Store) -> Result(Nil, String) {
   let found =
     store.read(store, fn(read) {
       store.query(
@@ -80,7 +80,7 @@ pub fn up_to_date(applied: List(String), known: List(String)) -> Bool {
 
 /// Applies every migration not yet recorded. Returns the ids applied now.
 pub fn run(
-  store: Store(effect),
+  store: Store,
   session_ttl_ms session_ttl_ms: Int,
 ) -> Result(List(String), String) {
   use dir <- result.try(directory())
@@ -89,7 +89,7 @@ pub fn run(
 
 /// `run`, with the migrations read from `dir`.
 pub fn run_from(
-  store: Store(effect),
+  store: Store,
   dir: String,
   session_ttl_ms session_ttl_ms: Int,
 ) -> Result(List(String), String) {
@@ -102,7 +102,7 @@ pub fn run_from(
     |> list.sort(string.compare)
   use _ <- result.try(
     store.unit(store, fn(tx) {
-      store.exec(tx, bookkeeping) |> result.map(fn(_) { #(Nil, []) })
+      store.exec(tx, bookkeeping) |> result.replace(Nil)
     })
     |> result.map_error(string.inspect),
   )
@@ -130,7 +130,7 @@ pub fn run_from(
           decode.success(Nil),
         ))
         case done {
-          [_] -> Ok(#(applied, []))
+          [_] -> Ok(applied)
           _ -> {
             use _ <- result.try(store.exec(tx, sql))
             use broken <- result.try(store.query(
@@ -148,7 +148,7 @@ pub fn run_from(
                     [sqlight.text(id), sqlight.int(now)],
                   ),
                 )
-                Ok(#([id, ..applied], []))
+                Ok([id, ..applied])
               }
               _ -> store.refuse("foreign_key_check found broken references")
             }

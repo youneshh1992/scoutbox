@@ -4,13 +4,14 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import scoutbox/app.{type Ctx, SendMail}
+import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/invites.{type Invite}
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/sessions
 import scoutbox/identity/staff.{type Staff}
 import scoutbox/platform/clock
+import scoutbox/platform/effect.{SendMail}
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/secrets
@@ -68,7 +69,8 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
               at: clock.now_ms(),
             ),
           ))
-          let mail =
+          store.emit(
+            tx,
             SendMail(
               to: body.email,
               subject: org.name <> " invited you to ScoutBox",
@@ -83,8 +85,9 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 <> ".\n\nAccept with invite code: "
                 <> code
                 <> "\n\nThe code expires in 7 days.",
-            )
-          Ok(#(invite, [mail]))
+            ),
+          )
+          Ok(invite)
         })
       case outcome {
         Ok(invite) ->
@@ -174,10 +177,7 @@ pub fn accept(ctx: Ctx, req: Request) -> Response {
     Error(failure) -> http.internal(failure)
     Ok(Invalid) -> http.error(404, "INVITE_INVALID")
     Ok(Found(invite, _)) if invite.expires_at < now -> {
-      let _ =
-        store.unit(ctx.store, fn(tx) {
-          invites.expire(tx, invite.id) |> result.map(fn(i) { #(i, []) })
-        })
+      let _ = store.unit(ctx.store, fn(tx) { invites.expire(tx, invite.id) })
       http.error(410, "INVITE_EXPIRED")
     }
     Ok(Unavailable) -> http.error(403, "ORG_UNAVAILABLE")
@@ -214,7 +214,7 @@ fn accepting(
         now,
       ))
       use onboarding <- result.try(onboarding(store.reading(tx), org, user))
-      Ok(#(#(user, restored, token, onboarding), []))
+      Ok(#(user, restored, token, onboarding))
     })
   case outcome {
     Ok(#(user, restored, token, onboarding)) ->

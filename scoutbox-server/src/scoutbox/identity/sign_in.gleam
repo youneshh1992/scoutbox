@@ -190,7 +190,7 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
           let read = store.reading(tx)
           use user <- result.try(staff.by_org_and_name(read, org.id, raw_name))
           case user {
-            Some(user) if user.removed_at != None -> Ok(#(Removed, []))
+            Some(user) if user.removed_at != None -> Ok(Removed)
             _ -> {
               use user <- result.try(second_factor(ctx, tx, user, body, now))
               use user <- result.try(provision(tx, org, user, name, body, now))
@@ -200,7 +200,7 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
                 now,
               ))
               use certified <- result.try(orgs.safeguarding_certified(read, org))
-              Ok(#(SignedIn(user, token, certified), []))
+              Ok(SignedIn(user, token, certified))
             }
           }
         })

@@ -1,11 +1,11 @@
-//// `notify` returns the push it asks for as an effect, so what an act would push is asserted here directly; the
-//// unit sends it only once it commits.
+//// `notify` asks for its push with `store.emit`; `store.unit_effects` hands back what a unit asked for, so what
+//// an act would push is asserted here directly. The unit sends it only once it commits.
 
 import gleam/erlang/process
 import gleam/option.{Some}
 import gleam/result
-import scoutbox/app.{type Effect, SendPush}
 import scoutbox/messaging/notifications
+import scoutbox/platform/effect.{type Effect, SendPush}
 import scoutbox/platform/store
 import scoutbox/support
 import scoutbox/vocab/audience
@@ -14,9 +14,9 @@ import sqlight
 /// An adult in the demo seed with no quiet hours: a notice to them is pushed at once.
 const adult = "pl-adeyemi"
 
-fn notice(s: store.Store(Effect), text: String) -> List(Effect) {
-  let assert Ok(pushes) =
-    store.unit(s, fn(tx) {
+fn notice(s: store.Store, text: String) -> List(Effect) {
+  let assert Ok(#(Nil, pushes)) =
+    store.unit_effects(s, fn(tx) {
       notifications.notify(
         tx,
         to: audience.Player,
@@ -26,7 +26,6 @@ fn notice(s: store.Store(Effect), text: String) -> List(Effect) {
         ref_id: Some("chan-test"),
         at: 2_000_000_000_000,
       )
-      |> result.map(fn(pushes) { #(pushes, pushes) })
     })
   pushes
 }
@@ -66,7 +65,7 @@ pub fn a_muted_category_asks_for_no_push_test() {
         "INSERT INTO notification_pref_categories (audience_kind, audience_id, category, enabled) VALUES ('player', ?, 'messages', 0)",
         [sqlight.text(adult)],
       )
-      |> result.map(fn(_) { #(Nil, []) })
+      |> result.replace(Nil)
     })
   assert notice(s, "Synthetic message.") == []
 }
@@ -89,6 +88,17 @@ pub fn the_push_is_sent_after_commit_and_never_by_a_refused_unit_test() {
     })
   assert refused == Error(store.Refused("no"))
   assert process.receive(sent, 50) == Error(Nil)
-  let _ = notice(s, "Kept.")
+  let assert Ok(Nil) =
+    store.unit(s, fn(tx) {
+      notifications.notify(
+        tx,
+        to: audience.Player,
+        id: adult,
+        type_: "message",
+        text: "Kept.",
+        ref_id: Some("chan-test"),
+        at: 2_000_000_000_000,
+      )
+    })
   let assert Ok(SendPush(body: "Kept.", ..)) = process.receive(sent, 100)
 }

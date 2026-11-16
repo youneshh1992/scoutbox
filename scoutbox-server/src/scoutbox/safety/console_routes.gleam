@@ -127,10 +127,7 @@ pub fn moderation(ctx: Ctx, req: Request) -> Response {
 /// `POST /admin/blocks/:id/lift`: the row is deleted (Q5, docs/decisions.md).
 pub fn lift(ctx: Ctx, req: Request, id: String) -> Response {
   use Nil <- http.body(req, input.nothing(), [])
-  let outcome =
-    store.unit(ctx.store, fn(tx) {
-      audit.lift_block(tx, id) |> result.map(fn(b) { #(b, []) })
-    })
+  let outcome = store.unit(ctx.store, fn(tx) { audit.lift_block(tx, id) })
   case outcome {
     Ok(Some(block)) ->
       http.json(200, json.object([#("lifted", audit.block_view(block))]))
@@ -200,8 +197,8 @@ pub fn resolve(ctx: Ctx, req: Request, id: String) -> Response {
                 reports.OrgUser -> Some(audience.OrgUser)
                 reports.System -> None
               }
-              use pushes <- result.map(case reporter {
-                None -> Ok([])
+              use _ <- result.map(case reporter {
+                None -> Ok(Nil)
                 Some(kind) ->
                   notifications.notify(
                     tx,
@@ -213,7 +210,7 @@ pub fn resolve(ctx: Ctx, req: Request, id: String) -> Response {
                     at: now,
                   )
               })
-              #(r, pushes)
+              r
             })
           case resolved {
             Ok(r) -> http.json(200, audit.report_view(r))
@@ -346,7 +343,7 @@ pub fn verification(ctx: Ctx, req: Request, id: String) -> Response {
       use found <- result.try(orgs.by_id(read, org.id))
       let assert Some(updated) = found as "the organisation is still there"
       use view <- result.map(org_standing(read, updated))
-      #(view, [])
+      view
     })
   case updated {
     Ok(view) -> http.json(200, view)
@@ -370,33 +367,30 @@ pub fn metrics(ctx: Ctx) -> Response {
       use webhook <- result.try(audit.ops_count(read, ops_events.WebhookFailed))
       use backlog <- result.try(dispatches.backlog_count(read))
       use newest <- result.map(audit.ops_newest(read, 50))
-      #(
-        json.object([
-          #("deliveryFailures", json.int(delivery)),
-          #("webhookFailures", json.int(webhook)),
-          #("dispatchBacklog", json.int(backlog)),
-          #("webhookBacklog", json.int(0)),
-          #(
-            "opsEvents",
-            json.array(newest, fn(e) {
-              json.object([
-                #("id", json.string(e.id)),
-                #("at", json.int(e.occurred_at)),
-                #("kind", json.string(ops_events.kind_to_string(e.kind))),
-                #("detail", json.null()),
-              ])
-            }),
+      json.object([
+        #("deliveryFailures", json.int(delivery)),
+        #("webhookFailures", json.int(webhook)),
+        #("dispatchBacklog", json.int(backlog)),
+        #("webhookBacklog", json.int(0)),
+        #(
+          "opsEvents",
+          json.array(newest, fn(e) {
+            json.object([
+              #("id", json.string(e.id)),
+              #("at", json.int(e.occurred_at)),
+              #("kind", json.string(ops_events.kind_to_string(e.kind))),
+              #("detail", json.null()),
+            ])
+          }),
+        ),
+        #("verification", verification),
+        #(
+          "note",
+          json.string(
+            "Counters cover this process since boot. Local development metrics — not a production SLA measurement.",
           ),
-          #("verification", verification),
-          #(
-            "note",
-            json.string(
-              "Counters cover this process since boot. Local development metrics — not a production SLA measurement.",
-            ),
-          ),
-        ]),
-        [],
-      )
+        ),
+      ])
     })
   case found {
     Ok(body) -> http.json(200, body)

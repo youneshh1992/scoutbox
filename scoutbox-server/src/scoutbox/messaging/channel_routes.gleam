@@ -297,7 +297,7 @@ fn post(
         None -> Ok(None)
       })
       case dup {
-        Some(m) -> Ok(#(m, []))
+        Some(m) -> Ok(m)
         None -> {
           use m <- result.try(channels.append(
             tx,
@@ -332,7 +332,7 @@ fn post(
               at: now,
             )
           }
-          use pushes <- result.map(case sender.kind {
+          use _ <- result.map(case sender.kind {
             audience.OrgUser -> {
               let recipient = case c.counterparty {
                 party.Guardian -> #(audience.Guardian, c.guardian_id)
@@ -348,7 +348,7 @@ fn post(
                       <> option.unwrap(c.scout_role, "null")
                       <> ") sent a message.",
                   )
-                #(_, None) -> Ok([])
+                #(_, None) -> Ok(Nil)
               }
             }
             _ -> {
@@ -363,7 +363,7 @@ fn post(
                   }
                 None -> writers
               }
-              notifications.each(staff, fn(uid) {
+              list.try_each(staff, fn(uid) {
                 notice(
                   audience.OrgUser,
                   uid,
@@ -375,7 +375,7 @@ fn post(
               })
             }
           })
-          #(m, pushes)
+          m
         }
       }
     })
@@ -389,10 +389,7 @@ fn mark_read(ctx: Ctx, req: Request, t: Thread, side: Side) -> Response {
   use _ <- http.body(req, input.nothing(), [])
   let now = clock.now_ms()
   case
-    store.unit(ctx.store, fn(tx) {
-      channels.mark_read(tx, t.row.id, side, now)
-      |> result.map(fn(r) { #(r, []) })
-    })
+    store.unit(ctx.store, fn(tx) { channels.mark_read(tx, t.row.id, side, now) })
   {
     Ok(#(org, counterparty)) ->
       http.json(

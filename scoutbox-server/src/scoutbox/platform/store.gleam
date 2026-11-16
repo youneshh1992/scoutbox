@@ -3,8 +3,10 @@
 //// - Writes need a `Tx` and only `unit` makes one, so a write outside a transaction does not compile.
 //// - Reads take a `Read`: a unit's own connection (it sees the unit's writes) or a pooled read-only connection
 ////   (it sees the last commit, and SQLite refuses a write on it).
-//// - Work returns its side effects as data. They are dispatched in the caller's process after COMMIT, so a slow
-////   provider never holds the writer, and a refused unit sends nothing.
+//// - Side effects are data (`effect.Effect`), asked for with `emit` from anywhere inside a unit, at any depth.
+////   The unit collects them like its writes: they are dispatched in order, in the caller's process, after COMMIT
+////   (so a slow provider never holds the writer), and a refused or crashed unit sends none. Nothing has to pass
+////   them up, so nothing can drop one. A `Read` has no collector: a read cannot ask for an effect.
 //// - Each unit runs in a fresh process the writer monitors. If the work crashes (a `panic`, a failed
 ////   `let assert`), the writer sees the process go down, rolls back and carries on with the next unit.
 
@@ -15,10 +17,21 @@ import gleam/list
 import gleam/otp/actor
 import gleam/result
 import gleam/string
+import scoutbox/platform/effect.{type Effect}
 import sqlight
 
 pub opaque type Tx {
-  Tx(conn: sqlight.Connection, should_fail: fn(String) -> Bool)
+  Tx(
+    conn: sqlight.Connection,
+    should_fail: fn(String) -> Bool,
+    /// The unit's effects, in the order asked for. Owned by the unit's process, which drains it on success.
+    effects: Subject(Effect),
+  )
+}
+
+/// Asks for `effect` once this unit commits. A refused or crashed unit sends none.
+pub fn emit(tx: Tx, effect: Effect) -> Nil {
+  process.send(tx.effects, effect)
 }
 
 pub opaque type Read {
@@ -56,12 +69,12 @@ pub type UnitError(e) {
   TimedOut
 }
 
-pub opaque type Store(effect) {
+pub opaque type Store {
   Store(
     writer: Subject(Job),
     writer_pid: Pid,
     readers: List(Subject(Job)),
-    dispatch: fn(effect) -> Nil,
+    dispatch: fn(Effect) -> Nil,
     timeout: Int,
     /// The development fault layer's `internal:<step>` rules: whether a named step fails now.
     should_fail: fn(String) -> Bool,
@@ -77,8 +90,8 @@ type Job {
 pub fn open(
   path path: String,
   readers readers: Int,
-  dispatch dispatch: fn(effect) -> Nil,
-) -> Result(Store(effect), String) {
+  dispatch dispatch: fn(Effect) -> Nil,
+) -> Result(Store, String) {
   use #(writer_pid, writer) <- result.try(start_connection("file:" <> path))
   use readers <- result.try(
     list.repeat(Nil, readers)
@@ -100,10 +113,7 @@ pub fn open(
 }
 
 /// The same store with effects sent somewhere else: the dispatcher usually needs the store itself.
-pub fn with_dispatch(
-  store: Store(effect),
-  dispatch: fn(effect) -> Nil,
-) -> Store(effect) {
+pub fn with_dispatch(store: Store, dispatch: fn(Effect) -> Nil) -> Store {
   Store(..store, dispatch:)
 }
 
@@ -132,10 +142,7 @@ fn start_connection(uri: String) -> Result(#(Pid, Subject(Job)), String) {
 
 /// The same store with the fault layer's seams: `should_fail(step)` says whether a named step inside a unit
 /// fails now (always false in production).
-pub fn with_seams(
-  store: Store(effect),
-  should_fail: fn(String) -> Bool,
-) -> Store(effect) {
+pub fn with_seams(store: Store, should_fail: fn(String) -> Bool) -> Store {
   Store(..store, should_fail:)
 }
 
@@ -156,11 +163,31 @@ pub fn seam(tx: Tx, step: String) -> Result(Nil, Fail(e)) {
 }
 
 /// Runs `work` as one write transaction: everything it writes commits together or not at all. On success the
-/// effects it returned are dispatched, in order, after COMMIT.
+/// effects it asked for (`emit`) are dispatched, in order, after COMMIT.
 pub fn unit(
-  store: Store(effect),
-  work: fn(Tx) -> Result(#(a, List(effect)), Fail(e)),
+  store: Store,
+  work: fn(Tx) -> Result(a, Fail(e)),
 ) -> Result(a, UnitError(e)) {
+  use #(value, effects) <- result.map(attempt(store, work))
+  // `internal:unit.after_commit`: the unit's first after-commit step fails after its data committed; the act's
+  // own effects still go out, as each after-commit step is isolated.
+  let _ = store.should_fail("unit.after_commit")
+  list.each(effects, store.dispatch)
+  value
+}
+
+/// `unit`, but the effects the committed unit asked for are returned instead of dispatched: what a test asserts.
+pub fn unit_effects(
+  store: Store,
+  work: fn(Tx) -> Result(a, Fail(e)),
+) -> Result(#(a, List(Effect)), UnitError(e)) {
+  attempt(store, work)
+}
+
+fn attempt(
+  store: Store,
+  work: fn(Tx) -> Result(a, Fail(e)),
+) -> Result(#(a, List(Effect)), UnitError(e)) {
   // A unit started inside a unit would wait on its own writer forever. Joining a unit is passing its Tx.
   case process.self() == store.writer_pid {
     True -> panic as "unit() called inside a unit: pass the Tx instead"
@@ -175,14 +202,7 @@ pub fn unit(
   )
   case process.receive(reply, store.timeout) {
     Error(Nil) -> Error(TimedOut)
-    Ok(Error(e)) -> Error(e)
-    Ok(Ok(#(value, effects))) -> {
-      // `internal:unit.after_commit`: the unit's first after-commit step fails after its data committed; the
-      // act's own effects still go out, as each after-commit step is isolated.
-      let _ = store.should_fail("unit.after_commit")
-      list.each(effects, store.dispatch)
-      Ok(value)
-    }
+    Ok(outcome) -> outcome
   }
 }
 
@@ -191,8 +211,8 @@ pub fn unit(
 fn supervise_unit(
   conn: sqlight.Connection,
   should_fail: fn(String) -> Bool,
-  work: fn(Tx) -> Result(#(a, List(effect)), Fail(e)),
-) -> Result(#(a, List(effect)), UnitError(e)) {
+  work: fn(Tx) -> Result(a, Fail(e)),
+) -> Result(#(a, List(Effect)), UnitError(e)) {
   let done = process.new_subject()
   let pid =
     process.spawn_unlinked(fn() {
@@ -219,15 +239,16 @@ fn supervise_unit(
 fn run_unit(
   conn: sqlight.Connection,
   should_fail: fn(String) -> Bool,
-  work: fn(Tx) -> Result(#(a, List(effect)), Fail(e)),
-) -> Result(#(a, List(effect)), UnitError(e)) {
+  work: fn(Tx) -> Result(a, Fail(e)),
+) -> Result(#(a, List(Effect)), UnitError(e)) {
   use _ <- result.try(
     sqlight.exec("BEGIN IMMEDIATE", conn) |> result.map_error(Database),
   )
-  let outcome = case work(Tx(conn, should_fail)) {
+  let effects = process.new_subject()
+  let outcome = case work(Tx(conn, should_fail, effects)) {
     Error(Refuse(e)) -> Error(Refused(e))
     Error(Storage(e)) -> Error(Database(e))
-    Ok(done) -> {
+    Ok(value) -> {
       // `internal:unit.sqlite_commit`: the real COMMIT fails, on a deferred foreign key left dangling on purpose.
       case should_fail("unit.sqlite_commit") {
         True -> {
@@ -245,7 +266,7 @@ fn run_unit(
       }
       sqlight.exec("COMMIT", conn)
       |> result.map_error(Database)
-      |> result.replace(done)
+      |> result.replace(#(value, drain(effects, [])))
     }
   }
   case outcome {
@@ -258,8 +279,16 @@ fn run_unit(
   outcome
 }
 
+/// The effects a unit asked for, in order. Only the unit's own process may drain them.
+fn drain(effects: Subject(Effect), acc: List(Effect)) -> List(Effect) {
+  case process.receive(effects, 0) {
+    Ok(e) -> drain(effects, [e, ..acc])
+    Error(Nil) -> list.reverse(acc)
+  }
+}
+
 /// Runs `f` on a read-only connection. It sees the last commit and cannot write.
-pub fn read(store: Store(effect), f: fn(Read) -> a) -> a {
+pub fn read(store: Store, f: fn(Read) -> a) -> a {
   let index = int.random(list.length(store.readers))
   let assert Ok(reader) = store.readers |> list.drop(index) |> list.first
   let reply = process.new_subject()
@@ -322,7 +351,7 @@ pub fn exec(tx: Tx, sql: String) -> Result(Nil, Fail(e)) {
 
 /// A connection setting on the writer, between units: SQLite ignores `PRAGMA foreign_keys` inside a
 /// transaction. Only the migration runner needs this, around a step that rebuilds a referenced table.
-pub fn writer_pragma(store: Store(effect), sql: String) -> Result(Nil, String) {
+pub fn writer_pragma(store: Store, sql: String) -> Result(Nil, String) {
   let reply = process.new_subject()
   process.send(
     store.writer,

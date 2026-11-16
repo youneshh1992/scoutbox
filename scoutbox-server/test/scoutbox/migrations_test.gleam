@@ -13,7 +13,7 @@ import scoutbox/platform/store
 import simplifile
 import sqlight
 
-fn fresh() -> store.Store(Nil) {
+fn fresh() -> store.Store {
   let dir = "build/test-dbs"
   let assert Ok(_) = simplifile.create_directory_all(dir)
   let assert Ok(s) =
@@ -25,7 +25,7 @@ fn fresh() -> store.Store(Nil) {
   s
 }
 
-fn recorded(s: store.Store(Nil)) -> List(String) {
+fn recorded(s: store.Store) -> List(String) {
   let assert Ok(ids) =
     store.read(s, store.query(
       _,
@@ -36,7 +36,7 @@ fn recorded(s: store.Store(Nil)) -> List(String) {
   ids
 }
 
-fn has_table(s: store.Store(Nil), name: String) -> Bool {
+fn has_table(s: store.Store, name: String) -> Bool {
   let assert Ok(found) =
     store.read(s, store.query(
       _,

@@ -5,7 +5,7 @@ import ewe
 import gleam/erlang/process
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Ctx, type Effect, Ctx, SendMail, SendPush}
+import scoutbox/app.{type Ctx, Ctx}
 import scoutbox/identity/sessions
 import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
@@ -13,6 +13,7 @@ import scoutbox/messaging/outbox
 import scoutbox/messaging/push
 import scoutbox/platform/clock
 import scoutbox/platform/config
+import scoutbox/platform/effect.{type Effect, SendMail, SendPush}
 import scoutbox/platform/faults
 import scoutbox/platform/limits
 import scoutbox/platform/migrations
@@ -115,13 +116,13 @@ fn sweeping(ctx: Ctx) -> Nil {
 }
 
 /// After COMMIT. A failing effect never undoes the act's data; it is logged.
-fn dispatch(store: Store(Effect), effect: Effect) -> Nil {
+fn dispatch(store: Store, effect: Effect) -> Nil {
   case effect {
     SendMail(to:, subject:, text:) -> {
       let recorded =
         store.unit(store, fn(tx) {
           outbox.append(tx, to:, subject:, text:, at: clock.now_ms())
-          |> result.map(fn(_) { #(Nil, []) })
+          |> result.replace(Nil)
         })
       case recorded {
         Ok(Nil) -> Nil
@@ -132,7 +133,7 @@ fn dispatch(store: Store(Effect), effect: Effect) -> Nil {
       let recorded =
         store.unit(store, fn(tx) {
           push.send(tx, to, id, title, body, clock.now_ms())
-          |> result.map(fn(_) { #(Nil, []) })
+          |> result.replace(Nil)
         })
       case recorded {
         Ok(Nil) -> Nil
