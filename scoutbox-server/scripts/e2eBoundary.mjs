@@ -39,7 +39,6 @@ export const NOT_YET_NEUTRAL = [
   'passport/passport',
   'passport/trustScore',
   'platform/contracts',
-  'platform/productionHardening',
   'recruitment/analytics',
   'recruitment/contacts',
   'recruitment/contactsPersistence',
