@@ -711,7 +711,8 @@ section(
   if (r.o.status === 'WITHDRAWN') {
     x = await issued(maria.token, 'pl-tanaka');
     const accepted = await pAccept(x.OID, { revisionId: x.R, clientKey: key() }, tanaka.token);
-    if (accepted.status !== 200) throw new Error(`accept ${accepted.status} ${JSON.stringify(accepted.body).slice(0, 200)}`);
+    if (accepted.status !== 200)
+      throw new Error(`accept ${accepted.status} ${JSON.stringify(accepted.body).slice(0, 200)}`);
     globalThis.__T = { RID: x.RID, OID: x.OID, R: x.R };
   }
   // decline vs withdraw — Svensson again (reopen)
