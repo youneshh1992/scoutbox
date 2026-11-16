@@ -20,6 +20,7 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/http
 import scoutbox/platform/ids
 import scoutbox/platform/input
+import scoutbox/platform/media
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/ver_claims.{type Status} as claim_row
 import scoutbox/rows/ver_events as event_row
@@ -217,6 +218,7 @@ pub fn create_claim(
     ),
     now,
   ))
+  use _ <- result.try(count(tx, "requestsCreated"))
   Ok(claim)
 }
 
@@ -389,6 +391,14 @@ pub fn transition(
             ),
             now,
           ))
+          use _ <- result.try(case to {
+            claim_row.Verified -> count(tx, "approvals")
+            claim_row.Rejected -> count(tx, "rejections")
+            claim_row.Revoked -> count(tx, "revocations")
+            claim_row.Expired -> count(tx, "expiries")
+            claim_row.Disputed -> count(tx, "disputes")
+            _ -> Ok(Nil)
+          })
           Ok(Ok(moved))
         }
       }
@@ -468,6 +478,7 @@ pub fn blank_evidence(
 /// A file sent as a data URL, checked and ready to store.
 pub type File {
   File(
+    media_id: String,
     bytes: BitArray,
     mime: evidence_row.Mime,
     sha256: String,
@@ -475,8 +486,10 @@ pub type File {
   )
 }
 
-/// A data URL's file, if it is one the evidence rules accept (storeEvidenceFile). Error: the refusal's code.
+/// A data URL's file, if it is one the evidence rules accept, stored under an id of our own (storeEvidenceFile):
+/// before the unit that records it, as the TypeScript server does. Error: the refusal's code.
 pub fn evidence_file(
+  ctx: Ctx,
   data_url: String,
   filename: Option(String),
 ) -> Result(File, String) {
@@ -499,7 +512,17 @@ pub fn evidence_file(
             None -> {
               let assert Ok(m) = list.key_find(evidence_row.mime_pairs, mime)
                 as "an accepted file has an accepted type"
+              let media_id =
+                "vfil-"
+                <> string.lowercase(
+                  bit_array.base16_encode(crypto.strong_random_bytes(8)),
+                )
+              // A file the disk refuses is a broken store, not the sender's fault.
+              let assert Ok(Nil) =
+                media.save(ctx.config.data_dir, media_id, mime, bytes)
+                as "the media directory accepts files"
               Ok(File(
+                media_id:,
                 bytes:,
                 mime: m,
                 sha256: string.lowercase(
@@ -515,11 +538,11 @@ pub fn evidence_file(
   }
 }
 
-/// The fields a stored file sets on its evidence record. Not ported yet: the bytes themselves go to media
-/// storage (uploads are out of this slice's scope), so only their digest, type and size are kept.
+/// The fields a stored file sets on its evidence record.
 pub fn with_file(ev: Evidence, file: File) -> Evidence {
   evidence_row.Row(
     ..ev,
+    media_id: Some(file.media_id),
     sha256: Some(file.sha256),
     mime: Some(file.mime),
     bytes: Some(bit_array.byte_size(file.bytes)),
@@ -984,4 +1007,44 @@ pub fn look(
 /// A storage failure inside an act keeps its meaning; an act's own refusals are responses.
 pub fn storage(r: Result(a, Fail(e))) -> Result(a, Fail(Response)) {
   store.map_refusal(r, fn(_) { http.error(500, "INTERNAL") })
+}
+
+// ------------------------------------------------------------------------------------------------ metrics
+
+/// The verification counters `/admin/metrics` shows, in its order: counts only, never names or e-mails.
+pub const metric_names = [
+  "requestsCreated", "autoPrechecksPassed", "routedToHumanReview", "approvals",
+  "rejections", "disputes", "expiries", "revocations", "emailChallengeFailures",
+]
+
+const metrics_table =
+  "CREATE TEMP TABLE IF NOT EXISTS ver_metrics (name TEXT PRIMARY KEY, n INTEGER NOT NULL)"
+
+/// Counts one occurrence. The counters live for the process, like the TypeScript server's in-memory ones: in a
+/// temporary table of the writer's connection, so they are not part of the schema, start at zero on every boot,
+/// and a refused act's count rolls back with it.
+pub fn count(tx: Tx, metric: String) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(store.exec(tx, metrics_table))
+  store.run(
+    tx,
+    "INSERT INTO ver_metrics (name, n) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET n = n + 1",
+    [sqlight.text(metric)],
+  )
+}
+
+/// The counters, read on the writer's connection, which holds them.
+pub fn metrics(tx: Tx) -> Result(Json, Fail(e)) {
+  use _ <- result.try(store.exec(tx, metrics_table))
+  use rows <- result.map(
+    store.query(store.reading(tx), "SELECT name, n FROM ver_metrics", [], {
+      use name <- decode.field(0, decode.string)
+      use n <- decode.field(1, decode.int)
+      decode.success(#(name, n))
+    }),
+  )
+  json.object(
+    list.map(metric_names, fn(name) {
+      #(name, json.int(list.key_find(rows, name) |> result.unwrap(0)))
+    }),
+  )
 }

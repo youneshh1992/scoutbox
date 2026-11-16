@@ -300,7 +300,7 @@ fn add_evidence(
 ) -> Response {
   let note = input.filled(body.note)
   let file = case body.data_url {
-    Some(url) if url != "" -> Some(core.evidence_file(url, body.filename))
+    Some(url) if url != "" -> Some(core.evidence_file(ctx, url, body.filename))
     _ -> None
   }
   case file, note {
@@ -568,8 +568,8 @@ pub fn route_claim(
       review_reasons: Some(review.reasons),
     )
   case review.decision {
-    claims.RequiresHumanReview ->
-      apply_status(
+    claims.RequiresHumanReview -> {
+      use _ <- result.try(apply_status(
         tx,
         claim.id,
         claim_row.RequiresHumanReview,
@@ -577,9 +577,11 @@ pub fn route_claim(
         None,
         record,
         now,
-      )
-      |> result.replace(Nil)
+      ))
+      core.count(tx, "routedToHumanReview")
+    }
     claims.CanAutoComplete -> {
+      use _ <- result.try(core.count(tx, "autoPrechecksPassed"))
       use _ <- result.try(apply_status(
         tx,
         claim.id,
@@ -839,6 +841,7 @@ pub fn confirm_work_email(
         access.user.id,
         token_row.WorkEmail,
       ))
+      use _ <- result.try(core.count(tx, "emailChallengeFailures"))
       reply(http.error(
         case code {
           "TOKEN_EXPIRED" -> 410
@@ -1067,6 +1070,7 @@ pub fn open_dispute(
     core.About(..core.claim_about(claim), reason: Some(reason)),
     now,
   ))
+  use _ <- result.try(core.count(tx, "disputes"))
   reply(http.json(
     201,
     json.object([

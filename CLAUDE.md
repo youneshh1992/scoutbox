@@ -29,7 +29,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
     blocks the run that would write it. Regenerate before using a new column or table.
   - A domain record that is a generated `Row` is a type alias: its constructor can't be matched through the alias.
     Match with a guard (`Some(u) if u.removed_at != None`) or the row module's constructor.
-  - Function calls are not allowed in case guards.
+  - Function calls are not allowed in case guards, nor constructors with a non-constant argument
+    (`if x == Some(user.id)`): bind the value first (`let me = Some(user.id)`).
+  - `|>` binds looser than `<>`: `"a" <> x |> f <> "b"` pipes the whole left side. Call `f(x)` instead.
+  - A unit runs in the writer's process: read the request body before it (`http.parse_body`), never inside.
   - Two vocabularies of one table that share a value get prefixed constructors (`reports.TargetKindPlayer`).
   - Imports go at the top of a module; when a need turns up mid-file, add the import there, don't wrap the
     function. The stdlib already has `list.try_map`, `string.join` and friends: look before writing one.
@@ -43,8 +46,10 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 - A rule the TypeScript server has (in `domain.ts` and similar) is proved against it with cases generated from the
   TypeScript rule itself (`dev/*_cases.mjs` writes `test/fixtures/`). `dev/shape_diff.mjs` compares whole responses.
 - A battery's checks of the rules themselves live in the TypeScript tree's `scripts/rules/<domain>/<battery>.mjs`.
-  `npm run cases` records their calls to the rules; `dev/battery_cases/report.json` lists each function's cases still
-  to be generated and the calls to port by hand (`npm run cases:check` fails when it is stale).
+  `npm run cases` records their calls to the rules (with the clock frozen); `dev/battery_cases/map.mjs` maps each
+  ported rule to its Gleam and generates a gleeunit test per call into `test/scoutbox/battery/` (never edit those).
+  `dev/battery_cases/report.json` lists each function's cases (generated or pending) and the calls to port by hand,
+  which go in `test/scoutbox/<domain>/`. `npm run cases:check` (part of `e2e:check`) fails when any of it is stale.
 
 ## Server rules (as in the TypeScript server, enforced by types where possible)
 

@@ -3,11 +3,13 @@
 import exception
 import gleam/http.{Get, Post, Put}
 import gleam/json
+import gleam/regexp
 import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/development/record_routes as record
 import scoutbox/discovery/directory
 import scoutbox/discovery/player_routes as discovery
+import scoutbox/enterprise/audit_export
 import scoutbox/identity/access
 import scoutbox/identity/guardian_routes
 import scoutbox/identity/invite_routes
@@ -32,8 +34,10 @@ import scoutbox/safety/console_routes as console
 import scoutbox/safety/report_routes
 import scoutbox/verification/applications
 import scoutbox/verification/console_routes as verification_console
+import scoutbox/verification/invite_routes as invites
 import scoutbox/verification/org_admin_routes as org_admin
 import scoutbox/verification/personal_routes as personal
+import scoutbox/verification/reference_routes as references
 import scoutbox/verification/review_routes as review
 import scoutbox/vocab/audience
 import wisp.{type Request, type Response}
@@ -44,6 +48,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["health"] -> only(req, Get, fn() { health(ctx) })
     ["healthz"] -> only(req, Get, fn() { healthz(ctx) })
     ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
+    ["media", id] -> only(req, Get, fn() { media_file(id) })
     ["auth", ..rest] -> {
       use <- auth_limit(ctx, req)
       case rest {
@@ -74,6 +79,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       use org <- access.org_session(ctx, req)
       case rest {
         ["verification", ..path] -> verification_org(ctx, req, org, path)
+        ["audit", "export"] ->
+          only(req, Get, fn() { audit_export.export(ctx, org) })
         ["staff"] -> only(req, Get, fn() { staff_routes.list(ctx, org) })
         ["staff", user_id, "remove"] ->
           only(req, Post, fn() { staff_routes.remove(ctx, org, user_id) })
@@ -136,6 +143,9 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["export"] -> only(req, Get, fn() { player_routes.export(ctx, player) })
         ["verification", "org", id] ->
           only(req, Get, fn() { personal.public_org(ctx, id) })
+        ["invites", "accept"] ->
+          only(req, Post, fn() { invites.player_accept(ctx, req, player) })
+        ["references"] -> only(req, Get, fn() { references.mine(ctx, player) })
         ["me"] -> only(req, Get, fn() { record.me(player) })
         ["availability"] ->
           only(req, Post, fn() { record.availability(ctx, req, player) })
@@ -160,9 +170,17 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["verification", "org", id] ->
           only(req, Get, fn() { personal.public_org(ctx, id) })
+        ["invites", "accept"] ->
+          only(req, Post, fn() { invites.guardian_accept(ctx, req, guardian) })
+        ["children", id, "references"] ->
+          only(req, Get, fn() { references.child(ctx, guardian, id) })
         ["me"] -> only(req, Get, fn() { guardian_routes.me(guardian) })
         ["children"] ->
-          only(req, Get, fn() { guardian_routes.children(ctx, guardian) })
+          case req.method {
+            Get -> guardian_routes.children(ctx, guardian)
+            Post -> player_routes.create_child(ctx, req, guardian)
+            _ -> not_found()
+          }
         ["children", id, "availability"] ->
           only(req, Post, fn() {
             record.child_availability(ctx, req, guardian, id)
@@ -311,6 +329,22 @@ fn verification_org(
       only(req, Get, fn() { verification_console.staff_register(ctx, req, org) })
     ["staff", id, "departed"] ->
       only(req, Post, fn() { verification_console.departed(ctx, req, org, id) })
+    ["references"] ->
+      case req.method {
+        Get -> references.list_for_org(ctx, org)
+        Post -> references.create(ctx, req, org)
+        _ -> not_found()
+      }
+    ["references", id, "withdraw"] ->
+      only(req, Post, fn() { references.withdraw(ctx, req, org, id) })
+    ["references", id, "correct"] ->
+      only(req, Post, fn() { references.correct(ctx, req, org, id) })
+    ["player-invites"] ->
+      case req.method {
+        Get -> invites.list_invites(ctx, org)
+        Post -> invites.create(ctx, req, org)
+        _ -> not_found()
+      }
     ["licence-providers"] ->
       only(req, Get, fn() { review.licence_providers(ctx) })
     ["licence"] -> only(req, Post, fn() { review.new_licence(ctx, req, org) })
@@ -387,6 +421,30 @@ fn auth_limit(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
             json.string("Too many attempts — wait a minute and try again."),
           ),
           #("retryAfterMs", json.int(retry_after)),
+        ]),
+      )
+  }
+}
+
+/// `GET /media/:id`. Not ported yet: signed media links and the media their owners and the organisations that
+/// may see them can fetch (uploads are out of this slice's scope). Until then no request is authorised, which is
+/// the TypeScript server's answer for every file this server stores: verification evidence, which is never on a
+/// public path.
+fn media_file(id: String) -> Response {
+  let assert Ok(shape) = regexp.from_string("^[a-zA-Z0-9-]+$")
+  case regexp.check(shape, id) {
+    False -> contract.error(400, "BAD_MEDIA_ID")
+    True ->
+      contract.json(
+        401,
+        json.object([
+          #("error", json.string("MEDIA_AUTH_REQUIRED")),
+          #(
+            "message",
+            json.string(
+              "Media links are short-lived and tied to your login — refetch the profile for a fresh link.",
+            ),
+          ),
         ]),
       )
   }

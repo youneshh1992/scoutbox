@@ -611,10 +611,14 @@ pub fn confirm_email(ctx: Ctx, req: Request, id: String) -> Response {
       ))
       let own = Some(a.id)
       case peek {
-        Error(code) -> reply(http.error(401, code))
+        Error(code) -> {
+          use _ <- result.try(core.count(tx, "emailChallengeFailures"))
+          reply(http.error(401, code))
+        }
         Ok(t) if t.ref_id != own -> {
           // A code for another application is spent and refused.
           use _ <- result.try(records.use_token(tx, t.id, now))
+          use _ <- result.try(core.count(tx, "emailChallengeFailures"))
           reply(http.error(401, "TOKEN_WRONG_PURPOSE"))
         }
         Ok(t) -> {
@@ -661,7 +665,7 @@ pub fn evidence(ctx: Ctx, req: Request, id: String) -> Response {
   let now = clock.now_ms()
   let note = input.filled(note)
   let file = case data_url {
-    Some(url) if url != "" -> Some(core.evidence_file(url, filename))
+    Some(url) if url != "" -> Some(core.evidence_file(ctx, url, filename))
     _ -> None
   }
   use tx <- act(ctx)
@@ -812,6 +816,7 @@ pub fn submit(ctx: Ctx, req: Request, id: String) -> Response {
         ),
         now,
       ))
+      use _ <- result.try(core.count(tx, "routedToHumanReview"))
       reply(http.json(
         200,
         json.object([

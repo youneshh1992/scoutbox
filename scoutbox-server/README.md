@@ -1,10 +1,12 @@
 # scoutbox-server (Gleam)
 
-A Gleam port of three slices of the ScoutBox server: organisation staff (sign-in, sessions, invitations, MFA), the
-safeguarding core (reports, blocks, moderation, the Trust & Safety console, the Discovery Ledger) and players and
-guardians (sign-up, the player record, the directory, guardians and their children). It answers three of the
-TypeScript server's e2e batteries unchanged: `platform/staff`, `platform/safeguarding` and
-`platform/playersAndGuardians`.
+A Gleam port of four slices of the ScoutBox server: organisation staff (sign-in, sessions, invitations, MFA), the
+safeguarding core (reports, blocks, moderation, the Trust & Safety console, the Discovery Ledger), players and
+guardians (sign-up, the player record, the directory, guardians and their children), and verification (claims and
+their review, organisation applications, domains, the administrator hierarchy, squad invitations, coach
+references). It answers five of the TypeScript server's e2e batteries unchanged: `platform/staff`,
+`platform/safeguarding`, `platform/playersAndGuardians`, `verification/organisationsAndStaff` and
+`verification/organisationsAndStaffAdversarial`.
 
 ```sh
 gleam check            # type-check (fast)
@@ -12,7 +14,9 @@ gleam test             # unit tests, the generator's snapshots, and the rules pr
 gleam run              # the server on PORT (default 4000), data in DATA_DIR (default ./data)
 npm run e2e            # build the Erlang release, then run the batteries against it
 npm run e2e:sync       # re-copy the batteries from ../../scoutbox/scoutbox-server/e2e
-npm run e2e:check      # fail if a copied battery differs from its source
+npm run e2e:check      # fail if a copied battery or a generated rule test differs from its source
+npm run cases          # record the TypeScript rules suites' calls; write dev/battery_cases/report.json and the
+                       # generated tests in test/scoutbox/battery/ (mapping: dev/battery_cases/map.mjs)
 npm run codegen        # regenerate src/scoutbox/rows and src/scoutbox/vocab from priv/migrations
 npm run codegen:check  # fail if the committed row modules differ from what the migrations generate
 ```
@@ -32,7 +36,9 @@ Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY`
   migrations, limits, config.
 - `src/scoutbox/rules/`: the pure rules, each proved against the TypeScript one: `age`, `visibility` (one SQL
   expression for every read), `moderation`, `journey`; `time_zones` is generated.
-- `src/scoutbox/identity/`, `safety/`, `discovery/`, `recruitment/`, `development/`, `messaging/`: the domains.
+- `src/scoutbox/identity/`, `safety/`, `discovery/`, `recruitment/`, `development/`, `messaging/`,
+  `verification/`, `enterprise/`: the domains. `verification/claims` holds the pure rules, proved by the generated
+  tests in `test/scoutbox/battery/verification/`.
 - `priv/migrations/`: the tables, copied from the TypeScript server's migrated schema. `priv/seed.sql`: its demo
   seed, dumped by `dev/seed_sql.mjs`.
 - `dev/`: the generator, and the Node scripts that take data from the TypeScript server: `seed_sql.mjs`,
@@ -55,6 +61,7 @@ Every route below is exercised by a battery, except where marked.
 | Player | `GET /player/me`, `/player/export`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/stats`, `/badges`, `/prefs` |
 | Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
 | Feeds | `GET /guardian/notifications`; `/player/notifications`, `/org/notifications` (no battery) |
+| Verification | `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).

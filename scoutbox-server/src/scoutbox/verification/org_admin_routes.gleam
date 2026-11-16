@@ -466,10 +466,14 @@ pub fn confirm_domain(
           ))
           let own = Some(r.id)
           case peek {
-            Error(code) -> reply(http.error(401, code))
+            Error(code) -> {
+              use _ <- result.try(core.count(tx, "emailChallengeFailures"))
+              reply(http.error(401, code))
+            }
             Ok(t) if t.ref_id != own -> {
               // A valid code for another request is spent.
               use _ <- result.try(records.use_token(tx, t.id, now))
+              use _ <- result.try(core.count(tx, "emailChallengeFailures"))
               reply(http.error(401, "TOKEN_WRONG_PURPOSE"))
             }
             Ok(t) -> {

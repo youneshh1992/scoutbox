@@ -464,6 +464,16 @@ pub fn create(tx: Tx, new: NewPlayer) -> Result(Player, Fail(e)) {
       complete: False,
     )
   use _ <- result.try(row.insert(tx, row.Row(..base, profile_signal: signal)))
+  // A child is created with its primary guardian's link in the same transaction.
+  use _ <- result.try(case new.guardian_id {
+    Some(guardian_id) ->
+      store.run(
+        tx,
+        "INSERT INTO guardian_children (guardian_id, player_id, role) VALUES (?, ?, 'primary')",
+        [sqlight.text(guardian_id), sqlight.text(id)],
+      )
+    None -> Ok(Nil)
+  })
   use found <- result.map(by_id(store.reading(tx), id))
   let assert Some(p) = found as "a player reads back once inserted"
   p

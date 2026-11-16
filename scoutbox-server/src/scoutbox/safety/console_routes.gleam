@@ -22,6 +22,7 @@ import scoutbox/rows/moderation_log
 import scoutbox/rows/ops_events
 import scoutbox/rows/reports
 import scoutbox/safety/audit
+import scoutbox/verification/core as verification_core
 import scoutbox/verification/review_routes as verification_review
 import scoutbox/vocab/audience
 import wisp.{type Request, type Response}
@@ -344,37 +345,44 @@ pub fn verification(ctx: Ctx, req: Request, id: String) -> Response {
 /// Not ported yet: the process's request counters (platform metrics), the dispatch backlog (messaging) and the
 /// webhook backlog (integrations). An operations event's detail fields arrive with the events that write them.
 pub fn metrics(ctx: Ctx) -> Response {
+  // On the writer: it holds the verification counters (verification/core `count`).
   let found =
-    store.read(ctx.store, fn(read) {
+    store.unit(ctx.store, fn(tx) {
+      let read = store.reading(tx)
+      use verification <- result.try(verification_core.metrics(tx))
       use delivery <- result.try(audit.ops_count(
         read,
         ops_events.DeliveryFailed,
       ))
       use webhook <- result.try(audit.ops_count(read, ops_events.WebhookFailed))
       use newest <- result.map(audit.ops_newest(read, 50))
-      json.object([
-        #("deliveryFailures", json.int(delivery)),
-        #("webhookFailures", json.int(webhook)),
-        #("dispatchBacklog", json.int(0)),
-        #("webhookBacklog", json.int(0)),
-        #(
-          "opsEvents",
-          json.array(newest, fn(e) {
-            json.object([
-              #("id", json.string(e.id)),
-              #("at", json.int(e.occurred_at)),
-              #("kind", json.string(ops_events.kind_to_string(e.kind))),
-              #("detail", json.null()),
-            ])
-          }),
-        ),
-        #(
-          "note",
-          json.string(
-            "Counters cover this process since boot. Local development metrics — not a production SLA measurement.",
+      #(
+        json.object([
+          #("deliveryFailures", json.int(delivery)),
+          #("webhookFailures", json.int(webhook)),
+          #("dispatchBacklog", json.int(0)),
+          #("webhookBacklog", json.int(0)),
+          #(
+            "opsEvents",
+            json.array(newest, fn(e) {
+              json.object([
+                #("id", json.string(e.id)),
+                #("at", json.int(e.occurred_at)),
+                #("kind", json.string(ops_events.kind_to_string(e.kind))),
+                #("detail", json.null()),
+              ])
+            }),
           ),
-        ),
-      ])
+          #("verification", verification),
+          #(
+            "note",
+            json.string(
+              "Counters cover this process since boot. Local development metrics — not a production SLA measurement.",
+            ),
+          ),
+        ]),
+        [],
+      )
     })
   case found {
     Ok(body) -> http.json(200, body)

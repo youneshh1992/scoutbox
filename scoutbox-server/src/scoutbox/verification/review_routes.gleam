@@ -3,6 +3,7 @@
 //// The admin surface may authenticate with one shared key, which identifies no individual. A request may declare
 //// its reviewer in headers; with none declared, events say `shared_admin_key` rather than invent a person.
 
+import gleam/bit_array
 import gleam/bool
 import gleam/dynamic/decode
 import gleam/int
@@ -21,6 +22,7 @@ import scoutbox/platform/config
 import scoutbox/platform/http
 import scoutbox/platform/ids
 import scoutbox/platform/input
+import scoutbox/platform/media
 import scoutbox/platform/store
 import scoutbox/platform/temporal
 import scoutbox/rows/ver_admins as admin_row
@@ -339,7 +341,7 @@ pub fn new_licence(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
   let expires = option.map(body.expiry, temporal.end)
   let issued = option.map(body.issue_date, temporal.start)
   let file = case body.data_url {
-    Some(url) if url != "" -> Some(core.evidence_file(url, body.filename))
+    Some(url) if url != "" -> Some(core.evidence_file(ctx, url, body.filename))
     _ -> None
   }
   case missing, issued, expires, file {
@@ -783,7 +785,6 @@ fn registry_checked(
 // ------------------------------------------------------------------------------------------- evidence access
 
 /// `GET /admin/verification/evidence/:id`: Trust & Safety sees everything, every read logged.
-/// Not ported yet: the file itself (`file`), which lives in media storage (uploads are out of this slice).
 pub fn admin_evidence(ctx: Ctx, req: Request, evidence_id: String) -> Response {
   let now = clock.now_ms()
   let _ = req
@@ -818,7 +819,20 @@ pub fn admin_evidence(ctx: Ctx, req: Request, evidence_id: String) -> Response {
       ))
       reply(http.json(
         200,
-        json.object([#("evidence", record), #("file", json.null())]),
+        json.object([
+          #("evidence", record),
+          #(
+            "file",
+            case option.map(ev.media_id, media.read(ctx.config.data_dir, _)) {
+              Some(Ok(#(content_type, bytes))) ->
+                json.object([
+                  #("mime", json.string(content_type)),
+                  #("base64", json.string(bit_array.base64_encode(bytes, True))),
+                ])
+              _ -> json.null()
+            },
+          ),
+        ]),
       ))
     }
   }

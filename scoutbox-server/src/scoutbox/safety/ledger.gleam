@@ -169,3 +169,16 @@ pub fn view(l: row.Row) -> Json {
     #("detail", json.null()),
   ])
 }
+
+/// An organisation's whole ledger, oldest first: its audit export.
+pub fn all_for_org(
+  read: Read,
+  org_id: String,
+) -> Result(List(row.Row), Fail(e)) {
+  store.query(
+    read,
+    "SELECT " <> row.columns <> " FROM ledger WHERE org_id = ? ORDER BY seq",
+    [sqlight.text(org_id)],
+    row.decoder(),
+  )
+}

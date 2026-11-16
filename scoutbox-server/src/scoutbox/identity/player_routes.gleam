@@ -12,6 +12,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx}
 import scoutbox/identity/access.{type PlayerAccess}
+import scoutbox/identity/guardians
 import scoutbox/identity/players
 import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
@@ -69,6 +70,11 @@ fn blank_or(pairs: List(#(String, a))) -> input.Rule(Option(a)) {
 
 /// A new player's profile (identity/schemas.mjs PROFILE) and a password.
 fn signup_shape() -> input.Shape(Signup) {
+  profile_shape(True)
+}
+
+/// A new player's profile, with a password field or (a guardian's child) without one.
+fn profile_shape(with_password: Bool) -> input.Shape(Signup) {
   use name <- input.field("name", input.nullish(input.text(name_max)))
   use dob <- input.field("dob", input.nullish(input.text(10)))
   use country <- input.field("country", input.optional(input.required_text(40)))
@@ -85,7 +91,8 @@ fn signup_shape() -> input.Shape(Signup) {
   )
   use lat <- input.field("lat", input.nullish(input.number(-90, 90)))
   use lng <- input.field("lng", input.nullish(input.number(-180, 180)))
-  use password <- input.field(
+  use password <- maybe_field(
+    with_password,
     "password",
     input.nullish(input.text(password_max)),
   )
@@ -102,6 +109,121 @@ fn signup_shape() -> input.Shape(Signup) {
     lng:,
     password:,
   ))
+}
+
+fn maybe_field(
+  present: Bool,
+  name: String,
+  rule: input.Rule(Option(a)),
+  next: fn(Option(a)) -> input.Shape(b),
+) -> input.Shape(b) {
+  case present {
+    True -> input.field(name, rule, next)
+    False -> next(None)
+  }
+}
+
+/// `POST /guardian/children`: a guardian onboards their child, once their e-mail and identity are verified and
+/// the safeguarding disclaimer is accepted. Adults make their own accounts.
+pub fn create_child(ctx: Ctx, req: Request, g: guardians.Guardian) -> Response {
+  case g.row.email_verified, g.row.id_verified, g.row.disclaimer_accepted {
+    False, _, _ ->
+      http.error_message(
+        403,
+        "EMAIL_UNVERIFIED",
+        "Verify your email address first — the code is in your inbox.",
+      )
+    _, False, _ ->
+      http.error_message(
+        403,
+        "GUARDIAN_ID_UNVERIFIED",
+        "Verify your identity before onboarding a child.",
+      )
+    _, _, False ->
+      http.error_message(
+        403,
+        "DISCLAIMER_REQUIRED",
+        "Accept the safeguarding disclaimer before onboarding a child.",
+      )
+    True, True, True -> {
+      use body <- http.body(req, profile_shape(False), [#("dob", "DOB_INVALID")])
+      let now = clock.now_ms()
+      let country = option.unwrap(body.country, "GB")
+      case body.name, body.dob {
+        None, _ | _, None | Some(""), _ | _, Some("") ->
+          http.error(400, "NAME_AND_DOB_REQUIRED")
+        Some(name), Some(dob) ->
+          case string.trim(name), age.parse_dob(dob, now) {
+            "", _ ->
+              http.json(
+                400,
+                json.object([
+                  #("error", json.string("FIELD_INVALID")),
+                  #("field", json.string("name")),
+                  #("problem", json.string("blank")),
+                  #("message", json.string("name must not be blank.")),
+                ]),
+              )
+            _, Error(Nil) ->
+              http.error_message(
+                400,
+                "DOB_INVALID",
+                "Enter a date of birth as YYYY-MM-DD.",
+              )
+            _, Ok(_) ->
+              case age.is_adult(dob, country, now) {
+                True ->
+                  http.error_message(
+                    400,
+                    "NOT_A_MINOR",
+                    "Adults create their own account with player sign-up.",
+                  )
+                False -> {
+                  let created =
+                    store.unit(ctx.store, fn(tx) {
+                      use p <- result.map(players.create(
+                        tx,
+                        players.NewPlayer(
+                          name:,
+                          dob:,
+                          country:,
+                          city: case body.city {
+                            Some("") -> None
+                            other -> other
+                          },
+                          position: body.position,
+                          foot: body.foot,
+                          height_cm: body.height_cm,
+                          weight_kg: body.weight_kg,
+                          location: case body.lat, body.lng {
+                            Some(lat), Some(lng) -> Some(#(lat, lng))
+                            _, _ -> None
+                          },
+                          password_hash: None,
+                          guardian_id: Some(g.row.id),
+                          created_at: now,
+                        ),
+                      ))
+                      // Not ported yet: the saved-search check (discovery) and the live 'players' event.
+                      #(p, [])
+                    })
+                  case created {
+                    Ok(p) ->
+                      http.json(
+                        201,
+                        json.object([
+                          #("playerId", json.string(p.row.id)),
+                          #("player", players.guardian_child_view(p, now)),
+                        ]),
+                      )
+                    Error(failure) -> http.internal(failure)
+                  }
+                }
+              }
+          }
+      }
+    }
+  }
 }
 
 /// `POST /auth/player/signup`.
