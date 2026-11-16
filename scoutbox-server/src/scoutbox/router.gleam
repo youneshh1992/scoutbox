@@ -23,8 +23,10 @@ import scoutbox/identity/sign_in
 import scoutbox/identity/staff_routes
 import scoutbox/insight/review_queue
 import scoutbox/messaging/channel_routes as threads
+import scoutbox/messaging/delivery
 import scoutbox/messaging/delivery_prefs
 import scoutbox/messaging/feed_routes
+import scoutbox/messaging/notification_prefs
 import scoutbox/platform/clock
 import scoutbox/platform/fault_routes
 import scoutbox/platform/faults
@@ -47,6 +49,7 @@ import scoutbox/verification/org_admin_routes as org_admin
 import scoutbox/verification/personal_routes as personal
 import scoutbox/verification/reference_routes as references
 import scoutbox/verification/review_routes as review
+import scoutbox/verification/transitions
 import scoutbox/vocab/audience
 import wisp.{type Request, type Response}
 
@@ -66,6 +69,10 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["capabilities"] -> only(req, Get, fn() { operator.capabilities(ctx) })
     ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
     ["media", id] -> only(req, Get, fn() { media_file(id) })
+    ["push", "register"] ->
+      only(req, Post, fn() { feed_routes.register_device(ctx, req) })
+    ["callbacks", "delivery"] ->
+      only(req, Post, fn() { delivery.callback(ctx, req) })
     ["auth", ..rest] -> {
       use <- auth_limit(ctx, req)
       case rest {
@@ -147,6 +154,23 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             feed_routes.feed(ctx, audience.OrgUser, org.user.id)
           })
+        ["notifications", "read"] ->
+          only(req, Post, fn() {
+            feed_routes.read(ctx, req, audience.OrgUser, org.user.id)
+          })
+        ["notifications", id, "ack"] ->
+          only(req, Post, fn() {
+            delivery.ack(ctx, audience.OrgUser, org.user.id, id)
+          })
+        ["notification-preferences"] ->
+          case req.method {
+            Get -> notification_prefs.show(ctx, audience.OrgUser, org.user.id)
+            Put ->
+              notification_prefs.update(ctx, req, audience.OrgUser, org.user.id)
+            _ -> not_found()
+          }
+        ["delivery"] ->
+          only(req, Get, fn() { delivery.org_list(ctx, req, org) })
         ["channels"] -> only(req, Get, fn() { threads.org_list(ctx, req, org) })
         ["channels", "counts"] ->
           only(req, Get, fn() { threads.org_counts(ctx, org) })
@@ -191,6 +215,51 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["notifications"] ->
           only(req, Get, fn() {
             feed_routes.feed(ctx, audience.Player, player.player.row.id)
+          })
+        ["notifications", "read"] ->
+          only(req, Post, fn() {
+            feed_routes.read(ctx, req, audience.Player, player.player.row.id)
+          })
+        ["notifications", id, "ack"] ->
+          only(req, Post, fn() {
+            delivery.ack(ctx, audience.Player, player.player.row.id, id)
+          })
+        ["notification-preferences"] ->
+          case req.method {
+            Get ->
+              notification_prefs.show(
+                ctx,
+                audience.Player,
+                player.player.row.id,
+              )
+            Put ->
+              notification_prefs.update(
+                ctx,
+                req,
+                audience.Player,
+                player.player.row.id,
+              )
+            _ -> not_found()
+          }
+        ["transitions"] ->
+          only(req, Post, fn() { transitions.player_open(ctx, req, player) })
+        ["transitions", id, "recipients"] ->
+          only(req, Post, fn() {
+            transitions.add_recipient(
+              ctx,
+              req,
+              transitions.PlayerOwner(player),
+              id,
+            )
+          })
+        ["transitions", id, "revoke-recipient"] ->
+          only(req, Post, fn() {
+            transitions.revoke_recipient(
+              ctx,
+              req,
+              transitions.PlayerOwner(player),
+              id,
+            )
           })
         ["channels"] ->
           only(req, Get, fn() { threads.player_list(ctx, player) })
@@ -255,6 +324,49 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Get, fn() {
             feed_routes.feed(ctx, audience.Guardian, guardian.row.id)
           })
+        ["notifications", "read"] ->
+          only(req, Post, fn() {
+            feed_routes.read(ctx, req, audience.Guardian, guardian.row.id)
+          })
+        ["notifications", id, "ack"] ->
+          only(req, Post, fn() {
+            delivery.ack(ctx, audience.Guardian, guardian.row.id, id)
+          })
+        ["notification-preferences"] ->
+          case req.method {
+            Get ->
+              notification_prefs.show(ctx, audience.Guardian, guardian.row.id)
+            Put ->
+              notification_prefs.update(
+                ctx,
+                req,
+                audience.Guardian,
+                guardian.row.id,
+              )
+            _ -> not_found()
+          }
+        ["children", id, "transitions"] ->
+          only(req, Post, fn() {
+            transitions.guardian_open(ctx, req, guardian, id)
+          })
+        ["children-transitions", id, "recipients"] ->
+          only(req, Post, fn() {
+            transitions.add_recipient(
+              ctx,
+              req,
+              transitions.GuardianOwner(guardian),
+              id,
+            )
+          })
+        ["children-transitions", id, "revoke-recipient"] ->
+          only(req, Post, fn() {
+            transitions.revoke_recipient(
+              ctx,
+              req,
+              transitions.GuardianOwner(guardian),
+              id,
+            )
+          })
         ["channels"] ->
           only(req, Get, fn() { threads.guardian_list(ctx, guardian) })
         ["channels", id, "messages"] ->
@@ -278,6 +390,12 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["verification", ..path] -> verification_admin(ctx, req, path)
         ["outbox"] -> only(req, Get, fn() { admin.outbox(ctx, req) })
         ["channels"] -> only(req, Get, fn() { threads.admin_list(ctx, req) })
+        ["push-log"] -> only(req, Get, fn() { console.push_log(ctx, req) })
+        ["delivery"] -> only(req, Get, fn() { delivery.admin_view(ctx) })
+        ["delivery", "sweep"] ->
+          only(req, Post, fn() { delivery.admin_sweep(ctx, req) })
+        ["delivery", "inject-failure"] ->
+          only(req, Post, fn() { delivery.inject_failure(ctx, req) })
         ["overview"] -> only(req, Get, fn() { console.overview(ctx) })
         ["metrics"] -> only(req, Get, fn() { console.metrics(ctx) })
         ["reports"] -> only(req, Get, fn() { console.reports(ctx, req) })

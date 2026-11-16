@@ -4,10 +4,10 @@ A Gleam port of four slices of the ScoutBox server: organisation staff (sign-in,
 safeguarding core (reports, blocks, moderation, the Trust & Safety console, the Discovery Ledger), players and
 guardians (sign-up, the player record, the directory, guardians and their children), verification (claims and
 their review, organisation applications, domains, the administrator hierarchy, squad invitations, coach
-references), and message threads (answering a request opens one). It answers seven of the TypeScript server's e2e
-batteries unchanged: `platform/staff`, `platform/safeguarding`, `platform/playersAndGuardians`,
-`platform/storeGuarantees`, `platform/messaging`, `verification/organisationsAndStaff` and
-`verification/organisationsAndStaffAdversarial`.
+references), message threads (answering a request opens one), and notifications with their preferences, push and
+the delivery centre. It answers eight of the TypeScript server's e2e batteries unchanged: `platform/staff`,
+`platform/safeguarding`, `platform/playersAndGuardians`, `platform/storeGuarantees`, `platform/messaging`,
+`platform/notifications`, `verification/organisationsAndStaff` and `verification/organisationsAndStaffAdversarial`.
 
 ```sh
 gleam check            # type-check (fast)
@@ -63,13 +63,15 @@ Every route below is exercised by a battery, except where marked.
 | Safety | `POST /player/block`, `/player/report`, `/guardian/report`; `GET /player/reports`; `POST /guardian/block`, `/org/report`, `GET /guardian/reports`, `/org/reports` (no battery) |
 | Player | `GET /player/me`, `/player/export`; `POST /player/timeline`, `/availability`, `/first-team-seeker`, `/academyplus`, `/medical/share`, `/stats`, `/badges`, `/prefs` |
 | Guardian | `GET /guardian/me`, `/guardian/children`, `/guardian/log`; `POST /guardian/children/:id/availability`, `/medical/share`, `/guardian/coguardian` |
-| Feeds | `GET /guardian/notifications`; `/player/notifications`, `/org/notifications` (no battery) |
+| Notifications | `GET /{org,player,guardian}/notifications`; `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
+| Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
+| Transitions | `POST /player/transitions`, `/player/transitions/:id/recipients`, `/revoke-recipient`; the guardian's `/guardian/children/:id/transitions`, `/guardian/children-transitions/:id/…` |
 | Verification | `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
 | Trust & Safety | `GET /admin/overview`, `/metrics`, `/reports`, `/blocks`, `/moderation`, `/clubs`, `/guardians`, `/outbox`; `POST /admin/reports/:id/resolve`, `/blocks/:id/lift`, `/clubs/:id/credentials`, `/clubs/:id/verification`, `/guardians/:id/idv` |
 
 Behaviour that depends on a domain not ported yet says `Not ported yet:` in the code (`grep -rn "Not ported" src`).
-The largest: trials and trial requests, signings, the similarity engine ("more like this"),
-insights, coach vouches, club setup, live event streams, push delivery and its quiet hours, process metrics, and
+The largest: trials and trial requests, signings, the similarity engine ("more like this"), webhooks,
+insights, coach vouches, club setup, live event streams, the Expo push transport, process metrics, and
 password hashing (scrypt), which also means a password-protected account can't sign in yet and a new player
 account stores a hash no password matches. `dev/shape_diff.mjs` lists where responses differ because of them.
 
@@ -79,7 +81,10 @@ account stores a hash no password matches. `dev/shape_diff.mjs` lists where resp
 - Of several unknown fields in one body, the first in key order is named; the TypeScript server names the first
   in the order sent.
 - Ids are minted inside the unit, so a refused act does not use one up.
-- The outbox view lists mailer records only. Delivery records arrive with the messaging domain.
+- A delivery callback's signature is checked over the body as it arrived; the TypeScript server checks it over
+  the parsed body serialised again, which is the same text for a compact JSON body.
+- Two delivery sweeps can overlap here (the minute sweep and `POST /admin/delivery/sweep`); each send re-reads
+  its dispatch in its own unit, so a dispatch is never sent twice.
 - Distances agree with domain.ts to the last bit except within about 1e-12 km of the 50 km radius or a rounding
   edge, where macOS's `cos` and V8's `x ** 2` differ in the last place (`test/scoutbox/distance_test.gleam`).
 - The directory's text search lowers ASCII only (SQLite's `lower()`); the TypeScript server lowers as JavaScript

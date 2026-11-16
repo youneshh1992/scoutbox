@@ -6,6 +6,7 @@ import gleam/option.{type Option, None}
 import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/vocab/audience
+import scoutbox/vocab/notification_category
 import sqlight
 
 pub const table = "notifications"
@@ -25,109 +26,6 @@ pub fn qualified(alias: String) -> String {
   |> string.join(", ")
 }
 
-pub type Category {
-  Mentions
-  Assignments
-  RoomChanges
-  EvidenceRequests
-  Combine
-  TrialUpdates
-  SecondLook
-  BriefUpdates
-  Messages
-  Activity
-  DiscoveryNudges
-  WatchlistChanges
-  DevelopmentUpdates
-  Representation
-  Compliance
-  TransactionUpdates
-  OfferUpdates
-  SigningUpdates
-  SecurityAccount
-}
-
-/// Each value with the text the column stores.
-pub const category_pairs = [
-  #("mentions", Mentions),
-  #("assignments", Assignments),
-  #("room_changes", RoomChanges),
-  #("evidence_requests", EvidenceRequests),
-  #("combine", Combine),
-  #("trial_updates", TrialUpdates),
-  #("second_look", SecondLook),
-  #("brief_updates", BriefUpdates),
-  #("messages", Messages),
-  #("activity", Activity),
-  #("discovery_nudges", DiscoveryNudges),
-  #("watchlist_changes", WatchlistChanges),
-  #("development_updates", DevelopmentUpdates),
-  #("representation", Representation),
-  #("compliance", Compliance),
-  #("transaction_updates", TransactionUpdates),
-  #("offer_updates", OfferUpdates),
-  #("signing_updates", SigningUpdates),
-  #("security_account", SecurityAccount),
-]
-
-pub fn category_to_string(value: Category) -> String {
-  case value {
-    Mentions -> "mentions"
-    Assignments -> "assignments"
-    RoomChanges -> "room_changes"
-    EvidenceRequests -> "evidence_requests"
-    Combine -> "combine"
-    TrialUpdates -> "trial_updates"
-    SecondLook -> "second_look"
-    BriefUpdates -> "brief_updates"
-    Messages -> "messages"
-    Activity -> "activity"
-    DiscoveryNudges -> "discovery_nudges"
-    WatchlistChanges -> "watchlist_changes"
-    DevelopmentUpdates -> "development_updates"
-    Representation -> "representation"
-    Compliance -> "compliance"
-    TransactionUpdates -> "transaction_updates"
-    OfferUpdates -> "offer_updates"
-    SigningUpdates -> "signing_updates"
-    SecurityAccount -> "security_account"
-  }
-}
-
-pub fn category_from_string(value: String) -> Result(Category, Nil) {
-  case value {
-    "mentions" -> Ok(Mentions)
-    "assignments" -> Ok(Assignments)
-    "room_changes" -> Ok(RoomChanges)
-    "evidence_requests" -> Ok(EvidenceRequests)
-    "combine" -> Ok(Combine)
-    "trial_updates" -> Ok(TrialUpdates)
-    "second_look" -> Ok(SecondLook)
-    "brief_updates" -> Ok(BriefUpdates)
-    "messages" -> Ok(Messages)
-    "activity" -> Ok(Activity)
-    "discovery_nudges" -> Ok(DiscoveryNudges)
-    "watchlist_changes" -> Ok(WatchlistChanges)
-    "development_updates" -> Ok(DevelopmentUpdates)
-    "representation" -> Ok(Representation)
-    "compliance" -> Ok(Compliance)
-    "transaction_updates" -> Ok(TransactionUpdates)
-    "offer_updates" -> Ok(OfferUpdates)
-    "signing_updates" -> Ok(SigningUpdates)
-    "security_account" -> Ok(SecurityAccount)
-    _ -> Error(Nil)
-  }
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn category_decoder() -> decode.Decoder(Category) {
-  use value <- decode.then(decode.string)
-  case category_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(Mentions, "Category")
-  }
-}
-
 pub type Row {
   Row(
     seq: Int,
@@ -141,7 +39,7 @@ pub type Row {
     ref_id: Option(String),
     read: Bool,
     repeat_count: Int,
-    category: Option(Category),
+    category: Option(notification_category.NotificationCategory),
     deferred_push: Bool,
     dispatched_at: Option(Int),
     action_required: Bool,
@@ -162,7 +60,7 @@ pub type New {
     ref_id: Option(String),
     read: Bool,
     repeat_count: Int,
-    category: Option(Category),
+    category: Option(notification_category.NotificationCategory),
     deferred_push: Bool,
     dispatched_at: Option(Int),
     action_required: Bool,
@@ -212,7 +110,10 @@ pub fn decoder() -> decode.Decoder(Row) {
   use ref_id <- decode.field(8, decode.optional(decode.string))
   use read <- decode.field(9, sqlight.decode_bool())
   use repeat_count <- decode.field(10, decode.int)
-  use category <- decode.field(11, decode.optional(category_decoder()))
+  use category <- decode.field(
+    11,
+    decode.optional(notification_category.decoder()),
+  )
   use deferred_push <- decode.field(12, sqlight.decode_bool())
   use dispatched_at <- decode.field(13, decode.optional(decode.int))
   use action_required <- decode.field(14, sqlight.decode_bool())
@@ -255,7 +156,7 @@ pub fn values(row: New) -> List(sqlight.Value) {
     sqlight.bool(row.read),
     sqlight.int(row.repeat_count),
     sqlight.nullable(
-      fn(v) { sqlight.text(category_to_string(v)) },
+      fn(v) { sqlight.text(notification_category.to_string(v)) },
       row.category,
     ),
     sqlight.bool(row.deferred_push),

@@ -7,6 +7,7 @@ import gleam/result
 import gleam/string
 import scoutbox/app.{type Ctx, type Effect, Ctx, SendMail}
 import scoutbox/identity/sessions
+import scoutbox/messaging/delivery
 import scoutbox/messaging/outbox
 import scoutbox/platform/clock
 import scoutbox/platform/config
@@ -83,6 +84,8 @@ fn boot() -> Result(Nil, String) {
       integrity:,
       faults:,
     )
+  // Restart-safe: every dispatch is a row, so the first sweep picks up where the last process stopped.
+  let _ = delivery.sweep(ctx)
   process.spawn(fn() { sweeping(ctx) })
   let builder =
     router.handle(ctx, _)
@@ -99,9 +102,10 @@ fn boot() -> Result(Nil, String) {
   |> result.map_error(fn(e) { "could not listen: " <> string.inspect(e) })
 }
 
-/// The periodic sweeps, one after another, forever: verification expiries and warnings.
+/// The periodic sweeps, one after another, forever: the delivery centre, and verification expiries and warnings.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
+  let _ = delivery.sweep(ctx)
   let _ = verification_review.sweep(ctx)
   sweeping(ctx)
 }

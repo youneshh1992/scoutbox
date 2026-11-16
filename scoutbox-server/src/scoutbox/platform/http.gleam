@@ -83,30 +83,46 @@ pub fn json_body(req: Request, next: fn(Dynamic) -> Response) -> Response {
 
 /// The JSON body as sent, or the MALFORMED_JSON answer.
 fn read_json(req: Request) -> Result(Dynamic, Response) {
+  read_json_text(req) |> result.map(fn(pair) { pair.1 })
+}
+
+/// The body's text as it arrived, and the JSON it holds: for a route that checks a signature over the bytes.
+fn read_json_text(req: Request) -> Result(#(String, Dynamic), Response) {
   let is_json = case request.get_header(req, "content-type") {
     Ok(ct) -> string.starts_with(string.lowercase(ct), "application/json")
     Error(Nil) -> False
   }
   case is_json, wisp.read_body_bits(req) {
-    False, _ -> Ok(empty_object())
+    False, _ -> Ok(#("", empty_object()))
     True, Error(Nil) -> Error(malformed_json())
     True, Ok(bits) ->
       case bit_array.to_string(bits) {
         Error(Nil) -> Error(malformed_json())
         Ok(text) ->
           case string.trim(text) {
-            "" -> Ok(empty_object())
+            "" -> Ok(#(text, empty_object()))
             _ ->
               case json.parse(text, decode.dynamic) {
                 Error(_) -> Error(malformed_json())
                 Ok(value) ->
                   case dynamic.classify(value) {
-                    "Dict" | "List" -> Ok(value)
+                    "Dict" | "List" -> Ok(#(text, value))
                     _ -> Error(malformed_json())
                   }
               }
           }
       }
+  }
+}
+
+/// The JSON body with the text it arrived as.
+pub fn signed_body(
+  req: Request,
+  next: fn(String, Dynamic) -> Response,
+) -> Response {
+  case read_json_text(req) {
+    Ok(#(text, value)) -> next(text, value)
+    Error(response) -> response
   }
 }
 

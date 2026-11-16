@@ -6,10 +6,9 @@ import gleam/dict
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
-import gleam/string
-import scoutbox/messaging/notifications
+import scoutbox/messaging/notification_prefs
 import scoutbox/platform/limits.{Policy}
-import scoutbox/rows/notifications as notification_row
+import scoutbox/vocab/notification_category
 import simplifile
 
 fn snapshot(file: String, decoder: decode.Decoder(a)) -> a {
@@ -43,23 +42,36 @@ pub fn notification_type_categories_test() {
       "platform/notificationPrefs.json",
       decode.at(["TYPE_CATEGORY"], decode.dict(decode.string, decode.string)),
     )
-  list.each(notifications.type_category, fn(entry) {
+  list.each(notification_prefs.type_category, fn(entry) {
     let #(type_, category) = entry
     assert dict.get(type_category, type_)
-      == Ok(notification_row.category_to_string(category))
+      == Ok(notification_category.to_string(category))
   })
 }
 
-/// The `notifications.category` CHECK (from the migrations) allows exactly the categories CATEGORIES names.
+/// CATEGORIES, entry by entry, and the `notifications.category` CHECK (from the migrations) in the same order.
 pub fn notification_categories_test() {
   let categories =
     snapshot(
       "platform/notificationPrefs.json",
-      decode.at(["CATEGORIES"], decode.dict(decode.string, decode.dynamic)),
+      decode.at(
+        ["CATEGORIES"],
+        decode.dict(decode.string, {
+          use label <- decode.field("label", decode.string)
+          use default <- decode.field("default", decode.bool)
+          use mandatory <- decode.field("mandatory", decode.bool)
+          decode.success(#(label, default, mandatory))
+        }),
+      ),
     )
-  assert list.sort(dict.keys(categories), string.compare)
-    == list.sort(
-      list.map(notification_row.category_pairs, fn(p) { p.0 }),
-      string.compare,
-    )
+  let ported =
+    list.map(notification_prefs.categories, fn(c: notification_prefs.Category) {
+      #(
+        notification_category.to_string(c.id),
+        #(c.label, c.default, c.mandatory),
+      )
+    })
+  assert dict.from_list(ported) == categories
+  assert list.map(ported, fn(p) { p.0 })
+    == list.map(notification_category.pairs, fn(p) { p.0 })
 }

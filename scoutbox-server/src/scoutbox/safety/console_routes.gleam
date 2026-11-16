@@ -12,7 +12,9 @@ import scoutbox/identity/guardians
 import scoutbox/identity/orgs.{type Org}
 import scoutbox/identity/players
 import scoutbox/messaging/channels
+import scoutbox/messaging/dispatches
 import scoutbox/messaging/notifications
+import scoutbox/messaging/push
 import scoutbox/platform/clock
 import scoutbox/platform/http
 import scoutbox/platform/input
@@ -57,6 +59,7 @@ pub fn overview(ctx: Ctx) -> Response {
       use emails <- result.try(count_of(read, "outbox"))
       use sessions <- result.try(count_of(read, "sessions"))
       use channel_count <- result.try(channels.count(read))
+      use pushes <- result.try(push.count(read))
       use grooming <- result.map(audit.moderation_count(
         read,
         Some(moderation_log.Grooming),
@@ -68,13 +71,13 @@ pub fn overview(ctx: Ctx) -> Response {
         #("openReports", json.int(open)),
         #("blocks", json.int(blocks)),
         #("moderationHits", json.int(hits)),
-        // Not ported yet: signings (recruitment), invoices (billing) and the push log (outbound providers) are
-        // domains this server does not run; it holds none of each.
+        // Not ported yet: signings (recruitment) and invoices (billing) are domains this server does not run; it
+        // holds none of each.
         #("channels", json.int(channel_count)),
         #("signings", json.int(0)),
         #("invoices", json.int(0)),
         #("emailsSent", json.int(emails)),
-        #("pushesSent", json.int(0)),
+        #("pushesSent", json.int(pushes)),
         #("sessions", json.int(sessions)),
         #("storageEngine", json.string("sqlite")),
         #("groomingEscalations", json.int(grooming)),
@@ -83,6 +86,15 @@ pub fn overview(ctx: Ctx) -> Response {
     })
   case counts {
     Ok(body) -> http.json(200, body)
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `GET /admin/push-log`, newest first.
+pub fn push_log(ctx: Ctx, req: Request) -> Response {
+  use page <- pages.strict(req, [IntKind])
+  case store.read(ctx.store, push.page(_, page)) {
+    Ok(#(items, next)) -> pages.respond(items, next, push.view)
     Error(failure) -> http.internal(failure)
   }
 }
@@ -344,8 +356,7 @@ pub fn verification(ctx: Ctx, req: Request, id: String) -> Response {
 
 /// `GET /admin/metrics`.
 ///
-/// Not ported yet: the process's request counters (platform metrics), the dispatch backlog (messaging) and the
-/// webhook backlog (integrations). An operations event's detail fields arrive with the events that write them.
+/// Not ported yet: the process's request counters (platform metrics) and the webhook backlog (integrations). An operations event's detail fields arrive with the events that write them.
 pub fn metrics(ctx: Ctx) -> Response {
   // On the writer: it holds the verification counters (verification/core `count`).
   let found =
@@ -357,12 +368,13 @@ pub fn metrics(ctx: Ctx) -> Response {
         ops_events.DeliveryFailed,
       ))
       use webhook <- result.try(audit.ops_count(read, ops_events.WebhookFailed))
+      use backlog <- result.try(dispatches.backlog_count(read))
       use newest <- result.map(audit.ops_newest(read, 50))
       #(
         json.object([
           #("deliveryFailures", json.int(delivery)),
           #("webhookFailures", json.int(webhook)),
-          #("dispatchBacklog", json.int(0)),
+          #("dispatchBacklog", json.int(backlog)),
           #("webhookBacklog", json.int(0)),
           #(
             "opsEvents",

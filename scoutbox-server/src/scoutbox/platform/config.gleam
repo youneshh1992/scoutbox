@@ -24,6 +24,11 @@ pub type Config {
     licence_registry: TestRegistry,
     /// How often the periodic sweeps run: every half second with SCOUTBOX_FAST_SWEEPS=1, else every minute.
     sweep_ms: Int,
+    /// SCOUTBOX_FAST_SWEEPS=1: the delivery centre's retry ladder and quiet-hours hold in milliseconds, not minutes.
+    fast_sweeps: Bool,
+    /// DELIVERY_CALLBACK_SECRET: what the delivery provider signs its callbacks with. Its default is the local fake
+    /// provider's, as in the TypeScript server: there is no real provider to call back.
+    delivery_callback_secret: String,
   )
 }
 
@@ -83,6 +88,11 @@ pub fn load() -> Result(Config, String) {
       sweep_ms: case envoy.get("SCOUTBOX_FAST_SWEEPS") {
         Ok("1") -> 500
         _ -> 60_000
+      },
+      fast_sweeps: envoy.get("SCOUTBOX_FAST_SWEEPS") == Ok("1"),
+      delivery_callback_secret: case envoy.get("DELIVERY_CALLBACK_SECRET") {
+        Ok("") | Error(Nil) -> "local-fake-callback-secret"
+        Ok(secret) -> secret
       },
     ),
   )

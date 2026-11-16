@@ -123,20 +123,23 @@ fn when_some(
 }
 
 pub fn refusal_json(r: Refusal) -> Json {
-  json.object(
-    list.flatten([
-      [
-        #("error", json.string(r.error)),
-        #("field", json.string(r.field)),
-        #("problem", json.string(problem_name(r.problem))),
-        #("message", json.string(r.message)),
-      ],
-      when_some(r.min, "min", json.int),
-      when_some(r.max, "max", json.int),
-      when_some(r.expected, "expected", json.string),
-      when_some(r.allowed, "allowed", json.array(_, json.string)),
-    ]),
-  )
+  json.object(refusal_fields(r))
+}
+
+/// The refusal's fields, for a route that adds its own after them.
+pub fn refusal_fields(r: Refusal) -> List(#(String, Json)) {
+  list.flatten([
+    [
+      #("error", json.string(r.error)),
+      #("field", json.string(r.field)),
+      #("problem", json.string(problem_name(r.problem))),
+      #("message", json.string(r.message)),
+    ],
+    when_some(r.min, "min", json.int),
+    when_some(r.max, "max", json.int),
+    when_some(r.expected, "expected", json.string),
+    when_some(r.allowed, "allowed", json.array(_, json.string)),
+  ])
 }
 
 // ------------------------------------------------------------------------------------------------- checks
@@ -328,12 +331,17 @@ pub fn anything() -> Check(Dynamic) {
 
 /// An id: text of 1 to 80 characters (schemas.mjs `id`). Spaces count, unlike `required_text`.
 pub fn id() -> Check(String) {
+  id_of(80)
+}
+
+/// Text of 1 to `max` characters: an identifier another system hands out.
+pub fn id_of(max: Int) -> Check(String) {
   fn(v) {
     case string_check(v) {
       Error(e) -> Error(e)
       Ok("") ->
         Error(Issue(..issue(TooShort, "must not be empty"), min: Some(1)))
-      Ok(s) -> at_most(s, 80)
+      Ok(s) -> at_most(s, max)
     }
   }
 }
@@ -644,11 +652,60 @@ pub fn object(shape: Shape(a)) -> Check(a) {
               Issue(
                 ..i,
                 within: Some(case i.within {
-                  Some(inner) -> field <> "." <> inner
+                  Some(inner) -> path(field, inner)
                   None -> field
                 }),
               ),
             )
+        }
+    }
+  }
+}
+
+/// `field.inner`, or `field[i]…` for an item of a list.
+fn path(field: String, inner: String) -> String {
+  case inner {
+    "[" <> _ -> field <> inner
+    _ -> field <> "." <> inner
+  }
+}
+
+/// A list of at most `max` items, each passing `item`. A bad item is refused naming it (`events[1].status`).
+pub fn items(item: Check(a), max: Int) -> Check(List(a)) {
+  fn(v) {
+    case decode.run(v, decode.list(decode.dynamic)) {
+      Error(_) -> Error(issue(Invalid, "must be a list"))
+      Ok(values) ->
+        case list.length(values) > max {
+          True ->
+            Error(
+              Issue(
+                ..issue(
+                  TooLong,
+                  "must have at most " <> int.to_string(max) <> " items",
+                ),
+                max: Some(max),
+              ),
+            )
+          False ->
+            list.index_map(values, fn(value, i) { #(i, value) })
+            |> list.try_map(fn(pair) {
+              case item(pair.1) {
+                Ok(a) -> Ok(a)
+                Error(e) -> {
+                  let at = "[" <> int.to_string(pair.0) <> "]"
+                  Error(
+                    Issue(
+                      ..e,
+                      within: Some(case e.within {
+                        Some(inner) -> path(at, inner)
+                        None -> at
+                      }),
+                    ),
+                  )
+                }
+              }
+            })
         }
     }
   }
@@ -686,7 +743,7 @@ pub fn parse(
         Ok(value) -> Ok(value)
         Error(#(field, i)) -> {
           let field = case i.within {
-            Some(inner) -> field <> "." <> inner
+            Some(inner) -> path(field, inner)
             None -> field
           }
           let error = case list.key_find(codes, field), i.code {
