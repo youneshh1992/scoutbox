@@ -11,12 +11,11 @@
 // testing — the things that must NOT happen: no stage is claimed that a record
 // cannot prove.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   LIFECYCLE_ACTIONS,
   LIFECYCLE_TERMINAL,
@@ -55,12 +54,12 @@ import { LIFECYCLE_INPUT_CODES } from '../../domains/recruitment/lifecycle/index
 import { TRIAL_INPUT_CODES } from '../../domains/recruitment/lifecycle/trialRoutes.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { FUNNEL_STAGES, stagesReached } from '../../domains/recruitment/analytics/funnels.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 
 const PORT = pickPort(5700, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
 let negatives = 0;
@@ -855,7 +854,8 @@ process.on('exit', () => {
 
 /** Start a server on the shared PORT and DATA_DIR, and wait for it to answer. */
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1' },
     stdio: 'ignore',
   });

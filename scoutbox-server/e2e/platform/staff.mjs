@@ -13,11 +13,10 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { freePort } from '../../scripts/testPort.mjs';
-import { totp } from '../../domains/identity/totp.mjs';
+import { freePort } from '../support/testPort.mjs';
+import { totp } from '../support/totp.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = await freePort();
 const API = `http://localhost:${PORT}`;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-staff-'));
@@ -71,8 +70,8 @@ const inviteCodeFor = async (to) =>
     .at(0)
     ?.text.match(/invite code: ([0-9a-f]+)/)?.[1];
 
-child = spawn('node', ['server.mjs'], {
-  cwd: SERVER_DIR,
+child = spawn(...serverCommand(), {
+  cwd: serverDir,
   env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, SCOUTBOX_QUIET_LOGS: '1' },
   stdio: 'ignore',
 });

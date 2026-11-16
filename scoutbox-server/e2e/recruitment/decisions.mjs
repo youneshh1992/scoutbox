@@ -38,7 +38,6 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   DECISION_OUTCOMES,
   OUTCOME_MAP,
@@ -74,13 +73,13 @@ import {
 } from '../../domains/recruitment/rooms/shared.mjs';
 import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs';
 import { canTransitionRecruitmentCase, LIFECYCLE_ACTIONS } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 import { createEvidenceProvider, resolveEvidenceRefs } from '../../scripts/recruitmentReadsFixture.mjs'; // the recruitment queries over plain arrays
 
 const PORT = pickPort(6400, 200, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23d-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 const S_DEC = 'PRIVATE_DECISION_SENTINEL_5914';
 const S_ROOM = 'PRIVATE_ROOM_RATIONALE_SENTINEL_8812';
@@ -732,7 +731,8 @@ process.on('exit', () => {
   }
 });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' },
     stdio: 'ignore',
   });

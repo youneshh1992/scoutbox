@@ -17,12 +17,11 @@
 //
 // No assertion is `status !== 200`; every refusal names status AND code.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   OFFER_LIMITS,
   validateTerms,
@@ -52,6 +51,7 @@ import { isExpiredAt } from '../../temporal.ts';
 import { canTransitionRecruitmentCase } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -63,8 +63,6 @@ const LATEST_SCHEMA = Number(
 const PORT = pickPort(6900, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23oh-'));
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const S_NOTE = 'PRIVATE_NOTE_H_7731';
 const S_DEC = 'PRIVATE_DECISION_H_5914';
 const S_TX = 'PRIVATE_TX_NOTE_H_6106';
@@ -370,7 +368,8 @@ process.on('exit', () => {
   }
 });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(PORT),

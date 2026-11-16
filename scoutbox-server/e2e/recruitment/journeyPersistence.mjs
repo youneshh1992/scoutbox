@@ -18,13 +18,12 @@
 //      the analytics funnel identical across a restart
 //
 // Nothing is rewritten, re-ordered or "repaired" on boot.
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 const SCHEMA_VERSION = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -34,9 +33,8 @@ const SCHEMA_VERSION = Number(
 ); // the latest table migration's number
 import { DatabaseSync } from 'node:sqlite';
 import { openLayer, readRecords, plantCase, legacyMoves } from '../../scripts/dataLayerFixture.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 let passed = 0;
 let negatives = 0;
 let failures = 0;
@@ -83,7 +81,8 @@ const at = (ms) => ({ 'x-scoutbox-test-clock': String(ms) });
 
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(port),

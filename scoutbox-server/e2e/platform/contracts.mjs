@@ -14,7 +14,6 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   EVENT_REGISTRY,
@@ -54,17 +53,15 @@ import { DatabaseSync } from 'node:sqlite';
 import { runDataMigrations, dataSchemaReport, migrationApplied } from '../../repositories/database.ts';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { createNotificationsRepository } from '../../repositories/notifications.ts';
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SCHEMA_VERSION = Number(
   DATA_MIGRATIONS.map((m) => m.id)
     .sort()
     .at(-1)
     .slice(0, 4),
 );
-const SERVER_DIR = path.join(HERE, '..', '..');
-const SERVER = path.join(SERVER_DIR, 'server.mjs');
 const PORT = pickPort(5990, 8, [0, 10, 11, 13]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m182-'));
@@ -707,7 +704,7 @@ process.on('exit', () => {
   }
 });
 async function boot(env, base) {
-  const proc = spawn(process.execPath, [SERVER], { env, stdio: 'ignore' });
+  const proc = spawn(...serverCommand(), { cwd: serverDir, env, stdio: 'ignore' });
   children.push(proc);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) {
@@ -1259,7 +1256,8 @@ section('§19 — the request log carries no personal data');
   const LPORT = PORT + 13;
   const LDATA = mkdtempSync(path.join(tmpdir(), 'sbx-logs-'));
   const logged = [];
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...ENV, PORT: String(LPORT), DATA_DIR: LDATA, SCOUTBOX_QUIET_LOGS: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -1362,7 +1360,8 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
     MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef',
     ADMIN_KEY: 'm182-test-admin-key-not-real',
   }; // a real deployment names its own admin key
-  const withFaults = spawn(process.execPath, [SERVER], {
+  const withFaults = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...prodEnv, SCOUTBOX_FAULTS: 'unavailable:/org/players' },
     stdio: 'ignore',
   });
@@ -1383,7 +1382,8 @@ section('§43 — a production boot refuses simulated faults and exposes no faul
   const PBASE2 = `http://localhost:${PPORT2}`;
   let prodUp = false;
   let prodLog = '';
-  const prod = spawn(process.execPath, [SERVER], {
+  const prod = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...prodEnv, PORT: String(PPORT2) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

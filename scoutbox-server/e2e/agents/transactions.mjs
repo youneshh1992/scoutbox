@@ -11,13 +11,12 @@
 //
 // No assertion is `status !== 200`. Every refusal names its status and its code.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { clubRecords } from '../support/clubRecords.mjs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   TRANSACTION_TYPES,
   TRANSACTION_STATUSES,
@@ -75,12 +74,11 @@ import { TYPE_CATEGORY, CATEGORIES } from '../../domains/platform/notificationPr
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { AGENT_TRANSACTIONS_MIGRATION, AGENT_TRANSACTIONS_TABLES } from '../../repositories/agentTransactions.mjs';
 import { openLayer, readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 const PORT = pickPort(6900, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m26-'));
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 
 let passed = 0;
@@ -807,7 +805,8 @@ process.on('exit', () => {
   }
 });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(PORT),

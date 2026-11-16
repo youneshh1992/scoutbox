@@ -7,12 +7,11 @@
 //           state projecting as itself;
 //   part 2  the server — composition order (every module registers before the socket opens), the first requests on
 //           a bare database, and a restart that changes nothing.
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { PLANS, ARCHETYPES } from '../../catalogue.mjs';
 import { ORG_PLANS } from '../../repositories/orgs.ts';
 import { DatabaseSync } from 'node:sqlite';
@@ -27,10 +26,7 @@ import {
 } from '../../domains/recruitment/rooms/shared.mjs';
 import { NULL_EVIDENCE_PROVIDER } from '../../domains/recruitment/lifecycle/lifecycle.mjs';
 import { buildRecruitmentJourney } from '../../scripts/recruitmentReadsFixture.mjs';
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(HERE, '..', '..');
-const SERVER = path.join(ROOT, 'server.mjs');
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 let passed = 0;
 let negatives = 0;
@@ -273,7 +269,8 @@ section('§4 — every lifecycle state projects as itself');
 /** Boot the real server on a directory, optionally probe it, then stop it with SIGTERM. */
 async function bootOnce(dataDir, { port, probe = null } = {}) {
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_SEED_DEMO: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

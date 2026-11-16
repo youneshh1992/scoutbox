@@ -19,12 +19,11 @@
 // No fixture here calls buildSeed(): the defect class lives in the gap
 // between "the seed made it" and "the database guarantees it".
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
 import {
@@ -33,6 +32,7 @@ import {
   TRIAL_WORKFLOW_STATES,
 } from '../../domains/recruitment/lifecycle/trial.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -40,9 +40,6 @@ const LATEST_SCHEMA = Number(
     .at(-1)
     .slice(0, 4),
 ); // the latest table migration's number
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 
 let passed = 0;
 let negatives = 0;
@@ -77,7 +74,8 @@ process.on('exit', () => {
 /** Boot the real server on a directory; return a client and a stop() that SIGTERMs and reads the stored records back. */
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

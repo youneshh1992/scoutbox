@@ -14,9 +14,8 @@ import os from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const { API, DATA_DIR } = await serverUnderTest();
 
 async function serverUnderTest() {
@@ -39,7 +38,8 @@ async function serverUnderTest() {
     });
   });
   const { API_URL: _u, ...env } = process.env;
-  const child = spawn(process.execPath, [path.join(SERVER_DIR, 'server.mjs')], {
+  const child = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...env, PORT: String(port), DATA_DIR: dir, SCOUTBOX_QUIET_LOGS: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

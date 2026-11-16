@@ -3,20 +3,20 @@
 // dev data), runs unit fixtures against the pure helpers, then drives everything over HTTP, ending with a
 // backup→isolated-restore cycle and a SIGKILL restart. Transitions stay in this suite because the restart check
 // reads one.
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { totp, totpValid, b32encode } from '../../domains/identity/totp.mjs';
 import { convertMinor } from '../../domains/recruitment/money.mjs';
 import { slotsOverlap } from '../../domains/scouting/slots.mjs';
 import { webhookUrlProblem } from '../../domains/integrations/webhooks.mjs';
 import { computeScenarioTotals } from '../../domains/recruitment/budgets.mjs';
 import { ageOn, isAdult } from '../../domain.ts';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 process.env.ALLOW_LOCAL_WEBHOOKS = '1'; // the SSRF guard reads this at call time — needed for the in-process fixtures too
 
@@ -27,7 +27,6 @@ const RCV_PORT = PORT + 300;
 const RESTORE_PORT = PORT + 301;
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m13-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
 const fail = (msg) => {
@@ -62,7 +61,8 @@ process.on('exit', () => {
   }
 });
 async function startServer(port = PORT, dataDir = DATA_DIR) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...ENV, PORT: String(port), DATA_DIR: dataDir },
     stdio: 'ignore',
   });

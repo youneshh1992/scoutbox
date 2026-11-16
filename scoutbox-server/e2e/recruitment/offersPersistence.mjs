@@ -18,21 +18,18 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { readRecords, writeFixture } from '../../scripts/dataLayerFixture.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { offerIntegrity } from '../../domains/recruitment/offers/offer.mjs';
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
     .sort()
     .at(-1)
     .slice(0, 4),
 ); // the latest table migration's number
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 
 let passed = 0;
 let negatives = 0;
@@ -70,7 +67,8 @@ process.on('exit', () => {
 
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(port),

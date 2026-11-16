@@ -15,13 +15,12 @@
 // Structure:  in-process first — the registry, the pure statistics, source sweeps;
 //             then HTTP against a fresh server;
 //             then a second boot: migration idempotence and the upgrade path
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   RECRUITMENT_ANALYTICS_POLICY_VERSION,
@@ -85,12 +84,9 @@ import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { openLayer } from '../../scripts/dataLayerFixture.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { buildReportingContext } from '../../scripts/recruitmentReadsFixture.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 import { liveEvents } from '../support/liveEvents.mjs'; // the contacts/offers queries over plain arrays
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER_DIR = path.join(HERE, '..', '..');
-const ROOT = path.join(SERVER_DIR, '..');
-const SERVER = path.join(SERVER_DIR, 'server.mjs');
 const PORT = pickPort(5960, 8, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m20-'));
@@ -822,7 +818,7 @@ process.on('exit', () => {
   }
 });
 async function boot(env, base) {
-  const proc = spawn(process.execPath, [SERVER], { env, stdio: 'ignore' });
+  const proc = spawn(...serverCommand(), { cwd: serverDir, env, stdio: 'ignore' });
   children.push(proc);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) {

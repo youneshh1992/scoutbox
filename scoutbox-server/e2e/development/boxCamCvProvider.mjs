@@ -28,7 +28,7 @@ import {
 } from '../../domains/development/boxcam/cv/eligibility.mjs';
 import { decodeFrame } from '../../domains/development/boxcam/cv/frames.mjs';
 import { FRAME_LIMITS, FRAME_ENCODING } from '../../domains/development/boxcam/cv/policy.mjs';
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import {
   sequence,
   jugglePath,

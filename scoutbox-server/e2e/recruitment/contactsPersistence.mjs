@@ -17,18 +17,18 @@
 // class lives in the gap between "the seed made it" and "the database
 // guarantees it".
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { integrityReport } from '../../domains/platform/integrity.mjs';
 import { OPEN_ROOM_STATUSES } from '../../domains/recruitment/public.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { contactIntegrity, CONTACT_STATUSES } from '../../domains/recruitment/lifecycle/contact.mjs';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 import { buildRecruitmentJourney, createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -37,8 +37,6 @@ const LATEST_SCHEMA = Number(
     .slice(0, 4),
 ); // the latest table migration's number
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 
 let passed = 0;
@@ -74,7 +72,8 @@ process.on('exit', () => {
 /** Boot the real server on a directory; return a client and a stop() that SIGTERMs and reads the records back. */
 async function bootOn(dataDir, port) {
   const base = `http://localhost:${port}`;
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

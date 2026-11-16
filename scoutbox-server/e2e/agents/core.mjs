@@ -12,12 +12,11 @@
 // No assertion here is `status !== 200`. Every refusal names the status and
 // the code it expects.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   AGENT_POLICY_VERSION,
   VERIFICATION_STATES,
@@ -66,6 +65,7 @@ import { AGENT_CORE_MIGRATION } from '../../repositories/agentCore.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { TABLE_BACKED } from '../../repositories/index.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 const SCHEMA_VERSION = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -77,7 +77,6 @@ const SCHEMA_VERSION = Number(
 const PORT = pickPort(6300, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23agent-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 
 let passed = 0;
@@ -771,7 +770,8 @@ process.on('exit', () => {
   }
 });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(PORT),

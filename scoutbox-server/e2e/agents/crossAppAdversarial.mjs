@@ -9,13 +9,10 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { agreementInForce } from '../../domains/agents/core/shared.mjs';
 import { EVENT_REGISTRY, isRegistered } from '../../domains/platform/eventRegistry.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(HERE, '..', '..', '..');
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const PORT = Number(process.env.PORT || 4141);
 const BASE = `http://127.0.0.1:${PORT}`;
 const DATA_DIR = process.env.DATA_DIR || mkdtempSync(path.join(tmpdir(), 'm23p56e-repair-'));
@@ -56,7 +53,8 @@ process.on('exit', () => {
   }
 });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(PORT),

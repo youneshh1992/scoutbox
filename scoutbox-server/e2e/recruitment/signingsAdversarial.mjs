@@ -19,13 +19,12 @@
 // Every refusal asserts its exact status AND code. Nothing here weakens a
 // gate.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { openLayer, readRecords, plantCase } from '../../scripts/dataLayerFixture.mjs';
 import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
 import { budgetsDrawn } from '../support/rateBudgets.mjs';
@@ -42,9 +41,8 @@ import {
   requiredPartiesFor,
   canStart,
 } from '../../domains/recruitment/signings/signing.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const PORT = pickPort(4300, 300, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23-signing-hardening-'));
@@ -110,7 +108,8 @@ process.on('exit', () => {
   }
 });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(PORT),

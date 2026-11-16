@@ -9,13 +9,12 @@
 //
 // Unit sections drive the pure engine; HTTP sections drive the real routes,
 // including S1–S8, N1–N8 and all 60 enumerated abuse cases.
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { playerMatchesBrief } from '../../domains/discovery/matching/match.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   SECOND_LOOK_POLICY_VERSION,
   EVALUATION_COVERAGE_POLICY_VERSION,
@@ -63,11 +62,11 @@ import {
   clampPage,
   safeM18Projection,
 } from '../../domains/discovery/shared.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 const PORT = pickPort(5800, 150, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m18-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
 let negatives = 0;
@@ -753,7 +752,7 @@ process.on('exit', () => {
   }
 });
 {
-  const proc = spawn(process.execPath, [SERVER], { env: ENV, stdio: 'ignore' });
+  const proc = spawn(...serverCommand(), { cwd: serverDir, env: ENV, stdio: 'ignore' });
   children.push(proc);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) {

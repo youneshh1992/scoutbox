@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { writeFixture } from './dataLayerFixture.mjs';
 import { buildSeed } from '../seed.mjs';
-import { freePort } from './testPort.mjs';
+import { freePort } from '../e2e/support/testPort.mjs';
 import {
   NOW,
   tempDir,

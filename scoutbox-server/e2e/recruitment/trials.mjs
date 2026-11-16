@@ -32,12 +32,11 @@
 // No assertion here is `status !== 200`. Every refusal names the status and
 // the code it expects.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   TRIAL_WORKFLOW_STATES,
   TRIAL_SESSION_KINDS,
@@ -73,6 +72,7 @@ import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { STATUS_EVIDENCE_REQUIRED, roomCan } from '../../domains/recruitment/rooms/shared.mjs';
 import { EVIDENCE_KINDS } from '../../domains/recruitment/lifecycle/evidence.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -84,7 +84,6 @@ const LATEST_SCHEMA = Number(
 const PORT = pickPort(6100, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 const S_ASSESS = 'PRIVATE_TRIAL_ASSESSMENT_SENTINEL_9481';
 const S_NOTE = 'PRIVATE_TRIAL_NOTE_SENTINEL_5284';
@@ -796,7 +795,8 @@ process.on('exit', () => {
   }
 });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, PORT: String(PORT), DATA_DIR, SCOUTBOX_QUIET_LOGS: '1', SCOUTBOX_TEST_CLOCK: '1' },
     stdio: 'ignore',
   });

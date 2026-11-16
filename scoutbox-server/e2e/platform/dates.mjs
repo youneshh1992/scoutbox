@@ -21,7 +21,7 @@
 // refusal names its status and its code. Run it under TZ=UTC and under
 // TZ=America/New_York: the counts must be identical.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -63,6 +63,7 @@ import { normWhen } from '../../domains/passport/shared.mjs';
 import { parseDate as devParseDate } from '../../domains/development/hub/shared.mjs';
 import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
 import { writeFixture } from '../../scripts/dataLayerFixture.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 const SCHEMA_VERSION = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -75,7 +76,6 @@ const PORT = pickPort(7600, 150, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-p57-'));
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const ADMIN = { 'x-admin-key': process.env.ADMIN_KEY || 'scoutbox-admin' };
 
 let passed = 0;
@@ -1295,7 +1295,8 @@ process.on('exit', () => {
   }
 });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(PORT),

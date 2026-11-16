@@ -6,12 +6,11 @@
 // The test-only observation provider (local_test) is enabled via
 // BOX_CAM_TEST_PROVIDER=1 — simulated observations are always labelled
 // simulated and can never exist in production.
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   verifiedActiveMs,
   dedupeReps,
@@ -28,11 +27,11 @@ import {
 } from '../../domains/development/boxcam/shared.mjs';
 import { DRILLS, drillByIdVersion, providerFor, PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
 import { combineVerifiedProtocols, combineCapabilities } from '../../domains/development/boxcam/cv/eligibility.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 const PORT = pickPort(4700, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m16-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
 let negatives = 0;
@@ -73,7 +72,7 @@ process.on('exit', () => {
   }
 });
 {
-  const proc = spawn(process.execPath, [SERVER], { env: ENV, stdio: 'ignore' });
+  const proc = spawn(...serverCommand(), { cwd: serverDir, env: ENV, stdio: 'ignore' });
   children.push(proc);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) {

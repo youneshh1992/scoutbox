@@ -8,7 +8,6 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   applyTransition,
   canTransition,
@@ -30,14 +29,14 @@ import {
   orgVerificationStatus,
   arrayTokenStore,
 } from '../../domains/verification/claims/shared.mjs';
-import { totp } from '../../domains/identity/totp.mjs';
-import { pickPort } from '../../scripts/testPort.mjs';
+import { totp } from '../support/totp.mjs';
+import { pickPort } from '../support/testPort.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 const PORT = pickPort(4600, 300, [0, 300]); // never a fetch-blocked port
 const DOWN_PORT = PORT + 300;
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m14-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
 const fail = (msg) => {
@@ -72,7 +71,8 @@ process.on('exit', () => {
   }
 });
 async function startServer(port = PORT, dataDir = DATA_DIR, extraEnv = {}) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...ENV, PORT: String(port), DATA_DIR: dataDir, ...extraEnv },
     stdio: 'ignore',
   });

@@ -39,7 +39,7 @@ import { ROOM_CASES_FIX } from './recruitmentCasesTestFixtures.mjs';
 import { CONTACTS_OFFERS_FIX } from './recruitmentContactsOffersTestFixtures.mjs';
 import { SIGNINGS_FIX } from './signingsFollowUpsTestFixtures.mjs';
 import { spawnChild } from './testChildren.mjs';
-import { freePort } from './testPort.mjs';
+import { freePort } from '../e2e/support/testPort.mjs';
 
 const arg = (i, fallback) => (process.argv[i] === undefined ? fallback : Number(process.argv[i]));
 const PLAYERS = arg(2, 100_000);

@@ -7,9 +7,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = 4101;
 const API = `http://localhost:${PORT}`;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'scoutbox-connected-'));
@@ -49,8 +48,8 @@ function cleanup() {
 process.on('exit', cleanup);
 
 async function startServer(extraEnv = {}) {
-  child = spawn('node', ['server.mjs'], {
-    cwd: SERVER_DIR,
+  child = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, PORT: String(PORT), DATA_DIR: DATA, ...extraEnv },
     stdio: 'ignore',
   });

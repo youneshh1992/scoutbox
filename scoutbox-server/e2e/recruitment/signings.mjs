@@ -13,13 +13,12 @@
 // X legacy · Y temporal · Z signing boundary. The adversarial cases are
 // marked `#n`. Every refusal asserts its exact status AND code.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { factsMoved, playerFacts } from '../support/playerFacts.mjs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { EVENT_REGISTRY } from '../../domains/platform/eventRegistry.mjs';
@@ -54,6 +53,7 @@ import {
   cleanText,
   SIGNING_INPUT_CODES,
 } from '../../domains/recruitment/signings/signing.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
     .sort()
@@ -61,8 +61,6 @@ const LATEST_SCHEMA = Number(
     .slice(0, 4),
 ); // the latest table migration's number
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const PORT = pickPort(7100, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23sg-'));
@@ -519,7 +517,8 @@ process.on('exit', () => {
   }
 });
 async function boot() {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(PORT),

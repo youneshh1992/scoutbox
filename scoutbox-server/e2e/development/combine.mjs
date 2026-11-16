@@ -13,7 +13,6 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   COMBINE_PROTOCOLS,
   combineProtocol,
@@ -27,12 +26,12 @@ import {
   comparisonMatrix,
 } from '../../domains/development/boxcam/combineShared.mjs';
 import { PROVIDERS } from '../../domains/development/boxcam/drills.mjs';
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 const PORT = pickPort(4900, 180, [0]); // never a fetch-blocked port
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m161-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
 let negatives = 0;
@@ -73,7 +72,7 @@ process.on('exit', () => {
   }
 });
 {
-  const proc = spawn(process.execPath, [SERVER], { env: ENV, stdio: 'ignore' });
+  const proc = spawn(...serverCommand(), { cwd: serverDir, env: ENV, stdio: 'ignore' });
   children.push(proc);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) {

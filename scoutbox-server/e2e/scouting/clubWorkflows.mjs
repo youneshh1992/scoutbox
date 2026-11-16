@@ -1,27 +1,22 @@
 // Club scouting workflows: evidence, assessments, video, recruitment, tactical fit, opportunities, campaigns,
-// development, trial days, outcomes and access, including the negative permission paths. Run against a freshly
-// seeded ISOLATED server:
-//   DATA_DIR=$(mktemp -d) PORT=4102 node server.mjs &
-//   API_URL=http://localhost:4102 node e2e/scouting/clubWorkflows.mjs
-// The outcomes section restarts the server (SIGKILL) to prove scheduled work survives — pass RESTART_CMD handling
-// via the wrapper below.
+// development, trial days, outcomes and access, including the negative permission paths, against a freshly seeded
+// server of its own. The outcomes section restarts the server (SIGKILL) to prove scheduled work survives.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = 4102;
 const API = `http://localhost:${PORT}`;
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'm12e2e-'));
 
 let server = null;
 async function startServer() {
-  server = spawn('node', ['server.mjs'], {
-    cwd: SERVER_DIR,
+  server = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, DATA_DIR: DATA, PORT: String(PORT) },
     stdio: 'ignore',
   });

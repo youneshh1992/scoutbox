@@ -15,12 +15,11 @@
 // Structure:  §1–§9   in-process — the pure engines, the vocabulary, source sweeps
 //             §10–§22 HTTP against a fresh server
 //             §23     a second boot: restart idempotence
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   CRITERION_CLASSES,
@@ -73,10 +72,8 @@ import { DISCOVERY_MIGRATION, DISCOVERY_COLLECTIONS } from '../../repositories/d
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { SOURCE_CONTEXTS } from '../../domains/recruitment/rooms/shared.mjs';
 import { ageOn } from '../../domain.ts';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER_DIR = path.join(HERE, '..', '..');
-const SERVER = path.join(SERVER_DIR, 'server.mjs');
 const SCHEMA_VERSION = Number(
   DATA_MIGRATIONS.map((m) => m.id)
     .sort()
@@ -913,7 +910,7 @@ process.on('exit', () => {
   }
 });
 async function boot(env, base) {
-  const proc = spawn(process.execPath, [SERVER], { env, stdio: 'ignore' });
+  const proc = spawn(...serverCommand(), { cwd: serverDir, env, stdio: 'ignore' });
   children.push(proc);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) {

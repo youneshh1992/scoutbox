@@ -1,6 +1,7 @@
 // The language-neutral battery support in e2e/support/: the boundary the batteries keep, the specification tables,
 // the server contract, the row reader, and the SQL case plants (which must leave what the repository plants leave).
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -9,6 +10,8 @@ import { boundaryProblems } from '../e2e/support/boundary.mjs';
 import { serverCommand, serverDir } from '../e2e/support/server.mjs';
 import { openFixture, writeFixture, plantCase, legacyMoves } from '../e2e/support/sqlFixture.mjs';
 import { readRows, rows, json } from '../e2e/support/sqlRows.mjs';
+import { totp as supportTotp } from '../e2e/support/totp.mjs';
+import * as serverTotp from '../domains/identity/totp.mjs';
 import { boundaryReport } from './e2eBoundary.mjs';
 import { undocumented } from './e2eContract.mjs';
 import { notData, specProblems } from './specSnapshot.mjs';
@@ -38,6 +41,8 @@ assert.deepEqual(crossings("const m = await import('../../domains/x.mjs');"), [
 assert.deepEqual(crossings("const D = path.join(HERE, '..', '..', 'temporal.ts');"), ['builds a path outside e2e/']);
 assert.deepEqual(crossings("spawn('node', ['server.mjs'], {"), ['starts the server itself (use support/server.mjs)']);
 assert.deepEqual(crossings("import { j } from '../support/liveEvents.mjs';"), []);
+assert.deepEqual(crossings("import { serverCommand } from '../support/server.mjs';"), []);
+assert.deepEqual(crossings('// node server.mjs &'), ['starts the server itself (use support/server.mjs)']);
 assert.deepEqual(crossings("import path from 'node:path';"), []);
 assert.deepEqual(boundaryReport(), [], 'every file under e2e/ keeps the boundary, or is listed as not yet neutral');
 console.log(
@@ -50,6 +55,26 @@ assert.equal(cmd, process.execPath);
 assert.ok(fs.existsSync(args[0]) && path.basename(args[0]) === 'server.mjs', 'the launcher starts server.mjs');
 assert.ok(fs.existsSync(path.join(serverDir, 'package.json')), 'serverDir is the server directory');
 console.log('✓ support/server.mjs starts this server from its own directory');
+
+// ---------------------------------------------------------------- the authenticator
+{
+  // The battery's authenticator must show the codes the server accepts: the RFC 6238 vectors, and random secrets
+  // at random times against the server's own TOTP.
+  const rfc = serverTotp.b32encode(Buffer.from('12345678901234567890'));
+  for (const [s, code] of [
+    [59, '287082'],
+    [1111111109, '081804'],
+    [1234567890, '005924'],
+  ])
+    assert.equal(supportTotp(rfc, s * 1000), code, `RFC 6238 at t=${s}s`);
+  for (let i = 0; i < 200; i++) {
+    const secret = serverTotp.b32encode(crypto.randomBytes(20));
+    const at = crypto.randomInt(0, 2 ** 47);
+    assert.equal(supportTotp(secret, at), serverTotp.totp(secret, at), `${secret} at ${at}`);
+    assert.ok(serverTotp.totpValid(secret, supportTotp(secret, at), at));
+  }
+  console.log("✓ support/totp.mjs shows the codes the server's TOTP accepts");
+}
 
 // ---------------------------------------------------------------- specification tables and the contract
 assert.deepEqual(await specProblems(), [], 'e2e/support/spec/ is current: run node scripts/specSnapshot.mjs');

@@ -14,13 +14,11 @@ import crypto from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { writeFixture } from '../support/sqlFixture.mjs';
-import { isFetchBlockedPort, pickPort } from '../../scripts/testPort.mjs';
+import { isFetchBlockedPort, pickPort } from '../support/testPort.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 let passed = 0;
 let negatives = 0;
 let failures = 0;
@@ -57,7 +55,8 @@ process.on('exit', () => {
 });
 
 async function boot(env = {}, dataDir = DATA, port = PORT) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...process.env, PORT: String(port), DATA_DIR: dataDir, SCOUTBOX_QUIET_LOGS: '1', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

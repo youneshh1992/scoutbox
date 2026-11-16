@@ -9,12 +9,11 @@
 //
 // Unit sections drive the pure engine directly; HTTP sections then drive the
 // real routes, including all 48 enumerated abuse cases.
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   ROOM_STATUSES,
   ROOM_STATUS_LABELS,
@@ -54,11 +53,11 @@ import {
   SNAPSHOT_STATUSES,
   REASON_REQUIRED_STATUSES,
 } from '../../domains/recruitment/rooms/shared.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 const PORT = pickPort(5400, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m17-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
 let negatives = 0;
@@ -638,7 +637,7 @@ process.on('exit', () => {
   }
 });
 {
-  const proc = spawn(process.execPath, [SERVER], { env: ENV, stdio: 'ignore' });
+  const proc = spawn(...serverCommand(), { cwd: serverDir, env: ENV, stdio: 'ignore' });
   children.push(proc);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) {

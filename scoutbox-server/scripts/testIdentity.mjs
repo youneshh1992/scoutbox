@@ -22,7 +22,7 @@ import {
 } from '../domains/platform/capabilities.mjs';
 import { createBilling, createIdvProvider, createStorage } from '../adapters.mjs';
 import { buildSeed } from '../seed.mjs';
-import { freePort } from './testPort.mjs';
+import { freePort } from '../e2e/support/testPort.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 

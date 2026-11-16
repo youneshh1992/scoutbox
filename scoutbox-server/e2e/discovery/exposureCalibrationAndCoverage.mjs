@@ -5,12 +5,12 @@
 // coerced, the growing lists page, and reading a player's evidence gaps rewrites nothing that
 // did not change.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
 process.env.ALLOW_LOCAL_WEBHOOKS = '1'; // the SSRF guard reads this at call time — needed for the in-process fixtures too
 
@@ -19,7 +19,6 @@ process.env.ALLOW_LOCAL_WEBHOOKS = '1'; // the SSRF guard reads this at call tim
 const PORT = pickPort(7600, 300, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-discovery-ops-'));
-const SERVER = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'server.mjs');
 
 let passed = 0;
 const fail = (msg) => {
@@ -54,7 +53,8 @@ process.on('exit', () => {
   }
 });
 async function startServer(port = PORT, dataDir = DATA_DIR) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: { ...ENV, PORT: String(port), DATA_DIR: dataDir },
     stdio: 'ignore',
   });

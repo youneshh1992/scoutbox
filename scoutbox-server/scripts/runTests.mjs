@@ -1,7 +1,7 @@
 // `npm test`: the server's unit suites, several at a time.
 //
 // Each suite is its own process on its own temporary directories and
-// OS-assigned ports (testPort.mjs freePort); suiteRunner.mjs runs them side by side.
+// OS-assigned ports (e2e/support/testPort.mjs freePort); suiteRunner.mjs runs them side by side.
 //
 //   npm test                          every suite, TEST_JOBS at a time (default: up to 4)
 //   npm test -- testOrgs testSessions only those suites
@@ -95,7 +95,7 @@ export const SUITES = [
 ];
 // Files named test*.mjs that are helpers, not suites. Any other test*.mjs must
 // be in SUITES: a new suite that nobody listed would otherwise never run.
-const HELPERS = ['testChildren', 'testExpoStub', 'testPort', 'testSendgridStub'];
+const HELPERS = ['testChildren', 'testExpoStub', 'testSendgridStub'];
 const SUITE_TIMEOUT_MS = 10 * 60_000;
 
 const unlisted = fs

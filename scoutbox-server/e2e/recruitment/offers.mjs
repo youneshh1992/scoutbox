@@ -22,12 +22,11 @@
 // No assertion here is `status !== 200`. Every refusal names the status and
 // the code it expects.
 
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   OFFER_POLICY_VERSION,
   OFFER_STATUSES,
@@ -82,6 +81,7 @@ import {
 import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
 import { isAdult } from '../../domain.ts';
 import { isExpiredAt, parseInstant } from '../../temporal.ts';
+import { serverCommand, serverDir } from '../support/server.mjs';
 import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
 const LATEST_SCHEMA = Number(
   DATA_MIGRATIONS.map((m) => m.id)
@@ -93,8 +93,6 @@ const LATEST_SCHEMA = Number(
 const PORT = pickPort(6700, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23o-'));
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER = path.join(HERE, '..', '..', 'server.mjs');
 const S_NOTE = 'PRIVATE_OFFER_INTERNAL_NOTE_SENTINEL_7731';
 const S_DEC = 'PRIVATE_DECISION_RATIONALE_SENTINEL_5914';
 const S_ASSESS = 'PRIVATE_ASSESSMENT_SENTINEL_3407';
@@ -857,7 +855,8 @@ process.on('exit', () => {
   }
 });
 async function boot(env = {}) {
-  const proc = spawn(process.execPath, [SERVER], {
+  const proc = spawn(...serverCommand(), {
+    cwd: serverDir,
     env: {
       ...process.env,
       PORT: String(PORT),

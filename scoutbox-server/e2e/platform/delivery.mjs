@@ -17,10 +17,9 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { freePort } from '../../scripts/testPort.mjs';
+import { freePort } from '../support/testPort.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const SERVER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PORT = await freePort();
 const RCV_PORT = await freePort();
 const API = `http://localhost:${PORT}`;
@@ -111,8 +110,8 @@ receiver = http.createServer((req, res) => {
 });
 await new Promise((r) => receiver.listen(RCV_PORT, '127.0.0.1', r));
 
-child = spawn('node', ['server.mjs'], {
-  cwd: SERVER_DIR,
+child = spawn(...serverCommand(), {
+  cwd: serverDir,
   env: {
     ...process.env,
     PORT: String(PORT),

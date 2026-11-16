@@ -18,12 +18,11 @@
 //             §17     G1–G15, the positive journeys
 //             §18–§19 notifications, events and the demo mirrors
 //             §20     a second boot: migration idempotence
-import { pickPort } from '../../scripts/testPort.mjs';
+import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import {
   DEVELOPMENT_POLICY_VERSION,
@@ -101,10 +100,8 @@ import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/no
 import { openLayer, readRecords } from '../../scripts/dataLayerFixture.mjs';
 import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
 import { resolveEvidenceLink, recordBelongsToPlayer } from '../../scripts/recruitmentReadsFixture.mjs';
+import { serverCommand, serverDir } from '../support/server.mjs';
 
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SERVER_DIR = path.join(HERE, '..', '..');
-const SERVER = path.join(SERVER_DIR, 'server.mjs');
 const PORT = pickPort(5940, 8, [0]);
 const BASE = `http://localhost:${PORT}`;
 const DATA_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m21-'));
@@ -1081,7 +1078,7 @@ process.on('exit', () => {
   }
 });
 async function boot(env, base) {
-  const proc = spawn(process.execPath, [SERVER], { env, stdio: 'ignore' });
+  const proc = spawn(...serverCommand(), { cwd: serverDir, env, stdio: 'ignore' });
   children.push(proc);
   let up = false;
   for (let i = 0; i < 160 && !up; i++) {

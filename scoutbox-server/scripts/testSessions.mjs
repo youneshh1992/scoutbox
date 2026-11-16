@@ -22,7 +22,7 @@ import { hasBlobTable } from './coreIdentityTestFixtures.mjs';
 // registered list is what attachDataLayer and the real-server checks below run.
 const IDENTITY_BASE_MIGRATIONS = DATA_MIGRATIONS.filter((m) => /^000[1-4]_/.test(m.id));
 import { buildSeed } from '../seed.mjs';
-import { freePort } from './testPort.mjs';
+import { freePort } from '../e2e/support/testPort.mjs';
 
 let passed = 0;
 function test(name, fn) {

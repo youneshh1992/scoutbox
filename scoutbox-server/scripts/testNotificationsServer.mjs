@@ -11,7 +11,7 @@
 // DATA_DIR or any real data. Run with: npm test
 import assert from 'node:assert/strict';
 import { spawnChild } from './testChildren.mjs';
-import { freePort } from './testPort.mjs';
+import { freePort } from '../e2e/support/testPort.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
