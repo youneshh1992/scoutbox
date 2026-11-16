@@ -2,44 +2,88 @@
 //
 // THE INVARIANTS
 //
-//   1. A trial row reads back with the operational containers at NEUTRAL
-//      values (`legacy_accepted`, no schedule, no attendance, no completion)
-//      and never renames `awaiting_report` / `reported`, never invents a
-//      date, an attendance or a completion.
+//   1. A trial row is a typed row: the report statuses (`awaiting_report`,
+//      `reported`) are not workflow states, so nothing can have renamed them.
 //   2. A fixture that carries workflow trial rows restores them byte-faithfully
 //      through a real boot: sessions keep their ids and order, the append-only
 //      revisions and attendance history keep every entry, the idempotency
 //      keys live on the row.
 //   3. A corrupt trial row is NAMED and OMITTED from the room's trial list
 //      (counted, logged) and never takes the server down; a sound row on the
-//      same case still serves.
+//      same case still serves. A row the typed tables cannot hold is refused
+//      by the schema, and nothing is written.
 //   4. Clean boot → invitation → acceptance → restart: the replay keys, the
 //      case stage and the trial state are the same after the process died.
 //
 // No fixture here calls buildSeed(): the defect class lives in the gap
-// between "the seed made it" and "the database guarantees it".
+// between "the seed made it" and "the database guarantees it". Fixtures are
+// written and read back as stored rows. How the repository writes the older
+// record shapes into these rows, and its refusal of records that have no row
+// form (an entry that is not a record, a list that is not a list), is in
+// scripts/testRecruitment.mjs.
 
 import { pickPort } from '../support/testPort.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { writeFixture, readRecords } from '../../scripts/dataLayerFixture.mjs';
-import { JOURNEY_REQUIRED_STORES } from '../../domains/recruitment/lifecycle/journey.mjs';
-import {
-  trialIntegrity,
-  deriveWorkflowState,
-  TRIAL_WORKFLOW_STATES,
-} from '../../domains/recruitment/lifecycle/trial.mjs';
-import { DATA_MIGRATIONS, TABLE_BACKED } from '../../repositories/index.mjs';
+import { openFixture } from '../support/sqlFixture.mjs';
+import { readRows } from '../support/sqlRows.mjs';
+import trialSpec from '../support/spec/recruitment/lifecycle/trial.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
-import { createEvidenceProvider } from '../../scripts/recruitmentReadsFixture.mjs'; // the contacts/offers queries over plain arrays
-const LATEST_SCHEMA = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-); // the latest table migration's number
+
+const { TRIAL_WORKFLOW_STATES } = trialSpec;
+// The table migrations a new database records, as the migrated schema lists them.
+const MIGRATIONS = (() => {
+  const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-m23t-schema-')));
+  try {
+    return R.rows('data_migrations').map((r) => r.id);
+  } finally {
+    R.close();
+  }
+})();
+const LATEST_SCHEMA = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table migration's number
+
+// The tables a trial is stored in, and the request tables that name it.
+const TRIAL_TABLES = [
+  'trials',
+  'trial_schedule_sessions',
+  'trial_session_evidence',
+  'trial_schedule_revisions',
+  'trial_revision_sessions',
+  'trial_attendance',
+  'trial_history',
+  'trial_keys',
+  'trial_reminders',
+  'trial_reports',
+  'trial_day_staff',
+  'trial_day_consents',
+  'trial_day_checkins',
+  'trial_day_status_events',
+];
+/** What a stopped server left: the trial tables, the requests and the cases, as stored rows. */
+const stored = (dir) => {
+  const R = readRows(dir);
+  try {
+    return Object.fromEntries(
+      [...TRIAL_TABLES, 'recruitment_requests', 'request_trial_slots', 'recruitment_cases'].map((t) => [t, R.rows(t)]),
+    );
+  } finally {
+    R.close();
+  }
+};
+/** Every row of one trial in every trial table, as text to compare. */
+const trialRows = (s, id) =>
+  JSON.stringify(TRIAL_TABLES.map((t) => s[t].filter((r) => (t === 'trials' ? r.id : r.trial_id) === id)));
+/** The whole database, as text: the yardstick for "nothing was written". */
+const everything = (dir) => {
+  const R = readRows(dir);
+  try {
+    return JSON.stringify(R.all());
+  } finally {
+    R.close();
+  }
+};
 
 let passed = 0;
 let negatives = 0;
@@ -117,7 +161,7 @@ async function bootOn(dataDir, port) {
   const stop = async () => {
     proc.kill('SIGTERM');
     for (let i = 0; i < 60 && proc.exitCode == null; i += 1) await sleep(100);
-    return readRecords(dataDir);
+    return stored(dataDir);
   };
   return { up, j, stop, log: () => log };
 }
@@ -125,492 +169,437 @@ async function bootOn(dataDir, port) {
 const PORT = pickPort(5700, 200, [0, 1, 2, 3]);
 const H = 3_600_000;
 const T0 = 1_800_000_000_000; // 2027-01-15T08:00:00Z — inside the 2000–2100 window, in the future
+const NOW = Date.now(); // when the fixtures are installed: the migrated schema's own rows carry it
 
-// ------------------------------------------------------------- fixtures
+// ------------------------------------------------------------- fixtures, as stored rows
 
-/** A minimal, sound database: one verified club with a lead, one adult player, one case at under_review. */
-function baseDb() {
-  const db = {
-    players: [
-      {
-        id: 'pl-x',
-        name: 'Xavier Adult',
-        dob: '2000-05-05',
-        country: 'GB',
-        city: 'London',
-        media: [],
-        attendance: [],
-        trialReports: [],
-        badges: [],
-        timeline: [],
-        medical: { shared: false, records: [], conditionStatus: 'unknown' },
-        level: 'amateur',
-        location: { lat: 51.5, lng: -0.1 },
-      },
-    ],
-    orgs: [
-      {
-        id: 'org-x',
-        name: 'X FC',
-        type: 'club',
-        level: 'pro',
-        plan: 'Pro',
-        verified: true,
-        safeguardingContractSigned: true,
-        location: { lat: 51.5, lng: -0.1 },
-      },
-    ],
-    guardians: [],
-    // A request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
-    // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).
-    users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }],
-    sessions: [],
-    ledger: [],
-    notifications: [],
-    recruitmentCases: [
-      {
-        id: 'case-x',
-        orgId: 'org-x',
-        playerId: 'pl-x',
-        playerName: 'Xavier Adult',
-        ownerUserId: 'usr-owner',
-        ownerName: 'Owner',
-        stage: 'review',
-        priority: 'medium',
-        restricted: false,
-        assignments: [],
-        tasks: [],
-        approvals: [],
-        decision: null,
-        links: { requestIds: [], trialIds: [], signingId: null },
-        room: {
-          status: 'under_review',
-          priority: 'normal',
-          tags: [],
-          leadScoutUserId: 'usr-owner',
-          sourceContext: 'search',
-          updatedAt: 1000,
-          archivedAt: null,
-          closedAt: null,
-          rev: 2,
-          revAt: 1000,
-          revBy: null,
-        },
-        createdAt: 1000,
-        history: [
-          {
-            id: 'aud-1',
-            at: 1000,
-            byKind: 'org',
-            byId: 'usr-owner',
-            byName: 'Owner',
-            action: 'room_created',
-            detail: { status: 'watching' },
-          },
-          {
-            id: 'aud-2',
-            at: 1001,
-            byKind: 'org',
-            byId: 'usr-owner',
-            byName: 'Owner',
-            action: 'room_status_changed',
-            detail: { from: 'watching', to: 'under_review', reasonCodes: [] },
-          },
-        ],
-      },
-    ],
-  };
-  db.trials ??= [];
-  db.requests ??= [];
-  return db;
-}
+/** A minimal, sound database: one verified club with a lead, one adult player, one case at `roomStatus`. The case's
+ *  owner and lead scout, and a request's staff member, are real staff keys, so the fixture carries the staff row. */
+const baseRows = ({ roomStatus = 'under_review', profileSignal = 30 } = {}) => ({
+  orgs: [
+    {
+      id: 'org-x',
+      name: 'X FC',
+      type: 'club',
+      level: 'pro',
+      plan: 'Pro',
+      lat: 51.5,
+      lng: -0.1,
+      trusted_partner: 0,
+      verified: 1,
+      safeguarding_contract_signed: 1,
+      suspended: 0,
+      email_domain_verified: 0,
+      mfa_required_for_leads: 0,
+      created_at: NOW,
+    },
+  ],
+  org_users: [
+    {
+      id: 'usr-owner',
+      org_id: 'org-x',
+      name: 'Owner',
+      name_key: 'owner',
+      role: 'Head of Recruitment',
+      created_at: 1,
+      email_enabled: 1,
+    },
+  ],
+  players: [
+    {
+      id: 'pl-x',
+      name: 'Xavier Adult',
+      birth_date: '2000-05-05',
+      country: 'GB',
+      city: 'London',
+      academy_plus: 0,
+      first_team_seeker: 0,
+      availability: 'not_seeking',
+      contract_status: 'unknown',
+      level: 'amateur',
+      identity_verified: 0,
+      lat: 51.5,
+      lng: -0.1,
+      medical_shared: 0,
+      medical_condition_status: 'unknown',
+      // The player's stored profile figure counts the reports filed on their trials (one, in the pair).
+      profile_signal: profileSignal,
+    },
+  ],
+  recruitment_cases: [
+    {
+      id: 'case-x',
+      org_id: 'org-x',
+      player_id: 'pl-x',
+      player_name: 'Xavier Adult',
+      owner_user_id: 'usr-owner',
+      owner_name: 'Owner',
+      stage: 'review',
+      priority: 'medium',
+      restricted: 0,
+      created_at: 1000,
+      room_status: roomStatus,
+      room_priority: 'normal',
+      room_lead_scout_user_id: 'usr-owner',
+      room_source_context: 'search',
+      room_updated_at: 1000,
+      room_rev: 2,
+      room_rev_at: 1000,
+    },
+  ],
+  case_history: [
+    {
+      case_id: 'case-x',
+      position: 0,
+      id: 'aud-1',
+      at: 1000,
+      action: 'room_created',
+      by_kind: 'org',
+      by_id: 'usr-owner',
+      by_name: 'Owner',
+      detail_json: JSON.stringify({ status: 'watching' }),
+    },
+    {
+      case_id: 'case-x',
+      position: 1,
+      id: 'aud-2',
+      at: 1001,
+      action: 'room_status_changed',
+      by_kind: 'org',
+      by_id: 'usr-owner',
+      by_name: 'Owner',
+      detail_json: JSON.stringify({ from: 'watching', to: 'under_review', reasonCodes: [] }),
+    },
+  ],
+});
 
-/** A sound, fully-populated workflow trial row: two sessions, two revisions, two attendance records, one evidence link, keys. */
-const soundTrial = (over = {}) => ({
-  id: 'trial-1',
-  requestId: 'req-1',
-  caseId: 'case-x',
-  playerId: 'pl-x',
-  playerName: 'Xavier Adult',
-  orgId: 'org-x',
-  orgName: 'X FC',
-  scoutName: 'Owner',
-  acceptedAt: T0,
-  acceptedBy: 'player',
-  guardianApproved: false,
-  proposedDate: '2027-01-15',
-  venue: 'Dome, London',
-  notes: '',
-  reportDueAt: T0 + 7 * 86_400_000,
-  status: 'awaiting_report',
-  workflowState: 'scheduled',
-  schedule: {
-    timezone: 'Europe/London',
-    revision: 2,
-    proposedAt: T0 + 100,
-    proposedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-    confirmedAt: T0 + 200,
-    confirmedBy: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
-    declinedAt: null,
-    declinedBy: null,
-    sessions: [
+const BY_OWNER = (p) => ({ [`${p}_kind`]: 'org', [`${p}_user_id`]: 'usr-owner', [`${p}_name`]: 'Owner' });
+const BY_PLAYER = (p) => ({ [`${p}_kind`]: 'player', [`${p}_actor_id`]: 'pl-x', [`${p}_name`]: 'Xavier Adult' });
+const VENUE = { venue_name: 'Dome', venue_town: 'London' };
+const TSES_1 = { id: 'tses-1', kind: 'training', starts_at: T0 + 2 * H, ends_at: T0 + 4 * H, ...VENUE };
+const TSES_2 = {
+  id: 'tses-2',
+  kind: 'match',
+  starts_at: T0 + 48 * H,
+  ends_at: T0 + 50 * H,
+  ...VENUE,
+  venue_address: '1 Dome Road',
+  instructions: 'Gate B',
+};
+
+/** A sound, fully-populated workflow trial: two sessions, two revisions, two attendance records, one evidence link,
+ *  keys and its history, in its rows. `over` changes the trials row. */
+const soundTrialRows = (over = {}) => {
+  const id = over.id ?? 'trial-1';
+  const of = (rows) => rows.map((r) => ({ trial_id: id, ...r }));
+  const history = (position, hid, at, action, by, detail) => ({
+    position,
+    id: hid,
+    at,
+    action,
+    ...(by === 'player'
+      ? { by_kind: 'player', by_actor_id: 'pl-x', by_name: 'Xavier Adult' }
+      : { by_kind: 'org', by_user_id: 'usr-owner', by_name: 'Owner' }),
+    detail_json: JSON.stringify(detail),
+  });
+  return {
+    trials: [
       {
-        id: 'tses-2',
-        kind: 'match',
-        startsAt: T0 + 48 * H,
-        endsAt: T0 + 50 * H,
-        venue: { name: 'Dome', town: 'London', address: '1 Dome Road' },
-        instructions: 'Gate B',
-        evidence: [
-          {
-            id: 'tev-1',
-            kind: 'box_cam_session',
-            sessionId: 'bx-1',
-            linkedAt: T0 + 300,
-            linkedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-            removedAt: null,
-            removedBy: null,
-          },
-        ],
-      },
-      {
-        id: 'tses-1',
-        kind: 'training',
-        startsAt: T0 + 2 * H,
-        endsAt: T0 + 4 * H,
-        venue: { name: 'Dome', town: 'London', address: '1 Dome Road' },
-        instructions: null,
-        evidence: [],
+        id,
+        request_id: 'req-1',
+        case_id: 'case-x',
+        player_id: 'pl-x',
+        player_name: 'Xavier Adult',
+        org_id: 'org-x',
+        org_name: 'X FC',
+        scout_name: 'Owner',
+        accepted_at: T0,
+        accepted_by: 'player',
+        guardian_approved: 0,
+        proposed_date: '2027-01-15',
+        venue: 'Dome, London',
+        notes: '',
+        report_due_at: T0 + 7 * 86_400_000,
+        status: 'awaiting_report',
+        reminder_sent: 0,
+        workflow_state: 'scheduled',
+        schedule_timezone: 'Europe/London',
+        schedule_revision: 2,
+        schedule_proposed_at: T0 + 100,
+        ...BY_OWNER('schedule_proposed_by'),
+        schedule_confirmed_at: T0 + 200,
+        ...BY_PLAYER('schedule_confirmed_by'),
+        recipient_type: 'player',
+        recipient_player_id: 'pl-x',
+        recipient_minor: 0,
+        recipient_at: T0,
+        rev: 5,
+        rev_at: T0 + 3 * H + 1,
+        rev_by_user_id: 'usr-owner',
+        rev_by_name: 'Owner',
+        ...over,
       },
     ],
-    revisions: [
+    // The current schedule, in its stored order (the match first).
+    trial_schedule_sessions: of([
+      { position: 0, ...TSES_2 },
+      { position: 1, ...TSES_1, venue_address: '1 Dome Road' },
+    ]),
+    trial_session_evidence: of([
       {
+        session_id: 'tses-2',
+        position: 0,
+        id: 'tev-1',
+        kind: 'box_cam_session',
+        box_session_id: 'bx-1',
+        linked_at: T0 + 300,
+        ...BY_OWNER('linked_by'),
+      },
+    ]),
+    trial_schedule_revisions: of([
+      {
+        position: 0,
         revision: 1,
         timezone: 'Europe/London',
-        sessions: [
-          {
-            id: 'tses-1',
-            kind: 'training',
-            startsAt: T0 + 2 * H,
-            endsAt: T0 + 4 * H,
-            venue: { name: 'Dome', town: 'London', address: null },
-            instructions: null,
-          },
-        ],
-        proposedAt: T0,
-        proposedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-        confirmedAt: T0,
-        confirmedBy: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
-        supersededAt: T0 + 100,
+        proposed_at: T0,
+        ...BY_OWNER('proposed_by'),
+        confirmed_at: T0,
+        ...BY_PLAYER('confirmed_by'),
+        superseded_at: T0 + 100,
         reason: 'invitation',
-        material: null,
       },
       {
+        position: 1,
         revision: 2,
         timezone: 'Europe/London',
-        sessions: [
-          {
-            id: 'tses-1',
-            kind: 'training',
-            startsAt: T0 + 2 * H,
-            endsAt: T0 + 4 * H,
-            venue: { name: 'Dome', town: 'London', address: '1 Dome Road' },
-            instructions: null,
-          },
-          {
-            id: 'tses-2',
-            kind: 'match',
-            startsAt: T0 + 48 * H,
-            endsAt: T0 + 50 * H,
-            venue: { name: 'Dome', town: 'London', address: '1 Dome Road' },
-            instructions: 'Gate B',
-          },
-        ],
-        proposedAt: T0 + 100,
-        proposedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-        confirmedAt: T0 + 200,
-        confirmedBy: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
-        supersededAt: null,
+        proposed_at: T0 + 100,
+        ...BY_OWNER('proposed_by'),
+        confirmed_at: T0 + 200,
+        ...BY_PLAYER('confirmed_by'),
         reason: 'Added a match.',
-        material: true,
+        material: 1,
       },
-    ],
-  },
-  attendance: [
+    ]),
+    trial_revision_sessions: of([
+      { revision: 1, position: 0, ...TSES_1 },
+      { revision: 2, position: 0, ...TSES_1, venue_address: '1 Dome Road' },
+      { revision: 2, position: 1, ...TSES_2 },
+    ]),
+    trial_attendance: of([
+      {
+        position: 0,
+        session_id: 'tses-1',
+        state: 'no_show',
+        source: 'manual',
+        ...BY_OWNER('recorded_by'),
+        recorded_at: T0 + 3 * H,
+      },
+      {
+        position: 1,
+        session_id: 'tses-1',
+        state: 'attended',
+        source: 'manual',
+        ...BY_OWNER('recorded_by'),
+        recorded_at: T0 + 3 * H + 1,
+        note: 'Late.',
+      },
+    ]),
+    trial_history: of([
+      history(0, 'aud-10', T0, 'trial_accepted', 'player', {
+        recipientType: 'player',
+        slotId: 'tslot-1',
+        day: '2027-01-15',
+      }),
+      history(1, 'aud-11', T0 + 100, 'trial_rescheduled', 'org', {
+        revision: 2,
+        sessionCount: 2,
+        material: true,
+        requiresConfirmation: true,
+      }),
+      history(2, 'aud-12', T0 + 200, 'trial_schedule_confirmed', 'player', { revision: 2, sessionCount: 2 }),
+      history(3, 'aud-13', T0 + 300, 'trial_evidence_linked', 'org', {
+        trialSessionId: 'tses-2',
+        kind: 'box_cam_session',
+        sessionId: 'bx-1',
+      }),
+    ]),
+    trial_keys: of([
+      { act: 'attendance', position: 0, key: 'ak-1', fp: 'fp-a', at: T0 + 3 * H + 1 },
+      { act: 'schedule', position: 0, key: 'sk-1', fp: 'fp-1', at: T0 + 100 },
+    ]),
+  };
+};
+
+/** A trial without the workflow containers (the older shape, stored as `legacy_accepted`): a filed report and a trial
+ *  day with its emergency contact and one check-in. */
+const legacyTrialRows = () => ({
+  trials: [
     {
-      sessionId: 'tses-1',
-      state: 'no_show',
-      source: 'manual',
-      recordedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-      recordedAt: T0 + 3 * H,
-      note: null,
-    },
-    {
-      sessionId: 'tses-1',
-      state: 'attended',
-      source: 'manual',
-      recordedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-      recordedAt: T0 + 3 * H + 1,
-      note: 'Late.',
+      id: 'trial-legacy',
+      request_id: 'req-0',
+      player_id: 'pl-x',
+      player_name: 'Xavier Adult',
+      org_id: 'org-x',
+      org_name: 'X FC',
+      scout_name: 'Owner',
+      accepted_at: T0 - 400 * H,
+      accepted_by: 'player',
+      guardian_approved: 0,
+      proposed_date: '2026-12-01',
+      venue: 'Old Ground',
+      notes: 'Bring boots',
+      report_due_at: T0 - 300 * H,
+      status: 'reported',
+      reminder_sent: 0,
+      workflow_state: 'legacy_accepted',
+      day_emergency_name: 'Mum',
+      day_emergency_phone: '0770',
+      day_emergency_set_by: 'player',
+      day_emergency_at: T0 - 401 * H,
+      rev: 1,
     },
   ],
-  completion: null,
-  recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false, at: T0 },
-  keys: {
-    schedule: [{ key: 'sk-1', fp: 'fp-1', at: T0 + 100 }],
-    attendance: [{ key: 'ak-1', fp: 'fp-a', at: T0 + 3 * H + 1 }],
-  },
-  history: [
+  trial_reports: [
     {
-      id: 'aud-10',
-      at: T0,
-      action: 'trial_accepted',
-      by: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
-      detail: { recipientType: 'player', slotId: 'tslot-1', day: '2027-01-15' },
-    },
-    {
-      id: 'aud-11',
-      at: T0 + 100,
-      action: 'trial_rescheduled',
-      by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-      detail: { revision: 2, sessionCount: 2, material: true, requiresConfirmation: true },
-    },
-    {
-      id: 'aud-12',
-      at: T0 + 200,
-      action: 'trial_schedule_confirmed',
-      by: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
-      detail: { revision: 2, sessionCount: 2 },
-    },
-    {
-      id: 'aud-13',
-      at: T0 + 300,
-      action: 'trial_evidence_linked',
-      by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
-      detail: { trialSessionId: 'tses-2', kind: 'box_cam_session', sessionId: 'bx-1' },
+      trial_id: 'trial-legacy',
+      id: 'rep-1',
+      player_id: 'pl-x',
+      org_id: 'org-x',
+      org_name: 'X FC',
+      user_id: 'usr-owner',
+      scout_name: 'Owner',
+      filed_at: T0 - 350 * H,
+      acceleration: 7,
+      sprint_speed_kmh: 30.5,
+      distance_km: 6.1,
+      pass_completion_pct: 80,
+      duel_success_pct: 50,
+      coach_rating: 7,
+      notes: 'Fine.',
     },
   ],
-  reminders: {},
-  rev: 5,
-  revAt: T0 + 3 * H + 1,
-  revBy: { userId: 'usr-owner', name: 'Owner' },
+  trial_day_checkins: [
+    {
+      trial_id: 'trial-legacy',
+      position: 0,
+      player_id: 'pl-x',
+      at: T0 - 399 * H,
+      by_user_id: 'usr-owner',
+      by_name: 'Owner',
+    },
+  ],
+});
+
+/** An accepted trial invitation from the club, as its request row. */
+const invitation = (id, over = {}) => ({
+  id,
+  player_id: 'pl-x',
+  player_name: 'Xavier Adult',
+  org_id: 'org-x',
+  org_name: 'X FC',
+  org_type: 'club',
+  org_verified: 1,
+  org_safeguarding_certified: 1,
+  user_id: 'usr-owner',
+  scout_name: 'Owner',
+  scout_role: 'Head of Recruitment',
+  type: 'trial',
+  message: 'Come.',
+  trial_proposed_date: '2027-01-15',
+  trial_alt_days_json: '[]',
+  trial_venue: 'Dome, London',
+  trial_notes: '',
+  status: 'accepted',
+  created_at: T0 - 1000,
+  responded_at: T0,
+  responded_by: 'player',
+  routed_to: 'player',
   ...over,
 });
 
-/** A trial without the workflow containers (the older shape, stored as `legacy_accepted`): a filed report (the report route's literal) and a trial day. */
-const legacyTrial = () => ({
-  id: 'trial-legacy',
-  requestId: 'req-0',
-  playerId: 'pl-x',
-  playerName: 'Xavier Adult',
-  orgId: 'org-x',
-  orgName: 'X FC',
-  scoutName: 'Owner',
-  acceptedAt: T0 - 400 * H,
-  acceptedBy: 'player',
-  guardianApproved: false,
-  proposedDate: '2026-12-01',
-  venue: 'Old Ground',
-  notes: 'Bring boots',
-  reportDueAt: T0 - 300 * H,
-  status: 'reported',
-  workflowState: 'legacy_accepted',
-  rev: 1,
-  report: {
-    id: 'rep-1',
-    trialId: 'trial-legacy',
-    playerId: 'pl-x',
-    orgId: 'org-x',
-    orgName: 'X FC',
-    userId: 'usr-owner',
-    scoutName: 'Owner',
-    filedAt: T0 - 350 * H,
-    acceleration: 7,
-    sprintSpeedKmh: 30.5,
-    distanceKm: 6.1,
-    passCompletionPct: 80,
-    duelSuccessPct: 50,
-    coachRating: 7,
-    notes: 'Fine.',
-    strengthNote: null,
-    focusNote: null,
-  },
-  day: {
-    staff: [],
-    consents: [],
-    arrival: null,
-    emergency: { name: 'Mum', phone: '0770', setBy: 'player', at: T0 - 401 * H },
-    checkins: [{ playerId: 'pl-x', at: T0 - 399 * H, byUserId: 'usr-owner', byName: 'Owner' }],
-    collection: null,
-    statusEvents: [],
-  },
-});
+/** Merge row sets table by table, in order. */
+const merge = (...sets) => {
+  const out = {};
+  for (const s of sets) for (const [t, rs] of Object.entries(s)) out[t] = [...(out[t] ?? []), ...rs];
+  return out;
+};
 
-const stableJson = (v) => JSON.stringify(v);
-const write = (dir, db) => writeFixture(dir, db);
-// What a new directory holds after a refused fixture (the migrations' reference rows and the first installation's
-// organisation and player, by id): the yardstick for "nothing was written".
-const rowIds = (d) =>
-  JSON.stringify(
-    Object.fromEntries(Object.entries(d).map(([k, rows]) => [k, rows.map((r) => r?.id ?? JSON.stringify(r))])),
-  );
-const FRESH = (() => {
-  const { orgs, players, guardians } = baseDb();
-  return rowIds(
-    readRecords(writeFixture(mkdtempSync(path.join(tmpdir(), 'sbx-m23t-fresh-')), { orgs, players, guardians })),
-  );
-})();
-/** What the repository stored for the trials of a written directory, by id. */
-const storedTrials = (dir) => new Map(readRecords(dir).trials.map((t) => [t.id, t]));
-/** A stored record holds every field the writer gave it (absent and null say nothing), at every depth. */
-const holdsAll = (written, stored) =>
-  written === undefined || written === null
-    ? true
-    : typeof written !== 'object'
-      ? written === stored
-      : stored !== null &&
-        typeof stored === 'object' &&
-        Array.isArray(stored) === Array.isArray(written) &&
-        (!Array.isArray(written) || written.length === stored.length) &&
-        Object.entries(written).every(([k, v]) => holdsAll(v, stored[k]));
-
-/** The sound trial and the legacy one, each with the accepted invitation it came from, in case-x. */
-function pairDb() {
-  const db = baseDb();
-  db.trials.push(soundTrial(), legacyTrial());
-  // The legacy trial carries a filed report; the player's trialReports are read from the trials, so the fixture
-  // player carries no copy (a copy is refused).
-  // A trial names its request by a real key (trials.request_id → recruitment_requests), so the legacy trial
-  // gets the accepted invitation it came from (req-0, the legacy direct-request literal) beside the sound pair; a trial
-  // naming an absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The legacy trial
-  // row itself is unchanged.
-  db.requests = [
-    {
-      id: 'req-0',
-      orgId: 'org-x',
-      orgName: 'X FC',
-      orgType: 'club',
-      orgVerified: true,
-      orgSafeguardingCertified: true,
-      playerId: 'pl-x',
-      playerName: 'Xavier Adult',
-      userId: 'usr-owner',
-      scoutName: 'Owner',
-      scoutRole: 'Head of Recruitment',
-      type: 'trial',
-      message: 'Come and train.',
-      trialDetails: { proposedDate: '2026-12-01', altSlots: [], venue: 'Old Ground', notes: 'Bring boots' },
-      status: 'accepted',
-      createdAt: T0 - 401 * H,
-      respondedAt: T0 - 400 * H,
-      respondedBy: 'player',
-      routedTo: 'player',
-      guardianId: null,
-      contactChannel: null,
-    },
-    {
-      id: 'req-1',
-      orgId: 'org-x',
-      orgName: 'X FC',
-      orgType: 'club',
-      orgVerified: true,
-      orgSafeguardingCertified: true,
-      playerId: 'pl-x',
-      playerName: 'Xavier Adult',
-      userId: 'usr-owner',
-      scoutName: 'Owner',
-      scoutRole: 'Head of Recruitment',
-      type: 'trial',
-      message: 'Come.',
-      status: 'accepted',
-      routedTo: 'player',
-      guardianId: null,
-      contactChannel: null,
-      createdAt: T0 - 1000,
-      respondedAt: T0,
-      respondedBy: 'player',
-      caseId: 'case-x',
-      trialId: 'trial-1',
-      recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false },
-      keys: { invite: { key: 'ik-1', fp: 'fp-i' } },
-      trialDetails: {
-        proposedDate: '2027-01-15',
-        altSlots: [],
-        venue: 'Dome, London',
-        notes: '',
-        slots: [
-          {
-            id: 'tslot-1',
-            day: '2027-01-15',
-            kind: 'training',
-            startsAt: T0 + 2 * H,
-            endsAt: T0 + 4 * H,
-            timezone: 'Europe/London',
-            venue: { name: 'Dome', town: 'London' },
-          },
-        ],
-        private: { venueAddress: '1 Dome Road', instructions: null },
+/** The sound trial and the legacy one, each with the accepted invitation it came from, in case-x at trial_scheduled. */
+const pairRows = () =>
+  merge(baseRows({ roomStatus: 'trial_scheduled', profileSignal: 38 }), {
+    recruitment_requests: [
+      // The legacy direct-request literal.
+      invitation('req-0', {
+        message: 'Come and train.',
+        trial_proposed_date: '2026-12-01',
+        trial_venue: 'Old Ground',
+        trial_notes: 'Bring boots',
+        created_at: T0 - 401 * H,
+        responded_at: T0 - 400 * H,
+      }),
+      invitation('req-1', {
+        trial_private_venue_address: '1 Dome Road',
+        case_id: 'case-x',
+        trial_id: 'trial-1',
+        recipient_type: 'player',
+        recipient_player_id: 'pl-x',
+        recipient_minor: 0,
+        invite_key: 'ik-1',
+        invite_fp: 'fp-i',
+      }),
+    ],
+    request_trial_slots: [
+      {
+        request_id: 'req-1',
+        position: 0,
+        id: 'tslot-1',
+        day: '2027-01-15',
+        kind: 'training',
+        starts_at: T0 + 2 * H,
+        ends_at: T0 + 4 * H,
+        timezone: 'Europe/London',
+        ...VENUE,
       },
-    },
-  ];
-  db.recruitmentCases[0].room.status = 'trial_scheduled';
-  db.recruitmentCases[0].links.trialIds.push('trial-1');
-  return db;
-}
+    ],
+    ...merge(soundTrialRows(), legacyTrialRows()),
+    case_trial_links: [{ case_id: 'case-x', position: 0, trial_id: 'trial-1' }],
+  });
 
-// ======================================================= 1 — the migration
-section('1 — a trial row: neutral containers, nothing renamed, nothing invented');
+/** Write `tables` into `dir` in one transaction (all or nothing), its references checked at the end. */
+const write = (dir, tables) => {
+  const F = openFixture(dir, { now: NOW });
+  try {
+    F.transaction(() => {
+      if (F.fresh) F.markInstalled();
+      F.sql.exec('PRAGMA defer_foreign_keys = ON'); // a request and its trial name each other
+      for (const [table, rs] of Object.entries(tables)) for (const r of rs) F.insert(table, r);
+    });
+  } finally {
+    F.close();
+  }
+  return dir;
+};
+
+// ======================================================= 1 — the typed rows
+section('1 — a trial row: typed rows, nothing renamed');
 {
-  // The trials are typed rows read through SQL; every trial reads back from its rows with the containers.
+  // The trials are typed rows read through SQL; a trial's schedule, attendance, history and keys are its child tables.
+  const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-m23t-tables-')));
+  const tables = R.tables();
+  const trialsSql = R.sql.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'trials'").get().sql;
+  R.close();
   ok(
-    TABLE_BACKED.includes('trials') &&
-      !JOURNEY_REQUIRED_STORES.includes('trials') &&
-      DATA_MIGRATIONS.length === LATEST_SCHEMA,
+    MIGRATIONS.length === LATEST_SCHEMA &&
+      MIGRATIONS.includes('0015_recruitment') &&
+      TRIAL_TABLES.every((t) => tables.includes(t)),
     'trials is a typed table read through SQL',
   );
-  const input = legacyTrial();
-  const sound = soundTrial();
-  const soundBefore = stableJson(sound);
-  const WRITTEN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-written-'));
-  const pair = pairDb();
-  pair.trials = [sound, input];
-  write(WRITTEN_DIR, pair);
-  const back = storedTrials(WRITTEN_DIR);
-  const l = back.get('trial-legacy'); // the legacy row as its table rows read back
-  ok(
-    stableJson(input) === stableJson(legacyTrial()) &&
-      l.workflowState === 'legacy_accepted' &&
-      l.caseId === null &&
-      l.schedule === null &&
-      Array.isArray(l.attendance) &&
-      l.attendance.length === 0 &&
-      l.completion === null &&
-      l.rev === 1 &&
-      Array.isArray(l.history) &&
-      l.history.length === 0 &&
-      Object.values(l.keys).every((k) => k === null || (Array.isArray(k) && k.length === 0)) &&
-      stableJson(l.reminders) === '{}',
-    'the legacy row, typed, reads back with legacy_accepted and empty containers (the record it came from untouched)',
-  );
+  const workflowCheck = /workflow_state TEXT NOT NULL CHECK \(([^\n]*)\),\n/.exec(trialsSql)?.[1] ?? '';
   neg(
-    l.status === 'reported' &&
-      l.report.id === 'rep-1' &&
-      l.proposedDate === '2026-12-01' &&
-      l.notes === 'Bring boots' &&
-      l.day.checkins.length === 1 &&
-      l.day.emergency.name === 'Mum',
-    'and keeps status, report, date, notes and the P2 day record exactly — no attendance derived from the check-in, no completion invented',
-  );
-  neg(
-    deriveWorkflowState(l) === 'legacy_accepted' && trialIntegrity(l, { orgId: 'org-x' }).length === 0,
-    'the legacy row is sound and derives legacy_accepted',
-  );
-  ok(
-    stableJson(sound) === soundBefore && holdsAll(sound, back.get('trial-1')),
-    'a row that already carries P4B fields is stored as written, and the record it came from is left byte-identical',
-  );
-  neg(
-    !TRIAL_WORKFLOW_STATES.includes('awaiting_report') && !TRIAL_WORKFLOW_STATES.includes('reported'),
+    !TRIAL_WORKFLOW_STATES.includes('awaiting_report') &&
+      !TRIAL_WORKFLOW_STATES.includes('reported') &&
+      workflowCheck.includes("'legacy_accepted'") &&
+      !/awaiting_report|'reported'/.test(workflowCheck),
     'the report statuses are not workflow states — nothing can have renamed them',
   );
 }
@@ -619,11 +608,10 @@ section('1 — a trial row: neutral containers, nothing renamed, nothing invente
 section('2 — a fixture with trial rows restores byte-faithfully through a real boot');
 {
   const RESTORE_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-restore-'));
-  const db = pairDb();
-  write(RESTORE_DIR, db);
-  const written = storedTrials(RESTORE_DIR);
-  const beforeSound = stableJson(written.get('trial-1'));
-  const beforeLegacy = stableJson(written.get('trial-legacy'));
+  write(RESTORE_DIR, pairRows());
+  const written = stored(RESTORE_DIR);
+  const beforeSound = trialRows(written, 'trial-1');
+  const beforeLegacy = trialRows(written, 'trial-legacy');
   const s = await bootOn(RESTORE_DIR, PORT);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots on the fixture');
@@ -685,9 +673,7 @@ section('2 — a fixture with trial rows restores byte-faithfully through a real
   );
   const after = await s.stop();
   ok(
-    after &&
-      stableJson(after.trials.find((x) => x.id === 'trial-1')) === beforeSound &&
-      stableJson(after.trials.find((x) => x.id === 'trial-legacy')) === beforeLegacy,
+    after && trialRows(after, 'trial-1') === beforeSound && trialRows(after, 'trial-legacy') === beforeLegacy,
     'after a boot, reads and a graceful stop, both rows are byte-identical in the snapshot — nothing was rewritten, re-ordered or "repaired"',
   );
   neg(!s.log().includes('TRIAL integrity'), 'no integrity warning was logged for sound rows');
@@ -697,51 +683,26 @@ section('2 — a fixture with trial rows restores byte-faithfully through a real
 section('3 — corrupt trial rows are named and omitted, never fabricated, never fatal');
 {
   const CORRUPT_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-corrupt-'));
-  const db = baseDb();
   // Every trial names its own accepted invitation (trials.request_id is a UNIQUE key to recruitment_requests) and
   // only the sound trial is OPEN in case-x (trials_one_open_per_case). The typed tables hold a trial whose stored state
   // disagrees with its facts, a timezone that is not a zone and rev 0 — corruption a typed row can still carry — so
-  // those three are planted and judged on read. A state, a completion or an attendance row outside the vocabulary and
-  // an off-type `sessions` cannot be stored at all: section 3c proves the save refuses them with their ids.
-  const invitation = (id, trialId) => ({
-    id,
-    orgId: 'org-x',
-    orgName: 'X FC',
-    orgType: 'club',
-    orgVerified: true,
-    orgSafeguardingCertified: true,
-    playerId: 'pl-x',
-    playerName: 'Xavier Adult',
-    userId: 'usr-owner',
-    scoutName: 'Owner',
-    scoutRole: 'Head of Recruitment',
-    type: 'trial',
-    message: 'Come.',
-    trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '' },
-    status: 'accepted',
-    createdAt: T0 - 1000,
-    respondedAt: T0,
-    respondedBy: 'player',
-    routedTo: 'player',
-    guardianId: null,
-    contactChannel: null,
-    caseId: 'case-x',
-    trialId,
-  });
-  db.trials.push(
-    soundTrial(),
-    soundTrial({ id: 'trial-bad-mismatch', requestId: 'req-bad-mismatch', workflowState: 'completed' }),
-    soundTrial({
+  // those three are planted and judged on read. A state, a completion or an attendance row outside the vocabulary
+  // cannot be stored at all: section 3c proves the schema refuses them.
+  const rows = merge(
+    baseRows(),
+    soundTrialRows(),
+    soundTrialRows({ id: 'trial-bad-mismatch', request_id: 'req-bad-mismatch', workflow_state: 'completed' }),
+    soundTrialRows({
       id: 'trial-bad-tz',
-      requestId: 'req-bad-tz',
-      workflowState: 'cancelled',
-      schedule: { ...soundTrial().schedule, timezone: 'Mars/Olympus' },
+      request_id: 'req-bad-tz',
+      workflow_state: 'cancelled',
+      schedule_timezone: 'Mars/Olympus',
     }),
-    soundTrial({ id: 'trial-bad-rev', requestId: 'req-bad-rev', workflowState: 'cancelled', rev: 0 }),
+    soundTrialRows({ id: 'trial-bad-rev', request_id: 'req-bad-rev', workflow_state: 'cancelled', rev: 0 }),
   );
-  db.requests = db.trials.map((t) => invitation(t.requestId, t.id));
-  write(CORRUPT_DIR, db);
-  const writtenCorrupt = storedTrials(CORRUPT_DIR);
+  rows.recruitment_requests = rows.trials.map((t) => invitation(t.request_id, { case_id: 'case-x', trial_id: t.id }));
+  write(CORRUPT_DIR, rows);
+  const writtenCorrupt = stored(CORRUPT_DIR);
   const s = await bootOn(CORRUPT_DIR, PORT + 1);
   if (!s.up) console.error(s.log().split('\n').slice(-12).join('\n'));
   ok(s.up, 'the server boots with four trials, three of them corrupt rows');
@@ -791,140 +752,78 @@ section('3 — corrupt trial rows are named and omitted, never fabricated, never
   const after = await s.stop();
   neg(
     after.trials.length === 4 &&
-      after.trials.some((x) => x.id === 'trial-bad-tz' && x.schedule.timezone === 'Mars/Olympus') &&
+      after.trials.some((x) => x.id === 'trial-bad-tz' && x.schedule_timezone === 'Mars/Olympus') &&
       after.trials.some((x) => x.id === 'trial-bad-rev' && x.rev === 0),
     'the corrupt rows are still in the snapshot exactly as they were — omitted on read, never deleted or repaired',
   );
   for (const t of after.trials)
-    if (stableJson(t) !== stableJson(writtenCorrupt.get(t.id)))
-      console.error('   changed row', t.id, JSON.stringify(t).slice(0, 200));
+    if (trialRows(after, t.id) !== trialRows(writtenCorrupt, t.id))
+      console.error('   changed row', t.id, trialRows(after, t.id).slice(0, 200));
 }
 
 // ======================================================= 3c — records the typed tables cannot hold
 section(
-  '3c — a state, a completion or an attendance row outside the vocabulary, or an off-type list, is refused by the write with its id',
+  '3c — a state, a completion or an attendance row outside the vocabulary is refused by the schema, and nothing is written',
 );
+let REFUSED_DIR = null;
 {
-  const db = baseDb();
-  const invitation = (id) => ({
-    id,
-    orgId: 'org-x',
-    orgName: 'X FC',
-    orgType: 'club',
-    orgVerified: true,
-    orgSafeguardingCertified: true,
-    playerId: 'pl-x',
-    playerName: 'Xavier Adult',
-    userId: 'usr-owner',
-    scoutName: 'Owner',
-    scoutRole: 'Head of Recruitment',
-    type: 'trial',
-    message: 'Come.',
-    trialDetails: { proposedDate: null, altSlots: [], venue: null, notes: '' },
-    status: 'accepted',
-    createdAt: T0 - 1000,
-    routedTo: 'player',
-    guardianId: null,
-    contactChannel: null,
-  });
+  // A fixture is one transaction: a row the schema refuses (a CHECK, a NOT NULL) refuses the whole fixture, and the
+  // directory is left as a new one with nothing written.
+  const FRESH = (() => {
+    const D = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-fresh-'));
+    openFixture(D, { now: NOW }).close();
+    return everything(D);
+  })();
+  const unstorable = (id, over) =>
+    merge(
+      baseRows(),
+      {
+        recruitment_requests: [
+          invitation(`req-${id}`, {
+            trial_proposed_date: null,
+            trial_venue: null,
+            responded_at: null,
+            responded_by: null,
+          }),
+        ],
+      },
+      soundTrialRows({ id, request_id: `req-${id}`, case_id: null, ...over }),
+    );
+  const ghostAttendance = unstorable('trial-bad-att', { workflow_state: 'cancelled' });
+  ghostAttendance.trial_attendance = [
+    { trial_id: 'trial-bad-att', position: 0, session_id: 'ghost', state: 'attended', recorded_at: T0 },
+  ];
   const cases = [
     [
       'trial-bad-state',
-      { workflowState: 'flying' },
-      /trials trial-bad-state trial: CHECK constraint failed: workflow_state/,
+      unstorable('trial-bad-state', { workflow_state: 'flying' }),
+      /CHECK constraint failed: workflow_state/,
     ],
-    [
-      'trial-bad-att',
-      { workflowState: 'cancelled', attendance: [{ sessionId: 'ghost', state: 'attended' }] },
-      /trials trial-bad-att attendance\[0\]: NOT NULL constraint failed: trial_attendance\.source/,
-    ],
-    [
-      'trial-bad-sessions',
-      { workflowState: 'cancelled', schedule: { ...soundTrial().schedule, sessions: 'two' } },
-      /trials trial-bad-sessions schedule\.sessions: must be a list/,
-    ],
+    ['trial-bad-att', ghostAttendance, /NOT NULL constraint failed: trial_attendance\.source/],
     [
       'trial-bad-completion',
-      { workflowState: 'cancelled', completion: { state: 'done', at: 1 } },
-      /trials trial-bad-completion trial: CHECK constraint failed: completion_state/,
+      unstorable('trial-bad-completion', { workflow_state: 'cancelled', completion_state: 'done', completion_at: 1 }),
+      /CHECK constraint failed: completion_state/,
     ],
   ];
-  for (const [id, over, named] of cases) {
+  for (const [id, fixture, named] of cases) {
     const dir = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-unstorable-'));
-    db.trials = [soundTrial({ id, requestId: `req-${id}`, caseId: null, ...over })];
-    db.requests = [invitation(`req-${id}`)];
     let refused = null;
     try {
-      write(dir, db);
+      write(dir, fixture);
     } catch (err) {
       refused = err;
     }
     neg(
-      refused?.code === 'RECRUITMENT_INPUT_INVALID' && named.test(String(refused.message)),
-      `${id}: the write is refused and names the trial and the field (${String(refused?.message ?? 'not refused').slice(0, 160)})`,
+      !!refused && named.test(String(refused.message)),
+      `${id}: the write is refused by the schema, naming the column (${String(refused?.message ?? 'not refused').slice(0, 160)})`,
     );
-    neg(rowIds(readRecords(dir)) === FRESH, `${id}: nothing was written`);
+    neg(everything(dir) === FRESH, `${id}: nothing was written`);
+    REFUSED_DIR = dir;
   }
 }
-
-// ======================================================= 3b — alien entries
-section('3b — alien entries in the trials store are refused with their positions; the file is not modified');
 {
-  // A null, a string or a number in the trials store is not a record: the trials repository's create refuses each by
-  // its kind and nothing of the fixture is written. Nothing is dropped or repaired silently.
-  const req1 = {
-    id: 'req-1',
-    orgId: 'org-x',
-    orgName: 'X FC',
-    orgType: 'club',
-    orgVerified: true,
-    orgSafeguardingCertified: true,
-    playerId: 'pl-x',
-    playerName: 'Xavier Adult',
-    userId: 'usr-owner',
-    scoutName: 'Owner',
-    scoutRole: 'Head of Recruitment',
-    type: 'trial',
-    message: 'Come.',
-    trialDetails: { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '' },
-    status: 'accepted',
-    createdAt: T0 - 1000,
-    respondedAt: T0,
-    respondedBy: 'player',
-    routedTo: 'player',
-    guardianId: null,
-    contactChannel: null,
-    caseId: 'case-x',
-    trialId: 'trial-1',
-  };
-  let ALIEN_DIR = null;
-  for (const [alien, what] of [
-    [null, 'null'],
-    ['string', 'a string'],
-    [42, 'a number'],
-  ]) {
-    ALIEN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-alien-'));
-    const db = baseDb();
-    db.trials.push(soundTrial(), alien);
-    db.requests = [req1];
-    let refused = null;
-    try {
-      write(ALIEN_DIR, db);
-    } catch (err) {
-      refused = err;
-    }
-    const msg = String(refused?.message ?? '');
-    neg(
-      refused?.code === 'RECRUITMENT_INPUT_INVALID' &&
-        msg.includes(`trials: a record must be an object (got ${what.replace(/^a /, '')})`),
-      `a trials entry that is ${what} is refused by its kind (${msg.slice(0, 120)})`,
-    );
-    neg(
-      rowIds(readRecords(ALIEN_DIR)) === FRESH,
-      `${what}: nothing was written: the directory holds only the first installation`,
-    );
-  }
-  const s = await bootOn(ALIEN_DIR, PORT + 2);
+  const s = await bootOn(REFUSED_DIR, PORT + 2);
   ok(s.up, 'a server started on the directory boots (the refused fixture left nothing behind)');
   if (s.up) await s.stop();
 }
@@ -933,7 +832,7 @@ section('3b — alien entries in the trials store are refused with their positio
 section('4 — clean boot: invitation, acceptance, restart — keys and stages survive');
 {
   const CLEAN_DIR = mkdtempSync(path.join(tmpdir(), 'sbx-m23t-clean-'));
-  write(CLEAN_DIR, baseDb());
+  write(CLEAN_DIR, baseRows());
   const s = await bootOn(CLEAN_DIR, PORT + 2);
   const lead = (
     await s.j('POST', '/auth/org/login', { orgId: 'org-x', scoutName: 'Owner', role: 'Head of Recruitment' })
@@ -968,13 +867,13 @@ section('4 — clean boot: invitation, acceptance, restart — keys and stages s
   const row = snap1.trials.find((t) => t.id === acc.body.trialId);
   ok(
     row &&
-      row.workflowState === 'scheduled' &&
-      row.caseId === 'case-x' &&
-      row.schedule.sessions.length === 1 &&
-      row.history[0]?.action === 'trial_accepted' &&
-      row.requestId === snap1.requests[0].id &&
-      snap1.recruitmentCases[0].room.status === 'trial_scheduled' &&
-      snap1.requests[0].keys.invite.key === 'clean-inv',
+      row.workflow_state === 'scheduled' &&
+      row.case_id === 'case-x' &&
+      snap1.trial_schedule_sessions.filter((x) => x.trial_id === row.id).length === 1 &&
+      snap1.trial_history.find((h) => h.trial_id === row.id && h.position === 0)?.action === 'trial_accepted' &&
+      row.request_id === snap1.recruitment_requests[0].id &&
+      snap1.recruitment_cases[0].room_status === 'trial_scheduled' &&
+      snap1.recruitment_requests[0].invite_key === 'clean-inv',
     'the snapshot holds the scheduled trial, the case at trial_scheduled and the invitation key',
   );
   const s2 = await bootOn(CLEAN_DIR, PORT + 3);
@@ -1011,20 +910,22 @@ section('4 — clean boot: invitation, acceptance, restart — keys and stages s
     'the case stage and the milestone survived',
   );
   const snap2 = await s2.stop();
-  const strip = (rows) => stableJson(rows.map((t) => ({ ...t, reminders: undefined })));
+  const strip = (s) => JSON.stringify(TRIAL_TABLES.filter((t) => t !== 'trial_reminders').map((t) => s[t]));
   ok(
-    strip(snap2.trials) === strip(snap1.trials),
+    strip(snap2) === strip(snap1),
     'a boot, a replay and a stop rewrote nothing in the trials store (reminder markers aside)',
+  );
+  const markers = (s) => s.trial_reminders.filter((r) => r.trial_id === acc.body.trialId).map((r) => r.marker);
+  ok(
+    markers(snap2).some((k) => k.startsWith('t48:')) && markers(snap1).length === 0,
+    'the T-48h reminder for the session two hours away went out on the second boot and left its marker ON THE ROW — a restart re-sends nothing (the marker is persisted, not timer-held)',
   );
   const row2 = snap2.trials.find((t) => t.id === acc.body.trialId);
   ok(
-    Object.keys(row2.reminders).some((k) => k.startsWith('t48:')) && Object.keys(row.reminders).length === 0,
-    'the T-48h reminder for the session two hours away went out on the second boot and left its marker ON THE ROW — a restart re-sends nothing (the marker is persisted, not timer-held)',
-  );
-  const health = createEvidenceProvider(snap2).check('trial_confirmed', { kase: snap2.recruitmentCases[0] });
-  ok(
-    health.satisfied === true && health.sourceId === acc.body.trialId,
-    'the evidence provider, over the snapshot alone, still finds the confirmed schedule',
+    row2?.case_id === snap2.recruitment_cases[0].id &&
+      row2.workflow_state === 'scheduled' &&
+      row2.schedule_confirmed_at !== null,
+    "the stored rows alone still hold the confirmed schedule the case's trial_scheduled evidence reads",
   );
 }
 

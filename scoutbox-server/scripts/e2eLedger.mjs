@@ -68,6 +68,15 @@ export const NOTES = {
       },
     ],
   },
+  'recruitment/trialsPersistence': {
+    moved: [
+      {
+        checks: 6,
+        to: 'scripts/testRecruitment.mjs',
+        why: "§1 wrote the battery's record shapes through the repository and read them back (the legacy trial as legacy_accepted with empty containers and its report and trial day kept, sound by the integrity rule; the workflow trial stored as written), and §3b fed the repository entries that are not records; those are unit checks of the repository. The battery writes and reads stored rows, keeps the schema's refusals as plain-SQL writes (§3c) and the typed table as a schema check (§1)",
+      },
+    ],
+  },
   'platform/sessionsAndPorts': {
     moved: [
       {

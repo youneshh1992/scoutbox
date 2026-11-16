@@ -11,7 +11,8 @@ import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { computeTrustScore, TRUST } from '../domain.ts';
 import { openStore } from '../store.ts';
-import { openLayer, readRecords } from './dataLayerFixture.mjs';
+import { openLayer, readRecords, writeFixture } from './dataLayerFixture.mjs';
+import { deriveWorkflowState, trialIntegrity } from '../domains/recruitment/lifecycle/trial.mjs';
 import { NOW, TTL, tempDir, hasBlobTable } from './coreIdentityTestFixtures.mjs';
 import {
   legacyTrialRequest,
@@ -329,6 +330,12 @@ test('[fixtures] a write STOPS with the ids on a record the tables cannot hold �
     'off-type rev',
     { ...fix, trials: [scheduledTrial({ rev: '3' }), fix.trials[1]] },
     /trial-1 rev: is not stored as written/,
+  );
+  // SQLite would store a NaN as NULL, so a NaN deadline has no row form: the write refuses it rather than lose it.
+  refusedSave(
+    'NaN deadline',
+    { ...fix, trials: [fix.trials[0], preP4bTrial({ reportDueAt: NaN })] },
+    /RECRUITMENT_INPUT_INVALID: trials trial-old reportDueAt: is not stored as written/,
   );
   refusedSave(
     'trial without its request',
@@ -1316,6 +1323,556 @@ test('[capabilities] the live report: the named-acts write mode, no pending writ
   assert.deepEqual(plain(r.unresolvedPlayerReferences), { requests: 0, trials: 0 });
   L.close();
   rm(d);
+});
+
+// The trial fixtures of the trial persistence battery (e2e/recruitment/trialsPersistence.mjs) as it stood before its
+// fixtures became stored rows: how the repository writes those record shapes into the trial tables, and refuses the
+// records that have no row form.
+const TRIALS_PERSISTENCE = (() => {
+  const H = 3_600_000;
+  const T0 = 1_800_000_000_000;
+  /** A minimal, sound database: one verified club with a lead, one adult player, one case at under_review. */
+  function baseDb() {
+    const db = {
+      players: [
+        {
+          id: 'pl-x',
+          name: 'Xavier Adult',
+          dob: '2000-05-05',
+          country: 'GB',
+          city: 'London',
+          media: [],
+          attendance: [],
+          trialReports: [],
+          badges: [],
+          timeline: [],
+          medical: { shared: false, records: [], conditionStatus: 'unknown' },
+          level: 'amateur',
+          location: { lat: 51.5, lng: -0.1 },
+        },
+      ],
+      orgs: [
+        {
+          id: 'org-x',
+          name: 'X FC',
+          type: 'club',
+          level: 'pro',
+          plan: 'Pro',
+          verified: true,
+          safeguardingContractSigned: true,
+          location: { lat: 51.5, lng: -0.1 },
+        },
+      ],
+      guardians: [],
+      // A request names its staff member by a real key (recruitment_requests.user_id → org_users), so the
+      // fixture carries the staff row the case and the request name (the dev login below finds it by org and name).
+      users: [{ id: 'usr-owner', orgId: 'org-x', name: 'Owner', role: 'Head of Recruitment', createdAt: 1 }],
+      sessions: [],
+      ledger: [],
+      notifications: [],
+      recruitmentCases: [
+        {
+          id: 'case-x',
+          orgId: 'org-x',
+          playerId: 'pl-x',
+          playerName: 'Xavier Adult',
+          ownerUserId: 'usr-owner',
+          ownerName: 'Owner',
+          stage: 'review',
+          priority: 'medium',
+          restricted: false,
+          assignments: [],
+          tasks: [],
+          approvals: [],
+          decision: null,
+          links: { requestIds: [], trialIds: [], signingId: null },
+          room: {
+            status: 'under_review',
+            priority: 'normal',
+            tags: [],
+            leadScoutUserId: 'usr-owner',
+            sourceContext: 'search',
+            updatedAt: 1000,
+            archivedAt: null,
+            closedAt: null,
+            rev: 2,
+            revAt: 1000,
+            revBy: null,
+          },
+          createdAt: 1000,
+          history: [
+            {
+              id: 'aud-1',
+              at: 1000,
+              byKind: 'org',
+              byId: 'usr-owner',
+              byName: 'Owner',
+              action: 'room_created',
+              detail: { status: 'watching' },
+            },
+            {
+              id: 'aud-2',
+              at: 1001,
+              byKind: 'org',
+              byId: 'usr-owner',
+              byName: 'Owner',
+              action: 'room_status_changed',
+              detail: { from: 'watching', to: 'under_review', reasonCodes: [] },
+            },
+          ],
+        },
+      ],
+    };
+    db.trials ??= [];
+    db.requests ??= [];
+    return db;
+  }
+
+  /** A sound, fully-populated workflow trial row: two sessions, two revisions, two attendance records, one evidence link, keys. */
+  const soundTrial = (over = {}) => ({
+    id: 'trial-1',
+    requestId: 'req-1',
+    caseId: 'case-x',
+    playerId: 'pl-x',
+    playerName: 'Xavier Adult',
+    orgId: 'org-x',
+    orgName: 'X FC',
+    scoutName: 'Owner',
+    acceptedAt: T0,
+    acceptedBy: 'player',
+    guardianApproved: false,
+    proposedDate: '2027-01-15',
+    venue: 'Dome, London',
+    notes: '',
+    reportDueAt: T0 + 7 * 86_400_000,
+    status: 'awaiting_report',
+    workflowState: 'scheduled',
+    schedule: {
+      timezone: 'Europe/London',
+      revision: 2,
+      proposedAt: T0 + 100,
+      proposedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
+      confirmedAt: T0 + 200,
+      confirmedBy: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
+      declinedAt: null,
+      declinedBy: null,
+      sessions: [
+        {
+          id: 'tses-2',
+          kind: 'match',
+          startsAt: T0 + 48 * H,
+          endsAt: T0 + 50 * H,
+          venue: { name: 'Dome', town: 'London', address: '1 Dome Road' },
+          instructions: 'Gate B',
+          evidence: [
+            {
+              id: 'tev-1',
+              kind: 'box_cam_session',
+              sessionId: 'bx-1',
+              linkedAt: T0 + 300,
+              linkedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
+              removedAt: null,
+              removedBy: null,
+            },
+          ],
+        },
+        {
+          id: 'tses-1',
+          kind: 'training',
+          startsAt: T0 + 2 * H,
+          endsAt: T0 + 4 * H,
+          venue: { name: 'Dome', town: 'London', address: '1 Dome Road' },
+          instructions: null,
+          evidence: [],
+        },
+      ],
+      revisions: [
+        {
+          revision: 1,
+          timezone: 'Europe/London',
+          sessions: [
+            {
+              id: 'tses-1',
+              kind: 'training',
+              startsAt: T0 + 2 * H,
+              endsAt: T0 + 4 * H,
+              venue: { name: 'Dome', town: 'London', address: null },
+              instructions: null,
+            },
+          ],
+          proposedAt: T0,
+          proposedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
+          confirmedAt: T0,
+          confirmedBy: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
+          supersededAt: T0 + 100,
+          reason: 'invitation',
+          material: null,
+        },
+        {
+          revision: 2,
+          timezone: 'Europe/London',
+          sessions: [
+            {
+              id: 'tses-1',
+              kind: 'training',
+              startsAt: T0 + 2 * H,
+              endsAt: T0 + 4 * H,
+              venue: { name: 'Dome', town: 'London', address: '1 Dome Road' },
+              instructions: null,
+            },
+            {
+              id: 'tses-2',
+              kind: 'match',
+              startsAt: T0 + 48 * H,
+              endsAt: T0 + 50 * H,
+              venue: { name: 'Dome', town: 'London', address: '1 Dome Road' },
+              instructions: 'Gate B',
+            },
+          ],
+          proposedAt: T0 + 100,
+          proposedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
+          confirmedAt: T0 + 200,
+          confirmedBy: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
+          supersededAt: null,
+          reason: 'Added a match.',
+          material: true,
+        },
+      ],
+    },
+    attendance: [
+      {
+        sessionId: 'tses-1',
+        state: 'no_show',
+        source: 'manual',
+        recordedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
+        recordedAt: T0 + 3 * H,
+        note: null,
+      },
+      {
+        sessionId: 'tses-1',
+        state: 'attended',
+        source: 'manual',
+        recordedBy: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
+        recordedAt: T0 + 3 * H + 1,
+        note: 'Late.',
+      },
+    ],
+    completion: null,
+    recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false, at: T0 },
+    keys: {
+      schedule: [{ key: 'sk-1', fp: 'fp-1', at: T0 + 100 }],
+      attendance: [{ key: 'ak-1', fp: 'fp-a', at: T0 + 3 * H + 1 }],
+    },
+    history: [
+      {
+        id: 'aud-10',
+        at: T0,
+        action: 'trial_accepted',
+        by: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
+        detail: { recipientType: 'player', slotId: 'tslot-1', day: '2027-01-15' },
+      },
+      {
+        id: 'aud-11',
+        at: T0 + 100,
+        action: 'trial_rescheduled',
+        by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
+        detail: { revision: 2, sessionCount: 2, material: true, requiresConfirmation: true },
+      },
+      {
+        id: 'aud-12',
+        at: T0 + 200,
+        action: 'trial_schedule_confirmed',
+        by: { kind: 'player', id: 'pl-x', name: 'Xavier Adult' },
+        detail: { revision: 2, sessionCount: 2 },
+      },
+      {
+        id: 'aud-13',
+        at: T0 + 300,
+        action: 'trial_evidence_linked',
+        by: { kind: 'org', userId: 'usr-owner', name: 'Owner' },
+        detail: { trialSessionId: 'tses-2', kind: 'box_cam_session', sessionId: 'bx-1' },
+      },
+    ],
+    reminders: {},
+    rev: 5,
+    revAt: T0 + 3 * H + 1,
+    revBy: { userId: 'usr-owner', name: 'Owner' },
+    ...over,
+  });
+
+  /** A trial without the workflow containers (the older shape, stored as `legacy_accepted`): a filed report (the report route's literal) and a trial day. */
+  const legacyTrial = () => ({
+    id: 'trial-legacy',
+    requestId: 'req-0',
+    playerId: 'pl-x',
+    playerName: 'Xavier Adult',
+    orgId: 'org-x',
+    orgName: 'X FC',
+    scoutName: 'Owner',
+    acceptedAt: T0 - 400 * H,
+    acceptedBy: 'player',
+    guardianApproved: false,
+    proposedDate: '2026-12-01',
+    venue: 'Old Ground',
+    notes: 'Bring boots',
+    reportDueAt: T0 - 300 * H,
+    status: 'reported',
+    workflowState: 'legacy_accepted',
+    rev: 1,
+    report: {
+      id: 'rep-1',
+      trialId: 'trial-legacy',
+      playerId: 'pl-x',
+      orgId: 'org-x',
+      orgName: 'X FC',
+      userId: 'usr-owner',
+      scoutName: 'Owner',
+      filedAt: T0 - 350 * H,
+      acceleration: 7,
+      sprintSpeedKmh: 30.5,
+      distanceKm: 6.1,
+      passCompletionPct: 80,
+      duelSuccessPct: 50,
+      coachRating: 7,
+      notes: 'Fine.',
+      strengthNote: null,
+      focusNote: null,
+    },
+    day: {
+      staff: [],
+      consents: [],
+      arrival: null,
+      emergency: { name: 'Mum', phone: '0770', setBy: 'player', at: T0 - 401 * H },
+      checkins: [{ playerId: 'pl-x', at: T0 - 399 * H, byUserId: 'usr-owner', byName: 'Owner' }],
+      collection: null,
+      statusEvents: [],
+    },
+  });
+
+  /** The sound trial and the legacy one, each with the accepted invitation it came from, in case-x. */
+  function pairDb() {
+    const db = baseDb();
+    db.trials.push(soundTrial(), legacyTrial());
+    // The legacy trial carries a filed report; the player's trialReports are read from the trials, so the fixture
+    // player carries no copy (a copy is refused).
+    // A trial names its request by a real key (trials.request_id → recruitment_requests), so the legacy trial
+    // gets the accepted invitation it came from (req-0, the legacy direct-request literal) beside the sound pair; a trial
+    // naming an absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The legacy trial
+    // row itself is unchanged.
+    db.requests = [
+      {
+        id: 'req-0',
+        orgId: 'org-x',
+        orgName: 'X FC',
+        orgType: 'club',
+        orgVerified: true,
+        orgSafeguardingCertified: true,
+        playerId: 'pl-x',
+        playerName: 'Xavier Adult',
+        userId: 'usr-owner',
+        scoutName: 'Owner',
+        scoutRole: 'Head of Recruitment',
+        type: 'trial',
+        message: 'Come and train.',
+        trialDetails: { proposedDate: '2026-12-01', altSlots: [], venue: 'Old Ground', notes: 'Bring boots' },
+        status: 'accepted',
+        createdAt: T0 - 401 * H,
+        respondedAt: T0 - 400 * H,
+        respondedBy: 'player',
+        routedTo: 'player',
+        guardianId: null,
+        contactChannel: null,
+      },
+      {
+        id: 'req-1',
+        orgId: 'org-x',
+        orgName: 'X FC',
+        orgType: 'club',
+        orgVerified: true,
+        orgSafeguardingCertified: true,
+        playerId: 'pl-x',
+        playerName: 'Xavier Adult',
+        userId: 'usr-owner',
+        scoutName: 'Owner',
+        scoutRole: 'Head of Recruitment',
+        type: 'trial',
+        message: 'Come.',
+        status: 'accepted',
+        routedTo: 'player',
+        guardianId: null,
+        contactChannel: null,
+        createdAt: T0 - 1000,
+        respondedAt: T0,
+        respondedBy: 'player',
+        caseId: 'case-x',
+        trialId: 'trial-1',
+        recipient: { type: 'player', playerId: 'pl-x', guardianId: null, minor: false },
+        keys: { invite: { key: 'ik-1', fp: 'fp-i' } },
+        trialDetails: {
+          proposedDate: '2027-01-15',
+          altSlots: [],
+          venue: 'Dome, London',
+          notes: '',
+          slots: [
+            {
+              id: 'tslot-1',
+              day: '2027-01-15',
+              kind: 'training',
+              startsAt: T0 + 2 * H,
+              endsAt: T0 + 4 * H,
+              timezone: 'Europe/London',
+              venue: { name: 'Dome', town: 'London' },
+            },
+          ],
+          private: { venueAddress: '1 Dome Road', instructions: null },
+        },
+      },
+    ];
+    db.recruitmentCases[0].room.status = 'trial_scheduled';
+    db.recruitmentCases[0].links.trialIds.push('trial-1');
+    return db;
+  }
+  return { baseDb, soundTrial, legacyTrial, pairDb };
+})();
+
+test("[fixtures] the trial persistence battery's records: the legacy trial is written as legacy_accepted with empty containers and keeps its report, date, notes and trial day, and is sound; the workflow trial is stored as written; the records written are left untouched; an alien entry in the trials store or a schedule's sessions that are not a list is refused, naming it, and nothing is written", () => {
+  const { baseDb, soundTrial, legacyTrial, pairDb } = TRIALS_PERSISTENCE;
+  const stableJson = (v) => JSON.stringify(v);
+  /** A stored record holds every field the writer gave it (absent and null say nothing), at every depth. */
+  const holdsAll = (written, stored) =>
+    written === undefined || written === null
+      ? true
+      : typeof written !== 'object'
+        ? written === stored
+        : stored !== null &&
+          typeof stored === 'object' &&
+          Array.isArray(stored) === Array.isArray(written) &&
+          (!Array.isArray(written) || written.length === stored.length) &&
+          Object.entries(written).every(([k, v]) => holdsAll(v, stored[k]));
+  const rowIds = (r) =>
+    JSON.stringify(
+      Object.fromEntries(Object.entries(r).map(([k, rows]) => [k, rows.map((x) => x?.id ?? JSON.stringify(x))])),
+    );
+  const FRESH = (() => {
+    const { orgs, players, guardians } = baseDb();
+    const d = tempDir('s8a-tp-fresh');
+    const ids = rowIds(readRecords(writeFixture(d, { orgs, players, guardians })));
+    rm(d);
+    return ids;
+  })();
+
+  const input = legacyTrial();
+  const sound = soundTrial();
+  const soundBefore = stableJson(sound);
+  const d = tempDir('s8a-tp-written');
+  const pair = pairDb();
+  pair.trials = [sound, input];
+  writeFixture(d, pair);
+  const back = new Map(readRecords(d).trials.map((t) => [t.id, t]));
+  rm(d);
+  const l = back.get('trial-legacy');
+  assert.ok(
+    stableJson(input) === stableJson(legacyTrial()) &&
+      l.workflowState === 'legacy_accepted' &&
+      l.caseId === null &&
+      l.schedule === null &&
+      Array.isArray(l.attendance) &&
+      l.attendance.length === 0 &&
+      l.completion === null &&
+      l.rev === 1 &&
+      Array.isArray(l.history) &&
+      l.history.length === 0 &&
+      Object.values(l.keys).every((k) => k === null || (Array.isArray(k) && k.length === 0)) &&
+      stableJson(l.reminders) === '{}',
+    'the legacy row, typed, reads back with legacy_accepted and empty containers (the record it came from untouched)',
+  );
+  assert.ok(
+    l.status === 'reported' &&
+      l.report.id === 'rep-1' &&
+      l.proposedDate === '2026-12-01' &&
+      l.notes === 'Bring boots' &&
+      l.day.checkins.length === 1 &&
+      l.day.emergency.name === 'Mum',
+    'and keeps status, report, date, notes and the trial-day record exactly — no attendance derived from the check-in, no completion invented',
+  );
+  assert.ok(
+    deriveWorkflowState(l) === 'legacy_accepted' && trialIntegrity(l, { orgId: 'org-x' }).length === 0,
+    'the legacy row is sound and derives legacy_accepted',
+  );
+  assert.ok(
+    stableJson(sound) === soundBefore && holdsAll(sound, back.get('trial-1')),
+    'a row that already carries the workflow fields is stored as written, and the record it came from is left byte-identical',
+  );
+
+  const invitation = (id, linked) => ({
+    id,
+    orgId: 'org-x',
+    orgName: 'X FC',
+    orgType: 'club',
+    orgVerified: true,
+    orgSafeguardingCertified: true,
+    playerId: 'pl-x',
+    playerName: 'Xavier Adult',
+    userId: 'usr-owner',
+    scoutName: 'Owner',
+    scoutRole: 'Head of Recruitment',
+    type: 'trial',
+    message: 'Come.',
+    trialDetails: linked
+      ? { proposedDate: '2027-01-15', altSlots: [], venue: 'Dome, London', notes: '' }
+      : { proposedDate: null, altSlots: [], venue: null, notes: '' },
+    status: 'accepted',
+    createdAt: 1_800_000_000_000 - 1000,
+    ...(linked ? { respondedAt: 1_800_000_000_000, respondedBy: 'player' } : {}),
+    routedTo: 'player',
+    guardianId: null,
+    contactChannel: null,
+    ...(linked ? { caseId: 'case-x', trialId: 'trial-1' } : {}),
+  });
+  for (const [alien, what] of [
+    [null, 'null'],
+    ['string', 'string'],
+    [42, 'number'],
+  ]) {
+    const dir = tempDir('s8a-tp-alien');
+    const db = baseDb();
+    db.trials.push(soundTrial(), alien);
+    db.requests = [invitation('req-1', true)];
+    const err = refused(
+      () => writeFixture(dir, db),
+      new RegExp(`trials: a record must be an object \\(got ${what}\\)`),
+      `alien ${what}`,
+    );
+    assert.equal(err.code, 'RECRUITMENT_INPUT_INVALID', `alien ${what}: refused by its kind`);
+    assert.equal(
+      rowIds(readRecords(dir)),
+      FRESH,
+      `${what}: nothing was written: the directory holds only the first installation`,
+    );
+    rm(dir);
+  }
+  {
+    const dir = tempDir('s8a-tp-sessions');
+    const db = baseDb();
+    db.trials = [
+      soundTrial({
+        id: 'trial-bad-sessions',
+        requestId: 'req-trial-bad-sessions',
+        caseId: null,
+        workflowState: 'cancelled',
+        schedule: { ...soundTrial().schedule, sessions: 'two' },
+      }),
+    ];
+    db.requests = [invitation('req-trial-bad-sessions', false)];
+    const err = refused(
+      () => writeFixture(dir, db),
+      /trials trial-bad-sessions schedule\.sessions: must be a list/,
+      'sessions not a list',
+    );
+    assert.equal(err.code, 'RECRUITMENT_INPUT_INVALID');
+    assert.equal(rowIds(readRecords(dir)), FRESH, 'sessions not a list: nothing was written');
+    rm(dir);
+  }
 });
 
 console.log(`\n${passed} recruitment checks passed`);

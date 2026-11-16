@@ -13,8 +13,8 @@
 //   Also: the report date, one accept writer, the finalize rate limit, an
 //     unknown slot refused, respondedBy on both paths.
 //
-// Groups:
-//   A  pure — the validator against every malformed shape
+// Groups (the pure validator, A, and the notification taxonomy, C0, are in
+// scripts/rules/recruitment/trialDatesMinorsAndErasure.mjs):
 //   B  HTTP — trial dates on the request, accept, calendar, postpone and feed paths
 //   C  HTTP — the guardian decision, preferences, prototype keys, the privacy sentinel
 //   D  HTTP — the erasure cascade matrix, gate, readers, foreign org, guardian path
@@ -29,29 +29,33 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import {
-  parseTrialDate,
-  isTrialDate,
-  trialReportDueAt,
-  validateTrialDetails,
-  chooseTrialSlot,
-  TRIAL_REPORT_WINDOW_MS,
-  TRIAL_DATE_SYNTAX,
-  TRIAL_DETAIL_LIMITS,
-  TRIAL_REPORT_FIELDS,
-} from '../../domain.ts';
-import { CATEGORIES, TYPE_CATEGORY, categoryOf } from '../../domains/platform/notificationPrefs.mjs';
-import { RATE_LIMIT_POLICY } from '../../domains/platform/rateLimit.mjs';
-import { DATA_MIGRATIONS } from '../../repositories/index.mjs';
-
-const SCHEMA_VERSION = Number(
-  DATA_MIGRATIONS.map((m) => m.id)
-    .sort()
-    .at(-1)
-    .slice(0, 4),
-); // the latest table migration's number
-import { openLayer, readRecords, plantCase } from '../../scripts/dataLayerFixture.mjs';
+import { openFixture, plantCase } from '../support/sqlFixture.mjs';
+import { readRows } from '../support/sqlRows.mjs';
+import domainSpec from '../support/spec/domain.json' with { type: 'json' };
+import rateLimitSpec from '../support/spec/platform/rateLimit.json' with { type: 'json' };
 import { serverCommand, serverDir } from '../support/server.mjs';
+
+const { TRIAL_DATE_SYNTAX, TRIAL_DETAIL_LIMITS, TRIAL_REPORT_FIELDS } = domainSpec;
+const { RATE_LIMIT_POLICY } = rateLimitSpec;
+// The table migrations a new database records, as the migrated schema lists them.
+const MIGRATIONS = (() => {
+  const R = readRows(mkdtempSync(path.join(tmpdir(), 'sbx-p4a-schema-')));
+  try {
+    return R.rows('data_migrations').map((r) => r.id);
+  } finally {
+    R.close();
+  }
+})();
+const SCHEMA_VERSION = Number(MIGRATIONS.at(-1).slice(0, 4)); // the latest table migration's number
+/** The whole database, as text: the yardstick for "nothing was written". */
+const everything = (dir) => {
+  const R = readRows(dir);
+  try {
+    return JSON.stringify(R.all());
+  } finally {
+    R.close();
+  }
+};
 
 const PORT = pickPort(6200, 200, [0]);
 const BASE = `http://localhost:${PORT}`;
@@ -94,285 +98,7 @@ const FUTURE3 = dayStr(Date.now() + 35 * DAY);
 const FUTURE4 = dayStr(Date.now() + 42 * DAY);
 const PAST = dayStr(Date.now() - 30 * DAY);
 
-// ============================================================ A — pure validator
-section('A — one Trial date validator, every malformed shape refused before persistence');
-{
-  const malformed = [
-    'not-a-date',
-    '2026-13-99',
-    '2026-02-31',
-    {},
-    [],
-    0,
-    NaN,
-    'NaN',
-    ' 2026-10-03',
-    '2026-10-03 ',
-    '\t2026-10-03',
-    '2026-10-03T10:00',
-    '2026-10-03T00:00:00Z',
-    '1999-12-31',
-    '2101-01-01',
-    '0000-01-01',
-    '9999-12-31',
-    '2026-1-3',
-    '20261003',
-    true,
-    false,
-    1e12,
-    -1,
-    '2026-02-29',
-    '2026-04-31',
-    '2026-00-10',
-    '2026-10-00',
-    '2026/10/03',
-    '03-10-2026',
-    'today',
-    'next tuesday-ish',
-    Symbol.for('x'),
-    () => {},
-    new Date('2026-10-03'),
-    { proposedDate: '2026-10-03' },
-    ['2026-10-03'],
-  ];
-  for (const m of malformed) {
-    const r = parseTrialDate(m);
-    neg(
-      r.ok === false && r.error === 'TRIAL_DATE_INVALID' && r.expected === TRIAL_DATE_SYNTAX,
-      `A1 ${typeof m === 'symbol' ? 'Symbol' : typeof m === 'function' ? 'function' : (JSON.stringify(m) ?? String(m))} is refused as TRIAL_DATE_INVALID`,
-    );
-  }
-  for (const absent of ['', null, undefined]) {
-    const r = parseTrialDate(absent);
-    ok(
-      r.ok === true && r.value === null && r.t === null,
-      `A2 ${JSON.stringify(absent) ?? 'undefined'} means "no date", never an error and never a fabricated day`,
-    );
-  }
-  const good = parseTrialDate('2026-10-03');
-  ok(
-    good.ok && good.value === '2026-10-03' && good.t === Date.UTC(2026, 9, 3),
-    'A3 a calendar day parses to its own string and its UTC midnight',
-  );
-  ok(parseTrialDate('2028-02-29').ok === true, 'A3b a real leap day is accepted');
-  neg(parseTrialDate('2027-02-29').ok === false, 'A3c a leap day in a non-leap year is refused');
-  ok(
-    parseTrialDate('2000-01-01').ok && parseTrialDate('2100-12-31').ok,
-    'A3d the accepted range is inclusive at both ends',
-  );
-  neg(
-    isTrialDate('') === false &&
-      isTrialDate(null) === false &&
-      isTrialDate('bad') === false &&
-      isTrialDate('2026-10-03') === true,
-    'A4 isTrialDate is true only for a real stored day',
-  );
-
-  ok(
-    trialReportDueAt('2026-10-03', 5) === Date.UTC(2026, 9, 3) + TRIAL_REPORT_WINDOW_MS,
-    'A5 the deadline is trial day + 7 days, from the day not the acceptance',
-  );
-  ok(
-    trialReportDueAt(null, 1000) === 1000 + TRIAL_REPORT_WINDOW_MS,
-    'A5b with no day it is acceptance + 7 days, from the clock the caller passed',
-  );
-  neg(
-    trialReportDueAt('garbage', 1000) === 1000 + TRIAL_REPORT_WINDOW_MS,
-    'A5c a legacy garbage day falls back to the acceptance clock, never NaN',
-  );
-  neg(
-    trialReportDueAt(null, NaN) === null &&
-      trialReportDueAt(null, undefined) === null &&
-      trialReportDueAt('bad', 'bad') === null,
-    'A5d with nothing finite to derive from the answer is null, not NaN',
-  );
-  ok(TRIAL_REPORT_WINDOW_MS === 7 * DAY, 'A5e the window is exactly seven days');
-
-  const full = validateTrialDetails({
-    proposedDate: '2026-10-03',
-    altSlots: ['2026-10-10', '2026-10-17'],
-    venue: 'Eastport Dome',
-    notes: 'Bring boots.',
-  });
-  ok(
-    full.ok &&
-      JSON.stringify(full.details) ===
-        JSON.stringify({
-          proposedDate: '2026-10-03',
-          altSlots: ['2026-10-10', '2026-10-17'],
-          venue: 'Eastport Dome',
-          notes: 'Bring boots.',
-        }),
-    'A6 valid details come back canonical and untouched',
-  );
-  ok(
-    JSON.stringify(validateTrialDetails({}).details) ===
-      JSON.stringify({ proposedDate: null, altSlots: [], venue: null, notes: '' }),
-    'A6b nothing given is a date-to-be-confirmed invitation with empty logistics',
-  );
-  ok(
-    validateTrialDetails(null).ok && validateTrialDetails('text').ok && validateTrialDetails(42).ok,
-    'A6c a non-object body is treated as no details, not a crash',
-  );
-  neg(
-    validateTrialDetails({ proposedDate: 'bad' }).error === 'TRIAL_DATE_INVALID' &&
-      validateTrialDetails({ proposedDate: 'bad' }).field === 'proposedDate',
-    'A7 a bad proposed date is refused and names its field',
-  );
-  neg(validateTrialDetails({ altSlots: 'x' }).error === 'TRIAL_SLOTS_INVALID', 'A7b altSlots must be a list');
-  neg(
-    validateTrialDetails({ altSlots: { 0: '2026-10-10', length: 1 } }).error === 'TRIAL_SLOTS_INVALID',
-    'A7c an array-like object is not a list',
-  );
-  neg(
-    validateTrialDetails({ altSlots: ['2026-10-10', '2026-10-17', '2026-10-24'] }).error === 'TRIAL_SLOTS_INVALID',
-    `A7d more than ${TRIAL_DETAIL_LIMITS.altSlots} slots is refused, not truncated`,
-  );
-  neg(
-    validateTrialDetails({ altSlots: ['2026-10-10', 'bad'] }).error === 'TRIAL_DATE_INVALID' &&
-      validateTrialDetails({ altSlots: ['2026-10-10', 'bad'] }).field === 'altSlots',
-    'A7e a bad slot is refused as a date, naming altSlots',
-  );
-  neg(
-    validateTrialDetails({ altSlots: [''] }).error === 'TRIAL_SLOTS_INVALID' &&
-      validateTrialDetails({ altSlots: [null] }).error === 'TRIAL_SLOTS_INVALID',
-    'A7f an empty slot is refused (there is no such thing as an alternative "no date")',
-  );
-  neg(
-    validateTrialDetails({ proposedDate: '2026-10-03', altSlots: ['2026-10-03'] }).error === 'TRIAL_SLOTS_INVALID',
-    'A7g a slot equal to the proposed day is refused',
-  );
-  neg(
-    validateTrialDetails({ altSlots: ['2026-10-10', '2026-10-10'] }).error === 'TRIAL_SLOTS_INVALID',
-    'A7h duplicate slots are refused',
-  );
-  neg(
-    validateTrialDetails({ venue: 'x'.repeat(TRIAL_DETAIL_LIMITS.venue + 1) }).error === 'TRIAL_VENUE_INVALID',
-    'A8 an over-long venue is refused, not clamped',
-  );
-  ok(validateTrialDetails({ venue: 'x'.repeat(TRIAL_DETAIL_LIMITS.venue) }).ok, 'A8b exactly the limit is accepted');
-  neg(
-    validateTrialDetails({ venue: 'Gate B\nEND:VEVENT' }).error === 'TRIAL_VENUE_INVALID' &&
-      validateTrialDetails({ venue: 'a\rb' }).error === 'TRIAL_VENUE_INVALID' &&
-      validateTrialDetails({ venue: 'a\u0000b' }).error === 'TRIAL_VENUE_INVALID',
-    'A8c a venue with a line break or control character is refused (it is written into a calendar file)',
-  );
-  neg(
-    validateTrialDetails({ venue: {} }).error === 'TRIAL_VENUE_INVALID' &&
-      validateTrialDetails({ venue: 5 }).error === 'TRIAL_VENUE_INVALID' &&
-      validateTrialDetails({ venue: [] }).error === 'TRIAL_VENUE_INVALID',
-    'A8d a non-text venue is refused',
-  );
-  ok(
-    validateTrialDetails({ venue: '' }).details.venue === null &&
-      validateTrialDetails({ venue: null }).details.venue === null,
-    'A8e an empty venue is no venue',
-  );
-  neg(
-    validateTrialDetails({ notes: 'x'.repeat(TRIAL_DETAIL_LIMITS.notes + 1) }).error === 'TRIAL_NOTES_INVALID' &&
-      validateTrialDetails({ notes: 5 }).error === 'TRIAL_NOTES_INVALID' &&
-      validateTrialDetails({ notes: {} }).error === 'TRIAL_NOTES_INVALID',
-    'A9 over-long or non-text notes are refused',
-  );
-  for (const key of ['__proto__', 'constructor', 'prototype', 'toString', 'valueOf', 'hasOwnProperty']) {
-    const o = JSON.parse(`{"${key}": {"proposedDate": "bad"}, "proposedDate": "2026-10-03"}`);
-    const r = validateTrialDetails(o);
-    neg(
-      r.ok === true && r.details.proposedDate === '2026-10-03' && !(key in r.details && Object.hasOwn(r.details, key)),
-      `A10 a "${key}" key in the body neither leaks nor changes the details`,
-    );
-  }
-
-  ok(
-    chooseTrialSlot({ proposedDate: '2026-10-03', altSlots: ['2026-10-10'] }, '2026-10-10').date === '2026-10-10',
-    'A11 an offered alternative is chosen',
-  );
-  ok(
-    chooseTrialSlot({ proposedDate: '2026-10-03', altSlots: ['2026-10-10'] }, undefined).date === '2026-10-03' &&
-      chooseTrialSlot({ proposedDate: '2026-10-03' }, '').date === '2026-10-03' &&
-      chooseTrialSlot({ proposedDate: '2026-10-03' }, null).date === '2026-10-03',
-    'A11b no choice means the proposed day',
-  );
-  const unknown = chooseTrialSlot({ proposedDate: '2026-10-03', altSlots: ['2026-10-10'] }, '2026-10-04');
-  neg(
-    unknown.ok === false &&
-      unknown.error === 'TRIAL_SLOT_INVALID' &&
-      JSON.stringify(unknown.offered) === JSON.stringify(['2026-10-03', '2026-10-10']),
-    'A12 a day the club never offered is refused and the offered days are listed',
-  );
-  for (const v of [{}, [], 0, true, 42, ['2026-10-03'], { toString: () => '2026-10-03' }]) {
-    neg(
-      chooseTrialSlot({ proposedDate: '2026-10-03' }, v).error === 'TRIAL_SLOT_INVALID',
-      `A12b a ${JSON.stringify(v)} slot is refused, not coerced`,
-    );
-  }
-  neg(
-    chooseTrialSlot({ proposedDate: 'garbage' }, 'garbage').date === null &&
-      chooseTrialSlot({ proposedDate: 'garbage' }, undefined).date === null,
-    'A13 a legacy request whose stored day is garbage yields no date — never the garbage, never an invented day',
-  );
-  neg(
-    chooseTrialSlot(null, undefined).date === null && chooseTrialSlot('x', undefined).date === null,
-    'A13b no details at all is an undated acceptance',
-  );
-  neg(
-    chooseTrialSlot({ proposedDate: null }, '2026-10-03').error === 'TRIAL_SLOT_INVALID',
-    'A13c a slot cannot be chosen when nothing was offered',
-  );
-
-  // date boundaries — UTC calendar days only; there is no time-of-day and no timezone in this model, so DST cannot move a deadline
-  ok(
-    trialReportDueAt('2026-12-31', 0) === Date.UTC(2027, 0, 7),
-    'A14 a year-boundary trial day derives a deadline in the next year',
-  );
-  ok(
-    trialReportDueAt('2026-02-28', 0) === Date.UTC(2026, 2, 7) &&
-      trialReportDueAt('2028-02-29', 0) === Date.UTC(2028, 2, 7),
-    'A14b end-of-month and leap-day trial days derive correctly',
-  );
-  ok(
-    trialReportDueAt('2026-03-29', 0) - Date.UTC(2026, 2, 29) === 7 * DAY &&
-      trialReportDueAt('2026-10-25', 0) - Date.UTC(2026, 9, 25) === 7 * DAY,
-    'A14c the window is exactly 7 × 24 h across the European DST switches — UTC days, no local-time drift',
-  );
-  ok(
-    parseTrialDate('2026-12-31').t === Date.UTC(2026, 11, 31) &&
-      parseTrialDate('2027-01-01').t === parseTrialDate('2026-12-31').t + DAY,
-    'A14d consecutive days across the year boundary are one day apart',
-  );
-}
-
-// ============================================================ C0 — pure taxonomy
-section('C0 — the guardian decision is a request outcome in the notification taxonomy');
-{
-  ok(
-    TYPE_CATEGORY.guardian_decision === 'messages' && categoryOf('guardian_decision') === 'messages',
-    'C0a guardian_decision → messages ("Messages and requests")',
-  );
-  ok(
-    CATEGORIES.messages.default === true && CATEGORIES.messages.mandatory === false,
-    'C0b that category is on by default for every existing, new and migrated person, and may be muted like every other request outcome',
-  );
-  ok(
-    TYPE_CATEGORY.accepted === 'messages' && TYPE_CATEGORY.declined === 'messages',
-    'C0c the club-side outcome rows live in the same category — one taxonomy, no parallel system',
-  );
-  neg(
-    TYPE_CATEGORY.update === 'discovery_nudges' && CATEGORIES.discovery_nudges.default === false,
-    'C0d `update` still means a discovery nudge (off by default) — the type was wrong for the child, the category was not changed to fit it',
-  );
-  // A feature must not make its own traffic unmutable to get attention. Besides
-  // security, `compliance` is the one deliberate exception: it carries regulatory
-  // review, consent and verification, where muting would mute an obligation rather
-  // than a preference. Pinned as a set so adding a third has to change this line.
-  neg(
-    Object.keys(CATEGORIES)
-      .filter((k) => CATEGORIES[k].mandatory)
-      .sort()
-      .join() === 'compliance,security_account',
-    'C0e the mandatory categories are still exactly two — security_account and compliance; no milestone has quietly added a third',
-  );
-}
+// The validator (A) and the notification taxonomy (C0) are checked in scripts/rules/recruitment/trialDatesMinorsAndErasure.mjs.
 
 // =================================================================== HTTP
 section('HTTP — booting a real server');
@@ -1659,14 +1385,14 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
       break;
     }
   }
-  // The edit is written through the repositories (below); `db` is the stored records read back, `planted` the new rows.
-  const db = readRecords(DATA_DIR);
-  ok(Array.isArray(db.trials) && Array.isArray(db.recruitmentCases), 'L1 the stored records read for the fixture edit');
-  const planted = { cases: [], signings: [], trials: [], requests: [] };
-  const kase = db.recruitmentCases.find((c) => c.id === MID);
-  kase.room.status = 'signed'; // TEST FIXTURE ONLY: a legacy `signed` case with its signing record
+  // The edit is written as plain rows (below), into the store the killed server left; `kase` is the stored case row.
+  const R = readRows(DATA_DIR);
+  const kase = R.row('recruitment_cases', { id: MID });
+  const mariaId = R.row('org_users', { org_id: 'org-eastport', name: 'Maria Keane' })?.id;
+  R.close();
+  ok(!!kase && !!mariaId, 'L1 the stored records read for the fixture edit');
+  const planted = { recruitment_cases: [], case_history: [], signings: [], recruitment_requests: [], trials: [] };
   // the erasure matrix: one legacy case per lifecycle position, all for the same player (fixture rows; no route can reach these today)
-  const mariaId = db.users.find((u) => u.orgId === 'org-eastport' && u.name === 'Maria Keane').id;
   const MATRIX = [
     'trial_requested',
     'trial_scheduled',
@@ -1678,170 +1404,161 @@ section('L — legacy rows in the store: read-side defence, signed invariant, re
     'withdrawn',
     'closed',
   ];
+  const BY_MARIA = { by_kind: 'org', by_id: mariaId, by_name: 'Maria Keane' };
   for (const st of MATRIX) {
-    const clone = JSON.parse(JSON.stringify(kase));
-    // Each clone is a whole case of its own — its own history entries (the one entry shape, with ids), and no
-    // copy of the original's draft or handoff (those belong to the original case).
-    clone.id = `case-matrix-${st}`;
-    clone.room.status = st;
-    clone.room.rev = 3;
-    clone.decisionDraft = null;
-    clone.transactionHandoff = null;
-    clone.history = [
+    // Each clone is a whole case of its own, with its own history entries, and no copy of the original's draft or
+    // handoff (those belong to the original case).
+    const id = `case-matrix-${st}`;
+    planted.recruitment_cases.push({ ...kase, id, room_status: st, room_rev: 3 });
+    planted.case_history.push(
       {
+        case_id: id,
+        position: 0,
         id: `aud-matrix-${st}-1`,
         at: Date.now() - 20 * DAY,
-        byKind: 'org',
-        byId: mariaId,
-        byName: 'Maria Keane',
         action: 'room_created',
-        detail: { status: 'watching' },
+        ...BY_MARIA,
+        detail_json: JSON.stringify({ status: 'watching' }),
       },
       {
+        case_id: id,
+        position: 1,
         id: `aud-matrix-${st}-2`,
         at: Date.now() - 10 * DAY,
-        byKind: 'org',
-        byId: mariaId,
-        byName: 'Maria Keane',
         action: 'room_status_changed',
-        detail: { from: 'watching', to: st },
+        ...BY_MARIA,
+        detail_json: JSON.stringify({ from: 'watching', to: st }),
       },
-    ];
-    planted.cases.push(clone);
+    );
   }
+  // A legacy signing record: it names its staff member by a real key.
   planted.signings.push({
     id: 'sign-legacy-1',
-    playerId: 'pl-carvalho',
-    playerName: 'Mateus Carvalho',
-    orgId: 'org-eastport',
-    orgName: 'Eastport FC',
-    userId: mariaId /* the real staff id: a signing names its staff member by a key */,
-    scoutName: 'Maria Keane',
+    player_id: 'pl-carvalho',
+    player_name: 'Mateus Carvalho',
+    org_id: 'org-eastport',
+    org_name: 'Eastport FC',
+    user_id: mariaId,
+    scout_name: 'Maria Keane',
     ts: Date.now() - 5 * DAY,
+    inside_attribution_window: 0,
+    method: 'LEGACY_RECORDED',
   });
-  // legacy trial rows written before the validator existed. A typed row holds a day-shaped value only, so
-  // the bad dates planted here are the ones a row can still carry — an impossible month, an impossible day, a day
-  // outside the accepted range, no date — and the read side must still defend against each. The shapes a row cannot
-  // hold (free text, a NaN deadline, no acceptance instant) are refused by the save with their ids (L1b below).
+  // legacy trial rows written before the validator existed. A typed row holds a day-shaped value only, so the bad
+  // dates planted here are the ones a row can still carry — an impossible month, an impossible day, a day outside the
+  // accepted range, no date — and the read side must still defend against each. The shapes a row cannot hold (free
+  // text, no acceptance instant) are refused by the schema (L1b below).
   const legacyTrial = (over) => ({
-    playerId: 'pl-carvalho',
-    playerName: 'Mateus Carvalho',
-    orgId: 'org-eastport',
-    orgName: 'Eastport FC',
-    scoutName: 'Maria Keane',
-    acceptedAt: Date.now() - 40 * DAY,
-    venue: null,
+    player_id: 'pl-carvalho',
+    player_name: 'Mateus Carvalho',
+    org_id: 'org-eastport',
+    org_name: 'Eastport FC',
+    scout_name: 'Maria Keane',
+    accepted_at: Date.now() - 40 * DAY,
     notes: '',
-    reportDueAt: null,
     status: 'awaiting_report',
-    workflowState: 'legacy_accepted',
+    reminder_sent: 0,
+    workflow_state: 'legacy_accepted',
     rev: 1,
     ...over,
   });
   const unstorable = [
-    legacyTrial({ id: 'trial-junk-text', requestId: 'req-legacy-1', proposedDate: 'next tuesday-ish' }),
-    legacyTrial({ id: 'trial-junk-nan', requestId: 'req-legacy-2', reportDueAt: NaN }),
-    legacyTrial({ id: 'trial-junk-accepted', requestId: 'req-legacy-3', acceptedAt: undefined }),
+    [
+      legacyTrial({ id: 'trial-junk-text', request_id: 'req-legacy-1', proposed_date: 'next tuesday-ish' }),
+      /CHECK constraint failed: proposed_date/,
+    ],
+    [
+      legacyTrial({ id: 'trial-junk-accepted', request_id: 'req-legacy-3', accepted_at: null }),
+      /NOT NULL constraint failed: trials\.accepted_at/,
+    ],
   ];
   planted.trials.push(
-    legacyTrial({ id: 'trial-legacy-garbage', requestId: 'req-legacy-1', proposedDate: '2026-13-01', venue: 'x' }),
-    legacyTrial({ id: 'trial-legacy-nan', requestId: 'req-legacy-2', proposedDate: '2026-02-31' }),
-    legacyTrial({ id: 'trial-legacy-null', requestId: 'req-legacy-3', proposedDate: null }),
-    legacyTrial({ id: 'trial-legacy-old', requestId: 'req-legacy-4', proposedDate: '1999-01-01' }),
+    legacyTrial({ id: 'trial-legacy-garbage', request_id: 'req-legacy-1', proposed_date: '2026-13-01', venue: 'x' }),
+    legacyTrial({ id: 'trial-legacy-nan', request_id: 'req-legacy-2', proposed_date: '2026-02-31' }),
+    legacyTrial({ id: 'trial-legacy-null', request_id: 'req-legacy-3' }),
+    legacyTrial({ id: 'trial-legacy-old', request_id: 'req-legacy-4', proposed_date: '1999-01-01' }),
   );
-  // A trial names its request by a real key (trials.request_id → recruitment_requests), so the four legacy
-  // trials get the accepted invitation each of them came from, in the legacy direct-request literal; a trial naming an
-  // absent request is refused at the write with its id (PAIR_MISMATCH), never repaired. The garbage this section
-  // proves tolerated lives in the trial rows above, which are unchanged.
-  for (const n of [1, 2, 3, 4])
-    planted.requests.push({
-      id: `req-legacy-${n}`,
-      playerId: 'pl-carvalho',
-      playerName: 'Mateus Carvalho',
-      orgId: 'org-eastport',
-      orgName: 'Eastport FC',
-      orgType: 'club',
-      orgVerified: true,
-      orgSafeguardingCertified: true,
-      userId: mariaId,
-      scoutName: 'Maria Keane',
-      scoutRole: 'Head of Recruitment',
-      type: 'trial',
-      message: 'legacy accepted invitation',
-      trialDetails: { proposedDate: '1999-01-01', altSlots: [], venue: null, notes: '' },
-      status: 'accepted',
-      createdAt: Date.now() - 41 * DAY,
-      respondedAt: Date.now() - 40 * DAY,
-      respondedBy: 'player',
-      routedTo: 'player',
-      guardianId: null,
-      contactChannel: null,
-    });
-  planted.requests.push({
-    id: 'req-legacy-5',
-    playerId: 'pl-carvalho',
-    playerName: 'Mateus Carvalho',
-    orgId: 'org-eastport',
-    orgName: 'Eastport FC',
-    orgType: 'club',
-    orgVerified: true,
-    orgSafeguardingCertified: true,
-    userId: mariaId /* the real staff id (a request names its staff member by a key) */,
-    scoutName: 'Maria Keane',
-    scoutRole: 'Head of Recruitment',
+  // A trial names its request by a real key (trials.request_id → recruitment_requests), so the four legacy trials get
+  // the accepted invitation each of them came from, in the legacy direct-request literal. The garbage this section
+  // proves tolerated lives in the trial rows above.
+  const legacyRequest = (over) => ({
+    player_id: 'pl-carvalho',
+    player_name: 'Mateus Carvalho',
+    org_id: 'org-eastport',
+    org_name: 'Eastport FC',
+    org_type: 'club',
+    org_verified: 1,
+    org_safeguarding_certified: 1,
+    user_id: mariaId,
+    scout_name: 'Maria Keane',
+    scout_role: 'Head of Recruitment',
     type: 'trial',
-    message: 'legacy pending invitation',
-    trialDetails: { proposedDate: '2026-13-01', altSlots: ['2026-02-30'], venue: null, notes: '' },
-    status: 'pending',
-    createdAt: Date.now() - 3 * DAY,
-    routedTo: 'player',
-    guardianId: null,
-    contactChannel: null,
+    trial_notes: '',
+    routed_to: 'player',
+    ...over,
   });
-  for (const junk of unstorable) {
-    // "nothing written" is proved on the file's contents.
-    let refused = null;
-    const dumpBefore = JSON.stringify(readRecords(DATA_DIR));
-    const L = openLayer(DATA_DIR);
+  for (const n of [1, 2, 3, 4])
+    planted.recruitment_requests.push(
+      legacyRequest({
+        id: `req-legacy-${n}`,
+        message: 'legacy accepted invitation',
+        trial_proposed_date: '1999-01-01',
+        trial_alt_days_json: '[]',
+        status: 'accepted',
+        created_at: Date.now() - 41 * DAY,
+        responded_at: Date.now() - 40 * DAY,
+        responded_by: 'player',
+      }),
+    );
+  planted.recruitment_requests.push(
+    legacyRequest({
+      id: 'req-legacy-5',
+      message: 'legacy pending invitation',
+      trial_proposed_date: '2026-13-01',
+      trial_alt_days_json: JSON.stringify(['2026-02-30']),
+      status: 'pending',
+      created_at: Date.now() - 3 * DAY,
+    }),
+  );
+  /** Write `tables` into the store in one transaction, its references checked at the end. */
+  const plant = (tables, more = () => {}) => {
+    const F = openFixture(DATA_DIR);
     try {
-      L.unit(() => {
-        L.layer.recruitment.requests.create(planted.requests.find((q) => q.id === junk.requestId));
-        L.layer.recruitment.trials.create(junk);
+      F.transaction(() => {
+        F.sql.exec('PRAGMA defer_foreign_keys = ON');
+        more(F);
+        for (const [table, rs] of Object.entries(tables)) for (const r of rs) F.insert(table, r);
+      });
+    } finally {
+      F.close();
+    }
+  };
+  for (const [junk, why] of unstorable) {
+    // "nothing written" is proved on the database's contents.
+    let refused = null;
+    const dumpBefore = everything(DATA_DIR);
+    try {
+      plant({
+        recruitment_requests: planted.recruitment_requests.filter((q) => q.id === junk.request_id),
+        trials: [junk],
       });
     } catch (e) {
       refused = e;
-    } finally {
-      L.close();
     }
     neg(
-      refused?.code === 'RECRUITMENT_INPUT_INVALID' &&
-        refused.message.includes(junk.id) &&
-        JSON.stringify(readRecords(DATA_DIR)) === dumpBefore,
-      `L1b a trial the typed row cannot hold (${junk.id}) is refused by the write with its id; nothing written`,
+      !!refused && why.test(String(refused.message)) && everything(DATA_DIR) === dumpBefore,
+      `L1b a trial the typed row cannot hold (${junk.id}) is refused by the schema; nothing written`,
     );
   }
-  {
-    const L = openLayer(DATA_DIR);
-    try {
-      L.unit(() => {
-        const { recruitmentCases: C, recruitment: Rq, signingsFollowUps: S } = L.layer;
-        plantCase(L, MID, { status: 'signed' }); // no act jumps a case to signed: the plant is SQL
-        for (const c of planted.cases) C.cases.create(c);
-        for (const g of planted.signings) S.signings.record(g);
-        for (const q of planted.requests) Rq.requests.create(q);
-        for (const t of planted.trials) Rq.trials.create(t);
-      });
-    } finally {
-      L.close();
-    }
-  }
+  // no act jumps a case to signed: the plant is SQL
+  plant(planted, (F) => plantCase(F, MID, { status: 'signed' }));
   server = await boot();
   maria = await login('org-eastport', 'Maria Keane', 'Head of Recruitment');
   mateus = await playerLogin('pl-carvalho');
   harbour = await login('org-harbour', 'Dan Okoro', 'Head of Recruitment');
   ok(!!maria.token && !!mateus.token, 'L2 the server boots on the edited store');
   ok(
-    (await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && DATA_MIGRATIONS.length === SCHEMA_VERSION,
+    (await j('GET', '/healthz')).body.schemaVersion === SCHEMA_VERSION && MIGRATIONS.length === SCHEMA_VERSION,
     `L2b schema ${SCHEMA_VERSION} — no migration was needed or added for the closure`,
   );
   const survived = (await orgTrials(maria.token)).find((t) => t.id === mt.id);
