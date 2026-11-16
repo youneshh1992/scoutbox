@@ -33,5 +33,6 @@
     "INT": false,
     "USA": false,
     "DEFAULT": false
-  }
+  },
+  "OFFER_POLICY_VERSION": 1
 }

@@ -74,8 +74,13 @@ export const SPEC = {
   'domains/recruitment/lifecycle/trial.mjs': ['TRIAL_LIMITS', 'TRIAL_WORKFLOW_STATES'],
   'domains/recruitment/lifecycle/trialRoutes.mjs': ['TRIAL_INPUT_CODES'],
   'domains/recruitment/analytics/funnels.mjs': ['FUNNEL_STAGES'],
-  'domains/recruitment/offers/errors.mjs': ['OFFER_ERROR_HTTP'],
-  'domains/recruitment/offers/offer.mjs': ['OFFER_LIMITS', 'OFFER_INPUT_CODES', 'MINOR_OFFER_PATHWAY_ENABLED'],
+  'domains/recruitment/offers/errors.mjs': ['OFFER_ERROR_HTTP', 'PUBLIC_ERROR_FIELDS'],
+  'domains/recruitment/offers/offer.mjs': [
+    'OFFER_LIMITS',
+    'OFFER_INPUT_CODES',
+    'MINOR_OFFER_PATHWAY_ENABLED',
+    'OFFER_POLICY_VERSION',
+  ],
   'domains/recruitment/signings/errors.mjs': ['SIGNING_ERROR_HTTP'],
   'domains/recruitment/signings/signing.mjs': ['SIGNING_CORRUPTION', 'SIGNING_INPUT_CODES'],
 };
