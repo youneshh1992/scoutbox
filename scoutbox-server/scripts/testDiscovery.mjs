@@ -25,6 +25,7 @@ import {
   DISCOVERY_MIGRATION as MIGRATION,
   DISCOVERY_TABLES as TABLES,
   DISCOVERY_COLLECTIONS as COLLECTIONS,
+  DISCOVERY_DDL,
   typeBrief,
   typeReview,
   typeSecondLookItem,
@@ -716,6 +717,66 @@ test('[fixtures] a record written through the repository is typed, a missing ref
     'a refused write changed nothing',
   );
   rm(dir);
+});
+
+// Moved from the platform/contracts battery (§11), where it read the repository's DDL and typing in the battery's
+// process. The battery keeps the two table facts as schema checks.
+test('[unit] the discovery tables refuse a duplicated brief id, a fingerprint counted twice in one item and a brief without rev', () => {
+  const check = (cond, msg) => assert.ok(cond, msg);
+  // The discovery tables refuse a duplicated brief id, a fingerprint counted twice in one item and a brief without rev,
+  // so none of them is ever stored to be reported.
+  check(
+    /CREATE TABLE recruitment_briefs \(\n\s+id\s+TEXT PRIMARY KEY/.test(DISCOVERY_DDL),
+    "a duplicated brief id is refused: the brief id is the table's primary key",
+  );
+  check(
+    /the same evidence|names an entry twice/.test(
+      typeSecondLookItem({
+        id: 's1',
+        orgId: 'o1',
+        playerId: 'p1',
+        roomId: 'c1',
+        decisionId: 'd1',
+        policyVersion: 1,
+        triggerType: 'general_update',
+        changeFingerprints: ['f1', 'f1'],
+        directReasonCodes: [],
+        status: 'open',
+        createdAt: 1,
+        updatedAt: 1,
+        latestChangeAt: 1,
+        history: [],
+      }).reason ?? '',
+    ) && /UNIQUE \(item_id, fingerprint\)/.test(DISCOVERY_DDL),
+    'the same evidence counted twice inside one Second Look item is refused (typed, and unique per item in the table)',
+  );
+  check(
+    /rev is required/.test(
+      typeBrief({
+        id: 'b1',
+        orgId: 'o1',
+        title: 'T',
+        version: 1,
+        status: 'draft',
+        createdBy: { userId: 'u1', name: 'U' },
+        createdAt: 1,
+        updatedAt: 1,
+        criteria: {
+          positions: [],
+          minAge: null,
+          maxAge: null,
+          radiusKm: null,
+          maxLevel: null,
+          foot: null,
+          availability: null,
+          evidenceRequirements: [],
+          minTrustBand: null,
+          combineProtocols: [],
+        },
+      }).reason ?? '',
+    ),
+    'a rev-guarded brief with no rev is refused (rev is a required column)',
+  );
 });
 
 console.log(`\n${passed} discovery checks passed`);

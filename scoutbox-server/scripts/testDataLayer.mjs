@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { runDataMigrations, transaction, dataSchemaReport } from '../repositories/database.ts';
+import { runDataMigrations, transaction, dataSchemaReport, migrationApplied } from '../repositories/database.ts';
 import { attachDataLayer, DATA_MIGRATIONS, TABLE_BACKED } from '../repositories/index.mjs';
 import { RECRUITMENT_TABLES } from '../repositories/recruitment.ts';
 import { RECRUITMENT_CASES_TABLES } from '../repositories/recruitmentCases.ts';
@@ -1046,6 +1046,88 @@ test('id counter: without its counters row the store refuses to mint ids it coul
   assert.throws(() => createIdCounter({ sqlite: store.sqlite }), /COUNTER_MISSING/);
   store.sqlite.close();
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// Moved from the platform/contracts battery (§10), where it ran the migration runner in the battery's process.
+test('migrations: ordered, idempotent, recorded, and a failure aborts before any save', () => {
+  const check = (cond, msg) => assert.ok(cond, msg);
+  const SCHEMA_VERSION = Number(
+    DATA_MIGRATIONS.map((m) => m.id)
+      .sort()
+      .at(-1)
+      .slice(0, 4),
+  );
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON;');
+  check(!migrationApplied(db, DATA_MIGRATIONS.at(-1).id), 'an unmigrated database records no migration, never "fine"');
+  const first = runDataMigrations(db, DATA_MIGRATIONS, { now: 1000 });
+  check(
+    first.ran.length === DATA_MIGRATIONS.length && first.known === DATA_MIGRATIONS.length,
+    `a fresh database runs all ${DATA_MIGRATIONS.length} migrations, to ${SCHEMA_VERSION}`,
+  );
+  check(
+    first.ran.join() ===
+      DATA_MIGRATIONS.map((m) => m.id)
+        .sort()
+        .join(),
+    'in id order',
+  );
+  const second = runDataMigrations(db, DATA_MIGRATIONS, { now: 2000 });
+  check(second.ran.length === 0 && second.applied === DATA_MIGRATIONS.length, 'a second run applies nothing');
+  const rows = db.prepare('SELECT id, applied_at FROM data_migrations').all();
+  check(
+    rows.length === DATA_MIGRATIONS.length && rows.every((r) => r.applied_at === 1000),
+    'the applied list is recorded once, with its time',
+  );
+  const report = dataSchemaReport(db, DATA_MIGRATIONS);
+  check(
+    report.migrationsApplied === report.migrationsKnown &&
+      Number(report.migrations.at(-1).slice(0, 4)) === SCHEMA_VERSION,
+    'the report says every known migration is applied, the latest being the schema version',
+  );
+  check(new Set(DATA_MIGRATIONS.map((m) => m.id)).size === DATA_MIGRATIONS.length, 'migration ids are unique');
+  check(
+    DATA_MIGRATIONS.every((m) => /^\d{4}_[a-z0-9_]+$/.test(m.id) && m.note),
+    'every migration has a stable numbered id and a note',
+  );
+  db.close();
+  // A failing migration names itself, and its transaction is rolled back: nothing it wrote, no record.
+  const db2 = new DatabaseSync(':memory:');
+  runDataMigrations(db2, DATA_MIGRATIONS, { now: 1000 });
+  const broken = {
+    id: '9999_broken_on_purpose',
+    note: 'fixture',
+    up(sqlite) {
+      sqlite.exec('CREATE TABLE broken_on_purpose (x TEXT)');
+      throw new Error('synthetic failure');
+    },
+  };
+  let threw = null;
+  try {
+    runDataMigrations(db2, [...DATA_MIGRATIONS, broken], { now: 3000 });
+  } catch (e) {
+    threw = e;
+  }
+  check(
+    !!threw && /9999_broken_on_purpose failed/.test(threw.message) && /not modified/.test(threw.message),
+    'a failing migration names itself and promises the database was untouched',
+  );
+  check(
+    !db2.prepare("SELECT 1 FROM sqlite_master WHERE name = 'broken_on_purpose'").get() &&
+      !migrationApplied(db2, broken.id),
+    'and keeps that promise: no table it created, no record of it',
+  );
+  // The right latest id with the rest missing is NOT up to date.
+  const db3 = new DatabaseSync(':memory:');
+  db3.exec('CREATE TABLE data_migrations (id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);');
+  db3.prepare('INSERT INTO data_migrations (id, applied_at) VALUES (?, 1)').run(DATA_MIGRATIONS.at(-1).id);
+  const partial = dataSchemaReport(db3, DATA_MIGRATIONS);
+  check(
+    partial.migrationsApplied !== partial.migrationsKnown,
+    'the latest migration recorded without the rest is NOT reported as every migration applied',
+  );
+  db2.close();
+  db3.close();
 });
 
 console.log(`\n${passed} data-layer checks passed`);

@@ -13,7 +13,7 @@
 // repository's dev/ledger.mjs reads ledgerRows() from here, so this server never reads the port.
 //
 //   node scripts/e2eLedger.mjs              print each battery's accounting
-//   node scripts/e2eLedger.mjs --baseline   rewrite e2eLedger.baseline.json from BASELINE_REV (only ever once)
+//   node scripts/e2eLedger.mjs --baseline   rewrite e2eLedger.baseline.json from BASELINE_REV (only when the counting changes)
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,6 +35,31 @@ export const BASELINE_REV = '3c843bb2';
  * `added`: `{ checks, why }`, checks the battery or its rules suite has that the baseline didn't.
  */
 export const NOTES = {
+  'platform/contracts': {
+    moved: [
+      {
+        checks: 11,
+        to: 'scripts/testDataLayer.mjs',
+        why: "§10 ran the migration runner (runDataMigrations, dataSchemaReport, migrationApplied) on in-memory databases in the battery's process; that is a unit check of the runner. The battery keeps the migrations over HTTP (§20, §41)",
+      },
+      {
+        checks: 3,
+        to: 'scripts/testDiscovery.mjs',
+        why: "§11's discovery checks read the repository's DDL and called its typeBrief/typeSecondLookItem; those are unit checks of the repository. The battery keeps the two table facts as schema checks (§11b)",
+      },
+      {
+        checks: 7,
+        to: 'scripts/testPlatformHelpers.mjs',
+        why: "§12 built fault layers in the battery's process (parseFaultRules, createFaultLayer, productionConfigProblems); that is a unit check of the fault layer. The battery keeps the production boot's refusal over HTTP (§43)",
+      },
+    ],
+    added: [
+      {
+        checks: 2,
+        why: "§11b: the brief id is recruitment_briefs' primary key, and a fingerprint is unique per Second Look item, read from the migrated schema (they were regexes over the repository's DDL, now in testDiscovery)",
+      },
+    ],
+  },
   'platform/sessionsAndPorts': {
     moved: [
       {
@@ -71,9 +96,16 @@ export const NOTES = {
 
 // ------------------------------------------------------------------------------------------------ counting
 
-/** `text` without its comments, keeping line breaks. A `//` inside a string (a URL) is kept. */
+/**
+ * `text` without its comments, keeping line breaks. A `//` or `/*` inside a string (a URL, a route pattern such as
+ * `/players/*\/trust`) is kept: strings are matched first and left alone.
+ */
 function uncommented(text) {
-  return text.replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' ')).replace(/^\s*\/\/.*$/gm, '');
+  return text
+    .replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\//g, (c, str) =>
+      str ? c : c.replace(/[^\n]/g, ' '),
+    )
+    .replace(/^\s*\/\/.*$/gm, '');
 }
 
 /** The body of the arrow function or function whose definition starts at `from`: a balanced block, or one line. */

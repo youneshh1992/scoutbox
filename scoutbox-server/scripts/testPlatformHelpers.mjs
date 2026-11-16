@@ -12,7 +12,7 @@ import {
   limitCheck,
   refuseWhenLimited,
 } from '../domains/platform/rateLimit.mjs';
-import { createFaultLayer } from '../domains/platform/faults.mjs';
+import { createFaultLayer, parseFaultRules } from '../domains/platform/faults.mjs';
 import { installAsyncErrorForwarding } from '../domains/platform/asyncErrors.mjs';
 import express from 'express';
 import { normaliseClientKey as contactKey } from '../domains/recruitment/lifecycle/contact.mjs';
@@ -124,6 +124,47 @@ test('fault layer: an internal rule with N = 0 never fails and counts its hits; 
   const none = {};
   prod.install({ use() {}, get: (p) => (none[p] = true), post: (p) => (none[p] = true) });
   assert.deepEqual(none, {});
+});
+
+// Moved from the platform/contracts battery (§12), where it built fault layers in the battery's process.
+test('fault layer: inert in production and refuses to be configured there; rules parse, and a rule needs a path', () => {
+  const check = (cond, msg) => assert.ok(cond, msg);
+  check(parseFaultRules('delay:/org/players/*/trust:1500;unavailable:/org/rooms/*').length === 2, 'rules parse');
+  let bad = null;
+  try {
+    parseFaultRules('explode:/x');
+  } catch (e) {
+    bad = e;
+  }
+  check(!!bad, 'an unknown fault kind is refused');
+  let noPath = null;
+  try {
+    parseFaultRules('delay');
+  } catch (e) {
+    noPath = e;
+  }
+  check(!!noPath, 'a rule without a path is refused — a fault can never apply to every route by accident');
+  const prod = createFaultLayer({ env: { NODE_ENV: 'production', SCOUTBOX_FAULTS: 'unavailable:/org/players' } });
+  check(
+    prod.enabled === false && prod.rules().length === 0,
+    'in production the layer is disabled and loads NO rules even when the variable is set',
+  );
+  const routes = [];
+  prod.install({
+    use() {},
+    post(p) {
+      routes.push(p);
+    },
+  });
+  check(!routes.includes('/__faults'), 'and the runtime control route is not mounted');
+  check(
+    productionConfigProblems({
+      env: { NODE_ENV: 'production', MEDIA_SECRET: 'synthetic-media-secret-0123456789abcdef', SCOUTBOX_FAULTS: 'x' },
+    }).some((p) => p.code === 'FAULTS_IN_PRODUCTION' && p.fatal),
+    'a production boot with SCOUTBOX_FAULTS set is a fatal configuration problem',
+  );
+  const dev = createFaultLayer({ env: { NODE_ENV: 'development' } });
+  check(dev.enabled && dev.rules().length === 0, 'development with no variable is enabled and empty (a no-op)');
 });
 
 // Moved from the platform/sessionsAndPorts battery (A1–A3): it builds its own Express app, so it tests the patch.

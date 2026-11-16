@@ -247,7 +247,7 @@
       "modules": []
     },
     "platform/contracts": {
-      "checks": 173,
+      "checks": 207,
       "modules": [
         "domain.ts",
         "domains/discovery/shared.mjs",
