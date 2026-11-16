@@ -20,6 +20,7 @@ import scoutbox/messaging/notifications
 import scoutbox/platform/http
 import scoutbox/platform/input
 import scoutbox/platform/media
+import scoutbox/platform/metrics
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
 import scoutbox/rows/ver_claims.{type Status} as claim_row
@@ -36,7 +37,6 @@ import scoutbox/vocab/org_type
 import scoutbox/vocab/ver_code.{type VerCode}
 import scoutbox/vocab/ver_level.{type VerLevel}
 import scoutbox/vocab/verification_method.{type VerificationMethod}
-import sqlight
 import wisp.{type Request, type Response}
 
 /// The statuses a claim is still being decided in.
@@ -1015,34 +1015,12 @@ pub const metric_names = [
   "rejections", "disputes", "expiries", "revocations", "emailChallengeFailures",
 ]
 
-const metrics_table =
-  "CREATE TEMP TABLE IF NOT EXISTS ver_metrics (name TEXT PRIMARY KEY, n INTEGER NOT NULL)"
-
-/// Counts one occurrence. The counters live for the process, like the TypeScript server's in-memory ones: in a
-/// temporary table of the writer's connection, so they are not part of the schema, start at zero on every boot,
-/// and a refused act's count rolls back with it.
+/// Counts one occurrence (platform/metrics).
 pub fn count(tx: Tx, metric: String) -> Result(Nil, Fail(e)) {
-  use _ <- result.try(store.exec(tx, metrics_table))
-  store.run(
-    tx,
-    "INSERT INTO ver_metrics (name, n) VALUES (?, 1) ON CONFLICT (name) DO UPDATE SET n = n + 1",
-    [sqlight.text(metric)],
-  )
+  metrics.count(tx, "verification", metric)
 }
 
 /// The counters, read on the writer's connection, which holds them.
 pub fn metrics(tx: Tx) -> Result(Json, Fail(e)) {
-  use _ <- result.try(store.exec(tx, metrics_table))
-  use rows <- result.map(
-    store.query(store.reading(tx), "SELECT name, n FROM ver_metrics", [], {
-      use name <- decode.field(0, decode.string)
-      use n <- decode.field(1, decode.int)
-      decode.success(#(name, n))
-    }),
-  )
-  json.object(
-    list.map(metric_names, fn(name) {
-      #(name, json.int(list.key_find(rows, name) |> result.unwrap(0)))
-    }),
-  )
+  metrics.group(tx, "verification", metric_names)
 }
