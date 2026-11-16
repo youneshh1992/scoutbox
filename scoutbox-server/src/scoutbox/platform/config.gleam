@@ -5,6 +5,7 @@ import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import scoutbox/platform/secrets
 
 pub type Config {
   Config(
@@ -18,8 +19,11 @@ pub type Config {
     /// SCOUTBOX_SEED_DEMO: load the demo world on a database's first boot. Unset, except in production.
     seed_demo: Bool,
     quiet_logs: Bool,
-    /// MEDIA_SECRET: the key signing media links. Not ported yet: signed media links (uploads).
+    /// MEDIA_SECRET, when the deployment set one.
     media_secret: Option(String),
+    /// The key media links are signed with: MEDIA_SECRET, or in development a random key for this process, so
+    /// links minted before a restart stop verifying and clients re-mint them.
+    media_key: String,
     /// TEST_LICENCE_REGISTRY: the synthetic coaching-licence register (e2e/support/CONTRACT.md).
     licence_registry: TestRegistry,
     /// How often the periodic sweeps run: every half second with SCOUTBOX_FAST_SWEEPS=1, else every minute.
@@ -45,6 +49,11 @@ pub type TestRegistry {
 
 const dev_admin_key = "scoutbox-admin"
 
+const media_secret_min_length = 32
+
+const media_secret_missing =
+  "MEDIA_SECRET is unset or shorter than 32 characters; signed media URLs need a stable secret of the deployment's own."
+
 pub fn load() -> Result(Config, String) {
   let production = envoy.get("NODE_ENV") == Ok("production")
   use port <- result.try(case envoy.get("PORT") {
@@ -59,6 +68,20 @@ pub fn load() -> Result(Config, String) {
         "ADMIN_KEY is unset or the development default; the Trust & Safety API would accept a publicly known key",
       )
     False -> Ok(admin_key)
+  })
+  let media_secret = case envoy.get("MEDIA_SECRET") {
+    Ok("") | Error(Nil) -> None
+    Ok(secret) -> Some(secret)
+  }
+  use media_key <- result.try(case media_secret {
+    Some(secret) if !production -> Ok(secret)
+    Some(secret) ->
+      case string.length(secret) >= media_secret_min_length {
+        True -> Ok(secret)
+        False -> Error(media_secret_missing)
+      }
+    None if production -> Error(media_secret_missing)
+    None -> Ok(secrets.random_hex(32))
   })
   use seed_demo <- result.try(case envoy.get("SCOUTBOX_SEED_DEMO") {
     Ok("1") -> Ok(True)
@@ -77,10 +100,8 @@ pub fn load() -> Result(Config, String) {
     fault_rules: envoy.get("SCOUTBOX_FAULTS") |> result.unwrap(""),
     seed_demo:,
     quiet_logs: envoy.get("SCOUTBOX_QUIET_LOGS") == Ok("1"),
-    media_secret: case envoy.get("MEDIA_SECRET") |> result.map(string.trim) {
-      Ok("") | Error(Nil) -> None
-      Ok(secret) -> Some(secret)
-    },
+    media_secret:,
+    media_key:,
     licence_registry: case envoy.get("TEST_LICENCE_REGISTRY") {
       Ok("1") -> RegistryUp
       Ok("down") -> RegistryDown

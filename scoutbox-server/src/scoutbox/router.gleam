@@ -5,7 +5,6 @@ import gleam/http.{Get, Post, Put}
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/regexp
 import gleam/result
 import scoutbox/app.{type Ctx}
 import scoutbox/development/record_routes as record
@@ -24,6 +23,7 @@ import scoutbox/identity/sign_in
 import scoutbox/identity/staff_routes
 import scoutbox/insight/review_queue
 import scoutbox/integrations/webhooks
+import scoutbox/media/links
 import scoutbox/messaging/channel_routes as threads
 import scoutbox/messaging/delivery
 import scoutbox/messaging/delivery_prefs
@@ -59,6 +59,7 @@ import wisp.{type Request, type Response}
 
 pub fn handle(ctx: Ctx, req: Request) -> Response {
   use <- baseline(ctx)
+  use <- signed_media(ctx, req)
   use <- rescue
   use <- fault(ctx, req)
   case wisp.path_segments(req) {
@@ -72,7 +73,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["meta"] -> only(req, Get, operator.meta)
     ["capabilities"] -> only(req, Get, fn() { operator.capabilities(ctx) })
     ["orgs"] -> only(req, Get, fn() { sign_in.org_list(ctx, req) })
-    ["media", id] -> only(req, Get, fn() { media_file(id) })
+    ["media", id] -> only(req, Get, fn() { links.serve(ctx, req, id) })
     ["events"] -> only(req, Get, fn() { live_routes.connect(ctx, req) })
     ["events", "ticket"] ->
       only(req, Post, fn() { live_routes.ticket(ctx, req) })
@@ -757,28 +758,9 @@ fn auth_limit(ctx: Ctx, req: Request, next: fn() -> Response) -> Response {
   }
 }
 
-/// `GET /media/:id`. Not ported yet: signed media links and the media their owners and the organisations that
-/// may see them can fetch (uploads are out of this slice's scope). Until then no request is authorised, which is
-/// the TypeScript server's answer for every file this server stores: verification evidence, which is never on a
-/// public path.
-fn media_file(id: String) -> Response {
-  let assert Ok(shape) = regexp.from_string("^[a-zA-Z0-9-]+$")
-  case regexp.check(shape, id) {
-    False -> contract.error(400, "BAD_MEDIA_ID")
-    True ->
-      contract.json(
-        401,
-        json.object([
-          #("error", json.string("MEDIA_AUTH_REQUIRED")),
-          #(
-            "message",
-            json.string(
-              "Media links are short-lived and tied to your login — refetch the profile for a fresh link.",
-            ),
-          ),
-        ]),
-      )
-  }
+/// Every `/media/<id>` value a response carries leaves signed for the requesting session.
+fn signed_media(ctx: Ctx, req: Request, handler: fn() -> Response) -> Response {
+  links.sign(ctx, req, handler())
 }
 
 /// `GET /healthz`: up, for how long, and on which schema.

@@ -70,6 +70,7 @@ fn boot() -> Result(Nil, String) {
     store,
     clock.now_ms(),
     demo: config.seed_demo,
+    data_dir: config.data_dir,
   ))
   log(config, "migrations applied: " <> string.inspect(applied))
   log(config, "demo seed loaded: " <> string.inspect(seeded))

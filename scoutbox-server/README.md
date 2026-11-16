@@ -30,7 +30,8 @@ node dev/sse_check.mjs # the event stream's behaviour, and its fan-out to 100 an
 Settings (`src/scoutbox/platform/config.gleam`): `PORT`, `DATA_DIR`, `ADMIN_KEY` (development default
 `scoutbox-admin`, refused in production), `NODE_ENV=production` (turns off demo sign-ins and the seed),
 `SCOUTBOX_QUIET_LOGS=1`, `SCOUTBOX_FAST_SWEEPS=1` (the sweeps every half second, and the delivery and webhook
-retry ladders in milliseconds), `DELIVERY_CALLBACK_SECRET` (default: the local fake provider's), and
+retry ladders in milliseconds), `MEDIA_SECRET` (signs media links; in development a random key per boot,
+required in production), `DELIVERY_CALLBACK_SECRET` (default: the local fake provider's), and
 `ALLOW_LOCAL_WEBHOOKS=1` (a webhook may go to a loopback address).
 
 ## Layout
@@ -72,6 +73,7 @@ Every route below is exercised by a battery, except where marked.
 | Notifications | `GET /{org,player,guardian}/notifications`; `POST …/notifications/read`, `…/notifications/:id/ack`; `GET`/`PUT …/notification-preferences`; `POST /push/register` |
 | Delivery | `GET /org/delivery`, `/admin/delivery`, `/admin/push-log`; `POST /admin/delivery/sweep`, `/admin/delivery/inject-failure`, `/callbacks/delivery` |
 | Integrations | `POST /org/webhooks` (and their delivery, signed, by the minute sweep) |
+| Media | `GET /media/:id`: every `/media/<id>` value in a response leaves signed for the requesting session (`media/links`), and a fetch checks that session's standing each time |
 | Support | `POST /org/support`, `/admin/support/:id/reply` |
 | Transitions | `POST /player/transitions`, `/player/transitions/:id/recipients`, `/revoke-recipient`; the guardian's `/guardian/children/:id/transitions`, `/guardian/children-transitions/:id/…` |
 | Verification | `/org/verification/…` (me, identity, affiliation, work e-mail, evidence, submit, disputes, public profiles, dashboard, requests and decisions, staff, departures, licences, domains, administrators, root transfers, conflicts, player invitations, references); `/auth/org/verification/apply…`; `/admin/verification/…` (queue, cases, evidence, decisions, root requests, domain requests, disputes, authorities, organisation revocation); `POST /player/invites/accept`, `/guardian/invites/accept`, `/guardian/children`; `GET /player/references`, `/guardian/children/:id/references`, `/org/audit/export`, `/orgs`, `/healthz` |
