@@ -5,9 +5,6 @@
 ////   (it sees the last commit, and SQLite refuses a write on it).
 //// - Work returns its side effects as data. They are dispatched in the caller's process after COMMIT, so a slow
 ////   provider never holds the writer, and a refused unit sends nothing.
-//// - A write that must wait for the commit, in a unit of its own (the push record a notice leaves), is asked for
-////   with `after_commit` from anywhere inside the unit. It runs after COMMIT, in order, after the effects; a
-////   refused unit runs none, and one that fails is logged without undoing the act.
 //// - Each unit runs in a fresh process the writer monitors. If the work crashes (a `panic`, a failed
 ////   `let assert`), the writer sees the process go down, rolls back and carries on with the next unit.
 
@@ -19,23 +16,9 @@ import gleam/otp/actor
 import gleam/result
 import gleam/string
 import sqlight
-import wisp
 
 pub opaque type Tx {
-  Tx(
-    conn: sqlight.Connection,
-    should_fail: fn(String) -> Bool,
-    after: Subject(Step),
-  )
-}
-
-/// A write run in its own unit once the unit that asked for it has committed.
-pub type Step =
-  fn(Tx) -> Result(Nil, Fail(Nil))
-
-/// Asks for `step` to run, in a unit of its own, once this unit commits.
-pub fn after_commit(tx: Tx, step: Step) -> Nil {
-  process.send(tx.after, step)
+  Tx(conn: sqlight.Connection, should_fail: fn(String) -> Bool)
 }
 
 pub opaque type Read {
@@ -193,35 +176,13 @@ pub fn unit(
   case process.receive(reply, store.timeout) {
     Error(Nil) -> Error(TimedOut)
     Ok(Error(e)) -> Error(e)
-    Ok(Ok(#(#(value, effects), steps))) -> {
+    Ok(Ok(#(value, effects))) -> {
       // `internal:unit.after_commit`: the unit's first after-commit step fails after its data committed; the
       // act's own effects still go out, as each after-commit step is isolated.
       let _ = store.should_fail("unit.after_commit")
       list.each(effects, store.dispatch)
-      list.each(steps, run_step(store, _))
       Ok(value)
     }
-  }
-}
-
-/// An after-commit step, as a unit of its own. It asks for no further steps and returns no effects.
-fn run_step(store: Store(effect), step: Step) -> Nil {
-  let reply = process.new_subject()
-  process.send(
-    store.writer,
-    Job(fn(conn) {
-      process.send(
-        reply,
-        supervise_unit(conn, store.should_fail, fn(tx) {
-          step(tx) |> result.map(fn(_) { #(Nil, []) })
-        }),
-      )
-    }),
-  )
-  case process.receive(reply, store.timeout) {
-    Ok(Ok(_)) -> Nil
-    outcome ->
-      wisp.log_error("after-commit step failed: " <> string.inspect(outcome))
   }
 }
 
@@ -231,7 +192,7 @@ fn supervise_unit(
   conn: sqlight.Connection,
   should_fail: fn(String) -> Bool,
   work: fn(Tx) -> Result(#(a, List(effect)), Fail(e)),
-) -> Result(#(#(a, List(effect)), List(Step)), UnitError(e)) {
+) -> Result(#(a, List(effect)), UnitError(e)) {
   let done = process.new_subject()
   let pid =
     process.spawn_unlinked(fn() {
@@ -259,13 +220,11 @@ fn run_unit(
   conn: sqlight.Connection,
   should_fail: fn(String) -> Bool,
   work: fn(Tx) -> Result(#(a, List(effect)), Fail(e)),
-) -> Result(#(#(a, List(effect)), List(Step)), UnitError(e)) {
+) -> Result(#(a, List(effect)), UnitError(e)) {
   use _ <- result.try(
     sqlight.exec("BEGIN IMMEDIATE", conn) |> result.map_error(Database),
   )
-  // The unit's work runs in this process, so the steps it asks for wait in this process's mailbox.
-  let after = process.new_subject()
-  let outcome = case work(Tx(conn, should_fail, after)) {
+  let outcome = case work(Tx(conn, should_fail)) {
     Error(Refuse(e)) -> Error(Refused(e))
     Error(Storage(e)) -> Error(Database(e))
     Ok(done) -> {
@@ -296,14 +255,7 @@ fn run_unit(
       Nil
     }
   }
-  result.map(outcome, fn(done) { #(done, drain(after, [])) })
-}
-
-fn drain(after: Subject(Step), steps: List(Step)) -> List(Step) {
-  case process.receive(after, 0) {
-    Ok(step) -> drain(after, [step, ..steps])
-    Error(Nil) -> list.reverse(steps)
-  }
+  outcome
 }
 
 /// Runs `f` on a read-only connection. It sees the last commit and cannot write.

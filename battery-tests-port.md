@@ -300,10 +300,10 @@ would mean porting most of the product under the heading "platform". So:
    (`/player|guardian/requests/:id/respond`) and the transition packs (`/player/transitions…`). Each battery
    adds 10–16 routes. **[done]** All three pass unchanged on the Gleam server (66, 64 and 48
    checks), each mutation-checked once. What the port needed beyond the routes:
-   - **`store.after_commit(tx, step)`.** The notifier writes the push record after the act commits, from deep
-     inside call chains (15 `notify` call sites). Rather than thread effects through all of them, a unit collects
-     steps in its own process's mailbox and runs each in a unit of its own after COMMIT; a refused unit runs none.
-     Unit-tested in `store_test`.
+   - **Pushes are effects.** The notifier's push is an `app.SendPush` that `notify` returns (none when the notice
+     is muted, repeated or deferred), passed up through every helper to its unit's effects and dispatched after
+     COMMIT, so a test asserts what an act would push (`test/scoutbox/messaging/notifications_test.gleam`). The
+     compiler can't see a dropped push (`use _ <-`, `list.try_each`), so loops use `notifications.each`.
    - **Two vocabularies made shared:** the notification categories (`notifications`, `notification_pref_categories`)
      and the webhook events (`webhook_deliveries`, `webhook_endpoint_events`).
    - **`input.items`**, a list whose refusal names the item (`events[1].status`), and `input.id_of(max)`.

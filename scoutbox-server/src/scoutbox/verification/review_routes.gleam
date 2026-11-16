@@ -12,7 +12,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Ctx}
+import scoutbox/app.{type Ctx, type Effect}
 import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/orgs
 import scoutbox/identity/staff
@@ -34,7 +34,7 @@ import scoutbox/rows/ver_evidence as evidence_row
 import scoutbox/verification/applications
 import scoutbox/verification/claims
 import scoutbox/verification/conflicts
-import scoutbox/verification/core.{act, reply, stop}
+import scoutbox/verification/core.{act, reply, reply_with, stop}
 import scoutbox/verification/org_admin_routes as org_admin
 import scoutbox/verification/personal_routes as personal
 import scoutbox/verification/records
@@ -155,7 +155,7 @@ pub fn appoint_root(ctx: Ctx, req: Request, org_id: String) -> Response {
                     core.system_actor(None),
                     now,
                   ))
-                  use _ <- result.try(notifications.notify(
+                  use pushes <- result.try(notifications.notify(
                     tx,
                     to: audience.OrgUser,
                     id: u.id,
@@ -166,13 +166,16 @@ pub fn appoint_root(ctx: Ctx, req: Request, org_id: String) -> Response {
                     ref_id: Some(org.id),
                     at: now,
                   ))
-                  reply(http.json(
-                    201,
-                    json.object([
-                      #("orgId", json.string(org.id)),
-                      #("rootAdminUserId", json.string(u.id)),
-                    ]),
-                  ))
+                  reply_with(
+                    http.json(
+                      201,
+                      json.object([
+                        #("orgId", json.string(org.id)),
+                        #("rootAdminUserId", json.string(u.id)),
+                      ]),
+                    ),
+                    pushes,
+                  )
                 }
                 _ -> stop(http.error(404, "USER_NOT_FOUND"))
               }
@@ -1028,7 +1031,7 @@ fn notify_subject(
   c: records.Claim,
   text: String,
   now: Int,
-) -> Result(Nil, store.Fail(e)) {
+) -> Result(List(Effect), store.Fail(e)) {
   case c.subject_kind {
     claim_row.User ->
       notifications.notify(
@@ -1040,7 +1043,7 @@ fn notify_subject(
         ref_id: Some(c.id),
         at: now,
       )
-    claim_row.Org -> Ok(Nil)
+    claim_row.Org -> Ok([])
   }
 }
 
@@ -1146,7 +1149,7 @@ pub fn approve(ctx: Ctx, req: Request, claim_id: String) -> Response {
             }),
             now,
           ))
-          use _ <- result.try(notify_subject(
+          use pushes <- result.try(notify_subject(
             tx,
             c,
             "Trust & Safety approved your "
@@ -1158,7 +1161,7 @@ pub fn approve(ctx: Ctx, req: Request, claim_id: String) -> Response {
               <> " verification. ✓",
             now,
           ))
-          claim_reply(tx, c.id)
+          claim_reply(tx, c.id) |> core.also(pushes)
         }
       }
   }
@@ -1197,14 +1200,14 @@ pub fn reject(ctx: Ctx, req: Request, claim_id: String) -> Response {
             core.no_more(),
             now,
           ))
-          use _ <- result.try(notify_subject(
+          use pushes <- result.try(notify_subject(
             tx,
             c,
             "Trust & Safety declined a verification request: "
               <> input.utf16_take(reason, 140),
             now,
           ))
-          claim_reply(tx, c.id)
+          claim_reply(tx, c.id) |> core.also(pushes)
         }
       }
   }
@@ -1228,13 +1231,13 @@ pub fn request_info(ctx: Ctx, req: Request, claim_id: String) -> Response {
         core.no_more(),
         now,
       ))
-      use _ <- result.try(notify_subject(
+      use pushes <- result.try(notify_subject(
         tx,
         c,
         "Trust & Safety needs more evidence: " <> input.utf16_take(reason, 140),
         now,
       ))
-      claim_reply(tx, c.id)
+      claim_reply(tx, c.id) |> core.also(pushes)
     }
   }
 }
@@ -1264,7 +1267,7 @@ pub fn suspend_or_revoke(
         core.no_more(),
         now,
       ))
-      use _ <- result.try(notify_subject(
+      use pushes <- result.try(notify_subject(
         tx,
         c,
         "A verification claim was "
@@ -1290,6 +1293,7 @@ pub fn suspend_or_revoke(
           ),
         ]),
       ))
+      |> core.also(pushes)
     }
   }
 }
@@ -1769,7 +1773,7 @@ fn resolving(
       resolution_attribution: Some(rev.attribution),
     )
   use _ <- result.try(records.update_dispute(tx, done, dispute_row.Open))
-  use _ <- result.try(notifications.notify(
+  use pushes <- result.try(notifications.notify(
     tx,
     to: audience.OrgUser,
     id: d.by_id,
@@ -1787,13 +1791,16 @@ fn resolving(
     }
     None -> Ok(json.null())
   })
-  reply(http.json(
-    200,
-    json.object([
-      #("dispute", personal.dispute_json(done)),
-      #("claim", claim_json),
-    ]),
-  ))
+  reply_with(
+    http.json(
+      200,
+      json.object([
+        #("dispute", personal.dispute_json(done)),
+        #("claim", claim_json),
+      ]),
+    ),
+    pushes,
+  )
 }
 
 // ------------------------------------------------------------------------------------------- authorities
@@ -2112,7 +2119,7 @@ pub fn sweep(ctx: Ctx) -> Int {
             core.no_more(),
             now,
           ))
-          use _ <- result.map(notify_subject(
+          use pushes <- result.map(notify_subject(
             tx,
             c,
             "A verification claim expired ("
@@ -2128,7 +2135,7 @@ pub fn sweep(ctx: Ctx) -> Int {
               <> "). Reconfirm it from Verification.",
             now,
           ))
-          #(Nil, [])
+          #(Nil, pushes)
         })
       }
       let warned = fn(c: records.Claim) {
@@ -2137,7 +2144,7 @@ pub fn sweep(ctx: Ctx) -> Int {
             tx,
             claim_row.Row(..c, expiry_warned_at: Some(now)),
           ))
-          use _ <- result.map(notify_subject(
+          use pushes <- result.map(notify_subject(
             tx,
             c,
             "A verification claim expires soon — reconfirm before "
@@ -2145,7 +2152,7 @@ pub fn sweep(ctx: Ctx) -> Int {
               <> ".",
             now,
           ))
-          #(Nil, [])
+          #(Nil, pushes)
         })
       }
       list.each(expired, fn(c) {

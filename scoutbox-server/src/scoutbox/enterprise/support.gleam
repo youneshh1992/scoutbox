@@ -215,7 +215,7 @@ pub fn reply(ctx: Ctx, req: Request, id: String) -> Response {
                 _ -> Ok(Nil)
               })
               use filer <- result.try(staff.by_id(read, t.row.by_user_id))
-              use _ <- result.try(case filer {
+              use pushes <- result.try(case filer {
                 Some(u) ->
                   notifications.notify(
                     tx,
@@ -226,11 +226,11 @@ pub fn reply(ctx: Ctx, req: Request, id: String) -> Response {
                     ref_id: Some(t.row.id),
                     at: now,
                   )
-                None -> Ok(Nil)
+                None -> Ok([])
               })
               use found <- result.map(by_id(read, t.row.id))
               let assert Some(t) = found as "the ticket reads back in its unit"
-              #(t, [])
+              #(t, pushes)
             })
           case replied {
             Ok(t) -> http.json(200, json.object([#("ticket", view(t))]))

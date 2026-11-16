@@ -200,8 +200,8 @@ pub fn resolve(ctx: Ctx, req: Request, id: String) -> Response {
                 reports.OrgUser -> Some(audience.OrgUser)
                 reports.System -> None
               }
-              use _ <- result.map(case reporter {
-                None -> Ok(Nil)
+              use pushes <- result.map(case reporter {
+                None -> Ok([])
                 Some(kind) ->
                   notifications.notify(
                     tx,
@@ -213,7 +213,7 @@ pub fn resolve(ctx: Ctx, req: Request, id: String) -> Response {
                     at: now,
                   )
               })
-              #(r, [])
+              #(r, pushes)
             })
           case resolved {
             Ok(r) -> http.json(200, audit.report_view(r))

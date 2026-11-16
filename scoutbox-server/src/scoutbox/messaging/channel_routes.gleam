@@ -332,7 +332,7 @@ fn post(
               at: now,
             )
           }
-          use _ <- result.map(case sender.kind {
+          use pushes <- result.map(case sender.kind {
             audience.OrgUser -> {
               let recipient = case c.counterparty {
                 party.Guardian -> #(audience.Guardian, c.guardian_id)
@@ -348,7 +348,7 @@ fn post(
                       <> option.unwrap(c.scout_role, "null")
                       <> ") sent a message.",
                   )
-                #(_, None) -> Ok(Nil)
+                #(_, None) -> Ok([])
               }
             }
             _ -> {
@@ -363,7 +363,7 @@ fn post(
                   }
                 None -> writers
               }
-              list.try_each(staff, fn(uid) {
+              notifications.each(staff, fn(uid) {
                 notice(
                   audience.OrgUser,
                   uid,
@@ -375,7 +375,7 @@ fn post(
               })
             }
           })
-          #(m, [])
+          #(m, pushes)
         }
       }
     })

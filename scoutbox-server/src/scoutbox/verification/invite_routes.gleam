@@ -466,7 +466,7 @@ fn address_check(
         ),
         now,
       ))
-      use _ <- result.try(notifications.notify(
+      use pushes <- result.try(notifications.notify(
         tx,
         to: audience.OrgUser,
         id: inv.by_user_id,
@@ -493,6 +493,7 @@ fn address_check(
           ),
         ]),
       ))
+      |> core.also(pushes)
     }
   }
 }

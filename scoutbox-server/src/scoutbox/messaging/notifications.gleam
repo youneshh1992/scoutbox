@@ -3,6 +3,9 @@
 //// sentence about the same record, still unread within six hours, is refreshed and counted rather than written
 //// (or pushed) twice.
 ////
+//// `notify` returns the push it asks for as an `app.Effect` (none when the notice is muted, repeated or deferred):
+//// the caller adds it to its unit's effects, so it is sent only once the unit commits. A caller must never drop it.
+////
 //// Not ported yet: the live `notify` event, and a staff member's feed `target` (the recruitment Rooms).
 
 import gleam/dict
@@ -14,8 +17,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import gleam/time/calendar
+import scoutbox/app.{type Effect}
 import scoutbox/messaging/notification_prefs
-import scoutbox/messaging/push
 import scoutbox/platform/ids
 import scoutbox/platform/input
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
@@ -56,7 +59,7 @@ pub fn notify(
   text text: String,
   ref_id ref_id: Option(String),
   at at: Int,
-) -> Result(Nil, Fail(e)) {
+) -> Result(List(Effect), Fail(e)) {
   deliver(tx, kind, audience_id, type_, text, ref_id, None, at)
 }
 
@@ -70,7 +73,7 @@ pub fn notify_action(
   ref_id ref_id: Option(String),
   deadline deadline: Option(Int),
   at at: Int,
-) -> Result(Nil, Fail(e)) {
+) -> Result(List(Effect), Fail(e)) {
   deliver(tx, kind, audience_id, type_, text, ref_id, Some(deadline), at)
 }
 
@@ -83,7 +86,7 @@ fn deliver(
   ref_id: Option(String),
   action: Option(Option(Int)),
   at: Int,
-) -> Result(Nil, Fail(e)) {
+) -> Result(List(Effect), Fail(e)) {
   let read = store.reading(tx)
   let body = cut(text)
   let category = notification_prefs.category_of(type_, body)
@@ -116,14 +119,16 @@ fn deliver(
           [sqlight.int(at), sqlight.text(id)],
         ),
       )
+      // A repeat is counted, never pushed again.
       case action {
-        None -> Ok(Nil)
+        None -> Ok([])
         Some(deadline) ->
           store.run(
             tx,
             "UPDATE notifications SET action_required = 1, action_deadline_at = ?, action_acked_at = NULL WHERE id = ?",
             [sqlight.nullable(sqlight.int, deadline), sqlight.text(id)],
           )
+          |> result.replace([])
       }
     }
     Error(Nil) -> {
@@ -148,11 +153,10 @@ fn deliver(
         ),
       ))
       case deferred {
-        True -> Nil
-        False ->
-          store.after_commit(tx, fn(tx) {
-            push.send(tx, kind, audience_id, "ScoutBox", body, at)
-          })
+        True -> []
+        False -> [
+          app.SendPush(to: kind, id: audience_id, title: "ScoutBox", body:),
+        ]
       }
     }
   }
@@ -160,12 +164,20 @@ fn deliver(
 
 fn guard(
   allowed: Bool,
-  next: fn() -> Result(Nil, Fail(e)),
-) -> Result(Nil, Fail(e)) {
+  next: fn() -> Result(List(Effect), Fail(e)),
+) -> Result(List(Effect), Fail(e)) {
   case allowed {
     True -> next()
-    False -> Ok(Nil)
+    False -> Ok([])
   }
+}
+
+/// `notify` for each item, the effects in order: a notice per staff member, per badge, per reviewer.
+pub fn each(
+  items: List(a),
+  notice: fn(a) -> Result(List(Effect), Fail(e)),
+) -> Result(List(Effect), Fail(e)) {
+  list.try_map(items, notice) |> result.map(list.flatten)
 }
 
 type PushPrefs {

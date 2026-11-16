@@ -58,9 +58,8 @@ specification this server must pass unchanged. Read `../scoutbox/CLAUDE.md` and
 - Writes need a `store.Tx`, and only `store.unit` makes one. Pass the `Tx` to join a unit. Never call `unit`
   inside a unit.
 - Side effects are returned from the unit as `app.Effect` values and dispatched after COMMIT. Never send
-  anything from inside a unit. A write that must wait for the commit, asked for deep inside an act (a notice's push
-  record), is `store.after_commit(tx, step)`: it runs in a unit of its own once the act commits, never after a
-  refusal.
+  anything from inside a unit. `notifications.notify` returns the push it asks for as an effect: pass it up to the
+  unit's effects, never drop it (`use _ <-` and `list.try_each` drop it silently; use `notifications.each`).
 - Expected failures are values: `store.refuse(e)` rolls the unit back. Map one act's refusals into another's
   with `store.map_refusal`. `panic` and `let assert` are for broken invariants only.
 - Request input is read with `platform/input` shapes. It is valid as sent or refused in the shared refusal

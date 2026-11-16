@@ -5,11 +5,12 @@ import ewe
 import gleam/erlang/process
 import gleam/result
 import gleam/string
-import scoutbox/app.{type Ctx, type Effect, Ctx, SendMail}
+import scoutbox/app.{type Ctx, type Effect, Ctx, SendMail, SendPush}
 import scoutbox/identity/sessions
 import scoutbox/integrations/webhooks
 import scoutbox/messaging/delivery
 import scoutbox/messaging/outbox
+import scoutbox/messaging/push
 import scoutbox/platform/clock
 import scoutbox/platform/config
 import scoutbox/platform/faults
@@ -125,6 +126,17 @@ fn dispatch(store: Store(Effect), effect: Effect) -> Nil {
       case recorded {
         Ok(Nil) -> Nil
         Error(e) -> wisp.log_error("mail not recorded: " <> string.inspect(e))
+      }
+    }
+    SendPush(to:, id:, title:, body:) -> {
+      let recorded =
+        store.unit(store, fn(tx) {
+          push.send(tx, to, id, title, body, clock.now_ms())
+          |> result.map(fn(_) { #(Nil, []) })
+        })
+      case recorded {
+        Ok(Nil) -> Nil
+        Error(e) -> wisp.log_error("push not recorded: " <> string.inspect(e))
       }
     }
   }

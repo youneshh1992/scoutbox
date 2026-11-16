@@ -740,7 +740,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 ),
                 now,
               ))
-              use _ <- result.try(notifications.notify(
+              use pushes <- result.try(notifications.notify(
                 tx,
                 to: audience.OrgUser,
                 id: user_id,
@@ -757,6 +757,7 @@ pub fn grant(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 201,
                 json.object([#("admin", json.object(admin_record(a)))]),
               ))
+              |> core.also(pushes)
             }
           }
         _ -> stop(http.error(404, "USER_NOT_FOUND"))
