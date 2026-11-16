@@ -27,6 +27,8 @@ import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store
 import scoutbox/recruitment/requests
+import scoutbox/recruitment/trial_routes
+import scoutbox/recruitment/trial_rules
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/recruitment_requests as request_row
@@ -328,25 +330,105 @@ pub fn funnel(ctx: Ctx, a: OrgAccess) -> Response {
 pub fn guardian_inbox(ctx: Ctx, req: Request, g: Guardian) -> Response {
   use page <- pages.lenient(req, [IntKind])
   case
-    store.read(ctx.store, requests.page_for_guardian_of(_, g.child_ids, page))
+    store.read(ctx.store, fn(read) {
+      use #(items, next) <- result.try(requests.page_for_guardian_of(
+        read,
+        g.child_ids,
+        page,
+      ))
+      use with <- result.map(requests.with_slots(read, items))
+      #(with, next)
+    })
   {
-    Ok(#(items, next)) -> pages.respond(items, next, requests.recipient_view)
+    Ok(#(items, next)) ->
+      pages.respond(items, next, fn(p) {
+        requests.recipient_view_with(p.0, p.1)
+      })
     Error(failure) -> http.internal(failure)
+  }
+}
+
+/// `GET /player/inbox`: newest first. A child's inbox never carries a message or a contact channel, only what
+/// the guardian decided.
+pub fn player_inbox(
+  ctx: Ctx,
+  req: Request,
+  p: access.PlayerAccess,
+) -> Response {
+  use page <- pages.lenient(req, [IntKind])
+  case
+    store.read(ctx.store, fn(read) {
+      use #(items, next) <- result.try(requests.page_for_player(
+        read,
+        p.player.row.id,
+        page,
+      ))
+      use with <- result.map(requests.with_slots(read, items))
+      #(with, next)
+    })
+  {
+    Ok(#(items, next)) ->
+      case p.minor {
+        False ->
+          pages.respond(items, next, fn(x) {
+            requests.recipient_view_with(x.0, x.1)
+          })
+        True ->
+          pages.respond(items, next, fn(x) {
+            let r = x.0
+            json.object([
+              #("id", id.request_json(r.id)),
+              #("type", request_row.type_to_json(r.type_)),
+              #("orgName", json.string(r.org_name)),
+              #("orgVerified", json.bool(r.org_verified)),
+              #("status", request_row.status_to_json(r.status)),
+              #("guardianManaged", json.bool(True)),
+              #("note", json.string(child_inbox_note(r))),
+            ])
+          })
+      }
+    Error(failure) -> http.internal(failure)
+  }
+}
+
+fn child_inbox_note(r: requests.Request) -> String {
+  let kind = request_row.type_to_string(r.type_)
+  case r.status {
+    request_row.Pending ->
+      r.org_name
+      <> " contacted your parent/guardian about a "
+      <> case r.type_ {
+        request_row.Trial -> "trial"
+        request_row.Contact -> "conversation"
+      }
+      <> ". They will decide together with you."
+    request_row.Accepted ->
+      "Your parent/guardian accepted the "
+      <> kind
+      <> " with "
+      <> r.org_name
+      <> "."
+    _ ->
+      "Your parent/guardian declined the "
+      <> kind
+      <> " with "
+      <> r.org_name
+      <> "."
   }
 }
 
 // ------------------------------------------------------------------------------------------------- answering
 
 type Answer {
-  Answer(accept: Bool, message: Option(Dynamic))
+  Answer(accept: Bool, chosen_slot: Option(Dynamic), message: Option(Dynamic))
 }
 
 /// `accept` is true or false, never "false" read as truthy. The slot and the reply keep their own rules.
 fn answer_shape() -> input.Shape(Answer) {
   use accept <- input.field("accept", input.required(input.boolean()))
-  use _ <- input.field("chosenSlot", input.optional(input.anything()))
+  use chosen_slot <- input.field("chosenSlot", input.optional(input.anything()))
   use message <- input.field("message", input.optional(input.anything()))
-  input.done(Answer(accept:, message:))
+  input.done(Answer(accept:, chosen_slot:, message:))
 }
 
 const reply_max = 500
@@ -459,8 +541,11 @@ pub fn guardian_respond(
 /// One answer to a pending request. A block placed after the request arrived still lets it be declined, never
 /// accepted. The answer, its ledger row, the thread and the notices are one unit.
 ///
-/// Not ported yet: answering a trial request (its slot, the trial and the Room's gate), the Contact a Room
-/// links to a request (and its budget of 30 answers an hour), and the live `requests` event.
+/// A trial invitation's chosen slot is checked before the answer is recorded, so a refused slot leaves it
+/// pending, and a case-tied invitation re-derives its recipient now (`trial_routes.accept_gate`).
+///
+/// Not ported yet: the Contact a Room links to a request (and its budget of 30 answers an hour), and the live
+/// `requests` event.
 fn respond(
   ctx: Ctx,
   req: Request,
@@ -485,14 +570,34 @@ fn respond(
             "You have blocked this organisation. Lift the block before accepting.",
           )
         Ok(_) ->
-          case r.type_ {
-            request_row.Trial ->
-              http.error_message(
-                501,
-                "NOT_PORTED",
-                "Trial requests are not supported by this server yet.",
-              )
-            request_row.Contact -> answer(ctx, r, player, by, body.accept)
+          case r.type_, body.accept {
+            request_row.Trial, True ->
+              case choose_trial_slot(r, body.chosen_slot) {
+                Error(offered) ->
+                  http.json(
+                    400,
+                    json.object([
+                      #("ok", json.bool(False)),
+                      #("error", json.string("TRIAL_SLOT_INVALID")),
+                      #(
+                        "message",
+                        json.string("Pick one of the dates the club offered."),
+                      ),
+                      #("offered", json.array(offered, json.string)),
+                    ]),
+                  )
+                Ok(date) -> {
+                  let gate = case r.case_id {
+                    Some(_) -> trial_routes.accept_gate(ctx, r, by.kind, by.id)
+                    None -> Ok(Nil)
+                  }
+                  case gate {
+                    Error(refused) -> refused
+                    Ok(Nil) -> answer(ctx, r, player, by, True, date)
+                  }
+                }
+              }
+            _, _ -> answer(ctx, r, player, by, body.accept, None)
           }
       }
     }
@@ -530,6 +635,7 @@ fn answer(
   player: players.Player,
   by: Responder,
   accept: Bool,
+  trial_date: Option(String),
 ) -> Response {
   let now = clock.now_ms()
   let by_guardian = by.kind == party.Guardian
@@ -565,11 +671,15 @@ fn answer(
           at: now,
         )
       }
-      let ledger_type = case accept, by_guardian {
-        True, False -> ledger_row.ContactAccepted
-        True, True -> ledger_row.ContactAcceptedByGuardian
-        False, False -> ledger_row.ContactDeclined
-        False, True -> ledger_row.ContactDeclinedByGuardian
+      let ledger_type = case r.type_, accept, by_guardian {
+        request_row.Contact, True, False -> ledger_row.ContactAccepted
+        request_row.Contact, True, True -> ledger_row.ContactAcceptedByGuardian
+        request_row.Contact, False, False -> ledger_row.ContactDeclined
+        request_row.Contact, False, True -> ledger_row.ContactDeclinedByGuardian
+        request_row.Trial, True, False -> ledger_row.TrialAccepted
+        request_row.Trial, True, True -> ledger_row.TrialAcceptedByGuardian
+        request_row.Trial, False, False -> ledger_row.TrialDeclined
+        request_row.Trial, False, True -> ledger_row.TrialDeclinedByGuardian
       }
       let outcome = case accept {
         True -> "accepted"
@@ -596,6 +706,28 @@ fn answer(
         ),
         now,
       ))
+      // A trial invitation's answer is the trial's birth, or its decline, in the same unit.
+      let who_answered =
+        trial_routes.Answerer(kind: by.kind, id: by.id, name: by.name)
+      use _ <- result.try(case r.type_, accept {
+        request_row.Trial, True -> {
+          use answered <- result.try(requests.by_id(read, r.id))
+          let assert Some(answered) = answered
+            as "the answered request reads back"
+          use t <- result.try(trial_routes.accepted(
+            tx,
+            answered,
+            player,
+            trial_date,
+            who_answered,
+            now,
+          ))
+          trial_routes.on_accepted(tx, answered, t, who_answered, now)
+        }
+        request_row.Trial, False ->
+          trial_routes.on_declined(tx, r, who_answered, now)
+        request_row.Contact, _ -> Ok(Nil)
+      })
       use _ <- result.try(notice(
         audience.OrgUser,
         id.org_user_to_string(r.user_id),
@@ -624,14 +756,55 @@ fn answer(
           )
         False -> Ok(Nil)
       })
-      use after <- result.map(requests.by_id(read, r.id))
+      use after <- result.try(requests.by_id(read, r.id))
       let assert Some(after) = after as "the answered request reads back"
-      after
+      use slots <- result.map(case after.type_ {
+        request_row.Trial -> requests.slots_of(read, after.id)
+        request_row.Contact -> Ok([])
+      })
+      #(after, slots)
     })
   case answered {
-    Ok(after) -> http.json(200, requests.recipient_view(after))
+    Ok(#(after, slots)) ->
+      http.json(200, requests.recipient_view_with(after, slots))
     Error(store.Refused(AlreadyResponded)) ->
       http.error(409, "ALREADY_RESPONDED")
     Error(failure) -> http.internal(failure)
+  }
+}
+
+/// The day a trial acceptance takes (domain.ts chooseTrialSlot): one of the days offered, or the proposed day
+/// when none is named. A day that is offered but not a valid trial date is taken as no date. Error: the valid
+/// days offered.
+fn choose_trial_slot(
+  r: requests.Request,
+  chosen: Option(Dynamic),
+) -> Result(Option(String), List(String)) {
+  let offered =
+    [option.unwrap(r.trial_proposed_date, ""), ..requests.alt_days(r)]
+    |> list.filter(fn(d) { d != "" })
+  let valid = fn(d: Option(String)) {
+    case trial_rules.is_trial_date(d) {
+      True -> d
+      False -> None
+    }
+  }
+  let nothing = case chosen {
+    None -> True
+    Some(v) ->
+      dynamic.classify(v) == "Nil" || decode.run(v, decode.string) == Ok("")
+  }
+  case nothing, option.map(chosen, decode.run(_, decode.string)) {
+    True, _ -> Ok(valid(r.trial_proposed_date))
+    False, Some(Ok(day)) ->
+      case list.contains(offered, day) {
+        True -> Ok(valid(Some(day)))
+        False ->
+          Error(
+            list.filter(offered, fn(d) { trial_rules.is_trial_date(Some(d)) }),
+          )
+      }
+    False, _ ->
+      Error(list.filter(offered, fn(d) { trial_rules.is_trial_date(Some(d)) }))
   }
 }

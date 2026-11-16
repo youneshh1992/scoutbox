@@ -23,6 +23,7 @@ import scoutbox/platform/operator
 import scoutbox/platform/secrets
 import scoutbox/platform/store.{type Store}
 import scoutbox/platform/wisp_ewe
+import scoutbox/recruitment/trial_routes
 import scoutbox/router
 import scoutbox/seed
 import scoutbox/verification/review_routes as verification_review
@@ -95,8 +96,10 @@ fn boot() -> Result(Nil, String) {
       faults:,
       live: hub,
     )
-  // Restart-safe: every dispatch is a row, so the first sweep picks up where the last process stopped.
+  // Restart-safe: every dispatch is a row, so the first sweep picks up where the last process stopped. A trial's
+  // reminder markers are rows too, so the boot pass re-sends nothing.
   let _ = delivery.sweep(ctx)
+  let _ = trial_routes.remind(ctx, clock.now_ms())
   process.spawn(fn() { sweeping(ctx) })
   let builder =
     router.handle(ctx, _)
@@ -117,13 +120,14 @@ fn boot() -> Result(Nil, String) {
   |> result.map_error(fn(e) { "could not listen: " <> string.inspect(e) })
 }
 
-/// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, and verification expiries
-/// and warnings.
+/// The periodic sweeps, one after another, forever: the delivery centre, the webhooks, verification expiries and
+/// warnings, and the trial reminders.
 fn sweeping(ctx: Ctx) -> Nil {
   process.sleep(ctx.config.sweep_ms)
   let _ = delivery.sweep(ctx)
   let _ = webhooks.sweep(ctx)
   let _ = verification_review.sweep(ctx)
+  let _ = trial_routes.remind(ctx, clock.now_ms())
   sweeping(ctx)
 }
 

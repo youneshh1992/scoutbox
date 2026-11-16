@@ -51,6 +51,32 @@ pub type Event {
     offer_id: String,
     status: Option(String),
   )
+  /// A club sent a trial invitation from a Room. Private to the club.
+  TrialInvited(org_id: String, room_id: String, request_id: String)
+  /// The recipient accepted a trial invitation. Private to the club.
+  TrialAccepted(
+    org_id: String,
+    room_id: String,
+    trial_id: String,
+    request_id: String,
+  )
+  /// The recipient declined a trial invitation. Private to the club.
+  TrialDeclined(org_id: String, room_id: String, request_id: String)
+  /// A trial's schedule or end changed (each change is its own registry entry). Private to the club.
+  TrialChanged(
+    change: TrialChange,
+    org_id: String,
+    room_id: String,
+    trial_id: String,
+  )
+  /// A trial session's record changed (attendance, evidence). Private to the club.
+  TrialSessionChanged(
+    change: TrialSessionChange,
+    org_id: String,
+    room_id: String,
+    trial_id: String,
+    session_id: String,
+  )
   /// A club invited a transaction workspace on a Room. Private to the club.
   TransactionHandoffInvited(org_id: String, room_id: String, handoff_id: String)
   /// A compliance context was evaluated. Private to the agency.
@@ -73,6 +99,18 @@ pub type OfferChange {
   OfferIssued
   OfferSuperseded
   OfferWithdrawn
+}
+
+pub type TrialChange {
+  TrialScheduled
+  TrialRescheduled
+  TrialCancelled
+  TrialCompleted
+}
+
+pub type TrialSessionChange {
+  TrialAttendanceRecorded
+  TrialEvidenceLinked
 }
 
 pub type RepresentationChange {
@@ -117,6 +155,21 @@ pub fn name(event: Event) -> String {
         OfferWithdrawn -> "offer_withdrawn"
       }
     OfferResponded(..) -> "offer_responded"
+    TrialInvited(..) -> "trial_invited"
+    TrialAccepted(..) -> "trial_accepted"
+    TrialDeclined(..) -> "trial_declined"
+    TrialChanged(change:, ..) ->
+      case change {
+        TrialScheduled -> "trial_scheduled"
+        TrialRescheduled -> "trial_rescheduled"
+        TrialCancelled -> "trial_cancelled"
+        TrialCompleted -> "trial_completed"
+      }
+    TrialSessionChanged(change:, ..) ->
+      case change {
+        TrialAttendanceRecorded -> "trial_attendance_recorded"
+        TrialEvidenceLinked -> "trial_evidence_linked"
+      }
     TransactionHandoffInvited(..) -> "transaction_handoff_invited"
     ConflictEvaluated(..) -> "conflict_evaluated"
     AgentTransactionCreated(..) -> "agent_transaction_created"
@@ -138,6 +191,11 @@ pub fn org_of(event: Event) -> Result(String, Nil) {
     | RegulatoryReviewRequested(org_id:, ..)
     | OfferChanged(org_id:, ..)
     | OfferResponded(org_id:, ..)
+    | TrialInvited(org_id:, ..)
+    | TrialAccepted(org_id:, ..)
+    | TrialDeclined(org_id:, ..)
+    | TrialChanged(org_id:, ..)
+    | TrialSessionChanged(org_id:, ..)
     | TransactionHandoffInvited(org_id:, ..)
     | ConflictEvaluated(org_id:, ..)
     | AgentTransactionCreated(org_id:, ..)
@@ -196,6 +254,29 @@ pub fn payload(event: Event) -> List(#(String, Json)) {
       #("roomId", json.string(room_id)),
       #("offerId", json.string(offer_id)),
       #("status", json.nullable(status, json.string)),
+    ]
+    TrialInvited(org_id:, room_id:, request_id:)
+    | TrialDeclined(org_id:, room_id:, request_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("requestId", json.string(request_id)),
+    ]
+    TrialAccepted(org_id:, room_id:, trial_id:, request_id:) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("trialId", json.string(trial_id)),
+      #("requestId", json.string(request_id)),
+    ]
+    TrialChanged(org_id:, room_id:, trial_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("trialId", json.string(trial_id)),
+    ]
+    TrialSessionChanged(org_id:, room_id:, trial_id:, session_id:, ..) -> [
+      #("orgId", json.string(org_id)),
+      #("roomId", json.string(room_id)),
+      #("trialId", json.string(trial_id)),
+      #("sessionId", json.string(session_id)),
     ]
     TransactionHandoffInvited(org_id:, room_id:, handoff_id:) -> [
       #("orgId", json.string(org_id)),

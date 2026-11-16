@@ -28,6 +28,7 @@ import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/cases.{type Room}
 import scoutbox/recruitment/room_records
 import scoutbox/recruitment/room_rules
+import scoutbox/recruitment/trial_rules
 import scoutbox/recruitment/trials
 import scoutbox/rows/case_tasks as task_row
 import scoutbox/rows/combine_requests
@@ -464,7 +465,7 @@ fn passport_json(
 
 // ---------------------------------------------------------------------------------------------------- the room
 
-fn trial_state(ts: List(trials.Trial)) -> room_rules.TrialState {
+fn trial_state(ts: List(trial_rules.Trial)) -> room_rules.TrialState {
   case
     list.any(ts, fn(t) { t.row.status == trial_row.Reported }),
     list.any(ts, fn(t) { t.row.status == trial_row.AwaitingReport })
@@ -826,7 +827,7 @@ pub fn build(
                   ),
                   #("venue", json.nullable(t.row.venue, json.string)),
                   #("reportDueAt", json.nullable(t.row.report_due_at, json.int)),
-                  #("hasReport", json.bool(t.has_report)),
+                  #("hasReport", json.bool(t.report != None)),
                   #(
                     "linked",
                     json.bool(list.contains(room.trial_ids, t.row.id)),

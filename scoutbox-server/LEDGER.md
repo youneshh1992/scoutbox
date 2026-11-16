@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 18 / 2354 | 0 / 179 | 5 to go |
-| recruitment | 19 | 6 | 5 | 438 / 443 | 15 / 69 | 17 to go |
+| recruitment | 19 | 9 | 6 | 441 / 716 | 15 / 110 | 17 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -84,9 +84,9 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/signings` | not yet neutral | 5 → 5 | 245 | 245 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/signingsAdversarial` | not yet neutral | 4 → 4 | 212 | 212 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/signingsPersistence` | not yet neutral | 3 → 3 | 78 | 78 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/trialDatesMinorsAndErasure` | not yet neutral | 5 → 5 | 243 | 243 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/trials` | not yet neutral | 8 → 8 | 388 | 388 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/trialsPersistence` | not yet neutral | 5 → 5 | 36 | 36 |  |  |  |  |  | not untangled; not answered |
+| `recruitment/trialDatesMinorsAndErasure` | neutral | 5 → 0 | 243 | 197 | 46 |  |  | 0 / 106 | 0 / 6 | not answered; 106 cases pending; 6 hand-port calls |
+| `recruitment/trials` | neutral | 8 → 0 | 388 | 298 | 90 |  |  | 3 / 167 | 0 / 35 | not answered; 167 cases pending; 35 hand-port calls |
+| `recruitment/trialsPersistence` | neutral | 5 → 0 | 36 | 30 |  | 6 moved | yes |  |  | 1 TypeScript-only move unreviewed |
 | `scouting/clubWorkflows` | neutral | 0 → 0 | 264 | 264 |  |  |  |  |  | not answered |
 | `verification/organisationsAndStaff` | neutral | 1 → 0 | 231 | 184 | 47 |  | yes | 45 / 0 | 10 / 10 | **done** |
 | `verification/organisationsAndStaffAdversarial` | neutral | 1 → 0 | 99 | 69 | 30 |  | yes | 23 / 0 | 7 / 7 | **done** |
@@ -103,6 +103,7 @@ covers each one: a Gleam unit test of its own counterpart, or nothing, with the 
 | `platform/contracts` | 7 | `scripts/testPlatformHelpers.mjs` | §12 built fault layers in the battery's process (parseFaultRules, createFaultLayer, productionConfigProblems); that is a unit check of the fault layer. The battery keeps the production boot's refusal over HTTP (§43) | `test/scoutbox/faults_test.gleam` |
 | `platform/sessionsAndPorts` | 3 | `scripts/testPlatformHelpers.mjs` | A1–A3 built their own Express app in the battery's process to prove installAsyncErrorForwarding; that is a unit check of the patch. The battery keeps A4–A5 over HTTP | none: These test installAsyncErrorForwarding, a patch to Express's async handlers. This server has no Express; a crashing handler is a 500 by router.rescue, and the battery keeps the outcome over HTTP (A4–A5). |
 | `platform/storeGuarantees` | 1 | `scripts/testDataLayer.mjs` | COUNTER_MISSING was checked by calling the repository's createIdCounter on a damaged file; that is a unit check of the repository | `test/scoutbox/ids_test.gleam` |
+| `recruitment/trialsPersistence` | 6 | `scripts/testRecruitment.mjs` | §1 wrote the battery's record shapes through the repository and read them back (the legacy trial as legacy_accepted with empty containers and its report and trial day kept, sound by the integrity rule; the workflow trial stored as written), and §3b fed the repository entries that are not records; those are unit checks of the repository. The battery writes and reads stored rows, keeps the schema's refusals as plain-SQL writes (§3c) and the typed table as a schema check (§1) | not yet reviewed |
 
 ## Checks added while untangling
 
@@ -170,6 +171,12 @@ ported by hand to a gleeunit test.
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateDecision` | 2 | args[].note.toString is a function; Gleam's types can't hold its arguments: cannot print "sign_immediately" as a value of scoutbox/rows/room_decisions.recommendation_pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateReasonCodes` | 1 | Gleam's types can't hold its arguments: cannot print "budget" as a List | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateTransition` | 2 | Gleam's types can't hold its arguments: cannot print "not_a_status" as a value of scoutbox/vocab/room_status.pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 1 | args[].toString is a function | to do |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 4 | args[] is a ; args[] is a function; args[] is a symbol; args[] is NaN | to do |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#trialReportDueAt` | 1 | args[] is NaN | to do |
+| `recruitment/trials` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 14 | args[].requests.byId is a function; result.check is a function | to do |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#parseInstant` | 2 | args[] is Infinity; args[] is NaN | to do |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateScheduleInput` | 19 | args[].mintId is a function | to do |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#arrayTokenStore` | 1 | result.create is a function | `test/scoutbox/verification/tokens_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#consumeToken` | 7 | args[].create is a function | `test/scoutbox/verification/tokens_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#mintToken` | 2 | args[].create is a function | `test/scoutbox/verification/tokens_test.gleam` |
@@ -332,3 +339,30 @@ mapped, then `npm run cases`.
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateMessages` | 2 |
 | `recruitment/offersAdversarial` | `domains/recruitment/offers/offer.mjs#validateTerms` | 2 |
 | `recruitment/offersAdversarial` | `temporal.ts#isExpiredAt` | 1 |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#chooseTrialSlot` | 16 |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#isTrialDate` | 4 |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#parseTrialDate` | 42 |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#trialReportDueAt` | 10 |
+| `recruitment/trialDatesMinorsAndErasure` | `domain.ts#validateTrialDetails` | 33 |
+| `recruitment/trialDatesMinorsAndErasure` | `domains/platform/notificationPrefs.mjs#categoryOf` | 1 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/errors.mjs#httpStatusFor` | 7 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#blockedAllows` | 9 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#canComplete` | 9 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#deriveWorkflowState` | 8 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#icsLocal` | 1 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#icsText` | 1 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#isLegacyTrial` | 1 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#localDay` | 4 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#materialChange` | 5 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#normaliseTrialClientKey` | 6 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#parseInstant` | 27 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialClubView` | 1 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialFamilyView` | 1 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialIntegrity` | 10 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialMilestone` | 1 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialOutcomeLine` | 1 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialRoleAllows` | 8 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#trialStateAllows` | 37 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateSessionInput` | 2 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateTimezone` | 25 |
+| `recruitment/trials` | `domains/recruitment/lifecycle/trial.mjs#validateVenue` | 3 |

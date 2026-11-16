@@ -8,6 +8,8 @@ import gleam/string
 import scoutbox/platform/store.{type Fail, type Tx}
 import scoutbox/rows/id
 import scoutbox/vocab/party
+import scoutbox/vocab/trial_actor_kind
+import scoutbox/vocab/trial_workflow_state
 import sqlight
 
 pub const table = "trials"
@@ -67,244 +69,21 @@ pub fn status_decoder() -> decode.Decoder(Status) {
   }
 }
 
-pub type WorkflowState {
-  WorkflowStateLegacyAccepted
-  WorkflowStateAccepted
-  WorkflowStateScheduled
-  WorkflowStateCompleted
-  WorkflowStateCancelled
-}
-
-/// Each value with the text the column stores.
-pub const workflow_state_pairs = [
-  #("legacy_accepted", WorkflowStateLegacyAccepted),
-  #("accepted", WorkflowStateAccepted),
-  #("scheduled", WorkflowStateScheduled),
-  #("completed", WorkflowStateCompleted),
-  #("cancelled", WorkflowStateCancelled),
-]
-
-pub fn workflow_state_to_string(value: WorkflowState) -> String {
-  case value {
-    WorkflowStateLegacyAccepted -> "legacy_accepted"
-    WorkflowStateAccepted -> "accepted"
-    WorkflowStateScheduled -> "scheduled"
-    WorkflowStateCompleted -> "completed"
-    WorkflowStateCancelled -> "cancelled"
-  }
-}
-
-pub fn workflow_state_from_string(value: String) -> Result(WorkflowState, Nil) {
-  case value {
-    "legacy_accepted" -> Ok(WorkflowStateLegacyAccepted)
-    "accepted" -> Ok(WorkflowStateAccepted)
-    "scheduled" -> Ok(WorkflowStateScheduled)
-    "completed" -> Ok(WorkflowStateCompleted)
-    "cancelled" -> Ok(WorkflowStateCancelled)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn workflow_state_to_json(value: WorkflowState) -> Json {
-  json.string(workflow_state_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn workflow_state_decoder() -> decode.Decoder(WorkflowState) {
-  use value <- decode.then(decode.string)
-  case workflow_state_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(WorkflowStateLegacyAccepted, "WorkflowState")
-  }
-}
-
-pub type ScheduleProposedByKind {
-  ScheduleProposedByKindOrg
-  ScheduleProposedByKindPlayer
-  ScheduleProposedByKindGuardian
-  ScheduleProposedByKindSystem
-}
-
-/// Each value with the text the column stores.
-pub const schedule_proposed_by_kind_pairs = [
-  #("org", ScheduleProposedByKindOrg),
-  #("player", ScheduleProposedByKindPlayer),
-  #("guardian", ScheduleProposedByKindGuardian),
-  #("system", ScheduleProposedByKindSystem),
-]
-
-pub fn schedule_proposed_by_kind_to_string(
-  value: ScheduleProposedByKind,
-) -> String {
-  case value {
-    ScheduleProposedByKindOrg -> "org"
-    ScheduleProposedByKindPlayer -> "player"
-    ScheduleProposedByKindGuardian -> "guardian"
-    ScheduleProposedByKindSystem -> "system"
-  }
-}
-
-pub fn schedule_proposed_by_kind_from_string(
-  value: String,
-) -> Result(ScheduleProposedByKind, Nil) {
-  case value {
-    "org" -> Ok(ScheduleProposedByKindOrg)
-    "player" -> Ok(ScheduleProposedByKindPlayer)
-    "guardian" -> Ok(ScheduleProposedByKindGuardian)
-    "system" -> Ok(ScheduleProposedByKindSystem)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn schedule_proposed_by_kind_to_json(
-  value: ScheduleProposedByKind,
-) -> Json {
-  json.string(schedule_proposed_by_kind_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn schedule_proposed_by_kind_decoder() -> decode.Decoder(
-  ScheduleProposedByKind,
-) {
-  use value <- decode.then(decode.string)
-  case schedule_proposed_by_kind_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(ScheduleProposedByKindOrg, "ScheduleProposedByKind")
-  }
-}
-
-pub type ScheduleConfirmedByKind {
-  ScheduleConfirmedByKindOrg
-  ScheduleConfirmedByKindPlayer
-  ScheduleConfirmedByKindGuardian
-  ScheduleConfirmedByKindSystem
-}
-
-/// Each value with the text the column stores.
-pub const schedule_confirmed_by_kind_pairs = [
-  #("org", ScheduleConfirmedByKindOrg),
-  #("player", ScheduleConfirmedByKindPlayer),
-  #("guardian", ScheduleConfirmedByKindGuardian),
-  #("system", ScheduleConfirmedByKindSystem),
-]
-
-pub fn schedule_confirmed_by_kind_to_string(
-  value: ScheduleConfirmedByKind,
-) -> String {
-  case value {
-    ScheduleConfirmedByKindOrg -> "org"
-    ScheduleConfirmedByKindPlayer -> "player"
-    ScheduleConfirmedByKindGuardian -> "guardian"
-    ScheduleConfirmedByKindSystem -> "system"
-  }
-}
-
-pub fn schedule_confirmed_by_kind_from_string(
-  value: String,
-) -> Result(ScheduleConfirmedByKind, Nil) {
-  case value {
-    "org" -> Ok(ScheduleConfirmedByKindOrg)
-    "player" -> Ok(ScheduleConfirmedByKindPlayer)
-    "guardian" -> Ok(ScheduleConfirmedByKindGuardian)
-    "system" -> Ok(ScheduleConfirmedByKindSystem)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn schedule_confirmed_by_kind_to_json(
-  value: ScheduleConfirmedByKind,
-) -> Json {
-  json.string(schedule_confirmed_by_kind_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn schedule_confirmed_by_kind_decoder() -> decode.Decoder(
-  ScheduleConfirmedByKind,
-) {
-  use value <- decode.then(decode.string)
-  case schedule_confirmed_by_kind_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(ScheduleConfirmedByKindOrg, "ScheduleConfirmedByKind")
-  }
-}
-
-pub type ScheduleDeclinedByKind {
-  ScheduleDeclinedByKindOrg
-  ScheduleDeclinedByKindPlayer
-  ScheduleDeclinedByKindGuardian
-  ScheduleDeclinedByKindSystem
-}
-
-/// Each value with the text the column stores.
-pub const schedule_declined_by_kind_pairs = [
-  #("org", ScheduleDeclinedByKindOrg),
-  #("player", ScheduleDeclinedByKindPlayer),
-  #("guardian", ScheduleDeclinedByKindGuardian),
-  #("system", ScheduleDeclinedByKindSystem),
-]
-
-pub fn schedule_declined_by_kind_to_string(
-  value: ScheduleDeclinedByKind,
-) -> String {
-  case value {
-    ScheduleDeclinedByKindOrg -> "org"
-    ScheduleDeclinedByKindPlayer -> "player"
-    ScheduleDeclinedByKindGuardian -> "guardian"
-    ScheduleDeclinedByKindSystem -> "system"
-  }
-}
-
-pub fn schedule_declined_by_kind_from_string(
-  value: String,
-) -> Result(ScheduleDeclinedByKind, Nil) {
-  case value {
-    "org" -> Ok(ScheduleDeclinedByKindOrg)
-    "player" -> Ok(ScheduleDeclinedByKindPlayer)
-    "guardian" -> Ok(ScheduleDeclinedByKindGuardian)
-    "system" -> Ok(ScheduleDeclinedByKindSystem)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn schedule_declined_by_kind_to_json(
-  value: ScheduleDeclinedByKind,
-) -> Json {
-  json.string(schedule_declined_by_kind_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn schedule_declined_by_kind_decoder() -> decode.Decoder(
-  ScheduleDeclinedByKind,
-) {
-  use value <- decode.then(decode.string)
-  case schedule_declined_by_kind_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(ScheduleDeclinedByKindOrg, "ScheduleDeclinedByKind")
-  }
-}
-
 pub type CompletionState {
-  CompletionStateCompleted
-  CompletionStateCancelled
+  Completed
+  Cancelled
 }
 
 /// Each value with the text the column stores.
 pub const completion_state_pairs = [
-  #("completed", CompletionStateCompleted),
-  #("cancelled", CompletionStateCancelled),
+  #("completed", Completed),
+  #("cancelled", Cancelled),
 ]
 
 pub fn completion_state_to_string(value: CompletionState) -> String {
   case value {
-    CompletionStateCompleted -> "completed"
-    CompletionStateCancelled -> "cancelled"
+    Completed -> "completed"
+    Cancelled -> "cancelled"
   }
 }
 
@@ -312,8 +91,8 @@ pub fn completion_state_from_string(
   value: String,
 ) -> Result(CompletionState, Nil) {
   case value {
-    "completed" -> Ok(CompletionStateCompleted)
-    "cancelled" -> Ok(CompletionStateCancelled)
+    "completed" -> Ok(Completed)
+    "cancelled" -> Ok(Cancelled)
     _ -> Error(Nil)
   }
 }
@@ -328,128 +107,23 @@ pub fn completion_state_decoder() -> decode.Decoder(CompletionState) {
   use value <- decode.then(decode.string)
   case completion_state_from_string(value) {
     Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(CompletionStateCompleted, "CompletionState")
-  }
-}
-
-pub type CompletionByKind {
-  CompletionByKindOrg
-  CompletionByKindPlayer
-  CompletionByKindGuardian
-  CompletionByKindSystem
-}
-
-/// Each value with the text the column stores.
-pub const completion_by_kind_pairs = [
-  #("org", CompletionByKindOrg),
-  #("player", CompletionByKindPlayer),
-  #("guardian", CompletionByKindGuardian),
-  #("system", CompletionByKindSystem),
-]
-
-pub fn completion_by_kind_to_string(value: CompletionByKind) -> String {
-  case value {
-    CompletionByKindOrg -> "org"
-    CompletionByKindPlayer -> "player"
-    CompletionByKindGuardian -> "guardian"
-    CompletionByKindSystem -> "system"
-  }
-}
-
-pub fn completion_by_kind_from_string(
-  value: String,
-) -> Result(CompletionByKind, Nil) {
-  case value {
-    "org" -> Ok(CompletionByKindOrg)
-    "player" -> Ok(CompletionByKindPlayer)
-    "guardian" -> Ok(CompletionByKindGuardian)
-    "system" -> Ok(CompletionByKindSystem)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn completion_by_kind_to_json(value: CompletionByKind) -> Json {
-  json.string(completion_by_kind_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn completion_by_kind_decoder() -> decode.Decoder(CompletionByKind) {
-  use value <- decode.then(decode.string)
-  case completion_by_kind_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) -> decode.failure(CompletionByKindOrg, "CompletionByKind")
-  }
-}
-
-pub type CompletionPhase {
-  CompletionPhaseLegacyAccepted
-  CompletionPhaseAccepted
-  CompletionPhaseScheduled
-  CompletionPhaseCompleted
-  CompletionPhaseCancelled
-}
-
-/// Each value with the text the column stores.
-pub const completion_phase_pairs = [
-  #("legacy_accepted", CompletionPhaseLegacyAccepted),
-  #("accepted", CompletionPhaseAccepted),
-  #("scheduled", CompletionPhaseScheduled),
-  #("completed", CompletionPhaseCompleted),
-  #("cancelled", CompletionPhaseCancelled),
-]
-
-pub fn completion_phase_to_string(value: CompletionPhase) -> String {
-  case value {
-    CompletionPhaseLegacyAccepted -> "legacy_accepted"
-    CompletionPhaseAccepted -> "accepted"
-    CompletionPhaseScheduled -> "scheduled"
-    CompletionPhaseCompleted -> "completed"
-    CompletionPhaseCancelled -> "cancelled"
-  }
-}
-
-pub fn completion_phase_from_string(
-  value: String,
-) -> Result(CompletionPhase, Nil) {
-  case value {
-    "legacy_accepted" -> Ok(CompletionPhaseLegacyAccepted)
-    "accepted" -> Ok(CompletionPhaseAccepted)
-    "scheduled" -> Ok(CompletionPhaseScheduled)
-    "completed" -> Ok(CompletionPhaseCompleted)
-    "cancelled" -> Ok(CompletionPhaseCancelled)
-    _ -> Error(Nil)
-  }
-}
-
-/// The text the column stores, as JSON.
-pub fn completion_phase_to_json(value: CompletionPhase) -> Json {
-  json.string(completion_phase_to_string(value))
-}
-
-/// Text outside the vocabulary fails loudly: the table's CHECK should make it impossible.
-pub fn completion_phase_decoder() -> decode.Decoder(CompletionPhase) {
-  use value <- decode.then(decode.string)
-  case completion_phase_from_string(value) {
-    Ok(v) -> decode.success(v)
-    Error(Nil) ->
-      decode.failure(CompletionPhaseLegacyAccepted, "CompletionPhase")
+    Error(Nil) -> decode.failure(Completed, "CompletionState")
   }
 }
 
 pub type CompletionCancelledBy {
   Club
-  CompletionCancelledByPlayer
-  CompletionCancelledByGuardian
-  CompletionCancelledBySystem
+  Player
+  Guardian
+  System
 }
 
 /// Each value with the text the column stores.
 pub const completion_cancelled_by_pairs = [
   #("club", Club),
-  #("player", CompletionCancelledByPlayer),
-  #("guardian", CompletionCancelledByGuardian),
-  #("system", CompletionCancelledBySystem),
+  #("player", Player),
+  #("guardian", Guardian),
+  #("system", System),
 ]
 
 pub fn completion_cancelled_by_to_string(
@@ -457,9 +131,9 @@ pub fn completion_cancelled_by_to_string(
 ) -> String {
   case value {
     Club -> "club"
-    CompletionCancelledByPlayer -> "player"
-    CompletionCancelledByGuardian -> "guardian"
-    CompletionCancelledBySystem -> "system"
+    Player -> "player"
+    Guardian -> "guardian"
+    System -> "system"
   }
 }
 
@@ -468,9 +142,9 @@ pub fn completion_cancelled_by_from_string(
 ) -> Result(CompletionCancelledBy, Nil) {
   case value {
     "club" -> Ok(Club)
-    "player" -> Ok(CompletionCancelledByPlayer)
-    "guardian" -> Ok(CompletionCancelledByGuardian)
-    "system" -> Ok(CompletionCancelledBySystem)
+    "player" -> Ok(Player)
+    "guardian" -> Ok(Guardian)
+    "system" -> Ok(System)
     _ -> Error(Nil)
   }
 }
@@ -511,32 +185,32 @@ pub type Row {
     status: Status,
     reminder_sent: Bool,
     feedback_escalated_at: Option(Int),
-    workflow_state: WorkflowState,
+    workflow_state: trial_workflow_state.TrialWorkflowState,
     schedule_timezone: Option(String),
     schedule_revision: Option(Int),
     schedule_proposed_at: Option(Int),
-    schedule_proposed_by_kind: Option(ScheduleProposedByKind),
+    schedule_proposed_by_kind: Option(trial_actor_kind.TrialActorKind),
     schedule_proposed_by_user_id: Option(String),
     schedule_proposed_by_actor_id: Option(String),
     schedule_proposed_by_name: Option(String),
     schedule_confirmed_at: Option(Int),
-    schedule_confirmed_by_kind: Option(ScheduleConfirmedByKind),
+    schedule_confirmed_by_kind: Option(trial_actor_kind.TrialActorKind),
     schedule_confirmed_by_user_id: Option(String),
     schedule_confirmed_by_actor_id: Option(String),
     schedule_confirmed_by_name: Option(String),
     schedule_declined_at: Option(Int),
-    schedule_declined_by_kind: Option(ScheduleDeclinedByKind),
+    schedule_declined_by_kind: Option(trial_actor_kind.TrialActorKind),
     schedule_declined_by_user_id: Option(String),
     schedule_declined_by_actor_id: Option(String),
     schedule_declined_by_name: Option(String),
     completion_state: Option(CompletionState),
     completion_at: Option(Int),
-    completion_by_kind: Option(CompletionByKind),
+    completion_by_kind: Option(trial_actor_kind.TrialActorKind),
     completion_by_user_id: Option(String),
     completion_by_actor_id: Option(String),
     completion_by_name: Option(String),
     completion_reason: Option(String),
-    completion_phase: Option(CompletionPhase),
+    completion_phase: Option(trial_workflow_state.TrialWorkflowState),
     completion_cancelled_by: Option(CompletionCancelledBy),
     recipient_type: Option(party.Party),
     recipient_player_id: Option(id.PlayerId),
@@ -574,7 +248,7 @@ pub fn new(
   accepted_at accepted_at: Int,
   status status: Status,
   reminder_sent reminder_sent: Bool,
-  workflow_state workflow_state: WorkflowState,
+  workflow_state workflow_state: trial_workflow_state.TrialWorkflowState,
   rev rev: Int,
 ) -> Row {
   Row(
@@ -672,13 +346,13 @@ pub fn decoder() -> decode.Decoder(Row) {
   use status <- decode.field(15, status_decoder())
   use reminder_sent <- decode.field(16, sqlight.decode_bool())
   use feedback_escalated_at <- decode.field(17, decode.optional(decode.int))
-  use workflow_state <- decode.field(18, workflow_state_decoder())
+  use workflow_state <- decode.field(18, trial_workflow_state.decoder())
   use schedule_timezone <- decode.field(19, decode.optional(decode.string))
   use schedule_revision <- decode.field(20, decode.optional(decode.int))
   use schedule_proposed_at <- decode.field(21, decode.optional(decode.int))
   use schedule_proposed_by_kind <- decode.field(
     22,
-    decode.optional(schedule_proposed_by_kind_decoder()),
+    decode.optional(trial_actor_kind.decoder()),
   )
   use schedule_proposed_by_user_id <- decode.field(
     23,
@@ -695,7 +369,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use schedule_confirmed_at <- decode.field(26, decode.optional(decode.int))
   use schedule_confirmed_by_kind <- decode.field(
     27,
-    decode.optional(schedule_confirmed_by_kind_decoder()),
+    decode.optional(trial_actor_kind.decoder()),
   )
   use schedule_confirmed_by_user_id <- decode.field(
     28,
@@ -712,7 +386,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use schedule_declined_at <- decode.field(31, decode.optional(decode.int))
   use schedule_declined_by_kind <- decode.field(
     32,
-    decode.optional(schedule_declined_by_kind_decoder()),
+    decode.optional(trial_actor_kind.decoder()),
   )
   use schedule_declined_by_user_id <- decode.field(
     33,
@@ -733,7 +407,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use completion_at <- decode.field(37, decode.optional(decode.int))
   use completion_by_kind <- decode.field(
     38,
-    decode.optional(completion_by_kind_decoder()),
+    decode.optional(trial_actor_kind.decoder()),
   )
   use completion_by_user_id <- decode.field(39, decode.optional(decode.string))
   use completion_by_actor_id <- decode.field(40, decode.optional(decode.string))
@@ -741,7 +415,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   use completion_reason <- decode.field(42, decode.optional(decode.string))
   use completion_phase <- decode.field(
     43,
-    decode.optional(completion_phase_decoder()),
+    decode.optional(trial_workflow_state.decoder()),
   )
   use completion_cancelled_by <- decode.field(
     44,
@@ -881,12 +555,12 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.text(status_to_string(row.status)),
     sqlight.bool(row.reminder_sent),
     sqlight.nullable(sqlight.int, row.feedback_escalated_at),
-    sqlight.text(workflow_state_to_string(row.workflow_state)),
+    sqlight.text(trial_workflow_state.to_string(row.workflow_state)),
     sqlight.nullable(sqlight.text, row.schedule_timezone),
     sqlight.nullable(sqlight.int, row.schedule_revision),
     sqlight.nullable(sqlight.int, row.schedule_proposed_at),
     sqlight.nullable(
-      fn(v) { sqlight.text(schedule_proposed_by_kind_to_string(v)) },
+      fn(v) { sqlight.text(trial_actor_kind.to_string(v)) },
       row.schedule_proposed_by_kind,
     ),
     sqlight.nullable(sqlight.text, row.schedule_proposed_by_user_id),
@@ -894,7 +568,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.schedule_proposed_by_name),
     sqlight.nullable(sqlight.int, row.schedule_confirmed_at),
     sqlight.nullable(
-      fn(v) { sqlight.text(schedule_confirmed_by_kind_to_string(v)) },
+      fn(v) { sqlight.text(trial_actor_kind.to_string(v)) },
       row.schedule_confirmed_by_kind,
     ),
     sqlight.nullable(sqlight.text, row.schedule_confirmed_by_user_id),
@@ -902,7 +576,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.schedule_confirmed_by_name),
     sqlight.nullable(sqlight.int, row.schedule_declined_at),
     sqlight.nullable(
-      fn(v) { sqlight.text(schedule_declined_by_kind_to_string(v)) },
+      fn(v) { sqlight.text(trial_actor_kind.to_string(v)) },
       row.schedule_declined_by_kind,
     ),
     sqlight.nullable(sqlight.text, row.schedule_declined_by_user_id),
@@ -914,7 +588,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     ),
     sqlight.nullable(sqlight.int, row.completion_at),
     sqlight.nullable(
-      fn(v) { sqlight.text(completion_by_kind_to_string(v)) },
+      fn(v) { sqlight.text(trial_actor_kind.to_string(v)) },
       row.completion_by_kind,
     ),
     sqlight.nullable(sqlight.text, row.completion_by_user_id),
@@ -922,7 +596,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.text, row.completion_by_name),
     sqlight.nullable(sqlight.text, row.completion_reason),
     sqlight.nullable(
-      fn(v) { sqlight.text(completion_phase_to_string(v)) },
+      fn(v) { sqlight.text(trial_workflow_state.to_string(v)) },
       row.completion_phase,
     ),
     sqlight.nullable(

@@ -2605,6 +2605,235 @@ pub fn trial_decoder() -> decode.Decoder(TrialId) {
   decode.map(decode.string, TrialId)
 }
 
+/// A new id, minted inside the unit that uses it.
+pub fn next_trial(tx: Tx) -> Result(TrialId, Fail(e)) {
+  ids.next(tx, "trial") |> result.map(TrialId)
+}
+
+/// An id of `trial_day_consents`.
+pub opaque type TrialConsentId {
+  TrialConsentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn trial_consent(text: String) -> TrialConsentId {
+  TrialConsentId(text)
+}
+
+pub fn trial_consent_to_string(id: TrialConsentId) -> String {
+  let TrialConsentId(text) = id
+  text
+}
+
+pub fn trial_consent_sql(id: TrialConsentId) -> sqlight.Value {
+  sqlight.text(trial_consent_to_string(id))
+}
+
+pub fn trial_consent_json(id: TrialConsentId) -> Json {
+  json.string(trial_consent_to_string(id))
+}
+
+pub fn trial_consent_decoder() -> decode.Decoder(TrialConsentId) {
+  decode.map(decode.string, TrialConsentId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_trial_consent(tx: Tx) -> Result(TrialConsentId, Fail(e)) {
+  ids.next(tx, "cns") |> result.map(TrialConsentId)
+}
+
+/// An id of `trial_history`.
+pub opaque type TrialEventId {
+  TrialEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn trial_event(text: String) -> TrialEventId {
+  TrialEventId(text)
+}
+
+pub fn trial_event_to_string(id: TrialEventId) -> String {
+  let TrialEventId(text) = id
+  text
+}
+
+pub fn trial_event_sql(id: TrialEventId) -> sqlight.Value {
+  sqlight.text(trial_event_to_string(id))
+}
+
+pub fn trial_event_json(id: TrialEventId) -> Json {
+  json.string(trial_event_to_string(id))
+}
+
+pub fn trial_event_decoder() -> decode.Decoder(TrialEventId) {
+  decode.map(decode.string, TrialEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_trial_event(tx: Tx) -> Result(TrialEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(TrialEventId)
+}
+
+/// An id of `trial_session_evidence`.
+pub opaque type TrialEvidenceId {
+  TrialEvidenceId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn trial_evidence(text: String) -> TrialEvidenceId {
+  TrialEvidenceId(text)
+}
+
+pub fn trial_evidence_to_string(id: TrialEvidenceId) -> String {
+  let TrialEvidenceId(text) = id
+  text
+}
+
+pub fn trial_evidence_sql(id: TrialEvidenceId) -> sqlight.Value {
+  sqlight.text(trial_evidence_to_string(id))
+}
+
+pub fn trial_evidence_json(id: TrialEvidenceId) -> Json {
+  json.string(trial_evidence_to_string(id))
+}
+
+pub fn trial_evidence_decoder() -> decode.Decoder(TrialEvidenceId) {
+  decode.map(decode.string, TrialEvidenceId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_trial_evidence(tx: Tx) -> Result(TrialEvidenceId, Fail(e)) {
+  ids.next(tx, "tev") |> result.map(TrialEvidenceId)
+}
+
+/// An id of `trial_reports`.
+pub opaque type TrialReportId {
+  TrialReportId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn trial_report(text: String) -> TrialReportId {
+  TrialReportId(text)
+}
+
+pub fn trial_report_to_string(id: TrialReportId) -> String {
+  let TrialReportId(text) = id
+  text
+}
+
+pub fn trial_report_sql(id: TrialReportId) -> sqlight.Value {
+  sqlight.text(trial_report_to_string(id))
+}
+
+pub fn trial_report_json(id: TrialReportId) -> Json {
+  json.string(trial_report_to_string(id))
+}
+
+pub fn trial_report_decoder() -> decode.Decoder(TrialReportId) {
+  decode.map(decode.string, TrialReportId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_trial_report(tx: Tx) -> Result(TrialReportId, Fail(e)) {
+  ids.next(tx, "rep") |> result.map(TrialReportId)
+}
+
+/// An id of `trial_schedule_sessions`.
+pub opaque type TrialSessionId {
+  TrialSessionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn trial_session(text: String) -> TrialSessionId {
+  TrialSessionId(text)
+}
+
+pub fn trial_session_to_string(id: TrialSessionId) -> String {
+  let TrialSessionId(text) = id
+  text
+}
+
+pub fn trial_session_sql(id: TrialSessionId) -> sqlight.Value {
+  sqlight.text(trial_session_to_string(id))
+}
+
+pub fn trial_session_json(id: TrialSessionId) -> Json {
+  json.string(trial_session_to_string(id))
+}
+
+pub fn trial_session_decoder() -> decode.Decoder(TrialSessionId) {
+  decode.map(decode.string, TrialSessionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_trial_session(tx: Tx) -> Result(TrialSessionId, Fail(e)) {
+  ids.next(tx, "tses") |> result.map(TrialSessionId)
+}
+
+/// An id of `request_trial_slots`.
+pub opaque type TrialSlotId {
+  TrialSlotId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn trial_slot(text: String) -> TrialSlotId {
+  TrialSlotId(text)
+}
+
+pub fn trial_slot_to_string(id: TrialSlotId) -> String {
+  let TrialSlotId(text) = id
+  text
+}
+
+pub fn trial_slot_sql(id: TrialSlotId) -> sqlight.Value {
+  sqlight.text(trial_slot_to_string(id))
+}
+
+pub fn trial_slot_json(id: TrialSlotId) -> Json {
+  json.string(trial_slot_to_string(id))
+}
+
+pub fn trial_slot_decoder() -> decode.Decoder(TrialSlotId) {
+  decode.map(decode.string, TrialSlotId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_trial_slot(tx: Tx) -> Result(TrialSlotId, Fail(e)) {
+  ids.next(tx, "tslot") |> result.map(TrialSlotId)
+}
+
+/// An id of `trial_day_staff`.
+pub opaque type TrialStaffId {
+  TrialStaffId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn trial_staff(text: String) -> TrialStaffId {
+  TrialStaffId(text)
+}
+
+pub fn trial_staff_to_string(id: TrialStaffId) -> String {
+  let TrialStaffId(text) = id
+  text
+}
+
+pub fn trial_staff_sql(id: TrialStaffId) -> sqlight.Value {
+  sqlight.text(trial_staff_to_string(id))
+}
+
+pub fn trial_staff_json(id: TrialStaffId) -> Json {
+  json.string(trial_staff_to_string(id))
+}
+
+pub fn trial_staff_decoder() -> decode.Decoder(TrialStaffId) {
+  decode.map(decode.string, TrialStaffId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_trial_staff(tx: Tx) -> Result(TrialStaffId, Fail(e)) {
+  ids.next(tx, "stf") |> result.map(TrialStaffId)
+}
+
 /// An id of `ver_admins`.
 pub opaque type VerAdminId {
   VerAdminId(String)

@@ -2856,8 +2856,9 @@ pub fn link(
       Some(t) -> {
         use found <- result.try(trials.by_id(read, id.trial(t)) |> storage)
         case found {
-          Some(r) if r.org_id == a.org.id && r.player_id == room.row.player_id ->
-            Ok(Some(r))
+          Some(t)
+            if t.row.org_id == a.org.id && t.row.player_id == room.row.player_id
+          -> Ok(Some(t.row))
           _ -> store.refuse(http.error(404, "TRIAL_NOT_FOUND"))
         }
       }

@@ -22,6 +22,8 @@ import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/offer_rules.{type Offer}
 import scoutbox/recruitment/offers
 import scoutbox/recruitment/room_rules.{type RoomRole}
+import scoutbox/recruitment/trial_rules.{type Trial}
+import scoutbox/recruitment/trials
 import scoutbox/rows/assessments as assessment_row
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
@@ -30,10 +32,13 @@ import scoutbox/rows/recruitment_cases as case_row
 import scoutbox/rows/recruitment_requests as request_row
 import scoutbox/rows/room_decisions as decision_row
 import scoutbox/rows/signings as signing_row
+import scoutbox/rows/trials as trial_row
 import scoutbox/vocab/decision_outcome
 import scoutbox/vocab/offer_status
 import scoutbox/vocab/party
 import scoutbox/vocab/room_status.{type RoomStatus}
+import scoutbox/vocab/trial_actor_kind
+import scoutbox/vocab/trial_workflow_state
 
 pub const policy_version = 1
 
@@ -170,6 +175,9 @@ type Records {
     offers: List(Offer),
     signings: List(signing_row.Row),
     requests: List(request_row.Row),
+    /// The organisation's trials of the player, and the trials naming this case.
+    trials: List(Trial),
+    case_trials: List(Trial),
     blocked: Bool,
     player_present: Bool,
   )
@@ -222,6 +230,12 @@ pub fn build(
     [id.org_sql(r.org_id), id.player_sql(r.player_id)],
     request_row.decoder(),
   ))
+  use player_trials <- result.try(trials.for_org_player(
+    read,
+    r.org_id,
+    r.player_id,
+  ))
+  use case_trials <- result.try(trials.for_case(read, r.id))
   let rec =
     Records(
       room:,
@@ -231,6 +245,8 @@ pub fn build(
       offers: list.filter(case_offers, fn(o) { o.row.org_id == r.org_id }),
       signings:,
       requests:,
+      trials: player_trials,
+      case_trials:,
       blocked:,
       player_present:,
     )
@@ -345,10 +361,47 @@ fn club(
     list.filter(rec.requests, fn(q) {
       q.type_ == request_row.Trial && q.case_id == Some(r.id)
     })
+  // Milestones only: never instructions, an address, a note, an observation or an assessment. A corrupt row is
+  // omitted and counted.
+  let #(listed_trials, trials_omitted) =
+    list.fold(rec.trials, #([], 0), fn(acc, t) {
+      case trial_rules.integrity(t, Some(r.org_id), t.row.case_id) {
+        [] -> #([t, ..acc.0], acc.1)
+        _ -> #(acc.0, acc.1 + 1)
+      }
+    })
+  let listed_trials = list.reverse(listed_trials)
+  // The model and timeline read this case's Trials only, the evidence provider's scope: a Trial from an earlier,
+  // ended case is that case's history.
+  let trial_rows =
+    list.filter(listed_trials, fn(t) { t.row.case_id == Some(r.id) })
+  let trial_ids = list.map(trial_rows, fn(t) { id.trial_to_string(t.row.id) })
+  let trial_assessments =
+    list.filter(rec.assessments, fn(a) {
+      case a.context_trial_id {
+        Some(tid) -> list.contains(trial_ids, tid)
+        None -> False
+      }
+    })
+  let corrupt_trials =
+    list.count(rec.case_trials, fn(t) {
+      t.row.case_id == Some(r.id)
+      && t.row.org_id == r.org_id
+      && trial_rules.integrity(t, Some(r.org_id), Some(r.id)) != []
+    })
   let signing = supporting_signing(rec)
   let assessed =
     list.any(rec.assessments, fn(a) { a.state != assessment_row.Draft })
-  let total_history = timeline(rec, lines, trial_requests, sound_offers, now)
+  let total_history =
+    timeline(
+      rec,
+      lines,
+      trial_requests,
+      trial_rows,
+      trial_assessments,
+      sound_offers,
+      now,
+    )
   let limit =
     paging.limit
     |> option.then(fn(t) { int.parse(t) |> option.from_result })
@@ -418,8 +471,15 @@ fn club(
           "decisionPending",
           json.bool(status == room_status.TrialCompleted && current == None),
         ),
-        // Not ported yet: trials, so no trial is awaiting its report.
-        #("trialActive", json.bool(False)),
+        #(
+          "trialActive",
+          json.bool(
+            status == room_status.TrialScheduled
+            && list.any(listed_trials, fn(t) {
+              t.row.status == trial_row.AwaitingReport
+            }),
+          ),
+        ),
         #(
           "offerAwaitingResponse",
           json.bool(status == room_status.OfferMade && offer_awaiting),
@@ -429,7 +489,16 @@ fn club(
         #("reopenable", json.bool(reopenable)),
         #(
           "decisionOutstanding",
-          json.bool(!terminal && current_formal == None && assessed),
+          json.bool(
+            !terminal
+            && current_formal == None
+            && {
+              assessed
+              || list.any(listed_trials, fn(t) {
+                trial_rules.workflow_state(t) == trial_workflow_state.Completed
+              })
+            },
+          ),
         ),
         #("hasFormalDecision", json.bool(current_formal != None)),
       ]),
@@ -444,7 +513,7 @@ fn club(
         sound_offers,
         trial_requests,
         signing,
-        corrupt_offers,
+        corrupt_offers + corrupt_trials,
         assessed,
         now,
       ),
@@ -469,9 +538,19 @@ fn club(
         #("omitted", json.int(0)),
       ]),
     ),
-    // Not ported yet: Trials.
-    #("trials", json.preprocessed_array([])),
-    #("trialsOmitted", json.int(0)),
+    #(
+      "trials",
+      json.array(listed_trials, fn(t) {
+        json.object([
+          #("id", id.trial_json(t.row.id)),
+          #("status", trial_row.status_to_json(t.row.status)),
+          #("proposedDate", json.nullable(t.row.proposed_date, json.string)),
+          #("hasReport", json.bool(t.report != None)),
+          #("workflow", json.object(trial_rules.milestone(t))),
+        ])
+      }),
+    ),
+    #("trialsOmitted", json.int(trials_omitted)),
     #(
       "assessments",
       json.array(rec.assessments, fn(a) {
@@ -1401,14 +1480,135 @@ type Line {
   Line(at: Int, key: String, fields: List(#(String, Json)))
 }
 
+/// Trial history actions that are milestones. Unlinking is housekeeping.
+const trial_timeline_actions = [
+  "trial_accepted", "trial_schedule_proposed", "trial_rescheduled",
+  "trial_schedule_confirmed", "trial_schedule_declined",
+  "trial_attendance_recorded", "trial_cancelled", "trial_completed",
+  "trial_evidence_linked",
+]
+
+/// The trial history detail fields a milestone carries.
+type TrialDetail {
+  TrialDetail(
+    session_id: Option(String),
+    trial_session_id: Option(String),
+    state: Option(String),
+    revision: Option(Int),
+    session_count: Option(Int),
+    phase: Option(String),
+    cancelled_by: Option(String),
+    attended_sessions: Option(Int),
+  )
+}
+
+fn trial_detail(text: Option(String)) -> TrialDetail {
+  let s = fn(name, next) {
+    decode.optional_field(name, None, decode.optional(decode.string), next)
+  }
+  let n = fn(name, next) {
+    decode.optional_field(name, None, decode.optional(decode.int), next)
+  }
+  let decoder = {
+    use session_id <- s("sessionId")
+    use trial_session_id <- s("trialSessionId")
+    use state <- s("state")
+    use revision <- n("revision")
+    use session_count <- n("sessionCount")
+    use phase <- s("phase")
+    use cancelled_by <- s("cancelledBy")
+    use attended_sessions <- n("attendedSessions")
+    decode.success(TrialDetail(
+      session_id:,
+      trial_session_id:,
+      state:,
+      revision:,
+      session_count:,
+      phase:,
+      cancelled_by:,
+      attended_sessions:,
+    ))
+  }
+  text
+  |> option.then(fn(t) { json.parse(t, decoder) |> option.from_result })
+  |> option.unwrap(TrialDetail(None, None, None, None, None, None, None, None))
+}
+
+fn opt_field(
+  name: String,
+  value: Option(a),
+  to_json: fn(a) -> Json,
+) -> List(#(String, Json)) {
+  case value {
+    Some(v) -> [#(name, to_json(v))]
+    None -> []
+  }
+}
+
 fn timeline(
   rec: Records,
   lines: List(DecisionLine),
   invitations: List(request_row.Row),
+  case_trials: List(Trial),
+  trial_assessments: List(assessment_row.Row),
   offers: List(Offer),
   now: Int,
 ) -> List(Json) {
   let room = rec.room
+  let trial_lines =
+    list.flat_map(case_trials, fn(t) {
+      let tid = id.trial_to_string(t.row.id)
+      list.filter_map(t.history, fn(h) {
+        case list.contains(trial_timeline_actions, h.action) {
+          False -> Error(Nil)
+          True -> {
+            let d = trial_detail(h.detail_json)
+            Ok(Line(
+              h.at,
+              h.action <> ":" <> tid <> ":" <> id.trial_event_to_string(h.id),
+              list.flatten([
+                [
+                  #("kind", json.string(h.action)),
+                  #("at", json.int(h.at)),
+                  #("by", case h.by_kind {
+                    Some(trial_actor_kind.Org) ->
+                      json.nullable(h.by_name, json.string)
+                    _ -> json.null()
+                  }),
+                  #(
+                    "byKind",
+                    json.nullable(h.by_kind, trial_actor_kind.to_json),
+                  ),
+                  #("trialId", id.trial_json(t.row.id)),
+                ],
+                case option.or(d.trial_session_id, d.session_id) {
+                  Some(sid) -> [#("sessionId", json.string(sid))]
+                  None -> []
+                },
+                opt_field("state", d.state, json.string),
+                opt_field("revision", d.revision, json.int),
+                opt_field("sessionCount", d.session_count, json.int),
+                opt_field("phase", d.phase, json.string),
+                opt_field("cancelledBy", d.cancelled_by, json.string),
+                opt_field("attendedSessions", d.attended_sessions, json.int),
+              ]),
+            ))
+          }
+        }
+      })
+    })
+  let assessment_lines =
+    list.map(trial_assessments, fn(a) {
+      let at = option.unwrap(a.submitted_at, a.created_at)
+      Line(at, "trial_assessment_recorded:" <> id.assessment_to_string(a.id), [
+        #("kind", json.string("trial_assessment_recorded")),
+        #("at", json.int(at)),
+        #("by", json.null()),
+        #("trialId", json.nullable(a.context_trial_id, json.string)),
+        #("assessmentId", id.assessment_json(a.id)),
+        #("state", assessment_row.state_to_json(a.state)),
+      ])
+    })
   let invited =
     list.flat_map(invitations, fn(q) {
       let qid = id.request_to_string(q.id)
@@ -1624,7 +1824,15 @@ fn timeline(
         #("decisionId", id.room_decision_json(d.id)),
       ])
     })
-  list.flatten([invited, offer_lines, case_lines, handoff_lines, decision_lines])
+  list.flatten([
+    invited,
+    trial_lines,
+    assessment_lines,
+    offer_lines,
+    case_lines,
+    handoff_lines,
+    decision_lines,
+  ])
   |> list.sort(fn(a, b) {
     case int.compare(a.at, b.at) {
       order.Eq -> string.compare(a.key, b.key)

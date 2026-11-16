@@ -18,6 +18,8 @@ import scoutbox/recruitment/lifecycle.{type Action}
 import scoutbox/recruitment/offer_rules
 import scoutbox/recruitment/offers
 import scoutbox/recruitment/room_rules.{type RoomRole}
+import scoutbox/recruitment/trial_rules
+import scoutbox/recruitment/trials
 import scoutbox/rows/case_history as history_row
 import scoutbox/rows/id
 import scoutbox/rows/orgs
@@ -35,8 +37,7 @@ pub type Evidence {
 /// Is there a record that supports `kind` for this case? From stores the lifecycle does not own and never
 /// writes.
 ///
-/// Not ported yet: contacts and trials. No route here records a contact or a Trial, so those kinds have no
-/// record to find.
+/// Not ported yet: contacts. No route here records a contact, so that kind has no record to find.
 pub fn evidence(
   read: Read,
   room: Room,
@@ -52,8 +53,29 @@ pub fn evidence(
   }
   case kind {
     room_rules.ContactDelivered -> Ok(Lacks("no_contact_delivered"))
-    room_rules.TrialConfirmed -> Ok(Lacks("no_confirmed_schedule"))
-    room_rules.TrialCompletedEvidence -> Ok(Lacks("no_completed_trial"))
+    // `legacy_accepted` never satisfies `trial_confirmed` (no confirmed schedule) and `reported` never satisfies
+    // `trial_completed` (a report is not completion). A tombstoned trial still answers, so history stays honest.
+    room_rules.TrialConfirmed | room_rules.TrialCompletedEvidence -> {
+      use found <- result.map(trials.for_case(read, r.id))
+      let own =
+        list.filter(found, fn(t) {
+          t.row.case_id == Some(r.id)
+          && t.row.org_id == r.org_id
+          && t.row.player_id == r.player_id
+          && trial_rules.integrity(t, Some(r.org_id), Some(r.id)) == []
+        })
+      let #(holds, reason) = case kind {
+        room_rules.TrialConfirmed -> #(
+          trial_rules.confirms,
+          "no_confirmed_schedule",
+        )
+        _ -> #(trial_rules.completes, "no_completed_trial")
+      }
+      case list.find(own, holds) {
+        Ok(t) -> Holds("trial", id.trial_to_string(t.row.id))
+        Error(Nil) -> Lacks(reason)
+      }
+    }
     // A delivered `trial` request tied to this case, still pending or accepted.
     room_rules.TrialInvited ->
       store.query(

@@ -51,6 +51,11 @@ pub const policy = [
   #("offer_issue", offer_issue_policy),
   #("offer_withdraw", offer_withdraw_policy),
   #("offer_response", offer_response_policy),
+  #("trial_invite", trial_invite_policy),
+  #("trial_schedule", trial_schedule_policy),
+  #("trial_response", trial_response_policy),
+  #("trial_evidence_link", trial_evidence_link_policy),
+  #("trial_attendance", trial_attendance_policy),
   #("agent_representation_request", agent_representation_request_policy),
   #("agent_player_lookup", agent_player_lookup_policy),
   #("agent_profile_write", agent_profile_write_policy),
@@ -83,6 +88,16 @@ pub type Action {
   OfferWithdraw
   /// Offer acceptances and declines, per player or guardian answering.
   OfferResponse
+  /// Trial invitations, per organisation.
+  TrialInvite
+  /// Trial schedules proposed, revised or cancelled, per organisation.
+  TrialSchedule
+  /// Trial schedule confirmations, declines and cancellations, per player or guardian answering.
+  TrialResponse
+  /// Box Cam sessions linked to a Trial, per organisation.
+  TrialEvidenceLink
+  /// Trial attendance and completion records, per organisation.
+  TrialAttendance
   /// Representation requests that reach a player lookup, per agent.
   AgentRepresentationRequest
   /// Player lookups from the Agent workspace, per agent.
@@ -121,6 +136,16 @@ const offer_withdraw_policy = Policy(max: 30, window_ms: 3_600_000)
 
 const offer_response_policy = Policy(max: 30, window_ms: 3_600_000)
 
+const trial_invite_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const trial_schedule_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const trial_response_policy = Policy(max: 30, window_ms: 3_600_000)
+
+const trial_evidence_link_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const trial_attendance_policy = Policy(max: 120, window_ms: 3_600_000)
+
 const agent_representation_request_policy =
   Policy(max: 40, window_ms: 86_400_000)
 
@@ -150,6 +175,11 @@ fn action_name(action: Action) -> String {
     OfferIssue -> "offer_issue"
     OfferWithdraw -> "offer_withdraw"
     OfferResponse -> "offer_response"
+    TrialInvite -> "trial_invite"
+    TrialSchedule -> "trial_schedule"
+    TrialResponse -> "trial_response"
+    TrialEvidenceLink -> "trial_evidence_link"
+    TrialAttendance -> "trial_attendance"
     AgentRepresentationRequest -> "agent_representation_request"
     AgentPlayerLookup -> "agent_player_lookup"
     AgentProfileWrite -> "agent_profile_write"
@@ -173,6 +203,11 @@ fn action_policy(action: Action) -> Policy {
     OfferIssue -> offer_issue_policy
     OfferWithdraw -> offer_withdraw_policy
     OfferResponse -> offer_response_policy
+    TrialInvite -> trial_invite_policy
+    TrialSchedule -> trial_schedule_policy
+    TrialResponse -> trial_response_policy
+    TrialEvidenceLink -> trial_evidence_link_policy
+    TrialAttendance -> trial_attendance_policy
     AgentRepresentationRequest -> agent_representation_request_policy
     AgentPlayerLookup -> agent_player_lookup_policy
     AgentProfileWrite -> agent_profile_write_policy

@@ -57,6 +57,7 @@ import scoutbox/recruitment/offer_routes
 import scoutbox/recruitment/request_routes
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/signings
+import scoutbox/recruitment/trial_routes
 import scoutbox/recruitment/trials
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
@@ -167,6 +168,7 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
             offer_routes.revise(ctx, req, org, oid)
           })
         ["recruitment", "offer-policy"] -> only(req, Get, offer_routes.policy)
+        ["recruitment", "trial-policy"] -> only(req, Get, trial_routes.policy)
         ["rooms-funnel"] ->
           only(req, Get, fn() { room_routes.funnel(ctx, org) })
         ["trials"] -> only(req, Get, fn() { trials.org_page() })
@@ -320,6 +322,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
     ["player", ..rest] -> {
       use player <- access.player_session(ctx, req)
       case rest {
+        ["inbox"] ->
+          only(req, Get, fn() { request_routes.player_inbox(ctx, req, player) })
         ["agent", "relationships"] ->
           only(req, Get, fn() { agent.my_agent(ctx, player) })
         ["agent", "relationships", rid, "confirm"] ->
@@ -359,6 +363,26 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               req,
               offer_routes.PlayerRecipient(player),
               oid,
+            )
+          })
+        ["trials", tid, "confirm-schedule"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            trial_routes.confirm(ctx, req, trial_routes.PlayerSide(player), tid)
+          })
+        ["trials", tid, "decline-schedule"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            trial_routes.decline(ctx, req, trial_routes.PlayerSide(player), tid)
+          })
+        ["trials", tid, "cancel"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            trial_routes.recipient_cancel(
+              ctx,
+              req,
+              trial_routes.PlayerSide(player),
+              tid,
             )
           })
         ["offers", oid, "accept"] ->
@@ -538,6 +562,36 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               req,
               offer_routes.GuardianRecipient(guardian),
               oid,
+            )
+          })
+        ["trials", tid, "confirm-schedule"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            trial_routes.confirm(
+              ctx,
+              req,
+              trial_routes.GuardianSide(guardian),
+              tid,
+            )
+          })
+        ["trials", tid, "decline-schedule"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            trial_routes.decline(
+              ctx,
+              req,
+              trial_routes.GuardianSide(guardian),
+              tid,
+            )
+          })
+        ["trials", tid, "cancel"] ->
+          only(req, Post, fn() {
+            use req <- contract.rerun_on_stale(req)
+            trial_routes.recipient_cancel(
+              ctx,
+              req,
+              trial_routes.GuardianSide(guardian),
+              tid,
             )
           })
         ["offers", oid, "accept"] ->
@@ -1184,6 +1238,42 @@ fn rooms(
     [rid, "combine-requests"], Post ->
       room_routes.request_combine(ctx, req, org, room(rid))
     [rid, "link"], Post -> room_routes.link(ctx, req, org, room(rid))
+    [rid, "trials"], Get -> trial_routes.list_trials(ctx, org, room(rid))
+    [rid, "trials"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      trial_routes.invite(ctx, req, org, room(rid))
+    }
+    [rid, "trials", tid], Get -> trial_routes.get(ctx, org, room(rid), tid)
+    [rid, "trials", tid, "schedule"], Post
+    | [rid, "trials", tid, "reschedule"], Post
+    -> {
+      use req <- contract.rerun_on_stale(req)
+      trial_routes.schedule(ctx, req, org, room(rid), tid)
+    }
+    [rid, "trials", tid, "cancel"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      trial_routes.cancel(ctx, req, org, room(rid), tid)
+    }
+    [rid, "trials", tid, "sessions", sid, "attendance"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      trial_routes.attendance(ctx, req, org, room(rid), tid, sid)
+    }
+    [rid, "trials", tid, "complete"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      trial_routes.complete(ctx, req, org, room(rid), tid)
+    }
+    [rid, "trials", tid, "sessions", sid, "evidence"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      trial_routes.link(ctx, req, org, room(rid), tid, sid)
+    }
+    [rid, "trials", tid, "evidence", eid, "unlink"], Post -> {
+      use req <- contract.rerun_on_stale(req)
+      trial_routes.unlink(ctx, req, org, room(rid), tid, eid)
+    }
+    [rid, "trials", tid, "evidence", "candidates"], Get ->
+      trial_routes.candidates(ctx, org, room(rid), tid)
+    [rid, "trials", tid, "evidence"], Get ->
+      trial_routes.evidence(ctx, org, room(rid), tid)
     [rid, "offers"], Get -> offer_routes.surface(ctx, req, org, room(rid))
     [rid, "offers"], Post -> {
       use req <- contract.rerun_on_stale(req)

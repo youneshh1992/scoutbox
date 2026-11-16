@@ -1533,6 +1533,243 @@
     ]
   },
   {
+    "battery": "recruitment/trialDatesMinorsAndErasure",
+    "functions": [
+      {
+        "function": "domain.ts#chooseTrialSlot",
+        "calls": 17,
+        "cases": 16,
+        "handPort": {
+          "args[].toString is a function": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#isTrialDate",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#parseTrialDate",
+        "calls": 47,
+        "cases": 42,
+        "handPort": {
+          "args[] is a ": 1,
+          "args[] is a function": 1,
+          "args[] is a symbol": 1,
+          "args[] is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#trialReportDueAt",
+        "calls": 11,
+        "cases": 10,
+        "handPort": {
+          "args[] is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domain.ts#validateTrialDetails",
+        "calls": 35,
+        "cases": 33,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/platform/notificationPrefs.mjs#categoryOf",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      }
+    ]
+  },
+  {
+    "battery": "recruitment/trials",
+    "functions": [
+      {
+        "function": "domains/recruitment/lifecycle/errors.mjs#httpStatusFor",
+        "calls": 7,
+        "cases": 7,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider",
+        "calls": 14,
+        "cases": 0,
+        "handPort": {
+          "args[].requests.byId is a function": 11,
+          "result.check is a function": 3
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#blockedAllows",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#canComplete",
+        "calls": 9,
+        "cases": 9,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#deriveWorkflowState",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#icsLocal",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#icsText",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#isLegacyTrial",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#localDay",
+        "calls": 4,
+        "cases": 4,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#materialChange",
+        "calls": 5,
+        "cases": 5,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#normaliseTrialClientKey",
+        "calls": 7,
+        "cases": 6,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#parseInstant",
+        "calls": 30,
+        "cases": 27,
+        "handPort": {
+          "args[] is Infinity": 1,
+          "args[] is NaN": 1
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#trialClubView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#trialFamilyView",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#trialIntegrity",
+        "calls": 10,
+        "cases": 10,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#trialMilestone",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#trialOutcomeLine",
+        "calls": 1,
+        "cases": 1,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#trialRoleAllows",
+        "calls": 8,
+        "cases": 8,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#trialStateAllows",
+        "calls": 37,
+        "cases": 37,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#validateScheduleInput",
+        "calls": 19,
+        "cases": 0,
+        "handPort": {
+          "args[].mintId is a function": 19
+        },
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#validateSessionInput",
+        "calls": 2,
+        "cases": 2,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#validateTimezone",
+        "calls": 25,
+        "cases": 25,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/lifecycle/trial.mjs#validateVenue",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "pending"
+      },
+      {
+        "function": "domains/recruitment/rooms/shared.mjs#roomCan",
+        "calls": 3,
+        "cases": 3,
+        "handPort": {},
+        "status": "generated"
+      }
+    ]
+  },
+  {
     "battery": "verification/organisationsAndStaff",
     "functions": [
       {
