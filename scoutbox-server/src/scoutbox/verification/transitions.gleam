@@ -764,3 +764,49 @@ pub fn revoke_recipient(
     }
   }
 }
+
+/// `GET /org/transitions`: the packs the organisation holds a live grant to. There is no browsable pool of
+/// released players.
+pub fn org_list(ctx: Ctx, org_id: id.OrgId) -> Response {
+  let now = clock.now_ms()
+  let found =
+    store.read(ctx.store, fn(read) {
+      store.query(
+        read,
+        "SELECT c.id, c.player_name, r.granted_at, r.expires_at, c.note FROM transition_cases c JOIN transition_case_recipients r ON r.transition_case_id = c.id WHERE c.status = 'open' AND r.org_id = ? AND r.revoked_at IS NULL AND r.expires_at > ? AND r.ord = (SELECT MIN(r2.ord) FROM transition_case_recipients r2 WHERE r2.transition_case_id = c.id AND r2.org_id = r.org_id AND r2.revoked_at IS NULL AND r2.expires_at > ?) ORDER BY c.rowid",
+        [id.org_sql(org_id), sqlight.int(now), sqlight.int(now)],
+        {
+          use case_id <- decode.field(0, id.transition_case_decoder())
+          use name <- decode.field(1, decode.optional(decode.string))
+          use granted <- decode.field(2, decode.int)
+          use expires <- decode.field(3, decode.int)
+          use note <- decode.field(4, decode.optional(decode.string))
+          decode.success(
+            json.object([
+              #("id", id.transition_case_json(case_id)),
+              #("playerName", json.nullable(name, json.string)),
+              #("grantedAt", json.int(granted)),
+              #("expiresAt", json.int(expires)),
+              #("note", json.nullable(note, json.string)),
+            ]),
+          )
+        },
+      )
+    })
+  case found {
+    Ok(items) ->
+      http.json(
+        200,
+        json.object([
+          #("items", json.preprocessed_array(items)),
+          #(
+            "note",
+            json.string(
+              "Each pack was individually shared with your club by the player or their guardian, and can be withdrawn at any time.",
+            ),
+          ),
+        ]),
+      )
+    Error(e) -> http.internal(e)
+  }
+}

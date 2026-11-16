@@ -446,6 +446,22 @@ const ROOM_MAP = {
       );
     },
   },
+  [`${ROOM_RULES}#secondLookEvent`]: {
+    module: ROOMS,
+    test: (c, ctx) => {
+      const [r, d] = c.args;
+      const known = ['id', 'orgId', 'playerId', 'room'];
+      for (const k of Object.keys(r)) if (!known.includes(k)) throw new Error(`secondLookEvent has no argument for room.${k}`);
+      const decision = d
+        ? `Some(${ctx.use(ROOMS)}.SecondLookDecision(reason_codes: ${list(string)(d.reasonCodes ?? [], ctx)}, created_at: ${int(d.createdAt ?? r.room.updatedAt)}, source_refs: ${option(jsonValue)(d.snapshot?.sourceRefs ?? null, ctx)}))`
+        : 'None';
+      return eqJson(
+        `${ctx.use(ROOMS)}.second_look_event(${ident('recruitment_case')(r.id, ctx)}, ${ident('org')(r.orgId, ctx)}, ${ident('player')(r.playerId, ctx)}, ${roomStatus(r.room.status, ctx)}, ${int(r.room.updatedAt)}, ${decision})`,
+        c.result,
+        ctx,
+      );
+    },
+  },
   [`${ROOM_RULES}#validateTag`]: {
     module: ROOMS,
     test: (c, ctx) =>
@@ -524,4 +540,9 @@ export const HAND_PORTED = {
   [`${SHARED}#mintToken`]: 'test/scoutbox/verification/tokens_test.gleam',
   [`${SHARED}#peekToken`]: 'test/scoutbox/verification/tokens_test.gleam',
   [`${SHARED}#consumeToken`]: 'test/scoutbox/verification/tokens_test.gleam',
+  ...Object.fromEntries(
+    ['buildRoomSnapshot', 'roomCan', 'roomSummary', 'validateDecision', 'validateReasonCodes', 'validateTransition'].map(
+      (f) => [`domains/recruitment/rooms/shared.mjs#${f}`, 'test/scoutbox/recruitment/room_rules_test.gleam'],
+    ),
+  ),
 };

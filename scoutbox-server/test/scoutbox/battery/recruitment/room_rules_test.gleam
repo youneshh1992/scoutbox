@@ -3830,6 +3830,40 @@ pub fn the_funnel_counts_each_stage_test() {
     == "{\"total\":4,\"active\":2,\"shortlisted\":1,\"trials\":0,\"offers\":0,\"signed\":1,\"archived\":1,\"byStatus\":{\"watching\":1,\"under_review\":0,\"contact_planned\":0,\"contacted\":0,\"shortlisted\":1,\"priority\":0,\"trial_requested\":0,\"trial_scheduled\":0,\"trial_completed\":0,\"offer_consideration\":0,\"offer_made\":0,\"offer_accepted\":0,\"offer_declined\":0,\"signed\":1,\"on_hold\":0,\"withdrawn\":0,\"archived\":1,\"closed\":0},\"note\":\"Your organisation’s own recruitment activity. ScoutBox publishes no cross-club league table.\"}"
 }
 
+// rooms: secondLookEvent — the archive event is typed and marked revisitable
+pub fn the_archive_event_is_typed_and_marked_revisitable_test() {
+  assert json.to_string(room_rules.second_look_event(
+      id.recruitment_case("case-1"),
+      id.org("org-a"),
+      id.player("pl-1"),
+      room_status.Archived,
+      9,
+      Some(room_rules.SecondLookDecision(
+        reason_codes: ["insufficient_recent_evidence"],
+        created_at: 9,
+        source_refs: Some(json.object([#("passportVersion", json.int(2))])),
+      )),
+    ))
+    == "{\"type\":\"recruitment_room_archived\",\"roomId\":\"case-1\",\"orgId\":\"org-a\",\"playerId\":\"pl-1\",\"status\":\"archived\",\"reasonCodes\":[\"insufficient_recent_evidence\"],\"revisitable\":true,\"decisionAt\":9,\"sourceVersionRefs\":{\"passportVersion\":2}}"
+}
+
+// rooms: secondLookEvent — a squad-space archive is not marked revisitable
+pub fn a_squad_space_archive_is_not_marked_revisitable_test() {
+  assert json.to_string(room_rules.second_look_event(
+      id.recruitment_case("c"),
+      id.org("o"),
+      id.player("p"),
+      room_status.Archived,
+      1,
+      Some(room_rules.SecondLookDecision(
+        reason_codes: ["squad_space"],
+        created_at: 1,
+        source_refs: None,
+      )),
+    ))
+    == "{\"type\":\"recruitment_room_archived\",\"roomId\":\"c\",\"orgId\":\"o\",\"playerId\":\"p\",\"status\":\"archived\",\"reasonCodes\":[\"squad_space\"],\"revisitable\":false,\"decisionAt\":1,\"sourceVersionRefs\":null}"
+}
+
 // rooms: roomSummary — a list row carries the Trust disclaimer with the score
 pub fn a_list_row_carries_the_trust_disclaimer_with_the_score_test() {
   assert json.to_string(room_rules.room_summary(

@@ -42,25 +42,46 @@ const auth_policy = Policy(max: 40, window_ms: 60_000)
 pub const policy = [
   #("login_failure", login_policy),
   #("email_challenge_request", email_challenge_request_policy),
+  #("room_create", room_create_policy),
+  #("room_comment", room_comment_policy),
+  #("room_combine_request", room_combine_request_policy),
 ]
 
 /// An act bounded per owner. Its budget is its entry in `policy`.
 pub type Action {
   /// Club e-mail-domain verification codes requested, per organisation (each one sends a mail).
   EmailChallengeRequest
+  /// New Recruitment Rooms, per organisation.
+  RoomCreate
+  /// Room discussion messages, per room and staff member.
+  RoomComment
+  /// Combine requests raised from a Room, per organisation.
+  RoomCombineRequest
 }
 
 const email_challenge_request_policy = Policy(max: 5, window_ms: 3_600_000)
 
+const room_create_policy = Policy(max: 60, window_ms: 3_600_000)
+
+const room_comment_policy = Policy(max: 20, window_ms: 60_000)
+
+const room_combine_request_policy = Policy(max: 60, window_ms: 3_600_000)
+
 fn action_name(action: Action) -> String {
   case action {
     EmailChallengeRequest -> "email_challenge_request"
+    RoomCreate -> "room_create"
+    RoomComment -> "room_comment"
+    RoomCombineRequest -> "room_combine_request"
   }
 }
 
 fn action_policy(action: Action) -> Policy {
   case action {
     EmailChallengeRequest -> email_challenge_request_policy
+    RoomCreate -> room_create_policy
+    RoomComment -> room_comment_policy
+    RoomCombineRequest -> room_combine_request_policy
   }
 }
 

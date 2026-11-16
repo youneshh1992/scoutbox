@@ -1,13 +1,14 @@
 //// Every route the server answers, and the middleware in front of them.
 
 import exception
-import gleam/http.{Get, Post, Put}
+import gleam/http.{Delete, Get, Patch, Post, Put}
 import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import scoutbox/app.{type Ctx}
+import scoutbox/development/combine
 import scoutbox/development/grassroots_club
 import scoutbox/development/record_routes as record
 import scoutbox/discovery/directory
@@ -15,7 +16,7 @@ import scoutbox/discovery/player_routes as discovery
 import scoutbox/discovery/saved_searches
 import scoutbox/enterprise/audit_export
 import scoutbox/enterprise/support
-import scoutbox/identity/access
+import scoutbox/identity/access.{type OrgAccess}
 import scoutbox/identity/guardian_routes
 import scoutbox/identity/invite_routes
 import scoutbox/identity/mfa_routes
@@ -26,6 +27,7 @@ import scoutbox/identity/register_routes
 import scoutbox/identity/sessions
 import scoutbox/identity/sign_in
 import scoutbox/identity/staff_routes
+import scoutbox/insight/evidence_gaps
 import scoutbox/insight/review_queue
 import scoutbox/integrations/webhooks
 import scoutbox/media/links
@@ -35,6 +37,7 @@ import scoutbox/messaging/delivery_prefs
 import scoutbox/messaging/feed_routes
 import scoutbox/messaging/live_routes
 import scoutbox/messaging/notification_prefs
+import scoutbox/passport/trust
 import scoutbox/platform/clock
 import scoutbox/platform/fault_routes
 import scoutbox/platform/faults
@@ -45,12 +48,16 @@ import scoutbox/platform/store
 import scoutbox/platform/wisp_ewe
 import scoutbox/recruitment/lifecycle
 import scoutbox/recruitment/request_routes
+import scoutbox/recruitment/room_routes
+import scoutbox/recruitment/signings
+import scoutbox/recruitment/trials
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/ver_claims as claim_row
 import scoutbox/safety/admin
 import scoutbox/safety/console_routes as console
 import scoutbox/safety/report_routes
+import scoutbox/scouting/evidence
 import scoutbox/verification/applications
 import scoutbox/verification/club_checks
 import scoutbox/verification/console_routes as verification_console
@@ -125,6 +132,13 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       use org <- access.org_session(ctx, req)
       case rest {
         ["verification", ..path] -> verification_org(ctx, req, org, path)
+        ["rooms", ..path] -> rooms(ctx, req, org, path)
+        ["rooms-funnel"] ->
+          only(req, Get, fn() { room_routes.funnel(ctx, org) })
+        ["trials"] -> only(req, Get, fn() { trials.org_page() })
+        ["signings"] -> only(req, Get, fn() { signings.org_page() })
+        ["transitions"] ->
+          only(req, Get, fn() { transitions.org_list(ctx, org.org.id) })
         ["audit", "export"] ->
           only(req, Get, fn() { audit_export.export(ctx, org) })
         ["staff"] -> only(req, Get, fn() { staff_routes.list(ctx, org) })
@@ -161,6 +175,20 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() {
             request_routes.request(ctx, req, org, id.player(id))
           })
+        ["players", id, "evidence"] ->
+          only(req, Post, fn() {
+            evidence.club_submit(ctx, req, org, id.player(id))
+          })
+        ["players", id, "evidence-gaps"] ->
+          only(req, Get, fn() { evidence_gaps.gaps(ctx, org, id.player(id)) })
+        ["combine", "protocols"] ->
+          only(req, Get, fn() { combine.protocols(ctx) })
+        ["combine", "players", id] ->
+          only(req, Get, fn() {
+            combine.player_results(ctx, org, id.player(id))
+          })
+        ["players", id, "trust-profile"] ->
+          only(req, Get, fn() { trust.org_view(ctx, org, id.player(id)) })
         ["shortlist"] -> only(req, Get, fn() { discovery.shortlist(ctx, org) })
         ["review-queue"] ->
           only(req, Get, fn() { review_queue.review_queue(ctx, org) })
@@ -272,6 +300,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { invites.player_accept(ctx, req, player) })
         ["references"] -> only(req, Get, fn() { references.mine(ctx, player) })
         ["me"] -> only(req, Get, fn() { record.me(player) })
+        ["trust-profile"] ->
+          only(req, Get, fn() { trust.player_view(ctx, player) })
         ["availability"] ->
           only(req, Post, fn() { record.availability(ctx, req, player) })
         ["first-team-seeker"] ->
@@ -516,6 +546,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
           only(req, Post, fn() { delivery.inject_failure(ctx, req) })
         ["overview"] -> only(req, Get, fn() { console.overview(ctx) })
         ["metrics"] -> only(req, Get, fn() { console.metrics(ctx) })
+        ["rooms", "overview"] ->
+          only(req, Get, fn() { room_routes.admin_overview(ctx) })
         ["reports"] -> only(req, Get, fn() { console.reports(ctx, req) })
         ["reports", id, "resolve"] ->
           only(req, Post, fn() { console.resolve(ctx, req, id) })
@@ -884,5 +916,48 @@ fn health(ctx: Ctx) -> Response {
           #("orgs", json.int(org_count)),
         ]),
       )
+  }
+}
+
+/// `/org/rooms…`: the Recruitment Rooms.
+fn rooms(
+  ctx: Ctx,
+  req: Request,
+  org: OrgAccess,
+  path: List(String),
+) -> Response {
+  let room = fn(rid) { id.recruitment_case(rid) }
+  case path, req.method {
+    [], Get -> room_routes.list_rooms(ctx, req, org)
+    [], Post -> room_routes.create(ctx, req, org)
+    ["needs-attention"], Get -> room_routes.needs_attention(ctx, org)
+    ["summaries"], Get -> room_routes.summaries(ctx, req, org)
+    [rid], Get -> room_routes.get(ctx, org, room(rid))
+    [rid], Patch -> room_routes.edit(ctx, req, org, room(rid))
+    [rid, "status"], Post -> room_routes.move_status(ctx, req, org, room(rid))
+    [rid, "snapshots"], Get -> room_routes.snapshots(ctx, org, room(rid))
+    [rid, "activity"], Get -> room_routes.activity(ctx, req, org, room(rid))
+    [rid, "comments"], Get -> room_routes.comments(ctx, req, org, room(rid))
+    [rid, "comments"], Post -> room_routes.add_comment(ctx, req, org, room(rid))
+    [rid, "comments", cid], Patch ->
+      room_routes.edit_comment(ctx, req, org, room(rid), cid)
+    [rid, "comments", cid], Delete ->
+      room_routes.delete_comment(ctx, org, room(rid), cid)
+    [rid, "tasks"], Post -> room_routes.add_task(ctx, req, org, room(rid))
+    [rid, "tasks", tid], Patch ->
+      room_routes.edit_task(ctx, req, org, room(rid), tid)
+    [rid, "decisions"], Post ->
+      room_routes.add_decision(ctx, req, org, room(rid))
+    [rid, "decisions"], Get -> room_routes.decisions(ctx, org, room(rid))
+    [rid, "evidence", eid, "review"], Post ->
+      room_routes.review_evidence(ctx, req, org, room(rid), eid)
+    [rid, "assessment-assignments"], Post ->
+      room_routes.assign_assessment(ctx, req, org, room(rid))
+    [rid, "evidence-requests"], Post ->
+      room_routes.request_evidence(ctx, req, org, room(rid))
+    [rid, "combine-requests"], Post ->
+      room_routes.request_combine(ctx, req, org, room(rid))
+    [rid, "link"], Post -> room_routes.link(ctx, req, org, room(rid))
+    _, _ -> not_found()
   }
 }

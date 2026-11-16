@@ -23,7 +23,7 @@ The three Box Cam analysis batteries are TypeScript only for good and don't coun
 | operations | 1 | 0 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | passport | 2 | 0 | 0 | 0 / 0 | 0 / 0 | 2 to go |
 | platform | 13 | 13 | 9 | 18 / 2354 | 0 / 179 | 5 to go |
-| recruitment | 19 | 2 | 0 | 428 / 198 | 0 / 15 | 19 to go |
+| recruitment | 19 | 2 | 1 | 430 / 196 | 9 / 15 | 18 to go |
 | scouting | 1 | 1 | 0 | 0 / 0 | 0 / 0 | 1 to go |
 | verification | 2 | 2 | 2 | 68 / 0 | 17 / 17 | **ported** |
 
@@ -80,7 +80,7 @@ distinct recorded calls of its rules suite, generated as Gleam tests or still pe
 | `recruitment/offers` | not yet neutral | 12 → 12 | 354 | 354 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/offersAdversarial` | not yet neutral | 10 → 10 | 206 | 206 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/offersPersistence` | not yet neutral | 3 → 3 | 72 | 72 |  |  |  |  |  | not untangled; not answered |
-| `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  |  | 428 / 2 | 0 / 9 | not answered; 2 cases pending; 9 hand-port calls |
+| `recruitment/rooms` | neutral | 1 → 0 | 371 | 207 | 164 |  | yes | 430 / 0 | 9 / 9 | **done** |
 | `recruitment/signings` | not yet neutral | 5 → 5 | 245 | 245 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/signingsAdversarial` | not yet neutral | 4 → 4 | 212 | 212 |  |  |  |  |  | not untangled; not answered |
 | `recruitment/signingsPersistence` | not yet neutral | 3 → 3 | 78 | 78 |  |  |  |  |  | not untangled; not answered |
@@ -151,12 +151,12 @@ ported by hand to a gleeunit test.
 | `platform/storeGuarantees` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 19 | args[].reads.contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/evidence.mjs#createEvidenceProvider` | 4 | args[].contacts.byId is a function | to do |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journey.mjs#buildRecruitmentJourney` | 2 | args[].reads.contacts.byId is a function | to do |
-| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#buildRoomSnapshot` | 2 | its result depends on the clock | to do |
-| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomCan` | 1 | Gleam's types can't hold its arguments: cannot print "invent_capability" as a code of scoutbox/recruitment/room_rules.action_code | to do |
-| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomSummary` | 1 | Gleam's types can't hold its arguments: cannot print "s" as a value of scoutbox/rows/recruitment_cases.stage_pairs | to do |
-| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateDecision` | 2 | args[].note.toString is a function; Gleam's types can't hold its arguments: cannot print "sign_immediately" as a value of scoutbox/rows/room_decisions.recommendation_pairs | to do |
-| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateReasonCodes` | 1 | Gleam's types can't hold its arguments: cannot print "budget" as a List | to do |
-| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateTransition` | 2 | Gleam's types can't hold its arguments: cannot print "not_a_status" as a value of scoutbox/vocab/room_status.pairs | to do |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#buildRoomSnapshot` | 2 | its result depends on the clock | `test/scoutbox/recruitment/room_rules_test.gleam` |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomCan` | 1 | Gleam's types can't hold its arguments: cannot print "invent_capability" as a code of scoutbox/recruitment/room_rules.action_code | `test/scoutbox/recruitment/room_rules_test.gleam` |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#roomSummary` | 1 | Gleam's types can't hold its arguments: cannot print "s" as a value of scoutbox/rows/recruitment_cases.stage_pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateDecision` | 2 | args[].note.toString is a function; Gleam's types can't hold its arguments: cannot print "sign_immediately" as a value of scoutbox/rows/room_decisions.recommendation_pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateReasonCodes` | 1 | Gleam's types can't hold its arguments: cannot print "budget" as a List | `test/scoutbox/recruitment/room_rules_test.gleam` |
+| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#validateTransition` | 2 | Gleam's types can't hold its arguments: cannot print "not_a_status" as a value of scoutbox/vocab/room_status.pairs | `test/scoutbox/recruitment/room_rules_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#arrayTokenStore` | 1 | result.create is a function | `test/scoutbox/verification/tokens_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#consumeToken` | 7 | args[].create is a function | `test/scoutbox/verification/tokens_test.gleam` |
 | `verification/organisationsAndStaff` | `domains/verification/claims/shared.mjs#mintToken` | 2 | args[].create is a function | `test/scoutbox/verification/tokens_test.gleam` |
@@ -281,4 +281,3 @@ mapped, then `npm run cases`.
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#playerStageFor` | 6 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#timelineVisibleTo` | 4 |
 | `recruitment/journey` | `domains/recruitment/lifecycle/journeyModel.mjs#validateRecruitmentJourney` | 8 |
-| `recruitment/rooms` | `domains/recruitment/rooms/shared.mjs#secondLookEvent` | 2 |

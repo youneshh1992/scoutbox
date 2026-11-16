@@ -1478,3 +1478,52 @@ pub fn tag_json(result: Result(String, TagRefusal)) -> Json {
     Error(refusal) -> json.object(tag_refusal_fields(refusal))
   }
 }
+
+// ---------------------------------------------------------------------------------------------- second look
+
+/// The decision a filed-away room's Second Look event carries: machine-readable reasons, never the note.
+pub type SecondLookDecision {
+  SecondLookDecision(
+    reason_codes: List(String),
+    created_at: Int,
+    source_refs: Option(Json),
+  )
+}
+
+/// The internal shape Second Look reads when a room is filed away. Absent: the note, comments, assessment
+/// content and the player's name.
+pub fn second_look_event(
+  room_id: id.RecruitmentCaseId,
+  org_id: id.OrgId,
+  player_id: id.PlayerId,
+  status: RoomStatus,
+  updated_at: Int,
+  decision: Option(SecondLookDecision),
+) -> Json {
+  let codes = case decision {
+    Some(d) -> d.reason_codes
+    None -> []
+  }
+  let revisitable = revisitable_reason_codes()
+  json.object([
+    #("type", json.string("recruitment_room_archived")),
+    #("roomId", id.recruitment_case_json(room_id)),
+    #("orgId", id.org_json(org_id)),
+    #("playerId", id.player_json(player_id)),
+    #("status", room_status.to_json(status)),
+    #("reasonCodes", json.array(codes, json.string)),
+    #("revisitable", json.bool(list.any(codes, list.contains(revisitable, _)))),
+    #(
+      "decisionAt",
+      json.int(case decision {
+        Some(d) -> d.created_at
+        None -> updated_at
+      }),
+    ),
+    #(
+      "sourceVersionRefs",
+      option.then(decision, fn(d) { d.source_refs })
+        |> option.unwrap(json.null()),
+    ),
+  ])
+}

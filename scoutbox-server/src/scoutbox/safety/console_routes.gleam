@@ -22,6 +22,7 @@ import scoutbox/platform/input
 import scoutbox/platform/pages
 import scoutbox/platform/paging.{IntKind}
 import scoutbox/platform/store.{type Read}
+import scoutbox/recruitment/room_routes
 import scoutbox/rows/id
 import scoutbox/rows/moderation_log
 import scoutbox/rows/ops_events
@@ -373,6 +374,7 @@ pub fn metrics(ctx: Ctx) -> Response {
     store.unit(ctx.store, fn(tx) {
       let read = store.reading(tx)
       use verification <- result.try(verification_core.metrics(tx))
+      use rooms <- result.try(room_routes.metrics_json(tx))
       use delivery <- result.try(audit.ops_count(
         read,
         ops_events.DeliveryFailed,
@@ -397,6 +399,7 @@ pub fn metrics(ctx: Ctx) -> Response {
           }),
         ),
         #("verification", verification),
+        #("rooms", rooms),
         #(
           "note",
           json.string(

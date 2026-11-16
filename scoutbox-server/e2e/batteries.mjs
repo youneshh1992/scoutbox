@@ -12,4 +12,5 @@ export const BATTERIES = [
   'verification/organisationsAndStaffAdversarial',
   'platform/connectedMode',
   'platform/sessionsAndPorts',
+  'recruitment/rooms',
 ];

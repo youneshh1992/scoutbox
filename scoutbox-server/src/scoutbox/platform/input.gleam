@@ -26,6 +26,7 @@ import gleam/int
 import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/regexp
 import gleam/string
 import scoutbox/platform/temporal
 
@@ -489,6 +490,29 @@ fn in_range(n: Float, min: Int, max: Int) -> Result(Nil, Issue) {
   }
 }
 
+/// A claim's value: a finite number, or text of at most `max` characters.
+pub type NumberOrText {
+  Number(Float)
+  Text(String)
+}
+
+pub fn number_or_text(max: Int) -> Check(NumberOrText) {
+  fn(v) {
+    case number_value(v), string_check(v) {
+      Ok(n), _ -> Ok(Number(n))
+      _, Ok(s) -> at_most(s, max) |> result_map_text
+      _, _ -> Error(issue(Invalid, "must be a number or text"))
+    }
+  }
+}
+
+fn result_map_text(r: Result(String, Issue)) -> Result(NumberOrText, Issue) {
+  case r {
+    Ok(s) -> Ok(Text(s))
+    Error(e) -> Error(e)
+  }
+}
+
 /// A number from `min` to `max`.
 pub fn number(min: Int, max: Int) -> Check(Float) {
   fn(v) {
@@ -785,7 +809,12 @@ pub fn parse(
             Some(inner) -> path(field, inner)
             None -> field
           }
-          let error = case list.key_find(codes, field), i.code {
+          // A code for every item of a list is written `tags.*`, as the TypeScript schemas write it.
+          let coded = case list.key_find(codes, field) {
+            Ok(code) -> Ok(code)
+            Error(Nil) -> list.key_find(codes, wildcard(field))
+          }
+          let error = case coded, i.code {
             Ok(code), _ -> code
             Error(Nil), Some(code) -> code
             Error(Nil), None -> "FIELD_INVALID"
@@ -815,4 +844,10 @@ pub fn filled(s: Option(String)) -> Option(String) {
       }
     None -> None
   }
+}
+
+/// `tags[3].name` → `tags.*.name`.
+fn wildcard(field: String) -> String {
+  let assert Ok(index) = regexp.from_string("\\[[0-9]+\\]")
+  regexp.replace(index, field, ".*")
 }

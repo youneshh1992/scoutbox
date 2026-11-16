@@ -1114,7 +1114,7 @@
         "calls": 2,
         "cases": 2,
         "handPort": {},
-        "status": "pending"
+        "status": "generated"
       },
       {
         "function": "domains/recruitment/rooms/shared.mjs#stageForRoomStatus",

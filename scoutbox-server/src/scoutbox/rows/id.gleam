@@ -578,6 +578,38 @@ pub fn evidence_dispute_decoder() -> decode.Decoder(EvidenceDisputeId) {
   decode.map(decode.string, EvidenceDisputeId)
 }
 
+/// An id of `evidence_history`.
+pub opaque type EvidenceEventId {
+  EvidenceEventId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn evidence_event(text: String) -> EvidenceEventId {
+  EvidenceEventId(text)
+}
+
+pub fn evidence_event_to_string(id: EvidenceEventId) -> String {
+  let EvidenceEventId(text) = id
+  text
+}
+
+pub fn evidence_event_sql(id: EvidenceEventId) -> sqlight.Value {
+  sqlight.text(evidence_event_to_string(id))
+}
+
+pub fn evidence_event_json(id: EvidenceEventId) -> Json {
+  json.string(evidence_event_to_string(id))
+}
+
+pub fn evidence_event_decoder() -> decode.Decoder(EvidenceEventId) {
+  decode.map(decode.string, EvidenceEventId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_evidence_event(tx: Tx) -> Result(EvidenceEventId, Fail(e)) {
+  ids.next(tx, "aud") |> result.map(EvidenceEventId)
+}
+
 /// An id of `evidence_suggestions`.
 pub opaque type EvidenceSuggestionId {
   EvidenceSuggestionId(String)
