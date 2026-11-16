@@ -4,8 +4,8 @@
 //// A `Player` is the row and its lists, each in `position` order. Lists of players load in one query per table,
 //// never one per player.
 ////
-//// Not ported yet: `trialReports` belongs to the trials (recruitment), which this server does not run, so every
-//// record has none, and the profile signal counts none.
+//// `trial_reports` is derived from the trials (recruitment): the reports filed on the player's trials, in filing
+//// order. The profile signal counts them.
 
 import gleam/dict
 import gleam/dynamic/decode
@@ -16,6 +16,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import scoutbox/identity/orgs.{type Org}
+import scoutbox/platform/json_text
 import scoutbox/platform/sql
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/rows/id
@@ -32,6 +33,7 @@ import scoutbox/rows/player_programme_completions as completion_row
 import scoutbox/rows/player_season_history as season_row
 import scoutbox/rows/player_timeline as timeline_row
 import scoutbox/rows/players as row
+import scoutbox/rows/trial_reports as report_row
 import scoutbox/rules/age
 import scoutbox/rules/visibility.{type Access}
 import scoutbox/vocab/availability
@@ -58,6 +60,7 @@ pub type Player {
     season_history: List(season_row.Row),
     medical_records: List(medical_row.Row),
     programme_completed: List(completion_row.Row),
+    trial_reports: List(report_row.Row),
   )
 }
 
@@ -194,7 +197,7 @@ pub fn with_lists(
     fn(r) { r.player_id },
     ids,
   ))
-  use completions <- result.map(lists_of(
+  use completions <- result.try(lists_of(
     read,
     completion_row.table,
     completion_row.columns,
@@ -202,6 +205,21 @@ pub fn with_lists(
     fn(r) { r.player_id },
     ids,
   ))
+  // The reports on the players' trials, in filing order (ties in trial order).
+  use reports <- result.map(
+    store.query(
+      read,
+      "SELECT "
+        <> report_row.qualified("r")
+        <> " FROM trial_reports r JOIN trials t ON t.id = r.trial_id WHERE t.player_id IN (SELECT value FROM json_each(?)) ORDER BY r.filed_at, t.rowid",
+      [ids_json(ids, id.player_json)],
+      report_row.decoder(),
+    )
+    |> result.map(fn(rows) {
+      list.group(rows, fn(x) { x.player_id })
+      |> dict.map_values(fn(_, rs) { list.reverse(rs) })
+    }),
+  )
   list.map(rows, fn(r) {
     Player(
       row: r,
@@ -219,6 +237,7 @@ pub fn with_lists(
       season_history: of(seasons, r.id),
       medical_records: of(medical, r.id),
       programme_completed: of(completions, r.id),
+      trial_reports: of(reports, r.id),
     )
   })
 }
@@ -360,7 +379,7 @@ pub fn profile_signal(p: Player) -> Int {
   profile_signal_of(
     identity_verified: p.row.identity_verified,
     attendance: list.length(p.attendance),
-    trial_reports: 0,
+    trial_reports: list.length(p.trial_reports),
     media: list.length(p.media),
     complete: profile_complete(p.row),
   )
@@ -381,7 +400,7 @@ pub fn trust_breakdown(p: Player) -> Json {
       "verifiedAttendance",
       json.int(int.min(list.length(p.attendance) * 5, 20)),
     ),
-    #("trialReports", json.int(0)),
+    #("trialReports", json.int(int.min(list.length(p.trial_reports) * 8, 24))),
     #("media", json.int(int.min(list.length(p.media) * 2, 10))),
     #("profileComplete", json.int(bonus(profile_complete(p.row), 5))),
     #("total", json.int(profile_signal(p))),
@@ -578,6 +597,29 @@ fn media_json(m: Media) -> Json {
 }
 
 /// An attendance item as the player holds it, with the GPS fix.
+/// A filed trial report as the trial record carries it.
+pub fn report_json(r: report_row.Row) -> Json {
+  json.object([
+    #("id", id.trial_report_json(r.id)),
+    #("trialId", id.trial_json(r.trial_id)),
+    #("playerId", id.player_json(r.player_id)),
+    #("orgId", id.org_json(r.org_id)),
+    #("orgName", json.nullable(r.org_name, json.string)),
+    #("userId", json.nullable(r.user_id, id.org_user_json)),
+    #("scoutName", json.nullable(r.scout_name, json.string)),
+    #("filedAt", json.int(r.filed_at)),
+    #("acceleration", json_text.number(r.acceleration)),
+    #("sprintSpeedKmh", json_text.number(r.sprint_speed_kmh)),
+    #("distanceKm", json_text.number(r.distance_km)),
+    #("passCompletionPct", json_text.number(r.pass_completion_pct)),
+    #("duelSuccessPct", json_text.number(r.duel_success_pct)),
+    #("coachRating", json_text.number(r.coach_rating)),
+    #("notes", json.nullable(r.notes, json.string)),
+    #("strengthNote", json.nullable(r.strength_note, json.string)),
+    #("focusNote", json.nullable(r.focus_note, json.string)),
+  ])
+}
+
 fn attendance_json(a: attendance_row.Row) -> Json {
   json.object(
     list.flatten([
@@ -795,8 +837,7 @@ pub fn self_fields(p: Player) -> List(#(String, Json)) {
     #("activityLog", json.array(p.activity_log, json.int)),
     #("externalIds", json.array(p.external_ids, external_id_json)),
     #("seasonHistory", json.array(p.season_history, season_json)),
-    // Not ported yet: the trials' reports.
-    #("trialReports", json.preprocessed_array([])),
+    #("trialReports", json.array(p.trial_reports, report_json)),
   ]
 }
 
@@ -910,8 +951,14 @@ pub fn org_fields(
           ])
       }),
       #("attendance", json.array(p.attendance, org_attendance_json)),
-      // Not ported yet: this organisation's own trial reports, from the trials.
-      #("trialReports", json.preprocessed_array([])),
+      // This organisation's own trial reports.
+      #(
+        "trialReports",
+        json.array(
+          list.filter(p.trial_reports, fn(x) { x.org_id == org.id }),
+          report_json,
+        ),
+      ),
     ],
     case minor {
       True -> [#("contactPolicy", json.string("guardian_only"))]
@@ -1205,4 +1252,43 @@ pub fn log_activity(tx: Tx, id: id.PlayerId, at: Int) -> Result(Nil, Fail(e)) {
     "INSERT INTO player_activity_log (player_id, position, occurred_at) SELECT ?, COALESCE(MAX(position) + 1, 0), ? FROM player_activity_log WHERE player_id = ?",
     [id.player_sql(id), sqlight.int(at), id.player_sql(id)],
   )
+}
+
+/// A trial day's check-in feeds the player's attendance record once: verified, corroborated by the club.
+pub fn add_trial_attendance(
+  tx: Tx,
+  player_id: id.PlayerId,
+  trial_id: id.TrialId,
+  fixture: String,
+  venue: String,
+  date: String,
+  corroborated_by: String,
+) -> Result(Player, Fail(e)) {
+  use attendance_id <- result.try(id.next_attendance(tx))
+  use _ <- result.try(
+    store.run(
+      tx,
+      "INSERT INTO player_attendance (id, player_id, position, fixture, venue, match_date, lat, lng, device_confirmed, verified, corroborated_by, trial_id) SELECT ?, ?, COALESCE(MAX(position) + 1, 0), ?, ?, ?, NULL, NULL, NULL, 1, ?, ? FROM player_attendance WHERE player_id = ?",
+      [
+        id.attendance_sql(attendance_id),
+        id.player_sql(player_id),
+        sqlight.text(fixture),
+        sqlight.text(venue),
+        sqlight.text(date),
+        sqlight.text(corroborated_by),
+        id.trial_sql(trial_id),
+        id.player_sql(player_id),
+      ],
+    ),
+  )
+  refreshed(tx, player_id)
+}
+
+/// Keeps the stored profile signal in step after a write the record's own acts did not make (a filed trial
+/// report).
+pub fn refresh_signal(
+  tx: Tx,
+  player_id: id.PlayerId,
+) -> Result(Player, Fail(e)) {
+  refreshed(tx, player_id)
 }

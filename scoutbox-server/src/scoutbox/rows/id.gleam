@@ -256,6 +256,11 @@ pub fn attendance_decoder() -> decode.Decoder(AttendanceId) {
   decode.map(decode.string, AttendanceId)
 }
 
+/// A new id, minted inside the unit that uses it.
+pub fn next_attendance(tx: Tx) -> Result(AttendanceId, Fail(e)) {
+  ids.next(tx, "att") |> result.map(AttendanceId)
+}
+
 /// An id of `blocks`.
 pub opaque type BlockId {
   BlockId(String)

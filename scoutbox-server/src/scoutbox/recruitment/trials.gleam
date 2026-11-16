@@ -13,7 +13,6 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
-import scoutbox/platform/http
 import scoutbox/platform/store.{type Fail, type Read, type Tx}
 import scoutbox/recruitment/trial_rules.{
   type Trial, type ValidSession, Day, Revision, Session, Trial,
@@ -37,7 +36,6 @@ import scoutbox/vocab/party
 import scoutbox/vocab/trial_actor_kind.{type TrialActorKind}
 import scoutbox/vocab/trial_workflow_state.{type TrialWorkflowState}
 import sqlight
-import wisp.{type Response}
 
 // ---------------------------------------------------------------------------------------------------- reads
 
@@ -1142,13 +1140,248 @@ pub fn mark_reminders(
   })
 }
 
-/// `GET /org/trials`. Not ported yet: the trial records' view and their paging.
-pub fn org_page() -> Response {
-  http.json(
-    200,
-    json.object([
-      #("items", json.preprocessed_array([])),
-      #("nextCursor", json.null()),
+// ---------------------------------------------------------------------------------------------- the trial day
+
+fn day_position(
+  tx: Tx,
+  table: String,
+  trial_id: id.TrialId,
+) -> Result(Int, Fail(e)) {
+  next_position(tx, table, "trial_id = ?", [id.trial_sql(trial_id)])
+}
+
+/// A named staff member for the day, with the background check the club filed (pending until Trust & Safety
+/// reviews it).
+pub type NewStaff {
+  NewStaff(
+    name: String,
+    role: String,
+    check: Option(#(String, Option(String), Option(String))),
+    added_by: String,
+    added_at: Int,
+  )
+}
+
+pub fn add_staff(
+  tx: Tx,
+  t: Trial,
+  s: NewStaff,
+) -> Result(#(Trial, id.TrialStaffId), Fail(e)) {
+  use staff_id <- result.try(id.next_trial_staff(tx))
+  use position <- result.try(day_position(tx, "trial_day_staff", t.row.id))
+  let #(kind, ref, expires) = case s.check {
+    Some(#(k, r, e)) -> #(sqlight.text(k), text(r), text(e))
+    None -> #(sqlight.null(), sqlight.null(), sqlight.null())
+  }
+  use _ <- result.try(
+    store.run(
+      tx,
+      "INSERT INTO trial_day_staff (trial_id, position, id, name, role, check_kind, check_ref, check_status, check_expires_at, check_reviewed_by, check_reviewed_at, added_by_name, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
+      [
+        id.trial_sql(t.row.id),
+        sqlight.int(position),
+        id.trial_staff_sql(staff_id),
+        sqlight.text(s.name),
+        sqlight.text(s.role),
+        kind,
+        ref,
+        case s.check {
+          Some(_) -> sqlight.text("pending")
+          None -> sqlight.null()
+        },
+        expires,
+        sqlight.text(s.added_by),
+        sqlight.int(s.added_at),
+      ],
+    ),
+  )
+  use fresh <- result.map(reload(tx, t.row.id))
+  #(fresh, staff_id)
+}
+
+/// Arrival details replace the last; a collection policy only when one is given.
+pub fn set_arrival(
+  tx: Tx,
+  t: Trial,
+  time: Option(String),
+  address: Option(String),
+  notes: Option(String),
+  collection: Option(String),
+) -> Result(Trial, Fail(e)) {
+  use _ <- result.try(store.run(
+    tx,
+    "UPDATE trials SET day_arrival_time = ?, day_arrival_address = ?, day_arrival_notes = ?"
+      <> case collection {
+      Some(_) -> ", day_collection_policy = ?"
+      None -> ""
+    }
+      <> " WHERE id = ?",
+    list.flatten([
+      [text(time), text(address), text(notes)],
+      case collection {
+        Some(c) -> [sqlight.text(c)]
+        None -> []
+      },
+      [id.trial_sql(t.row.id)],
+    ]),
+  ))
+  reload(tx, t.row.id)
+}
+
+/// A cancellation or postponement of the day; a postponement to a day moves the date and the report deadline.
+pub fn record_day_status(
+  tx: Tx,
+  t: Trial,
+  kind: String,
+  at: Int,
+  by_name: String,
+  reason: String,
+  new_date: Option(String),
+) -> Result(Trial, Fail(e)) {
+  use position <- result.try(day_position(
+    tx,
+    "trial_day_status_events",
+    t.row.id,
+  ))
+  use _ <- result.try(
+    store.run(
+      tx,
+      "INSERT INTO trial_day_status_events (trial_id, position, kind, at, by_name, reason, new_date) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [
+        id.trial_sql(t.row.id),
+        sqlight.int(position),
+        sqlight.text(kind),
+        sqlight.int(at),
+        sqlight.text(by_name),
+        sqlight.text(reason),
+        text(new_date),
+      ],
+    ),
+  )
+  use _ <- result.try(case kind, new_date {
+    "postponed", Some(day) ->
+      store.run(
+        tx,
+        "UPDATE trials SET proposed_date = ?, report_due_at = ? WHERE id = ?",
+        [
+          sqlight.text(day),
+          sqlight.int(trial_rules.report_due_at(Some(day), t.row.accepted_at)),
+          id.trial_sql(t.row.id),
+        ],
+      )
+    _, _ -> Ok(Nil)
+  })
+  reload(tx, t.row.id)
+}
+
+/// A check-in, and (when a session is live) its one `attended` attendance record, with the act's bookkeeping.
+pub fn check_in(
+  tx: Tx,
+  t: Trial,
+  at: Int,
+  by_user: id.OrgUserId,
+  by_name: String,
+  attended: Option(#(id.TrialSessionId, Acted)),
+) -> Result(Trial, Fail(e)) {
+  use position <- result.try(day_position(tx, "trial_day_checkins", t.row.id))
+  use _ <- result.try(
+    store.run(
+      tx,
+      "INSERT INTO trial_day_checkins (trial_id, position, player_id, at, by_user_id, by_name) VALUES (?, ?, ?, ?, ?, ?)",
+      [
+        id.trial_sql(t.row.id),
+        sqlight.int(position),
+        id.player_sql(t.row.player_id),
+        sqlight.int(at),
+        id.org_user_sql(by_user),
+        sqlight.text(by_name),
+      ],
+    ),
+  )
+  case attended {
+    None -> reload(tx, t.row.id)
+    Some(#(session_id, acted)) -> {
+      use apos <- result.try(day_position(tx, "trial_attendance", t.row.id))
+      use _ <- result.try(
+        store.run(
+          tx,
+          "INSERT INTO trial_attendance (trial_id, position, session_id, state, source, recorded_by_kind, recorded_by_user_id, recorded_by_actor_id, recorded_by_name, recorded_at, note) VALUES (?, ?, ?, 'attended', 'checkin', 'org', ?, NULL, ?, ?, NULL)",
+          [
+            id.trial_sql(t.row.id),
+            sqlight.int(apos),
+            id.trial_session_sql(session_id),
+            id.org_user_sql(by_user),
+            sqlight.text(by_name),
+            sqlight.int(at),
+          ],
+        ),
+      )
+      use _ <- result.try(apply(tx, t.row.id, acted))
+      reload(tx, t.row.id)
+    }
+  }
+}
+
+/// Event consent for the day, by the player or the guardian.
+pub fn give_consent(
+  tx: Tx,
+  t: Trial,
+  by: Actor,
+  scope: String,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  use consent_id <- result.try(id.next_trial_consent(tx))
+  use position <- result.try(day_position(tx, "trial_day_consents", t.row.id))
+  store.run(
+    tx,
+    "INSERT INTO trial_day_consents (trial_id, position, id, by_kind, by_user_id, by_actor_id, by_name, scope, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    list.flatten([
+      [
+        id.trial_sql(t.row.id),
+        sqlight.int(position),
+        id.trial_consent_sql(consent_id),
+      ],
+      actor_values(Some(by)),
+      [sqlight.text(scope), sqlight.int(at)],
     ]),
   )
+}
+
+/// The family's emergency contact for the day, readable only in the club's trial-day view.
+pub fn set_emergency(
+  tx: Tx,
+  t: Trial,
+  name: String,
+  phone: String,
+  set_by: party.Party,
+  at: Int,
+) -> Result(Nil, Fail(e)) {
+  store.run(
+    tx,
+    "UPDATE trials SET day_emergency_name = ?, day_emergency_phone = ?, day_emergency_set_by = ?, day_emergency_at = ? WHERE id = ?",
+    [
+      sqlight.text(name),
+      sqlight.text(phone),
+      sqlight.text(party.to_string(set_by)),
+      sqlight.int(at),
+      id.trial_sql(t.row.id),
+    ],
+  )
+}
+
+/// The mandatory report, filed once.
+pub fn file_report(
+  tx: Tx,
+  t: Trial,
+  r: report_row.Row,
+) -> Result(Nil, Fail(e)) {
+  use _ <- result.try(guarded(
+    tx,
+    t.row.id,
+    "status = 'reported'",
+    [],
+    "status = 'awaiting_report'",
+    "already has its report",
+  ))
+  report_row.insert(tx, r)
 }

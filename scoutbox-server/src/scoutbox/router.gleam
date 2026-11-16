@@ -42,6 +42,7 @@ import scoutbox/messaging/delivery_prefs
 import scoutbox/messaging/feed_routes
 import scoutbox/messaging/live_routes
 import scoutbox/messaging/notification_prefs
+import scoutbox/passport/football_passport
 import scoutbox/passport/trust
 import scoutbox/platform/clock
 import scoutbox/platform/fault_routes
@@ -57,8 +58,8 @@ import scoutbox/recruitment/offer_routes
 import scoutbox/recruitment/request_routes
 import scoutbox/recruitment/room_routes
 import scoutbox/recruitment/signings
+import scoutbox/recruitment/trial_day
 import scoutbox/recruitment/trial_routes
-import scoutbox/recruitment/trials
 import scoutbox/rows/id
 import scoutbox/rows/ledger as ledger_row
 import scoutbox/rows/ver_claims as claim_row
@@ -171,7 +172,27 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
         ["recruitment", "trial-policy"] -> only(req, Get, trial_routes.policy)
         ["rooms-funnel"] ->
           only(req, Get, fn() { room_routes.funnel(ctx, org) })
-        ["trials"] -> only(req, Get, fn() { trials.org_page() })
+        ["trials"] -> only(req, Get, fn() { trial_day.org_page(ctx, req, org) })
+        ["trials", tid, "day"] ->
+          only(req, Get, fn() { trial_day.day(ctx, org, tid) })
+        ["trials", tid, "ics"] ->
+          only(req, Get, fn() { trial_day.ics(ctx, org, tid) })
+        ["trials", tid, "staff"] ->
+          only(req, Post, fn() { trial_day.add_staff(ctx, req, org, tid) })
+        ["trials", tid, "arrival"] ->
+          only(req, Post, fn() { trial_day.set_arrival(ctx, req, org, tid) })
+        ["trials", tid, "cancel"] ->
+          only(req, Post, fn() {
+            trial_day.day_status(ctx, req, org, tid, False)
+          })
+        ["trials", tid, "postpone"] ->
+          only(req, Post, fn() {
+            trial_day.day_status(ctx, req, org, tid, True)
+          })
+        ["trials", tid, "checkin"] ->
+          only(req, Post, fn() { trial_day.check_in(ctx, org, tid) })
+        ["trials", tid, "report"] ->
+          only(req, Post, fn() { trial_day.report(ctx, req, org, tid) })
         ["signings"] -> only(req, Get, fn() { signings.org_page() })
         ["transitions"] ->
           only(req, Get, fn() { transitions.org_list(ctx, org.org.id) })
@@ -324,6 +345,8 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
       case rest {
         ["inbox"] ->
           only(req, Get, fn() { request_routes.player_inbox(ctx, req, player) })
+        ["football-passport"] ->
+          only(req, Get, fn() { football_passport.player_view(ctx, player) })
         ["agent", "relationships"] ->
           only(req, Get, fn() { agent.my_agent(ctx, player) })
         ["agent", "relationships", rid, "confirm"] ->
@@ -364,6 +387,22 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               offer_routes.PlayerRecipient(player),
               oid,
             )
+          })
+        ["trials"] ->
+          only(req, Get, fn() {
+            trial_day.list_for(ctx, trial_day.PlayerFamily(player))
+          })
+        ["trials", tid, "safety-pack"] ->
+          only(req, Get, fn() {
+            trial_day.safety_pack(ctx, trial_day.PlayerFamily(player), tid)
+          })
+        ["trials", tid, "consent"] ->
+          only(req, Post, fn() {
+            trial_day.consent(ctx, trial_day.PlayerFamily(player), tid)
+          })
+        ["trials", tid, "emergency-contact"] ->
+          only(req, Post, fn() {
+            trial_day.emergency(ctx, req, trial_day.PlayerFamily(player), tid)
           })
         ["trials", tid, "confirm-schedule"] ->
           only(req, Post, fn() {
@@ -562,6 +601,27 @@ pub fn handle(ctx: Ctx, req: Request) -> Response {
               req,
               offer_routes.GuardianRecipient(guardian),
               oid,
+            )
+          })
+        ["trials"] ->
+          only(req, Get, fn() {
+            trial_day.list_for(ctx, trial_day.GuardianFamily(guardian))
+          })
+        ["trials", tid, "safety-pack"] ->
+          only(req, Get, fn() {
+            trial_day.safety_pack(ctx, trial_day.GuardianFamily(guardian), tid)
+          })
+        ["trials", tid, "consent"] ->
+          only(req, Post, fn() {
+            trial_day.consent(ctx, trial_day.GuardianFamily(guardian), tid)
+          })
+        ["trials", tid, "emergency-contact"] ->
+          only(req, Post, fn() {
+            trial_day.emergency(
+              ctx,
+              req,
+              trial_day.GuardianFamily(guardian),
+              tid,
             )
           })
         ["trials", tid, "confirm-schedule"] ->

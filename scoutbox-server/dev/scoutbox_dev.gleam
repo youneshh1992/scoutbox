@@ -488,7 +488,7 @@ pub const ided = [
   Ided("org_squad_members", "SquadEntry", Some("sq")),
   Ided("orgs", "Org", Some("org")),
   Ided("outbox", "Mail", Some("mail")),
-  Ided("player_attendance", "Attendance", None),
+  Ided("player_attendance", "Attendance", Some("att")),
   Ided("player_drill_results", "DrillResult", None),
   Ided("player_media", "Media", Some("media")),
   Ided("player_medical_records", "MedicalRecord", Some("md")),

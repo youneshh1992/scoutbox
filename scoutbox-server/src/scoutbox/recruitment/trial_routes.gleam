@@ -550,6 +550,17 @@ fn reauth(
   }
 }
 
+fn bool_guard_unit(
+  raced: Bool,
+  what: String,
+  next: fn() -> Result(a, Fail(e)),
+) -> Result(a, Fail(e)) {
+  case raced {
+    True -> store.stale(what)
+    False -> next()
+  }
+}
+
 fn bool_guard(bad: Bool, refusal: fn() -> Response, next: fn() -> Response) {
   case bad {
     True -> refusal()
@@ -592,7 +603,12 @@ fn rev_value(v: Dynamic, t: Trial, next: fn() -> Response) -> Response {
         rev.Expected(n),
         rev.Rev(t.row.rev, t.row.rev_at, t.row.rev_by_name),
         "TRIAL_VERSION_CONFLICT",
-        state_json(t),
+        [
+          #(
+            "workflowState",
+            trial_workflow_state.to_json(trial_rules.workflow_state(t)),
+          ),
+        ],
         next,
       )
     _ ->
@@ -1355,6 +1371,16 @@ fn send_invitation(
 ) -> Response {
   store.unit(ctx.store, fn(tx) {
     let rd = store.reading(tx)
+    // Another invitation (this one's retry, say) may have been sent meanwhile: the route re-runs and answers from
+    // it.
+    use now_mine <- result.try(invitations_of(rd, room) |> storage)
+    use <- bool_guard_unit(
+      list.any(now_mine, fn(r) {
+        r.status == request_row.Pending
+        || { key != None && r.invite_key == key }
+      }),
+      "another trial invitation was sent meanwhile",
+    )
     use player <- result.try(players.by_id(rd, room.row.player_id) |> storage)
     use player <- result.try(case player {
       Some(p) -> Ok(p)
