@@ -38,7 +38,7 @@ pub type Row {
     device_confirmed: Option(Bool),
     verified: Bool,
     corroborated_by: Option(String),
-    trial_id: Option(String),
+    trial_id: Option(id.TrialId),
   )
 }
 
@@ -82,7 +82,7 @@ pub fn decoder() -> decode.Decoder(Row) {
   )
   use verified <- decode.field(9, sqlight.decode_bool())
   use corroborated_by <- decode.field(10, decode.optional(decode.string))
-  use trial_id <- decode.field(11, decode.optional(decode.string))
+  use trial_id <- decode.field(11, decode.optional(id.trial_decoder()))
   decode.success(Row(
     id:,
     player_id:,
@@ -116,7 +116,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
     sqlight.nullable(sqlight.bool, row.device_confirmed),
     sqlight.bool(row.verified),
     sqlight.nullable(sqlight.text, row.corroborated_by),
-    sqlight.nullable(sqlight.text, row.trial_id),
+    sqlight.nullable(id.trial_sql, row.trial_id),
   ]
 }
 

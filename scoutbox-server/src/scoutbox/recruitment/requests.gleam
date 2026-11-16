@@ -228,7 +228,7 @@ pub fn recipient_view(r: Request) -> Json {
     #("guardianId", json.nullable(r.guardian_id, id.guardian_json)),
     #("contactChannel", json.nullable(r.contact_channel_id, id.channel_json)),
     #("subjectRemovedAt", json.nullable(r.subject_removed_at, json.int)),
-    #("trialId", opt(r.trial_id)),
+    #("trialId", json.nullable(r.trial_id, id.trial_json)),
   ])
 }
 

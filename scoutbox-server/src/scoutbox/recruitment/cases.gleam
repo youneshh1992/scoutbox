@@ -41,7 +41,7 @@ pub type Room {
     tasks: List(task_row.Row),
     history: List(history_row.Row),
     request_ids: List(id.RequestId),
-    trial_ids: List(String),
+    trial_ids: List(id.TrialId),
   )
 }
 
@@ -127,7 +127,7 @@ fn with_children(read: Read, r: row.Row) -> Result(Option(Room), Fail(e)) {
         "case_trial_links",
         "trial_id",
         r.id,
-        decode.at([0], decode.string),
+        decode.at([0], id.trial_decoder()),
       ))
       Some(Room(
         row: r,
@@ -1035,7 +1035,7 @@ pub fn add_assignment(
 pub fn link(
   tx: Tx,
   case_id: id.RecruitmentCaseId,
-  trial_id: Option(String),
+  trial_id: Option(id.TrialId),
   request_id: Option(id.RequestId),
   signing_id: Option(String),
 ) -> Result(Nil, Fail(e)) {
@@ -1066,7 +1066,7 @@ pub fn link(
     None -> Ok(Nil)
   })
   use _ <- result.try(case trial_id {
-    Some(t) -> once("case_trial_links", "trial_id", sqlight.text(t))
+    Some(t) -> once("case_trial_links", "trial_id", id.trial_sql(t))
     None -> Ok(Nil)
   })
   case signing_id {

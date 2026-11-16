@@ -24,14 +24,14 @@ pub fn qualified(alias: String) -> String {
 }
 
 pub type Row {
-  Row(case_id: id.RecruitmentCaseId, position: Int, trial_id: String)
+  Row(case_id: id.RecruitmentCaseId, position: Int, trial_id: id.TrialId)
 }
 
 /// A `Row` from its required columns: the nullable ones are `None`, the defaulted ones their DEFAULT.
 pub fn new(
   case_id case_id: id.RecruitmentCaseId,
   position position: Int,
-  trial_id trial_id: String,
+  trial_id trial_id: id.TrialId,
 ) -> Row {
   Row(case_id:, position:, trial_id:)
 }
@@ -40,7 +40,7 @@ pub fn new(
 pub fn decoder() -> decode.Decoder(Row) {
   use case_id <- decode.field(0, id.recruitment_case_decoder())
   use position <- decode.field(1, decode.int)
-  use trial_id <- decode.field(2, decode.string)
+  use trial_id <- decode.field(2, id.trial_decoder())
   decode.success(Row(case_id:, position:, trial_id:))
 }
 
@@ -52,7 +52,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
   [
     id.recruitment_case_sql(row.case_id),
     sqlight.int(row.position),
-    sqlight.text(row.trial_id),
+    id.trial_sql(row.trial_id),
   ]
 }
 

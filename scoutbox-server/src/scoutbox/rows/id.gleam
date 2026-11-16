@@ -10,6 +10,60 @@ import scoutbox/platform/ids
 import scoutbox/platform/store.{type Fail, type Tx}
 import sqlight
 
+/// An id of `representation_agreements`.
+pub opaque type AgreementId {
+  AgreementId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn agreement(text: String) -> AgreementId {
+  AgreementId(text)
+}
+
+pub fn agreement_to_string(id: AgreementId) -> String {
+  let AgreementId(text) = id
+  text
+}
+
+pub fn agreement_sql(id: AgreementId) -> sqlight.Value {
+  sqlight.text(agreement_to_string(id))
+}
+
+pub fn agreement_json(id: AgreementId) -> Json {
+  json.string(agreement_to_string(id))
+}
+
+pub fn agreement_decoder() -> decode.Decoder(AgreementId) {
+  decode.map(decode.string, AgreementId)
+}
+
+/// An id of `assessments`.
+pub opaque type AssessmentId {
+  AssessmentId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn assessment(text: String) -> AssessmentId {
+  AssessmentId(text)
+}
+
+pub fn assessment_to_string(id: AssessmentId) -> String {
+  let AssessmentId(text) = id
+  text
+}
+
+pub fn assessment_sql(id: AssessmentId) -> sqlight.Value {
+  sqlight.text(assessment_to_string(id))
+}
+
+pub fn assessment_json(id: AssessmentId) -> Json {
+  json.string(assessment_to_string(id))
+}
+
+pub fn assessment_decoder() -> decode.Decoder(AssessmentId) {
+  decode.map(decode.string, AssessmentId)
+}
+
 /// An id of `case_assignments`.
 pub opaque type AssignmentId {
   AssignmentId(String)
@@ -99,6 +153,60 @@ pub fn block_decoder() -> decode.Decoder(BlockId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_block(tx: Tx) -> Result(BlockId, Fail(e)) {
   ids.next(tx, "blk") |> result.map(BlockId)
+}
+
+/// An id of `box_sessions`.
+pub opaque type BoxSessionId {
+  BoxSessionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn box_session(text: String) -> BoxSessionId {
+  BoxSessionId(text)
+}
+
+pub fn box_session_to_string(id: BoxSessionId) -> String {
+  let BoxSessionId(text) = id
+  text
+}
+
+pub fn box_session_sql(id: BoxSessionId) -> sqlight.Value {
+  sqlight.text(box_session_to_string(id))
+}
+
+pub fn box_session_json(id: BoxSessionId) -> Json {
+  json.string(box_session_to_string(id))
+}
+
+pub fn box_session_decoder() -> decode.Decoder(BoxSessionId) {
+  decode.map(decode.string, BoxSessionId)
+}
+
+/// An id of `passport_career_entries`.
+pub opaque type CareerEntryId {
+  CareerEntryId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn career_entry(text: String) -> CareerEntryId {
+  CareerEntryId(text)
+}
+
+pub fn career_entry_to_string(id: CareerEntryId) -> String {
+  let CareerEntryId(text) = id
+  text
+}
+
+pub fn career_entry_sql(id: CareerEntryId) -> sqlight.Value {
+  sqlight.text(career_entry_to_string(id))
+}
+
+pub fn career_entry_json(id: CareerEntryId) -> Json {
+  json.string(career_entry_to_string(id))
+}
+
+pub fn career_entry_decoder() -> decode.Decoder(CareerEntryId) {
+  decode.map(decode.string, CareerEntryId)
 }
 
 /// An id of `case_history`.
@@ -195,6 +303,65 @@ pub fn claim_decoder() -> decode.Decoder(ClaimId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_claim(tx: Tx) -> Result(ClaimId, Fail(e)) {
   ids.next(tx, "vclm") |> result.map(ClaimId)
+}
+
+/// An id of `combine_attempts`.
+pub opaque type CombineAttemptId {
+  CombineAttemptId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn combine_attempt(text: String) -> CombineAttemptId {
+  CombineAttemptId(text)
+}
+
+pub fn combine_attempt_to_string(id: CombineAttemptId) -> String {
+  let CombineAttemptId(text) = id
+  text
+}
+
+pub fn combine_attempt_sql(id: CombineAttemptId) -> sqlight.Value {
+  sqlight.text(combine_attempt_to_string(id))
+}
+
+pub fn combine_attempt_json(id: CombineAttemptId) -> Json {
+  json.string(combine_attempt_to_string(id))
+}
+
+pub fn combine_attempt_decoder() -> decode.Decoder(CombineAttemptId) {
+  decode.map(decode.string, CombineAttemptId)
+}
+
+/// An id of `combine_requests`.
+pub opaque type CombineRequestId {
+  CombineRequestId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn combine_request(text: String) -> CombineRequestId {
+  CombineRequestId(text)
+}
+
+pub fn combine_request_to_string(id: CombineRequestId) -> String {
+  let CombineRequestId(text) = id
+  text
+}
+
+pub fn combine_request_sql(id: CombineRequestId) -> sqlight.Value {
+  sqlight.text(combine_request_to_string(id))
+}
+
+pub fn combine_request_json(id: CombineRequestId) -> Json {
+  json.string(combine_request_to_string(id))
+}
+
+pub fn combine_request_decoder() -> decode.Decoder(CombineRequestId) {
+  decode.map(decode.string, CombineRequestId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_combine_request(tx: Tx) -> Result(CombineRequestId, Fail(e)) {
+  ids.next(tx, "creq") |> result.map(CombineRequestId)
 }
 
 /// An id of `ver_conflicts`.
@@ -382,6 +549,67 @@ pub fn evidence_decoder() -> decode.Decoder(EvidenceId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_evidence(tx: Tx) -> Result(EvidenceId, Fail(e)) {
   ids.next(tx, "vevd") |> result.map(EvidenceId)
+}
+
+/// An id of `evidence_disputes`.
+pub opaque type EvidenceDisputeId {
+  EvidenceDisputeId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn evidence_dispute(text: String) -> EvidenceDisputeId {
+  EvidenceDisputeId(text)
+}
+
+pub fn evidence_dispute_to_string(id: EvidenceDisputeId) -> String {
+  let EvidenceDisputeId(text) = id
+  text
+}
+
+pub fn evidence_dispute_sql(id: EvidenceDisputeId) -> sqlight.Value {
+  sqlight.text(evidence_dispute_to_string(id))
+}
+
+pub fn evidence_dispute_json(id: EvidenceDisputeId) -> Json {
+  json.string(evidence_dispute_to_string(id))
+}
+
+pub fn evidence_dispute_decoder() -> decode.Decoder(EvidenceDisputeId) {
+  decode.map(decode.string, EvidenceDisputeId)
+}
+
+/// An id of `evidence_suggestions`.
+pub opaque type EvidenceSuggestionId {
+  EvidenceSuggestionId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn evidence_suggestion(text: String) -> EvidenceSuggestionId {
+  EvidenceSuggestionId(text)
+}
+
+pub fn evidence_suggestion_to_string(id: EvidenceSuggestionId) -> String {
+  let EvidenceSuggestionId(text) = id
+  text
+}
+
+pub fn evidence_suggestion_sql(id: EvidenceSuggestionId) -> sqlight.Value {
+  sqlight.text(evidence_suggestion_to_string(id))
+}
+
+pub fn evidence_suggestion_json(id: EvidenceSuggestionId) -> Json {
+  json.string(evidence_suggestion_to_string(id))
+}
+
+pub fn evidence_suggestion_decoder() -> decode.Decoder(EvidenceSuggestionId) {
+  decode.map(decode.string, EvidenceSuggestionId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_evidence_suggestion(
+  tx: Tx,
+) -> Result(EvidenceSuggestionId, Fail(e)) {
+  ids.next(tx, "gap") |> result.map(EvidenceSuggestionId)
 }
 
 /// An id of `friendlies`.
@@ -891,6 +1119,33 @@ pub fn next_org_user(tx: Tx) -> Result(OrgUserId, Fail(e)) {
   ids.next(tx, "usr") |> result.map(OrgUserId)
 }
 
+/// An id of `outcome_reports`.
+pub opaque type OutcomeReportId {
+  OutcomeReportId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn outcome_report(text: String) -> OutcomeReportId {
+  OutcomeReportId(text)
+}
+
+pub fn outcome_report_to_string(id: OutcomeReportId) -> String {
+  let OutcomeReportId(text) = id
+  text
+}
+
+pub fn outcome_report_sql(id: OutcomeReportId) -> sqlight.Value {
+  sqlight.text(outcome_report_to_string(id))
+}
+
+pub fn outcome_report_json(id: OutcomeReportId) -> Json {
+  json.string(outcome_report_to_string(id))
+}
+
+pub fn outcome_report_decoder() -> decode.Decoder(OutcomeReportId) {
+  decode.map(decode.string, OutcomeReportId)
+}
+
 /// An id of `players`.
 pub opaque type PlayerId {
   PlayerId(String)
@@ -1341,6 +1596,65 @@ pub fn next_saved_search(tx: Tx) -> Result(SavedSearchId, Fail(e)) {
   ids.next(tx, "ss") |> result.map(SavedSearchId)
 }
 
+/// An id of `evidence`.
+pub opaque type ScoutingEvidenceId {
+  ScoutingEvidenceId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn scouting_evidence(text: String) -> ScoutingEvidenceId {
+  ScoutingEvidenceId(text)
+}
+
+pub fn scouting_evidence_to_string(id: ScoutingEvidenceId) -> String {
+  let ScoutingEvidenceId(text) = id
+  text
+}
+
+pub fn scouting_evidence_sql(id: ScoutingEvidenceId) -> sqlight.Value {
+  sqlight.text(scouting_evidence_to_string(id))
+}
+
+pub fn scouting_evidence_json(id: ScoutingEvidenceId) -> Json {
+  json.string(scouting_evidence_to_string(id))
+}
+
+pub fn scouting_evidence_decoder() -> decode.Decoder(ScoutingEvidenceId) {
+  decode.map(decode.string, ScoutingEvidenceId)
+}
+
+/// A new id, minted inside the unit that uses it.
+pub fn next_scouting_evidence(tx: Tx) -> Result(ScoutingEvidenceId, Fail(e)) {
+  ids.next(tx, "evd") |> result.map(ScoutingEvidenceId)
+}
+
+/// An id of `signings`.
+pub opaque type SigningId {
+  SigningId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn signing(text: String) -> SigningId {
+  SigningId(text)
+}
+
+pub fn signing_to_string(id: SigningId) -> String {
+  let SigningId(text) = id
+  text
+}
+
+pub fn signing_sql(id: SigningId) -> sqlight.Value {
+  sqlight.text(signing_to_string(id))
+}
+
+pub fn signing_json(id: SigningId) -> Json {
+  json.string(signing_to_string(id))
+}
+
+pub fn signing_decoder() -> decode.Decoder(SigningId) {
+  decode.map(decode.string, SigningId)
+}
+
 /// An id of `org_squad_members`.
 pub opaque type SquadEntryId {
   SquadEntryId(String)
@@ -1499,6 +1813,33 @@ pub fn transition_event_decoder() -> decode.Decoder(TransitionEventId) {
 /// A new id, minted inside the unit that uses it.
 pub fn next_transition_event(tx: Tx) -> Result(TransitionEventId, Fail(e)) {
   ids.next(tx, "aud") |> result.map(TransitionEventId)
+}
+
+/// An id of `trials`.
+pub opaque type TrialId {
+  TrialId(String)
+}
+
+/// An id from outside: a request's path or body, a test's literal.
+pub fn trial(text: String) -> TrialId {
+  TrialId(text)
+}
+
+pub fn trial_to_string(id: TrialId) -> String {
+  let TrialId(text) = id
+  text
+}
+
+pub fn trial_sql(id: TrialId) -> sqlight.Value {
+  sqlight.text(trial_to_string(id))
+}
+
+pub fn trial_json(id: TrialId) -> Json {
+  json.string(trial_to_string(id))
+}
+
+pub fn trial_decoder() -> decode.Decoder(TrialId) {
+  decode.map(decode.string, TrialId)
 }
 
 /// An id of `ver_admins`.

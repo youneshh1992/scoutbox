@@ -74,7 +74,7 @@ pub type Row {
     captions: Option(String),
     size_bytes: Option(Int),
     captured_by: Option(CapturedBy),
-    box_session_id: Option(String),
+    box_session_id: Option(id.BoxSessionId),
   )
 }
 
@@ -119,7 +119,10 @@ pub fn decoder() -> decode.Decoder(Row) {
   use captions <- decode.field(9, decode.optional(decode.string))
   use size_bytes <- decode.field(10, decode.optional(decode.int))
   use captured_by <- decode.field(11, decode.optional(captured_by_decoder()))
-  use box_session_id <- decode.field(12, decode.optional(decode.string))
+  use box_session_id <- decode.field(
+    12,
+    decode.optional(id.box_session_decoder()),
+  )
   decode.success(Row(
     id:,
     player_id:,
@@ -158,7 +161,7 @@ pub fn values(row: Row) -> List(sqlight.Value) {
       fn(v) { sqlight.text(captured_by_to_string(v)) },
       row.captured_by,
     ),
-    sqlight.nullable(sqlight.text, row.box_session_id),
+    sqlight.nullable(id.box_session_sql, row.box_session_id),
   ]
 }
 

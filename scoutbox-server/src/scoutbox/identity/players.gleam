@@ -566,7 +566,7 @@ fn media_json(m: Media) -> Json {
         option.map(c.captured_by, media_row.captured_by_to_string),
         json.string,
       ),
-      present("boxSessionId", c.box_session_id, json.string),
+      present("boxSessionId", c.box_session_id, id.box_session_json),
       [
         #(
           "tags",
@@ -587,7 +587,7 @@ fn attendance_json(a: attendance_row.Row) -> Json {
       present("deviceConfirmed", a.device_confirmed, json.bool),
       [#("verified", json.bool(a.verified))],
       present("corroboratedBy", a.corroborated_by, json.string),
-      present("trialId", a.trial_id, json.string),
+      present("trialId", a.trial_id, id.trial_json),
       case a.lat, a.lng {
         Some(lat), Some(lng) -> [
           #(
@@ -614,7 +614,7 @@ fn org_attendance_json(a: attendance_row.Row) -> Json {
       ],
       present("corroboratedBy", a.corroborated_by, json.string),
       present("deviceConfirmed", a.device_confirmed, json.bool),
-      present("trialId", a.trial_id, json.string),
+      present("trialId", a.trial_id, id.trial_json),
     ]),
   )
 }
