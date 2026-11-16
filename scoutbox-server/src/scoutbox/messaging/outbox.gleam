@@ -16,15 +16,27 @@ import sqlight
 pub type Mail =
   row.Row
 
-/// Records a mail on the dev transport. A subject or text longer than the columns hold is shortened, never
-/// refused: the mail still goes.
+/// What a withheld secret reads as in the stored record.
+pub const withheld_placeholder =
+  "[code withheld — delivered to the recipient only]"
+
+/// Records a mail on the dev transport, with each of `secrets` withheld. A subject or text longer than the columns
+/// hold is shortened, never refused: the mail still goes.
 pub fn append(
   tx: Tx,
   to to: String,
   subject subject: String,
   text text: String,
+  secrets secrets: List(String),
   at at: Int,
 ) -> Result(Nil, Fail(e)) {
+  let text =
+    list.fold(secrets, text, fn(t, secret) {
+      case secret {
+        "" -> t
+        _ -> string.replace(t, secret, withheld_placeholder)
+      }
+    })
   use id <- result.try(id.next_mail(tx))
   row.insert(
     tx,

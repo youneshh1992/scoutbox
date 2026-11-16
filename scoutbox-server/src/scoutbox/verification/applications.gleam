@@ -494,6 +494,7 @@ fn applying(
       text: "Your ScoutBox organisation-application code is "
         <> code
         <> "\n\nSingle use, expires in 30 minutes.",
+      secrets: [],
     ),
   )
   Ok(http.json(

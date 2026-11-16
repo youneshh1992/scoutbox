@@ -131,10 +131,10 @@ fn sweeping(ctx: Ctx) -> Nil {
 fn dispatch(store: Store, hub: Hub, effect: Effect) -> Nil {
   case effect {
     Live(event:) -> live_routes.publish(store, hub, event)
-    SendMail(to:, subject:, text:) -> {
+    SendMail(to:, subject:, text:, secrets:) -> {
       let recorded =
         store.unit(store, fn(tx) {
-          outbox.append(tx, to:, subject:, text:, at: clock.now_ms())
+          outbox.append(tx, to:, subject:, text:, secrets:, at: clock.now_ms())
           |> result.replace(Nil)
         })
       case recorded {

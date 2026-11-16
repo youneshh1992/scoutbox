@@ -423,8 +423,10 @@ would mean porting most of the product under the heading "platform". So:
      against `spec/platform/rateLimit.json`), one-time codes (`secrets.random_code`, `code_hash`), a calendar-day
      input check (`input.day_or_blank`, with `temporal.ts`'s reasons), and `foot` and `availability` declared
      once as shared vocabularies, since saved searches use them as well as players.
-   - **One gap:** the club e-mail code stays in the persisted outbox record, where the TypeScript mailer withholds
-     it. Fixing it means giving `effect.SendMail` a list of secret text.
+   - **Mail secrets:** `effect.SendMail` carries `secrets`, the one-time codes in its text, and the persisted
+     outbox record has each replaced by a placeholder, as the TypeScript mailer does. Only the club e-mail code is
+     one, as there. Not ported: the TypeScript dev transport's in-memory copy of the full text, which
+     `/admin/outbox` shows.
 3. **The domains, in port order** (recruitment, discovery, passport, development, agents, …). Each domain's
    batteries are untangled just ahead of its port.
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open

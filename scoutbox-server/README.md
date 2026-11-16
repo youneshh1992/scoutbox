@@ -105,5 +105,5 @@ for players and guardians (a new player account stores a hash no password matche
 - A refused `badges` that is not a list says `invalid`; the TypeScript server says `not_list`.
 - Of several junk saved-search filters, the first in the filters' own order is named; the TypeScript server names
   the first in the order sent.
-- A club e-mail challenge's code stays in the persisted outbox record. The TypeScript server's mailer withholds a
-  mail's one-time codes from it (`secrets`); `effect.SendMail` can't mark them yet.
+- A mail's withheld one-time codes (`SendMail`'s `secrets`) read as the placeholder in `/admin/outbox` too. The
+  TypeScript server's dev transport keeps the full text in process memory and shows it there.

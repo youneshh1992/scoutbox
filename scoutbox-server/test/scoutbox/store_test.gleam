@@ -14,7 +14,7 @@ fn count(s: store.Store, sql: String) -> Int {
 }
 
 fn mail(subject: String) -> Effect {
-  SendMail(to: "someone@example.com", subject:, text: "")
+  SendMail(to: "someone@example.com", subject:, text: "", secrets: [])
 }
 
 fn insert_counter(tx: store.Tx, name: String) -> Result(Nil, store.Fail(e)) {

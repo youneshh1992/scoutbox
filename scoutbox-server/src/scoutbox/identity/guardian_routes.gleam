@@ -97,6 +97,7 @@ pub fn signup(ctx: Ctx, req: Request) -> Response {
                         <> ",\n\nYour ScoutBox verification code is "
                         <> code
                         <> ".\n\nGuardian accounts own every under-18 profile on ScoutBox — verifying your email is the first of the safeguarding gates (email → ID → disclaimer) before any child profile can exist.",
+                      secrets: [],
                     ),
                   )
                   #(g, token)

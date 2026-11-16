@@ -404,6 +404,7 @@ pub fn add_domain(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 <> " domain: "
                 <> secret
                 <> "\n\nSingle use, expires in 30 minutes.",
+              secrets: [],
             ),
           )
         }

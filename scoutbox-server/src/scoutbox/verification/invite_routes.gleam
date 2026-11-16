@@ -257,6 +257,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                     <> ".\n\nInvitation code: "
                     <> secret
                     <> "\n\nJoining is your choice — an invitation gives the club no control over your profile. Under-18s join through a parent or guardian.",
+                  secrets: [],
                 ),
               )
             None -> Nil

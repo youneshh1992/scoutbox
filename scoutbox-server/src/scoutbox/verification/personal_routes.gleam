@@ -793,6 +793,7 @@ pub fn work_email(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 <> ",\n\nYour ScoutBox work-email confirmation code is "
                 <> secret
                 <> "\n\nEntering it proves control of this mailbox. It expires in 30 minutes and works once.\n\nIf you did not request this, ignore the email.",
+              secrets: [],
             ),
           )
           Ok(http.json(

@@ -1,9 +1,7 @@
 //// A club proves control of its company mailbox (domains/verification/clubChecks.mjs): one of the safeguarding
 //// requirements before a club can see under-18 players. A code goes to the mailbox; the club enters it.
 ////
-//// Not ported yet: confirming the code (`/org/verification/email/confirm`) and the federation check. The outbox
-//// record keeps the code: the TypeScript server's mailer withholds a mail's one-time codes from the persisted
-//// record (`secrets`), and `effect.SendMail` has no way to say which text is secret yet.
+//// Not ported yet: confirming the code (`/org/verification/email/confirm`) and the federation check.
 
 import gleam/json
 import gleam/list
@@ -109,8 +107,8 @@ fn email_required(problem: String) -> Response {
   )
 }
 
-/// The challenge row is durable before the mail is sent. A mail that fails to send leaves the row to expire or be
-/// replaced.
+/// The challenge row is durable before the mail is sent, and the code is a secret of the mail, so the persisted
+/// outbox record withholds it. A mail that fails to send leaves the row to expire or be replaced.
 fn issue(ctx: Ctx, a: OrgAccess, email: String, now: Int) -> Response {
   let code = secrets.random_code(6)
   let issued =
@@ -146,6 +144,7 @@ fn issue(ctx: Ctx, a: OrgAccess, email: String, now: Int) -> Response {
             <> ".\n\nEntering it confirms "
             <> a.org.name
             <> " controls this company mailbox — one of the safeguarding requirements before a club can see under-18 players.",
+          secrets: [code],
         ),
       )
       Ok(Nil)

@@ -86,6 +86,7 @@ pub fn create(ctx: Ctx, req: Request, access: OrgAccess) -> Response {
                 <> ".\n\nAccept with invite code: "
                 <> code
                 <> "\n\nThe code expires in 7 days.",
+              secrets: [],
             ),
           )
           Ok(invite)
