@@ -118,8 +118,6 @@ for players and guardians (a new player account stores a hash no password matche
 - Inside a Room, the Passport is its version, the player and the club history only, and has no revision; a
   snapshot records no Passport revision either. A Room's Combine results, development activity and the
   missing-evidence rules that read assessment ratings are not ported (`Not ported yet:`).
-- The journey's case-history lines name no one (`by: null`), as the TypeScript server's do: its projector reads
-  `h.by?.name`, but a case history entry carries `byName`. Ported as it behaves.
 - The journey, the evidence provider and the decision surface see no Contact records, Trials or signing packages
   (`Not ported yet:`): no route here records one. An Offer cannot cite a transaction workspace yet.
 - A mail's withheld one-time codes (`SendMail`'s `secrets`) read as the placeholder in `/admin/outbox` too. The

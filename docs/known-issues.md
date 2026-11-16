@@ -33,3 +33,21 @@ staying with scrypt keeps the seed, fixtures and both servers on one scheme.
 Switching scheme means changing both servers together (`adapters.mjs` `hashPassword`/`verifyPassword` in the
 TypeScript tree) and regenerating the seed, whose Trust & Safety reviewer secrets are scrypt hashes. There is no
 production data, so nothing needs rehashing.
+
+## The journey's history lines never name who acted
+
+Found 2026-11-16 while porting the recruitment journey. Ported as the TypeScript server behaves.
+
+**What it is.** `GET /org/rooms/:id/journey` lists a case's history, and each line has a `by` field. For the case's
+own entries (`room_created`, `room_status_changed`, `room_reopened`, `room_decision_recorded`, and the transaction
+handoff entries), the TypeScript projector (`domains/recruitment/lifecycle/journey.mjs`, `timelineFor`) reads
+`h.by?.name`. A case history entry has no `by` field, though: the repository reads it back as `byKind`, `byId` and
+`byName` (`historyOut` in `repositories/recruitmentCases.ts`). So `by` is always null on those lines, even when the
+entry records a named staff member. Decision, Offer and trial lines are unaffected: those records do carry `by`.
+
+**Where it is in the port.** `scoutbox-server/src/scoutbox/recruitment/journey.gleam` writes `by: null` for those
+lines, with a comment, so the batteries and `dev/shape_diff.mjs` agree with the TypeScript server.
+
+**Fix.** Read `h.byName` in `timelineFor` on the TypeScript side, then name the actor in the Gleam projection too.
+Check that no client or battery relies on the null first.
+
