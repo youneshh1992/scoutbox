@@ -171,9 +171,9 @@ fn signing_in(ctx: Ctx, body: Login, org: Org, now: Int) -> Response {
         "Every session is attributed to a named individual.",
       )
     Some(_) if org.password_hash != None ->
-      // Not ported yet: password-protected organisations need scrypt, which OTP's crypto lacks, and the
-      // routes that set a password (grassroots registration) are not in this server. No organisation it
-      // can hold has one.
+      // Not ported yet: signing in with a password (`identity/passwords` checks one), and the routes that
+      // set one (grassroots registration, provisioned credentials). No organisation this server can hold has
+      // one.
       http.error_message(
         501,
         "NOT_PORTED",

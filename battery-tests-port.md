@@ -359,6 +359,24 @@ would mean porting most of the product under the heading "platform". So:
      every stream, so the Gleam figures at 1,000 are partly the client's. Gleam uses about twice the memory per
      stream, measured as the BEAM's resident size; it isn't broken down yet (each stream is one process, its
      connection's).
+
+   **Scrypt short check [done].** Pure Gleam (`platform/scrypt`), no FFI or NIF. It agrees with Node's
+   `crypto.scryptSync` on 47 keys from `dev/scrypt_cases.mjs`: RFC 7914's vectors, 40 small-parameter shapes, and
+   the server's own parameters with a hex-text salt. It also verifies hashes the TypeScript server's own
+   `hashPassword` stored. `identity/passwords` reads and writes the stored form, `scrypt$<salt>$<hash>`, so seeded
+   and fixture hashes stay valid on both servers. Timed with `gleam run -m scrypt_bench` at N=16384, r=8, on an
+   M1 Pro with 6 schedulers:
+   - **One hash: 467 ms**, against Node's 38 ms. About 12 times slower; the Salsa20/8 core is about 0.5 µs, near
+     what plain integer arithmetic costs on the BEAM.
+   - **Eight at once: 816 ms** wall clock. Each runs on its own scheduler and is preempted, so other work keeps its
+     latency: a 1 ms sleep took at most 3.9 ms meanwhile. Node's `scryptSync` blocks its only thread for each hash.
+   - **One trap, now in the module's comment:** building ROMix's 16 MiB table by appending to one binary took
+     16.5 s a hash, because the BEAM copied it on every append once BlockMix built other binaries in between.
+     Building a list of blocks and joining it once fixed it.
+
+   So a password sign-in costs about half a second, and the server handles about 13 of them a second at most.
+   That's usable for sign-in, but slower than the TypeScript server. If it matters, the choices are a NIF (C
+   scrypt or Argon2id) or PBKDF2 from OTP's crypto, on both servers together.
 3. **The domains, in port order** (recruitment, discovery, passport, development, agents, …). Each domain's
    batteries are untangled just ahead of its port.
 4. **Last, the cross-domain batteries:** `platform/api` (61 new routes across trials, squad, billing, open
